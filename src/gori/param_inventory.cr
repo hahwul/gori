@@ -188,8 +188,12 @@ module Gori
     # The scheduler is handed back after EVERY flow: gori runs one cooperative scheduler, the
     # TUI runs this in a spawned fiber beside the proxy's own (P6), and a yield costs
     # microseconds where one flow's read + decode + reflection search can cost milliseconds.
-    private def each_flow(store : Store, filter : QL::Filter, max : Int32, keep : Store::FlowRow -> Bool,
-                          stop : -> Bool, & : Store::FlowRow ->) : {Int32, Bool}
+    #
+    # Public because the OpenAPI export (`Export::OpenApi`, #1241) walks the same flow set the
+    # same way; a second copy of this pager is how the two would come to disagree about what
+    # "the newest N flows" means.
+    def each_flow(store : Store, filter : QL::Filter, max : Int32, keep : Store::FlowRow -> Bool,
+                  stop : -> Bool, & : Store::FlowRow ->) : {Int32, Bool}
       scanned = 0
       cursor : Int64? = nil
       loop do
@@ -204,6 +208,10 @@ module Gori
         end
         return {scanned, false} if page.size < PAGE # the filter ran out of matches
         cursor = page.last.id
+        # Once per PAGE too, not only per kept row: a `keep` that rejects (an operation already
+        # full, a path outside the selection) would otherwise walk a 200k-flow history in one
+        # synchronous stretch, since only a kept row reaches the yield above.
+        Fiber.yield
       end
     end
 

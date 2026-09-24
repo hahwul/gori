@@ -202,11 +202,7 @@ module Gori::Tui
       if mode = @history.detail_mode_at(inner, mx, my)
         @host.focus_body
         @history.set_detail_focus(:strip) # the mode chips live on the strip row too
-        case mode
-        when :hex    then @history.toggle_detail_hex
-        when :ws     then @host.toggle_reveal
-        when :pretty then @host.toggle_pretty
-        end
+        toggle_detail_mode(mode)
         return
       end
       # `detail_text_rect`, not a second Rect built here: that helper's own comment says it
@@ -227,6 +223,15 @@ module Gori::Tui
       @host.focus_body
       @history.set_detail_focus(:body) # a body click enters the caret/text level
       @history.detail_click_to_cursor(body, mx, my, focused: true)
+    end
+
+    private def toggle_detail_mode(mode : Symbol) : Nil
+      case mode
+      when :hex     then @history.toggle_detail_hex
+      when :ws      then @host.toggle_reveal
+      when :pretty  then @host.toggle_pretty
+      when :unicode then @history.toggle_unicode_decoding
+      end
     end
 
     # The filter bar row. Its right cluster's chips do exactly what their own chords do —
@@ -1180,6 +1185,10 @@ module Gori::Tui
 
     def toggle_detail_hex : Nil
       @history.toggle_detail_hex
+    end
+
+    def toggle_unicode_decoding : Nil
+      @history.toggle_unicode_decoding
     end
   end
 end

@@ -170,19 +170,21 @@ describe Gori::Verb::Keyset do
     r["notes.select-line"].menu_key.should eq('x')
   end
 
-  it "does not displace a tab-scope key in any editor pane" do
+  it "documents the vim `u` action in the Repeater's read-only response" do
     # The Editor scope sits AHEAD of the tab's scope, which `validate_chords!` cannot see — it
     # sweeps one scope at a time. So the vim bare letters are checked BY HAND here against the
-    # eight scopes an editor pane can belong to. A hit is not a bug in itself (the keyset wins
-    # in that pane, by design) but it is a DISPLACEMENT that has to be listed in the docs, so
-    # it must not appear by accident.
+    # eight scopes an editor pane can belong to. The one intentional overlap is `u` in the
+    # Repeater's read-only response: it has no Editor scope, so Unicode display wins there;
+    # the request editor still resolves `u` to `editor.undo`.
     editor_scopes = [
       Gori::Verb::Scope::Repeater, Gori::Verb::Scope::Notes, Gori::Verb::Scope::Decoder,
       Gori::Verb::Scope::Jwt, Gori::Verb::Scope::Cookie, Gori::Verb::Scope::Fuzzer,
       Gori::Verb::Scope::IssuesDetail, Gori::Verb::Scope::ProjectDesc,
     ]
     vim = Keymap.build(r, Gori::Verb::OsProfile::Os::Linux, Keymap::NO_OVERRIDES, Keyset::Kind::Vim)
-    bare = [Chord.new("u"), Chord.new("/"), Chord.new("a"), Chord.new("g"), Chord.new("g", shift: true)]
+    vim.lookup_in(Chord.new("u"), Gori::Verb::Scope::Repeater).should eq("repeater.toggle-unicode")
+    vim.lookup_in(Chord.new("u"), Gori::Verb::Scope::Editor).should eq("editor.undo")
+    bare = [Chord.new("/"), Chord.new("a"), Chord.new("g"), Chord.new("g", shift: true)]
     editor_scopes.each do |scope|
       bare.each do |c|
         if hit = vim.lookup_in(c, scope)

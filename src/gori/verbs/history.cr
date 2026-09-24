@@ -273,10 +273,11 @@ module Gori
         available: in_repeater, mnemonic: 'n', section: :subtab) { |ctx| ctx.repeater_new; nil }
 
       # Burp's "Paste cURL to Repeater" (#1244): a paste box whose request(s) open as new
-      # sub-tabs. Menu/palette only — no chord to collide with the editor's keys.
+      # sub-tabs. Menu/palette only — no chord to collide with the editor's keys. `u` is
+      # reserved for Unicode decoding in the response menu, so the mnemonic is `U`.
       r.register Verb::Definition.new(
         "repeater.paste-curl", "Paste cURL", "Paste a curl command and open its request as a new Repeater sub-tab",
-        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'u', section: :subtab) { |ctx| ctx.repeater_paste_curl; nil }
+        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'U', section: :subtab) { |ctx| ctx.repeater_paste_curl; nil }
 
       # "Minimize request" (Caido-"squash"-style): strip cosmetic headers, tracking-cookie
       # crumbs and unused query/body params, re-sending to verify the response is unchanged.
@@ -493,6 +494,10 @@ module Gori
         "repeater.toggle-pretty", "Pretty bodies", "Pretty-print JSON/XML/form/… response bodies (display only)",
         Verb::Scope::Repeater, [Verb::Chord.new("p")],
         available: in_repeater, mnemonic: 'p', section: :response) { |ctx| ctx.toggle_pretty; nil }
+      r.register Verb::Definition.new(
+        "repeater.toggle-unicode", "Decode Unicode escapes", "Display JSON \\u escapes as characters (display only)",
+        Verb::Scope::Repeater, [Verb::Chord.new("u")],
+        available: in_repeater_read, mnemonic: 'u', section: :response) { |ctx| ctx.repeater_toggle_unicode_escapes; nil }
 
       # --- detail view ---
       # esc/q always leave. → walks forward through the panes (REQ→RES→FRAMES) and clamps at
@@ -592,6 +597,10 @@ module Gori
       r.register Verb::Definition.new(
         "detail.toggle-pretty", "Pretty bodies", "Pretty-print JSON/XML/form/… bodies (display only)",
         Verb::Scope::HistoryDetail, [Verb::Chord.new("p")], group: :view) { |ctx| ctx.toggle_pretty; nil }
+
+      r.register Verb::Definition.new(
+        "detail.toggle-unicode", "Decode Unicode escapes", "Display JSON \\u escapes as characters (display only)",
+        Verb::Scope::HistoryDetail, [Verb::Chord.new("u")], mnemonic: 'u', group: :view) { |ctx| ctx.toggle_unicode_escapes; nil }
 
       # The flow actions mirror the History list's "space" menu so the muscle memory
       # carries into the drill-in (the user's goal). Each keeps the list's exact chord

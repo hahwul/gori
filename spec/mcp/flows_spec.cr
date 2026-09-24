@@ -146,6 +146,32 @@ describe Gori::MCP::Server do
       end
     end
 
+    it "returns a pending image before advancing the hide_static since cursor" do
+      with_store do |store|
+        prior = mcp_seed_flow(store, "a.test", "GET", "/prior", 200)
+        pending = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "https", host: "a.test", port: 443, method: "GET",
+          target: "/uploads/avatar.png", http_version: "HTTP/1.1",
+          head: "GET /uploads/avatar.png HTTP/1.1\r\nHost: a.test\r\n\r\n".to_slice,
+          body: nil, source: Gori::FlowSource::Kind::Proxy))
+        api = mcp_seed_flow(store, "a.test", "GET", "/api", 200)
+
+        call = ->(since : Int64) {
+          req = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_history","arguments":{"hide_static":true,"since":#{since},"limit":10}}})
+          mcp_tool_payload(mcp_drive(store, req)[0])
+        }
+        first = call.call(prior)
+        first["flows"].as_a.map(&.["id"].as_i64).should eq([pending, api])
+        cursor = first["next_since"].as_i64
+
+        store.update_response(Gori::Store::CapturedResponse.new(
+          flow_id: pending, status: 200, content_type: "text/html",
+          head: "HTTP/1.1 200 OK\r\n\r\n".to_slice))
+        follow_up = call.call(cursor)
+        follow_up["flows"].as_a.map(&.["id"].as_i64).should_not contain(pending)
+      end
+    end
+
     it "in_scope composes with a QL query" do
       with_store do |store|
         mcp_seed_flow(store, "alpha.test", "GET", "/a", 200)

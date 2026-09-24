@@ -144,6 +144,50 @@ describe Gori::Tui::Highlight do
     end
   end
 
+  it "shows hidden body codepoints as badges and keeps visible emoji clusters intact" do
+    backend = MemoryBackend.new(80, 2)
+    screen = Screen.new(backend)
+    screen.text(0, 0, "a\u{200b}b\u{202e}c", Theme.text)
+    backend.row(0).should start_with("a⟨ZWSP⟩b⟨RLO⟩c")
+
+    family = "👨‍👩‍👧‍👦"
+    screen.text(0, 1, family, Theme.text)
+    backend.cluster_row(1).should start_with(family)
+    Screen.display_width(family).should eq(2)
+  end
+
+  it "styles decoded Unicode escape characters separately from wire text" do
+    decoded = Gori::JsonUnicode.decode("{\"x\":\"\\u003c\\u200b\"}")
+    Highlight.decoded_ranges_for(decoded.ranges, 0).should eq([{6, 7}, {7, 8}])
+    Highlight.decoded_ranges_for(decoded.ranges, 1).should be_empty
+    head = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n".to_slice
+    win = Highlight.message_windowed(head, decoded.text.to_slice, request: false,
+      decoded_ranges: decoded.ranges)
+    line = win.line_at(win.head.size)
+    escaped = line.find { |span| span.text == "<" }.not_nil!
+    escaped.fg.should eq(Theme.accent)
+    escaped.attr.should eq(Attribute::Underline)
+    hidden = line.find { |span| span.text == "\u{200b}" }.not_nil!
+    hidden.fg.should eq(Theme.accent)
+    hidden.attr.should eq(Attribute::Underline)
+  end
+
+  it "draws a decoded LF as an inline badge while search text keeps the newline" do
+    head = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n".to_slice
+    decoded = Gori::Pretty.format(head, "{\"x\":\"a\\u000ab\\u003c\"}".to_slice,
+      decode_unicode: true).not_nil!
+    win = Highlight.message_windowed(head, decoded.bytes, request: false,
+      decoded_ranges: decoded.decoded_ranges, protected_linefeeds: decoded.protected_linefeeds)
+
+    win.body.size.should eq(3)
+    source_line = win.body[1]
+    source_line.should contain("a\nb<")
+
+    backend = MemoryBackend.new(80, 1)
+    Highlight.draw(Screen.new(backend), 0, 0, win.line_at(win.head.size + 1), width: 80)
+    backend.row(0).should contain("a⟨LF⟩b<")
+  end
+
   describe "HTTP structure" do
     it "colours the request line: verb, bright target, muted version" do
       line = Highlight.from_lines(["GET /path HTTP/1.1"], request: true).first
@@ -365,11 +409,10 @@ describe Gori::Tui::Highlight do
       b.row(0).strip.should eq("")
     end
 
-    it "keeps a tab as one space cell so it matches Screen#text (issue #278)" do
-      # A span with an embedded tab is NOT printable_ascii?, so draw takes the grapheme
-      # path. That path must floor width-0 controls to 1 and substitute a space — same
-      # as Screen#text's Char path — or the styled editor collapses "x,\ty" to "x,y"
-      # while the caret still steps across the missing cell.
+    it "shows a tab badge with the same width in Highlight and Screen" do
+      # An embedded control takes the grapheme path and is expanded to a named badge in
+      # both renderers. The editor's caret and click math must advance across every badge
+      # column, not the source control's zero-width Unicode measurement.
       {"x,\ty", "a\tb", "{\"a\":1,\t\"b\":2}"}.each do |str|
         plain = MemoryBackend.new(24, 1)
         px = Screen.new(plain).text(0, 0, str, Theme.text)
@@ -377,16 +420,16 @@ describe Gori::Tui::Highlight do
         hx = Highlight.draw(Screen.new(hl), 0, 0, [Highlight::Span.new(str, Theme.text)], width: 24)
         hl.row(0).should eq(plain.row(0)) # same glyphs (str=#{str.inspect})
         hx.should eq(px)                  # same advance
-        # Explicit layout: tab → space, neighbours unmoved
-        expected = str.gsub('\t', ' ')
+        # Explicit layout: tab → a named badge
+        expected = str.gsub('\t', "⟨TAB⟩")
         hl.row(0).rstrip.should eq(expected)
       end
     end
 
-    it "line_width counts a tab as one column" do
+    it "line_width counts a tab's named badge width" do
       line = [Highlight::Span.new("a\tb", Theme.text)]
-      Highlight.line_width(line).should eq(3)
-      Highlight.line_width_upto(line, 10).should eq(3)
+      Highlight.line_width(line).should eq(7)
+      Highlight.line_width_upto(line, 10).should eq(7)
     end
   end
 
@@ -450,9 +493,9 @@ describe Gori::Tui::Highlight do
       Highlight.slice_left_text(zwj + "abc", 2).should eq("abc")
       # Cutting INTO the cluster replaces it with blanks (it cannot be half-drawn).
       Highlight.slice_left_text(zwj + "abc", 1).should eq(" abc")
-      # Identity below the cut, and tabs still count as their one cell.
+      # Identity below the cut, and a tab's visible badge has five drawn columns.
       Highlight.slice_left_text(zwj + "abc", 0).should eq(zwj + "abc")
-      Highlight.slice_left_text("a\tbc", 2).should eq("bc")
+      Highlight.slice_left_text("a\tbc", 2).should eq("    bc")
     end
   end
 
@@ -481,8 +524,9 @@ describe Gori::Tui::Highlight do
       screen = Screen.new(b)
       screen.text(0, 0, text, Theme.text)
       Wrap.mark_search(screen, 0, 0, text, 0, text.size, "needle", 40)
-      (2...8).each { |x| b.bg_at(x, 0).should eq(Theme.yellow) }
-      b.bg_at(1, 0).should_not eq(Theme.yellow)
+      (6...12).each { |x| b.bg_at(x, 0).should eq(Theme.yellow) }
+      (1...6).each { |x| b.bg_at(x, 0).should_not eq(Theme.yellow) }
+      b.bg_at(12, 0).should_not eq(Theme.yellow)
     end
   end
 

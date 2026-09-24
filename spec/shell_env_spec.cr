@@ -152,6 +152,19 @@ describe Gori::ShellEnv do
     end
   end
 
+  it "restores NO_PROXY from the ORIG record inside a gori shell when keep_no_proxy is set" do
+    with_shell_fixture do |root, ca, system|
+      outer = build(root, ca, system, {"NO_PROXY" => "corp.internal", "HTTPS_PROXY" => "http://corp:3128"})
+      inner_env = outer.to_env.compact.merge({"PATH" => "/usr/bin"})
+      inner_env.has_key?("NO_PROXY").should be_false
+      inner_env["GORI_SHELL_ORIG_NO_PROXY"].should eq("corp.internal")
+
+      inner = build(root, ca, system, inner_env, keep_no_proxy: true)
+      value(inner, "NO_PROXY").should eq("corp.internal")
+      value(inner, "GORI_SHELL_ORIG_NO_PROXY").should eq("corp.internal")
+    end
+  end
+
   it "starts a shell inside a shell from the terminal's ORIGINAL trust, not the outer gori's root" do
     with_shell_fixture do |root, ca, system|
       outer = build(root, ca, system, {"HTTPS_PROXY" => "http://corp.example:3128"})
@@ -268,6 +281,20 @@ describe Gori::ShellEnv do
         fish.should contain("set -e NO_PROXY\n")
         fish.should_not contain("#")
       end
+    end
+
+    it "sanitizes comment lines so control characters and newlines cannot escape comments" do
+      with_shell_fixture do |root, ca, system|
+        r = build(root, ca, system)
+        sh = Gori::ShellEnv.render(r, Gori::ShellEnv::Syntax::Posix,
+          header: ["line\nwith\rnewlines\x00and\x1bescapes"])
+        # Each header element must remain exactly one comment line
+        sh.lines.first.should eq("# line with newlines and escapes")
+      end
+    end
+
+    it "replaces ASCII control characters with spaces in sanitize_comment" do
+      Gori::ShellEnv.sanitize_comment("hello\nworld\r\x00\x1b\x7f!").should eq("hello world    !")
     end
 
     # The values are paths, and a home directory can hold anything a filename can.

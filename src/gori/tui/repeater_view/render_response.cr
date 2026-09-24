@@ -8,9 +8,6 @@ class Gori::Tui::RepeaterView
   # when active. Plain response mode needs no chip of its own — it's simply none of
   # these lit (the pane is already titled RESPONSE).
   private def render_response_chrome(screen : Screen, rect : Rect) : Nil
-    resp_plain = !@resp_hex && @resp_mode == :response
-    diff_lit = !@resp_hex && @resp_mode == :diff
-    pretty_lit = resp_plain && !@reveal && resp_pretty_applied?
     # These chips are LEFT-anchored, and `Frame.chip` does not clip (unlike its sibling
     # `Frame.toggle_badge`, which draws nothing when it doesn't fit). RESPONSE is a
     # half-width split pane, so below ~88 cols the cluster ran through this card's own
@@ -18,7 +15,7 @@ class Gori::Tui::RepeaterView
     # cross `limit`; the meta/⚠ read-out after this was already fit-guarded.
     limit = rect.right - 1 # keep the corner
     chips_end = rect.x + 12
-    { {" d:diff ", diff_lit}, {" ^X:hex ", @resp_hex}, {" p:pretty ", pretty_lit} }.each do |label, lit|
+    response_chips.each do |(_, label, lit)|
       break if chips_end + Screen.draw_width(label) > limit
       chips_end = Frame.chip(screen, chips_end, rect.y, label, lit) + 1
     end
@@ -26,6 +23,21 @@ class Gori::Tui::RepeaterView
     # ⚠ for a cut-short body, then the frozen-copy marker.
     right = (result = @result) ? draw_response_meta(screen, rect, result, chips_end) : rect.right - 1
     draw_frozen_marker(screen, rect, right, chips_end)
+  end
+
+  # One source for response-chip drawing and mouse hit-testing. Unicode decode is offered only
+  # while the plain response is visible and the JSON formatter found escaped codepoints.
+  private def response_chips : Array({Symbol, String, Bool})
+    resp_plain = !@resp_hex && @resp_mode == :response
+    chips = [
+      {:diff, " d:diff ", !@resp_hex && @resp_mode == :diff},
+      {:hex, " ^X:hex ", @resp_hex},
+      {:pretty, " p:pretty ", resp_plain && !@reveal && resp_pretty_applied?},
+    ] of {Symbol, String, Bool}
+    if resp_plain && !@reveal && resp_unicode_escape_count > 0
+      chips << {:unicode, resp_unicode_decoded? ? " u:wire " : " u:decode ", resp_unicode_decoded?}
+    end
+    chips
   end
 
   # The latency·size read-out and the ⚠ beside it; answers where the next read-out to the
@@ -303,9 +315,10 @@ class Gori::Tui::RepeaterView
       styled = Highlight.slice_left(styled, xs) if xs > 0
       Highlight.draw(screen, rect.x + gw, y, styled, width: cw)
       paint_resp_line_chrome(screen, rect.x + gw, y, vr.li, line, focused, sel_spans, vr.a, vr.b,
-        clip_x: rect.x + gw, clip_w: cw)
+        clip_x: rect.x + gw, clip_w: cw, reveal: true)
       next unless searching
-      Wrap.mark_search(screen, rect.x + gw, y, line, vr.a, vr.b, @search_hl, rect.x + gw + cw, xoff: xs, lower: lower.for(vr.li, line))
+      Wrap.mark_search(screen, rect.x + gw, y, line, vr.a, vr.b, @search_hl, rect.x + gw + cw, xoff: xs,
+        lower: lower.for(vr.li, line), reveal: true)
     end
   end
 
@@ -395,7 +408,8 @@ class Gori::Tui::RepeaterView
   private def paint_resp_line_chrome(screen : Screen, x : Int32, y : Int32, li : Int32, line : String,
                                      focused : Bool, sel_spans : Array({Int32, Int32, Int32})? = nil,
                                      rs : Int32 = 0, re : Int32 = -1,
-                                     clip_x : Int32 = 0, clip_w : Int32 = 0) : Nil
+                                     clip_x : Int32 = 0, clip_w : Int32 = 0,
+                                     reveal : Bool = false) : Nil
     return unless focused && resp_navigable?
     re = line.size if re < 0
     if spans = sel_spans
@@ -403,20 +417,22 @@ class Gori::Tui::RepeaterView
         next unless l == li
         a = {x0, rs}.max
         b = {x1, re}.min
-        paint_char_span_bg(screen, x, y, line, a, b, Theme.accent_bg, rs, clip_x, clip_w) if a < b
+        paint_char_span_bg(screen, x, y, line, a, b, Theme.accent_bg, rs, clip_x, clip_w,
+          reveal: reveal) if a < b
       end
     end
     return unless li == @resp_cursor.cy
     cx = @resp_cursor.cx.clamp(0, line.size)
     return unless cx >= rs && (cx < re || re >= line.size)
-    px = x + Wrap.row_col(line, nil, rs, cx) - resp_xscroll
+    px = x + Wrap.row_col(line, nil, rs, cx, reveal: reveal) - resp_xscroll
     # Clipped only while the pane is PANNED: with no offset the caret is inside the row by
     # construction, except for an end-of-line caret on a row exactly as wide as the pane —
     # which lands on the border cell and has always been drawn there. Clipping that one
     # unconditionally would trade a caret a column too far right for no caret at all.
     return if resp_xscroll > 0 && clip_w > 0 && (px < clip_x || px >= clip_x + clip_w)
-    ch = cx < line.size ? line[cx] : ' '
-    screen.cell(px, y, ch, Theme.bg, Theme.accent_bg)
+    ch = cx < line.size ? Screen.caret_glyph(line, cx) : ' '
+    shown = reveal ? (Reveal.visible_grapheme(ch.to_s) || ch) : ch
+    screen.cell(px, y, shown, Theme.bg, Theme.accent_bg)
     screen.cursor(px, y)
   end
 

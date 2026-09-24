@@ -189,7 +189,8 @@ class Gori::Tui::RepeaterView
   # continuation row starts at the pane's left edge like the text it covers.
   private def paint_char_span_bg(screen : Screen, x : Int32, y : Int32, line : String,
                                  x0 : Int32, x1 : Int32, bg : Color, row_start : Int32 = 0,
-                                 clip_x : Int32 = 0, clip_w : Int32 = 0) : Nil
+                                 clip_x : Int32 = 0, clip_w : Int32 = 0,
+                                 *, reveal : Bool = false) : Nil
     return if x0 >= x1
     # Cluster-wise, matching the base draw and the caret. Summing draw_width over single
     # CHARS is exactly the retired per-codepoint measure: it drifts right by each
@@ -199,16 +200,17 @@ class Gori::Tui::RepeaterView
     a = {Screen.cluster_start(line, {x0, line.size}.min), row_start}.max
     b = Screen.cluster_end(line, {x1, line.size}.min)
     return if a >= b
-    px = x + Wrap.row_col(line, nil, row_start, a) - resp_xscroll
+    px = x + Wrap.row_col(line, nil, row_start, a, reveal: reveal) - resp_xscroll
     i = a
     while i < b
       e = Screen.cluster_end(line, i + 1)
       seg = line[i...e]
-      w = Screen.draw_width(seg)
+      w = Wrap.draw_width(seg, reveal)
       # A cluster the h-scroll pushed off either edge is skipped rather than half-painted:
       # those cells belong to the gutter or to the pane next door. Inert with no offset, so
       # a wrapped row draws exactly as it did before the clip existed.
-      screen.text(px, y, seg, Theme.text, bg) if resp_xscroll <= 0 || clip_w <= 0 || (px >= clip_x && px + w <= clip_x + clip_w)
+      shown = reveal ? Reveal.rendered_text(seg) : seg
+      screen.text(px, y, shown, Theme.text, bg) if resp_xscroll <= 0 || clip_w <= 0 || (px >= clip_x && px + w <= clip_x + clip_w)
       px += w
       i = e
     end

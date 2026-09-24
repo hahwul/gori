@@ -168,9 +168,9 @@ describe "Gori::Tui::Wrap.mark_search (single unwrapped row)" do
     end
 
     it "lands correctly after a tab (issue #278, ASCII grapheme path)" do
-      # A tab is one drawn column, so "needle" begins at col 2.
+      # ⟨TAB⟩ occupies five columns, so "needle" begins after the badge at col 6.
       b = base_and_mark("a\tneedle", "needle", 40)
-      yellow_cols(b).should eq([2, 3, 4, 5, 6, 7])
+      yellow_cols(b).should eq([6, 7, 8, 9, 10, 11])
     end
   end
 

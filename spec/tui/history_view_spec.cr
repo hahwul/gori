@@ -1536,6 +1536,37 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  it "returns to the hit on close when in the list, and disables follow without tail snap when not" do
+    with_store do |store|
+      id1 = add_flow(store, "GET", "/first", 200)
+      add_flow(store, "GET", "/second", 200)
+      add_flow(store, "GET", "/third", 200)
+      hidden = add_flow(store, "GET", "/hidden", 404)
+
+      view = HistoryView.new
+      view.reload(store)
+      view.follow?.should be_true
+
+      # 1. When the hit is in the list:
+      idx1 = view.rows.index { |r| r.id == id1 }.not_nil!
+      view.open_detail_id(id1, store).should be_true
+      view.follow?.should be_false
+      view.selected.should eq(idx1)
+      view.close_detail
+      view.selected.should eq(idx1)
+      view.follow?.should be_false
+
+      # 2. When the hit is not in the filtered list:
+      view.set_query("status:200")
+      view.reload(store)
+      view.open_detail_id(hidden, store).should be_true
+      view.follow?.should be_false
+      view.close_detail
+      view.follow?.should be_false
+      view.selected.should be <= 2
+    end
+  end
+
   it "keeps the whole interior for the detail when the pane is too short for a rail" do
     with_store do |store|
       3.times { |i| add_flow(store, "GET", "/api/#{i}", 200) }
@@ -1834,17 +1865,15 @@ describe Gori::Tui::HistoryView do
     end
   end
 
-  # Was: "scrolls a tab-filled response line to its end in reveal mode" — a regression test
-  # for two measures disagreeing about a tab's width (display_width says 0, draw_width says
-  # 1) while one drove the h-scroll clamp and the other the caret-follow. There is no
-  # h-scroll left to clamp, but the SAME disagreement would now break the wrap: `Wrap` breaks
-  # on `Screen.grapheme_cols`, so a 100-tab line has to occupy several drawn rows rather than
-  # the single 14-column one the raw measure would predict.
+  # Reveal maps tabs to a one-column arrow, while the ordinary pane now names a raw tab with
+  # a wider badge. Wrapping uses the current representation's width, so each mode remains
+  # internally aligned and the response tail stays reachable.
   it "wraps a tab-filled response line onto continuation rows in reveal mode" do
     with_store do |store|
       line = "STARTTOK#{"\t" * 100}ENDTOK"
-      Screen.display_width(line).should eq(14) # the raw measure the clamp used to trust
-      Screen.draw_width(line).should eq(114)   # what reveal actually paints (tab → '→')
+      Screen.display_width(line).should eq(514) # default display names each tab with a badge
+      revealed_width = Reveal.styled(line, false, 600).sum { |span| Screen.draw_width(span.text) }
+      revealed_width.should eq(114) # reveal paints one arrow cell per tab
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
         method: "GET", target: "/t", http_version: "HTTP/1.1",
@@ -2231,6 +2260,33 @@ describe Gori::Tui::HistoryView do
       hy = (0...12).find { |y| backend.row(y).includes?("Host") }.not_nil!
       hx = backend.row(hy).index("Host").not_nil!
       backend.fg_at(hx, hy).should eq(Theme.syn_header)
+    end
+  end
+
+  it "offers Unicode decoding for the response and keeps raw JSON escapes until toggled" do
+    with_store do |store|
+      id = add_flow(store, "GET", "/unicode", 200)
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: id, status: 200,
+        head: "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n".to_slice,
+        body: "{\"x\":\"\\u003c\\u200b\"}".to_slice))
+
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      view.toggle_pane # REQUEST → RESPONSE
+
+      raw = MemoryBackend.new(100, 20)
+      view.render_detail(Screen.new(raw), Rect.new(0, 0, 100, 20), focused: false)
+      raw.contains?("\\u003c\\u200b").should be_true
+      raw.contains?("u:decode").should be_true
+
+      view.toggle_unicode_decoding
+      decoded = MemoryBackend.new(100, 20)
+      view.render_detail(Screen.new(decoded), Rect.new(0, 0, 100, 20), focused: false)
+      decoded.contains?("<⟨ZWSP⟩").should be_true
+      decoded.contains?("u:wire").should be_true
+      decoded.contains?("2 escapes").should be_true
     end
   end
 

@@ -1,6 +1,7 @@
 require "./screen"
 require "./theme"
 require "./highlight"
+require "./reveal"
 
 module Gori::Tui
   # Soft wrap: one LOGICAL line → N VISUAL rows, Burp-style (the line number is printed
@@ -96,11 +97,13 @@ module Gori::Tui
     # chars stay inside whichever row their neighbours land on: a run's edges are `¦`/`§`,
     # both Grapheme_Cluster_Break=Other, so a run never straddles a cluster and a break can
     # never fall inside one.
-    def self.layout(line : String, width : Int32, conceal : Array({Int32, Int32})? = nil) : Layout
+    def self.layout(line : String, width : Int32, conceal : Array({Int32, Int32})? = nil,
+                    *, reveal : Bool = false) : Layout
+      return layout_revealed(line, width, conceal) if reveal
       len = line.size
       # A degenerate width can't be divided into; one row, clipped by the drawer as before.
       return Layout.new(len, 1, [0]) if width <= 0
-      if (conceal.nil? || conceal.empty?) && line.ascii_only?
+      if (conceal.nil? || conceal.empty?) && Screen.printable_ascii?(line)
         return Layout.new(len, width, nil) # uniform grid — see Layout
       end
       starts = [0]
@@ -119,6 +122,38 @@ module Gori::Tui
         i += n
       end
       Layout.new(len, width, starts)
+    end
+
+    # Layout for Reveal.styled's visible whitespace markers. Tabs and controls can be
+    # narrower there than their default named badges, so wrap at what is actually drawn.
+    def self.layout_revealed(line : String, width : Int32,
+                             conceal : Array({Int32, Int32})? = nil) : Layout
+      len = line.size
+      return Layout.new(len, 1, [0]) if width <= 0
+      return layout(line, width, conceal) if Screen.printable_ascii?(line)
+
+      starts = [0]
+      col = 0
+      i = 0
+      line.each_grapheme do |g|
+        n = g.size
+        w = hidden?(conceal, i) ? 0 : Reveal.grapheme_cols(g.to_s)
+        if col > 0 && col + w > width
+          starts << i
+          col = 0
+        end
+        col += w
+        i += n
+      end
+      Layout.new(len, width, starts)
+    end
+
+    def self.draw_width(line : String, reveal : Bool = false) : Int32
+      reveal ? Reveal.draw_width(line) : Screen.draw_width(line)
+    end
+
+    def self.draw_width_upto(line : String, limit : Int32, reveal : Bool = false) : Int32
+      reveal ? Reveal.draw_width_upto(line, limit) : Screen.draw_width_upto(line, limit)
     end
 
     # --- the (line, sub-row) scroll anchor -----------------------------------
@@ -261,12 +296,13 @@ module Gori::Tui
     def self.step_caret(li : Int32, cx : Int32, dr : Int32, size : Int32,
                         line_at : Int32 -> String,
                         layout_at : Int32 -> Layout,
-                        conceal_at : (Int32 -> Array({Int32, Int32})?)? = nil) : {Int32, Int32}
+                        conceal_at : (Int32 -> Array({Int32, Int32})?)? = nil,
+                        *, reveal : Bool = false) : {Int32, Int32}
       return {li, cx} if dr == 0 || size <= 0
       li = li.clamp(0, size - 1)
       lay = layout_at.call(li)
       sub = lay.row_of(cx)
-      goal = row_col(line_at.call(li), conceal_at.try &.call(li), lay.start_of(sub), cx)
+      goal = row_col(line_at.call(li), conceal_at.try &.call(li), lay.start_of(sub), cx, reveal: reveal)
       n = dr.abs
       while n > 0
         if dr > 0
@@ -293,7 +329,8 @@ module Gori::Tui
         n -= 1
       end
       target = line_at.call(li)
-      {li, row_index(target, conceal_at.try &.call(li), lay.start_of(sub), lay.end_of(sub), goal)}
+      {li, row_index(target, conceal_at.try &.call(li), lay.start_of(sub), lay.end_of(sub), goal,
+        reveal: reveal)}
     end
 
     # Whether char index `i` falls inside a concealed run. Linear in the run count, which is
@@ -351,7 +388,7 @@ module Gori::Tui
     def self.mark_search(screen : Screen, x : Int32, y : Int32, line : String,
                          a : Int32, b : Int32, query : String, max_x : Int32,
                          conceal : Array({Int32, Int32})? = nil, xoff : Int32 = 0,
-                         lower : String? = nil) : Nil
+                         lower : String? = nil, *, reveal : Bool = false) : Nil
       return if query.empty? || line.empty? || a >= b
       q = query.downcase
       dl = lower || line.downcase
@@ -404,7 +441,7 @@ module Gori::Tui
         ma = {i, lo}.max
         mb = {i + qn, hi}.min
         next if ma >= mb # this match doesn't touch the row
-        col = x + (cols ||= ColRun.new(src, conceal, lo)).col_at(ma) - xoff
+        col = x + (cols ||= ColRun.new(src, conceal, lo, reveal)).col_at(ma) - xoff
         # `row_col` is monotone in `ma` and `x`/`xoff` are fixed, so `col` only grows: once
         # the band starts at or past the clip, every later match is clipped too. Without
         # this the loop still walked a match-dense line to its end to paint nothing.
@@ -419,12 +456,13 @@ module Gori::Tui
         if col < x
           # Cut the columns that scrolled off the left, cluster-wise (`slice_left_text`'s
           # rule) — the base draw cut them the same way, so what is left lines up with it.
-          seg = Highlight.slice_left_text(seg, x - col)
+          seg = reveal ? Reveal.slice_left_text(seg, x - col) : Highlight.slice_left_text(seg, x - col)
           col = x
         end
         # `col < max_x` is not re-tested: the break above is that predicate, taken one match
         # earlier, and the drawn column is `{col, x}.max` either way.
-        screen.text(col, y, seg, Theme.bg, Theme.yellow, width: {max_x - col, 0}.max) unless seg.empty?
+        shown = reveal ? Reveal.rendered_text(seg) : seg
+        screen.text(col, y, shown, Theme.bg, Theme.yellow, width: {max_x - col, 0}.max) unless shown.empty?
       end
     end
 
@@ -510,16 +548,18 @@ module Gori::Tui
       # Concealed runs already passed; they arrive sorted (`TextArea#line_conceal`).
       @ri : Int32
       @ascii : Bool
+      @reveal : Bool
       @clusters : Iterator(String::Grapheme)?
       @pending : String::Grapheme?
 
-      def initialize(@src : String, @conceal : Array({Int32, Int32})?, lo : Int32)
+      def initialize(@src : String, @conceal : Array({Int32, Int32})?, lo : Int32,
+                     @reveal : Bool = false)
         @len = @src.size
         @lo = lo.clamp(0, @len)
         @pos = @lo
         @col = 0
         @ri = 0
-        @ascii = @src.ascii_only?
+        @ascii = Screen.printable_ascii?(@src)
         @clusters = nil
         @pending = nil
       end
@@ -571,7 +611,7 @@ module Gori::Tui
             return @col + Screen.draw_width(g.to_s[0, t - @pos])
           end
           @pending = nil
-          @col += Screen.grapheme_cols(g.to_s)
+          @col += @reveal ? Reveal.grapheme_cols(g.to_s) : Screen.grapheme_cols(g.to_s)
           @pos = e
         end
         @col
@@ -618,22 +658,23 @@ module Gori::Tui
     # begins at `a`, with concealed chars contributing no cells. `draw_width` semantics
     # (≥1 per cluster), matching what `Highlight.draw` / `Screen#text` actually advance —
     # so caret, selection tint, search overdraw and click all land on the same cells.
-    def self.row_col(line : String, conceal : Array({Int32, Int32})?, a : Int32, cx : Int32) : Int32
+    def self.row_col(line : String, conceal : Array({Int32, Int32})?, a : Int32, cx : Int32,
+                     *, reveal : Bool = false) : Int32
       lo = a.clamp(0, line.size)
       hi = cx.clamp(lo, line.size)
       return 0 if lo >= hi
-      return Screen.draw_width(line[lo...hi]) if conceal.nil? || conceal.empty?
+      return draw_width(line[lo...hi], reveal) if conceal.nil? || conceal.empty?
       w = 0
       pos = lo
       conceal.each do |(ra, rb)|
         next if rb <= lo
         break if ra >= hi
         s = {ra, lo}.max
-        w += Screen.draw_width(line[pos...s]) if s > pos
+        w += draw_width(line[pos...s], reveal) if s > pos
         return w if rb >= hi # cx lands inside the run → the run's own start column
         pos = {rb, pos}.max
       end
-      w + Screen.draw_width(line[pos...hi])
+      w + draw_width(line[pos...hi], reveal)
     end
 
     # Inverse of `row_col` for click hit-testing: the raw char index whose drawn cell holds
@@ -656,7 +697,7 @@ module Gori::Tui
     # holds for both settings rather than resting on the one caller that happens to re-snap
     # afterwards (`TextArea#click_to_cursor`'s `snap_cx_out_of_conceal`).
     def self.row_index(line : String, conceal : Array({Int32, Int32})?, a : Int32, b : Int32,
-                       target : Int32, nearest : Bool = false) : Int32
+                       target : Int32, nearest : Bool = false, *, reveal : Bool = false) : Int32
       lo = a.clamp(0, line.size)
       hi = b.clamp(lo, line.size)
       return lo if target <= 0
@@ -668,7 +709,7 @@ module Gori::Tui
           next
         end
         e = {Screen.cluster_end(line, i + 1), hi}.min
-        w = Screen.draw_width(line[i...e])
+        w = draw_width(line[i...e], reveal)
         return i if target < col + (nearest ? (w + 1) // 2 : w)
         if nearest && target < col + w
           run = conceal.try &.find { |(ra, rb)| e >= ra && e < rb }

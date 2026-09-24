@@ -160,14 +160,14 @@ describe "gori run notes delete" do
     err.should_not contain("exists nowhere else")
   end
 
-  it "neutralizes the control bytes a terminal would act on, INCLUDING the Cf class" do
+  it "names the control bytes a terminal would act on, INCLUDING the Cf class" do
     # A note is free text taken from $EDITOR, a paste or a pipe, so its "title" can carry
     # ANSI — this sentence goes straight to a terminal. `should_not contain('\e')` alone
-    # would be vacuous (inspect escapes ESC by itself), so the escape TEXT is refused too.
+    # would be vacuous (inspect escapes ESC by itself), so assert the visible ESC badge too.
     err = Gori::CLI::Run.note_delete_confirmation_error_for_spec(1, note("a\e[31mred"), false).not_nil!
     err.should_not contain('\e')
     err.should_not contain("\\u001B") # what inspect alone, without term_safe, would leave
-    err.should contain("a·[31mred")
+    err.should contain("a⟨ESC⟩[31mred")
 
     # U+202E (RIGHT-TO-LEFT OVERRIDE) reverses everything after it without changing a byte —
     # the one input class that can defeat "is this the note I meant". Crystal's `Char#control?`
@@ -175,7 +175,7 @@ describe "gori run notes delete" do
     # (Cc only) would not; this is why the helper does not reuse that one.
     bidi = Gori::CLI::Run.note_delete_confirmation_error_for_spec(1, note("a\u{202E}gnitset"), false).not_nil!
     bidi.should_not contain('\u{202E}')
-    bidi.should contain("a·gnitset")
+    bidi.should contain("a⟨RLO⟩gnitset")
   end
 
   it "clamps a long first line, and clamps before scrubbing so the work fits the message" do

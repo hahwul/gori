@@ -81,6 +81,14 @@ class Gori::Tui::RepeaterView
     @resp_pretty_applied
   end
 
+  private def resp_unicode_escape_count : Int32
+    resp_view.unicode_escape_count
+  end
+
+  private def resp_unicode_decoded? : Bool
+    @decode_unicode && resp_unicode_escape_count > 0
+  end
+
   # The last send's {head, body} as WIRE BYTES — nil when nothing has been sent, or when the
   # send errored and there is no response to hand out.
   #
@@ -228,7 +236,7 @@ class Gori::Tui::RepeaterView
     return nil if size <= 0
     _, line_at = resp_line_source
     li, dcx = Wrap.step_caret(@resp_cursor.cy, @resp_cursor.cx + off, dr, size,
-      drawn_at, resp_layout_fn(@resp_last_cw, drawn_at))
+      drawn_at, resp_layout_fn(@resp_last_cw, drawn_at), reveal: @reveal)
     {li, {dcx - off, 0}.max.clamp(0, line_at.call(li).size)}
   end
 

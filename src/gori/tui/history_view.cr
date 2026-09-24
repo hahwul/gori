@@ -296,6 +296,7 @@ module Gori::Tui
       @detail_hex = false                      # 'x' toggles a raw hex dump of the current pane (req/resp)
       @detail_hex_bytes = nil.as(Bytes?)       # cached combined head+body for the current pane (hex source)
       @pretty = Settings.pretty_bodies_default # 'p' pretty-prints bodies (display only); pushed from the runner
+      @decode_unicode = false                  # 'u' decodes JSON \u escapes for display only
       # Windowed detail content, rebuilt only when the detail/pane changes (NOT on
       # scroll or every frame). The head/notes are pre-styled; the body is kept RAW
       # and styled per VISIBLE line, so opening a multi-MiB response is instant
@@ -505,7 +506,10 @@ module Gori::Tui
       # binary body PRETTY *does* apply here: it swaps each message payload between the
       # protobuf tree and a hex preview. Without this flag the mode strip would suppress the
       # very toggle that drives the pane.
-      grpc : Bool = false do
+      grpc : Bool = false,
+      decoded_ranges : Array(Highlight::DecodedRange) = [] of Highlight::DecodedRange,
+      unicode_escape_count : Int32 = 0,
+      unicode_decoded : Bool = false do
       def total : Int32
         head.size + body.size + trailer.size
       end
@@ -513,7 +517,12 @@ module Gori::Tui
       def line_at(i : Int32) : Highlight::Line
         return head[i] if i < head.size
         j = i - head.size
-        return Highlight.body_styled(body[j], kind) if j < body.size
+        if j < body.size
+          line = Highlight.body_styled(body[j], kind)
+          ranges = Highlight.decoded_ranges_for(decoded_ranges, j)
+          return Highlight.emphasize(line, ranges) unless ranges.empty?
+          return line
+        end
         trailer[j - body.size]
       end
 
@@ -1673,11 +1682,16 @@ module Gori::Tui
       @detail = store.get_flow(id)
       return false if @detail.nil?
       @detail_frozen = store.evidence_count_for(Store::LinkRefKind::Flow, id)
-      if idx = @rows.index { |r| r.id == id }
+      if idx = index_of(id)
         @selected = idx
         # A deep-linked OLDER flow must survive a live reload — otherwise follow mode snaps
         # @selected back to the tail on the next data_version tick, losing the anchor.
         @follow = false if idx != follow_index
+      else
+        @follow = false
+        if nearest = nearest_row_index(id)
+          @selected = nearest
+        end
       end
       # WebSocket flows (101) carry a captured message log; h2 flows link to their
       # connection's raw frame log. Both are loaded as a bounded most-recent window
@@ -1695,6 +1709,18 @@ module Gori::Tui
     end
 
     def close_detail : Nil
+      if detail = @detail
+        did = detail.row.id
+        if idx = index_of(did)
+          @selected = idx
+          @follow = false if idx != follow_index
+        else
+          @follow = false
+          if nearest = nearest_row_index(did)
+            @selected = nearest
+          end
+        end
+      end
       @detail = nil
       drop_detail_cache
       @detail_frames = nil # release the h2-frame / ws-message payload arrays (can be MiB)
@@ -1940,7 +1966,7 @@ module Gori::Tui
                                      line_at : Int32 -> String) : {Int32, Int32}?
       return nil if dr == 0 || @detail_hex || @detail_last_cw <= 0 || !detail_wrap?
       Wrap.step_caret(@detail_read.cy, @detail_read.cx, dr, size, line_at,
-        detail_layout_fn(@detail_last_cw, line_at))
+        detail_layout_fn(@detail_last_cw, line_at), reveal: detail_reveal_active?)
     end
 
     # Wheel: scroll the viewport by DRAWN rows without moving the caret (READ panes).
@@ -2024,7 +2050,7 @@ module Gori::Tui
       # wrap and the columns panned off the left edge without it, so a click on a sideways-
       # scrolled line would land that many columns early.
       cx = Wrap.row_index(line_at.call(vr.li), nil, vr.a, vr.b,
-        mx - (rect.x + gw) + detail_xscroll, nearest: true)
+        mx - (rect.x + gw) + detail_xscroll, nearest: true, reveal: detail_reveal_active?)
       if selecting
         @detail_read.move_to(vr.li, cx, selecting: true) # keeps (or plants) the anchor
       else
@@ -2379,11 +2405,12 @@ module Gori::Tui
         return
       end
       line = line_at.call(@detail_read.cy.clamp(0, size - 1))
-      if Screen.draw_width_upto(line, cw + 1) <= cw
+      reveal = detail_reveal_active?
+      if Wrap.draw_width_upto(line, cw + 1, reveal) <= cw
         @detail_xscroll = 0 # the line fits whole — never hold an offset for it
         return
       end
-      curx = Wrap.row_col(line, nil, 0, @detail_read.cx.clamp(0, line.size))
+      curx = Wrap.row_col(line, nil, 0, @detail_read.cx.clamp(0, line.size), reveal: reveal)
       @detail_xscroll = curx if curx < @detail_xscroll
       @detail_xscroll = curx - cw + 1 if curx >= @detail_xscroll + cw
       @detail_xscroll = 0 if @detail_xscroll < 0
@@ -2444,7 +2471,7 @@ module Gori::Tui
         return hit
       end
       @detail_wrap.clear if @detail_wrap.size >= DETAIL_WRAP_CACHE_CAP
-      @detail_wrap[li] = Wrap.layout(line_at.call(li), cw)
+      @detail_wrap[li] = Wrap.layout(line_at.call(li), cw, reveal: detail_reveal_active?)
     end
 
     private def detail_layout_fn(cw : Int32, line_at : Int32 -> String) : Int32 -> Wrap::Layout
@@ -2517,6 +2544,16 @@ module Gori::Tui
       @detail_read.reset
     end
 
+    # Decode JSON Unicode escapes on demand, retaining the wire spelling in storage and
+    # request write-back.
+    def toggle_unicode_decoding : Nil
+      @decode_unicode = !@decode_unicode
+      drop_detail_cache
+      @detail_scroll = 0
+      detail_wrap_reset
+      @detail_read.reset
+    end
+
     # Revealed (whitespace-visible) lines of the current pane, cached + rebuilt only
     # when the pane bytes change (compared by pointer — detail_pane_bytes memoizes).
     private def reveal_lines : Array(String)?
@@ -2570,6 +2607,10 @@ module Gori::Tui
       return nil unless detail
       return nil unless reveal_active?(detail_hex?(detail), detail_view)
       reveal_lines
+    end
+
+    private def detail_reveal_active? : Bool
+      !shown_reveal_lines.nil?
     end
 
     # Whether the current pane supports the hex view (raw request/response bytes;
@@ -3431,11 +3472,15 @@ module Gori::Tui
       elsif dv.binary
         [{:hex, " ^X:hex ", false}] of {Symbol, String, Bool}
       else
-        [
+        chips = [
           {:hex, " ^X:hex ", false},
           {:ws, " b:ws ", false},
           {:pretty, dv.pretty ? " p:raw " : " p:pretty ", dv.pretty},
         ] of {Symbol, String, Bool}
+        if dv.unicode_escape_count > 0
+          chips << {:unicode, dv.unicode_decoded ? " u:wire " : " u:decode ", dv.unicode_decoded}
+        end
+        chips
       end
     end
 
@@ -3711,9 +3756,11 @@ module Gori::Tui
         styled = Reveal.styled(line[vr.a...vr.b], eol, cw + xs)
         styled = Highlight.slice_left(styled, xs) if xs > 0
         Highlight.draw(screen, body.x + gw, y, styled, width: cw)
-        paint_detail_line_chrome(screen, body.x + gw, y, vr.li, line, focused, sel_spans, vr.a, vr.b)
+        paint_detail_line_chrome(screen, body.x + gw, y, vr.li, line, focused, sel_spans, vr.a, vr.b,
+          reveal: true)
         next unless searching
-        Wrap.mark_search(screen, body.x + gw, y, line, vr.a, vr.b, @search_hl, body.x + gw + cw, xoff: xs, lower: lower.for(vr.li, line))
+        Wrap.mark_search(screen, body.x + gw, y, line, vr.a, vr.b, @search_hl, body.x + gw + cw,
+          xoff: xs, lower: lower.for(vr.li, line), reveal: true)
       end
     end
 
@@ -3741,7 +3788,8 @@ module Gori::Tui
     private def paint_detail_line_chrome(screen : Screen, x : Int32, y : Int32, li : Int32,
                                          line : String, focused : Bool,
                                          sel_spans : Array({Int32, Int32, Int32})? = nil,
-                                         rs : Int32 = 0, re : Int32 = -1) : Nil
+                                         rs : Int32 = 0, re : Int32 = -1,
+                                         *, reveal : Bool = false) : Nil
       return unless focused && detail_navigable?
       re = line.size if re < 0
       cw = @detail_last_cw
@@ -3750,21 +3798,22 @@ module Gori::Tui
           next unless l == li
           a = {x0, rs}.max
           b = {x1, re}.min
-          paint_char_span_bg(screen, x, y, line, a, b, Theme.accent_bg, rs, cw) if a < b
+          paint_char_span_bg(screen, x, y, line, a, b, Theme.accent_bg, rs, cw, reveal: reveal) if a < b
         end
       end
       return unless li == @detail_read.cy
       cx = @detail_read.cx.clamp(0, line.size)
       return unless cx >= rs && (cx < re || re >= line.size)
-      px = x + Wrap.row_col(line, nil, rs, cx) - detail_xscroll
+      px = x + Wrap.row_col(line, nil, rs, cx, reveal: reveal) - detail_xscroll
       # Clipped only while the pane is PANNED. With no offset the caret is inside the row by
       # construction, save for one case: an end-of-line caret on a row exactly as wide as the
       # pane sits at x + cw, which is the border cell. That is where this pane (and every
       # other one in the tree) has always drawn it, so clipping it unconditionally would trade
       # a caret one column too far right for no caret at all.
       return if detail_xscroll > 0 && (px < x || (cw > 0 && px >= x + cw))
-      ch = cx < line.size ? line[cx] : ' '
-      screen.cell(px, y, ch, Theme.bg, Theme.accent_bg)
+      ch = cx < line.size ? Screen.caret_glyph(line, cx) : ' '
+      shown = reveal ? (Reveal.visible_grapheme(ch.to_s) || ch) : ch
+      screen.cell(px, y, shown, Theme.bg, Theme.accent_bg)
       screen.cursor(px, y)
     end
 
@@ -3776,7 +3825,7 @@ module Gori::Tui
     # exceed the width it was laid out at).
     private def paint_char_span_bg(screen : Screen, x : Int32, y : Int32, line : String,
                                    x0 : Int32, x1 : Int32, bg : Color, row_start : Int32 = 0,
-                                   cw : Int32 = 0) : Nil
+                                   cw : Int32 = 0, *, reveal : Bool = false) : Nil
       return if x0 >= x1
       # Cluster-wise, matching the base draw and the caret. Summing draw_width over single
       # CHARS is exactly the retired per-codepoint measure: it drifts right by each
@@ -3786,15 +3835,16 @@ module Gori::Tui
       a = {Screen.cluster_start(line, {x0, line.size}.min), row_start}.max
       b = Screen.cluster_end(line, {x1, line.size}.min)
       return if a >= b
-      px = x + Wrap.row_col(line, nil, row_start, a) - detail_xscroll
+      px = x + Wrap.row_col(line, nil, row_start, a, reveal: reveal) - detail_xscroll
       i = a
       while i < b
         e = Screen.cluster_end(line, i + 1)
         seg = line[i...e]
-        w = Screen.draw_width(seg)
+        w = Wrap.draw_width(seg, reveal)
         # Clipped only while panned — see `paint_detail_line_chrome`. A wrapped row cannot
         # exceed the width it was laid out at, so the unpanned draw is byte-identical.
-        screen.text(px, y, seg, Theme.text, bg) if detail_xscroll <= 0 || (px >= x && (cw <= 0 || px + w <= x + cw))
+        shown = reveal ? Reveal.rendered_text(seg) : seg
+        screen.text(px, y, shown, Theme.text, bg) if detail_xscroll <= 0 || (px >= x && (cw <= 0 || px + w <= x + cw))
         px += w
         i = e
       end
@@ -4059,6 +4109,20 @@ module Gori::Tui
       nil
     end
 
+    private def nearest_row_index(id : Int64) : Int32?
+      return nil if @rows.empty?
+      best_idx = 0
+      best_diff = (@rows[0].id - id).abs
+      @rows.each_with_index do |r, i|
+        diff = (r.id - id).abs
+        if diff < best_diff
+          best_diff = diff
+          best_idx = i
+        end
+      end
+      best_idx
+    end
+
     # Drop the oldest rows so the window stays at MAX_ROWS. Newest-first: oldest
     # are at the END (pop). Oldest-first: oldest are at the START (shift).
     private def trim_window : Nil
@@ -4237,7 +4301,11 @@ module Gori::Tui
       # every redraw, which is what a bare `Pretty.format` here did whenever the header claimed
       # a document and the render came back nil (a lying header, or a projection over the size
       # ceiling): the whole parse repeated per frame for a body that was never going to render.
-      pretty = doc || (@pretty ? Pretty.format(head, src) : nil)
+      pretty = doc || if @pretty
+        Pretty.format(head, src, decode_unicode: @decode_unicode)
+      elsif @decode_unicode
+        Pretty.decode_unicode_json(head, src)
+      end
       # A binary document's note rides the DECODE note, not the reflow's silence. A reflow
       # rearranges the body's own text and the operator asked for it with `p`; this pane is
       # showing a different FORMAT from the one on the wire, and a reader who cannot tell that
@@ -4246,7 +4314,10 @@ module Gori::Tui
         decode_note = decode_note ? "#{decode_note} · #{d.note}" : d.note
       end
       pretty_kind = pretty.try(&.kind)
-      win = Highlight.message_windowed(head, pretty.try(&.bytes) || src, request, kind: pretty_kind)
+      decoded_ranges = pretty.try(&.decoded_ranges) || [] of Highlight::DecodedRange
+      protected_linefeeds = pretty.try(&.protected_linefeeds) || [] of Int32
+      win = Highlight.message_windowed(head, pretty.try(&.bytes) || src, request,
+        kind: pretty_kind, decoded_ranges: decoded_ranges, protected_linefeeds: protected_linefeeds)
       if decode_note
         note = [] of Highlight::Line
         note << Highlight::Line.new
@@ -4259,10 +4330,23 @@ module Gori::Tui
         note << [Highlight::Span.new("— #{decode_note} —", color)]
         trailer = note + trailer # decode note before the truncation note
       end
+      if p = pretty
+        if @decode_unicode && p.unicode_escape_count > 0
+          note = [] of Highlight::Line
+          note << Highlight::Line.new
+          note << [Highlight::Span.new("— #{p.note} —", Theme.accent)]
+          trailer = note + trailer
+        end
+      end
       # No pretty trailer: the "PRETTY" mode indicator in the pane header already
       # signals the reflow, so the "— pretty: … —" footer is redundant (and Repeater
       # never showed one — this keeps the two response views consistent).
-      DetailView.new(win.head, win.body, win.kind, trailer, pretty: pretty != nil)
+      count = pretty.try(&.unicode_escape_count) || Pretty.unicode_escape_count(head, src)
+      DetailView.new(win.head, win.body, win.kind, trailer,
+        pretty: @pretty && (pretty.try(&.reflowed) || false),
+        decoded_ranges: decoded_ranges,
+        unicode_escape_count: count,
+        unicode_decoded: @decode_unicode && count > 0)
     end
 
     # How many leading bytes to sniff for the binary heuristic. Binary formats carry

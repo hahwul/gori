@@ -173,7 +173,17 @@ module Gori
       proxy = "http://#{authority}"
       vars = [{MARKER_VAR, "1"}, {PROXY_VAR, authority}] of {String, String?}
       PROXY_VARS.each { |name| vars << {name, proxy} }
-      NO_PROXY_VARS.each { |name| vars << {name, nil} } unless keep_no_proxy
+      if keep_no_proxy
+        if env[MARKER_VAR]? == "1"
+          NO_PROXY_VARS.each do |name|
+            if val = env["#{ORIG_PREFIX}#{name}"]?.try(&.strip).presence || env[name]?.try(&.strip).presence
+              vars << {name, val}
+            end
+          end
+        end
+      else
+        NO_PROXY_VARS.each { |name| vars << {name, nil} }
+      end
       vars << {NODE_PROXY_VAR, "1"}
       BUNDLE_VARS.each { |name| vars << {name, bundles[name]} }
       vars << {NODE_EXTRA_VAR, node_extra}
@@ -189,10 +199,21 @@ module Gori
     # record always describes the terminal before the FIRST shell.
     private def self.originals(env : Hash(String, String), keep_no_proxy : Bool) : Array({String, String?})
       found = [] of {String, String?}
-      proxies = keep_no_proxy ? PROXY_VARS : PROXY_VARS + NO_PROXY_VARS
-      proxies.each do |name|
+      in_shell = env[MARKER_VAR]? == "1"
+      PROXY_VARS.each do |name|
         if value = inherited_proxy(name, env)
           found << {"#{ORIG_PREFIX}#{name}", value}
+        end
+      end
+      NO_PROXY_VARS.each do |name|
+        if in_shell
+          if value = env["#{ORIG_PREFIX}#{name}"]?.try(&.strip).presence
+            found << {"#{ORIG_PREFIX}#{name}", value}
+          end
+        elsif !keep_no_proxy
+          if value = inherited_proxy(name, env)
+            found << {"#{ORIG_PREFIX}#{name}", value}
+          end
         end
       end
       (BUNDLE_VARS + [NODE_EXTRA_VAR]).each do |name|
@@ -222,12 +243,18 @@ module Gori
       "#{current},#{setting}"
     end
 
+    # Control characters (ASCII < 0x20 and 0x7f) are replaced with a space so that
+    # text interpolated into shell comments cannot break out of `#` or emit terminal escapes.
+    def self.sanitize_comment(text : String) : String
+      text.gsub(/[\x00-\x1f\x7f]/, " ")
+    end
+
     # `result` as lines a shell evaluates: `eval "$(…)"` for POSIX shells, `… | source` for
     # fish. `header` prefixes the caveats as comments — off for text that is PASTED, since an
     # interactive zsh without INTERACTIVE_COMMENTS runs `#` as a command.
     def self.render(result : Result, syntax : Syntax, *, header : Array(String) = [] of String) : String
       String.build do |s|
-        header.each { |line| s << "# " << line << '\n' }
+        header.each { |line| s << "# " << sanitize_comment(line) << '\n' }
         result.vars.each do |name, value|
           case syntax
           in Syntax::Posix

@@ -160,12 +160,19 @@ module Gori::Tui
 
     setter gutter : Bool
     setter search_hl : String
-    setter reveal : Bool
     setter bg_regions : Array({Int32, Int32, Color})
     # Enable horizontal cursor-following (the Decoder/JWT inputs); off everywhere
     # else, so those editors keep @xscroll == 0 and their hot render path unchanged.
     # Ignored while wrap is on — a wrapped line has nothing off to the side.
     setter follow_x : Bool
+
+    def reveal=(on : Bool) : Nil
+      return if @reveal == on
+      @reveal = on
+      @wrap_cache.clear
+      @wrap_rev = -1
+      @xscroll = 0
+    end
 
     # …and ON, unasked, for an editor that opted into wrap while the Display preference has
     # wrap switched off. Every one of those panes REPLACED a `follow_x` pan when it started
@@ -1034,7 +1041,7 @@ module Gori::Tui
       # visible window, which is @xscroll columns into the full line (always 0 under wrap).
       target = mx - (rect.x + gw) + @xscroll
       line = @lines[@cy]
-      cr = @conceal_spans.empty? ? nil : line_conceal(line_start_offset(@cy), line.size)
+      cr = @reveal || @conceal_spans.empty? ? nil : line_conceal(line_start_offset(@cy), line.size)
       # `Wrap.row_index` is the exact inverse of `Wrap.row_col`, which is what the caret,
       # the selection tint and the search overdraw all measure with — so a click lands on
       # the cell the caret would paint, on a continuation row as much as on a first row. It
@@ -1042,7 +1049,7 @@ module Gori::Tui
       # start and never an unseen `¦chain` char; it clamps to the row's own end, so a click
       # past the text of a wrapped row stops at the break instead of running into the next
       # row's characters.
-      @cx = Wrap.row_index(line, cr, vr.a, vr.b, target, nearest: true)
+      @cx = Wrap.row_index(line, cr, vr.a, vr.b, target, nearest: true, reveal: @reveal)
       snap_cx_out_of_conceal(0) # a click on the closing-§ column resolves to it; nudge to a legal rest
       break_run                 # a caret move ends the typing run — see push_undo
       env_complete_close
@@ -1493,7 +1500,7 @@ module Gori::Tui
           # constant (the two editors with conceal both wrapped); the Display preference can
           # now send them down this path.
           Wrap.mark_search(screen, cx0, rect.y + i, line, a, b, @search_hl, cx0 + cw, cr,
-            xoff: @xscroll)
+            xoff: @xscroll, reveal: @reveal)
         end
         # The INS selection tint, over the text and the search marks, under the caret —
         # the same stacking (and the same `Theme.accent_bg`) the READ-mode over-painter
@@ -1512,7 +1519,7 @@ module Gori::Tui
         # exactly: `@cx` rests only on cluster boundaries (snap_cx_to_cluster), so this is
         # single-valued and Wrap.row_index inverts it. Measured from the ROW's first char,
         # which is char 0 of the line whenever nothing wrapped.
-        prefix_w = Wrap.row_col(line, cr, a, ci)
+        prefix_w = Wrap.row_col(line, cr, a, ci, reveal: @reveal)
         # Unwrapped editors draw the preedit AFTER the buffer text without it being part of
         # `line`, so its width is added here; under wrap `drawn_line` already spliced it in.
         preedit_w = wrapping? ? 0 : Screen.draw_width(@preedit)
@@ -1607,11 +1614,11 @@ module Gori::Tui
     # `Wrap::Layout` stores no per-row table for an ASCII line — but together they make the
     # common case (a big ASCII body, scrolled) O(1) per row with no allocation at all.
     private def layout_of(li : Int32, cw : Int32) : Wrap::Layout
-      cr = @conceal_spans.empty? ? nil : line_conceal(line_start_offset(li), @lines[li].size)
+      cr = @reveal || @conceal_spans.empty? ? nil : line_conceal(line_start_offset(li), @lines[li].size)
       # The caret line while an IME is composing changes with every jamo WITHOUT bumping
       # @edits, so it must never enter the memo — a stale layout there desyncs the caret
       # from the row it is drawn on.
-      return Wrap.layout(drawn_line(li), cw, cr) if li == @cy && !@preedit.empty?
+      return Wrap.layout(drawn_line(li), cw, cr, reveal: @reveal) if li == @cy && !@preedit.empty?
       if @wrap_rev != @edits || @wrap_w != cw
         @wrap_cache.clear
         @wrap_rev = @edits
@@ -1621,7 +1628,7 @@ module Gori::Tui
         return hit
       end
       @wrap_cache.clear if @wrap_cache.size >= WRAP_CACHE_CAP
-      @wrap_cache[li] = Wrap.layout(@lines[li], cw, cr)
+      @wrap_cache[li] = Wrap.layout(@lines[li], cw, cr, reveal: @reveal)
     end
 
     # A `Wrap` layout provider bound to this buffer at content width `cw`.
@@ -1694,10 +1701,11 @@ module Gori::Tui
                    else
                      ->(i : Int32) : Array({Int32, Int32})? { line_conceal(line_start_offset(i), @lines[i].size) }
                    end
+      conceal_at = nil if @reveal
       Wrap.step_caret(@cy, @cx, dr, @lines.size,
         ->(i : Int32) { @lines[i] },
         ->(i : Int32) { layout_of(i, cw) },
-        conceal_at)
+        conceal_at, reveal: @reveal)
     end
 
     # The composing caret line as spans: buffer text, the preedit underlined, buffer text —
@@ -1832,10 +1840,12 @@ module Gori::Tui
     def read_caret_cell(li : Int32, cx : Int32, row_start : Int32 = 0) : {Int32, Char | String}
       line = @lines[li]? || ""
       cr = conceal_of(li)
-      col = Wrap.row_col(line, cr, row_start, cx)
+      col = Wrap.row_col(line, cr, row_start, cx, reveal: @reveal)
       r = cx
       cr.each { |(ra, rb)| r = rb if r >= ra && r < rb } if cr
-      {col, Screen.caret_glyph(line, r)}
+      glyph = Screen.caret_glyph(line, r)
+      shown = @reveal ? (Reveal.visible_grapheme(glyph.to_s) || glyph) : glyph
+      {col, shown}
     end
 
     # Paint `[x0, x1)` of line `li` on the selection background, clipped to the drawn row
@@ -1885,15 +1895,16 @@ module Gori::Tui
                                 cr : Array({Int32, Int32})?, row_start : Int32,
                                 s : Int32, e : Int32, cw : Int32) : Nil
       return if s >= e
-      from = Wrap.row_col(line, cr, row_start, s) - @xscroll
-      to = {Wrap.row_col(line, cr, row_start, e) - @xscroll, cw}.min
+      from = Wrap.row_col(line, cr, row_start, s, reveal: @reveal) - @xscroll
+      to = {Wrap.row_col(line, cr, row_start, e, reveal: @reveal) - @xscroll, cw}.min
       seg = line[s...e]
       if from < 0 # h-scrolled off the left edge (unwrapped follow_x editors only)
-        seg = Highlight.slice_left_text(seg, -from)
+        seg = @reveal ? Reveal.slice_left_text(seg, -from) : Highlight.slice_left_text(seg, -from)
         from = 0
       end
       return if from >= to || seg.empty?
-      screen.text(cx0 + from, y, seg, Theme.text, Theme.accent_bg, width: to - from)
+      shown = @reveal ? Reveal.rendered_text(seg) : seg
+      screen.text(cx0 + from, y, shown, Theme.text, Theme.accent_bg, width: to - from)
     end
 
     # Overlay the bg_regions intersecting THIS line. `off0` is the line's start offset
@@ -1921,12 +1932,12 @@ module Gori::Tui
         la = (a - off0).clamp(rs, re)
         lb = (b - off0).clamp(rs, re)
         next if la >= lb
-        start_col = Wrap.row_col(line, nil, rs, la) - @xscroll
-        end_col = Wrap.row_col(line, nil, rs, lb) - @xscroll
+        start_col = Wrap.row_col(line, nil, rs, la, reveal: @reveal) - @xscroll
+        end_col = Wrap.row_col(line, nil, rs, lb, reveal: @reveal) - @xscroll
         draw_from = {start_col, 0}.max
         draw_to = {end_col, cw}.min
         next if draw_from >= draw_to
-        seg = Highlight.slice_left_text(line[la, lb - la], draw_from - start_col)
+        seg = @reveal ? Reveal.slice_left_text(line[la, lb - la], draw_from - start_col) : Highlight.slice_left_text(line[la, lb - la], draw_from - start_col)
         screen.text(cx0 + draw_from, y, seg, Theme.marker_fg, color, width: draw_to - draw_from)
       end
     end
@@ -1946,7 +1957,7 @@ module Gori::Tui
         la = (a - off0).clamp(rs, re)
         lb = (b - off0).clamp(rs, re)
         next if la >= lb
-        col = Wrap.row_col(line, cr, rs, la) # display columns before the first drawn char, within this row
+        col = Wrap.row_col(line, cr, rs, la, reveal: @reveal) # display columns before the first drawn char, within this row
         i = la
         while i < lb
           hit = cr.find { |(ra, rb)| i >= ra && i < rb }
@@ -1954,7 +1965,7 @@ module Gori::Tui
             i = hit[1] # skip the hidden run in one hop
             next
           end
-          w = Screen.grapheme_cols(line[i].to_s)
+          w = @reveal ? Reveal.grapheme_cols(line[i].to_s) : Screen.grapheme_cols(line[i].to_s)
           sx = cx0 + col - @xscroll
           if sx >= cx0 && sx < cx0 + cw
             accent = cr.any? { |(_, rb)| rb == i } # char immediately after a concealed run = closing §
@@ -2053,7 +2064,7 @@ module Gori::Tui
     # safe direction — it can only increase, staying clear of the `(a, b]` no-rest zone,
     # whereas rounding down would land on `b` itself, the one index this exists to avoid.
     private def snap_cx_out_of_conceal(dir : Int32) : Nil
-      return if @conceal_spans.empty?
+      return if @reveal || @conceal_spans.empty?
       line = @lines[@cy]
       line_conceal(line_start_offset(@cy), line.size).each do |(a, b)|
         next unless @cx > a && @cx <= b
@@ -2150,7 +2161,7 @@ module Gori::Tui
       pw = Screen.draw_width(@preedit)
       # On a concealed line, measure in CONCEALED columns — the hidden ¦chain doesn't take
       # cells, so the caret window must be sized/positioned against what's actually drawn.
-      cr = @conceal_spans.empty? ? nil : line_conceal(line_start_offset(@cy), line.size)
+      cr = @reveal || @conceal_spans.empty? ? nil : line_conceal(line_start_offset(@cy), line.size)
       concealed = cr && !cr.empty?
       # draw_width (not display_width) to match the actual draw: a raw control char
       # occupies one drawn cell, so measuring it as width 0 here would let the caret render
@@ -2164,13 +2175,13 @@ module Gori::Tui
       # (snap_cx_to_cluster) and every measure here, in `cxs`/`prefix_w`, and in
       # Highlight.slice_left is draw_width, so the window, the slice and the caret finally
       # agree — that reconciliation was the caret-model change this comment used to defer.
-      full = concealed ? Wrap.row_col(line, cr, 0, line.size) : Screen.draw_width(line)
+      full = concealed ? Wrap.row_col(line, cr, 0, line.size, reveal: @reveal) : Wrap.draw_width(line, @reveal)
       if full + pw <= cw
         @xscroll = 0
         return
       end
       cx = @cx.clamp(0, line.size)
-      curx = (concealed ? Wrap.row_col(line, cr, 0, cx) : Screen.draw_width(line[0, cx])) + pw
+      curx = (concealed ? Wrap.row_col(line, cr, 0, cx, reveal: @reveal) : Wrap.draw_width(line[0, cx], @reveal)) + pw
       @xscroll = curx if curx < @xscroll                # caret left of the window → snap left
       @xscroll = curx - cw + 1 if curx >= @xscroll + cw # caret past the right edge → snap right
       @xscroll = 0 if @xscroll < 0

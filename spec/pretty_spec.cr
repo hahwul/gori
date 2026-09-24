@@ -48,6 +48,61 @@ describe Gori::Pretty do
       t.lines.size.should be > 1
     end
 
+    it "keeps escapes and duplicate members visible in the default pretty view" do
+      body = "{\"k\":\"\\u003c\\/x\",\"k\":1E+05}"
+      result = pretty("application/json", body).not_nil!
+      text(result).should contain("\\u003c\\/x")
+      text(result).should contain("\"k\": 1E+05")
+      text(result).should_not contain("<")
+      result.unicode_escape_count.should eq(1)
+    end
+
+    it "preserves a number that collides with the first template-marker placeholder" do
+      seed = "87654321098765432109876543210987654321"
+      prefix = seed[0, seed.bytesize - 8] + "00000000"
+      body = %({"n":#{prefix}00000000,"template":"§val§"})
+
+      formatted = Gori::Pretty.format_request(
+        "POST /x HTTP/1.1\r\nContent-Type: application/json\r\n\r\n", body
+      ).not_nil!
+      formatted.should contain(%("n": #{prefix}00000000))
+      formatted.should contain(%("template": "§val§"))
+    end
+
+    it "preserves invalid UTF-8 bytes through request reindent" do
+      body = Bytes[
+        0x7b_u8, 0x22_u8, 0x61_u8, 0x22_u8, 0x3a_u8, 0x22_u8, 0xff_u8, 0x22_u8,
+        0x2c_u8, 0x22_u8, 0x62_u8, 0x22_u8, 0x3a_u8, 0x31_u8, 0x7d_u8,
+      ]
+      formatted = Gori::Pretty.format_request(
+        "POST /x HTTP/1.1\r\nContent-Type: application/json\r\n\r\n", String.new(body)
+      ).not_nil!
+      formatted.to_slice.should eq(Bytes[
+        0x7b_u8, 0x0a_u8, 0x20_u8, 0x20_u8, 0x22_u8, 0x61_u8, 0x22_u8, 0x3a_u8,
+        0x20_u8, 0x22_u8, 0xff_u8, 0x22_u8, 0x2c_u8, 0x0a_u8, 0x20_u8, 0x20_u8,
+        0x22_u8, 0x62_u8, 0x22_u8, 0x3a_u8, 0x20_u8, 0x31_u8, 0x0a_u8, 0x7d_u8,
+      ])
+    end
+
+    it "decodes Unicode escapes only on request and carries highlight ranges" do
+      body = "{\"value\":\"\\u003c\\u200b\"}"
+      raw = Gori::Pretty.format(head_ct("application/json"), body.to_slice).not_nil!
+      String.new(raw.bytes).should contain("\\u003c\\u200b")
+      raw.decoded_ranges.should be_empty
+
+      decoded = Gori::Pretty.format(head_ct("application/json"), body.to_slice, decode_unicode: true).not_nil!
+      String.new(decoded.bytes).should contain("<\u{200b}")
+      decoded.note.should contain("\\u decoded (2 escapes)")
+      decoded.decoded_ranges.should eq([{1, 12, 13}, {1, 13, 14}])
+    end
+
+    it "offers the decode count without pretty reflow" do
+      body = "{ \"x\" : \"\\u003c\" }".to_slice
+      Gori::Pretty.unicode_escape_count(head_ct("application/json"), body).should eq(1)
+      Gori::Pretty.decode_unicode_json(head_ct("application/json"), body).not_nil!.bytes
+        .should eq("{ \"x\" : \"<\" }".to_slice)
+    end
+
     it "is a no-op on already-pretty JSON (idempotent → nil)" do
       r1 = pretty("application/json", %({"a":1})).not_nil!
       pretty("application/json", String.new(r1.bytes)).should be_nil
@@ -74,19 +129,19 @@ describe Gori::Pretty do
   end
 
   describe "GraphQL" do
-    it "presents operationName + query + variables, kind :graphql" do
+    it "keeps JSON GraphQL envelopes as escaped JSON in the default pane" do
       body = %({"operationName":"Q","query":"query Q { me { id } }","variables":{"x":1}})
       res = pretty("application/json", body)
-      res.not_nil!.kind.should eq(:graphql)
+      res.not_nil!.kind.should be_nil
       t = text(res)
-      t.should contain("# operationName: Q")
+      t.should contain(%("operationName": "Q"))
       t.should contain("query Q { me { id } }")
-      t.should contain("# variables")
+      t.should contain(%("variables": {))
     end
 
-    it "un-escapes a multi-line query" do
+    it "keeps JSON escape spellings in a GraphQL envelope" do
       body = %({"query":"query {\\n  me {\\n    id\\n  }\\n}"})
-      text(pretty("application/json", body)).should contain("  me {")
+      text(pretty("application/json", body)).should contain(%(\\n))
     end
 
     it "plain JSON (no query field) routes to the JSON formatter (kind nil)" do
@@ -268,9 +323,13 @@ describe Gori::Pretty do
       Gori::Pretty.format_request(head, jwt_token).should be_nil
     end
 
-    it "refuses the GraphQL document rendered out of its JSON envelope" do
+    it "keeps the JSON envelope while reflowing whitespace only" do
       head = "POST /g HTTP/1.1\r\nHost: x\r\nContent-Type: application/json"
-      Gori::Pretty.format_request(head, %({"operationName":"Me","variables":{"a":1},"query":"query Me { me { id } }"})).should be_nil
+      body = "{\"query\":\"query Me { me { id } }\",\"query\":\"other\",\"n\":1E+05}"
+      formatted = Gori::Pretty.format_request(head, body).not_nil!
+      formatted.should contain("\"query\": \"query Me { me { id } }\"")
+      formatted.should contain("\"query\": \"other\"")
+      formatted.should contain("1E+05")
     end
 
     # Positive control: the guard must not be a blanket `return nil`.
@@ -291,13 +350,14 @@ describe Gori::Pretty do
   describe "GraphQL — one detector, shared with the decoded pane" do
     envelope = %({"operationName":"Me","variables":{"a":1},"query":"query Me { me { id } }"})
 
-    it "renders the shapes it never knew: batch and persisted query" do
+    it "keeps batch and persisted-query JSON envelopes in the default pane" do
       res = pretty("application/json", %([{"query":"{a}"},{"query":"{b}"}])).not_nil!
-      res.note.should eq("pretty: graphql (batch)")
-      text(res).should contain("# batch of 2 operations")
+      res.note.should eq("pretty: json")
+      text(res).should contain(%("query": "{a}"))
+      text(res).should contain(%("query": "{b}"))
 
       res = pretty("application/json", %({"extensions":{"persistedQuery":{"sha256Hash":"h"}}})).not_nil!
-      res.note.should eq("pretty: graphql (persisted)")
+      res.note.should eq("pretty: json")
     end
 
     it "renders a urlencoded GraphQL body as the document, not as anonymous fields" do

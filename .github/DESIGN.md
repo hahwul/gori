@@ -2674,8 +2674,9 @@ of those letters in one of those scopes would shadow silently and only for the o
 picked that keyset. And `spec/verb/keyset_spec.cr` sweeps the vim bare letters (`u` `/` `a`
 `g` `⇧G`) against the eight scopes an editor pane can belong to: the Editor scope sits ahead
 of the tab scope, which `validate_chords!` cannot see, so a hit there is a DISPLACEMENT that
-must be documented rather than discovered. Today there are none — every one of those letters
-is free in every editor-capable tab scope.
+must be documented rather than discovered. The one intentional hit is `u` in the Repeater's
+read-only response, where Unicode escape display takes priority; the request editor still
+resolves `u` in the leading Editor scope to `editor.undo`.
 
 What the keyset deliberately leaves alone: the enable/disable `x` on the four rule lists (that
 `x` is a state change, not a selection — KEY_AUDIT F4), and `intercept.select-line`, which
@@ -3401,10 +3402,10 @@ databases have no constraint on the rewriter enum columns, and settings parsing 
 clamped an unrecognised label to that field's live default. Thus a future `short_circuit` op
 could become `replace` in an older binary and rewrite traffic. Keep each raw label beside its
 total enum projection in `MatchRule`; `inert?` is the shared gate for replacement and
-short-circuit selection. Settings saves retain the raw strings. TUI, CLI and MCP list the raw
-labels and explain the unsupported fields; they refuse to edit or enable such a rule while
-allowing deletion. The scope is the rewriter grammar fields (`target`, `part`, `op`, and
-`match_kind`), so the guard also covers a label added to an existing enum.
+short-circuit selection. Settings saves retain the raw strings, non-string values and unrecognised extra keys, keeping those rows inert so newer fields do not widen matching, and reordering any inert neighbour is refused in both scopes. TUI, CLI and MCP list the raw
+labels and explain the unsupported fields; they refuse to edit, duplicate, reorder or enable such a rule while
+allowing deletion. Unknown ops count as might-execute so profile import requires `--allow-commands`. The scope is the rewriter grammar fields (`target`, `part`, `op`, and
+`match_kind`), plus unrecognised keys on settings rules, so the guard also covers a label added to an existing enum.
 
 ### 2026-09-24: a fuzz run can end itself, and the archive need not keep every row
 
@@ -3434,3 +3435,19 @@ holds its real position and the gaps are the dropped rows; `fuzz_runs.keep` reco
 so a filtered archive reads "12 of 100,000 kept" instead of a lost run. Pause-on-condition is
 deliberately left out: it needs a plain pause verb first, and the engine's pause still drains
 the worker buffer (`Engine#pause` parks only the dispatcher).
+### 2026-09-24: JSON Unicode decoding is a view, and `u` belongs to the read-only response
+
+Refines: [P4](#p4), [P7](#p7). #1248.
+
+Pretty-printing a request is a write-back action, so it only adds JSON whitespace. It must keep
+string escape spellings, duplicate members, number tokens, lone surrogates and even invalid
+UTF-8 bytes inside strings as the operator entered them. The response and History detail have
+a separate `u` view toggle: it decodes valid `\\uXXXX` escapes for display, marks the decoded
+ranges, and leaves the captured bytes and copy/search data untouched. Hidden Unicode and
+control characters render as named badges, with emoji joiners/selectors retained in context.
+
+In the Repeater, the response is read-only and outside `Scope::Editor`, so its default `u`
+action occupies that tab-scope chord; the request editor remains in `Scope::Editor`, where
+vim's `u` still means undo. An explicit user rebind wins over that default in keymap collision
+resolution. The English and Korean hotkey guides and `spec/verb/keyset_spec.cr` record this
+cross-scope exception.
