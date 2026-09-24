@@ -69,7 +69,7 @@ gori run <subcommand> [verb] [options]
 | `mine [<flow-id>]` | Hidden-parameter discovery |
 | `sequence` (`seq`) `[<flow-id>]` | Grade token randomness (live replay, or `--tokens` for a pasted list) |
 | `authorize [<flow-id>…]` | Replay captured flows under several identities and judge each response against a baseline (broken access control) |
-| `cache-deception [<flow-id>…]` | Check flows for web cache deception: prime as authenticated, re-request anonymous, compare |
+| `cache-deception [<flow-id>…]` | Check flows for web cache deception: prime authenticated, re-request anonymously, then compare with a cache-busted anonymous control |
 | `probe [QL]` | Passive security scan (no requests) |
 | `probe issues` · `dismiss` · `promote` · `delete` | Triage persisted Probe findings |
 | `probe rules` · `mode` | List / arm scan rules; get or set the scan mode |
@@ -646,7 +646,7 @@ Flows that cannot be replayed meaningfully are listed on STDERR before anything 
 
 ### run cache-deception
 
-Check each selected flow for **web cache deception**: replay it as its captured (authenticated) identity to prime any cache, then re-request the *same* url with no session, and compare. If the anonymous re-request is served the authenticated response *from a cache* (`verdict: cached`), that private response was cached under a key an anonymous client hits. Borrows the Authorize engine; the crafted paths that trigger it (`;`, `.css`, `%00`, dot-segments) are the Fuzzer's `cache-delimiters` payload set.
+Check each selected flow for **web cache deception**: replay it as its captured (authenticated) identity to prime any cache, re-request the *same* url with no session, then make an anonymous request with a unique cache-busting query parameter as a control. Matching control content means the endpoint is public (`served`); matching anonymous content with a cache hit and different control content is a likely deception (`cached`). The check sends up to three requests per flow. Borrows the Authorize engine; the crafted paths that trigger it (`;`, `.css`, `%00`, dot-segments) are the Fuzzer's `cache-delimiters` payload set.
 
 ```bash
 gori run cache-deception 12
@@ -656,13 +656,13 @@ gori run cache-deception --flow 12 --flow 13 --format json
 | Option | Description |
 | -------- | ------------- |
 | `<flow-id>…`, `--flow=ID` | Captured flows to check, in the order given (repeatable) |
-| `--unsafe-methods` | Also check `POST`/`PUT`/`PATCH`/`DELETE`; the side effect runs twice (prime + anonymous) |
+| `--unsafe-methods` | Also check `POST`/`PUT`/`PATCH`/`DELETE`; the side effect can run up to three times (prime, anonymous, control) |
 | `--allow-unscoped` | Send even when the target is outside the project scope (sandbox and excludes still apply) |
 | `--timeout=SEC`, `-k`/`--insecure-upstream` | Per-request connect + idle timeout; skip upstream TLS verification |
 | `--project`, `--db` | Project to read |
 | `--format` | `text` (default), `json` (one array at the end), or `jsonl` (streamed) |
 
-Each flow reports one verdict: `cached` (the deception — anonymous served the authenticated response from a cache), `served` (matching content but no cache-hit header — likely a public endpoint), `review` (similar but not identical), `protected` (anonymous got a different response), `blocked` (gori refused the send), or `errored`. Only safe methods (`GET`/`HEAD`/`OPTIONS`) are checked without `--unsafe-methods`.
+Each flow reports one verdict: `cached` (the deception — anonymous served the authenticated response from a cache and the cache-busted control differed), `served` (no cache-hit evidence or matching public control), `review` (similar but not identical or no decisive control), `protected` (anonymous got a different response), `blocked` (gori refused the send), or `errored`. Only safe methods (`GET`/`HEAD`/`OPTIONS`) are checked without `--unsafe-methods`.
 
 ### run session
 

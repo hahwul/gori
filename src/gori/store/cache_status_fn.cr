@@ -18,8 +18,8 @@ module Gori
   # only for a `body~`/`header~` scan.
   #
   # Registered per pooled connection beside the byte-safe REGEXP and the scope match functions
-  # (see `Store.configure_connections`) AND on `ProjectSearch`'s raw read-only handle, so a
-  # cross-project `cache:` query cannot fail with "no such function".
+  # (see `Store.configure_connections`). ProjectSearch's cross-project FTS lookup does not
+  # compile QL fields and therefore does not need this function.
   module CacheStatusFn
     # `SQLITE_TRANSIENT` (-1): copy the result bytes now. The token is a static literal so
     # `SQLITE_STATIC` would also be safe, but TRANSIENT removes the need to reason about the

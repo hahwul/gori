@@ -5,7 +5,6 @@ require "./ql"
 require "./store"
 require "./store/query_control"
 require "./store/scope_match"
-require "./store/cache_status_fn"
 
 # The one C entry point the search needs that neither the shard nor gori binds yet. Reopening
 # is additive (see SafeRegexp, QueryControl).
@@ -400,9 +399,6 @@ module Gori
         LibSQLite3.busy_timeout(@db, BUSY_TIMEOUT_MS)
         exec("PRAGMA query_only = 1")
         ScopeMatch.install(@db)
-        # `gori_cache_status` too, so a cross-project `cache:` query does not fail with "no
-        # such function" (mirrors `QL.contains_cond`'s need for `gori_ci_contains`).
-        CacheStatusFn.install(@db)
         box = Box.box(control)
         @control_box = box
         LibSQLite3.progress_handler(@db, Store::QueryControl::STEPS, Store::QueryControl::CALLBACK, box)

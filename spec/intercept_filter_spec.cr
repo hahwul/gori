@@ -412,6 +412,8 @@ describe Gori::InterceptFilter do
         .not_nil!.should contain("`body:` already means the message in hand")
       Gori::InterceptFilter.unsupported_field_reason("scope:in")
         .not_nil!.should contain("scope rules are not part of a message")
+      Gori::InterceptFilter.unsupported_field_reason("cache:hit")
+        .not_nil!.should contain("cannot gate a request before its response exists")
       Gori::InterceptFilter.unsupported_field_reason("host:acme method:POST").should be_nil
     end
   end

@@ -183,6 +183,26 @@ describe "MCP cancellation stops the work" do
       end
     end
 
+    it "stops cache_deception_check before it sends when the call is cancelled" do
+      origin = CountingOrigin.new
+      begin
+        with_store do |store|
+          id = cancel_flow(store, origin.port, "/account")
+          tools = tools_for(store)
+          args = JSON.parse(%({"flow_id":#{id},"allow_unscoped":true,"verify":false}))
+          stopped = tools.call("cache_deception_check", args, cancelled: -> { true })
+          stopped.is_error.should be_true # the cancelled check has no report to return
+          origin.hits.should eq(0)
+
+          completed = tools.call("cache_deception_check", args)
+          completed.is_error.should be_false
+          origin.hits.should eq(2) # no cache-hit evidence, so no control request
+        end
+      ensure
+        origin.close
+      end
+    end
+
     # A stop during CALIBRATION aborts the run, but a stop mid-SEARCH does not: it returns
     # `aborted: false` with the removals proven so far. `apply` was guarded only on `aborted`,
     # so a cancelled minimize would have rewritten the stored request under a caller that is

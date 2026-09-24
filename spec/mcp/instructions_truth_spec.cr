@@ -16,7 +16,7 @@ private NAMEABLE = %w[
   send_request send_websocket create_issue update_issue create_rule delete_rule
   set_rule_enabled switch_project create_project delete_project list_projects
   operator_messages reply_to_operator ql_reference list_history list_sitemap
-  project_info decode jwt_decode
+  project_info decode jwt_decode cache_deception_check
 ]
 
 private def instructions_under(store, spec : String?, allow_actions = true) : {String, Set(String)}
@@ -67,6 +67,7 @@ describe "MCP instructions truthfulness" do
       text, _ = instructions_under(store, nil, allow_actions: false)
       text.should contain("Read-only mode")
       text.should contain("send_request")
+      text.should contain("cache_deception_check")
 
       narrowed, listed = instructions_under(store, "list_*", allow_actions: false)
       named_in(narrowed).should_not contain("send_request")
@@ -109,6 +110,15 @@ describe "MCP instructions truthfulness" do
       text.should contain("SCOPE_BLOCKED")
       text.should contain("project_info")
       text.should contain("operator_messages")
+    end
+  end
+
+  it "scope-gates cache-deception even when it is the only active tool" do
+    with_store do |store|
+      text, listed = instructions_under(store, "cache_deception_check")
+      listed.should contain("cache_deception_check")
+      text.should contain("cache_deception_check")
+      text.should contain("SCOPE_BLOCKED")
     end
   end
 end

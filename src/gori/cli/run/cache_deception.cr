@@ -4,14 +4,13 @@ require "../../host_overrides"
 
 # `gori run cache-deception` — check captured flows for WEB CACHE DECEPTION, the headless
 # equivalent of the MCP `cache_deception_check` tool. Replays each flow as its captured
-# (authenticated) identity to prime any cache, then re-requests the SAME url with no session,
-# and reports whether the anonymous re-request was served the authenticated response from a
-# cache. Borrows the Authorize engine.
+# (authenticated) identity to prime any cache, re-requests the SAME url anonymously, then makes
+# a cache-busted anonymous control request. Borrows the Authorize engine.
 module Gori
   module CLI
     module Run
       @[Subcommand("cache-deception", help: [
-        {"cache-deception [<id>…]", "Check flows for web cache deception (prime authenticated, re-request anonymous)"},
+        {"cache-deception [<id>…]", "Check flows for web cache deception (authenticated, anonymous, cache-busted control)"},
       ])]
       private def self.cmd_cache_deception(args : Array(String)) : Nil
         db_path : String? = nil
@@ -27,8 +26,10 @@ module Gori
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run cache-deception [<flow-id>…] [options]\n\n" \
                      "For each selected flow, replay it as its captured (AUTHENTICATED) identity to\n" \
-                     "prime any cache, then re-request the SAME url with NO session, and compare. If\n" \
-                     "the anonymous re-request is served the authenticated response FROM a cache, that\n" \
+                     "prime any cache, re-request the SAME url with NO session, then compare with an\n" \
+                     "anonymous cache-busted control request. Matching control content is public; if\n" \
+                     "the anonymous re-request is served the authenticated response FROM a cache and\n" \
+                     "the control differs, that\n" \
                      "private response was cached under a key an anonymous client hits — a web cache\n" \
                      "deception. The crafted paths that trigger it (`;`, `.css`, `%00`, dot-segments)\n" \
                      "are the Fuzzer's `cache-delimiters` payload set; check the promising hits here.\n\n" \
@@ -36,7 +37,7 @@ module Gori
           p.on("--flow=ID", "Check this captured flow (repeatable; same as a positional id)") { |v| flow_ids << parse_flow_id(v, "gori run cache-deception") }
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
-          p.on("--unsafe-methods", "Also check POST/PUT/PATCH/DELETE — the side effect runs twice (prime + anonymous)") { unsafe_methods = true }
+          p.on("--unsafe-methods", "Also check POST/PUT/PATCH/DELETE — side effects can run up to three times") { unsafe_methods = true }
           p.on("--allow-unscoped", "Send even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
           p.on("-k", "--insecure-upstream", "Do not verify upstream TLS certificates") { insecure = true }
           p.on("--timeout=SEC", "Per-request connect + idle timeout (seconds)") { |v| timeout = parse_count(v, "--timeout").seconds }
@@ -56,6 +57,8 @@ module Gori
         engine = Authorize::Engine.live(outbound, !insecure, timeout, overrides: overrides)
 
         reports = [] of CacheDeception::Report
+        checked = 0
+        sent = 0
         begin
           flow_ids.uniq.each do |id|
             detail = store.get_flow(id)
@@ -63,19 +66,14 @@ module Gori
               STDERR.puts "gori run cache-deception: no flow with id #{id}"
               next
             end
-            if reason = CacheDeception.skip_reason(detail, unsafe_methods)
-              STDERR.puts "  skip flow #{id}: #{CacheDeception.reason_label(reason)}" \
-                          "#{reason == :unsafe_method ? " (pass --unsafe-methods to check it anyway)" : ""}"
-              next
-            end
+            next if report_skip_reason?(id, detail, unsafe_methods)
             row = detail.row
-            if outbound.check_request(row.scheme, row.host, row.target, row.port).blocked?
-              STDERR.puts "  skip flow #{id}: outside project scope (pass --allow-unscoped to check it)"
-              next
-            end
+            next if report_outbound_skip?(id, row, outbound)
             report = CacheDeception.check(engine, detail)
-            next unless report # nil only under a stop, which this path does not pass
+            next unless report # nil only if the engine was stopped before completing the check
             reports << report
+            sent += report.sent_count
+            checked += 1 unless report.verdict.blocked? || report.verdict.errored?
             emit_cache_deception(report, format) if format != :json
           end
         ensure
@@ -85,8 +83,42 @@ module Gori
 
         emit_cache_deception_json_array(reports) if format == :json
         deceptions = reports.count(&.verdict.deception?)
-        STDERR.puts "checked #{reports.size} flow#{reports.size == 1 ? "" : "s"} — " \
+        STDERR.puts "checked #{checked} flow#{checked == 1 ? "" : "s"} — " \
                     "#{deceptions} likely cache deception#{deceptions == 1 ? "" : "s"}"
+        exit_if_no_cache_deception_evidence(reports, sent, checked)
+      end
+
+      private def self.exit_if_no_cache_deception_evidence(reports : Array(CacheDeception::Report),
+                                                           sent : Int32, checked : Int32) : Nil
+        if reports.empty?
+          STDERR.puts "gori run cache-deception: no flow was checked — every selection was missing, skipped, or out of scope"
+          exit 1
+        end
+        if sent == 0
+          STDERR.puts "gori run cache-deception: every send was refused before the socket"
+          exit 1
+        end
+        if checked == 0
+          STDERR.puts "gori run cache-deception: no response could be compared"
+          exit 1
+        end
+      end
+
+      private def self.report_outbound_skip?(id : Int64, row : Store::FlowRow,
+                                             outbound : Outbound) : Bool
+        verdict = outbound.check_request(row.scheme, row.host, row.target, row.port)
+        return false unless verdict.blocked?
+        STDERR.puts "  skip flow #{id}: #{Outbound.remedy(verdict, "--allow-unscoped")}"
+        true
+      end
+
+      private def self.report_skip_reason?(id : Int64, detail : Store::FlowDetail,
+                                           unsafe_methods : Bool) : Bool
+        reason = CacheDeception.skip_reason(detail, unsafe_methods)
+        return false unless reason
+        STDERR.puts "  skip flow #{id}: #{CacheDeception.reason_label(reason)}" \
+                    "#{reason == :unsafe_method ? " (pass --unsafe-methods to check it anyway)" : ""}"
+        true
       end
 
       private def self.emit_cache_deception(report : CacheDeception::Report, format : Symbol) : Nil
@@ -99,9 +131,11 @@ module Gori
       private def self.cache_deception_report_text(report : CacheDeception::Report) : String
         auth = report.authenticated
         anon = report.anonymous
+        control = report.control
         detail = String.build do |io|
           io << "  authenticated: " << (auth ? cache_deception_trial_text(auth) : "—")
           io << "  ·  anonymous: " << (anon ? cache_deception_trial_text(anon) : "—")
+          io << "  ·  cache-busted: " << (control ? cache_deception_trial_text(control) : "—")
           io << "  ·  cache: " << report.cache.token
         end
         "[#{report.verdict.label}] #{report.method} #{report.url}\n#{detail}"
@@ -135,6 +169,7 @@ module Gori
           j.field "cache", report.cache.token
           cache_deception_trial_fields(j, "authenticated", report.authenticated)
           cache_deception_trial_fields(j, "anonymous", report.anonymous)
+          cache_deception_trial_fields(j, "cache_busted", report.control)
           report.blocked_reason.try { |r| j.field "blocked_reason", r }
         end
       end

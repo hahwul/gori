@@ -2878,7 +2878,10 @@ module Gori::Tui
       # value is not on the light `FlowRow` — a shown CACHE column costs a head read per visible
       # row (see `cache_status_for`), which a session not doing cache work should not pay. 5
       # cells fit the "CACHE" header and the widest cell ("MISS"); the values are abbreviated.
-      show_cache = spare >= 6
+      # CACHE is an opt-in diagnostic column. Reading it requires one response-head lookup per
+      # visible row, so only show it when the bar or active saved view asks a cache: question.
+      view_query = active_view.try(&.query)
+      show_cache = spare >= 6 && (cache_field_used?(@query) || view_query.try { |q| cache_field_used?(q) } == true)
       cluster_w += 6 if show_cache
 
       status_x = {rect.right - cluster_w, host_x}.max
@@ -3134,6 +3137,10 @@ module Gori::Tui
         n += 1
       end
       {n, used}
+    end
+
+    private def cache_field_used?(query : String) : Bool
+      QL.fields_used(query).any? { |use| use.name == "cache" && !use.regex }
     end
 
     # Each column is granted `width + 1` and DRAWN one cell in, so the spare cell is a LEADING

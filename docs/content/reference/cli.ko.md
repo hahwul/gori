@@ -69,7 +69,7 @@ gori run <subcommand> [verb] [options]
 | `mine [<flow-id>]` | 숨은 파라미터 탐색 |
 | `sequence` (`seq`) `[<flow-id>]` | 토큰 무작위성 평가 (라이브 리플레이, 또는 붙여넣은 목록은 `--tokens`) |
 | `authorize [<flow-id>…]` | 캡처된 플로우를 여러 아이덴티티로 재전송하고 각 응답을 기준선과 비교 (접근 제어 결함) |
-| `cache-deception [<flow-id>…]` | 플로우의 웹 캐시 디셉션 검사: 인증 상태로 캐시를 채우고, 익명으로 다시 요청해 비교 |
+| `cache-deception [<flow-id>…]` | 플로우의 웹 캐시 디셉션 검사: 인증·익명 요청 후 캐시 무효화 익명 요청과 비교 |
 | `probe [QL]` | 패시브 보안 스캔 (요청 없음) |
 | `probe issues` · `dismiss` · `promote` · `delete` | 저장된 Probe 발견 항목 트리아지 |
 | `probe rules` · `mode` | 스캔 규칙 목록 / 무장, 스캔 모드 조회 및 설정 |
@@ -634,7 +634,7 @@ gori run authorize --query 'host:acme.test method:GET' --identities identities.j
 
 ### run cache-deception {#run-cache-deception}
 
-선택한 각 플로우를 **웹 캐시 디셉션**으로 검사합니다: 캡처된(인증된) 아이덴티티로 재전송해 캐시를 채운 뒤, 세션 없이 *같은* url을 다시 요청해 비교합니다. 익명 재요청이 인증된 응답을 *캐시에서* 받으면(`verdict: cached`), 그 개인 응답이 익명 클라이언트도 맞히는 키로 캐시된 것입니다. Authorize 엔진을 차용하며, 이를 유발하는 조작된 경로(`;`, `.css`, `%00`, dot-segment)는 Fuzzer의 `cache-delimiters` 페이로드 세트입니다.
+선택한 각 플로우를 **웹 캐시 디셉션**으로 검사합니다: 캡처된(인증된) 아이덴티티로 재전송해 캐시를 채우고, 세션 없이 *같은* url을 다시 요청한 뒤 고유한 캐시 무효화 쿼리 매개변수를 붙여 익명 제어 요청을 보냅니다. 제어 응답도 일치하면 공개 콘텐츠(`served`)이고, 익명 응답이 캐시 히트를 보이며 제어 응답은 다르면 디셉션 가능성(`cached`)이 있습니다. 플로우 하나당 최대 세 번 요청합니다. Authorize 엔진을 차용하며, 이를 유발하는 조작된 경로(`;`, `.css`, `%00`, dot-segment)는 Fuzzer의 `cache-delimiters` 페이로드 세트입니다.
 
 ```bash
 gori run cache-deception 12
@@ -644,13 +644,13 @@ gori run cache-deception --flow 12 --flow 13 --format json
 | 옵션 | 설명 |
 | -------- | ------------- |
 | `<flow-id>…`, `--flow=ID` | 검사할 캡처 플로우(순서대로, 반복 가능) |
-| `--unsafe-methods` | `POST`/`PUT`/`PATCH`/`DELETE`도 검사; 부작용이 두 번(프라임 + 익명) 실행됨 |
+| `--unsafe-methods` | `POST`/`PUT`/`PATCH`/`DELETE`도 검사; 부작용이 최대 세 번(프라임, 익명, 제어) 실행될 수 있음 |
 | `--allow-unscoped` | 대상이 프로젝트 스코프 밖이어도 전송(샌드박스·제외 규칙은 여전히 적용) |
 | `--timeout=SEC`, `-k`/`--insecure-upstream` | 요청별 연결 + 유휴 타임아웃; 업스트림 TLS 검증 생략 |
 | `--project`, `--db` | 읽을 프로젝트 |
 | `--format` | `text`(기본), `json`(끝에 배열 하나), `jsonl`(스트리밍) |
 
-플로우마다 판정 하나를 보고합니다: `cached`(디셉션 — 익명이 인증된 응답을 캐시에서 받음), `served`(내용은 같지만 캐시 히트 헤더 없음 — 공개 엔드포인트일 가능성), `review`(비슷하지만 동일하지 않음), `protected`(익명이 다른 응답을 받음), `blocked`(gori가 전송 거부), `errored`. `--unsafe-methods` 없이는 안전한 메서드(`GET`/`HEAD`/`OPTIONS`)만 검사합니다.
+플로우마다 판정 하나를 보고합니다: `cached`(디셉션 — 익명이 인증된 응답을 캐시에서 받았고 캐시 무효화 제어 응답은 다름), `served`(캐시 히트 증거가 없거나 공개 제어 응답과 일치), `review`(비슷하지만 동일하지 않거나 제어 결과가 불분명), `protected`(익명이 다른 응답을 받음), `blocked`(gori가 전송 거부), `errored`. `--unsafe-methods` 없이는 안전한 메서드(`GET`/`HEAD`/`OPTIONS`)만 검사합니다.
 
 ### run session {#run-session}
 
