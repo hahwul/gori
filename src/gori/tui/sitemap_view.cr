@@ -96,6 +96,9 @@ module Gori::Tui
       # QL filter bar (mirrors HistoryView): the Scope lens + a `/` query are AND-ed
       # into the one filter that builds the tree.
       @scope = nil.as(Scope?)
+      # The hide-static lens (#1239), shared with History: one project key, set by the Runner's
+      # toggle and read by SitemapController on open.
+      @hide_static = false
       @query = ""
       @querying = false
       @qcx = 0                      # caret position within @query
@@ -138,6 +141,14 @@ module Gori::Tui
     # (the scope chip). Mirrors HistoryController wiring the same Scope into its view.
     def set_scope(scope : Scope) : Nil
       @scope = scope
+    end
+
+    def set_hide_static(hide : Bool) : Nil
+      @hide_static = hide
+    end
+
+    def hide_static? : Bool
+      @hide_static
     end
 
     # Rebuild the tree from the store. Selection, scroll, and manual expand/collapse
@@ -204,13 +215,15 @@ module Gori::Tui
       ReloadPlan.new(positives, negatives, combined)
     end
 
-    # The flow filter a query's QL half compiles to — the scope lens AND the residual — or nil
+    # The flow filter a query's QL half compiles to — the scope lens, the hide-static lens AND the
+    # residual — or nil
     # when a non-blank residual compiled to nothing. ONE home for both readers of it: the tree
     # (`prepare_reload`) and the Params sub-tab (`params_filter`), which must scan the flow set
     # this tree is built from.
     private def flow_filter_of(residual : String, residual_filter : QL::Filter) : QL::Filter?
       return nil if residual_has_terms?(residual) && QL.reject_empty?(residual, residual_filter)
-      QL.and(@scope.try(&.filter) || QL::EMPTY, residual_filter)
+      combined = QL.and(@scope.try(&.filter) || QL::EMPTY, residual_filter)
+      @hide_static ? QL.and(combined, QL.hide_static) : combined
     end
 
     # Reads only — safe off the main fiber. `control` lets the caller cancel a superseded read.
@@ -353,8 +366,12 @@ module Gori::Tui
       end
       # Same note History carries, for the same reason: an empty tree cannot say WHY it is empty.
       return "no scope rules — nothing is in scope" if QL.uses_scope?(residual) && !lens.try(&.configured?)
+      return STATIC_HIDDEN_NOTE if @hide_static
       nil
     end
+
+    # History's note, pointing at the one door this tab has: the space menu (no `v` picker here).
+    STATIC_HIDDEN_NOTE = "static assets hidden — ␣V shows them"
 
     # Split `tag:` terms out of the query. Cut with the SHARED lexer, not `String#split`:
     # hand-tokenising saw no quotes (`tag:"my tag"` became `tag:"my` + `tag"`) and no
@@ -532,9 +549,10 @@ module Gori::Tui
       @query
     end
 
-    # True when the tree is a filtered subset (a `/` query or the Scope lens is on).
+    # True when the tree is a filtered subset (a `/` query, the Scope lens or the hide-static
+    # lens is on).
     def filtering? : Bool
-      !@query.blank? || (@scope.try(&.active?) == true)
+      !@query.blank? || (@scope.try(&.active?) == true) || @hide_static
     end
 
     def start_query : Nil
@@ -1089,6 +1107,8 @@ module Gori::Tui
             # An INVALID QL residual (all terms bad, or a broken regex) reads as "no
             # endpoints match" unless we say why — @query_note distinguishes it.
             {@query_note || "no endpoints match", querying? ? "esc clears the filter" : "/ to edit the filter"}
+          elsif @hide_static && @scope.try(&.active?) != true
+            {"only static assets so far — they are hidden", "␣V shows static assets"}
           elsif filtering? # in-scope subset is empty (Scope lens, no QL query)
             {"no endpoints in scope", nil}
           else
@@ -1397,11 +1417,12 @@ module Gori::Tui
       scope_on = @scope.try(&.active?) == true
       chips << (scope_on ? {:scope, "s scope:#{@scope.try(&.size) || 0}", Theme.accent} : {:scope, "s scope:off", Theme.muted})
       chips << {:fold, "g:fold", @grouping ? Theme.accent : Theme.muted}
+      chips << {:static, "static:hidden", Theme.accent} if @hide_static # see HistoryView's
       chips << {:mark, mark_chip_text.not_nil!, Theme.accent} if mark_chip_text
       chips
     end
 
-    # Which filter-bar chip is under (mx, my) — :count | :scope | :fold | :mark, or nil for a
+    # Which filter-bar chip is under (mx, my) — :count | :scope | :fold | :static | :mark, or nil for a
     # miss. Same geometry as the paint, off the same tagged list; nil while the bar is being
     # EDITED, where those cells hold the query text instead (see HistoryView#ql_chip_at).
     def ql_chip_at(rect : Rect, mx : Int32, my : Int32) : Symbol?

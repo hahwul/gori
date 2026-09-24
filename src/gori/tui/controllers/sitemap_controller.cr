@@ -13,6 +13,7 @@ module Gori::Tui
       super(host)
       @sitemap = SitemapView.new
       @sitemap.set_scope(@host.session.scope) # honour the lens + show its chip on the bar
+      @sitemap.set_hide_static(StaticAsset.hidden?(@host.session.store))
       @query_reload_at = nil.as(Time::Instant?)
       # The `/` bar's reload off the main fiber (the History #967 shape): one running read
       # and one replaceable request. A superseded read is cancelled and its answer dropped
@@ -153,8 +154,9 @@ module Gori::Tui
       return false if @sitemap.tagging?
       if chip = @sitemap.ql_chip_at(content, mx, my)
         case chip
-        when :scope then @host.toggle_scope_lens
-        when :fold  then sitemap_toggle_grouping
+        when :scope  then @host.toggle_scope_lens
+        when :fold   then sitemap_toggle_grouping
+        when :static then @host.toggle_static_assets
         end
         return true
       end

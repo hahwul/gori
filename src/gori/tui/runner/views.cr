@@ -14,6 +14,14 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # The `+ Save current filter as a view…` row's index. Negative so it can never collide with a
   # position in the merged list.
   VIEW_ROW_SAVE = -1
+  # The hide-static toggle row (#1239). Negative for the same reason, and FIRST on the card.
+  VIEW_ROW_STATIC = -2
+
+  # Every row index that is not a view: the toggle and the save row. `view_at` answers nil for
+  # both, and ^X/^E refuse both by name.
+  private def view_row_action?(i : Int32) : Bool
+    i < 0
+  end
 
   # `v` — the picker. A `LibraryPicker` for the same reason the session-slot picker is one: it
   # is exactly that shape, a filterable name + detail list whose actions the open-site injects.
@@ -31,21 +39,49 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     # always IS a current answer, so parking the cursor on row 0 made ↑/↓ step from somewhere the
     # operator is not, and made `●` something they had to go find. `views` and the rows are built
     # in the same order, so the array index IS the visual position on a card with no filter typed
-    # yet.
-    lp.set_selected(views.index { |v| active_view_matches?(v, active) } || 0)
+    # yet — plus one for the hide-static row above them.
+    lp.set_selected((views.index { |v| active_view_matches?(v, active) } || 0) + 1)
+    install_view_hooks(lp, views, bar)
+    open_overlay(lp)
+  end
+
+  # ↵/^X/^E against `views`, the array the card's rows were built from. One installer for the
+  # open-site and for `delete_view`, which rebuilds the rows and must re-point all three.
+  private def install_view_hooks(lp : LibraryPicker, views : Array(SavedViews::View), bar : String) : Nil
     lp.on_commit = -> {
       # Index against the SAME array the rows were built from, and re-resolve by KEY rather than
       # trusting the position: the two stores can be edited from the CLI, from MCP or by a peer
       # between this card opening and ↵, and activating "whatever is fourth now" would filter by
       # a view the operator never saw.
       if i = lp.selected_index
-        i == VIEW_ROW_SAVE ? open_view_save(bar) : activate_view(view_at(views, i))
+        case i
+        when VIEW_ROW_STATIC then toggle_static_assets
+        when VIEW_ROW_SAVE   then open_view_save(bar)
+        else                      activate_view(view_at(views, i))
+        end
       end
       true
     }
     lp.on_delete = ->(i : Int32) { delete_view(lp, i, views) }
-    lp.on_edit = ->(i : Int32) { edit_view_query(view_at(views, i)) }
-    open_overlay(lp)
+    lp.on_edit = ->(i : Int32) { edit_view_query(i, view_at(views, i)) }
+  end
+
+  # The hide-static lens (#1239) — the picker's top row, a `static:hidden` chip, and `␣V` on
+  # History and the Sitemap all land here. The shape of `scope_toggle_lens`, with the refusal
+  # rule of `activate_view`: a write the store refused changes nothing on screen either, since
+  # a lens the next restart forgets is a lens the operator cannot trust.
+  def toggle_static_assets : Nil
+    store = @session.store
+    hide = !history_controller.view.hide_static?
+    unless StaticAsset.set_hidden(store, hide)
+      @toast = "static assets NOT #{hide ? "hidden" : "shown"} — the project store is busy or unwritable"
+      return
+    end
+    history_controller.view.set_hide_static(hide)
+    sitemap_controller.view.set_hide_static(hide)
+    history_controller.view.reload(store)
+    sitemap_controller.reload if @active_tab == :target && target_controller.sitemap_active?
+    @toast = hide ? "static assets hidden (images, fonts, media) — v shows them" : "static assets shown"
   end
 
   # One row per view, plus the save row when there is a filter to save. The `●` marker and the
@@ -53,7 +89,15 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # and which store it would be edited in.
   private def view_rows(views : Array(SavedViews::View), active : SavedViews::View?,
                         bar : String) : Array(LibraryPicker::Row)
-    rows = views.map_with_index do |v, i|
+    # FIRST, above the views: it is not one of them. A view is exclusive — picking one drops
+    # the last — while this row stacks over whichever view is on, so it reads as a switch on the
+    # card rather than as a sixth choice between the others. The detail names the rule, because
+    # "static" is a judgement the operator should see before trusting it with their list.
+    hidden = history_controller.view.hide_static?
+    rows = [LibraryPicker::Row.new(VIEW_ROW_STATIC,
+      hidden ? "◐ Static assets: hidden — ↵ show" : "◐ Static assets: shown — ↵ hide",
+      "-static:true · images, fonts, media; svg/css/js and errors stay")]
+    rows.concat(views.map_with_index do |v, i|
       detail = v.narrowing? ? v.query : "everything — no source term"
       # The scope badge only where there IS a store to name. A builtin's `·` beside the
       # separators rendered as `· · ·`, which reads as a formatting bug rather than as "this one
@@ -61,7 +105,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       detail = "#{v.badge} · #{detail}" unless v.builtin?
       detail = "● active · #{detail}" if active_view_matches?(v, active)
       LibraryPicker::Row.new(i, v.name, detail)
-    end
+    end)
     # Only when the bar HAS something to save. An entry that opens a name prompt for an empty
     # query would only ever end in a refusal, and it is the operator's own filter — not a menu
     # item — that makes the action available.
@@ -71,14 +115,15 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     rows
   end
 
-  # The view a picker row index names, or nil for the `+ Save current filter…` row.
+  # The view a picker row index names, or nil for the `+ Save current filter…` and hide-static
+  # rows.
   #
   # NOT a bare `views[i]?`: that row carries index `VIEW_ROW_SAVE` (-1), and Crystal's
   # `Array#[]?` WRAPS a negative index rather than answering nil — so `^E` on the save row would
   # have edited the LAST view in the list, overwriting the filter the operator had just typed
   # with an unrelated query. One helper, so no call site can forget the guard again.
   private def view_at(views : Array(SavedViews::View), i : Int32) : SavedViews::View?
-    i < 0 ? nil : views[i]?
+    view_row_action?(i) ? nil : views[i]?
   end
 
   # `active` is nil for All, and All is a row like any other — so "nothing is narrowing" has to
@@ -109,12 +154,12 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # place a view's query is REPLACED into the bar, and it is explicit on purpose: picking a view
   # (↵) is a mode that leaves what the operator typed alone, which is the whole point of #776.
   # Re-saving under the same name updates the view.
-  private def edit_view_query(view : SavedViews::View?) : Nil
-    # nil is the `+ Save current filter…` row (see `view_at`). SAY so, rather than letting the
-    # card come down on a keystroke that did nothing — ^X on the same row already answers, and
-    # a silent dismissal is indistinguishable from ^E having worked.
+  private def edit_view_query(i : Int32, view : SavedViews::View?) : Nil
+    # nil is the `+ Save current filter…` or the hide-static row (see `view_at`). SAY so, rather
+    # than letting the card come down on a keystroke that did nothing — ^X on the same row
+    # already answers, and a silent dismissal is indistinguishable from ^E having worked.
     unless view
-      @toast = "pick a view to edit — ↵ on this row saves the filter instead"
+      @toast = i == VIEW_ROW_STATIC ? "pick a view to edit — ↵ on this row toggles static assets" : "pick a view to edit — ↵ on this row saves the filter instead"
       return
     end
     unless view.narrowing?
@@ -135,7 +180,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # are refused by name rather than hidden: an operator who tries is asking a reasonable question
   # and deserves the answer.
   private def delete_view(lp : LibraryPicker, i : Int32, views : Array(SavedViews::View)) : Nil
-    return @toast = "pick a view to delete" if i == VIEW_ROW_SAVE
+    return @toast = "pick a view to delete" if view_row_action?(i)
     return unless view = views[i]?
     if view.builtin?
       @toast = "#{view.name} is a built-in view — it can't be deleted"
@@ -154,18 +199,12 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       history_controller.view.reload(store)
     end
     fresh = SavedViews.merged(store)
-    lp.set_rows(view_rows(fresh, history_controller.view.active_view, history_controller.view.query))
+    bar = history_controller.view.query
+    lp.set_rows(view_rows(fresh, history_controller.view.active_view, bar))
     @toast = "deleted view #{view.name}"
-    # The card stays up and its rows were just replaced, so the closure the open-site installed
-    # is now indexing a stale array. Reinstall both hooks against the fresh one.
-    lp.on_commit = -> {
-      if j = lp.selected_index
-        j == VIEW_ROW_SAVE ? open_view_save(history_controller.view.query) : activate_view(view_at(fresh, j))
-      end
-      true
-    }
-    lp.on_delete = ->(j : Int32) { delete_view(lp, j, fresh) }
-    lp.on_edit = ->(j : Int32) { edit_view_query(view_at(fresh, j)) }
+    # The card stays up and its rows were just replaced, so the closures the open-site installed
+    # are now indexing a stale array. Reinstall them against the fresh one.
+    install_view_hooks(lp, fresh, bar)
   end
 
   # `+ Save current filter…` — step one: the name. Seeded with the active view's name when one

@@ -118,6 +118,12 @@ module Gori::Tui
     def open_history_view_picker : Nil
     end
 
+    # Flip the hide-static lens (#1239) from a `static:hidden` chip. Same seam, and same reason,
+    # as the view picker above: the Runner's own `toggle_static_assets` (runner/views.cr)
+    # overrides it.
+    def toggle_static_assets : Nil
+    end
+
     # The History column editor (#819). Same seam, and same reason, as the view picker above:
     # the Runner's own `open_history_columns` (runner/columns.cr) overrides it.
     def open_history_columns : Nil

@@ -101,6 +101,29 @@ describe Gori::Tui::SitemapView do
     end
   end
 
+  it "folds static assets out of the tree, and out of the Params flow set, while the lens is on" do
+    with_store do |store|
+      capture(store, "api.acme.test", "GET", "/v1/users")
+      capture(store, "cdn.acme.test", "GET", "/img/logo.png") # pending: judged by extension
+
+      view = SitemapView.new
+      view.set_hide_static(true)
+      view.reload(store)
+      b = MemoryBackend.new(70, 20)
+      view.render(Screen.new(b), Rect.new(0, 0, 70, 20))
+      b.contains?("api.acme.test").should be_true
+      b.contains?("cdn.acme.test").should be_false
+      b.contains?("static:hidden").should be_true
+      view.params_filter.not_nil!.sql.should contain(Gori::QL.hide_static.sql)
+
+      view.set_hide_static(false)
+      view.reload(store)
+      b2 = MemoryBackend.new(70, 20)
+      view.render(Screen.new(b2), Rect.new(0, 0, 70, 20))
+      b2.contains?("cdn.acme.test").should be_true
+    end
+  end
+
   # The same silence History carries, one tab over: an unknown `field:` free-texts the whole
   # token and matches nothing, which on an empty tree reads as "nothing was mapped".
   it "names a misspelled filter field in the empty-state" do

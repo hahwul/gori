@@ -224,6 +224,31 @@ describe Gori::Tui::HistoryView do
     view.query_suggestions.should eq(["stub:true", "stub:false"])
   end
 
+  describe "the hide-static lens" do
+    it "counts as filtering, so live capture cannot push a hidden row onto the list" do
+      view = HistoryView.new
+      view.filtering?.should be_false
+      view.set_hide_static(true)
+      view.filtering?.should be_true
+    end
+
+    it "changes the search identity, so a toggle reloads" do
+      view = HistoryView.new
+      before = view.search_identity
+      view.set_hide_static(true)
+      view.search_identity.should_not eq(before)
+    end
+
+    it "ANDs QL.hide_static over the bar, and only while on" do
+      with_store do |store|
+        view = HistoryView.new
+        view.prepare_search(store).not_nil!.filter.sql.should_not contain("gori_static_asset")
+        view.set_hide_static(true)
+        view.prepare_search(store).not_nil!.filter.sql.should contain(Gori::QL.hide_static.sql)
+      end
+    end
+  end
+
   it "completes the two values static: takes" do
     view = HistoryView.new
     view.start_query

@@ -123,6 +123,12 @@ module Gori
         "sitemap.scope-toggle", "Toggle scope lens", "Filter the tree to in-scope endpoints on/off",
         Verb::Scope::Sitemap, [] of Verb::Chord, mnemonic: 's', group: :scope) { |ctx| ctx.scope_toggle_lens; nil } # the Global `s` is the key
 
+      # The hide-static lens (#1239), shared with History. Menu-only for the reason History's
+      # twin gives; this tab has no `v` picker, so the menu is its door (and the chip, while on).
+      r.register Verb::Definition.new(
+        "sitemap.toggle-static", "Toggle static assets", "Hide images, fonts and media from the tree on/off (shared with History)",
+        Verb::Scope::Sitemap, [] of Verb::Chord, mnemonic: 'V', group: :view) { |ctx| ctx.toggle_static_assets; nil }
+
       # `a` — add the cursor row to the project scope, pre-filling the SAME popup the Project
       # tab's `a` opens (hence the same chord): a host row seeds a `host` rule, a path row a
       # "host/path" `string` rule. The tree is where you SEE what is worth scoping, so the

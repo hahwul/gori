@@ -219,6 +219,20 @@ describe Gori::Tui::LibraryPicker do
     edited.should eq([-1])
   end
 
+  # The hide-static toggle (#1239) is the view picker's FIRST row, under its own sentinel. There
+  # is no Runner in any spec (it owns a terminal), so the open-site is pinned by reading it —
+  # comments stripped, so a rule's own prose cannot satisfy the check.
+  it "puts the hide-static toggle first on the view picker and routes ↵ on it to the toggle" do
+    code = File.read(File.join(__DIR__, "..", "..", "src", "gori", "tui", "runner", "views.cr"))
+      .lines.reject(&.lstrip.starts_with?('#')).join('\n')
+    Runner::VIEW_ROW_STATIC.should be < 0
+    Runner::VIEW_ROW_STATIC.should_not eq(Runner::VIEW_ROW_SAVE)
+    code.should contain("rows = [LibraryPicker::Row.new(VIEW_ROW_STATIC,")
+    code.should contain("when VIEW_ROW_STATIC then toggle_static_assets")
+    # The rows shift down by one, so the cursor's starting position must too.
+    code.should contain("|| 0) + 1)")
+  end
+
   it "does not type ^E into the filter query" do
     lp = LibraryPicker.new("LOAD CHAIN", private_rows, "chain")
     lp.on_edit = ->(_i : Int32) { nil }

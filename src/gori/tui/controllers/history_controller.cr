@@ -21,6 +21,7 @@ module Gori::Tui
       super(host)
       @history = history
       @history.set_scope(@host.session.scope)
+      @history.set_hide_static(StaticAsset.hidden?(@host.session.store))
       @history.set_colormarker(@host.session.colormarker)
       reload_columns
       @query_reload_at = nil.as(Time::Instant?)
@@ -244,6 +245,7 @@ module Gori::Tui
         when :scope  then @host.toggle_scope_lens
         when :follow then toggle_follow
         when :view   then @host.open_history_view_picker
+        when :static then @host.toggle_static_assets
         end
         return true
       end
