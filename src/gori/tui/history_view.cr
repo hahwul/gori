@@ -3866,6 +3866,7 @@ module Gori::Tui
                when "scope"  then QL::SCOPE_VALUES
                when "src"    then QL::SOURCE_VALUES
                when "stub"   then QL::STUB_VALUES
+               when "static" then QL::STATIC_VALUES
                when "dur"    then [">500", ">1s", ">=200", "<100"]
                else               return [] of String
                end

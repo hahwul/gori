@@ -8,6 +8,8 @@ SIZES = (ENV["BENCH_SIZES"]? || "10000,100000,500000").split(',').map(&.to_i)
 BODY  = (ENV["BENCH_BODY"]? || "1024").to_i
 REPS  = (ENV["BENCH_REPS"]? || "3").to_i
 
+# 40% of the rows are static assets for `static:` (#1239): 30% by Content-Type, 10% with none,
+# judged by a `.png` target — the two paths `gori_static_asset` takes.
 def seed_history(path : String, count : Int32) : Nil
   # No Store/writer exists during fixture construction. Once opened below, all
   # measured capture writes go through the real writer fiber.
@@ -18,10 +20,13 @@ def seed_history(path : String, count : Int32) : Nil
       INSERT INTO flows(id, created_at, scheme, host, port, method, target, http_version,
         request_head, response_head, response_body, status, content_type, request_size,
         response_size, state, source)
-      SELECT x, x, 'https', 'host' || (x % 100) || '.test', 443, 'GET', '/api/' || x, 'HTTP/1.1',
+      SELECT x, x, 'https', 'host' || (x % 100) || '.test', 443, 'GET',
+        CASE WHEN x % 10 = 3 THEN '/img/' || x || '.png' ELSE '/api/' || x END, 'HTTP/1.1',
         CAST('GET / HTTP/1.1' AS BLOB), CAST('HTTP/1.1 200 OK' AS BLOB),
         CAST(replace(hex(zeroblob(?)), '00', 'ab') || ' commonneedle ' || x AS BLOB),
-        CASE WHEN x % 997 = 0 THEN 500 ELSE 200 END, 'text/plain', 16, ?, 1, 'proxy'
+        CASE WHEN x % 997 = 0 THEN 500 ELSE 200 END,
+        CASE WHEN x % 10 < 3 THEN 'image/png' WHEN x % 10 = 3 THEN NULL ELSE 'text/plain' END,
+        16, ?, 1, 'proxy'
       FROM n
       SQL
     db.exec "INSERT INTO flows_fts(rowid, req, resp) SELECT id, '', CAST(response_body AS TEXT) FROM flows"
@@ -91,7 +96,8 @@ end
 queries = ["host:host1", "host:missing", "path:/missing", "status:500", "status:999",
            "missing", "body:z", "body:zz", "body:commonneedle", "body:absentneedle",
            "header:missing", "body~absentneedle", "body~commonneedle header~absentheader",
-           "scope:in src:proxy path:/missing"]
+           "scope:in src:proxy path:/missing",
+           "static:true", "-static:true", "-static:true path:/missing", "-static:true host:host1"]
 lens = Gori::QL::ScopeLens.new(Gori::QL::Filter.new("host LIKE ?", ["host1%"] of DB::Any))
 SIZES.each do |size|
   path = File.tempname("gori-history-bench", ".db")

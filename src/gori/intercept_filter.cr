@@ -220,6 +220,8 @@ module Gori
         "an exchange that has not finished has no size or duration yet"
       when "stub"
         "whether a body was stored is a CAPTURE decision, made after this gate"
+      when "static"
+        "a static asset is judged from the finished response's Content-Type and status"
       when "src"
         "a flow's source is recorded when it is captured, not while it is in flight"
       when .includes?('.')
@@ -355,7 +357,9 @@ module Gori
       when "scope"  then QL::SCOPE_VALUES
       when "src"    then QL::SOURCE_VALUES
       when "proto"  then rows ? QL::PROTO_VALUES : PROTO_VAL
-      when "stub"   then rows ? QL::STUB_VALUES : nil
+        # One arm for the two boolean predicates (ameba's ceiling): `STATIC_VALUES` is the same
+        # true/false pair, and a spec pins the two equal.
+      when "stub", "static" then rows ? QL::STUB_VALUES : nil
       end
     end
 

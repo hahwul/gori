@@ -224,6 +224,13 @@ describe Gori::Tui::HistoryView do
     view.query_suggestions.should eq(["stub:true", "stub:false"])
   end
 
+  it "completes the two values static: takes" do
+    view = HistoryView.new
+    view.start_query
+    "static:".each_char { |c| view.query_insert(c) }
+    view.query_suggestions.should eq(["static:true", "static:false"])
+  end
+
   # `proto:` splits the transport off the application protocol, so `proto:wss` means the TLS
   # socket specifically — a distinction the guide teaches and that this pool could not be used
   # to find. The plain form stays first: it is the broader answer.

@@ -377,7 +377,7 @@ describe Gori::InterceptFilter do
   # from `QL::FIELDS - FIELDS` is what keeps the two from disagreeing again.
   describe "every QL field a live message cannot answer" do
     it "is refused by name rather than degraded to free text" do
-      %w[size reqsize respsize dur stub src scope req.header resp.header req.body resp.body].each do |f|
+      %w[size reqsize respsize dur stub static src scope req.header resp.header req.body resp.body].each do |f|
         Gori::InterceptFilter::UNSUPPORTED_FIELDS.should contain(f)
       end
       # An alias resolves before the check, so `res.body:` cannot free-text past it.
@@ -404,6 +404,8 @@ describe Gori::InterceptFilter do
         .not_nil!.should contain("has no size or duration yet")
       Gori::InterceptFilter.unsupported_field_reason("stub:yes")
         .not_nil!.should contain("CAPTURE decision")
+      Gori::InterceptFilter.unsupported_field_reason("static:true")
+        .not_nil!.should contain("finished response")
       Gori::InterceptFilter.unsupported_field_reason("src:proxy")
         .not_nil!.should contain("recorded when it is captured")
       Gori::InterceptFilter.unsupported_field_reason("resp.body:x")

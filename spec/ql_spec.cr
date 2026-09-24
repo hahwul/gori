@@ -12,6 +12,14 @@ private def capture(store, host, method, target, status = nil)
   id
 end
 
+private def capture_typed(store, target, status, content_type)
+  id = capture(store, "t.test", "GET", target)
+  store.update_response(Gori::Store::CapturedResponse.new(
+    flow_id: id, status: status, content_type: content_type,
+    head: "HTTP/1.1 #{status} X\r\nContent-Type: #{content_type}\r\n\r\n".to_slice))
+  id
+end
+
 # One flow on a non-default port, in each of the two wire shapes gori captures. The plaintext
 # forward-proxy request arrives ABSOLUTE-form (its target carries the authority); the
 # CONNECT-tunnelled one arrives ORIGIN-form. Both are the same origin on the same port.
@@ -1244,6 +1252,37 @@ describe "Gori::Store#search (QL)" do
         File.delete?(path)
         File.delete?("#{path}-wal")
         File.delete?("#{path}-shm")
+      end
+    end
+
+    it "compiles static: to the gori_static_asset function, with stub:'s spellings" do
+      Gori::QL.parse("static:true").sql.should eq("(gori_static_asset(content_type, target, status) = 1)")
+      Gori::QL.parse("static:off").sql.should eq("(gori_static_asset(content_type, target, status) = 0)")
+      Gori::QL.analyze("static:maybe").ignored.should_not be_empty
+      Gori::QL.parse("static:maybe host:a").sql.should eq("((host) LIKE ? ESCAPE '\\')")
+      # `~` on a predicate is dropped, not free-texted.
+      Gori::QL.analyze("static~true").ignored.should_not be_empty
+      # The colour-rule overlay completes static: through stub:'s pool (InterceptFilter.value_pool).
+      Gori::QL::STATIC_VALUES.should eq(Gori::QL::STUB_VALUES)
+    end
+
+    it "splits captured flows into static assets and the rest, NULL-free in both directions" do
+      with_store do |store|
+        png = capture_typed(store, "/logo.png", 200, "image/png")
+        font = capture_typed(store, "/f.woff2", 200, "font/woff2")
+        cached = capture(store, "t.test", "GET", "/hero.jpg?v=2", 304) # no Content-Type
+        missing = capture_typed(store, "/gone.png", 404, "image/png")
+        svg = capture_typed(store, "/icon.svg", 200, "image/svg+xml")
+        api = capture_typed(store, "/api/me", 200, "application/json; charset=utf-8")
+        pending = capture(store, "t.test", "GET", "/api/slow")
+
+        store.search(Gori::QL.parse("static:true"), 50).map(&.id).sort!.should eq([png, font, cached].sort!)
+        rest = [missing, svg, api, pending].sort!
+        store.search(Gori::QL.parse("static:false"), 50).map(&.id).sort!.should eq(rest)
+        store.search(Gori::QL.parse("-static:true"), 50).map(&.id).sort!.should eq(rest)
+        store.search(Gori::QL.hide_static, 50).map(&.id).sort!.should eq(rest)
+        store.search(Gori::QL.and(Gori::QL.parse("path:/api"), Gori::QL.hide_static), 50)
+          .map(&.id).sort!.should eq([api, pending].sort!)
       end
     end
 
