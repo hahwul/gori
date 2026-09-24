@@ -90,7 +90,10 @@ module Gori
       # is always an array so a script gets valid JSON either way.
       private def self.emit_sitemap_params(report : ParamInventory::Report, format : Symbol,
                                            include_sensitive : Bool, *, headers : Bool) : Nil
-        if report.truncated
+        if report.rows_capped
+          STDERR.puts "gori run sitemap params: stopped at #{report.rows.size} parameter rows (the row cap) " \
+                      "after #{report.flows_scanned} flows — narrow the query, --host or --path"
+        elsif report.truncated
           STDERR.puts "gori run sitemap params: read the newest #{report.flows_scanned} flows " \
                       "(--max-flows); older flows are not in this inventory — raise it or narrow the query"
         end

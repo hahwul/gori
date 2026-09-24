@@ -136,7 +136,7 @@ module Gori::Tui
     # --- verbs ---------------------------------------------------------------
 
     # Narrow to one Sitemap row (host, or subtree). A rescan, not a re-filter: the engine
-    # reads the host's flows only, which is what makes a narrowed scan cheap on a big project.
+    # reads the host and subtree's flows only, which is what makes a narrowed scan cheap on a big project.
     def set_target(t : ParamsView::Target?) : Nil
       @params.target = t
       run
@@ -159,6 +159,7 @@ module Gori::Tui
       end
       @scanned_under = {filter.sql, filter.args}
       opts = ParamInventory::Options.new(filter: filter, host: @params.target.try(&.host),
+        path_prefix: @params.target.try(&.prefix),
         all_headers: @params.all_headers?, max_flows: MAX_FLOWS)
       store = @host.session.store
       results = @results

@@ -313,6 +313,22 @@ describe "MCP mine_status{skipped}" do
       call_json(tools, "mine_stop", %({"job_id":#{start["job_id"].as_s.to_json}}))
     end
   end
+
+  it "mine_start accepts comma-separated names as multiple candidates" do
+    port = HTML_ORIGIN_PORT
+    with_store do |store|
+      tools = tools_for(store)
+      start = call_json(tools, "mine_start",
+        {"template" => "GET /m HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\n\r\n",
+         "url" => "http://127.0.0.1:#{port}", "locations" => "query",
+         "names" => "tenant, org, role", "max_requests" => 1,
+         "concurrency" => 1, "allow_unscoped" => true}.to_json)
+      job_id = start["job_id"].as_s
+      st = call_json(tools, "mine_status", %({"job_id":#{job_id.to_json}}))
+      st["candidate_names"].as_i.should be >= 3
+      call_json(tools, "mine_stop", %({"job_id":#{job_id.to_json}}))
+    end
+  end
 end
 
 # ── sequence_start's runaway guard ────────────────────────────────────────────────────────

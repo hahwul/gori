@@ -143,4 +143,44 @@ describe Gori::Params do
       Gori::Params.json_leaf("tags[]").should be_nil
     end
   end
+
+  describe ".bracket_leaf" do
+    it "reduces bracket-nested names to their leaf name" do
+      Gori::Params.bracket_leaf("user[password]").should eq("password")
+      Gori::Params.bracket_leaf("user[password][]").should eq("password")
+      Gori::Params.bracket_leaf("a[b][c]").should eq("c")
+      Gori::Params.bracket_leaf("a[]").should eq("a")
+      Gori::Params.bracket_leaf("user[][]").should eq("user")
+      Gori::Params.bracket_leaf("password").should eq("password")
+      Gori::Params.bracket_leaf("user[account][password]").should eq("password")
+    end
+  end
+
+  it "skips gori internal h2 marker headers even when all_headers: true" do
+    head = "CONNECT /chat HTTP/2\r\nHost: h\r\n" \
+           "X-Gori-Protocol: websocket\r\n" \
+           "X-Gori-Pushed: stream 2\r\n" \
+           "X-Gori-Trailers: grpc-status\r\n" \
+           "X-Real-Header: v\r\n\r\n"
+    ps = params_of(head, all_headers: true)
+    ps.map(&.[1]).should eq(["host", "x-real-header"])
+  end
+
+  it "keeps valid cookie pairs when a Cookie line contains an invalid UTF-8 byte" do
+    head = IO::Memory.new
+    head << "GET / HTTP/1.1\r\nHost: h\r\nCookie: sid=abc; pref=caf"
+    head.write_byte(0xe9_u8)
+    head << "\r\nX-Api-Key: k\r\n\r\n"
+    out = [] of {L, String, String}
+    Gori::Params.each(head.to_slice, nil) { |p| out << {p.loc, p.name, p.value} }
+    out.should contain({L::Cookies, "sid", "abc"})
+    out.should contain({L::Headers, "x-api-key", "k"})
+    out.any? { |p| p[1] == "pref" }.should be_false
+  end
+
+  it "keeps pairs seen before JSON parser depth limit in deeply nested bodies" do
+    body = %({"user":"alice","blob":) + "[" * 600 + "]" * 600 + "}"
+    ps = params_of("POST /j HTTP/1.1\r\nHost: h\r\nContent-Type: application/json\r\n\r\n", body)
+    ps.should eq([{L::Json, "user", "alice"}])
+  end
 end

@@ -47,7 +47,12 @@ module Gori
           p.on("-k", "--insecure-upstream", "Do not verify upstream TLS certificates") { insecure = true }
           p.on("--locations=LIST", "Where to mine: query,form,multipart,json,headers,cookies (default: auto-detect)") { |v| locations = parse_mine_locations(v) }
           p.on("--wordlist=PATH", "Extra param-name wordlist (merged with the built-in list)") { |v| wordlist = v }
-          p.on("--name=NAME", "Test this name FIRST, ahead of the wordlists (repeatable; e.g. from `gori run sitemap params`)") { |v| seed_names << v }
+          p.on("--name=NAME", "Test this name FIRST, ahead of the wordlists (repeatable or comma-separated; e.g. from `gori run sitemap params`)") do |v|
+            v.split(',').each do |n|
+              s = n.strip
+              seed_names << s unless s.empty?
+            end
+          end
           p.on("--bucket=N", "Names stuffed per request before bisection (per location)") { |v| bucket = parse_count(v, "--bucket") }
           p.on("--concurrency=N", "Parallel requests (default 10)") { |v| concurrency = parse_count(v, "--concurrency") }
           p.on("--rate=RPS", "Cap requests/sec (0 = unlimited)") { |v| rate = parse_rate(v) }

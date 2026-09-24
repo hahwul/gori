@@ -257,4 +257,58 @@ describe Gori::ParamInventory do
       end
     end
   end
+
+  it "masks bracket-nested sensitive names" do
+    with_store do |store|
+      pi_flow(store, "/login", method: "POST", req_headers: "Content-Type: application/x-www-form-urlencoded\r\n",
+        body: "user%5Bemail%5D=a%40b.c&user%5Bpassword%5D=hunter2&password=hunter3")
+      rep = PI.build(store)
+      pwd = row(rep, "user[password]")
+      pwd.sensitive.should be_true
+      PI.masked(pwd, false).should eq(["[REDACTED]"])
+      email = row(rep, "user[email]")
+      email.sensitive.should be_false
+      PI.masked(email, false).should eq(["a@b.c"])
+    end
+  end
+
+  it "groups mixed-case hosts under lowercase host without splitting" do
+    with_store do |store|
+      pi_flow(store, "/a?x=1", host: "Shop.test")
+      pi_flow(store, "/a?x=2", host: "shop.test")
+      rep = PI.build(store)
+      rep.rows.size.should eq(1)
+      r = rep.rows.first
+      r.host.should eq("shop.test")
+      r.count.should eq(2)
+      r.samples.sort.should eq(["1", "2"])
+    end
+  end
+
+  it "matches the host filter case-insensitively against hosts stored as captured" do
+    with_store do |store|
+      pi_flow(store, "/a?x=1", host: "shop.test")
+      pi_flow(store, "/a?x=2", host: "Shop.Test")
+      pi_flow(store, "/a?x=3", host: "sub.shop.test")
+      rep = PI.build(store, PI::Options.new(host: "SHOP.test"))
+      rep.rows.size.should eq(1)
+      rep.rows.first.host.should eq("shop.test")
+      rep.rows.first.samples.sort.should eq(["1", "2"])
+    end
+  end
+
+  it "bounds accumulators by max_rows and flags truncated" do
+    with_store do |store|
+      10.times do |i|
+        m = (0...20).map { |k| %("#{i}-#{k}":{"qty":1}) }.join(",")
+        pi_flow(store, "/cart", method: "POST", req_headers: "Content-Type: application/json\r\n",
+          body: %({"items":{#{m}}}))
+      end
+      rep = PI.build(store, PI::Options.new(max_rows: 50))
+      rep.rows.size.should eq(50)
+      rep.truncated.should be_true
+      rep.rows_capped.should be_true
+      PI.build(store).rows_capped.should be_false
+    end
+  end
 end

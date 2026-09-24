@@ -26,18 +26,20 @@ module Gori
       note : String? = nil
 
     # The request's form fields, or nil when it carries none.
-    def from_flow(target : String, req_head : Bytes?, req_body : Bytes?) : Array(Field)?
+    def from_flow(target : String, req_head : Bytes?, req_body : Bytes?, max_body : Int32 = MAX_BODY) : Array(Field)?
       fields = [] of Field
       query_fields(target).each { |f| fields << f }
+      ct = MediaType.of(req_head)
+      is_form = MediaType.form_urlencoded?(ct)
+      is_multipart = ct && MediaType.multipart?(ct)
       # The ENTITY, not the wire body. A chunked form POST did not merely go missing here, it
       # came back WRONG: `dechunk` never ran, so the chunk-size line fused onto the first key
       # and `a=1&b=22` was listed as a field named `9\r\na`. This pane re-encodes nothing, so
       # the decode is unconditional.
-      if (b = Entity.bytes(req_head, req_body, MAX_BODY)) && !b.empty? && b.size <= MAX_BODY
-        ct = MediaType.of(req_head)
-        if MediaType.form_urlencoded?(ct)
+      if (is_form || is_multipart) && (b = Entity.bytes(req_head, req_body, max_body)) && !b.empty? && b.size <= max_body
+        if is_form
           urlencoded(String.new(b), :body).each { |f| fields << f }
-        elsif ct && MediaType.multipart?(ct)
+        elsif ct
           multipart(b, ct).each { |f| fields << f }
         end
       end
@@ -61,8 +63,8 @@ module Gori
       end
     end
 
-    NAME_RE     = /name=(?:"([^"]*)"|'([^']*)'|([^;\s]+))/i
-    FILENAME_RE = /filename=(?:"([^"]*)"|'([^']*)'|([^;\s]+))/i
+    NAME_RE     = /(?:^|[;\s])name=(?:"([^"]*)"|'([^']*)'|([^;\s]+))/i
+    FILENAME_RE = /(?:^|[;\s])filename=(?:"([^"]*)"|'([^']*)'|([^;\s]+))/i
 
     private def extract_param(cd : String, re : Regex) : String?
       if m = re.match(cd)
