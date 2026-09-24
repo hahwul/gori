@@ -156,4 +156,20 @@ describe "gori run shell — which gori" do
       Gori::ShellEnv::CAVEATS.each { |c| header.should contain(c) }
     end
   end
+
+  it "sanitizes the --print header so a hostile project name cannot break out of comments" do
+    with_capture_project do |_project, ca, root|
+      pwned = File.join(root, "PWNED")
+      hostile_target = Gori::CLI::Run::ShellTarget.new("127.0.0.1:8070", ca,
+        "demo\ntouch #{pwned}\n# extra on 127.0.0.1:8070", [] of String)
+      result = Gori::ShellEnv.build(hostile_target.authority, hostile_target.ca_cert_path,
+        env: {} of String => String, dir: File.join(root, "shell"), system_source: {nil, nil})
+      text = Gori::ShellEnv.render(result, Gori::ShellEnv::Syntax::Posix,
+        header: Gori::CLI::Run.shell_print_header(result, hostile_target))
+
+      # When evaluated by /bin/sh, no commands outside of comments must run
+      Process.run("/bin/sh", ["-c", "cd #{root} && eval \"$0\"", text])
+      File.exists?(pwned).should be_false
+    end
+  end
 end
