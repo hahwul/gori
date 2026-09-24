@@ -17,7 +17,10 @@ module Gori::Tui
     flow_id : Int64?,
     summary : String,
     applicable : Array(Miner::Location),
-    default : Array(Miner::Location)
+    default : Array(Miner::Location),
+    # Names tested FIRST (`Miner::Config#seed_names`) — the Params sub-tab's neighbour names
+    # (#1231). Not free text, so the no-text-field rule below still holds.
+    names : Array(String) = [] of String
 
   # The small config popup shown before a mine starts: adaptive location checkboxes,
   # concurrency + notification cyclers, and a Start row. No text field (so no IME
@@ -191,6 +194,7 @@ module Gori::Tui
       c.notify = NOTIFY_CHOICES[@notify_idx]
       c.max_requests = MAX_REQ_CHOICES[@maxreq_idx].try(&.to_i64)
       c.keep_alive = @keep_alive
+      c.seed_names = @seed.names
       # `user_wordlist` and `hook` (#846) are NOT set here, on purpose and for the same reason:
       # both are free-text (a filesystem path, an argv command line), and this overlay is
       # deliberately field-free — cyclers and checkboxes only, no text input and no IME
@@ -218,7 +222,8 @@ module Gori::Tui
     # the cycler's value means N × that many requests in flight, and a reader who takes the "10"
     # below as a batch-wide ceiling would be off by a factor of N.
     private def header_summary : String
-      return @seed.summary if @extra_seeds.empty?
+      seeded = @seed.names.empty? ? "" : " · +#{@seed.names.size} seeded name#{@seed.names.size == 1 ? "" : "s"}"
+      return "#{@seed.summary}#{seeded}" if @extra_seeds.empty?
       "#{target_count} flows · one session each · concurrency is per session"
     end
 

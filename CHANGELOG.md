@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Sitemap: a parameter inventory lists every captured input name per endpoint with its location, counts, sample values and whether a value is reflected, in the new Target → Params sub-tab, `gori run sitemap params` and MCP `list_params`. It exports Miner wordlists and seeds a mine with names seen on the host's other endpoints (`gori run mine --name`, `mine_start names`) (#1231)
 - TUI: `Ctrl-F` in the project picker searches every project's captured flows by host, path or body text, and `Enter` on a hit opens that project on the flow's detail; the search reads each database without migrating or writing to it (#1229)
 - gRPC reflection: a fetch stays live in this process when a busy project cannot save it, a cut-short reply names the requests it left unanswered, and an out-of-range `error_code` no longer aborts the fetch (#1234)
 - Protobuf: a varint overflowing 64 bits reads as malformed, and enum values read as int32, so a negative packed enum lists as -1 instead of 18446744073709551615 (#1234)

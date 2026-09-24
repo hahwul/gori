@@ -281,6 +281,11 @@ module Gori
       property max_requests : Int64?    # hard cap on total sends
       property? add_content_length_when_missing : Bool
       property user_wordlist : String?
+      # Names to test FIRST, ahead of the built-in list and the user file — the parameter
+      # inventory's neighbour names (#1231: seen on this host's other endpoints, absent from
+      # this one). First so a `max_requests`-capped run spends its budget on the likeliest
+      # guesses. Merged and de-duplicated by `Plan.build`, like the user file.
+      property seed_names = [] of String
       # The operator's per-request transform HOOK (#818/#846): an argv command that receives
       # the assembled request on stdin and returns the request to actually send on stdout. nil
       # = no hook, the default. This is the miner's answer to a signed API — an app that

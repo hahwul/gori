@@ -36,6 +36,7 @@ module Gori::Tui
       Verb::Scope::Intercept       => "INTERCEPT",
       Verb::Scope::Comparer        => "COMPARER",
       Verb::Scope::Diff            => "RETEST DIFF",
+      Verb::Scope::Params          => "PARAMS",
       Verb::Scope::ProjectDesc     => "PROJECT DESCRIPTION",
       Verb::Scope::Project         => "PROJECT SCOPE",
       Verb::Scope::Env             => "PROJECT ENV",

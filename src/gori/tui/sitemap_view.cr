@@ -11,6 +11,7 @@ require "../ql"
 require "../scope"
 require "../sitemap" # the host→path tree model + builder (URI normalisation lives there now)
 require "./viewport"
+require "./params_view"
 
 module Gori::Tui
   # The Sitemap tab: a host → path tree built from captured flows. The tree is literal —
@@ -186,12 +187,13 @@ module Gori::Tui
       lens = @scope.try(&.ql_lens)
       residual_filter = QL.parse(residual, scope: lens)
       @query_note = query_note_for(residual, residual_filter, lens)
+      combined = flow_filter_of(residual, residual_filter)
       # A non-blank QL residual that compiles to EMPTY means every QL term was invalid
       # (typo'd field, bad numeric, unterminated value). Mirror HistoryView / MCP / CLI:
       # reject it (empty tree + a note) rather than fall through to a match-all search
       # that shows the WHOLE sitemap behind an "active" filter. A tag-only query has a
       # blank residual, so reject_empty? is false and the tag filter still applies below.
-      if residual_has_terms?(residual) && QL.reject_empty?(residual, residual_filter)
+      unless combined
         @hosts = [] of Node
         @visible_cache = nil
         @selected = 0
@@ -199,7 +201,16 @@ module Gori::Tui
         @loaded = true
         return
       end
-      ReloadPlan.new(positives, negatives, QL.and(@scope.try(&.filter) || QL::EMPTY, residual_filter))
+      ReloadPlan.new(positives, negatives, combined)
+    end
+
+    # The flow filter a query's QL half compiles to — the scope lens AND the residual — or nil
+    # when a non-blank residual compiled to nothing. ONE home for both readers of it: the tree
+    # (`prepare_reload`) and the Params sub-tab (`params_filter`), which must scan the flow set
+    # this tree is built from.
+    private def flow_filter_of(residual : String, residual_filter : QL::Filter) : QL::Filter?
+      return nil if residual_has_terms?(residual) && QL.reject_empty?(residual, residual_filter)
+      QL.and(@scope.try(&.filter) || QL::EMPTY, residual_filter)
     end
 
     # Reads only — safe off the main fiber. `control` lets the caller cancel a superseded read.
@@ -765,6 +776,40 @@ module Gori::Tui
         return nil unless node = first_endpoint(node)
       end
       endpoint_of(node, host)
+    end
+
+    # The flow filter this tree is built from — the scope lens AND the `/` query's QL half —
+    # for the Params sub-tab, so the two sub-tabs answer about one flow set. `tag:` terms are
+    # Sitemap-local (they filter the built tree, not flows) and have no flow reading, so they
+    # are left out. nil when the residual is non-blank yet compiles to nothing: the tree is
+    # empty for that reason, and a param scan of EVERY flow behind it would be the match-all
+    # this view refuses in `prepare_reload`.
+    def params_filter : QL::Filter?
+      _, _, residual = split_tag_terms(@query)
+      flow_filter_of(residual, QL.parse(residual, scope: @scope.try(&.ql_lens)))
+    end
+
+    # What the cursor row means to the Params sub-tab: a host row is the whole host, any
+    # other row the ENDPOINT PATHS under it (query cut, as `ParamInventory` keys them). A set
+    # and not a prefix, because a `{uuid}` fold's descendants share a parent the fold itself
+    # does not name — and a prefix of "/users" would also take in /users-admin.
+    def selected_params_target : ParamsView::Target?
+      return nil unless row = visible_rows[@selected]?
+      return ParamsView::Target.new(row.host, nil, row.host) if row.depth == 0
+      node = row.node
+      paths = Set(String).new
+      collect_endpoint_paths(node, paths)
+      shown = if node.grouped && (parent = node.fold_parent)
+                "#{parent}/#{node.label}"
+              else
+                Sitemap.path_part(node.path)
+              end
+      ParamsView::Target.new(row.host, paths, "#{row.host}#{shown}")
+    end
+
+    private def collect_endpoint_paths(node : Node, acc : Set(String)) : Nil
+      acc << Sitemap.path_part(node.path) unless node.methods.empty? || node.path.empty?
+      node.children.each { |c| collect_endpoint_paths(c, acc) }
     end
 
     # The cursor row's scope-rule seed — what "add THIS to the scope" means at this depth:

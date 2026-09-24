@@ -1,6 +1,7 @@
 require "json"
 require "../../ql"
 require "../../sitemap"
+require "../../param_inventory"
 require "../serialize"
 
 module Gori
@@ -324,6 +325,103 @@ module Gori
         end)
       end
 
+      # The parameter inventory (#1231) — one call instead of paging list_history + get_flow
+      # to learn what inputs a target takes. Read-only and recomputed per call (P6); see
+      # `ParamInventory` for what "reflected" does and does not claim.
+      @[Tool("list_params")]
+      private def list_params(h) : Result
+        req_off = optional_int_arg(h, "offset")
+        req_lim = optional_int_arg(h, "limit")
+        offset = clamp_nonneg(req_off)
+        limit = clamp(req_lim, 200, 2000)
+        query = str(h, "query")
+        filter = ql_filter_or_error(h, query)
+        return filter if filter.is_a?(Result)
+        if fts_error = drain_fts_or_error(filter.uses_fts?)
+          return fts_error
+        end
+        locations = begin
+          params_locations(h)
+        rescue ex : Gori::Error
+          return err(ex.message || "invalid 'location'", "INVALID_ARGUMENT", field: "location")
+        end
+        # Per-flow scope, the lens list_history's `in_scope` applies; unconfigured = nothing is
+        # in scope, said in a note rather than as an unexplained empty list.
+        scope_unconfigured = false
+        if bool_arg(h, "in_scope", false)
+          scope = Scope.load(store)
+          if scope.configured?
+            filter = QL.and(scope.filter(force: true), filter)
+          else
+            scope_unconfigured = true
+          end
+        end
+        include_sensitive = bool_arg(h, "include_sensitive", false)
+        report = if scope_unconfigured
+                   ParamInventory::Report.new([] of ParamInventory::Row, 0, false)
+                 else
+                   opts = ParamInventory::Options.new(filter: filter, host: str(h, "host"),
+                     path_prefix: str(h, "path_prefix"), locations: locations,
+                     all_headers: bool_arg(h, "all_headers", false),
+                     max_flows: clamp(optional_int_arg(h, "max_flows"), 2000, 20_000),
+                     samples: clamp(optional_int_arg(h, "samples"), 5, 50))
+                   ParamInventory.build(store, opts)
+                 end
+        rows = report.rows
+        page = rows[offset, limit]? || [] of ParamInventory::Row
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field("params") { j.array { page.each { |r| param_row(j, r, include_sensitive) } } }
+            j.field "returned", page.size
+            j.field "offset", offset
+            j.field "limit", limit
+            emit_clamp(j, req_off, offset, req_lim, limit)
+            j.field "total", rows.size
+            j.field "has_more", offset + page.size < rows.size
+            j.field "flows_scanned", report.flows_scanned
+            # The flow cap, not the page: parameters on OLDER flows are absent from `total`.
+            j.field "truncated", report.truncated
+            j.field "sensitive_values_redacted", !include_sensitive
+            if scope_unconfigured
+              j.field "note", "in_scope:true but no scope rules are configured — nothing is in scope"
+            elsif report.truncated
+              j.field "note", "read the newest #{report.flows_scanned} flows (max_flows); older flows " \
+                              "are not in this inventory — raise max_flows or narrow the query"
+            end
+          end
+        end)
+      end
+
+      private def param_row(j : JSON::Builder, r : ParamInventory::Row, include_sensitive : Bool) : Nil
+        j.object do
+          j.field "host", Serialize.text(r.host)
+          j.field "method", Serialize.text(r.method)
+          j.field "path", Serialize.text(r.path)
+          j.field "location", r.location.label
+          j.field "name", Serialize.text(r.name)
+          j.field "count", r.count
+          j.field "samples", ParamInventory.masked(r, include_sensitive).map { |v| Serialize.text(v) }
+          j.field "samples_truncated", r.samples_truncated
+          j.field "sensitive", r.sensitive
+          j.field "first_flow_id", r.first_flow_id
+          j.field "last_flow_id", r.last_flow_id
+          j.field "reflected", r.reflected
+          j.field "reflected_flow_id", r.reflected_flow_id if r.reflected_flow_id
+        end
+      end
+
+      # `location` as an array, a JSON-encoded array, a bare name or a comma list — every entry
+      # a `Miner::Location` spelling. Absent/empty = all six. An unknown name raises (named),
+      # never silently widens back to all.
+      private def params_locations(h) : Array(Miner::Location)
+        names = str_list(h, "location").flat_map(&.split(',')).map(&.strip).reject(&.empty?)
+        return ParamInventory::ALL_LOCATIONS if names.empty?
+        names.map do |n|
+          Miner::Location.parse?(n) ||
+            raise Gori::Error.new("unknown location #{n.inspect} (query|form|multipart|json|headers|cookies)")
+        end.uniq!
+      end
+
       # The tools/list schemas for the sitemap tools, kept beside the handlers that
       # implement them. `Tools#list` composes every one of these; the action gate is applied
       # here rather than around one long block, so a new write tool cannot be added on the
@@ -356,6 +454,30 @@ module Gori
           s.field "collapse_transport", boolprop("collapse to distinct host/method/target only (legacy shape), dropping scheme/port/version + counts (default false)")
           s.field "strict", boolprop("reject the query if any term is unrecognized/invalid instead of silently dropping it (default false)")
           s.field "lenient", boolprop("search a `field:` QL does not implement as literal TEXT instead of refusing the query (default false). A typo like `methd:GET` free-texts its whole token and therefore matches nothing, which is indistinguishable from an empty project — so it is refused by default, the way `gori run history --lenient` spells the same escape hatch. `strict` is the other half and covers dropped terms, not unknown fields")
+        end
+
+        tool j, "list_params",
+          "Per-endpoint PARAMETER INVENTORY from captured requests: one row per (host, method, " \
+          "path, location, name), location = query|form|multipart|json|headers|cookies, with " \
+          "`count` (flows), sample values, first/last flow id and `reflected` (a 4+ byte value " \
+          "seen verbatim in the decoded response; a triage hint, not a finding). JSON names are " \
+          "paths (items[].id; [] is not JsonPath). Standard browser headers are omitted unless " \
+          "all_headers. Cookie, credential-header and credential-named values are [REDACTED] " \
+          "unless include_sensitive. Reads the newest max_flows flows (truncated:true = older " \
+          "ones unread). Names from a host's OTHER endpoints make good mine_start `names`." do |s|
+          s.field "query", strprop("gori QL filter over the flows read (see ql_reference)")
+          s.field "in_scope", boolprop("only flows in the project's configured scope (default false; empty with a note when no scope is configured)")
+          s.field "host", strprop("only this host (exact, case-insensitive)")
+          s.field "path_prefix", strprop("only endpoints whose path starts with this, e.g. /api/v1")
+          s.field "location", arr_or_str_prop("only these locations: query, form, multipart, json, headers, cookies (array or comma list; default all)")
+          s.field "all_headers", boolprop("include standard browser headers (User-Agent, Accept*, Sec-*, …) (default false)")
+          s.field "max_flows", intprop("newest matching flows to read (default 2000, max 20000)")
+          s.field "samples", intprop("distinct sample values kept per parameter (default 5, max 50)")
+          s.field "include_sensitive", boolprop("return cookie / credential / token sample values instead of [REDACTED] (default false)")
+          s.field "limit", intprop("max rows per page (default 200, max 2000)")
+          s.field "offset", intprop("skip this many rows (default 0)")
+          s.field "strict", boolprop("reject a query with an unrecognized/invalid term (default false)")
+          s.field "lenient", boolprop("free-text an unknown `field:` instead of refusing the query (default false)")
         end
 
         tool j, "list_sitemap_tags",

@@ -2,10 +2,11 @@ require "../tab_controller"
 require "./sitemap_controller"
 require "./discover_controller"
 require "./diff_controller"
+require "./params_controller"
 
 module Gori::Tui
-  # The Target parent tab: a fixed sub-tab multiplexer over the Sitemap, Discover and Diff
-  # views — "‹ Sitemap · Discover · Diff ›". It composes the child controllers (they are NOT
+  # The Target parent tab: a fixed sub-tab multiplexer over the Sitemap, Discover, Diff and
+  # Params views — "‹ Sitemap · Discover · Diff · Params ›". It composes the child controllers (they are NOT
   # registered in the Runner's @tabs) and forwards nearly every hook to the active child.
   # command_scope/command_section delegate to the child, so every existing Sitemap verb keeps
   # firing when the Sitemap sub-tab is active, Discover verbs when Discover is, and the retest
@@ -13,18 +14,20 @@ module Gori::Tui
   #
   # Diff belongs HERE and not beside the Comparer for the same reason Sitemap does: it is a
   # question about the endpoint map ("what is on this target that was not there last time"),
-  # and it keys its rows on the very tree the sub-tab next to it draws.
+  # and it keys its rows on the very tree the sub-tab next to it draws. Params (#1231) is the
+  # same kind of question — "what inputs does this map take?" — over the same flow set.
   class TargetController < TabController
-    SUBS = ["Sitemap", "Discover", "Diff"]
+    SUBS = ["Sitemap", "Discover", "Diff", "Params"]
 
     def initialize(host : Host)
       super(host)
       @sitemap = SitemapController.new(host)
       @discover = DiscoverController.new(host)
       @diff = DiffController.new(host)
+      @params = ParamsController.new(host, @sitemap.view)
       # Built ONCE: `active_child` is on the render path and every forwarded hook goes
       # through it, so materialising this list per call would allocate a few times per frame.
-      @children = [@sitemap, @discover, @diff] of TabController
+      @children = [@sitemap, @discover, @diff, @params] of TabController
       @active_sub = 0
     end
 
@@ -39,6 +42,10 @@ module Gori::Tui
 
     def diff : DiffController
       @diff
+    end
+
+    def params : ParamsController
+      @params
     end
 
     def sitemap_active? : Bool
@@ -113,7 +120,8 @@ module Gori::Tui
         case @active_sub
         when 0 then @sitemap.render_content(screen, content, focus)
         when 1 then @discover.render_content(screen, content, focus)
-        else        @diff.render_content(screen, content, focus)
+        when 2 then @diff.render_content(screen, content, focus)
+        else        @params.render_content(screen, content, focus)
         end
       end
     end
@@ -123,7 +131,8 @@ module Gori::Tui
       case @active_sub
       when 0 then @sitemap.handle_click_content(content, mx, my)
       when 1 then @discover.handle_click_content(content, mx, my)
-      else        @diff.handle_click_content(content, mx, my)
+      when 2 then @diff.handle_click_content(content, mx, my)
+      else        @params.handle_click_content(content, mx, my)
       end
     end
 
@@ -135,7 +144,8 @@ module Gori::Tui
       case @active_sub
       when 0 then @sitemap.handle_double_click_content(content, mx, my)
       when 1 then @discover.handle_double_click_content(content, mx, my)
-      else        @diff.handle_double_click_content(content, mx, my)
+      when 2 then @diff.handle_double_click_content(content, mx, my)
+      else        @params.handle_double_click_content(content, mx, my)
       end
     end
 
@@ -144,12 +154,13 @@ module Gori::Tui
       case @active_sub
       when 0 then @sitemap.copy_row
       when 1 then @discover.copy_row
-      else        @diff.copy_row
+      when 2 then @diff.copy_row
+      else        @params.copy_row
       end
     end
 
     # --- forwarded input / focus / lifecycle ---
-    # Target is a shell over Sitemap / Discover / Diff — each answers for its own panes.
+    # Target is a shell over Sitemap / Discover / Diff / Params — each answers for its own panes.
     def body_takes_text? : Bool
       active_child.body_takes_text?
     end
@@ -268,6 +279,18 @@ module Gori::Tui
 
     def diff_active? : Bool
       @active_sub == 2
+    end
+
+    def params_active? : Bool
+      @active_sub == 3
+    end
+
+    # The Sitemap's `p`: switch to Params narrowed to the row the operator was on.
+    # The rescan starts FIRST, so the sub-tab's `on_enter` finds one in flight and does not
+    # start a second, unnarrowed one.
+    def select_params(target : ParamsView::Target?) : Nil
+      @params.set_target(target)
+      set_sub(3)
     end
   end
 end

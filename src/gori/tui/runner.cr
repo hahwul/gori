@@ -120,6 +120,7 @@ require "./runner/colormarker"
 require "./runner/comparer"
 require "./runner/decoder"
 require "./runner/diff"
+require "./runner/params"
 require "./runner/discover"
 require "./runner/activity"
 require "./runner/env"
@@ -773,6 +774,7 @@ module Gori::Tui
             dirty = true if history_controller.flush_query_reload_if_due(now)
             dirty = true if sitemap_controller.flush_query_reload_if_due(now)
             dirty = true if sitemap_controller.drain_search
+            dirty = true if target_controller.params.drain_build
             dirty = true if drain_import_events
             # Tick the top-bar clock: dirty only when the displayed minute changes, so the
             # idle loop wakes once a minute to repaint rather than every second.
@@ -5682,10 +5684,10 @@ module Gori::Tui
     # Sitemap verbs that stay SINGLE-target even with marks set, and say so in their menu
     # hint. Discover is single by design (one config popup scans one start target under one
     # host — see the multi-host refusal in runner/discover.cr), the Sequencer collects one
-    # endpoint's token, a detail overlay shows one flow, and the scope form edits one
-    # pattern; the rest (query / fold / scope-lens) are selection-independent, so a cursor
-    # note there would be noise.
-    SITEMAP_CURSOR_ONLY = {"sitemap.discover", "sitemap.sequence", "sitemap.open-flow", "sitemap.scope-add"}
+    # endpoint's token, a detail overlay shows one flow, the scope form edits one pattern,
+    # and Params narrows to one row's subtree; the rest (query / fold / scope-lens) are
+    # selection-independent, so a cursor note there would be noise.
+    SITEMAP_CURSOR_ONLY = {"sitemap.discover", "sitemap.sequence", "sitemap.open-flow", "sitemap.scope-add", "sitemap.params"}
 
     # Retitle the Sitemap's menu entries while marks are set, so the menu says what will
     # actually happen — "Tag 3 paths". MUST return nil when nothing is marked, so every

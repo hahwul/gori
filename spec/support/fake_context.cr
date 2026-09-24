@@ -232,6 +232,11 @@ class FakeExecContext < Gori::Verb::ExecContext
     @diff_rows_shown
   end
 
+  # --- params (the parameter inventory under Target) ---
+
+  property? params_rows_shown : Bool = false
+  property? params_targeted : Bool = false
+
   property decoder_read_mode : Bool = false # settable so grouped-menu specs can exercise COMMON's Copy
 
   def decoder_read_mode? : Bool
