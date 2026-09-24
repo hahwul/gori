@@ -957,6 +957,13 @@ module Gori::Tui
       # into the project block (that is a scope change, `s`), and walking the cursor there
       # anyway would read as a swap that never happened.
       return @host.status("#{rule.inert_reason} — can't reorder this rule; use a newer gori") if rule.inert?
+      scoped = rule_list.select { |r| r.scope == rule.scope }
+      if i = scoped.index { |r| r.id == rule.id }
+        j = i + (dir < 0 ? -1 : 1)
+        if 0 <= j < scoped.size && (target = scoped[j]) && target.inert?
+          return @host.status("#{target.inert_reason} — can't reorder this rule; use a newer gori")
+        end
+      end
       if rules_engine.move(rule.id, dir, rule.scope)
         move_sel(dir)
       elsif !at_scope_edge?(rule, dir)

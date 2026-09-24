@@ -86,12 +86,13 @@ module Gori
     # of two rules touching the same header wins, so a caller that reports a swap the store
     # dropped leaves the operator believing an order that reverts at next start.
     def move_rule(id : Int64, dir : Int32) : Bool
-      ids = [] of Int64
-      @db.query("SELECT id FROM match_rules ORDER BY position, id") { |rs| rs.each { ids << rs.read(Int64) } }
-      i = ids.index(id)
+      rules = match_rules
+      i = rules.index { |r| r.id == id }
       return false unless i
       j = i + (dir < 0 ? -1 : 1)
-      return false unless 0 <= j < ids.size
+      return false unless 0 <= j < rules.size
+      return false if rules[i].inert? || rules[j].inert?
+      ids = rules.map(&.id)
       ids.swap(i, j)
       exec_task_ok ->(c : DB::Connection) {
         ids.each_with_index { |rid, pos| c.exec("UPDATE match_rules SET position = ? WHERE id = ?", pos, rid) }

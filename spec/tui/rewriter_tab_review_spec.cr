@@ -268,6 +268,21 @@ describe "Gori::Tui::RewriterController (tab review)" do
         ctl.apply_rewriter_rule(edited).should be_true
         host.statuses.last.should contain("can't edit this rule")
         session.rules.rules.first.op_label.should eq("future_short_circuit")
+
+        ctl.rewriter_move(1)
+        host.statuses.last.should contain("can't reorder this rule; use a newer gori")
+
+        # Adding a known rule next to the inert global rule
+        Gori::Settings.rewriter_rules = [
+          Gori::Settings::RewriterRule.new(1242_i64, true, "future", "request", "head", "POST /pay", "HTTP/1.1 200 OK", "future_short_circuit", "literal", "", ""),
+          Gori::Settings::RewriterRule.new(1243_i64, true, "known", "request", "head", "POST /pay", "HTTP/1.1 200 OK", "replace", "literal", "", ""),
+        ]
+        session.rules.reload(announce: false)
+        down(ctl) # select 'known'
+        ctl.selected_rule.not_nil!.name.should eq("known")
+        ctl.rewriter_move(-1) # attempt to move up past inert 'future'
+        host.statuses.last.should contain("can't reorder this rule; use a newer gori")
+        session.rules.rules.map(&.name).should eq(["future", "known"])
       end
     end
   end

@@ -130,8 +130,10 @@ describe "Gori::Settings rewriter rule shape" do
       rules[3].match_kind.should eq("future_match")
       rules.all?(&.inert?).should be_true
       rules[0].to_rule.inert_reason.should eq("unknown op \"future_short_circuit\" (newer gori?)")
-      rules[0].executes?.should be_false
-      rules[0].command.should be_nil
+      rules[0].executes?.should be_true
+      rules[0].command.should eq("HTTP/1.1 200 OK")
+      rules[1].executes?.should be_false
+      rules[1].command.should be_nil
       rules[2].executes?.should be_true
       rules[2].command.should eq("cat")
       Gori::Settings.command_entries(JSON.parse(File.read(Gori::Settings.path))).any? do |entry|
@@ -148,6 +150,67 @@ describe "Gori::Settings rewriter rule shape" do
       rows[3]["target"].as_s.should eq("response")
       rows[3]["part"].as_s.should eq("body")
       rows[3]["match_kind"].as_s.should eq("future_match")
+    end
+  end
+
+  it "marks non-string label values inert and preserves their raw JSON on round-trip" do
+    with_rewriter_home do
+      write_settings(<<-JSON)
+        {"rewriter": {"rules": [
+          {"id": 1, "enabled": true, "name": "future obj op", "pattern": "secret", "replacement": "X", "op": {"kind": "lua"}},
+          {"id": 2, "enabled": true, "name": "future array target", "pattern": "secret", "replacement": "Y", "target": ["request", "response"]}
+        ]}}
+        JSON
+      Gori::Settings.load
+      rules = Gori::Settings.rewriter_rules
+      rules.size.should eq(2)
+      rules[0].inert?.should be_true
+      rules[1].inert?.should be_true
+      rules[0].to_rule.inert?.should be_true
+      rules[1].to_rule.inert?.should be_true
+
+      # Live traffic must not rewrite
+      with_store do |store|
+        engine = Gori::Rules.load(store)
+        head = "GET /secret HTTP/1.1\r\nHost: a\r\n\r\n".to_slice
+        engine.rewrite_request(head, "a").should eq(head)
+      end
+
+      # Round-trip save preserves raw JSON
+      Gori::Settings.save.should be_true
+      doc = JSON.parse(File.read(Gori::Settings.path))
+      saved_rules = doc["rewriter"]["rules"].as_a
+      saved_rules[0]["op"]["kind"].as_s.should eq("lua")
+      saved_rules[1]["target"].as_a.map(&.as_s).should eq(["request", "response"])
+    end
+  end
+
+  it "marks a rule with unknown extra keys inert and preserves them on round-trip" do
+    with_rewriter_home do
+      write_settings(<<-JSON)
+        {"rewriter": {"rules": [
+          {"id": 1, "enabled": true, "name": "scoped", "pattern": "secret", "replacement": "X", "op": "replace", "path": "/only-here"}
+        ]}}
+        JSON
+      Gori::Settings.load
+      rules = Gori::Settings.rewriter_rules
+      rules.size.should eq(1)
+      rules[0].inert?.should be_true
+      rules[0].to_rule.inert?.should be_true
+      rules[0].to_rule.inert_reason.should eq("unknown key \"path\" (newer gori?)")
+
+      # Does not rewrite live traffic
+      with_store do |store|
+        engine = Gori::Rules.load(store)
+        head = "GET /elsewhere/secret HTTP/1.1\r\nHost: a\r\n\r\n".to_slice
+        engine.rewrite_request(head, "a").should eq(head)
+      end
+
+      # Round-trip preserves the extra key
+      Gori::Settings.save.should be_true
+      doc = JSON.parse(File.read(Gori::Settings.path))
+      saved_rules = doc["rewriter"]["rules"].as_a
+      saved_rules[0]["path"].as_s.should eq("/only-here")
     end
   end
 end
