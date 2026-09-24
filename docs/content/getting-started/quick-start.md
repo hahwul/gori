@@ -22,6 +22,8 @@ The first launch runs a short [setup wizard](#first-run-wizard) (global bind, th
 
 At the picker, select **New project**, enter a name, then press `Enter` twice (the description is optional). The guided tour returns you to this picker when it finishes on first launch.
 
+To find which project captured something (a token, a host, an endpoint), press `Ctrl-F` at the picker and type it. gori searches the flows of every project by host and path, and by body text once you have typed three characters, then lists the hits under each project. `Enter` opens that project with the flow's detail showing. `Esc` stops a search that is still running, and closes the search once it has finished.
+
 By default the proxy listens on `127.0.0.1:8070`. Override it for a single run (a project's own bind still wins when set):
 
 ```bash

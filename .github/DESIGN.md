@@ -3310,3 +3310,26 @@ the CLI without depending on a surface. The TUI export has no opt-in, the same c
 evidence export makes. The Markdown issue report still embeds each linked flow's head
 verbatim. It is a human-readable report rather than a machine feed, and changing it is a
 separate decision.
+
+### 2026-09-24: a search across projects reads each database raw and read-only, never through `Store.open`
+
+Refines: [P5](#p5), [P6](#p6). #1229.
+
+The picker's `^F` searches the captured flows of every registered project (`Gori::ProjectSearch`),
+so an explicit search now opens project databases, which the picker's render path still never
+does (see 2026-08-27). `Store.open` is the facade P5 names, and it is the wrong door here even
+with `read_only: true`: it still migrates a stale schema and refuses a newer one, and a host with
+hundreds of projects spans a dozen schema versions, so one keystroke would have migrated most of
+them. The search goes around it in the one direction that cannot change state. Each database is
+opened through the C API with `SQLITE_OPEN_READONLY`, because the shard hardcodes
+`READWRITE | CREATE` and ignores `mode=ro`, and only the `flows` columns and `flows_fts` that V1
+created are queried, plus V4's `fts_dirty` where it exists, so the bodies the index has not reached
+yet are scanned under the indexer's own rule (`Store.body_fts_text`). A read-write connection is not a reader, since closing the last one
+checkpoints the WAL into the db file. A READONLY one never does, which was measured against a live
+writer and a crashed session's WAL on macOS and Linux. The exception is a WAL database with no
+`-wal` beside it, a cleanly closed project on Linux, where READONLY creates a fresh `-wal` stamped
+now and `Project#last_modified` would reorder every project list around the search. That shape is
+read with `immutable=1`, chosen from the file header rather than from a failed open, and re-read
+once if the file changed during the read. The work is cooperative (P6): one database at a time, a
+`QueryControl` progress handler so a keystroke cancels mid-query, and a 100 ms busy budget rather
+than the store's five seconds, because SQLite's busy wait blocks the single-threaded scheduler.

@@ -105,6 +105,16 @@ module Gori
       LibSQLite3.result_int(context, matched ? 1 : 0)
       nil
     end
+
+    # Register both functions on a raw SQLite handle — THE one registration, so a connection
+    # that is not a pooled `SQLite3::Connection` (`ProjectSearch`'s read-only handle over
+    # another project's database) cannot end up with a `gori_ci_contains` that means
+    # something else, or with none: `QL.contains_cond` emits a call to it for every
+    # non-ASCII needle.
+    def self.install(db : LibSQLite3::SQLite3) : Nil
+      LibSQLite3.create_function(db, "gori_host_match", 2, 1, nil, HOST_FN, nil, nil)
+      LibSQLite3.create_function(db, "gori_ci_contains", 2, 1, nil, CONTAINS_FN, nil, nil)
+    end
   end
 end
 
@@ -113,7 +123,6 @@ class SQLite3::Connection
   # from `Store.configure_connections`' single setup block — see the comment there for why
   # a second `setup_connection` call would silently drop this one.
   def gori_install_scope_match : Nil
-    LibSQLite3.create_function(@db, "gori_host_match", 2, 1, nil, Gori::ScopeMatch::HOST_FN, nil, nil)
-    LibSQLite3.create_function(@db, "gori_ci_contains", 2, 1, nil, Gori::ScopeMatch::CONTAINS_FN, nil, nil)
+    Gori::ScopeMatch.install(@db)
   end
 end

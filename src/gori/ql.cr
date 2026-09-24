@@ -896,9 +896,38 @@ module Gori
       side == :req ? "req" : "resp"
     end
 
+    # The trigram tokenizer's floor: `flows_fts MATCH` cannot answer a needle shorter than this.
+    FTS_MIN_CHARS = 3
+
+    # :nodoc: — internal, but NOT private: `ProjectSearch` reads other projects' databases over
+    # a raw read-only handle and has to spell `body:`'s needle folding and its FTS term exactly
+    # as this module does, or the picker's cross-project search and History would disagree
+    # about what a needle matches (#1229). NUL and the other control characters go: neither
+    # the FTS phrase nor a LIKE pattern can carry them safely.
+    def self.strip_controls(value : String) : String
+      value.chars.reject(&.control?).join
+    end
+
+    # :nodoc: — the indexed half of `body:`, for the same caller as `strip_controls`. nil when
+    # the needle (after the strip) is under `FTS_MIN_CHARS`, which the index cannot answer; the
+    # caller decides what a short needle means instead. The value is a quoted FTS phrase with
+    # its embedded quotes doubled — a contiguous-substring match that no character in it can
+    # turn into FTS operator syntax, and still a single bound `?`.
+    def self.fts_cond(value : String, side : Symbol? = nil) : {String, Array(DB::Any)}?
+      value = strip_controls(value)
+      return nil if value.size < FTS_MIN_CHARS
+      phrase = %("#{value.gsub('"', "\"\"")}") # quoted phrase → contiguous substring match
+      # An FTS5 COLUMN FILTER (`resp : "phrase"`) narrows the match to one indexed column. The
+      # column name is this module's own constant, never user input — the value stays inside the
+      # quoted phrase whose embedded quotes were doubled just above — so the term is still not an
+      # injection surface, and it stays a single bound `?`.
+      phrase = "#{fts_column(side)} : #{phrase}" if side
+      {"id IN (SELECT rowid FROM flows_fts WHERE flows_fts MATCH ?)", [phrase] of DB::Any}
+    end
+
     private def self.body_cond(value : String, fts : Bool = true,
                                body_max : Int32? = nil, side : Symbol? = nil) : {String, Array(DB::Any)}?
-      value = value.chars.reject(&.control?).join # strip NUL/control chars (FTS/LIKE safety)
+      value = strip_controls(value) # strip NUL/control chars (FTS/LIKE safety)
       # `field_cond`'s `return nil if value.empty?` runs BEFORE this strip, so a value made
       # only of control bytes survived that guard and arrived here as "". `like("")` is
       # `'%%'`, which matches EVERY flow with a body — and `-body:` then excluded every flow
@@ -920,14 +949,8 @@ module Gori
       # needle used — `body:s` and `body:sql` disagreeing about `ſ` for no reason an operator
       # could see. One spelling for every needle length, and the shorter needle can no longer
       # match fewer rows than the longer one.
-      return body_literal_cond(value, body_max, side) if value.size < 3 || !fts
-      phrase = %("#{value.gsub('"', "\"\"")}") # quoted phrase → contiguous substring match
-      # An FTS5 COLUMN FILTER (`resp : "phrase"`) narrows the match to one indexed column. The
-      # column name is this module's own constant, never user input — the value stays inside the
-      # quoted phrase whose embedded quotes were doubled just above — so the term is still not an
-      # injection surface, and it stays a single bound `?`.
-      phrase = "#{fts_column(side)} : #{phrase}" if side
-      {"id IN (SELECT rowid FROM flows_fts WHERE flows_fts MATCH ?)", [phrase] of DB::Any}
+      return body_literal_cond(value, body_max, side) unless fts && (indexed = fts_cond(value, side))
+      indexed
     end
 
     # The index-free spelling of `body:` (see `parse`'s `fts:`): `body~` with the needle escaped
@@ -1064,7 +1087,7 @@ module Gori
     # per head column instead — more scans, and a different fold rule at 1-2 characters
     # than at 3, which `body_cond` explains at more length.
     private def self.header_cond(value : String, side : Symbol? = nil) : {String, Array(DB::Any)}?
-      value = value.chars.reject(&.control?).join
+      value = strip_controls(value)
       return nil if value.empty?
       pat = "(?i)#{Regex.escape(value)}"
       return {"0", [] of DB::Any} unless valid_regex?(pat)
