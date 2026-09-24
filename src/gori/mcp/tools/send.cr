@@ -146,6 +146,169 @@ module Gori
         Result.new(ex.message || "invalid request arguments", is_error: true)
       end
 
+      # Fire several saved HTTP repeaters as ONE synchronized multi-endpoint race (#1236): N
+      # distinct requests on the wire in one narrow window (h1 last-byte-sync, h2 single-packet)
+      # to hit a TOCTOU across DISTINCT endpoints. The headless counterpart of the TUI's
+      # `repeater.send-race`; the first multi-request send tool on MCP (`send_request` is one
+      # request). All members must resolve to ONE origin and share the transport.
+      @[Tool("race_requests", gated: true, agent_action: true, env_refresh: true)]
+      private def race_requests(h) : Result
+        members = race_member_ids(h)
+        return members if members.is_a?(Result)
+        force_http2 = present?(h, "http2") ? bool_arg(h, "http2", false) : nil
+        verbatim = bool_arg(h, "verbatim", false)
+        insecure = bool_arg(h, "insecure", false)
+        timeout = send_timeout(h)
+        ob = outbound(bool_arg(h, "allow_unscoped", false))
+
+        built = build_race_plan(members, force_http2, insecure, verbatim, timeout, store, ob)
+        return built if built.is_a?(Result)
+        plan, labels = built
+
+        gate = send_gate(ob, plan)
+        return gate if gate.is_a?(Result)
+
+        results = plan.send_race
+        Log.info { "race_requests #{plan.scheme}://#{plan.host}:#{plan.port} x#{results.size} (#{plan.http2? ? "h2" : "h1"}) -> #{results.count(&.ok?)} ok" }
+        Result.new(race_result_json(labels, results, plan))
+      end
+
+      # The validated race member ids, or the error Result to return as-is: an array of at least
+      # two integers, capped at the race ceiling.
+      private def race_member_ids(h) : Array(Int64) | Result
+        ids_json = h["repeater_ids"]?.try(&.as_a?)
+        unless ids_json && ids_json.size >= 2
+          return err("'repeater_ids' must be an array of at least two saved HTTP repeater ids — a race of one proves nothing",
+            "INVALID_ARGUMENT", field: "repeater_ids")
+        end
+        members = [] of Int64
+        ids_json.each do |v|
+          id = v.as_i64?
+          return err("'repeater_ids' must be integers", "INVALID_ARGUMENT", field: "repeater_ids") unless id
+          members << id
+        end
+        if members.size > Repeater::MAX_RACE_MEMBERS
+          return err("#{members.size} members exceeds the #{Repeater::MAX_RACE_MEMBERS}-member race ceiling",
+            "INVALID_ARGUMENT", field: "repeater_ids")
+        end
+        members
+      end
+
+      # The ready-to-send race plan and its per-member labels, or the error Result to return:
+      # loads every session, resolves the transport (forced, or the sessions' shared one),
+      # asserts one origin across the group, and builds ONE plan over every member's request.
+      private def build_race_plan(members : Array(Int64), force_http2 : Bool?, insecure : Bool,
+                                  verbatim : Bool, timeout : Time::Span?, st : Store,
+                                  ob : Outbound) : {Repeater::Plan, Array(String)} | Result
+        loaded = [] of {Int64, Store::RepeaterRecord}
+        members.each do |id|
+          rec = st.get_repeater_full(id)
+          return not_found("no repeater with id #{id}") unless rec
+          # §…§ markers render through their ¦chain on a Repeater send; this path cannot, so a
+          # live one would put the literal § bytes on the wire — refuse it exactly as
+          # send_request's repeater_id replay does. `verbatim` waives it, the same way.
+          if !verbatim && Repeater::DraftMarkers.live?(st, rec)
+            return err("#{Repeater::DraftMarkers.refusal(id, MARKER_REMEDY)} NOTHING was sent.",
+              "INVALID_ARGUMENT", field: "repeater_ids")
+          end
+          loaded << {id, rec}
+        end
+        overrides = Gori::HostOverrides.load(st)
+
+        mode = force_http2
+        if mode.nil?
+          modes = loaded.map { |(_, rec)| rec.http2? }.uniq!
+          if modes.size > 1
+            return err("the sessions mix HTTP/1.1 and HTTP/2 — pass http2:true or http2:false to force one",
+              "INVALID_ARGUMENT", field: "http2")
+          end
+          mode = modes.first
+        end
+
+        # The dial SIGNATURE every member must share (this also validates each target / env): the
+        # group rides ONE Sender built from the anchor, so a member whose origin, Content-Length
+        # policy, SNI or TLS preset differs would be silently sent under the anchor's — refuse
+        # instead of flattening it. `verbatim` folds the CL column uniform, so it only fires on a
+        # real stored difference.
+        sigs = [] of {String, String, Int32, Bool, String?, String?}
+        wires = [] of Bytes
+        labels = [] of String
+        loaded.each do |(id, rec)|
+          probe = begin
+            Repeater::Plan.build(race_member_options([rec.request], rec, insecure, overrides, verbatim, timeout, rec.http2?), ob)
+          rescue ex : Repeater::PlanError
+            return send_plan_error(ex, "repeater_ids")
+          end
+          sigs << {probe.scheme, probe.host, probe.port, !verbatim && rec.auto_content_length?, rec.sni, rec.tls_preset}
+          wires << rec.request
+          labels << "##{id} #{race_member_request_line(rec.request)}"
+        end
+        first = sigs.first
+        unless sigs.all? { |s| s == first }
+          return err("the sessions differ in origin, Content-Length policy, SNI or TLS preset — a race rides one connection shape (origins: #{sigs.map { |(s, ho, po, _, _, _)| "#{s}://#{ho}:#{po}" }.uniq!.join(", ")})",
+            "INVALID_ARGUMENT", field: "repeater_ids")
+        end
+
+        anchor = loaded.first[1]
+        plan = begin
+          Repeater::Plan.build(race_member_options(wires, anchor, insecure, overrides, verbatim, timeout, mode), ob)
+        rescue ex : Repeater::PlanError
+          return send_plan_error(ex, "repeater_ids")
+        end
+        {plan, labels}
+      end
+
+      # PlanOptions for one race member (or the whole group, when `requests` carries every
+      # member's bytes and `rec` is the anchor). Mirrors the CLI's `session_plan_options`.
+      private def race_member_options(requests : Array(Bytes), rec : Store::RepeaterRecord,
+                                      insecure : Bool, overrides : Gori::HostOverrides?,
+                                      verbatim : Bool, timeout : Time::Span?, http2 : Bool) : Repeater::PlanOptions
+        Repeater::PlanOptions.new(requests,
+          default_target: rec.target, http2: http2, sni: rec.sni, timeout: timeout,
+          expand_request: !verbatim, expand_bindings: !verbatim, preserve_field_case: verbatim,
+          auto_content_length: !verbatim && rec.auto_content_length?, verify: !insecure,
+          overrides: overrides, tls_preset: rec.tls_preset)
+      end
+
+      private def race_member_request_line(request : Bytes) : String
+        line = String.new(request[0, {request.size, 200}.min]).lines.first?.try(&.strip)
+        line && !line.empty? ? line : "(no request line)"
+      end
+
+      # One race's per-member results as JSON: status, size and RELEASE-RELATIVE timing (each
+      # member's duration is measured from the synchronized release), plus `won_2xx` as a NEUTRAL
+      # count (how many members answered 2xx). Whether that count is a finding is the agent's to
+      # judge from the endpoints raced — for a multi-endpoint race each endpoint may legitimately
+      # answer 2xx, so this does not editorialize.
+      private def race_result_json(labels : Array(String), results : Array(Repeater::Result),
+                                   plan : Repeater::Plan) : String
+        won = results.count { |r| r.ok? && (s = r.response.try(&.status)) && 200 <= s < 300 }
+        JSON.build do |j|
+          j.object do
+            j.field "target", "#{plan.scheme}://#{plan.host}:#{plan.port}"
+            j.field "transport", plan.http2? ? "single-packet h2" : "last-byte-sync h1"
+            j.field "responded", results.count(&.ok?)
+            j.field "won_2xx", won
+            j.field "members" do
+              j.array do
+                labels.each_with_index do |label, i|
+                  r = results[i]?
+                  j.object do
+                    j.field "label", label
+                    j.field "ok", r.try(&.ok?) || false
+                    j.field "status", r.try(&.response.try(&.status))
+                    j.field "size", r.try { |x| (x.head.size + (x.body.try(&.size) || 0)) }
+                    j.field "duration_us", r.try(&.duration_us)
+                    j.field "incomplete", r.try(&.incomplete?) || false
+                    j.field "error", r.try(&.error)
+                  end
+                end
+              end
+            end
+          end
+        end
+      end
+
       # The two arguments that name a request gori has ALREADY stored. Exactly one may be given.
       SEND_SOURCE_ARGS = %w[flow_id repeater_id]
 
@@ -1619,6 +1782,26 @@ module Gori
           s.field "allow_unscoped", boolprop("send even when the target host is outside the project's configured scope — REQUIRED to run against an out-of-scope target, or when no scope is configured at all (active requests are refused by default without a matching scope)")
           s.field "name", strprop("optional custom name for the saved repeater tab (only when save_as_repeater=true)")
           s.field "issue_id", intprop("optional issue to link to the saved repeater; requires save_as_repeater=true")
+        end
+
+        tool j, "race_requests",
+          "Fire several saved HTTP repeaters as ONE synchronized race — N DISTINCT requests on " \
+          "the wire in the same narrow window, to hit a multi-endpoint TOCTOU (e.g. apply-coupon " \
+          "racing checkout). ACTIVE: makes real outbound requests from this host. Distinct from " \
+          "the Fuzzer race (N byte-identical copies of ONE request): here every member is a " \
+          "different saved session. Transport: HTTP/1.1 last-byte-sync over N connections, or " \
+          "HTTP/2 single-packet attack over one connection (pass http2:true). ALL members must " \
+          "resolve to ONE origin (scheme://host:port) and share the transport, or the call is " \
+          "REFUSED. The result gives each member's status, size and RELEASE-RELATIVE timing " \
+          "(the arrival spread) plus `won_2xx`, a NEUTRAL count of how many members answered 2xx " \
+          "— whether that is a finding depends on the endpoints raced (a multi-endpoint race may " \
+          "legitimately see several 2xx)." do |s|
+          s.field "repeater_ids", JSON.parse(%({"type":"array","description":"two or more saved HTTP repeater ids (from list_history / the Repeater workbench) to race together; all must share one origin and transport","items":{"type":"integer"},"minItems":2})), required: true
+          s.field "http2", boolprop("race over HTTP/2 (single-packet attack); default: the sessions' shared stored setting (refused if they disagree)")
+          s.field "verbatim", boolprop("send each member's bytes EXACTLY: no token expansion, no Content-Length resync (see send_request.verbatim). Default false")
+          s.field "timeout_ms", intprop("per-operation connect + idle timeout in milliseconds (1-600000)")
+          s.field "insecure", boolprop("skip upstream TLS verification (default false)")
+          s.field "allow_unscoped", boolprop("send even when the shared origin is outside (or without) a configured scope — Sandbox/exclude still apply (default false)")
         end
 
         tool j, "send_websocket",

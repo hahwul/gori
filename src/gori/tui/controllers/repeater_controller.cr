@@ -92,6 +92,10 @@ module Gori::Tui
       # "Send group" pipelines several requests on one connection and delivers the
       # labelled per-request results here (distinct type again — an ordered array).
       @group_results = Channel({RepeaterView, Array({String, Repeater::Result})}).new(8)
+      # "Send race" fires N marked sub-tabs together and delivers the labelled per-member
+      # results here — same shape as @group_results, but its own channel so the drain can say
+      # "race" (N connections / one packet), not "one connection", and name the winners.
+      @race_results = Channel({RepeaterView, Array({String, Repeater::Result})}).new(8)
       # "Minimize request" fires many probe sends off the UI fiber; it streams Progress
       # pings and one terminal Report back here (a union type — Progress or Report), drained
       # by drain_results. Only one minimize runs at a time (tracked by @minimize_job).
@@ -1481,6 +1485,19 @@ module Gori::Tui
         @host.status("send group: #{ok}/#{labeled.size} ok on one connection")
         applied = true
       end
+      while pair = nonblocking_race_result
+        view, labeled = pair
+        next unless @repeaters.find(&.view.same?(view)) # sub-tab closed mid-flight
+        view.apply_group(labeled)
+        responded = labeled.count { |(_, r)| r.error.nil? }
+        # Just the facts: how many members answered, and how many with a 2xx. Whether N distinct
+        # 2xx is a finding is the operator's call — the transcript shows each status and its
+        # release-relative timing — so this does NOT editorialize (a multi-endpoint race where
+        # both endpoints SHOULD return 2xx is the normal case, not a double-spend).
+        ok2xx = labeled.count { |(_, r)| r.error.nil? && (s = r.response.try(&.status)) && 200 <= s < 300 }
+        @host.status("send race: #{responded}/#{labeled.size} responded · #{ok2xx}×2xx")
+        applied = true
+      end
       while pair = nonblocking_minimize_event
         view, msg = pair
         next unless tab = @repeaters.find(&.view.same?(view)) # sub-tab closed mid-run → drop
@@ -1621,6 +1638,15 @@ module Gori::Tui
     private def nonblocking_group_result : {RepeaterView, Array({String, Repeater::Result})}?
       select
       when p = @group_results.receive
+        p
+      else
+        nil
+      end
+    end
+
+    private def nonblocking_race_result : {RepeaterView, Array({String, Repeater::Result})}?
+      select
+      when p = @race_results.receive
         p
       else
         nil
@@ -2466,6 +2492,145 @@ module Gori::Tui
       ensure
         view.inflight = false
       end
+    end
+
+    # Send the MARKED sub-tabs as a synchronized RACE (#1236): N DISTINCT hand-authored
+    # requests on the wire in one narrow window — last-byte-sync over N connections on h1, the
+    # single-packet attack over one connection on h2. This is the multi-endpoint TOCTOU
+    # primitive, distinct from `repeater_send_group` (one connection, sequential pipeline) and
+    # from the batch arm of `^R` (N INDEPENDENT sends, unsynchronized).
+    #
+    # The marked sub-tabs ARE the group, and they must share ONE origin and ONE transport
+    # (h1 xor h2): the h2 single-packet attack is one connection = one host, and the h1 form is
+    # kept to the same shape for a legible transcript (cross-host h1 is a deliberate follow-up).
+    # The transcript renders in the CURRENT tab's pane, reusing `apply_group`.
+    def repeater_send_race : Nil
+      refs = batch_subtab_refs
+      unless refs
+        @host.status("mark at least 2 sub-tabs (t) to race them")
+        return
+      end
+      tabs = refs.compact_map { |r| @repeaters.find(&.view.same?(r)) }
+      if tabs.size < 2
+        @host.status("mark at least 2 sub-tabs (t) to race them")
+        return
+      end
+      if tabs.size > Runner::BATCH_SUBTAB_CAP
+        @host.status("#{tabs.size} sub-tabs marked — a race is capped at #{Runner::BATCH_SUBTAB_CAP}")
+        return
+      end
+      # Anchor on a MARKED member, NOT the cursor tab. The `t` gesture steps the cursor, so the
+      # current tab is usually NOT in the marked set — building the plan from it would bind the
+      # race to that tab's origin/transport, not the marked group's. `collect_race_members` has
+      # validated every marked tab shares one origin + transport, so `tabs.first` is a safe
+      # anchor for the plan and the transcript.
+      anchor = tabs.first
+      return unless (view = anchor.view).loaded?
+      if view.inflight?
+        @host.status("repeater already in flight…")
+        return
+      end
+
+      return unless collected = collect_race_members(tabs) # sets its own status on a refusal
+      drafts, labels = collected
+
+      # ONE plan over all members, built from the anchor (current) tab's send context (session
+      # slot, TLS preset, SNI). Its Sender is origin-bound to the shared origin every member
+      # resolved to.
+      return unless plan = repeater_plan(view, drafts, http2: view.http2?)
+      save_current_repeater
+      # One blocked member refuses the whole race — a race is one unit (like send-group).
+      if reason = plan.refusal
+        labeled = labels.map { |l| {l, Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, reason)} }
+        apply_refusal { view.apply_group(labeled) }
+        @host.status("send race: #{reason}")
+        return
+      end
+
+      n = plan.requests.size
+      transport = view.http2? ? "single-packet h2" : "last-byte-sync h1"
+      @host.confirm("SEND RACE", "Race #{n} marked sub-tabs against #{plan.host}:#{plan.port}?\n" \
+                                 "All #{n} fire together (#{transport}).",
+        confirm_label: "race", danger: false) { launch_race_fiber(view, plan, labels) }
+    end
+
+    # Collect each marked tab's DRAFT wire and its label, and assert one origin + one transport
+    # across the group — or nil (after setting a status line) when the group can't race. A per-tab
+    # plan resolves the origin (and validates the target / env / chains) WITHOUT sending; the
+    # DRAFTS, not those plans' wired bytes, are what the race plan wires once — running the seam
+    # twice is the non-idempotent bug `Sender#send_group` documents.
+    private def collect_race_members(tabs : Array(RepeaterTab)) : {Array(Bytes), Array(String)}?
+      drafts = [] of Bytes
+      labels = [] of String
+      # The dial SIGNATURE every member must share: the race rides ONE Sender (h2 is literally
+      # one connection, and the h1 form is held to the same shape), so a member whose origin,
+      # transport, SNI or TLS preset differs would be silently sent under the anchor's — refuse
+      # instead of flattening it.
+      sigs = [] of {String, String, Int32, Bool, String?, String?}
+      loaded = 0
+      tabs.each do |t|
+        tv = t.view
+        next unless tv.loaded?
+        loaded += 1
+        tv.commit_chain_pane
+        # §…§ markers render through their ¦chain on ^R / send-group; this path cannot, so it
+        # would put the literal § bytes on the wire — refuse it exactly as those two do.
+        if tv.markers_active?
+          @host.status("send race does not render §…§ markers — remove them from “#{tv.label}” or send it with ^R")
+          return nil
+        end
+        draft = begin
+          tv.request_bytes
+        rescue ex : Fuzz::ChainError
+          @host.status("repeater race: #{tv.label}: #{ex.message}")
+          return nil
+        end
+        return nil unless probe = repeater_plan(tv, [draft], http2: tv.http2?) # sets its own status on a PlanError
+        drafts << draft
+        labels << race_member_label(tv, draft)
+        sigs << {probe.scheme, probe.host, probe.port, probe.http2?, tv.sni_override, tv.tls_preset}
+      end
+      if loaded < 2
+        @host.status("race needs at least 2 loaded sub-tabs — #{loaded} of #{tabs.size} marked #{loaded == 1 ? "is" : "are"} ready")
+        return nil
+      end
+      first = sigs.first
+      unless sigs.all? { |s| s == first }
+        @host.status("race needs one origin, transport, SNI and TLS preset — the marked sub-tabs differ")
+        return nil
+      end
+      {drafts, labels}
+    end
+
+    # Fire the assembled race off the UI fiber and hand each member's result back through
+    # `@race_results` for the drain to install. One outstanding race per view (the confirm can
+    # fire after the tab went in-flight some other way).
+    private def launch_race_fiber(view : RepeaterView, plan : Repeater::Plan, labels : Array(String)) : Nil
+      return if view.inflight?
+      view.inflight = true
+      results = @race_results
+      n = plan.requests.size
+      transport = plan.http2? ? "single-packet h2" : "last-byte-sync h1"
+      @host.status("send race → #{plan.host}:#{plan.port} · #{n} requests together (#{transport})…#{unrecorded_note("send race")}", :busy)
+      spawn(name: "gori-repeater-race") do
+        rs = plan.send_race
+        labeled = labels.zip(rs)
+        select
+        when results.send({view, labeled})
+        else
+        end
+      rescue ex
+        ::Log.error(exception: ex) { "repeater race send fiber died" }
+      ensure
+        view.inflight = false
+      end
+    end
+
+    # A transcript label for one race member: its request line (the first wire line), which is
+    # what distinguishes the members of a multi-endpoint race.
+    private def race_member_label(view : RepeaterView, draft : Bytes) : String
+      line = String.new(draft[0, {draft.size, 200}.min]).lines.first?.try(&.strip)
+      line && !line.empty? ? line : view.label
     end
 
     def current_session_db_id : Int64?

@@ -240,6 +240,10 @@ private class FakeContext < ExecContext
     @calls << :repeater_send_group
   end
 
+  def repeater_send_race : Nil
+    @calls << :repeater_send_race
+  end
+
   def repeater_find_subtab : Nil
     @calls << :repeater_find_subtab
   end

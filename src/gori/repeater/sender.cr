@@ -6,6 +6,7 @@ require "../intercept_filter"
 require "../host_overrides"
 require "./engine"
 require "./h2_engine"
+require "./h2_race"
 require "./ws_engine"
 
 module Gori
@@ -363,6 +364,39 @@ module Gori
         # A group is ONE connection carrying a deliberate sequence, so every member is as
         # hand-authored as a lone `send` and every response is an equally legitimate source.
         # Later members win on a name both write, which is the wire order.
+        requests.each_with_index { |b, i| results[i]?.try { |r| extract(b, r) } }
+        results
+      end
+
+      # Fire N DISTINCT hand-authored requests as close to simultaneously as one process can —
+      # the multi-endpoint race (#1236). Unlike `send_group` (one connection, a SEQUENTIAL
+      # pipeline — smuggling / keep-alive desync), this puts every member on the wire in the
+      # same narrow window: last-byte-sync over N dedicated connections on h1, the single-packet
+      # attack over one connection on h2.
+      #
+      # Same seam discipline as `send_group`: WIRE each member once (binding + slot overlay,
+      # never sanitized — P7), THEN gate the wired bytes, one blocked member refusing the whole
+      # group (a race is one unit). The transport lives in `Engine.race_h1` / `H2Engine
+      # .single_packet`; the caller has already resolved these members to ONE origin (this
+      # Sender's), which the surface enforces before building the plan.
+      def send_race(requests : Array(Bytes)) : Array(Result)
+        requests = requests.map { |b| wire(b) }
+        if reason = requests.each.compact_map { |b| refusal_wired(b) }.first?
+          return requests.map { Result.new(Bytes.new(0), nil, nil, 0_i64, reason) }
+        end
+        results =
+          if @http2
+            H2Engine.single_packet(requests, scheme: @scheme, host: @host, port: @port,
+              verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides,
+              preserve_field_case: @preserve_field_case, reframe_grpc: @reframe_grpc,
+              tls_preset: @tls_preset)
+          else
+            Engine.race_h1(requests, scheme: @scheme, host: @host, port: @port,
+              verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides,
+              tls_preset: @tls_preset)
+          end
+        # Every member is as hand-authored as a lone `send`, so each response is a legitimate
+        # source for session-binding extraction — later members win on a name both write.
         requests.each_with_index { |b, i| results[i]?.try { |r| extract(b, r) } }
         results
       end

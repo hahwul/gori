@@ -464,6 +464,10 @@ module Gori
         "repeater.send-group", "Send group (one connection)",
         "Pipeline every request (split on a lone %%% line) over ONE keep-alive connection — active request-smuggling / keep-alive reuse — and show each response",
         Verb::Scope::Repeater, available: in_repeater, mnemonic: 'g', section: :request) { |ctx| ctx.repeater_send_group; nil }
+      r.register Verb::Definition.new(
+        "repeater.send-race", "Race marked sub-tabs",
+        "Fire the MARKED sub-tabs (mark with t) as one synchronized race — N DISTINCT requests on the wire together to hit a multi-endpoint TOCTOU window (h1 last-byte-sync, h2 single-packet). One origin, one transport; shows each response with its timing",
+        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'G', section: :request) { |ctx| ctx.repeater_send_race; nil }
 
       # --- RESPONSE pane (diff / pretty via keymap so rebind works; hex stays
       # controller-owned on the response pane because plain `x` is also select-line

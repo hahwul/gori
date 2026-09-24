@@ -1177,11 +1177,13 @@ module Gori
       # same wire, so the two surfaces answered differently about one response. `absorb` now
       # hands back THIS BLOCK's status instead of folding it into the running one, which is
       # what makes "a trailing block may not restate the status" expressible at all.
-      private def self.merge_block(header_buf : IO::Memory, decoder : HPACK::Decoder,
-                                   headers : Array({String, String}), status : Int32,
-                                   final_seen : Bool, trailers : Array(String)?,
-                                   late_interim : Int32?, trailer_pseudo : Array(String)?,
-                                   end_stream_pending : Bool) : {Int32, Bool, Array(String)?, Int32?, Array(String)?}
+      # PUBLIC for the single-packet reader's `PacketStream` (`h2_race.cr`), which reassembles
+      # one stream out of N interleaved on a single connection and needs the same block-folding.
+      def self.merge_block(header_buf : IO::Memory, decoder : HPACK::Decoder,
+                           headers : Array({String, String}), status : Int32,
+                           final_seen : Bool, trailers : Array(String)?,
+                           late_interim : Int32?, trailer_pseudo : Array(String)?,
+                           end_stream_pending : Bool) : {Int32, Bool, Array(String)?, Int32?, Array(String)?}
         count_before = headers.size
         block_status, names, pseudo = absorb(header_buf, decoder, headers)
         if final_seen
