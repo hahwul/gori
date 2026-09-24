@@ -18,7 +18,10 @@ module Gori
       tls_preset : String? = nil,
       websocket : Bool = false,
       surface : String? = nil,
-      source_ref : String? = nil
+      source_ref : String? = nil,
+      # The result-capture policy this run is archived under (issue #1240) — `Fuzz::Keep#label`.
+      # Recorded on the run row so a filtered archive is legible as one, not a lost run.
+      keep : String = "all"
 
     # Bounded asynchronous writer shared by permanent saves and the temporary result spool.
     # Live Result appends only serialize and offer a batch to this four-slot queue; they never
@@ -54,10 +57,17 @@ module Gori
       getter run_id : Int64
       getter error : String?
       getter written : Int64
+      # The result-capture policy this archive is written under (issue #1240). The live
+      # `append(result : Result)` path drops a row the policy does not keep — so a
+      # `keep: interesting` run stores matched/errored/re-sent/stop rows and skips the rest,
+      # while the whole-run counters `finish` records stay complete. The record/write-row
+      # overloads (the spool→permanent copy) are NOT re-filtered: the spool already applied it.
+      getter keep : Keep
 
       def initialize(@store : Store, meta : SavedRunMeta, initial_status : String = "running",
                      @batch_size : Int32 = BATCH_SIZE,
                      @batch_bytes : Int64 = BATCH_BYTES)
+        @keep = Keep.parse?(meta.keep) || Keep::All
         raise ArgumentError.new("batch_size must be positive") if @batch_size <= 0
         raise ArgumentError.new("batch_bytes must be positive") if @batch_bytes <= 0
 
@@ -77,7 +87,7 @@ module Gori
           @run_id = @store.insert_fuzz_run(meta.session_id, meta.target, meta.mode, meta.total,
             created_at: meta.created_at, status: initial_status, http2: meta.http2,
             sni: meta.sni, tls_preset: meta.tls_preset, websocket: meta.websocket,
-            surface: meta.surface, source_ref: meta.source_ref)
+            surface: meta.surface, source_ref: meta.source_ref, keep: meta.keep)
           if @run_id > 0
             @worker_started = true
             @worker_stopped = false
@@ -121,6 +131,11 @@ module Gori
       # Live-engine path. It never waits for the Store writer or for this Persistence queue.
       def append(result : Result) : Bool
         return false unless accepting?
+        # `keep: interesting` drops a row the archive does not keep — reported as ACCEPTED
+        # (true), not a failure: the caller's saturation/`spool_lost` signal is about the queue,
+        # and a policy-skipped row never touched it. `written` stays the count of ROWS STORED,
+        # which is what "N of M kept" reads off.
+        return true unless @keep.keeps?(result)
         try_append(self.class.write_row(result))
       rescue ex
         fail_save(ex.message || "could not serialize a fuzz result")

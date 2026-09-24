@@ -93,6 +93,19 @@ describe "Gori::Store fuzz persistence" do
     end
   end
 
+  it "round-trips the keep policy, defaulting a run written without one to all" do
+    with_store do |store|
+      default_run = store.insert_fuzz_run(nil, "http://h", "sniper", 3_i64)
+      store.get_fuzz_run(default_run).not_nil!.keep.should eq("all")
+      store.get_fuzz_run(default_run).not_nil!.filtered?.should be_false
+
+      filtered = store.insert_fuzz_run(nil, "http://h", "sniper", 100_i64, keep: "interesting")
+      rec = store.get_fuzz_run(filtered).not_nil!
+      rec.keep.should eq("interesting")
+      rec.filtered?.should be_true
+    end
+  end
+
   it "selects the latest successfully saved run for one session" do
     with_store do |store|
       first_session = store.insert_fuzz_session("http://one", "GET / HTTP/1.1\r\n\r\n",

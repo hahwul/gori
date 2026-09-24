@@ -29,7 +29,15 @@ module Gori::Tui
     # above it are: every construction site that predates it keeps compiling, and a caller
     # that does not know about it cannot silently clear it.
     m_time : String = "",
-    f_time : String = ""
+    f_time : String = "",
+    # `stop_on` (issue #1240): stop once the matchers have hit N times (`stop_after`), and/or
+    # when a SEPARATE condition holds (`stop_on`, one DIM:SPEC term — regex:admin, status:200,
+    # !regex:Invalid password). `keep_interesting` is the archive filter (on = keep only the
+    # interesting rows). All DEFAULTED so every construction site that predates them keeps
+    # compiling and none can silently clear them.
+    stop_after : String = "",
+    stop_on : String = "",
+    keep_interesting : Bool = false
 
   # The full-area popup for the Fuzzer's advanced run settings. Every engine / match
   # / filter knob gets its OWN labeled row (no more horizontal fields walked by ↑/↓,
@@ -125,6 +133,19 @@ module Gori::Tui
       # this is the one position that renumbers none of them.
       {:m_time, "Match time (ms)", :text},
       {:f_time, "Filter time (ms)", :text},
+      # `stop_on` (issue #1240) — `gori run fuzz --stop-after-matches` / `--stop-on`, MCP
+      # `stop_on`. `Stop after N hits` ends the run once the matchers have hit N times (1 = first
+      # hit); `Stop on` is a SEPARATE condition, one DIM:SPEC term (regex:admin, status:200,
+      # !regex:Invalid password — ! negates to a filter, "stop when the body no longer carries
+      # it"). A run either fires lands `condition_met`, not `stopped`. Appended LAST, like the
+      # rows above them, so no spec-indexed row is renumbered.
+      {:stop_after, "Stop after N hits", :text},
+      {:stop_on, "Stop on (DIM:SPEC)", :text},
+      # The result-capture filter for a saved run (Shift-S) / the private spool: on keeps only
+      # the interesting rows (matched + error/re-send/incomplete/stop), so a huge sweep does not
+      # spool one row per request. The pane, the counters and `idx` are unaffected. A toggle
+      # because the policy is exactly two-valued (all / interesting).
+      {:keep_interesting, "Keep interesting only", :toggle},
     ]
     LABEL_W = 22 # value column offset (widest label "gRPC reframe (unary)" + padding)
 
@@ -136,6 +157,7 @@ module Gori::Tui
       @keep_alive = snap.keep_alive
       @update_cl = snap.update_cl
       @reframe_grpc = snap.reframe_grpc
+      @keep_interesting = snap.keep_interesting
       @fields = {
         :conc         => TextField.new(snap.conc),
         :rate         => TextField.new(snap.rate),
@@ -155,6 +177,8 @@ module Gori::Tui
         :tls_preset   => TextField.new(snap.tls_preset),
         :m_time       => TextField.new(snap.m_time),
         :f_time       => TextField.new(snap.f_time),
+        :stop_after   => TextField.new(snap.stop_after),
+        :stop_on      => TextField.new(snap.stop_on),
       }
     end
 
@@ -223,11 +247,12 @@ module Gori::Tui
 
     private def toggle_current : Nil
       case current[0]
-      when :follow       then @follow = !@follow
-      when :calibrate    then @calibrate = !@calibrate
-      when :keep_alive   then @keep_alive = !@keep_alive
-      when :update_cl    then @update_cl = !@update_cl
-      when :reframe_grpc then @reframe_grpc = !@reframe_grpc
+      when :follow           then @follow = !@follow
+      when :calibrate        then @calibrate = !@calibrate
+      when :keep_alive       then @keep_alive = !@keep_alive
+      when :update_cl        then @update_cl = !@update_cl
+      when :reframe_grpc     then @reframe_grpc = !@reframe_grpc
+      when :keep_interesting then @keep_interesting = !@keep_interesting
       end
     end
 
@@ -254,7 +279,9 @@ module Gori::Tui
         f_words: @fields[:f_words].value, f_regex: @fields[:f_regex].value,
         grpc_fields: @fields[:grpc_fields].value,
         tls_preset: @fields[:tls_preset].value,
-        m_time: @fields[:m_time].value, f_time: @fields[:f_time].value)
+        m_time: @fields[:m_time].value, f_time: @fields[:f_time].value,
+        stop_after: @fields[:stop_after].value, stop_on: @fields[:stop_on].value,
+        keep_interesting: @keep_interesting)
     end
 
     # --- rendering ----------------------------------------------------------
@@ -297,6 +324,19 @@ module Gori::Tui
       # entirely, so the two lines on screen disagreed about what the form could do.
     end
 
+    # A toggle row's current state, by field key — pulled out of `render_row` so that method
+    # stays under the complexity ceiling as the toggle set grows.
+    private def toggle_on?(key : Symbol) : Bool
+      case key
+      when :follow           then @follow
+      when :keep_alive       then @keep_alive
+      when :update_cl        then @update_cl
+      when :reframe_grpc     then @reframe_grpc
+      when :keep_interesting then @keep_interesting
+      else                        @calibrate
+      end
+    end
+
     private def render_row(screen : Screen, box : Rect, ri : Int32, y : Int32, vx : Int32) : Nil
       key, label, kind = ROWS[ri]
       foc = ri == @sel
@@ -304,14 +344,7 @@ module Gori::Tui
       screen.fill(Rect.new(box.x + 1, y, box.w - 2, 1), bg) if foc
       screen.text(box.x + 2, y, label, foc ? Theme.text_bright : Theme.muted, bg)
       if kind == :toggle
-        on = case key
-             when :follow       then @follow
-             when :keep_alive   then @keep_alive
-             when :update_cl    then @update_cl
-             when :reframe_grpc then @reframe_grpc
-             else                    @calibrate
-             end
-        screen.text(vx, y, on ? "‹ on ›" : "‹ off ›", foc ? Theme.text_bright : Theme.text, bg)
+        screen.text(vx, y, toggle_on?(key) ? "‹ on ›" : "‹ off ›", foc ? Theme.text_bright : Theme.text, bg)
       else
         vw = {box.right - 2 - vx, 1}.max
         @fields[key].render(screen, vx, y, vw, foc, foc ? Theme.text_bright : Theme.text, bg)

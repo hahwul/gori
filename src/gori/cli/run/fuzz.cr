@@ -78,6 +78,9 @@ module Gori
         slot : String? = nil
         fail_if_no_matches = false
         record_policy = :none
+        keep = Fuzz::Keep::All
+        stop_after_matches : Int32? = nil
+        stop_specs = [] of String
         matcher = Fuzz::Matcher.new(keep_bodies: :none)
         ws_overrides = [] of Fuzz::WsMessageSource
         ws_idle_ms : Int64? = nil
@@ -191,6 +194,22 @@ module Gori
           p.on("--mh=TEXT", "Match a case-insensitive substring of the response HEAD (e.g. 'x-powered-by: php')") { |v| matcher.match_header = v }
           p.on("--fh=TEXT", "Filter out a case-insensitive substring of the response HEAD") { |v| matcher.filter_header = v }
           p.on("--extract=REGEX", "Grep-extract a value from each response (capture group 1)") { |v| matcher.extract = parse_regex(v) }
+          # Stop the run once the matchers have hit N times — N=1 ends it on the first hit, the
+          # shape a credential / IDOR sweep wants. The run lands `condition_met`, not `stopped`,
+          # and exits 0: the condition was the goal, and in-flight requests finish (see
+          # `Engine#check_stop_condition`).
+          p.on("--stop-after-matches=N", "Stop the run once the matchers have hit N times (1 = first hit); the run ends `condition_met`") { |v| stop_after_matches = parse_count(v, "--stop-after-matches") }
+          # A SEPARATE stop condition, independent of --mc/--ms/…: end the run when THIS predicate
+          # holds on a response. DIM:SPEC where DIM is status|grpc|size|words|lines|time|header|regex,
+          # and !DIM negates (a filter) — `--stop-on '!regex:Invalid password'` stops when the body
+          # no longer carries it. Repeatable; each DIM ANDs (a filter fires on any). Evaluated on
+          # the same decoded body the matchers use, so it costs no extra decode.
+          p.on("--stop-on=DIM:SPEC", "Stop when a response meets this condition (repeatable). DIM is status|grpc|size|words|lines|time|header|regex; !DIM negates (e.g. '!regex:Invalid password'). The run ends `condition_met`") { |v| stop_specs << v }
+          # The result-capture filter for `fuzz save` (issue #1240): `interesting` stores only
+          # matched rows plus the ones carrying an observed fact (an error, a re-send, a
+          # truncated capture, the stop row), so a huge sweep does not write one archive row per
+          # request. The run's counters stay whole-run and `idx` stays the payload position.
+          p.on("--keep=POLICY", "Which result rows `fuzz save` stores: all (default) | interesting (matched + error/re-send/incomplete/stop rows only)") { |v| keep = parse_keep(v) }
           p.on("--ac", "Auto-calibrate: sample the target's noise and drop matching responses") { auto_cal = true }
           p.on("--format=FMT", "Output: text (default) | json | jsonl") { |v| format = parse_format(v, [:text, :json, :jsonl]) }
           p.on("--force", "Run even when the request count is huge or unknown") { force = true }
@@ -278,11 +297,28 @@ module Gori
         if race_warmup_file && !race
           abort "gori run fuzz: --race-warmup applies to a --race run (add --race N, or drop the warm-up)"
         end
+        # The separate stop condition, built from every --stop-on and attached to the run's
+        # matcher BEFORE spec_error runs — so a stop-condition typo is refused by the same
+        # validator, and it is evaluated on the one decode the matcher already pays for.
+        unless stop_specs.empty?
+          cond = Fuzz::Matcher.new
+          stop_specs.each { |spec| parse_stop_on(spec, cond) }
+          matcher.stop_condition = cond
+        end
         # A match/filter spec that can never fire (`--ms 1O00`, `--mc 2OO`) used to run the
-        # whole sweep and report `0 matched` — indistinguishable from "nothing there". See
+        # whole sweep and report `0 matched` — indistinguishable from "nothing there". This
+        # now also names a bad --stop-on term ("stop match size spec …"). See
         # `Fuzz::Matcher#spec_error`.
         if spec_err = matcher.spec_error
           abort "gori run fuzz: #{spec_err}"
+        end
+        # `--keep interesting` governs the `fuzz save` archive; without a save there is no
+        # archive to filter, so say so rather than let the flag do nothing (the "knob that
+        # silently did nothing" shape the refusals above exist to close). --record-history is a
+        # separate mechanism (History flows), unaffected by --keep.
+        if keep.interesting? && !save_results
+          abort "gori run fuzz: --keep applies to `fuzz save` (the permanent result archive); " \
+                "this run persists no archive. Use `gori run fuzz save … --keep interesting`."
         end
         unless websocket
           if !ws_overrides.empty?
@@ -331,6 +367,7 @@ module Gori
           config: Fuzz::Config.new(mode: mode, concurrency: concurrency, rps: rate, throttle_ms: throttle,
             retries: retries, timeout: timeout, follow_redirects: follow, auto_calibrate: auto_cal,
             keep_bodies: (save_results ? :all : record_policy), keep_alive: keep_alive, max_requests: max_requests,
+            stop_after_matches: stop_after_matches, keep: keep,
             update_content_length: update_cl, reframe_grpc: reframe_grpc, race_count: race,
             race_warmup: race_warmup_file.try { |f| read_input_file(f, "gori run fuzz").to_slice },
             ws_idle: ws_idle,
@@ -420,7 +457,7 @@ module Gori
             saved = Fuzz::Persistence.new(s, Fuzz::SavedRunMeta.new(nil,
               "#{origin.scheme}://#{origin.host}:#{origin.port}", saved_mode, total,
               http2: http2, sni: sni, tls_preset: plan.tls_preset,
-              websocket: plan.websocket?, surface: "cli",
+              websocket: plan.websocket?, surface: "cli", keep: keep.label,
               source_ref: flow_id.try { |id| "flow:#{id}" } ||
                           repeater_id.try { |id| "repeater:#{id}" }))
           end
@@ -804,6 +841,9 @@ module Gori
         shown = 0
         had_error = false
         saved_terminal = false
+        # Set when the run's own `stop_on` ended it: the run reached its goal, so it exits 0
+        # even under --fail-if-no-matches (a `--stop-on 'regex:admin'` need not have "matched").
+        condition_met = false
         last_progress = nil.as(Fuzz::Progress?)
         interrupted = Run.install_interrupt_trap("fuzz-interrupt",
           "interrupted — stopping and emitting what completed…") { engine.stop }
@@ -850,8 +890,9 @@ module Gori
             when Fuzz::DoneEvent
               last_progress = ev.progress
               saved_terminal = true
+              condition_met = !ev.stop_reason.nil?
               saved.try(&.finish(ev.progress.sent, ev.progress.matched, ev.progress.errors,
-                Fuzz.terminal_status(ev.progress, ev.stopped, max_requests, had_error)))
+                Fuzz.terminal_status(ev.progress, ev.stopped, max_requests, had_error, ev.stop_reason)))
               fuzz_done(ev, shown, pool, max_requests, race, engine.matcher_constrained?, reframe_grpc)
             when Fuzz::ErrorEvent
               # The engine follows setup errors with Done. Defer the terminal write to that
@@ -879,7 +920,8 @@ module Gori
           if persist.failed?
             STDERR.puts "gori run fuzz save: NOT saved: #{persist.error}"
           else
-            STDERR.puts "saved fuzz run ##{persist.run_id} · #{persist.written} result#{persist.written == 1 ? "" : "s"}"
+            kept = persist.keep.interesting? && (p = last_progress) && p.sent > persist.written ? " (kept #{persist.written} of #{p.sent}, keep: interesting)" : ""
+            STDERR.puts "saved fuzz run ##{persist.run_id} · #{persist.written} result#{persist.written == 1 ? "" : "s"}#{kept}"
           end
         end
         # STDERR so STDOUT stays the result rows/JSON alone. `get_flow <id>` (History) reads the
@@ -901,7 +943,9 @@ module Gori
         # "no matches". See `Run.report_interrupted`.
         Run.report_interrupted(shown, "row", "emitted") if interrupted.call
         exit 1 if had_error || saved.try(&.failed?)
-        exit 3 if fail_if_no_matches && matched == 0
+        # `--stop-on` / `--stop-after-matches` that fired is the run reaching its GOAL, so it
+        # exits 0 even with no matcher hit — a `--stop-on 'regex:admin'` need not "match".
+        exit 3 if fail_if_no_matches && matched == 0 && !condition_met
         # A run where NOTHING matched and every send errored (target down, scope-blocked, TLS
         # failure) is a failure, not a clean "no matches" — so a scripted caller can tell the two
         # apart even without --fail-if-no-matches. The errored rows are now shown too (below),
@@ -1042,7 +1086,16 @@ module Gori
         # second number that says the same thing twice. See `Fuzz::Progress#requests`.
         p = ev.progress
         extra = p.requests > p.sent ? " · #{p.requests} requests on the wire" : ""
-        STDERR.puts "done · #{p.sent} sent#{extra} · #{emitted} shown · #{p.errors} errors#{ev.stopped ? " (stopped)" : ""}"
+        # `stop_on` that fired outranks the bare "(stopped)": the run met its condition, which
+        # is a different ending from ^X, and the operator wants the sentence that says which.
+        ending = if reason = ev.stop_reason
+                   " (#{reason})"
+                 elsif ev.stopped
+                   " (stopped)"
+                 else
+                   ""
+                 end
+        STDERR.puts "done · #{p.sent} sent#{extra} · #{emitted} shown · #{p.errors} errors#{ending}"
         warn_fuzz_budget(p, max_requests)
         warn_fuzz_grpc_framing(p, reframe_grpc)
         warn_fuzz_ws_notes(p)

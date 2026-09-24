@@ -1770,11 +1770,22 @@ module Gori
       getter surface : String?
       getter source_ref : String?
       getter snapshot_version : Int32
+      # The result-capture policy this run was archived under (issue #1240): "all" or
+      # "interesting". DEFAULTED so every construction site that predates the column keeps
+      # compiling, and a run written before it reads "all" — which is what it was.
+      getter keep : String
 
       def initialize(@id, @session_id, @created_at, @finished_at, @target, @mode,
                      @total, @sent, @matched, @errors, @status, @http2 = false,
                      @sni = nil, @tls_preset = nil, @websocket = false,
-                     @surface = nil, @source_ref = nil, @snapshot_version = 0)
+                     @surface = nil, @source_ref = nil, @snapshot_version = 0,
+                     @keep = "all")
+      end
+
+      # Was this run's archive filtered — i.e. not every row was kept? Read by the listings to
+      # add a "N of M kept" note rather than let a filtered run read as a lost one.
+      def filtered? : Bool
+        @keep != "all"
       end
 
       # This run predates the V24 snapshot columns, so `http2` / `websocket` / `sni` /

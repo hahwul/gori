@@ -1407,8 +1407,19 @@ module Gori
         "ALTER TABLE oast_sessions ADD COLUMN provider_key TEXT",
       ]
 
+      # The result-capture policy a saved fuzz run was written under (issue #1240): `all` (every
+      # row) or `interesting` (matched rows plus the ones carrying an observed fact — an error, a
+      # re-send, a truncated capture, the stop condition). Recorded so a filtered archive reads
+      # "12 of 100,000 rows kept (keep: interesting)" rather than looking like a lost run — the
+      # counters (`sent`/`matched`/`errors`) stay whole-run and `idx` stays the payload position,
+      # so a kept row's gaps are the dropped rows. DEFAULT 'all', which is what every run before
+      # this column was: the archive kept everything.
+      V30 = [
+        "ALTER TABLE fuzz_runs ADD COLUMN keep TEXT NOT NULL DEFAULT 'all'",
+      ]
+
       MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17,
-                    V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29]
+                    V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29, V30]
 
       def self.migrate!(db : DB::Database, read_only : Bool = false) : Nil
         db.using_connection do |conn|

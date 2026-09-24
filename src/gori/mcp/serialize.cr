@@ -637,6 +637,11 @@ module Gori
           j.field "source_ref", text(run.source_ref)
           j.field "snapshot_version", run.snapshot_version
           j.field "legacy", run.legacy_snapshot?
+          # The result-capture policy this archive was written under (issue #1240), and whether
+          # it was filtered — so `stored_results` below reading under `sent` is a policy, not a
+          # lost run.
+          j.field "keep", text(run.keep)
+          j.field "filtered", run.filtered?
         end
       end
 
