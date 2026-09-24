@@ -187,12 +187,13 @@ module Gori::Tui
       lens = @scope.try(&.ql_lens)
       residual_filter = QL.parse(residual, scope: lens)
       @query_note = query_note_for(residual, residual_filter, lens)
+      combined = flow_filter_of(residual, residual_filter)
       # A non-blank QL residual that compiles to EMPTY means every QL term was invalid
       # (typo'd field, bad numeric, unterminated value). Mirror HistoryView / MCP / CLI:
       # reject it (empty tree + a note) rather than fall through to a match-all search
       # that shows the WHOLE sitemap behind an "active" filter. A tag-only query has a
       # blank residual, so reject_empty? is false and the tag filter still applies below.
-      if residual_has_terms?(residual) && QL.reject_empty?(residual, residual_filter)
+      unless combined
         @hosts = [] of Node
         @visible_cache = nil
         @selected = 0
@@ -200,7 +201,16 @@ module Gori::Tui
         @loaded = true
         return
       end
-      ReloadPlan.new(positives, negatives, QL.and(@scope.try(&.filter) || QL::EMPTY, residual_filter))
+      ReloadPlan.new(positives, negatives, combined)
+    end
+
+    # The flow filter a query's QL half compiles to — the scope lens AND the residual — or nil
+    # when a non-blank residual compiled to nothing. ONE home for both readers of it: the tree
+    # (`prepare_reload`) and the Params sub-tab (`params_filter`), which must scan the flow set
+    # this tree is built from.
+    private def flow_filter_of(residual : String, residual_filter : QL::Filter) : QL::Filter?
+      return nil if residual_has_terms?(residual) && QL.reject_empty?(residual, residual_filter)
+      QL.and(@scope.try(&.filter) || QL::EMPTY, residual_filter)
     end
 
     # Reads only — safe off the main fiber. `control` lets the caller cancel a superseded read.
@@ -776,10 +786,7 @@ module Gori::Tui
     # this view refuses in `prepare_reload`.
     def params_filter : QL::Filter?
       _, _, residual = split_tag_terms(@query)
-      lens = @scope.try(&.ql_lens)
-      residual_filter = QL.parse(residual, scope: lens)
-      return nil if residual_has_terms?(residual) && QL.reject_empty?(residual, residual_filter)
-      QL.and(@scope.try(&.filter) || QL::EMPTY, residual_filter)
+      flow_filter_of(residual, QL.parse(residual, scope: @scope.try(&.ql_lens)))
     end
 
     # What the cursor row means to the Params sub-tab: a host row is the whole host, any

@@ -41,11 +41,22 @@ module Gori::Tui
       Verb::Scope::Params
     end
 
-    # The first visit scans; later visits keep what is on screen (^R rescans). A scan that
-    # re-ran on every tab switch would move rows out from under the cursor the operator
-    # came back to.
+    # The first visit scans; later visits keep what is on screen (^R rescans) — unless the
+    # Sitemap's query or scope lens changed since, in which case what is on screen answers
+    # about a flow set the tree beside it no longer shows. A scan that re-ran on EVERY switch
+    # would move rows out from under the cursor the operator came back to.
     def on_enter : Nil
-      run unless @params.ready? || @params.scanning?
+      return if @params.scanning?
+      run unless @params.ready? && scanned_filter_current?
+    end
+
+    # The filter the on-screen scan read under, as {sql, args} — `QL::Filter` is a struct
+    # with no `==` of its own worth trusting across a re-parse.
+    @scanned_under : {String, Array(DB::Any)}? = nil
+
+    private def scanned_filter_current? : Bool
+      f = @sitemap.params_filter
+      !f.nil? && @scanned_under == {f.sql, f.args}
     end
 
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
@@ -146,6 +157,7 @@ module Gori::Tui
         @params.scanning = false
         return
       end
+      @scanned_under = {filter.sql, filter.args}
       opts = ParamInventory::Options.new(filter: filter, host: @params.target.try(&.host),
         all_headers: @params.all_headers?, max_flows: MAX_FLOWS)
       store = @host.session.store

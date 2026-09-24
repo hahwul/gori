@@ -154,6 +154,45 @@ describe Gori::ParamInventory do
     end
   end
 
+  # A narrow prefix must not be starved by newer flows elsewhere: rows outside it are judged
+  # before their bodies are read and do not count against max_flows.
+  it "does not spend max_flows on flows outside the path prefix" do
+    with_store do |store|
+      pi_flow(store, "/admin?role=1")
+      3.times { pi_flow(store, "/static/app.js?v=1") }
+      report = PI.build(store, PI::Options.new(path_prefix: "/admin", max_flows: 1))
+      report.rows.map(&.name).should eq(["role"])
+      report.flows_scanned.should eq(1)
+      report.truncated.should be_false
+    end
+  end
+
+  # The project's own redaction profile is what `get_flow` masks with; a field it names must
+  # not come back from the inventory as an ordinary sample.
+  it "honours the project's configured redaction profile" do
+    with_store do |store|
+      profile = Gori::Redact::Profile.new("engagement", json_fields: ["email"], patterns: ["acct-\\d+"])
+      Gori::Redact::Policy.write_project_scope(store,
+        Gori::Redact::Policy::ProjectScope.new(active: "engagement", profiles: [profile]))
+      pi_flow(store, "/u", method: "POST", req_headers: "Content-Type: application/json\r\n",
+        body: %({"email":"a@b.c","ref":"acct-12345","name":"Al"}))
+      report = PI.build(store)
+      row(report, "email").sensitive.should be_true
+      row(report, "ref").sensitive.should be_true
+      row(report, "name").sensitive.should be_false
+    end
+  end
+
+  # The stored body is read whole: a cap on the WIRE bytes would cut a JSON body before it
+  # could parse.
+  it "reads a JSON body larger than the old 256 KiB cut" do
+    with_store do |store|
+      big = %({"pad":"#{"x" * (300 * 1024)}","late":"v"})
+      pi_flow(store, "/j", method: "POST", req_headers: "Content-Type: application/json\r\n", body: big)
+      row(PI.build(store), "late").samples.should eq(["v"])
+    end
+  end
+
   it "narrows by exact host, path prefix, and location" do
     with_store do |store|
       pi_flow(store, "/api/a?k=1", host: "api.test", req_headers: "X-Tenant: acme\r\n")
@@ -193,6 +232,15 @@ describe Gori::ParamInventory do
         rows = PI.build(store).rows
         PI.wordlist(rows).sort.should eq(["email", "q"])
         PI.wordlist(rows, headers: true).should contain("x-tenant")
+      end
+    end
+
+    # One name per line is the format: a name it cannot carry is left out, not split in two.
+    it "leaves out names a line-oriented wordlist cannot carry" do
+      with_store do |store|
+        pi_flow(store, "/a?ok=1&a%0Ab=2&%23hash=3", method: "POST",
+          req_headers: "Content-Type: application/json\r\n", body: %({"":1,"fine":2}))
+        PI.wordlist(PI.build(store).rows).sort!.should eq(["fine", "ok"])
       end
     end
   end

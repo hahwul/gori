@@ -72,6 +72,22 @@ describe Gori::Params do
 
   it "yields nothing for a JSON-typed body that is not JSON" do
     params_of("POST /j HTTP/1.1\r\nContent-Type: application/json\r\n\r\n", "not json").should be_empty
+    # …including one that parses up to trailing garbage: no names from a document that is not one.
+    params_of("POST /j HTTP/1.1\r\nContent-Type: application/json\r\n\r\n", %({"a":"b"} x)).should be_empty
+    params_of("POST /j HTTP/1.1\r\nContent-Type: application/json\r\n\r\n", %({"a":"b"}{"c":"d"})).should be_empty
+  end
+
+  # The request line is cut by byte: a raw high byte in the target makes that LINE invalid
+  # UTF-8, which the head walk skips — and must not turn the first header into "the request line".
+  it "reads the first header behind a request line that is not valid UTF-8" do
+    head = IO::Memory.new
+    head << "GET /caf"
+    head.write_byte(0xe9_u8)
+    head << "?x=1 HTTP/1.1\r\nX-Tenant: acme\r\nCookie: sid=1\r\n\r\n"
+    out = [] of {L, String, String}
+    Gori::Params.each(head.to_slice, nil) { |p| out << {p.loc, p.name, p.value} }
+    out.should contain({L::Headers, "x-tenant", "acme"})
+    out.should contain({L::Cookies, "sid", "1"})
   end
 
   it "bounds a deep JSON nest instead of recursing through it" do

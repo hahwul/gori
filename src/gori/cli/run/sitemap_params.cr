@@ -32,7 +32,7 @@ module Gori
           p.on("--host=HOST", "Only this host (exact, case-insensitive)") { |v| host = v }
           p.on("--path=PREFIX", "Only endpoints whose path starts with PREFIX") { |v| path_prefix = v }
           p.on("--location=LIST", "Only these locations: query,form,multipart,json,headers,cookies (default: all)") do |v|
-            locations = parse_params_locations(v)
+            locations = parse_mine_locations(v, "gori run sitemap params")
           end
           p.on("--all-headers", "Include standard browser headers (User-Agent, Accept*, Sec-*, …)") { all_headers = true }
           p.on("--in-scope", "Only flows in the project's configured scope") { in_scope = true }
@@ -126,14 +126,6 @@ module Gori
           opts = opts.copy_with(filter: QL.and(scope.filter(force: true), opts.filter))
         end
         ParamInventory.build(store, opts)
-      end
-
-      private def self.parse_params_locations(v : String) : Array(Miner::Location)
-        v.split(',').compact_map do |tok|
-          next if tok.strip.empty?
-          Miner::Location.parse?(tok) ||
-            abort("gori run sitemap params: unknown location '#{tok}' (query|form|multipart|json|headers|cookies)")
-        end
       end
 
       # Grouped by host, then endpoint; one line per parameter. Every captured string goes

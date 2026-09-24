@@ -146,6 +146,26 @@ describe ParamsController do
     end
   end
 
+  # The inventory answers about the Sitemap's flow set; once the tree's query moved, the
+  # scan on screen answers about a different one and a revisit rescans.
+  it "rescans on entry when the Sitemap query changed since the scan" do
+    with_params_controller do |ctl, sitemap, session|
+      seed_params_flow(session.store, "https://acme.test/a?x=1")
+      seed_params_flow(session.store, "https://other.test/b?y=1")
+      ctl.on_enter
+      drain_until_landed(ctl)
+      ctl.view.rows.map(&.name).sort!.should eq(["x", "y"])
+      gen = ctl.generation
+      ctl.on_enter # nothing changed: the scan on screen stands
+      ctl.generation.should eq(gen)
+      "host:acme.test".each_char { |c| sitemap.view.query_insert(c) }
+      ctl.on_enter
+      ctl.generation.should_not eq(gen)
+      drain_until_landed(ctl)
+      ctl.view.rows.map(&.name).should eq(["x"])
+    end
+  end
+
   it "narrows the scan to the Sitemap row the operator came from" do
     with_params_controller do |ctl, sitemap, session|
       seed_params_flow(session.store, "https://acme.test/users/1?x=1")

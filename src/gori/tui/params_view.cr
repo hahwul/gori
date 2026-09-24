@@ -215,7 +215,7 @@ module Gori::Tui
     private def empty_note : String
       return "scanning captured requests…" if scanning? && @report.nil?
       return "press ^R to scan the captured requests for parameters" unless r = @report
-      return "no parameters on #{@target.try(&.label)} — clear the filter (x) to see every endpoint" if @target && !r.rows.empty?
+      return "no parameters on #{@target.try(&.label)} — esc clears the filter to show every endpoint" if @target && !r.rows.empty?
       "no parameters in #{Fmt.count(r.flows_scanned)} flows read (the Sitemap query and scope lens apply)"
     end
 

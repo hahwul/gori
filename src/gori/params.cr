@@ -2,7 +2,6 @@ require "json"
 require "./form_data"
 require "./entity"
 require "./media_type"
-require "./json_spans"
 require "./miner/types"
 require "./miner/inject"
 require "./proxy/codec/http1"
@@ -24,9 +23,8 @@ module Gori
   #
   #   * query / form / multipart → `FormData.from_flow`, the PARAMS pane's projection (it
   #     already reads the ENTITY, so a chunked or gzip'd form is not listed as garbage);
-  #   * JSON → a pull-parser walk over `Entity.bytes`, gated by `MediaType.json?` and
-  #     `JsonSpans.valid?`, reading numbers as their TEXT (never converted, so a value past
-  #     Int64 cannot raise);
+  #   * JSON → one pull-parser walk over `Entity.bytes`, gated by `MediaType.json?`, reading
+  #     numbers as their TEXT (never converted, so a value past Int64 cannot raise);
   #   * headers / cookies → `Miner::Inject.each_ascii_line`, the byte-safe head walk.
   #
   # Values are DECODED and UNSCRUBBED — captured bytes may be invalid UTF-8, and a surface
@@ -139,14 +137,19 @@ module Gori
     # numbers/bools/null as their literal text. Arrays collapse their index to `[]`, so every
     # element of `items` contributes to one `items[].id` — an inventory counts names, not
     # positions. A body that is not exactly one JSON value yields nothing.
+    #
+    # ONE lex of the body: the walk is the validity check. Leaves are collected first and
+    # yielded only once the whole document has parsed (trailing data included), so an invalid
+    # body yields nothing rather than the names before its first error. (The pull parser reads
+    # a number as its text, so a value past Int64 is not an error here.)
     def each_json_leaf(bytes : Bytes, & : String, String, Bool ->) : Nil
-      return unless JsonSpans.valid?(bytes)
+      return if bytes.empty?
       acc = [] of {String, String, Bool}
       begin
-        walk_json(JSON::PullParser.new(String.new(bytes)), "", 0, acc)
+        pull = JSON::PullParser.new(String.new(bytes))
+        walk_json(pull, "", 0, acc) # the parser raises on anything trailing the root value
       rescue JSON::ParseException
-        # `valid?` already ran the stdlib lexer over the whole document, so this is unreachable
-        # short of a lexer disagreement with itself — and a best-effort read keeps what it had.
+        return
       end
       acc.each { |(path, value, literal)| yield path, value, literal }
     end
@@ -206,13 +209,14 @@ module Gori
     # verbatim, since that namespace is case-sensitive. An obs-fold continuation line (leading
     # SP/HTAB) belongs to the header above it and is skipped rather than read as a header
     # whose NAME is value bytes.
+    #
+    # The request line is cut off by BYTE (its first LF) before the walk, not by skipping the
+    # walk's first line: `each_ascii_line` drops a line that is not valid UTF-8, so a request
+    # line with a raw high byte in its target — the malformed input gori exists to capture
+    # (P7) — would otherwise make the first HEADER the one skipped.
     private def each_head(head : Bytes, all_headers : Bool, & : Param ->) : Nil
-      first = true
-      Miner::Inject.each_ascii_line(head) do |line|
-        if first
-          first = false
-          next # the request line
-        end
+      nl = head.index(0x0a_u8) || return
+      Miner::Inject.each_ascii_line(head[(nl + 1)..]) do |line|
         break if line.empty? # the blank line ends the head
         next if line.starts_with?(' ') || line.starts_with?('\t')
         colon = line.index(':')

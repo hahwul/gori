@@ -200,10 +200,11 @@ module Gori
         end
       end
 
-      private def self.parse_mine_locations(v : String) : Array(Miner::Location)
+      # `cmd` names the command in the refusal — `sitemap params` takes the same list.
+      private def self.parse_mine_locations(v : String, cmd : String = "gori run mine") : Array(Miner::Location)
         v.split(',').compact_map do |tok|
           next if tok.strip.empty?
-          Miner::Location.parse?(tok) || abort("gori run mine: unknown location '#{tok}' (query|form|multipart|json|headers|cookies)")
+          Miner::Location.parse?(tok) || abort("#{cmd}: unknown location '#{tok}' (query|form|multipart|json|headers|cookies)")
         end
       end
 
