@@ -1294,4 +1294,68 @@ describe "Gori::Store#search (QL)" do
       f.args.should eq(["%/a(b)%"])
     end
   end
+
+  # --- cache: (#1247) -------------------------------------------------------------------------
+  describe "cache:" do
+    it "compiles to the gori_cache_status UDF over response_head" do
+      f = Gori::QL.parse("cache:hit")
+      f.sql.should eq("(gori_cache_status(response_head) = ?)")
+      f.args.should eq(["hit"])
+    end
+
+    it "case-normalises the value" do
+      Gori::QL.parse("cache:HIT").should eq(Gori::QL.parse("cache:hit"))
+      Gori::QL.parse("cache:Dynamic").should eq(Gori::QL.parse("cache:dynamic"))
+    end
+
+    it "accepts every value in its vocabulary and drops an unknown one" do
+      Gori::QL::CACHE_VALUES.each do |v|
+        Gori::QL.parse("cache:#{v}").sql.should eq("(gori_cache_status(response_head) = ?)")
+      end
+      # `cache:yes` is a bad value — DROPPED (matches everything is the wrong reading), same as
+      # `proto:zzz`. An all-dropped query folds to EMPTY.
+      Gori::QL.parse("cache:yes").should eq(Gori::QL::EMPTY)
+    end
+
+    it "selects flows by their response cache headers, end to end through the UDF" do
+      with_store do |store|
+        hit = capture(store, "acme.test", "GET", "/a")
+        store.update_response(Gori::Store::CapturedResponse.new(
+          flow_id: hit, status: 200, head: "HTTP/1.1 200 OK\r\nX-Cache: HIT\r\nAge: 30\r\n\r\n".to_slice))
+        miss = capture(store, "acme.test", "GET", "/b")
+        store.update_response(Gori::Store::CapturedResponse.new(
+          flow_id: miss, status: 200, head: "HTTP/1.1 200 OK\r\nX-Cache: MISS\r\n\r\n".to_slice))
+        dyn = capture(store, "acme.test", "GET", "/c")
+        store.update_response(Gori::Store::CapturedResponse.new(
+          flow_id: dyn, status: 200, head: "HTTP/1.1 200 OK\r\nCache-Control: no-store\r\n\r\n".to_slice))
+        plain = capture(store, "acme.test", "GET", "/d")
+        store.update_response(Gori::Store::CapturedResponse.new(
+          flow_id: plain, status: 200, head: "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n".to_slice))
+        pending = capture(store, "acme.test", "GET", "/e") # never got a response
+        store.flush
+
+        store.search(Gori::QL.parse("cache:hit"), 50).map(&.id).should eq([hit])
+        store.search(Gori::QL.parse("cache:miss"), 50).map(&.id).should eq([miss])
+        store.search(Gori::QL.parse("cache:dynamic"), 50).map(&.id).should eq([dyn])
+        # `none` = no cache headers OR no response yet — so both the plain flow and the pending
+        # one, newest first.
+        store.search(Gori::QL.parse("cache:none"), 50).map(&.id).sort!.should eq([plain, pending].sort!)
+      end
+    end
+
+    it "negates and groups like any other term" do
+      with_store do |store|
+        hit = capture(store, "acme.test", "GET", "/a")
+        store.update_response(Gori::Store::CapturedResponse.new(
+          flow_id: hit, status: 200, head: "HTTP/1.1 200 OK\r\nCF-Cache-Status: HIT\r\n\r\n".to_slice))
+        miss = capture(store, "acme.test", "GET", "/b")
+        store.update_response(Gori::Store::CapturedResponse.new(
+          flow_id: miss, status: 200, head: "HTTP/1.1 200 OK\r\nCF-Cache-Status: MISS\r\n\r\n".to_slice))
+        store.flush
+
+        store.search(Gori::QL.parse("-cache:hit"), 50).map(&.id).should contain(miss)
+        store.search(Gori::QL.parse("-cache:hit"), 50).map(&.id).should_not contain(hit)
+      end
+    end
+  end
 end

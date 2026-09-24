@@ -637,6 +637,11 @@ module Gori
           j.field "source_ref", text(run.source_ref)
           j.field "snapshot_version", run.snapshot_version
           j.field "legacy", run.legacy_snapshot?
+          # The result-capture policy this archive was written under (issue #1240), and whether
+          # it was filtered — so `stored_results` below reading under `sent` is a policy, not a
+          # lost run.
+          j.field "keep", text(run.keep)
+          j.field "filtered", run.filtered?
         end
       end
 
@@ -785,6 +790,12 @@ module Gori
           j.field "state", row.state.to_s.downcase
           j.field "duration_us", row.duration_us
           j.field "content_type", text(row.content_type)
+          # The normalised cache signal (#1247), computed from the response head in hand — the
+          # same `Gori::CacheStatus` the QL `cache:` field runs in SQL, so `get_flow` and a
+          # `cache:hit` query cannot disagree about a flow. An agent chasing web-cache deception
+          # reads this to know whether a response was served from a shared cache (`hit`) before
+          # it re-requests without a session to confirm. `none` when no cache headers were sent.
+          j.field "cache", Gori::CacheStatus.classify(detail.response_head).token
           # `flow_row`'s field, on the DETAIL projection too, and for a sharper reason: this
           # is the call an agent makes to read a flow's BYTES before writing an issue, and
           # without it there is no way to tell a response gori fabricated from a

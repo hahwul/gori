@@ -73,7 +73,7 @@ By default `gori mcp` advertises every tool, so an agent can reach the whole wor
 
 | Start with | Tools | `tools/list` | Tokens | For |
 | --- | ---: | ---: | ---: | --- |
-| `gori mcp` | 180 | ~206 KB | ~53k | Everything (the default) |
+| `gori mcp` | 181 | ~207 KB | ~53k | Everything (the default) |
 | `--read-only` | 60 | ~67 KB | ~17k | Read tools and pure compute; no live requests |
 | `--tools=@recon` | 35 | ~52 KB | ~13k | Read and map the capture, replay a request, record issues and notes |
 | `--tools=@recon --read-only` | 27 | ~37 KB | ~10k | `@recon` minus what `--read-only` disables |
@@ -196,7 +196,7 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 | `ql_reference` | The query-language reference |
 | `ql_explain` | Diagnose a query without running it, to check a filter before spending requests on it |
 
-**Action tools** (disabled by `--read-only`). Every one that opens a socket (`send_request`, `send_websocket`, `fuzz_*`, `mine_*`, `authorize_*`, `sequence_*`, `discover_*`, `grpc_reflect`, `minimize_repeater`, and `probe_scan` with `active:true`) is scope-gated: a target outside, or without, a configured scope is refused with `SCOPE_BLOCKED` unless the call passes `allow_unscoped:true`, the explicit waiver, and the sandbox and explicit excludes apply even then.
+**Action tools** (disabled by `--read-only`). Every one that opens a socket (`send_request`, `send_websocket`, `fuzz_*`, `mine_*`, `authorize_*`, `cache_deception_check`, `sequence_*`, `discover_*`, `grpc_reflect`, `minimize_repeater`, and `probe_scan` with `active:true`) is scope-gated: a target outside, or without, a configured scope is refused with `SCOPE_BLOCKED` unless the call passes `allow_unscoped:true`, the explicit waiver, and the sandbox and explicit excludes apply even then.
 
 | Tool | Purpose |
 | ------ | --------- |
@@ -241,6 +241,7 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 | `mine_start` / `mine_status` / `mine_results` / `mine_stop` | Drive the param miner |
 | `sequence_start` / `sequence_status` / `sequence_results` / `sequence_stop` | Collect tokens by live replay and grade them (results return the report, never the tokens) |
 | `authorize_start` / `authorize_status` / `authorize_results` / `authorize_stop` | Replay captured flows under several identities and compare each response against a baseline (broken access control). Results lead with `access_control` (`BYPASS`/`enforced`/`review`/`error`/`nothing_sent`) and a flat, never-paged `bypasses` list |
+| `cache_deception_check` | Test one flow for web cache deception: replay it as its captured (authenticated) identity to prime any cache, then re-request the same url with no session. `verdict: cached` (`deception: true`) means the anonymous re-request was served the authenticated response from a cache. Synchronous (two sends). Reads the response's `cache` status; pair it with the Fuzzer's `cache-delimiters` payload set to find the crafted paths that trigger it |
 | `discover_start` / `discover_status` / `discover_results` / `discover_stop` | Spider and brute-force endpoints, poll progress, and read findings. All four are action tools, so a read-only server has no Discover surface |
 | `oast_start` / `oast_stop` | Register an ad-hoc OAST payload and poll for callbacks (read the hits with `oast_poll`); `oast_stop` on a RESUMED session stops polling but keeps it resumable |
 | `oast_resume` / `oast_release` | Re-arm a persisted session so payloads planted earlier keep resolving (its polls are saved into the project), or deregister one for a finished engagement; its callbacks stay |

@@ -139,6 +139,34 @@ describe Gori::Fuzz::Persistence do
     end
   end
 
+  it "under keep: interesting stores only the interesting rows while the counters stay whole-run" do
+    with_persistence_store do |store|
+      saved = Gori::Fuzz::Persistence.new(store,
+        Gori::Fuzz::SavedRunMeta.new(nil, "http://keep.test", "sniper", 4_i64, keep: "interesting"))
+      saved.keep.should eq(Gori::Fuzz::Keep::Interesting)
+      # A bare unmatched row is dropped (accepted, not a failure — the return is true)…
+      saved.append(persistence_result(0_i64)).should be_true
+      # …while a matched row and an errored row are kept.
+      matched = Gori::Fuzz::Result.new(1_i64, ["p1"], nil, 200, 2_i64, 1, 1, 10_i64, nil, true, false, "hit")
+      errored = Gori::Fuzz::Result.new(2_i64, ["p2"], nil, nil, 0_i64, 0, 0, 10_i64, "boom", false, false, nil)
+      saved.append(matched).should be_true
+      saved.append(errored).should be_true
+      saved.flush.should be_true
+      # 3 sent, 1 kept-as-matched + 1 kept-as-error = 2 rows stored; the unmatched one dropped.
+      store.fuzz_result_count(saved.run_id).should eq(2_i64)
+      saved.written.should eq(2_i64)
+      # The idx of a kept row is its real payload position — the dropped row leaves a gap at 0.
+      store.fuzz_results(saved.run_id).map(&.idx).should eq([1_i64, 2_i64])
+
+      # The whole-run counters `finish` records are independent of the archive filter.
+      saved.finish(3_i64, 1_i64, 1_i64, "done").should be_true
+      run = store.get_fuzz_run(saved.run_id).not_nil!
+      run.sent.should eq(3_i64)
+      run.keep.should eq("interesting")
+      run.filtered?.should be_true
+    end
+  end
+
   it "makes flush and finish FIFO barriers and finish idempotent" do
     with_persistence_store do |store|
       saved = Gori::Fuzz::Persistence.new(store,

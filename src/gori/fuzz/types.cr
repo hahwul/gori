@@ -265,7 +265,24 @@ module Gori
                      @head = nil, @body = nil, @request = nil, @retried = false,
                      @chain_error = nil, @grpc_status = nil, @grpc_message = nil,
                      @timed_out = false, @resent_count = 0, @wire = nil, *,
-                     @ws_close_code : Int32? = nil, @ws_frames_in : Int32? = nil)
+                     @ws_close_code : Int32? = nil, @ws_frames_in : Int32? = nil,
+                     @stop_hit : Bool = false)
+      end
+
+      # This row met the run's separate STOP condition (`StopOn#condition`) — the row that
+      # ended, or paused, the sweep. Distinct from `matched?`: the condition is its own
+      # match/filter set, independent of the run's matchers, so the row that says "the login
+      # succeeded" can be one `--mc` never selected. Not persisted — a saved run records the
+      # verdict as its `condition_met` status, and the row itself is kept by `interesting?`.
+      getter? stop_hit : Bool
+
+      # The row carries something the run OBSERVED beyond its metrics: a match, a failed send, a
+      # payload that did not go out as declared, a re-send (pool or `--retries`), a truncated
+      # capture, or the stop condition. The one predicate every surface keeps rows by — the
+      # CLI's printed rows, MCP's live cache and the archive's `keep: interesting` — so the
+      # three cannot come to disagree about which unmatched row was worth keeping.
+      def interesting? : Bool
+        matched? || !error.nil? || !chain_error.nil? || retried? || resent? || incomplete? || stop_hit?
       end
 
       # The same row carrying its session's WebSocket facts. A copy-returning method rather
@@ -278,7 +295,7 @@ module Gori
           @duration_us, @error, @matched, @incomplete, @extracted,
           @head, @body, @request, @retried, @chain_error, @grpc_status, @grpc_message,
           @timed_out, @resent_count, @wire,
-          ws_close_code: o.close_code, ws_frames_in: o.frames_in)
+          ws_close_code: o.close_code, ws_frames_in: o.frames_in, stop_hit: @stop_hit)
       end
     end
 
@@ -351,21 +368,54 @@ module Gori
       cap ? {total, cap}.min : total
     end
 
-    # One durable verdict across CLI and TUI. `max_requests` is a wire-attempt budget,
+    # How a finished run ended. An ENUM so a consumer can `case … in` it and a new verdict is
+    # a compile error at every one of them, rather than the string it used to be — MCP mapped
+    # any status it did not know to `:error`, so adding one would have read as a failed run.
+    enum Terminal
+      Done
+      BudgetExhausted
+      ConditionMet
+      Stopped
+      Error
+
+      # The durable spelling — `fuzz_runs.status`, MCP's `status`, the CLI's JSON.
+      def label : String
+        case self
+        in Done            then "done"
+        in BudgetExhausted then "budget_exhausted"
+        in ConditionMet    then "condition_met"
+        in Stopped         then "stopped"
+        in Error           then "error"
+        end
+      end
+    end
+
+    # One durable verdict across CLI, TUI and MCP. `max_requests` is a wire-attempt budget,
     # so exhausting it before every payload completes is a partial run rather than `done`.
-    def self.terminal_status(progress : Progress, stopped : Bool, max_requests : Int64?,
-                             errored : Bool = false) : String
-      return "error" if errored
-      return "stopped" if stopped
+    #
+    # `stop_reason` is `DoneEvent#stop_reason`: non-nil when the run's own `stop_on` ended
+    # it, which is the run reaching its goal rather than being cut short — so it outranks
+    # `stopped` (the engine stopped itself; nobody pressed ^X) and the budget.
+    def self.terminal_verdict(progress : Progress, stopped : Bool, max_requests : Int64?,
+                              errored : Bool = false, stop_reason : String? = nil) : Terminal
+      return Terminal::Error if errored
+      return Terminal::ConditionMet if stop_reason
+      return Terminal::Stopped if stopped
       incomplete = if total = progress.total
                      progress.sent < total
                    else
                      true
                    end
       if (cap = max_requests) && progress.requests >= cap && incomplete
-        return "budget_exhausted"
+        return Terminal::BudgetExhausted
       end
-      "done"
+      Terminal::Done
+    end
+
+    # `terminal_verdict`'s durable spelling, for the consumers that store or print it.
+    def self.terminal_status(progress : Progress, stopped : Bool, max_requests : Int64?,
+                             errored : Bool = false, stop_reason : String? = nil) : String
+      terminal_verdict(progress, stopped, max_requests, errored, stop_reason).label
     end
 
     # Engine → consumer events. A union (not a class hierarchy) so `Channel(Event)`
@@ -373,8 +423,44 @@ module Gori
     # Result/Done/Error are never dropped.
     record ProgressEvent, progress : Progress
     record ResultEvent, result : Result
-    record DoneEvent, progress : Progress, stopped : Bool
+    # `stop_reason` is set when the run's `stop_on` ended it (`Terminal::ConditionMet`) — a
+    # sentence naming what was met, for the finish line every surface prints. `stopped` is
+    # then true as well: the engine stopped itself exactly as ^X would.
+    record DoneEvent, progress : Progress, stopped : Bool, stop_reason : String? = nil
     record ErrorEvent, message : String
+
+    # Which result rows a run's ARCHIVE keeps — the CLI/MCP saved run and the TUI spool behind
+    # Shift-S. The live views (the TUI pane, MCP's live cache, the CLI's printed rows) are not
+    # governed by it.
+    #
+    # `Interesting` keeps the rows `Result#interesting?` names and drops the rest. The run's
+    # counters stay whole-run either way (`fuzz_runs.sent/matched/errors` count every request),
+    # and `fuzz_runs.keep` records the policy, so a saved run reads "12 of 100,000 rows kept"
+    # instead of looking like a lost archive. `idx` stays the engine's job index, so a kept row
+    # keeps its real payload position and the gaps are the dropped rows.
+    enum Keep
+      All
+      Interesting
+
+      def label : String
+        case self
+        in All         then "all"
+        in Interesting then "interesting"
+        end
+      end
+
+      def self.parse?(token : String?) : Keep?
+        case token.try(&.strip.downcase)
+        when "all"         then All
+        when "interesting" then Interesting
+        end
+      end
+
+      # Does the archive keep this row?
+      def keeps?(result : Result) : Bool
+        all? || result.interesting?
+      end
+    end
 
     alias Event = ProgressEvent | ResultEvent | DoneEvent | ErrorEvent
 
@@ -429,6 +515,19 @@ module Gori
       property? auto_calibrate : Bool # drop responses identical to the baseline
       property keep_bodies : Symbol   # :none | :matched | :all
       property max_requests : Int64?  # hard cap on total sends
+      # Stop once this many rows matched the run's own matchers (issue #1240). N=1 stops on the
+      # first hit — the shape a credential / IDOR sweep wants. nil = run to the end, which is
+      # every sweep that came before. The SEPARATE `stop_on` condition (a body regex, a status,
+      # a header, a time) rides `Matcher#stop_condition` rather than Config, because it is a
+      # match/filter predicate the matcher evaluates on the one decode it already paid for. The
+      # run lands `Terminal::ConditionMet` when either fires — its own status, not `stopped`.
+      property stop_after_matches : Int32?
+      # Which result rows the ARCHIVE keeps (the CLI/MCP saved run and the TUI spool) — the live
+      # views are never governed by it. `Keep::All` (the default) is today's behaviour: every
+      # row written. `Keep::Interesting` writes only the rows `Result#interesting?` names, so a
+      # 100k-request sweep does not grow the project by one row per request. The counters and
+      # `idx` stay whole-run; see `Fuzz::Keep`.
+      property keep : Keep
       # Reuse one connection across many sends instead of dialing per request — `ConnPool` on
       # HTTP/1.1, `H2Pool` on h2, both behind `Repeater::Pool`. On by default: a sweep pays one
       # TCP — and, on https, one TLS — handshake per WORKER rather than per request, which is
@@ -507,6 +606,8 @@ module Gori
                      @auto_calibrate : Bool = false,
                      @keep_bodies : Symbol = :matched,
                      @max_requests : Int64? = nil,
+                     @stop_after_matches : Int32? = nil,
+                     @keep : Keep = Keep::All,
                      @keep_alive : Bool = true,
                      @race_count : Int32? = nil,
                      @race_warmup : Bytes? = nil,

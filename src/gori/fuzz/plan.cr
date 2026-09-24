@@ -99,6 +99,17 @@ module Gori::Fuzz
   class WsError < Gori::Error
   end
 
+  # A `stop_on` (issue #1240) asked for alongside a shape it cannot ride.
+  #
+  # Deliberately NOT a `PlanError::Reason`, for the reason `WsError`/`GrpcFieldError` above are
+  # not: that enum is `case … in`'d exhaustively across three surfaces, and this refusal reads
+  # identically on all of them (`stop_on cannot combine with --race …`), so the builder writes
+  # the sentence once and every surface's existing `Gori::Error` path carries it. Today the one
+  # incompatibility is `--race`: a race group is released whole, so there is no per-row verdict
+  # for a stop condition to fire on.
+  class StopOnError < Gori::Error
+  end
+
   # A normalized, surface-independent description of ONE fuzz run.
   #
   # Each surface's remaining job is to parse ITS OWN input format into this — `OptionParser`
@@ -483,6 +494,7 @@ module Gori::Fuzz
       # operator would never learn that a race of 1 is refused on its own terms.
       race_count = validate_race_count(options.config.race_count)
       validate_race_budget(race_count, options.config, options.http2?)
+      validate_stop_on(race_count, options.config, options.matcher)
       # Beside the race guard rather than at the `Sender` it feeds, so an unknown preset is
       # refused before the run reads a wordlist off disk or resolves a `.proto` — everything
       # after this point is work the operator does not want done for a run that cannot start.
@@ -774,6 +786,17 @@ module Gori::Fuzz
     # `validate_race_count` above: a plan-INPUT refusal, so it rides the `rescue
     # Fuzz::PlanError` every surface already wraps `Plan.build` in. Returns the NORMALISED
     # name, which is what the sender, the pool and the run record all carry.
+    # `stop_on` (a match count or a separate condition) cannot ride a race run — see
+    # `StopOnError`. A no-op for every run that set neither, so the ordinary sweep is untouched.
+    private def self.validate_stop_on(race_count : Int32?, config : Config, matcher : Matcher) : Nil
+      return unless race_count
+      return unless config.stop_after_matches || matcher.stop_condition
+      raise StopOnError.new(
+        "stop_on cannot combine with --race: a race group is N byte-identical copies of ONE " \
+        "request released together in a single write, so there is no per-response verdict for a " \
+        "stop condition or a match count to fire on. Drop --race, or drop the stop condition")
+    end
+
     private def self.validate_tls_preset(name : String?) : String?
       if err = Settings.tls_preset_error(name)
         raise PlanError.new(PlanError::Reason::TlsPreset, err, name.try(&.strip))

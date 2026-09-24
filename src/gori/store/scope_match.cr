@@ -118,7 +118,7 @@ module Gori
 
     # `gori_static_asset(content_type, target, status)` — `StaticAsset.static?` from SQL (#1239).
     # NOT what `static:` compiles to: it WRITES the `static_asset` column, once per flow, from
-    # `Store#update_one` (the values just bound plus the row's own target) and V30's backfill.
+    # `Store#update_one` (the values just bound plus the row's own target) and V31's backfill.
     # Always 0 or 1, so the column is NOT NULL and `-static:true` is exactly `static:false`.
     STATIC_FN = ->(context : LibSQLite3::SQLite3Context, _argc : Int32, argv : LibSQLite3::SQLite3Value*) do
       args = Slice.new(argv, 3)
@@ -140,7 +140,7 @@ module Gori
     # connection that is not a pooled `SQLite3::Connection` (`ProjectSearch`'s read-only handle
     # over another project's database) cannot end up with a `gori_ci_contains` that means
     # something else, or with none: `QL.contains_cond` emits a call to it for every
-    # non-ASCII needle, and every flow write and V30's backfill call `gori_static_asset`.
+    # non-ASCII needle, and every flow write and V31's backfill call `gori_static_asset`.
     def self.install(db : LibSQLite3::SQLite3) : Nil
       LibSQLite3.create_function(db, "gori_host_match", 2, 1, nil, HOST_FN, nil, nil)
       LibSQLite3.create_function(db, "gori_ci_contains", 2, 1, nil, CONTAINS_FN, nil, nil)

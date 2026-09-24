@@ -49,8 +49,11 @@ module Gori
       # here rather than the `[H1]` its defaulted columns would otherwise assert.
       private def self.fuzz_saved_run_line(run : Store::FuzzRunRecord, stored : Int64) : String
         session = run.session_id.try { |id| " session:#{id}" } || ""
+        # "N of M kept" for a filtered archive, so `keep: interesting` reads as a policy rather
+        # than a run that lost most of its rows.
+        rows = run.filtered? ? "#{stored} of #{run.sent} rows (keep:#{run.keep})" : "#{stored} rows"
         "##{run.id}  [#{run.status}] [#{run.proto_label}]  #{run.mode}  " \
-        "#{run.matched}/#{run.sent} hit  #{stored} rows#{session}  " \
+        "#{run.matched}/#{run.sent} hit  #{rows}#{session}  " \
         "→ #{CLI::Output.term_safe(run.target)}"
       end
 
@@ -171,8 +174,9 @@ module Gori
         else
           # The transport chip the listing and the TUI picker draw, so a LEGACY run says so
           # here too — this is the command the picker's own refusal sends the operator to.
+          keep = run.filtered? ? " · keep:#{run.keep}" : ""
           puts "fuzz run ##{run.id} · #{run.status} · #{run.proto_label} · #{run.mode} · " \
-               "#{run.sent} sent · #{run.matched} hit · #{run.errors} errors"
+               "#{run.sent} sent · #{run.matched} hit · #{run.errors} errors#{keep}"
           rows.each { |row| puts CLI::Output.fuzz_row_text(Fuzz::Persistence.result(row)) }
           STDERR.puts "showing #{offset + 1}-#{offset + rows.size} of #{total}" unless rows.empty?
         end
@@ -247,6 +251,10 @@ module Gori
           j.field "source_ref", run.source_ref.try(&.scrub)
           j.field "snapshot_version", run.snapshot_version
           j.field "legacy", run.legacy_snapshot?
+          # The result-capture policy (issue #1240) and, for a filtered run, that `stored_results`
+          # is a subset of `sent` — the same two fields MCP's `saved_fuzz_run` emits.
+          j.field "keep", run.keep.scrub
+          j.field "filtered", run.filtered?
           j.field "stored_results", stored_results
         end
       end

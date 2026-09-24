@@ -224,6 +224,8 @@ module Gori
         "a static asset is judged from the finished response's Content-Type and status"
       when "src"
         "a flow's source is recorded when it is captured, not while it is in flight"
+      when "cache"
+        "the response headers a cache status is read from have not arrived yet"
       when .includes?('.')
         # The `req.`/`resp.` half. A gate stands on one leg and already knows which, so the
         # side prefix is not narrowing anything — it is naming bytes that are not in hand.
@@ -350,14 +352,16 @@ module Gori
     # complete this field at all".
     private def self.value_pool(field : String, hosts : Array(String), rows : Bool) : Array(String)?
       case field
-      when "host"           then hosts
-      when "method"         then METHOD_VAL
-      when "scheme"         then SCHEME_VAL
-      when "status"         then STATUS_VAL
-      when "scope"          then QL::SCOPE_VALUES
-      when "src"            then QL::SOURCE_VALUES
-      when "proto"          then rows ? QL::PROTO_VALUES : PROTO_VAL
-      when "stub", "static" then rows ? QL::FLAG_VALUES : nil
+      when "host"   then hosts
+      when "method" then METHOD_VAL
+      when "scheme" then SCHEME_VAL
+      when "status" then STATUS_VAL
+      when "scope"  then QL::SCOPE_VALUES
+      when "src"    then QL::SOURCE_VALUES
+      when "proto"  then rows ? QL::PROTO_VALUES : PROTO_VAL
+      when "stub", "static", "cache" # row-backed ONLY (see the note above); a hold gate never reaches them
+        return nil unless rows
+        field == "cache" ? QL::CACHE_VALUES : QL::FLAG_VALUES
       end
     end
 

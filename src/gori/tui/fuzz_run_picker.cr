@@ -108,7 +108,9 @@ module Gori::Tui
       screen.fill(Rect.new(box.x + 1, y, box.w - 2, 1), bg)
       screen.cell(box.x + 1, y, active ? '▎' : ' ', Theme.accent, bg)
       proto = row.proto_label
-      label = "##{row.id}  #{row.status.upcase} · #{proto} · #{row.mode}"
+      # A filtered archive (issue #1240) says so, so a small stored count reads as a policy.
+      keep = row.filtered? ? " · keep:#{row.keep}" : ""
+      label = "##{row.id}  #{row.status.upcase} · #{proto} · #{row.mode}#{keep}"
       stats = "#{row.matched}/#{row.sent} hit"
       sx = box.right - 2 - stats.size
       screen.text(box.x + 3, y, label, active ? Theme.text_bright : Theme.text, bg,

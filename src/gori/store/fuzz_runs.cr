@@ -3,7 +3,7 @@ require "db"
 module Gori
   class Store
     FUZZ_RUN_COLS = "id, session_id, created_at, finished_at, target, mode, total, sent, matched, errors, status, " \
-                    "http2, sni, tls_preset, websocket, surface, source_ref, snapshot_version"
+                    "http2, sni, tls_preset, websocket, surface, source_ref, snapshot_version, keep"
     FUZZ_RESULT_COLS = "id, run_id, idx, payloads, status, length, words, lines, duration_us, error, matched, " \
                        "extracted, request, response_head, response_body, position, incomplete, retried, " \
                        "chain_error, grpc_status, grpc_message, timed_out, resent_count, wire, " \
@@ -32,16 +32,17 @@ module Gori
                         created_at : Int64 = now_us, status : String = "running",
                         http2 : Bool = false, sni : String? = nil,
                         tls_preset : String? = nil, websocket : Bool = false,
-                        surface : String? = nil, source_ref : String? = nil) : Int64
+                        surface : String? = nil, source_ref : String? = nil,
+                        keep : String = "all") : Int64
       inserted = 0_i64
       committed = exec_task_ok ->(c : DB::Connection) {
         # Checked on the writer connection, inside the transaction that inserts the run. A
         # session deleted by another Store can therefore never gain a new orphan run.
         if session_id.nil? || c.query_one?("SELECT 1 FROM fuzz_sessions WHERE id = ?", session_id,
              as: Int64)
-          c.exec("INSERT INTO fuzz_runs (session_id, created_at, target, mode, total, sent, matched, errors, status, http2, sni, tls_preset, websocket, surface, source_ref, snapshot_version) VALUES (?,?,?,?,?,0,0,0,?,?,?,?,?,?,?,1)",
+          c.exec("INSERT INTO fuzz_runs (session_id, created_at, target, mode, total, sent, matched, errors, status, http2, sni, tls_preset, websocket, surface, source_ref, snapshot_version, keep) VALUES (?,?,?,?,?,0,0,0,?,?,?,?,?,?,?,1,?)",
             session_id, created_at, target, mode, total, status, http2 ? 1 : 0, sni,
-            tls_preset, websocket ? 1 : 0, surface, source_ref)
+            tls_preset, websocket ? 1 : 0, surface, source_ref, keep)
           inserted = c.scalar("SELECT last_insert_rowid()").as(Int64)
         end
         nil
@@ -447,7 +448,7 @@ module Gori
         rs.read(Int64), rs.read(Int64?), rs.read(Int64), rs.read(Int64?), rs.read(String),
         rs.read(String), rs.read(Int64?), rs.read(Int64), rs.read(Int64), rs.read(Int64),
         rs.read(String), rs.read(Int32) != 0, rs.read(String?), rs.read(String?),
-        rs.read(Int32) != 0, rs.read(String?), rs.read(String?), rs.read(Int32))
+        rs.read(Int32) != 0, rs.read(String?), rs.read(String?), rs.read(Int32), rs.read(String))
     end
 
     private def read_fuzz_result(rs : DB::ResultSet) : FuzzResultRecord

@@ -41,7 +41,13 @@ describe "MCP decode" do
   it "can name the inverse of every ENCODE converter the catalog has one for" do
     # The genuinely one-way transforms: nothing in the catalog undoes them, so the note has
     # nothing to offer and correctly stays silent.
-    one_way = %w[shell-escape powershell-escape homoglyph typo]
+    one_way = %w[
+      shell-escape powershell-escape homoglyph typo
+      nfc nfd nfkc nfkd codepoint-overflow
+      windows-bestfit-874 windows-bestfit-932 windows-bestfit-936 windows-bestfit-949 windows-bestfit-950
+      windows-bestfit-1250 windows-bestfit-1251 windows-bestfit-1252 windows-bestfit-1253 windows-bestfit-1254
+      windows-bestfit-1255 windows-bestfit-1256 windows-bestfit-1257 windows-bestfit-1258
+    ]
     reg = Gori::Decoder.default_registry
     missing = [] of String
     reg.each do |c|

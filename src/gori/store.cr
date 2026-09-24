@@ -6,6 +6,7 @@ require "./media_type"
 require "./store/models"
 require "./store/safe_regexp"
 require "./store/scope_match"
+require "./store/cache_status_fn"
 require "./store/schema"
 require "./store/compact"
 require "./store/scope_rules"
@@ -422,6 +423,9 @@ module Gori
         # The Scope match functions, for the rule shapes whose native SQL spelling does not
         # mean what the in-memory lens means (see ScopeMatch).
         sqlite.gori_install_scope_match
+        # `gori_cache_status(response_head)` for QL `cache:` — computed on read, so it costs a
+        # query that names the field and nothing else (see CacheStatusFn).
+        sqlite.gori_install_cache_status
         sqlite.exec("PRAGMA mmap_size = #{MMAP_SIZE}")
         # After migrate. A read-only store must not be able to write even if a caller forgets
         # the @writes-closed degradation — SQLite refuses the statement instead of taking
@@ -1891,7 +1895,7 @@ module Gori
       args << req.source.token
       args << req.source_surface.try(&.token)
       args << req.source_ref
-      # The hide-static lens's column (V30), for a row with no response yet: the path's
+      # The hide-static lens's column (V31), for a row with no response yet: the path's
       # extension is all there is. `update_one` decides again when the response lands.
       args << (StaticAsset.static?(nil, req.target, nil) ? 1 : 0)
       res = conn.exec(
@@ -1923,7 +1927,7 @@ module Gori
             -- side may already have written an advisory on this row and a bare `advisory = ?`
             -- would erase it. COALESCE keeps whatever is stored when the DTO carries nothing.
             advisory = COALESCE(?, advisory),
-            -- The hide-static lens's column (V30), decided once here from the values just
+            -- The hide-static lens's column (V31), decided once here from the values just
             -- bound and the row's own target, rather than per row on every read.
             static_asset = gori_static_asset(?, target, ?),
             fts_dirty = 1

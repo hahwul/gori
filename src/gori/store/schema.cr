@@ -1,5 +1,5 @@
 require "db"
-require "./scope_match" # V30's backfill calls gori_static_asset; `migrate!` installs it
+require "./scope_match" # V31's backfill calls gori_static_asset; `migrate!` installs it
 
 module Gori
   class Store
@@ -1408,7 +1408,18 @@ module Gori
         "ALTER TABLE oast_sessions ADD COLUMN provider_key TEXT",
       ]
 
-      # V30 — the hide-static lens (#1239). `static:` and the lens read a COLUMN decided once,
+      # The result-capture policy a saved fuzz run was written under (issue #1240): `all` (every
+      # row) or `interesting` (matched rows plus the ones carrying an observed fact — an error, a
+      # re-send, a truncated capture, the stop condition). Recorded so a filtered archive reads
+      # "12 of 100,000 rows kept (keep: interesting)" rather than looking like a lost run — the
+      # counters (`sent`/`matched`/`errors`) stay whole-run and `idx` stays the payload position,
+      # so a kept row's gaps are the dropped rows. DEFAULT 'all', which is what every run before
+      # this column was: the archive kept everything.
+      V30 = [
+        "ALTER TABLE fuzz_runs ADD COLUMN keep TEXT NOT NULL DEFAULT 'all'",
+      ]
+
+      # V31 — the hide-static lens (#1239). `static:` and the lens read a COLUMN decided once,
       # when the response lands (`Store#update_one`), rather than calling `gori_static_asset`
       # per row per query: `content_type` and `status` sit AFTER the body BLOBs, so reading
       # them walks every row's overflow chain, and the Sitemap's DISTINCT — which otherwise
@@ -1416,8 +1427,8 @@ module Gori
       # lens on, re-run on every data_version tick (P6).
       #
       # The partial index is that DISTINCT with the lens on, covered: ~2.5 ms on the same set.
-      # The rows a project already holds are classified by `BACKFILLS[30]`, not here — see there.
-      V30 = [
+      # The rows a project already holds are classified by `BACKFILLS[31]`, not here — see there.
+      V31 = [
         "ALTER TABLE flows ADD COLUMN static_asset INTEGER NOT NULL DEFAULT 0",
         "CREATE INDEX idx_flows_sitemap_nonstatic ON flows (host, target, method) WHERE static_asset = 0",
       ]
@@ -1427,18 +1438,18 @@ module Gori
       # bare connection can replay (specs build every historical shape that way), and a bare
       # connection has no `gori_static_asset`; `migrate!` registers it before running these.
       #
-      # 30: rewrite only rows that ARE static (an UPDATE storing 0 over the default would still
+      # 31: rewrite only rows that ARE static (an UPDATE storing 0 over the default would still
       # rewrite every row's overflow chain), and only statuses the rule can call static, so an
       # error or a redirect is never even classified. ~2.5 s once at 100k flows, 40% of them
       # 20 KB images.
       BACKFILLS = {
-        30 => "UPDATE flows SET static_asset = 1 " \
+        31 => "UPDATE flows SET static_asset = 1 " \
               "WHERE (status IS NULL OR status BETWEEN 200 AND 299 OR status = 304) " \
               "AND gori_static_asset(content_type, target, status) = 1",
       }
 
       MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17,
-                    V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29, V30]
+                    V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29, V30, V31]
 
       def self.migrate!(db : DB::Database, read_only : Bool = false) : Nil
         db.using_connection do |conn|

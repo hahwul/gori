@@ -66,21 +66,20 @@ describe Gori::Tui::FuzzAdvancedOverlay do
     applied.should eq(["50"])
   end
 
-  it "↵ advances a row and, on the LAST row, does nothing at all" do
+  it "↵ advances a row and never commits, even on the LAST row" do
     # Pins the PRE-EXISTING behaviour the migration preserved: handle_key discards the
-    # case's value, so handle_text's commit-on-the-last-row never reaches the shell. Only
-    # esc and a click-away apply. See the note on FuzzAdvancedOverlay#handle_key.
+    # case's value, so ↵ never reaches the shell — only esc and a click-away apply. The
+    # last row is now the `Keep interesting only` toggle (issue #1240), so ↵ there toggles
+    # it rather than stepping out of ROWS' range. See the note on FuzzAdvancedOverlay#handle_key.
     ov = FuzzAdvancedOverlay.new(blank_snapshot)
     h = OverlayHarness.new(ov)
     h.press(Termisu::Input::Key::Enter).should eq(:open) # row 0 → row 1
     h.commits.should eq(0)
     (FuzzAdvancedOverlay::ROWS.size - 1).times { h.press(Termisu::Input::Key::Down) }
-    h.press(Termisu::Input::Key::Enter).should eq(:open)
+    ov.snapshot.keep_interesting.should be_false
+    h.press(Termisu::Input::Key::Enter).should eq(:open) # ↵ on the last (toggle) row flips it
     h.commits.should eq(0)
-    # …and the last row stays FOCUSED rather than stepping out of ROWS' range: what gets
-    # typed next still lands in the last row (Filter time — appended after TLS fingerprint).
-    h.type("x").should eq(:open)
-    ov.snapshot.f_time.should eq("x")
+    ov.snapshot.keep_interesting.should be_true
   end
 
   it "a click outside the card APPLIES rather than dismissing" do
@@ -210,19 +209,17 @@ describe Gori::Tui::FuzzAdvancedOverlay do
     h.rendered?("Filter regex").should be_false # off-screen until the list scrolls
     (FuzzAdvancedOverlay::ROWS.size - 1).times { h.press(Termisu::Input::Key::Down) }
     h.rendered?("Filter regex").should be_true # this render is what advances @scroll
-    h.type("x")
 
     # The list has scrolled, so the first VISIBLE row is no longer ROWS[0] (Concurrency):
-    # the 3rd visible row is "Filter status", which is where this click must land. (WHICH row
+    # the 3rd visible row is "Filter regex", which is where this click must land. (WHICH row
     # that is moves down by one every time a row is appended to the end of ROWS — the scroll
     # needed to reach the new last row is one deeper — so this is a fact about the arithmetic,
-    # not about "Filter status".)
+    # not about "Filter regex"; the #1240 stop_on/keep rows pushed it from Filter status to here.)
     h.click_in_box(2, 3).should eq(:open)
     h.type("9")
-    ov.snapshot.f_status.should eq("9") # lands near Retries if the click ignores @scroll
-    ov.snapshot.retries.should eq("0")  # …and the un-scrolled rows stay untouched
+    ov.snapshot.f_regex.should eq("9") # lands near the top if the click ignores @scroll
+    ov.snapshot.retries.should eq("0") # …and the un-scrolled rows stay untouched
     ov.snapshot.conc.should eq("20")
-    ov.snapshot.f_time.should eq("x") # the last row — Filter time, appended after TLS fingerprint
 
     h.press(Termisu::Input::Key::Escape).should eq(:closed)
     h.commits.should eq(1)

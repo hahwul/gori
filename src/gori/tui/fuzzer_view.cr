@@ -148,6 +148,13 @@ module Gori::Tui
       @s_grpc_fields = ""
       @s_m_regex = "" # regex fields buffered as source strings, compiled on commit
       @s_f_regex = ""
+      # `stop_on` (issue #1240): `@s_stop_after` ends the run once the matchers hit N times
+      # (blank = never), `@s_stop_on` is one DIM:SPEC condition term (blank = none, compiled to
+      # `Matcher#stop_condition` by `commit_buffers`, its grammar errors surfaced by
+      # `stop_on_error`). Buffers like the numeric/regex ones, for the same "a field can be
+      # cleared mid-edit" reason.
+      @s_stop_after = ""
+      @s_stop_on = ""
       # Memoized "Run · N requests" count, recomputed only when the config signature
       # (mode + sets + marker count) changes, so the summary row never rebuilds sources each frame.
       @run_count_cache = nil.as(Int64?)
@@ -262,6 +269,10 @@ module Gori::Tui
       @run_tls_preset = nil.as(String?)
       @run_websocket = false
       @run_max_requests = nil.as(Int64?)
+      # The archive policy this run's spool/Shift-S was frozen under (issue #1240) — captured at
+      # `begin_run` like the other `@run_*` snapshot fields, so a post-run config edit does not
+      # change what the saved run records.
+      @run_keep = Fuzz::Keep::All
       @saved_run_id = nil.as(Int64?)
       @failed_save_run_id = nil.as(Int64?)
       @result_io_state = ResultIoState::Idle
@@ -982,6 +993,7 @@ module Gori::Tui
       @run_tls_preset = @config.tls_preset
       @run_websocket = @pending_websocket
       @run_max_requests = @config.max_requests
+      @run_keep = @config.keep
       @saved_run_id = nil
       @failed_save_run_id = nil
       @loaded_saved_run = false
@@ -997,8 +1009,9 @@ module Gori::Tui
       @result_io_state = archive_ready ? ResultIoState::Ready : ResultIoState::Failed
     end
 
-    def terminal_status(progress : Fuzz::Progress, stopped : Bool, errored : Bool = false) : String
-      Fuzz.terminal_status(progress, stopped, @run_max_requests, errored)
+    def terminal_status(progress : Fuzz::Progress, stopped : Bool, errored : Bool = false,
+                        stop_reason : String? = nil) : String
+      Fuzz.terminal_status(progress, stopped, @run_max_requests, errored, stop_reason)
     end
 
     def apply_progress(p : Fuzz::Progress) : Nil
@@ -1099,7 +1112,7 @@ module Gori::Tui
       Fuzz::SavedRunMeta.new(session_id, @run_target, @run_mode, @run_total,
         created_at: @run_started_at, http2: @run_http2, sni: @run_sni,
         tls_preset: @run_tls_preset, websocket: @run_websocket, surface: "tui",
-        source_ref: "tui:#{session_id}:#{@run_started_at}")
+        source_ref: "tui:#{session_id}:#{@run_started_at}", keep: @run_keep.label)
     end
 
     def saved_run_counters : {Int64, Int64, Int64, String}
@@ -1282,7 +1295,9 @@ module Gori::Tui
         f_words: @matcher.filter_words || "", f_regex: @s_f_regex,
         grpc_fields: @s_grpc_fields,
         tls_preset: @config.tls_preset || "",
-        m_time: @matcher.match_time || "", f_time: @matcher.filter_time || "")
+        m_time: @matcher.match_time || "", f_time: @matcher.filter_time || "",
+        stop_after: @s_stop_after, stop_on: @s_stop_on,
+        keep_interesting: @config.keep.interesting?)
     end
 
     # Write the overlay's edited knobs back into the engine buffers (regexes stay as
@@ -1322,6 +1337,12 @@ module Gori::Tui
       # payload is the only evidence for (see `Fuzz::Matcher#match_time`).
       @matcher.match_time = blank_nil(s.m_time)
       @matcher.filter_time = blank_nil(s.f_time)
+      # `stop_on` buffers stay as typed — `commit_buffers` compiles them at build/persist time,
+      # so a half-typed condition never breaks the overlay. `keep` is a plain policy the archive
+      # reads (`Fuzz::Keep`); the toggle picks between its two values.
+      @s_stop_after = s.stop_after
+      @s_stop_on = s.stop_on
+      @config.keep = s.keep_interesting ? Fuzz::Keep::Interesting : Fuzz::Keep::All
       @dirty = true
     end
 
@@ -1421,6 +1442,33 @@ module Gori::Tui
       @config.race_count = @s_race.to_i?.try { |n| n > 0 ? n.clamp(1, Fuzz::Engine::MAX_RACE_SIZE) : nil }
       @matcher.match_regex = @s_m_regex.empty? ? nil : (Regex.new(@s_m_regex) rescue nil)
       @matcher.filter_regex = @s_f_regex.empty? ? nil : (Regex.new(@s_f_regex) rescue nil)
+      # `stop_on` (issue #1240): blank / <= 0 = never, same reading as the numeric buffers. The
+      # condition is compiled from the one DIM:SPEC term; a GRAMMAR error leaves it nil and is
+      # named by `stop_on_error` (like an invalid regex left nil above), while a value-level typo
+      # rides through on a built matcher and is named by `@matcher.spec_error`.
+      @config.stop_after_matches = @s_stop_after.to_i?.try { |n| n > 0 ? n : nil }
+      @matcher.stop_condition = compiled_stop_condition
+    end
+
+    # The `@s_stop_on` buffer compiled to a condition matcher, or nil — split out of
+    # `commit_buffers` so that method stays under the complexity ceiling. A grammar error
+    # yields nil (named by `stop_on_error`), mirroring how the regex buffers nil on a bad
+    # pattern; a value-level typo rides through on the built matcher to `spec_error`.
+    private def compiled_stop_condition : Fuzz::Matcher?
+      spec = @s_stop_on.strip
+      return nil if spec.empty?
+      cond = Fuzz::Matcher.new
+      Fuzz.apply_stop_term(spec, cond).nil? ? cond : nil
+    end
+
+    # The stop-condition buffer's GRAMMAR error, or nil — the twin of `regex_error`, named for
+    # the same reason: `commit_buffers` nils an uncompilable term, which would otherwise stop
+    # nothing with no feedback. A value-level typo (`status:2OO`) is not caught here; it rides a
+    # built condition and is named by `@matcher.spec_error` with every other dimension.
+    private def stop_on_error : String?
+      spec = @s_stop_on.strip
+      return nil if spec.empty?
+      Fuzz.apply_stop_term(spec, Fuzz::Matcher.new)
     end
 
     private def sync_buffers : Nil
@@ -1432,6 +1480,9 @@ module Gori::Tui
       @s_race = @config.race_count.try(&.to_s) || ""
       @s_m_regex = @matcher.match_regex.try(&.source) || ""
       @s_f_regex = @matcher.filter_regex.try(&.source) || ""
+      # `@s_stop_on` is a raw-text buffer restored by `apply_config_json` (like `@s_grpc_fields`),
+      # so only the numeric match count is mirrored back from `@config` here.
+      @s_stop_after = @config.stop_after_matches.try(&.to_s) || ""
     end
 
     # A message when a non-empty regex buffer failed to compile (commit_buffers nils
@@ -1451,6 +1502,7 @@ module Gori::Tui
         {"Concurrency", @s_conc, "a whole number"}, {"Rate", @s_rate, "requests per second"},
         {"Timeout", @s_timeout, "whole seconds"}, {"Retries", @s_retries, "a whole number"},
         {"Max requests", @s_max_req, "a whole number"}, {"Race", @s_race, "a whole number"},
+        {"Stop after N hits", @s_stop_after, "a whole number"},
       }.each do |(name, buf, form)|
         v = buf.strip
         next if v.empty?
@@ -1478,6 +1530,11 @@ module Gori::Tui
       # A numeric field the commit above fell back from (`Timeout 1.5` → no timeout,
       # `Concurrency 50x` → 20) kept SHOWING the typed text while the run used the default.
       if err = buffer_error
+        return {nil, err}
+      end
+      # A `stop_on` term with a bad dimension or an uncompilable regex — named before the run so
+      # the condition is not silently dropped (its value-level typos are caught by spec_error).
+      if err = stop_on_error
         return {nil, err}
       end
       # A status/size/… spec that can never fire (`2OO`, `>1O0`) ran the whole sweep as
@@ -2528,6 +2585,11 @@ module Gori::Tui
           j.field "retries", @config.retries
           j.field "max_requests", @config.max_requests
           j.field "race_count", @config.race_count
+          # `stop_on` (issue #1240): the match count, the raw DIM:SPEC condition text (the same
+          # "store what the operator typed" reasoning as `grpc_fields`), and the archive policy.
+          j.field "stop_after_matches", @config.stop_after_matches
+          j.field "stop_on", @s_stop_on
+          j.field "keep", @config.keep.label
           j.field "follow", @config.follow_redirects?
           j.field "calibrate", @config.auto_calibrate?
           j.field "keep_alive", @config.keep_alive?
@@ -2569,6 +2631,7 @@ module Gori::Tui
       obj["retries"]?.try(&.as_i?).try { |n| @config.retries = n }
       @config.max_requests = obj["max_requests"]?.try(&.as_i64?)
       @config.race_count = obj["race_count"]?.try(&.as_i?)
+      apply_stop_on_json(obj)
       @config.follow_redirects = obj["follow"]?.try(&.as_bool?) || false
       @config.auto_calibrate = obj["calibrate"]?.try(&.as_bool?) || false
       # A session persisted before this key existed reads as nil ⇒ keep the ctor default
@@ -2603,6 +2666,16 @@ module Gori::Tui
       sync_buffers # mirror the restored config/matcher into the editable buffers
     rescue
       # tolerate a malformed/older config blob — keep defaults
+    end
+
+    # The `stop_on` knobs (issue #1240), restored together — split out of `apply_config_json`
+    # so that method stays under the complexity ceiling. Absent (a session saved before these
+    # keys existed) reads as nil / blank / all: no stop condition and an unfiltered archive,
+    # which every saved tab was.
+    private def apply_stop_on_json(obj : Hash(String, JSON::Any)) : Nil
+      @config.stop_after_matches = obj["stop_after_matches"]?.try(&.as_i?)
+      @s_stop_on = string_knob(obj, "stop_on")
+      @config.keep = Fuzz::Keep.parse?(obj["keep"]?.try(&.as_s?)) || Fuzz::Keep::All
     end
 
     # A persisted STRING knob, or "" for a session saved before the key existed (and for a

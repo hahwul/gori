@@ -3,7 +3,7 @@ module Gori
   # the dozen beside every API call (#1239). One classifier behind the QL `static:` field, and
   # through it behind the TUI's hide-static lens, `gori run history|sitemap --hide-static` and
   # MCP `hide_static`. It runs ONCE per flow, when the flow is written, into the `static_asset`
-  # column (schema V30) every surface then reads, so there is no second list to drift and no
+  # column (schema V31) every surface then reads, so there is no second list to drift and no
   # per-row function call on a list that reloads during live capture.
   #
   # Deliberately narrow, and in the same direction Discover's `BINARY_EXT` is: a flow is hidden

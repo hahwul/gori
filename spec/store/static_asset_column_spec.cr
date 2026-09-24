@@ -1,17 +1,17 @@
 require "../spec_helper"
 
-# The hide-static lens's column (#1239, schema V30): decided once when a flow is written, and
+# The hide-static lens's column (#1239, schema V31): decided once when a flow is written, and
 # backfilled for the flows a project already holds, so `static:` and the lens read a column
 # instead of calling a function per row on every reload.
 
-# A V29 database with flows in each shape the backfill has to tell apart, as an existing
+# A V30 database with flows in each shape the backfill has to tell apart, as an existing
 # project would hold them. Returns the path for `Store.open` to upgrade.
-private def build_pre_v30 : String
-  path = File.tempname("gori-v30", ".db")
+private def build_pre_v31 : String
+  path = File.tempname("gori-v31", ".db")
   DB.open("sqlite3:#{path}") do |db|
     db.using_connection do |c|
-      Gori::Store::Schema::MIGRATIONS[0...29].each { |stmts| stmts.each { |sql| c.exec(sql) } }
-      c.exec("PRAGMA user_version = 29")
+      Gori::Store::Schema::MIGRATIONS[0...30].each { |stmts| stmts.each { |sql| c.exec(sql) } }
+      c.exec("PRAGMA user_version = 30")
       {
         {"/logo.png", 200, "image/png"},      # 1: static by MIME
         {"/f/inter.woff2", 304, nil},         # 2: static by extension (no Content-Type)
@@ -36,9 +36,9 @@ private def static_ids(store) : Array(Int64)
   ids
 end
 
-describe "Store::Schema V30" do
+describe "Store::Schema V31" do
   it "backfills static_asset for the flows a project already holds" do
-    path = build_pre_v30
+    path = build_pre_v31
     begin
       store = Gori::Store.open(path)
       begin
