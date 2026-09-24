@@ -10,6 +10,15 @@ private def capture(store, host, method, target)
     head: "#{method} #{target} HTTP/1.1\r\nHost: #{host}\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
 end
 
+private def capture_image(store, host, target)
+  id = capture(store, host, "GET", target)
+  store.update_response(Gori::Store::CapturedResponse.new(
+    flow_id: id, status: 200, content_type: "image/png",
+    head: "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\n\r\n".to_slice,
+    state: Gori::Store::FlowState::Complete))
+  id
+end
+
 # Rows rendering the marked-row gutter bar ('▌'; the cursor row's is the thinner '▎').
 private def marked_row_indexes(b)
   (0...20).select { |y| b.row(y).includes?("▌") }
@@ -104,7 +113,7 @@ describe Gori::Tui::SitemapView do
   it "folds static assets out of the tree, and out of the Params flow set, while the lens is on" do
     with_store do |store|
       capture(store, "api.acme.test", "GET", "/v1/users")
-      capture(store, "cdn.acme.test", "GET", "/img/logo.png") # pending: judged by extension
+      capture_image(store, "cdn.acme.test", "/img/logo.png")
 
       view = SitemapView.new
       view.set_hide_static(true)
@@ -134,7 +143,7 @@ describe Gori::Tui::SitemapView do
       b.contains?("no traffic captured").should be_true
       b.contains?("only static assets").should be_false
 
-      capture(store, "cdn.acme.test", "GET", "/img/logo.png")
+      capture_image(store, "cdn.acme.test", "/img/logo.png")
       view.reload(store)
       b2 = MemoryBackend.new(70, 15)
       view.render(Screen.new(b2), Rect.new(0, 0, 70, 15))
