@@ -173,7 +173,17 @@ module Gori
       proxy = "http://#{authority}"
       vars = [{MARKER_VAR, "1"}, {PROXY_VAR, authority}] of {String, String?}
       PROXY_VARS.each { |name| vars << {name, proxy} }
-      NO_PROXY_VARS.each { |name| vars << {name, nil} } unless keep_no_proxy
+      if keep_no_proxy
+        if env[MARKER_VAR]? == "1"
+          NO_PROXY_VARS.each do |name|
+            if val = env["#{ORIG_PREFIX}#{name}"]?.try(&.strip).presence || env[name]?.try(&.strip).presence
+              vars << {name, val}
+            end
+          end
+        end
+      else
+        NO_PROXY_VARS.each { |name| vars << {name, nil} }
+      end
       vars << {NODE_PROXY_VAR, "1"}
       BUNDLE_VARS.each { |name| vars << {name, bundles[name]} }
       vars << {NODE_EXTRA_VAR, node_extra}
@@ -189,10 +199,21 @@ module Gori
     # record always describes the terminal before the FIRST shell.
     private def self.originals(env : Hash(String, String), keep_no_proxy : Bool) : Array({String, String?})
       found = [] of {String, String?}
-      proxies = keep_no_proxy ? PROXY_VARS : PROXY_VARS + NO_PROXY_VARS
-      proxies.each do |name|
+      in_shell = env[MARKER_VAR]? == "1"
+      PROXY_VARS.each do |name|
         if value = inherited_proxy(name, env)
           found << {"#{ORIG_PREFIX}#{name}", value}
+        end
+      end
+      NO_PROXY_VARS.each do |name|
+        if in_shell
+          if value = env["#{ORIG_PREFIX}#{name}"]?.try(&.strip).presence
+            found << {"#{ORIG_PREFIX}#{name}", value}
+          end
+        elsif !keep_no_proxy
+          if value = inherited_proxy(name, env)
+            found << {"#{ORIG_PREFIX}#{name}", value}
+          end
         end
       end
       (BUNDLE_VARS + [NODE_EXTRA_VAR]).each do |name|

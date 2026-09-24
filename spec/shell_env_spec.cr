@@ -152,6 +152,19 @@ describe Gori::ShellEnv do
     end
   end
 
+  it "restores NO_PROXY from the ORIG record inside a gori shell when keep_no_proxy is set" do
+    with_shell_fixture do |root, ca, system|
+      outer = build(root, ca, system, {"NO_PROXY" => "corp.internal", "HTTPS_PROXY" => "http://corp:3128"})
+      inner_env = outer.to_env.compact.merge({"PATH" => "/usr/bin"})
+      inner_env.has_key?("NO_PROXY").should be_false
+      inner_env["GORI_SHELL_ORIG_NO_PROXY"].should eq("corp.internal")
+
+      inner = build(root, ca, system, inner_env, keep_no_proxy: true)
+      value(inner, "NO_PROXY").should eq("corp.internal")
+      value(inner, "GORI_SHELL_ORIG_NO_PROXY").should eq("corp.internal")
+    end
+  end
+
   it "starts a shell inside a shell from the terminal's ORIGINAL trust, not the outer gori's root" do
     with_shell_fixture do |root, ca, system|
       outer = build(root, ca, system, {"HTTPS_PROXY" => "http://corp.example:3128"})
