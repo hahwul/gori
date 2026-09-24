@@ -171,6 +171,16 @@ describe Gori::FormData do
       f.source.should eq(:body)
     end
 
+    it "anchors name= and does not match filename= as name when filename appears first" do
+      body = multipart_body("BND",
+        %(Content-Disposition: form-data; filename="evil.png"; name="avatar"\r\nContent-Type: image/png\r\n\r\nABCDE))
+      fields = Gori::FormData.from_flow("/", multipart_head("BND"), body.to_slice)
+      f = field_named(fields, "avatar").not_nil!
+      f.name.should eq("avatar")
+      f.note.not_nil!.should contain("evil.png")
+      field_named(fields, "evil.png").should be_nil
+    end
+
     it "notes a binary (invalid-encoding) part as 'binary, N bytes'" do
       io = IO::Memory.new
       io << "--BND\r\nContent-Disposition: form-data; name=\"blob\"\r\n\r\n"
@@ -343,6 +353,21 @@ describe Gori::FormData do
       fields[0].note.not_nil!.should contain("file: unquoted.txt")
       fields[1].name.should eq("single_quoted")
       fields[1].note.not_nil!.should contain("file: single.txt")
+    end
+
+    it "does not decode or inflate non-form bodies" do
+      # Content-Type is text/plain; body is not decompressed even if Content-Encoding is gzip
+      h = head("POST / HTTP/1.1", "Content-Type: text/plain", "Content-Encoding: gzip")
+      bad_gzip = Bytes[0x1f, 0x8b, 0x08, 0x00, 0xff, 0xff]
+      fields = Gori::FormData.from_flow("/?q=1", h, bad_gzip)
+      fields.not_nil!.map(&.name).should eq(["q"])
+    end
+
+    it "honors custom max_body limit" do
+      body = "a=" + ("x" * 1000)
+      # with max_body: 500, body is larger than cap so body fields are omitted
+      fields = Gori::FormData.from_flow("/?q=1", urlencoded_head, body.to_slice, max_body: 500)
+      fields.not_nil!.map(&.name).should eq(["q"])
     end
   end
 end
