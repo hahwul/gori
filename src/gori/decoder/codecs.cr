@@ -908,6 +908,318 @@ module Gori::Decoder
       sink.to_slice
     end
 
+    # ---- RFC 2047 encoded words (UTF-8 output; Q and B) ----
+
+    # An encoded-word has 75 octets total; `=?UTF-8?X?` plus `?=` takes 12. Q leaves
+    # room for 63 encoded-text characters, while Base64 uses at most 60 characters
+    # (45 source octets). Chunks stay on UTF-8 character boundaries so each word is
+    # independently decodable.
+    RFC2047_Q_MAX = 63
+    RFC2047_B_MAX = 45
+
+    def rfc2047_q_encode(s : String) : String
+      return "" if s.empty?
+      chunks = [] of String
+      chunk = IO::Memory.new
+      width = 0
+      s.each_char do |char|
+        token = rfc2047_q_token(char.to_s.to_slice)
+        if width + token.bytesize > RFC2047_Q_MAX && width > 0
+          chunks << chunk.to_s
+          chunk = IO::Memory.new
+          width = 0
+        end
+        chunk.write(token.to_slice)
+        width += token.bytesize
+      end
+      chunks << chunk.to_s if width > 0
+      rfc2047_words(chunks, 'Q')
+    end
+
+    def rfc2047_b_encode(s : String) : String
+      return "" if s.empty?
+      chunks = [] of String
+      chunk = IO::Memory.new
+      width = 0
+      s.each_char do |char|
+        bytes = char.to_s.to_slice
+        if width + bytes.size > RFC2047_B_MAX && width > 0
+          chunks << Base64.strict_encode(chunk.to_slice)
+          chunk = IO::Memory.new
+          width = 0
+        end
+        chunk.write(bytes)
+        width += bytes.size
+      end
+      chunks << Base64.strict_encode(chunk.to_slice) if width > 0
+      rfc2047_words(chunks, 'B')
+    end
+
+    private def rfc2047_words(chunks : Array(String), encoding : Char) : String
+      String.build do |io|
+        chunks.each_with_index do |chunk, index|
+          io << "\r\n " unless index == 0
+          io << "=?UTF-8?" << encoding << '?' << chunk << "?="
+        end
+      end
+    end
+
+    private def rfc2047_q_token(bytes : Bytes) : String
+      String.build(bytes.size * 3) do |io|
+        bytes.each do |b|
+          if b == 0x20_u8
+            io << '_'
+          elsif 33_u8 <= b <= 126_u8 && b != 0x3d_u8 && b != 0x3f_u8 && b != 0x5f_u8
+            io.write_byte(b)
+          else
+            io << "=%02X" % b
+          end
+        end
+      end
+    end
+
+    # Decode every well-formed encoded-word in a header-like value. Malformed marker
+    # text stays literal, but a recognized word with unsupported charset/encoding or
+    # invalid Q/B data fails clearly. Linear whitespace between adjacent words is
+    # ignored as RFC 2047 requires; whitespace beside ordinary text is preserved.
+    def rfc2047_decode(s : String, required_encoding : UInt8? = nil) : String
+      bytes = s.to_slice
+      sink = IO::Memory.new(bytes.size)
+      i = 0
+      while i < bytes.size
+        if word = rfc2047_word_at(bytes, i)
+          if required_encoding && word[2] != required_encoding
+            raise DecoderError.new("expected RFC 2047 #{required_encoding.chr} encoded-word")
+          end
+          sink.write(word[0].to_slice)
+          i = word[1]
+          gap_end = rfc2047_fws_end(bytes, i)
+          if gap_end > i && rfc2047_word_at(bytes, gap_end)
+            i = gap_end
+          else
+            while i < gap_end
+              sink.write_byte(bytes[i])
+              i += 1
+            end
+          end
+          next
+        end
+
+        width = utf8_char_width(bytes[i])
+        width.times { |offset| sink.write_byte(bytes[i + offset]) }
+        i += width
+      end
+      String.new(sink.to_slice)
+    end
+
+    private def rfc2047_word_at(bytes : Bytes, start : Int32) : Tuple(String, Int32, UInt8)?
+      return nil unless bytes[start]? == 0x3d_u8 && bytes[start + 1]? == 0x3f_u8 # =?
+      charset_start = start + 2
+      charset_end = rfc2047_charset_end(bytes, charset_start)
+      return nil unless charset_end && charset_end > charset_start && charset_end < bytes.size
+
+      encoding = rfc2047_word_encoding(bytes, charset_end + 1)
+      return nil unless encoding
+
+      text_start = charset_end + 3
+      text_end = rfc2047_encoded_text_end(bytes, text_start)
+      return nil unless text_end
+      raise DecoderError.new("invalid RFC 2047 encoded-word: empty encoded-text") if text_end == text_start
+
+      charset = String.new(bytes[charset_start, charset_end - charset_start])
+      encoded_text = String.new(bytes[text_start, text_end - text_start])
+      decoded = rfc2047_decode_payload(encoded_text, encoding)
+      {rfc2047_charset_decode(charset, decoded), text_end + 2, encoding}
+    end
+
+    private def rfc2047_charset_end(bytes : Bytes, start : Int32) : Int32?
+      i = start
+      while i < bytes.size && bytes[i] != 0x3f_u8
+        return nil unless 33_u8 <= bytes[i] <= 126_u8
+        i += 1
+      end
+      i
+    end
+
+    private def rfc2047_word_encoding(bytes : Bytes, start : Int32) : UInt8?
+      return nil if start + 1 >= bytes.size || bytes[start + 1] != 0x3f_u8
+      encoding = bytes[start]
+      encoding -= 0x20_u8 if 0x61_u8 <= encoding <= 0x7a_u8
+      return nil unless encoding == 'Q'.ord.to_u8 || encoding == 'B'.ord.to_u8
+      encoding
+    end
+
+    private def rfc2047_encoded_text_end(bytes : Bytes, start : Int32) : Int32?
+      i = start
+      while i + 1 < bytes.size
+        if bytes[i] == 0x3f_u8
+          return nil unless bytes[i + 1] == 0x3d_u8 # a '?' inside encoded-text is invalid
+          return i
+        end
+        i += 1
+      end
+      nil
+    end
+
+    private def rfc2047_decode_payload(encoded_text : String, encoding : UInt8) : Bytes
+      if encoding == 'Q'.ord.to_u8
+        rfc2047_q_decode(encoded_text)
+      else
+        rfc2047_b_decode(encoded_text)
+      end
+    end
+
+    private def rfc2047_q_decode(s : String) : Bytes
+      bytes = s.to_slice
+      sink = IO::Memory.new(bytes.size)
+      i = 0
+      while i < bytes.size
+        b = bytes[i]
+        if b == 0x5f_u8 # '_' represents SPACE in encoded-word Q, unlike body QP
+          sink.write_byte(0x20_u8)
+          i += 1
+        elsif b == 0x3d_u8
+          value = hex_n(bytes, i + 1, 2) || raise DecoderError.new("invalid RFC 2047 Q escape")
+          sink.write_byte(value.to_u8)
+          i += 3
+        elsif 33_u8 <= b <= 126_u8 && b != 0x3f_u8
+          sink.write_byte(b)
+          i += 1
+        else
+          raise DecoderError.new("invalid RFC 2047 Q character")
+        end
+      end
+      sink.to_slice
+    end
+
+    private def rfc2047_b_decode(s : String) : Bytes
+      bytes = s.to_slice
+      unless rfc2047_base64_valid?(bytes)
+        raise DecoderError.new("invalid RFC 2047 Base64 data")
+      end
+      Base64.decode(s)
+    rescue ex : Base64::Error
+      raise DecoderError.new("invalid RFC 2047 Base64 data: #{ex.message}")
+    end
+
+    private def rfc2047_base64_valid?(bytes : Bytes) : Bool
+      return false if bytes.empty? || bytes.size % 4 != 0
+      padding = 0
+      i = bytes.size - 1
+      while i >= 0 && bytes[i] == 0x3d_u8
+        padding += 1
+        i -= 1
+      end
+      return false if padding > 2 || i < 0
+      (0..i).each do |index|
+        b = bytes[index]
+        return false unless (65_u8..90_u8).includes?(b) || (97_u8..122_u8).includes?(b) ||
+                            (48_u8..57_u8).includes?(b) || b == 0x2b_u8 || b == 0x2f_u8
+      end
+      true
+    end
+
+    private def rfc2047_charset_decode(charset : String, data : Bytes) : String
+      case charset.downcase
+      when "utf-8", "utf8"
+        text = String.new(data)
+        raise DecoderError.new("invalid UTF-8 in RFC 2047 encoded-word") unless text.valid_encoding?
+        text
+      when "us-ascii", "ascii"
+        raise DecoderError.new("non-ASCII byte in RFC 2047 US-ASCII word") if data.any? { |b| b >= 0x80 }
+        String.new(data)
+      when "iso-8859-1", "iso8859-1", "latin1", "latin-1"
+        String.build { |io| data.each { |b| io << b.to_i.chr } }
+      when "windows-1252", "cp1252"
+        String.build { |io| data.each { |b| io << windows_1252_scalar(b).chr } }
+      else
+        raise DecoderError.new("unsupported RFC 2047 charset: #{charset}")
+      end
+    end
+
+    WINDOWS_1252_SPECIAL_SCALARS = {
+      0x80_u8 => 0x20ac, 0x82_u8 => 0x201a, 0x83_u8 => 0x0192, 0x84_u8 => 0x201e,
+      0x85_u8 => 0x2026, 0x86_u8 => 0x2020, 0x87_u8 => 0x2021, 0x88_u8 => 0x02c6,
+      0x89_u8 => 0x2030, 0x8a_u8 => 0x0160, 0x8b_u8 => 0x2039, 0x8c_u8 => 0x0152,
+      0x8e_u8 => 0x017d, 0x91_u8 => 0x2018, 0x92_u8 => 0x2019, 0x93_u8 => 0x201c,
+      0x94_u8 => 0x201d, 0x95_u8 => 0x2022, 0x96_u8 => 0x2013, 0x97_u8 => 0x2014,
+      0x98_u8 => 0x02dc, 0x99_u8 => 0x2122, 0x9a_u8 => 0x0161, 0x9b_u8 => 0x203a,
+      0x9c_u8 => 0x0153, 0x9e_u8 => 0x017e, 0x9f_u8 => 0x0178,
+    }
+
+    private def windows_1252_scalar(byte : UInt8) : Int32
+      WINDOWS_1252_SPECIAL_SCALARS[byte]? || byte.to_i
+    end
+
+    private def rfc2047_fws_end(bytes : Bytes, start : Int32) : Int32
+      i = start
+      loop do
+        if bytes[i]? == 0x20_u8 || bytes[i]? == 0x09_u8
+          i += 1
+        elsif bytes[i]? == 0x0d_u8 && bytes[i + 1]? == 0x0a_u8 &&
+              (bytes[i + 2]? == 0x20_u8 || bytes[i + 2]? == 0x09_u8)
+          i += 2
+        else
+          break
+        end
+      end
+      i
+    end
+
+    private def utf8_char_width(lead : UInt8) : Int32
+      case lead
+      when 0x00_u8..0x7f_u8 then 1
+      when 0xc2_u8..0xdf_u8 then 2
+      when 0xe0_u8..0xef_u8 then 3
+      else                       4
+      end
+    end
+
+    # ---- codepoint overflow (Unicode scalar -> low byte) ----
+
+    # This models the common mod-256 mistake explicitly: U+0140 becomes 0x40 ('@').
+    # It returns bytes, so a following `hex-encode` step makes non-printable results
+    # inspectable without pretending they are UTF-8 text.
+    def codepoint_overflow(data : Bytes) : Bytes
+      s = String.new(data)
+      raise DecoderError.new("codepoint-overflow: input is not valid UTF-8 text") unless s.valid_encoding?
+      sink = IO::Memory.new(s.size)
+      s.each_char { |char| sink.write_byte((char.ord & 0xff).to_u8) }
+      sink.to_slice
+    end
+
+    # ---- Windows ANSI Best-Fit target-side preview ----
+
+    WINDOWS_BESTFIT_CODE_PAGES = BestFitData::TABLES.keys.sort!
+
+    @@windows_bestfit_cache : Hash(Int32, Hash(Int32, Int32)) = {} of Int32 => Hash(Int32, Int32)
+
+    # Apply Microsoft's Unicode-to-ANSI best-fit mapping and decode its output through
+    # the selected code page. Characters with no WCTABLE entry become that page's
+    # default '?', matching WideCharToMultiByte's default-character behavior.
+    def windows_bestfit_preview(s : String, code_page : Int32) : String
+      table = windows_bestfit_table(code_page)
+      String.build(s.bytesize) do |io|
+        s.each_char do |char|
+          io << (table[char.ord]? || 0x3f).unsafe_chr
+        end
+      end
+    end
+
+    private def windows_bestfit_table(code_page : Int32) : Hash(Int32, Int32)
+      @@windows_bestfit_cache[code_page]? || begin
+        raw = BestFitData::TABLES[code_page]?
+        raise DecoderError.new("unsupported Windows Best-Fit code page: #{code_page}") unless raw
+
+        table = {} of Int32 => Int32
+        raw.each_line do |line|
+          source, target = line.split('\t')
+          table[source.to_i(16)] = target.to_i(16)
+        end
+        @@windows_bestfit_cache[code_page] = table
+      end
+    end
+
     # ---- punycode / IDN (RFC 3492 bootstring) ----
     PUNY_BASE         =   36
     PUNY_TMIN         =    1

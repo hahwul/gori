@@ -342,6 +342,87 @@ describe Gori::Decoder do
     end
   end
 
+  describe "Unicode and security encoding transforms" do
+    it "registers the four Unicode normalization forms as one-way encoders" do
+      REG["nfc"].direction.should eq Gori::Decoder::Direction::Encode
+      REG["normalize-nfkc"].should eq REG["nfkc"]
+      conv("nfc", "e\u0301").should eq "é"
+      conv("nfd", "é").should eq "e\u0301"
+      conv("nfkc", "ﬁ ⁵ ／").should eq "fi 5 /"
+      conv("nfkc", "⁄").should eq "⁄" # FRACTION SLASH is a confusable, not an NFKC compatibility character
+      conv("nfkd", "ﬁ").should eq "fi"
+    end
+
+    it "RFC 2047 Q and B encode UTF-8 and decode their own output" do
+      conv("rfc2047-q-encode", "André test?").should eq "=?UTF-8?Q?Andr=C3=A9_test=3F?="
+      conv("rfc2047-b-encode", "André").should eq "=?UTF-8?B?QW5kcsOp?="
+      ["André", "plain ASCII", "質問です", "x" * 160].each do |sample|
+        conv("rfc2047-q-decode", conv("rfc2047-q-encode", sample)).should eq sample
+        conv("rfc2047-b-decode", conv("rfc2047-b-encode", sample)).should eq sample
+      end
+    end
+
+    it "keeps RFC 2047 words within 75 octets and folds only between words" do
+      ["rfc2047-q-encode", "rfc2047-b-encode"].each do |encoder|
+        encoded = conv(encoder, "é" * 80)
+        words = encoded.split("\r\n ")
+        words.size.should be > 1
+        words.each(&.bytesize.should(be <= 75))
+        conv(encoder.ends_with?("q-encode") ? "rfc2047-q-decode" : "rfc2047-b-decode", encoded).should eq "é" * 80
+      end
+    end
+
+    it "decodes RFC 2047 words in mixed text and suppresses whitespace between adjacent words" do
+      conv("rfc2047-decode", "Subject: =?UTF-8?Q?hello_world?= =?UTF-8?B?IQ==?=").should eq "Subject: hello world!"
+      conv("rfc2047-decode", "=?ISO-8859-1?Q?Keld_J=F8rn?=").should eq "Keld Jørn"
+      conv("rfc2047-decode", "=?Windows-1252?Q?=80?=").should eq "€"
+      conv("rfc2047-decode", "=?UTF-8?Q?a?= text =?UTF-8?Q?b?=").should eq "a text b"
+      conv("rfc2047-decode", "ordinary text").should eq "ordinary text"
+    end
+
+    it "reports malformed encoded words, unsupported charsets, and wrong forced encodings" do
+      expect_raises(Gori::Decoder::DecoderError, /Q escape/) do
+        conv("rfc2047-q-decode", "=?UTF-8?Q?bad=ZZ?=")
+      end
+      expect_raises(Gori::Decoder::DecoderError, /Base64/) do
+        conv("rfc2047-b-decode", "=?UTF-8?B?@@==?=")
+      end
+      expect_raises(Gori::Decoder::DecoderError, /unsupported RFC 2047 charset/) do
+        conv("rfc2047-decode", "=?shift_jis?B?QQ==?=")
+      end
+      expect_raises(Gori::Decoder::DecoderError, /expected RFC 2047 Q/) do
+        conv("rfc2047-q-decode", "=?UTF-8?B?QQ==?=")
+      end
+    end
+
+    it "maps codepoints to their low byte and exposes binary results to later chain steps" do
+      conv_bytes("codepoint-overflow", "plain".to_slice).should eq "plain".to_slice
+      conv_bytes("codepoint-overflow", "\u0140".to_slice).should eq Bytes[0x40]
+      conv("mod-256", "\u0140").should eq "@"
+      result = Gori::Decoder.run(REG, "\\u0140".to_slice, "unicode-unescape > codepoint-overflow > hex-encode")
+      String.new(result.output.not_nil!).should eq "40"
+      Gori::Decoder.run(REG, Bytes[0xff], "codepoint-overflow").ok?.should be_false
+    end
+
+    it "shows Windows Best-Fit table results by code page" do
+      REG["bestfit-932"].should eq REG["windows-bestfit-932"]
+      REG["worstfit-949"].should eq REG["windows-bestfit-949"]
+      conv("windows-bestfit-932", "yen=¥ soft=\u00ad overline=‾").should eq "yen=\\ soft=- overline=?"
+      conv("windows-bestfit-936", "\u00ad").should eq "-"
+      conv("windows-bestfit-950", "\u00ad").should eq "-"
+      conv("windows-bestfit-949", "₩").should eq "\\"
+      conv("windows-bestfit-1252", "＼／．＂＇＜＞⁵∞").should eq "\\/.\"'<>58"
+      # Windows Best-Fit independently maps FRACTION SLASH to ASCII slash on these pages.
+      conv("windows-bestfit-1252", "⁄").should eq "/"
+      conv("windows-bestfit-1250", "⁄").should eq "/"
+      conv("windows-bestfit-1254", "⁄").should eq "/"
+      # CP932 can represent fullwidth reverse solidus exactly, so it is not folded to ASCII.
+      conv("windows-bestfit-932", "＼").should eq "＼"
+      conv("windows-bestfit-1252", "café 😀").should eq "café ?"
+      Gori::Decoder::Codecs::WINDOWS_BESTFIT_CODE_PAGES.size.should eq 14
+    end
+  end
+
   describe "serialization" do
     it "renders a MessagePack document as JSON, naming what JSON cannot hold" do
       # {"a": 1, "b": <2 raw bytes>}
@@ -516,7 +597,7 @@ describe Gori::Decoder do
         reason.try(&.starts_with?("#{name}: ")).should eq(available ? nil : true)
       end
       # Nothing else in the catalog claims to be unusable.
-      REG.each { |c| c.unusable.should be_nil } if available
+      REG.each(&.unusable.should(be_nil)) if available
     end
 
     it "raw deflate round-trips (RFC 1951, no zlib/gzip wrapper)" do
@@ -556,7 +637,7 @@ describe Gori::Decoder do
     end
 
     it "round-trips every byte value 0..255 in each base" do
-      bytes = Bytes.new(256) { |i| i.to_u8 }
+      bytes = Bytes.new(256, &.to_u8)
       {"decimal", "binary", "octal"}.each do |base|
         rt = conv_bytes("#{base}-decode", conv_bytes("#{base}-encode", bytes).dup)
         rt.should eq bytes
