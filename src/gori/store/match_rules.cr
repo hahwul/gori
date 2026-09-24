@@ -46,8 +46,9 @@ module Gori
                     body_file : String = "") : Int64
       # A stale-grammar process must not mix two grammars into one database — see
       # `store/env_write_guard.cr`. The `pattern` is a needle or a regex and nothing expands it, so
-      # only the `replacement` is re-spelled.
-      (w = env_write) && (replacement = w.call(replacement, EnvMigration::Kind::Rule))
+      # only the `replacement` is re-spelled — and not even that for a stub, whose replacement is
+      # a response sent as authored (`RuleOp#expands_tokens?`).
+      (w = env_write) && op.expands_tokens? && (replacement = w.call(replacement, EnvMigration::Kind::Rule))
       exec_task ->(c : DB::Connection) {
         pos = c.query_one("SELECT COALESCE(MAX(position), -1) + 1 FROM match_rules", as: Int64)
         c.exec("INSERT INTO match_rules (enabled, target, part, pattern, replacement, op, match_kind, name, host, body_file, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -69,7 +70,7 @@ module Gori
     def update_rule(id : Int64, target : RuleTarget, part : RulePart, pattern : String, replacement : String,
                     op : RuleOp = RuleOp::Replace, match_kind : MatchKind = MatchKind::Literal,
                     name : String = "", host : String = "", body_file : String = "") : Bool
-      (w = env_write) && (replacement = w.call(replacement, EnvMigration::Kind::Rule))
+      (w = env_write) && op.expands_tokens? && (replacement = w.call(replacement, EnvMigration::Kind::Rule))
       exec_task_ok ->(c : DB::Connection) {
         c.exec("UPDATE match_rules SET target = ?, part = ?, pattern = ?, replacement = ?, op = ?, match_kind = ?, name = ?, host = ?, body_file = ? WHERE id = ?",
           target.label, part.label, pattern, replacement, op.label, match_kind.label, name, host, body_file, id)

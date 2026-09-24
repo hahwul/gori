@@ -11,7 +11,8 @@ module Gori
     # this walks the one file that sits above all of them.
     #
     # Rewritten as `Kind::Rule`: `Rules#substitute` owns `$$` and `$1..$9` in BOTH grammars, so
-    # only the token spelling follows the syntax.
+    # only the token spelling follows the syntax. A short-circuit rule is skipped outright: its
+    # replacement is a response sent as authored, never expanded (`RuleOp#expands_tokens?`).
 
     # What a re-spelling of the global rules did. Nil is returned instead when nothing changed,
     # so a caller never has to test the counters to decide whether to speak.
@@ -60,7 +61,7 @@ module Gori
       touched = 0
       tokens = 0
       migrated = rules.map do |rule|
-        next rule if rule.replacement.empty?
+        next rule if rule.replacement.empty? || !rule.expands_tokens?
         after, changes = rewrite(rule.replacement.to_slice, from: from, to: to,
           env_names: env, bind_names: bind, enabled_bind_names: live, kind: Kind::Rule,
           prefix: Settings.env_prefix)

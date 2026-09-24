@@ -1163,6 +1163,15 @@ module Gori
       def rewrite? : Bool
         !short_circuit?
       end
+
+      # Does `Rules#substitute` resolve `$NAME` tokens in this op's `replacement`? False only
+      # for `ShortCircuit`: a stub is a whole response the operator authored, sent exactly as
+      # written (`Rules#stub_for` never expands it), so a `$token` in it is literal body text.
+      # The env-grammar migration keys on this — re-spelling a stub's bytes would change what
+      # gori answers with, not how a reference resolves (P7).
+      def expands_tokens? : Bool
+        !short_circuit?
+      end
     end
 
     # How a `Replace` rule matches: a `Literal` substring or a `Regex` (with $1/\1

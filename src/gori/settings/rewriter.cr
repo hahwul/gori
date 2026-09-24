@@ -81,6 +81,13 @@ module Gori::Settings
       known ? known.executes? : true
     end
 
+    # Does the replacement carry `$NAME` tokens the env-grammar migration should re-spell?
+    # Through `RuleOp#expands_tokens?` for the same reason `executes?` goes through the enum.
+    # An unknown op projects to `replace` and stays migratable, as it was before.
+    def expands_tokens? : Bool
+      Store::RuleOp.from_label(op).expands_tokens?
+    end
+
     # A pipe rule's ARGV, or nil when it does not run one. It lives in `replacement` — see
     # `Rules#pipe_argv`, which tokenizes exactly this string. Named so the profile surfaces
     # do not have to know which field a given op keeps its command in.
