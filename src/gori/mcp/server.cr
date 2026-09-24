@@ -788,6 +788,7 @@ module Gori
         clauses = [] of String
         clauses << "send_request (supports flow_id/repeater_id)" if @tools.advertises?("send_request")
         clauses << "send_websocket (executes a persisted WS repeater)" if @tools.advertises?("send_websocket")
+        clauses << "race_requests (fire several saved repeaters as one synchronized multi-endpoint race)" if @tools.advertises?("race_requests")
         clauses << "fuzz_*" if @tools.advertises?("fuzz_start")
         clauses << "mine_*" if @tools.advertises?("mine_start")
         clauses << "authorize_* (replay captured requests under several identities to find " \

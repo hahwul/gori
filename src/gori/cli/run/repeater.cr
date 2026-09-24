@@ -71,6 +71,7 @@ module Gori
       # bare form takes.
       @[Subcommand("repeater", help: [
         {"repeater", "Re-send a captured flow; list/create/send (replay, incl. WebSocket) repeater sessions"},
+        {"repeater race", "Fire several saved sessions as one synchronized race (h1 last-byte, h2 single-packet)"},
         {"repeater minimize", "Strip noise from a saved request, keeping the response the same"},
         {"repeater move", "Rearrange the sub-tab strip: move a session to a tab number (--to N) or one place (--up/--down)"},
         {"repeater delete", "Delete saved repeater sessions by id (needs --yes)"},
@@ -85,6 +86,9 @@ module Gori
           return
         elsif sub == "send"
           cmd_repeater_send(args[1..])
+          return
+        elsif sub == "race"
+          cmd_repeater_race(args[1..])
           return
         elsif sub == "minimize"
           cmd_repeater_minimize(args[1..])
@@ -1049,6 +1053,238 @@ module Gori
       # `gori run repeater send <repeater-id>` — replay a saved repeater SESSION (as
       # opposed to a bare id, which replays a History FLOW). Honors the session's
       # target / http2 / sni / auto_content_length toggle.
+      # `gori run repeater race <id> <id> [<id>…]` — the headless multi-endpoint race (#1236).
+      # Fires several saved sessions as one synchronized group: N distinct requests on the wire
+      # in one narrow window (h1 last-byte-sync over N connections, h2 single-packet over one),
+      # the primitive for a multi-endpoint TOCTOU. This is the FIRST multi-request path on the
+      # headless surface — `send` is one session, `send-group` is TUI-only.
+      #
+      # Same origin, one transport: every session must resolve to one `scheme://host:port` and
+      # share the h1/h2 setting (a mixed group is refused), because the h2 single-packet attack
+      # is one connection = one host and the h1 form is held to the same shape for a legible
+      # transcript. Cross-host h1 is a deliberate follow-up.
+      private def self.cmd_repeater_race(args : Array(String)) : Nil
+        db_path : String? = nil
+        project_name : String? = nil
+        insecure = false
+        timeout : Time::Span? = nil
+        allow_unscoped = false
+        verbatim = false
+        slot : String? = nil
+        reframe_grpc = false
+        tls_preset : String? = nil
+        force_http2 : Bool? = nil
+        max_requests : Int32? = nil
+        format = :text
+        positional = [] of String
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run repeater race <id> <id> [<id>…] [options]\n\n" \
+                     "Fire several saved repeater SESSIONS (ids from `gori run repeater list`) as ONE\n" \
+                     "synchronized race — N distinct requests on the wire together to hit a\n" \
+                     "multi-endpoint TOCTOU window. All sessions must share one origin and transport."
+          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          p.on("-k", "--insecure-upstream", "Do not verify the upstream TLS certificate") { insecure = true }
+          p.on("--timeout=SEC", "Per-operation connect + idle timeout (seconds)") { |v| timeout = parse_count(v, "--timeout").seconds }
+          p.on("--http2", "Race over HTTP/2 (single-packet attack), overriding the sessions' stored setting") { force_http2 = true }
+          p.on("--http1", "Race over HTTP/1.1 (last-byte sync), overriding the sessions' stored setting") { force_http2 = false }
+          p.on("--allow-unscoped", "Send even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
+          p.on("--verbatim", "Send the stored bytes EXACTLY: no token expansion, no Content-Length resync (see `repeater send --verbatim`)") { verbatim = true }
+          p.on("--slot=NAME", "Send as this SESSION SLOT — its header overlay and $BIND table for every member") { |v| slot = v.strip }
+          p.on("--reframe-grpc", "HTTP/2 only: recompute the gRPC length prefix over the body being sent") { reframe_grpc = true }
+          p.on("--tls-preset=NAME", "#{TLS_PRESET_HELP}, overriding the sessions' stored one") { |v| tls_preset = v }
+          p.on("--max-requests=N", "Refuse the race if it would exceed N members (a race is sent whole, never split)") { |v| max_requests = parse_count(v, "--max-requests") }
+          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |before, after| positional = before + after }
+          p.invalid_option { |f| abort "gori run repeater race: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run repeater race: missing value for #{f}" }
+        end
+        parser.parse(args)
+        ids = race_member_ids(positional, max_requests, parser)
+
+        project = resolve_read_project(project_name, db_path)
+        store = open_store(project, read_only: true)
+        # `abort` inside the block still runs the `ensure` (the store closes), and it narrows
+        # each row to a non-nil record, so `loaded` needs no `not_nil!` below. The §…§ marker
+        # guard is asked HERE, with the store open (`DraftMarkers.live?` may read the seed flow),
+        # exactly as `repeater send` asks it — the race renders no markers, so a live one would
+        # put the literal § bytes on the wire; `--verbatim` waives it, matching `repeater send`.
+        loaded, host_overrides = begin
+          rows = ids.map do |id|
+            rec = store.get_repeater_full(id)
+            abort "gori run repeater race: no repeater session ##{id}" unless rec
+            if !verbatim && Repeater::DraftMarkers.live?(store, rec)
+              abort "gori run repeater race: #{Repeater::DraftMarkers.refusal(id, MARKER_REMEDY)}"
+            end
+            {id, rec}
+          end
+          {rows, Gori::HostOverrides.load(store)}
+        ensure
+          store.close
+        end
+
+        # The transport: forced by --http1/--http2, else the sessions' shared stored setting.
+        mode = force_http2
+        if mode.nil?
+          modes = loaded.map { |(_, rec)| rec.http2? }.uniq!
+          if modes.size > 1
+            abort "gori run repeater race: the sessions mix HTTP/1.1 and HTTP/2 — pass --http1 or --http2 to force one"
+          end
+          mode = modes.first
+        end
+
+        activate_slot(slot, "gori run repeater race")
+        outbound = project_outbound(project_name, db_path, allow_unscoped)
+        plan, labels = build_cli_race_plan(loaded, mode, outbound, insecure, host_overrides,
+          verbatim, timeout, reframe_grpc, tls_preset)
+
+        abort_if_out_of_scope!(outbound, plan, "gori run repeater race")
+        abort_if_blocked!(plan, "gori run repeater race")
+
+        results = plan.send_race
+        outbound.close
+        emit_repeater_race(labels, results, plan, format)
+        exit 1 unless results.any?(&.ok?)
+      end
+
+      # The validated race member ids: at least two integers, within `--max-requests` and the
+      # race ceiling. A race is sent whole (never split), so a group over a cap is refused here,
+      # before any dial.
+      private def self.race_member_ids(positional : Array(String), max_requests : Int32?,
+                                       parser : OptionParser) : Array(Int64)
+        if positional.size < 2
+          abort "gori run repeater race: needs at least two <repeater-id>s (a race of one proves nothing)\n#{parser}"
+        end
+        ids = positional.map { |s| s.to_i64? || abort("gori run repeater race: invalid repeater id '#{s}'") }
+        if (cap = max_requests) && ids.size > cap
+          abort "gori run repeater race: #{ids.size} members exceeds --max-requests=#{cap} (a race is sent whole, never split)"
+        end
+        if ids.size > Repeater::MAX_RACE_MEMBERS
+          abort "gori run repeater race: #{ids.size} members exceeds the #{Repeater::MAX_RACE_MEMBERS}-member ceiling"
+        end
+        ids
+      end
+
+      # Resolve every race member's origin (each via its own single-request plan, which also
+      # validates its target / env), assert one origin across the group, and build ONE plan over
+      # every member's request from the first session's send context. Aborts (closing `outbound`)
+      # on a per-member builder refusal or a cross-origin group.
+      private def self.build_cli_race_plan(loaded : Array({Int64, Store::RepeaterRecord}), mode : Bool,
+                                           outbound : Gori::Outbound, insecure : Bool,
+                                           host_overrides : Gori::HostOverrides?, verbatim : Bool,
+                                           timeout : Time::Span?, reframe_grpc : Bool,
+                                           tls_preset : String?) : {Repeater::Plan, Array(String)}
+        # The dial SIGNATURE every member must share: the group rides ONE Sender built from the
+        # anchor, so a member whose origin, effective Content-Length policy, SNI or TLS preset
+        # differs would be silently sent under the anchor's — refuse instead of flattening it.
+        # The signature uses the EFFECTIVE values (the flags fold in: `--tls-preset` / `--verbatim`
+        # make those columns uniform), so it only fires on a real stored difference.
+        sigs = [] of {String, String, Int32, Bool, String?, String?}
+        wires = [] of Bytes
+        labels = [] of String
+        loaded.each do |(id, rec)|
+          probe = begin
+            Repeater::Plan.build(session_plan_options(rec, insecure, host_overrides, verbatim, timeout,
+              reframe_grpc, tls_preset), outbound)
+          rescue ex : Repeater::PlanError
+            outbound.close
+            repeater_plan_abort("gori run repeater race", ex, "session ##{id}")
+          end
+          sigs << {probe.scheme, probe.host, probe.port, !verbatim && rec.auto_content_length?,
+                   rec.sni, tls_preset || rec.tls_preset}
+          wires << rec.request
+          labels << "##{id} #{race_request_line(rec.request)}"
+        end
+        first = sigs.first
+        unless sigs.all? { |s| s == first }
+          outbound.close
+          abort "gori run repeater race: the sessions differ in origin, Content-Length policy, SNI or " \
+                "TLS preset — a race rides one connection shape (origins: " \
+                "#{sigs.map { |(s, h, po, _, _, _)| "#{s}://#{h}:#{po}" }.uniq!.join(", ")})"
+        end
+
+        anchor = loaded.first[1]
+        plan = begin
+          Repeater::Plan.build(Repeater::PlanOptions.new(wires,
+            reframe_grpc: reframe_grpc, default_target: anchor.target, http2: mode, sni: anchor.sni,
+            timeout: timeout, expand_request: !verbatim, expand_bindings: !verbatim,
+            preserve_field_case: verbatim, auto_content_length: !verbatim && anchor.auto_content_length?,
+            verify: !insecure, overrides: host_overrides, tls_preset: tls_preset || anchor.tls_preset), outbound)
+        rescue ex : Repeater::PlanError
+          outbound.close
+          repeater_plan_abort("gori run repeater race", ex)
+        end
+        {plan, labels}
+      end
+
+      # The request line (first line) of a member's stored request, for the race transcript.
+      private def self.race_request_line(request : Bytes) : String
+        line = String.new(request[0, {request.size, 200}.min]).lines.first?.try(&.strip)
+        line && !line.empty? ? line : "(no request line)"
+      end
+
+      # Print one race's per-member results — status, size and RELEASE-RELATIVE timing (each
+      # member's duration is measured from the synchronized release, so the spread is the
+      # arrival order), plus a winners tally (a 2xx count > 1 where the app should allow one is
+      # the finding).
+      private def self.emit_repeater_race(labels : Array(String), results : Array(Repeater::Result),
+                                          plan : Repeater::Plan, format : Symbol) : Nil
+        format == :json ? emit_race_json(labels, results, plan) : emit_race_text(labels, results, plan)
+      end
+
+      private def self.emit_race_json(labels : Array(String), results : Array(Repeater::Result),
+                                      plan : Repeater::Plan) : Nil
+        JSON.build(STDOUT) do |j|
+          j.object do
+            j.field "target", "#{plan.scheme}://#{plan.host}:#{plan.port}"
+            j.field "transport", plan.http2? ? "single-packet h2" : "last-byte-sync h1"
+            j.field "members" do
+              j.array do
+                labels.each_with_index do |label, i|
+                  r = results[i]?
+                  j.object do
+                    j.field "label", label
+                    j.field "ok", r.try(&.ok?) || false
+                    j.field "status", r.try(&.response.try(&.status))
+                    j.field "size", r.try { |x| (x.head.size + (x.body.try(&.size) || 0)) }
+                    j.field "duration_us", r.try(&.duration_us)
+                    j.field "incomplete", r.try(&.incomplete?) || false
+                    j.field "error", r.try(&.error)
+                  end
+                end
+              end
+            end
+          end
+        end
+        STDOUT.puts
+      end
+
+      private def self.emit_race_text(labels : Array(String), results : Array(Repeater::Result),
+                                      plan : Repeater::Plan) : Nil
+        transport = plan.http2? ? "single-packet h2" : "last-byte-sync h1"
+        # Facts only, no verdict: whether N distinct 2xx is a finding is the operator's call
+        # (a multi-endpoint race where each endpoint SHOULD answer 2xx is the normal case).
+        ok2xx = results.count { |r| r.ok? && (s = r.response.try(&.status)) && 200 <= s < 300 }
+        puts "race → #{plan.scheme}://#{plan.host}:#{plan.port} · #{results.size} requests together (#{transport})"
+        labels.each_with_index { |label, i| puts race_member_line(label, results[i]?) }
+        puts "→ #{results.count(&.ok?)}/#{results.size} responded · #{ok2xx}×2xx"
+      end
+
+      # One member's line(s) in the text transcript: its label, then its status/size/timing or its
+      # error (a member that never produced a result at all reads "(no result)").
+      private def self.race_member_line(label : String, r : Repeater::Result?) : String
+        return "  #{label}\n    (no result)" unless r
+        if err = r.error
+          head = r.head.empty? ? "" : "HTTP #{r.response.try(&.status)} · "
+          "  #{label}\n    ✗ #{head}#{err}"
+        else
+          size = CLI::Output.human_size((r.head.size + (r.body.try(&.size) || 0)).to_i64)
+          "  #{label}\n    HTTP #{r.response.try(&.status)} · #{size} · #{CLI::Output.human_us(r.duration_us)}#{r.incomplete? ? " ⚠ incomplete" : ""}"
+        end
+      end
+
       private def self.cmd_repeater_send(args : Array(String)) : Nil
         db_path : String? = nil
         project_name : String? = nil

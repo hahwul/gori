@@ -205,6 +205,127 @@ module Gori
         results
       end
 
+      # Fire N DISTINCT requests as close to simultaneously as one process can — the
+      # multi-endpoint race / last-byte-sync primitive (#1236). Each member gets its OWN
+      # dedicated connection to the shared origin, every member's final byte is held back, and
+      # all of them are released in one tight loop, so the requests land within the same narrow
+      # window on the server. This is the primitive behind TOCTOU across DISTINCT endpoints
+      # (`POST /apply-coupon` racing `POST /checkout`).
+      #
+      # Contrast the two neighbours: `send_pipeline` is ONE connection, sequential; the Fuzzer
+      # race (`Fuzz::Sender#send_race`) is N BYTE-IDENTICAL copies of one template. This is N
+      # connections released together carrying N DISTINCT `wires` — so `Fuzz::Sender#send_race`
+      # now delegates here, passing N identical wires, and the Repeater passes hand-authored
+      # distinct ones.
+      #
+      # The caller owns GATING: every wire here has already cleared the Layer-2 send gate, and a
+      # warm-up (a SECOND, different request on each socket) must be gated by the caller too.
+      # `on_warmup` fires once per warm-up exchange actually performed, for callers that count
+      # the extra wire sends (`Fuzz::Sender#extra_requests`). The socket-retirement rule after a
+      # warm-up (`ConnPool.reusable_response?`) and the release discipline (one tight loop, no
+      # I/O between writes; fan-out read only once every byte is on the wire — P6) carry over
+      # verbatim from the Fuzzer race.
+      #
+      # Refuses the whole release if fewer than 2 connections survive assembly — racing one
+      # connection proves nothing.
+      def self.race_h1(wires : Array(Bytes), *, scheme : String, host : String, port : Int32,
+                       verify_upstream : Bool, sni : String? = nil,
+                       timeout : Time::Span? = nil,
+                       overrides : Gori::HostOverrides? = nil,
+                       tls_preset : String? = nil,
+                       warmup : Bytes? = nil,
+                       on_warmup : (-> Nil)? = nil) : Array(Result)
+        return [] of Result if wires.empty?
+        n = wires.size
+        results = Array(Result?).new(n) { nil }
+        sockets = Array(IO?).new(n) { nil }
+
+        # ── assemble: dial, optionally warm up, write everything but the final byte ─────────
+        n.times do |i|
+          socket, error = assemble_race_conn(wires[i], scheme, host, port, verify_upstream, sni,
+            timeout, overrides, tls_preset, warmup, on_warmup)
+          sockets[i] = socket
+          results[i] = error if error
+        end
+
+        live = (0...n).select { |i| sockets[i] }
+        if live.size < 2
+          live.each { |i| sockets[i].try(&.close) rescue nil }
+          return (0...n).map do |i|
+            results[i] || Result.new(Bytes.new(0), nil, nil, 0_i64,
+              "race: could not assemble enough live connections (#{live.size} of #{n})")
+          end
+        end
+
+        # ── release: one tight loop, no sleep/channel-op/other I/O between writes ───────────
+        started = Time.instant
+        live.each do |i|
+          next unless socket = sockets[i]
+          wire = wires[i]
+          begin
+            socket.write(wire[wire.size - 1, 1])
+          rescue ex
+            # A broken socket here must not stop writing to the REST of the group — that would
+            # desynchronize the release far worse than losing one member.
+            results[i] = Result.new(Bytes.new(0), nil, nil, 0_i64, "race: release write failed — #{ex.message}")
+            socket.close rescue nil
+            sockets[i] = nil
+          end
+        end
+
+        # ── read: no longer time-critical once every byte is on the wire — fan out ──────────
+        released = (0...n).select { |i| sockets[i] }
+        done = Channel(Nil).new(released.size)
+        released.each do |i|
+          spawn do
+            if socket = sockets[i]
+              results[i] = read_response(socket, wires[i], host, port, started, origin_scheme: scheme)
+              socket.close rescue nil
+            end
+            done.send(nil)
+          end
+        end
+        released.size.times { done.receive }
+
+        (0...n).map { |i| (r = results[i]) ? r.with_wire(wires[i]) : Result.new(Bytes.new(0), nil, nil, 0_i64, "race: no result") }
+      end
+
+      # Dial one race member's connection, optionally warm it up, and write everything but the
+      # final byte — the per-member half of `race_h1`'s assemble loop, split out so the loop
+      # itself stays a straight fan-out. Returns `{socket, nil}` on success (the socket holds the
+      # withheld last byte), or `{nil, error}` for a member that could not be assembled.
+      private def self.assemble_race_conn(wire : Bytes, scheme : String, host : String, port : Int32,
+                                          verify_upstream : Bool, sni : String?, timeout : Time::Span?,
+                                          overrides : Gori::HostOverrides?, tls_preset : String?,
+                                          warmup : Bytes?, on_warmup : (-> Nil)?) : {IO?, Result?}
+        if wire.size < 2
+          # Nothing to hold back — a hand-built member too short to split. Record an error rather
+          # than slice a negative/empty tail; it counts against the live floor in the caller.
+          return {nil, Result.new(Bytes.new(0), nil, nil, 0_i64, "race: request too short to hold back a byte")}
+        end
+        upstream, dial_error = dial_result(scheme, host, port, verify_upstream, sni, timeout, overrides, tls_preset)
+        unless upstream
+          msg = connect_error(scheme, host, port, verify_upstream, dial_error)
+          return {nil, Result.new(Bytes.new(0), nil, nil, 0_i64, "race: dial failed — #{msg}")}
+        end
+        if w = warmup
+          wr = exchange(upstream, w, host, port, Time.instant, origin_scheme: scheme)
+          on_warmup.try(&.call)
+          unless ConnPool.reusable_response?(wr, request_method(w))
+            upstream.close rescue nil
+            return {nil, Result.new(Bytes.new(0), nil, nil, 0_i64,
+              "race: warmup failed — #{wr.error || "the connection will not survive to the race request"}")}
+          end
+        end
+        begin
+          upstream.write(wire[0, wire.size - 1]) # sync=true already flushes; no second syscall needed
+        rescue ex
+          upstream.close rescue nil
+          return {nil, Result.new(Bytes.new(0), nil, nil, 0_i64, "race: write failed — #{ex.message}")}
+        end
+        {upstream, nil}
+      end
+
       # The exact error string a clean EOF before ANY response byte produces. A keep-alive
       # pool matches on it to tell "the origin had already closed this parked socket" (retry
       # once on a fresh connection) apart from a timeout or a mid-response failure (never

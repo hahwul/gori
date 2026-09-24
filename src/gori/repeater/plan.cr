@@ -7,6 +7,12 @@ require "./sender"
 require "./ws_engine"
 
 module Gori::Repeater
+  # The ceiling on a multi-endpoint race group (#1236). A race is sent WHOLE — never split —
+  # so every surface refuses a group over this before any dial, the same rule the Fuzzer race
+  # follows (`Fuzz::MAX_RACE_SIZE`). Set to the marked-sub-tab batch cap (`BATCH_SUBTAB_CAP`),
+  # the TUI gesture that forms a race, since that is where the largest group comes from.
+  MAX_RACE_MEMBERS = 20
+
   # Why one option set cannot become a runnable send.
   #
   # The builder never writes the user-facing sentence: every surface phrases these in its
@@ -359,6 +365,14 @@ module Gori::Repeater
 
     def send_group : Array(Result)
       @sender.send_group(@requests)
+    end
+
+    # Fire every request in the plan as a synchronized RACE — distinct requests on the wire in
+    # one narrow window (h1 last-byte-sync, h2 single-packet), the multi-endpoint TOCTOU
+    # primitive (#1236). The members share this plan's ONE origin (the surface resolved them to
+    # it); `refusal` above already covers the whole group.
+    def send_race : Array(Result)
+      @sender.send_race(@requests)
     end
 
     # `keep_key` sends the operator's own `Sec-WebSocket-Key` header instead of a fresh one.

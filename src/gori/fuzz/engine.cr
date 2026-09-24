@@ -643,101 +643,19 @@ module Gori::Fuzz
         end
       end
 
-      head = expanded[0, expanded.size - 1]
-      tail = expanded[expanded.size - 1, 1]
-      n = jobs.size
-      dial_timeout = timeout || @timeout
-      results = Array(Repeater::Result?).new(n) { nil }
-      sockets = Array(IO?).new(n) { nil }
-
-      # ── assemble: dial, optionally warm up, write everything but the final byte ──────────
-      n.times do |i|
-        upstream, dial_error = Repeater::Engine.dial_result(@origin.scheme, @origin.host,
-          @origin.port, @verify, @sni, dial_timeout, @overrides, @tls_preset)
-        unless upstream
-          msg = Repeater::Engine.connect_error(@origin.scheme, @origin.host, @origin.port, @verify, dial_error)
-          results[i] = Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, "race: dial failed — #{msg}")
-          next
-        end
-        if w = warmup
-          wr = Repeater::Engine.exchange(upstream, w, @origin.host, @origin.port, Time.instant,
-            origin_scheme: @origin.scheme)
-          # The warmup request is now on the wire (whether or not the response says the socket
-          # survives), so it counts toward the true wire total — reported via `extra_requests`,
-          # below the caller's `jobs.size`, matching how ConnPool re-sends are counted.
-          @race_warmups += 1
-          # Same retirement rule `send_pipeline`/`ConnPool` use: an error, an incomplete read,
-          # or a response that itself says the connection will NOT survive (`Connection:
-          # close`, HTTP/1.0 without keep-alive, a close-delimited body) all leave this socket
-          # unusable for a second exchange — writing the race request onto it would either
-          # misframe the response or simply find the socket already gone by release time.
-          # `ConnPool.reusable_response?` is the exact same check the keep-alive pool already
-          # makes before parking a socket (it covers error/incomplete itself); reused here
-          # rather than re-deriving it.
-          unless ConnPool.reusable_response?(wr, Repeater::Engine.request_method(w))
-            upstream.close rescue nil
-            results[i] = Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64,
-              "race: warmup failed — #{wr.error || "the connection will not survive to the race request"}")
-            next
-          end
-        end
-        begin
-          upstream.write(head) # sync=true already flushes; no second syscall needed
-        rescue ex
-          upstream.close rescue nil
-          results[i] = Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, "race: write failed — #{ex.message}")
-          next
-        end
-        sockets[i] = upstream
-      end
-
-      live = (0...n).select { |i| sockets[i] }
-      if live.size < 2
-        # Fewer than 2 connections survived assembly — refuse the release (racing one
-        # connection proves nothing) rather than silently reporting a weaker "race".
-        live.each { |i| sockets[i].try(&.close) rescue nil }
-        return (0...n).map do |i|
-          results[i] || Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64,
-            "race: could not assemble enough live connections (#{live.size} of #{n})")
-        end
-      end
-
-      # ── release: one tight loop, no sleep/channel-op/other I/O between writes ────────────
-      started = Time.instant
-      live.each do |i|
-        socket = sockets[i].not_nil!
-        begin
-          socket.write(tail)
-        rescue ex
-          # A broken socket here must not stop writing to the REST of the group — that would
-          # desynchronize the release far worse than losing one member.
-          results[i] = Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, "race: release write failed — #{ex.message}")
-          socket.close rescue nil
-          sockets[i] = nil
-        end
-      end
-
-      # ── read: no longer time-critical once every byte is on the wire — fan out ───────────
-      released = (0...n).select { |i| sockets[i] }
-      done = Channel(Nil).new(released.size)
-      released.each do |i|
-        spawn do
-          socket = sockets[i].not_nil!
-          # `origin_scheme:` for the same reason the warm-up exchange above carries it: the
-          # no-response diagnostic re-asks the route, and an https race target behind an
-          # HTTPS_PROXY-only environment otherwise loses its "(reached via …)" clause — or,
-          # with two proxies exported, names the wrong one (#1114).
-          results[i] = Repeater::Engine.read_response(socket, expanded, @origin.host, @origin.port, started,
-            origin_scheme: @origin.scheme)
-          socket.close rescue nil
-          done.send(nil)
-        end
-      end
-      released.size.times { done.receive }
-
-      # Every member of a race writes the SAME `expanded` bytes (that is what makes it a race),
-      # so one wire answers for all of them — and it is the post-seam buffer, not `jobs[0].bytes`.
-      (0...n).map { |i| results[i].not_nil!.with_wire(expanded) }
+      # Every member of a fuzz race writes the SAME post-seam `expanded` bytes — that is what
+      # makes it a race — so the distinct-request transport in `Repeater::Engine.race_h1` is
+      # handed N identical wires. The last-byte-sync mechanics (dial per member, per-conn
+      # warm-up + `ConnPool.reusable_response?` retirement, `< 2` live refusal, the tight
+      # release loop, the fan-out read, `with_wire`) all live there now, shared with the
+      # Repeater's own multi-endpoint race (#1236). Only the fuzz-specific pre-work stays here:
+      # the evidence/`$GEN` expansion and the `sweep_block` gate above, and the `@race_warmups`
+      # tally below (each warm-up is a real wire send, reported via `extra_requests`).
+      Repeater::Engine.race_h1(Array.new(jobs.size) { expanded },
+        scheme: @origin.scheme, host: @origin.host, port: @origin.port,
+        verify_upstream: @verify, sni: @sni, timeout: timeout || @timeout,
+        overrides: @overrides, tls_preset: @tls_preset,
+        warmup: warmup, on_warmup: -> { @race_warmups += 1; nil })
     end
   end
 
