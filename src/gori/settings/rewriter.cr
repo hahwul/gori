@@ -26,10 +26,15 @@ module Gori::Settings
     part : String,   # Store::RulePart label — "head" | "body" | "ws"
     pattern : String,
     replacement : String,
-    op : String,          # Store::RuleOp label — "replace" | "add_header" | ... | "short_circuit"
-    match_kind : String,  # Store::MatchKind label — "literal" | "regex"
-    host : String,        # host glob ("" = every host)
-    body_file : String do # ShortCircuit stub path ("" = inline body in `replacement`)
+    op : String,         # Store::RuleOp label — "replace" | "add_header" | ... | "short_circuit"
+    match_kind : String, # Store::MatchKind label — "literal" | "regex"
+    host : String,       # host glob ("" = every host)
+    body_file : String,  # ShortCircuit stub path ("" = inline body in `replacement`)
+    extra_keys : Hash(String, JSON::Any) = Hash(String, JSON::Any).new,
+    raw_target : JSON::Any? = nil,
+    raw_part : JSON::Any? = nil,
+    raw_op : JSON::Any? = nil,
+    raw_match_kind : JSON::Any? = nil do
     # The rule as the proxy sees it in one project: `enabled` is the EFFECTIVE state there
     # (this rule's default unless the project overrode it) and `overridden` says which of the
     # two it is, so the list row can mark it.
@@ -47,7 +52,8 @@ module Gori::Settings
         unknown_target: Store::RuleTarget.from_label?(target) ? nil : target,
         unknown_part: Store::RulePart.from_label?(part) ? nil : part,
         unknown_op: Store::RuleOp.from_label?(op) ? nil : op,
-        unknown_match_kind: Store::MatchKind.from_label?(match_kind) ? nil : match_kind)
+        unknown_match_kind: Store::MatchKind.from_label?(match_kind) ? nil : match_kind,
+        unknown_keys: extra_keys.empty? ? nil : extra_keys.keys)
     end
 
     # Keep the configured state in settings.json, but don't treat an unsupported grammar value
@@ -55,7 +61,8 @@ module Gori::Settings
     # presenting an unknown `pipe`-shaped row as an executable command.
     def inert? : Bool
       Store::RuleTarget.from_label?(target).nil? || Store::RulePart.from_label?(part).nil? ||
-        Store::RuleOp.from_label?(op).nil? || Store::MatchKind.from_label?(match_kind).nil?
+        Store::RuleOp.from_label?(op).nil? || Store::MatchKind.from_label?(match_kind).nil? ||
+        !extra_keys.empty? || !raw_target.nil? || !raw_part.nil? || !raw_op.nil? || !raw_match_kind.nil?
     end
 
     # Does this rule RUN AN EXTERNAL COMMAND when it fires? The question a profile's two ends
@@ -67,21 +74,24 @@ module Gori::Settings
     # here would be a second answer to that question, free to stay behind — which is exactly
     # how the export contract came to be written for `pipe`'s predecessors and never revisited.
     #
-    # `from_label` is still total (an unrecognised op projects to `replace`), but the raw
-    # string is retained and `inert?` gates traffic use of that projection. This command
-    # metadata is separate: a known `pipe` still needs profile command review if another shape
-    # field is unknown, while an unknown op is not a command this binary knows how to run.
+    # An unknown op counts as "might execute" so that profile import refuses an unknown-op rule
+    # unless --allow-commands is supplied.
     def executes? : Bool
-      Store::RuleOp.from_label(op).executes?
+      known = Store::RuleOp.from_label?(op)
+      known ? known.executes? : true
     end
 
     # A pipe rule's ARGV, or nil when it does not run one. It lives in `replacement` — see
     # `Rules#pipe_argv`, which tokenizes exactly this string. Named so the profile surfaces
     # do not have to know which field a given op keeps its command in.
     def command : String?
-      executes? ? replacement : nil
+      return nil unless executes?
+      replacement.presence
     end
   end
+
+  # A settings rule with any other key is kept inert.
+  KNOWN_RULE_KEYS = %w[id enabled name target part pattern replacement op match_kind host body_file]
 
   class_property rewriter_rules : Array(RewriterRule) = [] of RewriterRule
 
@@ -145,11 +155,12 @@ module Gori::Settings
       next unless o = e.as_h?
       pattern = o["pattern"]?.try(&.as_s?)
       next if pattern.nil? || pattern.empty?
-      op = keep_unknown_label(o["op"]?.try(&.as_s?), RULE_OPS, "replace")
-      target = keep_unknown_label(o["target"]?.try(&.as_s?), RULE_TARGETS, "request")
-      part = keep_unknown_label(o["part"]?.try(&.as_s?), RULE_PARTS, "head")
-      match_kind = keep_unknown_label(o["match_kind"]?.try(&.as_s?), RULE_KINDS, "literal")
+      op, raw_op = parse_rule_label(o["op"]?, RULE_OPS, "replace")
+      target, raw_target = parse_rule_label(o["target"]?, RULE_TARGETS, "request")
+      part, raw_part = parse_rule_label(o["part"]?, RULE_PARTS, "head")
+      match_kind, raw_match_kind = parse_rule_label(o["match_kind"]?, RULE_KINDS, "literal")
       next if known_rule_shape?(op, part) && impossible_shape?(op, part)
+      extra = o.reject { |k, _| KNOWN_RULE_KEYS.includes?(k) }
       list << RewriterRule.new(
         claim_id(o["id"]?.try(&.as_i64?), seen),
         o["enabled"]?.try(&.as_bool?) || false,
@@ -160,9 +171,23 @@ module Gori::Settings
         op,
         match_kind,
         o["host"]?.try(&.as_s?) || "",
-        o["body_file"]?.try(&.as_s?) || "")
+        o["body_file"]?.try(&.as_s?) || "",
+        extra_keys: extra,
+        raw_target: raw_target,
+        raw_part: raw_part,
+        raw_op: raw_op,
+        raw_match_kind: raw_match_kind)
     end
     list
+  end
+
+  private def self.parse_rule_label(node : JSON::Any?, allowed : Array(String), default : String) : {String, JSON::Any?}
+    return {default, nil} unless node
+    if s = node.as_s?
+      {keep_unknown_label(s, allowed, default), nil}
+    else
+      {node.to_json, node}
+    end
   end
 
   # Canonicalize a label this binary knows, but carry an unknown string unchanged. `nil` still
@@ -241,11 +266,12 @@ module Gori::Settings
       name = o["name"]?.try(&.as_s?)
       pattern = o["pattern"]?.try(&.as_s?)
       next if name.nil? || name.empty? || pattern.nil? || pattern.empty?
-      op = keep_unknown_label(o["op"]?.try(&.as_s?), RULE_OPS, "replace")
-      target = keep_unknown_label(o["target"]?.try(&.as_s?), RULE_TARGETS, "request")
-      part = keep_unknown_label(o["part"]?.try(&.as_s?), RULE_PARTS, "head")
-      match_kind = keep_unknown_label(o["match_kind"]?.try(&.as_s?), RULE_KINDS, "literal")
+      op, raw_op = parse_rule_label(o["op"]?, RULE_OPS, "replace")
+      target, raw_target = parse_rule_label(o["target"]?, RULE_TARGETS, "request")
+      part, raw_part = parse_rule_label(o["part"]?, RULE_PARTS, "head")
+      match_kind, raw_match_kind = parse_rule_label(o["match_kind"]?, RULE_KINDS, "literal")
       next if known_rule_shape?(op, part) && impossible_shape?(op, part)
+      extra = o.reject { |k, _| KNOWN_RULE_KEYS.includes?(k) }
       list << RewriterRule.new(
         (list.size + 1).to_i64, false, name,
         target, part,
@@ -254,7 +280,12 @@ module Gori::Settings
         op,
         match_kind,
         o["host"]?.try(&.as_s?) || "",
-        o["body_file"]?.try(&.as_s?) || "")
+        o["body_file"]?.try(&.as_s?) || "",
+        extra_keys: extra,
+        raw_target: raw_target,
+        raw_part: raw_part,
+        raw_op: raw_op,
+        raw_match_kind: raw_match_kind)
     end
     list
   end
@@ -386,6 +417,7 @@ module Gori::Settings
     return false unless i
     j = i + (dir < 0 ? -1 : 1)
     return false if j < 0 || j >= list.size
+    return false if list[i].inert? || list[j].inert?
     list[i], list[j] = list[j], list[i]
     prev_rules = rewriter_rules
     self.rewriter_rules = list
@@ -422,14 +454,33 @@ module Gori::Settings
                 j.field "id", r.id
                 j.field "enabled", r.enabled
                 j.field "name", r.name
-                j.field "target", r.target
-                j.field "part", r.part
+                if raw = r.raw_target
+                  j.field("target") { raw.to_json(j) }
+                else
+                  j.field "target", r.target
+                end
+                if raw = r.raw_part
+                  j.field("part") { raw.to_json(j) }
+                else
+                  j.field "part", r.part
+                end
                 j.field "pattern", r.pattern
                 j.field "replacement", r.replacement
-                j.field "op", r.op
-                j.field "match_kind", r.match_kind
+                if raw = r.raw_op
+                  j.field("op") { raw.to_json(j) }
+                else
+                  j.field "op", r.op
+                end
+                if raw = r.raw_match_kind
+                  j.field("match_kind") { raw.to_json(j) }
+                else
+                  j.field "match_kind", r.match_kind
+                end
                 j.field "host", r.host
                 j.field "body_file", r.body_file
+                r.extra_keys.each do |k, v|
+                  j.field(k) { v.to_json(j) }
+                end
               end
             end
           end

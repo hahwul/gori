@@ -1682,11 +1682,16 @@ module Gori::Tui
       @detail = store.get_flow(id)
       return false if @detail.nil?
       @detail_frozen = store.evidence_count_for(Store::LinkRefKind::Flow, id)
-      if idx = @rows.index { |r| r.id == id }
+      if idx = index_of(id)
         @selected = idx
         # A deep-linked OLDER flow must survive a live reload — otherwise follow mode snaps
         # @selected back to the tail on the next data_version tick, losing the anchor.
         @follow = false if idx != follow_index
+      else
+        @follow = false
+        if nearest = nearest_row_index(id)
+          @selected = nearest
+        end
       end
       # WebSocket flows (101) carry a captured message log; h2 flows link to their
       # connection's raw frame log. Both are loaded as a bounded most-recent window
@@ -1704,6 +1709,18 @@ module Gori::Tui
     end
 
     def close_detail : Nil
+      if detail = @detail
+        did = detail.row.id
+        if idx = index_of(did)
+          @selected = idx
+          @follow = false if idx != follow_index
+        else
+          @follow = false
+          if nearest = nearest_row_index(did)
+            @selected = nearest
+          end
+        end
+      end
       @detail = nil
       drop_detail_cache
       @detail_frames = nil # release the h2-frame / ws-message payload arrays (can be MiB)
@@ -4090,6 +4107,20 @@ module Gori::Tui
         end
       end
       nil
+    end
+
+    private def nearest_row_index(id : Int64) : Int32?
+      return nil if @rows.empty?
+      best_idx = 0
+      best_diff = (@rows[0].id - id).abs
+      @rows.each_with_index do |r, i|
+        diff = (r.id - id).abs
+        if diff < best_diff
+          best_diff = diff
+          best_idx = i
+        end
+      end
+      best_idx
     end
 
     # Drop the oldest rows so the window stays at MAX_ROWS. Newest-first: oldest

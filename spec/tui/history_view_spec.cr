@@ -1536,6 +1536,37 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  it "returns to the hit on close when in the list, and disables follow without tail snap when not" do
+    with_store do |store|
+      id1 = add_flow(store, "GET", "/first", 200)
+      add_flow(store, "GET", "/second", 200)
+      add_flow(store, "GET", "/third", 200)
+      hidden = add_flow(store, "GET", "/hidden", 404)
+
+      view = HistoryView.new
+      view.reload(store)
+      view.follow?.should be_true
+
+      # 1. When the hit is in the list:
+      idx1 = view.rows.index { |r| r.id == id1 }.not_nil!
+      view.open_detail_id(id1, store).should be_true
+      view.follow?.should be_false
+      view.selected.should eq(idx1)
+      view.close_detail
+      view.selected.should eq(idx1)
+      view.follow?.should be_false
+
+      # 2. When the hit is not in the filtered list:
+      view.set_query("status:200")
+      view.reload(store)
+      view.open_detail_id(hidden, store).should be_true
+      view.follow?.should be_false
+      view.close_detail
+      view.follow?.should be_false
+      view.selected.should be <= 2
+    end
+  end
+
   it "keeps the whole interior for the detail when the pane is too short for a rail" do
     with_store do |store|
       3.times { |i| add_flow(store, "GET", "/api/#{i}", 200) }
