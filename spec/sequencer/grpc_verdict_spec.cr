@@ -1,4 +1,5 @@
 require "../spec_helper"
+require "compress/gzip"
 
 private alias Q = Gori::Sequencer
 private alias F = Gori::Fuzz
@@ -30,6 +31,27 @@ private class GrpcCookieBackend < F::Backend
   end
 end
 
+# grpc-web under `Content-Encoding: gzip`: the outcome is a trailer FRAME inside a coded body.
+private class GrpcWebGzipBackend < F::Backend
+  getter origin : F::Origin
+
+  def initialize(@origin : F::Origin)
+  end
+
+  def send(bytes : Bytes) : Gori::Repeater::Result
+    io = IO::Memory.new
+    Compress::Gzip::Writer.open(io) do |gz|
+      gz.write(Gori::Proxy::H2::Grpc.frame(false, "grpc-status: 7\r\n".to_slice, trailer: true))
+    end
+    wire = io.to_slice
+    head = ("HTTP/1.1 200 OK\r\ncontent-type: application/grpc-web+proto\r\n" \
+            "Set-Cookie: SID=1000; Path=/\r\nContent-Encoding: gzip\r\n" \
+            "Content-Length: #{wire.size}\r\n\r\n").to_slice
+    resp = Gori::Proxy::Codec::Http1.parse_response_head(head)
+    Gori::Repeater::Result.new(head, wire, resp, 500_i64)
+  end
+end
+
 private def drain(engine : Q::Engine) : Array(Q::Sample)
   samples = [] of Q::Sample
   engine.run { |ev| samples << ev.sample if ev.is_a?(Q::SampleEvent) }
@@ -56,6 +78,11 @@ describe "sequence over gRPC" do
     granted.grpc_message.should be_nil # an empty grpc-message is absent, not ""
 
     denied.grpc_status.should_not eq(granted.grpc_status)
+  end
+
+  # A `Repeater::Result` body is WIRE bytes; read raw, the gzipped trailer frame is invisible.
+  it "reads a gzipped grpc-web trailer onto the Sample" do
+    collect_one(GrpcWebGzipBackend.new(F::Origin.new("http", "h", 80))).grpc_status.should eq(7)
   end
 
   # The reporting half: `--format jsonl` only renders the fields when present, so a

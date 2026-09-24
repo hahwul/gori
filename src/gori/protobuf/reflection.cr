@@ -452,6 +452,17 @@ module Gori::Protobuf
           notes << "#{dropped} descriptor file#{dropped == 1 ? "" : "s"} past the " \
                    "#{MAX_FILES}-file limit were dropped"
         end
+        # One reply per request, in order, on one stream — so fewer replies than requests is a
+        # stream cut short (the replay engine stops reading a body at its size cap), and every
+        # request past the last reply went unanswered. Named, because a service whose
+        # descriptors never arrived otherwise vanished from the schema without a word.
+        if replies.size < asked.size
+          missed = asked[replies.size..]
+          shown = missed.first(3).join(", ")
+          shown += ", …" if missed.size > 3
+          notes << "#{missed.size} request#{missed.size == 1 ? "" : "s"} went unanswered — " \
+                   "the reply stream was cut short (#{shown})"
+        end
         added > 0
       end
     end
@@ -534,7 +545,7 @@ module Gori::Protobuf
         kind = code == UNIMPLEMENTED ? FailureKind::Unimplemented : FailureKind::Answered
         return {none, Failure.new("#{service}: #{text}", kind)}
       end
-      messages, residual = Proxy::H2::Grpc.scan_body(resp.headers.get?("content-type"), result.body || Bytes.new(0))
+      messages, residual = Proxy::H2::Grpc.scan_wire(result.head, result.body || Bytes.new(0))
       if messages.empty?
         text = residual > 0 ? "#{service} answered with #{residual} bytes that are not gRPC frames" : "#{service} answered with no message"
         return {none, Failure.new(text, FailureKind::Answered)}
@@ -578,7 +589,7 @@ module Gori::Protobuf
     # the same way here. nil when the server sent none, which is itself legal for a stream
     # gori cut short, and is then judged by whether messages arrived.
     private def grpc_status(resp : Proxy::Codec::RawResponse) : Int32?
-      resp.headers.get?("grpc-status").try(&.strip.to_i?)
+      resp.headers.get?("grpc-status").try { |v| Proxy::H2::Grpc.parse_status(v) }
     end
 
     # ErrorResponse (field 7) as a sentence, or nil when this reply is not one.
@@ -586,7 +597,10 @@ module Gori::Protobuf
       Schema.submessages(m, ERROR_RESPONSE).each do |e|
         code = Schema.int32(e, ERROR_CODE) || 2_i64
         message = Schema.text(e, ERROR_MESSAGE)
-        name = Proxy::H2::Grpc.status_name(code.to_i32)
+        # A code past the int32 range is the server's own malformed answer: named by the value
+        # it sent, not by the status its low 32 bits happen to spell (2^40 would read "OK").
+        raw = Schema.varint(e, ERROR_CODE)
+        name = raw && raw.to_i64! != code ? "CODE#{raw}" : Proxy::H2::Grpc.status_name(code.to_i32)
         return message && !message.empty? ? "#{name}: #{message}" : name
       end
       nil

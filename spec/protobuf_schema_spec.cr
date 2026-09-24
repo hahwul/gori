@@ -247,6 +247,41 @@ describe Gori::Protobuf::Lens do
     r.note.not_nil!.should contain("demo.Role")
   end
 
+  # An enum is an int32: a negative value is sign-extended on the wire, and a 5-byte
+  # 0xFFFFFFFF is -1 too. The packed reader fell through to the raw uint64, so -1 listed as
+  # 18446744073709551615 — a seed the encoder then refused, on a field nobody edited.
+  it "reads an enum value as an int32, singular and packed" do
+    s = demo_schema
+    t = s.message?("demo.User").not_nil!
+    f = PB.decode(pb_varint(3, 0xFFFFFFFF_u64)).fields[0]
+    Lens.read(s, t, f).not_nil!.value.should eq(-1_i64)
+
+    neg = concat(pb_len(1, "NEG"), pb_varint(2, (-1_i64).to_u64!))
+    zero = concat(pb_len(1, "ZERO"), pb_varint(2, 0_u64))
+    color = concat(pb_len(1, "Color"), pb_len(2, neg), pb_len(2, zero))
+    field = concat(pb_len(1, "c"), pb_varint(3, 1_u64), pb_varint(4, 3_u64),
+      pb_varint(5, 14_u64), pb_len(6, ".p.Color"))
+    file = concat(pb_len(1, "p.proto"), pb_len(2, "p"),
+      pb_len(4, concat(pb_len(1, "M"), pb_len(2, field))), pb_len(5, color))
+    ps = Schema.parse(pb_len(1, file)).as(Schema)
+    io = IO::Memory.new
+    write_varint(io, (-1_i64).to_u64!)
+    write_varint(io, 0_u64)
+    pf = PB.decode(pb_len(1, io.to_slice)).fields[0]
+    Lens.read(ps, ps.message?("p.M").not_nil!, pf).not_nil!.packed.should eq([-1_i64, 0_i64])
+  end
+
+  # The packed reader keeps its own copy of the varint rule, so the 64-bit overflow check has
+  # to hold there too: a 10th byte above 1 is not an element.
+  it "stops a packed run at a varint that overflows 64 bits" do
+    s = demo_schema
+    t = s.message?("demo.User").not_nil!
+    over = Bytes[0x01, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f]
+    r = Lens.read(s, t, PB.decode(pb_len(6, over)).fields[0]).not_nil!
+    r.packed.should eq([1_i64])
+    r.note.not_nil!.should contain("ends mid-element")
+  end
+
   it "keeps the elements of a packed run that ends mid-element and says how many are left" do
     s = demo_schema
     t = s.message?("demo.User").not_nil!

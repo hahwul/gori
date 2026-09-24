@@ -859,10 +859,10 @@ module Gori
         return if head.nil? || body.nil? || body.empty?
         ct = MediaType.of(head)
         return unless Proxy::H2::Grpc.grpc?(ct)
-        # `scan_body`: grpc-web-text carries the frames base64-encoded, so scanning the raw
-        # bytes finds a length prefix built out of base64 characters — an agent reading this
-        # would be told a gRPC call had no messages.
-        msgs, residual = Proxy::H2::Grpc.scan_body(ct, body)
+        # `scan_wire`: grpc-web-text carries the frames base64-encoded, and any body may sit
+        # under a `Content-Encoding` — scanning the raw bytes finds a length prefix built out
+        # of base64 or gzip octets, and an agent would be told a gRPC call had no messages.
+        msgs, residual = Proxy::H2::Grpc.scan_wire(head, body)
         return if msgs.empty? && residual == 0
         binding = Protobuf::Schemas.resolve(target, request: request)
         j.field field_name do
@@ -883,7 +883,7 @@ module Gori
             # trailers, which reach the agent in this flow's response headers; grpc-web has
             # none, so without this an agent could only get it by hand-parsing a trailer frame's
             # `headers` map — and the HTTP status is 200 for a denial as much as for a grant.
-            gs, gm = Proxy::H2::Grpc.trailer_status(msgs)
+            gs, gm = Proxy::H2::Grpc.trailer_status(ct, msgs)
             if gs
               j.field "grpc_status", gs
               j.field "grpc_status_name", Proxy::H2::Grpc.status_name(gs)

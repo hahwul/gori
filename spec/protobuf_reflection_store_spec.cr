@@ -106,6 +106,32 @@ describe "gRPC reflection cache" do
       end
     end
 
+    # "Applied either way" — every surface promises the lens stays live in this process when
+    # the write loses to a busy peer. The re-read after a failed write lacked the new row, so
+    # the fetch the operator had just run was thrown away.
+    it "keeps a fetch live in this process when its row does not commit" do
+      path = File.tempname("gori-reflect-busy", ".db")
+      store = Gori::Store.open(path, busy_timeout_ms: 200)
+      peer = DB.open("sqlite3:#{path}?busy_timeout=100")
+      cn = peer.checkout
+      begin
+        Schemas.load_project(store)
+        cn.exec("BEGIN IMMEDIATE") # a peer holding the write lock: the project is busy
+        set = Reflection.descriptor_set([demo_file_descriptor])
+        Schemas.adopt(store, "https://api.test:443", Reflection::SERVICE_V1, 1, 1, set).should be_false
+        Schemas.resolve("/demo.Users/GetUser", request: true).should_not be_nil
+      ensure
+        cn.exec("ROLLBACK")
+        cn.release
+        peer.close
+        Schemas.clear
+        store.close
+        File.delete?(path)
+        File.delete?("#{path}-wal")
+        File.delete?("#{path}-shm")
+      end
+    end
+
     it "names the reflected target in the settings row's status" do
       with_store do |store|
         set = Reflection.descriptor_set([demo_file_descriptor])

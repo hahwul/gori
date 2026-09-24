@@ -3,6 +3,7 @@ require "../../support/demo_descriptor"
 require "base64"
 require "file_utils"
 require "json"
+require "compress/gzip"
 
 # `gori run history` / `gori run show` — the QL gate on the listing, the flow-row text and
 # JSON contract in CLI::Output, and the `show --format json` document. Split out of the
@@ -553,6 +554,27 @@ describe "gori run show --format json" do
       msgs = JSON.parse(Gori::CLI::Run.show_json_for_spec(detail, true, true))["response"]["grpc_messages"]
       msgs.as_h.has_key?("schema_method").should be_false
       msgs["messages"].as_a[0].as_h.has_key?("schema").should be_false
+    end
+
+    # A stored body is WIRE bytes: scanned raw, a gzipped grpc-web response reported its
+    # frames as residual garbage and lost the trailer frame carrying the call's outcome.
+    it "deframes a response body under a Content-Encoding" do
+      io = IO::Memory.new
+      Compress::Gzip::Writer.open(io) do |gz|
+        gz.write(grpc_frame_for_spec("hi".to_slice))
+        gz.write(Gori::Proxy::H2::Grpc.frame(false, "grpc-status: 7\r\n".to_slice, trailer: true))
+      end
+      resp_head = "HTTP/1.1 200 OK\r\ncontent-type: application/grpc-web\r\ncontent-encoding: gzip\r\n\r\n"
+      row = Gori::Store::FlowRow.new(
+        id: 9_i64, created_at: 0_i64, scheme: "https", method: "POST", host: "api.test", port: 443,
+        target: "/S/M", status: 200, size: 0_i64, state: Gori::Store::FlowState::Complete,
+        content_type: "application/grpc-web")
+      req_head = "POST /S/M HTTP/1.1\r\nHost: api.test\r\n\r\n"
+      detail = Gori::Store::FlowDetail.new(row, "HTTP/1.1", req_head.to_slice, nil, resp_head.to_slice, io.to_slice)
+      msgs = JSON.parse(Gori::CLI::Run.show_json_for_spec(detail, true, true))["response"]["grpc_messages"]
+      msgs["count"].as_i.should eq(2)
+      msgs.as_h.has_key?("framing_error").should be_false
+      msgs["grpc_status"].as_i.should eq(7)
     end
 
     it "does not feed a compressed gRPC payload to the protobuf decoder" do

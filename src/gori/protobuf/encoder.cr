@@ -70,8 +70,11 @@ module Gori::Protobuf
       end
     end
 
-    # The text `encode` would turn back into the bytes already on the wire — what the input
-    # field is SEEDED with, so applying an untouched value re-emits what was captured.
+    # The text `encode` would turn back into the VALUE already on the wire — what the input
+    # field is seeded with. The value, not always the octets: a non-minimal varint, a bool of
+    # 2 or a NaN's payload bits have no text spelling, so a caller that must keep an untouched
+    # field byte-exact skips the encode when the text still equals the seed (the Repeater
+    # FIELDS form and the Fuzzer's field positions both do).
     # nil when the reading has no single-line text form: the caller keeps that row read-only
     # rather than seeding a lossy value into an editor (see `editable?`).
     def seed(d : Schema::FieldDef, f : Protobuf::Field, r : Lens::Reading) : String?

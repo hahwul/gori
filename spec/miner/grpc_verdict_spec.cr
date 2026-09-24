@@ -1,4 +1,5 @@
 require "../spec_helper"
+require "compress/gzip"
 
 private alias M = Gori::Miner
 private alias F = Gori::Fuzz
@@ -22,7 +23,9 @@ private class GrpcHiddenParamBackend < F::Backend
   getter origin : F::Origin
   getter sent : Int32 = 0
 
-  def initialize(@origin : F::Origin, @grant : String)
+  # `web_gzip`: answer as grpc-web under `Content-Encoding: gzip` — the outcome is then a
+  # trailer FRAME inside a coded body, not a header.
+  def initialize(@origin : F::Origin, @grant : String, @web_gzip : Bool = false)
   end
 
   def send(bytes : Bytes) : Gori::Repeater::Result
@@ -32,6 +35,7 @@ private class GrpcHiddenParamBackend < F::Backend
     body = granted ? "OK" + "X" * 40 : "OK"
     code = granted ? 0 : 7
     msg = granted ? nil : "nope; you may not"
+    return web_gzip_result(body, code, msg) if @web_gzip
     head = String.build do |io|
       io << "HTTP/1.1 200 OK\r\ncontent-type: application/grpc\r\n"
       io << "Content-Length: #{body.bytesize}\r\ngrpc-status: #{code}\r\n"
@@ -40,6 +44,21 @@ private class GrpcHiddenParamBackend < F::Backend
     end.to_slice
     resp = Gori::Proxy::Codec::Http1.parse_response_head(head)
     Gori::Repeater::Result.new(head, body.to_slice, resp, 1000_i64)
+  end
+
+  private def web_gzip_result(body : String, code : Int32, msg : String?) : Gori::Repeater::Result
+    trailer = "grpc-status: #{code}\r\n"
+    trailer += "grpc-message: #{msg}\r\n" if msg
+    io = IO::Memory.new
+    Compress::Gzip::Writer.open(io) do |gz|
+      gz.write(Gori::Proxy::H2::Grpc.frame(false, body.to_slice))
+      gz.write(Gori::Proxy::H2::Grpc.frame(false, trailer.to_slice, trailer: true))
+    end
+    wire = io.to_slice
+    head = ("HTTP/1.1 200 OK\r\ncontent-type: application/grpc-web+proto\r\n" \
+            "Content-Encoding: gzip\r\nContent-Length: #{wire.size}\r\n\r\n").to_slice
+    resp = Gori::Proxy::Codec::Http1.parse_response_head(head)
+    Gori::Repeater::Result.new(head, wire, resp, 1000_i64)
   end
 
   private def query_params(bytes : Bytes) : Hash(String, String)
@@ -91,6 +110,16 @@ describe "mine over gRPC" do
     secret.grpc_message.should be_nil # an empty grpc-message is absent, not ""
 
     findings.map(&.name).should_not contain("alpha")
+  end
+
+  # A `Repeater::Result` body is WIRE bytes: read raw, a gzipped grpc-web body has no trailer
+  # frame to find, and the isolated Finding carried no grpc-status at all.
+  it "reads a gzipped grpc-web trailer onto the isolated Finding" do
+    backend = GrpcHiddenParamBackend.new(F::Origin.new("http", "h", 80), "secret", web_gzip: true)
+    names = ["alpha", "beta", "gamma", "secret", "delta", "epsilon", "zeta", "eta"]
+    secret = mine(backend, names, cfg).find { |f| f.name == "secret" }
+    raise "expected a finding for 'secret'" unless secret
+    secret.grpc_status.should eq(0)
   end
 
   # F1, the reporting half: CLI JSON/text and MCP JSON only render the field when present,

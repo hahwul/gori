@@ -1326,8 +1326,9 @@ module Gori
         return if head.nil? || body.nil? || body.empty?
         ct = MediaType.of(head)
         return unless Proxy::H2::Grpc.grpc?(ct)
-        # `scan_body`: grpc-web-text carries the frames base64-encoded on the wire.
-        msgs, residual = Proxy::H2::Grpc.scan_body(ct, body)
+        # `scan_wire`: grpc-web-text carries the frames base64-encoded on the wire, and any
+        # body may sit under a `Content-Encoding`.
+        msgs, residual = Proxy::H2::Grpc.scan_wire(head, body)
         return if msgs.empty? && residual == 0
         binding = Protobuf::Schemas.resolve(target, request: request)
         j.field "grpc_messages" do
@@ -1349,7 +1350,7 @@ module Gori
             # none, so without this the one fact that separates a granted call from a denied one
             # (the HTTP status is 200 for both) was reachable only by hand-parsing a trailer
             # frame's `headers` map further down.
-            gs, gm = Proxy::H2::Grpc.trailer_status(msgs)
+            gs, gm = Proxy::H2::Grpc.trailer_status(ct, msgs)
             if gs
               j.field "grpc_status", gs
               j.field "grpc_status_name", Proxy::H2::Grpc.status_name(gs)

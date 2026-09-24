@@ -58,7 +58,7 @@ module Gori::Fuzz
           next unless idx = line.index(':')
           value = line[(idx + 1)..].strip
           case line[0, idx].strip.downcase
-          when "grpc-status"  then code = value.to_i?
+          when "grpc-status"  then code = Proxy::H2::Grpc.parse_status(value)
           when "grpc-message" then msg = value.presence
           end
         end
@@ -68,6 +68,18 @@ module Gori::Fuzz
       end
       return {nil, nil} unless body && AsciiBytes.contains_ci?(head, WEB_NEEDLE)
       Proxy::H2::Grpc.trailer_status(Gori::MediaType.of(head), body)
+    end
+
+    # `response` over a WIRE body — one still carrying its `Content-Encoding`, as a
+    # `Repeater::Result` and a stored flow do. grpc-web's outcome is a frame INSIDE the body,
+    # and an origin is free to gzip that body like any other, so reading the trailer frame off
+    # the coded octets finds nothing and a denied call reads as one with no status at all. The
+    # decode is paid only past every cheap answer: a head that already carries the status, a
+    # response that is not grpc-web.
+    def self.response_wire(head : Bytes?, body : Bytes?) : {Int32?, String?}
+      verdict = response(head, nil)
+      return verdict if verdict[0] || body.nil? || !head || !AsciiBytes.contains_ci?(head, WEB_NEEDLE)
+      Proxy::H2::Grpc.wire_trailer_status(head, body)
     end
 
     # Does this REQUEST declare a gRPC content-type? Read once per run off the template's

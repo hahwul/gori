@@ -613,6 +613,11 @@ module Gori::Fuzz
                            registry : Decoder::Registry) : Nil
       return if sets.empty?
       @fields.each_with_index do |fp, k|
+        # A chain that runs a command cannot be dry-run here: this check promises no side
+        # effect, and running the operator's hook once per payload at PLAN time would double
+        # every hook's runs before the first dial. Such a field is left to the render-time
+        # backstop (`Job#chain_error`), the same line `Plan.refuse_unrunnable_chains` draws.
+        next if !fp.chain.empty? && Decoder.chain_runs_commands?(registry, fp.chain)
         set = sets[base_count + k]? || sets[0]
         checked = 0
         set.each do |raw|

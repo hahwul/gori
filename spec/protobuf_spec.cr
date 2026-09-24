@@ -177,6 +177,15 @@ describe Gori::Protobuf do
       m.complete.should be_false
     end
 
+    # The 10th byte carries bit 63 and nothing else; a larger one overflowed 64 bits, and
+    # dropping those bits read a malformed varint as UInt64::MAX.
+    it "marks incomplete on a varint whose 10th byte overflows 64 bits" do
+      over = Bytes[0x08, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f]
+      PB.decode(over).complete.should be_false
+      max = Bytes[0x08, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01]
+      PB.decode(max).fields[0].uint.should eq(UInt64::MAX)
+    end
+
     it "marks incomplete on an illegal wire type" do
       # tag: field 1, wire type 6 (illegal)
       m = PB.decode(Bytes[(1 << 3) | 6])

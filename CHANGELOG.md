@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- gRPC reflection: a fetch stays live in this process when a busy project cannot save it, a cut-short reply names the requests it left unanswered, and an out-of-range `error_code` no longer aborts the fetch (#1234)
+- Protobuf: a varint overflowing 64 bits reads as malformed, and enum values read as int32, so a negative packed enum lists as -1 instead of 18446744073709551615 (#1234)
+- Repeater: an unedited grpc-web-text body, and a gRPC field applied unchanged in the FIELDS form, are sent exactly as captured (#1234)
+- gRPC: grpc-web messages and status are read through an HTTP `Content-Encoding` on every surface, and neither a 0x80 frame in a native gRPC body nor a malformed `grpc-status` such as `+0` is reported as the call status (#1234)
+- Fuzzer: a gRPC field whose `¦chain` runs an `exec:` hook no longer runs that hook once per payload while the run is planned (#1234)
 - MCP: a running server picks up another gori process's changes to session slots, global env vars, the User-Agent list and the global view, rule and colour libraries on its next call, so a rotated or deleted credential stops going out without a restart; a running TUI now follows global env vars and User-Agents too (#1215, #1216, #1217, #1218)
 - Proxy: HTTP/2 response rules now use each stream's `:authority` on coalesced connections, so host-scoped rewrites apply to the matching response (#1222)
 - CLI: `gori run capture --max` counts WebSocket and other upgraded flows after their tunnel closes, once their captured transcript is complete (#1221)
