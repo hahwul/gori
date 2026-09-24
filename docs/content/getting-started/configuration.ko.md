@@ -72,6 +72,8 @@ gori ca import --cert root.crt.pem --key root.key.pem --yes
 
 팔레트의 **Open browser** 동작은 이미 CA를 신뢰하고 프록시를 경유하는 격리된 프로파일로 설치된 브라우저를 실행합니다([빠른 시작](/ko/getting-started/quick-start/) 참조).
 
+커맨드라인 도구에는 팔레트의 **Open shell** 동작이 같은 일을 터미널에 해줍니다. **Open shell here**는 프록시와 CA 번들이 설정된 `$SHELL`에 이 터미널을 넘겨주고(그동안 gori는 계속 캡처하며, 셸을 나가면 돌아옵니다. 셸이 화면을 쓰는 동안에는 붙잡힌 요청을 넘길 수 없으므로 캡처는 켜져 있고 인터셉트는 꺼져 있어야 합니다), **Copy env**는 gori 옆 창에 붙여넣을 `export` 줄을 클립보드에 복사합니다. 어느 터미널에서든 `gori run shell`로도 같은 일을 할 수 있습니다([`gori run shell`](/ko/reference/cli/#run-shell) 참조).
+
 ## 전체 레퍼런스 {#full-reference}
 
 모든 설정 키는 [설정 레퍼런스](/ko/reference/config/)를, 모든 명령줄 플래그는 [CLI 레퍼런스](/ko/reference/cli/)를 참고하세요.

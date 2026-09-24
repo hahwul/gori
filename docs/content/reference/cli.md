@@ -158,6 +158,39 @@ gori run capture --port 8070 --format json --for 5m
 | `--for=DURATION` | Stop after e.g. `30s`, `5m`, `1h` |
 | `--max=N` | Stop after N completed flows; upgraded tunnels count after they close |
 
+### run shell
+
+Open a terminal whose tools go through a live gori and trust its CA, without touching OS settings. It is the terminal counterpart of the palette's **Open browser**.
+
+```bash
+gori run shell                            # interactive $SHELL; `exit` to leave
+gori run shell -- curl https://target/    # one command, exits with its status
+eval "$(gori run shell --print)"          # export lines for the shell you are already in
+gori run shell --print --shell fish | source
+```
+
+The address comes from the gori capturing the project (its live port, even after a port fallback), and the CA from the one that gori signs with. When nothing is capturing the project, the command refuses unless `--proxy` names an address. When capture is paused, it warns and continues.
+
+| Option | Description |
+| -------- | ------------- |
+| `--project=NAME`; `--db=PATH` | Which live gori to point at (default: the most recently active project) |
+| `--proxy=HOST:PORT` | Use this proxy address instead of looking up a live capture |
+| `--ca-dir=DIR` | CA directory (default: the capturing gori's, else `~/.gori/ca`) |
+| `--print` | Print `export` lines instead of starting a shell |
+| `--shell=SYNTAX` | Syntax for `--print`: `sh` (default; also `bash`, `zsh`) or `fish` |
+| `--keep-no-proxy` | Keep the inherited `NO_PROXY` instead of unsetting it |
+
+What gets set: `http_proxy`, `https_proxy`, `HTTP_PROXY` and `HTTPS_PROXY` point at gori, and `NO_PROXY`/`no_proxy` are unset so local targets are captured too. `SSL_CERT_FILE`, `CURL_CA_BUNDLE`, `REQUESTS_CA_BUNDLE`, `GIT_SSL_CAINFO`, `AWS_CA_BUNDLE`, `PIP_CERT`, `CARGO_HTTP_CAINFO` and `DENO_CERT` point at a bundle under `~/.gori/shell/`. That bundle holds the store the terminal already trusted (your own `SSL_CERT_FILE`, else the system roots) plus gori's root, because most of these variables replace a tool's trust store rather than add to it. A CA variable you had set for one tool (say `REQUESTS_CA_BUNDLE`) gets its own file with gori's root added, rather than the shared one. `NODE_EXTRA_CA_CERTS` adds gori's root, `NODE_USE_ENV_PROXY=1` turns on Node's proxy support, and `GODEBUG=x509sslcertoverrideplatform=1` makes Go on macOS read `SSL_CERT_FILE`. `GORI_SHELL=1` and `GORI_PROXY=HOST:PORT` mark the shell for your prompt:
+
+```bash
+# ~/.zshrc or ~/.bashrc
+[ -n "$GORI_SHELL" ] && PS1="(gori) $PS1"
+```
+
+Whatever the shell replaces or unsets is recorded as `GORI_SHELL_ORIG_<NAME>` (for example `GORI_SHELL_ORIG_HTTPS_PROXY`). A gori started inside the shell (`gori run send`, a second capture) does not use the shell's proxy variables as its own upstream, so its traffic is not captured twice. It uses the recorded proxy and `NO_PROXY` instead, and an upstream you configure explicitly still applies. A shell started inside a gori shell also starts from the recorded values, so it does not keep trusting the outer gori's CA.
+
+Not covered: Go programs built with a toolchain older than 1.27 on macOS verify through the keychain; Go never proxies `localhost` or loopback addresses; Node uses the proxy only in releases that support `NODE_USE_ENV_PROXY` (stable in v22.21 and v24.10); Java needs a truststore via `JAVA_TOOL_OPTIONS`; tools that pin their own trust store are not covered.
+
 ### run history / ls
 
 ```bash

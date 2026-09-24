@@ -1219,6 +1219,10 @@ private class FakeContext < ExecContext
     @calls << :open_browser_picker
   end
 
+  def open_shell_picker : Nil
+    @calls << :open_shell_picker
+  end
+
   def authorize_seed_selected : Nil
     @calls << :authorize_seed_selected
   end

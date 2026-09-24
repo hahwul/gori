@@ -53,11 +53,12 @@ describe "Gori::Verbs.register_core" do
     end
 
     it "keeps the destructive CA verbs palette-only (no chord to fat-finger)" do
-      %w[ca.export ca.regenerate ca.import browser.open].each { |id| r[id].chords.should be_empty }
+      %w[ca.export ca.regenerate ca.import browser.open shell.open].each { |id| r[id].chords.should be_empty }
       verb_intents(r, "ca.export").should eq([:export_ca])
       verb_intents(r, "ca.regenerate").should eq([:regenerate_ca])
       verb_intents(r, "ca.import").should eq([:import_ca])
       verb_intents(r, "browser.open").should eq([:open_browser_picker])
+      verb_intents(r, "shell.open").should eq([:open_shell_picker])
     end
   end
 

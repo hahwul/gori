@@ -149,6 +149,39 @@ gori run capture --port 8070 --format json --for 5m
 | `--for=DURATION` | 예: `30s`, `5m`, `1h` 이후 중지 |
 | `--max=N` | 플로우 N개 이후 중지 |
 
+### run shell {#run-shell}
+
+OS 설정을 건드리지 않고, 도구들이 실행 중인 gori를 거치며 gori의 CA를 신뢰하는 터미널을 엽니다. 팔레트의 **Open browser**에 대응하는 터미널 기능입니다.
+
+```bash
+gori run shell                            # 대화형 $SHELL; `exit`로 나감
+gori run shell -- curl https://target/    # 명령 하나를 실행하고 그 종료 코드로 끝남
+eval "$(gori run shell --print)"          # 지금 쓰는 셸에 적용할 export 줄
+gori run shell --print --shell fish | source
+```
+
+주소는 프로젝트를 캡처 중인 gori에서 가져오고(포트 폴백 뒤에도 실제 포트), CA는 그 gori가 서명에 쓰는 것을 씁니다. 프로젝트를 캡처하는 gori가 없으면 `--proxy`로 주소를 주지 않는 한 거부합니다. 캡처가 일시정지 상태면 경고하고 진행합니다.
+
+| Option | Description |
+|--------|-------------|
+| `--project=NAME`; `--db=PATH` | 가리킬 실행 중인 gori (기본값: 가장 최근에 활동한 프로젝트) |
+| `--proxy=HOST:PORT` | 실행 중인 캡처를 찾는 대신 이 프록시 주소 사용 |
+| `--ca-dir=DIR` | CA 디렉터리 (기본값: 캡처 중인 gori의 것, 없으면 `~/.gori/ca`) |
+| `--print` | 셸을 띄우지 않고 `export` 줄을 출력 |
+| `--shell=SYNTAX` | `--print`의 문법: `sh` (기본값; `bash`, `zsh`도 가능) 또는 `fish` |
+| `--keep-no-proxy` | 물려받은 `NO_PROXY`를 지우지 않고 유지 |
+
+설정되는 것: `http_proxy`, `https_proxy`, `HTTP_PROXY`, `HTTPS_PROXY`는 gori를 가리키고, 로컬 대상도 캡처되도록 `NO_PROXY`/`no_proxy`는 지웁니다. `SSL_CERT_FILE`, `CURL_CA_BUNDLE`, `REQUESTS_CA_BUNDLE`, `GIT_SSL_CAINFO`, `AWS_CA_BUNDLE`, `PIP_CERT`, `CARGO_HTTP_CAINFO`, `DENO_CERT`는 `~/.gori/shell/` 아래 번들을 가리킵니다. 이 변수들 대부분은 도구의 신뢰 저장소에 추가하는 게 아니라 교체하기 때문에, 번들에는 터미널이 원래 신뢰하던 저장소(직접 설정한 `SSL_CERT_FILE`, 없으면 시스템 루트)와 gori 루트가 함께 들어 있습니다. 특정 도구에만 설정해 둔 CA 변수(예: `REQUESTS_CA_BUNDLE`)는 공용 번들 대신 그 파일에 gori 루트를 더한 별도 파일을 받습니다. `NODE_EXTRA_CA_CERTS`는 gori 루트를 추가하고, `NODE_USE_ENV_PROXY=1`은 Node의 프록시 지원을 켜고, `GODEBUG=x509sslcertoverrideplatform=1`은 macOS의 Go가 `SSL_CERT_FILE`을 읽게 합니다. `GORI_SHELL=1`과 `GORI_PROXY=HOST:PORT`는 프롬프트에서 쓸 수 있는 표식입니다:
+
+```bash
+# ~/.zshrc 또는 ~/.bashrc
+[ -n "$GORI_SHELL" ] && PS1="(gori) $PS1"
+```
+
+셸이 바꾸거나 지운 값은 `GORI_SHELL_ORIG_<NAME>`(예: `GORI_SHELL_ORIG_HTTPS_PROXY`)으로 기록됩니다. 셸 안에서 띄운 gori(`gori run send`, 두 번째 캡처)는 셸의 프록시 변수를 자기 업스트림으로 쓰지 않으므로, 그 트래픽이 두 번 캡처되지 않습니다. 대신 기록된 프록시와 `NO_PROXY`를 쓰고, 명시적으로 설정한 업스트림은 그대로 적용됩니다. gori 셸 안에서 다시 연 셸도 기록된 값에서 시작하므로 바깥 gori의 CA를 계속 신뢰하지 않습니다.
+
+다루지 않는 것: 1.27보다 오래된 툴체인으로 빌드한 macOS의 Go 프로그램은 키체인으로 검증합니다. Go는 `localhost`와 루프백 주소를 절대 프록시하지 않습니다. Node는 `NODE_USE_ENV_PROXY`를 지원하는 릴리스(v22.21, v24.10에서 stable)에서만 프록시를 씁니다. Java는 `JAVA_TOOL_OPTIONS`로 truststore가 필요합니다. 자체 신뢰 저장소를 고정한 도구는 다루지 않습니다.
+
 ### run history / ls {#run-history-ls}
 
 ```bash

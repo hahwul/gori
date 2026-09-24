@@ -3333,3 +3333,41 @@ read with `immutable=1`, chosen from the file header rather than from a failed o
 once if the file changed during the read. The work is cooperative (P6): one database at a time, a
 `QueryControl` progress handler so a keystroke cancels mid-query, and a 100 ms busy budget rather
 than the store's five seconds, because SQLite's busy wait blocks the single-threaded scheduler.
+
+### 2026-09-24: a gori shell is one terminal's environment, and gori does not adopt its own injection
+
+Refines: [P4](#p4), the 2026-09-21 entry. #1238.
+
+`gori run shell` and the palette's **Open shell** point one terminal's tools at gori (`Gori::ShellEnv`),
+the way **Open browser** points one browser. Nothing global changes. The proxy variables and the
+trust variables live in that shell, and the only file written is a CA bundle under `~/.gori/shell/`.
+
+**The bundle keeps what the terminal already trusted.** Most trust variables (`SSL_CERT_FILE`,
+`CURL_CA_BUNDLE`, `GIT_SSL_CAINFO`, …) replace a tool's store rather than add to it, so pointing
+them at gori's root alone breaks every host gori does not intercept. The bundle is the operator's
+own `SSL_CERT_FILE` (else the system roots) plus gori's root, named by the hash of its content.
+A regenerated CA, an updated system store or a different enterprise bundle therefore gets a new
+file rather than a stale one, and a bundle that already holds the root is reused as it is. A CA
+variable the terminal set for one tool keeps its own base in the same way.
+
+**The address comes from the capture, not from settings.** The CLI reads `CaptureStatus` only
+while the capture lock is held, because the live port can differ from the configured one after a
+fallback. The marker now also records the CA the session signs with, since `--ca-dir` is chosen
+per process and another process cannot derive it.
+
+**The environment arm skips a value a gori shell exported.** A gori started inside the shell would
+otherwise adopt the parent as its upstream through the 2026-09-21 fallback, and every request it
+made would be captured twice. Only the exact value the shell wrote (`GORI_SHELL=1` plus
+`GORI_PROXY`) is skipped. An explicit rule, scalar or project pin still chains on purpose. The
+shell records what it replaced or unset as `GORI_SHELL_ORIG_<NAME>`, and the environment arm falls
+back to that record, so a nested gori still reaches the terminal's own egress proxy and its
+`NO_PROXY`. A shell opened inside a shell starts its trust from the same record rather than from
+the outer bundle, which would otherwise keep the outer gori's root trusted.
+
+**The TUI hands its terminal to `gori run shell`, not to `$SHELL`.** Crystal's runtime ignores
+SIGPIPE, and an ignored signal survives `exec`. A shell spawned directly passed that on to every
+pipeline, so `yes | head` printed "Broken pipe". The CLI resets it right before its own `exec`.
+The handoff also uses termisu's `full_cooked` rather than `suspend`'s cooked mode, which leaves
+OPOST and ICRNL off. An editor sets its own termios and never noticed, but a shell passes that
+state to every command it runs. Open shell here is refused while intercept is on, because held
+requests are released from a screen the shell is covering.

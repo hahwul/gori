@@ -30,6 +30,12 @@ module Gori
       File.join(home_dir, "ca")
     end
 
+    # Where `gori run shell` writes the CA bundles it points a terminal's tools at: the system
+    # roots plus gori's, content-addressed (see ShellEnv.bundle). Public certificates only.
+    def self.shell_dir : String
+      File.join(home_dir, "shell")
+    end
+
     # Convention dir for fuzzer wordlists: bare (slash-less) names typed into the
     # Fuzzer's wordlist field auto-complete from here (and the current dir). Users
     # drop `*.txt` lists in here for discovery without typing a full path.

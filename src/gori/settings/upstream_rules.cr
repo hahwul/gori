@@ -1,6 +1,7 @@
 require "json"
 require "uri"
 require "../host_pattern"
+require "../shell_env/marker"
 
 # UPSTREAM RULES section (settings:network → Upstream rules): per-destination upstream
 # routing. Replaces the single `network.upstream_proxy` string as the expressive form —
@@ -276,13 +277,27 @@ module Gori::Settings
     environment_lookup(name).try(&.[1])
   end
 
+  # Read through `ShellEnv.inherited_proxy`, so a value a gori shell exported is passed over:
+  # it points back at the gori that started the shell, and adopting it as THIS gori's upstream
+  # chains every request through the parent, which captures it a second time. What the shell
+  # replaced — a corporate `HTTPS_PROXY`, its `NO_PROXY` — is read instead, so a gori started
+  # there still reaches the egress it needs. An explicit rule, scalar or project pin still
+  # chains on purpose.
   private def self.environment_lookup(name : String) : {String, String}?
     [name, name.downcase].each do |spelling|
-      if value = ENV[spelling]?.try(&.strip).try(&.presence)
+      if value = Gori::ShellEnv.inherited_proxy(spelling)
         return {spelling, value}
       end
     end
     nil
+  end
+
+  # The proxy variables passed over because a gori shell exported them — for the one banner
+  # line that says so, since a silently ignored `$HTTPS_PROXY` reads as a gori bug.
+  private def self.environment_shell_injected : Array(String)
+    (ENVIRONMENT_HTTPS_PROXY_NAMES.flat_map { |name| [name, name.downcase] }).select do |spelling|
+      ENV[spelling]?.try { |value| Gori::ShellEnv.injected_proxy?(value) }
+    end
   end
 
   # One environment variable that `upstream_route` would select, with the route it parses to
@@ -392,6 +407,12 @@ module Gori::Settings
   private def self.environment_upstream_warnings : Array(String)
     notes = [] of String
     return notes unless environment_upstream_in_effect?
+    injected = environment_shell_injected
+    unless injected.empty?
+      notes << "network: running inside a gori shell, so #{injected.map { |n| "$#{n}" }.join(", ")} " \
+               "(gori at #{ENV[Gori::ShellEnv::PROXY_VAR]?}) is not used as this gori's upstream; " \
+               "any proxy the shell replaced still is"
+    end
     reach = environment_upstream_reach
     environment_upstream_proxies.each do |env|
       origins = env.schemes.join(" and ")

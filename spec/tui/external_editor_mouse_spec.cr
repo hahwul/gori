@@ -38,6 +38,14 @@ private class TermSpy
     yield
     @log << :suspend_out
   end
+
+  # Stands in for `Termisu#with_mode`: the shell's handoff, which needs the terminal's own
+  # output/input flags rather than `suspend`'s cooked subset.
+  def with_mode(mode : Termisu::Terminal::Mode, preserve_screen : Bool, &) : Nil
+    @log << (mode == Termisu::Terminal::Mode.full_cooked && !preserve_screen ? :full_cooked_in : :other_mode_in)
+    yield
+    @log << :mode_out
+  end
 end
 
 describe "Runner.suspend_without_mouse" do
@@ -61,5 +69,29 @@ describe "Runner.suspend_without_mouse" do
       Runner.suspend_without_mouse(spy, mouse: true, io: IO::Memory.new) { raise "no such editor" }
     end
     spy.log.should eq([:disable, :suspend_in, :enable]) # the ensure ran; :suspend_out never did
+  end
+
+  # A shell hands its termios to every command it runs, so `suspend`'s cooked mode (OPOST and
+  # ICRNL off) staircased their output (#1238). The mode is the caller's; the ordering is not.
+  it "hands the tty over in the mode asked for, bracketed the same way" do
+    spy = TermSpy.new
+    Runner.suspend_without_mouse(spy, mouse: true, io: IO::Memory.new,
+      mode: Termisu::Terminal::Mode.full_cooked) { spy.log << :shell }
+    spy.log.should eq([:disable, :full_cooked_in, :shell, :mode_out, :enable])
+  end
+end
+
+# Open shell's toast (#1238). A shell exits with its last command's status, so non-zero after real
+# use is ordinary; gone at once and non-zero means it never started, and whatever it printed was
+# repainted over — the toast is the only place left to say so.
+describe "Runner.shell_exit_toast" do
+  it "counts what was captured after an ordinary session, whatever the exit status" do
+    Runner.shell_exit_toast(Process::Status[0], 30.seconds, 3).should eq("shell exited · 3 flows captured meanwhile")
+    Runner.shell_exit_toast(Process::Status[1], 30.seconds, 1).should eq("shell exited · 1 flow captured meanwhile")
+  end
+
+  it "says the shell never started when it failed at once" do
+    Runner.shell_exit_toast(Process::Status[127], 100.milliseconds, 0).should contain("exited at once (exit 127)")
+    Runner.shell_exit_toast(Process::Status[0], 100.milliseconds, 0).should contain("0 flows captured")
   end
 end

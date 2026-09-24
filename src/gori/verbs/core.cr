@@ -118,6 +118,13 @@ module Gori
         "browser.open", "Open browser", "Launch a browser pre-trusting gori's CA, routed via the proxy",
         Verb::Scope::Global) { |ctx| ctx.open_browser_picker; nil }
 
+      # Palette-only, beside browser.open: its terminal counterpart (#1238). A shell whose tools
+      # go through the proxy and trust the CA, opened in place of the TUI or copied as export
+      # lines for another pane.
+      r.register Verb::Definition.new(
+        "shell.open", "Open shell", "Open a terminal proxied through gori and trusting its CA, or copy its env for another pane",
+        Verb::Scope::Global) { |ctx| ctx.open_shell_picker; nil }
+
       # Settings (config control). The generic entry opens the unified Preferences modal
       # at its group picker (same as Ctrl+, / the ⚙ top-bar chip); the per-section entries
       # below jump straight to one section. Both the palette list and the modal's groups

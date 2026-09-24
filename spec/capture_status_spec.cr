@@ -32,6 +32,23 @@ describe Gori::CaptureStatus do
     end
   end
 
+  # `gori run shell` in another process reads the CA from here: a TUI started with `--ca-dir`
+  # signs with a CA the default dir does not hold (#1238).
+  it "records the session's CA certificate as an absolute path, and reads an older marker without one" do
+    dir = File.tempname("gori-status-ca")
+    begin
+      marker = Gori::CaptureStatus.path(dir)
+      Gori::CaptureStatus.write_at(marker, "127.0.0.1", 8070, true, "relative/root.crt.pem")
+      Gori::CaptureStatus.read_at(marker).not_nil!.ca_cert_path.should eq(File.expand_path("relative/root.crt.pem"))
+      File.write(marker, %({"host":"127.0.0.1","port":8070,"listening":false}))
+      status = Gori::CaptureStatus.read_at(marker).not_nil!
+      status.ca_cert_path.should be_nil
+      status.listening.should be_false
+    ensure
+      FileUtils.rm_rf(dir) if Dir.exists?(dir)
+    end
+  end
+
   it "formats loopback hosts as localhost" do
     Gori::CaptureStatus.format_endpoint("127.0.0.1", 8070).should eq("localhost:8070")
     Gori::CaptureStatus.format_endpoint("::1", 9000).should eq("localhost:9000")
