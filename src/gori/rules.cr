@@ -849,7 +849,28 @@ module Gori
     # The stub a matched rule answers with, or nil when the rule does not CLAIM the request
     # after all — see `short_circuit`. Only a `dir` rule can decline.
     private def claim(rule : Store::MatchRule, head : Bytes) : Proxy::HeadRewriter::Stub?
-      rule.respond.dir? ? map_local(rule, head) : stub_for(rule)
+      stub =
+        case rule.respond
+        in .dir?            then map_local(rule, head)
+        in .fault?          then fault_for(rule)
+        in .inline?, .file? then stub_for(rule)
+        end
+      return nil unless stub
+      # The delay rides on every sub-kind, gori's own failure answers included: a rule that
+      # says "answer slowly" and then cannot find its file still answered slowly.
+      delay = rule.args.delay_ms
+      delay > 0 ? stub.copy_with(delay: delay.milliseconds, ref: "#{stub.ref} +#{delay}ms") : stub
+    end
+
+    # A `respond: fault` rule (#1237): no response bytes at all, only what to do to the
+    # connection. `respond_error` refuses a fault rule without a kind at save time; a row that
+    # arrives without one anyway (a hand edit) fails closed like any other broken stub.
+    private def fault_for(rule : Store::MatchRule) : Proxy::HeadRewriter::Stub
+      kind = rule.args.fault
+      return stub_failure(rule, "fault rule names no fault kind", stub_ref(rule, "fault")) unless kind
+      hang = kind.hang? ? rule.args.hang_ms.milliseconds : nil
+      Proxy::HeadRewriter::Stub.new(Bytes.new(0), Bytes.new(0), 0, rule.id,
+        ref: stub_ref(rule, "fault #{kind.label}"), fault: kind, hang: hang)
     end
 
     # A `respond: dir` rule (#1237). See `RuleStub::MapLocal` for the confinement.

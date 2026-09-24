@@ -114,6 +114,14 @@ module Gori::Proxy
     # sees a 1xx — and never waits on one either.
     CONTINUE_RESPONSE = "HTTP/1.1 100 Continue\r\n\r\n".to_slice
 
+    # How many connections a short-circuit `delay` or `hang` (#1237) may hold at once, across the
+    # whole process. Each one pins a fiber, an fd and one of `Server::MAX_CONNECTIONS` accept
+    # slots for up to `Store::RespondArgs::MAX_WAIT_MS`, and a page that retries a hung endpoint
+    # can open them faster than they drain — so past this, a hang closes at once and a delay is
+    # skipped, and the flow says which. An eighth of the accept slots: the rest keep serving.
+    MAX_HELD_CONNECTIONS = 256
+    @@held = Atomic(Int32).new(0)
+
     # `fixed_host`/`fixed_port` pin all requests to one origin (post-CONNECT TLS
     # tunnel); when nil the upstream is resolved per request from the target /
     # Host header (plaintext forward proxy). `tls_upstream` wraps the origin
@@ -534,6 +542,10 @@ module Gori::Proxy
       # It also has to come after `request_framing`, because answering means draining the
       # body first (see serve_short_circuit).
       if (rw = @rewriter) && (stub = rw.short_circuit(sent_head, host))
+        if stub.fault
+          return serve_fault(stub, req, sent_req, record_req, host, port, scheme, created_at,
+            req_framing, req_len)
+        end
         return serve_short_circuit(stub, req, sent_req, record_req, host, port, scheme,
           created_at, req_framing, req_len)
       end
@@ -768,6 +780,21 @@ module Gori::Proxy
         return false
       end
 
+      # Recorded BEFORE the answer, so a request held by a rule's delay shows in History as
+      # pending while it waits, the way a fault's does (`serve_fault`).
+      stored, trunc, size = capped(buffered)
+      flow_id = @sink.on_request(FlowMapper.request(record_req,
+        scheme: scheme, host: host, port: port, created_at: created_at,
+        body: stored, body_truncated: trunc, body_size: size, short_circuited: true, source: FlowSource::Kind::Proxy,
+        # WHICH rule answered (#1237), as text that outlives the rule: `STUB` alone says gori
+        # answered, and this says with what, after the rule is edited or deleted.
+        source_ref: stub.ref.presence))
+
+      # A rule's `delay` (#1237): after the body is drained, so the wait measures gori's answer
+      # and not the client's upload, and on this connection's own fiber — the Rules mutex was
+      # released before the stub was built.
+      delay_note = (d = stub.delay) ? hold_for(d) : nil
+
       omit_length, send_body = stub_framing(stub, req.method)
       resp_head = build_stub_head(stub, omit_length)
 
@@ -780,18 +807,11 @@ module Gori::Proxy
         false
       end
 
-      stored, trunc, size = capped(buffered)
-      flow_id = @sink.on_request(FlowMapper.request(record_req,
-        scheme: scheme, host: host, port: port, created_at: created_at,
-        body: stored, body_truncated: trunc, body_size: size, short_circuited: true, source: FlowSource::Kind::Proxy,
-        # WHICH rule answered (#1237), as text that outlives the rule: `STUB` alone says gori
-        # answered, and this says with what, after the rule is edited or deleted.
-        source_ref: stub.ref.presence))
       resp = Codec::Http1.parse_response_head(resp_head)
       # ttfb/duration stay nil on purpose. There was no round trip to measure, and a `0`
       # would render in History as an impossibly fast origin — the exact misreading the
       # short-circuit marker exists to prevent. `—` is the truth.
-      # Capped like every other capture path (`capped` eight lines above for the request,
+      # Capped like every other capture path (`capped` above for the request,
       # `CaptureBuffer` on the streaming path, the h2 assembler). The stub's body is bounded
       # only by `RuleStub::MAX_BODY_FILE_BYTES` = 8 MiB, four times the default
       # `Settings.capture_max`, and it is written PER REQUEST — so a `body_file` stub on an
@@ -808,7 +828,7 @@ module Gori::Proxy
       non_final = resp.status < 200
       @sink.on_response(FlowMapper.response(resp,
         flow_id: flow_id, body: resp_stored,
-        body_truncated: resp_trunc, body_size: resp_size,
+        body_truncated: resp_trunc, body_size: resp_size, advisory: delay_note,
         state: written && !non_final ? Store::FlowState::Complete : Store::FlowState::Aborted,
         error: if !written
           "client closed before the short-circuit response was written"
@@ -820,6 +840,137 @@ module Gori::Proxy
       return false unless written
       return false if non_final
       keep_alive?(req, resp, omit_length ? Codec::BodyFraming::None : Codec::BodyFraming::Length)
+    end
+
+    # A short-circuit FAULT (#1237): the rule answers with no response at all — the connection
+    # is closed (`close`), reset (`reset`) or held until the client gives up (`hang`).
+    #
+    # The request is recorded BEFORE the fault, so a hang shows in History as pending while it
+    # holds, and the flow is then finished Aborted — the intercept-drop precedent, plus the
+    # `short_circuited` mark, because the origin never saw this request either.
+    #
+    # The body is drained first unless the client is withholding it for `Expect: 100-continue`:
+    # a fault writes no bytes, so it sends no self-issued 100 either, and reading a withheld body
+    # would block until the timeout. Draining matters for `close`: unread bytes in the kernel's
+    # receive buffer turn a close into an RST on most stacks.
+    #
+    # Every outcome returns false, so `run`'s ensure closes the connection. None of this spawns
+    # a fiber, and nothing else reads `@io` here — which is what makes the raw-socket close in
+    # `reset_client` safe under TLS (read the `sync_close` comment in `tls/tunnel.cr`).
+    private def serve_fault(stub : HeadRewriter::Stub, req : Codec::RawRequest,
+                            sent_req : Codec::RawRequest, record_req : Codec::RawRequest,
+                            host : String, port : Int32, scheme : String, created_at : Int64,
+                            req_framing : Codec::BodyFraming, req_len : Int64) : Bool
+      buffered = nil.as(Bytes?)
+      unless req_framing.none? || expect_continue?(req)
+        buffered, body_complete = Codec::Body.read_complete(@io, req_framing, req_len)
+        unless body_complete
+          record_error(sent_req, scheme, host, port, created_at, "client truncated request body")
+          return false
+        end
+      end
+      stored, trunc, size = capped(buffered)
+      flow_id = @sink.on_request(FlowMapper.request(record_req,
+        scheme: scheme, host: host, port: port, created_at: created_at,
+        body: stored, body_truncated: trunc, body_size: size, short_circuited: true,
+        source: FlowSource::Kind::Proxy, source_ref: stub.ref.presence))
+      notes = [] of String
+      if (d = stub.delay) && (note = hold_for(d))
+        notes << note
+      end
+      done =
+        case stub.fault
+        when Store::FaultKind::Reset
+          reset_client ? "injected reset" : "injected close (a TCP reset is not available on this connection)"
+        when Store::FaultKind::Hang
+          hang_client(stub.hang || Store::RespondArgs::DEFAULT_HANG_MS.milliseconds)
+        else
+          "injected close"
+        end
+      message = "#{done} by #{stub.ref}"
+      message += "; #{notes.join("; ")}" unless notes.empty?
+      @sink.on_response(FlowMapper.aborted_response(flow_id, message))
+      false
+    end
+
+    # Wait `span` while counted against `MAX_HELD_CONNECTIONS`. Nil when it waited, or the
+    # note a flow carries when the cap made it skip the wait.
+    private def hold_for(span : Time::Span) : String?
+      return held_cap_note("delay") unless acquire_hold
+      begin
+        sleep span
+      ensure
+        release_hold
+      end
+      nil
+    end
+
+    private def acquire_hold : Bool
+      if @@held.add(1) >= MAX_HELD_CONNECTIONS
+        @@held.sub(1)
+        return false
+      end
+      true
+    end
+
+    private def release_hold : Nil
+      @@held.sub(1)
+    end
+
+    private def held_cap_note(what : String) : String
+      "#{what} skipped: #{MAX_HELD_CONNECTIONS} connections are already held by short-circuit delays and hangs"
+    end
+
+    # `SO_LINGER 0`, then close the RAW socket, so the client sees an RST rather than a FIN.
+    # Through the `::Socket` object and never a bare `LibC.close`, so Crystal marks it closed:
+    # the TLS close that `run`'s ensure still performs then fails on a closed socket (rescued)
+    # instead of writing a close_notify into an fd number something else may have reused.
+    # False when there is no socket to reset (a non-TCP transport) or the option is refused —
+    # the caller then records the close it actually sent.
+    private def reset_client : Bool
+      sock = SocketTuning.underlying_socket(@io) || return false
+      begin
+        sock.linger = 0
+      rescue
+        return false
+      end
+      sock.close rescue nil
+      true
+    end
+
+    # Hold the connection without answering until the client leaves or `limit` passes, then
+    # let the caller close it. A real deadline: each read gets only what is LEFT, because a
+    # per-read timeout alone would let a client that sends a byte every few seconds hold the
+    # connection forever. Reading (rather than sleeping) is what notices the client going away.
+    private def hang_client(limit : Time::Span) : String
+      return "injected close (#{held_cap_note("hang")})" unless acquire_hold
+      started = Time.instant
+      deadline = started + limit
+      sock = SocketTuning.underlying_socket(@io)
+      outcome = "released after"
+      begin
+        if sock
+          buf = Bytes.new(512)
+          loop do
+            left = deadline - Time.instant
+            break if left <= Time::Span.zero
+            sock.read_timeout = left
+            if @io.read(buf) == 0
+              outcome = "client closed after"
+              break
+            end
+          end
+        else
+          sleep limit
+        end
+      rescue IO::TimeoutError
+        # the deadline — "released after"
+      rescue
+        outcome = "client closed after"
+      ensure
+        release_hold
+      end
+      "injected hang (#{outcome} #{(Time.instant - started).total_seconds.round(1)}s)"
     end
 
     # {omit_length, send_body} for a stub answering `method`. Content-Length is prohibited on

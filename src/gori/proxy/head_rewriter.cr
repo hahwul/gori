@@ -1,3 +1,5 @@
+require "../store/models"
+
 module Gori::Proxy
   # The seam where the Match&Replace lens rewrites messages in flight. Kept abstract
   # (like FlowSink) so ClientConn stays decoupled from the rule engine and testable
@@ -35,8 +37,14 @@ module Gori::Proxy
     # recorded on the flow's `source_ref`. Text rather than the id alone: the two rule stores
     # number independently, and a mocked response must stay attributable after the rule that
     # produced it is edited or deleted.
+    #
+    # `fault` (#1237) means there is NO response: the connection is closed, reset or held
+    # instead, and `head`/`body`/`status` are empty. `delay` is waited out before any answer
+    # (or fault); `hang` bounds a `Hang` fault. The waits are bounded by the rule's own
+    # validation (`Store::RespondArgs::MAX_WAIT_MS`) and by `ClientConn::MAX_HELD_CONNECTIONS`.
     record Stub, head : Bytes, body : Bytes, status : Int32, rule_id : Int64, error : String? = nil,
-      ref : String = ""
+      ref : String = "", fault : Store::FaultKind? = nil, delay : Time::Span? = nil,
+      hang : Time::Span? = nil
 
     abstract def rewrite_request(head : Bytes, host : String) : Bytes
     abstract def rewrite_response(head : Bytes, host : String) : Bytes

@@ -484,6 +484,8 @@ describe "Gori::Rules — map-local (respond: dir)" do
       stub = rules.short_circuit(get("/static/js/nope.js"), "acme.test").not_nil!
       stub.status.should eq(502)
       String.new(stub.head).should contain("X-Gori-Short-Circuit: error")
+      # The page under test reads this body: it names the file, never the operator's path.
+      String.new(stub.body).should_not contain(root)
     end
     with_dir_rules do |rules, root|
       add_dir(rules, root, fallthrough: true)
@@ -542,6 +544,82 @@ describe "Gori::Rules — map-local (respond: dir)" do
         "/admin", "200 OK\n\nok", op: SC)
       id = rules.rules.first.id
       rules.short_circuit(get("/admin"), "acme.test").not_nil!.ref.should eq("project rule ##{id} · inline")
+    end
+  end
+end
+
+describe "Gori::Rules — fault injection (respond: fault)" do
+  it "answers a fault rule with no response, only what to do to the connection" do
+    with_store do |store|
+      rules = Gori::Rules.load(store)
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+        "/pay", "", op: SC, respond: RK::Fault, respond_args: %({"fault":"hang","hang_ms":1500,"delay_ms":200}))
+      id = rules.rules.first.id
+      stub = rules.short_circuit(get("/pay"), "acme.test").not_nil!
+      stub.fault.should eq(Gori::Store::FaultKind::Hang)
+      stub.hang.should eq(1500.milliseconds)
+      stub.delay.should eq(200.milliseconds)
+      stub.head.size.should eq(0)
+      stub.ref.should eq("project rule ##{id} · fault hang +200ms")
+    end
+  end
+
+  it "delays an ordinary stub too, and fails a fault row with no kind closed" do
+    with_store do |store|
+      rules = Gori::Rules.load(store)
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+        "/slow", "200 OK\n\nok", op: SC, respond_args: %({"delay_ms":50}))
+      stub = rules.short_circuit(get("/slow"), "acme.test").not_nil!
+      stub.delay.should eq(50.milliseconds)
+      stub.fault.should be_nil
+    end
+    with_store do |store|
+      # A hand-written row: a fault with no kind. Never a nil dereference — the 502 stub.
+      id = store.insert_rule(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+        "/pay", "", op: SC, respond: "fault")
+      stub = Gori::Rules.load(store).short_circuit(get("/pay"), "acme.test").not_nil!
+      stub.status.should eq(502)
+      stub.fault.should be_nil
+      stub.rule_id.should eq(id)
+    end
+  end
+end
+
+# Review follow-ups (#1237): shapes the first pass let through.
+describe "Gori::Rules — short-circuit sub-kind, edges" do
+  it "claims a map-local request whose request line has a doubled space" do
+    with_dir_rules do |rules, root|
+      add_dir(rules, root, pattern: "/static/")
+      head = "GET  /static/js/app.js HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice
+      stub = rules.short_circuit(head, "acme.test").not_nil!
+      String.new(stub.body).should eq("tampered()")
+    end
+  end
+
+  it "reads back the args a listing prints, null fault included" do
+    json = JSON.build { |j| Gori::Store::RespondArgs.new(strip_prefix: "/s/", fallthrough: true).to_json(j) }
+    json.should contain(%("fault":null))
+    Gori::Store::RespondArgs.parse(json).should be_a(Gori::Store::RespondArgs)
+  end
+
+  it "keeps a rule's sub-kind when it moves between scopes" do
+    with_store do |store|
+      rules = Gori::Rules.load(store)
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+        "/pay", "", op: SC, respond: RK::Fault, respond_args: %({"fault":"reset","delay_ms":7}))
+      rule = rules.rules.first
+      begin
+        rules.set_scope(rule, Gori::Store::RuleScope::Global).should be_true
+        moved = rules.rules.find! { |r| r.global? && r.pattern == "/pay" }
+        moved.respond.should eq(RK::Fault)
+        moved.respond_args.should eq(%({"fault":"reset","delay_ms":7}))
+      ensure
+        # Off the DISK too: a global rule lives in settings.json, and every later `Rules.load`
+        # in this process re-reads it — a copy left there would answer other examples' requests.
+        rules.rules.select { |r| r.global? && r.pattern == "/pay" }.each do |r|
+          rules.remove(r.id, Gori::Store::RuleScope::Global)
+        end
+      end
     end
   end
 end
