@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Sitemap: export the captured API as an OpenAPI 3.0.3 document with templated paths, parameters, inferred request and response schemas, servers and security schemes, never with credential values and with redacted examples only on request. Use `gori run sitemap export`, MCP `export_openapi` or `⇧E` on the Sitemap (#1241)
 - History: the first row of the `v` picker hides static assets (images, fonts, audio/video) from History and the Sitemap; SVG, CSS, JS, errors and redirects stay. It is backed by a new `static:` QL field and by `--hide-static` on `gori run history`/`sitemap`/`sitemap params` and `hide_static` on MCP `list_history`/`list_sitemap`/`list_params`. Opening an existing project classifies its flows once (#1239)
 - Fuzzer: a run can stop itself early — after the matchers hit N times, or when a separate condition holds (a body regex present or absent, a status, a header, a time). It lands a `condition_met` status of its own, and a result-capture filter `keep: interesting` stores only the matched rows plus the ones carrying a fault (error, re-send, truncation, the stop row), so a large sweep does not grow the archive by one row per request. `gori run fuzz --stop-after-matches/--stop-on/--keep`, MCP `fuzz_start{stop_on, keep}`, and the Fuzzer Advanced overlay (#1240)
 - Decoder: add NFC/NFD/NFKC/NFKD, RFC 2047 encoded-word Q/Base64, codepoint-overflow bytes, and Windows Best-Fit previews by code page (#1245)

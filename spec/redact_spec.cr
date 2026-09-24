@@ -244,6 +244,30 @@ describe Gori::Redact do
     end
   end
 
+  # The request-line / head axis a body pass never sees: a query or header value an export
+  # prints on its own (the OpenAPI export's examples, #1241).
+  describe "named values" do
+    it "redacts by a form-key OR json-field name, case-insensitively, and reports the hit" do
+      with_salt do
+        m = matcher(Gori::Redact::DEFAULT_PROFILE)
+        hits = [] of Gori::Redact::Hit
+        m.named_value("Token", "abc", hits).should eq(Gori::Redact.placeholder("abc"))
+        m.named_value("jsessionid", "s1", hits).should start_with("[REDACTED:") # json_fields only
+        m.named_value("lang", "en", hits).should eq("en")
+        hits.map(&.rule).should eq(["form_key token", "json_field jsessionid"])
+      end
+    end
+
+    it "runs the value rules on a name nobody listed" do
+      with_salt do
+        hits = [] of Gori::Redact::Hit
+        jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.c2lnbmF0dXJl"
+        matcher(Gori::Redact::DEFAULT_PROFILE).named_value("q", jwt, hits).should start_with("[REDACTED:")
+        hits.size.should eq(1)
+      end
+    end
+  end
+
   describe "bodies that cannot be sanitized" do
     it "withholds a body that is not valid UTF-8" do
       with_salt do

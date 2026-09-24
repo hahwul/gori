@@ -67,6 +67,7 @@ module Gori::Tui
       when :sequence_md     then "randomness report (Markdown)"
       when :sequence_json   then "randomness report (JSON)"
       when :evidence_json   then "evidence (JSON)"
+      when :openapi         then "OpenAPI spec"
       else                       "file"
       end
     end
@@ -81,6 +82,7 @@ module Gori::Tui
       when :sequence_md     then "Write this session's token-randomness report to a Markdown file (no token values)."
       when :sequence_json   then "Write this session's token-randomness report to a JSON file (no token values)."
       when :evidence_json   then "Write this immutable snapshot and provenance to a JSON file."
+      when :openapi         then "Write these endpoints as OpenAPI 3.0.3 — .yaml/.yml for YAML, else JSON."
       else                       "Write the export to a file."
       end
     end

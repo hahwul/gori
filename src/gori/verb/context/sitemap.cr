@@ -13,6 +13,7 @@ abstract class Gori::Verb::ExecContext
   abstract def sitemap_repeater : Nil          # send the selected/marked endpoints to Repeater
   abstract def sitemap_open_flow : Nil         # open the selected endpoint's captured flow in History
   abstract def sitemap_scope_add : Nil         # seed the scope-rule popup from the cursor row (host, or host+path)
+  abstract def sitemap_export : Nil            # the marked/cursor endpoints as an OpenAPI document (asks for the path)
   # multi-select marks: the batch verbs above act on the marks if any are set, else the cursor row
   abstract def sitemap_mark_toggle : Nil                # flip the cursor row's mark, then step down
   abstract def sitemap_mark_all : Nil                   # ⇧T: mark every endpoint the tree shows

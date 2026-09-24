@@ -78,6 +78,7 @@ gori run <subcommand> [verb] [options]
 | `sitemap [QL]` | 호스트 → 경로 엔드포인트 트리 |
 | `sitemap tag` | Sitemap 경로에 자유 텍스트 메모를 고정 / 해제 / 목록 |
 | `sitemap params [QL]` | 엔드포인트별 파라미터 목록: 위치별 이름, 등장 횟수, 샘플 값, 반사된 값 |
+| `sitemap export [QL]` | 캡처된 API를 OpenAPI 3.0.3 문서(JSON 또는 YAML)로 출력 |
 | `oast listen` · `presets` | 아웃오브밴드 콜백 리스너 (interactsh 및 유사 서비스) |
 | `oast list` · `resume` · `release` | 프로젝트에 저장된 OAST 리스닝 세션 목록 / 재개 / 릴리스 |
 | `oast providers` | 저장된 OAST 프로바이더 목록 / 추가 / 수정 / 활성화 / 비활성화 / 삭제 |
@@ -828,6 +829,24 @@ gori run mine 42 --wordlist <(gori run sitemap params --host api.example.com --f
 ```
 
 `-q`/`--query=QL`(위치 인자로도 가능), `--in-scope`, `--hide-static`은 읽을 플로우를 좁힙니다. `history`처럼 플로우 단위로 적용됩니다. `--host`는 정확한 호스트, `--path=PREFIX`는 경로 접두사, `--location=LIST`는 위치를 고릅니다(기본값 전체). 표준 브라우저 헤더는 `--all-headers`를 주지 않으면 빠집니다. `--max-flows=N`은 조건에 맞는 최신 플로우 N개를 읽고(기본값 2000), 더 오래된 플로우를 건너뛰었으면 stderr에 알립니다. 쿠키, 자격 증명 헤더, `password`나 `token`처럼 자격 증명 이름을 가진 필드의 값은 `--include-sensitive`를 주지 않으면 `[REDACTED]`로 출력됩니다. 가리는 기준은 이름과 JWT / 개인 키 형태뿐이라, 다른 이름의 비밀 값(presigned `X-Amz-Signature`, 임의의 `sig=` 등)이나 URL 경로 안의 자격 증명은 그대로 출력됩니다. `--format`은 `text`, `json`, `names` 중에서 고릅니다. `names`는 한 줄에 이름 하나(JSON은 마지막 키 이름, `--location`에 지정하지 않으면 헤더 제외)로, Miner나 Fuzzer 워드리스트로 바로 쓸 수 있습니다.
+
+**`sitemap export`**: 캡처된 API를 OpenAPI 3.0.3 문서로 stdout에 출력합니다. TUI [Sitemap](/ko/guide/proxy/#openapi)에서 `⇧E`로 쓰는 문서와 같습니다. 빠진 것과 그 이유는 stderr로 나옵니다.
+
+```bash
+gori run sitemap export --host api.example.com > api.json
+gori run sitemap export --host api.example.com --format openapi-yaml > api.yaml
+gori run sitemap export 'src:proxy' --in-scope --examples > api.json
+```
+
+- **경로**는 경로마다 템플릿으로 바꿉니다. 숫자, UUID, 긴 16진수, 날짜 세그먼트는 앞 세그먼트 이름을 딴 파라미터가 되어 `/users/123/orders/9f1c2b7d0a4e`가 `/users/{userId}/orders/{orderId}`가 됩니다. 트리 표시용 접기와 달리 한 번만 캡처된 id도 바꿉니다. 템플릿이 같은 엔드포인트는 하나의 operation으로 합치고, 쿼리 문자열만 다른 변형도 하나로 합칩니다.
+- **파라미터**(query, header, cookie)는 그 operation의 모든 샘플에 있을 때만 `required`입니다. 표준 브라우저 헤더는 빼고, 반복된 쿼리 키는 배열로 씁니다.
+- **본문**: 요청 본문과 상태 코드별 응답에 모든 샘플에서 추론한 스키마가 붙습니다. JSON 스키마는 타입을 합치고(`integer`와 `number`는 `number`로, 정말 다른 타입은 `oneOf`로), 객체 속성은 합집합으로 모으며, 모든 샘플에 있던 멤버만 `required`로 둡니다. 폼은 객체 스키마, 그 밖의 미디어 타입은 문자열이 됩니다.
+- **보안**: `Authorization` 헤더는 `http` bearer, basic, digest 스킴이 됩니다. 다른 자격 증명 헤더(`X-Api-Key`, `X-Auth-Token` 등)와 세션 쿠키는 `apiKey` 스킴이 됩니다. 값은 절대 쓰지 않습니다.
+- **건너뜀**: WebSocket, gRPC, SSE, 응답이 완료되지 않은 플로우, 그리고 OpenAPI에 자리가 없는 메서드(CONNECT, WebDAV)는 건너뛰고 stderr에 개수를 적습니다.
+
+`-q`/`--query=QL`(위치 인자로도 가능), `--in-scope`, `--hide-static`은 `history`처럼 플로우 단위로 읽을 대상을 좁힙니다. `--host`는 정확한 호스트, `--path=PREFIX`는 경로 접두사입니다. 여러 호스트에 걸친 플로우는 문서 하나에 모든 origin을 `servers`로 적고, 경로마다 응답한 origin을 따로 적습니다. API 하나당 문서 하나가 필요하면 `--host`를 쓰세요. `--max-samples=N`(기본값 20)은 operation마다 읽을 플로우 수, `--max-flows=N`(기본값 5000)은 전체 플로우 수, `--max-endpoints=N`(기본값 1000)은 남길 operation 수의 상한입니다. 상한 때문에 문서가 잘리면 stderr에 알려줍니다.
+
+`--examples`를 주지 않으면 `example` 값은 없습니다. 예시 값은 샘플 하나에서 가져와 redaction 프로필(`--redact=PROFILE`, 기본값은 프로젝트 프로필, 없으면 전역 프로필, 없으면 `default`)을 거칩니다. 프로필의 필드 이름과 폼 키 이름은 쿼리 파라미터에도 적용되고, 쿠키 값은 항상 placeholder로 바뀝니다. 경로의 UUID나 16진수 id에는 예시를 붙이지 않습니다. 경로 속 토큰과 구별할 수 없기 때문입니다. 출력은 결정적이어서 같은 플로우를 두 번 내보내면 바이트가 같습니다. 그래서 두 문서의 `diff`가 곧 API의 변화입니다.
 
 ### run oast {#run-oast}
 

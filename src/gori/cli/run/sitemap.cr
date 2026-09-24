@@ -6,12 +6,14 @@ module Gori
         {"sitemap", "Print the host → path endpoint tree (text, json, paths)"},
         {"sitemap tag", "Pin/clear/list a free-text memo on a sitemap path"},
         {"sitemap params", "Per-endpoint parameter inventory (names, locations, samples, reflected)"},
+        {"sitemap export", "The captured API as an OpenAPI 3.0.3 document (JSON or YAML)"},
       ])]
       private def self.cmd_sitemap(args : Array(String)) : Nil
-        # `tag` and `params` are reserved as the first positional; a QL query starting with
-        # either goes through --query (same convention as `gori run probe`'s subcommands).
+        # `tag`, `params` and `export` are reserved as the first positional; a QL query starting
+        # with one goes through --query (same convention as `gori run probe`'s subcommands).
         return cmd_sitemap_tag(args[1..]) if args.first? == "tag"
         return cmd_sitemap_params(args[1..]) if args.first? == "params"
+        return cmd_sitemap_export(args[1..]) if args.first? == "export"
         cmd_sitemap_tree(args)
       end
 
@@ -187,7 +189,7 @@ module Gori
         # STDERR to say a term had gone.
         query, dropped = Run.compose_history_query(query, positional, neg_terms)
         Run.warn_dropped_query_terms("sitemap", dropped)
-        if err = Run.reserved_query_verb_error(positional, "sitemap", ["tag", "params"], "tag, params")
+        if err = Run.reserved_query_verb_error(positional, "sitemap", ["tag", "params", "export"], "tag, params, export")
           abort err
         end
         Run.refuse_unknown_query_fields("sitemap", query, lenient)
