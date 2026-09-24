@@ -256,7 +256,7 @@ module Gori
           when 'c'      then control_escape
           when '0'..'7'
             @i -= 1
-            byte_or_end((digits(8, 3) || 0) & 0xff)
+            byte_or_end((digits(8, 3) || 0_i64) & 0xff)
           else
             # An unknown escape is kept as written, backslash and all — bash's own behaviour.
             Bytes[0x5c_u8, c]
@@ -266,10 +266,12 @@ module Gori
         # `\uHHHH` / `\UHHHHHHHH`: the code point as UTF-8; a surrogate or an out-of-range value
         # is kept as written.
         private def unicode_escape(ch : Char) : Bytes
+          digits_start = @i
           value = digits(16, ch == 'u' ? 4 : 8)
           return "\\#{ch}".to_slice if value.nil?
           return Bytes.empty if value == 0
-          return value.chr.to_s.to_slice if value <= 0x10ffff && !(0xd800..0xdfff).includes?(value)
+          return value.to_i32.chr.to_s.to_slice if value <= 0x10ffff && !(0xd800..0xdfff).includes?(value)
+          @i = digits_start
           "\\#{ch}".to_slice
         end
 
@@ -277,19 +279,19 @@ module Gori
         private def control_escape : Bytes
           ctl = @bytes[@i]? || return "\\c".to_slice
           @i += 1
-          byte_or_end((ctl & 0x1f_u8).to_i)
+          byte_or_end((ctl & 0x1f_u8).to_i64)
         end
 
-        private def byte_or_end(value : Int32) : Bytes
+        private def byte_or_end(value : Int64) : Bytes
           value == 0 ? Bytes.empty : Bytes[value.to_u8]
         end
 
         # Up to `max` digits in `base` at `@i`, consumed; nil when there is not even one.
-        private def digits(base : Int32, max : Int32) : Int32?
-          value = 0
+        private def digits(base : Int32, max : Int32) : Int64?
+          value = 0_i64
           count = 0
           while count < max && (b = @bytes[@i]?) && (d = b.chr.to_i?(base))
-            value = value * base + d
+            value = value * base.to_i64 + d.to_i64
             count += 1
             @i += 1
           end

@@ -47,6 +47,13 @@ describe Gori::Import::Shell do
       words(%q(x $'\q')).should eq(["x", %q(\q)])
     end
 
+    it "keeps invalid Unicode escapes and their digits as written without overflowing" do
+      words(%q(x $'\u00e9\U0001f600'))[1].should eq("é😀")
+      words(%q(x $'\ud800zz'))[1].should eq(%q(\ud800zz))
+      words(%q(x $'\UFFFFFFFFz'))[1].should eq(%q(\UFFFFFFFFz))
+      words(%q(x $'\U80000000'))[1].should eq(%q(\U80000000))
+    end
+
     it "leaves $VAR literal — gori's own $ENV.KEY token is spelled that way" do
       words(%q(x $ENV.TOKEN "$HOME")).should eq(["x", "$ENV.TOKEN", "$HOME"])
     end
