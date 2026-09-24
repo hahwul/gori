@@ -31,15 +31,19 @@ module Gori
                     # differ — this project overrode it — and both are reported so an agent can
                     # tell "off everywhere" from "off in this engagement".
                     j.field "enabled", r.enabled?
+                    j.field "inert", r.inert?
+                    if reason = r.inert_reason
+                      j.field "inert_reason", reason
+                    end
                     if r.global?
                       j.field "overridden", r.overridden?
                       j.field "default_enabled", Settings.rewriter_rules.find { |g| g.id == r.id }.try(&.enabled)
                     end
                     j.field "name", r.name
-                    j.field "target", r.target.label
-                    j.field "part", r.part.label
-                    j.field "op", r.op.label
-                    j.field "match", r.match_kind.label
+                    j.field "target", r.target_label
+                    j.field "part", r.part_label
+                    j.field "op", r.op_label
+                    j.field "match", r.match_kind_label
                     j.field "host", r.host
                     j.field "pattern", r.pattern
                     j.field "replacement", r.replacement
@@ -237,6 +241,9 @@ module Gori
         return scope if scope.is_a?(Result)
         existing = Gori::Rules.merged(store).find { |r| r.id == id && r.scope == scope }
         return not_found("no #{scope.label} rule with id #{id}") unless existing
+        if existing.inert?
+          return err("#{existing.inert_reason} — cannot edit this rule with this gori; use a newer version or delete it", "INVALID_ARGUMENT", field: "id")
+        end
         tp = rule_target_part(h, existing.target, existing.part)
         return tp if tp.is_a?(Result)
         target, part = tp
@@ -417,6 +424,9 @@ module Gori
         everywhere = bool_arg(h, "everywhere", false)
         return err("'everywhere' needs scope=global — a project rule has no default", "INVALID_ARGUMENT", field: "everywhere") if everywhere && !scope.global?
         return not_found("no #{scope.label} rule with id #{id}") unless rule_exists?(id, scope)
+        if error = inert_enable_error(id, scope, enabled)
+          return error
+        end
         # Through the model — see `create_rule`. `set_default` is the library's own default;
         # `set_enabled` is this project's answer, and for a GLOBAL rule that is an override,
         # dropped rather than pinned when it agrees with the default.
@@ -431,6 +441,13 @@ module Gori
             j.field "everywhere", everywhere if scope.global?
           end
         end)
+      end
+
+      private def inert_enable_error(id : Int64, scope : Store::RuleScope, enabled : Bool) : Result?
+        return nil unless enabled
+        rule = Gori::Rules.merged(store).find { |r| r.id == id && r.scope == scope }
+        return nil unless rule && rule.inert?
+        err("#{rule.inert_reason} — cannot enable this rule with this gori; use a newer version or delete it", "INVALID_ARGUMENT", field: "enabled")
       end
 
       @[Tool("delete_rule", gated: true, agent_action: true)]

@@ -34,20 +34,28 @@ module Gori::Settings
     # (this rule's default unless the project overrode it) and `overridden` says which of the
     # two it is, so the list row can mark it.
     #
-    # All four `from_label`s are TOTAL (an unrecognised label reads as that field's default),
-    # so nothing here can raise on a hand-edited file. The clamp at the parse boundary is what
-    # makes that irrelevant rather than load-bearing: a rule only reaches memory through
-    # `parse_rewriter_rules`, which restricts all four enum fields to their allowed sets, or
-    # through the CRUD below, which is handed a live rule's own `.label`. A label that gets
-    # past both of those is already a drifted file, and reading it as a default beats a
-    # backtrace out of whichever surface asked for the rules.
+    # `to_rule` keeps the enum projections total so every surface can still list or delete a
+    # row, while the raw unknown labels travel beside them. `MatchRule#inert?` prevents those
+    # fallback enum values from ever reaching a rewrite path.
     def to_rule(enabled : Bool = @enabled, overridden : Bool = false) : Store::MatchRule
       Store::MatchRule.new(id, enabled,
         Store::RuleTarget.from_label(target), Store::RulePart.from_label(part),
         pattern, replacement,
         Store::RuleOp.from_label(op), Store::MatchKind.from_label(match_kind),
         name, host, body_file,
-        scope: Store::RuleScope::Global, overridden: overridden)
+        scope: Store::RuleScope::Global, overridden: overridden,
+        unknown_target: Store::RuleTarget.from_label?(target) ? nil : target,
+        unknown_part: Store::RulePart.from_label?(part) ? nil : part,
+        unknown_op: Store::RuleOp.from_label?(op) ? nil : op,
+        unknown_match_kind: Store::MatchKind.from_label?(match_kind) ? nil : match_kind)
+    end
+
+    # Keep the configured state in settings.json, but don't treat an unsupported grammar value
+    # as permission to run the default operation. This is also used by profile export to avoid
+    # presenting an unknown `pipe`-shaped row as an executable command.
+    def inert? : Bool
+      Store::RuleTarget.from_label?(target).nil? || Store::RulePart.from_label?(part).nil? ||
+        Store::RuleOp.from_label?(op).nil? || Store::MatchKind.from_label?(match_kind).nil?
     end
 
     # Does this rule RUN AN EXTERNAL COMMAND when it fires? The question a profile's two ends
@@ -59,8 +67,10 @@ module Gori::Settings
     # here would be a second answer to that question, free to stay behind — which is exactly
     # how the export contract came to be written for `pipe`'s predecessors and never revisited.
     #
-    # `from_label` is total (an unrecognised label reads as `replace`), and `op` is clamped to
-    # RULE_OPS by every parse below, so this cannot raise on a hand-edited file.
+    # `from_label` is still total (an unrecognised op projects to `replace`), but the raw
+    # string is retained and `inert?` gates traffic use of that projection. This command
+    # metadata is separate: a known `pipe` still needs profile command review if another shape
+    # field is unknown, while an unknown op is not a command this binary knows how to run.
     def executes? : Bool
       Store::RuleOp.from_label(op).executes?
     end
@@ -116,17 +126,13 @@ module Gori::Settings
 
   # Tolerant global-rule parse: a non-array (or absent) node keeps the current value; entries
   # missing a pattern are dropped (a rule with no pattern can never match, and `Rules#add`
-  # refuses it anyway), as is a header op on a non-head part (`impossible_shape?`, same
-  # reasoning); the four enum fields are clamped to their allowed sets.
+  # refuses it anyway), as is a known header op on a known non-head part (`impossible_shape?`).
+  # Unknown enum labels stay in their string fields so they can be written back unchanged and
+  # shown to the operator, but the runtime projection marks the row inert.
   #
-  # The clamp is a NORMALISATION, and it used to be a crash guard as well: `from_label` raised
-  # on an unknown label, so one typo in a hand-edited settings.json took the whole file down
-  # through `load`'s blanket rescue, resetting theme, hotkeys and every other section to
-  # factory defaults. All four readers are total now — an unknown label reads as that field's
-  # default — so that particular disaster is gone either way. Clamping still earns its place:
-  # it decides HERE, at the file boundary, that a label this parser does not recognise is not
-  # carried forward as itself, which is what keeps the in-memory rule and the stored one from
-  # disagreeing about what the file said. Mirrors parse_scan_rules.
+  # A known label is still canonicalized case-insensitively, as it was before. An unknown label
+  # must not be clamped to a live default: this file is shared by gori binaries from different
+  # releases, and doing that turned e.g. a future `short_circuit` into a `replace` rule.
   #
   # A missing `enabled` reads as FALSE. These rules rewrite live traffic in every project, so
   # the one direction a malformed or hand-written entry may not default to is "on".
@@ -139,10 +145,11 @@ module Gori::Settings
       next unless o = e.as_h?
       pattern = o["pattern"]?.try(&.as_s?)
       next if pattern.nil? || pattern.empty?
-      op = clamp_field(o["op"]?.try(&.as_s?), RULE_OPS, "replace")
-      target = clamp_field(o["target"]?.try(&.as_s?), RULE_TARGETS, "request")
-      part = clamp_field(o["part"]?.try(&.as_s?), RULE_PARTS, "head")
-      next if impossible_shape?(op, part)
+      op = keep_unknown_label(o["op"]?.try(&.as_s?), RULE_OPS, "replace")
+      target = keep_unknown_label(o["target"]?.try(&.as_s?), RULE_TARGETS, "request")
+      part = keep_unknown_label(o["part"]?.try(&.as_s?), RULE_PARTS, "head")
+      match_kind = keep_unknown_label(o["match_kind"]?.try(&.as_s?), RULE_KINDS, "literal")
+      next if known_rule_shape?(op, part) && impossible_shape?(op, part)
       list << RewriterRule.new(
         claim_id(o["id"]?.try(&.as_i64?), seen),
         o["enabled"]?.try(&.as_bool?) || false,
@@ -151,11 +158,26 @@ module Gori::Settings
         pattern,
         o["replacement"]?.try(&.as_s?) || "",
         op,
-        clamp_field(o["match_kind"]?.try(&.as_s?), RULE_KINDS, "literal"),
+        match_kind,
         o["host"]?.try(&.as_s?) || "",
         o["body_file"]?.try(&.as_s?) || "")
     end
     list
+  end
+
+  # Canonicalize a label this binary knows, but carry an unknown string unchanged. `nil` still
+  # means the field was omitted and keeps its documented default; a future label must never
+  # become that default on an older binary.
+  private def self.keep_unknown_label(val : String?, allowed : Array(String), default : String) : String
+    return default unless val
+    normalized = val.downcase
+    allowed.includes?(normalized) ? normalized : val
+  end
+
+  # Only known labels can name a shape that is impossible in this binary. An unknown part is
+  # retained as an inert row even when the fallback `Head` plus a header op would look valid.
+  private def self.known_rule_shape?(op : String, part : String) : Bool
+    !Store::RuleOp.from_label?(op).nil? && !Store::RulePart.from_label?(part).nil?
   end
 
   # Whether this op/part pair names a rule that could never rewrite anything: a header op
@@ -219,17 +241,18 @@ module Gori::Settings
       name = o["name"]?.try(&.as_s?)
       pattern = o["pattern"]?.try(&.as_s?)
       next if name.nil? || name.empty? || pattern.nil? || pattern.empty?
-      op = clamp_field(o["op"]?.try(&.as_s?), RULE_OPS, "replace")
-      target = clamp_field(o["target"]?.try(&.as_s?), RULE_TARGETS, "request")
-      part = clamp_field(o["part"]?.try(&.as_s?), RULE_PARTS, "head")
-      next if impossible_shape?(op, part)
+      op = keep_unknown_label(o["op"]?.try(&.as_s?), RULE_OPS, "replace")
+      target = keep_unknown_label(o["target"]?.try(&.as_s?), RULE_TARGETS, "request")
+      part = keep_unknown_label(o["part"]?.try(&.as_s?), RULE_PARTS, "head")
+      match_kind = keep_unknown_label(o["match_kind"]?.try(&.as_s?), RULE_KINDS, "literal")
+      next if known_rule_shape?(op, part) && impossible_shape?(op, part)
       list << RewriterRule.new(
         (list.size + 1).to_i64, false, name,
         target, part,
         pattern,
         o["replacement"]?.try(&.as_s?) || "",
         op,
-        clamp_field(o["match_kind"]?.try(&.as_s?), RULE_KINDS, "literal"),
+        match_kind,
         o["host"]?.try(&.as_s?) || "",
         o["body_file"]?.try(&.as_s?) || "")
     end

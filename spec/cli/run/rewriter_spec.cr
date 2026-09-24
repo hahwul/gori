@@ -235,6 +235,27 @@ describe "gori run rewriter --format=json" do
     j.as_h.has_key?("default_enabled").should be_false
   end
 
+  it "shows the raw unknown labels and marks the row inert" do
+    rule = Gori::Store::MatchRule.new(12_i64, true,
+      Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+      "POST /pay", "HTTP/1.1 200 OK", Gori::Store::RuleOp::Replace,
+      Gori::Store::MatchKind::Literal, "future", "", "",
+      unknown_target: "future_side", unknown_part: "future_head",
+      unknown_op: "future_short_circuit", unknown_match_kind: "future_match")
+    j = JSON.parse(Gori::CLI::Run.rewriter_rule_json_for_spec(rule))
+    j["target"].as_s.should eq("future_side")
+    j["part"].as_s.should eq("future_head")
+    j["op"].as_s.should eq("future_short_circuit")
+    j["match"].as_s.should eq("future_match")
+    j["inert"].as_bool.should be_true
+    j["inert_reason"].as_s.should contain("unknown op \"future_short_circuit\"")
+
+    row = Gori::CLI::Run.rewriter_rule_row_for_spec(rule)
+    row.should contain("[?]")
+    row.should contain("future_short_circuit")
+    row.should contain("future_head")
+  end
+
   # `default_enabled` is read back out of the global library, so a rule this project has
   # switched OFF still reports the library's ON — that difference is the whole point of the
   # field, and a script that only read `enabled` could not tell an override from a default.

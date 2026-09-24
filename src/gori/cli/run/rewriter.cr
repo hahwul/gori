@@ -407,7 +407,7 @@ module Gori
       # so `#3` on its own does not say which rule the next command would address.
       # `*` after it = this project overrides the global default (see Store#rewriter_overrides).
       private def self.rewriter_rule_row(r : Store::MatchRule) : String
-        mark = r.enabled? ? "x" : " "
+        mark = r.inert? ? "?" : (r.enabled? ? "x" : " ")
         side = r.target.request? ? "REQ" : "RES"
         name = r.name.empty? ? "" : " [#{r.name}]"
         host = r.host.empty? ? "" : " @#{r.host}"
@@ -426,6 +426,7 @@ module Gori
       end
 
       private def self.rewriter_op_tag(r : Store::MatchRule) : String
+        return "?" if r.inert?
         case r.op
         when .replace?       then "#{r.match_kind.regex? ? "re" : "sub"}/#{r.part.badge}"
         when .add_header?    then "+hdr"
@@ -439,6 +440,7 @@ module Gori
       # `=>` rather than `->` for a stub: it answers instead of forwarding, so the row should
       # not read like the four rewrite ops.
       private def self.rewriter_rule_body(r : Store::MatchRule) : String
+        return r.inert_reason || "unknown rule" if r.inert?
         case r.op
         when .remove_header? then r.pattern
         when .short_circuit? then "#{r.pattern} => #{RuleStub.summary(r.replacement, r.body_file)}"
@@ -505,15 +507,19 @@ module Gori
           j.field "id", r.id
           j.field "scope", r.scope.label
           j.field "enabled", r.enabled?
+          j.field "inert", r.inert?
+          if reason = r.inert_reason
+            j.field "inert_reason", reason
+          end
           if r.global?
             j.field "overridden", r.overridden?
             j.field "default_enabled", Settings.rewriter_rules.find { |g| g.id == r.id }.try(&.enabled)
           end
           j.field "name", r.name
-          j.field "target", r.target.label
-          j.field "part", r.part.label
-          j.field "op", r.op.label
-          j.field "match", r.match_kind.label
+          j.field "target", r.target_label
+          j.field "part", r.part_label
+          j.field "op", r.op_label
+          j.field "match", r.match_kind_label
           j.field "host", r.host
           j.field "pattern", r.pattern
           j.field "replacement", r.replacement
@@ -804,6 +810,9 @@ module Gori
         store = open_store(project)
         begin
           rules = Gori::Rules.load(store)
+          if enable && (rule = rules.rules.find { |r| r.id == id && r.scope == scope }) && rule.inert?
+            abort "gori run rewriter #{action}: #{rule.inert_reason} — cannot enable this rule with this gori; use a newer version or delete it"
+          end
           if everywhere
             # The library's own default. `set_default`, not `set_enabled`: the latter writes
             # THIS project's override, and agreeing with the default drops it rather than

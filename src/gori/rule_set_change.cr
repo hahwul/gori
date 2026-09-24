@@ -29,7 +29,8 @@ module Gori
   # the loud line every time anything moves is how a loud line stops being read.
   record RuleSetChange, changed : Int32, reordered : Bool, enabled : Int32, executes : Int32 = 0 do
     # Fold a later change into an earlier one — a burst that arrived inside one coalescing window
-    # is announced once. Counts add; `enabled` is a standing total, so the LATER value wins.
+    # is announced once. Changed counts add; `enabled` carries the caller's live-rule total, so
+    # the LATER value wins.
     def merge(newer : RuleSetChange) : RuleSetChange
       RuleSetChange.new(changed + newer.changed, reordered || newer.reordered, newer.enabled,
         executes + newer.executes)
@@ -48,10 +49,11 @@ module Gori
     # A snapshot that differs while every rule is present and unchanged can only have moved in
     # ORDER, which is what makes `reordered` derivable rather than a second diff.
     # `executes` is an optional predicate over an entry that CHANGED — nil for a rule set with
-    # no such notion (the extract rules), which is why it is a parameter rather than a field
-    # every caller has to compute. See the record's own comment for what it is for.
+    # no such notion (the extract rules). `live` decides the standing count behind the notice's
+    # consequence; by default it is `enabled?`, while the Rewriter supplies `active?` so an
+    # unsupported enum projection cannot make an inert row read as live traffic.
     def self.between(before : Array(T), after : Array(T), key : T -> K,
-                     executes : (T -> Bool)? = nil) : RuleSetChange? forall T, K
+                     executes : (T -> Bool)? = nil, live : (T -> Bool)? = nil) : RuleSetChange? forall T, K
       return nil if before == after
       previous = {} of K => T
       before.each { |rule| previous[key.call(rule)] = rule }
@@ -70,7 +72,8 @@ module Gori
       # running it over `after` a second time to build a difference costs both an extra pass and
       # three more intermediate collections on a path the poll reaches for every peer edit.
       changed += previous.each_key.count { |k| !seen.includes?(k) }
-      RuleSetChange.new(changed, changed.zero?, after.count(&.enabled?), runs)
+      active = after.count { |rule| live ? live.call(rule) : rule.enabled? }
+      RuleSetChange.new(changed, changed.zero?, active, runs)
     end
   end
 end

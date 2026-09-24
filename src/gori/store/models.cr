@@ -1012,15 +1012,19 @@ module Gori
       # list` down with an `ArgumentError` backtrace, through `Rules.merged`. Two of the four
       # enum fields on that row were already total and two were not, which is the whole bug.
       #
-      # This is not a hole in input validation: every WRITE path still refuses a bad label
-      # loudly — the CLI via `parse?` + abort, MCP via `values.find`, the settings file via
-      # the clamp in `parse_rewriter_rules`. This clause only decides what a row that is
-      # ALREADY stored reads as.
-      def self.from_label(s : String) : RuleTarget
+      # This is not a hole in input validation: CLI and MCP writes still refuse a bad label.
+      # Settings intentionally retains an unknown string for forward-compatible round trips.
+      # `from_label` is only the total enum projection; `Store#match_rules` carries the raw
+      # value into `MatchRule`, whose `inert?` guard prevents the projection from running.
+      def self.from_label?(s : String) : RuleTarget?
         case s
         when "response" then Response
-        else                 Request
+        when "request"  then Request
         end
+      end
+
+      def self.from_label(s : String) : RuleTarget
+        from_label?(s) || Request
       end
     end
 
@@ -1045,16 +1049,19 @@ module Gori
         to_s.downcase
       end
 
-      # Total for the reason `RuleTarget.from_label` gives: a stored row must not be able to
-      # raise on the way out of the store. `head` is the default the CLI and the V30 migration
-      # already use, so an unreadable label reads as the same thing a rule written without a
-      # `--part` does.
-      def self.from_label(s : String) : RulePart
+      # Total for the reason `RuleTarget.from_label` gives: a stored row must not raise on the
+      # way out of the store. `head` remains the legacy enum projection, and the raw database
+      # label is preserved beside it so this fallback cannot make the row executable.
+      def self.from_label?(s : String) : RulePart?
         case s
         when "body" then Body
         when "ws"   then Ws
-        else             Head
+        when "head" then Head
         end
+      end
+
+      def self.from_label(s : String) : RulePart
+        from_label?(s) || Head
       end
 
       # One-letter tag for a rule row (the TUI Rewriter list and `gori run rewriter`).
@@ -1114,15 +1121,19 @@ module Gori
         end
       end
 
-      def self.from_label(s : String) : RuleOp
+      def self.from_label?(s : String) : RuleOp?
         case s
         when "add_header"    then AddHeader
         when "set_header"    then SetHeader
         when "remove_header" then RemoveHeader
         when "short_circuit" then ShortCircuit
         when "pipe"          then Pipe
-        else                      Replace
+        when "replace"       then Replace
         end
+      end
+
+      def self.from_label(s : String) : RuleOp
+        from_label?(s) || Replace
       end
 
       # A header-name-keyed op (mutates the HEAD by name, not a substring gsub). Header
@@ -1165,8 +1176,15 @@ module Gori
         to_s.downcase
       end
 
+      def self.from_label?(s : String) : MatchKind?
+        case s
+        when "regex"   then Regex
+        when "literal" then Literal
+        end
+      end
+
       def self.from_label(s : String) : MatchKind
-        s == "regex" ? Regex : Literal
+        from_label?(s) || Literal
       end
     end
 
@@ -1235,15 +1253,61 @@ module Gori
       # Whether THIS project overrides the global default of `enabled`. Always false for a
       # project rule — there is no default to disagree with. See `Store#rewriter_overrides`.
       getter? overridden : Bool
+      # The enum fallbacks above keep a drifted row readable by older callers. Carry its raw
+      # spelling beside those projections so the row stays visible and, via `inert?`, cannot
+      # accidentally run as one of those defaults. Settings rows already store these labels as
+      # strings; project rows need the same provenance after the SQLite read.
+      getter unknown_target : String?
+      getter unknown_part : String?
+      getter unknown_op : String?
+      getter unknown_match_kind : String?
 
       def initialize(@id, @enabled, @target, @part, @pattern, @replacement,
                      @op = RuleOp::Replace, @match_kind = MatchKind::Literal,
                      @name = "", @host = "", @body_file = "",
-                     @scope = RuleScope::Project, @overridden = false)
+                     @scope = RuleScope::Project, @overridden = false,
+                     @unknown_target = nil, @unknown_part = nil,
+                     @unknown_op = nil, @unknown_match_kind = nil)
       end
 
       def global? : Bool
         @scope.global?
+      end
+
+      # Unknown labels are preserved for display and deletion, but never interpreted as the
+      # defaults returned by `from_label`. One shared predicate guards both rewrite and stub
+      # selection, as well as every surface that wants to describe the row as usable.
+      def inert? : Bool
+        !@unknown_target.nil? || !@unknown_part.nil? || !@unknown_op.nil? || !@unknown_match_kind.nil?
+      end
+
+      def active? : Bool
+        enabled? && !inert?
+      end
+
+      def target_label : String
+        @unknown_target || @target.label
+      end
+
+      def part_label : String
+        @unknown_part || @part.label
+      end
+
+      def op_label : String
+        @unknown_op || @op.label
+      end
+
+      def match_kind_label : String
+        @unknown_match_kind || @match_kind.label
+      end
+
+      def inert_reason : String?
+        labels = [] of String
+        labels << "op #{@unknown_op.inspect}" if @unknown_op
+        labels << "target #{@unknown_target.inspect}" if @unknown_target
+        labels << "part #{@unknown_part.inspect}" if @unknown_part
+        labels << "match_kind #{@unknown_match_kind.inspect}" if @unknown_match_kind
+        labels.empty? ? nil : "unknown #{labels.join(", ")} (newer gori?)"
       end
     end
 

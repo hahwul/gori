@@ -243,6 +243,35 @@ private def sub_row_cell(ctl : RewriterController, i : Int32) : {Int32, Int32}
 end
 
 describe "Gori::Tui::RewriterController (tab review)" do
+  it "shows unknown global rules as inert and refuses edit or duplicate" do
+    with_globals do
+      with_rewriter_controller do |ctl, host, session|
+        Gori::Settings.rewriter_rules = [Gori::Settings::RewriterRule.new(
+          1242_i64, true, "future", "request", "head", "POST /pay",
+          "HTTP/1.1 200 OK", "future_short_circuit", "literal", "", "")]
+        session.rules.reload(announce: false)
+
+        screen = render(ctl)
+        screen.contains?("?").should be_true
+        screen.contains?("future_short_circuit").should be_true
+        screen.contains?("unknown op").should be_true
+
+        ctl.rewriter_edit
+        host.opened_rules.should be_empty
+        host.statuses.last.should contain("can't edit this rule")
+
+        ctl.rewriter_duplicate
+        session.rules.rules.size.should eq(1)
+        host.statuses.last.should contain("can't duplicate this rule")
+
+        edited = Gori::Tui::RewriterRuleOverlay.editing(ctl.selected_rule.not_nil!)
+        ctl.apply_rewriter_rule(edited).should be_true
+        host.statuses.last.should contain("can't edit this rule")
+        session.rules.rules.first.op_label.should eq("future_short_circuit")
+      end
+    end
+  end
+
   describe "the highlight follows the rule the operator acted on" do
     it "lands on the copy after `c`, not on the original" do
       with_rewriter_controller do |ctl, _, session|

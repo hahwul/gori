@@ -1591,7 +1591,7 @@ describe Gori::Settings do
       Gori::Settings.rewriter_rules.size.should eq(2)
 
       # Malformed rules tolerated: an entry with no pattern is dropped, an unknown enum label
-      # is CLAMPED rather than raised (`from_label` would raise, and load's blanket rescue
+      # is preserved rather than raised (`from_label` would raise, and load's blanket rescue
       # would turn one typo into a factory reset of every section), a missing `enabled` reads
       # as OFF, and a duplicated id is renumbered so every by-id mutation stays unambiguous.
       File.write(Gori::Settings.path, %({"rewriter":{"rules":[\
@@ -1602,11 +1602,12 @@ describe Gori::Settings do
       Gori::Settings.rewriter_rules.size.should eq(2)
       kept = Gori::Settings.rewriter_rules.first
       kept.name.should eq("ok")
-      kept.op.should eq("replace")
-      kept.part.should eq("head")
-      kept.target.should eq("request")
-      kept.match_kind.should eq("literal")
-      kept.to_rule.op.replace?.should be_true # the clamped labels really rebuild a rule
+      kept.op.should eq("nonsense")
+      kept.part.should eq("nope")
+      kept.target.should eq("sideways")
+      kept.match_kind.should eq("fuzzy")
+      kept.to_rule.op.replace?.should be_true # legacy projection is preserved
+      kept.to_rule.inert?.should be_true      # raw unknown labels keep it out of live traffic
       dup = Gori::Settings.rewriter_rules[1]
       dup.id.should_not eq(7_i64)
       dup.enabled.should be_false # no "enabled" key => OFF, never armed by a hand edit

@@ -117,7 +117,7 @@ module Gori
     # that applies is what keeps "a rule is live" from meaning two different things.
     private def rewrites?(rule : Store::MatchRule, target : Store::RuleTarget?,
                           part : Store::RulePart) : Bool
-      rule.enabled? && rule.op.rewrite? && !rule.pattern.empty? && rule.part == part &&
+      rule.active? && rule.op.rewrite? && !rule.pattern.empty? && rule.part == part &&
         !(rule.op.header? && !part.head?) && (target.nil? || rule.target == target)
     end
 
@@ -132,7 +132,7 @@ module Gori
     # is counted anyway: it MUST still short-circuit (fail closed — see `stub_for`), because
     # falling through would send a request the operator declared contained.
     private def stub_count(rules : Array(Store::MatchRule)) : Int32
-      rules.count { |r| r.enabled? && r.op.short_circuit? && !r.pattern.empty? }
+      rules.count { |r| r.active? && r.op.short_circuit? && !r.pattern.empty? }
     end
 
     def self.load(store : Store) : Rules
@@ -166,11 +166,11 @@ module Gori
 
     # The lens is doing something iff at least one rule is enabled.
     def active? : Bool
-      @mutex.synchronize { @rules.any?(&.enabled?) }
+      @mutex.synchronize { @rules.any?(&.active?) }
     end
 
     def enabled_count : Int32
-      @mutex.synchronize { @rules.count(&.enabled?) }
+      @mutex.synchronize { @rules.count(&.active?) }
     end
 
     # --- editing (persists, then refreshes the snapshot) ---------------------
@@ -244,6 +244,8 @@ module Gori
                op : Store::RuleOp = Store::RuleOp::Replace, match_kind : Store::MatchKind = Store::MatchKind::Literal,
                name : String = "", host : String = "", body_file : String = "",
                scope : Store::RuleScope = Store::RuleScope::Project) : Bool
+      existing = rules.find { |r| r.id == id && r.scope == scope }
+      return false unless existing && !existing.inert?
       return false if pattern.empty?
       target, part = normalize_shape(op, target, part)
       ok =
@@ -274,6 +276,13 @@ module Gori
       "#{label}##{id} (#{target.label}/#{part.label})"
     end
 
+    def self.rule_phrase(rule : Store::MatchRule) : String
+      label = rule.name.empty? ? "" : "#{rule.name.inspect} "
+      target = rule.unknown_target.try(&.inspect) || rule.target.label
+      part = rule.unknown_part.try(&.inspect) || rule.part.label
+      "#{label}##{rule.id} (#{target}/#{part})"
+    end
+
     def self.scope_word(scope : Store::RuleScope) : String
       scope.global? ? "global" : "project"
     end
@@ -298,7 +307,7 @@ module Gori
     # duplicate stands, which is why the id is kept rather than the copy re-found by fields
     # (that would pick the wrong twin).
     def set_scope(rule : Store::MatchRule, to : Store::RuleScope) : Bool
-      return false if rule.scope == to
+      return false if rule.inert? || rule.scope == to
       copy_id =
         if to.global?
           Settings.add_rewriter_rule(rule.target.label, rule.part.label, rule.pattern,
@@ -405,7 +414,7 @@ module Gori
         end
       refresh
       if log && ok && (r = doomed)
-        ConfigLog.record(@store, "rule_remove", "#{Rules.scope_word(scope)} rewrite rule removed — #{Rules.rule_phrase(r.id, r.name, r.target, r.part)}")
+        ConfigLog.record(@store, "rule_remove", "#{Rules.scope_word(scope)} rewrite rule removed — #{Rules.rule_phrase(r)}")
       end
       ok
     end
@@ -430,6 +439,9 @@ module Gori
     def set_enabled(id : Int64, enabled : Bool, scope : Store::RuleScope = Store::RuleScope::Project) : Bool
       rule = rules.find { |r| r.id == id && r.scope == scope }
       return false unless rule
+      # Turning an inert row ON would claim it is usable, even though this binary still cannot
+      # interpret its grammar. Turning it OFF is safe and preserves the unsupported labels.
+      return false if enabled && rule.inert?
       ok =
         if scope.global?
           set_effective(id, enabled)
@@ -440,7 +452,7 @@ module Gori
       # Enabling and disabling is the same act as installing and removing, as far as what
       # actually rewrites traffic is concerned.
       state = enabled ? "enabled" : "disabled"
-      ConfigLog.record(@store, "rule_toggle", "#{Rules.scope_word(scope)} rewrite rule #{state} — #{Rules.rule_phrase(rule.id, rule.name, rule.target, rule.part)}") if ok
+      ConfigLog.record(@store, "rule_toggle", "#{Rules.scope_word(scope)} rewrite rule #{state} — #{Rules.rule_phrase(rule)}") if ok
       ok
     end
 
@@ -464,13 +476,14 @@ module Gori
     def set_default(id : Int64, enabled : Bool) : Bool
       rule = Settings.rewriter_rules.find { |r| r.id == id }
       return false unless rule
+      return false if enabled && rule.inert?
       ok = Settings.set_rewriter_rule_enabled(id, enabled)
       refresh
       if ok
         r = rule.to_rule
         ConfigLog.record(@store, "rule_toggle",
           "global rewrite rule #{enabled ? "enabled" : "disabled"} by default in every project — " \
-          "#{Rules.rule_phrase(r.id, r.name, r.target, r.part)}")
+          "#{Rules.rule_phrase(r)}")
       end
       ok
     end
@@ -496,7 +509,10 @@ module Gori
     # same header wins, so reporting a reorder that did not reach disk leaves the operator
     # believing an order that reverts at next start.
     def move(id : Int64, dir : Int32, scope : Store::RuleScope = Store::RuleScope::Project) : Bool
-      scoped = rules.select { |r| r.scope == scope }
+      snapshot = rules
+      rule = snapshot.find { |r| r.id == id && r.scope == scope }
+      return false unless rule && !rule.inert?
+      scoped = snapshot.select { |r| r.scope == scope }
       i = scoped.index { |r| r.id == id }
       return false unless i
       j = i + (dir < 0 ? -1 : 1)
@@ -540,7 +556,8 @@ module Gori
       # rule forks nothing; it is a row, not a hook.
       return unless change = RuleSetChange.between(before, after,
                       ->(r : Store::MatchRule) { {r.scope, r.id} },
-                      ->(r : Store::MatchRule) { r.enabled? && r.op.executes? })
+                      ->(r : Store::MatchRule) { r.active? && r.op.executes? },
+                      ->(r : Store::MatchRule) { r.active? })
       @mutex.synchronize do
         @pending_peer_change = (held = @pending_peer_change) ? held.merge(change) : change
       end
@@ -564,6 +581,7 @@ module Gori
 
     # The short op badge — "re/H", "sub/B", "+hdr", "stub", …
     def self.op_tag(rule : Store::MatchRule) : String
+      return "?" if rule.inert?
       case rule.op
       when .replace?
         kind = rule.match_kind.regex? ? "re" : "sub"
@@ -581,6 +599,7 @@ module Gori
 
     # What the rule does to the bytes, in the op's own shape.
     def self.describe(rule : Store::MatchRule) : String
+      return rule.inert_reason || "unknown rule" if rule.inert?
       case rule.op
       when .add_header?, .set_header? then "#{rule.pattern}: #{rule.replacement}"
       when .remove_header?            then rule.pattern
@@ -719,7 +738,7 @@ module Gori
       return false if @short_circuit_count.get == 0 # lock-free fast path
       @mutex.synchronize do
         @rules.any? do |r|
-          r.enabled? && r.op.short_circuit? && !r.pattern.empty? && host_matches?(r.host, host)
+          r.active? && r.op.short_circuit? && !r.pattern.empty? && host_matches?(r.host, host)
         end
       end
     end
@@ -731,7 +750,7 @@ module Gori
       return nil if @short_circuit_count.get == 0 # lock-free fast path
       active = @mutex.synchronize do
         @rules.select do |r|
-          r.enabled? && r.op.short_circuit? && !r.pattern.empty? && host_matches?(r.host, host)
+          r.active? && r.op.short_circuit? && !r.pattern.empty? && host_matches?(r.host, host)
         end
       end
       return nil if active.empty?
@@ -1780,6 +1799,7 @@ module Gori
     # of your recent flows does this touch"), and the more useful one for a stub: it tells
     # the operator what they are about to stop sending.
     private def rule_affects?(rule : Store::MatchRule, detail : Store::FlowDetail) : Bool
+      return false if rule.inert?
       return false unless host_matches?(rule.host, detail.row.host)
       return stub_matches?(rule, String.new(detail.request_head)) if rule.op.short_circuit?
       return false if rule.op.header? && !rule.part.head?
