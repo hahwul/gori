@@ -1795,8 +1795,8 @@ module Gori
           rows.each do |(id, req_head, req_body, resp_head, resp_body, resp_ct)|
             # The request side has no content_type column, so its marker comes from its head —
             # exactly what the old path did for the request body.
-            req = body_fts_text(req_head, req_body)
-            resp = resp_head.nil? ? "" : body_fts_text(resp_head, resp_body, resp_ct)
+            req = Store.body_fts_text(req_head, req_body)
+            resp = resp_head.nil? ? "" : Store.body_fts_text(resp_head, resp_body, resp_ct)
             # Contentless FTS5 forbids UPDATE, so a refresh is DELETE (a cheap tombstone under
             # contentless_delete=1) + INSERT. Unconditional rather than tracking whether this row
             # was ever indexed: it makes a re-index idempotent — and a double index pass, or one
@@ -1826,7 +1826,11 @@ module Gori
     # rule the old on-commit path applied. `ct`, when given (the response side), is the stored
     # content_type column and takes precedence over whatever the head says; the head is still
     # scanned for Content-Encoding, which has no column.
-    private def body_fts_text(head : Bytes, body : Bytes?, ct : String? = nil) : String
+    #
+    # Class-level, and public, because the indexer is not the only reader that has to agree with
+    # it: `ProjectSearch` scans the bodies the index has not reached yet, and a body it matched
+    # that the indexer then skips would flip the same search's answer once the backlog drains.
+    def self.body_fts_text(head : Bytes, body : Bytes?, ct : String? = nil) : String
       return "" if body.nil? || body.empty?
       return "" if ct && binary_content?(ct)
       skip_body_fts?(head) ? "" : String.new(body)
@@ -1933,7 +1937,7 @@ module Gori
     # Skip body FTS for clearly-binary content types (images/media/archives/
     # octet-stream/protobuf) — never usefully body-searched and the dominant byte
     # volume. Text AND unknown types are still indexed so search isn't quietly lost.
-    private def binary_content?(ct : String?) : Bool
+    private def self.binary_content?(ct : String?) : Bool
       return false unless ct
       c = ct.downcase
       c.starts_with?("image/") || c.starts_with?("video/") || c.starts_with?("audio/") ||
@@ -1946,14 +1950,14 @@ module Gori
     # both markers read in ONE pass over the head. A non-identity Content-Encoding means the
     # body is stored in COMPRESSED wire form: high-entropy bytes that explode the trigram
     # index while being unsearchable for readable text (you can't `body:` a gzip stream).
-    private def skip_body_fts?(head : Bytes) : Bool
+    private def self.skip_body_fts?(head : Bytes) : Bool
       ct, ce = head_markers(head)
       binary_content?(ct) || encoded?(ce)
     end
 
     # {Content-Type, Content-Encoding} header values from a raw head BLOB (either nil), read
     # in a single pass so a skip decision costs one scan, not one per header.
-    private def head_markers(head : Bytes) : {String?, String?}
+    private def self.head_markers(head : Bytes) : {String?, String?}
       ct = nil.as(String?)
       ce = nil.as(String?)
       String.new(head).each_line do |raw|
@@ -1971,7 +1975,7 @@ module Gori
 
     # A non-identity Content-Encoding ⇒ the body is compressed (skip it from FTS). `ce` comes
     # from head_markers already stripped, so downcase alone suffices.
-    private def encoded?(ce : String?) : Bool
+    private def self.encoded?(ce : String?) : Bool
       return false unless ce
       c = ce.downcase
       !c.empty? && c != "identity"
