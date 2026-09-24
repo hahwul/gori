@@ -181,9 +181,11 @@ module Gori
     def add(target : Store::RuleTarget, part : Store::RulePart, pattern : String, replacement : String,
             op : Store::RuleOp = Store::RuleOp::Replace, match_kind : Store::MatchKind = Store::MatchKind::Literal,
             name : String = "", host : String = "", body_file : String = "",
-            scope : Store::RuleScope = Store::RuleScope::Project, enabled : Bool = true) : Bool
+            scope : Store::RuleScope = Store::RuleScope::Project, enabled : Bool = true,
+            respond : Store::RespondKind = Store::RespondKind.implied(body_file),
+            respond_args : String = "") : Bool
       create(target, part, pattern, replacement, op, match_kind, name, host, body_file,
-        scope: scope, enabled: enabled) != 0
+        scope: scope, enabled: enabled, respond: respond, respond_args: respond_args) != 0
     end
 
     # `add`, answering the new rule's ID rather than only whether the write committed (0 = it
@@ -196,9 +198,12 @@ module Gori
     def create(target : Store::RuleTarget, part : Store::RulePart, pattern : String, replacement : String,
                op : Store::RuleOp = Store::RuleOp::Replace, match_kind : Store::MatchKind = Store::MatchKind::Literal,
                name : String = "", host : String = "", body_file : String = "",
-               scope : Store::RuleScope = Store::RuleScope::Project, enabled : Bool = true) : Int64
+               scope : Store::RuleScope = Store::RuleScope::Project, enabled : Bool = true,
+               respond : Store::RespondKind = Store::RespondKind.implied(body_file),
+               respond_args : String = "") : Int64
       return 0_i64 if pattern.empty?
       target, part = normalize_shape(op, target, part)
+      respond, respond_args, body_file = Rules.normalize_respond(op, respond, respond_args, body_file)
       # Both writers already answered — a global add returns the new id (0 = not written),
       # a project add the same through `insert_rule`'s `exec_task`. This threw it away, so a
       # surface printed "rule duplicated" (or silently closed its overlay having "added" the
@@ -208,9 +213,11 @@ module Gori
       new_id =
         if scope.global?
           Settings.add_rewriter_rule(target.label, part.label, pattern, replacement, op.label,
-            match_kind.label, name, host, body_file, enabled)
+            match_kind.label, name, host, body_file, enabled,
+            respond: respond.label, respond_args: respond_args)
         else
-          @store.insert_rule(target, part, pattern, replacement, op, match_kind, name, host, enabled, body_file: body_file)
+          @store.insert_rule(target, part, pattern, replacement, op, match_kind, name, host, enabled,
+            body_file: body_file, respond: respond.label, respond_args: respond_args)
         end
       ok = new_id != 0
       refresh
@@ -243,17 +250,24 @@ module Gori
     def update(id : Int64, target : Store::RuleTarget, part : Store::RulePart, pattern : String, replacement : String,
                op : Store::RuleOp = Store::RuleOp::Replace, match_kind : Store::MatchKind = Store::MatchKind::Literal,
                name : String = "", host : String = "", body_file : String = "",
-               scope : Store::RuleScope = Store::RuleScope::Project) : Bool
+               scope : Store::RuleScope = Store::RuleScope::Project,
+               respond : Store::RespondKind? = nil, respond_args : String? = nil) : Bool
       existing = rules.find { |r| r.id == id && r.scope == scope }
       return false unless existing && !existing.inert?
       return false if pattern.empty?
       target, part = normalize_shape(op, target, part)
+      # nil KEEPS the rule's own sub-kind: a caller that predates #1237 (or simply does not
+      # speak of it) must not turn a dir or fault rule back into an inline stub by omission.
+      respond, respond_args, body_file = Rules.normalize_respond(op, respond || existing.respond,
+        respond_args || existing.respond_args, body_file)
       ok =
         if scope.global?
           Settings.update_rewriter_rule(id, target.label, part.label, pattern, replacement,
-            op.label, match_kind.label, name, host, body_file)
+            op.label, match_kind.label, name, host, body_file,
+            respond: respond.label, respond_args: respond_args)
         else
-          @store.update_rule(id, target, part, pattern, replacement, op, match_kind, name, host, body_file)
+          @store.update_rule(id, target, part, pattern, replacement, op, match_kind, name, host,
+            body_file, respond: respond.label, respond_args: respond_args)
         end
       refresh
       ConfigLog.record(@store, "rule_update", "#{Rules.scope_word(scope)} rewrite rule changed — #{Rules.rule_phrase(id, name, target, part)}") if ok
@@ -312,10 +326,11 @@ module Gori
         if to.global?
           Settings.add_rewriter_rule(rule.target.label, rule.part.label, rule.pattern,
             rule.replacement, rule.op.label, rule.match_kind.label, rule.name, rule.host,
-            rule.body_file, rule.enabled?)
+            rule.body_file, rule.enabled?, respond: rule.respond.label, respond_args: rule.respond_args)
         else
           @store.insert_rule(rule.target, rule.part, rule.pattern, rule.replacement, rule.op,
-            rule.match_kind, rule.name, rule.host, rule.enabled?, body_file: rule.body_file)
+            rule.match_kind, rule.name, rule.host, rule.enabled?, body_file: rule.body_file,
+            respond: rule.respond.label, respond_args: rule.respond_args)
         end
       return false if copy_id == 0
       # `log: false` — see `remove_rule`. Either half failing rolls the other back, so nothing
@@ -368,6 +383,19 @@ module Gori
     private def normalize_shape(op : Store::RuleOp, target : Store::RuleTarget,
                                 part : Store::RulePart) : {Store::RuleTarget, Store::RulePart}
       Rules.normalize_shape(op, target, part)
+    end
+
+    # The {respond, respond_args, body_file} a rule can actually have (#1237) — `normalize_shape`'s
+    # twin for the short-circuit sub-kind. Every other op reads none of the three, so an op
+    # changed away from `short_circuit` drops them rather than carrying a dir path or a fault
+    # kind it would silently resurrect if switched back. A `dir` path is made absolute here
+    # (`~` included), once, for every surface: the proxy resolves it at request time from its
+    # own working directory, which is not the directory the operator typed it in.
+    def self.normalize_respond(op : Store::RuleOp, respond : Store::RespondKind, respond_args : String,
+                               body_file : String) : {Store::RespondKind, String, String}
+      return {Store::RespondKind::Inline, "", ""} unless op.short_circuit?
+      body_file = File.expand_path(body_file, home: true) if respond.dir? && !body_file.empty?
+      {respond, respond_args, body_file}
     end
 
     # False when the write did NOT commit (store busy, locked or closing) — the rule is still
@@ -607,7 +635,7 @@ module Gori
       when .remove_header?            then rule.pattern
         # `⇥` (not `→`) because a stub does not transform the request into the response — it
         # answers instead of forwarding, and the row should not read like the other four ops.
-      when .short_circuit? then "#{rule.pattern} ⇥ #{RuleStub.summary(rule.replacement, rule.body_file)}"
+      when .short_circuit? then "#{rule.pattern} ⇥ #{RuleStub.summary(rule)}"
         # `⇄` (not `→`) because the replacement is not the text on the right — it is whatever
         # that command WRITES. The row names the command so the operator can see, in the list,
         # that this rule executes something.

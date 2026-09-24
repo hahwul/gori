@@ -1,5 +1,6 @@
 require "http/status"
 require "../proxy/head_rewriter"
+require "../store/models"
 
 module Gori
   # The canned response half of a short-circuit rule (#511).
@@ -82,6 +83,49 @@ module Gori
       !parse_head(text).nil?
     end
 
+    # Why a short-circuit rule's answer could not be honoured as authored, or nil when it can —
+    # the ONE validator for the #1237 sub-kinds, which `gori run rewriter`, MCP
+    # `create_rule`/`update_rule` and the TUI editor's Save row all call, so a rule that would
+    # only fail at request time cannot be saved. Like `valid?`, it checks the SHAPE and never
+    # the filesystem: a stub file or a mapped directory that appears later is a normal way to
+    # work, and the proxy fails closed when it is still missing.
+    def self.respond_error(respond : Store::RespondKind, replacement : String, body_file : String,
+                           respond_args : String) : String?
+      args = Store::RespondArgs.parse(respond_args)
+      return args if args.is_a?(String)
+      unless respond.dir?
+        return "strip prefix is only for a dir rule" unless args.strip_prefix.empty?
+        return "fall-through is only for a dir rule" if args.fallthrough?
+      end
+      return "a fault kind is only for a fault rule" if args.fault && !respond.fault?
+      if args.hang_ms != Store::RespondArgs::DEFAULT_HANG_MS && args.fault != Store::FaultKind::Hang
+        return "a hang bound is only for a hang fault"
+      end
+      case respond
+      in .inline?
+        return "write a stub response" unless valid?(replacement)
+        return "an inline stub takes no body file (use the file source)" unless body_file.empty?
+      in .file?
+        return "write a stub response head" unless valid?(replacement)
+        return "name the body file" if body_file.empty?
+      in .dir?
+        return "name the directory to serve" if body_file.empty?
+        unless replacement.strip.empty?
+          return "the response head template does not parse" unless valid?(replacement)
+          return "a dir rule's body comes from the directory — keep the template head-only" unless inline_body(replacement).empty?
+        end
+        prefix = args.strip_prefix
+        unless prefix.empty? || (prefix.starts_with?('/') && prefix.ends_with?('/'))
+          return "strip prefix must start and end with / (e.g. /static/)"
+        end
+      in .fault?
+        return "pick a fault: close, reset or hang" unless args.fault
+        return "a fault answers nothing — leave the response empty" unless replacement.strip.empty?
+        return "a fault takes no body file" unless body_file.empty?
+      end
+      nil
+    end
+
     # A one-line summary of a stub for a list row ("200 OK · 42B" / "404 · file:…").
     def self.summary(text : String, body_file : String) : String
       head = parse_head(text)
@@ -89,6 +133,26 @@ module Gori
       status_line = String.new(head.bytes).lines.first?.try(&.lchop("HTTP/1.1 ").strip) || ""
       body = body_file.empty? ? "#{inline_body(text).size}B inline" : "file:#{body_file}"
       "#{status_line} · #{body}"
+    end
+
+    # The same summary, knowing the sub-kind (#1237): `dir:~/work/js (fallthrough)`,
+    # `fault:reset +500ms`, or the stub summary above — each with its delay, when it has one.
+    def self.summary(rule : Store::MatchRule) : String
+      return "(#{rule.inert_reason})" if rule.op.short_circuit? && rule.inert?
+      args = rule.args
+      out =
+        case rule.respond
+        in .inline?, .file?
+          summary(rule.replacement, rule.body_file)
+        in .dir?
+          prefix = args.strip_prefix.empty? ? "" : "#{args.strip_prefix} → "
+          "#{prefix}dir:#{rule.body_file}#{args.fallthrough? ? " (fallthrough)" : ""}"
+        in .fault?
+          kind = args.fault.try(&.label) || "?"
+          hang = args.fault.try(&.hang?) ? " ≤#{args.hang_ms}ms" : ""
+          "fault:#{kind}#{hang}"
+        end
+      args.delay_ms > 0 ? "#{out} +#{args.delay_ms}ms" : out
     end
 
     # Split the authored text into {head, inline body} on the FIRST blank line, in either

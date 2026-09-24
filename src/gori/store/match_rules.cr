@@ -7,7 +7,7 @@ module Gori
 
     def match_rules : Array(MatchRule)
       list = [] of MatchRule
-      @db.query("SELECT id, enabled, target, part, CAST(pattern AS BLOB) AS pattern, CAST(replacement AS BLOB) AS replacement, op, match_kind, name, host, body_file FROM match_rules ORDER BY position, id") do |rs|
+      @db.query("SELECT id, enabled, target, part, CAST(pattern AS BLOB) AS pattern, CAST(replacement AS BLOB) AS replacement, op, match_kind, name, host, body_file, respond, respond_args FROM match_rules ORDER BY position, id") do |rs|
         rs.each do
           id = rs.read(Int64)
           enabled = rs.read(Int32) != 0
@@ -17,6 +17,11 @@ module Gori
           replacement = String.new(rs.read(Bytes))
           op_label = rs.read(String)
           match_kind_label = rs.read(String)
+          name = rs.read(String)
+          host = rs.read(String)
+          body_file = rs.read(String)
+          respond_label = rs.read(String)
+          respond_args = rs.read(String)
           list << MatchRule.new(
             id, enabled,
             RuleTarget.from_label(target_label), RulePart.from_label(part_label),
@@ -27,11 +32,14 @@ module Gori
             # echoed the truncated form, making the discrepancy invisible everywhere.
             pattern, replacement,
             RuleOp.from_label(op_label), MatchKind.from_label(match_kind_label),
-            rs.read(String), rs.read(String), rs.read(String),
+            name, host, body_file,
             unknown_target: RuleTarget.from_label?(target_label) ? nil : target_label,
             unknown_part: RulePart.from_label?(part_label) ? nil : part_label,
             unknown_op: RuleOp.from_label?(op_label) ? nil : op_label,
-            unknown_match_kind: MatchKind.from_label?(match_kind_label) ? nil : match_kind_label)
+            unknown_match_kind: MatchKind.from_label?(match_kind_label) ? nil : match_kind_label,
+            respond: RespondKind.from_label?(respond_label) || RespondKind.implied(body_file),
+            respond_args: respond_args,
+            unknown_respond: RespondKind.from_label?(respond_label) ? nil : respond_label)
         end
       end
       list
@@ -43,7 +51,8 @@ module Gori
     def insert_rule(target : RuleTarget, part : RulePart, pattern : String, replacement : String,
                     op : RuleOp = RuleOp::Replace, match_kind : MatchKind = MatchKind::Literal,
                     name : String = "", host : String = "", enabled : Bool = true,
-                    body_file : String = "") : Int64
+                    body_file : String = "", respond : String = "inline",
+                    respond_args : String = "") : Int64
       # A stale-grammar process must not mix two grammars into one database — see
       # `store/env_write_guard.cr`. The `pattern` is a needle or a regex and nothing expands it, so
       # only the `replacement` is re-spelled — and not even that for a stub, whose replacement is
@@ -51,9 +60,9 @@ module Gori
       (w = env_write) && op.expands_tokens? && (replacement = w.call(replacement, EnvMigration::Kind::Rule))
       exec_task ->(c : DB::Connection) {
         pos = c.query_one("SELECT COALESCE(MAX(position), -1) + 1 FROM match_rules", as: Int64)
-        c.exec("INSERT INTO match_rules (enabled, target, part, pattern, replacement, op, match_kind, name, host, body_file, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        c.exec("INSERT INTO match_rules (enabled, target, part, pattern, replacement, op, match_kind, name, host, body_file, respond, respond_args, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
           enabled ? 1 : 0, target.label, part.label, pattern, replacement,
-          op.label, match_kind.label, name, host, body_file, pos)
+          op.label, match_kind.label, name, host, body_file, respond, respond_args, pos)
         nil
       }
     end
@@ -69,11 +78,12 @@ module Gori
     # Returns whether the write committed (false = store busy/locked/closing).
     def update_rule(id : Int64, target : RuleTarget, part : RulePart, pattern : String, replacement : String,
                     op : RuleOp = RuleOp::Replace, match_kind : MatchKind = MatchKind::Literal,
-                    name : String = "", host : String = "", body_file : String = "") : Bool
+                    name : String = "", host : String = "", body_file : String = "",
+                    respond : String = "inline", respond_args : String = "") : Bool
       (w = env_write) && op.expands_tokens? && (replacement = w.call(replacement, EnvMigration::Kind::Rule))
       exec_task_ok ->(c : DB::Connection) {
-        c.exec("UPDATE match_rules SET target = ?, part = ?, pattern = ?, replacement = ?, op = ?, match_kind = ?, name = ?, host = ?, body_file = ? WHERE id = ?",
-          target.label, part.label, pattern, replacement, op.label, match_kind.label, name, host, body_file, id)
+        c.exec("UPDATE match_rules SET target = ?, part = ?, pattern = ?, replacement = ?, op = ?, match_kind = ?, name = ?, host = ?, body_file = ?, respond = ?, respond_args = ? WHERE id = ?",
+          target.label, part.label, pattern, replacement, op.label, match_kind.label, name, host, body_file, respond, respond_args, id)
         nil
       }
     end

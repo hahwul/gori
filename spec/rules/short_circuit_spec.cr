@@ -251,3 +251,181 @@ describe "Gori::Rules — short-circuit op" do
     end
   end
 end
+
+# The short-circuit SUB-KIND (#1237): where the answer comes from — inline, file, dir, fault —
+# and its parameters. This half is the model and the one validator every surface calls; the
+# proxy half is in spec/proxy/short_circuit_spec.cr.
+private alias RK = Gori::Store::RespondKind
+
+describe Gori::Store::RespondArgs do
+  it "reads an empty column as every default" do
+    args = Gori::Store::RespondArgs.parse("").as(Gori::Store::RespondArgs)
+    args.strip_prefix.should eq("")
+    args.fallthrough?.should be_false
+    args.fault.should be_nil
+    args.delay_ms.should eq(0)
+    args.hang_ms.should eq(Gori::Store::RespondArgs::DEFAULT_HANG_MS)
+  end
+
+  it "reads every key it knows" do
+    args = Gori::Store::RespondArgs.parse(
+      %({"strip_prefix":"/static/","fallthrough":true,"fault":"hang","delay_ms":250,"hang_ms":1000})
+    ).as(Gori::Store::RespondArgs)
+    args.strip_prefix.should eq("/static/")
+    args.fallthrough?.should be_true
+    args.fault.should eq(Gori::Store::FaultKind::Hang)
+    args.delay_ms.should eq(250)
+    args.hang_ms.should eq(1000)
+  end
+
+  # The #1242 contract applied to this field: what this binary cannot read comes back as a
+  # REASON, never as a rule that silently lost the part it did not understand — and never as a
+  # raise, because this runs inside `Rules#refresh` on the peer tick.
+  it "answers a reason, never a raise, for anything it cannot read" do
+    {
+      %({"throttle":5}),
+      %({"fault":"slowloris"}),
+      %({"fault":3}),
+      %({"fallthrough":"yes"}),
+      %({"delay_ms":-1}),
+      %({"delay_ms":120001}),
+      %({"delay_ms":99999999999999999999}),
+      %({"hang_ms":1.5}),
+      %(["fault"]),
+      %({not json),
+    }.each do |raw|
+      Gori::Store::RespondArgs.parse(raw).should be_a(String)
+    end
+  end
+
+  it "stores only what differs from the defaults" do
+    Gori::Store::RespondArgs.new.to_stored.should eq("")
+    Gori::Store::RespondArgs.new(fault: Gori::Store::FaultKind::Reset, delay_ms: 500).to_stored
+      .should eq(%({"fault":"reset","delay_ms":500}))
+  end
+end
+
+describe "Gori::RuleStub.respond_error" do
+  it "accepts each sub-kind in its own shape" do
+    Gori::RuleStub.respond_error(RK::Inline, "200 OK\n\nhi", "", "").should be_nil
+    Gori::RuleStub.respond_error(RK::File, "200 OK", "/tmp/x.json", "").should be_nil
+    Gori::RuleStub.respond_error(RK::Dir, "", "/srv/js", %({"strip_prefix":"/static/","fallthrough":true})).should be_nil
+    Gori::RuleStub.respond_error(RK::Dir, "200 OK\nCache-Control: no-store", "/srv/js", "").should be_nil
+    Gori::RuleStub.respond_error(RK::Fault, "", "", %({"fault":"reset","delay_ms":100})).should be_nil
+    Gori::RuleStub.respond_error(RK::Fault, "", "", %({"fault":"hang","hang_ms":2000})).should be_nil
+    Gori::RuleStub.respond_error(RK::Inline, "200 OK", "", %({"delay_ms":50})).should be_nil
+  end
+
+  it "refuses a shape the proxy could only fail on" do
+    {
+      {RK::Inline, "nope", "", ""},                             # unparseable head
+      {RK::Inline, "200 OK", "/tmp/x", ""},                     # inline with a file
+      {RK::File, "200 OK", "", ""},                             # file without one
+      {RK::Dir, "", "", ""},                                    # dir without a directory
+      {RK::Dir, "200 OK\n\nbody", "/srv", ""},                  # a dir template with a body
+      {RK::Dir, "", "/srv", %({"strip_prefix":"/static"})},     # prefix not closed by /
+      {RK::Dir, "", "/srv", %({"strip_prefix":"static/"})},     # prefix not rooted
+      {RK::Fault, "", "", ""},                                  # no fault kind
+      {RK::Fault, "200 OK", "", %({"fault":"close"})},          # a fault that answers
+      {RK::Fault, "", "/tmp/x", %({"fault":"close"})},          # a fault with a body file
+      {RK::Inline, "200 OK", "", %({"fallthrough":true})},      # fall-through off dir
+      {RK::Inline, "200 OK", "", %({"fault":"close"})},         # a fault kind off fault
+      {RK::Fault, "", "", %({"fault":"close","hang_ms":1000})}, # a hang bound off hang
+      {RK::Inline, "200 OK", "", %({"future":1})},              # a key it cannot read
+    }.each do |(respond, repl, body_file, args)|
+      Gori::RuleStub.respond_error(respond, repl, body_file, args).should_not be_nil
+    end
+  end
+end
+
+describe "Gori::Rules — short-circuit sub-kind" do
+  it "round-trips respond and its args through the store" do
+    with_store do |store|
+      rules = Gori::Rules.load(store)
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+        "GET /static/", "", op: SC, body_file: "/srv/js", respond: RK::Dir,
+        respond_args: %({"strip_prefix":"/static/"}))
+      rule = Gori::Rules.load(store).rules.first
+      rule.respond.should eq(RK::Dir)
+      rule.args.strip_prefix.should eq("/static/")
+      rule.inert?.should be_false
+    end
+  end
+
+  it "infers a file stub from a body file when no sub-kind is named" do
+    with_store do |store|
+      rules = Gori::Rules.load(store)
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+        "/logo", "200 OK", op: SC, body_file: "/tmp/logo.png")
+      Gori::Rules.load(store).rules.first.respond.should eq(RK::File)
+    end
+  end
+
+  it "makes a dir path absolute once, for every surface" do
+    with_store do |store|
+      rules = Gori::Rules.load(store)
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+        "GET /s/", "", op: SC, body_file: "~/mock-root", respond: RK::Dir)
+      rules.rules.first.body_file.should eq(File.expand_path("~/mock-root", home: true))
+    end
+  end
+
+  # nil KEEPS the rule's sub-kind: a caller that does not speak of it must not turn a fault
+  # rule back into an inline stub by omission.
+  it "keeps the sub-kind on an update that does not name it, and drops it with the op" do
+    with_store do |store|
+      rules = Gori::Rules.load(store)
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+        "/pay", "", op: SC, respond: RK::Fault, respond_args: %({"fault":"reset"}))
+      id = rules.rules.first.id
+      rules.update(id, Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+        "/pay/v2", "", op: SC).should be_true
+      rule = rules.rules.first
+      rule.pattern.should eq("/pay/v2")
+      rule.respond.should eq(RK::Fault)
+      rule.args.fault.should eq(Gori::Store::FaultKind::Reset)
+
+      # An op that reads none of the three drops them, so switching back later cannot
+      # resurrect a fault the operator no longer sees.
+      rules.update(id, Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+        "X-A", "b", op: Gori::Store::RuleOp::SetHeader).should be_true
+      rule = rules.rules.first
+      rule.respond.should eq(RK::Inline)
+      rule.respond_args.should eq("")
+    end
+  end
+
+  it "keeps a rule with a sub-kind or an arg it cannot read INERT, and says why" do
+    with_store do |store|
+      label = store.insert_rule(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+        "/a", "", op: SC)
+      arg = store.insert_rule(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+        "/b", "", op: SC, respond: "fault", respond_args: %({"fault":"reset"}))
+      store.@db.exec("UPDATE match_rules SET respond = 'script' WHERE id = ?", label)
+      store.@db.exec(%(UPDATE match_rules SET respond_args = '{"fault":"reset","throttle":9}' WHERE id = ?), arg)
+
+      rows = store.match_rules
+      a = rows.find! { |r| r.id == label }
+      a.respond_label.should eq("script")
+      a.inert?.should be_true
+      a.inert_reason.not_nil!.should contain("respond \"script\"")
+      b = rows.find! { |r| r.id == arg }
+      b.respond_args.should eq(%({"fault":"reset","throttle":9})) # raw, for a write-back
+      b.inert?.should be_true
+      b.inert_reason.not_nil!.should contain("throttle")
+
+      engine = Gori::Rules.load(store)
+      engine.short_circuits?.should be_false
+      engine.short_circuit(get("/a"), "acme.test").should be_nil
+      engine.update(label, Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+        "/a", "200 OK", op: SC).should be_false
+    end
+  end
+
+  it "ignores respond fields on an op that never reads them" do
+    rule = Gori::Store::MatchRule.new(1_i64, true, Gori::Store::RuleTarget::Request,
+      Gori::Store::RulePart::Head, "X-A", "b", Gori::Store::RuleOp::SetHeader,
+      respond_args: %({"future":1}))
+    rule.inert?.should be_false
+  end
+end
