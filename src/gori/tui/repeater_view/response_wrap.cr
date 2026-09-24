@@ -52,11 +52,11 @@ class Gori::Tui::RepeaterView
       return
     end
     line = drawn_at.call(@resp_cursor.cy.clamp(0, size - 1))
-    if Screen.draw_width_upto(line, cw + 1) <= cw
+    if Wrap.draw_width_upto(line, cw + 1, @reveal) <= cw
       @resp_xscroll = 0 # the line fits whole — never hold an offset for it
       return
     end
-    curx = Wrap.row_col(line, nil, 0, (@resp_cursor.cx + off).clamp(0, line.size))
+    curx = Wrap.row_col(line, nil, 0, (@resp_cursor.cx + off).clamp(0, line.size), reveal: @reveal)
     @resp_xscroll = curx if curx < @resp_xscroll
     @resp_xscroll = curx - cw + 1 if curx >= @resp_xscroll + cw
     @resp_xscroll = 0 if @resp_xscroll < 0
@@ -127,7 +127,7 @@ class Gori::Tui::RepeaterView
       return hit
     end
     @resp_wrap.clear if @resp_wrap.size >= RESP_WRAP_CACHE_CAP
-    @resp_wrap[li] = Wrap.layout(line_at.call(li), cw)
+    @resp_wrap[li] = Wrap.layout(line_at.call(li), cw, reveal: @reveal)
   end
 
   private def resp_layout_fn(cw : Int32, line_at : Int32 -> String) : Int32 -> Wrap::Layout

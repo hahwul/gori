@@ -18,6 +18,7 @@ require "../authorize/engine"
 # layering contract gates CORE subsystems knowing about a surface, not surface ↔ surface.
 require "../mcp/serialize"
 require "../tui/screen" # Screen.display_width — the cell measure every column here pads against
+require "../unicode_reveal"
 
 module Gori
   module CLI
@@ -341,11 +342,11 @@ module Gori
         j.field name, s.try(&.scrub)
       end
 
-      # Neutralize terminal control bytes in an untrusted CAPTURED string before it is
-      # printed to a live terminal. A malicious client can embed ANSI/OSC escape
-      # sequences in its request line (method / host / target), which `puts` would
-      # otherwise inject verbatim into the operator's terminal (and re-inject on every
-      # later view). Replace every control char (incl. ESC, CR/LF, tab, C1) with '·'.
+      # Make hidden/control codepoints in an untrusted CAPTURED string visible before it is
+      # printed to a live terminal. A malicious client can embed ANSI/OSC escape sequences
+      # in its request line (method / host / target), which `puts` would otherwise inject
+      # verbatim into the operator's terminal (and re-inject on every later view). Named
+      # badges keep the byte's identity visible while preventing terminal control handling.
       #
       # Also scrubs invalid UTF-8 first: a captured host/path is raw bytes off the wire
       # (see Sitemap.template_class's comment) and can be invalid UTF-8 without containing
@@ -355,18 +356,26 @@ module Gori
       # valid-UTF-8 case, so this stays free when there's nothing to fix.
       def self.term_safe(s : String) : String
         s = s.scrub
-        return s unless s.each_char.any?(&.control?)
-        String.build { |io| s.each_char { |c| io << (c.control? ? '·' : c) } }
+        UnicodeReveal.visible(s) || s
       end
 
-      # Like `term_safe` but preserves '\n'/'\t', so a captured multi-line head/body keeps
-      # its layout while ANSI/OSC/CSI escapes and other control bytes are neutralized. Use
+      # Like `term_safe` but preserves line breaks, so a captured multi-line head/body keeps
+      # its layout while tabs, ANSI/OSC/CSI escapes and other hidden controls get named badges. Use
       # for captured text written to a live terminal (the `show`/`repeater` text views).
       # `--format raw` stays the exact-bytes path for scripts/redirection.
       def self.term_safe_multiline(s : String) : String
         s = s.scrub
-        return s unless s.each_char.any? { |c| c.control? && c != '\n' && c != '\t' }
-        String.build { |io| s.each_char { |c| io << ((c.control? && c != '\n' && c != '\t') ? '·' : c) } }
+        return s unless s.each_char.any? { |c| c != '\n' && !UnicodeReveal.label(c.ord).nil? }
+        String.build do |io|
+          s.each_grapheme do |grapheme|
+            text = grapheme.to_s
+            if text == "\n"
+              io << text
+            else
+              io << (UnicodeReveal.visible(text) || text)
+            end
+          end
+        end
       end
 
       # The listing's location cell: the flow's absolute URL minus the scheme the SCHEME column

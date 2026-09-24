@@ -54,6 +54,15 @@ class Gori::Tui::RepeaterView
     resp_wrap_reset
   end
 
+  # Decode JSON Unicode escapes in the response body on demand. The original result bytes and
+  # the search/copy text remain unchanged.
+  def toggle_unicode_decoding : Nil
+    @decode_unicode = !@decode_unicode
+    drop_resp_view_cache
+    @scroll = 0
+    resp_wrap_reset
+  end
+
   # ^F highlight, scoped to the searched pane (the Runner picks which).
   def request_search_hl=(q : String) : Nil
     @editor.search_hl = q

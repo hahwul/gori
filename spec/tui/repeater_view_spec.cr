@@ -72,6 +72,28 @@ describe Gori::Tui::RepeaterView do
     plain.contains?("PONG").should be_true
   end
 
+  it "decodes response JSON escapes only on demand when pretty reflow is off" do
+    view = RepeaterView.new
+    view.load_blank
+    view.pretty = false
+    view.apply(Gori::Repeater::Result.new(
+      "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n".to_slice,
+      "{\"x\":\"\\u003c\\u200b\"}".to_slice, nil, 1000_i64))
+    view.focus_pane(:response)
+
+    raw = MemoryBackend.new(120, 20)
+    view.render(Screen.new(raw), Rect.new(0, 0, 120, 20))
+    raw.contains?("\\u003c\\u200b").should be_true
+    raw.contains?("u:decode").should be_true
+
+    view.toggle_unicode_decoding
+    decoded = MemoryBackend.new(120, 20)
+    view.render(Screen.new(decoded), Rect.new(0, 0, 120, 20))
+    decoded.contains?("<⟨ZWSP⟩").should be_true
+    decoded.contains?("u:wire").should be_true
+    decoded.contains?("2 escapes").should be_true
+  end
+
   it "load_blank seeds an editable, sendable scaffold (no source flow)" do
     view = RepeaterView.new
     view.load_blank
@@ -230,30 +252,17 @@ describe Gori::Tui::RepeaterView do
     back.contains?("ALPHATOKEN").should be_true # cached Line uncorrupted by the intervening slices
   end
 
-  # Reveal mode is the surface built to inspect whitespace, and it was the one surface a
-  # tabbed line could not be scrolled across. Reveal.styled gives every control char a
-  # 1-column marker (tab → '→'), so the row DRAWS one cell per tab, but the h-scroll clamp
-  # measured the raw string with display_width, where a tab is 0 columns. On a tab-heavy
-  # line the clamp's ceiling collapsed to 0 and the offset was pinned there every frame, so
-  # the tail of the line was permanently unreachable no matter how far right you scrolled.
-  #
-  # ASSERTION INVERTED BY SOFT WRAP. The bug's root cause — a width measure that scores a
-  # tab 0 while the draw gives it a cell — is unchanged and still the thing under test, but
-  # it now shows up in the WRAP rather than in a scroll ceiling: `Wrap` must break this line
-  # on `grapheme_cols` (tab = 1), so the 74 drawn columns land on two rows and the tail is
-  # visible WITHOUT scrolling at all. Measured under display_width the line is 14 columns,
-  # would not wrap, and ENDTOK would be off the right edge again — so the assertion flips
-  # from "invisible until scrolled" to "visible on the continuation row", and the old
-  # failure mode is still caught.
+  # Reveal maps tabs to one-column arrows. In the normal pane, tabs instead occupy the width
+  # of their named badge; the reveal wrap must measure its own marker representation.
   it "wraps a tab-filled line by its DRAWN width in reveal mode, tail and all" do
     view = RepeaterView.new
     view.load_blank
     view.focus_pane(:response)
     hdr = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n"
     line = "STARTTOK#{"\t" * 60}ENDTOK"
-    # The two measures disagree by the tab count — that gap IS the tail that used to vanish.
-    Screen.display_width(line).should eq(14)
-    Screen.draw_width(line).should eq(74)
+    Screen.display_width(line).should eq(314) # normal view renders ⟨TAB⟩ badges
+    revealed_width = Reveal.styled(line, false, 400).sum { |span| Screen.draw_width(span.text) }
+    revealed_width.should eq(74) # reveal uses one arrow cell per tab
     view.apply(Gori::Repeater::Result.new(hdr.to_slice, line.to_slice, nil, 1000_i64))
     view.reveal = true
 

@@ -46,18 +46,15 @@ class Gori::Tui::RepeaterView
       return hit
     end
 
-    # RESPONSE: d:diff / x:hex / p:pretty (not drawn in WS/gRPC/group transcript modes)
+    # RESPONSE: d:diff / x:hex / p:pretty / u:decode (not drawn in WS/gRPC/group modes)
     unless ws_mode? || @grpc_mode || group_mode?
       if right.w >= 2 && my == right.y
         # `limit:` is render_response's own `rect.right - 1` stop. The draw breaks at the
         # first chip that would cross the card's '╮'; without the same stop here the hit
         # walked all three anyway, so on a half-width RESPONSE below ~88 columns hex and
         # pretty answered clicks on the border and past it.
-        if hit = Frame.left_chip_hit(mx, my, right.y, right.x + 12, [
-             {:diff, " d:diff "},
-             {:hex, " ^X:hex "},
-             {:pretty, " p:pretty "},
-           ] of {Symbol, String}, limit: right.right - 1)
+        chips = response_chips.map { |(id, label, _)| {id, label} }
+        if hit = Frame.left_chip_hit(mx, my, right.y, right.x + 12, chips, limit: right.right - 1)
           return hit
         end
       end
@@ -333,7 +330,7 @@ class Gori::Tui::RepeaterView
     # `+ @resp_xscroll` puts the pointer back into the DRAWN line's column space: it is 0
     # under wrap, and without it a click on a sideways-panned line lands that many columns
     # early.
-    hit = Wrap.row_index(drawn, nil, vr.a, vr.b, mx - (body.x + gw) + resp_xscroll)
+    hit = Wrap.row_index(drawn, nil, vr.a, vr.b, mx - (body.x + gw) + resp_xscroll, reveal: @reveal)
     cx = {hit - off, 0}.max.clamp(0, line_at.call(vr.li).size)
     if selecting
       @resp_cursor.move_to(vr.li, cx, selecting: true) # keeps (or plants) the anchor

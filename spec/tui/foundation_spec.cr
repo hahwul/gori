@@ -33,11 +33,10 @@ end
 
 describe Gori::Tui::Screen do
   it "draw_width counts a raw control char as 1 column (inverse of column_for)" do
-    line = "ab\rc" # a lone CR (display width 0) between real chars
-    # display_width under-counts the control char (0); draw_width matches the drawn
-    # cells + column_for, so the caret after it lands on the right column.
-    Screen.display_width(line).should eq(3)                               # CR contributes 0
-    Screen.draw_width(line).should eq(4)                                  # CR occupies a cell → counts as 1
+    line = "ab\rc" # a lone CR between visible characters
+    # CR is shown as a named badge in both the display and the caret measure.
+    Screen.display_width(line).should eq(7)
+    Screen.draw_width(line).should eq(7)
     Screen.column_for(line, Screen.draw_width(line)).should eq(line.size) # round-trips
   end
 
@@ -46,20 +45,16 @@ describe Gori::Tui::Screen do
     Screen.draw_width("日本").should eq(4) # CJK: 2 columns each, same as display_width
   end
 
-  it "grapheme_cols floors a tab to 1 so draw advance matches the caret model" do
-    # display_width is pure Unicode (tab = 0); grapheme_cols / draw_width keep the
-    # space cell Screen#cell substitutes for C0 controls (issue #278).
-    Screen.display_width("\t").should eq(0)
-    Screen.grapheme_cols("\t").should eq(1)
-    Screen.draw_width("a\tb").should eq(3)
-    Screen.draw_width_upto("a\tb", 10).should eq(3)
-    Screen.draw_width_upto("a\tb", 2).should eq(2)
+  it "measures a tab by the visible TAB badge in display and caret paths" do
+    Screen.display_width("\t").should eq(5)
+    Screen.grapheme_cols("\t").should eq(5)
+    Screen.draw_width("a\tb").should eq(7)
+    Screen.draw_width_upto("a\tb", 10).should eq(7)
+    Screen.draw_width_upto("a\tb", 2).should eq(6)
   end
 
-  # The two measures, pinned side by side. They are NOT interchangeable: display_width
-  # under-counts a C0 control (Unicode width 0, but `cell` still paints a space there),
-  # while draw_width matches the cells actually painted because it floors per CLUSTER —
-  # the same walk `#text` / `Highlight.draw` do.
+  # The two measures, pinned side by side. Both render unsafe codepoints as named badges;
+  # draw_width retains its ≥1-per-cluster floor for any remaining zero-width grapheme.
   #
   # `column_width` used to sit between them, flooring every CODEPOINT to ≥1 to serve a
   # per-codepoint caret. The `was` column below is what it returned. draw_width SUBSUMES
@@ -74,24 +69,23 @@ describe Gori::Tui::Screen do
 
     # {label, string, display_width, draw_width, what column_width used to return}
     cases = [
-      {"tab", "a\tb", 2, 3, 3},        # control: display under-counts; the tab owns a cell
-      {"ZWSP", "a\u{200B}b", 2, 3, 3}, # zero-width space: same, it still gets a cell
-      {"BOM", "a\u{FEFF}b", 3, 3, 3},  # zero-width no-break space: likewise its own cluster
-      {"skin tone", skin, 2, 2, 3},    # 1 cluster, 1 glyph → 2 cols drawn, not 3
-      {"ZWJ", zwj, 2, 2, 5},           # column_width drifted 3
-      {"family", family, 2, 2, 11},    # column_width drifted 9 — the worst case
-      {"keycap", "1\u{FE0F}\u{20E3}", 2, 2, 3},
+      {"tab", "a\tb", 7, 7, 7},        # TAB expands to its five-column badge
+      {"ZWSP", "a\u{200B}b", 8, 8, 8}, # ZWSP expands to its six-column badge
+      {"BOM", "a\u{FEFF}b", 7, 7, 7},  # BOM expands to its five-column badge
+      {"skin tone", skin, 2, 2, 11},   # one emoji cluster; isolated modifier is named
+      {"ZWJ", zwj, 2, 2, 9},           # family shaping stays one two-column glyph
+      {"family", family, 2, 2, 23},    # visible emoji cluster, isolated ZWJs are named
+      {"keycap", "1\u{FE0F}\u{20E3}", 2, 2, 15},
       {"CJK", "한글", 4, 4, 4},              # wide but single-codepoint: both agree
-      {"NFD Hangul", nfd_han, 2, 2, 4},    # 3 jamo (2 + 0 + 0 floored to 2+1+1), ONE cluster
-      {"combining", "e\u{0301}", 1, 1, 2}, # é as e + U+0301: cluster is 1 col, not 2
+      {"NFD Hangul", nfd_han, 2, 2, 4},    # 3 jamo in ONE cluster
+      {"combining", "e\u{0301}", 1, 1, 9}, # attached mark stays with its visible base
     ]
 
     cases.each do |(label, str, dw, gw, was_cw)|
       it "measures #{label} as display=#{dw} draw=#{gw} (column_width was #{was_cw})" do
         Screen.display_width(str).should eq(dw)
         Screen.draw_width(str).should eq(gw)
-        # The retired measure, recomputed inline: floor every CODEPOINT to ≥1. Pinned so
-        # the divergence this collapse removed stays visible rather than becoming folklore.
+        # Per-codepoint measurement differs from the intact display of composed graphemes.
         str.each_char.sum { |c| {Screen.display_width(c.to_s), 1}.max }.should eq(was_cw)
       end
     end
@@ -157,7 +151,7 @@ describe Gori::Tui::Screen do
     # once: a 1-column cluster has no far half, so the two agree everywhere on ASCII and no
     # existing click behaviour moved.
     it "column_for_click is identical to column_for on 1-column clusters" do
-      ["hello world", "a\tb\tc", "GET /x?a=1 HTTP/1.1", "a\u{200B}b"].each do |s|
+      ["hello world", "GET /x?a=1 HTTP/1.1"].each do |s|
         (-2..Screen.draw_width(s) + 2).each do |col|
           Screen.column_for_click(s, col).should eq(Screen.column_for(s, col)) # (#{s.inspect} @ #{col})
         end
@@ -198,7 +192,7 @@ describe Gori::Tui::Screen do
       # right by each cluster's inflation — while the caret and base draw in the same view
       # measure per cluster. Drawing char-by-char is worse still: it shreds a cluster
       # across cells. Any new copy of that helper must iterate CLUSTERS.
-      [{"cafe\u{0301}xyz", 7, 8}, {family, 2, 11}, {nfd_han, 2, 4}].each do |(s, whole, per_char)|
+      [{"cafe\u{0301}xyz", 7, 15}, {family, 2, 23}, {nfd_han, 2, 4}].each do |(s, whole, per_char)|
         Screen.draw_width(s).should eq(whole)
         s.each_char.sum { |c| Screen.draw_width(c.to_s) }.should eq(per_char)
       end
@@ -251,13 +245,11 @@ describe Gori::Tui::Screen do
       Screen.draw_width_upto("abcdef", 99).should eq(6)
     end
 
-    it "draw_width keeps the ASCII fast path exact (1 char == 1 cluster per line)" do
-      # The fast path returns str.size. That is EXACT rather than approximate because the
-      # only multi-char ASCII grapheme cluster is CRLF, and no rendered line can hold one
-      # (every caller splits on '\n' first). Tabs and lone CRs still count as one cell.
+    it "draw_width keeps the printable ASCII fast path exact" do
+      # Control bytes leave the ASCII shortcut because their named badges span several cells.
       Screen.draw_width("hello").should eq(5)
-      Screen.draw_width("a\tb").should eq(3)
-      Screen.draw_width("ab\rc").should eq(4)
+      Screen.draw_width("a\tb").should eq(7)
+      Screen.draw_width("ab\rc").should eq(7)
       Screen.draw_width("").should eq(0)
     end
   end
@@ -270,33 +262,30 @@ describe Gori::Tui::Screen do
   # field's click-to-cursor goes through Screen.column_for, which floors each CODEPOINT to
   # ≥1. `parse_printable` accepts U+200B / U+FEFF / a combining mark unfiltered, and a URL
   # carrying a zero-width char is a stock filter-bypass payload — reachable input here.
-  it "input_line puts the caret exactly where column_for maps that column back" do
-    value = "ab\u{200B}cd" # ZWSP at index 2: display_width 0, column_width 1, drawn 1 cell
+  it "input_line uses the named badge width for the caret and click inverse" do
+    value = "ab\u{200B}cd" # ZWSP at index 2 is drawn as a six-column badge
     (0..value.size).each do |cx|
       b = MemoryBackend.new(40, 3)
       Screen.new(b).input_line(0, 1, value, cx, "", Theme.text)
-      # The caret is the single cell painted on the ACCENT background.
+      # The block caret covers its visible grapheme: a badge can span several cells.
       col = (0...40).select { |x| b.bg_at(x, 1) == Theme.accent }
-      col.size.should eq(1)                              # exactly one caret cell (cx=#{cx})
-      col[0].should eq(Screen.draw_width(value[0, cx]))  # sits on its own glyph
-      Screen.column_for(value, col[0]).should eq(cx)     # a click there returns the same cx
-      Screen.display_width(value[0, cx]).should be <= cx # (the old measure could only under-count)
+      cursor_width = cx < value.size ? Screen.grapheme_cols(value[cx].to_s) : 1
+      cursor_x = Screen.draw_width(value[0, cx])
+      col.should eq((cursor_x...cursor_x + cursor_width).to_a)
+      Screen.column_for(value, col[0]).should eq(cx)
+      Screen.display_width(value[0, cx]).should eq(cursor_x)
     end
-    # Concretely: past the ZWSP the two measures disagree by one, which is exactly the
-    # column the caret used to be short by.
-    Screen.display_width(value[0, 3]).should eq(2)
-    Screen.draw_width(value[0, 3]).should eq(3)
+    Screen.display_width(value[0, 3]).should eq(8)
+    Screen.draw_width(value[0, 3]).should eq(8)
   end
 
-  it "text draws a tab as a one-column space (ASCII and mixed paths)" do
-    # ASCII fast path
+  it "text draws a named tab badge in ASCII and mixed paths" do
     b1 = MemoryBackend.new(10, 1)
     Screen.new(b1).text(0, 0, "a\tb", Theme.text)
-    b1.row(0).rstrip.should eq("a b")
-    # Non-ASCII path (any multibyte glyph forces grapheme walk) still keeps the tab cell
+    b1.row(0).rstrip.should eq("a⟨TAB⟩b")
     b2 = MemoryBackend.new(10, 1)
     Screen.new(b2).text(0, 0, "a\t가", Theme.text)
-    b2.row(0).rstrip.should eq("a 가")
+    b2.row(0).rstrip.should eq("a⟨TAB⟩가")
   end
 
   it "fit truncates a too-wide string with an ellipsis and returns a fitting one whole" do

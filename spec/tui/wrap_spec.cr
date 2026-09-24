@@ -33,6 +33,16 @@ describe Gori::Tui::Wrap do
       rows_of(line, 12).join.should eq(line)
     end
 
+    it "uses the reveal marker width rather than the default tab badge" do
+      line = "a\tb"
+      Wrap.draw_width(line).should eq(7)
+      Wrap.draw_width(line, reveal: true).should eq(3)
+      Wrap.layout(line, 2).rows.should eq(3)
+      revealed = Wrap.layout(line, 2, reveal: true)
+      revealed.rows.should eq(2)
+      revealed.start_of(1).should eq(2)
+    end
+
     # The rows must always concatenate back to the source, at every width — a wrap that
     # drops or duplicates a character corrupts every offset downstream of it (caret,
     # click, selection, search).

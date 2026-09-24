@@ -395,18 +395,18 @@ describe "gori run sitemap tag — the key a tag is filed under" do
 end
 
 describe "gori run sitemap tag --list — the TSV line" do
-  it "folds a newline and a tab in the tag, so one tag is one line with three fields" do
+  it "names a newline and a tab in the tag, so one tag is one line with three fields" do
     # A tag is free text and can be set from the TUI or MCP too. Printed raw it broke the TSV
     # two ways at once: the newline split one tag across two physical lines, and the tab
-    # invented a fourth column. The tree view already folds the same tag to `# multi·line`.
+    # invented a fourth column. Named badges keep each hidden character visible in the TSV.
     row = Gori::CLI::Run.sitemap_tag_row_for_spec("acme.test", "/api", "multi\nline\tcol 한글 <b>")
     row.lines.size.should eq(1)
     row.split('\t').size.should eq(2)
-    row.should eq("acme.test/api\tmulti·line·col 한글 <b>")
+    row.should eq("acme.test/api\tmulti⟨LF⟩line⟨TAB⟩col 한글 <b>")
   end
 
-  it "folds the host and path halves too, and leaves an ordinary tag untouched" do
-    Gori::CLI::Run.sitemap_tag_row_for_spec("acme.test", "/a\nb", "ok").should eq("acme.test/a·b\tok")
+  it "names controls in the host and path halves too, and leaves ordinary text untouched" do
+    Gori::CLI::Run.sitemap_tag_row_for_spec("acme.test", "/a\nb", "ok").should eq("acme.test/a⟨LF⟩b\tok")
     Gori::CLI::Run.sitemap_tag_row_for_spec("acme.test", "/api", "payment flow").should eq("acme.test/api\tpayment flow")
   end
 end

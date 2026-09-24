@@ -131,4 +131,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   def toggle_detail_hex : Nil
     history_controller.toggle_detail_hex
   end
+
+  def toggle_unicode_escapes : Nil
+    history_controller.toggle_unicode_decoding
+  end
 end

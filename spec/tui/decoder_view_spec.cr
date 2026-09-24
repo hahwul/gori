@@ -267,18 +267,12 @@ end
 describe "DecoderView OUTPUT control bytes" do
   # Decoding is precisely where raw control bytes surface — an unhex/base64 of a binary blob is
   # the whole point of the tab. The OUTPUT rows draw through `screen.text`, which gives every
-  # control char a cell, and the retired h-scroll clamp measured them with `display_width`, where
-  # those chars are 0 columns: its ceiling fell short of the real content and the tail of such a
-  # line could not be reached at all.
-  #
-  # The pane wraps now, so the clamp is gone and the same hazard lives in the WRAP measure
-  # instead — `Wrap.layout` breaks on `Screen.grapheme_cols`, the same ≥1-per-cluster measure
-  # the draw advances by. That is what this pins: a line of tabs must break at the pane's edge
-  # and its tail must land on a continuation row, not be counted as 14 columns and never wrap.
+  # A decoded tab is rendered as ⟨TAB⟩, and wrapping must count that badge's width to keep the
+  # tail reachable in the OUTPUT pane.
   it "wraps a decoded line containing control bytes so its end is reachable" do
     line = "STARTTOK#{"\t" * 100}ENDTOK"
-    Screen.display_width(line).should eq(14) # the raw measure: 60 tabs count for nothing
-    Screen.draw_width(line).should eq(114)   # what `text` paints: one cell per tab
+    Screen.display_width(line).should eq(514)
+    Screen.draw_width(line).should eq(514)
     input = line.to_slice.hexstring
     result = Gori::Decoder.run(REG, input.to_slice, "unhex")
     String.new(result.output.not_nil!).should eq(line) # the decode really produced the tabs
@@ -303,8 +297,7 @@ describe "DecoderView OUTPUT control bytes" do
     card = rows.join("\n")
     card.should contain("STARTTOK")
     card.should contain("ENDTOK") # the tail wrapped onto a later row rather than being clipped
-    # …and onto a DIFFERENT row: the tabs were measured at one cell each, so the 114-column
-    # line broke at the pane's edge instead of being called 14 columns wide and left unwrapped.
+    # …and onto a DIFFERENT row: the named badges are included in the wrap measure.
     start_row = rows.index { |r| r.includes?("STARTTOK") }.not_nil!
     end_row = rows.index { |r| r.includes?("ENDTOK") }.not_nil!
     end_row.should be > start_row
