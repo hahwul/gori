@@ -3405,3 +3405,32 @@ short-circuit selection. Settings saves retain the raw strings. TUI, CLI and MCP
 labels and explain the unsupported fields; they refuse to edit or enable such a rule while
 allowing deletion. The scope is the rewriter grammar fields (`target`, `part`, `op`, and
 `match_kind`), so the guard also covers a label added to an existing enum.
+
+### 2026-09-24: a fuzz run can end itself, and the archive need not keep every row
+
+#1240. Refines [P4](#p4) (the operator decides what leaves the machine) and [P6](#p6). Two
+additions, both surface-neutral through `Plan.build`.
+
+`stop_on` lets a run end when its work is done rather than when the payloads run out: a match
+count (`Config#stop_after_matches`) or a SEPARATE match/filter condition
+(`Matcher#stop_condition`). The condition is a `Matcher` used as a spec container, never
+`build`-called — `Matcher#build` evaluates it through `matches_precomputed?` on the same
+decoded body/text/metrics it computed for the run's own verdict, so a stop condition costs no
+second decode. The trigger is `Engine#record_result`, the one bookkeeping path `worker_loop`
+and `run_race` share, and it is exactly `stop`: in-flight requests finish. "Stop when the body
+no longer says `Invalid password`" is a condition with only a filter regex — the matcher's
+existing way of expressing absence. Calibration sends are not results, so they never trip it.
+A new terminal verdict `Terminal::ConditionMet` names the ending; it is an enum so a consumer
+`case`s it exhaustively rather than mapping an unknown string to `:error`. The CLI exits 0 on
+it (the condition was the goal), and race mode refuses the pair (`StopOnError`): a race group
+is released in one write, with no per-response verdict to fire on.
+
+`keep: interesting` (`Fuzz::Keep`) filters the ARCHIVE only — the CLI/MCP saved run and the
+TUI spool behind Shift-S — never the live pane or MCP's live cache. It keeps the rows
+`Result#interesting?` names (matched, plus error/chain-error/re-send/incomplete/stop rows),
+the one predicate every retention decision reads so the surfaces cannot drift on "interesting".
+The run's counters stay whole-run and `idx` stays the engine's payload index, so a kept row
+holds its real position and the gaps are the dropped rows; `fuzz_runs.keep` records the policy
+so a filtered archive reads "12 of 100,000 kept" instead of a lost run. Pause-on-condition is
+deliberately left out: it needs a plain pause verb first, and the engine's pause still drains
+the worker buffer (`Engine#pause` parks only the dispatcher).

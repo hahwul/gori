@@ -125,6 +125,11 @@ module Gori
 
         def append(result : Result) : Bool
           return false if failed? || finished?
+          # `keep: interesting` (issue #1240) drops a row the spool does not keep — accepted
+          # (true) and never charged against the byte budget, so a huge sweep that keeps 12 of
+          # 100k rows spools 12. Shift-S then copies exactly those (`each_result`), and the
+          # whole-run counters `finish` records stay complete.
+          return true unless @persistence.keep.keeps?(result)
           row = Persistence.write_row(result)
           bytes = Persistence.row_bytes(row)
           # Charged BEFORE the queue so the budget bounds what reaches the disk rather than
@@ -251,7 +256,7 @@ module Gori
         SavedRunMeta.new(nil, meta.target, meta.mode, meta.total,
           created_at: meta.created_at, http2: meta.http2, sni: meta.sni,
           tls_preset: meta.tls_preset, websocket: meta.websocket, surface: meta.surface,
-          source_ref: meta.source_ref)
+          source_ref: meta.source_ref, keep: meta.keep)
       end
     end
   end

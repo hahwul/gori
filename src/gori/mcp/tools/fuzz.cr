@@ -52,7 +52,7 @@ module Gori
             Fuzz::SavedRunMeta.new(nil, audit.target, mode_label, total,
               created_at: audit.started_at_ms * 1000_i64, http2: http2,
               sni: effective_sni, tls_preset: fjob.tls_preset, websocket: fjob.websocket?,
-              surface: "mcp", source_ref: id))
+              surface: "mcp", source_ref: id, keep: fuzz_keep(h).label))
         end
         # Re-read rather than plumbed back out of `build_fuzz_job`: it is a REPORTING input
         # (it words `grpc_stale_prefix_reason`), read off the same arg and the same default
@@ -186,7 +186,8 @@ module Gori
           store_fuzz_result(fjob, ev.result, flow_id, flow_ref)
         when Fuzz::DoneEvent
           apply_fuzz_progress(fjob, ev.progress)
-          terminal = fuzz_terminal_status(fjob, ev.progress, ev.stopped)
+          fjob.stop_reason = ev.stop_reason
+          terminal = fuzz_terminal_status(fjob, ev.progress, ev.stopped, ev.stop_reason)
           finish_fuzz_persistence(fjob, terminal)
           fjob.status = terminal
           fjob.ended_at_ms = Time.utc.to_unix_ms
@@ -259,11 +260,12 @@ module Gori
       # Progress.requests (not payload count) is the max_requests budget unit, and a nil total
       # remains incomplete when that wire budget was reached.
       private def fuzz_terminal_status(fjob : FuzzJob, progress : Fuzz::Progress,
-                                       stopped : Bool) : Symbol
+                                       stopped : Bool, stop_reason : String? = nil) : Symbol
         case Fuzz.terminal_status(progress, stopped, fjob.audit.max_requests,
-          fjob.terminal_error?)
+          fjob.terminal_error?, stop_reason)
         when "done"             then :done
         when "budget_exhausted" then :budget_exhausted
+        when "condition_met"    then :condition_met
         when "stopped"          then :stopped
         else                         :error
         end
@@ -432,6 +434,9 @@ module Gori
             j.field "history_truncated", fjob.history_truncated?
             j.field "job_complete", fjob.status != :running
             j.field "incomplete_reason", incomplete_reason(fjob.status)
+            # Why the run's own `stop_on` ended it (issue #1240) — present only for a
+            # :condition_met run, so a non-stop_on job's status object is unchanged.
+            j.field("stop_reason", Serialize.text(fjob.stop_reason)) if fjob.stop_reason
             j.field "error", fjob.error_msg
             emit_audit(j, fjob.audit, fjob.ended_at_ms)
           end
@@ -580,8 +585,15 @@ module Gori
         effective_sni = str(h, "sni").presence || src_sni
         config = fuzz_config(h, mode, src_tls_preset)
         matcher = fuzz_matcher(h)
+        # The `stop_on` condition (issue #1240): `after_matches` on the config, a separate
+        # match/filter predicate on the matcher — evaluated on the one decode `build` pays for.
+        # Set BEFORE spec_error so a bad stop term ("size: 1O00") is refused by the same
+        # validator, and BEFORE `config.keep` below so both #1240 knobs land together.
+        config.stop_after_matches, matcher.stop_condition = fuzz_stop_on(h)
+        config.keep = fuzz_keep(h)
         # A `match`/`filter` term that can never fire (`size: "1O00"`, `status: "2OO"`) used to
         # run the whole sweep and report `matched: 0` — the "nothing there" an agent acts on.
+        # Also names a bad `stop_on` term ("stop match size spec …").
         if spec_err = matcher.spec_error
           raise FuzzArgError.new(spec_err)
         end
@@ -1205,6 +1217,72 @@ module Gori
         m
       end
 
+      # The `stop_on` object (issue #1240): `{after_matches, match:{…}, filter:{…}}`. `match` and
+      # `filter` reuse the EXACT `fuzz_conditions` shape the run's own matcher parses, so a stop
+      # regex/status/time means here what it means there. Returns the match count for the config
+      # and a SEPARATE condition matcher for `Matcher#stop_condition` — the run stops on either.
+      #
+      # `stop_on` present but empty (no count, no condition) is refused: an agent that passed the
+      # key meant a stop, and a silent no-op is the "knob that did nothing" this codebase closes.
+      private def fuzz_stop_on(h) : {Int32?, Fuzz::Matcher?}
+        raw = h["stop_on"]?
+        return {nil, nil} unless raw && !raw.raw.nil?
+        obj =
+          if hh = raw.as_h?
+            hh
+          elsif s = raw.as_s?
+            return {nil, nil} if s.strip.empty?
+            (JSON.parse(s).as_h? rescue nil) || raise FuzzArgError.new("'stop_on' must be a JSON object {after_matches, match, filter}")
+          else
+            raise FuzzArgError.new("'stop_on' must be a JSON object (not a bare string/scalar)")
+          end
+        after = fuzz_int(obj["after_matches"]?, "stop_on.after_matches").try(&.clamp(1_i64, Int32::MAX.to_i64).to_i)
+        cond = fuzz_stop_condition(obj["match"]?, obj["filter"]?)
+        if after.nil? && cond.nil?
+          raise FuzzArgError.new("'stop_on' names no condition — pass after_matches:N, a match:{…}, or a filter:{…}")
+        end
+        {after, cond}
+      end
+
+      # A matcher built from a `stop_on` `match`/`filter` pair, or nil when neither is given.
+      # It never decodes: `Matcher#build` runs it through `matches_precomputed?` on the body it
+      # already decoded for the run's own verdict.
+      private def fuzz_stop_condition(match_raw : JSON::Any?, filter_raw : JSON::Any?) : Fuzz::Matcher?
+        m = Fuzz::Matcher.new
+        any = false
+        if c = fuzz_conditions(match_raw, "stop_on.match")
+          m.match_status = c[:status]
+          m.match_grpc = c[:grpc]
+          m.match_size = c[:size]
+          m.match_words = c[:words]
+          m.match_lines = c[:lines]
+          m.match_time = c[:time]
+          m.match_header = c[:header]
+          m.match_regex = fuzz_regex(c[:regex], "stop_on.match")
+          any = true
+        end
+        if c = fuzz_conditions(filter_raw, "stop_on.filter")
+          m.filter_status = c[:status]
+          m.filter_grpc = c[:grpc]
+          m.filter_size = c[:size]
+          m.filter_words = c[:words]
+          m.filter_lines = c[:lines]
+          m.filter_time = c[:time]
+          m.filter_header = c[:header]
+          m.filter_regex = fuzz_regex(c[:regex], "stop_on.filter")
+          any = true
+        end
+        any ? m : nil
+      end
+
+      # `keep` (issue #1240): which rows a `save_results` archive stores. Refused by NAME on a
+      # typo rather than degraded to a default — the contract every enum argument here holds.
+      private def fuzz_keep(h) : Fuzz::Keep
+        raw = str(h, "keep")
+        return Fuzz::Keep::All if raw.nil? || raw.strip.empty?
+        Fuzz::Keep.parse?(raw) || raise FuzzArgError.new("invalid 'keep' #{raw.inspect} (all | interesting)")
+      end
+
       private alias FuzzConds = NamedTuple(status: String?, grpc: String?, size: String?, words: String?, lines: String?, time: String?, header: String?, regex: String?)
 
       private def fuzz_conditions(raw : JSON::Any?, which : String) : FuzzConds?
@@ -1381,6 +1459,8 @@ module Gori
           s.field "http2", boolprop("use real HTTP/2 (default false). A run seeded from a captured h2 flow selects it on its own. Pooled like h1 unless keep_alive is false")
           s.field "insecure", boolprop("skip upstream TLS verification (default false)")
           s.field "max_requests", intprop("caller cap on total requests")
+          s.field "stop_on", jsonprop(%(end the run early when a condition holds (issue #1240) — object {after_matches, match, filter}. "after_matches":N stops once the run's own matchers have hit N times (1 = first hit). "match"/"filter" are a SEPARATE condition in the same shape as the top-level match/filter (e.g. {"match":{"regex":"Welcome admin"}} stops when the body contains it; {"filter":{"regex":"Invalid password"}} stops when it no longer does). The run ends status "condition_met" (see fuzz_status.stop_reason), NOT "done". Cannot combine with race_count.))
+          s.field "keep", enumprop("which result rows a save_results archive stores (issue #1240): all (default) | interesting (matched rows plus the ones carrying an observed fact — an error, a re-send, a truncated capture, the stop row). The run's sent/matched/errors counts stay whole-run and the stored idx stays the payload position, so a filtered archive reads \"12 of 100,000 kept\" rather than a lost run. Only affects save_results.", %w[all interesting])
           s.field "allow_unscoped", boolprop("run even when the target host is outside the project's configured scope — REQUIRED to run against an out-of-scope target, or when no scope is configured at all (active requests are refused by default without a matching scope)")
           s.field "record_history", enumprop("record each sent request+response as a History flow for audit/evidence (default none); matched results carry the flow_id in fuzz_results while that History row still belongs to this job (fetch full detail with get_flow). A clear or delete detaches the result before the id can be reused. 'all' is capped at #{FUZZ_HISTORY_MAX} flows. Booleans are accepted as aliases (true = all, false = none) because send_request spells this argument as a boolean; any OTHER value is refused by name rather than silently recording nothing.", RECORD_HISTORY_MODES)
           s.field "save_results", boolprop("persist EVERY result permanently in this project, including full rendered request, final wire request, response head and response body. Independent of record_history and of the bounded live-job cache. The start/status/results replies include run_id + save_status; inspect it later with list_fuzz_runs/get_fuzz_run.")
@@ -1394,9 +1474,11 @@ module Gori
           s.field "ws_http_only", boolprop("Sweep a WebSocket template as plain HTTP: the handshake goes out as an ordinary request and its own answer (a 101, or the 2xx of an RFC 8441 extended CONNECT) is read as the response, instead of performing the framed exchange. The bytes are unchanged — this selects the engine, not a rewrite. Also the way to use race_count / record_history against a WebSocket seed, and http2 against an `Upgrade:` one; all are refused on the framed path.")
         end
 
-        tool j, "fuzz_status", "Counts + state of a fuzz job (running|done|budget_exhausted|stopped|error). " \
+        tool j, "fuzz_status", "Counts + state of a fuzz job (running|done|budget_exhausted|condition_met|stopped|error). " \
                                "budget_exhausted means max_requests halted the run before every candidate was checked — " \
-                               "a partial result, NOT an exhaustive one; see incomplete_reason and candidates_remaining." do |s|
+                               "a partial result, NOT an exhaustive one; condition_met means the run's own stop_on ended it " \
+                               "(see stop_reason) — it reached its goal but is likewise not exhaustive; " \
+                               "see incomplete_reason and candidates_remaining." do |s|
           s.field "job_id", strprop("id from fuzz_start"), required: true
         end
 

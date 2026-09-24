@@ -201,6 +201,49 @@ module Gori::Fuzz
   # apart from "this target's response length is just noisy" (needs a wider sample set).
   record BaselineSample, metrics : Metrics, payload_len : Int32
 
+  # Apply one `stop_on` term to a condition matcher, returning an error SENTENCE or nil — the
+  # one home for the `DIM:SPEC` grammar the CLI (`--stop-on`) and the TUI Advanced row share
+  # (MCP names its dimensions as a JSON object and builds the matcher directly). A leading `!`
+  # makes the term a FILTER, so `!regex:Invalid password` stops when the body no longer carries
+  # it — the matcher's own way of expressing "missing". The SPEC keeps every colon after the
+  # first, so a regex may contain them. It never raises and never aborts: a value-level typo
+  # (`status:2OO`) parses lenient here and is caught by `Matcher#spec_error`, exactly as a
+  # `--mc 2OO` is; only a bad DIMENSION or an uncompilable regex is reported here.
+  # The non-regex `stop_on` dimensions, each as a {set-match, set-filter} pair — a table
+  # rather than a `case` so `apply_stop_term` stays one lookup, not one branch per dimension.
+  # `regex` is not here: it compiles its value, which the plain string setters do not.
+  STOP_STRING_SETTERS = {
+    "status" => {->(m : Matcher, v : String) { m.match_status = v }, ->(m : Matcher, v : String) { m.filter_status = v }},
+    "grpc"   => {->(m : Matcher, v : String) { m.match_grpc = v }, ->(m : Matcher, v : String) { m.filter_grpc = v }},
+    "size"   => {->(m : Matcher, v : String) { m.match_size = v }, ->(m : Matcher, v : String) { m.filter_size = v }},
+    "words"  => {->(m : Matcher, v : String) { m.match_words = v }, ->(m : Matcher, v : String) { m.filter_words = v }},
+    "lines"  => {->(m : Matcher, v : String) { m.match_lines = v }, ->(m : Matcher, v : String) { m.filter_lines = v }},
+    "time"   => {->(m : Matcher, v : String) { m.match_time = v }, ->(m : Matcher, v : String) { m.filter_time = v }},
+    "header" => {->(m : Matcher, v : String) { m.match_header = v }, ->(m : Matcher, v : String) { m.filter_header = v }},
+  }
+
+  def self.apply_stop_term(spec : String, m : Matcher) : String?
+    neg = spec.starts_with?('!')
+    dim, sep, val = (neg ? spec[1..] : spec).partition(':')
+    return "stop_on term #{spec.inspect}: use DIM:SPEC (e.g. regex:admin, status:200, !regex:Invalid password)" if sep.empty?
+    key = dim.strip.downcase
+    return apply_stop_regex(m, val, neg) if key == "regex"
+    setters = STOP_STRING_SETTERS[key]?
+    unless setters
+      return "stop_on term #{spec.inspect}: unknown dimension #{dim.inspect} " \
+             "(status|grpc|size|words|lines|time|header|regex, optionally !-negated)"
+    end
+    (neg ? setters[1] : setters[0]).call(m, val)
+    nil
+  end
+
+  private def self.apply_stop_regex(m : Matcher, val : String, neg : Bool) : String?
+    re = (Regex.new(val) rescue nil)
+    return "stop_on regex #{val.inspect} is not a valid regular expression" unless re
+    neg ? (m.filter_regex = re) : (m.match_regex = re)
+    nil
+  end
+
   # Decides whether a response is "interesting" and extracts a value from it.
   # ffuf/Burp semantics: a result is MATCHED when every active matcher dimension
   # passes AND no filter dimension passes. Each dimension is a comma-list spec
@@ -316,6 +359,19 @@ module Gori::Fuzz
     getter line_tol : Int64 = 0_i64
     property? auto_calibrate : Bool
     property keep_bodies : Symbol # :none | :matched | :all
+
+    # A SEPARATE match/filter predicate whose match ENDS the run — the `stop_on` condition
+    # (issue #1240), independent of this matcher's own dimensions. A run can `--mc 200` while
+    # it stops on `--stop-on 'regex:Welcome admin'`, or on `--stop-on '!regex:Invalid
+    # password'` (the body no longer contains it) — the latter is a filter_regex with no match
+    # spec, exactly as `Matcher` already expresses "missing".
+    #
+    # It is a `Matcher`, not a second parser, so its grammar and its `spec_error` are this
+    # file's; but it is NEVER built from its own decode. `Matcher#build` evaluates it through
+    # `decide_precomputed` on the SAME decoded body/text/metrics it computed for the run's own
+    # verdict — a second decode per response would double the hot path (P6). nil = no stop
+    # condition, which is every run that came before.
+    property stop_condition : Matcher? = nil
 
     # The template is a gRPC request whose SEED body frames cleanly (set once by
     # `Fuzz::Plan.build` — see `GrpcVerdict.framed_template?`). While it is on, every rendered
@@ -488,15 +544,25 @@ module Gori::Fuzz
       length = body.size.to_i64
       words, lines = count_metrics(body)
 
-      need_text = !@match_regex.nil? || !@filter_regex.nil? || !@extract.nil?
+      # The stop condition's regex counts toward `need_text` too — it is evaluated on this same
+      # `text` below, so if it needs a body match the decode has to happen even when the run's
+      # own matchers do not (`--stop-on 'regex:…'` with no `--mr`).
+      elapsed = elapsed_ms(raw)
+      need_text = needs_text? || (@stop_condition.try(&.needs_text?) || false)
       # `Gori::Utf8.text`, not `String.new(body).scrub`: the scrub is mandatory (PCRE2 raises on
       # an invalid byte rather than not matching) but `String#scrub` charges every VALID body a
       # full character-by-character decode to be told there was nothing to repair — 681µs against
       # 81µs on a 216 KB body, once per response, on every run that sets `--mr`/`--fr`/`--extract`.
       text = need_text ? Gori::Utf8.text(body) : ""
       extracted = extract_value(text)
-      matched = decide(raw, status, grpc_status, length, words, lines, elapsed_ms(raw), text)
-      keep = keep?(matched)
+      matched = decide(raw, status, grpc_status, length, words, lines, elapsed, text)
+      # The SEPARATE stop condition, on the very metrics/text just computed (never a second
+      # decode). nil for every run without `stop_on`, so the common path is unchanged.
+      stop_hit = @stop_condition.try(&.matches_precomputed?(raw, status, grpc_status, length, words, lines, elapsed, text)) || false
+      # A stop row's bytes are retained even under `keep_bodies: :matched`: it is the row that
+      # ended the run, and dropping its request/response would leave the operator the verdict
+      # with no evidence for it.
+      keep = keep?(matched) || stop_hit
 
       Result.new(
         index: job.index, payloads: job.payloads, position: job.position,
@@ -508,7 +574,7 @@ module Gori::Fuzz
         wire: keep ? raw.wire.try { |w| present(w) } : nil,
         chain_error: job.chain_error,
         grpc_status: grpc_status, grpc_message: grpc_message,
-        timed_out: raw.timed_out?, resent_count: resent_count)
+        timed_out: raw.timed_out?, resent_count: resent_count, stop_hit: stop_hit)
     end
 
     # Count a rendered request whose gRPC framing a payload broke. Only reached while
@@ -527,6 +593,23 @@ module Gori::Fuzz
     # would put a sub-millisecond response on the wrong side of `>=5`.
     private def elapsed_ms(raw : Repeater::Result) : Int64
       raw.duration_us // 1000
+    end
+
+    # This matcher's verdict on metrics + text a CALLER already decoded — the seam a run's
+    # matcher uses to evaluate its `stop_condition` on the single decode `build` paid for
+    # (a private `decide` cannot be called on another instance). Same answer as if this
+    # matcher had built the row itself; it just does not decode again.
+    def matches_precomputed?(raw : Repeater::Result, status : Int32?, grpc_status : Int32?,
+                             length : Int64, words : Int32, lines : Int32, elapsed_ms : Int64,
+                             text : String) : Bool
+      decide(raw, status, grpc_status, length, words, lines, elapsed_ms, text)
+    end
+
+    # Whether any dimension this matcher evaluates reads the decoded body TEXT — the two body
+    # regexes and the extract. `build` ORs this with the stop condition's own answer to decide
+    # whether to pay the decode, so a `stop_on` regex is not silently never evaluated.
+    def needs_text? : Bool
+      !@match_regex.nil? || !@filter_regex.nil? || !@extract.nil?
     end
 
     private def decide(raw : Repeater::Result, status : Int32?, grpc_status : Int32?,
@@ -628,6 +711,13 @@ module Gori::Fuzz
         next unless bad
         forms = dim == "status" ? "a status, a class (2xx), a range (200-299) or a comparator (>=400)" : "a number, a range (100-200) or a comparator (>=100)"
         return "#{which} #{dim} spec #{spec.inspect}: #{bad.inspect} is not #{forms}"
+      end
+      # The separate stop condition is validated through the SAME predicate, so a `stop_on`
+      # typo (`--stop-on 'size:1O00'`) is refused at the surface exactly as a `--ms` one is,
+      # rather than running the whole sweep and never stopping. Its message names `stop`, so
+      # the operator knows which of the two predicates the bad term is in.
+      if err = @stop_condition.try(&.spec_error)
+        return "stop #{err}"
       end
       nil
     end

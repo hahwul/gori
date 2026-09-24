@@ -769,10 +769,16 @@ module Gori
       class FuzzJob
         getter id : String
         getter total : Int64?
-        # :running | :done | :budget_exhausted | :stopped | :error. :budget_exhausted
-        # is a DISTINCT terminal state from :done so a run that hit the request budget
-        # before checking every candidate is not read as an exhaustive "0 matches".
+        # :running | :done | :budget_exhausted | :condition_met | :stopped | :error.
+        # :budget_exhausted is a DISTINCT terminal state from :done so a run that hit the
+        # request budget before checking every candidate is not read as an exhaustive "0
+        # matches"; :condition_met (issue #1240) is the run's own `stop_on` ending it — it
+        # reached its goal, which is why it is neither :done (not exhaustive) nor :stopped
+        # (nobody pressed stop).
         property status : Symbol = :running
+        # The sentence naming what the run's `stop_on` met, when `status == :condition_met`;
+        # nil otherwise. Reported by `fuzz_status` so an agent reads WHY the run ended early.
+        property stop_reason : String? = nil
         property sent = 0_i64
         # Requests on the wire (`Fuzz::Progress#requests`): the `max_requests` unit.
         property requests = 0_i64
@@ -1664,9 +1670,12 @@ module Gori
       private def incomplete_reason(status : Symbol) : String?
         case status
         when :budget_exhausted then "budget_exhausted"
-        when :stopped          then "stopped"
-        when :error            then "failed"
-        else                        nil
+          # A run its own `stop_on` ended is not EXHAUSTIVE — it stopped before checking every
+          # candidate — so it names a reason, even though reaching the condition was the goal.
+        when :condition_met then "condition_met"
+        when :stopped       then "stopped"
+        when :error         then "failed"
+        else                     nil
         end
       end
 

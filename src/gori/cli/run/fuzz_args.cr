@@ -106,6 +106,23 @@ module Gori
         n
       end
 
+      # `--keep all|interesting` (issue #1240). Refused by name on a typo rather than degraded
+      # to a default — the same contract every other enum flag here holds.
+      private def self.parse_keep(v : String) : Fuzz::Keep
+        Fuzz::Keep.parse?(v) || abort "gori run fuzz: invalid --keep '#{v}' (all|interesting)"
+      end
+
+      # One `--stop-on DIM:SPEC` term, folded into the run's stop-condition matcher `m`. The
+      # grammar's one home is `Fuzz.apply_stop_term` (shared with the TUI Advanced row); this
+      # only turns its error sentence into the command's `abort`. A repeated dimension
+      # overwrites, exactly as a repeated `--mc` does; a value-level typo flows through
+      # `Matcher#spec_error` with every other dimension.
+      private def self.parse_stop_on(spec : String, m : Fuzz::Matcher) : Nil
+        if err = Fuzz.apply_stop_term(spec, m)
+          abort "gori run fuzz: #{err}"
+        end
+      end
+
       private def self.parse_regex_replace(v : String) : Fuzz::RegexReplace
         abort "gori run fuzz: --regex-replace needs /pattern/replacement/" if v.size < 3
         delim = v[0]

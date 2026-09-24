@@ -112,6 +112,52 @@ describe "MCP fuzz tools" do
     end
   end
 
+  it "stops on stop_on and reports condition_met with a stop_reason" do
+    port = start_origin
+    with_store do |store|
+      tools = tools_for(store)
+      start = call_json(tools, "fuzz_start", {
+        "template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+        "url"            => "http://127.0.0.1:#{port}",
+        "payloads"       => %([{"list":["a","b","c","d","e"]}]),
+        "match"          => %({"status":"200"}),
+        "stop_on"        => %({"after_matches":1}),
+        "allow_unscoped" => true,
+      }.to_json)
+      status = wait_fuzz_done(tools, start["job_id"].as_s)
+      status["status"].as_s.should eq("condition_met")
+      status["stop_reason"]?.should_not be_nil
+      status["incomplete_reason"].as_s.should eq("condition_met")
+      status["matched"].as_i.should be >= 1
+    end
+  end
+
+  it "keep: interesting stores no archive rows for a run that matched nothing, but keeps whole-run counts" do
+    port = start_origin
+    with_store do |store|
+      tools = tools_for(store)
+      start = call_json(tools, "fuzz_start", {
+        "template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+        "url"            => "http://127.0.0.1:#{port}",
+        "payloads"       => %([{"list":["a","b","c"]}]),
+        "match"          => %({"status":"500"}), # the origin answers 200, so nothing matches
+        "save_results"   => true,
+        "keep"           => "interesting",
+        "allow_unscoped" => true,
+      }.to_json)
+      job_id = start["job_id"].as_s
+      status = wait_fuzz_done(tools, job_id)
+      status["status"].as_s.should eq("done")
+      status["sent"].as_i.should eq(3) # every request was still sent…
+      run_id = status["run_id"].as_i64
+      run = call_json(tools, "get_fuzz_run", {run_id: run_id}.to_json)["run"]
+      run["keep"].as_s.should eq("interesting")
+      run["filtered"].as_bool.should be_true
+      run["sent"].as_i.should eq(3)           # …the run's own count stays whole-run…
+      run["stored_results"].as_i.should eq(0) # …while the archive kept none of the 3 uninteresting rows
+    end
+  end
+
   it "permanently saves every row independently of the bounded selective live cache" do
     port = start_origin
     with_store do |store|

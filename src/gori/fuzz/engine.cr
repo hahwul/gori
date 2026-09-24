@@ -987,6 +987,12 @@ module Gori::Fuzz
     # but the fuzz `snapshot` now publishes THIS one.
     @blocked : Int64
     @blocked_reason : String?
+    # Why the run's own `stop_on` ended it (issue #1240), or nil for a run that reached its end,
+    # was ^X'd, or hit the budget. Set ONCE in `record_result` — the first row that meets the
+    # condition or takes the match count to `stop_after_matches` — and rides the `DoneEvent` so
+    # the verdict is `Terminal::ConditionMet` rather than `stopped`. A run with no stop_on never
+    # touches it, so nothing changes for one.
+    @stop_reason : String?
     @dispatched : Int64
     @last_dispatch : Time::Instant
     @total : Int64?
@@ -1011,6 +1017,7 @@ module Gori::Fuzz
       @errors = 0_i64
       @blocked = 0_i64
       @blocked_reason = nil.as(String?)
+      @stop_reason = nil.as(String?)
       @dispatched = 0_i64
       @last_dispatch = Time.instant
       @total = nil.as(Int64?)
@@ -1242,7 +1249,7 @@ module Gori::Fuzz
       @events.send(ErrorEvent.new(ex.message || "fuzz race error"))
     ensure
       @backend.close rescue nil
-      @events.send(DoneEvent.new(snapshot, @state == State::Stopped))
+      @events.send(DoneEvent.new(snapshot, @state == State::Stopped, @stop_reason))
       @events.close
     end
 
@@ -1265,6 +1272,27 @@ module Gori::Fuzz
       @errors += result.resent_count
       @events.send(ResultEvent.new(result)) # blocking — never drop a row
       emit_progress
+      check_stop_condition(result)
+    end
+
+    # End the run when its `stop_on` is met — the separate condition matched this row, or the
+    # run's own matchers have now hit `stop_after_matches` times (issue #1240). Called from
+    # `record_result`, the ONE bookkeeping path both `worker_loop` and `run_race` share, so a
+    # race group is covered too. `stop` here is exactly ^X: the dispatcher halts and in-flight
+    # requests finish, so the run does not send a burst after it has already found its answer.
+    #
+    # `@stop_reason` is set once (the first row to trip it), which is what turns the verdict
+    # into `Terminal::ConditionMet`. `stop_hit?` outranks the count so the reason names the
+    # sharper signal when both hold on the same row.
+    private def check_stop_condition(result : Result) : Nil
+      return unless @stop_reason.nil?
+      if result.stop_hit?
+        @stop_reason = "stop condition met after #{@sent} sent"
+        stop
+      elsif (n = @config.stop_after_matches) && n > 0 && @matched >= n
+        @stop_reason = "reached #{n} match#{n == 1 ? "" : "es"} after #{@sent} sent"
+        stop
+      end
     end
 
     private def coordinate : Nil
@@ -1278,7 +1306,7 @@ module Gori::Fuzz
       # means `finalize_job` never runs, pinning the job at `:running` and blocking
       # `switch_project`/`delete_project` for the rest of the session.
       @backend.close rescue nil
-      @events.send(DoneEvent.new(snapshot, @state == State::Stopped))
+      @events.send(DoneEvent.new(snapshot, @state == State::Stopped, @stop_reason))
     ensure
       # ALWAYS close, on every exit path: closing is what turns the consumer's blocking
       # `receive?` into a nil and lets it finish. `Channel#close` is idempotent.

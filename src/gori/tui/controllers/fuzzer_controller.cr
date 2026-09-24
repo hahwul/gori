@@ -1237,7 +1237,7 @@ module Gori::Tui
         v.apply_progress(ev.progress)
         # A setup ErrorEvent is followed by Done. Do not overwrite its durable status with
         # `done`; finish_job already applies the same errored-job guard to notifications.
-        terminal = @host.jobs.errored?(v.job_id) ? "error" : v.terminal_status(ev.progress, ev.stopped)
+        terminal = @host.jobs.errored?(v.job_id) ? "error" : v.terminal_status(ev.progress, ev.stopped, stop_reason: ev.stop_reason)
         spool_run = @spool_runs[v]?
         archive_ready = !!spool_run && !spool_run.failed? && spool_run.finished?
         v.finish_run(terminal, archive_ready: archive_ready)
@@ -1283,7 +1283,11 @@ module Gori::Tui
       return if @host.jobs.errored?(v.job_id) # an ErrorEvent already finalized this run — the
       #                                         engine's trailing DoneEvent must not log/notify success
       n = v.matched_count
-      summary = terminal == "budget_exhausted" ? "#{n} hit · budget exhausted" : "#{n} hit"
+      summary = case terminal
+                when "budget_exhausted" then "#{n} hit · budget exhausted"
+                when "condition_met"    then "#{n} hit · condition met"
+                else                         "#{n} hit"
+                end
       @host.jobs.finish(v.job_id, :done, summary)
       level = n > 0 ? :success : :info
       # `requests` only when it DIFFERS from the payload count — retries and redirect hops
@@ -1297,7 +1301,9 @@ module Gori::Tui
         case terminal
         when "stopped"          then " (stopped)"
         when "budget_exhausted" then " (request budget exhausted — partial run)"
-        else                         ""
+          # The run's own `stop_on` ended it — its goal, distinct from ^X and from the budget.
+        when "condition_met" then ev.stop_reason ? " (#{ev.stop_reason})" : " (condition met)"
+        else                      ""
         end
       msg = "Fuzzer: #{n} hit#{n == 1 ? "" : "s"} / #{v.result_count} sent#{wire} on #{v.summary}#{ending}"
       log_event(v, level, msg)
@@ -1420,7 +1426,10 @@ module Gori::Tui
       bound = Fuzz.request_bound(total, v.config.max_requests)
       if bound.nil? || bound > CONFIRM_THRESHOLD
         e = engine
-        @host.confirm("RUN FUZZ", "Send #{bound ? bound.to_s : "an unknown number of"} requests to #{v.target_origin}?\nEvery result is privately spooled; the pane keeps at most 5,000 rows / 64 MiB.",
+        # Name the archive policy: `keep: interesting` spools only the interesting rows, so the
+        # confirm should not promise "every result is spooled" (issue #1240).
+        spooled = v.config.keep.interesting? ? "Only interesting results (matched + error/re-send/incomplete/stop) are spooled" : "Every result is privately spooled"
+        @host.confirm("RUN FUZZ", "Send #{bound ? bound.to_s : "an unknown number of"} requests to #{v.target_origin}?\n#{spooled}; the pane keeps at most 5,000 rows / 64 MiB.",
           confirm_label: "run", danger: false) { start_run(v, e, total) }
       else
         start_run(v, engine, total)
@@ -1486,7 +1495,7 @@ module Gori::Tui
             error_sent = true
             events.send({v, ev})
           when Fuzz::DoneEvent
-            terminal = v.terminal_status(ev.progress, ev.stopped, error_sent)
+            terminal = v.terminal_status(ev.progress, ev.stopped, error_sent, ev.stop_reason)
             spool_run.try(&.finish(ev.progress.sent, ev.progress.matched,
               ev.progress.errors, terminal))
             events.send({v, ev})
