@@ -119,6 +119,21 @@ So `/ status:5xx` → `⇧T` marks every path the filter shows (or mark them one
 
 Note that **`t` marks, `⇧T` marks all and `Space` → `m` tags**: `t` / `⇧T` mean mark / mark all in every list tab, so tagging is the menu entry here. `⇧T` marks every **captured path** the tree currently shows — the `/` filter and the open folds decide the set — and a host or a folder row is skipped, because the batch would otherwise sweep them in beside the endpoints under them. A synthetic `{uuid}` / `[1, 2, 3 …]` fold is not a real path either, so it can't be marked or tagged: a range sweeps over it, and `t` on one says so.
 
+### Parameters {#params}
+
+Press `p` on a Sitemap row to open the **Params** sub-tab (`Sitemap · Discover · Diff · Params`) narrowed to that host or subtree. It lists every input name the captured requests carry, one row per endpoint, location and name. Locations are `query`, `form`, `multipart`, `json`, `headers` and `cookies`. Each row shows how many flows carried the name, a few sample values, and a `↩` when a value of four or more bytes came back verbatim in the first 256 KiB of the decoded response body. `↩` marks a place to look for XSS or injection, not a finding. JSON names are paths such as `user.email` and `items[].id`; the `[]` only collapses array indices and is not JsonPath syntax. Headers every browser sends (`User-Agent`, `Accept*`, `Sec-*`, …) are left out until you press `a`.
+
+The scan reads the flows the Sitemap shows, so the `/` query and the `s` scope lens apply. It reads the newest 5,000 of them and marks the header `TRUNCATED` when older flows were not read. `^R` rescans. `Esc` drops the node filter, and a second `Esc` goes back to the sub-tabs.
+
+| Action | Key | Result |
+| --- | --- | --- |
+| Open flow | `↵` | The newest request that carried the name, in the History detail |
+| Copy | `y` / `⇧Y` | The name, or every listed name one per line |
+| Export wordlist | `w` | The listed names (JSON leaf names, no headers) to a file under `~/.gori/wordlists/` |
+| Mine | `m` | Opens the Miner on this endpoint with the names seen on the host's other endpoints tested first |
+
+The same inventory is `gori run sitemap params` on the CLI and `list_params` over MCP.
+
 ## Protocol Support
 
 The canonical capture / intercept / replay / fuzz table is the

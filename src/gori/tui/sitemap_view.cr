@@ -11,6 +11,7 @@ require "../ql"
 require "../scope"
 require "../sitemap" # the host→path tree model + builder (URI normalisation lives there now)
 require "./viewport"
+require "./params_view"
 
 module Gori::Tui
   # The Sitemap tab: a host → path tree built from captured flows. The tree is literal —
@@ -765,6 +766,43 @@ module Gori::Tui
         return nil unless node = first_endpoint(node)
       end
       endpoint_of(node, host)
+    end
+
+    # The flow filter this tree is built from — the scope lens AND the `/` query's QL half —
+    # for the Params sub-tab, so the two sub-tabs answer about one flow set. `tag:` terms are
+    # Sitemap-local (they filter the built tree, not flows) and have no flow reading, so they
+    # are left out. nil when the residual is non-blank yet compiles to nothing: the tree is
+    # empty for that reason, and a param scan of EVERY flow behind it would be the match-all
+    # this view refuses in `prepare_reload`.
+    def params_filter : QL::Filter?
+      _, _, residual = split_tag_terms(@query)
+      lens = @scope.try(&.ql_lens)
+      residual_filter = QL.parse(residual, scope: lens)
+      return nil if residual_has_terms?(residual) && QL.reject_empty?(residual, residual_filter)
+      QL.and(@scope.try(&.filter) || QL::EMPTY, residual_filter)
+    end
+
+    # What the cursor row means to the Params sub-tab: a host row is the whole host, any
+    # other row the ENDPOINT PATHS under it (query cut, as `ParamInventory` keys them). A set
+    # and not a prefix, because a `{uuid}` fold's descendants share a parent the fold itself
+    # does not name — and a prefix of "/users" would also take in /users-admin.
+    def selected_params_target : ParamsView::Target?
+      return nil unless row = visible_rows[@selected]?
+      return ParamsView::Target.new(row.host, nil, row.host) if row.depth == 0
+      node = row.node
+      paths = Set(String).new
+      collect_endpoint_paths(node, paths)
+      shown = if node.grouped && (parent = node.fold_parent)
+                "#{parent}/#{node.label}"
+              else
+                Sitemap.path_part(node.path)
+              end
+      ParamsView::Target.new(row.host, paths, "#{row.host}#{shown}")
+    end
+
+    private def collect_endpoint_paths(node : Node, acc : Set(String)) : Nil
+      acc << Sitemap.path_part(node.path) unless node.methods.empty? || node.path.empty?
+      node.children.each { |c| collect_endpoint_paths(c, acc) }
     end
 
     # The cursor row's scope-rule seed — what "add THIS to the scope" means at this depth:

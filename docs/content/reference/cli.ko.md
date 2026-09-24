@@ -76,6 +76,7 @@ gori run <subcommand> [verb] [options]
 | `import` | HAR / URL 목록 / OpenAPI / Postman / Insomnia / Burp / WSDL 파일에서 History로 플로우 일괄 임포트 |
 | `sitemap [QL]` | 호스트 → 경로 엔드포인트 트리 |
 | `sitemap tag` | Sitemap 경로에 자유 텍스트 메모를 고정 / 해제 / 목록 |
+| `sitemap params [QL]` | 엔드포인트별 파라미터 목록: 위치별 이름, 등장 횟수, 샘플 값, 반사된 값 |
 | `oast listen` · `presets` | 아웃오브밴드 콜백 리스너 (interactsh 및 유사 서비스) |
 | `oast list` · `resume` · `release` | 프로젝트에 저장된 OAST 리스닝 세션 목록 / 재개 / 릴리스 |
 | `oast providers` | 저장된 OAST 프로바이더 목록 / 추가 / 수정 / 활성화 / 비활성화 / 삭제 |
@@ -523,6 +524,7 @@ gori run mine <flow-id> --locations query,headers --wordlist params.txt
 | `--flow`, `--request`, `--target`, `--sni`, `--http2`, `-k` | 요청 소스와 트랜스포트 |
 | `--locations=LIST` | `query`, `form`, `multipart`, `json`, `headers`, `cookies` (multipart는 기본 꺼짐, 명시해야 켜집니다) |
 | `--wordlist`, `--bucket=N` | 후보 이름과 버킷 크기 |
+| `--name=NAME` | 워드리스트보다 먼저 시험할 이름(여러 번 지정 가능). 예: `sitemap params`가 다른 엔드포인트에서 찾은 이름 |
 | `--concurrency` (10), `--rate`, `--throttle`, `--timeout`, `--retries` (1), `--max-requests=N` | 속도 제어 |
 | `--no-keep-alive` | 연결 재사용 대신 프로브마다 새로 연결 |
 | `--hook=ARGV` | 조립된 각 요청을 보내기 전에 외부 명령(argv, 셸 없음)으로 변환합니다. 서명 / HMAC이 붙는 API용. [프로세스 훅](/ko/guide/scripting/#프로세스-훅) 참고 |
@@ -752,6 +754,16 @@ gori run sitemap tag --host api.example.com --path /v1/users --tag "IDOR candida
 gori run sitemap tag --host api.example.com --path /v1/users --clear
 gori run sitemap tag --list
 ```
+
+**`sitemap params`**: TUI [Params 서브탭](/ko/guide/proxy/#params)과 같은 파라미터 목록입니다. 호스트, 메서드, 경로, 위치, 이름마다 한 줄씩 나오며, 그 이름이 나온 플로우 수, 서로 다른 값 최대 `--samples`개(기본값 5), 그리고 4바이트 이상인 값이 디코딩된 응답 본문의 앞 256 KiB 안에 그대로 나타나면 `reflected`가 붙습니다(관찰일 뿐 취약점 판정은 아닙니다).
+
+```bash
+gori run sitemap params --host api.example.com
+gori run sitemap params 'method:POST' --location json,form --format json
+gori run mine 42 --wordlist <(gori run sitemap params --host api.example.com --format names)
+```
+
+`-q`/`--query=QL`(위치 인자로도 가능)와 `--in-scope`는 읽을 플로우를 좁힙니다. `history`처럼 플로우 단위로 적용됩니다. `--host`는 정확한 호스트, `--path=PREFIX`는 경로 접두사, `--location=LIST`는 위치를 고릅니다(기본값 전체). 표준 브라우저 헤더는 `--all-headers`를 주지 않으면 빠집니다. `--max-flows=N`은 조건에 맞는 최신 플로우 N개를 읽고(기본값 2000), 더 오래된 플로우를 건너뛰었으면 stderr에 알립니다. 쿠키, 자격 증명 헤더, `password`나 `token`처럼 자격 증명 이름을 가진 필드의 값은 `--include-sensitive`를 주지 않으면 `[REDACTED]`로 출력됩니다. 가리는 기준은 이름과 JWT / 개인 키 형태뿐이라, 다른 이름의 비밀 값(presigned `X-Amz-Signature`, 임의의 `sig=` 등)이나 URL 경로 안의 자격 증명은 그대로 출력됩니다. `--format`은 `text`, `json`, `names` 중에서 고릅니다. `names`는 한 줄에 이름 하나(JSON은 마지막 키 이름, `--location`에 지정하지 않으면 헤더 제외)로, Miner나 Fuzzer 워드리스트로 바로 쓸 수 있습니다.
 
 ### run oast {#run-oast}
 

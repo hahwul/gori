@@ -71,6 +71,7 @@ private INCIDENTAL = {
   "probe_issues -> probe_delete"            => "the third triage verb, left out of @recon on purpose: it erases the record",
   "list_env -> send_websocket"              => "names where env tokens are substituted",
   "send_request -> send_websocket"          => "only for a WebSocket repeater id; @recon replays HTTP",
+  "list_params -> mine_start"               => "says where the names can feed; @recon maps a target, it does not mine",
 }
 
 private def table_cells(line : String) : Array(String)

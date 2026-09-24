@@ -76,6 +76,7 @@ gori run <subcommand> [verb] [options]
 | `import` | Bulk-import flows into History from a HAR / URL list / OpenAPI / Postman / Insomnia / Burp / WSDL file |
 | `sitemap [QL]` | Host → path endpoint tree |
 | `sitemap tag` | Pin, clear, or list a free-text memo on a sitemap path |
+| `sitemap params [QL]` | Per-endpoint parameter inventory: names by location, counts, sample values, reflected values |
 | `oast listen` · `presets` | Out-of-band callback listener (interactsh & friends) |
 | `oast list` · `resume` · `release` | List, resume, or release the project's saved OAST listening sessions |
 | `oast providers` | List / add / update / enable / disable / delete saved OAST providers |
@@ -535,6 +536,7 @@ gori run mine <flow-id> --locations query,headers --wordlist params.txt
 | `--flow`, `--request`, `--target`, `--sni`, `--http2`, `-k` | Request source and transport |
 | `--locations=LIST` | `query`, `form`, `multipart`, `json`, `headers`, `cookies` (multipart off by default, pass it explicitly) |
 | `--wordlist`, `--bucket=N` | Candidate names and bucket size |
+| `--name=NAME` | Test this name first, ahead of the wordlists (repeatable), for example a name `sitemap params` found on another endpoint |
 | `--concurrency` (10), `--rate`, `--throttle`, `--timeout`, `--retries` (1), `--max-requests=N` | Rate control |
 | `--no-keep-alive` | Dial a fresh connection per probe instead of reusing one |
 | `--hook=ARGV` | Transform each assembled request through an external command (argv, no shell) before it is sent, for signed / HMAC'd APIs. See [Process hooks](/guide/scripting/#process-hooks) |
@@ -764,6 +766,16 @@ gori run sitemap tag --host api.example.com --path /v1/users --tag "IDOR candida
 gori run sitemap tag --host api.example.com --path /v1/users --clear
 gori run sitemap tag --list
 ```
+
+**`sitemap params`**: the parameter inventory, the same one the TUI's [Params sub-tab](/guide/proxy/#params) shows. One row per host, method, path, location and name, with the number of flows that carried it, up to `--samples` distinct values (default 5), and `reflected` when a value of four or more bytes appears verbatim in the first 256 KiB of the decoded response body (an observation, not a finding).
+
+```bash
+gori run sitemap params --host api.example.com
+gori run sitemap params 'method:POST' --location json,form --format json
+gori run mine 42 --wordlist <(gori run sitemap params --host api.example.com --format names)
+```
+
+`-q`/`--query=QL` (also positional) and `--in-scope` narrow the flows read, per flow as in `history`. `--host` is an exact host, `--path=PREFIX` a path prefix, and `--location=LIST` picks locations (default all). Standard browser headers are left out unless `--all-headers`. `--max-flows=N` reads the newest N matching flows (default 2000); a note on stderr says when older ones were skipped. Values of cookies, credential headers and credential-named fields such as `password` or `token` print as `[REDACTED]` unless `--include-sensitive`. Redaction goes by name and by JWT / private-key shape only, so a secret under any other name (a presigned `X-Amz-Signature`, a custom `sig=`) prints in the clear, as does one inside a URL path. `--format` is `text`, `json`, or `names` (one name per line, JSON leaf names, no headers unless `--location` names them), which is a Miner or Fuzzer wordlist.
 
 ### run oast
 

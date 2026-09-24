@@ -234,7 +234,7 @@ module Gori::Miner
         config.locations.each { |loc| config.bucket_size[loc] = b }
       end
 
-      names = load_names(config.user_wordlist)
+      names = load_names(config.user_wordlist, config.seed_names)
       # `evidence:` carries the branch above to the SEND seam, where session bindings resolve
       # (`Fuzz::Sender#evidence?`). Round 6 marked the miner's INJECTED candidates verbatim
       # and cleared the carrier as safe because gori's canaries cannot contain a `$` — true
@@ -410,10 +410,11 @@ module Gori::Miner
         "unresolved env #{detail}", detail)
     end
 
-    # Built-in names plus the optional user file, read HERE so a bad path surfaces as a
-    # PlanError at build time rather than from inside a worker fiber.
-    private def self.load_names(user_wordlist : String?) : Array(String)
+    # Seed names, then the built-in names plus the optional user file, read HERE so a bad path
+    # surfaces as a PlanError at build time rather than from inside a worker fiber.
+    private def self.load_names(user_wordlist : String?, seeds : Array(String)) : Array(String)
       names = Wordlist.load(user_wordlist)
+      names = EmbeddedList.dedup(seeds.reject(&.strip.empty?) + names) unless seeds.empty?
       # `Wordlist.load` always prepends the compiled-in list, so an empty result means the
       # candidate set is gone entirely — a run that would send nothing but a baseline.
       raise PlanError.new(PlanError::Reason::NoNames, "the candidate name list is empty") if names.empty?

@@ -19,6 +19,7 @@ module Gori
         # falling back to auto-detect (#415).
         locations : Array(Miner::Location)? = nil
         wordlist : String? = nil
+        seed_names = [] of String
         bucket : Int32? = nil
         concurrency = 10
         rate : Float64? = nil
@@ -46,6 +47,7 @@ module Gori
           p.on("-k", "--insecure-upstream", "Do not verify upstream TLS certificates") { insecure = true }
           p.on("--locations=LIST", "Where to mine: query,form,multipart,json,headers,cookies (default: auto-detect)") { |v| locations = parse_mine_locations(v) }
           p.on("--wordlist=PATH", "Extra param-name wordlist (merged with the built-in list)") { |v| wordlist = v }
+          p.on("--name=NAME", "Test this name FIRST, ahead of the wordlists (repeatable; e.g. from `gori run sitemap params`)") { |v| seed_names << v }
           p.on("--bucket=N", "Names stuffed per request before bisection (per location)") { |v| bucket = parse_count(v, "--bucket") }
           p.on("--concurrency=N", "Parallel requests (default 10)") { |v| concurrency = parse_count(v, "--concurrency") }
           p.on("--rate=RPS", "Cap requests/sec (0 = unlimited)") { |v| rate = parse_rate(v) }
@@ -86,6 +88,7 @@ module Gori
         config.retries = retries
         config.max_requests = max_requests
         config.user_wordlist = wordlist
+        config.seed_names = seed_names
         config.hook = hook
         config.keep_alive = keep_alive
         # `--locations=` with no usable value (empty, or only blanks/commas) is an operator

@@ -181,6 +181,19 @@ describe Gori::Miner::Plan do
     File.delete?(path) if path
   end
 
+  # The parameter inventory's neighbour names (#1231) go FIRST, so a capped run tests them
+  # before the built-in list; one the built-in list already holds is not tested twice.
+  it "puts seed names ahead of the built-in list, de-duplicated" do
+    cfg = config
+    cfg.seed_names = ["zzseedparam", "is_admin", "", "zzseedparam"]
+    plan = M::Plan.build(M::PlanOptions.new(CRLF_RAW, target: "http://t.test", config: cfg), ungated_outbound)
+    plan.names.first(2).should eq(["zzseedparam", "is_admin"])
+    plan.names.count("is_admin").should eq(1)
+    plan.names.should_not contain("")
+    builtin_only = M::Plan.build(M::PlanOptions.new(CRLF_RAW, target: "http://t.test", config: config), ungated_outbound)
+    plan.names.size.should eq(builtin_only.names.size + 1)
+  end
+
   describe "transport" do
     it "gives the run a keep-alive pool, sized to its concurrency" do
       cfg = config(concurrency: 7)

@@ -68,6 +68,7 @@ require "./run/session"
 require "./run/discover"
 require "./run/oast"
 require "./run/sitemap"
+require "./run/sitemap_params"
 require "./run/import"
 require "./run/probe"
 require "./run/notes"
@@ -1679,6 +1680,7 @@ module Gori
               when "paths"          then :paths
               when "markdown", "md" then :markdown
               when "sarif"          then :sarif
+              when "names"          then :names
               else                       abort "gori run: unknown --format '#{v}'"
               end
         abort "gori run: --format #{v} not valid here (use #{allowed.join("|")})" unless allowed.includes?(sym)

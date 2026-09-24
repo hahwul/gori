@@ -156,6 +156,12 @@ module Gori
         "sitemap.repeater", "Send to Repeater", "Open the selected — or every marked — endpoint's captured request in Repeater",
         Verb::Scope::Sitemap, [Verb::Chord.new("r")], mnemonic: 'r', group: :send) { |ctx| ctx.sitemap_repeater; nil }
 
+      # `p` — the parameter inventory (#1231) for the cursor row: a host row lists every
+      # endpoint on it, any other row the endpoints under it (a `{uuid}` fold included).
+      r.register Verb::Definition.new(
+        "sitemap.params", "Parameters here", "List the parameter names the selected host or subtree takes (Params sub-tab)",
+        Verb::Scope::Sitemap, [Verb::Chord.new("p")], mnemonic: 'p', group: :view) { |ctx| ctx.sitemap_params; nil }
+
       r.register Verb::Definition.new(
         "sitemap.to-menu", "Back to sub-tabs", "Move focus up to the Sitemap/Discover strip", Verb::Scope::Sitemap,
         [Verb::Chord.new("escape")], hidden: true) { |ctx| ctx.focus_pane(:subtabs); nil }

@@ -229,6 +229,11 @@ module Gori
         cap = optional_int_arg(h, "max_requests")
         config.max_requests = cap ? {cap, MINE_MAX_REQUESTS}.min : MINE_MAX_REQUESTS
         config.user_wordlist = str(h, "wordlist").presence
+        config.seed_names = begin
+          str_list(h, "names")
+        rescue ex : Gori::Error
+          raise FuzzArgError.new(ex.message || "invalid 'names'")
+        end
         config.hook = str(h, "hook").presence
         optional_int_arg(h, "throttle_ms").try { |v| config.throttle_ms = v.clamp(0_i64, 600_000_i64).to_i }
         config.keep_alive = bool_arg(h, "keep_alive", true)
@@ -341,6 +346,7 @@ module Gori
           s.field "url", strprop("absolute target URL (scheme+host) that sets the origin — a 'template' or 'flow_id' is still REQUIRED; url alone does NOT define the request (unlike send_request)")
           s.field "locations", strprop("comma list of where to mine: #{MINE_LOCATIONS.join(",")} (default: auto-detect; multipart is applicable but off by default — pass it explicitly)")
           s.field "wordlist", strprop("path to an extra param-name wordlist (merged with the built-in list)")
+          s.field "names", strarrprop("names to test FIRST, ahead of the built-in list and any wordlist — e.g. list_params names seen on this host's other endpoints but not on this one")
           s.field "bucket", intprop("names stuffed per request before bisection (per location)")
           s.field "concurrency", intprop("parallel requests (default 10, max #{MINE_MAX_CONCURRENCY})")
           s.field "rate", numprop("requests/sec cap, fractional allowed (0 = unlimited; 0.5 = one request every two seconds)")

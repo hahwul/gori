@@ -73,10 +73,10 @@ gori mcp --read-only
 
 | 시작 방법 | 도구 | `tools/list` | 토큰 | 용도 |
 | --- | ---: | ---: | ---: | --- |
-| `gori mcp` | 179 | ~203 KB | ~52k | 전부 (기본값) |
-| `--read-only` | 59 | ~64 KB | ~16k | 읽기 도구와 순수 연산; 실제 요청 전송 없음 |
-| `--tools=@recon` | 34 | ~46 KB | ~12k | 캡처를 읽고 파악, 요청 재전송, 이슈·노트 기록 |
-| `--tools=@recon --read-only` | 26 | ~33 KB | ~9k | `--read-only`가 끄는 도구를 뺀 `@recon` |
+| `gori mcp` | 180 | ~206 KB | ~53k | 전부 (기본값) |
+| `--read-only` | 60 | ~67 KB | ~17k | 읽기 도구와 순수 연산; 실제 요청 전송 없음 |
+| `--tools=@recon` | 35 | ~52 KB | ~13k | 캡처를 읽고 파악, 요청 재전송, 이슈·노트 기록 |
+| `--tools=@recon --read-only` | 27 | ~37 KB | ~10k | `--read-only`가 끄는 도구를 뺀 `@recon` |
 | `--tools=@minimal` | 17 | ~25 KB | ~6k | History와 flow, 현재 TUI 컨텍스트를 읽고 오퍼레이터와 대화 |
 
 토큰은 바이트 ÷ 4로 잡은 JSON 어림값이며, 실제 값은 클라이언트의 토크나이저가 정합니다.
@@ -84,7 +84,7 @@ gori mcp --read-only
 | 프로필 | 도구 |
 | --- | --- |
 | `@minimal` | `project_info`, `list_projects`, `switch_project`, `create_project`, `ql_reference`, `ql_explain`, `list_history`, `get_flow`, `get_response_body_chunk`, `get_current_context`, `get_repeater_context`, `get_issue`, `list_sitemap`, `intercept_get`, `intercept_list`, `operator_messages`, `reply_to_operator` |
-| `@recon` | `@minimal`에 더해 `list_scope`, `compare_flows`, `list_env`, `decode`, `jwt_decode`, `jwt_verify`, `probe_issues`, `probe_promote`, `probe_dismiss`, `list_issues`, `list_notes`, `get_note`, `send_request`, `create_issue`, `update_issue`, `create_note`, `update_note` |
+| `@recon` | `@minimal`에 더해 `list_scope`, `list_params`, `compare_flows`, `list_env`, `decode`, `jwt_decode`, `jwt_verify`, `probe_issues`, `probe_promote`, `probe_dismiss`, `list_issues`, `list_notes`, `get_note`, `send_request`, `create_issue`, `update_issue`, `create_note`, `update_note` |
 
 프로필은 글롭이 아니라 고정된 이름 목록이므로, 이후 버전이 `list_*` 도구를 추가해도 `@recon`이 조용히 커지지 않습니다. 둘 다 `switch_project`와 `create_project`를 포함하므로, 프로젝트가 하나도 없는 머신에서 바인딩 없이 시작해도 동작합니다.
 
@@ -158,6 +158,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `get_flow` | 한 플로우의 전체 요청 + 응답. [리댁션 프로파일](/ko/reference/cli/#run-redact)이 기본 적용된 곳에서는 본문이 정제되어 `body_redaction` 객체와 함께 돌아옵니다. `include_sensitive:true`는 헤더 리댁션과 함께 그것도 끕니다 |
 | `get_response_body_chunk` | 인라인 64 KiB 상한을 넘는 디코드(또는 원시) 플로우/Repeater 응답을 페이지 단위로 조회 |
 | `list_sitemap` / `list_sitemap_tags` | 고유 엔드포인트(host, method, path)와 거기에 달린 태그 |
+| `list_params` | 엔드포인트별 파라미터 목록: 위치별 입력 이름, 등장 횟수, 샘플 값(자격 증명은 가림), 응답에 값이 반사되는지 여부 |
 | `list_issues` / `get_issue` | 트리아지된 이슈 읽기 |
 | `probe_scan` | 캡처된 플로우와 Repeater 탭 재스캔. `active:true`가 아니면 패시브(요청 0건)이고, 액티브는 쓰기 권한이 필요하며 스코프 게이트를 거침 |
 | `probe_issues` | Probe 탭에 저장된 발견 항목을 트리아지 상태로 조회(기본은 open만) |

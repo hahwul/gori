@@ -29,6 +29,7 @@ module Gori
       Sitemap         # the Sitemap sub-tab (under Target) has focus
       Discover        # the Discover sub-tab (under Target) has focus
       Diff            # the Diff sub-tab (under Target) has focus — the retest report
+      Params          # the Params sub-tab (under Target) has focus — the parameter inventory
       Issues          # the Issues list has focus
       IssuesDetail    # an issue's detail is open
       Evidence        # project-wide immutable snapshot archive

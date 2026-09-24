@@ -5,11 +5,13 @@ module Gori
       @[Subcommand("sitemap", help: [
         {"sitemap", "Print the host → path endpoint tree (text, json, paths)"},
         {"sitemap tag", "Pin/clear/list a free-text memo on a sitemap path"},
+        {"sitemap params", "Per-endpoint parameter inventory (names, locations, samples, reflected)"},
       ])]
       private def self.cmd_sitemap(args : Array(String)) : Nil
-        # `tag` is reserved as the first positional; a QL query starting with it goes
-        # through --query (same convention as `gori run probe`'s subcommands).
+        # `tag` and `params` are reserved as the first positional; a QL query starting with
+        # either goes through --query (same convention as `gori run probe`'s subcommands).
         return cmd_sitemap_tag(args[1..]) if args.first? == "tag"
+        return cmd_sitemap_params(args[1..]) if args.first? == "params"
         cmd_sitemap_tree(args)
       end
 
@@ -183,7 +185,7 @@ module Gori
         # STDERR to say a term had gone.
         query, dropped = Run.compose_history_query(query, positional, neg_terms)
         Run.warn_dropped_query_terms("sitemap", dropped)
-        if err = Run.reserved_query_verb_error(positional, "sitemap", ["tag"], "tag")
+        if err = Run.reserved_query_verb_error(positional, "sitemap", ["tag", "params"], "tag, params")
           abort err
         end
         Run.refuse_unknown_query_fields("sitemap", query, lenient)

@@ -76,6 +76,11 @@ module Gori::Tui
     def diff_to_comparer : Nil
     end
 
+    # The Params row's newest flow in the History detail (`params.open-flow`) — a double-click
+    # asks for what ↵ does, and the tab switch is the Runner's. A default, as above.
+    def params_open_flow : Nil
+    end
+
     # The Issues detail's RELATED row ↵ (`issue.open-link`) — it navigates to the linked
     # flow / repeater / … in that item's own tab, so it lives on the Runner like the four
     # above, and a double-click on a link row asks for exactly what the key asks for.

@@ -1315,6 +1315,50 @@ private class FakeContext < ExecContext
     true
   end
 
+  def params_move(delta : Int32) : Nil
+    @calls << :params_move
+  end
+
+  def params_run : Nil
+    @calls << :params_run
+  end
+
+  def params_toggle_headers : Nil
+    @calls << :params_toggle_headers
+  end
+
+  def params_clear_target : Nil
+    @calls << :params_clear_target
+  end
+
+  def params_open_flow : Nil
+    @calls << :params_open_flow
+  end
+
+  def params_copy_names : Nil
+    @calls << :params_copy_names
+  end
+
+  def params_export : Nil
+    @calls << :params_export
+  end
+
+  def params_mine : Nil
+    @calls << :params_mine
+  end
+
+  def sitemap_params : Nil
+    @calls << :sitemap_params
+  end
+
+  def params_rows_shown? : Bool
+    false
+  end
+
+  def params_targeted? : Bool
+    false
+  end
+
   def comparer_swap : Nil
     @calls << :comparer_swap
   end
