@@ -1,9 +1,9 @@
 require "../spec_helper"
 require "file_utils"
 
-# Issue #566 — built-in payload preset sets (sqli/xss/traversal/format-string/
-# bad-strings/command-injection): each loads, is non-empty and de-duped; a preset
-# drives a run as a PayloadSource and composes with a second set; and an optional
+# Issue #566 / #1247 — built-in payload preset sets (sqli/xss/traversal/format-string/
+# bad-strings/command-injection/cache-delimiters): each loads, is non-empty and de-duped; a
+# preset drives a run as a PayloadSource and composes with a second set; and an optional
 # user file merges in built-in-first, order-preserving, de-duped.
 private alias F = Gori::Fuzz
 
@@ -12,7 +12,7 @@ private alias F = Gori::Fuzz
 describe Gori::Fuzz::Presets do
   it "enumerates every documented preset name, sorted and stable" do
     F::Presets.names.should eq(
-      ["bad-strings", "command-injection", "format-string", "sqli", "traversal", "xss"]
+      ["bad-strings", "cache-delimiters", "command-injection", "format-string", "sqli", "traversal", "xss"]
     )
   end
 

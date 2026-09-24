@@ -347,6 +347,25 @@ describe Gori::Colormarker do
       end
     end
 
+    # --- cache: (#1247) -----------------------------------------------------------------------
+    # A `cache:` condition is read from `response_head`, which the light `FlowRow` projection
+    # does not carry, so — like `scope:`/`body:` — it MUST land on the store tier. It stays off
+    # the row tier the same structural way: `cache` is absent from `InterceptFilter::FIELDS`, so
+    # `ROW_FIELDS`' subtraction leaves it out. Pinned so adding it there (where it would compile
+    # to a never-match Term over a row with no head) cannot silently answer false for every row.
+    it "routes a cache: condition to the store tier, never the row tier" do
+      Gori::Colormarker.row_answerable?("cache:hit").should be_false
+      Gori::Colormarker.row_answerable?("cache:none").should be_false
+      Gori::Colormarker.row_answerable?("host:acme cache:dynamic").should be_false
+      with_globals do
+        with_store do |store|
+          cm = Gori::Colormarker.load(store)
+          cm.add("cache:hit", RED, FULL, "cached")
+          cm.needs_store?.should be_true
+        end
+      end
+    end
+
     # End to end: the lens `compile` threads comes from the STORE, so a rule written before any
     # scope rule exists paints nothing, and starts painting the right rows once the scope is
     # configured and the engine reloads. That reload is what `refresh`'s scope-lens comparison
@@ -478,6 +497,7 @@ describe Gori::Colormarker do
                 when "stub"                                         then "true"
                 when "scope"                                        then "in"
                 when "src"                                          then "repeater"
+                when "cache"                                        then "hit"
                 else                                                     "x"
                 end
         Gori::Colormarker.unusable_reason("#{field}:#{value}").should be_nil

@@ -28,6 +28,7 @@ require "./request_builder"
 require "./tool"
 require "./tool_filter"
 require "./tools/authorize"
+require "./tools/cache_deception"
 require "./tools/compare"
 require "./tools/diff"
 require "./tools/context"
@@ -1177,6 +1178,7 @@ module Gori
           list_discover_tools j
           list_grpc_tools j
           list_authorize_tools j
+          list_cache_deception_tools j
           list_jobs_tools j
         end
       end

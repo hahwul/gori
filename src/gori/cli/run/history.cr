@@ -1431,6 +1431,10 @@ module Gori
               CLI::Output.flow_row_fields(j, detail.row)
             end
             j.field "http_version", detail.http_version
+            # The normalised cache signal (#1247), from the response head in hand — the same
+            # `Gori::CacheStatus` classifier the QL `cache:` field and MCP `get_flow` use, so a
+            # `gori run history -q cache:hit` listing and `gori run show` agree about a flow.
+            j.field "cache", Gori::CacheStatus.classify(detail.response_head).token
             # `Serialize.flow_detail` wraps this same field in `text()`; here it was raw. A
             # capture failure's text quotes bytes the origin sent (a malformed status line, a
             # header the codec refused), so it is captured data — see `Output.json_captured`.
