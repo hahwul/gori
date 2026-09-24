@@ -83,6 +83,16 @@ describe Gori::Tui::ConfirmDialog do
     drawn.should be >= 2
   end
 
+  it "reports whether a message is fully visible before a confirmation can proceed" do
+    disclosure = ConfirmDialog.new("EXPORT PROJECT",
+      "Contains captured requests, session values, environment values, and upstream proxy credentials. " \
+      "The archive copies the complete database as stored and is not redacted.",
+      confirm_label: "export", danger: false)
+    disclosure.message_fits?(Rect.new(0, 0, 100, 30)).should be_true
+    disclosure.message_fits?(Rect.new(0, 0, 100, 8)).should be_false
+    disclosure.message_fits?(Rect.new(0, 0, 17, 30)).should be_false
+  end
+
   # Measured in terminal COLUMNS, not characters. A Hangul syllable is two cells, so 40 of
   # them are 80 columns and have to wrap even though the character count is well under the
   # budget — a character-counted wrap would hand `Screen#text` a line it then clips.

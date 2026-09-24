@@ -41,19 +41,20 @@ module Gori::Tui
     # The source format, for the card title and the Runner's result toast — one source
     # so the popup, the toast and `gori run import` can't disagree about what was imported.
     def label : String
-      Import.label(@kind)
+      @kind == :project_archive ? "project archive" : Import.label(@kind)
     end
 
     private def blurb : String
       case @kind
-      when :har      then "Load flows from a browser or proxy HAR export into History."
-      when :urls     then "Load a text file of URLs into History — one URL per line."
-      when :oas      then "Build request templates from an OpenAPI spec into History."
-      when :postman  then "Build request templates from a Postman Collection v2 export."
-      when :insomnia then "Build request templates from an Insomnia v4 JSON export."
-      when :burp     then "Load saved Burp items into History — request and response, byte-exact."
-      when :wsdl     then "Build request templates from a WSDL 1.1 service — one per operation."
-      else                "Load flows into History."
+      when :project_archive then "Read a project archive and add it to this machine's project list."
+      when :har             then "Load flows from a browser or proxy HAR export into History."
+      when :urls            then "Load a text file of URLs into History — one URL per line."
+      when :oas             then "Build request templates from an OpenAPI spec into History."
+      when :postman         then "Build request templates from a Postman Collection v2 export."
+      when :insomnia        then "Build request templates from an Insomnia v4 JSON export."
+      when :burp            then "Load saved Burp items into History — request and response, byte-exact."
+      when :wsdl            then "Build request templates from a WSDL 1.1 service — one per operation."
+      else                       "Load flows into History."
       end
     end
 

@@ -165,20 +165,31 @@ end
 
 describe Gori::Tui::ProjectPicker do
   describe ".space_entries" do
-    it "is byte-identical to the old menu when nothing is marked" do
-      ProjectPicker.space_entries(0).map(&.label).should eq(["Open", "Rename", "Compress", "Delete"])
+    it "offers single-project archive actions when nothing is marked" do
+      ProjectPicker.space_entries(0).map(&.label).should eq([
+        "Open", "Rename", "Compress", "Export (cursor)", "Import archive", "Delete",
+      ])
     end
 
     # The AC of a batch menu: a delete opened over 3 marks must say it is about 3, and the
     # single-target verbs must say they are not.
     it "says what Delete will take, and marks the others cursor-only" do
       labels = ProjectPicker.space_entries(3).map(&.label)
-      labels.should eq(["Open (cursor)", "Rename (cursor)", "Compress (cursor)", "Delete 3 projects", "Clear marks"])
+      labels.should eq([
+        "Open (cursor)", "Rename (cursor)", "Compress (cursor)", "Export (cursor)",
+        "Delete 3 projects", "Import archive", "Clear marks",
+      ])
     end
 
-    it "keeps the mnemonics stable, and adds only 'n' for the mark-only entry" do
-      ProjectPicker.space_entries(2).map(&.key).should eq(['o', 'r', 'c', 'd', 'n'])
-      ProjectPicker.space_entries(2).map(&.action).should eq([:open, :rename, :compress, :delete, :mark_clear])
+    it "keeps the mnemonics for archive actions and marks clear distinct" do
+      ProjectPicker.space_entries(2).map(&.key).should eq(['o', 'r', 'c', 'e', 'd', 'i', 'n'])
+      ProjectPicker.space_entries(2).map(&.action).should eq([
+        :open, :rename, :compress, :archive_export, :delete, :archive_import, :mark_clear,
+      ])
+    end
+
+    it "offers import from the empty picker search row" do
+      ProjectPicker::IMPORT_ONLY_ENTRIES.map(&.action).should eq([:archive_import])
     end
 
     it "does not pluralise a single mark" do

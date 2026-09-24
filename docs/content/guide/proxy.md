@@ -669,6 +669,19 @@ Malformed entries are skipped rather than aborting the whole import. OpenAPI 3.x
 
 The same sources are scriptable headless: `gori run import --postman PATH` (and `--har` / `--urls` / `--oas` / `--insomnia` / `--burp` / `--wsdl` / `--curl`, where `--curl -` reads stdin), and the MCP `import_flows` tool.
 
+## Project archives {#project-archives}
+
+To hand off a whole engagement or keep a snapshot before a risky change, export the project from the picker with `Space` → **Export (cursor)**, or from the CLI:
+
+```bash
+gori run project export "Acme API" -o acme-api.gori
+gori run project import acme-api.gori
+```
+
+The archive is one compact `.gori` file containing a manifest and a consistent database snapshot. Export uses SQLite's WAL-aware snapshot, so committed traffic is included while the project remains open. Import creates a separate project with a fresh id; workspace bindings and runtime locks stay on the source machine. In the picker, `Space` → **Import archive** opens the file picker, including from the empty Search row.
+
+Projects can contain request and response credentials, session slots, env values and proxy auth. Before an export or import, gori displays counts and whether proxy credentials are configured. The archive contains the full database without redaction; keep the file as carefully as the project itself. CLI export refuses an existing destination unless `--force` is passed. See the [CLI reference](/reference/cli/#project-export) for collision and schema behavior.
+
 ## Host Overrides
 
 Host overrides are a `/etc/hosts`-style map: dial a specific IP for a hostname without changing DNS. Two layers exist:

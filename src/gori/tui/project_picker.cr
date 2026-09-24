@@ -5,6 +5,7 @@ require "../capture_status"
 require "../agent_presence"
 require "../project"
 require "../project_registry"
+require "../project_archive"
 require "../project_search"
 require "../update"
 require "../fuzzy"
@@ -20,6 +21,9 @@ require "./settings_view"
 require "./preferences_view"
 require "./compact_overlay"
 require "./project_search_overlay"
+require "./export_overlay"
+require "./import_overlay"
+require "./name_prompt_overlay"
 require "./viewport"
 
 module Gori::Tui
@@ -70,17 +74,22 @@ module Gori::Tui
       SpaceEntry.new('o', "Open", :open),
       SpaceEntry.new('r', "Rename", :rename),
       SpaceEntry.new('c', "Compress", :compress),
+      SpaceEntry.new('e', "Export (cursor)", :archive_export),
+      SpaceEntry.new('i', "Import archive", :archive_import),
       SpaceEntry.new('d', "Delete", :delete),
     ]
+    IMPORT_ONLY_ENTRIES = [SpaceEntry.new('i', "Import archive", :archive_import)]
 
-    # The menu while marks are set. Delete is the batch verb and says so; the other three
+    # The menu while marks are set. Delete is the batch verb and says so; the other four
     # are named SINGLE-target explicitly, the way the Runner tags its HISTORY_CURSOR_ONLY
-    # verbs, so a menu opened over 3 marks can't read as an offer to do all three:
+    # verbs, so a menu opened over 3 marks can't read as an offer to do all four:
     #   • Open returns ONE project (that is the picker's whole return value).
     #   • Rename edits one display name.
     #   • Compress measures and VACUUMs synchronously on this event loop, with a per-project
     #     byte estimate in its popup — N of those is N multi-second freezes and an estimate
     #     that would be a fiction for every individual project.
+    #   • Export snapshots the cursor project; archives don't combine marked projects.
+    # Import always creates a separate project and applies to no marked target.
     # Clear marks mirrors the in-app `*.mark-clear` entry, mnemonic and all.
     #
     # Class-level and pure so the labels a destructive menu shows can be pinned in a spec:
@@ -91,7 +100,9 @@ module Gori::Tui
         SpaceEntry.new('o', "Open (cursor)", :open),
         SpaceEntry.new('r', "Rename (cursor)", :rename),
         SpaceEntry.new('c', "Compress (cursor)", :compress),
+        SpaceEntry.new('e', "Export (cursor)", :archive_export),
         SpaceEntry.new('d', "Delete #{plural_projects(marked)}", :delete),
+        SpaceEntry.new('i', "Import archive", :archive_import),
         SpaceEntry.new('n', "Clear marks", :mark_clear),
       ]
     end
@@ -128,7 +139,7 @@ module Gori::Tui
       @query = "" # current search filter; only editable when Search row selected
       @selected = 0
       @results_scroll = 0
-      @mode = :list # :list | :new | :confirm | :space | :rename | :settings | :theme | :compress | :global_search | + BUSY_LABELS
+      @mode = :list # :list | :new | :confirm | :space | :rename | :settings | :theme | :compress | archive forms | + BUSY_LABELS
       @name = ""
       @desc = ""
       @new_field = :name # :name | :desc (only in :new mode)
@@ -142,9 +153,17 @@ module Gori::Tui
       @pending_deletes = [] of Project
       # Multi-select over the project rows; every batch verb reads it through target_projects.
       @marks = ProjectMarks.new
-      # Space menu over a project row (open/rename/compress/delete).
+      # Space menu over a project row (open/rename/compress/export/import/delete).
       @space_selected = 0
       @space_project = nil.as(Project?)
+      @archive_export_overlay = nil.as(ExportOverlay?)
+      @archive_import_overlay = nil.as(ImportOverlay?)
+      @archive_name_overlay = nil.as(NamePromptOverlay?)
+      @archive_export_project = nil.as(Project?)
+      @archive_export_path = ""
+      @archive_export_overwrite = false
+      @prepared_export = nil.as(ProjectArchive::PreparedExport?)
+      @prepared_import = nil.as(ProjectArchive::PreparedImport?)
       # Compress scope popup (space → Compress): choose what to strip, confirm, VACUUM.
       # The picker holds no open Store, so it acts on the project's db file directly.
       @compact = nil.as(CompactOverlay?)
@@ -227,15 +246,18 @@ module Gori::Tui
         when Termisu::Event::Key
           @companion.wake_on_input # any key re-arms Miss Ring's idle clock (self-gated while off)
           result = case @mode
-                   when :new           then handle_new(ev)
-                   when :confirm       then handle_confirm(ev)
-                   when :settings      then handle_preferences(ev)
-                   when :theme         then handle_theme(ev)
-                   when :space         then handle_space(ev)
-                   when :rename        then handle_rename(ev)
-                   when :compress      then handle_compress(ev)
-                   when :global_search then handle_global_search(ev)
-                   else                     handle_list(ev)
+                   when :new                 then handle_new(ev)
+                   when :confirm             then handle_confirm(ev)
+                   when :settings            then handle_preferences(ev)
+                   when :theme               then handle_theme(ev)
+                   when :space               then handle_space(ev)
+                   when :rename              then handle_rename(ev)
+                   when :compress            then handle_compress(ev)
+                   when :archive_export_path then handle_archive_export_path(ev)
+                   when :archive_import_path then handle_archive_import_path(ev)
+                   when :archive_import_name then handle_archive_import_name(ev)
+                   when :global_search       then handle_global_search(ev)
+                   else                           handle_list(ev)
                    end
           case result
           when Project then return result
@@ -255,11 +277,20 @@ module Gori::Tui
             @preferences.set_preedit(ev.text)
           elsif @mode == :global_search
             @search.try(&.set_preedit(ev.text))
+          elsif @mode == :archive_export_path
+            @archive_export_overlay.try(&.set_preedit(ev.text))
+          elsif @mode == :archive_import_path
+            @archive_import_overlay.try(&.set_preedit(ev.text))
+          elsif @mode == :archive_import_name
+            @archive_name_overlay.try(&.set_preedit(ev.text))
           else
             @preedit = ev.text
           end
         end
       end
+    ensure
+      @prepared_export.try(&.close)
+      @prepared_import.try(&.close)
     end
 
     # --- update check --------------------------------------------------------
@@ -710,8 +741,10 @@ module Gori::Tui
     # project dir, compress strips + VACUUMs its db in place.
     private def commit_confirmed : Nil
       case @confirm_kind
-      when :compress then commit_compress
-      else                commit_delete
+      when :compress              then commit_compress
+      when :archive_export        then commit_archive_export
+      when :archive_import_review then start_archive_import_name
+      else                             commit_delete
       end
     end
 
@@ -971,6 +1004,8 @@ module Gori::Tui
     end
 
     private def cancel_confirm : Nil
+      close_archive_export if @confirm_kind == :archive_export
+      close_archive_import if @confirm_kind == :archive_import_review
       @mode = :list
       @confirm = nil
       @confirm_kind = :delete
@@ -1062,25 +1097,27 @@ module Gori::Tui
     end
 
     private def space_entries : Array(SpaceEntry)
+      return IMPORT_ONLY_ENTRIES unless @space_project || selected_project
       ProjectPicker.space_entries(@marks.size)
     end
 
     # Where `space` opens the action menu: a project row, marks or no marks. It was briefly
-    # allowed from New/Temp while marks were set, and that was wrong twice over — three of the
-    # five entries (Open/Rename/Compress) are cursor-only, so they closed the menu in silence
-    # with no cursor project to act on, and the footer had to grow "space actions" on the row
-    # that already carries ctrl-n/ctrl-t, pushing `ctrl-c quit` off an 80-column terminal.
+    # allowed from New/Temp while marks were set, and that was wrong twice over — four of the
+    # seven entries (Open/Rename/Compress/Export) are cursor-only, so they closed the menu in
+    # silence with no cursor project to act on. The footer then had to grow "space actions" on
+    # the row that already carries ctrl-n/ctrl-t, pushing `ctrl-c quit` off an 80-column terminal.
     # Marks still reach a delete from anywhere via ctrl-d, which needs no cursor row.
     #
     # THE single source of the rule: the key ladder and the footer hint (whose "space actions"
     # token is clickable) both read it, so the row can never offer a button the chord doesn't
-    # honour. The Search row is excluded by the same rule — it is a text field, so space types.
+    # honour. The empty Search row opens Import; a non-empty search keeps spaces as query text.
     private def space_opens_menu? : Bool
-      @selected >= 3
+      @selected >= 3 || (@selected == 2 && @query.empty?)
     end
 
     private def open_space_menu : Nil
-      return unless project = selected_project
+      project = selected_project
+      return unless project || (@selected == 2 && @query.empty?)
       @space_project = project
       @space_selected = 0
       @mode = :space
@@ -1094,12 +1131,15 @@ module Gori::Tui
 
     # Delete reads target_projects (marks, else the cursor) rather than the row the menu was
     # opened on, so it is the SAME resolver ctrl-d and the footer button go through. The
-    # other three are single-target by design and stay on the cursor project — the menu says
+    # other four are single-target by design and stay on the cursor project — the menu says
     # so while marks are set (see ProjectPicker.space_entries).
     private def activate_space_entry(entry : SpaceEntry) : Project | Symbol?
       project = @space_project || selected_project
       close_space_menu
       case entry.action
+      when :archive_import
+        start_archive_import
+        return nil
       when :delete
         request_delete
         return nil
@@ -1116,6 +1156,9 @@ module Gori::Tui
         nil
       when :compress
         start_compress(project)
+        nil
+      when :archive_export
+        start_archive_export(project)
         nil
       end
     end
@@ -1168,6 +1211,201 @@ module Gori::Tui
       @pending_rename = nil
       @rename_name = ""
       @preedit = ""
+    end
+
+    # --- project archive import/export --------------------------------------
+
+    private def start_archive_export(project : Project) : Nil
+      @archive_export_project = project
+      default_path = File.join(Dir.current, "#{@registry.slug_of(project)}.gori")
+      @archive_export_overlay = ExportOverlay.new(:project_archive, default_path)
+      @preedit = ""
+      @mode = :archive_export_path
+    end
+
+    private def handle_archive_export_path(ev : Termisu::Event::Key) : Project | Symbol?
+      overlay = @archive_export_overlay
+      return nil unless overlay
+      @preedit = ""
+      case overlay.handle_key(ev)
+      when :cancel
+        close_archive_export
+        @mode = :list
+      when :commit
+        prepare_archive_export(overlay)
+      end
+      nil
+    end
+
+    private def prepare_archive_export(overlay : ExportOverlay) : Nil
+      project = @archive_export_project
+      return close_archive_export unless project
+      @archive_export_path = overlay.resolved_path
+      @archive_export_overwrite = ProjectArchive.destination_exists?(@archive_export_path)
+      @archive_export_overlay = nil
+      @mode = :preparing_archive
+      render
+      prepared = ProjectArchive.prepare_export(project)
+      @prepared_export = prepared
+      destination_note = @archive_export_overwrite ? "\nReplace the existing file at #{@archive_export_path}?" : ""
+      dialog = ConfirmDialog.new("EXPORT PROJECT",
+        "#{ProjectArchive.disclosure(prepared.inventory)}#{destination_note}",
+        confirm_label: "export", cancel_label: "cancel", danger: false)
+      w, h = @backend.size
+      unless dialog.message_fits?(Rect.new(0, 0, w, h))
+        prepared.close
+        close_archive_export
+        set_flash("window too small to review a project export — make it taller", ok: false)
+        return
+      end
+      @confirm = dialog
+      @confirm_kind = :archive_export
+      @mode = :confirm
+    rescue ex : Gori::Error | File::Error | IO::Error | DB::Error | SQLite3::Exception
+      close_archive_export
+      @mode = :list
+      set_flash("project export failed: #{ex.message}", ok: false)
+    end
+
+    private def commit_archive_export : Nil
+      prepared = @prepared_export
+      unless prepared
+        cancel_confirm
+        return
+      end
+      path = @archive_export_path
+      @mode = :exporting_archive
+      render
+      begin
+        destination = prepared.write(path, overwrite: @archive_export_overwrite)
+        set_flash("exported project #{prepared.project.name.inspect} to #{destination}", ok: true)
+      rescue ex : Gori::Error | File::Error | IO::Error | DB::Error | SQLite3::Exception
+        set_flash("project export failed: #{ex.message}", ok: false)
+      ensure
+        close_archive_export
+        @mode = :list
+        @confirm = nil
+        @confirm_kind = :delete
+        @pending_deletes = [] of Project
+        @pending_compact = nil
+        @compact_project = nil
+      end
+    end
+
+    private def start_archive_import : Nil
+      @archive_import_overlay = ImportOverlay.new(:project_archive)
+      @preedit = ""
+      @mode = :archive_import_path
+    end
+
+    private def handle_archive_import_path(ev : Termisu::Event::Key) : Project | Symbol?
+      overlay = @archive_import_overlay
+      return nil unless overlay
+      @preedit = ""
+      case overlay.handle_key(ev)
+      when :cancel
+        close_archive_import
+        @mode = :list
+      when :commit
+        prepare_archive_import(overlay.path)
+      end
+      nil
+    end
+
+    private def prepare_archive_import(path : String) : Nil
+      @archive_import_overlay = nil
+      @mode = :preparing_archive
+      render
+      prepared = ProjectArchive.prepare_import(Path[path].expand(home: true).to_s)
+      @prepared_import = prepared
+      dialog = ConfirmDialog.new("IMPORT PROJECT",
+        "Import archive #{prepared.manifest.project_name.inspect}?\n" \
+        "#{ProjectArchive.disclosure(prepared.inventory)}",
+        confirm_label: "continue", cancel_label: "cancel", danger: false)
+      w, h = @backend.size
+      unless dialog.message_fits?(Rect.new(0, 0, w, h))
+        prepared.close
+        close_archive_import
+        set_flash("window too small to review a project archive — make it taller", ok: false)
+        return
+      end
+      @confirm = dialog
+      @confirm_kind = :archive_import_review
+      @mode = :confirm
+    rescue ex : Gori::Error | File::Error | IO::Error | DB::Error | SQLite3::Exception
+      close_archive_import
+      @mode = :list
+      set_flash("project import failed: #{ex.message}", ok: false)
+    end
+
+    private def start_archive_import_name : Nil
+      prepared = @prepared_import
+      unless prepared
+        cancel_confirm
+        return
+      end
+      @confirm = nil
+      @confirm_kind = :delete
+      @archive_name_overlay = NamePromptOverlay.new("IMPORT PROJECT",
+        "Archive contents reviewed. Choose a display name for the new project.",
+        initial: prepared.manifest.project_name, action: "import", noun: "project name")
+      @preedit = ""
+      @mode = :archive_import_name
+    end
+
+    private def handle_archive_import_name(ev : Termisu::Event::Key) : Project | Symbol?
+      return :quit if ev.ctrl_c?
+      overlay = @archive_name_overlay
+      return nil unless overlay
+      @preedit = ""
+      case overlay.handle_key(ev)
+      when :cancel
+        close_archive_import
+        @mode = :list
+      when :commit
+        commit_archive_import(overlay)
+      end
+      nil
+    end
+
+    private def commit_archive_import(overlay : NamePromptOverlay) : Nil
+      prepared = @prepared_import
+      return close_archive_import unless prepared
+      @mode = :importing_archive
+      render
+      begin
+        project = prepared.import_into(@registry, overlay.name)
+        close_archive_import
+        @query = ""
+        @results_scroll = 0
+        reload_projects
+        if index = filtered_projects.index { |candidate| candidate.dir == project.dir }
+          @selected = index + 3
+        end
+        set_flash("imported project #{project.name.inspect} — #{prepared.inventory.summary}", ok: true)
+      rescue ex : Gori::Error | File::Error | IO::Error
+        # Keep the name field open so an existing project collision can be fixed in place.
+        @archive_import_overlay = nil
+        @archive_name_overlay = overlay
+        @mode = :archive_import_name
+        set_flash("project import failed: #{ex.message}", ok: false)
+      end
+    end
+
+    private def close_archive_export : Nil
+      @prepared_export.try(&.close)
+      @prepared_export = nil
+      @archive_export_overlay = nil
+      @archive_export_project = nil
+      @archive_export_path = ""
+      @archive_export_overwrite = false
+    end
+
+    private def close_archive_import : Nil
+      @prepared_import.try(&.close)
+      @prepared_import = nil
+      @archive_import_overlay = nil
+      @archive_name_overlay = nil
     end
 
     # --- compress (space → Compress) -----------------------------------------
@@ -1417,17 +1655,44 @@ module Gori::Tui
         return picker_wheel(ev.button.wheel_up? ? -3 : 3)
       end
       case @mode
-      when :confirm       then handle_confirm_mouse(w, h, mx, my)
-      when :settings      then handle_preferences_mouse(w, h, mx, my)
-      when :theme         then handle_theme_mouse(w, h, mx, my)
-      when :space         then handle_space_mouse(w, h, mx, my)
-      when :compress      then handle_compress_mouse(w, h, mx, my)
-      when :global_search then handle_global_search_mouse(w, h, mx, my)
-      when :new, :rename  then nil # text form — keyboard only (cursor placement is Phase 2)
+      when :confirm             then handle_confirm_mouse(w, h, mx, my)
+      when :settings            then handle_preferences_mouse(w, h, mx, my)
+      when :theme               then handle_theme_mouse(w, h, mx, my)
+      when :space               then handle_space_mouse(w, h, mx, my)
+      when :compress            then handle_compress_mouse(w, h, mx, my)
+      when :global_search       then handle_global_search_mouse(w, h, mx, my)
+      when :archive_export_path then handle_archive_export_click(w, h, mx, my)
+      when :archive_import_path then handle_archive_import_click(w, h, mx, my)
+      when :archive_import_name then handle_archive_name_click(w, h, mx, my)
+      when :new, :rename        then nil # text form — keyboard only (cursor placement is Phase 2)
       else
         # A blocking step (VACUUM, measure, the batch rm_rf) owns the loop — ignore clicks
         # rather than let one land on the list drawn under the busy card.
         BUSY_LABELS.has_key?(@mode) ? nil : handle_list_mouse(mx, my)
+      end
+    end
+
+    private def handle_archive_export_click(w : Int32, h : Int32, mx : Int32, my : Int32) : Nil
+      outcome = @archive_export_overlay.try(&.handle_click(Rect.new(0, 0, w, h), mx, my))
+      if outcome == :cancel
+        close_archive_export
+        @mode = :list
+      end
+    end
+
+    private def handle_archive_import_click(w : Int32, h : Int32, mx : Int32, my : Int32) : Nil
+      outcome = @archive_import_overlay.try(&.handle_click(Rect.new(0, 0, w, h), mx, my))
+      if outcome == :cancel
+        close_archive_import
+        @mode = :list
+      end
+    end
+
+    private def handle_archive_name_click(w : Int32, h : Int32, mx : Int32, my : Int32) : Nil
+      outcome = @archive_name_overlay.try(&.handle_click(Rect.new(0, 0, w, h), mx, my))
+      if outcome == :cancel
+        close_archive_import
+        @mode = :list
       end
     end
 
@@ -1473,13 +1738,15 @@ module Gori::Tui
 
     private def picker_wheel(delta : Int32) : Nil
       case @mode
-      when :settings               then @preferences.wheel(delta)
-      when :theme                  then (@theme_card.move_field(delta); preview_theme)
-      when :space                  then @space_selected = (@space_selected + delta.sign).clamp(0, space_entries.size - 1)
-      when :compress               then @compact.try(&.move(delta.sign))
-      when :global_search          then @search.try(&.wheel(delta))
-      when :new, :confirm, :rename then nil # nothing to scroll
-      when .in?(BUSY_LABELS.keys)  then nil # a blocking step owns the loop
+      when :settings                                     then @preferences.wheel(delta)
+      when :theme                                        then (@theme_card.move_field(delta); preview_theme)
+      when :space                                        then @space_selected = (@space_selected + delta.sign).clamp(0, space_entries.size - 1)
+      when :compress                                     then @compact.try(&.move(delta.sign))
+      when :global_search                                then @search.try(&.wheel(delta))
+      when :archive_export_path                          then @archive_export_overlay.try(&.move(delta))
+      when :archive_import_path                          then @archive_import_overlay.try(&.move(delta))
+      when :new, :confirm, :rename, :archive_import_name then nil # nothing to scroll
+      when .in?(BUSY_LABELS.keys)                        then nil # a blocking step owns the loop
       else
         # The picker's wheel moves the SELECTION (it has no independent scroll of its own),
         # so it is an arrow by another name and ends a ⇧arrow range exactly as one does.
@@ -1686,6 +1953,8 @@ module Gori::Tui
         render_new(screen, cx, cw, w, h)
       when :rename
         render_rename(screen, cx, cw, w, h)
+      when :archive_export_path, :archive_import_path, :archive_import_name
+        render_archive_overlay(screen, w, h)
       else
         render_list(screen, cx, cw, w, h)
         @confirm.try(&.render(screen, Rect.new(0, 0, w, h))) if @mode == :confirm
@@ -1710,6 +1979,15 @@ module Gori::Tui
       # backend forwards only the cells that changed this frame.
       @backend.flush(sync: @resized)
       @resized = false
+    end
+
+    private def render_archive_overlay(screen : Screen, w : Int32, h : Int32) : Nil
+      area = Rect.new(0, 0, w, h)
+      case @mode
+      when :archive_export_path then @archive_export_overlay.try(&.render(screen, area))
+      when :archive_import_path then @archive_import_overlay.try(&.render(screen, area))
+      when :archive_import_name then @archive_name_overlay.try(&.render(screen, area))
+      end
     end
 
     # Centered like a game main menu: title + menu block vertically centered,
@@ -1835,6 +2113,12 @@ module Gori::Tui
                  "↑/↓ select   ‹/› keep   space toggle   ↵ compress   esc close"
                when @mode == :global_search
                  @search.try(&.hint) || ""
+               when @mode == :archive_export_path
+                 @archive_export_overlay.try(&.hint) || ""
+               when @mode == :archive_import_path
+                 @archive_import_overlay.try(&.hint) || ""
+               when @mode == :archive_import_name
+                 @archive_name_overlay.try(&.hint) || ""
                when label = BUSY_LABELS[@mode]?
                  # Every blocking mode, off the one table — :measuring used to fall through
                  # to the :space arm below and label its busy card with the action menu's
@@ -1922,10 +2206,13 @@ module Gori::Tui
         HintToken.new("↑/↓ select"),
         HintToken.new("↵ open", :open),
       ]
-      # A project row is selected → `space` opens its action menu; on the New/Temp/Search
-      # rows that chord does something else entirely, so the token (and its button) is
-      # offered only where it applies, exactly as the flat hint used to switch.
-      tokens << HintToken.new("space actions", :space) if space_opens_menu?
+      # A project row opens its action menu; the empty Search row exposes Import even when
+      # the registry is empty. A non-empty query keeps space as an input character.
+      if @selected == 2 && @query.empty?
+        tokens << HintToken.new("space import", :space)
+      elsif @selected >= 3
+        tokens << HintToken.new("space actions", :space)
+      end
       # On a project row the mark gesture TAKES the search hint's place rather than joining
       # it (and takes esc's new first meaning with it once marks are live). This row is the
       # widest thing the picker draws and it trims from the right, so a token added without
@@ -1936,7 +2223,7 @@ module Gori::Tui
       if @selected >= 3
         tokens << HintToken.new("tab mark")
         tokens << HintToken.new("esc clear") unless @marks.empty?
-      else
+      elsif !(@selected == 2 && @query.empty?)
         tokens << HintToken.new("type to search")
       end
       if @selected < 3
@@ -1998,10 +2285,11 @@ module Gori::Tui
       # `return`, not a bare call: `activate`'s Project IS how the picker says "open
       # this" (see `run`). Without it the footer button did nothing, and on the Temp row
       # it silently created a project directory on disk and abandoned it, once per click.
-      when :open  then return activate
-      when :space then open_space_menu
-      when :temp  then return open_temp
-      when :quit  then return :quit
+      when :open           then return activate
+      when :space          then open_space_menu
+      when :archive_import then start_archive_import
+      when :temp           then return open_temp
+      when :quit           then return :quit
       when :new
         name = @query.strip
         return safe_create(name) unless name.empty?
@@ -2026,6 +2314,7 @@ module Gori::Tui
     # plural. Sized for BOTH the widest label and this title: Frame.card ellipsizes a title
     # past `w - 4`, and a menu that silently truncates its own count is worse than no count.
     private def space_menu_title : String
+      return "IMPORT" unless @space_project || selected_project
       @marks.empty? ? "SPACE" : "SPACE · #{@marks.size} MARKED"
     end
 
@@ -2068,9 +2357,12 @@ module Gori::Tui
     # each. Keyed by @mode so `render` needs no growing `||` chain, and so a mode added
     # without a label can't silently paint a blank card.
     BUSY_LABELS = {
-      :measuring   => " Measuring … ",
-      :compressing => " Compressing … ",
-      :deleting    => " Deleting … ",
+      :measuring         => " Measuring … ",
+      :compressing       => " Compressing … ",
+      :deleting          => " Deleting … ",
+      :preparing_archive => " Reading archive … ",
+      :exporting_archive => " Writing archive … ",
+      :importing_archive => " Importing project … ",
     }
 
     private def render_busy(screen : Screen, w : Int32, h : Int32) : Nil

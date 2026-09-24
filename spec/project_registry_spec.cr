@@ -95,6 +95,32 @@ describe Gori::ProjectRegistry do
     end
   end
 
+  it "refuses imports that collide with a display name, slug, or short id" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      same_name = reg.create("Existing")
+      id_owner = reg.create("Identifier owner")
+      File.write(File.join(id_owner.dir, Gori::ProjectRegistry::ID_FILE), "new-project")
+      source = File.tempname("gori-import-source", ".db")
+      File.write(source, "validated archive database")
+
+      begin
+        same_name_error = expect_raises(Gori::Error) { reg.import_database("Existing", source) }
+        same_name_error.message.not_nil!.should contain("already exists")
+        slug_error = expect_raises(Gori::Error) { reg.import_database("Existing!", source) }
+        slug_error.message.not_nil!.should contain("slug")
+        id_error = expect_raises(Gori::Error) { reg.import_database("New Project", source) }
+        id_error.message.not_nil!.should contain("short id")
+
+        reg.list.map(&.dir).sort!.should eq([same_name.dir, id_owner.dir].sort)
+        File.exists?(same_name.db_path).should be_true
+        File.exists?(id_owner.db_path).should be_true
+      ensure
+        File.delete?(source)
+      end
+    end
+  end
+
   it "resolves a project by a unique id prefix (git-style abbreviation)" do
     with_root do |root|
       reg = Gori::ProjectRegistry.new(root)
