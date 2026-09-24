@@ -26,6 +26,11 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   end
 
   private def begin_bulk_paste? : Bool
+    # A modal that is itself a multi-line editor (the curl paste box) takes the paste whole,
+    # for the same reason a tab body does; every other modal keeps the keystroke path.
+    if ov = active_overlay
+      return ov.accepts_bulk_paste?
+    end
     return false unless paste_body_context?
     @tabs[@active_tab]?.try(&.accepts_bulk_paste?) || false
   end
@@ -214,7 +219,14 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     return false unless buf
     text = buf.to_s
     return false if text.empty?
-    return true if @tabs[@active_tab]?.try(&.paste_text(text))
+    # The modal the paste began over, when one took it (`begin_bulk_paste?`) — a click is
+    # swallowed mid-paste, so it is still the one on top.
+    taken = if ov = active_overlay
+              ov.paste_text(text)
+            else
+              @tabs[@active_tab]?.try(&.paste_text(text))
+            end
+    return true if taken
     replay_paste(text)
     true
   end

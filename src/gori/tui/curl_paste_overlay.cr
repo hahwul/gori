@@ -57,6 +57,17 @@ module Gori::Tui
       true
     end
 
+    # A copied command routinely carries a large `--data-raw` body, which is the paste the
+    # keystroke path is quadratic in — so the card takes it whole, as one edit.
+    def accepts_bulk_paste? : Bool
+      true
+    end
+
+    def paste_text(text : String) : Bool
+      @editor.insert_text(text)
+      true
+    end
+
     def handle_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
       return :cancel if key.escape?
@@ -131,22 +142,20 @@ module Gori::Tui
       t = @editor.text
       return {@preview, @preview_ok} if @preview_for == t
       @preview_for = t
-      @preview, @preview_ok = CurlPasteOverlay.describe(t)
+      @preview, @preview_ok = CurlPasteOverlay.describe(t, @mode)
       {@preview, @preview_ok}
     end
 
-    # Public for the spec: the preview line for `text`, and whether it would commit.
-    def self.describe(text : String) : {String, Bool}
+    # Public for the spec: the preview line for `text`, and whether it would commit to `mode`.
+    # Repeater opens a sub-tab per request, capped like every batch open.
+    def self.describe(text : String, mode : Symbol = :repeater) : {String, Bool}
       return {"waiting for a paste — curl 'https://…' -H '…' --data-raw '…'", false} if text.blank?
       return {"… the command continues on the next line", false} if Gori::Import::Shell.incomplete?(text)
       parsed = Gori::Import::Curl.parse(text)
       if parsed.requests.empty?
         return {"✗ #{parsed.skipped.first? || "no request"}", false}
       end
-      if parsed.requests.size > 1 || !parsed.skipped.empty?
-        extra = parsed.skipped.empty? ? "" : " · #{parsed.skipped.size} refused"
-        return {"#{parsed.requests.size} requests#{extra}", parsed.skipped.empty?}
-      end
+      return describe_many(parsed, mode) if parsed.requests.size > 1 || !parsed.skipped.empty?
       req = parsed.requests.first
       notes = (parsed.notes + req.notes).size
       tail = notes > 0 ? " · #{notes} note#{notes == 1 ? "" : "s"}" : ""
@@ -154,6 +163,18 @@ module Gori::Tui
       {"#{req.method} #{req.url}#{proto}#{tail}", true}
     rescue ex : Gori::Error
       {"✗ #{ex.message}", false}
+    end
+
+    # More than one request, or some refused: the count, and whether `mode` would take it —
+    # History imports what it can and counts the rest, Repeater opens all or nothing and caps
+    # the tab count like every batch open.
+    private def self.describe_many(parsed : Gori::Import::Curl::Parsed, mode : Symbol) : {String, Bool}
+      n = parsed.requests.size
+      if mode == :repeater && n > Runner::BATCH_SUBTAB_CAP
+        return {"✗ #{n} requests is over the #{Runner::BATCH_SUBTAB_CAP}-tab cap — use Import: cURL", false}
+      end
+      extra = parsed.skipped.empty? ? "" : " · #{parsed.skipped.size} refused"
+      {"#{n} requests#{extra}", parsed.skipped.empty? || mode == :history}
     end
 
     def render(screen : Screen, area : Rect) : Nil

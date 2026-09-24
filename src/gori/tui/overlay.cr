@@ -240,6 +240,21 @@ module Gori::Tui
       !ev.key.enter?
     end
 
+    # Whether a bracketed paste over this modal is collected and handed over whole
+    # (`paste_text`) instead of arriving key by key — the tab tier's `accepts_bulk_paste?`,
+    # one tier up. False by default: only a card whose body IS a multi-line editor opts in,
+    # because only there do the two paths build the same buffer, and only there does the
+    # per-keystroke cost (quadratic in the paste, `runner/paste.cr`) matter.
+    def accepts_bulk_paste? : Bool
+      false
+    end
+
+    # The whole paste, line breaks as `\n`. False hands it back to the Runner, which replays
+    # it keystroke by keystroke.
+    def paste_text(text : String) : Bool
+      false
+    end
+
     # Runs on a :commit outcome; returns true when the overlay should close (false keeps
     # it open — e.g. a validation error keeps the form up). Supplied at the open-site.
     property on_commit : Proc(Bool)?

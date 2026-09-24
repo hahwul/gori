@@ -62,6 +62,15 @@ describe Gori::Tui::CurlPasteOverlay do
     ov.text.should eq("curl -d @f https://a.test/")
   end
 
+  # A command carrying a big --data-raw is the paste the keystroke path is quadratic in.
+  it "takes a bracketed paste whole, as one edit" do
+    ov = CurlPasteOverlay.new(:repeater)
+    ov.accepts_bulk_paste?.should be_true
+    ov.paste_text("curl https://a.test/ \\\n  --data-raw '#{"x" * 50_000}'").should be_true
+    ov.text.lines.size.should eq(2)
+    ov.preview.first.should eq("POST https://a.test/")
+  end
+
   it "esc cancels and a click away dismisses, neither committing" do
     h = OverlayHarness.new(CurlPasteOverlay.new(:repeater))
     h.type("curl https://a.test/")
@@ -81,6 +90,14 @@ describe Gori::Tui::CurlPasteOverlay do
 
     it "counts the requests of a multi-command paste" do
       CurlPasteOverlay.describe("curl https://a.test/1; curl https://a.test/2").should eq({"2 requests", true})
+    end
+
+    it "says a paste over the Repeater tab cap will not open, and History takes it" do
+      many = (1..(Runner::BATCH_SUBTAB_CAP + 1)).map { |i| "curl https://a.test/#{i}" }.join("\n")
+      line, ok = CurlPasteOverlay.describe(many, :repeater)
+      ok.should be_false
+      line.should contain("cap")
+      CurlPasteOverlay.describe(many, :history).last.should be_true
     end
 
     it "says why a paste would be refused, and when it is waiting for more" do
