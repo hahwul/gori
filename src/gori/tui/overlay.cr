@@ -74,6 +74,9 @@ module Gori::Tui
     AuthorizeIdentity
     CaImport
     Import
+    # The curl paste box (#1244) — one member for both of its destinations (a Repeater sub-tab,
+    # History), for the reason `Help` gives: they never coexist, and the title is per instance.
+    CurlPaste
     Export
     ScopeRule
     SequenceConfig
@@ -235,6 +238,21 @@ module Gori::Tui
     # it is; the confirm card overrides to take nothing — a clipboard is not a decision.
     def takes_pasted?(ev : Termisu::Event::Key) : Bool
       !ev.key.enter?
+    end
+
+    # Whether a bracketed paste over this modal is collected and handed over whole
+    # (`paste_text`) instead of arriving key by key — the tab tier's `accepts_bulk_paste?`,
+    # one tier up. False by default: only a card whose body IS a multi-line editor opts in,
+    # because only there do the two paths build the same buffer, and only there does the
+    # per-keystroke cost (quadratic in the paste, `runner/paste.cr`) matter.
+    def accepts_bulk_paste? : Bool
+      false
+    end
+
+    # The whole paste, line breaks as `\n`. False hands it back to the Runner, which replays
+    # it keystroke by keystroke.
+    def paste_text(text : String) : Bool
+      false
     end
 
     # Runs on a :commit outcome; returns true when the overlay should close (false keeps

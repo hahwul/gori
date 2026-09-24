@@ -42,8 +42,10 @@ describe Gori::Tui::ImportOverlay do
       backend.contains?(fragment).should be_true
       backend.contains?("Load flows into History.").should be_false
     end
-    # Every registered kind is described — no source can be added without a blurb.
-    Gori::Import::LABELS.size.should eq(7)
+    # Every registered kind is described — no source can be added without a blurb. `:curl` is
+    # the one kind this card never opens for: a curl command is pasted, not saved, so
+    # Import: cURL opens `CurlPasteOverlay` instead (#1244).
+    (Gori::Import::LABELS.keys - [:curl]).size.should eq(7)
   end
 
   it "centers the card in the body area" do

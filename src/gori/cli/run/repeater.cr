@@ -559,11 +559,13 @@ module Gori
       # expressions is how a source gets refused in one place and silently overwritten in the
       # other. `--flow` is deliberately NOT on this list — it doubles as provenance for a
       # hand-authored request, so `--flow 42 --request-stdin` is a legitimate pair.
-      def self.request_sources(*, file : String?, raw : String?, stdin : Bool) : Array(String)
+      def self.request_sources(*, file : String?, raw : String?, stdin : Bool,
+                               curl : String? = nil) : Array(String)
         sources = [] of String
         sources << "--request-file" if file
         sources << "--request-raw" if raw
         sources << "--request-stdin" if stdin
+        sources << "--curl" if curl
         sources
       end
 
@@ -581,7 +583,7 @@ module Gori
           return "gori run repeater create: #{sources.join(", ")} cannot be combined — pick one request source"
         end
         if sources.empty? && !flow
-          return "gori run repeater create: either --request-file, --request-raw, --request-stdin, or --flow is required"
+          return "gori run repeater create: either --request-file, --request-raw, --request-stdin, --curl, or --flow is required"
         end
         nil
       end
@@ -639,6 +641,7 @@ module Gori
         request_file : String? = nil
         request_raw : String? = nil
         request_stdin = false
+        curl_path : String? = nil
         name : String? = nil
         tags : String? = nil
         http2 = false
@@ -660,9 +663,10 @@ module Gori
           p.on("-fFILE", "--request-file=FILE", "Read raw HTTP request from FILE") { |v| request_file = v }
           p.on("-rRAW", "--request-raw=RAW", "Verbatim raw HTTP request string") { |v| request_raw = v }
           p.on("--request-stdin", "Read the raw HTTP request from stdin, byte-for-byte, as --request-file reads a file (`generator | gori run repeater create --target … --request-stdin`). Keeps a large or binary-derived request out of the argument vector, so it is not in the process listing and cannot hit the command-line length limit. Needs a pipe or a redirect (`< req.http`): a terminal is refused, because it would echo the request back") { request_stdin = true }
+          p.on("--curl=PATH", "Build the request from the curl command in PATH (- reads stdin: `pbpaste | gori run repeater create --curl -`). It also supplies --target (the URL's origin) and --http2 (curl's --http2) unless those are given; curl's transport flags (-k, -x, -L…) are ignored and named") { |v| curl_path = v }
           p.on("--name=NAME", "Custom repeater tab name") { |v| name = v }
           p.on("--tags=TAGS", "Free-text tags for grouping tabs (the TUI subtab label)") { |v| tags = v }
-          p.on("--http2", "Use HTTP/2 (default: false, or how --flow was captured)") { http2 = true; http2_given = true }
+          p.on("--http2", "Use HTTP/2 (default: false, how --flow was captured, or what --curl says)") { http2 = true; http2_given = true }
           # The other half of the toggle: without it a session cloned from an h2 flow
           # (`--flow=N`) inherited h2 and `repeater send` had no way to override it, so an
           # h2 capture could never be replayed as h1 from the CLI at all.
@@ -684,11 +688,11 @@ module Gori
         # pass through a flag, and creating the session WITHOUT it left a row whose request
         # was not the one they typed — reported as a clean "session #N created".
         parse_no_positionals(parser, args, "gori run repeater create",
-          "pass the request via --request-file/--request-raw/--request-stdin/--flow and the origin via --target")
+          "pass the request via --request-file/--request-raw/--request-stdin/--curl/--flow and the origin via --target")
 
         # ONE build of the source list, shared by the gate below and the `--flow` seeding
         # further down, so the two can never disagree about whether a request was handed in.
-        sources = request_sources(file: request_file, raw: request_raw, stdin: request_stdin)
+        sources = request_sources(file: request_file, raw: request_raw, stdin: request_stdin, curl: curl_path)
 
         # EVERY argv-only refusal goes above the read, because `--request-stdin` blocks until
         # EOF: a conflict, or a missing --target, used to drain the pipe first — and hang
@@ -698,7 +702,7 @@ module Gori
         if err = request_source_error(sources, flow: !flow_id.nil?)
           abort err
         end
-        abort "gori run repeater create: --target is required" if target.nil? && flow_id.nil?
+        abort "gori run repeater create: --target is required" if target.nil? && flow_id.nil? && curl_path.nil?
         # Argv-only too, and it used to sit below BOTH the read and `open_store`: a typo'd
         # preset drained the generator and took the project's open-lock before saying that a
         # word typed on the command line is not one of four. The normalize stays with it, so
@@ -713,6 +717,12 @@ module Gori
         # project's shared open-lock while it waits (`Store.open` → `<db>.open.lock`).
         req_content = request_content(file: request_file, raw: request_raw,
           stdin: request_stdin, io: STDIN, what: "gori run repeater create")
+        if path = curl_path
+          curl = curl_request(path, "gori run repeater create")
+          req_content = curl.text
+          target ||= curl.origin
+          http2 = curl.http2? unless http2_given
+        end
         if err = request_content_error(sources, req_content)
           abort err
         end
@@ -853,6 +863,21 @@ module Gori
         ensure
           store.close
         end
+      end
+
+      # `--curl PATH|-`: the one request the curl command describes (`Import::Curl.parse_one`),
+      # its notes — the transport flags dropped, a path curl would have collapsed — on STDERR
+      # beside the other create notices. A paste holding two requests, or a command that reads a
+      # local file, is refused with the importer's own sentence.
+      def self.curl_request(path : String, what : String) : Import::Curl::Request
+        text = read_input_file(path, what, stdin: true, noun: "curl command", flag: "--curl -")
+        req = begin
+          Import::Curl.parse_one(text)
+        rescue ex : Gori::Error
+          abort "#{what}: --curl: #{ex.message}"
+        end
+        req.notes.each { |n| STDERR.puts "#{what}: note: #{n}" }
+        req
       end
 
       # `repeater create --format json` (#1117): the row as `repeater list --format json` prints

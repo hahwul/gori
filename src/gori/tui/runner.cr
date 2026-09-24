@@ -104,6 +104,7 @@ require "./oast_provider_overlay"
 require "./oast_provider_picker"
 require "./ca_import_overlay"
 require "./import_overlay"
+require "./curl_paste_overlay"
 require "./export_overlay"
 require "../paths"
 require "../browser"
@@ -4265,6 +4266,65 @@ module Gori::Tui
       open_overlay(ov)
     end
 
+    # --- curl paste box (Repeater → Paste cURL, palette → Import: cURL), #1244 ---
+
+    private def open_curl_paste(mode : Symbol) : Nil
+      ov = CurlPasteOverlay.new(mode)
+      ov.pasting = -> { @paste_newline.pasting? }
+      ov.on_commit = -> { mode == :history ? import_curl_paste(ov.text) : open_curl_paste_tabs(ov.text) }
+      open_overlay(ov)
+    end
+
+    # One Repeater sub-tab per request, capped like every batch open. Any refusal keeps the
+    # card up with the text intact (false), so a fix is an edit rather than a re-paste.
+    private def open_curl_paste_tabs(text : String) : Bool
+      parsed = begin
+        Import::Curl.parse(text)
+      rescue ex : Gori::Error
+        return curl_paste_refused(ex.message)
+      end
+      return curl_paste_refused(parsed.skipped.first) unless parsed.skipped.empty?
+      reqs = parsed.requests
+      return curl_paste_refused("the curl command names no URL") if reqs.empty?
+      if reqs.size > BATCH_SUBTAB_CAP
+        return curl_paste_refused("#{reqs.size} requests is over the #{BATCH_SUBTAB_CAP}-tab cap — use Import: cURL to put them in History")
+      end
+      reqs.each { |req| repeater_controller.repeater_from_request(req.origin, req.text, req.http2?, nil) }
+      notes = (parsed.notes + reqs.flat_map(&.notes)).uniq
+      opened = reqs.size == 1 ? "#{reqs.first.method} #{reqs.first.url}" : "#{reqs.size} sub-tabs"
+      status("repeater: opened #{opened} from curl#{curl_notes_tail(notes)} · ^R send", :done)
+      true
+    end
+
+    # Straight into History: a paste is a handful of requests, so it is written in place
+    # rather than through the file importer's background job.
+    private def import_curl_paste(text : String) : Bool
+      result = begin
+        Import.import_curl_text(@session.store, text, Gori::FlowSource::Surface::Tui, "curl (pasted)")
+      rescue ex : Gori::Error
+        return curl_paste_refused(ex.message)
+      end
+      sitemap_controller.reload
+      count = result.count
+      msg = "imported #{count} flow#{count == 1 ? "" : "s"} from cURL"
+      msg += " (#{result.skipped} refused)" if result.skipped > 0
+      result.shortfall_note.try { |note| msg += " — #{note}" }
+      status("#{msg}#{curl_notes_tail(result.notes)}", :done)
+      true
+    end
+
+    private def curl_paste_refused(why : String?) : Bool
+      status("curl: #{why || "not a usable curl command"}", :error)
+      false
+    end
+
+    # The first note in full (usually the ignored transport flags), and how many more.
+    private def curl_notes_tail(notes : Array(String)) : String
+      first = notes.first? || return ""
+      more = notes.size > 1 ? " (+#{notes.size - 1} more)" : ""
+      " — #{first}#{more}"
+    end
+
     # The ImportOverlay commit closure. Returns true so the SHELL closes the card — no
     # frame is drawn between this returning and that close, so the card is still gone
     # before the parse's toast is painted, which the pre-seam early close was for. An
@@ -6123,6 +6183,10 @@ module Gori::Tui
 
     def import_wsdl : Nil
       open_import(:wsdl)
+    end
+
+    def import_curl : Nil
+      open_curl_paste(:history)
     end
 
     # Palette / verb entry (`settings.*`): nothing to return to, so an editor opened here

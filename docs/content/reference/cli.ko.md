@@ -384,12 +384,15 @@ gori run repeater <flow-id> --target https://staging.example.com --http2 --diff
 gori run repeater create --target https://api.example.com --request-file req.txt --name "login probe"
 gori run repeater create --flow 42 --name "clone of 42"
 generate-request | gori run repeater create --target https://api.example.com --request-stdin
+pbpaste | gori run repeater create --curl - --name "from devtools"
 ```
 
-세 가지 요청 소스는 함께 쓸 수 없습니다. 두 개를 지정하면 플래그 순서로 하나를 고르는 대신
+네 가지 요청 소스는 함께 쓸 수 없습니다. 두 개를 지정하면 플래그 순서로 하나를 고르는 대신
 거부됩니다. 또한 빈 요청(빈 파일, `--request-raw ''`, 아무것도 내보내지 않은 파이프)은 전송할 수
-없는 세션을 만드는 대신 거부됩니다. `--flow`는 이 셋 중 하나가 아니며 — 출처 역할도 하므로 —
-셋 중 어느 하나와도 함께 쓸 수 있습니다.
+없는 세션을 만드는 대신 거부됩니다. `--flow`는 이 넷 중 하나가 아니며 — 출처 역할도 하므로 —
+넷 중 어느 하나와도 함께 쓸 수 있습니다. `--curl`은 curl 명령 하나를 읽고
+([Repeater → Paste cURL](/guide/repeater-and-fuzzer/#repeater) 참고), 따로 주지 않으면
+`--target`과 `--http2`도 그 명령에서 가져옵니다.
 
 `--request-stdin`은 파이프나 리다이렉트(`--request-stdin < req.http`)를 읽으며, 터미널은
 거부합니다. 터미널은 입력한 바이트를 그대로 되돌려 출력하므로 — `Cookie`와 `Authorization`을
@@ -416,6 +419,7 @@ generate-request | gori run repeater create --target https://api.example.com --r
 | `-f`, `--request-file=FILE` | FILE에서 원시 HTTP 요청을 읽음 (`--request-raw` / `--request-stdin`과 함께 쓸 수 없음) |
 | `-r`, `--request-raw=RAW` | 원시 HTTP 요청 문자열 그대로 (`--request-file` / `--request-stdin`과 함께 쓸 수 없음) |
 | `--request-stdin` | 원시 HTTP 요청을 stdin에서 바이트 그대로 읽음 (`--request-file`이 파일을 읽는 방식과 동일). 요청을 인자 벡터 밖에 둡니다. 파이프나 리다이렉트가 필요하며 터미널은 거부됩니다 (`--request-file` / `--request-raw`과 함께 쓸 수 없음) |
+| `--curl=PATH` | PATH의 curl 명령으로 요청을 만듦(`-`는 stdin). 따로 주지 않으면 대상과 HTTP/2도 가져오며, 무시한 전송 플래그는 stderr에 밝힘 |
 | `--flow=ID` | 캡처한 플로우에서 요청 / 대상 / HTTP/2 복제 |
 | `--name=NAME`, `--tags=TAGS` | 사용자 지정 탭 이름, 그리고 TUI 하위 탭 라벨이 되는 자유 텍스트 태그 |
 | `--http2` / `--http1` (`--no-http2`) | 프로토콜 선택. `--http1`은 h2로 캡처된 `--flow`를 덮어씁니다 |
@@ -764,6 +768,7 @@ gori run import --postman api.postman_collection.json --db ./assessment.db --for
 | `--insomnia=PATH` | Insomnia v4 익스포트(JSON) |
 | `--burp=PATH` | Burp Suite 항목 익스포트(XML). 요청**과** 응답, 바이트 단위 그대로 |
 | `--wsdl=PATH` | WSDL 1.1 서비스 설명서(XML). 오퍼레이션마다 SOAP 요청 템플릿 하나 |
+| `--curl=PATH` | curl 명령. 요청마다 플로우 하나이며 `-`는 stdin을 읽음(`pbpaste \| gori run import --curl -`). 무시한 전송 플래그는 stderr에 밝힘(JSON에서는 `notes`) |
 | `--project=NAME` | 임포트할 프로젝트(기본값: 가장 최근에 사용한 프로젝트) |
 | `--db=PATH` | 임포트할 SQLite db 파일을 직접 지정(없으면 생성) |
 | `--format` | `text`(기본) 또는 `json` |

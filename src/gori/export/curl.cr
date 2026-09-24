@@ -91,6 +91,7 @@ module Gori
         entity, transfer_encoding = unchunk(header_lines, body, notes)
         parts = ["curl #{shell_quote(Escape.percent_encode_non_ascii(url))}"]
         parts << "--globoff" if globbed?(url)
+        parts << "--path-as-is" if dot_segments?(url)
         if flag = version_flag(version, url)
           parts << flag
         end
@@ -104,8 +105,10 @@ module Gori
           end
         end
         te_written = false
+        content_type = false
         each_header(header_lines) do |name, value|
           down = name.downcase
+          content_type = true if down == "content-type"
           next if down == "content-length"
           next if MARKER_HEADERS.includes?(down)
           # curl derives Host FROM THE URL — which is the captured header only when the capture's
@@ -124,6 +127,14 @@ module Gori
             next
           end
           parts << "-H #{shell_quote(header_item(name, value))}"
+        end
+        # curl gives a `--data-raw` body a `Content-Type: application/x-www-form-urlencoded` of
+        # its own when the command names none — measured, curl 8.7.1 — so a capture that sent a
+        # body with NO Content-Type came out of the command with one. `-H 'Content-Type:'` is
+        # curl's "send none". Only beside a body that is actually on the command: a NUL body is
+        # omitted, and with no body curl adds nothing.
+        if !entity.empty? && !content_type && !entity.to_slice.includes?(0_u8)
+          parts << "-H #{shell_quote("Content-Type:")}"
         end
         parts << data_argument(entity) unless entity.empty?
         # LAST, like `data_argument`'s refusal and for the same reason: a `#` comment swallows
@@ -327,6 +338,17 @@ module Gori
       # to the same command without the flag (measured against an AF_INET6 listener).
       private def self.globbed?(url : String) : Bool
         url.to_slice.any? { |b| b == 0x5b_u8 || b == 0x5d_u8 || b == 0x7b_u8 || b == 0x7d_u8 }
+      end
+
+      # Does the URL's PATH hold a `.` or `..` segment? curl collapses them before sending
+      # unless told `--path-as-is`, so `/a/../etc/passwd` went out as `/etc/passwd` — measured
+      # against a raw listener, curl 8.7.1. A captured traversal is exactly the request that
+      # must reach the origin as written, so the flag rides along whenever the path has one.
+      # The predicate is `Gori::Url.dot_segments?`, shared with the import that reads it back.
+      private def self.dot_segments?(url : String) : Bool
+        rest = (sep = url.byte_index("://")) ? url.byte_slice(sep + 3) : url
+        slash = rest.byte_index('/') || return false
+        Gori::Url.dot_segments?(rest.byte_slice(slash))
       end
 
       # The protocol flag for a capture whose request line says HTTP/2, else nil. curl

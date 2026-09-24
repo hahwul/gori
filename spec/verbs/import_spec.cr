@@ -13,6 +13,7 @@ describe "Gori::Verbs.register_import" do
     "import.insomnia" => :import_insomnia,
     "import.burp"     => :import_burp,
     "import.wsdl"     => :import_wsdl,
+    "import.curl"     => :import_curl,
   }
 
   it "registers one Global, chordless verb per import source" do

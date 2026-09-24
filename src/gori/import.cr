@@ -7,16 +7,22 @@ require "./import/insomnia"
 require "./import/burp"
 require "./import/xml_mini"
 require "./import/wsdl"
+require "./import/raw"
+require "./import/curl"
 
 module Gori
   # Bulk-import captured flows from HAR files, URL lists, OpenAPI specs, Postman or
-  # Insomnia collections, or a Burp item export.
+  # Insomnia collections, a Burp item export, or pasted curl commands.
   module Import
     # `attempted` is how many parsed pairs the import TRIED to write; `count` is how many
     # committed. They differ only when a chunk rolled back part-way (see `insert_all`), and
     # every surface that prints `count` has to say so when they do — a smaller number printed
     # as a success is how an import that half-failed looks like an import of a small file.
-    record Result, count : Int32, skipped : Int32 = 0, attempted : Int32 = 0 do
+    #
+    # `notes` are what the source said that the import could not carry — today only a curl
+    # command's ignored transport flags. Empty for every file format.
+    record Result, count : Int32, skipped : Int32 = 0, attempted : Int32 = 0,
+      notes : Array(String) = [] of String do
       def short? : Bool
         attempted > 0 && count < attempted
       end
@@ -41,6 +47,7 @@ module Gori
       :insomnia => "Insomnia",
       :burp     => "Burp",
       :wsdl     => "WSDL",
+      :curl     => "cURL",
     }
 
     def self.label(kind : Symbol) : String
@@ -92,6 +99,43 @@ module Gori
 
     def self.from_wsdl(path : String, prov : Provenance = Provenance.none) : ParseResult
       Wsdl.parse_file(path, prov)
+    end
+
+    # Every curl command in `text`, one flow per request, each stored BYTE-EXACT through
+    # `Raw.request_flow` — the head `Curl` built is the request, so it is neither re-serialized
+    # nor re-split. A command `Curl` refused is a skipped entry, like a malformed HAR entry, and
+    # its reason rides in the notes; when NOTHING came out, the refusal itself is the error,
+    # since "no flows found" would hide the one reason there is. Returns the parse plus every
+    # note, deduplicated.
+    def self.from_curl_text(text : String, prov : Provenance = Provenance.none) : {ParseResult, Array(String)}
+      parsed = Curl.parse(text)
+      if parsed.requests.empty?
+        raise Gori::Error.new(parsed.skipped.first? || "the paste holds no curl command with a URL")
+      end
+      now = Time.utc.to_unix * 1_000_000
+      skipped = parsed.skipped.size
+      pairs = [] of Builder::FlowPair
+      refused = parsed.skipped.map { |why| "refused: #{why}" }
+      parsed.requests.each do |req|
+        pairs << Raw.request_flow(now, "#{req.origin}/", req.head, req.body,
+          source_surface: prov.surface, source_ref: prov.ref)
+      rescue ex : Gori::Error
+        skipped += 1
+        refused << "refused #{req.method} #{req.url}: #{ex.message}"
+      end
+      notes = (parsed.notes + parsed.requests.flat_map(&.notes) + refused).uniq
+      {ParseResult.new(pairs, skipped), notes}
+    end
+
+    # Pasted curl text straight into History — the TUI's Import: cURL and MCP's
+    # `import_flows{kind:"curl", text}`, where there is no file to name. `ref` stands in for
+    # the file name on each flow's provenance.
+    def self.import_curl_text(store : Store, text : String, surface : FlowSource::Surface? = nil,
+                              ref : String = "curl") : Result
+      parsed, notes = from_curl_text(text, Provenance.new(surface, ref))
+      raise Gori::Error.new("no flows imported — every curl command was refused") if parsed.flows.empty?
+      committed, attempted = insert_all(store, parsed.flows)
+      Result.new(committed, parsed.skipped, attempted, notes)
     end
 
     # Pairs per store write. The whole file used to go in as ONE `insert_import_batch`, which
@@ -208,6 +252,17 @@ module Gori
       raise Gori::Error.new("no flows found in #{path}")
     end
 
+    # A file of curl commands: read whole (a paste is small), then the text path.
+    private def self.import_curl_file(store : Store, path : String, surface : FlowSource::Surface?,
+                                      prov : Provenance) : Result
+      text = begin
+        File.read(path)
+      rescue ex : File::Error
+        raise Gori::Error.new("cannot read #{path}: #{ex.message}")
+      end
+      import_curl_text(store, text, surface, prov.ref || "curl")
+    end
+
     # `surface` is which of gori's three faces asked for this import. Every imported flow is
     # stamped `source: import` and `source_ref: <basename>`, so a History row can say WHICH file
     # it came out of — the provenance question an operator actually asks of an imported row.
@@ -226,6 +281,7 @@ module Gori
           raise Gori::Error.new("cannot read #{expanded}: #{ex.message}")
         end
       end
+      return import_curl_file(store, expanded, surface, prov) if kind == :curl
       parsed = begin
         case kind
         when :har      then from_har(expanded, prov)

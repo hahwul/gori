@@ -1,6 +1,6 @@
 # `gori run import` — bulk-import captured flows into the project's History from a
 # HAR export, a URL list, an OpenAPI/Swagger spec, a Postman or Insomnia collection,
-# a Burp item export, or a WSDL 1.1 service description (the CLI counterpart of the
+# a Burp item export, a WSDL 1.1 service description, or curl commands (the CLI counterpart of the
 # TUI's Import overlay). Exactly one source flag is required. Import WRITES flows, so it
 # resolves its target like `discover` (--db create-or-reopen, else an existing project —
 # never silently a fresh default).
@@ -25,10 +25,11 @@ module Gori
           :insomnia => nil.as(String?),
           :burp     => nil.as(String?),
           :wsdl     => nil.as(String?),
+          :curl     => nil.as(String?),
         }
 
         parser = OptionParser.new do |p|
-          p.banner = "Usage: gori run import (--har PATH | --urls PATH | --oas PATH | --postman PATH | --insomnia PATH | --burp PATH | --wsdl PATH) [options]\n\n" \
+          p.banner = "Usage: gori run import (--har PATH | --urls PATH | --oas PATH | --postman PATH | --insomnia PATH | --burp PATH | --wsdl PATH | --curl PATH) [options]\n\n" \
                      "Bulk-import flows into the project's History. Exactly one source is required:\n" \
                      "  --har       a browser/proxy HAR (HTTP Archive) export\n" \
                      "  --urls      a text file of URLs, one per line (# comments and blanks ignored)\n" \
@@ -36,7 +37,8 @@ module Gori
                      "  --postman   request templates from a Postman Collection v2 export (JSON)\n" \
                      "  --insomnia  request templates from an Insomnia v4 export (JSON)\n" \
                      "  --burp      saved Burp items (XML) — request AND response, byte-exact\n" \
-                     "  --wsdl      SOAP request templates from a WSDL 1.1 service description (XML)"
+                     "  --wsdl      SOAP request templates from a WSDL 1.1 service description (XML)\n" \
+                     "  --curl      curl commands (`-` reads stdin: `pbpaste | gori run import --curl -`) — one flow per request"
           p.on("--har=PATH", "Import a HAR (HTTP Archive) export") { |v| sources[:har] = v }
           p.on("--urls=PATH", "Import a URL list (one URL per line)") { |v| sources[:urls] = v }
           p.on("--oas=PATH", "Import OpenAPI 3.x or Swagger 2.0 (JSON or YAML; local refs only)") { |v| sources[:oas] = v }
@@ -44,6 +46,7 @@ module Gori
           p.on("--insomnia=PATH", "Import an Insomnia v4 JSON export") { |v| sources[:insomnia] = v }
           p.on("--burp=PATH", "Import a Burp Suite item export (XML)") { |v| sources[:burp] = v }
           p.on("--wsdl=PATH", "Import a WSDL 1.1 service description (SOAP 1.1/1.2)") { |v| sources[:wsdl] = v }
+          p.on("--curl=PATH", "Import curl commands from PATH, or from stdin when PATH is -") { |v| sources[:curl] = v }
           p.on("--project=NAME", "Project to import into (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to import into (created if absent)") { |v| db_path = v }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
@@ -58,12 +61,22 @@ module Gori
         parser.parse(args)
 
         kind, path = import_source(sources)
+        # Read BEFORE `open_store`, like `repeater create --request-stdin`: a pipe that never
+        # ends must not hold the project's open-lock while it waits.
+        curl_text = if kind == :curl
+                      read_input_file(path, "gori run import", stdin: true, noun: "curl command", flag: "--curl -")
+                    end
 
         # `long_running`: a HAR stream is written chunk by chunk through this one handle for as
         # long as the file takes, so it keeps the Store's standard wait budget.
         store = open_store(resolve_import_project(project_name, db_path), long_running: true)
         result = begin
-          Import.import_file(store, kind, path, Gori::FlowSource::Surface::Cli)
+          if text = curl_text
+            Import.import_curl_text(store, text, Gori::FlowSource::Surface::Cli,
+              path == "-" ? "curl (stdin)" : File.basename(path))
+          else
+            Import.import_file(store, kind, path, Gori::FlowSource::Surface::Cli)
+          end
         rescue ex : Gori::Error
           abort "gori run import: #{ex.message}"
         ensure
@@ -108,6 +121,10 @@ module Gori
 
       private def self.emit_import_result(kind : Symbol, path : String, result : Import::Result, format : Symbol) : Nil
         puts(format == :json ? import_result_json(kind, path, result) : import_result_text(kind, path, result))
+        # What the source said that the import could not carry (a curl command's ignored
+        # flags). On STDERR in text mode so the one result line stays the STDOUT a script
+        # reads; inside the object in JSON mode.
+        result.notes.each { |n| STDERR.puts "gori run import: note: #{n}" } unless format == :json
       end
 
       # Mirrors the TUI Import toast wording (runner.cr#apply_import) so the CLI and TUI
@@ -129,6 +146,7 @@ module Gori
             # detected without parsing prose.
             j.field "attempted", result.attempted
             j.field "skipped", result.skipped
+            j.field "notes", result.notes unless result.notes.empty?
           end
         end
       end

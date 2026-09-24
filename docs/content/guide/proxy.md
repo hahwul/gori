@@ -653,6 +653,7 @@ You don't have to capture everything live. From the command palette (`Ctrl-P`):
 | **Import: Insomnia** | Insomnia v4 JSON export → one request template per saved request |
 | **Import: Burp** | Burp Suite saved items (XML) → full request/response flows, byte-exact |
 | **Import: WSDL** | WSDL 1.1 service description (XML) → one SOAP request template per operation |
+| **Import: cURL** | A pasted curl command (or several, as "Copy all as cURL" writes them) → one request per URL |
 
 Malformed entries are skipped rather than aborting the whole import. OpenAPI 3.x and Swagger 2.0 specs resolve local JSON Pointer `$ref` values; remote refs are reported and never fetched. Imported flows land in History like captured traffic, so you can filter, Repeater, Fuzz, and scan them the same way.
 
@@ -664,7 +665,9 @@ Malformed entries are skipped rather than aborting the whole import. OpenAPI 3.x
 
 **WSDL** builds one SOAP request template per operation, for every SOAP port a service publishes: SOAP 1.1 (`SOAPAction`, `text/xml`) and SOAP 1.2 (the `action` media-type parameter, `application/soap+xml`) alike, so a dual-stack endpoint arrives as two requests rather than one. The body is a skeleton derived from the XSD inline in `<wsdl:types>`, with a valid placeholder for each built-in type so a schema-validating gateway lets the seed request through; a recursive type stops at its first repetition with a comment where you nest it by hand. WSDL 1.1 only, `http:binding` (GET/POST) ports and non-HTTP transports are skipped with a reason rather than counted as damage, external `xsd:import` files are never fetched, and a `<!DOCTYPE>` is refused outright, because a service description is a document, not the wire bytes you asked gori to replay.
 
-The same sources are scriptable headless: `gori run import --postman PATH` (and `--har` / `--urls` / `--oas` / `--insomnia` / `--burp` / `--wsdl`), and the MCP `import_flows` tool.
+**cURL** opens a paste box rather than a path prompt. Each command is read the way [Repeater's Paste cURL](/guide/repeater-and-fuzzer/#repeater) reads it, and each request is stored as built, so a `-H 'Content-Length: 1'` beside a longer `-d` stays the desync you typed.
+
+The same sources are scriptable headless: `gori run import --postman PATH` (and `--har` / `--urls` / `--oas` / `--insomnia` / `--burp` / `--wsdl` / `--curl`, where `--curl -` reads stdin), and the MCP `import_flows` tool.
 
 ## Host Overrides
 

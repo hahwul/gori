@@ -1582,3 +1582,65 @@ describe Gori::Import::Builder do
     end
   end
 end
+
+# #1244 — curl commands into History. Each request is stored BYTE-EXACT through `Raw.flow`:
+# the head `Import::Curl` built is the request, and re-serializing it through `Builder` would
+# re-derive framing the operator stated.
+describe "Gori::Import curl" do
+  it "stores each request as built, stamped import / the surface / the ref" do
+    with_store do |store|
+      result = Gori::Import.import_curl_text(store,
+        "curl 'https://a.test/p?x=1' -X post -H 'Content-Length: 1' -d abc -k ;\ncurl http://b.test:8080/",
+        Gori::FlowSource::Surface::Tui, "curl (pasted)")
+      result.count.should eq(2)
+      result.notes.join.should contain("-k")
+      rows = store.recent_flows(2)
+      post = rows.find! { |r| r.host == "a.test" }
+      post.method.should eq("post")
+      post.target.should eq("/p?x=1")
+      post.source.should eq(Gori::FlowSource::Kind::Import)
+      post.source_surface.should eq(Gori::FlowSource::Surface::Tui)
+      post.source_ref.should eq("curl (pasted)")
+      detail = store.get_flow(post.id).not_nil!
+      # The stated Content-Length stays beside the longer body — nothing reframed it.
+      String.new(detail.request_head).should eq(
+        "post /p?x=1 HTTP/1.1\r\nHost: a.test\r\nContent-Length: 1\r\n" \
+        "Content-Type: application/x-www-form-urlencoded\r\n\r\n")
+      detail.request_body.not_nil!.should eq("abc".to_slice)
+      rows.find! { |r| r.host == "b.test" }.port.should eq(8080)
+    end
+  end
+
+  # `Raw.flow` would re-split and CRLF-normalize the head; a head `Curl` built is stored as
+  # built, so History holds the same bytes the Repeater does for the same paste.
+  it "stores a bare LF inside a -H value byte-exact" do
+    with_store do |store|
+      Gori::Import.import_curl_text(store, %q(curl http://a.test/p -H $'X: a\nY: b' -H $'Z: 1\n\nq'))
+      head = String.new(store.get_flow(store.recent_flows(1).first.id).not_nil!.request_head)
+      head.should eq("GET /p HTTP/1.1\r\nHost: a.test\r\nX: a\nY: b\r\nZ: 1\n\nq\r\n\r\n")
+    end
+  end
+
+  it "reads a file through import_file, naming the file as the ref" do
+    with_store do |store|
+      path = File.tempname("gori-curl", ".sh")
+      File.write(path, "curl https://a.test/f\n")
+      begin
+        Gori::Import.import_file(store, :curl, path, Gori::FlowSource::Surface::Cli).count.should eq(1)
+        store.recent_flows(1).first.source_ref.should eq(File.basename(path))
+      ensure
+        File.delete?(path)
+      end
+    end
+  end
+
+  it "raises the refusal itself when no request came out, and counts a refused one as skipped" do
+    with_store do |store|
+      expect_raises(Gori::Error, /local file/) do
+        Gori::Import.import_curl_text(store, "curl -d @body.json https://a.test/")
+      end
+      store.count.should eq(0)
+      Gori::Import.import_curl_text(store, "curl https://a.test/ok\ncurl -T f https://a.test/no").skipped.should eq(1)
+    end
+  end
+end

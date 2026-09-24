@@ -206,6 +206,9 @@ module Gori
       abstract def import_insomnia : Nil
       abstract def import_burp : Nil
       abstract def import_wsdl : Nil
+      # Import: cURL (#1244) — a paste box rather than a path prompt; every request in the
+      # pasted command(s) becomes a History flow.
+      abstract def import_curl : Nil
       # Whether an import job is running, and the request to stop it after its current chunk.
       abstract def import_running? : Bool
       abstract def import_cancel : Nil

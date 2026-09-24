@@ -220,6 +220,10 @@ private class FakeContext < ExecContext
     @calls << :repeater_new
   end
 
+  def repeater_paste_curl : Nil
+    @calls << :repeater_paste_curl
+  end
+
   def repeater_send : Nil
     @calls << :repeater_send
   end
@@ -1921,6 +1925,10 @@ private class FakeContext < ExecContext
 
   def import_wsdl : Nil
     @calls << :import_wsdl
+  end
+
+  def import_curl : Nil
+    @calls << :import_curl
   end
 
   def import_running? : Bool

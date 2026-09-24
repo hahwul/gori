@@ -732,6 +732,60 @@ describe Gori::MCP::Server do
       end
     end
 
+    # #1244 — an agent holds a copied curl command as a string; `text` takes it directly.
+    it "imports curl text into History, one flow per request, with curl's meaning of -b" do
+      with_store do |store|
+        tools = tools_for(store)
+        text = "curl 'https://a.test/p' -b 'sid=1' -k -d 'x=1' ;\ncurl https://a.test/q"
+        payload = mcp_ok_json(tools, "import_flows", {kind: "curl", text: text}.to_json)
+        payload["count"].as_i.should eq(2)
+        payload.as_h.has_key?("path").should be_false
+        payload["notes"].as_a.map(&.as_s).join.should contain("-k")
+        flows = store.recent_flows(2).map { |f| store.get_flow(f.id).not_nil! }
+        post = flows.find! { |f| f.row.method == "POST" }
+        String.new(post.request_head).should contain("Cookie: sid=1\r\n")
+        post.request_body.not_nil!.should eq("x=1".to_slice)
+        post.row.host.should eq("a.test")
+      end
+    end
+
+    it "imports a curl command from a file" do
+      with_store do |store|
+        path = File.tempname("gori-mcp-import", ".sh")
+        File.write(path, "curl https://a.test/from-file\n")
+        begin
+          payload = mcp_ok_json(tools_for(store), "import_flows", {kind: "curl", path: path}.to_json)
+          payload["count"].as_i.should eq(1)
+        ensure
+          File.delete?(path)
+        end
+      end
+    end
+
+    it "refuses curl text that cannot become a request, with the importer's reason" do
+      with_store do |store|
+        r = tools_for(store).call("import_flows", JSON.parse({kind: "curl", text: "curl -d @body.json https://a.test/"}.to_json))
+        r.is_error.should be_true
+        r.text.should contain("local file")
+        store.count.should eq(0)
+      end
+    end
+
+    it "takes 'text' for kind curl only, and not beside 'path'" do
+      with_store do |store|
+        tools = tools_for(store)
+        r = tools.call("import_flows", JSON.parse({kind: "har", text: "x"}.to_json))
+        r.is_error.should be_true
+        r.text.should contain("\"curl\" only")
+        r = tools.call("import_flows", JSON.parse({kind: "curl", text: "curl https://a.test/", path: "/tmp/x"}.to_json))
+        r.is_error.should be_true
+        r.text.should contain("not both")
+        r = tools.call("import_flows", JSON.parse({kind: "curl"}.to_json))
+        r.is_error.should be_true
+        r.text.should contain("'path' or 'text'")
+      end
+    end
+
     it "accepts every kind Import.import_file dispatches on" do
       # The MCP whitelist (mcp/tools/import.cr) and the parser table are edited in different
       # files — a format added to one and not the other is invisible to agents.

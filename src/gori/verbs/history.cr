@@ -263,6 +263,12 @@ module Gori
         Verb::Scope::Repeater, [Verb::Chord.new("n", ctrl: true)],
         available: in_repeater, mnemonic: 'n', section: :subtab) { |ctx| ctx.repeater_new; nil }
 
+      # Burp's "Paste cURL to Repeater" (#1244): a paste box whose request(s) open as new
+      # sub-tabs. Menu/palette only — no chord to collide with the editor's keys.
+      r.register Verb::Definition.new(
+        "repeater.paste-curl", "Paste cURL", "Paste a curl command and open its request as a new Repeater sub-tab",
+        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'u', section: :subtab) { |ctx| ctx.repeater_paste_curl; nil }
+
       # "Minimize request" (Caido-"squash"-style): strip cosmetic headers, tracking-cookie
       # crumbs and unused query/body params, re-sending to verify the response is unchanged.
       # Runs in the BACKGROUND (bottom-bar spinner + notification) and writes the trimmed

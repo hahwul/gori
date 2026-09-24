@@ -122,6 +122,18 @@ describe Gori::Url do
     end
   end
 
+  # One predicate for both ends of the curl round trip (#1244).
+  describe ".dot_segments?" do
+    it "finds . and .. segments in the path only" do
+      Gori::Url.dot_segments?("/a/../etc/passwd").should be_true
+      Gori::Url.dot_segments?("/a/./b").should be_true
+      Gori::Url.dot_segments?("/a/..").should be_true
+      Gori::Url.dot_segments?("/a..b/.hidden").should be_false
+      Gori::Url.dot_segments?("/p?x=../y").should be_false
+      Gori::Url.dot_segments?("/p#../y").should be_false
+    end
+  end
+
   describe ".url_path" do
     # `OPTIONS *` (RFC 9112 §3.2.4) is the one request target no URI can spell. Gluing it
     # straight onto the authority produced `https://acme.test*`, which URI.parse reads as a

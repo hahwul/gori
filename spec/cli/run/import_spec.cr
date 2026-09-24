@@ -31,7 +31,7 @@ describe "gori run import" do
   it "maps each source flag to its {kind, path}" do
     {har: "a.har", urls: "urls.txt", oas: "api.yaml",
      postman: "c.postman_collection.json", insomnia: "i.json", burp: "items.xml",
-     wsdl: "service.wsdl"}.each do |kind, path|
+     wsdl: "service.wsdl", curl: "-"}.each do |kind, path|
       Gori::CLI::Run.import_source_for_spec(only(kind, path)).should eq({kind, path})
     end
   end
@@ -51,6 +51,16 @@ describe "gori run import" do
     json["path"].as_s.should eq("dump.har")
     json["count"].as_i.should eq(12)
     json["skipped"].as_i.should eq(3)
+  end
+
+  # A curl command's ignored flags ride in the object, and only when there are some — the
+  # file formats never produce any, so their JSON is unchanged.
+  it "carries a curl import's notes in the JSON result" do
+    result = Gori::Import::Result.new(count: 1, attempted: 1, notes: ["ignored (gori sends through its own network settings): -k"])
+    json = JSON.parse(Gori::CLI::Run.import_result_json_for_spec(:curl, "-", result))
+    json["notes"].as_a.map(&.as_s).should eq(["ignored (gori sends through its own network settings): -k"])
+    JSON.parse(Gori::CLI::Run.import_result_json_for_spec(:har, "a.har", Gori::Import::Result.new(count: 1)))
+      .as_h.has_key?("notes").should be_false
   end
 
   it "always reports `skipped` in JSON, even at zero" do

@@ -24,6 +24,15 @@ describe "gori run repeater create — the request source" do
       Gori::CLI::Run.request_sources(file: "req.txt", raw: "GET / HTTP/1.1", stdin: true)
         .should eq(["--request-file", "--request-raw", "--request-stdin"])
     end
+
+    # `--curl` (#1244) is a fourth door onto the same one request, so it joins the one list and
+    # every pairing refusal below applies to it unchanged.
+    it "counts --curl as a request source" do
+      Gori::CLI::Run.request_sources(file: nil, raw: nil, stdin: false, curl: "-").should eq(["--curl"])
+      Gori::CLI::Run.request_source_error(
+        Gori::CLI::Run.request_sources(file: nil, raw: nil, stdin: true, curl: "-"), flow: false)
+        .should eq("gori run repeater create: --request-stdin, --curl cannot be combined — pick one request source")
+    end
   end
 
   describe ".request_source_error" do
@@ -46,7 +55,7 @@ describe "gori run repeater create — the request source" do
     it "requires a source when there is no --flow to clone" do
       Gori::CLI::Run.request_source_error([] of String, flow: false)
         .should eq("gori run repeater create: either --request-file, --request-raw, " \
-                   "--request-stdin, or --flow is required")
+                   "--request-stdin, --curl, or --flow is required")
     end
 
     # The branch that reads the request is an `if/elsif` chain, so a second source was

@@ -202,7 +202,7 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 | ------ | --------- |
 | `send_request` | Send / resend an HTTP request (active; records History by default, expands `$ENV.KEY` env tokens and `$BIND.NAME` bindings, and redacts sensitive response-header values unless explicitly requested). `reframe_grpc: true` recomputes a unary gRPC message's 5-byte length prefix over the body actually sent. Off by default, so an edited message ships with the prefix it was captured with |
 | `send_websocket` | Execute a saved WebSocket Repeater session and collect the replies |
-| `create_repeater` / `update_repeater` / `delete_repeater` | Manage one Repeater session. Every reply carries `tui_index` beside `id`; a delete names the tab it destroyed (`was_tui_index`) and renumbers the rest |
+| `create_repeater` / `update_repeater` / `delete_repeater` | Manage one Repeater session. Every reply carries `tui_index` beside `id`; a delete names the tab it destroyed (`was_tui_index`) and renumbers the rest. `create_repeater{curl}` builds the session from a copied curl command |
 | `create_repeaters` | Seed a tab from each of several captured flows, the second hop of an OpenAPI import (see below). Checks every flow exists before creating the first session |
 | `delete_repeaters` / `update_repeaters` | Bulk close, and bulk re-label (tags and name affixes only; `update_repeater` is the one that writes request bytes). Both take explicit ids, never a filter: narrow with `get_repeater_context{filter}` first, so the set you read is the set acted on. Delete needs `confirm:true`, and an unknown id refuses the whole call |
 | `move_repeater` | Rearrange the sub-tab strip: `to_index` for an absolute tab number, `direction` for a one-step nudge. An open TUI picks the new order up on its own |
@@ -222,7 +222,7 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 | `grpc_reflect` / `grpc_forget` | Ask a target's `grpc.reflection.v1` service (falling back to `v1alpha`) for its descriptors and cache them in the project, or drop a cached target. `grpc_reflect` is an outbound send and is scope-gated like any other |
 | `create_view` / `update_view` / `delete_view` | Create, edit, re-home and delete saved History [views](/guide/proxy/#views). Each takes `scope`: `project` (default) or `global`. The query is validated on the way in: one whose every term would be dropped is refused, because it would narrow nothing while every surface showed a chip claiming it does |
 | `preview_rule` | Estimate how many stored flows a rule would change, before creating it |
-| `import_flows` | Bulk-import a HAR / URL list / OpenAPI / Postman / Insomnia / Burp / WSDL file into History |
+| `import_flows` | Bulk-import a HAR / URL list / OpenAPI / Postman / Insomnia / Burp / WSDL file into History, or curl commands (`kind: "curl"`, as a file or as `text`) |
 | `delete_flow` / `clear_history` | Remove one flow, or wipe captured History |
 | `set_sitemap_tag` | Pin a free-text memo onto a sitemap path |
 | `create_project` / `switch_project` / `delete_project` | Create or reopen a project, point this server at another one, or delete one. Deletion is two-step: a `dry_run` first, then a confirmation token |

@@ -3371,3 +3371,25 @@ The handoff also uses termisu's `full_cooked` rather than `suspend`'s cooked mod
 OPOST and ICRNL off. An editor sets its own termios and never noticed, but a shell passes that
 state to every command it runs. Open shell here is refused while intercept is on, because held
 requests are released from a screen the shell is covering.
+
+### 2026-09-24: a pasted curl command is operator bytes read with curl's meaning, minus curl's own identity
+
+Refines: [P7](#p7). #1244.
+
+A curl command an operator pastes (Repeater → Paste cURL, Import: cURL, `--curl`, MCP `curl`) is
+theirs, so it is read with curl's meaning of every flag, measured against curl 8.7.1 on a raw
+listener, and not with `gori run send`'s. The two disagree on `-b`, which is a cookie in curl and
+a body in `send`, and Chrome's "Copy as cURL" emits cookies with `-b`. Where curl sends the bytes
+as typed, so does the import: a `-H` line keeps its spacing and its argv position, a CR/LF inside
+`-H` or `-X` goes out as written (curl does the same), and a stated `Content-Length` stays beside a
+longer body. Where curl REFUSES, so does the import, for example on whitespace or a control byte in
+the URL. `--request-target` is curl's own verbatim door and is honoured. Two things are left out on
+purpose. curl's `User-Agent: curl/…` and `Accept: */*` describe the client that ran the command,
+not the request the command describes, and keeping them would break the export round trip,
+because a capture with no User-Agent exports with no `-H` for one. Transport flags (`-k`, `-x`,
+`-L`, `--resolve`) are ignored and named, since gori dials through its own settings. The
+round trip `Export::Curl` → `Import::Curl` returning the same bytes is the contract
+(`spec/curl_round_trip_spec.cr`). Holding the export to it found two cases where running the
+exported command sent something other than the capture: curl collapses `..` path segments and
+adds a form Content-Type to a body that had none. The export now writes `--path-as-is` and
+`-H 'Content-Type:'` for those cases.

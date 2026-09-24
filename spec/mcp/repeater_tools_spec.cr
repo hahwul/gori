@@ -432,3 +432,48 @@ describe "MCP update_repeater" do
     end
   end
 end
+
+# #1244 — `create_repeater{curl}`: the importer every surface shares builds the request, and the
+# command answers target and http2 unless the caller did.
+describe "MCP create_repeater from a curl command" do
+  it "stores the request curl describes, with its origin as the target" do
+    with_store do |store|
+      tools = tools_for(store)
+      created = mcp_ok_json(tools, "create_repeater",
+        {curl: "curl 'https://api.test:8443/v1/items?x=1' -H 'X-A: 1' -b 'sid=2' -d 'q=1' -k"}.to_json)
+      rec = store.repeaters_mcp.find! { |r| r.id == created["id"].as_i64 }
+      rec.target.should eq("https://api.test:8443")
+      String.new(rec.request).should eq(
+        "POST /v1/items?x=1 HTTP/1.1\r\nHost: api.test:8443\r\nX-A: 1\r\nCookie: sid=2\r\n" \
+        "Content-Length: 3\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\nq=1")
+      rec.http2?.should be_false
+      created["curl_notes"].as_a.map(&.as_s).join.should contain("-k")
+    end
+  end
+
+  it "takes http2 from --http2 unless the caller says otherwise, and keeps an explicit target" do
+    with_store do |store|
+      tools = tools_for(store)
+      a = mcp_ok_json(tools, "create_repeater", {curl: "curl --http2 https://api.test/p"}.to_json)
+      store.repeaters_mcp.find! { |r| r.id == a["id"].as_i64 }.http2?.should be_true
+      b = mcp_ok_json(tools, "create_repeater",
+        {curl: "curl --http2 https://api.test/p", http2: false, target: "https://10.0.0.5"}.to_json)
+      rec = store.repeaters_mcp.find! { |r| r.id == b["id"].as_i64 }
+      rec.http2?.should be_false
+      rec.target.should eq("https://10.0.0.5")
+    end
+  end
+
+  it "refuses curl beside request, and a command it cannot use, creating nothing" do
+    with_store do |store|
+      tools = tools_for(store)
+      r = tools.call("create_repeater", JSON.parse({curl: "curl https://a.test/", request: "GET / HTTP/1.1\r\n\r\n", target: "https://a.test"}.to_json))
+      r.is_error.should be_true
+      r.text.should contain("not both")
+      r = tools.call("create_repeater", JSON.parse({curl: "curl https://a.test/1 https://a.test/2"}.to_json))
+      r.is_error.should be_true
+      r.text.should contain("2 requests")
+      store.repeaters_mcp.should be_empty
+    end
+  end
+end

@@ -5,6 +5,7 @@ abstract class Gori::Verb::ExecContext
   # toggles are verbs so they're keymap-driven and rebindable)
   abstract def repeater_selected : Nil                   # load History's selection into Repeater
   abstract def repeater_new : Nil                        # open a blank, hand-authored repeater request
+  abstract def repeater_paste_curl : Nil                 # open the curl paste box; each request becomes a sub-tab
   abstract def repeater_send : Nil                       # resend the (edited) request to the target
   abstract def repeater_send_group : Nil                 # pipeline %%%-split requests on one connection
   abstract def repeater_find_subtab : Nil                # open the sub-tab search picker (filter + jump)
