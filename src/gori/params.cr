@@ -5,6 +5,7 @@ require "./media_type"
 require "./miner/types"
 require "./miner/inject"
 require "./proxy/codec/http1"
+require "./proxy/h2/head_codec"
 
 module Gori
   # Every named INPUT a captured request carries — query, urlencoded form, multipart, JSON,
@@ -76,6 +77,13 @@ module Gori
         n.starts_with?(':') || STANDARD_HEADER_PREFIXES.any? { |p| n.starts_with?(p) }
     end
 
+    def internal_header?(name : String) : Bool
+      n = name.downcase
+      n == Proxy::H2::HeadCodec::PROTOCOL_MARKER.downcase ||
+        n == Proxy::H2::HeadCodec::PUSHED_MARKER.downcase ||
+        n == Proxy::H2::HeadCodec::TRAILER_MARKER.downcase
+    end
+
     # Yield each input of one request, in a stable order: query, body (form, multipart or
     # JSON), headers, cookies. `head` is the stored request head (request line included),
     # `body` the stored wire body. A malformed request line still has its body and head read
@@ -87,7 +95,7 @@ module Gori
       json = MediaType.json?(ctype)
       # A JSON body is never a form, so FormData gets the query alone and the body is decoded
       # once, below, rather than once there and again here.
-      if fields = FormData.from_flow(form_target, head, json ? nil : body)
+      if fields = FormData.from_flow(form_target, head, json ? nil : body, max_body: DECODE_MAX)
         multipart = MediaType.multipart?(ctype)
         fields.each do |f|
           next if f.name.empty?
@@ -133,6 +141,20 @@ module Gori
       cut ? path[(cut + 1)..].presence : path
     end
 
+    # The leaf member of a bracket-nested name: `user[password]` → `password`, `user[password][]` → `password`,
+    # `a[b][c]` → `c`, `tags[]` → `tags`, `name` → `name`.
+    def bracket_leaf(name : String) : String
+      s = name
+      while s.ends_with?("[]")
+        s = s[0...-2]
+      end
+      if s.ends_with?(']') && (open = s.rindex('['))
+        inside = s[(open + 1)...-1]
+        return inside unless inside.empty?
+      end
+      s
+    end
+
     # Yield {path, scalar text, literal?} for every scalar leaf of a JSON document: strings decoded,
     # numbers/bools/null as their literal text. Arrays collapse their index to `[]`, so every
     # element of `items` contributes to one `items[].id` — an inventory counts names, not
@@ -148,8 +170,8 @@ module Gori
       begin
         pull = JSON::PullParser.new(String.new(bytes))
         walk_json(pull, "", 0, acc) # the parser raises on anything trailing the root value
-      rescue JSON::ParseException
-        return
+      rescue ex : JSON::ParseException
+        return unless ex.message.try(&.includes?("Nesting"))
       end
       acc.each { |(path, value, literal)| yield path, value, literal }
     end
@@ -210,29 +232,59 @@ module Gori
     # SP/HTAB) belongs to the header above it and is skipped rather than read as a header
     # whose NAME is value bytes.
     #
-    # The request line is cut off by BYTE (its first LF) before the walk, not by skipping the
-    # walk's first line: `each_ascii_line` drops a line that is not valid UTF-8, so a request
-    # line with a raw high byte in its target — the malformed input gori exists to capture
-    # (P7) — would otherwise make the first HEADER the one skipped.
+    # The request line is cut off by BYTE (its first LF) before the walk. Lines are walked
+    # by byte so an invalid-UTF-8 byte in a cookie does not drop valid pairs on the same line.
     private def each_head(head : Bytes, all_headers : Bool, & : Param ->) : Nil
       nl = head.index(0x0a_u8) || return
-      Miner::Inject.each_ascii_line(head[(nl + 1)..]) do |line|
-        break if line.empty? # the blank line ends the head
-        next if line.starts_with?(' ') || line.starts_with?('\t')
-        colon = line.index(':')
-        next unless colon && colon > 0
-        name = line[0...colon].strip.downcase
-        value = line[(colon + 1)..].strip
-        if name == "cookie"
-          value.split(';') do |crumb|
-            cname, eq, cval = crumb.partition('=')
-            cname = cname.strip
-            next if cname.empty? || eq.empty?
-            yield Param.new(Miner::Location::Cookies, cname, cval.strip)
-          end
-        elsif all_headers || !standard_header?(name)
-          yield Param.new(Miner::Location::Headers, name, value)
+      bytes = head[(nl + 1)..]
+      start = 0
+      i = 0
+      while i <= bytes.size
+        if i == bytes.size || bytes[i] == 0x0a_u8
+          stop = i
+          stop -= 1 if stop > start && bytes[stop - 1] == 0x0d_u8
+          line_bytes = bytes[start, stop - start]
+          start = i + 1
+          break if line_bytes.empty?
+          parse_header_line(line_bytes, all_headers) { |p| yield p }
         end
+        i += 1
+      end
+    end
+
+    private def parse_header_line(line_bytes : Bytes, all_headers : Bool, & : Param ->) : Nil
+      return if line_bytes[0]? == 0x20_u8 || line_bytes[0]? == 0x09_u8
+      colon = line_bytes.index(0x3a_u8)
+      return unless colon && colon > 0
+      name = String.new(line_bytes[0, colon]).strip.downcase
+      return unless name.valid_encoding?
+      val_bytes = line_bytes[(colon + 1)..]
+      if name == "cookie"
+        each_cookie_pair(val_bytes) do |cname, cval|
+          yield Param.new(Miner::Location::Cookies, cname, cval)
+        end
+      elsif !internal_header?(name) && (all_headers || !standard_header?(name))
+        val = String.new(val_bytes).strip
+        yield Param.new(Miner::Location::Headers, name, val) if val.valid_encoding?
+      end
+    end
+
+    private def each_cookie_pair(bytes : Bytes, & : String, String ->) : Nil
+      start = 0
+      i = 0
+      while i <= bytes.size
+        if i == bytes.size || bytes[i] == 0x3b_u8 # ';'
+          crumb = bytes[start, i - start]
+          start = i + 1
+          if eq = crumb.index(0x3d_u8) # '='
+            cname = String.new(crumb[0, eq]).strip
+            cval = String.new(crumb[(eq + 1)..]).strip
+            if cname.valid_encoding? && cval.valid_encoding? && !cname.empty?
+              yield cname, cval
+            end
+          end
+        end
+        i += 1
       end
     end
   end
