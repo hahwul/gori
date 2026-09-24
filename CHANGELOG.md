@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fuzzer: a gRPC field whose `¦chain` runs an `exec:` hook no longer runs that hook once per payload while the run is planned (#1234)
 - MCP: a running server picks up another gori process's changes to session slots, global env vars, the User-Agent list and the global view, rule and colour libraries on its next call, so a rotated or deleted credential stops going out without a restart; a running TUI now follows global env vars and User-Agents too (#1215, #1216, #1217, #1218)
 - Proxy: HTTP/2 response rules now use each stream's `:authority` on coalesced connections, so host-scoped rewrites apply to the matching response (#1222)
 - CLI: `gori run capture --max` counts WebSocket and other upgraded flows after their tunnel closes, once their captured transcript is complete (#1221)

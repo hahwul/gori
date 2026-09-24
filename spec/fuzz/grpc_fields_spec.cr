@@ -666,3 +666,28 @@ describe "Fuzz::Plan with gRPC field positions" do
     end
   end
 end
+
+# The plan-time preflight promises no side effect. It dry-ran each payload through the
+# field's `¦chain` with hooks ON, so an `exec:` step forked once per payload at `Plan.build`
+# and again at send — every hook's runs doubled before the first dial.
+describe "Fuzz::Plan gRPC field preflight and exec hooks" do
+  it "does not run a field's exec: chain at plan time" do
+    with_demo_schema do
+      dir = File.tempname("gori-grpc-hook")
+      Dir.mkdir_p(dir)
+      hook = File.join(dir, "h.sh")
+      tally = File.join(dir, "tally")
+      File.write(hook, "#!/bin/sh\necho ran >> '#{tally}'\ncat\n")
+      File.chmod(hook, 0o755)
+      begin
+        build_plan(grpc_request(demo_request_bytes), ["name¦exec:#{hook}"],
+          sources: [Fuzz::InlineList.new(["a", "b", "c", "d", "e"])] of Fuzz::PayloadSource)
+        # The baseline rendering's one memoized fork is the contract `hook_draw_send_spec`
+        # pins; the preflight used to add one per payload on top.
+        (File.exists?(tally) ? File.read(tally).lines.size : 0).should be <= 1
+      ensure
+        FileUtils.rm_rf(dir)
+      end
+    end
+  end
+end
