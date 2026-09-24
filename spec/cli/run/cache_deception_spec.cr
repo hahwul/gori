@@ -18,16 +18,18 @@ end
 private def cached_report : CD::Report
   authed = cd_trial("as-captured", true, 200, AZ::Verdict::Baseline)
   anon = cd_trial("anonymous", false, 200, AZ::Verdict::Same, ["X-Cache: HIT", "Age: 30"])
-  CD.classify(AZ::Target.new(7_i64, "GET", "https://acme.test/account", [authed, anon]))
+  control = cd_trial("anonymous-cache-busted", false, 404, AZ::Verdict::Different)
+  CD.classify(AZ::Target.new(7_i64, "GET", "https://acme.test/account", [authed, anon]), control)
 end
 
 describe "gori run cache-deception — output" do
-  it "renders the text report with the verdict, both trials and the cache signal" do
+  it "renders the text report with the verdict, three trials and the cache signal" do
     text = Gori::CLI::Run.cache_deception_text_for_spec(cached_report)
     text.should contain("[cached]")
     text.should contain("GET https://acme.test/account")
     text.should contain("authenticated:")
     text.should contain("anonymous:")
+    text.should contain("cache-busted:")
     text.should contain("cache: hit")
   end
 
@@ -39,5 +41,13 @@ describe "gori run cache-deception — output" do
     json["cache"].as_s.should eq("hit")
     json["anonymous"]["verdict"].as_s.should eq("same")
     json["authenticated"]["status"].as_i.should eq(200)
+  end
+
+  it "fails a run that checked no flows and uses Outbound's scope remedy" do
+    source = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run", "cache_deception.cr"))
+    source.should contain("if checked == 0")
+    source.should contain("if sent == 0")
+    source.should contain("Outbound.remedy(verdict, \"--allow-unscoped\")")
+    source.should_not contain("pass --allow-unscoped to check it")
   end
 end

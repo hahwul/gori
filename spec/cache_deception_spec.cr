@@ -23,28 +23,57 @@ private def errored_trial(name : String, baseline : Bool) : AZ::Trial
     nil, summary, "req".to_slice, nil, nil)
 end
 
-private def target(authed : AZ::Trial, anon : AZ::Trial, *,
+private def target(authed : AZ::Trial, anon : AZ::Trial, control : AZ::Trial? = nil, *,
                    blocked : Int64 = 0, reason : String? = nil) : AZ::Target
-  AZ::Target.new(1_i64, "GET", "https://h.test/account", [authed, anon], blocked, reason)
+  trials = [authed, anon]
+  trials << control if control
+  AZ::Target.new(1_i64, "GET", "https://h.test/account", trials, blocked, reason)
+end
+
+private class CacheDeceptionBackend < Gori::Fuzz::Backend
+  getter sent = [] of Bytes
+
+  def initialize(@origin : Gori::Fuzz::Origin, @cache_hit : Bool = true)
+  end
+
+  def origin : Gori::Fuzz::Origin
+    @origin
+  end
+
+  def send(bytes : Bytes) : Gori::Repeater::Result
+    @sent << bytes
+    text = String.new(bytes)
+    headers = @cache_hit && !text.includes?("__gori_cache_bust=") ? "X-Cache: HIT\r\nAge: 30\r\n" : ""
+    head = "HTTP/1.1 200 OK\r\n#{headers}Content-Length: 23\r\n\r\n".to_slice
+    Gori::Repeater::Result.new(head, "private account content".to_slice, nil, 1_000_i64)
+  end
 end
 
 describe Gori::CacheDeception do
   it "reports CACHED when the anonymous re-request got the authenticated body FROM a cache" do
     authed = cd_trial("as-captured", true, 200, AZ::Verdict::Baseline)
     anon = cd_trial("anonymous", false, 200, AZ::Verdict::Same, ["X-Cache: HIT", "Age: 30"])
-    report = CD.classify(target(authed, anon))
+    control = cd_trial("anonymous-cache-busted", false, 403, AZ::Verdict::Different)
+    report = CD.classify(target(authed, anon, control))
     report.verdict.should eq(CD::Verdict::Cached)
     report.verdict.deception?.should be_true
     report.cache.should eq(Gori::CacheStatus::Signal::Hit)
   end
 
-  it "reports SERVED when the content matched but no cache-hit header proves it was cached" do
+  it "reports SERVED when a cache-busted anonymous control also gets the same content" do
     authed = cd_trial("as-captured", true, 200, AZ::Verdict::Baseline)
-    anon = cd_trial("anonymous", false, 200, AZ::Verdict::Same) # no cache headers → none
-    report = CD.classify(target(authed, anon))
+    anon = cd_trial("anonymous", false, 200, AZ::Verdict::Same, ["X-Cache: HIT"])
+    control = cd_trial("anonymous-cache-busted", false, 200, AZ::Verdict::Same)
+    report = CD.classify(target(authed, anon, control))
     report.verdict.should eq(CD::Verdict::Served)
     report.verdict.deception?.should be_false
-    report.cache.should eq(Gori::CacheStatus::Signal::None)
+    report.cache.should eq(Gori::CacheStatus::Signal::Hit)
+  end
+
+  it "does not report CACHED without a completed cache-busted control" do
+    authed = cd_trial("as-captured", true, 200, AZ::Verdict::Baseline)
+    anon = cd_trial("anonymous", false, 200, AZ::Verdict::Same, ["X-Cache: HIT"])
+    CD.classify(target(authed, anon)).verdict.should eq(CD::Verdict::Review)
   end
 
   it "reports PROTECTED when the anonymous re-request got a different response" do
@@ -62,6 +91,50 @@ describe Gori::CacheDeception do
   it "reports ERRORED when the anonymous send failed (nothing was compared)" do
     authed = cd_trial("as-captured", true, 200, AZ::Verdict::Baseline)
     CD.classify(target(authed, errored_trial("anonymous", false))).verdict.should eq(CD::Verdict::Errored)
+  end
+
+  it "reports ERRORED when the authenticated baseline send failed" do
+    anon = cd_trial("anonymous", false, 200, AZ::Verdict::Same, ["X-Cache: HIT"])
+    control = cd_trial("anonymous-cache-busted", false, 403, AZ::Verdict::Different)
+    CD.classify(target(errored_trial("as-captured", true), anon, control)).verdict.should eq(CD::Verdict::Errored)
+  end
+
+  it "sends an anonymous cache-busted control through the shared replay engine" do
+    origin = Gori::Fuzz::Origin.new("https", "h.test", 443)
+    backend = CacheDeceptionBackend.new(origin)
+    engine = AZ::Engine.new(->(_origin : Gori::Fuzz::Origin, _http2 : Bool) {
+      backend.as(Gori::Fuzz::Backend)
+    })
+    row = Gori::Store::FlowRow.new(1_i64, 1_i64, "https", "GET", "h.test", 443,
+      "/account?from=history", 200, 100_i64, Gori::Store::FlowState::Complete)
+    request = "GET /account?from=history HTTP/1.1\r\nHost: h.test\r\n" \
+              "Cookie: session=secret\r\nAuthorization: Bearer secret\r\n\r\n".to_slice
+    detail = Gori::Store::FlowDetail.new(row, "HTTP/1.1", request, nil, nil, nil)
+
+    report = CD.check(engine, detail).not_nil!
+    report.verdict.should eq(CD::Verdict::Served)
+    backend.sent.size.should eq(3)
+    control = String.new(backend.sent.last)
+    control.should contain("GET /account?from=history&__gori_cache_bust=")
+    control.should_not contain("Cookie:")
+    control.should_not contain("Authorization:")
+  end
+
+  it "skips the control when the anonymous response has no cache-hit evidence" do
+    origin = Gori::Fuzz::Origin.new("https", "h.test", 443)
+    backend = CacheDeceptionBackend.new(origin, cache_hit: false)
+    engine = AZ::Engine.new(->(_origin : Gori::Fuzz::Origin, _http2 : Bool) {
+      backend.as(Gori::Fuzz::Backend)
+    })
+    row = Gori::Store::FlowRow.new(1_i64, 1_i64, "https", "GET", "h.test", 443,
+      "/account", 200, 100_i64, Gori::Store::FlowState::Complete)
+    request = "GET /account HTTP/1.1\r\nHost: h.test\r\nCookie: session=secret\r\n\r\n".to_slice
+    detail = Gori::Store::FlowDetail.new(row, "HTTP/1.1", request, nil, nil, nil)
+
+    report = CD.check(engine, detail).not_nil!
+    report.verdict.should eq(CD::Verdict::Served)
+    backend.sent.size.should eq(2)
+    report.control.should be_nil
   end
 
   it "reports BLOCKED when gori refused every send before the socket" do
@@ -92,7 +165,7 @@ describe Gori::CacheDeception do
     end
   end
 
-  it "fixes the two identities to as-captured (baseline) then anonymous" do
+  it "fixes the priming identities to as-captured (baseline) then anonymous" do
     ids = CD.identities
     ids.size.should eq(2)
     ids.first.baseline?.should be_true

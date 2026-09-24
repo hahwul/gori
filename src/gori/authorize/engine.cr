@@ -200,7 +200,7 @@ module Gori
       # says a resource is protected on the strength of a test that did not run — worse than a
       # false positive. The traffic that did go out is reported by the caller's run summary.
       def run(detail : Store::FlowDetail, identities : Array(Identity),
-              stop : Proc(Bool)? = nil) : Target?
+              stop : Proc(Bool)? = nil, *, request_target : String? = nil) : Target?
         row = detail.row
         ordered = order_baseline_first(identities)
         origin = Fuzz::Origin.new(row.scheme, row.host, row.port)
@@ -212,7 +212,13 @@ module Gori
         # a request nobody made. `FlowRequest.build` is the one home for that rewrite (plus the
         # truncated-body re-frame and the h2 pseudo-header refusal).
         built = Repeater::FlowRequest.build(detail)
-        base_bytes = drop_conditional_headers(built.bytes, row.method)
+        base_bytes = if target = request_target
+                       Repeater::FlowRequest.replace_request_target(built.bytes, target) ||
+                         raise Gori::Error.new("the captured request has no replaceable request-target")
+                     else
+                       built.bytes
+                     end
+        base_bytes = drop_conditional_headers(base_bytes, row.method)
         head_request = row.method.upcase == "HEAD"
         backend = @backend_factory.call(origin, http2)
         baseline_trial = nil.as(Trial?)

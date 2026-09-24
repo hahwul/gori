@@ -9,15 +9,15 @@ module Gori
       # --- cache_deception_check (web cache deception, synchronous) ------------
       #
       # The MCP adapter for `Gori::CacheDeception` (#1247). Synchronous, unlike `authorize_*`:
-      # a check is exactly TWO sends for one flow (authenticated to prime, then anonymous), so
+      # a check uses up to THREE sends for one flow (authenticated, anonymous, then a
+      # cache-busted anonymous control), so
       # the job registry the longer authorize/fuzz runs need would be overhead here.
       #
-      # It BORROWS the Authorize engine — `Engine.live`, the same scope-gated, fresh-connection-
-      # per-identity sender authorize uses — with the two identities fixed to as-captured and
-      # anonymous. What is MCP's own here is argument shapes, the strict Layer-1 gate
+      # It BORROWS the Authorize engine — `Engine.live`, the same scope-gated sender authorize
+      # uses — with the identities fixed to as-captured and anonymous. What is MCP's own here is argument shapes, the strict Layer-1 gate
       # (`Outbound.agent`, because no human eyeballed this target), and the JSON a model reads.
       # No `env_refresh`: unlike authorize_start, this replays the request AS CAPTURED (verbatim
-      # wire bytes) under two built-in identities that carry no `$NAME`/session-slot value to
+      # wire bytes) under built-in identities that carry no `$NAME`/session-slot value to
       # resolve, so there is no project env to re-read before the send.
       @[Tool("cache_deception_check", gated: true, agent_action: true, requires: ["get_flow"])]
       private def cache_deception_check(h) : Result
@@ -30,7 +30,7 @@ module Gori
         if reason = CacheDeception.skip_reason(detail, unsafe)
           # A refusal the caller can act on, named the same way authorize names its skips.
           return err("flow #{flow_id} cannot be checked: #{CacheDeception.reason_label(reason)}" \
-                     "#{reason == :unsafe_method ? " (pass unsafe_methods:true to replay it anyway — its side effect runs twice)" : ""}",
+                     "#{reason == :unsafe_method ? " (pass unsafe_methods:true to replay it anyway — its side effect can run up to three times)" : ""}",
             "INVALID_ARGUMENT", field: "flow_id")
         end
 
@@ -51,13 +51,13 @@ module Gori
         engine = Authorize::Engine.live(ob, verify, timeout, overrides: HostOverrides.load(store))
         report =
           begin
-            CacheDeception.check(engine, detail)
+            CacheDeception.check(engine, detail, -> { cancelled? })
           rescue ex
             ob.close
             return err("cache-deception check failed: #{ex.message}", "INTERNAL_ERROR")
           end
         ob.close
-        # `check` returns nil only when a stop fired mid-run; this synchronous path passes none.
+        # `check` returns nil when cancellation stops the run before its trials complete.
         return err("cache-deception check produced no result", "INTERNAL_ERROR") unless report
 
         Log.info { "cache_deception_check flow=#{flow_id} verdict=#{report.verdict.label} cache=#{report.cache.token}" }
@@ -78,6 +78,7 @@ module Gori
             j.field "cache", report.cache.token
             emit_cache_trial(j, "authenticated", report.authenticated)
             emit_cache_trial(j, "anonymous", report.anonymous)
+            emit_cache_trial(j, "cache_busted", report.control)
             report.blocked_reason.try { |r| j.field "blocked_reason", Serialize.text(r) }
             j.field "note", cache_deception_note(report.verdict)
           end
@@ -101,12 +102,14 @@ module Gori
       private def cache_deception_note(verdict : CacheDeception::Verdict) : String
         case verdict
         in .cached?
-          "the anonymous re-request was served the authenticated response FROM a cache — a web " \
+          "the anonymous re-request was served the authenticated response FROM a cache, while the " \
+          "cache-busted anonymous control got different content — a web " \
           "cache deception. Confirm the body carried private data before reporting it; the Fuzzer's " \
           "`cache-delimiters` payload set finds the crafted paths that trigger it."
         in .served?
-          "the anonymous re-request got matching content but with no cache-hit header — the endpoint " \
-          "may be public, or a cache served it silently. Not confirmed deception."
+          "the anonymous re-request got matching content, but either no cache-hit evidence was " \
+          "present or the cache-busted control matched too, indicating public content. Not confirmed " \
+          "deception."
         in .review?
           "the anonymous response was similar but not identical to the authenticated one — judge it."
         in .protected?
@@ -127,14 +130,15 @@ module Gori
           "replay it as its captured (AUTHENTICATED) identity to prime any cache, then re-request " \
           "the SAME url with NO session, and compare. If the anonymous re-request is served the " \
           "authenticated response FROM a cache (`verdict:cached`, `deception:true`), that private " \
-          "response was cached under a key an anonymous client hits. Reads `cache` from the response " \
+          "response was cached under a key an anonymous client hits; an anonymous cache-busted " \
+          "query request checks whether matching content is public. Reads `cache` from the response " \
           "headers (same as get_flow's `cache` / QL `cache:`). To find the CRAFTED paths that trigger " \
           "it (`;`, `.css`, `%00`, dot-segments), fuzz the path with the `cache-delimiters` payload " \
-          "set, then check the promising hits here. ACTIVE: sends 2 real requests (safe methods only " \
+          "set, then check the promising hits here. ACTIVE: sends up to 3 real requests (safe methods only " \
           "unless unsafe_methods:true). Only GET/HEAD/OPTIONS are checked by default." do |s|
           s.field "flow_id", intprop("captured flow id to check (from list_history)"), required: true
           s.field "unsafe_methods", boolprop("also check a flow whose method is not GET/HEAD/OPTIONS " \
-                                             "(default false) — its side effect runs twice (prime + anonymous)")
+                                             "(default false) — its side effect can run up to three times")
           s.field "verify", boolprop("verify upstream TLS certificates (default true)")
           s.field "timeout_ms", intprop("per-request connect + idle timeout in milliseconds (default 15000)")
           s.field "allow_unscoped", boolprop("check even when the flow's host is outside the project's " \

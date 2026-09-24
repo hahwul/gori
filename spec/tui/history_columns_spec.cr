@@ -355,6 +355,7 @@ describe "HistoryView — CACHE column" do
 
       view = HistoryView.new
       view.set_column_store(store)
+      view.set_query("cache:hit OR cache:dynamic OR cache:none")
       view.reload(store)
 
       text = screen_text(view)
@@ -364,11 +365,38 @@ describe "HistoryView — CACHE column" do
     end
   end
 
+  it "leaves the CACHE column hidden, and does not read response heads, by default" do
+    tmp_store do |store|
+      10.times { add_cache_flow(store, ["X-Cache: HIT"]) }
+      view = HistoryView.new
+      view.set_column_store(store)
+      view.reload(store)
+
+      store.reset_counts
+      text = screen_text(view)
+      text.should_not contain("CACHE")
+      store.get_flow_calls.should eq(0)
+    end
+  end
+
+  it "shows CACHE when an active saved view filters on cache status" do
+    tmp_store do |store|
+      add_cache_flow(store, ["X-Cache: HIT"])
+      view = HistoryView.new
+      view.set_column_store(store)
+      view.set_view(Gori::SavedViews::View.new("cache", "Cache hits", "cache:hit", "project"))
+      view.reload(store)
+
+      screen_text(view).should contain("CACHE")
+    end
+  end
+
   it "reads the head only for rows on screen, and remembers what it read" do
     tmp_store do |store|
       40.times { add_cache_flow(store, ["X-Cache: HIT"]) }
       view = HistoryView.new
       view.set_column_store(store)
+      view.set_query("cache:hit")
       view.reload(store)
 
       store.reset_counts
@@ -389,6 +417,7 @@ describe "HistoryView — CACHE column" do
       view = HistoryView.new
       view.set_column_store(store)
       view.set_columns([header_column]) # a user column that also reads the head
+      view.set_query("cache:hit")
       view.reload(store)
 
       store.reset_counts

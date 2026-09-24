@@ -225,7 +225,7 @@ module Gori
       when "src"
         "a flow's source is recorded when it is captured, not while it is in flight"
       when "cache"
-        "the response headers a cache status is read from have not arrived yet"
+        "cannot gate a request before its response exists"
       when .includes?('.')
         # The `req.`/`resp.` half. A gate stands on one leg and already knows which, so the
         # side prefix is not narrowing anything — it is naming bytes that are not in hand.

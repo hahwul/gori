@@ -242,7 +242,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `mine_start` / `mine_status` / `mine_results` / `mine_stop` | Param Miner 구동 |
 | `sequence_start` / `sequence_status` / `sequence_results` / `sequence_stop` | 라이브 리플레이로 토큰을 수집해 평가(결과는 리포트만 반환, 토큰은 반환하지 않음) |
 | `authorize_start` / `authorize_status` / `authorize_results` / `authorize_stop` | 캡처된 플로우를 여러 아이덴티티로 재전송하고 각 응답을 기준선과 비교합니다(접근 제어 결함). 결과는 `access_control`(`BYPASS`/`enforced`/`review`/`error`/`nothing_sent`)과 페이징 없는 `bypasses` 목록으로 시작합니다 |
-| `cache_deception_check` | 플로우 하나를 웹 캐시 디셉션으로 검사합니다: 캡처된(인증된) 아이덴티티로 재전송해 캐시를 채운 뒤, 세션 없이 같은 url을 다시 요청합니다. `verdict: cached`(`deception: true`)는 익명 재요청이 인증된 응답을 캐시에서 받았다는 뜻입니다. 동기(두 번 전송). 응답의 `cache` 상태를 읽으며, 트리거되는 조작된 경로를 찾으려면 Fuzzer의 `cache-delimiters` 페이로드 세트와 함께 쓰세요 |
+| `cache_deception_check` | 플로우 하나를 웹 캐시 디셉션으로 검사합니다: 캡처된(인증된) 아이덴티티로 재전송하고, 세션 없이 같은 url을 다시 요청한 뒤 캐시 무효화 익명 제어 요청을 보냅니다. 제어 응답도 일치하면 공개 콘텐츠(`served`)이고, 캐시 히트를 보이는 일치 응답과 다른 제어 응답은 디셉션 가능성(`cached`)이 있습니다. 동기 방식으로 최대 세 번 전송합니다. 응답의 `cache` 상태를 읽으며, 트리거되는 조작된 경로를 찾으려면 Fuzzer의 `cache-delimiters` 페이로드 세트와 함께 쓰세요 |
 | `discover_start` / `discover_status` / `discover_results` / `discover_stop` | 엔드포인트 스파이더링 & 브루트포스, 진행 상황 폴링, 결과 조회. 네 개 모두 액션 도구이므로 읽기 전용 서버에는 Discover 표면이 없습니다 |
 | `oast_start` / `oast_stop` | 즉석 OAST 페이로드 등록 후 콜백 폴링(`oast_poll`로 히트 조회). 재개한 세션에 `oast_stop`을 쓰면 폴링만 멈추고 세션은 다시 재개할 수 있게 남습니다 |
 | `oast_resume` / `oast_release` | 저장된 세션을 다시 살려 이전에 심어둔 페이로드가 계속 resolve되게 하고(폴링 결과는 프로젝트에 저장됩니다), 끝난 engagement는 등록 해제합니다. 콜백은 남습니다 |

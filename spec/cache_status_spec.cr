@@ -17,7 +17,40 @@ private def classify(*lines : String) : Symbol
   end
 end
 
+private def classify_lines(lines : Array(String)) : Symbol
+  raw = "HTTP/1.1 200 OK\r\n" + lines.map { |line| "#{line}\r\n" }.join + "\r\n"
+  case Gori::CacheStatus.classify(raw.to_slice)
+  in Gori::CacheStatus::Signal::Hit     then :hit
+  in Gori::CacheStatus::Signal::Miss    then :miss
+  in Gori::CacheStatus::Signal::Dynamic then :dynamic
+  in Gori::CacheStatus::Signal::None    then :none
+  end
+end
+
 describe Gori::CacheStatus do
+  it "classifies the corrected cache headers from a table of examples" do
+    examples = [] of Tuple(Array(String), Symbol)
+    examples << {["Age: 0"], :none}
+    examples << {["X-Varnish: 123 456"], :hit}
+    examples << {["X-Cache-Status: STALE"], :hit}
+    examples << {["X-Cache-Status: UPDATING"], :hit}
+    examples << {["X-Cache-Status: REVALIDATED"], :hit}
+    examples << {["X-Cache-Status: EXPIRED"], :miss}
+    examples << {["X-Cache-Status: BYPASS"], :dynamic}
+    examples << {["X-Vercel-Cache: HIT"], :hit}
+    examples << {["X-Proxy-Cache: HIT"], :hit}
+    examples << {["Akamai-Cache-Status: Hit from child"], :hit}
+    examples << {["CDN-Cache: HIT"], :hit}
+    examples << {["Cache-Control: private=\"set-cookie\", max-age=3600"], :none}
+    examples << {["Cache-Control: no-store", "Surrogate-Control: max-age=3600"], :none}
+    examples << {["Server-Timing: cdn-cache; desc=HIT"], :hit}
+    examples << {["Cache-Status: origin; hit, edge; fwd=uri-miss"], :miss}
+
+    examples.each do |lines, expected|
+      classify_lines(lines).should eq(expected), lines.join(" | ")
+    end
+  end
+
   describe "hit signals (served from a shared cache)" do
     it "reads X-Cache: HIT and its 'HIT from …' variants" do
       classify("X-Cache: HIT").should eq(:hit)
@@ -43,6 +76,31 @@ describe Gori::CacheStatus do
       classify("X-Cache-Status: HIT").should eq(:hit)
     end
 
+    it "reads nginx stale-family states and a two-id Varnish hit" do
+      classify("X-Cache-Status: STALE").should eq(:hit)
+      classify("X-Cache-Status: UPDATING").should eq(:hit)
+      classify("X-Cache-Status: REVALIDATED").should eq(:hit)
+      classify("X-Varnish: 123 456").should eq(:hit)
+    end
+
+    it "reads the common CDN cache-status headers" do
+      {
+        "X-Vercel-Cache: HIT",
+        "X-Proxy-Cache: HIT",
+        "Akamai-Cache-Status: Hit from child",
+        "CDN-Cache: HIT",
+        "Server-Timing: cdn-cache; desc=HIT",
+      }.each { |line| classify(line).should eq(:hit) }
+    end
+
+    it "uses the closest-to-client Cache-Status member" do
+      classify("Cache-Status: origin; hit, edge; fwd=uri-miss").should eq(:miss)
+      classify("Cache-Status: origin; fwd=miss, edge; hit").should eq(:hit)
+      classify("Cache-Status: origin; hit, \"edge, west\"; fwd=uri-miss").should eq(:miss)
+      # A cache-status field after another positive marker still controls the result.
+      classify("X-Cache: HIT", "Cache-Status: edge; fwd=uri-miss").should eq(:miss)
+    end
+
     it "takes HIT over a MISS elsewhere in a cache chain" do
       classify("X-Cache: MISS", "X-Cache: HIT").should eq(:hit)
     end
@@ -58,8 +116,12 @@ describe Gori::CacheStatus do
       classify("CF-Cache-Status: EXPIRED").should eq(:miss)
     end
 
-    it "reads Age: 0 as a store that produced it this request" do
-      classify("Age: 0").should eq(:miss)
+    it "does not treat Age: 0 as a cache miss" do
+      classify("Age: 0").should eq(:none)
+    end
+
+    it "reads nginx EXPIRED as a miss" do
+      classify("X-Cache-Status: EXPIRED").should eq(:miss)
     end
 
     it "reads X-Cache-Hits: 0" do
@@ -81,6 +143,21 @@ describe Gori::CacheStatus do
     it "reads Cache-Control: private (a shared cache must not store it)" do
       classify("Cache-Control: private").should eq(:dynamic)
       classify("Cache-Control: private, max-age=600").should eq(:dynamic)
+    end
+
+    it "does not treat field-limited private as uncacheable" do
+      classify("Cache-Control: private=\"set-cookie\", max-age=3600").should eq(:none)
+    end
+
+    it "lets shared-cache max-age directives override Cache-Control: no-store" do
+      classify("Cache-Control: no-store", "Surrogate-Control: max-age=3600").should eq(:none)
+      classify("Cache-Control: no-store", "CDN-Cache-Control: max-age=3600").should eq(:none)
+      # The shared override applies to no-store; bare private still bars shared caching.
+      classify("Cache-Control: private", "Surrogate-Control: max-age=3600").should eq(:dynamic)
+    end
+
+    it "classifies nginx BYPASS as dynamic" do
+      classify("X-Cache-Status: BYPASS").should eq(:dynamic)
     end
 
     it "does NOT read no-cache as dynamic — it permits storing, only forces revalidation" do

@@ -797,7 +797,7 @@ module Gori
         clauses << "create/update_issue" if advertised("create_issue", "update_issue")
         clauses << "create/delete_rule + set_rule_enabled" if advertised("create_rule", "delete_rule", "set_rule_enabled")
         return "" if clauses.empty?
-        gated = advertised("send_request", "send_websocket", "fuzz_start", "mine_start", "authorize_start")
+        gated = advertised("send_request", "send_websocket", "fuzz_start", "mine_start", "authorize_start", "cache_deception_check")
         " Action tools are enabled: #{clauses.join(", ")} make real outbound requests or " \
         "mutate issues/rules." + (gated ? " Active requests are gated by the project scope: a target outside — or without — a " \
                                           "configured scope is refused (SCOPE_BLOCKED) unless you pass allow_unscoped:true." : "")
@@ -816,6 +816,7 @@ module Gori
         disabled << "fuzz_*" if @tools.advertises?("fuzz_start")
         disabled << "mine_*" if @tools.advertises?("mine_start")
         disabled << "authorize_*" if @tools.advertises?("authorize_start")
+        disabled << "cache_deception_check" if @tools.advertises?("cache_deception_check")
         disabled << "create/update_issue" if restorable("create_issue", "update_issue")
         disabled << "create/delete_rule" if restorable("create_rule", "delete_rule")
         head = if disabled.empty?
