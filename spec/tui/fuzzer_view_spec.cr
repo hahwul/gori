@@ -1343,15 +1343,10 @@ describe "FuzzerView#template_click_to_cursor / #target_click_to_cursor" do
     view.target.should eq("httXps://h")
   end
 
-  # The TARGET caret was measured with display_width while BOTH of its counterparts —
-  # paint_char_span_bg (the selection tint, in the same render) and Screen.column_for (the
-  # click inverse, in target_click_to_cursor) — floor each codepoint to ≥1. On a target
-  # holding a zero-width char the three disagreed: the caret sat a column left of its
-  # glyph and a click came back one character off. A URL carrying U+200B is not exotic
-  # here; it is a stock filter-bypass payload, i.e. exactly what gets pasted into a fuzz
-  # target. Pin the round trip: caret column → click at that column → the same index.
+  # A hidden codepoint expands to a named badge; target caret and click mapping must use the
+  # badge's complete display width while the target string retains its source codepoint.
   it "keeps the target caret and click-to-cursor agreeing across a zero-width char" do
-    target = "https://h/a\u{200B}b" # ZWSP: display_width 0, column_width 1, one drawn cell
+    target = "https://h/a\u{200B}b" # ZWSP displays as a six-column badge
     view = FuzzerView.new
     view.load_request(target, "GET / HTTP/1.1\r\nHost: h\r\n\r\n", false, "")
     rect = Rect.new(0, 0, 100, 30)
@@ -1363,12 +1358,14 @@ describe "FuzzerView#template_click_to_cursor / #target_click_to_cursor" do
       view.target_click_to_cursor(rect, col, rect.y + 1)
       b = MemoryBackend.new(100, 30)
       view.render(Screen.new(b), rect)
-      # The caret is the single cell painted on an accent background in the field.
+      # The block caret highlights its current visible grapheme: one cell for ASCII, the
+      # whole badge when parked on the source ZWSP.
       caret = (base...(base + 24)).select do |x|
         bg = b.bg_at(x, rect.y + 1)
         bg == Theme.accent || bg == Theme.accent_bg
       end
-      caret.should eq([col]) # click column → caret column, with nothing left over
+      cursor_width = cx < target.size ? Screen.grapheme_cols(target[cx].to_s) : 1
+      caret.should eq((col...col + cursor_width).to_a) # click column → visible caret grapheme
     end
 
     # …and the click lands on the right CHARACTER, not merely the right column: index 12
@@ -1379,9 +1376,8 @@ describe "FuzzerView#template_click_to_cursor / #target_click_to_cursor" do
     fresh.target_insert('X')
     fresh.target.should eq("#{target[0, 12]}X#{target[12..]}")
 
-    # Concretely: past the ZWSP the old measure was one column short of the drawn glyph.
-    Screen.display_width(target).should eq(12)
-    Screen.draw_width(target).should eq(13)
+    Screen.display_width(target).should eq(18)
+    Screen.draw_width(target).should eq(18)
   end
 
   # Same round trip over a MULTI-CODEPOINT cluster, where the retired per-codepoint
@@ -1412,9 +1408,10 @@ describe "FuzzerView#template_click_to_cursor / #target_click_to_cursor" do
       caret.should eq([col]) # (cx=#{cx})
     end
 
-    # The per-codepoint measure over-counted by one for every combining mark.
+    # Measuring the composed cluster together keeps it narrower than measuring its isolated
+    # combining mark as a named badge.
     Screen.draw_width(target).should eq(15)
-    target.each_char.sum { |c| Screen.draw_width(c.to_s) }.should eq(16)
+    target.each_char.sum { |c| Screen.draw_width(c.to_s) }.should eq(23)
   end
 end
 

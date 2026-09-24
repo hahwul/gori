@@ -143,6 +143,6 @@ describe "gori run repeater — output caps and --path" do
 
   it "previews a request line short and terminal-safe" do
     Gori::CLI::Run.request_line_preview("GET /\e[31mx HTTP/1.1\r\nHost: h\r\n\r\n".to_slice)
-      .should eq(%("GET /·[31mx HTTP/1.1"))
+      .should eq(%("GET /⟨ESC⟩[31mx HTTP/1.1"))
   end
 end

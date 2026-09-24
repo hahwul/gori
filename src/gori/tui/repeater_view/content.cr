@@ -31,19 +31,32 @@ class Gori::Tui::RepeaterView
   private record RespView,
     head : Array(Highlight::Line),
     body : Highlight::BodyLines,
-    kind : Symbol do
+    kind : Symbol,
+    decoded_ranges : Array(Highlight::DecodedRange) = [] of Highlight::DecodedRange,
+    trailer : Array(Highlight::Line) = [] of Highlight::Line,
+    unicode_escape_count : Int32 = 0 do
     def total : Int32
-      head.size + body.size
+      head.size + body.size + trailer.size
     end
 
     def line_at(i : Int32) : Highlight::Line
       return head[i] if i < head.size
-      Highlight.body_styled(body[i - head.size], kind)
+      body_i = i - head.size
+      if body_i < body.size
+        line = Highlight.body_styled(body[body_i], kind)
+        ranges = Highlight.decoded_ranges_for(decoded_ranges, body_i)
+        return Highlight.emphasize(line, ranges) unless ranges.empty?
+        return line
+      end
+      trailer[body_i - body.size]
     end
 
     # Plain text of line `i` for searching — body lines raw (no re-styling).
     def line_text(i : Int32) : String
-      i < head.size ? head[i].map(&.text).join : body[i - head.size]
+      return head[i].map(&.text).join if i < head.size
+      body_i = i - head.size
+      return body[body_i] if body_i < body.size
+      trailer[body_i - body.size].map(&.text).join
     end
   end
 
@@ -94,16 +107,39 @@ class Gori::Tui::RepeaterView
       elsif !result.ok?
         RespView.new([[Highlight::Span.new("repeater error: #{result.error}", Theme.red)]], Highlight::BodyLines.empty, :text)
       else
-        src = display_body(result.head, result.body)
-        # Pretty-print the response body (display only). The DIFF path uses
-        # `display_body` directly (not this view), so both diff sides stay on the
-        # same unformatted bytes — pretty never destabilises the diff.
-        pretty = @pretty ? Pretty.format(result.head, src) : nil
-        @resp_pretty_applied = pretty != nil
-        win = Highlight.message_windowed(result.head, pretty.try(&.bytes) || src, request: false, kind: pretty.try(&.kind))
-        RespView.new(win.head, win.body, win.kind)
+        build_resp_view(result)
       end
     end
+  end
+
+  private def build_resp_view(result : Repeater::Result) : RespView
+    src = display_body(result.head, result.body)
+    # Pretty-print the response body (display only). The DIFF path uses `display_body`
+    # directly, so both diff sides stay on the same unformatted bytes.
+    pretty = formatted_resp_body(result.head, src)
+    @resp_pretty_applied = @pretty && (pretty.try(&.reflowed) || false)
+    decoded_ranges = pretty.try(&.decoded_ranges) || [] of Highlight::DecodedRange
+    protected_linefeeds = pretty.try(&.protected_linefeeds) || [] of Int32
+    win = Highlight.message_windowed(result.head, pretty.try(&.bytes) || src, request: false,
+      kind: pretty.try(&.kind), decoded_ranges: decoded_ranges,
+      protected_linefeeds: protected_linefeeds)
+    count = pretty.try(&.unicode_escape_count) || Pretty.unicode_escape_count(result.head, src)
+    RespView.new(win.head, win.body, win.kind, decoded_ranges, resp_unicode_trailer(pretty), count)
+  end
+
+  private def formatted_resp_body(head : Bytes, src : Bytes?) : Pretty::Result?
+    if @pretty
+      Pretty.format(head, src, decode_unicode: @decode_unicode)
+    elsif @decode_unicode
+      Pretty.decode_unicode_json(head, src)
+    end
+  end
+
+  private def resp_unicode_trailer(pretty : Pretty::Result?) : Array(Highlight::Line)
+    return [] of Highlight::Line unless pretty
+    return [] of Highlight::Line unless @decode_unicode
+    return [] of Highlight::Line unless pretty.unicode_escape_count > 0
+    [Highlight::Line.new, [Highlight::Span.new("— #{pretty.note} —", Theme.accent)]]
   end
 
   private def diff_lines : Array(Repeater::DiffLine)

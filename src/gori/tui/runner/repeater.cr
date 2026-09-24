@@ -123,6 +123,11 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     v.toggle_resp_hex
   end
 
+  def repeater_toggle_unicode_escapes : Nil
+    return unless (v = repeater_controller.current_view) && v.focus == :response
+    v.toggle_unicode_decoding
+  end
+
   def repeater_pretty_request : Nil
     repeater_controller.repeater_pretty_request
   end

@@ -153,6 +153,7 @@ module Gori::Tui
       @resp_hex_bytes = nil.as(Bytes?)         # cached combined head+body of the last result (hex source)
       @pretty = Settings.pretty_bodies_default # 'p' pretty-prints the response body (display only); pushed from the runner
       @resp_pretty_applied = false             # whether Pretty actually reflowed the current response (drives the chip)
+      @decode_unicode = false                  # 'u' decodes JSON \u escapes for display only
       @req_hex_edit = nil.as(HexEdit?)         # ^X: editable byte buffer for the REQUEST (authoritative while set)
       @scroll_req = 0                          # scroll offset for the hex request editor
       @focus = :request

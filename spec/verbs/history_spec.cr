@@ -196,7 +196,7 @@ describe "Gori::Verbs.register_history" do
 
     it "leaves the view toggles visible so they front the detail's space menu" do
       # The palette is Global-only, so un-hiding them cannot leak them there.
-      %w[detail.toggle-hex detail.toggle-ws detail.toggle-pretty].each do |id|
+      %w[detail.toggle-hex detail.toggle-ws detail.toggle-pretty detail.toggle-unicode].each do |id|
         r[id].hidden?.should be_false
         r[id].scope.should eq(Gori::Verb::Scope::HistoryDetail)
       end
@@ -204,6 +204,8 @@ describe "Gori::Verbs.register_history" do
       verb_intents(r, "detail.toggle-hex").should eq([:toggle_detail_hex])
       verb_intents(r, "detail.toggle-ws").should eq([:toggle_reveal])
       verb_intents(r, "detail.toggle-pretty").should eq([:toggle_pretty])
+      r["detail.toggle-unicode"].chords.should eq([Gori::Verb::Chord.new("u")])
+      verb_intents(r, "detail.toggle-unicode").should eq([:toggle_unicode_escapes])
     end
   end
 
@@ -222,6 +224,7 @@ describe "Gori::Verbs.register_history" do
       verb_intents(r, "repeater.send").should eq([:repeater_send])
       verb_intents(r, "repeater.new").should eq([:repeater_new])
       verb_intents(r, "repeater.paste-curl").should eq([:repeater_paste_curl])
+      r["repeater.paste-curl"].menu_key.should eq('U')
       verb_intents(r, "repeater.minimize").should eq([:repeater_minimize])
       verb_intents(r, "repeater.send-group").should eq([:repeater_send_group])
     end
@@ -272,10 +275,12 @@ describe "Gori::Verbs.register_history" do
       {"repeater.toggle-diff"     => :repeater_toggle_resp_diff,
        "repeater.toggle-resp-hex" => :repeater_toggle_resp_hex,
        "repeater.toggle-pretty"   => :toggle_pretty,
+       "repeater.toggle-unicode"  => :repeater_toggle_unicode_escapes,
       }.each do |id, intent|
         r[id].section.should eq(:response)
         verb_intents(r, id).should eq([intent])
       end
+      r["repeater.toggle-unicode"].chords.should eq([Gori::Verb::Chord.new("u")])
 
       r["repeater.toggle-sni"].section.should eq(:target)
       verb_intents(r, "repeater.toggle-sni").should eq([:repeater_toggle_sni])

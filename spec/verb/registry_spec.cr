@@ -216,6 +216,10 @@ private class FakeContext < ExecContext
     @calls << :toggle_pretty
   end
 
+  def toggle_unicode_escapes : Nil
+    @calls << :toggle_unicode_escapes
+  end
+
   def repeater_selected : Nil
     @calls << :repeater_selected
   end
@@ -338,6 +342,10 @@ private class FakeContext < ExecContext
 
   def repeater_toggle_resp_hex : Nil
     @calls << :repeater_toggle_resp_hex
+  end
+
+  def repeater_toggle_unicode_escapes : Nil
+    @calls << :repeater_toggle_unicode_escapes
   end
 
   def repeater_pretty_request : Nil
@@ -1974,6 +1982,7 @@ describe Gori::Verb do
       keymap.lookup(Chord.new("left"), Gori::Verb::Scope::HistoryDetail).should eq("detail.prev-pane")
       keymap.lookup(Chord.new("x"), Gori::Verb::Scope::HistoryDetail).should eq("detail.select-line")
       keymap.lookup(Chord.new("x", ctrl: true), Gori::Verb::Scope::HistoryDetail).should eq("detail.toggle-hex")
+      keymap.lookup(Chord.new("u"), Gori::Verb::Scope::HistoryDetail).should eq("detail.toggle-unicode")
       # ^U in the Fuzzer pretty-prints the template (must NOT be intercepted as clear-marks
       # anymore — clear-marks moved to the space menu as fuzz.clear-marks).
       keymap.lookup(Chord.new("u", ctrl: true), Gori::Verb::Scope::Fuzzer).should eq("fuzz.pretty-template")
@@ -2046,6 +2055,7 @@ describe Gori::Verb do
       km.lookup(Chord.new("x", ctrl: true), Gori::Verb::Scope::Repeater).should eq("repeater.toggle-hex")
       km.lookup(Chord.new("s", ctrl: true), Gori::Verb::Scope::Repeater).should eq("repeater.toggle-sni")
       km.lookup(Chord.new("l", ctrl: true), Gori::Verb::Scope::Repeater).should eq("repeater.toggle-auto-content-length")
+      km.lookup(Chord.new("u"), Gori::Verb::Scope::Repeater).should eq("repeater.toggle-unicode")
     end
 
     it "binds the Fuzzer run/stop/automark chords in Fuzzer scope" do

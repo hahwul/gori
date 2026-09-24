@@ -896,6 +896,9 @@ module Gori::Tui
       when :pretty
         view.focus_pane(:response)
         @host.toggle_pretty
+      when :unicode
+        view.focus_pane(:response)
+        view.toggle_unicode_decoding
       when :cl
         view.focus_pane(:request)
         repeater_toggle_auto_content_length

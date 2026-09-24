@@ -46,12 +46,12 @@ describe "gori run decoder output" do
     output.to_slice.should eq(bytes)
   end
 
-  it "neutralizes terminal controls and keeps the terminal line break" do
+  it "names terminal controls and keeps the terminal line break" do
     rendered = "before#{27.chr}[2Jafter"
     output = IO::Memory.new
     Gori::CLI::Run.write_decoder_output_for_spec(output, rendered,
       Gori::Decoder::RenderAs::Text, true)
-    output.to_s.should eq("before·[2Jafter\n")
+    output.to_s.should eq("before⟨ESC⟩[2Jafter\n")
   end
 end
 

@@ -62,20 +62,10 @@ describe Gori::Tui::TextField do
   end
 
   it "still scrolls to keep the caret visible when the value holds zero-width chars" do
-    # window_start decides when to scroll, so it has to measure in the SAME units
-    # Screen#input_line places the caret in. It measured with display_width, which scores
-    # a zero-width char 0 while input_line's caret (column_width) and the drawn cell both
-    # count it as 1. The window therefore under-counted, concluded the value still fit,
-    # and left start at 0 — putting the caret at column == width, one past the right edge,
-    # where input_line's `caret_x < right` guard drops it entirely. The field then had NO
-    # visible caret and no hardware cursor, so IME composition had nowhere to anchor.
-    # (This pins window_start specifically: it only fails once input_line itself measures
-    # with column_width. With BOTH on display_width the two under-counts cancelled and the
-    # caret was merely in the wrong column rather than missing — so the pair must move
-    # together, and the assertion below is on the caret EXISTING and being in-field.)
-    value = "#{"a" * 6}#{"\u{200B}" * 5}b" # 12 chars: display_width 7, column_width 12
-    Screen.display_width(value).should eq(7)
-    Screen.draw_width(value).should eq(12)
+    # Each ZWSP now occupies the width of its named badge in drawing and caret geometry.
+    value = "#{"a" * 6}#{"\u{200B}" * 5}b" # 12 source chars, 37 display columns
+    Screen.display_width(value).should eq(37)
+    Screen.draw_width(value).should eq(37)
     f = TextField.new(value) # TextField.new parks the caret at the end
     f.caret.should eq(12)
     backend = MemoryBackend.new(40, 3)

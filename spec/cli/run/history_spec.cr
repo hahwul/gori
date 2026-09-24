@@ -152,7 +152,9 @@ describe "gori run history — CLI::Output rows" do
     txt.should_not contain('\e') # no ESC
     txt.should_not contain('\r') # no CR
     txt.should_not contain('\a') # no BEL
-    txt.should contain("·")      # control bytes replaced with a visible marker
+    txt.should contain("⟨ESC⟩")
+    txt.should contain("⟨CR⟩")
+    txt.should contain("⟨BEL⟩")
   end
 
   it "scrubs the METHOD and SCHEME columns too, not just the target" do
@@ -163,7 +165,7 @@ describe "gori run history — CLI::Output rows" do
       target: "/", status: 200, size: 0_i64, state: Gori::Store::FlowState::Complete)
     txt = Gori::CLI::Output.flow_row_text(row)
     txt.should_not contain('\e')
-    txt.should contain("G·ET")
+    txt.should contain("G⟨ESC⟩ET")
   end
 
   # `ljust(7)` guarantees a separator only while the method is SHORTER than 7 — so the two
@@ -198,9 +200,11 @@ describe "gori run history — CLI::Output rows" do
     Gori::CLI::Output.flow_row_text(row).should contain("GET    https")
   end
 
-  it "term_safe leaves ordinary UTF-8 untouched but replaces control bytes" do
+  it "term_safe leaves ordinary UTF-8 untouched and names hidden characters" do
     Gori::CLI::Output.term_safe("api.test/π/데이터").should eq("api.test/π/데이터")
-    Gori::CLI::Output.term_safe("a\tb\nc").should eq("a·b·c")
+    Gori::CLI::Output.term_safe("a\tb\nc").should eq("a⟨TAB⟩b⟨LF⟩c")
+    Gori::CLI::Output.term_safe("a\u{200b}b").should eq("a⟨ZWSP⟩b")
+    Gori::CLI::Output.term_safe("👨‍👩‍👧‍👦").should eq("👨‍👩‍👧‍👦")
   end
 
   it "term_safe also scrubs invalid UTF-8 (not just control bytes) so JSON output stays valid" do
@@ -215,16 +219,19 @@ describe "gori run history — CLI::Output rows" do
     out.should eq("hi�hi")
   end
 
-  it "term_safe_multiline keeps newlines and tabs while still killing ANSI/OSC" do
+  it "term_safe_multiline keeps newlines and names tabs and ANSI/OSC controls" do
     # This is the `show`/`repeater` TEXT view's scrubber: a captured head/body must keep
     # its layout (a head flattened to one line is unreadable) while escapes still die.
     src = "HTTP/1.1 200 OK\r\nX-A:\t1\n\e[31mred\e]0;title\a"
     out = Gori::CLI::Output.term_safe_multiline(src)
     out.should contain("\n") # line breaks survive
-    out.should contain("\t") # tabs survive
+    out.should contain("⟨TAB⟩")
+    out.should_not contain('\t')
     out.should_not contain('\e')
     out.should_not contain('\a')
-    out.should contain('·') # the CR of the CRLF and the escapes are neutralized
+    out.should contain("⟨CR⟩")
+    out.should contain("⟨ESC⟩")
+    out.should contain("⟨BEL⟩")
   end
 
   it "emits a valid JSON object with the expected keys" do
