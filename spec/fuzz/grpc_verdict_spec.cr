@@ -1,4 +1,5 @@
 require "../spec_helper"
+require "compress/gzip"
 
 private alias F = Gori::Fuzz
 
@@ -328,6 +329,20 @@ describe F::GrpcVerdict do
     head = ("HTTP/1.1 200 OK\r\nContent-Type: application/grpc-web+proto\r\n" +
             "grpc-status: 16\r\n\r\n").to_slice
     F::GrpcVerdict.response(head, web_body("0")).should eq({16, nil})
+  end
+
+  # A `Repeater::Result` body is WIRE bytes — still gzipped when the origin gzipped it — and
+  # the Miner and Sequencer read their verdict off it: `response` over the coded octets finds
+  # no trailer frame, so a denied call read as one with no status at all.
+  it "reads a gzipped grpc-web body's trailer through response_wire" do
+    io = IO::Memory.new
+    Compress::Gzip::Writer.open(io, &.write(web_body("7", "denied")))
+    wire = io.to_slice
+    head = ("HTTP/1.1 200 OK\r\nContent-Type: application/grpc-web+proto\r\n" +
+            "Content-Encoding: gzip\r\n\r\n").to_slice
+    F::GrpcVerdict.response_wire(head, wire).should eq({7, "denied"})
+    plain = "HTTP/1.1 200 OK\r\nContent-Type: application/grpc-web+proto\r\n\r\n".to_slice
+    F::GrpcVerdict.response_wire(plain, web_body("7")).should eq({7, nil})
   end
 
   it "does not read a body the response never declared as grpc-web" do

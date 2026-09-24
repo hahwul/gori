@@ -165,7 +165,14 @@ class Gori::Tui::RepeaterView
     return @grpc_body unless @grpc_reframable
     payload = (h = @req_hex_edit) ? h.to_bytes : @grpc_payload
     framed = @grpc_reframe ? Proxy::H2::Grpc.frame(@grpc_compressed, payload) : grpc_stale_frame(payload)
-    @grpc_web_text ? Base64.strict_encode(framed).to_slice : framed
+    return framed unless @grpc_web_text
+    # Frames identical to the capture's go out as the CAPTURED text (P7). Re-encoding them
+    # would normalise what the operator never touched: a body of separately padded chunks
+    # (`AAAAAA==AUE=`, the shape `decode_web_text` exists for), a trailing CRLF, or the
+    # URL-safe alphabet all came back as one canonical strict-base64 string — a different
+    # request than `gori run repeater send` and MCP `send_request` put on the wire.
+    return @grpc_body if framed == grpc_framed_body
+    Base64.strict_encode(framed).to_slice
   end
 
   # The CAPTURED 5-byte prefix in front of the live payload — the reframe toggle's OFF half.
@@ -222,8 +229,8 @@ class Gori::Tui::RepeaterView
     # Keyed on the RESPONSE's own content-type: a grpc-web-text reply is base64 on the wire
     # (and a server may answer `-text` to a binary request), so the framing lives one decode
     # below the bytes.
-    msgs, residual = Proxy::H2::Grpc.scan_body(Gori::MediaType.of(result.head),
-      result.body || Bytes.empty)
+    # `scan_wire`: and one HTTP content-coding below that, when the origin gzipped it.
+    msgs, residual = Proxy::H2::Grpc.scan_wire(result.head, result.body || Bytes.empty)
     # The `.proto` lens for the RESPONSE half of this rpc (#823), keyed on the path that was
     # SENT — not the captured flow's (the editor is where an operator retargets a call) and not
     # the one currently typed. These rows describe a PAST response, and the transcript cache
@@ -245,7 +252,7 @@ class Gori::Tui::RepeaterView
           rows << {"← trailer  #{m.data.size}b", Theme.green}
           Proxy::H2::Grpc.trailer_headers(m.data).each do |k, v|
             if k == "grpc-status"
-              ok = v.strip.to_i? == 0
+              ok = Proxy::H2::Grpc.parse_status(v) == 0
               rows << {"    #{k}: #{Proxy::H2::Grpc.status_label(v)}", ok ? Theme.green : Theme.red}
             else
               rows << {"    #{k}: #{v}", Theme.muted}
@@ -269,13 +276,13 @@ class Gori::Tui::RepeaterView
   # up. Reading only the head therefore printed `⚠ no grpc-status trailer` directly beneath
   # the trailer it was looking for — the transcript contradicting itself about the one fact a
   # gRPC operator is reading it for, since the HTTP status is 200 for a denial as much as for
-  # a grant. `Grpc.trailer_status` is the same reader the Fuzzer/Miner/Sequencer verdict uses.
+  # a grant. `Grpc.wire_trailer_status` is the reader the Miner/Sequencer verdict uses too.
   private def grpc_status_row(result : Repeater::Result) : {String, Color}
     resp = result.response
     if code = resp.try(&.headers.get?("grpc-status"))
       return grpc_status_line(code, resp.try(&.headers.get?("grpc-message")))
     end
-    n, msg = Proxy::H2::Grpc.trailer_status(Gori::MediaType.of(result.head), result.body)
+    n, msg = Proxy::H2::Grpc.wire_trailer_status(result.head, result.body)
     return {"⚠ no grpc-status trailer", Theme.yellow} unless n
     grpc_status_line(n.to_s, msg)
   end
@@ -284,7 +291,7 @@ class Gori::Tui::RepeaterView
   # and `status_label` names it — a non-numeric `grpc-status` is an origin's own answer, so it
   # is printed as itself rather than repeated as its own "name".
   private def grpc_status_line(shown : String, msg : String?) : {String, Color}
-    ok = shown.strip.to_i? == 0
+    ok = Proxy::H2::Grpc.parse_status(shown) == 0
     {"#{ok ? "✓" : "✗"} grpc-status: #{Proxy::H2::Grpc.status_label(shown)}#{msg ? " · #{msg}" : ""}",
      ok ? Theme.green : Theme.red}
   end

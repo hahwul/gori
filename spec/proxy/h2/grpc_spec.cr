@@ -1,4 +1,5 @@
 require "../../spec_helper"
+require "compress/gzip"
 
 private alias Grpc = Gori::Proxy::H2::Grpc
 
@@ -278,11 +279,50 @@ describe Gori::Proxy::H2::Grpc do
       Grpc.trailer_status("application/grpc-web+proto", nil).should eq({nil, nil})
     end
 
+    # The 0x80 trailer frame is grpc-web's alone. In a native gRPC body it is a malformed
+    # frame, and reading it as the outcome let one hostile frame report `0 OK` beside the
+    # HTTP/2 trailer's 7.
+    it "does not read a trailer frame out of a NATIVE gRPC body" do
+      body = framed("hi") + trailer_frame("grpc-status: 0\r\n")
+      Grpc.trailer_status("application/grpc", body).should eq({nil, nil})
+      Grpc.trailer_status("application/grpc", Grpc.scan(body)[0]).should eq({nil, nil})
+      Grpc.trailer_status("application/grpc-web", Grpc.scan(body)[0]).should eq({0, nil})
+    end
+
     # A frame carrying only a message is not an outcome — the pair travels together.
     it "ignores a trailer frame with no grpc-status" do
       Grpc.trailer_status("application/grpc-web+proto",
         trailer_frame("grpc-message: something\r\n")).should eq({nil, nil})
     end
+  end
+
+  # The frames sit INSIDE any HTTP content-coding. Scanning the gzipped octets reported a
+  # well-framed call as bytes that are not gRPC frames, and lost grpc-web's trailer frame.
+  describe ".scan_wire" do
+    it "undoes the Content-Encoding before deframing" do
+      io = IO::Memory.new
+      Compress::Gzip::Writer.open(io) do |gz|
+        gz.write(framed("hi") + trailer_frame("grpc-status: 7\r\n"))
+      end
+      head = ("HTTP/1.1 200 OK\r\nContent-Type: application/grpc-web+proto\r\n" \
+              "Content-Encoding: gzip\r\n\r\n").to_slice
+      msgs, residual = Grpc.scan_wire(head, io.to_slice)
+      residual.should eq(0)
+      msgs.size.should eq(2)
+      String.new(msgs[0].data).should eq("hi")
+      Grpc.wire_trailer_status(head, io.to_slice).should eq({7, nil})
+    end
+  end
+
+  # `grpc-status` is `1*DIGIT`. `to_i?` also took `+0`, so a malformed status was named —
+  # and painted — as OK instead of being shown as itself.
+  it "parses a grpc-status value as digits only" do
+    Grpc.parse_status(" 7 ").should eq(7)
+    Grpc.parse_status("+0").should be_nil
+    Grpc.parse_status("-1").should be_nil
+    Grpc.parse_status("").should be_nil
+    Grpc.status_label("+7").should eq("+7")
+    Grpc.status_label("7").should eq("7 PERMISSION_DENIED")
   end
 
   # `grpc?` is what the Repeater, the PROTO column, the QL filter and every headless

@@ -3,6 +3,7 @@ require "../support/demo_descriptor"
 require "socket"
 require "base64"
 require "file_utils"
+require "compress/gzip"
 require "digest/sha1"
 
 # The MCP surface read as an AGENT-DRIVEN security-testing API: every case here is one where
@@ -794,6 +795,21 @@ describe "MCP WebSocket and gRPC projections in get_flow" do
     # agent had to hand-parse the trailer frame's header map to tell a grant from a denial.
     g["grpc_status"].as_i.should eq(3)
     g["grpc_status_name"].as_s.should eq("INVALID_ARGUMENT")
+  end
+
+  # A stored body is WIRE bytes: a gzipped grpc-web response scanned raw reported its frames
+  # as residual garbage and lost the trailer frame that carries the call's outcome.
+  it "deframes a gRPC body under a Content-Encoding" do
+    io = IO::Memory.new
+    Compress::Gzip::Writer.open(io) do |gz|
+      gz.write(Bytes[0x00, 0, 0, 0, 5] + "hello".to_slice +
+               Bytes[0x80, 0, 0, 0, 15] + "grpc-status:7\r\n".to_slice)
+    end
+    head = "HTTP/1.1 200 OK\r\ncontent-type: application/grpc-web\r\ncontent-encoding: gzip\r\n\r\n".to_slice
+    g = JSON.parse(JSON.build { |j| j.object { Gori::MCP::Serialize.emit_grpc_messages(j, "response_grpc_messages", head, io.to_slice) } })["response_grpc_messages"]
+    g["count"].as_i.should eq(2)
+    g.as_h.has_key?("framing_error").should be_false
+    g["grpc_status"].as_i.should eq(7)
   end
 
   # #823: the `.proto` lens rides ALONGSIDE the raw tree, so an agent gets `role = ROLE_ADMIN`

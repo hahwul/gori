@@ -21,6 +21,13 @@ module Gori::Proxy::H2
       !!MediaType.essence(content_type).try(&.starts_with?("application/grpc"))
     end
 
+    # grpc-web, binary or `-text` — the one transport whose call outcome is a 0x80 TRAILER
+    # frame inside the body. Native gRPC has no such frame: its outcome is HTTP/2 trailers,
+    # and a 0x80-flagged frame in a native body is a malformed frame, not a status.
+    def self.web?(content_type : String?) : Bool
+      !!MediaType.essence(content_type).try(&.starts_with?("application/grpc-web"))
+    end
+
     # `application/grpc-web-text[+proto]` — the grpc-web variant for clients that cannot carry
     # binary (an `XMLHttpRequest` reading `responseText`, or any environment where the body
     # must survive as text). The FRAMING is identical; the whole framed stream is base64 on
@@ -41,9 +48,20 @@ module Gori::Proxy::H2
       decode_web_text(body) || body
     end
 
-    # `scan` over `framed_bytes` — what every surface that deframes a captured body wants.
+    # `scan` over `framed_bytes` — for a body whose HTTP content-coding is already undone.
     def self.scan_body(content_type : String?, body : Bytes) : {Array(Message), Int32}
       scan(framed_bytes(content_type, body))
+    end
+
+    # `scan_body` over a WIRE body — what every surface deframing a stored flow or a replay
+    # result wants. The gRPC frames sit INSIDE any `Content-Encoding`: an origin (or a gateway
+    # in front of a grpc-web service) is free to gzip the body like any other, and scanning the
+    # coded octets reported "N bytes that are not gRPC frames" for a well-framed call — and,
+    # for grpc-web, lost the trailer frame that carries the call's outcome. A derived view only
+    # (P7): the stored and resent bytes are untouched.
+    def self.scan_wire(head : Bytes?, body : Bytes) : {Array(Message), Int32}
+      decoded, _ = Codec::ContentDecode.decode(head, body, Codec::Body::CAPTURE_READ_MAX)
+      scan_body(MediaType.of(head), decoded || body)
     end
 
     PAD = '='.ord.to_u8
@@ -94,8 +112,18 @@ module Gori::Proxy::H2
     # they map to. A non-numeric value is its own label — an origin's malformed status is the
     # finding, not something to replace with a guess.
     def self.status_label(value : String) : String
-      n = value.strip.to_i?
+      n = parse_status(value)
       n ? "#{value} #{status_name(n)}" : value
+    end
+
+    # A `grpc-status` value as a code: ASCII digits only, surrounding whitespace aside. The
+    # spec's grammar is `1*DIGIT`, and `String#to_i?` is wider — `+7`, `0x7`-free as it is, still
+    # reads `+0` as OK — so a malformed status would be named as though it were a real one
+    # instead of being shown as itself.
+    def self.parse_status(value : String) : Int32?
+      v = value.strip
+      return nil if v.empty? || !v.each_char.all?(&.ascii_number?)
+      v.to_i?
     end
 
     # Parse a grpc-web TRAILER frame payload: ASCII HTTP/1-style `name: value`
@@ -140,23 +168,36 @@ module Gori::Proxy::H2
     # a `grpc-status: 0` a gateway put in front must not hide the code the origin actually
     # ended on. A frame carrying a `grpc-message` but no `grpc-status` is not an outcome and
     # is skipped — the pair travels together.
+    #
+    # grpc-web ONLY (`web?`): a native gRPC body carrying a 0x80-flagged frame is malformed,
+    # and reading it as the outcome let one hostile frame report `0 OK` beside the real
+    # trailer's 7. `body` is content-DECODED here; `wire_trailer_status` takes wire bytes.
     def self.trailer_status(content_type : String?, body : Bytes?) : {Int32?, String?}
       b = body || return {nil, nil}
-      return {nil, nil} if b.empty? || !grpc?(content_type)
-      trailer_status(scan_body(content_type, b)[0])
+      return {nil, nil} if b.empty? || !web?(content_type)
+      trailer_status(content_type, scan_body(content_type, b)[0])
+    end
+
+    # :ditto: over a WIRE body (`scan_wire`), for a replay result or a stored flow.
+    def self.wire_trailer_status(head : Bytes?, body : Bytes?) : {Int32?, String?}
+      b = body || return {nil, nil}
+      ct = MediaType.of(head)
+      return {nil, nil} if b.empty? || !web?(ct)
+      trailer_status(ct, scan_wire(head, b)[0])
     end
 
     # :ditto: — for a caller that has already deframed the body. The projections scan once and
     # then ask, rather than paying a second scan (and, for grpc-web-text, a second base64
     # decode) to answer a question about the frames they are holding.
-    def self.trailer_status(msgs : Array(Message)) : {Int32?, String?}
+    def self.trailer_status(content_type : String?, msgs : Array(Message)) : {Int32?, String?}
+      return {nil, nil} unless web?(content_type)
       code = nil.as(Int32?)
       message = nil.as(String?)
       msgs.each do |m|
         next unless m.trailer
         fields = trailer_headers(m.data)
         next unless raw = fields["grpc-status"]?
-        code = raw.strip.to_i?
+        code = parse_status(raw)
         message = fields["grpc-message"]?.try(&.presence)
       end
       {code, message}

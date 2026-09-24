@@ -4102,7 +4102,7 @@ module Gori::Tui
         # RESPONSE picks which end of the rpc this pane is showing. nil — no descriptor set
         # loaded, a non-gRPC path, an rpc the set does not declare — renders as it always did.
         binding = Protobuf::Schemas.resolve(detail.row.target, request: request)
-        ls.concat(wrap(grpc_lines(MediaType.of(head), body, @pretty, binding)))
+        ls.concat(wrap(grpc_lines(head, body, @pretty, binding)))
         return DetailView.new(ls, EMPTY_BODY, :text, trailer, pretty: @pretty, binary: true, grpc: true)
       end
 
@@ -4234,11 +4234,12 @@ module Gori::Tui
     # than arrived rendered here as "(no complete gRPC messages)" with no byte count —
     # indistinguishable from a body that simply is not gRPC, while `gori run show
     # --format json` reported it in full.
-    private def grpc_lines(content_type : String?, body : Bytes, tree : Bool,
+    private def grpc_lines(head : Bytes?, body : Bytes, tree : Bool,
                            binding : Protobuf::Schemas::Binding? = nil) : Array(String)
-      # `scan_body`: a grpc-web-text body carries its frames base64-encoded, so scanning the
-      # raw bytes finds a length prefix made of base64 characters and reports nothing.
-      msgs, residual = Proxy::H2::Grpc.scan_body(content_type, body)
+      # `scan_wire`: a grpc-web-text body carries its frames base64-encoded, and any body may
+      # sit under a `Content-Encoding` — scanning the raw bytes finds a length prefix made of
+      # base64 or gzip octets and reports nothing.
+      msgs, residual = Proxy::H2::Grpc.scan_wire(head, body)
       note = Proxy::H2::Grpc.framing_error(residual)
       return ["(no complete gRPC messages — streaming or partial)"] if msgs.empty? && note.nil?
       lines = [] of String

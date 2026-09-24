@@ -1,5 +1,6 @@
 require "../spec_helper"
 require "../support/memory_backend"
+require "compress/gzip"
 
 include Gori::Tui
 
@@ -353,6 +354,27 @@ describe "RepeaterView gRPC over HTTP/1.1 (grpc-web)" do
     end
   end
 
+  # An UNEDITED grpc-web-text tab sends the captured text, whatever its spelling: re-encoding
+  # the frames normalised separately padded chunks (the shape `decode_web_text` exists for),
+  # a trailing CRLF and the URL-safe alphabet into one strict-base64 string — with `␣R:FRAME`
+  # off as much as on — while `gori run repeater send` and MCP sent the capture verbatim (P7).
+  it "sends an unedited grpc-web-text body verbatim, in either reframe state" do
+    grpc_tmp_store do |store|
+      frame = Bytes[0x00, 0x00, 0x00, 0x00, 0x01, 0x41]
+      [Base64.strict_encode(frame[0, 4]) + Base64.strict_encode(frame[4, 2]),
+       Base64.strict_encode(frame) + "\r\n",
+       Base64.urlsafe_encode(Bytes[0x00, 0x00, 0x00, 0x00, 0x02, 0xfb, 0xff])].each do |captured|
+        [true, false].each do |reframe|
+          view = def_web.call(store, "application/grpc-web-text", captured.to_slice)
+          view.grpc_reframable?.should be_true
+          view.toggle_grpc_reframe unless reframe
+          sent = String.new(view.request_bytes)
+          sent[(sent.index("\r\n\r\n").not_nil! + 4)..].should eq(captured)
+        end
+      end
+    end
+  end
+
   # The transcript used to read the call's outcome off the response HEAD only. grpc-web has no
   # HTTP trailers — the status is a FRAME in the body, which the rows right above already draw
   # — so the pane printed `⚠ no grpc-status trailer` directly beneath the trailer it was
@@ -371,6 +393,24 @@ describe "RepeaterView gRPC over HTTP/1.1 (grpc-web)" do
       # The STATUS row (not the trailer row above it, which always drew the raw headers).
       backend.contains?("✗ grpc-status: 7 PERMISSION_DENIED · denied").should be_true
       backend.contains?("no grpc-status trailer").should be_false
+    end
+  end
+
+  # The result body is WIRE bytes: under `Content-Encoding: gzip` the trailer frame is one
+  # decode down, and reading the coded octets printed `⚠ no grpc-status trailer` for a denial.
+  it "reads the status out of a gzipped grpc-web response" do
+    grpc_tmp_store do |store|
+      view = def_web.call(store, "application/grpc-web+proto", Bytes[0x00, 0x00, 0x00, 0x00, 0x01, 0x41])
+      io = IO::Memory.new
+      Compress::Gzip::Writer.open(io) do |gz|
+        gz.write(Gori::Proxy::H2::Grpc.frame(false, "grpc-status: 7\r\ngrpc-message: denied\r\n".to_slice, trailer: true))
+      end
+      resp_head = "HTTP/1.1 200 OK\r\nContent-Type: application/grpc-web+proto\r\nContent-Encoding: gzip\r\n\r\n"
+      resp = Gori::Proxy::Codec::Http1.parse_response_head(resp_head.to_slice)
+      view.apply(Gori::Repeater::Result.new(resp_head.to_slice, io.to_slice, resp, 5000_i64))
+      backend = MemoryBackend.new(160, 24)
+      view.render(Screen.new(backend), Rect.new(0, 0, 160, 24))
+      backend.contains?("✗ grpc-status: 7 PERMISSION_DENIED · denied").should be_true
     end
   end
 

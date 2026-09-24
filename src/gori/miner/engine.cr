@@ -581,7 +581,7 @@ module Gori::Miner
           # above is 200 for every gRPC call, so for a gRPC target this — not `last_status` —
           # is the isolated candidate's real outcome. nil/nil for a non-gRPC response, at the
           # cost of one allocation-free byte scan.
-          last_grpc_status, last_grpc_message = Fuzz::GrpcVerdict.response(raw.head, raw.body)
+          last_grpc_status, last_grpc_message = Fuzz::GrpcVerdict.response_wire(raw.head, raw.body)
           break if hits >= majority
         end
       end
