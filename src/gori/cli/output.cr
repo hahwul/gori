@@ -578,6 +578,7 @@ module Gori
           json_captured(j, "extracted", r.extracted)
           # Only when true. This is an exception rather than a per-row property, and a `false`
           # on every row of every clean run would bury the one row that matters.
+          j.field "stop_hit", true if r.stop_hit?
           j.field "retried", true if r.retried?
           # `--retries` re-sent this variation after a network error — DISTINCT from `retried`
           # (a keep-alive pool re-send). Only when it happened, with the count.
@@ -855,6 +856,7 @@ module Gori
           if extracted = r.extracted
             io << "  ⟦" << term_safe(extracted) << '⟧'
           end
+          io << "  stop-hit" if r.stop_hit?
           # Before the error text, because it qualifies the SEND rather than the response: this
           # request went out twice (see `Fuzz::Result#retried?`).
           io << "  re-sent" if r.retried?

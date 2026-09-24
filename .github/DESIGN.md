@@ -3418,7 +3418,9 @@ count (`Config#stop_after_matches`) or a SEPARATE match/filter condition
 `build`-called — `Matcher#build` evaluates it through `matches_precomputed?` on the same
 decoded body/text/metrics it computed for the run's own verdict, so a stop condition costs no
 second decode. The trigger is `Engine#record_result`, the one bookkeeping path `worker_loop`
-and `run_race` share, and it is exactly `stop`: in-flight requests finish. "Stop when the body
+and `run_race` share, and it is exactly `stop`: in-flight requests finish. An operator stop
+that lands first wins: an in-flight row meeting the condition afterwards is still flagged
+`stop_hit`, but the verdict stays `stopped`. "Stop when the body
 no longer says `Invalid password`" is a condition with only a filter regex — the matcher's
 existing way of expressing absence. Calibration sends are not results, so they never trip it.
 A new terminal verdict `Terminal::ConditionMet` names the ending; it is an enum so a consumer

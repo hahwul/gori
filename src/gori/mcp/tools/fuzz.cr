@@ -328,7 +328,7 @@ module Gori
         # names no PAYLOAD, so an agent could see `errors: 40` and have no way to ask which
         # forty. The CLI prints both (`emit_fuzz_result`) and the TUI renders every row; this
         # was the one surface where they vanished.
-        return unless r.matched? || r.retried? || r.resent? || r.incomplete? || r.chain_error || r.error
+        return unless r.interesting?
         # TWO budgets, because one FIFO over `FUZZ_MAX_STORED` lets the exceptions EVICT the
         # findings. Rows arrive in send order and the cap is a hard stop, so a sweep against a
         # target that starts resetting — or one the Sandbox refuses outright, where every row
@@ -343,11 +343,13 @@ module Gori
         # `FUZZ_MAX_STORED_UNMATCHED` sub-budget, which is generous for the job it has (naming
         # WHICH payloads failed — a thousand named examples is a diagnosis, not a sample), and
         # matches keep the full cap. `results_truncated` is set by either stop, honestly.
+        # The stop row rides the match budget too: it arrives LAST, exactly when a failing
+        # sweep has already spent the unmatched one, and it is the row the run ended on.
         if fjob.results.size >= FUZZ_MAX_STORED
           fjob.truncated = true
           return
         end
-        unless r.matched?
+        unless r.matched? || r.stop_hit?
           if fjob.unmatched_stored >= FUZZ_MAX_STORED_UNMATCHED
             fjob.truncated = true
             return
@@ -591,6 +593,11 @@ module Gori
         # validator, and BEFORE `config.keep` below so both #1240 knobs land together.
         config.stop_after_matches, matcher.stop_condition = fuzz_stop_on(h)
         config.keep = fuzz_keep(h)
+        # `keep` governs only the `save_results` archive; without one it did nothing. Refused,
+        # as the CLI's `--keep` without `fuzz save` is.
+        if config.keep.interesting? && !save_results
+          raise FuzzArgError.new("'keep' applies to the save_results archive; pass save_results: true")
+        end
         # A `match`/`filter` term that can never fire (`size: "1O00"`, `status: "2OO"`) used to
         # run the whole sweep and report `matched: 0` — the "nothing there" an agent acts on.
         # Also names a bad `stop_on` term ("stop match size spec …").
@@ -1236,12 +1243,24 @@ module Gori
           else
             raise FuzzArgError.new("'stop_on' must be a JSON object (not a bare string/scalar)")
           end
-        after = fuzz_int(obj["after_matches"]?, "stop_on.after_matches").try(&.clamp(1_i64, Int32::MAX.to_i64).to_i)
+        if bad = obj.keys.find { |k| !STOP_ON_KEYS.includes?(k) }
+          raise FuzzArgError.new("unknown stop_on key #{bad.inspect} (expected #{STOP_ON_KEYS.join(", ")})")
+        end
+        after = fuzz_after_matches(obj)
         cond = fuzz_stop_condition(obj["match"]?, obj["filter"]?)
         if after.nil? && cond.nil?
           raise FuzzArgError.new("'stop_on' names no condition — pass after_matches:N, a match:{…}, or a filter:{…}")
         end
         {after, cond}
+      end
+
+      # `after_matches` <= 0 is refused like the CLI's `--stop-after-matches` (not clamped to 1,
+      # which silently turned "never" into "first hit").
+      private def fuzz_after_matches(obj : Hash(String, JSON::Any)) : Int32?
+        n = fuzz_int(obj["after_matches"]?, "stop_on.after_matches")
+        return nil unless n
+        raise FuzzArgError.new("invalid stop_on.after_matches #{n} (expected a positive integer)") if n <= 0
+        n.clamp(1_i64, Int32::MAX.to_i64).to_i
       end
 
       # A matcher built from a `stop_on` `match`/`filter` pair, or nil when neither is given.
@@ -1285,6 +1304,24 @@ module Gori
 
       private alias FuzzConds = NamedTuple(status: String?, grpc: String?, size: String?, words: String?, lines: String?, time: String?, header: String?, regex: String?)
 
+      STOP_ON_KEYS   = {"after_matches", "match", "filter"}
+      CONDITION_KEYS = {"status", "grpc", "size", "words", "lines", "time", "header", "regex"}
+
+      # An unknown key used to be dropped silently — and under `stop_on` the condition still
+      # counted as present, so `{"match":{"body":…}}` stopped the run on its first response.
+      # A stop condition must also constrain something: an empty object or a blank value
+      # compiles to "unconstrained", which is the same first-response stop.
+      private def validate_condition_keys(obj : Hash(String, JSON::Any), which : String) : Nil
+        if bad = obj.keys.find { |k| !CONDITION_KEYS.includes?(k) }
+          raise FuzzArgError.new("unknown #{which} key #{bad.inspect} (expected #{CONDITION_KEYS.join(", ")})")
+        end
+        return unless which.starts_with?("stop_on.")
+        raise FuzzArgError.new("'#{which}' names no condition") if obj.empty?
+        obj.each do |k, v|
+          raise FuzzArgError.new("#{which} '#{k}' cannot be empty") if v.raw.nil? || v.as_s?.try(&.blank?)
+        end
+      end
+
       private def fuzz_conditions(raw : JSON::Any?, which : String) : FuzzConds?
         return nil unless raw && !raw.raw.nil?
         obj =
@@ -1296,6 +1333,7 @@ module Gori
           else
             raise FuzzArgError.new("'#{which}' must be a JSON object (not a bare string/scalar)")
           end
+        validate_condition_keys(obj, which)
         {status: jstr(obj, "status"), grpc: jstr(obj, "grpc"), size: jstr(obj, "size"),
          words: jstr(obj, "words"), lines: jstr(obj, "lines"),
          # Milliseconds, the unit `timeout_ms` on this same tool already uses.
@@ -1460,7 +1498,7 @@ module Gori
           s.field "insecure", boolprop("skip upstream TLS verification (default false)")
           s.field "max_requests", intprop("caller cap on total requests")
           s.field "stop_on", jsonprop(%(end the run early when a condition holds (issue #1240) — object {after_matches, match, filter}. "after_matches":N stops once the run's own matchers have hit N times (1 = first hit). "match"/"filter" are a SEPARATE condition in the same shape as the top-level match/filter (e.g. {"match":{"regex":"Welcome admin"}} stops when the body contains it; {"filter":{"regex":"Invalid password"}} stops when it no longer does). The run ends status "condition_met" (see fuzz_status.stop_reason), NOT "done". Cannot combine with race_count.))
-          s.field "keep", enumprop("which result rows a save_results archive stores (issue #1240): all (default) | interesting (matched rows plus the ones carrying an observed fact — an error, a re-send, a truncated capture, the stop row). The run's sent/matched/errors counts stay whole-run and the stored idx stays the payload position, so a filtered archive reads \"12 of 100,000 kept\" rather than a lost run. Only affects save_results.", %w[all interesting])
+          s.field "keep", enumprop("which result rows a save_results archive stores (issue #1240): all (default) | interesting (matched rows plus the ones carrying an observed fact — an error, a re-send, a truncated capture, the stop row). The run's sent/matched/errors counts stay whole-run and the stored idx stays the payload position, so a filtered archive reads \"12 of 100,000 kept\" rather than a lost run. Requires save_results: true.", %w[all interesting])
           s.field "allow_unscoped", boolprop("run even when the target host is outside the project's configured scope — REQUIRED to run against an out-of-scope target, or when no scope is configured at all (active requests are refused by default without a matching scope)")
           s.field "record_history", enumprop("record each sent request+response as a History flow for audit/evidence (default none); matched results carry the flow_id in fuzz_results while that History row still belongs to this job (fetch full detail with get_flow). A clear or delete detaches the result before the id can be reused. 'all' is capped at #{FUZZ_HISTORY_MAX} flows. Booleans are accepted as aliases (true = all, false = none) because send_request spells this argument as a boolean; any OTHER value is refused by name rather than silently recording nothing.", RECORD_HISTORY_MODES)
           s.field "save_results", boolprop("persist EVERY result permanently in this project, including full rendered request, final wire request, response head and response body. Independent of record_history and of the bounded live-job cache. The start/status/results replies include run_id + save_status; inspect it later with list_fuzz_runs/get_fuzz_run.")

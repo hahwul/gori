@@ -1131,7 +1131,7 @@ module Gori
         # response was truncated — a real finding that must not read as a clean short body) and
         # `resent?` (a `--retries` config re-send) join for the same argument: each is a fact the
         # run OBSERVED that vanishes if a matched-only gate drops the unmatched row carrying it.
-        return false unless r.matched? || r.error || r.retried? || r.resent? || r.incomplete? || r.chain_error
+        return false unless r.interesting?
         case format
         when :jsonl then puts CLI::Output.fuzz_row_json(r)
         when :json  then json_stream.try(&.append(r))

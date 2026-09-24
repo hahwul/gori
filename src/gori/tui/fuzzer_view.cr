@@ -88,6 +88,7 @@ module Gori::Tui
     property job_id : Int32 # bottom-bar/notification job handle (0 = no active job)
     getter config : Fuzz::Config
     getter matcher : Fuzz::Matcher
+    getter run_keep : Fuzz::Keep
 
     PANE_ORDER = [:target, :template, :config, :results]
 
@@ -1165,6 +1166,7 @@ module Gori::Tui
       @run_mode = run.mode
       @run_tls_preset = run.tls_preset
       @run_websocket = run.websocket?
+      @run_keep = Fuzz::Keep.parse?(run.keep) || Fuzz::Keep::All
       @saved_run_id = run.id
       @failed_save_run_id = nil
       @loaded_saved_run = true

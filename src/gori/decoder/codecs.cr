@@ -979,28 +979,36 @@ module Gori::Decoder
     end
 
     # Decode every well-formed encoded-word in a header-like value. Malformed marker
-    # text stays literal, but a recognized word with unsupported charset/encoding or
-    # invalid Q/B data fails clearly. Linear whitespace between adjacent words is
-    # ignored as RFC 2047 requires; whitespace beside ordinary text is preserved.
+    # text stays literal (a word with a space, bad Q/B data, or bytes its charset
+    # cannot decode), but a recognized word with an unsupported charset or the wrong
+    # forced encoding fails clearly. Linear whitespace between adjacent words is
+    # ignored as RFC 2047 requires, and adjacent same-charset words are joined BEFORE
+    # charset decoding (§5: a multibyte character may be split across words);
+    # whitespace beside ordinary text is preserved.
     def rfc2047_decode(s : String, required_encoding : UInt8? = nil) : String
       bytes = s.to_slice
       sink = IO::Memory.new(bytes.size)
       i = 0
       while i < bytes.size
-        if word = rfc2047_word_at(bytes, i)
-          if required_encoding && word[2] != required_encoding
-            raise DecoderError.new("expected RFC 2047 #{required_encoding.chr} encoded-word")
-          end
-          sink.write(word[0].to_slice)
-          i = word[1]
-          gap_end = rfc2047_fws_end(bytes, i)
-          if gap_end > i && rfc2047_word_at(bytes, gap_end)
-            i = gap_end
-          else
-            while i < gap_end
-              sink.write_byte(bytes[i])
-              i += 1
+        if word = rfc2047_word_at(bytes, i, required_encoding)
+          run_start = i
+          data = IO::Memory.new
+          data.write(word.data)
+          i = word.next_pos
+          resume = nil.as(Int32?)
+          while (gap_end = rfc2047_fws_end(bytes, i)) > i && (following = rfc2047_word_at(bytes, gap_end, required_encoding))
+            if following.charset.compare(word.charset, case_insensitive: true) != 0
+              resume = gap_end # a charset change ends the run; the gap between words is still dropped
+              break
             end
+            data.write(following.data)
+            i = following.next_pos
+          end
+          if text = (rfc2047_charset_decode(word.charset, data.to_slice) rescue nil)
+            sink << text
+            i = resume if resume
+          else
+            sink.write(bytes[run_start, i - run_start])
           end
           next
         end
@@ -1012,7 +1020,13 @@ module Gori::Decoder
       String.new(sink.to_slice)
     end
 
-    private def rfc2047_word_at(bytes : Bytes, start : Int32) : Tuple(String, Int32, UInt8)?
+    # A single encoded-word, payload-decoded but not yet charset-decoded: adjacent words are
+    # joined on these raw bytes first, so a multibyte character split across two words decodes.
+    private record Rfc2047RawWord, charset : String, data : Bytes, next_pos : Int32
+
+    # nil = not a well-formed encoded-word (the caller keeps the text literal). A recognized
+    # word still raises for an unsupported charset or a forced encoding it does not carry.
+    private def rfc2047_word_at(bytes : Bytes, start : Int32, required_encoding : UInt8? = nil) : Rfc2047RawWord?
       return nil unless bytes[start]? == 0x3d_u8 && bytes[start + 1]? == 0x3f_u8 # =?
       charset_start = start + 2
       charset_end = rfc2047_charset_end(bytes, charset_start)
@@ -1024,12 +1038,20 @@ module Gori::Decoder
       text_start = charset_end + 3
       text_end = rfc2047_encoded_text_end(bytes, text_start)
       return nil unless text_end
-      raise DecoderError.new("invalid RFC 2047 encoded-word: empty encoded-text") if text_end == text_start
 
-      charset = String.new(bytes[charset_start, charset_end - charset_start])
-      encoded_text = String.new(bytes[text_start, text_end - text_start])
-      decoded = rfc2047_decode_payload(encoded_text, encoding)
-      {rfc2047_charset_decode(charset, decoded), text_end + 2, encoding}
+      # RFC 2231 §5: `charset*language` — the language tag does not affect decoding.
+      charset = String.new(bytes[charset_start, charset_end - charset_start]).partition('*')[0]
+      rfc2047_check_word(charset, encoding, required_encoding)
+      decoded = rfc2047_decode_payload(String.new(bytes[text_start, text_end - text_start]), encoding) rescue nil
+      return nil unless decoded
+      Rfc2047RawWord.new(charset, decoded, text_end + 2)
+    end
+
+    private def rfc2047_check_word(charset : String, encoding : UInt8, required_encoding : UInt8?) : Nil
+      raise DecoderError.new("unsupported RFC 2047 charset: #{charset}") unless rfc2047_supported_charset?(charset)
+      if required_encoding && encoding != required_encoding
+        raise DecoderError.new("expected RFC 2047 #{required_encoding.chr} encoded-word")
+      end
     end
 
     private def rfc2047_charset_end(bytes : Bytes, start : Int32) : Int32?
@@ -1052,9 +1074,11 @@ module Gori::Decoder
     private def rfc2047_encoded_text_end(bytes : Bytes, start : Int32) : Int32?
       i = start
       while i + 1 < bytes.size
+        # RFC 2047 §5: encoded-text is printable ASCII with no space.
+        return nil if bytes[i] <= 0x20_u8 || bytes[i] > 126_u8
         if bytes[i] == 0x3f_u8
           return nil unless bytes[i + 1] == 0x3d_u8 # a '?' inside encoded-text is invalid
-          return i
+          return i == start ? nil : i               # empty encoded-text is not an encoded-word
         end
         i += 1
       end
@@ -1117,6 +1141,15 @@ module Gori::Decoder
                             (48_u8..57_u8).includes?(b) || b == 0x2b_u8 || b == 0x2f_u8
       end
       true
+    end
+
+    private def rfc2047_supported_charset?(charset : String) : Bool
+      case charset.downcase
+      when "utf-8", "utf8", "us-ascii", "ascii", "iso-8859-1", "iso8859-1", "latin1", "latin-1", "windows-1252", "cp1252"
+        true
+      else
+        false
+      end
     end
 
     private def rfc2047_charset_decode(charset : String, data : Bytes) : String
@@ -1196,12 +1229,18 @@ module Gori::Decoder
 
     # Apply Microsoft's Unicode-to-ANSI best-fit mapping and decode its output through
     # the selected code page. Characters with no WCTABLE entry become that page's
-    # default '?', matching WideCharToMultiByte's default-character behavior.
+    # default '?', matching WideCharToMultiByte's default-character behavior. That API
+    # walks UTF-16 code units, so a character above U+FFFF (a surrogate pair) becomes
+    # two defaults: "😀" -> "??".
     def windows_bestfit_preview(s : String, code_page : Int32) : String
       table = windows_bestfit_table(code_page)
       String.build(s.bytesize) do |io|
         s.each_char do |char|
-          io << (table[char.ord]? || 0x3f).unsafe_chr
+          if mapped = table[char.ord]?
+            io << mapped.unsafe_chr
+          else
+            (char.ord > 0xffff ? 2 : 1).times { io << '?' }
+          end
         end
       end
     end

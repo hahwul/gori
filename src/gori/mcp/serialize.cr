@@ -578,6 +578,7 @@ module Gori
           j.field "ws_close_code", cc
         end
         j.field "extracted", text(r.extracted)
+        j.field "stop_hit", true if r.stop_hit?
         # This variation's request reached the origin TWICE: the keep-alive pool found its
         # parked socket closed and re-sent (see `Fuzz::Result#retried?`). Emitted only when
         # true — it is an exception, and a `false` on every row would bury the one that is

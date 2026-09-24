@@ -1286,6 +1286,9 @@ module Gori::Fuzz
     # sharper signal when both hold on the same row.
     private def check_stop_condition(result : Result) : Nil
       return unless @stop_reason.nil?
+      # Already stopped with no reason = an operator stop (^X, fuzz_stop) landed first. An
+      # in-flight row that meets the condition afterwards must not relabel it `condition_met`.
+      return if @state == State::Stopped
       if result.stop_hit?
         @stop_reason = "stop condition met after #{@sent} sent"
         stop

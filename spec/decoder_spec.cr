@@ -375,18 +375,27 @@ describe Gori::Decoder do
     it "decodes RFC 2047 words in mixed text and suppresses whitespace between adjacent words" do
       conv("rfc2047-decode", "Subject: =?UTF-8?Q?hello_world?= =?UTF-8?B?IQ==?=").should eq "Subject: hello world!"
       conv("rfc2047-decode", "=?ISO-8859-1?Q?Keld_J=F8rn?=").should eq "Keld Jørn"
+      # Joins adjacent encoded-words before charset decoding so multibyte chars split across words decode
+      conv("rfc2047-decode", "=?UTF-8?Q?=E2=82?= =?UTF-8?Q?=AC?=").should eq "€"
+      # Accepts RFC 2231 language suffix
+      conv("rfc2047-decode", "=?UTF-8*en?Q?a?=").should eq "a"
+      # Words containing spaces stay literal
+      conv("rfc2047-decode", "=?UTF-8?Q?a b?=").should eq "=?UTF-8?Q?a b?="
+      # One malformed word stays literal without failing the rest of the value
+      conv("rfc2047-decode", "=?UTF-8?Q?bad=ZZ?= =?UTF-8?Q?ok?=").should eq "=?UTF-8?Q?bad=ZZ?= ok"
+      conv("rfc2047-decode", "=?UTF-8?Q?=FF?= =?ISO-8859-1?Q?=E9?=").should eq "=?UTF-8?Q?=FF?= é"
+      # Marker-shaped text that is not a whole word never reaches the charset check
+      conv("rfc2047-decode", "=?shift_jis?Q?a b?=").should eq "=?shift_jis?Q?a b?="
       conv("rfc2047-decode", "=?Windows-1252?Q?=80?=").should eq "€"
       conv("rfc2047-decode", "=?UTF-8?Q?a?= text =?UTF-8?Q?b?=").should eq "a text b"
       conv("rfc2047-decode", "ordinary text").should eq "ordinary text"
     end
 
-    it "reports malformed encoded words, unsupported charsets, and wrong forced encodings" do
-      expect_raises(Gori::Decoder::DecoderError, /Q escape/) do
-        conv("rfc2047-q-decode", "=?UTF-8?Q?bad=ZZ?=")
-      end
-      expect_raises(Gori::Decoder::DecoderError, /Base64/) do
-        conv("rfc2047-b-decode", "=?UTF-8?B?@@==?=")
-      end
+    it "leaves malformed encoded words literal and reports unsupported charsets or wrong forced encodings" do
+      conv("rfc2047-q-decode", "=?UTF-8?Q?bad=ZZ?=").should eq "=?UTF-8?Q?bad=ZZ?="
+      conv("rfc2047-b-decode", "=?UTF-8?B?@@==?=").should eq "=?UTF-8?B?@@==?="
+      conv("rfc2047-decode", "=?UTF-8?B?====?=").should eq "=?UTF-8?B?====?="
+      conv("rfc2047-decode", "=?UTF-8?Q??=").should eq "=?UTF-8?Q??="
       expect_raises(Gori::Decoder::DecoderError, /unsupported RFC 2047 charset/) do
         conv("rfc2047-decode", "=?shift_jis?B?QQ==?=")
       end
@@ -418,7 +427,8 @@ describe Gori::Decoder do
       conv("windows-bestfit-1254", "⁄").should eq "/"
       # CP932 can represent fullwidth reverse solidus exactly, so it is not folded to ASCII.
       conv("windows-bestfit-932", "＼").should eq "＼"
-      conv("windows-bestfit-1252", "café 😀").should eq "café ?"
+      # Characters outside BMP (U+FFFF) yield two default characters ('??') per UTF-16 surrogate code unit
+      conv("windows-bestfit-1252", "café 😀").should eq "café ??"
       Gori::Decoder::Codecs::WINDOWS_BESTFIT_CODE_PAGES.size.should eq 14
     end
   end
