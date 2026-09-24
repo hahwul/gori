@@ -1,5 +1,7 @@
 require "../tab_controller"
 require "../sitemap_view"
+require "../../export/openapi"
+require "../../durable_file"
 
 module Gori::Tui
   # The Sitemap tab: a host/path tree derived from captured flows. Near
@@ -22,10 +24,64 @@ module Gori::Tui
       @search_control = nil.as(Store::QueryControl?)
       @search_pending = nil.as({Store, SitemapView::ReloadPlan, Int64}?)
       @search_results = Channel({Int64, SitemapView::ReloadPlan, SitemapView::Fetched?}).new(1)
+      @export_results = Channel(String).new(4)
     end
 
     def view : SitemapView
       @sitemap
+    end
+
+    # The OpenAPI export (#1241), off the event loop: the build reads up to `max_flows` flows
+    # with their bodies, and on the one cooperative scheduler a synchronous walk would freeze
+    # the terminal for its length. The engine yields between flows; the finished toast lands
+    # through `drain_export`. `.yaml`/`.yml` writes YAML, anything else JSON.
+    def export_openapi(path : String, filter : QL::Filter, targets : Hash(String, Set(String)?),
+                       label : String) : Nil
+      store = @host.session.store
+      results = @export_results
+      opts = Export::OpenApi::Options.new(filter: filter, targets: targets)
+      yaml = {".yaml", ".yml"}.includes?(File.extname(path).downcase)
+      @host.status("exporting #{label} as OpenAPI…")
+      spawn(name: "gori-openapi-export") do
+        message = begin
+          result = Export::OpenApi.build(store, opts)
+          # An empty document is not a file anyone asked for; the toast says why it is empty.
+          if result.report.operations > 0
+            text = yaml ? Export::OpenApi.to_yaml(result.doc) : Export::OpenApi.to_json(result.doc)
+            DurableFile.write(path, text, perm: File::Permissions.new(0o644))
+          end
+          SitemapController.export_toast(result.report, path)
+        rescue ex
+          "OpenAPI export failed: #{ex.message || ex.class.name}"
+        end
+        results.send(message)
+      end
+    end
+
+    # The finished export as one line: what was written, every cap that was hit (a capped
+    # document looks complete, so the toast is where that has to be said), what was skipped,
+    # and — last, because it is the long part a narrow status line cuts — where it went.
+    def self.export_toast(report : Export::OpenApi::Report, path : String) : String
+      if report.operations == 0
+        why = report.notes.first? || "no captured request under the selection"
+        return "OpenAPI: nothing to export — #{why}; no file written"
+      end
+      msg = "OpenAPI: #{report.summary}"
+      msg += " · TRUNCATED (#{report.cap_notes.join("; ")})" if report.truncated?
+      skipped = report.skipped.values.sum
+      msg += " · #{skipped} skipped" if skipped > 0
+      "#{msg} → #{path}"
+    end
+
+    # Called each run-loop tick: land a finished export's toast. True when one arrived.
+    def drain_export : Bool
+      select
+      when message = @export_results.receive
+        @host.status(message)
+        true
+      else
+        false
+      end
     end
 
     def tab : Symbol

@@ -69,6 +69,17 @@ describe Gori::Import::Curl do
       req.text.should contain("Authorization: Basic YWRtaW46\r\n")
       req.notes.join.should contain("prompt")
     end
+
+    it "encodes URL userinfo with an empty password, including an empty username" do
+      wire(%q(curl http://user@h/)).should contain("Authorization: Basic dXNlcjo=\r\n")
+      wire(%q(curl http://@h/)).should contain("Authorization: Basic Og==\r\n")
+    end
+
+    it "applies auth scheme flags in order, including negated flags" do
+      wire(%q(curl --no-digest -u a:b http://h/)).should contain("Authorization: Basic YTpi\r\n")
+      wire(%q(curl --digest --basic -u a:b http://h/)).should contain("Authorization: Basic YTpi\r\n")
+      one(%q(curl -L --no-location http://h/)).notes.join.should_not contain("redirects are not followed")
+    end
   end
 
   describe "bodies" do
@@ -141,6 +152,14 @@ describe Gori::Import::Curl do
                          "Content-Type: multipart/form-data; boundary=BOUND\r\n\r\n#{body}")
     end
 
+    it "keeps quoted semicolons in form parameters and refuses header files" do
+      req = one(%q(curl http://h/p -F 'n=v;filename="a;b.txt"'))
+      req.text.should contain("Content-Disposition: form-data; name=\"n\"; filename=\"a;b.txt\"\r\n")
+      expect_raises(Gori::Error, /local file/) do
+        one(%q(curl http://h/p -F 'n=v;headers=@/etc/passwd'))
+      end
+    end
+
     it "drops an unquoted -F value's text after ; as curl does, and names it" do
       req = one(%q(curl http://h/p -F 'n=a;b'))
       req.text.should contain("name=\"n\"\r\n\r\na\r\n")
@@ -153,16 +172,26 @@ describe Gori::Import::Curl do
       expect_raises(Gori::Error, /-d and -F/) { one(%q(curl http://h/p -d a -F b=c)) }
     end
 
-    # Measured: curl chunk-frames the body itself under a stated `…, chunked`, even beside a
-    # stated Content-Length — the head must not promise a framing the body lacks.
-    it "chunk-frames the body under a stated Transfer-Encoding ending in chunked, as curl does" do
+    # Measured: curl looks for `chunked` anywhere in a Transfer-Encoding value, and only
+    # chunk-frames / suppresses Content-Length when it finds that substring.
+    it "matches curl's Transfer-Encoding substring rule for chunking and Content-Length" do
       wire(%q(curl http://h/p -H 'Transfer-Encoding: chunked' -d hello)).should eq(
         "POST /p HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n" \
         "Content-Type: application/x-www-form-urlencoded\r\n\r\n5\r\nhello\r\n0\r\n\r\n")
       wire(%q(curl http://h/p -H 'Transfer-Encoding: gzip, chunked' -H 'Content-Length: 5' -d hello)).should end_with(
         "Transfer-Encoding: gzip, chunked\r\nContent-Length: 5\r\n" \
         "Content-Type: application/x-www-form-urlencoded\r\n\r\n5\r\nhello\r\n0\r\n\r\n")
-      wire(%q(curl http://h/p -H 'Transfer-Encoding: gzip' -d hello)).should end_with("\r\n\r\nhello")
+      wire(%q(curl http://h/p -H 'Transfer-Encoding: xCHUNKED' -d hello)).should end_with(
+        "Content-Type: application/x-www-form-urlencoded\r\n\r\n5\r\nhello\r\n0\r\n\r\n")
+      wire(%q(curl http://h/p -H 'Transfer-Encoding: chunked, gzip' -d hello)).should end_with(
+        "Content-Type: application/x-www-form-urlencoded\r\n\r\n5\r\nhello\r\n0\r\n\r\n")
+      wire(%q(curl http://h/p -H 'Transfer-Encoding: gzip' -d hello)).should contain("Content-Length: 5\r\n")
+    end
+
+    it "refuses -I with a request body, as curl does" do
+      expect_raises(Gori::Error, /only select one HTTP request method/) do
+        one(%q(curl -I -d x http://h/))
+      end
     end
 
     it "gives a boundary to a stated multipart Content-Type that lacks one" do
@@ -196,6 +225,23 @@ describe Gori::Import::Curl do
       expect_raises(Gori::Error, /request-target/) { one(%q(curl 'http://h/a b')) }
       expect_raises(Gori::Error, /unsupported scheme/) { one(%q(curl ftp://h/f)) }
       expect_raises(Gori::Error, /port/) { one(%q(curl http://h:99999/)) }
+    end
+
+    it "turns hostile URL encodings into parser errors without corrupting operator bytes" do
+      [
+        %q(curl $'http://\xff.test/'),
+        %q(curl $'\xff://x/'),
+        %q(curl $'http://\xffa/'),
+      ].each do |text|
+        expect_raises(Gori::Error) { Gori::Import::Curl.parse_one(text) }
+      end
+      parsed = Gori::Import::Curl.parse("curl $'http://\\xff.test/'\ncurl http://ok/")
+      parsed.requests.map(&.target).should eq(["/"])
+      parsed.skipped.size.should eq(1)
+      path = Gori::Import::Curl.parse_one(%q(curl $'http://h/\xff')).target.to_slice
+      path.should eq(Bytes[0x2f_u8, 0xff_u8])
+      header = Gori::Import::Curl.parse_one(%q(curl http://h/ -H $'X: \xff')).head
+      header.to_a.should contain(0xff_u8)
     end
 
     it "sends --request-target verbatim" do

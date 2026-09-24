@@ -168,6 +168,13 @@ module Gori
         "sitemap.params", "Parameters here", "List the parameter names the selected host or subtree takes (Params sub-tab)",
         Verb::Scope::Sitemap, [Verb::Chord.new("p")], mnemonic: 'p', group: :view) { |ctx| ctx.sitemap_params; nil }
 
+      # `⇧E` — the marked paths (else the cursor's host or subtree) as an OpenAPI 3.0.3 document
+      # (#1241). ⇧E because it is the export key on every tab that has one (Issues, Sequencer,
+      # Evidence), spelled as a shift chord for the reason issues.export-key gives.
+      r.register Verb::Definition.new(
+        "sitemap.export", "Export OpenAPI…", "Write the selected — or every marked — host or subtree as an OpenAPI 3.0.3 document (asks for the path)",
+        Verb::Scope::Sitemap, [Verb::Chord.new("e", shift: true)], mnemonic: 'E', group: :send) { |ctx| ctx.sitemap_export; nil }
+
       r.register Verb::Definition.new(
         "sitemap.to-menu", "Back to sub-tabs", "Move focus up to the Sitemap/Discover strip", Verb::Scope::Sitemap,
         [Verb::Chord.new("escape")], hidden: true) { |ctx| ctx.focus_pane(:subtabs); nil }

@@ -63,17 +63,8 @@ module Gori
         # Parse before the open: abort skips ensure, so a bad query must not leave a store open.
         filter = sitemap_filter(query)
         store = open_store(resolve_read_project(project_name, db_path), read_only: !filter.uses_fts?)
-        if (q = query) && QL.uses_scope?(q)
-          lens = Scope.ql_lens(store)
-          filter = QL.parse(q, scope: lens)
-          Run.scope_query_notes(q, lens, in_scope).each { |n| STDERR.puts "gori run sitemap params: #{n}" }
-        end
-        if err = fts_backlog_error(store, filter,
-             "#{query.inspect} would leave parameters out of the inventory with nothing saying so. " \
-             "Nothing was printed;")
-          store.close
-          abort "gori run sitemap params: #{err}"
-        end
+        filter = sitemap_flow_filter(store, "sitemap params", query, filter, in_scope,
+          "parameters out of the inventory")
         wanted = ParamInventory::ALL_LOCATIONS
         if picked = locations
           wanted = picked
@@ -118,6 +109,26 @@ module Gori
             print params_text(report.rows, include_sensitive)
           end
         end
+      end
+
+      # The part of a per-flow Sitemap read (`sitemap params`, `sitemap export`) that needs the
+      # open store: a `scope:` term recompiled under the project's lens (the pre-open parse used
+      # the shape-only one), and a `body:` query refused while the trigram index is behind —
+      # `lost` names what would silently go missing. Closes the store before aborting, since
+      # abort skips the caller's ensure. One home, so the two commands cannot drift apart.
+      private def self.sitemap_flow_filter(store : Store, sub : String, query : String?, filter : QL::Filter,
+                                           in_scope : Bool, lost : String) : QL::Filter
+        if (q = query) && QL.uses_scope?(q)
+          lens = Scope.ql_lens(store)
+          filter = QL.parse(q, scope: lens)
+          Run.scope_query_notes(q, lens, in_scope).each { |n| STDERR.puts "gori run #{sub}: #{n}" }
+        end
+        if err = fts_backlog_error(store, filter,
+             "#{query.inspect} would leave #{lost} with nothing saying so. Nothing was printed;")
+          store.close
+          abort "gori run #{sub}: #{err}"
+        end
+        filter
       end
 
       # Per-FLOW scope, as `history --in-scope` — not the tree's host-level gate: the inventory

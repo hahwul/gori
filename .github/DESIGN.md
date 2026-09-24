@@ -3402,10 +3402,10 @@ databases have no constraint on the rewriter enum columns, and settings parsing 
 clamped an unrecognised label to that field's live default. Thus a future `short_circuit` op
 could become `replace` in an older binary and rewrite traffic. Keep each raw label beside its
 total enum projection in `MatchRule`; `inert?` is the shared gate for replacement and
-short-circuit selection. Settings saves retain the raw strings. TUI, CLI and MCP list the raw
-labels and explain the unsupported fields; they refuse to edit or enable such a rule while
-allowing deletion. The scope is the rewriter grammar fields (`target`, `part`, `op`, and
-`match_kind`), so the guard also covers a label added to an existing enum.
+short-circuit selection. Settings saves retain the raw strings, non-string values and unrecognised extra keys, keeping those rows inert so newer fields do not widen matching, and reordering any inert neighbour is refused in both scopes. TUI, CLI and MCP list the raw
+labels and explain the unsupported fields; they refuse to edit, duplicate, reorder or enable such a rule while
+allowing deletion. Unknown ops count as might-execute so profile import requires `--allow-commands`. The scope is the rewriter grammar fields (`target`, `part`, `op`, and
+`match_kind`), plus unrecognised keys on settings rules, so the guard also covers a label added to an existing enum.
 
 ### 2026-09-24: a fuzz run can end itself, and the archive need not keep every row
 

@@ -1,5 +1,6 @@
 require "./export/curl"
 require "./export/har"
+require "./export/openapi"
 
 module Gori
   # Write captured flows out in a standard interchange format, so bytes gori captured can

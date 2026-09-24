@@ -962,6 +962,33 @@ describe Gori::Rules do
       end
     end
 
+    it "refuses to reorder when the swap target is inert (project and global)" do
+      with_globals do
+        Gori::Settings.rewriter_rules = [
+          Gori::Settings::RewriterRule.new(1_i64, false, "inert global", "request", "head", "x", "y", "future_op", "literal", "", ""),
+          Gori::Settings::RewriterRule.new(2_i64, false, "known global", "request", "head", "x", "z", "replace", "literal", "", ""),
+        ]
+        with_store do |store|
+          p_inert = store.insert_rule(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "x", "y", name: "inert proj")
+          p_known = store.insert_rule(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "x", "z", name: "known proj")
+          store.@db.exec("UPDATE match_rules SET op = 'future_op' WHERE id = ?", p_inert)
+
+          engine = Gori::Rules.load(store)
+
+          # Moving the inert rule itself is refused
+          engine.move(p_inert, 1, Gori::Store::RuleScope::Project).should be_false
+          # Moving the known neighbour past the inert rule must also be refused
+          engine.move(p_known, -1, Gori::Store::RuleScope::Project).should be_false
+          store.match_rules.map(&.name).should eq(["inert proj", "known proj"])
+
+          # Same for global scope
+          engine.move(1_i64, 1, Gori::Store::RuleScope::Global).should be_false
+          engine.move(2_i64, -1, Gori::Store::RuleScope::Global).should be_false
+          Gori::Settings.rewriter_rules.map(&.name).should eq(["inert global", "known global"])
+        end
+      end
+    end
+
     it "does not select a short-circuit rule with an unknown target or part" do
       with_store do |store|
         target_id = store.insert_rule(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,

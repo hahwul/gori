@@ -84,6 +84,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     sitemap_controller.view.set_hide_static(hide)
     history_controller.view.reload(store)
     sitemap_controller.reload if @active_tab == :target && target_controller.sitemap_active?
+    params_controller.run if @active_tab == :target && target_controller.params_active?
     # Name the way back that works WHERE the operator is: the Sitemap has no `v` picker.
     back = @active_tab == :target ? "␣V" : "v"
     @toast = hide ? "static assets hidden (images, fonts, media) — #{back} shows them" : "static assets shown"
@@ -98,7 +99,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     # the last — while this row stacks over whichever view is on, so it reads as a switch on the
     # card rather than as a sixth choice between the others. The detail names the rule, because
     # "static" is a judgement the operator should see before trusting it with their list.
-    hidden = history_controller.view.hide_static?
+    hidden = StaticAsset.hidden?(@session.store)
     rows = [LibraryPicker::Row.new(VIEW_ROW_STATIC,
       # `[x]`/`[ ]`, the checkbox every other toggle row in gori draws (Compact, the Miner
       # config), so the row reads as a switch rather than as a seventh view to pick.

@@ -25,6 +25,31 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     sitemap_controller.sitemap_tag
   end
 
+  # `⇧E` — the marked paths, else the cursor's host or subtree, as an OpenAPI 3.0.3 document
+  # (#1241). The flow set is the tree's own (the `/` query, the scope and hide-static lenses),
+  # so the file describes what the tree shows. The path comes from the export popup.
+  def sitemap_export : Nil
+    view = sitemap_controller.view
+    unless picked = view.export_targets
+      @toast = "select a host or path to export"
+      return
+    end
+    unless filter = view.params_filter
+      @toast = "the Sitemap query has no usable terms — fix it (/) before exporting"
+      return
+    end
+    targets, label = picked
+    base = if targets.size == 1
+             "openapi-#{targets.keys.first.scrub.gsub(/[^A-Za-z0-9._-]/, "_")}.json"
+           else
+             "openapi.json"
+           end
+    open_export(:openapi, File.join(Dir.current, base)) do |path|
+      sitemap_controller.export_openapi(path, filter, targets, label)
+      true
+    end
+  end
+
   def sitemap_toggle_grouping : Nil
     sitemap_controller.sitemap_toggle_grouping
   end

@@ -73,8 +73,8 @@ By default `gori mcp` advertises every tool, so an agent can reach the whole wor
 
 | Start with | Tools | `tools/list` | Tokens | For |
 | --- | ---: | ---: | ---: | --- |
-| `gori mcp` | 181 | ~207 KB | ~53k | Everything (the default) |
-| `--read-only` | 60 | ~67 KB | ~17k | Read tools and pure compute; no live requests |
+| `gori mcp` | 182 | ~213 KB | ~54k | Everything (the default) |
+| `--read-only` | 61 | ~70 KB | ~18k | Read tools and pure compute; no live requests |
 | `--tools=@recon` | 35 | ~52 KB | ~13k | Read and map the capture, replay a request, record issues and notes |
 | `--tools=@recon --read-only` | 27 | ~37 KB | ~10k | `@recon` minus what `--read-only` disables |
 | `--tools=@minimal` | 17 | ~25 KB | ~6k | Read History, flows and the current TUI context; talk to the operator |
@@ -159,6 +159,7 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 | `get_response_body_chunk` | Page through decoded (or raw) flow/Repeater responses beyond the inline 64 KiB cap |
 | `list_sitemap` / `list_sitemap_tags` | Distinct endpoints (host, method, path), and the tags placed on them |
 | `list_params` | Per-endpoint parameter inventory: every input name by location, with counts, sample values (credentials redacted) and whether a value is reflected in the response |
+| `export_openapi` | The captured API as an OpenAPI 3.0.3 document, inline (a JSON object, or YAML with `format:"yaml"`): templated paths, parameters, inferred request and response schemas, servers and security schemes. No credential values, and no examples unless `examples:true` (redacted). Capped by `max_endpoints` and `max_bytes`, with `truncated` saying so. In the full catalogue only, since adding it would put `@recon` over its size budget |
 | `list_issues` / `get_issue` | Read triaged issues |
 | `probe_scan` | Rescan captured flows and Repeater tabs. Passive (zero requests) unless `active:true`, which needs write access and is scope-gated |
 | `probe_issues` | The Probe tab's persisted findings, as triage state (open by default) |

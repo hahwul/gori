@@ -14,7 +14,7 @@ describe Gori::StaticAsset do
 
     it "keeps everything that can carry an endpoint, a secret or script" do
       {
-        "image/svg+xml", "image/svg+xml; charset=utf-8", "text/css", "application/javascript",
+        "image/svg", "image/svgz", "image/svg+xml", "image/svg+xml; charset=utf-8", "text/css", "application/javascript",
         "text/javascript", "application/json", "application/pdf", "application/zip",
         "application/octet-stream", "application/wasm", "text/html",
         "audio/mpegurl", "audio/x-mpegurl", # HLS/M3U playlists: a list of URLs
@@ -37,14 +37,27 @@ describe Gori::StaticAsset do
       Gori::StaticAsset.static?("image/webp", "/_next/image?url=%2Fhero.jpg&w=640", 200).should be_false
       Gori::StaticAsset.static?("image/png", "/thumb?src=https://evil.test/x.png", 200).should be_false
       Gori::StaticAsset.static?("image/png", "/thumb?u=https%3A%2F%2Fevil.test", 200).should be_false
+      Gori::StaticAsset.static?("image/png", "/resize?src=//169.254.169.254/x.png", 200).should be_false
+      Gori::StaticAsset.static?("image/png", "/fetch?u=http%3A//10.0.0.1/", 200).should be_false
+      Gori::StaticAsset.static?("image/png", "/fetch?u=HTTP%3a//10.0.0.1/", 200).should be_false
+      Gori::StaticAsset.static?("image/png", "/fetch?u=http%3A%2F%2F10.0.0.1/", 200).should be_false
       Gori::StaticAsset.static?("image/png", "/logo.png?v=3", 200).should be_true
     end
 
-    it "falls back to the path's extension when there is no Content-Type (a 304, a pending row)" do
+    it "keeps an image fetched through a URL embedded in the path" do
+      Gori::StaticAsset.static?("image/jpeg", "/unsafe/300x200/https://internal.example/a.jpg", 200).should be_false
+      Gori::StaticAsset.static?("image/jpeg", "/unsafe/300x200/https:/internal.example/a.jpg", 200).should be_false
+      Gori::StaticAsset.static?("image/jpeg", "/unsafe/300x200/http:/internal.example/a.jpg", 200).should be_false
+      Gori::StaticAsset.static?("image/jpeg", "/unsafe/https%3A/internal.example/a.jpg", 200).should be_false
+      Gori::StaticAsset.static?("image/jpeg", "/unsafe/https%3A%2F%2Finternal.example/a.jpg", 200).should be_false
+    end
+
+    it "falls back to the path's extension when there is no Content-Type on a response" do
       Gori::StaticAsset.static?(nil, "/img/logo.PNG", 304).should be_true
       Gori::StaticAsset.static?("", "/f/inter.woff2?v=3", 304).should be_true
-      Gori::StaticAsset.static?(nil, "/clip.mp4#t=10", nil).should be_true
-      Gori::StaticAsset.static?(nil, "http://a.test/logo.png", nil).should be_true
+      Gori::StaticAsset.static?(nil, "http://a.test/logo.png", 304).should be_true
+      Gori::StaticAsset.static?(nil, "/clip.mp4#t=10", nil).should be_false
+      Gori::StaticAsset.static?(nil, "http://a.test/logo.png", nil).should be_false
     end
 
     it "reads the extension of the PATH, not of the query string" do

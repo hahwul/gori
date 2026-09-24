@@ -73,8 +73,8 @@ gori mcp --read-only
 
 | 시작 방법 | 도구 | `tools/list` | 토큰 | 용도 |
 | --- | ---: | ---: | ---: | --- |
-| `gori mcp` | 181 | ~207 KB | ~53k | 전부 (기본값) |
-| `--read-only` | 60 | ~67 KB | ~17k | 읽기 도구와 순수 연산; 실제 요청 전송 없음 |
+| `gori mcp` | 182 | ~213 KB | ~54k | 전부 (기본값) |
+| `--read-only` | 61 | ~70 KB | ~18k | 읽기 도구와 순수 연산; 실제 요청 전송 없음 |
 | `--tools=@recon` | 35 | ~52 KB | ~13k | 캡처를 읽고 파악, 요청 재전송, 이슈·노트 기록 |
 | `--tools=@recon --read-only` | 27 | ~37 KB | ~10k | `--read-only`가 끄는 도구를 뺀 `@recon` |
 | `--tools=@minimal` | 17 | ~25 KB | ~6k | History와 flow, 현재 TUI 컨텍스트를 읽고 오퍼레이터와 대화 |
@@ -159,6 +159,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `get_response_body_chunk` | 인라인 64 KiB 상한을 넘는 디코드(또는 원시) 플로우/Repeater 응답을 페이지 단위로 조회 |
 | `list_sitemap` / `list_sitemap_tags` | 고유 엔드포인트(host, method, path)와 거기에 달린 태그 |
 | `list_params` | 엔드포인트별 파라미터 목록: 위치별 입력 이름, 등장 횟수, 샘플 값(자격 증명은 가림), 응답에 값이 반사되는지 여부 |
+| `export_openapi` | 캡처된 API를 OpenAPI 3.0.3 문서로 바로 돌려줘요(JSON 객체, `format:"yaml"`이면 YAML). 템플릿 경로, 파라미터, 추론한 요청·응답 스키마, servers, 보안 스킴이 들어가요. 자격 증명 값은 넣지 않고, 예시 값은 `examples:true`일 때만 가려서 넣어요. `max_endpoints`와 `max_bytes`로 크기를 제한하고, 잘리면 `truncated`로 알려줘요. `@recon` 크기 예산을 넘겨서 전체 카탈로그에만 있어요 |
 | `list_issues` / `get_issue` | 트리아지된 이슈 읽기 |
 | `probe_scan` | 캡처된 플로우와 Repeater 탭 재스캔. `active:true`가 아니면 패시브(요청 0건)이고, 액티브는 쓰기 권한이 필요하며 스코프 게이트를 거침 |
 | `probe_issues` | Probe 탭에 저장된 발견 항목을 트리아지 상태로 조회(기본은 open만) |

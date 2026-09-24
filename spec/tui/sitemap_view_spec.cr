@@ -10,6 +10,15 @@ private def capture(store, host, method, target)
     head: "#{method} #{target} HTTP/1.1\r\nHost: #{host}\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
 end
 
+private def capture_image(store, host, target)
+  id = capture(store, host, "GET", target)
+  store.update_response(Gori::Store::CapturedResponse.new(
+    flow_id: id, status: 200, content_type: "image/png",
+    head: "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\n\r\n".to_slice,
+    state: Gori::Store::FlowState::Complete))
+  id
+end
+
 # Rows rendering the marked-row gutter bar ('▌'; the cursor row's is the thinner '▎').
 private def marked_row_indexes(b)
   (0...20).select { |y| b.row(y).includes?("▌") }
@@ -104,7 +113,7 @@ describe Gori::Tui::SitemapView do
   it "folds static assets out of the tree, and out of the Params flow set, while the lens is on" do
     with_store do |store|
       capture(store, "api.acme.test", "GET", "/v1/users")
-      capture(store, "cdn.acme.test", "GET", "/img/logo.png") # pending: judged by extension
+      capture_image(store, "cdn.acme.test", "/img/logo.png")
 
       view = SitemapView.new
       view.set_hide_static(true)
@@ -134,7 +143,7 @@ describe Gori::Tui::SitemapView do
       b.contains?("no traffic captured").should be_true
       b.contains?("only static assets").should be_false
 
-      capture(store, "cdn.acme.test", "GET", "/img/logo.png")
+      capture_image(store, "cdn.acme.test", "/img/logo.png")
       view.reload(store)
       b2 = MemoryBackend.new(70, 15)
       view.render(Screen.new(b2), Rect.new(0, 0, 70, 15))
@@ -1031,6 +1040,48 @@ describe Gori::Tui::SitemapView do
       view.render(Screen.new(b), Rect.new(0, 0, 70, 20))
       b.contains?("shallow").should be_true
       b.contains?("s0").should be_false
+    end
+  end
+
+  # The OpenAPI export's target set (#1241): marks if any, else the cursor row — a host row
+  # as the whole host, a path row as the endpoint paths under it, a marked row as its subtree.
+  describe "#export_targets" do
+    it "reads the cursor row: a host whole, a path as the endpoints under it" do
+      with_store do |store|
+        capture(store, "acme.test", "GET", "/api/users")
+        capture(store, "acme.test", "GET", "/api/users/7")
+        capture(store, "acme.test", "GET", "/about")
+        view = SitemapView.new
+        view.reload(store)
+        targets, label = view.export_targets.not_nil!
+        targets.should eq({"acme.test" => nil})
+        label.should eq("acme.test")
+
+        10.times do # walk down to the /api folder row, whatever order the tree draws it in
+          break if view.export_targets.not_nil![1] == "acme.test/api"
+          view.move(1)
+        end
+        targets, label = view.export_targets.not_nil!
+        label.should eq("acme.test/api")
+        targets["acme.test"].should eq(Set{"/api/users", "/api/users/7"})
+      end
+    end
+
+    it "unions marked subtrees per host, and a marked host row takes the whole host" do
+      with_store do |store|
+        capture(store, "acme.test", "GET", "/a")
+        capture(store, "acme.test", "GET", "/b")
+        capture(store, "other.test", "GET", "/c")
+        view = SitemapView.new
+        view.reload(store)
+        view.move(1)     # acme.test /a
+        view.toggle_mark # marks /a, steps to /b
+        view.toggle_mark # marks /b, steps to the other.test host row
+        view.toggle_mark # marks the other.test host row
+        targets, label = view.export_targets.not_nil!
+        targets.should eq({"acme.test" => Set{"/a", "/b"}, "other.test" => nil})
+        label.should eq("3 marked paths")
+      end
     end
   end
 end

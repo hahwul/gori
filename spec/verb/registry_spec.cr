@@ -636,6 +636,10 @@ private class FakeContext < ExecContext
     @calls << :sitemap_scope_add
   end
 
+  def sitemap_export : Nil
+    @calls << :sitemap_export
+  end
+
   def sitemap_mark_toggle : Nil
     @calls << :sitemap_mark_toggle
   end

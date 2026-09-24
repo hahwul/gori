@@ -156,6 +156,11 @@ require "./runner/subtabs"
 require "./runner/views"
 require "./runner/columns"
 
+lib LibC
+  fun tcsetpgrp(fd : Int32, pgrp : PidT) : Int32
+  fun getpgrp : PidT
+end
+
 module Gori::Tui
   # The shell controller for ONE open project: owns view state, implements the
   # verb ExecContext (so verbs drive the UI), and runs the main loop —
@@ -776,6 +781,7 @@ module Gori::Tui
             dirty = true if history_controller.flush_query_reload_if_due(now)
             dirty = true if sitemap_controller.flush_query_reload_if_due(now)
             dirty = true if sitemap_controller.drain_search
+            dirty = true if sitemap_controller.drain_export
             dirty = true if target_controller.params.drain_build
             dirty = true if drain_import_events
             # Tick the top-bar clock: dirty only when the displayed minute changes, so the
@@ -5753,6 +5759,7 @@ module Gori::Tui
     SITEMAP_BATCH_TITLES = {
       "sitemap.tag"      => "Tag %s",
       "sitemap.repeater" => "Send %s to Repeater",
+      "sitemap.export"   => "Export %s as OpenAPI…",
     }
 
     # Sitemap verbs that stay SINGLE-target even with marks set, and say so in their menu
@@ -6713,6 +6720,8 @@ module Gori::Tui
             input: Process::Redirect::Inherit,
             output: Process::Redirect::Inherit,
             error: Process::Redirect::Inherit)
+        ensure
+          Runner.reclaim_foreground_pgrp
         end
       rescue ex
         reclaim_terminal
@@ -6720,6 +6729,32 @@ module Gori::Tui
       end
       reclaim_terminal
       @toast = Runner.shell_exit_toast(status, Time.instant - started, (@session.store.max_flow_id || 0_i64) - before)
+    end
+
+    # Reclaim the terminal's foreground process group after a child process exits (#1250).
+    # An interactive shell with job control takes the foreground pgrp; if it is
+    # SIGKILLed or crashes without handing it back, restoring termios (tcsetattr)
+    # runs from a background pgrp, delivering SIGTTOU (stopping gori) or returning EIO.
+    # SIGTTOU is ignored around tcsetpgrp so the kernel does not stop gori while it
+    # reclaims the terminal.
+    def self.reclaim_foreground_pgrp : Nil
+      Signal::TTOU.ignore
+      begin
+        pgrp = LibC.getpgrp
+        if tty = (File.open("/dev/tty", "r") rescue nil)
+          begin
+            LibC.tcsetpgrp(tty.fd, pgrp)
+          ensure
+            tty.close
+          end
+        elsif LibC.isatty(0) == 1
+          LibC.tcsetpgrp(0, pgrp)
+        end
+      rescue
+        # Headless or test environments without a controlling terminal
+      ensure
+        Signal::TTOU.reset
+      end
     end
 
     # How long a shell has to have lived for its exit status to be the SHELL's. A shell exits
@@ -6736,25 +6771,39 @@ module Gori::Tui
       "shell exited · #{n} flow#{n == 1 ? "" : "s"} captured meanwhile"
     end
 
-    # The same text `gori run shell --print` writes, minus its comment header: this is PASTED,
-    # and an interactive zsh without INTERACTIVE_COMMENTS runs a `#` line as a command. The
-    # syntax follows `$SHELL`, since there is no flag to ask and the other pane is most likely
-    # running the same one.
+    # The command copied to the clipboard for another pane to evaluate in its own env (#1250).
+    def self.copy_shell_command(authority : String, ca_dir : String, syntax : ShellEnv::Syntax,
+                                executable : String? = Process.executable_path) : String
+      bin_arg = Process.quote(executable || "gori")
+      proxy_arg = Process.quote(authority)
+      ca_arg = Process.quote(ca_dir)
+      case syntax
+      in ShellEnv::Syntax::Posix
+        %(eval "$(#{bin_arg} run shell --print --proxy #{proxy_arg} --ca-dir #{ca_arg})")
+      in ShellEnv::Syntax::Fish
+        "#{bin_arg} run shell --print --shell fish --proxy #{proxy_arg} --ca-dir #{ca_arg} | source"
+      end
+    end
+
+    # A single-line command that evaluates `gori run shell --print` inside the target pane, so
+    # the target pane evaluates its own environment (its own GODEBUG, NODE_EXTRA_CA_CERTS, and
+    # tool CA variables) rather than inheriting gori's (#1250).
     private def copy_shell_env : Nil
-      result = ShellEnv.build(ShellEnv.dial_authority(@session.proxy.host, @session.proxy.port),
-        @session.ca.ca_cert_path)
+      if problem = ShellEnv.ca_problem(@session.ca.ca_cert_path)
+        return @toast = "shell: #{problem}"
+      end
+      authority = ShellEnv.dial_authority(@session.proxy.host, @session.proxy.port)
+      ca_dir = File.dirname(@session.ca.ca_cert_path)
       syntax = ShellEnv::Syntax.for_shell(ENV["SHELL"]?)
-      text = ShellEnv.render(result, syntax)
+      text = Runner.copy_shell_command(authority, ca_dir, syntax)
       copied = Clipboard.copy(text)
       @toast =
         if copied == 0
           "clipboard is off (Settings) — run `gori run shell --print` in the other pane instead"
         else
           off = @session.capturing? ? "" : " (capture is off — start it with c)"
-          "copied #{syntax.fish? ? "fish" : "sh"} env for proxy #{result.proxy_url} — paste it into another pane#{off}"
+          "copied #{syntax.fish? ? "fish" : "sh"} env for proxy http://#{authority} — paste it into another pane#{off}"
         end
-    rescue ex : ShellEnv::Error
-      @toast = "shell: #{ex.message}"
     end
 
     # After a child that owned the terminal (`$EDITOR`, a shell) returns it.

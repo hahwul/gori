@@ -843,6 +843,36 @@ module Gori::Tui
       ParamsView::Target.new(row.host, paths, "#{row.host}#{shown}", path_prefix: prefix)
     end
 
+    # What `sitemap.export` (the OpenAPI export, #1241) covers: the marks if any are set, else
+    # the cursor row read the way the Params sub-tab reads it (`selected_params_target`). As
+    # host → the endpoint paths wanted under it, nil for a whole host (a host row), plus the
+    # label a toast names it by. nil when the cursor sits on nothing.
+    #
+    # A marked row is its SUBTREE, as the cursor row is: marking `/api` and exporting means the
+    # API under it. A mark the tree no longer holds drops out.
+    def export_targets : {Hash(String, Set(String)?), String}?
+      if @marks.empty?
+        t = selected_params_target || return nil
+        return { {t.host => t.paths}, t.label }
+      end
+      index = node_index
+      out = {} of String => Set(String)?
+      marked = 0
+      marked_keys.each do |(host, path)|
+        next unless node = index[{host, path}]?
+        marked += 1
+        if path.empty? # a host row: the whole host, whatever else under it was marked
+          out[host] = nil
+        elsif !out.has_key?(host) || (paths = out[host])
+          set = paths || Set(String).new
+          collect_endpoint_paths(node, set)
+          out[host] = set
+        end
+      end
+      return nil if out.empty?
+      {out, "#{marked} marked path#{marked == 1 ? "" : "s"}"}
+    end
+
     private def collect_endpoint_paths(node : Node, acc : Set(String)) : Nil
       acc << Sitemap.path_part(node.path) unless node.methods.empty? || node.path.empty?
       node.children.each { |c| collect_endpoint_paths(c, acc) }

@@ -517,6 +517,8 @@ module Gori
       return false unless i
       j = i + (dir < 0 ? -1 : 1)
       return false if j < 0 || j >= scoped.size
+      target = scoped[j]
+      return false if target.inert?
       ok = scope.global? ? Settings.move_rewriter_rule(id, dir) : @store.move_rule(id, dir)
       refresh
       ok

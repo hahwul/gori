@@ -2,6 +2,7 @@ require "json"
 require "../../ql"
 require "../../sitemap"
 require "../../param_inventory"
+require "../../export/openapi"
 require "../serialize"
 
 module Gori
@@ -406,6 +407,108 @@ module Gori
         end
       end
 
+      # The captured API as an OpenAPI 3.0.3 document (#1241), inline — "summarize this API" in
+      # one call instead of paging list_sitemap + get_flow. Read-only and recomputed per call
+      # (P6). Bounded twice, because it lands in the agent's context: `max_endpoints` caps the
+      # operations the engine keeps, `max_bytes` the serialized document (whole paths are
+      # dropped from the end, `Export::OpenApi.fit`), and `truncated` says either happened.
+      @[Tool("export_openapi")]
+      private def export_openapi(h) : Result
+        filter = openapi_filter(h)
+        return filter if filter.is_a?(Result)
+        yaml = openapi_yaml?(h)
+        return yaml if yaml.is_a?(Result)
+        examples = bool_arg(h, "examples", false)
+        choice = openapi_redactor(h, examples)
+        return choice if choice.is_a?(Result)
+        opts = Export::OpenApi::Options.new(filter: filter, host: str(h, "host"),
+          path_prefix: str(h, "path_prefix"),
+          max_flows: clamp(optional_int_arg(h, "max_flows"), 5000, 20_000),
+          max_samples: clamp(optional_int_arg(h, "max_samples"), 10, 50),
+          max_endpoints: clamp(optional_int_arg(h, "max_endpoints"), 200, 2000),
+          examples: examples, redactor: choice.try(&.matcher), include_gori: bool_arg(h, "include_gori", false))
+        result = Export::OpenApi.build(store, opts)
+        doc, dropped = Export::OpenApi.fit(result.doc, clamp(optional_int_arg(h, "max_bytes"), 256 * 1024, 2 * 1024 * 1024))
+        result.report.paths_dropped = dropped
+        Result.new(openapi_json(doc, result.report, yaml, choice))
+      end
+
+      # The flow set: the QL query, then the per-flow scope and hide-static lenses. Unconfigured
+      # scope is refused rather than answered with an empty document.
+      private def openapi_filter(h) : QL::Filter | Result
+        filter = ql_filter_or_error(h, str(h, "query"))
+        return filter if filter.is_a?(Result)
+        if fts_error = drain_fts_or_error(filter.uses_fts?)
+          return fts_error
+        end
+        if bool_arg(h, "in_scope", false)
+          scope = Scope.load(store)
+          unless scope.configured?
+            return err("in_scope:true but no scope rules are configured — nothing is in scope; " \
+                       "add scope rules or drop in_scope", "INVALID_ARGUMENT", field: "in_scope")
+          end
+          filter = QL.and(scope.filter(force: true), filter)
+        end
+        bool_arg(h, "hide_static", false) ? QL.and(filter, QL.hide_static) : filter
+      end
+
+      private def openapi_yaml?(h) : Bool | Result
+        case f = str(h, "format").try(&.strip.downcase)
+        when nil, "", "json" then false
+        when "yaml"          then true
+        else                      err("unknown format #{f.inspect} (json|yaml)", "INVALID_ARGUMENT", field: "format")
+        end
+      end
+
+      # The profile examples pass through, resolved the way every sanitized surface resolves
+      # one; nil when examples are off. A profile named without examples is refused: it would
+      # read as "the document was sanitized" while changing nothing.
+      private def openapi_redactor(h, examples : Bool) : Redact::Policy::Choice? | Result
+        profile = str(h, "redact")
+        unless examples
+          return nil unless profile
+          return err("`redact` names the profile examples pass through — set examples:true",
+            "INVALID_ARGUMENT", field: "redact")
+        end
+        choice = Redact::Policy.resolve(store, profile, on: true)
+        if e = choice.error
+          return err(e, "INVALID_ARGUMENT", field: "redact")
+        end
+        choice
+      end
+
+      # What the CLI says on stderr, said in `notes`: the report's sentences, plus the two facts
+      # about the redaction itself — a profile pattern that did not compile (so a rule silently
+      # did not run) and a salt that could not be saved (so placeholders do not correlate).
+      private def openapi_notes(report : Export::OpenApi::Report, choice : Redact::Policy::Choice?) : Array(String)
+        notes = report.notes
+        return notes unless c = choice
+        c.matcher.try &.pattern_errors.each { |e| notes << "redaction pattern skipped, it does not compile — #{e}" }
+        notes << "the placeholder salt could not be saved, so these tags will NOT match another session's" unless c.salt_persisted
+        notes
+      end
+
+      private def openapi_json(doc : JSON::Any, report : Export::OpenApi::Report, yaml : Bool,
+                               choice : Redact::Policy::Choice?) : String
+        paths = doc["paths"]?.try(&.as_h?) || {} of String => JSON::Any
+        JSON.build do |j|
+          j.object do
+            j.field "format", yaml ? "yaml" : "json"
+            j.field "document" do
+              yaml ? j.string(Export::OpenApi.to_yaml(doc)) : doc.to_json(j)
+            end
+            j.field "paths", paths.size
+            j.field "operations", paths.sum { |_, item| item.as_h.keys.count { |k| k != "servers" } }
+            j.field "hosts", report.hosts.map { |x| Serialize.text(x) }
+            j.field "flows_read", report.flows_read
+            j.field "truncated", report.truncated?
+            j.field("skipped") { j.object { report.skipped.each { |k, v| j.field k.key, v } } }
+            j.field "notes", openapi_notes(report, choice)
+            j.field "examples_redacted", report.redacted if choice
+          end
+        end
+      end
+
       private def param_row(j : JSON::Builder, r : ParamInventory::Row, include_sensitive : Bool) : Nil
         j.object do
           j.field "host", Serialize.text(r.host)
@@ -492,6 +595,34 @@ module Gori
           s.field "include_sensitive", boolprop("return cookie / credential / token sample values instead of [REDACTED] (default false)")
           s.field "limit", intprop("max rows per page (default 200, max 2000)")
           s.field "offset", intprop("skip this many rows (default 0)")
+          s.field "strict", boolprop("reject a query with an unrecognized/invalid term (default false)")
+          s.field "lenient", boolprop("free-text an unknown `field:` instead of refusing the query (default false)")
+        end
+
+        tool j, "export_openapi",
+          "The captured API as an OpenAPI 3.0.3 document, returned inline (`document`: an object, " \
+          "or a YAML string with format:yaml). Paths are templated (/users/123 -> " \
+          "/users/{userId}); query/header/cookie parameters are `required` only when every sample " \
+          "carried them; request bodies and responses per status carry JSON schemas inferred from " \
+          "the samples; credentials become securitySchemes and their values are never included. " \
+          "No example values unless examples:true, and those pass the redaction profile. WebSocket, " \
+          "gRPC, SSE and incomplete flows are skipped and counted in `skipped`. Bounded by " \
+          "max_endpoints and max_bytes: `truncated:true` means operations or paths were left out " \
+          "(see `notes`) — narrow with host or path_prefix. Deterministic: the same flows give the " \
+          "same document." do |s|
+          s.field "query", strprop("gori QL filter over the flows read (see ql_reference)")
+          s.field "in_scope", boolprop("only flows in the project's configured scope (default false; refused when no scope is configured)")
+          s.field "hide_static", boolprop("leave out static assets — images, fonts, audio/video (default false)")
+          s.field "host", strprop("only this host (exact, case-insensitive) — one API per document")
+          s.field "path_prefix", strprop("only endpoints whose path starts with this, e.g. /api/v1")
+          s.field "format", strprop("json (default) or yaml")
+          s.field "include_gori", boolprop("keep the requests gori itself sent — Repeater, Fuzzer, Miner, Discover… (default false: a brute force or a fuzz run would describe gori's probing, not the API)")
+          s.field "examples", boolprop("add example values from one sample each, redacted through the profile (default false)")
+          s.field "redact", strprop("redaction profile the examples pass through (default: the project's, else the global one, else `default`); needs examples:true")
+          s.field "max_endpoints", intprop("operations kept (default 200, max 2000)")
+          s.field "max_samples", intprop("flows read per operation (default 10, max 50)")
+          s.field "max_flows", intprop("newest flows read in all (default 5000, max 20000)")
+          s.field "max_bytes", intprop("largest document, measured as compact JSON; whole paths past it are dropped (default 262144, max 2097152)")
           s.field "strict", boolprop("reject a query with an unrecognized/invalid term (default false)")
           s.field "lenient", boolprop("free-text an unknown `field:` instead of refusing the query (default false)")
         end

@@ -32,7 +32,19 @@ describe "Gori::Verbs.register_sitemap" do
      "sitemap.repeater"          => :sitemap_repeater,
      "sitemap.open-flow"         => :sitemap_open_flow,
      "sitemap.scope-add"         => :sitemap_scope_add,
+     "sitemap.export"            => :sitemap_export,
     }.each { |id, intent| verb_intents(r, id).should eq([intent]) }
+  end
+
+  # #1241: ⇧E is the export key on every tab that has one (Issues, Sequencer, Evidence).
+  it "exports OpenAPI on ⇧E, with the shared export letter in the menu" do
+    verb = r["sitemap.export"]
+    verb.chords.should eq([typed_chord("e", shift: true)])
+    verb.hidden?.should be_false
+    verb.menu_key.should eq('E')
+    r["issues.export-key"].chords.should eq(verb.chords)
+    keys = r.select(&.scope.sitemap?).compact_map(&.menu_key)
+    keys.size.should eq(keys.uniq.size)
   end
 
   # The tree is where you SEE what is worth scoping, but the rule editor lived only in the

@@ -47,8 +47,9 @@ describe Gori::Settings::RewriterRule do
     pipe_rule("./resign.sh").command.should eq("./resign.sh")
     pipe_rule("x").copy_with(op: "replace").executes?.should be_false
     pipe_rule("x").copy_with(op: "replace").command.should be_nil
-    # from_label is total — an unrecognised label reads as `replace`, never raises.
-    pipe_rule("x").copy_with(op: "not-an-op").executes?.should be_false
+    # An unknown op counts as might-execute for the command gate so profile import cannot bypass --allow-commands
+    pipe_rule("x").copy_with(op: "not-an-op").executes?.should be_true
+    pipe_rule("x").copy_with(op: "not-an-op").command.should eq("x")
   end
 end
 
@@ -109,8 +110,8 @@ describe "Settings.command_rules — a rewriter pipe rule" do
     # `clamp_field` downcases, so `PIPE` becomes a live pipe rule on import — reporting it as
     # anything else would be a second description of the parse.
     rules_in(%({"rewriter":{"rules":[{"id":1,"enabled":true,"pattern":"a","replacement":"/bin/echo","op":"PIPE"}]}})).size.should eq(1)
-    # An unrecognised op clamps to `replace`, which runs nothing.
-    rules_in(%({"rewriter":{"rules":[{"id":1,"enabled":true,"pattern":"a","replacement":"/bin/echo","op":"nope"}]}})).should be_empty
+    # An unrecognised op counts as might-execute for the command gate (to avoid bypassing --allow-commands)
+    rules_in(%({"rewriter":{"rules":[{"id":1,"enabled":true,"pattern":"a","replacement":"/bin/echo","op":"nope"}]}})).size.should eq(1)
   end
 
   it "does not report an entry the parse would DROP" do
