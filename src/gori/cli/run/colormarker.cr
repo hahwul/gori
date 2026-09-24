@@ -606,7 +606,7 @@ module Gori
               store.close
               abort "gori run colormarker #{action}: project is busy (write did not commit) — try again"
             end
-            puts "Global colour rule ##{id} #{enable ? "enabled" : "disabled"} in project #{project.name}."
+            puts "Global colour rule ##{id} #{enable ? "enabled" : "disabled"} in project #{CLI::Output.term_safe(project.name)}."
             return
           end
           unless store.color_rules.any? { |r| r.id == id }

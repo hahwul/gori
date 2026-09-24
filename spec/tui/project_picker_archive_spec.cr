@@ -48,11 +48,13 @@ describe "project archive modes in ProjectPicker" do
     prepare_export.should contain("ProjectArchive.disclosure(prepared.inventory)")
     prepare_export.should contain("@confirm_kind = :archive_export")
     prepare_export.should contain("dialog.message_fits?")
+    prepare_export.should match(/prepared\.close\n\s+close_archive_export\n\s+@mode = :list\n\s+set_flash\("window too small to review a project export/)
     prepare_export.should match(/prepared = ProjectArchive\.prepare_export\(project\)\n\s+@prepared_export = prepared\n\s+destination_note =/)
     prepare_import = picker_archive_method(source, "prepare_archive_import")
     prepare_import.should contain("ProjectArchive.disclosure(prepared.inventory)")
     prepare_import.should contain("@confirm_kind = :archive_import_review")
     prepare_import.should contain("dialog.message_fits?")
+    prepare_import.should match(/prepared\.close\n\s+close_archive_import\n\s+@mode = :list\n\s+set_flash\("window too small to review a project archive/)
     prepare_import.should match(/prepared = ProjectArchive\.prepare_import\(.*\)\n\s+@prepared_import = prepared\n\s+dialog = ConfirmDialog\.new/)
 
     cancel = picker_archive_method(source, "cancel_confirm")

@@ -1255,6 +1255,7 @@ module Gori::Tui
       unless dialog.message_fits?(Rect.new(0, 0, w, h))
         prepared.close
         close_archive_export
+        @mode = :list
         set_flash("window too small to review a project export — make it taller", ok: false)
         return
       end
@@ -1326,6 +1327,7 @@ module Gori::Tui
       unless dialog.message_fits?(Rect.new(0, 0, w, h))
         prepared.close
         close_archive_import
+        @mode = :list
         set_flash("window too small to review a project archive — make it taller", ok: false)
         return
       end

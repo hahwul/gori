@@ -230,7 +230,7 @@ module Gori
             ts = pr.last_modified.try { |t| LocalTime.of(t).to_s("%Y-%m-%d %H:%M") } || "—"
             id = row.entry.id || "—"
             flows = row.flows.try(&.to_s) || "?"
-            puts "#{project_row_marker(row)} #{CLI::Output.pad(pr.name, 24)}  #{id.ljust(8)}  #{ts}  " \
+            puts "#{project_row_marker(row)} #{CLI::Output.pad(terminal_project_name(pr.name), 24)}  #{id.ljust(8)}  #{ts}  " \
                  "#{CLI::Output.human_size(pr.db_size).rjust(8)}  #{flows.rjust(6)} flows"
           end
         end
@@ -274,6 +274,14 @@ module Gori
           notes << "the project a --project-less run reads (#{default.slug}) does not match --query=#{query}"
         end
         notes
+      end
+
+      # Project names can come from older `.name` sidecars, including ones written before the
+      # registry rejected controls. Keep every human-facing CLI rendering safe while leaving
+      # JSON values intact for scripts.
+      private def self.terminal_project_name(name : String, *, quoted : Bool = false) : String
+        safe = CLI::Output.term_safe(name)
+        quoted ? safe.inspect : safe
       end
 
       # The leading glyph naming why a row is pinned. `◆` is the project a `gori run` with
@@ -325,9 +333,9 @@ module Gori
             end
           end)
         elsif created
-          puts "Project #{project.name.inspect} created (#{project.db_path})."
+          puts "Project #{terminal_project_name(project.name, quoted: true)} created (#{project.db_path})."
         else
-          puts "Project #{project.name.inspect} already exists — reopened (#{project.db_path})."
+          puts "Project #{terminal_project_name(project.name, quoted: true)} already exists — reopened (#{project.db_path})."
         end
       end
 
@@ -340,11 +348,11 @@ module Gori
                                             description : String) : {Project, Bool}
         registry.create_or_reopen(name, description)
       rescue ex : Gori::Error
-        abort "gori run project create: #{ex.message} (#{name.inspect})"
+        abort "gori run project create: #{ex.message} (#{terminal_project_name(name, quoted: true)})"
       rescue ex : File::Error | IO::Error
-        abort "gori run project create: could not create project #{name.inspect}: #{ex.message}"
+        abort "gori run project create: could not create project #{terminal_project_name(name, quoted: true)}: #{ex.message}"
       rescue ex : DB::Error | SQLite3::Exception
-        abort "gori run project create: could not initialize the database for #{name.inspect}: #{ex.message}"
+        abort "gori run project create: could not initialize the database for #{terminal_project_name(name, quoted: true)}: #{ex.message}"
       end
 
       # Export first makes a WAL-safe snapshot, then shows the sensitive-data inventory before
@@ -374,17 +382,17 @@ module Gori
         rescue ex : ProjectRegistry::Ambiguous
           abort "gori run project export: #{ex.message}"
         end
-        abort "gori run project export: no project matching '#{positional.first}'" unless project
+        abort "gori run project export: no project matching '#{terminal_project_name(positional.first)}'" unless project
 
         prepared = begin
           ProjectArchive.prepare_export(project)
         rescue ex : Gori::Error
           abort "gori run project export: #{ex.message}"
         rescue ex : File::Error | IO::Error | DB::Error | SQLite3::Exception
-          abort "gori run project export: could not snapshot #{project.name.inspect}: #{ex.message}"
+          abort "gori run project export: could not snapshot #{terminal_project_name(project.name, quoted: true)}: #{ex.message}"
         end
         begin
-          STDERR.puts "gori run project export: #{project.name.inspect} — " \
+          STDERR.puts "gori run project export: #{terminal_project_name(project.name, quoted: true)} — " \
                       "#{ProjectArchive.disclosure(prepared.inventory)}"
           destination = begin
             prepared.write(output_path, overwrite: force)
@@ -395,7 +403,7 @@ module Gori
             prepared.close
             abort "gori run project export: could not write archive: #{ex.message}"
           end
-          puts "Project #{project.name.inspect} exported to #{destination}."
+          puts "Project #{terminal_project_name(project.name, quoted: true)} exported to #{destination}."
         ensure
           prepared.close
         end
@@ -427,7 +435,7 @@ module Gori
           abort "gori run project import: could not read archive: #{ex.message}"
         end
         begin
-          STDERR.puts "gori run project import: #{prepared.manifest.project_name.inspect} — " \
+          STDERR.puts "gori run project import: #{terminal_project_name(prepared.manifest.project_name, quoted: true)} — " \
                       "#{ProjectArchive.disclosure(prepared.inventory)}"
           project = begin
             prepared.import_into(ProjectRegistry.new(Paths.projects_dir), name)
@@ -438,7 +446,7 @@ module Gori
             prepared.close
             abort "gori run project import: could not register project: #{ex.message}"
           end
-          puts "Project #{project.name.inspect} imported (#{project.db_path})."
+          puts "Project #{terminal_project_name(project.name, quoted: true)} imported (#{project.db_path})."
         ensure
           prepared.close
         end
@@ -506,14 +514,14 @@ module Gori
             end
           end)
         else
-          puts "Project #{project.name.inspect} deleted (#{project.dir})."
+          puts "Project #{terminal_project_name(project.name, quoted: true)} deleted (#{project.dir})."
         end
       end
 
       private def self.abort_unknown_project(registry : ProjectRegistry, name : String) : NoReturn
         projects = registry.list
-        have = projects.empty? ? "" : " (have: #{projects.map(&.name).join(", ")})"
-        abort "gori run project delete: no project matching '#{name}'#{have}"
+        have = projects.empty? ? "" : " (have: #{projects.map { |project| terminal_project_name(project.name) }.join(", ")})"
+        abort "gori run project delete: no project matching '#{terminal_project_name(name)}'#{have}"
       end
 
       # What --yes would destroy. Exits NON-ZERO: this path removed nothing, and a script
@@ -560,7 +568,7 @@ module Gori
             end
           end)
         else
-          puts "Project:  #{project.name}  (id #{registry.id_of(project) || "—"}, slug #{registry.slug_of(project)})"
+          puts "Project:  #{terminal_project_name(project.name)}  (id #{registry.id_of(project) || "—"}, slug #{registry.slug_of(project)})"
           puts "Dir:      #{project.dir}"
           puts "Flows:    #{flows || "—"}"
           puts "Issues:   #{issues || "—"}"

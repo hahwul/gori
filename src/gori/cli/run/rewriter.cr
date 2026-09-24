@@ -833,7 +833,7 @@ module Gori
             abort "gori run rewriter #{action}: project is busy (write did not commit) — try again"
           end
           if scope.global?
-            puts "Global rule ##{id} #{enable ? "enabled" : "disabled"} in project #{project.name}."
+            puts "Global rule ##{id} #{enable ? "enabled" : "disabled"} in project #{CLI::Output.term_safe(project.name)}."
           else
             puts "Rule ##{id} #{enable ? "enabled" : "disabled"}."
           end

@@ -349,6 +349,25 @@ describe Gori::ProjectRegistry do
       reg.find("keep").should_not be_nil
     end
   end
+
+  it "rejects terminal control characters in names on create, rename and import" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      project = reg.create("keep")
+      imported_db = File.tempname("gori-name-import")
+      begin
+        File.copy(project.db_path, imported_db)
+        ["escape\e]0;owned\a", "line\nfeed", "c1\u{009b}name"].each do |name|
+          expect_raises(Gori::Error, /control characters/) { reg.create(name) }
+          expect_raises(Gori::Error, /control characters/) { reg.rename(project, name) }
+          expect_raises(Gori::Error, /control characters/) { reg.import_database(name, imported_db) }
+        end
+        reg.list.map(&.name).should eq(["keep"])
+      ensure
+        File.delete?(imported_db)
+      end
+    end
+  end
 end
 
 describe Gori::Session do

@@ -262,8 +262,7 @@ module Gori
     # machine-local `.workspace` / lock files are not copied.
     def import_database(name : String, database_path : String) : Project
       raise Gori::Error.new("project archive database is missing") unless File.file?(database_path)
-      raise Gori::Error.new(INVALID_UTF8_NAME) unless name.valid_encoding?
-      display = name.strip
+      display = validated_display_name(name)
       base_slug = slugify(display)
       raise Gori::Error.new(UNSLUGGABLE_NAME) if base_slug.empty?
       raise Gori::Error.new("project #{display.inspect} already exists — choose another name") \
@@ -319,8 +318,7 @@ module Gori
     # reads it from here instead of guessing beforehand with #find, which also matches a
     # short-id prefix and would call a brand-new project a reopen.
     def create_or_reopen(name : String, description : String = "") : {Project, Bool}
-      raise Gori::Error.new(INVALID_UTF8_NAME) unless name.valid_encoding?
-      display = name.strip
+      display = validated_display_name(name)
       slug = slugify(display)
       raise Gori::Error.new(UNSLUGGABLE_NAME) if slug.empty?
       slug = unique_slug(slug, display) # don't merge into a DIFFERENT project that slugifies alike
@@ -561,7 +559,7 @@ module Gori
     # label shown in the picker and `find` by display name changes. Empty / blank
     # names are rejected the same way create() rejects an unslugifiable name.
     def rename(project : Project, new_name : String) : Project
-      display = new_name.strip
+      display = validated_display_name(new_name)
       raise Gori::Error.new(BLANK_NAME) if display.empty?
       raise Gori::Error.new("project directory missing") unless Dir.exists?(project.dir)
       # The rename twin of `create_or_reopen`'s check: a name that another project's slug or
@@ -573,6 +571,19 @@ module Gori
       DurableFile.write(File.join(project.dir, NAME_FILE), display,
         perm: File::Permissions.new(0o600))
       Project.new(display, project.db_path, project.ephemeral?)
+    end
+
+    # Project names reach terminal titles and are persisted verbatim in `.name`; validate the
+    # bytes once for every write path so a manifest cannot install ANSI/OSC controls either.
+    private def validated_display_name(name : String) : String
+      raise Gori::Error.new(INVALID_UTF8_NAME) unless name.valid_encoding?
+      if name.each_char.any? do |char|
+           code = char.ord
+           code < 0x20 || (code >= 0x7f && code <= 0x9f)
+         end
+        raise Gori::Error.new("invalid project name: control characters are not allowed")
+      end
+      name.strip
     end
 
     # Slugify a display name into a safe directory name. gsub removes path
