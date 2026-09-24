@@ -199,6 +199,14 @@ module Gori
         Verb::Scope::Body, [] of Verb::Chord,
         available: history_selected, mnemonic: 'B', group: :view) { |ctx| ctx.open_response_external; nil }
 
+      # "Mock this response" (#1237). Menu-only, single-target, and it saves nothing by itself:
+      # it opens the Rewriter rule form prefilled with a short-circuit rule, which the operator
+      # edits (P4) and saves — or does not. `M` for mock; free across Scope::Body.
+      r.register Verb::Definition.new(
+        "history.mock-response", "Mock this response",
+        "Draft a short-circuit rule that answers this request with this captured response, then edit it before saving",
+        Verb::Scope::Body, available: history_selected, mnemonic: 'M', group: :send) { |ctx| ctx.mock_response_from_flow; nil }
+
       # Manually run the Probe ACTIVE checks (reflected params, CORS) against the selected flow,
       # regardless of the Probe mode — opens a confirm dialog with the expected request count.
       # Menu-only ('A'); mirrors detail.probe-active in the drill-in.
@@ -636,6 +644,13 @@ module Gori
       r.register Verb::Definition.new(
         "detail.open-browser", "Open response in browser", "Write this flow's decoded response body to a file and open it in the desktop viewer",
         Verb::Scope::HistoryDetail, mnemonic: 'B', group: :view) { |ctx| ctx.open_response_external; nil }
+
+      # The drill-in's twin of history.mock-response: the moment you decide to fake a response is
+      # the moment you are reading it. Closes the detail first, like detail.issue.
+      r.register Verb::Definition.new(
+        "detail.mock-response", "Mock this response",
+        "Draft a short-circuit rule that answers this request with this captured response, then edit it before saving",
+        Verb::Scope::HistoryDetail, mnemonic: 'M', group: :send) { |ctx| ctx.close_detail; ctx.mock_response_from_flow; nil }
 
       # The single smart Copy over the navigable detail text: the selection when one is held,
       # else the whole pane (the rule every other tab's Copy already follows — see

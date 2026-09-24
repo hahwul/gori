@@ -3646,6 +3646,11 @@ module Gori::Tui
     # "sent by gori — repeater (tui), session #42", or nil for a proxy capture and for a row
     # whose provenance predates the columns. `Gori::FlowSource` owns both spellings.
     private def source_note(row : Store::FlowRow) : String?
+      # A short-circuited proxy flow names the rule that answered it (#1237): `STUB` says gori
+      # answered, this says with what — and it stays true after that rule is edited or deleted.
+      if row.short_circuited? && (ref = row.source_ref) && !ref.empty?
+        return "answered by gori — #{ref}"
+      end
       src = row.source
       return nil if src.nil? || src.proxy?
       via = row.source_surface.try { |sf| " (#{sf.token})" } || ""

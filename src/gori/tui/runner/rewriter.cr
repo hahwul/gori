@@ -1,6 +1,27 @@
 # Rewriter (Match & Replace rules) — ExecContext verb implementations, reopens Gori::Tui::Runner (see
 # tui/runner.cr for the event loop, Host facade, overlays, and rendering).
 class Gori::Tui::Runner < Gori::Verb::ExecContext
+  # "Mock this response" (#1237): the flow's captured response, snapshotted by `MockFromFlow`
+  # (the engine `gori run rewriter add --from-flow` and MCP `from_flow_id` share), opened as an
+  # unsaved rule form. Nothing is written until the operator saves it (P4).
+  #
+  # `history_target_flow_id`, not the list cursor, for the reason `open_response_external`
+  # gives: live capture moves the cursor while the detail stays pinned to its own flow.
+  def mock_response_from_flow : Nil
+    id = history_target_flow_id
+    return status("mock: select a flow first") unless id
+    detail = @session.store.get_flow(id)
+    return status("mock: flow ##{id} is no longer in History") unless detail
+    drafted = MockFromFlow.draft(detail)
+    if refusal = drafted.as?(MockFromFlow::Refusal)
+      return status("mock: can't mock flow ##{id} — #{refusal.message}")
+    end
+    draft = drafted.as(MockFromFlow::Draft)
+    open_rewriter_rule_form(RewriterRuleOverlay.new(op: "short_circuit", match: "regex",
+      pattern: draft.pattern, host: draft.host, replacement: draft.replacement,
+      name: "mock flow ##{id}"))
+  end
+
   def rewriter_add : Nil
     rewriter_controller.rewriter_add
   end
