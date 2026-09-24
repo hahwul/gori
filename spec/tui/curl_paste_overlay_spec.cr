@@ -107,6 +107,22 @@ describe Gori::Tui::CurlPasteOverlay do
       CurlPasteOverlay.describe("curl 'https://a.test/").should eq({"… the command continues on the next line", false})
       CurlPasteOverlay.describe("").last.should be_false
     end
+
+    it "renders hostile URL bytes as a refusal instead of raising" do
+      line, ok = CurlPasteOverlay.describe(%q(curl $'http://\xff.test/'))
+      ok.should be_false
+      line.should start_with("✗ ")
+
+      ov = CurlPasteOverlay.new(:repeater)
+      ov.paste_text(%q(curl $'http://\xff.test/'))
+      OverlayHarness.new(ov).render
+    end
+
+    it "handles an overflowing shell escape on Enter without raising" do
+      ov = CurlPasteOverlay.new(:repeater)
+      ov.paste_text(%q(curl http://h/ -H $'X: \U80000000'))
+      ov.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::Enter)).should eq(:commit)
+    end
   end
 
   it "renders its placeholder, and the preview line under a paste" do

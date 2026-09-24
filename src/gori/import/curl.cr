@@ -138,10 +138,18 @@ module Gori
             end
           rescue ex : Gori::Error
             skipped << (ex.message || "not a usable curl command")
+          rescue
+            skipped << "could not parse cURL command safely"
           end
         end
         return Parsed.new(requests, skipped, notes) if saw_curl
         bare_url(commands) || raise Gori::Error.new("not a curl command — paste a command starting with `curl` (or a single URL)")
+      rescue ex : Gori::Error
+        raise ex
+      rescue
+        # Public callers only handle Gori::Error; malformed bytes must not escape as stdlib
+        # UTF-8 or numeric exceptions.
+        raise Gori::Error.new("could not parse cURL paste safely")
       end
 
       # The ONE request a paste must hold — the Repeater shape, where a session is one request.
@@ -203,7 +211,7 @@ module Gori
         Url; Method; Header; Cookie; Data; DataBinary; DataRaw; DataUrlencode; Json
         Form; FormString; UrlQuery; Get; Head; User; UserAgent; Referer; Compressed; Range
         Bearer; Http10; Http11; Http2; Http2Prior; Http3; RequestTarget; PathAsIs; Globoff
-        AuthOther; ReadsFile; Location; Ignore
+        AuthBasic; AuthOther; ReadsFile; Location; Ignore
       end
 
       record Spec, op : Op, arg : Bool
@@ -260,7 +268,7 @@ module Gori
         "http3" => Spec.new(Op::Http3, false), "http3-only" => Spec.new(Op::Http3, false),
         "request-target" => Spec.new(Op::RequestTarget, true),
         "path-as-is" => Spec.new(Op::PathAsIs, false), "globoff" => Spec.new(Op::Globoff, false),
-        "basic" => Spec.new(Op::Ignore, false), "digest" => Spec.new(Op::AuthOther, false),
+        "basic" => Spec.new(Op::AuthBasic, false), "digest" => Spec.new(Op::AuthOther, false),
         "ntlm" => Spec.new(Op::AuthOther, false), "ntlm-wb" => Spec.new(Op::AuthOther, false),
         "negotiate" => Spec.new(Op::AuthOther, false), "anyauth" => Spec.new(Op::AuthOther, false),
         "aws-sigv4" => Spec.new(Op::AuthOther, true), "location" => Spec.new(Op::Location, false),
@@ -472,15 +480,35 @@ module Gori
           in Op::PathAsIs      then @path_as_is = !negated
           in Op::Globoff       then @globoff = !negated
           in Op::AuthOther
-            @auth_other = true
-            @notes << "#{flag}: that authentication scheme needs the server's challenge, so -u was not turned into a header"
+            @auth_other = !negated
+            @notes.reject!(&.includes?("authentication scheme needs the server's challenge"))
+            @notes << "#{flag}: that authentication scheme needs the server's challenge, so -u was not turned into a header" unless negated
+          in Op::AuthBasic
+            @auth_other = false
+            @notes.reject!(&.includes?("authentication scheme needs the server's challenge"))
           in Op::ReadsFile
             raise Gori::Error.new("#{flag} reads a local file, which the paste does not carry — " \
                                   "put its contents in the command instead")
           in Op::Location
-            @ignored << flag unless @ignored.includes?(flag)
-            @follows_redirects = true
+            @follows_redirects = !negated
+            if negated
+              @ignored.reject!(&.in?("-L", "--location", "--location-trusted"))
+            else
+              @ignored << flag unless @ignored.includes?(flag)
+            end
           in Op::Ignore then @ignored << flag unless @ignored.includes?(flag)
+          end
+        end
+
+        private def ascii_lower(text : String) : String
+          String.build do |io|
+            text.to_slice.each do |b|
+              if 0x41_u8 <= b <= 0x5a_u8
+                io.write_byte(b + 0x20_u8)
+              else
+                io.write_byte(b)
+              end
+            end
           end
         end
 
@@ -501,7 +529,7 @@ module Gori
             return
           end
           if rest.strip(" \t").empty?
-            @removed << name.strip.downcase
+            @removed << ascii_lower(name.strip)
             return
           end
           @items << Item.new(name.strip, v, false)
@@ -555,6 +583,9 @@ module Gori
           u = Curl.parse_url(raw_url, @default_scheme)
           url_notes(raw_url, u, notes)
           body, form_boundary = body_bytes
+          if @head && body
+            raise Gori::Error.new("curl cannot combine -I/--head with a request body — only select one HTTP request method")
+          end
           body = Curl.chunk(body) if body && stated_chunked?
           target = request_target(u)
           method = @method || default_method(body)
@@ -570,7 +601,7 @@ module Gori
 
         # What curl would have done to this URL that gori does not.
         private def url_notes(raw_url : String, u : Curl::Url, notes : Array(String)) : Nil
-          if !@globoff && raw_url.each_char.any?(&.in?('[', ']', '{', '}')) && !u.ipv6?
+          if !@globoff && raw_url.to_slice.any?(&.in?(0x5b_u8, 0x5d_u8, 0x7b_u8, 0x7d_u8)) && !u.ipv6?
             notes << "the URL holds [ ] or { }: curl would expand them as a glob unless -g; gori takes the URL literally"
           end
           if !@path_as_is && u.dot_segments?
@@ -614,13 +645,13 @@ module Gori
           "HTTP/1.1"
         end
 
-        # Does a stated `Transfer-Encoding` end in `chunked`? Then curl chunk-frames the body
-        # itself — measured, with or without a stated Content-Length beside it — so the stored
-        # body has to carry that framing or the head promises one the bytes do not have.
+        # Does any stated `Transfer-Encoding` value contain `chunked`? curl tests that substring
+        # case-insensitively; when found, it chunk-frames the body even beside a stated length.
         private def stated_chunked? : Bool
-          te = @items.reverse_each.find { |it| !it.synth && it.name.downcase == "transfer-encoding" }
-          return false unless te
-          te.line.partition(':').last.split(',').last.strip.downcase == "chunked"
+          @items.any? do |it|
+            !it.synth && ascii_lower(it.name) == "transfer-encoding" &&
+              ascii_lower(it.line.partition(':').last).includes?("chunked")
+          end
         end
 
         # -I is HEAD, -G is GET, a body is POST, and nothing is GET — when -X said nothing.
@@ -653,19 +684,19 @@ module Gori
         # Host first (unless stated or removed), URL-userinfo auth next, every argv header in
         # order, then the body's framing. A header a FLAG implies loses to a -H of the same name.
         private def header_lines(u : Curl::Url, body : Bytes?, boundary : String?, notes : Array(String)) : Array(String)
-          stated = @items.reject(&.synth).map(&.name.downcase).to_set
+          stated = @items.reject(&.synth).map { |it| ascii_lower(it.name) }.to_set
           omitted = ->(name : String) { stated.includes?(name) || @removed.includes?(name) }
           lines = [] of String
           lines << "Host: #{Builder.host_header(u.scheme, u.host, u.port)}" unless omitted.call("host")
           if (ui = u.userinfo) && @user.nil? && !@auth_other && !omitted.call("authorization")
-            lines << "Authorization: Basic #{Base64.strict_encode(ui)}"
+            lines << basic_line(notes, ui, "URL userinfo")
           end
           @items.each_with_index do |it, idx|
-            next if it.synth && omitted.call(it.name.downcase)
+            next if it.synth && omitted.call(ascii_lower(it.name))
             line = item_line(it, idx, boundary, notes)
             lines << line if line
           end
-          body_framing(lines, body, boundary, stated, omitted)
+          body_framing(lines, body, boundary, omitted)
           lines
         end
 
@@ -674,7 +705,7 @@ module Gori
         private def item_line(it : Item, idx : Int32, boundary : String?, notes : Array(String)) : String?
           return "Cookie: #{@cookies.join(';')}" if it.synth && idx == @cookie_slot
           return (@auth_other ? nil : basic_line(notes)) if it.synth && idx == @user_slot
-          if boundary && !it.synth && it.name.downcase == "content-type" && !it.line.includes?("boundary=")
+          if boundary && !it.synth && ascii_lower(it.name) == "content-type" && !it.line.includes?("boundary=")
             notes << "-F: the stated multipart Content-Type got the body's boundary, as curl adds it"
             return "#{it.line}; boundary=#{boundary}"
           end
@@ -684,19 +715,23 @@ module Gori
         # Content-Length, then curl's default Content-Type — after every stated header, which is
         # where curl writes them.
         private def body_framing(lines : Array(String), body : Bytes?, boundary : String?,
-                                 stated : Set(String), omitted : Proc(String, Bool)) : Nil
+                                 omitted : Proc(String, Bool)) : Nil
           return unless body
-          unless omitted.call("content-length") || stated.includes?("transfer-encoding")
+          unless omitted.call("content-length") || stated_chunked?
             lines << "Content-Length: #{body.size}"
           end
           return if omitted.call("content-type") || @json
           lines << (boundary ? "Content-Type: multipart/form-data; boundary=#{boundary}" : "Content-Type: application/x-www-form-urlencoded")
         end
 
-        private def basic_line(notes : Array(String)) : String
-          cred = @user || ""
+        private def basic_line(notes : Array(String), value : String? = nil, source : String = "-u") : String
+          cred = value || @user || ""
           unless cred.includes?(':')
-            notes << "-u #{cred.inspect} has no password: curl would prompt for one; encoded with an empty password"
+            if source == "-u"
+              notes << "-u #{cred.inspect} has no password: curl would prompt for one; encoded with an empty password"
+            else
+              notes << "URL userinfo #{cred.inspect} has no password; encoded with an empty password"
+            end
             cred = "#{cred}:"
           end
           "Authorization: Basic #{Base64.strict_encode(cred)}"
@@ -731,7 +766,7 @@ module Gori
           authority = authority.byte_slice(at + 1)
         end
         host, port_s = split_host_port(authority, raw)
-        if host.empty? || !host.matches?(Builder::HOST_VALID)
+        if host.empty? || !host.valid_encoding? || !host.matches?(Builder::HOST_VALID)
           raise Gori::Error.new("no usable host in #{raw.inspect}")
         end
         port = url_port(port_s, scheme, raw)
@@ -743,8 +778,9 @@ module Gori
       private def self.split_scheme(raw : String, default : String) : {String, String}
         scheme = default
         rest = raw
-        if (sep = raw.byte_index("://")) && raw.byte_slice(0, sep).matches?(/\A[A-Za-z][A-Za-z0-9+.-]*\z/)
-          scheme = raw.byte_slice(0, sep).downcase
+        if (sep = raw.byte_index("://")) && (candidate = raw.byte_slice(0, sep)).valid_encoding? &&
+           candidate.matches?(/\A[A-Za-z][A-Za-z0-9+.-]*\z/)
+          scheme = candidate.downcase
           rest = raw.byte_slice(sep + 3)
         end
         unless scheme.in?("http", "https")
@@ -755,7 +791,7 @@ module Gori
 
       private def self.url_port(port_s : String, scheme : String, raw : String) : Int32
         return scheme == "https" ? 443 : 80 if port_s.empty?
-        port = port_s.to_i? if port_s.each_char.all?(&.ascii_number?)
+        port = port_s.to_i? if port_s.to_slice.all? { |b| 0x30_u8 <= b <= 0x39_u8 }
         raise Gori::Error.new("invalid port in #{raw.inspect}") unless port && 1 <= port <= 65535
         port
       end
@@ -847,15 +883,17 @@ module Gori
         type = nil
         filename = nil
         headers = [] of String
-        params.split(';').each do |param|
+        split_form_params(params).each do |param|
           next if param.empty?
           key, _, val = param.partition('=')
+          val = form_param_value(val)
           case key.strip.downcase
           when "type"     then type = val
           when "filename" then filename = val
-          when "headers"  then headers << val
-          when "encoder"  then nil
-          else                 notes << "-F #{name}: dropped `;#{param}` (curl reads text after `;` as part parameters)"
+          when "headers"
+            headers << form_header(val, v)
+          when "encoder" then nil
+          else                notes << "-F #{name}: dropped `;#{param}` (curl reads text after `;` as part parameters)"
           end
         end
         FormPart.new(form_name(name), value.to_slice, type, filename.try { |f| form_name(f) }, headers)
@@ -883,6 +921,48 @@ module Gori
           i += 1
         end
         raise Gori::Error.new("-F value #{content.inspect} has an unterminated quote")
+      end
+
+      # Split form parameters at semicolons outside quoted spans.
+      private def self.split_form_params(params : String) : Array(String)
+        parts = [] of String
+        bytes = params.to_slice
+        start = 0
+        quoted = false
+        i = 0
+        while i < bytes.size
+          b = bytes[i]
+          if b == 0x5c_u8 && quoted && i + 1 < bytes.size && bytes[i + 1].in?(0x22_u8, 0x5c_u8)
+            i += 2
+            next
+          end
+          if b == 0x22_u8
+            quoted = !quoted
+          elsif b == 0x3b_u8 && !quoted
+            parts << params.byte_slice(start, i - start)
+            start = i + 1
+          end
+          i += 1
+        end
+        parts << params.byte_slice(start)
+        parts
+      end
+
+      private def self.unquote_form_param(value : String) : String
+        decoded, rest = quoted_form_value(value)
+        raise Gori::Error.new("malformed quoted -F parameter #{value.inspect}") unless rest.empty?
+        decoded
+      end
+
+      private def self.form_param_value(value : String) : String
+        value.starts_with?('"') ? unquote_form_param(value) : value
+      end
+
+      private def self.form_header(value : String, part : String) : String
+        if value.starts_with?('@') || value.starts_with?('<')
+          raise Gori::Error.new("-F #{part} reads headers from a local file, which the paste does not carry")
+        end
+        value
       end
 
       # A part name or filename inside `name="…"`: a quote or line break percent-escaped, the

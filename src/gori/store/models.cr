@@ -1261,13 +1261,15 @@ module Gori
       getter unknown_part : String?
       getter unknown_op : String?
       getter unknown_match_kind : String?
+      getter unknown_keys : Array(String)?
 
       def initialize(@id, @enabled, @target, @part, @pattern, @replacement,
                      @op = RuleOp::Replace, @match_kind = MatchKind::Literal,
                      @name = "", @host = "", @body_file = "",
                      @scope = RuleScope::Project, @overridden = false,
                      @unknown_target = nil, @unknown_part = nil,
-                     @unknown_op = nil, @unknown_match_kind = nil)
+                     @unknown_op = nil, @unknown_match_kind = nil,
+                     @unknown_keys = nil)
       end
 
       def global? : Bool
@@ -1278,7 +1280,7 @@ module Gori
       # defaults returned by `from_label`. One shared predicate guards both rewrite and stub
       # selection, as well as every surface that wants to describe the row as usable.
       def inert? : Bool
-        !@unknown_target.nil? || !@unknown_part.nil? || !@unknown_op.nil? || !@unknown_match_kind.nil?
+        !@unknown_target.nil? || !@unknown_part.nil? || !@unknown_op.nil? || !@unknown_match_kind.nil? || !@unknown_keys.nil?
       end
 
       def active? : Bool
@@ -1307,6 +1309,9 @@ module Gori
         labels << "target #{@unknown_target.inspect}" if @unknown_target
         labels << "part #{@unknown_part.inspect}" if @unknown_part
         labels << "match_kind #{@unknown_match_kind.inspect}" if @unknown_match_kind
+        if keys = @unknown_keys
+          labels << (keys.size == 1 ? "key #{keys.first.inspect}" : "keys #{keys.map(&.inspect).join(", ")}")
+        end
         labels.empty? ? nil : "unknown #{labels.join(", ")} (newer gori?)"
       end
     end
