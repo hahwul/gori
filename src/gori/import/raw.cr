@@ -22,17 +22,8 @@ module Gori
                     raw_response : Bytes? = nil, duration_us : Int64? = nil,
                     source_surface : FlowSource::Surface? = nil,
                     source_ref : String? = nil) : Builder::FlowPair
-        scheme, host, port, _ = Builder.endpoint(url)
-
         head, body = split(raw_request)
-        raise Gori::Error.new("empty raw request") if head.empty?
-        req = Proxy::Codec::Http1.parse_request_head(head)
-        stored, trunc, size = Builder.capped(body)
-        request = FlowMapper.request(req,
-          scheme: scheme, host: host, port: port, created_at: created_at,
-          body: stored, body_truncated: trunc, body_size: size,
-          source: FlowSource::Kind::Import,
-          source_surface: source_surface, source_ref: source_ref)
+        request = request_from_parts(created_at, url, head, body, source_surface, source_ref)
 
         return Builder::FlowPair.new(request, nil) if raw_response.nil? || raw_response.empty?
 
@@ -43,6 +34,31 @@ module Gori
           body: resp_stored, duration_us: duration_us,
           body_truncated: resp_trunc, body_size: resp_size)
         Builder::FlowPair.new(request, response)
+      end
+
+      # A request whose head and body arrive ALREADY SEPARATED — `Import::Curl` builds them
+      # apart — stored exactly as given. `split` exists to find a boundary in bytes that carry
+      # none and to CRLF-normalize an editor-saved head, and neither applies to a head gori
+      # built: a bare LF inside a `-H $'…'` value is the operator's byte, and re-splitting would
+      # both rewrite it and cut the head at an LF LF inside a value.
+      def self.request_flow(created_at : Int64, url : String, head : Bytes, body : Bytes?,
+                            source_surface : FlowSource::Surface? = nil,
+                            source_ref : String? = nil) : Builder::FlowPair
+        Builder::FlowPair.new(request_from_parts(created_at, url, head, body, source_surface, source_ref), nil)
+      end
+
+      private def self.request_from_parts(created_at : Int64, url : String, head : Bytes, body : Bytes?,
+                                          source_surface : FlowSource::Surface?,
+                                          source_ref : String?) : Store::CapturedRequest
+        scheme, host, port, _ = Builder.endpoint(url)
+        raise Gori::Error.new("empty raw request") if head.empty?
+        req = Proxy::Codec::Http1.parse_request_head(head)
+        stored, trunc, size = Builder.capped(body.try { |b| b.empty? ? nil : b })
+        FlowMapper.request(req,
+          scheme: scheme, host: host, port: port, created_at: created_at,
+          body: stored, body_truncated: trunc, body_size: size,
+          source: FlowSource::Kind::Import,
+          source_surface: source_surface, source_ref: source_ref)
       end
 
       # Split wire bytes into {head, body}. Two things matter here:

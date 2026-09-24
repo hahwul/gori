@@ -341,15 +341,14 @@ module Gori
       end
 
       # Does the URL's PATH hold a `.` or `..` segment? curl collapses them before sending
-      # (RFC 3986 §5.2.4) unless told `--path-as-is`, so `/a/../etc/passwd` went out as
-      # `/etc/passwd` — measured against a raw listener, curl 8.7.1. A captured traversal is
-      # exactly the request that must reach the origin as written, so the flag rides along
-      # whenever the path has one. The query is not a path and is never collapsed.
+      # unless told `--path-as-is`, so `/a/../etc/passwd` went out as `/etc/passwd` — measured
+      # against a raw listener, curl 8.7.1. A captured traversal is exactly the request that
+      # must reach the origin as written, so the flag rides along whenever the path has one.
+      # The predicate is `Gori::Url.dot_segments?`, shared with the import that reads it back.
       private def self.dot_segments?(url : String) : Bool
-        rest = (sep = url.index("://")) ? url[(sep + 3)..] : url
-        slash = rest.index('/') || return false
-        path = rest[slash..].split(/[?#]/, 2).first
-        path.split('/').any? { |seg| seg == "." || seg == ".." }
+        rest = (sep = url.byte_index("://")) ? url.byte_slice(sep + 3) : url
+        slash = rest.byte_index('/') || return false
+        Gori::Url.dot_segments?(rest.byte_slice(slash))
       end
 
       # The protocol flag for a capture whose request line says HTTP/2, else nil. curl

@@ -47,11 +47,14 @@ module Gori
       # Would an interactive shell wait for another line — the text ends in a `\` continuation,
       # or inside a quote? A paste box answers ↵ with a newline then, and runs the command
       # otherwise, which is the whole of a shell's PS2 rule.
+      #
+      # Asked of the splitter itself rather than of the text's last byte, so every rule it
+      # already applies holds here too: `\\` is an escaped backslash, and a `\` inside a
+      # `# comment` is part of the comment, not a continuation.
       def self.incomplete?(text : String) : Bool
-        run = text.size - text.rstrip('\\').size
-        return true if run.odd? # `\\` is an escaped backslash; `\` alone continues
-        commands(text)
-        false
+        splitter = Splitter.new(text.to_slice)
+        splitter.run
+        splitter.dangling?
       rescue Unterminated
         true
       rescue Error
@@ -67,6 +70,9 @@ module Gori
         @skip_next_word = false
         @commands = [] of Command
         @i = 0
+        # The text ended in an unquoted `\` with nothing after it: a continuation still waiting
+        # for its next line (see `Shell.incomplete?`).
+        getter? dangling = false
 
         def initialize(@bytes : Bytes)
         end
@@ -133,6 +139,7 @@ module Gori
             @in_word = true
             @i += 2
           else
+            @dangling = true
             add(0x5c_u8)
           end
         end
@@ -158,6 +165,13 @@ module Gori
               case nxt
               when 0x0a_u8
                 @i += 2
+              when 0x0d_u8 # `\` CR LF — a continuation saved with Windows line ends
+                if @bytes[@i + 2]? == 0x0a_u8
+                  @i += 3
+                else
+                  @word.write_byte(b)
+                  @i += 1
+                end
               when 0x24_u8, 0x60_u8, 0x22_u8, 0x5c_u8
                 @word.write_byte(@bytes[@i + 1])
                 @i += 2

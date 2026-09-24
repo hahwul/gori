@@ -107,13 +107,6 @@ module Gori
         base == "curl" || base.compare("curl.exe", case_insensitive: true) == 0
       end
 
-      # Does `text` start with a curl command? The first word, past a pasted `$ ` prompt.
-      # For a surface that wants to route a paste; `parse` answers everything else.
-      def self.command?(text : String) : Bool
-        first = text.lstrip.lchop("$ ").lstrip
-        curl_word?(first.split(/\s/, 2).first?)
-      end
-
       # Every request in `text`. A paste that holds no curl command at all is accepted in one
       # shape more: a lone URL or bare host (`https://acme.test/p`, `acme.test`), taken as a GET
       # — `https://` when no scheme is written, the way `gori run import --urls` reads one
@@ -161,17 +154,24 @@ module Gori
         end
         req = parsed.requests.first? || raise Gori::Error.new("the curl command names no URL")
         if parsed.requests.size > 1
+          unknown = parsed.requests.flat_map(&.notes).select(&.starts_with?("ignored unknown option")).uniq!
+          hint = unknown.empty? ? "" : " (#{unknown.join("; ")} — if it takes a value, that value was read as a URL)"
           raise Gori::Error.new("the paste holds #{parsed.requests.size} requests — a Repeater session is one; " \
-                                "paste one command (or import them all into History)")
+                                "paste one command (or import them all into History)#{hint}")
         end
         req.notes.concat(parsed.notes)
         req
       end
 
-      # Chrome's "Copy as cURL (cmd)" quotes with `^"` and continues lines with `^`, which a
-      # POSIX splitter would read as a pile of carets. Refused by name rather than half-parsed.
+      # Chrome's "Copy as cURL (cmd)" quotes every argument with `^"` — the URL first, right
+      # after `curl` — and continues lines with `^`, which a POSIX splitter would read as a pile
+      # of carets. Recognized by that opening shape only: a `^"` inside a quoted bash value (a
+      # regex anchor, a test string) is data, and refusing the whole paste over it would be
+      # refusing the payload.
+      WINDOWS_CMD = /\A\s*(?:\S*[\/\\])?curl(?:\.exe)?\s+\^"/i
+
       private def self.refuse_windows_cmd(text : String) : Nil
-        return unless text.includes?("^\"") || text.each_line.any?(&.rstrip.ends_with?(" ^"))
+        return unless text.valid_encoding? && text.matches?(WINDOWS_CMD)
         raise Gori::Error.new("this is Windows cmd syntax (^\" quoting, ^ line ends) — copy the request " \
                               "as \"cURL (bash)\" instead")
       end
@@ -279,13 +279,13 @@ module Gori
         ftp-method ftp-port ftp-ssl-ccc-mode happy-eyeballs-timeout-ms haproxy-clientip
         hostpubmd5 hostpubsha256 hsts interface ip-tos ipfs-gateway keepalive-time key key-type
         krb libcurl limit-rate local-port login-options mail-auth mail-from mail-rcpt
-        max-filesize max-redirs max-time netrc-file noproxy output output-dir parallel-max pass
+        max-filesize max-redirs max-time keepalive-cnt knownhosts netrc-file noproxy output output-dir parallel-max pass
         pinnedpubkey preproxy proto proto-default proto-redir proxy proxy-cacert proxy-capath
         proxy-cert proxy-cert-type proxy-ciphers proxy-crlfile proxy-header proxy-key
         proxy-key-type proxy-pass proxy-pinnedpubkey proxy-service-name proxy-tls13-ciphers
         proxy-tlsauthtype proxy-tlspassword proxy-tlsuser proxy-user proxy1.0 pubkey quote
         random-file rate resolve retry retry-delay retry-max-time sasl-authzid service-name
-        socks4 socks4a socks5 socks5-gssapi-service socks5-hostname speed-limit speed-time
+        sigalgs socks4 socks4a socks5 socks5-gssapi-service socks5-hostname speed-limit speed-time ssl-sessions
         stderr telnet-option tftp-blksize time-cond tls-max tls13-ciphers tlsauthtype
         tlspassword tlsuser trace trace-ascii trace-config unix-socket variable write-out
       ]
@@ -305,7 +305,7 @@ module Gori
         sasl-ir show-error silent skip-existing socks5-basic socks5-gssapi socks5-gssapi-nec
         ssl ssl-allow-beast ssl-auto-client-cert ssl-no-revoke ssl-reqd ssl-revoke-best-effort
         sslv2 sslv3 styled-output suppress-connect-headers tcp-fastopen tcp-nodelay
-        tftp-no-options tlsv1 tlsv1.0 tlsv1.1 tlsv1.2 tlsv1.3 tr-encoding trace-ids trace-time
+        tftp-no-options tls-earlydata tlsv1 tlsv1.0 tlsv1.1 tlsv1.2 tlsv1.3 tr-encoding trace-ids trace-time
         use-ascii verbose version xattr
       ]
 
@@ -350,6 +350,7 @@ module Gori
         @unknown = [] of String
         @notes = [] of String
         @follows_redirects = false
+        @h2_prior = false
 
         def initialize(args : Array(String), @boundary : String? = nil, @default_scheme : String = "http")
           read(args)
@@ -387,6 +388,12 @@ module Gori
           name = a.byte_slice(2)
           spec = Curl.long_spec(name)
           negated = false
+          # curl 8.3's `--expand-<option>`: the option, with `{{variables}}` expanded first.
+          # There are no variables here, so it is the option itself, said once.
+          if spec.nil? && name.starts_with?("expand-") && (s = Curl.long_spec(name.byte_slice(7))) && s.arg
+            spec = s
+            @notes << "#{a}: curl variables ({{name}}) are not expanded — the value is taken as written"
+          end
           if spec.nil? && name.starts_with?("no-") && (s = Curl.long_spec(name.byte_slice(3))) && !s.arg
             spec = s
             negated = true
@@ -455,8 +462,9 @@ module Gori
           in Op::Bearer        then synth("Authorization", "Bearer #{v}")
           in Op::Http10        then @version = "HTTP/1.0"
           in Op::Http11        then @version = "HTTP/1.1"
-          in Op::Http2         then @version = "HTTP/2"
-          in Op::Http2Prior    then @version = "HTTP/2"
+          in Op::Http2, Op::Http2Prior
+            @version = "HTTP/2"
+            @h2_prior = op.http2_prior?
           in Op::Http3
             @version = "HTTP/1.1"
             @notes << "#{flag}: gori does not send HTTP/3 — imported as HTTP/1.1"
@@ -547,15 +555,17 @@ module Gori
           u = Curl.parse_url(raw_url, @default_scheme)
           url_notes(raw_url, u, notes)
           body, form_boundary = body_bytes
+          body = Curl.chunk(body) if body && stated_chunked?
           target = request_target(u)
           method = @method || default_method(body)
+          version = request_version(u, notes)
           head = String.build do |io|
-            io << method << ' ' << target << ' ' << @version << "\r\n"
+            io << method << ' ' << target << ' ' << version << "\r\n"
             header_lines(u, body, form_boundary, notes).each { |l| io << l << "\r\n" }
             io << "\r\n"
           end
           run_notes(notes)
-          Request.new(method, u.scheme, u.host, u.port, target, @version, head.to_slice, body, notes)
+          Request.new(method, u.scheme, u.host, u.port, target, version, head.to_slice, body, notes)
         end
 
         # What curl would have done to this URL that gori does not.
@@ -574,7 +584,7 @@ module Gori
           unless @ignored.empty?
             notes << "ignored (gori sends through its own network settings): #{@ignored.join(", ")}"
           end
-          @unknown.uniq.each { |f| notes << "ignored unknown option #{f}" }
+          @unknown.uniq.each { |f| notes << "ignored unknown option #{f} (read as taking no value)" }
         end
 
         # --request-target verbatim, else the URL's, with -G data and --url-query appended.
@@ -584,7 +594,33 @@ module Gori
           end
           query = @get && !@data.empty? ? [String.new(joined_data)] + @queries : @queries
           return u.target if query.empty?
-          "#{u.target}#{u.target.includes?('?') ? '&' : '?'}#{query.join('&')}"
+          target = "#{u.target}#{u.target.includes?('?') ? '&' : '?'}#{query.join('&')}"
+          # The same check the URL itself gets: curl builds this URL and refuses it too.
+          unless Proxy::Codec::Http1.request_token_safe?(target)
+            raise Gori::Error.new("the -G data or --url-query puts whitespace or a control byte in the URL, " \
+                                  "which curl refuses too — encode it (--data-urlencode), or use --request-target")
+          end
+          target
+        end
+
+        # `--http2` over cleartext is NOT h2: curl sends an HTTP/1.1 request offering an h2c
+        # Upgrade (measured), and only `--http2-prior-knowledge` speaks h2 without asking. The
+        # Upgrade headers are curl negotiating, like its User-Agent, so the request stays HTTP/1.1
+        # and says so. `Export::Curl.version_flag` draws the same line on the way out.
+        private def request_version(u : Curl::Url, notes : Array(String)) : String
+          return @version unless @version == "HTTP/2" && !@h2_prior && u.scheme == "http"
+          notes << "--http2 over http:// is an HTTP/1.1 request offering an h2c upgrade — imported as HTTP/1.1; " \
+                   "use --http2-prior-knowledge for h2 without the upgrade"
+          "HTTP/1.1"
+        end
+
+        # Does a stated `Transfer-Encoding` end in `chunked`? Then curl chunk-frames the body
+        # itself — measured, with or without a stated Content-Length beside it — so the stored
+        # body has to carry that framing or the head promises one the bytes do not have.
+        private def stated_chunked? : Bool
+          te = @items.reverse_each.find { |it| !it.synth && it.name.downcase == "transfer-encoding" }
+          return false unless te
+          te.line.partition(':').last.split(',').last.strip.downcase == "chunked"
         end
 
         # -I is HEAD, -G is GET, a body is POST, and nothing is GET — when -X said nothing.
@@ -677,8 +713,7 @@ module Gori
         end
 
         def dot_segments? : Bool
-          path = target.split('?', 2).first
-          path.split('/').any? { |seg| seg == "." || seg == ".." }
+          Gori::Url.dot_segments?(target)
         end
       end
 
@@ -854,6 +889,19 @@ module Gori
       # way curl (and browsers) write them.
       private def self.form_name(s : String) : String
         s.gsub('"', "%22").gsub('\r', "%0D").gsub('\n', "%0A")
+      end
+
+      # `body` as ONE chunk and the terminating zero chunk — how curl frames a body under a
+      # stated `Transfer-Encoding: chunked` (measured: `5\r\nhello\r\n0\r\n\r\n`).
+      def self.chunk(body : Bytes) : Bytes
+        io = IO::Memory.new(body.size + 16)
+        unless body.empty?
+          io << body.size.to_s(16) << "\r\n"
+          io.write(body)
+          io << "\r\n"
+        end
+        io << "0\r\n\r\n"
+        io.to_slice
       end
 
       # A boundary in curl's shape: 24 dashes and 22 random alphanumerics.

@@ -1611,6 +1611,16 @@ describe "Gori::Import curl" do
     end
   end
 
+  # `Raw.flow` would re-split and CRLF-normalize the head; a head `Curl` built is stored as
+  # built, so History holds the same bytes the Repeater does for the same paste.
+  it "stores a bare LF inside a -H value byte-exact" do
+    with_store do |store|
+      Gori::Import.import_curl_text(store, %q(curl http://a.test/p -H $'X: a\nY: b' -H $'Z: 1\n\nq'))
+      head = String.new(store.get_flow(store.recent_flows(1).first.id).not_nil!.request_head)
+      head.should eq("GET /p HTTP/1.1\r\nHost: a.test\r\nX: a\nY: b\r\nZ: 1\n\nq\r\n\r\n")
+    end
+  end
+
   it "reads a file through import_file, naming the file as the ref" do
     with_store do |store|
       path = File.tempname("gori-curl", ".sh")

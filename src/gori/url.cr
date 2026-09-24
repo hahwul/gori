@@ -77,6 +77,22 @@ module Gori
       "/#{target}"
     end
 
+    # Does this request-target's PATH hold a `.` or `..` segment — the ones curl collapses
+    # before it sends (RFC 3986 §5.2.4) unless told `--path-as-is`? The query and fragment are
+    # not a path and never collapse. One home for the two ends of the curl round trip (#1244):
+    # `Export::Curl` adds `--path-as-is` on this answer and `Import::Curl` notes it, so they
+    # cannot disagree about which paths curl would rewrite.
+    def self.dot_segments?(target : String) : Bool
+      path = target
+      if cut = path.byte_index('?')
+        path = path.byte_slice(0, cut)
+      end
+      if cut = path.byte_index('#')
+        path = path.byte_slice(0, cut)
+      end
+      path.split('/').any? { |seg| seg == "." || seg == ".." }
+    end
+
     # The scope/`url:`-matching URL of a request, from its parts. The Crystal-side twin of
     # `QL::URL_EXPR`, which builds the identical string in SQL for a STORED flow — so a `url:`
     # term means the same thing at a hold gate as it does in the History filter bar, and

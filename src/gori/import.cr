@@ -102,10 +102,11 @@ module Gori
     end
 
     # Every curl command in `text`, one flow per request, each stored BYTE-EXACT through
-    # `Raw.flow` — the head `Curl` built is the request, so it is not re-serialized. A command
-    # `Curl` refused is a skipped entry, like a malformed HAR entry; when NOTHING came out, the
-    # refusal itself is the error, since "no flows found" would hide the one reason there is.
-    # Returns the parse plus every note the requests carried, deduplicated.
+    # `Raw.request_flow` — the head `Curl` built is the request, so it is neither re-serialized
+    # nor re-split. A command `Curl` refused is a skipped entry, like a malformed HAR entry, and
+    # its reason rides in the notes; when NOTHING came out, the refusal itself is the error,
+    # since "no flows found" would hide the one reason there is. Returns the parse plus every
+    # note, deduplicated.
     def self.from_curl_text(text : String, prov : Provenance = Provenance.none) : {ParseResult, Array(String)}
       parsed = Curl.parse(text)
       if parsed.requests.empty?
@@ -114,13 +115,15 @@ module Gori
       now = Time.utc.to_unix * 1_000_000
       skipped = parsed.skipped.size
       pairs = [] of Builder::FlowPair
+      refused = parsed.skipped.map { |why| "refused: #{why}" }
       parsed.requests.each do |req|
-        pairs << Raw.flow(now, "#{req.origin}/", req.bytes,
+        pairs << Raw.request_flow(now, "#{req.origin}/", req.head, req.body,
           source_surface: prov.surface, source_ref: prov.ref)
-      rescue Gori::Error
+      rescue ex : Gori::Error
         skipped += 1
+        refused << "refused #{req.method} #{req.url}: #{ex.message}"
       end
-      notes = (parsed.notes + parsed.requests.flat_map(&.notes)).uniq
+      notes = (parsed.notes + parsed.requests.flat_map(&.notes) + refused).uniq
       {ParseResult.new(pairs, skipped), notes}
     end
 

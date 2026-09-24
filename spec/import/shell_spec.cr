@@ -31,6 +31,7 @@ describe Gori::Import::Shell do
     it "removes a backslash-newline continuation, LF or CRLF" do
       words("curl 'u' \\\n  -H 'A: 1' \\\r\n  -d x").should eq(["curl", "u", "-H", "A: 1", "-d", "x"])
       words("x \"a\\\nb\"").should eq(["x", "ab"])
+      words("x \"a\\\r\nb\"").should eq(["x", "ab"])
     end
 
     it "decodes $'…' ANSI-C quoting byte-wise, as Chrome's bash copy emits it" do
@@ -93,6 +94,8 @@ describe Gori::Import::Shell do
       Gori::Import::Shell.incomplete?("curl a\\\\").should be_false
       Gori::Import::Shell.incomplete?("curl 'u' \\\n").should be_false
       Gori::Import::Shell.incomplete?("x $(id)").should be_false
+      # A `\` inside a comment is the comment's, as bash reads it.
+      Gori::Import::Shell.incomplete?("curl http://h # note \\").should be_false
     end
   end
 end

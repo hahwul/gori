@@ -115,6 +115,12 @@ describe Gori::Import::Curl do
       expect_raises(Gori::Error, /local file/) { one(%q(curl http://h/p --data-urlencode name@f.txt)) }
     end
 
+    it "refuses -G data or --url-query that would put a space in the URL — curl refuses it too" do
+      expect_raises(Gori::Error, /--data-urlencode/) { one(%q(curl -G -d 'q=a b' http://h/s)) }
+      expect_raises(Gori::Error, /--data-urlencode/) { one(%q(curl --url-query '+a b' http://h/s)) }
+      wire(%q(curl http://h/s --url-query 'q=a b')).should start_with("GET /s?q=a+b HTTP/1.1\r\n")
+    end
+
     it "moves the data into the query with -G, as a GET" do
       wire(%q(curl http://h/a -G -d 'q=1' --data-urlencode 'x=a b&c' --data-urlencode '=y z')).should eq(
         "GET /a?q=1&x=a+b%26c&y+z HTTP/1.1\r\nHost: h\r\n\r\n")
@@ -145,6 +151,18 @@ describe Gori::Import::Curl do
       expect_raises(Gori::Error, /local file/) { one(%q(curl http://h/p -F f=@a.png)) }
       expect_raises(Gori::Error, /local file/) { one(%q(curl http://h/p -F 'f=<a.txt')) }
       expect_raises(Gori::Error, /-d and -F/) { one(%q(curl http://h/p -d a -F b=c)) }
+    end
+
+    # Measured: curl chunk-frames the body itself under a stated `…, chunked`, even beside a
+    # stated Content-Length — the head must not promise a framing the body lacks.
+    it "chunk-frames the body under a stated Transfer-Encoding ending in chunked, as curl does" do
+      wire(%q(curl http://h/p -H 'Transfer-Encoding: chunked' -d hello)).should eq(
+        "POST /p HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n" \
+        "Content-Type: application/x-www-form-urlencoded\r\n\r\n5\r\nhello\r\n0\r\n\r\n")
+      wire(%q(curl http://h/p -H 'Transfer-Encoding: gzip, chunked' -H 'Content-Length: 5' -d hello)).should end_with(
+        "Transfer-Encoding: gzip, chunked\r\nContent-Length: 5\r\n" \
+        "Content-Type: application/x-www-form-urlencoded\r\n\r\n5\r\nhello\r\n0\r\n\r\n")
+      wire(%q(curl http://h/p -H 'Transfer-Encoding: gzip' -d hello)).should end_with("\r\n\r\nhello")
     end
 
     it "gives a boundary to a stated multipart Content-Type that lacks one" do
@@ -192,6 +210,16 @@ describe Gori::Import::Curl do
       req.http2?.should be_true
       one(%q(curl --http3 https://h/p)).notes.join.should contain("HTTP/3")
     end
+
+    # Measured: over cleartext `--http2` is an HTTP/1.1 request offering an h2c Upgrade; only
+    # prior knowledge speaks h2 directly — the line `Export::Curl.version_flag` draws.
+    it "keeps --http2 over http:// as HTTP/1.1, and --http2-prior-knowledge as h2" do
+      req = one(%q(curl --http2 http://h/p))
+      req.http2?.should be_false
+      req.text.should start_with("GET /p HTTP/1.1\r\n")
+      req.notes.join.should contain("h2c")
+      one(%q(curl --http2-prior-knowledge http://h/p)).http2?.should be_true
+    end
   end
 
   describe "options curl uses to RUN, not to describe the request" do
@@ -205,6 +233,16 @@ describe Gori::Import::Curl do
 
     it "names an unknown option instead of failing" do
       one(%q(curl --frobnicate http://h/p)).notes.join.should contain("--frobnicate")
+    end
+
+    it "points at an unknown option when its value looks like a second URL" do
+      expect_raises(Gori::Error, /--frobnicate.*read as a URL/) { one(%q(curl --frobnicate 3 http://h/p)) }
+    end
+
+    it "reads --expand-<option> as the option, naming the unexpanded variables" do
+      req = one(%q(curl --expand-data 'a={{x}}' --expand-url http://h/p))
+      req.text.should end_with("\r\n\r\na={{x}}")
+      req.notes.join.should contain("not expanded")
     end
 
     it "refuses the options that read a local file" do
@@ -242,6 +280,11 @@ describe Gori::Import::Curl do
       expect_raises(Gori::Error, /not a curl command/) { Gori::Import::Curl.parse("wget http://h/ -O x") }
       expect_raises(Gori::Error, /cmd syntax/) { Gori::Import::Curl.parse("curl ^\"http://h/^\" ^\n  -H ^\"A: 1^\"") }
     end
+
+    it "does not mistake a ^\" inside a quoted bash value for cmd syntax" do
+      Gori::Import::Curl.parse(%q(curl http://h/p --data-raw '^"x' -H 'X: a ^')).requests.first.text
+        .should end_with("\r\n\r\n^\"x")
+    end
   end
 
   describe ".parse_one" do
@@ -254,13 +297,13 @@ describe Gori::Import::Curl do
     end
   end
 
-  describe ".command?" do
-    it "recognizes curl, a path to it, curl.exe and a prompt" do
-      Gori::Import::Curl.command?("curl http://h").should be_true
-      Gori::Import::Curl.command?("  /usr/bin/curl -s x").should be_true
-      Gori::Import::Curl.command?("curl.exe x").should be_true
-      Gori::Import::Curl.command?("$ curl x").should be_true
-      Gori::Import::Curl.command?("GET / HTTP/1.1").should be_false
+  describe ".curl_word?" do
+    it "recognizes curl, a path to it and curl.exe" do
+      Gori::Import::Curl.curl_word?("curl").should be_true
+      Gori::Import::Curl.curl_word?("/usr/bin/curl").should be_true
+      Gori::Import::Curl.curl_word?("CURL.EXE").should be_true
+      Gori::Import::Curl.curl_word?("curly").should be_false
+      Gori::Import::Curl.curl_word?(nil).should be_false
     end
   end
 end
