@@ -3446,7 +3446,8 @@ a separate `u` view toggle: it decodes valid `\\uXXXX` escapes for display, mark
 ranges, and leaves the captured bytes and copy/search data untouched. Hidden Unicode and
 control characters render as named badges, with emoji joiners/selectors retained in context.
 
-In the Repeater, the response is read-only and outside `Scope::Editor`, so its `u` action
-intentionally occupies that tab-scope chord; the request editor remains in `Scope::Editor`,
-where vim's `u` still means undo. The English and Korean hotkey guides and
-`spec/verb/keyset_spec.cr` record this cross-scope exception.
+In the Repeater, the response is read-only and outside `Scope::Editor`, so its default `u`
+action occupies that tab-scope chord; the request editor remains in `Scope::Editor`, where
+vim's `u` still means undo. An explicit user rebind wins over that default in keymap collision
+resolution. The English and Korean hotkey guides and `spec/verb/keyset_spec.cr` record this
+cross-scope exception.

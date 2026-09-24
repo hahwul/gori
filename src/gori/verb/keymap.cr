@@ -16,9 +16,29 @@ module Gori
                      overrides : Hash(String, Array(Chord)) = NO_OVERRIDES,
                      keyset : Keyset::Kind = Keyset.active) : Keymap
         by_scope = Hash(Scope, Hash(Chord, String)).new
+        os_overrides = OsProfile.overrides_for(os)
+        keyset_overrides = Keyset.overrides_for(keyset)
+        # A configured chord is a deliberate choice and wins collisions with untouched
+        # defaults. Build each broader layer first so a later registry entry cannot silently
+        # steal a chord that the operator or keyset assigned to another verb.
+        layers = Array.new(4) { [] of Definition }
         registry.each do |verb|
-          effective_chords(verb, os, overrides, keyset).each do |chord|
-            (by_scope[verb.scope] ||= {} of Chord => String)[chord] = verb.id
+          priority = if overrides.has_key?(verb.id)
+                       3
+                     elsif keyset_overrides.has_key?(verb.id)
+                       2
+                     elsif os_overrides.has_key?(verb.id)
+                       1
+                     else
+                       0
+                     end
+          layers[priority] << verb
+        end
+        layers.each do |layer|
+          layer.each do |verb|
+            effective_chords(verb, os, overrides, keyset).each do |chord|
+              (by_scope[verb.scope] ||= {} of Chord => String)[chord] = verb.id
+            end
           end
         end
         new(by_scope)

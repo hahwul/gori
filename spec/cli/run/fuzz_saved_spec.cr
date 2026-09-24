@@ -109,7 +109,7 @@ describe "gori run fuzz saved runs" do
     text.should_not contain('\r')
     text.should_not contain('\n')
     text.should_not contain("BAD\rOVERWRITE")
-    text.should contain("BAD·OVERWRITE·NEXT")
+    text.should contain("BAD⟨CR⟩OVERWRITE⟨LF⟩NEXT")
   end
 
   # A `snapshot_version = 0` row predates the V24 transport columns, so `http2`/`websocket`
