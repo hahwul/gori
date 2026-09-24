@@ -19,6 +19,27 @@ describe Gori::RawJson do
     end
   end
 
+  describe ".reindent" do
+    it "changes JSON whitespace while preserving token spellings, duplicate keys, and outer whitespace" do
+      source = " \t{ \"a\" : \"\\u003c\\/x\", \"a\" : 1E+05, \"s\" : \"\\ud800\" } \n"
+      expected = " \t{\n  \"a\": \"\\u003c\\/x\",\n  \"a\": 1E+05,\n  \"s\": \"\\ud800\"\n} \n"
+      Gori::RawJson.reindent(source).should eq(expected)
+    end
+
+    it "keeps invalid UTF-8 bytes inside strings verbatim" do
+      source = String.new(Bytes[0x7b, 0x22, 0x78, 0x22, 0x3a, 0x22, 0xff, 0x22, 0x7d])
+      formatted = Gori::RawJson.reindent(source).not_nil!
+      formatted.to_slice.should eq(Bytes[0x7b, 0x0a, 0x20, 0x20, 0x22, 0x78, 0x22, 0x3a, 0x20, 0x22, 0xff, 0x22, 0x0a, 0x7d])
+    end
+
+    it "returns nil for malformed JSON or output over the requested cap" do
+      ["", "{\"a\":}", "[1,]", "01", "{} trailing"].each do |source|
+        Gori::RawJson.reindent(source).should be_nil
+      end
+      Gori::RawJson.reindent("{\"a\":1}", "  ", 3).should be_nil
+    end
+  end
+
   describe ".members" do
     it "lists an object's members in order with raw values, duplicates kept" do
       Gori::RawJson.members(%({"a":1,"b":{"c":[99999999999999999999]},"a":2})).should eq(

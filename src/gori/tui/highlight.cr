@@ -20,6 +20,7 @@ module Gori::Tui
 
     # One rendered line: an ordered partition of the source line into spans.
     alias Line = Array(Span)
+    alias DecodedRange = {Int32, Int32, Int32} # body line, first character, one-past-last character
 
     # --- public entry points -------------------------------------------------
 
@@ -72,7 +73,7 @@ module Gori::Tui
       end
 
       # Build from wire/display bytes without splitting into strings.
-      def self.from_bytes(bytes : Bytes) : BodyLines
+      def self.from_bytes(bytes : Bytes, protected_linefeeds : Array(Int32) = [] of Int32) : BodyLines
         return empty if bytes.empty?
         starts = Array(Int32).new
         starts << 0
@@ -80,8 +81,13 @@ module Gori::Tui
         # one iteration per body byte, so opening a 10 MB response walked 10M times in
         # Crystal. Same result, and the scan is now the libc one.
         pos = 0
+        protected_i = 0
         while nl = bytes.index(0x0A_u8, pos)
-          starts << (nl + 1)
+          if protected_i < protected_linefeeds.size && protected_linefeeds[protected_i] == nl
+            protected_i += 1
+          else
+            starts << (nl + 1)
+          end
           pos = nl + 1
         end
         new(bytes, starts, nil)
@@ -132,14 +138,22 @@ module Gori::Tui
     # whole array for a request. It is opt-IN rather than derived from `request`, so the
     # read-only windowed callers that never had the overlay keep rendering exactly as they do.
     record Windowed, head : Array(Line), body : BodyLines, kind : Symbol,
-      env_tokens : Bool = false, literal : Set(String)? = nil do
+      env_tokens : Bool = false, literal : Set(String)? = nil,
+      decoded_ranges : Array(DecodedRange) = [] of DecodedRange do
       def total : Int32
         head.size + body.size
       end
 
       # The styled line at absolute index `i` (head pre-styled, body styled lazily).
       def line_at(i : Int32) : Line
-        line = i < head.size ? head[i] : Highlight.body_styled(body[i - head.size], kind)
+        if i < head.size
+          line = head[i]
+        else
+          body_i = i - head.size
+          line = Highlight.body_styled(body[body_i], kind)
+          ranges = Highlight.decoded_ranges_for(decoded_ranges, body_i)
+          line = Highlight.emphasize(line, ranges) unless ranges.empty?
+        end
         env_tokens ? Highlight.with_env_tokens(line, literal) : line
       end
 
@@ -165,7 +179,9 @@ module Gori::Tui
 
     # `kind` overrides the content-type-derived styling (used by Pretty when its
     # output is no longer the content-type's language, e.g. GraphQL/JWT → :text).
-    def self.message_windowed(head : Bytes?, body : Bytes?, request : Bool, kind : Symbol? = nil) : Windowed
+    def self.message_windowed(head : Bytes?, body : Bytes?, request : Bool, kind : Symbol? = nil,
+                              *, decoded_ranges : Array(DecodedRange) = [] of DecodedRange,
+                              protected_linefeeds : Array(Int32) = [] of Int32) : Windowed
       head_lines = to_lines(head)
       # A captured head ends with the CRLFCRLF terminator, which `to_lines` turns
       # into trailing "" entries ("…\r\n\r\n" → […, "", ""]). Drop them so the
@@ -191,12 +207,77 @@ module Gori::Tui
         end
       end
       styled << blank if has_body # the head/body separator
-      Windowed.new(styled, has_body ? BodyLines.from_bytes(body.not_nil!) : BodyLines.empty, kind)
+      Windowed.new(styled, has_body ? BodyLines.from_bytes(body.not_nil!, protected_linefeeds) : BodyLines.empty, kind,
+        decoded_ranges: decoded_ranges)
     end
 
     # Style a single body line (the public seam for windowed rendering).
     def self.body_styled(raw : String, kind : Symbol) : Line
       body_line(raw, kind)
+    end
+
+    # Underline characters produced by on-demand JSON escape decoding. The ranges address the
+    # decoded source text, before Screen turns any invisible codepoints into display badges.
+    def self.emphasize(line : Line, ranges : Array({Int32, Int32})) : Line
+      return line if ranges.empty?
+      ordered = ranges.select { |(a, b)| a < b }
+      ordered.sort_by!(&.[0])
+      return line if ordered.empty?
+
+      out = [] of Span
+      range_i = 0
+      offset = 0
+      line.each do |span|
+        text = span.text
+        finish = offset + text.size
+        pos = 0
+        while pos < text.size
+          range = ordered[range_i]?
+          while range && range[1] <= offset + pos
+            range_i += 1
+            range = ordered[range_i]?
+          end
+
+          if range.nil? || range[0] >= finish
+            out << Span.new(text[pos..], span.fg, span.attr) if pos < text.size
+            pos = text.size
+          elsif offset + pos < range[0]
+            stop = {range[0] - offset, text.size}.min
+            out << Span.new(text[pos...stop], span.fg, span.attr)
+            pos = stop
+          else
+            stop = {range[1] - offset, text.size}.min
+            out << Span.new(text[pos...stop], Theme.accent, span.attr | Attribute::Underline) if stop > pos
+            pos = stop
+            range_i += 1 if offset + pos >= range[1]
+          end
+        end
+        offset = finish
+      end
+      out
+    end
+
+    # Decoded ranges are appended in source order. Binary-search their first body line so drawing
+    # one visible line does not scan every decoded escape in a multi-megabyte response.
+    def self.decoded_ranges_for(ranges : Array(DecodedRange), line_i : Int32) : Array({Int32, Int32})
+      low = 0
+      high = ranges.size
+      while low < high
+        middle = (low + high) // 2
+        if ranges[middle][0] < line_i
+          low = middle + 1
+        else
+          high = middle
+        end
+      end
+
+      selected = [] of {Int32, Int32}
+      while low < ranges.size && ranges[low][0] == line_i
+        range = ranges[low]
+        selected << {range[1], range[2]}
+        low += 1
+      end
+      selected
     end
 
     # Highlight a message held as one combined text blob (Intercept's byte-exact
@@ -493,8 +574,8 @@ module Gori::Tui
       # glyphs, so its width is its char count: skip the grapheme walk (and its per-glyph
       # `g.to_s` String) entirely, mirroring Screen#text's ASCII fast path. Mixed lines
       # stay correct — width accumulates across spans regardless of which branch each takes.
-      # Non-printable spans use `grapheme_cols` (≥1) so an embedded tab still counts as a
-      # cell — same floor as Screen#text / the editor caret (issue #278).
+      # Non-printable spans use `grapheme_cols`, which measures the visible badge for a
+      # control rather than the zero-width source codepoint.
       overflow = false
       acc = 0
       line.each do |span|
@@ -546,9 +627,8 @@ module Gori::Tui
               done = true
               break
             end
-            # Single codepoint → Char path (C0 control → space via ASCII_CELL). Multi-
-            # codepoint clusters stay on the String path. Floor-to-1 above means a tab
-            # advances one column instead of collapsing the rest of the line leftward.
+            # Single codepoint → Char path. Multi-codepoint clusters stay on the String
+            # path. Unsafe codepoints expand into named badges through Screen#cell.
             if gs.size == 1
               screen.cell(x + visual_col, y, gs[0], span.fg, bg, span.attr)
             else
@@ -598,7 +678,7 @@ module Gori::Tui
         # (each of which allocates a String for `grapheme_cols`). That walk is what a minified
         # body line costs once it is panned to the right: O(the columns scrolled off), every
         # frame, on the one line long enough to need panning.
-        if span.text.ascii_only?
+        if Screen.printable_ascii?(span.text)
           kept = span.text[(start_col - acc)..]
           acc = start_col
           cutting = false
@@ -634,7 +714,7 @@ module Gori::Tui
       return s if start_col <= 0
       # ASCII fast path, exactly as in `slice_left` above and for the same reason: column ==
       # char index, so no cluster can straddle the cut and the tail is one slice.
-      return start_col >= s.size ? "" : s[start_col..] if s.ascii_only?
+      return start_col >= s.size ? "" : s[start_col..] if Screen.printable_ascii?(s)
       acc = 0
       cutting = true
       String.build do |io|

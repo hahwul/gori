@@ -2674,8 +2674,9 @@ of those letters in one of those scopes would shadow silently and only for the o
 picked that keyset. And `spec/verb/keyset_spec.cr` sweeps the vim bare letters (`u` `/` `a`
 `g` `⇧G`) against the eight scopes an editor pane can belong to: the Editor scope sits ahead
 of the tab scope, which `validate_chords!` cannot see, so a hit there is a DISPLACEMENT that
-must be documented rather than discovered. Today there are none — every one of those letters
-is free in every editor-capable tab scope.
+must be documented rather than discovered. The one intentional hit is `u` in the Repeater's
+read-only response, where Unicode escape display takes priority; the request editor still
+resolves `u` in the leading Editor scope to `editor.undo`.
 
 What the keyset deliberately leaves alone: the enable/disable `x` on the four rule lists (that
 `x` is a state change, not a selection — KEY_AUDIT F4), and `intercept.select-line`, which
@@ -3434,3 +3435,18 @@ holds its real position and the gaps are the dropped rows; `fuzz_runs.keep` reco
 so a filtered archive reads "12 of 100,000 kept" instead of a lost run. Pause-on-condition is
 deliberately left out: it needs a plain pause verb first, and the engine's pause still drains
 the worker buffer (`Engine#pause` parks only the dispatcher).
+### 2026-09-24: JSON Unicode decoding is a view, and `u` belongs to the read-only response
+
+Refines: [P4](#p4), [P7](#p7). #1248.
+
+Pretty-printing a request is a write-back action, so it only adds JSON whitespace. It must keep
+string escape spellings, duplicate members, number tokens, lone surrogates and even invalid
+UTF-8 bytes inside strings as the operator entered them. The response and History detail have
+a separate `u` view toggle: it decodes valid `\\uXXXX` escapes for display, marks the decoded
+ranges, and leaves the captured bytes and copy/search data untouched. Hidden Unicode and
+control characters render as named badges, with emoji joiners/selectors retained in context.
+
+In the Repeater, the response is read-only and outside `Scope::Editor`, so its `u` action
+intentionally occupies that tab-scope chord; the request editor remains in `Scope::Editor`,
+where vim's `u` still means undo. The English and Korean hotkey guides and
+`spec/verb/keyset_spec.cr` record this cross-scope exception.

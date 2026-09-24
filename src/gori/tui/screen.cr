@@ -1,4 +1,5 @@
 require "termisu"
+require "../unicode_reveal"
 
 module Gori::Tui
   # The cell sink Screen draws into. TermisuBackend targets the real terminal;
@@ -228,8 +229,8 @@ module Gori::Tui
     # Interned single-cell Strings for the 128 ASCII codepoints, so drawing a Char never
     # allocates a fresh 1-char String — `cell` is the universal draw primitive (a full-screen
     # fill alone is width×height calls, thousands more from text()), so `Char#to_s` per cell
-    # was tens of thousands of throwaway Strings per frame. C0/C1-style control chars that
-    # termisu rejects are pre-substituted with a space here, folding the old runtime check in.
+    # was tens of thousands of throwaway Strings per frame. Unsafe controls are named before
+    # they reach this table; the remaining ASCII entries are interned as usual.
     ASCII_CELL = Array(String).new(128) { |i| (i < 0x20 || i == 0x7f) ? " " : i.unsafe_chr.to_s }
 
     # The same interning for NON-ASCII single-cell glyphs — box-drawing borders (│ ─ ╭ ╮ …),
@@ -257,14 +258,14 @@ module Gori::Tui
       return str.bytesize if printable_ascii?(str)
       w = 0
       str.each_grapheme do |g|
-        w += Termisu::UnicodeWidth.grapheme_width(g.to_s)
+        w += visible_grapheme_width(g.to_s)
       end
       w
     end
 
     # Whether every byte is printable ASCII (0x20..0x7e) — one byte, one width-1 cell.
-    # Lets display_width skip grapheme walking on the common label/header string.
-    private def self.printable_ascii?(str : String) : Bool
+    # Shared with wrap/highlight fast paths so controls cannot take the one-cell shortcut.
+    def self.printable_ascii?(str : String) : Bool
       str.to_slice.all? { |b| b >= 0x20_u8 && b <= 0x7e_u8 }
     end
 
@@ -277,10 +278,22 @@ module Gori::Tui
       return 0 if str.empty? || limit <= 0
       w = 0
       str.each_grapheme do |g|
-        w += Termisu::UnicodeWidth.grapheme_width(g.to_s)
+        w += visible_grapheme_width(g.to_s)
         return w if w >= limit
       end
       w
+    end
+
+    private def self.visible_grapheme_width(grapheme : String) : Int32
+      if visible = UnicodeReveal.visible(grapheme)
+        width = 0
+        visible.each_grapheme do |badge_glyph|
+          width += Termisu::UnicodeWidth.grapheme_width(badge_glyph.to_s)
+        end
+        width
+      else
+        Termisu::UnicodeWidth.grapheme_width(grapheme).to_i32
+      end
     end
 
     # The CHARACTER index in `str` whose drawn cell the column `target` lands on, clamped
@@ -298,7 +311,7 @@ module Gori::Tui
       return 0 if target <= 0
       # ASCII fast path: 1 char == 1 cluster == 1 column (see draw_width), so the column IS
       # the index. Keeps every click off the grapheme walk + its per-glyph `to_s` String.
-      return {target, str.size}.min if str.ascii_only?
+      return {target, str.size}.min if printable_ascii?(str)
       acc = 0
       i = 0
       str.each_grapheme do |g|
@@ -328,7 +341,7 @@ module Gori::Tui
     # column wider than the space it has to fit.
     def self.column_for_click(str : String, target : Int32) : Int32
       return 0 if target <= 0
-      return {target, str.size}.min if str.ascii_only? # 1 char == 1 cluster == 1 column
+      return {target, str.size}.min if printable_ascii?(str) # 1 char == 1 cluster == 1 column
       acc = 0
       i = 0
       str.each_grapheme do |g|
@@ -422,10 +435,8 @@ module Gori::Tui
     end
 
     # Columns one grapheme occupies when drawn by `#text` / `Highlight.draw` and when the
-    # editor caret / click-to-cursor advance over it. Unicode width floored to ≥1 so a C0
-    # control (`\t`, `\r`, …) keeps the space cell that Char-path `cell` substitutes,
-    # preventing the styled draw path from collapsing a tab to zero columns while the
-    # caret still steps across it (issue #278).
+    # editor caret / click-to-cursor advance over it. Width measures the visible badge for
+    # unsafe codepoints, so draw, caret and pointer advance over the same columns.
     def self.grapheme_cols(g : String) : Int32
       {display_width(g), 1}.max
     end
@@ -440,7 +451,7 @@ module Gori::Tui
     # precomposed CJK and diverged only on a multi-codepoint cluster, where `column_width`
     # over-counted every codepoint past the first:
     #
-    #   "a\tb"     display_width 2   (was column_width 3)    draw_width 3
+    #   "a\tb"     display_width 7   (named TAB badge)        draw_width 7
     #   "👍🏽"       display_width 2   (was column_width 3)    draw_width 2   (skin tone)
     #   "👨‍👩‍👧‍👦"    display_width 2   (was column_width 11)   draw_width 2   (3 ZWJ)
     #   "한글" NFD  display_width 4   (was column_width 8)    draw_width 4   (6 jamo)
@@ -449,19 +460,18 @@ module Gori::Tui
     # and it painted a DUPLICATE glyph past any decomposed text: the caret advanced 8
     # columns over NFD "한글" while the draw advanced 4, so `value[@cx]` was stamped four
     # cells right of where the glyph ended. `draw_width` SUBSUMES the old measure — every
-    # property `column_width` existed for survives, because `grapheme_cols` still floors to
-    # ≥1 and a control char, a tab and a zero-width `U+200B`/`U+FEFF` are each their own
-    # cluster — so the caret model moved onto clusters (see `column_for`, `cluster_start`)
+    # property `column_width` existed for survives, because `grapheme_cols` measures the
+    # visible badge and a tab or zero-width `U+200B`/`U+FEFF` is each its own cluster — so the
+    # caret model moved onto clusters (see `column_for`, `cluster_start`)
     # and the codepoint measure is gone. `display_width` remains, and remains DIFFERENT: it
-    # is raw Unicode width, scoring a C0 control 0 even though `cell` substitutes a space
-    # and so gives it a real cell. Use it only for text with no control chars.
+    # is visible Unicode width, measuring unsafe codepoints as badges.
     def self.draw_width(str : String) : Int32
       # ASCII fast path, and it is EXACT rather than an approximation: the only multi-char
       # ASCII grapheme cluster is CRLF, which cannot appear inside a rendered line because
       # every caller splits on '\n' first (TextArea#text= also rstrips the '\r'). So each
       # ASCII char is its own cluster and the cluster sum IS the char count. Keeps the hot
       # path off the grapheme walk + its per-glyph `g.to_s` String, as the siblings do.
-      return str.size if str.ascii_only?
+      return str.size if printable_ascii?(str)
       w = 0
       str.each_grapheme { |g| w += grapheme_cols(g.to_s) }
       w
@@ -474,7 +484,7 @@ module Gori::Tui
     # multi-MB single line must never be measured in full. Exact for lines under `limit`.
     def self.draw_width_upto(str : String, limit : Int32) : Int32
       return 0 if str.empty? || limit <= 0
-      return {str.size, limit}.min if str.ascii_only? # see draw_width: 1 char == 1 cluster
+      return {str.size, limit}.min if printable_ascii?(str) # see draw_width: 1 char == 1 cluster
       w = 0
       str.each_grapheme do |g|
         w += grapheme_cols(g.to_s)
@@ -488,13 +498,37 @@ module Gori::Tui
       return unless x >= 0 && y >= 0 && x < @width && y < @height
       if grapheme.is_a?(Char)
         o = grapheme.ord
-        # ASCII → interned cell (control chars already mapped to a space in the table);
-        # non-ASCII control (C1) still substitutes a space; other non-ASCII interns (glyph_cell).
+        if name = UnicodeReveal.label(o)
+          put_visible(x, y, "⟨#{name}⟩", fg, bg, attr)
+          return
+        end
+        # ASCII → interned cell; other non-ASCII interns (glyph_cell). Unsafe codepoints were
+        # handled above, so neither cache receives a source control.
         g = o < 128 ? ASCII_CELL[o] : (grapheme.control? ? " " : glyph_cell(o, grapheme))
       else
+        if visible = UnicodeReveal.visible(grapheme)
+          put_visible(x, y, visible, fg, bg, attr)
+          return
+        end
         g = grapheme
       end
       @backend.put(x, y, g, fg, bg, attr)
+    end
+
+    # `cell` accepts one source grapheme, but a named badge is ordinary multi-cell text. Expand
+    # that safe replacement here so neither the terminal nor the frame cache sees the original
+    # format/control codepoint. Width callers use the same replacement in `display_width`.
+    private def put_visible(x : Int32, y : Int32, text : String, fg : Color, bg : Color,
+                            attr : Attribute) : Nil
+      col = x
+      text.each_grapheme do |g|
+        cluster = g.to_s
+        width = Termisu::UnicodeWidth.grapheme_width(cluster).to_i32
+        width = 1 if width <= 0
+        break if col + width > @width
+        @backend.put(col, y, cluster, fg, bg, attr)
+        col += width
+      end
     end
 
     # Interned String for a non-ASCII glyph codepoint (see GLYPH_CELL_CAP): returns the cached
@@ -517,7 +551,7 @@ module Gori::Tui
       # ASCII fast path — the common case (line numbers, method/host/path, headers):
       # display width == char count, so skip fit()'s full-width pre-scan, the second
       # grapheme walk, and the truncation String builder. Same ellipsis semantics.
-      if str.ascii_only?
+      if ascii_printable?(str)
         n = str.size
         draw = n <= limit ? n : (limit == 1 ? 1 : limit - 1)
         i = 0
@@ -532,17 +566,16 @@ module Gori::Tui
         end
         return x + i
       end
-      # Non-ASCII (CJK/emoji/combining): grapheme-aware truncation + draw.
-      # `grapheme_cols` floors width-0 controls to 1 so a mixed line with an embedded
-      # tab advances the same way the ASCII fast path does (1 cell, space glyph).
+      # Non-ASCII (CJK/emoji/combining) and controls: grapheme-aware truncation + draw.
+      # Unsafe codepoints use their visible badge width, matching what `cell` writes.
       s = fit(str, limit)
       cur_x = x
       s.each_grapheme do |g|
         gs = g.to_s
         gw = Screen.grapheme_cols(gs)
         break if cur_x + gw > @width
-        # Single-codepoint → Char path (C0 → space via ASCII_CELL); multi-codepoint
-        # clusters (emoji ZWJ, …) stay on the String path.
+        # Single-codepoint → Char path; multi-codepoint clusters (emoji ZWJ, …) stay on
+        # the String path. Unsafe codepoints expand into named badges inside `cell`.
         if gs.size == 1
           cell(cur_x, y, gs[0], fg, bg, attr)
         else
@@ -551,6 +584,10 @@ module Gori::Tui
         cur_x += gw
       end
       cur_x
+    end
+
+    private def ascii_printable?(str : String) : Bool
+      str.to_slice.all? { |b| b >= 0x20_u8 && b <= 0x7e_u8 }
     end
 
     # Clipped here, once per rect, so the backend's span write never has to. `Theme.text` as

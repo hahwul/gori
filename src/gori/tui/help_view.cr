@@ -102,7 +102,7 @@ module Gori::Tui
         # and it named the pair on none of them while ⇧N meant one thing here and the opposite
         # one tab over. Through `{verb.id}` like every other row, so a rebind moves it.
         Item.new("detail", "↑/↓ move · {detail.next-item}/{detail.prev-item} step flow · {detail.select-line} line · ⇧arrows select · {detail.copy} copy · space cmds"),
-        Item.new("{detail.toggle-hex} · {detail.toggle-ws} · {detail.toggle-pretty}", "in detail: hex · whitespace · pretty bodies"),
+        Item.new("{detail.toggle-hex} · {detail.toggle-ws} · {detail.toggle-pretty} · {detail.toggle-unicode}", "in detail: hex · whitespace · pretty · Unicode escapes"),
       ]},
       {"REPEATER", [
         Item.new("^R", "send the request", "repeater.send"),
@@ -137,7 +137,7 @@ module Gori::Tui
         Item.new("space → g", "send group: %%%-split requests on one connection"),
         Item.new("↹", "cycle target → request → response"),
         Item.new("⇧D", "response: toggle diff", "repeater.toggle-diff"),
-        Item.new("p", "response: pretty bodies", "repeater.toggle-pretty"),
+        Item.new("{repeater.toggle-pretty} · {repeater.toggle-unicode}", "response: pretty bodies · Unicode escapes"),
         Item.new("^X", "response: hex dump (pane-local)"),
         Item.new("⇧←/→", "response: scroll a long line sideways"),
       ]},

@@ -243,7 +243,7 @@ A keyset moves the key you press **in the pane**, not the letter the [space menu
 
 so the card teaches both halves rather than making you guess which one it means. The nine `SUB-TABS` letters (`n` `w` `d` `e` `t` `f` `/` `T` `N`) likewise mean the same thing on all nine strips whichever keyset you pick. The two namespaces cannot collide: the menu is modal, and a keyset only ever writes to the keymap.
 
-That includes `/`, which is a `SUB-TABS` letter *and* `vim-ish`'s find key. They are different tiers — the menu letter acts on the strip while the card is up, the chord searches the text pane you are standing in — and gori checks the chord half at boot: `validate_chords!` sweeps every (OS profile × keyset) cell, and a keyset letter that shadowed a pane's own key would fail the build rather than ship.
+That includes `/`, which is a `SUB-TABS` letter *and* `vim-ish`'s find key. They are different tiers — the menu letter acts on the strip while the card is up, the chord searches the text pane you are standing in. The one deliberate pane-key overlap is `u` in the Repeater's read-only response: it toggles display-only JSON Unicode decoding. The request editor is still in the Editor scope, where `u` means undo. `validate_chords!` checks same-scope collisions at boot; the cross-scope exception is pinned in `spec/verb/keyset_spec.cr`.
 
 ### What still works whatever you pick
 

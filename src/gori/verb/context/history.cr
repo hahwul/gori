@@ -55,6 +55,8 @@ abstract class Gori::Verb::ExecContext
   abstract def toggle_detail_hex : Nil
   # Toggle whitespace reveal (·→␍␊) in the req/res views (smuggling inspection).
   abstract def toggle_reveal : Nil
+  # Decode JSON Unicode escapes in the req/res display without changing the captured bytes.
+  abstract def toggle_unicode_escapes : Nil
   # Toggle pretty-print of req/res bodies (display only; `p` in History detail).
   abstract def toggle_pretty : Nil
 
