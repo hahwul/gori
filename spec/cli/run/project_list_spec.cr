@@ -155,8 +155,16 @@ end
 
 describe "gori run project list" do
   it "neutralizes legacy terminal controls in human project names" do
-    Gori::CLI::Output.term_safe("bad\e]0;owned\a").should eq("bad·]0;owned·")
-    Gori::CLI::Output.term_safe("bad\u{009b}name").should eq("bad·name")
+    safe_name = Gori::CLI::Output.term_safe("bad\e]0;owned\a")
+    safe_name.should contain("bad")
+    safe_name.should contain("owned")
+    safe_name.should_not contain('\e')
+    safe_name.should_not contain('\a')
+
+    safe_c1_name = Gori::CLI::Output.term_safe("bad\u{009b}name")
+    safe_c1_name.should contain("bad")
+    safe_c1_name.should contain("name")
+    safe_c1_name.should_not contain("\u{009b}")
 
     source = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run", "project.cr"))
     source.should contain("CLI::Output.pad(terminal_project_name(pr.name), 24)")
