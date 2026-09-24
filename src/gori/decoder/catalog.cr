@@ -26,6 +26,14 @@ module Gori::Decoder
     "#{name}: this gori was built with -Dwithout_native_codecs, so libbrotlidec/libzstd are not linked in"
   end
 
+  private def self.windows_bestfit_converter(code_page : Int32) : Converter
+    text("windows-bestfit-#{code_page}", "bestfit-#{code_page}", "worstfit-#{code_page}",
+      category: Category::Encoding, direction: Direction::Encode,
+      description: "Windows CP#{code_page} ANSI Best-Fit table preview (unmapped characters become '?')") do |s|
+      Codecs.windows_bestfit_preview(s, code_page)
+    end
+  end
+
   def self.default_registry : Registry
     r = Registry.new
 
@@ -98,6 +106,46 @@ module Gori::Decoder
     r.register text("punycode-decode", "idn-decode", "unpunycode",
       category: Category::Encoding, direction: Direction::Decode,
       description: "Punycode/IDN decode per dot-label (xn-- labels only)") { |s| Codecs.punycode_decode(s) }
+
+    # ---------------- ENCODING: Unicode normalization ----------------
+    r.register text("nfc", "unicode-nfc", "normalize-nfc",
+      category: Category::Encoding, direction: Direction::Encode,
+      description: "Unicode canonical composition (NFC, one-way)") { |s| s.unicode_normalize(:nfc) }
+    r.register text("nfd", "unicode-nfd", "normalize-nfd",
+      category: Category::Encoding, direction: Direction::Encode,
+      description: "Unicode canonical decomposition (NFD, one-way)") { |s| s.unicode_normalize(:nfd) }
+    r.register text("nfkc", "unicode-nfkc", "normalize-nfkc",
+      category: Category::Encoding, direction: Direction::Encode,
+      description: "Unicode compatibility composition (NFKC, one-way)") { |s| s.unicode_normalize(:nfkc) }
+    r.register text("nfkd", "unicode-nfkd", "normalize-nfkd",
+      category: Category::Encoding, direction: Direction::Encode,
+      description: "Unicode compatibility decomposition (NFKD, one-way)") { |s| s.unicode_normalize(:nfkd) }
+
+    # ---------------- ENCODING: RFC 2047 encoded words ----------------
+    r.register text("rfc2047-q-encode", "encoded-word-q-encode", "mime-word-q-encode",
+      category: Category::Encoding, direction: Direction::Encode,
+      description: "RFC 2047 UTF-8 encoded-word (Q, folds at 75 octets)") { |s| Codecs.rfc2047_q_encode(s) }
+    r.register text("rfc2047-b-encode", "encoded-word-b-encode", "mime-word-b-encode",
+      category: Category::Encoding, direction: Direction::Encode,
+      description: "RFC 2047 UTF-8 encoded-word (Base64, folds at 75 octets)") { |s| Codecs.rfc2047_b_encode(s) }
+    r.register text("rfc2047-q-decode", "encoded-word-q-decode", "mime-word-q-decode",
+      category: Category::Encoding, direction: Direction::Decode,
+      description: "Decode RFC 2047 Q encoded-words (UTF-8, ASCII, Latin-1, Windows-1252)") { |s| Codecs.rfc2047_decode(s, 'Q'.ord.to_u8) }
+    r.register text("rfc2047-b-decode", "encoded-word-b-decode", "mime-word-b-decode",
+      category: Category::Encoding, direction: Direction::Decode,
+      description: "Decode RFC 2047 Base64 encoded-words (UTF-8, ASCII, Latin-1, Windows-1252)") { |s| Codecs.rfc2047_decode(s, 'B'.ord.to_u8) }
+    r.register text("rfc2047-decode", "encoded-word-decode", "mime-word-decode",
+      category: Category::Encoding, direction: Direction::Decode,
+      description: "Decode RFC 2047 Q/Base64 encoded-words (UTF-8, ASCII, Latin-1, Windows-1252)") { |s| Codecs.rfc2047_decode(s) }
+
+    # ---------------- ENCODING: lossy security transforms ----------------
+    r.register Converter.new("codepoint-overflow", ["mod-256", "unicode-overflow"],
+      Category::Encoding, Direction::Encode,
+      "Map each Unicode codepoint to its low byte (mod 256)",
+      ->(input : Bytes) { Codecs.codepoint_overflow(input) })
+    Codecs::WINDOWS_BESTFIT_CODE_PAGES.each do |code_page|
+      r.register(windows_bestfit_converter(code_page))
+    end
 
     # ---------------- ENCODING: number bases (byte-oriented, space-separated) ----------------
     r.register encode("decimal-encode", "decimal", "to-decimal", "dec",
