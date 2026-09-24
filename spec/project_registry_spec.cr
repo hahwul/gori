@@ -368,6 +368,14 @@ describe Gori::ProjectRegistry do
       end
     end
   end
+
+  it "strips boundary whitespace before rejecting internal name controls" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      reg.create("demo\n").name.should eq("demo")
+      expect_raises(Gori::Error, /control characters/) { reg.create("de\nmo") }
+    end
+  end
 end
 
 describe Gori::Session do

@@ -74,8 +74,16 @@ module Gori
       end
 
       def import_into(registry : ProjectRegistry, name : String? = nil) : Project
+        override = name.presence
+        using_archive_name = override.nil? || override == @manifest.project_name
         raise Gori::Error.new("project archive is already closed") if @closed
-        registry.import_database(name.presence || @manifest.project_name, @database_path)
+        registry.import_database(override || @manifest.project_name, @database_path)
+      rescue ex : Gori::Error
+        if using_archive_name && ex.message.to_s.includes?("control characters")
+          raise Gori::Error.new("archive project name contains control characters; provide an explicit safe project name " \
+                                "with `--name NAME` or choose one in the project picker")
+        end
+        raise ex
       end
 
       def close : Nil

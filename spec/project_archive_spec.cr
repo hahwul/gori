@@ -366,8 +366,15 @@ describe Gori::ProjectArchive do
 
       prepared = Gori::ProjectArchive.prepare_import(archive_path)
       begin
-        expect_raises(Gori::Error, /control characters/) { prepared.import_into(registry) }
-        registry.list.map(&.name).should eq([project.name])
+        error = expect_raises(Gori::Error, /control characters/) { prepared.import_into(registry) }
+        error.message.not_nil!.should contain("provide an explicit safe project name")
+        prefilled_error = expect_raises(Gori::Error) do
+          prepared.import_into(registry, prepared.manifest.project_name)
+        end
+        prefilled_error.message.not_nil!.should contain("project picker")
+        imported = prepared.import_into(registry, "Recovered copy")
+        imported.name.should eq("Recovered copy")
+        registry.list.map(&.name).sort!.should eq(["Recovered copy", project.name].sort!)
       ensure
         prepared.close
       end

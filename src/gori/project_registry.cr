@@ -577,13 +577,14 @@ module Gori
     # bytes once for every write path so a manifest cannot install ANSI/OSC controls either.
     private def validated_display_name(name : String) : String
       raise Gori::Error.new(INVALID_UTF8_NAME) unless name.valid_encoding?
-      if name.each_char.any? do |char|
+      display = name.strip
+      if display.each_char.any? do |char|
            code = char.ord
            code < 0x20 || (code >= 0x7f && code <= 0x9f)
          end
         raise Gori::Error.new("invalid project name: control characters are not allowed")
       end
-      name.strip
+      display
     end
 
     # Slugify a display name into a safe directory name. gsub removes path
