@@ -102,6 +102,11 @@ module Gori
             scope_unconfigured = true
           end
         end
+        # `hide_static` opt-in: `QL.hide_static`, the lens the TUI's hide-static toggle and
+        # `gori run history --hide-static` AND in — images, fonts and media left out. Explicit,
+        # never the TUI's persisted toggle, for `in_scope`'s reason.
+        hide_static = bool_arg(h, "hide_static", false)
+        filter = QL.and(filter, QL.hide_static) if hide_static
         # User-defined columns (#819): the values QL can filter on but never show — a header, a
         # JSON field, a regex capture, per row. OPT-IN and never the project's configured set,
         # unlike `gori run history`: a per-row block an agent did not ask for is paid for on
@@ -125,8 +130,8 @@ module Gori
         # A named set is not a page: it has no cursor, no `limit` and no `has_more`, and its
         # short answers have to name themselves. Branches here rather than earlier so `query`,
         # `view` and `in_scope` are already compiled — they still narrow WITHIN the set.
-        return emit_history_ids(ids, filter, query, view_filter, in_scope, scope_unconfigured,
-          prepared, h) if ids
+        return emit_history_ids(ids, filter, query, view_filter, in_scope || hide_static,
+          scope_unconfigured, prepared, h) if ids
         # One row OVER the page, then dropped. The pagination contract was documented and
         # correct ("a page shorter than `limit` means no older rows") but it was an INFERENCE
         # the caller had to make and then act on with a second call: a query matching 51 flows
@@ -137,10 +142,11 @@ module Gori
         rows =
           if scope_unconfigured
             [] of Store::FlowRow
-          elsif (query && !query.strip.empty?) || in_scope || view_filter != QL::EMPTY
+          elsif (query && !query.strip.empty?) || in_scope || hide_static || view_filter != QL::EMPTY
             # `view_filter` belongs in this condition and not only in the AND above: without it a
             # `view` with no `query` and no `in_scope` falls through to `recent_flows`, which
             # takes no filter at all — the call would accept the view and return everything.
+            # `hide_static` likewise.
             store.search(filter, fetch, before_id, since_id)
           else
             store.recent_flows(fetch, before_id, since_id)
@@ -185,11 +191,12 @@ module Gori
       #     Two narrowings are two narrowings, the same rule `view` already carries — but a
       #     narrowing that removed part of the operator's selection has to say so.
       #   * `limit_ignored` — the caller passed a page size to a call that is not a page.
+      # `lensed` is whether a boolean lens (`in_scope`, `hide_static`) narrowed the filter.
       private def emit_history_ids(ids : Array(Int64), filter : QL::Filter, query : String?,
-                                   view_filter : QL::Filter, in_scope : Bool,
+                                   view_filter : QL::Filter, lensed : Bool,
                                    scope_unconfigured : Bool,
                                    prepared : Gori::DisplayColumns::Prepared, h) : Result
-        narrowed = (query && !query.strip.empty?) || in_scope || view_filter != QL::EMPTY
+        narrowed = (query && !query.strip.empty?) || lensed || view_filter != QL::EMPTY
         found = store.flow_rows(ids)
         by_id = {} of Int64 => Store::FlowRow
         found.each { |r| by_id[r.id] = r }
@@ -229,7 +236,7 @@ module Gori
             unless filtered_out.empty?
               j.field "filtered_out_ids", filtered_out
               j.field "filtered_out_note",
-                scope_unconfigured ? "in_scope:true with no scope rules configured excludes every flow — add_scope_rule, or drop in_scope" : "#{filtered_out.size} of the ids exist but were excluded by 'query'/'view'/'in_scope' — " \
+                scope_unconfigured ? "in_scope:true with no scope rules configured excludes every flow — add_scope_rule, or drop in_scope" : "#{filtered_out.size} of the ids exist but were excluded by 'query'/'view'/'in_scope'/'hide_static' — " \
                                                                                                                                              "drop the narrowing to see them"
             end
             j.field "flows" do
@@ -582,7 +589,7 @@ module Gori
             "`limit`, `before_id` and `since` do not apply — the list IS the page, and the two " \
             "cursors are refused beside it. An id with no row is REPORTED in `missing_ids`, never " \
             "dropped: flow ids are REUSED after a delete, so re-read the set from " \
-            "get_current_context rather than replaying a remembered one. `query`/`view`/`in_scope` " \
+            "get_current_context rather than replaying a remembered one. `query`/`view`/`in_scope`/`hide_static` " \
             "still narrow WITHIN the set, and what they removed comes back as `filtered_out_ids` — " \
             "so a short answer always says which kind of short it is. " \
             "At most #{MCP_HISTORY_IDS_MAX} ids per call")
@@ -591,6 +598,7 @@ module Gori
           s.field "since", intprop("forward cursor: tail NEWER — only flows with id > this, oldest-first (mutually exclusive with before_id)")
           s.field "view", strprop("apply a saved History view by name (list_views) — its query is ANDed OVER `query`, never replacing it, the same way the TUI's `v` picker layers over the filter bar. Built-ins: All, History (src:proxy), 'History + Repeater'. An unknown name is refused rather than ignored")
           s.field "in_scope", boolprop("only flows in the project's configured scope (the TUI `s` lens; capture still records everything). Empty result when no scope rules exist. Default false. For finer control use the QL terms `scope:in` / `scope:out` in `query`, which negate and group like any other term (ql_explain reports whether the project has scope rules at all)")
+          s.field "hide_static", boolprop("leave out static assets — images, fonts, audio/video (not svg/css/js, never a status >= 400); the TUI's hide-static lens, same as the QL term `-static:true`. Default false, and independent of whether the operator has the lens on in the TUI")
           s.field "strict", boolprop("reject the query if any term is unrecognized/invalid instead of silently dropping it (default false; use ql_explain to see which terms would drop)")
           s.field "lenient", boolprop("search a `field:` QL does not implement as literal TEXT instead of refusing the query (default false). A typo like `methd:GET` free-texts its whole token and therefore matches nothing, which is indistinguishable from an empty project — so it is refused by default, the way `gori run history --lenient` spells the same escape hatch. `strict` is the other half and covers dropped terms, not unknown fields")
           s.field "columns", strarrprop("extract a value out of each returned flow and carry it on the row under `columns` — what QL can FILTER on but never shows. Each spec is [LABEL=][req|res:]kind:selector, kind being cookie|header|regex|position|jsonpath: e.g. \"header:x-request-id\", \"req:header:authorization\", \"RID=jsonpath:data.id\", \"regex:token=(\\w+)\", \"position:0:32\". Side defaults to the RESPONSE; a label defaults to the selector. A descriptor that matches nothing yields \"\" — an empty string is a MISS, not an empty value. Costs one extra read per row (and, for the three body-scoped kinds, up to 512 KiB of body each), so ask only for what you will read")

@@ -26,6 +26,7 @@ gori에는 플로우를 걸러내는 작은 쿼리 언어(QL)가 있습니다. �
 | `header` | 헤드(요청 + 응답 헤더) 부분 문자열 |
 | `body` | 본문 전문 검색(trigram FTS 인덱스) |
 | `stub` | `true` / `false`. 원본에 닿지 않고 [short-circuit 규칙](/ko/guide/proxy/#short-circuit)이 gori 자신이 답한 플로우 |
+| `static` | `true` / `false`. 이미지, 폰트, 오디오·비디오. 응답 Content-Type으로 판단하고, 없으면 경로 확장자를 봅니다. SVG·CSS·JS는 제외하고, 상태 코드가 400 이상이면 해당하지 않습니다. `-static:true`가 [정적 에셋 숨기기 렌즈](/ko/guide/proxy/#hide-static)입니다 |
 | `scope` | `in` / `out`. 프로젝트 스코프 규칙([아래](#scope-in-scope-out)) |
 
 ```text

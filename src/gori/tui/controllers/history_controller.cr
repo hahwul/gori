@@ -957,6 +957,7 @@ module Gori::Tui
       j.field "query", @history.query unless @history.query.blank?
       @history.active_view.try { |v| j.field "view", v.name }
       j.field "scope_lens", @host.session.scope.active?
+      j.field "hide_static", @history.hide_static? # list_history's own argument name
     end
 
     def mcp_mark_count : Int32

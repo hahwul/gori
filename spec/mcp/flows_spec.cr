@@ -125,6 +125,27 @@ describe Gori::MCP::Server do
       end
     end
 
+    it "hide_static leaves out images, fonts and media, and composes with the rest" do
+      with_store do |store|
+        api = mcp_seed_flow(store, "a.test", "GET", "/api/me", 200, content_type: "application/json")
+        mcp_seed_flow(store, "a.test", "GET", "/logo", 200, content_type: "image/png")
+        mcp_seed_flow(store, "a.test", "GET", "/f.woff2", 304) # no Content-Type: by extension
+        gone = mcp_seed_flow(store, "a.test", "GET", "/gone.png", 404, content_type: "image/png")
+
+        call = ->(args : String) {
+          req = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_history","arguments":#{args}}})
+          mcp_tool_payload(mcp_drive(store, req)[0])
+        }
+        call.call(%({})).["flows"].as_a.size.should eq(4)
+        call.call(%({"hide_static":true})).["flows"].as_a.map(&.["id"].as_i64).should eq([gone, api])
+        call.call(%({"hide_static":true,"query":"status:200"})).["flows"].as_a.map(&.["id"].as_i64).should eq([api])
+        # An explicit id set is narrowed too, and says what did it.
+        named = call.call(%({"hide_static":true,"ids":[#{api},#{api + 1}]}))
+        named["filtered_out_ids"].as_a.map(&.as_i64).should eq([api + 1])
+        named["filtered_out_note"].as_s.should contain("hide_static")
+      end
+    end
+
     it "in_scope composes with a QL query" do
       with_store do |store|
         mcp_seed_flow(store, "alpha.test", "GET", "/a", 200)
@@ -414,6 +435,16 @@ describe Gori::MCP::Server do
         collapsed.size.should eq(1) # merged to one host/method/target
         collapsed[0].as_h.has_key?("scheme").should be_false
       end
+    end
+  end
+
+  it "list_sitemap hide_static leaves static endpoints out of the map" do
+    with_store do |store|
+      mcp_seed_flow(store, "a.test", "GET", "/api/me", 200, content_type: "application/json")
+      mcp_seed_flow(store, "a.test", "GET", "/logo.png", 200, content_type: "image/png")
+      req = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_sitemap","arguments":{"hide_static":true}}})
+      entries = mcp_tool_payload(mcp_drive(store, req)[0])["entries"].as_a
+      entries.map(&.["target"].as_s).should eq(["/api/me"])
     end
   end
 

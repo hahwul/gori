@@ -26,6 +26,7 @@ Match a field with `field:value` (substring or exact, depending on the field):
 | `header` | Substring over the head (request + response headers) |
 | `body` | Full-text match over bodies (trigram FTS index) |
 | `stub` | `true` / `false`. Flows gori answered itself from a [short-circuit rule](/guide/proxy/#short-circuit), with no origin involved |
+| `static` | `true` / `false`. Images, fonts and audio/video, by response Content-Type (by path extension when there is none). Not SVG, CSS or JS, and never a status of 400 or above. `-static:true` is the [hide-static lens](/guide/proxy/#hide-static) |
 | `scope` | `in` / `out`. The project's scope rules ([below](#scope-in-scope-out)) |
 
 ```text

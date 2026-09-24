@@ -360,6 +360,7 @@ module Gori
         format = :text
         lenient = false
         in_scope = false
+        hide_static = false
         include_sensitive = false
         view_name : String? = nil
         column_specs = [] of String
@@ -376,6 +377,7 @@ module Gori
           p.on("-nN", "--limit=N", "Max rows, newest first (default 50)") { |v| limit = parse_count(v, "--limit") }
           p.on("--view=NAME", "Apply a saved History view — ANDed with -q, like the TUI's `v` picker (see `gori run views`)") { |v| view_name = v }
           p.on("--in-scope", "Only flows in the project's configured scope (the TUI's `s` lens; capture still records everything)") { in_scope = true }
+          p.on("--hide-static", "Leave out static assets — images, fonts, media (the TUI's hide-static lens; same as -q -static:true)") { hide_static = true }
           p.on("--lenient", "Don't refuse a query naming an unknown field — search that token as text (old behaviour)") { lenient = true }
           p.on("--column=SPEC", "Show an extracted value per row: [LABEL=][req|res:]kind:selector — e.g. header:x-request-id, RID=jsonpath:data.id, position:0:32 (repeatable; replaces this project's configured History columns)") { |v| column_specs << v }
           p.on("--no-columns", "Don't draw this project's configured History columns (see the TUI's Columns… on the History tab)") { no_columns = true }
@@ -488,6 +490,11 @@ module Gori
             view_label = view.name if view.narrowing?
           end
 
+          # `--hide-static`: the one compiled spelling every surface ANDs (`QL.hide_static`). Like
+          # `--in-scope`, explicit — never read from the TUI's persisted toggle, so a script's
+          # answer does not change because somebody pressed a key in the TUI.
+          static_filter = hide_static ? QL.hide_static : QL::EMPTY
+
           scope_unconfigured = false
           scope_filter = QL::EMPTY
           if in_scope
@@ -516,7 +523,7 @@ module Gori
                 store.close
                 abort "gori run history: query #{q.inspect} did not match any field (check syntax, e.g. status:>=500 host:example.com method:POST)"
               end
-              combined = QL.and(QL.and(scope_filter, view_filter), filter)
+              combined = QL.and(QL.and(QL.and(scope_filter, view_filter), static_filter), filter)
               # Trigram indexing is off-commit (Store V4), so a `body:`/free-text query run
               # right after a capture — or against a db a killed process left behind — would
               # under-report until the backlog drains. A one-shot answer must be exact, so
@@ -536,12 +543,12 @@ module Gori
                 store.close
                 abort "gori run history: query #{q.inspect} failed: #{ex.message}"
               end
-            elsif in_scope || view_filter != QL::EMPTY
+            elsif in_scope || view_filter != QL::EMPTY || hide_static
               # `view_filter` belongs in this condition and not only in the AND above: without
               # it a `--view` with no `-q` and no `--in-scope` falls through to `recent_flows`,
               # which takes no filter at all — the command would accept the view and list
               # everything.
-              combined = QL.and(scope_filter, view_filter)
+              combined = QL.and(QL.and(scope_filter, view_filter), static_filter)
               # Same drain-or-refuse the query branch runs, for the same reason: a view is free
               # to use `body:`, and this listing IS the answer.
               if err = fts_backlog_error(store, combined,
@@ -556,7 +563,7 @@ module Gori
                 store.search(combined, limit_probe(limit), raise_on_error: true)
               rescue ex
                 store.close
-                abort "gori run history: view #{view_name.inspect} failed: #{ex.message}"
+                abort "gori run history: #{view_name ? "view #{view_name.inspect}" : "listing"} failed: #{ex.message}"
               end
             else
               store.recent_flows(limit_probe(limit))
@@ -602,7 +609,7 @@ module Gori
             # traffic" and "a standing --view/--in-scope lens excluded all of it" read identically
             # to the one consumer that cannot see the flags it was invoked with. STDOUT stays a
             # pure stream either way (this is STDERR), so a pipe is unaffected.
-            STDERR.puts empty_listing_note(query, view_label, in_scope) if rows.empty?
+            STDERR.puts empty_listing_note(query, view_label, in_scope, hide_static) if rows.empty?
             # One extra read per row for the head the projection does not carry — that is what
             # buys `url` and `headers` on the JSON-Lines row (`Output.flow_row_fields`). Heads
             # are small and this streams row by row, so a large `-n` costs queries, not memory.
@@ -612,7 +619,7 @@ module Gori
                 include_sensitive: include_sensitive, columns_redacted: cols_redacted)
             end
           elsif rows.empty?
-            STDERR.puts empty_listing_note(query, view_label, in_scope)
+            STDERR.puts empty_listing_note(query, view_label, in_scope, hide_static)
           else
             (note = history_truncation_note(truncated, limit)) && STDERR.puts("gori run history: #{note}")
             # `include_sensitive: true` on purpose — the text listing is out of #1002's scope
@@ -676,10 +683,12 @@ module Gori
       #
       # Public for the reason `view_row` is: the command ends in `exit`, so the printed shape is
       # the only part of it a spec can pin.
-      def self.empty_listing_note(query : String?, view : String?, in_scope : Bool) : String
+      def self.empty_listing_note(query : String?, view : String?, in_scope : Bool,
+                                  hide_static : Bool = false) : String
         scoped = in_scope ? " in scope" : ""
         viewed = view ? " in the #{view.inspect} view" : ""
-        "no flows#{query ? " match #{query.inspect}" : ""}#{scoped}#{viewed}"
+        static = hide_static ? " (static assets hidden)" : ""
+        "no flows#{query ? " match #{query.inspect}" : ""}#{scoped}#{viewed}#{static}"
       end
 
       # The sentence a listing cut by `--limit` prints, or nil when the page WAS the whole

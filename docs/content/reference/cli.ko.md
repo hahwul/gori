@@ -196,6 +196,7 @@ gori run history -q 'status:5xx' --limit 100 --format json
 | `-n`, `--limit=N` | 최대 행 수 (기본값 50) |
 | `--view=NAME` | 저장된 [뷰](#run-views)를 적용합니다. 그 쿼리는 `-q`를 **대체하지 않고 AND로** 얹힙니다. TUI의 `v` 피커가 필터 바 위에 얹히는 것과 같습니다. 없는 이름은 무시하지 않고 거절하며(있는 이름들을 알려 줍니다), 목록에서만 씁니다 |
 | `--in-scope` | 프로젝트에 설정된 스코프 안의 플로우만 출력합니다. TUI의 `s` 렌즈로, 옵트인이며 그 렌즈의 활성화 여부와 무관합니다. 캡처는 여전히 전부 기록하며, 스코프 규칙이 없으면 빈 결과 |
+| `--hide-static` | 이미지, 폰트, 오디오·비디오를 뺍니다. TUI의 [정적 에셋 숨기기 렌즈](/ko/guide/proxy/#hide-static)로, `-q -static:true`와 같고 그 렌즈가 켜져 있는지와는 무관합니다 |
 | `--lenient` | 없는 필드 이름을 쓴 쿼리를 거절하지 않고 그 토큰을 텍스트로 검색 |
 | `--column=SPEC` | 행마다 추출한 값을 함께 출력합니다 (반복 가능). `[LABEL=][req\|res:]kind:selector` 형식으로, 예: `header:x-request-id`, `RID=req:header:authorization`, `jsonpath:data.id`, `regex:token=(\w+)`, `position:0:32`. `--column`을 하나라도 주면 이 프로젝트에 설정된 [History 컬럼](/ko/guide/proxy/#columns)을 **대체**합니다 |
 | `--no-columns` | 이 프로젝트에 설정된 History 컬럼을 그리지 않습니다 |
@@ -785,7 +786,7 @@ gori run import --postman api.postman_collection.json --db ./assessment.db --for
 gori run sitemap --in-scope --format paths
 ```
 
-`-q`/`--query=QL`는 history와 같은 QL로 엔드포인트를 거릅니다(위치 인자로도 넘길 수 있습니다). `-n`/`--limit=N`은 스캔할 엔드포인트 수를 제한합니다(기본값 `SITEMAP_MAX`). `--in-scope`는 스코프 내 호스트로 한정하고, `--no-group`은 id 접기를, `--no-fold-query`는 쿼리 문자열 접기를 끕니다(서로 다른 축입니다). `--format`은 `text`(트리), `json`, `paths` 중에서 고릅니다. `--lenient`는 없는 필드 이름을 쓴 쿼리를 거절하지 않고 받아들입니다.
+`-q`/`--query=QL`는 history와 같은 QL로 엔드포인트를 거릅니다(위치 인자로도 넘길 수 있습니다). `-n`/`--limit=N`은 스캔할 엔드포인트 수를 제한합니다(기본값 `SITEMAP_MAX`). `--in-scope`는 스코프 내 호스트로 한정하고, `--hide-static`은 이미지·폰트·오디오·비디오를 뺍니다(TUI 트리처럼 플로우 단위). `--no-group`은 id 접기를, `--no-fold-query`는 쿼리 문자열 접기를 끕니다(서로 다른 축입니다). `--format`은 `text`(트리), `json`, `paths` 중에서 고릅니다. `--lenient`는 없는 필드 이름을 쓴 쿼리를 거절하지 않고 받아들입니다.
 
 **`sitemap tag`**: 경로 하나에 자유 텍스트 메모를 고정합니다. TUI Sitemap에 보이는 그 메모입니다.
 
