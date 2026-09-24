@@ -64,6 +64,15 @@ module Gori
         Verb::Scope::Body, [Verb::Chord.new("v")],
         available: in_history, mnemonic: 'v', group: :view) { |ctx| ctx.history_view_pick; nil }
 
+      # The hide-static lens (#1239) — images, fonts and media folded out of the list, over
+      # whichever view is on. Menu-only, NO chord: it is flipped once per engagement and left,
+      # the L3 shape `f` (follow) settled into, and its first door is the `v` picker's top row.
+      # `V` beside `v` because the two are the same question — what am I looking at — and `V` is
+      # free across Scope::Body.
+      r.register Verb::Definition.new(
+        "history.toggle-static", "Toggle static assets", "Hide images, fonts and media from the list on/off (shared with the Sitemap)",
+        Verb::Scope::Body, available: in_history, mnemonic: 'V', group: :view) { |ctx| ctx.toggle_static_assets; nil }
+
       # Menu-only, no chord. A column set is arranged ONCE and then read for the rest of the
       # engagement — the opposite shape from `v`, which is flipped many times an hour and earns
       # its bare key on that traffic. `C` is free across Body COMMON (the only other 'C' in the

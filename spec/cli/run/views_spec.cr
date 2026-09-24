@@ -115,6 +115,13 @@ describe "gori run history — the empty-listing sentence" do
       .should eq(%(no flows match "status:200" in scope in the "Errors" view))
   end
 
+  it "names --hide-static, which can empty a listing on its own" do
+    Gori::CLI::Run.empty_listing_note(nil, nil, false, true)
+      .should eq("no flows (static assets hidden)")
+    Gori::CLI::Run.empty_listing_note("host:cdn", nil, true, true)
+      .should eq(%(no flows match "host:cdn" in scope (static assets hidden)))
+  end
+
   it "stays quiet about All, which excluded nothing" do
     # The caller passes nil for a non-narrowing view. Naming it would send an operator looking
     # at a lens that had no part in the answer.
@@ -124,6 +131,7 @@ describe "gori run history — the empty-listing sentence" do
 
   it "names both lenses on an empty HAR too" do
     Gori::CLI::Run.empty_har_note(nil, nil).should eq("no flows written to the HAR")
+    Gori::CLI::Run.empty_har_note(nil, nil, true).should eq("no flows written to the HAR (static assets hidden)")
     Gori::CLI::Run.empty_har_note("status:200", "Errors")
       .should eq(%(no flows written to the HAR (query "status:200", view "Errors")))
     Gori::CLI::Run.empty_har_note(nil, "Errors")

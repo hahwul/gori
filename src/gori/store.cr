@@ -1704,7 +1704,7 @@ module Gori
       end
       return ids if ids.empty?
       conn.exec(
-        "UPDATE flows SET state = ?, error = ?, status = 0 WHERE state = ? AND unsent = 0",
+        "UPDATE flows SET state = ?, error = ?, status = 0, static_asset = 0 WHERE state = ? AND unsent = 0",
         FlowState::Error.value, message, FlowState::Pending.value)
       ids
     end
@@ -1895,13 +1895,16 @@ module Gori
       args << req.source.token
       args << req.source_surface.try(&.token)
       args << req.source_ref
+      # The hide-static lens's column (V31), for a row with no response yet: the path's
+      # extension is all there is. `update_one` decides again when the response lands.
+      args << (StaticAsset.static?(nil, req.target, nil) ? 1 : 0)
       res = conn.exec(
         "INSERT INTO flows " \
         "(created_at, scheme, host, port, method, target, http_version, " \
         " sni, alpn, tls_version, request_head, request_body, request_size, state, " \
         " h2_conn_id, h2_stream_id, request_body_truncated, unsent, short_circuited, advisory, " \
-        " request_content_type, connect_protocol, source, source_surface, source_ref, fts_dirty) " \
-        "VALUES (?,?,?,?,?,?,?,?,?,?,#{head_slot},?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)", args: args)
+        " request_content_type, connect_protocol, source, source_surface, source_ref, static_asset, fts_dirty) " \
+        "VALUES (?,?,?,?,?,?,?,?,?,?,#{head_slot},?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)", args: args)
       # The INSERT's own result carries the rowid — no separate `SELECT last_insert_rowid()`.
       # No flows_fts write here: `fts_dirty = 1` hands the trigram work to the off-commit
       # indexer, so a capture commit no longer pays for tokenization (see V4 / await_op).
@@ -1924,13 +1927,16 @@ module Gori
             -- side may already have written an advisory on this row and a bare `advisory = ?`
             -- would erase it. COALESCE keeps whatever is stored when the DTO carries nothing.
             advisory = COALESCE(?, advisory),
+            -- The hide-static lens's column (V31), decided once here from the values just
+            -- bound and the row's own target, rather than per row on every read.
+            static_asset = gori_static_asset(?, target, ?),
             fts_dirty = 1
           WHERE id = ?
           SQL
         resp.head, resp.body, resp.status, resp.reason, resp.content_type,
         response_size,
         resp.state.value, resp.ttfb_us, resp.duration_us, resp.error,
-        resp.body_truncated? ? 1 : 0, resp.advisory, resp.flow_id)
+        resp.body_truncated? ? 1 : 0, resp.advisory, resp.content_type, resp.status, resp.flow_id)
       # `fts_dirty = 1` again: the response side just appeared (or changed), so whatever the
       # indexer wrote for this row is stale. Re-dirtying an already-dirty row is a no-op, so
       # the common case — response landing before the indexer ever reached the row — is

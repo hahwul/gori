@@ -13,6 +13,7 @@ module Gori::Tui
       super(host)
       @sitemap = SitemapView.new
       @sitemap.set_scope(@host.session.scope) # honour the lens + show its chip on the bar
+      @sitemap.set_hide_static(StaticAsset.hidden?(@host.session.store))
       @query_reload_at = nil.as(Time::Instant?)
       # The `/` bar's reload off the main fiber (the History #967 shape): one running read
       # and one replaceable request. A superseded read is cancelled and its answer dropped
@@ -20,7 +21,7 @@ module Gori::Tui
       @search_generation = 0_i64
       @search_control = nil.as(Store::QueryControl?)
       @search_pending = nil.as({Store, SitemapView::ReloadPlan, Int64}?)
-      @search_results = Channel({Int64, SitemapView::ReloadPlan, {Array({String, String, String}), Hash({String, String}, String)}?}).new(1)
+      @search_results = Channel({Int64, SitemapView::ReloadPlan, SitemapView::Fetched?}).new(1)
     end
 
     def view : SitemapView
@@ -153,8 +154,9 @@ module Gori::Tui
       return false if @sitemap.tagging?
       if chip = @sitemap.ql_chip_at(content, mx, my)
         case chip
-        when :scope then @host.toggle_scope_lens
-        when :fold  then sitemap_toggle_grouping
+        when :scope  then @host.toggle_scope_lens
+        when :fold   then sitemap_toggle_grouping
+        when :static then @host.toggle_static_assets
         end
         return true
       end
@@ -202,6 +204,13 @@ module Gori::Tui
       reload
     end
 
+    # Every reload re-reads the hide-static lens from the project, so a peer's flip (another
+    # gori on this project) lands with the next tick rather than at restart — History does the
+    # same on entry and on an external change (#1239).
+    private def sync_hide_static : Nil
+      @sitemap.set_hide_static(StaticAsset.hidden?(@host.session.store))
+    end
+
     # Re-derive the tree from the store under the current scope filter + `/` query
     # (both held by the view). Public so the scope-lens toggle (a cross-tab action
     # mediated by the shell) can refresh it.
@@ -210,6 +219,7 @@ module Gori::Tui
     # query's tree.
     def reload : Nil
       invalidate_search
+      sync_hide_static
       @sitemap.searching = false
       @sitemap.reload(@host.session.store)
     end
@@ -242,7 +252,7 @@ module Gori::Tui
       results = @search_results
       view = @sitemap
       spawn(name: "gori-sitemap-search") do
-        result = nil.as({Array({String, String, String}), Hash({String, String}, String)}?)
+        result = nil.as(SitemapView::Fetched?)
         begin
           control.check!
           result = view.fetch_reload(store, plan, control)
@@ -264,7 +274,7 @@ module Gori::Tui
         generation, plan, result = done
         if generation == @search_generation
           @sitemap.searching = false
-          @sitemap.apply_reload(result[0], result[1], plan) if result
+          @sitemap.apply_reload(result[0], result[1], plan, result[2]) if result
         end
         start_search
         true

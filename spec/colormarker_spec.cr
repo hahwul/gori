@@ -494,7 +494,7 @@ describe Gori::Colormarker do
         value = case field
                 when "status", "size", "reqsize", "respsize", "dur" then "1"
                 when "proto"                                        then "ws"
-                when "stub"                                         then "true"
+                when "stub", "static"                               then "true"
                 when "scope"                                        then "in"
                 when "src"                                          then "repeater"
                 when "cache"                                        then "hit"

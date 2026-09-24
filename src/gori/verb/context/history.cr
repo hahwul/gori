@@ -31,6 +31,7 @@ abstract class Gori::Verb::ExecContext
   abstract def copy_selection : Nil
   abstract def history_query : Nil        # focus the QL filter bar
   abstract def history_view_pick : Nil    # open the view picker (#776)
+  abstract def toggle_static_assets : Nil # hide/show static assets in History + Sitemap (#1239)
   abstract def history_columns_edit : Nil # open the user-defined column editor (#819)
   # Fetch the selected flow's target schema by gRPC server reflection (#827). An OUTBOUND
   # request, made only here — never on capture and never on opening a flow (P4).

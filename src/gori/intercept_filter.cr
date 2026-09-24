@@ -220,6 +220,8 @@ module Gori
         "an exchange that has not finished has no size or duration yet"
       when "stub"
         "whether a body was stored is a CAPTURE decision, made after this gate"
+      when "static"
+        "a static asset is judged from the finished response's Content-Type and status"
       when "src"
         "a flow's source is recorded when it is captured, not while it is in flight"
       when "cache"
@@ -357,9 +359,9 @@ module Gori
       when "scope"  then QL::SCOPE_VALUES
       when "src"    then QL::SOURCE_VALUES
       when "proto"  then rows ? QL::PROTO_VALUES : PROTO_VAL
-      when "stub", "cache" # row-backed ONLY (see the note above); a hold gate never reaches them
+      when "stub", "static", "cache" # row-backed ONLY (see the note above); a hold gate never reaches them
         return nil unless rows
-        field == "stub" ? QL::STUB_VALUES : QL::CACHE_VALUES
+        field == "cache" ? QL::CACHE_VALUES : QL::FLAG_VALUES
       end
     end
 

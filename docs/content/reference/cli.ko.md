@@ -197,6 +197,7 @@ gori run history -q 'status:5xx' --limit 100 --format json
 | `-n`, `--limit=N` | 최대 행 수 (기본값 50) |
 | `--view=NAME` | 저장된 [뷰](#run-views)를 적용합니다. 그 쿼리는 `-q`를 **대체하지 않고 AND로** 얹힙니다. TUI의 `v` 피커가 필터 바 위에 얹히는 것과 같습니다. 없는 이름은 무시하지 않고 거절하며(있는 이름들을 알려 줍니다), 목록에서만 씁니다 |
 | `--in-scope` | 프로젝트에 설정된 스코프 안의 플로우만 출력합니다. TUI의 `s` 렌즈로, 옵트인이며 그 렌즈의 활성화 여부와 무관합니다. 캡처는 여전히 전부 기록하며, 스코프 규칙이 없으면 빈 결과 |
+| `--hide-static` | 이미지, 폰트, 오디오·비디오를 뺍니다. TUI의 [정적 에셋 숨기기 렌즈](/ko/guide/proxy/#hide-static)로, `-q -static:true`와 같고 그 렌즈가 켜져 있는지와는 무관합니다 |
 | `--lenient` | 없는 필드 이름을 쓴 쿼리를 거절하지 않고 그 토큰을 텍스트로 검색 |
 | `--column=SPEC` | 행마다 추출한 값을 함께 출력합니다 (반복 가능). `[LABEL=][req\|res:]kind:selector` 형식으로, 예: `header:x-request-id`, `RID=req:header:authorization`, `jsonpath:data.id`, `regex:token=(\w+)`, `position:0:32`. `--column`을 하나라도 주면 이 프로젝트에 설정된 [History 컬럼](/ko/guide/proxy/#columns)을 **대체**합니다 |
 | `--no-columns` | 이 프로젝트에 설정된 History 컬럼을 그리지 않습니다 |
@@ -808,7 +809,7 @@ gori run import --postman api.postman_collection.json --db ./assessment.db --for
 gori run sitemap --in-scope --format paths
 ```
 
-`-q`/`--query=QL`는 history와 같은 QL로 엔드포인트를 거릅니다(위치 인자로도 넘길 수 있습니다). `-n`/`--limit=N`은 스캔할 엔드포인트 수를 제한합니다(기본값 `SITEMAP_MAX`). `--in-scope`는 스코프 내 호스트로 한정하고, `--no-group`은 id 접기를, `--no-fold-query`는 쿼리 문자열 접기를 끕니다(서로 다른 축입니다). `--format`은 `text`(트리), `json`, `paths` 중에서 고릅니다. `--lenient`는 없는 필드 이름을 쓴 쿼리를 거절하지 않고 받아들입니다.
+`-q`/`--query=QL`는 history와 같은 QL로 엔드포인트를 거릅니다(위치 인자로도 넘길 수 있습니다). `-n`/`--limit=N`은 스캔할 엔드포인트 수를 제한합니다(기본값 `SITEMAP_MAX`). `--in-scope`는 스코프 내 호스트로 한정하고, `--hide-static`은 이미지·폰트·오디오·비디오를 뺍니다(TUI 트리처럼 플로우 단위). `--no-group`은 id 접기를, `--no-fold-query`는 쿼리 문자열 접기를 끕니다(서로 다른 축입니다). `--format`은 `text`(트리), `json`, `paths` 중에서 고릅니다. `--lenient`는 없는 필드 이름을 쓴 쿼리를 거절하지 않고 받아들입니다.
 
 **`sitemap tag`**: 경로 하나에 자유 텍스트 메모를 고정합니다. TUI Sitemap에 보이는 그 메모입니다.
 
@@ -826,7 +827,7 @@ gori run sitemap params 'method:POST' --location json,form --format json
 gori run mine 42 --wordlist <(gori run sitemap params --host api.example.com --format names)
 ```
 
-`-q`/`--query=QL`(위치 인자로도 가능)와 `--in-scope`는 읽을 플로우를 좁힙니다. `history`처럼 플로우 단위로 적용됩니다. `--host`는 정확한 호스트, `--path=PREFIX`는 경로 접두사, `--location=LIST`는 위치를 고릅니다(기본값 전체). 표준 브라우저 헤더는 `--all-headers`를 주지 않으면 빠집니다. `--max-flows=N`은 조건에 맞는 최신 플로우 N개를 읽고(기본값 2000), 더 오래된 플로우를 건너뛰었으면 stderr에 알립니다. 쿠키, 자격 증명 헤더, `password`나 `token`처럼 자격 증명 이름을 가진 필드의 값은 `--include-sensitive`를 주지 않으면 `[REDACTED]`로 출력됩니다. 가리는 기준은 이름과 JWT / 개인 키 형태뿐이라, 다른 이름의 비밀 값(presigned `X-Amz-Signature`, 임의의 `sig=` 등)이나 URL 경로 안의 자격 증명은 그대로 출력됩니다. `--format`은 `text`, `json`, `names` 중에서 고릅니다. `names`는 한 줄에 이름 하나(JSON은 마지막 키 이름, `--location`에 지정하지 않으면 헤더 제외)로, Miner나 Fuzzer 워드리스트로 바로 쓸 수 있습니다.
+`-q`/`--query=QL`(위치 인자로도 가능), `--in-scope`, `--hide-static`은 읽을 플로우를 좁힙니다. `history`처럼 플로우 단위로 적용됩니다. `--host`는 정확한 호스트, `--path=PREFIX`는 경로 접두사, `--location=LIST`는 위치를 고릅니다(기본값 전체). 표준 브라우저 헤더는 `--all-headers`를 주지 않으면 빠집니다. `--max-flows=N`은 조건에 맞는 최신 플로우 N개를 읽고(기본값 2000), 더 오래된 플로우를 건너뛰었으면 stderr에 알립니다. 쿠키, 자격 증명 헤더, `password`나 `token`처럼 자격 증명 이름을 가진 필드의 값은 `--include-sensitive`를 주지 않으면 `[REDACTED]`로 출력됩니다. 가리는 기준은 이름과 JWT / 개인 키 형태뿐이라, 다른 이름의 비밀 값(presigned `X-Amz-Signature`, 임의의 `sig=` 등)이나 URL 경로 안의 자격 증명은 그대로 출력됩니다. `--format`은 `text`, `json`, `names` 중에서 고릅니다. `names`는 한 줄에 이름 하나(JSON은 마지막 키 이름, `--location`에 지정하지 않으면 헤더 제외)로, Miner나 Fuzzer 워드리스트로 바로 쓸 수 있습니다.
 
 ### run oast {#run-oast}
 
@@ -1264,7 +1265,7 @@ gori run colormarker rm 3
 
 **우선순위가 곧 규칙 집합의 의미입니다.** Match & Replace 규칙은 *합성*되어 활성화된 모든 규칙이 순서대로 실행되지만, 색상 규칙은 *해석*됩니다. **첫 번째로 매칭되는 활성 규칙이 행을 칠하고 나머지는 조회조차 되지 않습니다.** `move`가 `rewriter`에는 없고 여기에만 있는 이유입니다. 전역 규칙이 프로젝트 규칙보다 먼저 해석되므로, 상시 정책이 로컬 레이어보다 우선합니다.
 
-`--when`은 **History QL** 조건입니다. 자기가 칠하는 목록 위의 필터 바와 문법도, 필드 집합도, 답도 같으며 `~정규식`과 `AND` / `OR` / `NOT`, `-부정`, `(그룹)`을 모두 포함합니다. 캡처된 행이 스스로 답할 수 있는 항(`host:` `path:` `url:` `method:` `scheme:` `status:` `proto:`)은 쿼리 없이 메모리에서 매칭되고, 나머지(`body:` `header:` `size:` `dur:` `stub:` `src:` `scope:`)는 다시 그릴 때마다 규칙당 한 번의 배치 쿼리로 프로젝트 DB에 대해 해석됩니다. 그냥 두면 조용히 실패할 네 가지가 있어, gori는 거부하거나 경고합니다.
+`--when`은 **History QL** 조건입니다. 자기가 칠하는 목록 위의 필터 바와 문법도, 필드 집합도, 답도 같으며 `~정규식`과 `AND` / `OR` / `NOT`, `-부정`, `(그룹)`을 모두 포함합니다. 캡처된 행이 스스로 답할 수 있는 항(`host:` `path:` `url:` `method:` `scheme:` `status:` `proto:`)은 쿼리 없이 메모리에서 매칭되고, 나머지(`body:` `header:` `size:` `dur:` `stub:` `static:` `src:` `scope:`)는 다시 그릴 때마다 규칙당 한 번의 배치 쿼리로 프로젝트 DB에 대해 해석됩니다. 그냥 두면 조용히 실패할 네 가지가 있어, gori는 거부하거나 경고합니다.
 
 - **`body:`는 여기서 텍스트 인덱스가 아니라 저장된 바이트를 *스캔*합니다.** 그래서 필터 바의 `body:`가 건너뛰는 바이너리 바디까지 닿지만, **각 방향 앞 64 KiB**까지만이고 바이트는 *캡처된 그대로*입니다. 그 경계를 넘어선 매치나 압축된 바디 안의 매치는 칠해지지 않습니다. (경고)
 - **`host:`는 DNS 레이블 글롭이 아니라 부분문자열입니다.** `host:alpha.test`는 `xalpha.test`도 매칭합니다. (경고)

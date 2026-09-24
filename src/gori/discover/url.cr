@@ -1,5 +1,6 @@
 require "uri"
 require "../proxy/codec/http1"
+require "../static_asset"
 
 module Gori::Discover
   # URL parsing, normalization, and the TWO keys that make trap prevention work:
@@ -363,22 +364,17 @@ module Gori::Discover
     # document is itself a finding worth having (an exposed one is the point of the sweep).
     # Only images, fonts, tracks and archives are here, and each of them is a body the crawl
     # downloads in full, fingerprints, and then discards without a single candidate.
-    BINARY_EXT = Set{
-      "jpg", "jpeg", "png", "gif", "bmp", "ico", "cur", "webp", "avif", "tif", "tiff", "heic",
-      "psd", "woff", "woff2", "ttf", "otf", "eot",
-      "mp3", "m4a", "oga", "wav", "flac", "aac", "opus",
-      "mp4", "m4v", "webm", "ogv", "avi", "mov", "mkv", "flv", "wmv",
-      "zip", "gz", "tgz", "bz2", "xz", "7z", "rar", "tar", "jar", "war", "iso", "dmg",
-    }
+    #
+    # The media half is `StaticAsset::MEDIA_EXT` — the same images/fonts/tracks the History
+    # hide-static lens folds away — so the two cannot drift; archives are the crawl's own
+    # addition, since an archive is a finding in History but a dead end for a link crawler.
+    BINARY_EXT = StaticAsset::MEDIA_EXT + StaticAsset::ARCHIVE_EXT
 
     # Does this path end in a `BINARY_EXT`? Asked of a link BEFORE it becomes a request, so
     # the extension is all there is to go on — the content type only arrives with the body
     # this exists to avoid downloading.
     def self.binary_asset?(path : String) : Bool
-      slash = path.rindex('/') || -1
-      dot = path.rindex('.')
-      return false unless dot && dot > slash + 1 && dot < path.size - 1
-      BINARY_EXT.includes?(path[(dot + 1)..].downcase)
+      (ext = StaticAsset.extension(path)) ? BINARY_EXT.includes?(ext) : false
     end
 
     # Answers `s.downcase`, returning `s` ITSELF when lowering it would change nothing — which

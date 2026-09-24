@@ -146,6 +146,7 @@ module Gori
         query : String? = nil
         limit = Store::SITEMAP_MAX
         in_scope = false
+        hide_static = false
         group = true
         fold_query = true
         format = :text
@@ -162,6 +163,7 @@ module Gori
           p.on("-qQL", "--query=QL", "Filter endpoints with a QL query (host: method: path: status: scheme: …)") { |v| query = v }
           p.on("-nN", "--limit=N", "Max distinct endpoints to scan (default #{Store::SITEMAP_MAX})") { |v| limit = parse_count(v, "--limit") }
           p.on("--in-scope", "Only hosts in the project's configured scope") { in_scope = true }
+          p.on("--hide-static", "Leave out static assets — images, fonts, media (the TUI's hide-static lens; same as -q -static:true)") { hide_static = true }
           p.on("--no-group", "Don't fold path-param ids (/users/<uuid>, /users/1,2,3…)") { group = false }
           p.on("--lenient", "Don't refuse a query naming an unknown field — search that token as text (old behaviour)") { lenient = true }
           # A SEPARATE axis from --no-group: query folding is about one endpoint requested
@@ -220,6 +222,10 @@ module Gori
           store.close
           abort "gori run sitemap: #{err}"
         end
+        # `--hide-static` is per-FLOW, unlike `--in-scope` here: it joins the flow filter the tree is
+        # built from, exactly as the TUI's lens joins `flow_filter_of`, so a host survives it with
+        # only its non-static endpoints. Explicit, never read from the TUI's persisted toggle.
+        filter = QL.and(filter, QL.hide_static) if hide_static
         hosts, truncated = begin
           collect_sitemap(store, filter, limit, in_scope, group, fold_query)
         rescue ex
@@ -311,7 +317,7 @@ module Gori
         if format == :json
           puts CLI::Output.sitemap_json(hosts)
         elsif hosts.empty?
-          STDERR.puts "no endpoints (capture some traffic, or relax --in-scope / the query)"
+          STDERR.puts "no endpoints (capture some traffic, or relax --in-scope / --hide-static / the query)"
         elsif format == :paths
           print CLI::Output.sitemap_paths(hosts)
         else

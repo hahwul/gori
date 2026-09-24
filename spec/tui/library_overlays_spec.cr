@@ -219,6 +219,39 @@ describe Gori::Tui::LibraryPicker do
     edited.should eq([-1])
   end
 
+  # The hide-static toggle (#1239) is the view picker's FIRST row, under its own sentinel. There
+  # is no Runner in any spec (it owns a terminal), so the open-site is pinned by reading it —
+  # comments stripped, so a rule's own prose cannot satisfy the check.
+  it "puts the hide-static toggle first on the view picker and routes ↵ on it to the toggle" do
+    code = File.read(File.join(__DIR__, "..", "..", "src", "gori", "tui", "runner", "views.cr"))
+      .lines.reject(&.lstrip.starts_with?('#')).join('\n')
+    Runner::VIEW_ROW_STATIC.should be < 0
+    Runner::VIEW_ROW_STATIC.should_not eq(Runner::VIEW_ROW_SAVE)
+    code.should contain("rows = [LibraryPicker::Row.new(VIEW_ROW_STATIC,")
+    code.should contain("when VIEW_ROW_STATIC then toggle_static_assets")
+    # The rows shift down by one, so the cursor's starting position must too.
+    code.should contain("|| 0) + 1)")
+  end
+
+  # A negative index is an ACTION row (the view picker's hide-static toggle is first on the
+  # card). Typing a name and pressing ↵ is how an entry is picked, so a filter the action row
+  # happens to match must not land the cursor on it: `err` + ↵ is the Errors view, not a flip
+  # of a lens whose detail says "errors stay".
+  it "lands a typed filter on the first library entry, not on an action row that matches" do
+    rows = [LibraryPicker::Row.new(-2, "[ ] Hide static assets", "svg/css/js and errors stay"),
+            LibraryPicker::Row.new(0, "All", "everything"),
+            LibraryPicker::Row.new(1, "Errors", "status:>=400")]
+    lp = LibraryPicker.new("HISTORY VIEW", rows, "view", action: "activate")
+    h = OverlayHarness.new(lp)
+    h.type("err")
+    lp.entry_count.should eq(2)
+    lp.selected_index.should eq(1)
+    # Still first — and still selected — when it is the only match.
+    lp2 = LibraryPicker.new("HISTORY VIEW", rows, "view", action: "activate")
+    OverlayHarness.new(lp2).type("hide")
+    lp2.selected_index.should eq(-2)
+  end
+
   it "does not type ^E into the filter query" do
     lp = LibraryPicker.new("LOAD CHAIN", private_rows, "chain")
     lp.on_edit = ->(_i : Int32) { nil }

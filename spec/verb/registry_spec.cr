@@ -168,6 +168,10 @@ private class FakeContext < ExecContext
     @calls << :history_view_pick
   end
 
+  def toggle_static_assets : Nil
+    @calls << :toggle_static_assets
+  end
+
   def history_columns_edit : Nil
     @calls << :history_columns_edit
   end

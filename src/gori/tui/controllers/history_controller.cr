@@ -21,6 +21,7 @@ module Gori::Tui
       super(host)
       @history = history
       @history.set_scope(@host.session.scope)
+      @history.set_hide_static(StaticAsset.hidden?(@host.session.store))
       @history.set_colormarker(@host.session.colormarker)
       reload_columns
       @query_reload_at = nil.as(Time::Instant?)
@@ -244,6 +245,7 @@ module Gori::Tui
         when :scope  then @host.toggle_scope_lens
         when :follow then toggle_follow
         when :view   then @host.open_history_view_picker
+        when :static then @host.toggle_static_assets
         end
         return true
       end
@@ -567,6 +569,7 @@ module Gori::Tui
       # no status line, and no `●` on any picker row to explain it.
       had = @history.active_view
       lost = resolve_active_view
+      sync_hide_static
       @history.reload(@host.session.store) # catch peer captures while we were elsewhere
       if had && @history.active_view.nil?
         @lost_view_key = nil
@@ -578,6 +581,12 @@ module Gori::Tui
         @lost_view_key = nil
         @host.status("the saved view this project had is gone — showing All")
       end
+    end
+
+    # The hide-static lens as the project stores it. Re-read on entry and on a peer's change for
+    # the reason the view is: another gori on this project may have flipped it (#1239).
+    private def sync_hide_static : Nil
+      @history.set_hide_static(StaticAsset.hidden?(@host.session.store))
     end
 
     def on_external_change : Nil
@@ -597,6 +606,7 @@ module Gori::Tui
       if had && @history.active_view.nil?
         @host.status("the #{had.name} view is gone — showing All")
       end
+      sync_hide_static
       refresh_search
       @history.refresh_detail(@host.session.store) if @host.overlay == :detail # peer filled the open flow
     end
@@ -955,6 +965,7 @@ module Gori::Tui
       j.field "query", @history.query unless @history.query.blank?
       @history.active_view.try { |v| j.field "view", v.name }
       j.field "scope_lens", @host.session.scope.active?
+      j.field "hide_static", @history.hide_static? # list_history's own argument name
     end
 
     def mcp_mark_count : Int32

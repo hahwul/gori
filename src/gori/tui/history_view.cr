@@ -196,6 +196,8 @@ module Gori::Tui
       # compiles to EMPTY (a peer's edit, a hand-edited settings.json). Kept apart from
       # @query_note so a broken view is not reported as a broken filter bar.
       @view_broken = false
+      # The hide-static lens (#1239). False until HistoryController reads the project's key.
+      @hide_static = false
       # Why an ACTIVE view came back empty, when the reason is something the operator can act on
       # rather than "no flows matched". Computed in `reload` (which has the store) and read by
       # the empty state (which does not).
@@ -543,6 +545,17 @@ module Gori::Tui
       v && v.narrowing? ? v : nil
     end
 
+    # The hide-static lens (#1239): `QL.hide_static` ANDed over the scope lens, the view and the
+    # bar. Set by HistoryController from the project's persisted `hide_static` key, and by the
+    # Runner's toggle. A lens of the `s` shape, not a view: it composes with whichever view is on.
+    def set_hide_static(hide : Bool) : Nil
+      @hide_static = hide
+    end
+
+    def hide_static? : Bool
+      @hide_static
+    end
+
     def set_colormarker(cm : Colormarker) : Nil
       @colormarker = cm
     end
@@ -735,7 +748,7 @@ module Gori::Tui
     # let the list fill, permanently, with exactly the rows the view exists to exclude, while
     # the chip claimed otherwise.
     def filtering? : Bool
-      !@query.blank? || (@scope.try(&.active?) == true) || !active_view.nil?
+      !@query.blank? || (@scope.try(&.active?) == true) || !active_view.nil? || @hide_static
     end
 
     # Load flows applying the Scope lens AND the QL query. store.search returns
@@ -752,10 +765,10 @@ module Gori::Tui
     record SearchResult, rows : Array(Store::FlowRow), note : String?, no_flows : Bool,
       view_note : String?, error : String? = nil
 
-    alias SearchIdentity = Tuple(String, QL::Filter?, Bool, SavedViews::View?)
+    alias SearchIdentity = Tuple(String, QL::Filter?, Bool, SavedViews::View?, Bool)
 
     def search_identity : SearchIdentity
-      {@query, @scope.try(&.ql_lens.predicate), @scope.try(&.active?) == true, active_view}
+      {@query, @scope.try(&.ql_lens.predicate), @scope.try(&.active?) == true, active_view, @hide_static}
     end
 
     # Compilation stays on the UI fiber. Workers receive a snapshot and never
@@ -804,6 +817,7 @@ module Gori::Tui
       end
       combined = QL.and(QL.and(@scope.try(&.filter) || QL::EMPTY, view_filter || QL::EMPTY),
         query_filter)
+      combined = QL.and(combined, QL.hide_static) if @hide_static
       SearchRequest.new(combined, view, @query_note)
     end
 
@@ -902,11 +916,22 @@ module Gori::Tui
       # whatever is typed, so a bar the operator can read in full still does not explain the
       # empty list. Named LAST because a broken regex or a dropped term is a defect in what they
       # just typed, while this one is a standing mode they may have set days ago.
-      if v = active_view
-        return "v:#{v.chip_label} also narrows to #{v.query}"
-      end
-      nil
+      standing_lens_note
     end
+
+    # The view and the hide-static lens — the standing modes that AND over the bar. Both named
+    # when both are on: either can be the one that emptied the list.
+    private def standing_lens_note : String?
+      if v = active_view
+        note = "v:#{v.chip_label} also narrows to #{v.query}"
+        return @hide_static ? "#{note} · static assets hidden" : note
+      end
+      @hide_static ? STATIC_HIDDEN_NOTE : nil
+    end
+
+    # Said wherever the hide-static lens might explain what the list lacks. Names `v` because
+    # the toggle lives on the view picker's top row.
+    STATIC_HIDDEN_NOTE = "static assets hidden — v shows them"
 
     # A view whose stored query compiles to nothing. `reload` refuses to APPLY it (see there),
     # so the list is empty on purpose and the operator needs to know it is the view that is
@@ -2902,9 +2927,14 @@ module Gori::Tui
             # A view with a blank bar. Named before the Scope lens for the same reason the bar
             # is: it is the more specific of the two, and "s clears the scope lens" on a
             # view-emptied list points at the wrong control.
-            {@view_note || "no flows match the #{v.name} view", "v selects a view — All shows everything"}
+            {@view_note || "no flows match the #{v.name} view",
+             @hide_static ? "v selects a view · static assets are hidden too" : "v selects a view — All shows everything"}
+          elsif @hide_static && @scope.try(&.active?) != true
+            # Only the hide-static lens is narrowing, so everything captured so far is an image,
+            # a font or a track. Rare, but "no flows" would be a lie about a project that has some.
+            {"only static assets so far — they are hidden", "v shows static assets"}
           elsif filtering? # in-scope subset is empty (Scope lens, no QL query)
-            {"no flows in scope", "s clears the scope lens"}
+            {"no flows in scope", @hide_static ? "s clears the scope lens · v shows static assets" : "s clears the scope lens"}
           else
             list_rect = Rect.new(time_x, list_top, rect.right - time_x, list_h)
             TrafficEmptyState.render(screen, list_rect, variant: :history, listen: listen, capturing: capturing)
@@ -3837,11 +3867,15 @@ module Gori::Tui
       # visible before it is ever used. Lowercase like every chip beside it — the view's own name
       # keeps its casing everywhere it is a name rather than a chip.
       chips << view_chip
+      # Only while hiding. Unlike `s` and `v`, the toggle has no bare key to advertise — its door
+      # is the `v` picker's top row, which the `v:` chip beside this already points at — so a
+      # muted `static:shown` would spend a dozen columns of a crowded bar announcing a default.
+      chips << {:static, "static:hidden", Theme.accent} if @hide_static
       chips << {:mark, mark_chip_text.not_nil!, Theme.accent} if mark_chip_text
       chips
     end
 
-    # Which filter-bar chip is under (mx, my) — :count | :scope | :follow | :view | :mark, or
+    # Which filter-bar chip is under (mx, my) — :count | :scope | :follow | :view | :static | :mark, or
     # nil for a miss. Same geometry as the paint, off the same tagged list.
     #
     # nil while the bar is in EDIT mode: `render_ql_bar` returns before the cluster there, so
@@ -3919,7 +3953,7 @@ module Gori::Tui
     # (capped + prefix-filtered) so a large History stays cheap to complete.
     #
     # The CLOSED-set fields complete from `QL`'s own vocabulary lists (`SCOPE_VALUES`,
-    # `SOURCE_VALUES`, `PROTO_VALUES`, `STUB_VALUES`) rather than from copies here, because the
+    # `SOURCE_VALUES`, `PROTO_VALUES`, `FLAG_VALUES`) rather than from copies here, because the
     # colour-rule overlay completes the same fields through `InterceptFilter.suggest_values` and
     # a second copy is how the two came to offer different sets. The pools written out here are
     # SAMPLES of open-ended fields (`status:`, `size:`, `dur:`) — no list can be their whole
@@ -3927,18 +3961,18 @@ module Gori::Tui
     private def suggest_values(field : String, prefix : String) : Array(String)
       p = prefix.downcase
       values = case field
-               when "scheme" then ["http", "https"]
-               when "proto"  then QL::PROTO_VALUES
-               when "method" then METHOD_VAL
-               when "status" then ["2xx", "3xx", "4xx", "5xx", ">=400", ">=500", "200", "301", "302", "401", "403", "404", "500", "502", "503"]
-               when "host"   then host_values_for(prefix)
-               when "size"   then [">10000", ">100000", "<1000"]
-               when "scope"  then QL::SCOPE_VALUES
-               when "src"    then QL::SOURCE_VALUES
-               when "stub"   then QL::STUB_VALUES
-               when "cache"  then QL::CACHE_VALUES
-               when "dur"    then [">500", ">1s", ">=200", "<100"]
-               else               return [] of String
+               when "scheme"         then ["http", "https"]
+               when "proto"          then QL::PROTO_VALUES
+               when "method"         then METHOD_VAL
+               when "status"         then ["2xx", "3xx", "4xx", "5xx", ">=400", ">=500", "200", "301", "302", "401", "403", "404", "500", "502", "503"]
+               when "host"           then host_values_for(prefix)
+               when "size"           then [">10000", ">100000", "<1000"]
+               when "scope"          then QL::SCOPE_VALUES
+               when "src"            then QL::SOURCE_VALUES
+               when "stub", "static" then QL::FLAG_VALUES
+               when "cache"          then QL::CACHE_VALUES
+               when "dur"            then [">500", ">1s", ">=200", "<100"]
+               else                       return [] of String
                end
       # host_values_for is already prefix-filtered by SQL; still apply starts_with so a
       # stale cache entry can't surface a non-matching host if the key ever drifts.

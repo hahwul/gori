@@ -1,6 +1,14 @@
 require "sqlite3"
 require "./safe_regexp" # re-opens LibSQLite3 with value_bytes, which `text` below needs
 require "../host_pattern"
+require "../static_asset"
+
+# `gori_static_asset` reads an INTEGER-or-NULL `status`; the shard binds neither accessor.
+# Additive, like SafeRegexp's `value_bytes`.
+lib LibSQLite3
+  fun value_type = sqlite3_value_type(SQLite3Value) : Int32
+  fun value_int64 = sqlite3_value_int64(SQLite3Value) : Int64
+end
 
 module Gori
   # The SQL half of a Scope rule, for the shapes where a NATIVE SQL spelling and the
@@ -106,14 +114,37 @@ module Gori
       nil
     end
 
-    # Register both functions on a raw SQLite handle — THE one registration, so a connection
-    # that is not a pooled `SQLite3::Connection` (`ProjectSearch`'s read-only handle over
-    # another project's database) cannot end up with a `gori_ci_contains` that means
+    SQLITE_NULL = 5
+
+    # `gori_static_asset(content_type, target, status)` — `StaticAsset.static?` from SQL (#1239).
+    # NOT what `static:` compiles to: it WRITES the `static_asset` column, once per flow, from
+    # `Store#update_one` (the values just bound plus the row's own target) and V31's backfill.
+    # Always 0 or 1, so the column is NOT NULL and `-static:true` is exactly `static:false`.
+    STATIC_FN = ->(context : LibSQLite3::SQLite3Context, _argc : Int32, argv : LibSQLite3::SQLite3Value*) do
+      args = Slice.new(argv, 3)
+      static =
+        begin
+          ct = LibSQLite3.value_type(args[0]) == SQLITE_NULL ? nil : ScopeMatch.text(args[0])
+          status = LibSQLite3.value_type(args[2]) == SQLITE_NULL ? nil : LibSQLite3.value_int64(args[2]).clamp(Int32::MIN, Int32::MAX).to_i32
+          StaticAsset.static?(ct, ScopeMatch.text(args[1]), status)
+        rescue
+          # Same belt as HOST_FN: an exception must not unwind through the C callback. Not
+          # static is the safe answer — a row the lens cannot classify stays visible.
+          false
+        end
+      LibSQLite3.result_int(context, static ? 1 : 0)
+      nil
+    end
+
+    # Register gori's SQL functions on a raw SQLite handle — THE one registration, so a
+    # connection that is not a pooled `SQLite3::Connection` (`ProjectSearch`'s read-only handle
+    # over another project's database) cannot end up with a `gori_ci_contains` that means
     # something else, or with none: `QL.contains_cond` emits a call to it for every
-    # non-ASCII needle.
+    # non-ASCII needle, and every flow write and V31's backfill call `gori_static_asset`.
     def self.install(db : LibSQLite3::SQLite3) : Nil
       LibSQLite3.create_function(db, "gori_host_match", 2, 1, nil, HOST_FN, nil, nil)
       LibSQLite3.create_function(db, "gori_ci_contains", 2, 1, nil, CONTAINS_FN, nil, nil)
+      LibSQLite3.create_function(db, "gori_static_asset", 3, 1, nil, STATIC_FN, nil, nil)
     end
   end
 end

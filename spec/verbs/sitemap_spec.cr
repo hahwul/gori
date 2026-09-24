@@ -93,6 +93,16 @@ describe "Gori::Verbs.register_sitemap" do
     verb.menu_key.should eq('s')
   end
 
+  # The hide-static lens (#1239) is shared with History and has no chord on either tab: this
+  # tab has no `v` picker, so the menu row is its door.
+  it "keeps the hide-static toggle a menu row under 'V', shared with History" do
+    verb = r["sitemap.toggle-static"]
+    verb.chords.should be_empty
+    verb.menu_key.should eq('V')
+    verb.hidden?.should be_false
+    verb_intents(r, "sitemap.toggle-static").should eq([:toggle_static_assets])
+  end
+
   it "escapes back to the Sitemap/Discover strip, not the tab bar" do
     ctx = FakeExecContext.new
     r["sitemap.to-menu"].call(ctx)

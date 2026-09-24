@@ -346,6 +346,12 @@ One caveat worth knowing before the list looks broken: a flow captured **before 
 
 A view's query is checked when you save it, not when it runs. One whose every term would be dropped is refused outright, because it would narrow *nothing* while the `v:` chip claimed otherwise.
 
+### Hiding static assets {#hide-static}
+
+Browsing an app through gori puts dozens of `.png`, `.woff2` and `.mp4` rows next to every API call. The first row of the `v` picker, **`[ ] Hide static assets`**, hides them. `↵` on it ticks the box and leaves your view alone, because it is a lens of its own ANDed over the view and the filter bar, the same way `s` is. While assets are hidden the filter row shows a `static:hidden` chip, and a click on the chip shows them again. The setting is shared with the Target → Sitemap tree, where `Space` `V` toggles it, and it is remembered per project. It is off by default, since the safe direction on a security proxy is to hide nothing.
+
+It is the QL term `-static:true` ([`static:`](/reference/query-language/#fields)), so a filter or a saved view can say the same thing. Only images, fonts and audio/video count, judged by the response Content-Type and, when a response has none (a `304`), by the path's extension. SVG, CSS, JavaScript, source maps, JSON, archives, PDFs, HLS playlists and an image fetched through a URL parameter (an image proxy such as `/_next/image?url=…`) stay visible. So does anything but a successful fetch: an error, a redirect, or a flow that got no response. Headless, pass `gori run history --hide-static` or `gori run sitemap --hide-static`; over MCP, pass `hide_static` to `list_history` or `list_sitemap`. Neither reads the TUI's setting.
+
 ## Columns (`Space` `C`) {#columns}
 
 A query answers *which flows match*. A **column** answers the other half: *what is the value of X in each row*. Press `Space` then `C` and you can add one (an `X-Request-Id`, a JWT `sub`, a rate-limit header, a field out of a JSON body) and it is drawn beside every flow in the list.

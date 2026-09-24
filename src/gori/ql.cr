@@ -140,7 +140,7 @@ module Gori
       NOT > AND > OR. `-term` and `NOT term` are equivalent.
 
       Fields (use : for value match, ~ for regex):
-        host path method scheme proto status size reqsize respsize dur header body url stub src scope cache
+        host path method scheme proto status size reqsize respsize dur header body url stub static src scope cache
 
       Sides: header: and body: search the REQUEST AND THE RESPONSE. Prefix either with `req.` or
       `resp.` to search one side — req.body:token resp.header:set-cookie resp.body~secret\\d+ —
@@ -159,6 +159,15 @@ module Gori
       Short-circuited: stub:true  stub:false  — flows gori answered ITSELF from a Match&Replace
       short-circuit rule, with NO origin involved. Their response bytes came from the rule, not
       from the server, so `stub:false` is what you want before treating History as evidence.
+
+      Static assets: static:true  static:false  — images, fonts and audio/video, judged by the
+      response Content-Type (image/svg+xml is NOT static: it can carry script) and, when a row has
+      no Content-Type (a 304, a pending flow), by the path's extension before `?`. Only a successful
+      fetch is static (2xx or 304): an error, a redirect or a flow with no response never is. JS,
+      CSS, source maps, JSON, archives, PDFs, octet-stream, HLS playlists and an image fetched
+      through a URL parameter (`/_next/image?url=…`, an image proxy) stay visible. Decided once,
+      when the flow is captured. `-static:true` hides the noise — the TUI's hide-static lens,
+      `--hide-static` and list_history/list_sitemap/list_params `hide_static` are that term.
 
       Source: src:proxy  src:repeater  src:fuzzer  src:import  …  src:gori — where the flow came
       from. `proxy` is traffic a client sent through gori; every other value is a request gori
@@ -341,7 +350,7 @@ module Gori
     # History's and Colormarker's completion pools, Colormarker's unknown-field refusal and the
     # docs all read it, so a field added to `field_cond` becomes offerable everywhere at once
     # instead of in the four hand-kept copies that used to drift.
-    FIELDS = %w[host path url method scheme proto status size reqsize respsize dur header body stub src scope cache
+    FIELDS = %w[host path url method scheme proto status size reqsize respsize dur header body stub static src scope cache
       req.header resp.header req.body resp.body]
 
     # The fields `~` compiles on. `method` and `scheme` are text columns like `host`, so a regex over
@@ -507,6 +516,7 @@ module Gori
       "header"      => "head bytes, BOTH sides — see req./resp.",
       "body"        => "body via index: 8 KiB/side, no compressed",
       "stub"        => "true = gori answered it, origin never saw it",
+      "static"      => "2xx image/font/media; not svg/css/js",
       "src"         => "who sent it — proxy repeater fuzzer … or gori",
       "scope"       => "in / out — the project's scope rules",
       "cache"       => "hit / miss / dynamic / none — from headers",
@@ -543,11 +553,12 @@ module Gori
     # the colour-rule overlay); see `InterceptFilter.suggest_values`, which picks between the two.
     PROTO_VALUES = %w[ws wss grpc grpcs sse sses http https]
 
-    # `stub:`'s two canonical spellings. `stub_cond` also takes yes/no/on/off/1/0, and a pool is
-    # deliberately not the place for every alias — it is the place for the answer a reader can
-    # type without checking. Beside the field for `SCOPE_VALUES`' reason: History's bar and the
-    # colour-rule overlay both complete this field, and it is a closed pair in both.
-    STUB_VALUES = %w[true false]
+    # The boolean fields' (`stub:`, `static:`) two canonical spellings. `flag_cond` also takes
+    # yes/no/on/off/1/0, and a pool is deliberately not the place for every alias — it is the
+    # place for the answer a reader can type without checking. Beside the fields for
+    # `SCOPE_VALUES`' reason: History's bar and the colour-rule overlay both complete them, and
+    # they are a closed pair in both.
+    FLAG_VALUES = %w[true false]
 
     # The fields the one-line hints SAMPLE, in the order that reads best on a bar. A hint gets one
     # terminal row and `FIELDS` has eighteen entries, so something has to choose; choosing once
@@ -583,6 +594,7 @@ module Gori
       {"a bad regex matches nothing", "body~[ is a HARD error, never silently dropped"},
       {"scope: with no scope rules", "nothing is in scope, so in AND out match nothing"},
       {"src: on a pre-0.4 flow", "provenance was not recorded, so it matches NEITHER direction"},
+      {"static: on an error", "only 2xx/304 is static, so -static:true keeps errors"},
     ]
 
     # The grammar itself — everything that is NOT a field name, as {what you type, what it does}.
@@ -689,7 +701,8 @@ module Gori
       when "dur"                                 then duration_cond(value)
       when "header", "req.header", "resp.header" then header_cond(value, side_of(field))
       when "body", "req.body", "resp.body"       then body_cond(value, fts, body_max, side_of(field))
-      when "stub"                                then stub_cond(value)
+      when "stub"                                then flag_cond("short_circuited", value)
+      when "static"                              then flag_cond("static_asset", value)
       when "src"                                 then src_cond(value)
       when "scope"                               then scope_cond(value, scope)
       when "cache"                               then cache_cond(value)
@@ -719,18 +732,31 @@ module Gori
       end
     end
 
-    # stub: selects flows gori ANSWERED ITSELF from a short-circuit rule (#511) — the ones no
-    # origin ever saw. `stub:true` isolates them for review; `stub:false` is the one an
-    # operator actually reaches for, to read History as traffic that really happened before
-    # writing anything up. The column is NOT NULL DEFAULT 0, so both directions are NULL-free
-    # and `-stub:true` behaves exactly like `stub:false`. An unrecognised value drops the term
-    # rather than guessing, same as a bad proto:/status:.
-    private def self.stub_cond(value : String) : {String, Array(DB::Any)}?
-      no_args = [] of DB::Any
+    # The two boolean fields, one parser, so a spelling one learns the other has too:
+    #
+    #   · stub: — flows gori ANSWERED ITSELF from a short-circuit rule (#511), the ones no
+    #     origin ever saw. `stub:true` isolates them for review; `stub:false` is the one an
+    #     operator actually reaches for, to read History as traffic that really happened.
+    #   · static: — images, fonts, audio/video (#1239). The rule lives in `StaticAsset.static?`
+    #     and is applied ONCE, when a flow is written, into the `static_asset` column (V31).
+    #
+    # Both columns are NOT NULL DEFAULT 0, so both directions are NULL-free and `-stub:true`
+    # behaves exactly like `stub:false`. An unrecognised value drops the term rather than
+    # guessing, same as a bad proto:/status:.
+    private def self.flag_cond(column : String, value : String) : {String, Array(DB::Any)}?
       case value.downcase
-      when "true", "yes", "on", "1"  then {"short_circuited = 1", no_args}
-      when "false", "no", "off", "0" then {"short_circuited = 0", no_args}
+      when "true", "yes", "on", "1"  then {"#{column} = 1", [] of DB::Any}
+      when "false", "no", "off", "0" then {"#{column} = 0", [] of DB::Any}
       end
+    end
+
+    # The hide-static lens — `static:false` as a ready filter. THE spelling every surface ANDs in
+    # (the TUI's toggle, `gori run history|sitemap --hide-static`, MCP `hide_static`), so none of
+    # them builds its own. Spelled `static_asset = 0` exactly, and ANDed as its own clause: that
+    # is the predicate `idx_flows_sitemap_nonstatic` is partial on, and a `NOT (… = 1)` would not
+    # let the planner use it.
+    def self.hide_static : Filter
+      Filter.new("static_asset = 0", [] of DB::Any)
     end
 
     # src: selects flows by WHERE THEY CAME FROM — `src:proxy` for traffic a client sent through

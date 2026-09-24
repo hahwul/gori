@@ -206,6 +206,7 @@ gori run history -q 'status:5xx' --limit 100 --format json
 | `-n`, `--limit=N` | Max rows (default 50) |
 | `--view=NAME` | Apply a saved [view](#run-views). Its query is **ANDed with** `-q`, never replacing it, exactly as the TUI's `v` picker layers over the filter bar. An unknown name is refused (and names the ones that exist) rather than ignored. Listing only |
 | `--in-scope` | Only flows in the project's configured scope: the TUI's `s` lens, opt-in and independent of whether that lens is enabled. Capture still records everything; empty when no scope rules exist |
+| `--hide-static` | Leave out images, fonts and audio/video: the TUI's [hide-static lens](/guide/proxy/#hide-static), the same as `-q -static:true`, and independent of whether that lens is on |
 | `--lenient` | Don't refuse a query naming an unknown field; search that token as text |
 | `--column=SPEC` | Show an extracted value per row (repeatable). `[LABEL=][req\|res:]kind:selector`, e.g. `header:x-request-id`, `RID=req:header:authorization`, `jsonpath:data.id`, `regex:token=(\w+)`, `position:0:32`. Any `--column` **replaces** this project's configured [History columns](/guide/proxy/#columns) |
 | `--no-columns` | Don't draw this project's configured History columns |
@@ -820,7 +821,7 @@ A malformed entry is skipped rather than aborting the file; the result reports b
 gori run sitemap --in-scope --format paths
 ```
 
-`-q`/`--query=QL` filters endpoints with the same QL as history (also positional), `-n`/`--limit=N` caps the endpoints scanned (default `SITEMAP_MAX`), `--in-scope` limits to in-scope hosts, `--no-group` disables id folding, `--no-fold-query` disables query-string folding (the two are separate axes), `--format` is `text` (tree), `json`, or `paths`, and `--lenient` accepts a query that names an unknown field instead of refusing it.
+`-q`/`--query=QL` filters endpoints with the same QL as history (also positional), `-n`/`--limit=N` caps the endpoints scanned (default `SITEMAP_MAX`), `--in-scope` limits to in-scope hosts, `--hide-static` leaves out images, fonts and audio/video (per flow, like the TUI tree), `--no-group` disables id folding, `--no-fold-query` disables query-string folding (the two are separate axes), `--format` is `text` (tree), `json`, or `paths`, and `--lenient` accepts a query that names an unknown field instead of refusing it.
 
 **`sitemap tag`**: pin a free-text memo onto one path, the same note the TUI's Sitemap shows.
 
@@ -838,7 +839,7 @@ gori run sitemap params 'method:POST' --location json,form --format json
 gori run mine 42 --wordlist <(gori run sitemap params --host api.example.com --format names)
 ```
 
-`-q`/`--query=QL` (also positional) and `--in-scope` narrow the flows read, per flow as in `history`. `--host` is an exact host, `--path=PREFIX` a path prefix, and `--location=LIST` picks locations (default all). Standard browser headers are left out unless `--all-headers`. `--max-flows=N` reads the newest N matching flows (default 2000); a note on stderr says when older ones were skipped. Values of cookies, credential headers and credential-named fields such as `password` or `token` print as `[REDACTED]` unless `--include-sensitive`. Redaction goes by name and by JWT / private-key shape only, so a secret under any other name (a presigned `X-Amz-Signature`, a custom `sig=`) prints in the clear, as does one inside a URL path. `--format` is `text`, `json`, or `names` (one name per line, JSON leaf names, no headers unless `--location` names them), which is a Miner or Fuzzer wordlist.
+`-q`/`--query=QL` (also positional), `--in-scope` and `--hide-static` narrow the flows read, per flow as in `history`. `--host` is an exact host, `--path=PREFIX` a path prefix, and `--location=LIST` picks locations (default all). Standard browser headers are left out unless `--all-headers`. `--max-flows=N` reads the newest N matching flows (default 2000); a note on stderr says when older ones were skipped. Values of cookies, credential headers and credential-named fields such as `password` or `token` print as `[REDACTED]` unless `--include-sensitive`. Redaction goes by name and by JWT / private-key shape only, so a secret under any other name (a presigned `X-Amz-Signature`, a custom `sig=`) prints in the clear, as does one inside a URL path. `--format` is `text`, `json`, or `names` (one name per line, JSON leaf names, no headers unless `--location` names them), which is a Miner or Fuzzer wordlist.
 
 ### run oast
 
@@ -1276,7 +1277,7 @@ On `update` every field is optional and defaults to the rule's current value, so
 
 **Precedence is the rule set's meaning.** Match & Replace rules *compose*: every enabled rule runs, in order. Colour rules *resolve*: the **first enabled match paints the row** and the rest are never consulted. That is why `move` exists here and not on `rewriter`. Global rules resolve before project ones, so a standing policy outranks a local layer.
 
-`--when` is a **History QL** condition — the same grammar, the same field set and the same answers as the filter bar above the list it paints, `~regex` and `AND` / `OR` / `NOT` / `-negation` / `(grouping)` included. A term the captured row can answer (`host:` `path:` `url:` `method:` `scheme:` `status:` `proto:`) is matched in memory with no query at all; the rest (`body:` `header:` `size:` `dur:` `stub:` `src:` `scope:`) resolve against the project database in one batched query per repaint. Four caveats, each of which would otherwise fail silently, so gori refuses or warns rather than letting you find out from a list that never turns colour:
+`--when` is a **History QL** condition — the same grammar, the same field set and the same answers as the filter bar above the list it paints, `~regex` and `AND` / `OR` / `NOT` / `-negation` / `(grouping)` included. A term the captured row can answer (`host:` `path:` `url:` `method:` `scheme:` `status:` `proto:`) is matched in memory with no query at all; the rest (`body:` `header:` `size:` `dur:` `stub:` `static:` `src:` `scope:`) resolve against the project database in one batched query per repaint. Four caveats, each of which would otherwise fail silently, so gori refuses or warns rather than letting you find out from a list that never turns colour:
 
 - **`body:` *scans* here, it does not read the text index.** So a colour rule reaches binary bodies the filter bar's `body:` skips — but only the first **64 KiB of each side**, and the bytes are as *captured*, so a match past that bound or inside a compressed body is not painted. (Warned.)
 - **`host:` is a substring, not a DNS-label glob.** `host:alpha.test` also matches `xalpha.test`. (Warned.)

@@ -125,7 +125,12 @@ module Gori::Tui
     protected def refilter : Nil
       terms = query.downcase.split
       @filtered = terms.empty? ? @rows : @indexed.select { |(_, hay)| terms.all? { |t| hay.includes?(t) } }.map(&.first)
-      @selected = 0
+      # Land on the first LIBRARY entry, not on an action row that happens to match. A negative
+      # `Row#index` is an open-site's sentinel (the view picker's hide-static toggle and
+      # `+ Save current filter…`), and "type a name, press ↵" is how an entry is picked — so
+      # `err` + ↵ must reach the Errors view, not flip a lens whose detail says "errors stay".
+      # An action row is still reachable with ↑, and still first when nothing else matches.
+      @selected = @filtered.index { |row| row.index >= 0 } || 0
       @scroll = 0
     end
 

@@ -14,6 +14,8 @@ module Gori
         query = str(h, "query")
         filter = ql_filter_or_error(h, query)
         return filter if filter.is_a?(Result)
+        # Per-flow, like the TUI tree's lens: a host keeps its non-static endpoints.
+        filter = QL.and(filter, QL.hide_static) if bool_arg(h, "hide_static", false)
         # Same reason as list_history: a `body:` query reads the off-commit trigram index
         # (Store V4), and an agent can't distinguish "absent" from "not indexed yet".
         if fts_error = drain_fts_or_error(filter.uses_fts?)
@@ -356,6 +358,8 @@ module Gori
             scope_unconfigured = true
           end
         end
+        # The TUI Params sub-tab follows the hide-static lens; this is it, asked for explicitly.
+        filter = QL.and(filter, QL.hide_static) if bool_arg(h, "hide_static", false)
         include_sensitive = bool_arg(h, "include_sensitive", false)
         report = if scope_unconfigured
                    ParamInventory::Report.new([] of ParamInventory::Row, 0, false)
@@ -452,6 +456,7 @@ module Gori
           s.field "offset", intprop("skip this many endpoint rows — the page cursor (default 0). The ordering is total, so paging with it is deterministic and reaches every endpoint")
           s.field "fold_query", boolprop("fold the query-string variants of one path into a single entry (default true); false lists one entry per query string")
           s.field "collapse_transport", boolprop("collapse to distinct host/method/target only (legacy shape), dropping scheme/port/version + counts (default false)")
+          s.field "hide_static", boolprop("leave out static assets — images, fonts, audio/video (not svg/css/js, never a status >= 400); the TUI's hide-static lens, same as `-static:true` in `query`. Default false")
           s.field "strict", boolprop("reject the query if any term is unrecognized/invalid instead of silently dropping it (default false)")
           s.field "lenient", boolprop("search a `field:` QL does not implement as literal TEXT instead of refusing the query (default false). A typo like `methd:GET` free-texts its whole token and therefore matches nothing, which is indistinguishable from an empty project — so it is refused by default, the way `gori run history --lenient` spells the same escape hatch. `strict` is the other half and covers dropped terms, not unknown fields")
         end
@@ -467,6 +472,7 @@ module Gori
           "ones unread). Names from a host's OTHER endpoints make good mine_start `names`." do |s|
           s.field "query", strprop("gori QL filter over the flows read (see ql_reference)")
           s.field "in_scope", boolprop("only flows in the project's configured scope (default false; empty with a note when no scope is configured)")
+          s.field "hide_static", boolprop("leave out static assets — images, fonts, audio/video; the TUI's hide-static lens, same as `-static:true` in `query` (default false)")
           s.field "host", strprop("only this host (exact, case-insensitive)")
           s.field "path_prefix", strprop("only endpoints whose path starts with this, e.g. /api/v1")
           s.field "location", arr_or_str_prop("only these locations: query, form, multipart, json, headers, cookies (array or comma list; default all)")
