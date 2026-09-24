@@ -384,6 +384,9 @@ module Gori
         return {0_u64, pos, false} if pos >= data.size
         b = data[pos]
         pos += 1
+        # The 10th byte holds bit 63 and nothing else: anything above 1 overflowed 64 bits,
+        # and dropping those bits would read a malformed varint as a well-formed one.
+        return {0_u64, pos, false} if shift == 63 && b > 1
         value |= (b.to_u64 & 0x7f_u64) << shift
         return {value, pos, true} if (b & 0x80) == 0
         shift += 7

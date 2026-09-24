@@ -98,7 +98,8 @@ module Gori::Protobuf
     end
 
     private def read_enum(schema : Schema, d : Schema::FieldDef, u : UInt64) : Reading
-      n = u.to_i64!
+      # An enum is an int32 on the wire: sign-extended when negative, low 32 bits the value.
+      n = u.to_u32!.to_i32!.to_i64
       e = d.type_name.try { |tn| schema.enum?(tn) }
       name = e.try(&.name?(n))
       note = if e.nil?
@@ -223,7 +224,8 @@ module Gori::Protobuf
             when .s_int32? then zigzag(u).to_i32!.to_i64.as(Scalar)
             when .s_int64? then zigzag(u).as(Scalar)
             when .bool?    then (u != 0).as(Scalar)
-            else                u.as(Scalar) # uint64, and enum (rendered by number)
+            when .enum?    then u.to_u32!.to_i32!.to_i64.as(Scalar) # an int32, like read_enum
+            else                u.as(Scalar)                        # uint64
             end
         {v, pos, true}
       end
@@ -239,6 +241,9 @@ module Gori::Protobuf
         return {0_u64, pos, false} if pos >= data.size
         b = data[pos]
         pos += 1
+        # The 10th byte holds bit 63 and nothing else: anything above 1 overflowed 64 bits,
+        # and dropping those bits would read a malformed varint as a well-formed one.
+        return {0_u64, pos, false} if shift == 63 && b > 1
         value |= (b.to_u64 & 0x7f_u64) << shift
         return {value, pos, true} if (b & 0x80) == 0
         shift += 7

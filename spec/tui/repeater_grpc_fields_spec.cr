@@ -168,6 +168,24 @@ describe "RepeaterView gRPC FIELDS editor (#828)" do
       end
     end
 
+    # The minimal encoding above round-trips either way; a padded tag or length does not —
+    # text has no spelling for it, so re-encoding the untouched seed normalised the octets.
+    it "keeps a non-minimal encoding when the value is applied unchanged" do
+      with_demo_schema do
+        grpc_tmp_store do |store|
+          [Bytes[0x8a, 0x00, 0x06] + "hahwul".to_slice,
+           Bytes[0x0a, 0x86, 0x00] + "hahwul".to_slice].each do |payload|
+            view = grpc_view(store, payload)
+            view.toggle_grpc_fields
+            view.grpc_field_rows[0].seed.should eq("hahwul")
+            view.grpc_field_begin.should be_nil
+            view.grpc_field_apply.should be_nil
+            sent_payload(view).should eq(payload)
+          end
+        end
+      end
+    end
+
     it "refuses without touching the payload, and keeps the text to be corrected" do
       with_demo_schema do
         grpc_tmp_store do |store|
