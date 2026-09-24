@@ -6770,14 +6770,16 @@ module Gori::Tui
     end
 
     # The command copied to the clipboard for another pane to evaluate in its own env (#1250).
-    def self.copy_shell_command(authority : String, ca_dir : String, syntax : ShellEnv::Syntax) : String
+    def self.copy_shell_command(authority : String, ca_dir : String, syntax : ShellEnv::Syntax,
+                                executable : String? = Process.executable_path) : String
+      bin_arg = Process.quote(executable || "gori")
       proxy_arg = Process.quote(authority)
       ca_arg = Process.quote(ca_dir)
       case syntax
       in ShellEnv::Syntax::Posix
-        %(eval "$(gori run shell --print --proxy #{proxy_arg} --ca-dir #{ca_arg})")
+        %(eval "$(#{bin_arg} run shell --print --proxy #{proxy_arg} --ca-dir #{ca_arg})")
       in ShellEnv::Syntax::Fish
-        "gori run shell --print --shell fish --proxy #{proxy_arg} --ca-dir #{ca_arg} | source"
+        "#{bin_arg} run shell --print --shell fish --proxy #{proxy_arg} --ca-dir #{ca_arg} | source"
       end
     end
 

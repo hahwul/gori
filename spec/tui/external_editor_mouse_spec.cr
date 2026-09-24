@@ -97,14 +97,20 @@ describe "Runner.shell_exit_toast" do
 end
 
 describe "Runner.copy_shell_command" do
-  it "copies a single-line eval command with resolved and quoted flags" do
+  it "uses the absolute path of the running gori binary and quotes arguments" do
     cmd_posix = Runner.copy_shell_command("127.0.0.1:8070", "/path/with space/ca",
-      Gori::ShellEnv::Syntax::Posix)
-    cmd_posix.should eq(%(eval "$(gori run shell --print --proxy 127.0.0.1:8070 --ca-dir '/path/with space/ca')"))
+      Gori::ShellEnv::Syntax::Posix, executable: "/opt/custom bin/gori")
+    cmd_posix.should eq(%(eval "$('/opt/custom bin/gori' run shell --print --proxy 127.0.0.1:8070 --ca-dir '/path/with space/ca')"))
 
     cmd_fish = Runner.copy_shell_command("127.0.0.1:8070", "/path/to/ca",
-      Gori::ShellEnv::Syntax::Fish)
-    cmd_fish.should eq("gori run shell --print --shell fish --proxy 127.0.0.1:8070 --ca-dir /path/to/ca | source")
+      Gori::ShellEnv::Syntax::Fish, executable: "/usr/local/bin/gori")
+    cmd_fish.should eq("/usr/local/bin/gori run shell --print --shell fish --proxy 127.0.0.1:8070 --ca-dir /path/to/ca | source")
+  end
+
+  it "falls back to 'gori' when executable is nil" do
+    cmd = Runner.copy_shell_command("127.0.0.1:8070", "/ca",
+      Gori::ShellEnv::Syntax::Posix, executable: nil)
+    cmd.should eq(%(eval "$(gori run shell --print --proxy 127.0.0.1:8070 --ca-dir /ca)"))
   end
 end
 
