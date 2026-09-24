@@ -226,6 +226,7 @@ module Gori::Fuzz
     neg = spec.starts_with?('!')
     dim, sep, val = (neg ? spec[1..] : spec).partition(':')
     return "stop_on term #{spec.inspect}: use DIM:SPEC (e.g. regex:admin, status:200, !regex:Invalid password)" if sep.empty?
+    return "stop_on term #{spec.inspect}: empty value" if val.blank?
     key = dim.strip.downcase
     return apply_stop_regex(m, val, neg) if key == "regex"
     setters = STOP_STRING_SETTERS[key]?

@@ -132,6 +132,99 @@ describe "MCP fuzz tools" do
     end
   end
 
+  it "rejects invalid stop_on configurations" do
+    with_store do |store|
+      tools = tools_for(store)
+      base = {
+        "template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+        "url"            => "http://127.0.0.1:80",
+        "payloads"       => %([{"list":["a"]}]),
+        "allow_unscoped" => true,
+      }
+
+      # Empty stop_on names no condition
+      res, err = call_raw(tools, "fuzz_start", base.merge({"stop_on" => %({})}).to_json)
+      err.should be_true
+      res.should contain("names no condition")
+
+      # Unknown key in stop_on
+      res, err = call_raw(tools, "fuzz_start", base.merge({"stop_on" => %({"body":"err"})}).to_json)
+      err.should be_true
+      res.should contain("unknown stop_on key")
+
+      # Unknown key in stop_on.match
+      res, err = call_raw(tools, "fuzz_start", base.merge({"stop_on" => %({"match":{"body":"err"}})}).to_json)
+      err.should be_true
+      res.should contain("unknown stop_on.match key")
+
+      # Empty match in stop_on
+      res, err = call_raw(tools, "fuzz_start", base.merge({"stop_on" => %({"match":{}})}).to_json)
+      err.should be_true
+      res.should contain("'stop_on.match' names no condition")
+
+      # Blank regex in stop_on
+      res, err = call_raw(tools, "fuzz_start", base.merge({"stop_on" => %({"match":{"regex":""}})}).to_json)
+      err.should be_true
+      res.should contain("cannot be empty")
+
+      # Unknown key in the run's own match is refused too, not silently dropped
+      res, err = call_raw(tools, "fuzz_start", base.merge({"match" => %({"body":"err"})}).to_json)
+      err.should be_true
+      res.should contain("unknown match key")
+
+      # after_matches <= 0
+      res, err = call_raw(tools, "fuzz_start", base.merge({"stop_on" => %({"after_matches":0})}).to_json)
+      err.should be_true
+      res.should contain("expected a positive integer")
+
+      res, err = call_raw(tools, "fuzz_start", base.merge({"stop_on" => %({"after_matches":-5})}).to_json)
+      err.should be_true
+      res.should contain("expected a positive integer")
+    end
+  end
+
+  it "rejects keep: interesting without save_results" do
+    with_store do |store|
+      tools = tools_for(store)
+      args = {
+        "template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+        "url"            => "http://127.0.0.1:80",
+        "payloads"       => %([{"list":["a"]}]),
+        "keep"           => "interesting",
+        "allow_unscoped" => true,
+      }.to_json
+      res, err = call_raw(tools, "fuzz_start", args)
+      err.should be_true
+      res.should contain("'keep' applies to the save_results archive")
+    end
+  end
+
+  it "stores and flags the unmatched row that triggered stop_on in fuzz_results" do
+    port = start_origin
+    with_store do |store|
+      tools = tools_for(store)
+      start = call_json(tools, "fuzz_start", {
+        "template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+        "url"            => "http://127.0.0.1:#{port}",
+        "payloads"       => %([{"list":["a","b","c"]}]),
+        "match"          => %({"status":"500"}),
+        "stop_on"        => %({"match":{"status":"200"}}),
+        "allow_unscoped" => true,
+      }.to_json)
+      job_id = start["job_id"].as_s
+      status = wait_fuzz_done(tools, job_id)
+      status["status"].as_s.should eq("condition_met")
+      status["stop_reason"]?.should_not be_nil
+
+      results = call_json(tools, "fuzz_results", {job_id: job_id}.to_json)
+      rows = results["results"].as_a
+      rows.size.should be >= 1
+      row = rows.first
+      row["matched"].as_bool.should be_false
+      row["stop_hit"].as_bool.should be_true
+    end
+  end
+
   it "keep: interesting stores no archive rows for a run that matched nothing, but keeps whole-run counts" do
     port = start_origin
     with_store do |store|
@@ -1430,6 +1523,47 @@ describe "MCP fuzz — failures cannot crowd matches out of the stored set" do
       st["sent"].as_i.should eq(cap + 5)
       st["stored_results"].as_i.should eq(cap) # …and NOT cap + 5
       st["results_truncated"].as_bool.should be_true
+    end
+  end
+end
+
+module Gori::MCP
+  class Tools
+    def __store_fuzz_result(fjob : FuzzJob, r : Fuzz::Result) : Nil
+      store_fuzz_result(fjob, r, nil, nil)
+    end
+  end
+end
+
+private class NullFuzzBackend < Gori::Fuzz::Backend
+  def origin : Gori::Fuzz::Origin
+    Gori::Fuzz::Origin.new("http", "h", 80)
+  end
+
+  def send(bytes : Bytes) : Gori::Repeater::Result
+    raise "not sent"
+  end
+end
+
+describe "MCP fuzz — the stop row survives a spent unmatched budget" do
+  it "stores an unmatched stop_hit row after the unmatched sub-budget is full" do
+    with_store do |store|
+      tools = tools_for(store)
+      cfg = Gori::Fuzz::Config.new
+      gen = Gori::Fuzz::Generator.new(Gori::Fuzz::Template.parse("GET / HTTP/1.1\r\nHost: h\r\n\r\n"), [] of Gori::Fuzz::PayloadSet, cfg)
+      engine = Gori::Fuzz::Engine.new(gen, Gori::Fuzz::Matcher.new, NullFuzzBackend.new, cfg)
+      audit = Gori::MCP::Tools::JobAudit.new("http://h:80", nil, 1, nil, 0_i64)
+      fjob = Gori::MCP::Tools::FuzzJob.new("j", 1_i64, engine, :none, Gori::Fuzz::Origin.new("http", "h", 80), false, audit)
+      fjob.unmatched_stored = Gori::MCP::Tools::FUZZ_MAX_STORED_UNMATCHED
+
+      errored = Gori::Fuzz::Result.new(0_i64, ["a"], nil, nil, 0_i64, 0, 0, 1_i64, "refused", false, false, nil)
+      tools.__store_fuzz_result(fjob, errored)
+      fjob.results.should be_empty
+      fjob.truncated?.should be_true
+
+      stop = Gori::Fuzz::Result.new(1_i64, ["b"], nil, 200, 2_i64, 1, 1, 1_i64, nil, false, false, nil, stop_hit: true)
+      tools.__store_fuzz_result(fjob, stop)
+      fjob.results.map(&.index).should eq([1_i64])
     end
   end
 end

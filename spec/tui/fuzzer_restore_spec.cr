@@ -29,9 +29,10 @@ private def with_fuzz_restore_project(session_count : Int32 = 1, &)
 end
 
 private def seed_saved_fuzz_run(store : Gori::Store, session_id : Int64, label : String,
-                                count : Int32 = 1, status : String = "done") : Int64
+                                count : Int32 = 1, status : String = "done",
+                                keep : String = "all") : Int64
   run = store.insert_fuzz_run(session_id, "https://#{label}.test", "sniper", count.to_i64,
-    status: "saving", surface: "tui")
+    status: "saving", surface: "tui", keep: keep)
   rows = Array(Gori::Store::FuzzResultWrite).new(count) do |i|
     Gori::Store::FuzzResultWrite.new(i.to_i64, %(["#{label}-#{i}"]), nil, 200 + i,
       label.bytesize.to_i64, 1, 1, 10_i64, nil, true, false, nil,
@@ -260,6 +261,17 @@ describe "FuzzerController saved-run restore" do
       drain_until(controller) { view.saved_run_id == run }
       view.results_saveable?.should be_false
       controller.body_hint(:body).should_not contain("save")
+      controller.stop_all
+    end
+  end
+
+  it "restores run_keep from the saved run record" do
+    with_fuzz_restore_project do |host, sessions|
+      run = seed_saved_fuzz_run(host.session.store, sessions[0], "keep-interesting", keep: "interesting")
+      controller = FuzzerController.new(host)
+      drain_until(controller) { controller.current_view.not_nil!.saved_run_id == run }
+      view = controller.current_view.not_nil!
+      view.run_keep.should eq(Gori::Fuzz::Keep::Interesting)
       controller.stop_all
     end
   end

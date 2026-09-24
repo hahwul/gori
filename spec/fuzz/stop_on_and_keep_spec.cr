@@ -26,6 +26,27 @@ private class ScriptedBackend < F::Backend
   end
 end
 
+# Stops the engine while its first request is in flight (an operator ^X / `fuzz_stop`), then
+# answers with a body that meets the stop condition.
+private class StopDuringSendBackend < F::Backend
+  property engine : F::Engine?
+
+  def initialize(@origin : F::Origin)
+  end
+
+  def origin : F::Origin
+    @origin
+  end
+
+  def send(bytes : Bytes) : Gori::Repeater::Result
+    @engine.try(&.stop)
+    body = "STOP"
+    head = "HTTP/1.1 200 X\r\nContent-Length: #{body.bytesize}\r\n\r\n".to_slice
+    Gori::Repeater::Result.new(head, body.to_slice,
+      Gori::Proxy::Codec::Http1.parse_response_head(head), 1_i64)
+  end
+end
+
 # One-position sweep of N inline payloads "0".."N-1", concurrency 1 so send order is the
 # dispatch order and a stop lands deterministically.
 private def sweep(be : F::Backend, matcher : F::Matcher, n : Int32, cfg : F::Config) : {Array(F::Result), F::DoneEvent}
@@ -142,6 +163,33 @@ describe "Fuzz.apply_stop_term" do
     F.apply_stop_term("noколon", F::Matcher.new).should_not be_nil
     F.apply_stop_term("regex:(", F::Matcher.new).should_not be_nil
   end
+
+  it "refuses empty values in stop terms" do
+    %w[status: header: size: regex:].each do |t|
+      m = F::Matcher.new
+      err = F.apply_stop_term(t, m)
+      err.should_not be_nil
+      err.not_nil!.should contain("empty value")
+    end
+    err = F.apply_stop_term("status:   ", F::Matcher.new)
+    err.should_not be_nil
+    err.not_nil!.should contain("empty value")
+  end
+end
+
+describe "Fuzz::Result serialization" do
+  it "serializes stop_hit in CLI json and text output" do
+    hit = F::Result.new(0_i64, ["x"], nil, 200, 1_i64, 1, 1, 1_i64, nil, false, false, nil, stop_hit: true)
+    miss = F::Result.new(1_i64, ["y"], nil, 200, 1_i64, 1, 1, 1_i64, nil, false, false, nil, stop_hit: false)
+
+    json = JSON.parse(Gori::CLI::Output.fuzz_row_json(hit))
+    json["stop_hit"]?.try(&.as_bool).should be_true
+    Gori::CLI::Output.fuzz_row_text(hit).should contain("stop-hit")
+
+    clean_json = JSON.parse(Gori::CLI::Output.fuzz_row_json(miss))
+    clean_json["stop_hit"]?.should be_nil
+    Gori::CLI::Output.fuzz_row_text(miss).should_not contain("stop-hit")
+  end
 end
 
 describe "Fuzz::Engine — stop_on" do
@@ -171,5 +219,31 @@ describe "Fuzz::Engine — stop_on" do
     be.sent.should eq(3)
     results.last.stop_hit?.should be_true
     done.stop_reason.should_not be_nil
+  end
+
+  it "keeps an operator stop as `stopped` when an in-flight row then meets the condition" do
+    cfg = F::Config.new(concurrency: 1)
+    matcher = F::Matcher.new
+    cond = F::Matcher.new
+    cond.match_regex = /STOP/
+    matcher.stop_condition = cond
+    be = StopDuringSendBackend.new(F::Origin.new("http", "h", 80))
+    gen = F::Generator.new(F::Template.parse("GET /?q=§a§ HTTP/1.1\r\nHost: h\r\n\r\n"),
+      [F::PayloadSet.new(F::InlineList.new(["1", "2", "3"]))], cfg)
+    engine = F::Engine.new(gen, matcher, be, cfg)
+    be.engine = engine
+    results = [] of F::Result
+    done = nil.as(F::DoneEvent?)
+    engine.run do |ev|
+      case ev
+      when F::ResultEvent then results << ev.result
+      when F::DoneEvent   then done = ev
+      end
+    end
+    d = done.not_nil!
+    results.first.stop_hit?.should be_true # the row still says what it saw
+    d.stopped.should be_true
+    d.stop_reason.should be_nil
+    F.terminal_verdict(d.progress, d.stopped, nil, false, d.stop_reason).should eq(F::Terminal::Stopped)
   end
 end
