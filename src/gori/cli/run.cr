@@ -382,9 +382,10 @@ module Gori
                                  prefix : String = "gori run",
                                  project_flag : String = "--project",
                                  db_flag : String = "--db") : String?
-        return nil unless project_name.try(&.presence) && db_path.try(&.presence)
+        name = project_name.try(&.presence)
+        return nil unless name && db_path.try(&.presence)
         "#{prefix}: pass #{db_flag} PATH or #{project_flag} NAME, not both " \
-        "(#{db_flag} names the database file directly, so #{project_flag} #{project_name.inspect} would be ignored)"
+        "(#{db_flag} names the database file directly, so #{project_flag} #{CLI::Output.term_safe(name).inspect} would be ignored)"
       end
 
       # --db wins → else --project resolved via ProjectRegistry#find (exact short id
@@ -411,7 +412,8 @@ module Gori
           end
           return found if found
           projects = registry.list
-          abort "gori run: no project matching '#{name}'#{projects.empty? ? "" : " (have: #{projects.map(&.name).join(", ")})"}"
+          have = projects.empty? ? "" : " (have: #{projects.map { |project| CLI::Output.term_safe(project.name) }.join(", ")})"
+          abort "gori run: no project matching '#{CLI::Output.term_safe(name)}'#{have}"
         end
         default = ProjectRegistry.default_of(registry.list)
         abort "gori run: no projects yet — capture some traffic first, or pass --db PATH" unless default
@@ -446,7 +448,7 @@ module Gori
         @@said_default_project = true
         io = @@default_project_io
         return unless io
-        io.puts "gori run: using project #{project.name} (most recently active) — " \
+        io.puts "gori run: using project #{CLI::Output.term_safe(project.name)} (most recently active) — " \
                 "name another with --project NAME or --db PATH"
       end
 
@@ -472,9 +474,9 @@ module Gori
         begin
           ProjectRegistry.new(Paths.projects_dir).create(name)
         rescue ex : Gori::Error
-          abort "gori run capture: #{ex.message} (#{name.inspect})"
+          abort "gori run capture: #{ex.message} (#{CLI::Output.term_safe(name).inspect})"
         rescue ex : File::Error
-          abort "gori run capture: could not create project #{name.inspect}: #{ex.message}"
+          abort "gori run capture: could not create project #{CLI::Output.term_safe(name).inspect}: #{ex.message}"
         end
       end
 
@@ -737,7 +739,7 @@ module Gori
         lines = report.try(&.notices) || [] of String
         Settings.take_env_syntax_global_migration.try { |g| lines << g.line }
         return if lines.empty?
-        lines.each { |line| io.try &.puts line }
+        lines.each { |line| io.try &.puts CLI::Output.term_safe(line) }
       end
 
       # What to add after SQLite's own sentence, for the two failures that are NOT what the

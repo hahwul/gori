@@ -44,6 +44,44 @@ private def read_archive(path : String) : Hash(String, String)
   contents
 end
 
+private def corrupt_second_entry_deflate(path : String) : Nil
+  bytes = File.read(path).to_slice.dup
+  count = 0
+  (0...bytes.size - 4).each do |index|
+    next unless bytes[index, 4] == Bytes[0x50, 0x4b, 0x03, 0x04]
+    count += 1
+    next unless count == 2
+    name_len = bytes[index + 26].to_i + (bytes[index + 27].to_i << 8)
+    extra_len = bytes[index + 28].to_i + (bytes[index + 29].to_i << 8)
+    data = index + 30 + name_len + extra_len
+    8.times { |offset| bytes[data + offset] = 0xff_u8 }
+    break
+  end
+  File.write(path, bytes)
+end
+
+private def write_minimal_current_database(path : String) : Nil
+  DB.open("sqlite3:#{path}") do |db|
+    db.exec("CREATE TABLE flows (id INTEGER PRIMARY KEY)")
+    db.exec("PRAGMA user_version = #{Gori::Store::Schema::VERSION}")
+  end
+end
+
+class ProjectArchiveFallbackExportSpec < Gori::ProjectArchive::PreparedExport
+  getter? link_attempted : Bool
+
+  def initialize(workdir : String, project : Gori::Project, manifest : Gori::ProjectArchive::Manifest,
+                 inventory : Gori::ProjectArchive::Inventory)
+    @link_attempted = false
+    super(workdir, project.db_path, project, manifest, inventory)
+  end
+
+  protected def link_archive(_source : String, _destination : String) : Nil
+    @link_attempted = true
+    raise IO::Error.new("hard links are unsupported")
+  end
+end
+
 describe Gori::ProjectArchive do
   it "exports a compact WAL snapshot and imports a fresh project without local sidecars" do
     with_archive_project do |registry, project, store, root|
@@ -69,7 +107,7 @@ describe Gori::ProjectArchive do
         prepared_export.inventory.env_vars.should eq(1)
         prepared_export.inventory.upstream_credentials.should be_true
         disclosure = Gori::ProjectArchive.disclosure(prepared_export.inventory)
-        disclosure.should contain("not redacted")
+        disclosure.should contain("unredacted")
         disclosure.should_not contain("session-secret")
         disclosure.should_not contain("env-secret")
         disclosure.should_not contain("proxy-secret")
@@ -102,7 +140,7 @@ describe Gori::ProjectArchive do
           imported_store.count.should eq(1)
           imported_store.setting(Gori::Store::SESSION_SLOTS_KEY).not_nil!.should contain("session-secret")
           imported_store.setting(Gori::Env::PROJECT_VARS_KEY).not_nil!.should contain("env-secret")
-          imported_store.setting(Gori::Settings::PROJECT_UPSTREAM_AUTH_KEY).not_nil!.should contain("proxy-secret")
+          imported_store.setting(Gori::Settings::PROJECT_UPSTREAM_AUTH_KEY).should be_nil
         ensure
           imported_store.close
         end
@@ -154,6 +192,24 @@ describe Gori::ProjectArchive do
     end
   end
 
+  it "falls back to copying and renaming when hard links are unsupported" do
+    with_archive_project do |_registry, project, _store, root|
+      prepared = Gori::ProjectArchive.prepare_export(project)
+      workdir = File.tempname("gori-link-fallback")
+      Dir.mkdir(workdir)
+      fallback = ProjectArchiveFallbackExportSpec.new(workdir, project, prepared.manifest, prepared.inventory)
+      begin
+        archive_path = File.join(root, "copy-installed.gori")
+        fallback.write(archive_path)
+        fallback.link_attempted?.should be_true
+        read_archive(archive_path).keys.sort!.should eq(["gori.db", "manifest.json"])
+      ensure
+        prepared.close
+        fallback.close
+      end
+    end
+  end
+
   it "rejects databases whose schema is newer than this build" do
     with_archive_project do |_registry, project, _store, root|
       exported = Gori::ProjectArchive.prepare_export(project)
@@ -194,6 +250,177 @@ describe Gori::ProjectArchive do
       error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }
       error.message.not_nil!.should contain("manifest says 2 flows")
       error.message.not_nil!.should contain("database has 1")
+    end
+  end
+
+  it "disables imported command and file rules and clears network overrides" do
+    with_archive_project do |registry, project, store, root|
+      store.insert_rule(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+        "GET", "id", Gori::Store::RuleOp::Pipe)
+      store.insert_rule(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+        "GET", "", Gori::Store::RuleOp::ShortCircuit, body_file: "/tmp/importer-secret")
+      store.insert_probe_custom_rule("exec rule", "", "response", "body", "exec", "id",
+        Gori::Store::Severity::Medium)
+      store.set_setting(Gori::Settings::PROJECT_BIND_HOST_KEY, "0.0.0.0")
+      store.set_setting(Gori::Settings::PROJECT_BIND_PORT_KEY, "8443")
+      store.set_setting(Gori::Settings::PROJECT_UPSTREAM_KEY, "http://proxy.attacker.test:8080")
+      store.set_setting(Gori::Settings::PROJECT_UPSTREAM_AUTH_KEY,
+        Gori::Settings::ProjectProxyAuth.new("basic", "user", "secret").to_json)
+      store.set_setting(Gori::Settings::PROJECT_UPSTREAM_DESTINATION_KEY, "*")
+      store.set_setting(Gori::Settings::PROJECT_CONNECT_TIMEOUT_KEY, "15")
+      store.set_setting(Gori::Settings::PROJECT_IO_TIMEOUT_KEY, "30")
+      store.set_setting(Gori::Settings::PROJECT_CAPTURE_MAX_KEY, "16")
+      store.add_host_override("api.example.test", "203.0.113.4")
+      store.set_setting(Gori::Store::AUTHORIZE_IDENTITIES_KEY,
+        Gori::Authorize.serialize([Gori::SessionSlot.new("operator",
+          [{"Authorization", "Bearer identity-secret"}])]))
+      provider_id = store.insert_oast_provider("saved", "interactsh", "https://oast.test", "provider-token", true, 0)
+      store.insert_oast_session(provider_id, "interactsh", "https://oast.test", "correlation",
+        "session-secret", "private-key", "session-token")
+
+      exported = Gori::ProjectArchive.prepare_export(project)
+      archive_path = File.join(root, "unsafe-config.gori")
+      exported.write(archive_path)
+      exported.close
+
+      prepared = Gori::ProjectArchive.prepare_import(archive_path)
+      begin
+        disclosure = Gori::ProjectArchive.disclosure(prepared.inventory)
+        disclosure.should contain("1 pipe Rewriter rule")
+        disclosure.should contain("1 exec Probe rule")
+        disclosure.should contain("1 file-backed short-circuit stub")
+        disclosure.should contain("8 project network settings")
+        disclosure.should contain("1 host override")
+        disclosure.should contain("OAST sessions")
+        disclosure.should contain("provider tokens")
+        disclosure.should contain("Authorize identities")
+
+        imported = prepared.import_into(registry, "Safe copy")
+        copied = Gori::Store.open(imported.db_path)
+        begin
+          copied.match_rules.map(&.enabled?).should eq([false, false])
+          copied.probe_custom_rules.map(&.enabled?).should eq([false])
+          copied.setting(Gori::Settings::PROJECT_BIND_HOST_KEY).should be_nil
+          copied.setting(Gori::Settings::PROJECT_BIND_PORT_KEY).should be_nil
+          copied.setting(Gori::Settings::PROJECT_UPSTREAM_KEY).should be_nil
+          copied.setting(Gori::Settings::PROJECT_UPSTREAM_AUTH_KEY).should be_nil
+          copied.setting(Gori::Settings::PROJECT_UPSTREAM_DESTINATION_KEY).should be_nil
+          copied.setting(Gori::Settings::PROJECT_CONNECT_TIMEOUT_KEY).should be_nil
+          copied.setting(Gori::Settings::PROJECT_IO_TIMEOUT_KEY).should be_nil
+          copied.setting(Gori::Settings::PROJECT_CAPTURE_MAX_KEY).should be_nil
+          copied.host_overrides.should be_empty
+          copied.setting(Gori::Store::AUTHORIZE_IDENTITIES_KEY).not_nil!.should contain("identity-secret")
+          copied.oast_providers.first.token.should eq("provider-token")
+          copied.oast_sessions.first.token.should eq("session-token")
+          copied.oast_sessions.first.private_key_pem.should eq("private-key")
+        ensure
+          copied.close
+        end
+      ensure
+        prepared.close
+      end
+    end
+  end
+
+  it "refuses imported SQLite triggers and views before they can affect sanitization" do
+    with_archive_project do |_registry, project, _store, root|
+      DB.open("sqlite3:#{project.db_path}") do |db|
+        db.exec("CREATE TRIGGER keep_rule AFTER DELETE ON match_rules BEGIN INSERT INTO match_rules (enabled,target,part,pattern,replacement,op) VALUES (1,old.target,old.part,old.pattern,old.replacement,old.op); END")
+        db.exec("CREATE VIEW attacker_view AS SELECT * FROM flows")
+      end
+      exported = Gori::ProjectArchive.prepare_export(project)
+      archive_path = File.join(root, "schema-objects.gori")
+      exported.write(archive_path)
+      exported.close
+
+      error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }
+      error.message.not_nil!.should contain("unsupported SQLite triggers or views")
+    end
+  end
+
+  it "rejects a database with only a flows id column even at the current schema version" do
+    with_archive_project do |_registry, _project, _store, root|
+      database_path = File.join(root, "minimal.db")
+      write_minimal_current_database(database_path)
+      manifest = Gori::ProjectArchive::Manifest.new(1, "crafted", "x",
+        Gori::Store::Schema::VERSION, Time.utc.to_rfc3339, 0_i64)
+      archive_path = File.join(root, "minimal.gori")
+      write_archive(archive_path, [{"manifest.json", manifest.to_json}, {"gori.db", File.read(database_path)}])
+
+      error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }
+      error.message.not_nil!.should contain("missing required column")
+    end
+  end
+
+  it "refuses an escape-laden project name from the archive manifest at registration" do
+    with_archive_project do |registry, project, _store, root|
+      exported = Gori::ProjectArchive.prepare_export(project)
+      archive_path = File.join(root, "unsafe-name.gori")
+      exported.write(archive_path)
+      exported.close
+      entries = read_archive(archive_path)
+      manifest = JSON.parse(entries["manifest.json"]).as_h
+      manifest["project_name"] = JSON::Any.new("Evil\e]0;PWNED\a")
+      entries["manifest.json"] = JSON::Any.new(manifest).to_json
+      write_archive(archive_path, entries.to_a)
+
+      prepared = Gori::ProjectArchive.prepare_import(archive_path)
+      begin
+        error = expect_raises(Gori::Error, /control characters/) { prepared.import_into(registry) }
+        error.message.not_nil!.should contain("provide an explicit safe project name")
+        prefilled_error = expect_raises(Gori::Error) do
+          prepared.import_into(registry, prepared.manifest.project_name)
+        end
+        prefilled_error.message.not_nil!.should contain("project picker")
+        imported = prepared.import_into(registry, "Recovered copy")
+        imported.name.should eq("Recovered copy")
+        registry.list.map(&.name).sort!.should eq(["Recovered copy", project.name].sort!)
+      ensure
+        prepared.close
+      end
+    end
+  end
+
+  it "wraps corrupt deflate streams and removes the partial import directory" do
+    with_archive_project do |_registry, project, _store, root|
+      exported = Gori::ProjectArchive.prepare_export(project)
+      archive_path = File.join(root, "corrupt-deflate.gori")
+      exported.write(archive_path)
+      exported.close
+      corrupt_second_entry_deflate(archive_path)
+
+      prefix = "gori-gori-import"
+      before = Dir.children(Dir.tempdir).count(&.starts_with?(prefix))
+      error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }
+      error.message.not_nil!.should contain("could not read project archive")
+      Dir.children(Dir.tempdir).count(&.starts_with?(prefix)).should eq(before)
+    end
+  end
+
+  it "rejects an archive whose total uncompressed content exceeds the documented cap" do
+    with_archive_project do |_registry, project, _store, root|
+      exported = Gori::ProjectArchive.prepare_export(project)
+      archive_path = File.join(root, "oversized.gori")
+      exported.write(archive_path)
+      exported.close
+
+      bytes = File.read(archive_path).to_slice.dup
+      found_database = false
+      (0...bytes.size - 46).each do |index|
+        next unless bytes[index, 4] == Bytes[0x50, 0x4b, 0x01, 0x02]
+        name_len = bytes[index + 28].to_i + (bytes[index + 29].to_i << 8)
+        filename = String.new(bytes[index + 46, name_len])
+        next unless filename == "gori.db"
+        oversized = (2_i64 * 1024 * 1024 * 1024 + 1).to_u32
+        4.times { |offset| bytes[index + 24 + offset] = ((oversized >> (offset * 8)) & 0xff).to_u8 }
+        found_database = true
+        break
+      end
+      found_database.should be_true
+      File.write(archive_path, bytes)
+
+      error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }
+      error.message.not_nil!.should contain("uncompressed size limit")
     end
   end
 end

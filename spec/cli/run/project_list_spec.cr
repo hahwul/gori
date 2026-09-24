@@ -154,6 +154,39 @@ describe Gori::Store do
 end
 
 describe "gori run project list" do
+  it "neutralizes legacy terminal controls in human project names" do
+    safe_name = Gori::CLI::Output.term_safe("bad\e]0;owned\a")
+    safe_name.should contain("bad")
+    safe_name.should contain("owned")
+    safe_name.should_not contain('\e')
+    safe_name.should_not contain('\a')
+
+    safe_c1_name = Gori::CLI::Output.term_safe("bad\u{009b}name")
+    safe_c1_name.should contain("bad")
+    safe_c1_name.should contain("name")
+    safe_c1_name.should_not contain("\u{009b}")
+
+    source = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run", "project.cr"))
+    source.should contain("CLI::Output.pad(terminal_project_name(pr.name), 24)")
+    source.should contain("terminal_project_name(project.name, quoted: true)")
+    source.should contain("terminal_project_name(project.name)}  (id")
+    source.should contain("projects.map { |project| terminal_project_name(project.name) }")
+
+    cli_root = File.join(__DIR__, "..", "..", "..", "src", "gori", "cli")
+    run_source = File.read(File.join(cli_root, "run.cr"))
+    run_source.should contain("CLI::Output.term_safe(project.name)")
+    run_source.should contain("CLI::Output.term_safe(project.name) }.join")
+    run_source.should contain("CLI::Output.term_safe(name)")
+    run_source.should contain("CLI::Output.term_safe(name).inspect")
+    run_source.should contain("CLI::Output.term_safe(line)")
+    rewriter = File.read(File.join(cli_root, "run", "rewriter.cr"))
+    rewriter.should contain("CLI::Output.term_safe(project.name)")
+    colormarker = File.read(File.join(cli_root, "run", "colormarker.cr"))
+    colormarker.should contain("CLI::Output.term_safe(project.name)")
+    source.should contain("terminal_project_name(positional.first)")
+    source.should contain("terminal_project_name(name)}'")
+  end
+
   it "omits a project with nothing captured in it" do
     with_project_root do |registry|
       busy = registry.create("busy")
