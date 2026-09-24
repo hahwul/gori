@@ -256,6 +256,20 @@ module Gori
         # traversal payload, or a binary body. A JSON string reaches the store as its UTF-8
         # encoding, so those bytes could previously only arrive via a Burp XML file on disk.
         request = base64_str(h, "request_base64") || str(h, "request")
+        # `curl` is the third way to hand a request in (#1244): a copied curl command, parsed by
+        # the importer every surface shares, which also answers `target` (the URL's origin) and
+        # `http2` (curl's --http2) unless those are given. A second request source beside it
+        # would have to lose silently, so it is refused like the CLI's pair of sources is.
+        curl_req = nil.as(Import::Curl::Request?)
+        if curl_text = str(h, "curl")
+          if request
+            return Result.new("pass 'curl' or 'request'/'request_base64', not both — each one is the whole request",
+              is_error: true)
+          end
+          curl_req = Import::Curl.parse_one(curl_text)
+          request = curl_req.text
+          target = curl_req.origin if target.nil? || target.empty?
+        end
 
         if issue_id
           issue = store.get_issue(issue_id)
@@ -298,6 +312,7 @@ module Gori
           ws_messages_override = seed.ws_messages
           notice_rows_dropped = seed.notice_rows_dropped
         end
+        http2 = curl_req.http2? if curl_req && http2_val.nil?
         return Result.new("missing required 'target'", is_error: true) if target.nil? || target.empty?
         return Result.new("missing required 'request'", is_error: true) if request.nil? || request.empty?
 
@@ -428,6 +443,11 @@ module Gori
             # How many frames were actually stored, so an agent authoring a multi-frame
             # sequence can assert on it rather than take the count on trust.
             j.field "ws_out_message_count", ws_count if ws_count
+            # What the curl command said that the session does not carry (its transport flags,
+            # a path curl would have collapsed), masked like every other echoed string here.
+            if (c = curl_req) && !c.notes.empty?
+              j.field "curl_notes", c.notes.map { |n| Env.mask_secrets(n) }
+            end
             # Only when it FIRED. The seed holds fewer frames than the capture, and a count
             # an agent asserts on has to come with the reason it is short.
             if notice_rows_dropped > 0
@@ -1199,8 +1219,10 @@ module Gori
           "OR ('flow_id') OR ('issue_id'). The reply carries both 'id' (the durable database id, " \
           "which every tool here takes) and 'tui_index' (the 1-based number the TUI paints on the " \
           "sub-tab chip, which is what the operator says out loud). To seed many tabs from one " \
-          "import, use create_repeaters." do |s|
+          "import, use create_repeaters. A copied curl command can stand in for 'target' and " \
+          "'request': pass it as 'curl'." do |s|
           s.field "target", strprop("absolute target URL (scheme+host+optional port), e.g. https://api.example.com")
+          s.field "curl", strprop("a curl command to build the request from (curl's own flag meanings: -b is a cookie, -d a body). Supplies 'target' (the URL's origin) and 'http2' (curl's --http2) unless given; transport flags (-k, -x, -L…) are ignored and listed in curl_notes. Exclusive with 'request'/'request_base64'")
           s.field "request", strprop(%(verbatim raw HTTP request bytes/text — stored byte-for-byte and never repaired or refused, because a malformed request is a legitimate thing to send. A head with no blank-line terminator is therefore kept (and is what shell $(...) leaves behind, since it strips trailing newlines); the reply, get_repeater_context and send_request all carry head_unterminated:true for such a session))
           s.field "request_base64", strprop("the raw HTTP request as base64 — the byte-exact form; use it when the request carries an octet a JSON string cannot (0x00, 0x80-0xFF, invalid UTF-8, a binary body). Overrides 'request'")
           s.field "http2", boolprop("use HTTP/2 (default false)")
