@@ -230,7 +230,7 @@ module Gori
         config.max_requests = cap ? {cap, MINE_MAX_REQUESTS}.min : MINE_MAX_REQUESTS
         config.user_wordlist = str(h, "wordlist").presence
         config.seed_names = begin
-          str_list(h, "names")
+          str_list(h, "names").flat_map(&.split(',')).map(&.strip).reject(&.empty?)
         rescue ex : Gori::Error
           raise FuzzArgError.new(ex.message || "invalid 'names'")
         end
