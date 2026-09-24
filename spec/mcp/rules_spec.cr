@@ -274,6 +274,38 @@ describe Gori::MCP::Server do
       end
     end
 
+    it "lists an unknown rule as inert, refuses enable/edit, and still allows deletion" do
+      with_store do |store|
+        id = store.insert_rule(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+          "POST /pay", "HTTP/1.1 200 OK", name: "future rule")
+        store.@db.exec("UPDATE match_rules SET op = 'future_short_circuit', part = 'future_head' WHERE id = ?", id)
+
+        listed = mcp_tool_payload(mcp_drive(store, %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_rules"}}))[0])
+        rule = listed["rules"][0]
+        rule["op"].as_s.should eq("future_short_circuit")
+        rule["part"].as_s.should eq("future_head")
+        rule["inert"].as_bool.should be_true
+        rule["inert_reason"].as_s.should contain("unknown op \"future_short_circuit\"")
+
+        enable = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"set_rule_enabled","arguments":{"id":#{id},"enabled":true}}})
+        refused_enable = mcp_drive(store, enable)[0]["result"]
+        refused_enable["isError"].as_bool.should be_true
+        refused_enable["structuredContent"]["error_code"].as_s.should eq("INVALID_ARGUMENT")
+        refused_enable["structuredContent"]["message"].as_s.should contain("cannot enable")
+        store.match_rules.first.enabled?.should be_true
+
+        update = %({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"update_rule","arguments":{"id":#{id},"replacement":"changed"}}})
+        refused_update = mcp_drive(store, update)[0]["result"]
+        refused_update["isError"].as_bool.should be_true
+        refused_update["structuredContent"]["message"].as_s.should contain("cannot edit")
+        store.match_rules.first.replacement.should eq("HTTP/1.1 200 OK")
+
+        delete = %({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"delete_rule","arguments":{"id":#{id}}}})
+        mcp_tool_payload(mcp_drive(store, delete)[0])["deleted"].as_bool.should be_true
+        store.match_rules.should be_empty
+      end
+    end
+
     # `ConfigLog` is recorded at the MODEL — see its header, which says one site there covers
     # TUI, CLI and MCP at once — but this tool family wrote straight at `Store`/`Settings` and
     # never reached it. So `rule_add`/`rule_update`/`rule_toggle`/`rule_remove` were events NO

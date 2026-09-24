@@ -147,14 +147,14 @@ describe Gori::PeerNotices do
       notices.flush(Time.instant).should be_nil
     end
 
-    it "drops the bell for a change that leaves nothing enabled" do
-      # Nothing enabled means nothing on the wire moved, whatever just happened to the list.
+    it "drops the bell for a change that leaves no active rule" do
+      # No active rule means nothing on the wire moved, whatever just happened to the list.
       t0 = Time.instant
       p = notices
       p.record_rules(Gori::RuleSetChange.new(changed: 2, reordered: false, enabled: 0), t0)
       note = p.flush(t0 + 5.seconds).not_nil!
       note.level.should eq(:info)
-      note.message.should contain("none are enabled")
+      note.message.should contain("none are active")
     end
 
     it "names a pure REORDER as what it is, never as zero rules changed" do
@@ -219,6 +219,21 @@ describe Gori::RuleSetChange do
     key = ->(r : Gori::Store::MatchRule) { {r.scope, r.id} }
     change = Gori::RuleSetChange.between([project], [global, project], key).not_nil!
     change.changed.should eq(1) # the global arrived; the project rule is untouched
+  end
+
+  it "counts a caller's live rules instead of raw enabled rows when asked" do
+    inert_pipe = Gori::Store::MatchRule.new(1_i64, true, Gori::Store::RuleTarget::Request,
+      Gori::Store::RulePart::Head, "a", "command", Gori::Store::RuleOp::Pipe,
+      unknown_target: "future_side")
+    active_replace = Gori::Store::MatchRule.new(2_i64, true, Gori::Store::RuleTarget::Request,
+      Gori::Store::RulePart::Head, "a", "b")
+    change = Gori::RuleSetChange.between([] of Gori::Store::MatchRule, [inert_pipe, active_replace],
+      ->(r : Gori::Store::MatchRule) { r.id },
+      ->(r : Gori::Store::MatchRule) { r.active? && r.op.executes? },
+      ->(r : Gori::Store::MatchRule) { r.active? }).not_nil!
+
+    change.enabled.should eq(1)
+    change.executes.should eq(0)
   end
 end
 

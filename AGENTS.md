@@ -55,6 +55,10 @@ parity with it, and every parity gap found so far has been in a surface, not an 
 - Adding a feature means: engine + `Plan.build` path once, then a thin adapter in each of
   `src/gori/tui/`, `src/gori/cli/run/`, `src/gori/mcp/tools/`. Parity is a convention held by
   each surface calling the same engines, not by a shared dispatcher ([DESIGN.md §2](.github/DESIGN.md)).
+- Unknown Rewriter labels read from settings or a project database stay raw and inert; enum
+  fallback values are projections for listing, never permission to rewrite. `MatchRule#inert?`
+  gates both replacement and short-circuit selection. Surfaces may list and delete such rows,
+  but must not enable, edit, duplicate, move or reorder them.
 - The seam is **not** the `Verb` registry. Its 318 verbs are TUI-only by decision: a verb reads
   its target from TUI selection state instead of naming it, and the missing argument schema is
   the blocker, not registry wiring (`src/gori/verb.cr`, DESIGN.md §7). Do not "fix" parity by

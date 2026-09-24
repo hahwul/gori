@@ -3393,3 +3393,15 @@ round trip `Export::Curl` → `Import::Curl` returning the same bytes is the con
 exported command sent something other than the capture: curl collapses `..` path segments and
 adds a form Content-Type to a body that had none. The export now writes `--path-as-is` and
 `-H 'Content-Type:'` for those cases.
+
+### 2026-09-24: unknown rewrite labels stay inert until this binary understands them
+
+#1242. A settings file or project database may have been written by a newer gori. Project
+databases have no constraint on the rewriter enum columns, and settings parsing historically
+clamped an unrecognised label to that field's live default. Thus a future `short_circuit` op
+could become `replace` in an older binary and rewrite traffic. Keep each raw label beside its
+total enum projection in `MatchRule`; `inert?` is the shared gate for replacement and
+short-circuit selection. Settings saves retain the raw strings. TUI, CLI and MCP list the raw
+labels and explain the unsupported fields; they refuse to edit or enable such a rule while
+allowing deletion. The scope is the rewriter grammar fields (`target`, `part`, `op`, and
+`match_kind`), so the guard also covers a label added to an existing enum.

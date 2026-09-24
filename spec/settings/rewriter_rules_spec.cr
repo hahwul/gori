@@ -7,7 +7,7 @@ require "file_utils"
 # fields are stored as the same labels `gori run rewriter` prints, precisely so the file reads
 # the way the CLI does.
 #
-# Which is what makes the SHAPE the parse's business too. The four enum fields are clamped
+# Which is what makes the SHAPE the parse's business too. The enum fields are parsed
 # INDEPENDENTLY, so `{op: "set_header", part: "ws"}` — a pair the CLI and MCP tools both REFUSE
 # outright rather than normalize — used to arrive in the rule list intact. A header op acts by
 # header NAME and only a head has header lines, so it can never fire; `Rules`' own `rewrites?`
@@ -107,6 +107,47 @@ describe "Gori::Settings rewriter rule shape" do
       rule.name.should eq("strip")
       rule.pattern.should eq("X-Bad")
       rule.host.should eq("*.corp.internal")
+    end
+  end
+
+  it "preserves unknown enum labels through save and keeps those rows inert" do
+    with_rewriter_home do
+      write_settings(<<-JSON)
+        {"rewriter": {"rules": [
+          {"id": 1, "enabled": true, "pattern": "POST /pay", "replacement": "HTTP/1.1 200 OK", "op": "future_short_circuit"},
+          {"id": 2, "enabled": true, "pattern": "X-Trace", "replacement": "on", "op": "set_header", "part": "future_head"},
+          {"id": 3, "enabled": true, "pattern": "/pay", "replacement": "cat", "target": "future_side", "op": "pipe"},
+          {"id": 4, "enabled": true, "pattern": "secret", "replacement": "masked", "target": "response", "part": "body", "op": "replace", "match_kind": "future_match"}
+        ]}}
+        JSON
+      Gori::Settings.load
+
+      rules = Gori::Settings.rewriter_rules
+      rules.size.should eq(4)
+      rules.map(&.op).should eq(["future_short_circuit", "set_header", "pipe", "replace"])
+      rules[1].part.should eq("future_head") # unknown part is kept even with a header op
+      rules[2].target.should eq("future_side")
+      rules[3].match_kind.should eq("future_match")
+      rules.all?(&.inert?).should be_true
+      rules[0].to_rule.inert_reason.should eq("unknown op \"future_short_circuit\" (newer gori?)")
+      rules[0].executes?.should be_false
+      rules[0].command.should be_nil
+      rules[2].executes?.should be_true
+      rules[2].command.should eq("cat")
+      Gori::Settings.command_entries(JSON.parse(File.read(Gori::Settings.path))).any? do |entry|
+        entry.kind == "pipe" && entry.command == "cat"
+      end.should be_true
+
+      Gori::Settings.add_rewriter_rule("request", "head", "X-New", "value",
+        "replace", "literal", "new", "", "").should eq(5_i64)
+      Gori::Settings.save.should be_true
+      rows = JSON.parse(File.read(Gori::Settings.path))["rewriter"]["rules"].as_a
+      rows.map(&.["op"].as_s).should eq(["future_short_circuit", "set_header", "pipe", "replace", "replace"])
+      rows[1]["part"].as_s.should eq("future_head")
+      rows[2]["target"].as_s.should eq("future_side")
+      rows[3]["target"].as_s.should eq("response")
+      rows[3]["part"].as_s.should eq("body")
+      rows[3]["match_kind"].as_s.should eq("future_match")
     end
   end
 end

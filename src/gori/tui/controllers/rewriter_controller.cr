@@ -895,6 +895,7 @@ module Gori::Tui
 
     def rewriter_edit : Nil
       if rule = selected_rule
+        return @host.status("#{rule.inert_reason} — can't edit this rule; delete it or use a newer gori") if rule.inert?
         @host.open_rewriter_rule_editor(rule)
       else
         @host.status("no rewrite rule selected")
@@ -926,6 +927,7 @@ module Gori::Tui
     def rewriter_toggle : Nil
       rule = selected_rule || return @host.status("no rewrite rule selected")
       unless rules_engine.toggle(rule.id, rule.scope)
+        return @host.status("#{rule.inert_reason} — can't enable this rule; use a newer gori") if rule.inert? && !rule.enabled?
         return @host.status("enable/disable NOT applied (project busy) — the rule is unchanged")
       end
       state = rule.enabled? ? "disabled" : "enabled"
@@ -936,6 +938,9 @@ module Gori::Tui
     def rewriter_toggle_default : Nil
       rule = selected_rule || return @host.status("no rewrite rule selected")
       return @host.status("only a global rule has a default — this one is project-scoped") unless rule.global?
+      if rule.inert? && (global = Settings.rewriter_rules.find { |r| r.id == rule.id }) && !global.enabled
+        return @host.status("#{rule.inert_reason} — can't enable this rule; use a newer gori")
+      end
       unless rules_engine.toggle_default(rule.id)
         return @host.status("default NOT changed (settings not writable) — the rule is unchanged")
       end
@@ -951,6 +956,7 @@ module Gori::Tui
       # Only follow the rule when it actually moved: ⇧J on the last GLOBAL rule cannot push it
       # into the project block (that is a scope change, `s`), and walking the cursor there
       # anyway would read as a swap that never happened.
+      return @host.status("#{rule.inert_reason} — can't reorder this rule; use a newer gori") if rule.inert?
       if rules_engine.move(rule.id, dir, rule.scope)
         move_sel(dir)
       elsif !at_scope_edge?(rule, dir)
@@ -982,6 +988,7 @@ module Gori::Tui
     # all. For a global rule `enabled?` is its state HERE, which is the state on that row.
     def rewriter_duplicate : Nil
       rule = selected_rule || return @host.status("no rewrite rule selected")
+      return @host.status("#{rule.inert_reason} — can't duplicate this rule; use a newer gori") if rule.inert?
       name = rule.name.empty? ? "" : "#{rule.name} copy"
       unless rules_engine.add(rule.target, rule.part, rule.pattern, rule.replacement,
                rule.op, rule.match_kind, name, rule.host, rule.body_file, scope: rule.scope,
@@ -1002,6 +1009,7 @@ module Gori::Tui
     # its fields and the state it has HERE; what changes is who else sees it.
     def rewriter_scope_toggle : Nil
       rule = selected_rule || return @host.status("no rewrite rule selected")
+      return @host.status("#{rule.inert_reason} — can't move this rule; use a newer gori") if rule.inert?
       to = rule.global? ? Store::RuleScope::Project : Store::RuleScope::Global
       unless rules_engine.set_scope(rule, to)
         return @host.status("scope NOT changed (project busy or settings not writable) — the rule is unchanged")
@@ -1027,6 +1035,7 @@ module Gori::Tui
       return false unless ov.valid?
       if id = ov.edit_id
         from = ov.edit_scope || Store::RuleScope::Project
+        return true if reject_inert_edit?(id, from)
         unless rules_engine.update(id, ov.target, ov.part, ov.pattern, ov.replacement,
                  ov.op, ov.match_kind, ov.name, ov.host, ov.body_file, scope: from)
           @host.status("rule NOT saved (project busy or settings not writable) — it is unchanged")
@@ -1054,6 +1063,13 @@ module Gori::Tui
         # A global rule lands at the end of the GLOBAL block, which is not the end of the list.
         @sel = last_index_of_scope(ov.scope)
       end
+      true
+    end
+
+    private def reject_inert_edit?(id : Int64, scope : Store::RuleScope) : Bool
+      rule = rule_list.find { |r| r.id == id && r.scope == scope }
+      return false unless rule && rule.inert?
+      @host.status("#{rule.inert_reason} — can't edit this rule; delete it or use a newer gori")
       true
     end
 

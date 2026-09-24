@@ -326,11 +326,10 @@ module Gori::Tui
       screen.fill(Rect.new(rect.x, py, w, 1), bg)
       screen.cell(rect.x, py, selected ? '▎' : ' ', Theme.accent, bg)
       x = rect.x + 2
-      mark = rule.enabled? ? '✓' : '·'
-      screen.cell(x, py, mark, rule.enabled? ? Theme.accent : Theme.muted, bg)
+      screen.cell(x, py, rule_mark(rule), rule_mark_color(rule), bg)
       x += 2
       x = render_scope_badge(screen, rule, x, py, bg)
-      fg = rule.enabled? ? (selected ? Theme.text_bright : Theme.text) : Theme.muted
+      fg = rule.active? ? (selected ? Theme.text_bright : Theme.text) : Theme.muted
       screen.text(x, py, rule.target.request? ? "REQ" : "RES", fg, bg)
       x += 4
       tag = op_tag(rule)
@@ -348,6 +347,15 @@ module Gori::Tui
       end
       desc = describe(rule)
       screen.text(x, py, desc, fg, bg, width: {rect.right - x, 1}.max) if x < rect.right
+    end
+
+    private def rule_mark(rule : Store::MatchRule) : Char
+      return '?' if rule.inert?
+      rule.enabled? ? '✓' : '·'
+    end
+
+    private def rule_mark_color(rule : Store::MatchRule) : Color
+      rule.active? ? Theme.accent : Theme.muted
     end
 
     # WHERE the rule lives: `G` = the global library (every project), `P` = this project's own

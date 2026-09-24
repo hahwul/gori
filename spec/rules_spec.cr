@@ -895,14 +895,11 @@ describe Gori::Rules do
     end
   end
 
-  # `match_rules` carries no CHECK constraint on `target`/`part`, so a hand-edited DB — or a
-  # project file written by a build whose label set has drifted — can hold a value the enum
-  # does not know. Two of the four enum readers on that row were TOTAL (`RuleOp`, `MatchKind`)
-  # and two called the raising `Enum.parse`, so one such row took `gori run rewriter list`
-  # down with an `ArgumentError` backtrace, by way of `Rules.merged`. All four are total now:
-  # a stored row must not be able to raise on the way out of the store.
+  # `match_rules` carries no CHECK constraint on its enum fields, so a hand-edited DB or a
+  # project file written by a newer build can hold labels this binary does not know. Keep the
+  # safe fallback projections for callers, but also retain the labels and make the rule inert.
   describe "a stored rule whose enum labels have drifted" do
-    it "reads as the defaults rather than raising out of the store" do
+    it "keeps the raw labels beside fallback projections rather than raising" do
       with_store do |store|
         store.insert_rule(Gori::Store::RuleTarget::Response, Gori::Store::RulePart::Body,
           "foo", "bar", name: "t")
@@ -911,6 +908,9 @@ describe Gori::Rules do
         rules.size.should eq(1)
         rules.first.target.should eq(Gori::Store::RuleTarget::Request)
         rules.first.part.should eq(Gori::Store::RulePart::Head)
+        rules.first.target_label.should eq("bogus")
+        rules.first.part_label.should eq("bogus")
+        rules.first.inert?.should be_true
       end
     end
 
@@ -920,6 +920,63 @@ describe Gori::Rules do
       Gori::Store::RulePart.from_label("head").should eq(Gori::Store::RulePart::Head)
       Gori::Store::RulePart.from_label("body").should eq(Gori::Store::RulePart::Body)
       Gori::Store::RulePart.from_label("ws").should eq(Gori::Store::RulePart::Ws)
+    end
+
+    it "preserves future op and shape labels and skips each inert row on live traffic" do
+      with_store do |store|
+        unknown_op = store.insert_rule(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+          "POST /pay", "HTTP/1.1 200 OK\r\n\r\nlocal stub", name: "future stub")
+        unknown_target = store.insert_rule(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+          "POST /pay", "changed", name: "future side")
+        unknown_part = store.insert_rule(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+          "POST /pay", "changed", name: "future part")
+        unknown_match = store.insert_rule(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+          "POST /pay", "changed", name: "future match")
+        store.@db.exec("UPDATE match_rules SET op = 'future_short_circuit' WHERE id = ?", unknown_op)
+        store.@db.exec("UPDATE match_rules SET target = 'future_side' WHERE id = ?", unknown_target)
+        store.@db.exec("UPDATE match_rules SET part = 'future_part' WHERE id = ?", unknown_part)
+        store.@db.exec("UPDATE match_rules SET match_kind = 'future_match' WHERE id = ?", unknown_match)
+
+        rows = store.match_rules
+        rows.find! { |r| r.id == unknown_op }.op_label.should eq("future_short_circuit")
+        rows.find! { |r| r.id == unknown_target }.target_label.should eq("future_side")
+        rows.find! { |r| r.id == unknown_part }.part_label.should eq("future_part")
+        rows.find! { |r| r.id == unknown_match }.match_kind_label.should eq("future_match")
+        rows.all?(&.inert?).should be_true
+
+        engine = Gori::Rules.load(store)
+        engine.active?.should be_false
+        engine.enabled_count.should eq(0)
+        head = "POST /pay HTTP/1.1\r\nHost: api.example.com\r\n\r\n".to_slice
+        engine.rewrite_request(head, "api.example.com").should eq(head)
+        engine.short_circuits?.should be_false
+        engine.short_circuit(head, "api.example.com").should be_nil
+
+        engine.set_enabled(unknown_op, true).should be_false
+        engine.move(unknown_op, 1).should be_false
+        engine.set_scope(rows.find! { |r| r.id == unknown_op }, Gori::Store::RuleScope::Global).should be_false
+        engine.update(unknown_op, Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+          "POST /pay", "changed").should be_false
+        engine.remove(unknown_op).should be_true
+        store.match_rules.any? { |r| r.id == unknown_op }.should be_false
+      end
+    end
+
+    it "does not select a short-circuit rule with an unknown target or part" do
+      with_store do |store|
+        target_id = store.insert_rule(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+          "/pay", "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n", op: Gori::Store::RuleOp::ShortCircuit)
+        part_id = store.insert_rule(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+          "/admin", "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n", op: Gori::Store::RuleOp::ShortCircuit)
+        store.@db.exec("UPDATE match_rules SET target = 'future_side' WHERE id = ?", target_id)
+        store.@db.exec("UPDATE match_rules SET part = 'future_part' WHERE id = ?", part_id)
+
+        engine = Gori::Rules.load(store)
+        engine.short_circuits?.should be_false
+        engine.short_circuits_for_host?("api.example.com").should be_false
+        head = "GET /pay HTTP/1.1\r\nHost: api.example.com\r\n\r\n".to_slice
+        engine.short_circuit(head, "api.example.com").should be_nil
+      end
     end
   end
 end

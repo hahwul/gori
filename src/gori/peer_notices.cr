@@ -136,7 +136,7 @@ module Gori
       if (change = rules) && change.executes > 0
         return executes_notice(change, extract, by_agent)
       end
-      # ONE level for the whole line. A change that leaves nothing enabled cannot move a byte on
+      # ONE level for the whole line. A change that leaves no active rule cannot move a byte on
       # the wire, whatever just happened to the list — and the operator must not get a bell or no
       # bell depending only on whether the peer happened to touch one list or two.
       quiet = ((rules.try(&.enabled) || 0) + (extract.try(&.enabled) || 0)).zero?
@@ -185,7 +185,7 @@ module Gori
     # burst that edited one rule AND moved another: the count then carries the edit and nothing
     # would carry the precedence move, which is the only thing that field was added for.
     private def consequence(change : RuleSetChange, live : String, reorder : String) : String
-      return "none are enabled, nothing on the wire" if change.enabled.zero?
+      return "none are active, nothing on the wire" if change.enabled.zero?
       return reorder if change.changed.zero?
       change.reordered ? "#{live}, and in a new order" : live
     end
