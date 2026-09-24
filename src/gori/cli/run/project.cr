@@ -7,6 +7,8 @@ module Gori
       @[Subcommand("project", help: [
         {"project [list]", "List projects holding captured traffic (--all for every one)"},
         {"project create", "Create (or reopen) a project by name"},
+        {"project export", "Export a project to a portable archive"},
+        {"project import", "Import a project archive as a new project"},
         {"project delete", "Delete a project and everything captured in it"},
         {"project scope", "Manage scope rules (list, add, update, delete, enable/disable)"},
         {"project sandbox", "Get/set the hard-containment sandbox gate (status, on, off)"},
@@ -25,6 +27,8 @@ module Gori
           cmd_project_list(args[1..])
         when "create"
           cmd_project_create(args[1..])
+        when "export", "import"
+          cmd_project_archive(args)
         when "delete", "rm"
           cmd_project_delete(args[1..])
         when "scope"
@@ -39,6 +43,14 @@ module Gori
           cmd_project_network(args[1..])
         else
           cmd_project_other(sub, args)
+        end
+      end
+
+      private def self.cmd_project_archive(args : Array(String)) : Nil
+        case args.first?
+        when "export" then cmd_project_export(args[1..])
+        when "import" then cmd_project_import(args[1..])
+        else               abort "gori run project: expected export or import"
         end
       end
 
@@ -64,6 +76,8 @@ module Gori
                                --query=TEXT narrows to the ones whose name, slug, short id
                                or bound workspace path contains TEXT
             create <name>      Create (or reopen) a project by name
+            export <name>      Write a portable project archive (-o PATH)
+            import <archive>   Import a project archive as a new project
             delete|rm <name>   Delete a project and everything captured in it
             scope              Manage scope rules (list, add, update, delete, enable/disable)
             sandbox            Get/set the hard-containment sandbox gate (status, on, off)
@@ -331,6 +345,103 @@ module Gori
         abort "gori run project create: could not create project #{name.inspect}: #{ex.message}"
       rescue ex : DB::Error | SQLite3::Exception
         abort "gori run project create: could not initialize the database for #{name.inspect}: #{ex.message}"
+      end
+
+      # Export first makes a WAL-safe snapshot, then shows the sensitive-data inventory before
+      # writing the archive. Existing destinations require an explicit --force.
+      private def self.cmd_project_export(args : Array(String)) : Nil
+        output = nil.as(String?)
+        force = false
+        positional = [] of String
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run project export <name> -o PATH [--force]\n\n" \
+                     "Snapshot a project database into one portable .gori archive."
+          p.on("-o PATH", "--output=PATH", "Write the archive to PATH") { |v| output = v }
+          p.on("--force", "Replace an existing destination file") { force = true }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |before, after| positional = before + after }
+          p.invalid_option { |f| abort "gori run project export: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run project export: missing value for #{f}" }
+        end
+        parser.parse(args)
+        abort "gori run project export: missing <name>" if positional.empty?
+        abort "gori run project export: too many arguments (expected one <name>)" if positional.size > 1
+        output_path = output.try(&.strip.presence) || abort "gori run project export: missing -o PATH"
+
+        registry = ProjectRegistry.new(Paths.projects_dir)
+        project = begin
+          registry.find(positional.first)
+        rescue ex : ProjectRegistry::Ambiguous
+          abort "gori run project export: #{ex.message}"
+        end
+        abort "gori run project export: no project matching '#{positional.first}'" unless project
+
+        prepared = begin
+          ProjectArchive.prepare_export(project)
+        rescue ex : Gori::Error
+          abort "gori run project export: #{ex.message}"
+        rescue ex : File::Error | IO::Error | DB::Error | SQLite3::Exception
+          abort "gori run project export: could not snapshot #{project.name.inspect}: #{ex.message}"
+        end
+        begin
+          STDERR.puts "gori run project export: #{project.name.inspect} — " \
+                      "#{ProjectArchive.disclosure(prepared.inventory)}"
+          destination = begin
+            prepared.write(output_path, overwrite: force)
+          rescue ex : Gori::Error
+            prepared.close
+            abort "gori run project export: #{ex.message}"
+          rescue ex : File::Error | IO::Error | DB::Error | SQLite3::Exception
+            prepared.close
+            abort "gori run project export: could not write archive: #{ex.message}"
+          end
+          puts "Project #{project.name.inspect} exported to #{destination}."
+        ensure
+          prepared.close
+        end
+      end
+
+      # An import never reopens or overwrites an existing project. --name gives the imported
+      # copy a different display name when the archive came from this same registry.
+      private def self.cmd_project_import(args : Array(String)) : Nil
+        name = nil.as(String?)
+        positional = [] of String
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run project import <archive.gori> [--name NEW]\n\n" \
+                     "Validate and register a portable project archive."
+          p.on("--name=NAME", "Display name for the imported project (default: archive name)") { |v| name = v }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |before, after| positional = before + after }
+          p.invalid_option { |f| abort "gori run project import: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run project import: missing value for #{f}" }
+        end
+        parser.parse(args)
+        abort "gori run project import: missing <archive>" if positional.empty?
+        abort "gori run project import: too many arguments (expected one <archive>)" if positional.size > 1
+
+        prepared = begin
+          ProjectArchive.prepare_import(positional.first)
+        rescue ex : Gori::Error
+          abort "gori run project import: #{ex.message}"
+        rescue ex : File::Error | IO::Error | DB::Error | SQLite3::Exception
+          abort "gori run project import: could not read archive: #{ex.message}"
+        end
+        begin
+          STDERR.puts "gori run project import: #{prepared.manifest.project_name.inspect} — " \
+                      "#{ProjectArchive.disclosure(prepared.inventory)}"
+          project = begin
+            prepared.import_into(ProjectRegistry.new(Paths.projects_dir), name)
+          rescue ex : Gori::Error
+            prepared.close
+            abort "gori run project import: #{ex.message}"
+          rescue ex : File::Error | IO::Error
+            prepared.close
+            abort "gori run project import: could not register project: #{ex.message}"
+          end
+          puts "Project #{project.name.inspect} imported (#{project.db_path})."
+        ensure
+          prepared.close
+        end
       end
 
       # `gori run project delete` — remove a project directory and everything in it. Until

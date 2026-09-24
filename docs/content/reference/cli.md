@@ -95,6 +95,8 @@ gori run <subcommand> [verb] [options]
 | `grpc [schema]` · `reflect` · `forget` | The gRPC `.proto` lens: show what is loaded, fetch descriptors by server reflection, drop a cached target |
 | `project [list]` | List known projects |
 | `project create <name>` | Create (or reopen) a project by name |
+| `project export <name>` | Save a compact, WAL-safe `.gori` project archive |
+| `project import <archive>` | Add a project archive as a new project |
 | `project delete <name>` | Delete a project and everything captured in it (`--yes` to confirm) |
 | `project scope` | List / add / update / delete / enable / disable scope rules |
 | `project sandbox` | Get / set the hard-containment sandbox gate (`status`, `on`, `off`) |
@@ -1313,7 +1315,7 @@ Deleting the view a project is currently looking through drops that project back
 
 ### run project
 
-List, create, or delete projects, or manage project-scoped config (scope rules, env vars, host overrides):
+List, create, export, import, or delete projects, or manage project-scoped config (scope rules, env vars, host overrides):
 
 ```bash
 gori run project --format json
@@ -1349,6 +1351,39 @@ gori run project create api-test --format json
 | `--format=FMT` | `text` (default) or `json` |
 
 A name that already exists reopens that project instead of failing; `--format json` reports it as `"created": false`. The reopen rewrites the stored display name (so its casing follows the last create) and replaces the description when `--description` is given. A new name that is already another project's directory slug or short id is refused, since `--project` could not then reach the project it made.
+
+#### project export
+
+Export one project's database, including committed writes still in its WAL, to a compact archive. The source project stays open and unchanged.
+
+```bash
+gori run project export "API test" -o engagement.gori
+gori run project export api-test --output=before-clear.gori --force
+```
+
+| Option / subcommand | Description |
+|---------------------|-------------|
+| `<name>` | Project display name, directory slug, or short id |
+| `-o PATH`, `--output=PATH` | Destination archive path (required) |
+| `--force` | Replace an existing destination file |
+
+Before writing, gori prints flow, session-slot and project env-var counts, and whether project upstream credentials are set, to stderr. The archive copies the full database as stored, without redaction, and is created with owner-only file permissions. Existing files are refused unless `--force` is given; the destination cannot be inside the source project directory.
+
+#### project import
+
+Validate an archive and register it as a separate project. Import never replaces or reopens an existing project.
+
+```bash
+gori run project import engagement.gori
+gori run project import engagement.gori --name "API test copy"
+```
+
+| Option / subcommand | Description |
+|---------------------|-------------|
+| `<archive>` | Path to a `.gori` project archive |
+| `--name=NAME` | Display name for the imported project (defaults to the archived name) |
+
+Before creating the project, gori prints the archive's flow, session-slot and env-var counts, and whether project upstream credentials are set, to stderr. An existing display name, directory slug, or short id is refused; choose a different `--name` to resolve a conflict. The imported project gets a new short id and no machine-local workspace binding or lock files. Older database schemas migrate when the project is first opened; a schema newer than this build supports is rejected. Import adds the project to the registry but does not open it.
 
 #### project delete
 

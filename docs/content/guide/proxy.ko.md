@@ -667,6 +667,19 @@ Content-Type: application/json
 
 같은 소스를 헤드리스에서도 다룰 수 있습니다. `gori run import --postman PATH`(그리고 `--har` / `--urls` / `--oas` / `--insomnia` / `--burp` / `--wsdl` / `--curl`, `--curl -`는 stdin을 읽음)와 MCP의 `import_flows` 도구입니다.
 
+## 프로젝트 아카이브 {#project-archives}
+
+참여 중인 프로젝트 전체를 동료에게 전달하거나 위험한 변경 전에 복사본을 남길 수 있습니다. 프로젝트 선택기에서 `Space` → **Export (cursor)**를 선택하거나 CLI를 사용하세요.
+
+```bash
+gori run project export "Acme API" -o acme-api.gori
+gori run project import acme-api.gori
+```
+
+아카이브는 manifest와 일관된 데이터베이스 스냅샷을 담은 압축 `.gori` 파일 하나입니다. 내보내기는 SQLite의 WAL 안전 스냅샷을 사용하므로 프로젝트가 열린 상태에서도 커밋된 트래픽을 포함합니다. 가져오면 새 id를 가진 별도 프로젝트가 생기며 워크스페이스 바인딩과 런타임 잠금은 원본 머신에 남습니다. 선택기에서는 `Space` → **Import archive**를 고르세요. 프로젝트가 하나도 없어도 빈 Search 행에서 이 메뉴를 열 수 있습니다.
+
+프로젝트에는 요청/응답 자격증명, 세션 슬롯, env 값, 프록시 인증 정보가 있을 수 있습니다. 내보내기와 가져오기를 실행하기 전에 개수와 프록시 자격증명 설정 여부를 표시합니다. 아카이브는 전체 데이터베이스를 마스킹하지 않고 포함하므로 프로젝트 파일과 같은 주의로 보관하세요. CLI 내보내기는 기본적으로 기존 파일을 거부하며, 교체하려면 `--force`가 필요합니다. 충돌과 스키마 동작은 [CLI 레퍼런스](/ko/reference/cli/#project-export)를 참고하세요.
+
 ## 호스트 오버라이드 {#host-overrides}
 
 호스트 오버라이드는 `/etc/hosts` 스타일 맵입니다. DNS를 바꾸지 않고 호스트명에 대해 특정 IP로 접속합니다. 두 개의 레이어가 있습니다.

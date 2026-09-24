@@ -51,10 +51,10 @@ describe "the picker's :global_search mode" do
   # one of them would silently hand its keys, clicks, wheel or IME text to the list underneath.
   it "has its own arm in every dispatch the list would otherwise take" do
     src = code("tui", "project_picker.cr")
-    method_body(src, "run").should contain("when :global_search then handle_global_search(ev)")
+    method_body(src, "run").should match(/when :global_search\s+then handle_global_search\(ev\)/)
     method_body(src, "run").should contain("@search.try(&.set_preedit(ev.text))")
     method_body(src, "run").should contain("@search.try(&.tick) if @mode == :global_search")
-    method_body(src, "handle_picker_mouse").should contain("when :global_search then handle_global_search_mouse(")
+    method_body(src, "handle_picker_mouse").should match(/when :global_search\s+then handle_global_search_mouse\(/)
     method_body(src, "picker_wheel").should match(/when :global_search\s+then @search\.try\(&\.wheel\(delta\)\)/)
     method_body(src, "render").should contain("@search.try(&.render(")
     method_body(src, "render_list").should contain("when @mode == :global_search")

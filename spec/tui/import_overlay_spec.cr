@@ -14,7 +14,7 @@ end
 
 describe Gori::Tui::ImportOverlay do
   it "titles and describes the card by import kind" do
-    {:har => "HAR", :urls => "URLs", :oas => "OpenAPI",
+    {:har => "HAR", :project_archive => "project archive", :urls => "URLs", :oas => "OpenAPI",
      :postman => "Postman", :insomnia => "Insomnia", :burp => "Burp",
      :wsdl => "WSDL"}.each do |kind, want|
       ov = ImportOverlay.new(kind)
@@ -29,13 +29,14 @@ describe Gori::Tui::ImportOverlay do
     # Two failures at once: the generic "Load flows into History." is the else-branch
     # fallback (a kind added to the parser table but never described here), and a blurb
     # longer than the 76-wide card's text column would be silently clipped by `width:`.
-    {:har      => "browser or proxy HAR export",
-     :urls     => "one URL per line",
-     :oas      => "OpenAPI spec",
-     :postman  => "Build request templates from a Postman Collection v2 export.",
-     :insomnia => "Build request templates from an Insomnia v4 JSON export.",
-     :burp     => "Load saved Burp items into History — request and response, byte-exact.",
-     :wsdl     => "Build request templates from a WSDL 1.1 service — one per operation.",
+    {:har             => "browser or proxy HAR export",
+     :project_archive => "add it to this machine's project list.",
+     :urls            => "one URL per line",
+     :oas             => "OpenAPI spec",
+     :postman         => "Build request templates from a Postman Collection v2 export.",
+     :insomnia        => "Build request templates from an Insomnia v4 JSON export.",
+     :burp            => "Load saved Burp items into History — request and response, byte-exact.",
+     :wsdl            => "Build request templates from a WSDL 1.1 service — one per operation.",
     }.each do |kind, fragment|
       backend = MemoryBackend.new(100, 30)
       ImportOverlay.new(kind).render(Screen.new(backend), Rect.new(0, 0, 100, 30))
@@ -46,6 +47,9 @@ describe Gori::Tui::ImportOverlay do
     # the one kind this card never opens for: a curl command is pasted, not saved, so
     # Import: cURL opens `CurlPasteOverlay` instead (#1244).
     (Gori::Import::LABELS.keys - [:curl]).size.should eq(7)
+    archive_backend = MemoryBackend.new(100, 30)
+    ImportOverlay.new(:project_archive).render(Screen.new(archive_backend), Rect.new(0, 0, 100, 30))
+    archive_backend.contains?("add it to this machine's project list.").should be_true
   end
 
   it "centers the card in the body area" do

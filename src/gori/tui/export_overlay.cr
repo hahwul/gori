@@ -59,27 +59,29 @@ module Gori::Tui
     # the popup and the toast can't disagree about what was written.
     def label : String
       case @kind
-      when :note          then "note"
-      when :issues_md     then "issues (Markdown)"
-      when :issues_json   then "issues (JSON)"
-      when :issues_sarif  then "issues (SARIF)"
-      when :sequence_md   then "randomness report (Markdown)"
-      when :sequence_json then "randomness report (JSON)"
-      when :evidence_json then "evidence (JSON)"
-      else                     "file"
+      when :note            then "note"
+      when :project_archive then "project archive"
+      when :issues_md       then "issues (Markdown)"
+      when :issues_json     then "issues (JSON)"
+      when :issues_sarif    then "issues (SARIF)"
+      when :sequence_md     then "randomness report (Markdown)"
+      when :sequence_json   then "randomness report (JSON)"
+      when :evidence_json   then "evidence (JSON)"
+      else                       "file"
       end
     end
 
     private def blurb : String
       case @kind
-      when :note          then "Write the current note's text to a Markdown file."
-      when :issues_md     then "Write the Markdown issue report to a file."
-      when :issues_json   then "Write every issue to a JSON file."
-      when :issues_sarif  then "Write every issue as a SARIF 2.1.0 log — the format GitHub code scanning and CI dashboards ingest."
-      when :sequence_md   then "Write this session's token-randomness report to a Markdown file (no token values)."
-      when :sequence_json then "Write this session's token-randomness report to a JSON file (no token values)."
-      when :evidence_json then "Write this immutable snapshot and provenance to a JSON file."
-      else                     "Write the export to a file."
+      when :note            then "Write the current note's text to a Markdown file."
+      when :project_archive then "Write a WAL-safe snapshot of the selected project to one archive."
+      when :issues_md       then "Write the Markdown issue report to a file."
+      when :issues_json     then "Write every issue to a JSON file."
+      when :issues_sarif    then "Write every issue as a SARIF 2.1.0 log — the format GitHub code scanning and CI dashboards ingest."
+      when :sequence_md     then "Write this session's token-randomness report to a Markdown file (no token values)."
+      when :sequence_json   then "Write this session's token-randomness report to a JSON file (no token values)."
+      when :evidence_json   then "Write this immutable snapshot and provenance to a JSON file."
+      else                       "Write the export to a file."
       end
     end
 

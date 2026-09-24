@@ -165,6 +165,16 @@ module Gori::Tui
       @selected == :confirm
     end
 
+    # Whether every wrapped message line can be read in `area` without the compact-card
+    # fallback folding the tail into an ellipsized row. A few decisions (project archives,
+    # for example) must show their full disclosure before the operator can continue.
+    def message_fits?(area : Rect) : Bool
+      box = overlay_box(area)
+      return false if box.empty?
+      room = {box.h - (CHROME_H - 1), 0}.max
+      display_lines(area).size <= room
+    end
+
     # Centered card over `area` (the body rect). The card sizes to the widest of
     # message / title / button row.
     def render(screen : Screen, area : Rect) : Nil

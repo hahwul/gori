@@ -256,6 +256,63 @@ module Gori
       create_or_reopen(name, description)[0]
     end
 
+    # Register a validated database snapshot as a NEW project. Unlike #create, importing must
+    # never reopen an existing project and replace its database. A directory is claimed
+    # atomically, sidecars are written before the DB becomes visible to #list, and the archive's
+    # machine-local `.workspace` / lock files are not copied.
+    def import_database(name : String, database_path : String) : Project
+      raise Gori::Error.new("project archive database is missing") unless File.file?(database_path)
+      raise Gori::Error.new(INVALID_UTF8_NAME) unless name.valid_encoding?
+      display = name.strip
+      base_slug = slugify(display)
+      raise Gori::Error.new(UNSLUGGABLE_NAME) if base_slug.empty?
+      raise Gori::Error.new("project #{display.inspect} already exists — choose another name") \
+        if list.any? { |project| project.name.downcase == display.downcase }
+      shadowed_name_reason(display).try { |why| raise Gori::Error.new(why) }
+
+      Paths.ensure_dir(@root)
+      projects = list
+      if project = projects.find { |candidate| slug_of(candidate).downcase == base_slug.downcase }
+        raise Gori::Error.new("project slug #{base_slug.inspect} already belongs to " \
+                              "#{project.name.inspect} (id #{id_of(project) || "—"}) — choose another name")
+      end
+      if project = projects.find { |candidate| id_of(candidate).try(&.downcase) == base_slug.downcase }
+        raise Gori::Error.new("project name #{display.inspect} would use the short id of " \
+                              "#{project.name.inspect} — choose another name")
+      end
+
+      dir = File.join(@root, base_slug)
+      begin
+        Dir.mkdir(dir, Paths::DIR_MODE)
+        File.chmod(dir, Paths::DIR_MODE) rescue nil
+      rescue File::AlreadyExistsError
+        # The atomic claim also catches an importer/creator that won after the checks above.
+        raise Gori::Error.new("project slug #{base_slug.inspect} is already in use — choose another name")
+      end
+
+      begin
+        DurableFile.write(File.join(dir, NAME_FILE), display,
+          perm: File::Permissions.new(0o600), inherit: false)
+        DurableFile.write(File.join(dir, ID_FILE), generate_id,
+          perm: File::Permissions.new(0o600), inherit: false)
+        staged_db = File.tempname(".gori.db.import", ".tmp", dir: dir)
+        begin
+          File.open(staged_db, "w", perm: File::Permissions.new(0o600)) do |target|
+            File.open(database_path, "r") { |source| IO.copy(source, target) }
+            target.flush
+            target.fsync
+          end
+          File.rename(staged_db, File.join(dir, Project::DB_FILE))
+        ensure
+          File.delete?(staged_db)
+        end
+        Project.new(display, File.join(dir, Project::DB_FILE))
+      rescue ex
+        FileUtils.rm_rf(dir)
+        raise ex
+      end
+    end
+
     # #create, plus WHICH of the two it did: `true` = a new project, `false` = reopened one
     # that already existed under that name. Only the registry can answer that honestly — it
     # is the one that resolves the slug — so every caller that reports "created" (CLI, MCP)

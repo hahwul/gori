@@ -95,6 +95,8 @@ gori run <subcommand> [verb] [options]
 | `grpc [schema]` · `reflect` · `forget` | gRPC `.proto` 렌즈: 무엇이 로드됐는지 보기, 서버 리플렉션으로 디스크립터 받기, 캐시된 대상 버리기 |
 | `project [list]` | 알려진 프로젝트 목록 |
 | `project create <name>` | 이름으로 프로젝트 생성 (같은 이름이면 다시 열기) |
+| `project export <name>` | 압축된 WAL 안전 `.gori` 프로젝트 아카이브 저장 |
+| `project import <archive>` | 프로젝트 아카이브를 새 프로젝트로 추가 |
 | `project delete <name>` | 프로젝트와 그 안에 캡처된 모든 것 삭제 (`--yes`로 확인) |
 | `project scope` | 스코프 규칙 목록 / 추가 / 수정 / 삭제 / 활성화 / 비활성화 |
 | `project sandbox` | 하드 컨테인먼트 샌드박스 게이트 조회 / 설정 (`status`, `on`, `off`) |
@@ -1301,7 +1303,7 @@ gori run views rm 'acme 5xx' --scope global
 
 ### run project {#run-project}
 
-프로젝트 목록/생성/삭제, 또는 프로젝트 스코프 설정(스코프 규칙, env 변수, 호스트 오버라이드) 관리:
+프로젝트 목록/생성/내보내기/가져오기/삭제, 또는 프로젝트 스코프 설정(스코프 규칙, env 변수, 호스트 오버라이드) 관리:
 
 ```bash
 gori run project --format json
@@ -1337,6 +1339,39 @@ gori run project create api-test --format json
 | `--format=FMT` | `text`(기본) 또는 `json` |
 
 이미 있는 이름은 오류가 아니라 그 프로젝트를 다시 여는 것으로 처리하며, `--format json`은 `"created": false`로 알려 줍니다. 다시 열 때 저장된 표시 이름은 마지막 create의 대소문자로 갱신되고, `--description`을 주면 기존 설명을 덮어씁니다. 새 이름이 이미 다른 프로젝트의 디렉터리 slug나 짧은 id라면 거부합니다. 그 이름으로는 `--project`가 새로 만든 프로젝트에 닿을 수 없기 때문입니다.
+
+#### project export {#project-export}
+
+프로젝트 데이터베이스를 WAL에 남아 있는 커밋된 쓰기까지 포함해 압축 아카이브로 내보냅니다. 원본 프로젝트는 열린 상태로 유지되며 변경되지 않습니다.
+
+```bash
+gori run project export "API test" -o engagement.gori
+gori run project export api-test --output=before-clear.gori --force
+```
+
+| 옵션 / 서브커맨드 | 설명 |
+|-------------------|------|
+| `<name>` | 프로젝트 표시 이름, 디렉터리 slug 또는 짧은 id |
+| `-o PATH`, `--output=PATH` | 아카이브 저장 경로 (필수) |
+| `--force` | 기존 대상 파일 교체 |
+
+쓰기 전에 flow·세션 슬롯·프로젝트 env 변수 개수와 프로젝트 업스트림 자격증명 설정 여부를 stderr에 출력합니다. 아카이브에는 저장된 전체 데이터베이스가 들어가며, 마스킹되지 않습니다. 파일 권한은 소유자만 읽고 쓸 수 있게 설정합니다. 기본적으로 기존 파일은 거부하고, 교체하려면 `--force`가 필요합니다. 원본 프로젝트 디렉터리 안에는 저장할 수 없습니다.
+
+#### project import {#project-import}
+
+아카이브를 검증하고 별도의 새 프로젝트로 등록합니다. 기존 프로젝트를 덮어쓰거나 다시 열지 않습니다.
+
+```bash
+gori run project import engagement.gori
+gori run project import engagement.gori --name "API test copy"
+```
+
+| 옵션 / 서브커맨드 | 설명 |
+|-------------------|------|
+| `<archive>` | `.gori` 프로젝트 아카이브 경로 |
+| `--name=NAME` | 가져온 프로젝트의 표시 이름 (기본값은 아카이브 이름) |
+
+프로젝트를 만들기 전에 아카이브의 flow·세션 슬롯·env 변수 개수와 프로젝트 업스트림 자격증명 설정 여부를 stderr에 출력합니다. 기존 표시 이름·디렉터리 slug·짧은 id와 충돌하면 거부하므로, 충돌을 해결하려면 다른 `--name`을 지정하세요. 가져온 프로젝트에는 새 짧은 id가 발급되며 로컬 워크스페이스 바인딩과 잠금 파일은 포함되지 않습니다. 이전 DB 스키마는 프로젝트를 처음 열 때 마이그레이션하고, 현재 빌드가 지원하는 것보다 새로운 스키마는 거부합니다. 가져온 프로젝트는 목록에 추가되지만 자동으로 열리지는 않습니다.
 
 #### project delete {#project-delete}
 

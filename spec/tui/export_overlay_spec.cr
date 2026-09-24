@@ -43,13 +43,17 @@ end
 
 describe Gori::Tui::ExportOverlay do
   it "titles and describes the card by export kind" do
-    {:note => "note", :issues_md => "issues (Markdown)", :issues_json => "issues (JSON)"}.each do |kind, want|
+    {:note => "note", :project_archive => "project archive",
+     :issues_md => "issues (Markdown)", :issues_json => "issues (JSON)"}.each do |kind, want|
       ov = ExportOverlay.new(kind, "/tmp/x.md")
       ov.label.should eq(want)
       backend = MemoryBackend.new(100, 30)
       ov.render(Screen.new(backend), Rect.new(0, 0, 100, 30))
       backend.contains?("EXPORT #{want.upcase}").should be_true
     end
+    backend = MemoryBackend.new(100, 30)
+    ExportOverlay.new(:project_archive, "/tmp/x.gori").render(Screen.new(backend), Rect.new(0, 0, 100, 30))
+    backend.contains?("WAL-safe snapshot").should be_true
   end
 
   it "arrives PREFILLED with the destination the open-site chose" do
@@ -189,9 +193,10 @@ end
 # WRITE and dispatches generically, so the overlay itself never touches a controller.
 describe "Gori::Tui::ExportOverlay — Overlay seam" do
   it "names itself in the focus badge by export SUBJECT" do
-    {:note        => "EXPORT note",
-     :issues_md   => "EXPORT issues (Markdown)",
-     :issues_json => "EXPORT issues (JSON)",
+    {:note            => "EXPORT note",
+     :project_archive => "EXPORT project archive",
+     :issues_md       => "EXPORT issues (Markdown)",
+     :issues_json     => "EXPORT issues (JSON)",
     }.each do |kind, want|
       OverlayHarness.new(ExportOverlay.new(kind, "/tmp/x.md")).assert_chrome(OverlayKind::Export, want)
     end
