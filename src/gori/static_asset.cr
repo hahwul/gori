@@ -2,7 +2,7 @@ module Gori
   # What counts as a STATIC ASSET — the images, fonts and audio/video a browsed app pulls in by
   # the dozen beside every API call (#1239). One classifier behind the QL `static:` field, and
   # through it behind the TUI's hide-static lens, `gori run history|sitemap --hide-static` and
-  # MCP `hide_static`. It runs ONCE per flow, when the flow is written, into the `static_asset`
+  # MCP `hide_static`. It runs ONCE per flow, when the response is written, into the `static_asset`
   # column (schema V31) every surface then reads, so there is no second list to drift and no
   # per-row function call on a list that reloads during live capture.
   #
@@ -23,8 +23,8 @@ module Gori
   # gori's own "no response" (an aborted intercept, an upstream failure) — hiding one of those
   # would hide the one row the operator acted on.
   module StaticAsset
-    # Image, font and audio/video extensions. The fallback for a row with no Content-Type (a 304
-    # usually carries none, and a pending row has no response yet), and the media half of
+    # Image, font and audio/video extensions. The fallback for a response with no Content-Type
+    # (a 304 usually carries none), and the media half of
     # `Discover::Url::BINARY_EXT`, which reads it from here rather than keeping a copy.
     MEDIA_EXT = Set{
       "jpg", "jpeg", "png", "gif", "bmp", "ico", "cur", "webp", "avif", "tif", "tiff", "heic",
@@ -46,7 +46,11 @@ module Gori
     FONT_MIME_EXACT    = "application/vnd.ms-fontobject"
 
     # Query-string fragments that mean the request NAMES another URL (see the header).
-    URL_PARAM_MARKERS = {"url=", "://", "%3a%2f%2f"}
+    URL_PARAM_MARKERS = {"url=", "//", "%3a//", "%3a%2f%2f"}
+
+    # Schemes embedded in a route are common in image-fetching proxies. Include normalized
+    # single-slash and percent-encoded forms as well as a complete scheme.
+    URL_PATH_MARKERS = {"http://", "https://", "http:/", "https:/", "http%3a", "https%3a"}
 
     # The project-DB key that remembers whether History and the Sitemap hide static assets.
     # Beside `scope_enabled` and `history_view`, for their reason: what the operator is looking
@@ -55,9 +59,11 @@ module Gori
 
     # Is this flow a static asset? `content_type` is the RESPONSE Content-Type as stored
     # (verbatim, parameters and case included), `target` the request target, `status` nil while
-    # the response is pending.
+    # the response is pending. A pending request is never static; only successful responses are
+    # eligible for the classification.
     def self.static?(content_type : String?, target : String, status : Int32?) : Bool
-      return false unless status.nil? || (200..299).includes?(status) || status == 304
+      return false if status.nil?
+      return false unless (200..299).includes?(status) || status == 304
       return false if names_a_url?(target)
       mime = mime_of(content_type)
       mime.empty? ? MEDIA_EXT.includes?(extension(target) || "") : media_mime?(mime)
@@ -85,15 +91,25 @@ module Gori
     end
 
     private def self.media_mime?(mime : String) : Bool
-      return mime != "image/svg+xml" if mime.starts_with?("image/")
+      return !mime.starts_with?("image/svg") if mime.starts_with?("image/")
       return !mime.includes?("mpegurl") if mime.starts_with?("audio/")
       mime.starts_with?("font/") || mime.starts_with?("video/") ||
         mime == FONT_MIME_EXACT || FONT_MIME_PREFIXES.any? { |p| mime.starts_with?(p) }
     end
 
     private def self.names_a_url?(target : String) : Bool
+      stop = {target.index('?') || target.size, target.index('#') || target.size}.min
+      path = target[0...stop].downcase
+      if path.starts_with?("http://") || path.starts_with?("https://")
+        authority_start = path.starts_with?("https://") ? "https://".size : "http://".size
+        authority_end = path.index('/', authority_start)
+        path = authority_end ? path[authority_end..] : ""
+      end
+      return true if URL_PATH_MARKERS.any? { |m| path.includes?(m) }
+
       return false unless q = target.index('?')
-      query = target[(q + 1)..].downcase
+      query_stop = target.index('#') || target.size
+      query = target[(q + 1)...query_stop].downcase
       URL_PARAM_MARKERS.any? { |m| query.includes?(m) }
     end
 

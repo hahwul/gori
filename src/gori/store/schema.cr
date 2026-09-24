@@ -1433,23 +1433,33 @@ module Gori
         "CREATE INDEX idx_flows_sitemap_nonstatic ON flows (host, target, method) WHERE static_asset = 0",
       ]
 
+      # V32 has no schema shape to add; its backfill clears materialized classifications made
+      # under V31's original narrower rules. Appending a data-only version makes already-V31
+      # projects reclassify their rows once without rebuilding the table or index.
+      V32 = [] of String
+
       # Data statements that call gori's OWN SQL functions, run by `migrate!` right after the
       # version they complete. Kept out of MIGRATIONS because that list is plain schema that a
       # bare connection can replay (specs build every historical shape that way), and a bare
       # connection has no `gori_static_asset`; `migrate!` registers it before running these.
       #
       # 31: rewrite only rows that ARE static (an UPDATE storing 0 over the default would still
-      # rewrite every row's overflow chain), and only statuses the rule can call static, so an
-      # error or a redirect is never even classified. ~2.5 s once at 100k flows, 40% of them
-      # 20 KB images.
+      # rewrite every row's overflow chain), and only completed responses with a status the rule
+      # can call static, so a pending or failed transfer is never even classified. ~2.5 s once
+      # at 100k flows, 40% of them 20 KB images.
+      # 32: only clear old positive flags that the current classifier rejects. The rule changes
+      # in #1257 add exclusions, never newly-static cases, so this scans the old positive subset
+      # and leaves still-static rows and their overflow chains untouched.
       BACKFILLS = {
         31 => "UPDATE flows SET static_asset = 1 " \
-              "WHERE (status IS NULL OR status BETWEEN 200 AND 299 OR status = 304) " \
+              "WHERE state = #{FlowState::Complete.value} AND (status BETWEEN 200 AND 299 OR status = 304) " \
               "AND gori_static_asset(content_type, target, status) = 1",
+        32 => "UPDATE flows SET static_asset = 0 WHERE static_asset = 1 " \
+              "AND (state != #{FlowState::Complete.value} OR gori_static_asset(content_type, target, status) = 0)",
       }
 
       MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17,
-                    V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29, V30, V31]
+                    V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29, V30, V31, V32]
 
       def self.migrate!(db : DB::Database, read_only : Bool = false) : Nil
         db.using_connection do |conn|
