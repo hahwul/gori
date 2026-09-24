@@ -156,6 +156,9 @@ module Gori
       # browser: open a system browser pre-trusting gori's CA + routed via the proxy
       abstract def open_browser_picker : Nil
 
+      # shell: a terminal proxied through gori and trusting its CA (#1238)
+      abstract def open_shell_picker : Nil
+
       # READ editors: line select / selection state (space menu + x/v chords).
       abstract def read_selection_active? : Bool
       abstract def read_select_line : Nil

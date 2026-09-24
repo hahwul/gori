@@ -107,6 +107,7 @@ require "./import_overlay"
 require "./export_overlay"
 require "../paths"
 require "../browser"
+require "../shell_env"
 require "../external_editor"
 require "./clipboard"
 require "./keybind"
@@ -5485,6 +5486,19 @@ module Gori::Tui
       open_overlay(ov)
     end
 
+    # --- shell (a terminal proxied through gori, trusting its CA — #1238) ---
+
+    # The two ways to get one: this terminal, handed over until the shell exits, or the export
+    # lines on the clipboard for a pane beside gori (the tmux workflow, and the only one that
+    # keeps the TUI on screen).
+    def open_shell_picker : Nil
+      cp = ChoicePicker.new("OPEN SHELL", [
+        ChoicePicker::Choice.new("OPEN SHELL HERE — gori resumes when it exits", 'o', Theme.accent, 0),
+        ChoicePicker::Choice.new("COPY ENV — export lines for another pane", 'c', Theme.text, 1),
+      ], -1, :shell)
+      open_choice_picker(cp) { |p| p.selected_value == 0 ? open_shell_here : copy_shell_env }
+    end
+
     # --- comparer (diff two arbitrary flows) ---
 
     # The unified Copy verbs whose base title is now plain "Copy" (selection if active,
@@ -6543,11 +6557,23 @@ module Gori::Tui
     # `io` is where the mode-1002 sequences go — the TUI's tty in the app (`TtyOut`, NOT
     # STDOUT), an IO::Memory in the spec that pins this ordering (a spec must not write
     # escape codes to the test runner's tty).
-    def self.suspend_without_mouse(term, *, mouse : Bool, io : IO = TtyOut.io, &)
+    #
+    # `mode` replaces `suspend`'s plain cooked mode for a child that does not set its own
+    # termios. termisu's cooked keeps OPOST and ICRNL off (the Mode table says `-` for both),
+    # which an editor never notices because it switches to raw itself — but a shell hands that
+    # state to every command it runs, and measured in one: `printf 'a\nb\n'` staircased (no
+    # NL→CRNL) and `stty -a` read `-opost -icrnl -ixon`. `full_cooked` restores the terminal's
+    # ORIGINAL output and input flags instead (termios.cr, the canonical branch).
+    def self.suspend_without_mouse(term, *, mouse : Bool, io : IO = TtyOut.io,
+                                   mode : Termisu::Terminal::Mode? = nil, &)
       MouseDrag.disable(io) # our mode 1002 rides along: the child would get motion reports too
       term.disable_mouse
       begin
-        term.suspend { yield }
+        if m = mode
+          term.with_mode(m, preserve_screen: false) { yield }
+        else
+          term.suspend { yield }
+        end
       ensure
         if mouse
           term.enable_mouse
@@ -6576,16 +6602,7 @@ module Gori::Tui
         end
         status
       end
-      @resized = true # alt-screen re-entered → force a full repaint via the resize path
-      # The child editor may have set its own OS window title. termisu memoizes the last
-      # title it wrote (still "𝓰𝓸𝓻𝓲 - <project> - <tab>"), so a plain re-emit is suppressed
-      # — bust its memo with a throwaway write, then invalidate gori's memo so the next
-      # render re-emits our title over whatever the editor left. Skipped when we own no
-      # title (pref "off"): there's nothing of ours to restore, so leave the editor's be.
-      if @title_written && Settings.terminal_title != "off"
-        @term.title = ""
-        @title_text = nil
-      end
+      reclaim_terminal
       case result.outcome
       in ExternalEditor::Outcome::Changed
         yield result.text.not_nil!
@@ -6594,6 +6611,99 @@ module Gori::Tui
         @toast = "no changes"
       in ExternalEditor::Outcome::Failed
         @toast = result.error || "external editor failed"
+      end
+    end
+
+    # Hand the terminal to `$SHELL` with the env applied, like `run_external_editor` hands it to
+    # `$EDITOR`. Only this fiber waits: `Process.run` parks it on the child's exit, so the proxy
+    # keeps accepting and the Store keeps writing while the screen is suspended.
+    #
+    # The child is `gori run shell`, not `$SHELL` itself. Crystal's runtime ignores SIGPIPE,
+    # an ignored signal survives exec, and nothing in `Process.run` resets it — spawned
+    # directly, the shell and every pipeline in it would inherit it (`yes | head` then prints
+    # "Broken pipe"). The CLI resets it just before its own exec, so reusing it gets that, and
+    # the same env and banner, for free. What would make it refuse is checked here first, so
+    # the refusal is a toast rather than a line the repaint scrolls away.
+    private def open_shell_here : Nil
+      unless @session.capturing?
+        return @toast = "capture is off — start it (c) first; a shell pointed at a closed listener captures nothing"
+      end
+      # Held requests are forwarded from the Intercept tab, which is not on screen while the shell
+      # is: every request the shell made would hang with nothing visible to release it.
+      if @session.interceptor.enabled?
+        return @toast = "intercept is on — the shell's requests would be held with no way to forward " \
+                        "them; turn it off (i) first, or use Copy env for another pane"
+      end
+      if problem = ShellEnv.ca_problem(@session.ca.ca_cert_path)
+        return @toast = "shell: #{problem}"
+      end
+      authority = ShellEnv.dial_authority(@session.proxy.host, @session.proxy.port)
+      before = @session.store.max_flow_id || 0_i64
+      args = ["run", "shell", "--proxy", authority, "--ca-dir", File.dirname(@session.ca.ca_cert_path)]
+      started = Time.instant
+      status = nil.as(Process::Status?)
+      begin
+        Runner.suspend_without_mouse(@term, mouse: Settings.mouse,
+          mode: Termisu::Terminal::Mode.full_cooked) do
+          status = Process.run(Process.executable_path || "gori", args,
+            input: Process::Redirect::Inherit,
+            output: Process::Redirect::Inherit,
+            error: Process::Redirect::Inherit)
+        end
+      rescue ex
+        reclaim_terminal
+        return @toast = "shell failed: #{ex.message}"
+      end
+      reclaim_terminal
+      @toast = Runner.shell_exit_toast(status, Time.instant - started, (@session.store.max_flow_id || 0_i64) - before)
+    end
+
+    # How long a shell has to have lived for its exit status to be the SHELL's. A shell exits
+    # with its last command's status, so a non-zero exit after real use is ordinary; one that is
+    # gone at once never started, and whatever it printed was repainted over.
+    SHELL_START_GRACE = 2.seconds
+
+    def self.shell_exit_toast(status : Process::Status?, lived : Time::Span, captured : Int64) : String
+      if status && !status.success? && lived < SHELL_START_GRACE
+        how = status.exit_code?.try { |c| "exit #{c}" } || status.exit_reason.to_s.downcase
+        return "shell exited at once (#{how}) — run `gori run shell` in a terminal to see why"
+      end
+      n = captured.clamp(0_i64, Int32::MAX.to_i64)
+      "shell exited · #{n} flow#{n == 1 ? "" : "s"} captured meanwhile"
+    end
+
+    # The same text `gori run shell --print` writes, minus its comment header: this is PASTED,
+    # and an interactive zsh without INTERACTIVE_COMMENTS runs a `#` line as a command. The
+    # syntax follows `$SHELL`, since there is no flag to ask and the other pane is most likely
+    # running the same one.
+    private def copy_shell_env : Nil
+      result = ShellEnv.build(ShellEnv.dial_authority(@session.proxy.host, @session.proxy.port),
+        @session.ca.ca_cert_path)
+      syntax = ShellEnv::Syntax.for_shell(ENV["SHELL"]?)
+      text = ShellEnv.render(result, syntax)
+      copied = Clipboard.copy(text)
+      @toast =
+        if copied == 0
+          "clipboard is off (Settings) — run `gori run shell --print` in the other pane instead"
+        else
+          off = @session.capturing? ? "" : " (capture is off — start it with c)"
+          "copied #{syntax.fish? ? "fish" : "sh"} env for proxy #{result.proxy_url} — paste it into another pane#{off}"
+        end
+    rescue ex : ShellEnv::Error
+      @toast = "shell: #{ex.message}"
+    end
+
+    # After a child that owned the terminal (`$EDITOR`, a shell) returns it.
+    private def reclaim_terminal : Nil
+      @resized = true # alt-screen re-entered → force a full repaint via the resize path
+      # The child may have set its own OS window title. termisu memoizes the last title it
+      # wrote (still "𝓰𝓸𝓻𝓲 - <project> - <tab>"), so a plain re-emit is suppressed — bust its
+      # memo with a throwaway write, then invalidate gori's memo so the next render re-emits
+      # our title over whatever the child left. Skipped when we own no title (pref "off"):
+      # there's nothing of ours to restore, so leave the child's be.
+      if @title_written && Settings.terminal_title != "off"
+        @term.title = ""
+        @title_text = nil
       end
     end
 

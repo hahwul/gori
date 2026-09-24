@@ -546,7 +546,8 @@ module Gori
     # live bind address. No-op when this session doesn't hold the capture lock.
     def sync_capture_status! : Nil
       return unless capturing_lock_held?
-      CaptureStatus.write_at(@project.capture_status_path, @proxy.host, @proxy.port, capturing?)
+      CaptureStatus.write_at(@project.capture_status_path, @proxy.host, @proxy.port, capturing?,
+        @ca.ca_cert_path)
     rescue
       # The capture-status file is a purely informational sidecar; a write failure
       # (disk full, dir vanished) must not abort session open / capture toggle / settings.

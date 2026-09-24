@@ -318,7 +318,7 @@ private SPAWN_SITES = {
   "src/gori/decoder/chain.cr"                         => {1, "decoder"},
   "src/gori/probe/custom_rule.cr"                     => {1, "scan_rules"},
   "src/gori/cli/settings.cr"                          => {1, "editor"},
-  "src/gori/tui/runner.cr"                            => {1, "editor"},
+  "src/gori/tui/runner.cr"                            => {2, "editor"}, # + Open shell's `gori run shell` (#1238)
   "src/gori/tui/controllers/statusline_controller.cr" => {1, "statusline"},
   # NOT settings-derived: the program is discovered, hardcoded, or comes off the wire
   "src/gori/browser.cr"                  => {2, nil}, # a detected browser; certutil

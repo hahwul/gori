@@ -72,6 +72,8 @@ The same action is available from the palette (**Import CA certificate**). gori 
 
 The palette's **Open browser** action launches an installed browser with an isolated profile that already trusts the CA and routes through the proxy (see the [Quick Start](/getting-started/quick-start/)).
 
+For command-line tools, the palette's **Open shell** action does the same for a terminal: **Open shell here** hands this terminal to your `$SHELL` with the proxy and a CA bundle already set (gori keeps capturing and comes back when the shell exits; it needs capture on and intercept off, since held requests could not be forwarded while the shell has the screen), and **Copy env** puts the `export` lines on the clipboard for a pane next to gori. From any terminal, `gori run shell` does the same (see [`gori run shell`](/reference/cli/#run-shell)).
+
 ## Full Reference
 
 See the [Configuration Reference](/reference/config/) for every settings key and the [CLI Reference](/reference/cli/) for all command-line flags.

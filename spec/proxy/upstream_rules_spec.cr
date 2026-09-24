@@ -14,6 +14,10 @@ end
 private PROXY_ENV_KEYS = [
   "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
   "http_proxy", "https_proxy", "all_proxy", "no_proxy",
+  # A suite run from inside `gori run shell` must not see its own markers (#1238).
+  "GORI_SHELL", "GORI_PROXY",
+  "GORI_SHELL_ORIG_HTTPS_PROXY", "GORI_SHELL_ORIG_HTTP_PROXY", "GORI_SHELL_ORIG_NO_PROXY",
+  "GORI_SHELL_ORIG_https_proxy", "GORI_SHELL_ORIG_http_proxy", "GORI_SHELL_ORIG_no_proxy",
 ]
 
 private def with_proxy_environment(values : Hash(String, String), &)
@@ -319,6 +323,49 @@ describe "upstream rules" do
     # environment is shadowed exactly as a non-blank scalar shadows it — and the banner used to
     # say "no gori upstream proxy is set, so $HTTPS_PROXY routes https origins" over a table
     # that sent everything to a jump host (#1114).
+    # A gori started inside `gori run shell` inherits the proxy variables pointing at the gori
+    # that opened the shell. Adopted as its own upstream, every request it makes would chain
+    # through the parent and be captured twice (#1238).
+    it "passes over the proxy a gori shell exported, and says so on the banner" do
+      injected = "http://127.0.0.1:8070"
+      with_proxy_environment({"HTTPS_PROXY" => injected, "https_proxy" => injected, "HTTP_PROXY" => injected,
+                              "GORI_SHELL" => "1", "GORI_PROXY" => "127.0.0.1:8070"}) do
+        Gori::Settings.upstream_route("a.test", "https", 443).direct?.should be_true
+        Gori::Settings.environment_upstream_summary.should eq("")
+        Gori::Settings.upstream_proxy_warnings.join("\n").should contain("running inside a gori shell")
+        # A proxy the operator exported on top of the shell's is a decision, and still routes.
+        ENV["ALL_PROXY"] = "http://corp.example:3128"
+        Gori::Settings.upstream_route("a.test", "https", 443).host.should eq("corp.example")
+      end
+    ensure
+      reset_upstream
+    end
+
+    # The shell replaced the terminal's own egress proxy, and recorded it. A gori started there
+    # still needs that egress — going direct fails on a proxy-only network, or leaks around it.
+    it "reaches the proxy the gori shell replaced, with the NO_PROXY exceptions that went with it" do
+      injected = "http://127.0.0.1:8070"
+      with_proxy_environment({"HTTPS_PROXY" => injected, "GORI_SHELL" => "1", "GORI_PROXY" => "127.0.0.1:8070",
+                              "GORI_SHELL_ORIG_HTTPS_PROXY" => "http://corp.example:3128",
+                              "GORI_SHELL_ORIG_NO_PROXY" => ".internal.test"}) do
+        Gori::Settings.upstream_route("a.test", "https", 443).host.should eq("corp.example")
+        Gori::Settings.upstream_route("svc.internal.test", "https", 443).direct?.should be_true
+        # NO_PROXY set again inside the shell is the operator's, and wins over the record.
+        ENV["NO_PROXY"] = "a.test"
+        Gori::Settings.upstream_route("a.test", "https", 443).direct?.should be_true
+      end
+    ensure
+      reset_upstream
+    end
+
+    it "keeps the same value as an upstream when no gori shell exported it" do
+      with_proxy_environment({"HTTPS_PROXY" => "http://127.0.0.1:8070"}) do
+        Gori::Settings.upstream_route("a.test", "https", 443).host.should eq("127.0.0.1")
+      end
+    ensure
+      reset_upstream
+    end
+
     it "treats a catch-all rule as shadowing the environment entirely" do
       with_proxy_environment({"HTTPS_PROXY" => "http://corp.example:3128"}) do
         Gori::Settings.upstream_rules = [rule("*", "socks5", "jump.example:1080")]
