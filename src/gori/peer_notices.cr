@@ -136,6 +136,11 @@ module Gori
       if (change = rules) && change.executes > 0
         return executes_notice(change, extract, by_agent)
       end
+      # A peer's map-local rule (#1237) is the next-loudest: it does not run anything, but it
+      # answers this operator's browser with files read off this machine's disk.
+      if (change = rules) && change.serves_files > 0
+        return serves_files_notice(change, extract, by_agent)
+      end
       # ONE level for the whole line. A change that leaves no active rule cannot move a byte on
       # the wire, whatever just happened to the list — and the operator must not get a bell or no
       # bell depending only on whether the peer happened to touch one list or two.
@@ -170,6 +175,18 @@ module Gori
         "#{counted(change.executes, "Match&Replace pipe rule")} added or changed by " \
         "#{author(by_agent)} — #{one ? "it runs" : "they run"} a local command " \
         "here, with your privileges, on every message #{one ? "it matches" : "they match"}#{also}",
+        :rewriter, by_agent)
+    end
+
+    # The map-local line — `executes_notice`'s shape, for a rule that reads local files.
+    private def serves_files_notice(change : RuleSetChange, extract : RuleSetChange?,
+                                    by_agent : Bool) : Notice
+      one = change.serves_files == 1
+      also = extract ? " (the extract rules moved too — #{binding_token} may expand to a different value here)" : ""
+      Notice.new(:warn,
+        "#{counted(change.serves_files, "Match&Replace map-local rule")} added or changed by " \
+        "#{author(by_agent)} — #{one ? "it answers" : "they answer"} matching requests with " \
+        "files from a directory on this machine#{also}",
         :rewriter, by_agent)
     end
 

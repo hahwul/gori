@@ -5,6 +5,7 @@ require "./proxy/head_rewriter"
 require "./proxy/codec/http1"
 require "./rules/stub"
 require "./rules/map_local"
+require "./rules/mock_from_flow"
 require "./rules/presets"
 require "./store"
 require "./store/safe_regexp"
@@ -590,10 +591,13 @@ module Gori
       # The `executes` predicate is what makes a peer's `pipe` rule announce louder than a peer's
       # `replace` rule — see `RuleSetChange`. `enabled?` is part of it because a disabled pipe
       # rule forks nothing; it is a row, not a hook.
+      # `serves_files` does the same for a map-local rule (#1237), which answers the operator's
+      # own browser with files off this machine's disk.
       return unless change = RuleSetChange.between(before, after,
                       ->(r : Store::MatchRule) { {r.scope, r.id} },
                       ->(r : Store::MatchRule) { r.active? && r.op.executes? },
-                      ->(r : Store::MatchRule) { r.active? })
+                      ->(r : Store::MatchRule) { r.active? },
+                      ->(r : Store::MatchRule) { r.active? && r.op.short_circuit? && r.respond.dir? })
       @mutex.synchronize do
         @pending_peer_change = (held = @pending_peer_change) ? held.merge(change) : change
       end

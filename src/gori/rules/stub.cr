@@ -1,3 +1,4 @@
+require "json"
 require "http/status"
 require "../proxy/head_rewriter"
 require "../store/models"
@@ -106,6 +107,12 @@ module Gori
                            respond_args : String) : String?
       args = Store::RespondArgs.parse(respond_args)
       return args if args.is_a?(String)
+      args_error(respond, args) || shape_error(respond, replacement, body_file, args)
+    end
+
+    # The args that only one sub-kind reads, refused on the others — a stored-but-ignored
+    # setting would leave the operator believing it applies.
+    private def self.args_error(respond : Store::RespondKind, args : Store::RespondArgs) : String?
       unless respond.dir?
         return "strip prefix is only for a dir rule" unless args.strip_prefix.empty?
         return "fall-through is only for a dir rule" if args.fallthrough?
@@ -114,29 +121,63 @@ module Gori
       if args.hang_ms != Store::RespondArgs::DEFAULT_HANG_MS && args.fault != Store::FaultKind::Hang
         return "a hang bound is only for a hang fault"
       end
+      nil
+    end
+
+    private def self.shape_error(respond : Store::RespondKind, replacement : String, body_file : String,
+                                 args : Store::RespondArgs) : String?
       case respond
       in .inline?
-        return "write a stub response" unless valid?(replacement)
-        return "an inline stub takes no body file (use the file source)" unless body_file.empty?
+        return stub_parse_error(replacement) unless valid?(replacement)
+        "an inline stub takes no body file (use the file source)" unless body_file.empty?
       in .file?
-        return "write a stub response head" unless valid?(replacement)
-        return "name the body file" if body_file.empty?
+        return stub_parse_error(replacement) unless valid?(replacement)
+        "name the body file" if body_file.empty?
       in .dir?
-        return "name the directory to serve" if body_file.empty?
-        unless replacement.strip.empty?
-          return "the response head template does not parse" unless valid?(replacement)
-          return "a dir rule's body comes from the directory — keep the template head-only" unless inline_body(replacement).empty?
-        end
-        prefix = args.strip_prefix
-        unless prefix.empty? || (prefix.starts_with?('/') && prefix.ends_with?('/'))
-          return "strip prefix must start and end with / (e.g. /static/)"
-        end
+        dir_error(replacement, body_file, args.strip_prefix)
       in .fault?
         return "pick a fault: close, reset or hang" unless args.fault
         return "a fault answers nothing — leave the response empty" unless replacement.strip.empty?
-        return "a fault takes no body file" unless body_file.empty?
+        "a fault takes no body file" unless body_file.empty?
+      end
+    end
+
+    # Why a stub's response did not parse — with the format, which is what a CLI or MCP caller
+    # has to go on (the TUI's editor shows it live).
+    private def self.stub_parse_error(text : String) : String
+      return "write a stub response" if text.blank?
+      "the stub response does not parse (expected a status line such as '200 OK', then headers, " \
+      "then a blank line and the body)"
+    end
+
+    private def self.dir_error(template : String, dir : String, prefix : String) : String?
+      return "name the directory to serve" if dir.empty?
+      unless template.strip.empty?
+        return "the response head template does not parse" unless valid?(template)
+        return "a dir rule's body comes from the directory — keep the template head-only" unless inline_body(template).empty?
+      end
+      unless prefix.empty? || (prefix.starts_with?('/') && prefix.ends_with?('/'))
+        return "strip prefix must start and end with / (e.g. /static/)"
       end
       nil
+    end
+
+    # The sub-kind fields of a rule listing (#1237), one spelling for `gori run rewriter --format
+    # json` and MCP `list_rules`: `respond`, its args decoded — or the RAW text when this binary
+    # cannot read them, which is exactly when the row is inert — and `fallthrough` on its own,
+    # because it is the one setting that lets a request a rule matched reach the origin.
+    #
+    # Only on a short-circuit rule: every other op ignores these, and `respond: "inline"` on a
+    # replace rule would read as a setting it has.
+    def self.respond_json_fields(j : JSON::Builder, rule : Store::MatchRule) : Nil
+      return unless rule.op.short_circuit?
+      j.field "respond", rule.respond_label
+      if rule.respond_args_error
+        j.field "respond_args", rule.respond_args
+      else
+        j.field "respond_args" { rule.args.to_json(j) }
+      end
+      j.field "fallthrough", rule.op.short_circuit? && rule.respond.dir? && rule.args.fallthrough?
     end
 
     # A one-line summary of a stub for a list row ("200 OK · 42B" / "404 · file:…").
@@ -249,7 +290,7 @@ module Gori
       end
       bytes = load(path, size.to_i32)
       @mutex.synchronize do
-        if (old = @entries[path]?)
+        if old = @entries[path]?
           @bytes -= old.bytes.size
         elsif @entries.size >= MAX_ENTRIES || @bytes + bytes.size > MAX_BYTES
           # No LRU, on purpose: the set a page re-requests refills in one load, and a clear is

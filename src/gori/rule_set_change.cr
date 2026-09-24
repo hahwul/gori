@@ -27,13 +27,19 @@ module Gori
   # It counts CHANGED entries, not the standing total: a peer editing an unrelated rule while a
   # pipe rule has been sitting there for an hour is not news about the pipe rule, and repeating
   # the loud line every time anything moves is how a loud line stops being read.
-  record RuleSetChange, changed : Int32, reordered : Bool, enabled : Int32, executes : Int32 = 0 do
+  #
+  # `serves_files` is the same idea for a map-local short-circuit rule (#1237): a live rule that
+  # answers requests with FILES READ OFF THIS MACHINE'S DISK. What it serves is visible in
+  # History, but not that a peer pointed gori at a local directory — the operator's own browser
+  # is what fetches it.
+  record RuleSetChange, changed : Int32, reordered : Bool, enabled : Int32, executes : Int32 = 0,
+    serves_files : Int32 = 0 do
     # Fold a later change into an earlier one — a burst that arrived inside one coalescing window
     # is announced once. Changed counts add; `enabled` carries the caller's live-rule total, so
     # the LATER value wins.
     def merge(newer : RuleSetChange) : RuleSetChange
       RuleSetChange.new(changed + newer.changed, reordered || newer.reordered, newer.enabled,
-        executes + newer.executes)
+        executes + newer.executes, serves_files + newer.serves_files)
     end
 
     # The delta between two snapshots, or nil when they are identical — which is the answer on
@@ -52,14 +58,18 @@ module Gori
     # no such notion (the extract rules). `live` decides the standing count behind the notice's
     # consequence; by default it is `enabled?`, while the Rewriter supplies `active?` so an
     # unsupported enum projection cannot make an inert row read as live traffic.
+    #
+    # `serves_files` is a predicate of the same shape as `executes`, for `RuleSetChange#serves_files`.
     def self.between(before : Array(T), after : Array(T), key : T -> K,
-                     executes : (T -> Bool)? = nil, live : (T -> Bool)? = nil) : RuleSetChange? forall T, K
+                     executes : (T -> Bool)? = nil, live : (T -> Bool)? = nil,
+                     serves_files : (T -> Bool)? = nil) : RuleSetChange? forall T, K
       return nil if before == after
       previous = {} of K => T
       before.each { |rule| previous[key.call(rule)] = rule }
       seen = Set(K).new
       changed = 0
       runs = 0
+      files = 0
       after.each do |rule|
         k = key.call(rule)
         seen << k
@@ -67,13 +77,14 @@ module Gori
         next unless was.nil? || was != rule
         changed += 1
         runs += 1 if executes && executes.call(rule)
+        files += 1 if serves_files && serves_files.call(rule)
       end
       # The removals, off the keys the loop above already visited — `key` is caller-supplied, so
       # running it over `after` a second time to build a difference costs both an extra pass and
       # three more intermediate collections on a path the poll reaches for every peer edit.
       changed += previous.each_key.count { |k| !seen.includes?(k) }
       active = after.count { |rule| live ? live.call(rule) : rule.enabled? }
-      RuleSetChange.new(changed, changed.zero?, active, runs)
+      RuleSetChange.new(changed, changed.zero?, active, runs, files)
     end
   end
 end
