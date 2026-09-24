@@ -1184,6 +1184,10 @@ gori run rewriter add --op replace --target response --part body \
 gori run rewriter add --op remove_header --target response \
   --find Content-Security-Policy --scope global          # applies in EVERY project
 gori run rewriter preview --op replace --part body --find password --value hunter2
+gori run rewriter add --op short_circuit --map-dir ./tampered \
+  --strip-prefix /static/ --fallthrough                 # missing files reach the origin
+gori run rewriter add --op short_circuit --find /api/pay --fault reset
+gori run rewriter add --op short_circuit --from-flow 42  # a captured response as the stub
 gori run rewriter disable 3
 gori run rewriter disable 2 --scope global               # off in THIS project only
 gori run rewriter disable 2 --scope global --everywhere  # off by default, everywhere
@@ -1198,7 +1202,14 @@ gori run rewriter rm 3
 | `--match=MODE` | `literal` (default) or `regex`, for `replace`, `pipe` and `short_circuit`. Regex replacements take `$1`, `$2`; `$$` is a literal `$` |
 | `--response-file=PATH` | `short_circuit`: read the canned response from PATH (`-` = stdin — a pipe or a redirect; a terminal is refused) |
 | `--body-file=PATH` | `short_circuit`: serve PATH as the response body, re-read whenever it changes |
-| `-f`, `--find=FIND` | Required. The literal, pattern, or header name to act on |
+| `--map-dir=DIR` | `short_circuit`: serve the file the request path names from DIR (Map Local). `--value` becomes an optional head template |
+| `--strip-prefix=PATH` | With `--map-dir`: the URL prefix removed before the path is joined under DIR (`/static/`). Without `--find`, the rule matches this prefix on the request line |
+| `--fallthrough` | With `--map-dir`: a request whose file is missing goes to the origin instead of a `502` |
+| `--fault=KIND` | `short_circuit`: answer with no response: `close`, `reset` or `hang` |
+| `--hang=MS` | With `--fault=hang`: how long to hold before closing (default 30000) |
+| `--delay=MS` | `short_circuit`: wait before answering (max 120000) |
+| `--from-flow=ID` | `short_circuit`: copy flow ID's captured response into the rule. `--find`, `--host` and `--value` override what it drafts |
+| `-f`, `--find=FIND` | Required, except with `--from-flow` or `--map-dir --strip-prefix`. The literal, pattern, or header name to act on |
 | `-v`, `--value=VALUE` | Replacement text, header value, or (with `--op=pipe`) the COMMAND to run. See [Process hooks](/guide/scripting/#process-hooks) |
 | `--host=GLOB` | Limit the rule to a host and its subdomains (`example.com` also matches `api.example.com`, but not `xexample.com`); `*` is the explicit wildcard. Omit to apply everywhere |
 | `--name=NAME` | Label shown in the rule list |

@@ -73,7 +73,7 @@ By default `gori mcp` advertises every tool, so an agent can reach the whole wor
 
 | Start with | Tools | `tools/list` | Tokens | For |
 | --- | ---: | ---: | ---: | --- |
-| `gori mcp` | 183 | ~215 KB | ~55k | Everything (the default) |
+| `gori mcp` | 183 | ~222 KB | ~56k | Everything (the default) |
 | `--read-only` | 61 | ~70 KB | ~18k | Read tools and pure compute; no live requests |
 | `--tools=@recon` | 35 | ~52 KB | ~13k | Read and map the capture, replay a request, record issues and notes |
 | `--tools=@recon --read-only` | 27 | ~37 KB | ~10k | `@recon` minus what `--read-only` disables |
@@ -215,7 +215,7 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 | `run_retest` | Run it, through the project's scope and Sandbox gates, and answer `pass` / `fail` / `inconclusive` / `blocked` plus a row per step (`isError` on anything but `pass`). A batch containing a state-changing method is REFUSED with the exact request count until `confirm:true`; after gori refuses a send the rest is skipped, cleanup included, unless `allow_cleanup:true`. Each send is recorded in History as `src:retest` |
 | `clear_retest_steps` / `delete_retest_run` | Drop every step of an Issue's retest (the run history is kept — re-planning a check does not un-run it), or delete one run summary and its result rows. The steps and the History flows each send recorded both stay: `delete_retest_run` drops the report, not the evidence, for a run that should not be on the record at all |
 | `create_note` / `update_note` / `delete_note` | Manage project notes |
-| `create_rule` / `update_rule` / `set_rule_enabled` / `delete_rule` | Create, edit, toggle, and delete Match & Replace rules (rewrites on in-flight request/response head or body). Each takes `scope`: `project` (default) or `global`, which applies in every project |
+| `create_rule` / `update_rule` / `set_rule_enabled` / `delete_rule` | Create, edit, toggle, and delete Match & Replace rules (rewrites on in-flight request/response head or body). Each takes `scope`: `project` (default) or `global`, which applies in every project. A `short_circuit` rule also takes the [mocking](/guide/proxy/#mocking) arguments: `dir`/`strip_prefix`/`fallthrough`, `fault`/`hang_ms`, `delay_ms`, and `from_flow_id` to draft it from a captured response |
 | `create_rule_from_preset` | Install a preset (see `list_rule_presets`) as ordinary Match & Replace rules, the same result as calling `create_rule` once per rule, so they stay visible, editable and disable-able afterwards. Returns the ids created |
 | `create_extract_rule` / `update_extract_rule` / `set_extract_rule_enabled` / `delete_extract_rule` | Manage the extract rules that bind `$BIND.NAME` from a response. Renaming drops the old name's bound value rather than re-labelling it, and disabling **un-declares** the name, so a rule injecting it goes back to refusing rather than sending a stale value |
 | `create_color_rule` / `update_color_rule` / `set_color_rule_enabled` / `move_color_rule` / `delete_color_rule` | Manage Colormarker rules. `move_color_rule` is a semantic edit, not cosmetic: the first enabled match paints the row. Each takes `scope`: `project` (default) or `global` |

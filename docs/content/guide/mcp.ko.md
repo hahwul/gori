@@ -73,7 +73,7 @@ gori mcp --read-only
 
 | 시작 방법 | 도구 | `tools/list` | 토큰 | 용도 |
 | --- | ---: | ---: | ---: | --- |
-| `gori mcp` | 183 | ~215 KB | ~55k | 전부 (기본값) |
+| `gori mcp` | 183 | ~222 KB | ~56k | 전부 (기본값) |
 | `--read-only` | 61 | ~70 KB | ~18k | 읽기 도구와 순수 연산; 실제 요청 전송 없음 |
 | `--tools=@recon` | 35 | ~52 KB | ~13k | 캡처를 읽고 파악, 요청 재전송, 이슈·노트 기록 |
 | `--tools=@recon --read-only` | 27 | ~37 KB | ~10k | `--read-only`가 끄는 도구를 뺀 `@recon` |
@@ -215,7 +215,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `run_retest` | 프로젝트 스코프와 Sandbox 게이트를 거쳐 실행하고 `pass` / `fail` / `inconclusive` / `blocked` 판정과 단계별 행을 반환합니다(`pass`가 아니면 `isError`). 상태를 바꾸는 메서드가 포함된 배치는 정확한 요청 수와 함께 거부되며 `confirm:true`가 필요합니다. gori가 전송을 거부하면 그 뒤는 모두 건너뛰고 cleanup도 `allow_cleanup:true` 없이는 보내지 않습니다. 모든 전송은 History에 `src:retest`로 기록됩니다 |
 | `clear_retest_steps` / `delete_retest_run` | Issue 리테스트의 모든 단계를 지우거나(실행 기록은 유지 — 검사를 다시 짠다고 실행이 없던 일이 되지는 않습니다), 실행 요약과 결과 행 하나를 지웁니다. 단계와 각 전송이 기록한 History 플로우는 그대로 남습니다: `delete_retest_run`이 지우는 것은 보고이지 증거가 아닙니다 |
 | `create_note` / `update_note` / `delete_note` | 프로젝트 노트 관리 |
-| `create_rule` / `update_rule` / `set_rule_enabled` / `delete_rule` | Match & Replace 규칙 생성, 편집, 토글, 삭제(오가는 요청/응답의 헤드 또는 본문을 그 자리에서 재작성). 각각 `scope`를 받습니다: `project`(기본값) 또는 모든 프로젝트에 적용되는 `global` |
+| `create_rule` / `update_rule` / `set_rule_enabled` / `delete_rule` | Match & Replace 규칙 생성, 편집, 토글, 삭제(오가는 요청/응답의 헤드 또는 본문을 그 자리에서 재작성). 각각 `scope`를 받습니다: `project`(기본값) 또는 모든 프로젝트에 적용되는 `global`. `short_circuit` 규칙은 [모킹](/guide/proxy/#mocking) 인자도 받습니다: `dir`/`strip_prefix`/`fallthrough`, `fault`/`hang_ms`, `delay_ms`, 그리고 캡처된 응답으로 초안을 잡는 `from_flow_id` |
 | `create_rule_from_preset` | 프리셋(`list_rule_presets` 참고)을 평범한 Match & Replace 규칙으로 설치. 규칙마다 `create_rule`을 한 번씩 부른 것과 같은 결과라, 설치 후에도 보이고 편집·비활성화됩니다. 생성된 id를 반환 |
 | `create_extract_rule` / `update_extract_rule` / `set_extract_rule_enabled` / `delete_extract_rule` | 응답에서 `$BIND.NAME`을 묶는 extract 규칙 관리. 이름을 바꾸면 옛 이름에 묶인 값은 라벨만 갈아 끼우는 게 아니라 버려지고, 비활성화하면 이름 자체가 **선언 해제**되어 그것을 주입하던 규칙이 낡은 값을 보내는 대신 다시 거부합니다 |
 | `create_color_rule` / `update_color_rule` / `set_color_rule_enabled` / `move_color_rule` / `delete_color_rule` | Colormarker 규칙 관리. `move_color_rule`은 겉모습이 아니라 의미의 편집입니다. 활성화된 첫 매칭이 그 행을 칠합니다. 각각 `scope`를 받습니다(`project` 기본값 또는 `global`) |
