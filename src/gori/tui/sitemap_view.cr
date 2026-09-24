@@ -822,7 +822,8 @@ module Gori::Tui
     # What the cursor row means to the Params sub-tab: a host row is the whole host, any
     # other row the ENDPOINT PATHS under it (query cut, as `ParamInventory` keys them). A set
     # and not a prefix, because a `{uuid}` fold's descendants share a parent the fold itself
-    # does not name — and a prefix of "/users" would also take in /users-admin.
+    # does not name — and a prefix of "/users" would also take in /users-admin. The engine
+    # still gets a covering prefix, so its flow cap counts this subtree, not the whole host.
     def selected_params_target : ParamsView::Target?
       return nil unless row = visible_rows[@selected]?
       return ParamsView::Target.new(row.host, nil, row.host) if row.depth == 0
@@ -834,7 +835,12 @@ module Gori::Tui
               else
                 Sitemap.path_part(node.path)
               end
-      ParamsView::Target.new(row.host, paths, "#{row.host}#{shown}")
+      prefix = if node.grouped && !node.query_fold && (parent = node.fold_parent)
+                 parent
+               else
+                 Sitemap.path_part(node.path)
+               end
+      ParamsView::Target.new(row.host, paths, "#{row.host}#{shown}", path_prefix: prefix)
     end
 
     private def collect_endpoint_paths(node : Node, acc : Set(String)) : Nil

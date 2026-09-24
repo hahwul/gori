@@ -180,4 +180,23 @@ describe ParamsController do
       ctl.view.rows.map(&.name).sort!.should eq(["x", "y"])
     end
   end
+
+  it "passes subtree path_prefix to avoid starvation by newer flows on other endpoints" do
+    with_params_controller do |ctl, _, session|
+      seed_params_flow(session.store, "https://acme.test/old/endpoint?old_param=1")
+      seed_params_flow(session.store, "https://acme.test/new/endpoint?new_param=1")
+      t = ParamsView::Target.new("acme.test", Set{"/old/endpoint"}, "acme.test/old/endpoint", path_prefix: "/old/endpoint")
+      ctl.set_target(t)
+      drain_until_landed(ctl)
+      ctl.view.rows.map(&.name).should eq(["old_param"])
+    end
+  end
+
+  it "matches target host case-insensitively in view projection" do
+    v = ParamsView.new
+    v.report = pv_report([pv_row("a", "/a", host: "acme.test")])
+    v.target = ParamsView::Target.new("ACME.TEST", nil, "ACME.TEST")
+    v.rows.map(&.name).should eq(["a"])
+    v.host_rows("Acme.Test").map(&.name).should eq(["a"])
+  end
 end

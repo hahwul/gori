@@ -385,15 +385,25 @@ module Gori
             j.field "flows_scanned", report.flows_scanned
             # The flow cap, not the page: parameters on OLDER flows are absent from `total`.
             j.field "truncated", report.truncated
+            j.field "rows_capped", report.rows_capped
             j.field "sensitive_values_redacted", !include_sensitive
-            if scope_unconfigured
-              j.field "note", "in_scope:true but no scope rules are configured — nothing is in scope"
-            elsif report.truncated
-              j.field "note", "read the newest #{report.flows_scanned} flows (max_flows); older flows " \
-                              "are not in this inventory — raise max_flows or narrow the query"
+            if note = list_params_note(report, scope_unconfigured)
+              j.field "note", note
             end
           end
         end)
+      end
+
+      private def list_params_note(report : ParamInventory::Report, scope_unconfigured : Bool) : String?
+        if scope_unconfigured
+          "in_scope:true but no scope rules are configured — nothing is in scope"
+        elsif report.rows_capped
+          "stopped at #{report.rows.size} parameter rows (the row cap) after " \
+          "#{report.flows_scanned} flows — narrow the query, host or path_prefix"
+        elsif report.truncated
+          "read the newest #{report.flows_scanned} flows (max_flows); older flows " \
+          "are not in this inventory — raise max_flows or narrow the query"
+        end
       end
 
       private def param_row(j : JSON::Builder, r : ParamInventory::Row, include_sensitive : Bool) : Nil

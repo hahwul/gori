@@ -19,7 +19,11 @@ module Gori::Tui
 
     # What the Sitemap row the operator came from stands for: a host (paths nil = every
     # endpoint on it) or a subtree's endpoint paths, with the label the header shows.
-    record Target, host : String, paths : Set(String)?, label : String
+    record Target, host : String, paths : Set(String)?, label : String, path_prefix : String? = nil do
+      def prefix : String?
+        path_prefix || (paths.try { |p| p.first if p.size == 1 })
+      end
+    end
 
     HEADER_H = 2 # summary · column headings
 
@@ -107,7 +111,7 @@ module Gori::Tui
       all = @report.try(&.rows) || [] of Row
       @rows = if t = @target
                 paths = t.paths
-                all.select { |r| r.host == t.host && (paths.nil? || paths.includes?(r.path)) }
+                all.select { |r| r.host.downcase == t.host.downcase && (paths.nil? || paths.includes?(r.path)) }
               else
                 all
               end
@@ -123,7 +127,8 @@ module Gori::Tui
     # The whole inventory's rows for the target HOST, ignoring the path filter — Miner's
     # neighbour names come from the host's OTHER endpoints, which the filter hides.
     def host_rows(host : String) : Array(Row)
-      (@report.try(&.rows) || [] of Row).select { |r| r.host == host }
+      h = host.downcase
+      (@report.try(&.rows) || [] of Row).select { |r| r.host.downcase == h }
     end
 
     # ── render ──────────────────────────────────────────────────────────────────

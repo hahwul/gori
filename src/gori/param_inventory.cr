@@ -52,6 +52,10 @@ module Gori
     REFLECT_CHECKS = 64
     REFLECT_YIELD  =  8
 
+    # Row cap: an adversarial project (ID-keyed JSON maps, a path per record) must not build
+    # millions of accumulators. Rows already open keep counting; new ones are refused.
+    ROW_CAP = 10_000
+
     record Options,
       filter : QL::Filter = QL::EMPTY,
       host : String? = nil,
@@ -59,6 +63,7 @@ module Gori
       locations : Array(Miner::Location) = ALL_LOCATIONS,
       all_headers : Bool = false,
       max_flows : Int32 = 2000,
+      max_rows : Int32 = ROW_CAP,
       samples : Int32 = 5,
       min_reflect : Int32 = 4,
       # nil = the whole stored body (capture already caps it at `Body::CAPTURE_MAX`). A cap
@@ -91,8 +96,9 @@ module Gori
       end
     end
 
-    # `truncated` — the flow cap stopped the read before the filter ran out of matches.
-    record Report, rows : Array(Row), flows_scanned : Int32, truncated : Bool
+    # `truncated` — a cap (flows or rows) or `stop` ended the read with matches left.
+    # `rows_capped` — the row cap (`max_rows`) stopped it: raising the flow cap won't help.
+    record Report, rows : Array(Row), flows_scanned : Int32, truncated : Bool, rows_capped : Bool = false
 
     # A row while it is being accumulated.
     private class Acc
@@ -140,7 +146,7 @@ module Gori
       def name?(p : Params::Param) : Bool
         return true if p.loc.cookies?
         return true if p.loc.headers? && Redact.sensitive_header?(p.name)
-        leaf = p.loc.json? ? Params.json_leaf(p.name) : p.name
+        leaf = p.loc.json? ? Params.json_leaf(p.name) : Params.bracket_leaf(p.name)
         !leaf.nil? && @names.includes?(leaf.downcase)
       end
 
@@ -161,11 +167,13 @@ module Gori
       # The path prefix is judged on the ROW, before its bodies are read and before it counts
       # against `max_flows` — so a narrow prefix is not starved by newer flows elsewhere.
       keep = ->(row : Store::FlowRow) { prefix.nil? || endpoint_path(row.target).starts_with?(prefix) }
-      scanned, truncated = each_flow(store, host_filter(opts), opts.max_flows, keep, stop) do |row|
+      scanned, flow_truncated = each_flow(store, host_filter(opts), opts.max_flows, keep,
+        -> { stop.call || accs.size >= opts.max_rows }) do |row|
         next unless detail = store.get_flow(row.id, body_max: opts.body_max)
-        add_flow(accs, detail, row.host, row.method.upcase, endpoint_path(row.target), wanted, opts, sens)
+        add_flow(accs, detail, row.host.downcase, row.method.upcase, endpoint_path(row.target), wanted, opts, sens)
       end
-      Report.new(rows(accs), scanned, truncated)
+      capped = accs.size >= opts.max_rows
+      Report.new(rows(accs), scanned, flow_truncated || capped, capped)
     end
 
     # The Sitemap's durable node key with the query cut — what a row's `path` names.
@@ -175,9 +183,13 @@ module Gori
 
     # The caller's filter, AND an exact host when one was named. Exact on purpose: QL's
     # `host:` is a substring, and "api.test" must not also read "sub.api.test".
+    # Case-insensitive, but hosts are stored as captured: a bare `host = ? COLLATE NOCASE`
+    # cannot use idx_flows_sitemap and scans the table, so the stored spellings are
+    # resolved off the index first and the outer match is an indexed equality.
     private def host_filter(opts : Options) : QL::Filter
       return opts.filter unless h = opts.host.try(&.strip).presence
-      QL.and(opts.filter, QL::Filter.new("host = ? COLLATE NOCASE", [h] of DB::Any))
+      QL.and(opts.filter, QL::Filter.new(
+        "host IN (SELECT DISTINCT host FROM flows WHERE host = ? COLLATE NOCASE)", [h] of DB::Any))
     end
 
     # Newest-first, id-cursor-paged walk over the filter's flows, yielding at most `max` rows
@@ -214,7 +226,12 @@ module Gori
       searched = {} of String => Bool # one search per distinct value per flow
       Params.each(detail.request_head, detail.request_body, opts.all_headers) do |p|
         next unless wanted.includes?(p.loc)
-        acc = accs[{host, method, path, p.loc, p.name}] ||= Acc.new(id)
+        key = {host, method, path, p.loc, p.name}
+        acc = accs[key]?
+        if acc.nil?
+          next if accs.size >= opts.max_rows
+          acc = accs[key] = Acc.new(id)
+        end
         observe(acc, p, id, opts, sens)
         next unless p.reflectable? && acc.reflected_flow_id.nil? && p.value.bytesize >= opts.min_reflect
         hit = searched[p.value]?
@@ -305,9 +322,10 @@ module Gori
     # endpoint's own names would test nothing; its neighbours' names are the guesses worth a
     # request ("the API takes `tenant` on /orders, does /invoices too?").
     def neighbor_names(rows : Enumerable(Row), host : String, path : String) : Array(String)
+      h = host.downcase
       own = Set(String).new
-      rows.each { |r| (w = r.word) && own << w if r.host == host && r.path == path }
-      neighbors = rows.select { |r| r.host == host && r.path != path }
+      rows.each { |r| (w = r.word) && own << w if r.host.downcase == h && r.path == path }
+      neighbors = rows.select { |r| r.host.downcase == h && r.path != path }
       wordlist(neighbors).reject { |w| own.includes?(w) }
     end
   end
