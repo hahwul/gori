@@ -81,8 +81,12 @@ module Gori
       # request on the wire. A bare key next to the navigation cluster would make an outbound
       # call one mistyped keystroke away, which is the shape P4 exists to prevent. `G` is free
       # across Scope::Body and reads as the feature's initial.
+      #
+      # The TITLE is short on purpose: the space menu sizes every column to its longest title,
+      # and at 31 cells this one held the History menu to two columns on a 100-column terminal,
+      # where the list was already full. The description carries the rest.
       r.register Verb::Definition.new(
-        "history.grpc-reflect", "gRPC: fetch schema (reflection)",
+        "history.grpc-reflect", "gRPC: reflect schema",
         "Ask the selected flow's target for its .proto descriptors over gRPC server reflection, and cache them in this project — ACTIVE: sends a real request to that host",
         Verb::Scope::Body, [] of Verb::Chord,
         available: history_selected, mnemonic: 'G', group: :view) { |ctx| ctx.history_grpc_reflect; nil }
