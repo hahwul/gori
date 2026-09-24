@@ -872,10 +872,12 @@ module Gori::Tui
       standing_lens_note
     end
 
-    # The view, then the hide-static lens — the standing modes that AND over the bar.
+    # The view and the hide-static lens — the standing modes that AND over the bar. Both named
+    # when both are on: either can be the one that emptied the list.
     private def standing_lens_note : String?
       if v = active_view
-        return "v:#{v.chip_label} also narrows to #{v.query}"
+        note = "v:#{v.chip_label} also narrows to #{v.query}"
+        return @hide_static ? "#{note} · static assets hidden" : note
       end
       @hide_static ? STATIC_HIDDEN_NOTE : nil
     end
@@ -2865,13 +2867,14 @@ module Gori::Tui
             # A view with a blank bar. Named before the Scope lens for the same reason the bar
             # is: it is the more specific of the two, and "s clears the scope lens" on a
             # view-emptied list points at the wrong control.
-            {@view_note || "no flows match the #{v.name} view", "v selects a view — All shows everything"}
+            {@view_note || "no flows match the #{v.name} view",
+             @hide_static ? "v selects a view · static assets are hidden too" : "v selects a view — All shows everything"}
           elsif @hide_static && @scope.try(&.active?) != true
             # Only the hide-static lens is narrowing, so everything captured so far is an image,
             # a font or a track. Rare, but "no flows" would be a lie about a project that has some.
             {"only static assets so far — they are hidden", "v shows static assets"}
           elsif filtering? # in-scope subset is empty (Scope lens, no QL query)
-            {"no flows in scope", "s clears the scope lens"}
+            {"no flows in scope", @hide_static ? "s clears the scope lens · v shows static assets" : "s clears the scope lens"}
           else
             list_rect = Rect.new(time_x, list_top, rect.right - time_x, list_h)
             TrafficEmptyState.render(screen, list_rect, variant: :history, listen: listen, capturing: capturing)
@@ -3880,7 +3883,7 @@ module Gori::Tui
     # (capped + prefix-filtered) so a large History stays cheap to complete.
     #
     # The CLOSED-set fields complete from `QL`'s own vocabulary lists (`SCOPE_VALUES`,
-    # `SOURCE_VALUES`, `PROTO_VALUES`, `STUB_VALUES`) rather than from copies here, because the
+    # `SOURCE_VALUES`, `PROTO_VALUES`, `FLAG_VALUES`) rather than from copies here, because the
     # colour-rule overlay completes the same fields through `InterceptFilter.suggest_values` and
     # a second copy is how the two came to offer different sets. The pools written out here are
     # SAMPLES of open-ended fields (`status:`, `size:`, `dur:`) — no list can be their whole
@@ -3888,18 +3891,17 @@ module Gori::Tui
     private def suggest_values(field : String, prefix : String) : Array(String)
       p = prefix.downcase
       values = case field
-               when "scheme" then ["http", "https"]
-               when "proto"  then QL::PROTO_VALUES
-               when "method" then METHOD_VAL
-               when "status" then ["2xx", "3xx", "4xx", "5xx", ">=400", ">=500", "200", "301", "302", "401", "403", "404", "500", "502", "503"]
-               when "host"   then host_values_for(prefix)
-               when "size"   then [">10000", ">100000", "<1000"]
-               when "scope"  then QL::SCOPE_VALUES
-               when "src"    then QL::SOURCE_VALUES
-               when "stub"   then QL::STUB_VALUES
-               when "static" then QL::STATIC_VALUES
-               when "dur"    then [">500", ">1s", ">=200", "<100"]
-               else               return [] of String
+               when "scheme"         then ["http", "https"]
+               when "proto"          then QL::PROTO_VALUES
+               when "method"         then METHOD_VAL
+               when "status"         then ["2xx", "3xx", "4xx", "5xx", ">=400", ">=500", "200", "301", "302", "401", "403", "404", "500", "502", "503"]
+               when "host"           then host_values_for(prefix)
+               when "size"           then [">10000", ">100000", "<1000"]
+               when "scope"          then QL::SCOPE_VALUES
+               when "src"            then QL::SOURCE_VALUES
+               when "stub", "static" then QL::FLAG_VALUES
+               when "dur"            then [">500", ">1s", ">=200", "<100"]
+               else                       return [] of String
                end
       # host_values_for is already prefix-filtered by SQL; still apply starts_with so a
       # stale cache entry can't surface a non-matching host if the key ever drifts.

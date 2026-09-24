@@ -72,7 +72,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # a lens the next restart forgets is a lens the operator cannot trust.
   def toggle_static_assets : Nil
     store = @session.store
-    hide = !history_controller.view.hide_static?
+    # Flipped from what the PROJECT holds, not from this TUI's copy: a peer gori on the same
+    # project may have changed it since, and "the opposite of a stale value" is a write neither
+    # operator meant.
+    hide = !StaticAsset.hidden?(store)
     unless StaticAsset.set_hidden(store, hide)
       @toast = "static assets NOT #{hide ? "hidden" : "shown"} — the project store is busy or unwritable"
       return
@@ -81,7 +84,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     sitemap_controller.view.set_hide_static(hide)
     history_controller.view.reload(store)
     sitemap_controller.reload if @active_tab == :target && target_controller.sitemap_active?
-    @toast = hide ? "static assets hidden (images, fonts, media) — v shows them" : "static assets shown"
+    # Name the way back that works WHERE the operator is: the Sitemap has no `v` picker.
+    back = @active_tab == :target ? "␣V" : "v"
+    @toast = hide ? "static assets hidden (images, fonts, media) — #{back} shows them" : "static assets shown"
   end
 
   # One row per view, plus the save row when there is a filter to save. The `●` marker and the

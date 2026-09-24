@@ -242,7 +242,7 @@ describe Gori::Tui::HistoryView do
     it "ANDs QL.hide_static over the bar, and only while on" do
       with_store do |store|
         view = HistoryView.new
-        view.prepare_search(store).not_nil!.filter.sql.should_not contain("gori_static_asset")
+        view.prepare_search(store).not_nil!.filter.sql.should_not contain("static_asset")
         view.set_hide_static(true)
         view.prepare_search(store).not_nil!.filter.sql.should contain(Gori::QL.hide_static.sql)
       end

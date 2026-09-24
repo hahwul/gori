@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- History: the first row of the `v` picker hides static assets (images, fonts, audio/video) from History and the Sitemap; SVG, CSS, JS and error responses stay. It is backed by a new `static:` QL field and by `--hide-static` on `gori run history`/`sitemap` and `hide_static` on MCP `list_history`/`list_sitemap` (#1239)
+- History: the first row of the `v` picker hides static assets (images, fonts, audio/video) from History and the Sitemap; SVG, CSS, JS, errors and redirects stay. It is backed by a new `static:` QL field and by `--hide-static` on `gori run history`/`sitemap`/`sitemap params` and `hide_static` on MCP `list_history`/`list_sitemap`/`list_params`. Opening an existing project classifies its flows once (#1239)
 - Import: paste a curl command to get a request. Repeater's Paste cURL opens it as a sub-tab and Import: cURL adds it to History, as do `gori run import --curl`, `gori run repeater create --curl` and MCP `import_flows{kind: "curl"}` / `create_repeater{curl}`; flags keep curl's meaning (`-b` is a cookie), and ignored transport flags are named (#1244)
 - Copy as cURL: a path with `..` segments now carries `--path-as-is`, and a body captured without a Content-Type carries `-H 'Content-Type:'`, so the command sends what was captured instead of curl's rewrite (#1244)
 - Shell: `gori run shell` and the palette's **Open shell** start a terminal whose curl, git, Python, Go and Node traffic goes through a live gori and trusts its CA without touching OS settings, using a bundle that keeps the terminal's existing roots; `--print` emits the `export` lines for another pane (#1238)

@@ -11,6 +11,7 @@ module Gori
         locations : Array(Miner::Location)? = nil
         all_headers = false
         in_scope = false
+        hide_static = false
         max_flows = ParamInventory::Options.new.max_flows
         samples = ParamInventory::Options.new.samples
         include_sensitive = false
@@ -36,6 +37,7 @@ module Gori
           end
           p.on("--all-headers", "Include standard browser headers (User-Agent, Accept*, Sec-*, …)") { all_headers = true }
           p.on("--in-scope", "Only flows in the project's configured scope") { in_scope = true }
+          p.on("--hide-static", "Leave out static assets — images, fonts, media (the TUI's hide-static lens)") { hide_static = true }
           p.on("--max-flows=N", "Newest flows to read (default #{max_flows})") { |v| max_flows = parse_count(v, "--max-flows") }
           p.on("--samples=N", "Distinct sample values kept per parameter (default #{samples})") { |v| samples = parse_count(v, "--samples") }
           p.on("--include-sensitive", "Print cookie / credential / token values instead of [REDACTED]") { include_sensitive = true }
@@ -76,6 +78,9 @@ module Gori
         if picked = locations
           wanted = picked
         end
+        # The TUI's Params sub-tab reads the tree's flow set, hide-static lens included; this is
+        # that lens asked for explicitly (never read from the TUI's persisted toggle).
+        filter = QL.and(filter, QL.hide_static) if hide_static
         opts = ParamInventory::Options.new(filter: filter, host: host, path_prefix: path_prefix,
           locations: wanted, all_headers: all_headers, max_flows: max_flows, samples: samples)
         report = begin

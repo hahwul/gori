@@ -350,16 +350,14 @@ module Gori
     # complete this field at all".
     private def self.value_pool(field : String, hosts : Array(String), rows : Bool) : Array(String)?
       case field
-      when "host"   then hosts
-      when "method" then METHOD_VAL
-      when "scheme" then SCHEME_VAL
-      when "status" then STATUS_VAL
-      when "scope"  then QL::SCOPE_VALUES
-      when "src"    then QL::SOURCE_VALUES
-      when "proto"  then rows ? QL::PROTO_VALUES : PROTO_VAL
-        # One arm for the two boolean predicates (ameba's ceiling): `STATIC_VALUES` is the same
-        # true/false pair, and a spec pins the two equal.
-      when "stub", "static" then rows ? QL::STUB_VALUES : nil
+      when "host"           then hosts
+      when "method"         then METHOD_VAL
+      when "scheme"         then SCHEME_VAL
+      when "status"         then STATUS_VAL
+      when "scope"          then QL::SCOPE_VALUES
+      when "src"            then QL::SOURCE_VALUES
+      when "proto"          then rows ? QL::PROTO_VALUES : PROTO_VAL
+      when "stub", "static" then rows ? QL::FLAG_VALUES : nil
       end
     end
 

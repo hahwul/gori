@@ -348,7 +348,7 @@ MCP에도 같은 세트가 있습니다. `list_views`, `create_view`, `update_vi
 
 앱을 gori로 둘러보면 API 호출마다 `.png`, `.woff2`, `.mp4` 행이 수십 개씩 붙습니다. `v` 피커의 첫 행 **`[ ] Hide static assets`**가 이런 행을 숨깁니다. 그 행에서 `↵`를 누르면 체크가 바뀌고, 쓰던 뷰는 그대로 남습니다. `s`처럼 뷰와 필터 바 위에 AND로 겹치는 별도 렌즈라서 그렇습니다. 숨기는 동안에는 필터 줄에 `static:hidden` 칩이 보이고, 칩을 클릭하면 다시 보입니다. 이 설정은 Target → Sitemap 트리와 공유하며, 거기서는 `Space` `V`로 켜고 끕니다. 프로젝트별로 저장되고 기본값은 꺼짐입니다. 보안 프록시에서 안전한 방향은 아무것도 숨기지 않는 쪽이기 때문입니다.
 
-이 렌즈는 QL 조건 `-static:true`([`static:`](/ko/reference/query-language/#fields))와 같습니다. 그래서 필터나 저장한 뷰에도 똑같이 쓸 수 있습니다. 이미지, 폰트, 오디오·비디오만 해당하고, 응답 Content-Type으로 판단합니다. Content-Type이 없는 응답(`304`)은 경로의 확장자를 봅니다. SVG, CSS, JavaScript, 소스맵, JSON, 압축 파일, PDF는 숨기지 않고, 상태 코드가 400 이상인 응답도 숨기지 않습니다. 헤드리스에서는 `gori run history --hide-static`나 `gori run sitemap --hide-static`를, MCP에서는 `list_history`나 `list_sitemap`에 `hide_static`을 넘기면 됩니다. 둘 다 TUI 설정은 읽지 않습니다.
+이 렌즈는 QL 조건 `-static:true`([`static:`](/ko/reference/query-language/#fields))와 같습니다. 그래서 필터나 저장한 뷰에도 똑같이 쓸 수 있습니다. 이미지, 폰트, 오디오·비디오만 해당하고, 응답 Content-Type으로 판단합니다. Content-Type이 없는 응답(`304`)은 경로의 확장자를 봅니다. SVG, CSS, JavaScript, 소스맵, JSON, 압축 파일, PDF, HLS 재생목록, URL 파라미터로 가져온 이미지(`/_next/image?url=…` 같은 이미지 프록시)는 숨기지 않습니다. 성공한 응답이 아닌 것도 숨기지 않습니다. 에러, 리다이렉트, 응답을 받지 못한 플로우가 그렇습니다. 헤드리스에서는 `gori run history --hide-static`나 `gori run sitemap --hide-static`를, MCP에서는 `list_history`나 `list_sitemap`에 `hide_static`을 넘기면 됩니다. 둘 다 TUI 설정은 읽지 않습니다.
 
 ## 컬럼 (`Space` `C`) {#columns}
 

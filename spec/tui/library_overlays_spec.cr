@@ -233,6 +233,25 @@ describe Gori::Tui::LibraryPicker do
     code.should contain("|| 0) + 1)")
   end
 
+  # A negative index is an ACTION row (the view picker's hide-static toggle is first on the
+  # card). Typing a name and pressing ↵ is how an entry is picked, so a filter the action row
+  # happens to match must not land the cursor on it: `err` + ↵ is the Errors view, not a flip
+  # of a lens whose detail says "errors stay".
+  it "lands a typed filter on the first library entry, not on an action row that matches" do
+    rows = [LibraryPicker::Row.new(-2, "[ ] Hide static assets", "svg/css/js and errors stay"),
+            LibraryPicker::Row.new(0, "All", "everything"),
+            LibraryPicker::Row.new(1, "Errors", "status:>=400")]
+    lp = LibraryPicker.new("HISTORY VIEW", rows, "view", action: "activate")
+    h = OverlayHarness.new(lp)
+    h.type("err")
+    lp.entry_count.should eq(2)
+    lp.selected_index.should eq(1)
+    # Still first — and still selected — when it is the only match.
+    lp2 = LibraryPicker.new("HISTORY VIEW", rows, "view", action: "activate")
+    OverlayHarness.new(lp2).type("hide")
+    lp2.selected_index.should eq(-2)
+  end
+
   it "does not type ^E into the filter query" do
     lp = LibraryPicker.new("LOAD CHAIN", private_rows, "chain")
     lp.on_edit = ->(_i : Int32) { nil }

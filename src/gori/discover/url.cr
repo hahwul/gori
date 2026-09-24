@@ -374,10 +374,7 @@ module Gori::Discover
     # the extension is all there is to go on — the content type only arrives with the body
     # this exists to avoid downloading.
     def self.binary_asset?(path : String) : Bool
-      slash = path.rindex('/') || -1
-      dot = path.rindex('.')
-      return false unless dot && dot > slash + 1 && dot < path.size - 1
-      BINARY_EXT.includes?(path[(dot + 1)..].downcase)
+      (ext = StaticAsset.extension(path)) ? BINARY_EXT.includes?(ext) : false
     end
 
     # Answers `s.downcase`, returning `s` ITSELF when lowering it would change nothing — which

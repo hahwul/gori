@@ -12,7 +12,11 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     # holds nothing. Say what happened instead (history_view.cr takes the same exit).
     rows =
       begin
-        @session.store.search(@scope.filter, 2000, raise_on_error: true)
+        # Through the hide-static lens as well as the scope lens: a picker must not offer the
+        # rows the lens the operator switched on just hid from History and the Sitemap.
+        lens = @scope.filter
+        lens = QL.and(lens, QL.hide_static) if history_controller.view.hide_static?
+        @session.store.search(lens, 2000, raise_on_error: true)
       rescue ex
         @toast = "could not list flows: #{ex.message}"
         return

@@ -131,6 +131,7 @@ describe "gori run history — the empty-listing sentence" do
 
   it "names both lenses on an empty HAR too" do
     Gori::CLI::Run.empty_har_note(nil, nil).should eq("no flows written to the HAR")
+    Gori::CLI::Run.empty_har_note(nil, nil, true).should eq("no flows written to the HAR (static assets hidden)")
     Gori::CLI::Run.empty_har_note("status:200", "Errors")
       .should eq(%(no flows written to the HAR (query "status:200", view "Errors")))
     Gori::CLI::Run.empty_har_note(nil, "Errors")

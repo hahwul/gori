@@ -96,6 +96,16 @@ describe "MCP list_params" do
     end
   end
 
+  it "hide_static leaves the params of image, font and media fetches out (the Params sub-tab's lens)" do
+    with_store do |store|
+      lp_flow(store, "/api?q=1")
+      lp_flow(store, "/logo.png?v=3") # no Content-Type: an image by its extension
+      tools = tools_for(store)
+      lp(tools, "{}")["params"].as_a.map(&.["name"].as_s).sort!.should eq(["q", "v"])
+      lp(tools, %({"hide_static":true}))["params"].as_a.map(&.["name"]).should eq(["q"])
+    end
+  end
+
   it "applies the QL query and exact host" do
     with_store do |store|
       lp_flow(store, "/a?x=1", host: "api.test")

@@ -74,15 +74,6 @@ module Gori
       ptr.null? || len <= 0 ? "" : String.new(ptr, len).scrub
     end
 
-    # :nodoc: — a SQLite TEXT argument as a view over SQLite's own buffer, valid only for the
-    # duration of the callback. For a function that only COMPARES bytes, `text`'s copy and scrub
-    # are a per-row allocation buying nothing (see `StaticAsset.static?`).
-    def self.bytes(v : LibSQLite3::SQLite3Value) : Bytes
-      ptr = LibSQLite3.value_text(v)
-      len = LibSQLite3.value_bytes(v)
-      ptr.null? || len <= 0 ? Bytes.empty : Bytes.new(ptr, len, read_only: true)
-    end
-
     # `gori_host_match(host, pattern)` — the host column against one host-rule pattern, through
     # the very object `Scope::Rule#host_match?` uses. Exact/subdomain/glob and the bracket
     # peeling all come from there, so there is no SQL spelling left to drift.
@@ -125,21 +116,17 @@ module Gori
 
     SQLITE_NULL = 5
 
-    # `gori_static_asset(content_type, target, status)` — the QL `static:` field (#1239), through
-    # `StaticAsset.static?` itself, so the TUI lens, the CLI flag and MCP all ask the one
-    # classifier. A function rather than a LIKE/regex chain because the rule is a MIME prefix
-    # test with an extension fallback, which SQL would spell as a dozen ORs re-evaluated per row
-    # on a list that reloads during live capture.
-    #
-    # Always 0 or 1, never NULL, so `-static:true` is exactly `static:false` — the NULL-falls-out-
-    # of-both trap `-status:` has cannot happen here.
+    # `gori_static_asset(content_type, target, status)` — `StaticAsset.static?` from SQL (#1239).
+    # NOT what `static:` compiles to: it WRITES the `static_asset` column, once per flow, from
+    # `Store#update_one` (the values just bound plus the row's own target) and V30's backfill.
+    # Always 0 or 1, so the column is NOT NULL and `-static:true` is exactly `static:false`.
     STATIC_FN = ->(context : LibSQLite3::SQLite3Context, _argc : Int32, argv : LibSQLite3::SQLite3Value*) do
       args = Slice.new(argv, 3)
       static =
         begin
-          ct = LibSQLite3.value_type(args[0]) == SQLITE_NULL ? nil : ScopeMatch.bytes(args[0])
+          ct = LibSQLite3.value_type(args[0]) == SQLITE_NULL ? nil : ScopeMatch.text(args[0])
           status = LibSQLite3.value_type(args[2]) == SQLITE_NULL ? nil : LibSQLite3.value_int64(args[2]).clamp(Int32::MIN, Int32::MAX).to_i32
-          StaticAsset.static?(ct, ScopeMatch.bytes(args[1]), status)
+          StaticAsset.static?(ct, ScopeMatch.text(args[1]), status)
         rescue
           # Same belt as HOST_FN: an exception must not unwind through the C callback. Not
           # static is the safe answer — a row the lens cannot classify stays visible.
@@ -153,7 +140,7 @@ module Gori
     # connection that is not a pooled `SQLite3::Connection` (`ProjectSearch`'s read-only handle
     # over another project's database) cannot end up with a `gori_ci_contains` that means
     # something else, or with none: `QL.contains_cond` emits a call to it for every
-    # non-ASCII needle, and `QL.static_cond` one to `gori_static_asset` for every `static:`.
+    # non-ASCII needle, and every flow write and V30's backfill call `gori_static_asset`.
     def self.install(db : LibSQLite3::SQLite3) : Nil
       LibSQLite3.create_function(db, "gori_host_match", 2, 1, nil, HOST_FN, nil, nil)
       LibSQLite3.create_function(db, "gori_ci_contains", 2, 1, nil, CONTAINS_FN, nil, nil)

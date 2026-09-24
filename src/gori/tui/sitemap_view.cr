@@ -99,6 +99,7 @@ module Gori::Tui
       # The hide-static lens (#1239), shared with History: one project key, set by the Runner's
       # toggle and read by SitemapController on open.
       @hide_static = false
+      @no_flows = false # the project holds no flows at all (see `fetch_reload`)
       @query = ""
       @querying = false
       @qcx = 0                      # caret position within @query
@@ -169,8 +170,8 @@ module Gori::Tui
     # is what is quoted here. Re-measure before assuming it still holds if that default moves.
     def reload(store : Store) : Nil
       plan = prepare_reload || return
-      entries, tags = fetch_reload(store, plan)
-      apply_reload(entries, tags, plan)
+      entries, tags, no_flows = fetch_reload(store, plan)
+      apply_reload(entries, tags, plan, no_flows)
     end
 
     # The store half of a reload, as three steps, so the `/` bar can run the middle one on a
@@ -226,13 +227,24 @@ module Gori::Tui
       @hide_static ? QL.and(combined, QL.hide_static) : combined
     end
 
+    # What `fetch_reload` hands `apply_reload`: the endpoints, the tags, and whether the project
+    # holds no flows at all.
+    alias Fetched = {Array({String, String, String}), Hash({String, String}, String), Bool}
+
     # Reads only — safe off the main fiber. `control` lets the caller cancel a superseded read.
+    #
+    # The third value is History's `no_flows`, asked only when the tree came back empty (one
+    # rowid seek): with a standing lens on, an empty tree is either "the lens hid everything" or
+    # "there is nothing", and only the second may show the traffic empty state (#1239).
     def fetch_reload(store : Store, plan : ReloadPlan,
-                     control : Store::QueryControl? = nil) : {Array({String, String, String}), Hash({String, String}, String)}
-      {store.sitemap_entries(plan.combined, control: control), store.sitemap_tags}
+                     control : Store::QueryControl? = nil) : Fetched
+      entries = store.sitemap_entries(plan.combined, control: control)
+      {entries, store.sitemap_tags, entries.empty? && store.recent_flows(1).empty?}
     end
 
-    def apply_reload(entries : Array({String, String, String}), tags : Hash({String, String}, String), plan : ReloadPlan) : Nil
+    def apply_reload(entries : Array({String, String, String}), tags : Hash({String, String}, String), plan : ReloadPlan,
+                     no_flows : Bool = false) : Nil
+      @no_flows = no_flows
       prev_sel = selection_anchor
       prev_scroll = @scroll
       prev_expand = collect_expand_state
@@ -1103,6 +1115,10 @@ module Gori::Tui
         msg, hint =
           if @searching
             {"searching…", nil}
+          elsif @no_flows && @query.blank?
+            # Nothing captured, whatever lens is on — History's first branch, for its reason.
+            TrafficEmptyState.render(screen, tree, variant: :sitemap, listen: listen, capturing: capturing)
+            return
           elsif !@query.blank?
             # An INVALID QL residual (all terms bad, or a broken regex) reads as "no
             # endpoints match" unless we say why — @query_note distinguishes it.
@@ -1110,7 +1126,9 @@ module Gori::Tui
           elsif @hide_static && @scope.try(&.active?) != true
             {"only static assets so far — they are hidden", "␣V shows static assets"}
           elsif filtering? # in-scope subset is empty (Scope lens, no QL query)
-            {"no endpoints in scope", nil}
+            # Name the hide-static lens too when it is also on: turning `s` off is not the only
+            # way back, and may not be the one that explains the empty tree.
+            {"no endpoints in scope", @hide_static ? "static assets are hidden too — ␣V shows them" : nil}
           else
             TrafficEmptyState.render(screen, tree, variant: :sitemap, listen: listen, capturing: capturing)
             return

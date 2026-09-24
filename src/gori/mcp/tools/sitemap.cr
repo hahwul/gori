@@ -358,6 +358,8 @@ module Gori
             scope_unconfigured = true
           end
         end
+        # The TUI Params sub-tab follows the hide-static lens; this is it, asked for explicitly.
+        filter = QL.and(filter, QL.hide_static) if bool_arg(h, "hide_static", false)
         include_sensitive = bool_arg(h, "include_sensitive", false)
         report = if scope_unconfigured
                    ParamInventory::Report.new([] of ParamInventory::Row, 0, false)
@@ -470,6 +472,7 @@ module Gori
           "ones unread). Names from a host's OTHER endpoints make good mine_start `names`." do |s|
           s.field "query", strprop("gori QL filter over the flows read (see ql_reference)")
           s.field "in_scope", boolprop("only flows in the project's configured scope (default false; empty with a note when no scope is configured)")
+          s.field "hide_static", boolprop("leave out static assets — images, fonts, audio/video; the TUI's hide-static lens, same as `-static:true` in `query` (default false)")
           s.field "host", strprop("only this host (exact, case-insensitive)")
           s.field "path_prefix", strprop("only endpoints whose path starts with this, e.g. /api/v1")
           s.field "location", arr_or_str_prop("only these locations: query, form, multipart, json, headers, cookies (array or comma list; default all)")

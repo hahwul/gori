@@ -523,7 +523,9 @@ module Gori
                 store.close
                 abort "gori run history: query #{q.inspect} did not match any field (check syntax, e.g. status:>=500 host:example.com method:POST)"
               end
-              combined = QL.and(QL.and(QL.and(scope_filter, view_filter), static_filter), filter)
+              # The hide-static lens LAST, after the operator's own terms, the way the TUI and MCP
+              # order it: a cheap `host LIKE` rejects a row before the lens is consulted.
+              combined = QL.and(QL.and(QL.and(scope_filter, view_filter), filter), static_filter)
               # Trigram indexing is off-commit (Store V4), so a `body:`/free-text query run
               # right after a capture — or against a db a killed process left behind — would
               # under-report until the backlog drains. A one-shot answer must be exact, so
@@ -598,7 +600,7 @@ module Gori
             # `--format har` run in any project that has a column, which is stderr noise in a
             # script rather than a warning about anything they did.
             STDERR.puts "gori run history: --column is not carried by --format har (the values are in each entry's headers/content)" unless column_specs.empty?
-            emit_har(store, rows, query, view_label, limit, truncated, redaction)
+            emit_har(store, rows, query, view_label, limit, truncated, redaction, hide_static)
           elsif format == :json
             # Said on STDERR in the streaming formats too, for the reason the empty note below
             # gives: STDOUT is a pipe, and the consumer reading it cannot see the flags the
@@ -728,8 +730,9 @@ module Gori
       # `gori run history:` prefix, and both lenses for the same reason as above: an export that
       # is empty because a standing view excluded everything must not read like one taken against
       # a project with no traffic.
-      def self.empty_har_note(query : String?, view : String?) : String
-        why = [query ? "query #{query.inspect}" : nil, view ? "view #{view.inspect}" : nil].compact
+      def self.empty_har_note(query : String?, view : String?, hide_static : Bool = false) : String
+        why = [query ? "query #{query.inspect}" : nil, view ? "view #{view.inspect}" : nil,
+               hide_static ? "static assets hidden" : nil].compact
         "no flows written to the HAR#{why.empty? ? "" : " (#{why.join(", ")})"}"
       end
 
@@ -746,7 +749,8 @@ module Gori
       # the failure this file keeps having to fix.
       private def self.emit_har(store : Store, rows : Array(Store::FlowRow), query : String?,
                                 view : String?, limit : Int32, truncated : Bool,
-                                redaction : RedactFlags = RedactFlags.new) : Nil
+                                redaction : RedactFlags = RedactFlags.new,
+                                hide_static : Bool = false) : Nil
         # Resolved (and refused) while the store is still open, exactly as `cmd_show` does: the
         # project's own profiles live on a settings row in this database.
         choice = redact_choice(store, redaction)
@@ -796,7 +800,7 @@ module Gori
         redact_notes(reports, choice, "history")
         report.notes.each { |n| STDERR.puts "gori run history: #{n}" }
         if report.written == 0
-          STDERR.puts "gori run history: #{empty_har_note(query, view)}"
+          STDERR.puts "gori run history: #{empty_har_note(query, view, hide_static)}"
           # ...and, if the page was CUT, that the export never saw the rest. An empty HAR is
           # normally "this project has nothing exportable", and for a project of imported URLs
           # or in-flight flows the newest `-n` can all lack a response while older ones carry

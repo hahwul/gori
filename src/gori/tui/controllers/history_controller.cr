@@ -569,6 +569,7 @@ module Gori::Tui
       # no status line, and no `●` on any picker row to explain it.
       had = @history.active_view
       lost = resolve_active_view
+      sync_hide_static
       @history.reload(@host.session.store) # catch peer captures while we were elsewhere
       if had && @history.active_view.nil?
         @lost_view_key = nil
@@ -580,6 +581,12 @@ module Gori::Tui
         @lost_view_key = nil
         @host.status("the saved view this project had is gone — showing All")
       end
+    end
+
+    # The hide-static lens as the project stores it. Re-read on entry and on a peer's change for
+    # the reason the view is: another gori on this project may have flipped it (#1239).
+    private def sync_hide_static : Nil
+      @history.set_hide_static(StaticAsset.hidden?(@host.session.store))
     end
 
     def on_external_change : Nil
@@ -599,6 +606,7 @@ module Gori::Tui
       if had && @history.active_view.nil?
         @host.status("the #{had.name} view is gone — showing All")
       end
+      sync_hide_static
       refresh_search
       @history.refresh_detail(@host.session.store) if @host.overlay == :detail # peer filled the open flow
     end

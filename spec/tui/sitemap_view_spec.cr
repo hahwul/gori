@@ -124,6 +124,24 @@ describe Gori::Tui::SitemapView do
     end
   end
 
+  it "shows the traffic empty state, not a lens sentence, for a project with no flows" do
+    with_store do |store|
+      view = SitemapView.new
+      view.set_hide_static(true)
+      view.reload(store)
+      b = MemoryBackend.new(70, 15)
+      view.render(Screen.new(b), Rect.new(0, 0, 70, 15), listen: {"127.0.0.1", 8070}, capturing: true)
+      b.contains?("no traffic captured").should be_true
+      b.contains?("only static assets").should be_false
+
+      capture(store, "cdn.acme.test", "GET", "/img/logo.png")
+      view.reload(store)
+      b2 = MemoryBackend.new(70, 15)
+      view.render(Screen.new(b2), Rect.new(0, 0, 70, 15))
+      b2.contains?("only static assets so far").should be_true
+    end
+  end
+
   # The same silence History carries, one tab over: an unknown `field:` free-texts the whole
   # token and matches nothing, which on an empty tree reads as "nothing was mapped".
   it "names a misspelled filter field in the empty-state" do

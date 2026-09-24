@@ -141,6 +141,12 @@ describe "Gori::Verbs.register_history" do
       r["history.clear"].menu_key.should eq('X')
       r["probe.clear"].menu_key.should eq('X')
       r["history.columns"].menu_key.should eq('C')
+      # The hide-static lens (#1239): menu-only, beside `v` — its first door is the `v` picker.
+      r["history.toggle-static"].chords.should be_empty
+      r["history.toggle-static"].menu_key.should eq('V')
+      verb_intents(r, "history.toggle-static").should eq([:toggle_static_assets])
+      r["history.toggle-static"].available?(on(:history)).should be_true
+      r["history.toggle-static"].available?(on(:project)).should be_false # Body is shared
       r["repeater.compare"].menu_key.should eq('C')
       r["history.clear"].menu_key.should_not eq(r["repeater.compare"].menu_key)
       r["detail.delete"].chords.should be_empty # the shortcut is list-only

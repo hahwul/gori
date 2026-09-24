@@ -9,7 +9,8 @@ BODY  = (ENV["BENCH_BODY"]? || "1024").to_i
 REPS  = (ENV["BENCH_REPS"]? || "3").to_i
 
 # 40% of the rows are static assets for `static:` (#1239): 30% by Content-Type, 10% with none,
-# judged by a `.png` target — the two paths `gori_static_asset` takes.
+# judged by a `.png` target. The raw INSERT below writes `static_asset` itself, the way
+# `Store#update_one` would have.
 def seed_history(path : String, count : Int32) : Nil
   # No Store/writer exists during fixture construction. Once opened below, all
   # measured capture writes go through the real writer fiber.
@@ -19,14 +20,14 @@ def seed_history(path : String, count : Int32) : Nil
       WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x < ?)
       INSERT INTO flows(id, created_at, scheme, host, port, method, target, http_version,
         request_head, response_head, response_body, status, content_type, request_size,
-        response_size, state, source)
+        response_size, state, source, static_asset)
       SELECT x, x, 'https', 'host' || (x % 100) || '.test', 443, 'GET',
         CASE WHEN x % 10 = 3 THEN '/img/' || x || '.png' ELSE '/api/' || x END, 'HTTP/1.1',
         CAST('GET / HTTP/1.1' AS BLOB), CAST('HTTP/1.1 200 OK' AS BLOB),
         CAST(replace(hex(zeroblob(?)), '00', 'ab') || ' commonneedle ' || x AS BLOB),
         CASE WHEN x % 997 = 0 THEN 500 ELSE 200 END,
         CASE WHEN x % 10 < 3 THEN 'image/png' WHEN x % 10 = 3 THEN NULL ELSE 'text/plain' END,
-        16, ?, 1, 'proxy'
+        16, ?, 1, 'proxy', CASE WHEN x % 10 < 4 THEN 1 ELSE 0 END
       FROM n
       SQL
     db.exec "INSERT INTO flows_fts(rowid, req, resp) SELECT id, '', CAST(response_body AS TEXT) FROM flows"

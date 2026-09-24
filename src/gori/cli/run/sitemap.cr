@@ -317,7 +317,7 @@ module Gori
         if format == :json
           puts CLI::Output.sitemap_json(hosts)
         elsif hosts.empty?
-          STDERR.puts "no endpoints (capture some traffic, or relax --in-scope / the query)"
+          STDERR.puts "no endpoints (capture some traffic, or relax --in-scope / --hide-static / the query)"
         elsif format == :paths
           print CLI::Output.sitemap_paths(hosts)
         else

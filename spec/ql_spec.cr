@@ -1255,15 +1255,15 @@ describe "Gori::Store#search (QL)" do
       end
     end
 
-    it "compiles static: to the gori_static_asset function, with stub:'s spellings" do
-      Gori::QL.parse("static:true").sql.should eq("(gori_static_asset(content_type, target, status) = 1)")
-      Gori::QL.parse("static:off").sql.should eq("(gori_static_asset(content_type, target, status) = 0)")
+    it "compiles static: to the static_asset column, with stub:'s spellings" do
+      Gori::QL.parse("static:true").sql.should eq("(static_asset = 1)")
+      Gori::QL.parse("static:off").sql.should eq("(static_asset = 0)")
+      # The lens is the exact predicate idx_flows_sitemap_nonstatic is partial on.
+      Gori::QL.hide_static.sql.should eq("static_asset = 0")
       Gori::QL.analyze("static:maybe").ignored.should_not be_empty
       Gori::QL.parse("static:maybe host:a").sql.should eq("((host) LIKE ? ESCAPE '\\')")
       # `~` on a predicate is dropped, not free-texted.
       Gori::QL.analyze("static~true").ignored.should_not be_empty
-      # The colour-rule overlay completes static: through stub:'s pool (InterceptFilter.value_pool).
-      Gori::QL::STATIC_VALUES.should eq(Gori::QL::STUB_VALUES)
     end
 
     it "splits captured flows into static assets and the rest, NULL-free in both directions" do

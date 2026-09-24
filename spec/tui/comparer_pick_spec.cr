@@ -21,7 +21,9 @@ end
 
 describe "the Comparer flow picker's row source" do
   it "applies the Scope lens in the query, before the row limit" do
-    comparer_pick_body.should match(/store\.search\(\s*@scope\.filter\s*,\s*\d+/)
+    # Through the hide-static lens too (#1239), ANDed onto the scope lens before the search.
+    comparer_pick_body.should match(/lens = @scope\.filter\b/)
+    comparer_pick_body.should match(/store\.search\(\s*lens\s*,\s*\d+/)
   end
 
   it "keeps no unlensed snapshot path, at any limit" do
