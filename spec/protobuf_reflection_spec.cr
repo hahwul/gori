@@ -93,7 +93,8 @@ private class ReflectOrigin
   def initialize(@unimplemented : Array(String) = [] of String,
                  @files : Hash(String, Bytes) = {} of String => Bytes,
                  @services : Array(String) = [] of String,
-                 @symbol_error : String? = nil)
+                 @symbol_error : String? = nil,
+                 @reply_limit : Int32? = nil)
     @server = TCPServer.new("127.0.0.1", 0)
     @port = @server.local_address.port
     @done = Channel(Nil).new(1)
@@ -149,6 +150,11 @@ private class ReflectOrigin
     end
     requests, _ = Gori::Proxy::H2::Grpc.scan(body.to_slice)
     replies = requests.map { |m| answer(m) }
+    # A stream cut short, as the replay engine's body cap leaves one: only the first
+    # `reply_limit` replies of a multi-request round arrive.
+    if (limit = @reply_limit) && requests.size > 1
+      replies = replies.first(limit)
+    end
     blk = enc.encode([{":status", "200"}, {"content-type", "application/grpc"}])
     conn.write(Frame::Header.new(Frame::Type::Headers.value, Frame::END_HEADERS, 1_u32, blk).to_bytes)
     replies.each do |r|
@@ -261,6 +267,16 @@ describe Gori::Protobuf::Reflection do
     it "reports an ErrorResponse as its gRPC status name and message" do
       m = Gori::Protobuf.decode(error_response(5, "symbol not found"))
       Reflection.error_response(m).should eq("NOT_FOUND: symbol not found")
+    end
+
+    # `error_code` is an int32; a hostile 2^40 raised OverflowError out of `to_i32` and threw
+    # away every file the fetch had already collected.
+    it "reads an out-of-range error_code as an int32 instead of raising" do
+      inner = IO::Memory.new
+      inner.write(Bytes[0x08]); inner.write(varint(1_u64 << 40))
+      inner.write(Encoder.length_delimited(2_u32, "denied".to_slice))
+      m = Gori::Protobuf.decode(Encoder.length_delimited(7_u32, inner.to_slice))
+      Reflection.error_response(m).should eq("CODE#{1_u64 << 40}: denied")
     end
 
     it "returns nil for a reply that is not an ErrorResponse" do
@@ -390,6 +406,23 @@ describe Gori::Protobuf::Reflection do
           # One stream per round: list_services, then the symbol.
           origin.asks.should eq([{7, ""}, {4, "demo.Users"}])
           origin.paths.uniq.should eq([Reflection.path(Reflection::SERVICE_V1)])
+        end
+      ensure
+        origin.close
+      end
+    end
+
+    # One reply per request, in order: a stream cut short (the replay engine stops reading a
+    # body at its size cap) left every later service out of the schema without a word.
+    it "names the requests a cut-short reply stream left unanswered" do
+      origin = ReflectOrigin.new(services: ["demo.Users", "other.Svc"],
+        files: {"demo.Users" => demo_file_descriptor}, reply_limit: 1)
+      begin
+        with_scope do |scope, _store|
+          outcome = Reflection::Client.new(Gori::Outbound.interactive(scope),
+            scheme: "http", host: "127.0.0.1", port: origin.port, verify: false, timeout: 5.seconds).fetch
+          outcome.ok?.should be_true
+          outcome.notes.any? { |n| n.includes?("went unanswered") && n.includes?("other.Svc") }.should be_true
         end
       ensure
         origin.close

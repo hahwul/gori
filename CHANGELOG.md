@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- gRPC reflection: a fetch stays live in this process when a busy project cannot save it, a cut-short reply names the requests it left unanswered, and an out-of-range `error_code` no longer aborts the fetch (#1234)
 - Protobuf: a varint overflowing 64 bits reads as malformed, and enum values read as int32, so a negative packed enum lists as -1 instead of 18446744073709551615 (#1234)
 - Repeater: an unedited grpc-web-text body, and a gRPC field applied unchanged in the FIELDS form, are sent exactly as captured (#1234)
 - gRPC: grpc-web messages and status are read through an HTTP `Content-Encoding` on every surface, and neither a 0x80 frame in a native gRPC body nor a malformed `grpc-status` such as `+0` is reported as the call status (#1234)

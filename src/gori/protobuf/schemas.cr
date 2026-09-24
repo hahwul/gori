@@ -148,8 +148,17 @@ module Gori::Protobuf
       committed = store.put_grpc_reflection(target, service, services, files, descriptor)
       # Re-read rather than splice the row in by hand: the Store is what orders them and what
       # the next `load_project` will replay, and two constructions of one list is how they
-      # come to disagree.
-      @@reflections = store.grpc_reflections
+      # come to disagree. Except when the write did NOT commit — the re-read then lacks the
+      # row, and "applied either way" silently became "applied never". The splice mirrors the
+      # Store's own rule (one row per target, the newest fetch merging last) for this process
+      # only; the next `load_project` reverts to what committed, as every surface says.
+      @@reflections = if committed
+                        store.grpc_reflections
+                      else
+                        @@reflections.reject(&.target.==(target)) <<
+                          Store::GrpcReflection.new(target, service, Time.utc.to_unix_ms * 1000_i64,
+                            services, files, descriptor)
+                      end
       rebuild
       committed
     end
