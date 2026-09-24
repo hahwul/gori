@@ -95,7 +95,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     # "static" is a judgement the operator should see before trusting it with their list.
     hidden = history_controller.view.hide_static?
     rows = [LibraryPicker::Row.new(VIEW_ROW_STATIC,
-      hidden ? "◐ Static assets: hidden — ↵ show" : "◐ Static assets: shown — ↵ hide",
+      # `[x]`/`[ ]`, the checkbox every other toggle row in gori draws (Compact, the Miner
+      # config), so the row reads as a switch rather than as a seventh view to pick.
+      hidden ? "[x] Hide static assets" : "[ ] Hide static assets",
       "-static:true · images, fonts, media; svg/css/js and errors stay")]
     rows.concat(views.map_with_index do |v, i|
       detail = v.narrowing? ? v.query : "everything — no source term"
