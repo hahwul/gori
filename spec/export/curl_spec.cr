@@ -320,6 +320,32 @@ describe Gori::Export::Curl do
     end
   end
 
+  # Both measured against a raw listener, curl 8.7.1, and both found by holding the export to
+  # the import round trip (`spec/curl_round_trip_spec.cr`).
+  describe "what curl would change on its own" do
+    it "adds --path-as-is for a . or .. path segment, which curl collapses otherwise" do
+      cmd = curl_of("GET /a/../etc/passwd HTTP/1.1\r\nHost: h\r\n\r\n", "http://h")
+      cmd.should contain("--path-as-is")
+      curl_of("GET /a/./b HTTP/1.1\r\nHost: h\r\n\r\n", "http://h").should contain("--path-as-is")
+    end
+
+    it "leaves the flag off a dotted name that is not a segment, and off a query" do
+      curl_of("GET /a..b/.hidden HTTP/1.1\r\nHost: h\r\n\r\n", "http://h").should_not contain("--path-as-is")
+      curl_of("GET /p?x=../y HTTP/1.1\r\nHost: h\r\n\r\n", "http://h").should_not contain("--path-as-is")
+    end
+
+    it "writes -H 'Content-Type:' for a body the capture sent without one" do
+      cmd = curl_of("POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\n\r\nabc", "http://h")
+      cmd.should contain("-H 'Content-Type:' \\\n  --data-raw 'abc'")
+    end
+
+    it "writes no suppression when the capture stated a Content-Type, or had no body" do
+      curl_of("POST /a HTTP/1.1\r\nHost: h\r\ncontent-type: text/plain\r\n\r\nabc", "http://h")
+        .should_not contain("'Content-Type:'")
+      curl_of("POST /a HTTP/1.1\r\nHost: h\r\n\r\n", "http://h").should_not contain("Content-Type")
+    end
+  end
+
   describe "a body no shell argument can carry" do
     it "refuses a NUL-bearing body in a comment rather than sending a SHORTER one" do
       cmd = curl_of("POST /a HTTP/1.1\r\nHost: h\r\n\r\nab\u{0}cd", "http://h")

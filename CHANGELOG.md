@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Copy as cURL: a path with `..` segments now carries `--path-as-is`, and a body captured without a Content-Type carries `-H 'Content-Type:'`, so the command sends what was captured instead of curl's rewrite (#1244)
 - Shell: `gori run shell` and the palette's **Open shell** start a terminal whose curl, git, Python, Go and Node traffic goes through a live gori and trusts its CA without touching OS settings, using a bundle that keeps the terminal's existing roots; `--print` emits the `export` lines for another pane (#1238)
 - Sitemap: a parameter inventory lists every captured input name per endpoint with its location, counts, sample values and whether a value is reflected, in the new Target → Params sub-tab, `gori run sitemap params` and MCP `list_params`. It exports Miner wordlists and seeds a mine with names seen on the host's other endpoints (`gori run mine --name`, `mine_start names`) (#1231)
 - TUI: `Ctrl-F` in the project picker searches every project's captured flows by host, path or body text, and `Enter` on a hit opens that project on the flow's detail; the search reads each database without migrating or writing to it (#1229)
