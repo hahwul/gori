@@ -781,6 +781,7 @@ module Gori::Tui
             dirty = true if history_controller.flush_query_reload_if_due(now)
             dirty = true if sitemap_controller.flush_query_reload_if_due(now)
             dirty = true if sitemap_controller.drain_search
+            dirty = true if sitemap_controller.drain_export
             dirty = true if target_controller.params.drain_build
             dirty = true if drain_import_events
             # Tick the top-bar clock: dirty only when the displayed minute changes, so the
@@ -5758,6 +5759,7 @@ module Gori::Tui
     SITEMAP_BATCH_TITLES = {
       "sitemap.tag"      => "Tag %s",
       "sitemap.repeater" => "Send %s to Repeater",
+      "sitemap.export"   => "Export %s as OpenAPI…",
     }
 
     # Sitemap verbs that stay SINGLE-target even with marks set, and say so in their menu

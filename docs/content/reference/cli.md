@@ -78,6 +78,7 @@ gori run <subcommand> [verb] [options]
 | `sitemap [QL]` | Host → path endpoint tree |
 | `sitemap tag` | Pin, clear, or list a free-text memo on a sitemap path |
 | `sitemap params [QL]` | Per-endpoint parameter inventory: names by location, counts, sample values, reflected values |
+| `sitemap export [QL]` | The captured API as an OpenAPI 3.0.3 document (JSON or YAML) |
 | `oast listen` · `presets` | Out-of-band callback listener (interactsh & friends) |
 | `oast list` · `resume` · `release` | List, resume, or release the project's saved OAST listening sessions |
 | `oast providers` | List / add / update / enable / disable / delete saved OAST providers |
@@ -840,6 +841,24 @@ gori run mine 42 --wordlist <(gori run sitemap params --host api.example.com --f
 ```
 
 `-q`/`--query=QL` (also positional), `--in-scope` and `--hide-static` narrow the flows read, per flow as in `history`. `--host` is an exact host, `--path=PREFIX` a path prefix, and `--location=LIST` picks locations (default all). Standard browser headers are left out unless `--all-headers`. `--max-flows=N` reads the newest N matching flows (default 2000); a note on stderr says when older ones were skipped. Values of cookies, credential headers and credential-named fields such as `password` or `token` print as `[REDACTED]` unless `--include-sensitive`. Redaction goes by name and by JWT / private-key shape only, so a secret under any other name (a presigned `X-Amz-Signature`, a custom `sig=`) prints in the clear, as does one inside a URL path. `--format` is `text`, `json`, or `names` (one name per line, JSON leaf names, no headers unless `--location` names them), which is a Miner or Fuzzer wordlist.
+
+**`sitemap export`**: the captured API as an OpenAPI 3.0.3 document on stdout, the same one `⇧E` on the TUI's [Sitemap](/guide/proxy/#openapi) writes. What was left out and why goes to stderr.
+
+```bash
+gori run sitemap export --host api.example.com > api.json
+gori run sitemap export --host api.example.com --format openapi-yaml > api.yaml
+gori run sitemap export --in-scope --examples > api.json
+```
+
+- **Paths** are templated one path at a time. A numeric, UUID, long-hex or date segment becomes a parameter named after the segment before it, so `/users/123/orders/9f1c2b7d0a4e` becomes `/users/{userId}/orders/{orderId}`. A single captured id is enough; the tree's display folding waits for many. Endpoints whose templates match merge into one operation. Query-string variants of one path are one operation too.
+- **Parameters** (query, header, cookie) are `required` only when every sample of the operation carried them. Standard browser headers are left out, and a repeated query key is an array.
+- **Bodies**: request bodies and responses per status carry a schema inferred from every sample. A JSON schema merges types (`integer` and `number` become `number`, and genuinely different types become `oneOf`), unions object properties and requires the members every sample had. Forms become object schemas, and other media types a string.
+- **Security**: an `Authorization` header becomes an `http` bearer, basic or digest scheme. Another credential header (`X-Api-Key`, `X-Auth-Token`, …) and a session cookie become `apiKey` schemes. Their values are never written.
+- **Skipped**: requests gori sent itself (Repeater, Fuzzer, Miner, Discover and the other tools; `--include-gori` keeps them), WebSocket, gRPC, SSE and incomplete flows, and methods OpenAPI has no slot for (CONNECT, WebDAV). Each is counted on stderr. Without that first rule, a Discover brute force would add every path it guessed and a fuzz run would loosen every type.
+
+`-q`/`--query=QL` (also positional), `--in-scope` and `--hide-static` narrow the flows read, per flow as in `history`. `--host` is an exact host, and `--path=PREFIX` is a path prefix. When the flows span several hosts, one document lists every origin under `servers` and each path lists the ones that answered it; use `--host` for one API per document. `--max-samples=N` (default 20) caps the flows read per operation, `--max-flows=N` (default 5000) the flows read in all, and `--max-endpoints=N` (default 1000) the operations kept. A note on stderr says when a cap cut the document short.
+
+There are no `example` values unless `--examples`. Examples come from one sample each and pass the redaction profile (`--redact=PROFILE`, by default the project's, else the global one, else `default`). The profile's field and form-key names apply to query parameters too. A name that reads as a credential (`X-Access-Token`, `apiKey`, `userPassword`, `sig`) is a placeholder whatever the profile says, and cookie values always are. A path id gets an example only when it is a short counter or a date under a segment that does not name a secret; a UUID, hex or token-shaped segment never does, because a credential in a path looks the same. Token-shaped path segments (a JWT, a long random string) and `;jsessionid=`-style matrix parameters never reach the path key. Output is deterministic: exporting the same flows twice gives the same bytes, so `diff` between two exports shows how the API changed.
 
 ### run oast
 

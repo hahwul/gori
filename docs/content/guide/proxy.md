@@ -134,6 +134,12 @@ The scan reads the flows the Sitemap shows, so the `/` query and the `s` scope l
 
 The same inventory is `gori run sitemap params` on the CLI and `list_params` over MCP.
 
+### OpenAPI export {#openapi}
+
+Press `⇧E` on a Sitemap row (or `Space` → `E`) to write an OpenAPI 3.0.3 document. It covers the marked paths if any are marked, otherwise the cursor row: a host row exports the whole host, and any other row exports the endpoints under it. The popup asks for the destination; end the name in `.yaml` or `.yml` for YAML, and anything else writes JSON. The flows are the ones the tree shows, so the `/` query, the `s` scope lens and the hide-static lens all apply, minus the requests gori sent itself (Repeater, Fuzzer, Discover, …). The export runs in the background, and a toast reports the operations written, any cap that cut the document short, and how many flows were skipped (WebSocket, gRPC, SSE, incomplete).
+
+Paths are templated (`/users/123` → `/users/{userId}`) and merged, parameters are `required` only when every sample carried them, and bodies and responses get schemas inferred from the samples. Credentials become security schemes and their values are never written, and the TUI export has no example values. For examples (redacted), size caps and every option, use [`gori run sitemap export`](/reference/cli/#run-sitemap); MCP has the same export as `export_openapi`.
+
 ## Protocol Support
 
 The canonical capture / intercept / replay / fuzz table is the

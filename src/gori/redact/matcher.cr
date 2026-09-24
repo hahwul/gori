@@ -113,6 +113,36 @@ module Gori
         body(text.to_slice, nil)
       end
 
+      # One NAMED value from outside a body — a query, header or form parameter that an export
+      # prints as an example (the OpenAPI export, #1241). `body` redacts entity bodies only and
+      # `Wire` says the request line is a separate axis; this is that axis, for a caller that
+      # already split the value from its name.
+      #
+      # Both name lists apply: a query string is form-encoded, and an API that calls a secret
+      # `token` in its JSON calls it `token` in its query too. Then the value rules (the
+      # profile's patterns and the built-in credential shapes), as for a form value.
+      def named_value(name : String, value : String, hits : Array(Hit)) : String
+        # A value with one invalid byte would skip the value rules entirely (they refuse to
+        # scan it) and print whole — a JWT with `%FF` after it included. It is printed scrubbed
+        # anyway, so the rules scan exactly what will be printed.
+        value = value.scrub
+        key = name.strip.downcase
+        rule = @form[key]?.try { |cfg| "form_key #{cfg}" } || @fields[key]?.try { |cfg| "json_field #{cfg}" }
+        if rule
+          ph = Redact.placeholder(value)
+          hits << Hit.new(name, rule, ph)
+          return ph
+        end
+        apply_text_rules(value, name, hits, values_only: true)
+      end
+
+      # Does the profile name this field or form key (case-insensitively)? For a caller deciding
+      # whether a value filed UNDER that name may be shown at all — a path id after `/ssn/`.
+      def named?(name : String) : Bool
+        key = name.strip.downcase
+        @form.has_key?(key) || @fields.has_key?(key)
+      end
+
       # --- shapes ------------------------------------------------------------
 
       # Is this worth handing to the JSON parser? The Content-Type when there is one, and the
