@@ -17,8 +17,6 @@ module Gori::Settings
   #
   # The enum fields are stored as their `label` strings — the same vocabulary `gori run
   # rewriter` and the MCP rule tools already speak — so a hand-edited settings.json reads the
-  KNOWN_RULE_KEYS = %w[id enabled name target part pattern replacement op match_kind host body_file]
-
   # way the CLI prints.
   record RewriterRule,
     id : Int64,      # monotonic, from `rewriter_next_rule_id`; never reused (see below)
@@ -91,6 +89,9 @@ module Gori::Settings
       replacement.presence
     end
   end
+
+  # A settings rule with any other key is kept inert.
+  KNOWN_RULE_KEYS = %w[id enabled name target part pattern replacement op match_kind host body_file]
 
   class_property rewriter_rules : Array(RewriterRule) = [] of RewriterRule
 
