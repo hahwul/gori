@@ -25,6 +25,9 @@ describe Gori::Export::OpenApi::Template do
     TPL.of("/reset/#{jwt}").path.should eq("/reset/{resetId}")
     TPL.of("/services/T0A1/B0B2/Xk9fQ2mLp8RtZ7vW3yN1").path.should eq("/services/T0A1/B0B2/{b0B2Id}")
     TPL.of("/blog/rust-and-crystal-in-2026").path.should eq("/blog/rust-and-crystal-in-2026") # a slug is lower case
+    # A camelCase RPC route is a route: two of them must not merge into one `{apiId}`.
+    TPL.of("/api/getUserProfileV2").path.should eq("/api/getUserProfileV2")
+    TPL.of("/api/getAccountInfoV3").path.should eq("/api/getAccountInfoV3")
     TPL.of("/login;jsessionid=ABCDEF0123456789XYZ").path.should eq("/login")
     TPL.of("/a;v=1/b").path.should eq("/a/b")
     TPL.of("/a;b").path.should eq("/a;b") # no `=`: not a matrix parameter

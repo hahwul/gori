@@ -835,18 +835,18 @@ gori run mine 42 --wordlist <(gori run sitemap params --host api.example.com --f
 ```bash
 gori run sitemap export --host api.example.com > api.json
 gori run sitemap export --host api.example.com --format openapi-yaml > api.yaml
-gori run sitemap export 'src:proxy' --in-scope --examples > api.json
+gori run sitemap export --in-scope --examples > api.json
 ```
 
 - **경로**는 경로마다 템플릿으로 바꿉니다. 숫자, UUID, 긴 16진수, 날짜 세그먼트는 앞 세그먼트 이름을 딴 파라미터가 되어 `/users/123/orders/9f1c2b7d0a4e`가 `/users/{userId}/orders/{orderId}`가 됩니다. 트리 표시용 접기와 달리 한 번만 캡처된 id도 바꿉니다. 템플릿이 같은 엔드포인트는 하나의 operation으로 합치고, 쿼리 문자열만 다른 변형도 하나로 합칩니다.
 - **파라미터**(query, header, cookie)는 그 operation의 모든 샘플에 있을 때만 `required`입니다. 표준 브라우저 헤더는 빼고, 반복된 쿼리 키는 배열로 씁니다.
 - **본문**: 요청 본문과 상태 코드별 응답에 모든 샘플에서 추론한 스키마가 붙습니다. JSON 스키마는 타입을 합치고(`integer`와 `number`는 `number`로, 정말 다른 타입은 `oneOf`로), 객체 속성은 합집합으로 모으며, 모든 샘플에 있던 멤버만 `required`로 둡니다. 폼은 객체 스키마, 그 밖의 미디어 타입은 문자열이 됩니다.
 - **보안**: `Authorization` 헤더는 `http` bearer, basic, digest 스킴이 됩니다. 다른 자격 증명 헤더(`X-Api-Key`, `X-Auth-Token` 등)와 세션 쿠키는 `apiKey` 스킴이 됩니다. 값은 절대 쓰지 않습니다.
-- **건너뜀**: WebSocket, gRPC, SSE, 응답이 완료되지 않은 플로우, 그리고 OpenAPI에 자리가 없는 메서드(CONNECT, WebDAV)는 건너뛰고 stderr에 개수를 적습니다.
+- **건너뜀**: gori가 직접 보낸 요청(Repeater, Fuzzer, Miner, Discover 등. `--include-gori`를 주면 포함), WebSocket, gRPC, SSE, 응답이 완료되지 않은 플로우, 그리고 OpenAPI에 자리가 없는 메서드(CONNECT, WebDAV)는 건너뛰고 stderr에 개수를 적습니다. 첫 번째 규칙이 없으면 Discover 브루트포스가 추측한 경로가 모두 들어가고, 퍼징이 모든 타입을 문자열로 넓혀 버립니다.
 
 `-q`/`--query=QL`(위치 인자로도 가능), `--in-scope`, `--hide-static`은 `history`처럼 플로우 단위로 읽을 대상을 좁힙니다. `--host`는 정확한 호스트, `--path=PREFIX`는 경로 접두사입니다. 여러 호스트에 걸친 플로우는 문서 하나에 모든 origin을 `servers`로 적고, 경로마다 응답한 origin을 따로 적습니다. API 하나당 문서 하나가 필요하면 `--host`를 쓰세요. `--max-samples=N`(기본값 20)은 operation마다 읽을 플로우 수, `--max-flows=N`(기본값 5000)은 전체 플로우 수, `--max-endpoints=N`(기본값 1000)은 남길 operation 수의 상한입니다. 상한 때문에 문서가 잘리면 stderr에 알려줍니다.
 
-`--examples`를 주지 않으면 `example` 값은 없습니다. 예시 값은 샘플 하나에서 가져와 redaction 프로필(`--redact=PROFILE`, 기본값은 프로젝트 프로필, 없으면 전역 프로필, 없으면 `default`)을 거칩니다. 프로필의 필드 이름과 폼 키 이름은 쿼리 파라미터에도 적용되고, 쿠키 값은 항상 placeholder로 바뀝니다. 경로의 UUID나 16진수 id에는 예시를 붙이지 않습니다. 경로 속 토큰과 구별할 수 없기 때문입니다. 출력은 결정적이어서 같은 플로우를 두 번 내보내면 바이트가 같습니다. 그래서 두 문서의 `diff`가 곧 API의 변화입니다.
+`--examples`를 주지 않으면 `example` 값은 없습니다. 예시 값은 샘플 하나에서 가져와 redaction 프로필(`--redact=PROFILE`, 기본값은 프로젝트 프로필, 없으면 전역 프로필, 없으면 `default`)을 거칩니다. 프로필의 필드 이름과 폼 키 이름은 쿼리 파라미터에도 적용됩니다. 자격 증명처럼 보이는 이름(`X-Access-Token`, `apiKey`, `userPassword`, `sig`)은 프로필과 상관없이 placeholder가 되고, 쿠키 값은 항상 placeholder입니다. 경로 id는 비밀을 뜻하지 않는 세그먼트 아래의 짧은 숫자나 날짜일 때만 예시를 붙이고, UUID·16진수·토큰 모양 세그먼트에는 붙이지 않습니다. 경로 속 자격 증명과 구별할 수 없기 때문입니다. 토큰 모양 경로 세그먼트(JWT, 긴 무작위 문자열)와 `;jsessionid=` 같은 matrix 파라미터는 경로 키에 들어가지 않습니다. 출력은 결정적이어서 같은 플로우를 두 번 내보내면 바이트가 같습니다. 그래서 두 문서의 `diff`가 곧 API의 변화입니다.
 
 ### run oast {#run-oast}
 

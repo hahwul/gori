@@ -37,8 +37,13 @@ module Gori
         end
 
         # A segment this long, of URL-safe base64 characters, with upper case, lower case AND a
-        # digit, reads as a random token rather than a word or a slug (slugs are lower case).
+        # digit, may be a random token rather than a word or a slug (slugs are lower case) — see
+        # `token?` for what separates it from a camelCase route name.
         TOKEN_MIN = 16
+
+        # A camelCase route (`getUserProfileV2`) always has a run of lower-case letters this long
+        # (`rofile`); a random token rarely does, and when it does it usually has digits to spare.
+        WORD_RUN = 5
 
         # One path parameter: its name in the template, the kind of segment it replaced, the
         # captured segment (the example source — see OpenApi for when one is emitted), and the
@@ -99,17 +104,30 @@ module Gori
           return false unless seg.ascii_only?
           return true if Redact::BUILTIN_PATTERNS.any? { |(rx, _)| rx.matches?(seg) }
           return false if seg.size < TOKEN_MIN
-          upper = lower = digit = false
+          shape = token_shape(seg) || return false
+          upper, lower, digits, longest = shape
+          # Mixed case and a digit, AND not word-shaped: several digits, or no English-length
+          # lower-case run. `getUserProfileV2` has one digit and `rofile`; a secret has neither.
+          upper && lower && digits > 0 && (digits >= 3 || longest < WORD_RUN)
+        end
+
+        # {has upper, has lower, digit count, longest lower-case run} of a base64url segment, or
+        # nil when a byte outside that alphabet rules a token out.
+        private def token_shape(seg : String) : {Bool, Bool, Int32, Int32}?
+          upper = lower = false
+          digits = run = longest = 0
           seg.each_byte do |b|
             case b
             when 0x41_u8..0x5a_u8 then upper = true
             when 0x61_u8..0x7a_u8 then lower = true
-            when 0x30_u8..0x39_u8 then digit = true
+            when 0x30_u8..0x39_u8 then digits += 1
             when 0x2d_u8, 0x5f_u8 # '-' and '_', base64url
-            else return false
+            else return nil
             end
+            run = 0x61_u8 <= b <= 0x7a_u8 ? run + 1 : 0
+            longest = run if run > longest
           end
-          upper && lower && digit
+          {upper, lower, digits, longest}
         end
 
         # `login;jsessionid=AB12…` → `login`. A `;name=value` matrix parameter is not route

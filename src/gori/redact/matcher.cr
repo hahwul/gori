@@ -122,6 +122,10 @@ module Gori
       # `token` in its JSON calls it `token` in its query too. Then the value rules (the
       # profile's patterns and the built-in credential shapes), as for a form value.
       def named_value(name : String, value : String, hits : Array(Hit)) : String
+        # A value with one invalid byte would skip the value rules entirely (they refuse to
+        # scan it) and print whole — a JWT with `%FF` after it included. It is printed scrubbed
+        # anyway, so the rules scan exactly what will be printed.
+        value = value.scrub
         key = name.strip.downcase
         rule = @form[key]?.try { |cfg| "form_key #{cfg}" } || @fields[key]?.try { |cfg| "json_field #{cfg}" }
         if rule
@@ -130,6 +134,13 @@ module Gori
           return ph
         end
         apply_text_rules(value, name, hits, values_only: true)
+      end
+
+      # Does the profile name this field or form key (case-insensitively)? For a caller deciding
+      # whether a value filed UNDER that name may be shown at all — a path id after `/ssn/`.
+      def named?(name : String) : Bool
+        key = name.strip.downcase
+        @form.has_key?(key) || @fields.has_key?(key)
       end
 
       # --- shapes ------------------------------------------------------------

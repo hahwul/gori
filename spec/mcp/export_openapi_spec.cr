@@ -117,6 +117,23 @@ describe "MCP export_openapi" do
     end
   end
 
+  it "leaves gori's own requests out unless include_gori" do
+    with_store do |store|
+      eo_flow(store, "/real")
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_700_000_200_000_000_i64, scheme: "https", host: "api.test", port: 443,
+        method: "GET", target: "/fuzzed", http_version: "HTTP/1.1",
+        head: "GET /fuzzed HTTP/1.1\r\nHost: api.test\r\n\r\n".to_slice, source: Gori::FlowSource::Kind::Fuzzer))
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice, body: nil))
+      tools = tools_for(store)
+      out = eo(tools, "{}")
+      out["document"]["paths"].as_h.keys.should eq(["/real"])
+      out["skipped"]["gori"].should eq(1)
+      eo(tools, %({"include_gori":true}))["document"]["paths"].as_h.keys.should eq(["/fuzzed", "/real"])
+    end
+  end
+
   it "rejects an unknown format" do
     with_store do |store|
       res = tools_for(store).call("export_openapi", JSON.parse(%({"format":"xml"})))

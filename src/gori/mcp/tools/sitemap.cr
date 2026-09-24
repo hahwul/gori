@@ -409,18 +409,18 @@ module Gori
         yaml = openapi_yaml?(h)
         return yaml if yaml.is_a?(Result)
         examples = bool_arg(h, "examples", false)
-        matcher = openapi_redactor(h, examples)
-        return matcher if matcher.is_a?(Result)
+        choice = openapi_redactor(h, examples)
+        return choice if choice.is_a?(Result)
         opts = Export::OpenApi::Options.new(filter: filter, host: str(h, "host"),
           path_prefix: str(h, "path_prefix"),
           max_flows: clamp(optional_int_arg(h, "max_flows"), 5000, 20_000),
           max_samples: clamp(optional_int_arg(h, "max_samples"), 10, 50),
           max_endpoints: clamp(optional_int_arg(h, "max_endpoints"), 200, 2000),
-          examples: examples, redactor: matcher)
+          examples: examples, redactor: choice.try(&.matcher), include_gori: bool_arg(h, "include_gori", false))
         result = Export::OpenApi.build(store, opts)
         doc, dropped = Export::OpenApi.fit(result.doc, clamp(optional_int_arg(h, "max_bytes"), 256 * 1024, 2 * 1024 * 1024))
         result.report.paths_dropped = dropped
-        Result.new(openapi_json(doc, result.report, yaml, examples))
+        Result.new(openapi_json(doc, result.report, yaml, choice))
       end
 
       # The flow set: the QL query, then the per-flow scope and hide-static lenses. Unconfigured
@@ -453,7 +453,7 @@ module Gori
       # The profile examples pass through, resolved the way every sanitized surface resolves
       # one; nil when examples are off. A profile named without examples is refused: it would
       # read as "the document was sanitized" while changing nothing.
-      private def openapi_redactor(h, examples : Bool) : Redact::Matcher? | Result
+      private def openapi_redactor(h, examples : Bool) : Redact::Policy::Choice? | Result
         profile = str(h, "redact")
         unless examples
           return nil unless profile
@@ -464,11 +464,22 @@ module Gori
         if e = choice.error
           return err(e, "INVALID_ARGUMENT", field: "redact")
         end
-        choice.matcher
+        choice
+      end
+
+      # What the CLI says on stderr, said in `notes`: the report's sentences, plus the two facts
+      # about the redaction itself — a profile pattern that did not compile (so a rule silently
+      # did not run) and a salt that could not be saved (so placeholders do not correlate).
+      private def openapi_notes(report : Export::OpenApi::Report, choice : Redact::Policy::Choice?) : Array(String)
+        notes = report.notes
+        return notes unless c = choice
+        c.matcher.try &.pattern_errors.each { |e| notes << "redaction pattern skipped, it does not compile — #{e}" }
+        notes << "the placeholder salt could not be saved, so these tags will NOT match another session's" unless c.salt_persisted
+        notes
       end
 
       private def openapi_json(doc : JSON::Any, report : Export::OpenApi::Report, yaml : Bool,
-                               examples : Bool) : String
+                               choice : Redact::Policy::Choice?) : String
         paths = doc["paths"]?.try(&.as_h?) || {} of String => JSON::Any
         JSON.build do |j|
           j.object do
@@ -482,8 +493,8 @@ module Gori
             j.field "flows_read", report.flows_read
             j.field "truncated", report.truncated?
             j.field("skipped") { j.object { report.skipped.each { |k, v| j.field k.key, v } } }
-            j.field "notes", report.notes
-            j.field "examples_redacted", report.redacted if examples
+            j.field "notes", openapi_notes(report, choice)
+            j.field "examples_redacted", report.redacted if choice
           end
         end
       end
@@ -595,6 +606,7 @@ module Gori
           s.field "host", strprop("only this host (exact, case-insensitive) — one API per document")
           s.field "path_prefix", strprop("only endpoints whose path starts with this, e.g. /api/v1")
           s.field "format", strprop("json (default) or yaml")
+          s.field "include_gori", boolprop("keep the requests gori itself sent — Repeater, Fuzzer, Miner, Discover… (default false: a brute force or a fuzz run would describe gori's probing, not the API)")
           s.field "examples", boolprop("add example values from one sample each, redacted through the profile (default false)")
           s.field "redact", strprop("redaction profile the examples pass through (default: the project's, else the global one, else `default`); needs examples:true")
           s.field "max_endpoints", intprop("operations kept (default 200, max 2000)")

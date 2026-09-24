@@ -847,18 +847,18 @@ gori run mine 42 --wordlist <(gori run sitemap params --host api.example.com --f
 ```bash
 gori run sitemap export --host api.example.com > api.json
 gori run sitemap export --host api.example.com --format openapi-yaml > api.yaml
-gori run sitemap export 'src:proxy' --in-scope --examples > api.json
+gori run sitemap export --in-scope --examples > api.json
 ```
 
 - **Paths** are templated one path at a time. A numeric, UUID, long-hex or date segment becomes a parameter named after the segment before it, so `/users/123/orders/9f1c2b7d0a4e` becomes `/users/{userId}/orders/{orderId}`. A single captured id is enough; the tree's display folding waits for many. Endpoints whose templates match merge into one operation. Query-string variants of one path are one operation too.
 - **Parameters** (query, header, cookie) are `required` only when every sample of the operation carried them. Standard browser headers are left out, and a repeated query key is an array.
 - **Bodies**: request bodies and responses per status carry a schema inferred from every sample. A JSON schema merges types (`integer` and `number` become `number`, and genuinely different types become `oneOf`), unions object properties and requires the members every sample had. Forms become object schemas, and other media types a string.
 - **Security**: an `Authorization` header becomes an `http` bearer, basic or digest scheme. Another credential header (`X-Api-Key`, `X-Auth-Token`, …) and a session cookie become `apiKey` schemes. Their values are never written.
-- **Skipped**: WebSocket, gRPC, SSE and incomplete flows, and methods OpenAPI has no slot for (CONNECT, WebDAV). Each is counted on stderr.
+- **Skipped**: requests gori sent itself (Repeater, Fuzzer, Miner, Discover and the other tools; `--include-gori` keeps them), WebSocket, gRPC, SSE and incomplete flows, and methods OpenAPI has no slot for (CONNECT, WebDAV). Each is counted on stderr. Without that first rule, a Discover brute force would add every path it guessed and a fuzz run would loosen every type.
 
 `-q`/`--query=QL` (also positional), `--in-scope` and `--hide-static` narrow the flows read, per flow as in `history`. `--host` is an exact host, and `--path=PREFIX` is a path prefix. When the flows span several hosts, one document lists every origin under `servers` and each path lists the ones that answered it; use `--host` for one API per document. `--max-samples=N` (default 20) caps the flows read per operation, `--max-flows=N` (default 5000) the flows read in all, and `--max-endpoints=N` (default 1000) the operations kept. A note on stderr says when a cap cut the document short.
 
-There are no `example` values unless `--examples`. Examples come from one sample each and pass the redaction profile (`--redact=PROFILE`, by default the project's, else the global one, else `default`). The profile's field and form-key names apply to query parameters too, and cookie values are always placeholders. A UUID or hex path id never gets an example, because a token in a path looks the same. Output is deterministic: exporting the same flows twice gives the same bytes, so `diff` between two exports shows how the API changed.
+There are no `example` values unless `--examples`. Examples come from one sample each and pass the redaction profile (`--redact=PROFILE`, by default the project's, else the global one, else `default`). The profile's field and form-key names apply to query parameters too. A name that reads as a credential (`X-Access-Token`, `apiKey`, `userPassword`, `sig`) is a placeholder whatever the profile says, and cookie values always are. A path id gets an example only when it is a short counter or a date under a segment that does not name a secret; a UUID, hex or token-shaped segment never does, because a credential in a path looks the same. Token-shaped path segments (a JWT, a long random string) and `;jsessionid=`-style matrix parameters never reach the path key. Output is deterministic: exporting the same flows twice gives the same bytes, so `diff` between two exports shows how the API changed.
 
 ### run oast
 

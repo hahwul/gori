@@ -57,6 +57,14 @@ module Gori
       # spec is not an example, it is a capture.
       EXAMPLE_MAX = 16 * 1024
 
+      # Largest single parameter or form-field example, in bytes: a form field may legally hold
+      # megabytes, and one of those would take over a document (and MCP's byte budget).
+      EXAMPLE_VALUE_MAX = 1024
+
+      # Digits a path counter may have and still be shown: a row id, not an SSN (9), an account
+      # or a card number.
+      PATH_EXAMPLE_DIGITS = 7
+
       DESCRIPTION = "Inferred by gori from captured traffic. Types, `required` flags and " \
                     "response codes reflect the samples that were captured, not a contract."
 
@@ -72,7 +80,13 @@ module Gori
       # `examples` turns on `example` values, and `redactor` is the profile they pass through —
       # resolved by the SURFACE (`Redact::Policy.resolve` mints the placeholder salt, a side
       # effect this engine does not take on). With examples on and no redactor, the built-in
-      # default profile is used; there is no way to ask this engine for unredacted examples.
+      # default profile is used; there is no way to ask this engine for unredacted examples. An
+      # install with no salt minted yet raises `Redact::SaltMissing` up front, not mid-document.
+      #
+      # `include_gori` keeps the flows gori itself sent (Repeater, Fuzzer, Miner, Discover, …).
+      # Off by default: a Discover brute force would otherwise add every 404 it guessed as an
+      # operation, a mine every injected name as a parameter, and a fuzz run would loosen every
+      # type to `string` — the document would describe gori's probing, not the API.
       record Options,
         filter : QL::Filter = QL::EMPTY,
         host : String? = nil,
@@ -83,10 +97,12 @@ module Gori
         max_samples : Int32 = 20,
         body_max : Int32 = Params::DECODE_MAX,
         examples : Bool = false,
-        redactor : Redact::Matcher? = nil
+        redactor : Redact::Matcher? = nil,
+        include_gori : Bool = false
 
       # Why a flow in the set contributed nothing.
       enum Skip
+        Gori
         WebSocket
         Grpc
         Sse
@@ -97,6 +113,7 @@ module Gori
         # The stable machine key (MCP's `skipped` object).
         def key : String
           case self
+          in Gori       then "gori"
           in WebSocket  then "websocket"
           in Grpc       then "grpc"
           in Sse        then "sse"
@@ -108,6 +125,7 @@ module Gori
 
         def label : String
           case self
+          in Gori       then "sent by gori"
           in WebSocket  then "WebSocket"
           in Grpc       then "gRPC"
           in Sse        then "SSE"
@@ -183,7 +201,7 @@ module Gori
           out << "#{count(bodies_too_large, "body", "bodies")} over the size cap or cut short had no schema inferred" if bodies_too_large > 0
           out << "#{count(bodies_unparsed, "body", "bodies")} declared JSON but did not parse" if bodies_unparsed > 0
           out << "#{count(redacted, "example value")} redacted" if redacted > 0
-          out << "#{count(examples_omitted, "example")} over #{EXAMPLE_MAX // 1024} KiB left out" if examples_omitted > 0
+          out << "#{count(examples_omitted, "example")} left out for size" if examples_omitted > 0
           out
         end
 
@@ -220,6 +238,9 @@ module Gori
         getter field_counts = {} of String => Int32
         property forms = 0
         property example : JSON::Any? = nil
+        # The example slot was decided (filled, or given up on for size): later samples do not
+        # redact a body again only to reach the same answer.
+        property? example_done = false
 
         def initialize(@kind : BodyKind)
         end
@@ -262,25 +283,26 @@ module Gori
 
         def initialize(@opts : Options)
           @matcher = @opts.examples ? (@opts.redactor || Redact::Matcher.new(Redact::DEFAULT_PROFILE)) : nil
+          raise Redact::SaltMissing.new if @matcher && Redact.salt.empty?
         end
       end
 
       # Build the document.
       def build(store : Store, opts : Options = Options.new) : Result
         b = Build.new(opts)
-        pending = {"", ""}
-        # The key `admit` computed rides from the row check to the flow read, so a row's path is
-        # templated once on the way in rather than again inside the block.
+        pending = nil.as({ {String, String}, Template::Result }?)
+        # The key and template `admit` computed ride from the row check to the flow read, so a
+        # row's path is templated once on the way in rather than again inside the block.
         keep = ->(row : Store::FlowRow) do
-          key = admit(b, row)
-          pending = key if key
-          !key.nil?
+          admitted = admit(b, row)
+          pending = admitted if admitted
+          !admitted.nil?
         end
         read, truncated = ParamInventory.each_flow(store, sql_filter(opts), opts.max_flows, keep, -> { false }) do |row|
-          next unless detail = store.get_flow(row.id)
-          key = pending
-          op = b.ops[key] ||= OpAcc.new(Template.of(endpoint_path(row.target)), key[1])
-          add_sample(b, op, detail)
+          next unless (admitted = pending) && (detail = store.get_flow(row.id))
+          key, tpl = admitted
+          op = b.ops[key] ||= OpAcc.new(tpl, key[1])
+          add_sample(b, op, detail, tpl)
         end
         b.report.flows_read = read
         b.report.flows_truncated = truncated
@@ -344,7 +366,7 @@ module Gori
 
       # The operation key a row lands on, or nil when it contributes nothing (counted in the
       # report when that is a SKIP; a row outside the selection is simply not in the set).
-      private def admit(b : Build, row : Store::FlowRow) : {String, String}?
+      private def admit(b : Build, row : Store::FlowRow) : { {String, String}, Template::Result }?
         opts = b.opts
         path = endpoint_path(row.target)
         if t = opts.targets
@@ -356,11 +378,12 @@ module Gori
         if (prefix = opts.path_prefix.presence) && !path.starts_with?(prefix)
           return nil
         end
-        if reason = skip_reason(row)
+        if reason = skip_reason(row, opts)
           b.report.skip(reason)
           return nil
         end
-        key = {Template.of(path).path, row.method.downcase}
+        tpl = Template.of(path)
+        key = {tpl.path, row.method.downcase}
         if op = b.ops[key]?
           if op.samples >= opts.max_samples
             b.report.samples_capped += 1
@@ -370,13 +393,14 @@ module Gori
           b.dropped << key
           return nil
         end
-        key
+        {key, tpl}
       end
 
       # Classified on the ROW (`Proto.classify`, the History PROTO column's own answer), so a
       # skipped flow costs no body read. gRPC has its own schema path (`grpc_reflect`), and a
       # socket or a stream is not a request/response pair an operation can describe.
-      private def skip_reason(row : Store::FlowRow) : Skip?
+      private def skip_reason(row : Store::FlowRow, opts : Options) : Skip?
+        return Skip::Gori if !opts.include_gori && row.sent_by_gori?
         case Proto.classify(row.status, row.content_type, row.request_content_type, row.connect_protocol)
         in .ws?   then return Skip::WebSocket
         in .grpc? then return Skip::Grpc
@@ -391,16 +415,15 @@ module Gori
 
       # --- one sample -------------------------------------------------------------------
 
-      private def add_sample(b : Build, op : OpAcc, detail : Store::FlowDetail) : Nil
+      private def add_sample(b : Build, op : OpAcc, detail : Store::FlowDetail, tpl : Template::Result) : Nil
         row = detail.row
         op.samples += 1
         op.origins << origin(row)
         op.hosts << row.host
-        tpl = Template.of(endpoint_path(row.target))
         tpl.params.each_with_index do |p, i|
           next unless i < op.path_kinds.size
           op.path_kinds[i] << p.kind
-          if b.matcher && op.path_examples[i].nil? && path_example?(p)
+          if b.matcher && op.path_examples[i].nil? && path_example?(b, p)
             op.path_examples[i] = p.raw
           end
         end
@@ -411,11 +434,14 @@ module Gori
 
       # Whether a path value may be shown as an example. An opaque id (uuid/hex/token) is
       # indistinguishable from a credential in a path, so only a short counter or a date is — and
-      # not one filed under a secret-sounding segment (`/otp/482913`). Past nine digits a number
-      # is an account, card or phone number more often than a row id.
-      private def path_example?(p : Template::Param) : Bool
-        return false if (prev = p.prev) && secret_name?(prev)
-        p.kind.date? || (p.kind.integer? && p.raw.size <= 9)
+      # not one filed under a segment that names a secret (`/otp/482913`, `/ssn/…`) by the name
+      # heuristic OR the redaction profile's own names. Past PATH_EXAMPLE_DIGITS a number is an
+      # SSN, account, card or phone number more often than a row id.
+      private def path_example?(b : Build, p : Template::Param) : Bool
+        if prev = p.prev
+          return false if secret_name?(prev) || b.matcher.try(&.named?(prev))
+        end
+        p.kind.date? || (p.kind.integer? && p.raw.size <= PATH_EXAMPLE_DIGITS)
       end
 
       # Query, header and cookie parameters, and the security schemes the credentials imply.
@@ -465,8 +491,8 @@ module Gori
       private def add_request_body(b : Build, op : OpAcc, detail : Store::FlowDetail,
                                    fields : Array(Params::Param)) : Nil
         head = detail.request_head
-        entity, whole = entity_of(head, detail.request_body, b.opts.body_max)
-        return if entity.nil? || entity.empty?
+        body = detail.request_body
+        return if body.nil? || body.empty?
         op.body_samples += 1
         ctype = MediaType.of(head)
         media = MediaType.essence(ctype) || "application/octet-stream"
@@ -475,23 +501,20 @@ module Gori
         case kind
         when .form?, .multipart?
           observe_form(b, acc, fields, kind)
-        else
-          observe_body(b, acc, entity, whole, ctype)
+        when .json?
+          # Only JSON has a shape to read, so only JSON pays for the dechunk/inflate.
+          entity, whole = entity_of(head, body, b.opts.body_max, detail.request_body_truncated?)
+          observe_body(b, acc, entity, whole, ctype) if entity && !entity.empty?
         end
       end
 
       private def add_response(b : Build, op : OpAcc, detail : Store::FlowDetail) : Nil
         status = detail.row.status || return
-        key = status
-        unless 100 <= status <= 599
-          op.odd_statuses << status
-          key = DEFAULT_STATUS
-        end
-        content = op.responses[key] ||= {} of String => BodyAcc
-        return if op.method == "head" || status < 200 || status == 204 || status == 304
+        content = op.responses[response_key(op, status)] ||= {} of String => BodyAcc
+        return unless body_allowed?(op.method, status)
         head = detail.response_head
-        entity, whole = entity_of(head, detail.response_body, b.opts.body_max)
-        return if entity.nil? || entity.empty?
+        body = detail.response_body
+        return if body.nil? || body.empty?
         ctype = MediaType.of(head)
         media = MediaType.essence(ctype) || "application/octet-stream"
         kind = body_kind(media)
@@ -499,41 +522,87 @@ module Gori
         kind = BodyKind::Text if kind.form?
         kind = BodyKind::Binary if kind.multipart?
         acc = content[media] ||= BodyAcc.new(kind)
-        observe_body(b, acc, entity, whole, ctype)
+        return unless kind.json? # the media type alone describes the rest; no decode for it
+        entity, whole = entity_of(head, body, b.opts.body_max, detail.response_body_truncated?)
+        observe_body(b, acc, entity, whole, ctype) if entity && !entity.empty?
+      end
+
+      # The `responses` slot a status lands in: itself, or DEFAULT_STATUS for one OpenAPI has no
+      # key for (recorded, so `default` can name it).
+      private def response_key(op : OpAcc, status : Int32) : Int32
+        return status if 100 <= status <= 599
+        op.odd_statuses << status
+        DEFAULT_STATUS
+      end
+
+      # A response that carries no content by definition: to HEAD, 1xx, 204 and 304.
+      private def body_allowed?(method : String, status : Int32) : Bool
+        method != "head" && status >= 200 && status != 204 && status != 304
       end
 
       # The entity behind a stored body (`Entity`'s reading), and whether it is WHOLE: false
-      # when a content coding stopped early — the body was cut at the capture cap, or inflating
-      # it hit `max` — so a JSON body that then fails to parse is reported as too large rather
-      # than as "declared JSON but not JSON", which would be a claim about the origin.
-      private def entity_of(head : Bytes?, body : Bytes?, max : Int32) : {Bytes?, Bool}
-        return {body, true} if body.nil? || body.empty?
+      # when the capture cut the body (`truncated`, the store's own flag) or a content coding
+      # stopped early — inflating hit `max`, or the compressed stream was itself cut — so a JSON
+      # body that then fails to parse is reported as too large rather than as "declared JSON but
+      # not JSON", which would be a claim about the origin.
+      private def entity_of(head : Bytes?, body : Bytes, max : Int32, truncated : Bool) : {Bytes?, Bool}
         decoded, _, complete = Proxy::Codec::ContentDecode.decode_full(head, body, max)
-        decoded ? {decoded, complete} : {body, true}
+        decoded ? {decoded, complete && !truncated} : {body, !truncated}
       end
 
       # A JSON, text or binary entity. Only JSON has a shape to infer; the other two are named
       # by their media type alone.
       private def observe_body(b : Build, acc : BodyAcc, entity : Bytes, whole : Bool, ctype : String?) : Nil
-        return unless acc.kind.json?
         if !whole || entity.size > b.opts.body_max
           b.report.bodies_too_large += 1
           return
         end
-        text = String.new(entity)
-        unless acc.schema.observe_json(text)
+        unless acc.schema.observe_json(String.new(entity))
           b.report.bodies_unparsed += 1
           return
         end
-        return unless (m = b.matcher) && acc.example.nil?
+        json_example(b, acc, entity, ctype)
+      end
+
+      # The media type's example, from the first sample that parsed: the profile's pass, then
+      # every member whose NAME is a secret by `secret_name?` — the profile's lists are exact
+      # underscore spellings, and `userPassword`, `accessToken`, `sessionKey` are none of them.
+      # Decided once per slot; a body too large for an example is not redacted to find that out.
+      private def json_example(b : Build, acc : BodyAcc, entity : Bytes, ctype : String?) : Nil
+        return if acc.example_done?
+        m = b.matcher || return
+        acc.example_done = true
+        if entity.size > EXAMPLE_MAX
+          b.report.examples_omitted += 1
+          return
+        end
         result = m.body(entity, ctype)
         return unless result.shape.json?
-        if result.text.bytesize > EXAMPLE_MAX
+        example = redact_secret_members(b, JSON.parse(result.text))
+        if example.to_json.bytesize > EXAMPLE_MAX
           b.report.examples_omitted += 1
           return
         end
         b.hits.concat(result.hits)
-        acc.example = JSON.parse(result.text)
+        acc.example = example
+      end
+
+      private def redact_secret_members(b : Build, any : JSON::Any) : JSON::Any
+        case raw = any.raw
+        when Hash(String, JSON::Any)
+          JSON::Any.new(raw.to_h do |k, v|
+            already = v.as_s?.try(&.starts_with?("[REDACTED:"))
+            if secret_name?(k) && !already
+              {k, JSON::Any.new(placeholder(b, k, v.as_s? || v.to_json, "sensitive name"))}
+            else
+              {k, redact_secret_members(b, v)}
+            end
+          end)
+        when Array(JSON::Any)
+          JSON::Any.new(raw.map { |v| redact_secret_members(b, v) })
+        else
+          any
+        end
       end
 
       # An urlencoded or multipart request body, from the fields `Params` reads off it (the
@@ -541,7 +610,8 @@ module Gori
       private def observe_form(b : Build, acc : BodyAcc, fields : Array(Params::Param), kind : BodyKind) : Nil
         acc.forms += 1
         present = Set(String).new
-        example = b.matcher && acc.example.nil? ? {} of String => JSON::Any : nil
+        # A multipart example would carry file parts nobody can read back; the schema says it all.
+        example = kind.form? && b.matcher && !acc.example_done? ? {} of String => JSON::Any : nil
         fields.each do |p|
           schema = acc.fields[p.name] ||= Schema.new
           if p.note
@@ -550,12 +620,14 @@ module Gori
             schema.observe_text(p.value)
           end
           acc.field_counts[p.name] = acc.field_counts.fetch(p.name, 0) + 1 if present.add?(p.name)
-          if example && !example.has_key?(p.name.scrub)
-            # A file part has no value to show; its name is enough.
-            example[p.name.scrub] = JSON::Any.new(p.note ? "" : redact_named(b, p.name, p.value).scrub)
+          if example && !example.has_key?(p.name.scrub) && (value = redact_named(b, p.name, p.value))
+            example[p.name.scrub] = JSON::Any.new(value.scrub)
           end
         end
-        acc.example = JSON::Any.new(example) if example && kind.form?
+        if example
+          acc.example_done = true
+          acc.example = JSON::Any.new(example)
+        end
       end
 
       private def body_kind(media : String) : BodyKind
@@ -621,9 +693,15 @@ module Gori
       # exact underscore spellings, and `X-Access-Token`, `Private-Token`, `?key=`, `?api-key=`,
       # `?sig=` are none of them), then the profile itself, names and value patterns.
       # Over-redacting an example costs a placeholder; under-redacting one publishes a key.
-      private def redact_named(b : Build, name : String, value : String) : String
+      #
+      # nil — no example — for a value over EXAMPLE_VALUE_MAX, counted in the report.
+      private def redact_named(b : Build, name : String, value : String) : String?
         m = b.matcher || return value
         return placeholder(b, name, value, "sensitive name") if Redact.sensitive_header?(name) || secret_name?(name)
+        if value.bytesize > EXAMPLE_VALUE_MAX
+          b.report.examples_omitted += 1
+          return nil
+        end
         m.named_value(name, value, b.hits)
       end
 
@@ -631,7 +709,8 @@ module Gori
       # the few that do even run into another word (`accesstoken`, `apikey`).
       SECRET_WORDS = Set{"token", "key", "secret", "signature", "sig", "auth", "session", "sessid",
                          "password", "passwd", "pwd", "pass", "csrf", "xsrf", "credential",
-                         "credentials", "code", "otp", "pin", "jwt", "bearer", "cookie"}
+                         "credentials", "code", "otp", "pin", "jwt", "bearer", "cookie",
+                         "ssn", "iban", "cvv", "cvc", "card", "cards", "account", "accounts"}
       SECRET_INFIXES = {"token", "secret", "passw", "signature", "apikey", "sessid", "session", "authoriz"}
 
       # `X-Access-Token`, `private_token`, `apiKey`, `X-Amz-Signature`, `sig` — by the words of

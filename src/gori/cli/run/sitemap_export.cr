@@ -10,6 +10,7 @@ module Gori
         path_prefix : String? = nil
         in_scope = false
         hide_static = false
+        include_gori = false
         examples = false
         redact_profile : String? = nil
         defaults = Export::OpenApi::Options.new
@@ -36,6 +37,7 @@ module Gori
           p.on("--path=PREFIX", "Only endpoints whose path starts with PREFIX") { |v| path_prefix = v }
           p.on("--in-scope", "Only flows in the project's configured scope") { in_scope = true }
           p.on("--hide-static", "Leave out static assets — images, fonts, media (the TUI's hide-static lens)") { hide_static = true }
+          p.on("--include-gori", "Keep the requests gori itself sent (Repeater, Fuzzer, Miner, Discover, …); left out by default") { include_gori = true }
           p.on("--format=FMT", "Output: openapi (JSON, default) | openapi-yaml") { |v| yaml = openapi_yaml_format?(v) }
           p.on("--examples", "Add example values from one sample each, redacted through the profile") { examples = true }
           p.on("--redact=PROFILE", "Redaction profile the examples pass through (default: the project's, else the global one, else `default`)") do |v|
@@ -73,7 +75,7 @@ module Gori
         end
         opts = Export::OpenApi::Options.new(filter: filter, host: host, path_prefix: path_prefix,
           max_flows: max_flows, max_samples: max_samples, max_endpoints: max_endpoints,
-          examples: examples, redactor: choice.try(&.matcher))
+          examples: examples, redactor: choice.try(&.matcher), include_gori: include_gori)
         result = begin
           Export::OpenApi.build(store, opts)
         rescue ex
@@ -94,24 +96,15 @@ module Gori
         end
       end
 
-      # The flow set against the open store: a `scope:` term recompiled under the project's lens,
-      # the `body:` backlog refused, then the hide-static and per-FLOW scope lenses (as `sitemap
-      # params`). Unconfigured scope is refused rather than exported: an empty document is not an
-      # answer anyone redirects to a file on purpose. Closes the store before any abort, since
-      # abort skips the caller's ensure.
+      # The flow set against the open store: the shared prologue (`sitemap_flow_filter`), then
+      # the hide-static and per-FLOW scope lenses. Unlike `sitemap params`, unconfigured scope is
+      # REFUSED rather than read as empty: an empty document is not an answer anyone redirects to
+      # a file on purpose. Closes the store before any abort, since abort skips the caller's
+      # ensure.
       private def self.sitemap_export_filter(store : Store, query : String?, filter : QL::Filter,
                                              in_scope : Bool, hide_static : Bool) : QL::Filter
-        if (q = query) && QL.uses_scope?(q)
-          lens = Scope.ql_lens(store)
-          filter = QL.parse(q, scope: lens)
-          Run.scope_query_notes(q, lens, in_scope).each { |n| STDERR.puts "gori run sitemap export: #{n}" }
-        end
-        if err = fts_backlog_error(store, filter,
-             "#{query.inspect} would leave endpoints out of the document with nothing saying so. " \
-             "Nothing was printed;")
-          store.close
-          abort "gori run sitemap export: #{err}"
-        end
+        filter = sitemap_flow_filter(store, "sitemap export", query, filter, in_scope,
+          "endpoints out of the document")
         filter = QL.and(filter, QL.hide_static) if hide_static
         return filter unless in_scope
         scope = Scope.load(store)
@@ -125,29 +118,29 @@ module Gori
 
       # The report on STDERR (STDOUT carries the document and nothing else).
       private def self.sitemap_export_notes(report : Export::OpenApi::Report,
-                                            choice : Redact::Policy::Choice?) : Nil
+                                            choice : Redact::Policy::Choice?, io : IO = STDERR) : Nil
         cmd = "gori run sitemap export"
         if report.operations == 0
-          STDERR.puts "#{cmd}: no operations (#{report.flows_read} flows read — capture some traffic, or relax the query)"
+          io.puts "#{cmd}: no operations (#{report.flows_read} flows read — capture some traffic, or relax the query)"
         else
-          STDERR.puts "#{cmd}: #{report.summary}"
+          io.puts "#{cmd}: #{report.summary}"
         end
         if report.hosts.size > 1
-          STDERR.puts "#{cmd}: the flows span #{report.hosts.size} hosts, so each path lists the servers " \
-                      "that answered it — --host H gives one API per document"
+          io.puts "#{cmd}: the flows span #{report.hosts.size} hosts, so each path lists the servers " \
+                  "that answered it — --host H gives one API per document"
         end
-        report.notes.each { |n| STDERR.puts "#{cmd}: #{n}" }
+        report.notes.each { |n| io.puts "#{cmd}: #{n}" }
         return unless c = choice
         if profile = c.matcher.try(&.profile)
-          STDERR.puts "#{cmd}: examples sanitized with profile #{profile.name.inspect}; cookie values " \
-                      "are always placeholders, and credential headers are never written"
+          io.puts "#{cmd}: examples sanitized with profile #{profile.name.inspect}; cookie values " \
+                  "are always placeholders, and credential headers are never written"
         end
         c.matcher.try &.pattern_errors.each do |e|
-          STDERR.puts "#{cmd}: redaction pattern skipped, it does not compile — #{e}"
+          io.puts "#{cmd}: redaction pattern skipped, it does not compile — #{e}"
         end
         unless c.salt_persisted
-          STDERR.puts "#{cmd}: the placeholder salt could not be saved to #{Settings.path}, so these " \
-                      "tags are consistent within this export and will NOT match another session's"
+          io.puts "#{cmd}: the placeholder salt could not be saved to #{Settings.path}, so these " \
+                  "tags are consistent within this export and will NOT match another session's"
         end
       end
     end

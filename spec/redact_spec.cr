@@ -258,6 +258,23 @@ describe Gori::Redact do
       end
     end
 
+    it "scans a value with an invalid byte instead of printing it whole" do
+      with_salt do
+        hits = [] of Gori::Redact::Hit
+        jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.c2lnbmF0dXJl"
+        out = matcher(Gori::Redact::DEFAULT_PROFILE).named_value("next", "#{jwt}#{String.new(Bytes[0xff])}", hits)
+        out.should_not contain("eyJhbGci")
+        hits.size.should eq(1)
+      end
+    end
+
+    it "answers whether the profile names a field or key" do
+      m = matcher(Gori::Redact::DEFAULT_PROFILE)
+      m.named?("SSN").should be_true
+      m.named?("jsessionid").should be_true # json_fields only
+      m.named?("lang").should be_false
+    end
+
     it "runs the value rules on a name nobody listed" do
       with_salt do
         hits = [] of Gori::Redact::Hit

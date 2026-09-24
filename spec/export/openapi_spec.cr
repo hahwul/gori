@@ -12,20 +12,22 @@ private OA_CLOCK = [1_780_000_000_000_000_i64]
 private def oa_flow(store : Gori::Store, target : String, *, host = "api.test", scheme = "https",
                     port = 443, method = "GET", req_headers = "", body : (String | Bytes)? = nil,
                     status = 200, resp_headers = "", resp_body : (String | Bytes)? = nil,
-                    content_type : String? = nil, complete = true) : Int64
+                    content_type : String? = nil, complete = true,
+                    source = Gori::FlowSource::Kind::Proxy, resp_truncated = false) : Int64
   OA_CLOCK[0] += 1000
   b = body.is_a?(String) ? body.to_slice : body
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: OA_CLOCK[0], scheme: scheme, host: host, port: port, method: method,
     target: target, http_version: "HTTP/1.1",
     head: "#{method} #{target} HTTP/1.1\r\nHost: #{host}\r\n#{req_headers}\r\n".to_slice,
-    body: b, source: Gori::FlowSource::Kind::Proxy))
+    body: b, source: source))
   return id unless complete
   rb = resp_body.is_a?(String) ? resp_body.to_slice : resp_body
   ct_line = content_type ? "Content-Type: #{content_type}\r\n" : ""
   store.update_response(Gori::Store::CapturedResponse.new(
     flow_id: id, status: status, reason: "X", content_type: content_type,
-    head: "HTTP/1.1 #{status} X\r\n#{ct_line}#{resp_headers}\r\n".to_slice, body: rb))
+    head: "HTTP/1.1 #{status} X\r\n#{ct_line}#{resp_headers}\r\n".to_slice, body: rb,
+    body_truncated: resp_truncated))
   id
 end
 
@@ -283,14 +285,114 @@ describe Gori::Export::OpenApi do
     end
   end
 
+  # The document describes the API, not gori's probing of it (#1241 review): a Discover brute
+  # force would add every 404 it guessed as an operation, a mine every name it injected.
+  it "leaves out the requests gori itself sent unless asked" do
+    with_store do |store|
+      oa_flow(store, "/real")
+      oa_flow(store, "/guessed-by-discover", status: 404, source: Gori::FlowSource::Kind::Discover)
+      oa_flow(store, "/real?injected=1", source: Gori::FlowSource::Kind::Miner)
+      oa_flow(store, "/imported", source: Gori::FlowSource::Kind::Import)
+      result = OA.build(store)
+      result.doc["paths"].as_h.keys.should eq(["/imported", "/real"])
+      param(op(result.doc, "/real", "get"), "injected", "query").should be_nil
+      result.report.skipped[OA::Skip::Gori].should eq(2)
+      OA.build(store, OA::Options.new(include_gori: true)).doc["paths"].as_h.keys
+        .should eq(["/guessed-by-discover", "/imported", "/real"])
+    end
+  end
+
+  it "redacts camelCase secret members in JSON examples, which the profile's lists miss" do
+    with_salt do
+      with_store do |store|
+        json_post(store, "/login", %({"user":"ada","userPassword":"hunter2","nested":{"accessToken":"opaque123"}}),
+          content_type: "application/json", resp_body: %({"sessionKey":"s3cr3tvalue","ok":true}))
+        result = OA.build(store, OA::Options.new(examples: true))
+        text = OA.to_json(result.doc)
+        {"hunter2", "opaque123", "s3cr3tvalue"}.each { |s| text.should_not contain(s) }
+        post = op(result.doc, "/login", "post")
+        post["requestBody"]["content"]["application/json"]["example"]["user"].should eq("ada")
+        result.report.redacted.should eq(3)
+      end
+    end
+  end
+
+  it "redacts a credential in a value that also holds an invalid byte" do
+    with_salt do
+      with_store do |store|
+        jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.c2lnbmF0dXJlLXBhcnQ"
+        oa_flow(store, "/cb?next=#{jwt}%FF")
+        OA.to_json(OA.build(store, OA::Options.new(examples: true)).doc).should_not contain("eyJhbGci")
+      end
+    end
+  end
+
+  it "counts a JSON body the capture cut as too large, not as unparsed" do
+    with_store do |store|
+      oa_flow(store, "/big", content_type: "application/json", resp_body: %({"a":[1,2,), resp_truncated: true)
+      report = OA.build(store).report
+      report.bodies_too_large.should eq(1)
+      report.bodies_unparsed.should eq(0)
+    end
+  end
+
+  it "writes no multipart example, and so counts no redaction for one" do
+    with_salt do
+      with_store do |store|
+        mp = "--B\r\nContent-Disposition: form-data; name=\"password\"\r\n\r\nhunter2\r\n--B--\r\n"
+        3.times do
+          oa_flow(store, "/up", method: "POST", body: mp,
+            req_headers: "Content-Type: multipart/form-data; boundary=B\r\nContent-Length: #{mp.bytesize}\r\n")
+        end
+        result = OA.build(store, OA::Options.new(examples: true))
+        op(result.doc, "/up", "post")["requestBody"]["content"]["multipart/form-data"]["example"]?.should be_nil
+        result.report.redacted.should eq(0)
+      end
+    end
+  end
+
+  it "decides an oversized example once, and leaves out oversized parameter values" do
+    with_salt do
+      with_store do |store|
+        big = %({"blob":"#{"x" * (OA::EXAMPLE_MAX + 10)}"})
+        3.times { oa_flow(store, "/dump", content_type: "application/json", resp_body: big) }
+        oa_flow(store, "/q?note=#{"y" * (OA::EXAMPLE_VALUE_MAX + 1)}&lang=en")
+        result = OA.build(store, OA::Options.new(examples: true))
+        result.report.examples_omitted.should eq(2) # one body slot, one parameter
+        q = op(result.doc, "/q", "get")
+        param(q, "note", "query").not_nil!["example"]?.should be_nil
+        param(q, "lang", "query").not_nil!["example"].should eq("en")
+      end
+    end
+  end
+
+  it "refuses examples up front when no placeholder salt has been minted" do
+    with_store do |store|
+      oa_flow(store, "/a?token=t")
+      before = Gori::Redact.salt
+      Gori::Redact.salt = ""
+      begin
+        expect_raises(Gori::Redact::SaltMissing) { OA.build(store, OA::Options.new(examples: true)) }
+      ensure
+        Gori::Redact.salt = before
+      end
+    end
+  end
+
   it "never gives an opaque path id an example" do
     with_salt do
       with_store do |store|
         oa_flow(store, "/reset/3f1c9ab4-0000-4000-8000-00000000abcd")
         oa_flow(store, "/items/42")
+        oa_flow(store, "/ssn/1234567")         # a secret-named segment, by the heuristic
+        oa_flow(store, "/national_id/1234567") # …or by the profile's own names
+        oa_flow(store, "/orders/123456789")    # nine digits: an SSN's length, not a row id's
         doc = OA.build(store, OA::Options.new(examples: true)).doc
         param(op(doc, "/reset/{resetId}", "get"), "resetId", "path").not_nil!["example"]?.should be_nil
         param(op(doc, "/items/{itemId}", "get"), "itemId", "path").not_nil!["example"].should eq("42")
+        param(op(doc, "/ssn/{ssnId}", "get"), "ssnId", "path").not_nil!["example"]?.should be_nil
+        param(op(doc, "/national_id/{nationalIdId}", "get"), "nationalIdId", "path").not_nil!["example"]?.should be_nil
+        param(op(doc, "/orders/{orderId}", "get"), "orderId", "path").not_nil!["example"]?.should be_nil
       end
     end
   end
