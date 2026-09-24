@@ -41,8 +41,10 @@ describe "layering contract" do
     # Top-level engine files with no directory of their own. The session layer is exactly the
     # shape this contract governs — the binding table is read by all three surfaces and by the
     # proxy response path, and session slots are the send context every one of them selects —
-    # so they are held to it even though they never grew a subdirectory.
-    %w[bindings session_slot session_slots].each do |name|
+    # so they are held to it even though they never grew a subdirectory. `project_search` is the
+    # picker's cross-project search engine (#1229), kept out of `tui/` so a CLI or MCP adapter
+    # can reuse it — which only holds while it knows nothing of the surface that calls it.
+    %w[bindings session_slot session_slots project_search].each do |name|
       path = File.join(root, "src", "gori", "#{name}.cr")
       paths << path if File.exists?(path)
     end

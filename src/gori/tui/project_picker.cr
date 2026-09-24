@@ -5,6 +5,7 @@ require "../capture_status"
 require "../agent_presence"
 require "../project"
 require "../project_registry"
+require "../project_search"
 require "../update"
 require "../fuzzy"
 require "./geometry"
@@ -18,6 +19,7 @@ require "./companion"
 require "./settings_view"
 require "./preferences_view"
 require "./compact_overlay"
+require "./project_search_overlay"
 require "./viewport"
 
 module Gori::Tui
@@ -41,6 +43,10 @@ module Gori::Tui
   # be "fixed" back: on this screen every printable key types into the search box (see
   # handle_list), so `t` would filter rather than mark. Tab is fzf's toggle in exactly this
   # shape of list, and ctrl-a is the same select-all everything else spells ⇧T.
+  #
+  # ctrl-f searches the captured FLOWS of every project rather than their names (#1229, see
+  # ProjectSearchOverlay). A chord for the same reason: every printable key is already the
+  # name filter's.
   class ProjectPicker
     # Throttle flock + status-file probes so the 50 ms poll loop doesn't hammer
     # the filesystem on every visible project row every frame.
@@ -122,7 +128,7 @@ module Gori::Tui
       @query = "" # current search filter; only editable when Search row selected
       @selected = 0
       @results_scroll = 0
-      @mode = :list # :list | :new | :confirm | :space | :rename | :settings | :theme | :compress | + BUSY_LABELS
+      @mode = :list # :list | :new | :confirm | :space | :rename | :settings | :theme | :compress | :global_search | + BUSY_LABELS
       @name = ""
       @desc = ""
       @new_field = :name # :name | :desc (only in :new mode)
@@ -143,6 +149,10 @@ module Gori::Tui
       # The picker holds no open Store, so it acts on the project's db file directly.
       @compact = nil.as(CompactOverlay?)
       @compact_project = nil.as(Project?)
+      # ctrl-f: the cross-project flow search, and the flow a hit asked `run`'s caller to open
+      # the chosen project on (see focus_flow_id).
+      @search = nil.as(ProjectSearchOverlay?)
+      @focus_flow_id = nil.as(Int64?)
       @pending_compact = nil.as(Store::CompactPlan?)
       # Which action a shared ConfirmDialog commits (:delete wipes the dir, :compress runs Store.compact).
       @confirm_kind = :delete
@@ -188,11 +198,18 @@ module Gori::Tui
     # is this recent (still surfaces a not-yet-notified update from the cached value).
     UPDATE_CHECK_TTL = 24 * 60 * 60
 
+    # The flow a cross-project search hit picked, for the caller to open the returned project
+    # on (History with that flow's detail showing). nil for every other way `run` returns a
+    # project — a getter beside the return value rather than a wider return type, because
+    # the picker is rebuilt for every pass of the app loop and so cannot carry it stale.
+    getter focus_flow_id : Int64?
+
     def run : Project?
       start_update_check
       loop do
         reconcile_update_check
         tick_companion
+        @search.try(&.tick) if @mode == :global_search
         render
         # Drive the entrance animation off the idle poll cadence (~50 ms/frame):
         # the loop re-renders whenever poll_event times out, so bumping the clock
@@ -210,14 +227,15 @@ module Gori::Tui
         when Termisu::Event::Key
           @companion.wake_on_input # any key re-arms Miss Ring's idle clock (self-gated while off)
           result = case @mode
-                   when :new      then handle_new(ev)
-                   when :confirm  then handle_confirm(ev)
-                   when :settings then handle_preferences(ev)
-                   when :theme    then handle_theme(ev)
-                   when :space    then handle_space(ev)
-                   when :rename   then handle_rename(ev)
-                   when :compress then handle_compress(ev)
-                   else                handle_list(ev)
+                   when :new           then handle_new(ev)
+                   when :confirm       then handle_confirm(ev)
+                   when :settings      then handle_preferences(ev)
+                   when :theme         then handle_theme(ev)
+                   when :space         then handle_space(ev)
+                   when :rename        then handle_rename(ev)
+                   when :compress      then handle_compress(ev)
+                   when :global_search then handle_global_search(ev)
+                   else                     handle_list(ev)
                    end
           case result
           when Project then return result
@@ -235,6 +253,8 @@ module Gori::Tui
           # syllable arrives afterwards as a normal Key and clears this.
           if @mode == :settings
             @preferences.set_preedit(ev.text)
+          elsif @mode == :global_search
+            @search.try(&.set_preedit(ev.text))
           else
             @preedit = ev.text
           end
@@ -583,6 +603,8 @@ module Gori::Tui
         request_delete
       elsif ev.ctrl? && key.lower_a?
         mark_all
+      elsif ProjectPicker.global_search_chord?(ev)
+        open_global_search
       elsif ev.ctrl? && key.comma?
         @preferences.open_default
         @mode = :settings
@@ -1312,6 +1334,62 @@ module Gori::Tui
       nil
     end
 
+    # --- cross-project flow search (ctrl-f) ------------------------------------
+
+    # ctrl-f — the in-app find chord, so the letter means "search" on both screens. Under the
+    # alt command modifier ⌥F reaches here as ctrl-f too: `f` is a claimed key, and `run` folds
+    # the alias (Keybind.dealias_event) before any handler sees the event. A bare `f` is a
+    # letter of a project name. Class-level so a spec can pin the chord — the picker holds a
+    # live Termisu and cannot be built in one.
+    def self.global_search_chord?(ev : Termisu::Event::Key) : Bool
+      ev.ctrl? && !ev.alt? && ev.key.lower_f?
+    end
+
+    # Over the WHOLE registry, most recently active first, whatever the name filter is showing:
+    # the question is "which project saw this", and a project hidden by the filter is still an
+    # answer to it.
+    private def open_global_search : Nil
+      @preedit = ""
+      @search = ProjectSearchOverlay.new(@projects, @discriminators)
+      @mode = :global_search
+    end
+
+    private def handle_global_search(ev : Termisu::Event::Key) : Project | Symbol?
+      return close_global_search unless search = @search
+      finish_global_search(search.handle_key(ev))
+    end
+
+    private def handle_global_search_mouse(w : Int32, h : Int32, mx : Int32, my : Int32) : Project | Symbol?
+      return close_global_search unless search = @search
+      finish_global_search(search.click(Rect.new(0, 0, w, h), mx, my))
+    end
+
+    # Every way out of the mode goes through `close_global_search`, which cancels the search
+    # fiber: a run left going would keep opening project databases behind whatever the operator
+    # does next, including the session a hit is about to open.
+    private def finish_global_search(outcome : ProjectSearchOverlay::Outcome) : Project | Symbol?
+      case outcome.kind
+      when :quit
+        close_global_search
+        return :quit
+      when :close
+        close_global_search
+      when :open
+        close_global_search
+        if project = outcome.project
+          @focus_flow_id = outcome.flow_id
+          return project
+        end
+      end
+      nil
+    end
+
+    private def close_global_search : Nil
+      @search.try(&.close)
+      @search = nil
+      @mode = :list
+    end
+
     # --- mouse ---------------------------------------------------------------
 
     # Maps a click to a picker entry index (0=New, 1=Temp, 2=Search, 3+=projects),
@@ -1339,12 +1417,13 @@ module Gori::Tui
         return picker_wheel(ev.button.wheel_up? ? -3 : 3)
       end
       case @mode
-      when :confirm      then handle_confirm_mouse(w, h, mx, my)
-      when :settings     then handle_preferences_mouse(w, h, mx, my)
-      when :theme        then handle_theme_mouse(w, h, mx, my)
-      when :space        then handle_space_mouse(w, h, mx, my)
-      when :compress     then handle_compress_mouse(w, h, mx, my)
-      when :new, :rename then nil # text form — keyboard only (cursor placement is Phase 2)
+      when :confirm       then handle_confirm_mouse(w, h, mx, my)
+      when :settings      then handle_preferences_mouse(w, h, mx, my)
+      when :theme         then handle_theme_mouse(w, h, mx, my)
+      when :space         then handle_space_mouse(w, h, mx, my)
+      when :compress      then handle_compress_mouse(w, h, mx, my)
+      when :global_search then handle_global_search_mouse(w, h, mx, my)
+      when :new, :rename  then nil # text form — keyboard only (cursor placement is Phase 2)
       else
         # A blocking step (VACUUM, measure, the batch rm_rf) owns the loop — ignore clicks
         # rather than let one land on the list drawn under the busy card.
@@ -1398,6 +1477,7 @@ module Gori::Tui
       when :theme                  then (@theme_card.move_field(delta); preview_theme)
       when :space                  then @space_selected = (@space_selected + delta.sign).clamp(0, space_entries.size - 1)
       when :compress               then @compact.try(&.move(delta.sign))
+      when :global_search          then @search.try(&.wheel(delta))
       when :new, :confirm, :rename then nil # nothing to scroll
       when .in?(BUSY_LABELS.keys)  then nil # a blocking step owns the loop
       else
@@ -1613,6 +1693,7 @@ module Gori::Tui
         @theme_card.render(screen, Rect.new(0, 0, w, h)) if @mode == :theme
         render_space_menu(screen, w, h) if @mode == :space
         @compact.try(&.render(screen, Rect.new(0, 0, w, h))) if @mode == :compress
+        @search.try(&.render(screen, Rect.new(0, 0, w, h))) if @mode == :global_search
         render_busy(screen, w, h) if BUSY_LABELS.has_key?(@mode)
       end
       # Sync the terminal hardware cursor to the focused caret so the terminal's
@@ -1707,6 +1788,12 @@ module Gori::Tui
       if fp.empty?
         msg = @query.empty? ? "no projects yet" : "no matches"
         screen.text(box.x + 3, list_top, msg, Theme.muted, Theme.panel)
+        # The moment a name search comes up empty is the moment the operator may have meant
+        # "which project SAW this" — say where that search lives (#1229).
+        if !@query.empty? && res_rows > 1
+          screen.text(box.x + 3, list_top + 1, "ctrl-f searches every project's flows",
+            Theme.muted, Theme.panel, width: {cw - 5, 1}.max)
+        end
       else
         discriminators = @discriminators
         (0...res_rows).each do |vi|
@@ -1746,6 +1833,8 @@ module Gori::Tui
         hint = case
                when @mode == :compress
                  "↑/↓ select   ‹/› keep   space toggle   ↵ compress   esc close"
+               when @mode == :global_search
+                 @search.try(&.hint) || ""
                when label = BUSY_LABELS[@mode]?
                  # Every blocking mode, off the one table — :measuring used to fall through
                  # to the :space arm below and label its busy card with the action menu's
@@ -1857,6 +1946,11 @@ module Gori::Tui
       tokens << HintToken.new("ctrl-d delete", :delete)
       tokens << HintToken.new("ctrl-, settings", :settings)
       tokens << HintToken.new("ctrl-c quit", :quit)
+      # LAST, after quit, and on purpose: the row trims from the right, and on the action rows
+      # it already needs ~111 columns, so a token placed anywhere earlier would push quit off a
+      # 120-column terminal. Here it costs no other token anything; it shows wherever there is
+      # room for it, and the list's "no matches" line names the chord where there is not.
+      tokens << HintToken.new("ctrl-f search all", :search_all)
       tokens
     end
 
@@ -1912,7 +2006,8 @@ module Gori::Tui
         name = @query.strip
         return safe_create(name) unless name.empty?
         start_new
-      when :delete then request_delete
+      when :delete     then request_delete
+      when :search_all then open_global_search
       when :settings
         @preferences.open_default
         @mode = :settings

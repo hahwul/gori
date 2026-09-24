@@ -224,11 +224,13 @@ module Gori
           notice = db_error || notice
         end
         loop do
-          project = Tui::ProjectPicker.new(term, projects, notice: notice).run
+          picker = Tui::ProjectPicker.new(term, projects, notice: notice)
+          project = picker.run
           break unless project # nil => quit gori
           # Reassigned every pass: a picker-chosen project that won't open reports it the
           # same way, and a successful open clears the previous failure's notice.
-          outcome, notice = open_or_report_guard(project, term)
+          # `focus_flow_id` is set when the pick came from a cross-project search hit (#1229).
+          outcome, notice = open_or_report_guard(project, term, picker.focus_flow_id)
           break if outcome == :quit
         end
       ensure
@@ -317,20 +319,24 @@ module Gori
     # ALREADY held. A compact that starts in the gap between the probe and the open falls
     # through to `try_shared` and waits it out exactly as before, which is the rare race inside
     # an already-rare collision.
-    private def open_or_report_guard(project : Project, term : Termisu) : {Symbol, String?}
+    private def open_or_report_guard(project : Project, term : Termisu,
+                                     focus_flow_id : Int64? = nil) : {Symbol, String?}
       if OpenLock.guarded?(project.db_path)
         # `:back` with a reason is the picker's own "here is why you are looking at this
         # screen" channel — the same one a failed open uses, so this needs no new surface.
         return {:back, OpenLock.guarded_message(project.db_path)}
       end
-      open_and_run(project, term)
+      open_and_run(project, term, focus_flow_id)
     end
 
     # `{outcome, error}`. `outcome` is :quit (leave gori) or :back (return to the picker);
     # `error` is a one-line reason and is non-nil ONLY when the session never opened, so the
     # caller can tell "the user pressed q" apart from "this project never opened" — both of
     # which are :back, and only one of which is worth putting on screen.
-    private def open_and_run(project : Project, term : Termisu) : {Symbol, String?}
+    #
+    # `focus_flow_id` opens the session on that flow's History detail (see
+    # `Runner#focus_flow_on_start`).
+    private def open_and_run(project : Project, term : Termisu, focus_flow_id : Int64? = nil) : {Symbol, String?}
       # Pick up any bind address / verify-upstream toggle changed via Settings since startup
       # (the previous session kept its values; this one opens on the new ones). `startup_*`,
       # not the bare globals: a `-l`/`-p` flag lives in its own layer now, and dropping it here
@@ -356,6 +362,7 @@ module Gori
         end
       begin
         runner = Tui::Runner.new(session, term)
+        runner.focus_flow_on_start = focus_flow_id
         # Verify on but no CA trust store resolvable (e.g. a static musl build on a host
         # without a standard CA bundle): every HTTPS flow would fail upstream verification
         # (#323). Surface it once at startup — the per-flow error (#332) explains each failure,

@@ -476,6 +476,31 @@ module Gori::Tui
       @tabs[:colormarker].as(ColormarkerController)
     end
 
+    # The flow to open this session on, set by the caller before `run`: the project picker's
+    # cross-project search (#1229) hands over the hit the operator pressed ↵ on, and the session
+    # opens on History with that flow's detail already showing.
+    property focus_flow_on_start : Int64?
+
+    # The drill-in hop `sitemap_open_flow` makes, taken once at startup. A flow can be gone by
+    # the time the session opens — pruned by retention or deleted by a peer between the search
+    # reading it and this — and then the project opens on its usual tab and SAYS so, since a
+    # silent landing would read as the search having pointed nowhere. The same two surfaces
+    # `announce_env_syntax_migration` uses: the ring always, the toast unless a bind failure
+    # already holds it.
+    private def open_focus_flow : Nil
+      return unless id = @focus_flow_on_start
+      @focus_flow_on_start = nil
+      if history_controller.view.open_detail_id(id, @session.store)
+        @active_tab = :history
+        @focus = :body
+        @overlay = OverlayKind::Detail
+      else
+        line = "flow ##{id} is no longer in this project — deleted or pruned since the search found it"
+        @notifications.push(:warn, line)
+        @toast ||= line
+      end
+    end
+
     def run : Symbol
       # Record the opened project's db path globally for explicitly opted-in headless
       # integrations (`gori mcp --use-active-project`). Workspace-aware MCP launches use
@@ -516,6 +541,7 @@ module Gori::Tui
       # — all of which read `@session.proxy.port` directly — plus the toast above.
       announce_env_syntax_migration
       project_controller.reload
+      open_focus_flow
       render # initial paint (the loop below only re-renders when something changed)
       # The render loop polls input on a 50ms cadence (so async channels are still
       # checked ≤50ms), but RENDER only runs when the frame would actually change —
