@@ -222,12 +222,18 @@ module Gori
       "#{current},#{setting}"
     end
 
+    # Control characters (ASCII < 0x20 and 0x7f) are replaced with a space so that
+    # text interpolated into shell comments cannot break out of `#` or emit terminal escapes.
+    def self.sanitize_comment(text : String) : String
+      text.gsub(/[\x00-\x1f\x7f]/, " ")
+    end
+
     # `result` as lines a shell evaluates: `eval "$(…)"` for POSIX shells, `… | source` for
     # fish. `header` prefixes the caveats as comments — off for text that is PASTED, since an
     # interactive zsh without INTERACTIVE_COMMENTS runs `#` as a command.
     def self.render(result : Result, syntax : Syntax, *, header : Array(String) = [] of String) : String
       String.build do |s|
-        header.each { |line| s << "# " << line << '\n' }
+        header.each { |line| s << "# " << sanitize_comment(line) << '\n' }
         result.vars.each do |name, value|
           case syntax
           in Syntax::Posix

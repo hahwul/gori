@@ -270,6 +270,20 @@ describe Gori::ShellEnv do
       end
     end
 
+    it "sanitizes comment lines so control characters and newlines cannot escape comments" do
+      with_shell_fixture do |root, ca, system|
+        r = build(root, ca, system)
+        sh = Gori::ShellEnv.render(r, Gori::ShellEnv::Syntax::Posix,
+          header: ["line\nwith\rnewlines\x00and\x1bescapes"])
+        # Each header element must remain exactly one comment line
+        sh.lines.first.should eq("# line with newlines and escapes")
+      end
+    end
+
+    it "replaces ASCII control characters with spaces in sanitize_comment" do
+      Gori::ShellEnv.sanitize_comment("hello\nworld\r\x00\x1b\x7f!").should eq("hello world    !")
+    end
+
     # The values are paths, and a home directory can hold anything a filename can.
     it "quotes a value so the shell reads it back byte for byte" do
       nasty = %(/tmp/it's a "path" with $HOME and `x` \\ and \\' and ${Y})

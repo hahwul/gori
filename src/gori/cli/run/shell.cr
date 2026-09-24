@@ -182,8 +182,8 @@ module Gori
       # `--print`'s comment header: what was set, how to apply it, and what it cannot reach.
       def self.shell_print_header(result : ShellEnv::Result, target : ShellTarget) : Array(String)
         lines = [
-          "gori shell environment — #{target.label}",
-          "proxy #{result.proxy_url} · CA bundle #{result.bundle_path}",
+          "gori shell environment — #{ShellEnv.sanitize_comment(target.label)}",
+          "proxy #{ShellEnv.sanitize_comment(result.proxy_url)} · CA bundle #{ShellEnv.sanitize_comment(result.bundle_path)}",
           %(apply: eval "$(gori run shell --print)"  ·  fish: gori run shell --print --shell fish | source),
           "not covered:",
         ]
