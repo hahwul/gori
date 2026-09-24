@@ -28,6 +28,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     repeater_controller.repeater_new
   end
 
+  def repeater_paste_curl : Nil
+    open_curl_paste(:repeater)
+  end
+
   def repeater_send : Nil
     repeater_controller.repeater_send
   end

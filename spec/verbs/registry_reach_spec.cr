@@ -138,7 +138,7 @@ describe "sub-tab verbs" do
   it "files every strip verb under :subtab, and the strip's search/filter under :tab" do
     {"decoder.close", "jwt.close", "comparer.close-subtab", "mine.close-subtab",
      "sequence.close-subtab", "repeater.close-subtab", "fuzz.close-subtab",
-     "repeater.new", "fuzz.new", "decoder.new", "jwt.new", "cookie.new",
+     "repeater.new", "repeater.paste-curl", "fuzz.new", "decoder.new", "jwt.new", "cookie.new",
      "notes.new", "comparer.new"}.each do |id|
       r[id].section.should eq(:subtab)
     end

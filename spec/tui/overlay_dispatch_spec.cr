@@ -32,7 +32,7 @@ private EXPECTED_OVERLAY_SYMS = {
   :settings, :tabs, :hosts, :env, :user_agents, :hotkeys, :help, :notifications, :note_detail, :passthrough, :listeners, :agents, :probe_active,
   :discover_config, :discover_headers, :fuzz_set, :fuzz_advanced, :oast_provider,
   :oast_provider_pick, :oast_session,
-  :probe_rule, :rewriter_rule, :colormarker_rule, :colormarker_color, :extract_rule, :rewriter_stub, :authorize_identities, :authorize_identity, :ca_import, :import, :export, :scope_rule, :sequence_config,
+  :probe_rule, :rewriter_rule, :colormarker_rule, :colormarker_color, :extract_rule, :rewriter_stub, :authorize_identities, :authorize_identity, :ca_import, :import, :curl_paste, :export, :scope_rule, :sequence_config,
   :mine_config, :name_prompt, :columns, :column, :library_pick, :cvss_calculator, :copy_as, :send_to,
   :evidence, :retest, :retest_assert,
 }
@@ -61,6 +61,9 @@ private MIGRATED_KINDS = [
   OverlayKind::RewriterStub,
   OverlayKind::CaImport,
   OverlayKind::Import,
+  # CurlPaste (#1244) — the curl paste box, born on the seam (Repeater → Paste cURL,
+  # Import: cURL), so never in MODAL_OVERLAYS.
+  OverlayKind::CurlPaste,
   # C1 — scan/fuzz config forms
   OverlayKind::Notifications,
   # NoteDetail (#1090) — one notification's long form, born on the seam (↵ on a ring row that

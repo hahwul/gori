@@ -204,7 +204,7 @@ describe "Gori::Verbs.register_history" do
   describe "Repeater workbench" do
     it "gates every Repeater verb on the Repeater tab" do
       ctx = on(:history)
-      %w[repeater.send repeater.new repeater.minimize repeater.insert-marker
+      %w[repeater.send repeater.new repeater.paste-curl repeater.minimize repeater.insert-marker
         repeater.auto-mark repeater.toggle-hex repeater.toggle-http2
         repeater.send-group repeater.toggle-diff].each do |id|
         r[id].available?(ctx).should be_false
@@ -215,6 +215,7 @@ describe "Gori::Verbs.register_history" do
     it "routes send / new / minimize / group-send to their own intents" do
       verb_intents(r, "repeater.send").should eq([:repeater_send])
       verb_intents(r, "repeater.new").should eq([:repeater_new])
+      verb_intents(r, "repeater.paste-curl").should eq([:repeater_paste_curl])
       verb_intents(r, "repeater.minimize").should eq([:repeater_minimize])
       verb_intents(r, "repeater.send-group").should eq([:repeater_send_group])
     end

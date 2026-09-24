@@ -74,6 +74,9 @@ module Gori::Tui
     AuthorizeIdentity
     CaImport
     Import
+    # The curl paste box (#1244) — one member for both of its destinations (a Repeater sub-tab,
+    # History), for the reason `Help` gives: they never coexist, and the title is per instance.
+    CurlPaste
     Export
     ScopeRule
     SequenceConfig

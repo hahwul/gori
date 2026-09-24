@@ -393,12 +393,15 @@ gori run repeater <flow-id> --target https://staging.example.com --http2 --diff
 gori run repeater create --target https://api.example.com --request-file req.txt --name "login probe"
 gori run repeater create --flow 42 --name "clone of 42"
 generate-request | gori run repeater create --target https://api.example.com --request-stdin
+pbpaste | gori run repeater create --curl - --name "from devtools"
 ```
 
-The three request sources are mutually exclusive — naming two is refused rather than
+The four request sources are mutually exclusive — naming two is refused rather than
 resolved by flag order — and a request that arrives empty (an empty file, `--request-raw ''`,
 or a pipe that produced nothing) is refused instead of creating a session that cannot be sent.
-`--flow` is not one of the three: it doubles as provenance, so it pairs with any one of them.
+`--flow` is not one of the four: it doubles as provenance, so it pairs with any one of them.
+`--curl` reads one curl command (see [Repeater → Paste cURL](/guide/repeater-and-fuzzer/#repeater))
+and supplies `--target` and `--http2` from it unless you pass them.
 
 `--request-stdin` reads a pipe or a redirect (`--request-stdin < req.http`), and refuses a
 terminal. A terminal echoes every byte back — the whole raw request, `Cookie` and
@@ -426,6 +429,7 @@ backtrace, as the flag doors already did.
 | `-f`, `--request-file=FILE` | Read the raw HTTP request from FILE (mutually exclusive with `--request-raw` / `--request-stdin`) |
 | `-r`, `--request-raw=RAW` | Verbatim raw HTTP request string (mutually exclusive with `--request-file` / `--request-stdin`) |
 | `--request-stdin` | Read the raw HTTP request from stdin, byte-for-byte as `--request-file` reads a file, keeping it out of the argument vector. Needs a pipe or a redirect; a terminal is refused (mutually exclusive with `--request-file` / `--request-raw`) |
+| `--curl=PATH` | Build the request from the curl command in PATH (`-` reads stdin). Supplies the target and HTTP/2 unless given; ignored transport flags are named on stderr |
 | `--flow=ID` | Clone request / target / HTTP/2 from a captured flow |
 | `--name=NAME`, `--tags=TAGS` | Custom tab name, and free-text tags that become the TUI subtab label |
 | `--http2` / `--http1` (`--no-http2`) | Pick a protocol; `--http1` overrides an h2-captured `--flow` |
@@ -776,6 +780,7 @@ gori run import --postman api.postman_collection.json --db ./assessment.db --for
 | `--insomnia=PATH` | An Insomnia v4 export (JSON) |
 | `--burp=PATH` | A Burp Suite item export (XML). Request **and** response, byte-exact |
 | `--wsdl=PATH` | A WSDL 1.1 service description (XML). One SOAP request template per operation |
+| `--curl=PATH` | curl commands, one flow per request; `-` reads stdin (`pbpaste \| gori run import --curl -`). Ignored transport flags are named on stderr (`notes` in JSON) |
 | `--project=NAME` | Project to import into (default: most-recently-active) |
 | `--db=PATH` | Explicit SQLite db file to import into (created if absent) |
 | `--format` | `text` (default) or `json` |

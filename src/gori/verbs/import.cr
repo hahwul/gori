@@ -24,6 +24,10 @@ module Gori
       r.register Verb::Definition.new(
         "import.wsdl", "Import: WSDL", "Import SOAP request templates from a WSDL 1.1 service description",
         Verb::Scope::Global, category: Verb::Category::Action) { |ctx| ctx.import_wsdl; nil }
+      # A paste box, not a path prompt: a curl command is copied, rarely saved (#1244).
+      r.register Verb::Definition.new(
+        "import.curl", "Import: cURL", "Paste curl command(s) and import each request into History",
+        Verb::Scope::Global, category: Verb::Category::Action) { |ctx| ctx.import_curl; nil }
       # Listed only while an import runs (`available:`), which is also the only time it means
       # anything. Stops after the chunk being written; what is committed stays.
       r.register Verb::Definition.new(
