@@ -147,7 +147,7 @@ The first two take **one** payload set; the last two take one per marked positio
 
 ### Positions and Payloads
 
-Mark positions with `§…§` markers in the request, or let gori place them automatically. Payload sets can be a built-in preset (`sqli`, `xss`, `traversal`, `format-string`, `bad-strings`, `command-injection`) for a fast start with no file, a wordlist, an explicit list, a numeric range, N empty (null) payloads, or brute-force character sets. A preset can merge an extra file (built-in first, de-duped), and composes with any other set. Processors let you transform each payload on the way out: prefix/suffix, URL/base64/hex encoding, case folding, hashing, or a regex replace.
+Mark positions with `§…§` markers in the request, or let gori place them automatically. Payload sets can be a built-in preset (`sqli`, `xss`, `traversal`, `format-string`, `bad-strings`, `command-injection`, `cache-delimiters`) for a fast start with no file, a wordlist, an explicit list, a numeric range, N empty (null) payloads, or brute-force character sets. A preset can merge an extra file (built-in first, de-duped), and composes with any other set. Processors let you transform each payload on the way out: prefix/suffix, URL/base64/hex encoding, case folding, hashing, or a regex replace.
 
 A gRPC message is the one place a marker cannot go usefully; see [Sweeping a gRPC Field](#sweeping-a-grpc-field), where the position is a schema-known field rather than a byte range.
 

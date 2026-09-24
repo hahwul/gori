@@ -177,6 +177,11 @@ module Gori::Tui
       # re-extract of the whole screenful every frame.
       @columns = Gori::DisplayColumns::Prepared.new([] of Store::DisplayColumn)
       @col_values = {} of {Int64, Int64, Store::FlowState} => Array(String)
+      # The CACHE column's classified signal per row (#1247), memoised on the SAME key and for
+      # the SAME reason as `@col_values`: `cache:` is read from `response_head`, which the light
+      # `FlowRow` projection does not carry, so an on-screen row's head is fetched once and the
+      # result kept. Only visible rows reach it (P8), and a `head_only` fetch never pulls a body.
+      @cache_memo = {} of {Int64, Int64, Store::FlowState} => Gori::CacheStatus::Signal
       # The store the row bytes are read from. Set by HistoryController on the render path,
       # beside `refresh_preview` — the list itself never opens one.
       @col_store = nil.as(Store?)
@@ -619,12 +624,54 @@ module Gori::Tui
         body_max: @columns.body_scoped?(count) ? Gori::DisplayColumns::BODY_CAP : 0)
       return Array.new(count, "") unless detail
       values = @columns.values(detail, count)
+      # This fetch already has the detail in hand, so derive the CACHE column's signal from the
+      # SAME read rather than letting `cache_status_for` open a second one for the same row
+      # (#1247). `||=` so a signal already memoised (a narrower earlier frame) is kept.
+      @cache_memo[key] ||= Gori::CacheStatus.classify(detail.response_head)
       # A bound the window itself cannot reach: MAX_ROWS is 5000 and the cache only ever gains a
       # row that was drawn, so this fires on a long session of scrolling rather than on a
       # screenful. Dropped whole rather than aged — the next draw refills what is visible.
       @col_values.clear if @col_values.size >= COL_CACHE_MAX
       @col_values[key] = values
       values
+    end
+
+    # The CACHE column's signal for one row, computed once and remembered (#1247).
+    #
+    # Only rows ON SCREEN reach here — the same P8 bound `column_values` documents — so a
+    # 5000-row window costs the head reads of its ~50 visible rows and nothing more. When a
+    # user-defined column already read this row (`column_values`), that read populated the memo
+    # and this is a hit with NO second fetch; otherwise it fetches `body_max: 0` (a cache status
+    # is read from the response HEAD, so a body BLOB is never pulled). A row with no head yet
+    # (Pending) or an unreadable one is `None`, exactly what `gori_cache_status` answers for the
+    # same row in a `cache:` query.
+    private def cache_status_for(row : Store::FlowRow) : Gori::CacheStatus::Signal
+      key = {row.id, row.created_at, row.state}
+      if cached = @cache_memo[key]?
+        return cached
+      end
+      store = @col_store
+      return Gori::CacheStatus::Signal::None unless store
+      detail = store.get_flow(row.id, body_max: 0)
+      signal = detail ? Gori::CacheStatus.classify(detail.response_head) : Gori::CacheStatus::Signal::None
+      # Same bound and same whole-drop as `@col_values`: only visible rows are ever inserted, so
+      # this fires on a long scroll rather than a screenful, and the next draw refills what shows.
+      @cache_memo.clear if @cache_memo.size >= COL_CACHE_MAX
+      @cache_memo[key] = signal
+      signal
+    end
+
+    # The CACHE cell's text and colour for a signal. `none` draws BLANK — most responses carry
+    # no cache headers, and a column full of "NONE" is noise; the interesting signals are the
+    # ones that show. `HIT` is accented (the deception candidate an operator scans for); `MISS`
+    # and `DYN` are muted facts. Abbreviated to fit the 5-cell cluster slot ("dynamic" → "DYN").
+    private def cache_cell(signal : Gori::CacheStatus::Signal) : {String, Color}
+      case signal
+      in Gori::CacheStatus::Signal::Hit     then {"HIT", Theme.accent}
+      in Gori::CacheStatus::Signal::Miss    then {"MISS", Theme.muted}
+      in Gori::CacheStatus::Signal::Dynamic then {"DYN", Theme.muted}
+      in Gori::CacheStatus::Signal::None    then {"", Theme.muted}
+      end
     end
 
     # Which rule paints `row`, or nil.
@@ -2755,8 +2802,18 @@ module Gori::Tui
         cluster_w += 7
         spare -= 7
       end
-      show_dur = spare >= 6
-      cluster_w += 6 if show_dur
+      if show_dur = spare >= 6
+        cluster_w += 6
+        spare -= 6
+      end
+      # CACHE is granted LAST — lowest priority, so it is the FIRST cluster column to drop on a
+      # narrow terminal (#1247). It is a specialised signal for web-cache testing, unlike the
+      # STA/SRC/TYPE/SIZE/DUR an operator reads on every list, and it is the one built-in whose
+      # value is not on the light `FlowRow` — a shown CACHE column costs a head read per visible
+      # row (see `cache_status_for`), which a session not doing cache work should not pay. 5
+      # cells fit the "CACHE" header and the widest cell ("MISS"); the values are abbreviated.
+      show_cache = spare >= 6
+      cluster_w += 6 if show_cache
 
       status_x = {rect.right - cluster_w, host_x}.max
       # STA is the one cell here that is not gated on `spare`, so on a pane narrower than the
@@ -2775,6 +2832,8 @@ module Gori::Tui
       cx += 7 if show_size
       dur_x = cx
       cx += 6 if show_dur
+      cache_x = cx
+      cx += 6 if show_cache
       # The custom block sits at the far RIGHT of the cluster, after the built-ins. It is granted
       # before them (above) and drawn after them, and the two orders are independent on purpose:
       # priority decides what survives a narrow terminal, position decides what the eye scans
@@ -2796,6 +2855,7 @@ module Gori::Tui
       screen.text(type_x, hdr_y, "TYPE", Theme.muted, width: 6) if show_type
       screen.text(size_x, hdr_y, "SIZE", Theme.muted, width: 6) if show_size
       screen.text(dur_x, hdr_y, "DUR", Theme.muted, width: 6) if show_dur
+      screen.text(cache_x, hdr_y, "CACHE", Theme.muted, width: 5) if show_cache
       render_columns_header(screen, cols_x, hdr_y, shown_cols)
       Frame.inner_divider(screen, rect, hdr_y + 1, border: Frame.pane_border(focused))
 
@@ -2972,7 +3032,17 @@ module Gori::Tui
         screen.text(type_x, y, fmt_mime_memo(row.content_type), Theme.muted, bg, width: 6) if show_type
         screen.text(size_x, y, fmt_size(row.response_size), Theme.muted, bg, width: 6) if show_size
         screen.text(dur_x, y, fmt_dur(row.duration_us), Theme.muted, bg, width: 6) if show_dur
+        # User columns FIRST, so a row they read for their own values also settles the CACHE
+        # memo below (one SQLite read feeds both — see `column_values`). Position is unaffected:
+        # each cell draws at its own absolute x.
         render_columns_row(screen, cols_x, y, shown_cols, row, fg, bg)
+        # CACHE: the normalised cache signal, read from the response head for on-screen rows
+        # only (see `cache_status_for`). `none` draws blank, so a list of ordinary traffic is
+        # not littered with it and a `HIT` stands out.
+        if show_cache
+          cache_text, cache_color = cache_cell(cache_status_for(row))
+          screen.text(cache_x, y, cache_text, cache_color, bg, width: 5) unless cache_text.empty?
+        end
       end
       # The busiest list in gori, and it had no position feedback at all: a 12-row window over
       # 400 flows looked exactly like a 12-row window over 12. `rect` is the framed interior,
@@ -3866,6 +3936,7 @@ module Gori::Tui
                when "scope"  then QL::SCOPE_VALUES
                when "src"    then QL::SOURCE_VALUES
                when "stub"   then QL::STUB_VALUES
+               when "cache"  then QL::CACHE_VALUES
                when "dur"    then [">500", ">1s", ">=200", "<100"]
                else               return [] of String
                end

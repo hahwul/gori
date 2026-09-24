@@ -21,6 +21,7 @@ module Gori::Fuzz
       "format-string"     => {{ read_file("#{__DIR__}/payloads/format-string.txt") }},
       "bad-strings"       => {{ read_file("#{__DIR__}/payloads/bad-strings.txt") }},
       "command-injection" => {{ read_file("#{__DIR__}/payloads/command-injection.txt") }},
+      "cache-delimiters"  => {{ read_file("#{__DIR__}/payloads/cache-delimiters.txt") }},
     }
 
     @@cache = {} of String => Array(String)

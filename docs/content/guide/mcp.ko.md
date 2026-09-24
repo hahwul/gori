@@ -73,7 +73,7 @@ gori mcp --read-only
 
 | 시작 방법 | 도구 | `tools/list` | 토큰 | 용도 |
 | --- | ---: | ---: | ---: | --- |
-| `gori mcp` | 180 | ~206 KB | ~53k | 전부 (기본값) |
+| `gori mcp` | 181 | ~207 KB | ~53k | 전부 (기본값) |
 | `--read-only` | 60 | ~67 KB | ~17k | 읽기 도구와 순수 연산; 실제 요청 전송 없음 |
 | `--tools=@recon` | 35 | ~52 KB | ~13k | 캡처를 읽고 파악, 요청 재전송, 이슈·노트 기록 |
 | `--tools=@recon --read-only` | 27 | ~37 KB | ~10k | `--read-only`가 끄는 도구를 뺀 `@recon` |
@@ -196,7 +196,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `ql_reference` | 쿼리 언어 레퍼런스 |
 | `ql_explain` | 쿼리를 실행하지 않고 진단. 요청을 쓰기 전에 필터를 점검할 때 사용 |
 
-**액션 도구**(`--read-only`로 비활성화됨). 소켓을 여는 도구(`send_request`, `send_websocket`, `fuzz_*`, `mine_*`, `authorize_*`, `sequence_*`, `discover_*`, `grpc_reflect`, `minimize_repeater`, 그리고 `active:true`를 준 `probe_scan`)는 모두 스코프 게이트를 지납니다. 설정된 스코프 밖의 대상, 또는 스코프가 없는 대상은 호출에 명시적 예외 선언인 `allow_unscoped:true`를 주지 않는 한 `SCOPE_BLOCKED`로 거부되며, 그때도 샌드박스와 명시적 제외 규칙은 그대로 적용됩니다.
+**액션 도구**(`--read-only`로 비활성화됨). 소켓을 여는 도구(`send_request`, `send_websocket`, `fuzz_*`, `mine_*`, `authorize_*`, `cache_deception_check`, `sequence_*`, `discover_*`, `grpc_reflect`, `minimize_repeater`, 그리고 `active:true`를 준 `probe_scan`)는 모두 스코프 게이트를 지납니다. 설정된 스코프 밖의 대상, 또는 스코프가 없는 대상은 호출에 명시적 예외 선언인 `allow_unscoped:true`를 주지 않는 한 `SCOPE_BLOCKED`로 거부되며, 그때도 샌드박스와 명시적 제외 규칙은 그대로 적용됩니다.
 
 | 도구 | 용도 |
 |------|---------|
@@ -241,6 +241,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `mine_start` / `mine_status` / `mine_results` / `mine_stop` | Param Miner 구동 |
 | `sequence_start` / `sequence_status` / `sequence_results` / `sequence_stop` | 라이브 리플레이로 토큰을 수집해 평가(결과는 리포트만 반환, 토큰은 반환하지 않음) |
 | `authorize_start` / `authorize_status` / `authorize_results` / `authorize_stop` | 캡처된 플로우를 여러 아이덴티티로 재전송하고 각 응답을 기준선과 비교합니다(접근 제어 결함). 결과는 `access_control`(`BYPASS`/`enforced`/`review`/`error`/`nothing_sent`)과 페이징 없는 `bypasses` 목록으로 시작합니다 |
+| `cache_deception_check` | 플로우 하나를 웹 캐시 디셉션으로 검사합니다: 캡처된(인증된) 아이덴티티로 재전송해 캐시를 채운 뒤, 세션 없이 같은 url을 다시 요청합니다. `verdict: cached`(`deception: true`)는 익명 재요청이 인증된 응답을 캐시에서 받았다는 뜻입니다. 동기(두 번 전송). 응답의 `cache` 상태를 읽으며, 트리거되는 조작된 경로를 찾으려면 Fuzzer의 `cache-delimiters` 페이로드 세트와 함께 쓰세요 |
 | `discover_start` / `discover_status` / `discover_results` / `discover_stop` | 엔드포인트 스파이더링 & 브루트포스, 진행 상황 폴링, 결과 조회. 네 개 모두 액션 도구이므로 읽기 전용 서버에는 Discover 표면이 없습니다 |
 | `oast_start` / `oast_stop` | 즉석 OAST 페이로드 등록 후 콜백 폴링(`oast_poll`로 히트 조회). 재개한 세션에 `oast_stop`을 쓰면 폴링만 멈추고 세션은 다시 재개할 수 있게 남습니다 |
 | `oast_resume` / `oast_release` | 저장된 세션을 다시 살려 이전에 심어둔 페이로드가 계속 resolve되게 하고(폴링 결과는 프로젝트에 저장됩니다), 끝난 engagement는 등록 해제합니다. 콜백은 남습니다 |

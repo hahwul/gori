@@ -792,6 +792,8 @@ module Gori
         clauses << "mine_*" if @tools.advertises?("mine_start")
         clauses << "authorize_* (replay captured requests under several identities to find " \
                    "broken access control)" if @tools.advertises?("authorize_start")
+        clauses << "cache_deception_check (prime a flow as authenticated, re-request anonymous, " \
+                   "and report a cached private response)" if @tools.advertises?("cache_deception_check")
         clauses << "create/update_issue" if advertised("create_issue", "update_issue")
         clauses << "create/delete_rule + set_rule_enabled" if advertised("create_rule", "delete_rule", "set_rule_enabled")
         return "" if clauses.empty?

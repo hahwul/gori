@@ -222,6 +222,8 @@ module Gori
         "whether a body was stored is a CAPTURE decision, made after this gate"
       when "src"
         "a flow's source is recorded when it is captured, not while it is in flight"
+      when "cache"
+        "the response headers a cache status is read from have not arrived yet"
       when .includes?('.')
         # The `req.`/`resp.` half. A gate stands on one leg and already knows which, so the
         # side prefix is not narrowing anything — it is naming bytes that are not in hand.
@@ -355,7 +357,9 @@ module Gori
       when "scope"  then QL::SCOPE_VALUES
       when "src"    then QL::SOURCE_VALUES
       when "proto"  then rows ? QL::PROTO_VALUES : PROTO_VAL
-      when "stub"   then rows ? QL::STUB_VALUES : nil
+      when "stub", "cache" # row-backed ONLY (see the note above); a hold gate never reaches them
+        return nil unless rows
+        field == "stub" ? QL::STUB_VALUES : QL::CACHE_VALUES
       end
     end
 

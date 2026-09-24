@@ -69,6 +69,7 @@ gori run <subcommand> [verb] [options]
 | `mine [<flow-id>]` | Hidden-parameter discovery |
 | `sequence` (`seq`) `[<flow-id>]` | Grade token randomness (live replay, or `--tokens` for a pasted list) |
 | `authorize [<flow-id>…]` | Replay captured flows under several identities and judge each response against a baseline (broken access control) |
+| `cache-deception [<flow-id>…]` | Check flows for web cache deception: prime as authenticated, re-request anonymous, compare |
 | `probe [QL]` | Passive security scan (no requests) |
 | `probe issues` · `dismiss` · `promote` · `delete` | Triage persisted Probe findings |
 | `probe rules` · `mode` | List / arm scan rules; get or set the scan mode |
@@ -532,7 +533,7 @@ Sources: `--flow=ID`, `--repeater=ID`, `--request=FILE`, or stdin. Positions: `�
 | Transport | `--target=URL` (required for `--request`/stdin), `--http2`, `--sni=HOST`, `-k`/`--insecure-upstream` |
 | Mode | `--mode=` `sniper` (default), `batteringram`, `pitchfork`, `clusterbomb`. The first two draw from **one** payload set, the last two from one per marked position; a set the mode will never draw from is named before the run starts |
 | gRPC fields | `--field=SPEC` (repeatable) sweeps a **schema-known field** of a unary gRPC request instead of its octets. `SPEC` is a field name, a path into a nested message (`profile.age`), a field number, or `name[i]` for one occurrence of a repeated field; `name¦chain` runs a Decoder chain over the payload **before** the declared type encodes it. The field must already be present on the captured message (gori replaces an occurrence, never adds one), and payloads for a `bytes` field are read as **hex** (`de ad be ef`). Each payload goes through the field's declaration on its way to bytes (`-3` is a different set of octets as `int32`, `sint32`, `bool` or an enum), every other byte of the message is copied from the capture, and the 5-byte length prefix is recomputed. Needs a descriptor set that resolves the rpc (`gori run grpc schema`). Field positions follow the template's own `§…§` positions in the run's index space, so `--mode` and the payload sets keep their meaning. An undeclared field, one whose wire type the declaration contradicts, and a payload the declared type cannot hold are all refused before the first request |
-| Payloads | `-w`/`--wordlist`, `--preset=NAME[:FILE]` (built-in: `sqli`, `xss`, `traversal`, `format-string`, `bad-strings`, `command-injection`), `--payloads=LIST`, `--numbers=FROM-TO[:STEP]`, `--null=N`, `--brute=CHARSET:MIN-MAX` |
+| Payloads | `-w`/`--wordlist`, `--preset=NAME[:FILE]` (built-in: `sqli`, `xss`, `traversal`, `format-string`, `bad-strings`, `command-injection`, `cache-delimiters`), `--payloads=LIST`, `--numbers=FROM-TO[:STEP]`, `--null=N`, `--brute=CHARSET:MIN-MAX` |
 | Encoding | A payload spliced into a **query-string** or **form-urlencoded body** value is URL-encoded by default; path segments, JSON/raw bodies, headers and cookies stay raw. `--no-encode` sends the query/form ones raw too. Use it for a payload that is *already* a percent-escape (`%00` would go out as `%2500`, so the `%00` / `%c0%af` / `%2e%2e%2f` probes aimed at the origin's own decoder arrive as text). An explicit `--encode` replaces the default and applies to every position. `--prefix` / `--suffix` / `--case` / `--hash` / `--regex-replace` do not: they say what the payload is, not how the wire spells it, so their output is still encoded for a query/form position |
 | Processors | `--prefix`, `--suffix`, `--encode` (`url`\|`urlall`\|`base64`\|`hex`), `--case` (`upper`\|`lower`), `--hash` (`md5`\|`sha1`\|`sha256`), `--regex-replace=/pat/rep/` |
 | Rate | `--concurrency` (20), `--rate=RPS`, `--throttle=MS`, `--timeout=SEC`, `--retries=N`, `--max-requests=N` (hard cap, retries and redirect hops count), `--follow-redirects`, `--no-keep-alive` |
@@ -640,6 +641,26 @@ Identities come from the project (the TUI Authorize tab's list) unless `--identi
 `set` upserts headers, `remove` strips them, and the request as captured is the baseline unless an entry carries `"baseline": true`. At least one identity besides the baseline is required, or there is nothing to compare.
 
 Flows that cannot be replayed meaningfully are listed on STDERR before anything is sent, each with its reason (`no identity changes them`, `not a safe method to repeat`, `never completed`, `answered by gori`, `outside project scope`, `already queued`). A selection where every flow was skipped is refused rather than run. If every send was refused before the socket, the run exits `1` and says so instead of reporting a clean result, because a run that sent nothing is not evidence that access control works.
+
+### run cache-deception
+
+Check each selected flow for **web cache deception**: replay it as its captured (authenticated) identity to prime any cache, then re-request the *same* url with no session, and compare. If the anonymous re-request is served the authenticated response *from a cache* (`verdict: cached`), that private response was cached under a key an anonymous client hits. Borrows the Authorize engine; the crafted paths that trigger it (`;`, `.css`, `%00`, dot-segments) are the Fuzzer's `cache-delimiters` payload set.
+
+```bash
+gori run cache-deception 12
+gori run cache-deception --flow 12 --flow 13 --format json
+```
+
+| Option | Description |
+| -------- | ------------- |
+| `<flow-id>…`, `--flow=ID` | Captured flows to check, in the order given (repeatable) |
+| `--unsafe-methods` | Also check `POST`/`PUT`/`PATCH`/`DELETE`; the side effect runs twice (prime + anonymous) |
+| `--allow-unscoped` | Send even when the target is outside the project scope (sandbox and excludes still apply) |
+| `--timeout=SEC`, `-k`/`--insecure-upstream` | Per-request connect + idle timeout; skip upstream TLS verification |
+| `--project`, `--db` | Project to read |
+| `--format` | `text` (default), `json` (one array at the end), or `jsonl` (streamed) |
+
+Each flow reports one verdict: `cached` (the deception — anonymous served the authenticated response from a cache), `served` (matching content but no cache-hit header — likely a public endpoint), `review` (similar but not identical), `protected` (anonymous got a different response), `blocked` (gori refused the send), or `errored`. Only safe methods (`GET`/`HEAD`/`OPTIONS`) are checked without `--unsafe-methods`.
 
 ### run session
 

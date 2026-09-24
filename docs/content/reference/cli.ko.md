@@ -69,6 +69,7 @@ gori run <subcommand> [verb] [options]
 | `mine [<flow-id>]` | 숨은 파라미터 탐색 |
 | `sequence` (`seq`) `[<flow-id>]` | 토큰 무작위성 평가 (라이브 리플레이, 또는 붙여넣은 목록은 `--tokens`) |
 | `authorize [<flow-id>…]` | 캡처된 플로우를 여러 아이덴티티로 재전송하고 각 응답을 기준선과 비교 (접근 제어 결함) |
+| `cache-deception [<flow-id>…]` | 플로우의 웹 캐시 디셉션 검사: 인증 상태로 캐시를 채우고, 익명으로 다시 요청해 비교 |
 | `probe [QL]` | 패시브 보안 스캔 (요청 없음) |
 | `probe issues` · `dismiss` · `promote` · `delete` | 저장된 Probe 발견 항목 트리아지 |
 | `probe rules` · `mode` | 스캔 규칙 목록 / 무장, 스캔 모드 조회 및 설정 |
@@ -520,7 +521,7 @@ WebSocket 핸드셰이크인 요청은 평범한 요청으로 나가고 그 `101
 | Transport | `--target=URL` (`--request`/stdin에 필수), `--http2`, `--sni=HOST`, `-k`/`--insecure-upstream` |
 | Mode | `--mode=` `sniper` (기본값), `batteringram`, `pitchfork`, `clusterbomb`. 앞의 둘은 페이로드 세트를 **하나만**, 뒤의 둘은 표시된 위치마다 하나씩 사용합니다. 모드가 쓰지 않을 세트는 실행 전에 알려 줍니다 |
 | gRPC fields | `--field=SPEC`(반복 가능)는 단항 gRPC 요청의 옥텟 대신 **스키마가 아는 필드**를 스윕합니다. `SPEC`은 필드 이름, 중첩 메시지 경로(`profile.age`), 필드 번호, 반복 필드의 특정 occurrence(`name[i]`)이며, `name¦chain`은 선언된 타입이 바이트로 인코딩하기 **전에** Decoder 체인을 돌립니다. 필드는 캡처된 메시지에 이미 있어야 하며(gori는 기존 occurrence를 바꿀 뿐 새로 추가하지 않습니다), `bytes` 필드의 페이로드는 **hex**(`de ad be ef`)로 읽습니다. 페이로드는 필드 선언을 거쳐 바이트가 되고(`-3`은 `int32`·`sint32`·`bool`·enum마다 다른 옥텟입니다), 메시지의 나머지 바이트는 캡처에서 그대로 복사되며, 5바이트 길이 접두사는 다시 계산됩니다. 해당 rpc를 해석할 descriptor set이 필요합니다(`gori run grpc schema`). 필드 위치는 템플릿 자신의 `§…§` 위치 뒤에 붙으므로 `--mode`와 페이로드 세트의 의미는 그대로입니다. 스키마가 선언하지 않은 필드, 선언과 와이어 타입이 충돌하는 필드, 선언된 타입이 담을 수 없는 페이로드는 모두 첫 요청 전에 거부됩니다 |
-| Payloads | `-w`/`--wordlist`, `--preset=NAME[:FILE]` (내장: `sqli`, `xss`, `traversal`, `format-string`, `bad-strings`, `command-injection`), `--payloads=LIST`, `--numbers=FROM-TO[:STEP]`, `--null=N`, `--brute=CHARSET:MIN-MAX` |
+| Payloads | `-w`/`--wordlist`, `--preset=NAME[:FILE]` (내장: `sqli`, `xss`, `traversal`, `format-string`, `bad-strings`, `command-injection`, `cache-delimiters`), `--payloads=LIST`, `--numbers=FROM-TO[:STEP]`, `--null=N`, `--brute=CHARSET:MIN-MAX` |
 | Encoding | **쿼리 문자열**이나 **form-urlencoded 본문** 값에 치환되는 페이로드는 기본으로 URL 인코딩됩니다. 경로 세그먼트·JSON/원시 본문·헤더·쿠키는 그대로 나갑니다. `--no-encode`는 쿼리/폼 위치도 원시로 보냅니다. 페이로드 자체가 이미 퍼센트 이스케이프인 경우에 쓰세요(`%00`이 `%2500`으로 나가므로, origin의 디코더 자체를 겨눈 `%00` / `%c0%af` / `%2e%2e%2f` 탐침은 그냥 텍스트로 도착합니다). `--encode`를 명시하면 기본 인코딩을 대체하며, 그 파이프라인이 모든 위치에 적용됩니다. `--prefix` / `--suffix` / `--case` / `--hash` / `--regex-replace`는 대체하지 않습니다: 페이로드가 무엇인지를 말할 뿐 와이어가 그것을 어떻게 적는지는 말하지 않으므로, 그 출력도 쿼리/폼 위치에서는 인코딩됩니다 |
 | Processors | `--prefix`, `--suffix`, `--encode` (`url`\|`urlall`\|`base64`\|`hex`), `--case` (`upper`\|`lower`), `--hash` (`md5`\|`sha1`\|`sha256`), `--regex-replace=/pat/rep/` |
 | Rate | `--concurrency` (20), `--rate=RPS`, `--throttle=MS`, `--timeout=SEC`, `--retries=N`, `--max-requests=N` (총 요청 상한. 재시도와 리다이렉트 홉도 포함), `--follow-redirects`, `--no-keep-alive` |
@@ -628,6 +629,26 @@ gori run authorize --query 'host:acme.test method:GET' --identities identities.j
 `set`은 헤더를 upsert하고 `remove`는 제거합니다. 어떤 항목도 `"baseline": true`를 갖지 않으면 캡처된 그대로의 요청이 기준선입니다. 기준선 외에 최소 한 개의 아이덴티티가 필요하며, 그렇지 않으면 비교할 것이 없습니다.
 
 의미 있게 재전송할 수 없는 플로우는 아무것도 보내기 전에 이유와 함께 STDERR에 나열됩니다(`no identity changes them`, `not a safe method to repeat`, `never completed`, `answered by gori`, `outside project scope`, `already queued`). 선택한 플로우가 전부 건너뛰어지면 실행하지 않고 거부합니다. 모든 전송이 소켓을 열기 전에 거부되면 깨끗한 결과를 보고하는 대신 `1`로 종료하며 그 사실을 말합니다. 아무것도 보내지 않은 실행은 접근 제어가 동작한다는 증거가 아니기 때문입니다.
+
+### run cache-deception {#run-cache-deception}
+
+선택한 각 플로우를 **웹 캐시 디셉션**으로 검사합니다: 캡처된(인증된) 아이덴티티로 재전송해 캐시를 채운 뒤, 세션 없이 *같은* url을 다시 요청해 비교합니다. 익명 재요청이 인증된 응답을 *캐시에서* 받으면(`verdict: cached`), 그 개인 응답이 익명 클라이언트도 맞히는 키로 캐시된 것입니다. Authorize 엔진을 차용하며, 이를 유발하는 조작된 경로(`;`, `.css`, `%00`, dot-segment)는 Fuzzer의 `cache-delimiters` 페이로드 세트입니다.
+
+```bash
+gori run cache-deception 12
+gori run cache-deception --flow 12 --flow 13 --format json
+```
+
+| 옵션 | 설명 |
+| -------- | ------------- |
+| `<flow-id>…`, `--flow=ID` | 검사할 캡처 플로우(순서대로, 반복 가능) |
+| `--unsafe-methods` | `POST`/`PUT`/`PATCH`/`DELETE`도 검사; 부작용이 두 번(프라임 + 익명) 실행됨 |
+| `--allow-unscoped` | 대상이 프로젝트 스코프 밖이어도 전송(샌드박스·제외 규칙은 여전히 적용) |
+| `--timeout=SEC`, `-k`/`--insecure-upstream` | 요청별 연결 + 유휴 타임아웃; 업스트림 TLS 검증 생략 |
+| `--project`, `--db` | 읽을 프로젝트 |
+| `--format` | `text`(기본), `json`(끝에 배열 하나), `jsonl`(스트리밍) |
+
+플로우마다 판정 하나를 보고합니다: `cached`(디셉션 — 익명이 인증된 응답을 캐시에서 받음), `served`(내용은 같지만 캐시 히트 헤더 없음 — 공개 엔드포인트일 가능성), `review`(비슷하지만 동일하지 않음), `protected`(익명이 다른 응답을 받음), `blocked`(gori가 전송 거부), `errored`. `--unsafe-methods` 없이는 안전한 메서드(`GET`/`HEAD`/`OPTIONS`)만 검사합니다.
 
 ### run session {#run-session}
 
