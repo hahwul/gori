@@ -1,6 +1,7 @@
 require "json"
 require "uri"
 require "../media_type"
+require "../params"
 
 module Gori
   module Redact
@@ -271,7 +272,8 @@ module Gori
         val_raw = pair[(eq + 1)..]
         key = Matcher.form_decode(key_raw)
         value = Matcher.form_decode(val_raw)
-        if cfg = @form[key.downcase]?
+        leaf = Params.bracket_leaf(key)
+        if cfg = @form[key.downcase]? || @form[leaf.downcase]?
           ph = Redact.placeholder(value)
           hits << Hit.new(key, "form_key #{cfg}", ph)
           return "#{key_raw}=#{URI.encode_www_form(ph)}"

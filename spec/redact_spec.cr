@@ -195,6 +195,16 @@ describe Gori::Redact do
         r.count.should eq 0
       end
     end
+
+    it "redacts bracket-nested form keys when the leaf matches a form key" do
+      with_salt do
+        r = body(Gori::Redact::DEFAULT_PROFILE, "user%5Bpassword%5D=hunter2&user%5Bemail%5D=a%40b.c",
+          "application/x-www-form-urlencoded")
+        r.count.should eq 1
+        r.text.should contain("user%5Bpassword%5D=%5BREDACTED%3A")
+        r.text.should contain("user%5Bemail%5D=a%40b.c")
+      end
+    end
   end
 
   describe "the conservative text pass" do
