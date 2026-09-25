@@ -92,14 +92,13 @@ describe "hex and whitespace letters" do
     end
   end
 
-  it "leaves the two that CANNOT take `x`, and says why" do
-    # Not drift — a real collision in each displayable view:
-    #   HistoryDetail   `x` is `detail.select-line`      → `detail.toggle-hex` stays 'e'
-    #   Repeater :response `x` is `repeater.select-line` → `repeater.toggle-resp-hex` stays 'h'
-    r["repeater.toggle-hex"].menu_key.should eq('x')
-    r["detail.toggle-hex"].menu_key.should eq('e')
+  it "spells hex `x` one level down, where select-line's `x` cannot compete" do
+    # Level 1 could not give all three `x`: the detail's and the response pane's `x` is
+    # select-line. Display… (#1274) is a keyspace of its own, so hex is `Z x` in all three.
+    %w[repeater.toggle-hex detail.toggle-hex repeater.toggle-resp-hex].each do |id|
+      r.menu_keys(id).should eq(['Z', 'x']), id
+    end
     r["detail.select-line"].menu_key.should eq('x')
-    r["repeater.toggle-resp-hex"].menu_key.should eq('h')
   end
 end
 

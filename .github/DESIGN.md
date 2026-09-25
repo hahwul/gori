@@ -3786,3 +3786,33 @@ one row, **`>` Send flow to…**, whose card lists the members. Every member is 
   picker, so Sequencer is `s` in both. Decoder keeps the `d` that picker taught first, so Discover
   is `D`. With Discover gone from level 1, History's and the detail's Delete take the lexicon
   `d` (the entry above listed them as waiting on this).
+
+### 2026-09-25: the toggles are two sticky families that show their state
+
+Refines: the entry above. #1274 WP9.
+
+The view and transport toggles cost a level-1 letter each, and one toggle read three letters:
+hex was `e` in the History detail, `x` in the Repeater request pane and `h` in its response pane,
+because select-line owns `x` in two of the three. Two families now hold them.
+
+- **`Z` Display…** holds what changes how a pane *draws* what it holds: hex, pretty, Unicode
+  escapes, whitespace, diff, envelope/decoded, static assets, follow, columns, the Sitemap's
+  folds and JS references, the Fuzzer's matched-only and distribution lenses, and the
+  Comparer's pane and fold. A write-back (pretty-print request, pretty-print template) changes
+  the request and stays a direct row, and so does the Fuzzer's sort, the key a results triage
+  presses most. The key is not `V`: under the `vim` keyset `⇧V` selects a line in every pane
+  the row is drawn in, which the R1 guard reports.
+- **`P` Protocol…** holds what changes what a Repeater or Fuzzer request *sends*: HTTP/2,
+  SNI, auto Content-Length, the WebSocket key, gRPC reframe and field editor, and the TLS
+  fingerprint. Fuzzer Save results takes the export `E` to free `P`.
+- **Sticky, with a state column.** After a member runs the card comes back at the same row,
+  and `ExecContext#menu_state` draws `●`/`○` or a value (the TLS preset's name). The tab in
+  front answers through `TabController#menu_state`; the shell answers for its own flags
+  (pretty, whitespace, the static lens). The card stays closed when the member opened
+  something — an overlay, a picker, a prompt, or a pane that took the keys
+  (`TabController#pane_captures_keys?`: INSERT, the SNI field, the request hex editor, the
+  gRPC field list) — or moved focus; `SpaceMenu.resume_sticky?` is that decision.
+- **A member is a toggle.** `^T` drops a `§` marker on a tab with no envelope/decoded split, a
+  write, so Display…'s envelope row is its own verb (`repeater.toggle-envelope`), listed only
+  where there is a split. The History detail's Copy flow copied the raw request, which Copy as…
+  already offers, and is gone.

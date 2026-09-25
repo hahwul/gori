@@ -75,33 +75,33 @@ class Gori::Tui::RepeaterView
     # rightmost, a gold button while idle, recessed while a send is in flight.
     send_edge = Frame.action_badge(screen, right_edge, rect.y, min_x, "^R", "SEND", !@inflight)
     if @grpc_mode # head as text; a unary call's payload is hex-editable (^X → MSG/HEX)
-      # `␣R:FRAME` chains left of the hex chip and is drawn in BOTH halves of this branch,
+      # `␣Pr:FRAME` chains left of the hex chip and is drawn in BOTH halves of this branch,
       # because the state it reports matters most exactly while the payload is being hex-edited:
       # off, the five captured length bytes go out in front of the edited payload. Drawn only
       # where it is live (`grpc_reframable?`) — the same condition `chrome_hit` lists it under.
       if h = @req_hex_edit
         hex_edge = Frame.toggle_badge(screen, send_edge, rect.y, min_x, "^X", "HEX", true)
-        hex_edge = Frame.toggle_badge(screen, hex_edge, rect.y, min_x, "␣R", "FRAME", @grpc_reframe) if @grpc_reframable
-        # `␣E:FIELDS` chains left of FRAME in every state it is available in, for the same
+        hex_edge = Frame.toggle_badge(screen, hex_edge, rect.y, min_x, "␣Pr", "FRAME", @grpc_reframe) if @grpc_reframable
+        # `␣Pf:FIELDS` chains left of FRAME in every state it is available in, for the same
         # reason FRAME is drawn in both hex states: the operator has to be able to SEE that a
         # typed editor exists over the bytes they are currently overtyping (#828).
-        Frame.toggle_badge(screen, hex_edge, rect.y, min_x, "␣E", "FIELDS", false) if grpc_fields_available?
+        Frame.toggle_badge(screen, hex_edge, rect.y, min_x, "␣Pf", "FIELDS", false) if grpc_fields_available?
         @scroll_req = h.render(screen, rect.inset(1, 1), focused, @scroll_req)
       elsif @grpc_fields
         # The FIELDS form replaces the head editor the way the hex buffer does — one pane,
-        # one editor, and `␣E` is the way back to the head.
+        # one editor, and `␣Pf` is the way back to the head.
         fields_edge = send_edge
         fields_edge = Frame.toggle_badge(screen, fields_edge, rect.y, min_x, "^X", "MSG", false) if @grpc_reframable
-        fields_edge = Frame.toggle_badge(screen, fields_edge, rect.y, min_x, "␣R", "FRAME", @grpc_reframe) if @grpc_reframable
-        Frame.toggle_badge(screen, fields_edge, rect.y, min_x, "␣E", "FIELDS", true)
+        fields_edge = Frame.toggle_badge(screen, fields_edge, rect.y, min_x, "␣Pr", "FRAME", @grpc_reframe) if @grpc_reframable
+        Frame.toggle_badge(screen, fields_edge, rect.y, min_x, "␣Pf", "FIELDS", true)
         render_grpc_fields(screen, rect.inset(1, 1), focused)
       else
         msg_edge = send_edge
         if @grpc_reframable
           msg_edge = Frame.toggle_badge(screen, send_edge, rect.y, min_x, "^X", "MSG", false)
-          msg_edge = Frame.toggle_badge(screen, msg_edge, rect.y, min_x, "␣R", "FRAME", @grpc_reframe)
+          msg_edge = Frame.toggle_badge(screen, msg_edge, rect.y, min_x, "␣Pr", "FRAME", @grpc_reframe)
         end
-        msg_edge = Frame.toggle_badge(screen, msg_edge, rect.y, min_x, "␣E", "FIELDS", false) if grpc_fields_available?
+        msg_edge = Frame.toggle_badge(screen, msg_edge, rect.y, min_x, "␣Pf", "FIELDS", false) if grpc_fields_available?
         # The gRPC head is a mode-switched text editor like every other non-hex request card
         # (`i`/esc, READ selection, and — since the read chrome landed here — a visible NORMAL
         # caret), so it carries the chip too. It was skipped while its READ caret was invisible;
@@ -125,7 +125,7 @@ class Gori::Tui::RepeaterView
       # the WS handshake was the one editor pane in the tree whose input mode was not on
       # screen anywhere — and the pane it belongs to is a `restore`-lands-in-READ tab.
       Frame.mode_badge(screen, Frame.right_badge_edge(right_edge, min_x, WS_BADGES), rect.y, min_x, request_insert?)
-      Frame.toggle_badge(screen, send_edge, rect.y, min_x, "␣K", "KEY", @ws_keep_key)
+      Frame.toggle_badge(screen, send_edge, rect.y, min_x, "␣Pw", "KEY", @ws_keep_key)
       @editor.conceal_spans = [] of {Int32, Int32} # WS messages aren't §-marker HTTP text — no stale concealment
       @editor.chain_peek_text = nil
       render_plain_request_editor(screen, rect.inset(1, 1), focused, ins)

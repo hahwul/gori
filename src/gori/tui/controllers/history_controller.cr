@@ -90,6 +90,16 @@ module Gori::Tui
       @history.querying? ? :editor : :body
     end
 
+    # Display… rows (#1274). Pretty, whitespace and the static lens are the shell's
+    # (`Runner#menu_state`); Columns… opens an editor and has no state.
+    def menu_state(verb_id : String) : String?
+      case verb_id
+      when "history.toggle-follow" then SpaceMenu.on_off(@history.follow?)
+      when "detail.toggle-hex"     then SpaceMenu.on_off(@history.hex_view?)
+      when "detail.toggle-unicode" then SpaceMenu.on_off(@history.unicode_decoded?)
+      end
+    end
+
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
       body_focused = focus == :body
       @history.reveal = @host.reveal? # propagate the global whitespace-reveal pref

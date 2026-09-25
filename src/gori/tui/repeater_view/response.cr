@@ -59,6 +59,11 @@ class Gori::Tui::RepeaterView
   end
 
   # --- response pane (focus == :response) ---
+  # The response pane shows the diff against the previous response (`repeater.toggle-diff`).
+  def resp_diff? : Bool
+    @resp_mode == :diff
+  end
+
   def toggle_resp_mode : Nil
     @resp_mode = @resp_mode == :response ? :diff : :response
     @scroll = 0

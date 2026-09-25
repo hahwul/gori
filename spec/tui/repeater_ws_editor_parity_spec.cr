@@ -18,7 +18,7 @@ include Gori::Tui
 #   * the cross-pane arrow step lived inline in `edit_move` (INS only), so a WebSocket tab —
 #     which `restore` leaves in READ mode — could not reach HANDSHAKE from MESSAGES with the
 #     arrows at all; and
-#   * `␣K:KEY` was drawn by `render_request` but absent from `chrome_hit`'s badge list, so
+#   * `␣Pw:KEY` was drawn by `render_request` but absent from `chrome_hit`'s badge list, so
 #     the badge was a dead cell.
 #
 # The shared seam is `request_sub_rect` / `request_hit` / `place_request_caret` /
@@ -307,12 +307,12 @@ describe "RepeaterView WebSocket editor parity" do
   end
 
   describe "border chrome" do
-    it "hit-tests the ␣K:KEY badge that render_request draws" do
+    it "hit-tests the ␣Pw:KEY badge that render_request draws" do
       rect = Rect.new(0, 0, 100, 30)
       view, b = render_ws.call(rect, true)
       env, _ = sub_rects.call(view, rect)
       border_y = env.y - 1 # the card's top border, one row above its content
-      col = col_of.call(b, border_y, "␣K:KEY")
+      col = col_of.call(b, border_y, "␣Pw:KEY")
       view.chrome_hit(rect, col + 2, border_y).should eq(:ws_key)
     end
 

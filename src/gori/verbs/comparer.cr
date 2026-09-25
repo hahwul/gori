@@ -27,12 +27,12 @@ module Gori
         Verb::Scope::Comparer, [Verb::Chord.new("w")],
         available: in_comparer, intent: :swap) { |ctx| ctx.comparer_swap; nil }
 
-      # `m` (mode), not `t`: `t` marks a chip on the sub-tab strip, and the strip's bucket is in
-      # every Comparer card.
+      # A Display… row, `Z t` (#1274). At level 1 it was `m`, since `t` marks a chip on the
+      # sub-tab strip, whose bucket is in every Comparer card; one level down nothing competes.
       r.register Verb::Definition.new(
         "comparer.toggle-pane", "Compare requests/responses",
         "Toggle the diff between the two requests and the two responses",
-        Verb::Scope::Comparer, available: in_comparer, mnemonic: 'm') { |ctx| ctx.comparer_toggle_pane; nil }
+        Verb::Scope::Comparer, available: in_comparer, intent: :compare_pane) { |ctx| ctx.comparer_toggle_pane; nil }
 
       # Navigating BY CHANGE and hiding what didn't change. Both gate on a shown diff —
       # there is nothing to jump between, or fold around, on a half-filled comparison.
@@ -71,14 +71,12 @@ module Gori
       # `f` is freeze in evidence contexts and find on the sub-tab strip, and folding is a
       # session-rare toggle rather than a loop key.
       #
-      # The letter stays 'z' and does NOT become 'f': `comparer.find-subtab` holds 'f' in the
-      # SUB-TABS bucket, which #1055 renders from EVERY focus level beside COMMON, so a 'f'
-      # here would raise in `validate_menu_keys!` at boot. The strip's `f` IS the find tier, so
-      # the collision is the rule working rather than an accident to route around.
+      # A Display… row, `Z z` (#1274): the letter it had at level 1, where `f` is the SUB-TABS
+      # bucket's find.
       r.register Verb::Definition.new(
         "comparer.toggle-fold", "Fold unchanged",
         "Collapse the runs of identical lines, keeping context around each change",
-        Verb::Scope::Comparer, available: in_diff, mnemonic: 'z') { |ctx| ctx.comparer_toggle_fold; nil }
+        Verb::Scope::Comparer, available: in_diff, intent: :fold_unchanged) { |ctx| ctx.comparer_toggle_fold; nil }
 
       # Sub-tab strip / space menu (session multi-pair workspace).
       r.register Verb::Definition.new(

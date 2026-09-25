@@ -148,6 +148,48 @@ module Gori::Tui
       current_repeater_tab.try(&.view)
     end
 
+    # Display… and Protocol… rows (#1274): what the tab in front would send and draw. A row
+    # that only applies to another kind of tab (the WebSocket key on an HTTP tab) has none.
+    # Pretty bodies is the shell's flag (`Runner#menu_state`).
+    def menu_state(verb_id : String) : String?
+      return nil unless v = current_view
+      display_state(v, verb_id) || protocol_state(v, verb_id)
+    end
+
+    private def display_state(v : RepeaterView, verb_id : String) : String?
+      case verb_id
+      when "repeater.toggle-hex"      then SpaceMenu.on_off(v.request_hex?)
+      when "repeater.toggle-resp-hex" then SpaceMenu.on_off(v.resp_hex?)
+      when "repeater.toggle-unicode"  then SpaceMenu.on_off(v.unicode_decoded?)
+      when "repeater.toggle-diff"     then SpaceMenu.on_off(v.resp_diff?)
+      when "repeater.toggle-envelope" then v.req_pane.to_s if v.decode_mode? || v.ws_mode?
+      end
+    end
+
+    private def protocol_state(v : RepeaterView, verb_id : String) : String?
+      case verb_id
+      when "repeater.toggle-http2"               then transport_state(v)
+      when "repeater.toggle-sni"                 then SpaceMenu.on_off(!v.sni_override.nil?)
+      when "repeater.toggle-auto-content-length" then SpaceMenu.on_off(v.auto_content_length?)
+      when "repeater.toggle-ws-key"              then SpaceMenu.on_off(v.ws_keep_key?) if v.ws_mode?
+      when "repeater.toggle-grpc-reframe"        then SpaceMenu.on_off(v.grpc_reframe?) if v.grpc_mode?
+      when "repeater.toggle-grpc-fields"         then SpaceMenu.on_off(v.grpc_fields?) if v.grpc_mode?
+      when "repeater.cycle-tls-preset"           then v.tls_preset || "off"
+      end
+    end
+
+    # ^V is two-state on an HTTP tab and three-state on a WebSocket one (WS → HTTP/1.1 →
+    # HTTP/2), so a WebSocket tab names where the cycle is instead of drawing ●/○.
+    private def transport_state(v : RepeaterView) : String
+      return SpaceMenu.on_off(v.http2?) unless v.ws_content?
+      v.ws_mode? ? "ws" : (v.http2? ? "h2" : "h1")
+    end
+
+    # The gRPC field list takes ↑/↓ and ↵ for itself, like an editor.
+    def pane_captures_keys? : Bool
+      super || current_view.try(&.grpc_fields?) || false
+    end
+
     # Cross-tab "Insert OAST payload": drop the URL at the request-editor caret.
     def insert_oast_payload(url : String) : Bool
       (v = current_view) ? v.insert_oast_payload(url) : false
@@ -361,7 +403,7 @@ module Gori::Tui
       if v.grpc_fields_editing?
         keys("type the value · ↵ apply · esc cancel · {repeater.send} send")
       elsif v.grpc_fields?
-        keys("↑/↓ pick a field · i/↵ edit · ␣E/esc head · {repeater.toggle-hex} hex · {repeater.send} send")
+        keys("↑/↓ pick a field · i/↵ edit · ␣Pf/esc head · {repeater.toggle-hex} hex · {repeater.send} send")
       elsif v.request_hex?
         keys("gRPC payload hex — overtype 0-9a-f · Ins/Del length · {repeater.toggle-hex}/esc exit · {repeater.send} send")
       elsif v.request_insert?
@@ -375,7 +417,7 @@ module Gori::Tui
         "esc read · ↹ text · type head/metadata · ⇧arrows select · ^Y copy"
       else
         msg = v.grpc_reframable? ? "{repeater.toggle-hex} hex-edit payload · " : ""
-        fields = v.grpc_fields_available? ? "␣E fields · " : ""
+        fields = v.grpc_fields_available? ? "␣Pf fields · " : ""
         keys("i/↵ edit head · #{msg}#{fields}⇧arrows select · {repeater.copy} copy · space cmds · ↹ pane")
       end
     end
@@ -656,7 +698,7 @@ module Gori::Tui
       if view.grpc_mode?
         # A unary gRPC call hex-edits its message PAYLOAD; a 0- or multi-message body has no
         # unambiguous single payload to edit. What happens to the length prefix in front of
-        # that payload is `␣R:FRAME`'s answer, not this one — so the toast reads the toggle
+        # that payload is `␣Pr:FRAME`'s answer, not this one — so the toast reads the toggle
         # rather than promising the recompute it used to be fused with.
         if !view.grpc_reframable?
           @host.status("gRPC hex edit needs a single-message body (this call has #{view.grpc_msg_count}) — sent verbatim")
@@ -665,7 +707,7 @@ module Gori::Tui
           # other rather than stacking two authoritative buffers over one slice.
           view.exit_grpc_fields if view.grpc_fields?
           on = view.toggle_request_hex
-          framing = view.grpc_reframe? ? "length prefix recomputed on send" : "captured length prefix kept (␣R to reframe)"
+          framing = view.grpc_reframe? ? "length prefix recomputed on send" : "captured length prefix kept (␣Pr to reframe)"
           @host.status(on ? "gRPC payload hex: on — #{framing} (^X/esc exit)" : "gRPC payload hex: off")
         else
           @host.status("hex edit (^X) applies to the REQUEST pane — ↹ to it")
@@ -693,18 +735,18 @@ module Gori::Tui
       end
     end
 
-    # `␣E` — the schema-typed FIELDS form over a unary gRPC payload (#828). Each refusal
+    # `␣Pf` — the schema-typed FIELDS form over a unary gRPC payload (#828). Each refusal
     # names the thing that is missing, because "no descriptor set loaded", "this rpc is not
     # in the one that is" and "this call is not unary" have three different fixes and only
     # the operator can tell which one they are looking at.
     def repeater_toggle_grpc_fields : Nil
       return unless view = current_view
       unless view.grpc_mode?
-        @host.status("the gRPC field editor (␣E) applies to a gRPC tab")
+        @host.status("the gRPC field editor (␣Pf) applies to a gRPC tab")
         return
       end
       unless view.focus == :request
-        @host.status("the gRPC field editor (␣E) applies to the REQUEST pane — ↹ to it")
+        @host.status("the gRPC field editor (␣Pf) applies to the REQUEST pane — ↹ to it")
         return
       end
       if view.grpc_fields?
@@ -721,8 +763,8 @@ module Gori::Tui
         return
       end
       view.toggle_grpc_fields
-      framing = view.grpc_reframe? ? "length prefix recomputed on send" : "captured length prefix kept (␣R to reframe)"
-      @host.status("gRPC fields: on — ↑/↓ pick · ↵ edit · #{framing} (␣E/esc exit)")
+      framing = view.grpc_reframe? ? "length prefix recomputed on send" : "captured length prefix kept (␣Pr to reframe)"
+      @host.status("gRPC fields: on — ↑/↓ pick · ↵ edit · #{framing} (␣Pf/esc exit)")
     end
 
     def repeater_toggle_sni : Nil
@@ -812,7 +854,7 @@ module Gori::Tui
                          : "gRPC reframe: off — sending the captured length prefix (stale after a ^X edit)")
     end
 
-    # `␣P` — cycle this tab's TLS fingerprint override (#844).
+    # `␣Pt` — cycle this tab's TLS fingerprint override (#844).
     #
     # The status line carries the honesty clause every other surface carries: #822 documents
     # these presets as APPROXIMATIONS, and a chip that reads `chrome` is exactly the place an
@@ -929,7 +971,7 @@ module Gori::Tui
         repeater_toggle_http2 # cycles WS→h1→h2 on a handshake tab, flips h1⇄h2 elsewhere
       when :tls_preset
         # No `focus_pane`, for the same reason `:transport` gives: the fingerprint belongs to
-        # the tab, not to a pane, and the `␣P` key does not move the caret either.
+        # the tab, not to a pane, and the `␣Pt` key does not move the caret either.
         repeater_cycle_tls_preset
       when :mark
         # The chord the badge names, doing what the chord does. It used to read `^K` — a
@@ -1747,7 +1789,7 @@ module Gori::Tui
 
     # Which handshake a WS tab holds, for the status line that announces the seed. The two
     # transports need different things of the operator — an h1 upgrade has a
-    # `Sec-WebSocket-Key` (`␣K`) and an h2 one has none — so a line that named neither left
+    # `Sec-WebSocket-Key` (`␣Pw`) and an h2 one has none — so a line that named neither left
     # `^V`'s two-vs-three stops unexplained.
     private def transport_word(view : RepeaterView) : String
       view.http2? ? "RFC 8441 extended CONNECT over h2" : "RFC 6455 upgrade over h1"
@@ -1937,7 +1979,7 @@ module Gori::Tui
         # so the clone sends the handshake its source would"), and leaving it out of the INSERT
         # meant the row said "no override" until some later save-on-leave committed: a peer
         # session reconciling the project, `repeater list` and MCP all read nil off the row
-        # while the chip on screen read `␣P:chrome`, and a crash before that save lost it.
+        # while the chip on screen read `␣Pt:chrome`, and a crash before that save lost it.
         tls_preset: view.tls_preset)
       id == 0 ? nil : id
     end
@@ -3110,7 +3152,7 @@ module Gori::Tui
         return
       end
       # Space opens the space menu, exactly as it does in the request pane's READ mode. The
-      # form's own hints name `␣E` and `␣R`, and swallowing space here made both of them
+      # form's own hints name `␣Pf` and `␣Pr`, and swallowing space here made both of them
       # unpressable — a footer advertising a key that does nothing.
       return @host.open_space_menu if key.space? && !ev.ctrl? && !ev.alt?
       case

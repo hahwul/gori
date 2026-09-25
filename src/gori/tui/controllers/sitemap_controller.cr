@@ -197,6 +197,15 @@ module Gori::Tui
       @sitemap.querying? || @sitemap.tagging? ? :editor : :body
     end
 
+    # Display… rows (#1274). The static lens is the shell's (`Runner#menu_state`).
+    def menu_state(verb_id : String) : String?
+      case verb_id
+      when "sitemap.toggle-grouping"   then SpaceMenu.on_off(@sitemap.grouping?)
+      when "sitemap.toggle-query-fold" then SpaceMenu.on_off(@sitemap.fold_query?)
+      when "sitemap.toggle-js-refs"    then SpaceMenu.on_off(@sitemap.js_refs?)
+      end
+    end
+
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
       BodyChrome.framed(screen, rect, focus == :body) { |inner| render_content(screen, inner, focus) }
     end

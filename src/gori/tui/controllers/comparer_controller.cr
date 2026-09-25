@@ -19,6 +19,14 @@ module Gori::Tui
       @sessions[@idx]
     end
 
+    # Display… rows (#1274): which half of the two flows is diffed, and the fold.
+    def menu_state(verb_id : String) : String?
+      case verb_id
+      when "comparer.toggle-pane" then "#{view.pane}s"
+      when "comparer.toggle-fold" then SpaceMenu.on_off(view.fold?)
+      end
+    end
+
     def tab : Symbol
       :comparer
     end

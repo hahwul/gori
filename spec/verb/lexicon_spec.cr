@@ -50,9 +50,7 @@ module LexiconSpec
 
   # {verb, other} pairs where a reserved letter is spent on a different intent in a scope that
   # has the reserved one. Each line names why it stands.
-  RESERVED_ALLOWED = {
-    {"repeater.toggle-hex", "repeater.select-line"} => "WP2 #2: hex moves into Display…",
-  }
+  RESERVED_ALLOWED = {} of {String, String} => String
 
   def registry(*verbs : Gori::Verb::Definition) : Gori::Verb::Registry
     reg = Gori::Verb::Registry.new

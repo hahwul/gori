@@ -108,7 +108,7 @@ module Gori::Tui
       # Race was appended after the matchers: it renumbers no row a spec reaches by index. Two
       # examples still moved with it — the ones pinning WHICH row is last and the arithmetic of
       # a click on a scrolled list — because those are facts about the table's end, not about a
-      # row's number. The field NAMES for a flow are the ones the Repeater's ␣E:FIELDS form and
+      # row's number. The field NAMES for a flow are the ones the Repeater's ␣Pf:FIELDS form and
       # the History protobuf tree already show for it, so this row is typed, not browsed.
       {:grpc_fields, "gRPC field(s)", :text},
       # The run's TLS fingerprint (#844) — the same knob `gori run fuzz --tls-preset` and MCP

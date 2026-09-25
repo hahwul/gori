@@ -108,7 +108,7 @@ describe "RepeaterView gRPC framing failure" do
   # the READ over-paint reached this branch — a visible NORMAL block caret), so it carries the
   # READ/INS chip like every other non-hex request card. Draw and hit-test share
   # `Frame.right_badge_edge` over one badge list; this pins them together, because a chip that
-  # is drawn but not hit-testable (or the reverse) is the exact defect `␣K:KEY` had.
+  # is drawn but not hit-testable (or the reverse) is the exact defect `␣Pw:KEY` had.
   it "draws a clickable READ/INS mode chip on the request head" do
     grpc_tmp_store do |store|
       view = def_view.call(store)
@@ -252,9 +252,9 @@ describe "RepeaterView gRPC reframe toggle" do
     end
   end
 
-  # Drawn AND hit-testable, in both halves of the gRPC branch — the defect `␣K:KEY` had, and
+  # Drawn AND hit-testable, in both halves of the gRPC branch — the defect `␣Pw:KEY` had, and
   # the state matters most exactly while the payload is being hex-edited.
-  it "draws a clickable ␣R:FRAME badge in both the MSG and HEX states" do
+  it "draws a clickable ␣Pr:FRAME badge in both the MSG and HEX states" do
     grpc_tmp_store do |store|
       view = unary.call(store)
       view.focus_pane(:request)
@@ -264,16 +264,16 @@ describe "RepeaterView gRPC reframe toggle" do
       b = MemoryBackend.new(160, 24)
       view.render(Screen.new(b), rect)
       row = b.row(border_y)
-      row.should contain("␣R:FRAME")
-      col = row.index("␣R:FRAME").not_nil!
+      row.should contain("␣Pr:FRAME")
+      col = row.index("␣Pr:FRAME").not_nil!
       view.chrome_hit(rect, col + 1, border_y).should eq(:grpc_reframe)
 
       view.toggle_request_hex.should be_true
       b2 = MemoryBackend.new(160, 24)
       view.render(Screen.new(b2), rect)
       row2 = b2.row(border_y)
-      row2.should contain("␣R:FRAME")
-      col2 = row2.index("␣R:FRAME").not_nil!
+      row2.should contain("␣Pr:FRAME")
+      col2 = row2.index("␣Pr:FRAME").not_nil!
       view.chrome_hit(rect, col2 + 1, border_y).should eq(:grpc_reframe)
     end
   end
@@ -356,7 +356,7 @@ describe "RepeaterView gRPC over HTTP/1.1 (grpc-web)" do
 
   # An UNEDITED grpc-web-text tab sends the captured text, whatever its spelling: re-encoding
   # the frames normalised separately padded chunks (the shape `decode_web_text` exists for),
-  # a trailing CRLF and the URL-safe alphabet into one strict-base64 string — with `␣R:FRAME`
+  # a trailing CRLF and the URL-safe alphabet into one strict-base64 string — with `␣Pr:FRAME`
   # off as much as on — while `gori run repeater send` and MCP sent the capture verbatim (P7).
   it "sends an unedited grpc-web-text body verbatim, in either reframe state" do
     grpc_tmp_store do |store|

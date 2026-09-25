@@ -253,7 +253,7 @@ module Gori::Tui
       @grpc_compressed = false    # the editable message's compressed flag (preserved on reframe)
       @grpc_payload = Bytes.empty # the current (possibly hex-edited) single-message payload
       @grpc_lines_cache = nil.as(Array({String, Color})?)
-      # `␣E` FIELDS: the schema-typed form over that same payload (#828). Available only when
+      # `␣Pf` FIELDS: the schema-typed form over that same payload (#828). Available only when
       # a descriptor set resolves the rpc being sent — with none loaded this whole slice is
       # inert and the tab is exactly what it was. See repeater_view/grpc_fields.cr.
       @grpc_fields = false
@@ -314,7 +314,7 @@ module Gori::Tui
       # non-base64 key. See `WsEngine.build_handshake`.
       @ws_keep_key = false
       # The TLS fingerprint THIS TAB presents (#844), or nil for "whatever the destination's
-      # outbound_tls policy says" — which is what every tab did before it existed. `␣P` cycles
+      # outbound_tls policy says" — which is what every tab did before it existed. `␣Pt` cycles
       # it; the TARGET band carries a chip whenever it is set.
       #
       # PER TAB, which is the entire point: two tabs against one host with different values

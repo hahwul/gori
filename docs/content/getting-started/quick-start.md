@@ -138,7 +138,7 @@ Try each of these:
 | `↑` / `↓` (or `j` / `k`) | Move the selection |
 | `Enter` | Open request/response detail |
 | `/` | Filter with the [query language](/reference/query-language/) |
-| `f` | Toggle follow-newest (tail) |
+| `Space` `Z` `f` | Toggle follow-newest (tail) |
 | `y` | Copy the selected flow |
 
 Press `/` and type a filter, then `Enter`:
