@@ -21,7 +21,10 @@ require "../spec_helper"
 #
 # A family row (#1274 WP9) is a menu letter like any other at level 1, so its key is swept
 # too, as the row `family:<id>` drawn wherever the scope registers a member. Level-2 letters
-# are exempt: they are reached after two keys, never by a dropped space (DESIGN.md §7).
+# are exempt: they are reached after two keys, never by a dropped space (DESIGN.md §7). The
+# SUB-TABS bucket is one such row in a pane view, `family:subtabs` on `T` (#1274 Decision
+# 8); its rows are level-1 letters only where the strip or the tab bar has focus, unless
+# `pinned:`.
 #
 # It covers the SHIPPED defaults. A user rebind can recreate a clash at runtime; the Hotkeys
 # editor's Conflicts check owns that.
@@ -52,7 +55,7 @@ module MenuLetterMeaning
   # live on every strip but Notes (`Runner#renameable_subtabs?`).
   STRIP_KEYS = {
     'r' => {"rename", "rename-subtab"},
-    't' => {"mark", nil},
+    't' => {"mark", "subtab-mark"},
     'T' => {"mark-all", "subtab-mark-all"},
     'f' => {"find", "find-subtab"},
     '/' => {"filter", "filter-subtabs"},
@@ -67,8 +70,9 @@ module MenuLetterMeaning
   HARMLESS_GLOBALS = {"scope.toggle-lens"}
 
   # One level-1 row: a verb on its `menu_key`, or a family on its key. `sections` is where it
-  # is drawn — nil for every view of the scope (a COMMON row, a SUB-TABS bucket row, or a
-  # family with a member in either), else the pane sections.
+  # is drawn — nil for every view of the scope (a COMMON row, a pinned SUB-TABS row, or a
+  # family with a member in COMMON), else the sections: the pane's own, the strip's two for
+  # a SUB-TABS row, every pane for the Sub-tabs… row.
   record Row, id : String, key : Char, scope : Gori::Verb::Scope, sections : Array(Symbol)?
 
   def rows : Array(Row)
@@ -76,17 +80,30 @@ module MenuLetterMeaning
     listed = reg.select { |v| !v.hidden? && !v.scope.global? && !v.scope.editor? }
     verbs = listed.compact_map do |v|
       next unless k = v.menu_key
-      Row.new(v.id, k, v.scope, everywhere?(v.section) ? nil : [v.section])
+      Row.new(v.id, k, v.scope, drawn_in(v))
     end
     families = listed.select(&.member?).group_by { |v| {v.family.not_nil!, v.scope} }.map do |(fid, scope), members|
       secs = members.map(&.section).uniq!
-      Row.new("family:#{fid}", reg.family(fid).not_nil!.key, scope, secs.any? { |sec| everywhere?(sec) } ? nil : secs)
+      Row.new("family:#{fid}", reg.family(fid).not_nil!.key, scope, secs.includes?(:common) ? nil : secs)
     end
-    verbs + families
+    fold = Gori::Verb::Registry::SUBTABS_FOLD
+    folds = strip_scopes.map do |scope|
+      panes = listed.select { |v| v.scope == scope }.map(&.section).uniq!.reject { |sec| strip_section?(sec) }
+      Row.new("family:#{fold.id}", fold.key, scope, (panes + [:common]).uniq!)
+    end
+    verbs + families + folds
   end
 
-  def everywhere?(section : Symbol) : Bool
-    section == :common || Gori::Verb::Registry::SUBTAB_SECTIONS.includes?(section)
+  def strip_section?(section : Symbol) : Bool
+    Gori::Verb::Registry::SUBTAB_SECTIONS.includes?(section)
+  end
+
+  # nil for a COMMON row and a pinned SUB-TABS row (every view); the strip's own two sections
+  # for any other SUB-TABS row, which a pane view folds into Sub-tabs…; else its section.
+  def drawn_in(v : Gori::Verb::Definition) : Array(Symbol)?
+    return nil if v.section == :common || (strip_section?(v.section) && v.pinned?)
+    return Gori::Verb::Registry::SUBTAB_SECTIONS.to_a if strip_section?(v.section)
+    [v.section]
   end
 
   # The chord a typed menu letter would be read as on the tab (a typed capital is shift +
@@ -188,7 +205,7 @@ module MenuLetterMeaning
   # A row the strip-focused card shows (COMMON + SUB-TABS) on a letter the strip answers raw.
   private def strip_clash(v : Row) : String?
     return nil unless strip_scopes.includes?(v.scope)
-    return nil unless v.sections.nil?
+    return nil unless (secs = v.sections).nil? || secs.all? { |sec| strip_section?(sec) }
     return nil unless raw = STRIP_KEYS[v.key]?
     name, suffix = raw
     return nil if name == "rename" && v.scope.notes?
@@ -212,11 +229,10 @@ MENU_LETTER_ALLOWED = {
   {"colormarker.color-edit", "colormarker.edit"}         => "false positive: handle_colors_key answers `e` in the colours pane",
   {"colormarker.color-delete", "colormarker.delete"}     => "false positive: handle_colors_key answers `d` in the colours pane",
   # WP2 #10 — the strip's `r` renames and `t` marks a chip.
-  {"repeater.send", "strip:rename"}     => "WP2 #10: strip `r` renames, the menu's `r` sends (hotkeys.md)",
-  {"fuzz.run", "strip:rename"}          => "WP2 #10: strip `r` renames, the menu's `r` runs (hotkeys.md)",
-  {"mine.run", "strip:rename"}          => "WP2 #10: strip `r` renames, the menu's `r` runs (hotkeys.md)",
-  {"sequence.run", "strip:rename"}      => "WP2 #10: strip `r` renames, the menu's `r` runs (hotkeys.md)",
-  {"repeater.tag-subtab", "strip:mark"} => "WP2 #10: Tag leaves `t` for a Mark sub-tab row",
+  {"repeater.send", "strip:rename"} => "WP2 #10: strip `r` renames, the menu's `r` sends (hotkeys.md)",
+  {"fuzz.run", "strip:rename"}      => "WP2 #10: strip `r` renames, the menu's `r` runs (hotkeys.md)",
+  {"mine.run", "strip:rename"}      => "WP2 #10: strip `r` renames, the menu's `r` runs (hotkeys.md)",
+  {"sequence.run", "strip:rename"}  => "WP2 #10: strip `r` renames, the menu's `r` runs (hotkeys.md)",
   # Decision 10 — a letter the tab does not bind falls through to Global on a dropped space.
   {"repeater.clear-marks", "capture.toggle"}  => "Decision 10: `c` reaches Global capture on a dropped space",
   {"fuzz.clear-marks", "capture.toggle"}      => "Decision 10: `c` reaches Global capture on a dropped space",
@@ -228,19 +244,14 @@ MENU_LETTER_ALLOWED = {
   {"diff.issue", "intercept.toggle"}          => "Decision 10: file-issue is `a` elsewhere; `i` holds all traffic on a dropped space",
   # The Editor scope answers ahead of the tab while a text editor pane has focus.
   # vim keyset only: ⇧V is select-line and the editor gains bare `/` `a` `g` `⇧G`.
-  {"issue.set-cvss", "issue.select-line"}    => "vim: ⇧V selects a line",
-  {"repeater.filter-subtabs", "editor.find"} => "vim: editor `/` finds; the SUB-TABS `/` is uniform on all nine strips",
-  {"fuzz.filter-subtabs", "editor.find"}     => "vim: editor `/` finds; the SUB-TABS `/` is uniform on all nine strips",
-  {"decoder.filter-subtabs", "editor.find"}  => "vim: editor `/` finds; the SUB-TABS `/` is uniform on all nine strips",
-  {"jwt.filter-subtabs", "editor.find"}      => "vim: editor `/` finds; the SUB-TABS `/` is uniform on all nine strips",
-  {"cookie.filter-subtabs", "editor.find"}   => "vim: editor `/` finds; the SUB-TABS `/` is uniform on all nine strips",
-  {"notes.filter-subtabs", "editor.find"}    => "vim: editor `/` finds; the SUB-TABS `/` is uniform on all nine strips",
-  {"repeater.auto-mark", "editor.append"}    => "vim: `a` appends in the request pane",
-  {"fuzz.automark", "editor.append"}         => "vim: `a` appends in the template pane",
-  {"repeater.send-group", "editor.top"}      => "vim: `g` jumps to the top of the request pane",
-  {"cookie.cycle-algorithm", "editor.top"}   => "vim: `g` jumps to the top of the input pane",
-  {"issue.goto-link", "editor.top"}          => "vim: `g` jumps to the top of the notes pane",
-  {"repeater.send-race", "editor.bottom"}    => "vim: ⇧G jumps to the bottom of the request pane",
+  {"issue.set-cvss", "issue.select-line"}  => "vim: ⇧V selects a line",
+  {"notes.filter-subtabs", "editor.find"}  => "vim: editor `/` finds; the SUB-TABS `/` is uniform on all nine strips",
+  {"repeater.auto-mark", "editor.append"}  => "vim: `a` appends in the request pane",
+  {"fuzz.automark", "editor.append"}       => "vim: `a` appends in the template pane",
+  {"repeater.send-group", "editor.top"}    => "vim: `g` jumps to the top of the request pane",
+  {"cookie.cycle-algorithm", "editor.top"} => "vim: `g` jumps to the top of the input pane",
+  {"issue.goto-link", "editor.top"}        => "vim: `g` jumps to the top of the notes pane",
+  {"repeater.send-race", "editor.bottom"}  => "vim: ⇧G jumps to the bottom of the request pane",
 } of MenuLetterMeaning::Pair => String
 
 describe "space-menu letters vs the keys the same tab answers (R1)" do

@@ -132,7 +132,11 @@ describe Gori::Hotkeys do
   describe ".menu_path / {space:verb.id}" do
     it "spells a menu-only verb's path from its menu_key, and nil for no menu row" do
       reg = Gori::Verbs.registry
-      Gori::Hotkeys.menu_path(reg, "repeater.tag-subtab").should eq("space → #{reg["repeater.tag-subtab"].menu_key}")
+      Gori::Hotkeys.menu_path(reg, "sequence.promote").should eq("space → #{reg["sequence.promote"].menu_key}")
+      # A SUB-TABS row is inside Sub-tabs… from a pane, at level 1 on the strip (#1274).
+      Gori::Hotkeys.menu_path(reg, "repeater.tag-subtab").should eq("space → T g")
+      Gori::Hotkeys.menu_path(reg, "repeater.tag-subtab", strip_focus: true).should eq("space → g")
+      Gori::Hotkeys.menu_path(reg, "repeater.paste-curl").should eq("space → U") # pinned
       Gori::Hotkeys.menu_path(reg, "sitemap.tag").should eq("space → m")
       Gori::Hotkeys.menu_path(reg, "no.such.verb").should be_nil
       # Hidden navigation verb: its chords are named keys, so it derives no menu letter.

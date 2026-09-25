@@ -209,9 +209,10 @@ describe "sub-tab verbs" do
 
   it "gives the strip the SAME nine letters on all nine tabs" do
     # The whole point of the bucket: one table to learn, not nine. A tab that lacks an
-    # intent simply omits the row — it never spends that letter on something else.
-    {"new" => 'n', "close" => 'w', "duplicate" => 'd', "rename" => 'e', "tag" => 't',
-     "find" => 'f', "filter" => '/', "mark-all" => 'T', "mark-clear" => 'N'}.each do |intent, key|
+    # intent simply omits the row — it never spends that letter on something else. `t` is
+    # Mark sub-tab, the strip's own raw `t`, so the Repeater's Tag moved to `g` (#1274).
+    {"new" => 'n', "close" => 'w', "duplicate" => 'd', "rename" => 'e', "mark" => 't',
+     "find" => 'f', "filter" => '/', "mark-all" => 'T', "mark-clear" => 'N', "tag" => 'g'}.each do |intent, key|
       r.each do |v|
         next unless Gori::Verb::Registry::SUBTAB_SECTIONS.includes?(v.section)
         next unless v.id.ends_with?(intent) || v.id.ends_with?("#{intent}-subtab") ||

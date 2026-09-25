@@ -262,6 +262,10 @@ private class FakeContext < ExecContext
     @calls << :subtab_filter_open
   end
 
+  def subtab_mark_toggle : Nil
+    @calls << :subtab_mark_toggle
+  end
+
   def subtab_mark_all : Nil
     @calls << :subtab_mark_all
   end

@@ -284,8 +284,15 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     move_subtab(1)
   end
 
-  # The two menu-reachable halves of the gesture (the toggle stays strip-only: a menu row
-  # that marks ONE chip and then closes the menu is a gesture nobody would use twice).
+  # The menu's Mark sub-tab row (#1274): the strip's `t` on the active chip, WITHOUT the step
+  # right. From the strip the step is what makes `t t t` mark a run; from a pane it would
+  # switch the sub-tab you are editing out from under you.
+  def subtab_mark_toggle : Nil
+    return unless t = @tabs[@active_tab]?
+    t.toggle_subtab_mark(current_subtab_index)
+  end
+
+  # The rest of the menu-reachable gesture: mark every chip, clear the marks.
   def subtab_mark_all : Nil
     @tabs[@active_tab]?.try(&.mark_all_subtabs)
   end

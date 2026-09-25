@@ -3867,3 +3867,32 @@ the palette's search finds it from its own tab. The default stays `:space`.
   so a hint never sends the operator to a row the verb does not have.
 - **Not a row budget.** Which rows move is decided per verb against the criterion, never by
   counting a view's rows, so adding an unrelated verb cannot push another one off the menu.
+
+### 2026-09-25: the SUB-TABS bucket is one row in a pane, and expanded on the strip
+
+Revises: #1055 ("the bucket rides along with every pane view"). #1274 Decision 8.
+
+#1055 made the strip's actions reachable from every level of a tab, which was right, but by
+drawing all of them in every pane card: nine or ten rows of the Repeater request pane's 25 were
+the strip's, and the nine letters were reserved in every pane, which is what pushed Mark word,
+the JWT/Cookie lens toggles and others off their natural letters.
+
+- **Discoverable as one row.** A pane view draws the bucket as **`T` Sub-tabs…**
+  (`Registry::SUBTABS_FOLD`), whose card is the whole bucket on the letters it already had. It
+  is not a registered family: membership is the section, and each row's level-2 letter is its
+  own `menu_key`, the nine that were already uniform on all nine strips. The row is static,
+  like a family row.
+- **Expanded where the strip is focused.** With the strip or the tab bar focused the strip is
+  the context, so the bucket stays at level 1 and there is no Sub-tabs… row. `n` from the strip
+  is `T n` from a pane; `Hotkeys.menu_path` prints the pane path unless told the strip has focus
+  (the palette's hint column knows).
+- **`T` keeps its reflex.** It was Mark all sub-tabs; from a pane it is now `T T`.
+- **Frequent rows stay direct.** `pinned:` now also keeps a SUB-TABS verb at level 1 in the pane
+  views (Paste cURL, `U`); New and Close keep `^N`/`^W`.
+- **Letters.** The strip's nine stay reserved for COMMON, which shares the strip-focused card;
+  a pane verb is free of them except `T`, which `validate_menu_keys!` checks per view. The freed
+  letters are not reassigned here.
+- **Mark sub-tab joins the menu** on `t`, the strip's own raw `t` (the active chip only, without
+  the strip's step right, which from a pane would switch the sub-tab being edited). Tag moved to
+  `g`, which ends the one standing R1 pair between a menu letter and the strip's raw keys other
+  than rename's `r`.

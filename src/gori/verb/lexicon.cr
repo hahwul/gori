@@ -67,10 +67,12 @@ module Gori
         :scope_add       => Entry.new('H', :preferred), # add the flow's host to the scope
       } of Symbol => Entry
 
-      # The strip's nine: the SUB-TABS bucket rides along with every view of a tab that has a
-      # strip (`Registry::SUBTAB_SECTIONS`), and the strip answers some of these raw (`t`
-      # marks a chip), so on those tabs a pane verb may not wear one of these letters, even
+      # The strip's nine: the SUB-TABS bucket is drawn expanded beside COMMON where the strip
+      # has focus (`Registry::SUBTAB_SECTIONS`), and the strip answers some of these raw (`t`
+      # marks a chip), so on those tabs a COMMON verb may not wear one of these letters, even
       # where that tab's own strip lacks the action. `Registry#validate_intents!` raises on it.
+      # A pane view folds the bucket into Sub-tabs… on `T` (#1274), so a pane verb is free of
+      # the other eight.
       STRIP_INTENTS = {:new, :close, :duplicate, :rename, :mark, :mark_all, :mark_clear, :find_subtab, :filter}
 
       STRIP_LETTERS = STRIP_INTENTS.map { |i| ENTRIES[i].letter }.to_set

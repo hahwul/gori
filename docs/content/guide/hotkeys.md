@@ -225,6 +225,13 @@ They are now their own `SUB-TABS` bucket, and it is in the menu from **every** l
 that has a strip — the body panes, the strip itself and the tab bar. With `⇧1`–`⇧9` dropping
 you anywhere, what `Space` offers must not depend on which row the cursor happens to be on.
 
+In a body pane the bucket is **one row**, `T` **Sub-tabs…**, which opens a card with the whole
+bucket on the letters below, so it no longer fills half the card: `Space` `T` `w` closes the
+sub-tab from the request editor. With the strip or the tab bar focused, the strip *is* the
+context, so the bucket is drawn in full at the top level and there is no Sub-tabs… row. The
+letters are the same either way: `n` from the strip is `T` `n` from a pane. **Paste cURL**
+(`U`, Repeater) also keeps its own row in the panes, and `Ctrl-N` / `Ctrl-W` work everywhere.
+
 ### The same nine letters on all nine strips
 
 The bucket is one table to learn, not nine. A tab that does not have an action simply omits
@@ -236,25 +243,28 @@ the row; it never spends that letter on something else.
 | `w` | Close sub-tab (or every marked one) | `Ctrl-W` |
 | `d` | Duplicate sub-tab | |
 | `e` | Rename sub-tab | `r` on the strip |
-| `t` | Tag sub-tab (Repeater) | |
+| `t` | Mark or unmark the active sub-tab | `t` on the strip |
 | `f` | Search sub-tabs — the `⌕` picker | `f` on the strip, `⇧0` anywhere |
 | `/` | Filter the strip (name / host / method / tag) | |
 | `T` | Mark every sub-tab the filter shows | |
 | `N` | Clear the sub-tab marks | `Esc` on the strip |
+| `g` | Tag sub-tab (Repeater) | |
 
 `Ctrl-N` and `Ctrl-W` are shown beside their rows, and they work from any pane on all nine
 tabs — the menu teaches the faster key rather than hiding it. (Miner and Sequencer seed
 their sessions from a run, so they have no `n`.)
 
-Because the bucket rides along with every pane, its nine letters are **reserved in every view
-of those tabs**. A pane action that wanted one had to move: the rule is that the *pane* letter
-yields, since the strip's letter has to read the same on all nine strips. Mark word in the
-Repeater/Fuzzer editors and the JWT and Cookie lens toggles gave theirs up, and are now
-[palette-only](#palette-only) on `Ctrl-K` and `Ctrl-T`. JWT and Cookie copy their OUTPUT with `C`, and
-Notes opens the note in `$EDITOR` with `o`. The response diff and the Comparer's
-requests/responses switch now sit in [Display…](#display-protocol), where the strip's letters
-do not reach. The rule holds on a strip that lacks the
-action too, and gori refuses to start if a pane row breaks it.
+`T` used to mark every sub-tab from a pane; it is `T` `T` now, so the old reflex lands in the
+right card. The menu's `t` is the strip's own `t`, marking the sub-tab you are on, so the
+Repeater's Tag moved to `g`, a letter no strip key answers.
+
+The nine letters are **reserved in the COMMON rows** of those tabs, which share the card with
+the expanded bucket on the strip, and gori refuses to start if a COMMON row breaks it. A pane's
+own rows no longer compete with them, since from a pane the bucket is one level down; only `T`,
+the Sub-tabs… row, stays taken there. Earlier, while every pane still drew the whole bucket, pane
+actions gave the nine up: Mark word in the Repeater/Fuzzer editors and the JWT and Cookie lens
+toggles (now [palette-only](#palette-only) on `Ctrl-K` and `Ctrl-T`), JWT and Cookie's copy
+OUTPUT (`C`) and Notes' `$EDITOR` (`o`). They keep those letters for now.
 
 ### One intent, one letter
 
@@ -397,7 +407,7 @@ A keyset moves the key you press **in the pane**, not the letter the [space menu
 │ x Select line   ⇧V │
 ```
 
-so the card teaches both halves rather than making you guess which one it means. The nine `SUB-TABS` letters (`n` `w` `d` `e` `t` `f` `/` `T` `N`) likewise mean the same thing on all nine strips whichever keyset you pick. The two namespaces cannot collide: the menu is modal, and a keyset only ever writes to the keymap.
+so the card teaches both halves rather than making you guess which one it means. The nine `SUB-TABS` letters (`n` `w` `d` `e` `t` `f` `/` `T` `N`, inside **Sub-tabs…** from a pane) likewise mean the same thing on all nine strips whichever keyset you pick. The two namespaces cannot collide: the menu is modal, and a keyset only ever writes to the keymap.
 
 That includes `/`, which is a `SUB-TABS` letter *and* `vim-ish`'s find key. They are different tiers — the menu letter acts on the strip while the card is up, the chord searches the text pane you are standing in. The one deliberate pane-key overlap is `u` in the Repeater's read-only response: it toggles display-only JSON Unicode decoding. The request editor is still in the Editor scope, where `u` means undo. `validate_chords!` checks same-scope collisions at boot; the cross-scope exception is pinned in `spec/verb/keyset_spec.cr`.
 

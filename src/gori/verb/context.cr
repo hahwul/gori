@@ -131,9 +131,10 @@ module Gori
       abstract def subtab_filter_open : Nil # open the `/` sub-tab filter bar for the active tab (issue #121)
       # Sub-tab multi-select (#683). Generic, like the three above: the shell already routes
       # to whichever strip is active, so nine scopes' menu entries share one intent each
-      # rather than widening this catalogue nine times over. The toggle is deliberately
-      # absent — `t` is a strip key, and a menu row that marks one chip then closes the menu
-      # would be a gesture nobody uses twice.
+      # rather than widening this catalogue nine times over. The toggle joined them with the
+      # Sub-tabs… card (#1274): from a pane, `space T t` marks the sub-tab you are working in
+      # without walking up to the strip.
+      abstract def subtab_mark_toggle : Nil    # mark or unmark the active chip (the strip's `t`)
       abstract def subtab_mark_all : Nil       # mark every chip the sub-tab filter shows
       abstract def subtab_mark_clear : Nil     # drop every sub-tab mark (esc does the same)
       abstract def subtab_marked_count : Int32 # marked chips on the active strip (gates Clear marks)

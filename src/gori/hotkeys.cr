@@ -325,9 +325,11 @@ module Gori
     # ONE place a menu path is spelled: Help's key column, every `{space:…}` token and the
     # palette's hint column (`compact`: "␣ > f") come through here. The keys are the
     # registry's (`Registry#menu_keys`), which a rebind does not move (the space menu reads
-    # the same properties).
-    def self.menu_path(registry : Verb::Registry, id : String, *, compact : Bool = false) : String?
-      return nil unless keys = registry.menu_keys(id)
+    # the same properties). A SUB-TABS verb reads as its pane-view path (`space → T n`) unless
+    # `strip_focus` says the strip or the tab bar is where the menu opens (`space → n`).
+    def self.menu_path(registry : Verb::Registry, id : String, *, compact : Bool = false,
+                       strip_focus : Bool = false) : String?
+      return nil unless keys = registry.menu_keys(id, strip_focus)
       compact ? "␣ #{keys.join(' ')}" : "space → #{keys.join(' ')}"
     end
 
