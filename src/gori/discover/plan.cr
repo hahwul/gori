@@ -12,7 +12,7 @@ module Gori::Discover
   #
   # The builder never writes the user-facing sentence: every surface phrases these in its
   # own idiom (`gori run discover: --target URL is required` vs the TUI's `start from
-  # Sitemap/History (space → "Discover here")`), and those strings are part of each
+  # Sitemap/History (space → > D Discover here)`), and those strings are part of each
   # surface's contract. So `reason` is the machine-readable fact and the `message` here is
   # only a fallback for a caller that has nothing better to say.
   class PlanError < Exception

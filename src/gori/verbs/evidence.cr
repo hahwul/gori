@@ -56,7 +56,7 @@ module Gori
       r.register Verb::Definition.new(
         "evidence.repeater", "Duplicate into Repeater", "Create an editable Repeater tab from the frozen request",
         Verb::Scope::Evidence, [Verb::Chord.new("r")], available: selected,
-        group: :send) { |ctx| ctx.evidence_duplicate_repeater; nil }
+        group: :send, intent: :to_repeater, pinned: true) { |ctx| ctx.evidence_duplicate_repeater; nil }
 
       # Menu-only, like `link.*.attach`: both open a picker, and neither has a chord to
       # spare here. `k`/`u` are the SPACE-MENU keys — `k` as a chord would never fire (the

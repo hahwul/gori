@@ -18,7 +18,7 @@ session cookie, CSRF token, 비밀번호 리셋 코드, API key가 예측 가능
 
 ## 토큰을 넣는 두 가지 방법 {#two-ways-to-feed-it}
 
-**라이브.** 새 token을 발급하는 요청을 지정하면, gori가 그 요청을 여러 번 재전송하면서 각 응답에서 token을 뽑아냅니다. **History**에서 token을 설정하는 플로우를 선택하고 `Space` → **Send to Sequencer**를 고르면, gori가 유력한 session cookie를 자동으로 감지합니다. `c`(재설정)로 token 위치와 샘플 크기를 조정한 뒤, `Ctrl-R`로 수집을 시작하고 `Ctrl-X`로 멈춥니다.
+**라이브.** 새 token을 발급하는 요청을 지정하면, gori가 그 요청을 여러 번 재전송하면서 각 응답에서 token을 뽑아냅니다. **History**에서 token을 설정하는 플로우를 선택하고 `Space` `>` `s`(**Send flow to…** → **Send to Sequencer**)를 누르면, gori가 유력한 session cookie를 자동으로 감지합니다. `c`(재설정)로 token 위치와 샘플 크기를 조정한 뒤, `Ctrl-R`로 수집을 시작하고 `Ctrl-X`로 멈춥니다.
 
 **수동.** 이미 token 목록이 있나요? 한 줄에 하나씩 붙여넣으면 네트워크 트래픽 없이 순수하게 통계 분석만 수행합니다.
 

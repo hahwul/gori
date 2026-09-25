@@ -209,10 +209,8 @@ MENU_LETTER_ALLOWED = {
   {"link.miner.attach", "strip:nav"}          => "WP1 hjkl decision: Link is `k`, the strip's up key",
   {"notes.links", "strip:nav"}                => "WP1 hjkl decision: Links is `l`, the strip's right key",
   # WP2 — menu letters another verb of the same tab answers.
-  {"history.discover", "history.delete"}                 => "WP2 #1: `d` deletes on the list; Discover moves into Send flow to…",
   {"repeater.toggle-hex", "repeater.select-line"}        => "WP2 #2: hex moves into Display…",
   {"detail.copy-flow", "detail.issue"}                   => "WP2 #5: folds into Copy as… → Raw request",
-  {"detail.sequence", "detail.close"}                    => "WP2 #6: Sequencer moves into Send flow to…",
   {"issue.set-severity", "issue.goto-link"}              => "WP2 #7: documented at verbs/issues.cr (severity keeps `s` in the menu)",
   {"probe.scope-toggle", "probe.open-evidence"}          => "WP2 #8: documented in DESIGN.md §7 2026-09-12 (Probe's `s` is go to source)",
   {"mine.filter-subtabs", "mine.filter"}                 => "WP2 #9: the strip owns `/` in every view since #1055",
@@ -230,9 +228,6 @@ MENU_LETTER_ALLOWED = {
   {"sequence.run", "strip:rename"}      => "WP2 #10: strip `r` renames, the menu's `r` runs (hotkeys.md)",
   {"repeater.tag-subtab", "strip:mark"} => "WP2 #10: Tag leaves `t` for a Mark sub-tab row",
   # Decision 10 — a letter the tab does not bind falls through to Global on a dropped space.
-  {"history.compare", "capture.toggle"}       => "Decision 10: Comparer moves into Send flow to…",
-  {"detail.compare", "capture.toggle"}        => "Decision 10: Comparer moves into Send flow to…",
-  {"sitemap.compare", "capture.toggle"}       => "Decision 10: Comparer moves into Send flow to…",
   {"repeater.clear-marks", "capture.toggle"}  => "Decision 10: `c` reaches Global capture on a dropped space",
   {"fuzz.clear-marks", "capture.toggle"}      => "Decision 10: `c` reaches Global capture on a dropped space",
   {"issues.set-status", "capture.toggle"}     => "Decision 10: `c` reaches Global capture on a dropped space",

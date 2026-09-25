@@ -160,19 +160,20 @@ describe Gori::Tui::HelpView do
       menu_only.should be > 5
     end
 
-    # The class, not the rows: every `space → X` anywhere on the rendered sheet must be the
-    # menu letter of a verb that row names — by verb id or by a `{space:…}` token. A literal
-    # letter typed into SECTIONS names no verb, so it fails here whether or not it is right.
+    # The class, not the rows: every `space → X` (or `space → > f`, a family member one level
+    # down) anywhere on the rendered sheet must be the menu path of a verb that row names — by
+    # verb id or by a `{space:…}` token. A literal letter typed into SECTIONS names no verb, so
+    # it fails here whether or not it is right.
     it "never prints a menu letter the row's own verbs do not carry" do
       registry = Gori::Verbs.registry
       seen = 0
       help_item_rows(registry).each do |(title, item, row)|
         named = [item.verb_id].compact
         "#{item.key} #{item.desc}".scan(Gori::Hotkeys::SPACE_TOKEN_RE) { |m| named << m[1] }
-        letters = named.compact_map { |id| registry[id]?.try(&.menu_key) }
-        "#{row.a} #{row.b}".scan(/space → (\S)/) do |m|
+        paths = named.compact_map { |id| registry.menu_keys(id).try(&.join(' ')) }
+        "#{row.a} #{row.b}".scan(/space → (\S(?: [^\s·](?=\s|$))?)/) do |m|
           seen += 1
-          letters.should contain(m[1][0]), "#{title}: `#{row.a}` prints space → #{m[1]}"
+          paths.should contain(m[1]), "#{title}: `#{row.a}` prints space → #{m[1]}"
         end
         "#{row.a} #{row.b}".should_not contain("{space:")
       end

@@ -35,7 +35,8 @@ describe Gori::Tui::ActionContext do
     here.subtabs.should be_false
   end
 
-  # Both surfaces list from `Registry#for_view`; the space menu keeps only the lettered rows.
+  # Both surfaces list from `Registry#for_view`; the space menu keeps only the lettered rows,
+  # and draws a family member one level down, under its family's row (#1274 WP9).
   # Swept over every scope and section so the two can never drift apart again.
   it "gives the space menu exactly the palette's tab actions that carry a letter" do
     ctx = FakeExecContext.new
@@ -50,7 +51,9 @@ describe Gori::Tui::ActionContext do
         palette.capture(here, ctx)
         menu.open(here.scope, here.section, ctx, subtabs: here.subtabs)
         lettered = palette.tab_actions.select(&.menu_key)
-        menu.entries.map(&.id).sort!.should eq(lettered.map(&.id).sort!)
+        menu.entries.compact_map(&.verb).map(&.id).sort!.should eq(lettered.map(&.id).sort!)
+        families = menu.entries.compact_map(&.family).map(&.id)
+        palette.tab_actions.compact_map(&.family).uniq!.each { |fid| families.should contain(fid) }
       end
     end
   end

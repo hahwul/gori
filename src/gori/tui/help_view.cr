@@ -178,7 +178,7 @@ module Gori::Tui
       # whose entire keyboard surface was undiscoverable from the one screen that exists to
       # answer "what can I press here".
       {"MINER", [
-        Item.new("Mine parameters", "from History/Repeater (space menu) — finds params the app accepts but never shows"),
+        Item.new("{space:history.mine}", "Mine parameters, from History/Repeater — finds params the app accepts but never shows", "history.mine"),
         Item.new("{mine.run} · {mine.stop}", "mine · stop"),
         Item.new("↹", "summary ⟷ findings"),
         Item.new("↑/↓ · ↵", "findings: select · open detail"),
@@ -231,7 +231,7 @@ module Gori::Tui
         Item.new("{space:repeater.oast-insert}", "Repeater · Fuzzer: insert an OAST payload into the focused editor", "repeater.oast-insert"),
       ]},
       {"SEQUENCER", [
-        Item.new("Send to Sequencer", "from History/Repeater/Sitemap (space menu) — replay + analyze a token"),
+        Item.new("{space:history.sequence}", "Send to Sequencer, from History/Repeater/Sitemap — replay + analyze a token", "history.sequence"),
         Item.new("Send selection to → Sequencer", "selected text becomes manual token sample(s)"),
         Item.new("c", "configure the token location (cookie/header/regex/position/jsonpath) + goal", "sequence.configure"),
         Item.new("{sequence.run} · {sequence.stop}", "run collection · stop"),
@@ -247,7 +247,7 @@ module Gori::Tui
         Item.new("⇧←/→", "h-scroll both columns (long lines)"),
         Item.new("w", "swap A ⇄ B", "comparer.swap"),
         Item.new("^N / ^W · r", "new / close / rename comparison sub-tab"),
-        Item.new("Send to Comparer", "from History (space menu) — fills the active sub-tab"),
+        Item.new("{space:history.compare}", "Send to Comparer, from History — fills the active sub-tab", "history.compare"),
       ]},
       {"EDITORS", [
         Item.new("^G · ^F", "go to line · find (↵/↑↓ step)"),

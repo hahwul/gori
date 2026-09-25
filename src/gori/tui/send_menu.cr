@@ -3,7 +3,8 @@ module Gori::Tui
   # string-handling tools that accept a raw selected string as their input. The
   # SendPicker overlay renders these rows; the picker's injected commit routes the
   # chosen one's `tab` to that controller's seeding method. No TUI/state deps, so the
-  # list stays a single trivially-extensible source of truth.
+  # list stays a single trivially-extensible source of truth. The letters are the shared
+  # `Verb::TOOL_LETTERS`, the same ones the "Send flow to…" family draws (#1274).
   #
   # Adding a target later (e.g. an Encryption tab) is one line here plus a `when :<tab>`
   # branch in the commit closure at Runner#send_to_open — no other wiring.
@@ -17,10 +18,10 @@ module Gori::Tui
     # target for now is the Decoder — the selection becomes a new conversion's input.
     def self.destinations : Array(Destination)
       [
-        Destination.new("Decoder", 'd', :decoder, "decode / encode input"),
-        Destination.new("Sequencer", 's', :sequencer, "analyze tokens"),
-        Destination.new("JWT", 'j', :jwt, "decode / re-sign / attack a token"),
-        Destination.new("Cookie", 'k', :cookie, "decode / verify / crack / forge a session cookie"),
+        Destination.new("Decoder", Verb::TOOL_LETTERS[:decoder], :decoder, "decode / encode input"),
+        Destination.new("Sequencer", Verb::TOOL_LETTERS[:sequencer], :sequencer, "analyze tokens"),
+        Destination.new("JWT", Verb::TOOL_LETTERS[:jwt], :jwt, "decode / re-sign / attack a token"),
+        Destination.new("Cookie", Verb::TOOL_LETTERS[:cookie], :cookie, "decode / verify / crack / forge a session cookie"),
       ]
     end
   end

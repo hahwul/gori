@@ -15,7 +15,7 @@ A predictable session cookie, CSRF token, or reset code is one an attacker can f
 
 The Sequencer tab is off the bar by default. It's a workbench you reach for occasionally, not part of the daily loop — press **`0`** and type "seq", or `Ctrl-P` → **Go to Sequencer**.
 
-Feed it from a captured flow: in **History**, select the flow whose response sets the token, then `Space` → **Send to Sequencer**. gori auto-detects the likely session cookie and drops you on the **CONFIG** pane. Press `c` to reconfigure the token location if the guess is wrong: pick one of Cookie, Header, Regex, Position, or JSONPath.
+Feed it from a captured flow: in **History**, select the flow whose response sets the token, then `Space` `>` `s` (**Send flow to…** → **Send to Sequencer**). gori auto-detects the likely session cookie and drops you on the **CONFIG** pane. Press `c` to reconfigure the token location if the guess is wrong: pick one of Cookie, Header, Regex, Position, or JSONPath.
 
 Aim the extraction at the token's *varying* region only. Real tokens carry a skeleton (a `sess_v1_` prefix, a version byte, padding) that never changes across the sample. Counting that fixed structure as if it were random drags the grade down and can misfire the bit-level tests, so the token descriptor should cover the part that actually moves.
 

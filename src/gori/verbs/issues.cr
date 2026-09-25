@@ -264,7 +264,7 @@ module Gori
       # title match `sitemap.repeater`, the sibling gesture on the same letter.
       r.register Verb::Definition.new(
         "issue.repeater-flow", "Send to Repeater", "Send the selected related exchange to Repeater (the first flow row when the cursor is on neither a flow nor a frozen copy)",
-        Verb::Scope::IssuesDetail, [Verb::Chord.new("r")], group: :send) { |ctx| ctx.issue_repeater_flow; nil }
+        Verb::Scope::IssuesDetail, [Verb::Chord.new("r")], group: :send, intent: :to_repeater, pinned: true) { |ctx| ctx.issue_repeater_flow; nil }
 
       r.register Verb::Definition.new(
         "issue.links", "Manage links", "View/add/remove related History/Repeater/Fuzzer/Miner URLs",

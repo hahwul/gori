@@ -156,19 +156,19 @@ module Gori
         "Send this tab's last send (request + response) to the Comparer's next slot",
         Verb::Scope::Repeater,
         available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :repeater },
-        mnemonic: 'C', group: :send) { |ctx| ctx.comparer_add_repeater; nil }
+        intent: :to_comparer, group: :send) { |ctx| ctx.comparer_add_repeater; nil }
 
       r.register Verb::Definition.new(
         "sitemap.compare", "Send to Comparer",
         "Send the selected endpoint's captured flow to the Comparer's next slot",
-        Verb::Scope::Sitemap, mnemonic: 'c', group: :send) { |ctx| ctx.comparer_add_sitemap; nil }
+        Verb::Scope::Sitemap, intent: :to_comparer, group: :send) { |ctx| ctx.comparer_add_sitemap; nil }
 
       r.register Verb::Definition.new(
         "fuzz.compare", "Send to Comparer",
         "Send the selected result (request + response) to the Comparer's next slot",
         Verb::Scope::Fuzzer,
         available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :fuzzer && ctx.fuzzer_result_selected? },
-        mnemonic: 'C') { |ctx| ctx.comparer_add_fuzz; nil }
+        intent: :to_comparer) { |ctx| ctx.comparer_add_fuzz; nil }
     end
   end
 end

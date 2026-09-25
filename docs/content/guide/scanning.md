@@ -74,7 +74,7 @@ A mine is latency-bound rather than CPU-bound (it sends a bucket, waits, bisects
 
 Where the Miner finds hidden inputs, **Discover** finds hidden endpoints. It spiders a target (following links you never clicked) and brute-forces unlinked directories and paths (`/admin`, `.git/config`, `/api/v2`). It lives as a sub-tab under the new **Target** tab, next to the Sitemap, and every endpoint it finds flows straight into that Sitemap.
 
-Start a run from where you already are: on a **Sitemap** node or a **History** flow, press `Space` and pick **Discover here**. A small popup lets you choose the exploration style (spider, brute-force, or both, the default), a max depth, the crawl scope, and concurrency. The run happens in the background: watch the bottom bar, pause or stop it from the Discover sub-tab (`^X` stop, `p` pause), and jump to the results from the completion notification.
+Start a run from where you already are: on a **Sitemap** node or a **History** flow, press `Space` `>` `D` (**Send flow to…** → **Discover here**). A small popup lets you choose the exploration style (spider, brute-force, or both, the default), a max depth, the crawl scope, and concurrency. The run happens in the background: watch the bottom bar, pause or stop it from the Discover sub-tab (`^X` stop, `p` pause), and jump to the results from the completion notification.
 
 A finished run is more than a list of URLs. Every finding is stored with the request Discover framed and the response the origin sent back, so in the FINDINGS table `Enter` (or `o`) opens that exchange in the same detail view History uses: headers, body, pretty-printed JSON, and from there `^R` to the Repeater. Headless runs and MCP runs store the same bytes, so a finding is openable with `gori run show` or `get_flow` too.
 
@@ -147,7 +147,7 @@ Two more tools round out analysis:
 - **Notes**: free-form, per-project Markdown documents (multiple notes per project). Create, edit, and close notes from the Notes tab; list or dump them headless with `gori run notes` / `gori run notes --all`. Agents can manage notes over MCP (`list_notes`, `get_note`, `create_note`, …).
 - **Comparer**: load two messages into slots A and B for a side-by-side diff, useful for spotting how a response changed between requests.
 
-  A slot is filled from anywhere that holds a request and a response: `Space` → **Send to Comparer** from History, the Sitemap, a Repeater tab (its last send) or a Fuzzer result row, or `a` / `b` on the Comparer tab itself to pick a captured flow. That picker follows the active Scope lens, like History and the Sitemap, so turn the lens off to reach an out-of-scope flow. A Repeater send and a fuzz row leave no capture behind, so this is the only route those two have into a diff.
+  A slot is filled from anywhere that holds a request and a response: `Space` `>` `c` (**Send flow to…** → **Send to Comparer**) from History, the Sitemap, a Repeater tab (its last send) or a Fuzzer result row, or `a` / `b` on the Comparer tab itself to pick a captured flow. That picker follows the active Scope lens, like History and the Sitemap, so turn the lens off to reach an out-of-scope flow. A Repeater send and a fuzz row leave no capture behind, so this is the only route those two have into a diff.
 
   Each column header carries that side's `status · size · time`, and the divider between them states the A→B delta; a `403 → 200` is usually the whole answer, before a body line is read.
 

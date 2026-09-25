@@ -27,8 +27,10 @@ describe Gori::Tui::SpaceMenu do
     menu.verb_for('y').try(&.id).should eq("history.copy")
     menu.verb_for('Y').try(&.id).should eq("history.copy-as") # pairs with 'y' (was 'F')
     menu.verb_for('r').try(&.id).should eq("history.repeater")
-    # `D` deletes the row and `X` wipes the tab — the pairing Probe already had.
-    menu.verb_for('D').try(&.id).should eq("history.delete")
+    # `d` deletes the row (its bare key, now that Discover sits in Send flow to…) and `X`
+    # wipes the tab.
+    menu.verb_for('d').try(&.id).should eq("history.delete")
+    menu.entry_for('>').try(&.id).should eq("family:send_flow")
     menu.verb_for('X').try(&.id).should eq("history.clear")
     # 'C' was free in Body until the History column editor claimed it (#819); the OTHER 'C'
     # in the registry is Send to Comparer, which lives in the Repeater/Fuzzer scopes.
@@ -116,9 +118,9 @@ describe Gori::Tui::SpaceMenu do
     menu.verb_for('r').try(&.id).should eq("detail.repeater")
     menu.verb_for('x').try(&.id).should eq("detail.select-line")
     menu.verb_for('e').try(&.id).should eq("detail.toggle-hex")
-    # 'D' here too, so the drill-in does not read `X` as "this one" while the list one
+    # 'd' here too, so the drill-in does not read `X` as "this one" while the list one
     # keystroke away reads it as "all of them".
-    menu.verb_for('D').try(&.id).should eq("detail.delete")
+    menu.verb_for('d').try(&.id).should eq("detail.delete")
   end
 
   it "lists the scope-rule actions in the Project scope pane (space replaced the lens toggle)" do
@@ -976,6 +978,7 @@ describe "the SUB-TABS bucket, on every strip and from every focus level" do
       strip = menu.entries.map(&.id)
       wanted.each { |id| strip.should contain(id) }
       strip.each do |id|
+        next if id.starts_with?("family:") # a family row files under a member's bucket
         s = Gori::Verbs.registry[id].section
         (s == :common || Gori::Verb::Registry::SUBTAB_SECTIONS.includes?(s)).should be_true
       end

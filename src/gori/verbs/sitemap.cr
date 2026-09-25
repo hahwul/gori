@@ -150,12 +150,12 @@ module Gori
         "sitemap.scope-add", "Add to scope", "Add the selected host — or host + path — to the scope rules",
         Verb::Scope::Sitemap, [Verb::Chord.new("a")], mnemonic: 'a', group: :scope) { |ctx| ctx.sitemap_scope_add; nil }
 
-      # Menu-only (`space → d`): spider + brute-force the selected host/path (opens the Discover
+      # Menu-only (Send flow to… → `D`): spider + brute-force the selected host/path (opens the Discover
       # config popup). It sat on bare `d` — the key that DELETES a row on History, Issues and
       # Probe, one ⇥ away — so a hand trained on those put requests on the wire here.
       r.register Verb::Definition.new(
         "sitemap.discover", "Discover here", "Spider + brute-force the selected host or path subtree",
-        Verb::Scope::Sitemap, [] of Verb::Chord, mnemonic: 'd', group: :send) { |ctx| ctx.sitemap_discover; nil }
+        Verb::Scope::Sitemap, [] of Verb::Chord, intent: :to_discover, group: :send) { |ctx| ctx.sitemap_discover; nil }
 
       # `o` — read the bytes behind the selected endpoint: resolve its representative captured
       # flow and open History's detail on it. Same chord and same shape as Probe's
@@ -173,7 +173,7 @@ module Gori
       # representative captured flow per path.
       r.register Verb::Definition.new(
         "sitemap.repeater", "Send to Repeater", "Open the selected — or every marked — endpoint's captured request in Repeater",
-        Verb::Scope::Sitemap, [Verb::Chord.new("r")], mnemonic: 'r', group: :send) { |ctx| ctx.sitemap_repeater; nil }
+        Verb::Scope::Sitemap, [Verb::Chord.new("r")], mnemonic: 'r', intent: :to_repeater, pinned: true, group: :send) { |ctx| ctx.sitemap_repeater; nil }
 
       # `p` — the parameter inventory (#1231) for the cursor row: a host row lists every
       # endpoint on it, any other row the endpoints under it (a `{uuid}` fold included).

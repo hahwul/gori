@@ -3,6 +3,7 @@ require "./links"
 require "./read_edit"
 require "./editor"
 require "./evidence"
+require "./families"
 
 module Gori
   module Verbs
@@ -75,8 +76,8 @@ module Gori
 
       # Menu-only, no chord. A column set is arranged ONCE and then read for the rest of the
       # engagement — the opposite shape from `v`, which is flipped many times an hour and earns
-      # its bare key on that traffic. `C` is free across Body COMMON (the only other 'C' in the
-      # registry is Comparer-scoped), and 'c' is already a Global chord (capture).
+      # its bare key on that traffic. `C` is free across Body COMMON, and 'c' is already a Global
+      # chord (capture).
       # Menu-only, no chord, and deliberately so: this is the one History verb that puts a
       # request on the wire. A bare key next to the navigation cluster would make an outbound
       # call one mistyped keystroke away, which is the shape P4 exists to prevent. `G` is free
@@ -167,20 +168,20 @@ module Gori
       r.register Verb::Definition.new(
         "history.repeater", "Repeater flow", "Open the selected flow in the Repeater tab",
         Verb::Scope::Body, [Verb::Chord.new("r", ctrl: true)],
-        available: history_targets, mnemonic: 'r', group: :send) { |ctx| ctx.repeater_selected; nil }
+        available: history_targets, mnemonic: 'r', intent: :to_repeater, pinned: true, group: :send) { |ctx| ctx.repeater_selected; nil }
 
       # Spider + brute-force the selected flow's host (opens the Discover config popup; the
       # run streams into the Target → Discover sub-tab). Menu-only (no chord).
       r.register Verb::Definition.new(
         "history.discover", "Discover from flow", "Spider + brute-force the selected flow's host",
         Verb::Scope::Body, [] of Verb::Chord,
-        available: history_targets, mnemonic: 'd', group: :send) { |ctx| ctx.history_discover; nil }
+        available: history_targets, intent: :to_discover, group: :send) { |ctx| ctx.history_discover; nil }
 
       # Send the selected flow to the Comparer's next slot (A → B → A), then open the
       # Comparer tab to view the diff.
       r.register Verb::Definition.new(
         "history.compare", "Send to Comparer", "Send the selected flow to the Comparer (next slot A/B)",
-        Verb::Scope::Body, available: history_targets, mnemonic: 'c', group: :send) { |ctx| ctx.comparer_add_selected; nil }
+        Verb::Scope::Body, available: history_targets, intent: :to_comparer, group: :send) { |ctx| ctx.comparer_add_selected; nil }
 
       # Write the selected flow's decoded response body out and hand it to the desktop's
       # opener — the terminal's one way to actually SEE a page, an image or a PDF.
@@ -197,7 +198,7 @@ module Gori
       r.register Verb::Definition.new(
         "history.open-browser", "Open response in browser", "Write this flow's decoded response body to a file and open it in the desktop viewer",
         Verb::Scope::Body, [] of Verb::Chord,
-        available: history_selected, intent: :open_browser, group: :view) { |ctx| ctx.open_response_external; nil }
+        available: history_selected, intent: :to_browser, group: :view) { |ctx| ctx.open_response_external; nil }
 
       # "Mock this response" (#1237). Menu-only, single-target, and it saves nothing by itself:
       # it opens the Rewriter rule form prefilled with a short-circuit rule, which the operator
@@ -214,12 +215,12 @@ module Gori
         "history.probe-active", "Run active scan", "Run the Probe active checks against the selected flow (shows the request count first)",
         Verb::Scope::Body, available: history_targets, mnemonic: 'A', group: :send) { |ctx| ctx.probe_active_selected; nil }
 
-      # Delete the selected/marked flows after confirmation. Bare `d` is the direct shortcut;
-      # the explicit `D` menu key keeps Space→d assigned to Discover.
+      # Delete the selected/marked flows after confirmation. Bare `d` is the direct shortcut and
+      # the menu letter too (the lexicon's `:delete`), now that Discover sits in Send flow to….
       r.register Verb::Definition.new(
         "history.delete", "Delete flow", "Delete the selected or marked flows from History (asks first)",
         Verb::Scope::Body, [Verb::Chord.new("d")],
-        available: history_targets, mnemonic: 'D', group: :danger) { |ctx| ctx.history_delete; nil }
+        available: history_targets, intent: :delete, group: :danger) { |ctx| ctx.history_delete; nil }
 
       # ⇧X clears the whole project History after confirmation, and `X` remains the space-menu
       # key. One chord and one letter for every "wipe this tab" verb in the app: `probe.clear`,
@@ -277,7 +278,7 @@ module Gori
       # which teaches more than a verb that quietly is not there.
       r.register Verb::Definition.new(
         "repeater.open-browser", "Open response in browser", "Write this tab's decoded response body to a file and open it in the desktop viewer",
-        Verb::Scope::Repeater, available: in_repeater, intent: :open_browser) { |ctx| ctx.repeater_open_response_external; nil }
+        Verb::Scope::Repeater, available: in_repeater, intent: :to_browser) { |ctx| ctx.repeater_open_response_external; nil }
 
       r.register Verb::Definition.new(
         "repeater.new", "New repeater request", "Open a blank request in Repeater to author and send",
@@ -315,8 +316,8 @@ module Gori
         # 'f', the letter the STRIP itself binds for this picker, and one of the nine the
         # SUB-TABS bucket spells the same way on all nine strips. It read 's' until the key
         # audit, so an operator who found the action in the menu learned a letter the strip
-        # does not answer to. `repeater.fuzz` gave the letter up (it is 'F' now, joining
-        # `C` Send to Comparer in this scope's capital send family).
+        # does not answer to. `repeater.fuzz` gave the letter up, and now sits in Send flow
+        # to… (#1274).
         intent: :find_subtab, section: :tab) { |ctx| ctx.repeater_find_subtab; nil }
 
       # Sub-tab rename/close — today's raw key-dispatch on the strip (`r` rename, ^W
@@ -636,7 +637,7 @@ module Gori
       r.register Verb::Definition.new(
         "detail.repeater", "Repeater flow", "Open this flow in the Repeater tab",
         Verb::Scope::HistoryDetail, [Verb::Chord.new("r", ctrl: true)],
-        mnemonic: 'r', group: :send) { |ctx| ctx.close_detail; ctx.repeater_selected; nil }
+        mnemonic: 'r', intent: :to_repeater, pinned: true, group: :send) { |ctx| ctx.close_detail; ctx.repeater_selected; nil }
 
       # Create an issue while reading the flow — the natural moment to file one.
       # Without this, ⇧F silently dead-ends in the detail (it's a Body-scope verb).
@@ -648,13 +649,13 @@ module Gori
       # Send the open flow to the Comparer (mirrors history.compare from the list).
       r.register Verb::Definition.new(
         "detail.compare", "Send to Comparer", "Send this flow to the Comparer (next slot A/B)",
-        Verb::Scope::HistoryDetail, mnemonic: 'c', group: :send) { |ctx| ctx.comparer_add_selected; nil }
+        Verb::Scope::HistoryDetail, intent: :to_comparer, group: :send) { |ctx| ctx.comparer_add_selected; nil }
 
       # The drill-in's twin of history.open-browser, and the place it is reached from most:
       # the moment you want a page rendered is the moment you are reading its bytes.
       r.register Verb::Definition.new(
         "detail.open-browser", "Open response in browser", "Write this flow's decoded response body to a file and open it in the desktop viewer",
-        Verb::Scope::HistoryDetail, intent: :open_browser, group: :view) { |ctx| ctx.open_response_external; nil }
+        Verb::Scope::HistoryDetail, intent: :to_browser, group: :view) { |ctx| ctx.open_response_external; nil }
 
       # The drill-in's twin of history.mock-response: the moment you decide to fake a response is
       # the moment you are reading it. Closes the detail first, like detail.issue.
@@ -688,12 +689,12 @@ module Gori
         "detail.copy-flow", "Copy flow", "Copy this flow's raw request to the clipboard",
         Verb::Scope::HistoryDetail, mnemonic: 'F', group: :copy) { |ctx| ctx.copy_selection; nil }
 
-      # Send the open flow to the Fuzzer (mirrors history.fuzz ⇧I/'z' from the list) —
+      # Send the open flow to the Fuzzer (mirrors history.fuzz ⇧I / Send flow to… from the list) —
       # close the detail first so it doesn't float over the Fuzzer tab.
       r.register Verb::Definition.new(
         "detail.fuzz", "Send to Fuzzer", "Open this flow in the Fuzzer tab",
         Verb::Scope::HistoryDetail, [Verb::Chord.new("i", shift: true)],
-        mnemonic: 'z', group: :send) { |ctx| ctx.close_detail; ctx.fuzz_selected; nil }
+        intent: :to_fuzzer, group: :send) { |ctx| ctx.close_detail; ctx.fuzz_selected; nil }
 
       # Add the open flow's host to the scope lens (mirrors scope.add-host 'h' from the
       # list — also menu-only there; 'h' is the ← pane-nav chord in the detail).
@@ -707,13 +708,13 @@ module Gori
         "detail.probe-active", "Run active scan", "Run the Probe active checks against this flow (shows the request count first)",
         Verb::Scope::HistoryDetail, mnemonic: 'A', group: :send) { |ctx| ctx.close_detail; ctx.probe_active_selected; nil }
 
-      # Delete the open flow (mirrors history.delete, and its letter): menu-only 'D', so the
+      # Delete the open flow (mirrors history.delete, and its letter): menu-only `d`, so the
       # drill-in does not read `X` as "this one" while the list one keystroke away reads it as
       # "all of them". Confirm runs after the menu closes; the controller captures the id so a
       # live reload can't retarget the delete.
       r.register Verb::Definition.new(
         "detail.delete", "Delete flow", "Delete this flow from History (asks first)",
-        Verb::Scope::HistoryDetail, mnemonic: 'D', group: :danger) { |ctx| ctx.history_delete; nil }
+        Verb::Scope::HistoryDetail, intent: :delete, group: :danger) { |ctx| ctx.history_delete; nil }
     end
 
     # Fuzzer/Intruder verbs: the cross-tab "send to Fuzzer" (⇧I from History, palette
@@ -729,17 +730,13 @@ module Gori
       r.register Verb::Definition.new(
         "history.fuzz", "Send to Fuzzer", "Open the selected flow in the Fuzzer tab",
         Verb::Scope::Body, [Verb::Chord.new("i", shift: true)],
-        available: history_targets, mnemonic: 'z', group: :send) { |ctx| ctx.fuzz_selected; nil }
+        available: history_targets, intent: :to_fuzzer, group: :send) { |ctx| ctx.fuzz_selected; nil }
       r.register Verb::Definition.new(
-        # 'F'. It held 'f' until the key audit, where 'f' went to `repeater.find-subtab` so the
-        # menu and the strip stop naming the picker two different ways — and 'f' is now one of
-        # the nine letters the SUB-TABS bucket reserves in EVERY Repeater view, so this could
-        # not stay whatever else happened. The capital joins `C` Send to Comparer, the other
-        # cross-tab send in this scope's COMMON. (`history.fuzz` spells the same act 'z' in
-        # the Body scope; cross-scope reuse is legal and the two lists never render together,
-        # but the send family inside a scope is the closer neighbour to agree with.)
+        # Send flow to… → `f`, the letter it has on every tab (#1274). At level 1 it held 'f'
+        # until the key audit gave that to `repeater.find-subtab`, then 'F' — while History
+        # spelled the same act 'z'; the family table is what ended that drift.
         "repeater.fuzz", "Send to Fuzzer", "Turn this repeater request into a fuzz template",
-        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'F') { |ctx| ctx.fuzz_from_repeater; nil }
+        Verb::Scope::Repeater, available: in_repeater, intent: :to_fuzzer) { |ctx| ctx.fuzz_from_repeater; nil }
 
       r.register Verb::Definition.new(
         "fuzz.run", "Run fuzz", "Start the fuzz/intruder run", Verb::Scope::Fuzzer,
@@ -786,7 +783,7 @@ module Gori
         "fuzz.repeater", "Send to Repeater", "Open the selected result's request in Repeater (payload spliced in)",
         Verb::Scope::Fuzzer,
         available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :fuzzer && ctx.fuzzer_result_selected? },
-        mnemonic: 'R') { |ctx| ctx.fuzz_repeater_selected; nil }
+        mnemonic: 'R', intent: :to_repeater, pinned: true) { |ctx| ctx.fuzz_repeater_selected; nil }
       # COMMON (Round 5), not :tab: New-session is a top action the user reaches for
       # from anywhere in the Fuzzer tab, not just the tab bar — mirrors repeater.new
       # (Repeater) and decoder.new (Decoder, Round 4a), both :common. Fuzzer's COMMON
@@ -916,13 +913,13 @@ module Gori
 
       r.register Verb::Definition.new(
         "history.mine", "Mine parameters", "Discover hidden parameters for the selected flow",
-        Verb::Scope::Body, available: history_targets, mnemonic: 'm', group: :send) { |ctx| ctx.mine_selected; nil }
+        Verb::Scope::Body, available: history_targets, intent: :to_miner, group: :send) { |ctx| ctx.mine_selected; nil }
       r.register Verb::Definition.new(
         "detail.mine", "Mine parameters", "Discover hidden parameters for this flow",
-        Verb::Scope::HistoryDetail, mnemonic: 'm', group: :send) { |ctx| ctx.close_detail; ctx.mine_selected; nil }
+        Verb::Scope::HistoryDetail, intent: :to_miner, group: :send) { |ctx| ctx.close_detail; ctx.mine_selected; nil }
       r.register Verb::Definition.new(
         "repeater.mine", "Mine parameters", "Discover hidden parameters for this repeater request",
-        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'm') { |ctx| ctx.mine_from_repeater; nil }
+        Verb::Scope::Repeater, available: in_repeater, intent: :to_miner) { |ctx| ctx.mine_from_repeater; nil }
 
       # Run the Probe active checks against the current Repeater request's last send (COMMON, so
       # it's reachable from any Repeater pane) — opens a confirm with the expected request count.
@@ -950,7 +947,7 @@ module Gori
         "mine.repeater", "Send to Repeater", "Open the selected finding as a request in Repeater (param injected)",
         Verb::Scope::Miner,
         available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :miner && ctx.miner_finding_selected? },
-        mnemonic: 'R') { |ctx| ctx.mine_repeater_selected; nil }
+        mnemonic: 'R', intent: :to_repeater, pinned: true) { |ctx| ctx.mine_repeater_selected; nil }
       # Content-only clone of the active miner session (request + config; no findings).
       # 'd' is free in COMMON ∪ :subtab (COMMON: r/s/k/u/p).
       r.register Verb::Definition.new(
@@ -1040,6 +1037,7 @@ module Gori
     # Builds a registry with every built-in verb registered.
     def self.registry : Verb::Registry
       r = Verb::Registry.new
+      register_families(r) # first, so each member is tagged as it registers
       register_core(r)
       register_import(r)
       register_history(r)

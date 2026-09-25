@@ -15,6 +15,24 @@ module Gori
     #
     # Registered on the Registry rather than kept in a constant, so a spec builds a small
     # registry with a demo family the way it builds demo verbs.
+    # One letter per destination TOOL, shared by every card that hands something to a tool:
+    # the "Send flow to…" family's level 2 and the "Send selection to…" picker
+    # (`Tui::SendMenu`). "Sequencer is `s`" then holds in both cards by construction. Decoder
+    # keeps the `d` the selection picker taught first, so Discover takes its capital.
+    TOOL_LETTERS = {
+      :repeater  => 'r',
+      :fuzzer    => 'f',
+      :comparer  => 'c',
+      :miner     => 'm',
+      :sequencer => 's',
+      :authorize => 'a',
+      :discover  => 'D',
+      :browser   => 'b',
+      :decoder   => 'd',
+      :jwt       => 'j',
+      :cookie    => 'k',
+    } of Symbol => Char
+
     struct Family
       # The bands a family row may sit in: `Tui::SpaceMenu::GROUP_ORDER` plus the untagged
       # `:none`. `verb/` does not name `Tui`, so the list is spelled here and

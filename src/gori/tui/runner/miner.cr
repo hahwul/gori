@@ -1,7 +1,7 @@
 # Param Miner — ExecContext verb implementations, reopens Gori::Tui::Runner (see
 # tui/runner.cr for the event loop, Host facade, overlays, and rendering).
 class Gori::Tui::Runner < Gori::Verb::ExecContext
-  # CROSS-TAB: open the config popup for History's selected flow (space → Mine params).
+  # CROSS-TAB: open the config popup for History's selected flow (space → Send flow to… → Miner).
   # Batch-capable (#442): ONE config popup, then a mining session per marked flow. Capped
   # like the other session-spawning verbs. Flows with no mineable location are dropped here
   # rather than starting an empty session.

@@ -166,7 +166,7 @@ the palette searches the actions of the pane you opened it from as well as the a
 commands. It uses the same set `Space` would show there, plus the actions that have no menu
 letter. The pane's matches come first under `THIS TAB`, then the app commands under `APP`.
 Each tab row shows its fast path on the right: its key if it has one, else its menu letter
-(`␣ t` means `Space`, then `t`). If you have rows marked, the title reads
+(`␣ t` means `Space`, then `t`; `␣ > c` is a row inside [Send flow to…](#send-flow-to)). If you have rows marked, the title reads
 `COMMANDS · 3 MARKED`, just like the space menu, so you know a batch action acts on all of
 them. With the query empty, the palette lists only the app commands, as it always has.
 
@@ -239,6 +239,40 @@ cannot drift apart on it:
 other row wears the letter. The rest are the action's wherever it exists and free for a tab-local row where it
 does not. Rewriter and Colormarker's **Enable/disable everywhere** is `T` for this reason: `X`
 wipes.
+
+### Send flow to… {#send-flow-to}
+
+Handing the selected flow to another tool is one row, **`>` Send flow to…**, which opens a
+second card. Inside it every tool has the same letter on every tab:
+
+| Key | Sends the flow to |
+|-----|-------------------|
+| `r` | Repeater |
+| `f` | Fuzzer |
+| `c` | Comparer |
+| `m` | Miner |
+| `s` | Sequencer |
+| `a` | Authorize |
+| `D` | Discover |
+| `b` | the browser (Open response in browser) |
+
+So `Space` `>` `c` sends to the Comparer from History, the Sitemap, a Repeater tab or a Fuzzer
+result alike. A tab lists only the tools it can send to. The letters match the
+**Send selection to…** card (`S`): Sequencer is `s` in both, and Decoder keeps the `d` it
+already had there, which is why Discover is `D`.
+
+- **Send to Repeater keeps its own letter too**: `r` on History, the detail, the Sitemap, Probe,
+  Evidence and an issue, `R` on the Fuzzer and the Miner, where `r` runs the tab.
+- The `>` row is drawn whenever the tab has a send, even when nothing is selected. The card then
+  says **nothing here right now**, so `Space` `>` `r` typed quickly never reaches the pane
+  underneath.
+- `Esc` or `Backspace` goes back one level, and `Esc` again closes. Any other key closes the
+  whole menu, as at the first level.
+- The title reads `SPACE › SEND FLOW TO`, with `· 3 MARKED` when rows are marked.
+- Direct keys are unchanged: `Ctrl-R` / `r` to the Repeater and `⇧I` to the Fuzzer still work.
+
+What moved: on History these were `c` `z` `m` `q` `u` `d` `⇧B`, and **Delete took `d`**, its own
+bare key, now that Discover left it. The detail's Delete is `d` too.
 
 ## Editor Keysets {#editor-keysets}
 

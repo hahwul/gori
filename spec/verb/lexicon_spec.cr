@@ -45,9 +45,7 @@ module LexiconSpec
   # Rows whose id names an intent but whose letter is decided elsewhere. Each line names why,
   # and the last example fails once a row stops needing its line.
   SUFFIX_ALLOWED = {
-    "history.delete" => "WP2 #1: the list's `d` is Discover until Discover moves into Send flow to…",
-    "detail.delete"  => "WP2 #1: `D` until the detail's `d` is free",
-    "mine.filter"    => "the strip owns `/` in every Miner view since #1055; the table filter is `F`",
+    "mine.filter" => "the strip owns `/` in every Miner view since #1055; the table filter is `F`",
   }
 
   # {verb, other} pairs where a reserved letter is spent on a different intent in a scope that
@@ -78,7 +76,9 @@ describe Gori::Verb::Lexicon do
 
   it "gives one intent one letter in every scope" do
     by_intent = Hash(Symbol, Set(Char)).new { |h, k| h[k] = Set(Char).new }
-    LexiconSpec.menu_rows.each { |v| (i = v.intent) && by_intent[i] << v.menu_key.not_nil! }
+    # A family member's intent is the family table's (spec/tui/space_menu_spec.cr); a pinned
+    # member's level-1 letter is its own.
+    LexiconSpec.menu_rows.each { |v| (i = v.intent) && !v.member? && by_intent[i] << v.menu_key.not_nil! }
     by_intent.reject { |_, letters| letters.size == 1 }.should be_empty
     by_intent.each { |i, letters| letters.first.should eq(Gori::Verb::Lexicon.letter(i)) }
   end
