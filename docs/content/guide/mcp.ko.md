@@ -73,7 +73,7 @@ gori mcp --read-only
 
 | 시작 방법 | 도구 | `tools/list` | 토큰 | 용도 |
 | --- | ---: | ---: | ---: | --- |
-| `gori mcp` | 187 | ~222 KB | ~57k | 전부 (기본값) |
+| `gori mcp` | 188 | ~225 KB | ~58k | 전부 (기본값) |
 | `--read-only` | 62 | ~72 KB | ~18k | 읽기 도구와 순수 연산; 실제 요청 전송 없음 |
 | `--tools=@recon` | 37 | ~54 KB | ~14k | 캡처를 읽고 파악, 요청 재전송, 이슈·노트 기록 |
 | `--tools=@recon --read-only` | 28 | ~39 KB | ~10k | `--read-only`가 끄는 도구를 뺀 `@recon` |
