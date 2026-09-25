@@ -32,6 +32,7 @@ require "../discover"
 require "../discover/adapters"
 require "../oast/provider_config"
 require "../oast/sessions"
+require "../session_refresh"
 require "../probe/passive"
 require "../probe/group"
 require "../notes"
@@ -702,6 +703,12 @@ module Gori
         # per-process and starts nil — see `SessionSlots`), so `gori run` behaves exactly as it
         # did: unscoped rules, global table, no overlay.
         Env.layer = Bindings.load(store, SessionSlots.load(store))
+        layer = Env.layer.as(Bindings)
+        # …and the slots' REFRESH runner beside it (#1233), so a `--slot NAME` send whose slot
+        # carries a `refresh_before` policy re-authenticates before it goes out — in THIS
+        # process's table, which is the only one a `gori run` has. Gated as the CLI gates:
+        # `Outbound.cli` over the project's scope, never a send's own `--allow-unscoped`.
+        Gori::SessionRefresh::Runner.new(store, layer, -> { Gori::Outbound.cli(Gori::Scope.load(store), false) }).install
         # …and re-select whatever `--slot` chose, because THIS line just replaced the registry
         # holding the pointer. See `reapply_active_slot`.
         reapply_active_slot

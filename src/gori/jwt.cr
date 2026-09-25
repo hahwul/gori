@@ -100,6 +100,12 @@ module Gori
       nil
     end
 
+    # The `exp` claim of a JWS payload SEGMENT (the token's second part), or nil. Public for
+    # `SessionRefresh`'s `jwt-exp` policy (#1233), which reads the expiry of a bound value.
+    def claim_exp(payload_segment : String) : Int64?
+      claim_i(payload_segment, "exp")
+    end
+
     # --- internals ----------------------------------------------------------
 
     private def decode(tok : String) : String

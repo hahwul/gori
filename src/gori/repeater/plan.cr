@@ -228,6 +228,13 @@ module Gori::Repeater
     property h2_fields : Array({String, String})?
     property h2_body : Bytes?
 
+    # A session slot's REFRESH step (#1233): the request goes out AS this slot without the slot
+    # being active — its `$BIND.*` resolve out of this slot's table, its response rebinds this
+    # slot's claimed rules, and the slot's header overlay is NOT written (the login request
+    # must not carry the stale credential it is replacing). nil everywhere else. See
+    # `Sender#refresh_slot`.
+    property refresh_slot : String?
+
     def initialize(@requests : Array(Bytes) = [] of Bytes,
                    *,
                    @expand_request : Bool = true,
@@ -248,7 +255,8 @@ module Gori::Repeater
                    @verify : Bool = true,
                    @timeout : Time::Span? = nil,
                    @overrides : Gori::HostOverrides? = nil,
-                   @tls_preset : String? = nil)
+                   @tls_preset : String? = nil,
+                   @refresh_slot : String? = nil)
     end
   end
 
@@ -525,7 +533,8 @@ module Gori::Repeater
         preserve_field_case: options.preserve_field_case?, evidence: options.evidence?,
         expand_bindings: options.expand_bindings?,
         evidence_literals: options.evidence_literals,
-        reframe_grpc: options.reframe_grpc?, tls_preset: tls_preset)
+        reframe_grpc: options.reframe_grpc?, tls_preset: tls_preset,
+        refresh_slot: options.refresh_slot)
       new(sender: sender, requests: wires, scheme: scheme, host: host, port: port,
         http2: options.http2?, websocket: websocket, sni: sni,
         preserve_field_case: options.preserve_field_case?,

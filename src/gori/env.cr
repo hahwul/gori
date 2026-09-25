@@ -1042,11 +1042,17 @@ module Gori
     # the operator's references. A caller passing it also passes `unescape: Owns::None` —
     # narrowing is about which NAMES resolve, and a `$$` in captured bytes is two bytes the
     # origin sent, exactly as the env-var pass decides it (`Fuzz::Plan`'s evidence branch).
+    #
+    # `as_slot` resolves as if that slot were the active one — `expand_bindings_as` for a whole
+    # message. For the one caller that sends AS a slot without being able to activate it: a
+    # slot's refresh steps (#1233), which run while any other slot (or none) is the send
+    # context, and whose `$BIND.CSRF` has to mean the refreshing slot's CSRF.
     def self.expand_bindings(bytes : Bytes, verbatim : Array({Int32, Int32})? = nil, *,
                              resolve : Owns = SEND_OWNS,
                              generation : Generation? = nil,
                              literal : Set(String)? = nil,
-                             unescape : Owns? = nil) : Bytes
+                             unescape : Owns? = nil,
+                             as_slot : String? = nil) : Bytes
       prefix = Settings.env_prefix
       syntax = Settings.env_syntax
       # GEN has no bare spelling. In the opt-out grammar this remains the BIND pass that shipped;
@@ -1056,7 +1062,7 @@ module Gori
       # of `$id` / `$ne` carries nothing this pass owns, and saying so costs one scan instead of
       # a full expansion of head and body.
       return bytes if prefix.empty? || resolve.none? || !may_contain_tokens?(bytes, resolve, prefix)
-      vals = binding_values
+      vals = as_slot ? binding_values_as(as_slot) : binding_values
       # The Bytes form expands head and body in two calls. Seed their shared context here so the
       # same generator name cannot change at the message boundary when a binding table is active.
       generation ||= Generation.new if generator_in?(bytes, resolve, prefix, syntax)

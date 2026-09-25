@@ -45,13 +45,140 @@ module Gori
     # time. Names are compared case-insensitively; an empty list is the compatible default for
     # slots written before captured-flow provenance existed.
     getter literal_headers : Array(String)
+    # The Repeater sessions that RE-AUTHENTICATE this slot, in the order they run (#1233) —
+    # `csrf-fetch → login`. Each step's response goes through the slot's own extract rules,
+    # which is what rebinds it; see `SessionRefresh`. Ids, because a session's name is not
+    # unique. A NEGATIVE id is a step whose session was deleted (`Store#delete_repeater`):
+    # `repeaters.id` has no AUTOINCREMENT, so a positive id left behind would re-bind to the
+    # next tab that takes it (#1160's encoding, for the same reason). It keeps its place in
+    # the list and refuses to run until it is removed.
+    getter refresh : Array(Int64)
+    # WHEN the refresh runs on its own, before a send that goes out as this slot. `off` — the
+    # default, and every slot written before #1233 — means only an explicit refresh does.
+    getter refresh_before : RefreshBefore
+
+    # The automatic-refresh policy. Three answers and no more:
+    #
+    #   * `off`      — never on its own.
+    #   * `jwt-exp`  — when a JWT bound in this slot's table is within `SKEW` of its `exp`.
+    #   * `ttl=10m`  — when the slot's newest binding is older than the span.
+    #
+    # Deliberately a question about the VALUE gori holds and never about a response: acting
+    # before a send is what keeps a refresh from ever reinterpreting an answer (#1233's "not C").
+    struct RefreshBefore
+      enum Kind
+        Off
+        JwtExp
+        Ttl
+      end
+
+      # How early `jwt-exp` refreshes. A token that expires between the check and the origin
+      # reading it is a 401 the policy was meant to prevent, and a request can sit behind a
+      # slow login for a while.
+      SKEW = 30.seconds
+
+      getter kind : Kind
+      getter ttl : Time::Span
+
+      def initialize(@kind : Kind = Kind::Off, @ttl : Time::Span = Time::Span.zero)
+      end
+
+      def self.off : RefreshBefore
+        new
+      end
+
+      def off? : Bool
+        @kind.off?
+      end
+
+      # `off` | `jwt-exp` | `ttl=<n>[s|m|h]`, case-insensitively; nil for anything else. A
+      # bare number is seconds, as `--for` reads one. A zero TTL is refused: it would refresh
+      # before every send, which is a login flood with a policy's name on it.
+      def self.parse?(raw : String) : RefreshBefore?
+        v = raw.strip.downcase
+        return off if v == "off" || v.empty?
+        return new(Kind::JwtExp) if v == "jwt-exp" || v == "jwt_exp"
+        return nil unless m = v.match(/\Attl[=:](\d{1,7})(s|m|h)?\z/)
+        n = m[1].to_i64
+        return nil if n <= 0
+        span = case m[2]?
+               when "m" then n.minutes
+               when "h" then n.hours
+               else          n.seconds
+               end
+        new(Kind::Ttl, span)
+      end
+
+      # The spelling `parse?` reads back, and the one every surface prints.
+      def to_s(io : IO) : Nil
+        case @kind
+        in Kind::Off    then io << "off"
+        in Kind::JwtExp then io << "jwt-exp"
+        in Kind::Ttl    then io << "ttl=" << RefreshBefore.span_label(@ttl)
+        end
+      end
+
+      def ==(other : RefreshBefore) : Bool
+        @kind == other.kind && (@kind.ttl? ? @ttl == other.ttl : true)
+      end
+
+      # `90s` → `90s`, `600s` → `10m`, `7200s` → `2h`: the largest unit that divides evenly.
+      def self.span_label(span : Time::Span) : String
+        s = span.total_seconds.to_i64
+        return "#{s // 3600}h" if s > 0 && s % 3600 == 0
+        return "#{s // 60}m" if s > 0 && s % 60 == 0
+        "#{s}s"
+      end
+    end
 
     def initialize(@name : String,
                    @set_headers : Array({String, String}) = [] of {String, String},
                    @remove_headers : Array(String) = [] of String,
                    @baseline : Bool = false,
                    @rules : Array(String) = [] of String,
-                   @literal_headers : Array(String) = [] of String)
+                   @literal_headers : Array(String) = [] of String,
+                   @refresh : Array(Int64) = [] of Int64,
+                   @refresh_before : RefreshBefore = RefreshBefore.off)
+    end
+
+    # The same slot with some fields replaced. EVERY rebuild of an existing slot goes through
+    # here: a positional `SessionSlot.new(…)` that forgets a trailing field compiles cleanly and
+    # silently resets it to its default, which is how a baseline move would erase a slot's
+    # refresh steps.
+    def copy_with(*, name : String = @name,
+                  set_headers : Array({String, String}) = @set_headers,
+                  remove_headers : Array(String) = @remove_headers,
+                  baseline : Bool = @baseline,
+                  rules : Array(String) = @rules,
+                  literal_headers : Array(String) = @literal_headers,
+                  refresh : Array(Int64) = @refresh,
+                  refresh_before : RefreshBefore = @refresh_before) : SessionSlot
+      SessionSlot.new(name, set_headers, remove_headers, baseline, rules, literal_headers,
+        refresh, refresh_before)
+    end
+
+    # Does this slot have a way to re-authenticate at all? A negative (detached) step still
+    # counts: the slot HAS a refresh, and running it reports the deleted step rather than
+    # pretending the list is empty.
+    def refreshable? : Bool
+      !@refresh.empty?
+    end
+
+    # Should a send going out as this slot consider refreshing it first? The cheap half of the
+    # before-send question — a policy and something to run. Whether it is DUE is the engine's.
+    def auto_refresh? : Bool
+      refreshable? && !@refresh_before.off?
+    end
+
+    # The identity half of a slot: everything that decides WHICH credential a send carries,
+    # and nothing about how it is refreshed or which slot is the baseline. Two lists whose
+    # identities agree are the same set of identities, so a peer's edit to a refresh list (or
+    # a deleted step's detach) is not a reason to discard anything bound under them — see
+    # `SessionSlots#reload`.
+    def same_identity?(other : SessionSlot) : Bool
+      @name == other.name && @set_headers == other.set_headers &&
+        @remove_headers == other.remove_headers && @rules == other.rules &&
+        @literal_headers == other.literal_headers
     end
 
     # The as-captured slot: no overlay at all, so the request goes out exactly as it was
@@ -83,13 +210,13 @@ module Gori
     # The same slot with a different baseline flag — the list editor's `b` key, which is the
     # ONLY place the flag moves, so two slots can never both claim it.
     def with_baseline(flag : Bool) : SessionSlot
-      SessionSlot.new(@name, @set_headers, @remove_headers, flag, @rules, @literal_headers)
+      copy_with(baseline: flag)
     end
 
     # The same slot claiming a different rule set. Membership is edited on the SLOT and not on
     # the rule so that a project with no slots has no membership state at all to migrate.
     def with_rules(names : Array(String)) : SessionSlot
-      SessionSlot.new(@name, @set_headers, @remove_headers, @baseline, names, @literal_headers)
+      copy_with(rules: names)
     end
 
     def literal_header?(name : String) : Bool
@@ -106,7 +233,7 @@ module Gori
       values = @set_headers.map do |(name, value)|
         literal_header?(name) ? {name, value} : {name, yield(value)}
       end
-      SessionSlot.new(@name, values, @remove_headers, @baseline, @rules, @literal_headers)
+      copy_with(set_headers: values)
     end
 
     # A one-line summary of what this overlay does, header NAMES only. The identities list
@@ -161,6 +288,15 @@ module Gori
                   j.array { slot.literal_headers.each { |name| j.string(name) } }
                 end
               end
+              # Both refresh keys are written only when set, for the reason `rules` is: a
+              # project that never configured a refresh round-trips byte-identically to what a
+              # pre-#1233 gori wrote, and an older build reading a newer blob ignores the keys.
+              unless slot.refresh.empty?
+                j.field "refresh" do
+                  j.array { slot.refresh.each { |id| j.number(id) } }
+                end
+              end
+              j.field "refresh_before", slot.refresh_before.to_s unless slot.refresh_before.off?
             end
           end
         end
@@ -186,9 +322,49 @@ module Gori
         next if name.nil? || name.empty?
         list << SessionSlot.new(name, parse_set(o["set"]?), parse_strings(o["remove"]?),
           o["baseline"]?.try(&.as_bool?) || false, parse_strings(o["rules"]?),
-          parse_strings(o["literal"]?))
+          parse_strings(o["literal"]?), parse_ids(o["refresh"]?),
+          o["refresh_before"]?.try(&.as_s?).try { |v| RefreshBefore.parse?(v) } || RefreshBefore.off)
       end
       list
+    end
+
+    # The persisted blob with Repeater session `id` DETACHED from every slot's refresh list
+    # (negated in place), or nil when no slot names it — the common case, which writes nothing.
+    # Called by `Store#delete_repeater` inside its transaction.
+    #
+    # Edited at the JSON level rather than through `parse_json` + `serialize`: those two are
+    # lossy for an entry this build does not understand (a newer build's key, a hand-written
+    # blob), and a tab close must not rewrite anything but the one number it is about. Never
+    # raises — it runs on the store's writer fiber, and a malformed row is "nothing to detach".
+    def self.detach_refresh(raw : String?, id : Int64) : String?
+      return nil if raw.nil? || id <= 0
+      arr = JSON.parse(raw).as_a?
+      return nil unless arr
+      touched = false
+      fresh = arr.map do |entry|
+        o = entry.as_h?
+        refs = o.try(&.["refresh"]?).try(&.as_a?)
+        next entry unless o && refs && refs.any? { |r| r.as_i64? == id }
+        touched = true
+        copy = o.dup
+        copy["refresh"] = JSON::Any.new(refs.map { |r| r.as_i64? == id ? JSON::Any.new(-id) : r })
+        JSON::Any.new(copy)
+      end
+      touched ? fresh.to_json : nil
+    rescue JSON::ParseException
+      nil
+    end
+
+    # A step id of zero, or anything that is not an integer, is skipped: neither can name a
+    # Repeater session. A negative id is KEPT — it is a detached step (see `refresh`).
+    private def self.parse_ids(node : JSON::Any?) : Array(Int64)
+      ids = [] of Int64
+      return ids unless arr = node.try(&.as_a?)
+      arr.each do |e|
+        id = e.as_i64?
+        ids << id if id && id != 0
+      end
+      ids
     end
 
     private def self.parse_set(node : JSON::Any?) : Array({String, String})

@@ -19,7 +19,7 @@ module Gori
     # Activity pane's `s` chip could never narrow to them, and MCP `list_events{source:"issues"}`
     # was REFUSED as invalid while naming a set that omitted a source the project writes. A
     # writer that is not in this list is reachable only by reading the whole feed.
-    EVENT_SOURCES = %w[agent operator config issues bindings rewriter probe discover fuzzer miner sequencer]
+    EVENT_SOURCES = %w[agent operator config issues bindings session rewriter probe discover fuzzer miner sequencer]
 
     # Every `level` the feed carries, in the order the Activity pane's `l` chip cycles them.
     # Here for the reason EVENT_SOURCES is: the column is a free string and this is the list of

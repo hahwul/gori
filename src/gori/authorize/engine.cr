@@ -4,6 +4,7 @@ require "../host_overrides"
 require "../repeater/exchange_meta"
 require "../repeater/flow_request"
 require "../outbound"
+require "../session_refresh/hook"
 require "./identity"
 require "./passive"
 require "./verdict"
@@ -289,6 +290,12 @@ module Gori
         # The mint context names the dial, so a `$GEN.USER_AGENT` in the identity's headers
         # agrees with the TLS preset the replay presents (#1153). Authorize has no per-send
         # preset: the destination rule decides.
+        # The IDENTITY's before-send refresh (#1233), keyed on its own name: this sender wears no
+        # active slot (`live`), so every slot a trial goes out as is asked about in turn. An
+        # identity no slot registers (an `--identities` file, the built-in baseline) has no
+        # policy and is a no-op. It acts BEFORE the send and reads no response, so a 401 here is
+        # still the verdict — never a reason to log in again and retry.
+        SessionRefresh.before_send(id.name)
         gen = Env::Generation.for_dial(origin.host, origin.scheme)
         bytes = Authorize.overlay_wire(base_bytes, Authorize.resolve(id, gen))
         # Whole-buffer verbatim: we supply the identity ourselves, so gori's own session-binding

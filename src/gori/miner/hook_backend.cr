@@ -1,4 +1,5 @@
 require "../env"
+require "../session_refresh/hook"
 require "../process_hook"
 require "../fuzz/engine"
 require "./inject"
@@ -99,6 +100,9 @@ module Gori::Miner
       spans = @inner.evidence? ? Fuzz::Backend.all_verbatim(bytes) : verbatim
       # ONE context across both passes, as `Fuzz::Sender#send` holds it, naming the dial so a
       # `$GEN.USER_AGENT` agrees with the TLS preset the inner sender will present (#1153).
+      # The active slot's before-send refresh (#1233): this backend runs the binding pass and the
+      # overlay ITSELF (the inner sender's overlay is off), so it asks here, before both.
+      Gori::SessionRefresh.before_send(Gori::Env.active_slot_name)
       origin = @inner.origin
       gen = Gori::Env::Generation.for_dial(origin.host, origin.scheme, @inner.as?(Fuzz::Sender).try(&.tls_preset))
       prepared = Gori::Env.expand_bindings(bytes, spans, generation: gen)

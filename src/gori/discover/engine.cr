@@ -8,6 +8,7 @@ require "../repeater/engine"
 require "../repeater/h2_engine"
 require "../repeater/conn_pool"
 require "../env"
+require "../session_refresh/hook"
 require "../proxy/codec/content_decode"
 require "../pacing"
 
@@ -196,6 +197,9 @@ module Gori::Discover
       unless Proxy::Codec::Http1.request_token_safe?(target) && Proxy::Codec::Http1.request_token_safe?(host)
         return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, UNSAFE_URL)
       end
+      # The active slot's before-send refresh (#1233), before `request_head` resolves the
+      # slot's overlay — the crawl then carries the rebound credential. See `Repeater::Sender#wire`.
+      Gori::SessionRefresh.before_send(Gori::Env.active_slot_name)
       req = request_head(scheme, host, port, target)
       result = if @http2
                  Repeater::H2Engine.send(req, scheme: scheme, host: host, port: port,
