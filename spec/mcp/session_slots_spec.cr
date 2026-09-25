@@ -459,3 +459,94 @@ describe "MCP create_session_slot from a captured request" do
     end
   end
 end
+
+# A login origin for the refresh tool: every request gets a fresh `Set-Cookie: sid=T<n>`.
+private def start_refresh_origin : {TCPServer, Int32}
+  server = TCPServer.new("127.0.0.1", 0)
+  port = server.local_address.port
+  n = 0
+  spawn do
+    while conn = server.accept?
+      begin
+        conn.read_timeout = 5.seconds
+        next unless Gori::Proxy::Codec::Http1.read_head(conn)
+        n += 1
+        conn << "HTTP/1.1 200 OK\r\nSet-Cookie: sid=SECRET#{n}; Path=/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        conn.flush
+      rescue
+      ensure
+        conn.close rescue nil
+      end
+    end
+  end
+  {server, port}
+end
+
+describe "MCP session slot refresh (#1233)" do
+  it "takes refresh steps and a policy on create/update, and refuses an id that names nothing" do
+    with_store_env do |store|
+      t = tools_for(store)
+      id = store.insert_repeater("http://127.0.0.1:1", "GET /login HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0)
+      created = call_json(t, "create_session_slot",
+        %({"name":"admin","rules":["SESSION"],"refresh":[#{id}],"refresh_before":"jwt-exp"}))
+      created["refresh"].as_a.map(&.as_i64).should eq([id])
+      created["refresh_before"].as_s.should eq("jwt-exp")
+      Gori::SessionSlots.load(store).find("admin").not_nil!.refresh.should eq([id])
+
+      text, is_err = call_raw(t, "update_session_slot", %({"name":"admin","refresh":[#{id + 99}]}))
+      is_err.should be_true
+      text.should contain("no Repeater session ##{id + 99}")
+      text, is_err = call_raw(t, "update_session_slot", %({"name":"admin","refresh_before":"often"}))
+      is_err.should be_true
+      text.should contain("not a policy")
+
+      # An update that names neither keeps both — the partial-update contract of this tool.
+      call_json(t, "update_session_slot", %({"name":"admin","baseline":true}))
+      kept = Gori::SessionSlots.load(store).find("admin").not_nil!
+      kept.refresh.should eq([id])
+      kept.refresh_before.kind.jwt_exp?.should be_true
+    end
+  end
+
+  it "runs the steps, reports binding names and never a value, and lists the outcome" do
+    with_store_env do |store|
+      prev_hook = Gori::SessionRefresh.hook
+      server, port = start_refresh_origin
+      begin
+        id = store.insert_repeater("http://127.0.0.1:#{port}", "POST /login HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n".to_slice,
+          false, true, nil, 0)
+        t = tools_for(store)
+        call_json(t, "create_extract_rule", %({"name":"SESSION","kind":"cookie","selector":"sid"}))
+        call_json(t, "create_session_slot", %({"name":"admin","rules":["SESSION"],"refresh":[#{id}]}))
+
+        # Strict by default: an unconfigured project refuses the step unless the caller waives it.
+        refused = call_json(t, "refresh_session_slot", %({"name":"admin"}))
+        refused["ok"].as_bool.should be_false
+        refused["reason"].as_s.should contain("out of the project scope")
+
+        text, _ = call_raw(t, "refresh_session_slot", %({"name":"admin","allow_unscoped":true}))
+        text.should_not contain("SECRET")
+        reply = JSON.parse(text)
+        reply["ok"].as_bool.should be_true
+        reply["rebound"].as_a.map(&.as_s).should eq(["SESSION"])
+
+        listed = call_raw(t, "list_session_slots", "{}")[0]
+        listed.should_not contain("SECRET")
+        JSON.parse(listed)["slots"][0]["last_refresh"]["ok"].as_bool.should be_true
+      ensure
+        server.close
+        Gori::SessionRefresh.hook = prev_hook
+      end
+    end
+  end
+
+  it "refuses a slot with no steps as a deterministic argument error" do
+    with_store_env do |store|
+      t = tools_for(store)
+      call_json(t, "create_session_slot", %({"name":"plain"}))
+      text, is_err = call_raw(t, "refresh_session_slot", %({"name":"plain"}))
+      is_err.should be_true
+      text.should contain("has no refresh steps")
+    end
+  end
+end

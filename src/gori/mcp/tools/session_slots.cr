@@ -3,6 +3,7 @@ require "../../store"
 require "../../session_slots"
 require "../../discover/headers"
 require "../../session_from_flow"
+require "../../session_refresh"
 
 module Gori
   module MCP
@@ -62,7 +63,7 @@ module Gori
                                    "overlay, global bindings). Pick one with set_active_session_slot." if active.nil?
             j.field("slots") do
               j.array do
-                registry.slots.each { |s| emit_session_slot(j, s, include_sensitive, active) }
+                registry.slots.each { |s| emit_session_slot(j, s, include_sensitive, active, refresh_status: true) }
               end
             end
           end
@@ -88,9 +89,11 @@ module Gori
         built = slot_set_headers_or_flow(h)
         return built if built.is_a?(Result)
         set_headers, sources, literal_headers = built
+        refresh = slot_refresh_args(h, [] of Int64, Gori::SessionSlot::RefreshBefore.off)
+        return refresh if refresh.is_a?(Result)
         slot = Gori::SessionSlot.new(name, set_headers, str_list(h, "remove_headers").map(&.strip).reject(&.empty?),
           bool_arg(h, "baseline", false), str_list(h, "rules").map(&.strip).reject(&.empty?),
-          literal_headers)
+          literal_headers, refresh[0], refresh[1])
         unless registry.add(slot)
           return busy("session slot NOT created (store busy or unwritable); no slot was added")
         end
@@ -208,10 +211,13 @@ module Gori
         headers = update_slot_headers(h, current)
         return headers if headers.is_a?(Result)
         set_headers, literal_headers = headers
-        updated = Gori::SessionSlot.new(target_name, set_headers,
-          slot_names_arg(h, "remove_headers", current.remove_headers),
-          bool_arg(h, "baseline", current.baseline?),
-          slot_names_arg(h, "rules", current.rules), literal_headers)
+        refresh = slot_refresh_args(h, current.refresh, current.refresh_before)
+        return refresh if refresh.is_a?(Result)
+        updated = current.copy_with(name: target_name, set_headers: set_headers,
+          remove_headers: slot_names_arg(h, "remove_headers", current.remove_headers),
+          baseline: bool_arg(h, "baseline", current.baseline?),
+          rules: slot_names_arg(h, "rules", current.rules), literal_headers: literal_headers,
+          refresh: refresh[0], refresh_before: refresh[1])
         unless registry.update(name, updated)
           return busy("session slot NOT updated (store busy or unwritable); it is unchanged")
         end
@@ -283,6 +289,76 @@ module Gori
         end)
       end
 
+      # `refresh` (Repeater session ids, in order) and `refresh_before` (`off` | `jwt-exp` |
+      # `ttl=10m`), each ABSENT-keeps like the name lists above. Every id must name a Repeater
+      # session that exists now: a typo refused here is cheaper than a step that fails at the
+      # first automatic refresh in the middle of a sweep. Deterministic, so INVALID_ARGUMENT.
+      private def slot_refresh_args(h, ids : Array(Int64),
+                                    policy : Gori::SessionSlot::RefreshBefore) : {Array(Int64), Gori::SessionSlot::RefreshBefore} | Result
+        if h.has_key?("refresh")
+          ids = begin
+            id_list_arg(h, "refresh")
+          rescue ex : Gori::Error
+            return err(ex.message || "invalid 'refresh'", "INVALID_ARGUMENT", field: "refresh")
+          end
+          if bad = ids.find { |id| id <= 0 || store.get_repeater(id).nil? }
+            return err("no Repeater session ##{bad} in this project (see get_repeater_context / " \
+                       "create_repeater) — 'refresh' lists the Repeater sessions that re-authenticate " \
+                       "the slot, in order", "INVALID_ARGUMENT", field: "refresh")
+          end
+        end
+        if raw = str(h, "refresh_before")
+          policy = Gori::SessionSlot::RefreshBefore.parse?(raw) ||
+                   return err("'refresh_before' #{raw.inspect} is not a policy — use \"off\", " \
+                              "\"jwt-exp\" or \"ttl=<n>[s|m|h]\" (e.g. \"ttl=10m\")",
+                     "INVALID_ARGUMENT", field: "refresh_before")
+        end
+        {ids, policy}
+      end
+
+      # Run a slot's refresh steps now (#1233). The values it rebinds live in THIS server
+      # process — the same per-process table every other tool here resolves against — and the
+      # reply carries binding NAMES, never a value. Every step is recorded in History (source
+      # `refresh`) and the outcome in the event log.
+      #
+      # `allow_unscoped` gates the STEPS, strictly by default (`Outbound.agent`), exactly as it
+      # gates `send_request`. A deterministic refusal (no such slot, no steps) is
+      # INVALID_ARGUMENT; a refresh that RAN and failed is a normal reply with `ok: false`, since
+      # the step's answer is the result the caller asked for.
+      @[Tool("refresh_session_slot", gated: true, agent_action: true, env_refresh: true)]
+      private def refresh_session_slot(h) : Result
+        name = str(h, "name").try(&.strip)
+        return err("missing required 'name'", "INVALID_ARGUMENT", field: "name") if name.nil? || name.empty?
+        registry = fresh_slots
+        slot = registry.find(name)
+        return not_found("no session slot named '#{name}' (see list_session_slots)") unless slot
+        if slot.refresh.empty?
+          return err("session slot '#{name}' has no refresh steps — set them with update_session_slot " \
+                     "{refresh: [repeater ids, in order]}", "INVALID_ARGUMENT", field: "name")
+        end
+        runner = @refresher || return err("no project is bound", "INVALID_ARGUMENT")
+        outcome = runner.refresh(name, Outbound.agent(Scope.load(store), bool_arg(h, "allow_unscoped", false)))
+        Result.new(JSON.build { |j| emit_refresh_outcome(j, outcome) })
+      end
+
+      private def emit_refresh_outcome(j : JSON::Builder, o : Gori::SessionRefresh::Outcome) : Nil
+        j.object do
+          j.field "slot", o.slot
+          j.field "ok", o.ok
+          j.field "manual", o.manual
+          j.field "steps", o.steps
+          j.field "failed_step", o.failed_step
+          j.field "step", o.step_label
+          j.field "status", o.status
+          j.field "reason", o.reason
+          j.field("rebound") { j.array { o.rebound.each { |n| j.string n } } }
+          j.field("flow_ids") { j.array { o.flow_ids.each { |id| j.number id } } }
+          j.field "message", o.message
+          j.field "at_iso", o.at.to_rfc3339
+          j.field "note", "values live in THIS server process only; a TUI or another gori keeps its own"
+        end
+      end
+
       # A name-list argument that is ABSENT rather than empty keeps what the slot already has —
       # the difference an agent rotating one cookie depends on, since it never read the rule
       # list it would otherwise blank. An explicit `[]` is a clear.
@@ -340,7 +416,8 @@ module Gori
 
       private def emit_session_slot(j : JSON::Builder, slot : Gori::SessionSlot,
                                     include_sensitive : Bool, active : String?,
-                                    sources : Array(String) = [] of String) : Nil
+                                    sources : Array(String) = [] of String,
+                                    refresh_status : Bool = false) : Nil
         j.object do
           j.field "name", slot.name
           # Where each header came from, when the overlay was READ off a flow rather than
@@ -364,6 +441,24 @@ module Gori
           end
           j.field("remove_headers") { j.array { slot.remove_headers.each { |n| j.string n } } }
           j.field("rules") { j.array { slot.rules.each { |n| j.string n } } }
+          # The refresh half (#1233). A NEGATIVE id is a step whose Repeater session was
+          # deleted — it refuses to run until it is removed.
+          j.field("refresh") { j.array { slot.refresh.each { |id| j.number id } } }
+          j.field("refresh_steps") { j.array { Gori::SessionRefresh.step_labels(store, slot).each { |l| j.string l } } }
+          j.field "refresh_before", slot.refresh_before.to_s
+          emit_refresh_status(j, slot) if refresh_status
+        end
+      end
+
+      # THIS process's refresh state for the slot: refreshing now, the last outcome (names,
+      # never values), and whether automatic refresh has switched itself off.
+      private def emit_refresh_status(j : JSON::Builder, slot : Gori::SessionSlot) : Nil
+        return unless (runner = @refresher) && slot.refreshable?
+        st = runner.status(slot.name)
+        j.field "refreshing", st.refreshing
+        j.field "auto_refresh_off", st.auto_off if st.auto_off
+        if last = st.last
+          j.field("last_refresh") { emit_refresh_outcome(j, last) }
         end
       end
 
@@ -392,7 +487,8 @@ module Gori
           "exchange: gori copies the response's Set-Cookie pairs into one Cookie header and its " \
           "Authorization (or a top-level access_token/token/id_token string in a JSON body, as a " \
           "Bearer token). That overlay is a LITERAL snapshot of the response bytes: it does " \
-          "NOT auto-reauthenticate or refresh. The slot is project-wide and its active overlay " \
+          "NOT re-authenticate by itself — give the slot 'refresh' steps (Repeater sessions that " \
+          "log in) for that. The slot is project-wide and its active overlay " \
           "can affect every outbound request from this server, so consider the blast radius. " \
           "For a token that ROTATES, use the extract-rule path (create_extract_rule) instead. " \
           "Pass 'from_request_flow_id' together with 'copy_headers' to copy selected headers " \
@@ -405,6 +501,8 @@ module Gori
           s.field "remove_headers", strarrprop("header names to STRIP before sending (e.g. [\"Cookie\",\"Authorization\"] for an anonymous identity)")
           s.field "rules", strarrprop("extract-rule binding NAMES whose observed values belong to this slot instead of the global table (see list_extract_rules)")
           s.field "baseline", boolprop("make this the authorize BASELINE every other slot is judged against (exactly one slot holds it)")
+          s.field "refresh", refresh_ids_prop
+          s.field "refresh_before", refresh_before_prop
         end
 
         tool j, "update_session_slot",
@@ -416,6 +514,22 @@ module Gori
           s.field "remove_headers", strarrprop("replace the header names this slot strips")
           s.field "rules", strarrprop("replace the extract-rule binding names this slot claims")
           s.field "baseline", boolprop("make this the authorize baseline")
+          s.field "refresh", refresh_ids_prop
+          s.field "refresh_before", refresh_before_prop
+        end
+
+        tool j, "refresh_session_slot",
+          "Run a session slot's REFRESH steps now: its Repeater sessions, in order (e.g. csrf-fetch " \
+          "then login), each response going through the slot's own extract rules so the slot's " \
+          "bindings are rebound. Steps resolve THIS slot's $BIND values and carry no slot header " \
+          "overlay. Each step is recorded in History (source refresh) and the outcome in the event " \
+          "log. Returns ok/failed_step/status and the binding NAMES rebound — never a value. The " \
+          "values live in this server process only. A slot with refresh_before set also refreshes " \
+          "on its own before a send that goes out as it; a failed automatic refresh cools down " \
+          "#{Gori::SessionRefresh::COOLDOWN.total_seconds.to_i}s and stops after " \
+          "#{Gori::SessionRefresh::FAILURE_LIMIT} failures until a manual refresh succeeds." do |s|
+          s.field "name", strprop("the slot to refresh (see list_session_slots)"), required: true
+          s.field "allow_unscoped", boolprop("send the steps even when their host is outside the project scope (default false)")
         end
 
         tool j, "delete_session_slot",
@@ -438,6 +552,18 @@ module Gori
       # `set_headers` accepts both shapes a client reaches for: the {name, value} objects the
       # rest of this surface uses, and the "Name: value" lines an operator copies out of a
       # request. Declaring both beats refusing one an LLM will send anyway.
+      private def refresh_ids_prop : JSON::Any
+        id_list_prop("Repeater session ids that RE-AUTHENTICATE this slot, in the order they run " \
+                     "(e.g. [csrf-fetch id, login id]). Omit to keep the current list; [] clears it")
+      end
+
+      private def refresh_before_prop : JSON::Any
+        strprop("when the slot refreshes on its own before a send: \"off\" (default), \"jwt-exp\" " \
+                "(a JWT bound in the slot is within #{Gori::SessionSlot::RefreshBefore::SKEW.total_seconds.to_i}s " \
+                "of its exp) or \"ttl=10m\" (its newest binding is older than that). Acts before a " \
+                "send, never on a response: a 401 is never retried")
+      end
+
       private def session_headers_prop : JSON::Any
         desc = "headers this slot UPSERTS (replace if present, append if absent). Either " \
                "[{\"name\":\"Cookie\",\"value\":\"session=…\"}] or [\"Cookie: session=…\"]. " \
