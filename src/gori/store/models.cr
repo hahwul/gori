@@ -1985,12 +1985,16 @@ module Gori
       # "interesting". DEFAULTED so every construction site that predates the column keeps
       # compiling, and a run written before it reads "all" — which is what it was.
       getter keep : String
+      # The `idx` of the result this run's `stop_on` tripped on (issue #1270), or nil. Only a
+      # `condition_met` run carries one, and a `condition_met` run from before the column reads
+      # nil too: nil is "not recorded", never "no stop row". Defaulted like `keep`.
+      getter stop_idx : Int64?
 
       def initialize(@id, @session_id, @created_at, @finished_at, @target, @mode,
                      @total, @sent, @matched, @errors, @status, @http2 = false,
                      @sni = nil, @tls_preset = nil, @websocket = false,
                      @surface = nil, @source_ref = nil, @snapshot_version = 0,
-                     @keep = "all")
+                     @keep = "all", @stop_idx = nil)
       end
 
       # Was this run's archive filtered — i.e. not every row was kept? Read by the listings to

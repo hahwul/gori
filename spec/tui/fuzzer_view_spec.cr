@@ -1867,3 +1867,117 @@ describe "Gori::Tui::FuzzerController fuzz → Comparer slot" do
     slot.meta.status.should eq(404) # …and the row's own numbers survive
   end
 end
+
+# The run's stop row (issue #1270). The view marks it by INDEX against the run's own record —
+# the live `DoneEvent#stop_index` or a reopened run's `stop_idx` — never by `stop_hit?`, which
+# an `after_matches` stop does not set and several in-flight rows can carry.
+describe "Gori::Tui::FuzzerView stop row" do
+  it "keeps a stop row only for a condition_met ending, and a new run clears it" do
+    view = loaded_fuzzer
+    view.begin_run(3_i64)
+    3.times { |i| view.append_result(fuzz_result(i, 200, 10, matched: true)) }
+    view.finish_run("stopped", stop_idx: 1_i64)
+    view.run_stop_idx.should be_nil
+
+    view.begin_run(3_i64)
+    3.times { |i| view.append_result(fuzz_result(i, 200, 10, matched: true)) }
+    view.finish_run("condition_met", stop_idx: 1_i64)
+    view.run_stop_idx.should eq(1_i64)
+    view.results_count_label.should contain("stop #1")
+
+    view.begin_run(3_i64)
+    view.run_stop_idx.should be_nil
+    view.results_count_label.should_not contain("stop #")
+  end
+
+  it "marks the stop row in the list, and only that row — even when it carries no stop_hit" do
+    view = loaded_fuzzer
+    view.focus_pane(:results)
+    view.begin_run(3_i64)
+    # Rows 0 and 2 met the condition too (in flight); row 1 is where the run stopped.
+    view.append_result(Gori::Fuzz::Result.new(0_i64, ["p0"], nil, 200, 1_i64, 1, 1, 1_i64,
+      nil, false, false, nil, stop_hit: true))
+    view.append_result(fuzz_result(1, 200, 10, matched: true))
+    view.append_result(Gori::Fuzz::Result.new(2_i64, ["p2"], nil, nil, 0_i64, 0, 0, 1_i64,
+      "refused", false, false, nil, stop_hit: true))
+    view.finish_run("condition_met", stop_idx: 1_i64)
+    backend = MemoryBackend.new(160, 30)
+    view.render(Screen.new(backend), Rect.new(0, 0, 160, 30))
+    marked = (0...30).select { |y| backend.row(y).includes?(FuzzerView::STOP_ROW_MARK) }
+      .map { |y| backend.row(y) }
+    marked.size.should eq(1)
+    marked.first.should contain("p1")
+  end
+
+  it "keeps the marker ahead of an error, whose text runs to the border" do
+    view = loaded_fuzzer
+    view.focus_pane(:results)
+    view.begin_run(1_i64)
+    view.append_result(fuzz_result(0, nil, 0, error: "connection refused " * 8))
+    view.finish_run("condition_met", stop_idx: 0_i64)
+    backend = MemoryBackend.new(120, 30)
+    view.render(Screen.new(backend), Rect.new(0, 0, 120, 30))
+    (0...30).any? { |y| backend.row(y).includes?("#{FuzzerView::STOP_ROW_MARK} · connection refused") }
+      .should be_true
+  end
+
+  it "notes the stop row in its detail, including one opened before the run finished" do
+    view = loaded_fuzzer
+    view.begin_run(1_i64)
+    view.append_result(Gori::Fuzz::Result.new(0_i64, ["p0"], nil, 200, 2_i64, 1, 1, 1_i64, nil,
+      true, false, nil, "HTTP/1.1 200 OK\r\n\r\n".to_slice, "ok".to_slice))
+    view.open_detail
+    rect = Rect.new(0, 0, 140, 30)
+    before = MemoryBackend.new(rect.w, rect.h)
+    view.render(Screen.new(before), rect) # caches the row's lines while it is not yet the stop row
+    before.contains?("stop_on tripped on this result").should be_false
+
+    view.finish_run("condition_met", stop_idx: 0_i64)
+    after = MemoryBackend.new(rect.w, rect.h)
+    view.render(Screen.new(after), rect)
+    after.contains?("stop_on tripped on this result").should be_true
+  end
+end
+
+describe "Gori::Tui::FuzzerView stop row of a loaded run" do
+  it "drops a loaded run's stop row with the run when a peer deletes it" do
+    view = loaded_fuzzer
+    run = Gori::Store::FuzzRunRecord.new(5_i64, 2_i64, 3_i64, 4_i64, "https://h", "sniper",
+      2_i64, 2_i64, 1_i64, 0_i64, "condition_met", snapshot_version: 1, stop_idx: 1_i64)
+    view.load_saved_run(run, [fuzz_result(0, 200, 10), fuzz_result(1, 200, 10, matched: true)])
+    view.run_stop_idx.should eq(1_i64)
+    view.forget_saved_run(5_i64)
+    view.run_stop_idx.should be_nil
+    view.results_count_label.should_not contain("stop #")
+  end
+end
+
+class Gori::Tui::FuzzerView
+  def detail_styled_for_spec : Array(Gori::Tui::Highlight::Line)
+    r = selected_result.not_nil!
+    detail_styled(r, detail_lines(r))
+  end
+end
+
+describe "Gori::Tui::FuzzerView detail notes" do
+  # A note is prepended ABOVE the message, and the message highlighter reads line 0 as the
+  # start line: the note used to take that colour and push the real status line into header
+  # styling. The stop row's note put it on every stop row (#1270); `incomplete` already had it.
+  it "styles the status line under a note exactly as it would be styled without one" do
+    head = "HTTP/1.1 200 OK\r\nX-A: b\r\n\r\n"
+    view = loaded_fuzzer
+    view.begin_run(1_i64)
+    view.append_result(Gori::Fuzz::Result.new(0_i64, ["p0"], nil, 200, 2_i64, 1, 1, 1_i64, nil,
+      true, true, nil, head.to_slice, "ok".to_slice))
+    view.finish_run("condition_met", stop_idx: 0_i64)
+    view.open_detail
+    styled = view.detail_styled_for_spec
+    plain = view.detail_plain_lines
+    plain[0].should contain("stop_on tripped on this result")
+    plain[1].should contain("incomplete")
+    plain[2].should eq("HTTP/1.1 200 OK")
+    bare = Gori::Tui::Highlight.from_lines(plain[2..], request: false)
+    styled[2..].should eq(bare)
+    styled.size.should eq(plain.size)
+  end
+end

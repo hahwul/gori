@@ -1455,6 +1455,18 @@ module Gori
         "UPDATE match_rules SET respond = 'file' WHERE op = 'short_circuit' AND body_file != ''",
       ]
 
+      # Which result a saved fuzz run's `stop_on` tripped on (issue #1270): the `idx` of that
+      # row, written by the terminal update only when the run committed `condition_met`. NULL
+      # on every other run, and on every `condition_met` run written before this column — NULL
+      # means NOT RECORDED, not "no row", and nothing here can recover it: the per-row
+      # `stop_hit` flag was never stored, an `after_matches` stop trips on a row that flag does
+      # not mark, and concurrency lets later in-flight rows meet the condition too. On the run
+      # row rather than a `fuzz_results` column because it is one fact about the run, and it
+      # costs no result projection a byte.
+      V34 = [
+        "ALTER TABLE fuzz_runs ADD COLUMN stop_idx INTEGER",
+      ]
+
       # Data statements that call gori's OWN SQL functions, run by `migrate!` right after the
       # version they complete. Kept out of MIGRATIONS because that list is plain schema that a
       # bare connection can replay (specs build every historical shape that way), and a bare
@@ -1476,7 +1488,8 @@ module Gori
       }
 
       MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17,
-                    V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29, V30, V31, V32, V33]
+                    V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29, V30, V31, V32, V33,
+                    V34]
 
       def self.migrate!(db : DB::Database, read_only : Bool = false) : Nil
         db.using_connection do |conn|

@@ -165,7 +165,7 @@ module Gori
         end
 
         tool j, "get_fuzz_run",
-          "Get one permanent fuzz run and page every stored result. Metrics, including result_index, use a scalar-only projection. Set include_content:true for at most 25 SQLite-capped content rows; max_head_bytes and max_body_bytes bound redacted previews before retained BLOBs enter the process. include_sensitive:true adds exact capped prefix bytes and never bypasses those limits." do |s|
+          "Get one permanent fuzz run and page every stored result. A run whose stop_on ended it (status condition_met) names the result it tripped on as run.stop_index — fetch that row with result_index; null when not recorded (a run saved before gori recorded it). Metrics, including result_index, use a scalar-only projection. Set include_content:true for at most 25 SQLite-capped content rows; max_head_bytes and max_body_bytes bound redacted previews before retained BLOBs enter the process. include_sensitive:true adds exact capped prefix bytes and never bypasses those limits." do |s|
           s.field "run_id", intprop("permanent run id"), required: true
           s.field "result_index", intprop("optional exact result index (zero-based)")
           s.field "offset", intprop("result rows to skip (default 0)")

@@ -892,7 +892,8 @@ module Gori
               saved_terminal = true
               condition_met = !ev.stop_reason.nil?
               saved.try(&.finish(ev.progress.sent, ev.progress.matched, ev.progress.errors,
-                Fuzz.terminal_status(ev.progress, ev.stopped, max_requests, had_error, ev.stop_reason)))
+                Fuzz.terminal_status(ev.progress, ev.stopped, max_requests, had_error, ev.stop_reason),
+                stop_idx: ev.stop_index))
               fuzz_done(ev, shown, pool, max_requests, race, engine.matcher_constrained?, reframe_grpc)
             when Fuzz::ErrorEvent
               # The engine follows setup errors with Done. Defer the terminal write to that

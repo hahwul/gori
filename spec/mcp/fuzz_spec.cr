@@ -251,6 +251,61 @@ describe "MCP fuzz tools" do
     end
   end
 
+  it "names the stop row live and on the saved run, for both stop_on shapes (#1270)" do
+    port = start_origin
+    with_store do |store|
+      tools = tools_for(store)
+      base = {
+        "template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+        "url"            => "http://127.0.0.1:#{port}",
+        "payloads"       => %([{"list":["a","b","c","d","e"]}]),
+        "concurrency"    => 1,
+        "save_results"   => true,
+        "allow_unscoped" => true,
+      }
+
+      # after_matches: the 2nd match trips it — a plain matched row that carries no stop_hit.
+      start = call_json(tools, "fuzz_start", base.merge({
+        "match" => %({"status":"200"}), "stop_on" => %({"after_matches":2}),
+      }).to_json)
+      status = wait_fuzz_done(tools, start["job_id"].as_s)
+      status["status"].as_s.should eq("condition_met")
+      status["stop_index"].as_i64.should eq(1_i64)
+      run_id = status["run_id"].as_i64
+
+      # A reader with no live job — the reopen — still names it, in the listing and the run.
+      reader = Gori::MCP::Tools.new(store, allow_actions: false, verify_upstream: false)
+      listed = call_json(reader, "list_fuzz_runs", %({"limit":10}))
+      listed["runs"].as_a.find! { |r| r["id"].as_i64 == run_id }["stop_index"].as_i64.should eq(1_i64)
+      page = call_json(reader, "get_fuzz_run", {run_id: run_id}.to_json)
+      page["run"]["stop_index"].as_i64.should eq(1_i64)
+      row = call_json(reader, "get_fuzz_run", {run_id: run_id, result_index: 1}.to_json)
+      row["result"]["matched"].as_bool.should be_true
+      row["run"]["stop_index"].as_i64.should eq(1_i64)
+
+      # The separate condition under keep: interesting: the stop row is UNMATCHED, kept only
+      # because it is the stop row, and it is the one the saved run points at.
+      start = call_json(tools, "fuzz_start", base.merge({
+        "match" => %({"status":"500"}), "stop_on" => %({"match":{"status":"200"}}),
+        "keep" => "interesting",
+      }).to_json)
+      status = wait_fuzz_done(tools, start["job_id"].as_s)
+      status["status"].as_s.should eq("condition_met")
+      status["stop_index"].as_i64.should eq(0_i64)
+      page = call_json(reader, "get_fuzz_run", {run_id: status["run_id"].as_i64}.to_json)
+      page["run"]["stop_index"].as_i64.should eq(0_i64)
+      page["results"].as_a.map(&.["index"].as_i64).should eq([0_i64])
+
+      # A run that did not end on its condition has none: absent live, null saved.
+      start = call_json(tools, "fuzz_start", base.merge({"match" => %({"status":"200"})}).to_json)
+      status = wait_fuzz_done(tools, start["job_id"].as_s)
+      status["status"].as_s.should eq("done")
+      status["stop_index"]?.should be_nil
+      page = call_json(reader, "get_fuzz_run", {run_id: status["run_id"].as_i64}.to_json)
+      page["run"]["stop_index"].raw.should be_nil
+    end
+  end
+
   it "permanently saves every row independently of the bounded selective live cache" do
     port = start_origin
     with_store do |store|
@@ -1532,6 +1587,10 @@ module Gori::MCP
     def __store_fuzz_result(fjob : FuzzJob, r : Fuzz::Result) : Nil
       store_fuzz_result(fjob, r, nil, nil)
     end
+
+    def __drain_fuzz_event(fjob : FuzzJob, ev : Fuzz::Event) : Nil
+      drain_fuzz_event(fjob, ev)
+    end
   end
 end
 
@@ -1564,6 +1623,34 @@ describe "MCP fuzz — the stop row survives a spent unmatched budget" do
       stop = Gori::Fuzz::Result.new(1_i64, ["b"], nil, 200, 2_i64, 1, 1, 1_i64, nil, false, false, nil, stop_hit: true)
       tools.__store_fuzz_result(fjob, stop)
       fjob.results.map(&.index).should eq([1_i64])
+    end
+  end
+end
+
+describe "MCP fuzz — the live stop_index follows the terminal status (#1270)" do
+  it "names the stop row on condition_met and none on a job that landed :error" do
+    with_store do |store|
+      tools = tools_for(store)
+      job = ->(id : String) {
+        cfg = Gori::Fuzz::Config.new
+        gen = Gori::Fuzz::Generator.new(Gori::Fuzz::Template.parse("GET / HTTP/1.1\r\nHost: h\r\n\r\n"), [] of Gori::Fuzz::PayloadSet, cfg)
+        engine = Gori::Fuzz::Engine.new(gen, Gori::Fuzz::Matcher.new, NullFuzzBackend.new, cfg)
+        audit = Gori::MCP::Tools::JobAudit.new("http://h:80", nil, 1, nil, 0_i64)
+        Gori::MCP::Tools::FuzzJob.new(id, 3_i64, engine, :none, Gori::Fuzz::Origin.new("http", "h", 80), false, audit)
+      }
+      done = Gori::Fuzz::DoneEvent.new(Gori::Fuzz::Progress.new(2_i64, 3_i64, 2_i64, 0_i64), true,
+        "reached 2 matches on result 1 after 2 sent", 1_i64)
+
+      met = job.call("met")
+      tools.__drain_fuzz_event(met, done)
+      met.status.should eq(:condition_met)
+      met.stop_index.should eq(1_i64)
+
+      errored = job.call("errored")
+      tools.__drain_fuzz_event(errored, Gori::Fuzz::ErrorEvent.new("setup failed"))
+      tools.__drain_fuzz_event(errored, done)
+      errored.status.should eq(:error)
+      errored.stop_index.should be_nil
     end
   end
 end
