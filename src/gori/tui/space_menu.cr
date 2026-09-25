@@ -80,6 +80,10 @@ module Gori::Tui
       :wipe   => "WIPE",   # empties the whole tab/project store — the ⇧X verbs (#899)
     } of Symbol => String
 
+    # The bands that destroy stored data. They close the card in every bucket — after the
+    # untagged leftovers too — so a destructive key never sits above an ordinary one.
+    DESTRUCTIVE_GROUPS = {:danger, :wipe}
+
     # Below this many interior rows a column is too stubby to be worth splitting into,
     # so a very short terminal keeps the single-column vertical scroll (▲/▼) instead of
     # sprouting 3-row columns. Only consulted when the list does not already fit.
@@ -227,18 +231,22 @@ module Gori::Tui
     # One bucket's rows: its semantic bands (GROUP_ORDER, non-empty only) when ANY verb
     # in it carries a `group`, else the bucket itself under its own focus-area label.
     # Verbs left `:none` inside an otherwise-tagged bucket keep that bucket's label as a
-    # trailing band, so a half-tagged scope can never silently drop a verb — the worst
-    # case is one extra header, never a missing action.
+    # band of their own, so a half-tagged scope can never silently drop a verb — the worst
+    # case is one extra header, never a missing action. That band sits ahead of DANGER and
+    # WIPE: a scope that tags only its one clear (Notes) must not lead with it.
     private def split_semantic(label : String, verbs : Array(Verb::Definition)) : Array({String, Array(Verb::Definition)})
       return [{label, verbs}] if verbs.all? { |v| v.group == :none }
-      bands = [] of {String, Array(Verb::Definition)}
-      GROUP_ORDER.each do |g|
-        band = verbs.select { |v| v.group == g }
-        bands << {GROUP_LABELS[g], band} unless band.empty?
-      end
+      bands = semantic_bands(verbs, GROUP_ORDER.reject { |g| DESTRUCTIVE_GROUPS.includes?(g) })
       rest = verbs.select { |v| v.group == :none }
       bands << {label, rest} unless rest.empty?
-      bands
+      bands + semantic_bands(verbs, DESTRUCTIVE_GROUPS.to_a)
+    end
+
+    private def semantic_bands(verbs : Array(Verb::Definition), groups : Array(Symbol)) : Array({String, Array(Verb::Definition)})
+      groups.compact_map do |g|
+        band = verbs.select { |v| v.group == g }
+        {GROUP_LABELS[g], band} unless band.empty?
+      end
     end
 
     # Extra width when we paint a dim direct-chord label next to the title.

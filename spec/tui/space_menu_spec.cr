@@ -201,7 +201,7 @@ describe Gori::Tui::SpaceMenu do
     menu.verb_for('r').try(&.id).should eq("probe.repeater-evidence")
     menu.verb_for('d').try(&.id).should eq("probe.delete-selected")
     menu.verb_for('v').try(&.id).should eq("probe.open")
-    menu.verb_for('g').try(&.id).should eq("probe.dismiss-code")
+    menu.verb_for('G').try(&.id).should eq("probe.dismiss-code")
   end
 
   it "lists the Decoder tab's actions in the Decoder scope (reachable from the sub-tab strip)" do
@@ -605,9 +605,11 @@ describe Gori::Tui::SpaceMenu do
     menu = SpaceMenu.new(reg)
     menu.open(Gori::Verb::Scope::Body, :common, FakeExecContext.new)
 
-    # Nothing dropped, and the bands are in GROUP_ORDER with the leftovers last.
+    # Nothing dropped, and the bands are in GROUP_ORDER with the leftovers ahead of DANGER:
+    # a destructive band closes the card even when the rest of the bucket is untagged.
     menu.entries.size.should eq(5)
-    menu.entries.map(&.id).should contain("demo.untagged")
+    menu.entries.map(&.id).should eq(["demo.tagged.0", "demo.tagged.1", "demo.tagged.2",
+                                      "demo.untagged", "demo.tagged.3"])
     menu.verb_for('z').try(&.id).should eq("demo.untagged")
 
     backend = MemoryBackend.new(60, 30)
