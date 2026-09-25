@@ -1,6 +1,7 @@
 require "../tab_controller"
 require "../sitemap_view"
 require "../../export/openapi"
+require "../../js_refs"
 require "../../durable_file"
 
 module Gori::Tui
@@ -25,6 +26,10 @@ module Gori::Tui
       @search_pending = nil.as({Store, SitemapView::ReloadPlan, Int64}?)
       @search_results = Channel({Int64, SitemapView::ReloadPlan, SitemapView::Fetched?}).new(1)
       @export_results = Channel(String).new(4)
+      # The JavaScript reference scan (#1243), off the event loop like the export: it reads
+      # whole bodies, and the engine yields between flows and within one. One at a time.
+      @js_scan_results = Channel(String).new(4)
+      @js_scanning = false
     end
 
     def view : SitemapView
@@ -82,6 +87,73 @@ module Gori::Tui
       else
         false
       end
+    end
+
+    # `sitemap.js-scan` — read the JS responses and HTML pages behind the tree's own flow set
+    # (its `/` query and lenses, the Params sub-tab's rule) that no scan has read yet, and store
+    # what they reference. Sends nothing. A project switch mid-scan stops it between flows.
+    def js_scan(filter : QL::Filter) : Nil
+      if @js_scanning
+        @host.status("a JavaScript scan is already running")
+        return
+      end
+      store = @host.session.store
+      results = @js_scan_results
+      me = self
+      @js_scanning = true
+      @host.status("scanning captured JavaScript…")
+      spawn(name: "gori-js-scan") do
+        message = begin
+          report = JsRefs.scan(store, JsRefs::ScanOptions.new(filter: filter), -> { !me.bound_to?(store) })
+          SitemapController.js_scan_toast(report)
+        rescue ex
+          "JavaScript scan failed: #{ex.message || ex.class.name}"
+        end
+        results.send(message)
+      end
+    end
+
+    # Whether `store` is still the project this tab shows — a scan started before a switch
+    # stops at its next flow instead of writing on into a store the session let go of.
+    def bound_to?(store : Store) : Bool
+      @host.session.store.same?(store)
+    end
+
+    # The finished scan as one line: what it found, then every cap and failure — a capped scan
+    # looks complete, and a rolled-back write leaves a flow unscanned, so the toast says both.
+    def self.js_scan_toast(r : JsRefs::ScanReport) : String
+      msg = "JS scan: #{r.flows_scanned} response#{r.flows_scanned == 1 ? "" : "s"}, " \
+            "#{r.new_endpoints} new endpoint#{r.new_endpoints == 1 ? "" : "s"}"
+      msg += " · #{r.bodies_capped} read only to #{JsRefs::MAX_SCAN // 1024 // 1024} MiB" if r.bodies_capped > 0
+      msg += " · #{r.refs_capped} stopped at #{JsRefs::MAX_REFS} literals" if r.refs_capped > 0
+      msg += " · #{r.write_failures} NOT recorded (project busy) — scan again" if r.write_failures > 0
+      msg += " · more unscanned — scan again" if r.truncated
+      msg
+    end
+
+    # Called each run-loop tick: land a finished scan's toast and rebuild the tree with what it
+    # stored. True when one arrived.
+    def drain_js_scan : Bool
+      select
+      when message = @js_scan_results.receive
+        @js_scanning = false
+        @host.status(message)
+        reload
+        true
+      else
+        false
+      end
+    end
+
+    def js_scanning? : Bool
+      @js_scanning
+    end
+
+    # `sitemap.toggle-js-refs` — show/hide the JavaScript-referenced nodes, then rebuild.
+    def sitemap_toggle_js_refs : Nil
+      @sitemap.toggle_js_refs
+      reload
+      @host.status(@sitemap.js_refs? ? "JavaScript references shown" : "JavaScript references hidden")
     end
 
     def tab : Symbol
@@ -330,7 +402,7 @@ module Gori::Tui
         generation, plan, result = done
         if generation == @search_generation
           @sitemap.searching = false
-          @sitemap.apply_reload(result[0], result[1], plan, result[2]) if result
+          @sitemap.apply_reload(result[0], result[1], plan, result[2], result[3]) if result
         end
         start_search
         true

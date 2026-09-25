@@ -115,6 +115,19 @@ module Gori
         Verb::Scope::Sitemap, [Verb::Chord.new("g", shift: true)],
         mnemonic: 'Q', group: :view) { |ctx| ctx.sitemap_toggle_query_fold; nil }
 
+      # Endpoints captured JavaScript references (#1243). The scan reads bodies already in the
+      # project and sends NOTHING, so it needs no confirm; the toggle shows or hides what a scan
+      # stored. Menu-only, both: the tree's bare keys are spent, and neither is a
+      # many-times-a-minute gesture. 'J' names JavaScript; 'U' names the "unrequested" nodes
+      # the toggle governs ('j' is `sitemap.down`'s bare key, which a menu letter must not shadow).
+      r.register Verb::Definition.new(
+        "sitemap.js-scan", "Scan JavaScript", "Read captured JS responses and inline scripts for endpoints nobody requested (sends nothing)",
+        Verb::Scope::Sitemap, [] of Verb::Chord, mnemonic: 'J', group: :view) { |ctx| ctx.sitemap_js_scan; nil }
+
+      r.register Verb::Definition.new(
+        "sitemap.toggle-js-refs", "Toggle JS references", "Show/hide the paths captured JavaScript references and no request reached",
+        Verb::Scope::Sitemap, [] of Verb::Chord, mnemonic: 'U', group: :view) { |ctx| ctx.sitemap_toggle_js_refs; nil }
+
       # Toggle the scope lens from the Sitemap too (the lens key itself is the Global `s`).
       # scope_toggle_lens reloads the active sitemap, and the bar shows the `s scope` chip —
       # so the toggle is reachable where its effect is visible. Mnemonic 's' for the action

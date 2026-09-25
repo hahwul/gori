@@ -783,6 +783,7 @@ module Gori::Tui
             dirty = true if sitemap_controller.flush_query_reload_if_due(now)
             dirty = true if sitemap_controller.drain_search
             dirty = true if sitemap_controller.drain_export
+            dirty = true if sitemap_controller.drain_js_scan
             dirty = true if target_controller.params.drain_build
             dirty = true if drain_import_events
             # Tick the top-bar clock: dirty only when the displayed minute changes, so the

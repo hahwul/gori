@@ -33,7 +33,18 @@ describe "Gori::Verbs.register_sitemap" do
      "sitemap.open-flow"         => :sitemap_open_flow,
      "sitemap.scope-add"         => :sitemap_scope_add,
      "sitemap.export"            => :sitemap_export,
+     "sitemap.js-scan"           => :sitemap_js_scan,
+     "sitemap.toggle-js-refs"    => :sitemap_toggle_js_refs,
     }.each { |id, intent| verb_intents(r, id).should eq([intent]) }
+  end
+
+  # #1243: the scan sends nothing and the toggle only shows what a scan stored, so both are
+  # menu entries, on letters that name them rather than bare keys the tree has already spent.
+  it "offers the JavaScript scan and its toggle from the menu only" do
+    {"sitemap.js-scan" => 'J', "sitemap.toggle-js-refs" => 'U'}.each do |id, letter|
+      r[id].chords.should be_empty
+      r[id].mnemonic.should eq(letter)
+    end
   end
 
   # #1241: ⇧E is the export key on every tab that has one (Issues, Sequencer, Evidence).

@@ -58,6 +58,21 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     sitemap_controller.sitemap_toggle_query_fold
   end
 
+  def sitemap_toggle_js_refs : Nil
+    sitemap_controller.sitemap_toggle_js_refs
+  end
+
+  # `sitemap.js-scan` (#1243) — read the captured JS responses and HTML pages behind the tree's
+  # own flow set that no scan has read, and store the endpoints they reference. Sends nothing;
+  # the result lands as a toast and a rebuilt tree (`SitemapController#drain_js_scan`).
+  def sitemap_js_scan : Nil
+    unless filter = sitemap_controller.view.params_filter
+      @toast = "the Sitemap query has no usable terms — fix it (/) before scanning"
+      return
+    end
+    sitemap_controller.js_scan(filter)
+  end
+
   # --- multi-select marks ---
   def sitemap_mark_toggle : Nil
     sitemap_controller.sitemap_mark_toggle
@@ -84,6 +99,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # (a fold can't be marked) and which target_endpoints therefore doesn't do.
   def sitemap_repeater : Nil
     return sitemap_repeater_marked if sitemap_controller.marked_node_count > 0
+    if ref = sitemap_controller.view.selected_js_ref
+      return sitemap_repeater_js(ref[:host], ref[:path])
+    end
     ep = sitemap_controller.view.selected_endpoint
     unless ep
       @toast = "select an endpoint to send"
@@ -125,6 +143,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # `selected_endpoint` resolve, so `o` and `r` never disagree about which path is under
   # the cursor — including a `{uuid}` fold, which both resolve to a real descendant.
   def sitemap_open_flow : Nil
+    if ref = sitemap_controller.view.selected_js_ref
+      return sitemap_open_js_source(ref[:host], ref[:path])
+    end
     ep = sitemap_controller.view.selected_endpoint
     unless ep
       @toast = "select an endpoint to open"
@@ -144,6 +165,52 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       # as "this path was never captured".
       @toast = "that request was pruned since the tree was built"
     end
+  end
+
+  # The sighting a JavaScript-only row stands for: the newest one read in CODE, else the newest
+  # at all (a route only ever seen commented out is still where it was seen).
+  private def sitemap_js_sighting(host : String, path : String) : Store::JsRefSighting?
+    seen = @session.store.js_ref_sightings(host: host, path: path, limit: 50)
+    seen.find { |s| s.flags & JsRefs::FLAG_COMMENT == 0 } || seen.first?
+  end
+
+  # `o` on a path only JavaScript names: there is no request to open, so open where the
+  # reference was READ — the script's (or page's) flow in History — and say where in it.
+  private def sitemap_open_js_source(host : String, path : String) : Nil
+    unless s = sitemap_js_sighting(host, path)
+      @toast = "that reference is gone since the tree was built (its flow was deleted)"
+      return
+    end
+    unless history_controller.view.open_detail_id(s.flow_id, @session.store)
+      @toast = "that script was pruned since the tree was built"
+      return
+    end
+    @active_tab = :history
+    @focus = :body
+    @overlay = OverlayKind::Detail
+    comment = s.flags & JsRefs::FLAG_COMMENT != 0 ? " (in a comment)" : ""
+    @toast = "referenced at line #{s.line}, byte #{s.offset}#{comment}: #{DisplayColumns.display_safe(s.literal)}"
+  end
+
+  # `r` on a path only JavaScript names: a BARE GET for it in a new Repeater tab — nothing is
+  # sent until ^R. Bare on purpose: copying the page's Cookie/Authorization would carry
+  # credentials to a URL nobody visited, and that is the operator's call to make in the editor.
+  private def sitemap_repeater_js(host : String, path : String) : Nil
+    unless s = sitemap_js_sighting(host, path)
+      @toast = "that reference is gone since the tree was built (its flow was deleted)"
+      return
+    end
+    url = Store::FlowRow.url_of(s.scheme, s.host, s.port, s.target)
+    built = Repeater::UrlRequest.structured(Repeater::UrlRequest.target(url), "GET",
+      [] of {String, String}, nil, expand: false)
+    repeater_controller.repeater_from_request(url, String.new(built.bytes), false, nil, name: "js")
+    @toast = if s.flags & JsRefs::FLAG_TEMPLATED != 0
+               "a GET for a JavaScript reference — replace {expr} before ^R sends it"
+             else
+               "a bare GET for a path only JavaScript names — nothing sent; ^R sends it"
+             end
+  rescue ex : Gori::Error
+    @toast = "cannot build a request for that reference: #{ex.message}"
   end
 
   # Batch over the marks: one Repeater sub-tab per marked endpoint, capped (BATCH_SUBTAB_CAP)
