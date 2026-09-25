@@ -427,6 +427,17 @@ describe "Gori::Sitemap.attach_js_refs!" do
     Gori::Sitemap.endpoint_count(hosts[0]).should eq(before)
   end
 
+  it "lands a query-less reference on the captured query variant instead of growing an unrequested sibling" do
+    hosts = Gori::Sitemap.build([{"shop.test", "GET", "/api/search?q=shoes"}])
+    before = Gori::Sitemap.endpoint_count(hosts[0])
+    Gori::Sitemap.attach_js_refs!(hosts, [Gori::Store::JsRefNode.new("https", "shop.test", 443, "/api/search", 1)]) { false }
+    api = hosts[0].children.find!(&.label.==("api"))
+    api.children.map(&.label).should eq(["search?q=shoes"])
+    api.children[0].js_refs.should eq(1)
+    api.children[0].js_only?.should be_false
+    Gori::Sitemap.endpoint_count(hosts[0]).should eq(before)
+  end
+
   it "adds a host the block allows, flagged unrequested" do
     hosts = Gori::Sitemap.build([{"shop.test", "GET", "/"}])
     Gori::Sitemap.attach_js_refs!(hosts, [Gori::Store::JsRefNode.new("https", "api.shop.test", 443, "/v1/me", 1)]) { true }

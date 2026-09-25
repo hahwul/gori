@@ -261,8 +261,12 @@ module Gori
         next if segments.empty? # the bare root is never stored (`JsRefs.resolve`)
         node = host_node
         acc = ""
-        segments.each do |seg|
-          if existing = node.child?(seg)
+        last = segments.size - 1
+        segments.each_with_index do |seg, i|
+          # A reference is query-less and a capture rides its query on the last segment, so
+          # `/api/search` must land on the captured `search?q=shoes` rather than grow a sibling
+          # that claims the path was never requested (the list answers "requested" for it).
+          if existing = node.child?(seg) || (i == last ? captured_variant(node, seg) : nil)
             node = existing
           else
             node = node.child(seg)
@@ -274,6 +278,11 @@ module Gori
         node.truncated = true if truncated
         node.js_refs += r.flows
       end
+    end
+
+    # A captured child of `node` whose label is `seg` plus a query string, or nil.
+    private def self.captured_variant(node : Node, seg : String) : Node?
+      node.children.find { |c| !c.methods.empty? && c.label.includes?('?') && path_part(c.label) == seg }
     end
 
     # The path segments one already-normalized path contributes to the tree — the query
