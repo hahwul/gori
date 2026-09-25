@@ -11,12 +11,71 @@ module Gori
       def initialize
         @by_id = {} of String => Definition
         @order = [] of String
+        @families = [] of Family
       end
 
       def register(verb : Definition) : Nil
         raise Gori::Error.new("duplicate verb id: #{verb.id}") if @by_id.has_key?(verb.id)
-        @by_id[verb.id] = verb
+        @by_id[verb.id] = verb.tagged(verb.intent.try { |i| family_of_intent(i).try(&.id) })
         @order << verb.id
+      end
+
+      # Add a space-menu family (#1274 WP9). Every verb whose `intent` the family's letter
+      # table names becomes a member — the ones registered already and the ones still to come,
+      # so the order of the two calls does not matter. Raises on a malformed family
+      # (`Family#validate!`), a duplicate id, an intent another family already claims, or one
+      # the lexicon owns: an intent fixes ONE letter, either a level-1 lexicon letter or a
+      # family's level-2 one, never both.
+      def register_family(family : Family) : Nil
+        family.validate!
+        raise Gori::Error.new("duplicate family id: #{family.id.inspect}") if family(family.id)
+        family.intents.each do |intent|
+          if other = family_of_intent(intent)
+            raise Gori::Error.new("intent #{intent.inspect} is in both family #{other.id.inspect} and #{family.id.inspect}")
+          end
+          if Lexicon::ENTRIES.has_key?(intent)
+            raise Gori::Error.new(
+              "intent #{intent.inspect} is in family #{family.id.inspect} and in Verb::Lexicon " \
+              "(a family intent takes its letter from the family table)")
+          end
+        end
+        @families << family
+        @order.each do |id|
+          v = @by_id[id]
+          @by_id[id] = v.tagged(family.id) if (i = v.intent) && family.includes?(i)
+        end
+      end
+
+      def family(id : Symbol) : Family?
+        @families.find { |f| f.id == id }
+      end
+
+      def families : Array(Family)
+        @families
+      end
+
+      private def family_of_intent(intent : Symbol) : Family?
+        @families.find(&.includes?(intent))
+      end
+
+      # A member's level-2 letter: its family table's letter for its intent. Nil for a verb
+      # that is not a member.
+      def l2_key(v : Definition) : Char?
+        return nil unless (fid = v.family) && (i = v.intent)
+        family(fid).try(&.letter(i))
+      end
+
+      # The keys that reach `id` from an open space menu: `[letter]` for a level-1 row (a
+      # pinned member included — the shorter path wins), `[family key, letter]` for a member
+      # one level down, nil for a verb the menu does not list. Scope-free on purpose: a verb
+      # id names one scope, and a family's letters are the same in every scope.
+      def menu_keys(id : String) : Array(Char)?
+        return nil unless v = self[id]?
+        if k = v.menu_key
+          return [k]
+        end
+        return nil unless (fid = v.family) && (f = family(fid)) && (l = l2_key(v))
+        [f.key, l]
       end
 
       def []?(id : String) : Definition?
@@ -34,13 +93,30 @@ module Gori
       # has a strip, which is why #validate_menu_keys! has to sweep those merged views too.
       SUBTAB_SECTIONS = {:subtab, :tab}
 
-      # True when scope has at least one non-hidden, MENU-KEYED verb tagged with
+      # True when scope has at least one non-hidden, MENU-LISTED verb tagged with
       # `section` — lets the tab-bar space menu (@focus == :menu) decide whether a
       # scope has its OWN :tab actions or should fall back to :common instead. Must
-      # match what open() actually renders (SpaceMenu#open only shows verbs carrying
-      # a menu_key), else this could report a section that would render empty.
+      # match what open() actually renders (SpaceMenu#open shows verbs carrying a
+      # menu_key, and a family row for its members), else this could report a section that
+      # would render empty — or, keyed on `menu_key` alone, drop a section whose every verb
+      # sits in a family.
       def has_section?(scope : Scope, section : Symbol) : Bool
-        any? { |v| !v.hidden? && v.scope == scope && v.section == section && v.menu_key }
+        any? { |v| !v.hidden? && v.scope == scope && v.section == section && v.menu_listed? }
+      end
+
+      # Whether a verb of section `v_section` is part of the view the space menu draws for
+      # `section` — COMMON, the SUB-TABS bucket when the tab has a strip, and the focused pane.
+      # The one membership rule `#for_view` and `#registered_in_view` share.
+      def self.in_view?(v_section : Symbol, section : Symbol, subtabs : Bool) : Bool
+        v_section == :common || v_section == section || (subtabs && SUBTAB_SECTIONS.includes?(v_section))
+      end
+
+      # The non-hidden verbs of `scope` that the view REGISTERS, available or not — what a
+      # family row is drawn from. A family row is static: whether it shows must not depend on
+      # `available?`, or `space > r` typed blind would open level 2 in one state and fall
+      # through to the tab's bare `r` in another.
+      def registered_in_view(scope : Scope, section : Symbol, subtabs : Bool = false) : Array(Definition)
+        self.select { |v| !v.hidden? && v.scope == scope && Registry.in_view?(v.section, section, subtabs) }
       end
 
       # Fail fast on a space-menu key collision WITHIN a displayable view. A view is
@@ -65,14 +141,42 @@ module Gori
           # part of every sweep below — the reason a pane letter may no longer reuse one of
           # the strip's nine (see .github/DESIGN.md).
           strip = verbs.select { |v| SUBTAB_SECTIONS.includes?(v.section) }
-          check_menu_keys!(scope, :common, common + strip)
+          check_view!(scope, :common, common + strip)
           sections = verbs.map(&.section).uniq!.reject { |s| s == :common }
           sections.each do |section|
             view = common + verbs.select { |v| v.section == section }
-            check_menu_keys!(scope, section, view)
+            check_view!(scope, section, view)
             next if strip.empty? || SUBTAB_SECTIONS.includes?(section)
-            check_menu_keys!(scope, section, view + strip)
+            check_view!(scope, section, view + strip)
           end
+        end
+      end
+
+      # One displayable view, at both levels of the menu.
+      #   • Level 1: every row's key — the level-1 letters (`menu_key`, which a pinned member
+      #     keeps) and one key per family that has a member here. A family row is drawn when
+      #     the view REGISTERS a member, not when one is available, so this is the whole check.
+      #   • Level 2: inside each family, no two members of the view on one intent. The letter
+      #     comes from the family table, so a duplicate intent is the only way two rows could
+      #     share one. Checked per VIEW, not per scope: the Repeater's request and response
+      #     panes may each have a hex toggle, since they never render together.
+      private def check_view!(scope : Scope, section : Symbol, verbs : Array(Definition)) : Nil
+        pairs = verbs.compact_map { |v| (k = v.menu_key) ? {k, v.id} : nil }
+        verbs.compact_map(&.family).uniq!.each do |fid|
+          next unless f = family(fid)
+          pairs << {f.key, "family:#{fid}"}
+        end
+        check_menu_keys!(scope, section, pairs)
+
+        seen = {} of {Symbol, Symbol} => String
+        verbs.each do |v|
+          next unless (fid = v.family) && (i = v.intent)
+          if prior = seen[{fid, i}]?
+            raise Gori::Error.new(
+              "space-menu L2 collision: intent #{i.inspect} of family #{fid.inspect} claimed by both " \
+              "#{prior} and #{v.id} in #{scope}/#{section}")
+          end
+          seen[{fid, i}] = v.id
         end
       end
 
@@ -89,18 +193,46 @@ module Gori
       #     pane, and the strip answers `t` raw, so a pane `t` means one thing in the card and
       #     another on the strip a keystroke away. It holds on a strip that lacks the action
       #     too: the nine read the same on all nine strips.
+      #   • A family member (#1274 WP9) is the same rule one level down: its letter is the
+      #     family table's, so it spells no `mnemonic:` — unless it is `pinned:`, where the
+      #     mnemonic is its level-1 letter. Only a member may be pinned.
+      #   • A family's key is a level-1 letter like any other: on a strip tab it is not one of
+      #     the strip's.
       def validate_intents! : Nil
         strip_scopes = compact_map { |v| v.scope if SUBTAB_SECTIONS.includes?(v.section) }.to_set
         each do |v|
           check_intent!(v)
           check_reserved_menu_letter!(v, strip_scopes) unless v.hidden?
         end
+        check_family_keys!(strip_scopes)
+      end
+
+      private def check_family_keys!(strip_scopes : Set(Scope)) : Nil
+        @families.each do |f|
+          next unless Lexicon::STRIP_LETTERS.includes?(f.key)
+          if v = find { |m| m.family == f.id && !m.hidden? && strip_scopes.includes?(m.scope) }
+            raise Gori::Error.new(
+              "family #{f.id.inspect} has key '#{f.key}', one of the sub-tab strip's letters, and a " \
+              "member (#{v.id}) on #{v.scope}, which has a strip")
+          end
+        end
       end
 
       private def check_intent!(v : Definition) : Nil
+        if v.pinned? && !v.member?
+          raise Gori::Error.new("#{v.id} is pinned: but no family lists its intent #{v.intent.inspect}")
+        end
         return unless intent = v.intent
+        if v.member?
+          if (m = v.mnemonic) && !v.pinned?
+            raise Gori::Error.new(
+              "#{v.id} is a member of family #{v.family.inspect} (letter '#{l2_key(v)}') and spells " \
+              "mnemonic '#{m}' — only a pinned: member keeps a level-1 letter")
+          end
+          return
+        end
         unless Lexicon::ENTRIES.has_key?(intent)
-          raise Gori::Error.new("unknown intent #{intent.inspect} on #{v.id} (add it to Verb::Lexicon)")
+          raise Gori::Error.new("unknown intent #{intent.inspect} on #{v.id} (add it to Verb::Lexicon or a Verb::Family)")
         end
         if m = v.mnemonic
           raise Gori::Error.new(
@@ -174,16 +306,16 @@ module Gori
         end
       end
 
-      # Raise on the first key collision among `verbs` (one displayable view's worth).
-      private def check_menu_keys!(scope : Scope, section : Symbol, verbs : Array(Definition)) : Nil
+      # Raise on the first key collision among one displayable view's level-1 rows, given as
+      # `{key, row id}` (a family row's id is `family:<id>`).
+      private def check_menu_keys!(scope : Scope, section : Symbol, rows : Array({Char, String})) : Nil
         seen = {} of Char => String
-        verbs.each do |v|
-          next unless key = v.menu_key
+        rows.each do |(key, id)|
           if prior = seen[key]?
             raise Gori::Error.new(
-              "space-menu key collision: '#{key}' claimed by both #{prior} and #{v.id} in #{scope}/#{section}")
+              "space-menu key collision: '#{key}' claimed by both #{prior} and #{id} in #{scope}/#{section}")
           end
-          seen[key] = v.id
+          seen[key] = id
         end
       end
 
@@ -224,12 +356,10 @@ module Gori
       # The focused area's actions — "what can I do here" — in registration order: #for_scope
       # narrowed to COMMON, the SUB-TABS bucket when the tab has a strip (`subtabs`), and the
       # focused `section`. The ONE membership rule both surfaces read (#1282): the space menu
-      # draws the menu-keyed ones, the palette's typed search ranks all of them, so a
-      # chord-only action is still found by name.
+      # draws the menu-listed ones (a family member one level down), the palette's typed
+      # search ranks all of them, so a chord-only action is still found by name.
       def for_view(scope : Scope, section : Symbol, ctx : ExecContext, subtabs : Bool = false) : Array(Definition)
-        for_scope(scope, ctx).select do |v|
-          v.section == :common || v.section == section || (subtabs && SUBTAB_SECTIONS.includes?(v.section))
-        end
+        for_scope(scope, ctx).select { |v| Registry.in_view?(v.section, section, subtabs) }
       end
 
       # Shared filter→rank tail: an empty query keeps registration order (browsable);

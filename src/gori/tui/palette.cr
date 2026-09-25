@@ -229,15 +229,14 @@ module Gori::Tui
     end
 
     # The dim hint column: the verb's effective chord, else — for a tab row — its space-menu
-    # letter (`␣ t`), so a search result names the one-keypress route to it next time.
-    # Rendered locally from `Hotkeys.binding_for` + `menu_key`; the registry-derived route
-    # helper (`Hotkeys.menu_path`, #1274) should replace this body once it lands.
+    # path (`␣ t`, or `␣ > f` for a family member), so a search result names the short route
+    # to it next time.
     private def fast_path(verb : Verb::Definition, overrides : Hash(String, Array(Verb::Chord)), *, tab : Bool) : String?
       if chord = Hotkeys.binding_for(@registry, verb.id, overrides)
         return chord.label
       end
-      return nil unless tab && (mk = verb.menu_key)
-      "␣ #{mk}"
+      return nil unless tab
+      Hotkeys.menu_path(@registry, verb.id, compact: true)
     end
 
     # The drawn rows: `{header, nil}` or `{"", index into @results}`. Flat — one row per

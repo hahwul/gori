@@ -192,6 +192,10 @@ module Gori
       abstract def detail_navigable? : Bool # History detail text pane (not hex)
       # Override a verb's space-menu title (nil → use the registered default).
       abstract def space_menu_title(verb_id : String) : String?
+      # A space-menu row's live state, drawn in its hint column (#1274 WP9): "on"/"off" as
+      # ●/○, any other string as a short dim value (a TLS preset's name), nil for a stateless
+      # row. For the toggle families, whose sticky card stays up across several flips.
+      abstract def menu_state(verb_id : String) : String?
 
       # settings: open the config editor for a section (:network | :editor | :theme |
       # :tabs | :hotkeys). :tabs opens the tab-bar customizer overlay.

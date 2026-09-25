@@ -184,6 +184,16 @@ module Gori
       # spell a `mnemonic:` as well (`Registry#validate_intents!`). Nil for a scope-local
       # action, whose letter stays its own mnemonic or chord.
       getter intent : Symbol?
+      # The `Verb::Family` this verb is a member of, or nil. Never spelled at registration: it
+      # is derived from `intent` (a family's letter table names its member intents) and set by
+      # `Registry#register_family`, so a member cannot name one family and answer another's
+      # intent.
+      getter family : Symbol?
+      # A family member that ALSO keeps a level-1 row under its own letter (a `mnemonic:` or its
+      # bare chord) — the loop action of the tab, e.g. Send to Repeater on the list scopes. Only
+      # a member may be pinned, and only a pinned member may spell a `mnemonic:`
+      # (`Registry#validate_intents!`).
+      getter? pinned : Bool
 
       def initialize(@id : String, @title : String, @description : String, @scope : Scope,
                      @chords : Array(Chord) = [] of Chord, @hidden : Bool = false,
@@ -191,7 +201,7 @@ module Gori
                      @coming_soon : Bool = false, @category : Category = Category::Action,
                      @mnemonic : Char? = nil, @section : Symbol = :common,
                      @group : Symbol = :none, @chord_sections : Array(Symbol)? = nil,
-                     @intent : Symbol? = nil,
+                     @intent : Symbol? = nil, @pinned : Bool = false,
                      &@handler : ExecContext -> String?)
       end
 
@@ -206,11 +216,38 @@ module Gori
         secs.includes?(ctx.focused_section)
       end
 
-      # The key the space menu shows + binds: an explicit mnemonic, else the intent's
+      # This verb as a member of `family` (nil: of none) — the one way `family` is set, used by
+      # `Registry#register_family`. A copy: a Definition is a value.
+      def tagged(family : Symbol?) : Definition
+        copy = dup
+        copy.family = family
+        copy
+      end
+
+      protected setter family : Symbol?
+
+      # A member of a `Verb::Family`: the space menu lists it one level down, under the family.
+      def member? : Bool
+        !@family.nil?
+      end
+
+      # Whether the space menu can show this verb at EITHER level: its own level-1 letter, or a
+      # row inside its family. What decides "this section has something to show"
+      # (`Registry#has_section?`) and the menu's candidate set — `menu_key` alone answers only
+      # level 1, and an unpinned member has none.
+      def menu_listed? : Bool
+        member? || !menu_key.nil?
+      end
+
+      # The LEVEL-1 key the space menu shows + binds: an explicit mnemonic, else the intent's
       # lexicon letter, else the first plain single-char chord (no ctrl/alt/shift), else
-      # nil (verb is excluded from the menu — it has no single-key handle). Hidden nav
+      # nil (verb is excluded from level 1 — it has no single-key handle). Hidden nav
       # chords like "enter"/"left"/"space" are multi-char names, so they never qualify.
+      # A family member has no level-1 key unless it is `pinned?`: its letter is the family's
+      # (`Registry#l2_key`), and a chord-derived letter would otherwise keep holding a level-1
+      # slot the family exists to free.
       def menu_key : Char?
+        return nil if member? && !pinned?
         if m = @mnemonic
           return m
         end
@@ -232,6 +269,7 @@ module Gori
   end
 end
 
+require "./verb/family"
 require "./verb/registry"
 require "./verb/lexicon"
 require "./verb/os_profile"

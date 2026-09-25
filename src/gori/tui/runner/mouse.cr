@@ -449,7 +449,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   private def click_space_menu(layout : Layout, mx : Int32, my : Int32) : Bool
     if idx = @space_menu.row_at(layout.body, mx, my)
       @space_menu.set_selected(idx)
-      run_space_verb(@space_menu.selected_verb)
+      activate_space_entry(@space_menu.selected_entry)
     elsif !@space_menu.box(layout.body).contains?(mx, my)
       close_space_menu
     end

@@ -16,7 +16,7 @@ describe "verb reachability" do
       next if v.hidden?                            # a gesture, not a listed command
       next if v.scope == Gori::Verb::Scope::Global # the palette lists these by scope alone
       next unless v.chords.empty?
-      next if v.menu_key
+      next if v.menu_listed? # a level-1 letter, or a row inside its family (#1274 WP9)
       unreachable << v.id
     end
     unreachable.should be_empty
