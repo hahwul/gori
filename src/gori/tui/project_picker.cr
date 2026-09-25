@@ -70,11 +70,16 @@ module Gori::Tui
     # to a hover highlight, which termisu can't report. See `Chrome::Chip`.)
     record HintToken, label : String, action : Symbol? = nil
 
+    # The letters are the app's own, so a mnemonic means one thing on both sides of the
+    # picker: rename is `e` as it is on every sub-tab strip, export `E` as on Issues, Notes
+    # and the Sitemap, clear marks `N` as on every marked list, delete `d` and open `o`.
+    # Compress and Import archive have no in-app counterpart. Case is significant, as it is
+    # in the app, so `e` and `E` are two entries rather than one.
     SPACE_ENTRIES = [
       SpaceEntry.new('o', "Open", :open),
-      SpaceEntry.new('r', "Rename", :rename),
+      SpaceEntry.new('e', "Rename", :rename),
       SpaceEntry.new('c', "Compress", :compress),
-      SpaceEntry.new('e', "Export (cursor)", :archive_export),
+      SpaceEntry.new('E', "Export (cursor)", :archive_export),
       SpaceEntry.new('i', "Import archive", :archive_import),
       SpaceEntry.new('d', "Delete", :delete),
     ]
@@ -90,7 +95,11 @@ module Gori::Tui
     #     that would be a fiction for every individual project.
     #   • Export snapshots the cursor project; archives don't combine marked projects.
     # Import always creates a separate project and applies to no marked target.
-    # Clear marks mirrors the in-app `*.mark-clear` entry, mnemonic and all.
+    # Clear marks is the in-app `*.mark-clear` entry, letter included.
+    #
+    # The order is the unmarked menu's, with Clear marks slotted in ahead of Delete: rows
+    # never swap places when a mark is set, and the destructive entry renders last, as the
+    # app's DANGER band does.
     #
     # Class-level and pure so the labels a destructive menu shows can be pinned in a spec:
     # the picker holds a live Termisu and cannot be built in one.
@@ -98,12 +107,12 @@ module Gori::Tui
       return SPACE_ENTRIES if marked <= 0
       [
         SpaceEntry.new('o', "Open (cursor)", :open),
-        SpaceEntry.new('r', "Rename (cursor)", :rename),
+        SpaceEntry.new('e', "Rename (cursor)", :rename),
         SpaceEntry.new('c', "Compress (cursor)", :compress),
-        SpaceEntry.new('e', "Export (cursor)", :archive_export),
-        SpaceEntry.new('d', "Delete #{plural_projects(marked)}", :delete),
+        SpaceEntry.new('E', "Export (cursor)", :archive_export),
         SpaceEntry.new('i', "Import archive", :archive_import),
-        SpaceEntry.new('n', "Clear marks", :mark_clear),
+        SpaceEntry.new('N', "Clear marks", :mark_clear),
+        SpaceEntry.new('d', "Delete #{plural_projects(marked)}", :delete),
       ]
     end
 
@@ -748,25 +757,66 @@ module Gori::Tui
       end
     end
 
-    # Project-row space menu: ↑/↓ move, mnemonic key or ↵ run, esc dismiss.
+    # Project-row space menu: ↑/↓ (tab/⇧tab) move, mnemonic key or ↵ run, esc dismiss.
+    # Keys read as the in-app menu reads them (Runner#handle_space_menu_key): an unmapped
+    # key dismisses, and ←/→ are inert because the card is one column.
     private def handle_space(ev : Termisu::Event::Key) : Project | Symbol?
       key = ev.key
-      entries = space_entries
       @preedit = ""
-      if key.escape? || ev.ctrl_c?
-        close_space_menu
-      elsif key.up?
-        @space_selected = (@space_selected - 1).clamp(0, entries.size - 1)
-      elsif key.down?
-        @space_selected = (@space_selected + 1).clamp(0, entries.size - 1)
+      if delta = ProjectPicker.space_nav(key)
+        move_space_selection(delta)
       elsif key.enter?
-        return activate_space_entry(entries[@space_selected])
+        return activate_space_entry(space_entries[@space_selected])
       elsif (c = ev.char || key.to_char) && !ev.ctrl? && !ev.alt?
-        if entry = entries.find { |e| e.key == c.downcase }
-          return activate_space_entry(entry)
-        end
+        return apply_space_key(ProjectPicker.space_key(space_entries, c))
+      else
+        close_space_menu # esc, ctrl-c and every other chord
       end
       nil
+    end
+
+    private def apply_space_key(hit : SpaceEntry | Symbol) : Project | Symbol?
+      case hit
+      when SpaceEntry then return activate_space_entry(hit)
+      when :down      then move_space_selection(1)
+      when :up        then move_space_selection(-1)
+      when :dismiss   then close_space_menu
+      end # :stay — h/l on a one-column card
+      nil
+    end
+
+    private def move_space_selection(delta : Int32) : Nil
+      @space_selected = (@space_selected + delta).clamp(0, space_entries.size - 1)
+    end
+
+    # The selection step a non-printing key makes: ↑/⇧tab up, ↓/tab down, and 0 for ←/→,
+    # which have no second column to reach but must not dismiss the menu either.
+    def self.space_nav(key : Termisu::Input::Key) : Int32?
+      if key.up? || key.back_tab?
+        -1
+      elsif key.down? || key.tab?
+        1
+      elsif key.left? || key.right?
+        0
+      end
+    end
+
+    # What a printable key does in the space menu. Case-sensitive, as the in-app menu is:
+    # `e` renames and `E` exports. A bound mnemonic always wins; j/k then fall back to
+    # moving the selection and h/l to the (inert) column move, as they do in the app; any
+    # other key dismisses. Class-level and pure so a spec can pin it.
+    def self.space_key(entries : Array(SpaceEntry), c : Char) : SpaceEntry | Symbol
+      if entry = entries.find { |e| e.key == c }
+        entry
+      elsif c == 'j'
+        :down
+      elsif c == 'k'
+        :up
+      elsif c == 'h' || c == 'l'
+        :stay
+      else
+        :dismiss
+      end
     end
 
     # Rename prompt: type a new display name, ↵ commit, esc cancel.

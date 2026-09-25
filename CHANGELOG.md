@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Project picker: the space menu uses the app's letters and letter case (rename `e`, export `⇧E`, clear marks `⇧N`), keeps one row order when projects are marked, and closes on a key it does not bind, like the in-app menu (#1274)
 - TUI: typing in the command palette (`Ctrl-P`) also finds the focused tab's actions, listed first under `THIS TAB` with their key or space-menu letter, and with the marks count in the title (#1282)
 - TUI: the JWT, Cookie and Decoder clears ask before wiping a session, and the space-menu rows that clear, overwrite or start a listener move off `h`/`k`/`l`, the keys that move the menu's selection: clear is `K` on all four workbench tabs, load decoded is `L`, OAST listen and resume are `r`/`R`, and Probe's bulk dismissals are `G`/`H`. Destructive rows always sit last in the card (#1274)
 - Sitemap: scan captured JavaScript for the endpoints it references and draw the ones nobody requested as dimmed `js` rows, resolved against the page (via `Referer`) and sending nothing. `Space` → `J` in the Sitemap, `gori run sitemap js --scan`, `gori run sitemap --js-refs`, and MCP `scan_js_endpoints` / `list_js_endpoints` / `list_sitemap include_unrequested` (#1243)
