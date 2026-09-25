@@ -41,16 +41,7 @@ private def start_login_origin(seen : Seen, login_status : Int32 = 200,
         seen.heads << text
         seen.paths << path
         n += 1
-        extra =
-          if path.starts_with?("/csrf") && csrf_status < 400
-            "X-CSRF: C#{n}\r\n"
-          elsif path.starts_with?("/login") && login_status < 400
-            "Set-Cookie: sid=#{sid || "T#{n}"}; Path=/\r\n"
-          else
-            ""
-          end
-        status = path.starts_with?("/login") ? login_status : (path.starts_with?("/csrf") ? csrf_status : 200)
-        conn << "HTTP/1.1 #{status} X\r\n#{extra}Content-Length: 0\r\nConnection: close\r\n\r\n"
+        conn << login_response(path, n, login_status, csrf_status, sid)
         conn.flush
       rescue
       ensure
@@ -59,6 +50,20 @@ private def start_login_origin(seen : Seen, login_status : Int32 = 200,
     end
   end
   {server, port}
+end
+
+# The origin's answer to request `n` for `path` — see `start_login_origin`.
+private def login_response(path : String, n : Int32, login_status : Int32, csrf_status : Int32,
+                           sid : String?) : String
+  status, extra =
+    if path.starts_with?("/csrf")
+      {csrf_status, csrf_status < 400 ? "X-CSRF: C#{n}\r\n" : ""}
+    elsif path.starts_with?("/login")
+      {login_status, login_status < 400 ? "Set-Cookie: sid=#{sid || "T#{n}"}; Path=/\r\n" : ""}
+    else
+      {200, ""}
+    end
+  "HTTP/1.1 #{status} X\r\n#{extra}Content-Length: 0\r\nConnection: close\r\n\r\n"
 end
 
 private def with_refresh_env(&)
