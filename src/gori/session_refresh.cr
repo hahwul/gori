@@ -280,7 +280,11 @@ module Gori
         if (cd = st.cooldown_until) && Time.utc < cd
           return
         end
-        return unless due?(s, st)
+        # A slot whose last refresh FAILED is due again once its cooldown is over, whatever its
+        # policy reads. The policy alone would go quiet: a login whose step 1 rebound `$CSRF`
+        # and whose step 2 was refused leaves a freshly bound value in the table, so a TTL
+        # counted from it says "fresh" while the session token it exists for is still stale.
+        return unless st.last.try { |o| !o.ok } || due?(s, st)
         run(s, st, @outbound.call, manual: false)
       rescue ex
         # A refresh must never fail the send that asked for it.

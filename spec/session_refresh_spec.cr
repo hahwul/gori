@@ -1,6 +1,13 @@
 require "./spec_helper"
 require "../src/gori/session_refresh"
 
+# The cooldown is 30 s of wall clock; a spec moves it rather than sleeping through it.
+class Gori::SessionRefresh::Runner
+  def expire_cooldown_for_spec(slot : String) : Nil
+    @states[slot]?.try(&.cooldown_until=(Time.utc - 1.second))
+  end
+end
+
 # A session slot refreshing itself from Repeater steps (#1233). The origin below is a real
 # socket, because the property under test is what reaches the WIRE: a step resolves the
 # refreshing slot's own bindings, carries no slot overlay, and rebinds only that slot — while
@@ -18,7 +25,8 @@ end
 
 # `/csrf` answers a fresh `X-CSRF: C<n>`, `/login` a fresh `Set-Cookie: sid=T<n>` — or the
 # status `login_status` says. Serves until the spec closes it.
-private def start_login_origin(seen : Seen, login_status : Int32 = 200) : {TCPServer, Int32}
+private def start_login_origin(seen : Seen, login_status : Int32 = 200,
+                               csrf_status : Int32 = 200) : {TCPServer, Int32}
   server = TCPServer.new("127.0.0.1", 0)
   port = server.local_address.port
   n = 0
@@ -34,14 +42,14 @@ private def start_login_origin(seen : Seen, login_status : Int32 = 200) : {TCPSe
         seen.paths << path
         n += 1
         extra =
-          if path.starts_with?("/csrf")
+          if path.starts_with?("/csrf") && csrf_status < 400
             "X-CSRF: C#{n}\r\n"
           elsif path.starts_with?("/login") && login_status < 400
             "Set-Cookie: sid=T#{n}; Path=/\r\n"
           else
             ""
           end
-        status = path.starts_with?("/login") ? login_status : 200
+        status = path.starts_with?("/login") ? login_status : (path.starts_with?("/csrf") ? csrf_status : 200)
         conn << "HTTP/1.1 #{status} X\r\n#{extra}Content-Length: 0\r\nConnection: close\r\n\r\n"
         conn.flush
       rescue
@@ -234,16 +242,19 @@ describe Gori::SessionRefresh do
       begin
         runner, bindings, slots, _, _ = refresh_fixture(store, port, Policy.parse?("ttl=10m").not_nil!)
         slots.activate("admin")
-        done = Channel(Nil).new
+        done = Channel(String?).new
         3.times do
           spawn do
             Gori::SessionRefresh.before_send("admin")
-            done.send(nil)
+            # What this sender would resolve the moment the hook lets it go.
+            done.send(bindings.slot_values("admin")["SESSION"]?)
           end
         end
-        3.times { done.receive }
-        # Nothing was bound, so the first sender refreshed; the other two waited for it.
+        seen_values = Array.new(3) { done.receive }
+        # Nothing was bound, so the first sender refreshed; the other two WAITED for it, and
+        # none of the three went out before the new token was bound.
         seen.paths.should eq(["/csrf", "/login"])
+        seen_values.should eq(["T2", "T2", "T2"])
         bindings.slot_values("admin")["SESSION"].should eq("T2")
         # Freshly bound under a 10-minute TTL: not due again.
         Gori::SessionRefresh.before_send("admin")
@@ -258,17 +269,37 @@ describe Gori::SessionRefresh do
   it "cools down after an automatic failure and stops after the failure limit" do
     with_refresh_env do |store|
       seen = Seen.new
-      server, port = start_login_origin(seen, login_status: 500)
+      server, port = start_login_origin(seen, csrf_status: 500)
       begin
         runner, _, _, _, _ = refresh_fixture(store, port, Policy.parse?("ttl=10m").not_nil!)
         Gori::SessionRefresh.before_send("admin")
         Gori::SessionRefresh.before_send("admin")
         # The second send fell inside the cooldown and sent nothing.
-        seen.paths.size.should eq(2)
+        seen.paths.size.should eq(1)
         # Manual refreshes ignore the cooldown; the third consecutive failure turns auto off.
         runner.refresh("admin").ok.should be_false
         runner.refresh("admin").ok.should be_false
         runner.status("admin").auto_off.should be_true
+      ensure
+        server.close
+      end
+    end
+  end
+
+  it "retries a partly failed refresh after the cooldown even though step 1 rebound a value" do
+    with_refresh_env do |store|
+      seen = Seen.new
+      server, port = start_login_origin(seen, login_status: 500)
+      begin
+        runner, bindings, _, _, _ = refresh_fixture(store, port, Policy.parse?("ttl=10m").not_nil!)
+        Gori::SessionRefresh.before_send("admin")
+        # Step 1 bound a fresh CSRF; the session token was never bound.
+        bindings.slot_values("admin")["CSRF"]?.should_not be_nil
+        runner.status("admin").failed?.should be_true
+        # Past the cooldown, the next send retries — a TTL counted from the fresh CSRF would not.
+        runner.expire_cooldown_for_spec("admin")
+        Gori::SessionRefresh.before_send("admin")
+        seen.paths.size.should eq(4)
       ensure
         server.close
       end
