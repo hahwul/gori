@@ -97,15 +97,19 @@ describe Gori::Tui::HelpPopupOverlay do
       HelpView.query_rows.any? { |r| r.a.starts_with?("res.header") }.should be_true
     end
 
+    # The menu path comes from the registry: this line once said `T` for a Tag path that is `m`.
     it "teaches Sitemap's own tag:, which never reaches the parser" do
-      rows = HelpView.query_rows(["tag"] + Gori::QL::FIELDS, SitemapView::QL_HELP)
-      field_rows(rows)["tag"].should eq("path memo on this node — set with space → T")
+      registry = Gori::Verbs.registry
+      rows = HelpView.query_rows(["tag"] + Gori::QL::FIELDS, SitemapView.ql_help(registry))
+      field_rows(rows)["tag"].should eq("path memo on this node — set with #{Gori::Hotkeys.menu_path(registry, "sitemap.tag")}")
+      field_rows(HelpView.query_rows(["tag"], SitemapView.ql_help(nil)))["tag"]
+        .should eq("path memo on this node — set with #{Gori::Hotkeys::MENU_PATH_FALLBACK}")
     end
 
     it "still teaches the shared grammar on every surface" do
       [HelpView.query_rows,
        HelpView.query_rows(Gori::InterceptFilter::FIELDS, Gori::InterceptFilter::FIELD_HELP_PROC),
-       HelpView.query_rows(["tag"] + Gori::QL::FIELDS, SitemapView::QL_HELP)].each do |rows|
+       HelpView.query_rows(["tag"] + Gori::QL::FIELDS, SitemapView.ql_help(nil))].each do |rows|
         heads = rows.select(&.kind.== :head).map(&.a)
         heads.should contain("SYNTAX")
         heads.should contain("WORTH KNOWING")

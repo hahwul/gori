@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- TUI: Help, hint strips and toasts take space-menu letters from the menu itself, fixing the rows that named the wrong key (Repeater Tag sub-tab, gRPC reframe, OAST add issue, Sitemap `tag:` help); the guides now say `t` for a rule's enable/disable (#1274)
 - TUI: the JWT, Cookie and Decoder clears ask before wiping a session, and the space-menu rows that clear, overwrite or start a listener move off `h`/`k`/`l`, the keys that move the menu's selection: clear is `K` on all four workbench tabs, load decoded is `L`, OAST listen and resume are `r`/`R`, and Probe's bulk dismissals are `G`/`H`. Destructive rows always sit last in the card (#1274)
 - Sitemap: scan captured JavaScript for the endpoints it references and draw the ones nobody requested as dimmed `js` rows, resolved against the page (via `Referer`) and sending nothing. `Space` → `J` in the Sitemap, `gori run sitemap js --scan`, `gori run sitemap --js-refs`, and MCP `scan_js_endpoints` / `list_js_endpoints` / `list_sitemap include_unrequested` (#1243)
 - Session slots: a slot can log itself back in by replaying Repeater sessions you choose, on demand or just before a send when its token is about to expire, and never by retrying after a 401 (#1233)

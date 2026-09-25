@@ -3640,3 +3640,22 @@ overwrites or reaches out off the four letters:
 
 Whether the fallback stays and `h`/`j`/`k`/`l` stop being menu letters altogether (Link is `k`
 on six tabs) is settled after the grouped menu lands, when most cards fit one column.
+
+### 2026-09-25: a menu letter in UI text is read from the registry
+
+Refines: the two entries above. #1274 WP3/WP8.
+
+Help's verb-id rows resolved a chord through the keymap, but a menu-only verb has no chord, so
+the row printed its hand-typed `space → X` unchecked — and three had drifted (Tag subtab `a`
+for `t`, gRPC reframe `F` for `R`, and a row naming `oast.promote`, which never existed). The
+same literal sat in toasts and hint strips, and in the Sitemap filter's `tag:` help (`T` for
+`m`).
+
+- **`Hotkeys.menu_path` is the one place a menu path is spelled.** A Help row whose verb has
+  no chord prints it; hint text writes `{space:verb.id}`, which `Hotkeys.expand` resolves next
+  to `{verb.id}`. When the menu grows a second level, that function is what changes.
+- **No registry never prints the token.** It reads "the space menu" instead — the
+  `{fuzz.sort}` footer bug in a new shape is what this rules out.
+- **`spec/verb/hint_token_expands_spec.cr` scans `src/gori`** for a literal `space → <key>`
+  outside comments, and every `{space:…}` token must name a verb with a menu row. A row named
+  by its TITLE ("space → Mine parameters") names no letter and is left alone.

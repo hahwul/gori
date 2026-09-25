@@ -6,6 +6,7 @@ require "./text_field"
 require "./text_area"
 require "../authorize/identity"
 require "../discover/headers"
+require "../hotkeys"
 
 module Gori::Tui
   # Add or edit ONE Authorize identity: a name, the headers it SETS (a multi-line buffer, one
@@ -48,9 +49,14 @@ module Gori::Tui
     # The step labels of the slot being edited (`SessionRefresh.step_labels`), in order.
     getter refresh_labels : Array(String)
 
+    # The refresh line with no steps yet, naming the Repeater menu row that adds one.
+    REFRESH_EMPTY = "none — add a Repeater sub-tab with {space:repeater.use-as-refresh}"
+
+    # `registry` only spells REFRESH_EMPTY's menu path; without one it reads "the space menu".
     def initialize(identity : Authorize::Identity? = nil, @index : Int32? = nil,
                    taken : Array(String) = [] of String,
-                   @refresh_labels : Array(String) = [] of String)
+                   @refresh_labels : Array(String) = [] of String,
+                   @registry : Verb::Registry? = nil)
       @name = TextField.new(identity.try(&.name) || "")
       @original_set_headers = identity.try(&.set_headers) || [] of {String, String}
       @original_literal_headers = identity.try(&.literal_headers) || [] of String
@@ -364,7 +370,7 @@ module Gori::Tui
       else
         @editor.render(screen, ed, cursor: @selected == EDITOR_ROW)
       end
-      steps = @refresh.empty? ? "none — add a Repeater sub-tab with space → b" : @refresh_labels.join(" → ")
+      steps = @refresh.empty? ? Hotkeys.expand_menu_paths(@registry, REFRESH_EMPTY) : @refresh_labels.join(" → ")
       screen.text(box.x + 3, steps_y(box), "refresh:  #{steps}", Theme.muted, Theme.bg, width: box.w - 6)
       draw_field(screen, box, policy_y(box), row_bg(POLICY_ROW), row_fg(POLICY_ROW),
         @selected == POLICY_ROW, "refresh before:", @policy)
