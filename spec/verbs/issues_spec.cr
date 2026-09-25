@@ -160,16 +160,16 @@ describe "Gori::Verbs.register_issues" do
       end
     end
 
-    it "cycles severity from the space menu or the palette only — `[` / `]` are the Global tab chords" do
-      # Raise is palette-only (#1282), so its key is nil and the palette's search finds it.
-      {"issue.severity-up"   => {:issue_severity, "1", nil},
-       "issue.severity-down" => {:issue_severity, "-1", '-'},
-      }.each do |id, (intent, delta, key)|
+    it "steps severity from the palette only — `[` / `]` are the Global tab chords" do
+      # A symmetric pair, both palette-only (#1282): no key, and the palette's search finds them.
+      {"issue.severity-up"   => {:issue_severity, "1"},
+       "issue.severity-down" => {:issue_severity, "-1"},
+      }.each do |id, (intent, delta)|
         verb = r[id]
-        verb.hidden?.should be_false # a listed row now, so it has to show
+        verb.hidden?.should be_false # a listed row, so it has to show
         verb.chords.should be_empty
-        verb.menu_key.should eq(key)
-        verb.palette_only?.should eq(key.nil?)
+        verb.menu_key.should be_nil
+        verb.palette_only?.should be_true
         ctx = FakeExecContext.new
         verb.call(ctx)
         ctx.args_for(intent).should eq([delta])

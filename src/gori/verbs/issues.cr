@@ -199,15 +199,15 @@ module Gori
         Verb::Scope::IssuesDetail, [] of Verb::Chord, intent: :set_cvss) { |ctx| ctx.issue_set_cvss; nil }
 
       # No chord. They sat on `]` / `[` — the Global prev/next-tab chords — hidden and unhinted,
-      # so `]` inside an issue raised its severity where everywhere else it moved a tab. Raise
-      # is palette-only (#1282); Lower keeps its `-` row.
+      # so `]` inside an issue raised its severity where everywhere else it moved a tab. Both
+      # are palette-only (#1282): Set severity (`s`) is the menu's way to change it.
       r.register Verb::Definition.new(
         "issue.severity-up", "Raise severity", "Increase severity", Verb::Scope::IssuesDetail,
         [] of Verb::Chord, menu: :palette) { |ctx| ctx.issue_severity(1); nil }
 
       r.register Verb::Definition.new(
         "issue.severity-down", "Lower severity", "Decrease severity", Verb::Scope::IssuesDetail,
-        [] of Verb::Chord, mnemonic: '-') { |ctx| ctx.issue_severity(-1); nil }
+        [] of Verb::Chord, menu: :palette) { |ctx| ctx.issue_severity(-1); nil }
 
       # edit-notes/edit-title/open-flow/repeater-flow/delete are NON-hidden so they front
       # the issue-detail "space" action menu (parity with the History detail; the
