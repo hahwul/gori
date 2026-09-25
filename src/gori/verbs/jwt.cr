@@ -47,10 +47,11 @@ module Gori
         Verb::Scope::Jwt, [Verb::Chord.new("y"), Verb::Chord.new("y", ctrl: true)],
         available: in_jwt_copy, intent: :copy) { |ctx| ctx.jwt_copy; nil }
 
-      # Copy the re-signed OUTPUT token — tagged :output (the ENCODE result pane).
+      # Copy the re-signed OUTPUT token — tagged :output (the ENCODE result pane). `C`, not the
+      # `t` it had: `t` is a sub-tab strip letter, and the SUB-TABS bucket shares this card.
       r.register Verb::Definition.new(
         "jwt.copy-token", "Copy re-signed token", "Copy the OUTPUT token to the clipboard",
-        Verb::Scope::Jwt, available: in_jwt, mnemonic: 't', section: :output) { |ctx| ctx.jwt_copy_token; nil }
+        Verb::Scope::Jwt, available: in_jwt, mnemonic: 'C', section: :output) { |ctx| ctx.jwt_copy_token; nil }
 
       # Copy the selected ATTACK payload — tagged :attacks (the payload list pane).
       r.register Verb::Definition.new(

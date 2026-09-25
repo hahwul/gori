@@ -174,13 +174,12 @@ MENU_LETTER_ALLOWED = {
   {"colormarker.color-add", "colormarker.add"}           => "false positive: handle_colors_key answers `a` in the colours pane",
   {"colormarker.color-edit", "colormarker.edit"}         => "false positive: handle_colors_key answers `e` in the colours pane",
   {"colormarker.color-delete", "colormarker.delete"}     => "false positive: handle_colors_key answers `d` in the colours pane",
-  # WP2 #10 and WP6 — the strip's `r` renames and `t` marks a chip.
-  {"repeater.send", "strip:rename"}      => "WP2 #10: strip `r` renames, the menu's `r` sends (hotkeys.md)",
-  {"fuzz.run", "strip:rename"}           => "WP2 #10: strip `r` renames, the menu's `r` runs (hotkeys.md)",
-  {"mine.run", "strip:rename"}           => "WP2 #10: strip `r` renames, the menu's `r` runs (hotkeys.md)",
-  {"sequence.run", "strip:rename"}       => "WP2 #10: strip `r` renames, the menu's `r` runs (hotkeys.md)",
-  {"repeater.tag-subtab", "strip:mark"}  => "WP2 #10: Tag leaves `t` for a Mark sub-tab row",
-  {"comparer.toggle-pane", "strip:mark"} => "WP6: `t` is a strip letter; the pane toggle moves into Display…",
+  # WP2 #10 — the strip's `r` renames and `t` marks a chip.
+  {"repeater.send", "strip:rename"}     => "WP2 #10: strip `r` renames, the menu's `r` sends (hotkeys.md)",
+  {"fuzz.run", "strip:rename"}          => "WP2 #10: strip `r` renames, the menu's `r` runs (hotkeys.md)",
+  {"mine.run", "strip:rename"}          => "WP2 #10: strip `r` renames, the menu's `r` runs (hotkeys.md)",
+  {"sequence.run", "strip:rename"}      => "WP2 #10: strip `r` renames, the menu's `r` runs (hotkeys.md)",
+  {"repeater.tag-subtab", "strip:mark"} => "WP2 #10: Tag leaves `t` for a Mark sub-tab row",
   # Decision 10 — a letter the tab does not bind falls through to Global on a dropped space.
   {"history.compare", "capture.toggle"}       => "Decision 10: Comparer moves into Send flow to…",
   {"detail.compare", "capture.toggle"}        => "Decision 10: Comparer moves into Send flow to…",

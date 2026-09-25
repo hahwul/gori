@@ -181,10 +181,11 @@ describe "sub-tab verbs" do
     # to 'm' (Mode — the Decoder's letter for the same gesture).
     r["jwt.toggle-mode"].menu_key.should eq('m')
     r["cookie.toggle-mode"].menu_key.should eq('m')
-    # Notes derives its chip label from the body text, so it has no rename — which is why
-    # `notes.edit` may keep 'e'.
+    # Notes derives its chip label from the body text, so it has no rename. `notes.edit` still
+    # gave 'e' up (to 'o'): the strip's nine read the same on all nine strips, including the
+    # one that lacks the action (#1274 WP6, `Registry#validate_intents!`).
     r["notes.rename-subtab"]?.should be_nil
-    r["notes.edit"].menu_key.should eq('e')
+    r["notes.edit"].menu_key.should eq('o')
   end
 
   it "gives the strip the SAME nine letters on all nine tabs" do

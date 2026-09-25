@@ -83,9 +83,11 @@ module Gori
         "notes.export", "Export note…", "Write the current note's text to a Markdown file",
         Verb::Scope::Notes, available: in_notes, intent: :export) { |ctx| ctx.notes_export; nil }
 
+      # `o` (open it elsewhere), not `e`: `e` renames a sub-tab on the other eight strips, and a
+      # pane letter on a tab with a strip stays off the strip's nine (`Verb::Lexicon`).
       r.register Verb::Definition.new(
         "notes.edit", "Edit in $EDITOR", "Open the current note in the external editor",
-        Verb::Scope::Notes, available: in_notes, mnemonic: 'e') { |ctx| ctx.notes_edit; nil }
+        Verb::Scope::Notes, available: in_notes, mnemonic: 'o') { |ctx| ctx.notes_edit; nil }
 
       r.register Verb::Definition.new(
         "notes.goto", "Go to line", "Jump the cursor to a line number",

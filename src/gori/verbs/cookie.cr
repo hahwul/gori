@@ -59,10 +59,11 @@ module Gori
         Verb::Scope::Cookie, [Verb::Chord.new("y"), Verb::Chord.new("y", ctrl: true)],
         available: in_cookie_copy, intent: :copy) { |ctx| ctx.cookie_copy; nil }
 
-      # Copy the forged OUTPUT cookie — tagged :output (the FORGE result pane).
+      # Copy the forged OUTPUT cookie — tagged :output (the FORGE result pane). `C`, as on the
+      # JWT tab: `t` is a sub-tab strip letter.
       r.register Verb::Definition.new(
         "cookie.copy-cookie", "Copy forged cookie", "Copy the OUTPUT cookie to the clipboard",
-        Verb::Scope::Cookie, available: in_cookie, mnemonic: 't', section: :output) { |ctx| ctx.cookie_copy_output; nil }
+        Verb::Scope::Cookie, available: in_cookie, mnemonic: 'C', section: :output) { |ctx| ctx.cookie_copy_output; nil }
 
       # Sub-tab chip rename + content clone — tagged :subtab (mirrors JWT/Decoder).
       r.register Verb::Definition.new(

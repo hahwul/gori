@@ -135,6 +135,18 @@ describe Gori::Verb::Lexicon do
       expect_raises(Gori::Error, /declares intent :filter .* mnemonic 'f'/) { reg.validate_intents! }
     end
 
+    it "raises on a pane verb wearing a strip letter on a tab that has a strip" do
+      reg = LexiconSpec.registry(
+        LexiconSpec.verb("demo.new", Gori::Verb::Scope::Jwt, intent: :new, section: :subtab),
+        LexiconSpec.verb("demo.pane", Gori::Verb::Scope::Jwt, mnemonic: 't', section: :output))
+      expect_raises(Gori::Error, /demo.pane .* strip's menu 't'/) { reg.validate_intents! }
+    end
+
+    it "leaves the strip's letters free on a tab without a strip" do
+      LexiconSpec.registry(LexiconSpec.verb("demo.pane", Gori::Verb::Scope::Body, mnemonic: 't'))
+        .validate_intents!
+    end
+
     it "raises on a mnemonic that repeats the lexicon letter too, since it is the lexicon's to spell" do
       reg = LexiconSpec.registry(LexiconSpec.verb("demo.a", mnemonic: '/', intent: :filter))
       expect_raises(Gori::Error, /declares intent :filter/) { reg.validate_intents! }

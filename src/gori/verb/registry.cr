@@ -82,7 +82,13 @@ module Gori
       #   • An intent must be in the lexicon, and a verb with one must not spell a mnemonic
       #     as well: the lexicon is where its letter comes from, so a second spelling is
       #     either redundant or the drift the table exists to stop.
+      #   • On a tab with a sub-tab strip, only the SUB-TABS bucket may wear one of the
+      #     strip's letters (`Lexicon::STRIP_LETTERS`). The bucket shares every card with the
+      #     pane, and the strip answers `t` raw, so a pane `t` means one thing in the card and
+      #     another on the strip a keystroke away. It holds on a strip that lacks the action
+      #     too: the nine read the same on all nine strips.
       def validate_intents! : Nil
+        strip_scopes = compact_map { |v| v.scope if SUBTAB_SECTIONS.includes?(v.section) }.to_set
         each do |v|
           if intent = v.intent
             unless Lexicon::ENTRIES.has_key?(intent)
@@ -93,6 +99,12 @@ module Gori
                 "#{v.id} declares intent #{intent.inspect} (menu '#{Lexicon.letter(intent)}') and " \
                 "mnemonic '#{m}' — an intent verb takes its letter from Verb::Lexicon")
             end
+          end
+          next if v.hidden? || SUBTAB_SECTIONS.includes?(v.section) || !strip_scopes.includes?(v.scope)
+          if (key = v.menu_key) && Lexicon::STRIP_LETTERS.includes?(key)
+            raise Gori::Error.new(
+              "#{v.id} in #{v.scope}/#{v.section} wears the sub-tab strip's menu '#{key}' " \
+              "(a pane verb on a tab with a strip takes a letter outside #{Lexicon::STRIP_LETTERS.join})")
           end
         end
       end
