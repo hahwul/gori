@@ -55,7 +55,6 @@ module Gori
         :duplicate_rule  => Entry.new('c', :preferred),
         :move_up         => Entry.new('u', :preferred),
         :move_down       => Entry.new('n', :preferred),
-        :insert_marker   => Entry.new('I', :preferred), # `i` is insert in an editor pane
         :oast_payload    => Entry.new('O', :preferred),
         :open_browser    => Entry.new('B', :preferred),
         :mark_word       => Entry.new('W', :preferred),

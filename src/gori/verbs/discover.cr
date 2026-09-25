@@ -7,11 +7,11 @@ module Gori
     def self.register_discover(r : Verb::Registry) : Nil
       r.register Verb::Definition.new(
         "discover.run", "Run / re-run", "Start (or re-run) the selected discovery run",
-        Verb::Scope::Discover, [Verb::Chord.new("r", ctrl: true)], mnemonic: 'r') { |ctx| ctx.discover_run; nil }
+        Verb::Scope::Discover, [Verb::Chord.new("r", ctrl: true)], intent: :run) { |ctx| ctx.discover_run; nil }
 
       r.register Verb::Definition.new(
         "discover.stop", "Stop", "Stop the selected discovery run (in-flight requests finish)",
-        Verb::Scope::Discover, [Verb::Chord.new("x", ctrl: true)], mnemonic: 's') { |ctx| ctx.discover_stop; nil }
+        Verb::Scope::Discover, [Verb::Chord.new("x", ctrl: true)], intent: :stop) { |ctx| ctx.discover_stop; nil }
 
       # Plain `p` — a chord, so the hint and the hotkey editor both see it (it was a raw arm
       # in the controller). No ctrl-p — that's reserved for the command palette.
@@ -33,7 +33,7 @@ module Gori
       r.register Verb::Definition.new(
         "discover.open-flow", "Open flow", "Open the selected finding's captured request/response in History",
         Verb::Scope::Discover, [Verb::Chord.new("o"), Verb::Chord.new("enter")],
-        mnemonic: 'o', group: :view) { |ctx| ctx.discover_open_flow; nil }
+        intent: :open, group: :view) { |ctx| ctx.discover_open_flow; nil }
 
       # `d` clears a finished row from the RUNS list, which is append-only for the session.
       # Never a running one — the controller refuses and says to stop it first.
@@ -47,7 +47,7 @@ module Gori
 
       r.register Verb::Definition.new(
         "discover.copy", "Copy", "Copy the selected finding's URL",
-        Verb::Scope::Discover, [Verb::Chord.new("y")], mnemonic: 'y') { |ctx| ctx.read_copy; nil }
+        Verb::Scope::Discover, [Verb::Chord.new("y")], intent: :copy) { |ctx| ctx.read_copy; nil }
 
       r.register Verb::Definition.new(
         "discover.to-menu", "Back to sub-tabs", "Move focus up to the Sitemap/Discover strip", Verb::Scope::Discover,

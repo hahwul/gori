@@ -18,7 +18,7 @@ module Gori
       # bare `r` is "send to Repeater" everywhere it is bound.
       r.register Verb::Definition.new(
         "params.run", "Rescan", "Re-read the captured requests and rebuild the inventory",
-        Verb::Scope::Params, [Verb::Chord.new("r", ctrl: true)], mnemonic: 'r') { |ctx| ctx.params_run; nil }
+        Verb::Scope::Params, [Verb::Chord.new("r", ctrl: true)], intent: :run) { |ctx| ctx.params_run; nil }
 
       r.register Verb::Definition.new(
         "params.all-headers", "Toggle standard headers",
@@ -35,7 +35,7 @@ module Gori
       rows_shown = ->(ctx : Verb::ExecContext) { ctx.params_rows_shown? }
       r.register Verb::Definition.new(
         "params.copy", "Copy name", "Copy the selected parameter's name",
-        Verb::Scope::Params, [Verb::Chord.new("y")], available: rows_shown, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
+        Verb::Scope::Params, [Verb::Chord.new("y")], available: rows_shown, intent: :copy) { |ctx| ctx.read_copy; nil }
 
       # ⇧Y, spelled `Chord.new("y", shift: true)`: `Keybind.from_event` normalises a typed
       # capital to shift+lowercase, and `menu_key` skips shift chords — hence the mnemonic.
@@ -53,7 +53,7 @@ module Gori
       r.register Verb::Definition.new(
         "params.open-flow", "Open flow", "Open the newest captured request that carried this parameter in History",
         Verb::Scope::Params, [Verb::Chord.new("enter"), Verb::Chord.new("right")],
-        available: rows_shown, mnemonic: 'o', group: :view) { |ctx| ctx.params_open_flow; nil }
+        available: rows_shown, intent: :open, group: :view) { |ctx| ctx.params_open_flow; nil }
 
       r.register Verb::Definition.new(
         "params.mine", "Mine parameters",

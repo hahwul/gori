@@ -27,7 +27,7 @@ module Gori
 
       r.register Verb::Definition.new(
         "rewriter.add", "Add rule", "Open the editor to add a Match & Replace rule",
-        Verb::Scope::Rewriter, [Verb::Chord.new("a")], available: in_rw, mnemonic: 'a', section: :rules) { |ctx| ctx.rewriter_add; nil }
+        Verb::Scope::Rewriter, [Verb::Chord.new("a")], available: in_rw, intent: :add, section: :rules) { |ctx| ctx.rewriter_add; nil }
       # Install a response-modification preset (#821) — unhide hidden fields, strip validation,
       # drop CSP, etc. — as ordinary editable rules. `p` is free in this scope (the preview
       # pane's read verbs spend x/v/S/y; the rule list spends a/e/d/c/r/s and the two moves).
@@ -43,7 +43,7 @@ module Gori
         mnemonic: 'f', section: :rules) { |ctx| ctx.rewriter_filter; nil }
       r.register Verb::Definition.new(
         "rewriter.edit", "Edit rule", "Edit the selected rule in the popup editor",
-        Verb::Scope::Rewriter, [Verb::Chord.new("enter"), Verb::Chord.new("e")], available: has_rule, mnemonic: 'e', section: :rules) { |ctx| ctx.rewriter_edit; nil }
+        Verb::Scope::Rewriter, [Verb::Chord.new("enter"), Verb::Chord.new("e")], available: has_rule, intent: :edit, section: :rules) { |ctx| ctx.rewriter_edit; nil }
       # A REAL chord since the key audit's F4, and the reason it could not be one before is
       # exactly what F4 dissolves: `rewriter.select-line` (read_edit.cr) binds bare `x` in this
       # SCOPE for the preview pane, `Keymap#lookup` is keyed by scope alone and returns ONE id,
@@ -56,23 +56,23 @@ module Gori
       # to be — `rewriter_rule_list_focused?` is true for exactly the pane that arm ran in.
       r.register Verb::Definition.new(
         "rewriter.toggle", "Enable/disable", "Toggle the selected rule on or off in THIS project",
-        Verb::Scope::Rewriter, [Verb::Chord.new("t")], available: has_rule, mnemonic: 't', section: :rules) { |ctx| ctx.rewriter_toggle; nil }
+        Verb::Scope::Rewriter, [Verb::Chord.new("t")], available: has_rule, intent: :toggle_enabled, section: :rules) { |ctx| ctx.rewriter_toggle; nil }
       r.register Verb::Definition.new(
         "rewriter.delete", "Delete rule", "Delete the selected rule (confirms first)",
-        Verb::Scope::Rewriter, [Verb::Chord.new("d")], available: has_rule, mnemonic: 'd', section: :rules,
+        Verb::Scope::Rewriter, [Verb::Chord.new("d")], available: has_rule, intent: :delete, section: :rules,
         group: :danger) { |ctx| ctx.rewriter_delete; nil }
       r.register Verb::Definition.new(
         "rewriter.move-up", "Move up", "Move the selected rule earlier in apply order",
-        Verb::Scope::Rewriter, [Verb::Chord.new("k", shift: true)], available: has_rule, mnemonic: 'u', section: :rules) { |ctx| ctx.rewriter_move(-1); nil }
+        Verb::Scope::Rewriter, [Verb::Chord.new("k", shift: true)], available: has_rule, intent: :move_up, section: :rules) { |ctx| ctx.rewriter_move(-1); nil }
       r.register Verb::Definition.new(
         "rewriter.move-down", "Move down", "Move the selected rule later in apply order",
-        Verb::Scope::Rewriter, [Verb::Chord.new("j", shift: true)], available: has_rule, mnemonic: 'n', section: :rules) { |ctx| ctx.rewriter_move(1); nil }
+        Verb::Scope::Rewriter, [Verb::Chord.new("j", shift: true)], available: has_rule, intent: :move_down, section: :rules) { |ctx| ctx.rewriter_move(1); nil }
       r.register Verb::Definition.new(
         "rewriter.duplicate", "Duplicate rule", "Copy the selected rule into a new one",
-        Verb::Scope::Rewriter, available: has_rule, mnemonic: 'c', section: :rules) { |ctx| ctx.rewriter_duplicate; nil }
+        Verb::Scope::Rewriter, available: has_rule, intent: :duplicate_rule, section: :rules) { |ctx| ctx.rewriter_duplicate; nil }
       r.register Verb::Definition.new(
         "rewriter.reload", "Reload rules", "Re-read rules from the project DB (pick up external edits)",
-        Verb::Scope::Rewriter, available: in_rw, mnemonic: 'r', section: :rules) { |ctx| ctx.rewriter_reload; nil }
+        Verb::Scope::Rewriter, available: in_rw, intent: :run, section: :rules) { |ctx| ctx.rewriter_reload; nil }
 
       # The scope half. A Match & Replace rule lives EITHER in this project or in the global
       # library that every project reads (`Store::RuleScope`) — this replaces the old s/o

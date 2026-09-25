@@ -12,18 +12,18 @@ module Gori
       r.register Verb::Definition.new(
         "notes.new", "New note", "Open a fresh blank note sub-tab",
         Verb::Scope::Notes, [Verb::Chord.new("n", ctrl: true)],
-        available: in_notes, mnemonic: 'n', section: :subtab) { |ctx| ctx.notes_new; nil }
+        available: in_notes, intent: :new, section: :subtab) { |ctx| ctx.notes_new; nil }
 
       r.register Verb::Definition.new(
         "notes.close", "Close note", "Close the active note sub-tab (keeps at least one)",
         Verb::Scope::Notes, [Verb::Chord.new("w", ctrl: true)],
-        available: in_notes, mnemonic: 'w', section: :subtab) { |ctx| ctx.notes_close; nil }
+        available: in_notes, intent: :close, section: :subtab) { |ctx| ctx.notes_close; nil }
 
       # Content-only clone (new note id; entity_links are not copied). Tagged :subtab so
       # it fronts the strip's Space menu; 'd' is free in COMMON ∪ :subtab.
       r.register Verb::Definition.new(
         "notes.duplicate-subtab", "Duplicate subtab", "Open a new note sub-tab with the same text",
-        Verb::Scope::Notes, available: in_notes, mnemonic: 'd', section: :subtab) { |ctx| ctx.notes_duplicate_subtab; nil }
+        Verb::Scope::Notes, available: in_notes, intent: :duplicate, section: :subtab) { |ctx| ctx.notes_duplicate_subtab; nil }
 
       # Search-and-jump across note sub-tabs (section :tab, tab-bar space menu — like
       # repeater.find-subtab). A jump path that doesn't need Ctrl+digit.
@@ -35,7 +35,7 @@ module Gori
         "notes.find-subtab", "Search sub-tabs", "Filter the open notes and jump to one",
         Verb::Scope::Notes,
         available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :notes && ctx.subtab_search_count >= 1 },
-        mnemonic: 'f', section: :tab) { |ctx| ctx.subtab_search_open; nil }
+        intent: :find_subtab, section: :tab) { |ctx| ctx.subtab_search_open; nil }
 
       # Inline `/` filter bar over the note sub-tab strip (issue #121) — narrows chips by
       # name / free-text over the body. '/' is the shared filter idiom (unique in :tab).
@@ -43,7 +43,7 @@ module Gori
         "notes.filter-subtabs", "Filter sub-tabs", "Filter the note sub-tab strip by name / text",
         Verb::Scope::Notes,
         available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :notes && ctx.subtab_search_count >= 2 },
-        mnemonic: '/', section: :tab) { |ctx| ctx.subtab_filter_open; nil }
+        intent: :filter, section: :tab) { |ctx| ctx.subtab_filter_open; nil }
 
       # Sub-tab multi-select (#683). `t` marks a chip and `⇧T` marks the strip; ^W then
       # closes every marked one, `space ▸ r` sends them, and so on — the existing verbs
@@ -52,10 +52,10 @@ module Gori
       # strip, and it WOULD fire in the body, marking sub-tabs while the operator types.
       r.register Verb::Definition.new(
         "notes.subtab-mark-all", "Mark all sub-tabs", "Mark every note the sub-tab filter shows — the actions above then act on all of them",
-        Verb::Scope::Notes, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :notes && ctx.subtab_search_count >= 2 }, mnemonic: 'T', section: :subtab) { |ctx| ctx.subtab_mark_all; nil }
+        Verb::Scope::Notes, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :notes && ctx.subtab_search_count >= 2 }, intent: :mark_all, section: :subtab) { |ctx| ctx.subtab_mark_all; nil }
       r.register Verb::Definition.new(
         "notes.subtab-mark-clear", "Clear marks", "Drop every sub-tab mark (esc on the strip does the same)",
-        Verb::Scope::Notes, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :notes && ctx.subtab_marked_count > 0 }, mnemonic: 'N', section: :subtab) { |ctx| ctx.subtab_mark_clear; nil }
+        Verb::Scope::Notes, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :notes && ctx.subtab_marked_count > 0 }, intent: :mark_clear, section: :subtab) { |ctx| ctx.subtab_mark_clear; nil }
 
       # The single smart Copy (see repeater.copy in verbs/history.cr) — copy-all is gone.
       # `y` in READ, `^Y` in INS — one verb. See repeater.copy in verbs/history.cr for why
@@ -66,11 +66,11 @@ module Gori
       r.register Verb::Definition.new(
         "notes.copy", "Copy", "Copy the selected text, or the whole current note if nothing is selected, to the clipboard",
         Verb::Scope::Notes, [Verb::Chord.new("y"), Verb::Chord.new("y", ctrl: true)],
-        available: in_notes_copy, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
+        available: in_notes_copy, intent: :copy) { |ctx| ctx.read_copy; nil }
 
       r.register Verb::Definition.new(
         "notes.clear", "Clear note", "Clear the current note's text",
-        Verb::Scope::Notes, available: in_notes, mnemonic: 'K', group: :danger) { |ctx| ctx.notes_clear; nil }
+        Verb::Scope::Notes, available: in_notes, intent: :clear_input, group: :danger) { |ctx| ctx.notes_clear; nil }
 
       # Export the note as Markdown. Mnemonic 'E', not 'e' or 'x': 'e' is Edit-in-$EDITOR
       # and 'x' is read_edit.cr's Select line, both already in this scope. A capital follows
@@ -81,7 +81,7 @@ module Gori
       # The space menu and the palette are the only ways in, by construction.
       r.register Verb::Definition.new(
         "notes.export", "Export note…", "Write the current note's text to a Markdown file",
-        Verb::Scope::Notes, available: in_notes, mnemonic: 'E') { |ctx| ctx.notes_export; nil }
+        Verb::Scope::Notes, available: in_notes, intent: :export) { |ctx| ctx.notes_export; nil }
 
       r.register Verb::Definition.new(
         "notes.edit", "Edit in $EDITOR", "Open the current note in the external editor",

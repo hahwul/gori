@@ -25,14 +25,14 @@ module Gori
 
       r.register Verb::Definition.new(
         "probe.filter", "Filter issues", "Filter the list (severity:/status:/category:/host:/code:/free text)",
-        Verb::Scope::Probe, [Verb::Chord.new("/")], group: :view) { |ctx| ctx.probe_query; nil }
+        Verb::Scope::Probe, [Verb::Chord.new("/")], group: :view, intent: :filter) { |ctx| ctx.probe_query; nil }
 
       # `y` on the LIST (#964's shape): the issue as a report line with its affected URLs
       # under it. The detail scope's own `y` copies the selected affected URLs.
       r.register Verb::Definition.new(
         "probe.copy-issue", "Copy issue", "Copy the selected issue (severity, title, host) and its affected URLs",
         Verb::Scope::Probe, [Verb::Chord.new("y")],
-        available: ->(ctx : Verb::ExecContext) { ctx.probe_issue_selected? }, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
+        available: ->(ctx : Verb::ExecContext) { ctx.probe_issue_selected? }, intent: :copy) { |ctx| ctx.read_copy; nil }
 
       # Probe-local `m` (mode cycle). Global Match & Replace is palette-only by default,
       # so this no longer needs to shadow a Global bare letter.
@@ -55,7 +55,7 @@ module Gori
       # the `s scope` chip — so the toggle is reachable where its effect is visible.
       r.register Verb::Definition.new(
         "probe.scope-toggle", "Toggle scope lens", "Filter issues to in-scope hosts on/off",
-        Verb::Scope::Probe, [] of Verb::Chord, mnemonic: 's', group: :scope) { |ctx| ctx.scope_toggle_lens; nil } # the Global `s` is the key
+        Verb::Scope::Probe, [] of Verb::Chord, intent: :scope_lens, group: :scope) { |ctx| ctx.scope_toggle_lens; nil } # the Global `s` is the key
 
       # Bulk dismiss — space-menu only (mnemonic, no stray hotkey): mute a whole check
       # code, or a whole host, in one confirmed action. 'r' is reserved for repeater-evidence
@@ -101,7 +101,7 @@ module Gori
 
       r.register Verb::Definition.new(
         "probe.delete-selected", "Delete issue", "Delete the selected issue",
-        Verb::Scope::Probe, [Verb::Chord.new("d")], group: :danger) { |ctx| ctx.probe_delete; nil }
+        Verb::Scope::Probe, [Verb::Chord.new("d")], group: :danger, intent: :delete) { |ctx| ctx.probe_delete; nil }
 
       # ⇧X — the one chord every "wipe this tab" verb answers, each in its own scope:
       # `history.clear`, `authorize.clear` and `activity.clear` are the siblings, and `X` is
@@ -125,11 +125,11 @@ module Gori
       #
       # `Chord.new("x", shift: true)`, NOT `Chord.new("X")`: `Keybind.from_event` normalises a
       # typed capital to shift+lowercase, so the capital spelling never fires. `menu_key` skips
-      # shift chords, hence the explicit mnemonic.
+      # shift chords, hence the intent's lexicon letter.
       r.register Verb::Definition.new(
         "probe.clear", "Clear issues", "Delete all Probe issues for this project", Verb::Scope::Probe,
         [Verb::Chord.new("x", shift: true)],
-        mnemonic: 'X', group: :wipe) { |ctx| ctx.probe_clear; nil }
+        intent: :wipe, group: :wipe) { |ctx| ctx.probe_clear; nil }
 
       r.register Verb::Definition.new(
         "probe.leave", "Back to menu", "Return focus to the tab menu", Verb::Scope::Probe,
@@ -193,7 +193,7 @@ module Gori
 
       r.register Verb::Definition.new(
         "probe.delete", "Delete issue", "Delete this issue", Verb::Scope::ProbeDetail,
-        [Verb::Chord.new("d")], group: :danger) { |ctx| ctx.probe_delete; nil }
+        [Verb::Chord.new("d")], group: :danger, intent: :delete) { |ctx| ctx.probe_delete; nil }
 
       # --- Rules sub-tab (Verb::Scope::ProbeRules) ---
       # Nav (↑/↓, j/k) + Esc→strip are controller-claimed; these are the actions. edit/delete are
@@ -210,18 +210,18 @@ module Gori
       # so a reflex carried from any of them silently disabled a scanning rule here.
       r.register Verb::Definition.new(
         "probe-rules.toggle", "Toggle rule", "Enable or disable the selected rule",
-        Verb::Scope::ProbeRules, [Verb::Chord.new("t")], mnemonic: 't') { |ctx| ctx.probe_rule_toggle; nil }
+        Verb::Scope::ProbeRules, [Verb::Chord.new("t")], intent: :toggle_enabled) { |ctx| ctx.probe_rule_toggle; nil }
       r.register Verb::Definition.new(
         "probe-rules.add", "Add custom rule", "Open the popup to add a custom match rule",
-        Verb::Scope::ProbeRules, [Verb::Chord.new("a")]) { |ctx| ctx.probe_rule_add; nil }
+        Verb::Scope::ProbeRules, [Verb::Chord.new("a")], intent: :add) { |ctx| ctx.probe_rule_add; nil }
       r.register Verb::Definition.new(
         "probe-rules.edit", "Edit custom rule", "Edit the selected custom rule",
         Verb::Scope::ProbeRules, [Verb::Chord.new("enter"), Verb::Chord.new("e")],
-        mnemonic: 'e', available: probe_custom) { |ctx| ctx.probe_rule_edit; nil }
+        intent: :edit, available: probe_custom) { |ctx| ctx.probe_rule_edit; nil }
       r.register Verb::Definition.new(
         "probe-rules.delete", "Delete custom rule", "Delete the selected custom rule",
         Verb::Scope::ProbeRules, [Verb::Chord.new("d")], available: probe_custom,
-        group: :danger) { |ctx| ctx.probe_rule_delete; nil }
+        group: :danger, intent: :delete) { |ctx| ctx.probe_rule_delete; nil }
       # `/`, the app's filter key in eleven other list scopes and the one this list needed
       # most: ~40 built-in rules across three sections, where reaching one meant scrolling
       # past the other two. A LENS only — a hidden rule is still enabled.

@@ -17,7 +17,7 @@ module Gori
         "authorize.run", "Run pending",
         "Replay every queued request that has no result yet (never run, or the send failed)",
         Verb::Scope::Authorize, [Verb::Chord.new("r", ctrl: true)],
-        available: idle, mnemonic: 'r') { |ctx| ctx.authorize_run; nil }
+        available: idle, intent: :run) { |ctx| ctx.authorize_run; nil }
 
       # ⇧R against ^R mirrors Intercept's `f` / `⇧F` pair: the working set vs everything.
       # `Chord.new("r", shift: true)`, never `Chord.new("R")` — the latter never fires.
@@ -40,7 +40,7 @@ module Gori
         "authorize.stop", "Stop",
         "Stop the run — no further identity is sent once the current one returns",
         Verb::Scope::Authorize, [Verb::Chord.new("x", ctrl: true)],
-        available: busy, mnemonic: 's') { |ctx| ctx.authorize_stop; nil }
+        available: busy, intent: :stop) { |ctx| ctx.authorize_stop; nil }
 
       # Available even with an empty queue: configuring who you are is what you do BEFORE
       # sending anything here. Only a live run locks it.
@@ -67,12 +67,12 @@ module Gori
 
       r.register Verb::Definition.new(
         "authorize.copy", "Copy", "Copy the selected request as `METHOD host/path`",
-        Verb::Scope::Authorize, [Verb::Chord.new("y")], available: queued, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
+        Verb::Scope::Authorize, [Verb::Chord.new("y")], available: queued, intent: :copy) { |ctx| ctx.read_copy; nil }
 
       r.register Verb::Definition.new(
         "authorize.remove", "Remove request", "Drop the selected request from the queue",
         Verb::Scope::Authorize, [Verb::Chord.new("d")],
-        available: queued, mnemonic: 'd', group: :danger) { |ctx| ctx.authorize_remove; nil }
+        available: queued, intent: :delete, group: :danger) { |ctx| ctx.authorize_remove; nil }
 
       # ⇧X + the menu key 'X', the house shape for "wipe this tab" — `history.clear`,
       # `probe.clear`, `activity.clear` and `issues.clear` answer the same chord, each gated to
@@ -83,11 +83,11 @@ module Gori
       # run is in flight and says "^X to stop it first", which is the key the operator wanted.
       # Spelled Chord.new("x", shift: true), NEVER Chord.new("X") — from_event
       # normalises a typed capital to shift+lowercase, so the capital spelling never fires;
-      # menu_key skips shift chords, hence the explicit mnemonic.
+      # menu_key skips shift chords, hence the intent's lexicon letter.
       r.register Verb::Definition.new(
         "authorize.clear", "Clear", "Empty the request queue and its results",
         Verb::Scope::Authorize, [Verb::Chord.new("x", shift: true)],
-        available: queued, mnemonic: 'X', group: :wipe) { |ctx| ctx.authorize_clear; nil }
+        available: queued, intent: :wipe, group: :wipe) { |ctx| ctx.authorize_clear; nil }
 
       register_send_to_authorize(r)
     end

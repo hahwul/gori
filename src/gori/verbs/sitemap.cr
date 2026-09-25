@@ -27,13 +27,13 @@ module Gori
 
       r.register Verb::Definition.new(
         "sitemap.query", "Filter (QL)", "Filter the tree with a query (host: path: method: status: tag: …)",
-        Verb::Scope::Sitemap, [Verb::Chord.new("/")], group: :view) { |ctx| ctx.sitemap_query; nil }
+        Verb::Scope::Sitemap, [Verb::Chord.new("/")], group: :view, intent: :filter) { |ctx| ctx.sitemap_query; nil }
 
       # `y` — the cursor row's host/path, or every marked row one per line. The lists this
       # sits beside (History, Probe, Issues) all copy on `y`; the tree was the one that did not.
       r.register Verb::Definition.new(
         "sitemap.copy", "Copy", "Copy the cursor row's host/path — or every marked row, one per line",
-        Verb::Scope::Sitemap, [Verb::Chord.new("y")], mnemonic: 'y') { |ctx| ctx.read_copy; nil }
+        Verb::Scope::Sitemap, [Verb::Chord.new("y")], intent: :copy) { |ctx| ctx.read_copy; nil }
 
       # --- multi-select marks (mirrors History #442) ---
       # Marks make the EXISTING action menu act on N paths — the batch verbs below read the
@@ -44,7 +44,7 @@ module Gori
       # triage gesture that earns it an L1 bare key there).
       r.register Verb::Definition.new(
         "sitemap.mark-toggle", "Mark path", "Mark/unmark this path and step down — the action menu then acts on every marked path",
-        Verb::Scope::Sitemap, [Verb::Chord.new("t")], group: :triage) { |ctx| ctx.sitemap_mark_toggle; nil }
+        Verb::Scope::Sitemap, [Verb::Chord.new("t")], group: :triage, intent: :mark) { |ctx| ctx.sitemap_mark_toggle; nil }
 
       # ⇧T, the `t`/⇧T pair History, Issues and the Intercept queue all carry. It was held back
       # on the argument that "a tree has no useful mark every row — it would sweep hosts and
@@ -55,12 +55,12 @@ module Gori
       #
       # `Chord.new("t", shift: true)`, NOT `Chord.new("T")`: a typed capital normalises to
       # shift+lowercase, so the capital spelling can never fire. menu_key skips shift chords,
-      # hence the explicit 'T' mnemonic — which `sitemap.tag` gives up below, because the menu
+      # hence the :mark_all intent's 'T' — which `sitemap.tag` gives up below, because the menu
       # letter has to name what the chord beside it does.
       r.register Verb::Definition.new(
         "sitemap.mark-all", "Mark all (shown)", "Mark every captured path the tree currently shows — hosts and folders are skipped",
         Verb::Scope::Sitemap, [Verb::Chord.new("t", shift: true)],
-        mnemonic: 'T', group: :triage) { |ctx| ctx.sitemap_mark_all; nil }
+        intent: :mark_all, group: :triage) { |ctx| ctx.sitemap_mark_all; nil }
 
       # ⇧↑/⇧↓ extend a contiguous range from the anchor — the keyboard form of a GUI
       # shift+click. Free in this scope: Keymap#lookup matches a Chord record EXACTLY, so
@@ -83,7 +83,7 @@ module Gori
         "sitemap.mark-clear", "Clear marks", "Drop every mark (esc does the same)",
         Verb::Scope::Sitemap,
         available: ->(ctx : Verb::ExecContext) { ctx.sitemap_marked_count > 0 },
-        mnemonic: 'N') { |ctx| ctx.sitemap_mark_clear; nil }
+        intent: :mark_clear) { |ctx| ctx.sitemap_mark_clear; nil }
 
       # Tag the selected path (or every marked path) with a free-text memo; a group fold node
       # toasts. MENU-ONLY, on 'm' — for the memo the description names.
@@ -134,7 +134,7 @@ module Gori
       # menu; the verb carries no chord of its own, so it never shadows the Global one.
       r.register Verb::Definition.new(
         "sitemap.scope-toggle", "Toggle scope lens", "Filter the tree to in-scope endpoints on/off",
-        Verb::Scope::Sitemap, [] of Verb::Chord, mnemonic: 's', group: :scope) { |ctx| ctx.scope_toggle_lens; nil } # the Global `s` is the key
+        Verb::Scope::Sitemap, [] of Verb::Chord, intent: :scope_lens, group: :scope) { |ctx| ctx.scope_toggle_lens; nil } # the Global `s` is the key
 
       # The hide-static lens (#1239), shared with History. Menu-only for the reason History's
       # twin gives; this tab has no `v` picker, so the menu is its door (and the chip, while on).
@@ -167,7 +167,7 @@ module Gori
       # shows one flow, so there is nothing for a batch to mean here.
       r.register Verb::Definition.new(
         "sitemap.open-flow", "Open flow", "Open the selected endpoint's captured request/response in History",
-        Verb::Scope::Sitemap, [Verb::Chord.new("o")], mnemonic: 'o', group: :view) { |ctx| ctx.sitemap_open_flow; nil }
+        Verb::Scope::Sitemap, [Verb::Chord.new("o")], intent: :open, group: :view) { |ctx| ctx.sitemap_open_flow; nil }
 
       # `r` — send the selected endpoint (or every marked one) to Repeater, resolving a
       # representative captured flow per path.
@@ -186,7 +186,7 @@ module Gori
       # Evidence), spelled as a shift chord for the reason issues.export-key gives.
       r.register Verb::Definition.new(
         "sitemap.export", "Export OpenAPI…", "Write the selected — or every marked — host or subtree as an OpenAPI 3.0.3 document (asks for the path)",
-        Verb::Scope::Sitemap, [Verb::Chord.new("e", shift: true)], mnemonic: 'E', group: :send) { |ctx| ctx.sitemap_export; nil }
+        Verb::Scope::Sitemap, [Verb::Chord.new("e", shift: true)], intent: :export, group: :send) { |ctx| ctx.sitemap_export; nil }
 
       r.register Verb::Definition.new(
         "sitemap.to-menu", "Back to sub-tabs", "Move focus up to the Sitemap/Discover strip", Verb::Scope::Sitemap,

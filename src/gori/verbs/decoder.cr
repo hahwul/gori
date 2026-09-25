@@ -16,12 +16,12 @@ module Gori
       r.register Verb::Definition.new(
         "decoder.new", "New conversion", "Open a fresh blank conversion sub-tab",
         Verb::Scope::Decoder, [Verb::Chord.new("n", ctrl: true)],
-        available: in_decoder, mnemonic: 'n', section: :subtab) { |ctx| ctx.decoder_new; nil }
+        available: in_decoder, intent: :new, section: :subtab) { |ctx| ctx.decoder_new; nil }
 
       r.register Verb::Definition.new(
         "decoder.close", "Close conversion", "Close the active conversion sub-tab (keeps at least one)",
         Verb::Scope::Decoder, [Verb::Chord.new("w", ctrl: true)],
-        available: in_decoder, mnemonic: 'w', section: :subtab) { |ctx| ctx.decoder_close; nil }
+        available: in_decoder, intent: :close, section: :subtab) { |ctx| ctx.decoder_close; nil }
 
       # Rename the active sub-tab's chip — mirrors repeater.rename-subtab/fuzz.rename-subtab
       # (verbs/history.cr): Decoder is also in renameable_subtabs? (runner.cr), but had no
@@ -31,17 +31,17 @@ module Gori
       # which the four Send/Run tabs can never match.
       r.register Verb::Definition.new(
         "decoder.rename-subtab", "Rename subtab", "Rename the active conversion's sub-tab chip",
-        Verb::Scope::Decoder, available: in_decoder, mnemonic: 'e', section: :subtab) { |ctx| ctx.decoder_rename_subtab; nil }
+        Verb::Scope::Decoder, available: in_decoder, intent: :rename, section: :subtab) { |ctx| ctx.decoder_rename_subtab; nil }
       # Content-only clone (input + chain + chip name). 'd' is the bucket's Duplicate letter
       # on all nine, and free in COMMON ∪ :subtab here (COMMON keys: y/o/s).
       r.register Verb::Definition.new(
         "decoder.duplicate-subtab", "Duplicate subtab", "Open a new conversion with the same input and chain",
-        Verb::Scope::Decoder, available: in_decoder, mnemonic: 'd', section: :subtab) { |ctx| ctx.decoder_duplicate_subtab; nil }
+        Verb::Scope::Decoder, available: in_decoder, intent: :duplicate, section: :subtab) { |ctx| ctx.decoder_duplicate_subtab; nil }
 
       # Clears the INPUT text (and its chain spec) — the INPUT pane's own action.
       r.register Verb::Definition.new(
         "decoder.clear", "Clear input + chain", "Clear the current input and chain spec",
-        Verb::Scope::Decoder, [Verb::Chord.new("l", ctrl: true)], available: in_decoder, mnemonic: 'K',
+        Verb::Scope::Decoder, [Verb::Chord.new("l", ctrl: true)], available: in_decoder, intent: :clear_input,
         section: :input, group: :danger) { |ctx| ctx.decoder_clear; nil }
 
       # The single smart Copy (see repeater.copy in verbs/history.cr) — copy-all is gone.
@@ -53,7 +53,7 @@ module Gori
       r.register Verb::Definition.new(
         "decoder.copy", "Copy", "Copy the selected text, or the whole focused pane if nothing is selected, from INPUT/OUTPUT",
         Verb::Scope::Decoder, [Verb::Chord.new("y"), Verb::Chord.new("y", ctrl: true)],
-        available: in_decoder_copy, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
+        available: in_decoder_copy, intent: :copy) { |ctx| ctx.read_copy; nil }
 
       # Cycles the OUTPUT pane's display mode — tagged :output.
       r.register Verb::Definition.new(
@@ -83,7 +83,7 @@ module Gori
         "decoder.find-subtab", "Search sub-tabs", "Filter the open conversions and jump to one",
         Verb::Scope::Decoder,
         available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :decoder && ctx.subtab_search_count >= 1 },
-        mnemonic: 'f', section: :tab) { |ctx| ctx.subtab_search_open; nil }
+        intent: :find_subtab, section: :tab) { |ctx| ctx.subtab_search_open; nil }
 
       # Inline `/` filter bar over the conversion sub-tab strip (issue #121) — narrows
       # chips by name / free-text over the chain + input. '/' is the shared filter idiom.
@@ -91,7 +91,7 @@ module Gori
         "decoder.filter-subtabs", "Filter sub-tabs", "Filter the conversion sub-tab strip by name / text",
         Verb::Scope::Decoder,
         available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :decoder && ctx.subtab_search_count >= 2 },
-        mnemonic: '/', section: :tab) { |ctx| ctx.subtab_filter_open; nil }
+        intent: :filter, section: :tab) { |ctx| ctx.subtab_filter_open; nil }
 
       # Sub-tab multi-select (#683). `t` marks a chip and `⇧T` marks the strip; ^W then
       # closes every marked one, `space ▸ r` sends them, and so on — the existing verbs
@@ -100,10 +100,10 @@ module Gori
       # strip, and it WOULD fire in the body, marking sub-tabs while the operator types.
       r.register Verb::Definition.new(
         "decoder.subtab-mark-all", "Mark all sub-tabs", "Mark every conversion the sub-tab filter shows — the actions above then act on all of them",
-        Verb::Scope::Decoder, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :decoder && ctx.subtab_search_count >= 2 }, mnemonic: 'T', section: :subtab) { |ctx| ctx.subtab_mark_all; nil }
+        Verb::Scope::Decoder, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :decoder && ctx.subtab_search_count >= 2 }, intent: :mark_all, section: :subtab) { |ctx| ctx.subtab_mark_all; nil }
       r.register Verb::Definition.new(
         "decoder.subtab-mark-clear", "Clear marks", "Drop every sub-tab mark (esc on the strip does the same)",
-        Verb::Scope::Decoder, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :decoder && ctx.subtab_marked_count > 0 }, mnemonic: 'N', section: :subtab) { |ctx| ctx.subtab_mark_clear; nil }
+        Verb::Scope::Decoder, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :decoder && ctx.subtab_marked_count > 0 }, intent: :mark_clear, section: :subtab) { |ctx| ctx.subtab_mark_clear; nil }
     end
   end
 end

@@ -13,6 +13,56 @@ module LexiconSpec
       section: section, group: group) { |_| nil }
   end
 
+  # Every verb the space menu can show (Global and Editor are not menu scopes).
+  def menu_rows : Array(Gori::Verb::Definition)
+    Gori::Verbs.registry.select do |v|
+      !v.hidden? && v.menu_key && !v.scope.global? && !v.scope.editor?
+    end
+  end
+
+  # Id suffixes that name a lexicon intent. A menu verb ending in one declares that intent,
+  # so a new "…filter" row cannot quietly pick its own letter.
+  SUFFIX_INTENTS = {
+    "filter"           => :filter,
+    "filter-subtabs"   => :filter,
+    "query"            => :filter,
+    "select-line"      => :select_line,
+    "clear-selection"  => :clear_selection,
+    "send-to"          => :send_selection,
+    "copy-as"          => :copy_as,
+    "copy"             => :copy,
+    "delete"           => :delete,
+    "mark-toggle"      => :mark,
+    "mark-all"         => :mark_all,
+    "mark-clear"       => :mark_clear,
+    "export"           => :export,
+    "find-subtab"      => :find_subtab,
+    "close-subtab"     => :close,
+    "rename-subtab"    => :rename,
+    "duplicate-subtab" => :duplicate,
+  }
+
+  # Rows whose id names an intent but whose letter is decided elsewhere. Each line names why,
+  # and the last example fails once a row stops needing its line.
+  SUFFIX_ALLOWED = {
+    "history.delete"     => "WP2 #1: the list's `d` is Discover until Discover moves into Send flow to…",
+    "detail.delete"      => "WP2 #1: `D` until the detail's `d` is free",
+    "mine.filter"        => "the strip owns `/` in every Miner view since #1055; the table filter is `F`",
+    "discover.filter"    => "WP4: menu `f`, moving to `/`",
+    "oast.filter"        => "WP4: menu `f`, moving to `/`",
+    "authorize.filter"   => "WP4: menu `f`, moving to `/`",
+    "probe-rules.filter" => "WP4: menu `f`, moving to `/`",
+    "rewriter.filter"    => "WP4: menu `f`, moving to `/`",
+    "colormarker.filter" => "WP4: menu `f`, moving to `/`",
+    "params.export"      => "menu `w`, moving to `E`",
+  }
+
+  # {verb, other} pairs where a reserved letter is spent on a different intent in a scope that
+  # has the reserved one. Each line names why it stands.
+  RESERVED_ALLOWED = {
+    {"repeater.toggle-hex", "repeater.select-line"} => "WP2 #2: hex moves into Display…",
+  }
+
   def registry(*verbs : Gori::Verb::Definition) : Gori::Verb::Registry
     reg = Gori::Verb::Registry.new
     verbs.each { |v| reg.register(v) }
@@ -31,6 +81,49 @@ describe Gori::Verb::Lexicon do
       LexiconSpec.verb("demo.a", mnemonic: 'z').menu_key.should eq('z')
       LexiconSpec.verb("demo.b", chords: [Gori::Verb::Chord.new("q")]).menu_key.should eq('q')
     end
+  end
+
+  it "gives one intent one letter in every scope" do
+    by_intent = Hash(Symbol, Set(Char)).new { |h, k| h[k] = Set(Char).new }
+    LexiconSpec.menu_rows.each { |v| (i = v.intent) && by_intent[i] << v.menu_key.not_nil! }
+    by_intent.reject { |_, letters| letters.size == 1 }.should be_empty
+    by_intent.each { |i, letters| letters.first.should eq(Gori::Verb::Lexicon.letter(i)) }
+  end
+
+  it "has no entry that no verb answers" do
+    used = LexiconSpec.menu_rows.compact_map(&.intent).to_set
+    (Gori::Verb::Lexicon::ENTRIES.keys.to_set - used).should be_empty
+  end
+
+  it "spends a reserved letter on nothing else in a scope that has the intent" do
+    rows = LexiconSpec.menu_rows
+    found = [] of {String, String}
+    rows.group_by(&.scope).each do |_, verbs|
+      verbs.each do |owner|
+        next unless (i = owner.intent) && Gori::Verb::Lexicon.reserved?(i)
+        verbs.each do |v|
+          next if v.intent == i || v.menu_key != owner.menu_key
+          found << {v.id, owner.id}
+        end
+      end
+    end
+    found.uniq!
+    found.reject { |pair| LexiconSpec::RESERVED_ALLOWED.has_key?(pair) }.should eq([] of {String, String})
+    LexiconSpec::RESERVED_ALLOWED.keys.reject { |pair| found.includes?(pair) }.should eq([] of {String, String})
+  end
+
+  it "tags every menu verb whose id names an intent" do
+    untagged = LexiconSpec.menu_rows.compact_map do |v|
+      want = LexiconSpec::SUFFIX_INTENTS[v.id.rpartition('.').last]?
+      next unless want && v.intent != want
+      v.id unless LexiconSpec::SUFFIX_ALLOWED.has_key?(v.id)
+    end
+    untagged.should eq([] of String)
+    stale = LexiconSpec::SUFFIX_ALLOWED.keys.reject do |id|
+      v = Gori::Verbs.registry[id]
+      v.intent != LexiconSpec::SUFFIX_INTENTS[id.rpartition('.').last]
+    end
+    stale.should eq([] of String)
   end
 
   describe "Registry#validate_intents!" do
