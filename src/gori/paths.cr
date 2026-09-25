@@ -92,6 +92,13 @@ module Gori
       path
     end
 
+    # Whether *path* is *dir* itself or anything beneath it. Both sides are compared as given,
+    # so canonicalize them first (`canonical_file`) when they may be spelled differently.
+    def self.within?(path : String, dir : String) : Bool
+      return true if path == dir
+      path.starts_with?(dir.ends_with?(File::SEPARATOR) ? dir : dir + File::SEPARATOR)
+    end
+
     def self.ensure_dirs : Nil
       ensure_dir(home_dir)
       ensure_dir(projects_dir) # lock the projects ROOT too (registry only mkdir's leaves)

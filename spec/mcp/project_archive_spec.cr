@@ -159,6 +159,42 @@ describe "MCP export_project" do
     end
   end
 
+  it "refuses to overwrite the database a --db server is serving, and exports beside it" do
+    home = File.tempname("gori-mcp-archive-dbhome")
+    Dir.mkdir_p(home)
+    prev = ENV["GORI_HOME"]?
+    ENV["GORI_HOME"] = home
+    loose_dir = File.tempname("gori-mcp-archive-loose")
+    Dir.mkdir_p(loose_dir)
+    db_path = File.join(loose_dir, "acme.db")
+    store = Gori::Store.open(db_path)
+    begin
+      Gori::ProjectRegistry.new(Gori::Paths.projects_dir).create("Other")
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false, db_path: db_path)
+      store.insert_flow(archive_flow("/kept"))
+
+      clobber = archive_call(tools, "export_project", {"project" => "Other", "path" => db_path, "overwrite" => true})
+      clobber.error_code.should eq("INVALID_ARGUMENT")
+      clobber.field.should eq("path")
+      clobber.text.should contain("open in a running gori instance")
+      store.count.should eq(1)
+
+      # A bare --db file is not a registry project: the directory around it is the operator's.
+      beside = File.join(loose_dir, "acme.gori")
+      done = archive_call(tools, "export_project", {"path" => beside})
+      done.is_error.should be_false
+      body = JSON.parse(done.text)
+      body["project"].as_s.should eq("acme")
+      body["id"].raw.should be_nil
+      archive_entries(beside).keys.sort!.should eq(["gori.db", "manifest.json"])
+    ensure
+      store.close rescue nil
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(home)
+      FileUtils.rm_rf(loose_dir)
+    end
+  end
+
   it "names the argument a malformed call is missing or got wrong" do
     with_archive_server do |tools, _registry, project, _store, root|
       missing = archive_call(tools, "export_project", {} of String => String)
@@ -171,7 +207,7 @@ describe "MCP export_project" do
 
       inside = archive_call(tools, "export_project", {"path" => File.join(project.dir, "x.gori")})
       inside.field.should eq("path")
-      inside.text.should contain("inside gori's home")
+      inside.text.should contain("inside the source project directory")
     end
   end
 
@@ -294,6 +330,38 @@ describe "MCP import_project" do
 
       archive_call(tools, "import_project", {"path" => archive, "name" => "Recovered", "confirm" => true})
         .is_error.should be_false
+    end
+  end
+
+  it "keeps a manifest name that is not UTF-8 out of the JSON it answers with" do
+    with_archive_server do |tools, registry, _project, _store, root|
+      archive = File.join(root, "source.gori")
+      archive_call(tools, "export_project", {"path" => archive}).is_error.should be_false
+      entries = archive_entries(archive)
+      raw_manifest = entries["manifest.json"].to_slice.dup
+      marker = %("project_name":"Source").to_slice
+      index = (0..raw_manifest.size - marker.size).find { |i| raw_manifest[i, marker.size] == marker }.not_nil!
+      raw_manifest[index + marker.size - 2] = 0xff_u8 # "Sourc\xFF"
+      File.open(archive, "w") do |file|
+        Compress::Zip::Writer.open(file) do |zip|
+          zip.add("manifest.json", raw_manifest)
+          zip.add("gori.db", entries["gori.db"])
+        end
+      end
+
+      preview = archive_call(tools, "import_project", {"path" => archive, "name" => " Recovered "})
+      preview.error_code.should eq("CONFIRM_REQUIRED")
+      preview.text.valid_encoding?.should be_true
+      details = preview.details.not_nil!
+      details.to_json.valid_encoding?.should be_true
+      # The name reported is the one the registry will store: trimmed.
+      details["name"].as_s.should eq("Recovered")
+
+      done = archive_call(tools, "import_project", {"path" => archive, "name" => "Recovered", "confirm" => true})
+      done.is_error.should be_false
+      done.text.valid_encoding?.should be_true
+      JSON.parse(done.text)["archive"]["project_name"].as_s.should contain("Sourc")
+      registry.find("Recovered").should_not be_nil
     end
   end
 

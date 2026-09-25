@@ -42,8 +42,17 @@ module Gori
         return source if source.is_a?(Result)
         project, registered = source
 
+        # The destination is judged BEFORE the snapshot, which can be a multi-GiB VACUUM INTO:
+        # a refused path should cost a stat, not a copy of the project. `write` judges it again
+        # for the path it installs to.
+        begin
+          ProjectArchive.resolve_destination(path, project, overwrite: overwrite,
+            loose_database: !registered, protected_dir: Paths.home_dir)
+        rescue ex : Gori::Error
+          return archive_destination_error(ex)
+        end
         prepared = begin
-          ProjectArchive.prepare_export(project)
+          ProjectArchive.prepare_export(project, loose_database: !registered)
         rescue ex : Gori::Error
           return err(ex.message || "could not snapshot project #{project.name.inspect}",
             "INVALID_ARGUMENT", field: "project")
@@ -52,20 +61,11 @@ module Gori
             "INVALID_ARGUMENT", field: "project")
         end
         begin
-          target = Path[path].expand(home: true).to_s
-          if archive_inside_gori_home?(target)
-            return err("refusing to write a project archive inside gori's home (#{Paths.home_dir}): it holds " \
-                       "every project's database and gori's settings — choose a 'path' outside it",
-              "INVALID_ARGUMENT", field: "path")
-          end
-          replaced = overwrite && ProjectArchive.destination_exists?(target)
+          replaced = overwrite && ProjectArchive.destination_exists?(Path[path].expand(home: true).to_s)
           destination = begin
-            prepared.write(path, overwrite: overwrite)
-          rescue ex : ProjectArchive::DestinationExists
-            return err("destination already exists: #{ex.path} — pass overwrite:true to replace it, " \
-                       "or choose another 'path'", "INVALID_ARGUMENT", field: "path")
+            prepared.write(path, overwrite: overwrite, protected_dir: Paths.home_dir)
           rescue ex : Gori::Error
-            return err(ex.message || "could not write project archive", "INVALID_ARGUMENT", field: "path")
+            return archive_destination_error(ex)
           rescue ex : File::Error | IO::Error
             return err("could not write project archive: #{ex.message}", "INVALID_ARGUMENT", field: "path")
           end
@@ -75,16 +75,23 @@ module Gori
         end
       end
 
-      # gori's home holds every project's database, the registry sidecars and the settings. The
-      # engine only refuses the SOURCE project's own directory, so with overwrite:true an agent
-      # could rename an archive over another project's gori.db — a delete that never went through
-      # delete_project's dry run — or over settings.json. The CLI keeps that reach (its caller is
-      # the operator); an agent's export has no reason to land in there at all.
-      private def archive_inside_gori_home?(target : String) : Bool
-        home = Paths.home_dir
-        canonical_home = (File.realpath(home) rescue home)
-        canonical = Paths.canonical_file(target)
-        canonical == canonical_home || canonical.starts_with?(canonical_home + File::SEPARATOR)
+      # A refused destination, in this surface's words. gori's home is protected because it
+      # holds every project's database, the registry sidecars and the settings: the engine only
+      # refuses the SOURCE project, so with overwrite:true an agent could otherwise rename an
+      # archive over another project's gori.db — a delete that never went through
+      # delete_project's dry run — or over settings.json. The CLI keeps that reach; its caller
+      # is the operator.
+      private def archive_destination_error(ex : Gori::Error) : Result
+        message = case ex
+                  when ProjectArchive::DestinationExists
+                    "destination already exists: #{ex.path} — pass overwrite:true to replace it, or choose another 'path'"
+                  when ProjectArchive::ProtectedDestination
+                    "refusing to write a project archive inside gori's home (#{ex.dir}): it holds every " \
+                    "project's database and gori's settings — choose a 'path' outside it"
+                  else
+                    ex.message || "could not write project archive"
+                  end
+        err(message, "INVALID_ARGUMENT", field: "path")
       end
 
       # The project an export reads: the named one, or the one this server is bound to. A
@@ -98,10 +105,11 @@ module Gori
         end
         db_path = @db_path
         return no_project unless @store && db_path
-        if project = reg.list.find { |candidate| candidate.db_path == db_path }
-          return {project, true}
-        end
-        {Project.new(@project_name || File.basename(db_path, File.extname(db_path)), db_path), false}
+        # A registry project's database is `<projects_dir>/<slug>/gori.db`; asking the path
+        # answers that without listing (and stat-ing) every project on the host.
+        registered = File.basename(db_path) == Project::DB_FILE &&
+                     Paths.canonical_file(File.dirname(File.dirname(db_path))) == Paths.canonical_file(Paths.projects_dir)
+        {Project.new(@project_name || File.basename(db_path, File.extname(db_path)), db_path), registered}
       end
 
       private def archive_export_result(reg : ProjectRegistry, prepared : ProjectArchive::PreparedExport,
@@ -152,7 +160,11 @@ module Gori
           project = begin
             prepared.import_into(reg, name, rename_hint: ARCHIVE_RENAME_HINT)
           rescue ex : Gori::Error
-            return err(ex.message || "could not import project archive", "INVALID_ARGUMENT", field: "name")
+            # `name` only when the name is what failed: an agent reads the field as the argument
+            # to change, and renaming cannot fix anything else.
+            name_failed = !prepared.name_problem(reg, name, rename_hint: ARCHIVE_RENAME_HINT).nil?
+            return err(ex.message || "could not import project archive", "INVALID_ARGUMENT",
+              field: name_failed ? "name" : nil)
           rescue ex : File::Error | IO::Error
             return err("could not register project: #{ex.message}", "INTERNAL")
           end
@@ -183,7 +195,7 @@ module Gori
         details = JSON.build do |j|
           j.object do
             j.field "path", source
-            j.field "name", target
+            j.field "name", Serialize.text(target)
             j.field "name_available", problem.nil?
             j.field "name_problem", problem if problem
             archive_fields(j, manifest, prepared.inventory)
@@ -227,7 +239,19 @@ module Gori
       # safety steps an import applies, and the one disclosure sentence every surface shows.
       private def archive_fields(j : JSON::Builder, manifest : ProjectArchive::Manifest,
                                  inventory : ProjectArchive::Inventory) : Nil
-        j.field("archive") { manifest.to_json(j) }
+        # Field by field rather than `manifest.to_json`: the archive is untrusted, and its
+        # project name may carry bytes that are not UTF-8 (the version and timestamp are
+        # validated printable ASCII by the engine).
+        j.field "archive" do
+          j.object do
+            j.field "format_version", manifest.format_version
+            j.field "project_name", Serialize.text(manifest.project_name)
+            j.field "gori_version", manifest.gori_version
+            j.field "schema_version", manifest.schema_version
+            j.field "created_at", manifest.created_at
+            j.field "flow_count", manifest.flow_count
+          end
+        end
         j.field "inventory" do
           j.object do
             j.field "flows", inventory.flows

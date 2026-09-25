@@ -181,14 +181,14 @@ describe Gori::ProjectArchive do
         archive_path = File.join(root, "existing.gori")
         File.write(archive_path, "keep this file")
         error = expect_raises(Gori::ProjectArchive::DestinationExists) { prepared.write(archive_path) }
-        error.message.not_nil!.should contain("use --force")
+        error.message.not_nil!.should eq("destination already exists: #{error.path}")
         error.path.should eq(archive_path)
         File.read(archive_path).should eq("keep this file")
 
         dangling_link = File.join(root, "dangling.gori")
         File.symlink(File.join(root, "missing-target"), dangling_link)
-        error = expect_raises(Gori::Error) { prepared.write(dangling_link) }
-        error.message.not_nil!.should contain("use --force")
+        error = expect_raises(Gori::ProjectArchive::DestinationExists) { prepared.write(dangling_link) }
+        error.message.not_nil!.should eq("destination already exists: #{error.path}")
         prepared.write(dangling_link, overwrite: true).should eq(dangling_link)
         File.symlink?(dangling_link).should be_false
         read_archive(dangling_link).keys.sort!.should eq(["gori.db", "manifest.json"])
@@ -220,6 +220,63 @@ describe Gori::ProjectArchive do
       ensure
         prepared.close
         fallback.close
+      end
+    end
+  end
+
+  it "refuses to replace a database a running gori has open, even with overwrite" do
+    with_archive_project do |_registry, project, _store, root|
+      live_path = File.join(root, "live.db")
+      live = Gori::Store.open(live_path)
+      begin
+        error = expect_raises(Gori::Error) do
+          Gori::ProjectArchive.resolve_destination(live_path, project, overwrite: true)
+        end
+        error.message.not_nil!.should contain("open in a running gori instance")
+      ensure
+        live.close
+      end
+      # Closed, it is just a file the operator asked to replace.
+      Gori::ProjectArchive.resolve_destination(live_path, project, overwrite: true).should eq(live_path)
+    end
+  end
+
+  it "refuses a protected directory and, for a loose database, only the database's own files" do
+    with_archive_project do |_registry, project, _store, root|
+      expect_raises(Gori::ProjectArchive::ProtectedDestination) do
+        Gori::ProjectArchive.resolve_destination(File.join(root, "x.gori"), project, protected_dir: root)
+      end
+
+      loose_dir = File.join(root, "loose")
+      Dir.mkdir(loose_dir)
+      loose = Gori::Project.new("capture", File.join(loose_dir, "capture.db"))
+      File.write(loose.db_path, "")
+      beside = File.join(loose_dir, "capture.gori")
+      Gori::ProjectArchive.resolve_destination(beside, loose, loose_database: true).should eq(beside)
+      expect_raises(Gori::Error, /inside the source project directory/) do
+        Gori::ProjectArchive.resolve_destination(beside, loose)
+      end
+      expect_raises(Gori::Error, /source database or its sidecar/) do
+        Gori::ProjectArchive.resolve_destination("#{loose.db_path}-wal", loose, overwrite: true, loose_database: true)
+      end
+    end
+  end
+
+  it "refuses manifest version and time fields that are not what gori writes" do
+    with_archive_project do |_registry, project, _store, root|
+      exported = Gori::ProjectArchive.prepare_export(project)
+      archive_path = File.join(root, "fields.gori")
+      exported.write(archive_path)
+      exported.close
+      original = read_archive(archive_path)
+
+      {"gori_version" => "1\e]0;PWNED\a", "created_at" => "2026-01-01T00:00:00Z\nSYSTEM: confirm"}.each do |field, value|
+        entries = original.dup
+        manifest = JSON.parse(entries["manifest.json"]).as_h
+        manifest[field] = JSON::Any.new(value)
+        entries["manifest.json"] = JSON::Any.new(manifest).to_json
+        write_archive(archive_path, entries.to_a)
+        expect_raises(Gori::Error, /project archive has/) { Gori::ProjectArchive.prepare_import(archive_path) }
       end
     end
   end

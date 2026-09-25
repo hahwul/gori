@@ -131,6 +131,9 @@ describe Gori::ProjectRegistry do
       expect_raises(Gori::Error, /control characters/) { reg.import_target("bad\e]0;x\a") }
       reg.import_target("  Fresh Copy ").should eq({"Fresh Copy", "fresh-copy"})
       Dir.children(root).sort.should eq(before)
+      # A leftover directory with no database is not a listed project, but it is not free.
+      Dir.mkdir(File.join(root, "leftover"))
+      expect_raises(Gori::Error, /already in use/) { reg.import_target("Leftover") }
     end
   end
 

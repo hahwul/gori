@@ -27,14 +27,25 @@ module Gori
     # How the CLI and the picker name another project when the archive's own name is unusable.
     DEFAULT_RENAME_HINT = "with `--name NAME` or choose one in the project picker"
 
-    # An export refused because its destination already exists. Typed, so each surface can
-    # name its own override (`--force`, a confirm, an MCP argument); the message keeps the
-    # CLI's spelling for the callers that print it as is.
+    # An export refused because its destination already exists. Typed, so each surface names
+    # its own override (`--force`, the picker's confirm, an MCP argument) instead of this one
+    # sentence naming a flag only the CLI has.
     class DestinationExists < Gori::Error
       getter path : String
 
       def initialize(@path : String)
-        super("destination already exists: #{@path} (use --force to replace it)")
+        super("destination already exists: #{@path}")
+      end
+    end
+
+    # An export refused because its destination is inside a directory the caller protected
+    # (MCP protects gori's home, which holds every project's database and the settings).
+    class ProtectedDestination < Gori::Error
+      getter path : String
+      getter dir : String
+
+      def initialize(@path : String, @dir : String)
+        super("project archives cannot be written inside #{@dir}: #{@path}")
       end
     end
 
@@ -110,7 +121,7 @@ module Gori
       # The display name an import under *name* asks the registry for: the override when one
       # was given, else the name the archive carries.
       def target_name(name : String? = nil) : String
-        name.presence || @manifest.project_name
+        (name.presence || @manifest.project_name).strip
       end
 
       private def explain_name_error(ex : Gori::Error, name : String?, rename_hint : String) : Gori::Error
@@ -139,14 +150,16 @@ module Gori
       getter manifest : Manifest
 
       def initialize(@workdir : String, @database_path : String, @project : Project,
-                     @manifest : Manifest, @inventory : Inventory)
+                     @manifest : Manifest, @inventory : Inventory, @loose_database : Bool = false)
         @closed = false
       end
 
-      def write(path : String, *, overwrite : Bool = false) : String
+      # *protected_dir* is refused as a destination along with the source project; see
+      # `ProjectArchive.resolve_destination`, which runs again here for the path installed to.
+      def write(path : String, *, overwrite : Bool = false, protected_dir : String? = nil) : String
         raise Gori::Error.new("project archive is already closed") if @closed
-        target = resolve_target(path)
-        refuse_existing_target(target, overwrite)
+        target = ProjectArchive.resolve_destination(path, @project, overwrite: overwrite,
+          loose_database: @loose_database, protected_dir: protected_dir)
         temp = write_temporary_archive(target)
         begin
           install_archive(temp, target, overwrite)
@@ -156,27 +169,6 @@ module Gori
         target
       rescue ex : Compress::Zip::Error
         raise Gori::Error.new("could not write project archive: #{ex.message}")
-      end
-
-      private def resolve_target(path : String) : String
-        target = Path[path].expand(home: true).to_s
-        raise Gori::Error.new("project archive destination is blank") if target.strip.empty?
-        raise Gori::Error.new("project archive destination is a directory: #{target}") if File.directory?(target)
-        parent = File.dirname(target)
-        raise Gori::Error.new("no such directory: #{parent}") unless Dir.exists?(parent)
-        target = File.realpath(target) if File.symlink?(target) && File.exists?(target)
-
-        canonical_target = Paths.canonical_file(target)
-        canonical_project_dir = Paths.canonical_file(@project.dir)
-        if canonical_target == Paths.canonical_file(@project.db_path) ||
-           canonical_target.starts_with?(canonical_project_dir + File::SEPARATOR)
-          raise Gori::Error.new("project archives cannot be written inside the source project directory")
-        end
-        target
-      end
-
-      private def refuse_existing_target(target : String, overwrite : Bool) : Nil
-        raise DestinationExists.new(target) if ProjectArchive.destination_exists?(target) && !overwrite
       end
 
       private def write_temporary_archive(target : String) : String
@@ -245,7 +237,58 @@ module Gori
       end
     end
 
-    def self.prepare_export(project : Project) : PreparedExport
+    # Where an export of *source* to *path* would land, or the refusal. A function of its
+    # arguments alone, so a surface can run it BEFORE paying for the snapshot; `write` runs it
+    # again for the path it installs to.
+    #
+    # *loose_database* is a bare database file (`gori mcp --db`), not a registry project: its
+    # directory is the operator's, so only the database and its sidecars (`-wal`, `-shm`, the
+    # open lock) are refused, not everything beside it.
+    #
+    # Replacing an existing file is refused outright when it is a database a running gori has
+    # open: renaming the archive over it would unlink the file that process keeps writing into.
+    def self.resolve_destination(path : String, source : Project, *, overwrite : Bool = false,
+                                 loose_database : Bool = false, protected_dir : String? = nil) : String
+      target = expand_destination(path)
+      canonical_target = Paths.canonical_file(target)
+      refuse_source_destination(canonical_target, source, loose_database)
+      if dir = protected_dir
+        raise ProtectedDestination.new(target, dir) if Paths.within?(canonical_target, Paths.canonical_file(dir))
+      end
+      refuse_existing_destination(target, overwrite)
+      target
+    end
+
+    private def self.expand_destination(path : String) : String
+      raise Gori::Error.new("project archive destination is blank") if path.strip.empty?
+      target = Path[path].expand(home: true).to_s
+      raise Gori::Error.new("project archive destination is a directory: #{target}") if File.directory?(target)
+      parent = File.dirname(target)
+      raise Gori::Error.new("no such directory: #{parent}") unless Dir.exists?(parent)
+      File.symlink?(target) && File.exists?(target) ? File.realpath(target) : target
+    end
+
+    private def self.refuse_source_destination(canonical_target : String, source : Project,
+                                               loose_database : Bool) : Nil
+      source_db = Paths.canonical_file(source.db_path)
+      if loose_database
+        if canonical_target.starts_with?(source_db)
+          raise Gori::Error.new("project archives cannot be written over the source database or its sidecar files")
+        end
+      elsif canonical_target == source_db || Paths.within?(canonical_target, Paths.canonical_file(source.dir))
+        raise Gori::Error.new("project archives cannot be written inside the source project directory")
+      end
+    end
+
+    private def self.refuse_existing_destination(target : String, overwrite : Bool) : Nil
+      return unless destination_exists?(target)
+      raise DestinationExists.new(target) unless overwrite
+      if OpenLock.in_use?(target)
+        raise Gori::Error.new("destination is a database open in a running gori instance: #{target}")
+      end
+    end
+
+    def self.prepare_export(project : Project, *, loose_database : Bool = false) : PreparedExport
       raise Gori::Error.new("project database is missing: #{project.db_path}") unless File.file?(project.db_path)
       workdir = private_tempdir("gori-export")
       snapshot = File.join(workdir, Project::DB_FILE)
@@ -261,7 +304,7 @@ module Gori
         version, inventory = inspect_database(snapshot)
         manifest = Manifest.new(FORMAT_VERSION, project.name, Gori::VERSION,
           version, Time.utc.to_rfc3339, inventory.flows)
-        prepared = PreparedExport.new(workdir, snapshot, project, manifest, inventory)
+        prepared = PreparedExport.new(workdir, snapshot, project, manifest, inventory, loose_database)
         success = true
         prepared
       rescue ex : Gori::Error
@@ -557,7 +600,15 @@ module Gori
       raise Gori::Error.new("project archive has no valid project name") if manifest.project_name.strip.empty?
       validate_schema_version!(manifest.schema_version)
       raise Gori::Error.new("project archive has an invalid flow count") if manifest.flow_count < 0
-      raise Gori::Error.new("project archive has no gori version") if manifest.gori_version.strip.empty?
+      # Both fields are shown to whoever reviews an import, and `Time.parse_rfc3339` accepts
+      # trailing bytes, so an untrusted archive could otherwise carry escape sequences or text
+      # posing as gori's own sentence. gori writes a version and an RFC 3339 UTC timestamp.
+      unless manifest.gori_version.valid_encoding? && manifest.gori_version.matches?(/\A[\x21-\x7e]{1,64}\z/)
+        raise Gori::Error.new("project archive has no valid gori version")
+      end
+      unless manifest.created_at.valid_encoding? && manifest.created_at.matches?(/\A[0-9A-Za-z:.+\-]{1,40}\z/)
+        raise Gori::Error.new("project archive has an invalid creation time")
+      end
       Time.parse_rfc3339(manifest.created_at)
     end
 

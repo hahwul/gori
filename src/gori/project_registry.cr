@@ -276,6 +276,11 @@ module Gori
         raise Gori::Error.new("project name #{display.inspect} would use the short id of " \
                               "#{project.name.inspect} — choose another name")
       end
+      # A leftover directory without a database is not a project #list shows, but the import
+      # cannot claim it either — say so here rather than only at the directory claim.
+      if File.exists?(File.join(@root, base_slug))
+        raise Gori::Error.new("project slug #{base_slug.inspect} is already in use — choose another name")
+      end
       {display, base_slug}
     end
 
