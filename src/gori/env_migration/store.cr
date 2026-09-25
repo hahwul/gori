@@ -416,8 +416,7 @@ module Gori
           touched = true
           {name, after}
         end
-        SessionSlot.new(slot.name, headers, slot.remove_headers, slot.baseline?, slot.rules,
-          slot.literal_headers)
+        slot.copy_with(set_headers: headers)
       end
       return unless touched
       plan.writes << Write.new("UPDATE settings SET value = ? WHERE key = ?",

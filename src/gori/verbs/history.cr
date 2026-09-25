@@ -342,6 +342,14 @@ module Gori
       r.register Verb::Definition.new(
         "repeater.tag-subtab", "Tag subtab", "Add/edit flat tags on the active repeater sub-tab",
         Verb::Scope::Repeater, available: in_repeater, mnemonic: 't', section: :subtab) { |ctx| ctx.repeater_tag_subtab; nil }
+      # The Repeater is where a login request is authored and tested, so this is where it joins
+      # a session slot's refresh steps (#1233): a slot picker, then the sub-tab is appended to
+      # that slot's list. 'b' (for the binding it refreshes): free in every Repeater view, and
+      # no Repeater or Global bare chord claims it.
+      r.register Verb::Definition.new(
+        "repeater.use-as-refresh", "Use as refresh for slot…",
+        "Append this sub-tab to a session slot's refresh steps — the Repeater sessions that re-authenticate the slot",
+        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'b', section: :subtab) { |ctx| ctx.repeater_use_as_refresh; nil }
       r.register Verb::Definition.new(
         "repeater.filter-subtabs", "Filter sub-tabs", "Filter the sub-tab strip by tag / name / host / method",
         Verb::Scope::Repeater,

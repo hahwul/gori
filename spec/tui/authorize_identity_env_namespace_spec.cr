@@ -89,7 +89,7 @@ describe "AuthorizeIdentityOverlay env completion" do
         # …and the popup is really CLOSED, not merely empty on screen: ↹ reaches the form's row
         # navigation instead of being claimed by a list (`handle_key` routes the popup first).
         ov.handle_key(okey(Termisu::Input::Key::Tab))
-        ov.selected.should eq(AuthorizeIdentityOverlay::SAVE_ROW)
+        ov.selected.should eq(AuthorizeIdentityOverlay::POLICY_ROW)
         ov.set_headers.should eq([{"Cookie", "$H"}])
       end
     end

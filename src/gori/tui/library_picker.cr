@@ -45,6 +45,9 @@ module Gori::Tui
     #
     # nil = a library with no editor (the ^E hint then stays off).
     property on_edit : Proc(Int32, Nil)?
+    # ^R on the entry under the cursor, for an open-site whose rows can be refreshed in place
+    # (the session-slot picker, #1233). Nil = no such action; the hint says so by omission.
+    property on_refresh : Proc(Int32, Nil)?
 
     def initialize(@title : String, @rows : Array(Row), @noun : String, @action : String = "load")
       # Precompute each row's filter haystack ONCE (not per keystroke).
@@ -85,7 +88,8 @@ module Gori::Tui
     private def idle_hint : String
       edit = @on_edit ? " · ^E edit" : ""
       del = @on_delete ? " · ^X delete" : ""
-      "type to filter · ↑/↓ select · ↵ #{@action}#{edit}#{del} · esc cancel"
+      refresh = @on_refresh ? " · ^R refresh" : ""
+      "type to filter · ↑/↓ select · ↵ #{@action}#{edit}#{refresh}#{del} · esc cancel"
     end
 
     # ^X removes the highlighted entry from the library, in place — the card stays up so a
@@ -112,6 +116,11 @@ module Gori::Tui
       if ev.ctrl? && ev.key.lower_e? && (edit = @on_edit) && (i = selected_index)
         edit.call(i)
         return :cancel
+      end
+      # ^R stays: the card is where the operator watches the row it refreshed.
+      if ev.ctrl? && ev.key.lower_r? && (refresh = @on_refresh) && (i = selected_index)
+        refresh.call(i)
+        return :stay
       end
       super
     end

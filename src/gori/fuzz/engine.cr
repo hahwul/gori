@@ -4,6 +4,7 @@ require "../repeater/h2_engine"
 require "../proxy/codec/http1"
 require "../outbound"
 require "../env"
+require "../session_refresh/hook"
 require "../scope"
 require "../repeater/conn_pool"
 require "../repeater/h2_pool"
@@ -319,6 +320,12 @@ module Gori::Fuzz
       Gori::Env::Generation.for_dial(@origin.host, @origin.scheme, @tls_preset)
     end
 
+    # The active slot's before-send refresh (#1233) — see `send`. Not for a sender that
+    # carries its identity itself (`slot_overlay?` false: Authorize asks per identity).
+    private def before_send_refresh : Nil
+      Gori::SessionRefresh.before_send(Gori::Env.active_slot_name) if @slot_overlay
+    end
+
     def initialize(@origin : Origin, @outbound : Gori::Outbound, @http2 : Bool, @verify : Bool,
                    sni : String? = nil, @timeout : Time::Span? = nil,
                    @overrides : Gori::HostOverrides? = nil,
@@ -386,6 +393,12 @@ module Gori::Fuzz
       # ONE generation across the two passes below (see `Repeater::Sender#wire`): the request's
       # own `$GEN.UUID` and one in the active slot's header overlay are the same outbound
       # request, so they resolve to the same value.
+      #
+      # The active slot's before-send REFRESH (#1233) first of all, so the `$NAME` pass reads the
+      # value a refresh just rebound. Only when this sender wears the active slot at all: an
+      # Authorize sender (`slot_overlay: false`) asks per IDENTITY instead, in `send_one`. Cheap
+      # when nothing is configured — one atomic read in `SessionSlots#auto_refresh?`.
+      before_send_refresh
       gen = generation
       bytes = Gori::Env.expand_bindings(bytes, verbatim, generation: gen)
       # The ACTIVE SESSION SLOT's header overlay, after the `$NAME` pass and BEFORE the scope
@@ -447,6 +460,7 @@ module Gori::Fuzz
       # The FRAMES carry provenance individually (`WsFrame#evidence`) because the two
       # populations mix in one script — a `--message` override sits beside seeded rows.
       verbatim = Backend.all_verbatim(handshake) if @evidence
+      before_send_refresh
       ws_gen = generation
       wire = Gori::Env.expand_bindings(handshake, verbatim, generation: ws_gen)
       # The handshake takes the session-slot overlay and the frames do not. It IS an HTTP
@@ -566,6 +580,7 @@ module Gori::Fuzz
       # `send`, still gated, still one Result per request in order). The rule pre-filters to
       # HTTP/1.1 anyway, so this is a belt-and-braces guard, not a hot path.
       return super if @http2
+      before_send_refresh
       # WIRED FIRST, then gated — `Repeater::Sender#send_group`'s discipline, and for its
       # reason. This ran the seam once to read each target and AGAIN to build the bytes, which
       # is only the same answer while expansion is idempotent: a `$GEN.*` in a request line
@@ -605,6 +620,9 @@ module Gori::Fuzz
       # real stream multiplexing in H2Engine, a separate, larger change.
       return super if @http2
 
+      # A refresh happens BEFORE the group is dialled, never between warm-up and release: the
+      # race's whole premise is that nothing else happens in that window.
+      before_send_refresh
       bytes = jobs[0].bytes
       verbatim = @evidence ? Backend.all_verbatim(bytes) : jobs[0].payload_spans
       race_gen = generation

@@ -320,6 +320,14 @@ module Gori
         c.exec("DELETE FROM entity_links WHERE ref_kind = 'repeater' AND ref_id = ?", id)
         c.exec("UPDATE issue_retest_steps SET ref_id = -ref_id, updated_at = ? " \
                "WHERE ref_kind = 'repeater' AND ref_id = ? AND ref_id > 0", ts, id)
+        # A session slot's REFRESH steps (#1233) name repeaters by id too, and are detached the
+        # same way and in the same transaction: a refresh that re-bound to whatever tab took
+        # this id next would send an unrelated request as a login, automatically, before a
+        # send. The slot keeps the step in its place, negated, and refuses to run it.
+        raw = c.query_one?("SELECT value FROM settings WHERE key = ?", SESSION_SLOTS_KEY, as: String)
+        if detached = SessionSlot.detach_refresh(raw, id)
+          c.exec("UPDATE settings SET value = ? WHERE key = ?", detached, SESSION_SLOTS_KEY)
+        end
         c.exec("DELETE FROM repeaters WHERE id = ?", id)
         nil
       }

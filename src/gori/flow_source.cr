@@ -42,6 +42,12 @@ module Gori
       # a check gori ran to decide whether a finding is still there. A report reads the
       # difference, and `source_ref` carries `issue #N step M` so the row names WHICH check.
       Retest
+      # A session slot's refresh (#1233) replaying its Repeater steps to re-authenticate the
+      # slot — by hand, or on its own before a send when the slot's policy said the token was
+      # about to expire. Its own member because it is traffic an operator may never have typed
+      # at that moment, and "log freely" is the half of the rule that makes that acceptable:
+      # `source_ref` carries `slot NAME step N`.
+      Refresh
       # Read out of a file someone else captured (HAR, Burp, `--urls`, an OpenAPI document).
       # Deliberately NOT `sent_by_gori?`: gori never put these on a wire, and calling them its
       # own traffic would answer "is this evidence about the target?" the wrong way.
@@ -69,6 +75,7 @@ module Gori
         in Authorize then "AUTHZ"
         in Probe     then "PROBE"
         in Retest    then "RTEST"
+        in Refresh   then "RFRSH"
         in Import    then "IMPRT"
         end
       end
@@ -80,8 +87,9 @@ module Gori
       # member joins that filter by existing rather than by remembering to edit a SQL string.
       def sent_by_gori? : Bool
         case self
-        in Proxy, Import                                                          then false
-        in Repeater, Fuzzer, Miner, Sequencer, Discover, Authorize, Probe, Retest then true
+        in Proxy, Import then false
+        in Repeater, Fuzzer, Miner, Sequencer, Discover, Authorize, Probe, Retest, Refresh
+          true
         end
       end
 
@@ -119,8 +127,9 @@ module Gori
       # double-counts, which is what this predicate exists to prevent.
       def self_scanned? : Bool
         case self
-        in Repeater, Fuzzer                                                    then true
-        in Proxy, Miner, Sequencer, Discover, Authorize, Probe, Retest, Import then false
+        in Repeater, Fuzzer then true
+        in Proxy, Miner, Sequencer, Discover, Authorize, Probe, Retest, Refresh, Import
+          false
         end
       end
 

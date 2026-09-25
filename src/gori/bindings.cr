@@ -172,6 +172,15 @@ module Gori
     # see the class doc; a slot changes WHERE a value lives, never WHETHER it persists.
     @slot_values : Hash(String, Hash(String, Bound))
 
+    # The project this table's rules come from — the one a slot's refresh steps (#1233) are
+    # read out of and recorded into.
+    getter store : Store
+
+    # Told after every `prune_slots`, with the same argument. `SessionRefresh::Runner` keys its
+    # per-slot bookkeeping (#1233) by name exactly as the tables are keyed, so it forgets a
+    # deleted slot's failure count and cooldown at the moment its table goes.
+    property on_slots_pruned : Proc(Array(String)?, Nil)? = nil
+
     def initialize(@store : Store, rules : Array(Store::ExtractRule),
                    @slots : SessionSlots? = nil)
       @mutex = Mutex.new
@@ -228,6 +237,8 @@ module Gori
         end
         @rev &+= 1
       end
+      # Outside the mutex, and even when no table was held: the listener's state is its own.
+      @on_slots_pruned.try &.call(surviving)
     end
 
     def self.load(store : Store, slots : SessionSlots? = nil) : Bindings
@@ -719,11 +730,19 @@ module Gori
     # the `events` feed at warn level, carrying the rule name and the reason and NEVER the
     # value — `Sequencer::Extract`'s "nil on a miss rather than raising" contract was
     # already right; what was missing is that anybody heard about it.
+    #
+    # `as_slot` observes as if that slot were the send context — its claimed rules run and
+    # land in ITS table, whichever slot is active. A slot's refresh steps (#1233) are the
+    # caller: they re-authenticate one identity while another may be the context of every
+    # other tab, and `activate` is process-global. An unknown name degrades to no slot at all,
+    # the answer `slot_values` gives it.
     def observe(raw : Repeater::Result, subject : InterceptFilter::Subject,
-                flow_id : Int64? = nil) : Array(String)
+                flow_id : Int64? = nil, *, as_slot : String? = nil) : Array(String)
       return [] of String if raw.error
+      context = as_slot ? @slots.try(&.find(as_slot)) : @slots.try(&.active)
       # Not throttled: one deliberate send is one operator action, and they asked for it.
-      run(candidates(subject), raw, flow_id, entity_available: true, throttle: false)
+      run(candidates(subject, context), raw, flow_id, entity_available: true, throttle: false,
+        context: context)
     end
 
     # ── Proxy::ResponseExtract (the proxy response path, slice 2) ─────────────
@@ -830,13 +849,14 @@ module Gori
     #
     # Both slot snapshots are taken BEFORE `@mutex`: `SessionSlots` has a mutex of its own and
     # nesting the two would make the lock order depend on which method you came in through.
-    private def candidates(subject : InterceptFilter::Subject) : Array(Compiled)
+    private def candidates(subject : InterceptFilter::Subject,
+                           context : SessionSlot? = @slots.try(&.active)) : Array(Compiled)
       slots = @slots
       claimed = nil.as(Set(String)?)
       active = nil.as(SessionSlot?)
       if slots && slots.scoped?
         claimed = slots.claimed_names
-        active = slots.active
+        active = context
       end
       matched(subject).select do |c|
         next true unless claimed && claimed.includes?(c.rule.name)
@@ -921,14 +941,15 @@ module Gori
     end
 
     private def run(picked : Array(Compiled), raw : Repeater::Result, flow_id : Int64?,
-                    *, entity_available : Bool, throttle : Bool) : Array(String)
+                    *, entity_available : Bool, throttle : Bool,
+                    context : SessionSlot? = @slots.try(&.active)) : Array(String)
       return [] of String if picked.empty?
       bound = [] of String
       now = Time.utc
-      # The send context, read ONCE for the whole response: every rule that binds off these
-      # bytes belongs to the identity that was active when they arrived, and re-reading per
-      # rule could split one response's values across two slots.
-      active = @slots.try(&.active)
+      # The send context, read ONCE for the whole response (the caller's default argument):
+      # every rule that binds off these bytes belongs to the identity that was active when they
+      # arrived, and re-reading per rule could split one response's values across two slots.
+      active = context
       # Decided at most ONCE per response and only if a `text_only?` descriptor actually binds
       # off it — the check decodes the entity, so a project of cookie rules never pays for it.
       lossy = nil.as(Bool?)

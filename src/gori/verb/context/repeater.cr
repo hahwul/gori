@@ -13,6 +13,7 @@ abstract class Gori::Verb::ExecContext
   abstract def repeater_subtab_count : Int32             # open repeater session count (gates the search menu entry)
   abstract def repeater_rename_subtab : Nil              # open the rename prompt for the active sub-tab
   abstract def repeater_tag_subtab : Nil                 # open the tag editor for the active sub-tab (issue #121)
+  abstract def repeater_use_as_refresh : Nil             # append the active sub-tab to a session slot's refresh steps (#1233)
   abstract def repeater_filter_subtabs : Nil             # open the `/` tag-filter bar over the sub-tab strip
   abstract def repeater_close_subtab : Nil               # close the active sub-tab (confirm-gated)
   abstract def repeater_duplicate_subtab : Nil           # clone the active sub-tab's content into a new sibling

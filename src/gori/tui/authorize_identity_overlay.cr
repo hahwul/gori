@@ -25,7 +25,11 @@ module Gori::Tui
     NAME_ROW   = 0
     REMOVE_ROW = 1
     EDITOR_ROW = 2
-    SAVE_ROW   = 3
+    # The refresh POLICY (#1233): off / jwt-exp / ttl=10m. The refresh STEPS it applies to are
+    # shown read-only on the line above it — they are added from the Repeater (space → b),
+    # `gori run session edit --refresh` or MCP, where the request is authored and tested.
+    POLICY_ROW = 3
+    SAVE_ROW   = 4
 
     getter index : Int32? # nil = adding
     # The focused row, one of the four constants above.
@@ -41,8 +45,12 @@ module Gori::Tui
     @original_set_headers : Array({String, String})
     @original_literal_headers : Array(String)
 
+    # The step labels of the slot being edited (`SessionRefresh.step_labels`), in order.
+    getter refresh_labels : Array(String)
+
     def initialize(identity : Authorize::Identity? = nil, @index : Int32? = nil,
-                   taken : Array(String) = [] of String)
+                   taken : Array(String) = [] of String,
+                   @refresh_labels : Array(String) = [] of String)
       @name = TextField.new(identity.try(&.name) || "")
       @original_set_headers = identity.try(&.set_headers) || [] of {String, String}
       @original_literal_headers = identity.try(&.literal_headers) || [] of String
@@ -61,6 +69,8 @@ module Gori::Tui
       @editor.env_complete_namespaces = [Env::Namespace::Bind, Env::Namespace::Gen]
       @remove = TextField.new((identity.try(&.remove_headers) || [] of String).join(", "))
       @baseline = identity.try(&.baseline?) || false
+      @refresh = identity.try(&.refresh) || [] of Int64
+      @policy = TextField.new((identity.try(&.refresh_before) || SessionSlot::RefreshBefore.off).to_s)
       @taken = taken.map(&.downcase).to_set
       @selected = NAME_ROW
       @refused = nil.as(String?)
@@ -82,6 +92,11 @@ module Gori::Tui
       @remove.value.split(',').map(&.strip).reject(&.empty?)
     end
 
+    # The policy as typed, or nil while it does not parse.
+    def refresh_before : SessionSlot::RefreshBefore?
+      SessionSlot::RefreshBefore.parse?(@policy.value)
+    end
+
     # Lines the header parser will not turn into a header, in buffer order.
     def rejected_lines : Array(String)
       rejected = [] of String
@@ -100,6 +115,7 @@ module Gori::Tui
         return "#{label.inspect} will not be sent — a value may not contain CR or LF, " \
                "and a name must be an RFC 7230 token"
       end
+      return "refresh before: use off, jwt-exp or ttl=10m" unless refresh_before
       nil
     end
 
@@ -108,7 +124,7 @@ module Gori::Tui
       return nil if refusal
       headers = set_headers
       Authorize::Identity.new(name, headers, remove_headers, @baseline, [] of String,
-        surviving_literals(headers))
+        surviving_literals(headers), @refresh, refresh_before || SessionSlot::RefreshBefore.off)
     end
 
     # The captured-value marker as it survives this edit. `SessionSlot#literal_header?` is keyed
@@ -152,7 +168,7 @@ module Gori::Tui
     end
 
     def text_fields : Array(TextField)
-      [@name, @remove]
+      [@name, @remove, @policy]
     end
 
     def handle_key(ev : Termisu::Event::Key) : Symbol
@@ -176,6 +192,7 @@ module Gori::Tui
       case @selected
       when NAME_ROW, REMOVE_ROW then field_key(ev, @selected == NAME_ROW ? @name : @remove)
       when EDITOR_ROW           then editor_key(ev)
+      when POLICY_ROW           then field_key(ev, @policy)
       else                           save_key(ev)
       end
     end
@@ -257,6 +274,7 @@ module Gori::Tui
       when NAME_ROW   then @name.set_preedit(text)
       when REMOVE_ROW then @remove.set_preedit(text)
       when EDITOR_ROW then @editor.set_preedit(text)
+      when POLICY_ROW then @policy.set_preedit(text)
       end
     end
 
@@ -272,6 +290,8 @@ module Gori::Tui
       elsif my == box.bottom - 2
         set_selected(SAVE_ROW)
         return :commit
+      elsif my == policy_y(box)
+        set_selected(POLICY_ROW)
       elsif ed.contains?(mx, my)
         set_selected(EDITOR_ROW)
         @editor.click_to_cursor(ed, mx, my)
@@ -303,7 +323,17 @@ module Gori::Tui
     # by render and the pointer entries so a click cannot land on a row the draw never used.
     private def editor_rect(box : Rect) : Rect
       top = box.y + 6 # name, drop, its caption, the set-headers caption
-      Rect.new(box.x + 3, top, box.w - 6, {(box.bottom - 3) - top, 1}.max)
+      Rect.new(box.x + 3, top, box.w - 6, {(box.bottom - 5) - top, 1}.max)
+    end
+
+    # The refresh steps (read-only) and the policy field sit between the editor and the
+    # refusal band.
+    private def steps_y(box : Rect) : Int32
+      box.bottom - 5
+    end
+
+    private def policy_y(box : Rect) : Int32
+      box.bottom - 4
     end
 
     def render(screen : Screen, area : Rect) : Nil
@@ -334,6 +364,10 @@ module Gori::Tui
       else
         @editor.render(screen, ed, cursor: @selected == EDITOR_ROW)
       end
+      steps = @refresh.empty? ? "none — add a Repeater sub-tab with space → b" : @refresh_labels.join(" → ")
+      screen.text(box.x + 3, steps_y(box), "refresh:  #{steps}", Theme.muted, Theme.bg, width: box.w - 6)
+      draw_field(screen, box, policy_y(box), row_bg(POLICY_ROW), row_fg(POLICY_ROW),
+        @selected == POLICY_ROW, "refresh before:", @policy)
       band = box.bottom - 3
       if refused = @refused
         screen.text(box.x + 3, band, refused, Theme.red, Theme.bg, width: box.w - 6)

@@ -4,6 +4,7 @@ require "../bindings"
 require "../env"
 require "../intercept_filter"
 require "../host_overrides"
+require "../session_refresh/hook"
 require "./engine"
 require "./h2_engine"
 require "./h2_race"
@@ -111,12 +112,32 @@ module Gori
       # presets — reporting it does not claim a byte-exact JA3 match.
       getter tls_preset : String?
 
+      # The session slot this send RE-AUTHENTICATES, when it is one of that slot's refresh steps
+      # (#1233) — nil for every other send. Three things change, and each is the reason the mode
+      # exists rather than an `activate` around the send (which is process-global and would
+      # hand every other tab's in-flight send this slot's identity):
+      #
+      #   * `$BIND.*` resolves out of THIS slot's table (`Env.expand_bindings(as_slot:)`), so a
+      #     step-1 CSRF reaches step 2 whichever slot is the send context;
+      #   * the response rebinds THIS slot's claimed rules (`Bindings#observe(as_slot:)`);
+      #   * NO slot overlay is written — neither this slot's (the login must not carry the stale
+      #     credential it is replacing) nor the active one's (a different identity).
+      #
+      # And the before-send refresh check is skipped, which is what makes a refresh unable to
+      # trigger itself.
+      getter refresh_slot : String?
+
+      # The table a refresh step reads and rebinds — its runner's, never whichever project
+      # `Env.layer` holds by the time a slow login answers. nil falls back to `Env.layer`.
+      @refresh_layer : Gori::Bindings?
+
       def initialize(@outbound : Gori::Outbound, *, @scheme : String, @host : String, @port : Int32,
                      @verify : Bool, @http2 : Bool = false, @sni : String? = nil,
                      @timeout : Time::Span? = nil, @overrides : Gori::HostOverrides? = nil,
                      @preserve_field_case : Bool = false, @evidence : Bool = false,
                      @expand_bindings : Bool = true, @evidence_literals : Set(String)? = nil,
-                     @reframe_grpc : Bool = false, tls_preset : String? = nil)
+                     @reframe_grpc : Bool = false, tls_preset : String? = nil,
+                     @refresh_slot : String? = nil, @refresh_layer : Gori::Bindings? = nil)
         @tls_preset = Settings.tls_preset_normalize(tls_preset)
       end
 
@@ -156,7 +177,7 @@ module Gori
       # predicate this seam exists to have one of, so it is gone.)
       def refusal(bytes : Bytes) : String?
         return refusal_wired(bytes) unless resolve_bindings?
-        refusal_wired(expand_send(bytes, generation))
+        refusal_wired(expand_send(bytes, generation, @refresh_slot))
       end
 
       # FINAL bytes: the rule itself, asked about the slice the socket gets.
@@ -202,12 +223,14 @@ module Gori
       # which NAMES resolve; `Fuzz::Plan`'s evidence branch spells the same rule for the
       # env-var pass. The cost lands on the operator's own escape in a seeded tab (`$$GEN.UUID`
       # ships as it reads), which is the direction that can be read wrong but not sent wrong.
-      private def expand_send(bytes : Bytes, generation : Gori::Env::Generation? = nil) : Bytes
+      private def expand_send(bytes : Bytes, generation : Gori::Env::Generation? = nil,
+                              as_slot : String? = nil) : Bytes
+        layer = as_slot ? @refresh_layer : nil
         if literal = @evidence_literals
           Gori::Env.expand_bindings(bytes, generation: generation, literal: literal,
-            unescape: Gori::Env::Owns::None)
+            unescape: Gori::Env::Owns::None, as_slot: as_slot, layer: layer)
         else
-          Gori::Env.expand_bindings(bytes, generation: generation)
+          Gori::Env.expand_bindings(bytes, generation: generation, as_slot: as_slot, layer: layer)
         end
       end
 
@@ -276,10 +299,19 @@ module Gori
       # ONE generation across both passes: the request's own `$GEN.UUID` and the active slot's
       # header overlay are two expansions of ONE outbound request, and a context per pass would
       # put two different ids on the same socket write.
+      #
+      # The session slot's before-send refresh (#1233) runs FIRST, before either pass: a slot
+      # whose token is about to expire is re-authenticated here, so the `$NAME` pass below
+      # already reads the rebound value. Here and not in `send_wire`, because every recording
+      # surface takes `wire` first and hands its answer to `send_wire`. Not for a refresh step
+      # itself (`refresh_slot`), which resolves as its own slot and writes no overlay.
       def wire(bytes : Bytes) : Bytes
         gen = generation
-        bytes = expand_send(bytes, gen) if resolve_bindings?
-        Gori::Env.client_hints(Gori::Env.overlay_slot(bytes, gen), gen)
+        refreshing = @refresh_slot
+        Gori::SessionRefresh.before_send(Gori::Env.active_slot_name) unless refreshing
+        bytes = expand_send(bytes, gen, refreshing) if resolve_bindings?
+        bytes = Gori::Env.overlay_slot(bytes, gen) unless refreshing
+        Gori::Env.client_hints(bytes, gen)
       end
 
       def send(bytes : Bytes) : Result
@@ -467,7 +499,7 @@ module Gori
       #
       # Best-effort: an extract rule must never be able to fail a send the operator made.
       private def extract(request : Bytes, result : Result) : Nil
-        bindings = Gori::Env.layer.as?(Gori::Bindings)
+        bindings = (@refresh_slot && @refresh_layer) || Gori::Env.layer.as?(Gori::Bindings)
         return unless bindings
         return if result.error
         # First line only (NOT `request_target_line`, which deliberately scans past blank
@@ -478,7 +510,7 @@ module Gori
         subject = Gori::InterceptFilter::Subject.new(
           method: parts[0]? || "GET", host: @host, target: parts[1]? || "/",
           scheme: @scheme, status: result.response.try(&.status))
-        bindings.observe(result, subject)
+        bindings.observe(result, subject, as_slot: @refresh_slot)
       rescue ex
         ::Log.warn { "extract rules skipped: #{ex.message}" }
       end

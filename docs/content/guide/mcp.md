@@ -73,7 +73,7 @@ By default `gori mcp` advertises every tool, so an agent can reach the whole wor
 
 | Start with | Tools | `tools/list` | Tokens | For |
 | --- | ---: | ---: | ---: | --- |
-| `gori mcp` | 187 | ~222 KB | ~57k | Everything (the default) |
+| `gori mcp` | 188 | ~225 KB | ~58k | Everything (the default) |
 | `--read-only` | 62 | ~72 KB | ~18k | Read tools and pure compute; no live requests |
 | `--tools=@recon` | 37 | ~54 KB | ~14k | Read and map the capture, replay a request, record issues and notes |
 | `--tools=@recon --read-only` | 28 | ~39 KB | ~10k | `@recon` minus what `--read-only` disables |
@@ -232,7 +232,8 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 | `add_scope_rule` / `update_scope_rule` / `delete_scope_rule` / `set_scope_enabled` | Edit the project's include / exclude rules and toggle the scope lens |
 | `set_sandbox` | Hard containment: when on, the proxy forwards only what scope allows and blocks the rest |
 | `set_env_var` / `delete_env_var` | Manage the project env tokens substitution reads. The key is stored bare: reference it as `$ENV.KEY`, or as `$KEY` under the `bare` opt-out — `list_env`'s `syntax` / `example` says which one this install speaks |
-| `create_session_slot` / `update_session_slot` / `delete_session_slot` | Manage the session slots, the same list the Authorize tab's identities card edits, and the set `authorize_start` replays under |
+| `create_session_slot` / `update_session_slot` / `delete_session_slot` | Manage the session slots, the same list the Authorize tab's identities card edits, and the set `authorize_start` replays under. `refresh` (Repeater session ids, in order) and `refresh_before` (`off`, `jwt-exp`, `ttl=10m`) give a slot [refresh steps](/guide/authorize/#refreshing-a-slot) |
+| `refresh_session_slot` | Run a slot's refresh steps now, so its extract rules rebind it. Returns `ok`, the failing step and status, and the binding **names** rebound, never a value; steps are recorded in History (source `refresh`). Gated like `send_request` (`allow_unscoped`). Values live in this server process only |
 | `set_active_session_slot` | Choose the identity every outbound request goes out as: its header overlay is applied to the final wire bytes and `$BIND.NAME` resolves against its binding table. Held by this server process only, never persisted, so a new connection starts as-captured |
 | `add_host_override` / `update_host_override` / `delete_host_override` | Manage the host to IP dial map (changes only the connect IP, never the request) |
 | `probe_promote` / `probe_dismiss` / `probe_delete` | Triage a Probe finding into Issues, dismiss it, or remove it |

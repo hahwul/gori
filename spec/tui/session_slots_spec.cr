@@ -149,3 +149,71 @@ describe "the Repeater's send line" do
     body[/def sending_as.*?\n    end/m].should contain("Gori::Env.active_slot_name")
   end
 end
+
+private def ctrl_r : Termisu::Event::Key
+  Termisu::Event::Key.new(Termisu::Input::Key::LowerR, Termisu::Input::Modifier::Ctrl)
+end
+
+# Refreshing a slot from the TUI (#1233): ^R in the picker, the Repeater verb that appends a
+# step, the chip's two states, and the tick that turns a finished refresh into a toast.
+describe "session slot refresh in the TUI" do
+  it "runs the picker's refresh on ^R and keeps the card up, naming the chord in the hint" do
+    lp = LibraryPicker.new("SESSION SLOT", [LibraryPicker::Row.new(0, "as captured", ""),
+                                            LibraryPicker::Row.new(1, "admin", "")], "session slot", "activate")
+    lp.hint.should_not contain("^R")
+    hit = [] of Int32
+    lp.on_refresh = ->(i : Int32) { hit << i; nil }
+    lp.hint.should contain("^R refresh")
+    lp.handle_key(ctrl_r).should eq(:stay)
+    hit.should eq([0])
+  end
+
+  it "refreshes on its own fiber, so the chip keeps painting while the steps are on the wire" do
+    body = slot_code("tui", "runner", "session_slots.cr").join('\n')
+    refresh = body[/def refresh_session_slot.*?\n  end/m]
+    refresh.should contain("spawn(name: \"gori-session-refresh\")")
+    refresh.index("spawn").not_nil!.should be < refresh.index("runner.refresh(name)").not_nil!
+  end
+
+  it "marks the chip ⟳ while refreshing and ! after a failure" do
+    body = slot_code("tui", "runner", "session_slots.cr").join('\n')
+    chip = body[/def session_slot_chip.*?\n  end/m]
+    chip.should contain(%("session:\#{name} ⟳"))
+    chip.should contain(%("session:\#{name} !"))
+    rect = Rect.new(0, 0, 120, 1)
+    on = MemoryBackend.new(120, 1)
+    Chrome.render_top_bar(Screen.new(on), rect, project: "acme", scope: "scope:2",
+      listen: "127.0.0.1:8080", session: "session:admin ⟳")
+    on.row(0).should contain("session:admin ⟳")
+  end
+
+  it "drains finished refreshes on the tick, and repaints when the runner moves" do
+    tick = slot_code("tui", "runner.cr").join('\n')
+    tick.should contain("dirty = true if drain_session_refreshes")
+    tick.should contain("@session.refresher.rev")
+  end
+
+  it "offers the Repeater's 'use as refresh' verb on the sub-tab strip" do
+    verb = Gori::Verbs.registry["repeater.use-as-refresh"]
+    verb.scope.should eq(Gori::Verb::Scope::Repeater)
+    verb.mnemonic.should eq('b')
+    verb.section.should eq(:subtab)
+  end
+
+  it "carries the persisted refresh steps through the identities card's whole-list save" do
+    # The card caches its list; a step appended from a Repeater sub-tab since would otherwise
+    # be erased by the next edit to ANY identity.
+    body = slot_code("tui", "controllers", "authorize_controller.cr").join('\n')
+    save = body[/def replace_identities.*?\n    end/m]
+    save.should contain("carry_refresh_steps(")
+    body[/def apply_identity.*?\n    end/m].should contain("copy_with(refresh: list[i].refresh)")
+  end
+
+  it "saves the tab before it records the step, so the slot runs the request on screen" do
+    body = slot_code("tui", "runner", "session_slots.cr").join('\n')
+    use = body[/def repeater_use_as_refresh.*?\n  end/m]
+    use.index("save_current_repeater").not_nil!.should be < use.index("current_session_db_id").not_nil!
+    # A save the store refused leaves the tab dirty: the picker must not open on the stale row.
+    use.index("current_session_dirty?").not_nil!.should be < use.index("LibraryPicker.new").not_nil!
+  end
+end

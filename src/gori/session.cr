@@ -10,6 +10,7 @@ require "./saved_views"
 require "./scope"
 require "./host_overrides"
 require "./env"
+require "./session_refresh"
 require "./interceptor"
 require "./probe"
 require "./proxy/server"
@@ -49,6 +50,11 @@ module Gori
     # as" has to be one answer across the Authorize tab, a Repeater send and the proxy's
     # intercept forward, not one per surface.
     getter slots : SessionSlots
+    # The slots' REFRESH runner (#1233): replays a slot's Repeater steps on ^R in the slot
+    # picker, and before a send when the slot's policy says its token is about to expire.
+    # Installed as `SessionRefresh.hook` for the life of this session, beside `Env.layer`, and
+    # gated through `Outbound.interactive` — the TUI's own Layer 1, Sandbox still applying.
+    getter refresher : SessionRefresh::Runner
     getter scope : Scope
     getter host_overrides : HostOverrides
     getter interceptor : Interceptor
@@ -229,6 +235,7 @@ module Gori
         # The binding layer is cleared with them: a half-opened project must not leave a
         # dangling table whose `$KEY`s the next surface would happily resolve.
         Env.layer = nil
+        SessionRefresh.hook = nil
         lock.try(&.close) rescue nil
         probe.try(&.stop) rescue nil
         store.close rescue nil
@@ -283,6 +290,9 @@ module Gori
       @intercept_token = Random::Secure.hex(8)
       @listeners_applied = Settings.listeners.dup
       @colormarker = Colormarker.load(@store)
+      scope = @scope
+      @refresher = SessionRefresh::Runner.new(@store, @bindings, -> { Outbound.interactive(scope) },
+        overrides: @host_overrides, verify: !@config.insecure_upstream?).install
     end
 
     # True when the `listeners` section on disk no longer matches the one these sockets were
@@ -497,6 +507,7 @@ module Gori
       @config.insecure_upstream = !verify
       @tunnel.verify_upstream = verify
       @probe.verify_upstream = verify
+      @refresher.verify = verify
     end
 
     # Flip the direct-access info page live (settings:network toggle). Pushed to the
@@ -559,6 +570,7 @@ module Gori
       # against a closed project's table would be the worst kind of cross-project leak.
       # The values themselves die with the object — nothing wrote them anywhere.
       Env.layer = nil if Env.layer.same?(@bindings)
+      @refresher.uninstall
       @interceptor.release_all # unblock held fibers FIRST so they can write final rows
       @proxy.stop
       stop_extra_listeners

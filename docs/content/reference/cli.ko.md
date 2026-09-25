@@ -94,7 +94,7 @@ gori run <subcommand> [verb] [options]
 | `rewriter extract` · `bindings` | 세션 바인딩 추출 규칙 관리, 그 규칙이 선언한 `$BIND.NAME` 목록 |
 | `colormarker` · `add` · `update` · `rm` · `enable` · `disable` · `move` · `preview` · `color` | History 행 색상 규칙 관리 |
 | `views` · `add` · `set` · `rename` · `scope` · `rm` | 저장된 History 뷰 관리: 목록을 좁히는 이름 붙은 QL 쿼리를 렌즈로 적용 |
-| `session` · `add` · `from-flow` · `edit` · `rm` · `baseline` · `show` · `activate` | 세션 슬롯: 전송이나 Authorize 실행이 그 이름으로 나가는 신원 |
+| `session` · `add` · `from-flow` · `edit` · `rm` · `baseline` · `show` · `refresh` · `activate` | 세션 슬롯: 전송이나 Authorize 실행이 그 이름으로 나가는 신원과, 그 신원을 다시 인증하는 Repeater 단계 |
 | `grpc [schema]` · `reflect` · `forget` | gRPC `.proto` 렌즈: 무엇이 로드됐는지 보기, 서버 리플렉션으로 디스크립터 받기, 캐시된 대상 버리기 |
 | `project [list]` | 알려진 프로젝트 목록 |
 | `project create <name>` | 이름으로 프로젝트 생성 (같은 이름이면 다시 열기) |
@@ -664,18 +664,21 @@ gori run session add --name admin --set 'Cookie: session=…' --rule SESSION
 gori run session edit admin --clear-set --set 'Cookie: session=new'
 gori run session baseline as-captured
 gori run session rm admin
+gori run session edit admin --refresh 12,14 --refresh-before jwt-exp
+gori run session refresh admin
 ```
 
 | 동사 | 옵션 |
 |------|------|
 | `list`(기본) | `--show-values`(`[REDACTED]` 대신 헤더 값 출력), `--format text\|json` |
 | `show <name>` | `--show-values`, `--format text\|json` |
-| `add` | `--name`, `--set 'Name: value'`(반복 가능), `--remove NAME`(반복 가능), `--rule NAME`(반복 가능), `--baseline` / `--no-baseline`(플래그 해제. 그러면 첫 슬롯이 기준선을 물려받습니다) |
+| `add` | `--name`, `--set 'Name: value'`(반복 가능), `--remove NAME`(반복 가능), `--rule NAME`(반복 가능), `--baseline` / `--no-baseline`(플래그 해제. 그러면 첫 슬롯이 기준선을 물려받습니다), `--refresh ID,ID`(슬롯을 다시 인증하는 Repeater 세션, 실행 순서대로), `--refresh-before off\|jwt-exp\|ttl=10m` |
 | `from-flow <flow-id>` | `--name`(필수), `--baseline`, `--show-values`. 오버레이를 직접 타이핑하는 대신 캡처된 로그인 교환에서 만듭니다 |
 | `from-request <flow-id>` | `--name`(필수), `--copy-header NAME`(반복 가능, 하나 이상 필요), `--baseline`, `--show-values`. 캡처된 요청에서 지정한 헤더를 복사합니다 |
-| `edit <name>` | 같은 플래그에 `--clear-set` / `--clear-remove` / `--clear-rules` 추가. 컬렉션 플래그는 그 컬렉션 **전체를 교체** 하고, 생략한 것은 그대로 둡니다 |
+| `edit <name>` | 같은 플래그에 `--clear-set` / `--clear-remove` / `--clear-rules` / `--clear-refresh` 추가. 컬렉션 플래그는 그 컬렉션 **전체를 교체** 하고, 생략한 것은 그대로 둡니다 |
 | `rm`\|`delete <name>` | 그 슬롯이 주장하던 extract 규칙은 다시 전역 바인딩 테이블에 쓰게 됩니다 |
 | `baseline <name>` | Authorize 기준선 이동(정확히 한 슬롯이 갖습니다) |
+| `refresh <name>` | 슬롯의 갱신 단계를 지금 실행합니다. `--allow-unscoped`, `--format text\|json`. 갱신이 실패하면 `1`로 끝납니다 |
 
 모든 동사가 `--project=NAME` / `--db=PATH`를 받습니다.
 
@@ -688,7 +691,7 @@ gori run session from-flow 4211 --name admin
 gori run repeater 900 --slot admin        # 플로우 900을 그 신원으로 재전송
 ```
 
-오버레이는 **리터럴**입니다. 로그인이 돌려준 바이트 그대로 프로젝트에 저장됩니다. 재인증은 하지 않으므로, *회전하는* 토큰(수명 짧은 JWT, 요청마다 바뀌는 CSRF 값)은 extract 규칙 경로가 맞습니다: `gori run rewriter extract`에 `--bind-from FLOW`를 더하면 실행마다 값을 새로 발급받습니다. 이름은 플로우를 읽기 전에 검사하므로, 중복된 이름은 "그 플로우는 로그인이 아니다"가 아니라 이름 충돌로 보고됩니다.
+오버레이는 **리터럴**입니다. 로그인이 돌려준 바이트 그대로 프로젝트에 저장됩니다. 스스로 재인증하지는 않으므로, *회전하는* 토큰(수명 짧은 JWT, 요청마다 바뀌는 CSRF 값)은 extract 규칙 경로가 맞습니다: `gori run rewriter extract`에 `--bind-from FLOW`를 더하면 실행마다 값을 새로 발급받습니다. 슬롯에 [갱신 단계](#refresh-steps)를 붙이는 방법도 있습니다. 이름은 플로우를 읽기 전에 검사하므로, 중복된 이름은 "그 플로우는 로그인이 아니다"가 아니라 이름 충돌로 보고됩니다.
 
 **`from-request`는 캡처된 요청에서 지정한 헤더를 복사합니다.** 인증 정보나 CSRF 값이 요청에 이미 있거나, 로그인 교환의 모든 헤더가 아닌 필요한 헤더만 의도적으로 스냅샷할 때 유용합니다. `--copy-header`를 헤더마다 반복하고, 하나 이상 지정해야 합니다. `Content-Length`, `Transfer-Encoding`, `Host`는 거부됩니다. 슬롯은 본문과 대상이 다른 메시지에 적용되므로, 이 헤더를 복사하면 이후 모든 전송의 프레이밍이나 라우팅이 어긋납니다. 저장되는 값은 리터럴 바이트이며, `--show-values`를 주지 않으면 표준 출력은 `[REDACTED]`로 가립니다. STDERR의 provenance는 복사한 헤더 이름만 출력하고 값은 출력하지 않습니다. 슬롯은 **호스트 범위가 없습니다**. `--slot NAME`을 명시한 모든 전송에 해당 슬롯의 헤더가 적용되므로, 슬롯은 의도한 신원 하나에만 사용하세요.
 
@@ -698,7 +701,23 @@ gori run session from-request 4211 --name admin \
 gori run repeater 900 --slot admin        # 해당 헤더 스냅샷으로 전송
 ```
 
-이는 로그인 매크로가 아닌 **리터럴 스냅샷**입니다. 재인증하거나 회전하는 토큰을 갱신하지 않습니다. 수명이 짧은 JWT, 요청마다 바뀌는 CSRF 값처럼 다시 발급해야 하는 값은 `gori run rewriter extract`와 `--bind-from FLOW`를 사용해 실행마다 새로 추출하세요.
+이는 로그인 매크로가 아닌 **리터럴 스냅샷**입니다. 스스로 재인증하거나 회전하는 토큰을 갱신하지 않습니다. 수명이 짧은 JWT, 요청마다 바뀌는 CSRF 값처럼 다시 발급해야 하는 값은 `gori run rewriter extract`와 `--bind-from FLOW`를 사용해 실행마다 새로 추출하거나, 슬롯에 [갱신 단계](#refresh-steps)를 붙이세요.
+
+<a id="refresh-steps"></a>**갱신 단계는 슬롯을 다시 인증합니다.** `--refresh 12,14`는 로그인하는 Repeater 세션(`gori run repeater list`)을 실행 순서대로 지정합니다. 보통 CSRF를 가져오는 요청, 그다음 `$BIND.CSRF`를 싣는 로그인 요청입니다. 각 단계의 응답은 슬롯 자신의 extract 규칙을 거치고, 그것이 슬롯을 다시 바인딩합니다. 단계는 *그 슬롯의* `$BIND.NAME` 값을 해소하고 슬롯 헤더 오버레이는 **싣지 않으므로**, 로그인 요청이 교체하려는 만료된 자격 증명을 보내지 않습니다. 모든 단계는 source `refresh`(`src:refresh`)로 History에 기록되고, 갱신마다 이벤트 하나(`list_events`, source `session`)가 남습니다. 이벤트에는 바인딩 이름만 있고 값은 없습니다.
+
+`--refresh-before`를 주면 슬롯으로 나가는 전송(모든 전송 명령의 `--slot NAME`, 그리고 Authorize 실행의 각 신원) 직전에 갱신이 스스로 실행됩니다.
+
+| 정책 | 갱신 시점 |
+| --- | --- |
+| `off`(기본) | 스스로는 하지 않습니다. `session refresh`만 |
+| `jwt-exp` | 슬롯 테이블에 바인딩된 JWT의 `exp`가 30초 이내로 남았을 때 |
+| `ttl=10m` | 마지막으로 성공한 갱신(없으면 슬롯에서 가장 오래된 바인딩) 이후 그 기간이 지났을 때(`s`, `m`, `h`. 숫자만 쓰면 초) |
+
+정책이 있고 아직 아무것도 바인딩되지 않은 슬롯은 첫 전송 전에 갱신합니다. `401`을 받은 뒤 요청을 재시도하지는 않습니다. 정책은 전송 전에만 동작하고 응답을 읽지 않으므로, 로그인이 Authorize 판정을 가리지 않습니다. 자동 갱신이 실패하면 전송은 가진 값으로 그대로 나가고, 30초 동안 다시 시도하지 않으며, 3번 연속 실패하면 수동 갱신이 성공할 때까지 자동 갱신이 꺼집니다. 동시에 들어온 전송은 진행 중인 갱신 하나를 기다립니다. 자동 갱신은 `gori run`이 여느 전송을 제한하듯 프로젝트 스코프로 제한되며 명령의 `--allow-unscoped`를 물려받지 않습니다. 로그인 호스트가 스코프 안에 있어야 합니다.
+
+슬롯이 단계로 쓰는 Repeater 세션을 삭제하면 그 단계는 제자리에 삭제됨으로 표시되어 남고, 갱신은 그 id를 다음에 차지한 세션을 실행하는 대신 그 단계를 거부합니다. `--refresh`나 `--clear-refresh`로 제거하세요.
+
+바인딩 값은 메모리에, **프로세스마다** 따로 있습니다. `session refresh`는 이 명령 자신의 테이블을 다시 바인딩하고 명령이 끝나면 사라지므로, 로그인 순서가 동작하는지 확인하는 용도입니다. `--slot NAME` 스윕은 자기 프로세스에서 갱신하고, TUI와 실행 중인 `gori mcp`는 각자의 테이블을 가집니다.
 
 **`session activate`는 없습니다.** `gori run` 프로세스는 보내고 끝나므로 활성 포인터가 걸칠 시간이 없고, 저장해 두면 다음 실행에서 비어 있는 바인딩 테이블로 해소되어 `$BIND.SESSION`이 리터럴인 오버레이를 보내게 됩니다. 대신 전송할 때 신원을 지목하세요: `repeater`, `repeater send`, `repeater minimize`, `fuzz`, `mine`, `sequence`, `discover`에서 `--slot NAME`. 실행은 첫 요청 전에 STDERR로 `slot: sending as NAME`을 찍습니다.
 

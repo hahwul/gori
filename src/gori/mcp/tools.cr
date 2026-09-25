@@ -322,6 +322,8 @@ module Gori
         # bound on the next tool call. Rebuilding it per call would silently make every
         # binding write-only.
         @bindings = nil.as(Gori::Bindings?)
+        # The slots' refresh runner for the bound project (#1233) — see `bind_binding_layer`.
+        @refresher = nil.as(Gori::SessionRefresh::Runner?)
         # The peer's clientInfo, delivered by the initialize handshake — which can arrive
         # before OR after a project is bound, so both `client_seen` and `announce_presence`
         # know how to fill the other's gap.
@@ -588,10 +590,16 @@ module Gori
       # Publish this project's extract rules as `Env`'s send-time layer. Same per-project
       # global the TUI's `Session.open` and the CLI's `open_store` install, so `$SESSION`
       # means one thing on all three surfaces.
+      #
+      # …and the slots' REFRESH runner beside it (#1233), replaced on every bind so a
+      # `switch_project` cannot refresh the previous project's slot. An automatic refresh is
+      # gated STRICTLY (`Outbound.agent` with no waiver): a send's own `allow_unscoped` does not
+      # extend to a login request gori decided to make.
       private def bind_binding_layer(s : Store) : Nil
         b = Gori::Bindings.load(s, Gori::SessionSlots.load(s))
         @bindings = b
         Env.layer = b
+        @refresher = Gori::SessionRefresh::Runner.new(s, b, -> { Outbound.agent(Scope.load(s), false) }).install
       end
 
       # Drop any previous project's marker and lay one down beside the CURRENTLY bound

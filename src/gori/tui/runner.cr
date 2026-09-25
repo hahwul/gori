@@ -242,6 +242,8 @@ module Gori::Tui
       @import_job = nil.as(Int32?)
       @import_cancel = false
       @import_events = Channel(ImportEvent).new(16)
+      # The session-slot refresh runner's rev as last painted (#1233) — see the tick.
+      @session_refresh_rev = 0_u64
       @tag_preedit = ""
       @tag_views = [] of RepeaterView # the sub-tabs the prompt will tag (marks, else the active one)
       # Whitespace reveal (·→␍␊) toggle for the req/res views — global view pref,
@@ -511,6 +513,9 @@ module Gori::Tui
     end
 
     def run : Symbol
+      # The fiber that runs the event loop: a session slot's before-send refresh asked from it
+      # runs in the background instead of blocking the loop on a login (#1233).
+      Gori::SessionRefresh.ui_fiber = Fiber.current
       # Record the opened project's db path globally for explicitly opted-in headless
       # integrations (`gori mcp --use-active-project`). Workspace-aware MCP launches use
       # their path binding instead, preventing a different repository from inheriting this.
@@ -758,6 +763,14 @@ module Gori::Tui
             dirty = true if drain_passthrough_notices
             # …and what intercept could not hold. Same placement, same reason.
             dirty = true if drain_intercept_notices
+            # Session-slot refreshes (#1233): a finished one raises its toast, and a start or
+            # finish moves the `session:` chip (`⟳` / `!`), so repaint on the runner's rev
+            # rather than on a timer.
+            dirty = true if drain_session_refreshes
+            if (rrev = @session.refresher.rev) != @session_refresh_rev
+              @session_refresh_rev = rrev
+              dirty = true
+            end
             # Miss Ring: advance the animation beat and pick up new notifications. Like the
             # resource meter above she reports dirty ONLY when the drawn sprite/bubble
             # changes, and stops reporting at all once she dozes off (Companion::SLEEP_AFTER).

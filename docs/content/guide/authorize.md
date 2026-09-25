@@ -62,7 +62,21 @@ Three things the active slot deliberately does **not** do:
 - **It is never persisted.** Reopening a project, or a new `gori mcp` connection, starts as-captured. A slot's *values* are memory-only by design, so restoring "admin is active" into an empty admin table would hand the next send an overlay whose `$BIND.SESSION` is literal: a `401` with no visible cause. Activation is one keystroke; a stale one is a support ticket.
 - **`as-captured` is the baseline in both senses.** With no slot active nothing changes a byte, which is what makes every project and every playbook written before slots existed behave exactly as it did.
 
-There is no cookie jar and no auto-login macro here. A slot carries the headers you wrote and the values gori observed; `--bind-from` replays one flow *you* named to fill them.
+There is no cookie jar here. A slot carries the headers you wrote and the values gori observed; `--bind-from` replays one flow *you* named to fill them, and a slot's refresh steps replay the Repeater sessions *you* put in its list.
+
+## Refreshing a Slot
+
+A slot is a snapshot, so a long run can outlive its token. Give the slot **refresh steps**, the Repeater sessions that log in, in order (for example `csrf-fetch → login`), and the slot re-authenticates itself: each step's response goes through the slot's own extract rules, which rebind it. A step resolves the slot's own `$BIND.NAME` values and carries no slot header overlay, so the login never sends the stale credential it is replacing.
+
+| Surface | Add a step | Refresh now | Policy |
+|---------|------------|-------------|--------|
+| TUI | In the Repeater, `Space` → `b` (**Use as refresh for slot…**) on the login sub-tab | `Ctrl-R` on the row in the session slot picker | the **refresh before** field of the identity form (`i` on this tab) |
+| `gori run` | `session edit NAME --refresh 12,14` | `session refresh NAME` | `--refresh-before` |
+| MCP | `update_session_slot{refresh}` | `refresh_session_slot` | `refresh_before` |
+
+A **refresh before** policy runs the refresh on its own, before a send that goes out as the slot: `jwt-exp` when a JWT bound in the slot is within 30 s of its `exp`, or `ttl=10m` when that long has passed since the last successful refresh (or, before one, since the slot's oldest binding). A refresh that leaves the JWT still about to expire counts as a failure. It applies to every identity an Authorize run sends as, not only to the active slot. It acts **before** a send and never reads a response: a `401` in this tab is still the verdict, never a reason to log in again and retry.
+
+Refresh traffic is visible: each step lands in History with source `refresh` (`src:refresh`, SRC `RFRSH`), each refresh writes one event, and the `session:NAME` chip shows `⟳` while one runs and `!` after one failed. A failure also raises a notification and leaves the send going out with the value it had; a failed automatic refresh waits 30 s before it tries again, and after 3 failures in a row it switches itself off until a manual refresh succeeds. A step whose Repeater session was deleted stays in the list as `(deleted)` and refuses to run. Values stay per process: a refresh in the TUI does not update a running `gori mcp`.
 
 ## The Baseline
 

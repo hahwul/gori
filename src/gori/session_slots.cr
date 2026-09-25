@@ -30,9 +30,13 @@ module Gori
   # RFC 6265 storage is a separate feature with its own failure modes, and the case operators
   # actually ask for — "send these headers as this identity" — is this one.
   #
-  # No auto-login. `--bind-from` already replays ONE named flow to fill a binding table, and
-  # that is a flow the operator pointed at. A macro that decides for itself when to
-  # re-authenticate is gori acting behind the operator's back (P4).
+  # No hidden auto-login. `--bind-from` replays ONE named flow to fill a binding table, and a
+  # slot's REFRESH (#1233, `SessionRefresh`) replays the Repeater sessions the operator put in
+  # its list — manually, or before a send when the operator set a `refresh_before` policy on the
+  # slot. Both run only what the operator named, and a refresh is recorded in History and the
+  # event log. What gori still never does is decide by itself that a response means "log in
+  # again" (retry-after-401): that reinterprets an answer, and in Authorize the 401 IS the
+  # answer (DESIGN.md §7 2026-09-25).
   class SessionSlots
     # The settings key. Deliberately the SAME row Authorize identities have always used:
     # identities are slots, so an existing project's identities ARE its slots and a new key
@@ -48,6 +52,10 @@ module Gori
       # skips every namespacing test and behaves exactly as it did before slots existed.
       # Same pattern and the same reason as `Bindings`' own `@enabled_count`.
       @scoped_count = Atomic(Int32).new(count_scoped(slots))
+      # The same lock-free fast path for the before-send refresh check (#1233): a project with
+      # no slot carrying an automatic refresh policy pays one atomic read per send and nothing
+      # else — `Fuzz::Sender#send` asks on every request of a sweep.
+      @auto_count = Atomic(Int32).new(count_auto(slots))
       # Set by `Bindings` (a `Proc`, not a typed reference: core's dependency runs
       # bindings → session_slots and must not run back). Fired with the SURVIVING slot names
       # after every list write so a per-slot binding table whose slot is gone can be dropped —
@@ -139,8 +147,7 @@ module Gori
         headers = slot.set_headers.map do |(name, value)|
           slot.literal_header?(name) ? {name, value} : {name, w.call(value, EnvMigration::Kind::Slot)}
         end
-        SessionSlot.new(slot.name, headers, slot.remove_headers, slot.baseline?, slot.rules,
-          slot.literal_headers)
+        slot.copy_with(set_headers: headers)
       end
     end
 
@@ -157,6 +164,7 @@ module Gori
         @rev &+= 1
       end
       @scoped_count.set(count_scoped(list))
+      @auto_count.set(count_auto(list))
       # OUTSIDE the synchronize block, in the same position `bump_highlight_rev` holds: the
       # callback takes `Bindings`' mutex, and bindings.cr's `values` states the two must never
       # nest. Keyed on the NAME SET, never on object identity — `with_one_baseline` rebuilds
@@ -231,22 +239,36 @@ module Gori
     # deliberately does not carry (an old build has to read it — see `SessionSlot.serialize`).
     # In-process the identical case IS caught, because `save` fires mid-delete with the list the
     # delete produced (spec/bindings_slots_spec.cr).
+    #
+    # ONE narrowing, and it is about what a row can carry rather than about trust: a write that
+    # moved only the REFRESH half of the list (#1233 — a step appended, a policy changed, or
+    # `Store#delete_repeater` detaching a step whose tab was closed) left every identity
+    # exactly as it was, so it prunes nothing. Without it, closing any Repeater tab a slot
+    # named as a refresh step wiped every slot's live token in every process watching the
+    # project. `SessionSlot#same_identity?` is the comparison, in list order.
     def reload : Nil
       raw = @store.setting(KEY)
       return if raw == @raw
       fresh = SessionSlot.parse_json(raw)
+      identity_moved = true
       @mutex.synchronize do
+        identity_moved = !same_identities?(@slots, fresh)
         @raw = raw
         @slots = fresh
         @active = nil unless (a = @active) && fresh.any?(&.name.==(a))
         @rev &+= 1
       end
       @scoped_count.set(count_scoped(fresh))
+      @auto_count.set(count_auto(fresh))
       # nil, not the surviving names — see above. The MCP path reloads before every write
       # (`fresh_slots`), and the TUI's on every tick, so this is where an out-of-process
       # rotation is caught at all.
-      @on_slots_changed.try &.call(nil)
+      @on_slots_changed.try &.call(nil) if identity_moved
       Env.bump_highlight_rev
+    end
+
+    private def same_identities?(a : Array(SessionSlot), b : Array(SessionSlot)) : Bool
+      a.size == b.size && a.zip(b).all? { |(x, y)| x.same_identity?(y) }
     end
 
     # ── list edits ────────────────────────────────────────────────────────────
@@ -412,6 +434,36 @@ module Gori
 
     private def count_scoped(list : Array(SessionSlot)) : Int32
       list.sum(&.rules.size)
+    end
+
+    private def count_auto(list : Array(SessionSlot)) : Int32
+      list.count(&.auto_refresh?)
+    end
+
+    # Does ANY slot refresh on its own before a send? Lock-free, for the same reason `scoped?`
+    # is: it is the first question the before-send hook asks on every send of every sweep.
+    def auto_refresh? : Bool
+      @auto_count.get > 0
+    end
+
+    # ── refresh steps (#1233) ─────────────────────────────────────────────────
+
+    # Append a Repeater session to `name`'s refresh list — the Repeater's "use as refresh for
+    # slot" and the transaction-safe half of `gori run session edit --refresh`. A session
+    # already in the list is not appended twice: a login that runs twice per refresh is two
+    # logins, and the operator who pressed the key again meant "this one", not "again".
+    # False when the write did not commit OR there is no such slot (the caller asked `find`).
+    def append_refresh(name : String, repeater_id : Int64) : Bool
+      mutate do |list|
+        idx = list.index(&.name.==(name))
+        if idx
+          slot = list[idx]
+          unless slot.refresh.includes?(repeater_id)
+            list[idx] = slot.copy_with(refresh: slot.refresh + [repeater_id])
+          end
+          list
+        end
+      end
     end
   end
 end

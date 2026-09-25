@@ -292,6 +292,10 @@ private class FakeContext < ExecContext
     @calls << :repeater_tag_subtab
   end
 
+  def repeater_use_as_refresh : Nil
+    @calls << :repeater_use_as_refresh
+  end
+
   def repeater_filter_subtabs : Nil
     @calls << :repeater_filter_subtabs
   end

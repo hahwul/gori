@@ -255,3 +255,29 @@ describe "gori run session from-request" do
     banner.should contain("--bind-from")
   end
 end
+
+describe "gori run session — refresh steps (#1233)" do
+  it "summarises the steps and the policy on the row, and says nothing for a slot without them" do
+    slot = Slot.new("admin", rules: ["SESSION"], refresh: [3_i64, 4_i64],
+      refresh_before: Gori::SessionSlot::RefreshBefore.parse?("jwt-exp").not_nil!)
+    Gori::CLI::Run.session_slot_row(slot, false).should contain("refresh 2 steps · before jwt-exp")
+    Gori::CLI::Run.session_slot_row(Slot.new("user"), false).should_not contain("refresh")
+  end
+
+  it "emits the step ids (a detached one negative) and the policy in JSON" do
+    slot = Slot.new("admin", refresh: [3_i64, -4_i64])
+    j = JSON.parse(JSON.build { |b| Gori::CLI::Run.session_slot_json(b, slot, false) })
+    j["refresh"].as_a.map(&.as_i64).should eq([3_i64, -4_i64])
+    j["refresh_before"].as_s.should eq("off")
+    j["refresh_steps"].as_a.last.as_s.should contain("(deleted)")
+  end
+
+  it "reports a refresh outcome with names and never a value" do
+    o = Gori::SessionRefresh::Outcome.new("admin", false, true, 2, 2, "login", 403, "the step answered 403")
+    j = JSON.parse(JSON.build { |b| Gori::CLI::Run.session_refresh_json(b, o) })
+    j["ok"].as_bool.should be_false
+    j["failed_step"].as_i.should eq(2)
+    j["status"].as_i.should eq(403)
+    j["message"].as_s.should contain("refresh admin failed at step 2 (login → 403)")
+  end
+end
