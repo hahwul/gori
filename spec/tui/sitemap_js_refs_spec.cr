@@ -35,7 +35,7 @@ end
 
 # Put the cursor on the first row whose label is `label`.
 private def select_label(view : SitemapView, label : String) : Nil
-  b = draw(view)
+  draw(view) # the flattened rows are built by a render
   view.row_count.times do |i|
     view.select_index(i)
     return if view.selected_js_ref.try(&.[:path].ends_with?("/#{label}")) || view.selected_endpoint.try(&.[:target].ends_with?("/#{label}"))

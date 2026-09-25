@@ -98,12 +98,18 @@ module Gori
         key = sitemap_tag_path(path)
         text = clear ? "" : tag.to_s
         matched = sitemap_node_exists?(store, host, key)
-        js_node = matched == false && !key.includes?('?') && !store.js_ref_sightings(host: host, path: key, limit: 1).empty?
+        js_node = matched == false && js_ref_node?(store, host, key)
         abort "gori run sitemap tag: NOT applied (project busy) — the node is unchanged" unless store.set_sitemap_tag(host, key, text)
         puts text.empty? ? "Tag cleared on #{host}#{key}." : "Tagged #{host}#{key}: #{text}"
         if warning = tag_match_warning(matched, host, key, text, js_node)
           STDERR.puts "gori run sitemap tag: warning: #{warning}"
         end
+      end
+
+      # Whether captured JavaScript references this node (#1243): the tree then draws it as an
+      # unrequested node a tag stamps onto. Its key is query-less, so a path with a query never is.
+      private def self.js_ref_node?(store : Store, host : String, key : String) : Bool
+        !key.includes?('?') && !store.js_ref_sightings(host: host, path: key, limit: 1).empty?
       end
 
       # Whether any captured endpoint on `host` normalizes to `path`. A tag whose (host, path)

@@ -1115,7 +1115,7 @@ module Gori
             io << '\n' if i > 0
             io << term_safe(host.label)
             io << "  (" << sitemap_path_count(host.endpoints) << ')' if host.endpoints > 0
-            io << "  (js only — never requested)" if host.unrequested
+            io << "  (js only — never requested)" if host.unrequested?
             io << '\n'
             sitemap_text_children(host, "", io)
           end
@@ -1306,7 +1306,7 @@ module Gori
           io << %(,"tag":)
           term_safe(t).to_json(io)
         end
-        io << %(,"unrequested":true) if host.unrequested
+        io << %(,"unrequested":true) if host.unrequested?
         sitemap_children_json(io, host)
         io << '}'
       end
@@ -1359,7 +1359,7 @@ module Gori
         # `unrequested`: the node exists only because of such a reference — no captured request
         # reaches it or anything under it, and it never carries `methods`.
         io << %(,"js_refs":) << node.js_refs if node.js_refs > 0
-        io << %(,"unrequested":true) if node.unrequested
+        io << %(,"unrequested":true) if node.unrequested?
       end
 
       # Iterative for the same reason as `sitemap_text_children`. Unlike the text walks this

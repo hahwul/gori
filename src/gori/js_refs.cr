@@ -494,10 +494,7 @@ module Gori
       hidden = 0
       sightings.chunk_while { |a, b| a.host == b.host && a.path == b.path }.each do |group|
         ep = endpoint(group, captured, unknown)
-        next if (prefix = opts.path_prefix.presence) && !ep.path.starts_with?(prefix)
-        next if ep.requested == true && !opts.include_requested
-        next if ep.in_comment && !opts.include_comments
-        next if opts.in_scope && !(scope && scope.matches_url?(ep.url, ep.host))
+        next unless wanted?(ep, opts, scope)
         unless opts.all_hosts || visible_host?(ep.host, ep.url, hosts, scope)
           hidden += 1
           next
@@ -505,6 +502,14 @@ module Gori
         shown << ep
       end
       ListReport.new(shown, hidden, unknown, store.js_scanned_count(VERSION), capped)
+    end
+
+    # The listing filters other than the host rule — which `list` counts, so it is apart.
+    private def wanted?(ep : Endpoint, opts : ListOptions, scope : Scope?) : Bool
+      return false if (prefix = opts.path_prefix.presence) && !ep.path.starts_with?(prefix)
+      return false if ep.requested == true && !opts.include_requested
+      return false if ep.in_comment && !opts.include_comments
+      !opts.in_scope || (!scope.nil? && scope.matches_url?(ep.url, ep.host))
     end
 
     # The host rule, shared with the tree (`Sitemap.attach_js_refs!` takes it as `new_host`): a
@@ -541,7 +546,7 @@ module Gori
                          unknown : Bool) : Endpoint
       first = group.find { |s| s.flags & FLAG_COMMENT == 0 } || group.first
       requested = captured.includes?({first.host, first.path}) ? true : (unknown ? nil : false)
-      flows = group.map(&.flow_id).uniq.size
+      flows = group.map(&.flow_id).uniq!.size
       Endpoint.new(first.scheme, first.host, first.port, first.path, first.target, flows, requested,
         group.all? { |s| s.flags & FLAG_COMMENT != 0 }, group.any? { |s| s.flags & FLAG_TEMPLATED != 0 },
         Base.from_label?(first.base) || Base::Guessed, first.flow_id, first.offset, first.line,

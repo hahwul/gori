@@ -41,7 +41,7 @@ private def time_ms(runs : Int32, &) : Float64
   (Time.instant - t0).total_milliseconds / runs
 end
 
-base = Gori::Discover::Url.parse("https://shop.test/app").not_nil!
+base = Gori::Discover::Url.parse("https://shop.test/app") || raise "unparseable bench base"
 
 {
   {"256 KiB", bundle(256 * 1024, false)},

@@ -302,7 +302,7 @@ describe Gori::JsRefs do
         c = jr_flow(store, "/c.js", %(fetch("/api/c")))
         JR.scan(store)
         store.delete_flow(a).should be_true
-        refs_of(store).map(&.path).sort.should eq(["/api/b", "/api/c"])
+        refs_of(store).map(&.path).sort!.should eq(["/api/b", "/api/c"])
         store.delete_flows([b, c]).should be_true
         ref_count(store).should eq(0)
         marker_count(store).should eq(0)
@@ -416,10 +416,10 @@ describe "Gori::Sitemap.attach_js_refs!" do
     api = hosts[0].children.find!(&.label.==("api"))
     users = api.children.find!(&.label.==("users"))
     users.js_refs.should eq(2)
-    users.unrequested.should be_false
+    users.unrequested?.should be_false
     users.js_only?.should be_false
     admin = api.children.find!(&.label.==("admin"))
-    admin.unrequested.should be_true
+    admin.unrequested?.should be_true
     keys = admin.children.find!(&.label.==("keys"))
     keys.path.should eq("/api/admin/keys")
     keys.js_only?.should be_true
@@ -431,7 +431,7 @@ describe "Gori::Sitemap.attach_js_refs!" do
     hosts = Gori::Sitemap.build([{"shop.test", "GET", "/"}])
     Gori::Sitemap.attach_js_refs!(hosts, [Gori::Store::JsRefNode.new("https", "api.shop.test", 443, "/v1/me", 1)]) { true }
     api = hosts.find!(&.label.==("api.shop.test"))
-    api.unrequested.should be_true
+    api.unrequested?.should be_true
     api.children.first.children.first.path.should eq("/v1/me")
   end
 end

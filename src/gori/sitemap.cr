@@ -103,7 +103,7 @@ module Gori
       # This node exists ONLY because JavaScript referenced it (or a path under it) — no
       # captured request reaches it or anything below it. Never carries a method, so
       # `endpoint_count` and every "N endpoints" figure stay traffic-only (P3).
-      property unrequested : Bool
+      property? unrequested : Bool
 
       # Build-time label→child index so `child` is O(1) instead of a linear sibling scan —
       # a path-param explosion (thousands of `/users/<id>` siblings under one parent) made

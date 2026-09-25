@@ -77,7 +77,7 @@ describe "MCP scan_js_endpoints / list_js_endpoints" do
       res = ro.call("scan_js_endpoints", JSON.parse("{}"))
       res.is_error.should be_true
       res.text.should contain("read-only")
-      names = JSON.parse(JSON.build { |j| ro.list(j) }).as_a.map { |t| t["name"].as_s }
+      names = JSON.parse(JSON.build { |j| ro.list(j) }).as_a.map(&.["name"].as_s)
       names.should contain("list_js_endpoints")
       names.should_not contain("scan_js_endpoints")
     end
@@ -118,8 +118,8 @@ describe "MCP list_sitemap include_unrequested" do
       plain = je(tools, "list_sitemap")
       plain["unrequested"]?.should be_nil
       out = je(tools, "list_sitemap", %({"include_unrequested":true}))
-      out["entries"].as_a.map { |e| e["target"].as_s }.should eq(["/app.js"])
-      out["unrequested"].as_a.map { |e| e["target"].as_s }.should eq(["/api/hidden"])
+      out["entries"].as_a.map(&.["target"].as_s).should eq(["/app.js"])
+      out["unrequested"].as_a.map(&.["target"].as_s).should eq(["/api/hidden"])
       out["unrequested_total"].should eq(1)
       out["unrequested_truncated"].should be_false
     end

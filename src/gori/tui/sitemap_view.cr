@@ -1362,7 +1362,7 @@ module Gori::Tui
     # names, or a host nothing was captured from. `cluster_start` and `draw_cluster` both ask,
     # so the label is clipped for exactly the aside that is drawn.
     private def js_aside?(node : Node, host : Bool) : Bool
-      host ? node.unrequested : node.js_only?
+      host ? node.unrequested? : node.js_only?
     end
 
     # A fold row's right-hand count. A QUERY fold counts the query strings it stands for
@@ -1391,8 +1391,8 @@ module Gori::Tui
     # otherwise the depth tone (host bright, deeper nodes normal). `in_scope` is only ever
     # set on host nodes, so depth-0 alone decides the scope branch.
     private def label_color(host : Bool, node : Node) : Color
-      return Theme.accent if node.grouped    # the synthetic [1, 2, 3 …] fold pops as accent
-      return Theme.muted if node.unrequested # only JavaScript names it: recede behind traffic
+      return Theme.accent if node.grouped     # the synthetic [1, 2, 3 …] fold pops as accent
+      return Theme.muted if node.unrequested? # only JavaScript names it: recede behind traffic
       if host && @scope_configured
         node.in_scope ? Theme.text_bright : Theme.muted
       else
