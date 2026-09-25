@@ -330,6 +330,12 @@ describe Gori::SessionRefresh do
           runner.deferred?.should be_false
           rw.recent_flows(10).compact_map(&.source_ref).sort!.should eq(["slot admin step 1", "slot admin step 2"])
           rw.events_recent(10).rows.any? { |e| e.kind == "refresh_ok" }.should be_true
+          # A runner handed a writable handle of the same project (`gori run authorize`: a
+          # writable open, then a read-only one) writes through it at once and holds nothing.
+          direct = Gori::SessionRefresh::Runner.new(ro, bindings, -> { ungated_outbound }, records: rw, origin: path)
+          direct.refresh("admin").ok.should be_true
+          direct.deferred?.should be_false
+          rw.recent_flows(10).size.should eq(4)
         ensure
           ro.close
         end

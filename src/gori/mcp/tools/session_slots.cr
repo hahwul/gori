@@ -549,7 +549,7 @@ module Gori
       private def refresh_before_prop : JSON::Any
         strprop("when the slot refreshes on its own before a send: \"off\" (default), \"jwt-exp\" " \
                 "(a JWT bound in the slot is within #{Gori::SessionSlot::RefreshBefore::SKEW.total_seconds.to_i}s " \
-                "of its exp) or \"ttl=10m\" (its newest binding is older than that). Acts before a " \
+                "of its exp) or \"ttl=10m\" (that long since the last successful refresh, or since its oldest binding). Acts before a " \
                 "send, never on a response: a 401 is never retried")
       end
 

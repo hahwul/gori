@@ -3572,8 +3572,20 @@ retry, and a refresh that itself 401s needs loop protection against an account l
   30 s cooldown after a failure, automatic refresh off after 3 in a row until a manual refresh
   succeeds. A slot whose last refresh failed is due again after its cooldown whatever its
   policy reads: a TTL counted from a step-1 CSRF that DID rebind would otherwise call the slot
-  fresh while its session token stayed stale. A refresh whose steps all answered but rebound
-  none of the slot's claimed bindings counts as a failure.
+  fresh while its session token stayed stale — which is also why a TTL counts from the last
+  SUCCESSFUL refresh, or before one from the OLDEST claimed binding, never the newest. A
+  refresh whose steps all answered but rebound none of the slot's claimed bindings, or that
+  leaves a `jwt-exp` slot still inside its skew, counts as a failure: "succeeded but still due"
+  is a login before every send with no cooldown in front of it.
+- **Never on the TUI's event loop.** A before-send refresh asked from the UI fiber
+  (`SessionRefresh.ui_fiber`) runs on a fiber of its own and that one send goes out with the
+  value it has; the Repeater's send takes `wire_bytes` on its send fiber so the common path
+  waits for the fresh value there. An automatic refresh re-reads the slot list first, so a
+  step whose tab was closed is refused rather than resolved to whatever took its id.
+- **A `gori run` command reads through a read-only store**, so a refresh there writes its
+  History rows and event through a writable handle the same project already holds, or holds
+  them for the next writable open of that project (`hand_over`, keyed on the database path) —
+  never into another project's.
 - **A deleted step detaches, it does not re-bind.** `Store#delete_repeater` negates the id in
   the slot blob in the same transaction (#1160's encoding), editing the JSON in place so a key
   this build does not know survives. `SessionSlots#reload` prunes per-slot binding tables only

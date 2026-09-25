@@ -61,7 +61,9 @@ module Gori
     #
     #   * `off`      — never on its own.
     #   * `jwt-exp`  — when a JWT bound in this slot's table is within `SKEW` of its `exp`.
-    #   * `ttl=10m`  — when the slot's newest binding is older than the span.
+    #   * `ttl=10m`  — when the span has passed since the last successful refresh (before one,
+    #                  since the slot's OLDEST binding — a CSRF every page rebinds must not
+    #                  keep a stale session token looking fresh).
     #
     # Deliberately a question about the VALUE gori holds and never about a response: acting
     # before a send is what keeps a refresh from ever reinterpreting an answer (#1233's "not C").
