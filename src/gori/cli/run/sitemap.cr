@@ -289,16 +289,7 @@ module Gori
         # query (a reference is not a flow the query can judge — `JsRefs.attach!`). --in-scope
         # below then drops a host's references with the host.
         scope = Scope.load(store) if js_refs || in_scope
-        if js_refs && narrowed
-          STDERR.puts "gori run sitemap: --js-refs draws nothing under a query — a JavaScript reference is not a flow the query can match"
-        elsif js_refs
-          if store.js_scanned_count(JsRefs::VERSION) == 0
-            STDERR.puts "gori run sitemap: --js-refs, but no JavaScript has been scanned yet — run `gori run sitemap js --scan`"
-          end
-          nodes, capped = store.js_ref_nodes
-          STDERR.puts "gori run sitemap: --js-refs read the first #{Store::SITEMAP_MAX} referenced endpoints only" if capped
-          JsRefs.attach!(hosts, nodes, scope, lens: false)
-        end
+        attach_sitemap_js_refs(store, hosts, scope, narrowed) if js_refs
         Sitemap.stamp_tags!(hosts, store.sitemap_tags)
         if in_scope && scope
           STDERR.puts "gori run sitemap: --in-scope, but no scope rules are configured — nothing is in scope" unless scope.configured?
@@ -314,6 +305,23 @@ module Gori
         hosts.each { |h| Sitemap.fold_queries!(h) } if fold_query
         hosts.each { |h| h.endpoints = Sitemap.endpoint_count(h) }
         {hosts, truncated}
+      end
+
+      # `--js-refs`: the stored references onto the built tree, or a note saying why none are —
+      # not under a query (a reference is not a flow the query can match), and not before any
+      # scan. Split out of `collect_sitemap` for the complexity bar.
+      private def self.attach_sitemap_js_refs(store : Store, hosts : Array(Sitemap::Node), scope : Scope?,
+                                              narrowed : Bool) : Nil
+        if narrowed
+          STDERR.puts "gori run sitemap: --js-refs draws nothing under a query — a JavaScript reference is not a flow the query can match"
+          return
+        end
+        if store.js_scanned_count(JsRefs::VERSION) == 0
+          STDERR.puts "gori run sitemap: --js-refs, but no JavaScript has been scanned yet — run `gori run sitemap js --scan`"
+        end
+        nodes, capped = store.js_ref_nodes
+        STDERR.puts "gori run sitemap: --js-refs read the first #{Store::SITEMAP_MAX} referenced endpoints only" if capped
+        JsRefs.attach!(hosts, nodes, scope, lens: false)
       end
 
       # The sentence for a tree built off a capped read, or nil when the read was complete.
