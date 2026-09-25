@@ -209,7 +209,7 @@ module Gori
         begin
           list = slots.slots
           if format == :json
-            puts(JSON.build { |j| j.array { list.each { |s| session_slot_json(j, s, show_values) } } })
+            puts(JSON.build { |j| j.array { list.each { |s| session_slot_json(j, s, show_values, store) } } })
           elsif list.empty?
             puts "No session slots saved. Add one with `gori run session add --name admin " \
                  "--set 'Cookie: session=…'`, or open the TUI's Authorize tab (it starts from a " \
@@ -254,9 +254,9 @@ module Gori
           slot = slots.find(name)
           abort "gori run session show: no session slot named #{name.inspect}" unless slot
           if format == :json
-            puts(JSON.build { |j| session_slot_json(j, slot, show_values) })
+            puts(JSON.build { |j| session_slot_json(j, slot, show_values, store) })
           else
-            puts session_slot_detail(slot, show_values)
+            puts session_slot_detail(slot, show_values, store)
           end
         ensure
           store.close
@@ -677,7 +677,7 @@ module Gori
       end
 
       private def self.session_refresh_slot(store : Store, name : String) : Gori::SessionSlot
-        slot = Gori::Env.layer.as?(Gori::Bindings).try(&.slots).try(&.find(name))
+        slot = session_layer(store).slots.try(&.find(name))
         abort_closing(store, "gori run session refresh: no session slot named #{name.inspect}") unless slot
         slot
       end
@@ -686,8 +686,15 @@ module Gori
       private def self.session_refresher(store : Store) : Gori::SessionRefresh::Runner
         hook = Gori::SessionRefresh.hook.as?(Gori::SessionRefresh::Runner)
         return hook if hook && hook.store.same?(store)
-        bindings = Gori::Env.layer.as?(Gori::Bindings) || Gori::Bindings.load(store, Gori::SessionSlots.load(store))
-        Gori::SessionRefresh::Runner.new(store, bindings, -> { Gori::Outbound.cli(Gori::Scope.load(store), false) })
+        Gori::SessionRefresh::Runner.new(store, session_layer(store), -> { Gori::Outbound.cli(Gori::Scope.load(store), false) })
+      end
+
+      # `store`'s binding table: the one `open_store` just installed as `Env.layer`, or a fresh
+      # load when the layer belongs to another store — never another project's slots.
+      private def self.session_layer(store : Store) : Gori::Bindings
+        layer = Gori::Env.layer.as?(Gori::Bindings)
+        return layer if layer && layer.store.same?(store)
+        Gori::Bindings.load(store, Gori::SessionSlots.load(store))
       end
 
       def self.session_refresh_json(j : JSON::Builder, o : Gori::SessionRefresh::Outcome) : Nil
@@ -736,7 +743,8 @@ module Gori
         parts.join(" · ")
       end
 
-      def self.session_slot_detail(slot : Gori::SessionSlot, show_values : Bool) : String
+      def self.session_slot_detail(slot : Gori::SessionSlot, show_values : Bool,
+                                   store : Store? = nil) : String
         String.build do |io|
           io << slot.name
           io << "  (baseline)" if slot.baseline?
@@ -747,22 +755,23 @@ module Gori
           end
           slot.remove_headers.each { |n| io << "  remove  " << n << '\n' }
           slot.rules.each { |n| io << "  rule    " << Env.spell(n, Env::Namespace::Bind) << '\n' }
-          unless (labels = refresh_labels(slot)).empty?
+          unless (labels = refresh_labels(slot, store)).empty?
             io << "  refresh " << labels.join(" → ") << "  · before: " << slot.refresh_before << '\n'
           end
         end
       end
 
-      # The step labels, read off the project the layer was loaded from; nil store (a spec
-      # calling the formatter bare) falls back to the ids.
-      private def self.refresh_labels(slot : Gori::SessionSlot) : Array(String)
+      # The step labels, read off the project the command opened. Passed in rather than found
+      # through `Env.layer`: that global is whichever table the process installed LAST, which is
+      # not necessarily this project's. nil (a caller with no store) falls back to the ids.
+      private def self.refresh_labels(slot : Gori::SessionSlot, store : Store?) : Array(String)
         return [] of String unless slot.refreshable?
-        store = Gori::Env.layer.as?(Gori::Bindings).try(&.store)
         return slot.refresh.map { |id| id < 0 ? "repeater ##{-id} (deleted)" : "repeater ##{id}" } unless store
         Gori::SessionRefresh.step_labels(store, slot)
       end
 
-      def self.session_slot_json(j : JSON::Builder, slot : Gori::SessionSlot, show_values : Bool) : Nil
+      def self.session_slot_json(j : JSON::Builder, slot : Gori::SessionSlot, show_values : Bool,
+                                 store : Store? = nil) : Nil
         j.object do
           j.field "name", slot.name
           j.field "baseline", slot.baseline?
@@ -781,7 +790,7 @@ module Gori
           j.field("rules") { j.array { slot.rules.each { |n| j.string n } } }
           # Negative = a step whose Repeater session was deleted (it refuses to run).
           j.field("refresh") { j.array { slot.refresh.each { |id| j.number id } } }
-          j.field("refresh_steps") { j.array { refresh_labels(slot).each { |l| j.string l } } }
+          j.field("refresh_steps") { j.array { refresh_labels(slot, store).each { |l| j.string l } } }
           j.field "refresh_before", slot.refresh_before.to_s
         end
       end

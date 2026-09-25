@@ -708,7 +708,12 @@ module Gori
         # carries a `refresh_before` policy re-authenticates before it goes out — in THIS
         # process's table, which is the only one a `gori run` has. Gated as the CLI gates:
         # `Outbound.cli` over the project's scope, never a send's own `--allow-unscoped`.
-        Gori::SessionRefresh::Runner.new(store, layer, -> { Gori::Outbound.cli(Gori::Scope.load(store), false) }).install
+        previous = Gori::SessionRefresh.hook.as?(Gori::SessionRefresh::Runner)
+        runner = Gori::SessionRefresh::Runner.new(store, layer, -> { Gori::Outbound.cli(Gori::Scope.load(store), false) }).install
+        # A refresh that ran on an earlier READ-ONLY open owes History rows and an event; this
+        # open writes them if it can, or carries them to the runner it just installed.
+        previous.try &.hand_over(store, runner)
+        warn_unwritten_refresh_records
         # …and re-select whatever `--slot` chose, because THIS line just replaced the registry
         # holding the pointer. See `reapply_active_slot`.
         reapply_active_slot
@@ -975,6 +980,21 @@ module Gori
       # `activate_slot`, and a later open that cannot honour it (a second `--db` pointing
       # somewhere else) is not a case any command builds today — reporting it here would put
       # a line on STDERR for every internal re-open instead.
+      # Said once at exit when a refresh's records never met a writable store — a command that
+      # only ever read its project. The refresh itself happened; its record did not.
+      @@refresh_exit_note = false
+
+      private def self.warn_unwritten_refresh_records : Nil
+        return if @@refresh_exit_note
+        @@refresh_exit_note = true
+        at_exit do
+          if (r = Gori::SessionRefresh.hook.as?(Gori::SessionRefresh::Runner)) && r.deferred?
+            STDERR.puts "gori run: a session slot refresh ran, but this command never opened the " \
+                        "project for writing, so its History rows and event were not recorded"
+          end
+        end
+      end
+
       private def self.reapply_active_slot : Nil
         return unless name = @@active_slot
         Env.layer.as?(Gori::Bindings).try(&.slots).try(&.activate(name))

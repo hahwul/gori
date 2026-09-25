@@ -203,6 +203,8 @@ module Gori
                      @record_history : Bool = true)
         @states = {} of String => State
         @outcomes = Deque(Outcome).new
+        # Records that could not be written because `@store` is read-only — see `deferred`.
+        @deferred = [] of Proc(Store, Nil)
       end
 
       def layer : Env::Layer
@@ -394,9 +396,49 @@ module Gori
         if (st = @states[outcome.slot]?) && st.auto_off? && !outcome.ok && !outcome.manual
           message += " — automatic refresh is OFF after #{FAILURE_LIMIT} failures until a manual refresh succeeds"
         end
-        @store.insert_event("session", kind, level, message, flow_id: outcome.flow_ids.last?)
+        flow_id = outcome.flow_ids.last?
+        write { |store| store.insert_event("session", kind, level, message, flow_id: flow_id) }
       rescue ex
         ::Log.warn { "session refresh event not recorded: #{ex.message}" }
+      end
+
+      # Run one record against the project now, or hold it until a writable store is handed
+      # over (`hand_over`). A `gori run` command reads its project through a READ-ONLY store,
+      # and a refresh the policy triggers mid-send happens there; the History rows and the
+      # event it owes are written through the next writable store the command opens (the one
+      # that saves the response), rather than dropped.
+      private def write(&block : Store -> Nil) : Nil
+        if @store.read_only?
+          @deferred << block
+        else
+          block.call(@store)
+        end
+      end
+
+      # Whether records are waiting for a writable store.
+      def deferred? : Bool
+        !@deferred.empty?
+      end
+
+      # Hand the waiting records to `store` (writable) or, when it cannot take them either, to
+      # `successor` — the runner a later project open installs. Each record is written once.
+      def hand_over(store : Store, successor : Runner? = nil) : Nil
+        return if @deferred.empty?
+        pending = @deferred.dup
+        @deferred.clear
+        if store.read_only?
+          successor ? successor.adopt(pending) : @deferred.concat(pending)
+          return
+        end
+        pending.each do |rec|
+          rec.call(store)
+        rescue ex
+          ::Log.warn { "session refresh record not written: #{ex.message}" }
+        end
+      end
+
+      protected def adopt(pending : Array(Proc(Store, Nil))) : Nil
+        @deferred.concat(pending)
       end
 
       private def execute(slot : SessionSlot, outbound : Outbound, manual : Bool) : Outcome
@@ -514,8 +556,18 @@ module Gori
                          wire : Bytes, slot : String, n : Int32) : Int64?
         return nil unless @record_history
         surface = FlowSource.surface || FlowSource::Surface::Cli
+        ref = "slot #{slot} step #{n}"
+        if @store.read_only?
+          # No flow id to report: the row is written when the records are handed over.
+          write do |store|
+            Repeater::HistoryRecord.record(store, plan, result, sent_at, wire,
+              surface: surface, kind: FlowSource::Kind::Refresh, source_ref: ref)
+            nil
+          end
+          return nil
+        end
         Repeater::HistoryRecord.record(@store, plan, result, sent_at, wire,
-          surface: surface, kind: FlowSource::Kind::Refresh, source_ref: "slot #{slot} step #{n}")
+          surface: surface, kind: FlowSource::Kind::Refresh, source_ref: ref)
       rescue ex
         ::Log.warn { "session refresh step not recorded in History: #{ex.message}" }
         nil

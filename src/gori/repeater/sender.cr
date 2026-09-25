@@ -302,13 +302,11 @@ module Gori
       # itself (`refresh_slot`), which resolves as its own slot and writes no overlay.
       def wire(bytes : Bytes) : Bytes
         gen = generation
-        if slot = @refresh_slot
-          bytes = expand_send(bytes, gen, slot) if resolve_bindings?
-          return Gori::Env.client_hints(bytes, gen)
-        end
-        Gori::SessionRefresh.before_send(Gori::Env.active_slot_name)
-        bytes = expand_send(bytes, gen) if resolve_bindings?
-        Gori::Env.client_hints(Gori::Env.overlay_slot(bytes, gen), gen)
+        refreshing = @refresh_slot
+        Gori::SessionRefresh.before_send(Gori::Env.active_slot_name) unless refreshing
+        bytes = expand_send(bytes, gen, refreshing) if resolve_bindings?
+        bytes = Gori::Env.overlay_slot(bytes, gen) unless refreshing
+        Gori::Env.client_hints(bytes, gen)
       end
 
       def send(bytes : Bytes) : Result

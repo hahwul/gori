@@ -306,6 +306,37 @@ describe Gori::SessionRefresh do
     end
   end
 
+  it "holds a read-only store's records until a writable store takes them" do
+    with_refresh_env do |_|
+      seen = Seen.new
+      server, port = start_login_origin(seen)
+      path = File.tempname("gori-ro", ".db")
+      rw = Gori::Store.open(path)
+      begin
+        refresh_fixture(rw, port)
+        ro = Gori::Store.open(path, read_only: true)
+        begin
+          bindings = Gori::Bindings.load(ro, Gori::SessionSlots.load(ro))
+          Gori::Env.layer = bindings
+          runner = Gori::SessionRefresh::Runner.new(ro, bindings, -> { ungated_outbound })
+          runner.refresh("admin").ok.should be_true
+          runner.deferred?.should be_true
+          rw.recent_flows(10).should be_empty
+          runner.hand_over(rw)
+          runner.deferred?.should be_false
+          rw.recent_flows(10).compact_map(&.source_ref).sort!.should eq(["slot admin step 1", "slot admin step 2"])
+          rw.events_recent(10).rows.any? { |e| e.kind == "refresh_ok" }.should be_true
+        ensure
+          ro.close
+        end
+      ensure
+        rw.close
+        server.close
+        {path, "#{path}-wal", "#{path}-shm"}.each { |f| File.delete?(f) }
+      end
+    end
+  end
+
   it "is inert once another project's binding table is the layer" do
     with_refresh_env do |store|
       seen = Seen.new
