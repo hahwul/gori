@@ -272,8 +272,10 @@ module Gori
       # This row met the run's separate STOP condition (`StopOn#condition`) — the row that
       # ended, or paused, the sweep. Distinct from `matched?`: the condition is its own
       # match/filter set, independent of the run's matchers, so the row that says "the login
-      # succeeded" can be one `--mc` never selected. Not persisted — a saved run records the
-      # verdict as its `condition_met` status, and the row itself is kept by `interesting?`.
+      # succeeded" can be one `--mc` never selected. Not persisted per row — a saved run
+      # records the verdict as its `condition_met` status and the row that TRIPPED it as
+      # `fuzz_runs.stop_idx` (`DoneEvent#stop_index`), and the row itself is kept by
+      # `interesting?`.
       getter? stop_hit : Bool
 
       # The row carries something the run OBSERVED beyond its metrics: a match, a failed send, a
@@ -426,7 +428,14 @@ module Gori
     # `stop_reason` is set when the run's `stop_on` ended it (`Terminal::ConditionMet`) — a
     # sentence naming what was met, for the finish line every surface prints. `stopped` is
     # then true as well: the engine stopped itself exactly as ^X would.
-    record DoneEvent, progress : Progress, stopped : Bool, stop_reason : String? = nil
+    #
+    # `stop_index` is the `Result#index` of the row that tripped it (issue #1270), set exactly
+    # when `stop_reason` is. The engine is the only place that knows it: an `after_matches`
+    # stop trips on a row whose `stop_hit?` is false, and under concurrency other in-flight
+    # rows can meet the condition after the one that fired, so no surface can derive it from
+    # the rows. Saved runs record it as `fuzz_runs.stop_idx`.
+    record DoneEvent, progress : Progress, stopped : Bool, stop_reason : String? = nil,
+      stop_index : Int64? = nil
     record ErrorEvent, message : String
 
     # Which result rows a run's ARCHIVE keeps — the CLI/MCP saved run and the TUI spool behind

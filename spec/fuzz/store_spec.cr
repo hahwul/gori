@@ -106,6 +106,38 @@ describe "Gori::Store fuzz persistence" do
     end
   end
 
+  it "records the stop row only on a condition_met finish, and only when the archive holds it" do
+    with_store do |store|
+      row = ->(idx : Int64) {
+        Gori::Store::FuzzResultWrite.new(idx, %(["p#{idx}"]), nil, 200, 1_i64, 1, 1, 1_i64,
+          nil, false, false, nil)
+      }
+      met = store.insert_fuzz_run(nil, "http://h", "sniper", 9_i64)
+      store.insert_fuzz_results(met, [row.call(0_i64), row.call(4_i64)]).should be_true
+      store.finish_fuzz_run(met, 5_i64, 0_i64, 0_i64, "condition_met", stop_idx: 4_i64).should be_true
+      store.get_fuzz_run(met).not_nil!.stop_idx.should eq(4_i64)
+      store.fuzz_runs.find! { |r| r.id == met }.stop_idx.should eq(4_i64) # the listing reads it too
+
+      # Any other ending has no stop row, whatever the caller passed.
+      stopped = store.insert_fuzz_run(nil, "http://h", "sniper", 9_i64)
+      store.insert_fuzz_results(stopped, [row.call(0_i64)]).should be_true
+      store.finish_fuzz_run(stopped, 1_i64, 0_i64, 0_i64, "stopped", stop_idx: 0_i64).should be_true
+      store.get_fuzz_run(stopped).not_nil!.stop_idx.should be_nil
+
+      # A pointer at a row this run's archive does not hold is not recorded: it would name
+      # evidence that is not there. (`met` holds an idx 4; that row is not this run's.)
+      missing = store.insert_fuzz_run(nil, "http://h", "sniper", 9_i64)
+      store.insert_fuzz_results(missing, [row.call(0_i64)]).should be_true
+      store.finish_fuzz_run(missing, 4_i64, 0_i64, 0_i64, "condition_met", stop_idx: 4_i64).should be_true
+      store.get_fuzz_run(missing).not_nil!.stop_idx.should be_nil
+
+      # A run finished without one reads nil — "not recorded".
+      plain = store.insert_fuzz_run(nil, "http://h", "sniper", 1_i64)
+      store.finish_fuzz_run(plain, 1_i64, 0_i64, 0_i64, "condition_met").should be_true
+      store.get_fuzz_run(plain).not_nil!.stop_idx.should be_nil
+    end
+  end
+
   it "selects the latest successfully saved run for one session" do
     with_store do |store|
       first_session = store.insert_fuzz_session("http://one", "GET / HTTP/1.1\r\n\r\n",

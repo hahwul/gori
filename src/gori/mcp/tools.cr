@@ -783,6 +783,9 @@ module Gori
         # The sentence naming what the run's `stop_on` met, when `status == :condition_met`;
         # nil otherwise. Reported by `fuzz_status` so an agent reads WHY the run ended early.
         property stop_reason : String? = nil
+        # The `index` of the result that tripped it (`Fuzz::DoneEvent#stop_index`, issue #1270)
+        # — set with `stop_reason`, and what a `save_results` run records as `stop_index`.
+        property stop_index : Int64? = nil
         property sent = 0_i64
         # Requests on the wire (`Fuzz::Progress#requests`): the `max_requests` unit.
         property requests = 0_i64

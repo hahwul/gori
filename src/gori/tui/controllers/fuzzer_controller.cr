@@ -1208,7 +1208,8 @@ module Gori::Tui
         # showing, so it has to be counted where the pane reads.
         shown_rows = event.view.retained_result_count
         shown = shown_rows.to_i64 < run.sent ? " · showing #{shown_rows}" : ""
-        @host.status("loaded fuzz run ##{run.id} · #{run.status} · #{run.mode} · " \
+        stop = FuzzerView.stop_chip(run.stop_idx)
+        @host.status("loaded fuzz run ##{run.id} · #{run.status}#{stop} · #{run.mode} · " \
                      "#{run.sent} results#{shown} · #{run.target}")
       else
         event.view.fail_result_load
@@ -1240,7 +1241,7 @@ module Gori::Tui
         terminal = @host.jobs.errored?(v.job_id) ? "error" : v.terminal_status(ev.progress, ev.stopped, stop_reason: ev.stop_reason)
         spool_run = @spool_runs[v]?
         archive_ready = !!spool_run && !spool_run.failed? && spool_run.finished?
-        v.finish_run(terminal, archive_ready: archive_ready)
+        v.finish_run(terminal, archive_ready: archive_ready, stop_idx: ev.stop_index)
         # A view being CLOSED (`close_at`, `stop_all`) drains its own Done while it is still
         # in `@fuzzers`; its job was already finished `:stopped` by the close, and a "Fuzzer:
         # N hits (stopped)" toast with a jump to a session that no longer exists is not a
@@ -1607,6 +1608,10 @@ module Gori::Tui
       spool_run = @spool_runs[view]? || return
       meta = view.saved_run_meta(session_id)
       sent, matched, errors, status = view.saved_run_counters
+      # The permanent copy is a NEW Persistence, so the stop row is handed across from the view
+      # (`DoneEvent#stop_index`, kept by `finish_run`) — the spool's run row is private and is
+      # deleted once this save lands, so it is not where the permanent run reads it (#1270).
+      stop_idx = view.run_stop_idx
       generation = view.run_generation
       failed_run_id = view.failed_save_run_id
       view.begin_results_save
@@ -1647,7 +1652,7 @@ module Gori::Tui
             completions.send(SaveDone.new(view, generation, job, persisted.run_id,
               persisted.written, "save cancelled while project closed"))
           else
-            ok = persisted.finish(sent, matched, errors, status)
+            ok = persisted.finish(sent, matched, errors, status, stop_idx: stop_idx)
             ok = false unless persisted.written == spool_run.written
             completions.send(SaveDone.new(view, generation, job, persisted.run_id,
               persisted.written, ok ? nil : (persisted.error || "project write failed")))

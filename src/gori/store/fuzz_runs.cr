@@ -3,7 +3,7 @@ require "db"
 module Gori
   class Store
     FUZZ_RUN_COLS = "id, session_id, created_at, finished_at, target, mode, total, sent, matched, errors, status, " \
-                    "http2, sni, tls_preset, websocket, surface, source_ref, snapshot_version, keep"
+                    "http2, sni, tls_preset, websocket, surface, source_ref, snapshot_version, keep, stop_idx"
     FUZZ_RESULT_COLS = "id, run_id, idx, payloads, status, length, words, lines, duration_us, error, matched, " \
                        "extracted, request, response_head, response_body, position, incomplete, retried, " \
                        "chain_error, grpc_status, grpc_message, timed_out, resent_count, wire, " \
@@ -52,13 +52,24 @@ module Gori
 
     # Checked terminal update used by permanent-save surfaces. It succeeds exactly once: only
     # an active run may finish, and true means that one affected row committed.
+    #
+    # `stop_idx` (issue #1270) is the row the run's `stop_on` tripped on. It is recorded only
+    # on a `condition_met` finish and only when that row is in this run's archive, in the same
+    # transaction as the status: a `save_failed` or `stopped` run, or a pointer at a row the
+    # archive does not hold, stores NULL rather than naming evidence that is not there.
     def finish_fuzz_run(id : Int64, sent : Int64, matched : Int64, errors : Int64,
-                        status : String, finished_at : Int64? = now_us) : Bool
+                        status : String, finished_at : Int64? = now_us, *,
+                        stop_idx : Int64? = nil) : Bool
       changed = 0_i64
       committed = exec_task_ok ->(c : DB::Connection) {
-        c.exec("UPDATE fuzz_runs SET sent=?, matched=?, errors=?, status=?, finished_at=? " \
+        stop = stop_idx if status == "condition_met"
+        if idx = stop
+          stop = nil unless c.query_one?("SELECT 1 FROM fuzz_results WHERE run_id = ? AND idx = ? LIMIT 1",
+                              id, idx, as: Int64)
+        end
+        c.exec("UPDATE fuzz_runs SET sent=?, matched=?, errors=?, status=?, finished_at=?, stop_idx=? " \
                "WHERE id=? AND status IN ('running', 'saving')",
-          sent, matched, errors, status, finished_at, id)
+          sent, matched, errors, status, finished_at, stop, id)
         changed = c.scalar("SELECT changes()").as(Int64)
         nil
       }
@@ -448,7 +459,8 @@ module Gori
         rs.read(Int64), rs.read(Int64?), rs.read(Int64), rs.read(Int64?), rs.read(String),
         rs.read(String), rs.read(Int64?), rs.read(Int64), rs.read(Int64), rs.read(Int64),
         rs.read(String), rs.read(Int32) != 0, rs.read(String?), rs.read(String?),
-        rs.read(Int32) != 0, rs.read(String?), rs.read(String?), rs.read(Int32), rs.read(String))
+        rs.read(Int32) != 0, rs.read(String?), rs.read(String?), rs.read(Int32), rs.read(String),
+        rs.read(Int64?))
     end
 
     private def read_fuzz_result(rs : DB::ResultSet) : FuzzResultRecord

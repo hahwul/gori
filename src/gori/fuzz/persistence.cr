@@ -51,6 +51,7 @@ module Gori
         errors : Int64,
         status : String,
         finished_at : Int64,
+        stop_idx : Int64?,
         reply : Channel(Bool)
       private alias Command = Batch | Barrier | Terminal
 
@@ -184,9 +185,14 @@ module Gori
       # FIFO terminal barrier: pending rows are queued behind all accepted batches, then the
       # checked run update executes on the same worker. Repeated finishes return the first
       # outcome and never issue a second terminal update.
+      #
+      # `stop_idx` is `DoneEvent#stop_index`, the row the run's `stop_on` tripped on (issue
+      # #1270). Queued behind every batch, so the row it names is already committed when the
+      # Store checks for it; the Store keeps it only on a `condition_met` finish.
       def finish(sent : Int64, matched : Int64, errors : Int64, status : String,
-                 finished_at : Int64 = Time.utc.to_unix_ms * 1000_i64) : Bool
-        finish_once(sent, matched, errors, status, finished_at)
+                 finished_at : Int64 = Time.utc.to_unix_ms * 1000_i64, *,
+                 stop_idx : Int64? = nil) : Bool
+        finish_once(sent, matched, errors, status, finished_at, stop_idx)
         terminal_success
       end
 
@@ -198,7 +204,7 @@ module Gori
                 reason : String = "fuzz result persistence aborted") : Bool
         return @terminal_committed || false if terminal?
         fail_save(reason)
-        finish_once(sent, matched, errors, "save_failed", finished_at)
+        finish_once(sent, matched, errors, "save_failed", finished_at, nil)
         @terminal_committed || false
       end
 
@@ -393,7 +399,7 @@ module Gori
       end
 
       private def finish_once(sent : Int64, matched : Int64, errors : Int64, status : String,
-                              finished_at : Int64) : Nil
+                              finished_at : Int64, stop_idx : Int64?) : Nil
         return if terminal?
         @terminal_requested = true
         unless @worker_started && enqueue_pending_wait
@@ -401,7 +407,7 @@ module Gori
           return
         end
         reply = Channel(Bool).new(1)
-        unless send_command(Terminal.new(sent, matched, errors, status, finished_at, reply))
+        unless send_command(Terminal.new(sent, matched, errors, status, finished_at, stop_idx, reply))
           @terminal_committed = false
           return
         end
@@ -451,7 +457,7 @@ module Gori
         when Terminal
           terminal = failed? ? "save_failed" : command.status
           committed = @store.finish_fuzz_run(@run_id, command.sent, command.matched,
-            command.errors, terminal, command.finished_at)
+            command.errors, terminal, command.finished_at, stop_idx: command.stop_idx)
           fail_save("the fuzz run summary did not commit") unless committed
           command.reply.send(committed)
           true

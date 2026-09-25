@@ -911,6 +911,9 @@ module Gori::Fuzz
     # the verdict is `Terminal::ConditionMet` rather than `stopped`. A run with no stop_on never
     # touches it, so nothing changes for one.
     @stop_reason : String?
+    # The `Result#index` of that same row (issue #1270), set with `@stop_reason` and nowhere
+    # else, so the two are nil together — see `DoneEvent#stop_index`.
+    @stop_index : Int64?
     @dispatched : Int64
     @last_dispatch : Time::Instant
     @total : Int64?
@@ -936,6 +939,7 @@ module Gori::Fuzz
       @blocked = 0_i64
       @blocked_reason = nil.as(String?)
       @stop_reason = nil.as(String?)
+      @stop_index = nil.as(Int64?)
       @dispatched = 0_i64
       @last_dispatch = Time.instant
       @total = nil.as(Int64?)
@@ -1167,7 +1171,7 @@ module Gori::Fuzz
       @events.send(ErrorEvent.new(ex.message || "fuzz race error"))
     ensure
       @backend.close rescue nil
-      @events.send(DoneEvent.new(snapshot, @state == State::Stopped, @stop_reason))
+      @events.send(DoneEvent.new(snapshot, @state == State::Stopped, @stop_reason, @stop_index))
       @events.close
     end
 
@@ -1188,9 +1192,12 @@ module Gori::Fuzz
       # failures. `resent_count` is 0 on the common path, so a clean run is byte-unchanged; and
       # it never double-counts the final attempt, which is the one the `||` above already saw.
       @errors += result.resent_count
+      # BEFORE the blocking send, with no yield since `@matched` moved: this row's own
+      # increment is the one being judged. After the send another worker could have matched in
+      # between, and an `after_matches` stop then named the earlier row as the Nth (#1270).
+      check_stop_condition(result)
       @events.send(ResultEvent.new(result)) # blocking — never drop a row
       emit_progress
-      check_stop_condition(result)
     end
 
     # End the run when its `stop_on` is met — the separate condition matched this row, or the
@@ -1200,20 +1207,24 @@ module Gori::Fuzz
     # requests finish, so the run does not send a burst after it has already found its answer.
     #
     # `@stop_reason` is set once (the first row to trip it), which is what turns the verdict
-    # into `Terminal::ConditionMet`. `stop_hit?` outranks the count so the reason names the
-    # sharper signal when both hold on the same row.
+    # into `Terminal::ConditionMet`; `@stop_index` names that row, in both branches — the
+    # count branch's row is a plain match with `stop_hit?` false, and it is still the one the
+    # run ended on. `stop_hit?` outranks the count so the reason names the sharper signal when
+    # both hold on the same row.
     private def check_stop_condition(result : Result) : Nil
       return unless @stop_reason.nil?
       # Already stopped with no reason = an operator stop (^X, fuzz_stop) landed first. An
       # in-flight row that meets the condition afterwards must not relabel it `condition_met`.
       return if @state == State::Stopped
       if result.stop_hit?
-        @stop_reason = "stop condition met after #{@sent} sent"
-        stop
+        @stop_reason = "stop condition met on result #{result.index} after #{@sent} sent"
       elsif (n = @config.stop_after_matches) && n > 0 && @matched >= n
-        @stop_reason = "reached #{n} match#{n == 1 ? "" : "es"} after #{@sent} sent"
-        stop
+        @stop_reason = "reached #{n} match#{n == 1 ? "" : "es"} on result #{result.index} after #{@sent} sent"
+      else
+        return
       end
+      @stop_index = result.index
+      stop
     end
 
     private def coordinate : Nil
@@ -1227,7 +1238,7 @@ module Gori::Fuzz
       # means `finalize_job` never runs, pinning the job at `:running` and blocking
       # `switch_project`/`delete_project` for the rest of the session.
       @backend.close rescue nil
-      @events.send(DoneEvent.new(snapshot, @state == State::Stopped, @stop_reason))
+      @events.send(DoneEvent.new(snapshot, @state == State::Stopped, @stop_reason, @stop_index))
     ensure
       # ALWAYS close, on every exit path: closing is what turns the consumer's blocking
       # `receive?` into a nil and lets it finish. `Channel#close` is idempotent.
