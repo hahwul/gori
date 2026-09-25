@@ -73,10 +73,10 @@ By default `gori mcp` advertises every tool, so an agent can reach the whole wor
 
 | Start with | Tools | `tools/list` | Tokens | For |
 | --- | ---: | ---: | ---: | --- |
-| `gori mcp` | 185 | ~219 KB | ~56k | Everything (the default) |
-| `--read-only` | 61 | ~70 KB | ~18k | Read tools and pure compute; no live requests |
-| `--tools=@recon` | 35 | ~52 KB | ~13k | Read and map the capture, replay a request, record issues and notes |
-| `--tools=@recon --read-only` | 27 | ~37 KB | ~10k | `@recon` minus what `--read-only` disables |
+| `gori mcp` | 185 | ~218 KB | ~56k | Everything (the default) |
+| `--read-only` | 62 | ~72 KB | ~18k | Read tools and pure compute; no live requests |
+| `--tools=@recon` | 37 | ~54 KB | ~14k | Read and map the capture, replay a request, record issues and notes |
+| `--tools=@recon --read-only` | 28 | ~39 KB | ~10k | `@recon` minus what `--read-only` disables |
 | `--tools=@minimal` | 17 | ~25 KB | ~6k | Read History, flows and the current TUI context; talk to the operator |
 
 Tokens are bytes ÷ 4, a rough rule for JSON; your client's tokenizer has the final word.
@@ -84,7 +84,7 @@ Tokens are bytes ÷ 4, a rough rule for JSON; your client's tokenizer has the fi
 | Profile | Tools |
 | --- | --- |
 | `@minimal` | `project_info`, `list_projects`, `switch_project`, `create_project`, `ql_reference`, `ql_explain`, `list_history`, `get_flow`, `get_response_body_chunk`, `get_current_context`, `get_repeater_context`, `get_issue`, `list_sitemap`, `intercept_get`, `intercept_list`, `operator_messages`, `reply_to_operator` |
-| `@recon` | `@minimal`, plus `list_scope`, `list_params`, `compare_flows`, `list_env`, `decode`, `jwt_decode`, `jwt_verify`, `probe_issues`, `probe_promote`, `probe_dismiss`, `list_issues`, `list_notes`, `get_note`, `send_request`, `create_issue`, `update_issue`, `create_note`, `update_note` |
+| `@recon` | `@minimal`, plus `list_scope`, `list_params`, `list_js_endpoints`, `scan_js_endpoints`, `compare_flows`, `list_env`, `decode`, `jwt_decode`, `jwt_verify`, `probe_issues`, `probe_promote`, `probe_dismiss`, `list_issues`, `list_notes`, `get_note`, `send_request`, `create_issue`, `update_issue`, `create_note`, `update_note` |
 
 A profile is a fixed list of names, not a glob, so a later gori that adds a `list_*` tool does not quietly grow `@recon`. Both keep `switch_project` and `create_project`, so they work on an unbound start, even on a machine with no project yet.
 

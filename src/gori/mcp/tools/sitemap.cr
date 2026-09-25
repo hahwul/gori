@@ -23,6 +23,7 @@ module Gori
           return fts_error
         end
         return collapsed_sitemap(filter, limit, offset) if bool_arg(h, "collapse_transport", false)
+        unrequested = bool_arg(h, "include_unrequested", false)
         # One row OVER the page, then dropped: `has_more` costs a row instead of a second
         # COUNT(*) over the same GROUP BY. Without it a full page and an exactly-full set are
         # the same answer, and this tool — unlike list_history — has no id cursor an agent
@@ -42,6 +43,10 @@ module Gori
             j.field "offset", offset
             j.field "limit", limit
             j.field "has_more", has_more
+            # Endpoints captured JavaScript references and no request reached (#1243). NOT
+            # entries: an entry is a captured transport key with counts, and these have none —
+            # mixing them in would also make `has_more`/`offset` page two different things.
+            emit_unrequested(j) if unrequested
             j.field "entries" do
               j.array do
                 entries.each do |e|
@@ -115,7 +120,9 @@ module Gori
             j.field "tag", tag.presence
             j.field "cleared", tag.empty?
             j.field "matches_endpoint", matched
-            if matched == false && !tag.empty?
+            if matched == false && !tag.empty? && js_ref_node?(host, path)
+              j.field "warning", "no captured endpoint at #{host}#{path} — the tag shows on its JavaScript-referenced node (the TUI Sitemap, `gori run sitemap --js-refs`), not in list_sitemap entries"
+            elsif matched == false && !tag.empty?
               j.field "warning", "no captured endpoint at #{host}#{path} — this tag will not show in list_sitemap or the TUI until one exists (check for a typo or a trailing slash)"
             elsif matched.nil? && !tag.empty?
               j.field "warning", "tag stored, but there are more than #{Store::SITEMAP_MAX} captured endpoints so it could not be confirmed against one — check with list_sitemap"
@@ -155,6 +162,13 @@ module Gori
         entries = store.sitemap_entries_detailed(QL::EMPTY, Store::SITEMAP_MAX)
         return true if entries.any? { |e| e.host == host && sitemap_tag_path(e.target) == path }
         entries.size >= Store::SITEMAP_MAX ? nil : false
+      end
+
+      # Whether captured JavaScript references this node (#1243): the tree then draws it as an
+      # unrequested node a tag stamps onto. Its key is query-less, so a path with a query never is.
+      private def js_ref_node?(host : String, path : String) : Bool
+        return false if path.includes?('?')
+        !store.js_ref_sightings(host: host, path: path, limit: 1).empty?
       end
 
       # A sitemap tag's key is the exact node path the tree stamps. `node_path` shares its
@@ -570,6 +584,7 @@ module Gori
           s.field "fold_query", boolprop("fold the query-string variants of one path into a single entry (default true); false lists one entry per query string")
           s.field "collapse_transport", boolprop("collapse to distinct host/method/target only (legacy shape), dropping scheme/port/version + counts (default false)")
           s.field "hide_static", boolprop("leave out static assets — images, fonts, audio/video (not svg/css/js, never a status >= 400); the TUI's hide-static lens, same as `-static:true` in `query`. Default false")
+          s.field "include_unrequested", boolprop("add `unrequested`: endpoints captured JavaScript references that no request reached (up to #{UNREQUESTED_MAX}; `unrequested_total` says how many), from what scan_js_endpoints stored. Not filtered by `query` — a reference is not a flow. Default false")
           s.field "strict", boolprop("reject the query if any term is unrecognized/invalid instead of silently dropping it (default false)")
           s.field "lenient", boolprop("search a `field:` QL does not implement as literal TEXT instead of refusing the query (default false). A typo like `methd:GET` free-texts its whole token and therefore matches nothing, which is indistinguishable from an empty project — so it is refused by default, the way `gori run history --lenient` spells the same escape hatch. `strict` is the other half and covers dropped terms, not unknown fields")
         end

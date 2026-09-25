@@ -73,10 +73,10 @@ gori mcp --read-only
 
 | 시작 방법 | 도구 | `tools/list` | 토큰 | 용도 |
 | --- | ---: | ---: | ---: | --- |
-| `gori mcp` | 185 | ~219 KB | ~56k | 전부 (기본값) |
-| `--read-only` | 61 | ~70 KB | ~18k | 읽기 도구와 순수 연산; 실제 요청 전송 없음 |
-| `--tools=@recon` | 35 | ~52 KB | ~13k | 캡처를 읽고 파악, 요청 재전송, 이슈·노트 기록 |
-| `--tools=@recon --read-only` | 27 | ~37 KB | ~10k | `--read-only`가 끄는 도구를 뺀 `@recon` |
+| `gori mcp` | 185 | ~218 KB | ~56k | 전부 (기본값) |
+| `--read-only` | 62 | ~72 KB | ~18k | 읽기 도구와 순수 연산; 실제 요청 전송 없음 |
+| `--tools=@recon` | 37 | ~54 KB | ~14k | 캡처를 읽고 파악, 요청 재전송, 이슈·노트 기록 |
+| `--tools=@recon --read-only` | 28 | ~39 KB | ~10k | `--read-only`가 끄는 도구를 뺀 `@recon` |
 | `--tools=@minimal` | 17 | ~25 KB | ~6k | History와 flow, 현재 TUI 컨텍스트를 읽고 오퍼레이터와 대화 |
 
 토큰은 바이트 ÷ 4로 잡은 JSON 어림값이며, 실제 값은 클라이언트의 토크나이저가 정합니다.
@@ -84,7 +84,7 @@ gori mcp --read-only
 | 프로필 | 도구 |
 | --- | --- |
 | `@minimal` | `project_info`, `list_projects`, `switch_project`, `create_project`, `ql_reference`, `ql_explain`, `list_history`, `get_flow`, `get_response_body_chunk`, `get_current_context`, `get_repeater_context`, `get_issue`, `list_sitemap`, `intercept_get`, `intercept_list`, `operator_messages`, `reply_to_operator` |
-| `@recon` | `@minimal`에 더해 `list_scope`, `list_params`, `compare_flows`, `list_env`, `decode`, `jwt_decode`, `jwt_verify`, `probe_issues`, `probe_promote`, `probe_dismiss`, `list_issues`, `list_notes`, `get_note`, `send_request`, `create_issue`, `update_issue`, `create_note`, `update_note` |
+| `@recon` | `@minimal`에 더해 `list_scope`, `list_params`, `list_js_endpoints`, `scan_js_endpoints`, `compare_flows`, `list_env`, `decode`, `jwt_decode`, `jwt_verify`, `probe_issues`, `probe_promote`, `probe_dismiss`, `list_issues`, `list_notes`, `get_note`, `send_request`, `create_issue`, `update_issue`, `create_note`, `update_note` |
 
 프로필은 글롭이 아니라 고정된 이름 목록이므로, 이후 버전이 `list_*` 도구를 추가해도 `@recon`이 조용히 커지지 않습니다. 둘 다 `switch_project`와 `create_project`를 포함하므로, 프로젝트가 하나도 없는 머신에서 바인딩 없이 시작해도 동작합니다.
 

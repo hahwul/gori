@@ -67,6 +67,7 @@ require "./tools/scope"
 require "./tools/send"
 require "./tools/sequence"
 require "./tools/sitemap"
+require "./tools/js_refs"
 
 module Gori
   module MCP
@@ -1151,6 +1152,7 @@ module Gori
           list_compare_tools j
           list_diff_tools j
           list_sitemap_tools j
+          list_js_refs_tools j
           list_issues_tools j
           list_probe_tools j
           list_oast_providers_tools j

@@ -72,7 +72,7 @@ module Gori
       #
       # Finding triage is recording, so `probe_promote` / `probe_dismiss` ride with the issue
       # writes; `probe_delete` does not — it erases the scanner's record rather than judging it.
-      RECON = MINIMAL + %w[list_scope list_params compare_flows list_env
+      RECON = MINIMAL + %w[list_scope list_params list_js_endpoints scan_js_endpoints compare_flows list_env
         decode jwt_decode jwt_verify
         probe_issues probe_promote probe_dismiss list_issues list_notes get_note
         send_request create_issue update_issue create_note update_note]

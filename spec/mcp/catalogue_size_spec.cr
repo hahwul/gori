@@ -72,6 +72,7 @@ private INCIDENTAL = {
   "list_env -> send_websocket"              => "names where env tokens are substituted",
   "send_request -> send_websocket"          => "only for a WebSocket repeater id; @recon replays HTTP",
   "list_params -> mine_start"               => "says where the names can feed; @recon maps a target, it does not mine",
+  "list_sitemap -> scan_js_endpoints"       => "says where the optional unrequested block comes from; @minimal only reads",
 }
 
 private def table_cells(line : String) : Array(String)
