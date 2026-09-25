@@ -412,14 +412,17 @@ describe Gori::SessionRefresh do
       seen = Seen.new
       server, port = start_login_origin(seen)
       begin
-        _, _, slots, csrf, _ = refresh_fixture(store, port, Policy.parse?("ttl=10m").not_nil!)
-        slots.find("admin").not_nil!.refresh.first.should eq(csrf)
-        # Deleted on disk only; this process's cached list still names the positive id, and
-        # the next tab takes it.
-        store.delete_repeater(csrf).should be_true
-        store.insert_repeater("http://127.0.0.1:#{port}", "GET /unrelated HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 5)
+        _, _, slots, _, login = refresh_fixture(store, port, Policy.parse?("ttl=10m").not_nil!)
+        # Deleted on disk only: this process's cached list still names the positive id. The
+        # login is the HIGHEST id, so the next tab takes it (`repeaters.id` has no AUTOINCREMENT).
+        store.delete_repeater(login).should be_true
+        reused = store.insert_repeater("http://127.0.0.1:#{port}", "GET /unrelated HTTP/1.1\r\n\r\n".to_slice,
+          false, true, nil, 5)
+        reused.should eq(login)
+        slots.find("admin").not_nil!.refresh.last.should eq(login)
         Gori::SessionRefresh.before_send("admin")
-        seen.paths.should be_empty
+        # Step 1 ran; step 2 refused as deleted instead of replaying the unrelated tab.
+        seen.paths.should eq(["/csrf"])
       ensure
         server.close
       end
