@@ -230,6 +230,7 @@ describe "the shipped key set boots clean on every OS profile" do
     r = Gori::Verbs.registry
     r.validate_menu_keys!
     r.validate_chords!
+    r.validate_intents!
   end
 
   it "resolves the same effective chords on macOS, Linux and Windows" do

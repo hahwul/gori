@@ -76,6 +76,27 @@ module Gori
         end
       end
 
+      # Fail fast on a space-menu letter that breaks the intent lexicon (`Verb::Lexicon`,
+      # #1274). Only the rules with no exceptions live here; the reserved-letter sweep, which
+      # needs judgement, is `spec/verb/lexicon_spec.cr`.
+      #   • An intent must be in the lexicon, and a verb with one must not spell a mnemonic
+      #     as well: the lexicon is where its letter comes from, so a second spelling is
+      #     either redundant or the drift the table exists to stop.
+      def validate_intents! : Nil
+        each do |v|
+          if intent = v.intent
+            unless Lexicon::ENTRIES.has_key?(intent)
+              raise Gori::Error.new("unknown intent #{intent.inspect} on #{v.id} (add it to Verb::Lexicon)")
+            end
+            if m = v.mnemonic
+              raise Gori::Error.new(
+                "#{v.id} declares intent #{intent.inspect} (menu '#{Lexicon.letter(intent)}') and " \
+                "mnemonic '#{m}' — an intent verb takes its letter from Verb::Lexicon")
+            end
+          end
+        end
+      end
+
       # Fail fast on a same-scope CHORD collision, the keybinding sibling of
       # #validate_menu_keys!. Keymap.build is a plain hash assignment per scope, so a
       # second verb claiming a chord SILENTLY SHADOWS the first — the shadowed binding

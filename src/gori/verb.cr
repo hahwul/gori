@@ -167,13 +167,18 @@ module Gori
       # is what makes them scannable. Defaults to :none, which renders exactly as
       # before (no header, no subdivision), so an untagged scope is unchanged.
       getter group : Symbol
+      # The recurring intent this verb answers (`Verb::Lexicon`), which fixes its space-menu
+      # letter: `:filter` is `/` on every tab that has one. A verb with an intent does not
+      # spell a `mnemonic:` as well (`Registry#validate_intents!`). Nil for a scope-local
+      # action, whose letter stays its own mnemonic or chord.
+      getter intent : Symbol?
 
       def initialize(@id : String, @title : String, @description : String, @scope : Scope,
                      @chords : Array(Chord) = [] of Chord, @hidden : Bool = false,
                      @available : ExecContext -> Bool = ->(_ctx : ExecContext) { true },
                      @coming_soon : Bool = false, @category : Category = Category::Action,
                      @mnemonic : Char? = nil, @section : Symbol = :common,
-                     @group : Symbol = :none,
+                     @group : Symbol = :none, @intent : Symbol? = nil,
                      &@handler : ExecContext -> String?)
       end
 
@@ -181,13 +186,16 @@ module Gori
         @available.call(ctx)
       end
 
-      # The key the space menu shows + binds: an explicit mnemonic, else the first
-      # plain single-char chord (no ctrl/alt/shift), else nil (verb is excluded
-      # from the menu — it has no single-key handle). Hidden nav chords like
-      # "enter"/"left"/"space" are multi-char names, so they never qualify.
+      # The key the space menu shows + binds: an explicit mnemonic, else the intent's
+      # lexicon letter, else the first plain single-char chord (no ctrl/alt/shift), else
+      # nil (verb is excluded from the menu — it has no single-key handle). Hidden nav
+      # chords like "enter"/"left"/"space" are multi-char names, so they never qualify.
       def menu_key : Char?
         if m = @mnemonic
           return m
+        end
+        if (i = @intent) && (l = Lexicon.letter(i))
+          return l
         end
         @chords.each do |c|
           next if c.ctrl || c.alt || c.shift
@@ -205,6 +213,7 @@ module Gori
 end
 
 require "./verb/registry"
+require "./verb/lexicon"
 require "./verb/os_profile"
 require "./verb/keyset"
 require "./verb/keymap"
