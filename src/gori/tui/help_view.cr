@@ -256,7 +256,7 @@ module Gori::Tui
         Item.new("^B", "reveal whitespace"),
       ]},
       {"OTHER TABS", [
-        Item.new("Sitemap", "↑/↓ · {sitemap.query} filter · ↵/→ expand · {sitemap.mark-toggle} mark · {sitemap.mark-all} all · {sitemap.toggle-grouping} fold · {scope.toggle-lens} scope · space → m tag · space → J scan JS"),
+        Item.new("Sitemap", "↑/↓ · {sitemap.query} filter · ↵/→ expand · {sitemap.mark-toggle} mark · {sitemap.mark-all} all · {sitemap.toggle-grouping} fold · {scope.toggle-lens} scope · space → m tag · space → J js"),
         # `⇧X clear` sits in the LIST half, where the chord fires — and it is on this row at all
         # for the reason the Probe and Authorize rows carry theirs: a wipe has to be named where
         # it can be read before it is pressed. Marks make that sharper here than anywhere else,

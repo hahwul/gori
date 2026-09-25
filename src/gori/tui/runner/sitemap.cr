@@ -214,7 +214,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
                "a bare GET for a path only JavaScript names — nothing sent; ^R sends it"
              end
   rescue ex : Gori::Error
-    @toast = "cannot build a request for that reference: #{ex.message}"
+    @toast = "can't build a request for that reference: #{ex.message}"
   end
 
   # Batch over the marks: one Repeater sub-tab per marked endpoint, capped (BATCH_SUBTAB_CAP)
