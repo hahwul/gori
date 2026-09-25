@@ -206,7 +206,7 @@ exactly as before, and Help names the route: the key, or `^P → <name>` for an 
 | Comparer | Next change · Previous change | `⇧N` · `⇧P` |
 | Decoder | Save chain by name · Load a saved chain · Cycle output mode | `Ctrl-S` · `Ctrl-O` · `Ctrl-X` |
 | Issue detail | Edit title/severity · Retest… | `t` · `⇧R` |
-| Issue detail | Raise severity | palette (**Lower severity** keeps `Space` `-`) |
+| Issue detail | Raise severity · Lower severity | palette (**Set severity** keeps `Space` `s`) |
 | Rewriter · Colormarker | Move up · Move down | `⇧K` · `⇧J` |
 | Rewriter · Colormarker | Reload rules | palette |
 | Discover | Previous run · Next run | palette |

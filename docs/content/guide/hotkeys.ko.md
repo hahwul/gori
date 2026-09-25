@@ -197,7 +197,7 @@ space 메뉴는 자주 누르는 것을 위한 곳이고, 드물게 쓰는 것�
 | Comparer | Next change · Previous change | `⇧N` · `⇧P` |
 | Decoder | Save chain by name · Load a saved chain · Cycle output mode | `Ctrl-S` · `Ctrl-O` · `Ctrl-X` |
 | 이슈 상세 | Edit title/severity · Retest… | `t` · `⇧R` |
-| 이슈 상세 | Raise severity | 팔레트 (**Lower severity**는 `Space` `-` 그대로) |
+| 이슈 상세 | Raise severity · Lower severity | 팔레트 (**Set severity**는 `Space` `s` 그대로) |
 | Rewriter · Colormarker | Move up · Move down | `⇧K` · `⇧J` |
 | Rewriter · Colormarker | Reload rules | 팔레트 |
 | Discover | Previous run · Next run | 팔레트 |

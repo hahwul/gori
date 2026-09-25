@@ -3851,7 +3851,7 @@ the palette's search finds it from its own tab. The default stays `:space`.
 - **The criterion.** A row goes to the palette when it only repeats a direct chord for an
   editing or navigation convenience (Mark word `^K`, Decoder Save/Load `^S`/`^O`, a rule
   list's reorder `⇧K`/`⇧J`), or when it is a once-a-session configuration action (Minimize
-  request, Use as refresh for slot…, Change prefix). The first set is 36 verbs; the busiest
+  request, Use as refresh for slot…, Change prefix). The first set is 37 verbs; the busiest
   views drop to 25 and 22 rows.
 - **Nothing else changes about the verb.** Its chords fire as before, it runs through
   `Definition#call`, and its `available?` gate is the palette's too. It keeps its `intent`:

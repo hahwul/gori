@@ -88,11 +88,13 @@ describe "hint templates — space-menu letters come from the registry" do
     hits.should be_empty
   end
 
-  it "leaves no literal `space → <key>` in a string" do
-    # One key, then anything that is not part of a word: `space → t`, `space → k/j`, `space → /`.
-    # A title (`space → Mine`), a quoted one (`space → "Discover here"`) or an interpolation
-    # (Hotkeys.menu_path's own `space → #{key}`, the one place a path is spelled) is not a letter.
-    literal = /space → (?!#\{)[^\s\w"\\…]|space → \w(?!\w)/
+  it "leaves no literal `space → <key>` (or `space ▸ <key>`) in a string" do
+    # One key, then anything that is not part of a word: `space → t`, `space → k/j`, `space → /`,
+    # and the same after `▸`, which the Repeater's %%% refusal once spelled `space ▸ g` in.
+    # A title (`space → Mine`, `space ▸ SUB-TABS`), a quoted one (`space → "Discover here"`) or
+    # an interpolation (Hotkeys.menu_path's own `space → #{key}`, the one place a path is
+    # spelled) is not a letter.
+    literal = /space [→▸] (?!#\{)[^\s\w"\\…]|space [→▸] \w(?!\w)/
     hits = lines.select { |(_, _, line)| line.matches?(literal) }
       .map { |(file, n, line)| "#{file}:#{n}: #{line.strip}" }
     hits.should be_empty

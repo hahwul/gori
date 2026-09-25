@@ -142,14 +142,16 @@ class Gori::Tui::RepeaterView
   # Scoped to auto-CL ON, because that is exactly when gori has written a number of its
   # own. With `^L` off the pane, `^R` and `g` all carry the operator's numbers unchanged,
   # nothing is invented, and a literal `%%%` line in a body stays expressible — which is
-  # why the message names `^L` as the second remedy and not just `space ▸ g`.
+  # why the message names `^L` as the second remedy and not just Send group. The route to Send
+  # group is a `{space:…}` token: the view has no registry, so the controller that surfaces the
+  # refusal expands it (`RepeaterController#chain_refusal`) and the letter is never typed here.
   #
   # An EVIDENCE buffer whose capture merely CONTAINS `%%%` never reaches this: its separator
   # is not live (see `pipeline_live?`), nothing chunks, and `^R` sends it byte-exact.
   private def group_framing_refusal : String?
     return nil unless chunked_reflection?(@editor.wire_lines)
     "request holds a %%% separator, so its Content-Length describes the first request only — " \
-    "space ▸ g sends the group on one connection, or turn ^L off to send the buffer whole as one request"
+    "{space:repeater.send-group} sends the group on one connection, or turn ^L off to send the buffer whole as one request"
   end
 
   # Is the visible head carrying CHUNK-scoped Content-Lengths? The single predicate behind
