@@ -63,7 +63,7 @@ module Gori
       r.register Verb::Definition.new(
         "sequence.promote", "File as issue", "Record this randomness verdict in the Issues report (no token values)",
         Verb::Scope::Sequencer, [] of Verb::Chord, available: has_report,
-        mnemonic: 'i') { |ctx| ctx.sequence_promote; nil }
+        intent: :file_issue) { |ctx| ctx.sequence_promote; nil }
 
       # The strip's `r` rename / ^W close. `Runner#renameable_subtabs?` and `#subtab_close`
       # have listed :sequencer all along, but with no verbs this tab had NO `:subtab` menu

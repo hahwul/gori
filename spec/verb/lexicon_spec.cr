@@ -48,7 +48,6 @@ module LexiconSpec
     "history.delete" => "WP2 #1: the list's `d` is Discover until Discover moves into Send flow to…",
     "detail.delete"  => "WP2 #1: `D` until the detail's `d` is free",
     "mine.filter"    => "the strip owns `/` in every Miner view since #1055; the table filter is `F`",
-    "params.export"  => "menu `w`, moving to `E`",
   }
 
   # {verb, other} pairs where a reserved letter is spent on a different intent in a scope that

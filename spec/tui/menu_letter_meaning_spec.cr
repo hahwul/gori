@@ -191,12 +191,9 @@ MENU_LETTER_ALLOWED = {
   {"jwt.copy-attack", "capture.toggle"}       => "Decision 10: `c` reaches Global capture on a dropped space",
   {"rewriter.duplicate", "capture.toggle"}    => "Decision 10: `c` reaches Global capture on a dropped space",
   {"colormarker.duplicate", "capture.toggle"} => "Decision 10: `c` reaches Global capture on a dropped space",
-  {"sequence.promote", "intercept.toggle"}    => "Decision 10: file-issue is `a` elsewhere; `i` holds all traffic on a dropped space",
   {"diff.issue", "intercept.toggle"}          => "Decision 10: file-issue is `a` elsewhere; `i` holds all traffic on a dropped space",
   # The Editor scope answers ahead of the tab while a text editor pane has focus.
-  {"repeater.insert-marker", "editor.insert"} => "Editor: `i` enters insert in the request pane",
-  {"fuzz.insert-marker", "editor.insert"}     => "Editor: `i` enters insert in the template pane",
-  {"fuzz.toggle-sni", "editor.insert"}        => "Editor: `i` enters insert in the target pane; SNI moves into Protocol…",
+  {"fuzz.toggle-sni", "editor.insert"} => "Editor: `i` enters insert in the target pane; SNI moves into Protocol…",
   # vim keyset only: ⇧V is select-line and the editor gains bare `/` `a` `g` `⇧G`.
   {"repeater.toggle-decoded", "repeater.select-line"} => "vim: ⇧V selects a line; the envelope toggle moves into Display…",
   {"issue.set-cvss", "issue.select-line"}             => "vim: ⇧V selects a line",

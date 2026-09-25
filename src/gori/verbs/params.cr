@@ -46,7 +46,8 @@ module Gori
 
       r.register Verb::Definition.new(
         "params.export", "Export wordlist", "Write the listed names to a wordlist file (for Miner / Fuzzer)",
-        Verb::Scope::Params, [Verb::Chord.new("w")], available: rows_shown, group: :copy) { |ctx| ctx.params_export; nil }
+        # The key stays `w` (write); the menu says `E`, the lexicon's Export (#1274).
+        Verb::Scope::Params, [Verb::Chord.new("w")], available: rows_shown, group: :copy, intent: :export) { |ctx| ctx.params_export; nil }
 
       # `↵`/`→`, the alias pair every "open what the cursor is on" verb uses (see
       # diff.to-comparer for why a lone `enter` cannot be the only chord).

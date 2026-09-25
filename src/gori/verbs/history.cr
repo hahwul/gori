@@ -384,7 +384,8 @@ module Gori
       # (insert/mark/auto/clear/attach), THEN the view toggles (hex/decoded/pretty) below.
       r.register Verb::Definition.new(
         "repeater.insert-marker", "Insert marker", "Drop a single § at the cursor to bracket a region by hand",
-        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'i', section: :request) { |ctx| ctx.repeater_insert_marker; nil }
+        # `I`, not `i`: in this editor pane `i` enters INSERT before the menu is ever asked.
+        Verb::Scope::Repeater, available: in_repeater, intent: :insert_marker, section: :request) { |ctx| ctx.repeater_insert_marker; nil }
       # ^K, matching the Fuzzer's. The two panes are the same editor over the same template
       # grammar, and this was the one marker action reachable in one and not the other —
       # the Repeater had it on the space menu alone while the Fuzzer had it on a chord.
@@ -858,7 +859,7 @@ module Gori
       r.register Verb::Definition.new(
         "fuzz.insert-marker", "Insert marker", "Drop a single § at the cursor to bracket a region by hand",
         Verb::Scope::Fuzzer, [Verb::Chord.new("t", ctrl: true)],
-        available: in_fuzzer, mnemonic: 'i', section: :template) { |ctx| ctx.fuzz_insert_marker; nil }
+        available: in_fuzzer, intent: :insert_marker, section: :template) { |ctx| ctx.fuzz_insert_marker; nil }
       r.register Verb::Definition.new(
         "fuzz.attach-chain", "Edit decoder chain", "Focus the CHAIN pane to edit the encode/decode chain of the marker at the cursor (applied to each payload on send)",
         Verb::Scope::Fuzzer, [Verb::Chord.new("q", ctrl: true)], # ^Y → Copy; see repeater.attach-chain
