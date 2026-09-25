@@ -57,6 +57,7 @@ require "./tools/oast_providers"
 require "./tools/oast_sessions"
 require "./tools/probe"
 require "./tools/projects"
+require "./tools/project_archive"
 require "./tools/ql"
 require "./tools/repeater"
 require "./tools/rules"
@@ -1169,6 +1170,7 @@ module Gori
           list_color_rules_tools j
           list_saved_views_tools j
           list_projects_tools j
+          list_project_archive_tools j
           list_scope_tools j
           list_import_tools j
           list_send_tools j

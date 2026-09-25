@@ -45,7 +45,7 @@ gori mcp --no-project              # force unbound even inside a Git workspace
 
 **Git 워크스페이스 밖**에서 뜨면(AI 클라이언트가 홈·앱 디렉터리에서 MCP를 띄우는 흔한 경우) 서버는 **unbound**로 시작합니다. MCP 핸드셰이크와 도구 목록은 바로 성공하지만, 트래픽 도구(`list_history`, `send_request` 등)는 에이전트가 `list_projects`, `create_project`(unbound일 때 자동 바인딩), 또는 `switch_project`를 호출하기 전까지 `NO_PROJECT`를 반환합니다. unbound는 활성 TUI/MRU 프로젝트를 슬그머니 열지 않습니다. 그건 명시적 `--use-active-project` 옵트인(또는 `--project` / `--db` / `GORI_MCP_PROJECT` / `GORI_MCP_DB`)이 필요합니다.
 
-프로젝트가 없어도 동작하는 도구 계열이 몇 가지 있습니다. 프로젝트 관리(`project_info`, `list_projects`, `create_project`, `switch_project`, `delete_project`, `diff_projects`), 순수 계산 헬퍼(`decode`, `jwt_*`, `cookie_*`, `sequence_analyze`), 쿼리 언어 레퍼런스(`ql_reference`, `ql_explain`), 그리고 즉석 OAST 리스너(`oast_presets`, `oast_payload`, `oast_start`, `oast_stop`, `oast_poll`)입니다. 그 밖의 도구는 저장된 세션을 다루는 `oast_resume` / `oast_release`까지 포함해, 프로젝트가 바인딩되기 전까지 `NO_PROJECT`를 반환합니다.
+프로젝트가 없어도 동작하는 도구 계열이 몇 가지 있습니다. 프로젝트 관리(`project_info`, `list_projects`, `create_project`, `switch_project`, `delete_project`, `export_project`, `import_project`, `diff_projects`), 순수 계산 헬퍼(`decode`, `jwt_*`, `cookie_*`, `sequence_analyze`), 쿼리 언어 레퍼런스(`ql_reference`, `ql_explain`), 그리고 즉석 OAST 리스너(`oast_presets`, `oast_payload`, `oast_start`, `oast_stop`, `oast_poll`)입니다. 그 밖의 도구는 저장된 세션을 다루는 `oast_resume` / `oast_release`까지 포함해, 프로젝트가 바인딩되기 전까지 `NO_PROJECT`를 반환합니다.
 
 **선택된 프로젝트를 열 수 없으면**(데이터베이스가 없거나 깨졌거나 읽을 수 없을 때, 프로젝트 이름이 더 이상 존재하지 않을 때) 서버는 종료하지 않고 핸드셰이크를 마친 뒤 unbound로 시작합니다. 실패 이유는 stderr에 기록되고, 핸드셰이크 `instructions`에 실리며, 모든 `NO_PROJECT` 도구 오류에 함께 반환되고, `project_info`의 `bind_error` 필드로도 보고됩니다. 에이전트는 재시작 없이 `list_projects`와 `switch_project`로 복구할 수 있습니다.
 
@@ -73,7 +73,7 @@ gori mcp --read-only
 
 | 시작 방법 | 도구 | `tools/list` | 토큰 | 용도 |
 | --- | ---: | ---: | ---: | --- |
-| `gori mcp` | 183 | ~222 KB | ~56k | 전부 (기본값) |
+| `gori mcp` | 185 | ~219 KB | ~56k | 전부 (기본값) |
 | `--read-only` | 61 | ~70 KB | ~18k | 읽기 도구와 순수 연산; 실제 요청 전송 없음 |
 | `--tools=@recon` | 35 | ~52 KB | ~13k | 캡처를 읽고 파악, 요청 재전송, 이슈·노트 기록 |
 | `--tools=@recon --read-only` | 27 | ~37 KB | ~10k | `--read-only`가 끄는 도구를 뺀 `@recon` |
@@ -227,6 +227,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `delete_flow` / `clear_history` | 플로우 하나 삭제, 또는 캡처된 History 전체 삭제 |
 | `set_sitemap_tag` | Sitemap 경로에 자유 형식 메모 고정 |
 | `create_project` / `switch_project` / `delete_project` | 프로젝트 생성 또는 다시 열기, 이 서버를 다른 프로젝트로 전환, 프로젝트 삭제. 삭제는 2단계로, `dry_run` 후 확인 토큰 필요 |
+| `export_project` / `import_project` | 프로젝트를 이식 가능한 [`.gori` 아카이브](/ko/guide/proxy/#project-archives)로 쓰거나, 아카이브를 새 프로젝트로 가져옵니다. `gori run project export` / `import`와 같은 엔진을 씁니다. 두 경로 모두 MCP 서버의 파일시스템 기준입니다. 내보내기는 `project`로 다른 프로젝트를 지정하지 않으면 바인딩된 프로젝트를 쓰고, `overwrite:true` 없이는 기존 파일을, gori 홈 디렉터리 안의 경로는 항상 거부하며, 결과에 아카이브가 마스킹되지 않았다고 밝힙니다. 가져오기는 `confirm:true` 전까지 아카이브의 인벤토리, 공개 문구, 이름 사용 가능 여부를 담아 `CONFIRM_REQUIRED`로 답하고, 같은 가져오기 안전 조치(실행형·파일 기반 규칙 비활성화, 프로젝트 라우팅 초기화, 2 GiB 상한)를 적용하며, 새 프로젝트로 전환하지는 않습니다 |
 | `add_scope_rule` / `update_scope_rule` / `delete_scope_rule` / `set_scope_enabled` | 프로젝트의 include / exclude 규칙 편집과 스코프 렌즈 토글 |
 | `set_sandbox` | 하드 컨테인먼트. 켜면 프록시가 스코프가 허용한 것만 전달하고 나머지는 차단 |
 | `set_env_var` / `delete_env_var` | 치환이 읽는 프로젝트 env 토큰 관리. 키는 bare로 저장되며, 참조는 `$ENV.KEY`로, `bare` 옵트아웃에서는 `$KEY`로 씁니다. 이 설치가 어느 쪽인지는 `list_env`의 `syntax` / `example`이 말해 줍니다 |

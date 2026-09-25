@@ -396,6 +396,9 @@ module Gori
                       "#{ProjectArchive.disclosure(prepared.inventory)}"
           destination = begin
             prepared.write(output_path, overwrite: force)
+          rescue ex : ProjectArchive::DestinationExists
+            prepared.close
+            abort "gori run project export: #{ex.message} (use --force to replace it)"
           rescue ex : Gori::Error
             prepared.close
             abort "gori run project export: #{ex.message}"

@@ -45,7 +45,7 @@ With no explicit selector, gori discovers the nearest Git root and binds its can
 
 **Outside a Git workspace** (the common case when an AI client spawns MCP from a home or app directory), the server starts **unbound**: the MCP handshake and tool list succeed immediately, but traffic tools (`list_history`, `send_request`, …) return `NO_PROJECT` until the agent calls `list_projects`, `create_project` (auto-binds when unbound), or `switch_project`. Unbound mode never silently opens the active TUI or MRU project; that requires the explicit `--use-active-project` opt-in (or `--project` / `--db` / `GORI_MCP_PROJECT` / `GORI_MCP_DB`).
 
-A few tool families never need a project and work unbound: project management (`project_info`, `list_projects`, `create_project`, `switch_project`, `delete_project`, `diff_projects`), the pure-compute helpers (`decode`, `jwt_*`, `cookie_*`, `sequence_analyze`), the query-language reference (`ql_reference`, `ql_explain`), and the ad-hoc OAST listener (`oast_presets`, `oast_payload`, `oast_start`, `oast_stop`, `oast_poll`). Everything else, including the persisted `oast_resume` / `oast_release`, answers `NO_PROJECT` until one is bound.
+A few tool families never need a project and work unbound: project management (`project_info`, `list_projects`, `create_project`, `switch_project`, `delete_project`, `export_project`, `import_project`, `diff_projects`), the pure-compute helpers (`decode`, `jwt_*`, `cookie_*`, `sequence_analyze`), the query-language reference (`ql_reference`, `ql_explain`), and the ad-hoc OAST listener (`oast_presets`, `oast_payload`, `oast_start`, `oast_stop`, `oast_poll`). Everything else, including the persisted `oast_resume` / `oast_release`, answers `NO_PROJECT` until one is bound.
 
 **If the selected project cannot be opened** (a database that is missing, corrupt, or unreadable, a project name that no longer exists), the server still completes the handshake and starts unbound rather than exiting. The reason is written to stderr, repeated in the handshake `instructions`, returned with every `NO_PROJECT` tool error, and reported as `bind_error` by `project_info`, so the agent can call `list_projects` and `switch_project` to recover without a restart.
 
@@ -73,7 +73,7 @@ By default `gori mcp` advertises every tool, so an agent can reach the whole wor
 
 | Start with | Tools | `tools/list` | Tokens | For |
 | --- | ---: | ---: | ---: | --- |
-| `gori mcp` | 183 | ~222 KB | ~56k | Everything (the default) |
+| `gori mcp` | 185 | ~219 KB | ~56k | Everything (the default) |
 | `--read-only` | 61 | ~70 KB | ~18k | Read tools and pure compute; no live requests |
 | `--tools=@recon` | 35 | ~52 KB | ~13k | Read and map the capture, replay a request, record issues and notes |
 | `--tools=@recon --read-only` | 27 | ~37 KB | ~10k | `@recon` minus what `--read-only` disables |
@@ -227,6 +227,7 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 | `delete_flow` / `clear_history` | Remove one flow, or wipe captured History |
 | `set_sitemap_tag` | Pin a free-text memo onto a sitemap path |
 | `create_project` / `switch_project` / `delete_project` | Create or reopen a project, point this server at another one, or delete one. Deletion is two-step: a `dry_run` first, then a confirmation token |
+| `export_project` / `import_project` | Write a project to a portable [`.gori` archive](/guide/proxy/#project-archives), or import one as a new project, through the same engine as `gori run project export` / `import`. Both paths are on the MCP server's filesystem. Export takes the bound project unless `project` names another, refuses an existing file unless `overwrite:true` and any path inside gori's home, and says in its result that the archive is unredacted. Import answers `CONFIRM_REQUIRED` with the archive's inventory, the disclosure and whether its name is free until `confirm:true`, applies the same import safety (executable and file-backed rules disabled, project routing reset, 2 GiB cap), and does not switch to the new project |
 | `add_scope_rule` / `update_scope_rule` / `delete_scope_rule` / `set_scope_enabled` | Edit the project's include / exclude rules and toggle the scope lens |
 | `set_sandbox` | Hard containment: when on, the proxy forwards only what scope allows and blocks the rest |
 | `set_env_var` / `delete_env_var` | Manage the project env tokens substitution reads. The key is stored bare: reference it as `$ENV.KEY`, or as `$KEY` under the `bare` opt-out — `list_env`'s `syntax` / `example` says which one this install speaks |

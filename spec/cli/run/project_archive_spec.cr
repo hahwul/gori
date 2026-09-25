@@ -30,6 +30,9 @@ describe "gori run project archive commands" do
     export.should contain("ProjectArchive.disclosure(prepared.inventory)")
     export.index!("STDERR.puts").should be < export.index!("prepared.write(")
     export.should contain("overwrite: force")
+    # The engine's refusal names no flag; the CLI adds its own.
+    export.should contain("rescue ex : ProjectArchive::DestinationExists")
+    export.should contain("(use --force to replace it)")
   end
 
   it "validates and discloses an archive before registering its new project" do
