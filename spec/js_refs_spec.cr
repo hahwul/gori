@@ -240,6 +240,31 @@ describe Gori::JsRefs do
       end
     end
 
+    it "continues a capped rescan with a plain scan instead of re-reading the newest flows" do
+      with_store do |store|
+        3.times { |i| jr_flow(store, "/r#{i}.js", %(fetch("/api/r#{i}"))) }
+        JR.scan(store).flows_scanned.should eq(3)
+        first = JR.scan(store, JR::ScanOptions.new(rescan: true, max_flows: 2))
+        first.flows_scanned.should eq(2)
+        first.truncated.should be_true
+        rest = JR.scan(store, JR::ScanOptions.new(max_flows: 2))
+        rest.flows_scanned.should eq(1)
+        rest.truncated.should be_false
+        marker_count(store).should eq(3)
+        ref_count(store).should eq(3)
+      end
+    end
+
+    it "keeps offsets in body bytes on a body that is not UTF-8" do
+      with_store do |store|
+        body = Bytes[0xE9, 0xE9] + %(<script>fetch("/api/latin")</script>).to_slice
+        jr_flow(store, "/l", body, ctype: "text/html")
+        JR.scan(store)
+        r = refs_of(store).first
+        String.new(body[r.offset, 12]).should eq(%("/api/latin"))
+      end
+    end
+
     it "caps the flows one run reads and says unscanned ones remain" do
       with_store do |store|
         3.times { |i| jr_flow(store, "/c#{i}.js", %(fetch("/api/c#{i}"))) }
@@ -357,6 +382,48 @@ describe Gori::JsRefs do
     end
   end
 
+  describe "Store#js_ref_nodes" do
+    it "keys a node by its whole origin, so a scope question is asked about a URL that was referenced" do
+      with_store do |store|
+        # One reference per (host, path) per flow, so the two origins come from two bundles.
+        jr_flow(store, "/a.js", %(fetch("http://api.test:8080/p")))
+        jr_flow(store, "/b.js", %(fetch("https://api.test/p")))
+        JR.scan(store)
+        nodes, _ = store.js_ref_nodes
+        nodes.map { |n| {n.scheme, n.port} }.sort!.should eq([{"http", 8080}, {"https", 443}])
+      end
+    end
+
+    it "says whether the host has traffic, and follows new scans and deletes through its memo" do
+      with_store do |store|
+        a = jr_flow(store, "/a.js", %(fetch("/api/one");fetch("https://other.test/x")))
+        JR.scan(store)
+        nodes, _ = store.js_ref_nodes
+        nodes.find!(&.path.==("/api/one")).host_captured.should be_true
+        nodes.find!(&.host.==("other.test")).host_captured.should be_false
+        jr_flow(store, "/b.js", %(fetch("/api/two")))
+        JR.scan(store)
+        store.js_ref_nodes[0].map(&.path).should contain("/api/two")
+        store.delete_flow(a).should be_true
+        store.js_ref_nodes[0].map(&.path).should eq(["/api/two"])
+      end
+    end
+  end
+
+  describe ".unrequested_node?" do
+    it "is true only for a path no capture reaches in any query spelling" do
+      with_store do |store|
+        jr_flow(store, "/api/search?q=shoes", "[]", ctype: "application/json")
+        jr_flow(store, "/app.js", %(fetch("/api/search");fetch("/api/hidden")))
+        JR.scan(store)
+        JR.unrequested_node?(store, "shop.test", "/api/hidden").should be_true
+        JR.unrequested_node?(store, "shop.test", "/api/search").should be_false
+        JR.unrequested_node?(store, "shop.test", "/api/hidden?x=1").should be_false
+        JR.unrequested_node?(store, "shop.test", "/api/none").should be_false
+      end
+    end
+  end
+
   describe ".list" do
     it "lists only unrequested references by default, and says which are requested when asked" do
       with_store do |store|
@@ -436,6 +503,23 @@ describe "Gori::Sitemap.attach_js_refs!" do
     api.children[0].js_refs.should eq(1)
     api.children[0].js_only?.should be_false
     Gori::Sitemap.endpoint_count(hosts[0]).should eq(before)
+  end
+
+  it "does not bring back a host a lens hid when the host has captured traffic" do
+    hosts = Gori::Sitemap.build([{"shop.test", "GET", "/"}])
+    ref = Gori::Store::JsRefNode.new("https", "cdn.shop.test", 443, "/api/x", 1, host_captured: true)
+    path = File.tempname("gori-jsattach", ".db")
+    store = Gori::Store.open(path)
+    begin
+      store.add_scope_rule("include", "host", "*.shop.test")
+      JR.attach!(hosts, [ref], Gori::Scope.load(store), lens: false)
+      hosts.map(&.label).should eq(["shop.test"])
+      JR.attach!(hosts, [ref.copy_with(host_captured: false)], Gori::Scope.load(store), lens: false)
+      hosts.map(&.label).should eq(["shop.test", "cdn.shop.test"])
+    ensure
+      store.close
+      File.delete?(path)
+    end
   end
 
   it "adds a host the block allows, flagged unrequested" do

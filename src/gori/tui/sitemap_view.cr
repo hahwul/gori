@@ -188,11 +188,12 @@ module Gori::Tui
     # (an invalid residual); `fetch` is the two reads and touches no view state; `apply`
     # builds the tree from what came back. `reload` is the three in a row, for every caller
     # that is not typing.
-    # `js_refs` — attach the JavaScript references (the view's toggle, captured here so the
-    # worker never reads view state); `new_hosts` — a reference may add a host the tree lacks,
-    # which it may not while a QL residual narrows the tree (a host outside it would read as a match).
+    # `js_refs` — attach the JavaScript references: the view's toggle, captured here so the
+    # worker never reads view state, and off while a QL residual narrows the tree (a reference
+    # is not a flow, so the query cannot judge it — see `JsRefs.attach!`). `tag:` terms keep
+    # it on: they filter the built tree, reference nodes included.
     record ReloadPlan, positives : Array(String), negatives : Array(String), combined : QL::Filter,
-      js_refs : Bool = false, new_hosts : Bool = true
+      js_refs : Bool = false
 
     # Whether a worker fetch is in flight — the empty-tree note says so instead of "no
     # endpoints match" while the previous tree stays up.
@@ -225,7 +226,7 @@ module Gori::Tui
         @loaded = true
         return
       end
-      ReloadPlan.new(positives, negatives, combined, @js_refs, !residual_has_terms?(residual))
+      ReloadPlan.new(positives, negatives, combined, @js_refs && !residual_has_terms?(residual))
     end
 
     # The flow filter a query's QL half compiles to — the scope lens, the hide-static lens AND the
@@ -266,7 +267,7 @@ module Gori::Tui
       # CLI) keeps too. With the scope lens on a reference is filtered by it here: the SQL lens
       # the entries came through never saw it, because a reference is not a flow.
       unless js.empty? # `fetch_reload` reads none with the toggle off
-        JsRefs.attach!(@hosts, js, @scope, new_hosts: plan.new_hosts, lens: @scope.try(&.active?) == true)
+        JsRefs.attach!(@hosts, js, @scope, lens: @scope.try(&.active?) == true)
       end
       Sitemap.stamp_tags!(@hosts, tags)
       filter_by_tags(plan.positives, plan.negatives)

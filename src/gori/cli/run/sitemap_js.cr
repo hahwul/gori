@@ -74,7 +74,7 @@ module Gori
           p.on("--all", "Also list references that captured traffic already reached") { o.all = true }
           p.on("--all-hosts", "Also list references to hosts gori never captured and no scope include names") { o.all_hosts = true }
           p.on("--no-comments", "Leave out references that only ever appeared inside a comment") { o.comments = false }
-          p.on("--in-scope", "Only references the project scope includes") { o.in_scope = true }
+          p.on("--in-scope", "Only references the project scope includes (and, with --scan, only in-scope flows read)") { o.in_scope = true }
           p.on("--lenient", "Don't refuse a query naming an unknown field — search that token as text") { o.lenient = true }
           p.on("--format=FMT", "Output: text (default) | json | urls (one URL per line, to pipe into other tools)") do |v|
             o.format = parse_format(v, [:text, :json, :urls])
@@ -89,6 +89,13 @@ module Gori
       # Scan, then say what it did on STDERR (STDOUT carries only the listing). A rolled-back
       # write is reported, not swallowed: that flow stays unscanned and the next run retries it.
       private def self.sitemap_js_scan(store : Store, filter : QL::Filter, o : SitemapJsArgs) : Nil
+        # --in-scope narrows what the scan READS too, as MCP `scan_js_endpoints in_scope` does;
+        # an unconfigured scope skips the scan (the listing says why).
+        if o.in_scope?
+          scope = Scope.load(store)
+          return unless scope.configured?
+          filter = QL.and(scope.filter(force: true), filter)
+        end
         r = JsRefs.scan(store, JsRefs::ScanOptions.new(filter: filter, max_flows: o.max_flows, rescan: o.rescan?))
         STDERR.puts "gori run sitemap js: #{sitemap_js_scan_summary(r)}"
         if r.write_failures > 0

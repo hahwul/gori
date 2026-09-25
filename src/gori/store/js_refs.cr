@@ -11,10 +11,13 @@ module Gori
     record JsRef, scheme : String, host : String, port : Int32, path : String, target : String,
       literal : String, offset : Int32, line : Int32, flags : Int32, base : String
 
-    # One referenced endpoint for the Sitemap tree: every row for one (host, path), with how
-    # many flows referenced it and the lowest scheme/port seen (the tree is keyed by host and
-    # path only, so these are enough to ask the scope a URL question about it).
-    record JsRefNode, scheme : String, host : String, port : Int32, path : String, flows : Int32
+    # One referenced endpoint ORIGIN for the Sitemap tree: every row for one (scheme, host, port,
+    # path), with how many flows referenced it. Keyed by the whole origin so the URL a scope
+    # question is asked about is one a reference really named (a MIN per column could pair one
+    # reference's scheme with another's port). `host_captured` — the project holds traffic for
+    # this host, so a tree missing it has it hidden by a lens, not unknown.
+    record JsRefNode, scheme : String, host : String, port : Int32, path : String, flows : Int32,
+      host_captured : Bool = false
 
     # One stored reference WITH its source flow's URL (nil when the flow row is gone, which a
     # cascade makes a race, not a state).
@@ -64,22 +67,56 @@ module Gori
       QL::Filter.new("id NOT IN (SELECT flow_id FROM js_ref_scans WHERE version >= ?)", [version.to_i64] of DB::Any)
     end
 
-    # Every referenced (host, path) with its flow count, for the Sitemap tree. Capped at `limit`
-    # distinct endpoints; the second value says the cap was hit.
+    # Every referenced endpoint origin with its flow count, for the Sitemap tree. Capped at
+    # `limit` rows; the second value says the cap was hit.
+    #
+    # The Sitemap reloads on every data_version tick while capture runs, and this aggregate
+    # scans the whole table — so it is memoized on a fingerprint that moves whenever the rows
+    # can have: the marker count (a flow deleted with its references), the newest marker time
+    # (a flow scanned, references or not) and the newest reference id (rows inserted). A count
+    # over the per-flow marker table (one row per scanned flow, not per reference) plus two
+    # index-end reads, instead of a GROUP BY over every reference per tick (P6).
     def js_ref_nodes(limit : Int32 = SITEMAP_MAX) : {Array(JsRefNode), Bool}
+      print = js_ref_fingerprint
+      if (memo = @js_ref_nodes_memo) && memo[0] == {print, limit}
+        return memo[1]
+      end
       out = [] of JsRefNode
-      @db.query("SELECT MIN(scheme), host, MIN(port), path, COUNT(DISTINCT flow_id) FROM js_refs " \
-                "GROUP BY host, path ORDER BY host, path LIMIT ?", limit + 1) do |rs|
+      @db.query("SELECT scheme, host, port, path, COUNT(DISTINCT flow_id), " \
+                "EXISTS (SELECT 1 FROM flows f WHERE f.host = js_refs.host) FROM js_refs " \
+                "GROUP BY host, path, scheme, port ORDER BY host, path, scheme, port LIMIT ?", limit + 1) do |rs|
         rs.each do
-          out << JsRefNode.new(rs.read(String), rs.read(String), rs.read(Int64).to_i32, rs.read(String), rs.read(Int64).to_i32)
+          out << JsRefNode.new(rs.read(String), rs.read(String), rs.read(Int64).to_i32, rs.read(String),
+            rs.read(Int64).to_i32, rs.read(Int64) != 0)
         end
       end
       capped = out.size > limit
       out.pop if capped
-      {out, capped}
+      result = {out, capped}
+      @js_ref_nodes_memo = { {print, limit}, result }
+      result
     rescue
       # Never crash a Sitemap poll over a read (mirrors sitemap_tags / sitemap_entries).
       {[] of JsRefNode, false}
+    end
+
+    @js_ref_nodes_memo : { { {Int64, Int64, Int64}, Int32 }, {Array(JsRefNode), Bool} }? = nil
+
+    private def js_ref_fingerprint : {Int64, Int64, Int64}
+      scans = @db.scalar("SELECT COUNT(*) FROM js_ref_scans").as(Int64)
+      newest = @db.query_one("SELECT COALESCE(MAX(scanned_at), 0) FROM js_ref_scans", as: Int64)
+      top = @db.query_one("SELECT COALESCE(MAX(id), 0) FROM js_refs", as: Int64)
+      {scans, newest, top}
+    end
+
+    # Forget that the flows matching `filter` were scanned, so the next scan reads them again
+    # (`JsRefs.scan`'s rescan). Their references stay until that scan replaces them. Answers
+    # whether the write committed.
+    def forget_js_scans(filter : QL::Filter) : Bool
+      exec_task_ok ->(c : DB::Connection) {
+        c.exec("DELETE FROM js_ref_scans WHERE flow_id IN (SELECT id FROM flows WHERE #{filter.sql})", args: filter.args)
+        nil
+      }
     end
 
     # Distinct referenced (host, path) pairs — what a scan reports as "new" by comparing the

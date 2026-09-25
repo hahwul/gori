@@ -249,6 +249,7 @@ module Gori
                              & : Store::JsRefNode -> Bool) : Nil
       index = {} of String => Node
       hosts.each { |h| index[h.label.downcase] ||= h }
+      variants = {} of UInt64 => Hash(String, Node) # per parent, built on first miss
       refs.each do |r|
         host_node = index[r.host.downcase]?
         unless host_node
@@ -266,7 +267,7 @@ module Gori
           # A reference is query-less and a capture rides its query on the last segment, so
           # `/api/search` must land on the captured `search?q=shoes` rather than grow a sibling
           # that claims the path was never requested (the list answers "requested" for it).
-          if existing = node.child?(seg) || (i == last ? captured_variant(node, seg) : nil)
+          if existing = node.child?(seg) || (i == last ? captured_variant(node, seg, variants) : nil)
             node = existing
           else
             node = node.child(seg)
@@ -280,9 +281,19 @@ module Gori
       end
     end
 
-    # A captured child of `node` whose label is `seg` plus a query string, or nil.
-    private def self.captured_variant(node : Node, seg : String) : Node?
-      node.children.find { |c| !c.methods.empty? && c.label.includes?('?') && path_part(c.label) == seg }
+    # A captured child of `node` whose label is `seg` plus a query string, or nil. Indexed per
+    # parent on its first miss: a fuzzed `/search` can hold tens of thousands of query variants,
+    # and a scan per reference was O(children × references) on every reload.
+    private def self.captured_variant(node : Node, seg : String, variants : Hash(UInt64, Hash(String, Node))) : Node?
+      index = variants[node.object_id] ||= begin
+        by_path = {} of String => Node
+        node.children.each do |c|
+          next if c.methods.empty? || !c.label.includes?('?')
+          by_path[path_part(c.label)] ||= c
+        end
+        by_path
+      end
+      index[seg]?
     end
 
     # The path segments one already-normalized path contributes to the tree — the query

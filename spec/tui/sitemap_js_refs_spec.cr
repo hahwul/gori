@@ -108,6 +108,21 @@ describe "SitemapView — JavaScript references" do
     end
   end
 
+  it "draws no reference under a `/` query, which cannot judge one" do
+    with_store do |store|
+      sj_flow(store, "/app.js", %(fetch("/api/admin")), ctype: "application/javascript")
+      Gori::JsRefs.scan(store)
+      view = SitemapView.new
+      view.start_query
+      "path:/app".each_char { |c| view.query_insert(c) }
+      view.stop_query
+      view.reload(store)
+      b = draw(view)
+      b.contains?("app.js").should be_true
+      b.contains?("admin").should be_false
+    end
+  end
+
   it "filters references through the scope lens, which never saw them as flows" do
     with_store do |store|
       sj_flow(store, "/app.js", %(fetch("/api/in");fetch("/private/out")), ctype: "application/javascript")

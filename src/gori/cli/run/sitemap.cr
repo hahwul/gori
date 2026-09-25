@@ -98,18 +98,12 @@ module Gori
         key = sitemap_tag_path(path)
         text = clear ? "" : tag.to_s
         matched = sitemap_node_exists?(store, host, key)
-        js_node = matched == false && js_ref_node?(store, host, key)
+        js_node = matched == false && JsRefs.unrequested_node?(store, host, key)
         abort "gori run sitemap tag: NOT applied (project busy) — the node is unchanged" unless store.set_sitemap_tag(host, key, text)
         puts text.empty? ? "Tag cleared on #{host}#{key}." : "Tagged #{host}#{key}: #{text}"
         if warning = tag_match_warning(matched, host, key, text, js_node)
           STDERR.puts "gori run sitemap tag: warning: #{warning}"
         end
-      end
-
-      # Whether captured JavaScript references this node (#1243): the tree then draws it as an
-      # unrequested node a tag stamps onto. Its key is query-less, so a path with a query never is.
-      private def self.js_ref_node?(store : Store, host : String, key : String) : Bool
-        !key.includes?('?') && !store.js_ref_sightings(host: host, path: key, limit: 1).empty?
       end
 
       # Whether any captured endpoint on `host` normalizes to `path`. A tag whose (host, path)
@@ -291,17 +285,19 @@ module Gori
         # group that lost the cut is not on a later page, it is simply absent.
         truncated = entries.size >= limit
         hosts = Sitemap.build(entries)
-        # Right after the build, before tags, as SitemapView#apply_reload does. A query narrowed
-        # the tree, so no host outside it is added for a reference; --in-scope below then drops
-        # a host's references with the host.
+        # Right after the build, before tags, as SitemapView#apply_reload does, and not under a
+        # query (a reference is not a flow the query can judge — `JsRefs.attach!`). --in-scope
+        # below then drops a host's references with the host.
         scope = Scope.load(store) if js_refs || in_scope
-        if js_refs
+        if js_refs && narrowed
+          STDERR.puts "gori run sitemap: --js-refs draws nothing under a query — a JavaScript reference is not a flow the query can match"
+        elsif js_refs
           if store.js_scanned_count(JsRefs::VERSION) == 0
             STDERR.puts "gori run sitemap: --js-refs, but no JavaScript has been scanned yet — run `gori run sitemap js --scan`"
           end
           nodes, capped = store.js_ref_nodes
           STDERR.puts "gori run sitemap: --js-refs read the first #{Store::SITEMAP_MAX} referenced endpoints only" if capped
-          JsRefs.attach!(hosts, nodes, scope, new_hosts: !narrowed, lens: false)
+          JsRefs.attach!(hosts, nodes, scope, lens: false)
         end
         Sitemap.stamp_tags!(hosts, store.sitemap_tags)
         if in_scope && scope

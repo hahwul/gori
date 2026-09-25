@@ -22,8 +22,13 @@ module Gori
         if fts_error = drain_fts_or_error(filter.uses_fts?)
           return fts_error
         end
-        return collapsed_sitemap(filter, limit, offset) if bool_arg(h, "collapse_transport", false)
         unrequested = bool_arg(h, "include_unrequested", false)
+        if bool_arg(h, "collapse_transport", false)
+          # Refused rather than dropped: an answer without the block reads as "no references".
+          return err("include_unrequested is not available with collapse_transport — call without it, or use list_js_endpoints",
+            "INVALID_ARGUMENT", field: "include_unrequested") if unrequested
+          return collapsed_sitemap(filter, limit, offset)
+        end
         # One row OVER the page, then dropped: `has_more` costs a row instead of a second
         # COUNT(*) over the same GROUP BY. Without it a full page and an exactly-full set are
         # the same answer, and this tool — unlike list_history — has no id cursor an agent
@@ -120,7 +125,7 @@ module Gori
             j.field "tag", tag.presence
             j.field "cleared", tag.empty?
             j.field "matches_endpoint", matched
-            if matched == false && !tag.empty? && js_ref_node?(host, path)
+            if matched == false && !tag.empty? && JsRefs.unrequested_node?(store, host, path)
               j.field "warning", "no captured endpoint at #{host}#{path} — the tag shows on its JavaScript-referenced node (the TUI Sitemap, `gori run sitemap --js-refs`), not in list_sitemap entries"
             elsif matched == false && !tag.empty?
               j.field "warning", "no captured endpoint at #{host}#{path} — this tag will not show in list_sitemap or the TUI until one exists (check for a typo or a trailing slash)"
@@ -162,13 +167,6 @@ module Gori
         entries = store.sitemap_entries_detailed(QL::EMPTY, Store::SITEMAP_MAX)
         return true if entries.any? { |e| e.host == host && sitemap_tag_path(e.target) == path }
         entries.size >= Store::SITEMAP_MAX ? nil : false
-      end
-
-      # Whether captured JavaScript references this node (#1243): the tree then draws it as an
-      # unrequested node a tag stamps onto. Its key is query-less, so a path with a query never is.
-      private def js_ref_node?(host : String, path : String) : Bool
-        return false if path.includes?('?')
-        !store.js_ref_sightings(host: host, path: path, limit: 1).empty?
       end
 
       # A sitemap tag's key is the exact node path the tree stamps. `node_path` shares its

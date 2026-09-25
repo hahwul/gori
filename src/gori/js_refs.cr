@@ -352,11 +352,27 @@ module Gori
       body = Entity.bytes(detail.response_head, detail.response_body, MAX_SCAN + 1)
       return FlowResult.new([] of Store::JsRef, false, false, 0) if body.nil? || body.empty?
       capped = detail.response_body_truncated? || body.size > MAX_SCAN
-      text = Utf8.text(body.size > MAX_SCAN ? body[0, MAX_SCAN] : body)
+      text = offset_text(body.size > MAX_SCAN ? body[0, MAX_SCAN] : body)
       base, base_kind = kind.html? ? html_base(text, page) : script_base(detail.request_head, page)
       lits, refs_capped = literals(text, kind)
       refs, unsafe = resolve_all(lits, base, base_kind)
       FlowResult.new(refs, capped, refs_capped, unsafe)
+    end
+
+    # The body as a String PCRE can scan whose byte offsets are the BODY's: every invalid UTF-8
+    # byte becomes one `?`. `Utf8.text`'s scrub writes a 3-byte U+FFFD per bad byte, which
+    # shifted every stored offset past the first one on a Latin-1 or EUC-KR page.
+    # `Char::Reader` reports each invalid byte as its own 1-byte error, so this is exact.
+    def offset_text(bytes : Bytes) : String
+      str = String.new(bytes)
+      return str if str.valid_encoding?
+      String.build(bytes.size) do |io|
+        reader = Char::Reader.new(str)
+        while reader.has_next?
+          reader.error ? (io << '?') : (io << reader.current_char)
+          reader.next_char
+        end
+      end
     end
 
     # Resolve and deduplicate by (host, path) — the store's key — keeping the code occurrence
@@ -435,7 +451,13 @@ module Gori
     def scan(store : Store, opts : ScanOptions = ScanOptions.new, stop : -> Bool = -> { false }) : ScanReport
       candidates = QL::Filter.new("state = ? AND #{CANDIDATE_SQL}", [Store::FlowState::Complete.value.to_i64] of DB::Any)
       filter = QL.and(opts.filter, candidates)
-      filter = QL.and(filter, Store.js_unscanned_filter(VERSION)) unless opts.rescan
+      # A rescan FORGETS which of these flows were scanned and then scans as usual, so a run cut
+      # short by `max_flows` is continued by a plain scan — dropping the marker filter instead
+      # made every rescan re-read the same newest flows and never reach the older ones.
+      if opts.rescan && !store.forget_js_scans(filter)
+        return ScanReport.new(0, 0, 0, 0, 0, 0, 1, true)
+      end
+      filter = QL.and(filter, Store.js_unscanned_filter(VERSION))
       before = store.js_ref_endpoint_count
       refs = capped_bodies = capped_refs = unsafe = failures = 0
       keep = ->(row : Store::FlowRow) { !kind(row.content_type, row.target).nil? }
@@ -523,18 +545,36 @@ module Gori
 
     # Attach the stored references to a built Sitemap tree under the two rules both trees share
     # (the TUI's `SitemapView#apply_reload`, the CLI's `collect_sitemap`): `visible_host?`'s host
-    # rule — a host the tree lacks is added only when a scope include names the reference, and
-    # never when `new_hosts` is false (a `/` query narrowed the tree, and a host outside it would
-    # read as a match) — and, with `lens` on, the scope lens itself: a reference is not a flow,
-    # so the SQL filter the tree was built through never saw it.
+    # rule — a host the tree lacks is added only when a scope include names the reference — and,
+    # with `lens` on, the scope lens itself: a reference is not a flow, so the SQL filter the
+    # tree was built through never saw it.
+    #
+    # A host that HAS captured traffic but is missing from this tree was hidden by a lens (hide
+    # static, the scope lens), so its references stay hidden with it rather than bringing it
+    # back as a "js only — never requested" host (`JsRefNode#host_captured`). The callers do not
+    # attach at all under a `/` query: a reference is not a flow, so `status:500` cannot judge
+    # it, and attaching every reference under the hosts that survived would fill a narrowed
+    # tree with rows that match nothing.
     def attach!(hosts : Array(Sitemap::Node), nodes : Array(Store::JsRefNode), scope : Scope?, *,
-                new_hosts : Bool, lens : Bool) : Nil
+                lens : Bool) : Nil
       if lens && scope
         nodes = nodes.select { |r| scope.in_scope_url?(node_url(r), r.host) }
       end
       Sitemap.attach_js_refs!(hosts, nodes) do |r|
-        new_hosts && !scope.nil? && scope.matches_url?(node_url(r), r.host)
+        !r.host_captured && !scope.nil? && scope.matches_url?(node_url(r), r.host)
       end
+    end
+
+    # Whether (host, path) is a node the tree draws ONLY because JavaScript references it — what
+    # a tag set on it can stamp onto. False for a path with a query (a reference's key has none)
+    # and for one captured traffic reaches in any query spelling, where the reference lands on
+    # the captured row instead (`Sitemap.attach_js_refs!`). One home for the CLI and MCP tag
+    # warnings.
+    def unrequested_node?(store : Store, host : String, path : String) : Bool
+      return false if path.includes?('?')
+      return false if store.js_ref_sightings(host: host, path: path, limit: 1).empty?
+      captured, _, _ = captured_paths(store)
+      !captured.includes?({host.downcase, path})
     end
 
     # A tree reference's URL, for a scope question.

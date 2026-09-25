@@ -125,6 +125,26 @@ describe "MCP list_sitemap include_unrequested" do
     end
   end
 
+  it "refuses include_unrequested with collapse_transport instead of dropping it" do
+    with_store do |store|
+      tools = tools_for(store)
+      res = tools.call("list_sitemap", JSON.parse(%({"collapse_transport":true,"include_unrequested":true})))
+      res.is_error.should be_true
+      res.text.should contain("include_unrequested")
+    end
+  end
+
+  it "does not promise a tag shows on a node the reference folded onto captured traffic" do
+    with_store do |store|
+      je_flow(store, "/api/search?q=shoes", "[]", ctype: "application/json")
+      je_flow(store, "/app.js", %(fetch("/api/search")))
+      tools = tools_for(store)
+      je(tools, "scan_js_endpoints")
+      out = je(tools, "set_sitemap_tag", %({"host":"shop.test","path":"/api/search","tag":"x"}))
+      out["warning"].as_s.should_not contain("JavaScript-referenced node")
+    end
+  end
+
   it "says a tag on a referenced-only node shows on that node, not that it is lost" do
     with_store do |store|
       je_flow(store, "/app.js", %(fetch("/api/hidden")))
