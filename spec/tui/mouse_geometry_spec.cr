@@ -266,16 +266,15 @@ describe "marker actions across the two template editors" do
     {"repeater.toggle-http2", "fuzz.toggle-http2"},
   }.each do |(rep, fuzz)|
     it "gives #{rep.split('.').last} the same menu letter in both panes" do
-      registry[rep].menu_key.should eq(registry[fuzz].menu_key)
+      registry.menu_keys(rep).should eq(registry.menu_keys(fuzz))
     end
   end
 
-  it "leaves the SNI pair apart, because the Fuzzer cannot have the Repeater's letter" do
-    # NOT drift, and the one pair deliberately left unmatched: the space menu shows COMMON
-    # plus the focused section, and `fuzz.stop` already owns 's' in the Fuzzer's COMMON —
-    # the Repeater has no stop verb, so 's' was free there. Aligning would raise at boot.
-    registry["repeater.toggle-sni"].menu_key.should eq('s')
-    registry["fuzz.toggle-sni"].menu_key.should_not eq('s')
+  it "brings the SNI pair together one level down, where the Fuzzer's stop cannot compete" do
+    # They were `s` and `i` at level 1: `fuzz.stop` owns 's' in the Fuzzer's COMMON. Inside
+    # Protocol… (#1274) nothing else competes, so both are `P s`.
+    registry.menu_keys("repeater.toggle-sni").should eq(['P', 's'])
+    registry.menu_keys("fuzz.toggle-sni").should eq(['P', 's'])
     registry.find { |v| v.scope == Gori::Verb::Scope::Fuzzer && v.section == :common && v.menu_key == 's' }
       .should_not be_nil
   end

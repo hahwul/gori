@@ -1363,6 +1363,20 @@ module Gori::Tui
       :body
     end
 
+    # A space-menu row's live state for one of this tab's toggles (`ExecContext#menu_state`,
+    # #1274): "on"/"off" (`SpaceMenu.on_off`) or a short value, nil for a row with none. The
+    # Runner asks the tab in front; the tabs with toggle-family members answer.
+    def menu_state(verb_id : String) : String?
+      nil
+    end
+
+    # The focused pane has taken the keys for a form of its own: INSERT, a hex editor, the SNI
+    # field, a field list. A sticky family card must not come back over it
+    # (`Runner#run_space_verb`), since the member that opened it is asking for input next.
+    def pane_captures_keys? : Bool
+      body_badge == :editor
+    end
+
     def body_hint(focus : Symbol) : String
       ""
     end

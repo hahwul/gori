@@ -108,6 +108,17 @@ module Gori::Tui
       current_tab_obj.try(&.view)
     end
 
+    # Display… and Protocol… rows (#1274), for the session in front.
+    def menu_state(verb_id : String) : String?
+      return nil unless v = current_view
+      case verb_id
+      when "fuzz.matched"      then SpaceMenu.on_off(v.matched_only?)
+      when "fuzz.dist"         then SpaceMenu.on_off(v.dist_shown?)
+      when "fuzz.toggle-http2" then SpaceMenu.on_off(v.http2?)
+      when "fuzz.toggle-sni"   then SpaceMenu.on_off(!v.sni_override.nil?)
+      end
+    end
+
     # Cross-tab "Insert OAST payload": drop the URL at the template caret.
     def insert_oast_payload(url : String) : Bool
       (v = current_view) ? v.insert_oast_payload(url) : false

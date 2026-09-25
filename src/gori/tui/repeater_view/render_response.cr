@@ -94,7 +94,7 @@ class Gori::Tui::RepeaterView
   # The GRPC RESPONSE transcript's title, and where a chip cluster may start on its border:
   # past `Frame.card`'s " TITLE " (drawn from rect.x + 2) plus a column of air. ONE derivation,
   # read by the draw below and by `chrome_hit` — a chip drawn at one x and hit-tested at
-  # another is a dead cell, which is the defect `␣K:KEY` had.
+  # another is a dead cell, which is the defect `␣Pw:KEY` had.
   GRPC_TITLE = "GRPC RESPONSE"
 
   private def grpc_chip_x(rect : Rect) : Int32

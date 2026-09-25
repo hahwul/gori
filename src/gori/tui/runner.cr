@@ -2652,18 +2652,20 @@ module Gori::Tui
       return unless verb
       before = space_menu_blockers
       @toast = verb.call(self) || @toast
-      reopen_sticky_family(point, was) if point && was && space_menu_blockers == before
+      return unless point && was
+      here = action_context
+      reopen_sticky_family(point, here) if SpaceMenu.resume_sticky?(before, space_menu_blockers, was, here)
     end
 
-    # Every surface a verb could have opened that the space menu must not cover.
+    # Every surface a verb could have opened that the space menu must not cover — including
+    # a pane that took the keys (Protocol…'s SNI field, the gRPC field list, a hex editor).
     private def space_menu_blockers
       {@overlay, @active_overlay.try(&.object_id), copy_as_shown?, send_to_shown?,
-       @goto_open, @search_open, @rename_open, @tag_edit_open}
+       @goto_open, @search_open, @rename_open, @tag_edit_open, @focus, @active_tab,
+       @tabs[@active_tab]?.try(&.pane_captures_keys?)}
     end
 
-    private def reopen_sticky_family(point : {Verb::Family, Int32}, was : ActionContext) : Nil
-      here = action_context
-      return unless here.scope == was.scope && here.section == was.section && here.subtabs == was.subtabs
+    private def reopen_sticky_family(point : {Verb::Family, Int32}, here : ActionContext) : Nil
       w, h = @backend.size
       return unless Layout.usable?(w, h) && Layout.compute(w, h, statusline_active?).body.h >= 3
       @space_menu.open(here.scope, here.section, self, banner: here.banner, subtabs: here.subtabs)
@@ -5672,10 +5674,21 @@ module Gori::Tui
       oast.send-to probe.send-to sequence.send-to mine.send-to detail.send-to
     ]
 
-    # No row states yet: the toggle families (Display…, Protocol…) answer here, one `case`
-    # arm per toggle, when they land (#1274 WP9).
+    # The ●/○ (or value) a toggle-family row draws (#1274 WP9). Pretty and whitespace are the
+    # shell's own flags, shared by the History detail and the Repeater, and the hide-static lens
+    # is one project setting for History and the Sitemap; every other toggle belongs to the tab
+    # in front, which answers through `TabController#menu_state`.
     def menu_state(verb_id : String) : String?
-      nil
+      case verb_id
+      when "detail.toggle-pretty", "repeater.toggle-pretty"
+        SpaceMenu.on_off(@pretty)
+      when "detail.toggle-ws"
+        SpaceMenu.on_off(@reveal)
+      when "history.toggle-static", "sitemap.toggle-static"
+        SpaceMenu.on_off(history_controller.view.hide_static?)
+      else
+        @tabs[@active_tab]?.try(&.menu_state(verb_id))
+      end
     end
 
     def space_menu_title(verb_id : String) : String?

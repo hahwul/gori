@@ -40,10 +40,11 @@ describe "Gori::Verbs.register_sitemap" do
 
   # #1243: the scan sends nothing and the toggle only shows what a scan stored, so both are
   # menu entries, on letters that name them rather than bare keys the tree has already spent.
+  # The toggle is a Display… row (`Z J`) since #1274; the scan keeps its own `J`.
   it "offers the JavaScript scan and its toggle from the menu only" do
-    {"sitemap.js-scan" => 'J', "sitemap.toggle-js-refs" => 'U'}.each do |id, letter|
+    {"sitemap.js-scan" => ['J'], "sitemap.toggle-js-refs" => ['Z', 'J']}.each do |id, keys|
       r[id].chords.should be_empty
-      r[id].mnemonic.should eq(letter)
+      r.menu_keys(id).should eq(keys)
     end
   end
 
@@ -80,11 +81,9 @@ describe "Gori::Verbs.register_sitemap" do
     verb.chords.should eq([typed_chord("g", shift: true)])
     r["sitemap.toggle-grouping"].chords.should eq([typed_chord("g")]) # unchanged
     verb.hidden?.should be_false                                      # else it reaches neither the space menu nor Help
-    # A shift chord yields no menu key, so the mnemonic is what the action menu renders —
-    # and it must not collide with the id toggle's chord-derived 'g'.
-    verb.menu_key.should eq('Q')
-    keys = r.select(&.scope.sitemap?).compact_map(&.menu_key)
-    keys.size.should eq(keys.uniq.size)
+    # Both are Display… rows (#1274): `Z g` folds ids and `Z q` queries.
+    r.menu_keys("sitemap.toggle-grouping").should eq(['Z', 'g'])
+    r.menu_keys(verb.id).should eq(['Z', 'q'])
   end
 
   # #539: the action existed nowhere — no chord, no registry entry — so the space menu could
@@ -118,10 +117,11 @@ describe "Gori::Verbs.register_sitemap" do
 
   # The hide-static lens (#1239) is shared with History and has no chord on either tab: this
   # tab has no `v` picker, so the menu row is its door.
-  it "keeps the hide-static toggle a menu row under 'V', shared with History" do
+  it "keeps the hide-static toggle a Display… row (`Z s`), shared with History" do
     verb = r["sitemap.toggle-static"]
     verb.chords.should be_empty
-    verb.menu_key.should eq('V')
+    r.menu_keys(verb.id).should eq(['Z', 's'])
+    r.menu_keys("history.toggle-static").should eq(['Z', 's'])
     verb.hidden?.should be_false
     verb_intents(r, "sitemap.toggle-static").should eq([:toggle_static_assets])
   end

@@ -208,10 +208,11 @@ their sessions from a run, so they have no `n`.)
 Because the bucket rides along with every pane, its nine letters are **reserved in every view
 of those tabs**. A pane action that wanted one had to move: the rule is that the *pane* letter
 yields, since the strip's letter has to read the same on all nine strips. `Space` `W` marks a
-word in the Repeater/Fuzzer editors, `Space` `D` toggles the response diff, and the JWT and
-Cookie lens toggles moved to `m` (Mode — the Decoder's letter for the same gesture). JWT and
-Cookie copy their OUTPUT with `C`, the Comparer switches between requests and responses with
-`m`, and Notes opens the note in `$EDITOR` with `o`. The rule holds on a strip that lacks the
+word in the Repeater/Fuzzer editors, and the JWT and Cookie lens toggles moved to `m` (Mode —
+the Decoder's letter for the same gesture). JWT and Cookie copy their OUTPUT with `C`, and
+Notes opens the note in `$EDITOR` with `o`. The response diff and the Comparer's
+requests/responses switch now sit in [Display…](#display-protocol), where the strip's letters
+do not reach. The rule holds on a strip that lacks the
 action too, and gori refuses to start if a pane row breaks it.
 
 ### One intent, one letter
@@ -273,6 +274,40 @@ already had there, which is why Discover is `D`.
 
 What moved: on History these were `c` `z` `m` `q` `u` `d` `⇧B`, and **Delete took `d`**, its own
 bare key, now that Discover left it. The detail's Delete is `d` too.
+
+### Display… and Protocol… {#display-protocol}
+
+The toggles are two more cards. **`Z` Display…** holds what changes how a pane *draws* what it
+holds, and **`P` Protocol…** holds what changes what a Repeater or Fuzzer request *sends*. A
+row that rewrites the request itself, such as pretty-print request, stays a direct row.
+
+| Display… | | Protocol… | |
+|-----|---|-----|---|
+| `x` | Hex (History detail, both Repeater panes) | `2` | HTTP/2 |
+| `p` · `u` · `b` | Pretty · Unicode escapes · whitespace | `s` | SNI override |
+| `d` · `e` | Response diff · envelope/decoded | `c` | Auto Content-Length |
+| `s` · `f` · `c` | Static assets · follow · Columns… | `w` | Reuse Sec-WebSocket-Key |
+| `g` · `q` · `J` | Fold ids · fold queries · JS references | `r` · `f` | gRPC reframe · gRPC field editor |
+| `m` · `v` | Fuzzer: matched only · distribution | `t` | TLS fingerprint |
+| `t` · `z` | Comparer: requests/responses · fold unchanged | | |
+
+Both cards are **sticky**. After a row runs, the card comes back at the same row, so you can
+flip two or three settings in one visit, and each row shows its state: `●` on, `○` off, or a
+value such as the TLS preset's name. `Esc` closes the card. It does not come back when a row
+opened something of its own, such as the SNI field, the gRPC field list, the request hex editor
+or the column editor, or when the row moved focus.
+
+- Display… is `Z`, not `V`: under the `vim` keyset `⇧V` selects a line in every pane that has
+  these toggles, so a dropped `Space` would select instead of opening the card.
+- The Fuzzer's **Cycle sort** stays a direct row (`Space` `o`), because it is the one you press
+  most while reading results.
+- Direct keys are unchanged: `Ctrl-X` hex, `p` pretty, `u` Unicode, `b` whitespace, `⇧D` diff,
+  `Ctrl-T` envelope, `Ctrl-V` HTTP/2, `Ctrl-S` SNI, `Ctrl-L` auto Content-Length.
+
+What moved: hex was `e` in the History detail, `x` in the Repeater request pane and `h` in its
+response pane, and is now `Z` `x` in all three. Save results on the Fuzzer is `E`, the export
+letter, which frees `P`. The History detail's **Copy flow** row is gone: `Space` `Y` (Copy as…)
+on the REQUEST pane has **Raw request**, the same text.
 
 ## Editor Keysets {#editor-keysets}
 

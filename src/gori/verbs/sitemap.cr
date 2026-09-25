@@ -102,31 +102,31 @@ module Gori
       # `g` — fold/unfold path-param ids (/users/<uuid> → {uuid}, /users/1,2,3… → [1, 2, 3 … +N]).
       r.register Verb::Definition.new(
         "sitemap.toggle-grouping", "Fold ids", "Fold path-param ids into {uuid}/{hex}/{date} and [1, 2, 3 …] groups",
-        Verb::Scope::Sitemap, [Verb::Chord.new("g")], group: :view) { |ctx| ctx.sitemap_toggle_grouping; nil }
+        Verb::Scope::Sitemap, [Verb::Chord.new("g")], intent: :fold_ids, group: :view) { |ctx| ctx.sitemap_toggle_grouping; nil }
 
       # `⇧G` — fold/unfold the query-string variants of one path (/search?q=1 + /search?q=2
       # → /search). A SEPARATE axis from `g`, and deliberately not folded into it: `g` says
       # "show me every literal id", which is not the same wish as "show me every fuzz payload
       # that was ever sent to /search". Spelled Chord.new("g", shift: true), NOT Chord.new("G")
-      # — the latter never fires (see verbs/comparer.cr). A shift chord yields no menu key, so
-      # the action menu gets an explicit mnemonic ('g' is already the id toggle's).
+      # — the latter never fires (see verbs/comparer.cr). Both are Display… rows (#1274):
+      # `Z g` folds ids and `Z q` queries.
       r.register Verb::Definition.new(
         "sitemap.toggle-query-fold", "Fold queries", "Fold the query-string variants of a path into one node (/search?q=1, /search?q=2 → /search)",
         Verb::Scope::Sitemap, [Verb::Chord.new("g", shift: true)],
-        mnemonic: 'Q', group: :view) { |ctx| ctx.sitemap_toggle_query_fold; nil }
+        intent: :fold_queries, group: :view) { |ctx| ctx.sitemap_toggle_query_fold; nil }
 
       # Endpoints captured JavaScript references (#1243). The scan reads bodies already in the
       # project and sends NOTHING, so it needs no confirm; the toggle shows or hides what a scan
       # stored. Menu-only, both: the tree's bare keys are spent, and neither is a
-      # many-times-a-minute gesture. 'J' names JavaScript; 'U' names the "unrequested" nodes
-      # the toggle governs ('j' is `sitemap.down`'s bare key, which a menu letter must not shadow).
+      # many-times-a-minute gesture. 'J' names JavaScript ('j' is `sitemap.down`'s bare key,
+      # which a menu letter must not shadow); the toggle is a Display… row, `Z J` (#1274).
       r.register Verb::Definition.new(
         "sitemap.js-scan", "Scan JavaScript", "Read captured JS responses and inline scripts for endpoints nobody requested (sends nothing)",
         Verb::Scope::Sitemap, [] of Verb::Chord, mnemonic: 'J', group: :view) { |ctx| ctx.sitemap_js_scan; nil }
 
       r.register Verb::Definition.new(
         "sitemap.toggle-js-refs", "Toggle JS references", "Show/hide the paths captured JavaScript references and no request reached",
-        Verb::Scope::Sitemap, [] of Verb::Chord, mnemonic: 'U', group: :view) { |ctx| ctx.sitemap_toggle_js_refs; nil }
+        Verb::Scope::Sitemap, [] of Verb::Chord, intent: :js_refs, group: :view) { |ctx| ctx.sitemap_toggle_js_refs; nil }
 
       # Toggle the scope lens from the Sitemap too (the lens key itself is the Global `s`).
       # scope_toggle_lens reloads the active sitemap, and the bar shows the `s scope` chip —
@@ -137,10 +137,11 @@ module Gori
         Verb::Scope::Sitemap, [] of Verb::Chord, intent: :scope_lens, group: :scope) { |ctx| ctx.scope_toggle_lens; nil } # the Global `s` is the key
 
       # The hide-static lens (#1239), shared with History. Menu-only for the reason History's
-      # twin gives; this tab has no `v` picker, so the menu is its door (and the chip, while on).
+      # twin gives; this tab has no `v` picker, so the menu is its door (and the chip, while on):
+      # Display… → `s`, the letter History's twin reads.
       r.register Verb::Definition.new(
         "sitemap.toggle-static", "Toggle static assets", "Hide images, fonts and media from the tree on/off (shared with History)",
-        Verb::Scope::Sitemap, [] of Verb::Chord, mnemonic: 'V', group: :view) { |ctx| ctx.toggle_static_assets; nil }
+        Verb::Scope::Sitemap, [] of Verb::Chord, intent: :static_assets, group: :view) { |ctx| ctx.toggle_static_assets; nil }
 
       # `a` — add the cursor row to the project scope, pre-filling the SAME popup the Project
       # tab's `a` opens (hence the same chord): a host row seeds a `host` rule, a path row a

@@ -35,22 +35,22 @@ class Gori::Tui::RepeaterView
     rect.x + 9
   end
 
-  # The TARGET band's `␣P` TLS-fingerprint chip label (#844). ONE definition, read by the
+  # The TARGET band's `␣Pt` TLS-fingerprint chip label (#844). ONE definition, read by the
   # draw and by the hit test — the two must invert each other exactly, and a chip whose label
   # width is computed twice is a click that lands on the wrong cell the first time the two
   # spellings drift (#839).
   #
-  # ALWAYS drawn, muted while nothing is set: it is the only thing on screen saying `␣P` has
+  # ALWAYS drawn, muted while nothing is set: it is the only thing on screen saying `␣Pt` has
   # anything to offer, and this band has no other home for the affordance. Deliberately does
   # NOT consult the target's SCHEME — that would put a `URI.parse` on every frame for a
   # question only the chip's COLOUR needs (`tls_preset_live?` asks it, and only when an
   # override is actually set).
   private def tls_chip_label : String
-    " ␣P:#{@tls_preset || "tls"} "
+    " ␣Pt:#{@tls_preset || "tls"} "
   end
 
   # The TARGET band's right-to-left chrome after the READ/INS mode chip: the SNI marker, the
-  # `␣P` fingerprint chip, then the `^V` transport chip. Returns
+  # `␣Pt` fingerprint chip, then the `^V` transport chip. Returns
   # `{sni_x, tls_x, transport_right_edge}` — the first two nil when that piece is not shown or
   # does not fit. Pure geometry, shared by `render_target` and `chrome_hit`.
   #

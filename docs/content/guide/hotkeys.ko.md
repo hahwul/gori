@@ -199,10 +199,11 @@ Cookie, Comparer, Notes. 예전에는 스트립 자신의 액션도 다른 컨�
 이 버킷이 모든 패널에 함께 실리기 때문에, 그 아홉 글자는 **해당 탭의 모든 뷰에서 예약**됩니다.
 그 글자를 쓰던 패널 액션은 자리를 옮겼습니다. 규칙은 *패널* 글자가 양보한다는 것입니다.
 스트립의 글자는 아홉 스트립에서 똑같이 읽혀야 하기 때문입니다. Repeater/Fuzzer 편집기에서는
-`Space` `W`가 단어를 마크하고, `Space` `D`가 응답 diff를 토글하며, JWT와 Cookie의 렌즈 토글은
-`m`(Mode — 같은 동작에 대한 Decoder의 글자)으로 옮겼습니다. JWT와 Cookie는 OUTPUT을 `C`로
-복사하고, Comparer는 요청/응답 전환이 `m`, Notes는 노트를 `$EDITOR`로 여는 것이 `o`입니다. 그
-동작이 없는 스트립에서도 규칙은 같으며, 패널 행이 이를 어기면 gori가 시작하지 않습니다.
+`Space` `W`가 단어를 마크하고, JWT와 Cookie의 렌즈 토글은 `m`(Mode — 같은 동작에 대한 Decoder의
+글자)으로 옮겼습니다. JWT와 Cookie는 OUTPUT을 `C`로 복사하고, Notes는 노트를 `$EDITOR`로 여는
+것이 `o`입니다. 응답 diff와 Comparer의 요청/응답 전환은 이제 스트립 글자가 닿지 않는
+[Display…](#display-protocol) 안에 있습니다. 그 동작이 없는 스트립에서도 규칙은 같으며, 패널
+행이 이를 어기면 gori가 시작하지 않습니다.
 
 ### 의도 하나에 글자 하나
 
@@ -261,6 +262,39 @@ Rewriter와 Colormarker의 **Enable/disable everywhere**가 `T`인 이유가 이
 
 옮겨진 것: History에서는 이 동작들이 `c` `z` `m` `q` `u` `d` `⇧B`였고, Discover가 빠지면서
 **삭제가 자기 맨 키인 `d`를 가져갔습니다**. 상세의 삭제도 `d`입니다.
+
+### Display…와 Protocol… {#display-protocol}
+
+토글은 카드 두 장에 들어 있습니다. **`Z` Display…**는 패널이 가진 것을 *그리는* 방식을 바꾸는
+토글이고, **`P` Protocol…**은 Repeater나 Fuzzer 요청이 *보내는* 것을 바꾸는 토글입니다. 요청
+자체를 고쳐 쓰는 행(pretty-print request 등)은 직접 행으로 남습니다.
+
+| Display… | | Protocol… | |
+|-----|---|-----|---|
+| `x` | 헥스 (History 상세, Repeater 두 패널) | `2` | HTTP/2 |
+| `p` · `u` · `b` | Pretty · Unicode 이스케이프 · 공백 | `s` | SNI 재정의 |
+| `d` · `e` | 응답 diff · envelope/decoded | `c` | Content-Length 자동 계산 |
+| `s` · `f` · `c` | 정적 자산 · follow · Columns… | `w` | Sec-WebSocket-Key 재사용 |
+| `g` · `q` · `J` | id 접기 · 쿼리 접기 · JS 참조 | `r` · `f` | gRPC reframe · gRPC 필드 편집기 |
+| `m` · `v` | Fuzzer: 매치만 · 분포 | `t` | TLS 지문 |
+| `t` · `z` | Comparer: 요청/응답 · 변경 없는 구간 접기 | | |
+
+두 카드는 **sticky**입니다. 행을 실행하면 카드가 같은 행에서 다시 열리므로 한 번에 두세 개를
+바꿀 수 있고, 각 행은 상태를 보여줍니다. `●`는 켜짐, `○`는 꺼짐, TLS 프리셋 이름 같은 값도
+있습니다. `Esc`로 닫습니다. 행이 SNI 필드, gRPC 필드 목록, 요청 헥스 편집기, 컬럼 편집기처럼
+자기 것을 열었거나 포커스를 옮겼다면 카드는 다시 열리지 않습니다.
+
+- Display…는 `V`가 아니라 `Z`입니다. `vim` 키셋에서는 이 토글이 있는 모든 패널에서 `⇧V`가 줄을
+  선택하므로, `Space`를 빠뜨리면 카드 대신 선택이 일어납니다.
+- Fuzzer의 **Cycle sort**는 결과를 읽을 때 가장 자주 누르는 행이라 직접 행(`Space` `o`)으로
+  남습니다.
+- 직접 키는 그대로입니다. `Ctrl-X` 헥스, `p` pretty, `u` Unicode, `b` 공백, `⇧D` diff,
+  `Ctrl-T` envelope, `Ctrl-V` HTTP/2, `Ctrl-S` SNI, `Ctrl-L` Content-Length 자동 계산.
+
+옮겨진 것: 헥스는 History 상세에서 `e`, Repeater 요청 패널에서 `x`, 응답 패널에서 `h`였고 이제
+셋 모두 `Z` `x`입니다. Fuzzer의 결과 저장은 내보내기 글자인 `E`가 되어 `P`가 비었습니다.
+History 상세의 **Copy flow** 행은 없어졌습니다. REQUEST 패널에서 `Space` `Y`(Copy as…)의
+**Raw request**가 같은 텍스트입니다.
 
 ## 에디터 키셋 {#editor-keysets}
 

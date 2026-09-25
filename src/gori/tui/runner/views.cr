@@ -66,7 +66,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     lp.on_edit = ->(i : Int32) { edit_view_query(i, view_at(views, i)) }
   end
 
-  # The hide-static lens (#1239) — the picker's top row, a `static:hidden` chip, and `␣V` on
+  # The hide-static lens (#1239) — the picker's top row, a `static:hidden` chip, and `␣Zs` on
   # History and the Sitemap all land here. The shape of `scope_toggle_lens`, with the refusal
   # rule of `activate_view`: a write the store refused changes nothing on screen either, since
   # a lens the next restart forgets is a lens the operator cannot trust.
@@ -86,7 +86,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     sitemap_controller.reload if @active_tab == :target && target_controller.sitemap_active?
     params_controller.run if @active_tab == :target && target_controller.params_active?
     # Name the way back that works WHERE the operator is: the Sitemap has no `v` picker.
-    back = @active_tab == :target ? "␣V" : "v"
+    back = @active_tab == :target ? "␣Zs" : "v"
     @toast = hide ? "static assets hidden (images, fonts, media) — #{back} shows them" : "static assets shown"
   end
 

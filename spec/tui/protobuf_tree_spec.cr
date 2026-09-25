@@ -180,7 +180,7 @@ describe "HistoryView gRPC detail" do
   end
 
   # The chip is drawn AND clickable — a chip only one of those is true for is the defect
-  # `␣K:KEY` had. Both come off `detail_mode_chips`, so this pins them together.
+  # `␣Pw:KEY` had. Both come off `detail_mode_chips`, so this pins them together.
   it "hit-tests the p: chip it draws" do
     pb_tmp_store do |store|
       view = seed.call(store, grpc_frame(PB_BODY))
@@ -287,7 +287,7 @@ describe "RepeaterView gRPC protobuf transcript" do
   # `right - 1`. At 60 columns the RESPONSE half is 30 wide, ` p:bytes ` no longer clears the
   # ` 5ms ` on that border, and the draw paints NOTHING — while the hit test kept nine live
   # cells there, two of them on the duration text itself. Clicking the send you just made and
-  # having the pane silently swap readings is exactly the dead/ghost-cell class `␣K:KEY` had.
+  # having the pane silently swap readings is exactly the dead/ghost-cell class `␣Pw:KEY` had.
   it "does not light the p: chip over the duration meta it could not clear" do
     pb_tmp_store do |store|
       view = answered.call(loaded.call(store), grpc_frame(PB_BODY))

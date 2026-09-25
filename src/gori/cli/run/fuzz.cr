@@ -112,7 +112,7 @@ module Gori
           # a different set of octets as `int32`, `sint32`, `bool` or an enum — so the position
           # is the DECLARATION and the payload goes through it. Needs a descriptor set for the
           # rpc (`gori run grpc schema` says whether one is loaded); the field names are the
-          # ones the Repeater's ␣E form and the History tree already show for the same flow.
+          # ones the Repeater's ␣Pf form and the History tree already show for the same flow.
           p.on("--field=SPEC", "Sweep a schema-known gRPC field of a unary request (repeatable). SPEC is a field name, a path into a nested message (profile.age), or a field number, with [i] to pick one occurrence of a repeated field (tags[1]); append ¦chain to run a Decoder chain over the payload BEFORE the declared type encodes it. The field must be PRESENT on the captured message — gori replaces an occurrence, it never adds one, so a proto3 field left at its default is not a position. Payloads for a `bytes` field are read as HEX (`de ad be ef`), because that declaration's value is binary") { |v| grpc_fields << v }
           p.on("--message=TEXT", "WebSocket: outbound text frame (repeatable; may carry §…§ positions; replaces the seed's stored frames)") { |v| ws_overrides << Fuzz::WsMessageSource.new(1, v) }
           p.on("--message-frame=SPEC", "WebSocket: one outbound frame with an explicit shape (repeatable; mixes with --message in order). SPEC is comma-separated key=value: opcode=text|bin|cont|close|ping|pong|<0-15>, fin=0|1, rsv=0-7, mask=0|1, mask_key=<hex>, len=<declared length>, and one of hex=|b64=|text= (text= runs to the end of SPEC). Example: opcode=close,hex=03ea6279650a") { |v| ws_overrides << fuzz_message_frame(v) }

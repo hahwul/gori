@@ -416,7 +416,7 @@ module Gori::Tui
     end
 
     # History's note, pointing at the one door this tab has: the space menu (no `v` picker here).
-    STATIC_HIDDEN_NOTE = "static assets hidden — ␣V shows them"
+    STATIC_HIDDEN_NOTE = "static assets hidden — ␣Zs shows them"
 
     # Split `tag:` terms out of the query. Cut with the SHARED lexer, not `String#split`:
     # hand-tokenising saw no quotes (`tag:"my tag"` became `tag:"my` + `tag"`) and no
@@ -1211,11 +1211,11 @@ module Gori::Tui
             # endpoints match" unless we say why — @query_note distinguishes it.
             {@query_note || "no endpoints match", querying? ? "esc clears the filter" : "/ to edit the filter"}
           elsif @hide_static && @scope.try(&.active?) != true
-            {"only static assets so far — they are hidden", "␣V shows static assets"}
+            {"only static assets so far — they are hidden", "␣Zs shows static assets"}
           elsif filtering? # in-scope subset is empty (Scope lens, no QL query)
             # Name the hide-static lens too when it is also on: turning `s` off is not the only
             # way back, and may not be the one that explains the empty tree.
-            {"no endpoints in scope", @hide_static ? "static assets are hidden too — ␣V shows them" : nil}
+            {"no endpoints in scope", @hide_static ? "static assets are hidden too — ␣Zs shows them" : nil}
           else
             TrafficEmptyState.render(screen, tree, variant: :sitemap, listen: listen, capturing: capturing)
             return

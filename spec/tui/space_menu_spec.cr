@@ -32,9 +32,10 @@ describe Gori::Tui::SpaceMenu do
     menu.verb_for('d').try(&.id).should eq("history.delete")
     menu.entry_for('>').try(&.id).should eq("family:send_flow")
     menu.verb_for('X').try(&.id).should eq("history.clear")
-    # 'C' was free in Body until the History column editor claimed it (#819); the OTHER 'C'
-    # in the registry is Send to Comparer, which lives in the Repeater/Fuzzer scopes.
-    menu.verb_for('C').try(&.id).should eq("history.columns")
+    # The column editor is a Display… row (#1274), so `C` and `V` are free again.
+    menu.entry_for('Z').try(&.id).should eq("family:display")
+    menu.verb_for('C').should be_nil
+    menu.verb_for('V').should be_nil
     menu.verb_for('Q').should be_nil # no entry bound to this key
   end
 
@@ -112,15 +113,18 @@ describe Gori::Tui::SpaceMenu do
     menu.entries.size.should be > 0
     menu.entries.all?(&.scope.history_detail?).should be_true # strictly scope-local
     ids = menu.entries.map(&.id)
-    ids.should contain("detail.repeater")   # flow action carried over from the list
-    ids.should contain("detail.toggle-hex") # a detail-only view toggle
-    ids.should contain("detail.delete")     # destructive parity with the list menu
+    ids.should contain("detail.repeater") # flow action carried over from the list
+    ids.should contain("family:display")  # the view toggles, one level down
+    ids.should contain("detail.delete")   # destructive parity with the list menu
+    ids.should_not contain("detail.toggle-hex")
     menu.verb_for('r').try(&.id).should eq("detail.repeater")
     menu.verb_for('x').try(&.id).should eq("detail.select-line")
-    menu.verb_for('e').try(&.id).should eq("detail.toggle-hex")
+    menu.verb_for('e').should be_nil
     # 'd' here too, so the drill-in does not read `X` as "this one" while the list one
     # keystroke away reads it as "all of them".
     menu.verb_for('d').try(&.id).should eq("detail.delete")
+    menu.activate(menu.entry_for('Z')).should be_nil
+    menu.verb_for('x').try(&.id).should eq("detail.toggle-hex")
   end
 
   it "lists the scope-rule actions in the Project scope pane (space replaced the lens toggle)" do
@@ -402,7 +406,7 @@ describe Gori::Tui::SpaceMenu do
     menu.verb_for('d').try(&.id).should eq("repeater.duplicate-subtab")
   end
 
-  it "populates Repeater's :response group with diff/hex alongside pretty (Round 4 — was raw key-dispatch)" do
+  it "populates Repeater's :response Display… card with diff/hex alongside pretty (Round 4 — was raw key-dispatch)" do
     ctx = FakeExecContext.new
     ctx.current_tab = :repeater
     ctx.repeater_read_mode = true # so repeater.select-line ('x') is available in the menu
@@ -411,17 +415,18 @@ describe Gori::Tui::SpaceMenu do
 
     menu.open(Gori::Verb::Scope::Repeater, :response, ctx, subtabs: true)
     ids = menu.entries.map(&.id)
-    ids.should contain("repeater.send")            # COMMON
-    ids.should contain("repeater.toggle-pretty")   # :response
-    ids.should contain("repeater.toggle-diff")     # :response
-    ids.should contain("repeater.toggle-resp-hex") # :response
-    menu.verb_for('p').try(&.id).should eq("repeater.toggle-pretty")
-    # `d` is the strip's Duplicate on every tab now, so the response pane's diff toggle
-    # moved to `D` — the same letter one shift away, and the initial of its own title.
+    ids.should contain("repeater.send")  # COMMON
+    ids.should contain("family:display") # the :response toggles, one level down
+    # `d` is the strip's Duplicate on every tab, and `x` select-line; the toggles keep their
+    # own letters inside Display… (#1274), where nothing competes.
     menu.verb_for('d').try(&.id).should eq("repeater.duplicate-subtab")
-    menu.verb_for('D').try(&.id).should eq("repeater.toggle-diff")
+    menu.verb_for('D').should be_nil
     menu.verb_for('x').try(&.id).should eq("repeater.select-line")
-    menu.verb_for('h').try(&.id).should eq("repeater.toggle-resp-hex")
+    menu.activate(menu.entry_for('Z')).should be_nil
+    menu.entries.map(&.id).should eq(%w[repeater.toggle-resp-hex repeater.toggle-pretty repeater.toggle-unicode repeater.toggle-diff])
+    menu.verb_for('p').try(&.id).should eq("repeater.toggle-pretty")
+    menu.verb_for('d').try(&.id).should eq("repeater.toggle-diff")
+    menu.verb_for('x').try(&.id).should eq("repeater.toggle-resp-hex")
   end
 
   it "populates Fuzzer's :subtab group with rename/close/duplicate (Round 4 — was raw key-dispatch)" do
@@ -1324,5 +1329,23 @@ describe "the space menu's verb families (#1274 WP9)" do
     menu.level.should eq(family)
     menu.selected.should eq(1)
     menu.selected_verb.try(&.id).should eq("demo.b")
+  end
+
+  # The Runner's half of stickiness, which no spec can reach through a tty-less Runner: the
+  # card comes back only when the member opened nothing (the blocker snapshots match) and the
+  # view in front is still the one the card describes.
+  it "resumes a sticky card only over the same view with nothing opened" do
+    was = Gori::Tui::ActionContext.new(Gori::Verb::Scope::Repeater, :request, subtabs: true)
+    quiet = {:none, nil, false, false}
+    SpaceMenu.resume_sticky?(quiet, quiet, was, was).should be_true
+    # A member that opened a picker, an overlay or a field that takes the keys.
+    SpaceMenu.resume_sticky?(quiet, {:none, nil, false, true}, was, was).should be_false
+    SpaceMenu.resume_sticky?(quiet, {:columns, nil, false, false}, was, was).should be_false
+    # A member that moved focus to another pane, tab or strip.
+    SpaceMenu.resume_sticky?(quiet, quiet, was, Gori::Tui::ActionContext.new(Gori::Verb::Scope::Repeater, :response, subtabs: true)).should be_false
+    SpaceMenu.resume_sticky?(quiet, quiet, was, Gori::Tui::ActionContext.new(Gori::Verb::Scope::Fuzzer, :request, subtabs: true)).should be_false
+    SpaceMenu.resume_sticky?(quiet, quiet, was, Gori::Tui::ActionContext.new(Gori::Verb::Scope::Repeater, :request)).should be_false
+    # The marks banner is state the card redraws, not a different view.
+    SpaceMenu.resume_sticky?(quiet, quiet, was, Gori::Tui::ActionContext.new(Gori::Verb::Scope::Repeater, :request, subtabs: true, banner: "2 MARKED")).should be_true
   end
 end

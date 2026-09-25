@@ -95,7 +95,7 @@ class Gori::Tui::RepeaterView
     @grpc_mode && @grpc_reframable && !@grpc_compressed && !grpc_field_binding.nil?
   end
 
-  # `␣E` / `repeater.toggle-grpc-fields`. Returns the new state; the controller owns the
+  # `␣Pf` / `repeater.toggle-grpc-fields`. Returns the new state; the controller owns the
   # refusal sentences, because "no descriptor set" and "not a unary call" are different
   # problems with different fixes and the view cannot phrase either better than it can.
   def toggle_grpc_fields : Bool
@@ -495,7 +495,7 @@ class Gori::Tui::RepeaterView
            elsif note = row.note
              "⚠ #{note}"
            elsif row.editable?
-             focused ? "↵ edit this field · ␣E back to the head" : "␣E back to the head"
+             focused ? "↵ edit this field · ␣Pf back to the head" : "␣Pf back to the head"
            else
              ""
            end

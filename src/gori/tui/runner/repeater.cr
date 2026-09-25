@@ -173,4 +173,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   def repeater_read_mode? : Bool
     repeater_controller.repeater_read_mode?
   end
+
+  def repeater_split_request? : Bool
+    return false unless current_tab == :repeater && (v = repeater_controller.current_view)
+    v.decode_mode? || v.ws_mode?
+  end
 end

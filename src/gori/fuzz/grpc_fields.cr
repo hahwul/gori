@@ -88,7 +88,7 @@ module Gori::Fuzz
   # what applies it. Which is also why a field the schema does not declare, and one whose wire
   # type the declaration contradicts, are refused as positions rather than swept: there is no
   # declaration to encode by, and picking the schema over the bytes is the guess the whole lens
-  # exists to avoid. The Repeater's `␣E` form draws that line by rendering those rows read-only;
+  # exists to avoid. The Repeater's `␣Pf` form draws that line by rendering those rows read-only;
   # both surfaces read it off the same `Protobuf::Lens.read` + `Protobuf::Encoder.seed` pair, so
   # they cannot come to disagree about which fields exist and which can be typed.
   #
@@ -118,7 +118,7 @@ module Gori::Fuzz
   # ## Framing
   #
   # A re-encoded message changes length, so the 5-byte gRPC prefix is rebuilt by
-  # `Proxy::H2::Grpc.frame` — the framer the Repeater's `␣R:FRAME` path is made of. Not a second
+  # `Proxy::H2::Grpc.frame` — the framer the Repeater's `␣Pr:FRAME` path is made of. Not a second
   # framer, and not `Config#reframe_grpc?`: that knob repairs a prefix a byte-level payload left
   # stale, and is documented as opt-in because a deliberately-wrong prefix is one of the standard
   # gRPC parser tests. Here the message was re-encoded THROUGH the schema at the operator's
@@ -250,7 +250,7 @@ module Gori::Fuzz
         raise GrpcFieldError.new(
           "this message's frame flag says the payload is COMPRESSED, and compressed bytes are " \
           "not a protobuf message until something inflates them — which gori does not. " \
-          "The same carve-out the Repeater's ␣E form and every other gRPC pane make")
+          "The same carve-out the Repeater's ␣Pf form and every other gRPC pane make")
       end
       if msg.trailer
         raise GrpcFieldError.new("this frame is a grpc-web TRAILER frame (header text), not a protobuf message")
@@ -379,7 +379,7 @@ module Gori::Fuzz
     end
 
     # One level of the walk. Reads every field through `Protobuf::Lens.read` — the SAME call
-    # the Repeater's `␣E` form reads its rows through — so "which fields exist, and which of
+    # the Repeater's `␣Pf` form reads its rows through — so "which fields exist, and which of
     # them can carry a typed value" has exactly one author.
     private def self.descend(schema : Protobuf::Schema, type : Protobuf::Schema::MessageType,
                              msg : Protobuf::Message, segments : Array(Segment),
@@ -435,7 +435,7 @@ module Gori::Fuzz
       if r.disagrees
         raise GrpcFieldError.new(
           "#{spec.inspect}: #{r.note} — re-encoding here would mean picking the schema over the " \
-          "bytes, which is the guess the lens exists to avoid (the Repeater's ␣E form keeps this " \
+          "bytes, which is the guess the lens exists to avoid (the Repeater's ␣Pf form keeps this " \
           "row read-only for the same reason). Mark its octets with §…§ to fuzz them raw")
       end
       if r.nested
@@ -581,7 +581,7 @@ module Gori::Fuzz
     end
 
     # `{the request, the framed message's `[start, end)` in it}`. The head as rendered, then the
-    # message re-framed by `Proxy::H2::Grpc.frame` — the framer the Repeater's `␣R:FRAME` path
+    # message re-framed by `Proxy::H2::Grpc.frame` — the framer the Repeater's `␣Pr:FRAME` path
     # is built on, whose flag byte is `0x00` here because `build` refuses any other one.
     private def splice(raw : Bytes, msg : Bytes) : {Bytes, {Int32, Int32}}
       # The body is byte-constant in SIZE across variations of the BASE template (every `§…§` is

@@ -1743,7 +1743,7 @@ module Gori::Tui
           "race needs at least 2 connections — set Race to 2 or more (^O config)"
         end
       in Fuzz::PlanError::Reason::TlsPreset
-        # The ORDINARY path here, unlike the Repeater's `␣P` (which cycles known names and so
+        # The ORDINARY path here, unlike the Repeater's `␣Pt` (which cycles known names and so
         # cannot produce one): the advanced card's TLS fingerprint row is a TEXT field, so a
         # typo reaches this branch on the operator's first run. `ex.message` already names
         # every preset that does exist.
@@ -1887,6 +1887,14 @@ module Gori::Tui
       i = order.index(@sort) || 0
       @sort = order[(i + 1) % order.size]
       "sort: #{@sort}"
+    end
+
+    def matched_only? : Bool
+      @matched_only
+    end
+
+    def dist_shown? : Bool
+      @show_dist
     end
 
     def toggle_matched_only : String

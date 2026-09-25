@@ -402,6 +402,10 @@ private class FakeContext < ExecContext
     false
   end
 
+  def repeater_split_request? : Bool
+    false
+  end
+
   def fuzz_selected : Nil
     @calls << :fuzz_selected
   end

@@ -457,6 +457,20 @@ module Gori::Tui
       end
     end
 
+    # A boolean toggle's `ExecContext#menu_state`, drawn as ●/○.
+    def self.on_off(on : Bool) : String
+      on ? "on" : "off"
+    end
+
+    # Whether a sticky family's card comes back after one of its members ran. `before` and
+    # `after` are the Runner's snapshots of every surface a verb could open (overlays, pickers,
+    # prompts, a pane that took the keys): any change means the member asked for something of
+    # its own, and the card would cover it. `was` is the view the card was built for and
+    # `here` the one in front now; a card describing another view is closed, not redrawn.
+    def self.resume_sticky?(before, after, was : ActionContext, here : ActionContext) : Bool
+      before == after && here.scope == was.scope && here.section == was.section && here.subtabs == was.subtabs
+    end
+
     # What a family row shows in the hint column: it opens a card, the way a title's `…` says.
     FAMILY_HINT = "›"
 

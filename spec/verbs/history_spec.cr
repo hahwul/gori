@@ -141,10 +141,10 @@ describe "Gori::Verbs.register_history" do
       r["history.clear"].chords.should eq([shift_chord('X')])
       r["history.clear"].menu_key.should eq('X')
       r["probe.clear"].menu_key.should eq('X')
-      r["history.columns"].menu_key.should eq('C')
-      # The hide-static lens (#1239): menu-only, beside `v` — its first door is the `v` picker.
+      r.menu_keys("history.columns").should eq(['Z', 'c']) # Display… (#1274)
+      # The hide-static lens (#1239): menu-only, a Display… row — its first door is the `v` picker.
       r["history.toggle-static"].chords.should be_empty
-      r["history.toggle-static"].menu_key.should eq('V')
+      r.menu_keys("history.toggle-static").should eq(['Z', 's'])
       verb_intents(r, "history.toggle-static").should eq([:toggle_static_assets])
       r["history.toggle-static"].available?(on(:history)).should be_true
       r["history.toggle-static"].available?(on(:project)).should be_false # Body is shared
@@ -172,7 +172,7 @@ describe "Gori::Verbs.register_history" do
     it "keeps the in-place actions from closing the detail" do
       verb_intents(r, "detail.compare").should eq([:comparer_add_selected])
       verb_intents(r, "detail.copy").should eq([:detail_copy])
-      verb_intents(r, "detail.copy-flow").should eq([:copy_selection])
+      r["detail.copy-flow"]?.should be_nil # Copy as… → Raw request (#1274)
       verb_intents(r, "detail.copy-as").should eq([:copy_as_open])
       verb_intents(r, "detail.add-host").should eq([:scope_add_host])
       verb_intents(r, "detail.delete").should eq([:history_delete])
@@ -201,7 +201,9 @@ describe "Gori::Verbs.register_history" do
         r[id].hidden?.should be_false
         r[id].scope.should eq(Gori::Verb::Scope::HistoryDetail)
       end
-      r["detail.toggle-hex"].menu_key.should eq('e') # ^X has no menu key; plain 'x' is select-line
+      # Display… rows (#1274): hex is `Z x` here and in both Repeater panes.
+      %w[detail.toggle-hex detail.toggle-ws detail.toggle-pretty detail.toggle-unicode]
+        .map { |id| r.menu_keys(id) }.should eq([['Z', 'x'], ['Z', 'b'], ['Z', 'p'], ['Z', 'u']])
       verb_intents(r, "detail.toggle-hex").should eq([:toggle_detail_hex])
       verb_intents(r, "detail.toggle-ws").should eq([:toggle_reveal])
       verb_intents(r, "detail.toggle-pretty").should eq([:toggle_pretty])
@@ -287,14 +289,14 @@ describe "Gori::Verbs.register_history" do
       verb_intents(r, "repeater.toggle-sni").should eq([:repeater_toggle_sni])
     end
 
-    it "leaves bare `d` off the Repeater — diff is ⇧D on the chord AND in the menu" do
+    it "leaves bare `d` off the Repeater — diff is ⇧D on the chord, `Z d` in the menu" do
       # The one scope where `d` was not "delete the selected thing". The reflex now finds
       # nothing bound rather than a display toggle. The MENU letter followed the chord to the
       # capital: `d` is Duplicate on all nine sub-tab strips (#1055) and the SUB-TABS bucket
       # renders inside the :response view, so the plain letter was no longer this verb's to
       # keep — which leaves the row and the keyboard spelling it the same way.
       r["repeater.toggle-diff"].chords.should eq([shift_chord('D')])
-      r["repeater.toggle-diff"].mnemonic.should eq('D')
+      r.menu_keys("repeater.toggle-diff").should eq(['Z', 'd']) # Display… (#1274)
       bare_d = typed_chord("d")
       r.select { |v| v.scope == Gori::Verb::Scope::Repeater && v.chords.includes?(bare_d) }.should be_empty
     end

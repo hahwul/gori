@@ -141,7 +141,8 @@ describe "fuzz.toggle-sni verb" do
     v.scope.should eq(Gori::Verb::Scope::Fuzzer)
     v.section.should eq(:target)
     v.chords.map(&.label).should eq(["ctrl-s"])
-    v.mnemonic.should eq('i') # 's' is fuzz.stop in Fuzzer COMMON
+    # A Protocol… row, `P s` as on the Repeater: at level 1 `s` is fuzz.stop (#1274).
+    Gori::Verbs.registry.menu_keys(v.id).should eq(['P', 's'])
     # The chord/mnemonic pair must not collide with anything the space menu can show
     # alongside it (COMMON ∪ :target) — `validate_menu_keys!` is the boot-time check.
     Gori::Verbs.registry.validate_menu_keys!

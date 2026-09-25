@@ -5,10 +5,10 @@
 class Gori::Tui::RepeaterView
   # The HANDSHAKE REQUEST card's right-chained badges, right-to-left — ONE list, read by the
   # draw (`render_request`, for both the badges and where the mode chip chains to) and by the
-  # hit-test below. `␣K:KEY` was drawn from one place and hit-tested from another, and the
+  # hit-test below. `␣Pw:KEY` was drawn from one place and hit-tested from another, and the
   # second one did not list it: the badge was a dead cell, while HTTP's `^L:CL`/`^U:PRETTY`
   # next to it have always been clickable.
-  WS_BADGES = [{:send, "^R", "SEND"}, {:ws_key, "␣K", "KEY"}] of {Symbol, String, String}
+  WS_BADGES = [{:send, "^R", "SEND"}, {:ws_key, "␣Pw", "KEY"}] of {Symbol, String, String}
 
   # Border-chrome hit-test for REQUEST/RESPONSE toggle chips. Shares geometry with
   # render_request / render_response_chrome (label strings + start_x / right chain).
@@ -23,7 +23,7 @@ class Gori::Tui::RepeaterView
         return :target_mode
       end
       _, tls_x, tr_edge = target_chrome_chain(rect)
-      # The `␣P` fingerprint chip (#844). Tested against the SAME `tls_chip_label` the draw
+      # The `␣Pt` fingerprint chip (#844). Tested against the SAME `tls_chip_label` the draw
       # writes, at the same x the chain placed it — the geometry is inverted exactly, not
       # re-derived, which is the rule the `option_cycle` cue miss in #839 was about.
       if tls_x && mx >= tls_x && mx < tls_x + tls_chip_label.size
@@ -61,7 +61,7 @@ class Gori::Tui::RepeaterView
     end
 
     # REQUEST badges: ^R:SEND is always rightmost (primary action). Then CL/PRETTY (or HEX,
-    # or gRPC's ^X:MSG, or WS's ␣K:KEY) when drawn; the NOR/INS mode chip chains left of
+    # or gRPC's ^X:MSG, or WS's ␣Pw:KEY) when drawn; the NOR/INS mode chip chains left of
     # those. Decode / CHAIN splits keep chrome on the top card.
     req_card = req_split? ? decode_split(left)[0] : left
     if req_card.w >= 2 && my == req_card.y
@@ -78,13 +78,13 @@ class Gori::Tui::RepeaterView
                  # Chains left of whichever hex chip is drawn — in BOTH states, matching
                  # render_request. Recompute the 5-byte length prefix over the payload, or send
                  # the captured one in front of it (DESIGN.md §7).
-                 b << {:grpc_reframe, "␣R", "FRAME"} if @grpc_reframable
+                 b << {:grpc_reframe, "␣Pr", "FRAME"} if @grpc_reframable
                  # Same condition `render_request` draws it under, so the live cells are
                  # exactly the painted ones — the rule this list already keeps for FRAME.
-                 b << {:grpc_fields, "␣E", "FIELDS"} if grpc_fields_available?
+                 b << {:grpc_fields, "␣Pf", "FIELDS"} if grpc_fields_available?
                  b
                elsif ws_mode?
-                 WS_BADGES # ^R:SEND + ␣K:KEY — the list render_request draws from
+                 WS_BADGES # ^R:SEND + ␣Pw:KEY — the list render_request draws from
                elsif @req_hex_edit
                  [{:send, "^R", "SEND"}, {:req_hex, "^X", "HEX"}] of {Symbol, String, String}
                else
@@ -96,7 +96,7 @@ class Gori::Tui::RepeaterView
       # Mode chip: drawn on every non-hex request card — plain HTTP, the WS handshake and the
       # gRPC head are all mode-switched text editors. Hex is the exception and draws none (a
       # nibble cursor has no READ/INS), so hit-testing one there would invent a live cell over
-      # a badge that was never painted — the inverse of the dead `␣K:KEY` this pass fixed.
+      # a badge that was never painted — the inverse of the dead `␣Pw:KEY` this pass fixed.
       # …and none while the FIELDS form is up, for the same reason: `render_request`'s
       # `elsif @grpc_fields` branch draws the three gRPC chips and then the form, never
       # `Frame.mode_badge` — so hit-testing one here would answer clicks on cells nothing

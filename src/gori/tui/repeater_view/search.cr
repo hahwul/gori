@@ -56,6 +56,10 @@ class Gori::Tui::RepeaterView
 
   # Decode JSON Unicode escapes in the response body on demand. The original result bytes and
   # the search/copy text remain unchanged.
+  def unicode_decoded? : Bool
+    @decode_unicode
+  end
+
   def toggle_unicode_decoding : Nil
     @decode_unicode = !@decode_unicode
     drop_resp_view_cache

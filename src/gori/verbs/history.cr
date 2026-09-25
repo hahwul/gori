@@ -46,11 +46,11 @@ module Gori
       # and settles into two TIERS: **freeze** in every evidence context (the Issues detail and
       # the evidence card already agreed), and **find** on the sub-tab strip, which is a
       # different tier and cannot collide. Follow is a session-rare toggle — flipped once and
-      # left — which is the L3 price the key budget names, so it keeps the 'f' letter in the
-      # menu and gives up the bare key.
+      # left — which is the L3 price the key budget names, so it gives up the bare key and is a
+      # Display… row (`Z f`, #1274).
       r.register Verb::Definition.new(
         "history.toggle-follow", "Toggle follow", "Follow newest flows (tail) on/off",
-        Verb::Scope::Body, available: in_history, mnemonic: 'f', group: :view) { |ctx| ctx.toggle_follow; nil }
+        Verb::Scope::Body, available: in_history, intent: :follow, group: :view) { |ctx| ctx.toggle_follow; nil }
 
       # `v` is a bare-key (L1) claim, argued the same way `t` is below. A view is the answer to
       # "what am I looking at", asked every time the operator returns to the tab and every time
@@ -68,16 +68,15 @@ module Gori
       # The hide-static lens (#1239) — images, fonts and media folded out of the list, over
       # whichever view is on. Menu-only, NO chord: it is flipped once per engagement and left,
       # the L3 shape `f` (follow) settled into, and its first door is the `v` picker's top row.
-      # `V` beside `v` because the two are the same question — what am I looking at — and `V` is
-      # free across Scope::Body.
+      # A Display… row (`Z s`), the same letter as the Sitemap's twin.
       r.register Verb::Definition.new(
         "history.toggle-static", "Toggle static assets", "Hide images, fonts and media from the list on/off (shared with the Sitemap)",
-        Verb::Scope::Body, available: in_history, mnemonic: 'V', group: :view) { |ctx| ctx.toggle_static_assets; nil }
+        Verb::Scope::Body, available: in_history, intent: :static_assets, group: :view) { |ctx| ctx.toggle_static_assets; nil }
 
       # Menu-only, no chord. A column set is arranged ONCE and then read for the rest of the
       # engagement — the opposite shape from `v`, which is flipped many times an hour and earns
-      # its bare key on that traffic. `C` is free across Body COMMON, and 'c' is already a Global
-      # chord (capture).
+      # its bare key on that traffic. A Display… row (`Z c`); it opens an editor, so the sticky
+      # card closes behind it.
       # Menu-only, no chord, and deliberately so: this is the one History verb that puts a
       # request on the wire. A bare key next to the navigation cluster would make an outbound
       # call one mistyped keystroke away, which is the shape P4 exists to prevent. `G` is free
@@ -95,7 +94,7 @@ module Gori
       r.register Verb::Definition.new(
         "history.columns", "Columns…", "Add, reorder or remove the values the list draws beside each flow (a header, a JSON field, a regex capture)",
         Verb::Scope::Body,
-        available: in_history, mnemonic: 'C', group: :view) { |ctx| ctx.history_columns_edit; nil }
+        available: in_history, intent: :columns, group: :view) { |ctx| ctx.history_columns_edit; nil }
 
       # --- multi-select marks (#442) ---
       # Marks make the EXISTING space menu act on N flows — every batch verb below reads
@@ -414,23 +413,26 @@ module Gori
 
       # Request-pane VIEW toggles — keymap-driven (Repeater scope) so they're rebindable.
       # The Runner delegators carry the pane-gating + status messages. Hex-edit the
-      # request bytes, switch its envelope/decoded split, pretty-print its body —
-      # mnemonics added so they front the :request space-menu group (previously
-      # ctrl-only, so menu_key was nil and they were invisible there).
-      # 'x', matching its own ^X. It was 'b', and `b` is the app's WHITESPACE letter: the
-      # global reveal is ^B (`view.reveal-ws`) and the History detail binds bare `b` to
-      # `detail.toggle-ws`. So the Repeater's menu read `b` as hex while the drill-in one
-      # keystroke away read it as whitespace. `x` was free in `common ∪ :request` — the
-      # response pane's is not (`repeater.select-line` owns `x` there), which is why
-      # `repeater.toggle-resp-hex` keeps 'h' and `detail.toggle-hex` keeps 'e'.
+      # request bytes, switch its envelope/decoded split, pretty-print its body. Hex is a
+      # Display… row and the transport switches Protocol… rows (#1274): at level 1 hex could
+      # not be `x` in the response pane or the History detail, where `x` is select-line, so it
+      # read three letters in three panes; one level down it is `Z x` in all of them.
       r.register Verb::Definition.new(
         "repeater.toggle-hex", "Toggle hex edit", "Edit the request as raw bytes — sends exactly what you type",
         Verb::Scope::Repeater, [Verb::Chord.new("x", ctrl: true)],
-        available: in_repeater, mnemonic: 'x', section: :request) { |ctx| ctx.repeater_toggle_hex; nil }
+        available: in_repeater, intent: :hex, section: :request) { |ctx| ctx.repeater_toggle_hex; nil }
+      # ^T only: on a tab with no envelope/decoded split it drops a § marker, a WRITE, so it is
+      # no Display… row. `repeater.toggle-envelope` below is that row, and exists only where
+      # there is a split to flip (#1274).
       r.register Verb::Definition.new(
         "repeater.toggle-decoded", "Switch envelope/decoded", "SAML/GraphQL/WS flow: switch envelope/decoded · otherwise: insert a § marker at the cursor",
         Verb::Scope::Repeater, [Verb::Chord.new("t", ctrl: true)],
-        available: in_repeater, mnemonic: 'V', section: :request) { |ctx| ctx.repeater_toggle_decoded; nil }
+        available: in_repeater, section: :request) { |ctx| ctx.repeater_toggle_decoded; nil }
+      r.register Verb::Definition.new(
+        "repeater.toggle-envelope", "Envelope / decoded", "SAML/GraphQL/WS flow: switch the request pane between the envelope and the decoded payload",
+        Verb::Scope::Repeater, [] of Verb::Chord,
+        available: ->(ctx : Verb::ExecContext) { ctx.repeater_split_request? },
+        intent: :envelope, section: :request) { |ctx| ctx.repeater_toggle_decoded; nil }
       r.register Verb::Definition.new(
         "repeater.pretty-request", "Pretty-print request", "Format the request body in-place (JSON/XML/form-urlencoded)",
         Verb::Scope::Repeater, [Verb::Chord.new("u", ctrl: true)],
@@ -441,23 +443,23 @@ module Gori
       r.register Verb::Definition.new(
         "repeater.toggle-sni", "Toggle SNI override", "Override the TLS SNI on the target pane (dialed host unchanged)",
         Verb::Scope::Repeater, [Verb::Chord.new("s", ctrl: true)],
-        available: in_repeater, mnemonic: 's', section: :target) { |ctx| ctx.repeater_toggle_sni; nil }
-      # Target-pane cycle, no chord. Same reasoning `␣K` and `␣R` give: the ctrl- space in
+        available: in_repeater, intent: :sni, section: :target) { |ctx| ctx.repeater_toggle_sni; nil }
+      # Target-pane cycle, no chord. Same reasoning `␣Pw` and `␣Pr` give: the ctrl- space in
       # Repeater is dense, a fingerprint is a per-tab decision an operator makes once rather
-      # than a key they reach for mid-edit, and the TARGET band carries a `␣P:…` chip either
+      # than a key they reach for mid-edit, and the TARGET band carries a `␣Pt:…` chip either
       # way — so the state is on screen (and clickable) without opening the menu.
       r.register Verb::Definition.new(
         "repeater.cycle-tls-preset", "Cycle TLS fingerprint",
         "Shape THIS TAB's ClientHello like a named browser (chrome / firefox / safari / curl) instead of gori's own, for this tab only — the way to ask whether an origin answers differently by handshake, with a second tab on the same host set to a different preset. The destination's outbound_tls client certificate, protocol range and permissive flag still apply, and settings.json is not touched. An APPROXIMATION of that client's hello, not a byte-exact JA3 match: `gori settings tls-fingerprint HOST --preset NAME` prints what actually goes out. https targets only",
-        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'P', section: :target) { |ctx| ctx.repeater_cycle_tls_preset; nil }
+        Verb::Scope::Repeater, available: in_repeater, intent: :tls_fingerprint, section: :target) { |ctx| ctx.repeater_cycle_tls_preset; nil }
       r.register Verb::Definition.new(
         "repeater.toggle-auto-content-length", "Toggle auto Content-Length", "Recompute Content-Length from the body on send",
         Verb::Scope::Repeater, [Verb::Chord.new("l", ctrl: true)],
-        available: in_repeater, mnemonic: 'L', section: :request) { |ctx| ctx.repeater_toggle_auto_content_length; nil }
+        available: in_repeater, intent: :auto_content_length, section: :request) { |ctx| ctx.repeater_toggle_auto_content_length; nil }
       r.register Verb::Definition.new(
         "repeater.toggle-http2", "Toggle HTTP/2 (h2)", "Send this request over HTTP/2 or HTTP/1.1, overriding the captured protocol",
         Verb::Scope::Repeater, [Verb::Chord.new("v", ctrl: true)],
-        available: in_repeater, mnemonic: 'h', section: :request) { |ctx| ctx.repeater_toggle_http2; nil }
+        available: in_repeater, intent: :http2, section: :request) { |ctx| ctx.repeater_toggle_http2; nil }
       # WebSocket handshake only. No chord: `Sec-WebSocket-Key` regeneration is a per-session
       # decision an operator makes once and then forgets, not a key they reach for mid-edit,
       # and the ctrl- space in Repeater is already dense. The HANDSHAKE REQUEST pane carries a
@@ -465,23 +467,23 @@ module Gori
       r.register Verb::Definition.new(
         "repeater.toggle-ws-key", "Toggle Sec-WebSocket-Key reuse",
         "WebSocket: send the handshake's OWN Sec-WebSocket-Key instead of a fresh one — the only way to test an absent, short, duplicated or non-base64 key (off by default: a fresh key avoids a server's replay guard)",
-        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'K', section: :request) { |ctx| ctx.repeater_toggle_ws_key; nil }
-      # gRPC tab only, and no chord for the same reason `␣K` has none: the ctrl- space in
+        Verb::Scope::Repeater, available: in_repeater, intent: :ws_key, section: :request) { |ctx| ctx.repeater_toggle_ws_key; nil }
+      # gRPC tab only, and no chord for the same reason `␣Pw` has none: the ctrl- space in
       # Repeater is dense, this is a per-tab decision rather than a mid-edit key, and the
-      # GRPC REQUEST pane carries a `␣R:FRAME` badge either way — so the state is on screen
+      # GRPC REQUEST pane carries a `␣Pr:FRAME` badge either way — so the state is on screen
       # (and clickable) without opening the menu.
       r.register Verb::Definition.new(
         "repeater.toggle-grpc-reframe", "Toggle gRPC reframe",
         "gRPC: recompute the 5-byte length prefix over the payload actually being sent (ON by default in this tab, so a ^X hex edit produces a well-formed unary message; turn it OFF to send the captured prefix, which is the `gori run repeater send` default and a standard parser test). Unary only — a 0-/multi-message body is sent verbatim either way",
-        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'R', section: :request) { |ctx| ctx.repeater_toggle_grpc_reframe; nil }
-      # gRPC tab only, and no chord for the same reason `␣R` and `␣K` have none: the ctrl-
+        Verb::Scope::Repeater, available: in_repeater, intent: :grpc_reframe, section: :request) { |ctx| ctx.repeater_toggle_grpc_reframe; nil }
+      # gRPC tab only, and no chord for the same reason `␣Pr` and `␣Pw` have none: the ctrl-
       # space in Repeater is dense, this is a per-payload decision rather than a mid-edit key,
-      # and the GRPC REQUEST pane carries a `␣E:FIELDS` badge wherever the form is available —
+      # and the GRPC REQUEST pane carries a `␣Pf:FIELDS` badge wherever the form is available —
       # so the state is on screen (and clickable) without opening the menu.
       r.register Verb::Definition.new(
         "repeater.toggle-grpc-fields", "Toggle gRPC field editor",
         "gRPC: edit the request message BY FIELD through the loaded .proto — pick a schema-known field, type a value, and the message is re-encoded with every other byte copied from the capture. Needs a descriptor set that declares this rpc (Project → Proto schema) and a unary call; a field the schema does not declare, or one whose wire type it contradicts, stays read-only and is edited with ^X",
-        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'E', section: :request) { |ctx| ctx.repeater_toggle_grpc_fields; nil }
+        Verb::Scope::Repeater, available: in_repeater, intent: :grpc_fields, section: :request) { |ctx| ctx.repeater_toggle_grpc_fields; nil }
       r.register Verb::Definition.new(
         "repeater.send-group", "Send group (one connection)",
         "Pipeline every request (split on a lone %%% line) over ONE keep-alive connection — active request-smuggling / keep-alive reuse — and show each response",
@@ -504,28 +506,26 @@ module Gori
       # NOT Chord.new("D") — Keybind.from_event normalises a typed capital to
       # shift+lowercase.
       #
-      # The MENU letter is 'D', so the two now agree. It read the plain 'd' this section
-      # had always used, which the SUB-TABS bucket claims for Duplicate on all nine strips
-      # — and a bucket that renders inside the :response view cannot share it. Landing on
-      # the capital the chord already carries is the cheapest possible move: one letter,
-      # one shift, and the row in the menu spells what the keyboard does.
+      # In the menu it is Display… → `d` (`Z d`, #1274): the level-1 `d` is the SUB-TABS
+      # bucket's Duplicate, which renders inside the :response view, but one level down
+      # nothing competes for it.
       r.register Verb::Definition.new(
         "repeater.toggle-diff", "Toggle diff", "Switch the response pane between the raw response and a diff against the previous one",
         Verb::Scope::Repeater, [Verb::Chord.new("d", shift: true)],
-        available: in_repeater, mnemonic: 'D', section: :response,
+        available: in_repeater, intent: :diff, section: :response,
         chord_sections: [:response]) { |ctx| ctx.repeater_toggle_resp_diff; nil }
       r.register Verb::Definition.new(
         "repeater.toggle-resp-hex", "Hex dump", "Toggle a raw hex dump of the response bytes",
-        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'h', section: :response) { |ctx| ctx.repeater_toggle_resp_hex; nil }
+        Verb::Scope::Repeater, available: in_repeater, intent: :hex, section: :response) { |ctx| ctx.repeater_toggle_resp_hex; nil }
       r.register Verb::Definition.new(
         "repeater.toggle-pretty", "Pretty bodies", "Pretty-print JSON/XML/form/… response bodies (display only)",
         Verb::Scope::Repeater, [Verb::Chord.new("p")],
-        available: in_repeater, mnemonic: 'p', section: :response,
+        available: in_repeater, intent: :pretty, section: :response,
         chord_sections: [:response]) { |ctx| ctx.toggle_pretty; nil }
       r.register Verb::Definition.new(
         "repeater.toggle-unicode", "Decode Unicode escapes", "Display JSON \\u escapes as characters (display only)",
         Verb::Scope::Repeater, [Verb::Chord.new("u")],
-        available: in_repeater_read, mnemonic: 'u', section: :response) { |ctx| ctx.repeater_toggle_unicode_escapes; nil }
+        available: in_repeater_read, intent: :unicode, section: :response) { |ctx| ctx.repeater_toggle_unicode_escapes; nil }
 
       # --- detail view ---
       # esc/q always leave. → walks forward through the panes (REQ→RES→FRAMES) and clamps at
@@ -611,24 +611,24 @@ module Gori
         hidden: true) { |ctx| ctx.detail_step_item(-1); nil }
 
       # The view-toggles are NON-hidden so they front the detail's "space" action menu
-      # (and the palette's typed search from the detail, #1282). ws/pretty take
-      # their menu key from their plain chord (b/p) — exactly the key you'd press. Hex is
-      # ^X (plain `x` = select-line), so it carries an explicit 'e' mnemonic for the menu.
+      # (and the palette's typed search from the detail, #1282). They are Display… rows
+      # (#1274) on the letters of their keys — `Z b`, `Z p`, `Z u` — and hex is `Z x`, the
+      # letter its ^X spells, which level 1 could not give it beside select-line's `x`.
       r.register Verb::Definition.new(
         "detail.toggle-hex", "Hex view", "Toggle a raw hex dump of the request/response bytes",
-        Verb::Scope::HistoryDetail, [Verb::Chord.new("x", ctrl: true)], mnemonic: 'e', group: :view) { |ctx| ctx.toggle_detail_hex; nil }
+        Verb::Scope::HistoryDetail, [Verb::Chord.new("x", ctrl: true)], intent: :hex, group: :view) { |ctx| ctx.toggle_detail_hex; nil }
 
       r.register Verb::Definition.new(
         "detail.toggle-ws", "Reveal whitespace", "Show whitespace/CR/LF as glyphs (·→␍␊)",
-        Verb::Scope::HistoryDetail, [Verb::Chord.new("b")], group: :view) { |ctx| ctx.toggle_reveal; nil }
+        Verb::Scope::HistoryDetail, [Verb::Chord.new("b")], intent: :whitespace, group: :view) { |ctx| ctx.toggle_reveal; nil }
 
       r.register Verb::Definition.new(
         "detail.toggle-pretty", "Pretty bodies", "Pretty-print JSON/XML/form/… bodies (display only)",
-        Verb::Scope::HistoryDetail, [Verb::Chord.new("p")], group: :view) { |ctx| ctx.toggle_pretty; nil }
+        Verb::Scope::HistoryDetail, [Verb::Chord.new("p")], intent: :pretty, group: :view) { |ctx| ctx.toggle_pretty; nil }
 
       r.register Verb::Definition.new(
         "detail.toggle-unicode", "Decode Unicode escapes", "Display JSON \\u escapes as characters (display only)",
-        Verb::Scope::HistoryDetail, [Verb::Chord.new("u")], mnemonic: 'u', group: :view) { |ctx| ctx.toggle_unicode_escapes; nil }
+        Verb::Scope::HistoryDetail, [Verb::Chord.new("u")], intent: :unicode, group: :view) { |ctx| ctx.toggle_unicode_escapes; nil }
 
       # The flow actions mirror the History list's "space" menu so the muscle memory
       # carries into the drill-in (the user's goal). Each keeps the list's exact chord
@@ -666,28 +666,19 @@ module Gori
 
       # The single smart Copy over the navigable detail text: the selection when one is held,
       # else the whole pane (the rule every other tab's Copy already follows — see
-      # repeater.copy above). Flow copy lives in the space menu only (history.copy /
-      # detail.copy-flow).
+      # repeater.copy above). The flow's raw request is Copy as… → Raw request here, and
+      # `y` on the list (history.copy); the detail's own "Copy flow" row folded into the
+      # former (#1274).
       r.register Verb::Definition.new(
         "detail.copy", "Copy", "Copy the selected text, or the whole pane if nothing is selected, to the clipboard",
         Verb::Scope::HistoryDetail, [Verb::Chord.new("y")],
         intent: :copy, group: :copy) { |ctx| ctx.detail_copy; nil }
 
       # "Copy as X" for the drill-in: same focus-aware format picker as Repeater, over the
-      # REQUEST/RESPONSE pane bytes. Menu key 'Y' pairs with copy's 'y' (free in the
-      # HistoryDetail menu, whose keys are y/O/r/a/c/z/h/x/b/p).
+      # REQUEST/RESPONSE pane bytes. Menu key 'Y' pairs with copy's 'y'.
       r.register Verb::Definition.new(
         "detail.copy-as", "Copy as…", "Pick a copy format for this pane (url/headers/body/cookies/curl/raw)",
         Verb::Scope::HistoryDetail, intent: :copy_as, group: :copy) { |ctx| ctx.copy_as_open; nil }
-
-      # 'F' for flow, not 'O': `O` is the OAST-payload letter in three scopes
-      # (`history.oast-copy` in this very list, `repeater.oast-insert`, `fuzzer.oast-insert`),
-      # and HistoryDetail carries no OAST verb — so one `↵` into the drill-in the same letter
-      # silently stopped meaning "OAST payload" and started meaning "copy the whole flow".
-      # `y` cannot take it here: in the detail that is `detail.copy`, the SELECTION copy.
-      r.register Verb::Definition.new(
-        "detail.copy-flow", "Copy flow", "Copy this flow's raw request to the clipboard",
-        Verb::Scope::HistoryDetail, mnemonic: 'F', group: :copy) { |ctx| ctx.copy_selection; nil }
 
       # Send the open flow to the Fuzzer (mirrors history.fuzz ⇧I / Send flow to… from the list) —
       # close the detail first so it doesn't float over the Fuzzer tab.
@@ -755,20 +746,21 @@ module Gori
         Verb::Scope::Fuzzer, available: in_fuzzer, mnemonic: 'o', section: :results) { |ctx| ctx.fuzz_cycle_sort; nil }
       r.register Verb::Definition.new(
         "fuzz.matched", "Matched only", "RESULTS: show only the rows the matchers hit",
-        Verb::Scope::Fuzzer, [Verb::Chord.new("m")], available: in_fuzzer, mnemonic: 'm', section: :results) { |ctx| ctx.fuzz_toggle_matched; nil }
+        Verb::Scope::Fuzzer, [Verb::Chord.new("m")], available: in_fuzzer, intent: :matched_only, section: :results) { |ctx| ctx.fuzz_toggle_matched; nil }
       # Bare `v` only in RESULTS (`chord_sections`): in the template pane `v` is the menu's
       # clear-selection, as in every other read pane (#1274).
       r.register Verb::Definition.new(
         "fuzz.dist", "Distribution sidebar", "RESULTS: show/hide the status and length distribution",
-        Verb::Scope::Fuzzer, [Verb::Chord.new("v")], available: in_fuzzer, mnemonic: 'g', section: :results,
+        Verb::Scope::Fuzzer, [Verb::Chord.new("v")], available: in_fuzzer, intent: :distribution, section: :results,
         chord_sections: [:results]) { |ctx| ctx.fuzz_toggle_dist; nil }
+      # The menu letter is the export `E` (#1274), which frees `P` for Protocol….
       # Shift-S is intentionally READ-mode-only: in a template editor it remains a literal
       # uppercase S. Ctrl-S already edits the target's SNI and cannot be repurposed.
       r.register Verb::Definition.new(
         "fuzz.save-results", "Save results", "Permanently save every result and its full request/response in this project",
         Verb::Scope::Fuzzer, [Verb::Chord.new("s", shift: true)],
         available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :fuzzer && ctx.fuzzer_results_saveable? },
-        mnemonic: 'P') { |ctx| ctx.fuzz_save_results; nil }
+        intent: :export) { |ctx| ctx.fuzz_save_results; nil }
       r.register Verb::Definition.new(
         "fuzz.run-history", "Run history", "Open the permanent result sets saved for this fuzz session",
         Verb::Scope::Fuzzer, available: in_fuzzer, mnemonic: 'H') { |ctx| ctx.fuzz_run_history; nil }
@@ -877,7 +869,7 @@ module Gori
       r.register Verb::Definition.new(
         "fuzz.toggle-http2", "Toggle HTTP/2 (h2)", "Run the fuzz over HTTP/2 or HTTP/1.1, overriding the seed flow's protocol",
         Verb::Scope::Fuzzer, [Verb::Chord.new("v", ctrl: true)],
-        available: in_fuzzer, mnemonic: 'h', section: :template) { |ctx| ctx.fuzz_toggle_http2; nil }
+        available: in_fuzzer, intent: :http2, section: :template) { |ctx| ctx.fuzz_toggle_http2; nil }
       r.register Verb::Definition.new(
         "fuzz.clear-marks", "Clear markers", "Strip every §…§ marker (and its attached chain) from the template",
         Verb::Scope::Fuzzer, available: in_fuzzer, mnemonic: 'c', section: :template) { |ctx| ctx.fuzz_clear_marks; nil }
@@ -885,12 +877,11 @@ module Gori
       # two-line editor, same focus rule. `FuzzerView` already carried @sni, persisted it
       # with the session and handed it to build_engine — a session seeded from History had
       # no way to REACH it, so an https vhost sweep always presented the dialed IP.
-      # 'i' (from SNI), not 's': 's' is fuzz.stop in Fuzzer COMMON, and COMMON renders
-      # alongside every section (see fuzz.find-subtab's 'f' for the same trade).
+      # A Protocol… row, `P s` as on the Repeater (#1274): at level 1 `s` is fuzz.stop.
       r.register Verb::Definition.new(
         "fuzz.toggle-sni", "Toggle SNI override", "Override the TLS SNI the whole sweep presents (dialed host unchanged)",
         Verb::Scope::Fuzzer, [Verb::Chord.new("s", ctrl: true)],
-        available: in_fuzzer, mnemonic: 'i', section: :target) { |ctx| ctx.fuzz_toggle_sni; nil }
+        available: in_fuzzer, intent: :sni, section: :target) { |ctx| ctx.fuzz_toggle_sni; nil }
       in_fuzzer_copy = ->(ctx : Verb::ExecContext) do
         ctx.current_tab == :fuzzer && (ctx.fuzzer_read_mode? || ctx.editor_focused?)
       end

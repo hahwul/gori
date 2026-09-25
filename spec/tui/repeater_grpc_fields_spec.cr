@@ -120,7 +120,7 @@ describe "RepeaterView gRPC FIELDS editor (#828)" do
       end
     end
 
-    it "draws the named field in the request pane and a ␣E:FIELDS badge" do
+    it "draws the named field in the request pane and a ␣Pf:FIELDS badge" do
       with_demo_schema do
         grpc_tmp_store do |store|
           view = grpc_view(store, get_user_request("hahwul"))
@@ -251,7 +251,7 @@ describe "RepeaterView gRPC FIELDS editor (#828)" do
           view.toggle_grpc_fields
           view.grpc_field_begin
           view.grpc_fields_editing?.should be_true
-          view.toggle_grpc_fields.should be_false # the ␣E:FIELDS badge click
+          view.toggle_grpc_fields.should be_false # the ␣Pf:FIELDS badge click
           # A live `grpc_fields_editing?` with the form gone locks the tab against a
           # cross-session reconcile forever and routes IME composition into a dead buffer.
           view.grpc_fields_editing?.should be_false

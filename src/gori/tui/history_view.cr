@@ -2544,6 +2544,15 @@ module Gori::Tui
       @detail_read.reset
     end
 
+    # The detail's hex dump is showing (the FRAMES pane never draws one).
+    def hex_view? : Bool
+      @detail_hex && !log_pane?
+    end
+
+    def unicode_decoded? : Bool
+      @decode_unicode
+    end
+
     # Decode JSON Unicode escapes on demand, retaining the wire spelling in storage and
     # request write-back.
     def toggle_unicode_decoding : Nil
