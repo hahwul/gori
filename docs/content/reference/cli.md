@@ -78,6 +78,7 @@ gori run <subcommand> [verb] [options]
 | `sitemap [QL]` | Host → path endpoint tree |
 | `sitemap tag` | Pin, clear, or list a free-text memo on a sitemap path |
 | `sitemap params [QL]` | Per-endpoint parameter inventory: names by location, counts, sample values, reflected values |
+| `sitemap js` | Endpoints captured JavaScript references and nobody requested (`--scan` reads new bundles; sends nothing) |
 | `sitemap export [QL]` | The captured API as an OpenAPI 3.0.3 document (JSON or YAML) |
 | `oast listen` · `presets` | Out-of-band callback listener (interactsh & friends) |
 | `oast list` · `resume` · `release` | List, resume, or release the project's saved OAST listening sessions |
@@ -822,7 +823,7 @@ A malformed entry is skipped rather than aborting the file; the result reports b
 gori run sitemap --in-scope --format paths
 ```
 
-`-q`/`--query=QL` filters endpoints with the same QL as history (also positional), `-n`/`--limit=N` caps the endpoints scanned (default `SITEMAP_MAX`), `--in-scope` limits to in-scope hosts, `--hide-static` leaves out images, fonts and audio/video (per flow, like the TUI tree), `--no-group` disables id folding, `--no-fold-query` disables query-string folding (the two are separate axes), `--format` is `text` (tree), `json`, or `paths`, and `--lenient` accepts a query that names an unknown field instead of refusing it.
+`-q`/`--query=QL` filters endpoints with the same QL as history (also positional), `-n`/`--limit=N` caps the endpoints scanned (default `SITEMAP_MAX`), `--in-scope` limits to in-scope hosts, `--hide-static` leaves out images, fonts and audio/video (per flow, like the TUI tree), `--no-group` disables id folding, `--no-fold-query` disables query-string folding (the two are separate axes), `--js-refs` also draws the paths captured JavaScript references and nobody requested (see `sitemap js`; `js_refs` and `unrequested` in JSON, and never in `paths`), `--format` is `text` (tree), `json`, or `paths`, and `--lenient` accepts a query that names an unknown field instead of refusing it.
 
 **`sitemap tag`**: pin a free-text memo onto one path, the same note the TUI's Sitemap shows.
 
@@ -841,6 +842,16 @@ gori run mine 42 --wordlist <(gori run sitemap params --host api.example.com --f
 ```
 
 `-q`/`--query=QL` (also positional), `--in-scope` and `--hide-static` narrow the flows read, per flow as in `history`. `--host` is an exact host, `--path=PREFIX` a path prefix, and `--location=LIST` picks locations (default all). Standard browser headers are left out unless `--all-headers`. `--max-flows=N` reads the newest N matching flows (default 2000); a note on stderr says when older ones were skipped. Values of cookies, credential headers and credential-named fields such as `password` or `token` print as `[REDACTED]` unless `--include-sensitive`. Redaction goes by name and by JWT / private-key shape only, so a secret under any other name (a presigned `X-Amz-Signature`, a custom `sig=`) prints in the clear, as does one inside a URL path. `--format` is `text`, `json`, or `names` (one name per line, JSON leaf names, no headers unless `--location` names them), which is a Miner or Fuzzer wordlist.
+
+**`sitemap js`**: the endpoints captured JavaScript references, the same ones the TUI's [Sitemap](/guide/proxy/#js-refs) draws as `js` rows. By default it lists only the ones no captured request reached, grouped by host, each with the flow and line it was read from, the literal, and flags (`comment`, `templated`, `base: referer|guessed`).
+
+```bash
+gori run sitemap js --scan
+gori run sitemap js --host api.example.com --format json
+gori run sitemap js --format urls | httpx -silent
+```
+
+`--scan` first reads the captured JavaScript responses and HTML pages no scan has read yet (newest first, `--max-flows` of them, default 500) and stores what they reference. It sends nothing; `-q`/`--query=QL` (also positional) narrows the flows it reads, and `--rescan` reads already-scanned ones again. The listing takes `--host` (exact), `--path=PREFIX`, `--all` (also references traffic already reached), `--all-hosts` (also hosts gori never captured and no scope include names, which are hidden by default), `--no-comments` and `--in-scope`. `--format` is `text`, `json` or `urls` (one URL per line; templated references, which are not sendable as-is, are left out). The references are deleted with their source flows.
 
 **`sitemap export`**: the captured API as an OpenAPI 3.0.3 document on stdout, the same one `⇧E` on the TUI's [Sitemap](/guide/proxy/#openapi) writes. What was left out and why goes to stderr.
 

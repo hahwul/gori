@@ -22,7 +22,13 @@ module Gori
         if fts_error = drain_fts_or_error(filter.uses_fts?)
           return fts_error
         end
-        return collapsed_sitemap(filter, limit, offset) if bool_arg(h, "collapse_transport", false)
+        unrequested = bool_arg(h, "include_unrequested", false)
+        if bool_arg(h, "collapse_transport", false)
+          # Refused rather than dropped: an answer without the block reads as "no references".
+          return err("include_unrequested is not available with collapse_transport — call without it, or use list_js_endpoints",
+            "INVALID_ARGUMENT", field: "include_unrequested") if unrequested
+          return collapsed_sitemap(filter, limit, offset)
+        end
         # One row OVER the page, then dropped: `has_more` costs a row instead of a second
         # COUNT(*) over the same GROUP BY. Without it a full page and an exactly-full set are
         # the same answer, and this tool — unlike list_history — has no id cursor an agent
@@ -42,6 +48,10 @@ module Gori
             j.field "offset", offset
             j.field "limit", limit
             j.field "has_more", has_more
+            # Endpoints captured JavaScript references and no request reached (#1243). NOT
+            # entries: an entry is a captured transport key with counts, and these have none —
+            # mixing them in would also make `has_more`/`offset` page two different things.
+            emit_unrequested(j) if unrequested
             j.field "entries" do
               j.array do
                 entries.each do |e|
@@ -115,7 +125,9 @@ module Gori
             j.field "tag", tag.presence
             j.field "cleared", tag.empty?
             j.field "matches_endpoint", matched
-            if matched == false && !tag.empty?
+            if matched == false && !tag.empty? && JsRefs.unrequested_node?(store, host, path)
+              j.field "warning", "no captured endpoint at #{host}#{path} — the tag shows on its JavaScript-referenced node (the TUI Sitemap, `gori run sitemap --js-refs`), not in list_sitemap entries"
+            elsif matched == false && !tag.empty?
               j.field "warning", "no captured endpoint at #{host}#{path} — this tag will not show in list_sitemap or the TUI until one exists (check for a typo or a trailing slash)"
             elsif matched.nil? && !tag.empty?
               j.field "warning", "tag stored, but there are more than #{Store::SITEMAP_MAX} captured endpoints so it could not be confirmed against one — check with list_sitemap"
@@ -570,6 +582,7 @@ module Gori
           s.field "fold_query", boolprop("fold the query-string variants of one path into a single entry (default true); false lists one entry per query string")
           s.field "collapse_transport", boolprop("collapse to distinct host/method/target only (legacy shape), dropping scheme/port/version + counts (default false)")
           s.field "hide_static", boolprop("leave out static assets — images, fonts, audio/video (not svg/css/js, never a status >= 400); the TUI's hide-static lens, same as `-static:true` in `query`. Default false")
+          s.field "include_unrequested", boolprop("add `unrequested`: endpoints captured JavaScript references that no request reached (up to #{UNREQUESTED_MAX}; `unrequested_total` says how many), from what scan_js_endpoints stored. Not filtered by `query` — a reference is not a flow. Default false")
           s.field "strict", boolprop("reject the query if any term is unrecognized/invalid instead of silently dropping it (default false)")
           s.field "lenient", boolprop("search a `field:` QL does not implement as literal TEXT instead of refusing the query (default false). A typo like `methd:GET` free-texts its whole token and therefore matches nothing, which is indistinguishable from an empty project — so it is refused by default, the way `gori run history --lenient` spells the same escape hatch. `strict` is the other half and covers dropped terms, not unknown fields")
         end

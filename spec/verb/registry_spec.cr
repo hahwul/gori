@@ -624,6 +624,14 @@ private class FakeContext < ExecContext
     @calls << :sitemap_toggle_query_fold
   end
 
+  def sitemap_toggle_js_refs : Nil
+    @calls << :sitemap_toggle_js_refs
+  end
+
+  def sitemap_js_scan : Nil
+    @calls << :sitemap_js_scan
+  end
+
   def sitemap_discover : Nil
     @calls << :sitemap_discover
   end

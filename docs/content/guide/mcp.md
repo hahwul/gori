@@ -73,10 +73,10 @@ By default `gori mcp` advertises every tool, so an agent can reach the whole wor
 
 | Start with | Tools | `tools/list` | Tokens | For |
 | --- | ---: | ---: | ---: | --- |
-| `gori mcp` | 185 | ~219 KB | ~56k | Everything (the default) |
-| `--read-only` | 61 | ~70 KB | ~18k | Read tools and pure compute; no live requests |
-| `--tools=@recon` | 35 | ~52 KB | ~13k | Read and map the capture, replay a request, record issues and notes |
-| `--tools=@recon --read-only` | 27 | ~37 KB | ~10k | `@recon` minus what `--read-only` disables |
+| `gori mcp` | 187 | ~222 KB | ~57k | Everything (the default) |
+| `--read-only` | 62 | ~72 KB | ~18k | Read tools and pure compute; no live requests |
+| `--tools=@recon` | 37 | ~54 KB | ~14k | Read and map the capture, replay a request, record issues and notes |
+| `--tools=@recon --read-only` | 28 | ~39 KB | ~10k | `@recon` minus what `--read-only` disables |
 | `--tools=@minimal` | 17 | ~25 KB | ~6k | Read History, flows and the current TUI context; talk to the operator |
 
 Tokens are bytes ÷ 4, a rough rule for JSON; your client's tokenizer has the final word.
@@ -84,7 +84,7 @@ Tokens are bytes ÷ 4, a rough rule for JSON; your client's tokenizer has the fi
 | Profile | Tools |
 | --- | --- |
 | `@minimal` | `project_info`, `list_projects`, `switch_project`, `create_project`, `ql_reference`, `ql_explain`, `list_history`, `get_flow`, `get_response_body_chunk`, `get_current_context`, `get_repeater_context`, `get_issue`, `list_sitemap`, `intercept_get`, `intercept_list`, `operator_messages`, `reply_to_operator` |
-| `@recon` | `@minimal`, plus `list_scope`, `list_params`, `compare_flows`, `list_env`, `decode`, `jwt_decode`, `jwt_verify`, `probe_issues`, `probe_promote`, `probe_dismiss`, `list_issues`, `list_notes`, `get_note`, `send_request`, `create_issue`, `update_issue`, `create_note`, `update_note` |
+| `@recon` | `@minimal`, plus `list_scope`, `list_params`, `list_js_endpoints`, `scan_js_endpoints`, `compare_flows`, `list_env`, `decode`, `jwt_decode`, `jwt_verify`, `probe_issues`, `probe_promote`, `probe_dismiss`, `list_issues`, `list_notes`, `get_note`, `send_request`, `create_issue`, `update_issue`, `create_note`, `update_note` |
 
 A profile is a fixed list of names, not a glob, so a later gori that adds a `list_*` tool does not quietly grow `@recon`. Both keep `switch_project` and `create_project`, so they work on an unbound start, even on a machine with no project yet.
 
@@ -158,6 +158,7 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 | `get_flow` | Full request + response for one flow. Bodies come back sanitized, with a `body_redaction` object, where a [redaction profile](/reference/cli/#run-redact) is on by default; `include_sensitive:true` turns that off along with the header redaction |
 | `get_response_body_chunk` | Page through decoded (or raw) flow/Repeater responses beyond the inline 64 KiB cap |
 | `list_sitemap` / `list_sitemap_tags` | Distinct endpoints (host, method, path), and the tags placed on them |
+| `list_js_endpoints` / `scan_js_endpoints` | Endpoints captured JavaScript references and no request reached, with the flow, line and literal each was read from; the scan reads new JS/HTML responses and sends nothing. `list_sitemap` adds them as `unrequested` with `include_unrequested:true` |
 | `list_params` | Per-endpoint parameter inventory: every input name by location, with counts, sample values (credentials redacted) and whether a value is reflected in the response |
 | `export_openapi` | The captured API as an OpenAPI 3.0.3 document, inline (a JSON object, or YAML with `format:"yaml"`): templated paths, parameters, inferred request and response schemas, servers and security schemes. No credential values, and no examples unless `examples:true` (redacted). Capped by `max_endpoints` and `max_bytes`, with `truncated` saying so. In the full catalogue only, since adding it would put `@recon` over its size budget |
 | `list_issues` / `get_issue` | Read triaged issues |

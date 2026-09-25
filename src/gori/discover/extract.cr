@@ -405,12 +405,28 @@ module Gori::Discover
     # script.
     private def self.endpoints(text : String, acc : Array(Found), seen : Set(String)) : Nil
       return if acc.size >= MAX_LINKS
-      text.scan(ENDPOINT) do |m|
+      each_endpoint(text) do |v, _, _|
         break if acc.size >= MAX_LINKS
+        acc << Found.new(v, false) if seen.add?(v)
+      end
+    end
+
+    # Every ENDPOINT match in `text`, in order, with WHERE it sits: the value, the byte offset
+    # of the match's first byte (the opening quote of a path, the `h` of a URL) and the byte
+    # offset just past it. Neither deduplicated nor capped — both are the caller's policy, and
+    # the two callers want different ones (the crawl keeps the first spelling of a string;
+    # `JsRefs` keeps the occurrence in CODE over one in a comment).
+    #
+    # The one home of the regex's reading, so the passive JS reference scan (#1243) cannot come
+    # to disagree with the crawl about what an endpoint literal is. Byte offsets rather than
+    # `MatchData#begin`'s char index: on a non-ASCII body a char index costs a walk from the
+    # start of the string to convert, which over 4096 matches in a 2 MiB bundle is quadratic.
+    def self.each_endpoint(text : String, & : String, Int32, Int32 ->) : Nil
+      text.scan(ENDPOINT) do |m|
         # Group 1 is the path branch's capture; on the URL branch it is nil and the whole
         # match IS the URL.
         v = m[1]? || m[0]
-        acc << Found.new(v, false) if !v.empty? && seen.add?(v)
+        yield v, m.byte_begin(0), m.byte_end(0) unless v.empty?
       end
     end
 

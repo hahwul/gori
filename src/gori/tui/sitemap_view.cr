@@ -10,6 +10,7 @@ require "../store"
 require "../ql"
 require "../scope"
 require "../sitemap" # the host→path tree model + builder (URI normalisation lives there now)
+require "../js_refs"
 require "./viewport"
 require "./params_view"
 
@@ -80,6 +81,9 @@ module Gori::Tui
     METHODS_COL_W =  8
     COL_GAP       =  1 # minimum blank column between tag text and methods/aside
 
+    # The aside on a path captured JavaScript references and no request reached (#1243).
+    JS_ASIDE = "js"
+
     getter? loaded : Bool
 
     def initialize
@@ -115,6 +119,10 @@ module Gori::Tui
       # row per payload. On by default; ⇧G toggles it for the rare case of wanting to READ
       # the query strings in the tree instead of expanding the fold.
       @fold_query = true
+      # Endpoints captured JavaScript references (#1243): attached to the tree from what a scan
+      # stored, the never-requested ones as their own dimmed rows. On by default, which draws
+      # nothing until a scan has run (`sitemap.js-scan`); `sitemap.toggle-js-refs` hides them.
+      @js_refs = true
       # Tag editor — a one-line text sub-mode (mirrors the QL `/` bar) that edits the
       # selected node's path memo. The controller persists @tag_buffer on commit.
       @tagging = false
@@ -170,8 +178,8 @@ module Gori::Tui
     # is what is quoted here. Re-measure before assuming it still holds if that default moves.
     def reload(store : Store) : Nil
       plan = prepare_reload || return
-      entries, tags, no_flows = fetch_reload(store, plan)
-      apply_reload(entries, tags, plan, no_flows)
+      entries, tags, no_flows, js = fetch_reload(store, plan)
+      apply_reload(entries, tags, plan, no_flows, js)
     end
 
     # The store half of a reload, as three steps, so the `/` bar can run the middle one on a
@@ -180,7 +188,12 @@ module Gori::Tui
     # (an invalid residual); `fetch` is the two reads and touches no view state; `apply`
     # builds the tree from what came back. `reload` is the three in a row, for every caller
     # that is not typing.
-    record ReloadPlan, positives : Array(String), negatives : Array(String), combined : QL::Filter
+    # `js_refs` — attach the JavaScript references: the view's toggle, captured here so the
+    # worker never reads view state, and off while a QL residual narrows the tree (a reference
+    # is not a flow, so the query cannot judge it — see `JsRefs.attach!`). `tag:` terms keep
+    # it on: they filter the built tree, reference nodes included.
+    record ReloadPlan, positives : Array(String), negatives : Array(String), combined : QL::Filter,
+      js_refs : Bool = false
 
     # Whether a worker fetch is in flight — the empty-tree note says so instead of "no
     # endpoints match" while the previous tree stays up.
@@ -213,7 +226,7 @@ module Gori::Tui
         @loaded = true
         return
       end
-      ReloadPlan.new(positives, negatives, combined)
+      ReloadPlan.new(positives, negatives, combined, @js_refs && !residual_has_terms?(residual))
     end
 
     # The flow filter a query's QL half compiles to — the scope lens, the hide-static lens AND the
@@ -227,9 +240,9 @@ module Gori::Tui
       @hide_static ? QL.and(combined, QL.hide_static) : combined
     end
 
-    # What `fetch_reload` hands `apply_reload`: the endpoints, the tags, and whether the project
-    # holds no flows at all.
-    alias Fetched = {Array({String, String, String}), Hash({String, String}, String), Bool}
+    # What `fetch_reload` hands `apply_reload`: the endpoints, the tags, whether the project
+    # holds no flows at all, and the JavaScript references (empty with the toggle off).
+    alias Fetched = {Array({String, String, String}), Hash({String, String}, String), Bool, Array(Store::JsRefNode)}
 
     # Reads only — safe off the main fiber. `control` lets the caller cancel a superseded read.
     #
@@ -239,16 +252,23 @@ module Gori::Tui
     def fetch_reload(store : Store, plan : ReloadPlan,
                      control : Store::QueryControl? = nil) : Fetched
       entries = store.sitemap_entries(plan.combined, control: control)
-      {entries, store.sitemap_tags, entries.empty? && store.recent_flows(1).empty?}
+      js = plan.js_refs ? store.js_ref_nodes[0] : [] of Store::JsRefNode
+      {entries, store.sitemap_tags, entries.empty? && store.recent_flows(1).empty?, js}
     end
 
     def apply_reload(entries : Array({String, String, String}), tags : Hash({String, String}, String), plan : ReloadPlan,
-                     no_flows : Bool = false) : Nil
+                     no_flows : Bool = false, js : Array(Store::JsRefNode) = [] of Store::JsRefNode) : Nil
       @no_flows = no_flows
       prev_sel = selection_anchor
       prev_scroll = @scroll
       prev_expand = collect_expand_state
       @hosts = Sitemap.build(entries)
+      # Right after the build, before tags and every fold — the order `collect_sitemap` (the
+      # CLI) keeps too. With the scope lens on a reference is filtered by it here: the SQL lens
+      # the entries came through never saw it, because a reference is not a flow.
+      unless js.empty? # `fetch_reload` reads none with the toggle off
+        JsRefs.attach!(@hosts, js, @scope, lens: @scope.try(&.active?) == true)
+      end
       Sitemap.stamp_tags!(@hosts, tags)
       filter_by_tags(plan.positives, plan.negatives)
       if @grouping
@@ -526,6 +546,24 @@ module Gori::Tui
     end
 
     # Whether query-string folding is on (shown in the toast / used by the ⇧G toggle).
+    def js_refs? : Bool
+      @js_refs
+    end
+
+    def toggle_js_refs : Nil
+      @js_refs = !@js_refs
+    end
+
+    # The JavaScript reference under the cursor when the row is ONLY that — a path no request
+    # reached — for `o` (open where it was read) and `r` (a bare GET in Repeater). nil on a row
+    # with captured traffic, which those keys already serve from the flow.
+    def selected_js_ref : {host: String, path: String}?
+      return nil unless row = visible_rows[@selected]?
+      node = row.node
+      return nil if row.depth == 0 || node.grouped || !node.js_only?
+      {host: row.host, path: node.path}
+    end
+
     def fold_query? : Bool
       @fold_query
     end
@@ -1313,10 +1351,19 @@ module Gori::Tui
         txt = node.endpoints == 1 ? "1 path" : "#{node.endpoints} paths"
       elsif !node.methods.empty?
         return rect.right - methods_width(node.methods) - 1
+      elsif js_aside?(node, host)
+        txt = JS_ASIDE
       else
         return nil
       end
       rect.right - txt.size - 1
+    end
+
+    # A row whose only claim to the tree is a JavaScript reference: a method-less path one
+    # names, or a host nothing was captured from. `cluster_start` and `draw_cluster` both ask,
+    # so the label is clipped for exactly the aside that is drawn.
+    private def js_aside?(node : Node, host : Bool) : Bool
+      host ? node.unrequested? : node.js_only?
     end
 
     # A fold row's right-hand count. A QUERY fold counts the query strings it stands for
@@ -1345,7 +1392,8 @@ module Gori::Tui
     # otherwise the depth tone (host bright, deeper nodes normal). `in_scope` is only ever
     # set on host nodes, so depth-0 alone decides the scope branch.
     private def label_color(host : Bool, node : Node) : Color
-      return Theme.accent if node.grouped # the synthetic [1, 2, 3 …] fold pops as accent
+      return Theme.accent if node.grouped     # the synthetic [1, 2, 3 …] fold pops as accent
+      return Theme.muted if node.unrequested? # only JavaScript names it: recede behind traffic
       if host && @scope_configured
         node.in_scope ? Theme.text_bright : Theme.muted
       else
@@ -1376,10 +1424,12 @@ module Gori::Tui
             methods_width(node.fold_methods) + COL_GAP
           end
         draw_aside(screen, rect, y, bg, fold_aside(node), label_end, shift)
-      elsif host
-        draw_aside(screen, rect, y, bg, node.endpoints == 1 ? "1 path" : "#{node.endpoints} paths", label_end) if node.endpoints > 0
-      elsif !node.methods.empty?
+      elsif host && node.endpoints > 0
+        draw_aside(screen, rect, y, bg, node.endpoints == 1 ? "1 path" : "#{node.endpoints} paths", label_end)
+      elsif !host && !node.methods.empty?
         draw_methods(screen, rect, y, bg, node.methods, label_end)
+      elsif js_aside?(node, host)
+        draw_aside(screen, rect, y, bg, JS_ASIDE, label_end)
       end
     end
 

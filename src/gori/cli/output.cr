@@ -1115,6 +1115,7 @@ module Gori
             io << '\n' if i > 0
             io << term_safe(host.label)
             io << "  (" << sitemap_path_count(host.endpoints) << ')' if host.endpoints > 0
+            io << "  (js only — never requested)" if host.unrequested?
             io << '\n'
             sitemap_text_children(host, "", io)
           end
@@ -1176,9 +1177,19 @@ module Gori
         # Say it rather than silently showing a short path: this node's `path` is a PREFIX
         # of a target that ran past Sitemap::MAX_DEPTH segments.
         io << "  … +depth (truncated)" if node.truncated
+        sitemap_js_label(node, io)
         if t = node.tag
           io << "  # " << term_safe(t)
         end
+      end
+
+      # A path captured JavaScript references (#1243): how many flows named it, and whether any
+      # request ever did. A node carrying methods was requested, so it only gets the count.
+      private def self.sitemap_js_label(node : Sitemap::Node, io : IO) : Nil
+        return if node.js_refs == 0
+        io << "  (js: " << (node.js_refs == 1 ? "1 flow" : "#{node.js_refs} flows")
+        io << ", never requested" if node.methods.empty?
+        io << ')'
       end
 
       private def self.sitemap_path_count(n : Int32) : String
@@ -1257,7 +1268,9 @@ module Gori
       # id fold has no path, `template` ("{uuid}"/"{hex}"/"{date}") marks an ID fold as
       # opposed to a numeric run, and its `methods` are the UNION of its children's verbs. A
       # QUERY fold is marked `query_fold:true` and DOES carry `path` (the path-only endpoint)
-      # plus `queries` (how many query strings it stands for). The stable, documented machine contract. Unlike the text tree
+      # plus `queries` (how many query strings it stands for). Under `--js-refs` a node may add
+      # `js_refs` (flows whose JavaScript references it) and `unrequested:true` (it exists only
+      # because of such a reference; a host can carry it too). The stable, documented machine contract. Unlike the text tree
       # (which collapses a numeric fold and shows one representative under an ID fold),
       # JSON always keeps every child nested — the complete tree, with `grouped` as the
       # hint so a consumer can collapse it itself.
@@ -1293,6 +1306,7 @@ module Gori
           io << %(,"tag":)
           term_safe(t).to_json(io)
         end
+        io << %(,"unrequested":true) if host.unrequested?
         sitemap_children_json(io, host)
         io << '}'
       end
@@ -1341,6 +1355,11 @@ module Gori
         # `path` here is a PREFIX of the captured target — see Sitemap::MAX_DEPTH. Emitted
         # so a consumer can tell a real leaf from a cut one instead of trusting the path.
         io << %(,"truncated":true) if node.truncated
+        # `js_refs`: flows whose JavaScript references this path (`--js-refs`, #1243).
+        # `unrequested`: the node exists only because of such a reference — no captured request
+        # reaches it or anything under it, and it never carries `methods`.
+        io << %(,"js_refs":) << node.js_refs if node.js_refs > 0
+        io << %(,"unrequested":true) if node.unrequested?
       end
 
       # Iterative for the same reason as `sitemap_text_children`. Unlike the text walks this

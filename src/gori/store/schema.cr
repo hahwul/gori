@@ -1467,6 +1467,54 @@ module Gori
         "ALTER TABLE fuzz_runs ADD COLUMN stop_idx INTEGER",
       ]
 
+      # V35 — endpoints referenced in captured JavaScript (#1243). DERIVED rows: `JsRefs.scan`
+      # reads bodies already in the store and sends nothing, so every row here is a projection
+      # of a flow and is deleted WITH that flow (`delete_flow_one`, `clear_flows`, both retention
+      # sweeps). Not flows, deliberately: a Pending or stub flow would read as "a request was
+      # attempted" in History, QL and every export, and nothing was.
+      #
+      # `path` is the Sitemap's query-less node path (`Sitemap.path_part(node_path)`), the key the
+      # tree attaches on; `target` keeps the query the literal carried, for a replay. `host` is
+      # `Url.parse`'s lowercased host. `flags` bit 0 = the literal sat in a comment, bit 1 = it
+      # was a template literal cut at `${…}`. `base` names what a relative literal was resolved
+      # against (absolute|page|referer|guessed). `body_offset` is a byte offset into the decoded
+      # response body — not `offset`, which is an SQL keyword.
+      #
+      # `js_ref_scans` records WHICH flows were scanned, per flow rather than as a watermark:
+      # `flows.id` is a reused rowid (see `detach_flow_refs`), so after a `history clear` the next
+      # capture is handed ids BELOW any "scanned up to" mark and would never be scanned. A marker
+      # row dies with its flow, so a reused id starts unscanned. `version` is the extractor's
+      # (`JsRefs::VERSION`): a flow scanned by an older one reads as unscanned again.
+      V35 = [
+        <<-SQL,
+          CREATE TABLE js_refs (
+            id          INTEGER PRIMARY KEY,
+            flow_id     INTEGER NOT NULL,
+            scheme      TEXT    NOT NULL,
+            host        TEXT    NOT NULL,
+            port        INTEGER NOT NULL,
+            path        TEXT    NOT NULL,
+            target      TEXT    NOT NULL,
+            literal     TEXT    NOT NULL,
+            body_offset INTEGER NOT NULL,
+            line        INTEGER NOT NULL,
+            flags       INTEGER NOT NULL DEFAULT 0,
+            base        TEXT    NOT NULL,
+            created_at  INTEGER NOT NULL,
+            UNIQUE(host, path, flow_id)
+          )
+          SQL
+        "CREATE INDEX idx_js_refs_flow ON js_refs (flow_id)",
+        <<-SQL,
+          CREATE TABLE js_ref_scans (
+            flow_id    INTEGER PRIMARY KEY,
+            version    INTEGER NOT NULL,
+            refs       INTEGER NOT NULL,
+            scanned_at INTEGER NOT NULL
+          )
+          SQL
+      ]
+
       # Data statements that call gori's OWN SQL functions, run by `migrate!` right after the
       # version they complete. Kept out of MIGRATIONS because that list is plain schema that a
       # bare connection can replay (specs build every historical shape that way), and a bare
@@ -1489,7 +1537,7 @@ module Gori
 
       MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17,
                     V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29, V30, V31, V32, V33,
-                    V34]
+                    V34, V35]
 
       def self.migrate!(db : DB::Database, read_only : Bool = false) : Nil
         db.using_connection do |conn|
