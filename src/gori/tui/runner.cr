@@ -2572,8 +2572,7 @@ module Gori::Tui
         close_overlay
       elsif key.enter?
         if verb = @palette.selected_verb
-          close_overlay
-          @toast = verb.call(self) || @toast
+          run_palette_verb(verb)
         end
       elsif @palette.edit(ev, self) # ↑/↓, ⌃/⌥←→, Home/End, Delete, ⌥⌫, ←/→ — before ⌫ and the printables
       elsif key.backspace?
@@ -2670,40 +2669,17 @@ module Gori::Tui
       end
     end
 
-    # The (scope, section) the space menu renders for, captured at the space
-    # keystroke. Deliberately DISTINCT from current_scope (the keymap's resolver,
-    # unchanged above) — the tab bar keeps Sidebar for keybindings (so Repeater's
-    # chords don't fire while navigating tabs) but the space menu on the tab bar
-    # should show that TAB's own top actions instead. By the time this is read,
-    # @overlay is always :none or :detail — every other overlay handles its own
-    # keys earlier in handle_key and returns before space is ever checked.
-    private def space_menu_context : {Verb::Scope, Symbol}
-      if @overlay.detail?
-        {Verb::Scope::HistoryDetail, :common}
-      else
-        scope = @tabs[@active_tab]?.try(&.command_scope) || Verb::Scope::Body
-        case @focus
-        when :menu
-          section = @session.registry.has_section?(scope, :tab) ? :tab : :common
-          {scope, section}
-        when :subtabs
-          {scope, :subtab}
-        else
-          {scope, @tabs[@active_tab]?.try(&.command_section) || :common}
-        end
-      end
-    end
-
-    # Whether the card carries the SUB-TABS bucket: the SCOPE has a sub-tab family, so the
-    # strip's verbs belong on the menu whatever level opened it (#1055) — the body panes,
-    # the strip itself and the tab bar all get the one menu.
-    #
-    # Keyed to the registry and NOT to `subtabs_shown?`: a Repeater with no sessions open
-    # draws no strip, and gating on the strip being DRAWN would have taken `New repeater
-    # request` off the menu in exactly the empty state that verb exists for. Scopes with no
-    # `:subtab` verbs are unaffected either way — SpaceMenu drops an empty bucket.
-    private def space_menu_subtabs?(scope : Verb::Scope) : Bool
-      @session.registry.has_section?(scope, :subtab)
+    # "What can I do here" at this keystroke — the one context both `Space` and `Ctrl-P` list
+    # the focused tab's actions from (#1282), so the two can never disagree. The rule itself
+    # is `ActionContext.capture`. Must be read BEFORE either surface opens: by then @overlay
+    # is always :none or :detail — every other overlay handles its own keys earlier in
+    # handle_key and returns before space or ^P is ever checked — and the palette is about to
+    # replace it.
+    private def action_context : ActionContext
+      ctl = @tabs[@active_tab]?
+      ActionContext.capture(@session.registry, detail: @overlay.detail?, focus: @focus,
+        scope: ctl.try(&.command_scope) || Verb::Scope::Body,
+        pane_section: ctl.try(&.command_section) || :common, banner: space_menu_banner)
     end
 
     # The status strip's glyph — spinner / ✓ / ✗ — comes from the KIND the producer passed to
@@ -3607,13 +3583,44 @@ module Gori::Tui
       @notifications.push(:error, message, source: "toast") if kind == :error
     end
 
+    # The palette lists the focused tab's actions from the context captured HERE, before it
+    # takes @overlay (#1282): availability lambdas read state the palette's own overlay would
+    # change — an open History detail answers `@overlay.detail?` only while nothing sits on top
+    # of it — so they are evaluated once, against the tab as it was when ^P was pressed.
     def open_palette : Nil
+      @palette.capture(action_context, self)
+      @palette_return = Runner.palette_return(@overlay)
       @overlay = OverlayKind::Palette
       @palette.reset(self)
     end
 
+    # The overlay the open palette replaced, put back when it closes.
+    @palette_return = OverlayKind::None
+
+    # Where closing the palette lands, given the overlay it was opened over. An open History
+    # detail comes back: esc from ^P returns to the flow you were reading, and a verb chosen
+    # there runs against that flow — the same state its chord would have run in (P1). Before
+    # #1282 every close dropped to the bare list, which only Global verbs could survive.
+    # Anything else lands on the bare body, as before.
+    def self.palette_return(displaced : OverlayKind) : OverlayKind
+      displaced.detail? ? OverlayKind::Detail : OverlayKind::None
+    end
+
     def close_overlay : Nil
-      @overlay = OverlayKind::None
+      @overlay = @overlay.palette? ? @palette_return : OverlayKind::None
+      @palette_return = OverlayKind::None
+    end
+
+    # Close the palette, then run its pick with the state restored. A tab row was listed
+    # against the state ^P was pressed in, so it is re-checked here, in the state it will run
+    # in, rather than trusted; a Global row keeps its own listing (same as before #1282).
+    private def run_palette_verb(verb : Verb::Definition) : Nil
+      close_overlay
+      if @palette.tab_verb?(verb) && !verb.available?(self)
+        @toast = "#{verb.title}: not available here any more"
+        return
+      end
+      @toast = verb.call(self) || @toast
     end
 
     # Emergency full repaint (palette-only). `@resized` routes the next flush through the
@@ -4079,9 +4086,9 @@ module Gori::Tui
     # scope reflects where space was pressed — the History list → Body, an open
     # detail → HistoryDetail, the Repeater response → Repeater, the tab bar → Sidebar.
     def open_space_menu : Nil
-      scope, section = space_menu_context
+      here = action_context
       # captures the scope+section + populates entries
-      @space_menu.open(scope, section, self, banner: space_menu_banner, subtabs: space_menu_subtabs?(scope))
+      @space_menu.open(here.scope, here.section, self, banner: here.banner, subtabs: here.subtabs)
       # Don't open an empty popup: some focus areas (the tab bar, an open detail)
       # have only hidden nav verbs, so the entry list is empty. Opening there would
       # trap input behind an empty box — keep space a no-op (with a hint) instead.

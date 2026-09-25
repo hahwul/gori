@@ -511,8 +511,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     return unless idx = @palette.row_at(box, mx, my)
     @palette.set_selected(idx)
     if verb = @palette.selected_verb
-      close_overlay
-      @toast = verb.call(self) || @toast
+      run_palette_verb(verb)
     end
   end
 

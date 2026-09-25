@@ -151,20 +151,22 @@ module Gori
 
       # Find across ALL scopes: non-hidden, context-available verbs matching `query`
       # by fuzzy subsequence, ranked best-first. The general primitive (used in tests
-      # and future surfaces); the two TUI surfaces use the scoped #for_scope below.
+      # and future surfaces); the two TUI surfaces use the scoped #for_scope / #for_view below.
       def search(query : String, ctx : ExecContext) : Array(Definition)
         rank(self.select { |v| !v.hidden? && v.available?(ctx) }, query)
       end
 
-      # Verbs that fire in EXACTLY `scope` (no Global fallback). This backs the two
-      # deliberately-distinct command surfaces:
-      #   • Ctrl-P palette → for_scope(Global)  — gori-wide app control (settings,
-      #     capture, scope/rules, tab nav, quit …).
-      #   • space menu → for_scope(current_scope) — only the FOCUSED area's own
-      #     actions (Body: repeater/copy/open …, Repeater: send/new, …).
-      # Keeping them disjoint is the whole point: app control never clutters the
-      # space menu, and area actions never clutter the palette. Per-verb available? gates
-      # (e.g. history.copy only when current_tab == :history).
+      # Verbs that fire in EXACTLY `scope` (no Global fallback). The two TUI surfaces split
+      # along it:
+      #   • Ctrl-P palette → for_scope(Global) — gori-wide app control (settings, capture,
+      #     scope/rules, tab nav, quit …). Its empty-query BROWSE is this and nothing else.
+      #   • space menu → #for_view — only the FOCUSED area's own actions (Body:
+      #     repeater/copy/open …, Repeater: send/new, …).
+      # App control never clutters the space menu. The palette's TYPED search also finds the
+      # focused area's actions (#for_view again, without the menu_key narrowing), listed ahead
+      # of the Global matches (#1282): the space menu has no query line, so search is where an
+      # occasional action is found. Per-verb available? gates (e.g. history.copy only when
+      # current_tab == :history).
       def for_scope(scope : Scope, ctx : ExecContext, query : String = "") : Array(Definition)
         candidates = self.select { |v| !v.hidden? && v.scope == scope && v.available?(ctx) }
         # Empty Global browse: curated palette order (Settings → Go to → rest → exit).
@@ -173,9 +175,21 @@ module Gori
         rank(candidates, query)
       end
 
+      # The focused area's actions — "what can I do here" — in registration order: #for_scope
+      # narrowed to COMMON, the SUB-TABS bucket when the tab has a strip (`subtabs`), and the
+      # focused `section`. The ONE membership rule both surfaces read (#1282): the space menu
+      # draws the menu-keyed ones, the palette's typed search ranks all of them, so a
+      # chord-only action is still found by name.
+      def for_view(scope : Scope, section : Symbol, ctx : ExecContext, subtabs : Bool = false) : Array(Definition)
+        for_scope(scope, ctx).select do |v|
+          v.section == :common || v.section == section || (subtabs && SUBTAB_SECTIONS.includes?(v.section))
+        end
+      end
+
       # Shared filter→rank tail: an empty query keeps registration order (browsable);
-      # otherwise fuzzy-score "title id" and sort best-first.
-      private def rank(candidates : Array(Definition), query : String) : Array(Definition)
+      # otherwise fuzzy-score "title id" and sort best-first. Public for the palette, which
+      # ranks the captured tab list it holds against each keystroke's query.
+      def rank(candidates : Array(Definition), query : String) : Array(Definition)
         return candidates if query.empty?
 
         scored = candidates.compact_map do |v|
