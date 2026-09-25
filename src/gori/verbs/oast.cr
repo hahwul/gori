@@ -6,9 +6,11 @@ module Gori
     # "Insert OAST payload" actions in Repeater/Fuzzer/History.
     def self.register_oast(r : Verb::Registry) : Nil
       # --- Callbacks sub-tab ---
+      # Menu `r` runs the listener, as `r` runs every other tab's job, and `R` resumes a saved
+      # one — both their chords' letters (#1274; listen was `l`, a nav letter in the menu).
       r.register Verb::Definition.new(
         "oast.listen", "Start listening", "Register the selected provider and poll for callbacks",
-        Verb::Scope::OastCallbacks, [Verb::Chord.new("r", ctrl: true)], mnemonic: 'l') { |ctx| ctx.oast_listen; nil }
+        Verb::Scope::OastCallbacks, [Verb::Chord.new("r", ctrl: true)], mnemonic: 'r') { |ctx| ctx.oast_listen; nil }
 
       r.register Verb::Definition.new(
         "oast.stop", "Stop listening", "Stop polling the selected provider (deregisters)",
@@ -48,7 +50,7 @@ module Gori
       # action opens an overlay, which a controller cannot do — so it falls through to here.
       r.register Verb::Definition.new(
         "oast.sessions", "Resume listener…", "Resume polling a saved session — its planted payloads still resolve",
-        Verb::Scope::OastCallbacks, [Verb::Chord.new("r", shift: true)], mnemonic: 'r') { |ctx| ctx.oast_sessions; nil }
+        Verb::Scope::OastCallbacks, [Verb::Chord.new("r", shift: true)], mnemonic: 'R') { |ctx| ctx.oast_sessions; nil }
 
       # Promote a callback to an Issue. ⇧F is History's `issue.create` chord deliberately —
       # "file what I'm looking at" is one gesture across the app, and Keymap#lookup is

@@ -3633,3 +3633,25 @@ Exceptions are listed as exact `{menu verb, other meaning}` pairs with a reason,
 violating fails the spec until its line is deleted. The list started as the 67 pairs standing
 when the guard landed, and the #1274 work packages shrink it. The guard covers the SHIPPED
 defaults — a user rebind that recreates a clash is the Hotkeys editor's `Conflicts` check.
+
+### 2026-09-25: the menu's movement keys never run a destructive or outbound row
+
+Refines: the entry above. #1274 WP1, first stage.
+
+Inside the space menu `j`/`k`/`h`/`l` move the selection only when the open card does not use
+that letter, so one reflexive keystroke moved in one card and ran an action in the next — and
+in the JWT and Cookie cards `k` cleared the session, in the Decoder's `l` its input, with no
+prompt and no undo. The first stage keeps that fallback and moves every row that destroys,
+overwrites or reaches out off the four letters:
+
+- **Every workbench clear is `K` and asks first** (JWT, Cookie, Decoder, Notes), skipping the
+  prompt only when the session is already empty — `notes_clear`'s rule, now shared. JWT and
+  Cookie **load decoded** overwrite the encode editors and are `L`.
+- **OAST listen is `r`**, as `r` runs every other tab's job, and resume is `R`, its chord.
+- **Probe's bulk dismissals are `G`/`H`**, the capital forms of the one-issue `c`.
+- **Destructive bands close the card.** `SpaceMenu#split_semantic` used to append a
+  half-tagged bucket's untagged rows after DANGER and WIPE, so Notes led with Clear. The
+  untagged band now sits ahead of them, which is what GROUP_ORDER always promised.
+
+Whether the fallback stays and `h`/`j`/`k`/`l` stop being menu letters altogether (Link is `k`
+on six tabs) is settled after the grouped menu lands, when most cards fit one column.

@@ -59,14 +59,15 @@ module Gori
 
       # Bulk dismiss — space-menu only (mnemonic, no stray hotkey): mute a whole check
       # code, or a whole host, in one confirmed action. 'r' is reserved for repeater-evidence
-      # (parity with the detail scope).
+      # (parity with the detail scope). Capitals: the bulk forms of `c`'s one-issue dismiss,
+      # and `h` is a navigation letter inside the menu (#1274).
       r.register Verb::Definition.new(
         "probe.dismiss-code", "Dismiss all with this code", "Mute every open issue sharing the selected issue's check code",
-        Verb::Scope::Probe, mnemonic: 'g', group: :triage) { |ctx| ctx.probe_dismiss_code; nil }
+        Verb::Scope::Probe, mnemonic: 'G', group: :triage) { |ctx| ctx.probe_dismiss_code; nil }
 
       r.register Verb::Definition.new(
         "probe.dismiss-host", "Dismiss all on this host", "Mute every open issue on the selected issue's host",
-        Verb::Scope::Probe, mnemonic: 'h', group: :triage) { |ctx| ctx.probe_dismiss_host; nil }
+        Verb::Scope::Probe, mnemonic: 'H', group: :triage) { |ctx| ctx.probe_dismiss_host; nil }
 
       # Detail-parity actions on the selected row (no need to drill in first).
       #

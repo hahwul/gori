@@ -70,7 +70,7 @@ module Gori
 
       r.register Verb::Definition.new(
         "notes.clear", "Clear note", "Clear the current note's text",
-        Verb::Scope::Notes, available: in_notes, mnemonic: 'c', group: :danger) { |ctx| ctx.notes_clear; nil }
+        Verb::Scope::Notes, available: in_notes, mnemonic: 'K', group: :danger) { |ctx| ctx.notes_clear; nil }
 
       # Export the note as Markdown. Mnemonic 'E', not 'e' or 'x': 'e' is Edit-in-$EDITOR
       # and 'x' is read_edit.cr's Select line, both already in this scope. A capital follows

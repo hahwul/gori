@@ -27,10 +27,14 @@ module Gori
         Verb::Scope::Jwt, [Verb::Chord.new("a", ctrl: true)], available: in_jwt, mnemonic: 'a') { |ctx| ctx.jwt_cycle_alg; nil }
       r.register Verb::Definition.new(
         "jwt.load-decoded", "Load decoded claims", "Seed the ENCODE editors from the INPUT token's header + payload",
-        Verb::Scope::Jwt, available: in_jwt, mnemonic: 'l') { |ctx| ctx.jwt_load_decoded; nil }
+        Verb::Scope::Jwt, available: in_jwt, mnemonic: 'L') { |ctx| ctx.jwt_load_decoded; nil }
+      # The workbench clears (JWT, Cookie, Decoder, Notes) share menu `K`: off `k`/`l`, which
+      # move the selection inside the menu and on the strip, and all four ask first (#1274).
+      # Load is `L` for the same reason — it overwrites the ENCODE editors.
       r.register Verb::Definition.new(
         "jwt.clear", "Clear session", "Clear the token, editors, and secret of the active session",
-        Verb::Scope::Jwt, [Verb::Chord.new("l", ctrl: true)], available: in_jwt, mnemonic: 'k') { |ctx| ctx.jwt_clear; nil }
+        Verb::Scope::Jwt, [Verb::Chord.new("l", ctrl: true)], available: in_jwt, mnemonic: 'K',
+        group: :danger) { |ctx| ctx.jwt_clear; nil }
 
       # The single smart Copy (selection if any, else the focused pane) — chord 'y'.
       # `^Y` used to be a hardcoded copy-all chord in JwtController; folded in here so the

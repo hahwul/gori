@@ -35,11 +35,11 @@ module Gori
         Verb::Scope::Cookie, available: in_cookie, mnemonic: 's') { |ctx| ctx.cookie_cycle_salt; nil }
       r.register Verb::Definition.new(
         "cookie.load-decoded", "Load decoded payload", "Seed the FORGE payload editor from the INPUT cookie's parts",
-        Verb::Scope::Cookie, available: in_cookie, mnemonic: 'l') { |ctx| ctx.cookie_load_decoded; nil }
+        Verb::Scope::Cookie, available: in_cookie, mnemonic: 'L') { |ctx| ctx.cookie_load_decoded; nil }
       r.register Verb::Definition.new(
         "cookie.clear", "Clear session", "Clear the cookie, payload, secret, and salt of the active session",
         Verb::Scope::Cookie, [Verb::Chord.new("l", ctrl: true)],
-        available: in_cookie, mnemonic: 'k') { |ctx| ctx.cookie_clear; nil }
+        available: in_cookie, mnemonic: 'K', group: :danger) { |ctx| ctx.cookie_clear; nil }
 
       # Crack: reachable as `c` from a READ pane (INPUT-read / DECODED), where a bare letter
       # falls through to the keymap; in the editable panes `c` is a literal character. Also in

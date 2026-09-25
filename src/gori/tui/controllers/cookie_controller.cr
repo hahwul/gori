@@ -955,8 +955,21 @@ module Gori::Tui
       @host.status("loaded decoded payload into FORGE")
     end
 
+    # Clearing drops the cookie, the FORGE payload, the secret and the salt, and
+    # `TextArea#set_text` empties each editor's undo stack with them — so it asks first, the
+    # way `notes_clear` does. A session with nothing in it clears without the prompt.
     def clear_all : Nil
       s = cur
+      return clear_session(s) if session_blank?(s)
+      @host.confirm("CLEAR SESSION", "Clear this session's cookie, payload, secret and salt?\nThis can't be undone.",
+        confirm_label: "clear", danger: true) { clear_session(s) }
+    end
+
+    private def session_blank?(s : CookieSession) : Bool
+      s.input.text.empty? && s.payload.text.empty? && s.secret.empty? && s.salt.empty?
+    end
+
+    private def clear_session(s : CookieSession) : Nil
       s.input.set_text("")
       s.payload.set_text("")
       s.secret = ""
