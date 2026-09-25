@@ -27,8 +27,11 @@ module Gori
     #   what the AI did. Deliberately EXCLUDES gated READ tools (fuzz_status/results,
     #   mine_status/results, list_jobs, get_job, preview_rule) and project-management tools
     #   (switch_project reopens @store, so a post-hoc append would land in the wrong DB):
-    #   only in-project side effects. The intercept write verbs act on LIVE traffic the
-    #   human is holding — forwarding, dropping, or rewriting bytes mid-flight is the single
+    #   only in-project side effects. `export_project` / `import_project` are project tools that
+    #   are here anyway: neither moves the binding, so the entry lands in the project the agent
+    #   is working in, and an unredacted copy of an engagement written to disk — or a foreign
+    #   one registered beside it — is exactly what the operator should see. The intercept write
+    #   verbs act on LIVE traffic the human is holding — forwarding, dropping, or rewriting bytes mid-flight is the single
     #   most consequential thing an agent can do here, so they belong in the feed more than
     #   any store mutation does; toggle/set_filter/set_direction change what the proxy HOLDS
     #   next, which silently reshapes the human's queue, and are recorded for the same

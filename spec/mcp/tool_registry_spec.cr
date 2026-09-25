@@ -82,6 +82,11 @@ describe "MCP tool registry" do
     # `decode` is a pure tool and so needs no project.
     Gori::MCP::Tools::AGENT_ACTION_TOOLS.should contain("send_request")
     Gori::MCP::Tools::AGENT_ACTION_TOOLS.should_not contain("list_history")
+    # The two project tools that ARE agent actions: neither moves the binding, and an
+    # unredacted archive written to disk is what the operator should see (mcp/tool.cr).
+    Gori::MCP::Tools::AGENT_ACTION_TOOLS.should contain("export_project")
+    Gori::MCP::Tools::AGENT_ACTION_TOOLS.should contain("import_project")
+    Gori::MCP::Tools::AGENT_ACTION_TOOLS.should_not contain("switch_project")
     # `run_retest` joins the senders for the same reason they are here: a retest step replays
     # a Repeater session whose bytes may carry a `$KEY`, so the project's env has to be
     # re-read before the run rather than at whatever point this server last looked.
@@ -104,18 +109,21 @@ describe "MCP tool registry" do
 
   it "with no project bound and actions allowed, the tools flagged both unbound and gated reach their handlers" do
     # Under --read-only the next example refuses these before dispatch, so it proves nothing
-    # about their handlers. With actions allowed the handler runs, and every one of the three
+    # about their handlers. With actions allowed the handler runs, and every one of them
     # refuses its arguments before touching a network or a store: a provider that does not
-    # exist, a session that was never started, a project with no name.
+    # exist, a session that was never started, a project with no name, an archive with no path.
     tools = Gori::MCP::Tools.new(nil, allow_actions: true, verify_upstream: false)
     both = Gori::MCP::Tools::UNBOUND_SAFE & Gori::MCP::Tools::GATED_TOOLS
-    both.should eq(Set{"oast_start", "oast_stop", "oast_poll", "oast_payload", "delete_project"})
+    both.should eq(Set{"oast_start", "oast_stop", "oast_poll", "oast_payload", "delete_project",
+                       "export_project", "import_project"})
     safe_args = {
       "oast_start"     => %({"provider":"no-such-provider"}),
       "oast_stop"      => %({}),
       "oast_poll"      => %({}),
       "oast_payload"   => %({}),
       "delete_project" => %({}),
+      "export_project" => %({}),
+      "import_project" => %({}),
     }
     both.each do |name|
       r = tools.call(name, JSON.parse(safe_args[name]))
