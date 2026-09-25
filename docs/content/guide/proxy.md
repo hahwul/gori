@@ -154,7 +154,7 @@ A host gori has never captured (an API subdomain the bundle calls, but also `www
 | --- | --- | --- |
 | Open flow | `o` | Opens the script (or page) that referenced the path in the History detail, on the response pane, and names the line and byte |
 | Send to Repeater | `r` | A bare `GET` for the path in a new Repeater tab. Nothing is sent until `^R`, and no cookie or `Authorization` from the page is copied |
-| Discover here | `Space` `d` | Crawls under the path, as on any row |
+| Discover here | `Space` `>` `D` | Crawls under the path, as on any row |
 
 The stored references are deleted with the flows they came from, so `history clear` clears them; they never appear in History, QL or the OpenAPI export. The same data is `gori run sitemap js` (with `--scan`) and `gori run sitemap --js-refs` on the CLI, and `scan_js_endpoints` / `list_js_endpoints` over MCP.
 
@@ -424,20 +424,20 @@ Marks change **what the space menu acts on**, not which actions exist:
 
 > the effective target is **the marks if any are set, else the cursor row**
 
-So `/ status:5xx` → `Shift-T` → `Space` → `D` deletes every error in one confirm, and `Space` → `Y` copies all their URLs. The menu title reads `SPACE · 3 MARKED` and the entries rename themselves (`Delete 3 flows`, `Mine 3 flows`) so a batch is never a surprise.
+So `/ status:5xx` → `Shift-T` → `Space` → `d` deletes every error in one confirm, and `Space` → `Y` copies all their URLs. The menu title reads `SPACE · 3 MARKED` and the entries rename themselves (`Delete 3 flows`, `Mine 3 flows`) so a batch is never a surprise.
 
 | Action | Key | Over marks |
 |--------|-----|-----------|
 | Copy | `y` | The URL list (one per line) |
 | Copy as… | `Space` `Y` | urls / host list / cURL / raw requests / raw responses / req+res pairs |
-| Delete | `d` or `Space` `D` | One confirm for the whole set (`⇧X` is a different verb: it wipes the project's whole History) |
+| Delete | `d` or `Space` `d` | One confirm for the whole set (`⇧X` is a different verb: it wipes the project's whole History) |
 | Link… | `Space` `k` | One card lists every issue and note (plus `+ New issue…` / `+ New note…`); pick or create once, attach every flow — and on an issue, freeze each exchange as immutable evidence (max 20 copies; above that the links still land) |
 | Add issue | `Shift-F` | One issue with every flow as evidence |
 | Repeater / Fuzzer | `Ctrl-R` / `Shift-I` | One sub-tab per flow (max 20) |
-| Mine parameters | `Space` `m` | One config popup, one session per flow (max 20) |
+| Mine parameters | `Space` `>` `m` | One config popup, one session per flow (max 20) |
 | Run active scan | `Space` `A` | The request estimate is summed across the set |
 | Add host to scope | `Space` `h` | Hosts deduplicated: 12 flows on 2 hosts adds 2 rules |
-| Send to Comparer | `Space` `c` | Exactly 2 marked fills A (older) and B (newer) directly |
+| Send to Comparer | `Space` `>` `c` | Exactly 2 marked fills A (older) and B (newer) directly |
 
 Marks survive a filter change, a re-sort, and leaving the tab and coming back; the count chip tells you how many are currently off-screen. Anything that sends traffic still asks first and still honours scope per request; marking changes the request count, never the gate. A few actions stay single-target because they only make sense for one flow (opening the detail, the Sequencer, opening a response in the browser, mocking a response); their menu entries say `(cursor)` while marks are set.
 
@@ -463,15 +463,15 @@ Marking several flows switches the menu to the set-shaped formats instead: URLs,
 
 ## Open a response in the browser {#open-in-browser}
 
-A terminal cannot lay out a page, show you a PNG, or paginate a PDF. `Space` `Shift-B` hands the response to something that can: gori writes the **decoded** body to a file under `~/.gori/preview/` and opens it with your desktop's opener (`open` on macOS, `xdg-open` on Linux).
+A terminal cannot lay out a page, show you a PNG, or paginate a PDF. `Space` `>` `b` (**Send flow to…** → **Open response in browser**) hands the response to something that can: gori writes the **decoded** body to a file under `~/.gori/preview/` and opens it with your desktop's opener (`open` on macOS, `xdg-open` on Linux).
 
 It is on three surfaces, all the same action:
 
 | Where | Key | Opens |
 |-------|-----|-------|
-| History list | `Space` `Shift-B` | The cursor row's response |
-| History detail | `Space` `Shift-B` | The open flow's response |
-| Repeater | `Space` `Shift-B` | The active sub-tab's last response |
+| History list | `Space` `>` `b` | The cursor row's response |
+| History detail | `Space` `>` `b` | The open flow's response |
+| Repeater | `Space` `>` `b` | The active sub-tab's last response |
 
 Four things are worth knowing before you press it.
 

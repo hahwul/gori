@@ -154,6 +154,21 @@ module Gori::Tui
 
     getter focus : Symbol
 
+    # The empty card's pointer to where a run starts: Sitemap/History's space menu, read from
+    # the registry so the two keys (`space → > D`) follow the menu (`#set_registry`).
+    @start_hint = DiscoverView.start_hint(nil)
+
+    # "Discover here" from Sitemap/History — the one place the tab spells the menu path.
+    def self.start_hint(registry : Verb::Registry?) : String
+      Hotkeys.expand_menu_paths(registry, "start from Sitemap/History ({space:sitemap.discover} Discover here)")
+    end
+
+    getter start_hint : String
+
+    def set_registry(registry : Verb::Registry) : Nil
+      @start_hint = DiscoverView.start_hint(registry)
+    end
+
     def initialize
       @runs = [] of DiscoverRun
       @sel = 0
@@ -427,7 +442,7 @@ module Gori::Tui
       r = current
       unless r
         screen.text(inner.x + 1, inner.y,
-          "no runs — from Sitemap/History press space → \"Discover here\"", Theme.muted, Theme.bg, width: inner.w - 1)
+          "no runs — #{@start_hint}", Theme.muted, Theme.bg, width: inner.w - 1)
         return
       end
       # The badge tracks the SELECTED row, which is what ^R/^X act on — so a stopped run

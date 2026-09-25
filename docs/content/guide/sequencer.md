@@ -18,7 +18,7 @@ The **Sequencer** tab is off the bar by default. Press **`0`** and type "seq", o
 
 ## Two Ways to Feed It
 
-**Live.** Point it at a request that hands out a fresh token, and gori replays that request many times, pulling the token out of each response. From **History**, select the flow that sets the token and `Space` → **Send to Sequencer**; gori auto-detects the likely session cookie. Tune the token location and sample size with `c` (reconfigure), then `Ctrl-R` to collect and `Ctrl-X` to stop.
+**Live.** Point it at a request that hands out a fresh token, and gori replays that request many times, pulling the token out of each response. From **History**, select the flow that sets the token and `Space` `>` `s` (**Send flow to…** → **Send to Sequencer**); gori auto-detects the likely session cookie. Tune the token location and sample size with `c` (reconfigure), then `Ctrl-R` to collect and `Ctrl-X` to stop.
 
 **Manual.** Already have a list of tokens? Paste them (one per line) for a pure statistical analysis with no network traffic.
 

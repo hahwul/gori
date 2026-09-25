@@ -1,7 +1,7 @@
 require "../spec_helper"
 require "file_utils"
 
-# `space ▸ m` (Mine parameters) and `space ▸ q` (Send to Sequencer) in the Repeater tab hand
+# `space > m` (Mine parameters) and `space > s` (Send to Sequencer) in the Repeater tab hand
 # the editor's text to `build_seed_from_request`, whose first statement normalizes line
 # endings. That normalization ran as a PCRE `gsub(/\r?\n/, "\r\n")`, and PCRE2 raises
 # `ArgumentError` on a subject that is not valid UTF-8 — which a Repeater buffer routinely is,

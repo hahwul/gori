@@ -41,7 +41,7 @@ gori run sitemap            # folds ids by default; --no-group shows every one
 
 ## 3. Find what you never clicked with Discover
 
-The Sitemap only knows what you browsed. **Discover** finds the rest: it spiders links you never clicked, reads what the target says about itself (`robots.txt`, `sitemap.xml`, the `.well-known/` registry) and the paths quoted in its JavaScript, then brute-forces unlinked directories (`/admin`, `.git/config`, `/api/v2`). Open **Target → Discover**, or from a **Sitemap** node or a **History** flow press `Space` and pick **Discover here** to confine the run to that subtree. The popup chooses the exploration style (spider, brute-force, or both), a max depth, the crawl scope, and concurrency; the run happens in the background, and `^X` stops or `p` pauses it from the Discover sub-tab.
+The Sitemap only knows what you browsed. **Discover** finds the rest: it spiders links you never clicked, reads what the target says about itself (`robots.txt`, `sitemap.xml`, the `.well-known/` registry) and the paths quoted in its JavaScript, then brute-forces unlinked directories (`/admin`, `.git/config`, `/api/v2`). Open **Target → Discover**, or from a **Sitemap** node or a **History** flow press `Space` `>` `D` (**Send flow to…** → **Discover here**) to confine the run to that subtree. The popup chooses the exploration style (spider, brute-force, or both), a max depth, the crawl scope, and concurrency; the run happens in the background, and `^X` stops or `p` pauses it from the Discover sub-tab.
 
 ```bash
 gori run discover --target https://api.example.com \

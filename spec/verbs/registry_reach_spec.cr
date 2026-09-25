@@ -207,18 +207,17 @@ describe "sub-tab verbs" do
     # `f` on the strip opens this picker in all of them; the menu said 's' on Repeater and
     # Notes, which is a letter the strip does not answer to. It is also one of the nine the
     # SUB-TABS bucket now reserves in EVERY view of those tabs, so what held 'f' had to move
-    # whatever else was true: `repeater.fuzz` → 'F' (joining `C` Send to Comparer in that
-    # scope's capital send family) and `notes.find` → 's', the letter `notes.find-subtab`
-    # vacated, so the pair is a straight swap.
+    # whatever else was true: `repeater.fuzz` went to 'F' and has since moved into Send flow
+    # to… (#1274), and `notes.find` → 's', the letter `notes.find-subtab` vacated, so the pair
+    # is a straight swap.
     {"repeater", "fuzz", "mine", "sequence", "comparer", "decoder", "jwt", "cookie", "notes"}
       .each do |prefix|
         r["#{prefix}.find-subtab"].menu_key.should eq('f'), prefix
       end
-    r["repeater.fuzz"].menu_key.should eq('F')
+    r.menu_keys("repeater.fuzz").should eq(['>', 'f'])
     r["notes.find"].menu_key.should eq('s')
-    # `history.fuzz` keeps 'z' for the same act in the BODY scope: cross-scope reuse is legal
-    # and the two menus never render together.
-    r["history.fuzz"].menu_key.should eq('z')
+    # Send to Fuzzer is one letter in every scope now: the family table's.
+    r.menu_keys("history.fuzz").should eq(['>', 'f'])
   end
 end
 

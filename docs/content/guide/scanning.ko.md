@@ -74,7 +74,7 @@ gori run mine <flow-id> \
 
 Miner가 숨은 입력값을 찾는다면, **Discover**는 숨은 엔드포인트를 찾습니다. 링크를 따라가며 사이트를 스파이더링하고(직접 눌러보지 않은 링크까지), 링크되지 않은 디렉터리와 경로(`/admin`, `.git/config`, `/api/v2`)를 브루트포스합니다. 새로 생긴 **Target** 탭 아래 Sitemap 옆의 서브탭으로 존재하며, 찾아낸 엔드포인트는 모두 그 Sitemap으로 바로 반영됩니다.
 
-지금 있는 자리에서 바로 실행하세요. **Sitemap** 노드나 **History** 플로우에서 `Space`를 눌러 **Discover here**를 고르면 됩니다. 작은 팝업에서 탐색 방식(spider, bruteforce, 또는 기본값인 둘 다), 최대 깊이, 크롤 스코프, 동시성을 선택합니다. 실행은 백그라운드에서 진행됩니다. 하단 바에서 상태를 확인하고, Discover 서브탭에서 일시중지하거나 멈추며(`^X` 중지, `p` 일시중지), 완료 알림에서 결과로 바로 이동할 수 있습니다.
+지금 있는 자리에서 바로 실행하세요. **Sitemap** 노드나 **History** 플로우에서 `Space` `>` `D`(**Send flow to…** → **Discover here**)를 누르면 됩니다. 작은 팝업에서 탐색 방식(spider, bruteforce, 또는 기본값인 둘 다), 최대 깊이, 크롤 스코프, 동시성을 선택합니다. 실행은 백그라운드에서 진행됩니다. 하단 바에서 상태를 확인하고, Discover 서브탭에서 일시중지하거나 멈추며(`^X` 중지, `p` 일시중지), 완료 알림에서 결과로 바로 이동할 수 있습니다.
 
 실행 결과는 URL 목록만 남지 않습니다. 각 발견 항목은 Discover가 보낸 요청과 서버가 돌려준 응답까지 함께 저장되므로, FINDINGS 표에서 `Enter`(또는 `o`)를 누르면 History와 동일한 상세 화면에서 그 교환을 그대로 볼 수 있습니다. 헤더, 본문, JSON 정렬 보기까지 같고, 거기서 `^R`로 Repeater에 바로 보낼 수도 있습니다. 헤드리스 실행과 MCP 실행도 같은 바이트를 저장하므로 `gori run show`나 `get_flow`로도 열립니다.
 
@@ -147,7 +147,7 @@ History와 같은 방식으로 표시합니다. `t`를 누르면 커서의 이�
 - **Notes**: 자유 형식의 프로젝트별 마크다운 문서(프로젝트당 여러 노트). Notes 탭에서 노트를 생성, 편집, 닫을 수 있고, `gori run notes` / `gori run notes --all`로 헤드리스에서 목록을 보거나 덤프할 수 있습니다. 에이전트는 MCP(`list_notes`, `get_note`, `create_note`, …)로 노트를 관리할 수 있습니다.
 - **Comparer**: 두 메시지를 슬롯 A와 B에 불러와 나란히 diff합니다. 요청 간 응답이 어떻게 바뀌었는지 파악하는 데 유용합니다.
 
-  슬롯은 요청과 응답을 쥔 곳이면 어디서든 채울 수 있습니다. History, Sitemap, Repeater 탭(마지막 전송), Fuzzer 결과 행에서 `Space` → **Send to Comparer**, 또는 Comparer 탭에서 `a` / `b`로 캡처된 플로우를 직접 고르면 됩니다. 이 피커는 History·Sitemap과 마찬가지로 활성 Scope 렌즈를 따르므로, 스코프 밖 플로우를 고르려면 렌즈를 꺼야 합니다. Repeater 전송과 퍼즈 결과는 캡처를 남기지 않으므로, 그 둘이 diff로 들어올 수 있는 경로는 이것뿐입니다.
+  슬롯은 요청과 응답을 쥔 곳이면 어디서든 채울 수 있습니다. History, Sitemap, Repeater 탭(마지막 전송), Fuzzer 결과 행에서 `Space` `>` `c`(**Send flow to…** → **Send to Comparer**), 또는 Comparer 탭에서 `a` / `b`로 캡처된 플로우를 직접 고르면 됩니다. 이 피커는 History·Sitemap과 마찬가지로 활성 Scope 렌즈를 따르므로, 스코프 밖 플로우를 고르려면 렌즈를 꺼야 합니다. Repeater 전송과 퍼즈 결과는 캡처를 남기지 않으므로, 그 둘이 diff로 들어올 수 있는 경로는 이것뿐입니다.
 
   각 열 헤더에 그쪽의 `status · size · time`이 붙고, 가운데 구분선에 A→B 델타가 표시됩니다. `403 → 200` 하나가 본문을 읽기 전에 답인 경우가 대부분입니다.
 

@@ -100,12 +100,12 @@ module Gori
         "Queue the selected flows in the Authorize (access-control) tab",
         Verb::Scope::Body,
         available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :history && !ctx.selected_flow_ids.empty? },
-        mnemonic: 'u', group: :send) { |ctx| ctx.authorize_seed_selected; nil }
+        intent: :to_authorize, group: :send) { |ctx| ctx.authorize_seed_selected; nil }
 
       r.register Verb::Definition.new(
         "sitemap.authorize", "Send to Authorize",
         "Queue the selected endpoint's captured flow in the Authorize tab",
-        Verb::Scope::Sitemap, mnemonic: 'u', group: :send) { |ctx| ctx.authorize_seed_sitemap; nil }
+        Verb::Scope::Sitemap, intent: :to_authorize, group: :send) { |ctx| ctx.authorize_seed_sitemap; nil }
     end
   end
 end

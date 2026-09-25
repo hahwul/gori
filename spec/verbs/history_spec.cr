@@ -130,15 +130,14 @@ describe "Gori::Verbs.register_history" do
     end
 
     it "binds direct destructive shortcuts while preserving the danger menu keys" do
-      # Bare `d` deletes from the list even though Space→d remains Discover; the explicit
-      # menu mnemonic keeps the two actions distinct there. ⇧X wipes the tab — the chord and
-      # the menu letter every clear-all verb in the app now spells the same way (the family is
-      # asserted as a set in spec/verbs/activity_spec.cr).
+      # Bare `d` deletes from the list, and Space→d is the same delete now that Discover sits in
+      # Send flow to… (#1274). ⇧X wipes the tab — the chord and the menu letter every clear-all
+      # verb in the app now spells the same way (the family is asserted as a set in
+      # spec/verbs/activity_spec.cr).
       #
-      # `C` is not available for either half: this tab spends it on the column editor, and the
-      # other `C` in the registry is Send to Comparer.
+      # `C` is not available for either half: this tab spends it on the column editor.
       r["history.delete"].chords.should eq([typed_chord("d")])
-      r["history.delete"].menu_key.should eq('D')
+      r["history.delete"].menu_key.should eq('d')
       r["history.clear"].chords.should eq([shift_chord('X')])
       r["history.clear"].menu_key.should eq('X')
       r["probe.clear"].menu_key.should eq('X')
@@ -149,9 +148,8 @@ describe "Gori::Verbs.register_history" do
       verb_intents(r, "history.toggle-static").should eq([:toggle_static_assets])
       r["history.toggle-static"].available?(on(:history)).should be_true
       r["history.toggle-static"].available?(on(:project)).should be_false # Body is shared
-      r["repeater.compare"].menu_key.should eq('C')
-      r["history.clear"].menu_key.should_not eq(r["repeater.compare"].menu_key)
-      r["detail.delete"].chords.should be_empty # the shortcut is list-only
+      r.menu_keys("repeater.compare").should eq(['>', 'c'])               # Send flow to… → Comparer
+      r["detail.delete"].chords.should be_empty                           # the shortcut is list-only
       r["history.probe-active"].menu_key.should eq('A')
       verb_intents(r, "history.probe-active").should eq([:probe_active_selected])
     end

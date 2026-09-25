@@ -158,7 +158,7 @@ Ctrl-P  → settings:hotkeys
 함께 팔레트를 연 패널의 동작도 찾습니다. 그 자리에서 `Space`가 보여줄 목록과 같고, 메뉴 글자가
 없는 동작도 포함됩니다. 패널의 결과가 `THIS TAB` 아래 먼저 나오고, 앱 명령은 `APP` 아래에
 이어집니다. 탭 행의 오른쪽에는 가장 빠른 길이 표시됩니다. 키가 있으면 그 키를, 없으면 메뉴
-글자를 보여줍니다(`␣ t`는 `Space` 다음 `t`). 표시해 둔 행이 있으면 space 메뉴처럼 제목이
+글자를 보여줍니다(`␣ t`는 `Space` 다음 `t`, `␣ > c`는 [Send flow to…](#send-flow-to) 안의 행). 표시해 둔 행이 있으면 space 메뉴처럼 제목이
 `COMMANDS · 3 MARKED`로 바뀌어, 일괄 동작이 그 행 전부에 적용된다는 것을 알 수 있습니다. 검색어가
 비어 있으면 예전처럼 앱 명령만 나열합니다.
 
@@ -227,6 +227,41 @@ Cookie, Comparer, Notes. 예전에는 스트립 자신의 액션도 다른 컨�
 `/` `d` `x` `y` `Y` `S` `t` `T` `N`과 `X`는 **예약**입니다. 그 동작이 있는 탭에서는 다른 행이 그 글자를 쓰지 않습니다.
 나머지는 그 동작이 있는 곳에서는 그 동작의 글자이고, 없는 탭에서는 탭 고유의 행이 써도 됩니다.
 Rewriter와 Colormarker의 **Enable/disable everywhere**가 `T`인 이유가 이것입니다. `X`는 비우기입니다.
+
+### Send flow to… {#send-flow-to}
+
+선택한 플로우를 다른 도구로 넘기는 동작은 **`>` Send flow to…** 한 행이고, 누르면 두 번째 카드가
+열립니다. 그 안에서는 도구마다 모든 탭에서 같은 글자를 씁니다.
+
+| 키 | 플로우를 보내는 곳 |
+|----|--------------------|
+| `r` | Repeater |
+| `f` | Fuzzer |
+| `c` | Comparer |
+| `m` | Miner |
+| `s` | Sequencer |
+| `a` | Authorize |
+| `D` | Discover |
+| `b` | 브라우저 (Open response in browser) |
+
+그래서 History, Sitemap, Repeater 탭, Fuzzer 결과 어디서든 `Space` `>` `c`가 Comparer로 보냅니다.
+탭은 자기가 보낼 수 있는 도구만 보여줍니다. 글자는 **Send selection to…** 카드(`S`)와 같습니다.
+두 카드 모두 Sequencer가 `s`이고, Decoder는 거기서 이미 쓰던 `d`를 그대로 가지므로 Discover가
+`D`입니다.
+
+- **Send to Repeater는 자기 글자도 그대로 가집니다.** History, 상세, Sitemap, Probe, Evidence,
+  이슈에서는 `r`, `r`이 탭을 실행하는 Fuzzer와 Miner에서는 `R`입니다.
+- `>` 행은 탭에 보내기 동작이 있으면 선택한 것이 없어도 그려집니다. 그때 카드는
+  **nothing here right now**라고 보여주므로, `Space` `>` `r`을 빠르게 쳐도 아래 패널로 새지
+  않습니다.
+- `Esc`나 `Backspace`는 한 단계 뒤로 가고, `Esc`를 한 번 더 누르면 닫힙니다. 그 밖의 키는 첫
+  단계에서와 마찬가지로 메뉴 전체를 닫습니다.
+- 제목은 `SPACE › SEND FLOW TO`이고, 표시한 행이 있으면 `· 3 MARKED`가 붙습니다.
+- 직접 키는 그대로입니다. Repeater로 `Ctrl-R` / `r`, Fuzzer로 `⇧I`가 여전히 동작합니다.
+
+옮겨진 것: History에서는 이 동작들이 `c` `z` `m` `q` `u` `d` `⇧B`였고, Discover가 빠지면서
+**삭제가 자기 맨 키인 `d`를 가져갔습니다**. 상세의 삭제도 `d`입니다.
+
 ## 에디터 키셋 {#editor-keysets}
 
 gori의 텍스트 패널은 **모달**입니다. `Esc`와 `i`로 READ와 INSERT를 오가고, READ에서는 맨 글자가 명령입니다. 기본으로 제공되는 문법은 helix 형태입니다 — **`x`로 줄을 선택한 뒤 `y`로 복사**. vim에서는 같은 동작이 `V` 다음 `y`이고, 딱 그 한 제스처가 vim에 익숙한 손이 하루 종일 부딪히는 지점입니다.

@@ -3750,3 +3750,39 @@ surface, so its search now covers them too:
 Editor-scope verbs are not searched: the space menu does not list them either. Which rows move
 off the space menu into palette-only placement is stage 2, after the grouped menu lands.
 
+
+### 2026-09-25: the space menu gets a second level, for verb families
+
+Refines: [P1](#p1) and the R1 guard entry above. #1274 WP9.
+
+A tab's cross-tool sends were eight rows and eight letters each, and the letters drifted per tab
+(Send to Fuzzer was `z` on History and `F` on the Repeater). A `Verb::Family` now draws them as
+one row, **`>` Send flow to…**, whose card lists the members. Every member is still a
+`Definition` and runs through `Definition#call`; only the menu's presentation is new.
+
+- **Membership reuses `intent`.** A family's letter table (intent → level-2 letter, in row order)
+  is the only place a member's letter is spelled, so one intent reads one letter in every scope
+  by construction. Lexicon intents and family intents are disjoint, and boot refuses a member
+  that also spells a `mnemonic:`.
+- **`pinned:` keeps a member at level 1 too**, on its own letter: Send to Repeater stays `r`
+  (`R` on the Fuzzer and Miner) and is also `> r` everywhere. Only a pinned member keeps a
+  `mnemonic:`; `menu_key` is the level-1 key alone, and nil for an unpinned member.
+- **A family row is static.** It is drawn whenever the view registers a member, never decided by
+  `available?` and never collapsed into a lone member. With nothing available the card says so
+  instead of dismissing, so `space > r` typed blind cannot fall through to the pane's bare `r`.
+  The row sits in its family's band, in the first bucket that holds a member.
+- **R1 governs level 1 only.** A family key is checked like any menu letter (the guard sweeps
+  `family:<id>` rows); level-2 letters are reached after two keys, never by a dropped space, so
+  they are exempt. They are never `h`/`j`/`k`/`l`, which a sticky card needs for navigation and
+  which keeps the pending `hjkl` decision open.
+- **Validation is per view at both levels**: level 1 is every row's key (family keys included),
+  level 2 is one member per intent per view — per view and not per scope, since the Repeater's
+  request and response panes never render together.
+- **`esc` and `⌫` go back one level**; `esc` at level 1 closes, and an unmapped key closes the
+  whole menu. A sticky family re-opens its card after a member runs unless that member opened
+  something of its own, and `ExecContext#menu_state` draws a row's `●`/`○` or value. Both wait
+  for the toggle families.
+- **One tool-letter table** (`Verb::TOOL_LETTERS`) serves this card and the Send selection to…
+  picker, so Sequencer is `s` in both. Decoder keeps the `d` that picker taught first, so Discover
+  is `D`. With Discover gone from level 1, History's and the detail's Delete take the lexicon
+  `d` (the entry above listed them as waiting on this).

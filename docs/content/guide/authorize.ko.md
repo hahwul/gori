@@ -86,7 +86,7 @@ group = "워크벤치"
 
 ## 작업 흐름 {#the-loop}
 
-1. **History**에서 시험할 플로우를 선택하고 `Space` → **Send to Authorize**를 실행합니다. **Sitemap**에서도 같은 동작으로 선택한 엔드포인트의 캡처 플로우를 큐에 넣습니다.
+1. **History**에서 시험할 플로우를 선택하고 `Space` `>` `a`(**Send flow to…** → **Send to Authorize**)를 실행합니다. **Sitemap**에서도 같은 동작으로 선택한 엔드포인트의 캡처 플로우를 큐에 넣습니다.
 2. **Authorize** 탭에서 `i`를 눌러 비교할 아이덴티티를 구성합니다.
 3. `Ctrl-R`는 아직 결과가 없는 요청을 모두 재전송하고, `⇧R`는 전부 다시 실행하며, `t`는 커서에 있는 요청 하나만 실행합니다.
 4. 테이블을 읽습니다. 위쪽 패널은 요청당 한 행으로 종합 판정을 보여주고, `⇥`로 선택한 요청의 아이덴티티별 상세를 아래 패널에서 확인합니다.
@@ -160,7 +160,7 @@ group = "워크벤치"
 | `PgUp` / `PgDn` | 상세 패널 스크롤 |
 | `⇧X` | Clear: 큐와 모든 아이덴티티의 결과를 비움(먼저 확인을 묻습니다). `Space` → `X`도 같은 동작이며, `⇧X`는 History·Probe·Issues·프로젝트 ACTIVITY 피드에서도 같은 clear-all 키입니다 |
 
-**History**나 **Sitemap**에서 `Space` → **Send to Authorize**로 요청을 이 탭에 넣습니다.
+**History**나 **Sitemap**에서 `Space` `>` `a`(**Send flow to…** → **Send to Authorize**)로 요청을 이 탭에 넣습니다.
 
 ## 헤드리스 {#headless}
 

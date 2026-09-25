@@ -86,7 +86,7 @@ A run needs at least one identity besides the baseline, and all three surfaces r
 
 ## The Loop
 
-1. In **History**, select the flows worth testing and `Space` → **Send to Authorize**. From **Sitemap**, the same verb queues the selected endpoint's captured flow.
+1. In **History**, select the flows worth testing and `Space` `>` `a` (**Send flow to…** → **Send to Authorize**). From **Sitemap**, the same verb queues the selected endpoint's captured flow.
 2. On the **Authorize** tab, press `i` and set up the identities you want to compare.
 3. `Ctrl-R` replays every queued request that has no result yet; `⇧R` re-runs everything; `t` runs just the request under the cursor.
 4. Read the table. The top pane is one row per request with an aggregate verdict; `⇥` drills into the selected request's identities in the bottom pane.
@@ -160,7 +160,7 @@ The tab keeps a live readout of what passive has actually done (`N seen · M que
 | `PgUp` / `PgDn` | Scroll the detail pane |
 | `⇧X` | Clear: empty the queue and every identity's results (asks first). `Space` → `X` does the same; `⇧X` is the clear-all key in History, Probe, Issues and the Project ACTIVITY feed too |
 
-From **History** or **Sitemap**, `Space` → **Send to Authorize** queues a request here.
+From **History** or **Sitemap**, `Space` `>` `a` (**Send flow to…** → **Send to Authorize**) queues a request here.
 
 ## Headless
 

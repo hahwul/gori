@@ -31,9 +31,9 @@ describe "Gori::Verbs.register_sequencer" do
     verb_intents(r, "sitemap.sequence").should eq([:sequence_from_sitemap])
   end
 
-  it "shares the 'q' menu key across all four send-to-Sequencer surfaces" do
+  it "reaches all four send-to-Sequencer surfaces as Send flow to… → s" do
     %w[history.sequence detail.sequence repeater.sequence sitemap.sequence].each do |id|
-      r[id].menu_key.should eq('q')
+      r.menu_keys(id).should eq(['>', 's'])
     end
   end
 

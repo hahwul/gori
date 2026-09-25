@@ -24,6 +24,7 @@ module Gori::Tui
     def initialize(host : Host)
       super(host)
       @view = DiscoverView.new
+      @view.set_registry(host.session.registry)
       @discover_events = Channel({DiscoverRun, Discover::Event}).new(256)
       @persist_buf = [] of {Store::CapturedRequest, Store::CapturedResponse?}
       # Which findings row each buffered pair came from, same order as @persist_buf, so the
@@ -54,7 +55,7 @@ module Gori::Tui
       # The empty line ends in `esc sub-tabs` like the two below it. `discover.to-menu` has
       # always bound escape here; the one state where the tab has nothing else to say was the
       # one that did not say it.
-      return "start from Sitemap/History (space → \"Discover here\") · esc sub-tabs" if @view.empty?
+      return "#{@view.start_hint} · esc sub-tabs" if @view.empty?
       return @view.filter_hint if querying?
       if @view.focus == :runs
         keys("↑/↓ runs · ↵/tab findings · {discover.run} run · {discover.stop} stop · {discover.pause} pause · {discover.dismiss} dismiss · space cmds · esc sub-tabs")
@@ -78,7 +79,7 @@ module Gori::Tui
 
     # `/` — narrow the FINDINGS table by status / source / URL. Refused with nothing to filter.
     def discover_filter : Nil
-      return @host.status("no run selected — start from Sitemap/History (space → \"Discover here\")") unless @view.current
+      return @host.status("no run selected — #{@view.start_hint}") unless @view.current
       @view.filter_start
     end
 
@@ -234,7 +235,7 @@ module Gori::Tui
     def discover_run : Nil
       run = @view.current
       unless run
-        @host.status("no run selected — start from Sitemap/History (space → \"Discover here\")")
+        @host.status("no run selected — #{@view.start_hint}")
         return
       end
       if run.running?
@@ -307,7 +308,7 @@ module Gori::Tui
     # Runner#discover_open_flow, which is `sitemap_open_flow`'s hop from the same parent tab).
     def open_flow_target : Int64?
       if @view.empty?
-        @host.status("no runs yet — start from Sitemap/History (space → \"Discover here\")")
+        @host.status("no runs yet — #{@view.start_hint}")
         return nil
       end
       unless @view.selected_finding
@@ -440,7 +441,7 @@ module Gori::Tui
     private def discover_plan_error(ex : Discover::PlanError) : String
       case ex.reason
       in Discover::PlanError::Reason::NoTarget
-        "no target — start from Sitemap/History (space → \"Discover here\")"
+        "no target — #{@view.start_hint}"
       in Discover::PlanError::Reason::BadTarget
         "invalid target — use scheme://host[:port][/path]"
       in Discover::PlanError::Reason::NoTechnique

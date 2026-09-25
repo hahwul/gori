@@ -11,7 +11,7 @@ describe "one key, one meaning" do
   it "`d` never starts a crawl — Sitemap's discover is a menu row like its siblings' sends" do
     keymap.lookup(Gori::Verb::Chord.new("d"), Gori::Verb::Scope::Sitemap).should be_nil
     Gori::Verbs.registry["sitemap.discover"].chords.should be_empty
-    Gori::Verbs.registry["sitemap.discover"].menu_key.should eq('d')
+    Gori::Verbs.registry.menu_keys("sitemap.discover").should eq(['>', 'D']) # Send flow to… → Discover
   end
 
   it "`⇧X` is the wipe chord and nothing quieter — the rule-default toggles are menu rows" do

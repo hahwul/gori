@@ -265,17 +265,17 @@ module Gori::Tui
              when :issues
                "#{key("⇧F", "issue.create")} from History · #{key("n", "issues.new")} create"
              when :discover
-               "space → Discover here · #{key("^R", "discover.run")} run"
+               "Discover here (#{menu("sitemap.discover")}) · #{key("^R", "discover.run")} run"
              when :comparer
                "#{key("a", "comparer.pick-a")} pick A · #{key("b", "comparer.pick-b")} pick B"
              when :authorize
-               "space → Send to Authorize · #{key("i", "authorize.identities")} identities"
+               "Send to Authorize (#{menu("history.authorize")}) · #{key("i", "authorize.identities")} identities"
              when :miner
-               "space → Mine parameters · #{key("^R", "mine.run")} run"
+               "Mine parameters (#{menu("history.mine")}) · #{key("^R", "mine.run")} run"
              when :miner_results
                running ? "mining…" : "#{key("^R", "mine.run")} mine this request"
              when :sequencer
-               "space → Send to Sequencer · #{key("^R", "sequence.run")}"
+               "Send to Sequencer (#{menu("history.sequence")}) · #{key("^R", "sequence.run")}"
              when :sequencer_samples
                running ? "collecting…" : "#{key("c", "sequence.configure")} configure · #{key("^R", "sequence.run")} collect"
              when :oast
@@ -556,7 +556,7 @@ module Gori::Tui
       y += 2
       Frame.inner_divider(screen, inner, y, bg: Theme.bg, border: Theme.border)
       y += 1
-      y = draw_chord_hint(screen, ix, y, iw, " space ", "\"Discover here\" on a host", bullet: "▸ ")
+      y = draw_chord_hint(screen, ix, y, iw, menu_chip("sitemap.discover"), "\"Discover here\" on a host", bullet: "▸ ")
       draw_chord_hint(screen, ix, y, iw, " ^R ", "run the selected crawl", bullet: "▸ ", verb: "discover.run")
     end
 
@@ -865,7 +865,7 @@ module Gori::Tui
     end
 
     private def medium_discover(headline) : Array(String)
-      [headline, "target ──► crawl ──► endpoints", "space → Discover here · #{key("^R", "discover.run")} run"]
+      [headline, "target ──► crawl ──► endpoints", "Discover here (#{menu("sitemap.discover")}) · #{key("^R", "discover.run")} run"]
     end
 
     private def medium_comparer(headline) : Array(String)
@@ -873,15 +873,15 @@ module Gori::Tui
     end
 
     private def medium_authorize(headline) : Array(String)
-      [headline, "one request ──► many identities", "space → Send to Authorize · #{key("i", "authorize.identities")} identities"]
+      [headline, "one request ──► many identities", "Send to Authorize (#{menu("history.authorize")}) · #{key("i", "authorize.identities")} identities"]
     end
 
     private def medium_miner(headline) : Array(String)
-      [headline, "wordlist ──► probe ──► params", "space → Mine parameters · #{key("^R", "mine.run")} run"]
+      [headline, "wordlist ──► probe ──► params", "Mine parameters (#{menu("history.mine")}) · #{key("^R", "mine.run")} run"]
     end
 
     private def medium_sequencer(headline) : Array(String)
-      [headline, "collect ──► samples ──► entropy", "space → Send to Sequencer · #{key("^R", "sequence.run")}"]
+      [headline, "collect ──► samples ──► entropy", "Send to Sequencer (#{menu("history.sequence")}) · #{key("^R", "sequence.run")}"]
     end
 
     private def medium_miner_results(headline, running) : Array(String)
@@ -948,6 +948,18 @@ module Gori::Tui
     private def key(literal : String, verb : String) : String
       return literal unless reg = registry
       Hotkeys.binding_label(reg, verb, literal)
+    end
+
+    # The space-menu path to a menu-only verb (`space → > D`), or "the space menu" without a
+    # registry to read it from (`Hotkeys.expand_menu_paths`).
+    private def menu(verb : String) : String
+      Hotkeys.expand_menu_paths(registry, "{space:#{verb}}")
+    end
+
+    # …and the same path as a chip: ` space > D `, or a bare ` space ` without a registry.
+    private def menu_chip(verb : String) : String
+      keys = registry.try(&.menu_keys(verb))
+      keys ? " space #{keys.join(' ')} " : " space "
     end
 
     # A ` KEY ` or ` KEY:WORD ` chip; with `verb`, KEY is resolved through #key and the

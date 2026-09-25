@@ -91,7 +91,7 @@ module Gori::Tui
 
     def body_hint(focus : Symbol) : String
       v = current_view
-      return "↹/esc tabs · mine from History/Repeater (space → Mine parameters)" unless v
+      return Hotkeys.expand_menu_paths(@host.session.registry, "↹/esc tabs · mine from History/Repeater ({space:history.mine})") unless v
       return v.filter_hint if v.filter_editing?
       # `esc sub-tabs`, not `esc tabs`: `handle_escape` below goes to the strip whenever one
       # is shown, and `subtab_strip_shown?` is `!@miners.empty?` — every branch under this
@@ -178,7 +178,7 @@ module Gori::Tui
     # `/` — narrow the FINDINGS table by parameter / location / evidence. Refused with no
     # session; lands on the RESULTS pane (closing an open detail) so the rows are on screen.
     def mine_filter : Nil
-      return @host.status("no miner session — mine from History/Repeater (space → Mine parameters)") unless v = current_view
+      return @host.status(Hotkeys.expand_menu_paths(@host.session.registry, "no miner session — mine from History/Repeater ({space:history.mine})")) unless v = current_view
       v.filter_start
     end
 

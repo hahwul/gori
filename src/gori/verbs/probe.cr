@@ -87,7 +87,7 @@ module Gori
 
       r.register Verb::Definition.new(
         "probe.repeater-evidence", "Repeater evidence", "Send the selected issue's sample flow to Repeater",
-        Verb::Scope::Probe, [Verb::Chord.new("r")], group: :send) { |ctx| ctx.probe_repeater_flow; nil }
+        Verb::Scope::Probe, [Verb::Chord.new("r")], group: :send, intent: :to_repeater, pinned: true) { |ctx| ctx.probe_repeater_flow; nil }
 
       # Re-run the ACTIVE checks against the selected issue's sample flow (menu-only 'A') — opens
       # a confirm with the expected request count. 'a' is toggle-closed; capital 'A' is free.
@@ -181,7 +181,7 @@ module Gori
 
       r.register Verb::Definition.new(
         "probe.repeater-flow", "Repeater evidence", "Send the sample flow to the Repeater tab",
-        Verb::Scope::ProbeDetail, [Verb::Chord.new("r")]) { |ctx| ctx.probe_repeater_flow; nil }
+        Verb::Scope::ProbeDetail, [Verb::Chord.new("r")], intent: :to_repeater, pinned: true) { |ctx| ctx.probe_repeater_flow; nil }
 
       r.register Verb::Definition.new(
         "probe.promote", "Promote to issue", "Create a Issue from this issue", Verb::Scope::ProbeDetail,

@@ -1,7 +1,7 @@
 # Sequencer (token randomness) — ExecContext verb implementations, reopens Gori::Tui::Runner (see
 # tui/runner.cr for the event loop, Host facade, overlays, and rendering).
 class Gori::Tui::Runner < Gori::Verb::ExecContext
-  # CROSS-TAB: open the config popup for History's selected flow (space → Send to Sequencer).
+  # CROSS-TAB: open the config popup for History's selected flow (space → Send flow to… → Sequencer).
   def sequence_selected : Nil
     id = history_target_flow_id
     return (@toast = "select a flow first") unless id

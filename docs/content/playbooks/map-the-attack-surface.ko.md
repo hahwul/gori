@@ -41,7 +41,7 @@ gori run sitemap            # id를 기본으로 접습니다; --no-group은 전
 
 ## 3. Discover로 한 번도 클릭하지 않은 것 찾기 {#3-find-what-you-never-clicked-with-discover}
 
-Sitemap은 둘러본 것만 압니다. **Discover**는 나머지를 찾습니다. 클릭하지 않은 링크를 spider로 따라가고, 대상이 스스로 밝히는 것(`robots.txt`, `sitemap.xml`, `.well-known/` 레지스트리)과 JavaScript에 인용된 경로를 읽은 뒤, 링크되지 않은 디렉터리(`/admin`, `.git/config`, `/api/v2`)를 brute-force합니다. **Target → Discover**를 열거나, **Sitemap** 노드 또는 **History** 플로우에서 `Space`를 눌러 **Discover here**를 고르면 실행이 그 서브트리로 한정됩니다. 팝업에서 탐색 방식(spider, brute-force, 또는 둘 다), 최대 깊이, 크롤 스코프, 동시성을 고릅니다. 실행은 백그라운드에서 일어나며, Discover 서브탭에서 `^X`로 멈추거나 `p`로 일시정지합니다.
+Sitemap은 둘러본 것만 압니다. **Discover**는 나머지를 찾습니다. 클릭하지 않은 링크를 spider로 따라가고, 대상이 스스로 밝히는 것(`robots.txt`, `sitemap.xml`, `.well-known/` 레지스트리)과 JavaScript에 인용된 경로를 읽은 뒤, 링크되지 않은 디렉터리(`/admin`, `.git/config`, `/api/v2`)를 brute-force합니다. **Target → Discover**를 열거나, **Sitemap** 노드 또는 **History** 플로우에서 `Space` `>` `D`(**Send flow to…** → **Discover here**)를 누르면 실행이 그 서브트리로 한정됩니다. 팝업에서 탐색 방식(spider, brute-force, 또는 둘 다), 최대 깊이, 크롤 스코프, 동시성을 고릅니다. 실행은 백그라운드에서 일어나며, Discover 서브탭에서 `^X`로 멈추거나 `p`로 일시정지합니다.
 
 ```bash
 gori run discover --target https://api.example.com \
