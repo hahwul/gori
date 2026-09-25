@@ -86,8 +86,11 @@ module Gori
       r.register Verb::Definition.new(
         "colormarker.toggle-default", "Enable/disable everywhere",
         "Flip a GLOBAL rule's default — the state every project without an override follows",
-        Verb::Scope::Colormarker, [] of Verb::Chord, # menu-only: ⇧X is the wipe chord on five tabs, and this one asked no confirm
-        available: on_global_rule, mnemonic: 'X', section: :rules) { |ctx| ctx.colormarker_toggle_default; nil }
+        # Menu-only: ⇧X is the wipe chord on five tabs, and this one asked no confirm. The menu
+        # letter is `T` for the same reason — ⇧X wipes app-wide (`Registry#validate_intents!`) —
+        # and because flipping every project is the broad form of this list's `t`.
+        Verb::Scope::Colormarker, [] of Verb::Chord,
+        available: on_global_rule, mnemonic: 'T', section: :rules) { |ctx| ctx.colormarker_toggle_default; nil }
 
       # --- CUSTOM COLORS pane (section :colors) — no chords, see the header note. ---
       in_colors = ->(ctx : Verb::ExecContext) { ctx.current_tab == :colormarker && ctx.colormarker_colors_focused? }

@@ -62,9 +62,10 @@ describe "rule-list keys" do
     r["colormarker.toggle-default"].chords.should be_empty # menu-only: ⇧X is the wipe chord elsewhere
     r["colormarker.move-down"].chords.should contain(shift.call("j"))
     r["colormarker.move-up"].chords.should contain(shift.call("k"))
-    # …and the menu letter now names the key. It was 'g', which matched neither the verb
-    # ("Enable/disable everywhere") nor its ⇧X binding.
-    r["colormarker.toggle-default"].menu_key.should eq('X')
+    # It was 'g', then 'X' — and ⇧X is the wipe letter app-wide, which this is not. 'T' is
+    # the broad form of the list's `t` toggle (#1274).
+    r["colormarker.toggle-default"].menu_key.should eq('T')
+    r["rewriter.toggle-default"].menu_key.should eq('T')
   end
 end
 

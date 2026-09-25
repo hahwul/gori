@@ -82,6 +82,8 @@ module Gori
       #   • An intent must be in the lexicon, and a verb with one must not spell a mnemonic
       #     as well: the lexicon is where its letter comes from, so a second spelling is
       #     either redundant or the drift the table exists to stop.
+      #   • ⇧X is the wipe letter app-wide (DESIGN.md §7, 2026-09-12): only a `:wipe` verb in
+      #     group :wipe wears it in the menu.
       #   • On a tab with a sub-tab strip, only the SUB-TABS bucket may wear one of the
       #     strip's letters (`Lexicon::STRIP_LETTERS`). The bucket shares every card with the
       #     pane, and the strip answers `t` raw, so a pane `t` means one thing in the card and
@@ -90,22 +92,33 @@ module Gori
       def validate_intents! : Nil
         strip_scopes = compact_map { |v| v.scope if SUBTAB_SECTIONS.includes?(v.section) }.to_set
         each do |v|
-          if intent = v.intent
-            unless Lexicon::ENTRIES.has_key?(intent)
-              raise Gori::Error.new("unknown intent #{intent.inspect} on #{v.id} (add it to Verb::Lexicon)")
-            end
-            if m = v.mnemonic
-              raise Gori::Error.new(
-                "#{v.id} declares intent #{intent.inspect} (menu '#{Lexicon.letter(intent)}') and " \
-                "mnemonic '#{m}' — an intent verb takes its letter from Verb::Lexicon")
-            end
-          end
-          next if v.hidden? || SUBTAB_SECTIONS.includes?(v.section) || !strip_scopes.includes?(v.scope)
-          if (key = v.menu_key) && Lexicon::STRIP_LETTERS.includes?(key)
-            raise Gori::Error.new(
-              "#{v.id} in #{v.scope}/#{v.section} wears the sub-tab strip's menu '#{key}' " \
-              "(a pane verb on a tab with a strip takes a letter outside #{Lexicon::STRIP_LETTERS.join})")
-          end
+          check_intent!(v)
+          check_reserved_menu_letter!(v, strip_scopes) unless v.hidden?
+        end
+      end
+
+      private def check_intent!(v : Definition) : Nil
+        return unless intent = v.intent
+        unless Lexicon::ENTRIES.has_key?(intent)
+          raise Gori::Error.new("unknown intent #{intent.inspect} on #{v.id} (add it to Verb::Lexicon)")
+        end
+        if m = v.mnemonic
+          raise Gori::Error.new(
+            "#{v.id} declares intent #{intent.inspect} (menu '#{Lexicon.letter(intent)}') and " \
+            "mnemonic '#{m}' — an intent verb takes its letter from Verb::Lexicon")
+        end
+      end
+
+      private def check_reserved_menu_letter!(v : Definition, strip_scopes : Set(Scope)) : Nil
+        return unless key = v.menu_key
+        if key == 'X' && !(v.intent == :wipe && v.group == :wipe)
+          raise Gori::Error.new("#{v.id} in #{v.scope} wears the menu 'X', the wipe letter (intent :wipe, group :wipe)")
+        end
+        return if SUBTAB_SECTIONS.includes?(v.section) || !strip_scopes.includes?(v.scope)
+        if Lexicon::STRIP_LETTERS.includes?(key)
+          raise Gori::Error.new(
+            "#{v.id} in #{v.scope}/#{v.section} wears the sub-tab strip's menu '#{key}' " \
+            "(a pane verb on a tab with a strip takes a letter outside #{Lexicon::STRIP_LETTERS.join})")
         end
       end
 

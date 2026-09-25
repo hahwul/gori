@@ -142,6 +142,12 @@ describe Gori::Verb::Lexicon do
       expect_raises(Gori::Error, /demo.pane .* strip's menu 't'/) { reg.validate_intents! }
     end
 
+    it "raises on a menu 'X' that is not a wipe" do
+      reg = LexiconSpec.registry(LexiconSpec.verb("demo.flip", Gori::Verb::Scope::Rewriter, mnemonic: 'X'))
+      expect_raises(Gori::Error, /demo.flip .* the wipe letter/) { reg.validate_intents! }
+      LexiconSpec.registry(LexiconSpec.verb("demo.clear", intent: :wipe, group: :wipe)).validate_intents!
+    end
+
     it "leaves the strip's letters free on a tab without a strip" do
       LexiconSpec.registry(LexiconSpec.verb("demo.pane", Gori::Verb::Scope::Body, mnemonic: 't'))
         .validate_intents!
