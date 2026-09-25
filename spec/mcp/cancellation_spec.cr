@@ -19,7 +19,8 @@ require "socket"
 private class CountingOrigin
   getter hits = 0
 
-  def initialize(@body : String = "hello q=hello world", &@on_hit : Int32 -> Nil)
+  def initialize(@body : String = "hello q=hello world", @cache_headers : String = "",
+                 &@on_hit : Int32 -> Nil)
     @server = TCPServer.new("127.0.0.1", 0)
     @closed = false
     spawn do
@@ -31,8 +32,8 @@ private class CountingOrigin
     end
   end
 
-  def self.new(body : String = "hello q=hello world") : CountingOrigin
-    new(body) { }
+  def self.new(body : String = "hello q=hello world", cache_headers : String = "") : CountingOrigin
+    new(body, cache_headers) { }
   end
 
   def port : Int32
@@ -57,8 +58,9 @@ private class CountingOrigin
       end
       while (line = conn.gets("\r\n", chomp: true)) && !line.empty?
       end
-      conn << "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: #{@body.bytesize}\r\n" \
-              "Connection: close\r\n\r\n#{@body}"
+      conn << "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n" << @cache_headers <<
+        "Content-Length: #{@body.bytesize}\r\n" \
+        "Connection: close\r\n\r\n#{@body}"
       conn.flush rescue nil
       conn.close rescue nil
     rescue
@@ -67,8 +69,12 @@ private class CountingOrigin
   end
 end
 
-private def cancel_flow(store : Gori::Store, port : Int32, target : String) : Int64
-  head = "GET #{target} HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\n\r\n"
+private def cancel_flow(store : Gori::Store, port : Int32, target : String, cookie = false) : Int64
+  head = String.build do |s|
+    s << "GET #{target} HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\n"
+    s << "Cookie: session=secret\r\n" if cookie
+    s << "\r\n"
+  end
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "http", host: "127.0.0.1", port: port,
     method: "GET", target: target, http_version: "HTTP/1.1", head: head.to_slice,
@@ -271,6 +277,32 @@ describe "MCP cancellation stops the work" do
       ensure
         origin.close
       end
+    end
+  end
+end
+
+describe "MCP cache_deception_check" do
+  it "reports REVIEW when the cache-busted control is itself a cache hit" do
+    origin = CountingOrigin.new("private account content", "X-Cache: HIT\r\nAge: 30\r\n")
+    begin
+      with_store do |store|
+        id = cancel_flow(store, origin.port, "/account", cookie: true)
+        tools = tools_for(store)
+        args = JSON.parse(%({"flow_id":#{id},"allow_unscoped":true,"verify":false}))
+        result = tools.call("cache_deception_check", args)
+
+        result.is_error.should be_false
+        report = JSON.parse(result.text)
+        report["verdict"].as_s.should eq("review")
+        report["deception"].as_bool.should be_false
+        report["cache"].as_s.should eq("hit")
+        report["anonymous"]["cache"].as_s.should eq("hit")
+        report["cache_busted"]["cache"].as_s.should eq("hit")
+        report["note"].as_s.should contain("may not have bypassed the cache")
+        origin.hits.should eq(3)
+      end
+    ensure
+      origin.close
     end
   end
 end
