@@ -29,6 +29,17 @@ describe AuthorizeIdentityOverlay do
     render(ov)
   end
 
+  # #1274: the empty refresh line names the Repeater menu row that adds a step, and the letter
+  # is read from the registry rather than typed into the string.
+  it "names the Use-as-refresh menu path from the registry on an empty refresh line" do
+    registry = Gori::Verbs.registry
+    backend = MemoryBackend.new(100, 30)
+    AuthorizeIdentityOverlay.new(Identity.new("admin"), registry: registry)
+      .render(Screen.new(backend), Rect.new(0, 0, 100, 30))
+    backend.contains?("add a Repeater sub-tab with #{Gori::Hotkeys.menu_path(registry, "repeater.use-as-refresh")}").should be_true
+    backend.contains?("{space:").should be_false
+  end
+
   it "round-trips remove_headers through the comma field" do
     ov = AuthorizeIdentityOverlay.new(Identity.new("anon", remove_headers: ["Cookie", "Authorization"]))
     ov.remove_headers.should eq(["Cookie", "Authorization"])

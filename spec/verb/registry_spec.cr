@@ -20,6 +20,8 @@ private class FakeContext < ExecContext
     @tab
   end
 
+  property focused_section : Symbol = :common
+
   def focus_pane(pane : Symbol) : Nil
     @calls << :focus_pane
   end

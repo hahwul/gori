@@ -12,7 +12,7 @@ require "../spec_helper"
 # Two ways to fail, and the spec names them apart because the fixes differ: a token naming no
 # verb at all is a typo or a rename that missed a caller; a token naming a real verb with no
 # chord is a hint promising a key the key budget deliberately did not spend. That one belongs
-# in the menu spelling the app already uses for it ("space → o sort").
+# in the menu spelling, `{space:fuzz.sort} sort` (see the contract at the foot of this file).
 #
 # Source-scanned, like `layering_spec`: the templates live in string literals inside `case`
 # arms that no roster can reach, so reading them off disk is the only way to see them all.
@@ -43,5 +43,44 @@ describe "hint templates — every verb token expands to a chord" do
       Gori::Hotkeys.default_for(registry, id, Gori::Settings.keymap_os).nil?
     end
     chordless.to_a.sort.should be_empty
+  end
+end
+
+# CONTRACT (#1274): a space-menu letter in UI text comes from the registry.
+#
+# A hand-typed `space → t` is checked by nothing, and letters move — the Help sheet printed
+# three wrong ones, the Sitemap filter dropdown said `T` for a Tag path that is `m`, and a
+# toast still named `b` only by luck. Text that names a menu row spells it `{space:verb.id}`
+# (Hotkeys.expand / Hotkeys.expand_menu_paths), which reads the verb's `menu_key`. Naming the
+# row by its TITLE ("space → Mine parameters") is fine: that names no letter.
+#
+# Comment lines are skipped the way the scan above skips them; a comment may say what a key
+# is today, and it is not drawn.
+describe "hint templates — space-menu letters come from the registry" do
+  root = File.expand_path("../../src/gori", __DIR__)
+  lines = [] of {String, Int32, String}
+  Dir.glob(File.join(root, "**", "*.cr")).each do |file|
+    File.read_lines(file).each_with_index(1) do |line, n|
+      next if line.lstrip.starts_with?('#')
+      lines << {file.sub(root + "/", ""), n, line}
+    end
+  end
+
+  it "every {space:verb.id} token names a verb with a menu row" do
+    registry = Gori::Verbs.registry
+    ids = Set(String).new
+    lines.each { |(_, _, line)| line.scan(Gori::Hotkeys::SPACE_TOKEN_RE) { |m| ids << m[1] } }
+    ids.size.should be > 15
+    ids.reject { |id| Gori::Hotkeys.menu_path(registry, id) }.to_a.sort.should be_empty
+  end
+
+  it "leaves no literal `space → <key>` in a string" do
+    # One key, then anything that is not part of a word: `space → t`, `space → k/j`, `space → /`.
+    # A title (`space → Mine`), a quoted one (`space → "Discover here"`) or an interpolation
+    # (Hotkeys.menu_path's own `space → #{key}`, the one place a path is spelled) is not a letter.
+    literal = /space → (?!#\{)[^\s\w"\\…]|space → \w(?!\w)/
+    hits = lines.select { |(_, _, line)| line.matches?(literal) }
+      .map { |(file, n, line)| "#{file}:#{n}: #{line.strip}" }
+    hits.should be_empty
   end
 end

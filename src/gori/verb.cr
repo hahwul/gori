@@ -167,6 +167,18 @@ module Gori
       # is what makes them scannable. Defaults to :none, which renders exactly as
       # before (no header, no subdivision), so an untagged scope is unchanged.
       getter group : Symbol
+      # The sections (the active controller's `command_section`) in which this verb's CHORDS
+      # fire, or nil for anywhere its scope does. A FOCUS gate on the key alone: the palette
+      # and the space menu still run the verb wherever `available?` says (the menu already
+      # draws a row only in its own `section`). It exists for a bare key one pane of a tab
+      # owns while another pane's menu row spells the same letter — the Repeater's `p` pretty-
+      # prints the RESPONSE while the request menu's `p` rewrites the request. Declared here
+      # rather than folded into the `available:` lambda so the R1 guard
+      # (spec/tui/menu_letter_meaning_spec.cr) can see which panes a chord is live in. Out of
+      # its sections the press falls through the scope chain exactly like an unavailable verb
+      # (`Keymap#resolve`), so a gate on a letter Global binds would reach Global — the guard
+      # catches that as its own violation.
+      getter chord_sections : Array(Symbol)?
       # The recurring intent this verb answers (`Verb::Lexicon`), which fixes its space-menu
       # letter: `:filter` is `/` on every tab that has one. A verb with an intent does not
       # spell a `mnemonic:` as well (`Registry#validate_intents!`). Nil for a scope-local
@@ -178,12 +190,20 @@ module Gori
                      @available : ExecContext -> Bool = ->(_ctx : ExecContext) { true },
                      @coming_soon : Bool = false, @category : Category = Category::Action,
                      @mnemonic : Char? = nil, @section : Symbol = :common,
-                     @group : Symbol = :none, @intent : Symbol? = nil,
+                     @group : Symbol = :none, @chord_sections : Array(Symbol)? = nil,
+                     @intent : Symbol? = nil,
                      &@handler : ExecContext -> String?)
       end
 
       def available?(ctx : ExecContext) : Bool
         @available.call(ctx)
+      end
+
+      # Whether a press of one of this verb's chords may fire it in the focused section —
+      # `chord_sections`, asked by the scope chain on top of `available?`.
+      def chord_live?(ctx : ExecContext) : Bool
+        return true unless secs = @chord_sections
+        secs.includes?(ctx.focused_section)
       end
 
       # The key the space menu shows + binds: an explicit mnemonic, else the intent's

@@ -90,10 +90,10 @@ module Gori::Tui
         Item.new("^R", "send the flow to Repeater", "history.repeater"),
         Item.new("⇧I", "send the flow to the Fuzzer", "history.fuzz"),
         Item.new("⇧F", "create an issue", "issue.create"),
-        Item.new("space → f", "follow newest — the ⌁follow chip on the filter bar toggles it too", "history.toggle-follow"),
+        Item.new("{space:history.toggle-follow}", "follow newest — the ⌁follow chip on the filter bar toggles it too", "history.toggle-follow"),
         Item.new("/", "filter (query language — see the Query page)", "history.query"),
         Item.new("y", "copy flow", "history.copy"),
-        Item.new("space → Y", "copy as… — urls · hosts · cURL · raw · req+res pair"),
+        Item.new("{space:history.copy-as}", "copy as… — urls · hosts · cURL · raw · req+res pair", "history.copy-as"),
         Item.new("d", "delete selected/marked flows (asks first)", "history.delete"),
         Item.new("⇧X", "clear all History flows (asks first)", "history.clear"),
         Item.new("i", "toggle intercept hold-mode", "intercept.toggle"),
@@ -110,10 +110,11 @@ module Gori::Tui
         Item.new("r", "rename the sub-tab (on the strip)"),
         Item.new("/", "filter sub-tabs (tag: name: host: method:)", "repeater.filter-subtabs"),
         Item.new("↹", "complete filter field/value while filtering"),
-        # `space → a`, not a bare `t`: on the strip `t` MARKS a chip and `⇧T` marks the whole
+        # The menu path, not a bare `t`: on the strip `t` MARKS a chip and `⇧T` marks the whole
         # strip (#683), so the row this replaces named the marking key for tagging. Tagging
-        # has no chord of its own and never did — the menu letter is the whole route.
-        Item.new("space → a", "tag the active sub-tab (from the strip)", "repeater.tag-subtab"),
+        # has no chord of its own and never did — the menu letter is the whole route, and the
+        # registry spells it (the literal here once said `a` while the menu said `t`).
+        Item.new("{space:repeater.tag-subtab}", "tag the active sub-tab (from the strip)", "repeater.tag-subtab"),
         Item.new("i / ↵", "enter INS (edit) on request/target · esc back to READ"),
         Item.new("space", "command menu (READ mode on request/target/response)"),
         # Copy is the one READ verb that also works while TYPING: in INS a bare `y` is a
@@ -124,17 +125,17 @@ module Gori::Tui
         # The §…§ marker trio, same keys and same order as the FUZZER section below — the
         # Repeater grew `^K`/`^T` to match and Help documented neither.
         Item.new("{repeater.auto-mark} · {repeater.mark-word} · {repeater.toggle-decoded}", "auto-mark params · mark word · mark point (manual §)"),
-        Item.new("space → c", "clear every § marker", "repeater.clear-marks"),
+        Item.new("{space:repeater.clear-marks}", "clear every § marker", "repeater.clear-marks"),
         # ^Q, not ^Y — ^Y is Copy in every text box now (see the `y · ^Y` row above). The key
         # column resolves from the verb id, so it follows a rebind either way.
         Item.new("^Q", "edit the decoder chain on the marker at the cursor", "repeater.attach-chain"),
         Item.new("^X", "hex-edit the request", "repeater.toggle-hex"),
         Item.new("^S", "SNI override (on the target)", "repeater.toggle-sni"),
         Item.new("^L", "toggle auto Content-Length", "repeater.toggle-auto-content-length"),
-        Item.new("space → F", "gRPC: reframe the message on send (on by default; off sends the captured 5-byte length prefix)", "repeater.toggle-grpc-reframe"),
-        Item.new("space → E", "gRPC: edit the request message field by field through the loaded .proto (unary calls)", "repeater.toggle-grpc-fields"),
+        Item.new("{space:repeater.toggle-grpc-reframe}", "gRPC: reframe the message on send (on by default; off sends the captured 5-byte length prefix)", "repeater.toggle-grpc-reframe"),
+        Item.new("{space:repeater.toggle-grpc-fields}", "gRPC: edit the request message field by field through the loaded .proto (unary calls)", "repeater.toggle-grpc-fields"),
         Item.new("^V", "transport: HTTP/1.1 ↔ HTTP/2 · on a WebSocket tab, WS → h1 → h2 (send the handshake as plain HTTP)", "repeater.toggle-http2"),
-        Item.new("space → g", "send group: %%%-split requests on one connection"),
+        Item.new("{space:repeater.send-group}", "send group: %%%-split requests on one connection", "repeater.send-group"),
         Item.new("↹", "cycle target → request → response"),
         Item.new("⇧D", "response: toggle diff", "repeater.toggle-diff"),
         Item.new("{repeater.toggle-pretty} · {repeater.toggle-unicode}", "response: pretty bodies · Unicode escapes"),
@@ -159,7 +160,7 @@ module Gori::Tui
         # NOT `^U clear §` — that was wrong twice over: ^U is fuzz.pretty-template (the tab's
         # own ` ^U:PRETTY ` badge says so), and clear-marks has no chord at all. The advertised
         # key silently reflowed the template you had just finished marking by hand.
-        Item.new("^U", "pretty-print the template body (space → c clears §)", "fuzz.pretty-template"),
+        Item.new("^U", "pretty-print the template body ({space:fuzz.clear-marks} clears §)", "fuzz.pretty-template"),
         Item.new("^V", "toggle transport HTTP/1.1 ↔ HTTP/2", "fuzz.toggle-http2"),
         Item.new("^S", "SNI override (on the target)", "fuzz.toggle-sni"),
         Item.new("^O", "focus the config pane (payload sets · Mode · Advanced · Run)"),
@@ -181,7 +182,7 @@ module Gori::Tui
         Item.new("{mine.run} · {mine.stop}", "mine · stop"),
         Item.new("↹", "summary ⟷ findings"),
         Item.new("↑/↓ · ↵", "findings: select · open detail"),
-        Item.new("space → R", "send the selected finding to Repeater (param injected)", "mine.repeater"),
+        Item.new("{space:mine.repeater}", "send the selected finding to Repeater (param injected)", "mine.repeater"),
         Item.new("^N / ^W", "new / close a sub-tab — from any pane, not just the strip"),
       ]},
       {"JWT", [
@@ -213,7 +214,7 @@ module Gori::Tui
         Item.new("^L", "clear the session", "cookie.clear"),
         Item.new("↹", "cycle INPUT → DECODED → OPTIONS → SECRET (decode) / PAYLOAD → OPTIONS → SECRET → OUTPUT (forge)"),
         Item.new("c", "crack the secret over the SECRET field (a wordlist path or comma list)", "cookie.crack"),
-        Item.new("l", "seed the FORGE payload from the decoded cookie (space menu)", "cookie.load-decoded"),
+        Item.new("{space:cookie.load-decoded}", "seed the FORGE payload from the decoded cookie", "cookie.load-decoded"),
         # Same shape as the JWT row above: the letter follows a rebind, the `^Y` pin does not.
         Item.new("{cookie.copy} · ^Y", "copy selection/pane — `y` in READ, ^Y while typing an editable pane"),
         Item.new("^N / ^W", "new / close a sub-tab — from any pane, not just the strip"),
@@ -221,13 +222,13 @@ module Gori::Tui
       {"OAST", [
         Item.new("{oast.listen} · {oast.stop}", "start listening · stop"),
         Item.new("↑/↓ · ↵", "callbacks: select · open detail"),
-        Item.new("space → p", "promote a callback to an Issue", "oast.promote"),
-        Item.new("space → a", "add a provider · e edit · t enable/disable"),
+        Item.new("⇧F", "promote a callback to an Issue", "oast.issue"),
+        Item.new("{oast.add-provider} · {oast.edit-provider} · {oast.toggle-provider}", "providers: add · edit · enable/disable"),
         # Two copies, opposite directions of one interaction: the payload gori SENT (list) and
         # what came BACK (detail). Only the detail's can be a chord — `validate_chords!` allows
         # one `y` per scope — so the list's is named by its space-menu letter.
-        Item.new("{oast.copy-callback} · space → y", "detail: copy the callback · list: copy the last generated payload URL"),
-        Item.new("payload", "insert an OAST payload into the focused editor (space → O)", "oast.insert-payload"),
+        Item.new("{oast.copy-callback} · {space:oast.copy}", "detail: copy the callback · list: copy the last generated payload URL"),
+        Item.new("{space:repeater.oast-insert}", "Repeater · Fuzzer: insert an OAST payload into the focused editor", "repeater.oast-insert"),
       ]},
       {"SEQUENCER", [
         Item.new("Send to Sequencer", "from History/Repeater/Sitemap (space menu) — replay + analyze a token"),
@@ -242,7 +243,7 @@ module Gori::Tui
         Item.new("{comparer.pick-a} · {comparer.pick-b}", "pick flow A · flow B"),
         Item.new("←/→", "compare requests ⟷ responses"),
         Item.new("{comparer.next-change} · {comparer.prev-change}", "next · previous CHANGED row (the same pair the drill-ins step with)"),
-        Item.new("space → z", "fold the unchanged runs, keeping context", "comparer.toggle-fold"),
+        Item.new("{space:comparer.toggle-fold}", "fold the unchanged runs, keeping context", "comparer.toggle-fold"),
         Item.new("⇧←/→", "h-scroll both columns (long lines)"),
         Item.new("w", "swap A ⇄ B", "comparer.swap"),
         Item.new("^N / ^W · r", "new / close / rename comparison sub-tab"),
@@ -256,7 +257,7 @@ module Gori::Tui
         Item.new("^B", "reveal whitespace"),
       ]},
       {"OTHER TABS", [
-        Item.new("Sitemap", "↑/↓ · {sitemap.query} filter · ↵/→ expand · {sitemap.mark-toggle} mark · {sitemap.mark-all} all · {sitemap.toggle-grouping} fold · {scope.toggle-lens} scope · space → m tag · space → J js"),
+        Item.new("Sitemap", "↑/↓ · {sitemap.query} filter · ↵/→ expand · {sitemap.mark-toggle} mark · {sitemap.mark-all} all · {sitemap.toggle-grouping} fold · {scope.toggle-lens} scope · {space:sitemap.tag} tag · {space:sitemap.js-scan} js"),
         # `⇧X clear` sits in the LIST half, where the chord fires — and it is on this row at all
         # for the reason the Probe and Authorize rows carry theirs: a wipe has to be named where
         # it can be read before it is pressed. Marks make that sharper here than anywhere else,
@@ -277,11 +278,11 @@ module Gori::Tui
         # what the list holds as well as what the keys do.
         Item.new("RELATED row 1", "the flow the issue was filed from — {issue.goto-link} opens it in History"),
         Item.new("in RELATED", "↵ view the row's exchange (a fuzz/miner session: open it) · {issue.goto-link} source · {issue.freeze-link} freeze · {issue.repeater-flow} repeater"),
-        # `space → s scope`, NOT `{scope.toggle-lens} scope`: `s` on this tab is
+        # `{space:probe.scope-toggle}`, NOT `{scope.toggle-lens}`: `s` on this tab is
         # `probe.open-evidence` (go to source) since the key audit's F2, so the Global lens is
         # the menu entry `probe.scope-toggle` here. The token would have printed the Global
         # chord and been wrong on the one tab this row is about.
-        Item.new("Probe", "↑/↓ ↵ open · {probe.open-evidence} source · {probe.mode} mode · {probe.dismiss-selected} dismiss · {probe.toggle-closed} all · {probe.filter} filter · space → s scope · {probe.clear} clear issues"),
+        Item.new("Probe", "↑/↓ ↵ open · {probe.open-evidence} source · {probe.mode} mode · {probe.dismiss-selected} dismiss · {probe.toggle-closed} all · {probe.filter} filter · {space:probe.scope-toggle} scope · {probe.clear} clear issues"),
         # Evidence is hidden until the project freezes its first snapshot, so this row is where
         # an operator who just enabled the tab learns its keys — and `{evidence.delete}` is the
         # only one that destroys bytes no source can hand back, which is why it is named here
@@ -333,7 +334,7 @@ module Gori::Tui
       {"REWRITER", [
         Item.new("{rewriter.add} · ↵/e", "add a Match & Replace rule · edit the selected one"),
         Item.new("x · {rewriter.delete}", "enable/disable in this project · delete the selected rule"),
-        Item.new("space → s · space → X", "move the rule global ⇄ project · flip a global rule's default everywhere", "rewriter.scope"),
+        Item.new("{space:rewriter.scope} · {space:rewriter.toggle-default}", "move the rule global ⇄ project · flip a global rule's default everywhere"),
         Item.new("G / P column", "global (every project) or project · G* = this project overrides its default"),
         Item.new("{rewriter.move-down} / {rewriter.move-up}", "reorder within a scope — globals apply first, then project rules"),
         Item.new("[ / ]", "switch sub-tab: rules · extract · bindings"),
@@ -347,7 +348,7 @@ module Gori::Tui
       {"COLORMARKER", [
         Item.new("{colormarker.add} · ↵/e", "add a History row-colour rule · edit the selected one"),
         Item.new("{colormarker.toggle} · {colormarker.delete}", "enable/disable in this project · delete the selected rule"),
-        Item.new("space → s · space → X", "move the rule global ⇄ project · flip a global rule's default everywhere", "colormarker.scope"),
+        Item.new("{space:colormarker.scope} · {space:colormarker.toggle-default}", "move the rule global ⇄ project · flip a global rule's default everywhere"),
         Item.new("{colormarker.move-down} / {colormarker.move-up}", "reorder — the FIRST enabled match paints the row, the rest are skipped"),
         Item.new("style", "full = tint the whole row · strip = one colour cell ahead of TIME"),
         Item.new("when:", "host: path: method: scheme: status: proto: — ↹ completes · no header:/size:/dur:"),
@@ -434,11 +435,17 @@ module Gori::Tui
           key = item.key
           desc = item.desc
           if registry
+            # A verb-id row with no chord is a menu-only verb: its key column is the menu path,
+            # read off the registry rather than trusted from the literal (#1274 — three rows
+            # had drifted to letters the menu no longer used).
             if id = item.verb_id
-              key = Hotkeys.binding_label(registry, id, item.key)
+              key = Hotkeys.binding_label(registry, id, Hotkeys.menu_path(registry, id) || item.key)
             end
             key = Hotkeys.expand(registry, key)
             desc = Hotkeys.expand(registry, desc)
+          else
+            key = Hotkeys.expand_menu_paths(nil, key)
+            desc = Hotkeys.expand_menu_paths(nil, desc)
           end
           # Retag both columns: a verb-id row and the `{verb.id}` tokens already resolve
           # through the keymap, but the keyless rows (^N/^W, ^G/^F, ^1-9) and the claimed

@@ -492,10 +492,10 @@ module Gori
 
       # --- RESPONSE pane (diff / pretty via keymap so rebind works; hex stays
       # controller-owned on the response pane because plain `x` is also select-line
-      # on request/target READ — same letter, pane-local meaning). The 'p' chord is
-      # free in COMMON ∪ :response (:request's 'p' is a different section for the
-      # space menu only; keymap last-wins is avoided because request toggles use
-      # ctrl chords). Handlers no-op unless the response pane is focused.
+      # on request/target READ — same letter, pane-local meaning). `p` and ⇧D are
+      # `chord_sections: [:response]`: the request menu spells the same two letters for
+      # pretty-print-request and the decoder chain, so the bare key answers only in the
+      # pane it belongs to and is nothing in the request pane (#1274).
       #
       # Diff is ⇧D and not bare `d`: `d` deletes or dismisses the selected row in the
       # sixteen other scopes that bind it, and the Repeater was the one place where the
@@ -511,14 +511,16 @@ module Gori
       r.register Verb::Definition.new(
         "repeater.toggle-diff", "Toggle diff", "Switch the response pane between the raw response and a diff against the previous one",
         Verb::Scope::Repeater, [Verb::Chord.new("d", shift: true)],
-        available: in_repeater, mnemonic: 'D', section: :response) { |ctx| ctx.repeater_toggle_resp_diff; nil }
+        available: in_repeater, mnemonic: 'D', section: :response,
+        chord_sections: [:response]) { |ctx| ctx.repeater_toggle_resp_diff; nil }
       r.register Verb::Definition.new(
         "repeater.toggle-resp-hex", "Hex dump", "Toggle a raw hex dump of the response bytes",
         Verb::Scope::Repeater, available: in_repeater, mnemonic: 'h', section: :response) { |ctx| ctx.repeater_toggle_resp_hex; nil }
       r.register Verb::Definition.new(
         "repeater.toggle-pretty", "Pretty bodies", "Pretty-print JSON/XML/form/… response bodies (display only)",
         Verb::Scope::Repeater, [Verb::Chord.new("p")],
-        available: in_repeater, mnemonic: 'p', section: :response) { |ctx| ctx.toggle_pretty; nil }
+        available: in_repeater, mnemonic: 'p', section: :response,
+        chord_sections: [:response]) { |ctx| ctx.toggle_pretty; nil }
       r.register Verb::Definition.new(
         "repeater.toggle-unicode", "Decode Unicode escapes", "Display JSON \\u escapes as characters (display only)",
         Verb::Scope::Repeater, [Verb::Chord.new("u")],
@@ -757,9 +759,12 @@ module Gori
       r.register Verb::Definition.new(
         "fuzz.matched", "Matched only", "RESULTS: show only the rows the matchers hit",
         Verb::Scope::Fuzzer, [Verb::Chord.new("m")], available: in_fuzzer, mnemonic: 'm', section: :results) { |ctx| ctx.fuzz_toggle_matched; nil }
+      # Bare `v` only in RESULTS (`chord_sections`): in the template pane `v` is the menu's
+      # clear-selection, as in every other read pane (#1274).
       r.register Verb::Definition.new(
         "fuzz.dist", "Distribution sidebar", "RESULTS: show/hide the status and length distribution",
-        Verb::Scope::Fuzzer, [Verb::Chord.new("v")], available: in_fuzzer, mnemonic: 'g', section: :results) { |ctx| ctx.fuzz_toggle_dist; nil }
+        Verb::Scope::Fuzzer, [Verb::Chord.new("v")], available: in_fuzzer, mnemonic: 'g', section: :results,
+        chord_sections: [:results]) { |ctx| ctx.fuzz_toggle_dist; nil }
       # Shift-S is intentionally READ-mode-only: in a template editor it remains a literal
       # uppercase S. Ctrl-S already edits the target's SNI and cannot be repurposed.
       r.register Verb::Definition.new(

@@ -112,7 +112,7 @@ Marks change **what the action menu acts on**, not which actions exist. The effe
 
 | Action | Key | Over marks |
 |--------|-----|-----------|
-| Tag path | `Space` `T` | One editor, one memo, applied to every marked path (blank clears them all) |
+| Tag path | `Space` `m` | One editor, one memo, applied to every marked path (blank clears them all) |
 | Send to Repeater | `r` | One sub-tab per marked endpoint, deduplicated by captured flow (max 20) |
 
 So `/ status:5xx` → `⇧T` marks every path the filter shows (or mark them one at a time with `t`) → `Space` → `m` → `auth` tags the lot, and `tag:auth` brings them back later. The menu title reads `SPACE · 3 MARKED` and the entries rename themselves (`Tag 3 paths`, `Send 3 paths to Repeater`). Discover and the Sequencer stay single-target (they scan one subtree / collect one endpoint's token), and their menu entries say `(cursor)` while marks are set.
@@ -503,7 +503,7 @@ A **Replace** rule targets the request or response, and the **head** (request/st
 
 Scope any rule to a **host** so it only fires for matching traffic: a plain string means that host and its subdomains (`example.com` matches `example.com` and `api.example.com`, but not `xexample.com` or `example.com.evil.net`), and `*` is the explicit wildcard for anything wider (`*.example.com`). Leave it empty to apply to every host.
 
-Manage the list with `a` add, `e`/`Enter` edit, `x` enable/disable, `d` delete, `s` global/project, `Shift-J`/`Shift-K` reorder (rules apply top to bottom), and `space` for the full menu. The editor shows a live preview of how many recent flows a rule would affect. Rules take effect as soon as you save, with no restart.
+Manage the list with `a` add, `e`/`Enter` edit, `t` enable/disable, `d` delete, `Space → s` global/project, `Shift-J`/`Shift-K` reorder (rules apply top to bottom), and `space` for the full menu. The editor shows a live preview of how many recent flows a rule would affect. Rules take effect as soon as you save, with no restart.
 
 Under the list sits an editable **sample** message and, beside it, the same message after the enabled rules run. Paste a real captured request in there to see what your rules do to it before you turn them loose. The sample is saved with the project, like the rules it previews.
 
@@ -538,7 +538,7 @@ Global rules apply **first**, in their own order, then the project's own: the st
 
 A global rule carries a **default** on/off state, and a project may disagree with it:
 
-- `x` toggles the rule **in this project**. For a global rule that writes an override, and the row is marked `G*`.
+- `t` toggles the rule **in this project**. For a global rule that writes an override, and the row is marked `G*`.
 - **Enable/disable everywhere** (`Space → T`, the broad form of the toggle; no direct key, and not `X`, which wipes a tab everywhere it appears) flips the global default itself, which every project that has not overridden it follows.
 - Toggling back to the default **removes** the override, so the project follows the library again, including later changes to it.
 
@@ -546,7 +546,7 @@ Deleting a global rule removes it from every project. A running gori in another 
 
 Headless, `--scope=global` addresses the library on every subcommand: `gori run rewriter add --scope=global …`, `gori run rewriter disable 3 --scope=global` (this project's override) and `--everywhere` on top of that for the default. The MCP rule tools take the same `scope` argument.
 
-> Upgrading from the old saved-rule **library** (`s`/`o`): its entries are adopted as global rules, **disabled**, the first time gori reads the file. A preset did nothing until you loaded it, so none of them start rewriting traffic on their own; arm the ones you want with `x`.
+> Upgrading from the old saved-rule **library** (`s`/`o`): its entries are adopted as global rules, **disabled**, the first time gori reads the file. A preset did nothing until you loaded it, so none of them start rewriting traffic on their own; arm the ones you want with `t`.
 
 A **body** rule buffers the message to rewrite it and re-syncs `Content-Length` automatically (a chunked body is de-chunked and re-framed); head rules keep the body streaming untouched. A compressed body is **refused rather than rewritten**: gori does not decompress on the forwarding path, and running a pattern over compressed bytes can match inside the compressed stream by coincidence and corrupt it. A single common byte is enough, with no error and a recalculated `Content-Length` to make it look consistent. So the rule does not fire and the response goes through byte-exact. This covers compression declared either way (`Content-Encoding: gzip`/`br`/… and a compression layer in `Transfer-Encoding`), but not plain `Transfer-Encoding: chunked`, which is framing rather than compression and is de-chunked to the entity before your rule sees it. Streaming responses (SSE, close-delimited, WebSocket upgrades) are left to stream. **A body rule still forces matching hosts to HTTP/1.1**, a downgrade decided once, when the connection is set up, so a rule enabled while an HTTP/2 connection is already open applies to nothing carried by that connection until the client opens a new one. On HTTP/2 Match & Replace applies to heads; body rewriting there is not implemented and is not planned, because HTTP/2 flow control makes a rewrite that changes a body's length either fail outright or deadlock the stream. So a body rule takes its hosts down to HTTP/1.1, and an h2 client that can't take that downgrade (gRPC) won't connect while one is enabled. `gori.log` records that once per host, naming the host and the reason.
 
@@ -664,14 +664,14 @@ Conditions speak the same query language History's filter bar does — every fie
 - **`host:` is a substring, not a DNS-label glob.** `host:alpha.test` also matches `xalpha.test`.
 - **A condition is validated when you save it.** An unknown field, an invalid regex, a condition that matches every flow, and a value the field does not take are all refused with the reason. Left alone, `hsot:evil.com` would quietly become a free-text search and the rule would never fire, and a dropped term would make a standing rule paint more than you wrote.
 
-A rule lives either in this project or in the **global library** every project reads, exactly like a Match & Replace rule: `s` moves it between the two, `x` toggles it here, and `Space → T` flips a global rule's default everywhere. A project that disagrees with the library stores only the disagreement, and that disagreement is dropped the moment the two agree again, so a rule you toggled off and back on goes back to following the library rather than pinning today's answer.
+A rule lives either in this project or in the **global library** every project reads, exactly like a Match & Replace rule: `Space → s` moves it between the two, `t` toggles it here, and `Space → T` flips a global rule's default everywhere. A project that disagrees with the library stores only the disagreement, and that disagreement is dropped the moment the two agree again, so a rule you toggled off and back on goes back to following the library rather than pinning today's answer.
 
 | Action | Key |
 |--------|-----|
 | Add / edit a rule | `a` / `Enter` or `e` |
-| Enable or disable here | `x` |
+| Enable or disable here | `t` |
 | Flip a global rule's default everywhere | `Space → T` |
-| Move between project and global | `s` |
+| Move between project and global | `Space → s` |
 | Reorder (changes which rule wins) | `Shift-J` / `Shift-K` |
 | Delete | `d` |
 
