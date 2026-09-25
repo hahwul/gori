@@ -1033,7 +1033,7 @@ describe Gori::Tui::RepeaterView do
     # writes a CHUNK-scoped Content-Length into a buffer that `request_bytes` and the `^X`
     # snapshot both read WHOLE, and one number cannot be right for both framings:
     #
-    #   pane        Content-Length: 3    ← chunk 1's body, "AAA"; what `space ▸ g` sends
+    #   pane        Content-Length: 3    ← chunk 1's body, "AAA"; what Send group sends
     #   ^R          Content-Length: 60   ← re-synced whole; self-consistent, but the pane never
     #                                      said 60 and the operator authored TWO requests
     #   ^X then ^R  Content-Length: 3 over a 60-byte body — a desync gori INVENTED
@@ -1050,7 +1050,10 @@ describe Gori::Tui::RepeaterView do
         view.restore("http://h.test", draft, false, true) # auto-CL ON
         view.request_text.should contain("Content-Length: 3")
         ex = expect_raises(Gori::Fuzz::ChainError, /%%% separator/) { view.request_bytes }
-        ex.message.not_nil!.should contain("space ▸ g")
+        # Send group by its token, never a typed letter: the controller expands it (#1282).
+        ex.message.not_nil!.should contain("{space:repeater.send-group}")
+        Gori::Hotkeys.expand_menu_paths(Gori::Verbs.registry, ex.message.not_nil!)
+          .should contain(Gori::Hotkeys.route(Gori::Verbs.registry, "repeater.send-group").not_nil!)
         ex.message.not_nil!.should contain("^L")
       end
 
