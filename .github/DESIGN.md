@@ -3724,3 +3724,29 @@ holds by construction rather than by review — a verb with an intent cannot als
   decision lands: Link `k` and add-host `h` (the `h`/`j`/`k`/`l` decision), go to source and
   Probe's open, History/Detail delete `D`, file-as-issue on Probe `p` and Evidence/Diff `i`
   (Diff's `a` is pick A), Miner's filter `F` (its strip owns `/`), Notes' find `s`.
+
+### 2026-09-25: the palette's typed search finds the focused tab's actions
+
+Revises: "the palette and the space menu are disjoint" (`Registry#for_scope`'s comment). #1282,
+first stage.
+
+The space menu is the only surface that lists a tab's actions, and it has no query line, so every
+action anyone might ever need had to be a row on it. The palette already is the typed-search
+surface, so its search now covers them too:
+
+- **Browse stays app control.** With an empty query the palette is today's curated Global list,
+  exactly.
+- **Typed search is scope-aware.** `Ctrl-P` captures the same `ActionContext` (scope, section,
+  sub-tabs bucket, marks banner) `Space` does, and both list from `Registry#for_view`, so they
+  cannot disagree about "what can I do here". The palette keeps the actions with no menu letter.
+  They rank first under THIS TAB, ahead of Global's matches. Each group is ranked on its own, so
+  rows do not jump between groups while you type.
+- **Captured, then re-checked.** Availability is read before the palette takes `@overlay`, since
+  some gates read it (an open History detail). A tab pick is re-checked after the palette closes.
+  Closing the palette puts back a History detail it was opened over, so the pick runs where its
+  chord would (P1).
+- **The space menu still has no query line.** Search already has a home.
+
+Editor-scope verbs are not searched: the space menu does not list them either. Which rows move
+off the space menu into palette-only placement is stage 2, after the grouped menu lands.
+

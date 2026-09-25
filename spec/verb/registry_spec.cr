@@ -2169,7 +2169,25 @@ describe Gori::Verb do
       reg.search("zzxq-nope", ctx).should be_empty
     end
 
-    it "for_scope is STRICTLY scope-local — no Global fallback (the two surfaces are disjoint)" do
+    # One membership rule for "what can I do here", read by the space menu and the palette's
+    # typed search alike (#1282).
+    it "for_view is COMMON, the focused section, and the SUB-TABS bucket when the tab has a strip" do
+      reg = Registry.new
+      {"common" => :common, "req" => :request, "resp" => :response, "strip" => :subtab, "find" => :tab}.each do |id, section|
+        reg.register(Definition.new("demo.#{id}", id, "", Gori::Verb::Scope::Repeater, section: section) { |_| nil })
+      end
+      reg.register(Definition.new("demo.off", "off", "", Gori::Verb::Scope::Repeater,
+        available: ->(_c : ExecContext) { false }) { |_| nil })
+      reg.register(Definition.new("demo.other", "other", "", Gori::Verb::Scope::Body) { |_| nil })
+      ctx = FakeContext.new
+
+      reg.for_view(Gori::Verb::Scope::Repeater, :response, ctx, true).map(&.id)
+        .should eq(["demo.common", "demo.resp", "demo.strip", "demo.find"])
+      reg.for_view(Gori::Verb::Scope::Repeater, :response, ctx).map(&.id).should eq(["demo.common", "demo.resp"])
+      reg.for_view(Gori::Verb::Scope::Repeater, :tab, ctx).map(&.id).should eq(["demo.common", "demo.find"])
+    end
+
+    it "for_scope is STRICTLY scope-local — no Global fallback" do
       reg = Gori::Verbs.registry
       ctx = FakeContext.new
       ctx.selected = 5_i64 # so the flow-gated Body actions are available

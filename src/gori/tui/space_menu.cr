@@ -11,12 +11,13 @@ module Gori::Tui
   # the key runs the verb through the SAME Verb::Definition#call path as a keybinding
   # and the palette (P1 — no separate execution path).
   #
-  # Where Ctrl-P's PaletteState is a centered fuzzy-typed modal of every Global verb,
-  # the space menu is mnemonic-only (no text input, no fuzzy filter): the shown set is
-  # exactly `for_scope` narrowed to verbs that have a `menu_key`. THAT — the
-  # interaction, not the position — is what keeps the two surfaces from collapsing
-  # into each other. Both are centered cards; one is typed, one is one-keypress. Adding
-  # a query line here would make it a second palette wherever it was drawn.
+  # Where Ctrl-P's PaletteState is a centered fuzzy-typed modal (Global verbs, plus this
+  # same area's verbs once a query is typed — #1282), the space menu is mnemonic-only (no
+  # text input, no fuzzy filter): the shown set is exactly `Registry#for_view` narrowed to
+  # verbs that have a `menu_key`. THAT — the interaction, not the position — is what keeps
+  # the two surfaces from collapsing into each other. Both are centered cards; one is typed,
+  # one is one-keypress. Adding a query line here would make it a second palette wherever it
+  # was drawn — typing already has a home, and it finds these rows too.
   #
   # Grouping runs on two orthogonal axes:
   #   * `Verb::Definition#section` — FOCUS AREA. Splits into a COMMON band (tab-wide)
@@ -154,7 +155,7 @@ module Gori::Tui
       @selected = 0
       @scroll = 0
       @col_off = nil
-      all = @registry.for_scope(scope, ctx).select(&.menu_key)
+      all = @registry.for_view(scope, section, ctx, subtabs).select(&.menu_key)
       buckets, context = focus_buckets(all, section, subtabs)
 
       # Each focus-area bucket is then subdivided by the SEMANTIC axis when its verbs

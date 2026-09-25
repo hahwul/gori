@@ -610,7 +610,7 @@ module Gori
         hidden: true) { |ctx| ctx.detail_step_item(-1); nil }
 
       # The view-toggles are NON-hidden so they front the detail's "space" action menu
-      # (the palette stays Global-only, so un-hiding doesn't leak there). ws/pretty take
+      # (and the palette's typed search from the detail, #1282). ws/pretty take
       # their menu key from their plain chord (b/p) — exactly the key you'd press. Hex is
       # ^X (plain `x` = select-line), so it carries an explicit 'e' mnemonic for the menu.
       r.register Verb::Definition.new(

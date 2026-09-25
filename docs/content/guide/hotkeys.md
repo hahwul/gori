@@ -159,6 +159,20 @@ pane's own verbs, grouped under `COMMON` and the focused area's label, each fron
 mnemonic letter. It is not the palette: there is no typing and no filter, just one keypress
 per row.
 
+### Finding a tab's action by name {#palette-search}
+
+To find an action by name instead, type it into the palette (`Ctrl-P`). Once you type a query,
+the palette searches the actions of the pane you opened it from as well as the app-wide
+commands. It uses the same set `Space` would show there, plus the actions that have no menu
+letter. The pane's matches come first under `THIS TAB`, then the app commands under `APP`.
+Each tab row shows its fast path on the right: its key if it has one, else its menu letter
+(`␣ t` means `Space`, then `t`). If you have rows marked, the title reads
+`COMMANDS · 3 MARKED`, just like the space menu, so you know a batch action acts on all of
+them. With the query empty, the palette lists only the app commands, as it always has.
+
+Opened over a History flow detail, the palette searches the detail's actions. `Esc` from the
+palette returns you to that detail, and an action you pick runs against the flow on screen.
+
 ### One menu per tab, whatever has focus
 
 Nine tabs carry a **sub-tab strip** — Repeater, Fuzzer, Miner, Sequencer, Decoder, JWT,

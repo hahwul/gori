@@ -21,7 +21,7 @@ module Gori
         [Verb::Chord.new("up"), Verb::Chord.new("k")], hidden: true) { |ctx| ctx.issues_move(-1); nil }
 
       # open/delete are NON-hidden so they join New in the Issues list's "space" menu
-      # (the palette stays Global-only, so this doesn't leak there). open carries the
+      # (and the palette's typed search from this tab, #1282). open carries the
       # :open intent ('o') — its primary chord is enter/l, which would otherwise
       # front the menu with the unintuitive 'l'.
       r.register Verb::Definition.new(
@@ -210,7 +210,7 @@ module Gori
 
       # edit-notes/edit-title/open-flow/repeater-flow/delete are NON-hidden so they front
       # the issue-detail "space" action menu (parity with the History detail; the
-      # palette stays Global-only, so this doesn't leak there). Each menu key derives
+      # palette's typed search finds them from here too, #1282). Each menu key derives
       # from its plain chord — the key you'd press directly. severity/status keep their
       # bracket chords ([ ] { }) hidden (awkward as menu mnemonics; discoverable in Help).
       # The single smart Copy (see repeater.copy in verbs/history.cr) — copy-all is gone.
