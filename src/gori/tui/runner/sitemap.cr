@@ -185,6 +185,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       @toast = "that script was pruned since the tree was built"
       return
     end
+    # The reference sits in the RESPONSE body. The pane is not scrolled to it: a body line is
+    # not a display line once the head, pretty-printing and wrap are drawn above and around it,
+    # so the toast names the line and byte instead of landing somewhere near them.
+    history_controller.view.set_detail_pane_public(:response)
     @active_tab = :history
     @focus = :body
     @overlay = OverlayKind::Detail
