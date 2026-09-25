@@ -73,7 +73,7 @@ By default `gori mcp` advertises every tool, so an agent can reach the whole wor
 
 | Start with | Tools | `tools/list` | Tokens | For |
 | --- | ---: | ---: | ---: | --- |
-| `gori mcp` | 185 | ~218 KB | ~56k | Everything (the default) |
+| `gori mcp` | 187 | ~222 KB | ~57k | Everything (the default) |
 | `--read-only` | 62 | ~72 KB | ~18k | Read tools and pure compute; no live requests |
 | `--tools=@recon` | 37 | ~54 KB | ~14k | Read and map the capture, replay a request, record issues and notes |
 | `--tools=@recon --read-only` | 28 | ~39 KB | ~10k | `@recon` minus what `--read-only` disables |
