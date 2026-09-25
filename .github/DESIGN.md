@@ -3593,3 +3593,28 @@ retry, and a refresh that itself 401s needs loop protection against an account l
   have wiped every slot's live token in every process.
 - **Per process**, like the values themselves: a TUI refresh does not update a running
   `gori mcp`, and `gori run session refresh` rebinds a table that ends with the command.
+
+### 2026-09-25: a space-menu letter is checked against every key its tab answers first
+
+Refines: the 2026-09-12 entry above. #1274 WP0.
+
+That entry's rule — a menu letter must never name a key the tab answers differently — had no
+check. `validate_menu_keys!` compares menu against menu and `validate_chords!` chord against
+chord; nothing compared the two. `spec/tui/menu_letter_meaning_spec.cr` now does, and it looks
+past the keymap's single scope because the operator's keystroke does:
+
+- **every OS profile × editor keyset.** `vim` respells a bundle (⇧V select-line, editor `/`
+  `a` `g` `⇧G`), so a letter clean under `helix` can clash for the operators who picked `vim`.
+- **the Editor scope**, which `Runner#resolve_verb_id` consults ahead of the tab while a text
+  editor pane has focus — helix `i` is "insert" in the Repeater request pane.
+- **the sub-tab strip's raw keys** (`r` rename, `t` mark, `h/j/k/l` move), which the keymap
+  cannot see and which share the card with COMMON when the strip has focus.
+- **the Global fallback**, for a letter the tab leaves unbound: a menu `c` whose space was
+  dropped stops capture, and an `i` holds all traffic. The scope lens is the one Global
+  whose fall-through is harmless (a reversible view filter), and the only one excused.
+
+Exceptions are listed as exact `{menu verb, other meaning}` pairs with a reason, never as a
+`(scope, letter)`, so a later row on the same letter is still caught; an entry that stops
+violating fails the spec until its line is deleted. The list started as the 67 pairs standing
+when the guard landed, and the #1274 work packages shrink it. The guard covers the SHIPPED
+defaults — a user rebind that recreates a clash is the Hotkeys editor's `Conflicts` check.
