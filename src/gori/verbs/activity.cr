@@ -29,7 +29,7 @@ module Gori
       r.register Verb::Definition.new(
         "activity.filter-level", "Filter by level",
         "Cycle the level narrowing: all, #{Gori::Store::EVENT_LEVELS.join(", ")}",
-        Verb::Scope::ProjectActivity, [Verb::Chord.new("l")]) { |ctx| ctx.activity_filter_level; nil }
+        Verb::Scope::ProjectActivity, [Verb::Chord.new("l")], mnemonic: 'v') { |ctx| ctx.activity_filter_level; nil }
 
       r.register Verb::Definition.new(
         "activity.filter-actor", "Filter by actor",

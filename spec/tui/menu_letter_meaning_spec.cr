@@ -200,14 +200,6 @@ end
 # The standing exceptions, keyed by the exact pair so a later, unrelated row on the same
 # letter is still caught. The #1274 work packages delete their own lines.
 MENU_LETTER_ALLOWED = {
-  # Link and add-host on nav letters — settled with the h/j/k/l decision after the families land.
-  {"link.history.attach", "body.up"}          => "WP1 hjkl decision: Link is `k`, the list's up key",
-  {"link.history-detail.attach", "detail.up"} => "WP1 hjkl decision: Link is `k`, the detail's up key",
-  {"detail.add-host", "detail.prev-pane"}     => "WP1 hjkl decision: add-host is `h`, the detail's pane-left key",
-  {"link.repeater.attach", "strip:nav"}       => "WP1 hjkl decision: Link is `k`, the strip's up key",
-  {"link.fuzzer.attach", "strip:nav"}         => "WP1 hjkl decision: Link is `k`, the strip's up key",
-  {"link.miner.attach", "strip:nav"}          => "WP1 hjkl decision: Link is `k`, the strip's up key",
-  {"notes.links", "strip:nav"}                => "WP1 hjkl decision: Links is `l`, the strip's right key",
   # WP2 — menu letters another verb of the same tab answers.
   {"issue.set-severity", "issue.goto-link"}              => "WP2 #7: documented at verbs/issues.cr (severity keeps `s` in the menu)",
   {"probe.scope-toggle", "probe.open-evidence"}          => "WP2 #8: documented in DESIGN.md §7 2026-09-12 (Probe's `s` is go to source)",

@@ -3816,3 +3816,23 @@ because select-line owns `x` in two of the three. Two families now hold them.
   write, so Display…'s envelope row is its own verb (`repeater.toggle-envelope`), listed only
   where there is a split. The History detail's Copy flow copied the raw request, which Copy as…
   already offers, and is gone.
+
+### 2026-09-25: a menu letter is never h, j, k or l
+
+Closes: the WP1 first-stage entry above ("settled after the grouped menu lands"). #1274.
+
+Inside the space menu `j`/`k`/`h`/`l` move the selection only when the open card does not use
+that letter. With Link on `k` in six tabs and add-host on `h`, the same reflex moved in one card
+and acted in the next, and a sticky family card, which stays up after a row ran, made the next
+reflex keystroke likelier still. The fallback stays; the letters go.
+
+- **No row wears one, at either level.** `Registry#validate_intents!` refuses a level-1 letter
+  (a pinned member included, and a letter derived from a chord as much as a mnemonic) in
+  `Family::NAV_LETTERS`, and `Family#validate!` refuses one as a family's key or a level-2
+  letter. Global and Editor draw no card and are exempt (`Registry::NO_SPACE_MENU`).
+- **The movers take lexicon letters.** Link… and Manage links are `:link` → `L`, add-host is
+  `:scope_add` → `H`. Discover's run stepping is `J`/`K` (`[`/`]` are Global tab switching, which
+  a dropped space would reach), the Fuzzer's list paste `A`, and Activity's level filter `v` in
+  the menu while its bare `l` stays.
+- The Project Picker's hand-rolled menu already had no row on the four; it keeps the same
+  fallback.

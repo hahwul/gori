@@ -16,7 +16,7 @@ describe "Gori::Verbs.register_links" do
      "link.miner.attach"          => Gori::Verb::Scope::Miner,
     }.each do |id, scope|
       r[id].scope.should eq(scope)
-      r[id].menu_key.should eq('k')
+      r[id].menu_key.should eq('L') # the lexicon's :link, never the nav `k` (#1274)
       r[id].title.should eq("Link…")
       verb_intents(r, id).should eq([:link_attach])
     end
@@ -43,7 +43,7 @@ describe "Gori::Verbs.register_links" do
     end
     {"link.history.attach", "link.history-detail.attach", "link.repeater.attach"}.each do |id|
       r[id].description.should contain("freezing")
-      r[id].menu_key.should eq('k')
+      r[id].menu_key.should eq('L')
     end
     # Not the Miner or the Fuzzer: a template plus a run is not one exchange
     # (`Evidence.freezable?`), so their descriptions must not promise a copy.

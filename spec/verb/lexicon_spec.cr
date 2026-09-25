@@ -40,6 +40,10 @@ module LexiconSpec
     "close-subtab"     => :close,
     "rename-subtab"    => :rename,
     "duplicate-subtab" => :duplicate,
+    "attach"           => :link,
+    "link"             => :link,
+    "links"            => :link,
+    "add-host"         => :scope_add,
   }
 
   # Rows whose id names an intent but whose letter is decided elsewhere. Each line names why,
@@ -137,6 +141,23 @@ describe Gori::Verb::Lexicon do
         LexiconSpec.verb("demo.new", Gori::Verb::Scope::Jwt, intent: :new, section: :subtab),
         LexiconSpec.verb("demo.pane", Gori::Verb::Scope::Jwt, mnemonic: 't', section: :output))
       expect_raises(Gori::Error, /demo.pane .* strip's menu 't'/) { reg.validate_intents! }
+    end
+
+    # h/j/k/l move the menu's selection (#1274): a row on one would run where the hand meant
+    # to move, so no row wears one. A chord-derived letter counts as much as a mnemonic.
+    it "raises on a menu letter that is h, j, k or l" do
+      Gori::Verb::Family::NAV_LETTERS.each do |nav|
+        reg = LexiconSpec.registry(LexiconSpec.verb("demo.nav", Gori::Verb::Scope::Notes, mnemonic: nav))
+        expect_raises(Gori::Error, /demo.nav .* navigation letter/) { reg.validate_intents! }
+      end
+      derived = LexiconSpec.verb("demo.chord", Gori::Verb::Scope::Evidence, [Gori::Verb::Chord.new("l")])
+      expect_raises(Gori::Error, /demo.chord .* navigation letter/) { LexiconSpec.registry(derived).validate_intents! }
+      # Global and Editor draw no space menu, so a letter their chords derive is never a row.
+      LexiconSpec.registry(LexiconSpec.verb("demo.ed", Gori::Verb::Scope::Editor, [Gori::Verb::Chord.new("l")])).validate_intents!
+      LexiconSpec.registry(LexiconSpec.verb("demo.gl", Gori::Verb::Scope::Global, [Gori::Verb::Chord.new("k")])).validate_intents!
+      # A hidden verb has no row.
+      LexiconSpec.registry(Gori::Verb::Definition.new("demo.hid", "x", "x", Gori::Verb::Scope::Body,
+        [Gori::Verb::Chord.new("j")], hidden: true) { |_| nil }).validate_intents!
     end
 
     it "raises on a menu 'X' that is not a wipe" do

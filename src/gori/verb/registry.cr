@@ -180,6 +180,11 @@ module Gori
         end
       end
 
+      # The scopes no space menu is drawn for: Global is the palette's, and Editor is a keymap
+      # scope consulted ahead of the tab while a text editor has focus. A letter derived from
+      # their chords never reaches a card.
+      NO_SPACE_MENU = {Scope::Global, Scope::Editor}
+
       # Fail fast on a space-menu letter that breaks the intent lexicon (`Verb::Lexicon`,
       # #1274). Only the rules with no exceptions live here; the reserved-letter sweep, which
       # needs judgement, is `spec/verb/lexicon_spec.cr`.
@@ -198,6 +203,8 @@ module Gori
       #     mnemonic is its level-1 letter. Only a member may be pinned.
       #   • A family's key is a level-1 letter like any other: on a strip tab it is not one of
       #     the strip's.
+      #   • No menu letter is h/j/k/l (`Family::NAV_LETTERS`): inside the menu those four move
+      #     the selection, so a row on one would run where the hand meant to move (#1274).
       def validate_intents! : Nil
         strip_scopes = compact_map { |v| v.scope if SUBTAB_SECTIONS.includes?(v.section) }.to_set
         each do |v|
@@ -243,6 +250,11 @@ module Gori
 
       private def check_reserved_menu_letter!(v : Definition, strip_scopes : Set(Scope)) : Nil
         return unless key = v.menu_key
+        if Family::NAV_LETTERS.includes?(key) && !NO_SPACE_MENU.includes?(v.scope)
+          raise Gori::Error.new(
+            "#{v.id} in #{v.scope} wears the menu '#{key}', a navigation letter " \
+            "(h/j/k/l move the space menu's selection and are never a row's letter)")
+        end
         if key == 'X' && !(v.intent == :wipe && v.group == :wipe)
           raise Gori::Error.new("#{v.id} in #{v.scope} wears the menu 'X', the wipe letter (intent :wipe, group :wipe)")
         end

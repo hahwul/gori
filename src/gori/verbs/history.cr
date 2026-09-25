@@ -687,11 +687,12 @@ module Gori
         Verb::Scope::HistoryDetail, [Verb::Chord.new("i", shift: true)],
         intent: :to_fuzzer, group: :send) { |ctx| ctx.close_detail; ctx.fuzz_selected; nil }
 
-      # Add the open flow's host to the scope lens (mirrors scope.add-host 'h' from the
-      # list — also menu-only there; 'h' is the ← pane-nav chord in the detail).
+      # Add the open flow's host to the scope lens (mirrors scope.add-host from the list,
+      # menu-only there too). The lexicon's `H`: `h` is the ← pane-nav chord in the detail,
+      # and no menu letter is h/j/k/l (#1274).
       r.register Verb::Definition.new(
         "detail.add-host", "Add host to scope", "Add this flow's host to the scope lens",
-        Verb::Scope::HistoryDetail, mnemonic: 'h', group: :scope) { |ctx| ctx.scope_add_host; nil }
+        Verb::Scope::HistoryDetail, intent: :scope_add, group: :scope) { |ctx| ctx.scope_add_host; nil }
 
       # Run the Probe active checks against the open flow (mirrors history.probe-active 'A' from
       # the list) — close the detail first so the confirm dialog isn't buried under it.
@@ -861,7 +862,7 @@ module Gori
       r.register Verb::Definition.new(
         "fuzz.list-paste", "Add List payload set", "Open the payload-set editor pre-seeded to a List — a multi-line editor, one value per line (paste splits automatically)",
         Verb::Scope::Fuzzer, [Verb::Chord.new("l", ctrl: true)],
-        available: in_fuzzer, mnemonic: 'l', section: :template) { |ctx| ctx.fuzz_list_paste; nil }
+        available: in_fuzzer, mnemonic: 'A', section: :template) { |ctx| ctx.fuzz_list_paste; nil }
       r.register Verb::Definition.new(
         "fuzz.pretty-template", "Pretty-print template", "Format the request template body in-place (JSON/XML/form-urlencoded)",
         Verb::Scope::Fuzzer, [Verb::Chord.new("u", ctrl: true)],
@@ -1019,10 +1020,10 @@ module Gori
       r.register Verb::Definition.new(
         "link.repeater.attach", "Link…",
         "Attach this repeater session to an issue (freezing its request + last response as evidence) or a note — or create one",
-        Verb::Scope::Repeater, available: repeater_linkable, mnemonic: 'k') { |ctx| ctx.link_attach; nil }
+        Verb::Scope::Repeater, available: repeater_linkable, intent: :link) { |ctx| ctx.link_attach; nil }
       r.register Verb::Definition.new(
         "link.fuzzer.attach", "Link…", "Attach this fuzz session to an issue or note — or create one",
-        Verb::Scope::Fuzzer, available: fuzz_linkable, mnemonic: 'k') { |ctx| ctx.link_attach; nil }
+        Verb::Scope::Fuzzer, available: fuzz_linkable, intent: :link) { |ctx| ctx.link_attach; nil }
     end
 
     # Builds a registry with every built-in verb registered.

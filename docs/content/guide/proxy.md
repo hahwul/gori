@@ -431,12 +431,12 @@ So `/ status:5xx` → `Shift-T` → `Space` → `d` deletes every error in one c
 | Copy | `y` | The URL list (one per line) |
 | Copy as… | `Space` `Y` | urls / host list / cURL / raw requests / raw responses / req+res pairs |
 | Delete | `d` or `Space` `d` | One confirm for the whole set (`⇧X` is a different verb: it wipes the project's whole History) |
-| Link… | `Space` `k` | One card lists every issue and note (plus `+ New issue…` / `+ New note…`); pick or create once, attach every flow — and on an issue, freeze each exchange as immutable evidence (max 20 copies; above that the links still land) |
+| Link… | `Space` `L` | One card lists every issue and note (plus `+ New issue…` / `+ New note…`); pick or create once, attach every flow — and on an issue, freeze each exchange as immutable evidence (max 20 copies; above that the links still land) |
 | Add issue | `Shift-F` | One issue with every flow as evidence |
 | Repeater / Fuzzer | `Ctrl-R` / `Shift-I` | One sub-tab per flow (max 20) |
 | Mine parameters | `Space` `>` `m` | One config popup, one session per flow (max 20) |
 | Run active scan | `Space` `A` | The request estimate is summed across the set |
-| Add host to scope | `Space` `h` | Hosts deduplicated: 12 flows on 2 hosts adds 2 rules |
+| Add host to scope | `Space` `H` | Hosts deduplicated: 12 flows on 2 hosts adds 2 rules |
 | Send to Comparer | `Space` `>` `c` | Exactly 2 marked fills A (older) and B (newer) directly |
 
 Marks survive a filter change, a re-sort, and leaving the tab and coming back; the count chip tells you how many are currently off-screen. Anything that sends traffic still asks first and still honours scope per request; marking changes the request count, never the gate. A few actions stay single-target because they only make sense for one flow (opening the detail, the Sequencer, opening a response in the browser, mocking a response); their menu entries say `(cursor)` while marks are set.

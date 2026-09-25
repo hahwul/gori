@@ -37,6 +37,19 @@ describe Gori::Verb::Family do
     expect_raises(Gori::Error, /band :bogus/) { fam(group: :bogus).validate! }
   end
 
+  it "never takes a navigation letter as its own key" do
+    V::Family::NAV_LETTERS.each do |nav|
+      expect_raises(Gori::Error, /key '#{nav}' is a navigation letter/) { fam(key: nav).validate! }
+    end
+  end
+
+  it "keeps a pinned member off the navigation letters at level 1" do
+    reg = V::Registry.new
+    reg.register_family(fam)
+    reg.register(verb("demo.pin", intent: :to_a, mnemonic: 'k', pinned: true))
+    expect_raises(Gori::Error, /demo.pin .* navigation letter/) { reg.validate_intents! }
+  end
+
   it "never gives a member a navigation letter at level 2" do
     V::Family::NAV_LETTERS.each do |nav|
       expect_raises(Gori::Error, /navigation letter/) { fam([{:to_a, nav}]).validate! }
