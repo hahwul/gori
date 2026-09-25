@@ -141,9 +141,16 @@ module Gori
       index = {} of String => Int32
       capped = false
       lines = LineCounter.new(text.to_slice)
+      matches = 0
       Probe::Passive::JsScan.each_script(text, kind.html?, kind.js?) do |script, at|
         probe = CommentProbe.new(script, Probe::Passive::JsScan.strip_comments(script))
+        # The lex and the pass are separate stretches on the scheduler (P6). The lex is the
+        # longest one the scan holds — ~5.5 ms on a 2 MiB bundle in a release build, ~8 ms on a
+        # non-ASCII one (bench/js_refs_bench.cr) — and cannot be split without a resumable copy
+        # of the lexer; the pass yields every YIELD_EVERY matches.
+        Fiber.yield
         Discover::Extract.each_endpoint(script) do |value, from, to|
+          Fiber.yield if (matches += 1) % YIELD_EVERY == 0
           lit, templated = template_path(script, value, from, to)
           comment = probe.comment?(from)
           if i = index[lit]?
@@ -255,25 +262,50 @@ module Gori
     # `strip_comments` blanks a comment to spaces with CHAR offsets preserved, so a literal's
     # opening byte (a quote, or the `h` of a URL — never a space) reads as a space there exactly
     # when it was commented out. Byte offsets line up only while no multi-byte character was
-    # blanked, so the two strings are walked in lockstep by character instead: one pass per
-    # script in all, not a walk from the start per question.
+    # blanked; past one, the two strings are walked in lockstep — one pass per script in all, not
+    # a walk from the start per question.
+    #
+    # The walk is by lead BYTE, not `Char::Reader`: decoding every character of a 2 MiB bundle
+    # twice cost ~9 ms (bench/js_refs_bench.cr), and the only question per character is whether
+    # the stripped copy blanked it (one space byte for the whole character) or kept it (the same
+    # bytes). The text is valid UTF-8 (`Utf8.text`), so a lead byte's width is exact.
     private class CommentProbe
+      @op = 0 # byte position in the original script
+      @kp = 0 # the same character's byte position in the stripped copy
+
       def initialize(@orig : String, @kept : String)
         @aligned = @orig.bytesize == @kept.bytesize
-        @o = Char::Reader.new(@orig)
-        @k = Char::Reader.new(@kept)
       end
 
       def comment?(byte_off : Int32) : Bool
+        o = @orig.to_slice
+        k = @kept.to_slice
         if @aligned
-          return false if byte_off >= @kept.bytesize
-          return @kept.to_slice[byte_off] == 0x20_u8 && @orig.to_slice[byte_off] != 0x20_u8
+          return false if byte_off >= k.size
+          return k[byte_off] == 0x20_u8 && o[byte_off] != 0x20_u8
         end
-        while @o.pos < byte_off && @o.has_next?
-          @o.next_char
-          @k.next_char if @k.has_next?
+        while @op < byte_off && @op < o.size && @kp < k.size
+          width = utf8_width(o[@op])
+          @kp += blanked?(o, k) ? 1 : width
+          @op += width
         end
-        @k.current_char == ' ' && @o.current_char != ' '
+        @op < o.size && @kp < k.size && blanked?(o, k)
+      end
+
+      private def blanked?(o : Bytes, k : Bytes) : Bool
+        k[@kp] == 0x20_u8 && o[@op] != 0x20_u8
+      end
+
+      private def utf8_width(lead : UInt8) : Int32
+        if lead < 0x80_u8
+          1
+        elsif lead < 0xe0_u8
+          2
+        elsif lead < 0xf0_u8
+          3
+        else
+          4
+        end
       end
     end
 
