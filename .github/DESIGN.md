@@ -2679,7 +2679,8 @@ read-only response, where Unicode escape display takes priority; the request edi
 resolves `u` in the leading Editor scope to `editor.undo`.
 
 What the keyset deliberately leaves alone: the enable/disable `x` on the four rule lists (that
-`x` is a state change, not a selection — KEY_AUDIT F4), and `intercept.select-line`, which
+`x` is a state change, not a selection — KEY_AUDIT F4; since the entry below, all four toggles
+are `t` and there is no such `x`), and `intercept.select-line`, which
 ships keyless because the Intercept queue spends nearly every letter. A keyset respells keys;
 it does not hand one to a pane whose author decided against it.
 
