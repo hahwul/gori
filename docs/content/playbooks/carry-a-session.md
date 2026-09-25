@@ -86,7 +86,9 @@ gori run fuzz 42 --slot low-priv --bind-from 17 --wordlist ids.txt
 
 The overlay is header-only (`Content-Length` never moves and the body is byte-exact), so a slot is safe on bytes you did not author: a captured replay, a fuzz template with its payload already spliced.
 
-Two limits worth knowing before you lean on it. The active slot is **never persisted**: reopening the project starts as-captured, because a slot's values are memory-only and restoring the pointer into an empty table would send an overlay whose `$BIND.SESSION` is literal. And there is no cookie jar and no auto-login macro; a slot carries the headers you wrote and the values gori observed, and `--bind-from` is the explicit version of "log in again".
+Two limits worth knowing before you lean on it. The active slot is **never persisted**: reopening the project starts as-captured, because a slot's values are memory-only and restoring the pointer into an empty table would send an overlay whose `$BIND.SESSION` is literal. And there is no cookie jar; a slot carries the headers you wrote and the values gori observed, and `--bind-from` is the explicit version of "log in again".
+
+For a run long enough to outlive the token, give the slot **refresh steps**: the Repeater sessions that log in, in order. `gori run session edit admin --refresh 12,14 --refresh-before jwt-exp` makes a `--slot admin` send refresh the slot first whenever its bound JWT is about to expire, and `gori run session refresh admin` runs the steps by hand to check them. It acts before a send and never retries after a `401`. See [refresh steps](/reference/cli/#refresh-steps).
 
 **Checkpoint.** `gori run session list` shows both slots, and a `--slot low-priv` run prints `slot: sending as low-priv` before its first request.
 

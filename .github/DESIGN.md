@@ -3539,3 +3539,45 @@ The scan is on demand only for now; a background mode on the Analyzer's passive 
 references to the Probe mode, where "off" would silently mean "no references". Relative
 literals without a leading `/`, `.map`/JSON bodies, and copying the page's credentials into a
 Repeater request built from a reference are all left out on purpose.
+
+### 2026-09-25: a session slot refreshes itself before a send, never after a response
+
+#1233. A slot was a static snapshot and said so ("No auto-login … gori acting behind the
+operator's back (P4)"), so a long Fuzz, Authorize, Retest or agent run went on after the token
+expired and collected 401s. A slot now carries `refresh` (Repeater session ids, in order) and
+`refresh_before` (`off` | `jwt-exp` | `ttl=`), and `Gori::SessionRefresh` replays the steps —
+by hand, or before a send the policy says is due. This narrows the old refusal rather than
+reversing it: gori runs only requests the operator put in the slot's list, under a policy the
+operator set on it, and every one is logged (History `src:refresh`, one `session` event, the
+`⟳`/`!` chip). What gori still never does is decide from a RESPONSE that it should log in
+again. Retry-after-401 is out because it produces wrong answers, not just complexity: in
+Authorize the 401 is the verdict, a fuzz row would stand for two requests, race mode cannot
+retry, and a refresh that itself 401s needs loop protection against an account lockout.
+
+- **A step is sent AS the slot, not by activating it.** `activate` is process-global and would
+  hand every in-flight send in another tab the refreshing identity. `PlanOptions#refresh_slot`
+  resolves the step's `$BIND.*` from that slot's table (`Env.expand_bindings(as_slot:)`),
+  observes its response into that table (`Bindings#observe(as_slot:)`), and writes no overlay —
+  the login must not carry the stale credential it replaces (open question 1: no overlay).
+- **The before-send hook is asked for every identity a send goes out as** (open question 2):
+  the active slot at `Repeater::Sender#wire`, every `Fuzz::Sender` send (race: before the group
+  is dialled), Discover, the Miner hook backend — and each Authorize identity by name in
+  `send_one`, since that sender wears no active slot. It lives in a leaf
+  (`session_refresh/hook.cr`) so the send seams do not depend on the Repeater, and it answers
+  only while its binding table is `Env.layer`, so a hook a closed project left behind is inert.
+  An automatic refresh uses the SURFACE's gate (`Outbound.interactive`/`.cli`/`.agent`) and
+  never inherits a send's own waiver; a manual one may pass its own.
+- **Failure never blocks the send and never repeats quickly** (open question 3): single-flight
+  per slot (a closed `Channel` wakes every waiter; no `-Dpreview_mt`, so a latch is enough), a
+  30 s cooldown after a failure, automatic refresh off after 3 in a row until a manual refresh
+  succeeds. A slot whose last refresh failed is due again after its cooldown whatever its
+  policy reads: a TTL counted from a step-1 CSRF that DID rebind would otherwise call the slot
+  fresh while its session token stayed stale. A refresh whose steps all answered but rebound
+  none of the slot's claimed bindings counts as a failure.
+- **A deleted step detaches, it does not re-bind.** `Store#delete_repeater` negates the id in
+  the slot blob in the same transaction (#1160's encoding), editing the JSON in place so a key
+  this build does not know survives. `SessionSlots#reload` prunes per-slot binding tables only
+  when an IDENTITY field moved (`SessionSlot#same_identity?`), or closing a step's tab would
+  have wiped every slot's live token in every process.
+- **Per process**, like the values themselves: a TUI refresh does not update a running
+  `gori mcp`, and `gori run session refresh` rebinds a table that ends with the command.

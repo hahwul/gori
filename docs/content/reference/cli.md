@@ -94,7 +94,7 @@ gori run <subcommand> [verb] [options]
 | `rewriter extract` · `bindings` | Manage session-binding extract rules, and list the `$BIND.NAME`s they declare |
 | `colormarker` · `add` · `update` · `rm` · `enable` · `disable` · `move` · `preview` · `color` | Manage History row-colour rules |
 | `views` · `add` · `set` · `rename` · `scope` · `rm` | Manage saved History views: named QL queries the list is narrowed by, as a lens |
-| `session` · `add` · `from-flow` · `edit` · `rm` · `baseline` · `show` · `activate` | Session slots: the named identities a send or an Authorize run goes out as |
+| `session` · `add` · `from-flow` · `edit` · `rm` · `baseline` · `show` · `refresh` · `activate` | Session slots: the named identities a send or an Authorize run goes out as, and the Repeater steps that re-authenticate one |
 | `grpc [schema]` · `reflect` · `forget` | The gRPC `.proto` lens: show what is loaded, fetch descriptors by server reflection, drop a cached target |
 | `project [list]` | List known projects |
 | `project create <name>` | Create (or reopen) a project by name |
@@ -676,18 +676,21 @@ gori run session add --name admin --set 'Cookie: session=…' --rule SESSION
 gori run session edit admin --clear-set --set 'Cookie: session=new'
 gori run session baseline as-captured
 gori run session rm admin
+gori run session edit admin --refresh 12,14 --refresh-before jwt-exp
+gori run session refresh admin
 ```
 
 | Verb | Options |
 | ------ | --------- |
 | `list` (default) | `--show-values` (print header values instead of `[REDACTED]`), `--format text\|json` |
 | `show <name>` | `--show-values`, `--format text\|json` |
-| `add` | `--name`, `--set 'Name: value'` (repeatable), `--remove NAME` (repeatable), `--rule NAME` (repeatable), `--baseline` / `--no-baseline` (clear the flag; the first slot then inherits it) |
+| `add` | `--name`, `--set 'Name: value'` (repeatable), `--remove NAME` (repeatable), `--rule NAME` (repeatable), `--baseline` / `--no-baseline` (clear the flag; the first slot then inherits it), `--refresh ID,ID` (the Repeater sessions that re-authenticate the slot, in order), `--refresh-before off\|jwt-exp\|ttl=10m` |
 | `from-flow <flow-id>` | `--name` (required), `--baseline`, `--show-values`. Build the overlay from a captured login exchange instead of typing it |
 | `from-request <flow-id>` | `--name` (required), `--copy-header NAME` (repeatable; at least one), `--baseline`, `--show-values`. Copy selected headers from a captured request |
-| `edit <name>` | The same flags, plus `--clear-set` / `--clear-remove` / `--clear-rules`. A collection flag REPLACES that whole collection; one you omit is left alone |
+| `edit <name>` | The same flags, plus `--clear-set` / `--clear-remove` / `--clear-rules` / `--clear-refresh`. A collection flag REPLACES that whole collection; one you omit is left alone |
 | `rm`\|`delete <name>` | Any extract rule it claimed goes back to writing the global binding table |
 | `baseline <name>` | Move the Authorize baseline (exactly one slot holds it) |
+| `refresh <name>` | Run the slot's refresh steps now. `--allow-unscoped`, `--format text\|json`; exits `1` when the refresh failed |
 
 All verbs take `--project=NAME` / `--db=PATH`.
 
@@ -700,7 +703,7 @@ gori run session from-flow 4211 --name admin
 gori run repeater 900 --slot admin        # re-send flow 900 as that identity
 ```
 
-The overlay is **literal**: the bytes login handed back, saved with the project. It does not re-authenticate, so a token that *rotates* (a short-lived JWT, a per-request CSRF value) belongs on the extract-rule path instead: `gori run rewriter extract` plus `--bind-from FLOW`, which re-mints the value once per run. The name is checked before the flow is read, so a duplicate is reported as a name clash rather than as "that flow is not a login".
+The overlay is **literal**: the bytes login handed back, saved with the project. It does not re-authenticate by itself, so a token that *rotates* (a short-lived JWT, a per-request CSRF value) belongs on the extract-rule path instead: `gori run rewriter extract` plus `--bind-from FLOW`, which re-mints the value once per run, or [refresh steps](#refresh-steps) on the slot. The name is checked before the flow is read, so a duplicate is reported as a name clash rather than as "that flow is not a login".
 
 **`from-request` copies named headers from a captured request.** This is useful when the credential or CSRF material is already on the request, or when you need a deliberately small snapshot rather than every header in a login exchange. Repeat `--copy-header` once per header; at least one is required. `Content-Length`, `Transfer-Encoding` and `Host` are refused: a slot is applied to a message with a different body and target, so copying one would make every later send under the slot misframe or misroute itself. The saved values are literal bytes, stdout redacts them as `[REDACTED]` unless `--show-values` is passed, and provenance on STDERR names the copied headers without printing their values. Slots are **not host-scoped**: every send that explicitly uses `--slot NAME` receives the slot's headers, so keep each slot limited to its intended identity.
 
@@ -710,7 +713,23 @@ gori run session from-request 4211 --name admin \
 gori run repeater 900 --slot admin        # send with that header snapshot
 ```
 
-This is a **literal snapshot**, not a login macro: it does not re-authenticate or refresh a rotating token. For short-lived JWTs, per-request CSRF values, or any credential that must be minted again, use `gori run rewriter extract` with `--bind-from FLOW` so the value is extracted anew for each run.
+This is a **literal snapshot**, not a login macro: it does not re-authenticate or refresh a rotating token by itself. For short-lived JWTs, per-request CSRF values, or any credential that must be minted again, use `gori run rewriter extract` with `--bind-from FLOW` so the value is extracted anew for each run, or give the slot [refresh steps](#refresh-steps).
+
+<a id="refresh-steps"></a>**Refresh steps re-authenticate a slot.** `--refresh 12,14` names the Repeater sessions (`gori run repeater list`) that log in, in the order they run: typically a CSRF fetch, then the login that carries `$BIND.CSRF`. Each step's response goes through the slot's own extract rules, which is what rebinds the slot. A step resolves the *slot's* `$BIND.NAME` values and carries **no** slot header overlay, so the login does not send the stale credential it is replacing. Every step is recorded in History with source `refresh` (`src:refresh`), and each refresh writes one event (`list_events`, source `session`) that names binding names and never a value.
+
+`--refresh-before` makes the refresh run on its own, before a send that goes out as the slot (`--slot NAME` on any sending command, and each identity of an Authorize run):
+
+| Policy | Refreshes when |
+| --- | --- |
+| `off` (default) | Never on its own; only `session refresh` |
+| `jwt-exp` | A JWT bound in the slot's table is within 30 s of its `exp` |
+| `ttl=10m` | The slot's newest binding is older than the span (`s`, `m`, `h`; a bare number is seconds) |
+
+A slot with a policy and nothing bound yet refreshes before its first send. It never retries a request after a `401`: the policy acts before a send and never reads a response, so an Authorize verdict is never hidden by a login. A failed automatic refresh lets the send go ahead with the value it has, waits 30 s before trying again, and switches automatic refresh off after 3 consecutive failures until a manual refresh succeeds. Concurrent sends wait for the one refresh in flight. An automatic refresh is gated by the project scope as `gori run` gates any send and never inherits a command's own `--allow-unscoped`; the login host must be in scope.
+
+Deleting a Repeater session that a slot uses as a step keeps the step in place, marked deleted, and a refresh refuses it rather than running whatever session takes that id next. Remove it with `--refresh` or `--clear-refresh`.
+
+Binding values live in memory, **per process**: `session refresh` rebinds this command's own table and is gone when it exits, so it is for checking that a login sequence works. A `--slot NAME` sweep refreshes in its own process, and the TUI and a running `gori mcp` each keep their own.
 
 **There is no `session activate`.** A `gori run` process sends and exits, so the active pointer has nothing to span, and persisting one would resolve into an empty binding table on the next run, sending an overlay whose `$BIND.SESSION` is literal. Name the identity on the send instead: `--slot NAME`, on `repeater`, `repeater send`, `repeater minimize`, `fuzz`, `mine`, `sequence` and `discover`. The run prints `slot: sending as NAME` on STDERR before its first request.
 
