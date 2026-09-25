@@ -157,8 +157,18 @@ module Gori
         def self.scripts(text : String?, html : Bool, js : Bool) : Array(String)
           return [] of String if text.nil? || text.empty?
           out = [] of String
+          each_script(text, html, js) { |body, _| out << body }
+          out
+        end
+
+        # `scripts`, one fragment at a time with the BYTE offset it starts at in `text` (0 for a
+        # JS response, which is one fragment). The passive JS reference scan (#1243) records
+        # where in the response a literal sat, which `scripts`' bare strings cannot say; the two
+        # share this walk so they cannot disagree about which blocks are code.
+        def self.each_script(text : String, html : Bool, js : Bool, & : String, Int32 ->) : Nil
+          return if text.empty?
           if js
-            out << text
+            yield text, 0
           elsif html
             text.scan(SCRIPT_BLOCK) do |m|
               attrs = m[1]
@@ -166,10 +176,9 @@ module Gori
               next if body.empty?
               next if HAS_SRC.matches?(attrs)     # external script; body is decorative
               next if NON_JS_TYPE.matches?(attrs) # data/template island, not code
-              out << body
+              yield body, m.byte_begin(2)
             end
           end
-          out
         end
 
         # The two output sides of one lex pass, so the lexers below never spell a nil test.

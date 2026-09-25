@@ -529,8 +529,8 @@ module Gori
       }
     end
 
-    # Wipe every captured History flow in this project (and their WS/FTS/h2 logs and
-    # flow entity_links). Repeater-owned WS rows (repeater_id set) and workbench sessions
+    # Wipe every captured History flow in this project (and their WS/FTS/h2 logs, flow
+    # entity_links and the JS references derived from their bodies). Repeater-owned WS rows (repeater_id set) and workbench sessions
     # are left intact, and so are `sitemap_tags`: a tag is the OPERATOR'S memo on a path, in
     # the same class as a note or an issue, and `history clear` clears captured traffic rather
     # than the operator's own annotations. It is keyed by `(host, path)` and not by a flow id,
@@ -550,6 +550,8 @@ module Gori
         c.exec("INSERT INTO flows_fts(flows_fts) VALUES('delete-all')")
         c.exec("DELETE FROM entity_links WHERE ref_kind = 'flow'")
         detach_flow_refs(c, nil)
+        c.exec("DELETE FROM js_refs")
+        c.exec("DELETE FROM js_ref_scans")
         c.exec("DELETE FROM flows")
         c.exec("DELETE FROM h2_frames")
         c.exec("DELETE FROM h2_connections")
@@ -565,6 +567,8 @@ module Gori
       conn.exec("DELETE FROM flows_fts WHERE rowid = ?", id)
       conn.exec("DELETE FROM entity_links WHERE ref_kind = 'flow' AND ref_id = ?", id)
       detach_flow_refs(conn, id)
+      conn.exec("DELETE FROM js_refs WHERE flow_id = ?", id)
+      conn.exec("DELETE FROM js_ref_scans WHERE flow_id = ?", id)
       # The h2 frame log (often the flow's bulk bytes) — capture the conn BEFORE deleting
       # the flow row so we can reclaim it if this was the last flow on that connection.
       h2_conn = conn.query_one?("SELECT h2_conn_id FROM flows WHERE id = ?", id, as: Int64?)
@@ -590,6 +594,11 @@ module Gori
 
     # Every table that cross-references a flow by id, in one place. `id` nil = every flow is
     # going (a clear), so every reference is dangling.
+    #
+    # Not here, because they are DELETED rather than detached: `js_refs` and `js_ref_scans`
+    # (V34) are projections of the flow's own body, meaningless without it, so both callers
+    # delete them beside this call — and so do the two retention sweeps (`Store#prune`,
+    # `prune_old_flows`), which never reach this method.
     #
     # `flows.id` is a plain `INTEGER PRIMARY KEY`, i.e. the rowid, which SQLite REUSES: delete
     # the newest flow (or clear the project) and the next capture is handed the same id. These

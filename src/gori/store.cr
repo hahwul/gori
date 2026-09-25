@@ -38,6 +38,7 @@ require "./store/h2_frames"
 require "./store/reads"
 require "./store/query_control"
 require "./store/sitemap_tags"
+require "./store/js_refs"
 require "./store/env_write_guard"
 require "./ql"
 require "./open_lock"
@@ -1600,6 +1601,9 @@ module Gori
         # on each sweep. Gate on repeater_id so repeater-owned rows are never reaped by flow retention.
         c.exec("DELETE FROM ws_messages WHERE flow_id <= ? AND repeater_id IS NULL", cutoff)
         c.exec("DELETE FROM flows_fts WHERE rowid <= ?", cutoff)
+        # JS references are derived from their flow's body (V34) and go with it.
+        c.exec("DELETE FROM js_refs WHERE flow_id <= ?", cutoff)
+        c.exec("DELETE FROM js_ref_scans WHERE flow_id <= ?", cutoff)
         c.exec("DELETE FROM flows WHERE id <= ?", cutoff)
         # Read changes() IMMEDIATELY after the flows delete — it reports the most recent
         # statement, so any query in between (including the h2 reaping below) would replace it.

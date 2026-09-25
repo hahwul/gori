@@ -96,6 +96,14 @@ module Gori
       # methods are those of one or more deeper endpoints folded onto it. Display-only — the
       # captured request is untouched and History still shows the target verbatim (P7).
       property truncated : Bool
+      # How many captured flows' JavaScript REFERENCES this node's path (#1243), stamped by
+      # `attach_js_refs!`. On a node carrying methods it is a count beside the traffic; on a
+      # method-less one it is the only reason the path is known to have been named at all.
+      property js_refs : Int32
+      # This node exists ONLY because JavaScript referenced it (or a path under it) — no
+      # captured request reaches it or anything below it. Never carries a method, so
+      # `endpoint_count` and every "N endpoints" figure stay traffic-only (P3).
+      property unrequested : Bool
 
       # Build-time label→child index so `child` is O(1) instead of a linear sibling scan —
       # a path-param explosion (thousands of `/users/<id>` siblings under one parent) made
@@ -116,6 +124,8 @@ module Gori
         @fold_methods = [] of String
         @query_fold = false
         @truncated = false
+        @js_refs = 0
+        @unrequested = false
       end
 
       # The durable key for a fold node (nil on a real node). FOLD_SEP can't occur in a
@@ -132,8 +142,20 @@ module Gori
         end
       end
 
+      # The child labelled `label`, or nil — `child` without creating one. Build-time only, like
+      # `child`: the index is not maintained once a fold reshapes `@children`.
+      def child?(label : String) : Node?
+        @child_index[label]?
+      end
+
       def leaf? : Bool
         @children.empty?
+      end
+
+      # A path JavaScript names that no captured request reaches as such: an unrequested node,
+      # or a traffic folder (`/api` above `/api/users`) that was never itself requested.
+      def js_only? : Bool
+        @js_refs > 0 && @methods.empty?
       end
 
       # An ID fold from `fold_templates!` (vs a numeric-run fold from `group_sequences!`).
@@ -207,6 +229,51 @@ module Gori
         node.truncated = true if truncated
       end
       node.methods << method unless node.methods.includes?(method)
+    end
+
+    # Attach the endpoints captured JavaScript references (#1243, `Store#js_ref_nodes`) to a
+    # freshly BUILT tree: a reference whose path already has a node adds its count there, and
+    # one whose path does not grows `unrequested` nodes down to it. Runs right after `build` —
+    # before tags, the tag filter and every fold, which then treat these nodes as ordinary
+    # ones — at both call sites (`SitemapView#apply_reload`, the CLI's `collect_sitemap`), so
+    # the two keep the same order.
+    #
+    # Hosts match case-insensitively (a reference's host is `Url.parse`'s lowercased one, a
+    # flow keeps its host as captured). A host the tree does not hold is added only when
+    # `new_host` says so for that reference — `JsRefs.visible_host?` is the rule — so a bundle
+    # full of `www.w3.org` namespaces does not grow a host per namespace.
+    #
+    # Reuses `segments_of`, so a reference lands on exactly the node path a request for it
+    # would, depth cut included. Nothing here adds a METHOD.
+    def self.attach_js_refs!(hosts : Array(Node), refs : Enumerable(Store::JsRefNode),
+                             & : Store::JsRefNode -> Bool) : Nil
+      index = {} of String => Node
+      hosts.each { |h| index[h.label.downcase] ||= h }
+      refs.each do |r|
+        host_node = index[r.host.downcase]?
+        unless host_node
+          next unless yield r
+          host_node = index[r.host.downcase] = Node.new(r.host)
+          host_node.unrequested = true
+          hosts << host_node
+        end
+        segments, truncated = segments_of(r.path)
+        next if segments.empty? # the bare root is never stored (`JsRefs.resolve`)
+        node = host_node
+        acc = ""
+        segments.each do |seg|
+          if existing = node.child?(seg)
+            node = existing
+          else
+            node = node.child(seg)
+            node.unrequested = true
+          end
+          acc = node.path.empty? ? "#{acc}/#{seg}" : node.path
+          node.path = acc
+        end
+        node.truncated = true if truncated
+        node.js_refs += r.flows
+      end
     end
 
     # The path segments one already-normalized path contributes to the tree — the query
