@@ -292,4 +292,22 @@ describe "gori settings env-syntax" do
       Gori::Settings.rewriter_rules.map(&.replacement).should eq(["X-A: $TOKEN $$TOKEN"])
     end
   end
+
+  # A global short-circuit stub is a response sent as authored — no pass ever expands it — so a
+  # `$TOKEN` in its body is literal text the switch must not touch.
+  it "leaves a global short-circuit stub alone on a switch" do
+    with_cli_home do |dir|
+      path = File.join(dir, "settings.json")
+      File.write(path, <<-'JSON')
+        {"env":{"syntax":"bare","vars":[{"key":"TOKEN","value":"t"}]},
+         "rewriter":{"rules":[{"id":1,"enabled":true,"name":"mock","target":"request",
+                               "part":"head","pattern":"GET /x","replacement":"200 OK\n\n$TOKEN",
+                               "op":"short_circuit","match_kind":"literal","host":"","body_file":""}]}}
+        JSON
+      Gori::Settings.load
+      Gori::EnvMigration.migrate_global_rules(from: Gori::Env::Syntax::Bare,
+        to: Gori::Env::Syntax::Namespaced).should be_nil
+      Gori::Settings.rewriter_rules.map(&.replacement).should eq(["200 OK\n\n$TOKEN"])
+    end
+  end
 end

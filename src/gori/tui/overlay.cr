@@ -67,6 +67,9 @@ module Gori::Tui
     ColormarkerColor
     ExtractRule
     RewriterStub
+    # The answer options of a short-circuit rule (#1237) — a sub-editor of the rule form, like
+    # RewriterStub.
+    RewriterRespond
     # The Authorize tab's identities: a LIST card (pick / reorder the baseline / delete) and
     # the per-identity FORM it hands off to. Two members, because the list stays the thing the
     # form returns to — see Runner#open_authorize_identities.

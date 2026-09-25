@@ -32,12 +32,19 @@ module Gori::Tui
     ROW_PART   = 5
     ROW_HOST   = 6
     ROW_FIND   = 7
-    ROW_VALUE  = 8
-    # short_circuit only: the response BODY file. Sits between the response and Save so the
-    # two body sources (inline, in the response buffer; on disk, here) read as one choice.
-    ROW_BODY_FILE =  9
-    ROW_SAVE      = 10
-    ROW_COUNT     = 11
+    # short_circuit only (#1237): WHERE the answer comes from — an inline stub, a body file, a
+    # directory (map local), or a fault instead of a response. Directly above the rows it
+    # decides, so the form reads top-down as the choice and then its parts.
+    ROW_RESPOND = 8
+    ROW_VALUE   = 9
+    # short_circuit only: the response BODY file — or, for a directory source, the directory.
+    # Sits between the response and the options so the body sources read as one choice.
+    ROW_BODY_FILE = 10
+    # short_circuit only: the source's options (prefix, fall-through, hang bound, delay), in
+    # their own sub-editor so the form stays one screen tall (`RewriterRespondOverlay`).
+    ROW_OPTIONS = 11
+    ROW_SAVE    = 12
+    ROW_COUNT   = 13
 
     SCOPES       = %w[project global]
     SCOPE_LABELS = ["this project", "global (every project)"]
@@ -49,6 +56,10 @@ module Gori::Tui
     # the direction (request = client→server, response = server→client). It is its own part
     # rather than a flavour of `body` so that no existing body rule starts touching frames.
     PARTS = %w[head body ws]
+    # The `source:` cycler. The three fault kinds are sources of their own rather than an
+    # option under one "fault" entry: which fault is the whole of what such a rule does.
+    SOURCES       = %w[inline file dir close reset hang]
+    SOURCE_LABELS = ["inline", "body file", "directory", "close", "reset", "hang"]
 
     getter edit_id : Int64?
     # The scope the edited rule was OPENED at, so the commit can tell an edit from a re-home:
@@ -65,11 +76,19 @@ module Gori::Tui
     # the Runner owns the overlay swap and putting this form back afterwards.
     property on_edit_stub : Proc(Nil)?
 
+    # Opens the answer-options sub-editor for the `options:` row — the same seam as
+    # `on_edit_stub` (#1237).
+    property on_edit_options : Proc(Nil)?
+
     @scope_i : Int32
     @target_i : Int32
     @op_i : Int32
     @match_i : Int32
     @part_i : Int32
+    @source_i : Int32
+    # The source's options as last edited; `respond_args` drops the ones the current source
+    # does not read.
+    @options : Store::RespondArgs
     @sel : Int32
     @preview : String = ""
     # Last previewed field set; gates the rescan to real changes (see refresh_preview).
@@ -79,7 +98,8 @@ module Gori::Tui
                    match : String = "literal", part : String = "head", host : String = "",
                    pattern : String = "", replacement : String = "", @edit_id : Int64? = nil,
                    body_file : String = "", scope : String = "project",
-                   @edit_scope : Store::RuleScope? = nil)
+                   @edit_scope : Store::RuleScope? = nil, respond : String = "inline",
+                   respond_args : String = "")
       @fields = {
         name:      TextField.new(name),
         host:      TextField.new(host),
@@ -96,6 +116,10 @@ module Gori::Tui
       @op_i = idx(OPS, op)
       @match_i = idx(MATCHES, match)
       @part_i = idx(PARTS, part)
+      parsed = Store::RespondArgs.parse(respond_args)
+      @options = parsed.is_a?(String) ? Store::RespondArgs.new : parsed
+      source = respond == "fault" ? (@options.fault.try(&.label) || "close") : respond
+      @source_i = idx(SOURCES, source)
       @sel = 0
     end
 
@@ -107,7 +131,8 @@ module Gori::Tui
       new(name: rule.name, target: rule.target.label, op: rule.op.label,
         match: rule.match_kind.label, part: rule.part.label, host: rule.host,
         pattern: rule.pattern, replacement: rule.replacement, edit_id: rule.id,
-        body_file: rule.body_file, scope: rule.scope.label, edit_scope: rule.scope)
+        body_file: rule.body_file, scope: rule.scope.label, edit_scope: rule.scope,
+        respond: rule.respond.label, respond_args: rule.respond_args)
     end
 
     private def idx(list : Array(String), v : String) : Int32
@@ -143,7 +168,8 @@ module Gori::Tui
     # a replacement may legitimately contain them). A short-circuit rule persists its canned
     # response through the same field, so the two paths join here.
     def replacement : String
-      short_circuit_op? ? @stub : @fields[:value].value
+      return @fields[:value].value unless short_circuit_op?
+      respond.fault? ? "" : @stub
     end
 
     # The stub buffer, as the sub-editor last left it.
@@ -156,7 +182,32 @@ module Gori::Tui
     end
 
     def body_file : String
-      short_circuit_op? ? @fields[:body_file].value.strip : ""
+      short_circuit_op? && (respond.file? || respond.dir?) ? @fields[:body_file].value.strip : ""
+    end
+
+    # The short-circuit sub-kind the `source:` row names (#1237).
+    def respond : Store::RespondKind
+      fault_kind ? Store::RespondKind::Fault : (Store::RespondKind.from_label?(SOURCES[@source_i]) || Store::RespondKind::Inline)
+    end
+
+    def fault_kind : Store::FaultKind?
+      Store::FaultKind.from_label?(SOURCES[@source_i])
+    end
+
+    # The options as the sub-editor last left them, before the source filters them.
+    def options : Store::RespondArgs
+      @options
+    end
+
+    def options=(args : Store::RespondArgs) : Nil
+      @options = args
+    end
+
+    # The stored args: only what the current source reads, so switching `source:` never leaves
+    # an ignored setting behind for `respond_error` to refuse.
+    def respond_args : String
+      return "" unless short_circuit_op?
+      @options.for(respond, fault_kind).to_stored
     end
 
     def scope : Store::RuleScope
@@ -201,13 +252,28 @@ module Gori::Tui
     # for a change that changed nothing.
     private def skip_row?(row : Int32) : Bool
       if short_circuit_op?
-        row == ROW_TARGET || row == ROW_PART
+        stub_skips?(row)
       elsif header_op?
-        row == ROW_MATCH || row == ROW_PART || row == ROW_BODY_FILE ||
+        row == ROW_MATCH || row == ROW_PART || row == ROW_BODY_FILE || stub_only_row?(row) ||
           (row == ROW_VALUE && op.remove_header?)
       else
-        row == ROW_BODY_FILE
+        row == ROW_BODY_FILE || stub_only_row?(row)
       end
+    end
+
+    # A stub forces target/part, a fault has no response, and only a file or a directory
+    # source has a path.
+    private def stub_skips?(row : Int32) : Bool
+      case row
+      when ROW_TARGET, ROW_PART then true
+      when ROW_VALUE            then respond.fault?
+      when ROW_BODY_FILE        then !(respond.file? || respond.dir?)
+      else                           false
+      end
+    end
+
+    private def stub_only_row?(row : Int32) : Bool
+      row == ROW_RESPOND || row == ROW_OPTIONS
     end
 
     def on_save_row? : Bool
@@ -219,7 +285,7 @@ module Gori::Tui
     # request with gori's own 502 and still never reach the origin.
     def valid? : Bool
       return false if pattern.empty?
-      return false if short_circuit_op? && !RuleStub.valid?(@stub)
+      return false if short_circuit_op? && !respond_error.nil?
       # A pipe rule's `value:` is the command, so an empty or unparseable one is exactly as
       # unsaveable as an empty pattern: the rule would match live traffic and then do nothing
       # at all, silently, on every message. Same validator the CLI and MCP call
@@ -235,11 +301,21 @@ module Gori::Tui
     # What is missing, for the Save row's label.
     def invalid_reason : String
       return "enter a #{header_op? ? "header name" : "pattern"}" if pattern.empty?
-      return "write a stub response (↵ on response:)" if short_circuit_op? && !RuleStub.valid?(@stub)
+      if short_circuit_op? && (why = respond_error)
+        # The editor says what is wrong with a response as it is typed; the Save row only has to
+        # say where to go.
+        stub = (respond.inline? || respond.file?) && !RuleStub.valid?(@stub)
+        return stub ? "write a stub response (↵ on response:)" : why
+      end
       if pipe_op? && (why = Gori::Rules.pipe_argv_error(op, replacement))
         return replacement.strip.empty? ? "enter a command to pipe through" : "fix the command: #{why}"
       end
       "fix the regex"
+    end
+
+    # The shared validator (#1237) over what this form would save.
+    private def respond_error : String?
+      RuleStub.respond_error(respond, replacement, body_file, respond_args)
     end
 
     # The preview line as last computed — "" until the first key that changes a
@@ -248,7 +324,7 @@ module Gori::Tui
 
     # The fields a match preview depends on — only rescan when this changes.
     private def preview_signature : String
-      "#{@target_i}|#{@op_i}|#{@match_i}|#{@part_i}|#{host}|#{pattern}|#{replacement}|#{body_file}"
+      "#{@target_i}|#{@op_i}|#{@match_i}|#{@part_i}|#{host}|#{pattern}|#{replacement}|#{body_file}|#{@source_i}|#{respond_args}"
     end
 
     # Recompute the preview when the candidate rule's match-relevant fields changed.
@@ -272,7 +348,8 @@ module Gori::Tui
     def candidate_rule : Store::MatchRule
       tgt, prt = Gori::Rules.normalize_shape(op, target, part)
       Store::MatchRule.new(@edit_id || 0_i64, true, tgt, prt,
-        pattern, replacement, op, match_kind, name, host, body_file, scope: scope)
+        pattern, replacement, op, match_kind, name, host, body_file, scope: scope,
+        respond: short_circuit_op? ? respond : Store::RespondKind::Inline, respond_args: respond_args)
     end
 
     def move(d : Int32) : Nil
@@ -295,7 +372,7 @@ module Gori::Tui
     end
 
     private def cycler_row?(row : Int32) : Bool
-      ROW_SCOPE <= row <= ROW_PART
+      ROW_SCOPE <= row <= ROW_PART || row == ROW_RESPOND
     end
 
     private def text_field_for(row : Int32) : TextField?
@@ -310,11 +387,12 @@ module Gori::Tui
 
     def adjust(d : Int32) : Nil
       case @sel
-      when ROW_SCOPE  then @scope_i = (@scope_i + d) % SCOPES.size
-      when ROW_TARGET then @target_i = (@target_i + d) % TARGETS.size
-      when ROW_OP     then @op_i = (@op_i + d) % OPS.size
-      when ROW_MATCH  then @match_i = (@match_i + d) % MATCHES.size
-      when ROW_PART   then @part_i = (@part_i + d) % PARTS.size
+      when ROW_SCOPE   then @scope_i = (@scope_i + d) % SCOPES.size
+      when ROW_TARGET  then @target_i = (@target_i + d) % TARGETS.size
+      when ROW_OP      then @op_i = (@op_i + d) % OPS.size
+      when ROW_MATCH   then @match_i = (@match_i + d) % MATCHES.size
+      when ROW_PART    then @part_i = (@part_i + d) % PARTS.size
+      when ROW_RESPOND then @source_i = (@source_i + d) % SOURCES.size
       end
     end
 
@@ -355,7 +433,8 @@ module Gori::Tui
       if idx = row_at(box, mx, my)
         set_selected(idx)
         return :commit if on_save_row?
-        @on_edit_stub.try(&.call) if idx == ROW_VALUE && short_circuit_op?
+        @on_edit_stub.try(&.call) if idx == ROW_VALUE && short_circuit_op? && !respond.fault?
+        @on_edit_options.try(&.call) if idx == ROW_OPTIONS && short_circuit_op?
       end
       # …then the caret, if the press landed inside a drawn field. The row pick above is
       # what focuses; this is what puts the caret where the operator pointed instead of
@@ -388,13 +467,16 @@ module Gori::Tui
         # Not a text row for this op — the response is multi-line and lives in its own editor.
         @on_edit_stub.try(&.call) if key.enter? || key.space?
         :stay
+      elsif @sel == ROW_OPTIONS
+        @on_edit_options.try(&.call) if key.enter? || key.space?
+        :stay
       else # text row
         field = text_field_for(@sel)
         if key.enter?
-          # ↵ on the LAST text row commits — the value, the body file, or the header name when
-          # the op has no value row (remove header).
-          return :commit if @sel == ROW_VALUE || @sel == ROW_BODY_FILE ||
-                            (@sel == ROW_FIND && skip_row?(ROW_VALUE))
+          # ↵ on the LAST text row commits — the value, or the header name when the op has no
+          # value row (remove header). A stub's body-file row is followed by its options, so ↵
+          # there moves on like every other row before the end.
+          return :commit if @sel == ROW_VALUE || (@sel == ROW_FIND && skip_row?(ROW_VALUE) && !short_circuit_op?)
           move(1)
         elsif field
           field.handle_edit_key(ev)
@@ -456,15 +538,25 @@ module Gori::Tui
       when ROW_HOST   then draw_field(screen, box, py, bg, fg, sel, "host:", @fields[:host])
       when ROW_FIND   then draw_field(screen, box, py, bg, fg, sel, hop ? "header:" : "find:", @fields[:pattern])
       when ROW_VALUE
-        if sc
+        if sc && respond.fault?
+          draw_na(screen, x, py, bg, "response:", "none — a fault answers with no response")
+        elsif sc
           draw_stub_row(screen, x, py, bg, fg, sel)
         elsif op.remove_header?
           draw_na(screen, x, py, bg, "value:", "n/a (nothing to set)")
         else
           draw_field(screen, box, py, bg, fg, sel, value_label, @fields[:value])
         end
+      when ROW_RESPOND
+        Frame.option_cycle(screen, x, py, box.right - 2, bg, "source:", SOURCE_LABELS, @source_i, sel) if sc
       when ROW_BODY_FILE
-        draw_field(screen, box, py, bg, fg, sel, "body file:", @fields[:body_file]) if sc
+        if sc && respond.dir?
+          draw_field(screen, box, py, bg, fg, sel, "dir:", @fields[:body_file])
+        elsif sc && respond.file?
+          draw_field(screen, box, py, bg, fg, sel, "body file:", @fields[:body_file])
+        end
+      when ROW_OPTIONS
+        draw_options_row(screen, x, py, bg, fg, sel) if sc
       else
         ok = valid?
         label = ok ? "[ Save rule ]" : "[ #{invalid_reason} ]"
@@ -478,9 +570,38 @@ module Gori::Tui
     private def draw_stub_row(screen : Screen, x : Int32, py : Int32, bg : Color, fg : Color, sel : Bool) : Nil
       screen.text(x, py, "response:", Theme.muted, bg)
       tx = x + 10
-      text = @stub.blank? ? "(none — ↵ to write one)" : RuleStub.summary(@stub, body_file)
+      text =
+        if respond.dir?
+          # For a directory the buffer is only a head TEMPLATE; the body is the mapped file.
+          @stub.blank? ? "200 OK (default — ↵ to add headers)" : "head: #{RuleStub.summary(@stub, "").split(" · ").first}"
+        elsif @stub.blank?
+          "(none — ↵ to write one)"
+        else
+          RuleStub.summary(@stub, body_file)
+        end
       screen.text(tx, py, text, @stub.blank? ? Theme.muted : fg, bg)
       screen.text(tx + Screen.draw_width(text) + 1, py, "↵", Theme.accent, bg) if sel
+    end
+
+    # The `options:` row is a button like `response:` — ↵ opens the answer-options sub-editor —
+    # and shows what the options amount to for the current source.
+    private def draw_options_row(screen : Screen, x : Int32, py : Int32, bg : Color, fg : Color, sel : Bool) : Nil
+      screen.text(x, py, "options:", Theme.muted, bg)
+      tx = x + 10
+      text = options_summary
+      screen.text(tx, py, text, fg, bg)
+      screen.text(tx + Screen.draw_width(text) + 1, py, "↵", Theme.accent, bg) if sel
+    end
+
+    private def options_summary : String
+      parts = [] of String
+      if respond.dir?
+        parts << (@options.strip_prefix.empty? ? "no prefix" : "strip #{@options.strip_prefix}")
+        parts << (@options.fallthrough? ? "falls through" : "missing → 502")
+      end
+      parts << "≤#{@options.hang_ms}ms" if fault_kind == Store::FaultKind::Hang
+      parts << (@options.delay_ms > 0 ? "delay #{@options.delay_ms}ms" : "no delay")
+      parts.join(" · ")
     end
 
     private def value_label : String

@@ -27,11 +27,11 @@ module Gori
           p.banner = "Usage: gori run cache-deception [<flow-id>…] [options]\n\n" \
                      "For each selected flow, replay it as its captured (AUTHENTICATED) identity to\n" \
                      "prime any cache, re-request the SAME url with NO session, then compare with an\n" \
-                     "anonymous cache-busted control request. Matching control content is public; if\n" \
-                     "the anonymous re-request is served the authenticated response FROM a cache and\n" \
-                     "the control differs, that\n" \
-                     "private response was cached under a key an anonymous client hits — a web cache\n" \
-                     "deception. The crafted paths that trigger it (`;`, `.css`, `%00`, dot-segments)\n" \
+                     "anonymous cache-busted control request. Matching content supports a public\n" \
+                     "verdict only when the control is not itself a cache hit; otherwise the buster\n" \
+                     "may have been ignored. If the anonymous request gets the authenticated response\n" \
+                     "FROM a cache and the control differs, that private response may be cached under\n" \
+                     "a key an anonymous client hits — a web cache deception. The crafted paths that\n" \
                      "are the Fuzzer's `cache-delimiters` payload set; check the promising hits here.\n\n" \
                      "Only safe methods (GET/HEAD/OPTIONS) are checked without --unsafe-methods."
           p.on("--flow=ID", "Check this captured flow (repeatable; same as a positional id)") { |v| flow_ids << parse_flow_id(v, "gori run cache-deception") }
@@ -136,16 +136,17 @@ module Gori
           io << "  authenticated: " << (auth ? cache_deception_trial_text(auth) : "—")
           io << "  ·  anonymous: " << (anon ? cache_deception_trial_text(anon) : "—")
           io << "  ·  cache-busted: " << (control ? cache_deception_trial_text(control) : "—")
-          io << "  ·  cache: " << report.cache.token
+          io << "  ·  anonymous cache: " << report.cache.token
         end
         "[#{report.verdict.label}] #{report.method} #{report.url}\n#{detail}"
       end
 
       private def self.cache_deception_trial_text(trial : Authorize::Trial) : String
+        cache = CacheStatus.classify(trial.response_head).token
         if e = trial.summary.error
-          "error (#{e})"
+          "error (#{e}), cache: #{cache}"
         else
-          "#{trial.summary.status || "—"} #{trial.summary.size || 0}b"
+          "#{trial.summary.status || "—"} #{trial.summary.size || 0}b, cache: #{cache}"
         end
       end
 
@@ -182,6 +183,7 @@ module Gori
             j.field "status", trial.summary.status
             j.field "size", trial.summary.size
             j.field "verdict", trial.verdict.label
+            j.field "cache", CacheStatus.classify(trial.response_head).token
             trial.summary.error.try { |e| j.field "error", e }
           end
         end

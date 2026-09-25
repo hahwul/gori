@@ -1423,6 +1423,10 @@ private class FakeContext < ExecContext
     @calls << :open_response_external
   end
 
+  def mock_response_from_flow : Nil
+    @calls << :mock_response_from_flow
+  end
+
   def comparer_new : Nil
     @calls << :comparer_new
   end

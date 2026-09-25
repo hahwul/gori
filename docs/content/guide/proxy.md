@@ -206,7 +206,7 @@ A gap in the schema is distinguished from a conflict with it: an enum value with
 
 **A row you cannot type into says why.** An `(undeclared)` field number and a wire type the schema contradicts both stay read-only and keep their raw reading, because there is nothing to type them *as*, and offering a typed editor there would be the guess the lens exists to avoid. `^X` is still how you change those octets, and still the way to send something the schema calls impossible. The `␣R:FRAME` toggle governs the 5-byte length prefix in front of an edited message exactly as it does after a hex edit.
 
-**Or ask the target.** A server that answers gRPC **server reflection** already has the descriptors; `gori run grpc reflect https://api.test:443` fetches them and caches them in the project, and MCP's `grpc_reflect` does the same for an agent. In the TUI it is on a captured flow: the space menu's **gRPC: fetch schema (reflection)**, which reflects against that row's own host. `grpc.reflection.v1` is tried first and `v1alpha` second (still what most deployed servers expose); a server that answers neither says so rather than failing quietly. gori asks for the services, then the file declaring each one, then their imports until the graph closes.
+**Or ask the target.** A server that answers gRPC **server reflection** already has the descriptors; `gori run grpc reflect https://api.test:443` fetches them and caches them in the project, and MCP's `grpc_reflect` does the same for an agent. In the TUI it is on a captured flow: the space menu's **gRPC: reflect schema**, which reflects against that row's own host. `grpc.reflection.v1` is tried first and `v1alpha` second (still what most deployed servers expose); a server that answers neither says so rather than failing quietly. gori asks for the services, then the file declaring each one, then their imports until the graph closes.
 
 The result is the same lens: one `Schema`, one `/package.Service/Method` binding, the same renderers and the same field editor. The Proto schema row says where each half came from (`1 file · reflection https://api.test:443 · 41 messages · 12 rpcs`), and a descriptor set the two sources disagree about is counted as `redefined` rather than silently merged, with the target's own word taking precedence.
 
@@ -415,7 +415,7 @@ So `/ status:5xx` → `Shift-T` → `Space` → `D` deletes every error in one c
 | Add host to scope | `Space` `h` | Hosts deduplicated: 12 flows on 2 hosts adds 2 rules |
 | Send to Comparer | `Space` `c` | Exactly 2 marked fills A (older) and B (newer) directly |
 
-Marks survive a filter change, a re-sort, and leaving the tab and coming back; the count chip tells you how many are currently off-screen. Anything that sends traffic still asks first and still honours scope per request; marking changes the request count, never the gate. A few actions stay single-target because they only make sense for one flow (opening the detail, the Sequencer, opening a response in the browser); their menu entries say `(cursor)` while marks are set.
+Marks survive a filter change, a re-sort, and leaving the tab and coming back; the count chip tells you how many are currently off-screen. Anything that sends traffic still asks first and still honours scope per request; marking changes the request count, never the gate. A few actions stay single-target because they only make sense for one flow (opening the detail, the Sequencer, opening a response in the browser, mocking a response); their menu entries say `(cursor)` while marks are set.
 
 ## Copy a request as code {#copy-as-code}
 
@@ -572,6 +572,31 @@ Two consequences worth knowing:
 
 - **Short-circuited flows are marked in History.** They show `STUB` in the `PROTO` column and no duration, because there was no round trip. Filter with `stub:true` to review them, or `stub:false` to read History as traffic that really happened, which is worth doing before you screenshot anything.
 - **Probe skips them.** A passive rule reading a stub is reading your bytes, not the target's, and an active probe would compare a canned baseline against a live origin. Both refuse, so a stub can never manufacture a finding.
+
+### Mocking: a directory, a captured response, a fault {#mocking}
+
+A short-circuit rule's `source:` row picks where its answer comes from. `inline` and `body file` are the stub above. The other four make it a small mocking toolkit:
+
+| Source | Answer |
+|--------|--------|
+| **directory** | The file the request path names, from a local directory (Map Local) |
+| **close** | No response: the connection is closed (FIN) |
+| **reset** | No response: the connection is reset (TCP RST) |
+| **hang** | No response: the connection is held until the client gives up, or until the rule's bound |
+
+`options:` opens the source's settings. Every source takes a **delay**, waited out before the answer (or the fault), so a slow endpoint is one rule too.
+
+**Map Local.** Point `dir:` at a directory and set **strip prefix** to the URL prefix it stands in for: with `/static/`, a request for `/static/js/app.js` is answered from `<dir>/js/app.js` and the query string is ignored. A path ending in `/` serves `index.html`; there are no directory listings. The `response:` row becomes an optional head template (`200 OK` by default), and when it names no `Content-Type` one is looked up from the file's extension. Serve tampered JavaScript to strip a client-side check, or a flipped config JSON on every load.
+
+The request path is the client's bytes naming a local file, so it is confined: it is percent-decoded once, then any `.`/`..` segment, dotfile, backslash or NUL is refused, and the resolved file must sit under the directory's real path, so a symlink cannot lead out of it. A refused path is answered `404` with `X-Gori-Short-Circuit: error` and recorded. A file that is simply **missing** is answered `502` the same way, unless the rule opts into **fall through**: then the request goes on to the origin. That is the one case where a request a rule matched reaches the origin, and it is decided before anything is dialed. A directory that is gone is always `502`.
+
+**Mock this response.** On a History flow, `Space` `M` (also in the flow detail) opens the rule form with a short-circuit rule drafted from the captured response: the flow's host, a regex anchored on its request line (`\AGET /api/me(\?| )`, so `/api/mes` is not claimed), and the response as an inline stub. The body is decoded (gzip, chunked) so you can edit it; its `Content-Encoding` goes with it. Nothing is saved until you save the form. It is a copy, not a reference, so deleting the flow later changes nothing. A flow whose captured body was truncated, one with no complete response, one gori answered itself, and a binary body are refused with the reason; for a binary body, save it to a file and use a body file.
+
+**Faults.** `close` drains the request body and closes without a byte; `reset` closes with `SO_LINGER 0`, so the client sees a TCP reset (inside a TLS tunnel, with no `close_notify` in front of it); `hang` holds the connection until the client gives up or `hang ms` passes (30 s by default). Use them on login and payment steps to see what a client does with a dead backend. The flow is recorded `Aborted` with the fault and the rule that injected it. A delay or a hang is capped at 120 s, and at most 256 connections are held at once; past that, a hang closes at once and a delay is skipped, and the flow says so.
+
+**Which rule answered** is recorded on the flow: the detail reads `answered by gori — project rule #4 · dir js/app.js`, `gori run history` prints it beside `[stub`, and MCP returns it as `source_ref`. It stays after the rule is edited or deleted.
+
+What it does not do: a `text/event-stream` body is sent once and the client reconnects, as it would after any stream ends; gRPC cannot be mocked, because it needs HTTP/2 (below); and a `101` answer is refused.
 
 **A short-circuit rule forces matching hosts to HTTP/1.1**, the way a body rule does: the h2 relay has no way to answer a request locally, so a stub rule left on an h2 connection would silently let the request through to the origin, the one thing it exists to prevent. `gori.log` records that once per host, naming the host and the reason. An h2-only client (gRPC) will not connect while a stub rule is enabled.
 

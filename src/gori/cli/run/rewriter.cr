@@ -443,7 +443,7 @@ module Gori
         return r.inert_reason || "unknown rule" if r.inert?
         case r.op
         when .remove_header? then r.pattern
-        when .short_circuit? then "#{r.pattern} => #{RuleStub.summary(r.replacement, r.body_file)}"
+        when .short_circuit? then "#{r.pattern} => #{RuleStub.summary(r)}"
           # `<>` rather than `->`: the text on the right is the COMMAND, not the bytes it puts
           # on the wire. Same distinction `Rules.describe` draws with `⇄` in the TUI.
         when .pipe? then "#{r.pattern} <> #{r.replacement}"
@@ -524,6 +524,7 @@ module Gori
           j.field "pattern", r.pattern
           j.field "replacement", r.replacement
           j.field "body_file", r.body_file
+          RuleStub.respond_json_fields(j, r)
         end
       end
 
@@ -558,6 +559,104 @@ module Gori
           noun: "canned response", flag: "--response-file=-")
       end
 
+      # The #1237 flags: where a short-circuit rule's answer comes from. A class so the option
+      # parser's blocks can fill it; read by `mock_respond` and `apply_flow_draft`, which keep
+      # `cmd_rewriter_add` itself under the complexity bar the lint gate holds.
+      private class MockFlags
+        property map_dir : String? = nil
+        property strip_prefix : String = ""
+        property? fallthrough : Bool = false
+        property fault : String? = nil
+        property delay_ms : Int32 = 0
+        property hang_ms : Int32? = nil
+        property from_flow : Int64? = nil
+
+        def given? : Bool
+          !@map_dir.nil? || !@strip_prefix.empty? || @fallthrough || !@fault.nil? ||
+            @delay_ms != 0 || !@hang_ms.nil? || !@from_flow.nil?
+        end
+      end
+
+      private def self.parse_wait_ms(v : String, flag : String) : Int32
+        n = v.to_i?
+        max = Store::RespondArgs::MAX_WAIT_MS
+        abort "gori run rewriter add: invalid #{flag} '#{v}' (milliseconds, 0-#{max})" unless n && 0 <= n <= max
+        n
+      end
+
+      # {respond, respond_args} for the flags, refusing a combination that names two answers.
+      private def self.mock_respond(op : Store::RuleOp, mock : MockFlags,
+                                    body_file : String) : {Store::RespondKind, String}
+        unless op.short_circuit?
+          abort "gori run rewriter add: --map-dir, --fault, --delay and --from-flow need --op=short_circuit" if mock.given?
+          return {Store::RespondKind::Inline, ""}
+        end
+        abort "gori run rewriter add: --map-dir and --fault are two different answers — pick one" if mock.map_dir && mock.fault
+        if mock.map_dir && !body_file.empty?
+          abort "gori run rewriter add: --map-dir serves a directory; --body-file is for a single-file stub"
+        end
+        fault = mock.fault.try do |f|
+          Store::FaultKind.from_label?(f.downcase) || abort("gori run rewriter add: invalid --fault '#{f}' (close|reset|hang)")
+        end
+        respond =
+          if mock.map_dir
+            Store::RespondKind::Dir
+          elsif fault
+            Store::RespondKind::Fault
+          else
+            Store::RespondKind.implied(body_file)
+          end
+        args = Store::RespondArgs.new(mock.strip_prefix, mock.fallthrough?, fault, mock.delay_ms,
+          mock.hang_ms || Store::RespondArgs::DEFAULT_HANG_MS)
+        {respond, args.to_stored}
+      end
+
+      # `--from-flow`: the flow's snapshot fills whatever the flags left unsaid — the match, the
+      # host, the response — so `--find`/`--host`/`--value` still override it (P4). Returns
+      # {find, match, host, value}.
+      private def self.apply_flow_draft(store : Store, flow_id : Int64, find : String?,
+                                        match : Store::MatchKind, host : String?,
+                                        value : String?) : {String, Store::MatchKind, String, String}
+        detail = store.get_flow(flow_id) || abort_closing(store, "gori run rewriter add: no flow ##{flow_id} in this project")
+        draft = MockFromFlow.draft(detail)
+        if draft.is_a?(MockFromFlow::Refusal)
+          abort_closing(store, "gori run rewriter add: cannot mock flow ##{flow_id}: #{draft.message}")
+        end
+        {find || draft.pattern, find ? match : Store::MatchKind::Regex, host || draft.host, value || draft.replacement}
+      end
+
+      # The `--find` a rule is created with. A map-dir rule without one claims its prefix on the
+      # REQUEST LINE, anchored — a bare substring would also match a Referer carrying it; a
+      # `--from-flow` rule may leave it to the flow's draft (`add_fill`).
+      private def self.add_find(op : Store::RuleOp, respond : Store::RespondKind, mock : MockFlags,
+                                find : String?, match : Store::MatchKind) : {String?, Store::MatchKind}
+        if find.nil? && respond.dir? && !mock.strip_prefix.empty?
+          return {"\\A\\S+ #{Regex.escape(mock.strip_prefix)}", Store::MatchKind::Regex}
+        end
+        if find.try(&.empty?) || (find.nil? && mock.from_flow.nil?)
+          abort "gori run rewriter add: --find is required"
+        end
+        if find && match.regex? && !op.header? && !valid_regex?(find)
+          abort "gori run rewriter add: invalid regex --find (failed to compile)"
+        end
+        {find, match}
+      end
+
+      # Everything that needs the open store: the `--from-flow` draft, then the one validator
+      # every surface shares (`RuleStub.respond_error`). Returns {find, match, host, value}.
+      private def self.add_fill(store : Store, op : Store::RuleOp, mock : MockFlags,
+                                respond : Store::RespondKind, respond_args : String, body_file : String,
+                                find : String?, match : Store::MatchKind, host : String?,
+                                value : String?) : {String, Store::MatchKind, String, String}
+        if flow_id = mock.from_flow
+          find, match, host, value = apply_flow_draft(store, flow_id, find, match, host, value)
+        end
+        if op.short_circuit? && (err = RuleStub.respond_error(respond, value || "", body_file, respond_args))
+          abort_closing(store, "gori run rewriter add: #{err}")
+        end
+        {find || abort_closing(store, "gori run rewriter add: --find is required"), match, host || "", value || ""}
+      end
+
       private def self.cmd_rewriter_add(args : Array(String)) : Nil
         db_path : String? = nil
         project_name : String? = nil
@@ -565,15 +664,16 @@ module Gori
         part_s = "head"
         op_s = "replace"
         match_s = "literal"
-        host = ""
+        host : String? = nil
         name = ""
         find : String? = nil
-        value = ""
+        value : String? = nil
         disabled = false
         body_file = ""
         response_file : String? = nil
         scope = Store::RuleScope::Project
         format = :text
+        mock = MockFlags.new
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run rewriter add [options]\n\n" \
@@ -585,7 +685,10 @@ module Gori
                      "For pipe: --find selects the region and --value is a COMMAND, run with\n" \
                      "no shell, fed the matched bytes on stdin; its stdout replaces them. It\n" \
                      "runs with YOUR privileges. On timeout, non-zero exit or a failed spawn\n" \
-                     "the bytes pass through unchanged and a notice is written."
+                     "the bytes pass through unchanged and a notice is written.\n\n" \
+                     "Mocking (short_circuit): --map-dir serves files from a directory by path,\n" \
+                     "--fault answers with a close/reset/hang instead of a response, --delay\n" \
+                     "waits first, and --from-flow copies a captured response into the rule."
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("--target=SIDE", "request|response (default request)") { |v| target_s = v }
@@ -599,6 +702,13 @@ module Gori
           p.on("-vVALUE", "--value=VALUE", "Replacement, header value, canned response, or (--op=pipe) the COMMAND (default empty)") { |v| value = v }
           p.on("--response-file=PATH", "short_circuit: read the canned response from PATH ('-' = stdin, which needs a pipe or a redirect — a terminal is refused)") { |v| response_file = v }
           p.on("--body-file=PATH", "short_circuit: serve PATH as the response BODY (re-read when it changes)") { |v| body_file = v }
+          p.on("--map-dir=DIR", "short_circuit: serve the file the request path names from DIR (--value is an optional head template)") { |v| mock.map_dir = v }
+          p.on("--strip-prefix=PATH", "--map-dir: the URL prefix to strip before the path is joined under DIR (e.g. /static/)") { |v| mock.strip_prefix = v }
+          p.on("--fallthrough", "--map-dir: let a request whose file is MISSING reach the origin (off: gori answers 502)") { mock.fallthrough = true }
+          p.on("--fault=KIND", "short_circuit: answer with no response — close | reset | hang") { |v| mock.fault = v }
+          p.on("--delay=MS", "short_circuit: wait MS milliseconds before answering (max #{Store::RespondArgs::MAX_WAIT_MS})") { |v| mock.delay_ms = parse_wait_ms(v, "--delay") }
+          p.on("--hang=MS", "--fault=hang: how long to hold before closing (default #{Store::RespondArgs::DEFAULT_HANG_MS})") { |v| mock.hang_ms = parse_wait_ms(v, "--hang") }
+          p.on("--from-flow=ID", "short_circuit: copy flow ID's captured response into the rule (--find/--host/--value override)") { |v| mock.from_flow = parse_flow_id(v, "gori run rewriter add") }
           p.on("--disabled", "Create the rule disabled") { disabled = true }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
@@ -609,14 +719,15 @@ module Gori
           "pass the match as --find FIND and the replacement as --value VALUE — quote them, a value " \
           "with spaces is one argument")
 
-        abort "gori run rewriter add: --find is required" if (f = find).nil? || f.empty?
         op = parse_rewriter_op(op_s)
         target = Store::RuleTarget.parse?(target_s) || abort("gori run rewriter add: invalid --target '#{target_s}'")
         part = Store::RulePart.parse?(part_s) || abort("gori run rewriter add: invalid --part '#{part_s}'")
         match = Store::MatchKind.parse?(match_s) || abort("gori run rewriter add: invalid --match '#{match_s}' (literal|regex)")
-        if match.regex? && !op.header? && !valid_regex?(f)
-          abort "gori run rewriter add: invalid regex --find (failed to compile)"
-        end
+        respond, respond_args = mock_respond(op, mock, body_file)
+        body_file = mock.map_dir || body_file
+        find_arg, match = add_find(op, respond, mock, find, match)
+        value_arg = value
+        host_arg = host
         # ABOVE the read: `check_short_circuit_args` is where `--response-file` is drained, and
         # both of these are knowable from argv alone. `--op=short_circuit --part=ws
         # --response-file=-` used to consume the whole generator — or, at a terminal, earn the
@@ -624,8 +735,8 @@ module Gori
         # the operator fixed the pipe and only then learned the flags were wrong. Same
         # ordering, and same reason, as `repeater create` and `issues create` (#1034).
         check_ws_part(op, part, "add")
-        check_pipe_value(op, value, "add")
-        value = check_short_circuit_args(op, value, response_file, body_file)
+        check_pipe_value(op, value_arg || "", "add")
+        value_arg = check_short_circuit_args(op, value_arg, response_file, body_file)
         target, part = Gori::Rules.normalize_shape(op, target, part)
 
         # A global rule needs no project at all — it lives in settings.json — but one is
@@ -641,8 +752,10 @@ module Gori
         project = resolve_read_project(project_name, db_path)
         store = open_store(project)
         begin
-          id = Gori::Rules.load(store).create(target, part, f, value, op, match, name, host,
-            body_file, scope: scope, enabled: !disabled)
+          f, match, rule_host, rule_value = add_fill(store, op, mock, respond, respond_args, body_file,
+            find_arg, match, host_arg, value_arg)
+          id = Gori::Rules.load(store).create(target, part, f, rule_value, op, match, name, rule_host,
+            body_file, scope: scope, enabled: !disabled, respond: respond, respond_args: respond_args)
           if id == 0
             abort "gori run rewriter add: failed to persist rule " \
                   "(#{scope.global? ? "settings not writable" : "store busy or unwritable"})"
@@ -675,19 +788,18 @@ module Gori
       # and never reach the origin, so it is refused here rather than discovered from live
       # traffic; --body-file on any other op is refused too, since storing an ignored path
       # would leave the operator believing a body source is configured.
-      private def self.check_short_circuit_args(op : Store::RuleOp, value : String,
-                                                response_file : String?, body_file : String) : String
+      #
+      # Returns nil when no response was given at all, so `--from-flow` can still fill it; the
+      # whole shape is then judged by `RuleStub.respond_error`, the validator every surface
+      # shares (#1237), once the flow's draft is in.
+      private def self.check_short_circuit_args(op : Store::RuleOp, value : String?,
+                                                response_file : String?, body_file : String) : String?
         unless op.short_circuit?
           abort "gori run rewriter add: --response-file is only meaningful with --op=short_circuit" if response_file
           abort "gori run rewriter add: --body-file is only meaningful with --op=short_circuit" unless body_file.empty?
           return value
         end
-        value = read_stub_response(response_file) if response_file
-        unless RuleStub.valid?(value)
-          abort "gori run rewriter add: the canned response is not parseable " \
-                "(expected a status line such as '200 OK', then headers, then a blank line and the body)"
-        end
-        value
+        response_file ? read_stub_response(response_file) : value
       end
 
       # Only `replace` acts on a WebSocket message: a header op names a header and a WS

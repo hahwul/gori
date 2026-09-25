@@ -10,9 +10,11 @@ module Gori
   #
   # The test: replay a captured request as its captured (AUTHENTICATED) identity to PRIME any
   # cache, re-request the SAME url anonymously, then use an anonymous cache-busted query as a
-  # control. Matching control content is public; matching anonymous content with a cache hit and
-  # different control content is a deception candidate. The delimiter tricks that make a cache
-  # key an origin ignores (`;`, `.css`, `%00`, …) are the Fuzzer's `cache-delimiters` payload set.
+  # control. Matching control content supports a public verdict only when the control itself has
+  # no cache-hit signal; a control HIT may mean the cache ignored the query. Matching anonymous
+  # content with a cache hit and different control content is a deception candidate. The
+  # delimiter tricks that make a cache key an origin ignores (`;`, `.css`, `%00`, …) are the
+  # Fuzzer's `cache-delimiters` payload set.
   #
   # This is EXACTLY the shape `Authorize::Engine` already runs — baseline-first (so the
   # authenticated send primes before the anonymous one, ordered not raced), each on its own
@@ -36,10 +38,10 @@ module Gori
       # body was actually private before writing it up.
       Cached
       # The anonymous re-request got matching content but had no cache-hit evidence, or its
-      # cache-busted control matched too. It is not confirmed cache deception.
+      # cache-busted control matched without cache-hit evidence. It is not confirmed deception.
       Served
-      # The anonymous re-request got a SIMILAR-but-not-identical response (same status, divergent
-      # body, or an ambiguous redirect). Authorize's `Review` — the operator judges.
+      # The anonymous re-request got a SIMILAR-but-not-identical response, or a cache hit on the
+      # control left public content unproven. Authorize's `Review` — the operator judges.
       Review
       # The anonymous re-request did NOT get the authenticated response (different status class,
       # unrelated content, or a denial). No private content was served anonymously.
@@ -209,8 +211,8 @@ module Gori
       case anon.verdict
       when .same?
         # Without a cache hit there is no cache-deception signal. With a hit, compare a unique
-        # anonymous URL: if it gets the same content the endpoint is public; if not, the original
-        # URL may have served authenticated content from a shared cache.
+        # anonymous URL: matching content supports a public verdict only if the control has no
+        # cache-hit evidence of its own.
         return Verdict::Served unless cache.hit?
         return Verdict::Review unless control
         verdict_for_control(authed, control)
@@ -223,7 +225,10 @@ module Gori
 
     private def self.verdict_for_control(authed : Authorize::Trial, control : Authorize::Trial) : Verdict
       case Authorize::Judge.verdict(authed.summary, control.summary)
-      when .same?      then Verdict::Served
+      when .same?
+        # A matching control can prove public content only if the buster got past the cache. If
+        # it is a hit too, the query may not be part of the cache key, so leave the result open.
+        CacheStatus.classify(control.response_head).hit? ? Verdict::Review : Verdict::Served
       when .different? then Verdict::Cached
       when .review?    then Verdict::Review
       else                  Verdict::Errored

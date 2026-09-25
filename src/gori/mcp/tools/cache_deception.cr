@@ -92,6 +92,7 @@ module Gori
             j.field "status", trial.summary.status
             j.field "size", trial.summary.size # decoded body size
             j.field "verdict", trial.verdict.label
+            j.field "cache", CacheStatus.classify(trial.response_head).token
             trial.summary.error.try { |e| j.field "error", Serialize.text(e) }
           end
         end
@@ -107,11 +108,12 @@ module Gori
           "cache deception. Confirm the body carried private data before reporting it; the Fuzzer's " \
           "`cache-delimiters` payload set finds the crafted paths that trigger it."
         in .served?
-          "the anonymous re-request got matching content, but either no cache-hit evidence was " \
-          "present or the cache-busted control matched too, indicating public content. Not confirmed " \
-          "deception."
+          "the anonymous re-request got matching content, but either it had no cache-hit evidence " \
+          "or the cache-busted control matched without a cache-hit signal. A private cached response " \
+          "was not confirmed; inspect the trials before ruling out hidden cache behavior."
         in .review?
-          "the anonymous response was similar but not identical to the authenticated one — judge it."
+          "the anonymous response was similar but not identical, or the matching cache-busted control " \
+          "was itself a cache hit and may not have bypassed the cache — judge it."
         in .protected?
           "the anonymous re-request did NOT get the authenticated response, so no private content " \
           "was served without a session."
@@ -131,8 +133,10 @@ module Gori
           "the SAME url with NO session, and compare. If the anonymous re-request is served the " \
           "authenticated response FROM a cache (`verdict:cached`, `deception:true`), that private " \
           "response was cached under a key an anonymous client hits; an anonymous cache-busted " \
-          "query request checks whether matching content is public. Reads `cache` from the response " \
-          "headers (same as get_flow's `cache` / QL `cache:`). To find the CRAFTED paths that trigger " \
+          "query request checks whether matching content is public. If that control is itself a cache " \
+          "hit, matching content is inconclusive (`verdict:review`), because the query may be ignored. " \
+          "Each trial includes its `cache` signal; the top-level `cache` is the anonymous response. Reads " \
+          "the same cache classifier as get_flow's `cache` / QL `cache:`. To find the CRAFTED paths that trigger " \
           "it (`;`, `.css`, `%00`, dot-segments), fuzz the path with the `cache-delimiters` payload " \
           "set, then check the promising hits here. ACTIVE: sends up to 3 real requests (safe methods only " \
           "unless unsafe_methods:true). Only GET/HEAD/OPTIONS are checked by default." do |s|

@@ -22,6 +22,13 @@ private def cached_report : CD::Report
   CD.classify(AZ::Target.new(7_i64, "GET", "https://acme.test/account", [authed, anon]), control)
 end
 
+private def control_cache_hit_review_report : CD::Report
+  authed = cd_trial("as-captured", true, 200, AZ::Verdict::Baseline)
+  anon = cd_trial("anonymous", false, 200, AZ::Verdict::Same, ["X-Cache: HIT"])
+  control = cd_trial("anonymous-cache-busted", false, 200, AZ::Verdict::Same, ["X-Cache: HIT"])
+  CD.classify(AZ::Target.new(8_i64, "GET", "https://acme.test/account", [authed, anon]), control)
+end
+
 describe "gori run cache-deception — output" do
   it "renders the text report with the verdict, three trials and the cache signal" do
     text = Gori::CLI::Run.cache_deception_text_for_spec(cached_report)
@@ -31,6 +38,8 @@ describe "gori run cache-deception — output" do
     text.should contain("anonymous:")
     text.should contain("cache-busted:")
     text.should contain("cache: hit")
+    text.should contain("anonymous cache: hit")
+    text.should contain("cache: none")
   end
 
   it "renders the json report a script can read" do
@@ -41,6 +50,20 @@ describe "gori run cache-deception — output" do
     json["cache"].as_s.should eq("hit")
     json["anonymous"]["verdict"].as_s.should eq("same")
     json["authenticated"]["status"].as_i.should eq(200)
+    json["cache_busted"]["cache"].as_s.should eq("none")
+  end
+
+  it "reports the query-busted control cache hit alongside an inconclusive verdict" do
+    report = control_cache_hit_review_report
+    text = Gori::CLI::Run.cache_deception_text_for_spec(report)
+    text.should contain("[review]")
+    text.should contain("cache-busted: 200 40b, cache: hit")
+
+    json = JSON.parse(Gori::CLI::Run.cache_deception_json_for_spec(report))
+    json["verdict"].as_s.should eq("review")
+    json["deception"].as_bool.should be_false
+    json["anonymous"]["cache"].as_s.should eq("hit")
+    json["cache_busted"]["cache"].as_s.should eq("hit")
   end
 
   it "fails a run that checked no flows and uses Outbound's scope remedy" do

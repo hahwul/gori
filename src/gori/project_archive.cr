@@ -512,7 +512,7 @@ module Gori
             "flows_fts"          => %w[req resp],
             "settings"           => %w[key value],
             "scope_rules"        => %w[id kind match_type pattern],
-            "match_rules"        => %w[id enabled target part pattern replacement position op match_kind name host body_file],
+            "match_rules"        => %w[id enabled target part pattern replacement position op match_kind name host body_file respond respond_args],
             "probe_custom_rules" => %w[id title description side region kind pattern severity enabled],
             "host_overrides"     => %w[id host ip],
             "oast_providers"     => %w[id created_at updated_at name kind host token enabled position],

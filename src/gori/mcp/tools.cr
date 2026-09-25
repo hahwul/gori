@@ -654,6 +654,8 @@ module Gori
       RULE_PARTS     = Store::RulePart.values.map(&.label)
       RULE_OPS       = Store::RuleOp.values.map(&.label)
       RULE_MATCHES   = Store::MatchKind.values.map(&.label)
+      RESPOND_KINDS  = Store::RespondKind.values.map(&.label)
+      FAULT_KINDS    = Store::FaultKind.values.map(&.label)
       SEVERITIES     = Store::Severity.values.map(&.label)
       ISSUE_STATUSES = Store::Status.values.map(&.label)
       LINK_OWNERS    = Store::LinkOwnerKind.values.map(&.label)

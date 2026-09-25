@@ -646,7 +646,7 @@ Flows that cannot be replayed meaningfully are listed on STDERR before anything 
 
 ### run cache-deception
 
-Check each selected flow for **web cache deception**: replay it as its captured (authenticated) identity to prime any cache, re-request the *same* url with no session, then make an anonymous request with a unique cache-busting query parameter as a control. Matching control content means the endpoint is public (`served`); matching anonymous content with a cache hit and different control content is a likely deception (`cached`). The check sends up to three requests per flow. Borrows the Authorize engine; the crafted paths that trigger it (`;`, `.css`, `%00`, dot-segments) are the Fuzzer's `cache-delimiters` payload set.
+Check each selected flow for **web cache deception**: replay it as its captured (authenticated) identity to prime any cache, re-request the *same* url with no session, then make an anonymous request with a unique cache-busting query parameter as a control. Matching control content supports a public verdict (`served`) only when the control itself has no cache-hit signal. If the control is also a cache hit, the cache may have ignored the query and the verdict is `review`; matching anonymous content with a cache hit and different control content is a likely deception (`cached`). The check sends up to three requests per flow. Borrows the Authorize engine; the crafted paths that trigger it (`;`, `.css`, `%00`, dot-segments) are the Fuzzer's `cache-delimiters` payload set.
 
 ```bash
 gori run cache-deception 12
@@ -662,7 +662,7 @@ gori run cache-deception --flow 12 --flow 13 --format json
 | `--project`, `--db` | Project to read |
 | `--format` | `text` (default), `json` (one array at the end), or `jsonl` (streamed) |
 
-Each flow reports one verdict: `cached` (the deception — anonymous served the authenticated response from a cache and the cache-busted control differed), `served` (no cache-hit evidence or matching public control), `review` (similar but not identical or no decisive control), `protected` (anonymous got a different response), `blocked` (gori refused the send), or `errored`. Only safe methods (`GET`/`HEAD`/`OPTIONS`) are checked without `--unsafe-methods`.
+Each flow reports one verdict: `cached` (the deception — anonymous served the authenticated response from a cache and the cache-busted control differed), `served` (no cache-hit evidence or a matching control without cache-hit evidence), `review` (similar but not identical, no decisive control, or a matching control that was itself a cache hit), `protected` (anonymous got a different response), `blocked` (gori refused the send), or `errored`. Each trial includes its own cache signal; the top-level `cache` is the anonymous response. Only safe methods (`GET`/`HEAD`/`OPTIONS`) are checked without `--unsafe-methods`.
 
 ### run session
 
@@ -1184,6 +1184,10 @@ gori run rewriter add --op replace --target response --part body \
 gori run rewriter add --op remove_header --target response \
   --find Content-Security-Policy --scope global          # applies in EVERY project
 gori run rewriter preview --op replace --part body --find password --value hunter2
+gori run rewriter add --op short_circuit --map-dir ./tampered \
+  --strip-prefix /static/ --fallthrough                 # missing files reach the origin
+gori run rewriter add --op short_circuit --find /api/pay --fault reset
+gori run rewriter add --op short_circuit --from-flow 42  # a captured response as the stub
 gori run rewriter disable 3
 gori run rewriter disable 2 --scope global               # off in THIS project only
 gori run rewriter disable 2 --scope global --everywhere  # off by default, everywhere
@@ -1198,7 +1202,14 @@ gori run rewriter rm 3
 | `--match=MODE` | `literal` (default) or `regex`, for `replace`, `pipe` and `short_circuit`. Regex replacements take `$1`, `$2`; `$$` is a literal `$` |
 | `--response-file=PATH` | `short_circuit`: read the canned response from PATH (`-` = stdin — a pipe or a redirect; a terminal is refused) |
 | `--body-file=PATH` | `short_circuit`: serve PATH as the response body, re-read whenever it changes |
-| `-f`, `--find=FIND` | Required. The literal, pattern, or header name to act on |
+| `--map-dir=DIR` | `short_circuit`: serve the file the request path names from DIR (Map Local). `--value` becomes an optional head template |
+| `--strip-prefix=PATH` | With `--map-dir`: the URL prefix removed before the path is joined under DIR (`/static/`). Without `--find`, the rule matches this prefix on the request line |
+| `--fallthrough` | With `--map-dir`: a request whose file is missing goes to the origin instead of a `502` |
+| `--fault=KIND` | `short_circuit`: answer with no response: `close`, `reset` or `hang` |
+| `--hang=MS` | With `--fault=hang`: how long to hold before closing (default 30000) |
+| `--delay=MS` | `short_circuit`: wait before answering (max 120000) |
+| `--from-flow=ID` | `short_circuit`: copy flow ID's captured response into the rule. `--find`, `--host` and `--value` override what it drafts |
+| `-f`, `--find=FIND` | Required, except with `--from-flow` or `--map-dir --strip-prefix`. The literal, pattern, or header name to act on |
 | `-v`, `--value=VALUE` | Replacement text, header value, or (with `--op=pipe`) the COMMAND to run. See [Process hooks](/guide/scripting/#process-hooks) |
 | `--host=GLOB` | Limit the rule to a host and its subdomains (`example.com` also matches `api.example.com`, but not `xexample.com`); `*` is the explicit wildcard. Omit to apply everywhere |
 | `--name=NAME` | Label shown in the rule list |

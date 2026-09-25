@@ -634,7 +634,7 @@ gori run authorize --query 'host:acme.test method:GET' --identities identities.j
 
 ### run cache-deception {#run-cache-deception}
 
-선택한 각 플로우를 **웹 캐시 디셉션**으로 검사합니다: 캡처된(인증된) 아이덴티티로 재전송해 캐시를 채우고, 세션 없이 *같은* url을 다시 요청한 뒤 고유한 캐시 무효화 쿼리 매개변수를 붙여 익명 제어 요청을 보냅니다. 제어 응답도 일치하면 공개 콘텐츠(`served`)이고, 익명 응답이 캐시 히트를 보이며 제어 응답은 다르면 디셉션 가능성(`cached`)이 있습니다. 플로우 하나당 최대 세 번 요청합니다. Authorize 엔진을 차용하며, 이를 유발하는 조작된 경로(`;`, `.css`, `%00`, dot-segment)는 Fuzzer의 `cache-delimiters` 페이로드 세트입니다.
+선택한 각 플로우를 **웹 캐시 디셉션**으로 검사합니다: 캡처된(인증된) 아이덴티티로 재전송해 캐시를 채우고, 세션 없이 *같은* url을 다시 요청한 뒤 고유한 캐시 무효화 쿼리 매개변수를 붙여 익명 제어 요청을 보냅니다. 제어 응답이 일치하고 캐시 히트 신호가 없을 때 공개 콘텐츠(`served`)로 봅니다. 제어 응답도 캐시 히트라면 쿼리가 무시됐을 수 있으므로 판정은 `review`이며, 익명 응답이 캐시 히트를 보이고 제어 응답은 다르면 디셉션 가능성(`cached`)이 있습니다. 플로우 하나당 최대 세 번 요청합니다. Authorize 엔진을 차용하며, 이를 유발하는 조작된 경로(`;`, `.css`, `%00`, dot-segment)는 Fuzzer의 `cache-delimiters` 페이로드 세트입니다.
 
 ```bash
 gori run cache-deception 12
@@ -650,7 +650,7 @@ gori run cache-deception --flow 12 --flow 13 --format json
 | `--project`, `--db` | 읽을 프로젝트 |
 | `--format` | `text`(기본), `json`(끝에 배열 하나), `jsonl`(스트리밍) |
 
-플로우마다 판정 하나를 보고합니다: `cached`(디셉션 — 익명이 인증된 응답을 캐시에서 받았고 캐시 무효화 제어 응답은 다름), `served`(캐시 히트 증거가 없거나 공개 제어 응답과 일치), `review`(비슷하지만 동일하지 않거나 제어 결과가 불분명), `protected`(익명이 다른 응답을 받음), `blocked`(gori가 전송 거부), `errored`. `--unsafe-methods` 없이는 안전한 메서드(`GET`/`HEAD`/`OPTIONS`)만 검사합니다.
+플로우마다 판정 하나를 보고합니다: `cached`(디셉션 — 익명이 인증된 응답을 캐시에서 받았고 캐시 무효화 제어 응답은 다름), `served`(캐시 히트 증거가 없거나 캐시 히트가 없는 제어 응답과 일치), `review`(비슷하지만 동일하지 않거나 제어 결과가 불분명하거나, 일치한 제어 응답도 캐시 히트임), `protected`(익명이 다른 응답을 받음), `blocked`(gori가 전송 거부), `errored`. 각 시도의 `cache`는 해당 응답의 캐시 상태이며 최상위 `cache`는 익명 응답 상태입니다. `--unsafe-methods` 없이는 안전한 메서드(`GET`/`HEAD`/`OPTIONS`)만 검사합니다.
 
 ### run session {#run-session}
 
@@ -1172,6 +1172,10 @@ gori run rewriter add --op replace --target response --part body \
 gori run rewriter add --op remove_header --target response \
   --find Content-Security-Policy --scope global          # 모든 프로젝트에 적용
 gori run rewriter preview --op replace --part body --find password --value hunter2
+gori run rewriter add --op short_circuit --map-dir ./tampered \
+  --strip-prefix /static/ --fallthrough                 # 없는 파일만 원본으로
+gori run rewriter add --op short_circuit --find /api/pay --fault reset
+gori run rewriter add --op short_circuit --from-flow 42  # 캡처된 응답을 스텁으로
 gori run rewriter disable 3
 gori run rewriter disable 2 --scope global               # 이 프로젝트에서만 끄기
 gori run rewriter disable 2 --scope global --everywhere  # 기본값을 꺼서 모든 곳에 적용
@@ -1186,7 +1190,14 @@ gori run rewriter rm 3
 | `--match=MODE` | `literal`(기본값) 또는 `regex`. `replace`, `pipe`, `short_circuit`에 적용됩니다. 정규식 치환은 `$1`, `$2`를 쓰고 `$$`는 리터럴 `$` |
 | `--response-file=PATH` | `short_circuit`: 미리 준비한 응답을 PATH에서 읽음(`-`는 stdin — 파이프나 리다이렉트가 필요하며 터미널은 거부됨) |
 | `--body-file=PATH` | `short_circuit`: PATH를 응답 본문으로 제공하며, 파일이 바뀌면 다시 읽음 |
-| `-f`, `--find=FIND` | 필수. 대상이 되는 리터럴, 패턴, 또는 헤더 이름 |
+| `--map-dir=DIR` | `short_circuit`: 요청 경로가 가리키는 파일을 DIR에서 제공(Map Local). `--value`는 선택 사항인 헤드 템플릿이 됨 |
+| `--strip-prefix=PATH` | `--map-dir`와 함께: 경로를 DIR 아래에 붙이기 전에 떼어 낼 URL 접두사(`/static/`). `--find`가 없으면 요청 줄에서 이 접두사로 매칭 |
+| `--fallthrough` | `--map-dir`와 함께: 파일이 없는 요청을 `502` 대신 원본으로 넘김 |
+| `--fault=KIND` | `short_circuit`: 응답 없이 `close`, `reset`, `hang` 중 하나로 답함 |
+| `--hang=MS` | `--fault=hang`와 함께: 닫기 전까지 붙잡는 시간(기본 30000) |
+| `--delay=MS` | `short_circuit`: 답하기 전에 기다리는 시간(최대 120000) |
+| `--from-flow=ID` | `short_circuit`: flow ID의 캡처된 응답을 규칙에 복사. `--find`, `--host`, `--value`가 초안을 덮어씀 |
+| `-f`, `--find=FIND` | `--from-flow`나 `--map-dir --strip-prefix`가 아니면 필수. 대상이 되는 리터럴, 패턴, 또는 헤더 이름 |
 | `-v`, `--value=VALUE` | 치환할 텍스트, 헤더 값, 또는 `--op=pipe`일 때 실행할 명령. [프로세스 훅](/ko/guide/scripting/#프로세스-훅) 참고 |
 | `--host=GLOB` | 규칙을 그 호스트와 서브도메인으로 한정(`example.com`은 `api.example.com`에도 매칭되지만 `xexample.com`에는 매칭되지 않음). 더 넓게는 `*` 와일드카드. 생략하면 전체 적용 |
 | `--name=NAME` | 규칙 목록에 표시할 라벨 |

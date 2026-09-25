@@ -29,12 +29,21 @@ module Gori::Settings
     op : String,         # Store::RuleOp label — "replace" | "add_header" | ... | "short_circuit"
     match_kind : String, # Store::MatchKind label — "literal" | "regex"
     host : String,       # host glob ("" = every host)
-    body_file : String,  # ShortCircuit stub path ("" = inline body in `replacement`)
+    body_file : String,  # ShortCircuit stub path ("" = inline body in `replacement`); dir for `respond: dir`
+    # Store::RespondKind label and the raw RespondArgs JSON (#1237). Defaulted so a row an older
+    # binary wrote — which carries neither key — reads as the stub it always was; the parser
+    # derives `respond` from `body_file` for exactly that row (`RespondKind.implied`).
+    respond : String = "inline",
+    respond_args : String = "",
     extra_keys : Hash(String, JSON::Any) = Hash(String, JSON::Any).new,
     raw_target : JSON::Any? = nil,
     raw_part : JSON::Any? = nil,
     raw_op : JSON::Any? = nil,
-    raw_match_kind : JSON::Any? = nil do
+    raw_match_kind : JSON::Any? = nil,
+    # The two #1237 keys as a newer gori may have written them — a non-string `respond`, an
+    # OBJECT `respond_args` — kept so a save writes them back unchanged (the `raw_op` rule).
+    raw_respond : JSON::Any? = nil,
+    raw_respond_args : JSON::Any? = nil do
     # The rule as the proxy sees it in one project: `enabled` is the EFFECTIVE state there
     # (this rule's default unless the project overrode it) and `overridden` says which of the
     # two it is, so the list row can mark it.
@@ -53,7 +62,10 @@ module Gori::Settings
         unknown_part: Store::RulePart.from_label?(part) ? nil : part,
         unknown_op: Store::RuleOp.from_label?(op) ? nil : op,
         unknown_match_kind: Store::MatchKind.from_label?(match_kind) ? nil : match_kind,
-        unknown_keys: extra_keys.empty? ? nil : extra_keys.keys)
+        unknown_keys: extra_keys.empty? ? nil : extra_keys.keys,
+        respond: Store::RespondKind.from_label?(respond) || Store::RespondKind.implied(body_file),
+        respond_args: respond_args,
+        unknown_respond: Store::RespondKind.from_label?(respond) ? nil : respond)
     end
 
     # Keep the configured state in settings.json, but don't treat an unsupported grammar value
@@ -62,7 +74,8 @@ module Gori::Settings
     def inert? : Bool
       Store::RuleTarget.from_label?(target).nil? || Store::RulePart.from_label?(part).nil? ||
         Store::RuleOp.from_label?(op).nil? || Store::MatchKind.from_label?(match_kind).nil? ||
-        !extra_keys.empty? || !raw_target.nil? || !raw_part.nil? || !raw_op.nil? || !raw_match_kind.nil?
+        !extra_keys.empty? || !raw_target.nil? || !raw_part.nil? || !raw_op.nil? || !raw_match_kind.nil? ||
+        !raw_respond.nil? || to_rule.inert?
     end
 
     # Does this rule RUN AN EXTERNAL COMMAND when it fires? The question a profile's two ends
@@ -81,6 +94,13 @@ module Gori::Settings
       known ? known.executes? : true
     end
 
+    # Does the replacement carry `$NAME` tokens the env-grammar migration should re-spell?
+    # Through `RuleOp#expands_tokens?` for the same reason `executes?` goes through the enum.
+    # An unknown op projects to `replace` and stays migratable, as it was before.
+    def expands_tokens? : Bool
+      Store::RuleOp.from_label(op).expands_tokens?
+    end
+
     # A pipe rule's ARGV, or nil when it does not run one. It lives in `replacement` — see
     # `Rules#pipe_argv`, which tokenizes exactly this string. Named so the profile surfaces
     # do not have to know which field a given op keeps its command in.
@@ -91,7 +111,7 @@ module Gori::Settings
   end
 
   # A settings rule with any other key is kept inert.
-  KNOWN_RULE_KEYS = %w[id enabled name target part pattern replacement op match_kind host body_file]
+  KNOWN_RULE_KEYS = %w[id enabled name target part pattern replacement op match_kind host body_file respond respond_args]
 
   class_property rewriter_rules : Array(RewriterRule) = [] of RewriterRule
 
@@ -161,6 +181,7 @@ module Gori::Settings
       match_kind, raw_match_kind = parse_rule_label(o["match_kind"]?, RULE_KINDS, "literal")
       next if known_rule_shape?(op, part) && impossible_shape?(op, part)
       extra = o.reject { |k, _| KNOWN_RULE_KEYS.includes?(k) }
+      body_file = o["body_file"]?.try(&.as_s?) || ""
       list << RewriterRule.new(
         claim_id(o["id"]?.try(&.as_i64?), seen),
         o["enabled"]?.try(&.as_bool?) || false,
@@ -171,12 +192,16 @@ module Gori::Settings
         op,
         match_kind,
         o["host"]?.try(&.as_s?) || "",
-        o["body_file"]?.try(&.as_s?) || "",
+        body_file,
+        respond_label(o["respond"]?, body_file),
+        respond_args_text(o["respond_args"]?),
         extra_keys: extra,
         raw_target: raw_target,
         raw_part: raw_part,
         raw_op: raw_op,
-        raw_match_kind: raw_match_kind)
+        raw_match_kind: raw_match_kind,
+        raw_respond: raw_label(o["respond"]?),
+        raw_respond_args: raw_label(o["respond_args"]?))
     end
     list
   end
@@ -188,6 +213,28 @@ module Gori::Settings
     else
       {node.to_json, node}
     end
+  end
+
+  # The node itself when it is present but not a string — what a save must write back verbatim.
+  private def self.raw_label(node : JSON::Any?) : JSON::Any?
+    node if node && !node.raw.nil? && node.as_s?.nil?
+  end
+
+  # A `respond` label (#1237): canonicalized when known, carried unchanged when not (the same
+  # rule as `keep_unknown_label`), and derived from `body_file` when the key is absent — which is
+  # every row an older binary wrote, a stub whose body came from a file or from `replacement`.
+  private def self.respond_label(node : JSON::Any?, body_file : String) : String
+    return Store::RespondKind.implied(body_file).label if node.nil? || node.raw.nil?
+    str = node.as_s? || return node.to_json
+    Store::RespondKind.from_label?(str.downcase).try(&.label) || str
+  end
+
+  # The raw `respond_args` text. A string is kept as written; anything else (an object a future
+  # binary might write) is kept as its JSON so the row stays exactly as readable as it is — and
+  # `RespondArgs.parse` then decides, never silently `""`, which would drop a fault kind.
+  private def self.respond_args_text(node : JSON::Any?) : String
+    return "" if node.nil? || node.raw.nil?
+    node.as_s? || node.to_json
   end
 
   # Canonicalize a label this binary knows, but carry an unknown string unchanged. `nil` still
@@ -320,7 +367,8 @@ module Gori::Settings
   # commit" answer `Store#insert_rule` gives, so `Rules#add` can report the two scopes alike.
   def self.add_rewriter_rule(target : String, part : String, pattern : String, replacement : String,
                              op : String, match_kind : String, name : String, host : String,
-                             body_file : String, enabled : Bool = true) : Int64
+                             body_file : String, enabled : Bool = true,
+                             respond : String = "inline", respond_args : String = "") : Int64
     # BEFORE the snapshot below, so a refused write rolls back to what the FILE says rather than
     # to a list this process has been holding since startup. And before the mint, which is the
     # whole point: `rewriter_next_rule_id` is read from this line, and reading it stale is how
@@ -342,7 +390,7 @@ module Gori::Settings
     # `next_id_after`.
     self.rewriter_next_rule_id = next_id_after(id)
     self.rewriter_rules = rewriter_rules + [RewriterRule.new(id, enabled, name, target, part,
-      pattern, replacement, op, match_kind, host, body_file)]
+      pattern, replacement, op, match_kind, host, body_file, respond, respond_args)]
     return id if save
     self.rewriter_rules = prev_rules
     # The counter too: a burned id is not cosmetic — a project's `rewriter_overrides` key
@@ -355,7 +403,8 @@ module Gori::Settings
   # projects and an edit made in one of them is not a statement about the others.
   def self.update_rewriter_rule(id : Int64, target : String, part : String, pattern : String,
                                 replacement : String, op : String, match_kind : String,
-                                name : String, host : String, body_file : String) : Bool
+                                name : String, host : String, body_file : String,
+                                respond : String = "inline", respond_args : String = "") : Bool
     # A rule a peer deleted while this list sat on screen must not come BACK as an edit: after the
     # re-read there is no such id, `found` stays false, and the caller is told so.
     reload_rewriter_from_disk
@@ -365,7 +414,7 @@ module Gori::Settings
       next r unless r.id == id
       found = true
       RewriterRule.new(id, r.enabled, name, target, part, pattern, replacement,
-        op, match_kind, host, body_file)
+        op, match_kind, host, body_file, respond, respond_args)
     end
     # See `add_rewriter_rule`: a false answer means the edit did not commit, so the edited
     # fields must not stay live either.
@@ -426,6 +475,24 @@ module Gori::Settings
     false
   end
 
+  # The #1237 keys, written only when they say something the rule's other fields do not: a raw
+  # value a newer gori wrote, a `respond` other than the one `body_file` implies, or args. Every
+  # other rule — every rewrite rule, and every stub an older binary could have written — keeps
+  # exactly the keys it had, because a gori built after #1252 reads an unknown key as a reason
+  # to hold the whole rule inert, and a shared settings.json must not switch its rules off.
+  private def self.serialize_respond(j : JSON::Builder, r : RewriterRule) : Nil
+    if raw = r.raw_respond
+      j.field("respond") { raw.to_json(j) }
+    elsif r.respond != Store::RespondKind.implied(r.body_file).label || !r.respond_args.empty? || r.raw_respond_args
+      j.field "respond", r.respond
+    end
+    if raw = r.raw_respond_args
+      j.field("respond_args") { raw.to_json(j) }
+    elsif !r.respond_args.empty?
+      j.field "respond_args", r.respond_args
+    end
+  end
+
   # Factory reset for this section (dispatched by Settings.reset_to_factory). The rules go;
   # `rewriter_next_rule_id` deliberately does NOT go back to 1. Its monotonicity is not about
   # the global list at all — a PROJECT store keeps `rewriter_overrides` keyed by global rule
@@ -478,6 +545,7 @@ module Gori::Settings
                 end
                 j.field "host", r.host
                 j.field "body_file", r.body_file
+                serialize_respond(j, r)
                 r.extra_keys.each do |k, v|
                   j.field(k) { v.to_json(j) }
                 end

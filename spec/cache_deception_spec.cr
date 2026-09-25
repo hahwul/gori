@@ -33,7 +33,8 @@ end
 private class CacheDeceptionBackend < Gori::Fuzz::Backend
   getter sent = [] of Bytes
 
-  def initialize(@origin : Gori::Fuzz::Origin, @cache_hit : Bool = true)
+  def initialize(@origin : Gori::Fuzz::Origin, @cache_hit : Bool = true,
+                 @query_ignored : Bool = false)
   end
 
   def origin : Gori::Fuzz::Origin
@@ -43,7 +44,8 @@ private class CacheDeceptionBackend < Gori::Fuzz::Backend
   def send(bytes : Bytes) : Gori::Repeater::Result
     @sent << bytes
     text = String.new(bytes)
-    headers = @cache_hit && !text.includes?("__gori_cache_bust=") ? "X-Cache: HIT\r\nAge: 30\r\n" : ""
+    cache_busted = text.includes?("__gori_cache_bust=")
+    headers = @cache_hit && (!cache_busted || @query_ignored) ? "X-Cache: HIT\r\nAge: 30\r\n" : ""
     head = "HTTP/1.1 200 OK\r\n#{headers}Content-Length: 23\r\n\r\n".to_slice
     Gori::Repeater::Result.new(head, "private account content".to_slice, nil, 1_000_i64)
   end
@@ -118,6 +120,26 @@ describe Gori::CacheDeception do
     control.should contain("GET /account?from=history&__gori_cache_bust=")
     control.should_not contain("Cookie:")
     control.should_not contain("Authorization:")
+  end
+
+  it "reports REVIEW when a cache ignores the query buster and serves the private body again" do
+    origin = Gori::Fuzz::Origin.new("https", "h.test", 443)
+    backend = CacheDeceptionBackend.new(origin, query_ignored: true)
+    engine = AZ::Engine.new(->(_origin : Gori::Fuzz::Origin, _http2 : Bool) {
+      backend.as(Gori::Fuzz::Backend)
+    })
+    row = Gori::Store::FlowRow.new(1_i64, 1_i64, "https", "GET", "h.test", 443,
+      "/account", 200, 100_i64, Gori::Store::FlowState::Complete)
+    request = "GET /account HTTP/1.1\r\nHost: h.test\r\nCookie: session=secret\r\n\r\n".to_slice
+    detail = Gori::Store::FlowDetail.new(row, "HTTP/1.1", request, nil, nil, nil)
+
+    report = CD.check(engine, detail).not_nil!
+    report.verdict.should eq(CD::Verdict::Review)
+    report.verdict.deception?.should be_false
+    report.cache.should eq(Gori::CacheStatus::Signal::Hit)
+    report.control.should_not be_nil
+    Gori::CacheStatus.classify(report.control.not_nil!.response_head).should eq(Gori::CacheStatus::Signal::Hit)
+    backend.sent.size.should eq(3)
   end
 
   it "skips the control when the anonymous response has no cache-hit evidence" do

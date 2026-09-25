@@ -80,6 +80,22 @@ describe "Store env-grammar write guard" do
     end
   end
 
+  # A short-circuit stub is a response gori sends as authored — `Rules#stub_for` expands nothing
+  # in it — so a `$token` there is literal body text, and re-spelling it would change the answer.
+  it "leaves a short-circuit stub's response exactly as authored" do
+    with_marked_store(NS, BARE) do |store|
+      stub = "200 OK\nContent-Type: application/json\n\n{\"price\":\"$id\",\"tok\":\"$token\"}"
+      id = store.insert_rule(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+        "GET /api", stub, op: Gori::Store::RuleOp::ShortCircuit, name: "mock")
+      store.flush
+      store.match_rules.find { |r| r.id == id }.not_nil!.replacement.should eq(stub)
+      store.update_rule(id, Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+        "GET /api", stub, op: Gori::Store::RuleOp::ShortCircuit, name: "mock").should be_true
+      store.flush
+      store.match_rules.find { |r| r.id == id }.not_nil!.replacement.should eq(stub)
+    end
+  end
+
   it "re-spells a session slot's header VALUES and not its keys" do
     with_marked_store(NS, BARE) do |store|
       slots = Gori::SessionSlots.load(store)

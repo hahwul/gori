@@ -48,6 +48,8 @@ describe "Gori::Verbs.register_history" do
        "history.discover" => :history_discover,
        "history.compare"  => :comparer_add_selected,
        "history.delete"   => :history_delete,
+       # #1237 — single-target: one captured response becomes one draft rule.
+       "history.mock-response" => :mock_response_from_flow,
       }.each do |id, intent|
         r[id].available?(empty).should be_false
         r[id].available?(picked).should be_true
@@ -166,6 +168,7 @@ describe "Gori::Verbs.register_history" do
       verb_intents(r, "detail.mine").should eq([:close_detail, :mine_selected])
       verb_intents(r, "detail.sequence").should eq([:close_detail, :sequence_selected])
       verb_intents(r, "detail.probe-active").should eq([:close_detail, :probe_active_selected])
+      verb_intents(r, "detail.mock-response").should eq([:close_detail, :mock_response_from_flow])
     end
 
     it "keeps the in-place actions from closing the detail" do

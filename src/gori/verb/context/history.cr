@@ -69,4 +69,7 @@ abstract class Gori::Verb::ExecContext
   # Single-target on purpose — it opens the CURSOR row even when marks are set, since N
   # marked flows would mean N windows.
   abstract def open_response_external : Nil
+  # "Mock this response" (#1237): open the Rewriter rule form prefilled with a short-circuit
+  # rule that answers this flow's request with its captured response, or say why it cannot.
+  abstract def mock_response_from_flow : Nil
 end

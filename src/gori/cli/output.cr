@@ -455,7 +455,13 @@ module Gori
           io << dur
           # Never silently: a text-mode reader scanning this list would otherwise take a
           # stub for traffic the server produced.
-          io << "  [stub]" if row.short_circuited?
+          # With WHICH rule answered, when the flow recorded it (#1237) — the rule may since have
+          # been edited or deleted, and this is the only place a list reader would learn it.
+          if row.short_circuited?
+            io << "  [stub"
+            row.source_ref.try { |r| io << " · " << term_safe(r) unless r.empty? }
+            io << ']'
+          end
           # Same reasoning again, one axis over: a row gori itself put on the wire must not
           # scan as traffic the target's client produced. Only when it IS one — a proxy
           # capture is the norm, and a chip on every row teaches nothing. The lowercase token

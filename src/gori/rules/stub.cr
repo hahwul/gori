@@ -1,5 +1,7 @@
+require "json"
 require "http/status"
 require "../proxy/head_rewriter"
+require "../store/models"
 
 module Gori
   # The canned response half of a short-circuit rule (#511).
@@ -28,9 +30,14 @@ module Gori
     # pointed at a multi-GiB file must fail loudly rather than take the process down.
     MAX_BODY_FILE_BYTES = 8_i64 * 1024 * 1024
 
-    # How many distinct `body_file` paths stay cached. Rule sets are tiny; this only exists so
-    # a pathological set can't grow the cache without bound.
-    MAX_CACHED_FILES = 16
+    # How many distinct files stay cached. A `body_file` rule set is tiny, but a `respond: dir`
+    # rule (#1237) serves a whole directory — a page's worth of scripts and styles — so the
+    # count is sized for that, and `MAX_CACHED_BYTES` is what actually bounds the memory.
+    MAX_CACHED_FILES = 256
+
+    # Total bytes the cache may hold. Each file is already capped at `MAX_BODY_FILE_BYTES`; this
+    # keeps 256 of them from adding up to 2 GiB.
+    MAX_CACHED_BYTES = 64_i64 * 1024 * 1024
 
     # A parsed stub head: the wire bytes plus the status, which ClientConn needs in order to
     # decide whether the response may carry a body at all.
@@ -68,6 +75,14 @@ module Gori
       Head.new(io.to_slice, status)
     end
 
+    # Whether a parsed head (`Head#bytes`) carries a header `name` (case-insensitive).
+    def self.header?(head : Bytes, name : String) : Bool
+      String.new(head).each_line.skip(1).any? do |line|
+        colon = line.index(':')
+        colon && line[0, colon].strip.compare(name, case_insensitive: true) == 0
+      end
+    end
+
     # The inline body — everything after the first blank line, verbatim. Empty when the stub
     # is head-only.
     def self.inline_body(text : String) : Bytes
@@ -82,6 +97,89 @@ module Gori
       !parse_head(text).nil?
     end
 
+    # Why a short-circuit rule's answer could not be honoured as authored, or nil when it can —
+    # the ONE validator for the #1237 sub-kinds, which `gori run rewriter`, MCP
+    # `create_rule`/`update_rule` and the TUI editor's Save row all call, so a rule that would
+    # only fail at request time cannot be saved. Like `valid?`, it checks the SHAPE and never
+    # the filesystem: a stub file or a mapped directory that appears later is a normal way to
+    # work, and the proxy fails closed when it is still missing.
+    def self.respond_error(respond : Store::RespondKind, replacement : String, body_file : String,
+                           respond_args : String) : String?
+      args = Store::RespondArgs.parse(respond_args)
+      return args if args.is_a?(String)
+      args_error(respond, args) || shape_error(respond, replacement, body_file, args)
+    end
+
+    # The args that only one sub-kind reads, refused on the others — a stored-but-ignored
+    # setting would leave the operator believing it applies.
+    private def self.args_error(respond : Store::RespondKind, args : Store::RespondArgs) : String?
+      unless respond.dir?
+        return "strip prefix is only for a dir rule" unless args.strip_prefix.empty?
+        return "fall-through is only for a dir rule" if args.fallthrough?
+      end
+      return "a fault kind is only for a fault rule" if args.fault && !respond.fault?
+      if args.hang_ms != Store::RespondArgs::DEFAULT_HANG_MS && args.fault != Store::FaultKind::Hang
+        return "a hang bound is only for a hang fault"
+      end
+      nil
+    end
+
+    private def self.shape_error(respond : Store::RespondKind, replacement : String, body_file : String,
+                                 args : Store::RespondArgs) : String?
+      case respond
+      in .inline?
+        return stub_parse_error(replacement) unless valid?(replacement)
+        "an inline stub takes no body file (use the file source)" unless body_file.empty?
+      in .file?
+        return stub_parse_error(replacement) unless valid?(replacement)
+        "name the body file" if body_file.empty?
+      in .dir?
+        dir_error(replacement, body_file, args.strip_prefix)
+      in .fault?
+        return "pick a fault: close, reset or hang" unless args.fault
+        return "a fault answers nothing — leave the response empty" unless replacement.strip.empty?
+        "a fault takes no body file" unless body_file.empty?
+      end
+    end
+
+    # Why a stub's response did not parse — with the format, which is what a CLI or MCP caller
+    # has to go on (the TUI's editor shows it live).
+    private def self.stub_parse_error(text : String) : String
+      return "write a stub response" if text.blank?
+      "the stub response does not parse (expected a status line such as '200 OK', then headers, " \
+      "then a blank line and the body)"
+    end
+
+    private def self.dir_error(template : String, dir : String, prefix : String) : String?
+      return "name the directory to serve" if dir.empty?
+      unless template.strip.empty?
+        return "the response head template does not parse" unless valid?(template)
+        return "a dir rule's body comes from the directory — keep the template head-only" unless inline_body(template).empty?
+      end
+      unless prefix.empty? || (prefix.starts_with?('/') && prefix.ends_with?('/'))
+        return "strip prefix must start and end with / (e.g. /static/)"
+      end
+      nil
+    end
+
+    # The sub-kind fields of a rule listing (#1237), one spelling for `gori run rewriter --format
+    # json` and MCP `list_rules`: `respond`, its args decoded — or the RAW text when this binary
+    # cannot read them, which is exactly when the row is inert — and `fallthrough` on its own,
+    # because it is the one setting that lets a request a rule matched reach the origin.
+    #
+    # Only on a short-circuit rule: every other op ignores these, and `respond: "inline"` on a
+    # replace rule would read as a setting it has.
+    def self.respond_json_fields(j : JSON::Builder, rule : Store::MatchRule) : Nil
+      return unless rule.op.short_circuit?
+      j.field "respond", rule.respond_label
+      if rule.respond_args_error
+        j.field "respond_args", rule.respond_args
+      else
+        j.field "respond_args" { rule.args.to_json(j) }
+      end
+      j.field "fallthrough", rule.op.short_circuit? && rule.respond.dir? && rule.args.fallthrough?
+    end
+
     # A one-line summary of a stub for a list row ("200 OK · 42B" / "404 · file:…").
     def self.summary(text : String, body_file : String) : String
       head = parse_head(text)
@@ -89,6 +187,26 @@ module Gori
       status_line = String.new(head.bytes).lines.first?.try(&.lchop("HTTP/1.1 ").strip) || ""
       body = body_file.empty? ? "#{inline_body(text).size}B inline" : "file:#{body_file}"
       "#{status_line} · #{body}"
+    end
+
+    # The same summary, knowing the sub-kind (#1237): `dir:~/work/js (fallthrough)`,
+    # `fault:reset +500ms`, or the stub summary above — each with its delay, when it has one.
+    def self.summary(rule : Store::MatchRule) : String
+      return "(#{rule.inert_reason})" if rule.op.short_circuit? && rule.inert?
+      args = rule.args
+      out =
+        case rule.respond
+        in .inline?, .file?
+          summary(rule.replacement, rule.body_file)
+        in .dir?
+          prefix = args.strip_prefix.empty? ? "" : "#{args.strip_prefix} → "
+          "#{prefix}dir:#{rule.body_file}#{args.fallthrough? ? " (fallthrough)" : ""}"
+        in .fault?
+          kind = args.fault.try(&.label) || "?"
+          hang = args.fault.try(&.hang?) ? " ≤#{args.hang_ms}ms" : ""
+          "fault:#{kind}#{hang}"
+        end
+      args.delay_ms > 0 ? "#{out} +#{args.delay_ms}ms" : out
     end
 
     # Split the authored text into {head, inline body} on the FIRST blank line, in either
@@ -142,10 +260,12 @@ module Gori
     record Entry, mtime : Time, size : Int64, bytes : Bytes
 
     MAX_ENTRIES = RuleStub::MAX_CACHED_FILES
+    MAX_BYTES   = RuleStub::MAX_CACHED_BYTES
 
     def initialize
       @mutex = Mutex.new
       @entries = {} of String => Entry
+      @bytes = 0_i64
     end
 
     # The file's bytes. Raises `Gori::Error` when the path is unreadable, is not a regular
@@ -170,14 +290,25 @@ module Gori
       end
       bytes = load(path, size.to_i32)
       @mutex.synchronize do
-        @entries.clear if @entries.size >= MAX_ENTRIES && !@entries.has_key?(path)
+        if old = @entries[path]?
+          @bytes -= old.bytes.size
+        elsif @entries.size >= MAX_ENTRIES || @bytes + bytes.size > MAX_BYTES
+          # No LRU, on purpose: the set a page re-requests refills in one load, and a clear is
+          # the one policy that cannot be wrong about which entry was stale.
+          @entries.clear
+          @bytes = 0_i64
+        end
         @entries[path] = Entry.new(mtime, size, bytes)
+        @bytes += bytes.size
       end
       bytes
     end
 
     def clear : Nil
-      @mutex.synchronize { @entries.clear }
+      @mutex.synchronize do
+        @entries.clear
+        @bytes = 0_i64
+      end
     end
 
     # Read up to `size` bytes. A file that shrank between the stat and the read yields a short

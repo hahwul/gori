@@ -282,3 +282,80 @@ describe "Gori::Tui::RewriterRuleOverlay — Overlay seam" do
     h.rendered?("preedithere").should be_true
   end
 end
+
+# #1237 — the short-circuit answer's source and options on the rule form.
+describe "Gori::Tui::RewriterRuleOverlay — mock sources" do
+  it "cycles the source, showing only the rows each one reads" do
+    ov = RewriterRuleOverlay.new(op: "short_circuit", pattern: "/x", replacement: "200 OK")
+    ov.respond.should eq(Gori::Store::RespondKind::Inline)
+    ov.set_selected(RewriterRuleOverlay::ROW_BODY_FILE)
+    ov.@sel.should_not eq(RewriterRuleOverlay::ROW_BODY_FILE) # inline has no body file
+
+    ov.set_selected(RewriterRuleOverlay::ROW_RESPOND)
+    ov.handle_key(skey(Termisu::Input::Key::Right)) # → body file
+    ov.respond.should eq(Gori::Store::RespondKind::File)
+    ov.handle_key(skey(Termisu::Input::Key::Right)) # → directory
+    ov.respond.should eq(Gori::Store::RespondKind::Dir)
+    ov.set_selected(RewriterRuleOverlay::ROW_BODY_FILE)
+    ov.@sel.should eq(RewriterRuleOverlay::ROW_BODY_FILE)
+
+    ov.set_selected(RewriterRuleOverlay::ROW_RESPOND)
+    ov.handle_key(skey(Termisu::Input::Key::Right)) # → close
+    ov.respond.should eq(Gori::Store::RespondKind::Fault)
+    ov.fault_kind.should eq(Gori::Store::FaultKind::Close)
+    ov.replacement.should eq("") # a fault answers nothing, whatever the buffer holds
+    ov.set_selected(RewriterRuleOverlay::ROW_VALUE)
+    ov.@sel.should_not eq(RewriterRuleOverlay::ROW_VALUE)
+  end
+
+  it "keeps the source rows off every other op" do
+    ov = RewriterRuleOverlay.new(op: "replace", pattern: "a", replacement: "b")
+    ov.set_selected(RewriterRuleOverlay::ROW_RESPOND)
+    ov.@sel.should_not eq(RewriterRuleOverlay::ROW_RESPOND)
+    ov.set_selected(RewriterRuleOverlay::ROW_OPTIONS)
+    ov.@sel.should_not eq(RewriterRuleOverlay::ROW_OPTIONS)
+    ov.respond_args.should eq("")
+  end
+
+  it "stores only the options the source reads, and validates through the shared validator" do
+    ov = RewriterRuleOverlay.new(op: "short_circuit", pattern: "GET /static/", replacement: "",
+      body_file: "/srv/js", respond: "dir")
+    ov.options = Gori::Store::RespondArgs.new(strip_prefix: "/static/", fallthrough: true, delay_ms: 5)
+    ov.respond_args.should eq(%({"strip_prefix":"/static/","fallthrough":true,"delay_ms":5}))
+    ov.valid?.should be_true
+
+    ov.options = Gori::Store::RespondArgs.new(strip_prefix: "static")
+    ov.valid?.should be_false
+    ov.invalid_reason.should contain("strip prefix")
+
+    fault = RewriterRuleOverlay.new(op: "short_circuit", pattern: "/pay", respond: "fault",
+      respond_args: %({"fault":"hang","hang_ms":900}))
+    fault.fault_kind.should eq(Gori::Store::FaultKind::Hang)
+    fault.respond_args.should eq(%({"fault":"hang","hang_ms":900}))
+    fault.valid?.should be_true
+    # Switching to a different fault drops the hang bound it no longer reads.
+    fault.set_selected(RewriterRuleOverlay::ROW_RESPOND)
+    fault.handle_key(skey(Termisu::Input::Key::Left)) # hang → reset
+    fault.respond_args.should eq(%({"fault":"reset"}))
+  end
+
+  it "opens the options sub-editor from its row" do
+    ov = RewriterRuleOverlay.new(op: "short_circuit", pattern: "/x", replacement: "200 OK")
+    opened = 0
+    ov.on_edit_options = -> { opened += 1; nil }
+    ov.set_selected(RewriterRuleOverlay::ROW_OPTIONS)
+    ov.handle_key(skey(Termisu::Input::Key::Enter)).should eq(:stay)
+    opened.should eq(1)
+  end
+
+  it "carries an edited rule's source and options" do
+    rule = Gori::Store::MatchRule.new(3_i64, true, Gori::Store::RuleTarget::Request,
+      Gori::Store::RulePart::Head, "/pay", "", Gori::Store::RuleOp::ShortCircuit,
+      respond: Gori::Store::RespondKind::Fault, respond_args: %({"fault":"reset","delay_ms":250}))
+    ov = RewriterRuleOverlay.editing(rule)
+    ov.fault_kind.should eq(Gori::Store::FaultKind::Reset)
+    ov.options.delay_ms.should eq(250)
+    ov.candidate_rule.respond.should eq(Gori::Store::RespondKind::Fault)
+    ov.candidate_rule.respond_args.should eq(%({"fault":"reset","delay_ms":250}))
+  end
+end

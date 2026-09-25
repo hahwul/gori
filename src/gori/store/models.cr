@@ -1163,6 +1163,15 @@ module Gori
       def rewrite? : Bool
         !short_circuit?
       end
+
+      # Does `Rules#substitute` resolve `$NAME` tokens in this op's `replacement`? False only
+      # for `ShortCircuit`: a stub is a whole response the operator authored, sent exactly as
+      # written (`Rules#stub_for` never expands it), so a `$token` in it is literal body text.
+      # The env-grammar migration keys on this — re-spelling a stub's bytes would change what
+      # gori answers with, not how a reference resolves (P7).
+      def expands_tokens? : Bool
+        !short_circuit?
+      end
     end
 
     # How a `Replace` rule matches: a `Literal` substring or a `Regex` (with $1/\1
@@ -1185,6 +1194,169 @@ module Gori
 
       def self.from_label(s : String) : MatchKind
         from_label?(s) || Literal
+      end
+    end
+
+    # WHERE a `ShortCircuit` rule's answer comes from (#1237). Every other op ignores it.
+    #
+    #   - `Inline` / `File`: the stub in `replacement`, its body from `body_file` when that is
+    #     set. The two behave the same at request time (a legacy row carries only `body_file`),
+    #     and differ only in what a surface lets the operator edit.
+    #   - `Dir`: map-local. `body_file` names a DIRECTORY and the request path picks a file in
+    #     it (`RuleStub::MapLocal`); `replacement` is an optional head template.
+    #   - `Fault`: no response at all — the connection is closed, reset or held
+    #     (`RespondArgs#fault`); `replacement` stays EMPTY, so an older binary, which reads this
+    #     row as an inline stub, fails its head parse and answers the 502 stub.
+    #
+    # A sub-kind rather than new `RuleOp` members, on purpose: see `Schema::V33`.
+    enum RespondKind
+      Inline
+      File
+      Dir
+      Fault
+
+      def label : String
+        to_s.downcase
+      end
+
+      def self.from_label?(s : String) : RespondKind?
+        case s
+        when "inline" then Inline
+        when "file"   then File
+        when "dir"    then Dir
+        when "fault"  then Fault
+        end
+      end
+
+      # The sub-kind a row written before `respond` existed means: a `body_file` made it a file
+      # stub. Used where the column (or the settings key) is absent, never over a stored label.
+      def self.implied(body_file : String) : RespondKind
+        body_file.empty? ? Inline : File
+      end
+    end
+
+    # What a `Fault` rule does to the connection instead of answering (#1237).
+    #
+    #   - `Close`: FIN with no response bytes.
+    #   - `Reset`: `SO_LINGER 0` then close — a TCP RST on the client socket.
+    #   - `Hang`: hold without answering until the client gives up, bounded by
+    #     `RespondArgs#hang_ms` so it cannot pin a connection slot forever (P6).
+    enum FaultKind
+      Close
+      Reset
+      Hang
+
+      def label : String
+        to_s.downcase
+      end
+
+      def self.from_label?(s : String) : FaultKind?
+        case s
+        when "close" then Close
+        when "reset" then Reset
+        when "hang"  then Hang
+        end
+      end
+    end
+
+    # The parameters of a short-circuit sub-kind, stored as a small JSON object in
+    # `match_rules.respond_args` (and the `respond_args` key of a global rule). `""` is `{}`.
+    #
+    # `parse` never raises and never guesses: a key this binary does not know, a value of the
+    # wrong type or out of range, or an unknown fault kind comes back as an error STRING, and
+    # `MatchRule` turns that into `inert?` — the #1242 contract, applied to this field. A future
+    # gori's `"throttle"` must not run here as a rule that merely lost its throttle.
+    struct RespondArgs
+      # Ceiling on `delay_ms` and `hang_ms`. Each held connection pins a fiber, an fd and one of
+      # `Server::MAX_CONNECTIONS` slots for the whole wait (P6).
+      MAX_WAIT_MS = 120_000
+      # A `hang` without its own bound holds for the client read timeout
+      # (`Proxy::SocketTuning::CLIENT_IO_TIMEOUT`, 30 s) — the wait a client would have met from
+      # gori itself.
+      DEFAULT_HANG_MS = 30_000
+      KEYS            = %w[strip_prefix fallthrough fault delay_ms hang_ms]
+
+      getter strip_prefix : String
+      getter? fallthrough : Bool
+      getter fault : FaultKind?
+      getter delay_ms : Int32
+      getter hang_ms : Int32
+
+      def initialize(@strip_prefix = "", @fallthrough = false, @fault = nil,
+                     @delay_ms = 0, @hang_ms = DEFAULT_HANG_MS)
+      end
+
+      def self.parse(raw : String) : RespondArgs | String
+        return new if raw.strip.empty?
+        obj = begin
+          JSON.parse(raw).as_h?
+        rescue JSON::ParseException
+          nil
+        end
+        return "respond_args is not a JSON object" unless obj
+        obj.each { |key, val| key_error(key, val).try { |e| return e } }
+        # Every key present is known and well-typed by now (`key_error`).
+        new(obj["strip_prefix"]?.try(&.as_s) || "",
+          obj["fallthrough"]?.try(&.as_bool) || false,
+          obj["fault"]?.try { |f| f.as_s?.try { |l| FaultKind.from_label?(l) } },
+          obj["delay_ms"]?.try { |v| wait_ms(v) } || 0,
+          obj["hang_ms"]?.try { |v| wait_ms(v) } || DEFAULT_HANG_MS)
+      end
+
+      # Why one key cannot be read, or nil when it can.
+      private def self.key_error(key : String, val : JSON::Any) : String?
+        case key
+        when "strip_prefix" then "respond_args.strip_prefix is not a string" unless val.as_s?
+        when "fallthrough"  then "respond_args.fallthrough is not a boolean" if val.as_bool?.nil?
+        when "fault"
+          return nil if val.raw.nil? # the listing's own `"fault": null` reads back as no fault
+          label = val.as_s?
+          return "respond_args.fault is not a string" unless label
+          "unknown fault #{label.inspect}" unless FaultKind.from_label?(label)
+        when "delay_ms", "hang_ms"
+          "respond_args.#{key} is not 0..#{MAX_WAIT_MS}" unless wait_ms(val)
+        else
+          "unknown respond_args key #{key.inspect}"
+        end
+      end
+
+      private def self.wait_ms(val : JSON::Any) : Int32?
+        n = val.as_i64?
+        n && 0 <= n <= MAX_WAIT_MS ? n.to_i32 : nil
+      end
+
+      # These args with only what `respond` (and, for a fault, `fault`) reads: the rest go back to
+      # their defaults. What a surface applies when the operator switches a rule to a different
+      # answer, so a setting the new one ignores is not carried over for `respond_error` to refuse.
+      def for(respond : RespondKind, fault : FaultKind?) : RespondArgs
+        dir = respond.dir?
+        f = respond.fault? ? fault : nil
+        RespondArgs.new(dir ? @strip_prefix : "", dir && @fallthrough, f, @delay_ms,
+          f == FaultKind::Hang ? @hang_ms : DEFAULT_HANG_MS)
+      end
+
+      # The stored spelling: only the keys that differ from the defaults, in `KEYS` order, and
+      # `""` when none do — so a plain stub's row keeps an empty column.
+      def to_stored : String
+        return "" if self == RespondArgs.new
+        JSON.build { |j| j.object { write_fields(j, all: false) } }
+      end
+
+      # Every field, for a listing (`gori run rewriter list --json`, MCP `list_rules`).
+      def to_json(j : JSON::Builder) : Nil
+        j.object { write_fields(j, all: true) }
+      end
+
+      private def write_fields(j : JSON::Builder, all : Bool) : Nil
+        j.field "strip_prefix", @strip_prefix if all || !@strip_prefix.empty?
+        j.field "fallthrough", @fallthrough if all || @fallthrough
+        if f = @fault
+          j.field "fault", f.label
+        elsif all
+          j.field "fault", nil
+        end
+        j.field "delay_ms", @delay_ms if all || @delay_ms != 0
+        j.field "hang_ms", @hang_ms if all || @hang_ms != DEFAULT_HANG_MS
       end
     end
 
@@ -1230,7 +1402,8 @@ module Gori
     #
     # `body_file` belongs to `ShortCircuit` alone: a path whose bytes become the stub body,
     # instead of the inline body in `replacement`. Empty = inline (and every other op ignores
-    # it entirely).
+    # it entirely). For a `respond: dir` rule it names the DIRECTORY the request path is mapped
+    # into instead (`RespondKind`).
     #
     # `scope` says which store the rule came out of (see `RuleScope`) and `enabled` is always
     # the EFFECTIVE state in THIS project — for a global rule that is its own default unless
@@ -1262,6 +1435,16 @@ module Gori
       getter unknown_op : String?
       getter unknown_match_kind : String?
       getter unknown_keys : Array(String)?
+      # A `ShortCircuit` rule's sub-kind and its raw parameters (#1237) — see `RespondKind` and
+      # `RespondArgs`. `respond_args` is kept RAW so a row this binary cannot read is written
+      # back unchanged; `args` is its parse, done once here rather than per request.
+      getter respond : RespondKind
+      getter respond_args : String
+      getter unknown_respond : String?
+      getter args : RespondArgs
+      # Why `respond_args` did not parse, or nil. Only a short-circuit rule is made inert by it:
+      # no other op reads the field.
+      getter respond_args_error : String?
 
       def initialize(@id, @enabled, @target, @part, @pattern, @replacement,
                      @op = RuleOp::Replace, @match_kind = MatchKind::Literal,
@@ -1269,7 +1452,17 @@ module Gori
                      @scope = RuleScope::Project, @overridden = false,
                      @unknown_target = nil, @unknown_part = nil,
                      @unknown_op = nil, @unknown_match_kind = nil,
-                     @unknown_keys = nil)
+                     @unknown_keys = nil,
+                     @respond = RespondKind::Inline, @respond_args = "",
+                     @unknown_respond = nil)
+        parsed = RespondArgs.parse(@respond_args)
+        if parsed.is_a?(String)
+          @args = RespondArgs.new
+          @respond_args_error = parsed
+        else
+          @args = parsed
+          @respond_args_error = nil
+        end
       end
 
       def global? : Bool
@@ -1279,8 +1472,11 @@ module Gori
       # Unknown labels are preserved for display and deletion, but never interpreted as the
       # defaults returned by `from_label`. One shared predicate guards both rewrite and stub
       # selection, as well as every surface that wants to describe the row as usable.
+      #
+      # The respond fields count only on a short-circuit rule, the one op that reads them.
       def inert? : Bool
-        !@unknown_target.nil? || !@unknown_part.nil? || !@unknown_op.nil? || !@unknown_match_kind.nil? || !@unknown_keys.nil?
+        !@unknown_target.nil? || !@unknown_part.nil? || !@unknown_op.nil? || !@unknown_match_kind.nil? ||
+          !@unknown_keys.nil? || (@op.short_circuit? && (!@unknown_respond.nil? || !@respond_args_error.nil?))
       end
 
       def active? : Bool
@@ -1303,6 +1499,10 @@ module Gori
         @unknown_match_kind || @match_kind.label
       end
 
+      def respond_label : String
+        @unknown_respond || @respond.label
+      end
+
       def inert_reason : String?
         labels = [] of String
         labels << "op #{@unknown_op.inspect}" if @unknown_op
@@ -1311,6 +1511,12 @@ module Gori
         labels << "match_kind #{@unknown_match_kind.inspect}" if @unknown_match_kind
         if keys = @unknown_keys
           labels << (keys.size == 1 ? "key #{keys.first.inspect}" : "keys #{keys.map(&.inspect).join(", ")}")
+        end
+        if @op.short_circuit?
+          labels << "respond #{@unknown_respond.inspect}" if @unknown_respond
+          if (err = @respond_args_error) && labels.empty?
+            return "#{err} (newer gori?)"
+          end
         end
         labels.empty? ? nil : "unknown #{labels.join(", ")} (newer gori?)"
       end

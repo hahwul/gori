@@ -48,6 +48,7 @@ module Gori
                     j.field "pattern", r.pattern
                     j.field "replacement", r.replacement
                     j.field "body_file", r.body_file
+                    Gori::RuleStub.respond_json_fields(j, r)
                   end
                 end
               end
@@ -88,28 +89,163 @@ module Gori
       # creation rather than discovered from live traffic — the same stance the CLI takes.
       # `body_file` on any other op is rejected too: silently storing an ignored path would
       # leave the caller believing a body source is configured.
-      private def short_circuit_error(op : Store::RuleOp, replacement : String, body_file : String) : Result?
+      #
+      # The shape itself is judged by `RuleStub.respond_error`, the validator the CLI and the TUI
+      # editor call too (#1237).
+      private def short_circuit_error(op : Store::RuleOp, replacement : String, body_file : String,
+                                      respond : Store::RespondKind = Store::RespondKind.implied(body_file),
+                                      respond_args : String = "") : Result?
         unless op.short_circuit?
           return err("'body_file' is only valid with op=short_circuit", "INVALID_ARGUMENT", field: "body_file") unless body_file.empty?
           return nil
         end
-        return nil if Gori::RuleStub.valid?(replacement)
-        err("'replacement' is not a parseable HTTP response (expected a status line such as " \
-            "'200 OK', then headers, then a blank line and the body)", "INVALID_ARGUMENT", field: "replacement")
+        if msg = Gori::RuleStub.respond_error(respond, replacement, body_file, respond_args)
+          # Name the argument the caller has to change: a stub that does not parse is the
+          # `replacement`, everything else is the shape `respond` and its options describe.
+          stub = (respond.inline? || respond.file?) && !Gori::RuleStub.valid?(replacement)
+          return err("invalid short_circuit rule: #{msg}", "INVALID_ARGUMENT", field: stub ? "replacement" : "respond")
+        end
+        nil
+      end
+
+      # Whether a mocking argument was actually GIVEN. A client that fills every schema property
+      # sends `""`, `false` and `0` for the ones it means to leave alone — `describes?` already
+      # reads the empty string and null that way, and a `false`/`0` here is each argument's own
+      # default — so none of them may make a plain replace rule "use a short_circuit argument".
+      private def mock_given?(h, key : String) : Bool
+        return false unless describes?(h, key)
+        raw = h[key].raw
+        !(raw == false || raw == 0 || raw == 0_i64)
+      end
+
+      # The #1237 arguments: WHERE a short-circuit rule's answer comes from. `existing` is the rule
+      # an update starts from — each argument that is present overrides its field, and everything
+      # else is kept, so `update_rule{delay_ms: 0}` does not also forget a fault kind. Returns
+      # {respond, respond_args, body_file}.
+      MOCK_ARGS = %w[respond dir strip_prefix fallthrough fault delay_ms hang_ms from_flow_id]
+
+      private def mock_rule_args(h, op : Store::RuleOp, body_file : String,
+                                 existing : Store::MatchRule? = nil) : {Store::RespondKind, String, String} | Result
+        unless op.short_circuit?
+          if bad = MOCK_ARGS.find { |k| mock_given?(h, k) }
+            return err("'#{bad}' is only valid with op=short_circuit", "INVALID_ARGUMENT", field: bad)
+          end
+          return {Store::RespondKind::Inline, "", body_file}
+        end
+        body_file = mock_body_file(h, body_file)
+        return body_file if body_file.is_a?(Result)
+        base = existing.try(&.args) || Store::RespondArgs.new
+        fault = mock_fault(h, base)
+        return fault if fault.is_a?(Result)
+        respond = mock_respond_kind(h, fault, body_file, existing)
+        return respond if respond.is_a?(Result)
+        # Switching an existing rule to another answer drops what the new one does not read —
+        # the kept args and the kept body file — exactly as the TUI's `source:` row does. What the
+        # caller passed explicitly is still judged by `respond_error`.
+        base = base.for(respond, fault)
+        body_file = "" if (respond.inline? || respond.fault?) && !mock_given?(h, "body_file")
+        {respond, mock_args_stored(h, base, respond.fault? ? fault : nil), body_file}
+      rescue OverflowError
+        err("'delay_ms'/'hang_ms' out of range (0-#{Store::RespondArgs::MAX_WAIT_MS})", "INVALID_ARGUMENT", field: "delay_ms")
+      end
+
+      # `dir` names the directory in the same column a single-file stub keeps its body file in, so
+      # the two are one argument spelled twice — and passing both is refused, not merged.
+      private def mock_body_file(h, body_file : String) : String | Result
+        return body_file unless mock_given?(h, "dir")
+        if mock_given?(h, "body_file")
+          return err("pass either 'dir' (a directory to serve) or 'body_file' (one body), not both", "INVALID_ARGUMENT", field: "dir")
+        end
+        if mock_given?(h, "fault")
+          return err("'dir' and 'fault' are two different answers — pick one", "INVALID_ARGUMENT", field: "fault")
+        end
+        str(h, "dir") || ""
+      end
+
+      # The `fault` argument over the rule's own (an update), refusing a kind this gori lacks.
+      private def mock_fault(h, base : Store::RespondArgs) : Store::FaultKind? | Result
+        return base.fault unless mock_given?(h, "fault")
+        label = str(h, "fault") || ""
+        Store::FaultKind.from_label?(label.downcase) ||
+          err("invalid 'fault' (expected #{FAULT_KINDS.join("|")})", "INVALID_ARGUMENT", field: "fault")
+      end
+
+      # The stored `respond_args`: each argument present overrides the rule's own value. An
+      # out-of-range number is stored as given and refused by `RuleStub.respond_error`, which is
+      # the sentence every surface prints.
+      private def mock_args_stored(h, base : Store::RespondArgs, fault : Store::FaultKind?) : String
+        Store::RespondArgs.new(
+          describes?(h, "strip_prefix") ? (str(h, "strip_prefix") || "") : base.strip_prefix,
+          describes?(h, "fallthrough") ? bool_arg(h, "fallthrough", false) : base.fallthrough?,
+          fault,
+          describes?(h, "delay_ms") ? (int(h, "delay_ms") || -1).to_i32 : base.delay_ms,
+          describes?(h, "hang_ms") ? (int(h, "hang_ms") || -1).to_i32 : base.hang_ms).to_stored
+      end
+
+      # `respond` as named, or — when it is not — what the other arguments imply: a directory is
+      # a dir rule, a fault kind a fault rule, a body file a file stub. An update that names none
+      # of them keeps the rule's own.
+      private def mock_respond_kind(h, fault : Store::FaultKind?, body_file : String,
+                                    existing : Store::MatchRule?) : Store::RespondKind | Result
+        return mock_named_respond(h) if mock_given?(h, "respond")
+        return Store::RespondKind::Dir if mock_given?(h, "dir")
+        return Store::RespondKind::Fault if mock_given?(h, "fault") && fault
+        # An update keeps the rule's own answer — and on a dir rule a `body_file` is the one
+        # column the directory lives in, so it moves the directory rather than making a file stub.
+        return existing.respond if existing && (!mock_given?(h, "body_file") || existing.respond.dir?)
+        Store::RespondKind.implied(body_file)
+      end
+
+      # An explicit `respond`. A `dir` or `fault` argument that contradicts it is refused, never
+      # dropped: the caller asked for both and would read the rule back as the one they meant.
+      private def mock_named_respond(h) : Store::RespondKind | Result
+        label = str(h, "respond") || ""
+        named = Store::RespondKind.from_label?(label.downcase) ||
+                return err("invalid 'respond' (expected #{RESPOND_KINDS.join("|")})", "INVALID_ARGUMENT", field: "respond")
+        return err("'dir' needs respond=dir", "INVALID_ARGUMENT", field: "dir") if mock_given?(h, "dir") && !named.dir?
+        return err("'fault' needs respond=fault", "INVALID_ARGUMENT", field: "fault") if mock_given?(h, "fault") && !named.fault?
+        named
+      end
+
+      # `from_flow_id` (#1237): the captured response, snapshotted by the same engine the TUI and
+      # `gori run rewriter add --from-flow` use, so the refusals match. Returns the draft or the
+      # refusal as a Result; nil when the argument is absent.
+      private def mock_flow_draft(h) : (MockFromFlow::Draft | Result)?
+        return nil unless mock_given?(h, "from_flow_id")
+        flow_id = int(h, "from_flow_id")
+        return err(id_error(h, "from_flow_id"), "INVALID_ARGUMENT", field: "from_flow_id") unless flow_id
+        detail = store.get_flow(flow_id)
+        return not_found("no flow with id #{flow_id}") unless detail
+        drafted = Gori::MockFromFlow.draft(detail)
+        if refusal = drafted.as?(Gori::MockFromFlow::Refusal)
+          # Deterministic: the same flow refuses the same way next time — not retryable.
+          return err("flow ##{flow_id} — #{refusal.message}", refusal.code, field: "from_flow_id")
+        end
+        drafted.as(Gori::MockFromFlow::Draft)
       end
 
       @[Tool("create_rule", gated: true, agent_action: true)]
       private def create_rule(h) : Result
-        pattern = str(h, "pattern")
+        draft = mock_flow_draft(h)
+        return draft if draft.is_a?(Result)
+        pattern = str(h, "pattern").presence || draft.try(&.pattern)
         return err("missing required 'pattern'", "INVALID_ARGUMENT", field: "pattern") if pattern.nil? || pattern.empty?
         scope = rule_scope(h)
         return scope if scope.is_a?(Result)
         tp = rule_target_part(h, Store::RuleTarget::Request, Store::RulePart::Head)
         return tp if tp.is_a?(Result)
         target, part = tp
-        ok = rule_op_kind(h, Store::RuleOp::Replace, Store::MatchKind::Literal)
+        # A drafted pattern is a regex anchored on the request line (`MockFromFlow`).
+        default_match = draft && !describes?(h, "pattern") ? Store::MatchKind::Regex : Store::MatchKind::Literal
+        ok = rule_op_kind(h, Store::RuleOp::Replace, default_match)
         return ok if ok.is_a?(Result)
         op, match_kind = ok
+        if draft && !op.short_circuit?
+          return err("'from_flow_id' is only valid with op=short_circuit", "INVALID_ARGUMENT", field: "from_flow_id")
+        end
+        if draft && !describes?(h, "pattern") && match_kind.literal?
+          return err("the pattern drafted from 'from_flow_id' is a regex — omit 'match', or pass your own 'pattern'", "INVALID_ARGUMENT", field: "match")
+        end
         if bad = ws_shape_error(op, part)
           return bad
         end
@@ -119,11 +255,13 @@ module Gori
         unless valid_rule_regex?(op, match_kind, pattern)
           return err("invalid regex pattern (failed to compile)", "INVALID_ARGUMENT", field: "pattern")
         end
-        replacement = str(h, "replacement") || ""
+        replacement = str(h, "replacement").presence || draft.try(&.replacement) || ""
         name = str(h, "name") || ""
-        host = str(h, "host") || ""
-        body_file = str(h, "body_file") || ""
-        if bad = short_circuit_error(op, replacement, body_file)
+        host = str(h, "host").presence || draft.try(&.host) || ""
+        mock = mock_rule_args(h, op, str(h, "body_file") || "")
+        return mock if mock.is_a?(Result)
+        respond, respond_args, body_file = mock
+        if bad = short_circuit_error(op, replacement, body_file, respond, respond_args)
           return bad
         end
         if bad = pipe_shape_error(op, replacement)
@@ -142,7 +280,7 @@ module Gori
         # argument cannot carry the VALUE. `create` is `add` answering the new id, which this
         # tool echoes.
         id = rules_model.create(target, part, pattern, replacement, op, match_kind, name, host,
-          body_file, scope: scope, enabled: enabled)
+          body_file, scope: scope, enabled: enabled, respond: respond, respond_args: respond_args)
         if id == 0
           return busy(scope.global? ? "failed to persist global rule (settings not writable)" : "failed to persist rule (store busy or unwritable)")
         end
@@ -154,6 +292,7 @@ module Gori
             j.field "part", part.label
             j.field "op", op.label
             j.field "match", match_kind.label
+            j.field "respond", respond.label if op.short_circuit?
             j.field "enabled", enabled
           end
         end)
@@ -259,11 +398,19 @@ module Gori
         unless valid_rule_regex?(op, match_kind, pattern)
           return err("invalid regex pattern (failed to compile)", "INVALID_ARGUMENT", field: "pattern")
         end
-        replacement = present?(h, "replacement") ? (str(h, "replacement") || "") : existing.replacement
+        draft = mock_flow_draft(h)
+        return draft if draft.is_a?(Result)
+        replacement = present?(h, "replacement") ? (str(h, "replacement") || "") : (draft.try(&.replacement) || existing.replacement)
         name = present?(h, "name") ? (str(h, "name") || "") : existing.name
         host = present?(h, "host") ? (str(h, "host") || "") : existing.host
         body_file = present?(h, "body_file") ? (str(h, "body_file") || "") : existing.body_file
-        if bad = short_circuit_error(op, replacement, body_file)
+        mock = mock_rule_args(h, op, body_file, existing.op.short_circuit? ? existing : nil)
+        return mock if mock.is_a?(Result)
+        respond, respond_args, body_file = mock
+        # A fault answers nothing: switching a stub to one drops the old response rather than
+        # refusing the switch over bytes the new answer never sends (the TUI does the same).
+        replacement = "" if respond.fault? && !describes?(h, "replacement")
+        if bad = short_circuit_error(op, replacement, body_file, respond, respond_args)
           return bad
         end
         if bad = pipe_shape_error(op, replacement)
@@ -272,7 +419,7 @@ module Gori
         model = rules_model
         # Through the model — see `create_rule` for why the whole family had to move.
         updated = model.update(id, target, part, pattern, replacement, op, match_kind, name,
-          host, body_file, scope: scope)
+          host, body_file, scope: scope, respond: respond, respond_args: respond_args)
         return busy("rule not updated (store busy or unwritable); the rule is unchanged") unless updated
         if present?(h, "enabled")
           en = bool_arg(h, "enabled", existing.enabled?)
@@ -720,6 +867,19 @@ module Gori
       # implement them. `Tools#list` composes every one of these; the action gate is applied
       # here rather than around one long block, so a new write tool cannot be added on the
       # wrong side of it by landing in the wrong place in a 1,300-line method.
+      # The #1237 mocking arguments, shared by create_rule and update_rule. Terse on purpose: every
+      # byte here counts against each profile's catalogue budget (`catalogue_size_spec.cr`).
+      private def mock_rule_props(s) : Nil
+        s.field "respond", enumprop("short_circuit: where the answer comes from (default: inferred from the dir, fault or body_file argument, else inline)", RESPOND_KINDS)
+        s.field "dir", strprop("respond=dir: directory to serve; the request path picks the file (dot segments and dotfiles refused)")
+        s.field "strip_prefix", strprop("respond=dir: URL prefix removed before the path is joined under dir, e.g. /static/")
+        s.field "fallthrough", boolprop("respond=dir: a request whose file is MISSING goes to the origin instead of a 502")
+        s.field "fault", enumprop("respond=fault: close (FIN), reset (RST) or hang (hold, bounded by hang_ms)", FAULT_KINDS)
+        s.field "delay_ms", intprop("short_circuit: wait this long before answering (max #{Store::RespondArgs::MAX_WAIT_MS})")
+        s.field "hang_ms", intprop("fault=hang: how long to hold (default #{Store::RespondArgs::DEFAULT_HANG_MS})")
+        s.field "from_flow_id", intprop("short_circuit: copy this flow's captured response into the rule; pattern/host/replacement default from it")
+      end
+
       private def list_rules_tools(j : JSON::Builder) : Nil
         tool j, "list_rules",
           "List the Match & Replace rules applied to this project (the Rewriter tab — literal/regex " \
@@ -760,6 +920,7 @@ module Gori
           s.field "part", enumprop("head = request/status line + headers, body = entity body, ws = a WebSocket MESSAGE on an upgraded (101) flow with target picking the direction (request = client→server, response = server→client). Default head; ignored by header ops and short_circuit, which are head-only, and rejected for those ops when set to ws (replace and pipe are the two ops that can target ws)", RULE_PARTS)
           s.field "op", enumprop("what the rule does (default replace). short_circuit ANSWERS the request from the rule and never dials the origin — nothing is sent upstream; use it to stub a response that does not exist. pipe RUNS A LOCAL COMMAND: 'replacement' is an argv, exec'd with no shell and with the operator's own privileges, fed the matched bytes on stdin, its stdout spliced back in — on timeout, non-zero exit or a failed spawn the bytes pass through unchanged and a notice is written (P6)", RULE_OPS)
           s.field "body_file", strprop("short_circuit only: serve this file's bytes as the response BODY instead of the inline one (re-read when the file changes). Empty = inline")
+          mock_rule_props(s)
           s.field "match", enumprop("for replace: how `pattern` is read (default literal). Regex supports $1/\\1 capture groups", RULE_MATCHES)
           s.field "name", strprop("optional label for the rule")
           s.field "host", strprop("optional host glob scoping the rule (e.g. 'example.com' substring, '*.example.com' wildcard; empty = all hosts)")
@@ -788,6 +949,7 @@ module Gori
           s.field "part", enumprop("which part of the message (ws = a WebSocket message; replace only)", RULE_PARTS)
           s.field "op", enumprop("what the rule does", RULE_OPS)
           s.field "body_file", strprop("short_circuit only: file served as the response body ('' = inline)")
+          mock_rule_props(s)
           s.field "match", enumprop("how `pattern` is read", RULE_MATCHES)
           s.field "name", strprop("rule label")
           s.field "host", strprop("host glob ('' = all hosts)")

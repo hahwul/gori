@@ -999,7 +999,7 @@ module Gori::Tui
       name = rule.name.empty? ? "" : "#{rule.name} copy"
       unless rules_engine.add(rule.target, rule.part, rule.pattern, rule.replacement,
                rule.op, rule.match_kind, name, rule.host, rule.body_file, scope: rule.scope,
-               enabled: rule.enabled?)
+               enabled: rule.enabled?, respond: rule.respond, respond_args: rule.respond_args)
         return @host.status("rule NOT duplicated (project busy or settings not writable)")
       end
       # Land on the copy, as `apply_rewriter_rule` lands on an added rule and `install_preset`
@@ -1044,7 +1044,8 @@ module Gori::Tui
         from = ov.edit_scope || Store::RuleScope::Project
         return true if reject_inert_edit?(id, from)
         unless rules_engine.update(id, ov.target, ov.part, ov.pattern, ov.replacement,
-                 ov.op, ov.match_kind, ov.name, ov.host, ov.body_file, scope: from)
+                 ov.op, ov.match_kind, ov.name, ov.host, ov.body_file, scope: from,
+                 respond: ov.respond, respond_args: ov.respond_args)
           @host.status("rule NOT saved (project busy or settings not writable) — it is unchanged")
           return true
         end
@@ -1061,7 +1062,8 @@ module Gori::Tui
         end
       else
         unless rules_engine.add(ov.target, ov.part, ov.pattern, ov.replacement,
-                 ov.op, ov.match_kind, ov.name, ov.host, ov.body_file, scope: ov.scope)
+                 ov.op, ov.match_kind, ov.name, ov.host, ov.body_file, scope: ov.scope,
+                 respond: ov.respond, respond_args: ov.respond_args)
           # Report rather than re-select: with nothing added, `last_index_of_scope` would
           # move the highlight onto whatever already sat at the end of that block.
           @host.status("rule NOT added (project busy or settings not writable)")
