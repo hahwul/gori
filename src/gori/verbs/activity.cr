@@ -48,7 +48,7 @@ module Gori
       r.register Verb::Definition.new(
         "activity.find", "Filter events",
         "Filter the feed by text across source, kind and message",
-        Verb::Scope::ProjectActivity, [Verb::Chord.new("/")], mnemonic: 'f') { |ctx| ctx.activity_find; nil }
+        Verb::Scope::ProjectActivity, [Verb::Chord.new("/")], intent: :filter) { |ctx| ctx.activity_find; nil }
 
       # MENU-ONLY, no direct chord. `s` and `l` each cycle back to "all" and `/`+esc drops the
       # text filter, so every narrowing can already be released where it was set. Kept as an

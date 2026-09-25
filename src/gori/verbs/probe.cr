@@ -228,7 +228,7 @@ module Gori
       r.register Verb::Definition.new(
         "probe-rules.filter", "Filter rules", "Filter the rule list by name, category or description",
         Verb::Scope::ProbeRules, [Verb::Chord.new("/")],
-        mnemonic: 'f') { |ctx| ctx.probe_rule_filter; nil }
+        intent: :filter) { |ctx| ctx.probe_rule_filter; nil }
     end
   end
 end

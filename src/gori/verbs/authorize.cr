@@ -63,7 +63,7 @@ module Gori
 
       r.register Verb::Definition.new(
         "authorize.filter", "Filter requests", "Filter the queue by method / host / path / verdict",
-        Verb::Scope::Authorize, [Verb::Chord.new("/")], available: queued, mnemonic: 'f') { |ctx| ctx.authorize_filter; nil }
+        Verb::Scope::Authorize, [Verb::Chord.new("/")], available: queued, intent: :filter) { |ctx| ctx.authorize_filter; nil }
 
       r.register Verb::Definition.new(
         "authorize.copy", "Copy", "Copy the selected request as `METHOD host/path`",

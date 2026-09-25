@@ -36,7 +36,7 @@ module Gori
 
       r.register Verb::Definition.new(
         "oast.filter", "Filter callbacks", "Filter the callbacks list by protocol/method/source/destination/provider",
-        Verb::Scope::OastCallbacks, [Verb::Chord.new("/")], mnemonic: 'f') { |ctx| ctx.oast_filter; nil }
+        Verb::Scope::OastCallbacks, [Verb::Chord.new("/")], intent: :filter) { |ctx| ctx.oast_filter; nil }
 
       # Resume a persisted session — the one you reach for ONCE, at the start of a sitting.
       # `⇧R` and no longer a plain `r`: bare `r` means "send this to the Repeater" in the five

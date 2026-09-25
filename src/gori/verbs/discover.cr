@@ -43,7 +43,7 @@ module Gori
 
       r.register Verb::Definition.new(
         "discover.filter", "Filter findings", "Filter the FINDINGS table by status / source / URL",
-        Verb::Scope::Discover, [Verb::Chord.new("/")], mnemonic: 'f') { |ctx| ctx.discover_filter; nil }
+        Verb::Scope::Discover, [Verb::Chord.new("/")], intent: :filter) { |ctx| ctx.discover_filter; nil }
 
       r.register Verb::Definition.new(
         "discover.copy", "Copy", "Copy the selected finding's URL",

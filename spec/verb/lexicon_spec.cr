@@ -45,16 +45,10 @@ module LexiconSpec
   # Rows whose id names an intent but whose letter is decided elsewhere. Each line names why,
   # and the last example fails once a row stops needing its line.
   SUFFIX_ALLOWED = {
-    "history.delete"     => "WP2 #1: the list's `d` is Discover until Discover moves into Send flow to…",
-    "detail.delete"      => "WP2 #1: `D` until the detail's `d` is free",
-    "mine.filter"        => "the strip owns `/` in every Miner view since #1055; the table filter is `F`",
-    "discover.filter"    => "WP4: menu `f`, moving to `/`",
-    "oast.filter"        => "WP4: menu `f`, moving to `/`",
-    "authorize.filter"   => "WP4: menu `f`, moving to `/`",
-    "probe-rules.filter" => "WP4: menu `f`, moving to `/`",
-    "rewriter.filter"    => "WP4: menu `f`, moving to `/`",
-    "colormarker.filter" => "WP4: menu `f`, moving to `/`",
-    "params.export"      => "menu `w`, moving to `E`",
+    "history.delete" => "WP2 #1: the list's `d` is Discover until Discover moves into Send flow to…",
+    "detail.delete"  => "WP2 #1: `D` until the detail's `d` is free",
+    "mine.filter"    => "the strip owns `/` in every Miner view since #1055; the table filter is `F`",
+    "params.export"  => "menu `w`, moving to `E`",
   }
 
   # {verb, other} pairs where a reserved letter is spent on a different intent in a scope that

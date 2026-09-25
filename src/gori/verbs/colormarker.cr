@@ -33,7 +33,7 @@ module Gori
       r.register Verb::Definition.new(
         "colormarker.filter", "Filter rules", "Filter the rule list by name, match filter, colour or scope",
         Verb::Scope::Colormarker, [Verb::Chord.new("/")], available: in_cm,
-        mnemonic: 'f', section: :rules) { |ctx| ctx.colormarker_filter; nil }
+        intent: :filter, section: :rules) { |ctx| ctx.colormarker_filter; nil }
       r.register Verb::Definition.new(
         "colormarker.copy", "Copy", "Copy the selected rule's match filter (the QL that paints the row)",
         Verb::Scope::Colormarker, [Verb::Chord.new("y")], available: on_rule, intent: :copy, section: :rules) { |ctx| ctx.read_copy; nil }

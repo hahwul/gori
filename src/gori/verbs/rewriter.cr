@@ -40,7 +40,7 @@ module Gori
       r.register Verb::Definition.new(
         "rewriter.filter", "Filter rules", "Filter the rule list by name, match, replacement, part or scope",
         Verb::Scope::Rewriter, [Verb::Chord.new("/")], available: in_rw,
-        mnemonic: 'f', section: :rules) { |ctx| ctx.rewriter_filter; nil }
+        intent: :filter, section: :rules) { |ctx| ctx.rewriter_filter; nil }
       r.register Verb::Definition.new(
         "rewriter.edit", "Edit rule", "Edit the selected rule in the popup editor",
         Verb::Scope::Rewriter, [Verb::Chord.new("enter"), Verb::Chord.new("e")], available: has_rule, intent: :edit, section: :rules) { |ctx| ctx.rewriter_edit; nil }
