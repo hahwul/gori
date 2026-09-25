@@ -3595,6 +3595,21 @@ retry, and a refresh that itself 401s needs loop protection against an account l
 - **Per process**, like the values themselves: a TUI refresh does not update a running
   `gori mcp`, and `gori run session refresh` rebinds a table that ends with the command.
 
+### 2026-09-25: a menu outside the registry borrows the app's letters
+
+Refines: [P1](#p1). #1274.
+
+The Project Picker runs before any project is open, so its space menu is a hand-rolled table
+rather than registry verbs. It had drifted into its own dialect: rename `r`, export `e`, clear
+marks `n`, letters matched case-blind, an unmapped key ignored, and Import jumping behind
+Delete once marks were set. An operator learns one set of mnemonics, so a menu outside the
+registry spells a shared intent with the app's letter (rename `e`, export `E`, clear marks `N`,
+delete `d`, open `o`), matches case-sensitively, dismisses on an unmapped key with the same
+j/k/h/l fallback, and keeps one row order whether or not marks exist, with the destructive
+entry last. Caps Lock no longer reaches the picker's lower-case entries, as it never did in the
+app. `ProjectPicker.space_entries` and `.space_key` are pure so `spec/tui/project_marks_spec.cr`
+can pin the letters.
+
 ### 2026-09-25: a space-menu letter is checked against every key its tab answers first
 
 Refines: the 2026-09-12 entry above. #1274 WP0.
