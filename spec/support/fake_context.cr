@@ -448,8 +448,18 @@ class FakeExecContext < Gori::Verb::ExecContext
     @detail_navigable
   end
 
+  # Settable per verb id — what the space menu draws in a row's hint column.
+  property menu_states = {} of String => String
+
+  def menu_state(verb_id : String) : String?
+    @menu_states[verb_id]?
+  end
+
+  # Settable per id, like the Runner's READ_SEND / mark-count titles.
+  property menu_titles = {} of String => String
+
   def space_menu_title(verb_id : String) : String?
-    nil
+    @menu_titles[verb_id]?
   end
 
   # Settable so the issue-notes read verbs can be exercised.

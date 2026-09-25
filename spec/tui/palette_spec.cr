@@ -373,6 +373,25 @@ describe Gori::Tui::PaletteState, "tab actions" do
     rows.find(&.includes?("Zap bare")).not_nil!.should_not contain("␣")
   end
 
+  # A family member has no level-1 letter (#1274 WP9), yet search still finds it by title, and
+  # its row names the two keys that reach it.
+  it "finds a family member by title and hints its two-key menu path" do
+    ctx = FakeExecContext.new
+    reg = Gori::Verb::Registry.new
+    reg.register_family(Gori::Verb::Family.new(:send, "Send to…", '>', :send, [{:to_zap, 'z'}]))
+    reg.register(Gori::Verb::Definition.new("demo.member", "Zap member", "", Gori::Verb::Scope::Body,
+      intent: :to_zap) { |_| nil })
+    palette = PaletteState.new(reg)
+    palette.capture(history_body, ctx)
+    palette.reset(ctx)
+    "zap".each_char { |c| palette.append(c, ctx) }
+    palette.results.map(&.id).should eq(["demo.member"])
+
+    backend = MemoryBackend.new(80, 24)
+    palette.render(Screen.new(backend), Rect.new(0, 0, 80, 24))
+    (0...24).map { |y| backend.row(y) }.find(&.includes?("Zap member")).not_nil!.should contain("␣ > z")
+  end
+
   # Opening ^P over an open History detail: the detail's actions are what search finds, and
   # closing the palette puts the detail back so the pick runs against the flow on screen.
   it "searches an open History detail's actions and returns to the detail on close" do

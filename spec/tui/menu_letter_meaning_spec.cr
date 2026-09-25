@@ -19,6 +19,10 @@ require "../spec_helper"
 #   • the Global fallback, for a letter the tab does not bind (or binds only pane-gated
 #     elsewhere): a dropped space on a menu `c` silently stops capture.
 #
+# A family row (#1274 WP9) is a menu letter like any other at level 1, so its key is swept
+# too, as the row `family:<id>` drawn wherever the scope registers a member. Level-2 letters
+# are exempt: they are reached after two keys, never by a dropped space (DESIGN.md §7).
+#
 # It covers the SHIPPED defaults. A user rebind can recreate a clash at runtime; the Hotkeys
 # editor's Conflicts check owns that.
 #
@@ -62,10 +66,27 @@ module MenuLetterMeaning
   # filter, so a dropped space re-filters the list and the next `s` puts it back.
   HARMLESS_GLOBALS = {"scope.toggle-lens"}
 
-  def rows : Array(Gori::Verb::Definition)
-    Gori::Verbs.registry.select do |v|
-      !v.hidden? && v.menu_key && !v.scope.global? && !v.scope.editor?
+  # One level-1 row: a verb on its `menu_key`, or a family on its key. `sections` is where it
+  # is drawn — nil for every view of the scope (a COMMON row, a SUB-TABS bucket row, or a
+  # family with a member in either), else the pane sections.
+  record Row, id : String, key : Char, scope : Gori::Verb::Scope, sections : Array(Symbol)?
+
+  def rows : Array(Row)
+    reg = Gori::Verbs.registry
+    listed = reg.select { |v| !v.hidden? && !v.scope.global? && !v.scope.editor? }
+    verbs = listed.compact_map do |v|
+      next unless k = v.menu_key
+      Row.new(v.id, k, v.scope, everywhere?(v.section) ? nil : [v.section])
     end
+    families = listed.select(&.member?).group_by { |v| {v.family.not_nil!, v.scope} }.map do |(fid, scope), members|
+      secs = members.map(&.section).uniq!
+      Row.new("family:#{fid}", reg.family(fid).not_nil!.key, scope, secs.any? { |sec| everywhere?(sec) } ? nil : secs)
+    end
+    verbs + families
+  end
+
+  def everywhere?(section : Symbol) : Bool
+    section == :common || Gori::Verb::Registry::SUBTAB_SECTIONS.includes?(section)
   end
 
   # The chord a typed menu letter would be read as on the tab (a typed capital is shift +
@@ -74,19 +95,20 @@ module MenuLetterMeaning
     k.ascii_uppercase? ? Gori::Verb::Chord.new(k.downcase.to_s, shift: true) : Gori::Verb::Chord.new(k.to_s)
   end
 
-  def editor_view?(v : Gori::Verb::Definition) : Bool
+  def editor_view?(v : Row) : Bool
     return false unless EDITOR_VIEWS.has_key?(v.scope)
     return true unless secs = EDITOR_VIEWS[v.scope]
-    v.section == :common || Gori::Verb::Registry::SUBTAB_SECTIONS.includes?(v.section) ||
-      secs.includes?(v.section)
+    return true unless shown = v.sections
+    shown.any? { |sec| secs.includes?(sec) }
   end
 
   # Every view this row can appear in is an editor pane, so the Editor scope answers first
   # and a letter it binds never falls through to Global.
-  def editor_only?(v : Gori::Verb::Definition) : Bool
+  def editor_only?(v : Row) : Bool
     return false unless EDITOR_VIEWS.has_key?(v.scope)
     return true unless secs = EDITOR_VIEWS[v.scope]
-    secs.includes?(v.section)
+    return false unless shown = v.sections
+    shown.all? { |sec| secs.includes?(sec) }
   end
 
   class_getter strip_scopes : Set(Gori::Verb::Scope) do
@@ -117,8 +139,8 @@ module MenuLetterMeaning
   # The Editor link first (it answers ahead of the tab in an editor pane), then the tab's own
   # scope, then — for a letter the tab leaves unbound, or binds only to a verb whose chord is
   # not live where this row is drawn — the Global fallback.
-  private def check_keymap(found, keymap : Gori::Verb::Keymap, v : Gori::Verb::Definition, where : String) : Nil
-    chord = chord_for(v.menu_key.not_nil!)
+  private def check_keymap(found, keymap : Gori::Verb::Keymap, v : Row, where : String) : Nil
+    chord = chord_for(v.key)
     e = editor_view?(v) ? keymap.lookup_in(chord, Gori::Verb::Scope::Editor) : nil
     e = nil if e && !live_where_shown?(Gori::Verbs.registry[e], v)
     found[{v.id, e}] << where if e && e != v.id
@@ -133,16 +155,15 @@ module MenuLetterMeaning
   end
 
   # The sections this row is drawn in, or nil for every one: a COMMON row and a SUB-TABS
-  # bucket row ride every view of the scope (#1055); anything else only its own section.
-  def shown_in(v : Gori::Verb::Definition) : Array(Symbol)?
-    return nil if v.section == :common || Gori::Verb::Registry::SUBTAB_SECTIONS.includes?(v.section)
-    [v.section]
+  # bucket row ride every view of the scope (#1055); anything else only its own section(s).
+  def shown_in(v : Row) : Array(Symbol)?
+    v.sections
   end
 
   # Is `other`'s chord live in SOME section this row is drawn in (`Definition#chord_sections`)?
   # A key gated to the response pane is no clash for a row the request pane alone draws —
   # there the press is not that verb at all.
-  def live_where_shown?(other : Gori::Verb::Definition, v : Gori::Verb::Definition) : Bool
+  def live_where_shown?(other : Gori::Verb::Definition, v : Row) : Bool
     return true unless secs = other.chord_sections
     return true unless shown = shown_in(v)
     shown.any? { |sec| secs.includes?(sec) }
@@ -150,14 +171,14 @@ module MenuLetterMeaning
 
   # …in EVERY section this row is drawn in. Where it is not, the press walks on past the tab
   # scope (`Keymap#resolve`) and may reach Global — so a pane gate on `c` is still caught.
-  def live_everywhere_shown?(other : Gori::Verb::Definition, v : Gori::Verb::Definition) : Bool
+  def live_everywhere_shown?(other : Gori::Verb::Definition, v : Row) : Bool
     return true unless secs = other.chord_sections
     return false unless shown = shown_in(v)
     shown.all? { |sec| secs.includes?(sec) }
   end
 
   private def global_fallthrough(keymap : Gori::Verb::Keymap, chord : Gori::Verb::Chord,
-                                 v : Gori::Verb::Definition, editor : String?) : String?
+                                 v : Row, editor : String?) : String?
     return nil if editor && editor_only?(v)
     g = keymap.lookup_in(chord, Gori::Verb::Scope::Global)
     return nil if g.nil? || g == v.id || HARMLESS_GLOBALS.includes?(g)
@@ -165,10 +186,10 @@ module MenuLetterMeaning
   end
 
   # A row the strip-focused card shows (COMMON + SUB-TABS) on a letter the strip answers raw.
-  private def strip_clash(v : Gori::Verb::Definition) : String?
+  private def strip_clash(v : Row) : String?
     return nil unless strip_scopes.includes?(v.scope)
-    return nil unless v.section == :common || Gori::Verb::Registry::SUBTAB_SECTIONS.includes?(v.section)
-    return nil unless raw = STRIP_KEYS[v.menu_key.not_nil!]?
+    return nil unless v.sections.nil?
+    return nil unless raw = STRIP_KEYS[v.key]?
     name, suffix = raw
     return nil if name == "rename" && v.scope.notes?
     return nil if suffix && v.id.ends_with?(".#{suffix}")

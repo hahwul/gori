@@ -202,6 +202,9 @@ module Gori::Tui
       # to @overlay so it floats over WHATEVER is underneath (the History list, an
       # open detail …) without disturbing that state; the scope is captured at open.
       @space_menu_open = false
+      # The "what can I do here" the open menu was built from — what a sticky family re-opens
+      # against. Nil while the menu is closed.
+      @space_menu_here = nil.as(ActionContext?)
       # The ^G "go to line" prompt — also orthogonal to @overlay (floats over an
       # editor or the detail view). @goto_target is the view captured at ^G time.
       @goto_open = false
@@ -2580,12 +2583,13 @@ module Gori::Tui
 
     # Keys for the space action menu — mnemonic-first (helix leader): a printable key
     # matching an entry's menu_key runs it; ↑/↓ (+ Tab) navigate and ↵ runs the
-    # highlighted one; esc or any unmapped key dismisses. The chosen verb runs scoped
-    # to where space was pressed (P1).
+    # highlighted one; any unmapped key dismisses (at level 2 too: the whole menu). A family
+    # row's key descends, and esc/⌫ come back up one level — closing from level 1. The
+    # chosen verb runs scoped to where space was pressed (P1).
     private def handle_space_menu_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
-      if key.escape?
-        close_space_menu
+      if key.escape? || key.backspace?
+        close_space_menu unless @space_menu.back
       elsif key.up? || key.back_tab?
         @space_menu.move(-1)
       elsif key.down? || key.tab?
@@ -2595,14 +2599,14 @@ module Gori::Tui
       elsif key.right?
         space_menu_move_column(1)
       elsif key.enter?
-        run_space_verb(@space_menu.selected_verb)
+        activate_space_entry(@space_menu.selected_entry)
       elsif (c = ev.char) && !ev.ctrl? && !ev.alt?
         # A bound mnemonic always wins (helix leader). Only when j/k/h/l are NOT a live
         # mnemonic in this menu do they fall back to vim-style nav — so the reflex
         # keystroke moves the selection instead of dismissing the menu, while scopes
         # that bind 'k' (link-to-issue) or 'h' (add-host, dismiss-host) keep theirs.
-        if verb = @space_menu.verb_for(c)
-          run_space_verb(verb)
+        if entry = @space_menu.entry_for(c)
+          activate_space_entry(entry)
         elsif c == 'j'
           @space_menu.move(1)
         elsif c == 'k'
@@ -2629,10 +2633,43 @@ module Gori::Tui
       @space_menu.move_column(delta, Layout.compute(w, h, statusline_active?).body)
     end
 
-    # Close the menu, then run the verb (if any) and surface its status toast.
+    # ↵, a click or a row's key: a family row descends, a verb row runs, and the inert
+    # "nothing here right now" row does nothing — the card stays up for esc.
+    private def activate_space_entry(entry : SpaceMenu::Entry?) : Nil
+      if verb = @space_menu.activate(entry)
+        run_space_verb(verb)
+      end
+    end
+
+    # Close the menu, then run the verb (if any) and surface its status toast. From a STICKY
+    # family's card (`Verb::Family#sticky?`) the card comes back at the same row afterwards —
+    # unless the verb opened something of its own (an overlay, a picker, a prompt) or moved
+    # focus somewhere the card no longer describes; then it stays closed.
     private def run_space_verb(verb : Verb::Definition?) : Nil
+      point = @space_menu.sticky_point
+      was = @space_menu_here
       close_space_menu
-      @toast = verb.call(self) || @toast if verb
+      return unless verb
+      before = space_menu_blockers
+      @toast = verb.call(self) || @toast
+      reopen_sticky_family(point, was) if point && was && space_menu_blockers == before
+    end
+
+    # Every surface a verb could have opened that the space menu must not cover.
+    private def space_menu_blockers
+      {@overlay, @active_overlay.try(&.object_id), copy_as_shown?, send_to_shown?,
+       @goto_open, @search_open, @rename_open, @tag_edit_open}
+    end
+
+    private def reopen_sticky_family(point : {Verb::Family, Int32}, was : ActionContext) : Nil
+      here = action_context
+      return unless here.scope == was.scope && here.section == was.section && here.subtabs == was.subtabs
+      w, h = @backend.size
+      return unless Layout.usable?(w, h) && Layout.compute(w, h, statusline_active?).body.h >= 3
+      @space_menu.open(here.scope, here.section, self, banner: here.banner, subtabs: here.subtabs)
+      return unless @space_menu.resume(point)
+      @space_menu_here = here
+      @space_menu_open = true
     end
 
     # The verb `chord` would fire if the body had focus, or nil. Deliberately NOT gated on
@@ -3070,7 +3107,10 @@ module Gori::Tui
     # the active tab, and any open overlay (so the user always sees what the keys
     # under their fingers do right now).
     private def key_hints : String
-      return "press a key · ↑/↓ select · ←/→ column · ↵ run · esc close" if @space_menu_open
+      if @space_menu_open
+        return "press a key · ↑/↓ select · ↵ run · esc back" if @space_menu.level
+        return "press a key · ↑/↓ select · ←/→ column · ↵ run · esc close"
+      end
       if pt = prompt_picker # prompt-tier Overlays carry their own hint too
         return pt.hint
       end
@@ -4092,6 +4132,7 @@ module Gori::Tui
     # detail → HistoryDetail, the Repeater response → Repeater, the tab bar → Sidebar.
     def open_space_menu : Nil
       here = action_context
+      @space_menu_here = here # what a sticky family re-opens against (#run_space_verb)
       # captures the scope+section + populates entries
       @space_menu.open(here.scope, here.section, self, banner: here.banner, subtabs: here.subtabs)
       # Don't open an empty popup: some focus areas (the tab bar, an open detail)
@@ -4114,6 +4155,7 @@ module Gori::Tui
 
     private def close_space_menu : Nil
       @space_menu_open = false
+      @space_menu_here = nil
     end
 
     private def open_goto(target : Symbol) : Nil
@@ -5629,6 +5671,12 @@ module Gori::Tui
       issue.send-to project.send-to rewriter.send-to comparer.send-to intercept.send-to
       oast.send-to probe.send-to sequence.send-to mine.send-to detail.send-to
     ]
+
+    # No row states yet: the toggle families (Display…, Protocol…) answer here, one `case`
+    # arm per toggle, when they land (#1274 WP9).
+    def menu_state(verb_id : String) : String?
+      nil
+    end
 
     def space_menu_title(verb_id : String) : String?
       return "Copy selection" if READ_COPY_VERBS.includes?(verb_id) && read_selection_active?

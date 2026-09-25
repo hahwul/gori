@@ -835,7 +835,7 @@ describe Gori::Tui::SpaceMenu do
     }
     menu_scopes.each do |scope|
       verbs = registry.select { |v| v.scope == scope && !v.hidden? }
-      verbs.select(&.chords.empty?).all?(&.menu_key).should be_true # chordless ⇒ keyed
+      verbs.select(&.chords.empty?).all?(&.menu_listed?).should be_true # chordless ⇒ keyed (or in a family)
 
       common = verbs.select { |v| v.section == :common }
       no_collision.call(common)
@@ -1060,5 +1060,266 @@ describe "the SUB-TABS bucket, on every strip and from every focus level" do
     end
   ensure
     Gori::Settings.keymap_os = "auto"
+  end
+end
+
+# The two-level menu (#1274 WP9) against a synthetic registry: a `Verb::Family` draws as one
+# row, its key descends, and esc/⌫ come back (`SpaceMenu#back`). The Runner's key path is a
+# thin wrapper over `activate` / `back` / `sticky_point` + `resume`, which is why those are
+# what is pinned here.
+private def family_menu(*, members_available : Bool = true, sticky : Bool = false,
+                        member_section : Symbol = :common) : {SpaceMenu, Gori::Verb::Family, FakeExecContext}
+  reg = Gori::Verb::Registry.new
+  family = Gori::Verb::Family.new(:send, "Send to…", '>', :send,
+    [{:to_a, 'a'}, {:to_b, 'b'}, {:to_c, 'c'}], sticky: sticky)
+  reg.register_family(family)
+  gate = ->(_c : Gori::Verb::ExecContext) { members_available }
+  reg.register(Gori::Verb::Definition.new("demo.view", "Look", "x", Gori::Verb::Scope::Body,
+    mnemonic: 'v', group: :view) { |_| nil })
+  # Registered out of table order: level 2 still lists a, b, c.
+  reg.register(Gori::Verb::Definition.new("demo.b", "To B", "x", Gori::Verb::Scope::Body,
+    section: member_section, intent: :to_b, available: gate) { |_| nil })
+  reg.register(Gori::Verb::Definition.new("demo.a", "To A", "x", Gori::Verb::Scope::Body,
+    section: member_section, intent: :to_a, available: gate) { |_| nil })
+  reg.register(Gori::Verb::Definition.new("demo.c", "To C", "x", Gori::Verb::Scope::Body,
+    section: member_section, intent: :to_c, available: ->(_c : Gori::Verb::ExecContext) { false }) { |_| nil })
+  reg.register(Gori::Verb::Definition.new("demo.req", "Pane thing", "x", Gori::Verb::Scope::Body,
+    mnemonic: 'q', section: :request) { |_| nil })
+  ctx = FakeExecContext.new
+  menu = SpaceMenu.new(reg)
+  menu.open(Gori::Verb::Scope::Body, :request, ctx)
+  {menu, family, ctx}
+end
+
+private def render_menu(menu : SpaceMenu) : MemoryBackend
+  backend = MemoryBackend.new(80, 30)
+  menu.render(Screen.new(backend), Rect.new(0, 0, 80, 28))
+  backend
+end
+
+describe "the space menu's verb families (#1274 WP9)" do
+  it "pins the family bands to the menu's own" do
+    (Gori::Tui::SpaceMenu::GROUP_ORDER + [:none]).to_set.should eq(Gori::Verb::Family::BANDS.to_set)
+  end
+
+  it "draws a family's members as ONE row, on the family key, in the family's band" do
+    menu, _, _ = family_menu
+    row = menu.entry_for('>').not_nil!
+    row.family?.should be_true
+    row.id.should eq("family:send")
+    menu.verb_for('>').should be_nil # a family key runs nothing
+    %w[demo.a demo.b demo.c].each { |id| menu.entries.map(&.id).should_not contain(id) }
+    menu.verb_for('a').should be_nil # members have no level-1 letter
+
+    screen = render_menu(menu)
+    screen.contains?("─ SEND ─").should be_true
+    screen.contains?("Send to…").should be_true
+    screen.contains?("›").should be_true # the row says it opens a card
+  end
+
+  it "leaves an untagged bucket header-free, the family row an untagged row in it" do
+    reg = Gori::Verb::Registry.new
+    reg.register_family(Gori::Verb::Family.new(:send, "Send to…", '>', :send, [{:to_a, 'a'}]))
+    reg.register(Gori::Verb::Definition.new("demo.run", "Run", "x", Gori::Verb::Scope::Body, mnemonic: 'r') { |_| nil })
+    reg.register(Gori::Verb::Definition.new("demo.a", "To A", "x", Gori::Verb::Scope::Body, intent: :to_a) { |_| nil })
+    reg.register(Gori::Verb::Definition.new("demo.stop", "Stop", "x", Gori::Verb::Scope::Body, mnemonic: 's') { |_| nil })
+    menu = SpaceMenu.new(reg)
+    menu.open(Gori::Verb::Scope::Body, :common, FakeExecContext.new)
+    menu.entries.map(&.id).should eq(["demo.run", "family:send", "demo.stop"])
+    menu.entry_for('>').not_nil!.group.should eq(:none)
+    screen = render_menu(menu)
+    screen.contains?("─ SEND ─").should be_false
+    screen.contains?("─ COMMON ─").should be_false
+    screen.contains?("Send to…").should be_true
+  end
+
+  it "puts the family row in its band when the bucket is banded already" do
+    reg = Gori::Verb::Registry.new
+    reg.register_family(Gori::Verb::Family.new(:send, "Send to…", '>', :send, [{:to_a, 'a'}]))
+    reg.register(Gori::Verb::Definition.new("demo.look", "Look", "x", Gori::Verb::Scope::Body,
+      mnemonic: 'l', group: :view) { |_| nil })
+    reg.register(Gori::Verb::Definition.new("demo.a", "To A", "x", Gori::Verb::Scope::Body, intent: :to_a) { |_| nil })
+    reg.register(Gori::Verb::Definition.new("demo.run", "Run", "x", Gori::Verb::Scope::Body, mnemonic: 'r') { |_| nil })
+    menu = SpaceMenu.new(reg)
+    menu.open(Gori::Verb::Scope::Body, :common, FakeExecContext.new)
+    menu.entry_for('>').not_nil!.group.should eq(:send)
+    menu.entries.map(&.id).should eq(["demo.look", "family:send", "demo.run"]) # VIEW, SEND, then the leftovers
+    screen = render_menu(menu)
+    screen.contains?("─ VIEW ─").should be_true
+    screen.contains?("─ SEND ─").should be_true
+  end
+
+  it "files the row under the first bucket that holds a member" do
+    menu, _, _ = family_menu(member_section: :request)
+    # COMMON holds only `v`; the members are REQUEST's, so the row sits with `q` — in its own
+    # SEND band inside that bucket.
+    menu.entries.map(&.id).should eq(["demo.view", "family:send", "demo.req"])
+    menu.entry_for('>').not_nil!.section.should eq(:request)
+
+    common, _, _ = family_menu
+    common.entry_for('>').not_nil!.section.should eq(:common)
+  end
+
+  it "files the row under COMMON when a member sits there, even if a pane member came first" do
+    reg = Gori::Verb::Registry.new
+    reg.register_family(Gori::Verb::Family.new(:send, "Send to…", '>', :send, [{:to_a, 'a'}, {:to_b, 'b'}]))
+    reg.register(Gori::Verb::Definition.new("demo.pane", "Pane", "x", Gori::Verb::Scope::Body,
+      intent: :to_a, section: :request) { |_| nil })
+    reg.register(Gori::Verb::Definition.new("demo.common", "Common", "x", Gori::Verb::Scope::Body,
+      intent: :to_b) { |_| nil })
+    menu = SpaceMenu.new(reg)
+    menu.open(Gori::Verb::Scope::Body, :request, FakeExecContext.new)
+    menu.entry_for('>').not_nil!.section.should eq(:common)
+    menu.activate(menu.entry_for('>'))
+    menu.entries.map(&.id).should eq(["demo.pane", "demo.common"]) # both, whatever bucket they are in
+  end
+
+  it "descends on the family key: the available members, in table order, on the table's letters" do
+    menu, family, _ = family_menu
+    menu.activate(menu.entry_for('>')).should be_nil # descending runs nothing
+    menu.level.should eq(family)
+    menu.entries.map(&.id).should eq(["demo.a", "demo.b"]) # c is unavailable
+    menu.entries.map(&.menu_key).should eq(['a', 'b'])
+    menu.verb_for('a').try(&.id).should eq("demo.a")
+    menu.activate(menu.entry_for('b')).try(&.id).should eq("demo.b")
+    menu.card_title.should eq("SPACE › SEND TO")
+  end
+
+  it "descends on ↵ over the family row too" do
+    menu, family, _ = family_menu
+    menu.set_selected(menu.entries.index!(&.family?))
+    menu.activate(menu.selected_entry)
+    menu.level.should eq(family)
+  end
+
+  it "goes back ONE level with the level-1 selection restored, and reports false at level 1" do
+    menu, _, _ = family_menu
+    at = menu.entries.index!(&.family?)
+    menu.set_selected(at)
+    menu.activate(menu.selected_entry)
+    menu.set_selected(1)
+    menu.back.should be_true
+    menu.level.should be_nil
+    menu.selected.should eq(at)
+    menu.selected_entry.not_nil!.family?.should be_true
+    menu.back.should be_false # the Runner closes instead
+  end
+
+  it "draws the row even when no member is available, and lists one inert row below it" do
+    menu, _, _ = family_menu(members_available: false)
+    menu.entry_for('>').not_nil!.family?.should be_true # static: never decided by available?
+    menu.activate(menu.entry_for('>'))
+    menu.entries.size.should eq(1)
+    menu.entries.first.inert?.should be_true
+    menu.entries.first.menu_key.should be_nil
+    menu.activate(menu.selected_entry).should be_nil # ↵ on it does nothing
+    menu.entry_for('a').should be_nil                # a second key typed blind matches nothing
+    render_menu(menu).contains?(Gori::Tui::SpaceMenu::INERT_TITLE).should be_true
+  end
+
+  it "never collapses a family into its lone member" do
+    reg = Gori::Verb::Registry.new
+    reg.register_family(Gori::Verb::Family.new(:send, "Send to…", '>', :send, [{:to_a, 'a'}]))
+    reg.register(Gori::Verb::Definition.new("demo.a", "To A", "x", Gori::Verb::Scope::Body, intent: :to_a) { |_| nil })
+    menu = SpaceMenu.new(reg)
+    menu.open(Gori::Verb::Scope::Body, :common, FakeExecContext.new)
+    menu.entries.map(&.id).should eq(["family:send"])
+    menu.activate(menu.entry_for('>'))
+    menu.entries.map(&.id).should eq(["demo.a"])
+  end
+
+  it "draws no row for a family the view registers no member of" do
+    reg = Gori::Verb::Registry.new
+    reg.register_family(Gori::Verb::Family.new(:send, "Send to…", '>', :send, [{:to_a, 'a'}]))
+    reg.register(Gori::Verb::Definition.new("demo.a", "To A", "x", Gori::Verb::Scope::Body,
+      intent: :to_a, section: :response) { |_| nil })
+    reg.register(Gori::Verb::Definition.new("demo.q", "Q", "x", Gori::Verb::Scope::Body,
+      mnemonic: 'q', section: :request) { |_| nil })
+    menu = SpaceMenu.new(reg)
+    menu.open(Gori::Verb::Scope::Body, :request, FakeExecContext.new)
+    menu.entry_for('>').should be_nil
+    menu.descend(reg.family(:send).not_nil!).should be_false
+  end
+
+  it "keeps the state banner in the level-2 breadcrumb" do
+    reg = Gori::Verb::Registry.new
+    reg.register_family(Gori::Verb::Family.new(:send, "Send to…", '>', :send, [{:to_a, 'a'}]))
+    reg.register(Gori::Verb::Definition.new("demo.a", "To A", "x", Gori::Verb::Scope::Body, intent: :to_a) { |_| nil })
+    menu = SpaceMenu.new(reg)
+    menu.open(Gori::Verb::Scope::Body, :common, FakeExecContext.new, banner: "3 MARKED")
+    menu.activate(menu.entry_for('>'))
+    menu.card_title.should eq("SPACE › SEND TO · 3 MARKED")
+    render_menu(menu).contains?("SPACE › SEND TO · 3 MARKED").should be_true
+  end
+
+  it "draws a pinned member at level 1 on its own letter AND inside the family" do
+    reg = Gori::Verb::Registry.new
+    reg.register_family(Gori::Verb::Family.new(:send, "Send to…", '>', :send, [{:to_a, 'a'}, {:to_b, 'b'}]))
+    reg.register(Gori::Verb::Definition.new("demo.a", "To A", "x", Gori::Verb::Scope::Body,
+      intent: :to_a, mnemonic: 'r', pinned: true) { |_| nil })
+    reg.register(Gori::Verb::Definition.new("demo.b", "To B", "x", Gori::Verb::Scope::Body, intent: :to_b) { |_| nil })
+    menu = SpaceMenu.new(reg)
+    menu.open(Gori::Verb::Scope::Body, :common, FakeExecContext.new)
+    menu.verb_for('r').try(&.id).should eq("demo.a")
+    menu.entry_for('>').not_nil!.family?.should be_true
+    menu.activate(menu.entry_for('>'))
+    menu.verb_for('a').try(&.id).should eq("demo.a")
+  end
+
+  it "applies the context's title overrides at level 2 and to the family row" do
+    menu, _, ctx = family_menu
+    ctx.menu_titles["family:send"] = "Send 3 flows to…"
+    ctx.menu_titles["demo.a"] = "Send 3 to A"
+    menu.open(Gori::Verb::Scope::Body, :request, ctx)
+    render_menu(menu).contains?("Send 3 flows to…").should be_true
+    menu.activate(menu.entry_for('>'))
+    render_menu(menu).contains?("Send 3 to A").should be_true
+  end
+
+  it "descends on a click on the family row" do
+    menu, family, _ = family_menu
+    body = Rect.new(0, 0, 80, 28)
+    b = menu.box(body)
+    y = (b.y...b.bottom).find { |ry| (i = menu.row_at(body, b.x + 2, ry)) && menu.entries[i].family? }.not_nil!
+    menu.set_selected(menu.row_at(body, b.x + 2, y).not_nil!)
+    menu.activate(menu.selected_entry) # what Runner#click_space_menu does
+    menu.level.should eq(family)
+  end
+
+  it "draws each row's state in the hint column: ●/○ for on/off, a short value otherwise" do
+    reg = Gori::Verb::Registry.new
+    reg.register_family(Gori::Verb::Family.new(:proto, "Protocol…", 'P', :view,
+      [{:p_on, 'o'}, {:p_off, 'f'}, {:p_val, 't'}], sticky: true))
+    {"demo.on" => :p_on, "demo.off" => :p_off, "demo.val" => :p_val}.each do |id, intent|
+      reg.register(Gori::Verb::Definition.new(id, id, "x", Gori::Verb::Scope::Body, intent: intent) { |_| nil })
+    end
+    ctx = FakeExecContext.new
+    ctx.menu_states = {"demo.on" => "on", "demo.off" => "off", "demo.val" => "chrome"}
+    menu = SpaceMenu.new(reg)
+    menu.open(Gori::Verb::Scope::Body, :common, ctx)
+    menu.activate(menu.entry_for('P'))
+    screen = render_menu(menu)
+    screen.contains?("●").should be_true
+    screen.contains?("○").should be_true
+    screen.contains?("chrome").should be_true
+  end
+
+  it "comes back to a STICKY family's card at the same row, and closes a plain one" do
+    plain, _, _ = family_menu
+    plain.activate(plain.entry_for('>'))
+    plain.sticky_point.should be_nil
+
+    menu, family, ctx = family_menu(sticky: true)
+    menu.sticky_point.should be_nil # level 1 is never sticky
+    menu.activate(menu.entry_for('>'))
+    menu.set_selected(1)
+    point = menu.sticky_point.not_nil!
+    point.should eq({family, 1})
+    # What Runner#run_space_verb does after the member ran: re-open, then resume.
+    menu.open(Gori::Verb::Scope::Body, :request, ctx)
+    menu.resume(point).should be_true
+    menu.level.should eq(family)
+    menu.selected.should eq(1)
+    menu.selected_verb.try(&.id).should eq("demo.b")
   end
 end

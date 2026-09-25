@@ -319,14 +319,15 @@ module Gori
     # operator nothing (the `{fuzz.sort}` footer bug, spec/verb/hint_token_expands_spec.cr).
     MENU_PATH_FALLBACK = "the space menu"
 
-    # The keys that reach `id` through the space menu ("space → t"), or nil when the verb is
-    # unknown or has no menu row. The ONE place a menu path is spelled: Help's key column and
-    # every `{space:…}` token come through here, so when the menu grows a second level
-    # ("space → > f") this is the function that changes. The letter is the verb's `menu_key`,
-    # which a rebind does not move (the space menu reads the same property).
-    def self.menu_path(registry : Verb::Registry, id : String) : String?
-      return nil unless key = registry[id]?.try(&.menu_key)
-      "space → #{key}"
+    # The keys that reach `id` through the space menu ("space → t", or "space → > f" for a
+    # family member one level down), or nil when the verb is unknown or has no menu row. The
+    # ONE place a menu path is spelled: Help's key column, every `{space:…}` token and the
+    # palette's hint column (`compact`: "␣ > f") come through here. The keys are the
+    # registry's (`Registry#menu_keys`), which a rebind does not move (the space menu reads
+    # the same properties).
+    def self.menu_path(registry : Verb::Registry, id : String, *, compact : Bool = false) : String?
+      return nil unless keys = registry.menu_keys(id)
+      compact ? "␣ #{keys.join(' ')}" : "space → #{keys.join(' ')}"
     end
 
     # Resolve every `{space:verb.id}` in `template`. Without a registry each token collapses

@@ -1925,6 +1925,12 @@ private class FakeContext < ExecContext
     false
   end
 
+  property menu_states = {} of String => String
+
+  def menu_state(verb_id : String) : String?
+    @menu_states[verb_id]?
+  end
+
   def space_menu_title(verb_id : String) : String?
     nil
   end
