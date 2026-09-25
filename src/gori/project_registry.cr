@@ -256,21 +256,18 @@ module Gori
       create_or_reopen(name, description)[0]
     end
 
-    # Register a validated database snapshot as a NEW project. Unlike #create, importing must
-    # never reopen an existing project and replace its database. A directory is claimed
-    # atomically, sidecars are written before the DB becomes visible to #list, and the archive's
-    # machine-local `.workspace` / lock files are not copied.
-    def import_database(name : String, database_path : String) : Project
-      raise Gori::Error.new("project archive database is missing") unless File.file?(database_path)
+    # The display name and directory slug an import under *name* would claim, or the
+    # `Gori::Error` #import_database would refuse it with. Creates nothing, so a preview can
+    # report a name collision before the operator confirms the import; #import_database still
+    # claims the directory atomically, for a peer that wins between the two.
+    def import_target(name : String) : {String, String}
       display = validated_display_name(name)
       base_slug = slugify(display)
       raise Gori::Error.new(UNSLUGGABLE_NAME) if base_slug.empty?
-      raise Gori::Error.new("project #{display.inspect} already exists — choose another name") \
-        if list.any? { |project| project.name.downcase == display.downcase }
-      shadowed_name_reason(display).try { |why| raise Gori::Error.new(why) }
-
-      Paths.ensure_dir(@root)
       projects = list
+      raise Gori::Error.new("project #{display.inspect} already exists — choose another name") \
+        if projects.any? { |project| project.name.downcase == display.downcase }
+      shadowed_name_reason(display).try { |why| raise Gori::Error.new(why) }
       if project = projects.find { |candidate| slug_of(candidate).downcase == base_slug.downcase }
         raise Gori::Error.new("project slug #{base_slug.inspect} already belongs to " \
                               "#{project.name.inspect} (id #{id_of(project) || "—"}) — choose another name")
@@ -279,7 +276,18 @@ module Gori
         raise Gori::Error.new("project name #{display.inspect} would use the short id of " \
                               "#{project.name.inspect} — choose another name")
       end
+      {display, base_slug}
+    end
 
+    # Register a validated database snapshot as a NEW project. Unlike #create, importing must
+    # never reopen an existing project and replace its database. A directory is claimed
+    # atomically, sidecars are written before the DB becomes visible to #list, and the archive's
+    # machine-local `.workspace` / lock files are not copied.
+    def import_database(name : String, database_path : String) : Project
+      raise Gori::Error.new("project archive database is missing") unless File.file?(database_path)
+      display, base_slug = import_target(name)
+
+      Paths.ensure_dir(@root)
       dir = File.join(@root, base_slug)
       begin
         Dir.mkdir(dir, Paths::DIR_MODE)

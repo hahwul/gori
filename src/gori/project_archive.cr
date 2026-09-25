@@ -24,6 +24,19 @@ module Gori
     # together may use at most 2 GiB uncompressed; reserve the full manifest ceiling here.
     MAX_UNCOMPRESSED_BYTES = 2_i64 * 1024 * 1024 * 1024
     MAX_DATABASE_BYTES     = MAX_UNCOMPRESSED_BYTES - MAX_MANIFEST_BYTES
+    # How the CLI and the picker name another project when the archive's own name is unusable.
+    DEFAULT_RENAME_HINT = "with `--name NAME` or choose one in the project picker"
+
+    # An export refused because its destination already exists. Typed, so each surface can
+    # name its own override (`--force`, a confirm, an MCP argument); the message keeps the
+    # CLI's spelling for the callers that print it as is.
+    class DestinationExists < Gori::Error
+      getter path : String
+
+      def initialize(@path : String)
+        super("destination already exists: #{@path} (use --force to replace it)")
+      end
+    end
 
     record Inventory,
       flows : Int64,
@@ -73,17 +86,41 @@ module Gori
         @closed = false
       end
 
-      def import_into(registry : ProjectRegistry, name : String? = nil) : Project
+      # *rename_hint* finishes the sentence for an archive whose own name is unusable, in the
+      # caller's words: how THAT surface names a different project.
+      def import_into(registry : ProjectRegistry, name : String? = nil, *,
+                      rename_hint : String = DEFAULT_RENAME_HINT) : Project
+        raise Gori::Error.new("project archive is already closed") if @closed
+        registry.import_database(target_name(name), @database_path)
+      rescue ex : Gori::Error
+        raise explain_name_error(ex, name, rename_hint)
+      end
+
+      # The refusal #import_into would give *name* for a reason the name itself decides (taken,
+      # shadowed, unsluggable, control characters), or nil when the name is free right now.
+      # Creates nothing; the import still claims its directory atomically.
+      def name_problem(registry : ProjectRegistry, name : String? = nil, *,
+                       rename_hint : String = DEFAULT_RENAME_HINT) : String?
+        registry.import_target(target_name(name))
+        nil
+      rescue ex : Gori::Error
+        explain_name_error(ex, name, rename_hint).message
+      end
+
+      # The display name an import under *name* asks the registry for: the override when one
+      # was given, else the name the archive carries.
+      def target_name(name : String? = nil) : String
+        name.presence || @manifest.project_name
+      end
+
+      private def explain_name_error(ex : Gori::Error, name : String?, rename_hint : String) : Gori::Error
         override = name.presence
         using_archive_name = override.nil? || override == @manifest.project_name
-        raise Gori::Error.new("project archive is already closed") if @closed
-        registry.import_database(override || @manifest.project_name, @database_path)
-      rescue ex : Gori::Error
         if using_archive_name && ex.message.to_s.includes?("control characters")
-          raise Gori::Error.new("archive project name contains control characters; provide an explicit safe project name " \
-                                "with `--name NAME` or choose one in the project picker")
+          return Gori::Error.new("archive project name contains control characters; provide an explicit " \
+                                 "safe project name #{rename_hint}")
         end
-        raise ex
+        ex
       end
 
       def close : Nil
@@ -139,9 +176,7 @@ module Gori
       end
 
       private def refuse_existing_target(target : String, overwrite : Bool) : Nil
-        if ProjectArchive.destination_exists?(target) && !overwrite
-          raise Gori::Error.new("destination already exists: #{target} (use --force to replace it)")
-        end
+        raise DestinationExists.new(target) if ProjectArchive.destination_exists?(target) && !overwrite
       end
 
       private def write_temporary_archive(target : String) : String
@@ -171,11 +206,13 @@ module Gori
           # that appeared after the first exists? check is never silently overwritten.
           begin
             link_archive(temp, target)
-            File.delete(temp)
-          rescue ex : IO::Error
-            raise ex if ProjectArchive.destination_exists?(target)
-            install_archive_copy(temp, target)
+          rescue IO::Error
+            # The destination appeared after the first check: the same refusal, not a raw link
+            # error. Only the link is covered, so a later failure is never misreported as this.
+            raise DestinationExists.new(target) if ProjectArchive.destination_exists?(target)
+            return install_archive_copy(temp, target)
           end
+          File.delete(temp)
         end
       end
 
@@ -190,8 +227,7 @@ module Gori
           file.flush
           file.fsync
         end
-        raise Gori::Error.new("destination already exists: #{target} (use --force to replace it)") \
-          if ProjectArchive.destination_exists?(target)
+        raise DestinationExists.new(target) if ProjectArchive.destination_exists?(target)
         fallback_path = fallback || raise(Gori::Error.new("could not stage project archive copy"))
         File.rename(fallback_path, target)
       ensure

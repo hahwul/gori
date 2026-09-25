@@ -82,6 +82,19 @@ class ProjectArchiveFallbackExportSpec < Gori::ProjectArchive::PreparedExport
   end
 end
 
+# A peer claims the destination between the existence check and the hard link.
+class ProjectArchiveRacedExportSpec < Gori::ProjectArchive::PreparedExport
+  def initialize(workdir : String, project : Gori::Project, manifest : Gori::ProjectArchive::Manifest,
+                 inventory : Gori::ProjectArchive::Inventory)
+    super(workdir, project.db_path, project, manifest, inventory)
+  end
+
+  protected def link_archive(_source : String, destination : String) : Nil
+    File.write(destination, "a peer won")
+    raise IO::Error.new("File exists")
+  end
+end
+
 describe Gori::ProjectArchive do
   it "exports a compact WAL snapshot and imports a fresh project without local sidecars" do
     with_archive_project do |registry, project, store, root|
@@ -167,8 +180,9 @@ describe Gori::ProjectArchive do
       begin
         archive_path = File.join(root, "existing.gori")
         File.write(archive_path, "keep this file")
-        error = expect_raises(Gori::Error) { prepared.write(archive_path) }
+        error = expect_raises(Gori::ProjectArchive::DestinationExists) { prepared.write(archive_path) }
         error.message.not_nil!.should contain("use --force")
+        error.path.should eq(archive_path)
         File.read(archive_path).should eq("keep this file")
 
         dangling_link = File.join(root, "dangling.gori")
@@ -206,6 +220,25 @@ describe Gori::ProjectArchive do
       ensure
         prepared.close
         fallback.close
+      end
+    end
+  end
+
+  it "reports a destination that appeared before the link as the same refusal" do
+    with_archive_project do |_registry, project, _store, root|
+      prepared = Gori::ProjectArchive.prepare_export(project)
+      workdir = File.tempname("gori-link-race")
+      Dir.mkdir(workdir)
+      raced = ProjectArchiveRacedExportSpec.new(workdir, project, prepared.manifest, prepared.inventory)
+      begin
+        archive_path = File.join(root, "raced.gori")
+        error = expect_raises(Gori::ProjectArchive::DestinationExists) { raced.write(archive_path) }
+        error.path.should eq(archive_path)
+        File.read(archive_path).should eq("a peer won")
+        Dir.children(root).select(&.ends_with?(".tmp")).should be_empty
+      ensure
+        prepared.close
+        raced.close
       end
     end
   end
@@ -372,6 +405,19 @@ describe Gori::ProjectArchive do
           prepared.import_into(registry, prepared.manifest.project_name)
         end
         prefilled_error.message.not_nil!.should contain("project picker")
+        # A preview gives the same sentence without registering anything, and a caller's own
+        # rename hint replaces the CLI's.
+        prepared.name_problem(registry).not_nil!.should contain("project picker")
+        mcp_problem = prepared.name_problem(registry, rename_hint: "with the 'name' argument").not_nil!
+        mcp_problem.should contain("with the 'name' argument")
+        mcp_problem.should_not contain("--name")
+        expect_raises(Gori::Error, /with the 'name' argument/) do
+          prepared.import_into(registry, rename_hint: "with the 'name' argument")
+        end
+        prepared.name_problem(registry, project.name).not_nil!.should contain("already exists")
+        prepared.name_problem(registry, "Recovered copy").should be_nil
+        registry.list.map(&.name).should eq([project.name])
+
         imported = prepared.import_into(registry, "Recovered copy")
         imported.name.should eq("Recovered copy")
         registry.list.map(&.name).sort!.should eq(["Recovered copy", project.name].sort!)

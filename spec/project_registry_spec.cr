@@ -121,6 +121,19 @@ describe Gori::ProjectRegistry do
     end
   end
 
+  it "previews an import's name with the same refusals, creating nothing" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      reg.create("Existing")
+      before = Dir.children(root).sort
+      expect_raises(Gori::Error, /already exists/) { reg.import_target("existing") }
+      expect_raises(Gori::Error, /slug/) { reg.import_target("Existing!") }
+      expect_raises(Gori::Error, /control characters/) { reg.import_target("bad\e]0;x\a") }
+      reg.import_target("  Fresh Copy ").should eq({"Fresh Copy", "fresh-copy"})
+      Dir.children(root).sort.should eq(before)
+    end
+  end
+
   it "resolves a project by a unique id prefix (git-style abbreviation)" do
     with_root do |root|
       reg = Gori::ProjectRegistry.new(root)
