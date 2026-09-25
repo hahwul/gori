@@ -14,6 +14,8 @@ load-bearing: source comments cite principles as `(P4)`, `(P6/P7)` and sections 
 `DESIGN.md §4`.
 
 - Changing behavior? Read **Invariants** below first — those three are what changes get wrong.
+- Adding or moving a TUI key or space-menu row? **TUI keys** lists the rules the boot checks and
+  guard specs hold you to.
 - Committing? **House rules** has the commit, CHANGELOG and pre-commit checklist.
 - Adding a subsystem? DESIGN.md, then back here.
 
@@ -107,6 +109,47 @@ bottleneck every time.
   connections), cross-close on tunnel teardown (`src/gori/proxy/pump.cr:13`, fd exhaustion),
   `TeardownLatch` must stay a reference type (`src/gori/proxy/conn/client_conn.cr:65`), no
   loop-variable capture in `spawn do…end` (`src/gori/proxy/server.cr`).
+
+## TUI keys: the space menu and its letters
+
+Every letter the operator presses is checked at boot or by a guard spec. A new or moved verb
+passes these; it does not work around them. The reasoning is in DESIGN.md §7 (the 2026-09-12
+key grammar and the 2026-09-25 #1274 entries).
+
+- **One letter, one meaning per tab (R1).** A space-menu letter may differ from the verb's
+  chord, but it must never be a key the same tab answers with a different action. That covers
+  the tab's scope under every OS profile × keyset, the Editor scope in an editor pane, the
+  sub-tab strip's raw keys, and the Global fallback (`c` stops capture and `i` holds all
+  traffic on a dropped `space`). `spec/tui/menu_letter_meaning_spec.cr` sweeps all four. Its
+  `MENU_LETTER_ALLOWED` names exact verb pairs with a reason and fails when an entry stops
+  violating, so a fix deletes its own line. Never add an entry just to let a new verb pass.
+- **A recurring intent takes its letter from the lexicon.** Declare `intent:`
+  (`src/gori/verb/lexicon.cr`), never a `mnemonic:` beside it (`validate_intents!` raises).
+  The same intent has the same letter on every tab, and a verb whose id names an intent
+  (`*.filter`, `*.export`, `*.copy`, the strip ids, …) must declare it
+  (`spec/verb/lexicon_spec.cr`). Only a one-off action spells a local `mnemonic:`.
+- **Reserved letters.** Menu `X` / `⇧X` is wipe and nothing else. On a tab with a sub-tab
+  strip, the strip's nine (`n w d e t f / T N`) are never a pane verb's letter.
+- **A variation of one intent joins a family instead of taking a letter.** For example, every
+  cross-tool send is a member of `Send flow to…` (`>`, `src/gori/verbs/families.cr`).
+  - Members are keyed by `intent:`. Their second-level letters come only from the family table
+    (`Verb::Family`, `TOOL_LETTERS` for sends), are the same on every tab, and are never
+    `h`/`j`/`k`/`l`.
+  - `pinned: true` keeps a loop action one keypress away as well.
+  - A family row is static: it is drawn whenever the view registers a member. It is never gated
+    on `available?` and never collapsed into its lone member.
+- **A bare key that belongs to one pane declares `chord_sections:`.** Do not hide that gate in
+  `available:`, because the R1 guard reads the declaration. Never pane-gate a letter that Global
+  binds: outside the pane, the press falls through to Global.
+- **Never spell a menu letter in UI text.** Help rows, hints and toasts use `{space:verb.id}` or
+  `Hotkeys.menu_path` (which prints `space → > f` for a member).
+  `spec/verb/hint_token_expands_spec.cr` fails on a literal `space → X`.
+- **`Space` and `Ctrl-P` share one context.** `ActionContext.capture` + `Registry#for_view` is
+  the only answer to "what can I do here", and the palette's typed search finds the focused
+  tab's actions through it. Do not compute that a second way.
+- A key change runs the boot validators (`validate_chords!`, `validate_menu_keys!`,
+  `validate_intents!`). Run `spec/verbs/registry_reach_spec.cr` and the guard specs above
+  before the full suite.
 
 ## Commands
 
@@ -238,6 +281,9 @@ type(scope): what changed, imperative (#123)
 - Crystal has no `override`, so a subclass silently shadows a base-class contract method.
   Audit overlay and controller subclasses for accidental shadowing.
 - Shipping a green `just test` without `just check` and `just benchmark-check`: CI gates both.
+- Picking a free-looking menu letter by hand, or copying one from an issue's "free letters" list
+  (those go stale within days). Use the lexicon or a family, and let the boot checks and the R1
+  guard decide.
 
 ## Where to read next
 
