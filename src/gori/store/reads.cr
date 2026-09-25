@@ -596,7 +596,7 @@ module Gori
     # going (a clear), so every reference is dangling.
     #
     # Not here, because they are DELETED rather than detached: `js_refs` and `js_ref_scans`
-    # (V34) are projections of the flow's own body, meaningless without it, so both callers
+    # (V35) are projections of the flow's own body, meaningless without it, so both callers
     # delete them beside this call — and so do the two retention sweeps (`Store#prune`,
     # `prune_old_flows`), which never reach this method.
     #

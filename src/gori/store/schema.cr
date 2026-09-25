@@ -1455,7 +1455,19 @@ module Gori
         "UPDATE match_rules SET respond = 'file' WHERE op = 'short_circuit' AND body_file != ''",
       ]
 
-      # V34 — endpoints referenced in captured JavaScript (#1243). DERIVED rows: `JsRefs.scan`
+      # Which result a saved fuzz run's `stop_on` tripped on (issue #1270): the `idx` of that
+      # row, written by the terminal update only when the run committed `condition_met`. NULL
+      # on every other run, and on every `condition_met` run written before this column — NULL
+      # means NOT RECORDED, not "no row", and nothing here can recover it: the per-row
+      # `stop_hit` flag was never stored, an `after_matches` stop trips on a row that flag does
+      # not mark, and concurrency lets later in-flight rows meet the condition too. On the run
+      # row rather than a `fuzz_results` column because it is one fact about the run, and it
+      # costs no result projection a byte.
+      V34 = [
+        "ALTER TABLE fuzz_runs ADD COLUMN stop_idx INTEGER",
+      ]
+
+      # V35 — endpoints referenced in captured JavaScript (#1243). DERIVED rows: `JsRefs.scan`
       # reads bodies already in the store and sends nothing, so every row here is a projection
       # of a flow and is deleted WITH that flow (`delete_flow_one`, `clear_flows`, both retention
       # sweeps). Not flows, deliberately: a Pending or stub flow would read as "a request was
@@ -1473,7 +1485,7 @@ module Gori
       # capture is handed ids BELOW any "scanned up to" mark and would never be scanned. A marker
       # row dies with its flow, so a reused id starts unscanned. `version` is the extractor's
       # (`JsRefs::VERSION`): a flow scanned by an older one reads as unscanned again.
-      V34 = [
+      V35 = [
         <<-SQL,
           CREATE TABLE js_refs (
             id          INTEGER PRIMARY KEY,
@@ -1524,7 +1536,8 @@ module Gori
       }
 
       MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17,
-                    V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29, V30, V31, V32, V33, V34]
+                    V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29, V30, V31, V32, V33,
+                    V34, V35]
 
       def self.migrate!(db : DB::Database, read_only : Bool = false) : Nil
         db.using_connection do |conn|

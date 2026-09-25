@@ -167,6 +167,39 @@ describe Gori::Fuzz::Persistence do
     end
   end
 
+  it "records the stop row a condition_met finish names, behind the rows still pending" do
+    with_persistence_store do |store|
+      saved = Gori::Fuzz::Persistence.new(store,
+        Gori::Fuzz::SavedRunMeta.new(nil, "http://stop.test", "sniper", 9_i64))
+      3.times { |i| saved.append(persistence_result(i.to_i64)).should be_true }
+      # No flush: the stop row is still in the pending batch when `finish` is called, and the
+      # Store's existence check has to see it committed ahead of the terminal update.
+      saved.finish(3_i64, 0_i64, 0_i64, "condition_met", stop_idx: 2_i64).should be_true
+      store.get_fuzz_run(saved.run_id).not_nil!.stop_idx.should eq(2_i64)
+    end
+  end
+
+  it "records no stop row for a run that did not end condition_met" do
+    with_persistence_store do |store|
+      stopped = Gori::Fuzz::Persistence.new(store,
+        Gori::Fuzz::SavedRunMeta.new(nil, "http://stop.test", "sniper", 9_i64))
+      stopped.append(persistence_result(0_i64)).should be_true
+      stopped.finish(1_i64, 0_i64, 0_i64, "stopped", stop_idx: 0_i64).should be_true
+      store.get_fuzz_run(stopped.run_id).not_nil!.stop_idx.should be_nil
+
+      # A save that failed is `save_failed` whatever verdict the caller passed; its archive is
+      # not whole, so it cannot vouch for a stop row either.
+      failed = Gori::Fuzz::Persistence.new(store,
+        Gori::Fuzz::SavedRunMeta.new(nil, "http://stop.test", "sniper", 9_i64))
+      failed.append(persistence_result(0_i64)).should be_true
+      failed.abort(reason: "test abort").should be_true
+      failed.finish(1_i64, 0_i64, 0_i64, "condition_met", stop_idx: 0_i64).should be_false
+      rec = store.get_fuzz_run(failed.run_id).not_nil!
+      rec.status.should eq("save_failed")
+      rec.stop_idx.should be_nil
+    end
+  end
+
   it "makes flush and finish FIFO barriers and finish idempotent" do
     with_persistence_store do |store|
       saved = Gori::Fuzz::Persistence.new(store,

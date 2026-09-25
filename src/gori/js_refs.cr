@@ -22,7 +22,7 @@ module Gori
   # spends P4 budget — the operator decides later whether a reference is worth a send. The one
   # engine behind all three surfaces (TUI Sitemap, `gori run sitemap js`, MCP
   # `scan_js_endpoints` / `list_js_endpoints`), and like the parameter inventory it runs ON
-  # DEMAND off the capture path (P6). Unlike the inventory it PERSISTS what it found (Store V34):
+  # DEMAND off the capture path (P6). Unlike the inventory it PERSISTS what it found (Store V35):
   # the tree reloads on every data_version tick, and re-lexing megabyte bundles per reload is
   # exactly the cost the inventory's on-demand read avoids by never being asked that often.
   #

@@ -89,6 +89,10 @@ module Gori::Tui
     getter config : Fuzz::Config
     getter matcher : Fuzz::Matcher
     getter run_keep : Fuzz::Keep
+    # The index of the result this run's `stop_on` tripped on (issue #1270): the live run's
+    # `DoneEvent#stop_index`, or a reopened run's `fuzz_runs.stop_idx`, so both mark the same
+    # row. Nil unless the run ended `condition_met`.
+    getter run_stop_idx : Int64?
 
     PANE_ORDER = [:target, :template, :config, :results]
 
@@ -274,6 +278,7 @@ module Gori::Tui
       # `begin_run` like the other `@run_*` snapshot fields, so a post-run config edit does not
       # change what the saved run records.
       @run_keep = Fuzz::Keep::All
+      @run_stop_idx = nil.as(Int64?)
       @saved_run_id = nil.as(Int64?)
       @failed_save_run_id = nil.as(Int64?)
       @result_io_state = ResultIoState::Idle
@@ -311,7 +316,8 @@ module Gori::Tui
       # body on EVERY scroll keystroke. The selected row is fixed while the detail is open
       # (same invariant @decoded_index relies on), so this only recomputes on pane/row change.
       @detail_lines_cache = nil.as(Array(String)?)
-      @detail_lines_key = nil.as({Symbol, Int64}?)
+      @detail_lines_key = nil.as({Symbol, Int64, Bool}?)
+      @detail_note_count = 0
       # The Array `@detail_read` is currently pointed at, compared by IDENTITY — see
       # `sync_detail_source`.
       @detail_source_lines = nil.as(Array(String)?)
@@ -319,7 +325,7 @@ module Gori::Tui
       # theme revision so a palette switch rebuilds it. Held in lockstep with the plain
       # @detail_lines_cache; the plain lines still back the gutter/cursor/selection math.
       @detail_styled_cache = nil.as(Array(Highlight::Line)?)
-      @detail_styled_key = nil.as({Symbol, Int64}?)
+      @detail_styled_key = nil.as({Symbol, Int64, Bool}?)
       @detail_styled_rev = 0_u32
       @focus = :template
       @loaded = false
@@ -995,6 +1001,7 @@ module Gori::Tui
       @run_websocket = @pending_websocket
       @run_max_requests = @config.max_requests
       @run_keep = @config.keep
+      @run_stop_idx = nil
       @saved_run_id = nil
       @failed_save_run_id = nil
       @loaded_saved_run = false
@@ -1002,11 +1009,15 @@ module Gori::Tui
       clear_detail_decode # a new run reuses request indices → drop the old decode cache
     end
 
-    def finish_run(status : String? = nil, archive_ready : Bool = true) : Nil
+    def finish_run(status : String? = nil, archive_ready : Bool = true,
+                   stop_idx : Int64? = nil) : Nil
       @running = false
       if value = status
         @run_status = value
       end
+      # Only a `condition_met` ending has a stop row — the same rule the Store's terminal
+      # update applies, so the live pane and the run ⇧S saves cannot disagree about it.
+      @run_stop_idx = @run_status == "condition_met" ? stop_idx : nil
       @result_io_state = archive_ready ? ResultIoState::Ready : ResultIoState::Failed
     end
 
@@ -1167,6 +1178,7 @@ module Gori::Tui
       @run_tls_preset = run.tls_preset
       @run_websocket = run.websocket?
       @run_keep = Fuzz::Keep.parse?(run.keep) || Fuzz::Keep::All
+      @run_stop_idx = run.stop_idx
       @saved_run_id = run.id
       @failed_save_run_id = nil
       @loaded_saved_run = true
@@ -1198,6 +1210,7 @@ module Gori::Tui
         @results_rev += 1
         @progress = nil
         @run_total = nil
+        @run_stop_idx = nil
       end
       @saved_run_id = nil
       @loaded_saved_run = false
@@ -3188,7 +3201,10 @@ module Gori::Tui
         # answer the same question and are mutually exclusive (a failed archive is never Saved).
         archive = archive_failed? ? " · archive unavailable" : ""
         saved = @saved_run_id.try { |id| " · saved ##{id}" } || ""
-        "#{result_count} sent#{extra} · #{matched_count} hit#{window}#{archive}#{saved}"
+        # The row the run ended on (issue #1270), standing — the row itself can be scrolled
+        # away, windowed out, or hidden by the matched-only lens.
+        stop = FuzzerView.stop_chip(@run_stop_idx)
+        "#{result_count} sent#{extra} · #{matched_count} hit#{stop}#{window}#{archive}#{saved}"
       end
     end
 
@@ -3230,6 +3246,21 @@ module Gori::Tui
       Frame.scroll_gauge(screen, Rect.new(inner.x, inner.y + 1, inner.w, rows_h), view.size, @scroll, focused)
     end
 
+    STOP_ROW_MARK = "stop row"
+
+    # The ` · stop #N` chip for a run's stop row (issue #1270), or "" when it has none — ONE
+    # spelling for the RESULTS border, the run picker and the load status line.
+    def self.stop_chip(idx : Int64?) : String
+      idx ? " · stop ##{idx}" : ""
+    end
+
+    # Is `r` the result this run's `stop_on` tripped on? By index against the RUN's record, not
+    # `r.stop_hit?`: an `after_matches` stop trips on a plain match, several in-flight rows can
+    # meet the condition after the one that fired, and a reopened row carries no flag at all.
+    def stop_row?(r : Fuzz::Result) : Bool
+      !@run_stop_idx.nil? && r.index == @run_stop_idx
+    end
+
     private def render_result_row(screen : Screen, inner : Rect, y : Int32, r : Fuzz::Result, selected : Bool) : Nil
       bg = selected ? Theme.accent_bg : Theme.bg
       screen.fill(Rect.new(inner.x, y, inner.w, 1), bg) if selected
@@ -3252,15 +3283,20 @@ module Gori::Tui
       # cell per call PAST the card's border — which is how an over-wide payload leaked into
       # the DIST sidebar. `Screen#text` returns immediately on a width of 0, so 0 is a clean
       # no-draw and the gRPC `x2` chain no-ops instead of cascading.
+      # The row this run's `stop_on` tripped on (issue #1270). A word, not a glyph: the
+      # candidates are East-Asian-ambiguous width and shear a CJK terminal. Ahead of an error
+      # or chain note, whose text runs to the border and would clip a trailing marker.
+      stop = stop_row?(r)
       if err = r.error
-        screen.text(x, y, err, Theme.red, bg, width: {inner.right - x, 0}.max)
+        screen.text(x, y, stop ? "#{STOP_ROW_MARK} · #{err}" : err, Theme.red, bg, width: {inner.right - x, 0}.max)
       elsif r.chain_error
         # The send succeeded, but this row is not the request the operator declared: a `¦chain`
         # did not run so its payload went out RAW, or a schema-known gRPC field's declaration
         # could not hold the payload so that field kept the capture's own value. Flag it in the
         # list (the detail request pane names which, and why) so neither is invisible among
         # clean rows. #567/H3 Finding 1; the gRPC half is #843.
-        screen.text(x, y, "⚠ payload not as declared", Theme.yellow, bg, width: {inner.right - x, 0}.max)
+        note = "⚠ payload not as declared"
+        screen.text(x, y, stop ? "#{STOP_ROW_MARK} · #{note}" : note, Theme.yellow, bg, width: {inner.right - x, 0}.max)
       else
         line = "#{Fmt.size(r.length).ljust(8)} #{r.words.to_s.ljust(7)} #{Fmt.dur(r.duration_us)}"
         # Compact per-row markers — the detail panes carry the full story; here they flag a SHORT
@@ -3269,6 +3305,7 @@ module Gori::Tui
         # not the CLI classifier: the TUI has no CLI dependency.
         line += "  ⚠ incomplete" if r.incomplete?
         line += "  ⟳ ×#{r.resent_count}" if r.resent?
+        line += "  #{STOP_ROW_MARK}" if stop
         # For a gRPC target the h2 `:status` to the left is 200 by definition; THIS is the
         # call's real outcome. Only rendered when the response carried it, so a non-gRPC row
         # is unchanged — same fields `cli/output.cr:fuzz_row_text` already renders.
@@ -3516,22 +3553,32 @@ module Gori::Tui
       end
     end
 
+    # Keyed on `stop_row?` too: a row becomes the stop row when its run finishes, after its
+    # lines may already be cached, and the key is what makes the note appear (issue #1270).
     private def detail_lines(r : Fuzz::Result) : Array(String)
-      key = {@detail_pane, r.index}
+      key = {@detail_pane, r.index, stop_row?(r)}
       if (c = @detail_lines_cache) && @detail_lines_key == key
         return c
       end
+      notes = [] of String
       lines =
         case @detail_pane
         when :saml    then saml_detail_lines
         when :jwt     then jwt_detail_lines
         when :graphql then graphql_detail_lines
         when :params  then form_detail_lines
-        when :request then detail_request_lines(r)
-        else               detail_response_lines(r)
+        when :request then detail_request_lines(r, notes)
+        else               detail_response_lines(r, notes)
         end
+      if @detail_pane.in?(:request, :response)
+        # Both message panes open on the stop row's note, whichever one the operator left
+        # selected: the list marker says WHICH row, this says what it means once opened.
+        notes.unshift("(the run's stop_on tripped on this result — it ended the run)") if stop_row?(r)
+        lines = notes + lines
+      end
       @detail_lines_cache = lines
       @detail_lines_key = key
+      @detail_note_count = notes.size
       lines
     end
 
@@ -3539,15 +3586,23 @@ module Gori::Tui
     # plain @detail_lines_cache (+ theme revision). Request/response panes go through the
     # full message highlighter; the decoded panes style per line with their body kind.
     # 1:1 with `lines`, so the plain strings still drive the gutter/cursor/selection.
+    #
+    # The message panes' leading notes (`@detail_note_count`, set with the lines) are styled as
+    # plain text and kept OUT of the message highlighter, which reads line 0 as the start line —
+    # a note there used to take the start line's colour and push the real request/status line
+    # down into header styling.
     private def detail_styled(r : Fuzz::Result, lines : Array(String)) : Array(Highlight::Line)
-      key = {@detail_pane, r.index}
+      key = {@detail_pane, r.index, stop_row?(r)}
       if (c = @detail_styled_cache) && @detail_styled_key == key && @detail_styled_rev == Theme.revision
         return c
       end
+      n = @detail_pane.in?(:request, :response) ? @detail_note_count.clamp(0, lines.size) : 0
+      notes = lines[0, n].map { |ln| Highlight.body_styled(ln, :text) }
+      message = lines[n..]
       styled =
         case @detail_pane
-        when :request  then Highlight.from_lines(lines, request: true)
-        when :response then Highlight.from_lines(lines, request: false)
+        when :request  then notes + Highlight.from_lines(message, request: true)
+        when :response then notes + Highlight.from_lines(message, request: false)
         when :graphql  then lines.map { |ln| Highlight.body_styled(ln, :graphql) }
         when :jwt      then lines.map { |ln| Highlight.body_styled(ln, :json) }
         when :saml     then lines.map { |ln| Highlight.body_styled(ln, :xml) }
@@ -3716,32 +3771,35 @@ module Gori::Tui
       result_request(r).bytes
     end
 
-    private def detail_request_lines(r : Fuzz::Result) : Array(String)
+    # The message lines, with every note about them unshifted onto `notes` instead — see
+    # `detail_styled` for why the two are kept apart.
+    private def detail_request_lines(r : Fuzz::Result, notes : Array(String)) : Array(String)
       req = result_request(r)
       if req.display_omitted
-        return [FuzzerView.display_omitted_request_note]
+        notes << FuzzerView.display_omitted_request_note
+        return [] of String
       end
       lines = String.new(req.bytes).scrub.split('\n').map(&.rstrip('\r'))
-      lines.unshift(FuzzerView.reconstruction_note(run_policy[2])) if req.reconstructed
-      lines.unshift(FuzzerView.withheld_hook_note) if req.chain_withheld
+      notes.unshift(FuzzerView.reconstruction_note(run_policy[2])) if req.reconstructed
+      notes.unshift(FuzzerView.withheld_hook_note) if req.chain_withheld
       # This pane already SHOWS what actually went out for a row whose `¦chain` did not run, or
       # whose gRPC field declaration could not hold the payload (result_request replays the same
       # passes the engine did). Say WHY, so the operator doesn't read those bytes as the request
       # they declared. The reason names itself — `chain '…' step '…' failed` vs `field role: …`
       # — so the prefix stays neutral. #567/H3 Finding 1; the gRPC half is #843.
       if ce = r.chain_error
-        lines.unshift("(payload not as declared: #{ce})")
+        notes.unshift("(payload not as declared: #{ce})")
       end
       # The `--retries` config re-sent this request after a network error (DISTINCT from a
       # keep-alive re-send) — a note here because it qualifies the REQUEST that went out, and
       # the raw bytes above give no hint that they were sent more than once.
       if r.resent?
-        lines.unshift("(re-sent #{r.resent_count}× after a network error — --retries)")
+        notes.unshift("(re-sent #{r.resent_count}× after a network error — --retries)")
       end
       lines
     end
 
-    private def detail_response_lines(r : Fuzz::Result) : Array(String)
+    private def detail_response_lines(r : Fuzz::Result, notes : Array(String)) : Array(String)
       # The send failed, so there is no response to retain — say THAT, not the retention
       # policy. Fuzz::Engine builds a refused/failed Result with an empty head (engine.cr,
       # the scope/sandbox path), and Matcher#present returns nil for it under every
@@ -3750,7 +3808,8 @@ module Gori::Tui
       # is still a payload that can fail to send), and why it failed outranks where its bytes
       # went.
       if err = r.error
-        return ["(send failed: #{err})"]
+        notes << "(send failed: #{err})"
+        return [] of String
       end
       # The DISPLAY window dropped this row's bytes, the run did not — the third answer this
       # pane did not have. `FuzzerResultWindow` projects a row over its 64 MiB ceiling to
@@ -3759,10 +3818,14 @@ module Gori::Tui
       # is about to save it. `detail_request_lines` has always drawn the distinction
       # (`ResultRequest#display_omitted`); this pane read a nil `head` as the retention policy.
       if result_display_truncated?(r)
-        return [FuzzerView.display_omitted_response_note]
+        notes << FuzzerView.display_omitted_response_note
+        return [] of String
       end
       head = r.head
-      return ["(response not retained by this run)"] unless head
+      unless head
+        notes << "(response not retained by this run)"
+        return [] of String
+      end
       # `Result#body` is retained in its captured wire form. Read the response pane through
       # the same decoded-entity seam as the Fuzzer matcher, at the same output ceiling, so the
       # body on screen agrees with the row's decoded length/word/line metrics without changing
@@ -3778,7 +3841,7 @@ module Gori::Tui
       # row's own flags, not the CLI classifier — the TUI has no CLI dependency — keeping the
       # timeout distinction the operator needs to tell "raise the deadline" from "origin closed".
       if r.incomplete?
-        lines.unshift(r.timed_out? ? "(incomplete — the read deadline expired; the response is truncated)" : "(incomplete — the response is truncated)")
+        notes.unshift(r.timed_out? ? "(incomplete — the read deadline expired; the response is truncated)" : "(incomplete — the response is truncated)")
       end
       lines
     end

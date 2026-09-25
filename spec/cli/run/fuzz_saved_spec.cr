@@ -18,13 +18,18 @@ module Gori::CLI::Run
   def self.fuzz_saved_run_line_for_spec(run : Store::FuzzRunRecord, stored : Int64) : String
     fuzz_saved_run_line(run, stored)
   end
+
+  def self.fuzz_saved_run_header_for_spec(run : Store::FuzzRunRecord) : String
+    fuzz_saved_run_header(run)
+  end
 end
 
 private def saved_run(snapshot : Int32 = 1, http2 : Bool = false, websocket : Bool = false,
-                      finished : Int64? = 1_700_000_002_500_000_i64) : Gori::Store::FuzzRunRecord
+                      finished : Int64? = 1_700_000_002_500_000_i64,
+                      status : String = "done", stop_idx : Int64? = nil) : Gori::Store::FuzzRunRecord
   Gori::Store::FuzzRunRecord.new(7_i64, 3_i64, 1_700_000_001_250_000_i64, finished,
-    "https://h.test", "sniper", 4_i64, 4_i64, 2_i64, 0_i64, "done", http2,
-    nil, nil, websocket, "tui", "tui:3:1", snapshot)
+    "https://h.test", "sniper", 4_i64, 4_i64, 2_i64, 0_i64, status, http2,
+    nil, nil, websocket, "tui", "tui:3:1", snapshot, stop_idx: stop_idx)
 end
 
 describe "gori run fuzz saved runs" do
@@ -145,6 +150,22 @@ describe "gori run fuzz saved runs" do
     cli.each { |key, value| value.should eq(mcp[key]) }
     cli["created_at_iso"].as_s.should eq("2023-11-14T22:13:21.250Z")
     cli["finished_at_iso"].as_s.should eq("2023-11-14T22:13:22.500Z")
+  end
+
+  it "names the stop row of a condition_met run in the listing, the header and the JSON (#1270)" do
+    met = saved_run(status: "condition_met", stop_idx: 3_i64)
+    Gori::CLI::Run.fuzz_saved_run_line_for_spec(met, 4_i64).should contain("stop:#3")
+    Gori::CLI::Run.fuzz_saved_run_header_for_spec(met).should contain("stopped on result 3")
+    cli = JSON.parse(Gori::CLI::Run.fuzz_saved_run_json_for_spec(met, 4_i64))
+    cli["stop_index"].as_i64.should eq(3_i64)
+    mcp = JSON.parse(JSON.build { |j| Gori::MCP::Serialize.saved_fuzz_run(j, met, 4_i64) })
+    mcp["stop_index"].as_i64.should eq(3_i64)
+
+    # Not recorded: no chip, no clause, and a JSON null rather than a missing key.
+    plain = saved_run
+    Gori::CLI::Run.fuzz_saved_run_line_for_spec(plain, 4_i64).should_not contain("stop:")
+    Gori::CLI::Run.fuzz_saved_run_header_for_spec(plain).should_not contain("stopped on")
+    JSON.parse(Gori::CLI::Run.fuzz_saved_run_json_for_spec(plain, 4_i64)).as_h["stop_index"].raw.should be_nil
   end
 
   it "emits a null finished_at_iso for a run that never finished" do

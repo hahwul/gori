@@ -30,7 +30,7 @@ end
 
 private def seed_saved_fuzz_run(store : Gori::Store, session_id : Int64, label : String,
                                 count : Int32 = 1, status : String = "done",
-                                keep : String = "all") : Int64
+                                keep : String = "all", stop_idx : Int64? = nil) : Int64
   run = store.insert_fuzz_run(session_id, "https://#{label}.test", "sniper", count.to_i64,
     status: "saving", surface: "tui", keep: keep)
   rows = Array(Gori::Store::FuzzResultWrite).new(count) do |i|
@@ -40,7 +40,7 @@ private def seed_saved_fuzz_run(store : Gori::Store, session_id : Int64, label :
       "HTTP/1.1 #{200 + i}\r\n\r\n".to_slice, label.to_slice)
   end
   store.insert_fuzz_results(run, rows).should be_true
-  store.finish_fuzz_run(run, count.to_i64, count.to_i64, 0_i64, status).should be_true
+  store.finish_fuzz_run(run, count.to_i64, count.to_i64, 0_i64, status, stop_idx: stop_idx).should be_true
   run
 end
 
@@ -53,6 +53,20 @@ class Gori::Tui::FuzzerController
     run = @spool.start(Gori::Fuzz::SavedRunMeta.new(nil,
       "https://detached.test", "sniper", 0_i64))
     run.finish(0_i64, 0_i64, 0_i64, "done").should be_true
+    @spool_runs[view] = run
+  end
+
+  def apply_event_for_spec(view : Gori::Tui::FuzzerView, ev : Gori::Fuzz::Event) : Nil
+    apply_event(view, ev)
+  end
+
+  # A spool that archived `rows` for `view`'s current run and finished it the way the run
+  # fiber does (`start_run`'s DoneEvent arm) — the source a Shift-S save copies from.
+  def attach_spool_rows_for_spec(view : Gori::Tui::FuzzerView, rows : Array(Gori::Fuzz::Result),
+                                 status : String) : Nil
+    run = @spool.start(view.saved_run_meta(nil))
+    rows.each { |r| run.append(r).should be_true }
+    run.finish(rows.size.to_i64, rows.count(&.matched?).to_i64, 0_i64, status).should be_true
     @spool_runs[view] = run
   end
 end
@@ -261,6 +275,63 @@ describe "FuzzerController saved-run restore" do
       drain_until(controller) { view.saved_run_id == run }
       view.results_saveable?.should be_false
       controller.body_hint(:body).should_not contain("save")
+      controller.stop_all
+    end
+  end
+
+  it "restores the stop row of a condition_met run (#1270)" do
+    with_fuzz_restore_project do |host, sessions|
+      run = seed_saved_fuzz_run(host.session.store, sessions[0], "stopped-early", 3,
+        "condition_met", stop_idx: 1_i64)
+      controller = FuzzerController.new(host)
+      drain_until(controller) { controller.current_view.not_nil!.saved_run_id == run }
+      view = controller.current_view.not_nil!
+      view.run_stop_idx.should eq(1_i64)
+      view.results_count_label.should contain("stop #1")
+      view.selected_result.not_nil!.index.should eq(0_i64)
+      view.stop_row?(view.selected_result.not_nil!).should be_false
+      controller.stop_all
+    end
+  end
+
+  it "keeps the live run's stop row off its DoneEvent (#1270)" do
+    with_fuzz_restore_project do |host, _|
+      controller = FuzzerController.new(host)
+      view = controller.current_view.not_nil!
+      view.begin_run(3_i64)
+      2.times do |i|
+        view.append_result(Gori::Fuzz::Result.new(i.to_i64, ["p#{i}"], nil, 200, 1_i64, 1, 1,
+          1_i64, nil, true, false, nil))
+      end
+      progress = Gori::Fuzz::Progress.new(2_i64, 3_i64, 2_i64, 0_i64)
+      controller.apply_event_for_spec(view, Gori::Fuzz::DoneEvent.new(progress, true,
+        "reached 2 matches on result 1 after 2 sent", 1_i64))
+      view.running?.should be_false
+      view.run_stop_idx.should eq(1_i64)
+      view.results_count_label.should contain("stop #1")
+      controller.stop_all
+    end
+  end
+
+  it "carries the stop row across a Shift-S save into the permanent run (#1270)" do
+    with_fuzz_restore_project do |host, sessions|
+      controller = FuzzerController.new(host)
+      view = controller.current_view.not_nil!
+      rows = (0...3).map do |i|
+        Gori::Fuzz::Result.new(i.to_i64, ["p#{i}"], nil, 200, 1_i64, 1, 1, 1_i64, nil,
+          i == 1, false, nil)
+      end
+      view.begin_run(3_i64)
+      rows.each { |r| view.append_result(r) }
+      controller.attach_spool_rows_for_spec(view, rows, "condition_met")
+      view.finish_run("condition_met", stop_idx: 1_i64)
+
+      controller.fuzz_save_results
+      drain_until(controller) { !view.saved_run_id.nil? }
+      saved = host.session.store.get_fuzz_run(view.saved_run_id.not_nil!).not_nil!
+      saved.status.should eq("condition_met")
+      saved.stop_idx.should eq(1_i64)
+      saved.session_id.should eq(sessions[0])
       controller.stop_all
     end
   end

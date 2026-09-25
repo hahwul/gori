@@ -52,8 +52,10 @@ module Gori
         # "N of M kept" for a filtered archive, so `keep: interesting` reads as a policy rather
         # than a run that lost most of its rows.
         rows = run.filtered? ? "#{stored} of #{run.sent} rows (keep:#{run.keep})" : "#{stored} rows"
+        # Beside the rows, as the index `fuzz show RUN_ID RESULT_INDEX` takes (issue #1270).
+        stop = run.stop_idx.try { |idx| "  stop:##{idx}" } || ""
         "##{run.id}  [#{run.status}] [#{run.proto_label}]  #{run.mode}  " \
-        "#{run.matched}/#{run.sent} hit  #{rows}#{session}  " \
+        "#{run.matched}/#{run.sent} hit  #{rows}#{stop}#{session}  " \
         "→ #{CLI::Output.term_safe(run.target)}"
       end
 
@@ -172,14 +174,22 @@ module Gori
         when :jsonl
           rows.each { |row| puts CLI::Output.fuzz_row_json(Fuzz::Persistence.result(row)) }
         else
-          # The transport chip the listing and the TUI picker draw, so a LEGACY run says so
-          # here too — this is the command the picker's own refusal sends the operator to.
-          keep = run.filtered? ? " · keep:#{run.keep}" : ""
-          puts "fuzz run ##{run.id} · #{run.status} · #{run.proto_label} · #{run.mode} · " \
-               "#{run.sent} sent · #{run.matched} hit · #{run.errors} errors#{keep}"
+          puts fuzz_saved_run_header(run)
           rows.each { |row| puts CLI::Output.fuzz_row_text(Fuzz::Persistence.result(row)) }
           STDERR.puts "showing #{offset + 1}-#{offset + rows.size} of #{total}" unless rows.empty?
         end
+      end
+
+      # The `fuzz show` text header. The transport chip the listing and the TUI picker draw, so
+      # a LEGACY run says so here too — this is the command the picker's own refusal sends the
+      # operator to.
+      private def self.fuzz_saved_run_header(run : Store::FuzzRunRecord) : String
+        keep = run.filtered? ? " · keep:#{run.keep}" : ""
+        # A page can hold thousands of rows; the header names the one the run ended on
+        # (issue #1270), as the RESULT_INDEX that shows it.
+        stop = run.stop_idx.try { |idx| " · stopped on result #{idx}" } || ""
+        "fuzz run ##{run.id} · #{run.status} · #{run.proto_label} · #{run.mode} · " \
+        "#{run.sent} sent · #{run.matched} hit · #{run.errors} errors#{keep}#{stop}"
       end
 
       private def self.show_saved_fuzz_result_detail(run : Store::FuzzRunRecord,
@@ -190,6 +200,9 @@ module Gori
           output = JSON.build do |j|
             j.object do
               j.field "run_id", run.id
+              # The run's stop row (issue #1270), so a caller holding one result can tell
+              # whether it is the one the run ended on without a second `fuzz show`.
+              j.field "stop_index", run.stop_idx
               j.field("result") { CLI::Output.fuzz_row_fields(j, Fuzz::Persistence.result(row)) }
               fuzz_saved_bytes_json(j, "request", row.request)
               fuzz_saved_bytes_json(j, "wire", row.wire)
@@ -200,6 +213,7 @@ module Gori
           puts output
         else
           puts CLI::Output.fuzz_row_text(Fuzz::Persistence.result(row))
+          puts "(the result run ##{run.id}'s stop_on tripped on)" if run.stop_idx == row.idx
           puts "\n── REQUEST ──"
           puts CLI::Output.term_safe_multiline(row.request.try { |b| String.new(b) } || "(not retained)")
           if wire = row.wire
@@ -256,6 +270,9 @@ module Gori
           j.field "keep", run.keep.scrub
           j.field "filtered", run.filtered?
           j.field "stored_results", stored_results
+          # The result this run's `stop_on` tripped on (issue #1270), as MCP emits it: the row's
+          # `index`, the RESULT_INDEX `fuzz show` takes. Null when not recorded.
+          j.field "stop_index", run.stop_idx
         end
       end
 

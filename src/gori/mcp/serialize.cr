@@ -643,6 +643,10 @@ module Gori
           # lost run.
           j.field "keep", text(run.keep)
           j.field "filtered", run.filtered?
+          # The result this run's `stop_on` tripped on (issue #1270) — its `index`, which is the
+          # `result_index` get_fuzz_run takes. Null on every run that did not end
+          # `condition_met`, and on one saved before the column: null is "not recorded".
+          j.field "stop_index", run.stop_idx
         end
       end
 

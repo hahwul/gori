@@ -3482,12 +3482,32 @@ delay is skipped, and the flow says which. The rule that answered is recorded as
 deleted. A mock from History is a decoded snapshot, never a reference, because flow ids are
 reused.
 
+### 2026-09-25: a saved fuzz run points at its stop row; the engine names it, not the rows
+
+#1270. Completes the #1240 entry above. A `condition_met` run now records which result tripped
+it as `fuzz_runs.stop_idx` (V34), carried from `Engine#check_stop_condition` on
+`DoneEvent#stop_index` and written by the checked terminal update — only on a `condition_met`
+finish, and only when the run's own archive holds that `idx`, so a `save_failed`/`stopped` run
+never points at evidence that is not there.
+
+One run-level pointer, not a per-row `stop_hit` column, because the rows cannot say which of
+them it was. An `after_matches` stop trips on a plain match whose `stop_hit?` is false; with
+concurrency, in-flight rows that finish after the stop can meet the condition too, so the
+lowest flagged `idx` is not the row that fired; and an operator stop that lands first leaves a
+flagged row on a run with no stop at all. Only the engine sees the ordering, so it names the
+row — and `record_result` judges it BEFORE the blocking `ResultEvent` send, with no yield since
+`@matched` moved, or a worker parked on a full event buffer resumes to read another worker's
+match as its own Nth. Every surface reads the run's field: the TUI marks the row whose index matches
+(`FuzzerView#stop_row?`, live and reopened alike), the CLI and MCP print/emit `stop_index`.
+The live per-row `stop_hit` flag stays live-only. A run saved before V34 reads NULL — not
+recorded — and nothing backfills it, for the same three reasons.
+
 ### 2026-09-25: JavaScript references are derived rows, never flows, and a scan marker is per flow
 
 Refines: [P3](#p3), [P4](#p4), [P6](#p6), [P7](#p7). #1243.
 
 `JsRefs` reads endpoint literals out of JS responses and inline scripts already in the store and
-persists them in `js_refs` (V34). They are NOT written as flows, not even Pending ones: a flow
+persists them in `js_refs` (V35). They are NOT written as flows, not even Pending ones: a flow
 reads as "a request was attempted" in History, QL, HAR and the OpenAPI export, and nothing was
 sent. They attach to the Sitemap at the tree level only (`Sitemap.attach_js_refs!`, after the
 build and before tags and folds) and never through `Store#sitemap_entries`, so every consumer

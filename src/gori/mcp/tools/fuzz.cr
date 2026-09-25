@@ -188,6 +188,10 @@ module Gori
           apply_fuzz_progress(fjob, ev.progress)
           fjob.stop_reason = ev.stop_reason
           terminal = fuzz_terminal_status(fjob, ev.progress, ev.stopped, ev.stop_reason)
+          # Only a `condition_met` ending has a stop row — the rule the saved run's terminal
+          # update and the TUI apply, so a job that landed :error does not name one live while
+          # its saved run says null.
+          fjob.stop_index = terminal == :condition_met ? ev.stop_index : nil
           finish_fuzz_persistence(fjob, terminal)
           fjob.status = terminal
           fjob.ended_at_ms = Time.utc.to_unix_ms
@@ -274,7 +278,8 @@ module Gori
       private def finish_fuzz_persistence(fjob : FuzzJob, status : Symbol) : Nil
         return if fjob.persistence_finished?
         if persistence = fjob.persistence
-          persistence.finish(fjob.sent, fjob.matched, fjob.errors, status.to_s)
+          persistence.finish(fjob.sent, fjob.matched, fjob.errors, status.to_s,
+            stop_idx: fjob.stop_index)
         end
         fjob.persistence_finished = true
       end
@@ -439,6 +444,11 @@ module Gori
             # Why the run's own `stop_on` ended it (issue #1240) — present only for a
             # :condition_met run, so a non-stop_on job's status object is unchanged.
             j.field("stop_reason", Serialize.text(fjob.stop_reason)) if fjob.stop_reason
+            # And WHICH result it tripped on (issue #1270): the row's `index`, and the `stop_index`
+            # a save_results run keeps for get_fuzz_run after the job is gone. The stop row rides
+            # the match budget of the live cache, so fuzz_results lacks it only once
+            # `results_truncated` — the saved run, which checks its archive, never points at nothing.
+            j.field("stop_index", fjob.stop_index) if fjob.stop_index
             j.field "error", fjob.error_msg
             emit_audit(j, fjob.audit, fjob.ended_at_ms)
           end
@@ -1497,7 +1507,7 @@ module Gori
           s.field "http2", boolprop("use real HTTP/2 (default false). A run seeded from a captured h2 flow selects it on its own. Pooled like h1 unless keep_alive is false")
           s.field "insecure", boolprop("skip upstream TLS verification (default false)")
           s.field "max_requests", intprop("caller cap on total requests")
-          s.field "stop_on", jsonprop(%(end the run early when a condition holds (issue #1240) — object {after_matches, match, filter}. "after_matches":N stops once the run's own matchers have hit N times (1 = first hit). "match"/"filter" are a SEPARATE condition in the same shape as the top-level match/filter (e.g. {"match":{"regex":"Welcome admin"}} stops when the body contains it; {"filter":{"regex":"Invalid password"}} stops when it no longer does). The run ends status "condition_met" (see fuzz_status.stop_reason), NOT "done". Cannot combine with race_count.))
+          s.field "stop_on", jsonprop(%(end the run early when a condition holds (issue #1240) — object {after_matches, match, filter}. "after_matches":N stops once the run's own matchers have hit N times (1 = first hit). "match"/"filter" are a SEPARATE condition in the same shape as the top-level match/filter (e.g. {"match":{"regex":"Welcome admin"}} stops when the body contains it; {"filter":{"regex":"Invalid password"}} stops when it no longer does). The run ends status "condition_met" (see fuzz_status.stop_reason and stop_index, the result it tripped on; a save_results run keeps stop_index for get_fuzz_run), NOT "done". Cannot combine with race_count.))
           s.field "keep", enumprop("which result rows a save_results archive stores (issue #1240): all (default) | interesting (matched rows plus the ones carrying an observed fact — an error, a re-send, a truncated capture, the stop row). The run's sent/matched/errors counts stay whole-run and the stored idx stays the payload position, so a filtered archive reads \"12 of 100,000 kept\" rather than a lost run. Requires save_results: true.", %w[all interesting])
           s.field "allow_unscoped", boolprop("run even when the target host is outside the project's configured scope — REQUIRED to run against an out-of-scope target, or when no scope is configured at all (active requests are refused by default without a matching scope)")
           s.field "record_history", enumprop("record each sent request+response as a History flow for audit/evidence (default none); matched results carry the flow_id in fuzz_results while that History row still belongs to this job (fetch full detail with get_flow). A clear or delete detaches the result before the id can be reused. 'all' is capped at #{FUZZ_HISTORY_MAX} flows. Booleans are accepted as aliases (true = all, false = none) because send_request spells this argument as a boolean; any OTHER value is refused by name rather than silently recording nothing.", RECORD_HISTORY_MODES)
@@ -1515,7 +1525,7 @@ module Gori
         tool j, "fuzz_status", "Counts + state of a fuzz job (running|done|budget_exhausted|condition_met|stopped|error). " \
                                "budget_exhausted means max_requests halted the run before every candidate was checked — " \
                                "a partial result, NOT an exhaustive one; condition_met means the run's own stop_on ended it " \
-                               "(see stop_reason) — it reached its goal but is likewise not exhaustive; " \
+                               "(see stop_reason, and stop_index for the result it tripped on — in fuzz_results unless results_truncated) — it reached its goal but is likewise not exhaustive; " \
                                "see incomplete_reason and candidates_remaining." do |s|
           s.field "job_id", strprop("id from fuzz_start"), required: true
         end

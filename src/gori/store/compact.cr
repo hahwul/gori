@@ -271,7 +271,7 @@ class Gori::Store
     return if cutoff <= 0
     conn.exec("DELETE FROM ws_messages WHERE flow_id <= ? AND repeater_id IS NULL", cutoff)
     conn.exec("DELETE FROM flows_fts WHERE rowid <= ?", cutoff)
-    # Derived JS references (V34) go with their flow, as in `Store#prune`.
+    # Derived JS references (V35) go with their flow, as in `Store#prune`.
     conn.exec("DELETE FROM js_refs WHERE flow_id <= ?", cutoff)
     conn.exec("DELETE FROM js_ref_scans WHERE flow_id <= ?", cutoff)
     conn.exec("DELETE FROM flows WHERE id <= ?", cutoff)

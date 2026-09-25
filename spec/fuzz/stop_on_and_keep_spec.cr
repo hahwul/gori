@@ -47,6 +47,27 @@ private class StopDuringSendBackend < F::Backend
   end
 end
 
+# Answers each payload after a payload-keyed delay, with a body that meets a `STOP` condition
+# when the payload is listed in `stop`. With concurrency > 1 that makes COMPLETION order differ
+# from payload order — the shape where the row that trips a stop is not the lowest index.
+private class DelayedBackend < F::Backend
+  def initialize(@origin : F::Origin, @delays : Hash(String, Time::Span), @stop : Set(String))
+  end
+
+  def origin : F::Origin
+    @origin
+  end
+
+  def send(bytes : Bytes) : Gori::Repeater::Result
+    payload = String.new(bytes)[/q=(\w+)/, 1]? || ""
+    sleep(@delays[payload]? || 0.seconds)
+    body = @stop.includes?(payload) ? "STOP" : "go"
+    head = "HTTP/1.1 200 X\r\nContent-Length: #{body.bytesize}\r\n\r\n".to_slice
+    Gori::Repeater::Result.new(head, body.to_slice,
+      Gori::Proxy::Codec::Http1.parse_response_head(head), 1_i64)
+  end
+end
+
 # One-position sweep of N inline payloads "0".."N-1", concurrency 1 so send order is the
 # dispatch order and a stop lands deterministically.
 private def sweep(be : F::Backend, matcher : F::Matcher, n : Int32, cfg : F::Config) : {Array(F::Result), F::DoneEvent}
@@ -204,6 +225,11 @@ describe "Fuzz::Engine — stop_on" do
     done.stopped.should be_true
     done.stop_reason.should_not be_nil
     F.terminal_status(done.progress, done.stopped, nil, false, done.stop_reason).should eq("condition_met")
+    # The row that took the count to 2 is the stop row, although it carries no `stop_hit` —
+    # only the separate condition sets that flag (issue #1270).
+    done.stop_index.should eq(1_i64)
+    results.find! { |r| r.index == 1_i64 }.stop_hit?.should be_false
+    done.stop_reason.not_nil!.should contain("on result 1")
   end
 
   it "stops on a separate condition and flags the row that met it" do
@@ -219,6 +245,64 @@ describe "Fuzz::Engine — stop_on" do
     be.sent.should eq(3)
     results.last.stop_hit?.should be_true
     done.stop_reason.should_not be_nil
+    done.stop_index.should eq(results.last.index)
+    done.stop_index.should eq(2_i64)
+  end
+
+  it "names the row that TRIPPED the stop, not the lowest index that met the condition" do
+    # Payload 0 meets the condition but answers slowly; payload 1 meets it and answers first.
+    # The engine stops on 1; 0 is in flight, finishes, and is flagged too — so the lowest
+    # flagged index (0) is NOT the stop row, and only the engine can say which one is.
+    cfg = F::Config.new(concurrency: 2)
+    matcher = F::Matcher.new
+    cond = F::Matcher.new
+    cond.match_regex = /STOP/
+    matcher.stop_condition = cond
+    be = DelayedBackend.new(F::Origin.new("http", "h", 80),
+      {"0" => 60.milliseconds}, Set{"0", "1"})
+    results, done = sweep(be, matcher, 6, cfg)
+    results.select(&.stop_hit?).map(&.index).sort!.should eq([0_i64, 1_i64])
+    results.first.index.should eq(1_i64) # recorded first
+    done.stop_index.should eq(1_i64)
+  end
+
+  it "names the row whose OWN match crossed after_matches, even when sends block (#1270)" do
+    # A slow consumer fills the engine's event buffer, so both workers are parked in the
+    # blocking ResultEvent send when the two matches land. The first to match must not read
+    # the second's increment on resume and claim to be the Nth match.
+    cfg = F::Config.new(concurrency: 2, stop_after_matches: 2)
+    matcher = F::Matcher.new
+    matcher.match_regex = /STOP/
+    n = F::Engine::EVENT_BUFFER + 40
+    hits = Set{(n - 10).to_s, (n - 9).to_s}
+    be = DelayedBackend.new(F::Origin.new("http", "h", 80), {} of String => Time::Span, hits)
+    payloads = (0...n).map(&.to_s)
+    gen = F::Generator.new(F::Template.parse("GET /?q=§a§ HTTP/1.1\r\nHost: h\r\n\r\n"),
+      [F::PayloadSet.new(F::InlineList.new(payloads))], cfg)
+    engine = F::Engine.new(gen, matcher, be, cfg)
+    results = [] of F::Result
+    done = nil.as(F::DoneEvent?)
+    engine.run do |ev|
+      case ev
+      when F::ResultEvent
+        results << ev.result
+        sleep 200.microseconds
+      when F::DoneEvent then done = ev
+      end
+    end
+    matched = results.select(&.matched?)
+    matched.size.should eq(2)
+    done.not_nil!.stop_index.should eq(matched[1].index)
+  end
+
+  it "has no stop row for a run that ends without its condition" do
+    cfg = F::Config.new(concurrency: 1, stop_after_matches: 9)
+    matcher = F::Matcher.new
+    matcher.match_status = "200"
+    be = ScriptedBackend.new(F::Origin.new("http", "h", 80), [] of {Int32, String})
+    _, done = sweep(be, matcher, 3, cfg)
+    done.stop_reason.should be_nil
+    done.stop_index.should be_nil
   end
 
   it "keeps an operator stop as `stopped` when an in-flight row then meets the condition" do
@@ -244,6 +328,7 @@ describe "Fuzz::Engine — stop_on" do
     results.first.stop_hit?.should be_true # the row still says what it saw
     d.stopped.should be_true
     d.stop_reason.should be_nil
+    d.stop_index.should be_nil # ...but the run has no stop row: nothing tripped it
     F.terminal_verdict(d.progress, d.stopped, nil, false, d.stop_reason).should eq(F::Terminal::Stopped)
   end
 end

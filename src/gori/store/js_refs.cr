@@ -2,7 +2,7 @@ require "db"
 
 module Gori
   class Store
-    # --- endpoints referenced in captured JavaScript (V34, #1243) --------------
+    # --- endpoints referenced in captured JavaScript (V35, #1243) --------------
 
     # One reference as the scan hands it over: where it points (`host` lowercased, `path` the
     # query-less Sitemap node path, `target` the path + query as the literal wrote it) and where
