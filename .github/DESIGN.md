@@ -3698,3 +3698,29 @@ same literal sat in toasts and hint strips, and in the Sitemap filter's `tag:` h
 - **`spec/verb/hint_token_expands_spec.cr` scans `src/gori`** for a literal `space → <key>`
   outside comments, and every `{space:…}` token must name a verb with a menu row. A row named
   by its TITLE ("space → Mine parameters") names no letter and is left alone.
+
+### 2026-09-25: a recurring intent spells its menu letter once, in a lexicon
+
+Refines: the 2026-09-12 bare-key table. #1274.
+
+That table settled bare letters by question, but the space menu's letters were still chosen row
+by row, and they drifted the same way: seven list filters said `f` in the menu while their key
+was `/`. A verb now declares `intent:` and `Verb::Lexicon` supplies the letter, so the grammar
+holds by construction rather than by review — a verb with an intent cannot also spell a
+`mnemonic:`. 288 of the 466 menu rows declare one; 277 of them were already on the letter.
+
+- **Two tiers.** A *reserved* letter (`/` `d` `x` `y` `Y` `S` `t` `T` `N` `X`, and the strip's
+  own actions) is spent on nothing else anywhere in a scope that has the intent. A *preferred*
+  letter is the intent's where it exists and free for a local row elsewhere; reserving all
+  thirty-odd app-wide would leave a dozen letters for the rows that are genuinely one tab's.
+- **Boot refuses what has no exceptions** (`Registry#validate_intents!`): an unknown intent, an
+  intent beside a mnemonic, a menu `X` on anything but a `:wipe` verb in group `:wipe`, and a
+  pane verb wearing one of the strip's nine (`n w d e t f / T N`) on a tab that has a strip —
+  even a strip that lacks that action, since the nine read the same on all nine strips.
+- **The spec holds what needs judgement** (`spec/verb/lexicon_spec.cr`): the reserved sweep, and
+  a menu verb whose id names an intent (`…filter`, `…copy`, `…delete`) must declare it, so a new
+  row cannot opt out silently. Both keep exact-row allowlists that fail once an entry is stale.
+- **An intent on one tab is not an entry**, and some recurring rows stay untagged until another
+  decision lands: Link `k` and add-host `h` (the `h`/`j`/`k`/`l` decision), go to source and
+  Probe's open, History/Detail delete `D`, file-as-issue on Probe `p` and Evidence/Diff `i`
+  (Diff's `a` is pick A), Miner's filter `F` (its strip owns `/`), Notes' find `s`.

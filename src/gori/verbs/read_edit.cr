@@ -33,13 +33,13 @@ module Gori
       r.register Verb::Definition.new(
         "notes.select-line", "Select line", "Select the entire current line",
         Verb::Scope::Notes, [Verb::Chord.new("x")],
-        available: in_notes_read, mnemonic: 'x') { |ctx| ctx.read_select_line; nil }
+        available: in_notes_read, intent: :select_line) { |ctx| ctx.read_select_line; nil }
       r.register Verb::Definition.new(
         "notes.clear-selection", "Clear selection", "Clear the text selection",
-        Verb::Scope::Notes, available: in_sel, mnemonic: 'v') { |ctx| ctx.read_clear_selection; nil }
+        Verb::Scope::Notes, available: in_sel, intent: :clear_selection) { |ctx| ctx.read_clear_selection; nil }
       r.register Verb::Definition.new(
         "notes.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, …)",
-        Verb::Scope::Notes, available: sendable.call(in_notes_read), mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
+        Verb::Scope::Notes, available: sendable.call(in_notes_read), intent: :send_selection) { |ctx| ctx.send_to_open; nil }
 
       # Plain 'x' = select-line in every Repeater read-mode pane (request/target/response),
       # now that hex is ^X everywhere (the old x=resp-hex collision is gone). Tagged
@@ -50,10 +50,10 @@ module Gori
       r.register Verb::Definition.new(
         "repeater.select-line", "Select line", "Select the entire current line",
         Verb::Scope::Repeater, [Verb::Chord.new("x")],
-        available: in_repeater_read, mnemonic: 'x', section: :response) { |ctx| ctx.read_select_line; nil }
+        available: in_repeater_read, intent: :select_line, section: :response) { |ctx| ctx.read_select_line; nil }
       r.register Verb::Definition.new(
         "repeater.clear-selection", "Clear selection", "Clear the text selection",
-        Verb::Scope::Repeater, available: in_sel, mnemonic: 'v', section: :response) { |ctx| ctx.read_clear_selection; nil }
+        Verb::Scope::Repeater, available: in_sel, intent: :clear_selection, section: :response) { |ctx| ctx.read_clear_selection; nil }
       # send-to stays in COMMON (not :response like clear-selection): it's menu-only
       # (no keybinding fallback), so it must be listed in EVERY read pane's space menu.
       # command_section is the focused pane (:request/:response/:target), and the menu
@@ -62,7 +62,7 @@ module Gori
       # uncluttered when nothing is selected.
       r.register Verb::Definition.new(
         "repeater.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, …)",
-        Verb::Scope::Repeater, available: sendable.call(in_repeater_read), mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
+        Verb::Scope::Repeater, available: sendable.call(in_repeater_read), intent: :send_selection) { |ctx| ctx.send_to_open; nil }
 
       # Tagged :input (Decoder's read-mode panes are INPUT-read and OUTPUT; :input is
       # the more relevant "editing" pane — OUTPUT keeps 'x' reachable by keybinding).
@@ -70,15 +70,15 @@ module Gori
       r.register Verb::Definition.new(
         "decoder.select-line", "Select line", "Select the entire current line",
         Verb::Scope::Decoder, [Verb::Chord.new("x")],
-        available: in_decoder_read, mnemonic: 'x', section: :input) { |ctx| ctx.read_select_line; nil }
+        available: in_decoder_read, intent: :select_line, section: :input) { |ctx| ctx.read_select_line; nil }
       r.register Verb::Definition.new(
         "decoder.clear-selection", "Clear selection", "Clear the text selection",
-        Verb::Scope::Decoder, available: in_sel, mnemonic: 'v', section: :input) { |ctx| ctx.read_clear_selection; nil }
+        Verb::Scope::Decoder, available: in_sel, intent: :clear_selection, section: :input) { |ctx| ctx.read_clear_selection; nil }
       # COMMON, not :input — menu-only verb must show in both the INPUT and OUTPUT read
       # panes (command_section is cur.pane); see the repeater.send-to note above.
       r.register Verb::Definition.new(
         "decoder.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, …)",
-        Verb::Scope::Decoder, available: sendable.call(in_decoder_read), mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
+        Verb::Scope::Decoder, available: sendable.call(in_decoder_read), intent: :send_selection) { |ctx| ctx.send_to_open; nil }
 
       # Tagged :template (Fuzzer's only section named for this in Round 5's spec —
       # :target/:results/:detail are also read-mode-gated, but :template is the one
@@ -87,15 +87,15 @@ module Gori
       r.register Verb::Definition.new(
         "fuzzer.select-line", "Select line", "Select the entire current line",
         Verb::Scope::Fuzzer, [Verb::Chord.new("x")],
-        available: in_fuzzer_read, mnemonic: 'x', section: :template) { |ctx| ctx.read_select_line; nil }
+        available: in_fuzzer_read, intent: :select_line, section: :template) { |ctx| ctx.read_select_line; nil }
       r.register Verb::Definition.new(
         "fuzzer.clear-selection", "Clear selection", "Clear the text selection",
-        Verb::Scope::Fuzzer, available: in_sel, mnemonic: 'v', section: :template) { |ctx| ctx.read_clear_selection; nil }
+        Verb::Scope::Fuzzer, available: in_sel, intent: :clear_selection, section: :template) { |ctx| ctx.read_clear_selection; nil }
       # COMMON, not :template — menu-only verb must show in every Fuzzer read pane
       # (command_section follows the focused pane); see the repeater.send-to note above.
       r.register Verb::Definition.new(
         "fuzzer.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, …)",
-        Verb::Scope::Fuzzer, available: sendable.call(in_fuzzer_read), mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
+        Verb::Scope::Fuzzer, available: sendable.call(in_fuzzer_read), intent: :send_selection) { |ctx| ctx.send_to_open; nil }
 
       # JWT workbench read-mode panes (INPUT-read, DECODED, OUTPUT, ATTACKS). Tagged
       # :input for select-line (the token pane is the one with a fine selection); send-to
@@ -104,25 +104,25 @@ module Gori
       r.register Verb::Definition.new(
         "jwt.select-line", "Select line", "Select the entire current line",
         Verb::Scope::Jwt, [Verb::Chord.new("x")],
-        available: in_jwt_read, mnemonic: 'x', section: :input) { |ctx| ctx.read_select_line; nil }
+        available: in_jwt_read, intent: :select_line, section: :input) { |ctx| ctx.read_select_line; nil }
       r.register Verb::Definition.new(
         "jwt.clear-selection", "Clear selection", "Clear the text selection",
-        Verb::Scope::Jwt, available: in_sel, mnemonic: 'v', section: :input) { |ctx| ctx.read_clear_selection; nil }
+        Verb::Scope::Jwt, available: in_sel, intent: :clear_selection, section: :input) { |ctx| ctx.read_clear_selection; nil }
       r.register Verb::Definition.new(
         "jwt.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, JWT, …)",
-        Verb::Scope::Jwt, available: sendable.call(in_jwt_read), mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
+        Verb::Scope::Jwt, available: sendable.call(in_jwt_read), intent: :send_selection) { |ctx| ctx.send_to_open; nil }
 
       in_issues_notes = ->(ctx : Verb::ExecContext) { ctx.issues_notes_read_mode? }
       r.register Verb::Definition.new(
         "issue.select-line", "Select line", "Select the entire current notes line",
         Verb::Scope::IssuesDetail, [Verb::Chord.new("x")],
-        available: in_issues_notes, mnemonic: 'x') { |ctx| ctx.read_select_line; nil }
+        available: in_issues_notes, intent: :select_line) { |ctx| ctx.read_select_line; nil }
       r.register Verb::Definition.new(
         "issue.clear-selection", "Clear selection", "Clear the notes text selection",
-        Verb::Scope::IssuesDetail, available: in_sel, mnemonic: 'v') { |ctx| ctx.read_clear_selection; nil }
+        Verb::Scope::IssuesDetail, available: in_sel, intent: :clear_selection) { |ctx| ctx.read_clear_selection; nil }
       r.register Verb::Definition.new(
         "issue.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, …)",
-        Verb::Scope::IssuesDetail, available: sendable.call(in_issues_notes), mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
+        Verb::Scope::IssuesDetail, available: sendable.call(in_issues_notes), intent: :send_selection) { |ctx| ctx.send_to_open; nil }
 
       # Verb::Scope::ProjectDesc, not Body — see project.copy in verbs/core.cr for why the
       # description pane stopped borrowing the History list's scope. The read-mode flag itself
@@ -138,13 +138,13 @@ module Gori
       r.register Verb::Definition.new(
         "project.select-line", "Select line", "Select the entire current line",
         Verb::Scope::ProjectDesc, [Verb::Chord.new("x")],
-        available: in_project_desc, mnemonic: 'x') { |ctx| ctx.read_select_line; nil }
+        available: in_project_desc, intent: :select_line) { |ctx| ctx.read_select_line; nil }
       r.register Verb::Definition.new(
         "project.clear-selection", "Clear selection", "Clear the text selection",
-        Verb::Scope::ProjectDesc, available: in_sel, mnemonic: 'v') { |ctx| ctx.read_clear_selection; nil }
+        Verb::Scope::ProjectDesc, available: in_sel, intent: :clear_selection) { |ctx| ctx.read_clear_selection; nil }
       r.register Verb::Definition.new(
         "project.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, …)",
-        Verb::Scope::ProjectDesc, available: sendable.call(in_project_desc), mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
+        Verb::Scope::ProjectDesc, available: sendable.call(in_project_desc), intent: :send_selection) { |ctx| ctx.send_to_open; nil }
 
       # The Rewriter's PREVIEW OUTPUT, tagged `:preview` — the tab is multi-pane, and its rule
       # list already spends `x` on "Enable/disable" (see verbs/rewriter.cr for why every list
@@ -157,19 +157,19 @@ module Gori
       r.register Verb::Definition.new(
         "rewriter.select-line", "Select line", "Select the entire current preview line",
         Verb::Scope::Rewriter, [Verb::Chord.new("x")],
-        available: in_rewriter_out, mnemonic: 'x', section: :preview) { |ctx| ctx.read_select_line; nil }
+        available: in_rewriter_out, intent: :select_line, section: :preview) { |ctx| ctx.read_select_line; nil }
       r.register Verb::Definition.new(
         "rewriter.clear-selection", "Clear selection", "Clear the preview text selection",
-        Verb::Scope::Rewriter, available: in_sel, mnemonic: 'v', section: :preview) { |ctx| ctx.read_clear_selection; nil }
+        Verb::Scope::Rewriter, available: in_sel, intent: :clear_selection, section: :preview) { |ctx| ctx.read_clear_selection; nil }
       r.register Verb::Definition.new(
         "rewriter.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, …)",
-        Verb::Scope::Rewriter, available: sendable.call(in_rewriter_out), mnemonic: 'S', section: :preview) { |ctx| ctx.send_to_open; nil }
+        Verb::Scope::Rewriter, available: sendable.call(in_rewriter_out), intent: :send_selection, section: :preview) { |ctx| ctx.send_to_open; nil }
       r.register Verb::Definition.new(
         # `^Y` and the wider gate: the INPUT pane is an EDITOR, where a bare `y` is a literal
         # character that replaces the selection, so Copy has to be reachable by chord there too.
         "rewriter.copy", "Copy", "Copy the selected preview text, or the whole pane if nothing is selected",
         Verb::Scope::Rewriter, [Verb::Chord.new("y"), Verb::Chord.new("y", ctrl: true)],
-        available: in_rewriter_copy, mnemonic: 'y', section: :preview) { |ctx| ctx.read_copy; nil }
+        available: in_rewriter_copy, intent: :copy, section: :preview) { |ctx| ctx.read_copy; nil }
 
       # The Comparer's diff. Whole ROWS, never a char span: a screen row is two columns of the
       # same diff, so `ReadPane(line_select_only: true)` is what the cursor is — see
@@ -179,17 +179,17 @@ module Gori
       r.register Verb::Definition.new(
         "comparer.select-line", "Select row", "Select the whole diff row under the cursor",
         Verb::Scope::Comparer, [Verb::Chord.new("x")],
-        available: in_comparer_diff, mnemonic: 'x') { |ctx| ctx.read_select_line; nil }
+        available: in_comparer_diff, intent: :select_line) { |ctx| ctx.read_select_line; nil }
       r.register Verb::Definition.new(
         "comparer.clear-selection", "Clear selection", "Clear the diff row selection",
-        Verb::Scope::Comparer, available: in_sel, mnemonic: 'v') { |ctx| ctx.read_clear_selection; nil }
+        Verb::Scope::Comparer, available: in_sel, intent: :clear_selection) { |ctx| ctx.read_clear_selection; nil }
       r.register Verb::Definition.new(
         "comparer.send-to", "Send selection to…", "Send the selected diff rows to another tool (Decoder, …)",
-        Verb::Scope::Comparer, available: sendable.call(in_comparer_diff), mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
+        Verb::Scope::Comparer, available: sendable.call(in_comparer_diff), intent: :send_selection) { |ctx| ctx.send_to_open; nil }
       r.register Verb::Definition.new(
         "comparer.copy", "Copy", "Copy the selected diff rows as unified text, or the whole diff if nothing is selected",
         Verb::Scope::Comparer, [Verb::Chord.new("y")],
-        available: in_comparer_diff, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
+        available: in_comparer_diff, intent: :copy) { |ctx| ctx.read_copy; nil }
 
       # The Intercept's read-only held-message preview. Mouse-placed caret (see
       # `InterceptController#handle_click`), so `x`/`y` act on wherever the pointer left it.
@@ -199,13 +199,13 @@ module Gori
       in_icept_copy = ->(ctx : Verb::ExecContext) { ctx.current_tab == :intercept && ctx.intercept_copyable? }
       r.register Verb::Definition.new(
         "intercept.select-line", "Select line", "Select the entire current preview line",
-        Verb::Scope::Intercept, available: in_icept_preview, mnemonic: 'x') { |ctx| ctx.read_select_line; nil }
+        Verb::Scope::Intercept, available: in_icept_preview, intent: :select_line) { |ctx| ctx.read_select_line; nil }
       r.register Verb::Definition.new(
         "intercept.clear-selection", "Clear selection", "Clear the preview text selection",
-        Verb::Scope::Intercept, available: in_sel, mnemonic: 'v') { |ctx| ctx.read_clear_selection; nil }
+        Verb::Scope::Intercept, available: in_sel, intent: :clear_selection) { |ctx| ctx.read_clear_selection; nil }
       r.register Verb::Definition.new(
         "intercept.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, …)",
-        Verb::Scope::Intercept, available: sendable.call(in_icept_preview), mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
+        Verb::Scope::Intercept, available: sendable.call(in_icept_preview), intent: :send_selection) { |ctx| ctx.send_to_open; nil }
       r.register Verb::Definition.new(
         # `y` in READ and `^Y` in INS too — the copy pair every other text pane ships, and the
         # queue is not the exception it was written as: `y` is free across Scope::Intercept
@@ -219,7 +219,7 @@ module Gori
         # the only copy there is while typing — which is what makes it the pinned half.
         "intercept.copy", "Copy", "Copy the selected preview text, or the whole held message if nothing is selected",
         Verb::Scope::Intercept, [Verb::Chord.new("y"), Verb::Chord.new("y", ctrl: true)],
-        available: in_icept_copy, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
+        available: in_icept_copy, intent: :copy) { |ctx| ctx.read_copy; nil }
 
       # An OAST callback's detail. `section: :detail` (OastController#command_section answers to
       # match): the callbacks LIST spends `y` on "copy the generated payload", and this pane's `y`
@@ -229,13 +229,13 @@ module Gori
       r.register Verb::Definition.new(
         "oast.select-line", "Select line", "Select the entire current callback line",
         Verb::Scope::OastCallbacks, [Verb::Chord.new("x")],
-        available: in_oast_detail, mnemonic: 'x', section: :detail) { |ctx| ctx.read_select_line; nil }
+        available: in_oast_detail, intent: :select_line, section: :detail) { |ctx| ctx.read_select_line; nil }
       r.register Verb::Definition.new(
         "oast.clear-selection", "Clear selection", "Clear the callback text selection",
-        Verb::Scope::OastCallbacks, available: in_sel, mnemonic: 'v', section: :detail) { |ctx| ctx.read_clear_selection; nil }
+        Verb::Scope::OastCallbacks, available: in_sel, intent: :clear_selection, section: :detail) { |ctx| ctx.read_clear_selection; nil }
       r.register Verb::Definition.new(
         "oast.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, …)",
-        Verb::Scope::OastCallbacks, available: sendable.call(in_oast_detail), mnemonic: 'S', section: :detail) { |ctx| ctx.send_to_open; nil }
+        Verb::Scope::OastCallbacks, available: sendable.call(in_oast_detail), intent: :send_selection, section: :detail) { |ctx| ctx.send_to_open; nil }
       # The detail's `y` is a REAL chord now, so the Hotkeys editor can see and move it — it
       # used to be a raw `c == 'y'` arm in `OastController#handle_body_key`, which meant the
       # verb showed as unbound and a rebind moved nothing. It pairs with `oast.select-line`'s
@@ -249,7 +249,7 @@ module Gori
       r.register Verb::Definition.new(
         "oast.copy-callback", "Copy callback", "Copy the selected callback text, or the whole callback if nothing is selected",
         Verb::Scope::OastCallbacks, [Verb::Chord.new("y")],
-        available: in_oast_detail, mnemonic: 'y', section: :detail) { |ctx| ctx.read_copy; nil }
+        available: in_oast_detail, intent: :copy, section: :detail) { |ctx| ctx.read_copy; nil }
 
       # A Probe issue's detail, which is TWO read panes — AFFECTED URLS and DESCRIPTION — and
       # these verbs act on whichever holds focus. `ProbeView` routes them through one `pane`
@@ -265,17 +265,17 @@ module Gori
       r.register Verb::Definition.new(
         "probe.select-line", "Select line", "Select the line under the cursor in the focused pane",
         Verb::Scope::ProbeDetail, [Verb::Chord.new("x")],
-        available: in_probe_detail, mnemonic: 'x') { |ctx| ctx.read_select_line; nil }
+        available: in_probe_detail, intent: :select_line) { |ctx| ctx.read_select_line; nil }
       r.register Verb::Definition.new(
         "probe.clear-selection", "Clear selection", "Clear the selection in the focused pane",
-        Verb::Scope::ProbeDetail, available: in_sel, mnemonic: 'v') { |ctx| ctx.read_clear_selection; nil }
+        Verb::Scope::ProbeDetail, available: in_sel, intent: :clear_selection) { |ctx| ctx.read_clear_selection; nil }
       r.register Verb::Definition.new(
         "probe.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, …)",
-        Verb::Scope::ProbeDetail, available: sendable.call(in_probe_detail), mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
+        Verb::Scope::ProbeDetail, available: sendable.call(in_probe_detail), intent: :send_selection) { |ctx| ctx.send_to_open; nil }
       r.register Verb::Definition.new(
         "probe.copy", "Copy", "Copy the selection, or the whole focused pane if nothing is selected",
         Verb::Scope::ProbeDetail, [Verb::Chord.new("y")],
-        available: in_probe_detail, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
+        available: in_probe_detail, intent: :copy) { |ctx| ctx.read_copy; nil }
 
       # The Sequencer's ANALYSIS report. Whole ROWS (label + value in two columns — see
       # `SequencerView#analysis_plain` for the projection a copy produces). `x`/`v`/`S`/`y` are all
@@ -287,17 +287,17 @@ module Gori
       r.register Verb::Definition.new(
         "sequence.select-line", "Select row", "Select the analysis row under the cursor",
         Verb::Scope::Sequencer, [Verb::Chord.new("x")],
-        available: in_seq_analysis, mnemonic: 'x') { |ctx| ctx.read_select_line; nil }
+        available: in_seq_analysis, intent: :select_line) { |ctx| ctx.read_select_line; nil }
       r.register Verb::Definition.new(
         "sequence.clear-selection", "Clear selection", "Clear the analysis row selection",
-        Verb::Scope::Sequencer, available: in_sel, mnemonic: 'v') { |ctx| ctx.read_clear_selection; nil }
+        Verb::Scope::Sequencer, available: in_sel, intent: :clear_selection) { |ctx| ctx.read_clear_selection; nil }
       r.register Verb::Definition.new(
         "sequence.send-to", "Send selection to…", "Send the selected rows to another tool (Decoder, …)",
-        Verb::Scope::Sequencer, available: sendable.call(in_seq_analysis), mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
+        Verb::Scope::Sequencer, available: sendable.call(in_seq_analysis), intent: :send_selection) { |ctx| ctx.send_to_open; nil }
       r.register Verb::Definition.new(
         "sequence.copy", "Copy", "Copy the selected analysis rows, or the whole entropy report if nothing is selected",
         Verb::Scope::Sequencer, [Verb::Chord.new("y")],
-        available: in_seq_copy, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
+        available: in_seq_copy, intent: :copy) { |ctx| ctx.read_copy; nil }
 
       # The Miner's FINDING pane. Whole ROWS (label + value in two columns — see
       # `MinerView#detail_plain`). `x`/`v`/`S`/`y` are free in this scope; `r`/`s`/`p` are run,
@@ -308,29 +308,29 @@ module Gori
       r.register Verb::Definition.new(
         "mine.select-line", "Select row", "Select the finding row under the cursor",
         Verb::Scope::Miner, [Verb::Chord.new("x")],
-        available: in_miner_detail, mnemonic: 'x') { |ctx| ctx.read_select_line; nil }
+        available: in_miner_detail, intent: :select_line) { |ctx| ctx.read_select_line; nil }
       r.register Verb::Definition.new(
         "mine.clear-selection", "Clear selection", "Clear the finding row selection",
-        Verb::Scope::Miner, available: in_sel, mnemonic: 'v') { |ctx| ctx.read_clear_selection; nil }
+        Verb::Scope::Miner, available: in_sel, intent: :clear_selection) { |ctx| ctx.read_clear_selection; nil }
       r.register Verb::Definition.new(
         "mine.send-to", "Send selection to…", "Send the selected rows to another tool (Decoder, …)",
-        Verb::Scope::Miner, available: sendable.call(in_miner_detail), mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
+        Verb::Scope::Miner, available: sendable.call(in_miner_detail), intent: :send_selection) { |ctx| ctx.send_to_open; nil }
       r.register Verb::Definition.new(
         "mine.copy", "Copy", "Copy the selected finding rows, or the whole finding if nothing is selected",
         Verb::Scope::Miner, [Verb::Chord.new("y")],
-        available: in_miner_copy, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
+        available: in_miner_copy, intent: :copy) { |ctx| ctx.read_copy; nil }
 
       in_detail_nav = ->(ctx : Verb::ExecContext) { ctx.detail_navigable? }
       r.register Verb::Definition.new(
         "detail.select-line", "Select line", "Select the entire current line",
         Verb::Scope::HistoryDetail, [Verb::Chord.new("x")],
-        available: in_detail_nav, mnemonic: 'x', group: :view) { |ctx| ctx.read_select_line; nil }
+        available: in_detail_nav, intent: :select_line, group: :view) { |ctx| ctx.read_select_line; nil }
       r.register Verb::Definition.new(
         "detail.clear-selection", "Clear selection", "Clear the text selection",
-        Verb::Scope::HistoryDetail, available: in_sel, mnemonic: 'v') { |ctx| ctx.read_clear_selection; nil }
+        Verb::Scope::HistoryDetail, available: in_sel, intent: :clear_selection) { |ctx| ctx.read_clear_selection; nil }
       r.register Verb::Definition.new(
         "detail.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, …)",
-        Verb::Scope::HistoryDetail, available: sendable.call(in_detail_nav), mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
+        Verb::Scope::HistoryDetail, available: sendable.call(in_detail_nav), intent: :send_selection) { |ctx| ctx.send_to_open; nil }
     end
   end
 end

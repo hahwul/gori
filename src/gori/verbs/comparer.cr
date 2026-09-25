@@ -25,12 +25,14 @@ module Gori
       r.register Verb::Definition.new(
         "comparer.swap", "Swap A ⇄ B", "Swap the two flows being compared",
         Verb::Scope::Comparer, [Verb::Chord.new("w")],
-        available: in_comparer, mnemonic: 's') { |ctx| ctx.comparer_swap; nil }
+        available: in_comparer, intent: :swap) { |ctx| ctx.comparer_swap; nil }
 
+      # `m` (mode), not `t`: `t` marks a chip on the sub-tab strip, and the strip's bucket is in
+      # every Comparer card.
       r.register Verb::Definition.new(
         "comparer.toggle-pane", "Compare requests/responses",
         "Toggle the diff between the two requests and the two responses",
-        Verb::Scope::Comparer, available: in_comparer, mnemonic: 't') { |ctx| ctx.comparer_toggle_pane; nil }
+        Verb::Scope::Comparer, available: in_comparer, mnemonic: 'm') { |ctx| ctx.comparer_toggle_pane; nil }
 
       # Navigating BY CHANGE and hiding what didn't change. Both gate on a shown diff —
       # there is nothing to jump between, or fold around, on a half-filled comparison.
@@ -82,7 +84,7 @@ module Gori
       r.register Verb::Definition.new(
         "comparer.new", "New comparison", "Open a fresh blank comparison sub-tab",
         Verb::Scope::Comparer, [Verb::Chord.new("n", ctrl: true)],
-        available: in_comparer, mnemonic: 'n',
+        available: in_comparer, intent: :new,
         section: :subtab) { |ctx| ctx.comparer_new; nil }
 
       # 'e'. The key audit briefly put this on 'r' — the letter the STRIP binds — which is
@@ -92,7 +94,7 @@ module Gori
       # the raw chord it always was.
       r.register Verb::Definition.new(
         "comparer.rename-subtab", "Rename comparison", "Rename the active comparison chip",
-        Verb::Scope::Comparer, available: in_comparer, mnemonic: 'e',
+        Verb::Scope::Comparer, available: in_comparer, intent: :rename,
         section: :subtab) { |ctx| ctx.comparer_rename_subtab; nil }
 
       # `:subtab`, with the rest of the chip family. Until #1055 this had to be `:common` —
@@ -106,11 +108,11 @@ module Gori
       r.register Verb::Definition.new(
         "comparer.close-subtab", "Close comparison", "Close the active comparison sub-tab (keeps ≥1)",
         Verb::Scope::Comparer, [Verb::Chord.new("w", ctrl: true)],
-        available: in_comparer, mnemonic: 'w', section: :subtab) { |ctx| ctx.comparer_close_subtab; nil }
+        available: in_comparer, intent: :close, section: :subtab) { |ctx| ctx.comparer_close_subtab; nil }
 
       r.register Verb::Definition.new(
         "comparer.duplicate-subtab", "Duplicate comparison", "Clone the active A/B pair into a new sub-tab",
-        Verb::Scope::Comparer, available: in_comparer, mnemonic: 'd',
+        Verb::Scope::Comparer, available: in_comparer, intent: :duplicate,
         section: :subtab) { |ctx| ctx.comparer_duplicate_subtab; nil }
 
       # Sub-tab search + inline filter (issue #121), section :tab — like the other
@@ -119,13 +121,13 @@ module Gori
         "comparer.find-subtab", "Search sub-tabs", "Filter the open comparisons and jump to one",
         Verb::Scope::Comparer,
         available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :comparer && ctx.subtab_search_count >= 1 },
-        mnemonic: 'f', section: :tab) { |ctx| ctx.subtab_search_open; nil }
+        intent: :find_subtab, section: :tab) { |ctx| ctx.subtab_search_open; nil }
 
       r.register Verb::Definition.new(
         "comparer.filter-subtabs", "Filter sub-tabs", "Filter the comparison sub-tab strip by name / host / method",
         Verb::Scope::Comparer,
         available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :comparer && ctx.subtab_search_count >= 2 },
-        mnemonic: '/', section: :tab) { |ctx| ctx.subtab_filter_open; nil }
+        intent: :filter, section: :tab) { |ctx| ctx.subtab_filter_open; nil }
 
       # Sub-tab multi-select (#683). `t` marks a chip and `⇧T` marks the strip; ^W then
       # closes every marked one, `space ▸ r` sends them, and so on — the existing verbs
@@ -134,10 +136,10 @@ module Gori
       # strip, and it WOULD fire in the body, marking sub-tabs while the operator types.
       r.register Verb::Definition.new(
         "comparer.subtab-mark-all", "Mark all sub-tabs", "Mark every comparison the sub-tab filter shows — the actions above then act on all of them",
-        Verb::Scope::Comparer, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :comparer && ctx.subtab_search_count >= 2 }, mnemonic: 'T', section: :subtab) { |ctx| ctx.subtab_mark_all; nil }
+        Verb::Scope::Comparer, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :comparer && ctx.subtab_search_count >= 2 }, intent: :mark_all, section: :subtab) { |ctx| ctx.subtab_mark_all; nil }
       r.register Verb::Definition.new(
         "comparer.subtab-mark-clear", "Clear marks", "Drop every sub-tab mark (esc on the strip does the same)",
-        Verb::Scope::Comparer, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :comparer && ctx.subtab_marked_count > 0 }, mnemonic: 'N', section: :subtab) { |ctx| ctx.subtab_mark_clear; nil }
+        Verb::Scope::Comparer, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :comparer && ctx.subtab_marked_count > 0 }, intent: :mark_clear, section: :subtab) { |ctx| ctx.subtab_mark_clear; nil }
 
       register_send_to_comparer(r)
     end

@@ -15,19 +15,19 @@ module Gori
 
       r.register Verb::Definition.new(
         "env.add-var", "Add env var", "Open the inline row to add an environment variable",
-        Verb::Scope::Env, [Verb::Chord.new("a")]) { |ctx| ctx.env_add_var; nil }
+        Verb::Scope::Env, [Verb::Chord.new("a")], intent: :add) { |ctx| ctx.env_add_var; nil }
 
       r.register Verb::Definition.new(
         "env.copy-var", "Copy", "Copy the selected variable as KEY=VALUE",
-        Verb::Scope::Env, [Verb::Chord.new("y")], available: have_var) { |ctx| ctx.read_copy; nil }
+        Verb::Scope::Env, [Verb::Chord.new("y")], available: have_var, intent: :copy) { |ctx| ctx.read_copy; nil }
 
       r.register Verb::Definition.new(
         "env.edit-var", "Edit env var", "Edit the selected environment variable in place",
-        Verb::Scope::Env, [Verb::Chord.new("e")], available: have_var) { |ctx| ctx.env_edit_var; nil }
+        Verb::Scope::Env, [Verb::Chord.new("e")], available: have_var, intent: :edit) { |ctx| ctx.env_edit_var; nil }
 
       r.register Verb::Definition.new(
         "env.delete-var", "Delete env var", "Remove the selected environment variable",
-        Verb::Scope::Env, [Verb::Chord.new("d")], available: have_var, group: :danger) { |ctx| ctx.env_delete_var; nil }
+        Verb::Scope::Env, [Verb::Chord.new("d")], available: have_var, group: :danger, intent: :delete) { |ctx| ctx.env_delete_var; nil }
 
       r.register Verb::Definition.new(
         "env.edit-prefix", "Change prefix", "Edit the sigil that opens an env token (applies globally)",

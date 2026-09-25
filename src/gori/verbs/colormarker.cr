@@ -22,10 +22,10 @@ module Gori
 
       r.register Verb::Definition.new(
         "colormarker.add", "Add rule", "Open the editor to add a History row-colour rule",
-        Verb::Scope::Colormarker, [Verb::Chord.new("a")], available: in_cm, mnemonic: 'a', section: :rules) { |ctx| ctx.colormarker_add; nil }
+        Verb::Scope::Colormarker, [Verb::Chord.new("a")], available: in_cm, intent: :add, section: :rules) { |ctx| ctx.colormarker_add; nil }
       r.register Verb::Definition.new(
         "colormarker.edit", "Edit rule", "Edit the selected rule in the popup editor",
-        Verb::Scope::Colormarker, [Verb::Chord.new("enter"), Verb::Chord.new("e")], available: on_rule, mnemonic: 'e', section: :rules) { |ctx| ctx.colormarker_edit; nil }
+        Verb::Scope::Colormarker, [Verb::Chord.new("enter"), Verb::Chord.new("e")], available: on_rule, intent: :edit, section: :rules) { |ctx| ctx.colormarker_edit; nil }
       # `/`, the app's filter key. A LENS over the policy list — it hides rows, never disables
       # one — and the only action it changes is reordering, which `colormarker_move` refuses
       # while a query is held (precedence is the WHOLE list's order, and a filtered list is
@@ -33,36 +33,36 @@ module Gori
       r.register Verb::Definition.new(
         "colormarker.filter", "Filter rules", "Filter the rule list by name, match filter, colour or scope",
         Verb::Scope::Colormarker, [Verb::Chord.new("/")], available: in_cm,
-        mnemonic: 'f', section: :rules) { |ctx| ctx.colormarker_filter; nil }
+        intent: :filter, section: :rules) { |ctx| ctx.colormarker_filter; nil }
       r.register Verb::Definition.new(
         "colormarker.copy", "Copy", "Copy the selected rule's match filter (the QL that paints the row)",
-        Verb::Scope::Colormarker, [Verb::Chord.new("y")], available: on_rule, mnemonic: 'y', section: :rules) { |ctx| ctx.read_copy; nil }
+        Verb::Scope::Colormarker, [Verb::Chord.new("y")], available: on_rule, intent: :copy, section: :rules) { |ctx| ctx.read_copy; nil }
       # `t` — "flip this row's flag", the meaning `t` already carries as MARK in History,
       # Issues, the Sitemap and the Intercept queue. It was `x`, which is "select this line"
       # in fourteen scopes; a rule list has no marks, so `t` collides with nothing and `x` is
       # left meaning one thing everywhere (key audit, F4).
       r.register Verb::Definition.new(
         "colormarker.toggle", "Enable/disable", "Toggle the selected rule on or off in THIS project",
-        Verb::Scope::Colormarker, [Verb::Chord.new("t")], available: on_rule, mnemonic: 't', section: :rules) { |ctx| ctx.colormarker_toggle; nil }
+        Verb::Scope::Colormarker, [Verb::Chord.new("t")], available: on_rule, intent: :toggle_enabled, section: :rules) { |ctx| ctx.colormarker_toggle; nil }
       r.register Verb::Definition.new(
         "colormarker.delete", "Delete rule", "Delete the selected rule (confirms first)",
-        Verb::Scope::Colormarker, [Verb::Chord.new("d")], available: on_rule, mnemonic: 'd', section: :rules,
+        Verb::Scope::Colormarker, [Verb::Chord.new("d")], available: on_rule, intent: :delete, section: :rules,
         group: :danger) { |ctx| ctx.colormarker_delete; nil }
       # "Move up/down" reads like cosmetics on the Rewriter, where rules compose and order is a
       # tiebreak. Here the FIRST enabled match paints the row and the rest are never consulted,
       # so a move changes which rule wins — the descriptions say so.
       r.register Verb::Definition.new(
         "colormarker.move-up", "Move up", "Give the selected rule higher precedence (first match wins)",
-        Verb::Scope::Colormarker, [Verb::Chord.new("k", shift: true)], available: on_rule, mnemonic: 'u', section: :rules) { |ctx| ctx.colormarker_move(-1); nil }
+        Verb::Scope::Colormarker, [Verb::Chord.new("k", shift: true)], available: on_rule, intent: :move_up, section: :rules) { |ctx| ctx.colormarker_move(-1); nil }
       r.register Verb::Definition.new(
         "colormarker.move-down", "Move down", "Give the selected rule lower precedence (first match wins)",
-        Verb::Scope::Colormarker, [Verb::Chord.new("j", shift: true)], available: on_rule, mnemonic: 'n', section: :rules) { |ctx| ctx.colormarker_move(1); nil }
+        Verb::Scope::Colormarker, [Verb::Chord.new("j", shift: true)], available: on_rule, intent: :move_down, section: :rules) { |ctx| ctx.colormarker_move(1); nil }
       r.register Verb::Definition.new(
         "colormarker.duplicate", "Duplicate rule", "Copy the selected rule into a new one",
-        Verb::Scope::Colormarker, available: on_rule, mnemonic: 'c', section: :rules) { |ctx| ctx.colormarker_duplicate; nil }
+        Verb::Scope::Colormarker, available: on_rule, intent: :duplicate_rule, section: :rules) { |ctx| ctx.colormarker_duplicate; nil }
       r.register Verb::Definition.new(
         "colormarker.reload", "Reload rules", "Re-read rules from the project DB (pick up external edits)",
-        Verb::Scope::Colormarker, available: in_cm, mnemonic: 'r', section: :rules) { |ctx| ctx.colormarker_reload; nil }
+        Verb::Scope::Colormarker, available: in_cm, intent: :run, section: :rules) { |ctx| ctx.colormarker_reload; nil }
 
       # The scope half, the same shape the Rewriter's carries: a rule lives EITHER in this
       # project or in the global library every project reads. The default-flip is offered only
@@ -86,21 +86,24 @@ module Gori
       r.register Verb::Definition.new(
         "colormarker.toggle-default", "Enable/disable everywhere",
         "Flip a GLOBAL rule's default — the state every project without an override follows",
-        Verb::Scope::Colormarker, [] of Verb::Chord, # menu-only: ⇧X is the wipe chord on five tabs, and this one asked no confirm
-        available: on_global_rule, mnemonic: 'X', section: :rules) { |ctx| ctx.colormarker_toggle_default; nil }
+        # Menu-only: ⇧X is the wipe chord on five tabs, and this one asked no confirm. The menu
+        # letter is `T` for the same reason — ⇧X wipes app-wide (`Registry#validate_intents!`) —
+        # and because flipping every project is the broad form of this list's `t`.
+        Verb::Scope::Colormarker, [] of Verb::Chord,
+        available: on_global_rule, mnemonic: 'T', section: :rules) { |ctx| ctx.colormarker_toggle_default; nil }
 
       # --- CUSTOM COLORS pane (section :colors) — no chords, see the header note. ---
       in_colors = ->(ctx : Verb::ExecContext) { ctx.current_tab == :colormarker && ctx.colormarker_colors_focused? }
       on_color = ->(ctx : Verb::ExecContext) { ctx.current_tab == :colormarker && ctx.colormarker_colors_focused? && ctx.colormarker_color_selected? }
       r.register Verb::Definition.new(
         "colormarker.color-add", "Add colour", "Define a new custom colour (name + hex) for the picker",
-        Verb::Scope::Colormarker, available: in_colors, mnemonic: 'a', section: :colors) { |ctx| ctx.colormarker_color_add; nil }
+        Verb::Scope::Colormarker, available: in_colors, intent: :add, section: :colors) { |ctx| ctx.colormarker_color_add; nil }
       r.register Verb::Definition.new(
         "colormarker.color-edit", "Edit colour", "Edit the selected custom colour",
-        Verb::Scope::Colormarker, available: on_color, mnemonic: 'e', section: :colors) { |ctx| ctx.colormarker_color_edit; nil }
+        Verb::Scope::Colormarker, available: on_color, intent: :edit, section: :colors) { |ctx| ctx.colormarker_color_edit; nil }
       r.register Verb::Definition.new(
         "colormarker.color-delete", "Delete colour", "Delete the selected custom colour (confirms first)",
-        Verb::Scope::Colormarker, available: on_color, mnemonic: 'd', section: :colors,
+        Verb::Scope::Colormarker, available: on_color, intent: :delete, section: :colors,
         group: :danger) { |ctx| ctx.colormarker_color_delete; nil }
     end
   end

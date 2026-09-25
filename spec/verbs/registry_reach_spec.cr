@@ -62,9 +62,10 @@ describe "rule-list keys" do
     r["colormarker.toggle-default"].chords.should be_empty # menu-only: ⇧X is the wipe chord elsewhere
     r["colormarker.move-down"].chords.should contain(shift.call("j"))
     r["colormarker.move-up"].chords.should contain(shift.call("k"))
-    # …and the menu letter now names the key. It was 'g', which matched neither the verb
-    # ("Enable/disable everywhere") nor its ⇧X binding.
-    r["colormarker.toggle-default"].menu_key.should eq('X')
+    # It was 'g', then 'X' — and ⇧X is the wipe letter app-wide, which this is not. 'T' is
+    # the broad form of the list's `t` toggle (#1274).
+    r["colormarker.toggle-default"].menu_key.should eq('T')
+    r["rewriter.toggle-default"].menu_key.should eq('T')
   end
 end
 
@@ -181,10 +182,11 @@ describe "sub-tab verbs" do
     # to 'm' (Mode — the Decoder's letter for the same gesture).
     r["jwt.toggle-mode"].menu_key.should eq('m')
     r["cookie.toggle-mode"].menu_key.should eq('m')
-    # Notes derives its chip label from the body text, so it has no rename — which is why
-    # `notes.edit` may keep 'e'.
+    # Notes derives its chip label from the body text, so it has no rename. `notes.edit` still
+    # gave 'e' up (to 'o'): the strip's nine read the same on all nine strips, including the
+    # one that lacks the action (#1274 WP6, `Registry#validate_intents!`).
     r["notes.rename-subtab"]?.should be_nil
-    r["notes.edit"].menu_key.should eq('e')
+    r["notes.edit"].menu_key.should eq('o')
   end
 
   it "gives the strip the SAME nine letters on all nine tabs" do
@@ -230,6 +232,7 @@ describe "the shipped key set boots clean on every OS profile" do
     r = Gori::Verbs.registry
     r.validate_menu_keys!
     r.validate_chords!
+    r.validate_intents!
   end
 
   it "resolves the same effective chords on macOS, Linux and Windows" do

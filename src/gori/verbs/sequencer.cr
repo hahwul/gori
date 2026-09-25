@@ -31,10 +31,10 @@ module Gori
 
       r.register Verb::Definition.new(
         "sequence.run", "Run collection", "Re-run token collection for this session", Verb::Scope::Sequencer,
-        [Verb::Chord.new("r", ctrl: true)], available: in_sequencer, mnemonic: 'r') { |ctx| ctx.sequence_run; nil }
+        [Verb::Chord.new("r", ctrl: true)], available: in_sequencer, intent: :run) { |ctx| ctx.sequence_run; nil }
       r.register Verb::Definition.new(
         "sequence.stop", "Stop collection", "Stop the running collection", Verb::Scope::Sequencer,
-        [Verb::Chord.new("x", ctrl: true)], available: in_sequencer, mnemonic: 's') { |ctx| ctx.sequence_stop; nil }
+        [Verb::Chord.new("x", ctrl: true)], available: in_sequencer, intent: :stop) { |ctx| ctx.sequence_stop; nil }
       # Reconfigure the token descriptor / goal — the in-body 'c' chord promoted to a verb.
       r.register Verb::Definition.new(
         "sequence.configure", "Configure token", "Set the token location (cookie/header/regex/position/jsonpath) + goal",
@@ -50,7 +50,7 @@ module Gori
       r.register Verb::Definition.new(
         "sequence.export", "Export report…", "Write this session's randomness report to a Markdown file (asks for the path)",
         Verb::Scope::Sequencer, [Verb::Chord.new("e", shift: true)], available: has_report,
-        mnemonic: 'E') { |ctx| ctx.sequence_export(:markdown); nil }
+        intent: :export) { |ctx| ctx.sequence_export(:markdown); nil }
       # 'J', because without a mnemonic AND without a chord this verb was reachable from
       # NOTHING: `menu_key` returns nil, `SpaceMenu#open` filters on `menu_key`, and the
       # palette only queries Global scope — so a shipped export had no keyboard path at all.
@@ -63,7 +63,7 @@ module Gori
       r.register Verb::Definition.new(
         "sequence.promote", "File as issue", "Record this randomness verdict in the Issues report (no token values)",
         Verb::Scope::Sequencer, [] of Verb::Chord, available: has_report,
-        mnemonic: 'i') { |ctx| ctx.sequence_promote; nil }
+        intent: :file_issue) { |ctx| ctx.sequence_promote; nil }
 
       # The strip's `r` rename / ^W close. `Runner#renameable_subtabs?` and `#subtab_close`
       # have listed :sequencer all along, but with no verbs this tab had NO `:subtab` menu
@@ -76,7 +76,7 @@ module Gori
       in_seq = ->(ctx : Verb::ExecContext) { ctx.current_tab == :sequencer }
       r.register Verb::Definition.new(
         "sequence.rename-subtab", "Rename subtab", "Rename the active sequencing session's sub-tab chip",
-        Verb::Scope::Sequencer, available: in_seq, mnemonic: 'e', section: :subtab) { |ctx| ctx.sequencer_rename_subtab; nil }
+        Verb::Scope::Sequencer, available: in_seq, intent: :rename, section: :subtab) { |ctx| ctx.sequencer_rename_subtab; nil }
       # `:subtab`, with the rest of the chip family. Until #1055 this had to be `:common` —
       # the menu rendered COMMON ∪ the FOCUSED PANE's section, so a `:subtab` close was
       # invisible from the body and reachable only after moving focus to the strip. The
@@ -88,17 +88,17 @@ module Gori
       r.register Verb::Definition.new(
         "sequence.close-subtab", "Close subtab", "Close the active sequencing session",
         Verb::Scope::Sequencer, [Verb::Chord.new("w", ctrl: true)],
-        available: in_seq, mnemonic: 'w', section: :subtab) { |ctx| ctx.sequencer_close_subtab; nil }
+        available: in_seq, intent: :close, section: :subtab) { |ctx| ctx.sequencer_close_subtab; nil }
       r.register Verb::Definition.new(
         "sequence.find-subtab", "Search sub-tabs", "Filter the open sequencing sessions and jump to one",
         Verb::Scope::Sequencer,
         available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :sequencer && ctx.subtab_search_count >= 1 },
-        mnemonic: 'f', section: :tab) { |ctx| ctx.subtab_search_open; nil }
+        intent: :find_subtab, section: :tab) { |ctx| ctx.subtab_search_open; nil }
       r.register Verb::Definition.new(
         "sequence.filter-subtabs", "Filter sub-tabs", "Filter the sequencing sub-tab strip by name / host / method",
         Verb::Scope::Sequencer,
         available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :sequencer && ctx.subtab_search_count >= 2 },
-        mnemonic: '/', section: :tab) { |ctx| ctx.subtab_filter_open; nil }
+        intent: :filter, section: :tab) { |ctx| ctx.subtab_filter_open; nil }
 
       # Sub-tab multi-select (#683). `t` marks a chip and `⇧T` marks the strip; ^W then
       # closes every marked one, `space ▸ r` sends them, and so on — the existing verbs
@@ -107,10 +107,10 @@ module Gori
       # strip, and it WOULD fire in the body, marking sub-tabs while the operator types.
       r.register Verb::Definition.new(
         "sequence.subtab-mark-all", "Mark all sub-tabs", "Mark every session the sub-tab filter shows — the actions above then act on all of them",
-        Verb::Scope::Sequencer, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :sequencer && ctx.subtab_search_count >= 2 }, mnemonic: 'T', section: :subtab) { |ctx| ctx.subtab_mark_all; nil }
+        Verb::Scope::Sequencer, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :sequencer && ctx.subtab_search_count >= 2 }, intent: :mark_all, section: :subtab) { |ctx| ctx.subtab_mark_all; nil }
       r.register Verb::Definition.new(
         "sequence.subtab-mark-clear", "Clear marks", "Drop every sub-tab mark (esc on the strip does the same)",
-        Verb::Scope::Sequencer, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :sequencer && ctx.subtab_marked_count > 0 }, mnemonic: 'N', section: :subtab) { |ctx| ctx.subtab_mark_clear; nil }
+        Verb::Scope::Sequencer, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :sequencer && ctx.subtab_marked_count > 0 }, intent: :mark_clear, section: :subtab) { |ctx| ctx.subtab_mark_clear; nil }
     end
   end
 end

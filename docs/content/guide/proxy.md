@@ -539,7 +539,7 @@ Global rules apply **first**, in their own order, then the project's own: the st
 A global rule carries a **default** on/off state, and a project may disagree with it:
 
 - `t` toggles the rule **in this project**. For a global rule that writes an override, and the row is marked `G*`.
-- **Enable/disable everywhere** (`Space → X`; no direct key — `Space → X` is the wipe chord on the tabs that have one) flips the global default itself, which every project that has not overridden it follows.
+- **Enable/disable everywhere** (`Space → T`, the broad form of the toggle; no direct key, and not `X`, which wipes a tab everywhere it appears) flips the global default itself, which every project that has not overridden it follows.
 - Toggling back to the default **removes** the override, so the project follows the library again, including later changes to it.
 
 Deleting a global rule removes it from every project. A running gori in another window picks up global changes when its rules reload (reopen the Rewriter tab), and a second gori **process** only on restart.
@@ -664,13 +664,13 @@ Conditions speak the same query language History's filter bar does — every fie
 - **`host:` is a substring, not a DNS-label glob.** `host:alpha.test` also matches `xalpha.test`.
 - **A condition is validated when you save it.** An unknown field, an invalid regex, a condition that matches every flow, and a value the field does not take are all refused with the reason. Left alone, `hsot:evil.com` would quietly become a free-text search and the rule would never fire, and a dropped term would make a standing rule paint more than you wrote.
 
-A rule lives either in this project or in the **global library** every project reads, exactly like a Match & Replace rule: `Space → s` moves it between the two, `t` toggles it here, and `Space → X` flips a global rule's default everywhere. A project that disagrees with the library stores only the disagreement, and that disagreement is dropped the moment the two agree again, so a rule you toggled off and back on goes back to following the library rather than pinning today's answer.
+A rule lives either in this project or in the **global library** every project reads, exactly like a Match & Replace rule: `Space → s` moves it between the two, `t` toggles it here, and `Space → T` flips a global rule's default everywhere. A project that disagrees with the library stores only the disagreement, and that disagreement is dropped the moment the two agree again, so a rule you toggled off and back on goes back to following the library rather than pinning today's answer.
 
 | Action | Key |
 |--------|-----|
 | Add / edit a rule | `a` / `Enter` or `e` |
 | Enable or disable here | `t` |
-| Flip a global rule's default everywhere | `Space → X` |
+| Flip a global rule's default everywhere | `Space → T` |
 | Move between project and global | `Space → s` |
 | Reorder (changes which rule wins) | `Shift-J` / `Shift-K` |
 | Delete | `d` |

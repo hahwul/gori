@@ -12,19 +12,19 @@ module Gori
 
       r.register Verb::Definition.new(
         "hostoverride.add-entry", "Add host override", "Open the inline row to add an IP→host override",
-        Verb::Scope::HostOverrides, [Verb::Chord.new("a")]) { |ctx| ctx.hostov_add_entry; nil }
+        Verb::Scope::HostOverrides, [Verb::Chord.new("a")], intent: :add) { |ctx| ctx.hostov_add_entry; nil }
 
       r.register Verb::Definition.new(
         "hostoverride.copy-entry", "Copy", "Copy the selected override as a hosts-file line (`ip host`)",
-        Verb::Scope::HostOverrides, [Verb::Chord.new("y")], available: have_entry) { |ctx| ctx.read_copy; nil }
+        Verb::Scope::HostOverrides, [Verb::Chord.new("y")], available: have_entry, intent: :copy) { |ctx| ctx.read_copy; nil }
 
       r.register Verb::Definition.new(
         "hostoverride.edit-entry", "Edit host override", "Edit the selected host override in place",
-        Verb::Scope::HostOverrides, [Verb::Chord.new("e")], available: have_entry) { |ctx| ctx.hostov_edit_entry; nil }
+        Verb::Scope::HostOverrides, [Verb::Chord.new("e")], available: have_entry, intent: :edit) { |ctx| ctx.hostov_edit_entry; nil }
 
       r.register Verb::Definition.new(
         "hostoverride.delete-entry", "Delete host override", "Remove the selected host override",
-        Verb::Scope::HostOverrides, [Verb::Chord.new("d")], available: have_entry, group: :danger) { |ctx| ctx.hostov_delete_entry; nil }
+        Verb::Scope::HostOverrides, [Verb::Chord.new("d")], available: have_entry, group: :danger, intent: :delete) { |ctx| ctx.hostov_delete_entry; nil }
     end
   end
 end

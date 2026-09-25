@@ -289,7 +289,7 @@ describe Gori::Tui::SpaceMenu do
     ids.should contain("repeater.send")           # COMMON
     ids.should contain("repeater.insert-marker")  # :request
     ids.should_not contain("repeater.toggle-sni") # a DIFFERENT section (:target) — no bleed
-    menu.verb_for('i').try(&.id).should eq("repeater.insert-marker")
+    menu.verb_for('I').try(&.id).should eq("repeater.insert-marker")
 
     backend = MemoryBackend.new(100, 30)
     menu.render(Screen.new(backend), Rect.new(0, 0, 100, 28))

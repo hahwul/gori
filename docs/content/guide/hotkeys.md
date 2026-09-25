@@ -195,7 +195,36 @@ Because the bucket rides along with every pane, its nine letters are **reserved 
 of those tabs**. A pane action that wanted one had to move: the rule is that the *pane* letter
 yields, since the strip's letter has to read the same on all nine strips. `Space` `W` marks a
 word in the Repeater/Fuzzer editors, `Space` `D` toggles the response diff, and the JWT and
-Cookie lens toggles moved to `m` (Mode — the Decoder's letter for the same gesture).
+Cookie lens toggles moved to `m` (Mode — the Decoder's letter for the same gesture). JWT and
+Cookie copy their OUTPUT with `C`, the Comparer switches between requests and responses with
+`m`, and Notes opens the note in `$EDITOR` with `o`. The rule holds on a strip that lacks the
+action too, and gori refuses to start if a pane row breaks it.
+
+### One intent, one letter
+
+An action that recurs across tabs has the same menu letter on every tab that has it. The
+letter comes from one table in the source (`Verb::Lexicon`), not from each row, so two tabs
+cannot drift apart on it:
+
+| Key | Action |
+|-----|--------|
+| `/` | Filter this list |
+| `d` | Delete or dismiss the selected row |
+| `x` · `v` | Select the line · clear the selection |
+| `y` · `Y` · `S` | Copy · Copy as… · Send selection to… |
+| `t` · `T` · `N` | Mark · mark all · clear marks (on a rule list, `t` enables/disables) |
+| `o` | Open the selected row (the `↵` alias) |
+| `a` · `e` | Add · edit; on most tabs `a` also files an issue |
+| `r` · `s` | Run, send or reload (the menu echo of `Ctrl-R`) · stop |
+| `E` | Export |
+| `K` | Clear the workbench input (asks first) |
+| `I` | Insert a `§` marker |
+| `X` | Wipe the tab (asks first), and nothing else |
+
+`/` `d` `x` `y` `Y` `S` `t` `T` `N` and `X` are **reserved**: on a tab that has the action, no
+other row wears the letter. The rest are the action's wherever it exists and free for a tab-local row where it
+does not. Rewriter and Colormarker's **Enable/disable everywhere** is `T` for this reason: `X`
+wipes.
 
 ## Editor Keysets {#editor-keysets}
 

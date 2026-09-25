@@ -110,14 +110,14 @@ describe "one key, one meaning" do
   # `/` filters the list in eleven scopes and did not exist in the rule lists at all — the
   # Probe RULES sub-tab is ~40 built-ins across three sections, where reaching one meant
   # scrolling past the other two. All three share `RowFilter`, and all three are a LENS: a
-  # hidden rule is still enabled.
+  # hidden rule is still enabled. The space menu says `/` too: `:filter` in `Verb::Lexicon`.
   it "`/` filters the rule lists the way it filters every other list" do
     {Gori::Verb::Scope::Colormarker => "colormarker.filter",
      Gori::Verb::Scope::Rewriter    => "rewriter.filter",
      Gori::Verb::Scope::ProbeRules  => "probe-rules.filter",
     }.each do |scope, id|
       keymap.lookup(Gori::Verb::Chord.new("/"), scope).should eq(id), scope.to_s
-      Gori::Verbs.registry[id].menu_key.should eq('f'), id
+      Gori::Verbs.registry[id].menu_key.should eq('/'), id
     end
   end
 

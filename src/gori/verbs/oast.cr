@@ -14,7 +14,7 @@ module Gori
 
       r.register Verb::Definition.new(
         "oast.stop", "Stop listening", "Stop polling the selected provider (deregisters)",
-        Verb::Scope::OastCallbacks, [Verb::Chord.new("x", ctrl: true)], mnemonic: 's') { |ctx| ctx.oast_stop; nil }
+        Verb::Scope::OastCallbacks, [Verb::Chord.new("x", ctrl: true)], intent: :stop) { |ctx| ctx.oast_stop; nil }
 
       # `g` carries its chord HERE rather than in the controller's key handler, which is where it
       # used to live: with the provider bar on "All" and two or more providers enabled, getting a
@@ -31,12 +31,12 @@ module Gori
         # this one copies the payload gori sent — opposite directions of one interaction, and
         # `Registry#validate_menu_keys!` refuses one letter for two meanings inside a view. The
         # verb is also meaningless with a detail open, where there is no payload in front of you.
-        Verb::Scope::OastCallbacks, [] of Verb::Chord, mnemonic: 'y',
+        Verb::Scope::OastCallbacks, [] of Verb::Chord, intent: :copy,
         section: :list) { |ctx| ctx.oast_copy; nil }
 
       r.register Verb::Definition.new(
         "oast.filter", "Filter callbacks", "Filter the callbacks list by protocol/method/source/destination/provider",
-        Verb::Scope::OastCallbacks, [Verb::Chord.new("/")], mnemonic: 'f') { |ctx| ctx.oast_filter; nil }
+        Verb::Scope::OastCallbacks, [Verb::Chord.new("/")], intent: :filter) { |ctx| ctx.oast_filter; nil }
 
       # Resume a persisted session — the one you reach for ONCE, at the start of a sitting.
       # `⇧R` and no longer a plain `r`: bare `r` means "send this to the Repeater" in the five
@@ -56,12 +56,12 @@ module Gori
       # "file what I'm looking at" is one gesture across the app, and Keymap#lookup is
       # per-scope so the two never resolve together. The chord is Chord.new("f", shift: true),
       # NOT Chord.new("F"): Keybind.from_event normalises a typed capital to shift+lowercase,
-      # so an "F" chord would never fire; menu_key skips shift chords, hence the mnemonic.
+      # so an "F" chord would never fire; menu_key skips shift chords, hence the intent.
       r.register Verb::Definition.new(
         "oast.issue", "Add issue", "File the selected callback as an Issue, with its raw interaction as evidence",
         Verb::Scope::OastCallbacks, [Verb::Chord.new("f", shift: true)],
         available: ->(ctx : Verb::ExecContext) { ctx.oast_callback_selected? },
-        mnemonic: 'a', group: :triage) { |ctx| ctx.oast_issue_create; nil }
+        intent: :file_issue, group: :triage) { |ctx| ctx.oast_issue_create; nil }
 
       # No `escape` verb for either sub-tab. `OastController#handle_callbacks_key` /
       # `#handle_providers_key` claim escape first and return true, so a registration here
@@ -74,21 +74,21 @@ module Gori
       # `a`/`e`/`x`/`d` as free in this scope and a binding there would have been shadowed.
       r.register Verb::Definition.new(
         "oast.add-provider", "Add provider", "Add an OAST provider (interactsh + friends; presets prefilled)",
-        Verb::Scope::OastProviders, [Verb::Chord.new("a")], mnemonic: 'a') { |ctx| ctx.oast_add_provider; nil }
+        Verb::Scope::OastProviders, [Verb::Chord.new("a")], intent: :add) { |ctx| ctx.oast_add_provider; nil }
 
       r.register Verb::Definition.new(
         "oast.edit-provider", "Edit provider", "Edit the selected OAST provider",
-        Verb::Scope::OastProviders, [Verb::Chord.new("e")], mnemonic: 'e') { |ctx| ctx.oast_edit_provider; nil }
+        Verb::Scope::OastProviders, [Verb::Chord.new("e")], intent: :edit) { |ctx| ctx.oast_edit_provider; nil }
 
       # `t` — "flip this row's flag", the letter every rule list spells this action with since
       # the key audit's F4. It was `x`, which is "select this line" in fourteen scopes.
       r.register Verb::Definition.new(
         "oast.toggle-provider", "Enable / disable", "Toggle the selected provider on or off",
-        Verb::Scope::OastProviders, [Verb::Chord.new("t")], mnemonic: 't') { |ctx| ctx.oast_toggle_provider; nil }
+        Verb::Scope::OastProviders, [Verb::Chord.new("t")], intent: :toggle_enabled) { |ctx| ctx.oast_toggle_provider; nil }
 
       r.register Verb::Definition.new(
         "oast.delete-provider", "Delete provider", "Delete the selected provider (keeps its callback history)",
-        Verb::Scope::OastProviders, [Verb::Chord.new("d")], mnemonic: 'd', group: :danger) { |ctx| ctx.oast_delete_provider; nil }
+        Verb::Scope::OastProviders, [Verb::Chord.new("d")], intent: :delete, group: :danger) { |ctx| ctx.oast_delete_provider; nil }
 
       # --- cross-tab: insert / copy a fresh OAST payload (gated on an active listener) ---
       insert_avail = ->(tab : Symbol) {
@@ -97,15 +97,15 @@ module Gori
 
       r.register Verb::Definition.new(
         "repeater.oast-insert", "Insert OAST payload", "Insert a fresh OAST payload URL at the request cursor",
-        Verb::Scope::Repeater, available: insert_avail.call(:repeater), mnemonic: 'O') { |ctx| ctx.oast_insert_payload; nil }
+        Verb::Scope::Repeater, available: insert_avail.call(:repeater), intent: :oast_payload) { |ctx| ctx.oast_insert_payload; nil }
 
       r.register Verb::Definition.new(
         "fuzzer.oast-insert", "Insert OAST payload", "Insert a fresh OAST payload URL at the template cursor",
-        Verb::Scope::Fuzzer, available: insert_avail.call(:fuzzer), mnemonic: 'O') { |ctx| ctx.oast_insert_payload; nil }
+        Verb::Scope::Fuzzer, available: insert_avail.call(:fuzzer), intent: :oast_payload) { |ctx| ctx.oast_insert_payload; nil }
 
       r.register Verb::Definition.new(
         "history.oast-copy", "Copy OAST payload", "Copy a fresh OAST payload URL to the clipboard",
-        Verb::Scope::Body, available: insert_avail.call(:history), mnemonic: 'O') { |ctx| ctx.oast_copy_payload; nil }
+        Verb::Scope::Body, available: insert_avail.call(:history), intent: :oast_payload) { |ctx| ctx.oast_copy_payload; nil }
     end
   end
 end

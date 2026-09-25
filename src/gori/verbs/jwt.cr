@@ -13,11 +13,11 @@ module Gori
       r.register Verb::Definition.new(
         "jwt.new", "New session", "Open a fresh blank JWT session sub-tab",
         Verb::Scope::Jwt, [Verb::Chord.new("n", ctrl: true)],
-        available: in_jwt, mnemonic: 'n', section: :subtab) { |ctx| ctx.jwt_new; nil }
+        available: in_jwt, intent: :new, section: :subtab) { |ctx| ctx.jwt_new; nil }
       r.register Verb::Definition.new(
         "jwt.close", "Close session", "Close the active JWT session (keeps at least one)",
         Verb::Scope::Jwt, [Verb::Chord.new("w", ctrl: true)],
-        available: in_jwt, mnemonic: 'w', section: :subtab) { |ctx| ctx.jwt_close; nil }
+        available: in_jwt, intent: :close, section: :subtab) { |ctx| ctx.jwt_close; nil }
       r.register Verb::Definition.new(
         "jwt.toggle-mode", "Toggle decode/encode", "Flip between the DECODE and ENCODE lenses",
         Verb::Scope::Jwt, [Verb::Chord.new("t", ctrl: true)],
@@ -33,7 +33,7 @@ module Gori
       # Load is `L` for the same reason — it overwrites the ENCODE editors.
       r.register Verb::Definition.new(
         "jwt.clear", "Clear session", "Clear the token, editors, and secret of the active session",
-        Verb::Scope::Jwt, [Verb::Chord.new("l", ctrl: true)], available: in_jwt, mnemonic: 'K',
+        Verb::Scope::Jwt, [Verb::Chord.new("l", ctrl: true)], available: in_jwt, intent: :clear_input,
         group: :danger) { |ctx| ctx.jwt_clear; nil }
 
       # The single smart Copy (selection if any, else the focused pane) — chord 'y'.
@@ -45,12 +45,13 @@ module Gori
       r.register Verb::Definition.new(
         "jwt.copy", "Copy", "Copy the selection, or the whole focused pane if nothing is selected",
         Verb::Scope::Jwt, [Verb::Chord.new("y"), Verb::Chord.new("y", ctrl: true)],
-        available: in_jwt_copy, mnemonic: 'y') { |ctx| ctx.jwt_copy; nil }
+        available: in_jwt_copy, intent: :copy) { |ctx| ctx.jwt_copy; nil }
 
-      # Copy the re-signed OUTPUT token — tagged :output (the ENCODE result pane).
+      # Copy the re-signed OUTPUT token — tagged :output (the ENCODE result pane). `C`, not the
+      # `t` it had: `t` is a sub-tab strip letter, and the SUB-TABS bucket shares this card.
       r.register Verb::Definition.new(
         "jwt.copy-token", "Copy re-signed token", "Copy the OUTPUT token to the clipboard",
-        Verb::Scope::Jwt, available: in_jwt, mnemonic: 't', section: :output) { |ctx| ctx.jwt_copy_token; nil }
+        Verb::Scope::Jwt, available: in_jwt, mnemonic: 'C', section: :output) { |ctx| ctx.jwt_copy_token; nil }
 
       # Copy the selected ATTACK payload — tagged :attacks (the payload list pane).
       r.register Verb::Definition.new(
@@ -60,10 +61,10 @@ module Gori
       # Sub-tab chip rename + content clone — tagged :subtab (mirrors Decoder).
       r.register Verb::Definition.new(
         "jwt.rename-subtab", "Rename subtab", "Rename the active session's sub-tab chip",
-        Verb::Scope::Jwt, available: in_jwt, mnemonic: 'e', section: :subtab) { |ctx| ctx.jwt_rename_subtab; nil }
+        Verb::Scope::Jwt, available: in_jwt, intent: :rename, section: :subtab) { |ctx| ctx.jwt_rename_subtab; nil }
       r.register Verb::Definition.new(
         "jwt.duplicate-subtab", "Duplicate subtab", "Open a new session with the same token + claims",
-        Verb::Scope::Jwt, available: in_jwt, mnemonic: 'd', section: :subtab) { |ctx| ctx.jwt_duplicate_subtab; nil }
+        Verb::Scope::Jwt, available: in_jwt, intent: :duplicate, section: :subtab) { |ctx| ctx.jwt_duplicate_subtab; nil }
 
       # Search + filter across sessions — tagged :tab (like decoder.find-subtab), so
       # jumping never needs Ctrl+digit. The two thresholds differ and must not share a
@@ -75,10 +76,10 @@ module Gori
       has_many = ->(ctx : Verb::ExecContext) { ctx.current_tab == :jwt && ctx.subtab_search_count >= 2 }
       r.register Verb::Definition.new(
         "jwt.find-subtab", "Search sub-tabs", "Filter the open JWT sessions and jump to one",
-        Verb::Scope::Jwt, available: has_any, mnemonic: 'f', section: :tab) { |ctx| ctx.subtab_search_open; nil }
+        Verb::Scope::Jwt, available: has_any, intent: :find_subtab, section: :tab) { |ctx| ctx.subtab_search_open; nil }
       r.register Verb::Definition.new(
         "jwt.filter-subtabs", "Filter sub-tabs", "Filter the JWT sub-tab strip by name / token",
-        Verb::Scope::Jwt, available: has_many, mnemonic: '/', section: :tab) { |ctx| ctx.subtab_filter_open; nil }
+        Verb::Scope::Jwt, available: has_many, intent: :filter, section: :tab) { |ctx| ctx.subtab_filter_open; nil }
 
       # Sub-tab multi-select (#683). `t` marks a chip and `⇧T` marks the strip; ^W then
       # closes every marked one, `space ▸ r` sends them, and so on — the existing verbs
@@ -87,10 +88,10 @@ module Gori
       # strip, and it WOULD fire in the body, marking sub-tabs while the operator types.
       r.register Verb::Definition.new(
         "jwt.subtab-mark-all", "Mark all sub-tabs", "Mark every session the sub-tab filter shows — the actions above then act on all of them",
-        Verb::Scope::Jwt, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :jwt && ctx.subtab_search_count >= 2 }, mnemonic: 'T', section: :subtab) { |ctx| ctx.subtab_mark_all; nil }
+        Verb::Scope::Jwt, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :jwt && ctx.subtab_search_count >= 2 }, intent: :mark_all, section: :subtab) { |ctx| ctx.subtab_mark_all; nil }
       r.register Verb::Definition.new(
         "jwt.subtab-mark-clear", "Clear marks", "Drop every sub-tab mark (esc on the strip does the same)",
-        Verb::Scope::Jwt, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :jwt && ctx.subtab_marked_count > 0 }, mnemonic: 'N', section: :subtab) { |ctx| ctx.subtab_mark_clear; nil }
+        Verb::Scope::Jwt, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :jwt && ctx.subtab_marked_count > 0 }, intent: :mark_clear, section: :subtab) { |ctx| ctx.subtab_mark_clear; nil }
     end
   end
 end
