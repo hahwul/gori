@@ -16,6 +16,7 @@ module Gori::Tui
       super(host)
       @sitemap = SitemapView.new
       @sitemap.set_scope(@host.session.scope) # honour the lens + show its chip on the bar
+      @sitemap.set_registry(@host.session.registry)
       @sitemap.set_hide_static(StaticAsset.hidden?(@host.session.store))
       @query_reload_at = nil.as(Time::Instant?)
       # The `/` bar's reload off the main fiber (the History #967 shape): one running read
@@ -505,7 +506,7 @@ module Gori::Tui
     end
 
     # --- tag editor (a text sub-mode; the shell routes its keys via handle_tag_key) ---
-    # `space` → T — open the tag editor over the target set (the marks if any, else the selected
+    # Tag path (space menu, `sitemap.tag`) — open the tag editor over the target set (the marks if any, else the selected
     # node). A synthetic group fold node has no real path, so it can't be tagged — toast
     # instead of opening an empty editor.
     def sitemap_tag : Nil

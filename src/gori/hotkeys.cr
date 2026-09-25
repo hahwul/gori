@@ -309,6 +309,36 @@ module Gori
     # a JSON body out of it.
     VERB_TOKEN_RE = /\{([a-z][a-z0-9_.-]*)\}/
 
+    # A `{space:verb.id}` token names a verb by its SPACE-MENU path instead of a chord, for
+    # the menu-only verbs a hint still wants to point at ("tag with space → m"). The `:` keeps
+    # it out of VERB_TOKEN_RE, so the two never resolve the same token.
+    SPACE_TOKEN_RE = /\{space:([a-z][a-z0-9_.-]*)\}/
+
+    # What a `{space:…}` token reads as when there is no registry to ask, or the id names no
+    # menu row. Never the raw token: a status line that prints `{space:x.y}` has told the
+    # operator nothing (the `{fuzz.sort}` footer bug, spec/verb/hint_token_expands_spec.cr).
+    MENU_PATH_FALLBACK = "the space menu"
+
+    # The keys that reach `id` through the space menu ("space → t"), or nil when the verb is
+    # unknown or has no menu row. The ONE place a menu path is spelled: Help's key column and
+    # every `{space:…}` token come through here, so when the menu grows a second level
+    # ("space → > f") this is the function that changes. The letter is the verb's `menu_key`,
+    # which a rebind does not move (the space menu reads the same property).
+    def self.menu_path(registry : Verb::Registry, id : String) : String?
+      return nil unless key = registry[id]?.try(&.menu_key)
+      "space → #{key}"
+    end
+
+    # Resolve every `{space:verb.id}` in `template`. Without a registry each token collapses
+    # to MENU_PATH_FALLBACK — a render that cannot know the letter says where to look rather
+    # than printing the token.
+    def self.expand_menu_paths(registry : Verb::Registry?, template : String) : String
+      return template unless template.valid_encoding? && template.includes?("{space:")
+      template.gsub(SPACE_TOKEN_RE) do
+        (registry && menu_path(registry, $1)) || MENU_PATH_FALLBACK
+      end
+    end
+
     # Resolve every `{verb.id}` in `template` to the verb's EFFECTIVE chord (#binding_label),
     # so one string carries both the prose and the keys, and a rebind reaches every surface
     # that spells its hint this way — the status strips' body_hint, Help's composite rows
@@ -320,6 +350,8 @@ module Gori
     # (the same answer #binding_label's callers hand it as a literal), and a token naming a
     # verb with no default at all is left as written — visibly wrong rather than silently
     # blank, which is what `spec/hotkeys_spec.cr` / the Help spec check for.
+    #
+    # `{space:verb.id}` tokens resolve here too, to the verb's menu path (#expand_menu_paths).
     def self.expand(registry : Verb::Registry, template : String,
                     overrides : Hash(String, Array(Verb::Chord))? = nil,
                     profile : String = Settings.keymap_os,
@@ -343,6 +375,7 @@ module Gori
     private def self.expand_uncached(registry : Verb::Registry, template : String,
                                      overrides : Hash(String, Array(Verb::Chord)), profile : String,
                                      keyset : String) : String
+      template = expand_menu_paths(registry, template)
       template.gsub(VERB_TOKEN_RE) do |token|
         id = $1
         if chord = binding_for(registry, id, overrides, profile, keyset) || default_for(registry, id, profile, keyset)

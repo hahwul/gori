@@ -2679,7 +2679,8 @@ read-only response, where Unicode escape display takes priority; the request edi
 resolves `u` in the leading Editor scope to `editor.undo`.
 
 What the keyset deliberately leaves alone: the enable/disable `x` on the four rule lists (that
-`x` is a state change, not a selection — KEY_AUDIT F4), and `intercept.select-line`, which
+`x` is a state change, not a selection — KEY_AUDIT F4; since the entry below, all four toggles
+are `t` and there is no such `x`), and `intercept.select-line`, which
 ships keyless because the Intercept queue spends nearly every letter. A keyset respells keys;
 it does not hand one to a pane whose author decided against it.
 
@@ -3678,3 +3679,22 @@ the palette would have lost the row as well.
 
 A later R1 exception whose two meanings live in different panes of one tab can take this
 instead of an allowlist line.
+
+### 2026-09-25: a menu letter in UI text is read from the registry
+
+Refines: the two entries above. #1274 WP3/WP8.
+
+Help's verb-id rows resolved a chord through the keymap, but a menu-only verb has no chord, so
+the row printed its hand-typed `space → X` unchecked — and three had drifted (Tag subtab `a`
+for `t`, gRPC reframe `F` for `R`, and a row naming `oast.promote`, which never existed). The
+same literal sat in toasts and hint strips, and in the Sitemap filter's `tag:` help (`T` for
+`m`).
+
+- **`Hotkeys.menu_path` is the one place a menu path is spelled.** A Help row whose verb has
+  no chord prints it; hint text writes `{space:verb.id}`, which `Hotkeys.expand` resolves next
+  to `{verb.id}`. When the menu grows a second level, that function is what changes.
+- **No registry never prints the token.** It reads "the space menu" instead — the
+  `{fuzz.sort}` footer bug in a new shape is what this rules out.
+- **`spec/verb/hint_token_expands_spec.cr` scans `src/gori`** for a literal `space → <key>`
+  outside comments, and every `{space:…}` token must name a verb with a menu row. A row named
+  by its TITLE ("space → Mine parameters") names no letter and is left alone.

@@ -7,6 +7,15 @@ private def help_view_key(char : Char) : Termisu::Event::Key
   Termisu::Event::Key.new(Termisu::Input::Key.from_char(char), char: char)
 end
 
+# Each SECTIONS item beside the row `shortcut_rows` rendered for it. Paired by position, not by
+# text: several descriptions repeat across sections (the Copy rows, the two rule lists).
+private def help_item_rows(registry : Gori::Verb::Registry?) : Array({String, HelpView::Item, HelpView::Row})
+  items = HelpView::SECTIONS.flat_map { |(title, its)| its.map { |i| {title, i} } }
+  rows = HelpView.shortcut_rows(registry).select(&.kind.== :item)
+  rows.size.should eq(items.size)
+  items.zip(rows).map { |((title, item), row)| {title, item, row} }
+end
+
 describe Gori::Tui::HelpView do
   it "renders the grouped shortcut sections" do
     view = HelpView.new
@@ -121,6 +130,59 @@ describe Gori::Tui::HelpView do
         Gori::Settings.keymap_overrides = prev
       end
       HelpView.shortcut_rows(registry).select(&.b.starts_with?("copy selection/pane")).map(&.a).uniq!.should eq(["y · ^Y"])
+    end
+  end
+
+  # #1274: a verb-id row whose verb has no chord printed its hand-written `space → X` without
+  # any check, and three had drifted — Tag subtab said `a` (the menu said `t`), gRPC reframe
+  # said `F` (it was `R`), and one row named `oast.promote`, a verb that never existed.
+  describe "space-menu paths" do
+    it "names only registered verbs" do
+      registry = Gori::Verbs.registry
+      ids = HelpView::SECTIONS.flat_map { |(_, items)| items.compact_map(&.verb_id) }
+      ids.size.should be > 50 # the sheet still carries its verb-id rows
+      ids.reject { |id| registry[id]? }.should be_empty
+    end
+
+    it "prints a menu-only verb's menu path from the registry, and the chord for the rest" do
+      registry = Gori::Verbs.registry
+      menu_only = 0
+      help_item_rows(registry).each do |(title, item, row)|
+        next unless id = item.verb_id
+        want = if chord = Gori::Hotkeys.binding_for(registry, id)
+                 Gori::Hotkeys.display_label(chord)
+               else
+                 menu_only += 1
+                 Gori::Hotkeys.menu_path(registry, id) || item.key
+               end
+        row.a.should eq(Gori::Hotkeys.retag(want)), "#{title}: #{id}"
+      end
+      menu_only.should be > 5
+    end
+
+    # The class, not the rows: every `space → X` anywhere on the rendered sheet must be the
+    # menu letter of a verb that row names — by verb id or by a `{space:…}` token. A literal
+    # letter typed into SECTIONS names no verb, so it fails here whether or not it is right.
+    it "never prints a menu letter the row's own verbs do not carry" do
+      registry = Gori::Verbs.registry
+      seen = 0
+      help_item_rows(registry).each do |(title, item, row)|
+        named = [item.verb_id].compact
+        "#{item.key} #{item.desc}".scan(Gori::Hotkeys::SPACE_TOKEN_RE) { |m| named << m[1] }
+        letters = named.compact_map { |id| registry[id]?.try(&.menu_key) }
+        "#{row.a} #{row.b}".scan(/space → (\S)/) do |m|
+          seen += 1
+          letters.should contain(m[1][0]), "#{title}: `#{row.a}` prints space → #{m[1]}"
+        end
+        "#{row.a} #{row.b}".should_not contain("{space:")
+      end
+      seen.should be > 15
+    end
+
+    it "reads as the space menu, never a raw token, without a registry" do
+      HelpView.shortcut_rows(nil).each { |r| "#{r.a} #{r.b}".should_not contain("{space:") }
+      HelpView.shortcut_rows(nil).find(&.b.==("tag the active sub-tab (from the strip)"))
+        .not_nil!.a.should eq(Gori::Hotkeys::MENU_PATH_FALLBACK)
     end
   end
 

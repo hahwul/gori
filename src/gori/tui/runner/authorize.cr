@@ -64,7 +64,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     # label in the results table would leave no way to tell which session produced which.
     taken = all.each_with_index.compact_map { |(id, i)| i == idx ? nil : id.name }.to_a
     labels = editing ? Gori::SessionRefresh.step_labels(@session.store, editing) : [] of String
-    form = AuthorizeIdentityOverlay.new(editing, idx, taken, labels)
+    form = AuthorizeIdentityOverlay.new(editing, idx, taken, labels, @session.registry)
     form.on_commit = -> { authorize_controller.apply_identity(idx, form.build_identity) }
     # Both paths — saved or cancelled — return to a FRESHLY built list, so it shows whatever
     # the commit just wrote.

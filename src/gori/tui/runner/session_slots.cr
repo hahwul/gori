@@ -50,7 +50,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     slot = @session.slots.find(name)
     return (@toast = "session slot #{name.inspect} is gone") unless slot
     unless slot.refreshable?
-      return (@toast = "#{name} has no refresh steps — add one from a Repeater sub-tab (space → b)")
+      return (@toast = Hotkeys.expand_menu_paths(@session.registry, "#{name} has no refresh steps — add one from a Repeater sub-tab ({space:repeater.use-as-refresh})"))
     end
     runner = @session.refresher
     return (@toast = "refreshing #{name}…") if runner.refreshing?(name)

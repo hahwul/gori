@@ -1782,8 +1782,9 @@ module Gori::Tui
       end
 
       # "space" opens the focused area's action menu (helix leader). Placed AFTER the
-      # scoped keymap so any area that already binds space wins — Sitemap's space
-      # toggles a tree node (sitemap.toggle). The Project SCOPE pane instead DEFERS
+      # scoped keymap so any area that already binds space wins — none does today:
+      # Sitemap's expand/collapse (sitemap.toggle) is `enter` alone, which is what leaves
+      # its space free for the menu. The Project SCOPE pane instead DEFERS
       # space to here (its lens toggle is the menu-only scope.lens-toggle verb). Only
       # reached in NAVIGABLE contexts: text editors (Repeater request/target, Notes,
       # Project desc, the QL "/" bar, Issues notes, Intercept edit) swallow keys
@@ -3883,7 +3884,7 @@ module Gori::Tui
         # QL plus this surface's own `tag:`, which never reaches the parser (FilterAst.partition
         # pulls it out first) and so cannot come from QL's table.
         HelpPopupOverlay.query_reference("SITEMAP FILTER",
-          HelpView.query_rows(["tag"] + QL::FIELDS, SitemapView::QL_HELP))
+          HelpView.query_rows(["tag"] + QL::FIELDS, SitemapView.ql_help(@session.registry)))
       when :issues
         # Five fields, none of them QL's. Without this arm `?` fell through to the generic
         # reference below — the full QL vocabulary, of which `Issues::Filter` implements two

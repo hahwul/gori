@@ -310,7 +310,7 @@ module Gori::Tui
       # `esc sub-tabs` last, where every other tab's line ends it. `handle_body_key` has
       # always sent escape to the strip; the hint was the only tab-level line in the app that
       # never said so, and a line this long is exactly where a reader stops looking.
-      keys("←/→ req|res · ↑/↓ row · {comparer.next-change}/{comparer.prev-change} change · space → z fold · {comparer.copy} copy · ⇧←/→ h-scroll · {comparer.pick-a}/{comparer.pick-b} pick · {comparer.swap} swap · space cmds · esc sub-tabs")
+      keys("←/→ req|res · ↑/↓ row · {comparer.next-change}/{comparer.prev-change} change · {space:comparer.toggle-fold} fold · {comparer.copy} copy · ⇧←/→ h-scroll · {comparer.pick-a}/{comparer.pick-b} pick · {comparer.swap} swap · space cmds · esc sub-tabs")
     end
   end
 end

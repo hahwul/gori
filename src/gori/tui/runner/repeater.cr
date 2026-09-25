@@ -44,8 +44,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     repeater_controller.repeater_send_race
   end
 
-  # Open the Repeater sub-tab search picker (space → s). Snapshots the open
-  # sessions; the picker filters them in memory and jumps on ↵.
+  # Open the Repeater sub-tab search picker (`repeater.find-subtab`, space → f). Snapshots
+  # the open sessions; the picker filters them in memory and jumps on ↵.
   def repeater_find_subtab : Nil
     subtab_search_open
   end

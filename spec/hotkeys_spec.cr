@@ -127,6 +127,35 @@ describe Gori::Hotkeys do
     end
   end
 
+  # The menu path is read off the verb's `menu_key` (the letter the space menu itself draws),
+  # never from a hand-written literal — the Help sheet printed three wrong ones that way (#1274).
+  describe ".menu_path / {space:verb.id}" do
+    it "spells a menu-only verb's path from its menu_key, and nil for no menu row" do
+      reg = Gori::Verbs.registry
+      Gori::Hotkeys.menu_path(reg, "repeater.tag-subtab").should eq("space → #{reg["repeater.tag-subtab"].menu_key}")
+      Gori::Hotkeys.menu_path(reg, "sitemap.tag").should eq("space → m")
+      Gori::Hotkeys.menu_path(reg, "no.such.verb").should be_nil
+      # Hidden navigation verb: its chords are named keys, so it derives no menu letter.
+      Gori::Hotkeys.menu_path(reg, "sitemap.toggle").should be_nil
+    end
+
+    it "expands inside a hint, next to {verb.id} tokens, and ignores a rebind" do
+      reg = Gori::Verbs.registry
+      ov = {"fuzz.matched" => [Gori::Verb::Chord.new("q")]}
+      Gori::Hotkeys.expand(reg, "{space:fuzz.sort} sort · {fuzz.matched} matched", ov)
+        .should eq("space → o sort · q matched")
+      Gori::Hotkeys.expand(reg, "{space:fuzz.sort} sort").should eq("space → o sort")
+    end
+
+    it "never prints the raw token: no registry or no menu row reads as the space menu" do
+      reg = Gori::Verbs.registry
+      fallback = Gori::Hotkeys::MENU_PATH_FALLBACK
+      Gori::Hotkeys.expand_menu_paths(nil, "set with {space:sitemap.tag}").should eq("set with #{fallback}")
+      Gori::Hotkeys.expand(reg, "{space:no.such.verb} · {space:sitemap.toggle}").should eq("#{fallback} · #{fallback}")
+      Gori::Hotkeys.expand_menu_paths(nil, "{\"space\":1} · {sitemap.query}").should eq("{\"space\":1} · {sitemap.query}")
+    end
+  end
+
   describe ".claimed?" do
     it "covers the pre-keymap ctrl letter/digit/punct set" do
       Gori::Hotkeys.claimed?(Gori::Verb::Chord.new("p", ctrl: true)).should be_true
