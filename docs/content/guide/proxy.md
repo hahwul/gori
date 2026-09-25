@@ -134,6 +134,30 @@ The scan reads the flows the Sitemap shows, so the `/` query and the `s` scope l
 
 The same inventory is `gori run sitemap params` on the CLI and `list_params` over MCP.
 
+### JavaScript references {#js-refs}
+
+The API surface of a single-page app lives in a bundle the browser already downloaded, and the tree only shows the routes someone clicked through. `Space` → `J` (**Scan JavaScript**) reads the captured JavaScript responses and the inline `<script>` blocks of captured HTML pages, finds the endpoint literals in them (`fetch("/api/v1/users")`, an axios call, a route table), and adds the paths nobody has requested to the tree as dimmed rows marked `js`. **It sends nothing**: the bytes are already in the project. A path that captured traffic already reaches keeps its row and gains no second one, so the `N paths` counts stay traffic-only.
+
+The scan reads the flows the tree shows (the `/` query and the lenses apply), newest first, 500 per run, and only responses it has not read before, so running it again after more browsing reads just the new bundles. The toast reports how many new endpoints it found and any cap it hit (a body is read up to 2 MiB). `Space` → `U` hides or shows the `js` rows.
+
+A reference is read the way a browser would resolve it:
+
+- An inline script resolves against its page, or the page's `<base href>`.
+- An external script resolves against the page its captured request's `Referer` names, since a CDN bundle's `"/api/cart"` targets the page's origin. Without a `Referer` it falls back to the script's own origin, and the reference is marked `guessed`.
+- A template literal keeps its shape: `` `/api/users/${id}/orders` `` becomes `/api/users/{expr}/orders`, never the directory `/api/users/`.
+- A literal inside a comment is kept (old routes are worth seeing) and marked as such.
+- The bytes are treated as page-authored: a space is percent-encoded, and a literal carrying CR or LF is dropped rather than repaired. Images, fonts and a bare `/` are skipped.
+
+A host gori has never captured (an API subdomain the bundle calls, but also `www.w3.org` from an SVG namespace) appears only when a scope include names it. With the `s` lens on, references are filtered by the scope too.
+
+| Action | Key | On a `js` row |
+| --- | --- | --- |
+| Open flow | `o` | Opens the script (or page) that referenced the path in the History detail, on the response pane, and names the line and byte |
+| Send to Repeater | `r` | A bare `GET` for the path in a new Repeater tab. Nothing is sent until `^R`, and no cookie or `Authorization` from the page is copied |
+| Discover here | `Space` `d` | Crawls under the path, as on any row |
+
+The stored references are deleted with the flows they came from, so `history clear` clears them; they never appear in History, QL or the OpenAPI export. The same data is `gori run sitemap js` (with `--scan`) and `gori run sitemap --js-refs` on the CLI, and `scan_js_endpoints` / `list_js_endpoints` over MCP.
+
 ### OpenAPI export {#openapi}
 
 Press `⇧E` on a Sitemap row (or `Space` → `E`) to write an OpenAPI 3.0.3 document. It covers the marked paths if any are marked, otherwise the cursor row: a host row exports the whole host, and any other row exports the endpoints under it. The popup asks for the destination; end the name in `.yaml` or `.yml` for YAML, and anything else writes JSON. The flows are the ones the tree shows, so the `/` query, the `s` scope lens and the hide-static lens all apply, minus the requests gori sent itself (Repeater, Fuzzer, Discover, …). The export runs in the background, and a toast reports the operations written, any cap that cut the document short, and how many flows were skipped (WebSocket, gRPC, SSE, incomplete).

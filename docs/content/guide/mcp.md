@@ -158,6 +158,7 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 | `get_flow` | Full request + response for one flow. Bodies come back sanitized, with a `body_redaction` object, where a [redaction profile](/reference/cli/#run-redact) is on by default; `include_sensitive:true` turns that off along with the header redaction |
 | `get_response_body_chunk` | Page through decoded (or raw) flow/Repeater responses beyond the inline 64 KiB cap |
 | `list_sitemap` / `list_sitemap_tags` | Distinct endpoints (host, method, path), and the tags placed on them |
+| `list_js_endpoints` / `scan_js_endpoints` | Endpoints captured JavaScript references and no request reached, with the flow, line and literal each was read from; the scan reads new JS/HTML responses and sends nothing. `list_sitemap` adds them as `unrequested` with `include_unrequested:true` |
 | `list_params` | Per-endpoint parameter inventory: every input name by location, with counts, sample values (credentials redacted) and whether a value is reflected in the response |
 | `export_openapi` | The captured API as an OpenAPI 3.0.3 document, inline (a JSON object, or YAML with `format:"yaml"`): templated paths, parameters, inferred request and response schemas, servers and security schemes. No credential values, and no examples unless `examples:true` (redacted). Capped by `max_endpoints` and `max_bytes`, with `truncated` saying so. In the full catalogue only, since adding it would put `@recon` over its size budget |
 | `list_issues` / `get_issue` | Read triaged issues |

@@ -158,6 +158,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `get_flow` | 한 플로우의 전체 요청 + 응답. [리댁션 프로파일](/ko/reference/cli/#run-redact)이 기본 적용된 곳에서는 본문이 정제되어 `body_redaction` 객체와 함께 돌아옵니다. `include_sensitive:true`는 헤더 리댁션과 함께 그것도 끕니다 |
 | `get_response_body_chunk` | 인라인 64 KiB 상한을 넘는 디코드(또는 원시) 플로우/Repeater 응답을 페이지 단위로 조회 |
 | `list_sitemap` / `list_sitemap_tags` | 고유 엔드포인트(host, method, path)와 거기에 달린 태그 |
+| `list_js_endpoints` / `scan_js_endpoints` | 캡처된 JavaScript가 참조하지만 요청이 닿지 않은 엔드포인트와, 각각을 읽어 온 플로우, 줄, 문자열. 스캔은 새 JS/HTML 응답을 읽을 뿐 요청은 보내지 않습니다. `list_sitemap`에 `include_unrequested:true`를 주면 `unrequested`로 함께 나옵니다 |
 | `list_params` | 엔드포인트별 파라미터 목록: 위치별 입력 이름, 등장 횟수, 샘플 값(자격 증명은 가림), 응답에 값이 반사되는지 여부 |
 | `export_openapi` | 캡처된 API를 OpenAPI 3.0.3 문서로 바로 돌려줘요(JSON 객체, `format:"yaml"`이면 YAML). 템플릿 경로, 파라미터, 추론한 요청·응답 스키마, servers, 보안 스킴이 들어가요. 자격 증명 값은 넣지 않고, 예시 값은 `examples:true`일 때만 가려서 넣어요. `max_endpoints`와 `max_bytes`로 크기를 제한하고, 잘리면 `truncated`로 알려줘요. `@recon` 크기 예산을 넘겨서 전체 카탈로그에만 있어요 |
 | `list_issues` / `get_issue` | 트리아지된 이슈 읽기 |

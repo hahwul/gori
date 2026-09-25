@@ -3482,3 +3482,40 @@ delay is skipped, and the flow says which. The rule that answered is recorded as
 deleted. A mock from History is a decoded snapshot, never a reference, because flow ids are
 reused.
 
+### 2026-09-25: JavaScript references are derived rows, never flows, and a scan marker is per flow
+
+Refines: [P3](#p3), [P4](#p4), [P6](#p6), [P7](#p7). #1243.
+
+`JsRefs` reads endpoint literals out of JS responses and inline scripts already in the store and
+persists them in `js_refs` (V34). They are NOT written as flows, not even Pending ones: a flow
+reads as "a request was attempted" in History, QL, HAR and the OpenAPI export, and nothing was
+sent. They attach to the Sitemap at the tree level only (`Sitemap.attach_js_refs!`, after the
+build and before tags and folds) and never through `Store#sitemap_entries`, so every consumer
+of the traffic read — OpenAPI, `Diff`, `representative_flow_id`, tag confirmation — stays
+traffic-only, and a reference node never carries a method, so every "N paths" count is still
+a count of traffic.
+
+Persisting was chosen over the parameter inventory's recompute-per-read because the tree reloads
+on every data_version tick and re-lexing megabyte bundles per reload is the cost the inventory
+avoids only by being asked rarely. The rows are projections of their flow's body and are
+deleted with it in all four delete paths (`delete_flow_one`, `clear_flows`, `Store#prune`,
+`prune_old_flows`). Which flows were scanned is a per-flow marker (`js_ref_scans`), not a
+watermark: `flows.id` is a reused rowid, so after a `history clear` new captures get ids below
+any "scanned up to" mark. The marker carries the extractor's `VERSION`, so changing extraction
+rescans without a migration, and it is written in the same transaction as the flow's rows, so
+a rolled-back batch leaves the flow unscanned rather than marked done with nothing.
+
+A literal is page-authored bytes: it resolves through `Url.resolve`/`Url.parse` and
+`Headers.safe_url?`, like a crawled href (a separator is encoded, CR/LF is refused). A
+root-relative literal in an external script resolves against the page its captured request's
+`Referer` names, and against the script's own origin — flagged `guessed` — only without one.
+Everything that passes those filters is stored, and scope and host visibility are applied at
+READ time, because a reference dropped at scan time could never come back once its flow is
+marked scanned. The host rule: a host the project has traffic for is shown; one it never
+captured is shown only when a scope include names it, which keeps a bundle's `www.w3.org`
+namespaces out of the tree without a hard-coded denylist.
+
+The scan is on demand only for now; a background mode on the Analyzer's passive fiber would tie
+references to the Probe mode, where "off" would silently mean "no references". Relative
+literals without a leading `/`, `.map`/JSON bodies, and copying the page's credentials into a
+Repeater request built from a reference are all left out on purpose.

@@ -78,6 +78,7 @@ gori run <subcommand> [verb] [options]
 | `sitemap [QL]` | 호스트 → 경로 엔드포인트 트리 |
 | `sitemap tag` | Sitemap 경로에 자유 텍스트 메모를 고정 / 해제 / 목록 |
 | `sitemap params [QL]` | 엔드포인트별 파라미터 목록: 위치별 이름, 등장 횟수, 샘플 값, 반사된 값 |
+| `sitemap js` | 캡처된 JavaScript가 참조하지만 아무도 요청하지 않은 엔드포인트(`--scan`은 새 번들을 읽음, 요청은 보내지 않음) |
 | `sitemap export [QL]` | 캡처된 API를 OpenAPI 3.0.3 문서(JSON 또는 YAML)로 출력 |
 | `oast listen` · `presets` | 아웃오브밴드 콜백 리스너 (interactsh 및 유사 서비스) |
 | `oast list` · `resume` · `release` | 프로젝트에 저장된 OAST 리스닝 세션 목록 / 재개 / 릴리스 |
@@ -829,6 +830,16 @@ gori run mine 42 --wordlist <(gori run sitemap params --host api.example.com --f
 ```
 
 `-q`/`--query=QL`(위치 인자로도 가능), `--in-scope`, `--hide-static`은 읽을 플로우를 좁힙니다. `history`처럼 플로우 단위로 적용됩니다. `--host`는 정확한 호스트, `--path=PREFIX`는 경로 접두사, `--location=LIST`는 위치를 고릅니다(기본값 전체). 표준 브라우저 헤더는 `--all-headers`를 주지 않으면 빠집니다. `--max-flows=N`은 조건에 맞는 최신 플로우 N개를 읽고(기본값 2000), 더 오래된 플로우를 건너뛰었으면 stderr에 알립니다. 쿠키, 자격 증명 헤더, `password`나 `token`처럼 자격 증명 이름을 가진 필드의 값은 `--include-sensitive`를 주지 않으면 `[REDACTED]`로 출력됩니다. 가리는 기준은 이름과 JWT / 개인 키 형태뿐이라, 다른 이름의 비밀 값(presigned `X-Amz-Signature`, 임의의 `sig=` 등)이나 URL 경로 안의 자격 증명은 그대로 출력됩니다. `--format`은 `text`, `json`, `names` 중에서 고릅니다. `names`는 한 줄에 이름 하나(JSON은 마지막 키 이름, `--location`에 지정하지 않으면 헤더 제외)로, Miner나 Fuzzer 워드리스트로 바로 쓸 수 있습니다.
+
+**`sitemap js`**: 캡처된 JavaScript가 참조하는 엔드포인트입니다. TUI [Sitemap](/ko/guide/proxy/#js-refs)이 `js` 행으로 그리는 것과 같습니다. 기본값은 캡처된 요청이 닿지 않은 것만 호스트별로 보여주며, 각 줄에 읽어 온 플로우와 줄 번호, 문자열, 표시(`comment`, `templated`, `base: referer|guessed`)가 붙습니다.
+
+```bash
+gori run sitemap js --scan
+gori run sitemap js --host api.example.com --format json
+gori run sitemap js --format urls | httpx -silent
+```
+
+`--scan`은 먼저 아직 스캔하지 않은 캡처된 JavaScript 응답과 HTML 페이지를 최신 것부터 `--max-flows`개(기본값 500) 읽고 참조를 저장합니다. 요청은 보내지 않습니다. `-q`/`--query=QL`(위치 인자로도 가능)은 읽을 플로우를 좁히고, `--rescan`은 이미 읽은 것도 다시 읽습니다. 목록은 `--host`(정확한 호스트), `--path=PREFIX`, `--all`(트래픽이 이미 닿은 참조도 포함), `--all-hosts`(gori가 캡처한 적 없고 스코프 include도 가리키지 않는 호스트도 포함. 기본값은 숨김), `--no-comments`, `--in-scope`로 좁힙니다. `--format`은 `text`, `json`, `urls`(한 줄에 URL 하나. 그대로 보낼 수 없는 템플릿 참조는 빠집니다) 중에서 고릅니다. 참조는 원본 플로우와 함께 지워집니다.
 
 **`sitemap export`**: 캡처된 API를 OpenAPI 3.0.3 문서로 stdout에 출력합니다. TUI [Sitemap](/ko/guide/proxy/#openapi)에서 `⇧E`로 쓰는 문서와 같습니다. 빠진 것과 그 이유는 stderr로 나옵니다.
 
