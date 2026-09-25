@@ -66,6 +66,19 @@ describe "Send flow to… (#1274 WP9)" do
     end
   end
 
+  it "adds no band header to a menu that had none, and joins SEND where the bands exist" do
+    reg = Gori::Verbs.registry
+    {Gori::Verb::Scope::Repeater => :none, Gori::Verb::Scope::Fuzzer => :none, Gori::Verb::Scope::Miner => :none,
+     Gori::Verb::Scope::Body => :send, Gori::Verb::Scope::HistoryDetail => :send,
+     Gori::Verb::Scope::Sitemap => :send}.each do |scope, band|
+      ctx = FakeExecContext.new
+      ctx.selected = 5_i64
+      menu = Gori::Tui::SpaceMenu.new(reg)
+      menu.open(scope, :common, ctx, subtabs: reg.has_section?(scope, :subtab))
+      menu.entry_for('>').not_nil!.group.should eq(band), scope.to_s
+    end
+  end
+
   it "leaves Active scan and Mock as direct rows" do
     %w[history.probe-active detail.probe-active repeater.probe-active probe.active-rescan
       history.mock-response detail.mock-response].each do |id|
