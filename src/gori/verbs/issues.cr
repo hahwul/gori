@@ -268,7 +268,7 @@ module Gori
 
       r.register Verb::Definition.new(
         "issue.links", "Manage links", "View/add/remove related History/Repeater/Fuzzer/Miner URLs",
-        Verb::Scope::IssuesDetail, mnemonic: 'l') { |ctx| ctx.issue_links; nil }
+        Verb::Scope::IssuesDetail, intent: :link) { |ctx| ctx.issue_links; nil }
 
       r.register Verb::Definition.new(
         "issue.open-link", "Show related exchange", "Show the selected related row's request/response in place",

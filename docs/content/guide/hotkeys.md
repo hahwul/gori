@@ -159,6 +159,18 @@ pane's own verbs, grouped under `COMMON` and the focused area's label, each fron
 mnemonic letter. It is not the palette: there is no typing and no filter, just one keypress
 per row.
 
+### Moving inside the menu {#menu-nav}
+
+`↑`/`↓` or `j`/`k` move the selection, `←`/`→` or `h`/`l` change column, and `↵` runs the
+highlighted row. No row is ever lettered `h`, `j`, `k` or `l`, at either level, so those four
+always move, as they do on every list in the app, and a reflex `j` can never run an action.
+gori refuses to start if a row breaks this.
+
+What moved when the rule came in: **Link…** and **Manage links** are `L` on every tab (they were
+`k` or `l`), **Add host to scope** is `H` (was `h`), the Discover tab's next and previous run
+are `J` and `K`, the Fuzzer's **Add List payload set** is `A`, and the Activity feed's **Filter
+by level** is `v` in the menu (its bare key is still `l`).
+
 ### Finding a tab's action by name {#palette-search}
 
 To find an action by name instead, type it into the palette (`Ctrl-P`). Once you type a query,
@@ -234,6 +246,7 @@ cannot drift apart on it:
 | `E` | Export |
 | `K` | Clear the workbench input (asks first) |
 | `I` | Insert a `§` marker |
+| `L` · `H` | Link… (attach to an issue or note, or manage links) · add the host to scope |
 | `X` | Wipe the tab (asks first), and nothing else |
 
 `/` `d` `x` `y` `Y` `S` `t` `T` `N` and `X` are **reserved**: on a tab that has the action, no

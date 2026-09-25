@@ -130,11 +130,21 @@ key grammar and the 2026-09-25 #1274 entries).
   (`spec/verb/lexicon_spec.cr`). Only a one-off action spells a local `mnemonic:`.
 - **Reserved letters.** Menu `X` / `⇧X` is wipe and nothing else. On a tab with a sub-tab
   strip, the strip's nine (`n w d e t f / T N`) are never a pane verb's letter.
-- **A variation of one intent joins a family instead of taking a letter.** For example, every
-  cross-tool send is a member of `Send flow to…` (`>`, `src/gori/verbs/families.cr`).
+- **No menu letter is `h`/`j`/`k`/`l`**, at either level: not a row's letter (a chord-derived one
+  included), a pinned member's, a family key or a level-2 letter. Inside the menu those four
+  always move the selection; the Runner's fallback stays. `Registry#validate_intents!` and
+  `Verb::Family#validate!` raise at boot (`Family::NAV_LETTERS`).
+- **A variation of one intent joins a family instead of taking a letter.** Every cross-tool
+  send is a member of `Send flow to…` (`>`), every view toggle of `Display…` (`Z`) and every
+  Repeater/Fuzzer transport toggle of `Protocol…` (`P`), all in `src/gori/verbs/families.cr`.
   - Members are keyed by `intent:`. Their second-level letters come only from the family table
-    (`Verb::Family`, `TOOL_LETTERS` for sends), are the same on every tab, and are never
-    `h`/`j`/`k`/`l`.
+    (`Verb::Family`, `TOOL_LETTERS` for sends) and are the same on every tab.
+  - A toggle family is `sticky:`: its card comes back after a member runs and draws each row's
+    `ExecContext#menu_state` (●/○ or a value). A new toggle member needs its arm in the tab's
+    `TabController#menu_state` (`spec/tui/toggle_family_state_spec.cr` checks). A member that
+    opens something instead of flipping it closes the card through `SpaceMenu.resume_sticky?`
+    (an overlay, or a pane that takes the keys: `TabController#pane_captures_keys?`). A
+    member is never a write-back to the request.
   - `pinned: true` keeps a loop action one keypress away as well.
   - A family row is static: it is drawn whenever the view registers a member. It is never gated
     on `available?` and never collapsed into its lone member.

@@ -42,18 +42,18 @@ module Gori
       r.register Verb::Definition.new(
         "link.history.attach", "Link…",
         "Attach the selected/marked flows to an issue (freezing their exchanges as evidence) or a note — or create one",
-        Verb::Scope::Body, available: flow_targets, mnemonic: 'k') { |ctx| ctx.link_attach; nil }
+        Verb::Scope::Body, available: flow_targets, intent: :link) { |ctx| ctx.link_attach; nil }
 
       r.register Verb::Definition.new(
         "link.history-detail.attach", "Link…",
         "Attach this flow to an issue (freezing its exchange as evidence) or a note — or create one",
-        Verb::Scope::HistoryDetail, available: flow_available, mnemonic: 'k') { |ctx| ctx.link_attach; nil }
+        Verb::Scope::HistoryDetail, available: flow_available, intent: :link) { |ctx| ctx.link_attach; nil }
 
       # No freeze half here, and none possible: a mining session is a template plus a run,
       # not one exchange (`Evidence.freezable?`), so the picker's hint says "link".
       r.register Verb::Definition.new(
         "link.miner.attach", "Link…", "Attach this miner session to an issue or note — or create one",
-        Verb::Scope::Miner, available: miner_linkable, mnemonic: 'k') { |ctx| ctx.link_attach; nil }
+        Verb::Scope::Miner, available: miner_linkable, intent: :link) { |ctx| ctx.link_attach; nil }
     end
   end
 end

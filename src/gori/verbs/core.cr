@@ -170,7 +170,7 @@ module Gori
         # Batch-capable (#442): gates on the effective target set (marks if any, else the
         # cursor row) — which also aligns the gate with what the handler already acted on
         # (history_target_flow_id, i.e. the OPEN DETAIL's flow when one is up).
-        Verb::Scope::Body, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :history && !ctx.selected_flow_ids.empty? }, mnemonic: 'h', group: :scope) { |ctx| ctx.scope_add_host; nil }
+        Verb::Scope::Body, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :history && !ctx.selected_flow_ids.empty? }, intent: :scope_add, group: :scope) { |ctx| ctx.scope_add_host; nil }
 
       r.register Verb::Definition.new(
         "scope.toggle", "Toggle scope lens", "Filter History/Sitemap to in-scope flows on/off",

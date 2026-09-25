@@ -59,13 +59,12 @@ module Gori
         group: :send, intent: :to_repeater, pinned: true) { |ctx| ctx.evidence_duplicate_repeater; nil }
 
       # Menu-only, like `link.*.attach`: both open a picker, and neither has a chord to
-      # spare here. `k`/`u` are the SPACE-MENU keys — `k` as a chord would never fire (the
-      # controller claims j/k as list nav before the keymap is consulted) and would read as
-      # "move up", which is what k does in every other list scope.
+      # spare here. Link is the lexicon's `L` on every tab (#1274); it was `k`, which the
+      # controller claims as list nav and every list reads as "move up".
       r.register Verb::Definition.new(
         "evidence.link", "Link Issue…", "Link this snapshot to another Issue without changing its bytes",
         Verb::Scope::Evidence, available: selected,
-        mnemonic: 'k', group: :triage) { |ctx| ctx.evidence_link_issue; nil }
+        intent: :link, group: :triage) { |ctx| ctx.evidence_link_issue; nil }
 
       r.register Verb::Definition.new(
         "evidence.unlink", "Unlink Issue…", "Remove one Issue link without changing the snapshot",

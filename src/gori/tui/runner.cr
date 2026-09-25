@@ -2601,10 +2601,10 @@ module Gori::Tui
       elsif key.enter?
         activate_space_entry(@space_menu.selected_entry)
       elsif (c = ev.char) && !ev.ctrl? && !ev.alt?
-        # A bound mnemonic always wins (helix leader). Only when j/k/h/l are NOT a live
-        # mnemonic in this menu do they fall back to vim-style nav — so the reflex
-        # keystroke moves the selection instead of dismissing the menu, while scopes
-        # that bind 'k' (link-to-issue) or 'h' (add-host, dismiss-host) keep theirs.
+        # A bound mnemonic always wins (helix leader). No row is ever lettered j/k/h/l
+        # (`Registry#validate_intents!`, `Verb::Family#validate!`), so those four always
+        # fall back to vim-style nav — the reflex keystroke moves the selection instead of
+        # dismissing the menu or running a row, at either level (#1274).
         if entry = @space_menu.entry_for(c)
           activate_space_entry(entry)
         elsif c == 'j'

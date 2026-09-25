@@ -104,7 +104,7 @@ module Gori
 
       r.register Verb::Definition.new(
         "notes.links", "Manage links", "View/add/remove related History/Repeater/Fuzzer/Miner URLs",
-        Verb::Scope::Notes, available: in_notes, mnemonic: 'l') { |ctx| ctx.notes_links; nil }
+        Verb::Scope::Notes, available: in_notes, intent: :link) { |ctx| ctx.notes_links; nil }
     end
   end
 end

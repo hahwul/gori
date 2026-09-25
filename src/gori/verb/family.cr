@@ -39,9 +39,10 @@ module Gori
       # `spec/tui/space_menu_spec.cr` pins the two together.
       BANDS = {:none, :view, :send, :triage, :copy, :scope, :danger, :wipe}
 
-      # Never a level-2 letter. A sticky card stays up after a member runs, and a reflex `j`/`k`
-      # typed next must move the selection, not run a member; it also keeps the pending
-      # h/j/k/l decision (#1274 WP1) open at both levels.
+      # Never a menu letter, at either level or as a family's key (#1274): inside the space
+      # menu these four always move the selection, as on every list in the app, so a reflex
+      # `j`/`k` can never run a row — least of all in a sticky card that stays up after one ran.
+      # `Registry#validate_intents!` holds level 1; `#validate!` holds the key and level 2.
       NAV_LETTERS = {'h', 'j', 'k', 'l'}
 
       getter id : Symbol
@@ -90,6 +91,7 @@ module Gori
         fail!("has no members") if @letters.empty?
         fail!("key must be a printable ASCII character, not #{@key.inspect}") unless @key.ascii? && @key.printable? && @key != ' '
         fail!("key 'X' is the wipe letter") if @key == 'X'
+        fail!("key '#{@key}' is a navigation letter (never h/j/k/l in the space menu)") if NAV_LETTERS.includes?(@key)
         fail!("band #{@group.inspect} is not one of #{BANDS.join(", ")}") unless BANDS.includes?(@group)
         validate_letters!
       end

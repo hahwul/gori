@@ -63,6 +63,8 @@ module Gori
         :set_severity    => Entry.new('s', :preferred),
         :set_status      => Entry.new('c', :preferred),
         :set_cvss        => Entry.new('V', :preferred),
+        :link            => Entry.new('L', :preferred), # attach to an issue/note, or manage its links
+        :scope_add       => Entry.new('H', :preferred), # add the flow's host to the scope
       } of Symbol => Entry
 
       # The strip's nine: the SUB-TABS bucket rides along with every view of a tab that has a

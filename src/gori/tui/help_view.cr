@@ -286,7 +286,7 @@ module Gori::Tui
         # Evidence is hidden until the project freezes its first snapshot, so this row is where
         # an operator who just enabled the tab learns its keys — and `{evidence.delete}` is the
         # only one that destroys bytes no source can hand back, which is why it is named here
-        # rather than left to the space menu. Link/unlink are menu-only (space → k · u).
+        # rather than left to the space menu. Link/unlink are menu-only (`L` · `u`).
         #
         # No `↑/↓` on this one row: it is the longest on the Shortcuts page and sits against
         # `HelpPopupOverlay::MAX_W` (help_popup_overlay_spec measures it), so the list arrows —

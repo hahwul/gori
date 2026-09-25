@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- TUI: no space-menu row is lettered `h`, `j`, `k` or `l` any more, so inside the menu those keys always move the selection. Link… and Manage links are `L` on every tab, Add host to scope is `H`, Discover's next/previous run are `J`/`K`, the Fuzzer's Add List payload set is `A`, and Activity's Filter by level is `v` (#1274)
 - TUI: the view toggles (hex, pretty, diff, folds, static assets, follow, columns…) and the Repeater/Fuzzer transport toggles (HTTP/2, SNI, auto Content-Length, gRPC, TLS fingerprint…) move into two sticky space-menu cards, `Z` **Display…** and `P` **Protocol…**, that show each toggle's state; hex is `Z x` on every pane. Fuzzer Save results moves to `E`, the detail's Copy flow row folds into Copy as… → Raw request, and direct keys are unchanged (#1274)
 - TUI: the space menu gets a second level. Sending the selected flow to another tool is one `>` **Send flow to…** row whose card gives each tool one letter on every tab (Repeater `r`, Fuzzer `f`, Comparer `c`, Miner `m`, Sequencer `s`, Authorize `a`, Discover `D`, browser `b`), and `esc` goes back a level. Send to Repeater keeps its own letter too, History and detail Delete move to `d`, and direct keys like `Ctrl-R` and `⇧I` are unchanged (#1274)
 - Project picker: the space menu uses the app's letters and letter case (rename `e`, export `⇧E`, clear marks `⇧N`), keeps one row order when projects are marked, and closes on a key it does not bind, like the in-app menu (#1274)
