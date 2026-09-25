@@ -313,15 +313,7 @@ module Gori
           ch.receive?
           return
         end
-        return if st.auto_off?
-        if (cd = st.cooldown_until) && Time.utc < cd
-          return
-        end
-        # A slot whose last refresh FAILED is due again once its cooldown is over, whatever its
-        # policy reads. The policy alone would go quiet: a login whose step 1 rebound `$CSRF`
-        # and whose step 2 was refused leaves a freshly bound value in the table, so a TTL
-        # counted from it says "fresh" while the session token it exists for is still stale.
-        return unless st.last.try { |o| !o.ok } || due?(s, st)
+        return unless auto_due?(s, st)
         # Never block the TUI's event loop on a login: from the UI fiber the refresh runs on
         # its own fiber (and marks the slot in flight, so the chip shows `⟳`) while this send
         # goes out with the value it has. Every other caller waits for the fresh one.
@@ -334,6 +326,19 @@ module Gori
       rescue ex
         # A refresh must never fail the send that asked for it.
         ::Log.warn { "session refresh skipped for #{slot}: #{ex.message}" }
+      end
+
+      # Whether an AUTOMATIC refresh of `slot` should run now: not switched off, not cooling
+      # down, and due.
+      #
+      # A slot whose last refresh FAILED is due again once its cooldown is over, whatever its
+      # policy reads. The policy alone would go quiet: a login whose step 1 rebound `$CSRF` and
+      # whose step 2 was refused leaves a freshly bound value in the table, so a TTL counted from
+      # it says "fresh" while the session token it exists for is still stale.
+      private def auto_due?(slot : SessionSlot, st : State) : Bool
+        return false if st.auto_off?
+        return false if (cd = st.cooldown_until) && Time.utc < cd
+        !!st.last.try { |o| !o.ok } || due?(slot, st)
       end
 
       # The automatic run itself, over a FRESHLY read list: `Store#delete_repeater` detaches a
