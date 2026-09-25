@@ -646,7 +646,7 @@ Flows that cannot be replayed meaningfully are listed on STDERR before anything 
 
 ### run cache-deception
 
-Check each selected flow for **web cache deception**: replay it as its captured (authenticated) identity to prime any cache, re-request the *same* url with no session, then make an anonymous request with a unique cache-busting query parameter as a control. Matching control content means the endpoint is public (`served`); matching anonymous content with a cache hit and different control content is a likely deception (`cached`). The check sends up to three requests per flow. Borrows the Authorize engine; the crafted paths that trigger it (`;`, `.css`, `%00`, dot-segments) are the Fuzzer's `cache-delimiters` payload set.
+Check each selected flow for **web cache deception**: replay it as its captured (authenticated) identity to prime any cache, re-request the *same* url with no session, then make an anonymous request with a unique cache-busting query parameter as a control. Matching control content supports a public verdict (`served`) only when the control itself has no cache-hit signal. If the control is also a cache hit, the cache may have ignored the query and the verdict is `review`; matching anonymous content with a cache hit and different control content is a likely deception (`cached`). The check sends up to three requests per flow. Borrows the Authorize engine; the crafted paths that trigger it (`;`, `.css`, `%00`, dot-segments) are the Fuzzer's `cache-delimiters` payload set.
 
 ```bash
 gori run cache-deception 12
@@ -662,7 +662,7 @@ gori run cache-deception --flow 12 --flow 13 --format json
 | `--project`, `--db` | Project to read |
 | `--format` | `text` (default), `json` (one array at the end), or `jsonl` (streamed) |
 
-Each flow reports one verdict: `cached` (the deception — anonymous served the authenticated response from a cache and the cache-busted control differed), `served` (no cache-hit evidence or matching public control), `review` (similar but not identical or no decisive control), `protected` (anonymous got a different response), `blocked` (gori refused the send), or `errored`. Only safe methods (`GET`/`HEAD`/`OPTIONS`) are checked without `--unsafe-methods`.
+Each flow reports one verdict: `cached` (the deception — anonymous served the authenticated response from a cache and the cache-busted control differed), `served` (no cache-hit evidence or a matching control without cache-hit evidence), `review` (similar but not identical, no decisive control, or a matching control that was itself a cache hit), `protected` (anonymous got a different response), `blocked` (gori refused the send), or `errored`. Each trial includes its own cache signal; the top-level `cache` is the anonymous response. Only safe methods (`GET`/`HEAD`/`OPTIONS`) are checked without `--unsafe-methods`.
 
 ### run session
 

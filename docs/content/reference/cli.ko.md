@@ -634,7 +634,7 @@ gori run authorize --query 'host:acme.test method:GET' --identities identities.j
 
 ### run cache-deception {#run-cache-deception}
 
-선택한 각 플로우를 **웹 캐시 디셉션**으로 검사합니다: 캡처된(인증된) 아이덴티티로 재전송해 캐시를 채우고, 세션 없이 *같은* url을 다시 요청한 뒤 고유한 캐시 무효화 쿼리 매개변수를 붙여 익명 제어 요청을 보냅니다. 제어 응답도 일치하면 공개 콘텐츠(`served`)이고, 익명 응답이 캐시 히트를 보이며 제어 응답은 다르면 디셉션 가능성(`cached`)이 있습니다. 플로우 하나당 최대 세 번 요청합니다. Authorize 엔진을 차용하며, 이를 유발하는 조작된 경로(`;`, `.css`, `%00`, dot-segment)는 Fuzzer의 `cache-delimiters` 페이로드 세트입니다.
+선택한 각 플로우를 **웹 캐시 디셉션**으로 검사합니다: 캡처된(인증된) 아이덴티티로 재전송해 캐시를 채우고, 세션 없이 *같은* url을 다시 요청한 뒤 고유한 캐시 무효화 쿼리 매개변수를 붙여 익명 제어 요청을 보냅니다. 제어 응답이 일치하고 캐시 히트 신호가 없을 때 공개 콘텐츠(`served`)로 봅니다. 제어 응답도 캐시 히트라면 쿼리가 무시됐을 수 있으므로 판정은 `review`이며, 익명 응답이 캐시 히트를 보이고 제어 응답은 다르면 디셉션 가능성(`cached`)이 있습니다. 플로우 하나당 최대 세 번 요청합니다. Authorize 엔진을 차용하며, 이를 유발하는 조작된 경로(`;`, `.css`, `%00`, dot-segment)는 Fuzzer의 `cache-delimiters` 페이로드 세트입니다.
 
 ```bash
 gori run cache-deception 12
@@ -650,7 +650,7 @@ gori run cache-deception --flow 12 --flow 13 --format json
 | `--project`, `--db` | 읽을 프로젝트 |
 | `--format` | `text`(기본), `json`(끝에 배열 하나), `jsonl`(스트리밍) |
 
-플로우마다 판정 하나를 보고합니다: `cached`(디셉션 — 익명이 인증된 응답을 캐시에서 받았고 캐시 무효화 제어 응답은 다름), `served`(캐시 히트 증거가 없거나 공개 제어 응답과 일치), `review`(비슷하지만 동일하지 않거나 제어 결과가 불분명), `protected`(익명이 다른 응답을 받음), `blocked`(gori가 전송 거부), `errored`. `--unsafe-methods` 없이는 안전한 메서드(`GET`/`HEAD`/`OPTIONS`)만 검사합니다.
+플로우마다 판정 하나를 보고합니다: `cached`(디셉션 — 익명이 인증된 응답을 캐시에서 받았고 캐시 무효화 제어 응답은 다름), `served`(캐시 히트 증거가 없거나 캐시 히트가 없는 제어 응답과 일치), `review`(비슷하지만 동일하지 않거나 제어 결과가 불분명하거나, 일치한 제어 응답도 캐시 히트임), `protected`(익명이 다른 응답을 받음), `blocked`(gori가 전송 거부), `errored`. 각 시도의 `cache`는 해당 응답의 캐시 상태이며 최상위 `cache`는 익명 응답 상태입니다. `--unsafe-methods` 없이는 안전한 메서드(`GET`/`HEAD`/`OPTIONS`)만 검사합니다.
 
 ### run session {#run-session}
 
