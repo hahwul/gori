@@ -70,7 +70,7 @@ group = "워크벤치"
 
 | 표면 | 단계 추가 | 지금 갱신 | 정책 |
 |------|-----------|-----------|------|
-| TUI | Repeater의 로그인 서브탭에서 `Space` → `b`(**Use as refresh for slot…**) | 세션 슬롯 피커의 행에서 `Ctrl-R` | 아이덴티티 폼(이 탭의 `i`)의 **refresh before** 필드 |
+| TUI | Repeater의 로그인 서브탭에서 `Ctrl-P` → **Use as refresh for slot…** | 세션 슬롯 피커의 행에서 `Ctrl-R` | 아이덴티티 폼(이 탭의 `i`)의 **refresh before** 필드 |
 | `gori run` | `session edit NAME --refresh 12,14` | `session refresh NAME` | `--refresh-before` |
 | MCP | `update_session_slot{refresh}` | `refresh_session_slot` | `refresh_before` |
 

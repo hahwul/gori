@@ -57,4 +57,31 @@ describe Gori::Tui::ActionContext do
       end
     end
   end
+
+  # `menu: :palette` (#1282): the palette's typed search lists the verb from its own view, and
+  # the space menu lists it at neither level. Swept like the example above.
+  it "lists a palette-only verb in the palette's tab actions and nowhere in the space menu" do
+    ctx = FakeExecContext.new
+    ctx.selected = 5_i64
+    menu = SpaceMenu.new(reg)
+    found = Set(String).new
+    reg.map(&.scope).uniq!.each do |scope|
+      subtabs = reg.has_section?(scope, :subtab)
+      reg.select { |v| v.scope == scope }.map(&.section).uniq!.each do |section|
+        here = ActionContext.new(scope, section, subtabs)
+        palette = PaletteState.new(reg)
+        palette.capture(here, ctx)
+        placed = palette.tab_actions.select(&.palette_only?).map(&.id)
+        found.concat(placed)
+        menu.open(here.scope, here.section, ctx, subtabs: here.subtabs)
+        (menu.entries.compact_map(&.verb).map(&.id) & placed).should be_empty
+        menu.entries.compact_map(&.family).each do |f|
+          menu.descend(f)
+          (menu.entries.compact_map(&.verb).map(&.id) & placed).should be_empty
+          menu.open(here.scope, here.section, ctx, subtabs: here.subtabs)
+        end
+      end
+    end
+    %w[history.grpc-reflect discover.next-run env.edit-prefix issue.severity-up].each { |id| found.should contain(id) }
+  end
 end

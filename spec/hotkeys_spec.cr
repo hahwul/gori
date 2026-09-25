@@ -156,6 +156,29 @@ describe Gori::Hotkeys do
     end
   end
 
+  # A palette-only verb (`menu: :palette`, #1282) has no menu path, so a `{space:…}` token or a
+  # Help row naming it reads as the route that does exist: its chord, else the palette search.
+  describe ".route" do
+    it "is the menu path for a menu row, the chord or ^P → title for a palette-only verb" do
+      reg = Gori::Verbs.registry
+      Gori::Hotkeys.route(reg, "sitemap.tag").should eq("space → m")
+      Gori::Hotkeys.menu_path(reg, "repeater.minimize").should be_nil
+      Gori::Hotkeys.route(reg, "repeater.minimize").should eq("^P → Minimize request")
+      Gori::Hotkeys.route(reg, "decoder.save").should eq("^S")
+      Gori::Hotkeys.route(reg, "no.such.verb").should be_nil
+      Gori::Hotkeys.route(reg, "sitemap.toggle").should be_nil # hidden, no row, not palette-only
+    end
+
+    it "follows a rebind of the palette and of the verb" do
+      reg = Gori::Verbs.registry
+      ov = {"app.palette"  => [Gori::Verb::Chord.new("k", ctrl: true)],
+            "decoder.save" => [Gori::Verb::Chord.new("q")]}
+      Gori::Hotkeys.route(reg, "repeater.minimize", ov).should eq("^K → Minimize request")
+      Gori::Hotkeys.route(reg, "decoder.save", ov).should eq("q")
+      Gori::Hotkeys.expand(reg, "with {space:repeater.minimize}", ov).should eq("with ^K → Minimize request")
+    end
+  end
+
   describe ".claimed?" do
     it "covers the pre-keymap ctrl letter/digit/punct set" do
       Gori::Hotkeys.claimed?(Gori::Verb::Chord.new("p", ctrl: true)).should be_true

@@ -31,7 +31,7 @@ module Gori
 
       r.register Verb::Definition.new(
         "env.edit-prefix", "Change prefix", "Edit the sigil that opens an env token (applies globally)",
-        Verb::Scope::Env, mnemonic: 'p') { |ctx| ctx.env_edit_prefix; nil }
+        Verb::Scope::Env, menu: :palette) { |ctx| ctx.env_edit_prefix; nil }
       # The token GRAMMAR (`env.syntax`) is deliberately not a verb here. Flipping it re-reads
       # every token already stored in project DBs, drafts, rule replacements and slot headers,
       # so the switch has to re-spell those bytes — which is `gori settings env-syntax`'s job

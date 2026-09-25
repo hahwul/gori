@@ -5,10 +5,11 @@ require "../spec_helper"
 # filters on `menu_key`, and the palette only queries `Scope::Global`. A shipped export with
 # a handler, an `ExecContext` method and no way to invoke it.
 #
-# The three surfaces, and the whole rule:
+# The four surfaces, and the whole rule:
 #   • a chord      → the keymap fires it
 #   • a menu_key   → the space menu lists it (explicit `mnemonic:`, else a plain 1-char chord)
 #   • Scope::Global → the palette lists it regardless
+#   • `menu: :palette` → the palette's typed search lists it from its own view (#1282)
 describe "verb reachability" do
   it "leaves no verb without a keyboard path" do
     unreachable = [] of String
@@ -16,10 +17,27 @@ describe "verb reachability" do
       next if v.hidden?                            # a gesture, not a listed command
       next if v.scope == Gori::Verb::Scope::Global # the palette lists these by scope alone
       next unless v.chords.empty?
-      next if v.menu_listed? # a level-1 letter, or a row inside its family (#1274 WP9)
+      next if v.menu_listed?  # a level-1 letter, or a row inside its family (#1274 WP9)
+      next if v.palette_only? # the palette's search — pinned by the example below
       unreachable << v.id
     end
     unreachable.should be_empty
+  end
+
+  it "lists every palette-only verb in its own tab's view, which the palette's search reads" do
+    # `menu: :palette` drops the space-menu row, so the palette is the one listing left: the
+    # verb must be a tab verb the view registers (`Registry#for_view` is what `^P` searches,
+    # #1282), never hidden, and never a Global or Editor verb, which no view lists.
+    reg = Gori::Verbs.registry
+    placed = reg.select(&.palette_only?)
+    placed.size.should be >= 36
+    placed.each do |v|
+      v.hidden?.should be_false, v.id
+      v.scope.global?.should be_false, v.id
+      v.scope.editor?.should be_false, v.id
+      subtabs = reg.has_section?(v.scope, :subtab)
+      reg.registered_in_view(v.scope, v.section, subtabs).should contain(v), v.id
+    end
   end
 
   it "keeps a hidden verb's chord, since hidden means unlisted rather than unbound" do
@@ -148,16 +166,17 @@ describe "sub-tab verbs" do
     end
   end
 
-  it "hands `w` to close, and moves the two editors' mark-word to `W`" do
+  it "hands `w` to close, and keeps the two editors' mark-word off it" do
     # The collision the old placement could not solve: `repeater.mark-word` / `fuzz.mark-word`
     # owned 'w' in `:request` / `:template`, and the bucket now renders alongside them, so
-    # `Registry#validate_menu_keys!` would raise at boot. The PANE letter moved, not the
+    # `Registry#validate_menu_keys!` would raise at boot. The PANE verb moved, not the
     # strip's — `w` close is one of the nine letters that must read the same on all nine
-    # strips, and `W` is the same letter one shift away.
-    r["repeater.mark-word"].menu_key.should eq('W')
-    r["repeater.mark-word"].section.should eq(:request)
-    r["fuzz.mark-word"].menu_key.should eq('W')
-    r["fuzz.mark-word"].section.should eq(:template)
+    # strips. It moved to `W`, and then to the palette (#1282): `^K` is its key.
+    {"repeater.mark-word" => :request, "fuzz.mark-word" => :template}.each do |id, section|
+      r[id].palette_only?.should be_true
+      r[id].menu_key.should be_nil
+      r[id].section.should eq(section)
+    end
   end
 
   it "puts rename on `e` on every strip that has one" do
@@ -178,9 +197,9 @@ describe "sub-tab verbs" do
       r[runner].section.should eq(:common), runner
     end
     # JWT and Cookie held 'e' for their lens toggle and put rename on 'r'; both toggles moved
-    # to 'm' (Mode — the Decoder's letter for the same gesture).
-    r["jwt.toggle-mode"].menu_key.should eq('m')
-    r["cookie.toggle-mode"].menu_key.should eq('m')
+    # to 'm', and then to the palette (#1282): `^T` is their key.
+    r["jwt.toggle-mode"].palette_only?.should be_true
+    r["cookie.toggle-mode"].palette_only?.should be_true
     # Notes derives its chip label from the body text, so it has no rename. `notes.edit` still
     # gave 'e' up (to 'o'): the strip's nine read the same on all nine strips, including the
     # one that lacks the action (#1274 WP6, `Registry#validate_intents!`).

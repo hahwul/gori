@@ -51,15 +51,13 @@ module Gori
         "sequence.export", "Export report…", "Write this session's randomness report to a Markdown file (asks for the path)",
         Verb::Scope::Sequencer, [Verb::Chord.new("e", shift: true)], available: has_report,
         intent: :export) { |ctx| ctx.sequence_export(:markdown); nil }
-      # 'J', because without a mnemonic AND without a chord this verb was reachable from
-      # NOTHING: `menu_key` returns nil, `SpaceMenu#open` filters on `menu_key`, and the
-      # palette only queries Global scope — so a shipped export had no keyboard path at all.
-      # Its Markdown twin four lines up carries ⇧E + 'E'; Issues solves the same two-format
-      # problem by registering the palette entries in `Scope::Global` instead.
+      # Palette-only (#1282): its Markdown twin four lines up carries ⇧E + 'E', and the JSON
+      # form is the rarer export. It once had no mnemonic AND no chord, and was reachable from
+      # NOTHING while the palette searched Global only; the palette's typed search finds a
+      # tab's actions now, and `spec/verbs/registry_reach_spec.cr` pins that it lists this one.
       r.register Verb::Definition.new(
         "sequence.export-json", "Export report (JSON)…", "Write this session's randomness report to a JSON file (asks for the path)",
-        Verb::Scope::Sequencer, [] of Verb::Chord, available: has_report,
-        mnemonic: 'J') { |ctx| ctx.sequence_export(:json); nil }
+        Verb::Scope::Sequencer, [] of Verb::Chord, available: has_report, menu: :palette) { |ctx| ctx.sequence_export(:json); nil }
       r.register Verb::Definition.new(
         "sequence.promote", "File as issue", "Record this randomness verdict in the Issues report (no token values)",
         Verb::Scope::Sequencer, [] of Verb::Chord, available: has_report,

@@ -92,14 +92,14 @@ module Gori
         Verb::Scope::ProjectActivity, [Verb::Chord.new("x", shift: true)],
         intent: :wipe, group: :wipe) { |ctx| ctx.activity_clear; nil }
 
-      # MENU-ONLY since the key audit's F6. Bare `r` means "send this to the Repeater" in the
+      # No chord since the key audit's F6, and palette-only since #1282. Bare `r` means "send this to the Repeater" in the
       # five scopes that have a flow to send, and a FEED that needs a refresh key probably
       # wants none at all: this pane already re-reads on every entry, on `data_version`, and
       # on the poll. The entry stays for the case where none of those has fired yet.
       r.register Verb::Definition.new(
         "activity.refresh", "Refresh feed",
         "Re-read the event feed now",
-        Verb::Scope::ProjectActivity, intent: :run) { |ctx| ctx.activity_refresh; nil }
+        Verb::Scope::ProjectActivity, intent: :run, menu: :palette) { |ctx| ctx.activity_refresh; nil }
     end
   end
 end

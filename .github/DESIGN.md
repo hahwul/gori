@@ -3836,3 +3836,34 @@ reflex keystroke likelier still. The fallback stays; the letters go.
   the menu while its bare `l` stays.
 - The Project Picker's hand-rolled menu already had no row on the four; it keeps the same
   fallback.
+
+### 2026-09-25: the space menu is for the frequent, the palette for the long tail
+
+Closes: the #1282 first-stage entry above ("which rows move off the space menu … is stage 2").
+#1282.
+
+Once the palette's typed search found a tab's actions, a rare action no longer needed a
+space-menu row to be reachable, and the busiest cards were still two or three columns (the
+Repeater request pane drew 30 rows, the Fuzzer template 28). A verb now declares where it is
+listed: `menu: :palette` (`Verb::Placement`) gives it no space-menu row at either level, and
+the palette's search finds it from its own tab. The default stays `:space`.
+
+- **The criterion.** A row goes to the palette when it only repeats a direct chord for an
+  editing or navigation convenience (Mark word `^K`, Decoder Save/Load `^S`/`^O`, a rule
+  list's reorder `⇧K`/`⇧J`), or when it is a once-a-session configuration action (Minimize
+  request, Use as refresh for slot…, Change prefix). The first set is 36 verbs; the busiest
+  views drop to 25 and 22 rows.
+- **Nothing else changes about the verb.** Its chords fire as before, it runs through
+  `Definition#call`, and its `available?` gate is the palette's too. It keeps its `intent`:
+  the placement is where it is listed, the intent is what it means, and the letter comes back
+  from the lexicon if the verb ever returns to the menu.
+- **No row means no letter rules.** `menu_key` is nil, so the boot validators and the R1
+  guard have nothing to check. `Registry#validate_intents!` refuses a palette-only verb that
+  spells a `mnemonic:` (a letter no card draws), belongs to a family or is pinned (its family
+  would draw it), or is hidden (the palette would not list it either).
+- **Every surface names the route that exists.** `Hotkeys.route` is the menu path for a menu
+  row, and for a palette-only verb its effective chord, else `^P → <title>` spelled from the
+  palette's own effective chord. Help's key column and every `{space:…}` token go through it,
+  so a hint never sends the operator to a row the verb does not have.
+- **Not a row budget.** Which rows move is decided per verb against the criterion, never by
+  counting a view's rows, so adding an unrelated verb cannot push another one off the menu.

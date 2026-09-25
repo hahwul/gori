@@ -311,7 +311,8 @@ module Gori
 
     # A `{space:verb.id}` token names a verb by its SPACE-MENU path instead of a chord, for
     # the menu-only verbs a hint still wants to point at ("tag with space → m"). The `:` keeps
-    # it out of VERB_TOKEN_RE, so the two never resolve the same token.
+    # it out of VERB_TOKEN_RE, so the two never resolve the same token. A palette-only verb
+    # (`menu: :palette`, #1282) has no path, and its token reads as its #route instead.
     SPACE_TOKEN_RE = /\{space:([a-z][a-z0-9_.-]*)\}/
 
     # What a `{space:…}` token reads as when there is no registry to ask, or the id names no
@@ -330,13 +331,33 @@ module Gori
       compact ? "␣ #{keys.join(' ')}" : "space → #{keys.join(' ')}"
     end
 
-    # Resolve every `{space:verb.id}` in `template`. Without a registry each token collapses
-    # to MENU_PATH_FALLBACK — a render that cannot know the letter says where to look rather
-    # than printing the token.
-    def self.expand_menu_paths(registry : Verb::Registry?, template : String) : String
+    # How to reach `id` without typing its chord from memory: its space-menu path, or for a
+    # palette-only verb (`menu: :palette`, #1282) its effective chord when it has one, else the
+    # palette search that finds it — `^P → Use as refresh for slot…`, the palette's own
+    # effective chord and the verb's title. Nil for an unknown verb or one neither surface
+    # lists. Help's key column and every `{space:…}` token come through here, so a hint never
+    # sends the operator to a menu row the verb does not have.
+    def self.route(registry : Verb::Registry, id : String,
+                   overrides : Hash(String, Array(Verb::Chord))? = nil) : String?
+      if path = menu_path(registry, id)
+        return path
+      end
+      return nil unless (v = registry[id]?) && v.palette_only?
+      overrides ||= rebindable_overrides(registry)
+      if chord = binding_for(registry, id, overrides)
+        return display_label(chord)
+      end
+      "#{binding_label(registry, "app.palette", "^P", overrides)} → #{v.title}"
+    end
+
+    # Resolve every `{space:verb.id}` in `template` (#route). Without a registry each token
+    # collapses to MENU_PATH_FALLBACK — a render that cannot know the letter says where to
+    # look rather than printing the token.
+    def self.expand_menu_paths(registry : Verb::Registry?, template : String,
+                               overrides : Hash(String, Array(Verb::Chord))? = nil) : String
       return template unless template.valid_encoding? && template.includes?("{space:")
       template.gsub(SPACE_TOKEN_RE) do
-        (registry && menu_path(registry, $1)) || MENU_PATH_FALLBACK
+        (registry && route(registry, $1, overrides)) || MENU_PATH_FALLBACK
       end
     end
 
@@ -376,7 +397,7 @@ module Gori
     private def self.expand_uncached(registry : Verb::Registry, template : String,
                                      overrides : Hash(String, Array(Verb::Chord)), profile : String,
                                      keyset : String) : String
-      template = expand_menu_paths(registry, template)
+      template = expand_menu_paths(registry, template, overrides)
       template.gsub(VERB_TOKEN_RE) do |token|
         id = $1
         if chord = binding_for(registry, id, overrides, profile, keyset) || default_for(registry, id, profile, keyset)

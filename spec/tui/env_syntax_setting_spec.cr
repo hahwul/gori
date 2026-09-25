@@ -200,7 +200,9 @@ describe "the ENV pane's space menu" do
     menu = Gori::Tui::SpaceMenu.new(Gori::Verbs.registry)
     menu.open(Gori::Verb::Scope::Env, :common, ctx)
 
-    menu.entries.map(&.id).should contain("env.edit-prefix")
+    # The prefix is a once-a-session setting: the palette lists it, not this menu (#1282).
+    menu.entries.map(&.id).should_not contain("env.edit-prefix")
+    Gori::Verbs.registry["env.edit-prefix"].palette_only?.should be_true
     # The grammar is not here: a menu row could only write the setting, leaving every token
     # already stored in this project's rows spelled for the grammar it just left.
     menu.entries.map(&.id).should_not contain("env.syntax")

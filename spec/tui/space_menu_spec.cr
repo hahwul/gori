@@ -58,7 +58,7 @@ describe Gori::Tui::SpaceMenu do
     end
   end
 
-  # The Env pane offers `a`/`e`/`d`/`y` and the menu-only `p`, and NOTHING on `s` — the token
+  # The Env pane offers `a`/`e`/`d`/`y` (the prefix is palette-only since #1282), and NOTHING on `s` — the token
   # grammar used to live there, and it is now `gori settings env-syntax`'s alone (it has to
   # re-spell the tokens already stored in the project, which a setting-write cannot do). `s` in
   # this tab belongs to the Activity pane's source filter, in its own scope.
@@ -70,7 +70,7 @@ describe Gori::Tui::SpaceMenu do
     env_menu = SpaceMenu.new(registry)
     env_menu.open(Gori::Verb::Scope::Env, :common, ctx)
     env_menu.verb_for('s').should be_nil
-    env_menu.entries.map(&.id).should contain("env.edit-prefix")
+    env_menu.entries.map(&.id).should contain("env.add-var")
 
     activity = SpaceMenu.new(registry)
     activity.open(Gori::Verb::Scope::ProjectActivity, :common, ctx)
@@ -142,7 +142,7 @@ describe Gori::Tui::SpaceMenu do
     menu.verb_for('a').try(&.id).should eq("scope.add-rule")
   end
 
-  it "lists env-var actions (not scope rules) in the Project ENV pane, with change-prefix" do
+  it "lists env-var actions (not scope rules) in the Project ENV pane, and leaves change-prefix to the palette" do
     ctx = FakeExecContext.new
     ctx.env_has_var = true # edit/delete are gated on a selected var
     menu = SpaceMenu.new(Gori::Verbs.registry)
@@ -154,10 +154,10 @@ describe Gori::Tui::SpaceMenu do
     ids.should contain("env.add-var")
     ids.should contain("env.edit-var")
     ids.should contain("env.delete-var")
-    ids.should contain("env.edit-prefix")
-    ids.should_not contain("scope.add-rule") # the old, wrong menu is gone
+    ids.should_not contain("env.edit-prefix") # palette-only (#1282)
+    ids.should_not contain("scope.add-rule")  # the old, wrong menu is gone
     menu.verb_for('a').try(&.id).should eq("env.add-var")
-    menu.verb_for('p').try(&.id).should eq("env.edit-prefix")
+    menu.verb_for('p').should be_nil
   end
 
   it "hides the env-var edit/delete entries when no var is selected" do
@@ -166,8 +166,7 @@ describe Gori::Tui::SpaceMenu do
     menu.open(Gori::Verb::Scope::Env, :common, ctx)
 
     ids = menu.entries.map(&.id)
-    ids.should contain("env.add-var")     # always available
-    ids.should contain("env.edit-prefix") # always available
+    ids.should contain("env.add-var") # always available
     ids.should_not contain("env.edit-var")
     ids.should_not contain("env.delete-var")
   end
@@ -233,20 +232,16 @@ describe Gori::Tui::SpaceMenu do
     menu = SpaceMenu.new(Gori::Verbs.registry)
 
     # Tab-bar focus (@focus == :menu): COMMON + the TAB group (find/filter sub-tabs).
-    # Save/Load are COMMON too — they were :tab, which made the chain library reachable
-    # ONLY from here; see the :subtab and :chain examples below for the other two contexts
-    # that used to be missing it.
+    # Save/Load are palette-only (#1282) — `^S`/`^O`, found by name from every view; see
+    # the :chain example below.
     menu.open(Gori::Verb::Scope::Decoder, :tab, ctx, subtabs: true)
     ids = menu.entries.map(&.id)
     ids.should contain("decoder.copy")
     ids.should contain("decoder.new")
     ids.should contain("decoder.close")
-    ids.should contain("decoder.save")
-    ids.should contain("decoder.load")
+    ids.should_not contain("decoder.save")
     menu.verb_for('n').try(&.id).should eq("decoder.new")
     menu.verb_for('w').try(&.id).should eq("decoder.close")
-    menu.verb_for('s').try(&.id).should eq("decoder.save")
-    menu.verb_for('o').try(&.id).should eq("decoder.load")
 
     # Sub-tab strip focus (@focus == :subtabs): Decoder now has its OWN :subtab verbs
     # (rename + duplicate, mirroring Repeater/Fuzzer) — COMMON + SUBTAB, New/Close/Copy/
@@ -260,28 +255,23 @@ describe Gori::Tui::SpaceMenu do
     ids.should contain("decoder.duplicate-subtab")
     menu.verb_for('e').try(&.id).should eq("decoder.rename-subtab")
     menu.verb_for('d').try(&.id).should eq("decoder.duplicate-subtab")
-    ids.should contain("decoder.save")        # COMMON as of the library round
     ids.should contain("decoder.find-subtab") # :tab rides in the SAME bucket now (#1055)
 
-    # Body-pane focus: OUTPUT gets Cycle output mode + COMMON's New/Close/Copy/Save/Load —
-    # the whole point of Round 4 is New/Close now show INSIDE the body panes too.
+    # Body-pane focus: OUTPUT gets COMMON's New/Close/Copy — the whole point of Round 4 is
+    # New/Close now show INSIDE the body panes too. Cycle output mode is `^X`, palette-only.
     menu.open(Gori::Verb::Scope::Decoder, :output, ctx, subtabs: true)
     ids = menu.entries.map(&.id)
-    ids.should contain("decoder.mode")
+    ids.should_not contain("decoder.mode")
     ids.should contain("decoder.new")
     ids.should contain("decoder.close")
-    ids.should contain("decoder.save")
     ids.should contain("decoder.find-subtab") # the SUB-TABS bucket rides along here too
 
-    # CHAIN pane: Save/Load are COMMON, and CHAIN has no actions of its own, so this
-    # renders as a flat COMMON-only group (the single-group-omits-header rule) — which
-    # still carries the chain library, the one thing this pane most obviously wants.
+    # CHAIN pane: CHAIN has no actions of its own, so this renders as a flat COMMON-only
+    # group (the single-group-omits-header rule).
     menu.open(Gori::Verb::Scope::Decoder, :chain, ctx, subtabs: true)
     ids = menu.entries.map(&.id)
     ids.should contain("decoder.new")
     ids.should contain("decoder.close")
-    ids.should contain("decoder.save")
-    ids.should contain("decoder.load")
     ids.should_not contain("decoder.mode")
   end
 
@@ -457,32 +447,34 @@ describe Gori::Tui::SpaceMenu do
     ids.should contain("decoder.new")              # SUB-TABS
     ids.should contain("decoder.rename-subtab")    # SUB-TABS
     ids.should contain("decoder.duplicate-subtab") # SUB-TABS
-    ids.should contain("decoder.save")             # COMMON — the strip is where a conversion is managed
-    ids.should contain("decoder.load")
-    ids.should_not contain("decoder.mode")    # a DIFFERENT section (:output) — no bleed
-    ids.should contain("decoder.find-subtab") # :tab is part of the SUB-TABS bucket (#1055)
+    ids.should_not contain("decoder.clear")        # a DIFFERENT section (:input) — no bleed
+    ids.should contain("decoder.find-subtab")      # :tab is part of the SUB-TABS bucket (#1055)
     # 'e', the letter rename carries on all nine strips. Decoder's COMMON has no 'r' to
     # displace and could have taken the strip's own key, but four of the nine cannot —
     # registry_reach_spec pins why one spelling beats two.
     menu.verb_for('e').try(&.id).should eq("decoder.rename-subtab")
     menu.verb_for('d').try(&.id).should eq("decoder.duplicate-subtab")
-    menu.verb_for('s').try(&.id).should eq("decoder.save")
-    menu.verb_for('o').try(&.id).should eq("decoder.load")
   end
 
-  # The other context the :tab tagging hid the library from, and the one that reads worst:
-  # the CHAIN pane is where the spec being saved is on screen and under the caret.
-  it "offers Decoder's Save/Load from inside the CHAIN pane" do
+  # The chain library was once reachable only from the tab bar; the CHAIN pane is where the
+  # spec being saved is on screen. Save/Load are palette-only now (#1282): `^S`/`^O` from any
+  # pane, and the palette's typed search finds them from inside the CHAIN pane too.
+  it "leaves Decoder's Save/Load to the palette, which finds them from inside the CHAIN pane" do
     ctx = FakeExecContext.new
     ctx.current_tab = :decoder
-    menu = SpaceMenu.new(Gori::Verbs.registry)
+    registry = Gori::Verbs.registry
+    menu = SpaceMenu.new(registry)
 
     menu.open(Gori::Verb::Scope::Decoder, :chain, ctx)
     ids = menu.entries.map(&.id)
-    ids.should contain("decoder.save")
-    ids.should contain("decoder.load")
-    menu.verb_for('s').try(&.id).should eq("decoder.save")
-    menu.verb_for('o').try(&.id).should eq("decoder.load")
+    ids.should_not contain("decoder.save")
+    ids.should_not contain("decoder.load")
+
+    palette = Gori::Tui::PaletteState.new(registry)
+    palette.capture(Gori::Tui::ActionContext.new(Gori::Verb::Scope::Decoder, :chain, true), ctx)
+    "save chain".each_char { |c| palette.append(c, ctx) }
+    palette.tab_count.should be > 0
+    palette.results.first(palette.tab_count).map(&.id).should contain("decoder.save")
   end
 
   it "populates Notes' :subtab group with duplicate (content-only clone from the strip)" do
@@ -842,7 +834,8 @@ describe Gori::Tui::SpaceMenu do
     }
     menu_scopes.each do |scope|
       verbs = registry.select { |v| v.scope == scope && !v.hidden? }
-      verbs.select(&.chords.empty?).all?(&.menu_listed?).should be_true # chordless ⇒ keyed (or in a family)
+      # chordless ⇒ keyed (or in a family), unless the palette lists it instead (#1282)
+      verbs.select(&.chords.empty?).reject(&.palette_only?).all?(&.menu_listed?).should be_true
 
       common = verbs.select { |v| v.section == :common }
       no_collision.call(common)
@@ -866,6 +859,20 @@ describe Gori::Tui::SpaceMenu do
       reg.register(Gori::Verb::Definition.new("demo.b", "demo:b", "second",
         Gori::Verb::Scope::Body, mnemonic: 'z') { |_| nil }) # derives the same 'z'
       expect_raises(Gori::Error, /space-menu key collision/) { reg.validate_menu_keys! }
+    end
+
+    # A palette-only verb draws no row (#1282), so its chord-derived letter claims nothing: the
+    # same pair as above passes once the second verb is placed in the palette.
+    it "ignores a palette-only verb" do
+      reg = Gori::Verb::Registry.new
+      reg.register(Gori::Verb::Definition.new("demo.a", "demo:a", "first",
+        Gori::Verb::Scope::Body, [Gori::Verb::Chord.new("z")]) { |_| nil })
+      reg.register(Gori::Verb::Definition.new("demo.b", "demo:b", "second",
+        Gori::Verb::Scope::Body, [Gori::Verb::Chord.new("z")], menu: :palette) { |_| nil })
+      reg["demo.b"].menu_key.should be_nil
+      reg["demo.b"].menu_listed?.should be_false
+      reg.validate_menu_keys!
+      reg.validate_intents!
     end
 
     it "allows the same menu key across DIFFERENT scopes (scoped menu, deliberate reuse)" do

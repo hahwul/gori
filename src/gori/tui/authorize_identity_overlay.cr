@@ -49,8 +49,10 @@ module Gori::Tui
     # The step labels of the slot being edited (`SessionRefresh.step_labels`), in order.
     getter refresh_labels : Array(String)
 
-    # The refresh line with no steps yet, naming the Repeater menu row that adds one.
-    REFRESH_EMPTY = "none — add a Repeater sub-tab with {space:repeater.use-as-refresh}"
+    # The refresh line with no steps yet, naming the Repeater action that adds one. Its route
+    # is the palette's (`^P → Use as refresh for slot…`, #1282), so the prefix stays short
+    # enough for the whole route to fit the card.
+    REFRESH_EMPTY = "none — Repeater: {space:repeater.use-as-refresh}"
 
     # `registry` only spells REFRESH_EMPTY's menu path; without one it reads "the space menu".
     def initialize(identity : Authorize::Identity? = nil, @index : Int32? = nil,

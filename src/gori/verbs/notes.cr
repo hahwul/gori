@@ -91,7 +91,7 @@ module Gori
 
       r.register Verb::Definition.new(
         "notes.goto", "Go to line", "Jump the cursor to a line number",
-        Verb::Scope::Notes, available: in_notes, mnemonic: 'g') { |ctx| ctx.notes_goto; nil }
+        Verb::Scope::Notes, available: in_notes, menu: :palette) { |ctx| ctx.notes_goto; nil }
 
       # 's' and not 'f': the strip's `f` finds a SUB-TAB, and `notes.find-subtab` carries that
       # letter now — one of the nine the SUB-TABS bucket reserves in every Notes view. It

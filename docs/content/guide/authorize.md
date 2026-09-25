@@ -70,7 +70,7 @@ A slot is a snapshot, so a long run can outlive its token. Give the slot **refre
 
 | Surface | Add a step | Refresh now | Policy |
 |---------|------------|-------------|--------|
-| TUI | In the Repeater, `Space` → `b` (**Use as refresh for slot…**) on the login sub-tab | `Ctrl-R` on the row in the session slot picker | the **refresh before** field of the identity form (`i` on this tab) |
+| TUI | In the Repeater, `Ctrl-P` → **Use as refresh for slot…** on the login sub-tab | `Ctrl-R` on the row in the session slot picker | the **refresh before** field of the identity form (`i` on this tab) |
 | `gori run` | `session edit NAME --refresh 12,14` | `session refresh NAME` | `--refresh-before` |
 | MCP | `update_session_slot{refresh}` | `refresh_session_slot` | `refresh_before` |
 

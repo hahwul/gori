@@ -54,18 +54,18 @@ module Gori
       # could restore it, and erase the entry on their next save. It would also leave the
       # pair half-rebindable, which is how a `⇧N/b change` footer gets built from the UI.
       #
-      # Explicit menu mnemonics: the derived ones would be 'n' / 'p' / 'f' — and the KEYS
-      # here are ⇧N / ⇧P / f, so a derived letter would name a chord nobody presses. They
-      # just have to be free of comparer.new's own 'n'.
+      # Palette-only (#1282): the KEYS are ⇧N / ⇧P, and a menu row duplicated them for a
+      # navigation convenience. A derived letter would have been 'n' / 'p', naming a chord
+      # nobody presses.
       r.register Verb::Definition.new(
         "comparer.next-change", "Next change", "Jump the row cursor to the next changed row",
         Verb::Scope::Comparer, [Verb::Chord.new("n", shift: true)],
-        available: in_diff, mnemonic: 'g') { |ctx| ctx.comparer_jump_change(1); nil }
+        available: in_diff, menu: :palette) { |ctx| ctx.comparer_jump_change(1); nil }
 
       r.register Verb::Definition.new(
         "comparer.prev-change", "Previous change", "Jump the row cursor to the previous changed row",
         Verb::Scope::Comparer, [Verb::Chord.new("p", shift: true)],
-        available: in_diff, mnemonic: 'G') { |ctx| ctx.comparer_jump_change(-1); nil }
+        available: in_diff, menu: :palette) { |ctx| ctx.comparer_jump_change(-1); nil }
 
       # MENU-ONLY since the key audit's F3, for the reason `history.toggle-follow` carries:
       # `f` is freeze in evidence contexts and find on the sub-tab strip, and folding is a
