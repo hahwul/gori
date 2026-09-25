@@ -358,7 +358,8 @@ module Gori::Tui
     # class comment — so its members are read with `registered_in_view`, not `for_view`.
     #
     # The family row files under the first bucket, in render order, that holds a member
-    # (COMMON, then SUB-TABS, then the pane), and in the family's own band.
+    # (COMMON, then SUB-TABS, then the pane), and in the family's own band — but only when
+    # that bucket is banded already (#banded_home).
     private def level1_entries(scope : Verb::Scope, section : Symbol, ctx : Verb::ExecContext,
                                subtabs : Bool) : Array(Entry)
       registered = @registry.registered_in_view(scope, section, subtabs)
@@ -374,7 +375,19 @@ module Gori::Tui
         next if bucket_rank(home.section, section, subtabs) == Int32::MAX
         rows << Entry.new(f.key, scope, home.section, f.group, family: f)
       end
-      rows
+      rows.map { |e| (f = e.family) && !banded_home?(e, rows, section, subtabs) ? Entry.new(e.key, e.scope, e.section, :none, family: f) : e }
+    end
+
+    # Whether a family row's bucket already has a band of its own: some non-member verb row
+    # there carries a `group`. Only then does the row take its family's band. In an untagged
+    # bucket (the Repeater's COMMON, the Fuzzer's) it stays an untagged row, because a lone
+    # `─ SEND ─` over the family row would push everything else under a `─ COMMON ─` header
+    # the card never had.
+    private def banded_home?(e : Entry, rows : Array(Entry), section : Symbol, subtabs : Bool) : Bool
+      rank = bucket_rank(e.section, section, subtabs)
+      rows.any? do |r|
+        (v = r.verb) && !v.member? && v.group != :none && bucket_rank(r.section, section, subtabs) == rank
+      end
     end
 
     # Which focus bucket a verb of `v_section` lands in — 0 COMMON, 1 SUB-TABS, 2 the pane —

@@ -1117,6 +1117,38 @@ describe "the space menu's verb families (#1274 WP9)" do
     screen.contains?("›").should be_true # the row says it opens a card
   end
 
+  it "leaves an untagged bucket header-free, the family row an untagged row in it" do
+    reg = Gori::Verb::Registry.new
+    reg.register_family(Gori::Verb::Family.new(:send, "Send to…", '>', :send, [{:to_a, 'a'}]))
+    reg.register(Gori::Verb::Definition.new("demo.run", "Run", "x", Gori::Verb::Scope::Body, mnemonic: 'r') { |_| nil })
+    reg.register(Gori::Verb::Definition.new("demo.a", "To A", "x", Gori::Verb::Scope::Body, intent: :to_a) { |_| nil })
+    reg.register(Gori::Verb::Definition.new("demo.stop", "Stop", "x", Gori::Verb::Scope::Body, mnemonic: 's') { |_| nil })
+    menu = SpaceMenu.new(reg)
+    menu.open(Gori::Verb::Scope::Body, :common, FakeExecContext.new)
+    menu.entries.map(&.id).should eq(["demo.run", "family:send", "demo.stop"])
+    menu.entry_for('>').not_nil!.group.should eq(:none)
+    screen = render_menu(menu)
+    screen.contains?("─ SEND ─").should be_false
+    screen.contains?("─ COMMON ─").should be_false
+    screen.contains?("Send to…").should be_true
+  end
+
+  it "puts the family row in its band when the bucket is banded already" do
+    reg = Gori::Verb::Registry.new
+    reg.register_family(Gori::Verb::Family.new(:send, "Send to…", '>', :send, [{:to_a, 'a'}]))
+    reg.register(Gori::Verb::Definition.new("demo.look", "Look", "x", Gori::Verb::Scope::Body,
+      mnemonic: 'l', group: :view) { |_| nil })
+    reg.register(Gori::Verb::Definition.new("demo.a", "To A", "x", Gori::Verb::Scope::Body, intent: :to_a) { |_| nil })
+    reg.register(Gori::Verb::Definition.new("demo.run", "Run", "x", Gori::Verb::Scope::Body, mnemonic: 'r') { |_| nil })
+    menu = SpaceMenu.new(reg)
+    menu.open(Gori::Verb::Scope::Body, :common, FakeExecContext.new)
+    menu.entry_for('>').not_nil!.group.should eq(:send)
+    menu.entries.map(&.id).should eq(["demo.look", "family:send", "demo.run"]) # VIEW, SEND, then the leftovers
+    screen = render_menu(menu)
+    screen.contains?("─ VIEW ─").should be_true
+    screen.contains?("─ SEND ─").should be_true
+  end
+
   it "files the row under the first bucket that holds a member" do
     menu, _, _ = family_menu(member_section: :request)
     # COMMON holds only `v`; the members are REQUEST's, so the row sits with `q` — in its own
