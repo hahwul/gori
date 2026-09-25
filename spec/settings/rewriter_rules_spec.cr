@@ -213,4 +213,63 @@ describe "Gori::Settings rewriter rule shape" do
       saved_rules[0]["path"].as_s.should eq("/only-here")
     end
   end
+
+  # #1237: the short-circuit sub-kind. A row an older binary wrote carries neither key and reads
+  # as the stub it always was; a label or args this binary cannot read are kept verbatim and the
+  # row stays inert.
+  it "derives respond for a row that predates it, and round-trips it once named" do
+    with_rewriter_home do
+      write_settings(<<-JSON)
+        {"rewriter": {"rules": [
+          {"id": 1, "enabled": true, "pattern": "/logo", "replacement": "200 OK", "op": "short_circuit", "body_file": "/tmp/logo.png"},
+          {"id": 2, "enabled": true, "pattern": "/me", "replacement": "200 OK", "op": "short_circuit"},
+          {"id": 3, "enabled": true, "pattern": "GET /s/", "replacement": "", "op": "short_circuit",
+           "body_file": "/srv/js", "respond": "dir", "respond_args": "{\\"strip_prefix\\":\\"/s/\\"}"}
+        ]}}
+        JSON
+      Gori::Settings.load
+      rules = Gori::Settings.rewriter_rules
+      rules.map(&.respond).should eq(["file", "inline", "dir"])
+      rules[2].to_rule.args.strip_prefix.should eq("/s/")
+      rules.none?(&.inert?).should be_true
+
+      # A new rule writes both keys. The untouched rows follow the file (the 3-way merge), so the
+      # older binary's rows stay exactly as that binary wrote them.
+      Gori::Settings.add_rewriter_rule("request", "head", "/pay", "", "short_circuit", "literal",
+        "", "", "", respond: "fault", respond_args: %({"fault":"reset"})).should eq(4_i64)
+      rows = JSON.parse(File.read(Gori::Settings.path))["rewriter"]["rules"].as_a
+      rows.map(&.["respond"]?.try(&.as_s)).should eq([nil, nil, "dir", "fault"])
+      # A rewrite rule, or a stub whose respond is the one its body file implies, is written
+      # with exactly the keys it had — a gori built after #1252 holds an unknown key inert.
+      Gori::Settings.add_rewriter_rule("request", "head", "X-A", "b", "set_header", "literal",
+        "", "", "").should eq(5_i64)
+      rows = JSON.parse(File.read(Gori::Settings.path))["rewriter"]["rules"].as_a
+      rows[4].as_h.has_key?("respond").should be_false
+      rows[4].as_h.has_key?("respond_args").should be_false
+      rows[2]["respond_args"].as_s.should eq(%({"strip_prefix":"/s/"}))
+      rows[3]["respond_args"].as_s.should eq(%({"fault":"reset"}))
+    end
+  end
+
+  it "keeps a respond label or args it cannot read, verbatim and inert" do
+    with_rewriter_home do
+      write_settings(<<-JSON)
+        {"rewriter": {"rules": [
+          {"id": 1, "enabled": true, "pattern": "/a", "replacement": "", "op": "short_circuit", "respond": "script"},
+          {"id": 2, "enabled": true, "pattern": "/b", "replacement": "", "op": "short_circuit",
+           "respond": "fault", "respond_args": {"fault": "reset", "throttle": 3}}
+        ]}}
+        JSON
+      Gori::Settings.load
+      rules = Gori::Settings.rewriter_rules
+      rules[0].respond.should eq("script")
+      rules[1].respond_args.should eq(%({"fault":"reset","throttle":3}))
+      rules.all?(&.inert?).should be_true
+      Gori::Settings.save.should be_true
+      rows = JSON.parse(File.read(Gori::Settings.path))["rewriter"]["rules"].as_a
+      rows[0]["respond"].as_s.should eq("script")
+      # An object is written back as the object a newer gori wrote, not as a string of it.
+      rows[1]["respond_args"].as_h["throttle"].as_i.should eq(3)
+    end
+  end
 end

@@ -932,6 +932,27 @@ describe Gori::Tui::HistoryView do
       end
     end
 
+    # #1237: a short-circuited proxy flow names the rule that answered it, which outlives
+    # that rule being edited or deleted.
+    it "names the rule that answered a short-circuited flow" do
+      with_store do |store|
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+          method: "GET", target: "/static/app.js", http_version: "HTTP/1.1",
+          head: "GET /static/app.js HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil,
+          short_circuited: true, source: Gori::FlowSource::Kind::Proxy,
+          source_ref: "project rule #4 · dir app.js"))
+        store.update_response(Gori::Store::CapturedResponse.new(
+          flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice))
+        view = HistoryView.new
+        view.reload(store)
+        view.open_detail(store).should be_true
+        backend = MemoryBackend.new(100, 16)
+        view.render_detail(Screen.new(backend), Rect.new(0, 0, 100, 16))
+        backend.contains?("answered by gori — project rule #4 · dir app.js").should be_true
+      end
+    end
+
     it "says nothing about a proxy capture, which is the norm" do
       with_store do |store|
         add_sourced_flow(store, "/captured", Gori::FlowSource::Kind::Proxy)

@@ -52,6 +52,7 @@ require "./extract_rule_overlay"
 require "./columns_overlay"
 require "./column_overlay"
 require "./rewriter_stub_overlay"
+require "./rewriter_respond_overlay"
 require "./confirm_dialog"
 require "./browser_picker"
 require "./choice_picker"
@@ -5375,10 +5376,16 @@ module Gori::Tui
     # The form asks for its live match preview through on_preview (it decides WHEN — only
     # when a match-relevant field actually changed).
     def open_rewriter_rule_editor(rule : Store::MatchRule?) : Nil
-      ov = rule ? RewriterRuleOverlay.editing(rule) : RewriterRuleOverlay.adding
+      open_rewriter_rule_form(rule ? RewriterRuleOverlay.editing(rule) : RewriterRuleOverlay.adding)
+    end
+
+    # The wiring every Rewriter rule form gets, whoever opened it — the tab's add/edit, or
+    # History's "Mock this response" with a prefilled draft (#1237).
+    def open_rewriter_rule_form(ov : RewriterRuleOverlay) : Nil
       ov.on_preview = ->rewriter_preview_text(Store::MatchRule)
       ov.on_commit = -> { rewriter_controller.apply_rewriter_rule(ov) }
       ov.on_edit_stub = -> { open_rewriter_stub_editor(ov) }
+      ov.on_edit_options = -> { open_rewriter_respond_editor(ov) }
       open_overlay(ov)
     end
 
@@ -5467,6 +5474,18 @@ module Gori::Tui
         false
       }
       open_overlay(sov)
+    end
+
+    # --- short-circuit answer options (opened from the rule form's `options:` row, #1237) ---
+    # The same sub-editor seam as the stub editor above.
+    private def open_rewriter_respond_editor(form : RewriterRuleOverlay) : Nil
+      rov = RewriterRespondOverlay.new(form.respond, form.fault_kind, form.options)
+      rov.on_commit = -> {
+        form.options = rov.args
+        open_overlay(form)
+        false
+      }
+      open_overlay(rov)
     end
 
     # The "N of M recent flows" line under the Rewriter form. Bounded so a keystroke stays

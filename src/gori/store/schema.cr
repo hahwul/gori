@@ -1438,6 +1438,23 @@ module Gori
       # projects reclassify their rows once without rebuilding the table or index.
       V32 = [] of String
 
+      # V33 — where a short-circuit rule's answer comes from (#1237). `respond` is the sub-kind
+      # (`inline` | `file` | `dir` | `fault`, `Store::RespondKind`) and `respond_args` its
+      # parameters as a small JSON object (`Store::RespondArgs`). A sub-kind of `short_circuit`
+      # rather than a new `op`: an older binary reads an unknown op as inert (#1242) only from
+      # that release on, while every release since #511 already fails a `dir` or `fault` row
+      # CLOSED — a directory is "not a regular file", and a fault row's empty head does not parse,
+      # so both answer the 502 stub instead of reaching the origin.
+      #
+      # The UPDATE is plain SQL, so it lives here and not in BACKFILLS: a row that already had a
+      # `body_file` was a file stub, and saying so keeps `respond` truthful for every surface
+      # that lists it.
+      V33 = [
+        "ALTER TABLE match_rules ADD COLUMN respond TEXT NOT NULL DEFAULT 'inline'",
+        "ALTER TABLE match_rules ADD COLUMN respond_args TEXT NOT NULL DEFAULT ''",
+        "UPDATE match_rules SET respond = 'file' WHERE op = 'short_circuit' AND body_file != ''",
+      ]
+
       # Data statements that call gori's OWN SQL functions, run by `migrate!` right after the
       # version they complete. Kept out of MIGRATIONS because that list is plain schema that a
       # bare connection can replay (specs build every historical shape that way), and a bare
@@ -1459,7 +1476,7 @@ module Gori
       }
 
       MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17,
-                    V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29, V30, V31, V32]
+                    V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29, V30, V31, V32, V33]
 
       def self.migrate!(db : DB::Database, read_only : Bool = false) : Nil
         db.using_connection do |conn|

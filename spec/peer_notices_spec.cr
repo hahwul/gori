@@ -143,6 +143,20 @@ describe Gori::PeerNotices do
       p.flush(t0 + 5.seconds).not_nil!.message.should contain("local command")
     end
 
+    # #1237: a peer's map-local rule answers this operator's browser with files off local disk.
+    it "escalates a peer's MAP-LOCAL rule, below a pipe rule" do
+      t0 = Time.instant
+      p = notices
+      p.record_rules(Gori::RuleSetChange.new(changed: 1, reordered: false, enabled: 1, serves_files: 1), t0)
+      note = p.flush(t0 + 5.seconds).not_nil!
+      note.level.should eq(:warn)
+      note.message.should contain("map-local rule")
+      note.message.should contain("files from a directory on this machine")
+
+      p.record_rules(Gori::RuleSetChange.new(changed: 2, reordered: false, enabled: 2, executes: 1, serves_files: 1), t0)
+      p.flush(t0 + 5.seconds).not_nil!.message.should contain("runs a local command")
+    end
+
     it "says nothing at all when nothing was recorded" do
       notices.flush(Time.instant).should be_nil
     end
@@ -234,6 +248,19 @@ describe Gori::RuleSetChange do
 
     change.enabled.should eq(1)
     change.executes.should eq(0)
+  end
+
+  it "counts the changed map-local rules, and a merge sums them" do
+    dir = Gori::Store::MatchRule.new(1_i64, true, Gori::Store::RuleTarget::Request,
+      Gori::Store::RulePart::Head, "GET /s/", "", Gori::Store::RuleOp::ShortCircuit,
+      body_file: "/srv", respond: Gori::Store::RespondKind::Dir)
+    stub = Gori::Store::MatchRule.new(2_i64, true, Gori::Store::RuleTarget::Request,
+      Gori::Store::RulePart::Head, "/x", "200 OK", Gori::Store::RuleOp::ShortCircuit)
+    change = Gori::RuleSetChange.between([] of Gori::Store::MatchRule, [dir, stub],
+      ->(r : Gori::Store::MatchRule) { r.id }, nil, ->(r : Gori::Store::MatchRule) { r.active? },
+      ->(r : Gori::Store::MatchRule) { r.active? && r.respond.dir? }).not_nil!
+    change.serves_files.should eq(1)
+    change.merge(change).serves_files.should eq(2)
   end
 end
 

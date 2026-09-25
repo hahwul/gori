@@ -1172,6 +1172,10 @@ gori run rewriter add --op replace --target response --part body \
 gori run rewriter add --op remove_header --target response \
   --find Content-Security-Policy --scope global          # 모든 프로젝트에 적용
 gori run rewriter preview --op replace --part body --find password --value hunter2
+gori run rewriter add --op short_circuit --map-dir ./tampered \
+  --strip-prefix /static/ --fallthrough                 # 없는 파일만 원본으로
+gori run rewriter add --op short_circuit --find /api/pay --fault reset
+gori run rewriter add --op short_circuit --from-flow 42  # 캡처된 응답을 스텁으로
 gori run rewriter disable 3
 gori run rewriter disable 2 --scope global               # 이 프로젝트에서만 끄기
 gori run rewriter disable 2 --scope global --everywhere  # 기본값을 꺼서 모든 곳에 적용
@@ -1186,7 +1190,14 @@ gori run rewriter rm 3
 | `--match=MODE` | `literal`(기본값) 또는 `regex`. `replace`, `pipe`, `short_circuit`에 적용됩니다. 정규식 치환은 `$1`, `$2`를 쓰고 `$$`는 리터럴 `$` |
 | `--response-file=PATH` | `short_circuit`: 미리 준비한 응답을 PATH에서 읽음(`-`는 stdin — 파이프나 리다이렉트가 필요하며 터미널은 거부됨) |
 | `--body-file=PATH` | `short_circuit`: PATH를 응답 본문으로 제공하며, 파일이 바뀌면 다시 읽음 |
-| `-f`, `--find=FIND` | 필수. 대상이 되는 리터럴, 패턴, 또는 헤더 이름 |
+| `--map-dir=DIR` | `short_circuit`: 요청 경로가 가리키는 파일을 DIR에서 제공(Map Local). `--value`는 선택 사항인 헤드 템플릿이 됨 |
+| `--strip-prefix=PATH` | `--map-dir`와 함께: 경로를 DIR 아래에 붙이기 전에 떼어 낼 URL 접두사(`/static/`). `--find`가 없으면 요청 줄에서 이 접두사로 매칭 |
+| `--fallthrough` | `--map-dir`와 함께: 파일이 없는 요청을 `502` 대신 원본으로 넘김 |
+| `--fault=KIND` | `short_circuit`: 응답 없이 `close`, `reset`, `hang` 중 하나로 답함 |
+| `--hang=MS` | `--fault=hang`와 함께: 닫기 전까지 붙잡는 시간(기본 30000) |
+| `--delay=MS` | `short_circuit`: 답하기 전에 기다리는 시간(최대 120000) |
+| `--from-flow=ID` | `short_circuit`: flow ID의 캡처된 응답을 규칙에 복사. `--find`, `--host`, `--value`가 초안을 덮어씀 |
+| `-f`, `--find=FIND` | `--from-flow`나 `--map-dir --strip-prefix`가 아니면 필수. 대상이 되는 리터럴, 패턴, 또는 헤더 이름 |
 | `-v`, `--value=VALUE` | 치환할 텍스트, 헤더 값, 또는 `--op=pipe`일 때 실행할 명령. [프로세스 훅](/ko/guide/scripting/#프로세스-훅) 참고 |
 | `--host=GLOB` | 규칙을 그 호스트와 서브도메인으로 한정(`example.com`은 `api.example.com`에도 매칭되지만 `xexample.com`에는 매칭되지 않음). 더 넓게는 `*` 와일드카드. 생략하면 전체 적용 |
 | `--name=NAME` | 규칙 목록에 표시할 라벨 |

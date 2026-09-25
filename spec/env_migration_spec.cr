@@ -503,6 +503,30 @@ describe Gori::EnvMigration do
     end
   end
 
+  # A short-circuit stub's replacement is a response sent as authored (`RuleOp#expands_tokens?`),
+  # so the reconcile leaves it byte-identical even when it spells a name both tables hold.
+  it "leaves a short-circuit stub's response as authored" do
+    with_migration_home do |db_path|
+      stub = "200 OK\n\n{\"v\":\"$id\"}"
+      store = Gori::Store.open(db_path)
+      begin
+        store.set_setting(Gori::Env::PROJECT_VARS_KEY, Gori::Env.serialize_vars([{"id", "v"}]))
+        store.insert_rule(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+          "GET /x", stub, op: Gori::Store::RuleOp::ShortCircuit, name: "mock")
+        store.insert_rule(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+          "X-K", "$id", name: "r")
+        store.flush
+      ensure
+        store.close
+      end
+      Gori::Settings.env_syntax = NS
+      with_open_store(db_path) { |st| Gori::EnvMigration.reconcile(st, db_path, "demo") }
+      with_open_store(db_path) do |st|
+        st.match_rules.map(&.replacement).should eq([stub, "$ENV.id"])
+      end
+    end
+  end
+
   # And a name that is ONLY a disabled binding is left exactly as authored — the literal bare
   # shipped for it too.
   it "leaves a rule replacement naming only a DISABLED binding as authored" do

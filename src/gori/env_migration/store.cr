@@ -388,7 +388,8 @@ module Gori
     # left alone: it is a needle or a regex, and nothing expands it.
     private def self.scan_rules(store : Store, plan : Plan) : Nil
       store.match_rules.each do |rule|
-        next if rule.global? # a global rule lives in settings.json — see `migrate_global_rules`
+        next if rule.global?                # a global rule lives in settings.json — see `migrate_global_rules`
+        next unless rule.op.expands_tokens? # a stub's response is sent as authored
         if repl = text(plan, rule.replacement, Kind::Rule)
           plan.writes << Write.new("UPDATE match_rules SET replacement = ? WHERE id = ?",
             [repl.to_slice.as(::DB::Any), rule.id.as(::DB::Any)])
@@ -637,7 +638,7 @@ module Gori
     private def self.global_rule_hint(plan : Plan) : String?
       names = [] of String
       Settings.rewriter_rules.each do |rule|
-        next if rule.replacement.empty?
+        next if rule.replacement.empty? || !rule.expands_tokens?
         _, changes = rewrite(rule.replacement.to_slice, from: plan.from, to: plan.to,
           env_names: plan.env_names, bind_names: plan.bind_names,
           enabled_bind_names: plan.enabled_bind_names, kind: Kind::Rule, prefix: plan.prefix)

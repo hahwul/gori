@@ -3453,3 +3453,32 @@ action occupies that tab-scope chord; the request editor remains in `Scope::Edit
 vim's `u` still means undo. An explicit user rebind wins over that default in keymap collision
 resolution. The English and Korean hotkey guides and `spec/verb/keyset_spec.cr` record this
 cross-scope exception.
+
+### 2026-09-25: response mocking is a short-circuit sub-kind, and map-local is its one fall-through
+
+#1237 grows the #511 stub into a directory (Map Local), a snapshot of a captured response, and
+close/reset/hang faults with a delay. They are a `respond` sub-kind of `op = short_circuit`
+(`match_rules.respond`/`respond_args`, V33), not new `RuleOp` members. An older binary reads an
+unknown op as inert only since #1242. It reads a `dir` row as a stub whose body file is a
+directory, and a `fault` row as a stub with an empty head, and every release since #511 answers
+both with the 502 stub. A `respond` label or `respond_args` key this binary does not know keeps
+the row inert, on the #1242 terms.
+
+The request path of a `dir` rule is the client's bytes naming a local file, which is a new sink.
+It is confined rather than repaired or passed through ([P7](#p7) governs the wire, not the
+filesystem). The path is percent-decoded once. Dot segments, dotfiles, NUL and backslash are
+refused before any filesystem call. The file's realpath must sit under the root's. A refusal is
+a recorded 404 and never reaches the origin.
+
+"A claimed request never reaches the origin" gains exactly one exception: a `dir` rule with
+`fallthrough`, for a file that is simply absent. It declines at claim time, before anything is
+answered or dialed, and the next rule (or the origin) takes the request. A refused path, a
+missing root and every other sub-kind still fail closed.
+
+A delay and a hang pin a fiber, an fd and an accept slot, so they are bounded twice ([P6](#p6)):
+120 s per wait, and 256 held connections process-wide. Past the cap a hang closes at once, a
+delay is skipped, and the flow says which. The rule that answered is recorded as text in
+`flows.source_ref`, so a mocked response stays attributable after the rule is edited or
+deleted. A mock from History is a decoded snapshot, never a reference, because flow ids are
+reused.
+
