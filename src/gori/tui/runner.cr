@@ -1840,18 +1840,12 @@ module Gori::Tui
     # rather than instead of it is what keeps the tab's own vocabulary alive in its editor —
     # `{repeater.send-and-…}`, the Notes sub-tab keys, the Global breath keys all still
     # resolve behind it.
+    #
+    # A link also stands down when its verb's chord is not live in the focused section
+    # (`Definition#chord_sections`) — the Repeater's bare `p` in the request pane. The walk
+    # itself is `Keymap#resolve`, pure, so the pane gate is spec'd without a terminal.
     private def resolve_verb_id(chord : Verb::Chord, scope : Verb::Scope) : String?
-      if editor_pane? && (id = available_verb_id(chord, Verb::Scope::Editor))
-        return id
-      end
-      available_verb_id(chord, scope) || available_verb_id(chord, Verb::Scope::Global)
-    end
-
-    # One link of that chain: the id bound in EXACTLY `scope`, or nil when nothing is bound
-    # there OR what is bound is gated off right now.
-    private def available_verb_id(chord : Verb::Chord, scope : Verb::Scope) : String?
-      return nil unless id = @keymap.lookup_in(chord, scope)
-      @session.registry[id].available?(self) ? id : nil
+      @keymap.resolve(chord, scope, @session.registry, self)
     end
 
     # --- Overlay seam (see overlay.cr) — generic dispatch for the ONE @active_overlay,
@@ -2678,19 +2672,24 @@ module Gori::Tui
     # @overlay is always :none or :detail — every other overlay handles its own
     # keys earlier in handle_key and returns before space is ever checked.
     private def space_menu_context : {Verb::Scope, Symbol}
-      if @overlay.detail?
-        {Verb::Scope::HistoryDetail, :common}
+      return {Verb::Scope::HistoryDetail, :common} if @overlay.detail?
+      {@tabs[@active_tab]?.try(&.command_scope) || Verb::Scope::Body, focused_section}
+    end
+
+    # The section that holds focus — the space menu's half of `space_menu_context`, and what a
+    # verb's `chord_sections` is checked against. The detail overlay has no sections; the tab
+    # bar is `:tab` where the scope has a tab-level group; the strip is `:subtab`; otherwise
+    # the controller's own `command_section` (the Repeater's focused pane).
+    def focused_section : Symbol
+      return :common if @overlay.detail?
+      scope = @tabs[@active_tab]?.try(&.command_scope) || Verb::Scope::Body
+      case @focus
+      when :menu
+        @session.registry.has_section?(scope, :tab) ? :tab : :common
+      when :subtabs
+        :subtab
       else
-        scope = @tabs[@active_tab]?.try(&.command_scope) || Verb::Scope::Body
-        case @focus
-        when :menu
-          section = @session.registry.has_section?(scope, :tab) ? :tab : :common
-          {scope, section}
-        when :subtabs
-          {scope, :subtab}
-        else
-          {scope, @tabs[@active_tab]?.try(&.command_section) || :common}
-        end
+        @tabs[@active_tab]?.try(&.command_section) || :common
       end
     end
 

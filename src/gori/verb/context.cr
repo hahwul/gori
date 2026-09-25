@@ -94,6 +94,10 @@ module Gori
 
       # the currently focused tab (so verbs can gate by context, P4)
       abstract def current_tab : Symbol
+      # …and the SECTION within it that holds focus — the active controller's
+      # `command_section` (the Repeater's :request/:response/:target), `:subtab` on the strip.
+      # What `Definition#chord_sections` is checked against.
+      abstract def focused_section : Symbol
 
       # pane focus (:sidebar | :body) and tab navigation
       abstract def focus_pane(pane : Symbol) : Nil
