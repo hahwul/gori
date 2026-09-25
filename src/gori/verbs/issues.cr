@@ -9,7 +9,7 @@ module Gori
       r.register Verb::Definition.new(
         "issue.create", "Add issue", "Create an issue from the selected flow (every marked flow is attached as a link)", Verb::Scope::Body,
         [Verb::Chord.new("f", shift: true)],
-        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :history && !ctx.selected_flow_ids.empty? }, mnemonic: 'a', group: :triage) { |ctx| ctx.issue_create; nil }
+        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :history && !ctx.selected_flow_ids.empty? }, intent: :file_issue, group: :triage) { |ctx| ctx.issue_create; nil }
 
       # issues list
       r.register Verb::Definition.new(
@@ -21,20 +21,20 @@ module Gori
         [Verb::Chord.new("up"), Verb::Chord.new("k")], hidden: true) { |ctx| ctx.issues_move(-1); nil }
 
       # open/delete are NON-hidden so they join New in the Issues list's "space" menu
-      # (and the palette's typed search from this tab, #1282). open carries an
-      # explicit 'o' mnemonic — its primary chord is enter/l, which would otherwise
+      # (and the palette's typed search from this tab, #1282). open carries the
+      # :open intent ('o') — its primary chord is enter/l, which would otherwise
       # front the menu with the unintuitive 'l'.
       r.register Verb::Definition.new(
         "issues.open", "Open issue", "View/edit the selected issue", Verb::Scope::Issues,
-        [Verb::Chord.new("enter"), Verb::Chord.new("l"), Verb::Chord.new("right")], mnemonic: 'o') { |ctx| ctx.issues_open; nil }
+        [Verb::Chord.new("enter"), Verb::Chord.new("l"), Verb::Chord.new("right")], intent: :open) { |ctx| ctx.issues_open; nil }
 
       r.register Verb::Definition.new(
         "issues.filter", "Filter issues", "Filter the list (severity:/status:/host:/free text)",
-        Verb::Scope::Issues, [Verb::Chord.new("/")]) { |ctx| ctx.issues_query; nil }
+        Verb::Scope::Issues, [Verb::Chord.new("/")], intent: :filter) { |ctx| ctx.issues_query; nil }
 
       r.register Verb::Definition.new(
         "issues.new", "New issue", "Create a blank issue", Verb::Scope::Issues,
-        [Verb::Chord.new("n")]) { |ctx| ctx.issues_new; nil }
+        [Verb::Chord.new("n")], intent: :new) { |ctx| ctx.issues_new; nil }
 
       # The BATCH gate: "is there anything to act on", where anything = the marks if any are
       # set, else the cursor row. Equivalent to "a row is selected" when nothing is marked, so
@@ -45,12 +45,12 @@ module Gori
       # marked row, as `[severity] title (host)` lines.
       r.register Verb::Definition.new(
         "issues.copy-row", "Copy", "Copy the cursor row — or every marked row — as `[severity] title (host)` lines",
-        Verb::Scope::Issues, [Verb::Chord.new("y")], available: issues_targets, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
+        Verb::Scope::Issues, [Verb::Chord.new("y")], available: issues_targets, intent: :copy) { |ctx| ctx.read_copy; nil }
 
       r.register Verb::Definition.new(
         "issues.delete", "Delete issue", "Delete the selected issue (or every marked one)",
         Verb::Scope::Issues, [Verb::Chord.new("d")],
-        available: issues_targets, group: :danger) { |ctx| ctx.issues_delete; nil }
+        available: issues_targets, group: :danger, intent: :delete) { |ctx| ctx.issues_delete; nil }
 
       # ⇧X — the whole-tab wipe, in the fifth scope that has one. `history.clear`,
       # `probe.clear`, `authorize.clear` and `activity.clear` are the siblings (#899), `X` is
@@ -76,11 +76,11 @@ module Gori
       #
       # `Chord.new("x", shift: true)`, NOT `Chord.new("X")`: `Keybind.from_event` normalises a
       # typed capital to shift+lowercase, so the capital spelling never fires (`validate_chords!`
-      # raises on one at boot since #902). `menu_key` skips shift chords, hence the mnemonic.
+      # raises on one at boot since #902). `menu_key` skips shift chords, hence the intent.
       r.register Verb::Definition.new(
         "issues.clear", "Clear issues", "Delete ALL issues for this project (asks first)",
         Verb::Scope::Issues, [Verb::Chord.new("x", shift: true)],
-        mnemonic: 'X', group: :wipe) { |ctx| ctx.issues_clear; nil }
+        intent: :wipe, group: :wipe) { |ctx| ctx.issues_clear; nil }
 
       # Severity/status from the LIST, so re-triaging a set is one pass: mark five, pick
       # "False positive" once. Same ExecContext methods as the detail-scope pair below —
@@ -90,12 +90,12 @@ module Gori
       r.register Verb::Definition.new(
         "issues.set-severity", "Set severity", "Pick the severity for the selected/marked issues",
         Verb::Scope::Issues, [] of Verb::Chord,
-        available: issues_targets, mnemonic: 's') { |ctx| ctx.issue_set_severity; nil }
+        available: issues_targets, intent: :set_severity) { |ctx| ctx.issue_set_severity; nil }
 
       r.register Verb::Definition.new(
         "issues.set-status", "Set status", "Pick the triage status for the selected/marked issues",
         Verb::Scope::Issues, [] of Verb::Chord,
-        available: issues_targets, mnemonic: 'c') { |ctx| ctx.issue_set_status; nil }
+        available: issues_targets, intent: :set_status) { |ctx| ctx.issue_set_status; nil }
 
       # Scoring belongs on the SAME menu as severity, not three keys down inside the title
       # form: severity is what a cvss decides, so an operator reaching for one is reaching
@@ -105,7 +105,7 @@ module Gori
       r.register Verb::Definition.new(
         "issues.set-cvss", "Set CVSS", "Score the selected/marked issues (severity follows)",
         Verb::Scope::Issues, [] of Verb::Chord,
-        available: issues_targets, mnemonic: 'V') { |ctx| ctx.issue_set_cvss; nil }
+        available: issues_targets, intent: :set_cvss) { |ctx| ctx.issue_set_cvss; nil }
 
       # --- multi-select marks (the History list's gestures, #442) ---
       # Marks make the EXISTING space menu act on N issues — every batch verb above reads
@@ -122,16 +122,16 @@ module Gori
         "issues.mark-toggle", "Mark issue", "Mark/unmark this issue and step down — the space menu then acts on every marked issue",
         Verb::Scope::Issues, [Verb::Chord.new("t")],
         available: ->(ctx : Verb::ExecContext) { !ctx.selected_issue_id.nil? },
-        mnemonic: 't') { |ctx| ctx.issues_mark_toggle; nil }
+        intent: :mark) { |ctx| ctx.issues_mark_toggle; nil }
 
       # ⇧T, the list's Ctrl+A: mark everything the CURRENT filter shows, so `/ severity:high`
       # then ⇧T marks exactly those. The chord is Chord.new("t", shift: true), NOT
       # Chord.new("T") — Keybind.from_event normalises a typed capital to shift+lowercase, so
-      # a "T" chord would never fire; menu_key skips shift chords, hence the explicit mnemonic.
+      # a "T" chord would never fire; menu_key skips shift chords, hence the intent's lexicon letter.
       r.register Verb::Definition.new(
         "issues.mark-all", "Mark all (filtered)", "Mark every issue the current filter shows",
         Verb::Scope::Issues, [Verb::Chord.new("t", shift: true)],
-        mnemonic: 'T') { |ctx| ctx.issues_mark_all; nil }
+        intent: :mark_all) { |ctx| ctx.issues_mark_all; nil }
 
       # esc clears too (IssuesController#handle_body_key shadows issues.leave only while marks
       # are set) — that's the reflex; this is the discoverable form. Menu-only: 'N' is free in
@@ -140,7 +140,7 @@ module Gori
         "issues.mark-clear", "Clear marks", "Drop every mark (esc does the same)",
         Verb::Scope::Issues,
         available: ->(ctx : Verb::ExecContext) { ctx.marked_issue_count > 0 },
-        mnemonic: 'N') { |ctx| ctx.issues_mark_clear; nil }
+        intent: :mark_clear) { |ctx| ctx.issues_mark_clear; nil }
 
       # ⇧↑/⇧↓ extend a contiguous range from the anchor — the keyboard form of a GUI
       # shift+click, and free here: Keymap#lookup matches a Chord record EXACTLY, so
@@ -188,15 +188,15 @@ module Gori
       # power-shortcuts (one-step cycling); the pickers are the discoverable path.
       r.register Verb::Definition.new(
         "issue.set-severity", "Set severity", "Pick this issue's severity",
-        Verb::Scope::IssuesDetail, [] of Verb::Chord, mnemonic: 's') { |ctx| ctx.issue_set_severity; nil }
+        Verb::Scope::IssuesDetail, [] of Verb::Chord, intent: :set_severity) { |ctx| ctx.issue_set_severity; nil }
 
       r.register Verb::Definition.new(
         "issue.set-status", "Set status", "Pick this issue's triage status",
-        Verb::Scope::IssuesDetail, [] of Verb::Chord, mnemonic: 'c') { |ctx| ctx.issue_set_status; nil }
+        Verb::Scope::IssuesDetail, [] of Verb::Chord, intent: :set_status) { |ctx| ctx.issue_set_status; nil }
 
       r.register Verb::Definition.new(
         "issue.set-cvss", "Set CVSS", "Score this issue with the CVSS calculator (severity follows)",
-        Verb::Scope::IssuesDetail, [] of Verb::Chord, mnemonic: 'V') { |ctx| ctx.issue_set_cvss; nil }
+        Verb::Scope::IssuesDetail, [] of Verb::Chord, intent: :set_cvss) { |ctx| ctx.issue_set_cvss; nil }
 
       # Menu-only. They sat on `]` / `[` — the Global prev/next-tab chords — hidden and unhinted,
       # so `]` inside an issue raised its severity where everywhere else it moved a tab.
@@ -222,11 +222,11 @@ module Gori
       r.register Verb::Definition.new(
         "issue.copy", "Copy", "Copy the selected notes text, or the whole notes if nothing is selected, to the clipboard",
         Verb::Scope::IssuesDetail, [Verb::Chord.new("y"), Verb::Chord.new("y", ctrl: true)],
-        available: in_issues_notes_copy, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
+        available: in_issues_notes_copy, intent: :copy) { |ctx| ctx.read_copy; nil }
 
       r.register Verb::Definition.new(
         "issue.edit-notes", "Edit notes", "Edit the issue notes inline (i/↵/e)", Verb::Scope::IssuesDetail,
-        [Verb::Chord.new("e")]) { |ctx| ctx.issue_edit_notes; nil }
+        [Verb::Chord.new("e")], intent: :edit) { |ctx| ctx.issue_edit_notes; nil }
 
       # There is no ⇧←/→ h-scroll pair here any more: the notes pane soft-wraps, so nothing
       # sits off to the side to scroll to, and `IssuesController#handle_notes_read_key` had
@@ -234,7 +234,7 @@ module Gori
 
       r.register Verb::Definition.new(
         "issue.delete", "Delete issue", "Delete this issue", Verb::Scope::IssuesDetail,
-        [Verb::Chord.new("d")], group: :danger) { |ctx| ctx.issues_delete; nil }
+        [Verb::Chord.new("d")], group: :danger, intent: :delete) { |ctx| ctx.issues_delete; nil }
 
       r.register Verb::Definition.new(
         "issue.status-up", "Advance status", "Cycle triage status forward (open→confirmed→fp→resolved)",
@@ -360,12 +360,12 @@ module Gori
       #
       # The chord is Chord.new("e", shift: true), NOT Chord.new("E"): Keybind.from_event
       # normalises a typed capital to shift + lowercase, so an "E" chord would never fire.
-      # menu_key skips shift chords, hence the explicit mnemonic — the same pairing
+      # menu_key skips shift chords, hence the intent's lexicon letter — the same pairing
       # notes.send-to uses for 'S'.
       r.register Verb::Definition.new(
         "issues.export-key", "Export issues…", "Write all issues to a file (asks for the format, then the path)",
         Verb::Scope::Issues, [Verb::Chord.new("e", shift: true)],
-        mnemonic: 'E') { |ctx| ctx.issues_export_pick; nil }
+        intent: :export) { |ctx| ctx.issues_export_pick; nil }
     end
   end
 end

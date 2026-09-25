@@ -8,11 +8,11 @@ module Gori
       r.register Verb::Definition.new(
         "evidence.open", "Open frozen evidence", "Inspect the immutable request and response",
         Verb::Scope::Evidence, [Verb::Chord.new("enter"), Verb::Chord.new("l"), Verb::Chord.new("right")],
-        available: selected, mnemonic: 'o', group: :view) { |ctx| ctx.evidence_open; nil }
+        available: selected, intent: :open, group: :view) { |ctx| ctx.evidence_open; nil }
 
       r.register Verb::Definition.new(
         "evidence.filter", "Filter evidence", "Filter by issue, host, method, HTTP status, confirmation, source or date",
-        Verb::Scope::Evidence, [Verb::Chord.new("/")], group: :view) { |ctx| ctx.evidence_filter; nil }
+        Verb::Scope::Evidence, [Verb::Chord.new("/")], group: :view, intent: :filter) { |ctx| ctx.evidence_filter; nil }
 
       r.register Verb::Definition.new(
         "evidence.compare", "Compare snapshots", "Pin this snapshot as A, then choose B and compare their frozen bytes",
@@ -38,11 +38,11 @@ module Gori
       r.register Verb::Definition.new(
         "evidence.copy", "Copy", "Copy the frozen request and response as text, through the project's body-redaction policy",
         Verb::Scope::Evidence, [Verb::Chord.new("y")],
-        available: selected, mnemonic: 'y', group: :copy) { |ctx| ctx.evidence_copy; nil }
+        available: selected, intent: :copy, group: :copy) { |ctx| ctx.evidence_copy; nil }
 
       r.register Verb::Definition.new(
         "evidence.copy-as", "Copy as…", "Copy the frozen request/response through the project's body-redaction policy",
-        Verb::Scope::Evidence, available: selected, mnemonic: 'Y', group: :copy) { |ctx| ctx.copy_as_open; nil }
+        Verb::Scope::Evidence, available: selected, intent: :copy_as, group: :copy) { |ctx| ctx.copy_as_open; nil }
 
       # `⇧E`, not `e`: `e` is Edit in every scope that has something to edit, and the
       # archive has nothing — the same pairing `issues.export-key` and `notes.export` use
@@ -51,7 +51,7 @@ module Gori
       r.register Verb::Definition.new(
         "evidence.export", "Export evidence", "Write a redacted JSON copy to a file",
         Verb::Scope::Evidence, [Verb::Chord.new("e", shift: true)], available: selected,
-        mnemonic: 'E', group: :copy) { |ctx| ctx.evidence_export; nil }
+        intent: :export, group: :copy) { |ctx| ctx.evidence_export; nil }
 
       r.register Verb::Definition.new(
         "evidence.repeater", "Duplicate into Repeater", "Create an editable Repeater tab from the frozen request",
@@ -76,7 +76,7 @@ module Gori
       r.register Verb::Definition.new(
         "evidence.delete", "Delete evidence", "Delete this immutable copy after confirming every affected Issue link",
         Verb::Scope::Evidence, [Verb::Chord.new("d")], available: selected,
-        group: :danger) { |ctx| ctx.evidence_delete; nil }
+        group: :danger, intent: :delete) { |ctx| ctx.evidence_delete; nil }
     end
   end
 end

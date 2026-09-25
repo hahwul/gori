@@ -16,7 +16,7 @@ module Gori
         "activity.open", "Open event target",
         "Jump to the flow or session the selected event names",
         Verb::Scope::ProjectActivity, [Verb::Chord.new("o"), Verb::Chord.new("enter")],
-        available: have_row) { |ctx| ctx.activity_open; nil }
+        available: have_row, intent: :open) { |ctx| ctx.activity_open; nil }
 
       r.register Verb::Definition.new(
         "activity.filter-source", "Filter by source",
@@ -43,12 +43,12 @@ module Gori
         "activity.copy", "Copy event",
         "Copy the selected event as one line: time, level, source, actor and message",
         Verb::Scope::ProjectActivity, [Verb::Chord.new("y")],
-        available: have_row, mnemonic: 'y') { |ctx| ctx.activity_copy; nil }
+        available: have_row, intent: :copy) { |ctx| ctx.activity_copy; nil }
 
       r.register Verb::Definition.new(
         "activity.find", "Filter events",
         "Filter the feed by text across source, kind and message",
-        Verb::Scope::ProjectActivity, [Verb::Chord.new("/")], mnemonic: 'f') { |ctx| ctx.activity_find; nil }
+        Verb::Scope::ProjectActivity, [Verb::Chord.new("/")], intent: :filter) { |ctx| ctx.activity_find; nil }
 
       # MENU-ONLY, no direct chord. `s` and `l` each cycle back to "all" and `/`+esc drops the
       # text filter, so every narrowing can already be released where it was set. Kept as an
@@ -90,7 +90,7 @@ module Gori
         # typed capital to shift+lowercase, so the capital spelling never fires (the same note
         # `comparer.cr`, `authorize.cr`, `core.cr`, `diff.cr` and `issues.cr` all carry).
         Verb::Scope::ProjectActivity, [Verb::Chord.new("x", shift: true)],
-        mnemonic: 'X', group: :wipe) { |ctx| ctx.activity_clear; nil }
+        intent: :wipe, group: :wipe) { |ctx| ctx.activity_clear; nil }
 
       # MENU-ONLY since the key audit's F6. Bare `r` means "send this to the Repeater" in the
       # five scopes that have a flow to send, and a FEED that needs a refresh key probably
@@ -99,7 +99,7 @@ module Gori
       r.register Verb::Definition.new(
         "activity.refresh", "Refresh feed",
         "Re-read the event feed now",
-        Verb::Scope::ProjectActivity, mnemonic: 'r') { |ctx| ctx.activity_refresh; nil }
+        Verb::Scope::ProjectActivity, intent: :run) { |ctx| ctx.activity_refresh; nil }
     end
   end
 end

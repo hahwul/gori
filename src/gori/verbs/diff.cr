@@ -37,7 +37,7 @@ module Gori
       # `space`), and `w` there is Close in every workbench menu in the app.
       r.register Verb::Definition.new(
         "diff.swap", "Swap A ⇄ B", "Swap the two snapshots — a diff reads before → after",
-        Verb::Scope::Diff, [Verb::Chord.new("w")], mnemonic: 's') { |ctx| ctx.diff_swap; nil }
+        Verb::Scope::Diff, [Verb::Chord.new("w")], intent: :swap) { |ctx| ctx.diff_swap; nil }
 
       # `^R`, the Run chord in the nine other scopes that have one — Authorize, Body,
       # Discover, Fuzzer, the History detail, Miner, OAST, Repeater and Sequencer. This was
@@ -46,7 +46,7 @@ module Gori
       # spelled out because a ctrl chord derives no menu letter.
       r.register Verb::Definition.new(
         "diff.run", "Run the diff", "Re-read both projects and rebuild the report",
-        Verb::Scope::Diff, [Verb::Chord.new("r", ctrl: true)], mnemonic: 'r') { |ctx| ctx.diff_run; nil }
+        Verb::Scope::Diff, [Verb::Chord.new("r", ctrl: true)], intent: :run) { |ctx| ctx.diff_run; nil }
 
       # A lens, not a filter bar: the five verdicts are a closed set, so a ring is the whole
       # vocabulary. The COUNTS on the header always cover all five whatever the lens shows.
@@ -67,7 +67,7 @@ module Gori
       rows_shown = ->(ctx : Verb::ExecContext) { ctx.diff_rows_shown? }
       r.register Verb::Definition.new(
         "diff.copy", "Copy", "Copy the selected row — endpoint, verdict, and what moved — as one line",
-        Verb::Scope::Diff, [Verb::Chord.new("y")], available: rows_shown, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
+        Verb::Scope::Diff, [Verb::Chord.new("y")], available: rows_shown, intent: :copy) { |ctx| ctx.read_copy; nil }
       # `↵`/`→`, and an explicit 'o' menu letter where the dropped chord used to derive it.
       # `o` is the `↵` ALIAS in the four scopes that keep it ("open this row's own detail");
       # here it opened a DIFFERENT tab, which is the split the key audit's F2 closes.

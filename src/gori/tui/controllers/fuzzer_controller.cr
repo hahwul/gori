@@ -233,14 +233,14 @@ module Gori::Tui
         # "fuzz results already saved as run #N" refusal unreachable through the binding.
         # Named off the same predicate the gate reads, not a second copy of its conditions.
         save = v.results_saveable? ? " · #{save_key} save" : ""
-        # `space → o sort`, not `{fuzz.sort} sort`. `fuzz.sort` is MENU-ONLY by decision
-        # (verbs/history.cr, key audit F2: a sort order is set once and read for the rest of
-        # the run, which is not worth a bare letter), so it carries a `mnemonic:` and no
-        # chord — and `Hotkeys.expand` leaves a token it cannot resolve ALONE. This line
+        # `{space:fuzz.sort} sort`, not `{fuzz.sort} sort`. `fuzz.sort` is MENU-ONLY by
+        # decision (verbs/history.cr, key audit F2: a sort order is set once and read for the
+        # rest of the run, which is not worth a bare letter), so it carries a `mnemonic:` and
+        # no chord — and `Hotkeys.expand` leaves a token it cannot resolve ALONE. This line
         # printed the literal `{fuzz.sort} sort` into the footer, braces and all, and the one
-        # key it named answered "nothing bound here". `space → …` is the spelling the
-        # Rewriter already uses for its own menu-only action.
-        "↑/↓ select · ↵ detail · space → o sort · #{keys("{fuzz.matched} matched · {fuzz.dist} dist")}#{save} · " \
+        # key it named answered "nothing bound here". The `space:` form spells the menu path
+        # from the registry, as the Rewriter does for its own menu-only action.
+        "↑/↓ select · ↵ detail · #{keys("{space:fuzz.sort} sort · {fuzz.matched} matched · {fuzz.dist} dist")}#{save} · " \
         "#{run} run · #{stop} stop · space cmds · esc sub-tabs"
       when :detail then "↑/↓ move · #{read_common} · ←/→ pane · ^F find · esc back"
       else              "↹/esc sub-tabs"

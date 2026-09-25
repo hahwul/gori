@@ -1782,8 +1782,9 @@ module Gori::Tui
       end
 
       # "space" opens the focused area's action menu (helix leader). Placed AFTER the
-      # scoped keymap so any area that already binds space wins — Sitemap's space
-      # toggles a tree node (sitemap.toggle). The Project SCOPE pane instead DEFERS
+      # scoped keymap so any area that already binds space wins — none does today:
+      # Sitemap's expand/collapse (sitemap.toggle) is `enter` alone, which is what leaves
+      # its space free for the menu. The Project SCOPE pane instead DEFERS
       # space to here (its lens toggle is the menu-only scope.lens-toggle verb). Only
       # reached in NAVIGABLE contexts: text editors (Repeater request/target, Notes,
       # Project desc, the QL "/" bar, Issues notes, Intercept edit) swallow keys
@@ -1840,18 +1841,12 @@ module Gori::Tui
     # rather than instead of it is what keeps the tab's own vocabulary alive in its editor —
     # `{repeater.send-and-…}`, the Notes sub-tab keys, the Global breath keys all still
     # resolve behind it.
+    #
+    # A link also stands down when its verb's chord is not live in the focused section
+    # (`Definition#chord_sections`) — the Repeater's bare `p` in the request pane. The walk
+    # itself is `Keymap#resolve`, pure, so the pane gate is spec'd without a terminal.
     private def resolve_verb_id(chord : Verb::Chord, scope : Verb::Scope) : String?
-      if editor_pane? && (id = available_verb_id(chord, Verb::Scope::Editor))
-        return id
-      end
-      available_verb_id(chord, scope) || available_verb_id(chord, Verb::Scope::Global)
-    end
-
-    # One link of that chain: the id bound in EXACTLY `scope`, or nil when nothing is bound
-    # there OR what is bound is gated off right now.
-    private def available_verb_id(chord : Verb::Chord, scope : Verb::Scope) : String?
-      return nil unless id = @keymap.lookup_in(chord, scope)
-      @session.registry[id].available?(self) ? id : nil
+      @keymap.resolve(chord, scope, @session.registry, self)
     end
 
     # --- Overlay seam (see overlay.cr) — generic dispatch for the ONE @active_overlay,
@@ -2680,6 +2675,16 @@ module Gori::Tui
       ActionContext.capture(@session.registry, detail: @overlay.detail?, focus: @focus,
         scope: ctl.try(&.command_scope) || Verb::Scope::Body,
         pane_section: ctl.try(&.command_section) || :common, banner: space_menu_banner)
+    end
+
+    # The section that holds focus: what a verb's `chord_sections` is checked against. The
+    # same rule `Space` and `Ctrl-P` list actions from (`ActionContext.capture`), so a pane
+    # gate and the menu can never disagree about which pane is focused.
+    def focused_section : Symbol
+      ctl = @tabs[@active_tab]?
+      ActionContext.capture(@session.registry, detail: @overlay.detail?, focus: @focus,
+        scope: ctl.try(&.command_scope) || Verb::Scope::Body,
+        pane_section: ctl.try(&.command_section) || :common, banner: nil).section
     end
 
     # The status strip's glyph — spinner / ✓ / ✗ — comes from the KIND the producer passed to
@@ -3891,7 +3896,7 @@ module Gori::Tui
         # QL plus this surface's own `tag:`, which never reaches the parser (FilterAst.partition
         # pulls it out first) and so cannot come from QL's table.
         HelpPopupOverlay.query_reference("SITEMAP FILTER",
-          HelpView.query_rows(["tag"] + QL::FIELDS, SitemapView::QL_HELP))
+          HelpView.query_rows(["tag"] + QL::FIELDS, SitemapView.ql_help(@session.registry)))
       when :issues
         # Five fields, none of them QL's. Without this arm `?` fell through to the generic
         # reference below — the full QL vocabulary, of which `Issues::Filter` implements two

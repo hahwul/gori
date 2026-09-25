@@ -993,9 +993,11 @@ module Gori::Tui
         edited = !edit_id.nil?
         verb = edited ? "updated" : "added"
         # Confirm the write AND surface that the lens is still off (the common "I added
-        # a rule but nothing filtered" confusion — the space menu's 's' enables it).
+        # a rule but nothing filtered" confusion — the space menu's Toggle scope lens enables it).
         msg = "scope rule #{verb} — #{n} rule#{n == 1 ? "" : "s"}"
-        msg += " · space → s to enable the lens" unless @host.session.scope.enabled? || edited
+        unless @host.session.scope.enabled? || edited
+          msg += Hotkeys.expand_menu_paths(@host.session.registry, " · {space:scope.lens-toggle} to enable the lens")
+        end
         # An EDIT can black-hole the proxy too (flip the last include to an exclude), so
         # this path re-asks the same question the delete path does.
         msg += scope_blackhole_note

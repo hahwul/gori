@@ -8,6 +8,7 @@ require "./traffic_empty_state"
 require "../settings"
 require "../store"
 require "../ql"
+require "../hotkeys"
 require "../scope"
 require "../sitemap" # the host→path tree model + builder (URI normalisation lives there now)
 require "../js_refs"
@@ -72,9 +73,15 @@ module Gori::Tui
     # The editing bar's label — a constant because `render_query_popup` lines the dropdown up
     # under the token, which means knowing how far the query text is indented.
     QUERY_PREFIX = "filter › "
+
     # QL's help plus this surface's own field, which the shared table cannot know about because
-    # `tag:` never reaches the parser (`FilterAst.partition` pulls it out first).
-    QL_HELP = ->(f : String) { f == "tag" ? "path memo on this node — set with space → T" : QL.field_help(f) }
+    # `tag:` never reaches the parser (`FilterAst.partition` pulls it out first). The tag line
+    # names the menu row that sets it through the registry: it once said `T` while Tag path
+    # was `m` (#1274).
+    def self.ql_help(registry : Verb::Registry?) : Proc(String, String?)
+      tag = Hotkeys.expand_menu_paths(registry, "path memo on this node — set with {space:sitemap.tag}")
+      ->(f : String) : String? { f == "tag" ? tag : QL.field_help(f) }
+    end
 
     # Right-aligned column widths: path memo sits left of the method/aside cluster.
     TAG_COL_W     = 16
@@ -87,6 +94,7 @@ module Gori::Tui
     getter? loaded : Bool
 
     def initialize
+      @ql_help = SitemapView.ql_help(nil)
       @hosts = [] of Node
       @selected = 0
       @scroll = 0
@@ -150,6 +158,11 @@ module Gori::Tui
     # (the scope chip). Mirrors HistoryController wiring the same Scope into its view.
     def set_scope(scope : Scope) : Nil
       @scope = scope
+    end
+
+    # The registry the query dropdown reads menu letters from (`SitemapView.ql_help`).
+    def set_registry(registry : Verb::Registry) : Nil
+      @ql_help = SitemapView.ql_help(registry)
     end
 
     def set_hide_static(hide : Bool) : Nil
@@ -1166,7 +1179,7 @@ module Gori::Tui
       # `base + token.start` stops being the token's screen column on exactly the long queries
       # where precision would matter — the card would drift right of what it completes and then
       # clamp. A fixed anchor is always adjacent to the bar and never lies.
-      @popup.render(screen, rect.x + 1 + QUERY_PREFIX.size, top - 1, bounds, QL_HELP)
+      @popup.render(screen, rect.x + 1 + QUERY_PREFIX.size, top - 1, bounds, @ql_help)
     end
 
     private def render_tree_body(screen : Screen, rect : Rect, focused : Bool = true, *,

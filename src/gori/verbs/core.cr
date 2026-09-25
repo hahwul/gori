@@ -177,29 +177,29 @@ module Gori
         # Menu-only: the Global `s` (scope.toggle-lens) reaches this pane already, and the ⇧S
         # twin was a second key for the same flip in the same tab.
         Verb::Scope::Body, [] of Verb::Chord,
-        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :history }, mnemonic: 's', group: :scope) { |ctx| ctx.scope_toggle_lens; nil }
+        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :history }, intent: :scope_lens, group: :scope) { |ctx| ctx.scope_toggle_lens; nil }
 
       # --- Project tab SCOPE pane: the rule-list action menu (space) + its a/e/d keys.
       # Project scope is unique to that pane, so no current_tab gate is needed. The lens
-      # toggle is menu-only (mnemonic 's') — it REPLACED the old direct space=toggle, which
+      # toggle is menu-only (menu 's') — it REPLACED the old direct space=toggle, which
       # now opens this menu instead; add/edit/delete keep their a/e/d direct chords.
       scope_rule = ->(ctx : Verb::ExecContext) { ctx.scope_rule_selected? }
       r.register Verb::Definition.new(
         "scope.lens-toggle", "Toggle scope lens", "Filter History/Sitemap to in-scope flows on/off",
-        Verb::Scope::Project, mnemonic: 's') { |ctx| ctx.scope_toggle_lens; nil }
+        Verb::Scope::Project, intent: :scope_lens) { |ctx| ctx.scope_toggle_lens; nil }
       r.register Verb::Definition.new(
         "scope.add-rule", "Add scope rule", "Open the popup to add an include/exclude rule",
-        Verb::Scope::Project, [Verb::Chord.new("a")]) { |ctx| ctx.scope_add_rule; nil }
+        Verb::Scope::Project, [Verb::Chord.new("a")], intent: :add) { |ctx| ctx.scope_add_rule; nil }
       r.register Verb::Definition.new(
         "scope.copy-rule", "Copy", "Copy the selected scope rule as `kind match-type pattern`",
-        Verb::Scope::Project, [Verb::Chord.new("y")], available: scope_rule) { |ctx| ctx.read_copy; nil }
+        Verb::Scope::Project, [Verb::Chord.new("y")], available: scope_rule, intent: :copy) { |ctx| ctx.read_copy; nil }
       r.register Verb::Definition.new(
         "scope.edit-rule", "Edit scope rule", "Open the popup to edit the selected scope rule",
-        Verb::Scope::Project, [Verb::Chord.new("e")], available: scope_rule) { |ctx| ctx.scope_edit_rule; nil }
+        Verb::Scope::Project, [Verb::Chord.new("e")], available: scope_rule, intent: :edit) { |ctx| ctx.scope_edit_rule; nil }
       r.register Verb::Definition.new(
         "scope.delete-rule", "Delete scope rule", "Remove the selected scope rule",
         Verb::Scope::Project, [Verb::Chord.new("d")], available: scope_rule,
-        group: :danger) { |ctx| ctx.scope_delete_rule; nil }
+        group: :danger, intent: :delete) { |ctx| ctx.scope_delete_rule; nil }
 
       # The single smart Copy (see repeater.copy in verbs/history.cr) — copy-all is gone.
       # Was `hidden: true` (the menu only ever showed "Copy description"); now that
@@ -231,7 +231,7 @@ module Gori
         # ctrl-only because `ProjectController#handle_desc_read` claimed the letter itself and
         # the chord could never fire; that arm is gone (KEY_AUDIT §2e).
         Verb::Scope::ProjectDesc, [Verb::Chord.new("y"), Verb::Chord.new("y", ctrl: true)],
-        available: in_project_desc_copy, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
+        available: in_project_desc_copy, intent: :copy) { |ctx| ctx.read_copy; nil }
 
       # Match & Replace now lives in the Rewriter tab; this palette entry jumps there
       # (kept under the familiar "Match & Replace" name so a search still finds it).
@@ -257,7 +257,7 @@ module Gori
       r.register Verb::Definition.new(
         "intercept.drop", "Drop held", "Drop the marked held messages — or the selected one",
         Verb::Scope::Intercept, [Verb::Chord.new("d")],
-        available: intercept_selected, mnemonic: 'd') { |ctx| ctx.intercept_drop; nil }
+        available: intercept_selected, intent: :delete) { |ctx| ctx.intercept_drop; nil }
       # Deliberately NOT mark-aware: ⇧F stays "the whole queue, marks or not", so the pair
       # reads f = the target set / ⇧F = everything.
       r.register Verb::Definition.new(
@@ -273,15 +273,15 @@ module Gori
       r.register Verb::Definition.new(
         "intercept.mark-toggle", "Mark held", "Mark/unmark this held message and step down — forward/drop then act on every marked one",
         Verb::Scope::Intercept, [Verb::Chord.new("t")],
-        available: intercept_selected, mnemonic: 't') { |ctx| ctx.intercept_mark_toggle; nil }
+        available: intercept_selected, intent: :mark) { |ctx| ctx.intercept_mark_toggle; nil }
 
       # ⇧T is the queue's Ctrl+A. Chord.new("t", shift: true), NOT Chord.new("T") —
       # Keybind.from_event normalises a typed capital to shift+lowercase; menu_key skips shift
-      # chords, hence the explicit mnemonic (same reasoning as history.mark-all).
+      # chords, hence the intent's lexicon letter (same reasoning as history.mark-all).
       r.register Verb::Definition.new(
         "intercept.mark-all", "Mark all held", "Mark every message currently held in the queue",
         Verb::Scope::Intercept, [Verb::Chord.new("t", shift: true)],
-        available: intercept_selected, mnemonic: 'T') { |ctx| ctx.intercept_mark_all; nil }
+        available: intercept_selected, intent: :mark_all) { |ctx| ctx.intercept_mark_all; nil }
 
       # esc clears too (InterceptController#queue_escape shadows the pop-to-tab-bar only while
       # marks are set) — that's the reflex; this is the discoverable form.
@@ -289,7 +289,7 @@ module Gori
         "intercept.mark-clear", "Clear marks", "Drop every mark (esc does the same)",
         Verb::Scope::Intercept,
         available: ->(ctx : Verb::ExecContext) { ctx.marked_intercept_count > 0 },
-        mnemonic: 'N') { |ctx| ctx.intercept_mark_clear; nil }
+        intent: :mark_clear) { |ctx| ctx.intercept_mark_clear; nil }
 
       # ⇧↑/⇧↓ extend a contiguous range from the anchor — the keyboard form of a GUI
       # shift+click. These took ⇧↑/⇧↓ over from the read-only preview's vertical scroll, which
@@ -313,7 +313,7 @@ module Gori
         Verb::Scope::Intercept, [Verb::Chord.new("c")]) { |ctx| ctx.intercept_cycle_direction; nil }
       r.register Verb::Definition.new(
         "intercept.filter", "Catch condition", "Only hold messages matching a query (host: method: path: status: scheme:)",
-        Verb::Scope::Intercept, [Verb::Chord.new("/")]) { |ctx| ctx.intercept_query; nil }
+        Verb::Scope::Intercept, [Verb::Chord.new("/")], intent: :filter) { |ctx| ctx.intercept_query; nil }
 
       # Tab/Shift-Tab are the focus ring (handled directly in the Runner); these
       # bracket chords remain a from-anywhere shortcut to cycle tabs.

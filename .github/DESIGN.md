@@ -2679,7 +2679,8 @@ read-only response, where Unicode escape display takes priority; the request edi
 resolves `u` in the leading Editor scope to `editor.undo`.
 
 What the keyset deliberately leaves alone: the enable/disable `x` on the four rule lists (that
-`x` is a state change, not a selection — KEY_AUDIT F4), and `intercept.select-line`, which
+`x` is a state change, not a selection — KEY_AUDIT F4; since the entry below, all four toggles
+are `t` and there is no such `x`), and `intercept.select-line`, which
 ships keyless because the Intercept queue spends nearly every letter. A keyset respells keys;
 it does not hand one to a pane whose author decided against it.
 
@@ -3655,6 +3656,74 @@ overwrites or reaches out off the four letters:
 
 Whether the fallback stays and `h`/`j`/`k`/`l` stop being menu letters altogether (Link is `k`
 on six tabs) is settled after the grouped menu lands, when most cards fit one column.
+
+### 2026-09-25: a pane-local key is declared on the verb, not hidden in its gate
+
+Refines: the R1 guard entry above. #1274 WP2 #3, #4, #13.
+
+The Repeater's bare `p` (pretty bodies) and `⇧D` (diff) and the Fuzzer's `v` (distribution
+sidebar) were bound tab-wide, so they fired in the request and template panes, whose menus
+spell the same letters for pretty-print-request, the decoder chain and clear-selection. An
+`available:` lambda could have hidden the key there, but the guard cannot read a lambda, and
+the palette would have lost the row as well.
+
+- **`Definition#chord_sections`** names the sections (the controller's `command_section`) in
+  which the verb's chords fire; nil means the whole scope. It gates the KEY only: the palette
+  and the space menu still follow `available?` and `section`.
+- **Out of its sections the press walks on**, like an unavailable verb (`Keymap#resolve`, the
+  scope chain `Runner#resolve_verb_id` now calls). So a gate on a letter Global binds would reach
+  capture, intercept or the lens. The R1 guard models that walk, and a gated key is no clash
+  for a menu row drawn only in other sections.
+- `ExecContext#focused_section` is the value it is checked against, and the same one the
+  space menu renders for.
+
+A later R1 exception whose two meanings live in different panes of one tab can take this
+instead of an allowlist line.
+
+### 2026-09-25: a menu letter in UI text is read from the registry
+
+Refines: the two entries above. #1274 WP3/WP8.
+
+Help's verb-id rows resolved a chord through the keymap, but a menu-only verb has no chord, so
+the row printed its hand-typed `space → X` unchecked — and three had drifted (Tag subtab `a`
+for `t`, gRPC reframe `F` for `R`, and a row naming `oast.promote`, which never existed). The
+same literal sat in toasts and hint strips, and in the Sitemap filter's `tag:` help (`T` for
+`m`).
+
+- **`Hotkeys.menu_path` is the one place a menu path is spelled.** A Help row whose verb has
+  no chord prints it; hint text writes `{space:verb.id}`, which `Hotkeys.expand` resolves next
+  to `{verb.id}`. When the menu grows a second level, that function is what changes.
+- **No registry never prints the token.** It reads "the space menu" instead — the
+  `{fuzz.sort}` footer bug in a new shape is what this rules out.
+- **`spec/verb/hint_token_expands_spec.cr` scans `src/gori`** for a literal `space → <key>`
+  outside comments, and every `{space:…}` token must name a verb with a menu row. A row named
+  by its TITLE ("space → Mine parameters") names no letter and is left alone.
+
+### 2026-09-25: a recurring intent spells its menu letter once, in a lexicon
+
+Refines: the 2026-09-12 bare-key table. #1274.
+
+That table settled bare letters by question, but the space menu's letters were still chosen row
+by row, and they drifted the same way: seven list filters said `f` in the menu while their key
+was `/`. A verb now declares `intent:` and `Verb::Lexicon` supplies the letter, so the grammar
+holds by construction rather than by review — a verb with an intent cannot also spell a
+`mnemonic:`. 288 of the 466 menu rows declare one; 277 of them were already on the letter.
+
+- **Two tiers.** A *reserved* letter (`/` `d` `x` `y` `Y` `S` `t` `T` `N` `X`, and the strip's
+  own actions) is spent on nothing else anywhere in a scope that has the intent. A *preferred*
+  letter is the intent's where it exists and free for a local row elsewhere; reserving all
+  thirty-odd app-wide would leave a dozen letters for the rows that are genuinely one tab's.
+- **Boot refuses what has no exceptions** (`Registry#validate_intents!`): an unknown intent, an
+  intent beside a mnemonic, a menu `X` on anything but a `:wipe` verb in group `:wipe`, and a
+  pane verb wearing one of the strip's nine (`n w d e t f / T N`) on a tab that has a strip —
+  even a strip that lacks that action, since the nine read the same on all nine strips.
+- **The spec holds what needs judgement** (`spec/verb/lexicon_spec.cr`): the reserved sweep, and
+  a menu verb whose id names an intent (`…filter`, `…copy`, `…delete`) must declare it, so a new
+  row cannot opt out silently. Both keep exact-row allowlists that fail once an entry is stale.
+- **An intent on one tab is not an entry**, and some recurring rows stay untagged until another
+  decision lands: Link `k` and add-host `h` (the `h`/`j`/`k`/`l` decision), go to source and
+  Probe's open, History/Detail delete `D`, file-as-issue on Probe `p` and Evidence/Diff `i`
+  (Diff's `a` is pick A), Miner's filter `F` (its strip owns `/`), Notes' find `s`.
 
 ### 2026-09-25: the palette's typed search finds the focused tab's actions
 

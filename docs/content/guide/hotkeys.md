@@ -32,6 +32,7 @@ Rules of thumb:
 - **Ctrl** is for actions that must work while typing (INS), and for run/stop on a workbench (`Ctrl-R` / `Ctrl-X`). It is not a general upgrade from bare.
 - **Shift** carries the whole-tab wipes. `⇧X` is `Clear` in every tab that has one (History, Probe, Authorize, Issues, and the Project ACTIVITY feed), with `X` as the space-menu letter beside it. The letter is `x` and not `c` because of what sits under the shift: bare `x` is bound in none of those five scopes, while bare `c` is live in all of them (`capture.toggle`, and `dismiss` on the Probe list), and a project wipe does not belong one shift above a key an operator presses all day. A destructive chord must also be **named where it can be read before it is pressed** (the Help sheet and the tab's own body hint, not the space menu alone), and it must ask first.
 - **`d` destroys.** Bare `d` deletes or dismisses the selected row in every scope that binds it — sixteen of them. The Repeater's response diff was the one exception, and it now sits on `⇧D` so the reflex never lands on a display toggle. Its space-menu letter is `⇧D` too: `d` is **Duplicate sub-tab** on all nine sub-tab strips (see [the space menu](#space-menu)), and that bucket is drawn in every pane, so the plain letter was no longer the diff toggle's to keep — which leaves the row and the keyboard spelling it the same way. A new pane action that is not a delete does not get `d`.
+- **A pane's own key answers only in that pane.** The Repeater's `p` (pretty bodies) and `⇧D` (diff) act in the response pane, and the Fuzzer's `v` (distribution sidebar) in RESULTS. In the request and template panes the space menu uses `p`, `D` and `v` for other actions (pretty-print the request, the decoder chain, clear the selection), so there the bare key does nothing, rather than something the menu did not teach.
 - **Copy is the worked example of that rule.** `y` copies in READ, and `Ctrl-Y` copies in **INS as well**, in every text box. In INS a bare `y` is a literal character, and typing it over a `Shift`+arrows selection *replaces* the selection, so the copy reflex needs a chord that survives typing. Both are the same verb (`*.copy`), so a rebind moves the READ letter and **`Ctrl-Y` stays where it is**: it is pinned, in every scope, including through an explicit unbind. Unbinding `y` is a statement about READ mode, and it must not quietly leave a text pane with no way at all to copy what you just selected.
 - **Every list that holds something worth copying binds `y`.** A pane that shows bytes, a row, or a line of record and answers nothing to `y` is a gap, not a design: the Intercept queue, the Evidence archive, the Project ACTIVITY feed and the OAST callback detail each had one and each now answers the letter. Where two copies live in one place and mean opposite things — OAST's list copies the payload gori *sent*, its detail copies what came *back* — only one can hold the chord (a scope has no focus dimension in the keymap), and the other keeps its space-menu letter.
 - **`/` filters the list you are looking at.** Every list long enough to scroll answers it, including the three rule lists that did not: Colormarker, Match & Replace and the Probe **RULES** sub-tab (~40 built-in rules across three sections). The bar is a **lens** — it hides rows, it never disables one — and `Esc` clears it. The one thing it changes is reordering: on the two lists where order decides which rule wins, a move is refused while a query is held, because a filtered list is not the order the rule engine holds.
@@ -208,7 +209,36 @@ Because the bucket rides along with every pane, its nine letters are **reserved 
 of those tabs**. A pane action that wanted one had to move: the rule is that the *pane* letter
 yields, since the strip's letter has to read the same on all nine strips. `Space` `W` marks a
 word in the Repeater/Fuzzer editors, `Space` `D` toggles the response diff, and the JWT and
-Cookie lens toggles moved to `m` (Mode — the Decoder's letter for the same gesture).
+Cookie lens toggles moved to `m` (Mode — the Decoder's letter for the same gesture). JWT and
+Cookie copy their OUTPUT with `C`, the Comparer switches between requests and responses with
+`m`, and Notes opens the note in `$EDITOR` with `o`. The rule holds on a strip that lacks the
+action too, and gori refuses to start if a pane row breaks it.
+
+### One intent, one letter
+
+An action that recurs across tabs has the same menu letter on every tab that has it. The
+letter comes from one table in the source (`Verb::Lexicon`), not from each row, so two tabs
+cannot drift apart on it:
+
+| Key | Action |
+|-----|--------|
+| `/` | Filter this list |
+| `d` | Delete or dismiss the selected row |
+| `x` · `v` | Select the line · clear the selection |
+| `y` · `Y` · `S` | Copy · Copy as… · Send selection to… |
+| `t` · `T` · `N` | Mark · mark all · clear marks (on a rule list, `t` enables/disables) |
+| `o` | Open the selected row (the `↵` alias) |
+| `a` · `e` | Add · edit; on most tabs `a` also files an issue |
+| `r` · `s` | Run, send or reload (the menu echo of `Ctrl-R`) · stop |
+| `E` | Export |
+| `K` | Clear the workbench input (asks first) |
+| `I` | Insert a `§` marker |
+| `X` | Wipe the tab (asks first), and nothing else |
+
+`/` `d` `x` `y` `Y` `S` `t` `T` `N` and `X` are **reserved**: on a tab that has the action, no
+other row wears the letter. The rest are the action's wherever it exists and free for a tab-local row where it
+does not. Rewriter and Colormarker's **Enable/disable everywhere** is `T` for this reason: `X`
+wipes.
 
 ## Editor Keysets {#editor-keysets}
 
@@ -232,7 +262,7 @@ So some vim spellings are deliberately **not** offered, each for a reason you ca
 - **`gg`, `dd`, `yy` and every other two-key sequence.** A gori chord is one keystroke. `g` alone is the top of the pane, and `y` with nothing selected already copies the whole pane — which is the useful half of what `yy` means.
 - **`:` commands, including `:42`.** A bare `:` is [reserved](#reserved-keys) for gori's own command line, so go-to-line stays `Ctrl-G` under both keysets.
 - **Delete.** There is no delete-line in a READ-mode pane to put on `dd` or `D`. Editing happens in INSERT.
-- **The enable/disable `x` on a rule list** (Colormarker, Probe rules, OAST providers, Rewriter). That `x` turns a rule on and off; it is not a selection, and a keyset does not move a state change onto `⇧V`.
+- **A rule list's enable/disable** (Colormarker, Probe rules, OAST providers, Rewriter), which is `t` on all four. It turns a rule on and off; it is not a selection, so no keyset moves it.
 - **The Intercept queue's select-line**, which ships keyless on purpose — that pane reaches it from the space menu, and a keyset respells keys rather than handing one to a pane whose author decided against it.
 
 ### The override order
@@ -334,7 +364,7 @@ An absent action uses the profile default. Unknown ids and unparseable chords ar
 - Only an action's **primary** chord is shown/edited; navigation aliases (e.g. the arrow-key duplicates of `j` / `k`) aren't listed.
 - Every surface that names a rebindable chord reads it from the effective keymap: the **command palette**, the **space menu**, the **Help** tab and its popup, the status-bar hint strips, and the empty-state cards. What stays literal is not a verb: the claimed `^P` / `^N` / `^W` / `^1-9` family (the sub-tab alias) and structural keys (`esc`, `↵`, arrows, `↹`).
 - Space-menu **mnemonic** letters are stable action identities (Helix-like); rebinding changes the *direct* chord, not the space-menu letter.
-- Where the **sub-tab strip** already binds a letter for an action, the menu spells that action with the same letter where it can: `f` lists and searches the sub-tabs, `t` marks a chip and `⇧T` marks the strip. Rename is the one it cannot match — the strip binds `r`, and `r` is `Run`/`Send` (the menu echo of `Ctrl-R`) in the Repeater, Fuzzer, Miner and Sequencer, where a rename does not get to displace it. One action must not have two spellings across the nine strips, so rename is **`e` on all of them** and the strip's `r` stays a raw chord. See [the space menu](#space-menu) for the whole table.
+- Where the **sub-tab strip** already binds a letter for an action, the menu spells that action with the same letter where it can: `f` lists and searches the sub-tabs and `⇧T` marks the whole strip. Marking a single chip is the strip's own `t`, which has no menu row. Rename is the one it cannot match — the strip binds `r`, and `r` is `Run`/`Send` (the menu echo of `Ctrl-R`) in the Repeater, Fuzzer, Miner and Sequencer, where a rename does not get to displace it. One action must not have two spellings across the nine strips, so rename is **`e` on all of them** and the strip's `r` stays a raw chord. See [the space menu](#space-menu) for the whole table.
 - The editor actions are rebindable individually, and as a set via [Editor keysets](#editor-keysets). What the rebind editor will not move is the handful whose chord a hardcoded guard answers first: `Esc` (back to READ), `Ctrl-Z`, `Ctrl-F` and `Ctrl-G`. They are listed in the Help sheet so you can read them, and a keyset can give them a second, bare spelling — which is how `vim-ish` reaches `u` and `/`.
 - Press **`?`** from a navigable context to jump to the **Help** tab (mitmproxy-style cheat-sheet).
 
