@@ -20,17 +20,10 @@ module Gori
       ])]
       private def self.cmd_session(args : Array(String)) : Nil
         case sub = args.first?
-        when "add"          then cmd_session_add(args[1..])
-        when "from-flow"    then cmd_session_from_flow(args[1..])
-        when "from-request" then cmd_session_from_request(args[1..])
-        when "edit"         then cmd_session_edit(args[1..])
-        when "rm", "delete" then cmd_session_rm(args[1..])
-        when "baseline"     then cmd_session_baseline(args[1..])
-        when "refresh"      then cmd_session_refresh(args[1..])
-        when "show"         then cmd_session_show(args[1..])
-        when "list", nil    then cmd_session_list(session_list_args(sub, args))
-        when "activate"     then refuse_session_activate(args[1]?)
+        when "list", nil then cmd_session_list(session_list_args(sub, args))
+        when "activate"  then refuse_session_activate(args[1]?)
         else
+          return if session_verb(sub, args[1..])
           if (s = sub) && s.starts_with?('-')
             cmd_session_list(args)
           else
@@ -39,6 +32,23 @@ module Gori
             exit 1
           end
         end
+      end
+
+      # The subcommands that take the rest of the arguments as they are. True when `sub` named
+      # one (and it ran).
+      private def self.session_verb(sub : String, rest : Array(String)) : Bool
+        case sub
+        when "add"          then cmd_session_add(rest)
+        when "from-flow"    then cmd_session_from_flow(rest)
+        when "from-request" then cmd_session_from_request(rest)
+        when "edit"         then cmd_session_edit(rest)
+        when "rm", "delete" then cmd_session_rm(rest)
+        when "baseline"     then cmd_session_baseline(rest)
+        when "refresh"      then cmd_session_refresh(rest)
+        when "show"         then cmd_session_show(rest)
+        else                     return false
+        end
+        true
       end
 
       private def self.session_list_args(sub : String?, args : Array(String)) : Array(String)
@@ -523,20 +533,26 @@ module Gori
           end
           abort "gori run session edit: a slot needs a name" if renamed.empty?
           check_refresh_ids(store, edit.refresh, "gori run session edit")
-          updated = current.copy_with(name: renamed,
-            set_headers: edit.set || current.set_headers,
-            remove_headers: edit.remove || current.remove_headers,
-            baseline: edit.baseline.nil? ? current.baseline? : edit.baseline == true,
-            rules: edit.rules || current.rules,
-            literal_headers: edit.set ? [] of String : current.literal_headers,
-            refresh: edit.refresh || current.refresh,
-            refresh_before: edit.refresh_before || current.refresh_before)
+          updated = session_edited(current, edit, renamed)
           abort "gori run session edit: the project could not be written — " \
                 "#{target.inspect} is unchanged" unless slots.update(target, updated)
           puts session_slot_row(updated, false)
         ensure
           store.close
         end
+      end
+
+      # `current` with every flag `edit` carries applied — a flag left out keeps its field.
+      private def self.session_edited(current : Gori::SessionSlot, edit : SlotEdit,
+                                      renamed : String) : Gori::SessionSlot
+        current.copy_with(name: renamed,
+          set_headers: edit.set || current.set_headers,
+          remove_headers: edit.remove || current.remove_headers,
+          baseline: edit.baseline.nil? ? current.baseline? : edit.baseline == true,
+          rules: edit.rules || current.rules,
+          literal_headers: edit.set ? [] of String : current.literal_headers,
+          refresh: edit.refresh || current.refresh,
+          refresh_before: edit.refresh_before || current.refresh_before)
       end
 
       private def self.cmd_session_rm(args : Array(String)) : Nil

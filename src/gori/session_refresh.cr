@@ -401,64 +401,73 @@ module Gori
 
       private def execute(slot : SessionSlot, outbound : Outbound, manual : Bool) : Outcome
         total = slot.refresh.size
-        fail = ->(n : Int32?, label : String?, reason : String, status : Int32?, flows : Array(Int64)) {
-          Outcome.new(slot.name, false, manual, total, n, label, status, reason, [] of String, flows)
-        }
         flows = [] of Int64
         if total == 0
-          return fail.call(nil, nil, "the slot has no refresh steps — add a Repeater session to it", nil, flows)
+          return failed(slot, manual, nil, nil, "the slot has no refresh steps — add a Repeater session to it", nil, flows)
         end
         watched = watched_times(slot)
         slot.refresh.each_with_index do |id, i|
-          n = i + 1
-          if id < 0
-            return fail.call(n, "repeater ##{-id} (deleted)",
-              "its Repeater session was deleted; remove the step from the slot's refresh list", nil, flows)
+          if outcome = run_step(slot, id, i + 1, outbound, manual, flows)
+            return outcome
           end
-          rec = @store.get_repeater(id)
-          return fail.call(n, "repeater ##{id}", "that Repeater session no longer exists", nil, flows) unless rec
-          label = SessionRefresh.step_label(rec)
-          if Repeater::DraftMarkers.live?(@store, rec)
-            return fail.call(n, label, "the session holds §…§ fuzz markers, which a refresh cannot render", nil, flows)
-          end
-          plan = begin
-            Repeater::Plan.build(plan_options(rec, slot.name), outbound)
-          rescue ex : Repeater::PlanError
-            return fail.call(n, label, "could not build the request: #{ex.message}", nil, flows)
-          end
-          target = (bytes = plan.requests.first?) ? Outbound.request_target(bytes) : "/"
-          verdict = outbound.check_request(plan.scheme, plan.host, target, plan.port)
-          if verdict.blocked?
-            return fail.call(n, label, "#{plan.host} is out of the project scope — #{Outbound.remedy(verdict, nil)}", nil, flows)
-          end
-          if reason = plan.refusal
-            return fail.call(n, label, reason, nil, flows)
-          end
-          sent_at = Time.utc.to_unix_ms * 1000_i64
-          wire = plan.wire_bytes
-          result = plan.send_wire(wire)
-          if fid = record(plan, result, sent_at, wire, slot.name, n)
-            flows << fid
-          end
-          if err = result.error
-            return fail.call(n, label, err, nil, flows)
-          end
-          status = result.response.try(&.status)
-          if status.nil? || status == 0
-            return fail.call(n, label, "no response", nil, flows)
-          end
-          return fail.call(n, label, "the step answered #{status}", status, flows) if status >= 400
         end
         rebound = rebound_since(slot, watched)
         # The steps all answered, but if the slot claims a live rule and none of them moved,
         # the refresh did not refresh anything — the next send carries the same expired value.
         # Reported as a failure so the cooldown and the failure limit apply to it.
         if !watched.empty? && rebound.empty?
-          return fail.call(nil, nil, "every step answered, but none of the slot's bindings " \
-                                     "(#{Env.token_list(watched.keys, ns: Env::Namespace::Bind)}) was rebound — " \
-                                     "check the extract rules' host, condition and selector", nil, flows)
+          return failed(slot, manual, nil, nil, "every step answered, but none of the slot's bindings " \
+                                                "(#{Env.token_list(watched.keys, ns: Env::Namespace::Bind)}) was rebound — " \
+                                                "check the extract rules' host, condition and selector", nil, flows)
         end
         Outcome.new(slot.name, true, manual, total, rebound: rebound, flow_ids: flows)
+      end
+
+      private def failed(slot : SessionSlot, manual : Bool, n : Int32?, label : String?, reason : String,
+                         status : Int32?, flows : Array(Int64)) : Outcome
+        Outcome.new(slot.name, false, manual, slot.refresh.size, n, label, status, reason, [] of String, flows)
+      end
+
+      # Step `n` (Repeater session `id`): the failure it ended the refresh with, or nil to go on.
+      # Each send it makes lands in `flows`.
+      private def run_step(slot : SessionSlot, id : Int64, n : Int32, outbound : Outbound,
+                           manual : Bool, flows : Array(Int64)) : Outcome?
+        if id < 0
+          return failed(slot, manual, n, "repeater ##{-id} (deleted)",
+            "its Repeater session was deleted; remove the step from the slot's refresh list", nil, flows)
+        end
+        rec = @store.get_repeater(id)
+        return failed(slot, manual, n, "repeater ##{id}", "that Repeater session no longer exists", nil, flows) unless rec
+        label = SessionRefresh.step_label(rec)
+        if Repeater::DraftMarkers.live?(@store, rec)
+          return failed(slot, manual, n, label, "the session holds §…§ fuzz markers, which a refresh cannot render", nil, flows)
+        end
+        plan = begin
+          Repeater::Plan.build(plan_options(rec, slot.name), outbound)
+        rescue ex : Repeater::PlanError
+          return failed(slot, manual, n, label, "could not build the request: #{ex.message}", nil, flows)
+        end
+        if reason = step_refusal(plan, outbound)
+          return failed(slot, manual, n, label, reason, nil, flows)
+        end
+        sent_at = Time.utc.to_unix_ms * 1000_i64
+        wire = plan.wire_bytes
+        result = plan.send_wire(wire)
+        record(plan, result, sent_at, wire, slot.name, n).try { |fid| flows << fid }
+        return failed(slot, manual, n, label, result.error.to_s, nil, flows) if result.error
+        status = result.response.try(&.status)
+        return failed(slot, manual, n, label, "no response", nil, flows) if status.nil? || status == 0
+        return failed(slot, manual, n, label, "the step answered #{status}", status, flows) if status >= 400
+        nil
+      end
+
+      # Layer 1 (the surface's scope policy) before Layer 2 (Sandbox / explicit excludes) — the
+      # order every direct-dial surface asks them in (`Retest::LiveBackend#send`).
+      private def step_refusal(plan : Repeater::Plan, outbound : Outbound) : String?
+        target = (bytes = plan.requests.first?) ? Outbound.request_target(bytes) : "/"
+        verdict = outbound.check_request(plan.scheme, plan.host, target, plan.port)
+        return "#{plan.host} is out of the project scope — #{Outbound.remedy(verdict, nil)}" if verdict.blocked?
+        plan.refusal
       end
 
       # `{binding name => bound_at}` for every live rule the slot claims, unbound as nil.

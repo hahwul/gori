@@ -169,7 +169,7 @@ describe Gori::SessionRefresh do
         rows = store.recent_flows(10)
         rows.size.should eq(2)
         rows.all? { |r| r.source.try(&.refresh?) }.should be_true
-        rows.compact_map(&.source_ref).sort.should eq(["slot admin step 1", "slot admin step 2"])
+        rows.compact_map(&.source_ref).sort!.should eq(["slot admin step 1", "slot admin step 2"])
         store.events_recent(10).rows.any? { |e| e.kind == "refresh_ok" }.should be_true
       ensure
         server.close
