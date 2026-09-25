@@ -54,7 +54,9 @@ describe "Gori::Verbs.register_oast" do
   # pair for start/stop, and the shift is the honest place for a once-a-sitting action.
   it "puts resume on ⇧R, beside the ^R/^X pair" do
     r["oast.sessions"].chords.should eq([shift_chord('R')])
-    r["oast.sessions"].menu_key.should eq('r') # menu_key skips shift chords — explicit
+    # The menu spells it `R`, its chord's letter; menu `r` is listen, `r` = run as on every tab.
+    r["oast.sessions"].menu_key.should eq('R')
+    r["oast.listen"].menu_key.should eq('r')
     # …and bare `r` is bound nowhere in this scope now.
     Gori::Verb::Keymap.build(r).lookup(typed_chord("r"), Gori::Verb::Scope::OastCallbacks).should be_nil
   end

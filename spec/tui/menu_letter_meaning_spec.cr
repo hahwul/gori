@@ -148,12 +148,6 @@ end
 # The standing exceptions, keyed by the exact pair so a later, unrelated row on the same
 # letter is still caught. The #1274 work packages delete their own lines.
 MENU_LETTER_ALLOWED = {
-  # WP1 — nav letters on the strip (h/j/k/l move chips there); the clears and loads move off them.
-  {"jwt.clear", "strip:nav"}           => "WP1: clear session moves off the strip's nav `k`",
-  {"cookie.clear", "strip:nav"}        => "WP1: clear session moves off the strip's nav `k`",
-  {"jwt.load-decoded", "strip:nav"}    => "WP1: overwrites the editors; moves off the strip's nav `l`",
-  {"cookie.load-decoded", "strip:nav"} => "WP1: overwrites the editors; moves off the strip's nav `l`",
-  {"notes.clear", "capture.toggle"}    => "WP1: clear note moves to `K`; a dropped space stops capture today",
   # Link and add-host on nav letters — settled with the h/j/k/l decision after the families land.
   {"link.history.attach", "body.up"}          => "WP1 hjkl decision: Link is `k`, the list's up key",
   {"link.history-detail.attach", "detail.up"} => "WP1 hjkl decision: Link is `k`, the detail's up key",

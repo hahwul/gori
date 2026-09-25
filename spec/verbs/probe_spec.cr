@@ -73,8 +73,9 @@ describe "Gori::Verbs.register_probe" do
       %w[probe.dismiss-code probe.dismiss-host probe.active-rescan].each do |id|
         r[id].chords.should be_empty
       end
-      r["probe.dismiss-code"].menu_key.should eq('g')
-      r["probe.dismiss-host"].menu_key.should eq('h')
+      # Capitals, off the menu's navigation `h` (#1274): the bulk forms of `c`'s one-issue dismiss.
+      r["probe.dismiss-code"].menu_key.should eq('G')
+      r["probe.dismiss-host"].menu_key.should eq('H')
       r["probe.active-rescan"].menu_key.should eq('A') # lowercase 'a' is toggle-closed
     end
 

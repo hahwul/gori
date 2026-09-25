@@ -736,8 +736,17 @@ module Gori::Tui
       cur.view.cycle_out_mode
     end
 
+    # Clearing drops the INPUT and its chain, and `TextArea#set_text` empties the editor's
+    # undo stack with them — so it asks first, the way `notes_clear` does. Nothing to lose
+    # means no prompt.
     def clear_all : Nil
       s = cur
+      return clear_session(s) if s.input.text.empty? && s.chain.empty?
+      @host.confirm("CLEAR INPUT", "Clear this session's input and chain?\nThis can't be undone.",
+        confirm_label: "clear", danger: true) { clear_session(s) }
+    end
+
+    private def clear_session(s : DecoderSession) : Nil
       s.input.set_text("")
       s.chain = ""
       s.chain_cx = 0

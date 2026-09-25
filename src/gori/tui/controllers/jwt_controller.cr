@@ -904,8 +904,21 @@ module Gori::Tui
       @host.status("loaded decoded claims into the editor")
     end
 
+    # Clearing drops the token, both ENCODE editors and the SECRET, and `TextArea#set_text`
+    # empties each editor's undo stack with them — so it asks first, the way `notes_clear`
+    # does. A session with nothing in it has nothing to lose and clears without the prompt.
     def clear_all : Nil
       s = cur
+      return clear_session(s) if session_blank?(s)
+      @host.confirm("CLEAR SESSION", "Clear this session's token, editors and secret?\nThis can't be undone.",
+        confirm_label: "clear", danger: true) { clear_session(s) }
+    end
+
+    private def session_blank?(s : JwtSession) : Bool
+      s.input.text.empty? && s.header.text.empty? && s.payload.text.empty? && s.secret.empty?
+    end
+
+    private def clear_session(s : JwtSession) : Nil
       s.input.set_text("")
       s.header.set_text("")
       s.payload.set_text("")

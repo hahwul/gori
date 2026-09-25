@@ -41,7 +41,8 @@ module Gori
       # Clears the INPUT text (and its chain spec) — the INPUT pane's own action.
       r.register Verb::Definition.new(
         "decoder.clear", "Clear input + chain", "Clear the current input and chain spec",
-        Verb::Scope::Decoder, [Verb::Chord.new("l", ctrl: true)], available: in_decoder, mnemonic: 'l', section: :input) { |ctx| ctx.decoder_clear; nil }
+        Verb::Scope::Decoder, [Verb::Chord.new("l", ctrl: true)], available: in_decoder, mnemonic: 'K',
+        section: :input, group: :danger) { |ctx| ctx.decoder_clear; nil }
 
       # The single smart Copy (see repeater.copy in verbs/history.cr) — copy-all is gone.
       # `^Y` used to be a hardcoded copy-OUTPUT chord in DecoderController; it is folded in
