@@ -6,13 +6,15 @@ module Gori
         {"sitemap", "Print the host → path endpoint tree (text, json, paths)"},
         {"sitemap tag", "Pin/clear/list a free-text memo on a sitemap path"},
         {"sitemap params", "Per-endpoint parameter inventory (names, locations, samples, reflected)"},
+        {"sitemap js", "Endpoints referenced in captured JavaScript, and the ones never requested (--scan reads new bundles)"},
         {"sitemap export", "The captured API as an OpenAPI 3.0.3 document (JSON or YAML)"},
       ])]
       private def self.cmd_sitemap(args : Array(String)) : Nil
-        # `tag`, `params` and `export` are reserved as the first positional; a QL query starting
-        # with one goes through --query (same convention as `gori run probe`'s subcommands).
+        # `tag`, `params`, `js` and `export` are reserved as the first positional; a QL query
+        # starting with one goes through --query (same convention as `gori run probe`'s subcommands).
         return cmd_sitemap_tag(args[1..]) if args.first? == "tag"
         return cmd_sitemap_params(args[1..]) if args.first? == "params"
+        return cmd_sitemap_js(args[1..]) if args.first? == "js"
         return cmd_sitemap_export(args[1..]) if args.first? == "export"
         cmd_sitemap_tree(args)
       end
@@ -96,9 +98,10 @@ module Gori
         key = sitemap_tag_path(path)
         text = clear ? "" : tag.to_s
         matched = sitemap_node_exists?(store, host, key)
+        js_node = matched == false && !key.includes?('?') && !store.js_ref_sightings(host: host, path: key, limit: 1).empty?
         abort "gori run sitemap tag: NOT applied (project busy) — the node is unchanged" unless store.set_sitemap_tag(host, key, text)
         puts text.empty? ? "Tag cleared on #{host}#{key}." : "Tagged #{host}#{key}: #{text}"
-        if warning = tag_match_warning(matched, host, key, text)
+        if warning = tag_match_warning(matched, host, key, text, js_node)
           STDERR.puts "gori run sitemap tag: warning: #{warning}"
         end
       end
@@ -112,9 +115,12 @@ module Gori
       # `sitemap_node_exists?` reads as three cases rather than as branches inside the
       # command body (which is also what kept its complexity in budget).
       private def self.tag_match_warning(matched : Bool?, host : String, key : String,
-                                         text : String) : String?
+                                         text : String, js_node : Bool = false) : String?
         return nil if text.empty? || matched
-        if matched.nil?
+        if js_node
+          "no captured endpoint at #{host}#{key} — the tag shows on its JavaScript-referenced node " \
+          "(the TUI Sitemap, `gori run sitemap --js-refs`)"
+        elsif matched.nil?
           "tag stored, but there are more than #{Store::SITEMAP_MAX} captured endpoints so " \
           "it could not be confirmed against one — check with `gori run sitemap`"
         else
@@ -150,6 +156,7 @@ module Gori
         hide_static = false
         group = true
         fold_query = true
+        js_refs = false
         format = :text
         lenient = false
         positional = [] of String
@@ -171,6 +178,7 @@ module Gori
           # many ways, id folding about many endpoints sharing a route. Overloading --no-group
           # to mean both would make "show me every literal id" also dump every fuzz payload.
           p.on("--no-fold-query", "Don't fold query-string variants (/search?q=1, /search?q=2) onto their path") { fold_query = false }
+          p.on("--js-refs", "Also draw the endpoints captured JavaScript references and nobody requested (see `sitemap js --scan`)") { js_refs = true }
           p.on("--format=FMT", "Output: text (default tree) | json | paths") { |v| format = parse_format(v, [:text, :json, :paths]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
@@ -188,7 +196,7 @@ module Gori
         # STDERR to say a term had gone.
         query, dropped = Run.compose_history_query(query, positional, neg_terms)
         Run.warn_dropped_query_terms("sitemap", dropped)
-        if err = Run.reserved_query_verb_error(positional, "sitemap", ["tag", "params", "export"], "tag, params, export")
+        if err = Run.reserved_query_verb_error(positional, "sitemap", ["tag", "params", "js", "export"], "tag, params, js, export")
           abort err
         end
         Run.refuse_unknown_query_fields("sitemap", query, lenient)
@@ -228,7 +236,8 @@ module Gori
         # only its non-static endpoints. Explicit, never read from the TUI's persisted toggle.
         filter = QL.and(filter, QL.hide_static) if hide_static
         hosts, truncated = begin
-          collect_sitemap(store, filter, limit, in_scope, group, fold_query)
+          collect_sitemap(store, filter, limit, in_scope, group, fold_query,
+            js_refs: js_refs, narrowed: !query.to_s.strip.empty?)
         rescue ex
           abort "gori run sitemap: query #{query.inspect} failed: #{ex.message}"
         ensure
@@ -263,8 +272,8 @@ module Gori
       # (an explicit --in-scope is the opt-in). That host-level gate is coarser than
       # the TUI lens's per-flow SQL filter and conservative on url-level includes.
       private def self.collect_sitemap(store : Store, filter : QL::Filter, limit : Int32,
-                                       in_scope : Bool, group : Bool,
-                                       fold_query : Bool) : {Array(Sitemap::Node), Bool}
+                                       in_scope : Bool, group : Bool, fold_query : Bool, *,
+                                       js_refs : Bool = false, narrowed : Bool = false) : {Array(Sitemap::Node), Bool}
         # A `--query body:…` filter arrives here already drained and CHECKED — see
         # `cmd_sitemap_tree`, which refuses outright when the off-commit trigram index (Store V4)
         # is still behind.
@@ -276,9 +285,20 @@ module Gori
         # group that lost the cut is not on a later page, it is simply absent.
         truncated = entries.size >= limit
         hosts = Sitemap.build(entries)
+        # Right after the build, before tags, as SitemapView#apply_reload does. A query narrowed
+        # the tree, so no host outside it is added for a reference; --in-scope below then drops
+        # a host's references with the host.
+        scope = Scope.load(store) if js_refs || in_scope
+        if js_refs
+          if store.js_scanned_count(JsRefs::VERSION) == 0
+            STDERR.puts "gori run sitemap: --js-refs, but no JavaScript has been scanned yet — run `gori run sitemap js --scan`"
+          end
+          nodes, capped = store.js_ref_nodes
+          STDERR.puts "gori run sitemap: --js-refs read the first #{Store::SITEMAP_MAX} referenced endpoints only" if capped
+          JsRefs.attach!(hosts, nodes, scope, new_hosts: !narrowed, lens: false)
+        end
         Sitemap.stamp_tags!(hosts, store.sitemap_tags)
-        if in_scope
-          scope = Scope.load(store)
+        if in_scope && scope
           STDERR.puts "gori run sitemap: --in-scope, but no scope rules are configured — nothing is in scope" unless scope.configured?
           hosts.select! { |h| scope.host_in_scope?(h.label) }
         end

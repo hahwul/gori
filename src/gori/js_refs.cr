@@ -484,6 +484,27 @@ module Gori
       known.includes?(host.downcase) || (scope ? scope.matches_url?(url, host) : false)
     end
 
+    # Attach the stored references to a built Sitemap tree under the two rules both trees share
+    # (the TUI's `SitemapView#apply_reload`, the CLI's `collect_sitemap`): `visible_host?`'s host
+    # rule — a host the tree lacks is added only when a scope include names the reference, and
+    # never when `new_hosts` is false (a `/` query narrowed the tree, and a host outside it would
+    # read as a match) — and, with `lens` on, the scope lens itself: a reference is not a flow,
+    # so the SQL filter the tree was built through never saw it.
+    def attach!(hosts : Array(Sitemap::Node), nodes : Array(Store::JsRefNode), scope : Scope?, *,
+                new_hosts : Bool, lens : Bool) : Nil
+      if lens && scope
+        nodes = nodes.select { |r| scope.in_scope_url?(node_url(r), r.host) }
+      end
+      Sitemap.attach_js_refs!(hosts, nodes) do |r|
+        new_hosts && !scope.nil? && scope.matches_url?(node_url(r), r.host)
+      end
+    end
+
+    # A tree reference's URL, for a scope question.
+    def node_url(r : Store::JsRefNode) : String
+      Store::FlowRow.url_of(r.scheme, r.host, r.port, r.path)
+    end
+
     private def endpoint(group : Array(Store::JsRefSighting), captured : Set({String, String}),
                          unknown : Bool) : Endpoint
       first = group.find { |s| s.flags & FLAG_COMMENT == 0 } || group.first
