@@ -25,6 +25,11 @@ module Gori
 
     @@hook : Hook? = nil
 
+    # The TUI's event-loop fiber, set once by the TUI when its loop starts. A before-send
+    # refresh asked FROM it runs on a fiber of its own and the send goes on without waiting:
+    # the refresh steps are network round-trips, and the loop must keep painting (P6).
+    class_property ui_fiber : Fiber? = nil
+
     def self.hook : Hook?
       @@hook
     end

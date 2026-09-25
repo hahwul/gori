@@ -689,29 +689,20 @@ module Gori
         Gori::SessionRefresh::Runner.new(store, session_layer(store), -> { Gori::Outbound.cli(Gori::Scope.load(store), false) })
       end
 
-      # `store`'s binding table: the one `open_store` just installed as `Env.layer`, or a fresh
-      # load when the layer belongs to another store — never another project's slots.
+      # `store`'s binding table: the one `open_store` just installed as `Env.layer`, or — when
+      # the layer belongs to another store — a fresh load INSTALLED as the layer, because a
+      # refresh step resolves and binds through `Env.layer` and the runner reads its own table:
+      # two different tables would report every refresh as having rebound nothing.
       private def self.session_layer(store : Store) : Gori::Bindings
         layer = Gori::Env.layer.as?(Gori::Bindings)
         return layer if layer && layer.store.same?(store)
-        Gori::Bindings.load(store, Gori::SessionSlots.load(store))
+        fresh = Gori::Bindings.load(store, Gori::SessionSlots.load(store))
+        Gori::Env.layer = fresh
+        fresh
       end
 
       def self.session_refresh_json(j : JSON::Builder, o : Gori::SessionRefresh::Outcome) : Nil
-        j.object do
-          j.field "slot", o.slot
-          j.field "ok", o.ok
-          j.field "manual", o.manual
-          j.field "steps", o.steps
-          j.field "failed_step", o.failed_step
-          j.field "step", o.step_label
-          j.field "status", o.status
-          j.field "reason", o.reason
-          j.field("rebound") { j.array { o.rebound.each { |n| j.string n } } }
-          j.field("flow_ids") { j.array { o.flow_ids.each { |id| j.number id } } }
-          j.field "message", o.message
-          j.field "at", o.at.to_rfc3339
-        end
+        j.object { o.json_fields(j) }
       end
 
       # `◆ admin      sets Cookie · rules $SESSION` — the baseline diamond and the same

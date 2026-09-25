@@ -26,7 +26,7 @@ end
 # `/csrf` answers a fresh `X-CSRF: C<n>`, `/login` a fresh `Set-Cookie: sid=T<n>` — or the
 # status `login_status` says. Serves until the spec closes it.
 private def start_login_origin(seen : Seen, login_status : Int32 = 200,
-                               csrf_status : Int32 = 200) : {TCPServer, Int32}
+                               csrf_status : Int32 = 200, sid : String? = nil) : {TCPServer, Int32}
   server = TCPServer.new("127.0.0.1", 0)
   port = server.local_address.port
   n = 0
@@ -45,7 +45,7 @@ private def start_login_origin(seen : Seen, login_status : Int32 = 200,
           if path.starts_with?("/csrf") && csrf_status < 400
             "X-CSRF: C#{n}\r\n"
           elsif path.starts_with?("/login") && login_status < 400
-            "Set-Cookie: sid=T#{n}; Path=/\r\n"
+            "Set-Cookie: sid=#{sid || "T#{n}"}; Path=/\r\n"
           else
             ""
           end
@@ -318,11 +318,15 @@ describe Gori::SessionRefresh do
         begin
           bindings = Gori::Bindings.load(ro, Gori::SessionSlots.load(ro))
           Gori::Env.layer = bindings
-          runner = Gori::SessionRefresh::Runner.new(ro, bindings, -> { ungated_outbound })
+          runner = Gori::SessionRefresh::Runner.new(ro, bindings, -> { ungated_outbound }, origin: path)
           runner.refresh("admin").ok.should be_true
           runner.deferred?.should be_true
           rw.recent_flows(10).should be_empty
-          runner.hand_over(rw)
+          # Another project's store takes nothing.
+          runner.hand_over(rw, "/elsewhere/gori.db")
+          runner.deferred?.should be_true
+          rw.recent_flows(10).should be_empty
+          runner.hand_over(rw, path)
           runner.deferred?.should be_false
           rw.recent_flows(10).compact_map(&.source_ref).sort!.should eq(["slot admin step 1", "slot admin step 2"])
           rw.events_recent(10).rows.any? { |e| e.kind == "refresh_ok" }.should be_true
@@ -333,6 +337,91 @@ describe Gori::SessionRefresh do
         rw.close
         server.close
         {path, "#{path}-wal", "#{path}-shm"}.each { |f| File.delete?(f) }
+      end
+    end
+  end
+
+  it "fails a jwt-exp refresh whose new token is still inside the skew, so the next send does not log in again" do
+    with_refresh_env do |store|
+      seen = Seen.new
+      header = Base64.urlsafe_encode(%({"alg":"HS256"}), padding: false)
+      payload = Base64.urlsafe_encode(%({"exp":#{Time.utc.to_unix + 5}}), padding: false)
+      server, port = start_login_origin(seen, sid: "#{header}.#{payload}.sig")
+      begin
+        runner, _, _, _, _ = refresh_fixture(store, port, Policy.new(Policy::Kind::JwtExp))
+        Gori::SessionRefresh.before_send("admin")
+        seen.paths.size.should eq(2)
+        last = runner.status("admin").last.not_nil!
+        last.ok.should be_false
+        last.reason.not_nil!.should contain("still expires within")
+        # Inside the cooldown now: the next send goes out without another login.
+        Gori::SessionRefresh.before_send("admin")
+        seen.paths.size.should eq(2)
+      ensure
+        server.close
+      end
+    end
+  end
+
+  it "counts a ttl from the oldest claimed binding, not one every page rebinds" do
+    with_refresh_env do |store|
+      seen = Seen.new
+      server, port = start_login_origin(seen)
+      begin
+        runner, bindings, slots, _, _ = refresh_fixture(store, port, Policy.parse?("ttl=1").not_nil!)
+        slots.activate("admin")
+        subject = Gori::InterceptFilter::Subject.new(method: "GET", host: "127.0.0.1", target: "/", scheme: "http", status: 200)
+        cookie = "HTTP/1.1 200 OK\r\nSet-Cookie: sid=OLD; Path=/\r\nContent-Length: 0\r\n\r\n".to_slice
+        bindings.observe(Gori::Repeater::Result.new(cookie, Bytes.empty, Gori::Proxy::Codec::Http1.parse_response_head(cookie), 1_i64), subject)
+        sleep 1.1.seconds
+        csrf = "HTTP/1.1 200 OK\r\nX-CSRF: FRESH\r\nContent-Length: 0\r\n\r\n".to_slice
+        bindings.observe(Gori::Repeater::Result.new(csrf, Bytes.empty, Gori::Proxy::Codec::Http1.parse_response_head(csrf), 1_i64), subject)
+        # A CSRF rebound a moment ago does not make the older session token fresh.
+        runner.due_at(slots.find("admin").not_nil!).not_nil!.should be <= Time.utc
+      ensure
+        server.close
+      end
+    end
+  end
+
+  it "does not block the TUI's event loop on a login: the refresh runs on its own fiber" do
+    with_refresh_env do |store|
+      seen = Seen.new
+      server, port = start_login_origin(seen)
+      begin
+        runner, _, _, _, _ = refresh_fixture(store, port, Policy.parse?("ttl=10m").not_nil!)
+        Gori::SessionRefresh.ui_fiber = Fiber.current
+        Gori::SessionRefresh.before_send("admin")
+        # Returned before a single step went out …
+        seen.paths.should be_empty
+        # … and the refresh still ran, in the background.
+        deadline = Time.instant + 5.seconds
+        until runner.status("admin").last || Time.instant > deadline
+          sleep 10.milliseconds
+        end
+        seen.paths.should eq(["/csrf", "/login"])
+      ensure
+        Gori::SessionRefresh.ui_fiber = nil
+        server.close
+      end
+    end
+  end
+
+  it "re-reads the list before an automatic refresh, so a detached step is not replayed" do
+    with_refresh_env do |store|
+      seen = Seen.new
+      server, port = start_login_origin(seen)
+      begin
+        _, _, slots, csrf, _ = refresh_fixture(store, port, Policy.parse?("ttl=10m").not_nil!)
+        slots.find("admin").not_nil!.refresh.first.should eq(csrf)
+        # Deleted on disk only; this process's cached list still names the positive id, and
+        # the next tab takes it.
+        store.delete_repeater(csrf).should be_true
+        store.insert_repeater("http://127.0.0.1:#{port}", "GET /unrelated HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 5)
+        Gori::SessionRefresh.before_send("admin")
+        seen.paths.should be_empty
+      ensure
+        server.close
       end
     end
   end

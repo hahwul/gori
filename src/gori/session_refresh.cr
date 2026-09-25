@@ -1,4 +1,5 @@
 require "log"
+require "json"
 require "./session_refresh/hook"
 require "./bindings"
 require "./session_slots"
@@ -72,6 +73,11 @@ module Gori
     # never drains (a headless run) must not grow this forever.
     OUTCOME_QUEUE = 16
 
+    # How many unwritten records a runner on a read-only store holds for a later hand-over.
+    # Each captures a step's request and response, and a command that never opens its project
+    # for writing drops them at exit anyway, so the oldest go first past this.
+    DEFERRED_CAP = 32
+
     # One refresh, finished. Carries binding NAMES and never a value — the TUI renders a
     # masked preview itself from `Bindings#rows`, and nothing here reaches an event row or an
     # MCP reply with a credential in it.
@@ -110,7 +116,26 @@ module Gori
             ""
           end
         why = reason ? " — #{reason}" : ""
-        "refresh #{slot} failed#{where}#{why} · binding unchanged"
+        tail = rebound.empty? ? "binding unchanged" : "#{Env.token_list(rebound, ns: Env::Namespace::Bind)} rebound"
+        "refresh #{slot} failed#{where}#{why} · #{tail}"
+      end
+
+      # The fields every surface reports an outcome with — the CLI's `--format json` and MCP —
+      # written into an object the caller opens. One copy, so the two cannot drift. Names,
+      # never values.
+      def json_fields(j : JSON::Builder) : Nil
+        j.field "slot", slot
+        j.field "ok", ok
+        j.field "manual", manual
+        j.field "steps", steps
+        j.field "failed_step", failed_step
+        j.field "step", step_label
+        j.field "status", status
+        j.field "reason", reason
+        j.field("rebound") { j.array { rebound.each { |n| j.string n } } }
+        j.field("flow_ids") { j.array { flow_ids.each { |id| j.number id } } }
+        j.field "message", message
+        j.field "at_iso", at.to_rfc3339
       end
     end
 
@@ -176,6 +201,8 @@ module Gori
         property cooldown_until : Time? = nil
         property? auto_off : Bool = false
         property last : Outcome? = nil
+        # When the last refresh SUCCEEDED — what a `ttl=` policy counts from.
+        property last_ok_at : Time? = nil
         # Closed when the in-flight refresh finishes; every waiter wakes on `receive?`.
         property inflight : Channel(Nil)? = nil
         # `{binding rev, due time}` — the due time is absolute, so it stays right as the clock
@@ -198,9 +225,17 @@ module Gori
       # (`Session#set_verify_upstream`).
       property? verify : Bool
 
+      #
+      # `records` is where the History rows and the event go when that is not `@store` — a
+      # `gori run` command that opened its project writable and then again read-only hands the
+      # runner on the second open the first handle (`hydrate_cli_store`). `origin` names the
+      # project database, so records are never handed to ANOTHER project's store.
+      getter origin : String?
+
       def initialize(@store : Store, @bindings : Bindings, @outbound : Proc(Outbound), *,
                      @overrides : HostOverrides? = nil, @verify : Bool = true,
-                     @record_history : Bool = true)
+                     @record_history : Bool = true, @records : Store? = nil,
+                     @origin : String? = nil)
         @states = {} of String => State
         @outcomes = Deque(Outcome).new
         # Records that could not be written because `@store` is read-only — see `deferred`.
@@ -287,17 +322,47 @@ module Gori
         # and whose step 2 was refused leaves a freshly bound value in the table, so a TTL
         # counted from it says "fresh" while the session token it exists for is still stale.
         return unless st.last.try { |o| !o.ok } || due?(s, st)
-        run(s, st, @outbound.call, manual: false)
+        # Never block the TUI's event loop on a login: from the UI fiber the refresh runs on
+        # its own fiber (and marks the slot in flight, so the chip shows `⟳`) while this send
+        # goes out with the value it has. Every other caller waits for the fresh one.
+        if Fiber.current.same?(SessionRefresh.ui_fiber)
+          outbound = @outbound.call
+          spawn(name: "gori-session-refresh") { run_fresh(slot, outbound) }
+          return
+        end
+        run_fresh(slot, @outbound.call)
       rescue ex
         # A refresh must never fail the send that asked for it.
         ::Log.warn { "session refresh skipped for #{slot}: #{ex.message}" }
+      end
+
+      # The automatic run itself, over a FRESHLY read list: `Store#delete_repeater` detaches a
+      # closed tab's id in the persisted row, and a step id this process still holds positive
+      # could by now name whatever tab took that id next (`repeaters.id` has no AUTOINCREMENT).
+      # One settings read, and only when a refresh is actually about to run.
+      private def run_fresh(name : String, outbound : Outbound) : Nil
+        slots = @bindings.slots
+        return unless slots
+        slots.reload
+        s = slots.find(name)
+        return unless s && s.auto_refresh?
+        st = state(name)
+        # The reload above can yield, so another sender may have started this slot's refresh
+        # meanwhile: wait for THAT one rather than going out ahead of it.
+        if ch = st.inflight
+          ch.receive?
+          return
+        end
+        run(s, st, outbound, manual: false)
+      rescue ex
+        ::Log.warn { "session refresh skipped for #{name}: #{ex.message}" }
       end
 
       # When `slot` is due: now or earlier, a time in the future, or nil for "never" (the policy
       # has nothing to watch). Cached against the binding rev — the JWT decode must not run on
       # every request of a sweep.
       def due_at(slot : SessionSlot) : Time?
-        compute_due(slot)
+        compute_due(slot, state(slot.name))
       end
 
       private def due?(slot : SessionSlot, st : State) : Bool
@@ -306,7 +371,7 @@ module Gori
         at = if due && due[0] == rev
                due[1]
              else
-               fresh = compute_due(slot)
+               fresh = compute_due(slot, st)
                st.due = {rev, fresh}
                fresh
              end
@@ -319,7 +384,7 @@ module Gori
       # Nothing bound yet is due NOW: a slot with a refresh policy and an empty table is a slot
       # whose next send would carry literal `$BIND.*`, which is the 401 the policy exists to
       # prevent. The cooldown and failure limit bound how often that can fire.
-      private def compute_due(slot : SessionSlot) : Time?
+      private def compute_due(slot : SessionSlot, st : State) : Time?
         rows = @bindings.rows.select { |r| r.slot == slot.name && r.enabled }
         return nil if rows.empty?
         bound = rows.select(&.bound?)
@@ -333,9 +398,27 @@ module Gori
           return nil if exps.empty?
           unix_or_nil(exps.min).try { |t| t - SessionSlot::RefreshBefore::SKEW }
         in SessionSlot::RefreshBefore::Kind::Ttl
-          newest = bound.compact_map(&.bound_at).max?
-          newest.try { |t| t + policy.ttl }
+          # From the last successful refresh, else from the OLDEST claimed binding — never the
+          # newest: a `$BIND.CSRF` rebound by every page would keep a stale session token
+          # looking fresh forever.
+          base = st.last_ok_at || bound.compact_map(&.bound_at).min?
+          base.try { |t| t + policy.ttl }
         end
+      end
+
+      # A refresh that answered and rebound, but left a `jwt-exp` slot STILL inside its skew —
+      # the login handed back a token that expires within `SKEW`, or the step that rebinds the
+      # token did not. Counted as a failure, or the very next send would log in again, and the
+      # one after it: a login per request with no cooldown and no failure limit.
+      private def still_due_reason(slot : SessionSlot) : String?
+        return nil unless slot.refresh_before.kind.jwt_exp?
+        exps = @bindings.rows.select { |r| r.slot == slot.name && r.enabled && r.bound? }
+          .compact_map { |r| r.value.try { |v| SessionRefresh.jwt_exp(v) } }
+        return nil unless exp = exps.min?
+        at = unix_or_nil(exp)
+        return nil unless at && at - SessionSlot::RefreshBefore::SKEW <= Time.utc
+        "the refresh finished, but the slot's JWT still expires within " \
+        "#{SessionSlot::RefreshBefore::SKEW.total_seconds.to_i}s — the login step may not be rebinding it"
       end
 
       # A crafted token can carry an `exp` outside Crystal's Time range.
@@ -364,6 +447,10 @@ module Gori
           st.inflight = nil
           ch.close
         end
+        if outcome.ok && (why = still_due_reason(slot))
+          outcome = Outcome.new(slot.name, false, manual, slot.refresh.size, reason: why,
+            rebound: outcome.rebound, flow_ids: outcome.flow_ids)
+        end
         settle(st, outcome)
         report(outcome)
         @rev &+= 1
@@ -374,6 +461,7 @@ module Gori
         st.last = outcome
         st.due = nil
         if outcome.ok
+          st.last_ok_at = outcome.at
           st.failures = 0
           st.cooldown_until = nil
           st.auto_off = false
@@ -408,11 +496,20 @@ module Gori
       # event it owes are written through the next writable store the command opens (the one
       # that saves the response), rather than dropped.
       private def write(&block : Store -> Nil) : Nil
-        if @store.read_only?
-          @deferred << block
+        if target = record_target
+          block.call(target)
         else
-          block.call(@store)
+          @deferred.shift if @deferred.size >= DEFERRED_CAP
+          @deferred << block
         end
+      end
+
+      # The writable store records go through right now, or nil to hold them.
+      def record_target : Store?
+        if (r = @records) && !r.closed? && !r.read_only?
+          return r
+        end
+        @store.read_only? || @store.closed? ? nil : @store
       end
 
       # Whether records are waiting for a writable store.
@@ -420,14 +517,17 @@ module Gori
         !@deferred.empty?
       end
 
-      # Hand the waiting records to `store` (writable) or, when it cannot take them either, to
-      # `successor` — the runner a later project open installs. Each record is written once.
-      def hand_over(store : Store, successor : Runner? = nil) : Nil
+      # Hand the waiting records to `store` (writable, and the database `origin` names) or, when
+      # it cannot take them, to `successor` — the runner a later open of the SAME project
+      # installs. A store of another project gets nothing: a refresh of project A's slot does
+      # not belong in project B's History. Each record is written once.
+      def hand_over(store : Store, origin : String?, successor : Runner? = nil) : Nil
         return if @deferred.empty?
+        return unless origin == @origin
         pending = @deferred.dup
         @deferred.clear
         if store.read_only?
-          successor ? successor.adopt(pending) : @deferred.concat(pending)
+          successor && successor.origin == @origin ? successor.adopt(pending) : @deferred.concat(pending)
           return
         end
         pending.each do |rec|
@@ -557,7 +657,7 @@ module Gori
         return nil unless @record_history
         surface = FlowSource.surface || FlowSource::Surface::Cli
         ref = "slot #{slot} step #{n}"
-        if @store.read_only?
+        unless target = record_target
           # No flow id to report: the row is written when the records are handed over.
           write do |store|
             Repeater::HistoryRecord.record(store, plan, result, sent_at, wire,
@@ -566,7 +666,7 @@ module Gori
           end
           return nil
         end
-        Repeater::HistoryRecord.record(@store, plan, result, sent_at, wire,
+        Repeater::HistoryRecord.record(target, plan, result, sent_at, wire,
           surface: surface, kind: FlowSource::Kind::Refresh, source_ref: ref)
       rescue ex
         ::Log.warn { "session refresh step not recorded in History: #{ex.message}" }

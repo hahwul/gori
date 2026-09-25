@@ -513,6 +513,9 @@ module Gori::Tui
     end
 
     def run : Symbol
+      # The fiber that runs the event loop: a session slot's before-send refresh asked from it
+      # runs in the background instead of blocking the loop on a login (#1233).
+      Gori::SessionRefresh.ui_fiber = Fiber.current
       # Record the opened project's db path globally for explicitly opted-in headless
       # integrations (`gori mcp --use-active-project`). Workspace-aware MCP launches use
       # their path binding instead, preventing a different repository from inheriting this.

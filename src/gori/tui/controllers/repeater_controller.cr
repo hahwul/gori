@@ -2203,21 +2203,6 @@ module Gori::Tui
       view.inflight = true
       sni = plan.sni # custom TLS SNI host (nil → present the dialed host)
       @host.status("sending#{sending_as} → #{plan.host}:#{plan.port}#{sni ? " (SNI #{sni})" : ""}…", :busy) unless quiet
-      # The bytes the socket gets, taken ONCE and sent as-is. `view.request_bytes` above is the
-      # assembled DRAFT; this is the message, with the send seam's two passes applied (the
-      # `$NAME` binding pass and the active session slot's header overlay). The History
-      # recorder writes THIS slice, so the row is the request that went out rather than a
-      # second run of a seam whose binding values can rotate between two reads — which is why
-      # `Repeater::HistoryRecord` takes `wire` as a required argument at all.
-      sent_wire = plan.wire_bytes
-      # Recorded HERE, on the UI fiber, from the bytes the socket is about to get — the drain
-      # cannot recompute it, because by the time the answer lands the editor may have been
-      # typed into. This branch is already past `ws_mode?`, so a framed handshake (which
-      # `WsEngine.build_handshake` re-terminates on every send) never reaches it and is never
-      # accused; `!plan.http2?` is the other half of the same rule, because an h2 send
-      # re-encodes this text as an HPACK field list that never carried the missing line.
-      # See `CLI::Run.unterminated_head?`. #1075.
-      view.sent_head_unterminated = !plan.http2? && !Env.head_terminated?(sent_wire)
       # Read live so a toggle in Settings takes on the very next ^R, and read on the UI fiber
       # so the send fiber captures a decision rather than racing one.
       record_store = history_record_store
@@ -2226,7 +2211,7 @@ module Gori::Tui
       # Off the UI fiber: a round-trip can block up to 30s. The fiber touches only these
       # captured locals + the inflight flag — and hands the Result back through the
       # channel; the run loop applies it (see #drain_results).
-      launch_send_fiber(view, plan, sent_wire, results, record_store, record_ref, sent_at, sent_digest)
+      launch_send_fiber(view, plan, results, record_store, record_ref, sent_at, sent_digest)
       true
     end
 
@@ -2234,13 +2219,33 @@ module Gori::Tui
     # thing. Every argument is a captured local: the fiber must never read a controller ivar
     # (the same rule the minimize and ws fibers follow), and `results` in particular is
     # passed in so a channel replaced by a project switch cannot be picked up mid-flight.
-    private def launch_send_fiber(view : RepeaterView, plan : Repeater::Plan, sent_wire : Bytes,
+    private def launch_send_fiber(view : RepeaterView, plan : Repeater::Plan,
                                   results : Channel({RepeaterView, Repeater::Result, String?, String?}),
                                   record_store : Store?, record_ref : String?, sent_at : Int64,
                                   sent_digest : String) : Nil
       started = Time.instant
       spawn(name: "gori-repeater") do
+        # The bytes the socket gets, taken ONCE and sent as-is. `view.request_bytes` is the
+        # assembled DRAFT; this is the message, with the send seam's passes applied (the
+        # session slot's before-send refresh, the `$NAME` binding pass and the slot's header
+        # overlay). The History recorder writes THIS slice, so the row is the request that went
+        # out rather than a second run of a seam whose binding values can rotate between two
+        # reads — which is why `Repeater::HistoryRecord` takes `wire` as a required argument.
+        #
+        # On THIS fiber and not the UI one (#1233): `wire` may run the slot's refresh steps
+        # first, and those are network round-trips the event loop must not wait on. The plan
+        # was built from the draft on the UI fiber, so the bytes are the ones the operator sent.
+        sent_wire = Bytes.empty
         result = begin
+          sent_wire = plan.wire_bytes
+          # Marked from the bytes the socket is about to get — the drain cannot recompute it,
+          # because by the time the answer lands the editor may have been typed into. This
+          # branch is already past `ws_mode?`, so a framed handshake (which
+          # `WsEngine.build_handshake` re-terminates on every send) never reaches it and is never
+          # accused; `!plan.http2?` is the other half of the same rule, because an h2 send
+          # re-encodes this text as an HPACK field list that never carried the missing line.
+          # See `CLI::Run.unterminated_head?`. #1075.
+          view.sent_head_unterminated = !plan.http2? && !Env.head_terminated?(sent_wire)
           plan.send_wire(sent_wire)
         rescue ex
           # `Repeater::Engine.send` rescues its own transport failures, so anything escaping

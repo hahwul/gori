@@ -343,18 +343,7 @@ module Gori
 
       private def emit_refresh_outcome(j : JSON::Builder, o : Gori::SessionRefresh::Outcome) : Nil
         j.object do
-          j.field "slot", o.slot
-          j.field "ok", o.ok
-          j.field "manual", o.manual
-          j.field "steps", o.steps
-          j.field "failed_step", o.failed_step
-          j.field "step", o.step_label
-          j.field "status", o.status
-          j.field "reason", o.reason
-          j.field("rebound") { j.array { o.rebound.each { |n| j.string n } } }
-          j.field("flow_ids") { j.array { o.flow_ids.each { |id| j.number id } } }
-          j.field "message", o.message
-          j.field "at_iso", o.at.to_rfc3339
+          o.json_fields(j)
           j.field "note", "values live in THIS server process only; a TUI or another gori keeps its own"
         end
       end

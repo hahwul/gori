@@ -709,10 +709,17 @@ module Gori
         # process's table, which is the only one a `gori run` has. Gated as the CLI gates:
         # `Outbound.cli` over the project's scope, never a send's own `--allow-unscoped`.
         previous = Gori::SessionRefresh.hook.as?(Gori::SessionRefresh::Runner)
-        runner = Gori::SessionRefresh::Runner.new(store, layer, -> { Gori::Outbound.cli(Gori::Scope.load(store), false) }).install
+        origin = project.db_path
+        # A READ-ONLY open (a scope snapshot, `project_outbound`) records through the writable
+        # handle an earlier open of the SAME project still holds — `gori run authorize` opens
+        # one and then the other, and its refreshes would otherwise be recorded nowhere.
+        records = previous.try { |p| p.origin == origin ? p.record_target : nil } if store.read_only?
+        runner = Gori::SessionRefresh::Runner.new(store, layer,
+          -> { Gori::Outbound.cli(Gori::Scope.load(store), false) },
+          records: records, origin: origin).install
         # A refresh that ran on an earlier READ-ONLY open owes History rows and an event; this
         # open writes them if it can, or carries them to the runner it just installed.
-        previous.try &.hand_over(store, runner)
+        previous.try &.hand_over(store, origin, runner)
         warn_unwritten_refresh_records
         # …and re-select whatever `--slot` chose, because THIS line just replaced the registry
         # holding the pointer. See `reapply_active_slot`.

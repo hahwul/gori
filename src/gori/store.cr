@@ -1083,6 +1083,12 @@ module Gori
     # is no defence against a deadlock. It is the same hazard `writer_loop` already protects
     # against from the other side, where a failed batch must not kill the writer "or every
     # blocked caller (and close()) deadlocks".
+    # Whether `close` has run. For a holder that keeps a Store it did not open and must not
+    # write through one somebody else has since closed (`SessionRefresh::Runner`, #1233).
+    def closed? : Bool
+      @closed
+    end
+
     def close : Nil
       return if @closed
       @closed = true
