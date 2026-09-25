@@ -3657,6 +3657,29 @@ overwrites or reaches out off the four letters:
 Whether the fallback stays and `h`/`j`/`k`/`l` stop being menu letters altogether (Link is `k`
 on six tabs) is settled after the grouped menu lands, when most cards fit one column.
 
+### 2026-09-25: a pane-local key is declared on the verb, not hidden in its gate
+
+Refines: the R1 guard entry above. #1274 WP2 #3, #4, #13.
+
+The Repeater's bare `p` (pretty bodies) and `⇧D` (diff) and the Fuzzer's `v` (distribution
+sidebar) were bound tab-wide, so they fired in the request and template panes, whose menus
+spell the same letters for pretty-print-request, the decoder chain and clear-selection. An
+`available:` lambda could have hidden the key there, but the guard cannot read a lambda, and
+the palette would have lost the row as well.
+
+- **`Definition#chord_sections`** names the sections (the controller's `command_section`) in
+  which the verb's chords fire; nil means the whole scope. It gates the KEY only: the palette
+  and the space menu still follow `available?` and `section`.
+- **Out of its sections the press walks on**, like an unavailable verb (`Keymap#resolve`, the
+  scope chain `Runner#resolve_verb_id` now calls). So a gate on a letter Global binds would reach
+  capture, intercept or the lens. The R1 guard models that walk, and a gated key is no clash
+  for a menu row drawn only in other sections.
+- `ExecContext#focused_section` is the value it is checked against, and the same one the
+  space menu renders for.
+
+A later R1 exception whose two meanings live in different panes of one tab can take this
+instead of an allowlist line.
+
 ### 2026-09-25: a menu letter in UI text is read from the registry
 
 Refines: the two entries above. #1274 WP3/WP8.

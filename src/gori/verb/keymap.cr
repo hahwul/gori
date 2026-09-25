@@ -128,6 +128,25 @@ module Gori
       def lookup_in(chord : Chord, scope : Scope) : String?
         @by_scope[scope]?.try(&.[chord]?)
       end
+
+      # The id a press of `chord` fires in `scope` right now: down the SCOPE CHAIN — Editor
+      # (only while a text editor pane holds focus), then `scope`, then Global — taking the
+      # first link whose verb is available AND whose chord is live in the focused section
+      # (`Definition#chord_live?`). A link that fails either does not block the links behind
+      # it. `Runner#resolve_verb_id` is this with the live context; it lives here, pure, so a
+      # spec can walk the chain without a terminal.
+      def resolve(chord : Chord, scope : Scope, registry : Registry, ctx : ExecContext) : String?
+        if ctx.editor_pane? && (id = live_in(chord, Scope::Editor, registry, ctx))
+          return id
+        end
+        live_in(chord, scope, registry, ctx) || live_in(chord, Scope::Global, registry, ctx)
+      end
+
+      private def live_in(chord : Chord, scope : Scope, registry : Registry, ctx : ExecContext) : String?
+        return nil unless id = lookup_in(chord, scope)
+        verb = registry[id]
+        verb.available?(ctx) && verb.chord_live?(ctx) ? id : nil
+      end
     end
   end
 end
