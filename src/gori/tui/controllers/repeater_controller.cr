@@ -2642,6 +2642,12 @@ module Gori::Tui
       current_repeater_tab.try(&.db_id)
     end
 
+    # Whether the active sub-tab still holds edits its row does not — true after a
+    # `save_current_repeater` the store refused (project busy), which leaves the tab dirty.
+    def current_session_dirty? : Bool
+      !!current_repeater_tab.try(&.view.dirty?)
+    end
+
     def index_for_db_id(id : Int64) : Int32?
       @repeaters.index { |t| t.db_id == id }
     end

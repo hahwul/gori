@@ -21,6 +21,8 @@ private alias Policy = Gori::SessionSlot::RefreshBefore
 private class Seen
   getter heads = [] of String
   getter paths = [] of String
+  # Called with each path before the origin answers it — a spec's hook into "mid-refresh".
+  property on_request : Proc(String, Nil)? = nil
 end
 
 # `/csrf` answers a fresh `X-CSRF: C<n>`, `/login` a fresh `Set-Cookie: sid=T<n>` — or the
@@ -40,6 +42,7 @@ private def start_login_origin(seen : Seen, login_status : Int32 = 200,
         path = text.split(' ', 3)[1]? || "/"
         seen.heads << text
         seen.paths << path
+        seen.on_request.try &.call(path)
         n += 1
         conn << login_response(path, n, login_status, csrf_status, sid)
         conn.flush
@@ -194,6 +197,9 @@ describe Gori::SessionRefresh do
         outcome.status.should eq(403)
         outcome.message.should contain("refresh admin failed at step 2 (login → 403)")
         bindings.slot_values("admin")["SESSION"]?.should be_nil
+        # Step 1 did rebind the CSRF before step 2 was refused, and the outcome says so.
+        outcome.rebound.should eq(["CSRF"])
+        outcome.message.should_not contain("binding unchanged")
         runner.status("admin").failed?.should be_true
         store.events_recent(10).rows.any? { |e| e.kind == "refresh_failed" }.should be_true
       ensure
@@ -469,6 +475,87 @@ describe Gori::SessionRefresh do
         # The send itself went out AS admin, carrying the token the refresh just bound.
         seen.heads[2].should contain("sid=T2")
         seen.heads[2].should contain("X-Who: admin")
+      ensure
+        server.close
+      end
+    end
+  end
+
+  it "hands a manual refresh that waited on one in flight THAT run's outcome" do
+    with_refresh_env do |store|
+      seen = Seen.new
+      server, port = start_login_origin(seen)
+      begin
+        runner, _, _, _, _ = refresh_fixture(store, port)
+        first = Channel(Gori::SessionRefresh::Outcome).new
+        spawn { first.send(runner.refresh("admin")) }
+        until runner.refreshing?("admin")
+          Fiber.yield
+        end
+        waited = runner.refresh("admin")
+        ran = first.receive
+        # One login, and the waiter reports it — not nil, not "did not finish".
+        seen.paths.should eq(["/csrf", "/login"])
+        waited.ok.should be_true
+        waited.flow_ids.should eq(ran.flow_ids)
+      ensure
+        server.close
+      end
+    end
+  end
+
+  it "forgets a deleted slot's failures, so a new slot of the same name refreshes again" do
+    with_refresh_env do |store|
+      seen = Seen.new
+      server, port = start_login_origin(seen, csrf_status: 500)
+      begin
+        runner, _, slots, _, _ = refresh_fixture(store, port, Policy.parse?("ttl=10m").not_nil!)
+        Gori::SessionRefresh::FAILURE_LIMIT.times { runner.refresh("admin") }
+        runner.status("admin").auto_off.should be_true
+        old = slots.find("admin").not_nil!
+        slots.remove("admin").should be_true
+        slots.add(old).should be_true
+        status = runner.status("admin")
+        status.auto_off.should be_false
+        status.failures.should eq(0)
+        status.last.should be_nil
+      ensure
+        server.close
+      end
+    end
+  end
+
+  it "resolves and rebinds in its own project's table after another one became the layer" do
+    with_refresh_env do |store|
+      seen = Seen.new
+      server, port = start_login_origin(seen)
+      begin
+        runner, bindings, _, _, _ = refresh_fixture(store, port)
+        # A project switch mid-refresh: the process-global layer is now someone else's table.
+        other = Gori::Bindings.load(store, Gori::SessionSlots.load(store))
+        Gori::Env.layer = other
+        runner.refresh("admin").ok.should be_true
+        seen.heads[1].should contain("X-CSRF: C1")
+        bindings.slot_values("admin")["SESSION"].should eq("T2")
+        other.slot_values("admin")["SESSION"]?.should be_nil
+        other.slot_values("admin")["CSRF"]?.should be_nil
+      ensure
+        server.close
+      end
+    end
+  end
+
+  it "sends no further step once its project was closed mid-refresh" do
+    with_refresh_env do |store|
+      seen = Seen.new
+      server, port = start_login_origin(seen)
+      begin
+        runner, _, _, _, _ = refresh_fixture(store, port)
+        seen.on_request = ->(path : String) { store.close if path == "/csrf"; nil }
+        outcome = runner.refresh("admin")
+        outcome.ok.should be_false
+        outcome.reason.not_nil!.should contain("closed")
+        seen.paths.should eq(["/csrf"])
       ensure
         server.close
       end

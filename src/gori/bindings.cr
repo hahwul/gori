@@ -176,6 +176,11 @@ module Gori
     # read out of and recorded into.
     getter store : Store
 
+    # Told after every `prune_slots`, with the same argument. `SessionRefresh::Runner` keys its
+    # per-slot bookkeeping (#1233) by name exactly as the tables are keyed, so it forgets a
+    # deleted slot's failure count and cooldown at the moment its table goes.
+    property on_slots_pruned : Proc(Array(String)?, Nil)? = nil
+
     def initialize(@store : Store, rules : Array(Store::ExtractRule),
                    @slots : SessionSlots? = nil)
       @mutex = Mutex.new
@@ -232,6 +237,8 @@ module Gori
         end
         @rev &+= 1
       end
+      # Outside the mutex, and even when no table was held: the listener's state is its own.
+      @on_slots_pruned.try &.call(surviving)
     end
 
     def self.load(store : Store, slots : SessionSlots? = nil) : Bindings

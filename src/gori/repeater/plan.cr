@@ -234,6 +234,9 @@ module Gori::Repeater
     # must not carry the stale credential it is replacing). nil everywhere else. See
     # `Sender#refresh_slot`.
     property refresh_slot : String?
+    # The binding table `refresh_slot` names a slot of — the refreshing project's own, carried
+    # rather than read off `Env.layer`, which a project switch replaces mid-refresh.
+    property refresh_layer : Gori::Bindings?
 
     def initialize(@requests : Array(Bytes) = [] of Bytes,
                    *,
@@ -256,7 +259,8 @@ module Gori::Repeater
                    @timeout : Time::Span? = nil,
                    @overrides : Gori::HostOverrides? = nil,
                    @tls_preset : String? = nil,
-                   @refresh_slot : String? = nil)
+                   @refresh_slot : String? = nil,
+                   @refresh_layer : Gori::Bindings? = nil)
     end
   end
 
@@ -534,7 +538,7 @@ module Gori::Repeater
         expand_bindings: options.expand_bindings?,
         evidence_literals: options.evidence_literals,
         reframe_grpc: options.reframe_grpc?, tls_preset: tls_preset,
-        refresh_slot: options.refresh_slot)
+        refresh_slot: options.refresh_slot, refresh_layer: options.refresh_layer)
       new(sender: sender, requests: wires, scheme: scheme, host: host, port: port,
         http2: options.http2?, websocket: websocket, sni: sni,
         preserve_field_case: options.preserve_field_case?,

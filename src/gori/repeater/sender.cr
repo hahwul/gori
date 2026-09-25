@@ -127,13 +127,17 @@ module Gori
       # trigger itself.
       getter refresh_slot : String?
 
+      # The table a refresh step reads and rebinds — its runner's, never whichever project
+      # `Env.layer` holds by the time a slow login answers. nil falls back to `Env.layer`.
+      @refresh_layer : Gori::Bindings?
+
       def initialize(@outbound : Gori::Outbound, *, @scheme : String, @host : String, @port : Int32,
                      @verify : Bool, @http2 : Bool = false, @sni : String? = nil,
                      @timeout : Time::Span? = nil, @overrides : Gori::HostOverrides? = nil,
                      @preserve_field_case : Bool = false, @evidence : Bool = false,
                      @expand_bindings : Bool = true, @evidence_literals : Set(String)? = nil,
                      @reframe_grpc : Bool = false, tls_preset : String? = nil,
-                     @refresh_slot : String? = nil)
+                     @refresh_slot : String? = nil, @refresh_layer : Gori::Bindings? = nil)
         @tls_preset = Settings.tls_preset_normalize(tls_preset)
       end
 
@@ -221,11 +225,12 @@ module Gori
       # ships as it reads), which is the direction that can be read wrong but not sent wrong.
       private def expand_send(bytes : Bytes, generation : Gori::Env::Generation? = nil,
                               as_slot : String? = nil) : Bytes
+        layer = as_slot ? @refresh_layer : nil
         if literal = @evidence_literals
           Gori::Env.expand_bindings(bytes, generation: generation, literal: literal,
-            unescape: Gori::Env::Owns::None, as_slot: as_slot)
+            unescape: Gori::Env::Owns::None, as_slot: as_slot, layer: layer)
         else
-          Gori::Env.expand_bindings(bytes, generation: generation, as_slot: as_slot)
+          Gori::Env.expand_bindings(bytes, generation: generation, as_slot: as_slot, layer: layer)
         end
       end
 
@@ -494,7 +499,7 @@ module Gori
       #
       # Best-effort: an extract rule must never be able to fail a send the operator made.
       private def extract(request : Bytes, result : Result) : Nil
-        bindings = Gori::Env.layer.as?(Gori::Bindings)
+        bindings = (@refresh_slot && @refresh_layer) || Gori::Env.layer.as?(Gori::Bindings)
         return unless bindings
         return if result.error
         # First line only (NOT `request_target_line`, which deliberately scans past blank

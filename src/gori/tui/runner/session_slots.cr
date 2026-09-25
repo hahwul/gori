@@ -70,6 +70,11 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     repeater_controller.save_current_repeater
     id = repeater_controller.current_session_db_id
     return (@toast = "this sub-tab is not saved to the project (WebSocket/gRPC-binary tabs are session-only)") unless id
+    # A save the store refused leaves the tab dirty, and the row still holds the request from
+    # before the edit — appending its id now would refresh with bytes that are not on screen.
+    if repeater_controller.current_session_dirty?
+      return (@toast = "this sub-tab's edits are not saved (project busy) — nothing was changed, try again")
+    end
     registry = @session.slots
     list = registry.slots
     return (@toast = "no session slots yet — add one in the Authorize tab's identities card") if list.empty?

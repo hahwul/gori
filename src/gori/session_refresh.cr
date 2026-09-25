@@ -240,6 +240,18 @@ module Gori
         @outcomes = Deque(Outcome).new
         # Records that could not be written because `@store` is read-only — see `deferred`.
         @deferred = [] of Proc(Store, Nil)
+        @bindings.on_slots_pruned = ->forget_slots(Array(String)?)
+      end
+
+      # Drop the bookkeeping of every slot that is gone, on the same signal that drops its
+      # binding table (`Bindings#prune_slots`): `admin` deleted and created again is a new
+      # identity, and must not inherit the old one's failure count, cooldown or `auto_off`.
+      # nil — a peer's edit this process cannot attribute — forgets every slot. A slot with a
+      # refresh in flight keeps its entry, because its waiters hold that latch.
+      def forget_slots(surviving : Array(String)?) : Nil
+        @states.reject! do |name, st|
+          st.inflight.nil? && (surviving.nil? || !surviving.includes?(name))
+        end
       end
 
       def layer : Env::Layer
@@ -443,20 +455,25 @@ module Gori
         ch = Channel(Nil).new
         st.inflight = ch
         @rev &+= 1
+        # The latch opens only once the outcome is SETTLED: a manual `refresh` waiting on it
+        # returns `st.last`, which must be this run's answer and not the one before it.
         outcome = begin
-          execute(slot, outbound, manual)
-        rescue ex
-          Outcome.new(slot.name, false, manual, slot.refresh.size,
-            reason: "refresh raised: #{ex.message || ex.class.name}")
+          finished = begin
+            execute(slot, outbound, manual)
+          rescue ex
+            Outcome.new(slot.name, false, manual, slot.refresh.size,
+              reason: "refresh raised: #{ex.message || ex.class.name}")
+          end
+          if finished.ok && (why = still_due_reason(slot))
+            finished = Outcome.new(slot.name, false, manual, slot.refresh.size, reason: why,
+              rebound: finished.rebound, flow_ids: finished.flow_ids)
+          end
+          settle(st, finished)
+          finished
         ensure
           st.inflight = nil
           ch.close
         end
-        if outcome.ok && (why = still_due_reason(slot))
-          outcome = Outcome.new(slot.name, false, manual, slot.refresh.size, reason: why,
-            rebound: outcome.rebound, flow_ids: outcome.flow_ids)
-        end
-        settle(st, outcome)
         report(outcome)
         @rev &+= 1
         outcome
@@ -554,8 +571,16 @@ module Gori
         end
         watched = watched_times(slot)
         slot.refresh.each_with_index do |id, i|
+          # A refresh outlives nothing it belongs to: once its project closed (a TUI project
+          # switch while a manual refresh was on its own fiber) the remaining steps stay unsent.
+          if @store.closed?
+            return failed(slot, manual, nil, nil, "the project was closed before step #{i + 1}", nil, flows)
+              .copy_with(rebound: rebound_since(slot, watched))
+          end
           if outcome = run_step(slot, id, i + 1, outbound, manual, flows)
-            return outcome
+            # An earlier step may already have rebound part of the slot (step 1's `$BIND.CSRF`
+            # before step 2 was refused): the outcome says so rather than "binding unchanged".
+            return outcome.copy_with(rebound: rebound_since(slot, watched))
           end
         end
         rebound = rebound_since(slot, watched)
@@ -643,7 +668,8 @@ module Gori
           verify: @verify,
           overrides: overrides,
           tls_preset: rec.tls_preset,
-          refresh_slot: slot)
+          refresh_slot: slot,
+          refresh_layer: @bindings)
       end
 
       # The live overrides the TUI handed over, else the project's as they stand now — a

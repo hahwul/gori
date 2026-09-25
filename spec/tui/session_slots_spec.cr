@@ -213,5 +213,7 @@ describe "session slot refresh in the TUI" do
     body = slot_code("tui", "runner", "session_slots.cr").join('\n')
     use = body[/def repeater_use_as_refresh.*?\n  end/m]
     use.index("save_current_repeater").not_nil!.should be < use.index("current_session_db_id").not_nil!
+    # A save the store refused leaves the tab dirty: the picker must not open on the stale row.
+    use.index("current_session_dirty?").not_nil!.should be < use.index("LibraryPicker.new").not_nil!
   end
 end
