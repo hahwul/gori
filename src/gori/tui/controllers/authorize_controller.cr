@@ -124,7 +124,10 @@ module Gori::Tui
         # seam, so an edit that cleared them re-pointed the operator's `$SESSION` at the global
         # table while the card went on showing the identity they meant. `gori run session edit`
         # and MCP `update_session_slot` both keep them; this was the one surface that did not.
+        # The refresh STEPS are the same kind of thing (#1233): the form shows them and edits
+        # only their policy, so the list's steps stand.
         list[i] = identity.with_baseline(list[i].baseline?).with_rules(list[i].rules)
+          .copy_with(refresh: list[i].refresh)
       else
         list << identity.with_baseline(false)
       end
@@ -148,7 +151,8 @@ module Gori::Tui
       # deleted by this whole-list save, with no error and no row that ever showed it existed.
       # Same refresh and the same reason as MCP's `fresh_slots`.
       @host.session.slots.reload
-      merged = merge_peer_slots(list, @host.session.slots.slots)
+      fresh = @host.session.slots.slots
+      merged = carry_refresh_steps(merge_peer_slots(list, fresh), fresh)
       # Through the live registry, not `set_setting`: `SessionSlots#save` persists the same row
       # AND updates the object every send seam consults, dropping the active pointer when the
       # slot it named is gone. Writing the row by hand left the two out of step — the tab
@@ -173,6 +177,18 @@ module Gori::Tui
     #   in `fresh`, in neither base nor `list` -> a peer ADDED it: carry it over
     #   in base and in `list`, not in `fresh`  -> a peer DELETED it: drop it
     #   in base, not in `list`                 -> the OPERATOR deleted it: stays deleted
+    # The PERSISTED refresh steps onto every slot this card is about to save (#1233). The card
+    # never edits steps — they are appended from a Repeater sub-tab (`space → b`), `gori run
+    # session edit --refresh` or MCP, often while this card's cached list is older — so a
+    # whole-list save built from the cache would silently drop every step added since.
+    private def carry_refresh_steps(list : Array(Authorize::Identity),
+                                    fresh : Array(Authorize::Identity)) : Array(Authorize::Identity)
+      list.map do |s|
+        persisted = fresh.find(&.name.==(s.name))
+        persisted && persisted.refresh != s.refresh ? s.copy_with(refresh: persisted.refresh) : s
+      end
+    end
+
     private def merge_peer_slots(list : Array(Authorize::Identity),
                                  fresh : Array(Authorize::Identity)) : Array(Authorize::Identity)
       base = @identities_base

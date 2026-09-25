@@ -137,7 +137,9 @@ describe AuthorizeIdentityOverlay do
       ov.selected.should eq(AuthorizeIdentityOverlay::REMOVE_ROW)
       ov.handle_key(okey(Termisu::Input::Key::Down))
       ov.selected.should eq(AuthorizeIdentityOverlay::EDITOR_ROW)
-      # a one-line buffer is at both edges, so the next ↓ leaves for Save
+      # a one-line buffer is at both edges, so the next ↓ leaves for the refresh policy (#1233)
+      ov.handle_key(okey(Termisu::Input::Key::Down))
+      ov.selected.should eq(AuthorizeIdentityOverlay::POLICY_ROW)
       ov.handle_key(okey(Termisu::Input::Key::Down))
       ov.selected.should eq(AuthorizeIdentityOverlay::SAVE_ROW)
     end
@@ -145,6 +147,8 @@ describe AuthorizeIdentityOverlay do
     it "walks back up out of the Save row" do
       ov = AuthorizeIdentityOverlay.new(Identity.new("x"))
       ov.set_selected(AuthorizeIdentityOverlay::SAVE_ROW)
+      ov.handle_key(okey(Termisu::Input::Key::Up))
+      ov.selected.should eq(AuthorizeIdentityOverlay::POLICY_ROW)
       ov.handle_key(okey(Termisu::Input::Key::Up))
       ov.selected.should eq(AuthorizeIdentityOverlay::EDITOR_ROW)
     end
@@ -156,7 +160,35 @@ describe AuthorizeIdentityOverlay do
       2.times { ov.handle_key(okey(Termisu::Input::Key::Down)) } # caret walks to the last line
       ov.selected.should eq(AuthorizeIdentityOverlay::EDITOR_ROW)
       ov.handle_key(okey(Termisu::Input::Key::Down)) # now at the bottom → leave
-      ov.selected.should eq(AuthorizeIdentityOverlay::SAVE_ROW)
+      ov.selected.should eq(AuthorizeIdentityOverlay::POLICY_ROW)
+    end
+  end
+
+  # The refresh half (#1233): the steps are read-only here, the policy is a field, and an
+  # unparseable policy refuses the save by name.
+  describe "refresh" do
+    it "keeps the slot's steps and takes the policy from the field" do
+      policy = Gori::SessionSlot::RefreshBefore.parse?("ttl=10m").not_nil!
+      ov = AuthorizeIdentityOverlay.new(Identity.new("admin", refresh: [7_i64], refresh_before: policy),
+        0, [] of String, ["login"])
+      built = ov.build_identity.not_nil!
+      built.refresh.should eq([7_i64])
+      built.refresh_before.to_s.should eq("ttl=10m")
+      ov.set_selected(AuthorizeIdentityOverlay::POLICY_ROW)
+      ov.text_fields.last.set("jwt-exp")
+      ov.build_identity.not_nil!.refresh_before.kind.jwt_exp?.should be_true
+      ov.text_fields.last.set("sometimes")
+      ov.refusal.not_nil!.should contain("refresh before")
+      ov.build_identity.should be_nil
+    end
+
+    it "shows the steps it will run" do
+      b = MemoryBackend.new(100, 30)
+      ov = AuthorizeIdentityOverlay.new(Identity.new("admin", refresh: [1_i64, 2_i64]), 0,
+        [] of String, ["csrf-fetch", "login"])
+      ov.render(Screen.new(b), Rect.new(0, 0, 100, 30))
+      b.contains?("refresh:  csrf-fetch → login").should be_true
+      b.contains?("refresh before:").should be_true
     end
   end
 
