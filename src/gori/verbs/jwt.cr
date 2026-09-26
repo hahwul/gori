@@ -23,7 +23,7 @@ module Gori
         Verb::Scope::Jwt, [Verb::Chord.new("t", ctrl: true)],
         available: in_jwt, menu: :palette) { |ctx| ctx.jwt_toggle_mode; nil }
       r.register Verb::Definition.new(
-        "jwt.cycle-alg", "Cycle signing alg", "Cycle the signing algorithm: HS256 / HS384 / HS512 / none",
+        "jwt.cycle-alg", "Cycle signing alg", "Cycle the signing algorithm: HS256/384/512, then RS/PS/ES/EdDSA (PEM key), then none",
         Verb::Scope::Jwt, [Verb::Chord.new("a", ctrl: true)], available: in_jwt, menu: :palette) { |ctx| ctx.jwt_cycle_alg; nil }
       r.register Verb::Definition.new(
         "jwt.load-decoded", "Load decoded claims", "Seed the ENCODE editors from the INPUT token's header + payload",

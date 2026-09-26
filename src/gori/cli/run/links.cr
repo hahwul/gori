@@ -13,7 +13,7 @@ module Gori
       # composes verbs and a verb that silently did two things is a worse contract. So say
       # which verb does both rather than making the caller discover it.
       ADD_KEEPS_NO_BYTES = "\nA pointer only. For a flow or repeater whose bytes must survive, use\n" \
-                           "`gori run evidence freeze --link` (it links too)."
+                           "`gori run evidence freeze` (it links too, unless --no-link)."
 
       @[Subcommand("links", help: [
         {"links", "List/add/delete an issue's or note's evidence links"},

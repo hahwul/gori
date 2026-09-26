@@ -2285,9 +2285,10 @@ module Gori
           j.field "description", description
           # The hints a client uses to decide what it may run unattended. `readOnlyHint` is
           # the one that matters here — a workbench whose action tools send attack traffic
-          # has to be able to say which of its 179 tools only read — and it is derived from
-          # the same declaration `--read-only` enforces, so the hint and the gate cannot
-          # drift apart.
+          # has to be able to say which of its tools only read — and it is derived from the
+          # same `@[Tool]` declaration `--read-only` enforces (`read_only` defaults to
+          # `!gated`), so the two differ only on the short list of exceptions spelled there
+          # (see the `read_only` note in tool.cr).
           #
           # `openWorldHint` is emitted only where we can answer it. A read tool answers from
           # this project's store and never dials, so it is closed-world; an action tool may

@@ -33,7 +33,7 @@ module Gori::CLI
       p.on("--project=NAME", "Serve a named project's db") { |v| project = v }
       p.on("--use-active-project", "Ignore the current Git workspace and serve the active TUI/MRU project") { use_active_project = true }
       p.on("--no-project", "Start unbound even inside a Git workspace (agent picks via list/create/switch)") { no_project = true }
-      p.on("--insecure-upstream", "send_request: skip upstream TLS verification") { insecure_upstream = true }
+      p.on("--insecure-upstream", "Skip upstream TLS verification for every tool that sends (send_request, fuzz, grpc_reflect, session refresh, OAST, …)") { insecure_upstream = true }
       p.on("--read-only", "Disable action tools (send_request, create/update_issue); serve the project without a writer") { read_only = true }
       p.on("--tools=SPEC", mcp_tools_help) { |v| tools_spec = v }
       p.on("--install-agy", "Install gori as an MCP server in Antigravity (~/.gemini/antigravity-cli/mcp_config.json)") { install_targets << "agy" }

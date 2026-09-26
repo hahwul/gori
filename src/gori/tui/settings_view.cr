@@ -82,7 +82,7 @@ module Gori::Tui
       Field.new("Strip HTTP/3 Alt-Svc", "remove Alt-Svc alternatives advertising h3 from the response the client gets, so a browser cannot switch to QUIC/UDP where gori sees nothing — Alt-Svc: clear and non-h3 alternatives are left alone; ←/→/space toggles", bool: true),
       Field.new("TLS passthrough", "comma-separated hosts to relay WITHOUT decrypting (for certificate-pinned apps) — acme.test covers subdomains, *.acme.test globs; nothing is captured for them"),
       Field.new("Upstream rules",
-        "per-host routing / proxy auth — edit with `gori settings --edit` (network.upstream_rules)",
+        "per-host routing / proxy auth — edit with `gori settings --edit` (upstream_rules)",
         readonly: true),
       Field.new("Environment proxy",
         "HTTPS_PROXY / HTTP_PROXY / ALL_PROXY as this process sees them — the route while Proxy protocol is None and no project pin or rule claims the host (a `*` rule shadows them entirely); localhost stays direct, NO_PROXY exceptions apply; set a proxy above or unset the variable to change it",
