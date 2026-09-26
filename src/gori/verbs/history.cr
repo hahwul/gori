@@ -1073,9 +1073,10 @@ module Gori
       register_activity(r)
       register_read_edit(r)
       register_editor(r)
-      r.validate_menu_keys! # fail fast if any scope has a colliding space-menu key
-      r.validate_chords!    # …and on a same-scope chord collision or dead capital, on every OS profile
-      r.validate_intents!   # …and on a menu letter that breaks the intent lexicon (Verb::Lexicon)
+      r.register_family_openers # last: a family's bare key, in every scope that has a member
+      r.validate_menu_keys!     # fail fast if any scope has a colliding space-menu key
+      r.validate_chords!        # …and on a same-scope chord collision or dead capital, on every OS profile
+      r.validate_intents!       # …and on a menu letter that breaks the intent lexicon (Verb::Lexicon)
       r
     end
   end

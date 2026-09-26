@@ -31,6 +31,8 @@ module Gori::Tui
       {"GLOBAL", [
         Item.new("^P", "command palette", "app.palette"),
         Item.new("space", "focus-area action menu"),
+        # The family's bare key (`Verb::Family#chord`, #1295): no `space` needed on a tab that sends flows.
+        Item.new(">", "send flow to… card, where the tab has one"),
         Item.new("c", "toggle capture", "capture.toggle"),
         Item.new("i", "toggle intercept", "intercept.toggle"),
         Item.new("s", "toggle scope lens (or click scope:N)", "scope.toggle-lens"),

@@ -57,9 +57,14 @@ module Gori
       # After a member runs, re-open this card at the same row instead of closing — for the
       # toggle families, whose rows show their state (`ExecContext#menu_state`).
       getter? sticky : Bool
+      # A bare key that opens this card straight from a tab that has the family, without the
+      # `space` first (#1295): Send flow to…'s `>`, the same key its row wears, so a dropped
+      # `space` lands in the same card. `Registry#register_family_openers` binds it once per
+      # scope that registers a member, as a hidden verb that opens the menu and descends.
+      getter chord : Chord?
 
       def initialize(@id : Symbol, @title : String, @key : Char, @group : Symbol,
-                     @letters : Array({Symbol, Char}), @sticky : Bool = false)
+                     @letters : Array({Symbol, Char}), @sticky : Bool = false, @chord : Chord? = nil)
       end
 
       def intents : Array(Symbol)

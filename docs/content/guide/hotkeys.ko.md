@@ -302,6 +302,8 @@ Rewriter와 Colormarker의 **Enable/disable everywhere**가 `T`인 이유가 이
 두 카드 모두 Sequencer가 `s`이고, Decoder는 거기서 이미 쓰던 `d`를 그대로 가지므로 Discover가
 `D`입니다.
 
+- **`>`만 눌러도 이 카드가 열립니다.** 이 행이 있는 모든 탭에서 `>` `f`는 `Space` 없이 Fuzzer로
+  보내고, `Space`를 빠뜨려도 같은 카드에 도착합니다. `>`를 다른 동작에 쓰는 탭은 없습니다.
 - **Send to Repeater는 자기 글자도 그대로 가집니다.** History, 상세, Sitemap, Probe, Evidence,
   이슈에서는 `r`, `r`이 탭을 실행하는 Fuzzer와 Miner에서는 `R`입니다.
 - `>` 행은 탭에 보내기 동작이 있으면 선택한 것이 없어도 그려집니다. 그때 카드는

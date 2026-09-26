@@ -4155,6 +4155,16 @@ module Gori::Tui
       @space_menu_open = true
     end
 
+    # A family's card straight from the tab (`Verb::Family#chord`, the bare `>` of Send flow
+    # to…, #1295): the menu opened exactly as `space` opens it, then descended as the family
+    # row's key descends — so the bare key and `space >` are one path and one card. Where the
+    # view draws no row for the family, level 1 stays up rather than nothing happening.
+    def open_space_family(family : Symbol) : Nil
+      return unless f = @session.registry.family(family)
+      open_space_menu
+      @space_menu.descend(f) if @space_menu_open
+    end
+
     private def close_space_menu : Nil
       @space_menu_open = false
       @space_menu_here = nil

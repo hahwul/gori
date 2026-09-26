@@ -9,7 +9,9 @@ module Gori
     # Repeater is `pinned:` on every tab that has it, so it keeps its level-1 letter (`r`, or
     # `R` where `r` runs the tab) and `space > r` also reaches it everywhere. Active scan and
     # Mock stay direct rows: one scans and one creates a rule, neither hands the flow on.
-    SEND_FLOW = Verb::Family.new(:send_flow, "Send flow to…", '>', :send, [
+    # A bare `>` opens the card from the tab too (`chord:`, #1295): no scope and no Global
+    # binds `>`, and a hand that drops the `space` before `> f` still lands in the card.
+    SEND_FLOW = Verb::Family.new(:send_flow, "Send flow to…", '>', :send, chord: Verb::Chord.new(">"), letters: [
       {:to_repeater, Verb::TOOL_LETTERS[:repeater]},
       {:to_fuzzer, Verb::TOOL_LETTERS[:fuzzer]},
       {:to_comparer, Verb::TOOL_LETTERS[:comparer]},

@@ -55,6 +55,9 @@ module Gori
 
       # overlays
       abstract def open_palette : Nil
+      # Open the space menu already inside `family`'s card (`Verb::Family#chord`: the bare `>`
+      # of Send flow to…, #1295), through the menu's own open + descend.
+      abstract def open_space_family(family : Symbol) : Nil
       abstract def open_notifications : Nil # open the notification center (background-job results)
       # Open the TLS-passthrough list: hosts relayed WITHOUT decryption, so nothing was
       # captured for them. Its own intent rather than a settings jump — the answer is runtime

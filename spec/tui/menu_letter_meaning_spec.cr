@@ -160,15 +160,23 @@ module MenuLetterMeaning
     chord = chord_for(v.key)
     e = editor_view?(v) ? keymap.lookup_in(chord, Gori::Verb::Scope::Editor) : nil
     e = nil if e && !live_where_shown?(Gori::Verbs.registry[e], v)
-    found[{v.id, e}] << where if e && e != v.id
+    found[{v.id, e}] << where if e && !same_meaning?(e, v)
     id = keymap.lookup_in(chord, v.scope)
-    if id && id != v.id && live_where_shown?(Gori::Verbs.registry[id], v)
+    if id && !same_meaning?(id, v) && live_where_shown?(Gori::Verbs.registry[id], v)
       found[{v.id, id}] << where
     end
     return if id && live_everywhere_shown?(Gori::Verbs.registry[id], v)
     if g = global_fallthrough(keymap, chord, v, e)
       found[{v.id, g}] << where
     end
+  end
+
+  # The key answers what the row answers: the row's own verb, or — for a family row — the
+  # hidden verb its family's bare key binds (`Registry#register_family_openers`, #1295), which
+  # opens that same card. A dropped `space` before `>` lands where `space >` does.
+  def same_meaning?(other : String, v : Row) : Bool
+    return true if other == v.id
+    (fid = Gori::Verbs.registry.opens_family(other)) ? "family:#{fid}" == v.id : false
   end
 
   # The sections this row is drawn in, or nil for every one: a COMMON row and a SUB-TABS

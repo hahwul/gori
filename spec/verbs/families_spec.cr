@@ -67,6 +67,54 @@ describe "Send flow to… (#1274 WP9)" do
     end
   end
 
+  # A bare `>` is the family's own key without the `space` (#1295): bound in every scope that
+  # has a member, to a hidden verb whose one intent is to open this card, and nowhere Global,
+  # so on a tab without the family it stays unbound instead of reaching something else.
+  it "binds a bare `>` to this card in every scope that has a member, and nowhere else" do
+    reg = Gori::Verbs.registry
+    family.chord.should eq(Gori::Verb::Chord.new(">"))
+    chord = family.chord.not_nil!
+    with_members = reg.compact_map { |v| v.scope if v.family == family.id && !v.hidden? }.to_set
+    with_members.should contain(Gori::Verb::Scope::Params) # Mine parameters joined (#1295)
+    Gori::Verb::OsProfile::Os.each do |os|
+      Gori::Verb::Keyset::Kind.each do |ks|
+        km = Gori::Verb::Keymap.build(reg, os, Gori::Verb::Keymap::NO_OVERRIDES, ks)
+        km.lookup_in(chord, Gori::Verb::Scope::Global).should be_nil
+        km.lookup_in(chord, Gori::Verb::Scope::Editor).should be_nil
+        Gori::Verb::Scope.each do |scope|
+          id = km.lookup_in(chord, scope)
+          if with_members.includes?(scope)
+            id.should_not be_nil, scope.to_s
+            reg.opens_family(id.not_nil!).should eq(family.id)
+          else
+            id.should be_nil, scope.to_s
+          end
+        end
+      end
+    end
+    with_members.each do |scope|
+      opener = reg.find! { |v| v.scope == scope && reg.opens_family(v.id) == family.id }
+      opener.hidden?.should be_true # no row, no palette entry: it IS the family row's key
+      ctx = FakeExecContext.new
+      opener.call(ctx)
+      ctx.calls.should eq([FakeExecContext::Call.new(:open_space_family, ["send_flow"])])
+    end
+  end
+
+  it "lands the bare `>` in the card `space >` opens, on every tab that binds it" do
+    # `Runner#open_space_family` is `open_space_menu` + `SpaceMenu#descend`; the descent is
+    # what must hold in each scope, from the view `space` would have opened.
+    reg = Gori::Verbs.registry
+    reg.select { |v| reg.opens_family(v.id) == family.id }.each do |opener|
+      ctx = FakeExecContext.new
+      ctx.selected = 5_i64
+      menu = Gori::Tui::SpaceMenu.new(reg)
+      menu.open(opener.scope, :common, ctx, subtabs: reg.has_section?(opener.scope, :subtab))
+      menu.descend(family).should be_true, opener.scope.to_s
+      menu.card_title.should start_with("SPACE › SEND FLOW TO")
+    end
+  end
+
   it "adds no band header to a menu that had none, and joins SEND where the bands exist" do
     reg = Gori::Verbs.registry
     {Gori::Verb::Scope::Repeater => :none, Gori::Verb::Scope::Fuzzer => :none, Gori::Verb::Scope::Miner => :none,

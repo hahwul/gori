@@ -38,6 +38,10 @@ private class FakeContext < ExecContext
     @calls << :open_palette
   end
 
+  def open_space_family(family : Symbol) : Nil
+    @calls << :open_space_family
+  end
+
   def open_notifications : Nil
     @calls << :open_notifications
   end
@@ -2231,6 +2235,26 @@ describe Gori::Verb do
       reg.register(Definition.new("dup", "A", "", Gori::Verb::Scope::Global) { |_| nil })
       expect_raises(Gori::Error, /duplicate/) do
         reg.register(Definition.new("dup", "B", "", Gori::Verb::Scope::Global) { |_| nil })
+      end
+    end
+
+    describe "#register_family_openers (#1295)" do
+      it "binds a family's chord once per scope with a non-hidden member, and nothing for a keyless family" do
+        reg = Registry.new
+        reg.register_family(Gori::Verb::Family.new(:send, "Send to…", '>', :send, [{:to_a, 'a'}], chord: Chord.new(">")))
+        reg.register_family(Gori::Verb::Family.new(:show, "Show…", 'Z', :view, [{:to_z, 'z'}]))
+        reg.register(Definition.new("b.a", "A", "d", Gori::Verb::Scope::Body, intent: :to_a) { |_| nil })
+        reg.register(Definition.new("s.a", "A", "d", Gori::Verb::Scope::Sitemap, intent: :to_a, hidden: true) { |_| nil })
+        reg.register(Definition.new("b.z", "Z", "d", Gori::Verb::Scope::Body, intent: :to_z) { |_| nil })
+        reg.register_family_openers
+        openers = reg.select { |v| reg.opens_family(v.id) }
+        openers.map { |v| {v.id, v.scope} }.should eq([{"send.open.body", Gori::Verb::Scope::Body}])
+        openers[0].chords.should eq([Chord.new(">")])
+        openers[0].hidden?.should be_true
+        ctx = FakeContext.new
+        openers[0].call(ctx)
+        ctx.calls.should eq([:open_space_family])
+        reg.opens_family("b.a").should be_nil
       end
     end
 

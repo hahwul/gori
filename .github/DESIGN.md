@@ -3896,3 +3896,27 @@ the JWT/Cookie lens toggles and others off their natural letters.
   the strip's step right, which from a pane would switch the sub-tab being edited). Tag moved to
   `g`, which ends the one standing R1 pair between a menu letter and the strip's raw keys other
   than rename's `r`.
+
+### 2026-09-26: a family's key works bare, and a chip reads its path from the registry
+
+Refines: the verb-family entries and "a menu letter in UI text is read from the registry"
+above. #1295.
+
+- **A family may bind its own key bare** (`Verb::Family#chord`). Send flow to… does: `>` opens
+  its card from any tab that has a member, through the menu's own open and descend
+  (`Runner#open_space_family`), so the bare key and `space >` are one path. It is bound once per
+  scope by a hidden verb (`Registry#register_family_openers`), never Global, and the R1 guard
+  reads that verb as the family row's own meaning. Display… and Protocol… keep `space`: `Z` and
+  `P` are letters a pane may still want.
+- **A chip is a menu path too.** A border badge or a tight hint spells it with
+  `Hotkeys.menu_chip` (`␣Pr`), and the guard that refuses a literal `space → X` refuses a
+  literal `␣X`. A view takes the session's registry from its controller; without one the chip
+  is a bare `␣`.
+- **One chord may advertise two verbs** when one of them answers both panes: the Repeater's
+  `^X` toggles the focused pane's hex, so the response row declares `chord_of:` and shows it. A
+  scope still binds a chord to one verb; boot checks the chord is live in the row's section.
+- **A family row joins a band only beside another row of it.** Where nothing else of its
+  bucket is in the family's band, the row stays with the untagged rows, so no card draws a
+  header over the family row alone (ProbeDetail's `─ SEND ─`).
+- **Show all is one Display… intent** (`:show_all`, `a`): Probe's closed issues and the Params
+  tab's standard headers are the same lens, on the letter both tabs already answer bare.

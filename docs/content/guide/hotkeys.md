@@ -314,6 +314,9 @@ result alike. A tab lists only the tools it can send to. The letters match the
 **Send selection to…** card (`S`): Sequencer is `s` in both, and Decoder keeps the `d` it
 already had there, which is why Discover is `D`.
 
+- **`>` on its own opens the card too**, on every tab that has it: `>` `f` sends to the Fuzzer
+  without the `Space`, and a dropped `Space` still lands in the same card. No tab binds `>` to
+  anything else.
 - **Send to Repeater keeps its own letter too**: `r` on History, the detail, the Sitemap, Probe,
   Evidence and an issue, `R` on the Fuzzer and the Miner, where `r` runs the tab.
 - The `>` row is drawn whenever the tab has a send, even when nothing is selected. The card then

@@ -12,6 +12,7 @@ module Gori
         @by_id = {} of String => Definition
         @order = [] of String
         @families = [] of Family
+        @openers = {} of String => Symbol
       end
 
       def register(verb : Definition) : Nil
@@ -48,6 +49,31 @@ module Gori
 
       def family(id : Symbol) : Family?
         @families.find { |f| f.id == id }
+      end
+
+      # Bind each family's `chord` (`Family#chord`, #1295) in every scope that registers a
+      # non-hidden member: one hidden verb per scope, `<family>.open.<scope>`, whose press opens
+      # the space menu already inside that family's card (`ExecContext#open_space_family`) —
+      # the menu's own path, so no second dispatch. Called once every verb is registered;
+      # `validate_chords!` then holds the key like any other, and the R1 guard reads the verb as
+      # the family row's own meaning (`#opens_family`).
+      def register_family_openers : Nil
+        @families.each do |f|
+          next unless chord = f.chord
+          fid = f.id
+          scopes = compact_map { |v| v.scope if v.family == fid && !v.hidden? }.uniq!
+          scopes.each do |scope|
+            id = "#{fid.to_s.tr("_", "-")}.open.#{scope.to_s.underscore.tr("_", "-")}"
+            register(Definition.new(id, f.title, "Open the #{f.title} card", scope, [chord],
+              hidden: true) { |ctx| ctx.open_space_family(fid); nil })
+            @openers[id] = fid
+          end
+        end
+      end
+
+      # The family `id` opens straight from its tab (a `#register_family_openers` verb), or nil.
+      def opens_family(id : String) : Symbol?
+        @openers[id]?
       end
 
       def families : Array(Family)
