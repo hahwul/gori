@@ -52,6 +52,8 @@ private HANDLED_BY_CONTROLLER = {
   Gori::Verb::Scope::HostOverrides,   #   ″
   Gori::Verb::Scope::Env,             #   ″
   Gori::Verb::Scope::ProjectActivity, #   ″
+  Gori::Verb::Scope::ProjectSettings, #   ″ (settings → :subtabs)
+  Gori::Verb::Scope::Help,            # HelpController#handle_body_key → :menu
   Gori::Verb::Scope::Authorize,       # AuthorizeController#handle_body_key → :menu
 }
 

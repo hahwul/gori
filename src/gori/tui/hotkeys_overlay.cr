@@ -312,7 +312,7 @@ module Gori::Tui
           next
         end
         scope = SCOPE_LABEL[row.scope]? || row.scope.to_s.upcase
-        chord = effective_chord(row.verb_id).try(&.label) || "(unbound)"
+        chord = chord_label(row.verb_id)
         next unless "#{scope} #{row.title} #{chord}".downcase.includes?(needle)
         if h = header
           out << h
@@ -363,9 +363,38 @@ module Gori::Tui
       (r = @rows[@selected]?) ? r.kind == :binding : false
     end
 
+    # A keyless `chord_of` verb (`repeater.toggle-resp-hex`) follows the verb it names, working
+    # copy included: its row shows that key, and a rebind of the owner moves it.
     private def effective_chord(id : String) : Verb::Chord?
       return @overrides[id] if @overrides.has_key?(id)
+      if via = via_of(id)
+        return effective_chord(via)
+      end
       Hotkeys.default_for(@registry, id, @profile)
+    end
+
+    # The verb whose key `id` borrows (`Definition#chord_of`), unless the operator bound `id`
+    # itself.
+    private def via_of(id : String) : String?
+      return nil if @overrides.has_key?(id)
+      @registry[id]?.try(&.chord_of)
+    end
+
+    # The chord column: `^X (via Toggle hex edit)` for a borrowed key, `(unbound)` for none.
+    private def chord_label(id : String) : String
+      return "(unbound)" unless chord = effective_chord(id)
+      return chord.label unless via = via_of(id)
+      "#{chord.label} (via #{@registry[via]?.try(&.title) || via})"
+    end
+
+    # A borrowed key is its owner's to move: rebinding, unbinding or resetting the borrower
+    # would change nothing the operator presses (the owner's chord still reaches it), so the
+    # row says where the key lives instead.
+    private def refuse_borrowed? : Bool
+      return false unless via = via_of(selected_id)
+      @feedback_kind = :error
+      @feedback = "this key follows #{@registry[via]?.try(&.title) || via}: change that row"
+      true
     end
 
     private def overridden?(id : String) : Bool
@@ -408,6 +437,7 @@ module Gori::Tui
     # --- capture sub-mode ---
     def begin_capture : Nil
       return unless selected_binding?
+      return if refuse_borrowed?
       @mode = :capture
       @feedback_kind = :hint
       @feedback = "press a key to bind · esc cancel"
@@ -447,6 +477,7 @@ module Gori::Tui
 
     def unbind_selected : Nil
       return unless selected_binding?
+      return if refuse_borrowed?
       @overrides[selected_id] = nil
       @feedback_kind = :ok
       @feedback = "unbound"
@@ -454,6 +485,7 @@ module Gori::Tui
 
     def reset_selected : Nil
       return unless selected_binding?
+      return if refuse_borrowed?
       @overrides.delete(selected_id)
       @feedback_kind = :ok
       @feedback = "reset to default"
@@ -569,9 +601,8 @@ module Gori::Tui
       screen.cell(box.x + 3, ry, ov ? '●' : '·', ov ? Theme.accent : Theme.muted, bg)
 
       mark_x = box.right - 2
-      chord = effective_chord(r.verb_id) # resolve once (label + unbound flag derive from it)
-      clabel = chord.try(&.label) || "(unbound)"
-      unbound = chord.nil?
+      clabel = chord_label(r.verb_id)
+      unbound = effective_chord(r.verb_id).nil?
       cx = mark_x - 1 - clabel.size
       name_w = {cx - (box.x + 5) - 1, 1}.max
       screen.text(box.x + 5, ry, r.title, sel ? Theme.text_bright : Theme.text, bg, width: name_w)

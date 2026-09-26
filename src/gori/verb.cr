@@ -50,6 +50,12 @@ module Gori
       HostOverrides   # the Project tab's HOST OVERRIDES list has focus
       Env             # the Project tab's ENVIRONMENT var list has focus
       ProjectActivity # the Project tab's ACTIVITY pane has focus (the #124 event feed)
+      # Two panes that own every key they want, so no verb is registered here. Each is its own
+      # scope, not History's Body, so a History row (and a static family row such as Send flow
+      # to…, which draws whenever the scope registers a member) cannot reach their space menu
+      # or their bare keys.
+      ProjectSettings # the Project tab's NETWORK settings pane has focus
+      Help            # the Help tab has focus
       PaletteOpen     # the command palette overlay is up
       # The FOCUS dimension the other scopes don't have. Every scope above names a TAB (or an
       # overlay); `Keymap#lookup` is keyed by one of them alone, so a tab whose panes want the

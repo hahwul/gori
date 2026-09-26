@@ -1,6 +1,7 @@
 require "../spec_helper"
 require "../support/fake_context"
 require "../support/memory_backend"
+require "../support/tui_contract"
 
 # The shipped families (#1274 WP9). The engine is spec/verb/family_spec.cr and
 # spec/tui/space_menu_spec.cr; this pins what "Send flow to…" promises an operator.
@@ -132,6 +133,43 @@ describe "Send flow to… (#1274 WP9)" do
     %w[history.probe-active detail.probe-active repeater.probe-active probe.active-rescan
       history.mock-response detail.mock-response].each do |id|
       Gori::Verbs.registry[id].member?.should be_false, id
+    end
+  end
+end
+
+# Help and the Project settings pane once borrowed History's Body scope, so the family rows
+# (static: drawn whenever the scope registers a member) and the bare `>` opened dead cards on
+# them. Each pane owns its keys, and its scope registers nothing: space says "no commands for
+# this area" there, and `>` is unbound.
+describe "a pane that owns its keys (Help, Project settings)" do
+  it "draws no row and binds no `>`, from the pane or from the tab bar" do
+    reg = Gori::Verbs.registry
+    keymap = Gori::Verb::Keymap.build(reg)
+    scopes = {} of Symbol => Gori::Verb::Scope
+    TuiContract.with_session("owned-keys") do |session|
+      TuiContract.each_controller(session) do |controller, _host|
+        case controller
+        when Gori::Tui::HelpController
+          scopes[:help] = controller.command_scope
+        when Gori::Tui::ProjectController
+          controller.jump_subtab(Gori::Tui::ProjectView::PANES.index!(:settings))
+          scopes[:project] = controller.command_scope
+        end
+      end
+    end
+    scopes.should eq({:help => Gori::Verb::Scope::Help, :project => Gori::Verb::Scope::ProjectSettings})
+    scopes.each do |tab, scope|
+      reg.none? { |v| v.scope == scope }.should be_true, scope.to_s
+      ctx = FakeExecContext.new
+      ctx.current_tab = tab
+      ctx.selected = 5_i64
+      {:body, :menu}.each do |focus|
+        here = Gori::Tui::ActionContext.capture(reg, detail: false, focus: focus, scope: scope, pane_section: :common)
+        menu = Gori::Tui::SpaceMenu.new(reg)
+        menu.open(here.scope, here.section, ctx, subtabs: here.subtabs)
+        menu.entries.should be_empty, "#{scope} (#{focus})"
+      end
+      keymap.lookup(Gori::Verb::Chord.new(">"), scope).should be_nil
     end
   end
 end

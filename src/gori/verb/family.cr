@@ -1,20 +1,5 @@
 module Gori
   module Verb
-    # A verb FAMILY: one row in the space menu that opens a second level holding its members
-    # (#1274 WP9). "Send flow to…" is one row with a key of its own, and inside it `f` is
-    # Fuzzer on every tab, because at that level nothing else competes for the letter.
-    #
-    # Membership reuses `Definition#intent`: a verb whose intent appears in `letters` is a
-    # member (`Registry#register_family` tags it), and the table is the ONLY place a member's
-    # second-level letter is spelled, so the same intent reads the same letter in every scope
-    # by construction. The order of `letters` is the order of the rows at level 2.
-    #
-    # A member has no first-level letter of its own (`Definition#menu_key` is nil) unless it is
-    # `pinned:`, which draws it at level 1 as well, under its own letter — the loop action a
-    # tab should not have to reach through a second key.
-    #
-    # Registered on the Registry rather than kept in a constant, so a spec builds a small
-    # registry with a demo family the way it builds demo verbs.
     # One letter per destination TOOL, shared by every card that hands something to a tool:
     # the "Send flow to…" family's level 2 and the "Send selection to…" picker
     # (`Tui::SendMenu`). "Sequencer is `s`" then holds in both cards by construction. Decoder
@@ -33,6 +18,22 @@ module Gori
       :cookie    => 'k',
     } of Symbol => Char
 
+    # A verb FAMILY: one row in the space menu that opens a second level holding its members
+    # (#1274 WP9). "Send flow to…" is one row with a key of its own, and inside it `f` is
+    # Fuzzer on every tab, because at that level nothing else competes for the letter.
+    #
+    # Membership reuses `Definition#intent`: a verb whose intent appears in `letters` is a
+    # member (`Registry#register_family` tags it), and the table is the ONLY place a member's
+    # second-level letter is spelled, so the same intent reads the same letter in every scope
+    # by construction. The order of `letters` is the order of the rows at level 2.
+    #
+    # A member has no first-level letter of its own (`Definition#menu_key` is nil) unless it is
+    # `pinned:`, which draws it at level 1 as well, under its own letter — the loop action a
+    # tab should not have to reach through a second key.
+    #
+    # A family is a plain value: the shipped ones are constants (`verbs/families.cr`) that a
+    # registry learns through `Registry#register_family`, so a spec builds a small registry
+    # with a demo family the way it builds demo verbs.
     struct Family
       # The bands a family row may sit in: `Tui::SpaceMenu::GROUP_ORDER` plus the untagged
       # `:none`. `verb/` does not name `Tui`, so the list is spelled here and

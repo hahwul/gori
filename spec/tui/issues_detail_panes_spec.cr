@@ -61,6 +61,7 @@ private def detail(store, links = 0, &)
   end
   store.update_issue(id, notes: "alpha\nbravo\ncharlie").should be_true
   view = IssuesView.new
+  view.menu_registry = Gori::Verbs.registry
   view.reload(store)
   view.open_detail(store).should be_true
   yield view, id
@@ -176,7 +177,31 @@ describe "the Issues detail's two panes" do
           # `shared_chrome_spec` keeps counts out of card titles — the title's width is what a
           # badge's `min_x` is derived from — so the count rides the right-aligned meta slot.
           row.should_not contain("RELATED (")
-          row.should contain("2 · space l")
+          # Spelled from the registry, never typed: Manage links is `L`, and a bare `l` moves
+          # the menu's column.
+          row.should contain("2 · ␣L")
+        end
+      end
+    end
+
+    it "names the retest route, not a space-menu letter Retest does not have" do
+      with_store do |store|
+        detail(store) do |view, id|
+          rid = store.insert_repeater(target: "https://a.test", request: "GET / HTTP/1.1\r\nHost: a.test\r\n\r\n".to_slice,
+            http2: false, auto_cl: true, flow_id: nil, position: store.next_repeater_position)
+          store.add_retest_step(id, :variant, Gori::Store::LinkRefKind::Repeater, rid)[1].ok?.should be_true
+          view.refresh_retest_summary(store)
+          # Retest is palette-only (#1282): its route is its chord.
+          view.retest_summary.not_nil!.should end_with(" · ⇧R")
+        end
+      end
+    end
+
+    it "names Manage links by its menu path when RELATED is empty" do
+      with_store do |store|
+        detail(store) do |view|
+          backend = render(view)
+          (0...20).map { |y| backend.row(y) }.join('\n').should contain("(none — space → L to link")
         end
       end
     end

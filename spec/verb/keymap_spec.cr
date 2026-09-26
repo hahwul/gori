@@ -56,6 +56,26 @@ describe Gori::Verb::Keymap do
       km.lookup(Chord.new("x", ctrl: true), Gori::Verb::Scope::Body).should eq("g.x") # Global fallback
       km.lookup(Chord.new("y"), Gori::Verb::Scope::Body).should eq("b.x")
     end
+
+    # `>` was free before #1295 bound it to Send flow to… on eleven tabs, so an operator could
+    # have put a Global verb there. That explicit choice beats the hidden per-tab openers,
+    # which the lookup would otherwise answer first on exactly those tabs.
+    it "lets a user's Global chord win over a family opener's default" do
+      reg = Gori::Verbs.registry
+      gt = Chord.new(">")
+      km = Keymap.build(reg, OsProfile::Os::Linux, {"nav.next-tab" => [gt]})
+      openers = reg.select { |v| reg.opens_family(v.id) }
+      openers.size.should be > 5
+      openers.each do |opener|
+        km.lookup(gt, opener.scope).should eq("nav.next-tab"), opener.scope.to_s
+      end
+      # A tab verb the operator put on `>` still wins in its own scope, and without any
+      # override the openers are back.
+      km = Keymap.build(reg, OsProfile::Os::Linux, {"nav.next-tab" => [gt], "repeater.send" => [gt]})
+      km.lookup(gt, Gori::Verb::Scope::Repeater).should eq("repeater.send")
+      km = Keymap.build(reg, OsProfile::Os::Linux)
+      openers.each { |opener| km.lookup(gt, opener.scope).should eq(opener.id) }
+    end
   end
 
   describe ".parse_overrides" do

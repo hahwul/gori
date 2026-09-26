@@ -18,7 +18,11 @@ require "../spec_helper"
 #   • the sub-tab strip's raw keys (`Runner#handle_subtabs_key`), which the keymap cannot
 #     see — with the strip focused the menu shows COMMON + SUB-TABS;
 #   • the Global fallback, for a letter the tab does not bind (or binds only pane-gated
-#     elsewhere): a dropped space on a menu `c` silently stops capture.
+#     elsewhere): a dropped space on a menu `c` silently stops capture;
+#   • the TAB BAR, where the menu still lists the tab's rows (`ActionContext.capture` with
+#     focus :menu: COMMON, the `:tab` section, their family rows, and the SUB-TABS bucket —
+#     expanded, or folded under `T` when the bar's view is COMMON) but a bare key resolves
+#     Sidebar → Global (`Runner#current_scope`), never through the tab's own scope.
 #
 # A family row (#1274 WP9) is a menu letter like any other at level 1, so its key is swept
 # too, as the row `family:<id>` drawn wherever the scope registers a member. Level-2 letters
@@ -112,6 +116,43 @@ module MenuLetterMeaning
     Gori::Verb::Registry::SUBTAB_SECTIONS.includes?(section)
   end
 
+  # The scopes no tab bar opens a menu for: Global, Editor and Sidebar are not tabs, the
+  # History detail and the palette are overlays (`Runner#current_scope` answers them first).
+  NO_TAB_BAR = {Gori::Verb::Scope::Global, Gori::Verb::Scope::Editor, Gori::Verb::Scope::Sidebar,
+                Gori::Verb::Scope::HistoryDetail, Gori::Verb::Scope::PaletteOpen}
+
+  # The level-1 rows the menu draws when the TAB BAR has focus on a tab whose scope is
+  # `scope`: the view `ActionContext.capture` builds for focus :menu, read off the registry
+  # the way `SpaceMenu` reads it — static family rows included, availability ignored.
+  def tab_bar_rows : Array(Row)
+    reg = Gori::Verbs.registry
+    fold = Gori::Verb::Registry::SUBTABS_FOLD
+    scopes = reg.compact_map { |v| v.scope unless v.hidden? || NO_TAB_BAR.includes?(v.scope) }.uniq!
+    scopes.flat_map do |scope|
+      here = Gori::Tui::ActionContext.capture(reg, detail: false, focus: :menu, scope: scope, pane_section: :common)
+      folds = Gori::Verb::Registry.folds?(here.section, here.subtabs)
+      view = reg.registered_in_view(scope, here.section, here.subtabs)
+      rows = view.compact_map do |v|
+        next if folds && Gori::Verb::Registry.folded?(v)
+        (k = v.menu_key) ? Row.new(v.id, k, scope, [here.section]) : nil
+      end
+      view.compact_map(&.family).uniq!.each do |fid|
+        rows << Row.new("family:#{fid}", reg.family(fid).not_nil!.key, scope, [here.section])
+      end
+      rows << Row.new("family:#{fold.id}", fold.key, scope, [here.section]) if folds && view.any? { |v| Gori::Verb::Registry.folded?(v) }
+      rows
+    end
+  end
+
+  # A tab-bar row's letter, typed on the bar: Sidebar first, then Global.
+  private def check_tab_bar(found, keymap : Gori::Verb::Keymap, v : Row, where : String,
+                            ks : Gori::Verb::Keyset::Kind) : Nil
+    chord = chord_for(v.key)
+    other = keymap.lookup_in(chord, Gori::Verb::Scope::Sidebar) || keymap.lookup_in(chord, Gori::Verb::Scope::Global)
+    return if other && HARMLESS_GLOBALS.includes?(other)
+    note(found, v, other, "tab bar #{where}", ks)
+  end
+
   # nil for a COMMON row and a pinned SUB-TABS row (every view); the strip's own two sections
   # for any other SUB-TABS row, which a pane view folds into Sub-tabs…; else its section.
   def drawn_in(v : Gori::Verb::Definition) : Array(Symbol)?
@@ -152,11 +193,13 @@ module MenuLetterMeaning
   def violations : Hash(Pair, Set(String))
     found = Hash(Pair, Set(String)).new { |h, k| h[k] = Set(String).new }
     menu = rows
+    bar = tab_bar_rows
     Gori::Verb::OsProfile::Os.each do |os|
       Gori::Verb::Keyset::Kind.each do |ks|
         keymap = Gori::Verb::Keymap.build(Gori::Verbs.registry, os, Gori::Verb::Keymap::NO_OVERRIDES, ks)
         where = "#{Gori::Verb::Keyset.name_of(ks)}/#{os.to_s.downcase}"
         menu.each { |v| check_keymap(found, keymap, v, where, ks) }
+        bar.each { |v| check_tab_bar(found, keymap, v, where, ks) }
       end
     end
     menu.each do |v|
@@ -197,18 +240,12 @@ module MenuLetterMeaning
     (fid = Gori::Verbs.registry.opens_family(other)) ? "family:#{fid}" == v.id : false
   end
 
-  # The sections this row is drawn in, or nil for every one: a COMMON row and a SUB-TABS
-  # bucket row ride every view of the scope (#1055); anything else only its own section(s).
-  def shown_in(v : Row) : Array(Symbol)?
-    v.sections
-  end
-
   # Is `other`'s chord live in SOME section this row is drawn in (`Definition#chord_sections`)?
   # A key gated to the response pane is no clash for a row the request pane alone draws —
   # there the press is not that verb at all.
   def live_where_shown?(other : Gori::Verb::Definition, v : Row) : Bool
     return true unless secs = other.chord_sections
-    return true unless shown = shown_in(v)
+    return true unless shown = v.sections
     shown.any? { |sec| secs.includes?(sec) }
   end
 
@@ -216,7 +253,7 @@ module MenuLetterMeaning
   # scope (`Keymap#resolve`) and may reach Global — so a pane gate on `c` is still caught.
   def live_everywhere_shown?(other : Gori::Verb::Definition, v : Row) : Bool
     return true unless secs = other.chord_sections
-    return false unless shown = shown_in(v)
+    return false unless shown = v.sections
     shown.all? { |sec| secs.includes?(sec) }
   end
 
@@ -240,19 +277,33 @@ module MenuLetterMeaning
   end
 end
 
+# The maintainer's decision for the tab bar (2026-09-26): its menu lists the tab's rows, but
+# its bare keys are app-level, so Global's `c`/`i` win there. A tab's own loop letter keeps
+# its place in the menu rather than moving for a focus the operator leaves with ↵.
+TAB_BAR_GLOBAL_WINS = "the tab bar is app-level focus: Global keys win there by design; the letter is the tab's own loop key"
+
 # The standing exceptions, keyed by the exact pair so a later, unrelated row on the same
 # letter is still caught. The #1274 work packages delete their own lines.
 MENU_LETTER_ALLOWED = {
   # WP2 — menu letters another verb of the same tab answers.
   {"issue.set-severity", "issue.goto-link"}              => "WP2 #7: documented at verbs/issues.cr (severity keeps `s` in the menu)",
   {"probe.scope-toggle", "probe.open-evidence"}          => "WP2 #8: documented in DESIGN.md §7 2026-09-12 (Probe's `s` is go to source)",
-  {"mine.filter-subtabs", "mine.filter"}                 => "WP2 #9: the strip owns `/` in every view since #1055",
+  {"mine.filter-subtabs", "mine.filter"}                 => "WP2 #9: guard sees Miner's `/` Filter findings; the row is level-1 only on the strip (whose raw `/` is this filter) and the tab bar (no `/`), and `T /` in panes",
   {"comparer.close-subtab", "comparer.swap"}             => "WP2 #11: the strip's `w` close vs the R2 table's `w` swap",
   {"comparer.subtab-mark-clear", "comparer.next-change"} => "WP2 #12: the strip's `N` vs ⇧N next change",
   {"oast.copy", "oast.copy-callback"}                    => "false positive: the LIST's controller arm owns bare `y` (verbs/read_edit.cr)",
   {"colormarker.color-add", "colormarker.add"}           => "false positive: handle_colors_key answers `a` in the colours pane",
   {"colormarker.color-edit", "colormarker.edit"}         => "false positive: handle_colors_key answers `e` in the colours pane",
   {"colormarker.color-delete", "colormarker.delete"}     => "false positive: handle_colors_key answers `d` in the colours pane",
+  # The tab bar (Sidebar → Global), each on the letter Global answers.
+  {"probe.dismiss-selected", "capture.toggle"} => TAB_BAR_GLOBAL_WINS,
+  {"probe.dismiss", "capture.toggle"}          => TAB_BAR_GLOBAL_WINS,
+  {"evidence.compare", "capture.toggle"}       => TAB_BAR_GLOBAL_WINS,
+  {"intercept.direction", "capture.toggle"}    => TAB_BAR_GLOBAL_WINS,
+  {"sequence.configure", "capture.toggle"}     => TAB_BAR_GLOBAL_WINS,
+  {"cookie.crack", "capture.toggle"}           => TAB_BAR_GLOBAL_WINS,
+  {"evidence.issue", "intercept.toggle"}       => TAB_BAR_GLOBAL_WINS,
+  {"authorize.identities", "intercept.toggle"} => TAB_BAR_GLOBAL_WINS,
 } of MenuLetterMeaning::Pair => String
 
 describe "space-menu letters vs the keys the same tab answers (R1)" do

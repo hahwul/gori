@@ -1776,7 +1776,8 @@ module Gori::Tui
       # gets there, rather than "nothing bound here" one row above a header advertising the
       # very key that was pressed (F10).
       if @focus == :menu && (below = body_scope_verb(chord))
-        status(Runner.enter_first_hint(chord, below.title, strip: subtabs_shown?))
+        lands = @tabs[@active_tab]?.try(&.command_section) || :common
+        status(Runner.enter_first_hint(chord, below.title, strip: subtabs_shown?, pane: Runner.gated_pane(below, lands)))
         return
       end
       if hint = Runner.unbound_key_hint(chord)
@@ -2691,6 +2692,13 @@ module Gori::Tui
       verb
     end
 
+    # The pane `verb`'s chord is live in, when ↵ from the tab bar resumes into `lands`, where
+    # it is not (`Definition#chord_sections`); nil when the key works where ↵ lands.
+    def self.gated_pane(verb : Verb::Definition, lands : Symbol) : Symbol?
+      return nil unless secs = verb.chord_sections
+      secs.includes?(lands) ? nil : secs.first?
+    end
+
     private def current_scope : Verb::Scope
       case @overlay
       when .palette?
@@ -2758,10 +2766,15 @@ module Gori::Tui
     # `where` is what one `↵` from the bar actually reaches — the list itself, or the sub-tab
     # strip above it on the workbench tabs, where the body is one more ↵ down. Naming the
     # wrong one would repeat the defect this fixes in miniature.
-    def self.enter_first_hint(chord : Verb::Chord, verb : String, strip : Bool = false) : String
+    # `pane` names the pane the key is live in when ↵ lands somewhere else: a chord gated by
+    # `chord_sections` (the Repeater's `p` pretty, response only) is dead in the request pane
+    # ↵ resumes into, so "then p" alone would promise a key that does nothing there.
+    def self.enter_first_hint(chord : Verb::Chord, verb : String, strip : Bool = false,
+                              pane : Symbol? = nil) : String
       key = Hotkeys.display_label(chord)
       where = strip ? "↵↵ to enter the body" : "↵ to enter the list"
-      "‹#{key}› — press #{where}, then #{key} #{verb.downcase}"
+      line = "‹#{key}› — press #{where}, then #{key} #{verb.downcase}"
+      pane ? "#{line} in the #{pane.to_s.upcase} pane" : line
     end
 
     # The strip line for `message`: led by `spinner` / ✓ / ✗ when `kinded` names this same
@@ -4128,10 +4141,12 @@ module Gori::Tui
       end
     end
 
-    # Open the space action menu scoped to the CURRENT focus area. current_scope is
-    # read BEFORE flipping @space_menu_open (which is orthogonal to @overlay) so the
-    # scope reflects where space was pressed — the History list → Body, an open
-    # detail → HistoryDetail, the Repeater response → Repeater, the tab bar → Sidebar.
+    # Open the space action menu for the CURRENT focus area. `action_context` is read BEFORE
+    # flipping @space_menu_open (which is orthogonal to @overlay), so it reflects where space
+    # was pressed — the History list → Body, an open detail → HistoryDetail, the Repeater
+    # response → Repeater. On the tab bar it is the TAB's scope (COMMON or its `:tab` rows),
+    # while the bar's own bare keys still resolve Sidebar → Global (`current_scope`), so a
+    # dropped space there reaches Global, not the row (the R1 guard's tab-bar sweep).
     def open_space_menu : Nil
       here = action_context
       @space_menu_here = here # what a sticky family re-opens against (#run_space_verb)

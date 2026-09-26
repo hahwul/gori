@@ -25,9 +25,9 @@ module Gori::Tui
       :project
     end
 
-    # The SCOPE rule list is a navigable area with its own action menu (Project scope);
-    # the DESCRIPTION pane is a text editor (no menu — space is literal there), so its
-    # scope is irrelevant (Body, like the other editor tabs).
+    # The SCOPE rule list is a navigable area with its own action menu (Project scope). The
+    # NETWORK settings pane owns every key, so its scope registers no verb: it must not be
+    # History's Body, whose rows and `>` would otherwise reach its space menu.
     def command_scope : Verb::Scope
       case @project_view.pane
       when :scope     then Verb::Scope::Project
@@ -35,7 +35,7 @@ module Gori::Tui
       when :env       then Verb::Scope::Env
       when :activity  then Verb::Scope::ProjectActivity
       when :desc      then Verb::Scope::ProjectDesc
-      else                 Verb::Scope::Body
+      else                 Verb::Scope::ProjectSettings # :settings, the pane left
       end
     end
 

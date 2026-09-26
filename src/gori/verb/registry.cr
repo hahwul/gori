@@ -76,10 +76,6 @@ module Gori
         @openers[id]?
       end
 
-      def families : Array(Family)
-        @families
-      end
-
       private def family_of_intent(intent : Symbol) : Family?
         @families.find(&.includes?(intent))
       end
@@ -384,13 +380,19 @@ module Gori
 
       # `Definition#chord_of` advertises another verb's chord as this one's, so that chord must
       # reach it: the other verb is in the same scope and its chord is live in this verb's
-      # section. The verb declares no chord of its own, which would be the one advertised.
+      # section. The verb declares no chord of its own, which would be the one advertised. The
+      # other verb has a chord of its own, and no `chord_of`: `Hotkeys.binding_for` follows the
+      # link, so a chain could dangle and a cycle would recurse without end.
       private def check_chord_of!(v : Definition) : Nil
         return unless via = v.chord_of
         problem = if !v.chords.empty?
                     "declares chords of its own"
                   elsif !(other = self[via]?)
                     "names no registered verb"
+                  elsif other.chord_of
+                    "names #{via}, which has a chord_of: itself"
+                  elsif other.chords.empty?
+                    "names #{via}, which has no chord"
                   elsif other.scope != v.scope
                     "names #{via} in #{other.scope}, not #{v.scope}"
                   elsif (secs = other.chord_sections) && !secs.includes?(v.section)
