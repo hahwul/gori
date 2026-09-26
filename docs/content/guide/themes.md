@@ -11,11 +11,11 @@ gori ships thirty built-in colour themes: `goridark` (the default), `goriday`, `
 
 ## Switching Themes
 
-Open Preferences with `Ctrl-,` (or the `⚙` chip in the top bar), go to **Appearance**, and press `↵` on the **Theme** row. The row previews the current theme inline: its name and a small swatch of its palette. `Ctrl-P` → **`settings:theme`** opens the same picker in one step.
+Open Preferences with `Ctrl-,` (or the `⚙` chip in the top bar), go to **Appearance**, and press `↵` on the **Theme** row. The row previews the current theme inline: its name and a small swatch of its palette. `Ctrl-P` → **Settings: Theme** opens the same picker in one step.
 
 The picker is a vertical, scrollable list; each row shows a small swatch of the theme's own palette, and selecting a row previews it live. `Enter` applies and persists the choice, `Esc` reverts.
 
-`Ctrl-,` works in the project picker too, so you can set your theme on first launch before opening a project. Theme is the only section editable there; the rest need a project open.
+`Ctrl-,` works in the project picker too, so you can set your theme on first launch before opening a project. Every form section is editable there, and Theme is the one opener that works; the other openers (Tabs, Env, Hotkeys, hostname overrides, and User-Agents) need a project open.
 
 The same History view across six of the built-ins:
 

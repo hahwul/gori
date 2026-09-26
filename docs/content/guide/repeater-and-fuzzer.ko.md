@@ -23,7 +23,9 @@ Repeater는 요청 워크벤치입니다. 플로우를 보내고, 요청의 어�
 
 그래서 `Shift-T` → `Ctrl-W`는 열린 세션 전부를 confirm 한 번으로 닫고, `Ctrl-R`은 마크된 세션을 함께 보내며(각각 자기 연결로, 최대 20개, confirm 후), `Space` → `d`는 전부 복제하고, `Space` → `g`는 입력한 태그를 전부에 붙입니다(스트립의 `t`도, 메뉴의 `t`도 마크이므로 태그는 자기 글자를 따로 씁니다). 본문 패널에서는 같은 행들이 `Space` → `T`(**Sub-tabs…**) 아래 한 단계에 있습니다. 스트립에서 연 space 메뉴는 `SPACE · 3 MARKED`로 읽히고 항목 이름이 스스로 바뀝니다(`Close 3 sub-tabs`, `Send 3 sub-tabs`). 단일 대상으로 남는 동작은 `(cursor)`라고 말합니다. 필터가 가리고 있는 마크는 조용히 닫히지 않고 confirm에 드러납니다. Fuzzer, Notes, Decoder, JWT, Cookie, Comparer, Miner, Sequencer 등 모든 워크벤치 스트립이 같은 방식으로 마크·닫기·복제하며, 전송은 Repeater의 것입니다.
 
-요청 패널에는 요청을 한 번에 여러 개 보내는 동작이 두 가지 있습니다. `Space` → `G`(**Race marked sub-tabs**)는 마크한 서브탭(최소 2개, 최대 20개)을 하나의 동기화된 레이스로 보냅니다. HTTP/1.1에서는 요청마다 자기 연결로 보내고 마지막 바이트를 함께 풀며, HTTP/2에서는 single-packet으로 보냅니다. 마크한 탭은 모두 같은 오리진과 전송을 써야 하고, 응답마다 타이밍이 함께 표시됩니다. 헤드리스에서는 `gori run repeater race <id> <id>…`([CLI Reference](/ko/reference/cli/#run-repeater)), MCP에서는 `race_requests`입니다. `Space` → `g`(**Send group (one connection)**)는 패널의 요청들을 단독 `%%%` 줄로 나눠 keep-alive 연결 하나로 파이프라이닝하고 각 응답을 보여 주며, HTTP/1.1 일반 텍스트 모드에서만 동작합니다.
+요청 패널에는 요청을 한 번에 여러 개 보내는 동작이 세 가지 있습니다. `Space` → `G`(**Race marked sub-tabs**)는 마크한 서브탭(최소 2개, 최대 20개)을 하나의 동기화된 레이스로 보냅니다. HTTP/1.1에서는 요청마다 자기 연결로 보내고 마지막 바이트를 함께 풀며, HTTP/2에서는 single-packet으로 보냅니다. 마크한 탭은 모두 같은 오리진과 전송을 써야 하고, 응답마다 타이밍이 함께 표시됩니다. 헤드리스에서는 `gori run repeater race <id> <id>…`([CLI Reference](/ko/reference/cli/#run-repeater)), MCP에서는 `race_requests`입니다. `Space` → `g`(**Send group (one connection)**)는 패널의 요청들을 단독 `%%%` 줄로 나눠 keep-alive 연결 하나로 파이프라이닝하고 각 응답을 보여 주며, HTTP/1.1 일반 텍스트 모드에서만 동작합니다.
+
+`Space` → `B`(**Timing analysis (A vs B)**)는 마크한 서브탭 정확히 두 개를 비교하는 **차등 타이밍** 테스트입니다. 스트립에서 앞쪽 칩이 A, 뒤쪽 칩이 B입니다. 보낼 쌍의 개수를 묻고(기본 30, 최대 500), 워밍업 쌍 3개를 버린 뒤, 매번 레이스처럼 A와 B를 함께 풀어 보냅니다(HTTP/2는 연결 하나로 single-packet, HTTP/1.1은 연결 둘로 last-byte sync). 그래서 네트워크와 서버 부하의 흔들림이 양쪽에 똑같이 걸립니다. 판정은 지연 시간이 아니라 **응답 순서**로 내립니다. A가 B보다 늦게 도착한 쌍이 몇 개인지를 세고, 양측 부호 검정이 p < 0.01을 넘어야 느린 쪽을 지목합니다. 카드는 `A consistently slower`, `B consistently slower`, `no measurable difference`, 또는 양쪽 응답이 모두 온 쌍이 20개 미만이면 `inconclusive`를 보여 주고, 그 옆에 변형별 최솟값·사분위수·최댓값과 분포를 함께 보여 줍니다. 숫자 하나로 끝나는 법은 없습니다. 어느 한쪽이 오류를 낸 쌍은 빠르거나 느린 것으로 세지 않고 버립니다. 레이스와 마찬가지로 두 탭은 같은 오리진과 전송을 써야 하고, 실행 중에는 `Esc`로 취소합니다. 헤드리스에서는 `gori run repeater timing <idA> <idB>`(`--count`, `--warmup`, 레이스 대신 A와 B를 번갈아 순서를 바꿔 가며 차례로 보내는 `--interleaved`, `--format json`), MCP에서는 `timing_requests`입니다.
 
 <figure class="tui-shot">
   <img src="/images/tui/repeater.svg" alt="편집 가능한 HTTP/2 요청 패널, 헤더와 JSON 본문을 보여주는 응답 패널, 그리고 sent → 200 상태 줄을 갖춘 gori Repeater 탭">
@@ -158,7 +160,7 @@ gRPC 메시지는 마커가 유용하게 쓰이지 않는 유일한 곳입니다
 
 ffuf 스타일 matcher와 filter로 status, size, words, lines, 왕복 시간(`--mt`/`--ft`, ms 단위. 시간 기반 블라인드 페이로드의 유일한 증거가 되는 차원), 본문 정규식에 대해 결과를 필터링합니다(헤드리스에서는 `--mh`/`--fh`로 응답 헤드 부분 문자열, `--mg`/`--fg`로 gRPC status도). 여기에 시끄러운 기준선을 걸러내는 자동 보정까지 더해집니다. 자동 보정은 스윕 전에 대상을 여러 번 샘플링한 뒤, 각 응답을 모든 샘플 형태와 비교하되 그 샘플들이 스스로 보여 준 흔들림만큼 폭을 넓혀서 비교합니다. 그래서 요청마다 달라지는 id나 타임스탬프를 품은 페이지는 걸러지고, 샘플이 전부 동일했던 대상은 여전히 정확히 비교됩니다. 매칭된 응답은 강조되며 캡처 정규식으로 추출할 수 있습니다.
 
-ADVANCED 카드에는 실행을 다듬는 행도 있습니다. **Stop after N hits**와 **Stop on (DIM:SPEC)**은 matcher가 N번 히트했거나 응답이 조건 하나를 만족하면 스윕을 일찍 끝내며, 이렇게 멈춘 실행은 `stopped`가 아니라 `condition_met`으로 끝납니다. **Keep interesting only**는 저장한 실행에 매칭·오류·정지 행만 남깁니다. **Race (N conns)**는 페이로드 스윕 대신 요청 복사본 N개를 함께 풀어 보내고(last-byte sync), **Max requests**는 실제 와이어 요청 수에 상한을 둡니다. 헤드리스에서는 `--stop-after-matches`, `--stop-on`, `--keep`, `--race`, `--max-requests`입니다. [CLI Reference](/ko/reference/cli/#run-fuzz)를 참고하세요.
+ADVANCED 카드에는 실행을 다듬는 행도 있습니다. **Stop after N hits**와 **Stop on (DIM:SPEC)**은 matcher가 N번 히트했거나 응답이 조건 하나를 만족하면 스윕을 일찍 끝내며, 이렇게 멈춘 실행은 `stopped`가 아니라 `condition_met`으로 끝납니다. **Keep interesting only**는 저장한 실행에 매칭된 행과, 문제가 있었던 행(오류, 재전송, 잘린 응답), 그리고 실행을 멈춘 행만 남깁니다. **Race (N conns)**는 페이로드 스윕 대신 요청 복사본 N개를 함께 풀어 보내고(last-byte sync), **Max requests**는 실제 와이어 요청 수에 상한을 둡니다. 헤드리스에서는 `--stop-after-matches`, `--stop-on`, `--keep`, `--race`, `--max-requests`입니다. [CLI Reference](/ko/reference/cli/#run-fuzz)를 참고하세요.
 
 ### 실행 저장과 다시 열기 {#saving-and-reopening-runs}
 
@@ -281,7 +283,7 @@ gori run fuzz <flow-id> \
 
 소스는 캡처된 플로우(`--flow`), 저장된 HTTP 리피터 세션(`--repeater`), 원시 요청 파일(`--request`), 또는 stdin이 될 수 있습니다. 출력은 `text`, `json`, `jsonl`입니다. 이 형태는 일회성이며 이전과 호환됩니다. 정확히 같은 인자를 `gori run fuzz save` 뒤에 붙이면 모든 행이 영구 저장됩니다. 저장된 실행은 `fuzz list`, `fuzz show`, `fuzz delete`로 관리합니다.
 
-**TUI의 Repeater 전송은 History에 기록됩니다.** 손으로 요청을 다루는 테스터야말로 증거가 사라지던 쪽이었고, 플로우를 남기지 않는 전송은 비교도 내보내기도 인계도 할 수 없습니다. 상태줄이 방금 쓴 id를 알려 줍니다(`sent → 200 in 391ms · History #84`). Settings → General → *Record Repeater sends*에서 끌 수 있습니다. WebSocket 전송과 send-group은 기록되지 않으며(소켓의 증거는 프레임 트랜스크립트이고 세션이 이미 갖고 있습니다) 상태줄이 한 번 그렇게 알려 줍니다.
+**TUI의 Repeater 전송은 History에 기록됩니다.** 손으로 요청을 다루는 테스터야말로 증거가 사라지던 쪽이었고, 플로우를 남기지 않는 전송은 비교도 내보내기도 인계도 할 수 없습니다. 상태줄이 방금 쓴 id를 알려 줍니다(`sent → 200 in 391ms · History #84`). Settings → General → *Record Repeater sends*에서 끌 수 있습니다. WebSocket 전송(소켓의 증거는 프레임 트랜스크립트이고 세션이 이미 갖고 있습니다), send-group, 레이스, 타이밍 분석은 기록되지 않으며 상태줄이 한 번 그렇게 알려 줍니다.
 
 나머지는 그대로 opt-in이고, 헤드리스 표면은 각자의 호출별 인자를 유지하므로 이 설정 때문에 스크립트 동작이 바뀌지 않습니다. `gori run repeater send --record-history`는 전송을 플로우로 기록하고 그 id를 출력하며(기본 off), `gori run fuzz --record-history=none|matched|all`은 전송한 각 요청+응답을 기록하고(`matched`는 매칭된 행만, `all`은 매 전송, 5000개 상한), MCP `send_request`는 `record_history:false`를 넘기지 않는 한 기록합니다.
 

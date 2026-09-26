@@ -72,6 +72,15 @@ gori run diff --from q1-audit --to q3-retest --format md
 
 판정은 문자 그대로 읽으세요. `gone`은 새 캡처가 *요청했고* `404`를 받았다는 뜻이고, `not seen`은 아예 요청하지 않았다는 뜻입니다. 이번 리테스트의 커버리지 공백이지 수정된 게 아닙니다. 리포트 끝에는 아직 열려 있는 이슈들과 그 이슈가 걸려 있던 엔드포인트의 현재 상태가 붙습니다. 요청은 보내지 않습니다.
 
+표면 전체가 아니라 발견 하나를 다시 확인하려면 그 이슈에 **리테스트**를 붙이세요. 그것을 재현하는 Repeater 세션들을 순서대로 두고, 각각 기대 결과를 하나까지 답니다(`status:403`, `json:data.role=admin`, `json-absent:data.token`, `body:same`). `json:` 경로는 `--jsonpath`와 같은 방식으로 읽히며(`data.user.id`, `$.items[0].id`), 읽을 수 없는 경로는 스텝을 적는 시점에 거부되어 나중에 통과로 처리될 일이 없습니다. 이슈 상세에서는 `⇧R`(**Retest…**)이고, 헤드리스로는 이렇습니다:
+
+```bash
+gori run retest add --issue 7 --repeater 12 --assert 'json-absent:data.token'
+gori run retest run --issue 7
+```
+
+`retest run`은 스코프와 샌드박스 게이트를 거쳐 보내고, 전송마다 History에 기록하며, 판정이 `pass`일 때만 `0`으로 끝납니다.
+
 **체크포인트.** `--format md`는 리테스트 산출물에 그대로 붙여 넣을 수 있는 섹션을 만들어 주고, 개수 위에 양쪽의 커버리지가 함께 적힙니다.
 
 ## 4. 노트와 링크 남기기 {#4-keep-notes-and-links}

@@ -11,7 +11,7 @@ group = "핵심"
 
 ## 트래픽 캡처 {#capturing-traffic}
 
-gori를 실행하고 클라이언트를 `127.0.0.1:8070`으로 향하게 하세요(자세한 내용은 [Quick Start](/ko/getting-started/quick-start/) 참고). `c`로 언제든 캡처를 토글할 수 있습니다. 꺼두면 트래픽이 기록 없이 통과하므로 환경을 설정하는 동안 편리합니다.
+gori를 실행하고 클라이언트를 `127.0.0.1:8070`으로 향하게 하세요(자세한 내용은 [Quick Start](/ko/getting-started/quick-start/) 참고). 커맨드라인 도구라면 [`gori run shell`](/ko/reference/cli/#run-shell)(또는 팔레트의 **Open shell**)이 프록시 변수와 CA 번들이 이미 gori를 가리키는 셸을 엽니다. `c`로 언제든 캡처를 토글할 수 있습니다. 꺼두면 트래픽이 기록 없이 통과하므로 환경을 설정하는 동안 편리합니다.
 
 클라이언트가 프록시를 바라보고 있다면 `http://gori.proxy/`에서 gori의 안내 페이지와 CA 다운로드를 받을 수 있습니다. gori가 자체적으로 응답하는 예약된 이름이라 네트워크로 나가지 않습니다. 인증서보다 프록시를 먼저 설정하게 되는 휴대폰에서 특히 유용합니다. 프록시를 설정하지 않은 클라이언트는 리슨 주소로 직접 접속하면 같은 페이지를 받습니다.
 
@@ -104,7 +104,7 @@ Match & Replace는 홀드보다 **먼저** 돌기 때문에, 편집기에서 보
   <figcaption><strong>Sitemap</strong>은 History를 메서드 칩이 달린 <code>host → path</code> 트리로 접어, 대상의 표면을 한눈에 보여줍니다.</figcaption>
 </figure>
 
-### 경로 표시하기 (다중 선택) {#marking-paths}
+### 경로 표시하기 (다중 선택) {#marking-paths-multi-select}
 
 트리에서도 History 목록과 같은 방식으로 표시(mark)할 수 있습니다(제스처 전체는 [플로우 표시하기](#marking-flows) 참고). `t`를 누르면 커서 위의 경로를 **표시**하고 아래로 한 칸 이동하므로, `t`를 연달아 누르면 연속된 행이 표시됩니다. `Shift-↑` / `Shift-↓`는 시작한 지점부터 연속 범위를 확장하고, `Esc`는 표시를 모두 해제합니다. 표시된 행은 왼쪽 여백에 굵은 막대가 붙고, 필터 줄에 `3 marked` 카운트가 실시간으로 표시됩니다(현재 화면 밖에 있는 개수도 함께. 접힌 하위 트리 아래의 표시도 그대로 유지됩니다). `Shift`에서 손을 떼고 그냥 `↑` / `↓`를 누르면 GUI 목록이 강조를 접듯 그 범위가 해제됩니다. `t`로 직접 찍어 둔 표시는 남고, 마우스 휠은 스크롤일 뿐이라 표시를 지우지 않습니다.
 
@@ -157,7 +157,7 @@ gori가 한 번도 캡처하지 않은 호스트(번들이 부르는 API 서브�
 | Repeater로 보내기 | `r` | 그 경로에 대한 맨 `GET` 요청을 새 Repeater 탭에 엽니다. `^R`을 누르기 전에는 아무것도 보내지 않고, 페이지의 쿠키나 `Authorization`은 복사하지 않습니다 |
 | 여기서 Discover | `Space` `>` `D` | 다른 행과 같이 그 경로 아래를 크롤링합니다 |
 
-저장된 참조는 원본 플로우와 함께 지워지므로 `history clear`로 함께 지워지고, History, QL, OpenAPI 내보내기에는 나타나지 않습니다. CLI에서는 `gori run sitemap js`(`--scan`과 함께)와 `gori run sitemap --js-refs`, MCP에서는 `scan_js_endpoints` / `list_js_endpoints`로 같은 데이터를 봅니다.
+저장된 참조는 원본 플로우와 함께 지워지므로 `history clear`로 함께 지워지고, History, QL, OpenAPI 내보내기에는 나타나지 않습니다. CLI에서는 `gori run sitemap js`(`--scan`과 함께)와 `gori run sitemap --js-refs`, MCP에서는 `scan_js_endpoints` / `list_js_endpoints`(또는 `include_unrequested`를 준 `list_sitemap`)로 같은 데이터를 봅니다.
 
 ### OpenAPI 내보내기 {#openapi}
 
@@ -505,6 +505,8 @@ gori run ls --format json --column 'T=regex:tok=(\w+)'
 
 목록은 `a` 추가, `e`/`Enter` 편집, `t` 켜기/끄기, `d` 삭제, `Space → s` 전역/프로젝트 전환, `Shift-J`/`Shift-K` 순서 변경(규칙은 위에서 아래로 적용), `space`로 전체 메뉴를 다룹니다. 편집기는 규칙이 최근 몇 개의 플로우에 영향을 줄지 실시간 미리보기로 보여 줍니다. 규칙은 저장 즉시 적용되고 재시작은 필요 없습니다.
 
+더 새로운 gori가 쓴 규칙(이 빌드가 모르는 operation, target, part, match kind, 또는 읽지 않는 키가 있는 규칙)은 `?` 표시와 함께 목록에 나오고 발동하지 않습니다. 설정을 저장해도 그 필드는 그대로 남습니다. 이 빌드에서는 끄거나 지울 수만 있고, 켜기·편집·복제·전역/프로젝트 이동·순서 변경은 할 수 없으며, 상태 줄이 알아보지 못한 라벨을 알려 줍니다.
+
 목록 아래에는 편집 가능한 **샘플** 메시지와, 그 옆에 켜져 있는 규칙을 통과시킨 결과가 나란히 놓입니다. 실제로 캡처한 요청을 붙여 넣어 규칙을 풀어놓기 전에 무엇이 바뀌는지 확인하는 자리입니다. 샘플은 그것이 미리 보여 주는 규칙과 마찬가지로 프로젝트에 저장됩니다.
 
 ### 프리셋: 능력이 아니라 출발점 {#rewriter-presets}
@@ -525,7 +527,7 @@ gori run ls --format json --column 'T=regex:tok=(\w+)'
 
 헤드리스에서는 `gori run rewriter preset list`와 `gori run rewriter preset add <name>`(`--scope=global`, 트래픽에 닿기 전에 검토하려면 `--disabled`)이고, 에이전트는 `list_rule_presets`로 읽고 `create_rule_from_preset`으로 설치합니다.
 
-### 전역 규칙과 프로젝트 규칙 {#reusing-a-rule-across-projects}
+### 전역 규칙과 프로젝트 규칙 {#global-and-project-rules}
 
 모든 규칙은 두 곳 중 하나에 저장되며, 목록의 `G`/`P` 열이 어느 쪽인지 보여 줍니다.
 
@@ -548,7 +550,7 @@ gori run ls --format json --column 'T=regex:tok=(\w+)'
 
 > 예전의 저장된 규칙 **라이브러리**(`s`/`o`)에서 올라온 경우: 항목들은 gori가 파일을 처음 읽을 때 **꺼진 상태**의 전역 규칙으로 흡수됩니다. 프리셋은 불러오기 전까지 아무 일도 하지 않았으므로 스스로 트래픽을 재작성하기 시작하지 않습니다. 필요한 것만 `t`로 켜면 됩니다.
 
-**본문** 규칙은 메시지를 버퍼링해 재작성하고 `Content-Length`를 자동으로 다시 맞춥니다(청크 본문은 de-chunk 후 재프레이밍됩니다). 헤드 규칙은 본문을 손대지 않고 계속 스트리밍합니다. 압축된 본문은 재작성되지 않고 **거부됩니다.** gori는 전달 경로에서 압축을 풀지 않는데, 압축된 바이트 위에 패턴을 돌리면 우연히 압축 스트림 내부에 매칭되어 본문을 망가뜨릴 수 있습니다. 흔한 바이트 하나면 충분하고, 오류도 없이 `Content-Length`까지 다시 계산되어 멀쩡해 보입니다. 그래서 규칙은 아예 발동하지 않고 응답은 바이트 그대로 지나갑니다. 이는 압축이 어느 쪽으로 선언되었든 적용됩니다. `Content-Encoding: gzip`/`br`/… 그리고 `Transfer-Encoding`에 실린 압축 계층 모두. 다만 순수한 `Transfer-Encoding: chunked`는 압축이 아니라 프레이밍이므로 해당하지 않으며, 규칙이 보기 전에 de-chunk되어 엔티티로 전달됩니다. 스트리밍 응답(SSE, close로 구분되는 응답, WebSocket 업그레이드)은 그대로 흘려보냅니다. **본문 규칙은 여전히 매칭되는 호스트를 HTTP/1.1로 내립니다.** 이 강등은 연결을 맺을 때 한 번 결정되므로, HTTP/2 연결이 이미 열린 뒤에 켠 규칙은 클라이언트가 새 연결을 열기 전까지 그 연결이 실어 나르는 어떤 요청에도 적용되지 않습니다. HTTP/2에서 Match & Replace는 헤드에 적용됩니다. 본문 재작성은 구현되어 있지 않고 앞으로도 만들지 않습니다. HTTP/2 흐름 제어 때문에 본문 길이를 바꾸는 재작성은 그대로 실패하거나 스트림을 교착시키기 때문입니다. 그래서 본문 규칙은 해당 호스트를 HTTP/1.1로 내리고, 그 강등을 받아들이지 못하는 h2 클라이언트(gRPC)는 본문 규칙이 켜져 있는 동안 연결되지 않습니다. `gori.log`에 호스트당 한 번, 호스트와 이유가 남습니다.
+**본문** 규칙은 메시지를 버퍼링해 재작성하고 `Content-Length`를 자동으로 다시 맞춥니다(청크 본문은 de-chunk 후 재프레이밍됩니다). 헤드 규칙은 본문을 손대지 않고 계속 스트리밍합니다. 버퍼링하는 것은 규칙이 적용될 수 있는 메시지뿐입니다. 호스트 하나나 방향 하나로 범위를 좁힌 본문 규칙은 다른 호스트의 본문과 반대 방향을 그대로 스트리밍합니다. 압축된 본문은 재작성되지 않고 **거부됩니다.** gori는 전달 경로에서 압축을 풀지 않는데, 압축된 바이트 위에 패턴을 돌리면 우연히 압축 스트림 내부에 매칭되어 본문을 망가뜨릴 수 있습니다. 흔한 바이트 하나면 충분하고, 오류도 없이 `Content-Length`까지 다시 계산되어 멀쩡해 보입니다. 그래서 규칙은 아예 발동하지 않고 응답은 바이트 그대로 지나갑니다. 이는 압축이 어느 쪽으로 선언되었든 적용됩니다. `Content-Encoding: gzip`/`br`/… 그리고 `Transfer-Encoding`에 실린 압축 계층 모두. 다만 순수한 `Transfer-Encoding: chunked`는 압축이 아니라 프레이밍이므로 해당하지 않으며, 규칙이 보기 전에 de-chunk되어 엔티티로 전달됩니다. 스트리밍 응답(SSE, close로 구분되는 응답, WebSocket 업그레이드)은 그대로 흘려보냅니다. **본문 규칙은 여전히 매칭되는 호스트를 HTTP/1.1로 내립니다.** 이 강등은 연결을 맺을 때 한 번 결정되므로, HTTP/2 연결이 이미 열린 뒤에 켠 규칙은 클라이언트가 새 연결을 열기 전까지 그 연결이 실어 나르는 어떤 요청에도 적용되지 않습니다. HTTP/2에서 Match & Replace는 헤드에 적용됩니다. 본문 재작성은 구현되어 있지 않고 앞으로도 만들지 않습니다. HTTP/2 흐름 제어 때문에 본문 길이를 바꾸는 재작성은 그대로 실패하거나 스트림을 교착시키기 때문입니다. 그래서 본문 규칙은 해당 호스트를 HTTP/1.1로 내리고, 그 강등을 받아들이지 못하는 h2 클라이언트(gRPC)는 본문 규칙이 켜져 있는 동안 연결되지 않습니다. `gori.log`에 호스트당 한 번, 호스트와 이유가 남습니다.
 
 ### WebSocket에서의 Match & Replace {#match-replace-websocket}
 
@@ -633,13 +635,14 @@ Short circuit 규칙의 `source:` 행은 답을 어디서 가져올지 고릅니
 - `Cookie`는 클라이언트가 보낸 줄 수 그대로 나뉘어 있어, 쿠키 문자열 전체를 걸치는 패턴은 매칭되지 않을 수 있습니다.
 - `:scheme`은 다룰 수 없고, `Content-Length`는 원본 값으로 되돌립니다(본문은 손대지 않고 흘러가기 때문입니다).
 - 트레일러와 서버 푸시 헤드는 재작성하지 않습니다. 따라서 gRPC의 `grpc-status`는 규칙으로 건드릴 수 없습니다.
+- 규칙의 호스트는 스트림마다 포트를 뺀 값으로 맞춥니다. 요청은 자기 `:authority`로, 응답은 그 응답이 답하는 요청의 `:authority`로 맞춥니다. 여러 호스트를 싣는 연결에서도 각 스트림에는 자기 호스트의 규칙이 적용됩니다.
 - `Connection`, `Keep-Alive`, `Transfer-Encoding`, `Upgrade`를 추가하는 규칙은 쓴 그대로 나갑니다. HTTP/2가 금지하는 헤더라 피어가 스트림을 끊는데, 이는 의도한 동작입니다. 그 바이트는 보내기로 직접 정한 것입니다.
 
 헤드 규칙은 저장 이후에 열리는 연결부터 적용됩니다. 이미 열려 있는 장수명 HTTP/2 연결에는 그 연결의 다음 요청 헤드부터 적용됩니다. 본문 규칙, short-circuit 규칙, 본문 스코프 extract 규칙은 그렇지 않습니다. 이들은 호스트를 HTTP/1.1로 내려서 동작하는데 그 강등은 연결을 맺을 때 한 번 결정되고 이미 열린 HTTP/2 연결은 되돌리지 않으므로, 연결 도중에 켠 규칙은 클라이언트가 다시 연결하기 전까지 그 연결로 오가는 어떤 요청에도 적용되지 않습니다. `gori.log`에 연결당 한 번 그 사실이 남습니다.
 
 같은 규칙을 헤드리스에서도 다룰 수 있습니다. `gori run rewriter`(list / add / rm / enable / disable / preview)와 MCP의 `create_rule` / `update_rule` / `list_rules` / `preview_rule` 도구입니다. 규칙을 저장하거나 나열하는 도구는 모두 `scope` 인자를 받으므로 TUI를 열지 않고도 전역 규칙을 만들고 켜고 끌 수 있습니다(`preview_rule`에는 없습니다. 저장하지 않는 규칙의 영향 범위만 재기 때문입니다).
 
-## 행 색칠하기 (Colormarker 탭) {#colormarker}
+## 행 색칠하기 (Colormarker 탭) {#colouring-rows-colormarker-tab}
 
 마킹은 지금 당장 다루는 집합을 위한 것입니다. **색상 규칙**은 상시적입니다. "이 engagement의 모든 5xx는 빨강"이라고 한 번만 말해 두면, 트래픽이 도착할 때마다 매칭되는 행이 계속 빨갛게 남습니다. ZAP의 neonmarker와 같은 발상이되, 태그가 아니라 조건으로 동작합니다.
 
@@ -772,7 +775,7 @@ gori는 가능한 곳에서는 커널에서 목적지를 복구합니다(Linux�
 
 프록시를 지정할 수는 있는데 HTTP 프록시는 지정할 수 없는 클라이언트라면(`ALL_PROXY=socks5://127.0.0.1:1080`, 프록시 설정이 SOCKS뿐인 런타임) **socks5 리스너**를 쓰세요. 클라이언트가 SOCKS 핸드셰이크에서 목적지를 직접 말하므로 방화벽 규칙도, SNI나 `Host` 헤더에서 복구할 것도 없고, 핸드셰이크 이후는 투명 경로와 똑같이 가로챕니다. 인증 없이 `CONNECT`만 처리하며, 거부(샌드박스가 배제한 목적지, `UDP ASSOCIATE`를 요청한 클라이언트)는 RFC 1928이 정한 응답 코드로 답하고 플로우로도 기록하므로, 이유 없이 닫힌 연결이 아니라 History에서 읽힙니다. [SOCKS5 모드](/ko/reference/config/#socks5-mode)를 참고하세요.
 
-## 피닝된 앱이 방해할 때 {#pinned-app-in-the-way}
+## 피닝된 앱이 방해할 때 {#when-a-pinned-app-is-in-the-way}
 
 gori는 모든 HTTPS 연결을 가로채므로, 인증서를 피닝하는 클라이언트(모바일 앱, 자동 업데이터, 백그라운드 에이전트)는 깨집니다. 휴대폰이나 공용 머신에서는 그런 트래픽이 원하든 원치 않든 함께 들어오고, 다른 것을 테스트하는 동안 계속 실패합니다.
 
@@ -812,7 +815,7 @@ gori settings tls-fingerprint shop.example.com
 
 **`chrome`은 Chrome의 클라이언트 힌트도 보냅니다.** gori가 직접 보내는 `https` 요청(Repeater, Fuzzer, Discover, Authorize, Miner, `gori run`, MCP)에 `chrome` 프리셋이 걸려 있으면, Chrome이 보내는 `sec-ch-ua`·`sec-ch-ua-mobile`·`sec-ch-ua-platform` 헤더를 `User-Agent` 바로 앞에 넣습니다. 값은 그 요청의 User-Agent에서 Chrome 자신의 브랜드 알고리즘으로 계산하므로, `$GEN.USER_AGENT`와 브랜드 목록은 언제나 같은 버전을 말합니다. User-Agent가 Chrome 자신이 보내는 형태가 아닐 때(Edge, Opera, 스캐너 문자열), 요청에 이미 `sec-ch-ua` 계열 헤더가 하나라도 있을 때(직접 쓴 값이 이깁니다), WebSocket 핸드셰이크, 그리고 프록시를 지나가는 트래픽에는 아무것도 넣지 않습니다. Firefox와 Safari는 클라이언트 힌트를 보내지 않으므로 그 프리셋은 아무것도 넣지 않습니다.
 
-### 질문을 반대로 던지기 {#per-send-fingerprint}
+### 질문을 반대로 던지기 {#asking-the-question-the-other-way-round}
 
 목적지 규칙은 "이 origin엔 항상 Chrome처럼"에 답합니다. 정작 거기까지 오게 만든 질문은 보통 그 반대인 **이 엔드포인트가 `chrome`일 때와 `curl`일 때 다르게 답하나?**이고, 그건 *같은 호스트*에 대한 A/B입니다. 전송 사이에 규칙을 고쳐서는 답할 수 없습니다. 두 전송이 서로 다른 설정 상태에서 나가고, 어느 쪽이 뭐였는지 기록도 없으며, 그 호스트로 가는 다른 모든 탭과 백그라운드 캡처의 핸드셰이크까지 함께 바뀝니다.
 

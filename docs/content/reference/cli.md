@@ -36,7 +36,7 @@ gori tui --listen 0.0.0.0 --port 8080
 | -------- | ------------- |
 | `-l`, `--listen=HOST` | Global bind address for this process (defaults to `settings.json`, else `127.0.0.1`). Not persisted. A project's own bind still wins when set. |
 | `-p`, `--port=PORT` | Global bind port for this process, `0`-`65535` (defaults to `settings.json`, else `8070`). Not persisted. Project `net.bind_port` still wins when set. |
-| `--db=PATH` | SQLite database path |
+| `--db=PATH` | SQLite database path; opens it directly, skipping the project picker |
 | `--ca-dir=PATH` | Directory for the root CA |
 | `--insecure-upstream` | Do not verify upstream TLS certificates |
 
@@ -63,6 +63,7 @@ gori run <subcommand> [verb] [options]
 | `send [URL]` | Send one request built from a URL (curl-shaped) or a raw request, without creating a Repeater session |
 | `repeater <flow-id>` · `list` · `create` · `send` | Re-send a captured flow, or list / create / execute Repeater sessions (incl. WebSocket) |
 | `repeater race <id> <id>…` | Fire several saved sessions as one synchronized race (HTTP/1.1 last-byte sync, HTTP/2 single-packet) |
+| `repeater timing <id> <id>` | Differential timing analysis of two saved sessions: which one is consistently slower, by response order and quartiles |
 | `repeater minimize <id>` | Strip a saved request to the smallest form that keeps the response |
 | `repeater h2` | Send a field-native HTTP/2 request from an ordered HPACK field list |
 | `repeater move <id>` · `delete <id>…` | Reorder the workbench strip by tab number, or close one or more saved sessions |
@@ -129,6 +130,8 @@ so a script can distinguish a completed write from a response that needs attenti
 
 STDOUT carries data; warnings, counts, and export confirmations go to STDERR, so a pipe stays clean. A reader that closes the pipe early (`… | head`) exits `0` quietly.
 
+Captured text printed to a terminal shows control and invisible characters by name (`⟨ESC⟩`, `⟨NBSP⟩`, `⟨ZWSP⟩`, `⟨RLO⟩`), so an escape sequence in a request cannot drive your terminal and a hidden character is visible. The `show` and `repeater` text views keep their line breaks, CRLF included. `--format json` carries those characters as they are, replacing only invalid UTF-8, and `--format raw` is the exact bytes.
+
 Where a run streams, `json` and `jsonl` are not always the same shape:
 
 | Subcommand | `--format json` | `--format jsonl` |
@@ -141,10 +144,10 @@ Where a run streams, `json` and `jsonl` are not always the same shape:
 | ----------- | --------- |
 | `0` | Success |
 | `1` | Error: a failed send, an unreadable project, a mutation that could not be applied |
-| `3` | `run fuzz --fail-if-no-matches` completed but nothing matched |
+| `3` | `run fuzz --fail-if-no-matches` completed but nothing matched, and no `--stop-on` / `--stop-after-matches` condition was met |
 | `130` | Interrupted by SIGINT/SIGTERM. `capture` (which exits `0` when `--for` or `--max` ends it), `fuzz`, `mine`, `discover`, `sequence`, `authorize` and `repeater minimize` flush what they collected first, then exit `130` so a scripted `&& next-step` does not treat a truncated run as a finished one |
 
-Without `--fail-if-no-matches`, a fuzz run that matched nothing *and* errored on every send still exits `1`, so "no findings" stays distinguishable from "never reached the target". With the flag, `3` wins.
+Without `--fail-if-no-matches`, a fuzz run that matched nothing *and* errored on every send still exits `1`, so "no findings" stays distinguishable from "never reached the target". With the flag, `3` wins. A run whose stop condition was met is exempt from both rules: a send that timed out can meet `--stop-on 'time:>=5000'` while it stays an unmatched error row, and that is the result the run was looking for.
 
 **A create takes `--format json` and answers with the new row.** `repeater create`, `issues create`, `notes create`, `views add`, `colormarker add`, `rewriter add`, `rewriter extract add`, `probe rules add`, `oast providers add`, `links add`, `project scope add` and `project host-override add` print one object on STDOUT, read back after the write committed, in exactly the shape that family's listing prints for the same row. A script therefore takes the id with `jq .id` instead of scraping it out of a sentence. The id is whatever the rest of that family takes: a number for most, the rule name (`custom_p_7`) for a probe rule and the provider key (`p_3`) for an OAST provider. A view is addressed by name, so its object carries `name` and `key` rather than an id. `notes create` adds `index`, the position the text line names, and `links add` adds `created`, which is `false` for a pair that was already linked (with that link's id). Text output is unchanged.
 
@@ -506,6 +509,12 @@ gori run repeater move 5 --down
 gori run repeater race 3 4 --http2
 ```
 
+**`repeater timing <idA> <idB>`**: differential timing analysis of exactly two saved sessions, for a difference too small to see in one send. The pair is sent `--count=N` times (1-500, default 30) after `--warmup=N` pairs that are thrown away (default 3; `0` measures from the first pair). Each pair is released together as in `repeater race` (HTTP/2 single-packet, HTTP/1.1 last-byte sync), or sent one after the other in alternating order with `--interleaved`. The verdict is read from the **response order**, not from one latency: how many pairs A arrived after B, under a two-sided sign test. It is `a_slower` or `b_slower` only below p = 0.01, `no_difference` otherwise, and `inconclusive` with fewer than 20 usable pairs (a pair where either side failed is dropped). Each variant's min, quartiles and max print beside it. Both sessions must share one origin and connection shape, and a pair that mixes HTTP/1.1 and HTTP/2 needs `--http1` or `--http2`. `--verbatim`, `--slot=NAME`, `--reframe-grpc`, `--tls-preset=NAME`, `-k`, `--timeout`, `--allow-unscoped` and `--format text|json` behave as on `repeater send`, and the JSON is the object MCP `timing_requests` returns. A run with no usable pair exits `1`.
+
+```bash
+gori run repeater timing 3 4 --count 100
+```
+
 **`repeater minimize <repeater-id>`**: shrink a request to the smallest form that still reproduces the response. `--apply` writes the result back into the session; `--verbatim` sends the stored bytes as-is (body params stop being candidates, because their framing could not be kept honest); `--slot=NAME` sends as that [session slot](#run-session); `-k`/`--insecure`, `--allow-unscoped` and `--format` behave as above.
 
 **`repeater h2`**: send a field-native HTTP/2 request from an ordered HPACK field list, so duplicate or misordered pseudo-headers can be scripted.
@@ -548,7 +557,7 @@ Sources: `--flow=ID`, `--repeater=ID`, `--request=FILE`, or stdin. Positions: `�
 | Group | Options |
 | ------- | --------- |
 | Source | `--flow=ID` (a captured flow), `--repeater=ID` (a saved repeater session; a WebSocket one seeds its handshake **and** its stored frames), `--request=FILE`, or a bare `<flow-id>` / stdin |
-| Transport | `--target=URL` (required for `--request`/stdin), `--http2`, `--sni=HOST`, `-k`/`--insecure-upstream` |
+| Transport | `--target=URL` (required for `--request`/stdin), `--http2`, `--sni=HOST`, `--tls-preset=NAME` (one [TLS fingerprint](#per-send-tls-fingerprints) for the whole run), `-k`/`--insecure-upstream` |
 | Mode | `--mode=` `sniper` (default), `batteringram`, `pitchfork`, `clusterbomb`. The first two draw from **one** payload set, the last two from one per marked position; a set the mode will never draw from is named before the run starts |
 | gRPC fields | `--field=SPEC` (repeatable) sweeps a **schema-known field** of a unary gRPC request instead of its octets. `SPEC` is a field name, a path into a nested message (`profile.age`), a field number, or `name[i]` for one occurrence of a repeated field; `name¦chain` runs a Decoder chain over the payload **before** the declared type encodes it. The field must already be present on the captured message (gori replaces an occurrence, never adds one), and payloads for a `bytes` field are read as **hex** (`de ad be ef`). Each payload goes through the field's declaration on its way to bytes (`-3` is a different set of octets as `int32`, `sint32`, `bool` or an enum), every other byte of the message is copied from the capture, and the 5-byte length prefix is recomputed. Needs a descriptor set that resolves the rpc (`gori run grpc schema`). Field positions follow the template's own `§…§` positions in the run's index space, so `--mode` and the payload sets keep their meaning. An undeclared field, one whose wire type the declaration contradicts, and a payload the declared type cannot hold are all refused before the first request |
 | Payloads | `-w`/`--wordlist`, `--preset=NAME[:FILE]` (built-in: `sqli`, `xss`, `traversal`, `format-string`, `bad-strings`, `command-injection`, `cache-delimiters`), `--payloads=LIST`, `--numbers=FROM-TO[:STEP]`, `--null=N`, `--brute=CHARSET:MIN-MAX` |
@@ -680,7 +689,7 @@ gori run cache-deception --flow 12 --flow 13 --format json
 | `--project`, `--db` | Project to read |
 | `--format` | `text` (default), `json` (one array at the end), or `jsonl` (streamed) |
 
-Each flow reports one verdict: `cached` (the deception — anonymous served the authenticated response from a cache and the cache-busted control differed), `served` (no cache-hit evidence or a matching control without cache-hit evidence), `review` (similar but not identical, no decisive control, or a matching control that was itself a cache hit), `protected` (anonymous got a different response), `blocked` (gori refused the send), or `errored`. Each trial includes its own cache signal; the top-level `cache` is the anonymous response. Only safe methods (`GET`/`HEAD`/`OPTIONS`) are checked without `--unsafe-methods`.
+Each flow reports one verdict: `cached` (the deception — anonymous served the authenticated response from a cache and the cache-busted control differed), `served` (no cache-hit evidence or a matching control without cache-hit evidence), `review` (similar but not identical, no decisive control, or a matching control that was itself a cache hit), `protected` (anonymous got a different response), `blocked` (gori refused the send), or `errored`. Each trial includes its own cache signal; the top-level `cache` is the anonymous response. Only safe methods (`GET`/`HEAD`/`OPTIONS`) are checked without `--unsafe-methods`. A flow gori cannot replay is reported on STDERR and the run moves on to the next one; the run exits `1` when no flow could be checked at all.
 
 ### run session
 
@@ -748,7 +757,7 @@ Deleting a Repeater session that a slot uses as a step keeps the step in place, 
 
 Binding values live in memory, **per process**: `session refresh` rebinds this command's own table and is gone when it exits, so it is for checking that a login sequence works. A `--slot NAME` sweep refreshes in its own process, and the TUI and a running `gori mcp` each keep their own.
 
-**There is no `session activate`.** A `gori run` process sends and exits, so the active pointer has nothing to span, and persisting one would resolve into an empty binding table on the next run, sending an overlay whose `$BIND.SESSION` is literal. Name the identity on the send instead: `--slot NAME`, on `send`, `repeater`, `repeater send`, `repeater race`, `repeater minimize`, `fuzz`, `mine`, `sequence`, `discover` and `retest run`. The run prints `slot: sending as NAME` on STDERR before its first request.
+**There is no `session activate`.** A `gori run` process sends and exits, so the active pointer has nothing to span, and persisting one would resolve into an empty binding table on the next run, sending an overlay whose `$BIND.SESSION` is literal. Name the identity on the send instead: `--slot NAME`, on `send`, `repeater`, `repeater send`, `repeater race`, `repeater timing`, `repeater minimize`, `fuzz`, `mine`, `sequence`, `discover` and `retest run`. The run prints `slot: sending as NAME` on STDERR before its first request.
 
 ### run probe
 
@@ -776,7 +785,7 @@ gori run probe mode passive                      # off | passive | active | aggr
 | Verb | Options |
 | ------ | --------- |
 | `issues` | `-a`/`--all` (include dismissed / confirmed / resolved), `--severity`, `--category`, `--host` |
-| `dismiss <id>` | Or bulk with `--code=CODE` / `--host=HOST` |
+| `dismiss <id>` | With an id, toggles that finding dismissed ⇄ open; `--code=CODE` / `--host=HOST` dismiss every open finding sharing it. A dismiss the project could not write exits `1` and leaves the finding unchanged |
 | `promote <id>` | Promote a finding to a human-confirmed Issue |
 | `delete <id>` | Or `--all --yes` |
 | `rules [list\|enable\|disable\|add\|delete]` | `list` takes `--kind=passive\|active\|custom`; `enable`/`disable`/`delete` take a `<rule-id>` from that list; `add` takes `-t`/`--title` (required), `-p`/`--pattern` (required), `--description`, `--side` (`request`\|`response`, default `response`), `--region` (`whole`\|`header`\|`body`, default `body`), `--regex`, `--exec` (run `--pattern` as a [process hook](/guide/scripting/#process-hooks): exit 0 raises the finding, stdout is the evidence), `-s`/`--severity` (default `info`) |
@@ -852,7 +861,7 @@ gori run import --postman api.postman_collection.json --db ./assessment.db --for
 
 Import writes flows, so it resolves its target like `discover`: an explicit `--db` is created or reopened, and without one it writes into an existing project rather than silently creating a default.
 
-A malformed entry is skipped rather than aborting the file; the result reports both counts (`{"count": 12, "skipped": 3}`). Only `--har` and `--burp` carry responses; the rest import request templates that show as `Pending` in History until you send them.
+A malformed entry is skipped rather than aborting the file; the result reports both counts (`{"count": 12, "attempted": 12, "skipped": 3}`). When the project cannot commit every parsed flow (a busy or unwritable store), `count` is smaller than `attempted`, the text line says how many did not commit, and the command exits `1`; re-run the import to retry them. Only `--har` and `--burp` carry responses; the rest import request templates that show as `Pending` in History until you send them.
 
 ### run sitemap
 
@@ -1486,6 +1495,8 @@ gori run project import engagement.gori --name "API test copy"
 | `--name=NAME` | Display name for the imported project (defaults to the archived name) |
 
 Before creating the project, gori prints the archive's flow, session-slot and env-var counts, and whether project upstream credentials are set, to stderr. An existing display name, directory slug, or short id is refused; choose a different `--name` to resolve a conflict. The imported project gets a new short id and no machine-local workspace binding or lock files. Older database schemas migrate when the project is first opened; a schema newer than this build supports is rejected. Import adds the project to the registry but does not open it.
+
+The copy is imported as data, never as this machine's configuration or anything that runs: it drops the project's network settings (`net.*`), host overrides, Rewriter/Colormarker global-rule overrides and Probe mode, turns off every session slot's auto-refresh, and disables `pipe` rules, file-backed short-circuit rules and `exec` custom probe rules. Re-enable what you trust after reviewing it.
 
 #### project delete
 

@@ -211,7 +211,7 @@ gori run session baseline as-captured
 gori run session rm low-priv
 ```
 
-There is no `gori run session activate`: a `gori run` process sends and exits, so the active pointer has nothing to span. Name the identity on the send instead: `--slot NAME` works on `send`, `repeater`, `repeater minimize`, `fuzz`, `mine`, `sequence`, `discover` and `retest run`, and applies before `--bind-from` replays its seed, so the seed fills the slot the run then sends as.
+There is no `gori run session activate`: a `gori run` process sends and exits, so the active pointer has nothing to span. Name the identity on the send instead: `--slot NAME` works on `send`, `repeater`, `repeater send`, `repeater race`, `repeater timing`, `repeater minimize`, `fuzz`, `mine`, `sequence`, `discover` and `retest run`, and applies before `--bind-from` replays its seed, so the seed fills the slot the run then sends as.
 
 `--format jsonl` streams one object per request as it lands; `--format json` buffers and emits a single array at the end. Both carry the decoded body size the verdict actually compared alongside the wire size, which a gzipped response makes disagree by an order of magnitude. Full flags are in the [CLI Reference](/reference/cli/#run-authorize).
 

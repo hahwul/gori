@@ -77,7 +77,7 @@ gori mcp --read-only
 | `--read-only` | 62 | ~72 KB | ~18k | 읽기 도구와 순수 연산; 실제 요청 전송 없음 |
 | `--tools=@recon` | 37 | ~54 KB | ~14k | 캡처를 읽고 파악, 요청 재전송, 이슈·노트 기록 |
 | `--tools=@recon --read-only` | 28 | ~39 KB | ~10k | `--read-only`가 끄는 도구를 뺀 `@recon` |
-| `--tools=@minimal` | 17 | ~25 KB | ~6k | History와 flow, 현재 TUI 컨텍스트를 읽고 오퍼레이터와 대화 |
+| `--tools=@minimal` | 17 | ~26 KB | ~7k | History와 flow, 현재 TUI 컨텍스트를 읽고 오퍼레이터와 대화 |
 
 토큰은 바이트 ÷ 4로 잡은 JSON 어림값이며, 실제 값은 클라이언트의 토크나이저가 정합니다.
 
@@ -150,7 +150,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 
 | 도구 | 용도 |
 |------|---------|
-| `list_history` | 최신순으로 플로우 나열, 선택적 QL과 페이지네이션 포함. 각 행에 `source`가 실립니다(클라이언트가 보낸 트래픽은 `proxy`, `send_request`(기본으로 기록됩니다)는 `repeater`, 그 밖에 `discover`·`import` …). 그래서 gori가 만든 플로우가 대상에 대한 증거로 잘못 읽히지 않습니다. `src:`로 필터링합니다. `columns`에 `gori run ls --column`과 같은 `[LABEL=][req\|res:]kind:selector` 스펙을 주면 행마다 추출한 값(헤더, JSON 필드, 정규식 캡처)을 `columns` 객체로 함께 싣습니다. QL로 *거를* 수는 있어도 볼 수는 없던 값을 [보여 주는](/ko/guide/proxy/#columns) 쪽입니다. 행마다 읽기가 한 번 늘어나므로 명시할 때만 동작합니다. `ids`를 주면 정확히 그 집합을 한 번에 가져옵니다 — `get_current_context`가 `selection.ids`로 돌려주는, 사용자가 마크한 행들입니다. 요청한 순서 그대로 오고, `limit`과 두 커서는 적용되지 않으며, 행이 없는 id는 `missing_ids`로, `query`가 뺀 것은 `filtered_out_ids`로 이름을 부릅니다. 답이 짧으면 어느 쪽 때문에 짧은지 항상 말해 줍니다 |
+| `list_history` | 최신순으로 플로우 나열, 선택적 QL과 페이지네이션 포함. 각 행에 `source`가 실립니다(클라이언트가 보낸 트래픽은 `proxy`, `send_request`(기본으로 기록됩니다)는 `repeater`, 그 밖에 `discover`·`import` …). 그래서 gori가 만든 플로우가 대상에 대한 증거로 잘못 읽히지 않습니다. `src:`로 필터링합니다. `columns`에 `gori run ls --column`과 같은 `[LABEL=][req\|res:]kind:selector` 스펙을 주면 행마다 추출한 값(헤더, JSON 필드, 정규식 캡처)을 `columns` 객체로 함께 싣습니다. QL로 *거를* 수는 있어도 볼 수는 없던 값을 [보여 주는](/ko/guide/proxy/#columns) 쪽입니다. 행마다 읽기가 한 번 늘어나므로 명시할 때만 동작합니다. `hide_static:true`는 TUI의 정적 파일 숨기기 렌즈(`-static:true`)와 같아서 정적 자산(이미지, 폰트, 오디오/비디오)을 뺍니다. `list_sitemap`과 `list_params`도 같은 인자를 받습니다. `ids`를 주면 정확히 그 집합을 한 번에 가져옵니다 — `get_current_context`가 `selection.ids`로 돌려주는, 사용자가 마크한 행들입니다. 요청한 순서 그대로 오고, `limit`과 두 커서는 적용되지 않으며, 행이 없는 id는 `missing_ids`로, `query`가 뺀 것은 `filtered_out_ids`로 이름을 부릅니다. 답이 짧으면 어느 쪽 때문에 짧은지 항상 말해 줍니다 |
 | `list_events` | 작업 수명주기와 에이전트 활동을 추가 전용 피드로 전방 커서 조회. 플로우가 여전히 전체 스트림이며, 이 피드는 플로우 행을 중복하지 않음. 모든 이벤트가 `actor`(행위 표면: `tui` / `cli` / `mcp`)를 담고 있어 에이전트가 자기 쓰기와 운영자의 쓰기를 구분할 수 있으며, 설정 변경은 누가 하든 기록됩니다. 사람은 같은 피드를 **Project → Activity** 패널에서 읽습니다 |
 | `operator_messages` | 오퍼레이터가 gori TUI에서 여러분에게 입력한 메시지("Tell the agent…")입니다. 이 세션 또는 붙어 있는 모든 에이전트에게 보낸 것을 전방 커서로 읽습니다. gori는 가능하면 즉시 전달하고(Claude Code의 피어 메시지, Codex의 `codex queue` 전달, 채널 이벤트) 그래도 남은 것은 여러분의 다음 tool result에 실어 보냅니다. 이 도구는 모든 에이전트가 가진 폴백입니다 — 턴을 시작할 때 호출하세요. 반환한 메시지는 전달됨으로 표시되어 오퍼레이터의 알림 링에 "picked up"으로 보입니다 |
 | `reply_to_operator` | gori의 오퍼레이터에게 답합니다. `summary`는 알림 링과 Miss Ring 말풍선에 보이는 한 줄, `detail`은 링에서 ↵로 여는 긴 본문, `level`은 색, `in_reply_to`는 답하는 오퍼레이터 메시지 id입니다. 여러분의 터미널이 아니라 gori에 있는 사람에게 답이 닿는 방법입니다 |
@@ -177,9 +177,9 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `list_notes` / `get_note` | 프로젝트 노트 읽기 |
 | `list_rule_presets` | 응답 수정 [프리셋](/ko/guide/proxy/#rewriter-presets). 평범한 Match & Replace 규칙을 설치하는 이름 붙은 출발점(hidden 필드 드러내기, disabled 컨트롤 활성화, `maxlength` 제거, 클라이언트 검증 제거, CSP / 보안 헤더 제거, SRI 비활성화). 각 행이 설치할 규칙을 밝힙니다 |
 | `list_extract_rules` | 프로젝트의 **extract** 규칙. [세션 바인딩](/ko/guide/proxy/#session-bindings)의 읽는 쪽 절반. 각각 응답을 관찰해 `$BIND.NAME` 하나를 메모리에 묶고, Match & Replace 규칙이 그것을 주입합니다 |
-| `list_color_rules` / `list_custom_colors` | [Colormarker](/ko/guide/proxy/#colormarker) 규칙을 우선순위 순으로, 그리고 규칙의 `color`가 참조할 수 있는 전역 커스텀 색상. 표시 전용이며 색상 규칙은 트래픽을 건드리지 않습니다 |
+| `list_color_rules` / `list_custom_colors` | [Colormarker](/ko/guide/proxy/#colouring-rows-colormarker-tab) 규칙을 우선순위 순으로, 그리고 규칙의 `color`가 참조할 수 있는 전역 커스텀 색상. 표시 전용이며 색상 규칙은 트래픽을 건드리지 않습니다 |
 | `preview_color_rule` | 어떤 색상 조건이 최근 플로우 몇 개에 **매칭**되는지, 그리고 앞서 해소되는 규칙들을 셈한 뒤 실제로 몇 개를 **칠하는지**. 전역 후보는 모든 프로젝트 규칙보다 먼저 해석되므로 `scope`를 받습니다 |
-| `grpc_schema` | 이 프로젝트가 캡처된 gRPC를 어떤 `.proto` 스키마로 렌더하는지, 각 조각이 어디서 왔는지(디스크립터 셋 파일 또는 리플렉션 페치). 아무것도 보내지 않습니다 |
+| `grpc_schema` | 이 프로젝트가 캡처된 gRPC를 어떤 `.proto` 스키마로 렌더하는지, 각 조각이 어디서 왔는지(디스크립터 셋 파일 또는 리플렉션 페치). 리플렉션 목록에는 프로젝트에 저장된 모든 대상과, 이 서버가 가져왔지만 저장하지 못한 대상이 함께 나옵니다. 아무것도 보내지 않습니다 |
 | `list_rules` | 프로젝트에 적용되는 Match & Replace 규칙을 적용 순서로 나열. 전역 규칙이 먼저, 그다음이 프로젝트 규칙(`scope`로 한쪽만 조회) |
 | `list_env` | 치환에 쓰이는 프로젝트 env 토큰과 내장 생성기. 결과는 `{syntax, prefix, example, vars, generators}`입니다(env 값은 가려짐). 앞의 세 값은 참조를 어떻게 **적을지** 알려 줍니다. `syntax`는 이 설치의 문법(`namespaced`이면 `$ENV.KEY`, `$BIND.NAME`, `$GEN.UUID`; `bare`이면 생성기 없이 레거시 `$KEY`), `prefix`는 시길, `example`은 앞의 둘을 적용한 예시여서 기본이 아닌 시길도 조립할 필요가 없습니다. `vars`의 각 행은 bare 이름과 `length`, 값이 스킴으로 시작할 때의 `scheme`을 싣고, `generators`의 각 행은 완성된 토큰과 출력 형식을 싣습니다 |
 | `list_host_overrides` | 이 프로젝트에 적용 중인 호스트 → IP 다이얼 맵 |
@@ -223,7 +223,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `create_extract_rule` / `update_extract_rule` / `set_extract_rule_enabled` / `delete_extract_rule` | 응답에서 `$BIND.NAME`을 묶는 extract 규칙 관리. 이름을 바꾸면 옛 이름에 묶인 값은 라벨만 갈아 끼우는 게 아니라 버려지고, 비활성화하면 이름 자체가 **선언 해제**되어 그것을 주입하던 규칙이 낡은 값을 보내는 대신 다시 거부합니다 |
 | `create_color_rule` / `update_color_rule` / `set_color_rule_enabled` / `move_color_rule` / `delete_color_rule` | Colormarker 규칙 관리. `move_color_rule`은 겉모습이 아니라 의미의 편집입니다. 활성화된 첫 매칭이 그 행을 칠합니다. 각각 `scope`를 받습니다(`project` 기본값 또는 `global`) |
 | `create_custom_color` / `update_custom_color` / `delete_custom_color` | 기본 6색 위에 피커가 제공하는 전역 커스텀 색상 정의. 하나를 지워도 그것을 이름으로 쓰던 규칙은 삭제가 전파되지 않고 무해하게 남으며, 그 행들은 보이는 기본값으로 떨어집니다 |
-| `grpc_reflect` / `grpc_forget` | 대상의 `grpc.reflection.v1`(없으면 `v1alpha`)에 디스크립터를 요청해 프로젝트에 캐시하거나, 캐시된 대상을 버립니다. `grpc_reflect`는 아웃바운드 전송이므로 다른 것들과 똑같이 스코프 게이트를 지납니다 |
+| `grpc_reflect` / `grpc_forget` | 대상의 `grpc.reflection.v1`(없으면 `v1alpha`)에 디스크립터를 요청해 프로젝트에 캐시하거나, 캐시된 대상을 버립니다. `grpc_reflect`는 아웃바운드 전송이므로 다른 것들과 똑같이 스코프 게이트를 지납니다. `persisted: false`는 쓰기가 커밋되지 않았다는 뜻입니다(다른 gori가 라이터를 쥐고 있음). 리플렉션으로 가져온 스키마는 이 서버가 끝날 때까지 적용되고, `grpc_schema`에 나오며 `grpc_forget`으로 버릴 수 있습니다. 커밋되지 않은 forget은 이 서버가 그 대상으로 렌더하는 것만 멈추고 저장된 행은 남으므로, `grpc_schema`에는 계속 나옵니다 |
 | `create_view` / `update_view` / `delete_view` | 저장된 History [뷰](/ko/guide/proxy/#views) 생성, 편집, 스코프 이동, 삭제. 각각 `scope`를 받습니다: `project`(기본값) 또는 `global`. 쿼리는 들어올 때 검사합니다. 모든 항이 버려질 쿼리는 거절하는데, 아무것도 좁히지 못하면서 모든 표면의 칩은 좁히고 있다고 주장하게 되기 때문입니다 |
 | `preview_rule` | 규칙을 만들기 전에, 저장된 플로우 중 몇 개가 바뀌었을지 추정 |
 | `import_flows` | HAR / URL 목록 / OpenAPI / Postman / Insomnia / Burp / WSDL 파일, 또는 curl 명령(`kind: "curl"`, 파일이나 `text`로)을 History로 일괄 임포트 |
@@ -235,16 +235,16 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `set_sandbox` | 하드 컨테인먼트. 켜면 프록시가 스코프가 허용한 것만 전달하고 나머지는 차단 |
 | `set_env_var` / `delete_env_var` | 치환이 읽는 프로젝트 env 토큰 관리. 키는 bare로 저장되며, 참조는 `$ENV.KEY`로, `bare` 옵트아웃에서는 `$KEY`로 씁니다. 이 설치가 어느 쪽인지는 `list_env`의 `syntax` / `example`이 말해 줍니다 |
 | `create_session_slot` / `update_session_slot` / `delete_session_slot` | 세션 슬롯 관리. Authorize 탭의 identities 카드가 편집하는 바로 그 목록이고, `authorize_start`가 재생하는 집합입니다. `refresh`(Repeater 세션 id, 실행 순서대로)와 `refresh_before`(`off`, `jwt-exp`, `ttl=10m`)로 슬롯에 [갱신 단계](/ko/guide/authorize/#refreshing-a-slot)를 붙입니다 |
-| `refresh_session_slot` | 슬롯의 갱신 단계를 지금 실행해 extract 규칙이 슬롯을 다시 바인딩하게 합니다. `ok`, 실패한 단계와 상태 코드, 다시 바인딩된 바인딩 **이름**을 돌려주며 값은 돌려주지 않습니다. 단계는 History(source `refresh`)에 기록됩니다. `send_request`처럼 제한됩니다(`allow_unscoped`). 값은 이 서버 프로세스에만 있습니다 |
+| `refresh_session_slot` | 슬롯의 갱신 단계를 지금 실행해 extract 규칙이 슬롯을 다시 바인딩하게 합니다. `ok`, 실패한 단계와 상태 코드, 다시 바인딩된 바인딩 **이름**을 돌려주며 값은 돌려주지 않습니다. 단계는 History(source `refresh`)에 기록됩니다. `send_request`처럼 제한되고(`allow_unscoped`), 단계의 업스트림 TLS 검증도 `send_request`와 같이 합니다(`--insecure-upstream`). 값은 이 서버 프로세스에만 있습니다 |
 | `set_active_session_slot` | 모든 아웃바운드 요청이 어느 신원으로 나갈지 선택합니다. 그 슬롯의 헤더 오버레이가 최종 와이어 바이트에 적용되고 `$BIND.NAME`은 그 바인딩 테이블에서 해소됩니다. 이 서버 프로세스만 들고 있고 저장되지 않으므로, 새 연결은 캡처된 그대로 시작합니다 |
 | `add_host_override` / `update_host_override` / `delete_host_override` | 호스트 → IP 다이얼 맵 관리(요청은 그대로 두고 접속 IP만 변경) |
-| `probe_promote` / `probe_dismiss` / `probe_delete` | Probe 발견 항목을 Issues로 승격, 기각, 또는 삭제 |
+| `probe_promote` / `probe_dismiss` / `probe_delete` | Probe 발견 항목을 Issues로 승격, 기각, 또는 삭제. `probe_dismiss`는 `id`(그 항목 하나를 dismissed ⇄ open으로 토글), `code`, `host`(같은 값을 가진 open 항목 모두 기각) 중 정확히 하나를 받습니다. 기각이 반영되지 않으면 `PROJECT_BUSY`로 답하고 항목은 그대로 둡니다 |
 | `set_probe_mode` | 스캔 모드 설정: `off`, `passive`, `active`, `aggressive`(허가된 대상 전용) |
 | `create_probe_rule` / `update_probe_rule` / `delete_probe_rule` / `set_probe_rule_enabled` | 커스텀 매치 규칙 관리와 스캔 규칙 활성화 / 비활성화 |
 | `create_oast_provider` / `update_oast_provider` / `delete_oast_provider` / `set_oast_provider_enabled` | `oast_start`가 사용할 OAST 프로바이더 관리 |
-| `fuzz_start` / `fuzz_status` / `fuzz_results` / `fuzz_stop` | Fuzzer 구동. `save_results:true`는 바이트 상한이 걸린 비동기 기록자를 통해 **모든** 행을 영구 저장하고 데이터베이스 `run_id`를 돌려줍니다. 저장소 백프레셔가 걸리면 나가는 트래픽은 멈추지 않고 저장만 실패로 표시됩니다. 이것은 상한이 걸린 선택적 라이브 잡 캐시나 `record_history`와는 별개입니다. `fuzz_start{fields: ["role"]}`는 단항 요청의 **스키마가 아는 gRPC 필드**를 스윕합니다. 페이로드는 필드 선언을 거쳐 바이트가 되고, 메시지의 나머지 바이트는 캡처에서 그대로 복사되며, 길이 접두사가 따라옵니다. 바이트 위치를 쓰는 gRPC 스윕에서 페이로드가 메시지 길이를 바꾸면 `grpc_stale_prefix`로 보고하며, `fuzz_start{reframe_grpc: true}`는 보고 대신 접두사를 다시 계산합니다. `fuzz_results`는 매치되지 않았어도 런이 관찰한 사실이 있는 행(재전송이나 리트라이된 요청, 잘린 응답, 실패한 전송, 실행되지 못해 페이로드가 변환 없이 나간 `¦chain` 스텝)을 함께 보관하므로 각 행의 `matched`를 읽거나 `matched_only: true`를 넘기세요 |
+| `fuzz_start` / `fuzz_status` / `fuzz_results` / `fuzz_stop` | Fuzzer 구동. `save_results:true`는 바이트 상한이 걸린 비동기 기록자를 통해 **모든** 행을 영구 저장하고 데이터베이스 `run_id`를 돌려줍니다. 저장소 백프레셔가 걸리면 나가는 트래픽은 멈추지 않고 저장만 실패로 표시됩니다. 이것은 상한이 걸린 선택적 라이브 잡 캐시나 `record_history`와는 별개입니다. `fuzz_start{fields: ["role"]}`는 단항 요청의 **스키마가 아는 gRPC 필드**를 스윕합니다. 페이로드는 필드 선언을 거쳐 바이트가 되고, 메시지의 나머지 바이트는 캡처에서 그대로 복사되며, 길이 접두사가 따라옵니다. 바이트 위치를 쓰는 gRPC 스윕에서 페이로드가 메시지 길이를 바꾸면 `grpc_stale_prefix`로 보고하며, `fuzz_start{reframe_grpc: true}`는 보고 대신 접두사를 다시 계산합니다. `fuzz_results`는 매치되지 않았어도 런이 관찰한 사실이 있는 행(재전송이나 리트라이된 요청, 잘린 응답, 실패한 전송, 실행되지 못해 페이로드가 변환 없이 나간 `¦chain` 스텝)을 함께 보관하므로 각 행의 `matched`를 읽거나 `matched_only: true`를 넘기세요. `stop_on`은 매처가 N번 맞았을 때(`after_matches`) 또는 별도의 `match` / `filter` 조건이 성립할 때 실행을 일찍 끝내며 상태는 `condition_met`입니다. `keep: "interesting"`은 `save_results` 보관본에 매치된 행과 오류·재전송·잘린 캡처처럼 관찰된 사실이 있는 행만 남깁니다 |
 | `delete_fuzz_run` | 영구 퍼즈 실행 하나와 그 결과를 삭제합니다. 살아 있는 기록자가 확인되면 거부합니다. `force_stale:true`는 죽은 프로세스가 남긴 `running`/`saving` 행을 지우며, 다른 gori가 저장 중일 때는 절대 쓰면 안 됩니다 |
-| `mine_start` / `mine_status` / `mine_results` / `mine_stop` | Param Miner 구동 |
+| `mine_start` / `mine_status` / `mine_results` / `mine_stop` | Param Miner 구동. `names`로 준 이름은 내장 목록과 워드리스트보다 먼저 시험합니다(예: 같은 호스트의 다른 엔드포인트에서 `list_params`가 본 이름) |
 | `sequence_start` / `sequence_status` / `sequence_results` / `sequence_stop` | 라이브 리플레이로 토큰을 수집해 평가(결과는 리포트만 반환, 토큰은 반환하지 않음) |
 | `authorize_start` / `authorize_status` / `authorize_results` / `authorize_stop` | 캡처된 플로우를 여러 아이덴티티로 재전송하고 각 응답을 기준선과 비교합니다(접근 제어 결함). 결과는 `access_control`(`BYPASS`/`enforced`/`review`/`error`/`nothing_sent`)과 페이징 없는 `bypasses` 목록으로 시작합니다 |
 | `cache_deception_check` | 플로우 하나를 웹 캐시 디셉션으로 검사합니다: 캡처된(인증된) 아이덴티티로 재전송하고, 세션 없이 같은 url을 다시 요청한 뒤 캐시 무효화 익명 제어 요청을 보냅니다. 제어 응답이 일치하고 캐시 히트 신호가 없을 때만 `served`로 판정합니다. 제어 응답도 캐시 히트라면 쿼리가 무시됐을 수 있어 `review`이며, 익명 응답은 캐시 히트이고 제어 응답은 다르면 디셉션 가능성(`cached`)이 있습니다. 동기 방식으로 최대 세 번 전송합니다. 각 시도의 `cache`는 해당 응답 상태이고 최상위 `cache`는 익명 응답 상태입니다. 트리거되는 조작된 경로를 찾으려면 Fuzzer의 `cache-delimiters` 페이로드 세트와 함께 쓰세요 |
@@ -318,7 +318,7 @@ stateless 리비전에서 따라오는 두 가지는 클라이언트를 만들�
 
 ## 도구 힌트 {#tool-hints}
 
-`tools/list`의 모든 도구는 `annotations.readOnlyHint`를 함께 싣습니다. 이 프로젝트의 캡처를 읽기만 하는 도구와, 캡처에 쓰거나 대상에 트래픽을 보내는 도구를 클라이언트가 구분할 수 있도록 — 즉 사람 확인 없이 돌려도 되는 호출과 물어봐야 하는 호출을 가르기 위해서입니다. 이 힌트는 [`--read-only`](#read-only-mode)가 강제하는 것과 같은 선언에서 유도되므로 힌트와 게이트가 어긋날 수 없고, 읽기 전용 도구는 `openWorldHint: false`도 함께 답합니다. 프로젝트 스토어에서 답할 뿐 바깥으로 다이얼하지 않기 때문입니다.
+`tools/list`의 모든 도구는 `annotations.readOnlyHint`를 함께 싣습니다. 이 프로젝트의 캡처를 읽기만 하는 도구와, 캡처에 쓰거나 대상에 트래픽을 보내는 도구를 클라이언트가 구분할 수 있도록 — 즉 사람 확인 없이 돌려도 되는 호출과 물어봐야 하는 호출을 가르기 위해서입니다. 이 힌트는 [`--read-only`](#read-only-mode)가 강제하는 것과 같은 선언에서 유도되므로 힌트와 게이트가 따로 어긋나 갈 수 없고, 둘이 다른 곳은 그 선언이 그렇게 정한 곳뿐입니다. 워크벤치 폴링 도구(`*_status`, `*_results`, `list_jobs`, `get_job`)와 `preview_rule`은 보고만 하므로 `--read-only`에서는 숨겨지지만 읽기 전용으로 표시됩니다. 반대로 `switch_project`, `create_project`, `probe_scan`(`active:true`면 전송함), `operator_messages`(전달 기록을 씀)는 `--read-only`에서도 남지만 읽기 전용으로 표시되지 않습니다. 읽기 전용 도구는 `openWorldHint: false`도 함께 답합니다. 프로젝트 스토어에서 답할 뿐 바깥으로 다이얼하지 않기 때문입니다.
 
 ## 한 번에 한 호출 {#one-call-at-a-time}
 

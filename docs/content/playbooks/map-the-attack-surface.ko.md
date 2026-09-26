@@ -19,7 +19,7 @@ group = "기초"
 gori run sitemap
 ```
 
-트리는 캡처 위의 뷰일 뿐 두 번째 사본이 아닙니다. 다음에 둘러보는 것이 도착하는 즉시 나타납니다. `--in-scope`는 스코프 렌즈처럼 in-scope 호스트로 한정합니다.
+트리는 캡처 위의 뷰일 뿐 두 번째 사본이 아닙니다. 다음에 둘러보는 것이 도착하는 즉시 나타납니다. `--in-scope`는 스코프 렌즈처럼 in-scope 호스트로 한정하고, `--hide-static`은 이미지, 폰트, 미디어를 뺍니다(TUI에서는 **Display…** 아래 `Space` `Z` `s`, History와 함께 쓰는 렌즈입니다).
 
 <figure class="tui-shot">
   <img src="/images/tui/sitemap.svg" alt="캡처된 호스트가 method 칩과 호스트별 경로 수와 함께 경로 트리로 펼쳐진 gori Sitemap 탭">
@@ -30,7 +30,7 @@ gori run sitemap
 
 ## 2. 시끄러운 id 접기 {#2-fold-noisy-ids}
 
-REST API는 식별자 아래에 형태를 파묻습니다. `/user/1`, `/user/2`, `/order/9f3c…`는 백 개의 얼굴을 쓴 하나의 엔드포인트입니다. `g`를 눌러 path-param id를 접으면, `/user/1`과 `/user/2`가 한 노드를 공유하고 긴 id는 하나의 `{uuid}`로 접힙니다. 거의 똑같던 행의 벽이 그 뒤에 있는 몇 안 되는 진짜 엔드포인트로 바뀝니다.
+REST API는 식별자 아래에 형태를 파묻습니다. `/user/1`, `/user/2`, `/order/9f3c…`는 백 개의 얼굴을 쓴 하나의 엔드포인트입니다. Sitemap은 path-param id를 알아서 접으므로, `/user/1`과 `/user/2`가 한 노드를 공유하고 긴 id는 하나의 `{uuid}`로 접힙니다. 거의 똑같던 행의 벽이 그 뒤에 있는 몇 안 되는 진짜 엔드포인트로 바뀝니다. 쿼리 문자열 변형도 같은 방식으로 접힙니다(`/search?q=1`과 `/search?q=2`는 `/search`로). 두 접기는 기본으로 켜져 있습니다. 모든 값을 그대로 봐야 하는 드문 경우를 위해 `g`는 id 접기를, `Shift-G`는 쿼리 접기를 토글합니다.
 
 ```bash
 gori run sitemap            # id를 기본으로 접습니다; --no-group은 전부 보여 줍니다
@@ -52,6 +52,8 @@ gori run discover --target https://api.example.com \
 
 > Discover는 대상에 실제로 요청받지 않은 트래픽을 보냅니다. 추측하는 모든 경로마다 실제 요청 하나씩. 테스트 권한이 있는 시스템에만 실행하세요. 실행은 프로젝트 스코프 안에 머물고, 샌드박스와 exclude 규칙은 항상 존중됩니다.
 
+캡처한 JavaScript도 엔드포인트를 알려 주며, 그것을 읽는 데는 아무것도 보내지 않습니다. Sitemap에서 `Space` `J`(**Scan JavaScript**)는 프로젝트에 이미 있는 JS 응답과 인라인 스크립트를 읽고, 그것들이 참조하지만 어떤 요청도 닿지 않은 경로를 흐린 `js` 행으로 그립니다. 헤드리스에서는 `gori run sitemap js --scan`이 그것들을 나열하고, `gori run sitemap --js-refs`가 트리에 그립니다.
+
 **체크포인트.** 둘러본 적 없는 새 경로가 Sitemap에 나타나고, 실행 요약이 무엇을 찾았고 캘리브레이터가 무엇을 억제했는지 알려 줍니다.
 
 ## 4. 공격면 읽고 손대기 {#4-read-and-act-on-the-surface}
@@ -59,6 +61,8 @@ gori run discover --target https://api.example.com \
 Discover 발견은 단순한 URL이 아닙니다. gori는 그것이 구성한 요청과 origin이 돌려준 응답을 저장하므로, 트리는 직접 읽을 수 있는 증거입니다. 발견된 노드를 선택하고 `o`를 누르면 History와 같은 상세 뷰에서 그 교환이 열립니다(`Enter`는 노드를 펼치거나 접기만 합니다): 헤더, 본문, 정렬된 JSON. 거기서 `^R`로 **Repeater**에 보내 손으로 찔러 보기 시작합니다.
 
 트리아지하면서 중요한 경로를 `t`로 마킹하고(`t`를 연달아 누르면 연속된 행이 마킹됩니다), `Space` 메뉴로 태그를 달거나 바로 여기서 호스트를 스코프에 추가해, 신경 쓰는 엔드포인트가 다음 캡처까지 살아남게 하세요. 아무것도 스스로 트래픽을 보내지 않습니다. 무엇을 열고 무엇을 쫓을지는 사용자가 정합니다.
+
+트리는 두 가지 방식으로 더 읽힙니다. 호스트나 서브트리에서 `p`를 누르면 그 요청들이 실어 나른 모든 파라미터 이름을, 어디에 나타났는지와 값이 응답에 반사되었는지와 함께 나열합니다(**Target → Params**, `gori run sitemap params`). `⇧E`는 선택한 호스트나 서브트리를 OpenAPI 3.0.3 문서로 내보냅니다. 경로는 템플릿으로, 스키마는 추론해서 담지만 자격 증명 값은 절대 쓰지 않습니다(`gori run sitemap export`).
 
 **체크포인트.** 발견된 엔드포인트를 열어 실제 응답을 읽고, 그것을 Repeater로 넘길 수 있습니다.
 

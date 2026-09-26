@@ -15,7 +15,7 @@ gori에는 수동 테스트와 나란히 돌아가는 자동 분석 기능이 �
 
 **액티브** 체크는 의도적으로 *light-touch*로 설계되었습니다. 이미 캡처한 트래픽에 대해 안전하고 저용량인 프로브 몇 개를 보낼 뿐입니다. 기본적으로 안전한 메서드(`GET` / `HEAD`)만 프로브하고, 고유한 표면마다 한 번씩만 테스트하며, 액티브 모드를 활성화하기 전에는 아무것도 나가지 않습니다. Probe 탭에서 `m`(**Set mode**)을 누르거나 `gori run probe mode active`를 실행하세요. 새 프로젝트는 `passive`로 시작합니다. 흔적을 최소로 남기면서 빠른 직감을 확인하도록(파라미터가 반사되는지, origin이 허용되는지) 만들어졌습니다.
 
-안전하지 않은 메서드(`POST` / `PUT` / `PATCH` / `DELETE`)를 다시 보내면 서버 상태가 변경될 수 있으므로 항상 명시적으로 켜야 합니다. 플로우별 *Run active scan* 팝업에서 **unsafe methods**를 체크해 한 번만 의도적으로 재전송하거나, Probe를 **AGGRESSIVE** 모드로 전환하면 안전하지 않은 메서드도 자동으로 프로브하고 룰별 상한을 높입니다(더 넓은 파라미터 집합, 더 넓은 forbidden-bypass 헤더 집합). 두 경우 모두 프로젝트 스코프 안에서만 동작하므로 스코프를 벗어난 호스트는 절대 건드리지 않습니다.
+안전하지 않은 메서드(`POST` / `PUT` / `PATCH` / `DELETE`)를 다시 보내면 서버 상태가 변경될 수 있으므로 항상 명시적으로 켜야 합니다. 플로우별 *Run active scan* 팝업에서 **unsafe methods**를 체크해 한 번만 의도적으로 재전송하거나, Probe를 **AGGRESSIVE** 모드로 전환하면 안전하지 않은 메서드도 자동으로 프로브하고 룰별 상한을 높입니다(더 넓은 파라미터 집합, 더 넓은 forbidden-bypass 헤더 집합, 그리고 SQL 인젝션 룰에서는 숫자 문맥의 참/거짓 쌍과 MySQL 외에 PostgreSQL·MSSQL 지연 페이로드). 두 경우 모두 프로젝트 스코프 안에서만 동작하므로 스코프를 벗어난 호스트는 절대 건드리지 않습니다.
 
 <figure class="tui-shot">
   <img src="/images/tui/probe.svg" alt="심각도와 범주로 묶인 패시브 이슈를 나열하는 gori Probe 스캐너: 허용적 CORS, 누락된 CSP와 HSTS, 쿠키 플래그 문제, 캐시 가능한 응답, 각각 영향받는 호스트 표시">
@@ -35,7 +35,7 @@ gori에는 수동 테스트와 나란히 돌아가는 자동 분석 기능이 �
 일부 액티브 룰은 나머지와 다르게 동작하며, Rules 서브탭이 해당 행에 이를 표시합니다.
 
 - **HTTP 요청 스머글링**(CL.TE / TE.CL / TE.TE 디싱크)은 **비활성**으로 출하됩니다. POST 본문과 함께 불완전한 프레이밍 프로브를 보내고 프런트엔드/백엔드 디싱크를 타이밍 행으로 확인하는데, 여기 있는 어떤 룰보다 대상에게 무겁고 덜 정중한 일입니다. 행에는 `opt-in` 배지가 붙습니다. `gori run probe rules enable request_smuggling`으로 의도적으로 무장하고, 차분 확인은 `--aggressive --unsafe` 단계로 읽으세요. 활성화해도 unsafe 메서드(팝업의 옵트인, `--unsafe`, AGGRESSIVE) 없이는 프로브를 만들지 않습니다. 프로브가 모두 POST이기 때문입니다.
-- **시간 기반 블라인드 SQL 인젝션**(`sqli_time_based`)도 **비활성**으로 출하됩니다. 확인 단계마다 실제로 몇 초씩 기다리기 때문입니다. Rules 서브탭이나 `gori run probe rules enable sqli_time_based`로 켜세요.
+- **시간 기반 블라인드 SQL 인젝션**(`sqli_time_based`)도 **비활성**으로 출하됩니다. 확인 단계마다 실제로 몇 초씩 기다리기 때문입니다. Rules 서브탭이나 `gori run probe rules enable sqli_time_based`로 켜세요. 깨끗한 baseline 두 번에 이어 2초와 4초 지연을 주입하고(기본은 MySQL `SLEEP`, AGGRESSIVE에서는 `pg_sleep`과 `WAITFOR DELAY`도), 응답 시간이 요청한 지연에 비례해 늘어날 때만 보고하므로 그저 느린 엔드포인트에는 걸리지 않습니다. 두 baseline부터 신호만큼 벌어지는 엔드포인트는 측정하지 않고 건너뜁니다.
 - **대역 외 룰**(블라인드 SSRF, 블라인드 OS 커맨드 인젝션, XML 외부 엔티티, 원격 파일 포함)은 **활성이지만 작동하지 않는** 상태로 출하됩니다. 프로젝트에 등록된 OAST 리스너가 있어야만 페이로드를 찍어 보낼 수 있기 때문입니다. 이건 토글이 아니라 능력이라, 행에 `needs OAST` 배지가 붙고 리스너가 생기기 전까지는 그 요청 비용이 추정치에서 빠집니다.
 
 블라인드 SSRF는 쿼리, 폼 필드, 최상위 JSON 문자열 중 URL 형태의 첫 번째 값만 요청 1개로 검사합니다. RFI도 첫 번째 경로·URL·파일명 형태 값 또는 관습적인 포함 파라미터 하나만 검사하며, OAST URL에 PHP/JSP/ASP 표식을 담습니다. POST 등 안전하지 않은 메서드는 명시적 허용이 필요합니다. `xxe_oast`도 명시적 unsafe 허용이 필요하며, XML 외부 파라미터 엔티티 참조를 담은 요청 1개를 보내고 OAST 콜백이 도착해야 탐지합니다. 원래 문서를 유지하며, 기존 DTD가 있거나 압축·청크 전송을 사용하는 요청, 잘린 본문, 64 KiB를 넘는 본문, 지원하지 않는 인코딩은 건너뜁니다. 페이로드 목록을 순회하거나 확인용 재요청을 보내지 않습니다.
@@ -58,9 +58,13 @@ gori run probe --category cors       # a single category
 gori run probe -q 'host:example.com' # filter History with QL (Repeater still scanned)
 ```
 
+### 웹 캐시 디셉션 {#web-cache-deception}
+
+`gori run cache-deception <flow-id>…`(MCP `cache_deception_check`)는 비공개 응답이 캐시를 통해 다른 사람에게 제공될 수 있는지 확인합니다. 플로우마다 캡처된 로그인 신원 그대로 요청을 재생해 캐시를 채우고, `Cookie`와 `Authorization`을 뺀 채 같은 URL을 다시 요청한 뒤, 캐시 버스팅 쿼리를 붙인 익명 대조 요청을 보냅니다. 익명 요청이 캐시 히트로 인증된 내용을 받았고 대조 요청은 달랐다면 `cached`(디셉션 가능성이 높으니 본문이 정말 비공개였는지 확인하세요), 캐시 히트 없이 내용만 같았다면 `served`, 응답이 비슷하기만 하거나 대조 요청도 캐시 히트였다면 `review`(버스터가 무시됐을 수 있음), 익명 요청이 인증된 응답을 받지 못했다면 `protected`입니다. `blocked`와 `errored`는 아무것도 측정하지 못했다는 뜻입니다. `--unsafe-methods`를 주지 않으면 `GET`/`HEAD`/`OPTIONS`만 확인합니다. 확인해 볼 만한 경로는 Fuzzer의 `cache-delimiters` 프리셋으로 경로를 스윕해 찾고, History는 [`cache:` QL 필드](/ko/reference/query-language/#fields)로 거르세요.
+
 ## Param Miner {#param-miner}
 
-**Miner**는 서버가 받아들이지만 드러내지 않는 파라미터를 발견합니다. 플로우를 지정하면 쿼리 문자열, 폼 본문, multipart/form-data, JSON(중첩 객체와 배열 루트 포함), 헤더, 쿠키 등 여러 위치에서 후보 이름을 프로브하고, 추측을 효율적으로 버킷으로 묶어 응답을 변화시키는 것들을 보고합니다. multipart도 대상이지만 기본은 꺼져 있습니다(캡처된 파일 파트가 요청마다 다시 전송되기 때문). `--locations multipart` 또는 해당 체크박스로 켜세요.
+**Miner**는 서버가 받아들이지만 드러내지 않는 파라미터를 발견합니다. 플로우를 지정하면 쿼리 문자열, 폼 본문, multipart/form-data, JSON(중첩 객체와 배열 루트 포함), 헤더, 쿠키 등 여러 위치에서 후보 이름을 프로브하고, 추측을 효율적으로 버킷으로 묶어 응답을 변화시키는 것들을 보고합니다. multipart도 대상이지만 기본은 꺼져 있습니다(캡처된 파일 파트가 요청마다 다시 전송되기 때문). `--locations multipart` 또는 해당 체크박스로 켜세요. 이미 아는 이름은 먼저 시험합니다. `--name`(반복 가능, MCP `mine_start`의 `names`)은 워드리스트보다 앞서 그 이름을 시험하고, Target → Params 서브탭의 `m`(**Mine parameters**)은 같은 호스트의 다른 엔드포인트에서 본 이름부터 시험하며 선택한 엔드포인트를 마이닝합니다.
 
 ```bash
 gori run mine <flow-id> \
@@ -222,7 +226,7 @@ Comparer는 **메시지 두 개**를 비교합니다. 리테스트는 같은 질
 
 동결된 증거가 결함을 증명한 것을 보관한다면, **리테스트**는 그것을 다시 실행합니다. Issue에 붙는 작은 순서 목록으로, 각 단계는 Repeater 전송 하나와 역할 하나, 그리고 기대 결과 하나를 갖습니다. "먼저 #4로 로그인하고, #5가 403을 주어야 하고, #6이 대조군"이라고 적어 두던 그 서술입니다.
 
-평소처럼 Repeater 세션들을 Issue에 링크한 뒤, Issue 상세에서 `⇧R`(**Retest…**)을 누릅니다. `a`로 세션을 고르고 **역할**(`setup`은 전제를 만들고, `baseline`은 본문 비교의 기준, `variant`는 검사 대상, `control`은 대조군, `cleanup`은 되돌리기), 그리고 기대 결과 하나를 정합니다: 상태(`status:403`, `status:2xx`, `status:200-299`), JSON 필드(`json:data.role=admin`, `json-absent:data.token`), 또는 기준과의 비교(`body:same`, `body:diff`). 비워 두면 결과만 기록하고 아무것도 단언하지 않습니다 — 로그인 단계나 cleanup이 원하는 동작입니다. `⇧J` / `⇧K`로 순서를 바꾸고, `e`로 수정, `d`로 삭제, `r`로 실행합니다. `⇧R`은 전송이 거부된 뒤에도 cleanup 단계를 보내도록 허용하며 실행합니다.
+평소처럼 Repeater 세션들을 Issue에 링크한 뒤, Issue 상세에서 `⇧R`(**Retest…**)을 누릅니다. `a`로 세션을 고르고 **역할**(`setup`은 전제를 만들고, `baseline`은 본문 비교의 기준, `variant`는 검사 대상, `control`은 대조군, `cleanup`은 되돌리기), 그리고 기대 결과 하나를 정합니다: 상태(`status:403`, `status:2xx`, `status:200-299`), JSON 필드(`json:data.role=admin`, `json-absent:data.token`), 또는 기준과의 비교(`body:same`, `body:diff`). JSON 경로는 `--jsonpath`와 세션 바인딩이 읽는 방식 그대로 읽으며(`data.role`, `$.items[0].id`, `items.0`, `["a.b"]`), gori가 읽을 수 없는 경로(`..`, `*`, 필터, 닫히지 않은 괄호)는 `json-absent:`를 통과시키는 대신 단계를 추가할 때 거부합니다. 비워 두면 결과만 기록하고 아무것도 단언하지 않습니다 — 로그인 단계나 cleanup이 원하는 동작입니다. `⇧J` / `⇧K`로 순서를 바꾸고, `e`로 수정, `d`로 삭제, `r`로 실행합니다. `⇧R`은 전송이 거부된 뒤에도 cleanup 단계를 보내도록 허용하며 실행합니다.
 
 `↹`는 카드를 계획과 마지막 실행 결과 표 사이에서 전환합니다. 표에는 역할, 세션, 기대 결과, 실제 결과, 단계별 통과/실패가 있습니다. 결과 행에서 `↵`를 누르면 **그 단계의 전송이 기록한** History 플로우가 열립니다. 리테스트는 탭에 저장된 응답을 덮어쓰지 않으므로, 탭이 한참 뒤에 바뀌어도 그 행이 보고한 바로 그 응답을 계속 열 수 있습니다. Issue 상세에는 리테스트가 있을 때만 한 줄 요약(`retest 3 steps · last FAIL …`)이 표시되고, 없으면 아무 줄도 차지하지 않습니다.
 

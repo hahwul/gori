@@ -72,6 +72,15 @@ Endpoints are keyed by the same folded template the Sitemap draws (`/users/{uuid
 
 Read the verdicts exactly. `gone` means the newer capture *asked* and got a `404`; `not seen` means it never asked, a gap in this retest's coverage, not a fix. The report closes with each still-open issue and what became of the endpoint it was filed against, without sending anything.
 
+To retest one finding rather than the whole surface, give its issue a **retest**: the Repeater sessions that reproduce it, in order, each with at most one expected result (`status:403`, `json:data.role=admin`, `json-absent:data.token`, `body:same`). A `json:` path reads the same way as `--jsonpath` (`data.user.id`, `$.items[0].id`), and a path it cannot read is refused when you write the step, never stored to pass later. On the issue detail it is `⇧R` (**Retest…**); headless:
+
+```bash
+gori run retest add --issue 7 --repeater 12 --assert 'json-absent:data.token'
+gori run retest run --issue 7
+```
+
+`retest run` sends through the scope and sandbox gates, records each send in History, and exits `0` only when the verdict is `pass`.
+
 **Checkpoint.** `--format md` gives you a section you can paste straight into the retest deliverable, with both sides' coverage stated above the counts.
 
 ## 4. Keep notes and links

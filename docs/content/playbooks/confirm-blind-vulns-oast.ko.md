@@ -13,7 +13,7 @@ group = "워크벤치"
 
 ## 1. 리스너를 시작하고 페이로드 받기 {#1-start-a-listener-and-grab-a-payload}
 
-**OAST** 탭(기본적으로 탭 바 밖에 있으니 **`0`**을 누르고 "oast"를 입력하거나 `Ctrl-P` → **Go to OAST**)을 열고 `Ctrl-R`을 눌러 리스닝을 시작합니다. gori가 프로바이더(기본은 공개 `interactsh`)에 등록하고 **payload**를 발급합니다. 이 세션 동안 나에게만 속하는 고유한 호스트명/URL입니다. `g`(get payload)로 복사합니다.
+**OAST** 탭(기본적으로 탭 바 밖에 있으니 **`0`**을 누르고 "oast"를 입력하거나 `Ctrl-P` → **Go to OAST**)을 열고 `Ctrl-R`(또는 `Space` `r`, **Start listening**)을 눌러 리스닝을 시작합니다. gori가 프로바이더(기본은 공개 `interactsh`)에 등록하고 **payload**를 발급합니다. 이 세션 동안 나에게만 속하는 고유한 호스트명/URL입니다. `g`(get payload)로 복사합니다.
 
 리스너를 스크립트나 에이전트 루프에 두고 싶다면 헤드리스로:
 
@@ -22,13 +22,13 @@ gori run oast listen         # 임시: 등록이 프로세스와 함께 사라�
 gori run oast listen --save  # …프로젝트 세션으로 저장
 ```
 
-그냥 `listen`은 저장소를 쓰지 않아 등록이 프로세스와 함께 사라집니다. 몇 시간 뒤에 오는 콜백에겐 페이로드가 이미 죽어 있다는 뜻이죠. `--save`는 이를 프로젝트에 기록합니다 — `gori run oast list`에 보이고, 나중 프로세스에서 `gori run oast resume ID`로 이어받고, 정리는 `gori run oast release ID`입니다. MCP에서는 `oast_start`의 `persist: true`가 같은 스위치입니다. TUI의 `Ctrl-R`은 원래부터 세션을 저장하며, `Shift-R`로 재개합니다.
+그냥 `listen`은 저장소를 쓰지 않아 등록이 프로세스와 함께 사라집니다. 몇 시간 뒤에 오는 콜백에겐 페이로드가 이미 죽어 있다는 뜻이죠. `--save`는 이를 프로젝트에 기록합니다 — `gori run oast list`에 보이고, 나중 프로세스에서 `gori run oast resume ID`로 이어받고, 정리는 `gori run oast release ID`입니다. MCP에서는 `oast_start`의 `persist: true`가 같은 스위치입니다. TUI의 `Ctrl-R`은 원래부터 세션을 저장하며, `Shift-R`(`Space` `R`, **Resume listener…**)로 재개합니다.
 
 **체크포인트.** OAST 탭에 살아 있는 payload URL이 보이고, **Callbacks** 표는 비어 대기 중입니다.
 
 ## 2. 페이로드 심기 {#2-plant-the-payload}
 
-그 payload URL을 가져다 대상이 역참조할 만한 곳에 넣습니다. 후보 요청을 **Repeater**(History에서 `Ctrl-R`)나 **Fuzzer**(`Shift-I`)로 보낸 뒤, `Space` → **Insert OAST payload**로 URL을 커서 위치에 떨굽니다. 서버 측 페치나 원격 포함을 유발할 만한 곳이라면 어디든 심으세요: URL 파라미터, 파일·페이지·템플릿 필드, `Host`나 `X-Forwarded-For` 헤더, XXE용 XML 엔티티, 웹훅 필드. 요청을 전송합니다.
+그 payload URL을 가져다 대상이 역참조할 만한 곳에 넣습니다. 후보 요청을 **Repeater**(History에서 `Ctrl-R`)나 **Fuzzer**(`Shift-I`)로 보낸 뒤, `Space` `O`(**Insert OAST payload**)로 URL을 커서 위치에 떨굽니다. 서버 측 페치나 원격 포함을 유발할 만한 곳이라면 어디든 심으세요: URL 파라미터, 파일·페이지·템플릿 필드, `Host`나 `X-Forwarded-For` 헤더, XXE용 XML 엔티티, 웹훅 필드. 요청을 전송합니다.
 
 **체크포인트.** 페이로드를 실은 요청이 대상에 도달했습니다. 여기서 응답은 평범해도 괜찮습니다. 핵심은 *서버*가 그다음 대역 밖에서 하는 일입니다.
 

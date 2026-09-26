@@ -72,6 +72,8 @@ gori run fuzz <flow-id> \
   --ac
 ```
 
+원하는 것을 얻으면 실행이 스스로 멈추게 할 수도 있습니다. `--stop-after-matches 1`은 첫 매처 히트에서 실행을 끝내고, `--stop-on`은 별도의 조건을 지정합니다(`status:500`, 또는 본문에서 그 문자열이 처음 사라지는 순간을 잡는 `'!regex:Invalid password'`). 어느 쪽이든 실행은 `condition_met`으로 끝나고, 멈추게 한 행이 기록됩니다. TUI에서는 둘 다 CONFIG 창의 **Advanced** 카드에 있는 행입니다.
+
 ### 차이가 시계뿐일 때 {#when-the-only-difference-is-the-clock}
 
 시간 기반 블라인드 페이로드(`' OR SLEEP(5)--`, `; ping -c 10 127.0.0.1`, `pg_sleep`)는 아무 일도 하지 않은 페이로드와 status도, 바이트 길이도, 단어 수도, 본문도 똑같이 돌아옵니다. 위의 모든 차원이 이것을 보지 못하므로, 스윕이 우연히나 잡아낼 수 있는 유일한 부류였습니다. `--mt`는 이것을 직접 지목합니다.
@@ -103,6 +105,8 @@ gori run fuzz list
 gori run fuzz show RUN_ID
 gori run fuzz show RUN_ID RESULT_INDEX --format json
 ```
+
+긴 스윕이라면 `--keep interesting`(Advanced 카드의 **Keep interesting only**)이 모든 행 대신 매칭된 행과 결함이 있는 행(오류, 재전송, 잘린 응답, 멈춘 행)만 저장합니다.
 
 원래의 `gori run fuzz …`는 계속 일회성이므로, 업그레이드했다고 기존 스크립트가 갑자기 프로젝트 데이터베이스를 불리기 시작하지는 않습니다.
 

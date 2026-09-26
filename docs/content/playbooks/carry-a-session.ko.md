@@ -90,7 +90,7 @@ gori run fuzz 42 --slot low-priv --bind-from 17 --wordlist ids.txt
 
 기대기 전에 알아 둘 한계가 둘 있습니다. 활성 슬롯은 **절대 저장되지 않습니다.** 프로젝트를 다시 열면 캡처된 그대로에서 시작하는데, 슬롯의 값이 메모리 전용이라 포인터만 비어 있는 테이블 위로 복원하면 `$BIND.SESSION`이 리터럴인 오버레이를 보내게 되기 때문입니다. 그리고 쿠키 항아리는 없습니다. 슬롯은 직접 쓴 헤더와 gori가 관찰한 값을 들고 있고, `--bind-from`이 "다시 로그인한다"의 명시적인 버전입니다.
 
-토큰보다 오래 가는 실행이라면 슬롯에 **갱신 단계**(refresh steps)를 주세요. 순서대로 로그인하는 Repeater 세션들입니다. `gori run session edit admin --refresh 12,14 --refresh-before jwt-exp`를 하면 `--slot admin` 전송은 바인딩된 JWT가 곧 만료될 때마다 먼저 슬롯을 갱신하고, `gori run session refresh admin`은 그 단계를 손으로 돌려 확인합니다. 갱신은 전송 전에 동작하며 `401` 뒤에 재시도하지 않습니다. [갱신 단계](/ko/reference/cli/#refresh-steps)를 참고하세요.
+토큰보다 오래 가는 실행이라면 슬롯에 **갱신 단계**(refresh steps)를 주세요. 순서대로 로그인하는 Repeater 세션들입니다. `gori run session edit admin --refresh 12,14 --refresh-before jwt-exp`를 하면 `--slot admin` 전송은 바인딩된 JWT가 곧 만료될 때마다 먼저 슬롯을 갱신하고, `gori run session refresh admin`은 그 단계를 손으로 돌려 확인합니다. TUI에서는 Repeater 서브탭에서 `Ctrl-P` → **Use as refresh for slot…**으로 그 서브탭을 슬롯의 단계에 덧붙입니다. 갱신은 전송 전에 동작하며 `401` 뒤에 재시도하지 않습니다. [갱신 단계](/ko/reference/cli/#refresh-steps)를 참고하세요.
 
 **체크포인트.** `gori run session list`가 두 슬롯을 보여 주고, `--slot low-priv` 실행은 첫 요청 전에 `slot: sending as low-priv`를 찍습니다.
 

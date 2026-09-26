@@ -54,7 +54,7 @@ gori run issues --db /path/to/project.db --format json
 | 서브커맨드 | `--format json` | `--format jsonl` |
 |-----------|-----------------|------------------|
 | `capture`, `history` | 한 줄에 JSON 객체 하나 | `json`의 별칭, 출력 동일 |
-| `fuzz`, `mine`, `discover`, `authorize` | 버퍼링 후 마지막에 JSON 배열 하나 | 결과가 나올 때마다 한 줄씩 |
+| `fuzz`, `mine`, `discover`, `authorize`, `cache-deception` | 버퍼링 후 마지막에 JSON 배열 하나 | 결과가 나올 때마다 한 줄씩 |
 | `sequence` | 보고서 하나 | 샘플이 나올 때마다 한 줄씩, 마지막에 보고서 |
 
 긴 스윕을 진행 중에 소비하려면 `jsonl`을, 끝에 문서 하나를 받으려면 `json`을 씁니다.
@@ -108,7 +108,7 @@ gori run fuzz 42 --bind-from 41 --wordlist ids.txt
 
 바인딩을 정의하는 추출 규칙은 [세션 바인딩](/ko/guide/proxy/#session-bindings)을 참고하세요.
 
-## 프로세스 훅
+## 프로세스 훅 {#process-hooks}
 
 gori에는 플러그인 SDK가 없고 앞으로도 없습니다. 변환을 *계산*해야 할 때(JWT 재서명, 바디
 재압축, 독자 포맷 봉투 복호화, 진짜 탐지기 실행) 이미 가지고 있는 프로그램에 바이트를 넘기면

@@ -20,17 +20,17 @@ gori is organized into tabs; move between them with `[` / `]` or jump with numbe
 | **Intercept** | Hold requests/responses for a manual decision |
 | **Repeater** | Request workbench (incl. WebSocket & gRPC modes) |
 | **Fuzzer** | Intruder-style fuzzer with four attack modes |
-| **Miner** | Hidden-parameter discovery (hidden by default) |
+| **Miner** | Hidden-parameter discovery (behind `0` by default) |
 | **OAST** | Out-of-band callback listener for blind vulnerabilities (behind `0` by default) |
-| **Sequencer** | Token randomness / predictability analysis (hidden by default) |
+| **Sequencer** | Token randomness / predictability analysis (behind `0` by default) |
 | **Decoder** | Encode / decode / hash pipeline (behind `0` by default) |
 | **JWT** | Decode, re-sign, and attack JSON Web Tokens (behind `0` by default) |
-| **Cookie** | Decode, verify, crack, and re-sign Flask / Rack / Django session cookies (hidden by default) |
+| **Cookie** | Decode, verify, crack, and re-sign Flask / Rack / Django session cookies (behind `0` by default) |
 | **Comparer** | Side-by-side diff of two flows (behind `0` by default) |
 | **Rewriter** | Match & Replace rules that rewrite traffic in flight (behind `0` by default) |
-| **Colormarker** | Row-colour rules for History, by query (hidden by default) |
+| **Colormarker** | Row-colour rules for History, by query (behind `0` by default) |
 | **Probe** | Passive & light-touch active security scanner |
-| **Authorize** | Replay a request under several identities to find broken access control (hidden by default) |
+| **Authorize** | Replay a request under several identities to find broken access control (behind `0` by default) |
 | **Issues** | Triage results by severity and status |
 | **Evidence** | Frozen request/response snapshots, project-wide (appears once one exists) |
 | **Notes** | Per-project Markdown notes |

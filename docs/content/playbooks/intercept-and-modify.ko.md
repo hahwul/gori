@@ -59,7 +59,7 @@ Forward와 drop은 마킹된 행이 있으면 그것에, 없으면 커서 행에
 
 ## 4. Match & Replace로 편집을 영구화하기 {#4-make-an-edit-permanent-with-match-replace}
 
-같은 편집을 손으로 하려고 매 요청을 붙잡는 것은 금세 지칩니다. 상시 편집은 **Rewriter** 탭에 속합니다(Match & Replace 에디터. 기본적으로 탭 바 밖에 있으니 **`0`**을 누르고 "rewriter"를 입력하거나 `Ctrl-P` → **Match & Replace**). 연산이 있는 규칙을 추가하고(헤드나 본문의 텍스트를 **Replace**, 헤더를 **Add** / **Set** / **Remove**, origin을 전혀 다이얼하지 않고 규칙에서 요청에 답하는 **Short circuit**, 또는 매칭된 바이트를 명령에 넘기는 **Pipe**), 매칭되는 트래픽에만 발동하도록 host glob으로 스코프를 겁니다:
+같은 편집을 손으로 하려고 매 요청을 붙잡는 것은 금세 지칩니다. 상시 편집은 **Rewriter** 탭에 속합니다(Match & Replace 에디터. 기본적으로 탭 바 밖에 있으니 **`0`**을 누르고 "rewriter"를 입력하거나 `Ctrl-P` → **Match & Replace**). 연산이 있는 규칙을 추가하고(헤드나 본문의 텍스트를 **Replace**, 헤더를 **Add** / **Set** / **Remove**, origin을 전혀 다이얼하지 않고 규칙에서 요청에 답하는 **Short circuit**(미리 적은 응답, 로컬 디렉터리의 파일, History의 `Space` `M`으로 가져온 캡처 플로우의 응답, 또는 close/reset/hang 장애), 또는 매칭된 바이트를 명령에 넘기는 **Pipe**), 매칭되는 트래픽에만 발동하도록 host glob으로 스코프를 겁니다:
 
 ```bash
 gori run rewriter add --op set_header --target request \

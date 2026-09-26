@@ -41,7 +41,7 @@ gzip-decompress | json-unescape
 
 체인을 이름으로 저장하고(`Ctrl-S` 또는 팔레트의 **Save chain by name**) 나중에 다시 불러올 수 있습니다. 저장 입력창은 서브탭 이름으로 채워져 열리고, 이미 있는 이름으로 저장하면 그 항목을 갱신합니다. **Load a saved chain**(`Ctrl-O`)은 저장해 둔 목록을 피커로 열어 이름 옆에 체인 내용을 함께 보여 주므로, 무슨 이름으로 저장했는지 외우고 있을 필요가 없습니다. 타이핑으로 걸러 볼 수 있고, `Ctrl-X`는 선택한 항목을 라이브러리에서 지웁니다. 두 키 모두 탭 안 어디서든 동작합니다: 서브탭 스트립, 탭 바, 각 패널 안 전부.
 
-이름을 붙인 체인은 설정의 `decoder` 섹션에 저장되어 모든 프로젝트에서 공유됩니다. 체인은 조리법이고, 거기에 통과시킨 내용은 프로젝트에 남습니다. Rewriter는 같은 경계를 다르게 긋습니다. 규칙 자체가 [전역이거나 프로젝트 범위](/ko/guide/proxy/#reusing-a-rule-across-projects)입니다.
+이름을 붙인 체인은 설정의 `decoder` 섹션에 저장되어 모든 프로젝트에서 공유됩니다. 체인은 조리법이고, 거기에 통과시킨 내용은 프로젝트에 남습니다. Rewriter는 같은 경계를 다르게 긋습니다. 규칙 자체가 [전역이거나 프로젝트 범위](/ko/guide/proxy/#global-and-project-rules)입니다.
 
 저장한 이름은 그 자체로 **변환기**이기도 합니다. 체인의 한 단계로 이름을 적으면 저장해 둔 체인 전체가 그 자리에서 실행됩니다.
 
@@ -57,7 +57,7 @@ myenc > url-encode
 
 | 범주 | 예시 |
 |----------|----------|
-| **Encoding** | `base64-encode` / `base64-decode`, `base64url-encode`, `url-encode` / `url-decode`, `url-encode-all`(모든 바이트를 인코딩, WAF 우회용), `hex-encode` / `hex-decode`, `base32`, `ascii85`, `base58`, `base36`, `base62`, `quoted-printable`, `punycode-encode` / `punycode-decode`(별칭 `idn-encode` / `idn-decode`), `nfc` / `nfd` / `nfkc` / `nfkd`, `rfc2047-q-encode` / `rfc2047-b-encode` / `rfc2047-decode`, `windows-bestfit-<codepage>`, `codepoint-overflow` |
+| **Encoding** | `base64-encode` / `base64-decode`, `base64url-encode`, `url-encode` / `url-decode`, `url-encode-all`(모든 바이트를 인코딩, WAF 우회용), `hex-encode` / `hex-decode`, `base32`, `ascii85`, `base58`, `base36`, `base62`, `quoted-printable`, `punycode-encode` / `punycode-decode`(별칭 `idn-encode` / `idn-decode`), `nfc` / `nfd` / `nfkc` / `nfkd`, `rfc2047-q-encode` / `rfc2047-b-encode`, `rfc2047-q-decode` / `rfc2047-b-decode` / `rfc2047-decode`, `windows-bestfit-<codepage>`, `codepoint-overflow` |
 | **Number bases** | `decimal-encode` / `decimal-decode`, `binary-encode` / `binary-decode`, `octal-encode` / `octal-decode` |
 | **Compression** | `gzip-compress` / `gzip-decompress`, `zlib-compress` / `zlib-decompress`, `raw-deflate` / `raw-inflate` (헤더 없는 RFC 1951), `brotli-decompress`, `zstd-decompress` |
 | **Serialization** | `msgpack-decode`, `cbor-decode`(바이너리 문서를 JSON 텍스트로), 그리고 네이티브 직렬화 리더 `java-deserialize`, `dotnet-viewstate`, `php-unserialize`, `pickle-disasm` |

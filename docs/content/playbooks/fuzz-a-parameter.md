@@ -72,6 +72,8 @@ gori run fuzz <flow-id> \
   --ac
 ```
 
+A run can also stop itself once it has what you came for. `--stop-after-matches 1` ends it on the first matcher hit, and `--stop-on` names a separate condition (`status:500`, or `'!regex:Invalid password'` for the first body that no longer carries it). Either lands the run as `condition_met`, with the row that tripped it recorded. In the TUI both are rows on the CONFIG pane's **Advanced** card.
+
 ### When the only difference is the clock
 
 A time-based blind payload (`' OR SLEEP(5)--`, `; ping -c 10 127.0.0.1`, a `pg_sleep`) comes back with the same status, the same byte length, the same words and the same body as the payload that did nothing. Every dimension above is blind to it, so it is the one class of finding a sweep could report only by accident. `--mt` names it directly:
@@ -103,6 +105,8 @@ gori run fuzz list
 gori run fuzz show RUN_ID
 gori run fuzz show RUN_ID RESULT_INDEX --format json
 ```
+
+On a long sweep, `--keep interesting` (the Advanced card's **Keep interesting only**) stores only the matched rows and the ones carrying a fault (an error, a re-send, a truncated response, the stop row) instead of every row.
 
 The original `gori run fuzz …` remains ephemeral, so an existing script does not start growing the project database after an upgrade.
 

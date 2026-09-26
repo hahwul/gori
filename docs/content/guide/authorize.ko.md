@@ -211,7 +211,7 @@ gori run session baseline as-captured
 gori run session rm low-priv
 ```
 
-`gori run session activate`는 없습니다. `gori run` 프로세스는 보내고 끝나므로 활성 포인터가 걸쳐 있을 시간이 없습니다. 대신 전송 명령에서 아이덴티티를 지명하세요. `--slot NAME`은 `send`, `repeater`, `repeater minimize`, `fuzz`, `mine`, `sequence`, `discover`, `retest run`에서 동작하며, `--bind-from`이 시드를 재생하기 전에 적용되므로 시드가 채운 슬롯으로 실행이 전송됩니다.
+`gori run session activate`는 없습니다. `gori run` 프로세스는 보내고 끝나므로 활성 포인터가 걸쳐 있을 시간이 없습니다. 대신 전송 명령에서 아이덴티티를 지명하세요. `--slot NAME`은 `send`, `repeater`, `repeater send`, `repeater race`, `repeater timing`, `repeater minimize`, `fuzz`, `mine`, `sequence`, `discover`, `retest run`에서 동작하며, `--bind-from`이 시드를 재생하기 전에 적용되므로 시드가 채운 슬롯으로 실행이 전송됩니다.
 
 `--format jsonl`은 요청이 끝나는 대로 한 줄에 하나씩 흘려보내고, `--format json`은 버퍼링했다가 마지막에 배열 하나를 냅니다. 둘 다 와이어 크기와 함께 판정이 실제로 비교한 디코딩 후 크기를 담습니다. gzip 응답이라면 이 두 숫자는 자릿수가 달라집니다. 전체 플래그는 [CLI 레퍼런스](/ko/reference/cli/#run-authorize)에 있습니다.
 

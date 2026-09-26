@@ -57,7 +57,7 @@ Saved chains can call each other. A recursive definition fails that step with a 
 
 | Category | Examples |
 |----------|----------|
-| **Encoding** | `base64-encode` / `base64-decode`, `base64url-encode`, `url-encode` / `url-decode`, `url-encode-all` (every byte, WAF-bypass style), `hex-encode` / `hex-decode`, `base32`, `ascii85`, `base58`, `base36`, `base62`, `quoted-printable`, `punycode-encode` / `punycode-decode` (aliased `idn-encode` / `idn-decode`), `nfc` / `nfd` / `nfkc` / `nfkd`, `rfc2047-q-encode` / `rfc2047-b-encode` / `rfc2047-decode`, `windows-bestfit-<codepage>`, `codepoint-overflow` |
+| **Encoding** | `base64-encode` / `base64-decode`, `base64url-encode`, `url-encode` / `url-decode`, `url-encode-all` (every byte, WAF-bypass style), `hex-encode` / `hex-decode`, `base32`, `ascii85`, `base58`, `base36`, `base62`, `quoted-printable`, `punycode-encode` / `punycode-decode` (aliased `idn-encode` / `idn-decode`), `nfc` / `nfd` / `nfkc` / `nfkd`, `rfc2047-q-encode` / `rfc2047-b-encode`, `rfc2047-q-decode` / `rfc2047-b-decode` / `rfc2047-decode`, `windows-bestfit-<codepage>`, `codepoint-overflow` |
 | **Number bases** | `decimal-encode` / `decimal-decode`, `binary-encode` / `binary-decode`, `octal-encode` / `octal-decode` |
 | **Compression** | `gzip-compress` / `gzip-decompress`, `zlib-compress` / `zlib-decompress`, `raw-deflate` / `raw-inflate` (headerless, RFC 1951), `brotli-decompress`, `zstd-decompress` |
 | **Serialization** | `msgpack-decode`, `cbor-decode` (a binary document as JSON text), and the native-serialization readers `java-deserialize`, `dotnet-viewstate`, `php-unserialize`, `pickle-disasm` |

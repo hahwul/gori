@@ -11,7 +11,7 @@ The proxy sits between your client and the upstream server, records each exchang
 
 ## Capturing Traffic
 
-Start gori and point your client at `127.0.0.1:8070` (see the [Quick Start](/getting-started/quick-start/)). Toggle capture at any time with `c`. Turning it off lets traffic pass through without being recorded, which is handy while you set up.
+Start gori and point your client at `127.0.0.1:8070` (see the [Quick Start](/getting-started/quick-start/)). For command-line tools, [`gori run shell`](/reference/cli/#run-shell) (or **Open shell** in the palette) starts a shell whose proxy variables and CA bundle already point at gori. Toggle capture at any time with `c`. Turning it off lets traffic pass through without being recorded, which is handy while you set up.
 
 Once a client is pointed at the proxy, `http://gori.proxy/` serves gori's info page and CA download. It is a reserved name answered locally, so it never reaches the network. That is useful on a phone, where the proxy usually gets configured before the certificate. A client with no proxy configured gets the same page by browsing to the listen address directly.
 
@@ -157,7 +157,7 @@ A host gori has never captured (an API subdomain the bundle calls, but also `www
 | Send to Repeater | `r` | A bare `GET` for the path in a new Repeater tab. Nothing is sent until `^R`, and no cookie or `Authorization` from the page is copied |
 | Discover here | `Space` `>` `D` | Crawls under the path, as on any row |
 
-The stored references are deleted with the flows they came from, so `history clear` clears them; they never appear in History, QL or the OpenAPI export. The same data is `gori run sitemap js` (with `--scan`) and `gori run sitemap --js-refs` on the CLI, and `scan_js_endpoints` / `list_js_endpoints` over MCP.
+The stored references are deleted with the flows they came from, so `history clear` clears them; they never appear in History, QL or the OpenAPI export. The same data is `gori run sitemap js` (with `--scan`) and `gori run sitemap --js-refs` on the CLI, and `scan_js_endpoints` / `list_js_endpoints` (or `list_sitemap` with `include_unrequested`) over MCP.
 
 ### OpenAPI export {#openapi}
 
@@ -507,6 +507,8 @@ Scope any rule to a **host** so it only fires for matching traffic: a plain stri
 
 Manage the list with `a` add, `e`/`Enter` edit, `t` enable/disable, `d` delete, `Space → s` global/project, `Shift-J`/`Shift-K` reorder (rules apply top to bottom), and `space` for the full menu. The editor shows a live preview of how many recent flows a rule would affect. Rules take effect as soon as you save, with no restart.
 
+A rule written by a newer gori (an operation, target, part or match kind this build does not know, or a key it does not read) is listed with a `?` mark and never fires. It keeps its fields through a settings save. Here it can be disabled or deleted, but not enabled, edited, duplicated, moved between global and project, or reordered, and the status line names the label it did not recognise.
+
 Under the list sits an editable **sample** message and, beside it, the same message after the enabled rules run. Paste a real captured request in there to see what your rules do to it before you turn them loose. The sample is saved with the project, like the rules it previews.
 
 ### Presets: a starting point, not a capability {#rewriter-presets}
@@ -550,7 +552,7 @@ Headless, `--scope=global` addresses the library on every subcommand: `gori run 
 
 > Upgrading from the old saved-rule **library** (`s`/`o`): its entries are adopted as global rules, **disabled**, the first time gori reads the file. A preset did nothing until you loaded it, so none of them start rewriting traffic on their own; arm the ones you want with `t`.
 
-A **body** rule buffers the message to rewrite it and re-syncs `Content-Length` automatically (a chunked body is de-chunked and re-framed); head rules keep the body streaming untouched. A compressed body is **refused rather than rewritten**: gori does not decompress on the forwarding path, and running a pattern over compressed bytes can match inside the compressed stream by coincidence and corrupt it. A single common byte is enough, with no error and a recalculated `Content-Length` to make it look consistent. So the rule does not fire and the response goes through byte-exact. This covers compression declared either way (`Content-Encoding: gzip`/`br`/… and a compression layer in `Transfer-Encoding`), but not plain `Transfer-Encoding: chunked`, which is framing rather than compression and is de-chunked to the entity before your rule sees it. Streaming responses (SSE, close-delimited, WebSocket upgrades) are left to stream. **A body rule still forces matching hosts to HTTP/1.1**, a downgrade decided once, when the connection is set up, so a rule enabled while an HTTP/2 connection is already open applies to nothing carried by that connection until the client opens a new one. On HTTP/2 Match & Replace applies to heads; body rewriting there is not implemented and is not planned, because HTTP/2 flow control makes a rewrite that changes a body's length either fail outright or deadlock the stream. So a body rule takes its hosts down to HTTP/1.1, and an h2 client that can't take that downgrade (gRPC) won't connect while one is enabled. `gori.log` records that once per host, naming the host and the reason.
+A **body** rule buffers the message to rewrite it and re-syncs `Content-Length` automatically (a chunked body is de-chunked and re-framed); head rules keep the body streaming untouched. Only a message the rule could apply to is buffered: a body rule scoped to one host, or to one direction, leaves every other host's bodies and the other direction streaming. A compressed body is **refused rather than rewritten**: gori does not decompress on the forwarding path, and running a pattern over compressed bytes can match inside the compressed stream by coincidence and corrupt it. A single common byte is enough, with no error and a recalculated `Content-Length` to make it look consistent. So the rule does not fire and the response goes through byte-exact. This covers compression declared either way (`Content-Encoding: gzip`/`br`/… and a compression layer in `Transfer-Encoding`), but not plain `Transfer-Encoding: chunked`, which is framing rather than compression and is de-chunked to the entity before your rule sees it. Streaming responses (SSE, close-delimited, WebSocket upgrades) are left to stream. **A body rule still forces matching hosts to HTTP/1.1**, a downgrade decided once, when the connection is set up, so a rule enabled while an HTTP/2 connection is already open applies to nothing carried by that connection until the client opens a new one. On HTTP/2 Match & Replace applies to heads; body rewriting there is not implemented and is not planned, because HTTP/2 flow control makes a rewrite that changes a body's length either fail outright or deadlock the stream. So a body rule takes its hosts down to HTTP/1.1, and an h2 client that can't take that downgrade (gRPC) won't connect while one is enabled. `gori.log` records that once per host, naming the host and the reason.
 
 ### Match & Replace on WebSocket {#match-replace-websocket}
 
@@ -635,6 +637,7 @@ Head rules apply to HTTP/2 without downgrading the connection, so gRPC keeps wor
 - `Cookie` stays split across however many lines the client sent, so a pattern spanning the whole cookie string may not match.
 - `:scheme` isn't reachable, and `Content-Length` is restored from the original head (the body streams untouched).
 - Trailers and server-pushed heads aren't rewritten, so gRPC's `grpc-status` isn't reachable from a rule.
+- A rule's host is matched per stream, without the port: a request against its own `:authority`, a response against the `:authority` of the request it answers. On a connection that carries several hosts, each stream's rules are the ones for its own host.
 - A rule that adds `Connection`, `Keep-Alive`, `Transfer-Encoding` or `Upgrade` is sent as written. HTTP/2 forbids those, so the peer will reset the stream, which is deliberate: those bytes are yours to send.
 
 Head rules take effect on connections opened after you save. A rule enabled while a long-lived HTTP/2 connection is already open applies from that connection's next request head. Body, short-circuit and body-scoped extract rules do not: they work by taking the host down to HTTP/1.1, that downgrade is decided once when the connection is set up, and an open HTTP/2 connection is never taken back, so one enabled mid-connection fires on nothing the client sends over it until it reconnects, and `gori.log` records that once per connection.
