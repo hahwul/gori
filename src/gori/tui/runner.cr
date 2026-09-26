@@ -4128,10 +4128,12 @@ module Gori::Tui
       end
     end
 
-    # Open the space action menu scoped to the CURRENT focus area. current_scope is
-    # read BEFORE flipping @space_menu_open (which is orthogonal to @overlay) so the
-    # scope reflects where space was pressed — the History list → Body, an open
-    # detail → HistoryDetail, the Repeater response → Repeater, the tab bar → Sidebar.
+    # Open the space action menu for the CURRENT focus area. `action_context` is read BEFORE
+    # flipping @space_menu_open (which is orthogonal to @overlay), so it reflects where space
+    # was pressed — the History list → Body, an open detail → HistoryDetail, the Repeater
+    # response → Repeater. On the tab bar it is the TAB's scope (COMMON or its `:tab` rows),
+    # while the bar's own bare keys still resolve Sidebar → Global (`current_scope`), so a
+    # dropped space there reaches Global, not the row (the R1 guard's tab-bar sweep).
     def open_space_menu : Nil
       here = action_context
       @space_menu_here = here # what a sticky family re-opens against (#run_space_verb)
