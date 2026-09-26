@@ -154,7 +154,7 @@ status:5xx
 method:POST body:password
 ```
 
-Now select your `example.com` flow and press `Enter`. In the detail view, scroll with `↑` / `↓`, copy with `y`, and toggle `x` / `b` / `p` for hex / whitespace / pretty bodies. `Esc` returns to the list.
+Now select your `example.com` flow and press `Enter`. In the detail view, scroll with `↑` / `↓`, copy with `y`, and toggle `Ctrl-X` / `b` / `p` for hex / whitespace / pretty bodies. `Esc` returns to the list.
 
 **Checkpoint.** You can filter History down to one host and open a flow to read its full request and response.
 
