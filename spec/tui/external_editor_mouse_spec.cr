@@ -104,7 +104,15 @@ describe "Runner.copy_shell_command" do
 
     cmd_fish = Runner.copy_shell_command("127.0.0.1:8070", "/path/to/ca",
       Gori::ShellEnv::Syntax::Fish, executable: "/usr/local/bin/gori")
-    cmd_fish.should eq("/usr/local/bin/gori run shell --print --shell fish --proxy 127.0.0.1:8070 --ca-dir /path/to/ca | source")
+    cmd_fish.should eq("'/usr/local/bin/gori' run shell --print --shell fish --proxy '127.0.0.1:8070' --ca-dir '/path/to/ca' | source")
+  end
+
+  it "quotes arguments for Fish using ShellEnv.fish_quote" do
+    nasty_ca = "/path/with'quote/and\\ca\\"
+    cmd_fish = Runner.copy_shell_command("127.0.0.1:8070", nasty_ca,
+      Gori::ShellEnv::Syntax::Fish, executable: "/usr/local/bin/gori")
+    cmd_fish.should contain(Gori::ShellEnv.fish_quote(File.expand_path(nasty_ca)))
+    cmd_fish.should_not contain(Process.quote(File.expand_path(nasty_ca)))
   end
 
   it "falls back to 'gori' when executable is nil" do

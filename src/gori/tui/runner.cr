@@ -6924,9 +6924,10 @@ module Gori::Tui
     # and the pasted command runs in another pane's.
     def self.copy_shell_command(authority : String, ca_dir : String, syntax : ShellEnv::Syntax,
                                 executable : String? = Process.executable_path) : String
-      bin_arg = Process.quote(executable || "gori")
-      proxy_arg = Process.quote(authority)
-      ca_arg = Process.quote(File.expand_path(ca_dir))
+      quote = ->(s : String) { syntax.fish? ? ShellEnv.fish_quote(s) : Process.quote(s) }
+      bin_arg = quote.call(executable || "gori")
+      proxy_arg = quote.call(authority)
+      ca_arg = quote.call(File.expand_path(ca_dir))
       case syntax
       in ShellEnv::Syntax::Posix
         %(eval "$(#{bin_arg} run shell --print --proxy #{proxy_arg} --ca-dir #{ca_arg})")
