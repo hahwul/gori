@@ -1,5 +1,6 @@
 require "../spec_helper"
 require "../support/fake_context"
+require "../support/memory_backend"
 
 # The shipped families (#1274 WP9). The engine is spec/verb/family_spec.cr and
 # spec/tui/space_menu_spec.cr; this pins what "Send flow to…" promises an operator.
@@ -163,6 +164,19 @@ describe "Display… and Protocol… (#1274 WP9)" do
     rep.repeater_tab_count = 1
     family_card(Gori::Verb::Scope::Repeater, :request, rep, display).verb_for('x').try(&.id).should eq("repeater.toggle-hex")
     family_card(Gori::Verb::Scope::Repeater, :response, rep, display).verb_for('x').try(&.id).should eq("repeater.toggle-resp-hex")
+  end
+
+  # `^X` toggles the hex of the focused pane, so the response pane's row names it too
+  # (`chord_of:`, #1295) — it had no key on screen, although the chord always worked there.
+  it "shows ^X beside hex in the response pane's card" do
+    rep = FakeExecContext.new
+    rep.current_tab = :repeater
+    rep.repeater_tab_count = 1
+    card = family_card(Gori::Verb::Scope::Repeater, :response, rep, display)
+    backend = MemoryBackend.new(80, 30)
+    card.render(Gori::Tui::Screen.new(backend), Gori::Tui::Rect.new(0, 0, 80, 28))
+    row = (0...30).map { |y| backend.row(y) }.find!(&.includes?("Hex dump"))
+    row.should contain("^X")
   end
 
   it "reaches HTTP/2 and SNI with the same keys on the Repeater and the Fuzzer" do

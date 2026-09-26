@@ -2239,6 +2239,26 @@ describe Gori::Verb do
         Gori::Verbs.registry.validate_chords! # raises on any violation
       end
 
+      it "raises on a chord_of: that its named verb's chord does not reach (#1295)" do
+        gated = Definition.new("t.gated", "G", "d", Gori::Verb::Scope::Repeater, [Chord.new("x", ctrl: true)],
+          section: :request, chord_sections: [:request]) { |_| nil }
+        {
+          {Definition.new("t.row", "R", "d", Gori::Verb::Scope::Repeater, section: :response, chord_of: "t.nope") { |_| nil }, /names no registered verb/},
+          {Definition.new("t.row", "R", "d", Gori::Verb::Scope::Fuzzer, chord_of: "t.gated") { |_| nil }, /not Fuzzer/},
+          {Definition.new("t.row", "R", "d", Gori::Verb::Scope::Repeater, section: :response, chord_of: "t.gated") { |_| nil }, /not live in response/},
+          {Definition.new("t.row", "R", "d", Gori::Verb::Scope::Repeater, [Chord.new("q")], section: :request, chord_of: "t.gated") { |_| nil }, /chords of its own/},
+        }.each do |(row, why)|
+          reg = Registry.new
+          reg.register(gated)
+          reg.register(row)
+          expect_raises(Gori::Error, why) { reg.validate_chords! }
+        end
+        ok = Registry.new
+        ok.register(gated)
+        ok.register(Definition.new("t.row", "R", "d", Gori::Verb::Scope::Repeater, section: :request, chord_of: "t.gated") { |_| nil })
+        ok.validate_chords!
+      end
+
       it "raises on two verbs claiming the same chord in the same scope" do
         reg = Registry.new
         reg.register(Definition.new("a", "A", "d", Gori::Verb::Scope::Body, [Chord.new("g")]) { |_| nil })

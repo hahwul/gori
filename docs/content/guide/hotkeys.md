@@ -355,7 +355,8 @@ or the column editor, or when the row moved focus.
   these toggles, so a dropped `Space` would select instead of opening the card.
 - The Fuzzer's **Cycle sort** stays a direct row (`Space` `o`), because it is the one you press
   most while reading results.
-- Direct keys are unchanged: `Ctrl-X` hex, `p` pretty, `u` Unicode, `b` whitespace, `⇧D` diff,
+- Direct keys are unchanged: `Ctrl-X` hex (in the Repeater, the pane that has focus: the
+  request's hex edit or the response's hex dump, and both rows show it), `p` pretty, `u` Unicode, `b` whitespace, `⇧D` diff,
   `Ctrl-T` envelope, `a` show all, `Ctrl-V` HTTP/2, `Ctrl-S` SNI, `Ctrl-L` auto Content-Length.
 
 What moved: hex was `e` in the History detail, `x` in the Repeater request pane and `h` in its

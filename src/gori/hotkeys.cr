@@ -218,6 +218,10 @@ module Gori
       return nil unless verb
       chord = Verb::Keymap.effective_chords(verb, Verb::OsProfile.resolve(profile), overrides,
         Verb::Keyset.resolve(keyset)).first?
+      # A keyless verb that another verb's chord reaches (`Definition#chord_of`) names that chord.
+      if chord.nil? && (via = verb.chord_of)
+        return binding_for(registry, via, overrides, profile, keyset)
+      end
       return chord unless chord && alias_active?
       alt_twin(chord) || chord
     end

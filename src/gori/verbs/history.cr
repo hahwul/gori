@@ -517,9 +517,13 @@ module Gori
         Verb::Scope::Repeater, [Verb::Chord.new("d", shift: true)],
         available: in_repeater, intent: :diff, section: :response,
         chord_sections: [:response]) { |ctx| ctx.repeater_toggle_resp_diff; nil }
+      # No chord of its own: `^X` is `repeater.toggle-hex`'s, which toggles the hex of the pane
+      # that has focus, so it reaches this one in the response pane — and the row says so
+      # (`chord_of:`, #1295). A scope binds a chord to one verb, so the pair shares it this way.
       r.register Verb::Definition.new(
         "repeater.toggle-resp-hex", "Hex dump", "Toggle a raw hex dump of the response bytes",
-        Verb::Scope::Repeater, available: in_repeater, intent: :hex, section: :response) { |ctx| ctx.repeater_toggle_resp_hex; nil }
+        Verb::Scope::Repeater, available: in_repeater, intent: :hex, section: :response,
+        chord_of: "repeater.toggle-hex") { |ctx| ctx.repeater_toggle_resp_hex; nil }
       r.register Verb::Definition.new(
         "repeater.toggle-pretty", "Pretty bodies", "Pretty-print JSON/XML/form/… response bodies (display only)",
         Verb::Scope::Repeater, [Verb::Chord.new("p")],

@@ -90,6 +90,17 @@ describe Gori::Hotkeys do
       Gori::Hotkeys.binding_for(reg, "rules.edit").should be_nil
       Gori::Hotkeys.binding_for(reg, "app.notifications").should be_nil
     end
+
+    it "names the chord of the verb a keyless one declares `chord_of:`, and follows its rebind (#1295)" do
+      reg = Gori::Verbs.registry
+      reg["repeater.toggle-resp-hex"].chords.should be_empty
+      Gori::Hotkeys.binding_for(reg, "repeater.toggle-resp-hex").should eq(Gori::Verb::Chord.new("x", ctrl: true))
+      working = {"repeater.toggle-hex" => [Gori::Verb::Chord.new("j", ctrl: true)]}
+      Gori::Hotkeys.binding_for(reg, "repeater.toggle-resp-hex", working).should eq(Gori::Verb::Chord.new("j", ctrl: true))
+      # A chord of its own (a rebind of the row itself) wins.
+      own = {"repeater.toggle-resp-hex" => [Gori::Verb::Chord.new("o", ctrl: true)]}
+      Gori::Hotkeys.binding_for(reg, "repeater.toggle-resp-hex", own).should eq(Gori::Verb::Chord.new("o", ctrl: true))
+    end
   end
 
   describe ".display_label / .binding_label" do

@@ -342,7 +342,8 @@ Rewriter와 Colormarker의 **Enable/disable everywhere**가 `T`인 이유가 이
   선택하므로, `Space`를 빠뜨리면 카드 대신 선택이 일어납니다.
 - Fuzzer의 **Cycle sort**는 결과를 읽을 때 가장 자주 누르는 행이라 직접 행(`Space` `o`)으로
   남습니다.
-- 직접 키는 그대로입니다. `Ctrl-X` 헥스, `p` pretty, `u` Unicode, `b` 공백, `⇧D` diff,
+- 직접 키는 그대로입니다. `Ctrl-X` 헥스(Repeater에서는 포커스가 있는 패널의 것: 요청의 헥스 편집이나
+  응답의 헥스 덤프이며, 두 행 모두 이 키를 보여줍니다), `p` pretty, `u` Unicode, `b` 공백, `⇧D` diff,
   `Ctrl-T` envelope, `a` 모두 보기, `Ctrl-V` HTTP/2, `Ctrl-S` SNI, `Ctrl-L` Content-Length 자동 계산.
 
 옮겨진 것: 헥스는 History 상세에서 `e`, Repeater 요청 패널에서 `x`, 응답 패널에서 `h`였고 이제

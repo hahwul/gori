@@ -130,7 +130,7 @@ module Gori::Tui
         # ^Q, not ^Y — ^Y is Copy in every text box now (see the `y · ^Y` row above). The key
         # column resolves from the verb id, so it follows a rebind either way.
         Item.new("^Q", "edit the decoder chain on the marker at the cursor", "repeater.attach-chain"),
-        Item.new("^X", "hex-edit the request", "repeater.toggle-hex"),
+        Item.new("^X", "hex-edit the request · in the response pane, its hex dump", "repeater.toggle-hex"),
         Item.new("^S", "SNI override (on the target)", "repeater.toggle-sni"),
         Item.new("^L", "toggle auto Content-Length", "repeater.toggle-auto-content-length"),
         Item.new("{space:repeater.toggle-grpc-reframe}", "gRPC: reframe the message on send (on by default; off sends the captured 5-byte length prefix)", "repeater.toggle-grpc-reframe"),

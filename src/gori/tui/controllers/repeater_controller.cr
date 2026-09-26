@@ -699,8 +699,11 @@ module Gori::Tui
       end
     end
 
+    # `^X`: the hex of the pane that has focus — hex-edit in the request pane, the hex dump in
+    # the response pane (`repeater_toggle_resp_hex`, which `Z x` there runs too, #1295).
     def repeater_toggle_hex : Nil
       return unless view = current_view
+      return repeater_toggle_resp_hex if view.focus == :response
       if view.grpc_mode?
         # A unary gRPC call hex-edits its message PAYLOAD; a 0- or multi-message body has no
         # unambiguous single payload to edit. What happens to the length prefix in front of
@@ -724,20 +727,22 @@ module Gori::Tui
       elsif view.focus == :request
         on = view.toggle_request_hex
         @host.status(on ? "hex edit: on — sends exact bytes (^X/esc exit; not text-safe)" : "hex edit: off")
-      elsif view.focus == :response
-        # A transcript pane never renders the hex dump — `render_response` returns at its own
-        # branch long before the `@resp_hex` one — but `resp_navigable?` reads the same flag, so
-        # setting it here silently killed the caret, the selection and every arrow key while the
-        # pane looked completely unchanged. (Reachable only on a pipelined GROUP send: WS and
-        # gRPC are refused above.) Refuse it where it cannot be honoured.
-        if view.group_mode?
-          @host.status("no hex dump for a group transcript — it is N responses, not one byte stream")
-        else
-          view.toggle_resp_hex
-          @host.status(view.resp_hex? ? "response hex dump: on — raw bytes (^X exit)" : "response hex dump: off")
-        end
       else
         @host.status("hex edit (^X) applies to the REQUEST or RESPONSE pane — ↹ to one")
+      end
+    end
+
+    # The response pane's hex dump: `Z x` there, and `^X` (above). A transcript pane never
+    # renders the dump — `render_response` returns at its own branch long before the `@resp_hex`
+    # one — so on a WebSocket, gRPC or group transcript the flag would describe a pane nobody
+    # can see; refuse it there rather than set it, and say why.
+    def repeater_toggle_resp_hex : Nil
+      return unless (view = current_view) && view.focus == :response
+      if kind = (view.ws_mode? ? "WebSocket" : view.grpc_mode? ? "gRPC" : view.group_mode? ? "group" : nil)
+        @host.status("no hex dump for a #{kind} transcript — the pane shows messages, not one byte stream")
+      else
+        view.toggle_resp_hex
+        @host.status(view.resp_hex? ? "response hex dump: on — raw bytes (^X exit)" : "response hex dump: off")
       end
     end
 

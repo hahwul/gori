@@ -210,6 +210,15 @@ module Gori
       # member (`Registry#validate_intents!`), and its route in hint and Help text is
       # `Hotkeys.route`'s `^P → <title>` rather than a menu path.
       getter menu : Placement
+      # The verb whose chord ALSO reaches this one, for a pane-aware pair: the Repeater's `^X`
+      # (`repeater.toggle-hex`) toggles the hex of whichever pane has focus, so the response
+      # pane's hex row (`repeater.toggle-resp-hex`) advertises `^X` although a scope binds a
+      # chord to one verb (`Registry#validate_chords!`). `Hotkeys.binding_for` reads it when
+      # this verb has no chord of its own, so the space menu's hint column, Help and the
+      # palette name the key that works here and follow a rebind of it. It binds nothing:
+      # the keymap and the R1 guard see only the other verb's chord. Boot checks the pair
+      # (same scope, and a chord live in this verb's section).
+      getter chord_of : String?
 
       def initialize(@id : String, @title : String, @description : String, @scope : Scope,
                      @chords : Array(Chord) = [] of Chord, @hidden : Bool = false,
@@ -218,7 +227,7 @@ module Gori
                      @mnemonic : Char? = nil, @section : Symbol = :common,
                      @group : Symbol = :none, @chord_sections : Array(Symbol)? = nil,
                      @intent : Symbol? = nil, @pinned : Bool = false,
-                     @menu : Placement = Placement::Space,
+                     @menu : Placement = Placement::Space, @chord_of : String? = nil,
                      &@handler : ExecContext -> String?)
       end
 
