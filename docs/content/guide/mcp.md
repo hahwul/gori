@@ -146,7 +146,7 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 
 ## Tools
 
-**Read tools** (available under `--read-only`, except the four that write a row: `scan_js_endpoints`, `oast_payload`, `oast_poll`, and `reply_to_operator`):
+**Read tools** (available under `--read-only`, except these four: `scan_js_endpoints`, `oast_payload`, `oast_poll`, and `reply_to_operator`):
 
 | Tool | Purpose |
 | ------ | --------- |

@@ -146,7 +146,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 
 ## 도구 {#tools}
 
-**읽기 도구**(`--read-only`에서도 사용 가능. 단, 행을 쓰는 네 가지 `scan_js_endpoints`, `oast_payload`, `oast_poll`, `reply_to_operator`는 제외):
+**읽기 도구**(`--read-only`에서도 사용 가능. 단, 다음 네 가지 `scan_js_endpoints`, `oast_payload`, `oast_poll`, `reply_to_operator`는 제외):
 
 | 도구 | 용도 |
 |------|---------|
