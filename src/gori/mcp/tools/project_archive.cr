@@ -258,6 +258,9 @@ module Gori
             j.field "session_slots", inventory.session_slots
             j.field "env_vars", inventory.env_vars
             j.field "upstream_credentials", inventory.upstream_credentials
+            j.field "exec_repeaters", inventory.exec_repeaters
+            j.field "exec_fuzz_templates", inventory.exec_fuzz_templates
+            j.field "exec_env_vars", inventory.exec_env_vars
           end
         end
         j.field "import_safety" do
@@ -267,6 +270,9 @@ module Gori
             j.field "disabled_body_file_stubs", inventory.disabled_body_file_stubs
             j.field "reset_network_settings", inventory.reset_network_settings
             j.field "reset_host_overrides", inventory.reset_host_overrides
+            j.field "reset_global_overrides", inventory.reset_global_overrides
+            j.field "disabled_auto_refresh_slots", inventory.disabled_auto_refresh_slots
+            j.field "reset_probe_mode", inventory.reset_probe_mode.try(&.label)
           end
         end
         j.field "disclosure", ProjectArchive.disclosure(inventory)
@@ -293,8 +299,9 @@ module Gori
         tool j, "import_project",
           "Import a .gori project archive as a NEW project (never reopens or overwrites one), " \
           "through the same validation as `gori run project import`: pipe Rewriter rules, exec " \
-          "Probe rules and file-backed stubs are disabled, project network settings and host " \
-          "overrides are reset, and archives over 2 GiB uncompressed are refused. Without " \
+          "Probe rules and file-backed stubs are disabled, project network settings, host and " \
+          "global-rule overrides, Probe mode and slot auto-refresh are reset, and archives over " \
+          "2 GiB uncompressed are refused. Without " \
           "confirm:true nothing is imported: the archive is validated and the call returns " \
           "CONFIRM_REQUIRED with its inventory, the disclosure, and whether the name is free. " \
           "Does not change which project this server is bound to." do |s|

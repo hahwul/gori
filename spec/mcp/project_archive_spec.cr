@@ -248,6 +248,10 @@ describe "MCP import_project" do
       details["import_safety"]["disabled_pipe_rules"].as_i.should eq(1)
       details["import_safety"]["reset_host_overrides"].as_i.should eq(1)
       details["import_safety"]["reset_network_settings"].as_i.should eq(1)
+      details["import_safety"]["reset_global_overrides"].as_i.should eq(0)
+      details["import_safety"]["disabled_auto_refresh_slots"].as_i.should eq(0)
+      details["import_safety"]["reset_probe_mode"].raw.should be_nil
+      details["inventory"]["exec_repeaters"].as_i.should eq(0)
       details["disclosure"].as_s.should contain("disable 1 pipe Rewriter rule")
       registry.list.map(&.name).sort!.should eq(before)
 
