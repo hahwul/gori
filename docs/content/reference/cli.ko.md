@@ -21,7 +21,7 @@ gori [command] [options]
 | `tutorial` | 가이드형 TUI 투어 (탐색, 팔레트, 스페이스 메뉴, 편집 모드) |
 | `update` | 채널 인식 자체 업데이트 (바이너리 / Homebrew / Snap / AUR / Nix) |
 
-전역 플래그: `-v` / `-V` / `--version`, `-h` / `--help`, 그리고 `--config PATH`(이번 실행에만 쓸 설정 파일, 아래 [`--config PATH`](#config-path) 참고).
+전역 플래그: `-v` / `-V` / `--version`, `-h` / `--help`, 그리고 `--config PATH`(이번 실행에만 쓸 설정 파일, 아래 [`--config PATH`](#config-flag) 참고).
 
 ## gori tui {#gori-tui}
 
