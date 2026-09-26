@@ -127,9 +127,7 @@ module Gori
         # scan it) and print whole — a JWT with `%FF` after it included. It is printed scrubbed
         # anyway, so the rules scan exactly what will be printed.
         value = value.scrub
-        key = name.strip.downcase
-        rule = @form[key]?.try { |cfg| "form_key #{cfg}" } || @fields[key]?.try { |cfg| "json_field #{cfg}" }
-        if rule
+        if rule = named_rule(name)
           ph = Redact.placeholder(value)
           hits << Hit.new(name, rule, ph)
           return ph
@@ -140,8 +138,20 @@ module Gori
       # Does the profile name this field or form key (case-insensitively)? For a caller deciding
       # whether a value filed UNDER that name may be shown at all — a path id after `/ssn/`.
       def named?(name : String) : Bool
+        !named_rule(name).nil?
+      end
+
+      # The rule that names this parameter, by its whole name or its bracket leaf — a query or
+      # form parameter nests as `user[passcode]` / `filter[sid]`, and a profile lists the leaf.
+      # The same two lookups `redact_form_pair` makes for a form body (#1265).
+      private def named_rule(name : String) : String?
         key = name.strip.downcase
-        @form.has_key?(key) || @fields.has_key?(key)
+        leaf = Params.bracket_leaf(key)
+        {key, leaf}.each do |k|
+          @form[k]?.try { |cfg| return "form_key #{cfg}" }
+          @fields[k]?.try { |cfg| return "json_field #{cfg}" }
+        end
+        nil
       end
 
       # --- shapes ------------------------------------------------------------
