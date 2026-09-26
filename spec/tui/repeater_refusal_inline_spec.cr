@@ -187,7 +187,7 @@ end
 # with SANDBOX ON, one seeded repeater tab, and a controller over it. Sandbox is what makes
 # every send refuse without a socket: `Outbound.interactive` waives the up-front gate but the
 # per-send hard gate still answers `blocked by sandbox (out of scope)`.
-private def with_refused_tab(request : String, target : String = "http://127.0.0.1:9/", &)
+private def with_refused_tab(request : String, target : String = "http://127.0.0.1:9/", tabs : Int32 = 1, &)
   root = File.tempname("gori-refusal")
   Dir.mkdir_p(root)
   project = Gori::ProjectRegistry.new(root).temp("refusal")
@@ -197,7 +197,7 @@ private def with_refused_tab(request : String, target : String = "http://127.0.0
     session.scope.enable_sandbox
     # Seeded through the store, then read back by the controller's constructor — the same path
     # a reopened project takes, so no test-only tab-creation seam is needed.
-    session.store.insert_repeater(target, request.to_slice, false, true, nil, 0)
+    tabs.times { |i| session.store.insert_repeater(target, request.to_slice, false, true, nil, i) }
     host = FakeHost.new(session)
     yield RepeaterController.new(host), host
   ensure
@@ -304,6 +304,23 @@ describe "Gori::Tui::RepeaterController — a refused send never blocks the UI f
       controller.repeater_send
       host.statuses.size.should eq(2) # not "repeater already in flight…"
       host.statuses.last.should contain("blocked by sandbox")
+    end
+  end
+end
+
+describe "Gori::Tui::RepeaterController#prepare_timing_pair — a refused pair" do
+  # The race checked `plan.refusal` up front; timing did not, so a Sandbox- or exclude-blocked
+  # pair ran every iteration refused and ended "inconclusive — no pair had both responses",
+  # with the reason nowhere on screen.
+  it "refuses up front and names the reason, like the race" do
+    with_refused_tab(PLAIN_REQUEST, tabs: 2) do |controller, host|
+      controller.toggle_subtab_mark(0)
+      controller.toggle_subtab_mark(1)
+
+      controller.prepare_timing_pair.should be_nil
+      host.statuses.last.should contain("timing:")
+      host.statuses.last.should contain("blocked by sandbox")
+      controller.any_inflight?.should be_false
     end
   end
 end

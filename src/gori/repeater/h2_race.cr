@@ -41,6 +41,7 @@ module Gori
         getter? clean_eos : Bool = false
         getter duration_us : Int64 = 0_i64
         getter rst : String? = nil
+        getter failure : String? = nil
 
         @header_buf = IO::Memory.new
         @body = IO::Memory.new
@@ -66,11 +67,11 @@ module Gori
             return finish(started) if @header_buf.bytesize + chunk.size > H2Engine::MAX_HEADER_BLOCK
             @header_buf.write(chunk)
             @end_stream_pending = frame.end_stream?
-            merge(decoder) if frame.end_headers?
+            merge(decoder, started) if frame.end_headers?
           when Frame::Type::Continuation
             return finish(started) if @header_buf.bytesize + frame.payload.size > H2Engine::MAX_HEADER_BLOCK
             @header_buf.write(frame.payload)
-            merge(decoder) if frame.end_headers?
+            merge(decoder, started) if frame.end_headers?
           when Frame::Type::Data
             @body.write(H2Engine.data_block(frame)) if @body.bytesize < H2Engine::MAX_BODY
             if frame.end_stream?
@@ -100,6 +101,14 @@ module Gori
           finish(started)
         end
 
+        # Fail a still-open stream with `message` — the connection's shared HPACK state broke, so
+        # nothing more this stream receives can be decoded. A stream already done keeps its result.
+        def fail(message : String, started : Time::Instant) : Nil
+          return if @done
+          @failure = message
+          finish(started)
+        end
+
         # The assembled response, or nil when no final header block ever arrived (the origin
         # RST'd or went away before answering this stream).
         def reply : Reply?
@@ -108,13 +117,15 @@ module Gori
             nil, @rst, @trailers, false, @final_seen, @late_interim, @trailer_pseudo)
         end
 
-        private def merge(decoder : HPACK::Decoder) : Nil
+        # A block carrying END_STREAM (a body-less 204/304/HEAD answer, or trailers) closes the
+        # stream through `finish`, like every other close, so it records its duration.
+        private def merge(decoder : HPACK::Decoder, started : Time::Instant) : Nil
           @status, @final_seen, @trailers, @late_interim, @trailer_pseudo =
             H2Engine.merge_block(@header_buf, decoder, @headers, @status, @final_seen,
               @trailers, @late_interim, @trailer_pseudo, @end_stream_pending)
           if @end_stream_pending
             @clean_eos = true
-            @done = true
+            finish(started)
           end
         end
 
@@ -185,7 +196,7 @@ module Gori
           # ── read: demultiplex the N streams' responses off the one connection ──
           streams = {} of UInt32 => PacketStream
           prepared.each { |(_, st, _)| streams[st.id] = st }
-          read_streams(io, conn, streams, started)
+          read_streams(io, conn, streams, started, timeout)
           collect_results(prepared, results, host, port, started)
           finalize(results, n)
         ensure
@@ -293,11 +304,14 @@ module Gori
       # stream, until every stream has closed or the budget runs out. Connection-level frames
       # (SETTINGS/PING/GOAWAY, stream-0 WINDOW_UPDATE) are handled once here; per-stream frames
       # are routed to their `PacketStream` by `route_stream_frame`.
+      #
+      # The caller's `timeout` bounds both the no-progress stall and the whole read, the same
+      # shape `exchange` uses; without one, the global idle timeout and its budget multiple.
       private def self.read_streams(io : IO, conn : Conn, streams : Hash(UInt32, PacketStream),
-                                    started : Time::Instant) : Nil
+                                    started : Time::Instant, timeout : Time::Span? = nil) : Nil
         remaining = streams.size
-        patience = Settings.io_timeout
-        hard = started + (Settings.io_timeout * DEFAULT_BUDGET_FACTOR)
+        patience = timeout || Settings.io_timeout
+        hard = started + (timeout || Settings.io_timeout * DEFAULT_BUDGET_FACTOR)
         progress = Time.instant
         frames = 0
 
@@ -311,7 +325,8 @@ module Gori
           when Frame::Type::Settings, Frame::Type::Ping, Frame::Type::Goaway
             break if handle_connection_frame(io, frame) # GOAWAY tears the connection down
           when Frame::Type::Headers, Frame::Type::Continuation, Frame::Type::Data, Frame::Type::RstStream
-            advanced, closed = route_stream_frame(io, conn, streams, frame, started)
+            break unless routed = route_or_fail(io, conn, streams, frame, started)
+            advanced, closed = routed
             progress = Time.instant if advanced
             remaining -= 1 if closed
           else
@@ -368,11 +383,32 @@ module Gori
         end
       end
 
+      # `route_stream_frame`, or nil once a header block the origin chose broke the decode
+      # (`hpack: …`). The HPACK table is connection-wide, so no later block on this connection can
+      # be trusted: every stream still open fails with that error and the finished ones keep their
+      # results — what `exchange` reports for the same origin, instead of raising out of the race.
+      private def self.route_or_fail(io : IO, conn : Conn, streams : Hash(UInt32, PacketStream),
+                                     frame : Frame::Header, started : Time::Instant) : {Bool, Bool}?
+        route_stream_frame(io, conn, streams, frame, started)
+      rescue ex
+        msg = ex.message || "h2 response decode failed"
+        streams.each_value(&.fail(msg, started))
+        nil
+      end
+
       # One member's `PacketStream` as a `Result`, through the same `synth_head` projection the
       # capture path and `exchange` use.
       private def self.shape(st : PacketStream, host : String, port : Int32,
                              started : Time::Instant) : Result
         reply = st.reply
+        if failure = st.failure
+          # The origin answered, but its header state broke mid-read. A final head that already
+          # decoded is kept, flagged incomplete, beside the reason.
+          return Result.new(Bytes.new(0), nil, nil, st.duration_us, failure, delivered: true) unless reply
+          head = synth_head(reply)
+          return Result.new(head, reply.body, Proxy::Codec::Http1.parse_response_head(head),
+            st.duration_us, error: failure, incomplete: true, delivered: true)
+        end
         unless reply
           return Result.new(Bytes.new(0), nil, nil, st.duration_us,
             st.rst || "race: no response (h2 single-packet) from #{host}:#{port}",

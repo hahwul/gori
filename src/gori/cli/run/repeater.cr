@@ -1186,7 +1186,7 @@ module Gori
           p.on("-k", "--insecure-upstream", "Do not verify the upstream TLS certificate") { insecure = true }
           p.on("--timeout=SEC", "Per-operation connect + idle timeout (seconds)") { |v| timeout = parse_count(v, "--timeout").seconds }
           p.on("--count=N", "How many A/B pairs to send after warm-up (1-#{Repeater::Timing::Stats::MAX_ITERATIONS}; default #{Repeater::Timing::Stats::DEFAULT_ITERATIONS})") { |v| count = parse_count(v, "--count") }
-          p.on("--warmup=N", "Initial pairs discarded before measuring (default #{Repeater::Timing::Stats::DEFAULT_WARMUP})") { |v| warmup = parse_count(v, "--warmup") }
+          p.on("--warmup=N", "Initial pairs discarded before measuring (default #{Repeater::Timing::Stats::DEFAULT_WARMUP})") { |v| warmup = parse_nonneg(v, "--warmup") }
           p.on("--interleaved", "Send A then B sequentially (alternating order) instead of the synchronized race") { interleaved = true }
           p.on("--http2", "Send over HTTP/2 (single-packet), overriding the sessions' stored setting") { force_http2 = true }
           p.on("--http1", "Send over HTTP/1.1 (last-byte sync), overriding the sessions' stored setting") { force_http2 = false }
