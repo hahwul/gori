@@ -113,6 +113,12 @@ module Gori::Tui
       @refusal_applied = false
     end
 
+    # A request refusal as the status line shows it: `RepeaterView` has no registry, so a route
+    # it names (`{space:repeater.send-group}` in the %%% refusal) is expanded here.
+    private def chain_refusal(ex : Fuzz::ChainError) : String
+      Hotkeys.expand_menu_paths(@host.session.registry, ex.message || "")
+    end
+
     def tab : Symbol
       :repeater
     end
@@ -1139,7 +1145,7 @@ module Gori::Tui
       wire = begin
         String.new(v.request_bytes)
       rescue ex : Fuzz::ChainError
-        @host.status("repeater: #{ex.message}")
+        @host.status("repeater: #{chain_refusal(ex)}")
         return {[] of CopyMenu::Option, 0}
       end
       target = Env.expand(v.target)
@@ -2227,7 +2233,7 @@ module Gori::Tui
       begin
         wire = view.request_bytes
       rescue ex : Fuzz::ChainError
-        @host.status("repeater: #{ex.message}")
+        @host.status("repeater: #{chain_refusal(ex)}")
         return false
       end
       return false unless plan = repeater_plan(view, [wire], http2: view.http2?)
@@ -2629,7 +2635,7 @@ module Gori::Tui
         draft = begin
           tv.request_bytes
         rescue ex : Fuzz::ChainError
-          @host.status("repeater race: #{tv.label}: #{ex.message}")
+          @host.status("repeater race: #{tv.label}: #{chain_refusal(ex)}")
           return nil
         end
         return nil unless probe = repeater_plan(tv, [draft], http2: tv.http2?) # sets its own status on a PlanError

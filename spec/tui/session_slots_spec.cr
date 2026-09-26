@@ -193,11 +193,14 @@ describe "session slot refresh in the TUI" do
     tick.should contain("@session.refresher.rev")
   end
 
-  it "offers the Repeater's 'use as refresh' verb on the sub-tab strip" do
+  it "offers the Repeater's 'use as refresh' verb from the palette, on the sub-tab strip's section" do
+    # A once-a-session configuration action, so the palette lists it, not the space menu
+    # (#1282); the empty-state line names that route.
     verb = Gori::Verbs.registry["repeater.use-as-refresh"]
     verb.scope.should eq(Gori::Verb::Scope::Repeater)
-    verb.mnemonic.should eq('b')
+    verb.palette_only?.should be_true
     verb.section.should eq(:subtab)
+    Gori::Hotkeys.route(Gori::Verbs.registry, verb.id).should eq("^P → #{verb.title}")
   end
 
   it "carries the persisted refresh steps through the identities card's whole-list save" do

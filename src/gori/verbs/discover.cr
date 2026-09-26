@@ -13,14 +13,14 @@ module Gori
         "discover.stop", "Stop", "Stop the selected discovery run (in-flight requests finish)",
         Verb::Scope::Discover, [Verb::Chord.new("x", ctrl: true)], intent: :stop) { |ctx| ctx.discover_stop; nil }
 
-      # Plain `p` — a chord, so the hint and the hotkey editor both see it (it was a raw arm
-      # in the controller). No ctrl-p — that's reserved for the command palette.
+      # No chord (the RUNS list's own ↑/↓ steps runs; ctrl-p is the command palette's), and
+      # palette-only (#1282): stepping runs from the other pane is found by name.
       r.register Verb::Definition.new(
         "discover.prev-run", "Previous run", "Select the run above (the RUNS list's ↑, from either pane)",
-        Verb::Scope::Discover, [] of Verb::Chord, mnemonic: 'K') { |ctx| ctx.discover_prev_run; nil }
+        Verb::Scope::Discover, [] of Verb::Chord, menu: :palette) { |ctx| ctx.discover_prev_run; nil }
       r.register Verb::Definition.new(
         "discover.next-run", "Next run", "Select the run below (the RUNS list's ↓, from either pane)",
-        Verb::Scope::Discover, [] of Verb::Chord, mnemonic: 'J') { |ctx| ctx.discover_next_run; nil }
+        Verb::Scope::Discover, [] of Verb::Chord, menu: :palette) { |ctx| ctx.discover_next_run; nil }
 
       r.register Verb::Definition.new(
         "discover.pause", "Pause / resume", "Pause or resume the running discovery",

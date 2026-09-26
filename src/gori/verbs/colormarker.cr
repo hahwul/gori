@@ -53,16 +53,16 @@ module Gori
       # so a move changes which rule wins — the descriptions say so.
       r.register Verb::Definition.new(
         "colormarker.move-up", "Move up", "Give the selected rule higher precedence (first match wins)",
-        Verb::Scope::Colormarker, [Verb::Chord.new("k", shift: true)], available: on_rule, intent: :move_up, section: :rules) { |ctx| ctx.colormarker_move(-1); nil }
+        Verb::Scope::Colormarker, [Verb::Chord.new("k", shift: true)], available: on_rule, intent: :move_up, section: :rules, menu: :palette) { |ctx| ctx.colormarker_move(-1); nil }
       r.register Verb::Definition.new(
         "colormarker.move-down", "Move down", "Give the selected rule lower precedence (first match wins)",
-        Verb::Scope::Colormarker, [Verb::Chord.new("j", shift: true)], available: on_rule, intent: :move_down, section: :rules) { |ctx| ctx.colormarker_move(1); nil }
+        Verb::Scope::Colormarker, [Verb::Chord.new("j", shift: true)], available: on_rule, intent: :move_down, section: :rules, menu: :palette) { |ctx| ctx.colormarker_move(1); nil }
       r.register Verb::Definition.new(
         "colormarker.duplicate", "Duplicate rule", "Copy the selected rule into a new one",
         Verb::Scope::Colormarker, available: on_rule, intent: :duplicate_rule, section: :rules) { |ctx| ctx.colormarker_duplicate; nil }
       r.register Verb::Definition.new(
         "colormarker.reload", "Reload rules", "Re-read rules from the project DB (pick up external edits)",
-        Verb::Scope::Colormarker, available: in_cm, intent: :run, section: :rules) { |ctx| ctx.colormarker_reload; nil }
+        Verb::Scope::Colormarker, available: in_cm, intent: :run, section: :rules, menu: :palette) { |ctx| ctx.colormarker_reload; nil }
 
       # The scope half, the same shape the Rewriter's carries: a rule lives EITHER in this
       # project or in the global library every project reads. The default-flip is offered only

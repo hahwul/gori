@@ -205,9 +205,14 @@ module Gori
       #     the strip's.
       #   • No menu letter is h/j/k/l (`Family::NAV_LETTERS`): inside the menu those four move
       #     the selection, so a row on one would run where the hand meant to move (#1274).
+      #   • A palette-only verb (`menu: :palette`, #1282) has no row at either level, so it
+      #     spells no `mnemonic:` (a letter no card draws), is never a family member or pinned
+      #     (its family would draw it), and is never hidden (the palette would not list it
+      #     either, leaving only its chords). It is ignored by every letter rule above.
       def validate_intents! : Nil
         strip_scopes = compact_map { |v| v.scope if SUBTAB_SECTIONS.includes?(v.section) }.to_set
         each do |v|
+          check_placement!(v)
           check_intent!(v)
           check_reserved_menu_letter!(v, strip_scopes) unless v.hidden?
         end
@@ -223,6 +228,19 @@ module Gori
               "member (#{v.id}) on #{v.scope}, which has a strip")
           end
         end
+      end
+
+      private def check_placement!(v : Definition) : Nil
+        return unless v.palette_only?
+        problem = if v.member?
+                    "is a member of family #{v.family.inspect}, which lists it in the space menu"
+                  elsif m = v.mnemonic
+                    "spells mnemonic '#{m}', a letter no space menu draws"
+                  elsif v.hidden?
+                    "is hidden, which the palette does not list either"
+                  end
+        return unless problem
+        raise Gori::Error.new("#{v.id} is placed menu: :palette but #{problem}")
       end
 
       private def check_intent!(v : Definition) : Nil

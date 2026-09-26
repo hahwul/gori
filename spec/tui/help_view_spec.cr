@@ -153,7 +153,7 @@ describe Gori::Tui::HelpView do
                  Gori::Hotkeys.display_label(chord)
                else
                  menu_only += 1
-                 Gori::Hotkeys.menu_path(registry, id) || item.key
+                 Gori::Hotkeys.route(registry, id) || item.key
                end
         row.a.should eq(Gori::Hotkeys.retag(want)), "#{title}: #{id}"
       end

@@ -437,9 +437,10 @@ module Gori::Tui
           if registry
             # A verb-id row with no chord is a menu-only verb: its key column is the menu path,
             # read off the registry rather than trusted from the literal (#1274 — three rows
-            # had drifted to letters the menu no longer used).
+            # had drifted to letters the menu no longer used), or `^P → <title>` for a
+            # palette-only one (#1282, `Hotkeys.route`).
             if id = item.verb_id
-              key = Hotkeys.binding_label(registry, id, Hotkeys.menu_path(registry, id) || item.key)
+              key = Hotkeys.binding_label(registry, id, Hotkeys.route(registry, id) || item.key)
             end
             key = Hotkeys.expand(registry, key)
             desc = Hotkeys.expand(registry, desc)

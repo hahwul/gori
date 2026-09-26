@@ -79,17 +79,17 @@ module Gori
       # card closes behind it.
       # Menu-only, no chord, and deliberately so: this is the one History verb that puts a
       # request on the wire. A bare key next to the navigation cluster would make an outbound
-      # call one mistyped keystroke away, which is the shape P4 exists to prevent. `G` is free
-      # across Scope::Body and reads as the feature's initial.
+      # call one mistyped keystroke away, which is the shape P4 exists to prevent. Palette-only
+      # (#1282): the palette's search finds it by name from the History list.
       #
-      # The TITLE is short on purpose: the space menu sizes every column to its longest title,
-      # and at 31 cells this one held the History menu to two columns on a 100-column terminal,
-      # where the list was already full. The description carries the rest.
+      # The TITLE is short on purpose: as a space-menu row it held the History menu to two
+      # columns at 31 cells (the menu sizes every column to its longest title), and the palette
+      # row is narrower still. The description carries the rest.
       r.register Verb::Definition.new(
         "history.grpc-reflect", "gRPC: reflect schema",
         "Ask the selected flow's target for its .proto descriptors over gRPC server reflection, and cache them in this project — ACTIVE: sends a real request to that host",
         Verb::Scope::Body, [] of Verb::Chord,
-        available: history_selected, mnemonic: 'G', group: :view) { |ctx| ctx.history_grpc_reflect; nil }
+        available: history_selected, group: :view, menu: :palette) { |ctx| ctx.history_grpc_reflect; nil }
 
       r.register Verb::Definition.new(
         "history.columns", "Columns…", "Add, reorder or remove the values the list draws beside each flow (a header, a JSON field, a regex capture)",
@@ -294,11 +294,11 @@ module Gori
       # "Minimize request" (Caido-"squash"-style): strip cosmetic headers, tracking-cookie
       # crumbs and unused query/body params, re-sending to verify the response is unchanged.
       # Runs in the BACKGROUND (bottom-bar spinner + notification) and writes the trimmed
-      # request back when done. Menu-only (no chord); 'M' is free across COMMON ∪ every
-      # Repeater section (all-lowercase keys there — pairs like Copy 'y' / Copy-as 'Y').
+      # request back when done. No chord, and palette-only (#1282): an occasional action that
+      # the palette's search finds by name.
       r.register Verb::Definition.new(
         "repeater.minimize", "Minimize request", "Strip cosmetic headers, cookies and unused params while keeping the response unchanged (runs in the background)",
-        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'M') { |ctx| ctx.repeater_minimize; nil }
+        Verb::Scope::Repeater, available: in_repeater, menu: :palette) { |ctx| ctx.repeater_minimize; nil }
 
       # Search the open repeater sub-tabs and jump to the chosen one — menu-only
       # (no chord), shown from the FIRST session: the strip's ⌕ affordance opens this same
@@ -344,12 +344,12 @@ module Gori
         Verb::Scope::Repeater, available: in_repeater, mnemonic: 't', section: :subtab) { |ctx| ctx.repeater_tag_subtab; nil }
       # The Repeater is where a login request is authored and tested, so this is where it joins
       # a session slot's refresh steps (#1233): a slot picker, then the sub-tab is appended to
-      # that slot's list. 'b' (for the binding it refreshes): free in every Repeater view, and
-      # no Repeater or Global bare chord claims it.
+      # that slot's list. A once-a-session configuration action, so palette-only (#1282); the
+      # slot toast and the identities card name it with `{space:…}`, which reads its route.
       r.register Verb::Definition.new(
         "repeater.use-as-refresh", "Use as refresh for slot…",
         "Append this sub-tab to a session slot's refresh steps — the Repeater sessions that re-authenticate the slot",
-        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'b', section: :subtab) { |ctx| ctx.repeater_use_as_refresh; nil }
+        Verb::Scope::Repeater, available: in_repeater, section: :subtab, menu: :palette) { |ctx| ctx.repeater_use_as_refresh; nil }
       r.register Verb::Definition.new(
         "repeater.filter-subtabs", "Filter sub-tabs", "Filter the sub-tab strip by tag / name / host / method",
         Verb::Scope::Repeater,
@@ -392,7 +392,7 @@ module Gori
       r.register Verb::Definition.new(
         "repeater.mark-word", "Mark word", "Toggle a §…§ marker around the token at the cursor",
         Verb::Scope::Repeater, [Verb::Chord.new("k", ctrl: true)],
-        available: in_repeater, intent: :mark_word, section: :request) { |ctx| ctx.repeater_mark_word; nil }
+        available: in_repeater, intent: :mark_word, section: :request, menu: :palette) { |ctx| ctx.repeater_mark_word; nil }
       r.register Verb::Definition.new(
         "repeater.auto-mark", "Auto-mark params", "Wrap every request parameter value in a §…§ marker",
         Verb::Scope::Repeater, [Verb::Chord.new("a", ctrl: true)],
@@ -409,7 +409,7 @@ module Gori
       r.register Verb::Definition.new(
         "repeater.attach-chain", "Edit decoder chain", "Focus the CHAIN pane to edit the encode/decode chain of the marker at the cursor (applied on send)",
         Verb::Scope::Repeater, [Verb::Chord.new("q", ctrl: true)],
-        available: in_repeater, intent: :decoder_chain, section: :request) { |ctx| ctx.repeater_attach_chain; nil }
+        available: in_repeater, intent: :decoder_chain, section: :request, menu: :palette) { |ctx| ctx.repeater_attach_chain; nil }
 
       # Request-pane VIEW toggles — keymap-driven (Repeater scope) so they're rebindable.
       # The Runner delegators carry the pane-gating + status messages. Hex-edit the
@@ -436,7 +436,7 @@ module Gori
       r.register Verb::Definition.new(
         "repeater.pretty-request", "Pretty-print request", "Format the request body in-place (JSON/XML/form-urlencoded)",
         Verb::Scope::Repeater, [Verb::Chord.new("u", ctrl: true)],
-        available: in_repeater, mnemonic: 'p', section: :request) { |ctx| ctx.repeater_pretty_request; nil }
+        available: in_repeater, section: :request, menu: :palette) { |ctx| ctx.repeater_pretty_request; nil }
 
       # Target-pane toggle (SNI override) — tagged :target so it fronts the space menu
       # when the TARGET field has focus (previously ctrl-only ⇒ invisible there).
@@ -754,17 +754,17 @@ module Gori
         "fuzz.dist", "Distribution sidebar", "RESULTS: show/hide the status and length distribution",
         Verb::Scope::Fuzzer, [Verb::Chord.new("v")], available: in_fuzzer, intent: :distribution, section: :results,
         chord_sections: [:results]) { |ctx| ctx.fuzz_toggle_dist; nil }
-      # The menu letter is the export `E` (#1274), which frees `P` for Protocol….
-      # Shift-S is intentionally READ-mode-only: in a template editor it remains a literal
+      # Palette-only (#1282), on `⇧S`; its menu letter was the export `E`, which freed `P` for
+      # Protocol… (#1274). Shift-S is intentionally READ-mode-only: in a template editor it remains a literal
       # uppercase S. Ctrl-S already edits the target's SNI and cannot be repurposed.
       r.register Verb::Definition.new(
         "fuzz.save-results", "Save results", "Permanently save every result and its full request/response in this project",
         Verb::Scope::Fuzzer, [Verb::Chord.new("s", shift: true)],
         available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :fuzzer && ctx.fuzzer_results_saveable? },
-        intent: :export) { |ctx| ctx.fuzz_save_results; nil }
+        intent: :export, menu: :palette) { |ctx| ctx.fuzz_save_results; nil }
       r.register Verb::Definition.new(
         "fuzz.run-history", "Run history", "Open the permanent result sets saved for this fuzz session",
-        Verb::Scope::Fuzzer, available: in_fuzzer, mnemonic: 'H') { |ctx| ctx.fuzz_run_history; nil }
+        Verb::Scope::Fuzzer, available: in_fuzzer, menu: :palette) { |ctx| ctx.fuzz_run_history; nil }
       # Send the selected result row (the request that produced it) to Repeater — the
       # Miner's mine.repeater for a fuzz result; gated on a selected row so it hides
       # before the first run. COMMON like the Miner's, so it survives the detail
@@ -850,7 +850,7 @@ module Gori
       r.register Verb::Definition.new(
         "fuzz.mark-word", "Mark word", "Toggle a §…§ marker around the token at the cursor",
         Verb::Scope::Fuzzer, [Verb::Chord.new("k", ctrl: true)],
-        available: in_fuzzer, intent: :mark_word, section: :template) { |ctx| ctx.fuzz_mark_word; nil }
+        available: in_fuzzer, intent: :mark_word, section: :template, menu: :palette) { |ctx| ctx.fuzz_mark_word; nil }
       r.register Verb::Definition.new(
         "fuzz.insert-marker", "Insert marker", "Drop a single § at the cursor to bracket a region by hand",
         Verb::Scope::Fuzzer, [Verb::Chord.new("t", ctrl: true)],
@@ -858,15 +858,15 @@ module Gori
       r.register Verb::Definition.new(
         "fuzz.attach-chain", "Edit decoder chain", "Focus the CHAIN pane to edit the encode/decode chain of the marker at the cursor (applied to each payload on send)",
         Verb::Scope::Fuzzer, [Verb::Chord.new("q", ctrl: true)], # ^Y → Copy; see repeater.attach-chain
-        available: in_fuzzer, intent: :decoder_chain, section: :template) { |ctx| ctx.fuzz_attach_chain; nil }
+        available: in_fuzzer, intent: :decoder_chain, section: :template, menu: :palette) { |ctx| ctx.fuzz_attach_chain; nil }
       r.register Verb::Definition.new(
         "fuzz.list-paste", "Add List payload set", "Open the payload-set editor pre-seeded to a List — a multi-line editor, one value per line (paste splits automatically)",
         Verb::Scope::Fuzzer, [Verb::Chord.new("l", ctrl: true)],
-        available: in_fuzzer, mnemonic: 'A', section: :template) { |ctx| ctx.fuzz_list_paste; nil }
+        available: in_fuzzer, section: :template, menu: :palette) { |ctx| ctx.fuzz_list_paste; nil }
       r.register Verb::Definition.new(
         "fuzz.pretty-template", "Pretty-print template", "Format the request template body in-place (JSON/XML/form-urlencoded)",
         Verb::Scope::Fuzzer, [Verb::Chord.new("u", ctrl: true)],
-        available: in_fuzzer, mnemonic: 'p', section: :template) { |ctx| ctx.fuzz_pretty_template; nil }
+        available: in_fuzzer, section: :template, menu: :palette) { |ctx| ctx.fuzz_pretty_template; nil }
       r.register Verb::Definition.new(
         "fuzz.toggle-http2", "Toggle HTTP/2 (h2)", "Run the fuzz over HTTP/2 or HTTP/1.1, overriding the seed flow's protocol",
         Verb::Scope::Fuzzer, [Verb::Chord.new("v", ctrl: true)],

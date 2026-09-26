@@ -87,7 +87,7 @@ Define env vars in two places (project wins on a key collision):
 | **Global** | Preferences (`Ctrl-,`) → **Editor & Keys** → **Env**, `Ctrl-P` → **Settings: Env**, or the `env` section of `settings.json` |
 | **Project** | **Project** tab → **ENV** pane (`a` add, `e` edit, `d` delete) |
 
-The namespace is uppercase and case-sensitive; the name after the dot is `A-Z a-z _` followed by `A-Z a-z 0-9 _`. The sigil is `$` by default (changeable via **Change prefix** in the ENV space menu, or `env.prefix` in settings); the namespace spelling is not.
+The namespace is uppercase and case-sensitive; the name after the dot is `A-Z a-z _` followed by `A-Z a-z 0-9 _`. The sigil is `$` by default (changeable via **Change prefix**, which the palette finds from the ENV pane, or `env.prefix` in settings); the namespace spelling is not.
 
 Anything else that starts with the sigil is a byte. A GraphQL variable (`$id`), a MongoDB operator (`$ne`), an OData option (`$filter`) and a JSON Schema keyword (`$ref`) are not references and need **no escape** — paste that body and send it as written. To ship the text of a token itself, double the sigil: `$$ENV.KEY` sends `$ENV.KEY`, `$$BIND.NAME` sends `$BIND.NAME`, and a bare `$$` is two literal bytes. Each pass consumes only its own escape, so `$$BIND.NAME` survives env expansion and `$$ENV.KEY` survives the binding pass.
 
@@ -163,7 +163,7 @@ During a TUI run, gori writes every result to a private temporary SQLite spool w
 
 After a non-empty run finishes and its spool is complete, press **`Shift-S` in READ mode** to save every spooled row permanently in the project. An uppercase `S` still types normally while you are editing. Saving uses row- and byte-bounded background batches, and the status line and Jobs panel report success or failure. Repeating the shortcut does not create a duplicate; a failed project copy retains its temporary spool for retry.
 
-Reopening a project restores the latest successfully saved run for its initially selected Fuzzer session. Other Fuzzer sessions restore lazily on first selection. Restore reads only the newest 5,000 rows / 64 MiB into the pane and labels it `showing N`; the complete archive remains available through paged CLI/MCP readers. Active, partially failed, and legacy incomplete snapshots are never restored automatically. Open **Space → Run history** to choose an older current-format run; `Enter` loads it and `d` deletes it. Closing the Fuzzer session deletes its saved-run history too; the close confirmation says so.
+Reopening a project restores the latest successfully saved run for its initially selected Fuzzer session. Other Fuzzer sessions restore lazily on first selection. Restore reads only the newest 5,000 rows / 64 MiB into the pane and labels it `showing N`; the complete archive remains available through paged CLI/MCP readers. Active, partially failed, and legacy incomplete snapshots are never restored automatically. Open **Run history** (type it into `Ctrl-P`) to choose an older current-format run; `Enter` loads it and `d` deletes it. Closing the Fuzzer session deletes its saved-run history too; the close confirmation says so.
 
 The headless and agent surfaces use the same permanent store:
 

@@ -53,7 +53,7 @@ For binary results, OUTPUT cycles display modes (text → hex → base64), so by
 
 ## 4. Save and reuse a named chain
 
-A chain you'll use again is worth a name. Save it with `Ctrl-S` (or the space menu's **Save chain by name**); saving under an existing name updates it. Load one later with `Ctrl-O`, which opens a picker over everything you've saved, each name shown next to its spec, where you type to filter and `Ctrl-X` deletes the highlighted entry.
+A chain you'll use again is worth a name. Save it with `Ctrl-S` (or the palette's **Save chain by name**); saving under an existing name updates it. Load one later with `Ctrl-O`, which opens a picker over everything you've saved, each name shown next to its spec, where you type to filter and `Ctrl-X` deletes the highlighted entry.
 
 Named chains live under the `decoder` section of settings and are shared by every project: the chain is a recipe, while whatever you run through it stays with the project. A saved name is also a **converter**: type it as a step and its whole spec runs in that position, whether in the Decoder, on a Repeater or Fuzzer `§…§` marker, in `gori run decoder`, or through the MCP `decode` tool, which runs the identical chain over an argument.
 

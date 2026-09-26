@@ -150,8 +150,8 @@ describe "Display… and Protocol… (#1274 WP9)" do
       repeater.toggle-grpc-fields repeater.toggle-grpc-reframe repeater.toggle-http2
       repeater.toggle-sni repeater.toggle-ws-key
     ])
-    # The export letter, so `P` is free for the family on the Fuzzer.
-    Gori::Verbs.registry["fuzz.save-results"].menu_key.should eq('E')
+    # Save results left `P` for the family; it is palette-only now (#1282), on its `⇧S`.
+    Gori::Verbs.registry["fuzz.save-results"].palette_only?.should be_true
   end
 
   it "reaches hex with `Z x` in the History detail and both Repeater panes" do

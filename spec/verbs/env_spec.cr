@@ -27,12 +27,13 @@ describe "Gori::Verbs.register_env" do
     r["env.delete-var"].available?(ctx).should be_true
   end
 
-  it "leaves the GLOBAL prefix menu-only, out of the way of everyday edits" do
+  it "leaves the GLOBAL prefix palette-only, out of the way of everyday edits" do
     # It does not apply per project — a direct chord next to add/edit would read as another
-    # per-project field.
+    # per-project field, and it is a once-a-session setting, so the palette lists it (#1282).
     verb = r["env.edit-prefix"]
     verb.chords.should be_empty
-    verb.menu_key.should eq('p')
+    verb.palette_only?.should be_true
+    verb.menu_key.should be_nil
     verb.available?(FakeExecContext.new).should be_true
   end
 

@@ -160,9 +160,9 @@ Ctrl-P  → settings:hotkeys
 어기는 행이 있으면 gori가 시작하지 않습니다.
 
 이 규칙과 함께 옮겨진 것: **Link…**와 **Manage links**는 모든 탭에서 `L`(원래 `k`나 `l`),
-**Add host to scope**는 `H`(원래 `h`), Discover 탭의 다음/이전 실행은 `J`와 `K`, Fuzzer의
-**Add List payload set**은 `A`, Activity 피드의 **Filter by level**은 메뉴에서 `v`입니다(맨
-키는 여전히 `l`).
+**Add host to scope**는 `H`(원래 `h`), Activity 피드의 **Filter by level**은 메뉴에서 `v`입니다(맨
+키는 여전히 `l`). Discover 탭의 다음/이전 실행과 Fuzzer의 **Add List payload set**도 옮겨졌고,
+이후 메뉴를 떠나 [팔레트](#palette-only)로 갔습니다.
 
 ### 탭의 동작을 이름으로 찾기 {#palette-search}
 
@@ -176,6 +176,34 @@ Ctrl-P  → settings:hotkeys
 
 History 흐름 상세 위에서 열면 팔레트는 상세의 동작을 찾습니다. 팔레트에서 `Esc`를 누르면 그
 상세로 돌아가고, 고른 동작은 화면에 떠 있는 흐름에 적용됩니다.
+
+### 팔레트에만 있는 동작 {#palette-only}
+
+space 메뉴는 자주 누르는 것을 위한 곳이고, 드물게 쓰는 것은 팔레트가 맡습니다. 이미 있는 키를
+편집이나 이동의 편의로 되풀이할 뿐인 동작, 또는 세션에 한 번쯤 설정을 바꾸는 동작은 메뉴 행이
+없습니다. 그 동작이 속한 탭에서 `Ctrl-P`에 이름을 입력하면 `THIS TAB` 아래에 나옵니다. 키가 있는
+동작은 그 키가 예전과 똑같이 동작하고, Help는 가는 길을 알려 줍니다. 키가 있으면 그 키를, 없으면
+`^P → <이름>`을 보여줍니다.
+
+| 탭 | 동작 | 키 |
+|-----|--------|-----|
+| Repeater | Mark word · Edit decoder chain · Pretty-print request | `Ctrl-K` · `Ctrl-Q` · `Ctrl-U` |
+| Repeater | Minimize request · Use as refresh for slot… | 팔레트 |
+| Fuzzer | Mark word · Edit decoder chain · Pretty-print template | `Ctrl-K` · `Ctrl-Q` · `Ctrl-U` |
+| Fuzzer | Add List payload set · Save results | `Ctrl-L` · `⇧S` |
+| Fuzzer | Run history | 팔레트 |
+| History | gRPC: reflect schema | 팔레트 |
+| JWT · Cookie | Toggle decode/encode (decode/forge) · Cycle signing alg (format) | `Ctrl-T` · `Ctrl-A` |
+| Comparer | Next change · Previous change | `⇧N` · `⇧P` |
+| Decoder | Save chain by name · Load a saved chain · Cycle output mode | `Ctrl-S` · `Ctrl-O` · `Ctrl-X` |
+| 이슈 상세 | Edit title/severity · Retest… | `t` · `⇧R` |
+| 이슈 상세 | Raise severity · Lower severity | 팔레트 (**Set severity**는 `Space` `s` 그대로) |
+| Rewriter · Colormarker | Move up · Move down | `⇧K` · `⇧J` |
+| Rewriter · Colormarker | Reload rules | 팔레트 |
+| Discover | Previous run · Next run | 팔레트 |
+| Sequencer | Export report (JSON)… | 팔레트 (**Export report**는 `Space` `E` 그대로) |
+| Project | Refresh feed (ACTIVITY) · Change prefix (ENV) | 팔레트 |
+| Notes | Go to line | 팔레트 |
 
 ### 포커스와 무관하게, 탭당 하나의 메뉴
 
@@ -210,9 +238,9 @@ Cookie, Comparer, Notes. 예전에는 스트립 자신의 액션도 다른 컨�
 
 이 버킷이 모든 패널에 함께 실리기 때문에, 그 아홉 글자는 **해당 탭의 모든 뷰에서 예약**됩니다.
 그 글자를 쓰던 패널 액션은 자리를 옮겼습니다. 규칙은 *패널* 글자가 양보한다는 것입니다.
-스트립의 글자는 아홉 스트립에서 똑같이 읽혀야 하기 때문입니다. Repeater/Fuzzer 편집기에서는
-`Space` `W`가 단어를 마크하고, JWT와 Cookie의 렌즈 토글은 `m`(Mode — 같은 동작에 대한 Decoder의
-글자)으로 옮겼습니다. JWT와 Cookie는 OUTPUT을 `C`로 복사하고, Notes는 노트를 `$EDITOR`로 여는
+스트립의 글자는 아홉 스트립에서 똑같이 읽혀야 하기 때문입니다. Repeater/Fuzzer 편집기의 Mark
+word와 JWT·Cookie의 렌즈 토글은 자기 글자를 내주었고, 지금은 `Ctrl-K`와 `Ctrl-T`로 쓰는
+[팔레트 전용](#palette-only) 동작입니다. JWT와 Cookie는 OUTPUT을 `C`로 복사하고, Notes는 노트를 `$EDITOR`로 여는
 것이 `o`입니다. 응답 diff와 Comparer의 요청/응답 전환은 이제 스트립 글자가 닿지 않는
 [Display…](#display-protocol) 안에 있습니다. 그 동작이 없는 스트립에서도 규칙은 같으며, 패널
 행이 이를 어기면 gori가 시작하지 않습니다.
@@ -280,7 +308,8 @@ Rewriter와 Colormarker의 **Enable/disable everywhere**가 `T`인 이유가 이
 
 토글은 카드 두 장에 들어 있습니다. **`Z` Display…**는 패널이 가진 것을 *그리는* 방식을 바꾸는
 토글이고, **`P` Protocol…**은 Repeater나 Fuzzer 요청이 *보내는* 것을 바꾸는 토글입니다. 요청
-자체를 고쳐 쓰는 행(pretty-print request 등)은 직접 행으로 남습니다.
+자체를 고쳐 쓰는 동작(pretty-print request, `Ctrl-U` 등)은 토글이 아니므로 두 카드 어디에도
+들어가지 않습니다.
 
 | Display… | | Protocol… | |
 |-----|---|-----|---|
@@ -305,7 +334,7 @@ Rewriter와 Colormarker의 **Enable/disable everywhere**가 `T`인 이유가 이
   `Ctrl-T` envelope, `Ctrl-V` HTTP/2, `Ctrl-S` SNI, `Ctrl-L` Content-Length 자동 계산.
 
 옮겨진 것: 헥스는 History 상세에서 `e`, Repeater 요청 패널에서 `x`, 응답 패널에서 `h`였고 이제
-셋 모두 `Z` `x`입니다. Fuzzer의 결과 저장은 내보내기 글자인 `E`가 되어 `P`가 비었습니다.
+셋 모두 `Z` `x`입니다. Fuzzer의 결과 저장은 `P`를 내주었습니다(`⇧S`이며, [팔레트 전용](#palette-only)입니다).
 History 상세의 **Copy flow** 행은 없어졌습니다. REQUEST 패널에서 `Space` `Y`(Copy as…)의
 **Raw request**가 같은 텍스트입니다.
 

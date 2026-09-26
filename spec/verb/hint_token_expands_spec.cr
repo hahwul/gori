@@ -66,19 +66,35 @@ describe "hint templates — space-menu letters come from the registry" do
     end
   end
 
-  it "every {space:verb.id} token names a verb with a menu row" do
+  it "every {space:verb.id} token names a verb with a route (a menu row, or the palette)" do
     registry = Gori::Verbs.registry
     ids = Set(String).new
     lines.each { |(_, _, line)| line.scan(Gori::Hotkeys::SPACE_TOKEN_RE) { |m| ids << m[1] } }
     ids.size.should be > 15
-    ids.reject { |id| Gori::Hotkeys.menu_path(registry, id) }.to_a.sort.should be_empty
+    ids.reject { |id| Gori::Hotkeys.route(registry, id) }.to_a.sort.should be_empty
+    # A palette-only verb's token reads as its palette route, never as a menu path (#1282).
+    ids.select { |id| registry[id].palette_only? }.each do |id|
+      Gori::Hotkeys.expand_menu_paths(registry, "{space:#{id}}").should_not start_with("space →")
+    end
   end
 
-  it "leaves no literal `space → <key>` in a string" do
-    # One key, then anything that is not part of a word: `space → t`, `space → k/j`, `space → /`.
-    # A title (`space → Mine`), a quoted one (`space → "Discover here"`) or an interpolation
-    # (Hotkeys.menu_path's own `space → #{key}`, the one place a path is spelled) is not a letter.
-    literal = /space → (?!#\{)[^\s\w"\\…]|space → \w(?!\w)/
+  it "names a palette-only verb through its token, not a hand-written route" do
+    # `Hotkeys.route` spells a palette-only verb's route (#1282): its chord when it has one,
+    # else `^P → <title>`. A hand-typed `^P → Minimize request` or `space → M` for one would
+    # say whatever it said the day it was typed; the token follows the verb.
+    titles = Gori::Verbs.registry.select(&.palette_only?).map(&.title)
+    hits = lines.select { |(_, _, line)| titles.any? { |t| line.includes?("→ #{t}") } }
+      .map { |(file, n, line)| "#{file}:#{n}: #{line.strip}" }
+    hits.should be_empty
+  end
+
+  it "leaves no literal `space → <key>` (or `space ▸ <key>`) in a string" do
+    # One key, then anything that is not part of a word: `space → t`, `space → k/j`, `space → /`,
+    # and the same after `▸`, which the Repeater's %%% refusal once spelled `space ▸ g` in.
+    # A title (`space → Mine`, `space ▸ SUB-TABS`), a quoted one (`space → "Discover here"`) or
+    # an interpolation (Hotkeys.menu_path's own `space → #{key}`, the one place a path is
+    # spelled) is not a letter.
+    literal = /space [→▸] (?!#\{)[^\s\w"\\…]|space [→▸] \w(?!\w)/
     hits = lines.select { |(_, _, line)| line.matches?(literal) }
       .map { |(file, n, line)| "#{file}:#{n}: #{line.strip}" }
     hits.should be_empty

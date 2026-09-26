@@ -167,9 +167,10 @@ always move, as they do on every list in the app, and a reflex `j` can never run
 gori refuses to start if a row breaks this.
 
 What moved when the rule came in: **Link…** and **Manage links** are `L` on every tab (they were
-`k` or `l`), **Add host to scope** is `H` (was `h`), the Discover tab's next and previous run
-are `J` and `K`, the Fuzzer's **Add List payload set** is `A`, and the Activity feed's **Filter
-by level** is `v` in the menu (its bare key is still `l`).
+`k` or `l`), **Add host to scope** is `H` (was `h`), and the Activity feed's **Filter by level**
+is `v` in the menu (its bare key is still `l`). The Discover tab's next and previous run and the
+Fuzzer's **Add List payload set** moved too, and have since left the menu for the
+[palette](#palette-only).
 
 ### Finding a tab's action by name {#palette-search}
 
@@ -184,6 +185,34 @@ them. With the query empty, the palette lists only the app commands, as it alway
 
 Opened over a History flow detail, the palette searches the detail's actions. `Esc` from the
 palette returns you to that detail, and an action you pick runs against the flow on screen.
+
+### Actions only the palette lists {#palette-only}
+
+The space menu is for what you press often; the palette is for the long tail. An action that
+only repeats a key you already have, for an editing or navigation convenience, or that you use
+about once a session to configure something, has no menu row. Type its name into `Ctrl-P` from
+the tab it belongs to and it is listed under `THIS TAB`. Its key, where it has one, works
+exactly as before, and Help names the route: the key, or `^P → <name>` for an action with none.
+
+| Tab | Action | Key |
+|-----|--------|-----|
+| Repeater | Mark word · Edit decoder chain · Pretty-print request | `Ctrl-K` · `Ctrl-Q` · `Ctrl-U` |
+| Repeater | Minimize request · Use as refresh for slot… | palette |
+| Fuzzer | Mark word · Edit decoder chain · Pretty-print template | `Ctrl-K` · `Ctrl-Q` · `Ctrl-U` |
+| Fuzzer | Add List payload set · Save results | `Ctrl-L` · `⇧S` |
+| Fuzzer | Run history | palette |
+| History | gRPC: reflect schema | palette |
+| JWT · Cookie | Toggle decode/encode (decode/forge) · Cycle signing alg (format) | `Ctrl-T` · `Ctrl-A` |
+| Comparer | Next change · Previous change | `⇧N` · `⇧P` |
+| Decoder | Save chain by name · Load a saved chain · Cycle output mode | `Ctrl-S` · `Ctrl-O` · `Ctrl-X` |
+| Issue detail | Edit title/severity · Retest… | `t` · `⇧R` |
+| Issue detail | Raise severity · Lower severity | palette (**Set severity** keeps `Space` `s`) |
+| Rewriter · Colormarker | Move up · Move down | `⇧K` · `⇧J` |
+| Rewriter · Colormarker | Reload rules | palette |
+| Discover | Previous run · Next run | palette |
+| Sequencer | Export report (JSON)… | palette (**Export report** keeps `Space` `E`) |
+| Project | Refresh feed (ACTIVITY) · Change prefix (ENV) | palette |
+| Notes | Go to line | palette |
 
 ### One menu per tab, whatever has focus
 
@@ -219,9 +248,9 @@ their sessions from a run, so they have no `n`.)
 
 Because the bucket rides along with every pane, its nine letters are **reserved in every view
 of those tabs**. A pane action that wanted one had to move: the rule is that the *pane* letter
-yields, since the strip's letter has to read the same on all nine strips. `Space` `W` marks a
-word in the Repeater/Fuzzer editors, and the JWT and Cookie lens toggles moved to `m` (Mode —
-the Decoder's letter for the same gesture). JWT and Cookie copy their OUTPUT with `C`, and
+yields, since the strip's letter has to read the same on all nine strips. Mark word in the
+Repeater/Fuzzer editors and the JWT and Cookie lens toggles gave theirs up, and are now
+[palette-only](#palette-only) on `Ctrl-K` and `Ctrl-T`. JWT and Cookie copy their OUTPUT with `C`, and
 Notes opens the note in `$EDITOR` with `o`. The response diff and the Comparer's
 requests/responses switch now sit in [Display…](#display-protocol), where the strip's letters
 do not reach. The rule holds on a strip that lacks the
@@ -291,8 +320,9 @@ bare key, now that Discover left it. The detail's Delete is `d` too.
 ### Display… and Protocol… {#display-protocol}
 
 The toggles are two more cards. **`Z` Display…** holds what changes how a pane *draws* what it
-holds, and **`P` Protocol…** holds what changes what a Repeater or Fuzzer request *sends*. A
-row that rewrites the request itself, such as pretty-print request, stays a direct row.
+holds, and **`P` Protocol…** holds what changes what a Repeater or Fuzzer request *sends*. An
+action that rewrites the request itself, such as pretty-print request (`Ctrl-U`), is not a toggle
+and stays out of both cards.
 
 | Display… | | Protocol… | |
 |-----|---|-----|---|
@@ -318,8 +348,8 @@ or the column editor, or when the row moved focus.
   `Ctrl-T` envelope, `Ctrl-V` HTTP/2, `Ctrl-S` SNI, `Ctrl-L` auto Content-Length.
 
 What moved: hex was `e` in the History detail, `x` in the Repeater request pane and `h` in its
-response pane, and is now `Z` `x` in all three. Save results on the Fuzzer is `E`, the export
-letter, which frees `P`. The History detail's **Copy flow** row is gone: `Space` `Y` (Copy as…)
+response pane, and is now `Z` `x` in all three. Save results on the Fuzzer gave up `P` (it is
+`⇧S`, and [palette-only](#palette-only)). The History detail's **Copy flow** row is gone: `Space` `Y` (Copy as…)
 on the REQUEST pane has **Raw request**, the same text.
 
 ## Editor Keysets {#editor-keysets}

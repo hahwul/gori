@@ -282,13 +282,15 @@ describe "marker actions across the two template editors" do
   it "gives every marker action a space-menu entry in both panes" do
     # `menu_key` nil ⇒ the verb is EXCLUDED from the space menu. That is what the Fuzzer's
     # two `chord_action` arms amounted to: no verb, so nothing to list.
-    %w(mark-word insert-marker automark clear-marks).each do |a|
+    %w(insert-marker automark clear-marks).each do |a|
       fuzz_id = a == "automark" ? "fuzz.automark" : "fuzz.#{a}"
       registry[fuzz_id].menu_key.should_not be_nil
     end
-    %w(mark-word insert-marker auto-mark clear-marks).each do |a|
+    %w(insert-marker auto-mark clear-marks).each do |a|
       registry["repeater.#{a}"].menu_key.should_not be_nil
     end
+    # Mark word is a verb in both, placed in the palette in both (#1282): `^K` is its key.
+    %w[repeater.mark-word fuzz.mark-word].each { |id| registry[id].palette_only?.should be_true }
   end
 end
 

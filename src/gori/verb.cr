@@ -73,6 +73,17 @@ module Gori
       System     # app lifecycle (quit, the palette itself)
     end
 
+    # Which surface LISTS a verb (#1282). `Space` (the default) gives it a space-menu row;
+    # `Palette` gives it none, at either level, and leaves it to the palette's typed search
+    # (which finds the focused tab's actions) and to its chords. The space menu is for the
+    # frequent, the palette for the long tail: a row that duplicates a direct chord for an
+    # editing or navigation convenience, or a once-a-session configuration action, is placed
+    # `menu: :palette`. Either way the verb runs through `Definition#call`.
+    enum Placement
+      Space
+      Palette
+    end
+
     # A keybinding as pure data (no terminal dependency). The TUI converts a
     # termisu key event into a Chord and looks it up in the Keymap.
     record Chord, key : String, ctrl : Bool = false, alt : Bool = false, shift : Bool = false do
@@ -194,6 +205,11 @@ module Gori
       # a member may be pinned, and only a pinned member may spell a `mnemonic:`
       # (`Registry#validate_intents!`).
       getter? pinned : Bool
+      # Where the verb is listed (`Placement`): a space-menu row, or the palette's search only.
+      # A palette-only verb has no `menu_key`, spells no `mnemonic:` and is never a family
+      # member (`Registry#validate_intents!`), and its route in hint and Help text is
+      # `Hotkeys.route`'s `^P → <title>` rather than a menu path.
+      getter menu : Placement
 
       def initialize(@id : String, @title : String, @description : String, @scope : Scope,
                      @chords : Array(Chord) = [] of Chord, @hidden : Bool = false,
@@ -202,6 +218,7 @@ module Gori
                      @mnemonic : Char? = nil, @section : Symbol = :common,
                      @group : Symbol = :none, @chord_sections : Array(Symbol)? = nil,
                      @intent : Symbol? = nil, @pinned : Bool = false,
+                     @menu : Placement = Placement::Space,
                      &@handler : ExecContext -> String?)
       end
 
@@ -226,6 +243,11 @@ module Gori
 
       protected setter family : Symbol?
 
+      # Whether only the palette lists this verb (`menu: :palette`): it has no space-menu row.
+      def palette_only? : Bool
+        @menu.palette?
+      end
+
       # A member of a `Verb::Family`: the space menu lists it one level down, under the family.
       def member? : Bool
         !@family.nil?
@@ -236,6 +258,7 @@ module Gori
       # (`Registry#has_section?`) and the menu's candidate set — `menu_key` alone answers only
       # level 1, and an unpinned member has none.
       def menu_listed? : Bool
+        return false if palette_only?
         member? || !menu_key.nil?
       end
 
@@ -245,8 +268,9 @@ module Gori
       # chords like "enter"/"left"/"space" are multi-char names, so they never qualify.
       # A family member has no level-1 key unless it is `pinned?`: its letter is the family's
       # (`Registry#l2_key`), and a chord-derived letter would otherwise keep holding a level-1
-      # slot the family exists to free.
+      # slot the family exists to free. A palette-only verb has none: its chords stay chords.
       def menu_key : Char?
+        return nil if palette_only?
         return nil if member? && !pinned?
         if m = @mnemonic
           return m

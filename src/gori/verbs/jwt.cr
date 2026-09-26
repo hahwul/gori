@@ -21,10 +21,10 @@ module Gori
       r.register Verb::Definition.new(
         "jwt.toggle-mode", "Toggle decode/encode", "Flip between the DECODE and ENCODE lenses",
         Verb::Scope::Jwt, [Verb::Chord.new("t", ctrl: true)],
-        available: in_jwt, mnemonic: 'm') { |ctx| ctx.jwt_toggle_mode; nil }
+        available: in_jwt, menu: :palette) { |ctx| ctx.jwt_toggle_mode; nil }
       r.register Verb::Definition.new(
         "jwt.cycle-alg", "Cycle signing alg", "Cycle the signing algorithm: HS256 / HS384 / HS512 / none",
-        Verb::Scope::Jwt, [Verb::Chord.new("a", ctrl: true)], available: in_jwt, mnemonic: 'a') { |ctx| ctx.jwt_cycle_alg; nil }
+        Verb::Scope::Jwt, [Verb::Chord.new("a", ctrl: true)], available: in_jwt, menu: :palette) { |ctx| ctx.jwt_cycle_alg; nil }
       r.register Verb::Definition.new(
         "jwt.load-decoded", "Load decoded claims", "Seed the ENCODE editors from the INPUT token's header + payload",
         Verb::Scope::Jwt, available: in_jwt, mnemonic: 'L') { |ctx| ctx.jwt_load_decoded; nil }

@@ -198,15 +198,16 @@ module Gori
         "issue.set-cvss", "Set CVSS", "Score this issue with the CVSS calculator (severity follows)",
         Verb::Scope::IssuesDetail, [] of Verb::Chord, intent: :set_cvss) { |ctx| ctx.issue_set_cvss; nil }
 
-      # Menu-only. They sat on `]` / `[` — the Global prev/next-tab chords — hidden and unhinted,
-      # so `]` inside an issue raised its severity where everywhere else it moved a tab.
+      # No chord. They sat on `]` / `[` — the Global prev/next-tab chords — hidden and unhinted,
+      # so `]` inside an issue raised its severity where everywhere else it moved a tab. Both
+      # are palette-only (#1282): Set severity (`s`) is the menu's way to change it.
       r.register Verb::Definition.new(
         "issue.severity-up", "Raise severity", "Increase severity", Verb::Scope::IssuesDetail,
-        [] of Verb::Chord, mnemonic: '+') { |ctx| ctx.issue_severity(1); nil }
+        [] of Verb::Chord, menu: :palette) { |ctx| ctx.issue_severity(1); nil }
 
       r.register Verb::Definition.new(
         "issue.severity-down", "Lower severity", "Decrease severity", Verb::Scope::IssuesDetail,
-        [] of Verb::Chord, mnemonic: '-') { |ctx| ctx.issue_severity(-1); nil }
+        [] of Verb::Chord, menu: :palette) { |ctx| ctx.issue_severity(-1); nil }
 
       # edit-notes/edit-title/open-flow/repeater-flow/delete are NON-hidden so they front
       # the issue-detail "space" action menu (parity with the History detail; the
@@ -246,7 +247,7 @@ module Gori
 
       r.register Verb::Definition.new(
         "issue.edit-title", "Edit title/severity", "Rename the issue, score it, and set its severity",
-        Verb::Scope::IssuesDetail, [Verb::Chord.new("t")]) { |ctx| ctx.issue_edit_title; nil }
+        Verb::Scope::IssuesDetail, [Verb::Chord.new("t")], menu: :palette) { |ctx| ctx.issue_edit_title; nil }
 
       # There is no `issue.open-flow` here any more. `o` opened "the linked flow" in History,
       # which is the act `s` already performs on the FIRST RELATED row — the row that primary
@@ -311,19 +312,19 @@ module Gori
       # An Issue's RETEST (#1036) — the ordered Repeater steps that reproduce the finding and
       # the last run's result table, in one card.
       #
-      # MENU-ONLY plus a shifted chord, and both halves of that are deliberate. Every bare
+      # A shifted chord and no bare letter, deliberately. Every bare
       # letter this scope has left means something else one keystroke away (`r` is Repeater
       # evidence right here, `t` edits the title, `e` edits the notes), and a retest RUN
       # sends real requests — so it may not ride a letter a slip can reach. `⇧R` is spelled
       # `Chord.new("r", shift: true)`, never `Chord.new("R")`: `Keybind.from_event`
       # normalises a typed capital to shift + lowercase, so an "R" chord could never fire and
-      # `validate_chords!` raises on one at boot (#902). `menu_key` skips shift chords, hence
-      # the explicit mnemonic — the pairing `issues.export-key` uses.
+      # `validate_chords!` raises on one at boot (#902). Its menu row (`R`) duplicated that
+      # chord, so it is palette-only (#1282).
       r.register Verb::Definition.new(
         "issue.retest", "Retest…", "Open this issue's retest: ordered Repeater steps, their assertions, and the last run",
         Verb::Scope::IssuesDetail, [Verb::Chord.new("r", shift: true)],
         available: ->(ctx : Verb::ExecContext) { ctx.issue_retest_available? },
-        mnemonic: 'R', group: :triage) { |ctx| ctx.issue_retest; nil }
+        group: :triage, menu: :palette) { |ctx| ctx.issue_retest; nil }
 
       r.register Verb::Definition.new(
         "issue.link-down", "Next related link", "Select the next related item",

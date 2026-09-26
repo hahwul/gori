@@ -63,16 +63,16 @@ module Gori
         group: :danger) { |ctx| ctx.rewriter_delete; nil }
       r.register Verb::Definition.new(
         "rewriter.move-up", "Move up", "Move the selected rule earlier in apply order",
-        Verb::Scope::Rewriter, [Verb::Chord.new("k", shift: true)], available: has_rule, intent: :move_up, section: :rules) { |ctx| ctx.rewriter_move(-1); nil }
+        Verb::Scope::Rewriter, [Verb::Chord.new("k", shift: true)], available: has_rule, intent: :move_up, section: :rules, menu: :palette) { |ctx| ctx.rewriter_move(-1); nil }
       r.register Verb::Definition.new(
         "rewriter.move-down", "Move down", "Move the selected rule later in apply order",
-        Verb::Scope::Rewriter, [Verb::Chord.new("j", shift: true)], available: has_rule, intent: :move_down, section: :rules) { |ctx| ctx.rewriter_move(1); nil }
+        Verb::Scope::Rewriter, [Verb::Chord.new("j", shift: true)], available: has_rule, intent: :move_down, section: :rules, menu: :palette) { |ctx| ctx.rewriter_move(1); nil }
       r.register Verb::Definition.new(
         "rewriter.duplicate", "Duplicate rule", "Copy the selected rule into a new one",
         Verb::Scope::Rewriter, available: has_rule, intent: :duplicate_rule, section: :rules) { |ctx| ctx.rewriter_duplicate; nil }
       r.register Verb::Definition.new(
         "rewriter.reload", "Reload rules", "Re-read rules from the project DB (pick up external edits)",
-        Verb::Scope::Rewriter, available: in_rw, intent: :run, section: :rules) { |ctx| ctx.rewriter_reload; nil }
+        Verb::Scope::Rewriter, available: in_rw, intent: :run, section: :rules, menu: :palette) { |ctx| ctx.rewriter_reload; nil }
 
       # The scope half. A Match & Replace rule lives EITHER in this project or in the global
       # library that every project reads (`Store::RuleScope`) — this replaces the old s/o

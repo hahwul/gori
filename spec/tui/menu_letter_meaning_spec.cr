@@ -237,12 +237,9 @@ MENU_LETTER_ALLOWED = {
   {"notes.filter-subtabs", "editor.find"}    => "vim: editor `/` finds; the SUB-TABS `/` is uniform on all nine strips",
   {"repeater.auto-mark", "editor.append"}    => "vim: `a` appends in the request pane",
   {"fuzz.automark", "editor.append"}         => "vim: `a` appends in the template pane",
-  {"jwt.cycle-alg", "editor.append"}         => "vim: `a` appends in the input pane",
-  {"cookie.cycle-format", "editor.append"}   => "vim: `a` appends in the input pane",
   {"repeater.send-group", "editor.top"}      => "vim: `g` jumps to the top of the request pane",
   {"cookie.cycle-algorithm", "editor.top"}   => "vim: `g` jumps to the top of the input pane",
   {"issue.goto-link", "editor.top"}          => "vim: `g` jumps to the top of the notes pane",
-  {"notes.goto", "editor.top"}               => "vim: `g` jumps to the top of the note",
   {"repeater.send-race", "editor.bottom"}    => "vim: ⇧G jumps to the bottom of the request pane",
 } of MenuLetterMeaning::Pair => String
 

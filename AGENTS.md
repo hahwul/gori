@@ -151,8 +151,16 @@ key grammar and the 2026-09-25 #1274 entries).
 - **A bare key that belongs to one pane declares `chord_sections:`.** Do not hide that gate in
   `available:`, because the R1 guard reads the declaration. Never pane-gate a letter that Global
   binds: outside the pane, the press falls through to Global.
+- **The space menu is for the frequent; the palette takes the long tail.** A row that only
+  repeats a direct chord for an editing or navigation convenience, or a once-a-session
+  configuration action, is placed `menu: :palette` (`Verb::Placement`): no row at either level,
+  found by `Ctrl-P`'s typed search from its tab, chords unchanged. It spells no `mnemonic:`, is
+  never a family member, pinned or hidden (`validate_intents!` raises), and the letter rules
+  ignore it. Name it in UI text with `{space:verb.id}` like any row: `Hotkeys.route` prints its
+  chord, or `^P → <title>` when it has none. Move a row by that criterion, never by a row count.
 - **Never spell a menu letter in UI text.** Help rows, hints and toasts use `{space:verb.id}` or
-  `Hotkeys.menu_path` (which prints `space → > f` for a member).
+  `Hotkeys.menu_path` (which prints `space → > f` for a member; `Hotkeys.route` also covers a
+  palette-only verb).
   `spec/verb/hint_token_expands_spec.cr` fails on a literal `space → X`.
 - **`Space` and `Ctrl-P` share one context.** `ActionContext.capture` + `Registry#for_view` is
   the only answer to "what can I do here", and the palette's typed search finds the focused

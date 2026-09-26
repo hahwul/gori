@@ -22,11 +22,11 @@ module Gori
       r.register Verb::Definition.new(
         "cookie.toggle-mode", "Toggle decode/forge", "Flip between the DECODE and FORGE lenses",
         Verb::Scope::Cookie, [Verb::Chord.new("t", ctrl: true)],
-        available: in_cookie, mnemonic: 'm') { |ctx| ctx.cookie_toggle_mode; nil }
+        available: in_cookie, menu: :palette) { |ctx| ctx.cookie_toggle_mode; nil }
       r.register Verb::Definition.new(
         "cookie.cycle-format", "Cycle format", "Cycle the cookie format: auto / flask / rack / django",
         Verb::Scope::Cookie, [Verb::Chord.new("a", ctrl: true)],
-        available: in_cookie, mnemonic: 'a') { |ctx| ctx.cookie_cycle_format; nil }
+        available: in_cookie, menu: :palette) { |ctx| ctx.cookie_cycle_format; nil }
       r.register Verb::Definition.new(
         "cookie.cycle-algorithm", "Cycle Django algorithm", "Cycle the Django HMAC algorithm: sha256 / sha1",
         Verb::Scope::Cookie, available: in_cookie, mnemonic: 'g') { |ctx| ctx.cookie_cycle_algorithm; nil }

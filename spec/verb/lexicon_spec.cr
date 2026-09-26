@@ -86,7 +86,11 @@ describe Gori::Verb::Lexicon do
   end
 
   it "has no entry that no verb answers" do
-    used = LexiconSpec.menu_rows.compact_map(&.intent).to_set
+    # A palette-only verb (#1282) still answers its intent: the placement is where it is
+    # listed, the intent is what it means, and it takes the letter back if it returns to the
+    # menu. Mark word, the decoder chain and a rule list's reorder are all palette-only today.
+    palette = Gori::Verbs.registry.select(&.palette_only?).compact_map(&.intent)
+    used = (LexiconSpec.menu_rows.compact_map(&.intent) + palette).to_set
     (Gori::Verb::Lexicon::ENTRIES.keys.to_set - used).should be_empty
   end
 
@@ -158,6 +162,28 @@ describe Gori::Verb::Lexicon do
       # A hidden verb has no row.
       LexiconSpec.registry(Gori::Verb::Definition.new("demo.hid", "x", "x", Gori::Verb::Scope::Body,
         [Gori::Verb::Chord.new("j")], hidden: true) { |_| nil }).validate_intents!
+    end
+
+    # `menu: :palette` (#1282): no row at either level, so nothing that would draw one.
+    it "raises on a palette-only verb that spells a letter, joins a family or hides" do
+      palette = ->(id : String, mnemonic : Char?, intent : Symbol?, hidden : Bool) {
+        Gori::Verb::Definition.new(id, id, id, Gori::Verb::Scope::Body, [Gori::Verb::Chord.new("q", ctrl: true)],
+          hidden: hidden, mnemonic: mnemonic, intent: intent, menu: :palette) { |_| nil }
+      }
+      reg = LexiconSpec.registry(palette.call("demo.m", 'q', nil, false))
+      expect_raises(Gori::Error, /demo.m is placed menu: :palette but spells mnemonic 'q'/) { reg.validate_intents! }
+
+      reg = LexiconSpec.registry(palette.call("demo.f", nil, :to_a, false))
+      reg.register_family(Gori::Verb::Family.new(:demo, "Demo…", '>', :send, [{:to_a, 'a'}]))
+      expect_raises(Gori::Error, /demo.f is placed menu: :palette but is a member of family :demo/) { reg.validate_intents! }
+
+      reg = LexiconSpec.registry(palette.call("demo.h", nil, nil, true))
+      expect_raises(Gori::Error, /demo.h is placed menu: :palette but is hidden/) { reg.validate_intents! }
+
+      # An intent is fine: it names what the verb means, and the verb draws no letter from it.
+      ok = palette.call("demo.ok", nil, :filter, false)
+      ok.menu_key.should be_nil
+      LexiconSpec.registry(ok).validate_intents!
     end
 
     it "raises on a menu 'X' that is not a wipe" do
