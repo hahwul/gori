@@ -288,7 +288,7 @@ MENU_LETTER_ALLOWED = {
   # WP2 — menu letters another verb of the same tab answers.
   {"issue.set-severity", "issue.goto-link"}              => "WP2 #7: documented at verbs/issues.cr (severity keeps `s` in the menu)",
   {"probe.scope-toggle", "probe.open-evidence"}          => "WP2 #8: documented in DESIGN.md §7 2026-09-12 (Probe's `s` is go to source)",
-  {"mine.filter-subtabs", "mine.filter"}                 => "WP2 #9: the strip owns `/` in every view since #1055",
+  {"mine.filter-subtabs", "mine.filter"}                 => "WP2 #9: guard sees Miner's `/` Filter findings; the row is level-1 only on the strip (whose raw `/` is this filter) and the tab bar (no `/`), and `T /` in panes",
   {"comparer.close-subtab", "comparer.swap"}             => "WP2 #11: the strip's `w` close vs the R2 table's `w` swap",
   {"comparer.subtab-mark-clear", "comparer.next-change"} => "WP2 #12: the strip's `N` vs ⇧N next change",
   {"oast.copy", "oast.copy-callback"}                    => "false positive: the LIST's controller arm owns bare `y` (verbs/read_edit.cr)",

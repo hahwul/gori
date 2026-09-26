@@ -497,9 +497,8 @@ module Gori
       # --- RESPONSE pane (diff / pretty via keymap so rebind works; hex stays
       # controller-owned on the response pane because plain `x` is also select-line
       # on request/target READ — same letter, pane-local meaning). `p` and ⇧D are
-      # `chord_sections: [:response]`: the request menu spells the same two letters for
-      # pretty-print-request and the decoder chain, so the bare key answers only in the
-      # pane it belongs to and is nothing in the request pane (#1274).
+      # `chord_sections: [:response]`: the lenses they flip draw only in the response pane,
+      # so the bare key answers only there and is nothing in the request pane (#1274).
       #
       # Diff is ⇧D and not bare `d`: `d` deletes or dismisses the selected row in the
       # sixteen other scopes that bind it, and the Repeater was the one place where the
