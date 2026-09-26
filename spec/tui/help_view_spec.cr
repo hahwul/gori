@@ -182,7 +182,7 @@ describe Gori::Tui::HelpView do
 
     it "reads as the space menu, never a raw token, without a registry" do
       HelpView.shortcut_rows(nil).each { |r| "#{r.a} #{r.b}".should_not contain("{space:") }
-      HelpView.shortcut_rows(nil).find(&.b.==("tag the active sub-tab (from the strip)"))
+      HelpView.shortcut_rows(nil).find(&.b.==("tag the active sub-tab (or every marked one)"))
         .not_nil!.a.should eq(Gori::Hotkeys::MENU_PATH_FALLBACK)
     end
   end

@@ -39,6 +39,9 @@ module Gori::Tui
       @tab_titles = {} of String => String
       @banner = nil.as(String?)
       @tab_count = 0 # leading @results entries that are tab matches
+      # ^P was pressed with the strip or the tab bar focused, where the SUB-TABS rows are at
+      # level 1 rather than inside Sub-tabs… (#1274), so their hint drops the `T`.
+      @strip_focus = false
     end
 
     # Take the focused tab's actions from `here`, evaluated against `ctx` NOW — the Runner
@@ -50,6 +53,7 @@ module Gori::Tui
       @tab_all = here ? @registry.for_view(here.scope, here.section, ctx, here.subtabs) : [] of Verb::Definition
       @tab_titles = @tab_all.to_h { |v| {v.id, ctx.space_menu_title(v.id) || v.title} }
       @banner = here.try(&.banner)
+      @strip_focus = here ? Verb::Registry::SUBTAB_SECTIONS.includes?(here.section) && here.subtabs : false
     end
 
     # The focused tab's actions captured at ^P, in registration order — every one a typed
@@ -236,7 +240,7 @@ module Gori::Tui
         return chord.label
       end
       return nil unless tab
-      Hotkeys.menu_path(@registry, verb.id, compact: true)
+      Hotkeys.menu_path(@registry, verb.id, compact: true, strip_focus: @strip_focus)
     end
 
     # The drawn rows: `{header, nil}` or `{"", index into @results}`. Flat — one row per

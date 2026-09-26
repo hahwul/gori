@@ -90,6 +90,9 @@ module Gori
       # `@focus == :subtabs` returns before the keymap, so a chord could never fire on the
       # strip, and it WOULD fire in the body, marking sub-tabs while the operator types.
       r.register Verb::Definition.new(
+        "cookie.subtab-mark", "Mark sub-tab", "Mark or unmark the active sub-tab (the strip's `t`) — the actions above then act on every marked one",
+        Verb::Scope::Cookie, available: subtab_mark_ready(:cookie), intent: :mark, section: :subtab) { |ctx| ctx.subtab_mark_toggle; nil }
+      r.register Verb::Definition.new(
         "cookie.subtab-mark-all", "Mark all sub-tabs", "Mark every session the sub-tab filter shows — the actions above then act on all of them",
         Verb::Scope::Cookie, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :cookie && ctx.subtab_search_count >= 2 }, intent: :mark_all, section: :subtab) { |ctx| ctx.subtab_mark_all; nil }
       r.register Verb::Definition.new(

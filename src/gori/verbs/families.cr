@@ -62,6 +62,12 @@ module Gori
       {:tls_fingerprint, 't'},
     ], sticky: true)
 
+    # The gate of every strip's Mark sub-tab row (#1274): on its own tab, with a second chip to
+    # mark alongside — the same gate as Mark all. Shared so nine registrations spell it once.
+    def self.subtab_mark_ready(tab : Symbol) : Verb::ExecContext -> Bool
+      ->(ctx : Verb::ExecContext) { ctx.current_tab == tab && ctx.subtab_search_count >= 2 }
+    end
+
     def self.register_families(r : Verb::Registry) : Nil
       r.register_family(SEND_FLOW)
       r.register_family(DISPLAY)

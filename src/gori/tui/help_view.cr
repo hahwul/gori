@@ -71,8 +71,9 @@ module Gori::Tui
         # The menu used to be focus-dependent: the strip's own verbs showed only while the
         # strip was focused, so from a body pane one had to walk focus up before `space` would
         # offer "close this sub-tab". One menu per tab now, and the same nine letters on all
-        # nine strips — which is what makes it worth a line here rather than nine.
-        Item.new("space ▸ SUB-TABS", "the strip's actions from ANY pane — same letters on every tab"),
+        # nine strips — which is what makes it worth a line here rather than nine. From a pane
+        # they sit one level down under the Sub-tabs… row (#1274); on the strip, at the top.
+        Item.new("space ▸ Sub-tabs…", "the strip's actions from ANY pane, one level down — the strip's own letters, the same on every tab"),
         Item.new("^1-9", "sub-tab N — the ⇧1-9 alias for terminals that deliver Ctrl+digit"),
         Item.new("Settings: Tabs", "one list — ⇧K/⇧J move a row, and the rows above the seam are the bar"),
         Item.new("esc", "pop back to the tab bar"),
@@ -114,7 +115,7 @@ module Gori::Tui
         # strip (#683), so the row this replaces named the marking key for tagging. Tagging
         # has no chord of its own and never did — the menu letter is the whole route, and the
         # registry spells it (the literal here once said `a` while the menu said `t`).
-        Item.new("{space:repeater.tag-subtab}", "tag the active sub-tab (from the strip)", "repeater.tag-subtab"),
+        Item.new("{space:repeater.tag-subtab}", "tag the active sub-tab (or every marked one)", "repeater.tag-subtab"),
         Item.new("i / ↵", "enter INS (edit) on request/target · esc back to READ"),
         Item.new("space", "command menu (READ mode on request/target/response)"),
         # Copy is the one READ verb that also works while TYPING: in INS a bare `y` is a

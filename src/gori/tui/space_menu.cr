@@ -245,16 +245,32 @@ module Gori::Tui
       @l1_state = {@selected, @scroll}
       @level = family
       reset_position
-      members = @registry.for_view(scope, section, ctx, subtabs).select { |v| v.family == family.id }
-      rows = members.compact_map do |v|
-        next unless (i = v.intent) && (k = family.letter(i))
-        {family.order(i) || 0, Entry.for_verb(v, k)}
-      end
-      @entries = rows.sort_by!(&.[0]).map(&.[1])
+      @entries = level2_entries(family, scope, section, ctx, subtabs)
       @entries << Entry.new(nil, scope, section, :none) if @entries.empty?
       @groups = [] of Group
       measure(ctx)
       true
+    end
+
+    # A family's available members in its table order, each on the table's letter. Sub-tabs…
+    # (`Registry::SUBTABS_FOLD`) is the SUB-TABS bucket instead: its available rows in the
+    # bucket's own order, each on its own `menu_key` — the letters it has with the strip
+    # focused, so `n` from the strip is `T n` from a pane.
+    private def level2_entries(family : Verb::Family, scope : Verb::Scope, section : Symbol,
+                               ctx : Verb::ExecContext, subtabs : Bool) : Array(Entry)
+      view = @registry.for_view(scope, section, ctx, subtabs)
+      if family.id == Verb::Registry::SUBTABS_FOLD.id
+        return view.compact_map do |v|
+          next unless Verb::Registry::SUBTAB_SECTIONS.includes?(v.section)
+          next unless k = v.menu_key
+          Entry.for_verb(v, k)
+        end
+      end
+      rows = view.select { |v| v.family == family.id }.compact_map do |v|
+        next unless (i = v.intent) && (k = family.letter(i))
+        {family.order(i) || 0, Entry.for_verb(v, k)}
+      end
+      rows.sort_by!(&.[0]).map(&.[1])
     end
 
     # Up one level: level 1 again, with the selection it had. False at level 1 — the caller
@@ -360,10 +376,15 @@ module Gori::Tui
     # The family row files under the first bucket, in render order, that holds a member
     # (COMMON, then SUB-TABS, then the pane), and in the family's own band — but only when
     # that bucket is banded already (#banded_home).
+    #
+    # In a pane view of a tab with a strip the SUB-TABS bucket folds into one Sub-tabs… row
+    # (`Registry::SUBTABS_FOLD`, #1274 Decision 8), static like a family row and filed in the
+    # SUB-TABS bucket, where only the bucket's `pinned:` rows keep a level-1 row beside it. A
+    # family member there keeps its family's row instead (`Registry.folded?`).
     private def level1_entries(scope : Verb::Scope, section : Symbol, ctx : Verb::ExecContext,
                                subtabs : Bool) : Array(Entry)
-      registered = @registry.registered_in_view(scope, section, subtabs)
-      rows = [] of Entry
+      registered, fold_row = unfolded(scope, section, subtabs)
+      rows = [fold_row].compact
       seen = Set(Symbol).new
       registered.each do |v|
         if (k = v.menu_key) && v.available?(ctx)
@@ -376,6 +397,17 @@ module Gori::Tui
         rows << Entry.new(f.key, scope, home.section, f.group, family: f)
       end
       rows.map { |e| (f = e.family) && !banded_home?(e, rows, section, subtabs) ? Entry.new(e.key, e.scope, e.section, :none, family: f) : e }
+    end
+
+    # The verbs the view registers, less the ones a pane view folds into Sub-tabs…, and that
+    # row when it is drawn: static like a family row, filed in the SUB-TABS bucket.
+    private def unfolded(scope : Verb::Scope, section : Symbol, subtabs : Bool) : {Array(Verb::Definition), Entry?}
+      registered = @registry.registered_in_view(scope, section, subtabs)
+      return {registered, nil} unless Verb::Registry.folds?(section, subtabs)
+      folded, kept = registered.partition { |v| Verb::Registry.folded?(v) }
+      return {kept, nil} unless folded.any?(&.menu_listed?)
+      fold = Verb::Registry::SUBTABS_FOLD
+      {kept, Entry.new(fold.key, scope, :subtab, :none, family: fold)}
     end
 
     # Whether a family row's bucket already has a band of its own: some non-member verb row

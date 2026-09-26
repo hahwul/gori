@@ -129,7 +129,11 @@ key grammar and the 2026-09-25 #1274 entries).
   (`*.filter`, `*.export`, `*.copy`, the strip ids, …) must declare it
   (`spec/verb/lexicon_spec.cr`). Only a one-off action spells a local `mnemonic:`.
 - **Reserved letters.** Menu `X` / `⇧X` is wipe and nothing else. On a tab with a sub-tab
-  strip, the strip's nine (`n w d e t f / T N`) are never a pane verb's letter.
+  strip, the strip's nine (`n w d e t f / T N`) are never a COMMON verb's letter: COMMON shares
+  the strip-focused card, where the SUB-TABS bucket is drawn expanded. In a pane view the bucket
+  is one row, `T` **Sub-tabs…** (`Registry::SUBTABS_FOLD`), so a pane verb may use the other
+  eight but never `T`; `pinned:` keeps a strip verb at level 1 in the panes too (Paste cURL).
+  Reassign a freed pane letter in its own change.
 - **No menu letter is `h`/`j`/`k`/`l`**, at either level: not a row's letter (a chord-derived one
   included), a pinned member's, a family key or a level-2 letter. Inside the menu those four
   always move the selection; the Runner's fallback stays. `Registry#validate_intents!` and

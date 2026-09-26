@@ -69,9 +69,14 @@ module Gori
       # pinned member included — the shorter path wins), `[family key, letter]` for a member
       # one level down, nil for a verb the menu does not list. Scope-free on purpose: a verb
       # id names one scope, and a family's letters are the same in every scope.
-      def menu_keys(id : String) : Array(Char)?
+      #
+      # A SUB-TABS verb is one level down in a pane view (`SUBTABS_FOLD`, `[T, letter]`) and at
+      # level 1 where the strip or the tab bar has focus; `strip_focus` asks for the latter.
+      # A pinned one is at level 1 in both.
+      def menu_keys(id : String, strip_focus : Bool = false) : Array(Char)?
         return nil unless v = self[id]?
         if k = v.menu_key
+          return [SUBTABS_FOLD.key, k] if Registry.folded?(v) && !strip_focus
           return [k]
         end
         return nil unless (fid = v.family) && (f = family(fid)) && (l = l2_key(v))
@@ -89,9 +94,32 @@ module Gori
       # The two sections the space menu renders as ONE "SUB-TABS" bucket. `:subtab` holds the
       # strip's own actions (new/close/duplicate/rename/tag/mark) and `:tab` the strip's
       # search + filter; they are the same idea and only ever differed in which focus level
-      # revealed them. Since #1055 the bucket rides along with EVERY pane view of a tab that
-      # has a strip, which is why #validate_menu_keys! has to sweep those merged views too.
+      # revealed them. Since #1055 the bucket is part of EVERY view of a tab that has a strip:
+      # expanded where the strip has focus, one Sub-tabs… row in a pane view (#1274
+      # Decision 8), which is why #validate_menu_keys! sweeps both shapes.
       SUBTAB_SECTIONS = {:subtab, :tab}
+
+      # The SUB-TABS bucket as ONE level-1 row in a pane view, "Sub-tabs…" on `T` (#1274
+      # Decision 8). Not a registered family: membership is the bucket itself (a verb of a
+      # SUBTAB_SECTIONS section), and each member's level-2 letter is its own `menu_key` — the
+      # strip's nine, already the same on all nine strips. Where the strip or the tab bar has
+      # focus the strip IS the context, so the bucket is drawn expanded at level 1 and there is
+      # no Sub-tabs… row (`Registry.folds?`). `T` was Mark all sub-tabs, which is now `T T` from
+      # a pane, so the old reflex lands in the right card. `pinned:` keeps a member at level 1
+      # in the pane views too (Paste cURL).
+      SUBTABS_FOLD = Family.new(:subtabs, "Sub-tabs…", 'T', :none, [] of {Symbol, Char})
+
+      # Whether a view folds the SUB-TABS bucket into the Sub-tabs… row: a tab with a strip,
+      # seen from anywhere but the strip itself or the tab bar.
+      def self.folds?(section : Symbol, subtabs : Bool) : Bool
+        subtabs && !SUBTAB_SECTIONS.includes?(section)
+      end
+
+      # A SUB-TABS verb that a pane view draws inside Sub-tabs… rather than at level 1. Not a
+      # pinned one, and not a family member, which its family's row already draws.
+      def self.folded?(v : Definition) : Bool
+        SUBTAB_SECTIONS.includes?(v.section) && !v.pinned? && !v.member?
+      end
 
       # True when scope has at least one non-hidden, MENU-LISTED verb tagged with
       # `section` — lets the tab-bar space menu (@focus == :menu) decide whether a
@@ -137,31 +165,38 @@ module Gori
 
         by_scope.each do |scope, verbs|
           common = verbs.select { |v| v.section == :common }
-          # The SUB-TABS bucket is part of every view on a tab that has a strip, so it is
-          # part of every sweep below — the reason a pane letter may no longer reuse one of
-          # the strip's nine (see .github/DESIGN.md).
+          # The SUB-TABS bucket is expanded at level 1 where the strip or the tab bar has
+          # focus (COMMON + the bucket), and folded into Sub-tabs… on `T` in every pane view,
+          # where only its pinned members keep a level-1 row (#1274 Decision 8). So COMMON may
+          # not reuse one of the strip's nine, and a pane may not reuse `T` or a pinned letter.
           strip = verbs.select { |v| SUBTAB_SECTIONS.includes?(v.section) }
+          pinned = strip.reject { |v| Registry.folded?(v) } # level 1 in a pane view too
           check_view!(scope, :common, common + strip)
+          check_view!(scope, :common, common + pinned, fold: true) unless strip.empty?
           sections = verbs.map(&.section).uniq!.reject { |s| s == :common }
           sections.each do |section|
             view = common + verbs.select { |v| v.section == section }
-            check_view!(scope, section, view)
-            next if strip.empty? || SUBTAB_SECTIONS.includes?(section)
-            check_view!(scope, section, view + strip)
+            if strip.empty? || SUBTAB_SECTIONS.includes?(section)
+              check_view!(scope, section, view)
+            else
+              check_view!(scope, section, view + pinned, fold: true)
+            end
           end
         end
       end
 
       # One displayable view, at both levels of the menu.
       #   • Level 1: every row's key — the level-1 letters (`menu_key`, which a pinned member
-      #     keeps) and one key per family that has a member here. A family row is drawn when
-      #     the view REGISTERS a member, not when one is available, so this is the whole check.
+      #     keeps) and one key per family that has a member here (`fold`: and Sub-tabs… on `T`).
+      #     A family row is drawn when the view REGISTERS a member, not when one is available,
+      #     so this is the whole check.
       #   • Level 2: inside each family, no two members of the view on one intent. The letter
       #     comes from the family table, so a duplicate intent is the only way two rows could
       #     share one. Checked per VIEW, not per scope: the Repeater's request and response
       #     panes may each have a hex toggle, since they never render together.
-      private def check_view!(scope : Scope, section : Symbol, verbs : Array(Definition)) : Nil
+      private def check_view!(scope : Scope, section : Symbol, verbs : Array(Definition), fold : Bool = false) : Nil
         pairs = verbs.compact_map { |v| (k = v.menu_key) ? {k, v.id} : nil }
+        pairs << {SUBTABS_FOLD.key, "family:#{SUBTABS_FOLD.id}"} if fold
         verbs.compact_map(&.family).uniq!.each do |fid|
           next unless f = family(fid)
           pairs << {f.key, "family:#{fid}"}
@@ -193,14 +228,16 @@ module Gori
       #     either redundant or the drift the table exists to stop.
       #   • ⇧X is the wipe letter app-wide (DESIGN.md §7, 2026-09-12): only a `:wipe` verb in
       #     group :wipe wears it in the menu.
-      #   • On a tab with a sub-tab strip, only the SUB-TABS bucket may wear one of the
-      #     strip's letters (`Lexicon::STRIP_LETTERS`). The bucket shares every card with the
-      #     pane, and the strip answers `t` raw, so a pane `t` means one thing in the card and
-      #     another on the strip a keystroke away. It holds on a strip that lacks the action
-      #     too: the nine read the same on all nine strips.
+      #   • On a tab with a sub-tab strip, no COMMON verb wears one of the strip's letters
+      #     (`Lexicon::STRIP_LETTERS`): COMMON shares the strip-focused card with the expanded
+      #     SUB-TABS bucket, and the strip answers `t` raw. It holds on a strip that lacks the
+      #     action too, since the nine read the same on all nine strips. A PANE verb is free of
+      #     the rule since the bucket folded into Sub-tabs… there (#1274 Decision 8); only the
+      #     fold's own `T` stays taken, which #validate_menu_keys! checks per view.
       #   • A family member (#1274 WP9) is the same rule one level down: its letter is the
       #     family table's, so it spells no `mnemonic:` — unless it is `pinned:`, where the
-      #     mnemonic is its level-1 letter. Only a member may be pinned.
+      #     mnemonic is its level-1 letter. Only a member may be pinned: of a family, or of the
+      #     SUB-TABS bucket (`SUBTABS_FOLD`), whose pinned rows stay at level 1 in a pane view.
       #   • A family's key is a level-1 letter like any other: on a strip tab it is not one of
       #     the strip's.
       #   • No menu letter is h/j/k/l (`Family::NAV_LETTERS`): inside the menu those four move
@@ -244,8 +281,9 @@ module Gori
       end
 
       private def check_intent!(v : Definition) : Nil
-        if v.pinned? && !v.member?
-          raise Gori::Error.new("#{v.id} is pinned: but no family lists its intent #{v.intent.inspect}")
+        if v.pinned? && !v.member? && !SUBTAB_SECTIONS.includes?(v.section)
+          raise Gori::Error.new("#{v.id} is pinned: but no family lists its intent #{v.intent.inspect} " \
+                                "and it is not a SUB-TABS verb")
         end
         return unless intent = v.intent
         if v.member?
@@ -276,11 +314,12 @@ module Gori
         if key == 'X' && !(v.intent == :wipe && v.group == :wipe)
           raise Gori::Error.new("#{v.id} in #{v.scope} wears the menu 'X', the wipe letter (intent :wipe, group :wipe)")
         end
-        return if SUBTAB_SECTIONS.includes?(v.section) || !strip_scopes.includes?(v.scope)
+        return unless v.section == :common && strip_scopes.includes?(v.scope)
         if Lexicon::STRIP_LETTERS.includes?(key)
           raise Gori::Error.new(
             "#{v.id} in #{v.scope}/#{v.section} wears the sub-tab strip's menu '#{key}' " \
-            "(a pane verb on a tab with a strip takes a letter outside #{Lexicon::STRIP_LETTERS.join})")
+            "(a COMMON verb on a tab with a strip shares the strip's card, and takes a letter " \
+            "outside #{Lexicon::STRIP_LETTERS.join})")
         end
       end
 

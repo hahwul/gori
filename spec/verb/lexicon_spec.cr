@@ -140,11 +140,16 @@ describe Gori::Verb::Lexicon do
       expect_raises(Gori::Error, /declares intent :filter .* mnemonic 'f'/) { reg.validate_intents! }
     end
 
-    it "raises on a pane verb wearing a strip letter on a tab that has a strip" do
+    # COMMON shares the strip-focused card with the expanded SUB-TABS bucket; a pane view
+    # folds the bucket into Sub-tabs… (#1274 Decision 8), so a pane letter is free of the rule.
+    it "raises on a COMMON verb wearing a strip letter on a tab that has a strip, not a pane verb" do
       reg = LexiconSpec.registry(
         LexiconSpec.verb("demo.new", Gori::Verb::Scope::Jwt, intent: :new, section: :subtab),
-        LexiconSpec.verb("demo.pane", Gori::Verb::Scope::Jwt, mnemonic: 't', section: :output))
-      expect_raises(Gori::Error, /demo.pane .* strip's menu 't'/) { reg.validate_intents! }
+        LexiconSpec.verb("demo.all", Gori::Verb::Scope::Jwt, mnemonic: 't'))
+      expect_raises(Gori::Error, /demo.all .* strip's menu 't'/) { reg.validate_intents! }
+      LexiconSpec.registry(
+        LexiconSpec.verb("demo.new", Gori::Verb::Scope::Jwt, intent: :new, section: :subtab),
+        LexiconSpec.verb("demo.pane", Gori::Verb::Scope::Jwt, mnemonic: 't', section: :output)).validate_intents!
     end
 
     # h/j/k/l move the menu's selection (#1274): a row on one would run where the hand meant

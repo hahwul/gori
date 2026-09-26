@@ -286,10 +286,12 @@ module Gori
 
       # Burp's "Paste cURL to Repeater" (#1244): a paste box whose request(s) open as new
       # sub-tabs. Menu/palette only — no chord to collide with the editor's keys. `u` is
-      # reserved for Unicode decoding in the response menu, so the mnemonic is `U`.
+      # reserved for Unicode decoding in the response menu, so the mnemonic is `U`. Pinned: the
+      # pane views fold the SUB-TABS bucket into Sub-tabs… (#1274), and pasting a request is
+      # the one strip action frequent enough to stay one key away there as well.
       r.register Verb::Definition.new(
         "repeater.paste-curl", "Paste cURL", "Paste a curl command and open its request as a new Repeater sub-tab",
-        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'U', section: :subtab) { |ctx| ctx.repeater_paste_curl; nil }
+        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'U', section: :subtab, pinned: true) { |ctx| ctx.repeater_paste_curl; nil }
 
       # "Minimize request" (Caido-"squash"-style): strip cosmetic headers, tracking-cookie
       # crumbs and unused query/body params, re-sending to verify the response is unchanged.
@@ -333,15 +335,13 @@ module Gori
       r.register Verb::Definition.new(
         "repeater.rename-subtab", "Rename subtab", "Rename the active repeater sub-tab's chip",
         Verb::Scope::Repeater, available: in_repeater, intent: :rename, section: :subtab) { |ctx| ctx.repeater_rename_subtab; nil }
-      # Tag / filter the sub-tab strip (issue #121). 't' tags the active session and '/' opens
-      # the tag-filter bar — both letters of the SUB-TABS table, free across COMMON ∪ every
-      # Repeater section. The key audit briefly moved this to 'a' because the strip's LIVE `t`
-      # marks a chip; kept on 't' by the maintainer's call, since Repeater is the only strip
-      # with a tag verb and the table has nothing to be uniform with. Worth revisiting as a
-      # pair with the strip's raw mark key rather than on its own.
+      # Tag / filter the sub-tab strip (issue #121). '/' opens the tag-filter bar. Tag is 'g':
+      # the strip's LIVE `t` marks a chip, and the menu's `t` is now that same mark (#1274
+      # Decision 3), so tag takes a letter no strip key answers. Repeater is the only strip
+      # with a tag verb.
       r.register Verb::Definition.new(
         "repeater.tag-subtab", "Tag subtab", "Add/edit flat tags on the active repeater sub-tab",
-        Verb::Scope::Repeater, available: in_repeater, mnemonic: 't', section: :subtab) { |ctx| ctx.repeater_tag_subtab; nil }
+        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'g', section: :subtab) { |ctx| ctx.repeater_tag_subtab; nil }
       # The Repeater is where a login request is authored and tested, so this is where it joins
       # a session slot's refresh steps (#1233): a slot picker, then the sub-tab is appended to
       # that slot's list. A once-a-session configuration action, so palette-only (#1282); the
@@ -361,6 +361,9 @@ module Gori
       # verbs widen what they TARGET rather than growing batch twins. Menu-only, NO chords:
       # `@focus == :subtabs` returns before the keymap, so a chord could never fire on the
       # strip, and it WOULD fire in the body, marking sub-tabs while the operator types.
+      r.register Verb::Definition.new(
+        "repeater.subtab-mark", "Mark sub-tab", "Mark or unmark the active sub-tab (the strip's `t`) — the actions above then act on every marked one",
+        Verb::Scope::Repeater, available: subtab_mark_ready(:repeater), intent: :mark, section: :subtab) { |ctx| ctx.subtab_mark_toggle; nil }
       r.register Verb::Definition.new(
         "repeater.subtab-mark-all", "Mark all sub-tabs", "Mark every repeater session the sub-tab filter shows — the actions above then act on all of them",
         Verb::Scope::Repeater, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :repeater && ctx.subtab_search_count >= 2 }, intent: :mark_all, section: :subtab) { |ctx| ctx.subtab_mark_all; nil }
@@ -811,6 +814,9 @@ module Gori
       # `@focus == :subtabs` returns before the keymap, so a chord could never fire on the
       # strip, and it WOULD fire in the body, marking sub-tabs while the operator types.
       r.register Verb::Definition.new(
+        "fuzz.subtab-mark", "Mark sub-tab", "Mark or unmark the active sub-tab (the strip's `t`) — the actions above then act on every marked one",
+        Verb::Scope::Fuzzer, available: subtab_mark_ready(:fuzzer), intent: :mark, section: :subtab) { |ctx| ctx.subtab_mark_toggle; nil }
+      r.register Verb::Definition.new(
         "fuzz.subtab-mark-all", "Mark all sub-tabs", "Mark every fuzz session the sub-tab filter shows — the actions above then act on all of them",
         Verb::Scope::Fuzzer, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :fuzzer && ctx.subtab_search_count >= 2 }, intent: :mark_all, section: :subtab) { |ctx| ctx.subtab_mark_all; nil }
       r.register Verb::Definition.new(
@@ -989,6 +995,9 @@ module Gori
       # verbs widen what they TARGET rather than growing batch twins. Menu-only, NO chords:
       # `@focus == :subtabs` returns before the keymap, so a chord could never fire on the
       # strip, and it WOULD fire in the body, marking sub-tabs while the operator types.
+      r.register Verb::Definition.new(
+        "mine.subtab-mark", "Mark sub-tab", "Mark or unmark the active sub-tab (the strip's `t`) — the actions above then act on every marked one",
+        Verb::Scope::Miner, available: subtab_mark_ready(:miner), intent: :mark, section: :subtab) { |ctx| ctx.subtab_mark_toggle; nil }
       r.register Verb::Definition.new(
         "mine.subtab-mark-all", "Mark all sub-tabs", "Mark every mining session the sub-tab filter shows — the actions above then act on all of them",
         Verb::Scope::Miner, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :miner && ctx.subtab_search_count >= 2 }, intent: :mark_all, section: :subtab) { |ctx| ctx.subtab_mark_all; nil }
