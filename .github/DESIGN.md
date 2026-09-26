@@ -3914,3 +3914,15 @@ proxy does. The scope lens stays excused: it is a view filter the next `s` undoe
   eight allowlist lines gone, a new `c`/`i` row on such a tab fails it, and the only way back is
   an allowlist line with a reason. A tab that binds the letter itself (Probe's `c` dismiss) is
   unaffected, because the press never reaches Global.
+
+### 2026-09-26: the other R1 pairs, closed by a rule or a move
+
+Refines: the R1 guard entry above. #1295.
+
+- **vim motions are a rule, not eight allowlist lines.** Under the `vim` keyset an editor pane
+  answers `a` `g` `⇧G` `/` and `⇧V` with append, top, bottom, find and select line, and eight
+  menu rows share those letters. A dropped space there runs the motion a vim hand expects,
+  which moves or selects and never writes, sends or deletes, so the guard exempts those verbs
+  by id (`VIM_MOTIONS`) under that keyset only. Undo (`u`) and helix's `i` insert are not in
+  it, and an example fails if an exempt verb moves into an acting band (send, triage, danger,
+  wipe) or out of the vim table.

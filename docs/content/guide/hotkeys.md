@@ -416,6 +416,8 @@ so the card teaches both halves rather than making you guess which one it means.
 
 That includes `/`, which is a `SUB-TABS` letter *and* `vim-ish`'s find key. They are different tiers — the menu letter acts on the strip while the card is up, the chord searches the text pane you are standing in. The one deliberate pane-key overlap is `u` in the Repeater's read-only response: it toggles display-only JSON Unicode decoding. The request editor is still in the Editor scope, where `u` means undo. `validate_chords!` checks same-scope collisions at boot; the cross-scope exception is pinned in `spec/verb/keyset_spec.cr`.
 
+A few menu letters are also a `vim-ish` motion in an editor pane: Auto-mark `a` (append), `g` on the Repeater, Cookie and issue detail (top), Send race `⇧G` (bottom), Set CVSS `V` (select line), and the Notes strip's `/` (find). If the `Space` before one of them is lost, the key does what vim would, which moves or selects and never sends, writes or deletes. That overlap is deliberate; a menu letter that lands on anything else in the pane is refused.
+
 ### What still works whatever you pick
 
 `Ctrl-Z` keeps undoing **inside INSERT** under `vim-ish` — that guard runs before the keymap in all nine text editors, which is where a typing hand wants it. `Ctrl-F` likewise still opens the find prompt, INSERT included; `/` is an addition in READ, not a replacement. And `i` is refused with a message on a read-only pane that sits beside an editor (the Repeater response, the Fuzzer results, the Decoder output), under both keysets.
