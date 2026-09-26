@@ -46,7 +46,7 @@ module Gori
                      "Or run with a subcommand:\n" \
                      "  gori run issues create [options]\n" \
                      "  gori run issues update <issue-id> [options]\n" \
-                     "  gori run issues delete <issue-id>\n\n" \
+                     "  gori run issues delete <issue-id> --yes\n\n" \
                      "#{EVIDENCE_LINK_HELP}\n"
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
@@ -327,12 +327,14 @@ module Gori
       private def self.cmd_issues_delete(args : Array(String)) : Nil
         db_path : String? = nil
         project_name : String? = nil
+        yes = false
         positional = [] of String
 
         parser = OptionParser.new do |p|
-          p.banner = "Usage: gori run issues delete <id>\n\n" \
+          p.banner = "Usage: gori run issues delete <id> --yes\n\n" \
                      "Delete an issue and its links. To keep it in the report but mark it closed,\n" \
                      "use `gori run issues update <id> --status=resolved` instead."
+          p.on("-y", "--yes", "Confirm deletion") { yes = true }
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
@@ -349,11 +351,19 @@ module Gori
         store = open_store(resolve_read_project(project_name, db_path))
         begin
           abort "gori run issues delete: no issue with id #{id}" unless store.get_issue(id)
+          if err = issue_delete_confirmation_error(id, yes)
+            abort "gori run issues delete: #{err}"
+          end
           abort "gori run issues delete: issue NOT deleted (store busy or unwritable)" unless store.delete_issue(id)
           puts "Issue ##{id} deleted."
         ensure
           store.close
         end
+      end
+
+      private def self.issue_delete_confirmation_error(id : Int64, yes : Bool) : String?
+        return nil if yes
+        "refusing to delete issue ##{id} without --yes; deleted issues cannot be recovered"
       end
 
       private def self.cmd_issues_update(args : Array(String)) : Nil

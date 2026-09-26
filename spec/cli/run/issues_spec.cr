@@ -28,6 +28,10 @@ module Gori::CLI::Run
   def self.issue_created_output_for_spec(store : Gori::Store, id : Int64, format : Symbol) : String
     issue_created_output(store, id, format)
   end
+
+  def self.issue_delete_confirmation_error_for_spec(id : Int64, yes : Bool) : String?
+    issue_delete_confirmation_error(id, yes)
+  end
 end
 
 private def captured_flow(store : Gori::Store) : Int64
@@ -297,5 +301,24 @@ describe "gori run issues --format markdown" do
     scrubbed.should_not contain('\a')
     scrubbed.should contain("\n") # structure preserved
     scrubbed.should contain("\ttab")
+  end
+end
+
+describe "gori run issues delete --yes confirmation" do
+  it "refuses without --yes" do
+    err = Gori::CLI::Run.issue_delete_confirmation_error_for_spec(12_i64, false).not_nil!
+    err.should contain("refusing to delete issue #12 without --yes")
+    err.should contain("deleted issues cannot be recovered")
+  end
+
+  it "allows deletion with --yes" do
+    Gori::CLI::Run.issue_delete_confirmation_error_for_spec(12_i64, true).should be_nil
+  end
+
+  it "declares --yes and -y in the delete option parser" do
+    src = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run", "issues.cr"))
+    body = src[/private def self\.cmd_issues_delete\(.*?\n      end\n/m]
+    body.should contain("p.on(\"-y\", \"--yes\"")
+    body.should contain("issue_delete_confirmation_error")
   end
 end

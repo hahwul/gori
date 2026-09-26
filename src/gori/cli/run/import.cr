@@ -84,6 +84,7 @@ module Gori
         end
 
         emit_import_result(kind, path, result, format)
+        exit 1 if result.short?
       end
 
       # Exactly one source flag. Zero or two+ is a clean usage error.

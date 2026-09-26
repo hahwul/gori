@@ -94,4 +94,21 @@ describe "gori run import" do
       Gori::Tui::ImportOverlay.new(kind).label.should eq(label)
     end
   end
+
+  it "exits 1 after emitting the result when the import did not commit fully (short)" do
+    src = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run", "import.cr"))
+    body = src[/def self\.cmd_import\(.*?\n      end\n/m]
+    body.should contain("emit_import_result(kind, path, result, format)")
+    body.should contain("exit 1 if result.short?")
+    emit_idx = body.index("emit_import_result").not_nil!
+    exit_idx = body.index("exit 1 if result.short?").not_nil!
+    (exit_idx > emit_idx).should be_true
+  end
+
+  it "includes the shortfall note in prose when result is short" do
+    result = Gori::Import::Result.new(count: 0, skipped: 0, attempted: 10)
+    result.short?.should be_true
+    text = Gori::CLI::Run.import_result_text_for_spec(:har, "capture.har", result)
+    text.should contain("10 of 10 did NOT commit (store busy or unwritable)")
+  end
 end

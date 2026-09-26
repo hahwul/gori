@@ -28,6 +28,13 @@ private class RuleUpdateFailingStore < Gori::Store
     return false if @fail_delete
     super
   end
+
+  property? fail_status_update = false
+
+  def update_probe_issue_status(id : Int64, status : Gori::Store::Status)
+    return false if fail_status_update?
+    super
+  end
 end
 
 # Opened the long way round (the `Store.open` recipe minus the subclass), like
@@ -186,6 +193,17 @@ describe "MCP probe triage tools" do
       tools = tools_for(store)
       call_json(tools, "probe_dismiss", %({"id":#{issue.id}}))["status"].as_s.should eq("false-positive")
       call_json(tools, "probe_dismiss", %({"id":#{issue.id}}))["status"].as_s.should eq("open")
+    end
+  end
+
+  it "returns a busy error when toggling dismiss fails to land in the store" do
+    with_rule_update_failing_store do |store|
+      issue = seed_probe_issue(store)
+      tools = tools_for(store)
+      store.fail_status_update = true
+      res = tools.call("probe_dismiss", JSON.parse(%({"id":#{issue.id}})))
+      res.is_error.should be_true
+      res.text.should contain("finding #{issue.id} is unchanged")
     end
   end
 
