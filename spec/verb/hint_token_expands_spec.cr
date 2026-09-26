@@ -59,10 +59,7 @@ end
 # Hand-spelled letters this spec found in a file another change owns, each an exact
 # {file, stripped line}. Not a standing exception: the spelling is still wrong the day the
 # letter moves. The scan fails when a line stops matching, so the fix deletes its entry.
-private HAND_SPELLED_PENDING = {
-  # Help's Cookie row: `{space:cookie.cycle-algorithm}` once the Help strings are respelled.
-  {"tui/help_view.cr", %(Item.new("algo badge / Space g", "cycle the Django HMAC algorithm (sha256 / sha1)"),)},
-}
+private HAND_SPELLED_PENDING = [] of {String, String}
 
 describe "hint templates — space-menu letters come from the registry" do
   root = File.expand_path("../../src/gori", __DIR__)
