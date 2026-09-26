@@ -100,6 +100,35 @@ describe Gori::Probe::Analyzer do
     end
   end
 
+  it "re-plans blind SQLi probes with aggressive keys when switching from Active to Aggressive" do
+    with_store do |store|
+      set_probe_rule_enabled(store, "sqli_time_based", true)
+      probe_capture_flow(store, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n",
+        target: "/search?id=42", body: "<p>results</p>")
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "acme.test")
+
+      feed = Channel(Gori::Store::FlowEvent).new(8)
+      a = Gori::Probe::Analyzer.new(store, scope, feed, Gori::Probe::Mode::Active, true)
+      a.start
+      sleep 50.milliseconds
+
+      # Active pass planned the default base keys
+      a.@active_seen.should contain("sqli_boolean_based|acme.test:443|GET|/search|2:id@query")
+      a.@active_seen.should contain("sqli_time_based|acme.test:443|GET|/search|2:id@query")
+      a.@active_seen.should_not contain("sqli_boolean_based|acme.test:443|GET|/search|2:id@query|aggr")
+      a.@active_seen.should_not contain("sqli_time_based|acme.test:443|GET|/search|2:id@query|aggr")
+
+      # Transition to Aggressive triggers backfill, which must re-plan the wider breakouts / delay families
+      a.set_mode(Gori::Probe::Mode::Aggressive)
+      sleep 50.milliseconds
+      a.stop
+
+      a.@active_seen.should contain("sqli_boolean_based|acme.test:443|GET|/search|2:id@query|aggr")
+      a.@active_seen.should contain("sqli_time_based|acme.test:443|GET|/search|2:id@query|aggr")
+    end
+  end
+
   it "does not re-count a buffered WebSocket secret on every later frame (incremental rescan)" do
     with_store do |store|
       detail = probe_capture_flow(store,

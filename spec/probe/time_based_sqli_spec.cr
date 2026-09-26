@@ -154,6 +154,19 @@ describe "Gori::Probe::Active::TimeBlindSqli" do
     end
   end
 
+  it "dedup_key distinguishes aggressive mode and matches plan.dedup_key" do
+    with_store do |store|
+      detail = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?id=42")
+      base_key = rule.dedup_key(detail).not_nil!
+      aggr_opts = P::Active::Options.new(aggressive: true)
+      aggr_key = rule.dedup_key(detail, aggr_opts).not_nil!
+
+      base_key.should_not eq(aggr_key)
+      aggr_key.should contain("|aggr")
+      rule.plan(detail, aggr_opts).not_nil!.dedup_key.should eq(aggr_key)
+    end
+  end
+
   it "requests_per_flow is bounded at 6..10 (default posture)" do
     rule.requests_per_flow.should eq(6..10)
   end
