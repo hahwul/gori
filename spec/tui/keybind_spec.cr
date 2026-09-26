@@ -194,6 +194,18 @@ describe Gori::Tui::Keybind do
       end
     end
 
+    it "drops a reported shift from punctuation that only exists shifted (#1295)" do
+      # kitty report-all-keys / xterm modifyOtherKeys can send `>` WITH the shift it took to
+      # type; the bare `>` Send flow to… binds (and `?` Help) must still match.
+      Gori::Tui::Keybind::SHIFTED_PUNCTUATION.each do |punct|
+        want = Chord.new(punct.to_s)
+        Gori::Tui::Keybind.from_event(Termisu::Event::Key.new(Key.from_char(punct), Mod::Shift, punct)).should eq(want)
+        Gori::Tui::Keybind.from_event(Termisu::Event::Key.new(Key.from_char(punct), Mod::None, punct)).should eq(want)
+      end
+      # An unshifted mark keeps a reported shift: `⇧/` is not `/`.
+      chord(Key::Slash, Mod::Shift, '/').should eq(Chord.new("/", shift: true))
+    end
+
     it "leaves the shifted digit alone once a modifier owns it" do
       # ^1-9 is the sub-tab alias and a CLAIMED chord; folding `!` onto it would be a
       # different key entirely. Only the bare form is a shifted digit.
