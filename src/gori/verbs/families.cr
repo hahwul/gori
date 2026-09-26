@@ -33,7 +33,10 @@ module Gori
     # One intent reads one letter everywhere, so hex is `x` in the History detail and in both
     # Repeater panes (it was `e`, `x` and `h`). The Fuzzer's sort is a direct row: it is the
     # key a results triage presses most.
-    DISPLAY = Verb::Family.new(:display, "Display…", 'Z', :view, [
+    # A bare `⇧Z` opens the card as `>` opens Send flow to… (`chord:`): without it a dropped
+    # `space` made `Z` a no-op and read the member letter bare, so `Z c` stopped capture and
+    # `Z x` selected a line. No scope and no Global binds `⇧Z`.
+    DISPLAY = Verb::Family.new(:display, "Display…", 'Z', :view, chord: Verb::Chord.new("z", shift: true), letters: [
       {:hex, 'x'},
       {:pretty, 'p'},
       {:unicode, 'u'},
@@ -56,8 +59,10 @@ module Gori
     # "Protocol…" (`P`) holds the per-request transport settings of the Repeater and the
     # Fuzzer: what goes on the wire, not what the pane draws. Sticky, for the same reason as
     # Display…, and because smuggling and TLS work flips two or three of them together. The
-    # TLS fingerprint row shows its preset's name rather than `●`.
-    PROTOCOL = Verb::Family.new(:protocol, "Protocol…", 'P', :none, [
+    # TLS fingerprint row shows its preset's name rather than `●`. A bare `⇧P` opens it, for
+    # Display…'s reason: `P c` stopped capture and `P 2` jumped to the second tab. `⇧P` is
+    # previous-item in the detail views and the Comparer, none of which has a member.
+    PROTOCOL = Verb::Family.new(:protocol, "Protocol…", 'P', :none, chord: Verb::Chord.new("p", shift: true), letters: [
       {:http2, '2'},
       {:sni, 's'},
       {:auto_content_length, 'c'},

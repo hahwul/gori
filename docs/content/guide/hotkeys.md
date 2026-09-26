@@ -360,6 +360,8 @@ value such as the TLS preset's name. `Esc` closes the card. It does not come bac
 opened something of its own, such as the SNI field, the gRPC field list, the request hex editor
 or the column editor, or when the row moved focus.
 
+- **`⇧Z` and `⇧P` on their own open the cards too**, like `>`: `Z` `c` without the `Space`
+  still reaches Columns…, rather than a bare `c` that stops capture.
 - Display… is `Z`, not `V`: under the `vim` keyset `⇧V` selects a line in every pane that has
   these toggles, so a dropped `Space` would select instead of opening the card.
 - The Fuzzer's **Cycle sort** stays a direct row (`Space` `o`), because it is the one you press

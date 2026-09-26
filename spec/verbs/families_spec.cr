@@ -203,6 +203,38 @@ describe "Display… and Protocol… (#1274 WP9)" do
     protocol.key.should eq('P')
   end
 
+  # Without its own bare key a family's `Z`/`P` did nothing on a dropped `space`, and the
+  # member letter behind it was read bare: `Z c` (Columns…) stopped capture on History and
+  # `P 2` (HTTP/2) jumped to the second tab. The key now opens the card, as `>` does.
+  it "binds a bare `⇧Z`/`⇧P` to its card in every scope that has a member, and nowhere else" do
+    reg = Gori::Verbs.registry
+    display.chord.should eq(Gori::Verb::Chord.new("z", shift: true))
+    protocol.chord.should eq(Gori::Verb::Chord.new("p", shift: true))
+    {display, protocol}.each do |family|
+      chord = family.chord.not_nil!
+      with_members = reg.compact_map { |v| v.scope if v.family == family.id && !v.hidden? }.to_set
+      Gori::Verb::OsProfile::Os.each do |os|
+        Gori::Verb::Keyset::Kind.each do |ks|
+          km = Gori::Verb::Keymap.build(reg, os, Gori::Verb::Keymap::NO_OVERRIDES, ks)
+          km.lookup_in(chord, Gori::Verb::Scope::Global).should be_nil
+          km.lookup_in(chord, Gori::Verb::Scope::Editor).should be_nil
+          with_members.each do |scope|
+            id = km.lookup_in(chord, scope)
+            id.should_not be_nil, "#{family.id} #{scope}"
+            reg.opens_family(id.not_nil!).should eq(family.id)
+          end
+        end
+      end
+      reg.select { |v| reg.opens_family(v.id) == family.id }.each do |opener|
+        opener.hidden?.should be_true
+        with_members.should contain(opener.scope)
+        ctx = FakeExecContext.new
+        opener.call(ctx)
+        ctx.calls.should eq([FakeExecContext::Call.new(:open_space_family, [family.id.to_s])])
+      end
+    end
+  end
+
   it "gives each member intent the same level-2 letter in every scope that has it" do
     reg = Gori::Verbs.registry
     {display, protocol}.each do |family|

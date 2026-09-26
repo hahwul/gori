@@ -35,6 +35,8 @@ module Gori::Tui
         # Read from History's opener, so a user who put a Global verb on `>` (which then wins it,
         # `Keymap.global_claims`) is shown `space → >` instead of a bare key that is not this.
         Item.new(">", "send flow to… card, where the tab has one", "send-flow.open.body"),
+        Item.new("⇧Z", "display… card, where the tab has one", "display.open.body"),
+        Item.new("⇧P", "protocol… card (Repeater, Fuzzer)", "protocol.open.repeater"),
         Item.new("c", "toggle capture", "capture.toggle"),
         Item.new("i", "toggle intercept", "intercept.toggle"),
         Item.new("s", "toggle scope lens (or click scope:N)", "scope.toggle-lens"),
