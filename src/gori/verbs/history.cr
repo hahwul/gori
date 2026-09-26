@@ -20,8 +20,8 @@ module Gori
       # --- content pane (Body) navigation: arrow keys / hjkl ---
       r.register Verb::Definition.new(
         "body.down", "Select next flow", "Move selection down", Verb::Scope::Body,
-        # `available: in_history` — Body is shared with Help and the Project settings pane,
-        # and these two were the only Body verbs without the gate.
+        # `available: in_history`, like every Body verb: Body once doubled as the Help and
+        # Project settings scope, and these two were the last without the gate.
         [Verb::Chord.new("down"), Verb::Chord.new("j")], available: in_history, hidden: true) { |ctx| ctx.move_selection(1); nil }
 
       r.register Verb::Definition.new(
@@ -497,9 +497,8 @@ module Gori
       # --- RESPONSE pane (diff / pretty via keymap so rebind works; hex stays
       # controller-owned on the response pane because plain `x` is also select-line
       # on request/target READ — same letter, pane-local meaning). `p` and ⇧D are
-      # `chord_sections: [:response]`: the request menu spells the same two letters for
-      # pretty-print-request and the decoder chain, so the bare key answers only in the
-      # pane it belongs to and is nothing in the request pane (#1274).
+      # `chord_sections: [:response]`: the lenses they flip draw only in the response pane,
+      # so the bare key answers only there and is nothing in the request pane (#1274).
       #
       # Diff is ⇧D and not bare `d`: `d` deletes or dismisses the selected row in the
       # sixteen other scopes that bind it, and the Repeater was the one place where the

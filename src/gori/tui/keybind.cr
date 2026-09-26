@@ -64,6 +64,14 @@ module Gori::Tui
       '^' => '6', '&' => '7', '*' => '8', '(' => '9', ')' => '0',
     }
 
+    # The rest of the US shifted punctuation row: characters that only exist WITH shift. A
+    # terminal that reports modifiers for text keys (kitty's report-all-keys, xterm's
+    # modifyOtherKeys) can deliver `>` together with the shift flag it took to type it, and
+    # `Chord(">", shift)` then matches nothing — Send flow to…'s `>`, Help's `?` and the
+    # Issues status `{`/`}` are all bound bare. The character already says shift was held, so
+    # the flag is dropped. No shipped chord spells shift with one of these.
+    SHIFTED_PUNCTUATION = Set{'~', '_', '+', '{', '}', '|', ':', '"', '<', '>', '?'}
+
     def self.from_event(ev : Termisu::Event::Key) : Verb::Chord?
       key = ev.key
       shift = ev.shift?
@@ -98,6 +106,9 @@ module Gori::Tui
           if d = SHIFTED_DIGITS[c]?
             shift = true
             d.to_s
+          elsif SHIFTED_PUNCTUATION.includes?(c)
+            shift = false
+            c.to_s
           else
             shift ||= c.ascii_uppercase?
             c.downcase.to_s

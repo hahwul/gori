@@ -56,6 +56,14 @@ end
 #
 # Comment lines are skipped the way the scan above skips them; a comment may say what a key
 # is today, and it is not drawn.
+# Hand-spelled letters this spec found in a file another change owns, each an exact
+# {file, stripped line}. Not a standing exception: the spelling is still wrong the day the
+# letter moves. The scan fails when a line stops matching, so the fix deletes its entry.
+private HAND_SPELLED_PENDING = {
+  # Help's Cookie row: `{space:cookie.cycle-algorithm}` once the Help strings are respelled.
+  {"tui/help_view.cr", %(Item.new("algo badge / Space g", "cycle the Django HMAC algorithm (sha256 / sha1)"),)},
+}
+
 describe "hint templates — space-menu letters come from the registry" do
   root = File.expand_path("../../src/gori", __DIR__)
   lines = [] of {String, Int32, String}
@@ -100,12 +108,29 @@ describe "hint templates — space-menu letters come from the registry" do
     hits.should be_empty
   end
 
+  it "leaves no literal `space <key>` without the arrow either (#1274)" do
+    # The arrowless spelling went stale the same way: the Issues detail said `space R` for a
+    # Retest that is palette-only now, and `space l` for Manage links, whose letter is `L` (a
+    # bare `l` moves the menu's column). One key — a letter, a digit or `>` — then anything
+    # that is not part of a word, so prose (`space = AND`, `space · esc`, `space (menu)`)
+    # stays out, and a `{space:verb.id}` token has no space after `space` at all.
+    literal = /\b[Ss]pace (?!#\{)[A-Za-z0-9>](?![\w'])/
+    hits = lines.select { |(file, _, line)| line.matches?(literal) && !HAND_SPELLED_PENDING.includes?({file, line.strip}) }
+      .map { |(file, n, line)| "#{file}:#{n}: #{line.strip}" }
+    hits.should be_empty
+    stale = HAND_SPELLED_PENDING.reject { |(file, text)| lines.any? { |(f, _, l)| f == file && l.strip == text } }
+    stale.should be_empty # fixed: delete its line
+  end
+
   it "leaves no hand-written `␣<key>` chip in a string (#1295)" do
     # The compact spelling on a border badge or a tight hint — ` ␣Pr:FRAME `, `␣Zs shows them` —
     # names a menu path as surely as `space → P r` does, and it went stale the same way. It is
     # `Hotkeys.menu_chip`'s to spell. `␣` followed by a space is the space BAR as a key
     # (`␣ toggle`), and an interpolation builds the path from the registry.
-    literal = /␣(?!#\{)[^\s"\\]/
+    #
+    # The spaced form `␣ Z s` (`Hotkeys.menu_path(compact: true)`'s shape) is a path too: one
+    # key after `␣ `, then a non-word, where `␣ toggle` is the bar naming its own action.
+    literal = /␣(?!#\{)[^\s"\\]|␣ (?!#\{)(?:[^\s\w"\\]|\w(?!\w))/
     hits = lines.select { |(_, _, line)| line.matches?(literal) }
       .map { |(file, n, line)| "#{file}:#{n}: #{line.strip}" }
     hits.should be_empty

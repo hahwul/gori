@@ -23,25 +23,79 @@ module Gori
         # steal a chord that the operator or keyset assigned to another verb.
         layers = Array.new(4) { [] of Definition }
         registry.each do |verb|
-          priority = if overrides.has_key?(verb.id)
-                       3
-                     elsif keyset_overrides.has_key?(verb.id)
-                       2
-                     elsif os_overrides.has_key?(verb.id)
-                       1
-                     else
-                       0
-                     end
-          layers[priority] << verb
+          layers[layer_of(verb.id, overrides, keyset_overrides, os_overrides)] << verb
         end
+        claimed = global_claims(layers, os, overrides, keyset)
         layers.each do |layer|
           layer.each do |verb|
+            opener = registry.opens_family(verb.id)
             effective_chords(verb, os, overrides, keyset).each do |chord|
+              next if opener && claimed.includes?(chord)
               (by_scope[verb.scope] ||= {} of Chord => String)[chord] = verb.id
             end
           end
         end
         new(by_scope)
+      end
+
+      # Which configuration layer binds `id`: 3 the user's rebind, 2 a keyset row, 1 an OS
+      # row, 0 the verb's declared chords. `#build` writes the layers in that order, so on a
+      # shared chord in one scope the higher layer is the one the key fires.
+      def self.layer_of(id : String, overrides : Hash(String, Array(Chord)),
+                        keyset_overrides : Hash(String, Array(Chord)),
+                        os_overrides : Hash(String, Array(Chord))) : Int32
+        if overrides.has_key?(id)
+          3
+        elsif keyset_overrides.has_key?(id)
+          2
+        elsif os_overrides.has_key?(id)
+          1
+        else
+          0
+        end
+      end
+
+      # Whether `chord`, one of `verb`'s effective chords, fires another verb instead: a higher
+      # layer put it on a verb of the same scope, and `#build` let that one win. What a hint
+      # must not advertise — a default ⇧E Save results that the operator's own ⇧E rebind took
+      # (`Hotkeys.binding_for`). Only the configured rows can outrank a verb, so it reads those
+      # rather than the whole registry. A family opener also yields to a configured GLOBAL verb
+      # on its chord, which `#build` leaves it off (`.global_claims`).
+      def self.displaced?(registry : Registry, verb : Definition, chord : Chord,
+                          os : OsProfile::Os, overrides : Hash(String, Array(Chord)),
+                          keyset : Keyset::Kind) : Bool
+        keyset_overrides = Keyset.overrides_for(keyset)
+        os_overrides = OsProfile.overrides_for(os)
+        mine = layer_of(verb.id, overrides, keyset_overrides, os_overrides)
+        return false if mine == 3
+        opener = !registry.opens_family(verb.id).nil?
+        {overrides, keyset_overrides, os_overrides}.any? do |rows|
+          rows.each_key.any? do |id|
+            next false if id == verb.id
+            next false unless other = registry[id]?
+            next false unless other.scope == verb.scope || (opener && other.scope.global?)
+            next false unless layer_of(id, overrides, keyset_overrides, os_overrides) > mine
+            effective_chords(other, os, overrides, keyset).includes?(chord)
+          end
+        end
+      end
+
+      # The chords a configured layer (user, keyset or OS row) puts on a GLOBAL verb. A family
+      # opener (`Registry#register_family_openers`) is a default bound in up to eleven tab
+      # scopes, which the lookup consults ahead of Global, so it would shadow that deliberate
+      # choice on exactly those tabs — `nav.next-tab` on `>` switching tabs everywhere but
+      # History and the Repeater. It stands down instead, like any default the operator's
+      # chord collides with; `space >` still opens the card.
+      private def self.global_claims(layers : Array(Array(Definition)), os : OsProfile::Os,
+                                     overrides : Hash(String, Array(Chord)), keyset : Keyset::Kind) : Set(Chord)
+        claimed = Set(Chord).new
+        layers[1..].each do |layer|
+          layer.each do |verb|
+            next unless verb.scope.global?
+            effective_chords(verb, os, overrides, keyset).each { |chord| claimed << chord }
+          end
+        end
+        claimed
       end
 
       # The chords that actually bind `verb`, with the verb's PINNED chords (see

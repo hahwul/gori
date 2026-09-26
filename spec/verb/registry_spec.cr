@@ -2271,9 +2271,16 @@ describe Gori::Verb do
           {Definition.new("t.row", "R", "d", Gori::Verb::Scope::Fuzzer, chord_of: "t.gated") { |_| nil }, /not Fuzzer/},
           {Definition.new("t.row", "R", "d", Gori::Verb::Scope::Repeater, section: :response, chord_of: "t.gated") { |_| nil }, /not live in response/},
           {Definition.new("t.row", "R", "d", Gori::Verb::Scope::Repeater, [Chord.new("q")], section: :request, chord_of: "t.gated") { |_| nil }, /chords of its own/},
+          # A keyless target: the link would advertise nothing.
+          {Definition.new("t.row", "R", "d", Gori::Verb::Scope::Repeater, section: :request, chord_of: "t.keyless") { |_| nil }, /t.keyless, which has no chord/},
+          # A chain, and a cycle (here onto itself): `Hotkeys.binding_for` would recurse forever.
+          {Definition.new("t.row", "R", "d", Gori::Verb::Scope::Repeater, section: :request, chord_of: "t.link") { |_| nil }, /t.link, which has a chord_of/},
+          {Definition.new("t.row", "R", "d", Gori::Verb::Scope::Repeater, section: :request, chord_of: "t.row") { |_| nil }, /t.row, which has a chord_of/},
         }.each do |(row, why)|
           reg = Registry.new
           reg.register(gated)
+          reg.register(Definition.new("t.keyless", "K", "d", Gori::Verb::Scope::Repeater, section: :request) { |_| nil })
+          reg.register(Definition.new("t.link", "L", "d", Gori::Verb::Scope::Repeater, section: :request, chord_of: "t.gated") { |_| nil })
           reg.register(row)
           expect_raises(Gori::Error, why) { reg.validate_chords! }
         end

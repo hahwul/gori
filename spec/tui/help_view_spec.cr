@@ -112,6 +112,22 @@ describe Gori::Tui::HelpView do
       HelpView.shortcut_rows(registry).find(&.b.==("pick flow A · flow B")).not_nil!.a.should eq("a · b")
     end
 
+    # `>` was free before #1295, so a user may have put a Global verb there, which then wins
+    # the key on every tab (`Keymap.global_claims`). Help must not keep promising the bare
+    # `>` for the Send card; `space >` is what still opens it.
+    it "stops naming the bare > for Send flow to… once a Global rebind took it" do
+      registry = Gori::Verbs.registry
+      send_row = ->(rows : Array(HelpView::Row)) { rows.find(&.b.starts_with?("send flow to… card")).not_nil! }
+      send_row.call(HelpView.shortcut_rows(registry)).a.should eq(">")
+      prev = Gori::Settings.keymap_overrides
+      begin
+        Gori::Settings.keymap_overrides = {"nav.next-tab" => [">"]}
+        send_row.call(HelpView.shortcut_rows(registry)).a.should eq("space → >")
+      ensure
+        Gori::Settings.keymap_overrides = prev
+      end
+    end
+
     # The `y` + `^Y` Copy pairs are rebindable since #932 — the READ letter moves, `^Y` is
     # pinned — and the Repeater's row followed while the Fuzzer, JWT and Cookie rows stayed
     # literal, so one rebind moved one row out of four.

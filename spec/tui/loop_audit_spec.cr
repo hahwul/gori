@@ -384,6 +384,15 @@ describe "the core-loop hints" do
         .should eq("‹d› — press ↵↵ to enter the body, then d diff")
     end
 
+    it "names the pane a pane-gated key is live in, since ↵ may land in another (#1295)" do
+      Runner.enter_first_hint(Gori::Verb::Chord.new("p"), "Pretty bodies", strip: true, pane: :response)
+        .should eq("‹p› — press ↵↵ to enter the body, then p pretty bodies in the RESPONSE pane")
+      pretty = Gori::Verbs.registry["repeater.toggle-pretty"]
+      Runner.gated_pane(pretty, :request).should eq(:response) # ↵ resumed into the request
+      Runner.gated_pane(pretty, :response).should be_nil       # already where the key works
+      Runner.gated_pane(Gori::Verbs.registry["repeater.send"], :request).should be_nil
+    end
+
     it "is reached only for a key the tab bar itself does not bind" do
       # The answer is a REFUSAL with directions, not a fall-through: the letter still does
       # nothing here, which is the tab bar's own decision.

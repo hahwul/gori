@@ -32,7 +32,9 @@ module Gori::Tui
         Item.new("^P", "command palette", "app.palette"),
         Item.new("space", "focus-area action menu"),
         # The family's bare key (`Verb::Family#chord`, #1295): no `space` needed on a tab that sends flows.
-        Item.new(">", "send flow to… card, where the tab has one"),
+        # Read from History's opener, so a user who put a Global verb on `>` (which then wins it,
+        # `Keymap.global_claims`) is shown `space → >` instead of a bare key that is not this.
+        Item.new(">", "send flow to… card, where the tab has one", "send-flow.open.body"),
         Item.new("c", "toggle capture", "capture.toggle"),
         Item.new("i", "toggle intercept", "intercept.toggle"),
         Item.new("s", "toggle scope lens (or click scope:N)", "scope.toggle-lens"),

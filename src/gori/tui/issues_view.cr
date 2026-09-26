@@ -58,6 +58,11 @@ module Gori::Tui
     # already keeps `~` out of the question; this keeps a MISSPELLED name out of it too.
     QUERY_KNOWN = ->(f : String, op : Char) { Issues::Filter.known_field?(f, regex: op == '~') }
 
+    # The registry the detail's hints read their keys from (RELATED's `␣L`, the retest line's
+    # route), set by the controller that makes the view. Nil in a bare view, whose chip then
+    # reads `␣` alone and whose retest line names no key (`Hotkeys.menu_chip`, `.route`).
+    property menu_registry : Verb::Registry? = nil
+
     def initialize
       @all = [] of Store::Issue    # the raw store list (severity-desc)
       @issues = [] of Store::Issue # the filtered/visible subset
@@ -717,7 +722,10 @@ module Gori::Tui
       else
         line += " · never run"
       end
-      line += " · space R"
+      # Retest is palette-only (#1282), so its route is the chord, never a menu letter.
+      if (reg = @menu_registry) && (route = Hotkeys.route(reg, "issue.retest"))
+        line += " · #{route}"
+      end
       @retest_summary = line
     end
 
@@ -1655,7 +1663,7 @@ module Gori::Tui
       screen.text(rect.x + 1, rect.y + 3, line, Theme.muted, width: w)
     end
 
-    # The RELATED border meta: the row count, and the `space l` affordance unless INS owns the
+    # The RELATED border meta: the row count, and the Manage links chip unless INS owns the
     # keyboard. Two kinds of row share this card (see `RelatedRow`) and one total cannot say
     # which, so once the issue holds a frozen copy the count SPLITS — `3 · 2 frozen` is three
     # live pointers plus two immutable copies, and the live half stays the honest live count
@@ -1665,7 +1673,7 @@ module Gori::Tui
       frozen = @detail_related.count(&.frozen?)
       live = @detail_related.size - frozen
       count = frozen == 0 ? @detail_related.size.to_s : "#{live} · #{frozen} frozen"
-      insert ? count : "#{count} · space l"
+      insert ? count : "#{count} · #{Hotkeys.menu_chip(@menu_registry, "issue.links")}"
     end
 
     # The RELATED card. Costs exactly the six rows the divider + heading + `LINKS_VISIBLE`
@@ -1673,7 +1681,7 @@ module Gori::Tui
     private def render_related_card(screen : Screen, card : Rect, active : Bool) : Nil
       return if card.h < 2 || card.w < 2
       Frame.card(screen, card, "RELATED", bg: Theme.bg, border: Frame.pane_border(active))
-      # The count and the `space l` affordance share the RIGHT-ALIGNED meta slot instead of
+      # The count and the Manage links chip share the RIGHT-ALIGNED meta slot instead of
       # riding the title. Two rules meet here, both `shared_chrome_spec`'s: a hand-placed
       # `rect.right - hint.size - 1` string is forbidden (`Frame.border_meta` is the slot), and
       # so is a count inside a card title — it makes the title's width a moving target, which
@@ -1689,7 +1697,7 @@ module Gori::Tui
       return if body.empty?
       @links_scroll = Viewport.clamp_scroll(@links_scroll, body.h, @detail_related.size)
       if @detail_related.empty?
-        screen.text(body.x, body.y, "(none — space l to link History/Repeater/…)",
+        screen.text(body.x, body.y, Hotkeys.expand_menu_paths(@menu_registry, "(none — {space:issue.links} to link History/Repeater/…)"),
           Theme.muted, width: body.w)
         return
       end

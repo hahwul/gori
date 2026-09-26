@@ -66,7 +66,7 @@ module Gori::Tui
     end
 
     def command_scope : Verb::Scope
-      Verb::Scope::Body
+      Verb::Scope::Help
     end
 
     # Search is a single-line editor: bracketed paste must type into it rather than being
