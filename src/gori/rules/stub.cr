@@ -262,25 +262,38 @@ module Gori
     MAX_ENTRIES = RuleStub::MAX_CACHED_FILES
     MAX_BYTES   = RuleStub::MAX_CACHED_BYTES
 
+    # A body file that cannot be served. `message` names the local path and is what the flow's
+    # error records for the operator; `page_message` names none, because it becomes the body of
+    # gori's 502, which the page under test reads — and neither the operator's home directory
+    # nor an `EACCES` string with the path in it is the target's business (`MapLocal.locate`).
+    class ReadError < Gori::Error
+      getter page_message : String
+
+      def initialize(message : String, @page_message : String)
+        super(message)
+      end
+    end
+
     def initialize
       @mutex = Mutex.new
       @entries = {} of String => Entry
       @bytes = 0_i64
     end
 
-    # The file's bytes. Raises `Gori::Error` when the path is unreadable, is not a regular
+    # The file's bytes. Raises `ReadError` when the path is unreadable, is not a regular
     # file, or exceeds `RuleStub::MAX_BODY_FILE_BYTES` — the caller turns that into a recorded
     # failure rather than a fall-through to the origin.
     def read(path : String) : Bytes
       info = begin
         File.info(path)
       rescue ex : File::Error
-        raise Gori::Error.new("stub body file unreadable: #{path} (#{ex.message})")
+        raise ReadError.new("stub body file unreadable: #{path} (#{ex.message})", "stub body file unreadable")
       end
-      raise Gori::Error.new("stub body file is not a regular file: #{path}") unless info.file?
+      raise ReadError.new("stub body file is not a regular file: #{path}", "stub body file is not a regular file") unless info.file?
       size = info.size
       if size > RuleStub::MAX_BODY_FILE_BYTES
-        raise Gori::Error.new("stub body file too large: #{path} (#{size} bytes > #{RuleStub::MAX_BODY_FILE_BYTES})")
+        limit = "#{size} bytes > #{RuleStub::MAX_BODY_FILE_BYTES}"
+        raise ReadError.new("stub body file too large: #{path} (#{limit})", "stub body file too large (#{limit})")
       end
       mtime = info.modification_time
       @mutex.synchronize do
@@ -326,7 +339,7 @@ module Gori
       end
       read == buf.size ? buf : buf[0, read].dup
     rescue ex : File::Error | IO::Error
-      raise Gori::Error.new("stub body file unreadable: #{path} (#{ex.message})")
+      raise ReadError.new("stub body file unreadable: #{path} (#{ex.message})", "stub body file unreadable")
     end
   end
 end

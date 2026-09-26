@@ -843,8 +843,8 @@ module Gori
              else
                begin
                  @stub_bodies.read(rule.body_file)
-               rescue ex : Gori::Error
-                 return stub_failure(rule, ex.message || "stub body file unreadable", ref)
+               rescue ex : RuleStubBodyCache::ReadError
+                 return stub_failure(rule, ex.message || ex.page_message, ref, page_message: ex.page_message)
                end
              end
       Proxy::HeadRewriter::Stub.new(head.bytes, body, head.status, rule.id, ref: ref)
@@ -905,8 +905,8 @@ module Gori
       return stub_failure(rule, "stub response head could not be parsed", ref) unless parsed
       body = begin
         @stub_bodies.read(res.path)
-      rescue ex : Gori::Error
-        return stub_failure(rule, ex.message || "map-local file unreadable", ref)
+      rescue ex : RuleStubBodyCache::ReadError
+        return stub_failure(rule, ex.message || ex.page_message, ref, page_message: ex.page_message)
       end
       head_bytes = parsed.bytes
       # The template's own Content-Type wins; otherwise the extension table, or nothing.
@@ -936,11 +936,15 @@ module Gori
     # the wire (`X-Gori-Short-Circuit: error`): the operator's bytes go out untouched, but
     # bytes gori invented say so. 502 by default; a map-local path the confinement refused is
     # a 404, because it names a file that is not there to be served.
+    #
+    # `message` is the flow's error, read by the operator; `page_message` is what the body says,
+    # read by the page under test. They differ only where the reason names a local path (a
+    # body file that cannot be read), which stays out of the body.
     private def stub_failure(rule : Store::MatchRule, message : String, ref : String,
-                             status : Int32 = 502) : Proxy::HeadRewriter::Stub
+                             status : Int32 = 502, page_message : String = message) : Proxy::HeadRewriter::Stub
       # Names the SCOPE as well as the id: the two stores number rules independently, so
       # "rule #3" would send the operator to the wrong list half the time.
-      body = "gori: short-circuit #{rule.scope.label} rule ##{rule.id} could not be applied: #{message}\n".to_slice
+      body = "gori: short-circuit #{rule.scope.label} rule ##{rule.id} could not be applied: #{page_message}\n".to_slice
       reason = status == 404 ? "404 Not Found" : "502 Bad Gateway"
       head = "HTTP/1.1 #{reason}\r\nContent-Type: text/plain; charset=utf-8\r\nX-Gori-Short-Circuit: error\r\n".to_slice
       Proxy::HeadRewriter::Stub.new(head, body, status, rule.id, error: message, ref: ref)
