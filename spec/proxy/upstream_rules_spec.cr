@@ -33,6 +33,11 @@ private def with_proxy_environment(values : Hash(String, String), &)
   end
 end
 
+private def resolved_ipv4(host : String) : String
+  Socket::Addrinfo.resolve(host, 80, Socket::Family::INET, Socket::Type::STREAM)
+    .first.ip_address.address
+end
+
 private def rule(host : String, kind : String, addr : String = "",
                  username : String = "", password_env : String = "") : Gori::Settings::UpstreamRule
   Gori::Settings::UpstreamRule.new(host, kind, addr, username, password_env)
@@ -275,6 +280,20 @@ describe "upstream rules" do
       reset_upstream
     end
 
+    it "keeps legacy numeric IPv4 loopback spellings out of environment proxy routing" do
+      with_proxy_environment({"HTTP_PROXY" => "http://env-proxy.test:3128"}) do
+        ["127.1", "2130706433", "0x7f.1", "0177.1", "017700000001"].each do |host|
+          Gori::Settings.upstream_route(host, "http", 3000).direct?.should be_true, host
+        end
+        host = "0177.0.0.1"
+        resolved_ipv4(host).starts_with?("127.").should eq(
+          Gori::Settings.upstream_route(host, "http", 3000).direct?
+        )
+      end
+    ensure
+      reset_upstream
+    end
+
     it "summarises the exported variables per origin scheme, without credentials" do
       with_proxy_environment({"HTTP_PROXY" => "http://bob:hunter2@env-proxy.test:3128"}) do
         proxies = Gori::Settings.environment_upstream_proxies
@@ -314,6 +333,24 @@ describe "upstream rules" do
         ENV["NO_PROXY"] = "10.0.0.0/33,10.0.0.0/x,10.0.0/8,fd00::/129"
         Gori::Settings.upstream_route("10.1.2.3", "http", 8080).host.should eq("env-proxy.test")
         Gori::Settings.upstream_route("fd12::1", "http", 8080).host.should eq("env-proxy.test")
+      end
+    ensure
+      reset_upstream
+    end
+
+    it "matches NO_PROXY IPv4 CIDRs against legacy numeric destination spellings" do
+      with_proxy_environment({
+        "HTTP_PROXY" => "http://env-proxy.test:3128",
+        "NO_PROXY"   => "10.0.0.0/8",
+      }) do
+        ["10.1", "167772161", "0xa.1", "012.1", "01200000001"].each do |host|
+          Gori::Settings.upstream_route(host, "http", 8080).direct?.should be_true, host
+        end
+        host = "012.0.0.1"
+        resolved_ipv4(host).starts_with?("10.").should eq(
+          Gori::Settings.upstream_route(host, "http", 8080).direct?
+        )
+        Gori::Settings.upstream_route("11.1", "http", 8080).host.should eq("env-proxy.test")
       end
     ensure
       reset_upstream
@@ -649,6 +686,20 @@ describe "upstream rules" do
 
           sent.should contain("CONNECT example.test:80 HTTP/1.1")
         end
+      end
+    ensure
+      reset_upstream
+    end
+
+    it "preserves a legacy numeric destination spelling in CONNECT when an explicit rule proxies it" do
+      with_capturing_http_proxy do |pport, head|
+        Gori::Settings.upstream_rules = [rule("*", "http", "127.0.0.1:#{pport}")]
+        sock = Gori::Proxy::Upstream.dial("127.1", 80)
+        sock.should_not be_nil
+        sent = head.receive
+        sock.try(&.close) rescue nil
+
+        sent.should contain("CONNECT 127.1:80 HTTP/1.1")
       end
     ensure
       reset_upstream
