@@ -48,6 +48,26 @@ describe "FuzzerView#build_engine refusals" do
     refusal(fuzzer_with(->(s : AdvancedSnapshot) { s.copy_with(retries: "3 x") })).not_nil!.should contain("Retries")
   end
 
+  # CLI `--stop-after-matches` and MCP `stop_on.after_matches` refuse these; the TUI parsed them
+  # as numbers and `commit_buffers` then read them as "never stop".
+  it "refuses a negative or out-of-range Stop after N hits instead of running without a stop" do
+    ["-3", "3000000000"].each do |v|
+      refusal(fuzzer_with(->(s : AdvancedSnapshot) { s.copy_with(stop_after: v) })).not_nil!.should contain("Stop after N hits")
+    end
+  end
+
+  it "builds with Stop after N hits blank, 0 (off) or positive" do
+    {"" => nil, "0" => nil, "3" => 3}.each do |v, want|
+      view = fuzzer_with(->(s : AdvancedSnapshot) { s.copy_with(stop_after: v) })
+      with_scope do |scope|
+        engine, err = view.build_engine(false, scope, nil)
+        err.should be_nil
+        engine.should_not be_nil
+      end
+      view.config.stop_after_matches.should eq(want)
+    end
+  end
+
   it "still builds on blank numeric fields (blank = default / off) and valid specs" do
     view = fuzzer_with(->(s : AdvancedSnapshot) { s.copy_with(timeout: "", rate: "", m_status: "2xx,>=500", m_size: ">10") })
     with_scope do |scope|

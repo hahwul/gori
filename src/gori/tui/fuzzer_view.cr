@@ -1524,7 +1524,17 @@ module Gori::Tui
         ok = name == "Rate" ? !v.to_f?.nil? : !v.to_i64?.nil?
         return "invalid #{name}: #{v} (#{form})" unless ok
       end
-      nil
+      stop_after_range_error
+    end
+
+    # "Stop after N hits" parses as a number but still ran as "never stop" when it was negative
+    # or past Int32 (`commit_buffers` reads it with `to_i?`), a value the CLI's
+    # `--stop-after-matches` and MCP's `stop_on.after_matches` both refuse. 0 stays "off", the
+    # reading Max requests and Race give it.
+    private def stop_after_range_error : String?
+      n = @s_stop_after.strip.to_i64?
+      return nil if n.nil? || (0_i64..Int32::MAX.to_i64).includes?(n)
+      "invalid Stop after N hits: #{@s_stop_after.strip} (0 to #{Int32::MAX}; blank or 0 = off)"
     end
 
     # --- engine assembly -----------------------------------------------------
