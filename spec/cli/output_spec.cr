@@ -175,3 +175,59 @@ describe Gori::CLI::Output do
     end
   end
 end
+
+# `--format json` is for scripts, and a JSON string carries NBSP / ZWSP / bidi controls
+# safely — so these fields hold the captured value, not `term_safe`'s terminal badges. Only
+# invalid UTF-8 is scrubbed, the one thing that would break the whole document.
+describe "CLI::Output JSON emitters — no display projection" do
+  it "keeps hidden Unicode in History `columns` keys and values" do
+    row = Gori::Store::FlowRow.new(
+      id: 1_i64, created_at: 0_i64, scheme: "https", method: "GET", host: "h", port: 443,
+      target: "/", status: 200, size: 0_i64, state: Gori::Store::FlowState::Complete)
+    columns = [{"a\u{a0}b", "/a\u{a0}b/\u{200b}"}, {"dup", "\u{202e}x"}, {"dup", "y\ez"}]
+    json = JSON.parse(Gori::CLI::Output.flow_row_json(row, columns: columns))
+    json["columns"]["a\u{a0}b"].as_s.should eq("/a\u{a0}b/\u{200b}")
+    json["columns"]["dup"].as_a.map(&.as_s).should eq(["\u{202e}x", "y\ez"])
+  end
+
+  it "still scrubs invalid UTF-8 in a History column so the document parses" do
+    row = Gori::Store::FlowRow.new(
+      id: 1_i64, created_at: 0_i64, scheme: "https", method: "GET", host: "h", port: 443,
+      target: "/", status: 200, size: 0_i64, state: Gori::Store::FlowState::Complete)
+    bad = String.new(Bytes[0x68, 0xff, 0x69])
+    doc = Gori::CLI::Output.flow_row_json(row, columns: [{bad, bad}])
+    doc.valid_encoding?.should be_true
+    JSON.parse(doc)["columns"]["h\u{fffd}i"].as_s.should eq("h\u{fffd}i")
+  end
+
+  it "keeps hidden Unicode in a flow's advisory lines" do
+    row = Gori::Store::FlowRow.new(
+      id: 1_i64, created_at: 0_i64, scheme: "https", method: "GET", host: "h", port: 443,
+      target: "/", status: 200, size: 0_i64, state: Gori::Store::FlowState::Complete,
+      advisory: "rule\u{a0}x skipped\tbody")
+    json = JSON.parse(Gori::CLI::Output.flow_row_json(row))
+    json["advisory"].as_a.map(&.as_s).should eq(["rule\u{a0}x skipped\tbody"])
+  end
+
+  it "keeps hidden Unicode in sitemap host, label, path and tag" do
+    hosts = Gori::Sitemap.build([{"a\u{a0}.test", "GET", "/a\u{a0}b/\u{200b}"}])
+    Gori::Sitemap.stamp_tags!(hosts, { {"a\u{a0}.test", "/a\u{a0}b"} => "memo\u{202e}" })
+    hosts.each { |h| h.endpoints = Gori::Sitemap.endpoint_count(h) }
+    doc = Gori::CLI::Output.sitemap_json(hosts)
+    doc.should_not contain("⟨")
+    host = JSON.parse(doc).as_a[0]
+    host["host"].as_s.should eq("a\u{a0}.test")
+    node = host["children"].as_a[0]
+    node["label"].as_s.should eq("a\u{a0}b")
+    node["path"].as_s.should eq("/a\u{a0}b")
+    node["tag"].as_s.should eq("memo\u{202e}")
+    node["children"].as_a[0]["path"].as_s.should eq("/a\u{a0}b/\u{200b}")
+  end
+
+  it "still scrubs invalid UTF-8 in the sitemap JSON" do
+    bad = String.new(Bytes[0x2f, 0x78, 0xff])
+    doc = Gori::CLI::Output.sitemap_json(Gori::Sitemap.build([{"h", "GET", bad}]))
+    doc.valid_encoding?.should be_true
+    JSON.parse(doc)
+  end
+end

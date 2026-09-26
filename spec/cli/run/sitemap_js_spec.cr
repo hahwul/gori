@@ -105,3 +105,25 @@ describe "gori run sitemap — the js verb" do
     src.should match(/reserved_query_verb_error\(positional, "sitemap", \[[^\]]*"js"[^\]]*\]/)
   end
 end
+
+# The JSON rows are for scripts: a JSON string carries NBSP/ZWSP/bidi safely, so the captured
+# value goes out as-is — never `term_safe`'s terminal badges. Invalid UTF-8 is still scrubbed.
+describe "gori run sitemap js — json keeps hidden Unicode" do
+  it "emits host, path, target and url without badges" do
+    ep = SJ::Endpoint.new("https", "a\u{a0}.test", 443, "/x\u{200b}y", "/x\u{200b}y?q", 1, false, false,
+      false, SJ::Base::Page, 7_i64, 120, 3, "/x\u{200b}y", "https://a\u{a0}.test/\u202Eapp.js")
+    doc = Gori::CLI::Run.sitemap_js_json([ep])
+    doc.should_not contain("⟨")
+    row = JSON.parse(doc).as_a[0]
+    row["host"].as_s.should eq("a\u{a0}.test")
+    row["path"].as_s.should eq("/x\u{200b}y")
+    row["target"].as_s.should eq("/x\u{200b}y?q")
+    row["source_url"].as_s.should eq("https://a\u{a0}.test/\u202Eapp.js")
+  end
+
+  it "still scrubs invalid UTF-8 so the document parses" do
+    doc = Gori::CLI::Run.sitemap_js_json([sj_ep(String.new(Bytes[0x2f, 0xff]))])
+    doc.valid_encoding?.should be_true
+    JSON.parse(doc).as_a[0]["path"].as_s.should eq("/\u{fffd}")
+  end
+end
