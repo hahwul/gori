@@ -147,6 +147,7 @@ describe Gori::Verb::Keymap do
       {Gori::Verb::Scope::Repeater, :repeater, Chord.new("p"), "repeater.toggle-pretty", :response, [:request, :target]},
       {Gori::Verb::Scope::Repeater, :repeater, Chord.new("d", shift: true), "repeater.toggle-diff", :response, [:request, :target]},
       {Gori::Verb::Scope::Fuzzer, :fuzzer, Chord.new("v"), "fuzz.dist", :results, [:template, :target, :config]},
+      {Gori::Verb::Scope::Fuzzer, :fuzzer, Chord.new("m"), "fuzz.matched", :results, [:template, :target, :config]},
     }.each do |scope, tab, chord, id, home, elsewhere|
       it "answers #{chord.label} with #{id} only in #{home}" do
         reg = Gori::Verbs.registry

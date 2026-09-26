@@ -748,11 +748,13 @@ module Gori
       r.register Verb::Definition.new(
         "fuzz.sort", "Cycle sort", "RESULTS: cycle the sort column (index → status → length → …)",
         Verb::Scope::Fuzzer, available: in_fuzzer, mnemonic: 'o', section: :results) { |ctx| ctx.fuzz_cycle_sort; nil }
+      # Bare `m` and `v` only in RESULTS (`chord_sections`), the pane both lenses draw over: in
+      # the template pane `v` is the menu's clear-selection, as in every other read pane, and a
+      # results lens should not flip from a pane that cannot show it (#1274, #1295).
       r.register Verb::Definition.new(
         "fuzz.matched", "Matched only", "RESULTS: show only the rows the matchers hit",
-        Verb::Scope::Fuzzer, [Verb::Chord.new("m")], available: in_fuzzer, intent: :matched_only, section: :results) { |ctx| ctx.fuzz_toggle_matched; nil }
-      # Bare `v` only in RESULTS (`chord_sections`): in the template pane `v` is the menu's
-      # clear-selection, as in every other read pane (#1274).
+        Verb::Scope::Fuzzer, [Verb::Chord.new("m")], available: in_fuzzer, intent: :matched_only, section: :results,
+        chord_sections: [:results]) { |ctx| ctx.fuzz_toggle_matched; nil }
       r.register Verb::Definition.new(
         "fuzz.dist", "Distribution sidebar", "RESULTS: show/hide the status and length distribution",
         Verb::Scope::Fuzzer, [Verb::Chord.new("v")], available: in_fuzzer, intent: :distribution, section: :results,
