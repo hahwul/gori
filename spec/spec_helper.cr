@@ -69,6 +69,24 @@ end
 
 Spec.after_suite { FileUtils.rm_rf(GORI_TEST_HOME) }
 
+# Does anything accept a TCP connection on `host:port`? `TCPSocket.new` alone cannot say on
+# macOS 27: a REFUSED connect comes back as a socket (Crystal's event loop reads the second
+# `connect()`'s EISCONN as success), so a spec asserting "this port is closed" by expecting it to
+# raise passes a listener that is still up and fails one that is down. Asking for the peer
+# address is what tells the two apart. Raw on purpose: `Upstream.dial` would answer through the
+# process's host overrides and upstream routes, which is not the question.
+def tcp_port_accepts?(host : String, port : Int32) : Bool
+  sock = TCPSocket.new(host, port, connect_timeout: 2.seconds)
+  begin
+    sock.remote_address
+    true
+  ensure
+    sock.close
+  end
+rescue
+  false
+end
+
 # The chord a keypress ACTUALLY produces, built the way the TUI builds it: a Termisu key
 # event run through `Keybind.from_event`, never a hand-spelled `Verb::Chord.new`.
 #

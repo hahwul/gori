@@ -264,10 +264,12 @@ describe "outbound TLS policy" do
         # 127.0.0.1 and localhost are the same origin but different rule keys.
         Gori::Settings.outbound_tls = [tls_rule("localhost", cert: cert, key: key)]
         a = Gori::Proxy::Upstream.dial_tls("localhost", port, verify: false)
+        a.should_not be_nil # else the origin never saw a connection and `receive` waits forever
         seen.receive.should contain("client.test")
         a.try(&.close) rescue nil
 
         b = Gori::Proxy::Upstream.dial_tls("127.0.0.1", port, verify: false)
+        b.should_not be_nil
         seen.receive.should eq("(none)") # a cached context would have re-presented the cert
         b.try(&.close) rescue nil
       end

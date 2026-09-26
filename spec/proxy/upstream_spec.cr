@@ -178,6 +178,24 @@ describe Gori::Proxy::Upstream do
     end
   end
 
+  # `TCPSocket.new` on macOS 27 returned a REFUSED address as a connected socket (the event loop
+  # reads the second `connect()`'s EISCONN as success), so a dial never reached the next address.
+  # Only a host that resolves `localhost` to ::1 first AND has the quirk exercises the fix; on
+  # one without it this passes through stdlib's own fall-through. (A refused single address is
+  # "still reports a refused port as Connect", further down.)
+  describe "refused connects" do
+    it "falls through a refused address to the next one the name resolves to" do
+      server = TCPServer.new("127.0.0.1", 0) # IPv4 only: `localhost` may resolve ::1 first
+      spawn { server.accept?.try(&.close) }
+
+      sock = Gori::Proxy::Upstream.dial("localhost", server.local_address.port)
+      sock.should_not be_nil
+      sock.as?(TCPSocket).try(&.remote_address.address).should eq("127.0.0.1")
+      sock.try(&.close)
+      server.close
+    end
+  end
+
   describe "upstream proxy (CONNECT tunnel)" do
     it "tunnels a dial through the configured proxy when it answers 2xx" do
       proxy = TCPServer.new("127.0.0.1", 0)
