@@ -329,6 +329,16 @@ module Gori
     # (that would pick the wrong twin).
     def set_scope(rule : Store::MatchRule, to : Store::RuleScope) : Bool
       return false if rule.inert? || rule.scope == to
+      # `rule` is a snapshot. A global one may have gained a key a newer gori wrote since, and
+      # the copy below carries only the fields this binary knows while the delete then drops
+      # the original — so ask the file, as `Settings.move_rewriter_rule` does.
+      if rule.scope.global?
+        Settings.reload_rewriter_from_disk
+        if Settings.rewriter_rule_inert?(rule.id)
+          refresh
+          return false
+        end
+      end
       copy_id =
         if to.global?
           Settings.add_rewriter_rule(rule.target.label, rule.part.label, rule.pattern,

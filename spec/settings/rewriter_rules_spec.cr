@@ -214,6 +214,38 @@ describe "Gori::Settings rewriter rule shape" do
     end
   end
 
+  # The writers re-read the file before they touch a row; the inert check has to be made
+  # against that re-read, not the caller's snapshot, or a key a newer gori wrote in between is
+  # dropped by the rebuild (`update`) or the row is switched on (`set_enabled`).
+  it "refuses to edit or enable a rule that turned inert on disk since it was loaded" do
+    with_rewriter_home do
+      write_settings(<<-JSON)
+        {"rewriter": {"next_rule_id": 2, "rules": [
+          {"id": 1, "enabled": false, "name": "plain", "pattern": "a", "replacement": "b", "op": "replace"}
+        ]}}
+        JSON
+      Gori::Settings.load
+      Gori::Settings.rewriter_rules[0].inert?.should be_false
+      write_settings(<<-JSON)
+        {"rewriter": {"next_rule_id": 2, "rules": [
+          {"id": 1, "enabled": false, "name": "plain", "pattern": "a", "replacement": "b", "op": "replace", "throttle": 5}
+        ]}}
+        JSON
+
+      Gori::Settings.set_rewriter_rule_enabled(1_i64, true).should be_false
+      Gori::Settings.update_rewriter_rule(1_i64, "request", "head", "a", "edited", "replace",
+        "literal", "plain", "", "").should be_false
+      rule = JSON.parse(File.read(Gori::Settings.path))["rewriter"]["rules"][0]
+      rule["throttle"].as_i.should eq(5)
+      rule["replacement"].as_s.should eq("b")
+      rule["enabled"].as_bool.should be_false
+
+      # Turning it OFF stays allowed, and keeps the key.
+      Gori::Settings.set_rewriter_rule_enabled(1_i64, false).should be_true
+      JSON.parse(File.read(Gori::Settings.path))["rewriter"]["rules"][0]["throttle"].as_i.should eq(5)
+    end
+  end
+
   # #1237: the short-circuit sub-kind. A row an older binary wrote carries neither key and reads
   # as the stub it always was; a label or args this binary cannot read are kept verbatim and the
   # row stays inert.

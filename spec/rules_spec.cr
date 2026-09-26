@@ -962,6 +962,35 @@ describe Gori::Rules do
       end
     end
 
+    # `rules` is a snapshot: the inert check `Rules#update` / `#set_default` / `#set_scope` make
+    # against it cannot see a key a newer gori wrote to settings.json afterwards.
+    it "refuses to edit, enable or re-home a global rule that turned inert on disk" do
+      with_globals do
+        with_store do |store|
+          rules = Gori::Rules.load(store)
+          rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+            "A", "B", name: "plain", scope: Gori::Store::RuleScope::Global, enabled: false)
+          rule = rules.rules.first
+          doc = JSON.parse(File.read(Gori::Settings.path)).as_h
+          row = doc["rewriter"]["rules"][0].as_h
+          row["throttle"] = JSON::Any.new(5_i64)
+          File.write(Gori::Settings.path, doc.to_json)
+
+          rules.update(rule.id, Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+            "A", "edited", scope: Gori::Store::RuleScope::Global).should be_false
+          rules.set_default(rule.id, true).should be_false
+          rules.set_scope(rule, Gori::Store::RuleScope::Project).should be_false
+          store.match_rules.should be_empty
+
+          saved = JSON.parse(File.read(Gori::Settings.path))["rewriter"]["rules"].as_a
+          saved.size.should eq(1)
+          saved[0]["throttle"].as_i.should eq(5)
+          saved[0]["replacement"].as_s.should eq("B")
+          rules.rules.first.inert?.should be_true # the refusal refreshed the view
+        end
+      end
+    end
+
     it "refuses to reorder when the swap target is inert (project and global)" do
       with_globals do
         Gori::Settings.rewriter_rules = [
