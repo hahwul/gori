@@ -55,6 +55,13 @@ module Gori
         )
       end
 
+      # Would `build` refuse this head? The predicate behind `refuse_pseudo_header_head`, public
+      # so a caller that screens flows before replaying them (`CacheDeception.skip_reason`) asks
+      # the same question instead of re-deriving it.
+      def self.pseudo_header_head?(head : Bytes) : Bool
+        head.size > 0 && head[0] == 0x3A_u8 # ':'
+      end
+
       # Refuse a head that OPENS WITH AN HTTP/2 PSEUDO-HEADER, and nothing else.
       #
       # As narrow as it can be and still catch the field dump, because P7 ("malformed input
@@ -67,7 +74,7 @@ module Gori
       # dump. Shipping it is not "sending the operator's bytes" — it is sending a message
       # whose first header gori turned into a start line, and then reporting the status.
       private def self.refuse_pseudo_header_head(head : Bytes) : Nil
-        return unless head.size > 0 && head[0] == 0x3A_u8 # ':'
+        return unless pseudo_header_head?(head)
         nl = head.index(0x0A_u8)
         line = String.new(nl ? head[0, nl] : head).rstrip('\r')
         raise PseudoHeaderHead.new(

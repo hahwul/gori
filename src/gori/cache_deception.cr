@@ -116,10 +116,13 @@ module Gori
     # a cache-deception check declines exactly what an authorize replay declines, for the same
     # reasons: an incomplete flow, one gori answered itself, and — unless `unsafe` — an unsafe
     # method, whose replay would run its side effect up to three times (prime, anonymous, control).
+    # Plus one rung of its own: a head stored as an h2 field list, which `FlowRequest.build`
+    # refuses by raising — screened here so it is a skip, not an error halfway through a run.
     def self.skip_reason(detail : Store::FlowDetail, unsafe : Bool) : Symbol?
       row = detail.row
       return :incomplete unless row.state.complete?
       return :short_circuited if row.short_circuited?
+      return :pseudo_header_head if Repeater::FlowRequest.pseudo_header_head?(detail.request_head)
       return :unsafe_method unless unsafe || Authorize::Passive::SAFE_METHODS.includes?(row.method.upcase)
       nil
     end

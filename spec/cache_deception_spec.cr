@@ -185,6 +185,26 @@ describe Gori::CacheDeception do
         CD.reason_label(:unsafe_method).should eq("not a safe method to repeat")
       end
     end
+
+    it "skips a head stored as an h2 field list, which the replay would raise on" do
+      with_store do |store|
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "https", host: "h.test", port: 443,
+          method: "GET", target: "/account", http_version: "HTTP/2",
+          head: ":method: GET\r\n:path: /account\r\n:authority: h.test\r\n\r\n".to_slice, body: nil,
+          source: Gori::FlowSource::Kind::Proxy))
+        store.update_response(Gori::Store::CapturedResponse.new(flow_id: id, status: 200,
+          head: "HTTP/1.1 200 OK\r\n\r\n".to_slice))
+        store.flush
+        detail = store.get_flow(id).not_nil!
+        expect_raises(Gori::Repeater::FlowRequest::PseudoHeaderHead) { Gori::Repeater::FlowRequest.build(detail) }
+        # A skip, not an error: MCP answers INVALID_ARGUMENT with this label instead of an
+        # INTERNAL_ERROR, and the CLI moves on to the next flow.
+        CD.skip_reason(detail, false).should eq(:pseudo_header_head)
+        CD.skip_reason(detail, true).should eq(:pseudo_header_head)
+        CD.reason_label(:pseudo_header_head).should contain("HTTP/2 field list")
+      end
+    end
   end
 
   it "fixes the priming identities to as-captured (baseline) then anonymous" do
