@@ -116,6 +116,8 @@ gori run <subcommand> [verb] [options]
 
 읽기 서브커맨드는 스토어를 읽기 전용으로 열고 캡처 락을 잡지 않으므로, 라이브 TUI가 캡처 중인 프로젝트를 대상으로 실행해도 안전합니다. `body:` 질의는 검색 인덱스를 비우므로 쓰기입니다. gori 프로젝트가 아닌 `--db` 파일(다른 도구의 SQLite 데이터베이스나 빈 파일)은 파일에 손대기 전에 거부합니다. 데이터베이스를 만드는 명령(`import --db`, `capture --db`)은 빈 파일은 계속 초기화하지만, 다른 도구의 테이블이 든 파일은 거부합니다.
 
+쓰기 서브커맨드는 그 프로젝트의 WAL 데이터베이스를 TUI, MCP와 공유합니다. Store 라이터를 통해 직렬화되므로 TUI가 열려 있어도 실행할 수 있지만, 캡처 커밋이 SQLite 라이터 슬롯을 잠시 차지할 수 있습니다. 짧게 끝나는 서브커맨드는 SQLite 열기/라이터 대기에 1초 예산을 둡니다. 그때까지 슬롯이 바쁘면 필요한 쓰기는 0이 아닌 코드로 종료하며, 다른 gori가 프로젝트를 잠그고 있다고 알리고 해결책(다시 시도하거나 읽기 전용 서브커맨드로 읽기)을 함께 보여 줍니다. 실행 내내 프로젝트를 열어 두는 서브커맨드(`discover`, `fuzz`, `import`, `probe`, `retest run`, `oast listen`/`resume`, `intercept`)는 표준 5초 대기를 그대로 씁니다. repeater 전송도 네트워크 응답을 저장하지 못했다면 성공이라고 하지 않고 실패하므로, 스크립트가 완료된 쓰기와 확인이 필요한 응답을 구분할 수 있습니다.
+
 #### 출력 계약 {#output-contract}
 
 STDOUT은 데이터를 나릅니다. 경고, 개수, 내보내기 확인 메시지는 STDERR로 가므로 파이프가 깨끗하게 유지됩니다. 읽는 쪽이 파이프를 먼저 닫아도(`… | head`) 조용히 `0`으로 끝납니다.
@@ -405,7 +407,7 @@ pbpaste | gori run repeater create --curl - --name "from devtools"
 거부됩니다. 또한 빈 요청(빈 파일, `--request-raw ''`, 아무것도 내보내지 않은 파이프)은 전송할 수
 없는 세션을 만드는 대신 거부됩니다. `--flow`는 이 넷 중 하나가 아니며 — 출처 역할도 하므로 —
 넷 중 어느 하나와도 함께 쓸 수 있습니다. `--curl`은 curl 명령 하나를 읽고
-([Repeater → Paste cURL](/guide/repeater-and-fuzzer/#repeater) 참고), 따로 주지 않으면
+([Repeater → Paste cURL](/ko/guide/repeater-and-fuzzer/#repeater) 참고), 따로 주지 않으면
 `--target`과 `--http2`도 그 명령에서 가져옵니다.
 
 `--request-stdin`은 파이프나 리다이렉트(`--request-stdin < req.http`)를 읽으며, 터미널은
@@ -478,6 +480,8 @@ done
 ```
 
 이 옵션은 이번 전송을 위해 저장된 요청의 사본을 고칩니다. 세션은 자신의 요청과 **마지막 응답**을 그대로 유지합니다. 다른 대상의 응답을 그 옆에 저장하면 TUI 탭이 자신이 가지고 있지 않은 요청에 대한 응답을 보여주게 되고, 다음 `--diff`가 엉뚱한 엔드포인트와 비교하게 되기 때문입니다. 그래서 `--format json`에는 `response_saved`가 빠지고, `path` 필드가 전송된 대상을 이름 붙이며, text 상태 줄은 그 값으로 끝납니다(`→ 200 in 218.4ms · /api/v1/items/42`). `--record-history`는 실제로 나간 대로(새 경로 포함) 요청을 여전히 기록하며, `--diff`는 세션에 저장된 응답과 계속 비교합니다.
+
+오리진에 닿은 전송은 그 뒤의 쓰기가 실패해도 `0`으로 종료하므로, 셸이 같은 요청을 다시 보내지 않습니다. 어느 쓰기가 실패했는지는 `--format json`이 알려 줍니다. `response_saved`(세션에 응답을 썼으면 나타나고, 프로젝트가 쓰기를 거부했거나 전송 중에 세션이 삭제됐으면 `false`와 함께 `response_save_error`가 붙습니다. 이때 다음 `--diff`는 이전 응답과 비교합니다)와, `--record-history`를 주었다면 `history_saved`가 나오며, 실패하면 `history_error`가 붙고 `recorded_flow_id`는 빠집니다. 텍스트 모드는 같은 문장을 STDERR에 찍습니다.
 
 **`repeater move <repeater-id>`**: 워크벤치 스트립의 순서를 바꿉니다. `--to N`은 `repeater list`가 출력하는 1부터 시작하는 탭 번호이고, `--up` / `--down`은 한 칸씩 옮깁니다. 셋 중 하나만 주세요. `--to`와 방향을 함께 주면 임의로 해석하지 않고 거절하며, `1-<개수>` 범위를 벗어난 `--to`도 잘라 맞추지 않고 거절합니다. 명령이 지목하지 않은 자리에 세션이 놓이는 일이 없도록 하기 위해서입니다. `--format json`은 `from_index` / `to_index` / `moved`를 보고합니다.
 
@@ -828,7 +832,7 @@ gori run import --postman api.postman_collection.json --db ./assessment.db --for
 |--------|-------------|
 | `--har=PATH` | 브라우저/프록시 HAR(HTTP Archive) 익스포트. 전체 요청/응답 플로우 |
 | `--urls=PATH` | 한 줄에 URL 하나씩 담긴 텍스트 파일(`#` 주석과 빈 줄은 무시) |
-| `--oas=PATH` | OpenAPI/Swagger 스펙(JSON 또는 YAML). 오퍼레이션마다 템플릿 하나 |
+| `--oas=PATH` | OpenAPI 3.x 또는 Swagger 2.0(JSON 또는 YAML). 로컬 JSON Pointer 참조는 해소하고, 원격 참조는 보고만 하고 가져오지 않습니다 |
 | `--postman=PATH` | Postman Collection v2 익스포트(JSON) |
 | `--insomnia=PATH` | Insomnia v4 익스포트(JSON) |
 | `--burp=PATH` | Burp Suite 항목 익스포트(XML). 요청**과** 응답, 바이트 단위 그대로 |
@@ -848,7 +852,7 @@ gori run import --postman api.postman_collection.json --db ./assessment.db --for
 gori run sitemap --in-scope --format paths
 ```
 
-`-q`/`--query=QL`는 history와 같은 QL로 엔드포인트를 거릅니다(위치 인자로도 넘길 수 있습니다). `-n`/`--limit=N`은 스캔할 엔드포인트 수를 제한합니다(기본값 10000). `--in-scope`는 스코프 내 호스트로 한정하고, `--hide-static`은 이미지·폰트·오디오·비디오를 뺍니다(TUI 트리처럼 플로우 단위). `--no-group`은 id 접기를, `--no-fold-query`는 쿼리 문자열 접기를 끕니다(서로 다른 축입니다). `--format`은 `text`(트리), `json`, `paths` 중에서 고릅니다. `--lenient`는 없는 필드 이름을 쓴 쿼리를 거절하지 않고 받아들입니다.
+`-q`/`--query=QL`는 history와 같은 QL로 엔드포인트를 거릅니다(위치 인자로도 넘길 수 있습니다). `-n`/`--limit=N`은 스캔할 엔드포인트 수를 제한합니다(기본값 10000). `--in-scope`는 스코프 내 호스트로 한정하고, `--hide-static`은 이미지·폰트·오디오·비디오를 뺍니다(TUI 트리처럼 플로우 단위). `--no-group`은 id 접기를, `--no-fold-query`는 쿼리 문자열 접기를 끕니다(서로 다른 축입니다). `--js-refs`는 캡처한 JavaScript가 참조하지만 아무도 요청하지 않은 경로도 함께 그립니다(`sitemap js` 참고. JSON에서는 `js_refs`와 `unrequested`로 나오며, `paths`에는 나오지 않습니다). `--format`은 `text`(트리), `json`, `paths` 중에서 고릅니다. `--lenient`는 없는 필드 이름을 쓴 쿼리를 거절하지 않고 받아들입니다.
 
 **`sitemap tag`**: 경로 하나에 자유 텍스트 메모를 고정합니다. TUI Sitemap에 보이는 그 메모입니다.
 
