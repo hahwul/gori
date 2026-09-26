@@ -353,7 +353,7 @@ describe "Gori::Verbs.register_history" do
       r["fuzz.save-results"].available?(ctx).should be_false
       ctx.fuzzer_results_saveable = true
       r["fuzz.save-results"].available?(ctx).should be_true
-      r["fuzz.save-results"].chords.should eq([typed_chord("s", shift: true)])
+      r["fuzz.save-results"].chords.should eq([typed_chord("e", shift: true)])
       verb_intents(r, "fuzz.save-results").should eq([:fuzz_save_results])
     end
 

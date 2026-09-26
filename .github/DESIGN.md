@@ -3930,3 +3930,5 @@ Refines: the R1 guard entry above. #1295.
   is Send/Run on four of them, so the strip moves to the menu's letter rather than the menu to
   the strip's, and strip `r` does nothing (`^R` still sends from the Repeater strip). The
   project picker already renamed on `e`.
+- **The Fuzzer's Save results is `⇧E`,** the Export chord of four tabs. Its `⇧S` was also
+  what a typed menu `S` (Send selection to…, on every Fuzzer view) sends to the keymap.

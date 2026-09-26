@@ -2103,7 +2103,7 @@ describe Gori::Verb do
       km.lookup(Chord.new("r", ctrl: true), Gori::Verb::Scope::Fuzzer).should eq("fuzz.run")
       km.lookup(Chord.new("x", ctrl: true), Gori::Verb::Scope::Fuzzer).should eq("fuzz.stop")
       km.lookup(Chord.new("a", ctrl: true), Gori::Verb::Scope::Fuzzer).should eq("fuzz.automark")
-      km.lookup(Chord.new("s", shift: true), Gori::Verb::Scope::Fuzzer).should eq("fuzz.save-results")
+      km.lookup(Chord.new("e", shift: true), Gori::Verb::Scope::Fuzzer).should eq("fuzz.save-results")
     end
 
     it "binds the Intercept catch chords in Intercept scope, shadowing the Global/Body keys" do

@@ -199,7 +199,7 @@ exactly as before, and Help names the route: the key, or `^P → <name>` for an 
 | Repeater | Mark word · Edit decoder chain · Pretty-print request | `Ctrl-K` · `Ctrl-Q` · `Ctrl-U` |
 | Repeater | Minimize request · Use as refresh for slot… | palette |
 | Fuzzer | Mark word · Edit decoder chain · Pretty-print template | `Ctrl-K` · `Ctrl-Q` · `Ctrl-U` |
-| Fuzzer | Add List payload set · Save results | `Ctrl-L` · `⇧S` |
+| Fuzzer | Add List payload set · Save results | `Ctrl-L` · `⇧E` |
 | Fuzzer | Run history | palette |
 | History | gRPC: reflect schema | palette |
 | JWT · Cookie | Toggle decode/encode (decode/forge) · Cycle signing alg (format) | `Ctrl-T` · `Ctrl-A` |
@@ -364,7 +364,7 @@ or the column editor, or when the row moved focus.
 
 What moved: hex was `e` in the History detail, `x` in the Repeater request pane and `h` in its
 response pane, and is now `Z` `x` in all three. Save results on the Fuzzer gave up `P` (it is
-`⇧S`, and [palette-only](#palette-only)). The History detail's **Copy flow** row is gone: `Space` `Y` (Copy as…)
+`⇧E`, the Export chord, and [palette-only](#palette-only)). The History detail's **Copy flow** row is gone: `Space` `Y` (Copy as…)
 on the REQUEST pane has **Raw request**, the same text.
 
 ## Editor Keysets {#editor-keysets}

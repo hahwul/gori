@@ -241,7 +241,6 @@ MENU_LETTER_ALLOWED = {
   {"mine.filter-subtabs", "mine.filter"}                 => "WP2 #9: the strip owns `/` in every view since #1055",
   {"comparer.close-subtab", "comparer.swap"}             => "WP2 #11: the strip's `w` close vs the R2 table's `w` swap",
   {"comparer.subtab-mark-clear", "comparer.next-change"} => "WP2 #12: the strip's `N` vs ⇧N next change",
-  {"fuzzer.send-to", "fuzz.save-results"}                => "WP2 #14: save results moves to the Export letter",
   {"oast.copy", "oast.copy-callback"}                    => "false positive: the LIST's controller arm owns bare `y` (verbs/read_edit.cr)",
   {"colormarker.color-add", "colormarker.add"}           => "false positive: handle_colors_key answers `a` in the colours pane",
   {"colormarker.color-edit", "colormarker.edit"}         => "false positive: handle_colors_key answers `e` in the colours pane",

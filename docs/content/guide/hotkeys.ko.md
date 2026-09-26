@@ -190,7 +190,7 @@ space 메뉴는 자주 누르는 것을 위한 곳이고, 드물게 쓰는 것�
 | Repeater | Mark word · Edit decoder chain · Pretty-print request | `Ctrl-K` · `Ctrl-Q` · `Ctrl-U` |
 | Repeater | Minimize request · Use as refresh for slot… | 팔레트 |
 | Fuzzer | Mark word · Edit decoder chain · Pretty-print template | `Ctrl-K` · `Ctrl-Q` · `Ctrl-U` |
-| Fuzzer | Add List payload set · Save results | `Ctrl-L` · `⇧S` |
+| Fuzzer | Add List payload set · Save results | `Ctrl-L` · `⇧E` |
 | Fuzzer | Run history | 팔레트 |
 | History | gRPC: reflect schema | 팔레트 |
 | JWT · Cookie | Toggle decode/encode (decode/forge) · Cycle signing alg (format) | `Ctrl-T` · `Ctrl-A` |
@@ -350,7 +350,7 @@ Rewriter와 Colormarker의 **Enable/disable everywhere**가 `T`인 이유가 이
   `Ctrl-T` envelope, `Ctrl-V` HTTP/2, `Ctrl-S` SNI, `Ctrl-L` Content-Length 자동 계산.
 
 옮겨진 것: 헥스는 History 상세에서 `e`, Repeater 요청 패널에서 `x`, 응답 패널에서 `h`였고 이제
-셋 모두 `Z` `x`입니다. Fuzzer의 결과 저장은 `P`를 내주었습니다(`⇧S`이며, [팔레트 전용](#palette-only)입니다).
+셋 모두 `Z` `x`입니다. Fuzzer의 결과 저장은 `P`를 내주었습니다(내보내기 코드인 `⇧E`이며, [팔레트 전용](#palette-only)입니다).
 History 상세의 **Copy flow** 행은 없어졌습니다. REQUEST 패널에서 `Space` `Y`(Copy as…)의
 **Raw request**가 같은 텍스트입니다.
 
