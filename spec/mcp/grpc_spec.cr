@@ -99,4 +99,76 @@ describe "MCP gRPC tools with unpersisted reflections" do
       File.delete?("#{path}-shm")
     end
   end
+
+  it "lists and forgets reflections committed to the store after Schemas was loaded" do
+    path = File.tempname("gori-mcp-grpc-peer", ".db")
+    store = Gori::Store.open(path)
+    begin
+      Schemas.load_project(store)
+      tools = tools_for(store)
+
+      Schemas.reflections.should be_empty
+      call_json(tools, "grpc_schema", "{}")["reflections"].as_a.should be_empty
+
+      # Peer process commits a reflection directly into SQLite
+      set = Reflection.descriptor_set([demo_file_descriptor])
+      store.put_grpc_reflection("https://external.test:443", Reflection::SERVICE_V1, 1, 1, set).should be_true
+
+      # In-memory array has not re-read from store
+      Schemas.reflections.should be_empty
+
+      # 1. grpc_schema lists the externally-committed reflection via the union
+      schema_res = call_json(tools, "grpc_schema", "{}")
+      targets = schema_res["reflections"].as_a.map(&.["target"].as_s)
+      targets.should contain("https://external.test:443")
+
+      # 2. grpc_forget accepts the target and removes it from SQLite
+      forget_res = call_json(tools, "grpc_forget", %({"target": "https://external.test:443"}))
+      forget_res["forgotten"].as_i.should eq(1)
+      forget_res["persisted"].as_bool.should be_true
+
+      # It is now deleted from store and no longer listed
+      store.grpc_reflections.should be_empty
+      call_json(tools, "grpc_schema", "{}")["reflections"].as_a.should be_empty
+    ensure
+      Schemas.clear
+      store.close
+      File.delete?(path)
+      File.delete?("#{path}-wal")
+      File.delete?("#{path}-shm")
+    end
+  end
+
+  it "de-duplicates reflections preferring the in-memory entry on collision" do
+    path = File.tempname("gori-mcp-grpc-dedup", ".db")
+    store = Gori::Store.open(path, busy_timeout_ms: 200)
+    peer = DB.open("sqlite3:#{path}?busy_timeout=100")
+    cn = peer.checkout
+    begin
+      set = Reflection.descriptor_set([demo_file_descriptor])
+      store.put_grpc_reflection("https://api.test:443", "old.Service", 1, 1, set).should be_true
+      Schemas.load_project(store)
+      tools = tools_for(store)
+
+      # Adopt updated reflection in memory while store write lock is held
+      cn.exec("BEGIN IMMEDIATE")
+      saved = Schemas.adopt(store, "https://api.test:443", "new.Service", 2, 2, set)
+      saved.should be_false
+
+      schema_res = call_json(tools, "grpc_schema", "{}")
+      reflections = schema_res["reflections"].as_a
+      reflections.size.should eq(1)
+      reflections[0]["target"].as_s.should eq("https://api.test:443")
+      reflections[0]["service"].as_s.should eq("new.Service")
+    ensure
+      cn.exec("ROLLBACK") rescue nil
+      cn.release rescue nil
+      peer.close rescue nil
+      Schemas.clear
+      store.close
+      File.delete?(path)
+      File.delete?("#{path}-wal")
+      File.delete?("#{path}-shm")
+    end
+  end
 end

@@ -108,6 +108,19 @@ module Gori::Protobuf
     # into a database read on the UI fiber.
     class_getter reflections : Array(Store::GrpcReflection) = [] of Store::GrpcReflection
 
+    # What a listing or a forget should answer to: every target the project has committed
+    # plus every one this process holds, one row per target, the in-memory entry winning a
+    # collision. Neither half alone is the truth. The store is the live view across processes,
+    # so a long-lived MCP server still lists a target another process reflected after it bound
+    # (#1227); memory holds a fetch `adopt` could not commit on a busy project (#1315). Ordered
+    # as `Store#grpc_reflections` orders them: oldest fetch first.
+    def self.reflections(store : Store) : Array(Store::GrpcReflection)
+      by_target = Hash(String, Store::GrpcReflection).new
+      store.grpc_reflections.each { |r| by_target[r.target] = r }
+      @@reflections.each { |r| by_target[r.target] = r }
+      by_target.values.sort_by! { |r| {r.fetched_at, r.target} }
+    end
+
     # Publish the open project's schema: the descriptor-set path from settings, plus every
     # target this project has already reflected against. Never raises — a project must open
     # even when its descriptor path is gone, and the failure is reported through `sources`.

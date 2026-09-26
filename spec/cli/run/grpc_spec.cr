@@ -18,14 +18,14 @@ describe "gori run grpc reflect --timeout" do
 end
 
 describe "gori run grpc schema / forget reflections source parity" do
-  it "reads reflections from Gori::Protobuf::Schemas.reflections rather than store.grpc_reflections" do
+  it "reads reflections from Gori::Protobuf::Schemas.reflections(store) rather than store.grpc_reflections" do
     src = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run", "grpc.cr"))
     schema_body = src[/def self\.cmd_grpc_schema\(.*?\n      end/m].not_nil!
-    schema_body.should contain("reflections = Gori::Protobuf::Schemas.reflections")
+    schema_body.should contain("reflections = Gori::Protobuf::Schemas.reflections(store)")
     schema_body.should_not contain("reflections = store.grpc_reflections")
 
     forget_body = src[/def self\.cmd_grpc_forget\(.*?\n      end/m].not_nil!
-    forget_body.should contain("known = Gori::Protobuf::Schemas.reflections.map(&.target)")
+    forget_body.should contain("known = Gori::Protobuf::Schemas.reflections(store).map(&.target)")
     forget_body.should_not contain("known = store.grpc_reflections.map(&.target)")
   end
 end
