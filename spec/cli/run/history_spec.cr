@@ -222,16 +222,32 @@ describe "gori run history — CLI::Output rows" do
   it "term_safe_multiline keeps newlines and names tabs and ANSI/OSC controls" do
     # This is the `show`/`repeater` TEXT view's scrubber: a captured head/body must keep
     # its layout (a head flattened to one line is unreadable) while escapes still die.
-    src = "HTTP/1.1 200 OK\r\nX-A:\t1\n\e[31mred\e]0;title\a"
+    src = "HTTP/1.1 200 OK\r\nX-A:\t1\nbare\rcr\n\e[31mred\e]0;title\a"
     out = Gori::CLI::Output.term_safe_multiline(src)
     out.should contain("\n") # line breaks survive
     out.should contain("⟨TAB⟩")
     out.should_not contain('\t')
     out.should_not contain('\e')
     out.should_not contain('\a')
-    out.should contain("⟨CR⟩")
+    out.should_not contain('\r')
+    out.should contain("bare⟨CR⟩cr") # a LONE CR is still named
     out.should contain("⟨ESC⟩")
     out.should contain("⟨BEL⟩")
+  end
+
+  # "\r\n" is ONE grapheme cluster, so a walk that only let "\n" through badged every CRLF as
+  # `⟨CR⟩⟨LF⟩` and printed a whole HTTP head on one line. The fixture above passed anyway
+  # because it also carries a bare "\n"; this one has CRLF endings and nothing else.
+  it "term_safe_multiline keeps a CRLF-only head on separate lines" do
+    out = Gori::CLI::Output.term_safe_multiline("GET / HTTP/1.1\r\nHost: x\r\n\r\n")
+    out.should eq("GET / HTTP/1.1\nHost: x\n\n")
+    out.should_not contain("⟨CR⟩")
+    out.should_not contain("⟨LF⟩")
+  end
+
+  it "term_safe_multiline still names hidden characters on a CRLF line" do
+    out = Gori::CLI::Output.term_safe_multiline("X-A: 1\e[31m\r\nX-B:\u{200b}2\r\n")
+    out.should eq("X-A: 1⟨ESC⟩[31m\nX-B:⟨ZWSP⟩2\n")
   end
 
   it "emits a valid JSON object with the expected keys" do

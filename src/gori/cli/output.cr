@@ -363,14 +363,18 @@ module Gori
       # its layout while tabs, ANSI/OSC/CSI escapes and other hidden controls get named badges. Use
       # for captured text written to a live terminal (the `show`/`repeater` text views).
       # `--format raw` stays the exact-bytes path for scripts/redirection.
+      #
+      # CRLF is ONE grapheme cluster (UAX #29 GB3), so it never equals "\n" here — matching
+      # only "\n" badged every CRLF head as `⟨CR⟩⟨LF⟩` and printed it on one line. CRLF is
+      # the HTTP line ending, so it renders as a plain break; a lone CR keeps its badge.
       def self.term_safe_multiline(s : String) : String
         s = s.scrub
         return s unless s.each_char.any? { |c| c != '\n' && !UnicodeReveal.label(c.ord).nil? }
         String.build do |io|
           s.each_grapheme do |grapheme|
             text = grapheme.to_s
-            if text == "\n"
-              io << text
+            if text == "\n" || text == "\r\n"
+              io << '\n'
             else
               io << (UnicodeReveal.visible(text) || text)
             end
