@@ -408,6 +408,11 @@ module Gori::Settings
     # A rule a peer deleted while this list sat on screen must not come BACK as an edit: after the
     # re-read there is no such id, `found` stays false, and the caller is told so.
     reload_rewriter_from_disk
+    # The caller's inert check (`Rules#update`) read a snapshot; the re-read may hold a key a
+    # newer gori wrote since. Rebuilding that row from the fields below would drop the key and
+    # its raw labels — an edit of a rule this binary cannot read — so ask the file, as
+    # `move_rewriter_rule` does.
+    return false if rewriter_rule_inert?(id)
     prev_rules = rewriter_rules
     found = false
     self.rewriter_rules = rewriter_rules.map do |r|
@@ -426,6 +431,9 @@ module Gori::Settings
   # The rule's DEFAULT state, which every project without an override follows.
   def self.set_rewriter_rule_enabled(id : Int64, enabled : Bool) : Bool
     reload_rewriter_from_disk # see `update_rewriter_rule`
+    # Enabling is refused against the re-read too; disabling an inert row is allowed, and
+    # `copy_with` keeps its unknown keys (`Rules#set_default`).
+    return false if enabled && rewriter_rule_inert?(id)
     prev_rules = rewriter_rules
     found = false
     self.rewriter_rules = rewriter_rules.map do |r|
@@ -436,6 +444,13 @@ module Gori::Settings
     ok = found && save
     self.rewriter_rules = prev_rules unless ok
     ok
+  end
+
+  # Whether the global rule `id` is one this binary must hold inert, as the list stands NOW —
+  # call it after `reload_rewriter_from_disk`. False for an unknown id: the caller's own lookup
+  # answers that one.
+  def self.rewriter_rule_inert?(id : Int64) : Bool
+    rewriter_rules.any? { |r| r.id == id && r.inert? }
   end
 
   def self.delete_rewriter_rule(id : Int64) : Bool

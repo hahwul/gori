@@ -168,6 +168,19 @@ describe "Gori::Rules — short-circuit op" do
     end
   end
 
+  it "keeps the body file's local path out of the page-facing body" do
+    with_store do |store|
+      rules = Gori::Rules.load(store)
+      path = "/nonexistent/gori/secret-home/stub.png"
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+        "/logo.png", "200 OK\n", op: SC, body_file: path)
+      stub = rules.short_circuit(get("/logo.png"), "acme.test").not_nil!
+      String.new(stub.body).should contain("stub body file unreadable")
+      String.new(stub.body).should_not contain("secret-home")
+      stub.error.not_nil!.should contain(path)
+    end
+  end
+
   it "keeps a stub rule OUT of every rewrite path and its hot-path counts" do
     with_store do |store|
       rules = Gori::Rules.load(store)
@@ -494,6 +507,36 @@ describe "Gori::Rules — map-local (respond: dir)" do
         "GET /static/", "404 Not Found\n\nlocal miss", op: SC)
       String.new(rules.short_circuit(get("/static/js/nope.js"), "acme.test").not_nil!.body)
         .should eq("local miss")
+    end
+  end
+
+  it "keeps the local path out of the page-facing body when the mapped file cannot be served" do
+    with_dir_rules do |rules, root|
+      add_dir(rules, root)
+      # Sparse, so the spec does not write 8 MiB to disk: only the stat'd size matters.
+      big = File.join(root, "main.js.map")
+      File.open(big, "w", &.truncate(Gori::RuleStub::MAX_BODY_FILE_BYTES + 1))
+      stub = rules.short_circuit(get("/static/main.js.map"), "acme.test").not_nil!
+      stub.status.should eq(502)
+      body = String.new(stub.body)
+      body.should contain("too large")
+      body.should_not contain(root)
+      # The operator still gets the path, on the flow's error.
+      stub.error.not_nil!.should contain(big)
+    end
+    with_dir_rules do |rules, root|
+      add_dir(rules, root)
+      locked = File.join(root, "js", "app.js")
+      File.chmod(locked, 0o000)
+      begin
+        next if File::Info.readable?(locked) # running as root: EACCES cannot be staged
+        stub = rules.short_circuit(get("/static/js/app.js"), "acme.test").not_nil!
+        stub.status.should eq(502)
+        String.new(stub.body).should_not contain(root)
+        stub.error.not_nil!.should contain(locked)
+      ensure
+        File.chmod(locked, 0o644)
+      end
     end
   end
 

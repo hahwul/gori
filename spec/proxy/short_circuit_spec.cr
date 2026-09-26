@@ -112,6 +112,37 @@ private def read_bounded(client : TCPSocket, seconds : Int32 = 5) : String?
   end
 end
 
+# Send a chunked POST whose body is `mib` MiB through a proxy that short-circuits it, and
+# return {bytes gori allocated meanwhile, the recorded request, the response bytes}. The body
+# is never forwarded, so what it may cost is a capture's worth, not its own size: a path that
+# buffers it whole allocates at least `mib` MiB (more, through IO::Memory's doubling). Counted
+# with `total_bytes`, which only goes up, so free heap left by earlier examples cannot hide it.
+private def drain_big_chunked_post(rules : Gori::Rules, mib : Int32) : {Int64, Gori::Store::CapturedRequest, String?}
+  done = Channel(Nil).new(1)
+  sink = RecordingSink.new(done)
+  proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink, rewriter: rules)
+  proxy.start
+  chunk = Bytes.new(1024 * 1024, 'a'.ord.to_u8)
+  client = TCPSocket.new("127.0.0.1", proxy.port)
+  GC.collect
+  before = GC.stats.total_bytes
+  client << "POST /upload HTTP/1.1\r\nHost: 127.0.0.1:#{dead_port}\r\nConnection: close\r\n" \
+            "Transfer-Encoding: chunked\r\n\r\n"
+  mib.times do
+    client << chunk.size.to_s(16) << "\r\n"
+    client.write(chunk)
+    client << "\r\n"
+  end
+  client << "0\r\n\r\n"
+  client.flush
+  response = read_bounded(client)
+  client.close rescue nil
+  done.receive
+  allocated = (GC.stats.total_bytes - before).to_i64
+  proxy.stop
+  {allocated, sink.requests.first, response}
+end
+
 describe "proxy — short-circuit rule" do
   it "answers for an origin that does not exist, and never dials it" do
     with_rules do |rules|
@@ -227,6 +258,18 @@ describe "proxy — short-circuit rule" do
       # what the client tried to send.
       String.new(sink.requests.first.body.not_nil!).should eq("hello=world")
       sink.requests.all?(&.short_circuited?).should be_true
+    end
+  end
+
+  it "drains a large chunked request body without buffering it" do
+    with_rules do |rules|
+      add_stub(rules, "/upload", "201 Created\n\nok")
+      allocated, req, response = drain_big_chunked_post(rules, 48)
+      response.not_nil!.should start_with("HTTP/1.1 201 Created")
+      allocated.should be < 24_i64 * 1024 * 1024
+      req.short_circuited?.should be_true
+      req.body_truncated?.should be_true
+      req.body.not_nil!.size.should eq(Gori::Settings.capture_max)
     end
   end
 
@@ -504,6 +547,20 @@ describe "proxy — short-circuit rule" do
         resp = sink.responses.first
         resp.state.aborted?.should be_true
         resp.error.not_nil!.should start_with("injected close by project rule #")
+      end
+    end
+
+    # A fault only has to get past the body, and nothing bounds a chunked one: buffering it
+    # whole let a client grow the heap by whatever it sent to a `fault: close` endpoint.
+    it "drains a large chunked body without buffering it, still recording the capped capture" do
+      with_rules do |rules|
+        add_fault(rules, "/upload", %({"fault":"close"}))
+        allocated, req, response = drain_big_chunked_post(rules, 48)
+        response.should eq("")
+        allocated.should be < 24_i64 * 1024 * 1024
+        req.body_truncated?.should be_true
+        req.body.not_nil!.size.should eq(Gori::Settings.capture_max)
+        req.body_size.not_nil!.should be > 48_i64 * 1024 * 1024 # the wire size, chunk lines too
       end
     end
 
