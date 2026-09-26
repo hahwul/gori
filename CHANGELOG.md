@@ -61,7 +61,7 @@
 - Sitemap: CLI and MCP tags on paths with a trailing slash now match and display on the captured endpoint (#1165)
 - CLI: invalid UTF-8 arguments now receive command errors instead of PCRE2 backtraces (#1170)
 - Env: `project env set` and both TUI editors preserve assignment values, including empty and surrounding whitespace (#1172)
-- HAR: imports preserve duplicate and malformed Content-Length probes; exports and re-imports preserve colonless request and response headers (#1161, #1164)
+- HAR: imports preserve duplicate and malformed Content-Length probes; exports and re-imports preserve colonless request and response headers, and an export no longer fails on a cookie whose `Expires` is an impossible date (#1161, #1164, #1312)
 - Import: OpenAPI 3.x and Swagger 2.0 resolve local refs and seed body/formData templates; remote refs are reported and never fetched (#1166)
 - Proxy, Repeater and Fuzzer keep bytes from incomplete or oversized response heads and do not automatically replay those requests (#1167)
 - Env: `$GEN.USER_AGENT` fills in a real desktop browser User-Agent that follows the request's TLS preset, `$GEN.USER_AGENT_CHROME`/`_FIREFOX`/`_SAFARI` pick one browser, and Settings → User-Agents or `gori settings user-agents` replaces the built-in list. `$U` + ↹ now completes to it rather than `$GEN.UUID` (#1112, #1152, #1153, #1154)

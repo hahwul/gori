@@ -212,6 +212,19 @@ describe Gori::Export::Har do
     end
   end
 
+  # An origin-written `Expires` that is well-formed but impossible has no instant to export:
+  # the attribute is left out rather than failing the whole document.
+  it "leaves out a response cookie's Expires it cannot read" do
+    with_store do |store|
+      head = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n" \
+             "Set-Cookie: sid=xyz; Expires=Sat, 31 Feb 2026 00:00:00 GMT; Path=/\r\n" \
+             "Content-Length: 9\r\n\r\n"
+      cookie = JSON.parse(export([capture_flow(store, resp_head: head)])[0])["log"]["entries"][0]["response"]["cookies"][0]
+      cookie["name"].as_s.should eq("sid")
+      cookie["expires"]?.should be_nil
+    end
+  end
+
   it "round-trips: a HAR gori writes imports back as the same flow" do
     with_store do |store|
       detail = capture_flow(store,
