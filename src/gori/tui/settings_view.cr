@@ -205,6 +205,7 @@ module Gori::Tui
     # Companion: Miss Ring, the mascot in the body's bottom-right corner.
     COMPANION_MOTION_CHOICES    = ["lively", "calm", "still"]
     COMPANION_PLACEMENT_CHOICES = ["body", "bar"]
+    COMPANION_REPLIES_CHOICES   = ["hold", "timed"]
     COMPANION_FIELDS            = [
       Field.new("Companion (Miss Ring)",
         "show the mascot in the body's bottom-right corner — she covers three rows and repaints about once a second while you're at the keyboard — ←/→/space toggles",
@@ -218,6 +219,9 @@ module Gori::Tui
       Field.new("Notices",
         "announce new background results in a speech bubble, and react to them — independent of the bottom-bar toast — ←/→/space toggles",
         bool: true),
+      Field.new("Agent replies",
+        "hold = an agent's reply stays in her bubble (the status row, in bar) until your next key or click, and later notices do not replace it; timed = it leaves after a few seconds like any other notice — ←/→ cycles",
+        choices: COMPANION_REPLIES_CHOICES),
     ]
     # Notifications: bell/toast toggles + ring-buffer retention.
     NOTIFICATIONS_FIELDS = [
@@ -382,6 +386,7 @@ module Gori::Tui
                   Settings::DEFAULT_COMPANION_PLACEMENT,
                   Settings::DEFAULT_COMPANION_MOTION,
                   Settings::DEFAULT_COMPANION_NOTICES ? "on" : "off",
+                  Settings::DEFAULT_COMPANION_REPLIES,
                 ]
                 when :notifications then [
                   Settings::DEFAULT_NOTIFY_BELL ? "on" : "off",
@@ -587,6 +592,7 @@ module Gori::Tui
         Settings.companion_placement,
         Settings.companion_motion,
         Settings.companion_notices? ? "on" : "off",
+        Settings.companion_replies,
       ]
     end
 
@@ -843,6 +849,7 @@ module Gori::Tui
         Settings.companion_placement = Settings.normalize_companion_placement(@values[1])
         Settings.companion_motion = Settings.normalize_companion_motion(@values[2])
         Settings.companion_notices = @values[3] == "on"
+        Settings.companion_replies = Settings.normalize_companion_replies(@values[4])
         @values = companion_values
         return persist
       end

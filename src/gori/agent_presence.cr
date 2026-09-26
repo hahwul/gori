@@ -156,10 +156,25 @@ module Gori
       0
     end
 
+    # `count`, for a caller that ACTS on the answer: nil when this process cannot tell (an
+    # in-memory database, a directory it cannot read, a flock that fails for any reason but
+    # contention) rather than the 0 `count` falls back to for a render loop. "Nobody is
+    # there" and "I cannot see" are different answers, and only one is safe to act on.
+    def self.count?(db_path : String, kind : String = KIND_MCP) : Int32?
+      return nil unless markable?(db_path)
+      n = 0
+      unsure = false
+      each_live(db_path, kind, -> { unsure = true; nil }) { |_| n += 1 }
+      unsure ? nil : n
+    rescue
+      nil
+    end
+
     # Walk the marker directory, sweeping any marker whose owner is gone (its flock is free),
     # and yield the path of each LIVE one. The shared core of `live` and `count`: liveness and
     # the stale sweep are decided here once, so the two callers cannot drift on either.
-    private def self.each_live(db_path : String, kind : String, & : String ->) : Nil
+    private def self.each_live(db_path : String, kind : String,
+                               unsure : Proc(Nil)? = nil, & : String ->) : Nil
       return unless markable?(db_path)
       dir = dir_for(db_path, kind)
       return unless Dir.exists?(dir)
@@ -169,7 +184,7 @@ module Gori
         next if child.starts_with?('.')
         next unless child.ends_with?(".json")
         path = File.join(dir, child)
-        probe = File.open(path, "r") rescue next # flock works on a read-only fd
+        probe = File.open(path, "r") rescue (unsure.try(&.call); next) # flock works on a read-only fd
         begin
           begin
             probe.flock_exclusive(blocking: false)
@@ -181,8 +196,12 @@ module Gori
             # EAGAIN/EWOULDBLOCK is the one refusal that MEANS a live holder (same errno
             # discrimination as `OpenLock.contention?`); any other failure is "cannot tell",
             # which must neither sweep nor count.
-            next unless contention?(ex)
+            unless contention?(ex)
+              unsure.try(&.call)
+              next
+            end
           rescue
+            unsure.try(&.call)
             next
           end
           yield path

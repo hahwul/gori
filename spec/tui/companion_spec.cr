@@ -18,6 +18,17 @@ private def with_companion(enabled : Bool, motion : String = "lively", notices :
   end
 end
 
+# Runs `block` with the agent-reply bubble mode set, restoring it.
+private def with_replies(mode : String, &)
+  prev = Gori::Settings.companion_replies
+  Gori::Settings.companion_replies = mode
+  begin
+    yield
+  ensure
+    Gori::Settings.companion_replies = prev
+  end
+end
+
 # Step the companion forward `n` beats from `t0`, returning how many of those ticks reported a
 # change. Beats are stepped one at a time because #advance re-bases on `now`, not on
 # last + BEAT — a single jump would collapse the whole span into one beat.
@@ -730,6 +741,150 @@ describe Gori::Tui::Companion do
       companion.frame.not_nil!.bubble.should_not be_nil
       beats(companion, t0, 60) # well past every bubble TTL
       companion.frame.not_nil!.bubble.should be_nil
+    end
+  end
+
+  # --- an agent's reply is held ---------------------------------------------
+  #
+  # A reply (`reply_to_operator`) is the one notice written TO the operator, so under the
+  # default `replies: hold` it stays in the bubble until their next key or click instead of
+  # leaving with the few-second TTL everything else gets.
+
+  it "holds an addressed note past every TTL until input releases it" do
+    with_companion(true) do
+      with_replies("hold") do
+        notes = Notifications.new
+        companion = Companion.new(notes)
+        t0 = Time.instant
+        companion.tick(t0)
+        notes.push(:info, "claude-code: 3 endpoints checked, 1 IDOR", source: "agent", addressed: true)
+        companion.tick(t0 + Companion::BEAT)
+        beats(companion, t0, 60) # well past every bubble TTL
+        companion.frame.not_nil!.bubble.not_nil!.should contain("IDOR")
+
+        # A resize is the terminal moving, not the operator answering.
+        companion.wake_on_input(false)
+        beats(companion, t0 + Companion::BEAT * 60, 5)
+        companion.frame.not_nil!.bubble.not_nil!.should contain("IDOR")
+
+        later = t0 + Companion::BEAT * 70
+        companion.release_bubble(later)
+        companion.tick(later + Companion::BEAT)
+        companion.frame.not_nil!.bubble.should be_nil
+      end
+    end
+  end
+
+  # A key already on its way when the reply landed must not erase it unread: release lets
+  # the bubble go at the end of its ordinary TTL, never sooner.
+  it "never lets an early release cut a reply shorter than its ordinary TTL" do
+    with_companion(true) do
+      with_replies("hold") do
+        notes = Notifications.new
+        companion = Companion.new(notes)
+        t0 = Time.instant
+        companion.tick(t0)
+        notes.push(:info, "done", source: "agent", addressed: true)
+        companion.tick(t0 + Companion::BEAT)
+        companion.release_bubble(t0 + Companion::BEAT)
+        companion.tick(t0 + Companion::BEAT * 2)
+        companion.frame.not_nil!.bubble.should eq("done")
+        beats(companion, t0, 60)
+        companion.frame.not_nil!.bubble.should be_nil
+      end
+    end
+  end
+
+  it "lets a reply go on the ordinary TTL under replies: timed" do
+    with_companion(true) do
+      with_replies("timed") do
+        notes = Notifications.new
+        companion = Companion.new(notes)
+        t0 = Time.instant
+        companion.tick(t0)
+        notes.push(:info, "done", source: "agent", addressed: true)
+        companion.tick(t0 + Companion::BEAT)
+        companion.frame.not_nil!.bubble.should eq("done")
+        beats(companion, t0, 60)
+        companion.frame.not_nil!.bubble.should be_nil
+      end
+    end
+  end
+
+  # Holding exists so the reply gets read; a job result landing behind it would otherwise
+  # take the bubble and send the operator to the ring after all. A newer REPLY does take it.
+  it "keeps a held reply in front of later notices, but not of a later reply" do
+    with_companion(true) do
+      with_replies("hold") do
+        notes = Notifications.new
+        companion = Companion.new(notes)
+        t0 = Time.instant
+        companion.tick(t0)
+        notes.push(:info, "first reply", source: "agent", addressed: true)
+        companion.tick(t0 + Companion::BEAT)
+        notes.push(:error, "fuzzer: run failed", source: "fuzzer")
+        companion.tick(t0 + Companion::BEAT * 2)
+        f = companion.frame.not_nil!
+        f.bubble.should eq("first reply")
+        f.mood.should eq(:alarm) # the face still reacts to the result
+        notes.push(:info, "second reply", source: "agent", addressed: true)
+        companion.tick(t0 + Companion::BEAT * 3)
+        companion.frame.not_nil!.bubble.should eq("second reply")
+      end
+    end
+  end
+
+  # She reads only the newest note per tick; a reply and a result landing together must
+  # not leave her announcing the result and the reply never said.
+  it "picks the reply out of a tick that also brought a later note" do
+    with_companion(true) do
+      with_replies("hold") do
+        notes = Notifications.new
+        companion = Companion.new(notes)
+        t0 = Time.instant
+        companion.tick(t0)
+        notes.push(:info, "the reply", source: "agent", addressed: true)
+        notes.push(:error, "miner: failed", source: "miner")
+        companion.tick(t0 + Companion::BEAT)
+        f = companion.frame.not_nil!
+        f.bubble.should eq("the reply")
+        f.mood.should eq(:alarm) # the later note keeps its face, as it would a tick later
+        companion.holding?.should be_true
+      end
+    end
+  end
+
+  # `timed` changes how long a reply stays, not whether it is said.
+  it "still says a same-tick reply under replies: timed, without holding it" do
+    with_companion(true) do
+      with_replies("timed") do
+        notes = Notifications.new
+        companion = Companion.new(notes)
+        t0 = Time.instant
+        companion.tick(t0)
+        notes.push(:info, "the reply", source: "agent", addressed: true)
+        notes.push(:info, "probe: 2 issues", source: "probe")
+        companion.tick(t0 + Companion::BEAT)
+        companion.frame.not_nil!.bubble.should eq("the reply")
+        companion.holding?.should be_false
+      end
+    end
+  end
+
+  # The intercept bridge pushes `source: "agent"` notes too; those report what an agent did
+  # and go on the ordinary TTL. Only `addressed:` is held.
+  it "does not hold an agent note that was not addressed to the operator" do
+    with_companion(true) do
+      with_replies("hold") do
+        notes = Notifications.new
+        companion = Companion.new(notes)
+        t0 = Time.instant
+        companion.tick(t0)
+        notes.push(:info, "agent forwarded #3", source: "agent")
+        companion.tick(t0 + Companion::BEAT)
+        beats(companion, t0, 60)
+        companion.frame.not_nil!.bubble.should be_nil
+      end
     end
   end
 

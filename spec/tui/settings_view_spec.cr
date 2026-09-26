@@ -706,9 +706,11 @@ describe SettingsView do
     Dir.mkdir_p(dir)
     prev_home = ENV["GORI_HOME"]?
     prev = {Gori::Settings.companion?, Gori::Settings.companion_placement,
-            Gori::Settings.companion_motion, Gori::Settings.companion_notices?}
+            Gori::Settings.companion_motion, Gori::Settings.companion_notices?,
+            Gori::Settings.companion_replies}
     begin
       ENV["GORI_HOME"] = dir
+      Gori::Settings.companion_replies = "hold"
       Gori::Settings.companion = false
       Gori::Settings.companion_placement = "body"
       Gori::Settings.companion_motion = "lively"
@@ -722,6 +724,8 @@ describe SettingsView do
       v.toggle_or_move(1) # Motion: lively → calm (choice)
       v.move_field(1)
       v.toggle_or_move(1) # Notices: on → off (bool)
+      v.move_field(1)
+      v.toggle_or_move(1) # Agent replies: hold → timed (choice)
       v.save
       Gori::Settings.companion?.should be_true
       Gori::Settings.companion_placement.should eq("bar")
@@ -729,6 +733,8 @@ describe SettingsView do
       Gori::Settings.companion_motion.should eq("calm")
       Gori::Settings.companion_lively?.should be_false
       Gori::Settings.companion_notices?.should be_false
+      Gori::Settings.companion_replies.should eq("timed")
+      Gori::Settings.companion_holds_replies?.should be_false
 
       v.reset_to_defaults
       v.save
@@ -736,10 +742,12 @@ describe SettingsView do
       Gori::Settings.companion_placement.should eq(Gori::Settings::DEFAULT_COMPANION_PLACEMENT)
       Gori::Settings.companion_motion.should eq(Gori::Settings::DEFAULT_COMPANION_MOTION)
       Gori::Settings.companion_notices?.should eq(Gori::Settings::DEFAULT_COMPANION_NOTICES)
+      Gori::Settings.companion_replies.should eq(Gori::Settings::DEFAULT_COMPANION_REPLIES)
     ensure
       prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
       Gori::Settings.companion, Gori::Settings.companion_placement = prev[0], prev[1]
       Gori::Settings.companion_motion, Gori::Settings.companion_notices = prev[2], prev[3]
+      Gori::Settings.companion_replies = prev[4]
       FileUtils.rm_rf(dir)
     end
   end

@@ -1,5 +1,6 @@
 require "json"
 require "../../store"
+require "../../agent_presence"
 require "../operator_note"
 require "../serialize"
 
@@ -227,17 +228,52 @@ module Gori
         # with no error on it.
         level = closed_filter(h, "level", AgentReply::LEVELS)
         return level if level.is_a?(Result)
+        # Who could see it, counted BEFORE the write. A TUI seeds its reply cursor at the feed's
+        # high-water mark when it opens, so a window that opens after the write never announces
+        # this reply; one counted here was open first and will. Counting after would claim that
+        # late window as a reader. nil is "cannot tell" (`--db :memory:`, an unbound start, a
+        # marker directory this process cannot probe), never a guessed 0.
+        windows = @db_path.try { |path| AgentPresence.count?(path, kind: AgentPresence::KIND_TUI) }
         pid = Process.pid.to_i64
         id = store.record_agent_reply(summary, str(h, "detail").presence, level || "info",
           session_label, pid, optional_int_arg(h, "in_reply_to"))
+        # No row, no reply: nothing will ever drain it, so no note below would be true.
+        return busy("reply_to_operator: the reply was not written (project busy or unwritable), so the operator will not see it; retry, or tell them in your own output") if id <= 0
         Result.new(JSON.build do |j|
           j.object do
-            j.field "ok", id > 0
+            j.field "ok", true
             j.field "id", id
             j.field "summary", Serialize.text(AgentReply.summary_line(summary))
-            j.field "note", "the operator sees the summary in gori's notification ring (and Miss Ring's bubble); the detail opens from the ring"
+            # The shape get_current_context reports the same fact in.
+            j.field("tui") do
+              j.object do
+                if windows
+                  j.field "live", windows > 0
+                  j.field "windows", windows
+                else
+                  j.field "unknown", true
+                end
+              end
+            end
+            j.field "note", reply_note(windows)
           end
         end)
+      end
+
+      private def reply_note(windows : Int32?) : String
+        case windows
+        when 0
+          "no gori TUI is open on this project, so nobody was shown this: it is kept only in " \
+          "the project's Activity record. Tell the operator in your own output as well"
+        when nil
+          "this server cannot tell whether a gori TUI is open. If one is, the summary is in its " \
+          "notification ring and Miss Ring's bubble and the detail opens from the ring; if not, " \
+          "nobody sees it. Keep anything that must last in your own output too"
+        else
+          "shown in the notification ring and Miss Ring's bubble of the gori TUI open on this " \
+          "project; the detail opens from the ring. A notification, not a mailbox: keep anything " \
+          "that must last in your own output too"
+        end
       end
     end
   end

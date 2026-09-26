@@ -881,7 +881,9 @@ module Gori
       # reply_to_operator that tools/list does not carry. A live route still carries
       # `OperatorNote::REPLY_HINT`, which names the tool at the moment it is needed.
       OPERATOR_REPLY_NOTE = " Answer them with reply_to_operator (a one-line summary, optional " \
-                            "detail): the operator is in gori, not in your terminal."
+                            "detail): the operator is in gori, not in your terminal. It is a " \
+                            "notification in an open gori TUI, not a mailbox — keep anything " \
+                            "that must last in your own output too."
 
       # Start carrying operator messages once the client is initialized. `send` is this
       # server's frame writer (the lock, the UTF-8 guard); the store and client name are read

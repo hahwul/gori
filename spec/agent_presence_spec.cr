@@ -212,6 +212,23 @@ describe Gori::AgentPresence do
     end
   end
 
+  # `count?` is for a caller that acts on the number, so "cannot tell" is nil, never 0.
+  it "counts with count?, and answers nil where it cannot look" do
+    Gori::AgentPresence.count?(":memory:").should be_nil
+    Gori::AgentPresence.count?("").should be_nil
+    with_project do |_registry, project|
+      Gori::AgentPresence.count?(project.db_path, kind: Gori::AgentPresence::KIND_TUI).should eq(0)
+      window = Gori::AgentPresence.announce(project.db_path, client: "gori tui",
+        client_version: nil, read_only: false, selection_source: nil,
+        kind: Gori::AgentPresence::KIND_TUI).not_nil!
+      begin
+        Gori::AgentPresence.count?(project.db_path, kind: Gori::AgentPresence::KIND_TUI).should eq(1)
+      ensure
+        window.close
+      end
+    end
+  end
+
   it "answers nothing for :memory: and the empty path" do
     Gori::AgentPresence.announce(":memory:", client: "c", client_version: nil,
       read_only: false, selection_source: nil).should be_nil

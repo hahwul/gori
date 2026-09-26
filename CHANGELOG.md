@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Miss Ring keeps an agent's reply up until your next key or click, and later notices no longer push it out (Settings → Companion → Agent replies). MCP `reply_to_operator` now tells the agent whether a gori window was open to show it (#1328)
 - MCP: Preferences → AI → MCP permissions switches off what an attached agent may do, one group at a time (send traffic, intercept control, project edits, project management); every group stays on by default and reading the capture is always allowed (#1327)
 - TUI: new `solarized_dark` (dark) and `everforest_light` (light) themes, and the theme picker lists `dancheong` and `hanji` right after `goridark` and `goriday` (#1325)
 - CLI: `gori run oast resume` waits for a busy project as long as `oast listen --save` does, instead of giving up after one second while it saves callbacks (#1321)

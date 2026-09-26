@@ -847,7 +847,7 @@ Project-scoped profiles live in the project database rather than here; see [Per-
 | `colormarker` | GLOBAL History row-colour rules and the custom colour palette, with the same global/project split as `rewriter`. Display only: a colour rule never modifies traffic. See [run colormarker](/reference/cli/#run-colormarker) |
 | `mine` | Saved Param Miner defaults. See [mine](#mine) above |
 | `saved_views` | The GLOBAL History **views** library: named QL queries applied as a lens, with the same global/project split `rewriter` has. See [run views](/reference/cli/#run-views) |
-| `companion` | Miss Ring, the mascot: `enabled` (on by default), `placement` (`body` \| `bar`), `motion` (`lively` \| `calm` \| `still`) and `notices`. See the [Settings guide](/guide/settings/) |
+| `companion` | Miss Ring, the mascot: `enabled` (on by default), `placement` (`body` \| `bar`), `motion` (`lively` \| `calm` \| `still`), `notices` and `replies` (`hold` \| `timed`: whether an agent's reply stays until your next key or click). See the [Settings guide](/guide/settings/) |
 | `layout` | History / Probe / Issues previews, History list order, Sitemap expand depth, tab-bar numbers and slots. See [layout](#layout) above |
 | `statusline` | Bottom status row that runs a command on an interval. See [statusline](#statusline) above |
 | `redaction` | Safe-export profiles, the active one, the on-by-default switch and the placeholder salt. See [redaction](#redaction) above |

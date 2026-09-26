@@ -146,6 +146,22 @@ describe "the delivery drain's wiring" do
     (replies - deliveries).should be < 3
     lines.any?(&.includes?("@agent_reply_cursor = @agent_delivery_cursor")).should be_true
   end
+
+  # The one argument that makes Miss Ring hold a real reply: the companion specs push
+  # addressed notes by hand, so without this a drain that lost it would leave them green.
+  it "pushes each reply as an addressed note" do
+    src("tui", "runner", "agent_message.cr").any? do |l|
+      l.includes?("@notifications.push(") && l.includes?("source: \"agent\"") && l.includes?("addressed: true")
+    end.should be_true
+  end
+
+  # A held reply is released only by a key or click she was on screen for — not by a
+  # resize, and not by typing into an editor or overlay that hides her.
+  it "releases a held reply only on operator input she was visible for" do
+    lines = src("tui", "runner.cr")
+    lines.any?(&.includes?("@companion.wake_on_input(@operator_input && shown)")).should be_true
+    lines.any?(&.includes?("shown = companion_on_screen?")).should be_true
+  end
 end
 
 describe Gori::Tui::AgentsOverlay, "tell affordance (#1090)" do
