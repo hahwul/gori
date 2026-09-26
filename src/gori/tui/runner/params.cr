@@ -54,6 +54,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     @focus = :body
   end
 
+  # The row's flow was pruned, or a History clear gave its id to another request.
+  PARAMS_GONE = "that request is gone since the scan — rescan (^R)"
+
   # CROSS-TAB: the row's NEWEST carrying flow in the History detail — the hop
   # `sitemap_open_flow` makes, by id rather than by a representative-flow lookup, since the
   # inventory already knows which flows carried the name.
@@ -62,12 +65,12 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       @toast = "select a parameter first"
       return
     end
-    if history_controller.view.open_detail_id(row.last_flow_id, @session.store)
+    if (id = params_controller.carrying_flow_id(row)) && history_controller.view.open_detail_id(id, @session.store)
       @active_tab = :history
       @focus = :body
       @overlay = OverlayKind::Detail
     else
-      @toast = "that request was pruned since the scan — rescan (^R)"
+      @toast = PARAMS_GONE
     end
   end
 
@@ -80,9 +83,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       @toast = "select a parameter first"
       return
     end
-    seed = miner_controller.build_seed_from_flow(row.last_flow_id)
+    seed = params_controller.carrying_flow_id(row).try { |id| miner_controller.build_seed_from_flow(id) }
     unless seed
-      @toast = "that request was pruned since the scan — rescan (^R)"
+      @toast = PARAMS_GONE
       return
     end
     names = ParamInventory.neighbor_names(view.host_rows(row.host), row.host, row.path)

@@ -144,6 +144,27 @@ describe Gori::Params do
     end
   end
 
+  describe ".json_segments" do
+    it "reads back every step the JSON walk names, root first" do
+      Gori::Params.json_segments("user.tags[].name").should eq(["user", "tags", nil, "name"])
+      Gori::Params.json_segments("password[]").should eq(["password", nil])
+      Gori::Params.json_segments(%(a["b.c"][]["x\\"]"])).should eq(["a", "b.c", nil, %(x"])])
+      Gori::Params.json_segments("q").should eq(["q"])
+    end
+
+    it "is the inverse of the walk's naming for awkward keys" do
+      body = %({"a.b":{"[]":[{"q\\"]":1}]},"":2})
+      paths = [] of String
+      Gori::Params.each_json_leaf(body.to_slice) { |path, _, _| paths << path }
+      paths.map { |pa| Gori::Params.json_segments(pa) }.should eq([["a.b", "[]", nil, %(q"])], [""]])
+    end
+
+    it "answers nothing for a path the walk never produces" do
+      Gori::Params.json_segments(%(a["unclosed)).should be_empty
+      Gori::Params.json_segments("a[x]").should be_empty
+    end
+  end
+
   describe ".bracket_leaf" do
     it "reduces bracket-nested names to their leaf name" do
       Gori::Params.bracket_leaf("user[password]").should eq("password")

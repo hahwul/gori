@@ -204,6 +204,15 @@ module Gori::Tui
       end
     end
 
+    # The selected row's newest carrying flow, if it is still that request: nil once it was
+    # pruned, or when a History clear let a NEW flow take its id — ↵ and Mine would otherwise
+    # open or seed an unrelated request (possibly another host) under this row's name.
+    def carrying_flow_id(row : ParamInventory::Row) : Int64?
+      id = row.last_flow_id
+      flow = @host.session.store.flow_row(id)
+      id if flow && ParamInventory.carries?(row, flow)
+    end
+
     # `w`: the visible names as a wordlist under `Paths.wordlists_dir`, where the Fuzzer's
     # path completion and `gori run mine --wordlist` both find it. Header names are left
     # out: a Miner wordlist is one parameter namespace.
