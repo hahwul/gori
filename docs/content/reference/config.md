@@ -20,6 +20,11 @@ Everything lives under `GORI_HOME` (`$GORI_HOME` if set and non-empty, otherwise
 | `wordlists/` | Fuzzer / miner wordlists |
 | `protos/` | gRPC descriptor sets (`protoc --descriptor_set_out`), loaded by any project with no path of its own |
 | `active_project` | Marker for the most-recently-used project |
+| `gori.log` | The TUI's log |
+| `browser/` | Profiles for the browsers **Open browser** launches |
+| `shell/` | CA bundle and environment for **Open shell** |
+| `spool/` | A running fuzz sweep's full results, until they are saved or discarded |
+| `preview/` | Temporary files handed to an external viewer |
 
 ## settings.json
 
@@ -50,7 +55,7 @@ Its location resolves as `--config PATH` → `$GORI_CONFIG` → `$GORI_HOME/sett
 | `serve_landing` | bool | `true` | Serve the built-in info / CA-download page, both when the listen address is hit directly and at the reserved host `http://gori.proxy/` (or `http://gori/`) for a client already pointed at the proxy |
 | `connect_timeout_secs` | integer | `30` | Upstream connect timeout in seconds (minimum `1`) |
 | `io_timeout_secs` | integer | `30` | Upstream read / write idle timeout in seconds (minimum `1`) |
-| `capture_max_mib` | integer | `2` | Largest body stored per message, in MiB. Larger bodies still forward byte-exact; only the stored copy is truncated, and the true wire size is recorded |
+| `capture_max_mib` | integer | `2` | Largest body stored per message, in MiB (1–2047). Larger bodies still forward byte-exact; only the stored copy is truncated, and the true wire size is recorded |
 | `http2` | string | `"auto"` | `auto` reflects the origin's ALPN; `off` forces HTTP/1.1 on every tunnelled connection. See [http2](#http2) below |
 | `strip_alt_svc` | bool | `false` | Remove the `Alt-Svc` response fields advertising HTTP/3 before the client sees them, so a browser cannot switch to a transport gori does not carry. See [strip_alt_svc](#strip-alt-svc) below |
 | `tls_passthrough` | array | `[]` | Hosts to relay without decrypting. See [tls_passthrough](#tls-passthrough) below |
@@ -276,7 +281,7 @@ Rules are **ordered** and the **first match wins**, so specific rules go above g
 | Key | Type | Description |
 |-----|------|-------------|
 | `host` | string | Host pattern, same dialect as scope `host` rules: `corp.internal` covers that host and its subdomains, `*.corp.internal` is a glob, `*` is the catch-all. Case-insensitive |
-| `kind` | string | `direct`, `http`, `http+tls` (HTTP CONNECT over TLS), `socks5` (local DNS), or `socks5h` (proxy DNS). An unknown kind drops the rule rather than being treated as `direct`, which would quietly disable an intended proxy |
+| `kind` | string | `direct`, `http`, `http+tls` (HTTP CONNECT over TLS), `socks5` (local DNS), or `socks5h` (proxy DNS). An unknown kind (or a missing host) drops the rule and fails every rule-routed dial closed until the file is fixed, rather than being treated as `direct`, which would quietly disable an intended proxy |
 | `addr` | string | Proxy `host:port`. Port defaults to `8080` for `http`, `443` for `http+tls`, and `1080` for either SOCKS kind. Must be absent for `direct` |
 | `username` | string | Optional. Sent as HTTP Basic (RFC 7617) for `http` and `http+tls`, or via the RFC 1929 exchange for either SOCKS kind |
 | `password_env` | string | Optional. The **name** of an OS environment variable holding the password |
@@ -621,7 +626,8 @@ Saved defaults for a Discover run. Written only once you save the discover optio
     "spider": true,
     "bruteforce": true,
     "extensions": false,
-    "keep_alive": true
+    "keep_alive": true,
+    "assets": false
   }
 }
 ```
@@ -635,6 +641,7 @@ Saved defaults for a Discover run. Written only once you save the discover optio
 | `bruteforce` | bool | `true` | Brute-force paths from the wordlist |
 | `extensions` | bool | `false` | Also probe extension variants of each candidate |
 | `keep_alive` | bool | `true` | Reuse upstream connections across requests (the **Keep-alive** toggle in the Discover overlay). A file written before the key existed reads as `true` |
+| `assets` | bool | `false` | Also fetch images, fonts and media during the crawl |
 
 ### mine
 
@@ -709,7 +716,7 @@ Surfaces that do not own capture never prune, whatever the cap says: `gori mcp`'
 
 ### oast_providers
 
-OAST providers defined once and reusable across every project. Project-scoped providers live in the project database instead; these are the global library, edited in Preferences → **OAST providers**.
+OAST providers defined once and reusable across every project. Project-scoped providers live in the project database instead; these are the global library, added in the OAST tab's provider overlay with its scope set to `global`.
 
 ```json
 {
@@ -730,7 +737,7 @@ OAST providers defined once and reusable across every project. Project-scoped pr
 |-----|------|-------------|
 | `id` | string | Random hex token assigned on creation. Do not hand-edit |
 | `name` | string | Label shown in the OAST tab |
-| `kind` | string | Provider type, e.g. `interactsh` |
+| `kind` | string | Provider type: `interactsh`, `custom-http`, `webhook.site`, `BOAST`, or `postbin` |
 | `host` | string | Provider host |
 | `token` | string | Optional auth token for the provider |
 | `enabled` | bool | Whether the provider is selectable (default `true`) |
@@ -814,7 +821,7 @@ The [safe evidence export](/reference/cli/#safe-evidence-export) profiles, which
 
 Each profile carries `name` plus any of `description`, `json_fields`, `json_pointers`, `form_keys` and `patterns` — see [run redact](/reference/cli/#run-redact) for what each kind matches. Parsing is tolerant: an entry with no usable `name` is dropped, and a rule entry that is not a non-empty string is skipped rather than failing the load.
 
-The salt is a **secret**, kept beside `env`'s token values on the same terms (the tree is `0700`, the file `0600`). A factory reset keeps it — discarding it would silently break every placeholder in every artifact already written — and `gori settings export --sections redaction` carries it, so share `gori run redact profiles --format json` instead when you mean to hand over only the rules.
+The salt is a **secret**, kept beside `env`'s token values on the same terms (the tree is `0700`, the file `0600`). A factory reset keeps it — discarding it would silently break every placeholder in every artifact already written — and a plain `gori settings export` carries it, so share `gori run redact profiles --format json` instead when you mean to hand over only the rules.
 
 Project-scoped profiles live in the project database rather than here; see [Per-Project Overrides](#per-project-overrides).
 
@@ -835,7 +842,7 @@ Project-scoped profiles live in the project database rather than here; see [Per-
 | `hooks` | External process hooks: `timeout_secs` (default 5, clamped 1-60) is the wall-clock budget one hook run gets at every seam. See [Process hooks](/guide/scripting/#process-hooks) |
 | `decoder` | Named Decoder chain specs, shared by every project and callable as a chain step by name (open sub-tabs live in the project database) |
 | `rewriter` | GLOBAL Match & Replace rules, applied in every project, each with a default on/off state a project can override. See [Global and project rules](/guide/proxy/#global-and-project-rules) |
-| `colormarker` | GLOBAL History row-colour rules, with the same global/project split as `rewriter`. Display only: a colour rule never modifies traffic. See [run colormarker](/reference/cli/#run-colormarker) |
+| `colormarker` | GLOBAL History row-colour rules and the custom colour palette, with the same global/project split as `rewriter`. Display only: a colour rule never modifies traffic. See [run colormarker](/reference/cli/#run-colormarker) |
 | `mine` | Saved Param Miner defaults. See [mine](#mine) above |
 | `saved_views` | The GLOBAL History **views** library: named QL queries applied as a lens, with the same global/project split `rewriter` has. See [run views](/reference/cli/#run-views) |
 | `companion` | Miss Ring, the mascot: `enabled` (on by default), `placement` (`body` \| `bar`), `motion` (`lively` \| `calm` \| `still`) and `notices`. See the [Settings guide](/guide/settings/) |
@@ -881,4 +888,4 @@ Saving a Project-tab field that equals the current global value deletes that KV 
 
 ## Projects & Database
 
-Each project keeps at most `retention.max_flows` flows (100,000 by default; see [retention](#retention)); older ones are pruned so the file plateaus. Each project is a SQLite database (via `crystal-db` / `crystal-sqlite3`) holding flows, WebSocket messages, scope rules, issues, match rules, HTTP/2 frames, repeater and fuzz sessions, host overrides, sitemap tags, miner sessions, and Probe issues, plus a full-text index over flow bodies. Stored request/response bodies are capped at 2 MiB; larger bodies are truncated in the database, but their true wire size is still recorded. Serve any project's database directly with `--db PATH`, or select a named project with `--project NAME`.
+Each project keeps at most `retention.max_flows` flows (100,000 by default; see [retention](#retention)); older ones are pruned so the file plateaus. Each project is a SQLite database (via `crystal-db` / `crystal-sqlite3`) holding flows, WebSocket messages, scope rules, issues, match rules, HTTP/2 frames, repeater and fuzz sessions, host overrides, sitemap tags, miner sessions, and Probe issues, plus a full-text index over flow bodies. Stored request/response bodies are capped at `network.capture_max_mib` (2 MiB by default); larger bodies are truncated in the database, but their true wire size is still recorded. Open any project's database directly with `--db PATH`; `gori run` and `gori mcp` also select a named project with `--project NAME`.

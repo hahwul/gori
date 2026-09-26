@@ -20,6 +20,11 @@ gori는 전역 환경설정을 `settings.json`에, 각 프로젝트를 자체 SQ
 | `wordlists/` | Fuzzer / miner 워드리스트 |
 | `protos/` | gRPC 디스크립터 셋(`protoc --descriptor_set_out`). 자체 경로를 지정하지 않은 프로젝트가 여기서 읽습니다 |
 | `active_project` | 가장 최근에 사용한 프로젝트 마커 |
+| `gori.log` | TUI 로그 |
+| `browser/` | **Open browser**가 띄우는 브라우저 프로필 |
+| `shell/` | **Open shell**용 CA 번들과 환경 |
+| `spool/` | 실행 중인 fuzz 스윕의 전체 결과(저장하거나 버릴 때까지) |
+| `preview/` | 외부 뷰어에 넘기는 임시 파일 |
 
 ## settings.json {#settingsjson}
 
@@ -50,7 +55,7 @@ gori는 전역 환경설정을 `settings.json`에, 각 프로젝트를 자체 SQ
 | `serve_landing` | bool | `true` | 내장 안내 / CA 다운로드 페이지 제공. 리슨 주소로 직접 접속한 경우와, 이미 프록시를 설정한 클라이언트가 예약 호스트 `http://gori.proxy/`(또는 `http://gori/`)로 접속한 경우 모두 해당 |
 | `connect_timeout_secs` | integer | `30` | 업스트림 연결 타임아웃(초, 최소 `1`) |
 | `io_timeout_secs` | integer | `30` | 업스트림 읽기 / 쓰기 유휴 타임아웃(초, 최소 `1`) |
-| `capture_max_mib` | integer | `2` | 메시지당 저장하는 본문의 최대 크기(MiB). 더 큰 본문도 바이트 그대로 전달되며, 잘리는 것은 저장본뿐이고 실제 전송 크기는 기록됩니다 |
+| `capture_max_mib` | integer | `2` | 메시지당 저장하는 본문의 최대 크기(MiB, 1–2047). 더 큰 본문도 바이트 그대로 전달되며, 잘리는 것은 저장본뿐이고 실제 전송 크기는 기록됩니다 |
 | `http2` | string | `"auto"` | `auto`는 원 서버의 ALPN을 반영하고, `off`는 모든 터널 연결을 HTTP/1.1로 강제합니다. 아래 [http2](#http2)를 참고하세요 |
 | `strip_alt_svc` | bool | `false` | HTTP/3을 광고하는 `Alt-Svc` 응답 필드를 클라이언트에 도달하기 전에 제거하므로, 브라우저가 gori가 나르지 않는 전송으로 넘어갈 수 없습니다. 아래 [strip_alt_svc](#strip-alt-svc)를 참고하세요 |
 | `tls_passthrough` | array | `[]` | 복호화하지 않고 그대로 중계할 호스트 목록. 아래 [tls_passthrough](#tls-passthrough)를 참고하세요 |
@@ -276,7 +281,7 @@ gori가 `succeeded`로 답하기 전에 두 가지를 검사하고, 각각 연�
 | Key | Type | Description |
 |-----|------|-------------|
 | `host` | string | 호스트 패턴. 스코프 `host` 룰과 같은 문법. `corp.internal`은 해당 호스트와 서브도메인, `*.corp.internal`은 글롭, `*`는 catch-all. 대소문자 무관 |
-| `kind` | string | `direct`, `http`, `http+tls`(TLS 위의 HTTP CONNECT), `socks5`(로컬 DNS), `socks5h`(프록시 DNS). 알 수 없는 kind는 규칙을 버립니다(`direct`로 취급하면 의도한 프록시를 조용히 비활성화하게 되므로) |
+| `kind` | string | `direct`, `http`, `http+tls`(TLS 위의 HTTP CONNECT), `socks5`(로컬 DNS), `socks5h`(프록시 DNS). 알 수 없는 kind(또는 빠진 host)는 규칙을 버리고, 파일을 고칠 때까지 규칙으로 라우팅되는 모든 연결을 닫힌 상태로 실패시킵니다(`direct`로 취급하면 의도한 프록시를 조용히 비활성화하게 되므로) |
 | `addr` | string | 프록시 `host:port`. 포트 기본값은 `http`가 `8080`, `http+tls`가 `443`, 두 SOCKS kind가 `1080`. `direct`에는 없어야 합니다 |
 | `username` | string | 선택. `http`와 `http+tls`는 HTTP Basic(RFC 7617), 두 SOCKS kind는 RFC 1929 교환으로 전송 |
 | `password_env` | string | 선택. 비밀번호를 담은 **OS 환경변수의 이름** |
@@ -619,7 +624,8 @@ Discover 실행의 저장된 기본값입니다. discover 옵션을 저장해야
     "spider": true,
     "bruteforce": true,
     "extensions": false,
-    "keep_alive": true
+    "keep_alive": true,
+    "assets": false
   }
 }
 ```
@@ -633,6 +639,7 @@ Discover 실행의 저장된 기본값입니다. discover 옵션을 저장해야
 | `bruteforce` | bool | `true` | 워드리스트로 경로 무차별 탐색 |
 | `extensions` | bool | `false` | 각 후보의 확장자 변형도 함께 시도 |
 | `keep_alive` | bool | `true` | 요청 간에 업스트림 연결을 재사용(Discover 오버레이의 **Keep-alive** 토글). 이 키가 생기기 전에 기록된 파일은 `true`로 읽힘 |
+| `assets` | bool | `false` | 크롤 중 이미지·폰트·미디어도 가져옴 |
 
 ### mine {#mine}
 
@@ -707,7 +714,7 @@ retention은 **새 기능이 아닙니다**. gori는 프로젝트 DB가 무한�
 
 ### oast_providers {#oast-providers}
 
-한 번 정의해두고 모든 프로젝트에서 재사용하는 OAST 프로바이더입니다. 프로젝트 전용 프로바이더는 프로젝트 데이터베이스에 저장되고, 여기 있는 것은 Preferences → **OAST providers**에서 편집하는 전역 목록입니다.
+한 번 정의해두고 모든 프로젝트에서 재사용하는 OAST 프로바이더입니다. 프로젝트 전용 프로바이더는 프로젝트 데이터베이스에 저장되고, 여기 있는 것은 OAST 탭의 프로바이더 오버레이에서 scope를 `global`로 두고 추가하는 전역 목록입니다.
 
 ```json
 {
@@ -728,7 +735,7 @@ retention은 **새 기능이 아닙니다**. gori는 프로젝트 DB가 무한�
 |-----|------|-------------|
 | `id` | string | 생성 시 부여되는 무작위 hex 토큰. 직접 수정하지 마세요 |
 | `name` | string | OAST 탭에 표시되는 이름 |
-| `kind` | string | 프로바이더 종류. 예: `interactsh` |
+| `kind` | string | 프로바이더 종류: `interactsh`, `custom-http`, `webhook.site`, `BOAST`, `postbin` |
 | `host` | string | 프로바이더 호스트 |
 | `token` | string | 프로바이더 인증 토큰(선택) |
 | `enabled` | bool | 선택 가능 여부(기본값 `true`) |
@@ -812,7 +819,7 @@ Fuzzer의 Payload 오버레이가 기억하는 워드리스트 경로입니다. 
 
 각 프로파일은 `name`과 함께 `description`, `json_fields`, `json_pointers`, `form_keys`, `patterns` 중 필요한 것을 담습니다. 각 종류가 무엇을 매칭하는지는 [run redact](/ko/reference/cli/#run-redact)를 보세요. 파싱은 관대합니다. 쓸 수 있는 `name`이 없는 항목은 버려지고, 비어 있지 않은 문자열이 아닌 규칙 항목은 로드를 실패시키는 대신 건너뜁니다.
 
-salt는 **비밀**이며, `env`의 토큰 값과 같은 조건으로 보관됩니다(디렉터리는 `0700`, 파일은 `0600`). 공장 초기화는 salt를 남깁니다. 버리면 이미 쓴 모든 산출물의 자리표시자가 조용히 깨지기 때문입니다. `gori settings export --sections redaction`은 salt까지 가져가므로, 규칙만 건네려면 `gori run redact profiles --format json`을 쓰세요.
+salt는 **비밀**이며, `env`의 토큰 값과 같은 조건으로 보관됩니다(디렉터리는 `0700`, 파일은 `0600`). 공장 초기화는 salt를 남깁니다. 버리면 이미 쓴 모든 산출물의 자리표시자가 조용히 깨지기 때문입니다. 인자 없는 `gori settings export`도 salt까지 가져가므로, 규칙만 건네려면 `gori run redact profiles --format json`을 쓰세요.
 
 프로젝트 범위 프로파일은 여기가 아니라 프로젝트 데이터베이스에 있습니다. [프로젝트별 오버라이드](#per-project-overrides)를 보세요.
 
@@ -833,7 +840,7 @@ salt는 **비밀**이며, `env`의 토큰 값과 같은 조건으로 보관됩�
 | `hooks` | 외부 프로세스 훅: `timeout_secs`(기본 5, 1~60으로 클램프)는 모든 이음매에서 훅 한 번이 받는 벽시계 예산입니다. [프로세스 훅](/ko/guide/scripting/#프로세스-훅) 참고 |
 | `decoder` | 이름 붙인 Decoder 체인. 모든 프로젝트가 공유하며 체인 단계에서 이름으로 부를 수 있습니다(열려 있는 서브탭은 프로젝트 DB에 있습니다) |
 | `rewriter` | 전역 Match & Replace 규칙. 모든 프로젝트에 적용되며 각 규칙의 기본 켜짐/꺼짐 상태는 프로젝트가 오버라이드할 수 있습니다. [전역 규칙과 프로젝트 규칙](/ko/guide/proxy/#reusing-a-rule-across-projects) 참고 |
-| `colormarker` | 전역 History 행 색상 규칙. `rewriter`와 동일한 전역/프로젝트 분리 구조입니다. 표시 전용이며 트래픽을 수정하지 않습니다. [run colormarker](/ko/reference/cli/#run-colormarker) 참고 |
+| `colormarker` | 전역 History 행 색상 규칙과 사용자 색상 팔레트. `rewriter`와 동일한 전역/프로젝트 분리 구조입니다. 표시 전용이며 트래픽을 수정하지 않습니다. [run colormarker](/ko/reference/cli/#run-colormarker) 참고 |
 | `mine` | Param Miner의 저장된 기본값. 위 [mine](#mine) 참고 |
 | `saved_views` | 전역 History **뷰** 라이브러리. 이름 붙은 QL 쿼리를 렌즈로 적용하며, `rewriter`와 같은 전역/프로젝트 분리를 씁니다. [run views](/ko/reference/cli/#run-views) 참고 |
 | `companion` | 마스코트 Miss Ring: `enabled`(기본 on), `placement`(`body` \| `bar`), `motion`(`lively` \| `calm` \| `still`), `notices`. [Settings 가이드](/ko/guide/settings/) 참고 |
@@ -879,4 +886,4 @@ salt는 **비밀**이며, `env`의 토큰 값과 같은 조건으로 보관됩�
 
 ## 프로젝트와 데이터베이스 {#projects-database}
 
-각 프로젝트는 최대 `retention.max_flows`개의 플로우를 보관하며(기본 100,000, [retention](#retention) 참고), 그보다 오래된 것은 정리되어 파일 크기가 일정 수준에서 유지됩니다. 각 프로젝트는 SQLite 데이터베이스(`crystal-db` / `crystal-sqlite3` 사용)입니다. 여기에는 플로우, WebSocket 메시지, 스코프 규칙, 이슈, match 규칙, HTTP/2 프레임, repeater 및 fuzz 세션, 호스트 오버라이드, sitemap 태그, miner 세션, Probe 이슈가 담기고, 플로우 본문 전체를 훑는 전문 인덱스도 들어 있습니다. 저장하는 요청/응답 본문은 2 MiB로 상한이 걸려 있어, 더 큰 본문은 데이터베이스에서 잘리지만 실제 와이어 크기는 그대로 기록합니다. `--db PATH`로 어떤 프로젝트의 데이터베이스든 직접 지정하거나, `--project NAME`으로 이름이 지정된 프로젝트를 고릅니다.
+각 프로젝트는 최대 `retention.max_flows`개의 플로우를 보관하며(기본 100,000, [retention](#retention) 참고), 그보다 오래된 것은 정리되어 파일 크기가 일정 수준에서 유지됩니다. 각 프로젝트는 SQLite 데이터베이스(`crystal-db` / `crystal-sqlite3` 사용)입니다. 여기에는 플로우, WebSocket 메시지, 스코프 규칙, 이슈, match 규칙, HTTP/2 프레임, repeater 및 fuzz 세션, 호스트 오버라이드, sitemap 태그, miner 세션, Probe 이슈가 담기고, 플로우 본문 전체를 훑는 전문 인덱스도 들어 있습니다. 저장하는 요청/응답 본문은 `network.capture_max_mib`(기본 2 MiB)로 상한이 걸려 있어, 더 큰 본문은 데이터베이스에서 잘리지만 실제 와이어 크기는 그대로 기록합니다. `--db PATH`로 어떤 프로젝트의 데이터베이스든 직접 엽니다. `gori run`과 `gori mcp`는 `--project NAME`으로 이름이 지정된 프로젝트도 고를 수 있습니다.

@@ -25,7 +25,7 @@ gori settings          # print the settings.json path
 gori settings --edit   # open it in your editor
 ```
 
-파일을 직접 편집할 일은 거의 없습니다. 파일에 담기는 모든 항목은 하나의 화면, **Preferences** 모달에서 편집할 수 있으며, 네 개의 서브탭(General, Appearance, Editor & Keys, Network & Tabs)으로 묶여 있습니다.
+파일을 직접 편집할 일은 거의 없습니다. 파일에 담기는 모든 항목은 하나의 화면, **Preferences** 모달에서 편집할 수 있으며, 다섯 개의 서브탭(General, Appearance, Editor & Keys, Network & Tabs, AI)으로 묶여 있습니다.
 
 | 여는 방법 | 도착 지점 |
 |-----------|-----------|
@@ -47,7 +47,7 @@ gori settings --edit   # open it in your editor
 
 ## 루트 CA {#the-root-ca}
 
-HTTPS를 인터셉트하려면 클라이언트가 gori의 루트 인증서를 신뢰해야 합니다. 이 인증서는 `~/.gori/ca`에 `root.crt.pem`과 `root.key.pem`으로 보관됩니다.
+HTTPS를 인터셉트하려면 클라이언트가 gori의 루트 인증서를 신뢰해야 합니다. 이 인증서는 `$GORI_HOME/ca`(기본값 `~/.gori/ca`)에 `root.crt.pem`과 `root.key.pem`으로 보관됩니다.
 
 ```bash
 gori ca                       # print the certificate path
