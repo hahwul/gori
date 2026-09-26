@@ -189,11 +189,14 @@ module Gori
       Cache: cache:hit  cache:miss  cache:dynamic  cache:none  — what the RESPONSE HEADERS say
       about caching, normalised to one signal. `hit` = served from a shared cache (a positive
       `Age`, `X-Cache: HIT`, a served-from `CF-Cache-Status`) — the web-cache-deception
-      candidate; `miss` = a cache saw it but went to origin (`X-Cache: MISS`, `Age: 0`);
-      `dynamic` = declared uncacheable (`CF-Cache-Status: DYNAMIC`, `Cache-Control:
-      no-store`/`private`); `none` = no cache headers at all (a Pending flow is `none`). Read
-      from the stored head on read, so it names what the wire said, not what a cache did —
-      confirm a `hit` with a no-session re-request. An unknown value (cache:yes) drops the term.
+      candidate; `miss` = a cache saw it but went to origin (`X-Cache: MISS`,
+      `CF-Cache-Status: MISS`, `X-Cache-Hits: 0`); `dynamic` = declared uncacheable
+      (`CF-Cache-Status: DYNAMIC`, `Cache-Control: no-store`, a bare `private`); `none` = no
+      cache verdict — no cache headers, or only neutral ones (`Age: 0`, a field-limited
+      `private="set-cookie"`, a vendor value gori does not recognise); a Pending flow is
+      `none`. Read from the stored head on read, so it names what the wire said, not what a
+      cache did — confirm a `hit` with a no-session re-request. An unknown value (cache:yes)
+      drops the term.
 
       Regex (~): host~^api\\.  body~secret\\d+  path~/admin  method~^P(OST|UT)$ — on host path url
       method scheme header body (and req./resp. header/body). Case-sensitive; prefix (?i) to fold.

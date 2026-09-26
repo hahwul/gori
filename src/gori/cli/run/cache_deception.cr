@@ -57,42 +57,64 @@ module Gori
         overrides = Gori::HostOverrides.load(store)
         engine = Authorize::Engine.live(outbound, !insecure, timeout, overrides: overrides)
 
-        reports = [] of CacheDeception::Report
-        checked = 0
-        sent = 0
-        begin
-          flow_ids.uniq.each do |id|
-            detail = store.get_flow(id)
-            unless detail
-              STDERR.puts "gori run cache-deception: no flow with id #{id}"
-              next
-            end
-            next if report_skip_reason?(id, detail, unsafe_methods)
-            row = detail.row
-            next if report_outbound_skip?(id, row, outbound)
-            report = CacheDeception.check(engine, detail)
-            next unless report # nil only if the engine was stopped before completing the check
-            reports << report
-            sent += report.sent_count
-            checked += 1 unless report.verdict.blocked? || report.verdict.errored?
-            emit_cache_deception(report, format) if format != :json
+        reports, checked, sent, failed =
+          begin
+            check_cache_deception_flows(store, engine, outbound, flow_ids.uniq, unsafe_methods, format)
+          ensure
+            store.close
+            outbound.close
           end
-        ensure
-          store.close
-          outbound.close
-        end
 
         emit_cache_deception_json_array(reports) if format == :json
         deceptions = reports.count(&.verdict.deception?)
         STDERR.puts "checked #{checked} flow#{checked == 1 ? "" : "s"} — " \
                     "#{deceptions} likely cache deception#{deceptions == 1 ? "" : "s"}"
-        exit_if_no_cache_deception_evidence(reports, sent, checked)
+        exit_if_no_cache_deception_evidence(reports, sent, checked, failed)
+      end
+
+      # The per-flow loop, returning `{reports, checked, sent, failed}`. One flow that cannot be
+      # replayed is not the end of the selection — the same rule as `gori run authorize`'s
+      # `on_error`: a raise before any send (a backend that cannot be built, or a head
+      # `FlowRequest.build` refuses that `skip_reason` did not screen) is reported on STDERR
+      # and the run moves on. Escaping here lost every remaining flow AND the buffered
+      # `--format json` array with its summary.
+      private def self.check_cache_deception_flows(store : Store, engine : Authorize::Engine,
+                                                   outbound : Outbound, flow_ids : Array(Int64),
+                                                   unsafe_methods : Bool, format : Symbol)
+        reports = [] of CacheDeception::Report
+        checked = 0
+        sent = 0
+        failed = 0
+        flow_ids.each do |id|
+          detail = store.get_flow(id)
+          unless detail
+            STDERR.puts "gori run cache-deception: no flow with id #{id}"
+            next
+          end
+          next if report_skip_reason?(id, detail, unsafe_methods)
+          next if report_outbound_skip?(id, detail.row, outbound)
+          report = begin
+            CacheDeception.check(engine, detail)
+          rescue ex
+            failed += 1
+            STDERR.puts "  #{authorize_failure_text(detail, ex)}"
+            next
+          end
+          next unless report # nil only if the engine was stopped before completing the check
+          reports << report
+          sent += report.sent_count
+          checked += 1 unless report.verdict.blocked? || report.verdict.errored?
+          emit_cache_deception(report, format) if format != :json
+        end
+        {reports, checked, sent, failed}
       end
 
       private def self.exit_if_no_cache_deception_evidence(reports : Array(CacheDeception::Report),
-                                                           sent : Int32, checked : Int32) : Nil
+                                                           sent : Int32, checked : Int32,
+                                                           failed : Int32) : Nil
         if reports.empty?
-          STDERR.puts "gori run cache-deception: no flow was checked — every selection was missing, skipped, or out of scope"
+          STDERR.puts "gori run cache-deception: no flow was checked — every selection was missing, skipped, " \
+                      "#{failed > 0 ? "out of scope, or could not be replayed" : "or out of scope"}"
           exit 1
         end
         if sent == 0
@@ -198,6 +220,11 @@ module Gori
 
       def self.cache_deception_json_for_spec(report : CacheDeception::Report) : String
         cache_deception_report_json(report)
+      end
+
+      def self.check_cache_deception_flows_for_spec(store : Store, engine : Authorize::Engine,
+                                                    outbound : Outbound, flow_ids : Array(Int64))
+        check_cache_deception_flows(store, engine, outbound, flow_ids, false, :json)
       end
     end
   end

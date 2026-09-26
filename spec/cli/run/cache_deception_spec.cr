@@ -29,6 +29,54 @@ private def control_cache_hit_review_report : CD::Report
   CD.classify(AZ::Target.new(8_i64, "GET", "https://acme.test/account", [authed, anon]), control)
 end
 
+private class CliCacheBackend < Gori::Fuzz::Backend
+  def initialize(@origin : Gori::Fuzz::Origin)
+  end
+
+  def origin : Gori::Fuzz::Origin
+    @origin
+  end
+
+  def send(bytes : Bytes) : Gori::Repeater::Result
+    head = "HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\n".to_slice
+    Gori::Repeater::Result.new(head, "page".to_slice, nil, 1_000_i64)
+  end
+end
+
+private def cli_cd_flow(store : Gori::Store, host : String, head : String) : Int64
+  id = store.insert_flow(Gori::Store::CapturedRequest.new(
+    created_at: 1_i64, scheme: "https", host: host, port: 443,
+    method: "GET", target: "/account", http_version: "HTTP/1.1",
+    head: head.to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
+  store.update_response(Gori::Store::CapturedResponse.new(flow_id: id, status: 200,
+    head: "HTTP/1.1 200 OK\r\n\r\n".to_slice))
+  id
+end
+
+describe "gori run cache-deception — per-flow failures" do
+  it "reports a flow that raises before any send and keeps checking the rest" do
+    with_store do |store|
+      first = cli_cd_flow(store, "ok.test", "GET /account HTTP/1.1\r\nHost: ok.test\r\n\r\n")
+      broken = cli_cd_flow(store, "boom.test", "GET /account HTTP/1.1\r\nHost: boom.test\r\n\r\n")
+      pseudo = cli_cd_flow(store, "ok.test", ":method: GET\r\n:path: /account\r\n\r\n")
+      last = cli_cd_flow(store, "ok.test", "GET /account HTTP/1.1\r\nHost: ok.test\r\n\r\n")
+      store.flush
+      engine = AZ::Engine.new(->(origin : Gori::Fuzz::Origin, _http2 : Bool) {
+        raise Gori::Error.new("backend unavailable") if origin.host == "boom.test"
+        CliCacheBackend.new(origin).as(Gori::Fuzz::Backend)
+      })
+
+      reports, checked, sent, failed = Gori::CLI::Run.check_cache_deception_flows_for_spec(
+        store, engine, ungated_outbound, [first, broken, pseudo, last])
+
+      reports.map(&.flow_id).should eq([first, last])
+      checked.should eq(2)
+      sent.should eq(4)
+      failed.should eq(1) # the pseudo-header head is a skip, not a failure
+    end
+  end
+end
+
 describe "gori run cache-deception — output" do
   it "renders the text report with the verdict, three trials and the cache signal" do
     text = Gori::CLI::Run.cache_deception_text_for_spec(cached_report)

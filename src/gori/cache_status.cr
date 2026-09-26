@@ -65,9 +65,13 @@ module Gori
     # `NONE` = no caching applied. All three say "this will not be cached".
     CF_DYNAMIC = {"dynamic", "bypass", "none"}
 
+    # Every field name `Signals#observe` reads. The byte scan in `classify(Bytes)` skips any
+    # other field before allocating it, so a name added to `observe` and not here is silently
+    # ignored on that path — spec/cache_status_spec.cr checks the two classify paths agree.
     CACHE_HEADERS = %w[
       Age X-Cache X-Cache-Status CF-Cache-Status X-Cache-Hits X-Varnish Cache-Status
       X-Vercel-Cache X-Proxy-Cache Akamai-Cache-Status CDN-Cache Server-Timing
+      X-Nextjs-Cache X-LiteSpeed-Cache
       Cache-Control Surrogate-Control CDN-Cache-Control
     ]
 
@@ -104,7 +108,7 @@ module Gori
         when "server-timing"
           observe_signal(server_timing_signal(value))
         when "x-cache", "x-cache-status", "x-vercel-cache", "x-proxy-cache",
-             "akamai-cache-status", "cdn-cache"
+             "akamai-cache-status", "cdn-cache", "x-nextjs-cache", "x-litespeed-cache"
           observe_signal(vendor_signal(value))
         end
       end
@@ -151,9 +155,12 @@ module Gori
         @dynamic = true if signal.dynamic?
       end
 
+      # Next.js says `HIT`/`STALE`/`MISS`, LiteSpeed `hit`, `hit,litemage` or `miss`. An exact
+      # `PRERENDER` is Vercel's static prerender cache answering — served from a cache.
       private def vendor_signal(value : String) : Signal?
-        d = value.downcase
-        hit = d.includes?("hit") || d.includes?("stale") || d.includes?("updating") || d.includes?("revalidated")
+        d = value.strip.downcase
+        hit = d.includes?("hit") || d.includes?("stale") || d.includes?("updating") ||
+              d.includes?("revalidated") || d == "prerender"
         miss = d.includes?("miss") || d.includes?("expired")
         dynamic = d.includes?("bypass") || d == "dynamic" || d == "pass" || d == "none"
         return Signal::Hit if hit
