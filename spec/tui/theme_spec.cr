@@ -58,7 +58,7 @@ describe Gori::Tui::Theme do
   end
 
   it "lists the available themes" do
-    Theme.available.should eq(["goridark", "goriday", "latte", "espresso", "tokyonight", "gruvbox", "nord", "dracula", "solarized_light", "rosepine_dawn", "catppuccin_mocha", "monokai", "everforest", "onedark", "kanagawa", "github_dark", "zenburn", "synthwave84", "cyberpunk", "matrix", "cobalt2", "high_contrast", "github_light", "gruvbox_light", "one_light", "ayu_light", "rosepine", "tokyonight_day", "dancheong", "hanji"])
+    Theme.available.should eq(["goridark", "goriday", "dancheong", "hanji", "latte", "espresso", "tokyonight", "gruvbox", "nord", "dracula", "solarized_light", "rosepine_dawn", "catppuccin_mocha", "monokai", "everforest", "onedark", "kanagawa", "github_dark", "zenburn", "synthwave84", "cyberpunk", "matrix", "cobalt2", "high_contrast", "github_light", "gruvbox_light", "one_light", "ayu_light", "rosepine", "tokyonight_day", "solarized_dark", "everforest_light"])
   end
 
   it "swaps the active palette and bumps the revision" do
@@ -193,7 +193,7 @@ describe "Theme custom loading" do
     }) do
       Gori::Tui::Theme.load_custom
       avail = Gori::Tui::Theme.available
-      avail.first(30).should eq(["goridark", "goriday", "latte", "espresso", "tokyonight", "gruvbox", "nord", "dracula", "solarized_light", "rosepine_dawn", "catppuccin_mocha", "monokai", "everforest", "onedark", "kanagawa", "github_dark", "zenburn", "synthwave84", "cyberpunk", "matrix", "cobalt2", "high_contrast", "github_light", "gruvbox_light", "one_light", "ayu_light", "rosepine", "tokyonight_day", "dancheong", "hanji"]) # built-ins lead
+      avail.first(32).should eq(["goridark", "goriday", "dancheong", "hanji", "latte", "espresso", "tokyonight", "gruvbox", "nord", "dracula", "solarized_light", "rosepine_dawn", "catppuccin_mocha", "monokai", "everforest", "onedark", "kanagawa", "github_dark", "zenburn", "synthwave84", "cyberpunk", "matrix", "cobalt2", "high_contrast", "github_light", "gruvbox_light", "one_light", "ayu_light", "rosepine", "tokyonight_day", "solarized_dark", "everforest_light"]) # built-ins lead
       avail.should contain("ocean")
       avail.should contain("badname")
       avail.should_not contain("broken")

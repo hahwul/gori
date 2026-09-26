@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- TUI: new `solarized_dark` (dark) and `everforest_light` (light) themes, and the theme picker lists `dancheong` and `hanji` right after `goridark` and `goriday` (#1325)
 - CLI: `gori run oast resume` waits for a busy project as long as `oast listen --save` does, instead of giving up after one second while it saves callbacks (#1321)
 - Network: environment proxy selection applies its loopback and NO_PROXY CIDR exceptions to resolver-recognized numeric IPv4 aliases (#1318)
 - Repeater: differential **timing analysis** of two request variants — send the A/B pair many times (synchronized single-packet/last-byte race, or interleaved) and get a verdict (which is consistently slower) from the response order and per-variant quartiles, never a single number. `Space` → `B` over two marked sub-tabs, `gori run repeater timing <idA> <idB>`, and MCP `timing_requests` (#1246)
