@@ -50,21 +50,22 @@ issue #357.
 **The space menu is one menu per tab, not one per focus level.** `Verb::Definition#section`
 is a FOCUS-AREA axis, and for a long time it gated visibility straight through: the card was
 `COMMON ∪ the focused pane's section`, so the sub-tab strip's own verbs — new, close,
-duplicate, rename, tag, find, mark — showed only while the strip had focus. From a body pane
+duplicate, rename, mark, find, filter — showed only while the strip had focus. From a body pane
 the operator had to walk focus up a level before `Space` would offer to close the sub-tab
 they were looking at. With `⇧1`–`⇧9` landing anywhere on the strip, *what `Space` offers must
 not depend on which row the cursor happens to be on*. So on the nine tabs that carry a strip
 (Repeater, Fuzzer, Miner, Sequencer, Decoder, JWT, Cookie, Comparer, Notes) the `:subtab` and
-`:tab` sections are drawn as one `SUB-TABS` bucket on **every** view — body, strip and tab
-bar. The two sections were always the same idea (the strip's actions, and the strip's
-search/filter); only the focus level that revealed them differed.
+`:tab` sections are drawn as one `SUB-TABS` bucket on **every** view: expanded where the strip
+or the tab bar has focus, and one `T` **Sub-tabs…** row in a pane (§7, 2026-09-25). The two
+sections were always the same idea (the strip's actions, and the strip's search/filter); only
+the focus level that revealed them differed.
 
 **The bucket spells an intent with the same letter on all nine strips** — `n` new, `w` close,
-`d` duplicate, `e` rename, `t` tag, `f` find, `/` filter, `T` mark-all, `N` clear-marks — and
-a tab that lacks an intent omits the row rather than spending the letter elsewhere. That is
-what makes it one table to learn instead of nine, and it is the reason the bucket is worth a
-rule of its own: nine letters are now reserved in every view of those tabs, which is a real
-tax on the pane sections.
+`d` duplicate, `e` rename, `t` mark, `f` find, `/` filter, `T` mark-all, `N` clear-marks (the
+Repeater adds `g` tag) — and a tab that lacks an intent omits the row rather than spending the
+letter elsewhere. That is what makes it one table to learn instead of nine, and it is the
+reason the bucket is worth a rule of its own: the nine are reserved in COMMON, which shares the
+strip-focused card, and a pane view reserves only `T`.
 
 **When a letter collides, the PANE mnemonic moves, not the strip's.** A strip letter has to
 read the same on all nine strips, so moving it costs nine tabs to save one pane; a pane letter
@@ -3956,3 +3957,45 @@ Refines: the R1 guard entry above. #1295.
   project picker already renamed on `e`.
 - **The Fuzzer's Save results is `⇧E`,** the Export chord of four tabs. Its `⇧S` was also
   what a typed menu `S` (Send selection to…, on every Fuzzer view) sends to the keymap.
+
+### 2026-09-26: later reversals in the #1274 entries, and the rules their review added
+
+Refines: the 2026-09-25 #1274/#1282 entries and "no level-1 `c` or `i` where the tab leaves the
+letter to Global" above. #1274, #1295.
+
+The log is append-only, so the statements that later entries overturned are named here instead
+of being edited in place.
+
+- **Pane rows and the strip's nine.** The lexicon entry has boot refuse a pane verb on any of
+  the strip's nine letters. Since the SUB-TABS fold only COMMON reserves them, and a pane view
+  reserves only `T` (`validate_menu_keys!`).
+- **The Miner's filter `F`.** The lexicon entry's reason, "its strip owns `/`", went with the
+  fold. The row keeps `F`; the reason no longer holds.
+- **Pane-local keys.** The pane-local key entry's reason, that the request and template menus
+  spell `p`, `⇧D` and `v` for other rows, now holds only for the Fuzzer template's `v` (Clear
+  selection). The gate stays: in those panes the lenses draw nothing.
+- **Write-backs.** The toggles entry keeps pretty-print request and pretty-print template as
+  direct rows. Both are palette-only on `^U` now, and so is the decoder chain (`^Q`).
+- **Save results.** The toggles entry gives it the export `E`. It is palette-only, on `⇧E`.
+- **Discover's `J`/`K` and the Fuzzer's list paste `A`.** The h/j/k/l entry gives them menu
+  letters. All three are palette-only (list paste keeps `^L`).
+- **The tab bar is app-level focus.** With the tab bar focused, `Space` still lists the tab's
+  rows, but a bare key resolves Sidebar → Global. A tab's own loop letter that Global also binds
+  (`c` or `i`, such as Probe's `c` Dismiss) therefore stops capture or holds traffic there, not
+  the row's action. That is accepted: on the tab bar the Global keys win by design, and the tab
+  keeps its letter everywhere else. The R1 guard models the tab bar and allowlists these pairs
+  by name, so "the press never reaches Global" above holds everywhere but the tab bar.
+- **A pane that owns its keys has its own scope.** Help and the Project tab's NETWORK settings
+  pane are `Scope::Help` and `Scope::ProjectSettings`, verb-less, not History's `Body`: a
+  borrowed scope drew that tab's static family rows and answered its bare family keys.
+- **The keymap's layering reaches the family openers and the hints.** A chord a configured layer
+  (user, keyset or OS row) puts on a Global verb keeps a family's bare opener off it on every
+  tab (`Keymap.global_claims`); `space >` still opens the card. `Hotkeys.binding_for` never
+  advertises a chord the keymap fires as another verb in that scope (`Keymap.displaced?`), so a
+  footer, Help or the palette does not name a default an override took.
+- **`chord_of` names an owner, never a chain.** The target has a chord of its own and no
+  `chord_of`, in the same scope with that chord live in the row's section; boot refuses anything
+  else (`Registry#check_chord_of!`). The Hotkeys editor shows the borrowed key as "(via
+  <owner>)" and sends an edit to the owner's row.
+- **The hint scan reads every spelling of a path.** Besides `space → X` and `␣X`, it refuses an
+  arrowless `space X` / `Space X` and a spaced `␣ X` chip in a non-comment source line.

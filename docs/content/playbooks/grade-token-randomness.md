@@ -48,7 +48,7 @@ Read it like this: a high entropy figure with every row passing means the token 
 
 ## 4. Export the verdict
 
-The collected tokens are live credentials, so gori never writes them to disk; they vanish with the session. The verdict shouldn't. Press `⇧E` to export a Markdown report to a path you choose (the palette offers the same report as JSON), or `Space` → `i` to file it as an **Issue**, which maps Critical to `critical`, Weak to `high`, Moderate to `medium`, and Secure to `info`. Neither carries a token value: the report is built from frequency tables and verdicts, so there's nothing in it to leak.
+The collected tokens are live credentials, so gori never writes them to disk; they vanish with the session. The verdict shouldn't. Press `⇧E` to export a Markdown report to a path you choose (the palette offers the same report as JSON), or `Space` → `a` to file it as an **Issue**, which maps Critical to `critical`, Weak to `high`, Moderate to `medium`, and Secure to `info`. Neither carries a token value: the report is built from frequency tables and verdicts, so there's nothing in it to leak.
 
 **Checkpoint.** You have a saved grade, report or Issue, and not a single raw token left behind.
 

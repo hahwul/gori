@@ -174,7 +174,7 @@ module Gori::Tui
         Item.new("set editor", "↹/↑↓ fields · List = multi-line · wordlist path auto-completes · esc applies"),
         Item.new("{fuzz.run} · {fuzz.stop}", "run · stop"),
         Item.new("↑/↓ · ↵", "results: select · open detail"),
-        Item.new("o · m", "sort · matched-only"),
+        Item.new("{space:fuzz.sort} · {fuzz.matched}", "sort · matched-only"),
         Item.new("e", "rename the sub-tab (on the strip)"),
         Item.new("⇧←/→", "detail: scroll a long line sideways"),
       ]},
@@ -213,9 +213,9 @@ module Gori::Tui
         Item.new("^T", "switch decode ⟷ forge", "cookie.toggle-mode"),
         Item.new("^A", "cycle the format (auto / flask / rack / django)", "cookie.cycle-format"),
         # No verb id: cookie.cycle-algorithm has no chord (^G is the shell's go-to-line key), so
-        # the OPTIONS `algo` badge is click-only, plus `Space → g` and the palette. A verb id here
-        # would make build_rows print a key that does not fire.
-        Item.new("algo badge / Space g", "cycle the Django HMAC algorithm (sha256 / sha1)"),
+        # the OPTIONS `algo` badge is click-only, plus its menu row and the palette. The token
+        # spells the menu path; a verb id would replace the whole column, badge included.
+        Item.new("algo badge / {space:cookie.cycle-algorithm}", "cycle the Django HMAC algorithm (sha256 / sha1)"),
         Item.new("^L", "clear the session", "cookie.clear"),
         Item.new("↹", "cycle INPUT → DECODED → OPTIONS → SECRET (decode) / PAYLOAD → OPTIONS → SECRET → OUTPUT (forge)"),
         Item.new("c", "crack the secret over the SECRET field (a wordlist path or comma list)", "cookie.crack"),
@@ -338,7 +338,7 @@ module Gori::Tui
       ]},
       {"REWRITER", [
         Item.new("{rewriter.add} · ↵/e", "add a Match & Replace rule · edit the selected one"),
-        Item.new("x · {rewriter.delete}", "enable/disable in this project · delete the selected rule"),
+        Item.new("{rewriter.toggle} · {rewriter.delete}", "enable/disable in this project · delete the selected rule"),
         Item.new("{space:rewriter.scope} · {space:rewriter.toggle-default}", "move the rule global ⇄ project · flip a global rule's default everywhere"),
         Item.new("G / P column", "global (every project) or project · G* = this project overrides its default"),
         Item.new("{rewriter.move-down} / {rewriter.move-up}", "reorder within a scope — globals apply first, then project rules"),

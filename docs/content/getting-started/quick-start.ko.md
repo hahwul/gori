@@ -154,7 +154,7 @@ status:5xx
 method:POST body:password
 ```
 
-이제 `example.com` 플로우를 선택하고 `Enter`를 누르세요. 상세 화면에서는 `↑` / `↓`로 스크롤하고 `y`로 복사하며, hex / whitespace / pretty 본문은 `x` / `b` / `p`로 토글합니다. `Esc`로 목록에 돌아옵니다.
+이제 `example.com` 플로우를 선택하고 `Enter`를 누르세요. 상세 화면에서는 `↑` / `↓`로 스크롤하고 `y`로 복사하며, hex / whitespace / pretty 본문은 `Ctrl-X` / `b` / `p`로 토글합니다. `Esc`로 목록에 돌아옵니다.
 
 **확인.** History를 호스트 하나로 필터하고, 플로우를 열어 전체 요청과 응답을 읽을 수 있습니다.
 

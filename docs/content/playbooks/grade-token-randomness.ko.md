@@ -48,7 +48,7 @@ gori run sequence 42 --cookie SESSIONID --count 500
 
 ## 4. 판정 내보내기 {#4-export-the-verdict}
 
-수집한 토큰은 살아 있는 자격 증명이므로 gori는 그것을 디스크에 절대 쓰지 않습니다. 세션과 함께 사라집니다. 판정은 그래서는 안 됩니다. `⇧E`로 원하는 경로에 Markdown 리포트를 내보내거나(팔레트는 같은 리포트를 JSON으로 제공합니다), `Space` → `i`로 **Issue**로 정리합니다. 이때 Critical은 `critical`, Weak는 `high`, Moderate는 `medium`, Secure는 `info`로 매핑됩니다. 둘 중 어느 것도 토큰 값을 담지 않습니다. 리포트는 빈도표와 판정으로 만들어지므로, 새어 나갈 샘플이 그 안에 없습니다.
+수집한 토큰은 살아 있는 자격 증명이므로 gori는 그것을 디스크에 절대 쓰지 않습니다. 세션과 함께 사라집니다. 판정은 그래서는 안 됩니다. `⇧E`로 원하는 경로에 Markdown 리포트를 내보내거나(팔레트는 같은 리포트를 JSON으로 제공합니다), `Space` → `a`로 **Issue**로 정리합니다. 이때 Critical은 `critical`, Weak는 `high`, Moderate는 `medium`, Secure는 `info`로 매핑됩니다. 둘 중 어느 것도 토큰 값을 담지 않습니다. 리포트는 빈도표와 판정으로 만들어지므로, 새어 나갈 샘플이 그 안에 없습니다.
 
 **체크포인트.** 저장된 등급(리포트든 Issue든)을 손에 넣었고, 뒤에 남은 원본 토큰은 하나도 없습니다.
 

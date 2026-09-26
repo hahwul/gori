@@ -138,7 +138,7 @@ The same inventory is `gori run sitemap params` on the CLI and `list_params` ove
 
 The API surface of a single-page app lives in a bundle the browser already downloaded, and the tree only shows the routes someone clicked through. `Space` → `J` (**Scan JavaScript**) reads the captured JavaScript responses and the inline `<script>` blocks of captured HTML pages, finds the endpoint literals in them (`fetch("/api/v1/users")`, an axios call, a route table), and adds the paths nobody has requested to the tree as dimmed rows marked `js`. **It sends nothing**: the bytes are already in the project. A path that captured traffic already reaches keeps its row and gains no second one, so the `N paths` counts stay traffic-only.
 
-The scan reads the flows the tree shows (the `/` query and the lenses apply), newest first, 500 per run, and only responses it has not read before, so running it again after more browsing reads just the new bundles. The toast reports how many new endpoints it found and any cap it hit (a body is read up to 2 MiB). `Space` → `U` hides or shows the `js` rows.
+The scan reads the flows the tree shows (the `/` query and the lenses apply), newest first, 500 per run, and only responses it has not read before, so running it again after more browsing reads just the new bundles. The toast reports how many new endpoints it found and any cap it hit (a body is read up to 2 MiB). `Space` `Z` `J` (**Display…** → **JS references**) hides or shows the `js` rows.
 
 A reference is read the way a browser would resolve it:
 
