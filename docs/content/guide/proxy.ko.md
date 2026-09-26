@@ -17,7 +17,7 @@ gori를 실행하고 클라이언트를 `127.0.0.1:8070`으로 향하게 하세�
 
 각 플로우는 요청과 응답 전체를 기록합니다. 시작 줄, 헤더, 본문(저장되는 본문은 2 MiB로 제한되지만, 더 큰 본문도 바이트 단위 그대로 전달되며 실제 크기를 보고하고, TUI의 플로우 상세 뷰에서 캡처된 바이트 수와 실제 전송 크기 및 Settings → Network / `capture_max_mib`에서 설정값을 늘리는 방법을 배너로 표시합니다)까지 담습니다. gzip, deflate, Brotli, Zstd로 압축된 본문은 화면에 표시할 때 디코드됩니다.
 
-> **HTTPS와 업스트림 검증.** HTTPS의 경우 gori는 오리진 서버 인증서를 시스템 CA 트러스트 스토어로 검증합니다(표준 위치에서 자동 탐색하며 `SSL_CERT_FILE` / `SSL_CERT_DIR`를 존중). 최소 컨테이너 등에서 스토어를 찾지 못하면 검증이 실패해 해당 플로우는 오류로 기록됩니다. 이때는 `SSL_CERT_FILE=/path/to/ca-bundle.crt`를 지정하거나 `--insecure-upstream`으로 실행하세요(설정 → **Network → verify upstream**). 이는 gori가 트래픽을 복호화하기 위해 *클라이언트*에서 gori 루트 CA를 신뢰하는 것과는 별개입니다.
+> **HTTPS와 업스트림 검증.** HTTPS의 경우 gori는 오리진 서버 인증서를 시스템 CA 트러스트 스토어로 검증합니다(표준 위치에서 자동 탐색하며 `SSL_CERT_FILE` / `SSL_CERT_DIR`를 존중). 최소 컨테이너 등에서 스토어를 찾지 못하면 검증이 실패해 해당 플로우는 오류로 기록됩니다. 이때는 `SSL_CERT_FILE=/path/to/ca-bundle.crt`를 지정하거나 `--insecure-upstream`으로 실행하세요(설정 → **Network → Verify upstream TLS**). 이는 gori가 트래픽을 복호화하기 위해 *클라이언트*에서 gori 루트 CA를 신뢰하는 것과는 별개입니다.
 
 <figure class="tui-shot">
   <img src="/images/tui/response-detail.svg" alt="RESPONSE 서브탭의 gori 플로우 상세 뷰. HTTP/2 200 상태 줄과 구문 강조된 응답 헤더를 보여준다">
@@ -139,7 +139,7 @@ Sitemap 행에서 `p`를 누르면 그 호스트나 하위 트리로 좁힌 **Pa
 
 싱글 페이지 앱의 API는 브라우저가 이미 받아 둔 번들 안에 있는데, 트리에는 누군가 직접 눌러 본 경로만 나옵니다. `Space` → `J`(**Scan JavaScript**)는 캡처된 JavaScript 응답과 캡처된 HTML 페이지의 인라인 `<script>`를 읽어 그 안의 엔드포인트 문자열(`fetch("/api/v1/users")`, axios 호출, 라우트 테이블)을 찾고, 아무도 요청하지 않은 경로를 `js` 표시가 붙은 흐린 행으로 트리에 더합니다. **요청은 하나도 보내지 않습니다.** 바이트는 이미 프로젝트 안에 있습니다. 캡처된 트래픽이 이미 닿은 경로는 원래 행을 그대로 쓰고 행이 하나 더 생기지 않으므로, `N paths` 개수는 트래픽만 셉니다.
 
-스캔은 트리가 보여주는 플로우(`/` 쿼리와 렌즈 적용)를 최신 것부터 한 번에 500개씩, 아직 읽지 않은 응답만 읽습니다. 그래서 더 둘러본 뒤 다시 돌리면 새 번들만 읽습니다. 끝나면 토스트로 새로 찾은 엔드포인트 수와 걸린 상한(본문은 2 MiB까지 읽습니다)을 알려줍니다. `Space` `Z` `J`(**Display…** → **JS references**)는 `js` 행을 숨기거나 보여줍니다.
+스캔은 트리가 보여주는 플로우(`/` 쿼리와 렌즈 적용)를 최신 것부터 한 번에 500개씩, 아직 읽지 않은 응답만 읽습니다. 그래서 더 둘러본 뒤 다시 돌리면 새 번들만 읽습니다. 끝나면 토스트로 새로 찾은 엔드포인트 수와 걸린 상한(본문은 2 MiB까지 읽습니다)을 알려줍니다. `Space` `Z` `J`(**Display…** → **Toggle JS references**)는 `js` 행을 숨기거나 보여줍니다.
 
 참조는 브라우저가 해석하는 방식대로 읽습니다.
 
@@ -188,7 +188,7 @@ Sitemap 행에서 `⇧E`(또는 `Space` → `E`)를 누르면 OpenAPI 3.0.3 문�
 
 **재전송은 캡처와 같은 방식으로 소켓을 다시 엽니다.** RFC 8441 플로우로 Repeater를 시드하면 HTTP 탭이 아니라 WebSocket 탭이 열립니다. gori는 HTTP/2로 다이얼하고(ALPN `h2`, 평문 대상이면 h2c prior knowledge), 오리진의 `SETTINGS_ENABLE_CONNECT_PROTOCOL`을 기다린 뒤, `:protocol websocket`과 캡처 자신의 `:path`·`:authority`·헤더를 실은 `:method CONNECT`를 보내고, HTTP/2에는 존재하지 않는 `101`이 아니라 `2xx`를 소켓이 열린 신호로 판정합니다. 그 뒤부터는 HTTP/1.1 경로와 완전히 같은 엔진입니다: 같은 메시지 스크립트, 마스킹, 프레임 모양, 상한, 트랜스크립트. 핸드셰이크는 캡처 그대로이며 지어낸 것은 없습니다. 요청 패널에 보이는 `X-Gori-Protocol: websocket` 줄이 바로 그 `:protocol` 유사 헤더이고, 다른 헤더처럼 편집할 수 있습니다.
 
-네 가지는 감추지 않고 보고합니다. `SETTINGS_ENABLE_CONNECT_PROTOCOL`을 광고하지 않는 오리진은 빈 트랜스크립트가 아니라 그 설정을 지목하는 거부로 끝납니다. RFC 8441 §3이 그 광고 없이 확장 `CONNECT`를 보내는 것을 금지하기 때문입니다. `2xx`가 아닌 응답은 오리진의 헤드를 그대로 실은 거부입니다. 세션 중간의 `RST_STREAM`이나 `GOAWAY`는 이미 주고받은 프레임을 유지하고 피어가 밝힌 에러 코드를 결과 note에 덧붙입니다. 그리고 이런 탭의 `--http`/`^V` 전환은 정지점이 셋이 아니라 둘입니다(WebSocket, 또는 그 `CONNECT`를 평범한 HTTP/2 요청으로). 이 바이트에는 HTTP/1.1 형태가 없기 때문입니다. `keep_sec_websocket_key`는 여기서 보존할 대상이 없으며(RFC 8441에는 `Sec-WebSocket-Key`가 없습니다), 플래그를 무시하는 대신 결과가 그 사실을 알려 줍니다.
+다섯 가지는 감추지 않고 보고합니다. `SETTINGS_ENABLE_CONNECT_PROTOCOL`을 광고하지 않는 오리진은 빈 트랜스크립트가 아니라 그 설정을 지목하는 거부로 끝납니다. RFC 8441 §3이 그 광고 없이 확장 `CONNECT`를 보내는 것을 금지하기 때문입니다. `2xx`가 아닌 응답은 오리진의 헤드를 그대로 실은 거부입니다. 세션 중간의 `RST_STREAM`이나 `GOAWAY`는 이미 주고받은 프레임을 유지하고 피어가 밝힌 에러 코드를 결과 note에 덧붙입니다. 그리고 이런 탭의 `--http`/`^V` 전환은 정지점이 셋이 아니라 둘입니다(WebSocket, 또는 그 `CONNECT`를 평범한 HTTP/2 요청으로). 이 바이트에는 HTTP/1.1 형태가 없기 때문입니다. `keep_sec_websocket_key`는 여기서 보존할 대상이 없으며(RFC 8441에는 `Sec-WebSocket-Key`가 없습니다), 플래그를 무시하는 대신 결과가 그 사실을 알려 줍니다.
 
 **필터로 찾을 수 있습니다.** PROTO 열은 `WSS`로 표시되고, `proto:ws`는 RFC 8441 소켓을 HTTP/1.1 소켓과 함께 돌려줍니다. h2 핸드셰이크에 존재하지도 않는 `101`로 판정하는 대신, 확장 `CONNECT`의 `:protocol` 토큰을 캡처 시점에 흐름에 기록하기 때문입니다. `proto:wss`는 여전히 TLS 쪽만을 뜻합니다. 의도적으로 하지 않는 것이 둘 있습니다. `connect-udp`(RFC 9298)나 `connect-ip`(RFC 9484)를 실은 확장 `CONNECT`는 RFC 6455 프레이밍이 아니므로 잡히지 않고, 오리진이 *거절한* 핸드셰이크는 소켓이 열린 적이 없으므로 거절된 HTTP/1.1 핸드셰이크와 똑같이 평범한 실패 요청입니다. 이 변경 이전의 gori가 캡처한 흐름은 소급해서 추측하지 않고 분류되지 않은 채로 남습니다. 라벨이 필요하면 다시 캡처하세요.
 
@@ -505,7 +505,7 @@ gori run ls --format json --column 'T=regex:tok=(\w+)'
 
 목록은 `a` 추가, `e`/`Enter` 편집, `t` 켜기/끄기, `d` 삭제, `Space → s` 전역/프로젝트 전환, `Shift-J`/`Shift-K` 순서 변경(규칙은 위에서 아래로 적용), `space`로 전체 메뉴를 다룹니다. 편집기는 규칙이 최근 몇 개의 플로우에 영향을 줄지 실시간 미리보기로 보여 줍니다. 규칙은 저장 즉시 적용되고 재시작은 필요 없습니다.
 
-더 새로운 gori가 쓴 규칙(이 빌드가 모르는 operation, target, part, match kind, 또는 읽지 않는 키가 있는 규칙)은 `?` 표시와 함께 목록에 나오고 발동하지 않습니다. 설정을 저장해도 그 필드는 그대로 남습니다. 이 빌드에서는 끄거나 지울 수만 있고, 켜기·편집·복제·전역/프로젝트 이동·순서 변경은 할 수 없으며, 상태 줄이 알아보지 못한 라벨을 알려 줍니다.
+더 새로운 gori가 쓴 규칙(이 빌드가 모르는 operation, target, part, match kind, short-circuit source, 또는 읽지 않는 키가 있는 규칙)은 `?` 표시와 함께 목록에 나오고, 그 행에 이 빌드가 알아보지 못한 라벨이 적히며, 발동하지 않습니다. 설정을 저장해도 그 필드는 그대로 남습니다. 이 빌드에서는 끄거나 지울 수만 있고, 켜기·편집·복제·전역/프로젝트 이동·순서 변경은 할 수 없습니다. 시도하면 상태 줄이 그렇다고 알려 줍니다.
 
 목록 아래에는 편집 가능한 **샘플** 메시지와, 그 옆에 켜져 있는 규칙을 통과시킨 결과가 나란히 놓입니다. 실제로 캡처한 요청을 붙여 넣어 규칙을 풀어놓기 전에 무엇이 바뀌는지 확인하는 자리입니다. 샘플은 그것이 미리 보여 주는 규칙과 마찬가지로 프로젝트에 저장됩니다.
 
@@ -544,7 +544,7 @@ gori run ls --format json --column 'T=regex:tok=(\w+)'
 - **Enable/disable everywhere**(`Space → T`, 토글의 넓은 형태입니다. 직접 키는 없고, `X`는 어느 탭에서든 탭 전체를 비우는 키라서 쓰지 않습니다)는 전역 기본값 자체를 뒤집습니다. 오버라이드하지 않은 모든 프로젝트가 이 값을 따릅니다.
 - 다시 기본값과 같아지도록 되돌리면 오버라이드는 **삭제**됩니다. 그래서 그 프로젝트는 이후에 기본값이 바뀌어도 계속 따라갑니다.
 
-전역 규칙을 삭제하면 모든 프로젝트에서 사라집니다. 다른 창에서 돌고 있는 gori는 규칙을 다시 읽을 때(Rewriter 탭 재진입) 전역 변경을 가져오고, 별도의 gori **프로세스**는 재시작해야 반영됩니다.
+전역 규칙을 삭제하면 모든 프로젝트에서 사라집니다. 실행 중인 다른 gori도 재시작 없이 전역 변경을 가져옵니다. TUI는 프로젝트 데이터베이스가 바뀔 때마다(피어의 쓰기나 자기 캡처) 라이브러리를 다시 읽고, `gori run capture`는 2초마다, `gori mcp`는 도구를 호출할 때마다 다시 읽습니다.
 
 헤드리스에서는 모든 하위 명령이 `--scope=global`로 라이브러리를 가리킵니다. `gori run rewriter add --scope=global …`, `gori run rewriter disable 3 --scope=global`(이 프로젝트의 오버라이드), 여기에 `--everywhere`를 더하면 기본값을 바꿉니다. MCP 규칙 도구도 같은 `scope` 인자를 받습니다.
 
@@ -742,7 +742,7 @@ gori run project export "Acme API" -o acme-api.gori
 gori run project import acme-api.gori
 ```
 
-아카이브는 manifest와 일관된 데이터베이스 스냅샷을 담은 압축 `.gori` 파일 하나입니다. 내보내기는 SQLite의 WAL 안전 스냅샷을 사용하므로 프로젝트가 열린 상태에서도 커밋된 트래픽을 포함합니다. 가져오면 새 id를 가진 별도 프로젝트가 생기며 워크스페이스 바인딩과 런타임 잠금은 원본 머신에 남습니다. 선택기에서는 `Space` → **Import archive**를 고르세요. 프로젝트가 하나도 없어도 빈 Search 행에서 이 메뉴를 열 수 있습니다. 에이전트는 MCP [`export_project` / `import_project`](/ko/guide/mcp/)로 같은 작업을 하며, 가져오기는 `confirm:true`를 넘기기 전까지 미리보기에서 멈춥니다.
+아카이브는 manifest와 일관된 데이터베이스 스냅샷을 담은 압축 `.gori` 파일 하나입니다. 내보내기는 SQLite의 WAL 안전 스냅샷을 사용하므로 프로젝트가 열린 상태에서도 커밋된 트래픽을 포함합니다. 가져오면 새 id를 가진 별도 프로젝트가 생기며 워크스페이스 바인딩과 런타임 잠금은 원본 머신에 남습니다. 선택기에서는 `Space` → **Import archive**가 파일 선택기를 열며, 빈 Search 행에서도 열 수 있습니다. 에이전트는 MCP [`export_project` / `import_project`](/ko/guide/mcp/)로 같은 작업을 하며, 가져오기는 `confirm:true`를 넘기기 전까지 미리보기에서 멈춥니다.
 
 프로젝트에는 요청/응답 자격증명, 세션 슬롯, env 값, 프록시 인증 정보, OAST 세션과 제공자 토큰, Authorize identity가 있을 수 있습니다. 아카이브는 전체 데이터베이스를 마스킹하지 않고 포함하므로 프로젝트 파일과 같은 주의로 보관하세요. 내보내기와 가져오기를 실행하기 전에 개수와 프록시 자격증명 설정 여부를 표시합니다. 가져오기 전에는 비활성화할 pipe Rewriter 규칙, exec Probe 규칙, 파일 기반 스텁의 개수와 초기화할 프로젝트 네트워크 설정, 호스트 오버라이드, 전역 규칙 오버라이드 수, 자동 갱신을 끌 세션 슬롯 수, 그리고 passive로 되돌릴 활성 Probe 모드도 표시합니다. `exec:` 체인 단계를 담은 Repeater 탭, Fuzzer 템플릿, env 값의 개수도 알려 주며, 이들은 그대로 남아 전송할 때만 로컬 명령을 실행합니다. 가져온 프로젝트에는 OAST 세션, Authorize identity, 스코프 규칙(능동 전송을 허가하는 것은 스코프입니다)이 유지되지만, 머신별 라우팅 설정, 실행 또는 로컬 파일 읽기 규칙, 스스로 요청을 보내는 설정은 유지되지 않습니다. 압축 해제 후 전체 크기가 2 GiB를 넘는 아카이브는 거부합니다. CLI 내보내기는 기본적으로 기존 파일을 거부하며, 교체하려면 `--force`가 필요합니다. 실행 중인 gori가 열고 있는 데이터베이스는 어떤 경우에도 덮어쓰지 않습니다. 충돌과 스키마 동작은 [CLI 레퍼런스](/ko/reference/cli/#project-export)를 참고하세요.
 
@@ -759,7 +759,7 @@ gori run project import acme-api.gori
 
 ## 업스트림 프록시 {#upstream-proxy}
 
-gori는 직접 접속하는 대신 다른 프록시를 거쳐 나갈 수 있습니다. 회사 이그레스, SOCKS 터널, 뒤에 이어 붙인 다른 도구 같은 경우입니다. Preferences(`Ctrl-,`) → **Network & Tabs** → **Network**에서 설정합니다. **Proxy protocol**(`None`, `HTTP`, `HTTP+TLS`, 이름을 로컬에서 해석하는 `SOCKS5`, 프록시에서 해석하는 `SOCKS5H`), **Proxy host**와 **Proxy port**, 그리고 `HTTP+TLS` 홉에 쓰는 **Proxy TLS CA**와 **Verify proxy TLS**입니다. 프로젝트는 `gori run project network set upstream_proxy=socks5h://127.0.0.1:1080`(옆에 `upstream_destination_host`, `upstream_auth`)으로 자기 값을 고정할 수 있고, 그 값은 해당 프로젝트에서만 전역 값보다 우선합니다. `network.upstream_rules`는 호스트별로 경로를 따로 정합니다. 프로토콜이 `None`이고 다른 설정이 호스트를 가져가지 않으면 gori는 환경의 `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`를 따르며(`NO_PROXY`를 존중하고 localhost는 직접 접속), 지금 무엇이 적용되는지는 **Environment proxy** 행이 보여 줍니다. 키는 [설정 레퍼런스](/ko/reference/config/#network)에 있습니다.
+gori는 직접 접속하는 대신 다른 프록시를 거쳐 나갈 수 있습니다. 회사 이그레스, SOCKS 터널, 뒤에 이어 붙인 다른 도구 같은 경우입니다. Preferences(`Ctrl-,`) → **Network & Tabs** → **Network**에서 설정합니다. **Proxy protocol**(`None`, `HTTP`, `HTTP+TLS`, 이름을 로컬에서 해석하는 `SOCKS5`, 프록시에서 해석하는 `SOCKS5H`), **Proxy host**와 **Proxy port**, 그리고 `HTTP+TLS` 홉에 쓰는 **Proxy TLS CA**와 **Verify proxy TLS**입니다. 프로젝트는 `gori run project network set upstream_proxy=socks5h://127.0.0.1:1080`(옆에 `upstream_destination_host`, `upstream_auth`)으로 자기 값을 고정할 수 있고, 그 값은 해당 프로젝트에서만 전역 값보다 우선합니다. `upstream_rules`는 호스트별로 경로를 따로 정합니다. 프로토콜이 `None`이고 다른 설정이 호스트를 가져가지 않으면 gori는 환경의 `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`를 따르며(`NO_PROXY`를 존중하고 localhost는 직접 접속), 지금 무엇이 적용되는지는 **Environment proxy** 행이 보여 줍니다. 키는 [설정 레퍼런스](/ko/reference/config/#network)에 있습니다.
 
 ## 프록시를 설정할 수 없는 클라이언트 {#clients-without-proxy}
 

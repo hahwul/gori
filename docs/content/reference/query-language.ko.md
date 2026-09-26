@@ -36,7 +36,7 @@ method:POST
 status:404
 ```
 
-### 한쪽 방향만 보기: `req.` / `resp.`
+### 한쪽 방향만 보기: `req.` / `resp.` {#one-side-only-req-resp}
 
 `header:`와 `body:`는 **요청과 응답을 모두** 뒤집니다. 한쪽만 보려면 `req.` 또는 `resp.`를 앞에 붙입니다.
 
@@ -234,12 +234,12 @@ body:secret AND -host:cdn             컬러 규칙: 유출은 칠하고 CDN은 
 
 Intercept 바와 컬러 규칙 바 모두 입력하는 동안 필드 이름과 알려진 값을 Tab으로 자동 완성합니다.
 
-### 요청·응답 본문 문자열 매칭 {#matching-content}
+### 요청·응답 본문 문자열 매칭 {#matching-request-and-response-content}
 
 `header:`와 `body:`는 메시지의 바이트를 뒤집니다. 따라서 어디서 동작하는지는 필터를 물어보는 그 시점에 **어떤 바이트가 존재하는가**로 정해집니다.
 
 - **History, Sitemap, 컬러 규칙**은 이미 캡처된 플로를 봅니다. 그래서 두 필드 모두 요청·응답 양쪽에서 항상 동작합니다.
-- **Intercept와 Extract 규칙 조건**은 흐르는 중인 메시지를 봅니다. `header:`는 모든 게이트에서 동작합니다. `body:`는 페이로드가 손에 있는 경우(홀드된 **WebSocket 메시지**와 **Extract 규칙** 조건)에서 동작하고, HTTP 홀드 게이트에서는 동작하지 않습니다. 그 게이트가 바로 본문을 버퍼링할지 말지를 결정하는 지점이기 때문입니다.
+- **Intercept와 Extract 규칙 조건**은 흐르는 중인 메시지를 봅니다. `header:`는 HTTP 요청·응답 게이트와 Extract 규칙 조건에서 동작하고, 홀드된 WebSocket 메시지에서는 동작하지 않습니다. WebSocket 메시지에는 자기 헤드가 없기 때문입니다. `body:`는 페이로드가 손에 있는 경우(홀드된 **WebSocket 메시지**와 **Extract 규칙** 조건)에서 동작하고, HTTP 홀드 게이트에서는 동작하지 않습니다. 그 게이트가 바로 본문을 버퍼링할지 말지를 결정하는 지점이기 때문입니다.
 
 규칙을 쓰기 전에 알아둘, 의도된 차이가 하나 있습니다.
 

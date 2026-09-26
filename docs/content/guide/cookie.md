@@ -15,10 +15,10 @@ Select a cookie anywhere (a **History** detail pane, **Notes**, …) and `Space`
 
 One session, two views, toggled with `Ctrl-T`. The top card of each lens carries the switch on its border (` ^T:→FORGE ` on INPUT, ` ^T:→DECODE ` on PAYLOAD), and clicking it does the same thing as the key:
 
-- **Decode**: paste a cookie into INPUT and its parts decode live in DECODED. **OPTIONS** pins how it is read: the format (`Ctrl-A` cycles `auto` / `flask` / `rack` / `django`; `auto` detects it from the punctuation), the Django HMAC algorithm, and a signing salt. **SECRET** holds a candidate key, and its verify verdict (`✓ verified` / `✗ bad key`) is live as you type; press `c` to crack it (see below).
+- **Decode**: paste a cookie into INPUT and its parts decode live in DECODED. **OPTIONS** pins how it is read: the format (`Ctrl-A` cycles `auto` / `flask` / `rack` / `django`; `auto` detects it from the punctuation), the Django HMAC algorithm, and a signing salt. **SECRET** holds a candidate key, and its verify verdict (`✓ verified` / `✗ bad key`) is live as you type. To crack it, press `c` from a read pane (INPUT in READ mode, DECODED or OUTPUT); in SECRET and the other editable panes `c` just types the letter (see below).
 - **Forge**: edit the session in PAYLOAD (a JSON object for Flask/Django, the opaque base64 value for Rack), set a SECRET, and the re-signed cookie appears live in OUTPUT.
 
-`Space` → **Load decoded payload** loads the payload currently decoded on the Decode side into the Forge editor, so you can tweak a value and re-sign in two moves. Copy any result with `y` (the forged cookie with `Space` → **Copy forged cookie**).
+`Space` → **Load decoded payload** loads the payload currently decoded on the Decode side into the Forge editor, so you can tweak a value and re-sign in two moves. Copy any result with `y` from a read pane, or `Ctrl-Y` while editing (the forged cookie with `Space` → **Copy forged cookie**).
 
 > Unlike the [JWT](/guide/jwt/) tab, which decodes but never verifies, Cookie has the secret path: a `✓` in SECRET means the key you typed actually signs this cookie. Forge genuinely re-signs with the secret, salt, and algorithm you give it.
 

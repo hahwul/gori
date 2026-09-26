@@ -123,7 +123,7 @@ gori run <subcommand> [verb] [options]
 
 STDOUT은 데이터를 나릅니다. 경고, 개수, 내보내기 확인 메시지는 STDERR로 가므로 파이프가 깨끗하게 유지됩니다. 읽는 쪽이 파이프를 먼저 닫아도(`… | head`) 조용히 `0`으로 끝납니다.
 
-터미널에 찍는 캡처 텍스트는 제어 문자와 보이지 않는 문자를 이름으로 보여 줍니다(`⟨ESC⟩`, `⟨NBSP⟩`, `⟨ZWSP⟩`, `⟨RLO⟩`). 그래서 요청에 든 이스케이프 시퀀스가 터미널을 조작하지 못하고, 숨은 문자도 눈에 보입니다. `show`와 `repeater`의 text 뷰는 CRLF를 포함해 줄바꿈을 그대로 유지합니다. `--format json`은 이런 문자를 있는 그대로 싣고 잘못된 UTF-8만 치환하며, `--format raw`는 정확한 바이트입니다.
+`text` 출력의 캡처 텍스트는 STDOUT이 터미널이든 아니든 제어 문자와 보이지 않는 문자를 이름으로 보여 줍니다(`⟨ESC⟩`, `⟨NBSP⟩`, `⟨ZWSP⟩`, `⟨RLO⟩`). 그래서 요청에 든 이스케이프 시퀀스가 터미널을 조작하지 못하고, 숨은 문자도 눈에 보입니다. `show`와 `repeater`의 text 뷰는 CRLF를 포함해 줄바꿈을 그대로 유지합니다. `--format json`은 이런 문자를 있는 그대로 싣고 잘못된 UTF-8만 치환하며, `--format raw`는 정확한 바이트입니다.
 
 실행이 스트리밍되는 곳에서는 `json`과 `jsonl`의 형태가 늘 같지는 않습니다.
 
@@ -306,7 +306,7 @@ gori run diff --from q1-audit --to q3-retest --format md
 | `--from-db=PATH` / `--to-db=PATH` | 레지스트리 프로젝트 대신 SQLite 파일을 직접 지정 |
 | `-q`, `--query=QL` | **양쪽 모두**를 [QL 쿼리](/ko/reference/query-language/)로 좁힘 |
 | `--in-scope` | 각 프로젝트 자신의 스코프 규칙 안에 있는 호스트만 |
-| `-n`, `--limit=N` | 한쪽에서 읽을 엔드포인트 그룹 최대치 |
+| `-n`, `--limit=N` | 한쪽에서 읽을 엔드포인트 그룹 최대치(기본 40000) |
 | `--verdict=LIST` | 지정한 판정만 나열 (`added,gone,changed,unchanged,removed`) |
 | `--unchanged` | 변화 없는 엔드포인트도 나열 (개수는 항상 집계됨) |
 | `--no-issues` | 이슈 리테스트를 건너뜀 |
@@ -463,7 +463,7 @@ gori run repeater send 5 --message '{"op":"subscribe"}' --idle-ms 5000
 | Option | Description |
 |--------|-------------|
 | `--diff` | 세션에 마지막으로 저장된 응답과 비교 |
-| `--verbatim` | 저장된 바이트를 정확히 그대로 전송: 토큰 확장(프로젝트 env 변수 **와** 세션 바인딩 모두. `$ENV.KEY`나 `$BIND.NAME`이 와이어에 리터럴로 나감), 단독 LF 승격, `Content-Length` 재계산, HTTP/2→1.1 버전 보정, h2 필드명 소문자화를 모두 하지 않음. 시길 문법을 아예 해석하지 않으므로 `$$ENV.KEY` 이스케이프도 소비되지 않으니 `$ENV.KEY`로 쓰세요. 활성 `--slot`의 헤더 오버레이는 계속 적용됩니다. *어떤 바이트*가 아니라 *누구로서* 보낼지에 답하는 옵션이기 때문입니다. 저장된 헤더 그대로 보내려면 `--slot`을 주지 마세요 |
+| `--verbatim` | 저장된 바이트를 정확히 그대로 전송: 토큰 확장(프로젝트 env 변수, 세션 바인딩, 제너레이터 **모두**. `$ENV.KEY`, `$BIND.NAME`, `$GEN.UUID`가 와이어에 리터럴로 나감), 단독 LF 승격, `Content-Length` 재계산, HTTP/2→1.1 버전 보정, h2 필드명 소문자화를 모두 하지 않음. 시길 문법을 아예 해석하지 않으므로 `$$ENV.KEY` 이스케이프도 소비되지 않으니 `$ENV.KEY`로 쓰세요. 저장된 `§…§` 마커도 거부되지 않고 리터럴 바이트로 나갑니다. 활성 `--slot`의 헤더 오버레이는 계속 적용됩니다. *어떤 바이트*가 아니라 *누구로서* 보낼지에 답하는 옵션이기 때문입니다. 저장된 헤더 그대로 보내려면 `--slot`을 주지 마세요 |
 | `--reframe-grpc` | HTTP/2 전용: 실제로 전송되는 본문에 맞춰 gRPC 5바이트 길이 접두사를 다시 계산합니다(길이가 바뀐 단항 메시지용). 기본값은 꺼짐입니다. 페이로드와 어긋나는 접두사는 표준적인 파서 테스트이므로 쓴 그대로 나갑니다 |
 | `--message=TEXT` | WebSocket: 보낼 텍스트 메시지 (반복 가능; 세션에 저장된 메시지를 대체) |
 | `--message-frame=SPEC` | WebSocket: 형태를 명시한 프레임 하나. 쉼표로 구분한 `key=value`: `opcode=text\|bin\|cont\|close\|ping\|pong\|<0-15>`, `fin`, `rsv`, `mask`, `mask_key`, `len`, 그리고 `hex=`/`b64=`/`text=` 중 하나 |
@@ -596,9 +596,9 @@ gori run mine <flow-id> --locations query,headers --wordlist params.txt
 |--------|-------------|
 | `--flow`, `--request`, `--target`, `--sni`, `--http2`, `-k` | 요청 소스와 트랜스포트 |
 | `--allow-unscoped` | 대상이 프로젝트 스코프 밖이어도 전송(샌드박스와 명시적 제외 규칙은 그대로 적용) |
-| `--locations=LIST` | `query`, `form`, `multipart`, `json`, `headers`, `cookies` (multipart는 기본 꺼짐, 명시해야 켜집니다) |
+| `--locations=LIST` | `query`, `form`, `multipart`, `json`, `headers`, `cookies`. 기본값은 `query`이고, 요청 본문이 폼이나 JSON이면 `form`이나 `json`이 더해집니다. `multipart`, `headers`, `cookies`는 명시해야만 실행됩니다 |
 | `--wordlist`, `--bucket=N` | 후보 이름과 버킷 크기 |
-| `--name=NAME` | 워드리스트보다 먼저 시험할 이름(여러 번 지정 가능). 예: `sitemap params`가 다른 엔드포인트에서 찾은 이름 |
+| `--name=NAME` | 워드리스트보다 먼저 시험할 이름(여러 번 지정하거나 쉼표로 구분). 예: `sitemap params`가 다른 엔드포인트에서 찾은 이름 |
 | `--concurrency` (10), `--rate`, `--throttle`, `--timeout`, `--retries` (1), `--max-requests=N` | 속도 제어 |
 | `--no-keep-alive` | 연결 재사용 대신 프로브마다 새로 연결 |
 | `--hook=ARGV` | 조립된 각 요청을 보내기 전에 외부 명령(argv, 셸 없음)으로 변환합니다. 서명 / HMAC이 붙는 API용. [프로세스 훅](/ko/guide/scripting/#process-hooks) 참고 |
@@ -1036,7 +1036,7 @@ gori run cookie --forge --type flask --secret s3cret --payload '{"user":"admin"}
 | `--payload=JSON` | 서명할 세션 JSON(Flask / Django `--forge`) |
 | `--value=B64` | base64 Marshal 쿠키 값(Rack `--forge`, 불투명) |
 | `--salt=SALT` | Flask / Django 서명 솔트 |
-| `--algorithm=ALG` | Django HMAC 알고리즘: `sha256`(기본) 또는 `sha1` |
+| `--algorithm=ALG` | Django HMAC 알고리즘: `sha256`(기본) 또는 `sha1`. 지정하지 않으면 `--verify`와 `--crack`은 자동으로 감지합니다 |
 | `--timestamp=UNIX` | `--forge`에 찍을 유닉스 초(기본: 현재) |
 | `--format` | `text`(기본) 또는 `json` |
 
@@ -1192,6 +1192,7 @@ gori run retest forget 3                                                       #
 | `--allow-cleanup` | `run`: gori가 전송을 거부한 뒤에도 cleanup 단계를 보냅니다 |
 | `--allow-unscoped` | `run`: 프로젝트 스코프 밖으로도 전송. Sandbox와 명시적 exclude는 그대로 적용됩니다 |
 | `--no-record-history` | `run`: 각 전송을 History에 기록하지 않습니다(기본값은 기록 — 리테스트도 증거입니다) |
+| `-k`, `--insecure-upstream` | `run`: 업스트림 TLS 인증서를 검증하지 않습니다 |
 | `--slot=NAME` | `run`: 모든 단계를 이 세션 슬롯으로 전송(헤더 오버레이와 `$BIND.NAME` 테이블) |
 | `--timeout=SEC` | `run`: 단계별 연결 + 유휴 타임아웃(기본 20) |
 | `--limit=N` | `runs`: 출력할 실행 개수 |
@@ -1798,13 +1799,15 @@ gori settings import team-profile.json --sections network
 `gori settings sections`는 gori가 아는 모든 섹션을 나열하고, 이 설치본에 아직 값이 없는 것을 표시합니다:
 
 ```
+…
 statusline  (can carry commands)
 network
 editor  (can carry commands)
-env  (holds secrets: excluded unless named; not set: at its default)
-scan_rules  (can carry commands; not set: at its default)
-decoder  (holds secrets: excluded unless named; can carry commands; not set: at its default)
+env  (holds secrets — excluded unless named; not set — at its default)
+scan_rules  (can carry commands; not set — at its default)
+decoder  (holds secrets — excluded unless named; can carry commands; not set — at its default)
 rewriter  (can carry commands)
+…
 ```
 
 *not set*으로 표시된 섹션도 `--sections`에 쓸 수 있는 정상적인 이름입니다. export하면 담을 값이 없을 뿐이고(그 사실을 stderr로 알려줍니다), import하면 그 섹션이 처음으로 기록됩니다.
@@ -1851,7 +1854,7 @@ export가 실제로 그런 섹션을 담게 되면 `-o FILE`은 `0600`으로 생
 `export`는 개수를 stderr로 알리고, stdout의 프로필은 깨끗하게 둡니다:
 
 ```
-note: 5 entries in this profile run a local command (2 rewriter pipe, 1 scan_rules exec, 1 statusline sh -c, 1 editor exec); whoever imports it runs them with their own privileges
+note: 5 entries in this profile run a local command (2 rewriter pipe, 1 scan_rules exec, 1 statusline sh -c, 1 editor exec) — whoever imports it runs them with their own privileges
 ```
 
 `import`는 argv까지 한 줄씩 나열하고, 확인을 받기 전까지 쓰지 않습니다. `--dry-run`도 같은 목록을 출력하며 어느 쪽이든 아무것도 쓰지 않습니다:
@@ -1865,7 +1868,7 @@ $ gori settings import team-profile.json
   statusline sh -c  command        gori-status --project
   editor exec       command        nvim
 importing them is the same trust decision as running the author's script
-gori settings import: refused. The 5 entries listed above run a local command with your privileges. Read them, then pass --allow-commands. Nothing was written.
+gori settings import: refused — the 5 entries listed above run a local command with your privileges. Read them, then pass --allow-commands. Nothing was written.
 ```
 
 명령을 읽고 나서 `--allow-commands`를 주세요. 대화형 프롬프트가 없으므로 스크립트에서 실행하는 import는 그대로 스크립트로 남습니다. 그 플래그 자체가 확인 절차입니다. 프로필이 담고는 있지만 꺼둔 항목은 `[disabled]`로 표시됩니다. 누군가 켜기 전까지는 아무것도 실행하지 않지만, 파일에는 여전히 들어 있습니다. `--sections`로 범위를 좁히면 이 판단도 함께 좁아집니다. `network`만 적용하는 import는 아무것도 무장시키지 않으므로 항목을 나열하지도, 플래그를 요구하지도 않습니다.

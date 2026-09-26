@@ -86,7 +86,7 @@ paru -S gori
 sudo snap install gori
 ```
 
-strict confinement에서는 홈의 숨김 디렉터리에 접근할 수 없으므로, 스냅의 `GORI_HOME`(설정, 루트 CA, 프로젝트 데이터베이스)은 `~/.gori`가 아니라 `~/snap/gori/common`입니다. `gori update`는 스냅 설치를 알아보고 `snap refresh gori`를 출력합니다(`gori update --exec`로 바로 실행할 수 있습니다).
+strict confinement에서는 홈의 숨김 디렉터리에 접근할 수 없으므로, 스냅의 `GORI_HOME`(설정, 루트 CA, 프로젝트 데이터베이스)은 `~/.gori`가 아니라 `~/snap/gori/common`입니다. `gori update`는 스냅 설치를 알아보고 `snap refresh gori`를 출력합니다(`PATH`에 `snap` 명령이 있으면 `gori update --exec`가 바로 실행합니다).
 
 ## Nix {#nix}
 

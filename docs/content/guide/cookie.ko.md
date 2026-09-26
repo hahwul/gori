@@ -15,10 +15,10 @@ group = "워크벤치"
 
 하나의 세션, 두 개의 뷰이며 `Ctrl-T`로 전환합니다. 각 렌즈의 최상위 카드 테두리에 전환 칩이 있습니다(INPUT에는 ` ^T:→FORGE `, PAYLOAD에는 ` ^T:→DECODE `). 클릭해도 키와 똑같이 동작합니다:
 
-- **Decode**: INPUT에 쿠키를 붙여 넣으면 파트가 DECODED에 실시간으로 디코드됩니다. **OPTIONS**는 읽는 방식을 고정합니다: 포맷(`Ctrl-A`로 `auto` / `flask` / `rack` / `django` 순환, `auto`는 문장 부호로 감지), Django HMAC 알고리즘, 서명 salt. **SECRET**은 후보 키를 담으며, 입력하는 동안 검증 결과(`✓ verified` / `✗ bad key`)가 실시간으로 표시됩니다. `c`를 누르면 크랙합니다(아래 참고).
+- **Decode**: INPUT에 쿠키를 붙여 넣으면 파트가 DECODED에 실시간으로 디코드됩니다. **OPTIONS**는 읽는 방식을 고정합니다: 포맷(`Ctrl-A`로 `auto` / `flask` / `rack` / `django` 순환, `auto`는 문장 부호로 감지), Django HMAC 알고리즘, 서명 salt. **SECRET**은 후보 키를 담으며, 입력하는 동안 검증 결과(`✓ verified` / `✗ bad key`)가 실시간으로 표시됩니다. 크랙하려면 읽기 패널(READ 모드의 INPUT, DECODED, OUTPUT)에서 `c`를 누르세요. SECRET을 비롯한 편집 패널에서는 `c`가 그냥 글자로 입력됩니다(아래 참고).
 - **Forge**: PAYLOAD에서 세션을 편집하고(Flask/Django는 JSON 객체, Rack은 불투명한 base64 값), SECRET을 설정하면 재서명된 쿠키가 OUTPUT에 실시간으로 나타납니다.
 
-`Space` → **Load decoded payload**는 현재 Decode 쪽에서 디코드된 payload를 Forge 편집기로 불러옵니다. 그래서 값 하나를 손보고 두 동작만으로 재서명할 수 있습니다. 결과는 `y`로(위조된 쿠키는 `Space` → **Copy forged cookie**로) 복사하세요.
+`Space` → **Load decoded payload**는 현재 Decode 쪽에서 디코드된 payload를 Forge 편집기로 불러옵니다. 그래서 값 하나를 손보고 두 동작만으로 재서명할 수 있습니다. 결과는 읽기 패널에서는 `y`로, 편집 중에는 `Ctrl-Y`로(위조된 쿠키는 `Space` → **Copy forged cookie**로) 복사하세요.
 
 > 디코드는 하지만 검증은 하지 않는 [JWT](/ko/guide/jwt/) 탭과 달리, Cookie에는 secret 경로가 있습니다. SECRET의 `✓`는 입력한 키가 실제로 이 쿠키를 서명한다는 뜻입니다. Forge는 지정한 secret, salt, 알고리즘으로 실제로 재서명합니다.
 
@@ -40,7 +40,7 @@ group = "워크벤치"
 
 성공하면 필드가 찾아낸 secret으로 바뀌고 결과가 `✓`로 뒤집혀, 그대로 Forge 렌즈로 이어갈 수 있습니다.
 
-> Django **세션** 쿠키(`django.contrib.sessions`)는 기본이 아닌 salt로 서명되므로, 기본 salt로 크랙하면 실패합니다. 포맷이 Django로 해석되면 **OPTIONS**에 ` salt:signing ` 배지가 나타납니다. 이 배지를 클릭하거나(`Space` → **Toggle Django salt**) salt 필드를 `django.contrib.sessions.backends.signed_cookies`로 뒤집으면 verify·crack·forge가 모두 그 salt로 서명됩니다. 직접 아무 salt나 입력할 수도 있습니다. CLI의 `--salt`도 마찬가지입니다.
+> Django **세션** 쿠키(`django.contrib.sessions`)는 기본이 아닌 salt로 서명되므로, 기본 salt로 크랙하면 실패합니다. 포맷이 Django로 해석되면 **OPTIONS**에 ` salt:signing ` 배지가 나타납니다. 이 배지를 클릭하면(또는 `Space` → **Toggle Django salt**) salt 필드가 `django.contrib.sessions.backends.signed_cookies`로 바뀌고, verify·crack·forge가 모두 그 salt로 서명됩니다. 직접 아무 salt나 입력할 수도 있습니다. CLI의 `--salt`도 마찬가지입니다.
 
 ## 헤드리스 {#headless}
 

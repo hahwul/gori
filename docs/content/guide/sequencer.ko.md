@@ -20,7 +20,7 @@ session cookie, CSRF token, 비밀번호 리셋 코드, API key가 예측 가능
 
 **라이브.** 새 token을 발급하는 요청을 지정하면, gori가 그 요청을 여러 번 재전송하면서 각 응답에서 token을 뽑아냅니다. **History**에서 token을 설정하는 플로우를 선택하고 `Space` `>` `s`(**Send flow to…** → **Send to Sequencer**)를 누르면, 유력한 session cookie를 자동 감지한 **SEND TO SEQUENCER** 카드가 현재 탭 위에 열립니다. 거기서 token 위치, 샘플 목표, 동시성을 정하고 **Start**를 누르면 탭을 떠나지 않은 채 백그라운드에서 수집합니다. Sequencer 탭에서는 `c`로 세션을 재설정하고, `Ctrl-R`로 다시 수집하고, `Ctrl-X`로 멈춥니다.
 
-**수동.** 이미 token 목록이 있나요? 텍스트 패널에서 선택하고(한 줄에 하나씩) `Space` `S`(**Send selection to…**) → `s` **Sequencer**를 누르면 네트워크 트래픽 없이 순수하게 통계 분석만 수행합니다. 대기 중인 수동 세션에 더 보내면 덧붙여 다시 분석합니다. 헤드리스에서는 `gori run sequence --tokens FILE`이 같은 일을 합니다.
+**수동.** 이미 token 목록이 있나요? 텍스트 패널에서 선택하고(한 줄에 하나씩) `Space` `S`(**Send selection to…**) → `s` **Sequencer**를 누르면 네트워크 트래픽 없이 순수하게 통계 분석만 수행합니다. 다른 탭에서 보낼 때마다 새 수동 세션이 열리고, Sequencer 탭 안에서 대기 중인 수동 세션을 보고 있을 때 보내면 그 세션에 덧붙여 다시 분석합니다. 헤드리스에서는 `gori run sequence --tokens FILE`이 같은 일을 합니다.
 
 다음 위치 중 어디에서든 token을 추출할 수 있습니다:
 
@@ -57,7 +57,7 @@ session cookie, CSRF token, 비밀번호 리셋 코드, API key가 예측 가능
 
 무작위 부분이 가변 길이 머리 뒤의 *접미사*인 token(`123-<random>`)이라면, gori는 per-position 창을 entropy가 더 많은 쪽 끝에 맞추므로 머리 부분이 추정치를 끌어내리지 않습니다.
 
-패널은 **CONFIG**(소스와 token 위치), **SAMPLES**(수집된 token), **ANALYSIS**(등급과 테스트별 분석)로 구성되며, 개별 샘플에 대한 상세 보기가 함께 제공됩니다.
+패널은 제목 없는 설정 카드(소스와 token 위치, 테두리에 `^R` RUN / `^X` STOP 배지), **SAMPLES**(수집된 token), **ANALYSIS**(등급과 테스트별 분석)로 구성되며, 개별 샘플을 보는 **TOKEN** 상세 보기가 함께 제공됩니다.
 
 ## 판정 결과 내보내기 {#getting-the-verdict-out}
 

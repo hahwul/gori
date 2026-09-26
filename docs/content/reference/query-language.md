@@ -239,7 +239,7 @@ Both the Intercept and colour-rule bars Tab-complete field names and known value
 `header:` and `body:` search the bytes of a message, so where they work is decided by which bytes exist at the moment the filter is asked:
 
 - **History, Sitemap and colour rules** search a captured flow, so both fields always work, on both sides of the exchange.
-- **Intercept and extract-rule conditions** search the message in flight. `header:` works at every gate. `body:` works for a held **WebSocket message** and for an **extract-rule** condition, where the payload is in hand, but not at an HTTP hold gate, because that gate is what decides whether the body gets buffered in the first place.
+- **Intercept and extract-rule conditions** search the message in flight. `header:` works at the HTTP request and response gates and in an extract-rule condition, but not for a held WebSocket message, which has no head of its own. `body:` works for a held **WebSocket message** and for an **extract-rule** condition, where the payload is in hand, but not at an HTTP hold gate, because that gate is what decides whether the body gets buffered in the first place.
 
 One deliberate difference between the two, worth knowing before you write a rule:
 

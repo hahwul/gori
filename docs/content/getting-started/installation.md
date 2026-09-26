@@ -86,7 +86,7 @@ A strictly confined snap is published to the Snap Store with every release, for 
 sudo snap install gori
 ```
 
-Strict confinement keeps the snap out of hidden directories in your home, so its `GORI_HOME` (settings, root CA, project databases) is `~/snap/gori/common` rather than `~/.gori`. `gori update` recognises a snap install and prints `snap refresh gori` (`gori update --exec` runs it).
+Strict confinement keeps the snap out of hidden directories in your home, so its `GORI_HOME` (settings, root CA, project databases) is `~/snap/gori/common` rather than `~/.gori`. `gori update` recognises a snap install and prints `snap refresh gori` (`gori update --exec` runs it when a `snap` command is on `PATH`).
 
 ## Nix
 

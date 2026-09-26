@@ -48,13 +48,13 @@ gori run fuzz <flow-id> --auto --mode sniper
 
 A payload set is what gets substituted into the marker. Start with a built-in preset (`sqli`, `xss`, `traversal`, `format-string`, `bad-strings`, `command-injection`, `cache-delimiters`) for a fast first pass with no file, or point at a wordlist, an explicit list, a numeric range, or a brute-force character set.
 
-One thing to know before you run: **a payload spliced into a query-string or form-urlencoded body value is URL-encoded for you.** A raw space or `<` there would end the request-target or break the framing, so gori percent-encodes it, the same thing `--encode url` always did, now without having to remember it. Everywhere else the bytes go on the wire as written: a path segment, a JSON or raw body, a header and a cookie value, because a `%2F` in a traversal probe is a different test than the one you marked. `--no-encode` turns the default off when the raw byte *is* the payload, and when the payload is already a percent-escape, since `%` gets encoded like anything else: `%00` goes out as `%2500`, so a null-byte or overlong-UTF-8 probe aimed at the origin's own decoder arrives as plain text instead. Processors transform each payload on the way out (prefix/suffix, URL/base64/hex encoding, case folding, hashing, or a regex replace), and an `--encode` among them replaces the default rather than stacking on top of it. The others do not: a prefix, a case fold, a hash or a regex replace says what the payload is, not how the wire spells it, so a query or form position still encodes their output. Put the cursor inside a marker and press `Ctrl-Q` to open its processor chain, which previews the value through every step before a single request goes out.
+One thing to know before you run: **a payload spliced into a query-string or form-urlencoded body value is URL-encoded for you.** A raw space or `<` there would end the request-target or break the framing, so gori percent-encodes it, the same thing `--encode url` always did, now without having to remember it. Everywhere else the bytes go on the wire as written: a path segment, a JSON or raw body, a header and a cookie value, because a `%2F` in a traversal probe is a different test than the one you marked. `--no-encode` turns the default off when the raw byte *is* the payload, and when the payload is already a percent-escape, since `%` gets encoded like anything else: `%00` goes out as `%2500`, so a null-byte or overlong-UTF-8 probe aimed at the origin's own decoder arrives as plain text instead. Processors transform each payload on the way out (prefix/suffix, URL/base64/hex encoding, case folding, hashing, or a regex replace), and an `--encode` among them replaces the default rather than stacking on top of it. The others do not: a prefix, a case fold, a hash or a regex replace says what the payload is, not how the wire spells it, so a query or form position still encodes their output. The TUI has no processor rows; its per-marker equivalent is a Decoder chain. Put the cursor inside a marker and press `Ctrl-Q` to write one (`base64-encode > url-encode`, …): it runs over every payload on send and, like `--encode`, replaces the default URL-encoding for that position, and the editor previews the marker's own value through each step before a single request goes out.
 
 ```bash
 gori run fuzz <flow-id> --auto --mode sniper --wordlist params.txt
 ```
 
-**Checkpoint.** CONFIG lists your payload set, and `Ctrl-Q` shows each payload as it will actually leave. `gori run fuzz` also says once, before the first request, how many query/form positions it is encoding for.
+**Checkpoint.** CONFIG lists your payload set, and if you gave a marker a chain, the `Ctrl-Q` preview shows what it makes of that marker's value. `gori run fuzz` also says once, before the first request, how many query/form positions it is encoding for.
 
 ## 4. Set a matcher and run
 
@@ -72,7 +72,7 @@ gori run fuzz <flow-id> \
   --ac
 ```
 
-A run can also stop itself once it has what you came for. `--stop-after-matches 1` ends it on the first matcher hit, and `--stop-on` names a separate condition (`status:500`, or `'!regex:Invalid password'` for the first body that no longer carries it). Either lands the run as `condition_met`, with the row that tripped it recorded. In the TUI both are rows on the CONFIG pane's **Advanced** card.
+A run can also stop itself once it has what you came for. `--stop-after-matches 1` ends it on the first matcher hit, and `--stop-on` names a separate condition (`status:500`, or `'!regex:Invalid password'` for the first body that no longer carries it). Either lands the run as `condition_met`, with the row that tripped it recorded. In the TUI both are rows on the **ADVANCED** card, opened from the CONFIG pane's **Advanced** row.
 
 ### When the only difference is the clock
 
@@ -106,7 +106,7 @@ gori run fuzz show RUN_ID
 gori run fuzz show RUN_ID RESULT_INDEX --format json
 ```
 
-On a long sweep, `--keep interesting` (the Advanced card's **Keep interesting only**) stores only the matched rows and the ones carrying a fault (an error, a re-send, a truncated response, the stop row) instead of every row.
+On a long sweep, `--keep interesting` (the ADVANCED card's **Keep interesting only**) stores only the matched rows, the ones carrying a fault (an error, a re-send, a truncated response) and the row that stopped the run, instead of every row.
 
 The original `gori run fuzz …` remains ephemeral, so an existing script does not start growing the project database after an upgrade.
 

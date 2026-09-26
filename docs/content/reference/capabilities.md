@@ -62,8 +62,9 @@ difference.
 - **HTTP/3 is outside the proxy.** `network.strip_alt_svc` can remove response fields advertising
   h3, but cannot intercept QUIC or a route learned from DNS.
 - **An upstream `https://` spelling is legacy, not TLS to the proxy.** Bare `host:port`,
-  `http://…`, and `https://…` currently all mean a plaintext HTTP CONNECT proxy. Origin HTTPS
-  still runs inside that tunnel. `http+tls://…` is the spelling that wraps the hop to the proxy
+  `http://…`, and `https://…` currently all mean a plaintext HTTP CONNECT proxy in
+  `network.upstream_proxy` and a project pin (only in `HTTPS_PROXY` and its siblings does
+  `https://` mean TLS to the proxy). Origin HTTPS still runs inside that tunnel. `http+tls://…` is the spelling that wraps the hop to the proxy
   itself in TLS; `socks5://` and `socks5h://` select SOCKS instead.
 - **TLS fingerprint presets are approximations.** They control the value-level ClientHello
   fields OpenSSL exposes, but not extension order or GREASE placement, so they do not promise a

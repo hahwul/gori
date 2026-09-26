@@ -76,7 +76,7 @@ myenc > url-encode
 
 몇 가지는 한 방향으로만 동작하며 체인으로 되돌릴 수 없습니다. `shell-escape`와 `powershell-escape`는 값을 따옴표 리터럴로 감싸고, `homoglyph`는 ASCII 글자를 시각적으로 닮은 유니코드 문자로 바꿉니다(굳어진 대응 문자가 없는 글자는 그대로 둡니다). `typo`는 변환이 아니라 생성기입니다. 글자 누락, 인접 글자 자리바꿈, QWERTY 이웃 키로 만든 오타 변형을 한 줄에 하나씩 내놓습니다. 유니코드 정규화 단계도 한 방향입니다. NFKC/NFKD는 `ﬁ` → `fi`, `⁵` → `5`, 전각 `／` → `/` 같은 호환 문자 접기를 보여 줍니다. 모양이 비슷한 U+2044 `⁄` FRACTION SLASH는 호환 정규화 대상이 아니지만, Windows Best-Fit 표에서는 CP 1250, 1252, 1254가 `/`로 바꿉니다. RFC 2047 인코더는 UTF-8 Q 또는 Base64 인코드 워드를 만들고 75옥텟 제한에 맞춰 접으며, 디코더는 UTF-8, US-ASCII, ISO-8859-1, Windows-1252를 읽고, 인접한 워드를 문자셋 디코딩 전에 이어 붙여 두 워드에 걸쳐 나뉜 문자도 살리며, 형식이 틀린 워드는 문자 그대로 둡니다. `codepoint-overflow`는 원시 바이트를 냅니다(U+0140 문자 → `0x40`). 텍스트가 아닌 결과는 뒤에 `hex-encode`를 붙여 확인하세요. `windows-bestfit-<codepage>`는 CP 874, 932, 936, 949, 950, 1250–1258의 Microsoft Best-Fit 표를 미리 봅니다. 표에 없는 문자는 해당 코드페이지의 기본값인 `?`가 되는데, `WideCharToMultiByte`처럼 UTF-16 코드 유닛마다 하나씩이라 BMP 밖의 이모지는 `??`가 됩니다. 표의 출처와 라이선스는 `src/gori/decoder/bestfit/README.md`에 있습니다.
 
-OUTPUT은 바이너리 결과를 위해 표시 모드(text → hex → base64)를 순환할 수 있습니다. READ 모드에서는 `y`로, INS 모드로 INPUT을 편집하는 중에는 `Ctrl-Y`로 복사하거나 space 메뉴를 사용하세요.
+바이너리 결과라면 `Ctrl-X`로 OUTPUT의 표시 모드(text → hex → base64)를 순환합니다. READ 모드에서는 `y`로, INS 모드로 INPUT을 편집하는 중에는 `Ctrl-Y`로 복사하거나 space 메뉴를 사용하세요.
 
 ## 언제 사용하는가 {#when-to-use-it}
 

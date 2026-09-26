@@ -18,8 +18,8 @@ group = "워크벤치"
 
 ## 동작 흐름 {#the-loop}
 
-1. **OAST** 탭에서 `Ctrl-R`를 눌러 리스닝을 시작합니다. gori가 provider에 등록하고 **payload**(고유한 호스트명/URL)를 발급합니다.
-2. `g`(get payload)나 `y`로 payload를 복사하거나, **Repeater** / **Fuzzer**에서 요청에 바로 삽입합니다(`Space` → **Insert OAST payload**가 커서 위치에 넣습니다). **History**에서는 `Space` → **Copy OAST payload**입니다.
+1. **OAST** 탭에서 `Ctrl-R`를 눌러 리스닝을 시작합니다. gori가 선택한 provider에 등록하고 폴링을 시작합니다. 새 프로젝트에는 provider가 없으므로 먼저 **Providers** 서브탭에서 하나를 추가하세요(`a`, public interactsh가 미리 채워져 있습니다).
+2. `g`(get payload)를 누르면 **payload**(고유한 호스트명/URL)를 발급해 복사합니다. 리스너가 없으면 `g`가 직접 시작하고, `y`는 현재 payload를 다시 복사합니다. 또는 **Repeater** / **Fuzzer**에서 요청에 바로 삽입합니다(`Space` → **Insert OAST payload**가 커서 위치에 넣습니다). **History**에서는 `Space` → **Copy OAST payload**입니다.
 3. 대상이 URL을 역참조하거나 호스트명을 resolve할 만한 곳이라면 어디든 심습니다. URL 파라미터, `Host`/`X-Forwarded-For` 헤더, XML 엔티티, webhook 필드 등입니다.
 4. 대상의 인프라가 이름을 resolve하거나 다시 연결해 오면, 콜백이 프로토콜(`dns` / `http` / `smtp`), 소스 IP, 타임스탬프, 그리고 어떤 payload가 발동했는지 알 수 있는 전체 sub-identifier와 함께 **Callbacks**에 도착합니다.
 
@@ -33,7 +33,7 @@ group = "워크벤치"
 
 | Provider | 설명 |
 |----------|-----------|
-| `interactsh` | 자체 호스팅 또는 public [interactsh](https://github.com/projectdiscovery/interactsh) 서버. 암호화된 **DNS, HTTP, SMTP** 콜백을 잡습니다. Public preset: `oast.pro`, `oast.live`, `oast.site`, `oast.fun`, `oast.me`. 기본값입니다. |
+| `interactsh` | 자체 호스팅 또는 public [interactsh](https://github.com/projectdiscovery/interactsh) 서버. 암호화된 **DNS, HTTP, SMTP** 콜백을 잡습니다. Public preset: `oast.pro`, `oast.live`, `oast.site`, `oast.fun`, `oast.me`. 새 provider와 `gori run oast listen` / `oast_start`의 기본 타입입니다. |
 | `custom-http` | 직접 운영하며 hit를 폴링하는 평범한 HTTP 엔드포인트. |
 | `webhook.site` | public [webhook.site](https://webhook.site) 서비스(HTTP 전용). |
 | `BOAST` | [BOAST](https://github.com/marcohextor/BOAST) 서버(public preset `odiss.eu`). |
@@ -56,7 +56,7 @@ interactsh를 쓰면 gori가 로컬에서 RSA 키 쌍을 생성해 공개 키를
 
 세 표면 모두 같은 세션을 재개합니다. `gori run oast list` / `resume` / `release`와 MCP `list_oast_sessions` / `oast_resume` / `oast_release`는 이 피커가 보여주는 것과 동일한 행을 다루고, 헤드리스로 재개한 리스너도 콜백을 프로젝트에 기록합니다. 즉 탭과 스크립트와 에이전트가 하나의 테이블을 봅니다. `gori run oast listen`과 MCP `oast_start`은 기본적으로 임시입니다. 프로젝트 없이 등록하므로 그 등록은 프로세스와 함께 끝납니다. 다만 `--save` / `persist: true`를 주면 같은 행을 쓰기 때문에, 헤드리스나 에이전트가 띄운 리스너도 이 피커에 올라옵니다.
 
-재개한 세션은 시작할 때 쓴 저장 프로바이더로 폴링합니다. 저장 프로바이더 여러 개가 같은 서버를 다른 토큰으로 가리켜도 마찬가지입니다. 이전 버전 gori가 저장한 세션은 프로바이더를 기록하지 않았으므로, 등록할 때 쓴 토큰으로 프로바이더를 찾습니다. 그래도 후보가 둘 이상 남으면 탭은 하나를 고르지 않고 재개를 거부하며, `gori run oast resume`과 `oast_resume`은 세션에 저장된 토큰으로 폴링하고 그 사실을 알립니다.
+재개한 세션은 시작할 때 쓴 저장 프로바이더로 폴링합니다. 저장 프로바이더 여러 개가 같은 서버를 다른 토큰으로 가리켜도 마찬가지입니다. 이전 버전 gori가 저장한 세션은 프로바이더를 기록하지 않았으므로, 등록할 때 쓴 토큰으로 프로바이더를 찾습니다. 그래도 후보가 둘 이상 남으면 탭은 하나를 고르지 않고 재개를 거부하며(`gori run oast resume ID`를 안내합니다), `gori run oast resume`과 `oast_resume`은 세션에 저장된 토큰으로 폴링하고 그 사실을 알립니다.
 
 어느 표면도 알아서 재개하지 않습니다. 프로젝트를 열거나 MCP 서버를 바인딩하거나 `gori run`을 시작해도 리스너가 되살아나지 않습니다. 누군가 요청해야 합니다.
 
@@ -64,7 +64,7 @@ interactsh를 쓰면 gori가 로컬에서 RSA 키 쌍을 생성해 공개 키를
 
 | 키 | 동작 |
 |-----|--------|
-| `Ctrl-R` | 리스닝 시작(payload 등록 후 폴링 시작) |
+| `Ctrl-R` | 리스닝 시작(provider에 등록하고 폴링 시작) |
 | `Ctrl-X` | 폴링 중지(세션은 유지되며 `Shift-R`로 재개) |
 | `Shift-R` | 저장된 리스너 재개 |
 | `g` | 현재 payload 가져오기 / 복사(**All**이면 provider를 고르는 카드) |
@@ -76,7 +76,7 @@ interactsh를 쓰면 gori가 로컬에서 RSA 키 쌍을 생성해 공개 키를
 
 ## 콜백을 Issue로 {#filing-a-callback}
 
-콜백은 이 도구가 만들어내는 가장 강력한 증거입니다. 대상의 인프라가 접근할 이유가 전혀 없는 서버에 스스로 닿았다는 뜻이니까요. `Shift-F`(또는 `Space` → **Add issue**)는 선택한 콜백을 **Issue**로 등록합니다. 프로토콜과 소스가 미리 채워지고, raw interaction이 notes로 함께 들어갑니다. **HIGH**로 열리며, 확정 전에 Tab으로 등급을 바꿀 수 있습니다.
+콜백은 이 도구가 만들어내는 가장 강력한 증거입니다. 대상의 인프라가 접근할 이유가 전혀 없는 서버에 스스로 닿았다는 뜻이니까요. `Shift-F`(또는 `Space` → **Add issue**)는 선택한 콜백을 **Issue**로 등록합니다. 프로토콜과 소스가 미리 채워지고, raw interaction이 notes로 함께 들어갑니다. **HIGH**로 열리며, 확정 전에 Tab으로 severity 행으로 옮겨 `←` / `→`로 등급을 바꿀 수 있습니다.
 
 ## 헤드리스 {#headless}
 
@@ -141,7 +141,7 @@ gori run oast release 7                        # deregister it; its callbacks st
 
 저장된 provider(**Providers** 서브탭의 행들)도 `gori run oast providers add|update|enable|disable|delete|list`로 헤드리스에서 관리할 수 있고, `listen`과 `resume`은 폴링 주기를 정하는 `--interval SEC`(기본 5)를 받습니다. 플래그는 [CLI Reference](/ko/reference/cli/#run-oast)를 참고하세요.
 
-모든 플래그는 [CLI Reference](/ko/reference/cli/#run-oast)를 참고하세요. MCP에서는 에이전트가 `oast_presets` / `oast_payload` / `oast_poll` / `list_oast_sessions`(읽기)와 `oast_start` / `oast_stop` / `oast_resume` / `oast_release`(동작)로 같은 엔진을 구동합니다. `oast_start`는 `listen`의 임시 쌍둥이이고, `persist: true`로 `--save`와 같이 동작합니다. `oast_resume`은 `oast_poll`과 `oast_payload`가 받는 `session_id`를 돌려주고 그 폴링 결과는 CLI와 마찬가지로 저장됩니다. 저장했거나 재개한 세션에 `oast_stop`을 호출하면 `Ctrl-X`처럼 폴링만 멈추고 세션은 다시 재개할 수 있게 남습니다.
+모든 플래그는 [CLI Reference](/ko/reference/cli/#run-oast)를 참고하세요. MCP에서는 에이전트가 `oast_presets` / `oast_payload` / `oast_poll` / `list_oast_sessions`(읽기, 단 `oast_payload`와 `oast_poll`은 `--read-only`에서 제외됩니다)와 `oast_start` / `oast_stop` / `oast_resume` / `oast_release`(동작)로 같은 엔진을 구동합니다. `oast_start`는 `listen`의 임시 쌍둥이이고, `persist: true`로 `--save`와 같이 동작합니다. `oast_resume`은 `oast_poll`과 `oast_payload`가 받는 `session_id`를 돌려주고 그 폴링 결과는 CLI와 마찬가지로 저장됩니다. 저장했거나 재개한 세션에 `oast_stop`을 호출하면 `Ctrl-X`처럼 폴링만 멈추고 세션은 다시 재개할 수 있게 남습니다.
 
 > 콜백은 대상이 서드파티 interaction 서버에 접속했다는 뜻이며, public interactsh/webhook 서버는 그 콜백의 메타데이터를 보게 됩니다. 테스트 권한이 있는 시스템에만 OAST를 실행하고, 민감한 engagement에서는 자체 호스팅 서버를 우선하세요.
 

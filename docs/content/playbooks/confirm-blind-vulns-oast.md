@@ -13,7 +13,7 @@ A blind SSRF, a blind XXE, remote file inclusion, or an out-of-band injection: n
 
 ## 1. Start a listener and grab a payload
 
-Open the **OAST** tab (off the bar by default: press **`0`** and type "oast", or `Ctrl-P` → **Go to OAST**) and press `Ctrl-R` (or `Space` `r`, **Start listening**) to start listening. gori registers with a provider (public `interactsh` by default) and mints a **payload**: a unique hostname/URL that belongs to you for this session. Copy it with `g` (get payload).
+Open the **OAST** tab (off the bar by default: press **`0`** and type "oast", or `Ctrl-P` → **Go to OAST**) and press `Ctrl-R` (or `Space` `r`, **Start listening**) to start listening; gori registers with the selected provider and begins polling. A new project has no provider yet: add one on the **Providers** sub-tab first (`a`; the public `interactsh` is prefilled). Then press `g` (get payload) to mint a **payload**, a unique hostname/URL that belongs to you for this session, and copy it. `g` starts the listener itself if you skipped `Ctrl-R`.
 
 Headless, when you want the listener in a script or an agent loop:
 
@@ -47,9 +47,9 @@ Back on the **OAST** tab, callbacks land in the **Callbacks** table as the targe
 
 ## 4. Turn a hit into an Issue
 
-A callback is the strongest evidence this tool produces, so record it. Select the hit and press `Shift-F` (or `Space` → **Add issue**) to file it as an **Issue**, prefilled with its protocol and source and carrying the raw interaction as its notes. It opens at **HIGH**; `Tab` re-rates it before you commit.
+A callback is the strongest evidence this tool produces, so record it. Select the hit and press `Shift-F` (or `Space` → **Add issue**) to file it as an **Issue**, prefilled with its protocol and source and carrying the raw interaction as its notes. It opens at **HIGH**; `Tab` to the severity row and use `←` / `→` to re-rate it before you commit.
 
-**Checkpoint.** The confirmed callback is recorded as an Issue in the **Issues** tab, evidence attached.
+**Checkpoint.** The confirmed callback is recorded as an Issue in the **Issues** tab, with the raw interaction in its notes.
 
 ## Next Steps
 

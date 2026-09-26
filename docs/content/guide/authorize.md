@@ -33,7 +33,7 @@ Press `i` on the tab to open the identities card. A fresh project starts with tw
 | `b` | Make this one the baseline |
 | `esc` | Close |
 
-The add / edit form has four fields: a **name** (unique, because two rows under one label would make the results table unreadable, and all three surfaces refuse a duplicate; names are compared case-insensitively), the headers to **set**, one `Name: value` per line, the headers to **remove**, comma-separated, and **refresh before** (`off`, `jwt-exp` or `ttl=10m`; see [Refreshing a slot](#refreshing-a-slot)); the slot's refresh steps are listed read-only beside it. `⇥` moves between fields, `↵` saves (inside the set-headers editor it inserts a newline). A header line whose name is not a valid token, or whose value carries a CR or LF, is refused with the offending line named rather than silently dropped.
+The add / edit form has four fields: a **name** (unique, because two rows under one label would make the results table unreadable, and all three surfaces refuse a duplicate; names are compared case-insensitively), the headers to **remove** (`drop headers:`), comma-separated, the headers to **set**, one `Name: value` per line, and **refresh before** (`off`, `jwt-exp` or `ttl=10m`; see [Refreshing a slot](#refreshing-a-slot)); the slot's refresh steps are listed read-only on the line above it. `⇥` moves between fields, `↵` saves (inside the set-headers editor it inserts a newline). A header line whose name is not a valid token, or whose value carries a CR or LF, is refused with the offending line named rather than silently dropped.
 
 Identities are saved with the project, so `gori run authorize` and the MCP tools default to the same set you configured here. The list shows header *names* only. A session cookie is a credential, and a list that paints it on screen leaks it to anyone glancing at your terminal. The form shows values, because that is what editing means.
 
@@ -102,14 +102,14 @@ Each identity's response is reduced to three facts (status, decoded body size, a
 | Verdict | Means |
 |---------|-------|
 | `baseline` | This row *is* the baseline |
-| `different` | A different status **class** (2xx vs 4xx vs 3xx), the clearest sign access control engaged. Or two redirects that point somewhere else |
+| `different` | A different status **class** (2xx vs 4xx vs 3xx) where this identity did not gain a 2xx, the clearest sign access control engaged. Or two redirects to a different destination |
 | `same` | Same status class, and the body matches: within a SimHash distance of 3 **and** within 10% in size. Or two redirects to the same place |
-| `review` | Same status class, divergent body. Or the baseline itself errored, so there was nothing to anchor against |
+| `review` | Same status class, divergent body. Or this identity got a 2xx the baseline did not (`403 → 200`, `304 → 200`); two redirects to the same path that differ only in query or fragment; a `HEAD` or `304` pair with no `ETag` or `Content-Length` to compare; or the baseline itself errored or was denied (4xx/5xx), so there was nothing to anchor against |
 | `error` | This identity's send failed (TLS, DNS, timeout, refused); nothing was compared |
 
-Two redirects are judged on their **`Location`**, before the body is looked at. A redirect's body is empty, so on the three facts above every `3xx` matched every other `3xx`, and an authenticated `302 → /dashboard` against an anonymous `302 → /login`, which is the clearest *enforcement* there is, came back `same`. Where the origin steers each identity is the only thing a redirect says, so that is what gets compared: an exact string match, because `/login` and `/login/` are a difference worth showing you rather than one worth deciding for you.
+Two redirects are judged on their **`Location`**, before the body is looked at. A redirect's body is empty, so on the three facts above every `3xx` matched every other `3xx`, and an authenticated `302 → /dashboard` against an anonymous `302 → /login`, which is the clearest *enforcement* there is, came back `same`. Where the origin steers each identity is the only thing a redirect says, so that is what gets compared, when both responses carry one: an exact match is `same`, the same scheme, host, port and path with only the query or fragment differing is `review` (both identities still reached the resource), and anything else is `different`. Paths are compared as written, because `/login` and `/login/` are a difference worth showing you rather than one worth deciding for you.
 
-The per-request row aggregates them: **BYPASS** when any non-baseline identity came back `same`, **enforced** when every one clearly differed, **error** when every one of their sends *failed*, **review** otherwise.
+The per-request row aggregates them: **BYPASS** (the TUI row reads `⚠ N same`) when any non-baseline identity came back `same`, **enforced** when every one clearly differed, **error** when every one of their sends *failed*, **review** otherwise.
 
 That fourth word is not a formality. A request nothing answered has no `same` verdict and no `different` one either, so an aggregate built from those two alone calls it **enforced**: a clean bill of health for a host gori could not reach. "The server held" and "we never got a reply" are opposite findings, and every surface reports them apart: the tab paints the row `error`, `gori run authorize` prints `[x] error` for it, and the MCP verdict is `error` with an `unanswered_count` beside it. When *nothing* in the run was compared (every request either refused by the gate or unanswered), the CLI says so on its summary line and exits non-zero, so a script that gates on the exit code cannot read a dead host as an endpoint that held.
 
@@ -129,6 +129,7 @@ A selection can reach flows that cannot be replayed meaningfully. gori names eve
 | **answered by gori** | gori short-circuited this request itself; there is no origin behind it | — |
 | **outside project scope** | The outbound gate refused the target before the socket | `--allow-unscoped` (CLI), `allow_unscoped:true` (MCP), or add a scope include rule |
 | **already queued** | The same flow was named twice | — |
+| **sent by gori, not the browser** | Passive replay only: the flow is gori's own traffic (a Repeater send, a fuzz row, an agent's request), not something you browsed | — |
 
 The first row is the one worth internalizing. The skip is not a "does this request carry a `Cookie`?" test; that question missed APIs authenticating through `X-Api-Key`, and on a site you were not logged into it skipped everything while saying nothing. gori asks the exact question instead: *would any identity change these bytes?* If not, there is nothing to compare, and it says so.
 
@@ -223,13 +224,13 @@ Four MCP tools drive the same engine as a background job: `authorize_start` (ret
 
 Six more manage the slots themselves: `list_session_slots` (with the active one named, header values `[REDACTED]` unless you ask), `create_session_slot`, `update_session_slot`, `delete_session_slot`, `set_active_session_slot`, which picks the identity every *other* tool's sends go out as, for the life of that server process, and `refresh_session_slot`, which runs a slot's refresh steps now.
 
-A run is capped at 2,000 sends, and the cap counts `flows × identities`: a 500-row query under four identities is refused up front, naming both factors, rather than truncated into a run that would report "enforced" for flows it never sent. Layer-1 scope is strict here: an out-of-scope target needs an explicit `allow_unscoped:true`, because nobody eyeballed it.
+A run is capped at 2,000 sends, and the cap counts `flows × identities`: a 500-row query under five identities (2,500 sends) is refused up front, naming both factors, rather than truncated into a run that would report "enforced" for flows it never sent. Layer-1 scope is strict here: an out-of-scope target needs an explicit `allow_unscoped:true`, because nobody eyeballed it.
 
 ## A Run That Sent Nothing Is Not Evidence
 
 This is the property the code goes out of its way to enforce, on every surface.
 
-If the sandbox or an exclude rule refused every send before the socket, if every selected flow was skipped, or if you stopped the run part-way, gori does **not** report "no identity matched the baseline". It says nothing was sent. A clean bill of health for traffic that never left the machine is the worst way an access-control test can fail, worse than a false positive, because you would close the ticket.
+If the sandbox or an exclude rule refused every send before the socket, or if every selected flow was skipped, gori does **not** report "no identity matched the baseline". It says nothing was sent. A run you stop part-way says it was stopped and counts only the requests that finished. A clean bill of health for traffic that never left the machine is the worst way an access-control test can fail, worse than a false positive, because you would close the ticket.
 
 The same caution applies to a genuine `enforced`: it means access control held *for the identities you tested, on the requests you replayed*. A different endpoint, a different privilege boundary, or an identity you did not model is untested, not safe.
 

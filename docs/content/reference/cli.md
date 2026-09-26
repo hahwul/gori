@@ -130,7 +130,7 @@ so a script can distinguish a completed write from a response that needs attenti
 
 STDOUT carries data; warnings, counts, and export confirmations go to STDERR, so a pipe stays clean. A reader that closes the pipe early (`… | head`) exits `0` quietly.
 
-Captured text printed to a terminal shows control and invisible characters by name (`⟨ESC⟩`, `⟨NBSP⟩`, `⟨ZWSP⟩`, `⟨RLO⟩`), so an escape sequence in a request cannot drive your terminal and a hidden character is visible. The `show` and `repeater` text views keep their line breaks, CRLF included. `--format json` carries those characters as they are, replacing only invalid UTF-8, and `--format raw` is the exact bytes.
+Captured text in `text` output shows control and invisible characters by name (`⟨ESC⟩`, `⟨NBSP⟩`, `⟨ZWSP⟩`, `⟨RLO⟩`), whether or not STDOUT is a terminal, so an escape sequence in a request cannot drive your terminal and a hidden character is visible. The `show` and `repeater` text views keep their line breaks, CRLF included. `--format json` carries those characters as they are, replacing only invalid UTF-8, and `--format raw` is the exact bytes.
 
 Where a run streams, `json` and `jsonl` are not always the same shape:
 
@@ -313,7 +313,7 @@ gori run diff --from q1-audit --to q3-retest --format md
 | `--from-db=PATH` / `--to-db=PATH` | Explicit SQLite files instead of registry projects |
 | `-q`, `--query=QL` | Narrow **both** sides with a [QL query](/reference/query-language/) |
 | `--in-scope` | Only hosts inside each project's own scope rules |
-| `-n`, `--limit=N` | Max endpoint groups to read per side |
+| `-n`, `--limit=N` | Max endpoint groups to read per side (default 40000) |
 | `--verdict=LIST` | List only these verdicts (`added,gone,changed,unchanged,removed`) |
 | `--unchanged` | Also list the unchanged endpoints (they are always *counted*) |
 | `--no-issues` | Skip the issue retest |
@@ -471,7 +471,7 @@ gori run repeater send 5 --message '{"op":"subscribe"}' --idle-ms 5000
 | Option | Description |
 | -------- | ------------- |
 | `--diff` | Diff against the session's last stored response |
-| `--verbatim` | Send the stored bytes exactly: no token expansion (project env vars **and** session bindings; a `$ENV.KEY` or `$BIND.NAME` stays literal on the wire), no bare-LF promotion, no `Content-Length` resync, no HTTP/2→1.1 version fix, no h2 field-name lowercasing. Nothing interprets the sigil grammar, so the `$$ENV.KEY` escape is not consumed either; write `$ENV.KEY`. The active `--slot`'s header overlay still applies, since it answers *as whom*, not *which bytes*. Pass no `--slot` to send the stored headers |
+| `--verbatim` | Send the stored bytes exactly: no token expansion (project env vars, session bindings **and** generators; a `$ENV.KEY`, `$BIND.NAME` or `$GEN.UUID` stays literal on the wire), no bare-LF promotion, no `Content-Length` resync, no HTTP/2→1.1 version fix, no h2 field-name lowercasing. Nothing interprets the sigil grammar, so the `$$ENV.KEY` escape is not consumed either; write `$ENV.KEY`. A stored `§…§` marker also goes out as literal bytes instead of being refused. The active `--slot`'s header overlay still applies, since it answers *as whom*, not *which bytes*. Pass no `--slot` to send the stored headers |
 | `--reframe-grpc` | HTTP/2 only: recompute the gRPC 5-byte length prefix over the body actually being sent, for a unary message an edit changed the length of. Off by default, because a prefix that disagrees with its payload is a standard parser test, so it ships as written |
 | `--message=TEXT` | WebSocket: outbound text message (repeatable; replaces the session's stored messages) |
 | `--message-frame=SPEC` | WebSocket: one frame with an explicit shape. Comma-separated `key=value`: `opcode=text\|bin\|cont\|close\|ping\|pong\|<0-15>`, `fin`, `rsv`, `mask`, `mask_key`, `len`, and one of `hex=`/`b64=`/`text=` |
@@ -604,9 +604,9 @@ gori run mine <flow-id> --locations query,headers --wordlist params.txt
 | -------- | ------------- |
 | `--flow`, `--request`, `--target`, `--sni`, `--http2`, `-k` | Request source and transport |
 | `--allow-unscoped` | Send even if the target is outside the project scope (Sandbox and explicit excludes still apply) |
-| `--locations=LIST` | `query`, `form`, `multipart`, `json`, `headers`, `cookies` (multipart off by default, pass it explicitly) |
+| `--locations=LIST` | `query`, `form`, `multipart`, `json`, `headers`, `cookies`. Default: `query`, plus `form` or `json` when the request body is one; `multipart`, `headers` and `cookies` run only when named |
 | `--wordlist`, `--bucket=N` | Candidate names and bucket size |
-| `--name=NAME` | Test this name first, ahead of the wordlists (repeatable), for example a name `sitemap params` found on another endpoint |
+| `--name=NAME` | Test this name first, ahead of the wordlists (repeatable or comma-separated), for example a name `sitemap params` found on another endpoint |
 | `--concurrency` (10), `--rate`, `--throttle`, `--timeout`, `--retries` (1), `--max-requests=N` | Rate control |
 | `--no-keep-alive` | Dial a fresh connection per probe instead of reusing one |
 | `--hook=ARGV` | Transform each assembled request through an external command (argv, no shell) before it is sent, for signed / HMAC'd APIs. See [Process hooks](/guide/scripting/#process-hooks) |
@@ -1044,7 +1044,7 @@ gori run cookie --forge --type flask --secret s3cret --payload '{"user":"admin"}
 | `--payload=JSON` | Session JSON to sign (Flask / Django `--forge`) |
 | `--value=B64` | Base64 Marshal cookie value (Rack `--forge`, opaque) |
 | `--salt=SALT` | Flask / Django signing salt |
-| `--algorithm=ALG` | Django HMAC algorithm: `sha256` (default) or `sha1` |
+| `--algorithm=ALG` | Django HMAC algorithm: `sha256` (default) or `sha1`; when unset, `--verify` and `--crack` detect it |
 | `--timestamp=UNIX` | Unix second to stamp on `--forge` (default: now) |
 | `--format` | `text` (default) or `json` |
 
@@ -1200,6 +1200,7 @@ gori run retest forget 3                                                       #
 | `--allow-cleanup` | `run`: send the cleanup steps even after gori refused a send |
 | `--allow-unscoped` | `run`: send outside the project scope. Sandbox and explicit excludes still apply |
 | `--no-record-history` | `run`: do not write each send to History (default: record — a retest is evidence) |
+| `-k`, `--insecure-upstream` | `run`: do not verify the upstream TLS certificate |
 | `--slot=NAME` | `run`: send every step as this session slot — its header overlay and its `$BIND.NAME` table |
 | `--timeout=SEC` | `run`: per-step connect + idle timeout (default 20) |
 | `--limit=N` | `runs`: how many runs to print |
@@ -1806,13 +1807,15 @@ gori settings import team-profile.json --sections network
 `gori settings sections` lists every section gori knows, marking the ones this install has no value for yet:
 
 ```
+…
 statusline  (can carry commands)
 network
 editor  (can carry commands)
-env  (holds secrets: excluded unless named; not set: at its default)
-scan_rules  (can carry commands; not set: at its default)
-decoder  (holds secrets: excluded unless named; can carry commands; not set: at its default)
+env  (holds secrets — excluded unless named; not set — at its default)
+scan_rules  (can carry commands; not set — at its default)
+decoder  (holds secrets — excluded unless named; can carry commands; not set — at its default)
 rewriter  (can carry commands)
+…
 ```
 
 A section marked *not set* is still a valid name for `--sections`: exporting it simply carries nothing (gori says so on stderr), and importing one writes it for the first time.
@@ -1859,7 +1862,7 @@ The first three are [process hooks](/guide/scripting/#process-hooks). `statuslin
 `export` counts them on stderr, leaving the profile on stdout clean:
 
 ```
-note: 5 entries in this profile run a local command (2 rewriter pipe, 1 scan_rules exec, 1 statusline sh -c, 1 editor exec); whoever imports it runs them with their own privileges
+note: 5 entries in this profile run a local command (2 rewriter pipe, 1 scan_rules exec, 1 statusline sh -c, 1 editor exec) — whoever imports it runs them with their own privileges
 ```
 
 `import` lists them one per line, argv included, and refuses to write until you acknowledge them. `--dry-run` prints the same list and writes nothing either way:
@@ -1873,7 +1876,7 @@ $ gori settings import team-profile.json
   statusline sh -c  command        gori-status --project
   editor exec       command        nvim
 importing them is the same trust decision as running the author's script
-gori settings import: refused. The 5 entries listed above run a local command with your privileges. Read them, then pass --allow-commands. Nothing was written.
+gori settings import: refused — the 5 entries listed above run a local command with your privileges. Read them, then pass --allow-commands. Nothing was written.
 ```
 
 Read the commands, then pass `--allow-commands`. There is no interactive prompt, so a scripted import stays scriptable; the flag *is* the acknowledgement. An entry the profile carries but leaves off is marked `[disabled]`: it runs nothing until someone arms it, and it is still in the file. Narrowing with `--sections` narrows this too: an import that applies only `network` arms nothing, so it neither lists an entry nor asks for the flag.

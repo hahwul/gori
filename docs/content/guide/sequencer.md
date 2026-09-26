@@ -20,7 +20,7 @@ The **Sequencer** tab is off the bar by default. Press **`0`** and type "seq", o
 
 **Live.** Point it at a request that hands out a fresh token, and gori replays that request many times, pulling the token out of each response. From **History**, select the flow that sets the token and `Space` `>` `s` (**Send flow to…** → **Send to Sequencer**). A **SEND TO SEQUENCER** card opens over the current tab with the likely session cookie auto-detected; set the token location, sample goal and concurrency there, and **Start** collects in the background without leaving the tab. On the Sequencer tab, `c` reconfigures a session, `Ctrl-R` collects again, and `Ctrl-X` stops.
 
-**Manual.** Already have a list of tokens? Select them in a text pane (one per line) and `Space` `S` (**Send selection to…**) → `s` **Sequencer** for a pure statistical analysis with no network traffic; sending more into an idle manual session appends them and re-analyzes. Headless, the same is `gori run sequence --tokens FILE`.
+**Manual.** Already have a list of tokens? Select them in a text pane (one per line) and `Space` `S` (**Send selection to…**) → `s` **Sequencer** for a pure statistical analysis with no network traffic. Each send from another tab opens a new manual session; a send made on the Sequencer tab itself, while an idle manual session is focused, appends to it and re-analyzes. Headless, the same is `gori run sequence --tokens FILE`.
 
 Extract the token from any of these locations:
 
@@ -57,7 +57,7 @@ That distinction decides the grade. A token of `sess_v1_` plus 24 random hex cha
 
 For a token whose random part is a *suffix* behind a variable-length head (`123-<random>`), gori anchors the per-position window to whichever end carries more entropy, so the head does not drag the estimate down.
 
-The panes are **CONFIG** (source and token location), **SAMPLES** (the collected tokens), and **ANALYSIS** (the grade and the per-test breakdown), with a detail view for any one sample.
+The panes are an untitled config card (source and token location, with the `^R` RUN / `^X` STOP badge on its border), **SAMPLES** (the collected tokens), and **ANALYSIS** (the grade and the per-test breakdown), with a **TOKEN** detail view for any one sample.
 
 ## Getting the Verdict Out
 

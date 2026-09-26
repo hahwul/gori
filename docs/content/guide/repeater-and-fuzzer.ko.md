@@ -21,7 +21,7 @@ Repeater는 요청 워크벤치입니다. 플로우를 보내고, 요청의 어�
 
 > 대상은 **마크가 있으면 마크 전부, 없으면 활성 칩**
 
-그래서 `Shift-T` → `Ctrl-W`는 열린 세션 전부를 confirm 한 번으로 닫고, `Ctrl-R`은 마크된 세션을 함께 보내며(각각 자기 연결로, 최대 20개, confirm 후), `Space` → `d`는 전부 복제하고, `Space` → `g`는 입력한 태그를 전부에 붙입니다(스트립의 `t`도, 메뉴의 `t`도 마크이므로 태그는 자기 글자를 따로 씁니다). 본문 패널에서는 같은 행들이 `Space` → `T`(**Sub-tabs…**) 아래 한 단계에 있습니다. 스트립에서 연 space 메뉴는 `SPACE · 3 MARKED`로 읽히고 항목 이름이 스스로 바뀝니다(`Close 3 sub-tabs`, `Send 3 sub-tabs`). 단일 대상으로 남는 동작은 `(cursor)`라고 말합니다. 필터가 가리고 있는 마크는 조용히 닫히지 않고 confirm에 드러납니다. Fuzzer, Notes, Decoder, JWT, Cookie, Comparer, Miner, Sequencer 등 모든 워크벤치 스트립이 같은 방식으로 마크·닫기·복제하며, 전송은 Repeater의 것입니다.
+그래서 `Shift-T` → `Ctrl-W`는 열린 세션 전부를 confirm 한 번으로 닫고, `Ctrl-R`은 마크된 세션을 함께 보내며(각각 자기 연결로, 최대 20개, confirm 후), `Space` → `d`는 전부 복제하고, `Space` → `g`는 입력한 태그를 전부에 붙입니다(스트립의 `t`도, 메뉴의 `t`도 마크이므로 태그는 자기 글자를 따로 씁니다). 본문 패널에서는 같은 행들이 `Space` → `T`(**Sub-tabs…**) 아래 한 단계에 있습니다. 스트립에서 연 space 메뉴는 `SPACE · 3 MARKED`로 읽히고 항목 이름이 스스로 바뀝니다(`Close 3 sub-tabs`, `Send 3 sub-tabs`). 단일 대상으로 남는 동작은 `(cursor)`라고 말합니다. 필터가 가리고 있는 마크는 조용히 닫히지 않고 confirm에 드러납니다. Fuzzer, Notes, Decoder, JWT, Cookie, Comparer, Miner, Sequencer 등 모든 워크벤치 스트립이 같은 방식으로 마크·닫기를 하고, Sequencer를 뺀 나머지는 복제도 합니다. 전송은 Repeater의 것입니다.
 
 요청 패널에는 요청을 한 번에 여러 개 보내는 동작이 세 가지 있습니다. `Space` → `G`(**Race marked sub-tabs**)는 마크한 서브탭(최소 2개, 최대 20개)을 하나의 동기화된 레이스로 보냅니다. HTTP/1.1에서는 요청마다 자기 연결로 보내고 마지막 바이트를 함께 풀며, HTTP/2에서는 single-packet으로 보냅니다. 마크한 탭은 모두 같은 오리진과 전송을 써야 하고, 응답마다 타이밍이 함께 표시됩니다. 헤드리스에서는 `gori run repeater race <id> <id>…`([CLI Reference](/ko/reference/cli/#run-repeater)), MCP에서는 `race_requests`입니다. `Space` → `g`(**Send group (one connection)**)는 패널의 요청들을 단독 `%%%` 줄로 나눠 keep-alive 연결 하나로 파이프라이닝하고 각 응답을 보여 주며, HTTP/1.1 일반 텍스트 모드에서만 동작합니다.
 
@@ -37,7 +37,7 @@ Repeater는 HTTP/1 이상을 다룹니다.
 - **HTTP/2** 요청은 실제 h2 연결로 재전송됩니다.
 - **WebSocket** 리피터는 세션이 담고 있는 핸드셰이크(HTTP/1.1 위의 RFC 6455 `Upgrade:` 요청이든, HTTP/2 위의 RFC 8441 확장 `CONNECT`든)로 소켓을 연 뒤 메시지를 **한 번에 하나씩** 재생합니다. 하나를 보내고, 서버의 응답이 잠잠해질 때까지 받아낸 다음에야 그다음 메시지가 나갑니다.
 - **gRPC** 리피터는 프레이밍된 메시지를 위해 HTTP/2 엔진을 재사용합니다. 단항(unary) 호출(정확히 하나의 프레이밍된 메시지)은 `^X`로 페이로드를 헥스 편집할 수 있고, 디스크립터 셋이 그 rpc를 선언하고 있다면 `␣Pf`로 **필드 단위** 편집도 됩니다. 스키마가 아는 필드를 골라 값을 입력하면 그 필드만 다시 인코딩되고 나머지 바이트는 캡처에서 그대로 복사됩니다([`.proto`를 렌즈로](/ko/guide/proxy/#proto-schema)). 메시지가 0개이거나 여러 개인 본문은 그대로 재전송됩니다. 메시지 앞의 5바이트 길이 접두사는 요청 카드의 `␣Pr:FRAME` 토글이 결정합니다. 이 탭에서는 기본값이 **켜짐**이라, 편집한 단항 메시지가 올바른 형식으로 나가고 원본 서버가 호출을 받아들입니다. **끄면** 편집한 페이로드 앞에 캡처된 접두사가 그대로 붙습니다. 페이로드와 어긋나는 접두사 자체가 표준적인 gRPC 파서 테스트이기 때문입니다. 헤드리스에서는 기본값이 반대입니다. `gori run repeater send`(MCP `send_request`)는 `--reframe-grpc` / `reframe_grpc: true`를 주지 않는 한 접두사를 캡처된 그대로 보냅니다.
-- **decode** 모드는 편집된 SAML / GraphQL 페이로드를 전송 시 다시 인코드합니다. (JWT를 디코드하거나 편집하려면 [Decoder](/ko/guide/decoder/) 탭의 `jwt-decode`를 사용하세요.)
+- **decode** 모드는 편집된 SAML / GraphQL 페이로드를 전송 시 다시 인코드합니다. (JWT를 디코드하거나 편집하려면 [JWT](/ko/guide/jwt/) 탭으로 보내세요. Decoder의 `jwt-decode`는 읽기만 합니다.)
 
 WebSocket에서는 이 "하나씩" 순서가 핵심입니다. 소켓은 대화를 실어 나르므로, 세 번째 메시지가 두 번째의 응답에 의존하는 스크립트는 gori가 그 사이에 기다려 줄 때만 충실하게 재생됩니다. 그리고 그때 트랜스크립트는 보낸 것 전부를 받은 것 전부보다 앞에 나열하는 대신 실제 전선 순서대로 읽힙니다. 여기서 세 가지가 따라옵니다.
 
@@ -146,21 +146,21 @@ Fuzzer는 Intruder 스타일 엔진입니다. 요청에서 위치를 표시하�
 | `pitchfork` | 병렬 세트: 각 세트의 *n* 번째 페이로드를 함께 |
 | `clusterbomb` | 모든 세트에 걸친 모든 조합 |
 
-앞의 둘은 페이로드 세트를 **하나만**, 뒤의 둘은 표시된 위치마다 하나씩 사용합니다. 모드가 쓰는 것보다 많은 세트를 넘기면 실행 전에 쓰이지 않을 세트를 알려 줍니다 — 기본값 `sniper`에 워드리스트를 둘 주면 첫 번째 것만 모든 위치에 들어갑니다.
+앞의 둘은 페이로드 세트를 **하나만**, 뒤의 둘은 표시된 위치마다 하나씩 사용합니다. 모드가 쓰는 것보다 많은 세트를 넘기면 실행 전에 쓰이지 않을 세트가 몇 개인지와 그것을 쓰는 방법을 알려 줍니다 — 기본값 `sniper`에 워드리스트를 둘 주면 첫 번째 것만 모든 위치에 들어갑니다.
 
 ### 위치와 페이로드 {#positions-and-payloads}
 
 요청에서 `§…§` 마커로 위치를 표시하거나, gori가 자동으로 배치하게 하세요. 페이로드 세트는 내장 프리셋(`sqli`, `xss`, `traversal`, `format-string`, `bad-strings`, `command-injection`, `cache-delimiters`. 파일 없이 바로 시작), 워드리스트, 명시적 목록, 숫자 범위, N개의 빈(null) 페이로드, 또는 무차별 대입 문자 세트가 될 수 있습니다. 프리셋은 추가 파일을 병합(내장 우선, 중복 제거)할 수 있고 다른 세트와 조합됩니다. 프로세서를 사용하면 나가는 각 페이로드를 변환할 수 있습니다: prefix/suffix, URL/base64/hex 인코딩, 대소문자 변환, 해싱, 정규식 치환.
 
-마커 하나에 자체 Decoder 체인을 붙일 수도 있습니다. 커서를 마커 안에 두고 `Ctrl-Q`를 누르면 체인 편집기가 열리고, 보내기 전에 값이 각 단계를 거치는 모습을 미리 보여 줍니다. [Decoder 라이브러리에 저장해 둔 체인](/ko/guide/decoder/#building-a-chain)은 여기서 이름으로 부를 수 있어서, 한 번 만들어 둔 체인이 마커 안에서는 단어 하나가 됩니다: `§admin¦myenc > url-encode§`. Repeater 마커도 TUI 탭에서는 동일하게 동작합니다. 마커는 탭이 전송할 때 렌더링하는 초안 언어이므로 헤드리스 표면은 렌더링하지 않습니다. `gori run repeater send`, MCP `send_request`, 재테스트 단계는 탭이라면 렌더링했을 `§…§`가 든 세션을 리터럴 `§` 바이트로 내보내지 않고 **거부**합니다. 거기서 보내려면 마커를 지우거나, 마크된 요청을 Fuzzer 템플릿으로 스윕하거나(`gori run fuzz --request=FILE`, `fuzz_start{template}`), `--verbatim` / `verbatim:true`로 저장된 바이트가 곧 메시지라고 밝히세요. 캡처 자체에 들어 있던 `§`는 건드리지 않습니다. gori는 그것을 직접 입력한 것과 구분할 수 없으므로 탭은 그대로 두고, 모든 표면이 바이트 그대로 재생합니다.
+마커 하나에 자체 Decoder 체인을 붙일 수도 있습니다. 커서를 마커 안에 두고 `Ctrl-Q`를 누르면 체인 편집기가 열리고, 보내기 전에 마커의 값이 각 단계를 거치는 모습을 미리 보여 줍니다(`exec:` 단계는 미리보기에서 빠지고 전송할 때만 실행됩니다). [Decoder 라이브러리에 저장해 둔 체인](/ko/guide/decoder/#building-a-chain)은 여기서 이름으로 부를 수 있어서, 한 번 만들어 둔 체인이 마커 안에서는 단어 하나가 됩니다: `§admin¦myenc > url-encode§`. Repeater 마커도 TUI 탭에서는 동일하게 동작합니다. 마커는 탭이 전송할 때 렌더링하는 초안 언어이므로 헤드리스 표면은 렌더링하지 않습니다. `gori run repeater send`, MCP `send_request`, 재테스트 단계는 탭이라면 렌더링했을 `§…§`가 든 세션을 리터럴 `§` 바이트로 내보내지 않고 **거부**합니다. 거기서 보내려면 마커를 지우거나, 마크된 요청을 Fuzzer 템플릿으로 스윕하거나(`gori run fuzz --request=FILE`, `fuzz_start{template}`), `--verbatim` / `verbatim:true`로 저장된 바이트가 곧 메시지라고 밝히세요. 캡처 자체에 들어 있던 `§`는 건드리지 않습니다. gori는 그것을 직접 입력한 것과 구분할 수 없으므로 탭은 그대로 두고, 모든 표면이 바이트 그대로 재생합니다.
 
 gRPC 메시지는 마커가 유용하게 쓰이지 않는 유일한 곳입니다. 위치가 바이트 범위가 아니라 스키마가 아는 필드인 [gRPC 필드 스윕](#sweeping-a-grpc-field)을 보세요.
 
 ### 매칭 {#matching}
 
-ffuf 스타일 matcher와 filter로 status, size, words, lines, 왕복 시간(`--mt`/`--ft`, ms 단위. 시간 기반 블라인드 페이로드의 유일한 증거가 되는 차원), 본문 정규식에 대해 결과를 필터링합니다(헤드리스에서는 `--mh`/`--fh`로 응답 헤드 부분 문자열, `--mg`/`--fg`로 gRPC status도). 여기에 시끄러운 기준선을 걸러내는 자동 보정까지 더해집니다. 자동 보정은 스윕 전에 대상을 여러 번 샘플링한 뒤, 각 응답을 모든 샘플 형태와 비교하되 그 샘플들이 스스로 보여 준 흔들림만큼 폭을 넓혀서 비교합니다. 그래서 요청마다 달라지는 id나 타임스탬프를 품은 페이지는 걸러지고, 샘플이 전부 동일했던 대상은 여전히 정확히 비교됩니다. 매칭된 응답은 강조되며 캡처 정규식으로 추출할 수 있습니다.
+ffuf 스타일 matcher와 filter로 status, size, words, 왕복 시간(`--mt`/`--ft`, ms 단위. 시간 기반 블라인드 페이로드의 유일한 증거가 되는 차원), 본문 정규식에 대해 결과를 필터링합니다(헤드리스에서는 `--ml`/`--fl`로 줄 수, `--mh`/`--fh`로 응답 헤드 부분 문자열, `--mg`/`--fg`로 gRPC status도). 여기에 시끄러운 기준선을 걸러내는 자동 보정까지 더해집니다. 자동 보정은 스윕 전에 대상을 여러 번 샘플링한 뒤, 각 응답을 모든 샘플 형태와 비교하되 그 샘플들이 스스로 보여 준 흔들림만큼 폭을 넓혀서 비교합니다. 그래서 요청마다 달라지는 id나 타임스탬프를 품은 페이지는 걸러지고, 샘플이 전부 동일했던 대상은 여전히 정확히 비교됩니다. 매칭된 응답은 강조되며, 헤드리스에서는 캡처 정규식으로 각 응답에서 값을 추출할 수 있습니다(`--extract`, MCP `extract`).
 
-ADVANCED 카드에는 실행을 다듬는 행도 있습니다. **Stop after N hits**와 **Stop on (DIM:SPEC)**은 matcher가 N번 히트했거나 응답이 조건 하나를 만족하면 스윕을 일찍 끝내며, 이렇게 멈춘 실행은 `stopped`가 아니라 `condition_met`으로 끝납니다. **Keep interesting only**는 저장한 실행에 매칭된 행과, 문제가 있었던 행(오류, 재전송, 잘린 응답), 그리고 실행을 멈춘 행만 남깁니다. **Race (N conns)**는 페이로드 스윕 대신 요청 복사본 N개를 함께 풀어 보내고(last-byte sync), **Max requests**는 실제 와이어 요청 수에 상한을 둡니다. 헤드리스에서는 `--stop-after-matches`, `--stop-on`, `--keep`, `--race`, `--max-requests`입니다. [CLI Reference](/ko/reference/cli/#run-fuzz)를 참고하세요.
+ADVANCED 카드에는 실행을 다듬는 행도 있습니다. **Stop after N hits**와 **Stop on (DIM:SPEC)**은 matcher가 N번 히트했거나 응답이 조건 하나를 만족하면 스윕을 일찍 끝내며, 이렇게 멈춘 실행은 `stopped`가 아니라 `condition_met`으로 끝납니다. **Keep interesting only**는 저장한 실행에 매칭된 행과, 문제가 있었던 행(전송 오류, 실패한 마커 체인, 재전송, 잘린 응답), 그리고 실행을 멈춘 행만 남깁니다. **Race (N conns)**는 페이로드 스윕 대신 요청 복사본 N개를 함께 풀어 보내고(last-byte sync), **Max requests**는 실제 와이어 요청 수에 상한을 둡니다. 헤드리스에서는 `--stop-after-matches`, `--stop-on`, `--keep`, `--race`, `--max-requests`입니다. [CLI Reference](/ko/reference/cli/#run-fuzz)를 참고하세요.
 
 ### 실행 저장과 다시 열기 {#saving-and-reopening-runs}
 
@@ -258,7 +258,7 @@ WebSocket 세션에 대한 `--repeater N`은 핸드셰이크와 **세션에 저�
 
 `ws_close_code`와 `ws_frames_in`은 `--format json`과 MCP `fuzz_results`에도 같은 방식으로, WebSocket 행에만 나타납니다.
 
-적용되지 않는 옵션이 넷 있습니다. `--race`는 거부됩니다. 레이스 그룹은 바이트가 동일한 요청 복사본들이어서 프레임 교환 형태가 없기 때문입니다. `--http2`는 `Upgrade: websocket` 템플릿에서만 거부됩니다. HTTP/2에는 업그레이드 메커니즘이 없으므로(RFC 9113 §8.1) h2 위의 WebSocket은 RFC 8441 확장 `CONNECT`로 열리며, 시드 자체가 그 형태라면 플래그 없이도 HTTP/2로 스윕합니다. 핸드셰이크 바이트가 그렇게 말하기 때문입니다. `--record-history`도 거부됩니다. 프레임 교환은 요청/응답 플로우가 아니어서, 기록하면 전사가 비어 있는 WebSocket인 척하는 History 항목이 남기 때문입니다. `--follow-redirects`, `--timeout`, `--ac`는 여기서 그냥 무의미하며, 실행 시작 시 한 번 그렇게 알려 줍니다. 각 거부 메시지는 원하는 동작을 얻는 방법이 `--ws-http-only`일 때 그 사실을 함께 알려 줍니다. 그 플래그를 쓰면 평범한 HTTP 스윕이므로 셋 다 동작하며 History 기록도 됩니다. 송신 프레임이 없는 WebSocket 시드 역시 평범한 HTTP로 스윕합니다. 핸드셰이크만 있는 “프레임” 실행은 페이로드마다 소켓을 열어 아무것도 보내지 않을 뿐이기 때문입니다.
+적용되지 않는 옵션이 여섯 있습니다. 셋은 거부되고 셋은 무의미합니다. `--race`는 거부됩니다. 레이스 그룹은 바이트가 동일한 요청 복사본들이어서 프레임 교환 형태가 없기 때문입니다. `--http2`는 `Upgrade: websocket` 템플릿에서만 거부됩니다. HTTP/2에는 업그레이드 메커니즘이 없으므로(RFC 9113 §8.1) h2 위의 WebSocket은 RFC 8441 확장 `CONNECT`로 열리며, 시드 자체가 그 형태라면 플래그 없이도 HTTP/2로 스윕합니다. 핸드셰이크 바이트가 그렇게 말하기 때문입니다. `--record-history`도 거부됩니다. 프레임 교환은 요청/응답 플로우가 아니어서, 기록하면 전사가 비어 있는 WebSocket인 척하는 History 항목이 남기 때문입니다. `--follow-redirects`, `--timeout`, `--ac`는 여기서 그냥 무의미하며, 실행 시작 시 한 번 그렇게 알려 줍니다. 각 거부 메시지는 원하는 동작을 얻는 방법이 `--ws-http-only`일 때 그 사실을 함께 알려 줍니다. 그 플래그를 쓰면 평범한 HTTP 스윕이므로 셋 다 동작하며 History 기록도 됩니다. 송신 프레임이 없는 WebSocket 시드 역시 평범한 HTTP로 스윕합니다. 핸드셰이크만 있는 “프레임” 실행은 페이로드마다 소켓을 열어 아무것도 보내지 않을 뿐이기 때문입니다.
 
 ### 연결 재사용 {#connection-reuse}
 
@@ -281,7 +281,7 @@ gori run fuzz <flow-id> \
   --fs 0
 ```
 
-소스는 캡처된 플로우(`--flow`), 저장된 HTTP 리피터 세션(`--repeater`), 원시 요청 파일(`--request`), 또는 stdin이 될 수 있습니다. 출력은 `text`, `json`, `jsonl`입니다. 이 형태는 일회성이며 이전과 호환됩니다. 정확히 같은 인자를 `gori run fuzz save` 뒤에 붙이면 모든 행이 영구 저장됩니다. 저장된 실행은 `fuzz list`, `fuzz show`, `fuzz delete`로 관리합니다.
+소스는 캡처된 플로우(`--flow`), 저장된 리피터 세션(`--repeater`, HTTP 또는 WebSocket), 원시 요청 파일(`--request`), 또는 stdin이 될 수 있습니다. 출력은 `text`, `json`, `jsonl`입니다. 이 형태는 일회성이며 이전과 호환됩니다. 정확히 같은 인자를 `gori run fuzz save` 뒤에 붙이면 모든 행이 영구 저장됩니다. 저장된 실행은 `fuzz list`, `fuzz show`, `fuzz delete`로 관리합니다.
 
 **TUI의 Repeater 전송은 History에 기록됩니다.** 손으로 요청을 다루는 테스터야말로 증거가 사라지던 쪽이었고, 플로우를 남기지 않는 전송은 비교도 내보내기도 인계도 할 수 없습니다. 상태줄이 방금 쓴 id를 알려 줍니다(`sent → 200 in 391ms · History #84`). Settings → General → *Record Repeater sends*에서 끌 수 있습니다. WebSocket 전송(소켓의 증거는 프레임 트랜스크립트이고 세션이 이미 갖고 있습니다), send-group, 레이스, 타이밍 분석은 기록되지 않으며 상태줄이 한 번 그렇게 알려 줍니다.
 

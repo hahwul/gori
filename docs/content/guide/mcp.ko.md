@@ -318,7 +318,7 @@ stateless 리비전에서 따라오는 두 가지는 클라이언트를 만들�
 
 ## 도구 힌트 {#tool-hints}
 
-`tools/list`의 모든 도구는 `annotations.readOnlyHint`를 함께 싣습니다. 이 프로젝트의 캡처를 읽기만 하는 도구와, 캡처에 쓰거나 대상에 트래픽을 보내는 도구를 클라이언트가 구분할 수 있도록 — 즉 사람 확인 없이 돌려도 되는 호출과 물어봐야 하는 호출을 가르기 위해서입니다. 이 힌트는 [`--read-only`](#read-only-mode)가 강제하는 것과 같은 선언에서 유도되므로 힌트와 게이트가 따로 어긋나 갈 수 없고, 둘이 다른 곳은 그 선언이 그렇게 정한 곳뿐입니다. 워크벤치 폴링 도구(`*_status`, `*_results`, `list_jobs`, `get_job`)와 `preview_rule`은 보고만 하므로 `--read-only`에서는 숨겨지지만 읽기 전용으로 표시됩니다. 반대로 `switch_project`, `create_project`, `probe_scan`(`active:true`면 전송함), `operator_messages`(전달 기록을 씀)는 `--read-only`에서도 남지만 읽기 전용으로 표시되지 않습니다. 읽기 전용 도구는 `openWorldHint: false`도 함께 답합니다. 프로젝트 스토어에서 답할 뿐 바깥으로 다이얼하지 않기 때문입니다.
+`tools/list`의 모든 도구는 `annotations.readOnlyHint`를 함께 싣습니다. 이 프로젝트의 캡처를 읽기만 하는 도구와, 캡처에 쓰거나 대상에 트래픽을 보내는 도구를 클라이언트가 구분할 수 있도록 — 즉 사람 확인 없이 돌려도 되는 호출과 물어봐야 하는 호출을 가르기 위해서입니다. 이 힌트는 [`--read-only`](#read-only-mode)가 강제하는 것과 같은 선언에서 유도되므로 힌트와 게이트가 서로 어긋날 수 없고, 둘이 다른 곳은 그 선언이 그렇게 정한 곳뿐입니다. 워크벤치 폴링 도구(`*_status`, `*_results`, `list_jobs`, `get_job`)와 `preview_rule`은 보고만 하므로 `--read-only`에서는 숨겨지지만 읽기 전용으로 표시됩니다. 반대로 `switch_project`, `create_project`, `probe_scan`(`active:true`면 전송함), `operator_messages`(전달 기록을 씀)는 `--read-only`에서도 남지만 읽기 전용으로 표시되지 않습니다. 읽기 전용 도구는 `openWorldHint: false`도 함께 답합니다. 프로젝트 스토어에서 답할 뿐 바깥으로 다이얼하지 않기 때문입니다.
 
 ## 한 번에 한 호출 {#one-call-at-a-time}
 
