@@ -18,10 +18,7 @@ ensure
 end
 
 private def accepts?(port : Int32) : Bool
-  TCPSocket.new("127.0.0.1", port, connect_timeout: 2.seconds).close
-  true
-rescue
-  false
+  tcp_port_accepts?("127.0.0.1", port)
 end
 
 # The live `Proxy::Server` objects. Read off the ivar rather than through a getter on purpose:

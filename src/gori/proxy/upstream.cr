@@ -337,7 +337,9 @@ module Gori::Proxy
     private def self.direct_dial_result(host : String, port : Int32,
                                         connect_timeout : Time::Span = Settings.connect_timeout,
                                         io_timeout : Time::Span = Settings.io_timeout) : {TCPSocket?, DialError?}
-      sock = TCPSocket.new(bare_host(host), port, connect_timeout: connect_timeout)
+      # Not `TCPSocket.new(host, port)`: on macOS 27 it hands back a REFUSED address as
+      # connected (see `tcp_connect`).
+      sock = tcp_connect(bare_host(host), port, connect_timeout)
       begin
         sock.sync = true # flush writes immediately (P6)
         sock.tcp_nodelay = true
@@ -357,6 +359,50 @@ module Gori::Proxy
       {nil, DialError.new(DialErrorKind::Dns, cause: exception_cause(ex))}
     rescue
       {nil, DialError::ORIGIN_UNREACHABLE}
+    end
+
+    # `SO_ERROR`, which LibC does not bind on unix: 4 on Linux, 0x1007 on Darwin and the BSDs.
+    private SO_ERROR = {% if flag?(:linux) %} 4 {% else %} 0x1007 {% end %}
+
+    # `TCPSocket.new(host, port, connect_timeout:)`, except that each address's connect is
+    # judged by the socket's own pending error.
+    #
+    # Crystal's event loop finishes a non-blocking connect by calling `connect()` a second time
+    # and takes `EISCONN` as success (`Crystal::EventLoop::Polling#connect`, 1.21 and master).
+    # macOS 27 answers that second call with EISCONN even when the handshake was REFUSED, and
+    # leaves the ECONNREFUSED in SO_ERROR — so a refused address came back as a connected
+    # socket that is not one. Two things broke on it: `localhost` (::1 first) never fell through
+    # to 127.0.0.1, and a refused origin surfaced as a later option or read failure rather than
+    # a connect error. Reading SO_ERROR after the connect is correct on every platform; on one
+    # without the quirk it is 0 and costs one syscall per address.
+    private def self.tcp_connect(host : String, port : Int32, timeout : Time::Span?) : TCPSocket
+      ::Socket::Addrinfo.tcp(host, port) do |addrinfo|
+        # A family the host cannot open (IPv6 disabled, yet `localhost` still resolves ::1
+        # first) is one more address that failed, not the end of the walk.
+        sock = begin
+          TCPSocket.new(addrinfo.family)
+        rescue ex : ::Socket::Error
+          next ex
+        end
+        if err = sock.connect(addrinfo, timeout: timeout) { |e| e }
+          sock.close
+          next err
+        end
+        if errno = pending_error(sock)
+          sock.close
+          next ::Socket::ConnectError.from_os_error("connect", errno)
+        end
+        sock
+      end || raise ::Socket::ConnectError.new("connect: no address for #{host}")
+    end
+
+    # The error a non-blocking connect left on `sock`, or nil. A getsockopt that itself fails
+    # answers nil: it cannot tell us the connect failed, so it must not claim so.
+    private def self.pending_error(sock : ::Socket) : Errno?
+      err = 0
+      len = LibC::SocklenT.new(sizeof(Int32))
+      return nil unless LibC.getsockopt(sock.fd, LibC::SOL_SOCKET, SO_ERROR, pointerof(err), pointerof(len)) == 0
+      err == 0 ? nil : Errno.new(err)
     end
 
     # Connect to the upstream HTTP proxy and CONNECT-tunnel to the origin. Used for

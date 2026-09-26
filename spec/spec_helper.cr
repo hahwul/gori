@@ -69,6 +69,77 @@ end
 
 Spec.after_suite { FileUtils.rm_rf(GORI_TEST_HOME) }
 
+# Does anything accept a TCP connection on `host:port`? `TCPSocket.new` alone cannot say on
+# macOS 27: a REFUSED connect comes back as a socket (Crystal's event loop reads the second
+# `connect()`'s EISCONN as success), so a spec asserting "this port is closed" by expecting it to
+# raise passes a listener that is still up and fails one that is down. Asking for the peer
+# address is what tells the two apart. Raw on purpose: `Upstream.dial` would answer through the
+# process's host overrides and upstream routes, which is not the question.
+def tcp_port_accepts?(host : String, port : Int32) : Bool
+  sock = TCPSocket.new(host, port, connect_timeout: 2.seconds)
+  begin
+    sock.remote_address
+    true
+  ensure
+    sock.close
+  end
+rescue
+  false
+end
+
+# A hung example is not a failure, it is a suite that never ends: a bare `channel.receive`
+# waiting on a server that was never reached parks the one fiber the runner has, the process
+# sits at 0% CPU, and the dots are buffered so the log says nothing. Such processes outlived
+# their `crystal spec` parent by days on a developer machine. The watchdog turns that into a
+# loud exit naming the example. What it covers is an EXAMPLE that parks: a hang in a
+# `before_all`/`after_suite` hook is outside it, and an example spinning without yielding
+# starves this fiber too. `GORI_SPEC_EXAMPLE_TIMEOUT` (seconds, 0 = off) is generous by
+# default: no example should take minutes, and a false trip costs a rerun where a missed hang
+# costs the machine.
+#
+# Counted in watchdog ticks rather than read off a clock: Darwin's monotonic clock keeps running
+# while the machine sleeps, so closing a laptop lid mid-suite would otherwise read as a hang.
+# The one-second timer does not fire during sleep, so ticks only count time the suite had.
+SPEC_EXAMPLE_TIMEOUT = ENV["GORI_SPEC_EXAMPLE_TIMEOUT"]?.try(&.to_i?) || 300
+
+module SpecWatchdog
+  class_property ticks = 0_i64
+  class_property running : {Spec::Example, Int64}? = nil
+end
+
+if SPEC_EXAMPLE_TIMEOUT > 0
+  Spec.around_each do |example|
+    SpecWatchdog.running = {example.example, SpecWatchdog.ticks}
+    begin
+      example.run
+    ensure
+      SpecWatchdog.running = nil
+    end
+  end
+
+  Spec.before_suite do
+    spawn(name: "spec-watchdog") do
+      loop do
+        sleep 1.second
+        SpecWatchdog.ticks += 1
+        next unless running = SpecWatchdog.running
+        example, started = running
+        next if SpecWatchdog.ticks - started < SPEC_EXAMPLE_TIMEOUT
+        STDOUT.flush
+        STDERR.puts "\nspec watchdog: example still running after #{SPEC_EXAMPLE_TIMEOUT}s " \
+                    "(GORI_SPEC_EXAMPLE_TIMEOUT), aborting the suite:\n" \
+                    "crystal spec #{example.file}:#{example.line} # #{example.description}"
+        STDERR.flush
+        # `_exit`, not `exit`: the runner itself lives in an at_exit handler, and this fiber
+        # may be the only thing still able to run. That skips `after_suite`, so the suite's
+        # own temp home is removed here; per-file hooks' temp dirs are left behind.
+        FileUtils.rm_rf(GORI_TEST_HOME) rescue nil
+        LibC._exit(124)
+      end
+    end
+  end
+end
+
 # The chord a keypress ACTUALLY produces, built the way the TUI builds it: a Termisu key
 # event run through `Keybind.from_event`, never a hand-spelled `Verb::Chord.new`.
 #

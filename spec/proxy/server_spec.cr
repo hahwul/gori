@@ -552,7 +552,7 @@ describe Gori::Proxy::Server do
 
     response.should contain("Rebound!")
     # old port is no longer listening (skip the rare OS ephemeral-port reuse case)
-    expect_raises(Exception) { TCPSocket.new("127.0.0.1", old_port) } if new_port != old_port
+    tcp_port_accepts?("127.0.0.1", old_port).should be_false if new_port != old_port
   end
 
   it "releases its connection slot after each connection (bounded concurrency)" do
