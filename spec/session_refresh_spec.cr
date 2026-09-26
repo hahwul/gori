@@ -16,6 +16,14 @@ end
 private alias Slot = Gori::SessionSlot
 private alias Policy = Gori::SessionSlot::RefreshBefore
 
+# A runner whose post-step policy check raises — the shape an unforeseen error after the steps
+# already ran and rebound takes.
+private class RaisingAfterStepsRunner < Gori::SessionRefresh::Runner
+  private def still_due_reason(slot : Gori::SessionSlot) : String?
+    raise "boom after the steps"
+  end
+end
+
 # One request head seen by the origin, plus its path — enough to assert which header a step
 # carried and in which order the steps went out.
 private class Seen
@@ -153,6 +161,43 @@ describe Gori::SessionRefresh do
     header = Base64.urlsafe_encode(%({"alg":"HS256"}), padding: false)
     Gori::SessionRefresh.jwt_exp("Bearer #{header}.#{payload}.sig").should eq(1700000000_i64)
     Gori::SessionRefresh.jwt_exp("plain-cookie-value").should be_nil
+  end
+
+  # A bound value keeps its raw bytes (a `position` rule over a binary body), and a regex over
+  # invalid UTF-8 raises: the manual refresh raised out of `refresh`, and every automatic check
+  # raised before its due time was cached.
+  it "reads an exp out of a bound value that is not valid UTF-8" do
+    payload = Base64.urlsafe_encode(%({"exp":1700000000}), padding: false)
+    header = Base64.urlsafe_encode(%({"alg":"HS256"}), padding: false)
+    raw = String.new(Bytes[0xff, 0xfe] + "#{header}.#{payload}.sig".to_slice + Bytes[0xc3])
+    raw.valid_encoding?.should be_false
+    Gori::SessionRefresh.jwt_exp(raw).should eq(1700000000_i64)
+    Gori::SessionRefresh.jwt_exp(String.new(Bytes[0x41, 0xff, 0x42])).should be_nil
+  end
+
+  it "still settles and reports an outcome when the check after the steps raises" do
+    with_refresh_env do |store|
+      seen = Seen.new
+      server, port = start_login_origin(seen)
+      begin
+        _, bindings, _, _, _ = refresh_fixture(store, port)
+        runner = RaisingAfterStepsRunner.new(store, bindings, -> { ungated_outbound }).install
+        outcome = runner.refresh("admin")
+        outcome.ok.should be_false
+        outcome.reason.not_nil!.should contain("boom after the steps")
+        # The steps did run and rebind, and the outcome says so.
+        seen.paths.should eq(["/csrf", "/login"])
+        outcome.rebound.sort.should eq(["CSRF", "SESSION"])
+        outcome.flow_ids.size.should eq(2)
+        status = runner.status("admin")
+        status.last.should eq(outcome)
+        status.failures.should eq(1)
+        runner.take_outcomes.should eq([outcome])
+        store.events_recent(10).rows.any? { |e| e.kind == "refresh_failed" }.should be_true
+      ensure
+        server.close
+      end
+    end
   end
 
   it "refreshes the named slot as itself while another slot is active" do
