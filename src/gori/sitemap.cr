@@ -250,13 +250,22 @@ module Gori
       index = {} of String => Node
       hosts.each { |h| index[h.label.downcase] ||= h }
       variants = {} of UInt64 => Hash(String, Node) # per parent, built on first miss
+      grown = Set(String).new                       # hosts added here, not captured
       refs.each do |r|
-        host_node = index[r.host.downcase]?
-        unless host_node
+        key = r.host.downcase
+        host_node = index[key]?
+        # Every reference under a host the tree lacked is judged, not only the one that grew
+        # it: the rule reads the reference's URL (a scope include can name `host/v1`), so which
+        # of a host's references show must not depend on which sorted first. `JsRefs.list`
+        # judges every endpoint the same way.
+        if host_node.nil? || grown.includes?(key)
           next unless yield r
-          host_node = index[r.host.downcase] = Node.new(r.host)
+        end
+        unless host_node
+          host_node = index[key] = Node.new(r.host)
           host_node.unrequested = true
           hosts << host_node
+          grown << key
         end
         segments, truncated = segments_of(r.path)
         next if segments.empty? # the bare root is never stored (`JsRefs.resolve`)
