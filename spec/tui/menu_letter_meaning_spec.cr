@@ -240,18 +240,12 @@ module MenuLetterMeaning
     (fid = Gori::Verbs.registry.opens_family(other)) ? "family:#{fid}" == v.id : false
   end
 
-  # The sections this row is drawn in, or nil for every one: a COMMON row and a SUB-TABS
-  # bucket row ride every view of the scope (#1055); anything else only its own section(s).
-  def shown_in(v : Row) : Array(Symbol)?
-    v.sections
-  end
-
   # Is `other`'s chord live in SOME section this row is drawn in (`Definition#chord_sections`)?
   # A key gated to the response pane is no clash for a row the request pane alone draws —
   # there the press is not that verb at all.
   def live_where_shown?(other : Gori::Verb::Definition, v : Row) : Bool
     return true unless secs = other.chord_sections
-    return true unless shown = shown_in(v)
+    return true unless shown = v.sections
     shown.any? { |sec| secs.includes?(sec) }
   end
 
@@ -259,7 +253,7 @@ module MenuLetterMeaning
   # scope (`Keymap#resolve`) and may reach Global — so a pane gate on `c` is still caught.
   def live_everywhere_shown?(other : Gori::Verb::Definition, v : Row) : Bool
     return true unless secs = other.chord_sections
-    return false unless shown = shown_in(v)
+    return false unless shown = v.sections
     shown.all? { |sec| secs.includes?(sec) }
   end
 

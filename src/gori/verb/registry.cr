@@ -76,10 +76,6 @@ module Gori
         @openers[id]?
       end
 
-      def families : Array(Family)
-        @families
-      end
-
       private def family_of_intent(intent : Symbol) : Family?
         @families.find(&.includes?(intent))
       end
