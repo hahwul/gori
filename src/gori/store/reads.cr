@@ -277,6 +277,16 @@ module Gori
       nil
     end
 
+    # One flow's REQUEST head and body, without the response: what a reader of request inputs
+    # alone needs (`ParamInventory.seed_names`), where `get_flow` would also materialize the
+    # response body BLOB only to drop it. nil when there is no such flow.
+    def request_parts(id : Int64) : {Bytes, Bytes?}?
+      @db.query("SELECT request_head, request_body FROM flows WHERE id = ?", id) do |rs|
+        return {rs.read(Bytes), rs.read(Bytes?)} if rs.move_next
+      end
+      nil
+    end
+
     # Single-row projection, e.g. to refresh a row after an :inserted/:updated
     # event without re-reading the whole page.
     def flow_row(id : Int64) : FlowRow?
