@@ -240,7 +240,7 @@ module Gori
     # Only a response with no readable `Date` falls back to now.
     def self.set_cookie_jar(headers : Proxy::Codec::HeaderList) : Hash(String, String)
       jar = {} of String => String
-      sent_at = headers.get?("date").try { |d| HTTP.parse_time(d) } || Time.utc
+      sent_at = headers.get?("date").try { |d| http_date?(d) } || Time.utc
       headers.get_all("set-cookie").each do |sc|
         parts = sc.split(';')
         pair = parts.first
@@ -272,7 +272,7 @@ module Gori
           next if digits.empty? || !digits.each_char.all?(&.ascii_number?)
           max_age_expired = v.starts_with?('-') || digits.each_char.all?('0')
         when "expires"
-          HTTP.parse_time(v).try { |t| expires = t }
+          http_date?(v).try { |t| expires = t }
         end
       end
       unless max_age_expired.nil?
@@ -282,6 +282,20 @@ module Gori
         return ex <= sent_at
       end
       false
+    end
+
+    # An origin-written HTTP date (`Date`, a cookie's `Expires`), or nil when it cannot be read.
+    #
+    # `HTTP.parse_time` rescues only `Time::Format::Error`, so a well-formed but impossible date
+    # still raises: `ArgumentError` on `31 Feb`, day 00, hour 25 or year 0000, a bare `Exception`
+    # on a five-digit year, `InvalidTimezoneOffsetError` on `+9999`. The origin controls these
+    # bytes, and a raise here took down every reader of a stored flow (session from-flow, History
+    # cookie columns, Sequencer samples). RFC 6265 §5.2.1 ignores an `Expires` that fails to
+    # parse, and `set_cookie_jar` already treats a missing `Date` as now.
+    def self.http_date?(value : String) : Time?
+      HTTP.parse_time(value)
+    rescue
+      nil
     end
 
     # A named response header value (case-insensitive lookup, last-wins per HeaderList).

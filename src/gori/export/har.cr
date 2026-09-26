@@ -606,7 +606,7 @@ module Gori
               j.field "value", value.strip
               j.field "path", attrs["path"] if attrs.has_key?("path")
               j.field "domain", attrs["domain"] if attrs.has_key?("domain")
-              if exp = attrs["expires"]?.try { |s| HTTP.parse_time(s) }
+              if exp = attrs["expires"]?.try { |s| TokenExtract.http_date?(s) }
                 j.field "expires", exp.to_rfc3339
               end
               j.field "httpOnly", true if attrs.has_key?("httponly")

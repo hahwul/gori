@@ -261,6 +261,19 @@ describe Gori::SessionFromFlow do
       headers_of(detail)["Cookie"].should eq("keep=yes")
     end
 
+    # An impossible `Date` (or `Expires`) is the origin's to write. It must not cost the whole
+    # draft: the cookie is read against now and the JSON token beside it still lands.
+    it "reads a login response whose Date and Expires are impossible dates" do
+      detail = flow("HTTP/1.1 200 OK\r\n" \
+                    "Content-Type: application/json\r\n" \
+                    "Date: Sat, 31 Feb 2026 00:00:00 GMT\r\n" \
+                    "Set-Cookie: sid=abc; Expires=Mon, 00 Jan 2026 00:00:00 GMT; Path=/\r\n\r\n",
+        response_body: %({"access_token":"eyJ.x.y"}))
+      headers = headers_of(detail)
+      headers["Cookie"].should eq("sid=abc")
+      headers["Authorization"].should eq("Bearer eyJ.x.y")
+    end
+
     # A repeated name: the LATER value is the one a client would hold, but the line keeps the
     # order the origin wrote it in.
     it "lets the last value win for a repeated name, in first-appearance order" do
