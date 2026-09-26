@@ -13,7 +13,7 @@ Repeater edits a copy after the fact; intercept edits the real request while the
 
 ## 1. Arm intercept
 
-Press `i` to toggle **Intercept** on, or open the **Intercept** tab and arm the catch there. A blank condition holds *everything* (every request through the proxy stalls until you decide it), so narrow it in the filter bar with a query-language expression before you turn it loose:
+Press `i` to toggle **Intercept** on, or open the **Intercept** tab and arm the catch there. A blank condition holds *everything* (every request through the proxy stalls until you decide it; with the `s` scope lens on, everything in scope), so narrow it in the filter bar with a query-language expression before you turn it loose:
 
 ```text
 host:api.example.com method:POST
@@ -32,7 +32,7 @@ Now only the POSTs to your target are held; the rest pass straight through. The 
 
 ## 2. Catch a request and edit it
 
-Trigger the matching request from your client: a browser click, a `curl`, a Repeater send. Instead of leaving, it stops in the Intercept queue. Select it and press `↵` / `e` to open its raw bytes in the editor (the same INS-mode editor the Repeater uses), change what you need (a header value, a JSON field, the path), then release it with `f` to **forward** the edited request. `Esc` leaves the editor without sending.
+Trigger the matching request from your client: a browser click, a `curl`, a Repeater send. Instead of leaving, it stops in the Intercept queue. Select it and press `↵` / `e` to open its raw bytes in the editor (the same INS-mode editor the Repeater uses), change what you need (a header value, a JSON field, the path), then press `Ctrl-R` to **forward** the edited request. `Esc` leaves the editor without sending and keeps the edit, so `f` on the queue forwards it too; inside the editor `f` just types an `f`.
 
 Headless, the same queue is drivable from a second terminal against a running TUI:
 
@@ -41,7 +41,7 @@ gori run intercept                       # list held items + catch state
 gori run intercept edit 3 --raw-file edited.txt   # forward item 3 with edited bytes
 ```
 
-An edited request is forwarded with `Content-Length` resynced (on by default; `Ctrl-L` toggles it) and `$ENV.KEY` [environment variables](/guide/repeater-and-fuzzer/#environment-variables) expanded (`$$ENV.KEY` for the literal text); extract-rule `$BIND.NAME` bindings are not resolved on this path. Otherwise what you typed is what goes out.
+In the TUI editor, an edited request is forwarded with `Content-Length` resynced (on by default; `Ctrl-L` toggles it) and `$ENV.KEY` [environment variables](/guide/repeater-and-fuzzer/#environment-variables) and `$GEN.*` tokens expanded (`$$ENV.KEY` for the literal text); extract-rule `$BIND.NAME` bindings are not resolved on this path. `gori run intercept edit` expands nothing: the body goes out verbatim, and `--no-update-content-length` keeps the `Content-Length` you declared. Otherwise what you typed is what goes out.
 
 **Checkpoint.** The edited request reaches the origin: switch to **History** and read the flow to confirm the change and the origin's response.
 
@@ -55,11 +55,11 @@ Every held item is one of three decisions, and gori applies none of them for you
 
 Forward and drop act on the marked rows if any are set, else the cursor row, so `t` to mark a run and one `f` releases them together. The operator decides each one; nothing is auto-applied.
 
-**Checkpoint.** You have forwarded one request untouched and dropped another, and History records both, the drop as a cancelled flow.
+**Checkpoint.** You have forwarded one request untouched and dropped another, and History records both, the drop as an aborted flow noted `dropped by intercept (request)`.
 
 ## 4. Make an edit permanent with Match & Replace
 
-Holding every request to make the *same* edit by hand gets old fast. A standing edit belongs in the **Rewriter** tab (the Match & Replace editor, right of Comparer on the tab bar, or `Ctrl-P` → **Match & Replace**). Add a rule with an operation (**Replace** text in the head or body, **Add** / **Set** / **Remove** a header, or **Short circuit** to answer the request from the rule without dialing the origin at all) and scope it to a host glob so it fires only for matching traffic:
+Holding every request to make the *same* edit by hand gets old fast. A standing edit belongs in the **Rewriter** tab (the Match & Replace editor, off the tab bar by default: press **`0`** and type "rewriter", or `Ctrl-P` → **Match & Replace**). Add a rule with an operation (**Replace** text in the head or body, **Add** / **Set** / **Remove** a header, **Short circuit** to answer the request from the rule without dialing the origin at all, or **Pipe** to hand the matched bytes to a command) and scope it to a host glob so it fires only for matching traffic:
 
 ```bash
 gori run rewriter add --op set_header --target request \
@@ -74,4 +74,4 @@ Choose where the rule lives: **project** rules sit in this engagement's database
 
 - [Fuzz a parameter](/playbooks/fuzz-a-parameter/): take one of these requests and sweep a value across a wordlist
 - [Proxy & History](/guide/proxy/#intercept): the full Intercept reference, HTTP/2 and WebSocket rules
-- [Match & Replace](/guide/proxy/): every rewrite operation, short-circuit stubs, and global vs project scope
+- [Match & Replace](/guide/proxy/#match-replace): every rewrite operation, short-circuit stubs, and global vs project scope

@@ -38,21 +38,23 @@ gori run rewriter extract add --name SESSION --kind cookie --selector session \
 
 ## 3. 모든 요청에 되써 넣기 {#3-write-it-back-on-every-request}
 
-이름을 바인딩한 것만으로는 값을 캡처했을 뿐입니다. 그것을 다시 와이어에 올리는 것은 **Match & Replace** 규칙입니다. **Rewriter** 탭에서 **요청** 쪽에 `Authorization`(또는 `Cookie`)을 `$BIND.SESSION`으로 설정하는 **set header** 규칙을 추가하세요. `$BIND.SESSION`은 규칙을 저장한 때가 아니라 각 요청이 나갈 때 해석되므로, 이후의 모든 Repeater·Fuzzer 전송은 인증된 채로 나갑니다.
+이름을 바인딩한 것만으로는 값을 캡처했을 뿐입니다. 그것을 다시 와이어에 올려야 하고, 방법은 누가 보내느냐에 달려 있습니다. 프록시를 지나는 트래픽(브라우저나 클라이언트)은 **Match & Replace** 규칙이 맡습니다. **Rewriter** 탭에서 **요청** 쪽에 `Authorization`(또는 `Cookie`)을 `$BIND.SESSION`으로 설정하는 **set header** 규칙을 추가하세요. `$BIND.SESSION`은 규칙을 저장한 때가 아니라 각 요청이 나갈 때 해석되므로, 이후 프록시를 지나는 모든 요청은 인증된 채로 나갑니다.
 
 ```bash
 gori run rewriter add --op set_header --target request \
   --find Authorization --value 'Bearer $BIND.SESSION' --host '*.example.com'
 ```
 
-**체크포인트.** 전에 `401`을 돌려주던 보호된 엔드포인트를 Repeater로 재전송하면 이제 `200`을 돌려줍니다. 대신 규칙이 건너뛰어졌다면, 이벤트 피드가 이름이 아무것도 해석하지 못했다고 말합니다. 로그인을 다시 캡처해 재바인딩하세요.
+Match & Replace 규칙은 프록시를 지나는 트래픽에만 적용됩니다. Repeater나 Fuzzer 전송은 쓴 그대로 나갑니다. 그러니 이쪽은 요청 자체에 이름을 적으세요. Repeater 에디터나 퍼즈 템플릿의 `Authorization: Bearer $BIND.SESSION` 줄도 전송 시점에 똑같이 해석되며, 세션 슬롯(5단계)을 쓰면 요청마다 고치지 않아도 헤더를 더해 줍니다.
+
+**체크포인트.** 전에 `401`을 돌려주던 보호된 엔드포인트로 프록시를 거쳐 보낸 요청이 이제 `200`을 돌려주고, `Authorization` 줄이 `Bearer $BIND.SESSION`인 Repeater 전송도 마찬가지입니다. 대신 규칙이 건너뛰어졌다면, 이벤트 피드가 이름이 아무것도 해석하지 못했다고 말합니다. 로그인을 다시 캡처해 재바인딩하세요.
 
 ## 4. 헤드리스로 하기 {#4-do-it-headless}
 
-`gori run`은 호출마다 프로세스 하나이고, 바인딩은 로그인을 관측한 그 프로세스의 메모리에만 존재합니다. 그래서 새로 뜬 `fuzz`나 `mine`은 `$BIND.SESSION`을 해석할 것이 없어 전송 전에 거부됩니다. 스윕은 의도적으로 추출 소스도 아닙니다: 공격 페이로드를 되비추는 응답이 자칫 세션을 페이로드에서 유래한 값으로 재바인딩할 수 있기 때문입니다. `--bind-from`이 그 틈을 메웁니다. 캡처한 플로우 하나(로그인)를 먼저 재전송해, 그 응답이 같은 프로세스 안에서 이후 실행 동안 바인딩 표를 채웁니다:
+`gori run`은 호출마다 프로세스 하나이고, 바인딩은 로그인을 관측한 그 프로세스의 메모리에만 존재합니다. 그래서 새로 뜬 `fuzz`나 `mine`은 `$BIND.SESSION`을 해석할 것이 없어, 토큰이 글자 그대로 나갑니다. 스윕은 의도적으로 추출 소스도 아닙니다: 공격 페이로드를 되비추는 응답이 자칫 세션을 페이로드에서 유래한 값으로 재바인딩할 수 있기 때문입니다. `--bind-from`이 그 틈을 메웁니다. 캡처한 플로우 하나(로그인)를 먼저 재전송해, 그 응답이 같은 프로세스 안에서 이후 실행 동안 바인딩 표를 채웁니다. 템플릿이 토큰을 적고 있어야 하므로, `Authorization` 줄이 `Bearer $BIND.SESSION`인 요청 파일을 퍼징하세요(캡처한 플로우의 바이트에는 그 이름이 없습니다. 그런 플로우에는 5단계의 `--slot`이 헤더를 더해 줍니다):
 
 ```bash
-gori run fuzz 42 --bind-from 17 --wordlist ids.txt
+gori run fuzz --request req.http --target https://api.example.com --bind-from 17 --wordlist ids.txt
 # bind-from: flow #17 replayed → bound $BIND.SESSION
 ```
 
@@ -86,7 +88,9 @@ gori run fuzz 42 --slot low-priv --bind-from 17 --wordlist ids.txt
 
 오버레이는 헤더 전용이라 `Content-Length`는 움직이지 않고 본문은 바이트 그대로입니다. 그래서 직접 작성하지 않은 바이트(캡처된 재전송, 페이로드가 이미 끼워진 퍼즈 템플릿) 위에서도 슬롯은 안전합니다.
 
-기대기 전에 알아 둘 한계가 둘 있습니다. 활성 슬롯은 **절대 저장되지 않습니다.** 프로젝트를 다시 열면 캡처된 그대로에서 시작하는데, 슬롯의 값이 메모리 전용이라 포인터만 비어 있는 테이블 위로 복원하면 `$BIND.SESSION`이 리터럴인 오버레이를 보내게 되기 때문입니다. 그리고 쿠키 항아리도 자동 로그인 매크로도 없습니다. 슬롯은 직접 쓴 헤더와 gori가 관찰한 값을 들고 있고, `--bind-from`이 "다시 로그인한다"의 명시적인 버전입니다.
+기대기 전에 알아 둘 한계가 둘 있습니다. 활성 슬롯은 **절대 저장되지 않습니다.** 프로젝트를 다시 열면 캡처된 그대로에서 시작하는데, 슬롯의 값이 메모리 전용이라 포인터만 비어 있는 테이블 위로 복원하면 `$BIND.SESSION`이 리터럴인 오버레이를 보내게 되기 때문입니다. 그리고 쿠키 항아리는 없습니다. 슬롯은 직접 쓴 헤더와 gori가 관찰한 값을 들고 있고, `--bind-from`이 "다시 로그인한다"의 명시적인 버전입니다.
+
+토큰보다 오래 가는 실행이라면 슬롯에 **갱신 단계**(refresh steps)를 주세요. 순서대로 로그인하는 Repeater 세션들입니다. `gori run session edit admin --refresh 12,14 --refresh-before jwt-exp`를 하면 `--slot admin` 전송은 바인딩된 JWT가 곧 만료될 때마다 먼저 슬롯을 갱신하고, `gori run session refresh admin`은 그 단계를 손으로 돌려 확인합니다. 갱신은 전송 전에 동작하며 `401` 뒤에 재시도하지 않습니다. [갱신 단계](/ko/reference/cli/#refresh-steps)를 참고하세요.
 
 **체크포인트.** `gori run session list`가 두 슬롯을 보여 주고, `--slot low-priv` 실행은 첫 요청 전에 `slot: sending as low-priv`를 찍습니다.
 
