@@ -23,6 +23,8 @@ module Gori
     # "Display…" (`Z`) holds the toggles that change how a pane DRAWS what it holds — never a
     # write-back like pretty-print-request, which changes the request itself. Sticky: after a
     # flip the card comes back at the same row, whose `●`/`○` says what the pane now shows.
+    # `a` shows every row a default lens leaves out — Probe's closed issues, the Params tab's
+    # standard headers — the letter both tabs already answer bare (#1295).
     # Not `V`: under the vim keyset ⇧V selects a line in every read pane this row is drawn in,
     # so a dropped space would select instead of opening the card. `z` is vim's view-and-fold
     # prefix, and the capital keeps the lower case for single rows.
@@ -46,6 +48,7 @@ module Gori
       {:distribution, 'v'},
       {:compare_pane, 't'},
       {:fold_unchanged, 'z'},
+      {:show_all, 'a'},
     ], sticky: true)
 
     # "Protocol…" (`P`) holds the per-request transport settings of the Repeater and the

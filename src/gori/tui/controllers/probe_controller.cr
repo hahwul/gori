@@ -54,6 +54,13 @@ module Gori::Tui
       @probe.detail_open? ? Verb::Scope::ProbeDetail : Verb::Scope::Probe
     end
 
+    # Display…'s row (#1295): whether dismissed and promoted issues are listed too.
+    def menu_state(verb_id : String) : String?
+      case verb_id
+      when "probe.toggle-closed" then SpaceMenu.on_off(@probe.show_closed?)
+      end
+    end
+
     # --- fixed sub-tab strip (no ^N/^W/rename) ---
     def subtab_labels : Array(String)
       SUBTABS

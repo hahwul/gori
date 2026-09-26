@@ -133,7 +133,7 @@ describe "Display… and Protocol… (#1274 WP9)" do
     members_of(display).should eq(%w[
       comparer.toggle-fold comparer.toggle-pane detail.toggle-hex detail.toggle-pretty
       detail.toggle-unicode detail.toggle-ws fuzz.dist fuzz.matched history.columns
-      history.toggle-follow history.toggle-static repeater.toggle-diff repeater.toggle-envelope
+      history.toggle-follow history.toggle-static params.all-headers probe.toggle-closed repeater.toggle-diff repeater.toggle-envelope
       repeater.toggle-hex repeater.toggle-pretty repeater.toggle-resp-hex repeater.toggle-unicode
       sitemap.toggle-grouping sitemap.toggle-js-refs sitemap.toggle-query-fold sitemap.toggle-static
     ])

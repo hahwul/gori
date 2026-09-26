@@ -41,6 +41,13 @@ module Gori::Tui
       Verb::Scope::Params
     end
 
+    # Display…'s row (#1295): whether the standard browser headers are listed too.
+    def menu_state(verb_id : String) : String?
+      case verb_id
+      when "params.all-headers" then SpaceMenu.on_off(@params.all_headers?)
+      end
+    end
+
     # The first visit scans; later visits keep what is on screen (^R rescans) — unless the
     # Sitemap's query or scope lens changed since, in which case what is on screen answers
     # about a flow set the tree beside it no longer shows. A scan that re-ran on EVERY switch

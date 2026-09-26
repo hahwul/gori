@@ -303,7 +303,7 @@ second card. Inside it every tool has the same letter on every tab:
 | `r` | Repeater |
 | `f` | Fuzzer |
 | `c` | Comparer |
-| `m` | Miner |
+| `m` | Miner (the Params tab's Mine parameters too) |
 | `s` | Sequencer |
 | `a` | Authorize |
 | `D` | Discover |
@@ -343,6 +343,7 @@ and stays out of both cards.
 | `g` · `q` · `J` | Fold ids · fold queries · JS references | `r` · `f` | gRPC reframe · gRPC field editor |
 | `m` · `v` | Fuzzer: matched only · distribution | `t` | TLS fingerprint |
 | `t` · `z` | Comparer: requests/responses · fold unchanged | | |
+| `a` | Show all: Probe's closed issues, the Params tab's standard headers | | |
 
 Both cards are **sticky**. After a row runs, the card comes back at the same row, so you can
 flip two or three settings in one visit, and each row shows its state: `●` on, `○` off, or a
@@ -355,10 +356,12 @@ or the column editor, or when the row moved focus.
 - The Fuzzer's **Cycle sort** stays a direct row (`Space` `o`), because it is the one you press
   most while reading results.
 - Direct keys are unchanged: `Ctrl-X` hex, `p` pretty, `u` Unicode, `b` whitespace, `⇧D` diff,
-  `Ctrl-T` envelope, `Ctrl-V` HTTP/2, `Ctrl-S` SNI, `Ctrl-L` auto Content-Length.
+  `Ctrl-T` envelope, `a` show all, `Ctrl-V` HTTP/2, `Ctrl-S` SNI, `Ctrl-L` auto Content-Length.
 
 What moved: hex was `e` in the History detail, `x` in the Repeater request pane and `h` in its
-response pane, and is now `Z` `x` in all three. Save results on the Fuzzer gave up `P` (it is
+response pane, and is now `Z` `x` in all three. Probe's **Show closed** and the Params tab's
+**All headers** were `Space` `a` and are `Z` `a`, and Mine parameters on Params was `Space` `m` and
+is `>` `m`; their bare `a` and `m` still work. Save results on the Fuzzer gave up `P` (it is
 `⇧S`, and [palette-only](#palette-only)). The History detail's **Copy flow** row is gone: `Space` `Y` (Copy as…)
 on the REQUEST pane has **Raw request**, the same text.
 

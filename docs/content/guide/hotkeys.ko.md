@@ -291,7 +291,7 @@ Rewriter와 Colormarker의 **Enable/disable everywhere**가 `T`인 이유가 이
 | `r` | Repeater |
 | `f` | Fuzzer |
 | `c` | Comparer |
-| `m` | Miner |
+| `m` | Miner (Params 탭의 Mine parameters도) |
 | `s` | Sequencer |
 | `a` | Authorize |
 | `D` | Discover |
@@ -331,6 +331,7 @@ Rewriter와 Colormarker의 **Enable/disable everywhere**가 `T`인 이유가 이
 | `g` · `q` · `J` | id 접기 · 쿼리 접기 · JS 참조 | `r` · `f` | gRPC reframe · gRPC 필드 편집기 |
 | `m` · `v` | Fuzzer: 매치만 · 분포 | `t` | TLS 지문 |
 | `t` · `z` | Comparer: 요청/응답 · 변경 없는 구간 접기 | | |
+| `a` | 모두 보기: Probe의 닫힌 이슈, Params 탭의 표준 헤더 | | |
 
 두 카드는 **sticky**입니다. 행을 실행하면 카드가 같은 행에서 다시 열리므로 한 번에 두세 개를
 바꿀 수 있고, 각 행은 상태를 보여줍니다. `●`는 켜짐, `○`는 꺼짐, TLS 프리셋 이름 같은 값도
@@ -342,10 +343,12 @@ Rewriter와 Colormarker의 **Enable/disable everywhere**가 `T`인 이유가 이
 - Fuzzer의 **Cycle sort**는 결과를 읽을 때 가장 자주 누르는 행이라 직접 행(`Space` `o`)으로
   남습니다.
 - 직접 키는 그대로입니다. `Ctrl-X` 헥스, `p` pretty, `u` Unicode, `b` 공백, `⇧D` diff,
-  `Ctrl-T` envelope, `Ctrl-V` HTTP/2, `Ctrl-S` SNI, `Ctrl-L` Content-Length 자동 계산.
+  `Ctrl-T` envelope, `a` 모두 보기, `Ctrl-V` HTTP/2, `Ctrl-S` SNI, `Ctrl-L` Content-Length 자동 계산.
 
 옮겨진 것: 헥스는 History 상세에서 `e`, Repeater 요청 패널에서 `x`, 응답 패널에서 `h`였고 이제
-셋 모두 `Z` `x`입니다. Fuzzer의 결과 저장은 `P`를 내주었습니다(`⇧S`이며, [팔레트 전용](#palette-only)입니다).
+셋 모두 `Z` `x`입니다. Probe의 **Show closed**와 Params 탭의 **All headers**는 `Space` `a`였고
+이제 `Z` `a`이며, Params의 Mine parameters는 `Space` `m`에서 `>` `m`으로 옮겼습니다. 맨 `a`와
+`m`은 그대로 동작합니다. Fuzzer의 결과 저장은 `P`를 내주었습니다(`⇧S`이며, [팔레트 전용](#palette-only)입니다).
 History 상세의 **Copy flow** 행은 없어졌습니다. REQUEST 패널에서 `Space` `Y`(Copy as…)의
 **Raw request**가 같은 텍스트입니다.
 

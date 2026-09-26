@@ -69,6 +69,11 @@ describe "Gori::Verbs.register_probe" do
       }.each { |id, intent| verb_intents(r, id).should eq([intent]) }
     end
 
+    it "lists Show closed under Display…, on the `a` it answers bare (#1295)" do
+      r.menu_keys("probe.toggle-closed").should eq(['Z', 'a'])
+      r["probe.toggle-closed"].menu_key.should be_nil
+    end
+
     it "keeps the BULK dismissals menu-only, so no stray key mutes a whole host" do
       %w[probe.dismiss-code probe.dismiss-host probe.active-rescan].each do |id|
         r[id].chords.should be_empty
