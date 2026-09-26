@@ -27,6 +27,38 @@ private def classify_lines(lines : Array(String)) : Symbol
   end
 end
 
+# #1247 names Next.js and OpenLiteSpeed; Vercel's `PRERENDER` is its static cache answering.
+private VENDOR_EXAMPLES = [
+  {["x-nextjs-cache: HIT"], :hit},
+  {["x-nextjs-cache: STALE"], :hit},
+  {["x-nextjs-cache: MISS"], :miss},
+  {["X-LiteSpeed-Cache: hit"], :hit},
+  {["X-LiteSpeed-Cache: hit,litemage"], :hit},
+  {["X-LiteSpeed-Cache: miss"], :miss},
+  {["X-Vercel-Cache: HIT"], :hit},
+  {["X-Vercel-Cache: PRERENDER"], :hit},
+  {["X-Vercel-Cache: STALE"], :hit},
+  {["X-Vercel-Cache: MISS"], :miss},
+]
+
+# One of each field `Signals#observe` reads, so a name missing from CACHE_HEADERS shows up.
+private AGREEMENT_EXAMPLES = [
+  {["Age: 42"], :hit},
+  {["X-Cache: HIT"], :hit},
+  {["X-Cache-Status: EXPIRED"], :miss},
+  {["CF-Cache-Status: DYNAMIC"], :dynamic},
+  {["X-Cache-Hits: 0"], :miss},
+  {["X-Varnish: 123 456"], :hit},
+  {["Cache-Status: edge; fwd=uri-miss"], :miss},
+  {["X-Proxy-Cache: HIT"], :hit},
+  {["Akamai-Cache-Status: Hit from child"], :hit},
+  {["CDN-Cache: HIT"], :hit},
+  {["Server-Timing: cdn-cache; desc=HIT"], :hit},
+  {["Cache-Control: private"], :dynamic},
+  {["Cache-Control: no-store", "Surrogate-Control: max-age=3600"], :none},
+  {["Cache-Control: no-store", "CDN-Cache-Control: max-age=3600"], :none},
+]
+
 describe Gori::CacheStatus do
   it "classifies the corrected cache headers from a table of examples" do
     examples = [] of Tuple(Array(String), Symbol)
@@ -45,9 +77,27 @@ describe Gori::CacheStatus do
     examples << {["Cache-Control: no-store", "Surrogate-Control: max-age=3600"], :none}
     examples << {["Server-Timing: cdn-cache; desc=HIT"], :hit}
     examples << {["Cache-Status: origin; hit, edge; fwd=uri-miss"], :miss}
+    examples.concat(VENDOR_EXAMPLES)
 
     examples.each do |lines, expected|
       classify_lines(lines).should eq(expected), lines.join(" | ")
+    end
+  end
+
+  it "reads the Next.js, LiteSpeed and Vercel cache vocabularies" do
+    VENDOR_EXAMPLES.each do |lines, expected|
+      classify_lines(lines).should eq(expected), lines.join(" | ")
+    end
+  end
+
+  it "agrees between the byte scan and the parsed-header classification" do
+    # `classify(Bytes)` drops any field not in CACHE_HEADERS before `Signals#observe` sees it;
+    # `classify(HeaderList)` does not filter. A header `observe` reads but CACHE_HEADERS lacks
+    # makes the two disagree — the QL `cache:` UDF would miss what the detail view shows.
+    (AGREEMENT_EXAMPLES + VENDOR_EXAMPLES).each do |lines, _|
+      raw = ("HTTP/1.1 200 OK\r\n" + lines.map { |line| "#{line}\r\n" }.join + "\r\n").to_slice
+      parsed = Gori::Proxy::Codec::Http1.parse_response_head(raw).headers
+      Gori::CacheStatus.classify(raw).should eq(Gori::CacheStatus.classify(parsed)), lines.join(" | ")
     end
   end
 
