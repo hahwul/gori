@@ -99,4 +99,15 @@ describe "hint templates — space-menu letters come from the registry" do
       .map { |(file, n, line)| "#{file}:#{n}: #{line.strip}" }
     hits.should be_empty
   end
+
+  it "leaves no hand-written `␣<key>` chip in a string (#1295)" do
+    # The compact spelling on a border badge or a tight hint — ` ␣Pr:FRAME `, `␣Zs shows them` —
+    # names a menu path as surely as `space → P r` does, and it went stale the same way. It is
+    # `Hotkeys.menu_chip`'s to spell. `␣` followed by a space is the space BAR as a key
+    # (`␣ toggle`), and an interpolation builds the path from the registry.
+    literal = /␣(?!#\{)[^\s"\\]/
+    hits = lines.select { |(_, _, line)| line.matches?(literal) }
+      .map { |(file, n, line)| "#{file}:#{n}: #{line.strip}" }
+    hits.should be_empty
+  end
 end

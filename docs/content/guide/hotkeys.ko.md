@@ -32,7 +32,7 @@ Ctrl-P  → settings:hotkeys
 - **Ctrl**은 타이핑 중(INS)에도 작동해야 하는 동작, 그리고 워크벤치의 실행·중지(`Ctrl-R` / `Ctrl-X`)를 위한 것입니다. 맨 글자에서 한 단계 올리는 범용 승격 수단이 아닙니다.
 - **Shift**는 탭 전체를 비우는 동작을 맡습니다. `⇧X`는 clear가 있는 모든 탭(History·Probe·Authorize·Issues·프로젝트 ACTIVITY 피드)에서 같은 키이고, 스페이스 메뉴 글자는 그 옆의 `X`입니다. `c`가 아니라 `x`인 이유는 shift 아래에 무엇이 있느냐입니다: 맨 `x`는 그 다섯 스코프 어디에도 바인딩되어 있지 않지만 맨 `c`는 다섯 곳 모두에서 살아 있고(`capture.toggle`, Probe 목록에서는 dismiss), 프로젝트를 지우는 동작이 하루 종일 누르는 키 바로 위 shift에 있어서는 안 됩니다. 파괴적인 코드는 **누르기 전에 읽을 수 있는 곳에 이름이 적혀 있어야** 하고(스페이스 메뉴만이 아니라 Help 시트와 그 탭의 본문 힌트에), 먼저 확인을 물어야 합니다.
 - **`d`는 파괴합니다.** 맨 `d`는 이 키를 바인딩한 모든 스코프(16곳)에서 선택한 행을 삭제하거나 무시합니다. Repeater의 응답 diff가 유일한 예외였고, 이제 `⇧D`로 옮겨서 반사적으로 누른 `d`가 표시 토글에 떨어지지 않습니다. 스페이스 메뉴 글자도 `⇧D`입니다. `d`는 아홉 개 서브탭 스트립 전부에서 **서브탭 복제**이고([space 메뉴](#space-menu) 참고) 그 버킷은 모든 패널에 함께 그려지므로, 맨 글자는 더 이상 diff 토글의 것이 아닙니다 — 덕분에 메뉴 행과 키보드가 같은 철자를 씁니다. 삭제가 아닌 새 패널 동작은 `d`를 가져가지 않습니다.
-- **패널 고유의 키는 그 패널에서만 응답합니다.** Repeater의 `p`(본문 보기 좋게)와 `⇧D`(diff)는 응답 패널에서, Fuzzer의 `v`(분포 사이드바)는 RESULTS에서만 동작합니다. 요청 패널과 템플릿 패널에서는 스페이스 메뉴가 `p`·`D`·`v`를 다른 동작(요청 pretty-print, 디코더 체인, 선택 해제)에 쓰므로, 그곳에서 맨 키는 메뉴가 가르치지 않은 동작을 하는 대신 아무것도 하지 않습니다.
+- **패널 고유의 키는 그 패널에서만 응답합니다.** Repeater의 `p`(본문 보기 좋게)와 `⇧D`(diff)는 응답 패널에서, Fuzzer의 `m`(매치된 것만)과 `v`(분포 사이드바)는 RESULTS에서만 동작합니다. 요청 패널과 템플릿 패널에서는 스페이스 메뉴가 `p`·`D`·`v`를 다른 동작(요청 pretty-print, 디코더 체인, 선택 해제)에 쓰므로, 그곳에서 맨 키는 메뉴가 가르치지 않은 동작을 하는 대신 아무것도 하지 않습니다.
 - **복사가 그 규칙의 실례입니다.** `y`는 READ에서, `Ctrl-Y`는 **INS에서도**, 모든 텍스트 상자에서 복사합니다. INS에서 맨 `y`는 그냥 문자이고, `Shift`+화살표로 만든 선택 위에 타이핑하면 그 선택을 *덮어씁니다*. 그래서 복사 반사에는 타이핑을 견디는 코드가 필요합니다. 둘은 같은 동사(`*.copy`)이므로 재지정은 READ 쪽 글자만 옮기고 **`Ctrl-Y`는 그대로 남습니다**. 모든 스코프에서, 명시적인 해제(unbind)를 해도 마찬가지입니다. `y`를 푸는 것은 READ 모드에 대한 결정이지, 방금 선택한 것을 복사할 방법을 텍스트 패널에서 조용히 없애도 된다는 뜻이 아니기 때문입니다.
 - **복사할 것이 있는 목록은 모두 `y`를 바인딩합니다.** 바이트나 행, 기록 한 줄을 보여주면서 `y`에 아무 반응이 없는 패널은 설계가 아니라 구멍입니다. Intercept 큐, Evidence 보관함, 프로젝트 ACTIVITY 피드, OAST 콜백 상세가 각각 그런 구멍이었고 이제 모두 이 글자에 응답합니다. 한 곳에 복사가 둘 있고 서로 반대 방향을 가리킬 때는 — OAST 목록은 gori가 *보낸* 페이로드를, 상세는 *돌아온* 것을 복사합니다 — 코드는 하나만 가질 수 있고(키맵에는 포커스 차원이 없습니다), 나머지는 스페이스 메뉴 글자를 유지합니다.
 - **`/`는 지금 보고 있는 목록을 거릅니다.** 스크롤이 필요한 목록은 모두 이 키에 응답하며, 그렇지 않던 세 규칙 목록 — Colormarker, Match & Replace, Probe **RULES** 하위 탭(세 섹션에 걸친 내장 규칙 약 40개) — 도 이제 포함됩니다. 이 바는 **렌즈**입니다. 행을 숨길 뿐 비활성화하지 않으며, `Esc`로 지웁니다. 바뀌는 것은 순서 변경 하나뿐입니다: 어떤 규칙이 이기는지를 순서가 결정하는 두 목록에서는, 질의가 걸린 동안 이동이 거절됩니다. 걸러진 목록은 규칙 엔진이 들고 있는 순서가 아니기 때문입니다.
@@ -296,7 +296,7 @@ Rewriter와 Colormarker의 **Enable/disable everywhere**가 `T`인 이유가 이
 | `r` | Repeater |
 | `f` | Fuzzer |
 | `c` | Comparer |
-| `m` | Miner |
+| `m` | Miner (Params 탭의 Mine parameters도) |
 | `s` | Sequencer |
 | `a` | Authorize |
 | `D` | Discover |
@@ -307,6 +307,8 @@ Rewriter와 Colormarker의 **Enable/disable everywhere**가 `T`인 이유가 이
 두 카드 모두 Sequencer가 `s`이고, Decoder는 거기서 이미 쓰던 `d`를 그대로 가지므로 Discover가
 `D`입니다.
 
+- **`>`만 눌러도 이 카드가 열립니다.** 이 행이 있는 모든 탭에서 `>` `f`는 `Space` 없이 Fuzzer로
+  보내고, `Space`를 빠뜨려도 같은 카드에 도착합니다. `>`를 다른 동작에 쓰는 탭은 없습니다.
 - **Send to Repeater는 자기 글자도 그대로 가집니다.** History, 상세, Sitemap, Probe, Evidence,
   이슈에서는 `r`, `r`이 탭을 실행하는 Fuzzer와 Miner에서는 `R`입니다.
 - `>` 행은 탭에 보내기 동작이 있으면 선택한 것이 없어도 그려집니다. 그때 카드는
@@ -336,6 +338,7 @@ Rewriter와 Colormarker의 **Enable/disable everywhere**가 `T`인 이유가 이
 | `g` · `q` · `J` | id 접기 · 쿼리 접기 · JS 참조 | `r` · `f` | gRPC reframe · gRPC 필드 편집기 |
 | `m` · `v` | Fuzzer: 매치만 · 분포 | `t` | TLS 지문 |
 | `t` · `z` | Comparer: 요청/응답 · 변경 없는 구간 접기 | | |
+| `a` | 모두 보기: Probe의 닫힌 이슈, Params 탭의 표준 헤더 | | |
 
 두 카드는 **sticky**입니다. 행을 실행하면 카드가 같은 행에서 다시 열리므로 한 번에 두세 개를
 바꿀 수 있고, 각 행은 상태를 보여줍니다. `●`는 켜짐, `○`는 꺼짐, TLS 프리셋 이름 같은 값도
@@ -346,11 +349,14 @@ Rewriter와 Colormarker의 **Enable/disable everywhere**가 `T`인 이유가 이
   선택하므로, `Space`를 빠뜨리면 카드 대신 선택이 일어납니다.
 - Fuzzer의 **Cycle sort**는 결과를 읽을 때 가장 자주 누르는 행이라 직접 행(`Space` `o`)으로
   남습니다.
-- 직접 키는 그대로입니다. `Ctrl-X` 헥스, `p` pretty, `u` Unicode, `b` 공백, `⇧D` diff,
-  `Ctrl-T` envelope, `Ctrl-V` HTTP/2, `Ctrl-S` SNI, `Ctrl-L` Content-Length 자동 계산.
+- 직접 키는 그대로입니다. `Ctrl-X` 헥스(Repeater에서는 포커스가 있는 패널의 것: 요청의 헥스 편집이나
+  응답의 헥스 덤프이며, 두 행 모두 이 키를 보여줍니다), `p` pretty, `u` Unicode, `b` 공백, `⇧D` diff,
+  `Ctrl-T` envelope, `a` 모두 보기, `Ctrl-V` HTTP/2, `Ctrl-S` SNI, `Ctrl-L` Content-Length 자동 계산.
 
 옮겨진 것: 헥스는 History 상세에서 `e`, Repeater 요청 패널에서 `x`, 응답 패널에서 `h`였고 이제
-셋 모두 `Z` `x`입니다. Fuzzer의 결과 저장은 `P`를 내주었습니다(내보내기 코드인 `⇧E`이며, [팔레트 전용](#palette-only)입니다).
+셋 모두 `Z` `x`입니다. Probe의 **Show closed**와 Params 탭의 **All headers**는 `Space` `a`였고
+이제 `Z` `a`이며, Params의 Mine parameters는 `Space` `m`에서 `>` `m`으로 옮겼습니다. 맨 `a`와
+`m`은 그대로 동작합니다. Fuzzer의 결과 저장은 `P`를 내주었습니다(내보내기 코드인 `⇧E`이며, [팔레트 전용](#palette-only)입니다).
 History 상세의 **Copy flow** 행은 없어졌습니다. REQUEST 패널에서 `Space` `Y`(Copy as…)의
 **Raw request**가 같은 텍스트입니다.
 

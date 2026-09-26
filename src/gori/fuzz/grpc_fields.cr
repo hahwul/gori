@@ -250,7 +250,7 @@ module Gori::Fuzz
         raise GrpcFieldError.new(
           "this message's frame flag says the payload is COMPRESSED, and compressed bytes are " \
           "not a protobuf message until something inflates them — which gori does not. " \
-          "The same carve-out the Repeater's ␣Pf form and every other gRPC pane make")
+          "The same carve-out the Repeater's gRPC field editor and every other gRPC pane make")
       end
       if msg.trailer
         raise GrpcFieldError.new("this frame is a grpc-web TRAILER frame (header text), not a protobuf message")
@@ -435,7 +435,7 @@ module Gori::Fuzz
       if r.disagrees
         raise GrpcFieldError.new(
           "#{spec.inspect}: #{r.note} — re-encoding here would mean picking the schema over the " \
-          "bytes, which is the guess the lens exists to avoid (the Repeater's ␣Pf form keeps this " \
+          "bytes, which is the guess the lens exists to avoid (the Repeater's gRPC field editor keeps this " \
           "row read-only for the same reason). Mark its octets with §…§ to fuzz them raw")
       end
       if r.nested

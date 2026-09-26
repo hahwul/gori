@@ -121,6 +121,25 @@ describe "toggle-family row state (#1274 WP9)" do
     end
   end
 
+  it "reads Probe's closed lens and the Params headers lens through the Target shell (#1295)" do
+    with_toggle_host do |host|
+      probe = ProbeController.new(host)
+      probe.menu_state("probe.toggle-closed").should eq("off")
+      probe.probe_toggle_closed
+      probe.menu_state("probe.toggle-closed").should eq("on")
+
+      target = TargetController.new(host)
+      target.jump_subtab(TargetController::SUBS.index("Params").not_nil!)
+      target.command_scope.should eq(Gori::Verb::Scope::Params)
+      target.menu_state("params.all-headers").should eq("off")
+      target.params.view.all_headers = true
+      target.menu_state("params.all-headers").should eq("on")
+      # The Sitemap's folds answer through the same shell, which said nothing before.
+      target.jump_subtab(0)
+      target.menu_state("sitemap.toggle-query-fold").should eq("on")
+    end
+  end
+
   it "reads History's follow" do
     with_toggle_host do |host|
       ctl = HistoryController.new(host)

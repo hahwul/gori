@@ -38,6 +38,10 @@ private class FakeContext < ExecContext
     @calls << :open_palette
   end
 
+  def open_space_family(family : Symbol) : Nil
+    @calls << :open_space_family
+  end
+
   def open_notifications : Nil
     @calls << :open_notifications
   end
@@ -2234,9 +2238,49 @@ describe Gori::Verb do
       end
     end
 
+    describe "#register_family_openers (#1295)" do
+      it "binds a family's chord once per scope with a non-hidden member, and nothing for a keyless family" do
+        reg = Registry.new
+        reg.register_family(Gori::Verb::Family.new(:send, "Send to…", '>', :send, [{:to_a, 'a'}], chord: Chord.new(">")))
+        reg.register_family(Gori::Verb::Family.new(:show, "Show…", 'Z', :view, [{:to_z, 'z'}]))
+        reg.register(Definition.new("b.a", "A", "d", Gori::Verb::Scope::Body, intent: :to_a) { |_| nil })
+        reg.register(Definition.new("s.a", "A", "d", Gori::Verb::Scope::Sitemap, intent: :to_a, hidden: true) { |_| nil })
+        reg.register(Definition.new("b.z", "Z", "d", Gori::Verb::Scope::Body, intent: :to_z) { |_| nil })
+        reg.register_family_openers
+        openers = reg.select { |v| reg.opens_family(v.id) }
+        openers.map { |v| {v.id, v.scope} }.should eq([{"send.open.body", Gori::Verb::Scope::Body}])
+        openers[0].chords.should eq([Chord.new(">")])
+        openers[0].hidden?.should be_true
+        ctx = FakeContext.new
+        openers[0].call(ctx)
+        ctx.calls.should eq([:open_space_family])
+        reg.opens_family("b.a").should be_nil
+      end
+    end
+
     describe "#validate_chords!" do
       it "passes on the shipped registry (the guarantee itself)" do
         Gori::Verbs.registry.validate_chords! # raises on any violation
+      end
+
+      it "raises on a chord_of: that its named verb's chord does not reach (#1295)" do
+        gated = Definition.new("t.gated", "G", "d", Gori::Verb::Scope::Repeater, [Chord.new("x", ctrl: true)],
+          section: :request, chord_sections: [:request]) { |_| nil }
+        {
+          {Definition.new("t.row", "R", "d", Gori::Verb::Scope::Repeater, section: :response, chord_of: "t.nope") { |_| nil }, /names no registered verb/},
+          {Definition.new("t.row", "R", "d", Gori::Verb::Scope::Fuzzer, chord_of: "t.gated") { |_| nil }, /not Fuzzer/},
+          {Definition.new("t.row", "R", "d", Gori::Verb::Scope::Repeater, section: :response, chord_of: "t.gated") { |_| nil }, /not live in response/},
+          {Definition.new("t.row", "R", "d", Gori::Verb::Scope::Repeater, [Chord.new("q")], section: :request, chord_of: "t.gated") { |_| nil }, /chords of its own/},
+        }.each do |(row, why)|
+          reg = Registry.new
+          reg.register(gated)
+          reg.register(row)
+          expect_raises(Gori::Error, why) { reg.validate_chords! }
+        end
+        ok = Registry.new
+        ok.register(gated)
+        ok.register(Definition.new("t.row", "R", "d", Gori::Verb::Scope::Repeater, section: :request, chord_of: "t.gated") { |_| nil })
+        ok.validate_chords!
       end
 
       it "raises on two verbs claiming the same chord in the same scope" do

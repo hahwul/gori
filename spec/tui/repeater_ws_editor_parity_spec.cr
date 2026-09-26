@@ -59,6 +59,7 @@ describe "RepeaterView WebSocket editor parity" do
   # one has run.
   render_ws = ->(rect : Rect, on_handshake : Bool) {
     view = RepeaterView.new
+    view.menu_registry = Gori::Verbs.registry # the border chips' menu letters (#1295)
     view.restore("https://ws.test", ws_head, false, true, ws_messages: msgs.call)
     view.focus_pane(:request)
     view.toggle_req_pane if on_handshake # ^T — the tab opens on MESSAGES
@@ -307,12 +308,12 @@ describe "RepeaterView WebSocket editor parity" do
   end
 
   describe "border chrome" do
-    it "hit-tests the ␣Pw:KEY badge that render_request draws" do
+    it "hit-tests the WebSocket KEY badge that render_request draws" do
       rect = Rect.new(0, 0, 100, 30)
       view, b = render_ws.call(rect, true)
       env, _ = sub_rects.call(view, rect)
       border_y = env.y - 1 # the card's top border, one row above its content
-      col = col_of.call(b, border_y, "␣Pw:KEY")
+      col = col_of.call(b, border_y, "#{Gori::Hotkeys.menu_chip(Gori::Verbs.registry, "repeater.toggle-ws-key")}:KEY")
       view.chrome_hit(rect, col + 2, border_y).should eq(:ws_key)
     end
 

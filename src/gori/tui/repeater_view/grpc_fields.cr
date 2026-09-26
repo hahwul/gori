@@ -495,7 +495,8 @@ class Gori::Tui::RepeaterView
            elsif note = row.note
              "⚠ #{note}"
            elsif row.editable?
-             focused ? "↵ edit this field · ␣Pf back to the head" : "␣Pf back to the head"
+             back = "#{menu_chip("repeater.toggle-grpc-fields")} back to the head"
+             focused ? "↵ edit this field · #{back}" : back
            else
              ""
            end

@@ -32,7 +32,7 @@ Rules of thumb:
 - **Ctrl** is for actions that must work while typing (INS), and for run/stop on a workbench (`Ctrl-R` / `Ctrl-X`). It is not a general upgrade from bare.
 - **Shift** carries the whole-tab wipes. `⇧X` is `Clear` in every tab that has one (History, Probe, Authorize, Issues, and the Project ACTIVITY feed), with `X` as the space-menu letter beside it. The letter is `x` and not `c` because of what sits under the shift: bare `x` is bound in none of those five scopes, while bare `c` is live in all of them (`capture.toggle`, and `dismiss` on the Probe list), and a project wipe does not belong one shift above a key an operator presses all day. A destructive chord must also be **named where it can be read before it is pressed** (the Help sheet and the tab's own body hint, not the space menu alone), and it must ask first.
 - **`d` destroys.** Bare `d` deletes or dismisses the selected row in every scope that binds it — sixteen of them. The Repeater's response diff was the one exception, and it now sits on `⇧D` so the reflex never lands on a display toggle. Its space-menu letter is `⇧D` too: `d` is **Duplicate sub-tab** on all nine sub-tab strips (see [the space menu](#space-menu)), and that bucket is drawn in every pane, so the plain letter was no longer the diff toggle's to keep — which leaves the row and the keyboard spelling it the same way. A new pane action that is not a delete does not get `d`.
-- **A pane's own key answers only in that pane.** The Repeater's `p` (pretty bodies) and `⇧D` (diff) act in the response pane, and the Fuzzer's `v` (distribution sidebar) in RESULTS. In the request and template panes the space menu uses `p`, `D` and `v` for other actions (pretty-print the request, the decoder chain, clear the selection), so there the bare key does nothing, rather than something the menu did not teach.
+- **A pane's own key answers only in that pane.** The Repeater's `p` (pretty bodies) and `⇧D` (diff) act in the response pane, and the Fuzzer's `m` (matched only) and `v` (distribution sidebar) in RESULTS. In the request and template panes the space menu uses `p`, `D` and `v` for other actions (pretty-print the request, the decoder chain, clear the selection), so there the bare key does nothing, rather than something the menu did not teach.
 - **Copy is the worked example of that rule.** `y` copies in READ, and `Ctrl-Y` copies in **INS as well**, in every text box. In INS a bare `y` is a literal character, and typing it over a `Shift`+arrows selection *replaces* the selection, so the copy reflex needs a chord that survives typing. Both are the same verb (`*.copy`), so a rebind moves the READ letter and **`Ctrl-Y` stays where it is**: it is pinned, in every scope, including through an explicit unbind. Unbinding `y` is a statement about READ mode, and it must not quietly leave a text pane with no way at all to copy what you just selected.
 - **Every list that holds something worth copying binds `y`.** A pane that shows bytes, a row, or a line of record and answers nothing to `y` is a gap, not a design: the Intercept queue, the Evidence archive, the Project ACTIVITY feed and the OAST callback detail each had one and each now answers the letter. Where two copies live in one place and mean opposite things — OAST's list copies the payload gori *sent*, its detail copies what came *back* — only one can hold the chord (a scope has no focus dimension in the keymap), and the other keeps its space-menu letter.
 - **`/` filters the list you are looking at.** Every list long enough to scroll answers it, including the three rule lists that did not: Colormarker, Match & Replace and the Probe **RULES** sub-tab (~40 built-in rules across three sections). The bar is a **lens** — it hides rows, it never disables one — and `Esc` clears it. The one thing it changes is reordering: on the two lists where order decides which rule wins, a move is refused while a query is held, because a filtered list is not the order the rule engine holds.
@@ -308,7 +308,7 @@ second card. Inside it every tool has the same letter on every tab:
 | `r` | Repeater |
 | `f` | Fuzzer |
 | `c` | Comparer |
-| `m` | Miner |
+| `m` | Miner (the Params tab's Mine parameters too) |
 | `s` | Sequencer |
 | `a` | Authorize |
 | `D` | Discover |
@@ -319,6 +319,9 @@ result alike. A tab lists only the tools it can send to. The letters match the
 **Send selection to…** card (`S`): Sequencer is `s` in both, and Decoder keeps the `d` it
 already had there, which is why Discover is `D`.
 
+- **`>` on its own opens the card too**, on every tab that has it: `>` `f` sends to the Fuzzer
+  without the `Space`, and a dropped `Space` still lands in the same card. No tab binds `>` to
+  anything else.
 - **Send to Repeater keeps its own letter too**: `r` on History, the detail, the Sitemap, Probe,
   Evidence and an issue, `R` on the Fuzzer and the Miner, where `r` runs the tab.
 - The `>` row is drawn whenever the tab has a send, even when nothing is selected. The card then
@@ -348,6 +351,7 @@ and stays out of both cards.
 | `g` · `q` · `J` | Fold ids · fold queries · JS references | `r` · `f` | gRPC reframe · gRPC field editor |
 | `m` · `v` | Fuzzer: matched only · distribution | `t` | TLS fingerprint |
 | `t` · `z` | Comparer: requests/responses · fold unchanged | | |
+| `a` | Show all: Probe's closed issues, the Params tab's standard headers | | |
 
 Both cards are **sticky**. After a row runs, the card comes back at the same row, so you can
 flip two or three settings in one visit, and each row shows its state: `●` on, `○` off, or a
@@ -359,11 +363,14 @@ or the column editor, or when the row moved focus.
   these toggles, so a dropped `Space` would select instead of opening the card.
 - The Fuzzer's **Cycle sort** stays a direct row (`Space` `o`), because it is the one you press
   most while reading results.
-- Direct keys are unchanged: `Ctrl-X` hex, `p` pretty, `u` Unicode, `b` whitespace, `⇧D` diff,
-  `Ctrl-T` envelope, `Ctrl-V` HTTP/2, `Ctrl-S` SNI, `Ctrl-L` auto Content-Length.
+- Direct keys are unchanged: `Ctrl-X` hex (in the Repeater, the pane that has focus: the
+  request's hex edit or the response's hex dump, and both rows show it), `p` pretty, `u` Unicode, `b` whitespace, `⇧D` diff,
+  `Ctrl-T` envelope, `a` show all, `Ctrl-V` HTTP/2, `Ctrl-S` SNI, `Ctrl-L` auto Content-Length.
 
 What moved: hex was `e` in the History detail, `x` in the Repeater request pane and `h` in its
-response pane, and is now `Z` `x` in all three. Save results on the Fuzzer gave up `P` (it is
+response pane, and is now `Z` `x` in all three. Probe's **Show closed** and the Params tab's
+**All headers** were `Space` `a` and are `Z` `a`, and Mine parameters on Params was `Space` `m` and
+is `>` `m`; their bare `a` and `m` still work. Save results on the Fuzzer gave up `P` (it is
 `⇧E`, the Export chord, and [palette-only](#palette-only)). The History detail's **Copy flow** row is gone: `Space` `Y` (Copy as…)
 on the REQUEST pane has **Raw request**, the same text.
 

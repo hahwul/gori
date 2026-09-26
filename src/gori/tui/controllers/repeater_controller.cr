@@ -40,7 +40,7 @@ module Gori::Tui
       # resend never clobbers the local response.)
       @repeaters = [] of RepeaterTab
       @host.session.store.repeaters.each do |r|
-        view = RepeaterView.new
+        view = new_view
         ws_msgs = nil.as(Array(Store::WsOutMessage)?)
         request_text = String.new(r.request)
         if Repeater::WsEngine.replayable?(request_text)
@@ -409,7 +409,7 @@ module Gori::Tui
       if v.grpc_fields_editing?
         keys("type the value · ↵ apply · esc cancel · {repeater.send} send")
       elsif v.grpc_fields?
-        keys("↑/↓ pick a field · i/↵ edit · ␣Pf/esc head · {repeater.toggle-hex} hex · {repeater.send} send")
+        keys("↑/↓ pick a field · i/↵ edit · #{chip("repeater.toggle-grpc-fields")}/esc head · {repeater.toggle-hex} hex · {repeater.send} send")
       elsif v.request_hex?
         keys("gRPC payload hex — overtype 0-9a-f · Ins/Del length · {repeater.toggle-hex}/esc exit · {repeater.send} send")
       elsif v.request_insert?
@@ -423,7 +423,7 @@ module Gori::Tui
         "esc read · ↹ text · type head/metadata · ⇧arrows select · ^Y copy"
       else
         msg = v.grpc_reframable? ? "{repeater.toggle-hex} hex-edit payload · " : ""
-        fields = v.grpc_fields_available? ? "␣Pf fields · " : ""
+        fields = v.grpc_fields_available? ? "#{chip("repeater.toggle-grpc-fields")} fields · " : ""
         keys("i/↵ edit head · #{msg}#{fields}⇧arrows select · {repeater.copy} copy · space cmds · ↹ pane")
       end
     end
@@ -699,8 +699,22 @@ module Gori::Tui
       end
     end
 
+    # `^X`: the hex of the pane that has focus — hex-edit in the request pane, the hex dump in
+    # the response pane (`repeater_toggle_resp_hex`, which `Z x` there runs too, #1295).
+    # Every view this tab makes reads its border chips' menu letters from the session's
+    # registry (`RepeaterView#menu_registry`, #1295), so they are built in one place.
+    private def new_view : RepeaterView
+      RepeaterView.new.tap(&.menu_registry = @host.session.registry)
+    end
+
+    # A menu path in a status or hint strip, compact like the chips (`␣Pf`).
+    private def chip(id : String) : String
+      Hotkeys.menu_chip(@host.session.registry, id)
+    end
+
     def repeater_toggle_hex : Nil
       return unless view = current_view
+      return repeater_toggle_resp_hex if view.focus == :response
       if view.grpc_mode?
         # A unary gRPC call hex-edits its message PAYLOAD; a 0- or multi-message body has no
         # unambiguous single payload to edit. What happens to the length prefix in front of
@@ -713,7 +727,7 @@ module Gori::Tui
           # other rather than stacking two authoritative buffers over one slice.
           view.exit_grpc_fields if view.grpc_fields?
           on = view.toggle_request_hex
-          framing = view.grpc_reframe? ? "length prefix recomputed on send" : "captured length prefix kept (␣Pr to reframe)"
+          framing = view.grpc_reframe? ? "length prefix recomputed on send" : "captured length prefix kept (#{chip("repeater.toggle-grpc-reframe")} to reframe)"
           @host.status(on ? "gRPC payload hex: on — #{framing} (^X/esc exit)" : "gRPC payload hex: off")
         else
           @host.status("hex edit (^X) applies to the REQUEST pane — ↹ to it")
@@ -724,20 +738,22 @@ module Gori::Tui
       elsif view.focus == :request
         on = view.toggle_request_hex
         @host.status(on ? "hex edit: on — sends exact bytes (^X/esc exit; not text-safe)" : "hex edit: off")
-      elsif view.focus == :response
-        # A transcript pane never renders the hex dump — `render_response` returns at its own
-        # branch long before the `@resp_hex` one — but `resp_navigable?` reads the same flag, so
-        # setting it here silently killed the caret, the selection and every arrow key while the
-        # pane looked completely unchanged. (Reachable only on a pipelined GROUP send: WS and
-        # gRPC are refused above.) Refuse it where it cannot be honoured.
-        if view.group_mode?
-          @host.status("no hex dump for a group transcript — it is N responses, not one byte stream")
-        else
-          view.toggle_resp_hex
-          @host.status(view.resp_hex? ? "response hex dump: on — raw bytes (^X exit)" : "response hex dump: off")
-        end
       else
         @host.status("hex edit (^X) applies to the REQUEST or RESPONSE pane — ↹ to one")
+      end
+    end
+
+    # The response pane's hex dump: `Z x` there, and `^X` (above). A transcript pane never
+    # renders the dump — `render_response` returns at its own branch long before the `@resp_hex`
+    # one — so on a WebSocket, gRPC or group transcript the flag would describe a pane nobody
+    # can see; refuse it there rather than set it, and say why.
+    def repeater_toggle_resp_hex : Nil
+      return unless (view = current_view) && view.focus == :response
+      if kind = (view.ws_mode? ? "WebSocket" : view.grpc_mode? ? "gRPC" : view.group_mode? ? "group" : nil)
+        @host.status("no hex dump for a #{kind} transcript — the pane shows messages, not one byte stream")
+      else
+        view.toggle_resp_hex
+        @host.status(view.resp_hex? ? "response hex dump: on — raw bytes (^X exit)" : "response hex dump: off")
       end
     end
 
@@ -748,11 +764,11 @@ module Gori::Tui
     def repeater_toggle_grpc_fields : Nil
       return unless view = current_view
       unless view.grpc_mode?
-        @host.status("the gRPC field editor (␣Pf) applies to a gRPC tab")
+        @host.status("the gRPC field editor (#{chip("repeater.toggle-grpc-fields")}) applies to a gRPC tab")
         return
       end
       unless view.focus == :request
-        @host.status("the gRPC field editor (␣Pf) applies to the REQUEST pane — ↹ to it")
+        @host.status("the gRPC field editor (#{chip("repeater.toggle-grpc-fields")}) applies to the REQUEST pane — ↹ to it")
         return
       end
       if view.grpc_fields?
@@ -769,8 +785,8 @@ module Gori::Tui
         return
       end
       view.toggle_grpc_fields
-      framing = view.grpc_reframe? ? "length prefix recomputed on send" : "captured length prefix kept (␣Pr to reframe)"
-      @host.status("gRPC fields: on — ↑/↓ pick · ↵ edit · #{framing} (␣Pf/esc exit)")
+      framing = view.grpc_reframe? ? "length prefix recomputed on send" : "captured length prefix kept (#{chip("repeater.toggle-grpc-reframe")} to reframe)"
+      @host.status("gRPC fields: on — ↑/↓ pick · ↵ edit · #{framing} (#{chip("repeater.toggle-grpc-fields")}/esc exit)")
     end
 
     def repeater_toggle_sni : Nil
@@ -1755,7 +1771,7 @@ module Gori::Tui
       local_ids = @repeaters.compact_map(&.db_id).to_set
       rows.each do |row|
         next if local_ids.includes?(row.id)
-        view = RepeaterView.new
+        view = new_view
         ws_msgs = nil.as(Array(Store::WsOutMessage)?)
         row_request_text = String.new(row.request)
         if Repeater::WsEngine.replayable?(row_request_text)
@@ -1806,7 +1822,7 @@ module Gori::Tui
     # "send evidence to Repeater". No-op if the flow is gone (pruned).
     def repeater_flow(id : Int64) : Nil
       return unless detail = @host.session.store.get_flow(id)
-      view = RepeaterView.new
+      view = new_view
       # A seed asks a NARROWER question than a display surface does (#742). History's MESSAGES
       # pane shows a transcript because one was captured; this has to hand the operator a tab
       # whose `^R` actually re-opens the socket. So the gate is "does this capture carry a
@@ -1875,7 +1891,7 @@ module Gori::Tui
 
     # Open a fresh, hand-authored repeater session (Repeater `^N`) — a blank request.
     def repeater_new : Nil
-      view = RepeaterView.new
+      view = new_view
       view.load_blank
       @repeaters << RepeaterTab.new(view, nil, persist_new_repeater(view, nil))
       @current_repeater_idx = @repeaters.size - 1
@@ -1888,7 +1904,7 @@ module Gori::Tui
     # `name` is an optional sub-tab chip label (e.g. the Miner param that was injected).
     def repeater_from_request(target : String, request_text : String, http2 : Bool, sni : String?,
                               name : String? = nil, tls_preset : String? = nil) : Nil
-      view = RepeaterView.new
+      view = new_view
       view.restore(target, request_text, http2, true, sni: sni || "", tls_preset: tls_preset)
       # restore leaves focus on :target (placeholder-friendly); a fully-built request
       # from Miner should land in the editor so the user can send immediately.
@@ -1945,7 +1961,7 @@ module Gori::Tui
     # returns whether the clone's WebSocket frames failed to persist.
     private def duplicate_view(src : RepeaterView) : Bool
       src.flush_decoded_edits if src.decode_mode?
-      view = RepeaterView.new
+      view = new_view
       view.duplicate_from(src)
       db_id = if view.grpc_mode? || view.decode_mode?
                 nil

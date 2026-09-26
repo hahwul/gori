@@ -108,6 +108,17 @@ module Gori::Tui
     # the commonest workflow there is.
     getter? evidence : Bool
 
+    # The registry the border chips read their menu letters from (`␣Pr:FRAME`, `␣Pw:KEY`,
+    # `␣Pt:…`), set by the controller that makes the view (#1295). Nil in a bare view, whose
+    # chips then read `␣` alone (`Hotkeys.menu_chip`).
+    property menu_registry : Verb::Registry? = nil
+
+    # The compact menu path for `id` on a chip — `␣Pr` — spelled once for the draw and the
+    # hit-test, which must agree cell for cell.
+    private def menu_chip(id : String) : String
+      Hotkeys.menu_chip(@menu_registry, id)
+    end
+
     def initialize
       @name = nil
       @tags = [] of String

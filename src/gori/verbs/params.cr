@@ -21,9 +21,9 @@ module Gori
         Verb::Scope::Params, [Verb::Chord.new("r", ctrl: true)], intent: :run) { |ctx| ctx.params_run; nil }
 
       r.register Verb::Definition.new(
-        "params.all-headers", "Toggle standard headers",
+        "params.all-headers", "All headers",
         "Include or leave out the headers every browser sends (User-Agent, Accept*, Sec-*, …)",
-        Verb::Scope::Params, [Verb::Chord.new("a")], group: :view) { |ctx| ctx.params_toggle_headers; nil }
+        Verb::Scope::Params, [Verb::Chord.new("a")], group: :view, intent: :show_all) { |ctx| ctx.params_toggle_headers; nil }
 
       # No chord of its own: bare `x` is select-line app-wide (Keyset), and `esc` already does
       # this while a filter is set (`params.to-menu`) — the menu entry is for discovery.
@@ -59,7 +59,8 @@ module Gori
       r.register Verb::Definition.new(
         "params.mine", "Mine parameters",
         "Mine this endpoint, testing the names seen on the host's other endpoints first",
-        Verb::Scope::Params, [Verb::Chord.new("m")], available: rows_shown, group: :send) { |ctx| ctx.params_mine; nil }
+        Verb::Scope::Params, [Verb::Chord.new("m")], available: rows_shown, group: :send,
+        intent: :to_miner) { |ctx| ctx.params_mine; nil }
 
       # `esc` peels one layer: a Sitemap-node filter first, then focus up to the strip — the
       # Sitemap's marks work the same way.

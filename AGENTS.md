@@ -168,8 +168,8 @@ key grammar and the 2026-09-25 #1274 entries).
   chord, or `^P → <title>` when it has none. Move a row by that criterion, never by a row count.
 - **Never spell a menu letter in UI text.** Help rows, hints and toasts use `{space:verb.id}` or
   `Hotkeys.menu_path` (which prints `space → > f` for a member; `Hotkeys.route` also covers a
-  palette-only verb).
-  `spec/verb/hint_token_expands_spec.cr` fails on a literal `space → X`.
+  palette-only verb). A chip, a border badge or a tight hint uses `Hotkeys.menu_chip` (`␣Pr`).
+  `spec/verb/hint_token_expands_spec.cr` fails on a literal `space → X` or `␣X`.
 - **`Space` and `Ctrl-P` share one context.** `ActionContext.capture` + `Registry#for_view` is
   the only answer to "what can I do here", and the palette's typed search finds the focused
   tab's actions through it. Do not compute that a second way.

@@ -86,7 +86,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     sitemap_controller.reload if @active_tab == :target && target_controller.sitemap_active?
     params_controller.run if @active_tab == :target && target_controller.params_active?
     # Name the way back that works WHERE the operator is: the Sitemap has no `v` picker.
-    back = @active_tab == :target ? "␣Zs" : "v"
+    back = @active_tab == :target ? Hotkeys.menu_chip(@session.registry, "sitemap.toggle-static") : "v"
     @toast = hide ? "static assets hidden (images, fonts, media) — #{back} shows them" : "static assets shown"
   end
 

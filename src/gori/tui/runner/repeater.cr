@@ -123,8 +123,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   end
 
   def repeater_toggle_resp_hex : Nil
-    return unless (v = repeater_controller.current_view) && v.focus == :response
-    v.toggle_resp_hex
+    repeater_controller.repeater_toggle_resp_hex
   end
 
   def repeater_toggle_unicode_escapes : Nil

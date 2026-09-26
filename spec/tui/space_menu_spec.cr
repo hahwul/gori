@@ -1177,6 +1177,8 @@ private def family_menu(*, members_available : Bool = true, sticky : Bool = fals
   gate = ->(_c : Gori::Verb::ExecContext) { members_available }
   reg.register(Gori::Verb::Definition.new("demo.view", "Look", "x", Gori::Verb::Scope::Body,
     mnemonic: 'v', group: :view) { |_| nil })
+  reg.register(Gori::Verb::Definition.new("demo.scan", "Scan", "x", Gori::Verb::Scope::Body,
+    mnemonic: 's', group: :send) { |_| nil })
   # Registered out of table order: level 2 still lists a, b, c.
   reg.register(Gori::Verb::Definition.new("demo.b", "To B", "x", Gori::Verb::Scope::Body,
     section: member_section, intent: :to_b, available: gate) { |_| nil })
@@ -1234,27 +1236,87 @@ describe "the space menu's verb families (#1274 WP9)" do
     screen.contains?("Send to…").should be_true
   end
 
-  it "puts the family row in its band when the bucket is banded already" do
+  it "puts the family row in its band when another row of the bucket is in that band" do
     reg = Gori::Verb::Registry.new
     reg.register_family(Gori::Verb::Family.new(:send, "Send to…", '>', :send, [{:to_a, 'a'}]))
     reg.register(Gori::Verb::Definition.new("demo.look", "Look", "x", Gori::Verb::Scope::Body,
-      mnemonic: 'l', group: :view) { |_| nil })
+      mnemonic: 'v', group: :view) { |_| nil })
     reg.register(Gori::Verb::Definition.new("demo.a", "To A", "x", Gori::Verb::Scope::Body, intent: :to_a) { |_| nil })
     reg.register(Gori::Verb::Definition.new("demo.run", "Run", "x", Gori::Verb::Scope::Body, mnemonic: 'r') { |_| nil })
+    reg.register(Gori::Verb::Definition.new("demo.scan", "Scan", "x", Gori::Verb::Scope::Body,
+      mnemonic: 's', group: :send) { |_| nil })
     menu = SpaceMenu.new(reg)
     menu.open(Gori::Verb::Scope::Body, :common, FakeExecContext.new)
     menu.entry_for('>').not_nil!.group.should eq(:send)
-    menu.entries.map(&.id).should eq(["demo.look", "family:send", "demo.run"]) # VIEW, SEND, then the leftovers
+    menu.entries.map(&.id).should eq(["demo.look", "family:send", "demo.scan", "demo.run"]) # VIEW, SEND, then the leftovers
     screen = render_menu(menu)
     screen.contains?("─ VIEW ─").should be_true
     screen.contains?("─ SEND ─").should be_true
   end
 
+  it "keeps the family row out of a band it would hold alone (#1295)" do
+    # ProbeDetail's shape: the bucket is banded (a DANGER row), but nothing else is in SEND.
+    # A `─ SEND ─` over the one family row is a header over nothing; the row joins the
+    # untagged leftovers instead, beside its pinned member.
+    reg = Gori::Verb::Registry.new
+    reg.register_family(Gori::Verb::Family.new(:send, "Send to…", '>', :send, [{:to_a, 'a'}, {:to_b, 'b'}]))
+    reg.register(Gori::Verb::Definition.new("demo.a", "To A", "x", Gori::Verb::Scope::Body,
+      mnemonic: 'r', intent: :to_a, pinned: true) { |_| nil })
+    reg.register(Gori::Verb::Definition.new("demo.b", "To B", "x", Gori::Verb::Scope::Body, intent: :to_b) { |_| nil })
+    reg.register(Gori::Verb::Definition.new("demo.del", "Delete", "x", Gori::Verb::Scope::Body,
+      mnemonic: 'd', group: :danger) { |_| nil })
+    menu = SpaceMenu.new(reg)
+    menu.open(Gori::Verb::Scope::Body, :common, FakeExecContext.new)
+    menu.entry_for('>').not_nil!.group.should eq(:none)
+    menu.entries.map(&.id).should eq(["demo.a", "family:send", "demo.del"])
+    screen = render_menu(menu)
+    screen.contains?("─ SEND ─").should be_false
+    screen.contains?("─ DANGER ─").should be_true
+
+    # A pinned member in the family's band is a row of that band: the family row joins it.
+    reg2 = Gori::Verb::Registry.new
+    reg2.register_family(Gori::Verb::Family.new(:send, "Send to…", '>', :send, [{:to_a, 'a'}, {:to_b, 'b'}]))
+    reg2.register(Gori::Verb::Definition.new("demo.a", "To A", "x", Gori::Verb::Scope::Body,
+      mnemonic: 'r', intent: :to_a, pinned: true, group: :send) { |_| nil })
+    reg2.register(Gori::Verb::Definition.new("demo.b", "To B", "x", Gori::Verb::Scope::Body, intent: :to_b) { |_| nil })
+    reg2.register(Gori::Verb::Definition.new("demo.del", "Delete", "x", Gori::Verb::Scope::Body,
+      mnemonic: 'd', group: :danger) { |_| nil })
+    menu2 = SpaceMenu.new(reg2)
+    menu2.open(Gori::Verb::Scope::Body, :common, FakeExecContext.new)
+    menu2.entry_for('>').not_nil!.group.should eq(:send)
+    render_menu(menu2).contains?("─ SEND ─").should be_true
+  end
+
+  it "draws Send flow to… in SEND where the tab has other sends, and beside `r` on ProbeDetail (#1295)" do
+    reg = Gori::Verbs.registry
+    {
+      {Gori::Verb::Scope::Body, :history, :send},
+      {Gori::Verb::Scope::HistoryDetail, :history, :send},
+      {Gori::Verb::Scope::Sitemap, :target, :send},
+      {Gori::Verb::Scope::ProbeDetail, :probe, :none},
+    }.each do |(scope, tab, band)|
+      ctx = FakeExecContext.new
+      ctx.current_tab = tab
+      ctx.selected = 1_i64
+      menu = SpaceMenu.new(reg)
+      menu.open(scope, :common, ctx)
+      menu.entry_for('>').not_nil!.group.should eq(band), scope.to_s
+    end
+    menu = SpaceMenu.new(reg)
+    ctx = FakeExecContext.new
+    ctx.current_tab = :probe
+    menu.open(Gori::Verb::Scope::ProbeDetail, :common, ctx)
+    render_menu(menu).contains?("─ SEND ─").should be_false
+    ids = menu.entries.map(&.id)
+    ids.index("family:send_flow").should eq(ids.index("probe.repeater-flow").not_nil! + 1)
+  end
+
   it "files the row under the first bucket that holds a member" do
     menu, _, _ = family_menu(member_section: :request)
-    # COMMON holds only `v`; the members are REQUEST's, so the row sits with `q` — in its own
-    # SEND band inside that bucket.
-    menu.entries.map(&.id).should eq(["demo.view", "family:send", "demo.req"])
+    # COMMON holds only `v` and `s`; the members are REQUEST's, so the row sits with `q` — an
+    # untagged row there, since nothing else of that bucket is in SEND (#1295).
+    menu.entries.map(&.id).should eq(["demo.view", "demo.scan", "family:send", "demo.req"])
+    menu.entry_for('>').not_nil!.group.should eq(:none)
     menu.entry_for('>').not_nil!.section.should eq(:request)
 
     common, _, _ = family_menu

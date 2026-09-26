@@ -90,6 +90,17 @@ describe Gori::Hotkeys do
       Gori::Hotkeys.binding_for(reg, "rules.edit").should be_nil
       Gori::Hotkeys.binding_for(reg, "app.notifications").should be_nil
     end
+
+    it "names the chord of the verb a keyless one declares `chord_of:`, and follows its rebind (#1295)" do
+      reg = Gori::Verbs.registry
+      reg["repeater.toggle-resp-hex"].chords.should be_empty
+      Gori::Hotkeys.binding_for(reg, "repeater.toggle-resp-hex").should eq(Gori::Verb::Chord.new("x", ctrl: true))
+      working = {"repeater.toggle-hex" => [Gori::Verb::Chord.new("j", ctrl: true)]}
+      Gori::Hotkeys.binding_for(reg, "repeater.toggle-resp-hex", working).should eq(Gori::Verb::Chord.new("j", ctrl: true))
+      # A chord of its own (a rebind of the row itself) wins.
+      own = {"repeater.toggle-resp-hex" => [Gori::Verb::Chord.new("o", ctrl: true)]}
+      Gori::Hotkeys.binding_for(reg, "repeater.toggle-resp-hex", own).should eq(Gori::Verb::Chord.new("o", ctrl: true))
+    end
   end
 
   describe ".display_label / .binding_label" do
@@ -162,6 +173,16 @@ describe Gori::Hotkeys do
 
   # A palette-only verb (`menu: :palette`, #1282) has no menu path, so a `{space:…}` token or a
   # Help row naming it reads as the route that does exist: its chord, else the palette search.
+  describe ".menu_chip" do
+    it "spells a menu path compactly from the registry, and a bare ␣ without one (#1295)" do
+      reg = Gori::Verbs.registry
+      Gori::Hotkeys.menu_chip(reg, "repeater.toggle-grpc-reframe").should eq("␣#{reg.menu_keys("repeater.toggle-grpc-reframe").not_nil!.join}")
+      Gori::Hotkeys.menu_chip(reg, "sitemap.toggle-static").should eq("␣Zs")
+      Gori::Hotkeys.menu_chip(nil, "sitemap.toggle-static").should eq("␣")
+      Gori::Hotkeys.menu_chip(reg, "no.such-verb").should eq("␣")
+    end
+  end
+
   describe ".route" do
     it "is the menu path for a menu row, the chord or ^P → title for a palette-only verb" do
       reg = Gori::Verbs.registry

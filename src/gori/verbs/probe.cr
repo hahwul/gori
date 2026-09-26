@@ -48,7 +48,7 @@ module Gori
 
       r.register Verb::Definition.new(
         "probe.toggle-closed", "Show closed", "Toggle between open-only and all issues (incl. dismissed)",
-        Verb::Scope::Probe, [Verb::Chord.new("a")], group: :view) { |ctx| ctx.probe_toggle_closed; nil }
+        Verb::Scope::Probe, [Verb::Chord.new("a")], group: :view, intent: :show_all) { |ctx| ctx.probe_toggle_closed; nil }
 
       # Toggle the scope lens from Probe too (the lens key itself is the Global `s`; Sitemap
       # mirrors it). scope_toggle_lens reloads the active Probe list, and the bar shows

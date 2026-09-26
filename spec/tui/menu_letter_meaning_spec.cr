@@ -182,11 +182,19 @@ module MenuLetterMeaning
     note(found, v, global_fallthrough(keymap, chord, v, e), where, ks)
   end
 
-  # Records `other` as a second meaning of this row's letter, unless it is the row's own verb
-  # or a vim motion under the vim keyset.
+  # Records `other` as a second meaning of this row's letter, unless it answers what the row
+  # answers (`same_meaning?`) or is a vim motion under the vim keyset.
   private def note(found, v : Row, other : String?, where : String, ks : Gori::Verb::Keyset::Kind) : Nil
-    return if other.nil? || other == v.id || vim_motion?(ks, other)
+    return if other.nil? || same_meaning?(other, v) || vim_motion?(ks, other)
     found[{v.id, other}] << where
+  end
+
+  # The key answers what the row answers: the row's own verb, or — for a family row — the
+  # hidden verb its family's bare key binds (`Registry#register_family_openers`, #1295), which
+  # opens that same card. A dropped `space` before `>` lands where `space >` does.
+  def same_meaning?(other : String, v : Row) : Bool
+    return true if other == v.id
+    (fid = Gori::Verbs.registry.opens_family(other)) ? "family:#{fid}" == v.id : false
   end
 
   # The sections this row is drawn in, or nil for every one: a COMMON row and a SUB-TABS

@@ -75,6 +75,12 @@ module Gori::Tui
       active_child.command_section
     end
 
+    # The Display… rows' state (#1274) is the child's: the Sitemap's folds, the Params tab's
+    # headers lens. Without this the Runner asked this shell, whose default says nothing.
+    def menu_state(verb_id : String) : String?
+      active_child.menu_state(verb_id)
+    end
+
     # --- sub-tab strip (fixed set: no ^N/^W create/close) ---
     def subtab_labels : Array(String)?
       SUBS

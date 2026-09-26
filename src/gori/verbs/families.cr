@@ -9,7 +9,9 @@ module Gori
     # Repeater is `pinned:` on every tab that has it, so it keeps its level-1 letter (`r`, or
     # `R` where `r` runs the tab) and `space > r` also reaches it everywhere. Active scan and
     # Mock stay direct rows: one scans and one creates a rule, neither hands the flow on.
-    SEND_FLOW = Verb::Family.new(:send_flow, "Send flow to…", '>', :send, [
+    # A bare `>` opens the card from the tab too (`chord:`, #1295): no scope and no Global
+    # binds `>`, and a hand that drops the `space` before `> f` still lands in the card.
+    SEND_FLOW = Verb::Family.new(:send_flow, "Send flow to…", '>', :send, chord: Verb::Chord.new(">"), letters: [
       {:to_repeater, Verb::TOOL_LETTERS[:repeater]},
       {:to_fuzzer, Verb::TOOL_LETTERS[:fuzzer]},
       {:to_comparer, Verb::TOOL_LETTERS[:comparer]},
@@ -23,6 +25,8 @@ module Gori
     # "Display…" (`Z`) holds the toggles that change how a pane DRAWS what it holds — never a
     # write-back like pretty-print-request, which changes the request itself. Sticky: after a
     # flip the card comes back at the same row, whose `●`/`○` says what the pane now shows.
+    # `a` shows every row a default lens leaves out — Probe's closed issues, the Params tab's
+    # standard headers — the letter both tabs already answer bare (#1295).
     # Not `V`: under the vim keyset ⇧V selects a line in every read pane this row is drawn in,
     # so a dropped space would select instead of opening the card. `z` is vim's view-and-fold
     # prefix, and the capital keeps the lower case for single rows.
@@ -46,6 +50,7 @@ module Gori
       {:distribution, 'v'},
       {:compare_pane, 't'},
       {:fold_unchanged, 'z'},
+      {:show_all, 'a'},
     ], sticky: true)
 
     # "Protocol…" (`P`) holds the per-request transport settings of the Repeater and the

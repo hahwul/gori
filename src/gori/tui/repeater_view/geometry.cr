@@ -46,7 +46,7 @@ class Gori::Tui::RepeaterView
   # question only the chip's COLOUR needs (`tls_preset_live?` asks it, and only when an
   # override is actually set).
   private def tls_chip_label : String
-    " ␣Pt:#{@tls_preset || "tls"} "
+    " #{menu_chip("repeater.cycle-tls-preset")}:#{@tls_preset || "tls"} "
   end
 
   # The TARGET band's right-to-left chrome after the READ/INS mode chip: the SNI marker, the

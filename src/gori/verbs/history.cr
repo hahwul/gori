@@ -515,9 +515,13 @@ module Gori
         Verb::Scope::Repeater, [Verb::Chord.new("d", shift: true)],
         available: in_repeater, intent: :diff, section: :response,
         chord_sections: [:response]) { |ctx| ctx.repeater_toggle_resp_diff; nil }
+      # No chord of its own: `^X` is `repeater.toggle-hex`'s, which toggles the hex of the pane
+      # that has focus, so it reaches this one in the response pane — and the row says so
+      # (`chord_of:`, #1295). A scope binds a chord to one verb, so the pair shares it this way.
       r.register Verb::Definition.new(
         "repeater.toggle-resp-hex", "Hex dump", "Toggle a raw hex dump of the response bytes",
-        Verb::Scope::Repeater, available: in_repeater, intent: :hex, section: :response) { |ctx| ctx.repeater_toggle_resp_hex; nil }
+        Verb::Scope::Repeater, available: in_repeater, intent: :hex, section: :response,
+        chord_of: "repeater.toggle-hex") { |ctx| ctx.repeater_toggle_resp_hex; nil }
       r.register Verb::Definition.new(
         "repeater.toggle-pretty", "Pretty bodies", "Pretty-print JSON/XML/form/… response bodies (display only)",
         Verb::Scope::Repeater, [Verb::Chord.new("p")],
@@ -746,11 +750,13 @@ module Gori
       r.register Verb::Definition.new(
         "fuzz.sort", "Cycle sort", "RESULTS: cycle the sort column (index → status → length → …)",
         Verb::Scope::Fuzzer, available: in_fuzzer, mnemonic: 'o', section: :results) { |ctx| ctx.fuzz_cycle_sort; nil }
+      # Bare `m` and `v` only in RESULTS (`chord_sections`), the pane both lenses draw over: in
+      # the template pane `v` is the menu's clear-selection, as in every other read pane, and a
+      # results lens should not flip from a pane that cannot show it (#1274, #1295).
       r.register Verb::Definition.new(
         "fuzz.matched", "Matched only", "RESULTS: show only the rows the matchers hit",
-        Verb::Scope::Fuzzer, [Verb::Chord.new("m")], available: in_fuzzer, intent: :matched_only, section: :results) { |ctx| ctx.fuzz_toggle_matched; nil }
-      # Bare `v` only in RESULTS (`chord_sections`): in the template pane `v` is the menu's
-      # clear-selection, as in every other read pane (#1274).
+        Verb::Scope::Fuzzer, [Verb::Chord.new("m")], available: in_fuzzer, intent: :matched_only, section: :results,
+        chord_sections: [:results]) { |ctx| ctx.fuzz_toggle_matched; nil }
       r.register Verb::Definition.new(
         "fuzz.dist", "Distribution sidebar", "RESULTS: show/hide the status and length distribution",
         Verb::Scope::Fuzzer, [Verb::Chord.new("v")], available: in_fuzzer, intent: :distribution, section: :results,
@@ -1067,9 +1073,10 @@ module Gori
       register_activity(r)
       register_read_edit(r)
       register_editor(r)
-      r.validate_menu_keys! # fail fast if any scope has a colliding space-menu key
-      r.validate_chords!    # …and on a same-scope chord collision or dead capital, on every OS profile
-      r.validate_intents!   # …and on a menu letter that breaks the intent lexicon (Verb::Lexicon)
+      r.register_family_openers # last: a family's bare key, in every scope that has a member
+      r.validate_menu_keys!     # fail fast if any scope has a colliding space-menu key
+      r.validate_chords!        # …and on a same-scope chord collision or dead capital, on every OS profile
+      r.validate_intents!       # …and on a menu letter that breaks the intent lexicon (Verb::Lexicon)
       r
     end
   end

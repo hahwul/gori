@@ -375,7 +375,7 @@ module Gori::Tui
     #
     # The family row files under the first bucket, in render order, that holds a member
     # (COMMON, then SUB-TABS, then the pane), and in the family's own band — but only when
-    # that bucket is banded already (#banded_home).
+    # another row of that bucket is in that band already (#banded_home?).
     #
     # In a pane view of a tab with a strip the SUB-TABS bucket folds into one Sub-tabs… row
     # (`Registry::SUBTABS_FOLD`, #1274 Decision 8), static like a family row and filed in the
@@ -410,15 +410,17 @@ module Gori::Tui
       {kept, Entry.new(fold.key, scope, :subtab, :none, family: fold)}
     end
 
-    # Whether a family row's bucket already has a band of its own: some non-member verb row
-    # there carries a `group`. Only then does the row take its family's band. In an untagged
-    # bucket (the Repeater's COMMON, the Fuzzer's) it stays an untagged row, because a lone
-    # `─ SEND ─` over the family row would push everything else under a `─ COMMON ─` header
-    # the card never had.
+    # Whether a family row's bucket already has its family's band: another level-1 row there
+    # (a non-member, or a pinned member) carries the family's `group`. Only then does the row
+    # take that band. Otherwise it stays an untagged row, because a band holding the family row
+    # alone is a header over one row: in an untagged bucket (the Repeater's COMMON, the
+    # Fuzzer's) it would also push everything else under a `─ COMMON ─` header the card never
+    # had, and in a banded one (ProbeDetail, whose only other band is DANGER) it sat above the
+    # rest as a one-row `─ SEND ─` (#1295).
     private def banded_home?(e : Entry, rows : Array(Entry), section : Symbol, subtabs : Bool) : Bool
       rank = bucket_rank(e.section, section, subtabs)
       rows.any? do |r|
-        (v = r.verb) && !v.member? && v.group != :none && bucket_rank(r.section, section, subtabs) == rank
+        (v = r.verb) && (!v.member? || v.pinned?) && v.group == e.group && bucket_rank(r.section, section, subtabs) == rank
       end
     end
 

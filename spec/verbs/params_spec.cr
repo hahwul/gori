@@ -26,6 +26,15 @@ describe "Gori::Verbs.register_params" do
     verb_intents(r, "params.to-menu").should eq([:focus_pane])
   end
 
+  # #1295: Mine parameters is a Send flow to… member and the headers lens a Display… one; both
+  # keep the bare key they had, so only the menu path moved.
+  it "lists Mine parameters under Send flow to… and All headers under Display…" do
+    r.menu_keys("params.mine").should eq(['>', 'm'])
+    r["params.mine"].chords.should eq([typed_chord("m")])
+    r.menu_keys("params.all-headers").should eq(['Z', 'a'])
+    r["params.all-headers"].chords.should eq([typed_chord("a")])
+  end
+
   it "binds `p` on the Sitemap and ⇧Y / ^R on Params" do
     r["sitemap.params"].chords.should eq([typed_chord("p")])
     r["params.copy-names"].chords.should eq([typed_chord("y", shift: true)])
