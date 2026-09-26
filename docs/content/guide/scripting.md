@@ -64,7 +64,7 @@ The JSON that `gori run` emits is a stable, documented shape meant to be parsed,
 | Subcommand | `--format json` | `--format jsonl` |
 |------------|-----------------|------------------|
 | `capture`, `history` | One JSON object per line | Alias for `json`, same output |
-| `fuzz`, `mine`, `discover`, `authorize` | Buffered; one JSON array at the end | One object per line, as each result lands |
+| `fuzz`, `mine`, `discover`, `authorize`, `cache-deception` | Buffered; one JSON array at the end | One object per line, as each result lands |
 | `sequence` | The single report | Each sample as it lands, then the report |
 
 Reach for `jsonl` when you want to consume a long sweep while it runs, and `json` when you want one document at the end.

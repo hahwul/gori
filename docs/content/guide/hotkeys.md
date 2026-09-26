@@ -152,6 +152,11 @@ different one, so `⇧1`–`⇧9` work where your terminal reports the shift mod
 otherwise. Both fallbacks are always live: **`f`** on the sub-tab strip opens the same picker
 `⇧0` does, and `Ctrl-1`…`Ctrl-9` is the alias for `⇧1`–`⇧9` on terminals that deliver it.
 
+The rest of the shifted punctuation row goes the other way. A character that only exists with
+Shift (`>`, `?`, `{`, `}`, `~`, `|`, …) already says Shift was held, so gori drops the shift
+flag a terminal reports beside it (kitty's report-all-keys, xterm's `modifyOtherKeys`). A bare
+`>` opens [Send flow to…](#send-flow-to) and `?` opens Help on those terminals too.
+
 ## The space menu {#space-menu}
 
 `Space` in a navigable pane opens the action menu for **where you are standing** — the
@@ -246,8 +251,8 @@ the row; it never spends that letter on something else.
 | `e` | Rename sub-tab | `e` on the strip |
 | `t` | Mark or unmark the active sub-tab | `t` on the strip |
 | `f` | Search sub-tabs — the `⌕` picker | `f` on the strip, `⇧0` anywhere |
-| `/` | Filter the strip (name / host / method / tag) | |
-| `T` | Mark every sub-tab the filter shows | |
+| `/` | Filter the strip (name / host / method / tag) | `/` on the strip |
+| `T` | Mark every sub-tab the filter shows | `⇧T` on the strip |
 | `N` | Clear the sub-tab marks | `Esc` on the strip |
 | `g` | Tag sub-tab (Repeater) | |
 
@@ -288,6 +293,7 @@ cannot drift apart on it:
 | `I` | Insert a `§` marker |
 | `C` | Clear every `§` marker · set an issue's status · duplicate a rule |
 | `L` · `H` | Link… (attach to an issue or note, or manage links) · add the host to scope |
+| `O` · `M` · `V` | Insert (or, in History, copy) an OAST payload · mock this response · set an issue's CVSS |
 | `X` | Wipe the tab (asks first), and nothing else |
 
 `/` `d` `x` `y` `Y` `S` `t` `T` `N` and `X` are **reserved**: on a tab that has the action, no

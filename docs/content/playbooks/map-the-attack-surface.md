@@ -19,7 +19,7 @@ Leave capture on (`c` toggles it) and click through the app the way a user would
 gori run sitemap
 ```
 
-The tree is a view over the capture, not a second copy; anything you browse next appears the moment it lands. `--in-scope` limits it to in-scope hosts, matching the scope lens.
+The tree is a view over the capture, not a second copy; anything you browse next appears the moment it lands. `--in-scope` limits it to in-scope hosts, matching the scope lens, and `--hide-static` leaves out images, fonts and media (in the TUI, `Space` `Z` `s` under **Display…**, a lens History shares).
 
 <figure class="tui-shot">
   <img src="/images/tui/sitemap.svg" alt="gori Sitemap tab showing captured hosts expanded into a tree of paths with method chips and per-host path counts">
@@ -30,7 +30,7 @@ The tree is a view over the capture, not a second copy; anything you browse next
 
 ## 2. Fold noisy ids
 
-A REST API buries its shape under identifiers: `/user/1`, `/user/2`, `/order/9f3c…` are one endpoint wearing a hundred faces. Press `g` to fold path-param ids, so `/user/1` and `/user/2` share one node and a long id collapses into a single `{uuid}`. What was a wall of near-identical rows becomes the handful of real endpoints behind them.
+A REST API buries its shape under identifiers: `/user/1`, `/user/2`, `/order/9f3c…` are one endpoint wearing a hundred faces. The Sitemap folds path-param ids for you, so `/user/1` and `/user/2` share one node and a long id collapses into a single `{uuid}`. What was a wall of near-identical rows becomes the handful of real endpoints behind them. Query-string variants fold the same way (`/search?q=1` and `/search?q=2` onto `/search`). Both folds are on by default: `g` toggles the id fold and `Shift-G` the query fold, for the rare time you need every literal value.
 
 ```bash
 gori run sitemap            # folds ids by default; --no-group shows every one
@@ -52,6 +52,8 @@ gori run discover --target https://api.example.com \
 
 > Discover sends real, unsolicited traffic to the target: an actual request for every path it guesses. Run it only against systems you are authorized to test. It stays inside your project scope, and the sandbox and exclude rules are always respected.
 
+Captured JavaScript names endpoints too, and reading it sends nothing. `Space` `J` (**Scan JavaScript**) on the Sitemap reads the JS responses and inline scripts already in the project and draws the paths they reference but no request reached as dimmed `js` rows. Headless, `gori run sitemap js --scan` lists them, and `gori run sitemap --js-refs` draws them in the tree.
+
 **Checkpoint.** New paths appear in the Sitemap that you never browsed, and the run summary reports what it found and what its calibrator suppressed.
 
 ## 4. Read and act on the surface
@@ -59,6 +61,8 @@ gori run discover --target https://api.example.com \
 A Discover finding is more than a URL. gori stores the request it framed and the response the origin sent, so the tree is evidence you can read. Select a discovered node and press `o` to open that exchange in the same detail view History uses (`Enter` only expands or collapses a node): headers, body, pretty-printed JSON. From there `^R` sends it to the **Repeater** to start poking at it by hand.
 
 As you triage, mark the paths that matter with `t` (a run of `t` marks consecutive rows), and use the `Space` menu to tag them or add the host to scope from right here, so the endpoints you care about survive the next capture. Nothing sends traffic on its own; you decide what to open and what to chase.
+
+The tree reads two more ways. `p` on a host or subtree lists every parameter name its requests carried, where it appeared and whether a value came back reflected (**Target → Params**, `gori run sitemap params`). `⇧E` writes the selected host or subtree as an OpenAPI 3.0.3 document, with templated paths and inferred schemas but never a credential value (`gori run sitemap export`).
 
 **Checkpoint.** You can open a discovered endpoint, read its real response, and send it onward to the Repeater.
 

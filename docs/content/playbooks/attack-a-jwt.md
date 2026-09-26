@@ -74,7 +74,7 @@ An **encrypted** token — five segments rather than three — is a JWE, and non
 
 ## 4. Replay and confirm
 
-A forged token proves nothing until the server sees it. Pick a payload (your tampered token from step 2, or a preset from step 3) and send it to **Repeater**, swap it into the `Authorization` header of the captured request, and re-send with `Ctrl-R`. Read the status against what the endpoint should return for a bad token:
+A forged token proves nothing until the server sees it. Pick a payload (your tampered token from step 2, or a preset from step 3), copy it with `y`, paste it into the `Authorization` header of the captured request in **Repeater**, and re-send with `Ctrl-R`. Read the status against what the endpoint should return for a bad token:
 
 - A `401` or `403` means the server rejected the forgery; it verified the signature.
 - A `200` where you expected a reject means it did *not* verify; the token was accepted on your terms.

@@ -237,7 +237,7 @@ Every refusal is recorded in the project as a flow carrying its reason, too. A c
 
 `network.upstream_proxy` is the catch-all route. Bare `host:port` and `http://…` use a plaintext HTTP CONNECT proxy (default port `8080`). `http+tls://…` uses the same CONNECT protocol with the hop to the proxy wrapped in TLS (default port `443`). `socks5://…` resolves destination names **locally** and sends an address literal; `socks5h://…` sends hostname targets as `ATYP DOMAIN` so the **proxy** resolves them. Both SOCKS forms default to port 1080. URI credentials are refused; configure direct credentials in the Project tab, or use an `upstream_rules` entry with `username` and `password_env`.
 
-When this scalar is blank, gori consults the process environment at dial time. HTTP origins select `HTTP_PROXY`, then `ALL_PROXY`; HTTPS origins select `HTTPS_PROXY`, then `HTTP_PROXY`, then `ALL_PROXY`. Uppercase names are preferred and lowercase spellings are accepted. `NO_PROXY` / `no_proxy` supports `*`, hosts and domains, bracketed IPv6 literals, optional ports, and IPv4/IPv6 CIDR blocks (`10.0.0.0/8,fd00::/8`, matched against an address-literal destination); a match goes direct. `localhost` and loopback addresses are always direct, whatever `NO_PROXY` says — on every dial, TLS passthrough and CONNECT tunnels included; the exemption is about the destination, so a proxy that itself listens on `127.0.0.1` is still used for remote targets. An explicit project upstream, matching rule (including `direct`), or non-empty scalar takes precedence over the environment. In this environment-variable convention, `http://` means a plaintext HTTP CONNECT proxy (port 80 when none is given, not the scalar's 8080) and `https://` means TLS to the proxy; the persisted `network.upstream_proxy` `https://` spelling retains its legacy plaintext meaning.
+When this scalar is blank, gori consults the process environment at dial time. HTTP origins select `HTTP_PROXY`, then `ALL_PROXY`; HTTPS origins select `HTTPS_PROXY`, then `HTTP_PROXY`, then `ALL_PROXY`. Uppercase names are preferred and lowercase spellings are accepted. `NO_PROXY` / `no_proxy` supports `*`, hosts and domains, bracketed IPv6 literals, optional ports, and IPv4/IPv6 CIDR blocks (`10.0.0.0/8,fd00::/8`, matched against an address-literal destination); a match goes direct. `localhost` and loopback addresses are always direct, whatever `NO_PROXY` says — on every dial, TLS passthrough and CONNECT tunnels included; the exemption is about the destination, so a proxy that itself listens on `127.0.0.1` is still used for remote targets. The unspecified addresses `0.0.0.0` and `::` count as loopback here, and so does any numeric IPv4 spelling the system resolver accepts (`127.1`, `0x7f.0.0.1`, `2130706433`): the loopback check and the CIDR entries read such a destination as the dotted address it resolves to, while the dial and the `CONNECT` line keep the spelling that was sent. Inside a [gori shell](/reference/cli/#run-shell), the proxy variables that shell exported (pointing back at the gori that started it) are passed over, and the values it replaced (a corporate `HTTPS_PROXY`, its `NO_PROXY`) are read instead, so a gori started there does not chain its requests through its parent. An explicit project upstream, matching rule (including `direct`), or non-empty scalar takes precedence over the environment. In this environment-variable convention, `http://` means a plaintext HTTP CONNECT proxy (port 80 when none is given, not the scalar's 8080) and `https://` means TLS to the proxy; the persisted `network.upstream_proxy` `https://` spelling retains its legacy plaintext meaning.
 
 #### `https://` means the plaintext proxy, not TLS
 
@@ -542,6 +542,8 @@ Tokens like `$ENV.TOKEN` expand at send time in Repeater, Fuzzer, Miner, Interce
 | `prefix` | string | `"$"` | The sigil that opens a token (`$ENV.KEY`), in either grammar |
 | `vars` | array | `[]` | Global key/value pairs; project vars (Project tab → ENV) override on collision |
 
+A running TUI or `gori mcp` server re-reads `vars` and `prefix` when another process changes the file, so a token rotated or deleted elsewhere stops going out without a restart.
+
 See [Environment Variables](/guide/repeater-and-fuzzer/#environment-variables).
 
 ### user_agents {#user-agents}
@@ -557,7 +559,7 @@ Your own list for [`$GEN.USER_AGENT`](/guide/repeater-and-fuzzer/#environment-va
 }
 ```
 
-Each entry goes into a header verbatim, so an entry that is blank or carries a control or invisible format character is dropped on load, with a warning. `$GEN.USER_AGENT_CHROME` / `_FIREFOX` / `_SAFARI` draw from your lines of that browser (`Chrome/`, `Firefox/`, or `Safari/` without either), and from the built-in family when you listed none. Edit it from Preferences → **Editor & Keys** → **User-Agents**, or with [`gori settings user-agents`](/reference/cli/#user-agents).
+Each entry goes into a header verbatim, so an entry that is blank or carries a control or invisible format character is dropped on load, with a warning. `$GEN.USER_AGENT_CHROME` / `_FIREFOX` / `_SAFARI` draw from your lines of that browser (`Chrome/`, `Firefox/`, or `Safari/` without either), and from the built-in family when you listed none. Edit it from Preferences → **Editor & Keys** → **User-Agents**, or with [`gori settings user-agents`](/reference/cli/#user-agents). Like `env`, a running TUI or `gori mcp` server follows a change made by another process without a restart.
 
 ### general
 
@@ -830,11 +832,11 @@ Project-scoped profiles live in the project database rather than here; see [Per-
 | Section | Description |
 |---------|-------------|
 | `theme` | Active theme name (default `goridark`). See the [Themes guide](/guide/themes/) |
-| `mouse` | Mouse support toggle |
+| `mouse` | Mouse support toggle (on by default) |
 | `mouse_drag` | What releasing a drag does: `select` (default) or `copy` |
-| `pretty_bodies` | Pretty-print JSON/XML/etc. bodies in the detail view |
+| `pretty_bodies` | Pretty-print JSON/XML/etc. bodies in the detail view (on by default) |
 | `editor` | External editor `command` and Markdown handling |
-| `tabs` | Which TUI tabs are shown/hidden |
+| `tabs` | Which TUI tabs are shown/hidden, in tab-bar order |
 | `hostname_overrides` | Global host → IP dial map. See [hostname_overrides](#hostname-overrides) above |
 | `env` | Env-token grammar (`syntax`), sigil and global values. See [env](#env) above |
 | `user_agents` | Your own list for `$GEN.USER_AGENT`, replacing the built-in one. See [user_agents](#user-agents) above |
@@ -846,7 +848,7 @@ Project-scoped profiles live in the project database rather than here; see [Per-
 | `mine` | Saved Param Miner defaults. See [mine](#mine) above |
 | `saved_views` | The GLOBAL History **views** library: named QL queries applied as a lens, with the same global/project split `rewriter` has. See [run views](/reference/cli/#run-views) |
 | `companion` | Miss Ring, the mascot: `enabled` (on by default), `placement` (`body` \| `bar`), `motion` (`lively` \| `calm` \| `still`) and `notices`. See the [Settings guide](/guide/settings/) |
-| `layout` | History / Probe / Issues previews, Sitemap expand depth, tab-bar numbers. See [layout](#layout) above |
+| `layout` | History / Probe / Issues previews, History list order, Sitemap expand depth, tab-bar numbers and slots. See [layout](#layout) above |
 | `statusline` | Bottom status row that runs a command on an interval. See [statusline](#statusline) above |
 | `redaction` | Safe-export profiles, the active one, the on-by-default switch and the placeholder salt. See [redaction](#redaction) above |
 | `display` | Default detail pane, list time format, line-number gutter, `wrap_lines` (soft-wrap long lines, on by default), preview body cap, `resource_meter` (the CPU/memory readout at the far right of the bottom bar, on by default), and `terminal_title` |
@@ -856,7 +858,7 @@ Project-scoped profiles live in the project database rather than here; see [Per-
 
 A project can also carry its own **redaction** config under the `redaction` key — its own profiles, which one is active, and its own answer to "sanitize by default" (including an explicit `false` that turns a global default off for one engagement). Written by [`gori run redact`](/reference/cli/#run-redact); resolution is project, then global, then built-in, first match by name.
 
-A project can pin its own network settings without editing the global file. These are stored in the project database (keys `net.bind_host`, `net.bind_port`, `net.upstream_proxy`, `net.upstream_destination_host`, `net.upstream_auth`, `net.connect_timeout_secs`, `net.io_timeout_secs`, `net.capture_max_mib`) and edited from the **Project** tab's **Project settings** sub-tab, or headless with [`gori run project network`](/reference/cli/#project-network) (`list`, `get`, `set`, `unset`).
+A project can pin its own network settings without editing the global file. These are stored in the project database (keys `net.bind_host`, `net.bind_port`, `net.upstream_proxy`, `net.upstream_destination_host`, `net.upstream_auth`, `net.connect_timeout_secs`, `net.io_timeout_secs`, `net.capture_max_mib`) and edited from the **Project** tab's **Project settings** sub-tab, or headless with [`gori run project network`](/reference/cli/#project-network) (`list`, `get`, `set`, `unset`). A project imported from a `.gori` archive ([`gori run project import`](/reference/cli/#project-import)) arrives with none of these keys and none of its project host overrides, so it starts on this machine's global network settings.
 
 **Destination host** limits proxy routing to one case-insensitive host pattern. `*` is the default and makes every destination eligible; `example.com` covers that host and its subdomains, while `*.example.com` covers subdomains only. Domain, IPv4, IPv6, and `*`-based IP patterns are accepted. A non-match always goes direct and does not fall through to `upstream_rules` or `network.upstream_proxy`. This gate applies to every gori-owned dial while the project is active, including capture, replay, scanners, the updater, and OAST traffic.
 

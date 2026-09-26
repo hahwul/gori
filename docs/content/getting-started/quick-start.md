@@ -64,6 +64,8 @@ curl -x http://127.0.0.1:8070 https://example.com
 
 gori mints per-host leaf certificates from the root on demand, so you trust the root only once.
 
+For command-line tools there is a shortcut: `gori run shell` (or **Open shell** in the palette) starts a shell whose curl, git, Python, Go and Node traffic already goes through the running gori and trusts its CA, without touching OS settings. `gori run shell -- curl https://example.com` runs one command that way. See [`gori run shell`](/reference/cli/#run-shell).
+
 > gori's private key is a machine secret, written with `0600` permissions, and never leaves your machine. Rotate it from the palette (**Regenerate CA certificate**) only when you mean to invalidate every prior trust.
 
 ### Option C: Install the CA on a phone or tablet

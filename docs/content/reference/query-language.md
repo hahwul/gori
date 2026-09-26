@@ -210,13 +210,17 @@ Every filter bar shares the grammar above (fields, comparisons, `~` regex, `AND`
 | History, `gori run history`, MCP | The full table above |
 | Sitemap | The same, plus `tag:` for per-node path memos |
 | Colour rules (Colormarker) | The same. A colour rule takes the query the History bar takes |
-| Intercept catch condition, extract-rule condition | `host`, `path`, `url`, `method`, `scheme`, `status`, `proto`, `header`, `body`. **No `scope:`** |
+| Intercept catch condition, extract-rule condition | `host`, `path`, `url`, `method`, `scheme`, `status`, `proto`, `header`, `body`. **Every other field is refused** (see below) |
 | Probe | `severity` (`sev`), `status` (`st`), `category` (`cat`), `host`, `code` |
 | Issues | `severity` (`sev`), `status` (`st`), `host`, `title`, `cvss` |
 
-`scope:` is the one field a hold gate and an extract-rule condition refuse rather than answer:
-they evaluate a live message, and a project's scope rules are not part of one. The condition rows
-say so where you type them, and an extract rule carrying `scope:` will not save.
+A hold gate and an extract-rule condition evaluate one live message, before it is captured, so
+they refuse every History field that message cannot answer rather than guess: `scope:` (a
+project's scope rules are not part of a message), `size:`, `reqsize:`, `respsize:` and `dur:`
+(the exchange has not finished), `stub:`, `static:`, `src:` and `cache:`, and the one-sided
+`req.`/`resp.` spellings. A refused field is never searched as free text instead. The
+condition rows say so where you type them, an extract rule carrying one will not save, and MCP
+`intercept_set_filter` and `gori run intercept filter` refuse the condition.
 
 Probe and Issues take severity names (`info`, `low`, `medium`/`med`, `high`, `critical`/`crit`) and triage states (`open`, `confirmed`/`conf`, `false-positive`/`fp`, `resolved`/`done`, plus `closed` for any non-open state). Severity supports comparisons, so `sev:>=high` works. Issues also accepts `cvss:` with numeric comparison operators (`cvss:>=7.0`, `cvss:<4.0`), exact scores (`cvss:7.5`), or vector substrings (`cvss:3.1`).
 
@@ -235,7 +239,7 @@ Both the Intercept and colour-rule bars Tab-complete field names and known value
 `header:` and `body:` search the bytes of a message, so where they work is decided by which bytes exist at the moment the filter is asked:
 
 - **History, Sitemap and colour rules** search a captured flow, so both fields always work, on both sides of the exchange.
-- **Intercept and extract-rule conditions** search the message in flight. `header:` works at every gate. `body:` works for a held **WebSocket message** and for an **extract-rule** condition, where the payload is in hand, but not at an HTTP hold gate, because that gate is what decides whether the body gets buffered in the first place.
+- **Intercept and extract-rule conditions** search the message in flight. `header:` works at the HTTP request and response gates and in an extract-rule condition, but not for a held WebSocket message, which has no head of its own. `body:` works for a held **WebSocket message** and for an **extract-rule** condition, where the payload is in hand, but not at an HTTP hold gate, because that gate is what decides whether the body gets buffered in the first place.
 
 One deliberate difference between the two, worth knowing before you write a rule:
 

@@ -105,7 +105,7 @@ Placement는 *세션에서의* 비용을 결정합니다 (선택 화면에는 �
 | 섹션 | 필드 |
 |------|------|
 | **Network** | Bind IP, Bind Port, Proxy protocol, Proxy host, Proxy port, Proxy TLS CA, Verify proxy TLS, Verify upstream TLS, Info page and CA download, Connect timeout (s), Idle timeout (s), Capture body limit (MiB), HTTP/2, Strip HTTP/3 Alt-Svc, TLS passthrough, Upstream rules(읽기 전용), Environment proxy(읽기 전용), Outbound TLS(읽기 전용), Hostname overrides(오프너) |
-| **Tabs** | 오프너: 탭 바의 번호 슬롯 아홉 개 표시/숨김과 순서 변경 (열 번째 ✓는 거부됩니다 — 하나를 먼저 숨기세요. 바 밖의 탭도 `0`으로 계속 접근할 수 있습니다) |
+| **Tabs** | 오프너: 하나로 이어진 목록이며, 경계선 위의 행이 탭 바의 번호 슬롯입니다. `⇧K` / `⇧J`로 행을 옮기고 `space`로 경계선 너머로 보냅니다. **Tab bar slots**가 켜져 있으면 열 번째는 거부됩니다(대신 `⇧K`로 행을 맞바꿔 올립니다). 바 밖의 탭도 `0`으로 계속 접근할 수 있습니다 |
 
 여기의 Network는 **전역 기본값**입니다. 프로젝트는 **Project** 탭에서 자체 바인드 주소, 포트, 업스트림을 고정할 수 있고 그 프로젝트에서는 그쪽이 우선합니다. 전체 우선순위는 [설정](/ko/getting-started/configuration/#network)을 참고하세요.
 

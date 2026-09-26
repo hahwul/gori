@@ -59,7 +59,7 @@ Forward and drop act on the marked rows if any are set, else the cursor row, so 
 
 ## 4. Make an edit permanent with Match & Replace
 
-Holding every request to make the *same* edit by hand gets old fast. A standing edit belongs in the **Rewriter** tab (the Match & Replace editor, off the tab bar by default: press **`0`** and type "rewriter", or `Ctrl-P` → **Match & Replace**). Add a rule with an operation (**Replace** text in the head or body, **Add** / **Set** / **Remove** a header, **Short circuit** to answer the request from the rule without dialing the origin at all, or **Pipe** to hand the matched bytes to a command) and scope it to a host glob so it fires only for matching traffic:
+Holding every request to make the *same* edit by hand gets old fast. A standing edit belongs in the **Rewriter** tab (the Match & Replace editor, off the tab bar by default: press **`0`** and type "rewriter", or `Ctrl-P` → **Match & Replace**). Add a rule with an operation (**Replace** text in the head or body, **Add** / **Set** / **Remove** a header, **Short circuit** to answer the request from the rule without dialing the origin at all (a canned response, files from a local directory, a captured flow's response via History's `Space` `M`, or a close/reset/hang fault), or **Pipe** to hand the matched bytes to a command) and scope it to a host glob so it fires only for matching traffic:
 
 ```bash
 gori run rewriter add --op set_header --target request \

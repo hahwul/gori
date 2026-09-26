@@ -56,7 +56,7 @@ While it's on, the proxy forwards only the requests your scope allows and blocks
 
 Because scope is an allowlist, **a sandbox with no include rule blocks everything**, which is exactly why you drew scope first. A red `sandbox` chip stays lit in the top bar the whole time it's on.
 
-**Checkpoint.** The `sandbox` chip is lit. A request to an out-of-scope site fails; a request to `api.example.com` goes through. Toggle the sandbox off to roam freely again.
+**Checkpoint.** The `sandbox` chip is lit. A request to an out-of-scope site fails; a request to `api.example.com` goes through. To try both from a terminal, `gori run shell` opens one whose curl, git, Python, Go and Node traffic goes through the running gori and trusts its CA. Toggle the sandbox off to roam freely again.
 
 ## 5. Redirect a host without touching DNS (optional)
 
@@ -65,6 +65,8 @@ If your target's name has to resolve somewhere other than public DNS (a staging 
 ```bash
 gori run project host-override add --host=api.example.com --ip=10.0.0.1
 ```
+
+If the engagement has to leave through a client's proxy or a SOCKS jump host, give this project its own upstream in the NETWORK fields of the **Project settings** pane, or headless with `gori run project network set upstream_proxy=socks5h://127.0.0.1:1080`. `gori run project network` lists each key and whether the project sets it or inherits the global value.
 
 **Checkpoint.** `gori run project host-override` lists the entry, and a request to `api.example.com` now connects to `10.0.0.1`.
 

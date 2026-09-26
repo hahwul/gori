@@ -56,7 +56,7 @@ gori run project sandbox on
 
 스코프가 허용 목록이므로 **include 규칙이 없는 샌드박스는 모든 것을 차단합니다**. 스코프를 먼저 그린 이유가 바로 이것입니다. 켜져 있는 내내 상단 바에 빨간 `sandbox` 칩이 켜져 있습니다.
 
-**체크포인트.** `sandbox` 칩이 켜져 있습니다. 스코프 밖 사이트로의 요청은 실패하고, `api.example.com`으로의 요청은 통과합니다. 다시 자유롭게 다니려면 샌드박스를 끄세요.
+**체크포인트.** `sandbox` 칩이 켜져 있습니다. 스코프 밖 사이트로의 요청은 실패하고, `api.example.com`으로의 요청은 통과합니다. 터미널에서 둘 다 시험하려면 `gori run shell`을 쓰세요. curl, git, Python, Go, Node 트래픽이 실행 중인 gori를 거치고 그 CA를 신뢰하는 터미널을 엽니다. 다시 자유롭게 다니려면 샌드박스를 끄세요.
 
 ## 5. DNS를 건드리지 않고 호스트 리다이렉트 (선택) {#5-redirect-a-host-without-touching-dns-optional}
 
@@ -65,6 +65,8 @@ gori run project sandbox on
 ```bash
 gori run project host-override add --host=api.example.com --ip=10.0.0.1
 ```
+
+고객사 프록시나 SOCKS 점프 호스트를 거쳐 나가야 하는 엔게이지먼트라면, **Project settings** 패널의 NETWORK 필드에서 이 프로젝트만의 upstream을 지정하거나, 헤드리스로 `gori run project network set upstream_proxy=socks5h://127.0.0.1:1080`을 실행하세요. `gori run project network`는 키마다 프로젝트가 직접 지정했는지, 전역 값을 물려받는지 보여 줍니다.
 
 **체크포인트.** `gori run project host-override`에 항목이 나열되고, `api.example.com`으로의 요청이 이제 `10.0.0.1`로 연결됩니다.
 

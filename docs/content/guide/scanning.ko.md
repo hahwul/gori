@@ -13,9 +13,9 @@ gori에는 수동 테스트와 나란히 돌아가는 자동 분석 기능이 �
 
 **Probe**는 보안 이슈를 유형과 심각도로 묶습니다. 패시브 체크는 브라우징하는 동안 실행되며(추가 요청은 전혀 없이) **History** 플로우와 **Repeater** 전송 결과를 검사합니다.
 
-**액티브** 체크는 의도적으로 *light-touch*로 설계되었습니다. 이미 캡처한 트래픽에 대해 안전하고 저용량인 프로브 몇 개를 보낼 뿐입니다. 기본적으로 안전한 메서드(`GET` / `HEAD`)만 프로브하고, 고유한 표면마다 한 번씩만 테스트하며, 액티브 모드를 활성화하기 전에는 아무것도 나가지 않습니다. Probe 탭에서 `m`(**Set mode**)을 누르거나 `gori run probe mode active`를 실행하세요. 새 프로젝트는 `passive`로 시작합니다. 흔적을 최소로 남기면서 빠른 직감을 확인하도록(파라미터가 반사되는지, origin이 허용되는지) 만들어졌습니다.
+**액티브** 체크는 의도적으로 *light-touch*로 설계되었습니다. 이미 캡처한 트래픽에 대해 안전하고 저용량인 프로브 몇 개를 보낼 뿐입니다. 기본적으로 안전한 메서드(`GET` / `HEAD`)만 프로브하고, 고유한 표면마다 한 번씩만 테스트하며, 액티브 모드를 활성화하기 전에는 자동 파이프라인이 아무것도 보내지 않습니다. Probe 탭에서 `m`(**Set mode**)을 누르거나 `gori run probe mode active`를 실행하세요. 새 프로젝트는 `passive`로 시작합니다. 플로우별 *Run active scan*은 의도적인 일회성 실행이라 어느 모드에서든 동작하고, 이미 본 표면도 다시 테스트합니다. 흔적을 최소로 남기면서 빠른 직감을 확인하도록(파라미터가 반사되는지, origin이 허용되는지) 만들어졌습니다.
 
-안전하지 않은 메서드(`POST` / `PUT` / `PATCH` / `DELETE`)를 다시 보내면 서버 상태가 변경될 수 있으므로 항상 명시적으로 켜야 합니다. 플로우별 *Run active scan* 팝업에서 **unsafe methods**를 체크해 한 번만 의도적으로 재전송하거나, Probe를 **AGGRESSIVE** 모드로 전환하면 안전하지 않은 메서드도 자동으로 프로브하고 룰별 상한을 높입니다(더 넓은 파라미터 집합, 더 넓은 forbidden-bypass 헤더 집합). 두 경우 모두 프로젝트 스코프 안에서만 동작하므로 스코프를 벗어난 호스트는 절대 건드리지 않습니다.
+안전하지 않은 메서드(`POST` / `PUT` / `PATCH` / `DELETE`)를 다시 보내면 서버 상태가 변경될 수 있으므로 항상 명시적으로 켜야 합니다. 플로우별 *Run active scan* 팝업에서 **unsafe methods**를 체크해 한 번만 의도적으로 재전송하거나, Probe를 **AGGRESSIVE** 모드로 전환하면 안전하지 않은 메서드도 자동으로 프로브하고 룰별 상한을 높입니다(더 넓은 파라미터 집합, 더 넓은 forbidden-bypass 헤더 집합, 그리고 SQL 인젝션 룰에서는 숫자 문맥의 참/거짓 쌍과 MySQL 외에 PostgreSQL·MSSQL 지연 페이로드). AGGRESSIVE는 프로젝트 스코프 안에서만 동작하므로 자동 파이프라인이 스코프를 벗어난 호스트를 건드리는 일은 없습니다. 플로우별 팝업은 직접 고른 플로우에 대한 명시적 실행이라 스코프에 포함된 호스트로 제한되지 않지만, 샌드박스와 제외 규칙은 여전히 막습니다.
 
 <figure class="tui-shot">
   <img src="/images/tui/probe.svg" alt="심각도와 범주로 묶인 패시브 이슈를 나열하는 gori Probe 스캐너: 허용적 CORS, 누락된 CSP와 HSTS, 쿠키 플래그 문제, 캐시 가능한 응답, 각각 영향받는 호스트 표시">
@@ -24,18 +24,18 @@ gori에는 수동 테스트와 나란히 돌아가는 자동 분석 기능이 �
 
 | 범주 | 다루는 내용 |
 |----------|----------------|
-| `headers` | 보안 헤더(HSTS, CSP·report-only-only, XFO, Permissions-Policy 등), 평문 Basic 인증, http://로 제출된 비밀번호 또는 http://로 제공된 로그인 폼, 혼합 콘텐츠, 캐시 가능한 API 응답, 공유 캐시가 저장할 수 있는 Set-Cookie, MIME 타입 혼동(`nosniff` 없이 스니핑 가능한 타입으로 나가는 HTML 본문, `text/html`로 제공되는 JSON), JWT 취약점(`alg:none`, 비표준 alg, `exp` 없음), `integrity` 없는 크로스 오리진 서브리소스 |
+| `headers` | 보안 헤더(HSTS, CSP·report-only-only, XFO, Permissions-Policy 등), 평문 Basic 인증, http://로 제출된 비밀번호 또는 http://로 제공된 로그인 폼, 혼합 콘텐츠, 캐시 가능한 API 응답, 공유 캐시가 저장할 수 있는 Set-Cookie, MIME 타입 혼동(`nosniff` 없이 스니핑 가능한 타입으로 나가는 HTML 본문, `text/html`로 제공되는 JSON), JWT 취약점(`alg:none`, 비표준 alg, `exp` 없음, 키 주입용 `jku`/`x5u`/`jwk` 헤더), `integrity` 없는 크로스 오리진 서브리소스 |
 | `cookies` | `Secure` / `HttpOnly` / `SameSite` 및 관련 쿠키 위생 |
 | `tech` | 기술 및 프로토콜 핑거프린트(Project 탭에도 표시) |
 | `infoleak` | 본문 노출, URL / WS 프레임의 비밀 값, GraphQL introspection, 프로덕션 스크립트에 딸려 나간 소스맵, 디렉터리 리스팅, JWT 페이로드의 민감한 클레임, 클라이언트에 노출된 설정·진단 파일(`.env`, `.git/config`, `phpinfo()`, `.htpasswd`, `wp-config` 자격증명, Spring actuator env), 프로덕션에서 닿는 프레임워크 디버그 모드와 대화형 디버거(Symfony, Werkzeug/Flask, Django, Laravel, Rails, ASP.NET), 의심되는 서브도메인 테이크오버, 응답 헤더에 적힌 내부 호스트명 또는 RFC 1918 주소, 그리고 쿠키·파라미터·hidden 필드에 실린 네이티브 직렬화 블롭(Java, .NET `BinaryFormatter`/ViewState, PHP), 즉 안전하지 않은 역직렬화 표면, 노출된 API 문서·스키마와 대화형 GraphQL IDE(Swagger UI, OpenAPI/Swagger 스펙, GraphiQL, GraphQL Playground, ReDoc), 그리고 요청 URL에 실린 알려진 프레임워크 세션 식별자 |
 | `cors` | 와일드카드 / null origin / 자격 증명 관련 오설정; `Vary: Origin` 없이 캐시된 반사 origin; 액티브 origin 반사; 모든 오리진을 허용하는 Flash/Silverlight 크로스 도메인 정책(`domain="*"`) |
 | `client` | 페이지·번들 스크립트의 클라이언트 사이드 의심 지점: DOM 기반 XSS(소스가 싱크로 흐름), DOM 클로버링, 프로토타입 오염, postMessage 취약점. 휴리스틱이므로 확인이 필요한 단서로 다루세요 |
-| `active` | light-touch 프로브로 확인됨: 반사되는 파라미터, backslash-powered 주입 지점, 오픈 리다이렉트, CRLF/응답 헤더·호스트 헤더 인젝션, 접근 제어 우회(위조된 클라이언트 IP / 경로 정규화 / URL-rewrite 헤더), NGINX alias·파라미터 경로 탐색, 서버 사이드 템플릿 인젝션(SSTI), Next.js 서버 액션 인가 누락(`Next-Action` 요청을 세션 쿠키/Authorization 제거 후 재전송. 액션은 POST라 unsafe/AGGRESSIVE 필요). 에러 기반 SQL 인젝션(쿼리 파라미터마다 구문을 깨는 페이로드를 붙이고, 깨끗한 baseline에는 없는 데이터베이스 오류 서명이 프로브 응답에만 나타나면 보고), 불리언 기반 블라인드 SQL 인젝션(파라미터마다 항상 참인 브레이크아웃과 항상 거짓인 브레이크아웃을 보내, 참 쪽은 baseline과 같고 거짓 쪽은 다르면 보고), 시간 기반 블라인드 SQL 인젝션(기본 비활성, 아래 참고), 그리고 **대역 외**로 확인하는 블라인드 SSRF. URL 파라미터를 [OAST](/ko/guide/oast/) 페이로드로 향하게 하고 서버가 콜백을 걸면 발견으로 올립니다. 블라인드 OS 커맨드 인젝션도 같은 방식으로 확인합니다. 명령/진단 파라미터(`cmd`, `ping`, `host` 등)에 셸 브레이크아웃 페이로드를 덧붙이고, 서버의 셸이 OAST 리스너에 콜백을 걸면 발견으로 올립니다. 원격 파일 포함(RFI)도 `file`, `page`, `template`, `lang` 같은 포함형 파라미터에 PHP/JSP/ASP 표식이 담긴 OAST 리소스를 주입해 같은 방식으로 확인합니다. GraphQL introspection도 액티브로 확인됩니다(`infoleak`에 기록). 접근 제어 우회는 HTTP 메서드 트릭도 다룹니다 — 기본은 메서드 대소문자 변형(`gET`), unsafe 옵트인에서 메서드 오버라이드 헤더(`X-HTTP-Method-Override`)와 대체 verb. **레이트리밋 우회**는 `429` 요청을 위조된 클라이언트 IP 헤더와 함께 재전송해, 깨끗한 control은 여전히 제한되는데 해당 요청은 처리되면 보고합니다. **안전하지 않은 HTTP 메서드**는 `OPTIONS`와 `TRACE`를 보내 Cross-Site Tracing(요청을 되비추는 TRACE)과 `Allow`에 광고된 위험 메서드를 표시합니다 |
+| `active` | light-touch 프로브로 확인됨: 반사되는 파라미터, backslash-powered 주입 지점, 오픈 리다이렉트, CRLF/응답 헤더·호스트 헤더 인젝션, 접근 제어 우회(위조된 클라이언트 IP / 경로 정규화 / URL-rewrite 헤더), NGINX alias·파라미터 경로 탐색, 서버 사이드 템플릿 인젝션(SSTI), Next.js 서버 액션 인가 누락(`Next-Action` 요청을 세션 쿠키/Authorization 제거 후 재전송. 액션은 POST라 unsafe/AGGRESSIVE 필요). 에러 기반 SQL 인젝션(파라미터마다 구문을 깨는 페이로드를 붙이고, 깨끗한 baseline에는 없는 데이터베이스 오류 서명이 프로브 응답에만 나타나면 보고), 불리언 기반 블라인드 SQL 인젝션(파라미터마다 항상 참인 브레이크아웃과 항상 거짓인 브레이크아웃을 보내, 참 쪽은 baseline과 같고 거짓 쪽은 다르면 보고), 시간 기반 블라인드 SQL 인젝션(기본 비활성, 아래 참고), 그리고 **대역 외**로 확인하는 블라인드 SSRF. URL 파라미터를 [OAST](/ko/guide/oast/) 페이로드로 향하게 하고 서버가 콜백을 걸면 발견으로 올립니다. 블라인드 OS 커맨드 인젝션도 같은 방식으로 확인합니다. 명령/진단 파라미터(`cmd`, `ping`, `host` 등)에 셸 브레이크아웃 페이로드를 덧붙이고, 서버의 셸이 OAST 리스너에 콜백을 걸면 발견으로 올립니다. 원격 파일 포함(RFI)도 `file`, `page`, `template`, `lang` 같은 포함형 파라미터에 PHP/JSP/ASP 표식이 담긴 OAST 리소스를 주입해 같은 방식으로 확인합니다. GraphQL introspection도 액티브로 확인됩니다(`infoleak`에 기록). 접근 제어 우회는 HTTP 메서드 트릭도 다룹니다 — 기본은 메서드 대소문자 변형(`gET`), unsafe 옵트인에서 메서드 오버라이드 헤더(`X-HTTP-Method-Override`)와 대체 verb. **레이트리밋 우회**는 `429` 요청을 위조된 클라이언트 IP 헤더와 함께 재전송해, 깨끗한 control은 여전히 제한되는데 해당 요청은 처리되면 보고합니다. **안전하지 않은 HTTP 메서드**는 `OPTIONS`와 `TRACE`를 보내 Cross-Site Tracing(요청을 되비추는 TRACE)과 `Allow`에 광고된 위험 메서드를 표시합니다 |
 
 일부 액티브 룰은 나머지와 다르게 동작하며, Rules 서브탭이 해당 행에 이를 표시합니다.
 
 - **HTTP 요청 스머글링**(CL.TE / TE.CL / TE.TE 디싱크)은 **비활성**으로 출하됩니다. POST 본문과 함께 불완전한 프레이밍 프로브를 보내고 프런트엔드/백엔드 디싱크를 타이밍 행으로 확인하는데, 여기 있는 어떤 룰보다 대상에게 무겁고 덜 정중한 일입니다. 행에는 `opt-in` 배지가 붙습니다. `gori run probe rules enable request_smuggling`으로 의도적으로 무장하고, 차분 확인은 `--aggressive --unsafe` 단계로 읽으세요. 활성화해도 unsafe 메서드(팝업의 옵트인, `--unsafe`, AGGRESSIVE) 없이는 프로브를 만들지 않습니다. 프로브가 모두 POST이기 때문입니다.
-- **시간 기반 블라인드 SQL 인젝션**(`sqli_time_based`)도 **비활성**으로 출하됩니다. 확인 단계마다 실제로 몇 초씩 기다리기 때문입니다. Rules 서브탭이나 `gori run probe rules enable sqli_time_based`로 켜세요.
+- **시간 기반 블라인드 SQL 인젝션**(`sqli_time_based`)도 **비활성**으로 출하됩니다. 확인 단계마다 실제로 몇 초씩 기다리기 때문입니다. Rules 서브탭이나 `gori run probe rules enable sqli_time_based`로 켜세요. 깨끗한 baseline 두 번에 이어 2초와 4초 지연을 주입하고(기본은 MySQL `SLEEP`, AGGRESSIVE에서는 `pg_sleep`과 `WAITFOR DELAY`도), 응답 시간이 요청한 지연에 비례해 늘어날 때만 보고하므로 그저 느린 엔드포인트에는 걸리지 않습니다. 두 baseline부터 신호만큼 벌어지는 엔드포인트는 측정하지 않고 건너뜁니다.
 - **대역 외 룰**(블라인드 SSRF, 블라인드 OS 커맨드 인젝션, XML 외부 엔티티, 원격 파일 포함)은 **활성이지만 작동하지 않는** 상태로 출하됩니다. 프로젝트에 등록된 OAST 리스너가 있어야만 페이로드를 찍어 보낼 수 있기 때문입니다. 이건 토글이 아니라 능력이라, 행에 `needs OAST` 배지가 붙고 리스너가 생기기 전까지는 그 요청 비용이 추정치에서 빠집니다.
 
 블라인드 SSRF는 쿼리, 폼 필드, 최상위 JSON 문자열 중 URL 형태의 첫 번째 값만 요청 1개로 검사합니다. RFI도 첫 번째 경로·URL·파일명 형태 값 또는 관습적인 포함 파라미터 하나만 검사하며, OAST URL에 PHP/JSP/ASP 표식을 담습니다. POST 등 안전하지 않은 메서드는 명시적 허용이 필요합니다. `xxe_oast`도 명시적 unsafe 허용이 필요하며, XML 외부 파라미터 엔티티 참조를 담은 요청 1개를 보내고 OAST 콜백이 도착해야 탐지합니다. 원래 문서를 유지하며, 기존 DTD가 있거나 압축·청크 전송을 사용하는 요청, 잘린 본문, 64 KiB를 넘는 본문, 지원하지 않는 인코딩은 건너뜁니다. 페이로드 목록을 순회하거나 확인용 재요청을 보내지 않습니다.
@@ -58,9 +58,13 @@ gori run probe --category cors       # a single category
 gori run probe -q 'host:example.com' # filter History with QL (Repeater still scanned)
 ```
 
+### 웹 캐시 디셉션 {#web-cache-deception}
+
+`gori run cache-deception <flow-id>…`(MCP `cache_deception_check`)는 비공개 응답이 캐시를 통해 다른 사람에게 제공될 수 있는지 확인합니다. 플로우마다 캡처된 로그인 신원 그대로 요청을 재생해 캐시를 채우고, `Cookie`와 `Authorization`을 뺀 채 같은 URL을 다시 요청하고, 그 익명 응답이 같은 내용을 캐시 히트로 받았을 때만 캐시 버스팅 쿼리를 붙인 익명 대조 요청을 보냅니다. 익명 요청이 캐시 히트로 인증된 내용을 받았고 대조 요청은 달랐다면 `cached`(디셉션 가능성이 높으니 본문이 정말 비공개였는지 확인하세요), 캐시 히트 없이 내용만 같았거나 대조 요청도 캐시 히트 없이 같았다면 `served`(공개 내용으로 보임), 응답이 비슷하기만 하거나 대조 요청도 캐시 히트였다면 `review`(버스터가 무시됐을 수 있음), 익명 요청이 인증된 응답을 받지 못했다면 `protected`입니다. `blocked`와 `errored`는 아무것도 측정하지 못했다는 뜻입니다. `--unsafe-methods`를 주지 않으면 `GET`/`HEAD`/`OPTIONS`만 확인합니다. 확인해 볼 만한 경로는 Fuzzer의 `cache-delimiters` 프리셋으로 경로를 스윕해 찾고, History는 [`cache:` QL 필드](/ko/reference/query-language/#fields)로 거르세요.
+
 ## Param Miner {#param-miner}
 
-**Miner**는 서버가 받아들이지만 드러내지 않는 파라미터를 발견합니다. 플로우를 지정하면 쿼리 문자열, 폼 본문, multipart/form-data, JSON(중첩 객체와 배열 루트 포함), 헤더, 쿠키 등 여러 위치에서 후보 이름을 프로브하고, 추측을 효율적으로 버킷으로 묶어 응답을 변화시키는 것들을 보고합니다. multipart도 대상이지만 기본은 꺼져 있습니다(캡처된 파일 파트가 요청마다 다시 전송되기 때문). `--locations multipart` 또는 해당 체크박스로 켜세요.
+**Miner**는 서버가 받아들이지만 드러내지 않는 파라미터를 발견합니다. 플로우를 지정하면 쿼리 문자열, 폼 본문, multipart/form-data, JSON(중첩 객체와 배열 루트 포함), 헤더, 쿠키 등 여러 위치에서 후보 이름을 프로브하고, 추측을 효율적으로 버킷으로 묶어 응답을 변화시키는 것들을 보고합니다. multipart도 대상이지만 기본은 꺼져 있습니다(캡처된 파일 파트가 요청마다 다시 전송되기 때문). `--locations multipart` 또는 해당 체크박스로 켜세요. 이미 아는 이름은 먼저 시험합니다. `--name`(반복 가능, MCP `mine_start`의 `names`)은 워드리스트보다 앞서 그 이름을 시험하고, Target → Params 서브탭의 `m`(**Mine parameters**)은 같은 호스트의 다른 엔드포인트에서 본 이름부터 시험하며 선택한 엔드포인트를 마이닝합니다.
 
 ```bash
 gori run mine <flow-id> \
@@ -77,13 +81,13 @@ gori run mine <flow-id> \
 
 Miner가 숨은 입력값을 찾는다면, **Discover**는 숨은 엔드포인트를 찾습니다. 링크를 따라가며 사이트를 스파이더링하고(직접 눌러보지 않은 링크까지), 링크되지 않은 디렉터리와 경로(`/admin`, `.git/config`, `/api/v2`)를 브루트포스합니다. 새로 생긴 **Target** 탭 아래 Sitemap 옆의 서브탭으로 존재하며, 찾아낸 엔드포인트는 모두 그 Sitemap으로 바로 반영됩니다.
 
-지금 있는 자리에서 바로 실행하세요. **Sitemap** 노드나 **History** 플로우에서 `Space` `>` `D`(**Send flow to…** → **Discover here**)를 누르면 됩니다. 작은 팝업에서 탐색 방식(spider, bruteforce, 또는 기본값인 둘 다), 최대 깊이, 크롤 스코프, 동시성을 선택합니다. 실행은 백그라운드에서 진행됩니다. 하단 바에서 상태를 확인하고, Discover 서브탭에서 일시중지하거나 멈추며(`^X` 중지, `p` 일시중지), 완료 알림에서 결과로 바로 이동할 수 있습니다.
+지금 있는 자리에서 바로 실행하세요. **Sitemap** 노드나 **History** 플로우에서 `Space` `>` `D`(**Send flow to…** → Sitemap에서는 **Discover here**, History에서는 **Discover from flow**)를 누르면 됩니다. 작은 팝업에서 탐색 방식(spider, bruteforce, 또는 기본값인 둘 다), 최대 깊이, 크롤 스코프, 동시성을 선택합니다. 실행은 백그라운드에서 진행됩니다. 하단 바에서 상태를 확인하고, Discover 서브탭에서 일시중지하거나 멈추며(`^X` 중지, `p` 일시중지), 완료 알림에서 결과로 바로 이동할 수 있습니다.
 
 실행 결과는 URL 목록만 남지 않습니다. 각 발견 항목은 Discover가 보낸 요청과 서버가 돌려준 응답까지 함께 저장되므로, FINDINGS 표에서 `Enter`(또는 `o`)를 누르면 History와 동일한 상세 화면에서 그 교환을 그대로 볼 수 있습니다. 헤더, 본문, JSON 정렬 보기까지 같고, 거기서 `^R`로 Repeater에 바로 보낼 수도 있습니다. 헤드리스 실행과 MCP 실행도 같은 바이트를 저장하므로 `gori run show`나 `get_flow`로도 열립니다.
 
 Discover는 실제 사이트에서 오탐/미탐을 낮추도록 설계했습니다:
 
-- **대상이 스스로 밝힌 정보를 읽습니다.** 매 실행마다 origin의 알려진 문서를 가져옵니다. `robots.txt`, `sitemap.xml`, `sitemap_index.xml`에 더해 `.well-known/` 레지스트리(`openid-configuration`, `oauth-authorization-server`, `oauth-protected-resource`, `security.txt`, `apple-app-site-association`, `assetlinks.json`, `host-meta`, `change-password`), 그리고 API가 스스로를 기술한 문서(`openapi.json`, `swagger/v1/swagger.json`, `v3/api-docs`, `v2/api-docs`)까지 읽고, 거기에 선언된 엔드포인트를 크롤합니다. OIDC 디스커버리 문서 하나만으로도 authorize, token, userinfo, JWKS, revocation, registration 엔드포인트가 통째로 나오고, OpenAPI 문서 하나면 인증 뒤에 있는 것까지 포함해 서비스가 노출하는 라우트가 전부 나옵니다. 이들은 고정 경로에 대한 추측이므로, 워드리스트 히트와 똑같이 soft-404 기준선을 통과해야 인정됩니다.
+- **대상이 스스로 밝힌 정보를 읽습니다.** spider를 켠 실행마다 origin의 알려진 문서를 가져옵니다. `robots.txt`, `sitemap.xml`, `sitemap_index.xml`에 더해 `.well-known/` 레지스트리(`openid-configuration`, `oauth-authorization-server`, `oauth-protected-resource`, `security.txt`, `apple-app-site-association`, `assetlinks.json`, `host-meta`, `change-password`), 그리고 API가 스스로를 기술한 문서(`openapi.json`, `swagger/v1/swagger.json`, `v3/api-docs`, `v2/api-docs`)까지 읽고, 거기에 선언된 엔드포인트를 크롤합니다. OIDC 디스커버리 문서 하나만으로도 authorize, token, userinfo, JWKS, revocation, registration 엔드포인트가 통째로 나오고, OpenAPI 문서 하나면 인증 뒤에 있는 것까지 포함해 서비스가 노출하는 라우트가 전부 나옵니다. 이들은 고정 경로에 대한 추측이므로, 워드리스트 히트와 똑같이 soft-404 기준선을 통과해야 인정됩니다.
 - **JavaScript를 읽습니다.** 스파이더는 `<script src>`도 다른 링크처럼 따라가는데, 이제 받아온 번들을 파싱합니다. 따옴표로 감싼 루트 상대 경로와 절대 URL이 크롤 대상이 됩니다. SPA에서는 API 라우트가 JS에서만 도달 가능하고 구조상 링크되지 않으므로, 예전에는 스파이더와 브루트포서 양쪽 모두가 통째로 놓치던 표면입니다. 같은 패스가 인라인 `<script>` 블록, JSON 응답, 소스맵에도 적용됩니다.
 - **브루트포서가 찾아낸 것도 읽습니다.** 워드리스트 히트의 바디도 엔드포인트를 뽑아냅니다. `swagger.json`이나 자동 인덱스 페이지를 찾으면 행 하나로 끝나지 않고 거기서 크롤이 시작됩니다. 읽는 건 히트뿐이라, 스윕이 보내는 수천 건의 soft-404는 비용이 들지 않습니다.
 - **응답 헤더도 읽습니다.** `Link`(페이지네이션 API가 다음 페이지를 알리는 유일한 자리), `Content-Location`, `Refresh`, 그리고 `Set-Cookie`가 스스로 범위를 좁힌 `Path` — 애플리케이션이 자기가 어느 하위 트리에 마운트돼 있는지 말해주는 값이며, 링크되지 않은 디렉터리를 찾는 이 엔진이 바로 그런 걸 위해 있습니다.
@@ -92,7 +96,7 @@ Discover는 실제 사이트에서 오탐/미탐을 낮추도록 설계했습니
 - **대상이 태도를 바꾸면 기준선을 다시 잽니다.** 기준선은 디렉터리당 한 번만 측정하는데, 스윕 도중에 rate limiter가 걸리거나 WAF 차단 페이지가 나오거나 서버가 `5xx`로 주저앉으면 남은 프로브가 전부 "발견"처럼 보입니다. 자동 스윕이 똑같은 차단 페이지를 수백 개의 확신에 찬 결과로 쏟아내는 전형적인 경로입니다. Discover는 기준선을 통과하면서 *서로 똑같기까지 한* 응답이 연달아 나오는지 지켜보다가, 그 결과들을 내보내지 않고 붙들어 둔 뒤 해당 디렉터리를 다시 측정합니다. 버린 개수는 실행 요약에 `drift`로 보고하므로, 측정되지 못한 디렉터리가 비어 있던 디렉터리처럼 읽히지 않습니다.
 - **폭주하지 않는 크롤.** 두 개의 독립적인 가드가 크롤 폭발을 막습니다. URL 형태 접기가 `/user/1`, `/user/2`, `/user/3`…을 하나의 템플릿으로 모으고, 콘텐츠 지문이 거의 동일한 목록 페이지를 하나의 클러스터로 모읍니다. 깊이 제한, 페이지 제한, 하드 요청 예산이 나머지를 묶어줍니다.
 - **기본은 Scope 연동.** 실행은 Scope include 규칙을 설정하지 않은 한 시드 origin에 머물고, 설정했다면 그 규칙을 따릅니다. Scope exclude와 sandbox는 항상 존중됩니다. 호스트가 아닌 경로에서 실행하면 그 하위로 범위를 좁힙니다.
-- **그림은 내려받지 않습니다.** 페이지 하나가 이미지·폰트·트랙·아카이브를 수십 개씩 이름 붙이는데, 어떤 추출기도 읽을 수 없는 바이트를 위해 각각 요청 하나와 바디 전체 다운로드를 치렀고, 크롤의 페이지 예산까지 썼습니다. 이제는 그 *디렉터리*만 기록하고(`/uploads/photo.jpg`가 링크됐으니 `/uploads/`는 그대로 스윕합니다) 다운로드는 건너뛰며, 건너뛴 개수를 실행 요약에 `assets`로 보고합니다. `--assets`, `crawl_assets: true`, **fetch images/fonts/media** 체크박스로 다시 켭니다.
+- **그림은 내려받지 않습니다.** 페이지 하나가 이미지·폰트·트랙·아카이브를 수십 개씩 이름 붙이는데, 어떤 추출기도 읽을 수 없는 바이트를 위해 각각 요청 하나와 바디 전체 다운로드를 치렀고, 크롤의 페이지 예산까지 썼습니다. 이제는 그 *디렉터리*만 기록하고(`/uploads/photo.jpg`가 링크됐으니 `/uploads/`는 그대로 스윕합니다) 다운로드는 건너뛰며, 건너뛴 개수를 헤드리스 실행 요약에 `assets`로(MCP에서는 `assets_skipped`로) 보고합니다. `--assets`, `crawl_assets: true`, **fetch images/fonts/media** 체크박스로 다시 켭니다.
 - **연결 재사용.** 브루트포스는 디렉터리마다 워드리스트 항목 수만큼 요청을 보내는데, 예전에는 그 하나하나가 자기 TCP 핸드셰이크(https라면 TLS까지)를 치렀습니다. 이제 origin별로 keep-alive 연결을 유지하므로 워커마다 한 번만 치릅니다. 대상이 연결 단위로 동작한다면(연결 범위 rate limit, 연결로 고정하는 로드 밸런서) **reuse connections** 체크박스, `--no-keep-alive`, `keep_alive: false`로 끕니다.
 
 각 실행은 FP/FN 수치를 보고합니다. 캘리브레이터가 억제한 프로브 수, 트랩 가드가 잘라낸 탐색량, 그리고 남긴 결과의 신뢰도 분포입니다.
@@ -121,7 +125,7 @@ gori run issues --format sarif --export issues.sarif   # GitHub code scanning / 
 
 TUI에서는 `⇧E`가 형식을 먼저, 저장 경로를 그 다음에 묻습니다. SARIF result가 무엇을 담는지는 [리포트 내보내기](/ko/playbooks/triage-and-report/#5-export-the-report)를 참고하세요.
 
-`⇧X`(또는 `Space` → `X`)는 탭을 비웁니다. 프로젝트의 모든 이슈를 노트·CVSS 점수·증거 링크까지 함께. 먼저 확인을 묻고 총 개수를 밝히며, 그 개수는 필터가 보여주는 행도 표시(mark)한 집합도 아닌 **프로젝트 전체**입니다. `⇧X`는 History·Probe·Authorize·ACTIVITY 피드가 각자의 탭에서 답하는 그 clear-all 키와 같습니다.
+`⇧X`(또는 `Space` → `X`)는 탭을 비웁니다. 프로젝트의 모든 이슈를 노트·CVSS 점수·관련 링크까지 함께 지웁니다(동결된 복사본은 Evidence 보관소에 남습니다). 먼저 확인을 묻고 총 개수를 밝히며, 그 개수는 필터가 보여주는 행도 표시(mark)한 집합도 아닌 **프로젝트 전체**입니다. 그래서 둘 다 무시하는 유일한 이슈 키입니다. `⇧X`는 History·Probe·Authorize·ACTIVITY 피드가 각자의 탭에서 답하는 그 clear-all 키와 같습니다.
 
 ### 이슈 표시하기 (다중 선택) {#marking-issues-multi-select}
 
@@ -133,12 +137,12 @@ History와 같은 방식으로 표시합니다. `t`를 누르면 커서의 이�
 
 > 실제 대상은 **표시가 있으면 표시된 항목 전부, 없으면 커서 행**입니다.
 
-그래서 `/ status:open severity:low` → `Shift-T` → `Space` → `C` → **False positive**로 한 번에 전체를 재분류할 수 있습니다. 메뉴 제목은 `SPACE · 3 MARKED`로 바뀌고 항목 이름도 함께 바뀌므로(`Delete 3 issues`), 일괄 작업이 예상 밖으로 일어나지 않습니다.
+그래서 `/ status:open severity:low` → `Shift-T` → `Space` → `C` → `false-positive`로 한 번에 전체를 재분류할 수 있습니다. 메뉴 제목은 `SPACE · 3 MARKED`로 바뀌고 항목 이름도 함께 바뀌므로(`Delete 3 issues`), 일괄 작업이 예상 밖으로 일어나지 않습니다.
 
 | 동작 | 키 | 표시된 항목에 대해 |
 |--------|-----|-----------|
 | 심각도 설정 | `Space` `s` | 한 번 고르면 표시된 모든 이슈에 기록 |
-| 상태 설정 | `Space` `C` | 한 번 고르면 끝. false positive / resolved 일괄 처리 |
+| 상태 설정 | `Space` `C` | 한 번 고르면 끝. `false-positive` / `resolved` 일괄 처리 |
 | 삭제 | `Space` `d` | 전체 집합에 확인 창 하나 |
 
 표시는 필터 변경, 재정렬(직접 바꾼 심각도로 인한 재정렬 포함), 탭을 떠났다 돌아오는 동안에도 유지됩니다. 카운트 칩이 지금 화면 밖에 몇 개가 있는지 알려줍니다. 이슈를 열면 동작은 그 이슈 하나에 고정됩니다. 표시는 목록 차원의 개념입니다. 익스포트는 항상 **전체** 리포트를 쓰므로, 표시가 있을 때 메뉴 항목에 `(all)`이 붙습니다.
@@ -170,7 +174,7 @@ History와 같은 방식으로 표시합니다. `t`를 누르면 커서의 이�
 
 ## Diff: 지난번 대비 뭐가 바뀌었나 {#diff-retest}
 
-Comparer는 **메시지 두 개**를 비교합니다. 리테스트는 같은 질문을 한 단계 위에서 던집니다. *지난 엔게이지먼트 이후 뭐가 바뀌었나*, 그게 **Target** 아래 **Diff** 서브탭입니다. 폴딩을 그대로 빌려 쓰는 Sitemap 바로 옆에 있습니다.
+Comparer는 **메시지 두 개**를 비교합니다. 리테스트는 같은 질문을 한 단계 위에서 던집니다. *지난 엔게이지먼트 이후 뭐가 바뀌었나*, 그게 **Target** 아래 **Diff** 서브탭이며, Sitemap의 폴딩을 그대로 빌려 씁니다.
 
 슬롯에는 플로우가 아니라 **프로젝트**가 들어갑니다. `a`로 기준(이전 엔게이지먼트)을 고르고, `b`는 지금 열어 둔 프로젝트가 기본값이며, `w`로 교환하고 `Ctrl-R`로 다시 읽습니다. 아무것도 보내지 않습니다. 양쪽 모두 캡처된 트래픽입니다. 행은 엔드포인트이고, `↵`(또는 `→`)를 누르면 선택한 엔드포인트의 **양쪽** 캡처가 Comparer로 넘어가 바이트 단위 답을 보여줍니다.
 
@@ -188,7 +192,7 @@ Comparer는 **메시지 두 개**를 비교합니다. 리테스트는 같은 질
 
 리테스트가 얕으면 방문한 엔드포인트도 적어집니다. "안 가봤다"를 "사라졌다"로 뭉뚱그리면 짧은 오후 작업이 대규모 수정처럼 보고되므로, 둘은 서로 다른 판정이고 그 단서는 스크롤로 사라지지 않는 헤더에 붙어 있습니다. 양쪽의 플로우·엔드포인트·호스트 수가 숫자 옆에 함께 나오는 것도 같은 이유입니다.
 
-`changed` 판정은 바이트 동일성이 아니라 허용 밴드로 내립니다. Repeater의 minimize와 Miner가 쓰는 바로 그 캘리브레이션입니다. 그래서 캡처 사이에 길이가 흔들리는 페이지는 변화 없음으로 읽힙니다. 상태 코드는 **클래스**로 비교하므로 `200` → `201`은 발견이 아니고 `200` → `403`은 발견이며, 후자는 별도의 `auth` 축으로 보고됩니다.
+`changed` 판정은 바이트 동일성이 아니라 허용 밴드로 내립니다. Repeater의 minimize와 Miner가 쓰는 바로 그 캘리브레이션입니다. 그래서 캡처 사이에 길이가 흔들리는 페이지는 변화 없음으로 읽힙니다. 상태 코드는 **클래스**로 비교하므로 `200` → `201`은 발견이 아니고 `200` → `403`은 발견이며, 후자는 상태 변화보다 앞서 `auth` 축이 짚어 줍니다.
 
 `v`는 판정 렌즈를 순환시킵니다. 렌즈가 무엇을 보여주든 개수는 항상 다섯 판정 전부를 덮습니다. 헤드리스로는 [`gori run diff`](/ko/reference/cli/#run-diff)이고(`--format md`면 산출물에 그대로 붙여 넣을 섹션이 나옵니다), MCP로는 `diff_projects`입니다.
 
@@ -216,13 +220,13 @@ Comparer는 **메시지 두 개**를 비교합니다. 리테스트는 같은 질
 
 첫 스냅숏을 만든 뒤에는 탭 설정에서 선택형 **Evidence** 탭을 켤 수 있습니다. 이 탭은 프로젝트 전체 보관함이며 `issue:`, `host:`, `method:`, `status:`, `confirmation:`, `source:`, `date:`로 필터링할 수 있습니다. 연결된 Issue나 아직 남아 있는 History/Repeater 원본을 열 수 있고, 스냅숏 두 개에서 `c`를 눌러 수정 전·후 쌍을 Comparer로 보낼 수 있습니다. 복사와 JSON 내보내기는 프로젝트의 본문 마스킹 정책을 따릅니다. `r`은 동결된 요청을 새 Repeater 탭으로 복제하지만 전송하지 않습니다. Issue 링크는 다대다이며 바이트와 별개로 바꿀 수 있습니다. 마지막 링크를 끊거나 Issue를 삭제해도 스냅숏은 고아 상태로 보관함에 남습니다. 스냅숏 자체를 지울 때는 영향을 받는 모든 Issue 링크를 확인 창에 표시합니다. 헤드리스에서는 Issue를 지정하지 않은 `gori run evidence`와 MCP `list_evidence`가 같은 보관함을 고아까지 포함해 보여 줍니다.
 
-각 스냅숏에는 저장된 요청과 응답의 SHA-256이 있습니다. 보존 정리나 재전송으로 바뀌지 않으며, 스냅숏 자체를 명시적으로 삭제해야만 사라집니다. 한 번도 보내지 않은 Repeater 탭과 응답이 아직 도착하지 않은 플로우는 동결할 수 없습니다. 1 MB를 넘는 복사본은 먼저 바이트 비용을 보여 주고, 프로젝트의 증거 총량은 256 MB로 제한됩니다. Repeater 복사본은 탭에 *저장된* 요청(바인딩을 펼치지 않은 상태)과 저장소의 마지막 성공 응답을 짝지으므로 둘이 일치하는 전송 직후에 동결하세요. WebSocket 복사본에는 핸드셰이크만 들어가며 프레임 기록은 포함되지 않습니다. History 상세의 통계 줄과 Repeater의 RESPONSE 테두리에 표시되는 `frozen ×N`은 복사본 개수일 뿐입니다. 원본 탭은 계속 편집하고 전송할 수 있습니다.
+각 스냅숏에는 저장된 요청과 응답의 SHA-256이 있습니다. 보존 정리나 재전송으로 바뀌지 않으며, 스냅숏 자체를 명시적으로 삭제해야만 사라집니다. 한 번도 보내지 않은 Repeater 탭과 응답이 아직 도착하지 않은 플로우는 동결할 수 없습니다. 1 MB를 넘는 복사본은 먼저 바이트 비용을 보여 주고, 프로젝트의 증거 총량은 256 MB로 제한됩니다. Repeater 복사본은 탭에 *저장된* 요청(바인딩을 펼치지 않은 상태)과 저장소의 마지막 성공 응답을 짝지으므로 둘이 일치하는 전송 직후에 동결하세요. WebSocket 복사본에는 핸드셰이크만 들어가며 프레임 기록은 포함되지 않습니다. History 상세의 통계 줄과 Repeater의 RESPONSE 테두리에 표시되는 `frozen ×N`은 복사본 개수일 뿐입니다. 원본은 계속 편집할 수 있고, 다음 전송이 그 응답을 바꿀 수도 있습니다.
 
 ### Retest: 결함이 들고 다니는 검사 {#retest-the-check-a-finding-carries}
 
 동결된 증거가 결함을 증명한 것을 보관한다면, **리테스트**는 그것을 다시 실행합니다. Issue에 붙는 작은 순서 목록으로, 각 단계는 Repeater 전송 하나와 역할 하나, 그리고 기대 결과 하나를 갖습니다. "먼저 #4로 로그인하고, #5가 403을 주어야 하고, #6이 대조군"이라고 적어 두던 그 서술입니다.
 
-평소처럼 Repeater 세션들을 Issue에 링크한 뒤, Issue 상세에서 `⇧R`(**Retest…**)을 누릅니다. `a`로 세션을 고르고 **역할**(`setup`은 전제를 만들고, `baseline`은 본문 비교의 기준, `variant`는 검사 대상, `control`은 대조군, `cleanup`은 되돌리기), 그리고 기대 결과 하나를 정합니다: 상태(`status:403`, `status:2xx`, `status:200-299`), JSON 필드(`json:data.role=admin`, `json-absent:data.token`), 또는 기준과의 비교(`body:same`, `body:diff`). 비워 두면 결과만 기록하고 아무것도 단언하지 않습니다 — 로그인 단계나 cleanup이 원하는 동작입니다. `⇧J` / `⇧K`로 순서를 바꾸고, `e`로 수정, `d`로 삭제, `r`로 실행합니다. `⇧R`은 전송이 거부된 뒤에도 cleanup 단계를 보내도록 허용하며 실행합니다.
+Issue 상세에서 `⇧R`(**Retest…**)을 누릅니다. `a`로 아무 Repeater 세션이나 고르고(이슈에 링크돼 있지 않아도 됩니다) **역할**(`setup`은 전제를 만들고, `baseline`은 본문 비교의 기준, `variant`는 검사 대상, `control`은 대조군, `cleanup`은 되돌리기), 그리고 기대 결과 하나를 정합니다: 상태(`status:403`, `status:2xx`, `status:200-299`), JSON 필드(`json:data.role=admin`, `json-absent:data.token`), 또는 기준과의 비교(`body:same`, `body:diff`). JSON 경로는 `--jsonpath`와 세션 바인딩이 읽는 방식 그대로 읽으며(`data.role`, `$.items[0].id`, `items.0`, `["a.b"]`), gori가 읽을 수 없는 경로(`..`, `*`, 필터, 닫히지 않은 괄호)는 저장해 두었다가 나중에 없는 필드로 읽는 대신(그러면 `json-absent:`가 통과로 보고합니다) 단계를 추가할 때 거부합니다. 비워 두면 결과만 기록하고 아무것도 단언하지 않습니다 — 로그인 단계나 cleanup이 원하는 동작입니다. `⇧J` / `⇧K`로 순서를 바꾸고, `e`로 수정, `d`로 삭제, `r`로 실행합니다. `⇧R`은 전송이 거부된 뒤에도 cleanup 단계를 보내도록 허용하며 실행합니다.
 
 `↹`는 카드를 계획과 마지막 실행 결과 표 사이에서 전환합니다. 표에는 역할, 세션, 기대 결과, 실제 결과, 단계별 통과/실패가 있습니다. 결과 행에서 `↵`를 누르면 **그 단계의 전송이 기록한** History 플로우가 열립니다. 리테스트는 탭에 저장된 응답을 덮어쓰지 않으므로, 탭이 한참 뒤에 바뀌어도 그 행이 보고한 바로 그 응답을 계속 열 수 있습니다. Issue 상세에는 리테스트가 있을 때만 한 줄 요약(`retest 3 steps · last FAIL …`)이 표시되고, 없으면 아무 줄도 차지하지 않습니다.
 

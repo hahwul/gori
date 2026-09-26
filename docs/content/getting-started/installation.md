@@ -1,6 +1,6 @@
 +++
 title = "Installation"
-description = "Install gori via curl, Homebrew, the AUR, Nix, Docker, a pre-built binary, or from source."
+description = "Install gori via curl, Homebrew, the AUR, Snap, Nix, Docker, a pre-built binary, or from source."
 weight = 10
 +++
 
@@ -77,6 +77,16 @@ yay -S gori
 # or
 paru -S gori
 ```
+
+## Snap
+
+A strictly confined snap is published to the Snap Store with every release, for **Linux x86_64**:
+
+```bash
+sudo snap install gori
+```
+
+Strict confinement keeps the snap out of hidden directories in your home, so its `GORI_HOME` (settings, root CA, project databases) is `~/snap/gori/common` rather than `~/.gori`. `gori update` recognises a snap install and prints `snap refresh gori` (`gori update --exec` runs it when a `snap` command is on `PATH`).
 
 ## Nix
 

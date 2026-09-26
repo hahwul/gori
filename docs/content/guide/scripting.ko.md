@@ -17,7 +17,7 @@ gori run <subcommand> [verb] [options]
 
 전체 서브커맨드 목록은 `gori run -h`로, 모든 플래그는 [CLI 레퍼런스](/ko/reference/cli/)에서 확인하세요.
 
-## 프로젝트 선택
+## 프로젝트 선택 {#choosing-a-project}
 
 각 프로젝트는 자체 SQLite 데이터베이스입니다. 읽기 서브커맨드는 다음 순서로 하나를 고릅니다.
 
@@ -36,14 +36,14 @@ gori run <subcommand> [verb] [options]
 
 읽기 서브커맨드는 스토어를 읽기 전용으로 열고 캡처 락을 잡지 않으므로, 라이브 TUI가 캡처 중인 프로젝트를 대상으로 실행해도 안전합니다. SQLite WAL이 읽는 쪽과 쓰는 쪽을 함께 감당합니다. `body:` 질의는 예외입니다. 검색 인덱스를 비우므로 쓰기입니다.
 
-쓰기 서브커맨드는 TUI·MCP와 같은 WAL 데이터베이스를 사용하며 Store의 writer를 통해 직렬화됩니다. TUI가 열려 있어도 실행할 수 있지만, 캡처 커밋이 SQLite writer 슬롯을 잠시 점유할 수 있습니다. 짧게 끝나는 서브커맨드의 SQLite 열기·쓰기 대기는 최대 1초입니다. 슬롯이 계속 사용 중이면 다른 gori가 프로젝트를 잠그고 있다는 안내(재시도하거나 읽기 전용 서브커맨드로 읽기)를 출력하고 0이 아닌 종료 코드로 끝납니다. 실행 내내 프로젝트를 열어 두는 서브커맨드(`discover`, `fuzz`, `import`, `probe`, `retest run`, `oast listen`/`resume`, `intercept`)는 TUI 캡처 writer와 같은 기본 5초 대기를 유지합니다. repeater send는 응답이 이미 origin에 도달했다면 저장에 실패해도 종료 코드 0을 유지하되, STDERR 경고와 함께 `--format json`의 `response_saved` / `history_saved` 필드로 어느 쓰기가 실패했는지 알립니다.
+쓰기 서브커맨드는 TUI·MCP와 같은 WAL 데이터베이스를 사용하며 Store의 writer를 통해 직렬화됩니다. TUI가 열려 있어도 실행할 수 있지만, 캡처 커밋이 SQLite writer 슬롯을 잠시 점유할 수 있습니다. 짧게 끝나는 서브커맨드의 SQLite 열기·쓰기 대기는 최대 1초입니다. 슬롯이 계속 사용 중이면 다른 gori가 프로젝트를 잠그고 있다는 안내(재시도하거나 읽기 전용 서브커맨드로 읽기)를 출력하고 0이 아닌 종료 코드로 끝납니다. 실행 내내 프로젝트를 열어 두는 서브커맨드(`discover`, `fuzz`, `import`, `probe`, `retest run`, `oast listen`/`resume`, `intercept`)는 TUI 캡처 writer와 같은 기본 5초 대기를 유지합니다. 이미 네트워크로 나간 repeater send는 응답이나 History 쓰기를 저장하지 못해도 완료된 전송 결과를 그대로 유지합니다. STDERR에 경고를 출력하고, `--format json`에는 `response_saved` / `history_saved`가 그 이유와 함께 실리므로, 스크립트는 그 쓰기 실패 하나 때문에 범용 셸 재시도로 요청을 다시 보내지 않고도 이를 구분할 수 있습니다.
 
 ```bash
 gori run history --project my-engagement -q 'status:5xx'
 gori run issues --db /path/to/project.db --format json
 ```
 
-## 스크립팅 계약
+## 스크립팅 계약 {#the-scripting-contract}
 
 `gori run`이 뱉는 JSON은 눈으로 보라고 만든 게 아니라 파싱하라고 만든, 안정적이고 문서화된 형태입니다. 다음 네 가지 규칙이 파이프를 깔끔하게 유지합니다.
 
@@ -54,7 +54,7 @@ gori run issues --db /path/to/project.db --format json
 | 서브커맨드 | `--format json` | `--format jsonl` |
 |-----------|-----------------|------------------|
 | `capture`, `history` | 한 줄에 JSON 객체 하나 | `json`의 별칭, 출력 동일 |
-| `fuzz`, `mine`, `discover`, `authorize` | 버퍼링 후 마지막에 JSON 배열 하나 | 결과가 나올 때마다 한 줄씩 |
+| `fuzz`, `mine`, `discover`, `authorize`, `cache-deception` | 버퍼링 후 마지막에 JSON 배열 하나 | 결과가 나올 때마다 한 줄씩 |
 | `sequence` | 보고서 하나 | 샘플이 나올 때마다 한 줄씩, 마지막에 보고서 |
 
 긴 스윕을 진행 중에 소비하려면 `jsonl`을, 끝에 문서 하나를 받으려면 `json`을 씁니다.
@@ -90,13 +90,13 @@ rule=$(gori run project scope add --pattern=api.example.com --format json | jq .
 for p in /api/v1/items/{1..38}; do gori run send "https://api.example.com$p" --headers-only; done
 ```
 
-## 스코프 지키기
+## 스코프 지키기 {#staying-in-scope}
 
 소켓을 여는 모든 액티브 서브커맨드는 TUI와 MCP가 쓰는 것과 같은 아웃바운드 게이트를 지납니다. 스코프 규칙이 있는 프로젝트는 그 밖의 대상을 거부하며, `--allow-unscoped`가 의도적인 예외 선언입니다. 샌드박스와 명시적 제외 규칙은 이 플래그와 무관하게 항상 적용됩니다.
 
 `--request`나 STDIN으로 원시 요청을 퍼징하면서 `--project`/`--db`를 주지 않으면 참조할 스코프 자체가 없습니다. 이때 gori는 검사한 척하지 않고 STDERR에 명시적인 unscoped 경고를 출력합니다.
 
-## 인증이 필요한 스윕
+## 인증이 필요한 스윕 {#authenticated-sweeps}
 
 세션 바인딩(`$BIND.SESSION` 같은 것들)은 그것을 관측한 gori 프로세스의 메모리에만 존재하며, 절대 저장되지 않습니다. 복원된 토큰은 이미 낡은 것이기 때문입니다. TUI에서는 한 프로세스가 전송과 뒤이은 스윕을 모두 쥐고 있으니 문제가 없지만, `gori run`은 프로세스마다 한 번만 실행됩니다.
 
@@ -108,7 +108,7 @@ gori run fuzz 42 --bind-from 41 --wordlist ids.txt
 
 바인딩을 정의하는 추출 규칙은 [세션 바인딩](/ko/guide/proxy/#session-bindings)을 참고하세요.
 
-## 프로세스 훅
+## 프로세스 훅 {#process-hooks}
 
 gori에는 플러그인 SDK가 없고 앞으로도 없습니다. 변환을 *계산*해야 할 때(JWT 재서명, 바디
 재압축, 독자 포맷 봉투 복호화, 진짜 탐지기 실행) 이미 가지고 있는 프로그램에 바이트를 넘기면
@@ -200,7 +200,7 @@ Rewriter 룰과 같은 신뢰 수준입니다. gori가 훅을 스스로 만들�
 결정이니 명령을 먼저 읽으세요. 그 플래그가 확인 절차이고, 대화형 프롬프트가 없으므로 스크립트에서도
 그대로 답할 수 있습니다.
 
-## 무엇을 쓸까
+## 무엇을 쓸까 {#what-to-reach-for}
 
 | 할 일 | 서브커맨드 |
 |-------|-----------|
@@ -215,7 +215,7 @@ Rewriter 룰과 같은 신뢰 수준입니다. gori가 훅을 스스로 만들�
 | 프로젝트 없이 순수 계산 | `decoder`, `jwt`, `cookie` |
 | 프로젝트·스코프·env·네트워크·규칙 관리 | `project`, `rewriter`, `colormarker` |
 
-## 다음 단계
+## 다음 단계 {#next-steps}
 
 - [CLI 레퍼런스](/ko/reference/cli/): 모든 서브커맨드와 플래그
 - [쿼리 언어](/ko/reference/query-language/): `-q`가 받는 필터 문법

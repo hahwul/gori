@@ -237,7 +237,7 @@ gori가 `succeeded`로 답하기 전에 두 가지를 검사하고, 각각 연�
 
 `network.upstream_proxy`는 catch-all 경로입니다. `host:port`와 `http://…`는 평문 HTTP CONNECT 프록시를 사용합니다(기본 포트 `8080`). `http+tls://…`는 같은 CONNECT 프로토콜을 쓰지만 프록시까지의 홉을 TLS로 감쌉니다(기본 포트 `443`). `socks5://…`는 대상 이름을 **로컬에서** 해석해 주소 리터럴을 보내고, `socks5h://…`는 호스트 이름을 `ATYP DOMAIN`으로 보내 **프록시가** 해석합니다. 두 SOCKS 형식 모두 기본 포트는 1080입니다. URI 자격증명은 거부됩니다. Project 탭에서 직접 자격증명을 설정하거나 `username`과 `password_env`를 가진 `upstream_rules` 항목을 사용하세요.
 
-이 스칼라가 비어 있으면 gori는 dial 시점에 프로세스 환경을 확인합니다. HTTP origin은 `HTTP_PROXY`, `ALL_PROXY` 순서로, HTTPS origin은 `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY` 순서로 선택합니다. 대문자 이름을 우선하고 소문자 표기도 지원합니다. `NO_PROXY` / `no_proxy`는 `*`, 호스트·도메인, 대괄호로 감싼 IPv6 리터럴, 선택적인 포트, IPv4/IPv6 CIDR 블록(`10.0.0.0/8,fd00::/8`, 주소 리터럴 목적지에 대해 판정)을 지원하며 일치하면 직접 연결합니다. `localhost`와 루프백 주소는 `NO_PROXY`와 무관하게 항상 직접 연결합니다 — TLS passthrough와 CONNECT 터널을 포함한 모든 dial에서 그렇고, 이 예외는 목적지 기준이므로 프록시 자체가 `127.0.0.1`에 있어도 원격 목적지에는 그 프록시를 씁니다. 명시적인 프로젝트 업스트림, 일치하는 규칙(`direct` 포함), 또는 비어 있지 않은 스칼라가 환경변수보다 우선합니다. 환경변수 convention에서 `http://`는 평문 HTTP CONNECT 프록시(포트를 생략하면 스칼라의 8080이 아니라 80), `https://`는 프록시까지 TLS를 의미하지만, 저장된 `network.upstream_proxy`의 `https://`는 기존 호환성을 위해 평문 의미를 유지합니다.
+이 스칼라가 비어 있으면 gori는 dial 시점에 프로세스 환경을 확인합니다. HTTP origin은 `HTTP_PROXY`, `ALL_PROXY` 순서로, HTTPS origin은 `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY` 순서로 선택합니다. 대문자 이름을 우선하고 소문자 표기도 지원합니다. `NO_PROXY` / `no_proxy`는 `*`, 호스트·도메인, 대괄호로 감싼 IPv6 리터럴, 선택적인 포트, IPv4/IPv6 CIDR 블록(`10.0.0.0/8,fd00::/8`, 주소 리터럴 목적지에 대해 판정)을 지원하며 일치하면 직접 연결합니다. `localhost`와 루프백 주소는 `NO_PROXY`와 무관하게 항상 직접 연결합니다 — TLS passthrough와 CONNECT 터널을 포함한 모든 dial에서 그렇고, 이 예외는 목적지 기준이므로 프록시 자체가 `127.0.0.1`에 있어도 원격 목적지에는 그 프록시를 씁니다. 미지정 주소 `0.0.0.0`과 `::`도 여기서는 루프백으로 취급하며, 시스템 리졸버가 받아들이는 숫자 IPv4 표기(`127.1`, `0x7f.0.0.1`, `2130706433`)도 마찬가지입니다. 루프백 판정과 CIDR 항목은 이런 목적지를 리졸버가 해석하는 점 표기 주소로 읽고, dial과 `CONNECT` 라인은 보낸 표기를 그대로 유지합니다. [gori 셸](/ko/reference/cli/#run-shell) 안에서는 그 셸이 내보낸 프록시 변수(셸을 띄운 gori를 가리키는 값)를 건너뛰고, 셸이 대체한 원래 값(사내 `HTTPS_PROXY`와 그 `NO_PROXY`)을 대신 읽습니다. 그래서 그 안에서 시작한 gori가 부모 gori를 거쳐 요청을 이중으로 보내지 않습니다. 명시적인 프로젝트 업스트림, 일치하는 규칙(`direct` 포함), 또는 비어 있지 않은 스칼라가 환경변수보다 우선합니다. 환경변수 convention에서 `http://`는 평문 HTTP CONNECT 프록시(포트를 생략하면 스칼라의 8080이 아니라 80), `https://`는 프록시까지 TLS를 의미하지만, 저장된 `network.upstream_proxy`의 `https://`는 기존 호환성을 위해 평문 의미를 유지합니다.
 
 #### `https://`는 TLS가 아니라 평문 프록시입니다
 
@@ -540,6 +540,8 @@ Preferences → **Network & Tabs** → **Network** → **Hostname overrides**에
 | `prefix` | string | `"$"` | 토큰을 여는 시길 (`$ENV.KEY`), 두 문법 모두에서 |
 | `vars` | array | `[]` | 전역 키/값 쌍; 프로젝트 변수(Project 탭 → ENV)가 충돌 시 우선 |
 
+실행 중인 TUI나 `gori mcp` 서버는 다른 프로세스가 파일을 바꾸면 `vars`와 `prefix`를 다시 읽습니다. 그래서 다른 곳에서 교체하거나 삭제한 토큰은 재시작 없이 더 이상 나가지 않습니다.
+
 [환경 변수](/ko/guide/repeater-and-fuzzer/#environment-variables)를 참고하세요.
 
 ### user_agents {#user-agents}
@@ -555,7 +557,7 @@ Preferences → **Network & Tabs** → **Network** → **Hostname overrides**에
 }
 ```
 
-각 항목은 헤더에 그대로 들어가므로, 비어 있거나 제어 문자·보이지 않는 서식 문자가 들어 있는 항목은 불러올 때 경고와 함께 버려집니다. `$GEN.USER_AGENT_CHROME` / `_FIREFOX` / `_SAFARI`는 목록에서 해당 브라우저의 줄(`Chrome/`, `Firefox/`, 또는 둘 다 없는 `Safari/`)을 쓰고, 그런 줄이 없으면 내장 패밀리를 씁니다. Preferences → **Editor & Keys** → **User-Agents** 또는 [`gori settings user-agents`](/ko/reference/cli/#user-agents)로 편집합니다.
+각 항목은 헤더에 그대로 들어가므로, 비어 있거나 제어 문자·보이지 않는 서식 문자가 들어 있는 항목은 불러올 때 경고와 함께 버려집니다. `$GEN.USER_AGENT_CHROME` / `_FIREFOX` / `_SAFARI`는 목록에서 해당 브라우저의 줄(`Chrome/`, `Firefox/`, 또는 둘 다 없는 `Safari/`)을 쓰고, 그런 줄이 없으면 내장 패밀리를 씁니다. Preferences → **Editor & Keys** → **User-Agents** 또는 [`gori settings user-agents`](/ko/reference/cli/#user-agents)로 편집합니다. `env`와 마찬가지로, 실행 중인 TUI나 `gori mcp` 서버는 다른 프로세스가 바꾼 목록을 재시작 없이 따라갑니다.
 
 ### general {#general}
 
@@ -681,7 +683,7 @@ Param Miner의 저장된 기본값입니다. mine 옵션을 저장해야 기록�
 | `description` | string | 발견 상세에 표시 |
 | `side` | string | `request` 또는 `response` |
 | `region` | string | `whole`, `header`, `body` |
-| `kind` | string | `string`, `regex`, 또는 `exec`(argv. [프로세스 훅](/ko/guide/scripting/#프로세스-훅) 참고) |
+| `kind` | string | `string`, `regex`, 또는 `exec`(argv. [프로세스 훅](/ko/guide/scripting/#process-hooks) 참고) |
 | `pattern` | string | 매칭할 리터럴 또는 정규식, `kind`가 `exec`이면 실행할 명령 |
 | `severity` | string | `info`, `low`, `medium`, `high`, `critical` |
 | `enabled` | bool | 규칙 실행 여부 |
@@ -828,23 +830,23 @@ salt는 **비밀**이며, `env`의 토큰 값과 같은 조건으로 보관됩�
 | Section | Description |
 |---------|-------------|
 | `theme` | 활성 테마 이름 (기본값 `goridark`). [테마 가이드](/ko/guide/themes/) 참고 |
-| `mouse` | 마우스 지원 토글 |
+| `mouse` | 마우스 지원 토글(기본 켜짐) |
 | `mouse_drag` | 드래그를 놓았을 때의 동작: `select`(기본값) 또는 `copy` |
-| `pretty_bodies` | 상세 뷰에서 JSON/XML 등의 본문을 pretty-print |
+| `pretty_bodies` | 상세 뷰에서 JSON/XML 등의 본문을 pretty-print(기본 켜짐) |
 | `editor` | 외부 편집기 `command`와 Markdown 처리 |
-| `tabs` | 표시/숨김할 TUI 탭 |
+| `tabs` | 표시/숨김할 TUI 탭과 탭 바 순서 |
 | `hostname_overrides` | 전역 host → IP 다이얼 맵. 위의 [hostname_overrides](#hostname-overrides) 참고 |
 | `env` | Env 토큰 문법(`syntax`), 시길, 전역 값. 위의 [env](#env) 참고 |
 | `user_agents` | `$GEN.USER_AGENT`가 쓰는 직접 만든 목록으로, 내장 목록을 대체합니다. 위의 [user_agents](#user-agents) 참고 |
 | `hotkeys` | 키바인딩 오버라이드 (`os` 계층 + `command_modifier` + `keyset` + `bindings`). [단축키 가이드](/ko/guide/hotkeys/) 참고 |
-| `hooks` | 외부 프로세스 훅: `timeout_secs`(기본 5, 1~60으로 클램프)는 모든 이음매에서 훅 한 번이 받는 벽시계 예산입니다. [프로세스 훅](/ko/guide/scripting/#프로세스-훅) 참고 |
+| `hooks` | 외부 프로세스 훅: `timeout_secs`(기본 5, 1~60으로 클램프)는 모든 이음매에서 훅 한 번이 받는 벽시계 예산입니다. [프로세스 훅](/ko/guide/scripting/#process-hooks) 참고 |
 | `decoder` | 이름 붙인 Decoder 체인. 모든 프로젝트가 공유하며 체인 단계에서 이름으로 부를 수 있습니다(열려 있는 서브탭은 프로젝트 DB에 있습니다) |
-| `rewriter` | 전역 Match & Replace 규칙. 모든 프로젝트에 적용되며 각 규칙의 기본 켜짐/꺼짐 상태는 프로젝트가 오버라이드할 수 있습니다. [전역 규칙과 프로젝트 규칙](/ko/guide/proxy/#reusing-a-rule-across-projects) 참고 |
+| `rewriter` | 전역 Match & Replace 규칙. 모든 프로젝트에 적용되며 각 규칙의 기본 켜짐/꺼짐 상태는 프로젝트가 오버라이드할 수 있습니다. [전역 규칙과 프로젝트 규칙](/ko/guide/proxy/#global-and-project-rules) 참고 |
 | `colormarker` | 전역 History 행 색상 규칙과 사용자 색상 팔레트. `rewriter`와 동일한 전역/프로젝트 분리 구조입니다. 표시 전용이며 트래픽을 수정하지 않습니다. [run colormarker](/ko/reference/cli/#run-colormarker) 참고 |
 | `mine` | Param Miner의 저장된 기본값. 위 [mine](#mine) 참고 |
 | `saved_views` | 전역 History **뷰** 라이브러리. 이름 붙은 QL 쿼리를 렌즈로 적용하며, `rewriter`와 같은 전역/프로젝트 분리를 씁니다. [run views](/ko/reference/cli/#run-views) 참고 |
 | `companion` | 마스코트 Miss Ring: `enabled`(기본 on), `placement`(`body` \| `bar`), `motion`(`lively` \| `calm` \| `still`), `notices`. [Settings 가이드](/ko/guide/settings/) 참고 |
-| `layout` | History / Probe / Issues 미리보기, Sitemap 펼침 깊이, 탭 바 번호. 위의 [layout](#layout) 참고 |
+| `layout` | History / Probe / Issues 미리보기, History 목록 순서, Sitemap 펼침 깊이, 탭 바 번호와 슬롯. 위의 [layout](#layout) 참고 |
 | `statusline` | 일정 간격으로 명령을 실행하는 하단 상태 행. 위의 [statusline](#statusline) 참고 |
 | `redaction` | 안전한 내보내기 프로파일, 활성 프로파일, 기본 적용 스위치, 자리표시자 salt. 위의 [redaction](#redaction) 참고 |
 | `display` | 기본 상세 페인, 목록 시간 형식, 줄번호 거터, `wrap_lines`(긴 줄 접기, 기본 켜짐), 미리보기 본문 상한, `resource_meter`(하단 바 맨 오른쪽 CPU/메모리 표시, 기본 켜짐), 그리고 `terminal_title` |
@@ -854,7 +856,7 @@ salt는 **비밀**이며, `env`의 토큰 값과 같은 조건으로 보관됩�
 
 프로젝트는 `redaction` 키 아래에 자체 **리댁션** 설정도 가질 수 있습니다. 자체 프로파일, 어떤 것이 활성인지, 그리고 "기본으로 정제할지"에 대한 자체 답(전역 기본값을 이 engagement에서만 끄는 명시적 `false` 포함)입니다. [`gori run redact`](/ko/reference/cli/#run-redact)가 기록하며, 해석 순서는 프로젝트 → 전역 → 내장이고 이름이 같으면 먼저 나온 것이 이깁니다.
 
-프로젝트는 전역 파일을 수정하지 않고도 자체 네트워크 설정을 고정할 수 있습니다. 이 값들은 프로젝트 데이터베이스에 저장되며(키 `net.bind_host`, `net.bind_port`, `net.upstream_proxy`, `net.upstream_destination_host`, `net.upstream_auth`, `net.connect_timeout_secs`, `net.io_timeout_secs`, `net.capture_max_mib`), **Project** 탭의 **Project settings** 서브탭에서, 또는 헤드리스로는 [`gori run project network`](/ko/reference/cli/#project-network)(`list`, `get`, `set`, `unset`)로 편집합니다.
+프로젝트는 전역 파일을 수정하지 않고도 자체 네트워크 설정을 고정할 수 있습니다. 이 값들은 프로젝트 데이터베이스에 저장되며(키 `net.bind_host`, `net.bind_port`, `net.upstream_proxy`, `net.upstream_destination_host`, `net.upstream_auth`, `net.connect_timeout_secs`, `net.io_timeout_secs`, `net.capture_max_mib`), **Project** 탭의 **Project settings** 서브탭에서, 또는 헤드리스로는 [`gori run project network`](/ko/reference/cli/#project-network)(`list`, `get`, `set`, `unset`)로 편집합니다. `.gori` 아카이브에서 가져온 프로젝트([`gori run project import`](/ko/reference/cli/#project-import))는 이 키들과 프로젝트 호스트 오버라이드를 하나도 가져오지 않으므로, 이 머신의 전역 네트워크 설정으로 시작합니다.
 
 **Destination host**는 프록시 라우팅을 대소문자를 구분하지 않는 하나의 호스트 패턴으로 제한합니다. 기본값 `*`는 모든 목적지를 프록시 대상으로 허용합니다. `example.com`은 해당 호스트와 서브도메인을 포함하고, `*.example.com`은 서브도메인만 포함합니다. 도메인, IPv4, IPv6 및 `*` 기반 IP 패턴을 사용할 수 있습니다. 일치하지 않는 목적지는 항상 직접 연결되며 `upstream_rules`나 `network.upstream_proxy`로 폴백하지 않습니다. 이 게이트는 프로젝트가 활성화된 동안 캡처, 재생, 스캐너, 업데이터 및 OAST 트래픽을 포함해 gori가 여는 모든 연결에 적용됩니다.
 

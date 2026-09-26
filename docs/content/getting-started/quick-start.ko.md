@@ -64,6 +64,8 @@ curl -x http://127.0.0.1:8070 https://example.com
 
 gori는 요청 시 루트로부터 호스트별 리프 인증서를 발급하므로, 루트만 한 번 신뢰하면 됩니다.
 
+커맨드라인 도구에는 지름길이 있습니다. `gori run shell`(또는 팔레트의 **Open shell**)은 OS 설정을 건드리지 않고, curl, git, Python, Go, Node 트래픽이 실행 중인 gori를 거치며 그 CA를 신뢰하는 셸을 엽니다. `gori run shell -- curl https://example.com`은 명령 하나만 그렇게 실행합니다. [`gori run shell`](/ko/reference/cli/#run-shell)을 참고하세요.
+
 > gori의 개인 키는 머신 비밀입니다. `0600` 권한으로 기록되며 머신을 절대 벗어나지 않습니다. 이전의 모든 신뢰를 무효화할 의도가 있을 때만 팔레트(**Regenerate CA certificate**)에서 교체하세요.
 
 ### Option C: 휴대폰이나 태블릿에 CA 설치하기 {#option-c-install-the-ca-on-a-phone-or-tablet}

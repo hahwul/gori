@@ -1,6 +1,6 @@
 +++
 title = "설치"
-description = "curl, Homebrew, AUR, Nix, Docker, 사전 빌드 바이너리, 또는 소스에서 gori를 설치합니다."
+description = "curl, Homebrew, AUR, Snap, Nix, Docker, 사전 빌드 바이너리, 또는 소스에서 gori를 설치합니다."
 weight = 10
 +++
 
@@ -77,6 +77,16 @@ yay -S gori
 # or
 paru -S gori
 ```
+
+## Snap {#snap}
+
+릴리스마다 strict confinement 스냅이 Snap Store에 게시됩니다. **Linux x86_64**용입니다:
+
+```bash
+sudo snap install gori
+```
+
+strict confinement에서는 홈의 숨김 디렉터리에 접근할 수 없으므로, 스냅의 `GORI_HOME`(설정, 루트 CA, 프로젝트 데이터베이스)은 `~/.gori`가 아니라 `~/snap/gori/common`입니다. `gori update`는 스냅 설치를 알아보고 `snap refresh gori`를 출력합니다(`PATH`에 `snap` 명령이 있으면 `gori update --exec`가 바로 실행합니다).
 
 ## Nix {#nix}
 

@@ -27,7 +27,7 @@ group = "워크벤치"
 base64-decode | jwt-decode
 ```
 
-결과를 해시하거나 다시 인코딩하는 단계를 붙이세요: `sha256`, `url-encode`, `hex-encode`. 별칭은 기본 이름으로 해석되고(`b64` → `base64-encode`), 자동완성이 애매한 이름을 채워 줍니다. 전체 목록은 인코딩, 진법, 압축, `jwt-decode`, 해시(`md5` … `sha512`, `crc32`), 이스케이프/텍스트 변환을 아우릅니다. `gori run decoder list`(또는 [Decoder 가이드](/ko/guide/decoder/#converters))가 각각을 카테고리와 방향과 함께 출력합니다.
+결과를 해시하거나 다시 인코딩하는 단계를 붙이세요: `sha256`, `url-encode`, `hex-encode`. 별칭은 기본 이름으로 해석되고(`b64` → `base64-encode`), 자동완성이 애매한 이름을 채워 줍니다. 전체 목록은 인코딩(유니코드 정규화 포함), 진법, 압축, 역직렬화(MessagePack, CBOR, Java, PHP, pickle…), `jwt-decode`와 세션 쿠키 디코더, 해시(`md5` … `sha512`, `crc32`), 이스케이프/텍스트 변환을 아우릅니다. `gori run decoder list`(또는 [Decoder 가이드](/ko/guide/decoder/#converters))가 각각을 카테고리와 방향과 함께 출력합니다.
 
 같은 체인이 헤드리스로도 실행되며, 값은 인수나 stdin에서 받습니다:
 
@@ -47,7 +47,7 @@ echo -n secret | gori run decoder 'sha256 | base64'
 
 PIPELINE은 체인을 디버깅하는 곳입니다. 위에서 아래로 읽으세요. 각 행은 한 단계의 출력이고, 마지막 행이 OUTPUT으로 들어갑니다. 어떤 단계가 다룰 수 없는 입력을 받으면(Base64가 아닌 텍스트에 `base64-decode`, 토큰이 아닌 것에 `jwt-decode`) 그 행이 읽히던 데이터가 쓰레기나 오류로 바뀌는 지점이고, 그 아래 모든 행은 하류의 잡음입니다. 단계를 고치거나 체인 순서를 바꾼 뒤 다시 읽으세요.
 
-바이너리 결과의 경우 OUTPUT은 표시 모드를 순환합니다(text → hex → base64). 그래서 텍스트로는 비어 보이는 바이트가 hex로는 읽힙니다. 최종 값은 READ 모드에서 `y`로, INS에서 INPUT을 편집하는 중이라면 `Ctrl-Y`로 복사합니다.
+바이너리 결과의 경우 `Ctrl-X`로 OUTPUT의 표시 모드를 순환합니다(text → hex → base64). 그래서 텍스트로는 비어 보이는 바이트가 hex로는 읽힙니다. 최종 값은 READ 모드에서 `y`로, INS에서 INPUT을 편집하는 중이라면 `Ctrl-Y`로 복사합니다.
 
 **체크포인트.** 출력이 처음 어긋나는 PIPELINE 행을 정확히 짚을 수 있습니다. 또는 모든 행이 깨끗하고 OUTPUT이 기대한 값을 담고 있음을 확인합니다.
 

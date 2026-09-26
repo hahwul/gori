@@ -39,11 +39,11 @@ gori settings --edit   # open it in your editor
 
 업스트림 설정이나 프로세스 프록시 환경변수가 없으면 프록시는 `127.0.0.1:8070`에서 수신하며 대상에 직접 연결합니다. gori 쪽 경로를 바꿀 수 있는 곳은 세 군데이며, 우선순위가 높은 순서대로:
 
-1. **프로젝트별**: **Project** 탭에서 한 프로젝트의 바인드 주소, 포트, 업스트림을 고정합니다. 해당 프로젝트에 한해 우선합니다.
+1. **프로젝트별**: **Project** 탭이나 헤드리스로 [`gori run project network`](/ko/reference/cli/#project-network)를 써서 한 프로젝트의 바인드 주소, 포트, 업스트림을 고정합니다. 해당 프로젝트에 한해 우선합니다.
 2. **CLI 플래그**: `--listen` / `--port`는 현재 프로세스에 한해 전역 기본값을 재정의하며 디스크에 기록되지 않습니다.
 3. **`settings.json`의 `network`**: 공유되는 기본값으로, 첫 실행 마법사와 Preferences → **Network**가 편집합니다.
 
-아무것도 설정되지 않으면 공장 기본값은 `127.0.0.1:8070`, 직접 연결입니다. `network.upstream_proxy`가 비어 있으면 gori는 일반적인 `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY` 환경변수(소문자 표기도 지원)와 `NO_PROXY` / `no_proxy` 예외도 사용합니다. 명시적인 프로젝트 업스트림, 업스트림 규칙, 또는 비어 있지 않은 gori 스칼라 설정이 이 환경변수보다 우선합니다. 모든 키는 [network](/ko/reference/config/#network)를, 정확한 우선순위는 [프로젝트별 재정의](/ko/reference/config/#per-project-overrides)를 참고하세요.
+아무것도 설정되지 않으면 공장 기본값은 `127.0.0.1:8070`, 직접 연결입니다. `network.upstream_proxy`가 비어 있으면 gori는 일반적인 `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY` 환경변수(소문자 표기도 지원)와 `NO_PROXY` / `no_proxy` 예외도 사용하며, `localhost`와 루프백 목적지는 항상 직접 연결합니다. 명시적인 프로젝트 업스트림, 업스트림 규칙, 또는 비어 있지 않은 gori 스칼라 설정이 이 환경변수보다 우선합니다. 모든 키는 [network](/ko/reference/config/#network)를, 정확한 우선순위는 [프로젝트별 재정의](/ko/reference/config/#per-project-overrides)를 참고하세요.
 
 ## 루트 CA {#the-root-ca}
 

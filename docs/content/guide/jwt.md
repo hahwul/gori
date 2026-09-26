@@ -59,7 +59,7 @@ From a decoded token, gori generates ready-to-send variants that probe common JW
 | **Header injection** | Manipulates the `kid`, `jku`, `x5u`, and `jwk` header parameters, for a server that trusts attacker-supplied key material. |
 | **Algorithm confusion** | Only with the server's public key (`--attacks --key`, MCP `public_key`). Downgrades an `RS`/`PS`/`ES` token to `HS256` and HMAC-signs it with the public key's own bytes, for a server that dispatches on the token's `alg` and reuses its verification key. One payload per spelling a server might hold: the canonical SPKI PEM OpenSSL would write, and the bytes as supplied with and without a trailing newline. |
 
-Send a candidate to **Repeater** to try it against the target, or straight into a request you're already editing.
+Copy the highlighted payload with `y` and paste it into a **Repeater** session (or a request you're already editing) to try it against the target.
 
 ## Headless
 

@@ -41,7 +41,7 @@ gzip-decompress | json-unescape
 
 체인을 이름으로 저장하고(`Ctrl-S` 또는 팔레트의 **Save chain by name**) 나중에 다시 불러올 수 있습니다. 저장 입력창은 서브탭 이름으로 채워져 열리고, 이미 있는 이름으로 저장하면 그 항목을 갱신합니다. **Load a saved chain**(`Ctrl-O`)은 저장해 둔 목록을 피커로 열어 이름 옆에 체인 내용을 함께 보여 주므로, 무슨 이름으로 저장했는지 외우고 있을 필요가 없습니다. 타이핑으로 걸러 볼 수 있고, `Ctrl-X`는 선택한 항목을 라이브러리에서 지웁니다. 두 키 모두 탭 안 어디서든 동작합니다: 서브탭 스트립, 탭 바, 각 패널 안 전부.
 
-이름을 붙인 체인은 설정의 `decoder` 섹션에 저장되어 모든 프로젝트에서 공유됩니다. 체인은 조리법이고, 거기에 통과시킨 내용은 프로젝트에 남습니다. Rewriter는 같은 경계를 다르게 긋습니다. 규칙 자체가 [전역이거나 프로젝트 범위](/ko/guide/proxy/#reusing-a-rule-across-projects)입니다.
+이름을 붙인 체인은 설정의 `decoder` 섹션에 저장되어 모든 프로젝트에서 공유됩니다. 체인은 조리법이고, 거기에 통과시킨 내용은 프로젝트에 남습니다. Rewriter는 같은 경계를 다르게 긋습니다. 규칙 자체가 [전역이거나 프로젝트 범위](/ko/guide/proxy/#global-and-project-rules)입니다.
 
 저장한 이름은 그 자체로 **변환기**이기도 합니다. 체인의 한 단계로 이름을 적으면 저장해 둔 체인 전체가 그 자리에서 실행됩니다.
 
@@ -57,7 +57,7 @@ myenc > url-encode
 
 | 범주 | 예시 |
 |----------|----------|
-| **Encoding** | `base64-encode` / `base64-decode`, `base64url-encode`, `url-encode` / `url-decode`, `url-encode-all`(모든 바이트를 인코딩, WAF 우회용), `hex-encode` / `hex-decode`, `base32`, `ascii85`, `base58`, `base36`, `base62`, `quoted-printable`, `punycode-encode` / `punycode-decode`(별칭 `idn-encode` / `idn-decode`), `nfc` / `nfd` / `nfkc` / `nfkd`, `rfc2047-q-encode` / `rfc2047-b-encode` / `rfc2047-decode`, `windows-bestfit-<codepage>`, `codepoint-overflow` |
+| **Encoding** | `base64-encode` / `base64-decode`, `base64url-encode`, `url-encode` / `url-decode`, `url-encode-all`(모든 바이트를 인코딩, WAF 우회용), `hex-encode` / `hex-decode`, `base32`, `ascii85`, `base58`, `base36`, `base62`, `quoted-printable`, `punycode-encode` / `punycode-decode`(별칭 `idn-encode` / `idn-decode`), `nfc` / `nfd` / `nfkc` / `nfkd`, `rfc2047-q-encode` / `rfc2047-b-encode`, `rfc2047-q-decode` / `rfc2047-b-decode` / `rfc2047-decode`, `windows-bestfit-<codepage>`, `codepoint-overflow` |
 | **Number bases** | `decimal-encode` / `decimal-decode`, `binary-encode` / `binary-decode`, `octal-encode` / `octal-decode` |
 | **Compression** | `gzip-compress` / `gzip-decompress`, `zlib-compress` / `zlib-decompress`, `raw-deflate` / `raw-inflate` (헤더 없는 RFC 1951), `brotli-decompress`, `zstd-decompress` |
 | **Serialization** | `msgpack-decode`, `cbor-decode`(바이너리 문서를 JSON 텍스트로), 그리고 네이티브 직렬화 리더 `java-deserialize`, `dotnet-viewstate`, `php-unserialize`, `pickle-disasm` |
@@ -76,7 +76,7 @@ myenc > url-encode
 
 몇 가지는 한 방향으로만 동작하며 체인으로 되돌릴 수 없습니다. `shell-escape`와 `powershell-escape`는 값을 따옴표 리터럴로 감싸고, `homoglyph`는 ASCII 글자를 시각적으로 닮은 유니코드 문자로 바꿉니다(굳어진 대응 문자가 없는 글자는 그대로 둡니다). `typo`는 변환이 아니라 생성기입니다. 글자 누락, 인접 글자 자리바꿈, QWERTY 이웃 키로 만든 오타 변형을 한 줄에 하나씩 내놓습니다. 유니코드 정규화 단계도 한 방향입니다. NFKC/NFKD는 `ﬁ` → `fi`, `⁵` → `5`, 전각 `／` → `/` 같은 호환 문자 접기를 보여 줍니다. 모양이 비슷한 U+2044 `⁄` FRACTION SLASH는 호환 정규화 대상이 아니지만, Windows Best-Fit 표에서는 CP 1250, 1252, 1254가 `/`로 바꿉니다. RFC 2047 인코더는 UTF-8 Q 또는 Base64 인코드 워드를 만들고 75옥텟 제한에 맞춰 접으며, 디코더는 UTF-8, US-ASCII, ISO-8859-1, Windows-1252를 읽고, 인접한 워드를 문자셋 디코딩 전에 이어 붙여 두 워드에 걸쳐 나뉜 문자도 살리며, 형식이 틀린 워드는 문자 그대로 둡니다. `codepoint-overflow`는 원시 바이트를 냅니다(U+0140 문자 → `0x40`). 텍스트가 아닌 결과는 뒤에 `hex-encode`를 붙여 확인하세요. `windows-bestfit-<codepage>`는 CP 874, 932, 936, 949, 950, 1250–1258의 Microsoft Best-Fit 표를 미리 봅니다. 표에 없는 문자는 해당 코드페이지의 기본값인 `?`가 되는데, `WideCharToMultiByte`처럼 UTF-16 코드 유닛마다 하나씩이라 BMP 밖의 이모지는 `??`가 됩니다. 표의 출처와 라이선스는 `src/gori/decoder/bestfit/README.md`에 있습니다.
 
-OUTPUT은 바이너리 결과를 위해 표시 모드(text → hex → base64)를 순환할 수 있습니다. READ 모드에서는 `y`로, INS 모드로 INPUT을 편집하는 중에는 `Ctrl-Y`로 복사하거나 space 메뉴를 사용하세요.
+바이너리 결과라면 `Ctrl-X`로 OUTPUT의 표시 모드(text → hex → base64)를 순환합니다. READ 모드에서는 `y`로, INS 모드로 INPUT을 편집하는 중에는 `Ctrl-Y`로 복사하거나 space 메뉴를 사용하세요.
 
 ## 언제 사용하는가 {#when-to-use-it}
 

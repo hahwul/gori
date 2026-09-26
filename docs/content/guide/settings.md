@@ -105,7 +105,7 @@ Placement decides what she costs *in a session* (the picker has only the one spo
 | Section | Fields |
 |---------|--------|
 | **Network** | Bind IP, Bind Port, Proxy protocol, Proxy host, Proxy port, Proxy TLS CA, Verify proxy TLS, Verify upstream TLS, Info page and CA download, Connect timeout (s), Idle timeout (s), Capture body limit (MiB), HTTP/2, Strip HTTP/3 Alt-Svc, TLS passthrough, Upstream rules (read-only), Environment proxy (read-only), Outbound TLS (read-only), Hostname overrides (opener) |
-| **Tabs** | Opener: show/hide and reorder the tab bar's nine numbered slots (a tenth ✓ is refused — hide one first; everything off the bar stays reachable with `0`) |
+| **Tabs** | Opener: one ordered list, where the rows above the seam are the bar's numbered slots. `⇧K` / `⇧J` move a row and `space` sends it across the seam; while **Tab bar slots** is on, a tenth is refused (`⇧K` trades a row in instead). Everything off the bar stays reachable with `0` |
 
 Network here is the **global default**. A project can pin its own bind address, port, and upstream from the **Project** tab, and those win for that project. See [Configuration](/getting-started/configuration/#network) for the full precedence order.
 
