@@ -114,19 +114,23 @@ bottleneck every time.
 
 Every letter the operator presses is checked at boot or by a guard spec. A new or moved verb
 passes these; it does not work around them. The reasoning is in DESIGN.md §7 (the 2026-09-12
-key grammar and the 2026-09-25 #1274 entries).
+key grammar, the 2026-09-25 #1274 entries and the 2026-09-26 #1295 entries).
 
 - **One letter, one meaning per tab (R1).** A space-menu letter may differ from the verb's
   chord, but it must never be a key the same tab answers with a different action. That covers
   the tab's scope under every OS profile × keyset, the Editor scope in an editor pane, the
-  sub-tab strip's raw keys, and the Global fallback (`c` stops capture and `i` holds all
-  traffic on a dropped `space`). `spec/tui/menu_letter_meaning_spec.cr` sweeps all four. Its
+  sub-tab strip's raw keys, the Global fallback (`c` stops capture and `i` holds all traffic on
+  a dropped `space`) and the tab bar, whose bare keys go Sidebar → Global.
+  `spec/tui/menu_letter_meaning_spec.cr` sweeps all five. Its
   `MENU_LETTER_ALLOWED` names exact verb pairs with a reason and fails when an entry stops
   violating, so a fix deletes its own line. Never add an entry just to let a new verb pass.
   So a level-1 `c` or `i` is allowed only on a tab that binds that letter itself: anywhere else a
   dropped `space` reaches Global and stops capture or holds all traffic, and the guard fails.
-  The one rule-based exemption is the `vim` keyset's motions (`VIM_MOTIONS`: append, top, bottom,
-  find, select line), which only move or select. Never widen it to a verb that writes or sends.
+  The tab bar is the exception by design: it is app-level focus, so Global wins there even over
+  the tab's own `c`/`i` loop letter (Probe's `c` Dismiss), and those pairs are allowlisted by name.
+  Two exemptions are rule-based: the Global scope lens (`HARMLESS_GLOBALS`, a view filter the
+  next `s` undoes) and the `vim` keyset's motions (`VIM_MOTIONS`: append, top, bottom, find,
+  select line), which only move or select. Never widen either to a verb that writes or sends.
 - **A recurring intent takes its letter from the lexicon.** Declare `intent:`
   (`src/gori/verb/lexicon.cr`), never a `mnemonic:` beside it (`validate_intents!` raises).
   The same intent has the same letter on every tab, and a verb whose id names an intent
@@ -138,10 +142,12 @@ key grammar and the 2026-09-25 #1274 entries).
   is one row, `T` **Sub-tabs…** (`Registry::SUBTABS_FOLD`), so a pane verb may use the other
   eight but never `T`; `pinned:` keeps a strip verb at level 1 in the panes too (Paste cURL).
   Reassign a freed pane letter in its own change.
-- **No menu letter is `h`/`j`/`k`/`l`**, at either level: not a row's letter (a chord-derived one
-  included), a pinned member's, a family key or a level-2 letter. Inside the menu those four
-  always move the selection; the Runner's fallback stays. `Registry#validate_intents!` and
-  `Verb::Family#validate!` raise at boot (`Family::NAV_LETTERS`).
+- **No menu letter is `h`/`j`/`k`/`l`**, at either space-menu level: not a row's letter (a
+  chord-derived one included), a pinned member's, a family key or a level-2 letter. Inside the
+  menu those four always move the selection; the Runner's fallback stays.
+  `Registry#validate_intents!` and `Verb::Family#validate!` raise at boot
+  (`Family::NAV_LETTERS`). The **Send selection to…** picker (`Space` `S`) is not a menu level:
+  it letters JWT `j` and Cookie `k` from `TOOL_LETTERS` and moves with the arrows.
 - **A variation of one intent joins a family instead of taking a letter.** Every cross-tool
   send is a member of `Send flow to…` (`>`), every view toggle of `Display…` (`Z`) and every
   Repeater/Fuzzer transport toggle of `Protocol…` (`P`), all in `src/gori/verbs/families.cr`.
