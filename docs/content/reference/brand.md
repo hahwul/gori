@@ -78,7 +78,7 @@ homes:
 
 Only HTTP status keeps functional colour in the TUI, and that is a theme
 decision rather than a brand one — the [Themes guide](/guide/themes/) covers all
-thirty built-in palettes.
+thirty-two built-in palettes.
 
 ## Wallpaper {#wallpaper}
 

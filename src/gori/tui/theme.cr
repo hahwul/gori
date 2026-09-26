@@ -2,21 +2,24 @@ require "json"
 require "../paths"
 
 module Gori::Tui
-  # The TUI colour palette. gori ships thirty themes — GORIDARK (the default; a
+  # The TUI colour palette. gori ships thirty-two themes — GORIDARK (the default; a
   # monochrome palette in the spirit of Grok Build: near-black canvas, white/grey
   # text, a white highlight, hairline dividers), GORIDAY (the same relationships
-  # inverted onto an off-white canvas with dark ink), LATTE (a soft, cool light
-  # palette inspired by Catppuccin Latte — lavender-grey paper with pastel-but-AA
-  # accents), ESPRESSO (a warm, slightly muddy dark-brown palette with tan text +
-  # earthy accents), TOKYONIGHT (the popular dark blue palette), GRUVBOX (the warm
-  # retro dark palette), NORD (the cool arctic blue-grey palette), DRACULA (the
-  # popular high-contrast purple palette), SOLARIZED_LIGHT (the iconic cream/beige
-  # light palette), ROSEPINE_DAWN (a soft rosy light palette), CATPPUCCIN_MOCHA (the
-  # popular dark lavender-tinted palette), MONOKAI (the classic olive-dark code-editor
-  # palette), EVERFOREST (a muted, forest-green-toned dark palette), ONEDARK (the
-  # Atom/VS Code blue-grey dark palette), KANAGAWA (an ink-dark palette after
-  # Hokusai's Great Wave), GITHUB_DARK (GitHub's Primer dark palette), ZENBURN (the
-  # classic low-contrast grey-green dark palette), SYNTHWAVE84 (the neon
+  # inverted onto an off-white canvas with dark ink), DANCHEONG (Korean temple-beam
+  # ornament — obangsaek pigments on a dark green-black lacquer canvas), HANJI
+  # (Korean mulberry paper — ink text and natural-dye accents on warm ivory;
+  # DANCHEONG's light pair), LATTE (a soft, cool light palette inspired by
+  # Catppuccin Latte — lavender-grey paper with pastel-but-AA accents), ESPRESSO (a
+  # warm, slightly muddy dark-brown palette with tan text + earthy accents),
+  # TOKYONIGHT (the popular dark blue palette), GRUVBOX (the warm retro dark
+  # palette), NORD (the cool arctic blue-grey palette), DRACULA (the popular
+  # high-contrast purple palette), SOLARIZED_LIGHT (the iconic cream/beige light
+  # palette), ROSEPINE_DAWN (a soft rosy light palette), CATPPUCCIN_MOCHA (the
+  # popular dark lavender-tinted palette), MONOKAI (the classic olive-dark
+  # code-editor palette), EVERFOREST (a muted, forest-green-toned dark palette),
+  # ONEDARK (the Atom/VS Code blue-grey dark palette), KANAGAWA (an ink-dark palette
+  # after Hokusai's Great Wave), GITHUB_DARK (GitHub's Primer dark palette), ZENBURN
+  # (the classic low-contrast grey-green dark palette), SYNTHWAVE84 (the neon
   # retro-futurist palette after the famous VS Code theme), CYBERPUNK (neon
   # yellow/cyan/red on a near-black night-city canvas), MATRIX (green
   # phosphor-on-black in the spirit of the classic CRT terminal), COBALT2 (Wes
@@ -27,10 +30,9 @@ module Gori::Tui
   # Light grey-white palette), AYU_LIGHT (a bright light palette with Ayu's orange
   # accent), ROSEPINE (the deep-indigo dark base that ROSEPINE_DAWN inverts),
   # TOKYONIGHT_DAY (TOKYONIGHT's official light counterpart on a cool blue-grey
-  # canvas), DANCHEONG (Korean temple-beam ornament — obangsaek pigments on a dark
-  # green-black lacquer canvas), and HANJI (Korean mulberry paper — ink text and
-  # natural-dye accents on warm ivory; DANCHEONG's light pair). Only HTTP status
-  # keeps functional colour.
+  # canvas), SOLARIZED_DARK (SOLARIZED_LIGHT's dark pair on the deep teal base03),
+  # and EVERFOREST_LIGHT (EVERFOREST's official light variant on warm paper). Only
+  # HTTP status keeps functional colour.
   #
   # `Termisu::Color` is a value struct, so colours can't be mutated in place to
   # re-theme. Instead one Palette is active at a time (`@@active`) and every colour
@@ -908,7 +910,65 @@ module Gori::Tui
       syn_keyword: Color.from_hex("#9c3a55"),   # 연지 crimson — keywords / auth schemes (5.7:1)
     )
 
-    BUILTIN_THEMES = {"goridark" => GORIDARK, "goriday" => GORIDAY, "latte" => LATTE, "espresso" => ESPRESSO, "tokyonight" => TOKYONIGHT, "gruvbox" => GRUVBOX, "nord" => NORD, "dracula" => DRACULA, "solarized_light" => SOLARIZED_LIGHT, "rosepine_dawn" => ROSEPINE_DAWN, "catppuccin_mocha" => CATPPUCCIN_MOCHA, "monokai" => MONOKAI, "everforest" => EVERFOREST, "onedark" => ONEDARK, "kanagawa" => KANAGAWA, "github_dark" => GITHUB_DARK, "zenburn" => ZENBURN, "synthwave84" => SYNTHWAVE84, "cyberpunk" => CYBERPUNK, "matrix" => MATRIX, "cobalt2" => COBALT2, "high_contrast" => HIGH_CONTRAST, "github_light" => GITHUB_LIGHT, "gruvbox_light" => GRUVBOX_LIGHT, "one_light" => ONE_LIGHT, "ayu_light" => AYU_LIGHT, "rosepine" => ROSEPINE, "tokyonight_day" => TOKYONIGHT_DAY, "dancheong" => DANCHEONG, "hanji" => HANJI}
+    # Solarized Dark — SOLARIZED_LIGHT's pair on the deep teal base03 canvas, with
+    # base0 body text. Solarized fixes its accents' lightness rather than targeting AA,
+    # and on base03 red/orange/blue/violet/magenta sit at 3.3–4.1:1, so each is lifted
+    # along its own hue until it clears AA; green, yellow and cyan are upstream as-is.
+    SOLARIZED_DARK = Palette.new(
+      bg: Color.from_hex("#002b36"),            # base03 — deep teal canvas
+      panel: Color.from_hex("#073642"),         # top bar / status / overlays (base02)
+      elevated: Color.from_hex("#083a46"),      # header band, active segment (one notch more)
+      border: Color.from_hex("#1c4d58"),        # hairline dividers (resting)
+      border_focus: Color.from_hex("#2b5d68"),  # brighter hairline for an active modal card
+      focus_gold: Color.from_hex("#b58900"),    # focused body pane outline (solarized yellow, 4.7:1)
+      accent: Color.from_hex("#eee8d5"),        # the highlight (base2)
+      accent_bg: Color.from_hex("#0a3f4c"),     # selection band (focused pane, 1.31:1)
+      selection_dim: Color.from_hex("#05313d"), # selection band (unfocused pane)
+      text: Color.from_hex("#839496"),          # body text (base0, 4.8:1)
+      text_bright: Color.from_hex("#eee8d5"),   # emphasis / active (base2)
+      muted: Color.from_hex("#6f8a91"),         # secondary (lifted base01 — upstream is 2.8:1; 4.1:1)
+      green: Color.from_hex("#859900"),         # 2xx (4.7:1)
+      yellow: Color.from_hex("#b58900"),        # 4xx (4.7:1)
+      red: Color.from_hex("#e66a68"),           # 5xx / error (lifted red — upstream #dc322f is 3.3:1; 4.7:1)
+      orange: Color.from_hex("#e96a35"),        # (lifted orange, 4.7:1)
+      syn_header: Color.from_hex("#3797db"),    # header/field names, JSON keys, tag names (lifted blue, 4.7:1)
+      syn_string: Color.from_hex("#859900"),    # quoted strings (green)
+      syn_number: Color.from_hex("#2aa198"),    # numbers, tag attribute names (cyan, 4.8:1)
+      syn_literal: Color.from_hex("#878bcf"),   # true / false / null (lifted violet, 4.7:1)
+      syn_comment: Color.from_hex("#68838b"),   # comments (lifted base01, 3.7:1)
+      syn_keyword: Color.from_hex("#de68a1"),   # language keywords / auth schemes (lifted magenta, 4.7:1)
+    )
+
+    # Everforest Light (medium) — EVERFOREST's official light variant: warm paper
+    # (bg0) with the blue-grey fg ink. Its accents are tuned for a softer look than
+    # AA on bg0 (the yellow sits at 2.1:1, the green at 2.7:1), so each is darkened
+    # along its own hue until it clears AA — the treatment SOLARIZED_LIGHT received.
+    EVERFOREST_LIGHT = Palette.new(
+      bg: Color.from_hex("#fdf6e3"),            # everforest light bg0 — warm paper canvas
+      panel: Color.from_hex("#f4f0d9"),         # top bar / status / overlays (bg1)
+      elevated: Color.from_hex("#efebd4"),      # header band, active segment (bg2)
+      border: Color.from_hex("#939f91"),        # hairline dividers (resting, grey1) — 2.6:1
+      border_focus: Color.from_hex("#7f8c7e"),  # brighter hairline for an active modal card (3.3:1)
+      focus_gold: Color.from_hex("#906700"),    # focused body pane outline (darkened everforest yellow, 4.7:1)
+      accent: Color.from_hex("#5c6a72"),        # the highlight ink (everforest fg)
+      accent_bg: Color.from_hex("#ddd8b9"),     # selection band (focused pane) — deepened for a visible focus band on light (1.33:1)
+      selection_dim: Color.from_hex("#f1ecd6"), # selection band (unfocused pane)
+      text: Color.from_hex("#5c6a72"),          # body text (everforest fg, 5.2:1)
+      text_bright: Color.from_hex("#3f4b52"),   # emphasis / active (deeper ink)
+      muted: Color.from_hex("#667465"),         # secondary — AA on canvas (4.6:1) + legible on the selection band (3.4:1)
+      green: Color.from_hex("#657301"),         # 2xx (darkened everforest green, 4.9:1)
+      yellow: Color.from_hex("#906700"),        # 4xx (darkened everforest yellow, 4.7:1)
+      red: Color.from_hex("#ca3734"),           # 5xx / error (darkened everforest red, 4.7:1)
+      orange: Color.from_hex("#a7581a"),        # (darkened everforest orange, 4.8:1)
+      syn_header: Color.from_hex("#2e759c"),    # header/field names, JSON keys, tag names (darkened blue, 4.7:1)
+      syn_string: Color.from_hex("#657301"),    # quoted strings (green)
+      syn_number: Color.from_hex("#a7581a"),    # numbers, tag attribute names (orange)
+      syn_literal: Color.from_hex("#a94c89"),   # true / false / null (darkened purple, 4.8:1)
+      syn_comment: Color.from_hex("#758372"),   # comments (darkened grey2, 3.7:1)
+      syn_keyword: Color.from_hex("#bc454f"),   # language keywords / auth schemes (soft red, 4.8:1)
+    )
+
+    BUILTIN_THEMES = {"goridark" => GORIDARK, "goriday" => GORIDAY, "dancheong" => DANCHEONG, "hanji" => HANJI, "latte" => LATTE, "espresso" => ESPRESSO, "tokyonight" => TOKYONIGHT, "gruvbox" => GRUVBOX, "nord" => NORD, "dracula" => DRACULA, "solarized_light" => SOLARIZED_LIGHT, "rosepine_dawn" => ROSEPINE_DAWN, "catppuccin_mocha" => CATPPUCCIN_MOCHA, "monokai" => MONOKAI, "everforest" => EVERFOREST, "onedark" => ONEDARK, "kanagawa" => KANAGAWA, "github_dark" => GITHUB_DARK, "zenburn" => ZENBURN, "synthwave84" => SYNTHWAVE84, "cyberpunk" => CYBERPUNK, "matrix" => MATRIX, "cobalt2" => COBALT2, "high_contrast" => HIGH_CONTRAST, "github_light" => GITHUB_LIGHT, "gruvbox_light" => GRUVBOX_LIGHT, "one_light" => ONE_LIGHT, "ayu_light" => AYU_LIGHT, "rosepine" => ROSEPINE, "tokyonight_day" => TOKYONIGHT_DAY, "solarized_dark" => SOLARIZED_DARK, "everforest_light" => EVERFOREST_LIGHT}
     DEFAULT_THEME  = "goridark"
 
     # User themes loaded from <GORI_HOME>/themes/*.json (filename stem = name), merged
