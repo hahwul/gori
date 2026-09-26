@@ -116,6 +116,9 @@ module Gori::Tui
       # sub-tab it runs against (its inflight? gate is the one-run lock, like a send).
       @timing_progress = Channel(Int32).new(4)
       @timing_done = Channel({RepeaterView, Repeater::Timing::Stats::Report, Repeater::Timing::Present::Subject}).new(1)
+      # The fiber's own death (a bug, not a transport outcome — `Timing.run` gets failures back as
+      # results): the message the drain shows in place of the busy status it would otherwise leave.
+      @timing_failed = Channel({RepeaterView, String}).new(1)
       @timing_cancel = Atomic(Bool).new(false)
       @timing_view = nil.as(RepeaterView?)
       @timing_report = nil.as({Repeater::Timing::Stats::Report, Repeater::Timing::Present::Subject}?)
@@ -2694,14 +2697,19 @@ module Gori::Tui
       transport = plan.http2? ? "single-packet h2" : "last-byte-sync h1"
       @host.status("send race → #{plan.host}:#{plan.port} · #{n} requests together (#{transport})…#{unrecorded_note("send race")}", :busy)
       spawn(name: "gori-repeater-race") do
-        rs = plan.send_race
-        labeled = labels.zip(rs)
+        started = Time.instant
+        labeled = begin
+          labels.zip(plan.send_race)
+        rescue ex
+          # The engines turn transport failures into results, so this is a bug — but the drain is
+          # what replaces the "send race →…" busy status, so hand it an errored member each.
+          ::Log.error(exception: ex) { "repeater race send fiber died" }
+          labels.map { |l| {l, Repeater::Engine.error("send race failed: #{ex.message}", started)} }
+        end
         select
         when results.send({view, labeled})
         else
         end
-      rescue ex
-        ::Log.error(exception: ex) { "repeater race send fiber died" }
       ensure
         view.inflight = false
       end
@@ -2750,6 +2758,12 @@ module Gori::Tui
       return nil unless collected = collect_race_members(tabs) # sets its own status on a refusal
       drafts, labels = collected
       return nil unless plan = repeater_plan(view, drafts, http2: view.http2?)
+      # A blocked pair (Sandbox, an exclude) would run every iteration refused and end
+      # "inconclusive" without the reason — refuse up front, as the race does.
+      if reason = plan.refusal
+        @host.status("timing: #{reason}")
+        return nil
+      end
       {view, plan, labels}
     end
 
@@ -2764,6 +2778,7 @@ module Gori::Tui
       @timing_cancel.set(false)
       prog = @timing_progress
       done = @timing_done
+      failed = @timing_failed
       cancel = @timing_cancel
       mode = interleaved ? Repeater::Timing::Mode::Interleaved : Repeater::Timing::Mode::Auto
       transport = interleaved ? "interleaved" : (plan.http2? ? "single-packet h2" : "last-byte-sync h1")
@@ -2787,6 +2802,10 @@ module Gori::Tui
         end
       rescue ex
         ::Log.error(exception: ex) { "repeater timing fiber died" }
+        select
+        when failed.send({view, "timing failed: #{ex.message}"})
+        else
+        end
       ensure
         view.inflight = false
       end
@@ -2823,6 +2842,13 @@ module Gori::Tui
         else
           break
         end
+      end
+      select
+      when pair = @timing_failed.receive
+        @timing_view = nil
+        @host.status(pair[1], :warn)
+        applied = true
+      else
       end
       applied
     end
