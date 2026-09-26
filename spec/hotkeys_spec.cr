@@ -108,6 +108,18 @@ describe Gori::Hotkeys do
       Gori::Hotkeys.binding_for(reg, "fuzz.save-results", elsewhere).should eq(e)
     end
 
+    it "does not advertise a family opener's chord a configured Global verb took" do
+      reg = Gori::Verbs.registry
+      gt = Gori::Verb::Chord.new(">")
+      Gori::Hotkeys.binding_for(reg, "send-flow.open.repeater", {} of String => Array(Gori::Verb::Chord)).should eq(gt)
+      took = {"nav.next-tab" => [gt]}
+      Gori::Verb::Keymap.build(reg, Gori::Verb::OsProfile::Os::Linux, took).lookup(gt, Gori::Verb::Scope::Repeater)
+        .should eq("nav.next-tab")
+      Gori::Hotkeys.binding_for(reg, "send-flow.open.repeater", took).should be_nil
+      # A tab verb elsewhere on `>` is no Global claim: the other tabs' openers keep it.
+      Gori::Hotkeys.binding_for(reg, "send-flow.open.body", {"repeater.send" => [gt]}).should eq(gt)
+    end
+
     it "names the chord of the verb a keyless one declares `chord_of:`, and follows its rebind (#1295)" do
       reg = Gori::Verbs.registry
       reg["repeater.toggle-resp-hex"].chords.should be_empty

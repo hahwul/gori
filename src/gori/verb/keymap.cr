@@ -59,7 +59,8 @@ module Gori
       # layer put it on a verb of the same scope, and `#build` let that one win. What a hint
       # must not advertise — a default ⇧E Save results that the operator's own ⇧E rebind took
       # (`Hotkeys.binding_for`). Only the configured rows can outrank a verb, so it reads those
-      # rather than the whole registry.
+      # rather than the whole registry. A family opener also yields to a configured GLOBAL verb
+      # on its chord, which `#build` leaves it off (`.global_claims`).
       def self.displaced?(registry : Registry, verb : Definition, chord : Chord,
                           os : OsProfile::Os, overrides : Hash(String, Array(Chord)),
                           keyset : Keyset::Kind) : Bool
@@ -67,10 +68,12 @@ module Gori
         os_overrides = OsProfile.overrides_for(os)
         mine = layer_of(verb.id, overrides, keyset_overrides, os_overrides)
         return false if mine == 3
+        opener = !registry.opens_family(verb.id).nil?
         {overrides, keyset_overrides, os_overrides}.any? do |rows|
           rows.each_key.any? do |id|
             next false if id == verb.id
-            next false unless (other = registry[id]?) && other.scope == verb.scope
+            next false unless other = registry[id]?
+            next false unless other.scope == verb.scope || (opener && other.scope.global?)
             next false unless layer_of(id, overrides, keyset_overrides, os_overrides) > mine
             effective_chords(other, os, overrides, keyset).includes?(chord)
           end
