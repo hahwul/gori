@@ -110,8 +110,7 @@ module Gori
       # --- multi-select marks (the History list's gestures, #442) ---
       # Marks make the EXISTING space menu act on N issues — every batch verb above reads
       # ctx.selected_issue_ids ("marks if any, else the cursor row"). Scope::Issues belongs to
-      # this tab alone (unlike Scope::Body, which History shares with Project/Comparer), so no
-      # per-verb tab gate is needed here.
+      # this tab alone (as Scope::Body belongs to History), so no per-verb tab gate is needed.
       #
       # `t` is the same mark key History uses, deliberately: it is the one gesture that has to
       # feel identical across every list, and marking is a many-times-per-minute triage

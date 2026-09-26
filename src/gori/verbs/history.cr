@@ -20,8 +20,8 @@ module Gori
       # --- content pane (Body) navigation: arrow keys / hjkl ---
       r.register Verb::Definition.new(
         "body.down", "Select next flow", "Move selection down", Verb::Scope::Body,
-        # `available: in_history` — Body is shared with Help and the Project settings pane,
-        # and these two were the only Body verbs without the gate.
+        # `available: in_history`, like every Body verb: Body once doubled as the Help and
+        # Project settings scope, and these two were the last without the gate.
         [Verb::Chord.new("down"), Verb::Chord.new("j")], available: in_history, hidden: true) { |ctx| ctx.move_selection(1); nil }
 
       r.register Verb::Definition.new(
