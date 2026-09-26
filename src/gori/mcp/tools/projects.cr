@@ -176,7 +176,7 @@ module Gori
         err(ex.message || "could not create project", "INVALID_ARGUMENT", field: "name")
       end
 
-      @[Tool("switch_project", read_only: false, unbound: true)]
+      @[Tool("switch_project", read_only: false, unbound: true, permission: "projects")]
       private def switch_project(h) : Result
         name = str(h, "project")
         return err("missing required 'project'", "INVALID_ARGUMENT", field: "project") if name.nil? || name.strip.empty?
@@ -281,7 +281,7 @@ module Gori
         end)
       end
 
-      @[Tool("delete_project", gated: true, unbound: true)]
+      @[Tool("delete_project", gated: true, unbound: true, permission: "projects")]
       private def delete_project(h) : Result
         name = str(h, "project")
         return err("missing required 'project'", "INVALID_ARGUMENT", field: "project") if name.nil? || name.strip.empty?

@@ -102,7 +102,7 @@ module Gori
       end
 
       # Pin (or clear) a free-text memo on one sitemap endpoint — the TUI Sitemap tab's `t`.
-      @[Tool("set_sitemap_tag", gated: true, agent_action: true)]
+      @[Tool("set_sitemap_tag", gated: true, agent_action: true, permission: "write")]
       private def set_sitemap_tag(h) : Result
         host = str(h, "host").try(&.strip).presence
         return err("missing required 'host'", "INVALID_ARGUMENT", field: "host") unless host

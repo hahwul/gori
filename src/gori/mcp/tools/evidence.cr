@@ -18,7 +18,7 @@ module Gori
 
       FREEZE_SOURCES = [Store::LinkRefKind::Flow, Store::LinkRefKind::Repeater].map(&.label)
 
-      @[Tool("freeze_evidence", gated: true, agent_action: true)]
+      @[Tool("freeze_evidence", gated: true, agent_action: true, permission: "write")]
       private def freeze_evidence(h) : Result
         issue_id = int(h, "issue_id")
         return Result.new(id_error(h, "issue_id"), is_error: true) unless issue_id
@@ -105,7 +105,7 @@ module Gori
         Result.new(Serialize.evidence_json(ev, include_sensitive, cap, omit))
       end
 
-      @[Tool("delete_evidence", gated: true, agent_action: true)]
+      @[Tool("delete_evidence", gated: true, agent_action: true, permission: "write")]
       private def delete_evidence(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
@@ -115,7 +115,7 @@ module Gori
         Result.new({"deleted" => true, "id" => id, "issue_ids" => meta.issue_ids}.to_json)
       end
 
-      @[Tool("link_evidence", gated: true, agent_action: true)]
+      @[Tool("link_evidence", gated: true, agent_action: true, permission: "write")]
       private def link_evidence(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
@@ -127,7 +127,7 @@ module Gori
         Result.new({"linked" => true, "id" => id, "issue_id" => issue_id}.to_json)
       end
 
-      @[Tool("unlink_evidence", gated: true, agent_action: true)]
+      @[Tool("unlink_evidence", gated: true, agent_action: true, permission: "write")]
       private def unlink_evidence(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id

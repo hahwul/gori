@@ -74,6 +74,7 @@ private MAXIMAL_PROFILE = <<-JSON
     "saved_views": { "next_view_id": 2, "views": [ { "id": 1, "name": "v1", "query": "src:proxy" } ] },
     "redaction": { "active": "p1", "default": true, "profiles": [ { "name": "p1", "json_fields": ["password"] } ] },
     "mcp": { "channels": true },
+    "mcp_permissions": { "send": false },
     "user_agents": [ "Profile/1.0" ]
   }
   JSON
@@ -127,6 +128,7 @@ private def with_every_section_populated(&)
   redaction_active = Gori::Settings.redaction_active
   redaction_default = Gori::Settings.redaction_default?
   mcp_channels = Gori::Settings.mcp_channels?
+  mcp_denied = Gori::Settings.mcp_denied_permissions
   user_agents = Gori::Settings.user_agents
   begin
     yield
@@ -173,6 +175,7 @@ private def with_every_section_populated(&)
     Gori::Settings.redaction_active = redaction_active
     Gori::Settings.redaction_default = redaction_default
     Gori::Settings.mcp_channels = mcp_channels
+    Gori::Settings.mcp_denied_permissions = mcp_denied
   end
 end
 

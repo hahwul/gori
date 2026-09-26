@@ -853,6 +853,7 @@ Project-scoped profiles live in the project database rather than here; see [Per-
 | `redaction` | Safe-export profiles, the active one, the on-by-default switch and the placeholder salt. See [redaction](#redaction) above |
 | `display` | Default detail pane, list time format, line-number gutter, `wrap_lines` (soft-wrap long lines, on by default), preview body cap, `resource_meter` (the CPU/memory readout at the far right of the bottom bar, on by default), and `terminal_title` |
 | `mcp` | How `gori mcp` delivers "Tell the agent…" messages: `channels` (off by default) enables the `claude/channel` push as a last resort, tried only when neither the inbox socket nor the Codex queue answered. Those two, the tool-result carry and the `operator_messages` poll always run. See [Messages from gori](/guide/mcp/#messages-from-gori) |
+| `mcp_permissions` | Preferences › AI › MCP permissions: the groups of `gori mcp` tools an attached agent may NOT use, as `"<group>": false` (`send`, `intercept`, `write`, `projects`). Absent means every group is allowed. The object is the whole set, so a group it does not name is allowed; an unknown key is kept. Read when `gori mcp` starts. See [Permissions from Preferences](/guide/mcp/#permissions-from-preferences) |
 
 ## Per-Project Overrides
 

@@ -86,7 +86,7 @@ module Gori
         Serialize::AUTH_SCHEMES.includes?(head.downcase) ? head : nil
       end
 
-      @[Tool("set_env_var", gated: true, agent_action: true, env_refresh: true)]
+      @[Tool("set_env_var", gated: true, agent_action: true, env_refresh: true, permission: "write")]
       private def set_env_var(h) : Result
         key = str(h, "key").try(&.strip)
         return err("missing required 'key'", "INVALID_ARGUMENT", field: "key") if key.nil? || key.empty?
@@ -103,7 +103,7 @@ module Gori
         Result.new(JSON.build { |j| j.object { j.field "key", key; j.field "set", true } })
       end
 
-      @[Tool("delete_env_var", gated: true, agent_action: true, env_refresh: true)]
+      @[Tool("delete_env_var", gated: true, agent_action: true, env_refresh: true, permission: "write")]
       private def delete_env_var(h) : Result
         key = str(h, "key").try(&.strip)
         return err("missing required 'key'", "INVALID_ARGUMENT", field: "key") if key.nil? || key.empty?

@@ -114,8 +114,11 @@ Network here is the **global default**. A project can pin its own bind address, 
 | Section | Fields |
 |---------|--------|
 | **Agent messaging** | Channel delivery (off) |
+| **MCP permissions** | Send traffic, Intercept control, Edit project data, Manage projects (all on) |
 
 How `gori mcp` delivers a "Tell the agent…" message to an attached agent. The inbox-socket, Codex-queue, tool-result and `operator_messages`-poll layers always run; **Channel delivery** adds the `claude/channel` push *behind* them — it is tried only when no route that can confirm itself answered — and is off by default because it is a research preview that needs Claude Code launched with a development-channels flag. It is read when a `gori mcp` process starts, so an agent already running keeps the answer it was given. See [Messages from gori](/guide/mcp/#messages-from-gori).
+
+**MCP permissions** decides what an agent attached over `gori mcp` may do, one group at a time; reading the capture is always allowed, and like Channel delivery it is read when the server starts. See [Permissions from Preferences](/guide/mcp/#permissions-from-preferences).
 
 ## In the Project Picker
 

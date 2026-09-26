@@ -36,7 +36,7 @@ module Gori
         Result.new(JSON.build { |j| Serialize.issue(j, f, store, retest: true) })
       end
 
-      @[Tool("create_issue", gated: true, agent_action: true)]
+      @[Tool("create_issue", gated: true, agent_action: true, permission: "write")]
       private def create_issue(h) : Result
         title = str(h, "title")
         return Result.new("missing required 'title'", is_error: true) if title.nil? || title.empty?
@@ -99,7 +99,7 @@ module Gori
         end)
       end
 
-      @[Tool("update_issue", gated: true, agent_action: true)]
+      @[Tool("update_issue", gated: true, agent_action: true, permission: "write")]
       private def update_issue(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
@@ -157,7 +157,7 @@ module Gori
       # Remove an issue outright (the TUI Issues tab's delete). Distinct from status
       # "resolved"/"false-positive", which keep it in the report — this drops it, along with
       # its entity links (Store#delete_issue clears those in the same transaction).
-      @[Tool("delete_issue", gated: true, agent_action: true)]
+      @[Tool("delete_issue", gated: true, agent_action: true, permission: "write")]
       private def delete_issue(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id

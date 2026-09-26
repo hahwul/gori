@@ -60,7 +60,7 @@ module Gori
 
       # Read the not-yet-scanned JS/HTML responses and store the endpoints they reference.
       # Gated because it WRITES (derived rows, deleted with their flows); it sends nothing.
-      @[Tool("scan_js_endpoints", gated: true, agent_action: true)]
+      @[Tool("scan_js_endpoints", gated: true, agent_action: true, permission: "send")]
       private def scan_js_endpoints(h) : Result
         filter = ql_filter_or_error(h, str(h, "query"))
         return filter if filter.is_a?(Result)

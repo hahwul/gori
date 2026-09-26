@@ -515,7 +515,7 @@ module Gori
 
       # Hard-delete ONE captured flow (the TUI History tab's delete). Single and explicit,
       # so no extra confirmation — unlike clear_history.
-      @[Tool("delete_flow", gated: true, agent_action: true)]
+      @[Tool("delete_flow", gated: true, agent_action: true, permission: "write")]
       private def delete_flow(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
@@ -529,7 +529,7 @@ module Gori
       # Wipe EVERY captured flow. The TUI puts a danger confirm in front of this; here
       # confirm:true is that gate. Without it we report the count and refuse, so a
       # mis-issued call cannot silently empty a capture session.
-      @[Tool("clear_history", gated: true, agent_action: true)]
+      @[Tool("clear_history", gated: true, agent_action: true, permission: "write")]
       private def clear_history(h) : Result
         n = store.count?
         return busy("history NOT cleared (store busy); every flow is still there") unless n

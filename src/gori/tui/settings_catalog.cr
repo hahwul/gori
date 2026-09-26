@@ -105,6 +105,10 @@ module Gori::Tui
       # not have to open the proxy-address section to find it.
       Section.new(:mcp, "settings.mcp", "Agent messaging",
         "How gori mcp delivers \"Tell the agent…\" messages — enable the claude/channel push as a last resort behind the inbox socket, codex queue, operator_messages poll and tool-result carry", :ai, :form),
+      # What an attached agent may DO: coarse switches over groups of `gori mcp` tools. All on
+      # by default, which is what gori mcp served before they existed.
+      Section.new(:mcp_permissions, "settings.mcp-permissions", "MCP permissions",
+        "Which tool groups an agent attached over gori mcp may use — send traffic, intercept control, project edits, project management; reading the capture is always allowed", :ai, :form),
     ]
 
     # Every section, in registration order — drives the palette verb loop.

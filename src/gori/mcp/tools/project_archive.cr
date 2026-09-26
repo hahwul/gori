@@ -29,7 +29,7 @@ module Gori
       # Export writes a file on the operator's disk and changes no project, so it is gated
       # (a --read-only server writes nothing) and recorded in the event feed: an unredacted
       # copy of the engagement leaving gori is what the operator should see an agent do.
-      @[Tool("export_project", gated: true, agent_action: true, unbound: true)]
+      @[Tool("export_project", gated: true, agent_action: true, unbound: true, permission: "projects")]
       private def export_project(h) : Result
         path = str(h, "path").try(&.strip).presence
         unless path
@@ -139,7 +139,7 @@ module Gori
       # validated, the disclosure and the name it would take come back as CONFIRM_REQUIRED, and
       # nothing is registered. The confirmed call validates the file again and imports what it
       # read THEN, so its own result carries the inventory of what was actually imported.
-      @[Tool("import_project", gated: true, agent_action: true, unbound: true)]
+      @[Tool("import_project", gated: true, agent_action: true, unbound: true, permission: "projects")]
       private def import_project(h) : Result
         path = str(h, "path").try(&.strip).presence
         return err("missing required 'path' (the .gori archive to import)", "INVALID_ARGUMENT", field: "path") unless path

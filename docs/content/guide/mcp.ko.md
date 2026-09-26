@@ -67,6 +67,21 @@ gori mcp --read-only
 
 알아둘 만한 부수 효과가 하나 있습니다. 전문 검색(`body:`)이 읽는 인덱스는 캡처 커밋과 분리되어 만들어지는데, 읽기 전용 서버는 그 인덱스를 만들 수 없습니다. 아직 인덱싱되지 않은 flow가 남아 있으면 그런 질의는 부분 인덱스로 답하는 대신 `FTS_BACKLOG`로 거부됩니다. gori로 프로젝트를 열거나 `--read-only`를 빼고 실행해서 인덱스를 비우세요.
 
+### Preferences에서 권한 정하기 {#permissions-from-preferences}
+
+`--read-only`는 에이전트에 설치할 때 정해집니다. gori 안에서 바로 바꾸는 스위치는 **Settings → AI → MCP permissions**에 있고, 도구 묶음마다 토글이 하나씩 있으며 기본은 모두 켜져 있습니다:
+
+| 묶음 | 끄면 빠지는 도구 |
+|------|------------------|
+| **Send traffic** | 대상이나 OAST 서버로 요청을 보내는 모든 도구와, 그 도구가 시작한 작업의 폴러: `send_request`, `send_websocket`, `race_requests`, `timing_requests`, `fuzz_*`, `mine_*`, `discover_*`, `authorize_*`, `sequence_*`(`sequence_analyze` 제외), `run_retest`, `minimize_repeater`, `cache_deception_check`, `scan_js_endpoints`, `grpc_reflect`, `refresh_session_slot`, `oast_*`(`oast_presets` 제외), `list_jobs` / `get_job` / `stop_job`, `active:true`인 `probe_scan`, `active`나 `aggressive`로 올리는 `set_probe_mode` |
+| **Intercept control** | `intercept_forward`, `intercept_forward_edit`, `intercept_drop`, `intercept_toggle`, `intercept_set_filter`, `intercept_set_direction` |
+| **Edit project data** | 그 밖의 프로젝트 쓰기 전부: 이슈, 노트, repeater, 규칙, scope와 sandbox, env, host override, 세션 슬롯, evidence, 링크, 뷰, probe 스캔과 판정(수동 `probe_scan`도 찾은 결과를 기록합니다), flow·히스토리 삭제 |
+| **Manage projects** | `create_project`, `switch_project`, `delete_project`, `import_project`, `export_project` |
+
+캡처를 읽는 것은 묶음이 아닙니다. 읽기 도구와 `operator_messages` / `reply_to_operator`는 항상 제공됩니다. 꺼진 묶음의 도구는 `tools/list`에서 빠지고, 그래도 호출하면 `TOOL_DISABLED`로 거부되며, 핸드셰이크 instructions가 에이전트에게 어떤 묶음이 꺼졌는지 알려줍니다. 이 스위치는 `--read-only`, `--tools`와 함께 적용되어 셋 모두가 허용한 도구만 제공됩니다. `gori mcp` 프로세스가 시작할 때 읽으므로, 이미 떠 있는 에이전트는 서버를 다시 시작할 때까지 받았던 도구를 그대로 씁니다. 그 시점에 설정 파일을 읽지 못하면 모든 묶음을 켜는 대신 끕니다.
+
+묶음은 목적지가 아니라 능력 단위입니다. **Intercept control**이 켜져 있으면 에이전트는 보류된 요청을 고쳐서 forward할 수 있고, **Send traffic**이 꺼져 있어도 그 바이트는 대상에 도달합니다. 에이전트의 바이트가 대상에 닿지 않게 하려면 둘 다 끄세요.
+
 ## 노출할 도구 고르기 {#choosing-which-tools-are-exposed}
 
 기본적으로 `gori mcp`는 모든 도구를 노출하므로, 에이전트는 재시작 없이 워크벤치 전체를 쓸 수 있습니다. 대가는 컨텍스트입니다. 클라이언트는 첫 질문 전에 카탈로그 전체를 모델 컨텍스트에 싣고 세션 내내 유지합니다. gori는 시작할 때마다 제공하는 도구 수와 `tools/list` 크기를 로그에 남깁니다. 컨텍스트가 빠듯한 클라이언트라면 프로필에서 시작하세요:

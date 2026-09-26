@@ -834,4 +834,39 @@ describe SettingsView do
       FileUtils.rm_rf(dir)
     end
   end
+
+  # One row per Settings::MCP_PERMISSIONS group, all on at the factory default; a save flips
+  # exactly the groups toggled and leaves a key this gori does not draw where it was.
+  it "edits the MCP permission groups and resets them to all on" do
+    dir = File.tempname("gori-settings-mcp-perms")
+    Dir.mkdir_p(dir)
+    prev_home = ENV["GORI_HOME"]?
+    prev = Gori::Settings.mcp_denied_permissions
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.mcp_denied_permissions = Set{"future"}
+      v = SettingsView.new
+      v.reload(:mcp_permissions)
+      backend = MemoryBackend.new(140, 30)
+      v.render(Screen.new(backend), Rect.new(0, 0, 140, 30))
+      Gori::Settings::MCP_PERMISSIONS.each { |perm| backend.contains?(perm.title).should be_true }
+
+      v.toggle_or_move(1) # Send traffic: on → off
+      v.move_field(1)
+      v.toggle_or_move(1) # Intercept control: on → off
+      v.save
+      Gori::Settings.mcp_permitted?("send").should be_false
+      Gori::Settings.mcp_permitted?("intercept").should be_false
+      Gori::Settings.mcp_permitted?("write").should be_true
+      Gori::Settings.mcp_permitted?("future").should be_false
+
+      v.reset_to_defaults
+      v.save
+      Gori::Settings::MCP_PERMISSIONS.all? { |perm| Gori::Settings.mcp_permitted?(perm.key) }.should be_true
+    ensure
+      Gori::Settings.mcp_denied_permissions = prev
+      prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+    end
+  end
 end

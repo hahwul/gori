@@ -67,6 +67,21 @@ A default (actions-on) server still has a writer (`send_request` and `create_iss
 
 One consequence is worth knowing: free-text search (`body:`) reads an index that is built off the capture commit, and a read-only server cannot build it. If flows are still waiting to be indexed, such a query is refused with `FTS_BACKLOG` rather than answered from a partial index; open the project in gori, or drop `--read-only`, to drain it.
 
+### Permissions from Preferences {#permissions-from-preferences}
+
+`--read-only` is decided where the agent is installed. For a switch you flip from gori itself, **Settings → AI → MCP permissions** has one toggle per group of tools, all on by default:
+
+| Group | What turning it off withholds |
+|-------|-------------------------------|
+| **Send traffic** | Every tool that dials a target or an OAST server, with the pollers of the jobs they start: `send_request`, `send_websocket`, `race_requests`, `timing_requests`, `fuzz_*`, `mine_*`, `discover_*`, `authorize_*`, `sequence_*` (not `sequence_analyze`), `run_retest`, `minimize_repeater`, `cache_deception_check`, `scan_js_endpoints`, `grpc_reflect`, `refresh_session_slot`, `oast_*` (not `oast_presets`), `list_jobs` / `get_job` / `stop_job`, `probe_scan` with `active:true`, and `set_probe_mode` raised to `active` or `aggressive` |
+| **Intercept control** | `intercept_forward`, `intercept_forward_edit`, `intercept_drop`, `intercept_toggle`, `intercept_set_filter`, `intercept_set_direction` |
+| **Edit project data** | Every other in-project write: issues, notes, repeaters, rules, scope and sandbox, env, host overrides, session slots, evidence, links, views, probe scans and triage (a passive `probe_scan` records what it finds), and deleting flows or history |
+| **Manage projects** | `create_project`, `switch_project`, `delete_project`, `import_project`, `export_project` |
+
+Reading the capture is not a group: the read tools and `operator_messages` / `reply_to_operator` are always served. A tool in a group that is off is absent from `tools/list` and refused with `TOOL_DISABLED` if called anyway, and the handshake instructions tell the agent which groups you turned off. The switches compose with `--read-only` and `--tools`: a tool is served only when all three allow it. They are read when a `gori mcp` process starts, so an agent already running keeps the tools it was given until its server is started again; a settings file that start cannot read turns every group off rather than on.
+
+The groups are capabilities, not destinations. With **Intercept control** on, an agent can still forward a held request it has edited, and those bytes reach the target even with **Send traffic** off. Turn both off to keep an agent's bytes away from the target.
+
 ## Choosing Which Tools Are Exposed
 
 By default `gori mcp` advertises every tool, so an agent can reach the whole workbench without a restart. The price is context: a client loads the entire catalogue into the model's context before the first question and keeps it for the session. Every start logs how many tools it serves and how large `tools/list` is. For a client with a tight context budget, start from a profile:

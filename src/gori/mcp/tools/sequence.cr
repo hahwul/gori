@@ -28,7 +28,7 @@ module Gori
       end
 
       @[Tool("sequence_start", gated: true, agent_action: true, env_refresh: true,
-        requires: ["sequence_status", "sequence_results", "sequence_stop"])]
+        requires: ["sequence_status", "sequence_results", "sequence_stop"], permission: "send")]
       private def sequence_start(h) : Result
         ob = outbound(bool_arg(h, "allow_unscoped", false))
         plan = build_sequence_plan(h, ob)
@@ -149,7 +149,7 @@ module Gori
         sjob.error_msg ||= ex.message || "internal sequence drain error"
       end
 
-      @[Tool("sequence_status", gated: true, read_only: true)]
+      @[Tool("sequence_status", gated: true, read_only: true, permission: "send")]
       private def sequence_status(h) : Result
         sjob = lookup_sequence_job(h)
         return sjob if sjob.is_a?(Result)
@@ -174,7 +174,7 @@ module Gori
 
       # Returns the randomness REPORT over the collected tokens — never the tokens
       # themselves (they are secrets).
-      @[Tool("sequence_results", gated: true, read_only: true)]
+      @[Tool("sequence_results", gated: true, read_only: true, permission: "send")]
       private def sequence_results(h) : Result
         sjob = lookup_sequence_job(h)
         return sjob if sjob.is_a?(Result)
@@ -195,7 +195,7 @@ module Gori
         end)
       end
 
-      @[Tool("sequence_stop", gated: true, agent_action: true)]
+      @[Tool("sequence_stop", gated: true, agent_action: true, permission: "send")]
       private def sequence_stop(h) : Result
         sjob = lookup_sequence_job(h)
         return sjob if sjob.is_a?(Result)

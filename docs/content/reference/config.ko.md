@@ -851,6 +851,7 @@ salt는 **비밀**이며, `env`의 토큰 값과 같은 조건으로 보관됩�
 | `redaction` | 안전한 내보내기 프로파일, 활성 프로파일, 기본 적용 스위치, 자리표시자 salt. 위의 [redaction](#redaction) 참고 |
 | `display` | 기본 상세 페인, 목록 시간 형식, 줄번호 거터, `wrap_lines`(긴 줄 접기, 기본 켜짐), 미리보기 본문 상한, `resource_meter`(하단 바 맨 오른쪽 CPU/메모리 표시, 기본 켜짐), 그리고 `terminal_title` |
 | `mcp` | `gori mcp`가 "Tell the agent…" 메시지를 전달하는 방식: `channels`(기본 off)는 inbox socket과 Codex queue 중 어느 쪽도 답하지 않았을 때에만 쓰이는 마지막 수단으로 `claude/channel` push를 켭니다. 그 둘과 tool-result 전달, `operator_messages` poll은 항상 동작합니다. [gori가 보내는 메시지](/ko/guide/mcp/#messages-from-gori) 참고 |
+| `mcp_permissions` | Preferences › AI › MCP permissions: 붙은 에이전트가 쓸 수 *없는* `gori mcp` 도구 묶음을 `"<group>": false`로 적습니다(`send`, `intercept`, `write`, `projects`). 없으면 모든 묶음이 허용됩니다. 객체가 집합 전체이므로 이름이 없는 묶음은 허용되고, 모르는 키는 보존됩니다. `gori mcp`가 시작할 때 읽습니다. [Preferences에서 권한 정하기](/ko/guide/mcp/#permissions-from-preferences) 참고 |
 
 ## 프로젝트별 오버라이드 {#per-project-overrides}
 
