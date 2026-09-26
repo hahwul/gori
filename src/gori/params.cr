@@ -141,6 +141,53 @@ module Gori
       cut ? path[(cut + 1)..].presence : path
     end
 
+    # Every step of a JSON path as `each_json_leaf` spells it, root first: a member's name, or
+    # nil for an array element — `user.tags[].name` → `user`, `tags`, nil, `name`. The inverse
+    # of the walk's naming (a bare key never holds `.`, `[`, `]` or `"`; any other key is
+    # `["…"]`, JSON-quoted), so it needs no general JSONPath reader. `[]` for a path it did not
+    # produce.
+    def json_segments(path : String) : Array(String?)
+      out = [] of String?
+      b = path.to_slice # every delimiter is ASCII; bytes keep this linear on any key
+      i = 0
+      while i < b.size
+        case b[i]
+        when '.'.ord
+          i += 1
+        when '['.ord
+          if b[i + 1]? == ']'.ord
+            out << nil
+            i += 2
+          else
+            key, i = quoted_segment(b, i) || return [] of String?
+            out << key
+          end
+        else
+          stop = i
+          while stop < b.size && b[stop] != '.'.ord && b[stop] != '['.ord
+            stop += 1
+          end
+          out << String.new(b[i...stop])
+          i = stop
+        end
+      end
+      out
+    end
+
+    # The `["…"]` step opening at `b[i]`: its key and the offset past its `]`, or nil when
+    # the bytes there are not one.
+    private def quoted_segment(b : Bytes, i : Int32) : {String, Int32}?
+      return unless b[i + 1]? == '"'.ord
+      close = i + 2 # the closing quote: the first `"` not escaped by a `\`
+      while close < b.size && b[close] != '"'.ord
+        close += b[close] == '\\'.ord ? 2 : 1
+      end
+      return unless b[close + 1]? == ']'.ord
+      {String.from_json(String.new(b[(i + 1)..close])), close + 2}
+    rescue JSON::ParseException
+      nil
+    end
+
     # The leaf member of a bracket-nested name: `user[password]` → `password`, `user[password][]` → `password`,
     # `a[b][c]` → `c`, `tags[]` → `tags`, `name` → `name`.
     def bracket_leaf(name : String) : String

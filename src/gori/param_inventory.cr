@@ -125,15 +125,24 @@ module Gori
     private class Sensitivity
       @names : Set(String)
       @patterns : Array(Regex)
+      # Each `json_pointers` entry as its RFC 6901 tokens (`Redact::Matcher.pointer_tokens`).
+      @pointers : Array(Array(String))
+      # A JSON path's verdict by name alone, once per distinct path: the segment walk
+      # allocates, and `name?` runs on every sighting of a row not yet known sensitive.
+      @json = {} of String => Bool
 
       def initialize(store : Store)
         @names = SENSITIVE_NAMES.dup
         @patterns = Redact::BUILTIN_PATTERNS.map(&.[0])
+        @pointers = [] of Array(String)
         name = Redact::Policy.project_scope(store).active.presence || Settings.redaction_active.presence
         if profile = name.try { |n| Redact::Policy.profile(store, n) }
           (profile.json_fields + profile.form_keys).each do |f|
             f = f.strip.downcase
             @names << f unless f.empty?
+          end
+          profile.json_pointers.each do |ptr|
+            @pointers << Redact::Matcher.pointer_tokens(ptr.strip) unless ptr.strip.empty?
           end
           profile.patterns.each do |src|
             next if src.strip.empty?
@@ -146,8 +155,26 @@ module Gori
       def name?(p : Params::Param) : Bool
         return true if p.loc.cookies?
         return true if p.loc.headers? && Redact.sensitive_header?(p.name)
-        leaf = p.loc.json? ? Params.json_leaf(p.name) : Params.bracket_leaf(p.name)
-        !leaf.nil? && @names.includes?(leaf.downcase)
+        return @json.fetch(p.name) { @json[p.name] = json_path?(p.name) } if p.loc.json?
+        @names.includes?(Params.bracket_leaf(p.name).downcase)
+      end
+
+      # The Redact matcher masks a whole value — object or array included — under a member it
+      # names, at any depth, and whatever a pointer lands on. So a leaf is sensitive when ANY
+      # member on its path is a sensitive name (`password[]`, `secret.new`), or when a pointer
+      # names the path or one of its ancestors. The walk collapses array indices to `[]`, so an
+      # array step answers to `-` and to any numeric index: one element masked is enough.
+      private def json_path?(path : String) : Bool
+        segs = Params.json_segments(path)
+        return Params.json_leaf(path).try { |l| @names.includes?(l.downcase) } || false if segs.empty?
+        return true if segs.any? { |s| s && @names.includes?(s.downcase) }
+        @pointers.any? do |want|
+          next false if want.size > segs.size
+          want.each_with_index.all? do |tok, i|
+            seg = segs[i]
+            seg.nil? ? (tok == "-" || (!tok.empty? && tok.each_char.all?(&.ascii_number?))) : tok == seg
+          end
+        end
       end
 
       # By value shape — a regex per pattern, so it runs once per distinct sample, not per

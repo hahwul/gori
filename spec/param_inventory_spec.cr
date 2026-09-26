@@ -183,6 +183,38 @@ describe Gori::ParamInventory do
     end
   end
 
+  # The Redact matcher masks a whole value — array or object — under a member it names, at
+  # any depth; the inventory must not print what `get_flow` would mask (#1231 follow-up).
+  it "marks a JSON leaf under a sensitive member, not only a sensitive leaf" do
+    with_store do |store|
+      pi_flow(store, "/u", method: "POST", req_headers: "Content-Type: application/json\r\n",
+        body: %({"password":["hunter2xyz"],"secret":{"new":"s3cr3tval"},"items":[{"token":{"v":"t0k3nval"}}],"profile":{"name":"Al"}}))
+      report = PI.build(store)
+      %w[password[] secret.new items[].token.v].each do |n|
+        r = row(report, n)
+        r.sensitive.should be_true
+        PI.masked(r, include_sensitive: false).should eq(["[REDACTED]"])
+      end
+      row(report, "profile.name").sensitive.should be_false
+    end
+  end
+
+  it "honours the profile's json_pointers, with `-` and an index as array steps" do
+    with_store do |store|
+      profile = Gori::Redact::Profile.new("engagement",
+        json_pointers: ["/data/code", "/list/-/pin", "/rows/0/key", "/whole"])
+      Gori::Redact::Policy.write_project_scope(store,
+        Gori::Redact::Policy::ProjectScope.new(active: "engagement", profiles: [profile]))
+      pi_flow(store, "/u", method: "POST", req_headers: "Content-Type: application/json\r\n",
+        body: %({"data":{"code":"plainvalue","note":"hi"},"list":[{"pin":"1234x"}],"rows":[{"key":"k3yval"}],"whole":{"a":{"b":"deep"}},"code":"top"}))
+      report = PI.build(store)
+      %w[data.code list[].pin rows[].key whole.a.b].each do |n|
+        row(report, n).sensitive.should be_true
+      end
+      %w[data.note code].each { |n| row(report, n).sensitive.should be_false }
+    end
+  end
+
   # The stored body is read whole: a cap on the WIRE bytes would cut a JSON body before it
   # could parse.
   it "reads a JSON body larger than the old 256 KiB cut" do
