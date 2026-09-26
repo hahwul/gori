@@ -281,3 +281,56 @@ describe "gori run session — refresh steps (#1233)" do
     j["message"].as_s.should contain("refresh admin failed at step 2 (login → 403)")
   end
 end
+
+module Gori::CLI::Run
+  def self.refresh_verify_upstream_for_spec(verify : Bool) : Nil
+    refresh_verify_upstream(verify)
+  end
+
+  def self.open_store_for_refresh_spec(project : Project) : Store
+    open_store(project)
+  end
+end
+
+# A command's `-k` reaches the self-signed lab target with the send; the slot's login steps
+# have to reach it too, or every automatic refresh fails TLS and switches itself off.
+describe "gori run — a refresh step verifies upstream TLS as the command's -k says" do
+  it "hands -k to the runner open_store installs, and to one already installed" do
+    path = File.tempname("gori-clirun-refresh-verify", ".db")
+    Gori::Store.open(path).close
+    prev_hook = Gori::SessionRefresh.hook
+    prev_layer = Gori::Env.layer
+    begin
+      Gori::CLI::Run.refresh_verify_upstream_for_spec(false)
+      store = Gori::CLI::Run.open_store_for_refresh_spec(Gori::Project.new("verify", path))
+      begin
+        Gori::SessionRefresh.hook.as(Gori::SessionRefresh::Runner).verify?.should be_false
+        Gori::CLI::Run.refresh_verify_upstream_for_spec(true)
+        Gori::SessionRefresh.hook.as(Gori::SessionRefresh::Runner).verify?.should be_true
+      ensure
+        store.close
+      end
+    ensure
+      Gori::CLI::Run.refresh_verify_upstream_for_spec(true)
+      Gori::SessionRefresh.hook = prev_hook
+      Gori::Env.layer = prev_layer
+      {path, "#{path}-wal", "#{path}-shm"}.each { |f| File.delete?(f) }
+    end
+  end
+
+  # Every command that takes `-k` and can send as a slot says so before it sends. `capture`
+  # is the exception: it runs a proxy through `Session.open`, whose runner reads the flag itself.
+  it "is called by every command that parses -k" do
+    dir = File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run")
+    missing = [] of String
+    Dir.glob(File.join(dir, "*.cr")).each do |file|
+      File.read(file).split(/^\s*(?:private )?def self\./m).each do |body|
+        next unless body.includes?("p.on(\"-k\"")
+        name = body[/\A\w+/]
+        next if name == "cmd_capture"
+        missing << "#{File.basename(file)}:#{name}" unless body.includes?("refresh_verify_upstream(!insecure)")
+      end
+    end
+    missing.should eq([] of String)
+  end
+end

@@ -411,6 +411,7 @@ module Gori
           p.missing_option { |f| abort "gori run retest run: missing value for #{f}" }
         end
         parser.parse(args)
+        refresh_verify_upstream(!insecure)
         abort "gori run retest run: unexpected argument#{leftover.size == 1 ? "" : "s"} #{leftover.join(" ").inspect}" unless leftover.empty?
         iid = require_issue_id(issue_id, "gori run retest run")
 

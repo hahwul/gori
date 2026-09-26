@@ -716,7 +716,7 @@ module Gori
         records = previous.try { |p| p.origin == origin ? p.record_target : nil } if store.read_only?
         runner = Gori::SessionRefresh::Runner.new(store, layer,
           -> { Gori::Outbound.cli(Gori::Scope.load(store), false) },
-          records: records, origin: origin).install
+          verify: @@refresh_verify, records: records, origin: origin).install
         # A refresh that ran on an earlier READ-ONLY open owes History rows and an event; this
         # open writes them if it can, or carries them to the runner it just installed.
         previous.try &.hand_over(store, origin, runner)
@@ -1000,6 +1000,17 @@ module Gori
                         "project for writing, so its History rows and event were not recorded"
           end
         end
+      end
+
+      # Upstream TLS verification for a refresh step, which is the command's own `-k`: a send
+      # that reaches a self-signed lab target has to be able to log in to it too. Remembered,
+      # like `@@active_slot`, because every `open_store` installs a new runner; a command calls
+      # this right after parsing, before it opens anything or sends.
+      @@refresh_verify = true
+
+      private def self.refresh_verify_upstream(verify : Bool) : Nil
+        @@refresh_verify = verify
+        Gori::SessionRefresh.hook.as?(Gori::SessionRefresh::Runner).try(&.verify = verify)
       end
 
       private def self.reapply_active_slot : Nil

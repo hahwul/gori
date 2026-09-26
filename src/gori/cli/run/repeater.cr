@@ -160,6 +160,7 @@ module Gori
         # A stray word here is refused, not dropped — see `Run.parse_no_positionals`.
         parse_no_positionals(parser, args, "gori run repeater h2",
           "pass the origin as --target URL and the field list as --fields FILE")
+        refresh_verify_upstream(!insecure)
         cap = body_cap(headers_only, max_body, "gori run repeater h2")
 
         tgt = target
@@ -1108,6 +1109,7 @@ module Gori
           p.missing_option { |f| abort "gori run repeater race: missing value for #{f}" }
         end
         parser.parse(args)
+        refresh_verify_upstream(!insecure)
         ids = race_member_ids(positional, max_requests, parser)
 
         project = resolve_read_project(project_name, db_path)
@@ -1200,6 +1202,7 @@ module Gori
           p.missing_option { |f| abort "gori run repeater timing: missing value for #{f}" }
         end
         parser.parse(args)
+        refresh_verify_upstream(!insecure)
         ids = timing_member_ids(positional, parser)
         count = count.clamp(1, Repeater::Timing::Stats::MAX_ITERATIONS)
         warmup = warmup.clamp(0, count - 1)
@@ -1470,6 +1473,7 @@ module Gori
           p.missing_option { |f| abort "gori run repeater send: missing value for #{f}" }
         end
         parser.parse(args)
+        refresh_verify_upstream(!insecure)
         abort "gori run repeater send: missing <repeater-id>\n#{parser}" if positional.empty?
         abort "gori run repeater send: too many arguments (expected one <repeater-id>, got: #{positional.join(" ")})" if positional.size > 1
         id = positional[0].to_i64? || abort "gori run repeater send: invalid repeater id '#{positional[0]}'"
@@ -2454,6 +2458,7 @@ module Gori
           p.missing_option { |f| abort "gori run repeater: missing value for #{f}" }
         end
         parser.parse(args)
+        refresh_verify_upstream(!insecure)
         id = take_flow_id(positional, "repeater")
         cap = body_cap(headers_only, max_body, "gori run repeater")
         if err = output_diff_error(cap, do_diff) || path_override_error(path_override)

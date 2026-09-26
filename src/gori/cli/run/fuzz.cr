@@ -224,6 +224,7 @@ module Gori
           p.missing_option { |f| abort "gori run fuzz: missing value for #{f}" }
         end
         parser.parse(args)
+        refresh_verify_upstream(!insecure)
 
         abort "gori run fuzz: too many arguments (expected at most one <flow-id>)" if positional.size > 1
         # One template source only. `--repeater` joins `--flow`/`--request` as a third mutually

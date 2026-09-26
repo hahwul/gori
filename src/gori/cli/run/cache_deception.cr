@@ -48,6 +48,7 @@ module Gori
           p.missing_option { |f| abort "gori run cache-deception: missing value for #{f}" }
         end
         parser.parse(args)
+        refresh_verify_upstream(!insecure)
         positional.each { |s| flow_ids << parse_flow_id(s, "gori run cache-deception") }
         abort "gori run cache-deception: name at least one flow id (or --flow ID)" if flow_ids.empty?
 

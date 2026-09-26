@@ -594,12 +594,15 @@ module Gori
       # …and the slots' REFRESH runner beside it (#1233), replaced on every bind so a
       # `switch_project` cannot refresh the previous project's slot. An automatic refresh is
       # gated STRICTLY (`Outbound.agent` with no waiver): a send's own `allow_unscoped` does not
-      # extend to a login request gori decided to make.
+      # extend to a login request gori decided to make. Its steps verify upstream TLS exactly as
+      # `send_request` does (`--insecure-upstream`), or a lab target would take the send and
+      # refuse every login.
       private def bind_binding_layer(s : Store) : Nil
         b = Gori::Bindings.load(s, Gori::SessionSlots.load(s))
         @bindings = b
         Env.layer = b
-        @refresher = Gori::SessionRefresh::Runner.new(s, b, -> { Outbound.agent(Scope.load(s), false) }).install
+        @refresher = Gori::SessionRefresh::Runner.new(s, b, -> { Outbound.agent(Scope.load(s), false) },
+          verify: @verify_upstream).install
       end
 
       # Drop any previous project's marker and lay one down beside the CURRENTLY bound

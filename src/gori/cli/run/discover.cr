@@ -72,6 +72,7 @@ module Gori
           p.missing_option { |f| abort "gori run discover: missing value for #{f}" }
         end
         parser.parse(args)
+        refresh_verify_upstream(!insecure)
         if leftover.size == 1 && target_override.nil?
           target_override = leftover[0]
         elsif !leftover.empty?

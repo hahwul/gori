@@ -549,4 +549,21 @@ describe "MCP session slot refresh (#1233)" do
       text.should contain("has no refresh steps")
     end
   end
+
+  # `gori mcp --insecure-upstream` reaches a self-signed lab target with `send_request`; the
+  # login steps that keep its slot alive must reach it the same way, or every automatic refresh
+  # fails TLS and switches itself off after `FAILURE_LIMIT`.
+  it "verifies a refresh step's upstream TLS exactly as the server's sends do" do
+    with_store_env do |store|
+      prev_hook = Gori::SessionRefresh.hook
+      begin
+        {false, true}.each do |verify|
+          tools_for(store, verify_upstream: verify)
+          Gori::SessionRefresh.hook.as(Gori::SessionRefresh::Runner).verify?.should eq(verify)
+        end
+      ensure
+        Gori::SessionRefresh.hook = prev_hook
+      end
+    end
+  end
 end

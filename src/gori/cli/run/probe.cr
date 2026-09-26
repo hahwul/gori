@@ -92,6 +92,7 @@ module Gori
         args = normalize_query_flag(args)
         neg_terms, opt_args = split_ql_negations(args)
         parser.parse(opt_args)
+        refresh_verify_upstream(!insecure)
         # A positional QL is accepted too ("gori run probe status:>=500" / "-status:200"),
         # mirroring history. `compose_history_query` owns the precedence, and it is shared rather
         # than re-spelled here because the local `query ||= (positional + neg_terms).join` this

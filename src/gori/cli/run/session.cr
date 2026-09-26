@@ -629,6 +629,7 @@ module Gori
         project_name : String? = nil
         format = :text
         allow_unscoped = false
+        insecure = false
         positional = [] of String
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run session refresh <name> [options]\n\n" \
@@ -640,6 +641,7 @@ module Gori
                      "  gori run session edit admin --refresh 12,14 --refresh-before jwt-exp\n" \
                      "  gori run session refresh admin"
           p.on("--allow-unscoped", "Send the steps even when their host is outside a configured project scope") { allow_unscoped = true }
+          p.on("-k", "--insecure-upstream", "Do not verify upstream TLS certificates") { insecure = true }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
@@ -649,6 +651,7 @@ module Gori
           p.missing_option { |f| abort "gori run session refresh: missing value for #{f}" }
         end
         parser.parse(args)
+        refresh_verify_upstream(!insecure)
         abort "gori run session refresh: too many arguments (expected one name, got: #{positional.join(" ")})" if positional.size > 1
         name = positional.first?
         abort "gori run session refresh: name the slot (`gori run session list`)" if name.nil?
@@ -686,7 +689,8 @@ module Gori
       private def self.session_refresher(store : Store) : Gori::SessionRefresh::Runner
         hook = Gori::SessionRefresh.hook.as?(Gori::SessionRefresh::Runner)
         return hook if hook && hook.store.same?(store)
-        Gori::SessionRefresh::Runner.new(store, session_layer(store), -> { Gori::Outbound.cli(Gori::Scope.load(store), false) })
+        Gori::SessionRefresh::Runner.new(store, session_layer(store), -> { Gori::Outbound.cli(Gori::Scope.load(store), false) },
+          verify: @@refresh_verify)
       end
 
       # `store`'s binding table: the one `open_store` just installed as `Env.layer`, or — when

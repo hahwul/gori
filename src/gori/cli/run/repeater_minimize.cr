@@ -40,6 +40,7 @@ module Gori
           p.missing_option { |f| abort "gori run repeater minimize: missing value for #{f}" }
         end
         parser.parse(args)
+        refresh_verify_upstream(!insecure)
 
         abort "gori run repeater minimize: too many arguments (expected one <repeater-id>, got: #{positional.join(" ")})" if positional.size > 1
         id_s = positional.first? || abort("gori run repeater minimize: <repeater-id> is required")
