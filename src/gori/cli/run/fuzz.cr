@@ -957,7 +957,19 @@ module Gori
         # `gori run fuzz … || die` failed a healthy run. `errored` counts the rows with an error
         # and no match; with `matched == 0` that is every error row, so "every send errored" is
         # `errored >= sent` (the Done progress is the run's own count of completed payloads).
-        exit 1 if matched == 0 && errored > 0 && (p = last_progress) && p.sent > 0 && errored.to_i64 >= p.sent
+        exit 1 if fuzz_every_send_errored?(matched, errored, last_progress.try(&.sent), condition_met)
+      end
+
+      # The `exit 1` rule above, as a predicate a spec can reach. A met `--stop-on` is exempt,
+      # as it is from `exit 3`: a timed-out send meets `time:>=N` (the stop matcher's
+      # `match_time` makes it eligible) while the run's own matcher leaves that row an
+      # unmatched error, so `--stop-on 'time:>=5000' --timeout 5 -c 1` whose first payload
+      # hangs is sent=1, errored=1, matched=0 — the blind injection it was looking for, not a
+      # dead target.
+      def self.fuzz_every_send_errored?(matched : Int32, errored : Int32, sent : Int64?,
+                                        condition_met : Bool) : Bool
+        return false if condition_met || matched > 0 || errored == 0
+        !sent.nil? && sent > 0 && errored.to_i64 >= sent
       end
 
       private def self.fuzz_saved_mode(mode : Fuzz::Mode, requested_race : Int32?,
