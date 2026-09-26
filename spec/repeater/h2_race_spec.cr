@@ -101,6 +101,54 @@ describe "Repeater::H2Engine.single_packet" do
     open.error.not_nil!.should contain("hpack")
   end
 
+  it "keeps other streams alive after an oversized but synchronized header block" do
+    port = start_h2_scripted_origin(2) do |io, ended|
+      sids = ended.to_h { |(sid, path)| {path, sid} }
+      status_index = 0x80_u8 | (HPACK::STATIC.index({":status", "200"}).not_nil! + 1).to_u8
+      server_index = 0x80_u8 | (HPACK::STATIC.index({"server", ""}).not_nil! + 1).to_u8
+      repeat_count = HPACK::Decoder::MAX_HEADER_LIST // ("server".bytesize + HPACK::Decoder::ENTRY_OVERHEAD) + 1
+      sync_field = Bytes[0x40, 0x06, 'x'.ord.to_u8, '-'.ord.to_u8, 's'.ord.to_u8,
+        'y'.ord.to_u8, 'n'.ord.to_u8, 'c'.ord.to_u8, 0x03, 'y'.ord.to_u8,
+        'e'.ord.to_u8, 's'.ord.to_u8]
+      block = Bytes.new(1 + repeat_count + sync_field.size) do |i|
+        if i == 0
+          status_index
+        elsif i <= repeat_count
+          server_index
+        else
+          sync_field[i - repeat_count - 1]
+        end
+      end
+
+      offset = 0
+      first = true
+      while offset < block.size
+        size = Math.min(16_384, block.size - offset)
+        last = offset + size == block.size
+        type = first ? Frame::Type::Headers : Frame::Type::Continuation
+        flags = last ? Frame::END_HEADERS : 0_u8
+        flags |= Frame::END_STREAM if first
+        io.write(Frame::Header.new(type.value, flags, sids["/large"], block[offset, size]).to_bytes)
+        offset += size
+        first = false
+      end
+
+      ok_block = Bytes[status_index, 0xbe_u8] # :status 200, then the final dynamic entry
+      io.write(Frame::Header.new(Frame::Type::Headers.value,
+        Frame::END_HEADERS | Frame::END_STREAM, sids["/ok"], ok_block).to_bytes)
+      io.flush
+    end
+
+    large, ok = Gori::Repeater::H2Engine.single_packet(race_wires("/large", "/ok"),
+      scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false)
+
+    large.ok?.should be_false
+    large.error.not_nil!.should contain("header list too large")
+    ok.ok?.should be_true
+    ok.response.not_nil!.status.should eq(200)
+    String.new(ok.head).should contain("x-sync: yes")
+  end
+
   # The read loop used to take its patience and deadline from the global io timeout, so an
   # origin trickling body bytes held a `timeout: 0.5s` race for up to three times the global one.
   it "bounds the read by the caller's timeout" do
