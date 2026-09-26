@@ -21,7 +21,7 @@ gori [command] [options]
 | `tutorial` | Guided TUI tour (navigation, palette, space menu, edit mode) |
 | `update` | Channel-aware self-update (binary / Homebrew / Snap / AUR / Nix) |
 
-Global flags: `-v` / `-V` / `--version`, `-h` / `--help`.
+Global flags: `-v` / `-V` / `--version`, `-h` / `--help`, and `--config PATH` (a settings file for one run; see [`--config PATH`](#config-path) below).
 
 ## gori tui
 
@@ -53,6 +53,7 @@ gori run <subcommand> [verb] [options]
 | Subcommand | Description |
 | ------------ | ------------- |
 | `capture` | Run the proxy and stream captured flows to STDOUT |
+| `shell` · `shell --print` | Open `$SHELL` (or run `-- CMD`) proxied through a live gori and trusting its CA, or print the export lines |
 | `history` (`ls`) | List / query captured flows |
 | `history delete <id>` · `delete -q QL` · `clear` | Hard-delete one flow, every flow a query matches (`--yes`), or wipe the project's History (`--yes`) |
 | `show <flow-id>` | Print one flow's request and response |
@@ -61,6 +62,7 @@ gori run <subcommand> [verb] [options]
 | `intercept` | Inspect and drive a capturing TUI's live intercept queue |
 | `send [URL]` | Send one request built from a URL (curl-shaped) or a raw request, without creating a Repeater session |
 | `repeater <flow-id>` · `list` · `create` · `send` | Re-send a captured flow, or list / create / execute Repeater sessions (incl. WebSocket) |
+| `repeater race <id> <id>…` | Fire several saved sessions as one synchronized race (HTTP/1.1 last-byte sync, HTTP/2 single-packet) |
 | `repeater minimize <id>` | Strip a saved request to the smallest form that keeps the response |
 | `repeater h2` | Send a field-native HTTP/2 request from an ordered HPACK field list |
 | `repeater move <id>` · `delete <id>…` | Reorder the workbench strip by tab number, or close one or more saved sessions |
@@ -74,7 +76,7 @@ gori run <subcommand> [verb] [options]
 | `probe issues` · `dismiss` · `promote` · `delete` | Triage persisted Probe findings |
 | `probe rules` · `mode` | List / arm scan rules; get or set the scan mode |
 | `discover` | Spider and brute-force endpoints into the Sitemap |
-| `import` | Bulk-import flows into History from a HAR / URL list / OpenAPI / Postman / Insomnia / Burp / WSDL file |
+| `import` | Bulk-import flows into History from a HAR / URL list / OpenAPI / Postman / Insomnia / Burp / WSDL file, or a curl command |
 | `sitemap [QL]` | Host → path endpoint tree |
 | `sitemap tag` | Pin, clear, or list a free-text memo on a sitemap path |
 | `sitemap params [QL]` | Per-endpoint parameter inventory: names by location, counts, sample values, reflected values |
@@ -89,12 +91,15 @@ gori run <subcommand> [verb] [options]
 | `notes [<n>]` · `create` · `delete` | Read, write, or delete project notes (`delete` needs `--yes`) |
 | `issues` · `create` · `update` · `delete` | List / export issues, or write and remove issues |
 | `links` · `add` · `delete` | Evidence pointers from an issue or note to a flow, Repeater session, or job |
+| `evidence` | Freeze, list, show, link, unlink, or delete frozen request+response copies |
+| `retest` · `add` · `run` · `runs` | An issue's retest steps: list and add them, run the retest (exit `1` unless it passes), and list its run history |
+| `redact` | Manage safe-export redaction profiles (`profiles`, `use`, `default`, `set`, `rm`) |
 | `rewriter` · `add` · `rm` · `enable` · `disable` · `preview` | Manage Match & Replace rules |
 | `rewriter preset list` · `add` | List the response-modification presets, and install one as ordinary Match & Replace rules |
 | `rewriter extract` · `bindings` | Manage session-binding extract rules, and list the `$BIND.NAME`s they declare |
 | `colormarker` · `add` · `update` · `rm` · `enable` · `disable` · `move` · `preview` · `color` | Manage History row-colour rules |
 | `views` · `add` · `set` · `rename` · `scope` · `rm` | Manage saved History views: named QL queries the list is narrowed by, as a lens |
-| `session` · `add` · `from-flow` · `edit` · `rm` · `baseline` · `show` · `refresh` · `activate` | Session slots: the named identities a send or an Authorize run goes out as, and the Repeater steps that re-authenticate one |
+| `session` · `add` · `from-flow` · `edit` · `rm` · `baseline` · `show` · `refresh` · `from-request` | Session slots: the named identities a send or an Authorize run goes out as, and the Repeater steps that re-authenticate one |
 | `grpc [schema]` · `reflect` · `forget` | The gRPC `.proto` lens: show what is loaded, fetch descriptors by server reflection, drop a cached target |
 | `project [list]` | List known projects |
 | `project create <name>` | Create (or reopen) a project by name |
@@ -129,14 +134,15 @@ Where a run streams, `json` and `jsonl` are not always the same shape:
 | Subcommand | `--format json` | `--format jsonl` |
 |------------|-----------------|------------------|
 | `capture`, `history` | One JSON object per line | Alias for `json`, same output |
-| `fuzz`, `mine`, `discover`, `authorize` | Buffered; one JSON array at the end | One object per line, as each result lands |
+| `fuzz`, `mine`, `discover`, `authorize`, `cache-deception` | Buffered; one JSON array at the end | One object per line, as each result lands |
+| `sequence` | The single report | Each sample as it lands, then the report |
 
 | Exit code | Meaning |
 | ----------- | --------- |
 | `0` | Success |
 | `1` | Error: a failed send, an unreadable project, a mutation that could not be applied |
 | `3` | `run fuzz --fail-if-no-matches` completed but nothing matched |
-| `130` | Interrupted by SIGINT/SIGTERM. `fuzz`, `mine`, `discover`, `sequence`, `authorize` and `repeater minimize` flush what they collected first, then exit `130` so a scripted `&& next-step` does not treat a truncated run as a finished one |
+| `130` | Interrupted by SIGINT/SIGTERM. `capture` (which exits `0` when `--for` or `--max` ends it), `fuzz`, `mine`, `discover`, `sequence`, `authorize` and `repeater minimize` flush what they collected first, then exit `130` so a scripted `&& next-step` does not treat a truncated run as a finished one |
 
 Without `--fail-if-no-matches`, a fuzz run that matched nothing *and* errored on every send still exits `1`, so "no findings" stays distinguishable from "never reached the target". With the flag, `3` wins.
 
@@ -159,7 +165,7 @@ gori run capture --port 8070 --format json --for 5m
 | `--project=NAME` | Project to write to (default `default`) |
 | `--db=PATH` | Database path |
 | `-k`, `--insecure-upstream` | Skip upstream TLS verification |
-| `--format=FMT` | `text` or `json` (JSON Lines) |
+| `--format=FMT` | `text`, or `json` / `jsonl` (both JSON Lines) |
 | `--for=DURATION` | Stop after e.g. `30s`, `5m`, `1h` |
 | `--max=N` | Stop after N completed flows; upgraded tunnels count after they close |
 
@@ -377,6 +383,8 @@ gori run repeater <flow-id> --target https://staging.example.com --http2 --diff
 | `--path=TARGET` | Send to a different request-target (path and query, e.g. `/api/v1/items/42?lang=en`) on the same origin. Everything else on the request line, every header and the body are kept byte-exact; the value goes on the line as written |
 | `--http2` / `--http1` (`--no-http2`) | Force a protocol; the default follows how the flow was captured |
 | `--sni=HOST` | TLS SNI override |
+| `--tls-preset=NAME` | Shape the ClientHello like `chrome`, `firefox`, `safari` or `curl` for this send |
+| `--slot=NAME` | Send as this [session slot](#run-session): its header overlay and `$BIND` table |
 | `-k`, `--insecure-upstream` | Skip upstream TLS verification |
 | `--timeout=SEC` | Per-operation connect + idle timeout |
 | `-H`, `--header=HEADER` | Overwrite/add a request header (repeatable). Repeat the same name to send duplicate lines; an explicit `Content-Length` is honoured verbatim, for CL-mismatch testing |
@@ -468,6 +476,7 @@ gori run repeater send 5 --message '{"op":"subscribe"}' --idle-ms 5000
 | `--http` | WebSocket: send the handshake as an ordinary HTTP request for this send only. Selects the engine, not a rewrite |
 | `--record-history` | Also write the outbound request + response to History as a captured flow, and print its flow id on stdout (HTTP only; a Repeater send leaves no flow by default) |
 | `--path=TARGET` | Send this request-target (path and query) instead of the stored one, for this send only |
+| `--slot=NAME`, `--tls-preset=NAME` | As on `repeater <flow-id>` |
 | `--ws-keep-key`, `-k`, `--timeout`, `--allow-unscoped`, `--headers-only`, `--max-body`, `--format` | As above (`--headers-only` / `--max-body` are HTTP-only: a WebSocket exchange prints a transcript) |
 
 `--path` sweeps one session's request across endpoints that differ only in path, without a session per path:
@@ -490,6 +499,12 @@ gori run repeater move 5 --down
 ```
 
 **`repeater delete <repeater-id> [<repeater-id>…] --yes`**: close one or more saved sessions and renumber the strip. `--yes` is required, and every id is checked before the first delete, so one unknown id refuses the whole call, so a typo cannot half-empty the workbench. Each line names the tab number the session *had* (read once, before anything shifts); `--format json` returns `deleted` (with `was_tui_index`), `failed`, and `remaining`. A session that could not be removed leaves a non-zero exit.
+
+**`repeater race <repeater-id> <repeater-id> [<repeater-id>…]`**: fire several saved sessions as one synchronized race, so N distinct requests reach the server in one narrow window (a TOCTOU across different endpoints). Over HTTP/1.1 each request goes on its own connection and the last byte of every one is released together; over HTTP/2 they share one connection as a single-packet attack. Every session must resolve to one origin and share the transport, or the race is refused. `--http2` / `--http1` override the sessions' stored setting; `--max-requests=N` refuses a group larger than N rather than splitting it; `--verbatim`, `--slot=NAME`, `--reframe-grpc`, `--tls-preset=NAME`, `-k`, `--timeout`, `--allow-unscoped` and `--format text|json` behave as on `repeater send`. For many copies of *one* request, use `fuzz --race=N`.
+
+```bash
+gori run repeater race 3 4 --http2
+```
 
 **`repeater minimize <repeater-id>`**: shrink a request to the smallest form that still reproduces the response. `--apply` writes the result back into the session; `--verbatim` sends the stored bytes as-is (body params stop being candidates, because their framing could not be kept honest); `--slot=NAME` sends as that [session slot](#run-session); `-k`/`--insecure`, `--allow-unscoped` and `--format` behave as above.
 
@@ -579,6 +594,7 @@ gori run mine <flow-id> --locations query,headers --wordlist params.txt
 | Option | Description |
 | -------- | ------------- |
 | `--flow`, `--request`, `--target`, `--sni`, `--http2`, `-k` | Request source and transport |
+| `--allow-unscoped` | Send even if the target is outside the project scope (Sandbox and explicit excludes still apply) |
 | `--locations=LIST` | `query`, `form`, `multipart`, `json`, `headers`, `cookies` (multipart off by default, pass it explicitly) |
 | `--wordlist`, `--bucket=N` | Candidate names and bucket size |
 | `--name=NAME` | Test this name first, ahead of the wordlists (repeatable), for example a name `sitemap params` found on another endpoint |
@@ -607,6 +623,7 @@ gori run sequence --tokens tokens.txt          # '-' reads stdin
 | Token location (pick one) | `--cookie=NAME`, `--header=NAME`, `--regex=RE`, `--position=A:B`, `--jsonpath=EXPR` |
 | `--count=N` | Target token count (default 500) |
 | `--target`, `--http2`, `--sni`, `-k` | Transport (target required for `--request`/stdin) |
+| `--allow-unscoped` | Send even if the target is outside the project scope (Sandbox and explicit excludes still apply) |
 | `--concurrency` (1), `--rate`, `--throttle`, `--timeout`, `--retries`, `--max-requests=N` | Rate control (concurrency stays 1 for stateful tokens) |
 | `--no-keep-alive` | Dial a fresh connection per sample instead of reusing one |
 | `--bind-from=FLOW-ID` | Replay that captured flow first so its response fills the project's `$BIND.NAME` session bindings for the rest of the run |
@@ -731,7 +748,7 @@ Deleting a Repeater session that a slot uses as a step keeps the step in place, 
 
 Binding values live in memory, **per process**: `session refresh` rebinds this command's own table and is gone when it exits, so it is for checking that a login sequence works. A `--slot NAME` sweep refreshes in its own process, and the TUI and a running `gori mcp` each keep their own.
 
-**There is no `session activate`.** A `gori run` process sends and exits, so the active pointer has nothing to span, and persisting one would resolve into an empty binding table on the next run, sending an overlay whose `$BIND.SESSION` is literal. Name the identity on the send instead: `--slot NAME`, on `repeater`, `repeater send`, `repeater minimize`, `fuzz`, `mine`, `sequence` and `discover`. The run prints `slot: sending as NAME` on STDERR before its first request.
+**There is no `session activate`.** A `gori run` process sends and exits, so the active pointer has nothing to span, and persisting one would resolve into an empty binding table on the next run, sending an overlay whose `$BIND.SESSION` is literal. Name the identity on the send instead: `--slot NAME`, on `send`, `repeater`, `repeater send`, `repeater race`, `repeater minimize`, `fuzz`, `mine`, `sequence`, `discover` and `retest run`. The run prints `slot: sending as NAME` on STDERR before its first request.
 
 ### run probe
 
@@ -740,7 +757,7 @@ gori run probe --severity high --category cors
 gori run probe -a
 ```
 
-`--severity` is `info`\|`low`\|`medium`\|`high`\|`critical`; `--category` is `headers`\|`cookies`\|`tech`\|`infoleak`\|`cors`\|`client`\|`active`; `-a`/`--active` includes light-touch active checks; `-q`/`--query` filters with QL, and `--lenient` accepts a query that names an unknown field instead of refusing it. `--in-scope` reports only issues on hosts in the project's configured scope (the TUI's `s` lens, opt-in and independent of `--active`/`--allow-unscoped`); every flow is still scanned.
+`--severity` is `info`\|`low`\|`medium`\|`high`\|`critical`; `--category` is `headers`\|`cookies`\|`tech`\|`infoleak`\|`cors`\|`client`\|`active`\|`custom`; `-a`/`--active` includes light-touch active checks; `-q`/`--query` filters with QL, and `--lenient` accepts a query that names an unknown field instead of refusing it. `--in-scope` reports only issues on hosts in the project's configured scope (the TUI's `s` lens, opt-in and independent of `--active`/`--allow-unscoped`); every flow is still scanned.
 
 With `--active`: `--unsafe` also probes unsafe methods (`POST`/`PUT`/`PATCH`/`DELETE`), whose re-sends may mutate server data; `--aggressive` raises the per-rule caps and widens the forbidden-bypass header set (and implies `--unsafe`). Both stay scope-gated unless you also pass `--allow-unscoped`. Use them only against authorized targets.
 
@@ -786,6 +803,7 @@ gori run discover --target https://target.example --max-depth 3 --extensions php
 | `--no-keep-alive` | Dial a fresh connection per probe instead of reusing one per origin |
 | `--assets` | Also fetch the linked images, fonts, media and archives (default: record their directory, skip the download) |
 | `-k`, `--insecure-upstream` | Skip upstream TLS verification |
+| `--http2`, `--sni=HOST` | Force HTTP/2; TLS SNI override |
 | `--bind-from=FLOW-ID` | Replay that captured flow first so its response fills the project's `$BIND.NAME` session bindings for the rest of the run |
 | `--slot=NAME` | Send as this [session slot](#run-session): its header overlay, and its binding table for `$BIND.NAME`. Applied before `--bind-from`, so the seed fills the slot the run then sends as |
 | `--allow-unscoped` | Run even if the target is outside the project scope. Waives the up-front (Layer 1) check only. Sandbox mode and explicit exclude rules still refuse each send, and the refusal now names which of the two fired. |
@@ -842,7 +860,7 @@ A malformed entry is skipped rather than aborting the file; the result reports b
 gori run sitemap --in-scope --format paths
 ```
 
-`-q`/`--query=QL` filters endpoints with the same QL as history (also positional), `-n`/`--limit=N` caps the endpoints scanned (default `SITEMAP_MAX`), `--in-scope` limits to in-scope hosts, `--hide-static` leaves out images, fonts and audio/video (per flow, like the TUI tree), `--no-group` disables id folding, `--no-fold-query` disables query-string folding (the two are separate axes), `--js-refs` also draws the paths captured JavaScript references and nobody requested (see `sitemap js`; `js_refs` and `unrequested` in JSON, and never in `paths`), `--format` is `text` (tree), `json`, or `paths`, and `--lenient` accepts a query that names an unknown field instead of refusing it.
+`-q`/`--query=QL` filters endpoints with the same QL as history (also positional), `-n`/`--limit=N` caps the endpoints scanned (default 10000), `--in-scope` limits to in-scope hosts, `--hide-static` leaves out images, fonts and audio/video (per flow, like the TUI tree), `--no-group` disables id folding, `--no-fold-query` disables query-string folding (the two are separate axes), `--js-refs` also draws the paths captured JavaScript references and nobody requested (see `sitemap js`; `js_refs` and `unrequested` in JSON, and never in `paths`), `--format` is `text` (tree), `json`, or `paths`, and `--lenient` accepts a query that names an unknown field instead of refusing it.
 
 **`sitemap tag`**: pin a free-text memo onto one path, the same note the TUI's Sitemap shows.
 
@@ -959,7 +977,7 @@ gori run oast providers add --name lab --kind custom-http --host https://oast.la
 gori run oast providers enable p_1
 ```
 
-`enable`, `disable`, `update` and `delete` take the provider **id** (`p_1`, or a bare `1`), not its display name; `add` prints the id it assigned, and `list` shows it.
+`enable`, `disable`, `update` and `delete` take the provider **id** (`p_1`, or a bare `1`), not its display name; `add` prints the id it assigned, and `list` shows it. `list` also shows the global providers from `settings.json` as `g_<hex>`; those are read-only here.
 
 | Option | Description |
 | -------- | ------------- |
@@ -1660,7 +1678,7 @@ MCP stdio server. See the [MCP guide](/guide/mcp/) for tool details.
 | `--install-hermes` | Write Hermes `~/.hermes/config.yaml` `mcp_servers.gori` (or `$HERMES_HOME`) |
 | `--install-pi` | Write Pi `~/.pi/agent/mcp.json` `mcpServers.gori` (or `$PI_CODING_AGENT_DIR`); requires an MCP adapter |
 
-Several `--install-*` flags may be given in one run; each named client is configured and reported separately, and one unwritable config does not stop the others. Every other flag on the command line (`--db`, `--project`, `--no-project`, `--use-active-project`, `--read-only`, `--insecure-upstream`, and the global `--config`) is written into the installed command, with paths made absolute. Existing config files are updated in place: other entries, tables and comments survive, permissions are preserved, and the replacement is atomic.
+Several `--install-*` flags may be given in one run; each named client is configured and reported separately, and one unwritable config does not stop the others. Every other flag on the command line (`--db`, `--project`, `--no-project`, `--use-active-project`, `--read-only`, `--tools`, `--insecure-upstream`, and the global `--config`) is written into the installed command, with paths made absolute (`--project` is recorded as the name). Existing config files are updated in place: other entries, tables and comments survive, permissions are preserved, and the replacement is atomic.
 
 ## gori ca
 
@@ -1913,7 +1931,7 @@ Two sends differing only in the override dial two separate SSL contexts, so they
 `--config` points gori at a specific settings file for one run. It works before any subcommand:
 
 ```bash
-gori --config ./ci-profile.json run capture --target https://api.example.com
+gori --config ./ci-profile.json run capture --for 5m
 gori --config ~/profiles/corp.json          # the TUI, with a different config
 ```
 
