@@ -90,14 +90,14 @@ module Gori
       # normalises a typed capital to shift+lowercase, so an "F" chord would never fire —
       # and `menu_key` skips shift chords, hence the explicit mnemonic.
       #
-      # That mnemonic is 'i', not the 'a' its siblings use: `diff.pick-a`'s chord already
-      # claims 'a' in this scope, and `Registry#validate_menu_keys!` raises at BOOT on the
-      # collision rather than silently dropping one of the two from the space menu.
+      # That mnemonic is 'F', its own chord, not the 'a' its siblings use: `diff.pick-a`'s
+      # chord already claims 'a' in this scope. Never 'i': the tab does not bind it, so a
+      # dropped space would reach Global and hold all traffic (#1295).
       r.register Verb::Definition.new(
         "diff.issue", "Add issue",
         "File this endpoint as an Issue — prefilled with both projects, both sides' answers and what moved",
         Verb::Scope::Diff, [Verb::Chord.new("f", shift: true)],
-        available: rows_shown, mnemonic: 'i', group: :triage) { |ctx| ctx.diff_issue; nil }
+        available: rows_shown, mnemonic: 'F', group: :triage) { |ctx| ctx.diff_issue; nil }
 
       # The lighter exit, and the one a retest actually leans on: most rows are worth
       # MENTIONING, not filing. One keystroke, no form — a modal per row would cost more

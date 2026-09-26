@@ -123,6 +123,8 @@ key grammar and the 2026-09-25 #1274 entries).
   traffic on a dropped `space`). `spec/tui/menu_letter_meaning_spec.cr` sweeps all four. Its
   `MENU_LETTER_ALLOWED` names exact verb pairs with a reason and fails when an entry stops
   violating, so a fix deletes its own line. Never add an entry just to let a new verb pass.
+  So a level-1 `c` or `i` is allowed only on a tab that binds that letter itself: anywhere else a
+  dropped `space` reaches Global and stops capture or holds all traffic, and the guard fails.
 - **A recurring intent takes its letter from the lexicon.** Declare `intent:`
   (`src/gori/verb/lexicon.cr`), never a `mnemonic:` beside it (`validate_intents!` raises).
   The same intent has the same letter on every tab, and a verb whose id names an intent

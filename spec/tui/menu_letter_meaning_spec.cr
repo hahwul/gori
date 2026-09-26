@@ -233,15 +233,6 @@ MENU_LETTER_ALLOWED = {
   {"fuzz.run", "strip:rename"}      => "WP2 #10: strip `r` renames, the menu's `r` runs (hotkeys.md)",
   {"mine.run", "strip:rename"}      => "WP2 #10: strip `r` renames, the menu's `r` runs (hotkeys.md)",
   {"sequence.run", "strip:rename"}  => "WP2 #10: strip `r` renames, the menu's `r` runs (hotkeys.md)",
-  # Decision 10 — a letter the tab does not bind falls through to Global on a dropped space.
-  {"repeater.clear-marks", "capture.toggle"}  => "Decision 10: `c` reaches Global capture on a dropped space",
-  {"fuzz.clear-marks", "capture.toggle"}      => "Decision 10: `c` reaches Global capture on a dropped space",
-  {"issues.set-status", "capture.toggle"}     => "Decision 10: `c` reaches Global capture on a dropped space",
-  {"issue.set-status", "capture.toggle"}      => "Decision 10: `c` reaches Global capture on a dropped space",
-  {"jwt.copy-attack", "capture.toggle"}       => "Decision 10: `c` reaches Global capture on a dropped space",
-  {"rewriter.duplicate", "capture.toggle"}    => "Decision 10: `c` reaches Global capture on a dropped space",
-  {"colormarker.duplicate", "capture.toggle"} => "Decision 10: `c` reaches Global capture on a dropped space",
-  {"diff.issue", "intercept.toggle"}          => "Decision 10: file-issue is `a` elsewhere; `i` holds all traffic on a dropped space",
   # The Editor scope answers ahead of the tab while a text editor pane has focus.
   # vim keyset only: ⇧V is select-line and the editor gains bare `/` `a` `g` `⇧G`.
   {"issue.set-cvss", "issue.select-line"}  => "vim: ⇧V selects a line",

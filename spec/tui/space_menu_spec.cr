@@ -358,7 +358,7 @@ describe Gori::Tui::SpaceMenu do
     menu.verb_for('t').try(&.id).should eq("issues.mark-toggle")
     menu.verb_for('T').try(&.id).should eq("issues.mark-all")
     menu.verb_for('s').try(&.id).should eq("issues.set-severity")
-    menu.verb_for('c').try(&.id).should eq("issues.set-status")
+    menu.verb_for('C').try(&.id).should eq("issues.set-status")
     menu.verb_for('d').try(&.id).should eq("issues.delete")
     menu.verb_for('N').should be_nil # nothing marked yet
 

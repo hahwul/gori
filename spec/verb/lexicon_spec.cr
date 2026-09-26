@@ -44,6 +44,8 @@ module LexiconSpec
     "link"             => :link,
     "links"            => :link,
     "add-host"         => :scope_add,
+    "clear-marks"      => :clear_marks,
+    "set-status"       => :set_status,
   }
 
   # Rows whose id names an intent but whose letter is decided elsewhere. Each line names why,

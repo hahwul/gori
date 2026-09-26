@@ -343,10 +343,11 @@ describe "Gori::Verbs diff record verbs" do
 
   it "keeps every Diff space-menu key distinct — 'a' is already the baseline picker" do
     # `Registry#validate_menu_keys!` raises at BOOT on a collision; this names the pair that
-    # forced `diff.issue` off the 'a' its siblings on other tabs use.
+    # forced `diff.issue` off the 'a' its siblings on other tabs use. It takes its own ⇧F
+    # chord, never `i`: a dropped space would reach Global and hold all traffic (#1295).
     Gori::Verbs.registry.validate_menu_keys!
     r = Gori::Verbs.registry
-    r["diff.issue"].menu_key.should eq('i')
+    r["diff.issue"].menu_key.should eq('F')
     r["diff.pick-a"].menu_key.should eq('a')
   end
 end

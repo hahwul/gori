@@ -3896,3 +3896,21 @@ the JWT/Cookie lens toggles and others off their natural letters.
   the strip's step right, which from a pane would switch the sub-tab being edited). Tag moved to
   `g`, which ends the one standing R1 pair between a menu letter and the strip's raw keys other
   than rename's `r`.
+
+### 2026-09-26: no level-1 `c` or `i` where the tab leaves the letter to Global
+
+Closes: #1274 Decision 10 (the eight Global fall-through pairs in the R1 guard). #1295.
+
+Global binds three bare letters, `c` (stop capture), `i` (hold all traffic) and `s` (the scope
+lens). On a tab that does not bind the letter itself, a menu row on it is one dropped `space`
+away from the Global action, and for `c` and `i` that action is silent and changes what the
+proxy does. The scope lens stays excused: it is a view filter the next `s` undoes.
+
+- **The rows move.** `:set_status`, `:duplicate_rule` and the new `:clear_marks` (the Repeater
+  and Fuzzer marker clears, one intent now) are `C` in the lexicon, so each moves on every tab
+  at once. JWT's Copy attack token is `C`, like Copy re-signed token in the pane beside it.
+  Diff's Add issue is `F`, its own `⇧F`, since `a` is Diff's pick-A.
+- **The guard is the rule.** The R1 guard already reports a Global fall-through; with the
+  eight allowlist lines gone, a new `c`/`i` row on such a tab fails it, and the only way back is
+  an allowlist line with a reason. A tab that binds the letter itself (Probe's `c` dismiss) is
+  unaffected, because the press never reaches Global.
