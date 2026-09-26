@@ -166,6 +166,23 @@ describe ParamsController do
     end
   end
 
+  # A History clear restarts flow ids: the scan's ids then name whatever was captured next,
+  # and ↵ / Mine must refuse rather than open or seed that unrelated request.
+  it "refuses a row whose flow id now names another request" do
+    with_params_controller do |ctl, _, session|
+      seed_params_flow(session.store, "https://acme.test/search?q=shoes")
+      ctl.run
+      drain_until_landed(ctl)
+      row = ctl.view.rows.first
+      ctl.carrying_flow_id(row).should eq(row.last_flow_id)
+      session.store.clear_flows.should be_true
+      ctl.carrying_flow_id(row).should be_nil # pruned
+      seed_params_flow(session.store, "https://other.test/admin?role=1")
+      session.store.flow_row(row.last_flow_id).should_not be_nil # the id was reused
+      ctl.carrying_flow_id(row).should be_nil
+    end
+  end
+
   it "narrows the scan to the Sitemap row the operator came from" do
     with_params_controller do |ctl, sitemap, session|
       seed_params_flow(session.store, "https://acme.test/users/1?x=1")

@@ -208,6 +208,15 @@ module Gori
       Sitemap.path_part(Sitemap.node_path(target))
     end
 
+    # Does the stored flow `flow` still stand where `row` said its flow did — same host,
+    # method and endpoint, keyed exactly as `build` keyed the row? A report holds flow ids,
+    # and a History clear restarts them (`Store#clear_flows`), so an id read back after the
+    # scan can name an unrelated request; a caller that acts on the id checks this first.
+    def carries?(row : Row, flow : Store::FlowRow) : Bool
+      flow.host.downcase == row.host && flow.method.upcase == row.method &&
+        endpoint_path(flow.target) == row.path
+    end
+
     # The caller's filter, AND an exact host when one was named. Exact on purpose: QL's
     # `host:` is a substring, and "api.test" must not also read "sub.api.test".
     # Case-insensitive, but hosts are stored as captured: a bare `host = ? COLLATE NOCASE`

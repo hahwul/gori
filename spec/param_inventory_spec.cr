@@ -215,6 +215,18 @@ describe Gori::ParamInventory do
     end
   end
 
+  it "says whether a stored flow is still the request a row names" do
+    with_store do |store|
+      id = pi_flow(store, "/Search?q=1", host: "Shop.Test")
+      r = row(PI.build(store), "q")
+      PI.carries?(r, store.flow_row(id).not_nil!).should be_true
+      other = pi_flow(store, "/search?q=1", host: "other.test")
+      PI.carries?(r, store.flow_row(other).not_nil!).should be_false
+      post = pi_flow(store, "/Search?q=1", host: "shop.test", method: "POST")
+      PI.carries?(r, store.flow_row(post).not_nil!).should be_false
+    end
+  end
+
   # The stored body is read whole: a cap on the WIRE bytes would cut a JSON body before it
   # could parse.
   it "reads a JSON body larger than the old 256 KiB cut" do
