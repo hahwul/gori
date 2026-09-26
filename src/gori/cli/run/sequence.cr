@@ -72,6 +72,7 @@ module Gori
           p.missing_option { |f| abort "gori run sequence: missing value for #{f}" }
         end
         parser.parse(args)
+        refresh_verify_upstream(!insecure)
 
         # Manual mode — analyze a token list, no network.
         if tf = tokens_file

@@ -72,6 +72,7 @@ module Gori
           p.missing_option { |f| abort "gori run mine: missing value for #{f}" }
         end
         parser.parse(args)
+        refresh_verify_upstream(!insecure)
 
         abort "gori run mine: too many arguments (expected at most one <flow-id>)" if positional.size > 1
         abort "gori run mine: --request and --flow cannot be combined — pick one template source" if request_file && flow_id

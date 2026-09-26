@@ -707,7 +707,7 @@ gori run session refresh admin
 | `edit <name>` | The same flags, plus `--clear-set` / `--clear-remove` / `--clear-rules` / `--clear-refresh`. A collection flag REPLACES that whole collection; one you omit is left alone |
 | `rm`\|`delete <name>` | Any extract rule it claimed goes back to writing the global binding table |
 | `baseline <name>` | Move the Authorize baseline (exactly one slot holds it) |
-| `refresh <name>` | Run the slot's refresh steps now. `--allow-unscoped`, `--format text\|json`; exits `1` when the refresh failed |
+| `refresh <name>` | Run the slot's refresh steps now. `--allow-unscoped`, `-k`/`--insecure-upstream`, `--format text\|json`; exits `1` when the refresh failed |
 
 All verbs take `--project=NAME` / `--db=PATH`.
 
@@ -742,7 +742,7 @@ This is a **literal snapshot**, not a login macro: it does not re-authenticate o
 | `jwt-exp` | A JWT bound in the slot's table is within 30 s of its `exp` |
 | `ttl=10m` | The span has passed since the last successful refresh, or before one since the slot's oldest binding (`s`, `m`, `h`; a bare number is seconds) |
 
-A slot with a policy and nothing bound yet refreshes before its first send. It never retries a request after a `401`: the policy acts before a send and never reads a response, so an Authorize verdict is never hidden by a login. A failed automatic refresh lets the send go ahead with the value it has, waits 30 s before trying again, and switches automatic refresh off after 3 consecutive failures until a manual refresh succeeds. Concurrent sends wait for the one refresh in flight. An automatic refresh is gated by the project scope as `gori run` gates any send and never inherits a command's own `--allow-unscoped`; the login host must be in scope.
+A slot with a policy and nothing bound yet refreshes before its first send. It never retries a request after a `401`: the policy acts before a send and never reads a response, so an Authorize verdict is never hidden by a login. A failed automatic refresh lets the send go ahead with the value it has, waits 30 s before trying again, and switches automatic refresh off after 3 consecutive failures until a manual refresh succeeds. Concurrent sends wait for the one refresh in flight. An automatic refresh is gated by the project scope as `gori run` gates any send and never inherits a command's own `--allow-unscoped`; the login host must be in scope. Its steps skip upstream TLS verification when the command was given `-k`, as its sends do.
 
 Deleting a Repeater session that a slot uses as a step keeps the step in place, marked deleted, and a refresh refuses it rather than running whatever session takes that id next. Remove it with `--refresh` or `--clear-refresh`.
 

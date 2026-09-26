@@ -75,6 +75,7 @@ module Gori
           p.missing_option { |f| abort "gori run send: missing value for #{f}" }
         end
         parser.parse(args)
+        refresh_verify_upstream(!insecure)
 
         # Every refusal knowable from argv alone goes ABOVE the reads: `--request-stdin` blocks
         # until EOF, and a mistake in the flags must not first drain a pipe (or hang on one).

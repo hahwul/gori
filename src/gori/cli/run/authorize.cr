@@ -58,6 +58,7 @@ module Gori
         # here the way they are there: a positional on this command is a flow id, not a query,
         # so a bare `-path:/x` is a usage error rather than a term to fold in.)
         parser.parse(normalize_query_flag(args))
+        refresh_verify_upstream(!insecure)
         positional.each { |s| flow_ids << parse_flow_id(s, "gori run authorize") }
         # An unrecognized/uncompilable term makes the selection BROADER than asked, and every
         # extra row here is `identities.size` more requests on a target.

@@ -178,9 +178,12 @@ module Gori
 
     # The earliest `exp` of any JWT inside `value` — a bare token, `Bearer <token>`, a cookie
     # pair. nil when it holds none or none carries an `exp`.
+    #
+    # Scrubbed first: a bound value keeps its raw bytes (`TokenExtract.position`), and a regex
+    # over invalid UTF-8 raises. A token is ASCII, which `scrub` never alters.
     def self.jwt_exp(value : String) : Int64?
       exps = [] of Int64
-      value.scan(Jwt::SCAN_RE) do |m|
+      value.scrub.scan(Jwt::SCAN_RE) do |m|
         next unless tok = Jwt.narrow(m[0])
         next unless Jwt.jwt?(tok)
         next unless seg = tok.split('.')[1]?
@@ -464,7 +467,14 @@ module Gori
             Outcome.new(slot.name, false, manual, slot.refresh.size,
               reason: "refresh raised: #{ex.message || ex.class.name}")
           end
-          if finished.ok && (why = still_due_reason(slot))
+          # Guarded like `execute`: the steps already ran, so a raise here must still settle an
+          # outcome, or the waiters wake to the one before it and nothing is counted.
+          why = begin
+            still_due_reason(slot) if finished.ok
+          rescue ex
+            "refresh raised: #{ex.message || ex.class.name}"
+          end
+          if why
             finished = Outcome.new(slot.name, false, manual, slot.refresh.size, reason: why,
               rebound: finished.rebound, flow_ids: finished.flow_ids)
           end

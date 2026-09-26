@@ -63,6 +63,7 @@ module Gori
           p.missing_option { |f| abort "gori run grpc reflect: missing value for #{f}" }
         end
         parser.parse(args)
+        refresh_verify_upstream(!insecure)
 
         raw = url
         abort "gori run grpc reflect: a target URL is required (e.g. https://api.test:443)" if raw.nil? || raw.empty?
