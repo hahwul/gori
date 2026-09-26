@@ -429,12 +429,18 @@ module Gori
     # The PRIMARY default chord for `id` under `profile` + `keyset` with NO user overrides —
     # what a row reverts to on "reset". The keyset belongs in the answer: under `vim`,
     # resetting Select line puts it back on `⇧V`, not on the `x` the verb file declares.
+    #
+    # A keyless `chord_of` verb defaults to the chord it names, as #binding_for reports it.
     def self.default_for(registry : Verb::Registry, id : String, profile : String,
                          keyset : String = editor_keyset) : Verb::Chord?
       verb = registry[id]?
       return nil unless verb
-      Verb::Keymap.effective_chords(verb, Verb::OsProfile.resolve(profile), Verb::Keymap::NO_OVERRIDES,
+      chord = Verb::Keymap.effective_chords(verb, Verb::OsProfile.resolve(profile), Verb::Keymap::NO_OVERRIDES,
         Verb::Keyset.resolve(keyset)).first?
+      if chord.nil? && (via = verb.chord_of)
+        return default_for(registry, via, profile, keyset)
+      end
+      chord
     end
 
     # First conflict for a proposed (id, chord) against the working `overrides`, or nil.

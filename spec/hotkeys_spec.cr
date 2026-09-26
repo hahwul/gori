@@ -100,6 +100,8 @@ describe Gori::Hotkeys do
       # A chord of its own (a rebind of the row itself) wins.
       own = {"repeater.toggle-resp-hex" => [Gori::Verb::Chord.new("o", ctrl: true)]}
       Gori::Hotkeys.binding_for(reg, "repeater.toggle-resp-hex", own).should eq(Gori::Verb::Chord.new("o", ctrl: true))
+      # …and its default is the same borrowed chord, not "unbound" (the Hotkeys editor's reset).
+      Gori::Hotkeys.default_for(reg, "repeater.toggle-resp-hex", "auto").should eq(Gori::Verb::Chord.new("x", ctrl: true))
     end
   end
 
