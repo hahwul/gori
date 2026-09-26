@@ -89,7 +89,7 @@ gori run <subcommand> [verb] [options]
 | `cookie [<cookie>]` | Flask / Rack / Django 세션 쿠키 디코드, 검증, 브루트포스, 위조 |
 | `decoder <chain> [input]` | Decoder 인코드 / 디코드 / 해시 체인 실행 |
 | `notes [<n>]` · `create` · `delete` | 프로젝트 노트 읽기, 작성, 삭제 (`delete`는 `--yes` 필요) |
-| `issues` · `create` · `update` · `delete` | 이슈 목록 / 내보내기, 또는 이슈 작성과 삭제 |
+| `issues` · `create` · `update` · `delete` | 이슈 목록 / 내보내기, 또는 이슈 작성과 삭제 (`delete`는 `--yes` 필요) |
 | `links` · `add` · `delete` | 이슈나 노트에서 플로우, Repeater 세션, 잡으로 이어지는 증거 포인터 |
 | `evidence` | 고정한 요청+응답 사본을 만들고, 나열·조회·연결·연결 해제·삭제 |
 | `retest` · `add` · `run` · `runs` | 이슈의 재테스트 단계: 나열과 추가, 재테스트 실행(통과하지 않으면 종료 코드 `1`), 실행 이력 나열 |
@@ -1065,7 +1065,7 @@ gori run notes --all
 ```bash
 gori run issues create --title "Reflected XSS on /search" --cvss 8.8 --host app.example.com --flow 42
 gori run issues update 7 --status confirmed --notes "Verified on staging" --severity critical
-gori run issues delete 7
+gori run issues delete 7 --yes
 
 # 노트 본문은 인자 벡터 대신 파일이나 파이프에서 읽을 수 있습니다
 gori run issues create --title "IDOR on /v1/users/{id}" --severity high --notes-file writeup.md
@@ -1081,7 +1081,7 @@ report-generator | gori run issues update 7 --status confirmed --notes-stdin
 | `--include-sensitive` | `sarif`의 `webRequest`/`webResponse` 헤더에서 `Authorization` / `Cookie` / `Set-Cookie` / `Proxy-Authorization` / API 키 값을 `[REDACTED]` 대신 그대로 씁니다. 다른 형식에서는 효과가 없으며 STDERR로 알려 줍니다 |
 | `create` | `-t`/`--title` (필수), `--cvss` (점수 또는 벡터. 이 값에서 severity를 자동 산정), `-s`/`--severity` (`info`\|`low`\|`medium`\|`high`\|`critical`), `--host`, `--flow=ID`, `-n`/`--notes`, `--notes-file=FILE`, `--notes-stdin` |
 | `update <id>` | `-t`/`--title`, `--cvss` (새 점수/벡터. 빈 문자열로 초기화), `-s`/`--severity`, `-n`/`--notes` (빈 문자열로 초기화), `--notes-file=FILE`, `--notes-stdin`, `--status` (`open`\|`confirmed`\|`false-positive`\|`resolved`) |
-| `delete <id>` | 이슈와 그 증거 링크를 삭제합니다. 보고서에는 남기고 닫힌 상태로만 표시하려면 `update <id> --status=resolved`를 쓰세요 |
+| `delete <id>` | 이슈와 그 증거 링크를 삭제합니다. `-y`/`--yes`가 필요합니다. 보고서에는 남기고 닫힌 상태로만 표시하려면 `update <id> --status=resolved`를 쓰세요 |
 
 `--format sarif`는 [SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html) 로그를 씁니다. GitHub code scanning, DefectDojo, Azure DevOps가 그대로 읽는 형식입니다. 이슈 하나가 result 하나가 되며, severity는 SARIF `level`로 매핑되고(5단계 원본은 `rank`와 룰의 `security-severity`에 보존), `false-positive`/`resolved` 상태는 `suppression`으로 나가 정리한 이슈가 다시 열린 것으로 보이지 않습니다. 연결된 플로우는 실제 헤더와 (디코딩·64 KiB 상한) 본문을 담은 `webRequest`/`webResponse`로 함께 실립니다.
 

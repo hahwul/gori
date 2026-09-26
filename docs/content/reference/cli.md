@@ -89,7 +89,7 @@ gori run <subcommand> [verb] [options]
 | `cookie [<cookie>]` | Decode, verify, brute-force, or forge a Flask / Rack / Django session cookie |
 | `decoder <chain> [input]` | Run a Decoder encode / decode / hash chain |
 | `notes [<n>]` · `create` · `delete` | Read, write, or delete project notes (`delete` needs `--yes`) |
-| `issues` · `create` · `update` · `delete` | List / export issues, or write and remove issues |
+| `issues` · `create` · `update` · `delete` | List / export issues, or write and remove issues (`delete` needs `--yes`) |
 | `links` · `add` · `delete` | Evidence pointers from an issue or note to a flow, Repeater session, or job |
 | `evidence` | Freeze, list, show, link, unlink, or delete frozen request+response copies |
 | `retest` · `add` · `run` · `runs` | An issue's retest steps: list and add them, run the retest (exit `1` unless it passes), and list its run history |
@@ -1073,7 +1073,7 @@ Write issues from scripts with `create` / `update`:
 ```bash
 gori run issues create --title "Reflected XSS on /search" --cvss 8.8 --host app.example.com --flow 42
 gori run issues update 7 --status confirmed --notes "Verified on staging" --severity critical
-gori run issues delete 7
+gori run issues delete 7 --yes
 
 # The notes body can come from a file or a pipe instead of the argument vector
 gori run issues create --title "IDOR on /v1/users/{id}" --severity high --notes-file writeup.md
@@ -1089,7 +1089,7 @@ report-generator | gori run issues update 7 --status confirmed --notes-stdin
 | `--include-sensitive` | Emit `Authorization` / `Cookie` / `Set-Cookie` / `Proxy-Authorization` / API-key values in `sarif`'s `webRequest`/`webResponse` headers instead of `[REDACTED]`. Inert in the other formats, which say so on STDERR |
 | `create` | `-t`/`--title` (required), `--cvss` (score or vector; auto-derives severity), `-s`/`--severity` (`info`\|`low`\|`medium`\|`high`\|`critical`), `--host`, `--flow=ID`, `-n`/`--notes`, `--notes-file=FILE`, `--notes-stdin` |
 | `update <id>` | `-t`/`--title`, `--cvss` (new score/vector; empty to clear), `-s`/`--severity`, `-n`/`--notes` (empty to clear), `--notes-file=FILE`, `--notes-stdin`, `--status` (`open`\|`confirmed`\|`false-positive`\|`resolved`) |
-| `delete <id>` | Delete the issue and its evidence links. To keep it in the report but mark it closed, use `update <id> --status=resolved` instead |
+| `delete <id>` | Delete the issue and its evidence links. Requires `-y`/`--yes`. To keep it in the report but mark it closed, use `update <id> --status=resolved` instead |
 
 `--format sarif` writes a [SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html) log, the format GitHub code scanning, DefectDojo and Azure DevOps ingest. Each issue becomes one result: its severity maps to a SARIF `level` (with `rank` and the rule's `security-severity` preserving the full five-way scale), a `false-positive` or `resolved` triage status becomes a `suppression` so a dismissed finding does not reappear as open, and a linked flow rides along as `webRequest`/`webResponse` with real headers and (decoded, 64 KiB-capped) bodies.
 

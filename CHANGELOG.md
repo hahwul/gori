@@ -101,7 +101,7 @@
 - TUI: a click places the caret without entering INSERT, a double-click takes the word in READ, and a paste aimed at a READ pane inserts instead of being refused (#1124)
 - TUI: a READ selection no longer outlives its document — a sub-tab switch, a peer's rewrite, `^E` or a project switch drops the band (#1123)
 - Issues: an open writeup keeps its scroll position and caret, and saving no longer reports a peer conflict against your own write (#1122, #1123)
-- CLI: `gori run notes delete <n>` requires `--yes`, and the refusal quotes the note's first line (#1120)
+- CLI: `gori run notes delete <n>` and `gori run issues delete <id>` require `--yes`, and the note refusal quotes the note's first line (#1120, #1317)
 - Docs: an Apple `container` section in the install guide (macOS 26+), mirroring the docker recipes (#1121)
 
 ## v0.7.0
