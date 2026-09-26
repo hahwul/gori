@@ -3958,7 +3958,7 @@ Refines: the R1 guard entry above. #1295.
 - **The Fuzzer's Save results is `⇧E`,** the Export chord of four tabs. Its `⇧S` was also
   what a typed menu `S` (Send selection to…, on every Fuzzer view) sends to the keymap.
 
-### 2026-09-26: later reversals in the #1274 entries, and the tab bar's letters
+### 2026-09-26: later reversals in the #1274 entries, and the rules their review added
 
 Refines: the 2026-09-25 #1274/#1282 entries and "no level-1 `c` or `i` where the tab leaves the
 letter to Global" above. #1274, #1295.
@@ -3985,3 +3985,17 @@ of being edited in place.
   the row's action. That is accepted: on the tab bar the Global keys win by design, and the tab
   keeps its letter everywhere else. The R1 guard models the tab bar and allowlists these pairs
   by name, so "the press never reaches Global" above holds everywhere but the tab bar.
+- **A pane that owns its keys has its own scope.** Help and the Project tab's NETWORK settings
+  pane are `Scope::Help` and `Scope::ProjectSettings`, verb-less, not History's `Body`: a
+  borrowed scope drew that tab's static family rows and answered its bare family keys.
+- **The keymap's layering reaches the family openers and the hints.** A chord a configured layer
+  (user, keyset or OS row) puts on a Global verb keeps a family's bare opener off it on every
+  tab (`Keymap.global_claims`); `space >` still opens the card. `Hotkeys.binding_for` never
+  advertises a chord the keymap fires as another verb in that scope (`Keymap.displaced?`), so a
+  footer, Help or the palette does not name a default an override took.
+- **`chord_of` names an owner, never a chain.** The target has a chord of its own and no
+  `chord_of`, in the same scope with that chord live in the row's section; boot refuses anything
+  else (`Registry#check_chord_of!`). The Hotkeys editor shows the borrowed key as "(via
+  <owner>)" and sends an edit to the owner's row.
+- **The hint scan reads every spelling of a path.** Besides `space → X` and `␣X`, it refuses an
+  arrowless `space X` / `Space X` and a spaced `␣ X` chip in a non-comment source line.

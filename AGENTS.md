@@ -175,7 +175,15 @@ key grammar, the 2026-09-25 #1274 entries and the 2026-09-26 #1295 entries).
 - **Never spell a menu letter in UI text.** Help rows, hints and toasts use `{space:verb.id}` or
   `Hotkeys.menu_path` (which prints `space → > f` for a member; `Hotkeys.route` also covers a
   palette-only verb). A chip, a border badge or a tight hint uses `Hotkeys.menu_chip` (`␣Pr`).
-  `spec/verb/hint_token_expands_spec.cr` fails on a literal `space → X` or `␣X`.
+  `spec/verb/hint_token_expands_spec.cr` fails on a literal `space → X`, an arrowless `space X`
+  or `Space X`, `␣X`, or a spaced `␣ X` chip in any non-comment source line.
+- **A pane that owns its keys has its own scope.** Help and the Project NETWORK settings pane
+  are `Scope::Help` / `Scope::ProjectSettings`, with no verbs. Never let such a pane borrow
+  another tab's scope: it would draw that tab's static family rows and answer its bare family
+  keys (`>`).
+- **`chord_of:` names its owner, never a chain.** A row that shows another verb's chord declares
+  none itself; the owner is in the same scope, has a chord live in the row's section and no
+  `chord_of:` of its own (`Registry#check_chord_of!` raises at boot).
 - **`Space` and `Ctrl-P` share one context.** `ActionContext.capture` + `Registry#for_view` is
   the only answer to "what can I do here", and the palette's typed search finds the focused
   tab's actions through it. Do not compute that a second way.
