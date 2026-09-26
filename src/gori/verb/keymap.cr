@@ -34,14 +34,35 @@ module Gori
                      end
           layers[priority] << verb
         end
+        claimed = global_claims(layers, os, overrides, keyset)
         layers.each do |layer|
           layer.each do |verb|
+            opener = registry.opens_family(verb.id)
             effective_chords(verb, os, overrides, keyset).each do |chord|
+              next if opener && claimed.includes?(chord)
               (by_scope[verb.scope] ||= {} of Chord => String)[chord] = verb.id
             end
           end
         end
         new(by_scope)
+      end
+
+      # The chords a configured layer (user, keyset or OS row) puts on a GLOBAL verb. A family
+      # opener (`Registry#register_family_openers`) is a default bound in up to eleven tab
+      # scopes, which the lookup consults ahead of Global, so it would shadow that deliberate
+      # choice on exactly those tabs — `nav.next-tab` on `>` switching tabs everywhere but
+      # History and the Repeater. It stands down instead, like any default the operator's
+      # chord collides with; `space >` still opens the card.
+      private def self.global_claims(layers : Array(Array(Definition)), os : OsProfile::Os,
+                                     overrides : Hash(String, Array(Chord)), keyset : Keyset::Kind) : Set(Chord)
+        claimed = Set(Chord).new
+        layers[1..].each do |layer|
+          layer.each do |verb|
+            next unless verb.scope.global?
+            effective_chords(verb, os, overrides, keyset).each { |chord| claimed << chord }
+          end
+        end
+        claimed
       end
 
       # The chords that actually bind `verb`, with the verb's PINNED chords (see
