@@ -1303,6 +1303,20 @@ describe "Gori::Store#search (QL)" do
       f.args.should eq(["hit"])
     end
 
+    it "documents Age: 0 and field-limited private as none, the way the classifier reads them" do
+      # The reference is what MCP `ql_reference` serves; it must not promise `cache:miss` for a
+      # response the classifier calls `none`.
+      ref = Gori::QL::REFERENCE
+      para = ref[ref.index!("Cache: cache:hit")...ref.index!("Regex (~):")]
+      miss = para[para.index!("`miss` =")...para.index!("`dynamic` =")]
+      miss.should_not contain("Age: 0")
+      none = para[para.index!("`none` =")..]
+      none.should contain("Age: 0")
+      none.should contain("private=")
+      none.should contain("does not recognise")
+      Gori::CacheStatus.classify("HTTP/1.1 200 OK\r\nAge: 0\r\n\r\n".to_slice).should eq(Gori::CacheStatus::Signal::None)
+    end
+
     it "case-normalises the value" do
       Gori::QL.parse("cache:HIT").should eq(Gori::QL.parse("cache:hit"))
       Gori::QL.parse("cache:Dynamic").should eq(Gori::QL.parse("cache:dynamic"))
