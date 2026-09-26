@@ -72,7 +72,7 @@ module Gori
       end
 
       # The per-flow loop, returning `{reports, checked, sent, failed}`. One flow that cannot be
-      # replayed is not the end of the selection — the same rule as `Authorize::Plan#run`'s
+      # replayed is not the end of the selection — the same rule as `gori run authorize`'s
       # `on_error`: a raise before any send (a backend that cannot be built, or a head
       # `FlowRequest.build` refuses that `skip_reason` did not screen) is reported on STDERR
       # and the run moves on. Escaping here lost every remaining flow AND the buffered
