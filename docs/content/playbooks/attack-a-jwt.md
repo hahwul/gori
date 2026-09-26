@@ -26,7 +26,7 @@ The decode shows what the token *claims*; it never checks the signature, so a to
 
 ## 2. Tamper a claim
 
-Switch to the Encode lens with `Ctrl-T`, or press `l` to load the decoded token straight into the Encode editors. Edit the **PAYLOAD** JSON: escalate a `role`, swap a `sub`, extend an `exp`. Pick the algorithm with `Ctrl-A` (it cycles the HMAC family, then `RS`/`PS`/`ES` at 256/384/512, `EdDSA`, and `none`), set a **SECRET** when you're signing with an HMAC algorithm — or, for an asymmetric one, point the **KEY** card at a PEM private key — and the re-signed token appears live in OUTPUT. Copy it with `y`.
+Switch to the Encode lens with `Ctrl-T`, or `Space` → **Load decoded claims** to load the decoded token straight into the Encode editors. Edit the **PAYLOAD** JSON: escalate a `role`, swap a `sub`, extend an `exp`. Pick the algorithm with `Ctrl-A` (it cycles the HMAC family, then `RS`/`PS`/`ES` at 256/384/512, `EdDSA`, and `none`), set a **SECRET** when you're signing with an HMAC algorithm — or, for an asymmetric one, point the **KEY** card at a PEM private key — and the re-signed token appears live in OUTPUT. Copy it with `y`.
 
 The same claim edit runs headless, taking the token from the argument or stdin. `--set KEY=VALUE` patches one claim (repeatable), or `--payload` replaces the claims wholesale:
 

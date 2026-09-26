@@ -13,7 +13,7 @@ group = "워크벤치"
 
 ## 1. 리스너를 시작하고 페이로드 받기 {#1-start-a-listener-and-grab-a-payload}
 
-**OAST** 탭(기본 표시, Fuzzer 옆)을 열고 `Ctrl-R`을 눌러 리스닝을 시작합니다. gori가 프로바이더(기본은 공개 `interactsh`)에 등록하고 **payload**를 발급합니다. 이 세션 동안 나에게만 속하는 고유한 호스트명/URL입니다. `g`(get payload)로 복사합니다.
+**OAST** 탭(기본적으로 탭 바 밖에 있으니 **`0`**을 누르고 "oast"를 입력하거나 `Ctrl-P` → **Go to OAST**)을 열고 `Ctrl-R`을 눌러 리스닝을 시작합니다. gori가 프로바이더(기본은 공개 `interactsh`)에 등록하고 **payload**를 발급합니다. 이 세션 동안 나에게만 속하는 고유한 호스트명/URL입니다. `g`(get payload)로 복사합니다.
 
 리스너를 스크립트나 에이전트 루프에 두고 싶다면 헤드리스로:
 
@@ -22,7 +22,7 @@ gori run oast listen         # 임시: 등록이 프로세스와 함께 사라�
 gori run oast listen --save  # …프로젝트 세션으로 저장
 ```
 
-그냥 `listen`은 저장소를 쓰지 않아 등록이 프로세스와 함께 사라집니다. 몇 시간 뒤에 오는 콜백에겐 페이로드가 이미 죽어 있다는 뜻이죠. `--save`는 이를 프로젝트에 기록합니다 — `gori run oast list`에 보이고, 나중 프로세스에서 `gori run oast resume ID`로 이어받고, 정리는 `gori run oast release ID`입니다. MCP에서는 `oast_start`의 `persist: true`가 같은 스위치입니다. TUI의 `Ctrl-R`은 원래부터 세션을 저장하며, `r`로 재개합니다.
+그냥 `listen`은 저장소를 쓰지 않아 등록이 프로세스와 함께 사라집니다. 몇 시간 뒤에 오는 콜백에겐 페이로드가 이미 죽어 있다는 뜻이죠. `--save`는 이를 프로젝트에 기록합니다 — `gori run oast list`에 보이고, 나중 프로세스에서 `gori run oast resume ID`로 이어받고, 정리는 `gori run oast release ID`입니다. MCP에서는 `oast_start`의 `persist: true`가 같은 스위치입니다. TUI의 `Ctrl-R`은 원래부터 세션을 저장하며, `Shift-R`로 재개합니다.
 
 **체크포인트.** OAST 탭에 살아 있는 payload URL이 보이고, **Callbacks** 표는 비어 대기 중입니다.
 
@@ -34,7 +34,7 @@ gori run oast listen --save  # …프로젝트 세션으로 저장
 
 ## 3. 콜백 지켜보기 {#3-watch-for-a-callback}
 
-다시 **OAST** 탭으로 오면, 대상 인프라가 이름을 해석하거나 다시 연결하면서 콜백이 **Callbacks** 표에 도착합니다. 각각 프로토콜(`dns` / `http` / `smtp`), 소스 IP, 타임스탬프, 그리고 어느 페이로드가 발동했는지 알려 주는 하위 식별자를 담습니다. `Ctrl-X`는 폴링을 멈추지만 등록은 유지하므로, 이미 심어 둔 페이로드는 계속 해석됩니다. `r`을 눌러 나중에 재개하면, 자리를 비운 동안 프로바이더가 버퍼링한 것들을 받아 올 수 있습니다.
+다시 **OAST** 탭으로 오면, 대상 인프라가 이름을 해석하거나 다시 연결하면서 콜백이 **Callbacks** 표에 도착합니다. 각각 프로토콜(`dns` / `http` / `smtp`), 소스 IP, 타임스탬프, 그리고 어느 페이로드가 발동했는지 알려 주는 하위 식별자를 담습니다. `Ctrl-X`는 폴링을 멈추지만 등록은 유지하므로, 이미 심어 둔 페이로드는 계속 해석됩니다. `Shift-R`을 눌러 나중에 재개하면, 자리를 비운 동안 프로바이더가 버퍼링한 것들을 받아 올 수 있습니다.
 
 <figure class="tui-shot">
   <img src="/images/tui/oast.svg" alt="interactsh 페이로드에 대한 복호화된 히트 네 건의 Callbacks 표가 있는 gori OAST 탭으로, DNS A 조회 두 건과 HTTP GET 요청 두 건이 각각 소스 IP와 목적지로서의 페이로드와 함께 나열된다">
