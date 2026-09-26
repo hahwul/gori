@@ -6920,11 +6920,13 @@ module Gori::Tui
     end
 
     # The command copied to the clipboard for another pane to evaluate in its own env (#1250).
+    # `ca_dir` is made absolute here: `gori --ca-dir ./ca` leaves it relative to gori's cwd,
+    # and the pasted command runs in another pane's.
     def self.copy_shell_command(authority : String, ca_dir : String, syntax : ShellEnv::Syntax,
                                 executable : String? = Process.executable_path) : String
       bin_arg = Process.quote(executable || "gori")
       proxy_arg = Process.quote(authority)
-      ca_arg = Process.quote(ca_dir)
+      ca_arg = Process.quote(File.expand_path(ca_dir))
       case syntax
       in ShellEnv::Syntax::Posix
         %(eval "$(#{bin_arg} run shell --print --proxy #{proxy_arg} --ca-dir #{ca_arg})")

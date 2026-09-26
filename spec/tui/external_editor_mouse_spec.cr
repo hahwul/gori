@@ -112,6 +112,15 @@ describe "Runner.copy_shell_command" do
       Gori::ShellEnv::Syntax::Posix, executable: nil)
     cmd.should eq(%(eval "$(gori run shell --print --proxy 127.0.0.1:8070 --ca-dir /ca)"))
   end
+
+  # `gori --ca-dir ./ca` stores a relative CA path; the copied command runs in ANOTHER pane's
+  # cwd, where `./ca` names nothing.
+  it "makes a relative CA directory absolute against gori's cwd" do
+    cmd = Runner.copy_shell_command("127.0.0.1:8070", "./ca",
+      Gori::ShellEnv::Syntax::Posix, executable: "gori")
+    cmd.should eq(%(eval "$(gori run shell --print --proxy 127.0.0.1:8070 --ca-dir #{Process.quote(File.join(Dir.current, "ca"))})"))
+    cmd.should_not contain("./ca")
+  end
 end
 
 describe "Runner.reclaim_foreground_pgrp" do
