@@ -117,7 +117,7 @@ gori can write the MCP configuration for common clients for you:
 | ------ | -------- | ---------------- |
 | `--install-claude` | Claude Desktop | `claude_desktop_config.json` in the platform's app-config directory (see below) |
 | `--install-claude-code` | Claude Code | `~/.claude.json` (`mcpServers.gori`) |
-| `--install-codex` | OpenAI Codex | `~/.codex/config.toml` (`[mcp_servers.gori]`) |
+| `--install-codex` | OpenAI Codex | `~/.codex/config.toml` (`[mcp_servers.gori]`), or `$CODEX_HOME` |
 | `--install-agy` | Antigravity CLI | `~/.gemini/antigravity-cli/mcp_config.json` |
 | `--install-grok` | Grok | `~/.grok/config.toml` (`[mcp_servers.gori]`) |
 | `--install-hermes` | Hermes | `~/.hermes/config.yaml` (`mcp_servers.gori`), or `$HERMES_HOME` |
@@ -146,7 +146,7 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 
 ## Tools
 
-**Read tools** (always available):
+**Read tools** (available under `--read-only`, except the four that write a row: `scan_js_endpoints`, `oast_payload`, `oast_poll`, and `reply_to_operator`):
 
 | Tool | Purpose |
 | ------ | --------- |
@@ -190,7 +190,7 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 | `jwt_decode` / `jwt_verify` / `jwt_encode` / `jwt_attacks` | Decode (a JWS or the protected header of an encrypted JWE), verify a signature against a key you hold, re-sign with HMAC or a PEM key, or generate attack payloads for a JWT (pure compute; available even under `--read-only`) |
 | `cookie_decode` / `cookie_verify` / `cookie_crack` / `cookie_forge` | The [Cookie workbench](/guide/cookie/) as pure offline compute: parse a Flask / Rack / Django signed session cookie, check it against a candidate secret, brute-force the secret over a wordlist, and re-sign an edited payload. No network, so all four survive `--read-only` |
 | `sequence_analyze` | Grade a pasted token list for randomness / predictability (pure) |
-| `oast_presets` / `oast_payload` / `oast_poll` | List OAST providers, read the active payload, and poll a running listener for callbacks |
+| `oast_presets` / `oast_payload` / `oast_poll` | List OAST providers, mint a fresh payload URL for a session (`session_id`), and poll a running listener for callbacks |
 | `project_info` | Flow / issue counts, capture window, the project `description`, database, workspace binding, and selection source |
 | `get_current_context` | What the operator is viewing in the TUI **and what they have selected**. `selection.ids` is the rows they marked on History / Issues / Sitemap / Intercept — or the cursor row when nothing is marked, or the flow an open detail pins — with `target_source` naming which, so an agent never re-derives the rule. Sitemap selects `{host, path}` pairs, not flow ids, and says so with `kind`. `truncated` is the only signal that the array was capped — not `marked_count`, which describes the mark set and is reported even when an open drill-in overrides it. `marks_elsewhere` names tabs holding marks this selection does not carry (a `tab` plus a count, and a `kind` only where those marks have one), and `tui.live` reports whether a gori TUI window is attached at all — evidence, not proof. Feed a History selection straight to `list_history{ids}`. The History lenses it was drawn through come along too (`query`, `view`, `scope_lens`, `hide_static`), so an agent can list what the operator is looking at |
 | `get_repeater_context` | Repeater workbench state and saved sessions. Every session reports **both** ids (`db_id`, which every repeater tool takes, and `tui_index`, the 1-based number the TUI paints on its sub-tab chip (`6:POST /api`)), so an agent and the operator name the same tab. `filter` takes the same sub-tab language the TUI's `/` does (`tag:` `name:` `host:` `method:` `status:`, `-` negates, bare words search), ANDed with `query`. `include_content` adds the request head and, per credential header, an `env_headers` shape (`Authorization: Bearer $ENV.AUTH`) that names the wiring without the secret; `include_response_body` inlines the stored last response body |
@@ -198,12 +198,13 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 | `ql_reference` | The query-language reference |
 | `ql_explain` | Diagnose a query without running it, to check a filter before spending requests on it |
 
-**Action tools** (disabled by `--read-only`). Every one that opens a socket (`send_request`, `send_websocket`, `fuzz_*`, `mine_*`, `authorize_*`, `cache_deception_check`, `sequence_*`, `discover_*`, `grpc_reflect`, `minimize_repeater`, and `probe_scan` with `active:true`) is scope-gated: a target outside, or without, a configured scope is refused with `SCOPE_BLOCKED` unless the call passes `allow_unscoped:true`, the explicit waiver, and the sandbox and explicit excludes apply even then.
+**Action tools** (disabled by `--read-only`, except `switch_project`, which always works, and `create_project`, which works while the server is unbound). Every one that opens a socket (`send_request`, `send_websocket`, `fuzz_*`, `mine_*`, `authorize_*`, `cache_deception_check`, `sequence_*`, `discover_*`, `grpc_reflect`, `minimize_repeater`, `race_requests`, `run_retest`, `refresh_session_slot`, and `probe_scan` with `active:true`) is scope-gated: a target outside, or without, a configured scope is refused with `SCOPE_BLOCKED` unless the call passes `allow_unscoped:true`, the explicit waiver, and the sandbox and explicit excludes apply even then.
 
 | Tool | Purpose |
 | ------ | --------- |
 | `send_request` | Send / resend an HTTP request (active; records History by default, expands `$ENV.KEY` env tokens and `$BIND.NAME` bindings, and redacts sensitive response-header values unless explicitly requested). `reframe_grpc: true` recomputes a unary gRPC message's 5-byte length prefix over the body actually sent. Off by default, so an edited message ships with the prefix it was captured with |
 | `send_websocket` | Execute a saved WebSocket Repeater session and collect the replies |
+| `race_requests` | Fire two or more saved HTTP Repeater sessions (`repeater_ids`) as one synchronized race: HTTP/1.1 last-byte sync, or the HTTP/2 single-packet attack with `http2:true`. Every member must share one origin and transport; the result reports per-member timing |
 | `create_repeater` / `update_repeater` / `delete_repeater` | Manage one Repeater session. Every reply carries `tui_index` beside `id`; a delete names the tab it destroyed (`was_tui_index`) and renumbers the rest. `create_repeater{curl}` builds the session from a copied curl command |
 | `create_repeaters` | Seed a tab from each of several captured flows, the second hop of an OpenAPI import (see below). Checks every flow exists before creating the first session |
 | `delete_repeaters` / `update_repeaters` | Bulk close, and bulk re-label (tags and name affixes only; `update_repeater` is the one that writes request bytes). Both take explicit ids, never a filter: narrow with `get_repeater_context{filter}` first, so the set you read is the set acted on. Delete needs `confirm:true`, and an unknown id refuses the whole call |
@@ -247,7 +248,7 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 | `authorize_start` / `authorize_status` / `authorize_results` / `authorize_stop` | Replay captured flows under several identities and compare each response against a baseline (broken access control). Results lead with `access_control` (`BYPASS`/`enforced`/`review`/`error`/`nothing_sent`) and a flat, never-paged `bypasses` list |
 | `cache_deception_check` | Test one flow for web cache deception: replay it as its captured (authenticated) identity, re-request the same url anonymously, then make a cache-busted anonymous control request. Matching control content supports `served` only when the control has no cache-hit signal; if it is also a hit, the query may have been ignored and the verdict is `review`. Matching content with an anonymous cache hit and different control content is a likely deception (`cached`). Synchronous, up to three sends. Each trial includes its `cache` signal; the top-level `cache` is the anonymous response. Pair it with the Fuzzer's `cache-delimiters` payload set to find the crafted paths that trigger it |
 | `discover_start` / `discover_status` / `discover_results` / `discover_stop` | Spider and brute-force endpoints, poll progress, and read findings. All four are action tools, so a read-only server has no Discover surface |
-| `oast_start` / `oast_stop` | Register an ad-hoc OAST payload and poll for callbacks (read the hits with `oast_poll`); `oast_stop` on a RESUMED session stops polling but keeps it resumable |
+| `oast_start` / `oast_stop` | Register an OAST payload and poll for callbacks: on a public interactsh server by default, on a saved provider with `provider_id`, and as a resumable session with `persist:true` (read the hits with `oast_poll`); `oast_stop` on a RESUMED session stops polling but keeps it resumable |
 | `oast_resume` / `oast_release` | Re-arm a persisted session so payloads planted earlier keep resolving (its polls are saved into the project), or deregister one for a finished engagement; its callbacks stay |
 | `list_jobs` / `get_job` / `stop_job` | Work across job kinds: list every fuzz, mine, discover, sequence, and authorize job this session started, or fetch and stop one by id |
 | `intercept_forward` / `intercept_forward_edit` / `intercept_drop` | Release a held message byte-exact, release it with edited wire bytes, or drop it |
@@ -293,7 +294,7 @@ Delivery tries five layers, in the order of what gori can confirm — a route th
 
 Each delivery attempt writes an `agent_delivery` row, and you see the outcome without switching tabs: the TUI's notification ring shows `→ claude-code got it (socket)`, `→ codex-mcp-client got it (queued in codex)`, `→ grok-shell-gori got it (on its next tool result)`, `left for antigravity to pick up (operator_messages)` (and `→ antigravity picked it up` once it reads the message), or the reason a delivery failed, and Companion (Miss Ring) reacts to the same notice if she's on. The Activity pane lists every one of these under a new `operator` source, so the message and its delivery outcome stay on the record alongside everything else that happened to the project — see [Activity](/guide/proxy/#project-tab).
 
-The way back is `reply_to_operator`. The handshake instructions tell the agent to use it for anything you must see without switching to its terminal: the one-line `summary` lands in the ring (and on Miss Ring), tagged with the client's name, and `detail` opens from the ring with `↵` — a finding, a diff, a list of endpoints. It is a row in the same feed, so it works for every agent, Claude or not, and it stays on the project's record under the `agent` source.
+The way back is `reply_to_operator`. The handshake instructions tell the agent to use it for anything you must see without switching to its terminal: the one-line `summary` lands in the ring (and on Miss Ring), tagged with the client's name, and `detail` opens from the ring with `↵` — a finding, a diff, a list of endpoints. It is a row in the same feed, so it works for every agent, Claude or not (though not one started with `--read-only`), and it stays on the project's record under the `agent` source.
 
 A few limits worth knowing before you rely on this:
 

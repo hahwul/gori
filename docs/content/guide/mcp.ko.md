@@ -117,7 +117,7 @@ gori는 널리 쓰이는 클라이언트의 MCP 설정을 대신 작성해 줍�
 |------|--------|----------------|
 | `--install-claude` | Claude Desktop | 플랫폼별 앱 설정 디렉터리의 `claude_desktop_config.json` (아래 참고) |
 | `--install-claude-code` | Claude Code | `~/.claude.json` (`mcpServers.gori`) |
-| `--install-codex` | OpenAI Codex | `~/.codex/config.toml` (`[mcp_servers.gori]`) |
+| `--install-codex` | OpenAI Codex | `~/.codex/config.toml` (`[mcp_servers.gori]`), 또는 `$CODEX_HOME` |
 | `--install-agy` | Antigravity CLI | `~/.gemini/antigravity-cli/mcp_config.json` |
 | `--install-grok` | Grok | `~/.grok/config.toml` (`[mcp_servers.gori]`) |
 | `--install-hermes` | Hermes | `~/.hermes/config.yaml` (`mcp_servers.gori`), 또는 `$HERMES_HOME` |
@@ -146,7 +146,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 
 ## 도구 {#tools}
 
-**읽기 도구**(항상 사용 가능):
+**읽기 도구**(`--read-only`에서도 사용 가능. 단, 행을 쓰는 네 가지 `scan_js_endpoints`, `oast_payload`, `oast_poll`, `reply_to_operator`는 제외):
 
 | 도구 | 용도 |
 |------|---------|
@@ -190,7 +190,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `jwt_decode` / `jwt_verify` / `jwt_encode` / `jwt_attacks` | JWT 디코드(JWS 또는 암호화된 JWE의 보호 헤더), 보유한 키로 서명 검증, HMAC이나 PEM 키로 재서명, 공격 페이로드 생성(순수 계산; `--read-only`에서도 사용 가능) |
 | `cookie_decode` / `cookie_verify` / `cookie_crack` / `cookie_forge` | [Cookie 워크벤치](/ko/guide/cookie/)를 순수 오프라인 연산으로: Flask / Rack / Django 서명 세션 쿠키 파싱, 후보 시크릿으로 검증, 워드리스트로 시크릿 브루트포스, 편집한 페이로드 재서명. 네트워크를 쓰지 않으므로 네 개 모두 `--read-only`에서도 살아남습니다 |
 | `sequence_analyze` | 붙여넣은 토큰 목록의 무작위성 / 예측 가능성 평가(순수) |
-| `oast_presets` / `oast_payload` / `oast_poll` | OAST 프로바이더 나열, 현재 페이로드 조회, 실행 중인 리스너의 콜백 폴링 |
+| `oast_presets` / `oast_payload` / `oast_poll` | OAST 프로바이더 나열, 세션(`session_id`)의 새 페이로드 URL 발급, 실행 중인 리스너의 콜백 폴링 |
 | `project_info` | 플로우 / 이슈 개수, 캡처 구간, 프로젝트 `description`, 데이터베이스, 워크스페이스 바인딩, 선택 출처 |
 | `get_current_context` | 사용자가 지금 TUI에서 보고 있는 것, **그리고 무엇을 선택했는지**. `selection.ids`는 History / Issues / Sitemap / Intercept에서 마크한 행이고, 마크가 없으면 커서 행, 디테일이 열려 있으면 거기 고정된 플로우입니다. `target_source`가 셋 중 무엇인지 말해 주므로 에이전트가 규칙을 다시 유도할 필요가 없습니다. Sitemap은 플로우 id가 아니라 `{host, path}` 쌍을 고르며 `kind`가 그걸 알려 줍니다. 배열이 잘렸다는 신호는 `truncated` 하나뿐입니다 — `marked_count`는 마크 집합을 말하는 값이라 드릴인이 그걸 덮어쓴 경우에도 그대로 실립니다. `marks_elsewhere`는 이 selection이 싣지 못한 마크가 어느 탭에 있는지를(`tab`과 개수, 그리고 그 마크에 kind가 있을 때만 `kind`), `tui.live`는 gori TUI 창이 붙어 있는지를 말합니다 — 증거이지 증명은 아닙니다. History 선택은 `list_history{ids}`에 그대로 넘기면 됩니다. 그 선택이 걸러진 History 렌즈(`query`, `view`, `scope_lens`, `hide_static`)도 함께 오므로, 에이전트가 사용자가 보는 목록을 그대로 나열할 수 있습니다 |
 | `get_repeater_context` | Repeater 워크벤치 상태와 저장된 세션. 세션마다 id를 **둘 다** 싣습니다(모든 repeater 툴이 받는 `db_id`, 그리고 TUI가 서브탭 칩에 그리는 1-based 번호 `tui_index`(`6:POST /api`)). 그래서 에이전트와 사용자가 같은 탭을 같은 이름으로 부릅니다. `filter`는 TUI의 `/`와 같은 서브탭 문법(`tag:` `name:` `host:` `method:` `status:`, `-`는 부정, 맨 단어는 검색)이고 `query`와 AND로 묶입니다. `include_content`는 요청 헤드와 함께, 자격증명 헤더마다 비밀값 없이 배선만 밝히는 `env_headers` 모양(`Authorization: Bearer $ENV.AUTH`)을 줍니다. `include_response_body`는 저장된 마지막 응답 본문을 인라인합니다 |
@@ -198,12 +198,13 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `ql_reference` | 쿼리 언어 레퍼런스 |
 | `ql_explain` | 쿼리를 실행하지 않고 진단. 요청을 쓰기 전에 필터를 점검할 때 사용 |
 
-**액션 도구**(`--read-only`로 비활성화됨). 소켓을 여는 도구(`send_request`, `send_websocket`, `fuzz_*`, `mine_*`, `authorize_*`, `cache_deception_check`, `sequence_*`, `discover_*`, `grpc_reflect`, `minimize_repeater`, 그리고 `active:true`를 준 `probe_scan`)는 모두 스코프 게이트를 지납니다. 설정된 스코프 밖의 대상, 또는 스코프가 없는 대상은 호출에 명시적 예외 선언인 `allow_unscoped:true`를 주지 않는 한 `SCOPE_BLOCKED`로 거부되며, 그때도 샌드박스와 명시적 제외 규칙은 그대로 적용됩니다.
+**액션 도구**(`--read-only`로 비활성화됨. 단, `switch_project`는 항상 동작하고 `create_project`는 서버가 언바운드일 때 동작합니다). 소켓을 여는 도구(`send_request`, `send_websocket`, `fuzz_*`, `mine_*`, `authorize_*`, `cache_deception_check`, `sequence_*`, `discover_*`, `grpc_reflect`, `minimize_repeater`, `race_requests`, `run_retest`, `refresh_session_slot`, 그리고 `active:true`를 준 `probe_scan`)는 모두 스코프 게이트를 지납니다. 설정된 스코프 밖의 대상, 또는 스코프가 없는 대상은 호출에 명시적 예외 선언인 `allow_unscoped:true`를 주지 않는 한 `SCOPE_BLOCKED`로 거부되며, 그때도 샌드박스와 명시적 제외 규칙은 그대로 적용됩니다.
 
 | 도구 | 용도 |
 |------|---------|
 | `send_request` | HTTP 요청 전송 / 재전송(액티브; 기본적으로 History에 기록, `$ENV.KEY` 환경 토큰과 `$BIND.NAME` 바인딩을 확장, 명시적으로 요청하지 않는 한 민감한 응답 헤더 값을 가림). `reframe_grpc: true`는 실제 전송되는 본문에 맞춰 단항 gRPC 메시지의 5바이트 길이 접두사를 다시 계산합니다. 기본값은 꺼짐이므로 편집된 메시지도 캡처 당시의 접두사 그대로 나갑니다 |
 | `send_websocket` | 저장된 WebSocket Repeater 세션을 실행하고 응답을 수집 |
+| `race_requests` | 저장된 HTTP Repeater 세션 둘 이상(`repeater_ids`)을 하나의 동기화된 레이스로 발사: HTTP/1.1 last-byte sync, 또는 `http2:true`로 HTTP/2 single-packet 공격. 모든 멤버는 같은 오리진과 전송을 공유해야 하며, 결과에 멤버별 타이밍이 담깁니다 |
 | `create_repeater` / `update_repeater` / `delete_repeater` | Repeater 세션 하나를 관리. 모든 응답이 `id` 옆에 `tui_index`를 싣고, 삭제는 없앤 탭 번호(`was_tui_index`)를 밝힌 뒤 나머지를 다시 번호 매깁니다. `create_repeater{curl}`은 복사한 curl 명령으로 세션을 만듭니다 |
 | `create_repeaters` | 캡처된 flow 여러 개에서 탭을 하나씩 시드합니다. OpenAPI 임포트의 두 번째 단계입니다(아래 참고). 첫 세션을 만들기 전에 모든 flow의 존재를 확인합니다 |
 | `delete_repeaters` / `update_repeaters` | 일괄 닫기, 일괄 재라벨(태그와 이름 접사만. 요청 바이트를 쓰는 건 `update_repeater`입니다). 둘 다 필터가 아니라 명시적 id만 받습니다: 먼저 `get_repeater_context{filter}`로 좁혀서, 읽은 집합과 작용한 집합이 같게. 삭제는 `confirm:true`가 필요하고, 모르는 id 하나면 호출 전체를 거절합니다 |
@@ -247,7 +248,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `authorize_start` / `authorize_status` / `authorize_results` / `authorize_stop` | 캡처된 플로우를 여러 아이덴티티로 재전송하고 각 응답을 기준선과 비교합니다(접근 제어 결함). 결과는 `access_control`(`BYPASS`/`enforced`/`review`/`error`/`nothing_sent`)과 페이징 없는 `bypasses` 목록으로 시작합니다 |
 | `cache_deception_check` | 플로우 하나를 웹 캐시 디셉션으로 검사합니다: 캡처된(인증된) 아이덴티티로 재전송하고, 세션 없이 같은 url을 다시 요청한 뒤 캐시 무효화 익명 제어 요청을 보냅니다. 제어 응답이 일치하고 캐시 히트 신호가 없을 때만 `served`로 판정합니다. 제어 응답도 캐시 히트라면 쿼리가 무시됐을 수 있어 `review`이며, 익명 응답은 캐시 히트이고 제어 응답은 다르면 디셉션 가능성(`cached`)이 있습니다. 동기 방식으로 최대 세 번 전송합니다. 각 시도의 `cache`는 해당 응답 상태이고 최상위 `cache`는 익명 응답 상태입니다. 트리거되는 조작된 경로를 찾으려면 Fuzzer의 `cache-delimiters` 페이로드 세트와 함께 쓰세요 |
 | `discover_start` / `discover_status` / `discover_results` / `discover_stop` | 엔드포인트 스파이더링 & 브루트포스, 진행 상황 폴링, 결과 조회. 네 개 모두 액션 도구이므로 읽기 전용 서버에는 Discover 표면이 없습니다 |
-| `oast_start` / `oast_stop` | 즉석 OAST 페이로드 등록 후 콜백 폴링(`oast_poll`로 히트 조회). 재개한 세션에 `oast_stop`을 쓰면 폴링만 멈추고 세션은 다시 재개할 수 있게 남습니다 |
+| `oast_start` / `oast_stop` | OAST 페이로드 등록 후 콜백 폴링: 기본은 공개 interactsh 서버, `provider_id`로 저장된 프로바이더, `persist:true`로 재개 가능한 세션(`oast_poll`로 히트 조회). 재개한 세션에 `oast_stop`을 쓰면 폴링만 멈추고 세션은 다시 재개할 수 있게 남습니다 |
 | `oast_resume` / `oast_release` | 저장된 세션을 다시 살려 이전에 심어둔 페이로드가 계속 resolve되게 하고(폴링 결과는 프로젝트에 저장됩니다), 끝난 engagement는 등록 해제합니다. 콜백은 남습니다 |
 | `list_jobs` / `get_job` / `stop_job` | 작업 종류를 가로질러 처리: 이번 세션이 시작한 모든 fuzz, mine, discover, sequence, authorize 작업 나열, 또는 id로 하나를 조회하고 중지 |
 | `intercept_forward` / `intercept_forward_edit` / `intercept_drop` | 홀드된 메시지를 바이트 그대로 내보내거나, 수정한 와이어 바이트로 내보내거나, 드롭 |
@@ -293,7 +294,7 @@ create_repeaters{flow_ids: [...], name_prefix: "oas: ", tags: "spec"}
 
 전달 시도마다 `agent_delivery` 행이 하나씩 기록되고, 탭을 옮기지 않아도 결과를 볼 수 있습니다. TUI의 알림 링이 `→ claude-code got it (socket)`, `→ codex-mcp-client got it (queued in codex)`, `→ grok-shell-gori got it (on its next tool result)`, `left for antigravity to pick up (operator_messages)` 같은 문구나 전달이 실패한 이유를 보여주고, Companion(Miss Ring)을 켜 두었다면 같은 알림에 반응합니다. Activity 페인은 이 모두를 새로운 `operator` source 아래 나열하므로, 메시지와 그 전달 결과가 프로젝트에서 일어난 다른 모든 일과 함께 기록에 남습니다 — [Activity](/ko/guide/proxy/#project-tab) 참고.
 
-돌아오는 길은 `reply_to_operator`입니다. 핸드셰이크 instructions가 에이전트에게, 여러분이 그 터미널로 옮겨가지 않고도 봐야 하는 것은 이 도구로 답하라고 알려줍니다. 한 줄 `summary`는 클라이언트 이름과 함께 링(그리고 Miss Ring)에 뜨고, `detail`은 링에서 `↵`로 열립니다 — 발견 사항, diff, 엔드포인트 목록 같은 것. 같은 피드의 행이라 Claude가 아닌 에이전트에서도 동작하고, `agent` 소스로 프로젝트 기록에 남습니다.
+돌아오는 길은 `reply_to_operator`입니다. 핸드셰이크 instructions가 에이전트에게, 여러분이 그 터미널로 옮겨가지 않고도 봐야 하는 것은 이 도구로 답하라고 알려줍니다. 한 줄 `summary`는 클라이언트 이름과 함께 링(그리고 Miss Ring)에 뜨고, `detail`은 링에서 `↵`로 열립니다 — 발견 사항, diff, 엔드포인트 목록 같은 것. 같은 피드의 행이라 Claude가 아닌 에이전트에서도 동작하고(`--read-only`로 띄운 에이전트는 제외), `agent` 소스로 프로젝트 기록에 남습니다.
 
 의지하기 전에 알아둘 한계가 몇 가지 있습니다.
 
