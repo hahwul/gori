@@ -10,6 +10,10 @@ describe "MCP reply_to_operator (#1090)" do
       j = JSON.parse(r.text)
       j["ok"].should be_true
       j["summary"].should eq("Done: 3 endpoints checked, 1 IDOR")
+      # The shared harness binds no db_path, so the server cannot look for windows at all:
+      # null, never a guessed 0 (spec/mcp/agent_presence_spec.cr covers the counted cases).
+      j["tui"]["unknown"].as_bool.should be_true
+      j["tui"]["live"]?.should be_nil
       reply = store.agent_replies_after(0, 10).rows.first
       reply.level.should eq("success")
       reply.in_reply_to.should eq(12)

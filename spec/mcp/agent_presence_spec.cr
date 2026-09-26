@@ -289,3 +289,43 @@ describe "get_current_context TUI liveness" do
     end
   end
 end
+
+# `reply_to_operator` says whether a TUI window could show its reply, in get_current_context's
+# `tui` shape. A TUI announces only the
+# replies that land while it is open, so zero is a reply nobody will be shown — the one case
+# the agent has to hear about, because saying it in its own output is a fix only it has.
+describe "reply_to_operator reach" do
+  it "reports zero windows, and says nobody was shown it" do
+    with_registry do |reg, _root|
+      project = reg.create("target")
+      tools = tools_for(project)
+      begin
+        r = tools.call("reply_to_operator", JSON.parse(%({"summary":"done"})))
+        r.is_error.should be_false
+        j = JSON.parse(r.text)
+        j["tui"]["live"].as_bool.should be_false
+        j["tui"]["windows"].as_i.should eq(0)
+        j["note"].as_s.should contain("nobody was shown this")
+      ensure
+        tools.release_presence
+      end
+    end
+  end
+
+  it "counts the windows open on the project" do
+    with_registry do |reg, _root|
+      project = reg.create("target")
+      tools = tools_for(project)
+      window = announce_window(project.db_path)
+      begin
+        j = JSON.parse(tools.call("reply_to_operator", JSON.parse(%({"summary":"done"}))).text)
+        j["tui"]["live"].as_bool.should be_true
+        j["tui"]["windows"].as_i.should eq(1)
+        j["note"].as_s.should_not contain("nobody")
+      ensure
+        window.close
+        tools.release_presence
+      end
+    end
+  end
+end

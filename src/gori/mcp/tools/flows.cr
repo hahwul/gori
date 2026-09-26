@@ -644,9 +644,12 @@ module Gori
             "glance — it shows in the notification ring and on Miss Ring; put anything longer in " \
             "`detail` (markdown-ish plain text, opened from the ring with ↵). `level` colours it: " \
             "info (default) | success | warn | error. `in_reply_to` links it to the operator_messages " \
-            "id you are answering. Use it for the answer to a question they sent, the outcome of a " \
-            "task they asked for, or anything they must see without switching to your terminal — " \
-            "not for narration." do |s|
+            "id you are answering. Use it for the answer to a question they sent or the outcome of a " \
+            "task they asked for — not for narration. It is a NOTIFICATION, not a mailbox: it " \
+            "shows only in a gori TUI that is open on this project when it lands (Miss Ring keeps " \
+            "it up until their next key or click), and the ring forgets it when the TUI closes. " \
+            "The result's `tui` says whether a window was open (`windows: 0` = nobody was shown " \
+            "it; `unknown` = cannot tell). Keep anything that must last in your own output as well." do |s|
             s.field "summary", strprop("one line, ≤200 characters; the rest goes in detail"), required: true
             s.field "detail", strprop("the long form; optional, ≤32 KiB")
             s.field "level", enumprop("how the ring colours it", %w[info success warn error])
