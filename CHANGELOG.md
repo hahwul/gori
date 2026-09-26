@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- TUI: the sub-tab strip renames on `e`, the space menu's Rename letter on every strip, instead of `r`, which now does nothing there. The Fuzzer's Save results moves from `⇧S` to `⇧E`, the Export key elsewhere, because a typed `S` is the menu's Send selection to… (#1295)
 - TUI: no space-menu row is `c` or `i` on a tab that leaves that letter to the global keys, so a press that loses its `Space` no longer stops capture or holds all traffic. Set status, Duplicate rule, Clear markers and JWT's Copy attack token move to `C`, and Diff's Add issue to `F` (#1295)
 - TUI: on the nine tabs with a sub-tab strip, the strip's actions are one `T` **Sub-tabs…** row in a pane's space menu (Mark all sub-tabs is now `T T` from a pane), and stay drawn in full with the strip focused; the menu gains **Mark sub-tab** on `t`, the Repeater's Tag moves to `g`, and Paste cURL keeps its own `U` row (#1274)
 - TUI: typing in the command palette (`Ctrl-P`) also finds the focused tab's actions, listed first under `THIS TAB` with their key and the marks count in the title, and the space menu drops 37 rarely used rows that the palette now finds: ones that repeat a direct key (Mark word `Ctrl-K`, rule reorder `⇧K`/`⇧J`) or configure once a session (Minimize request, Use as refresh for slot…). Their keys are unchanged, and Help shows `^P → <name>` for the ones with none (#1282)

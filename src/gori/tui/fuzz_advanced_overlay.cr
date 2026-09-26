@@ -141,7 +141,7 @@ module Gori::Tui
       # rows above them, so no spec-indexed row is renumbered.
       {:stop_after, "Stop after N hits", :text},
       {:stop_on, "Stop on (DIM:SPEC)", :text},
-      # The result-capture filter for a saved run (Shift-S) / the private spool: on keeps only
+      # The result-capture filter for a saved run (Shift-E) / the private spool: on keeps only
       # the interesting rows (matched + error/re-send/incomplete/stop), so a huge sweep does not
       # spool one row per request. The pane, the counters and `idx` are unaffected. A toggle
       # because the policy is exactly two-valued (all / interesting).

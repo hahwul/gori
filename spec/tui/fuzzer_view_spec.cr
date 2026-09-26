@@ -177,7 +177,7 @@ describe Gori::Tui::FuzzerView do
     end
 
     # The DISPLAY window dropped the bytes, the RUN did not. `FuzzerResultWindow` projects a
-    # row past its byte ceiling down to metrics, and the spool (and, after ⇧S, the archive)
+    # row past its byte ceiling down to metrics, and the spool (and, after ⇧E, the archive)
     # still holds every byte — so "not retained by this run" tells the operator the evidence
     # does not exist at the moment gori is about to save it. The request pane has always drawn
     # the distinction (`display_omitted`); this pane read a nil head as the retention policy

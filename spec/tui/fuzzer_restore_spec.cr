@@ -61,7 +61,7 @@ class Gori::Tui::FuzzerController
   end
 
   # A spool that archived `rows` for `view`'s current run and finished it the way the run
-  # fiber does (`start_run`'s DoneEvent arm) — the source a Shift-S save copies from.
+  # fiber does (`start_run`'s DoneEvent arm) — the source a Shift-E save copies from.
   def attach_spool_rows_for_spec(view : Gori::Tui::FuzzerView, rows : Array(Gori::Fuzz::Result),
                                  status : String) : Nil
     run = @spool.start(view.saved_run_meta(nil))
@@ -225,7 +225,7 @@ describe "FuzzerController saved-run restore" do
   # `archive_failed?` shipped with no reader anywhere. The spool's failure was announced once,
   # on the run-start status line, and the completion toast overwrote it — after which a sweep
   # that can never be saved looked exactly like one that can, and the only difference left was
-  # a ⇧S that quietly did nothing. The pane's own count line is where that belongs.
+  # a ⇧E that quietly did nothing. The pane's own count line is where that belongs.
   it "says on the results line that a run has no archive to save" do
     with_fuzz_restore_project do |host, _sessions|
       controller = FuzzerController.new(host)
@@ -249,11 +249,11 @@ describe "FuzzerController saved-run restore" do
     end
   end
 
-  # An unavailable verb is never dispatched, so a footer that names ⇧S in a state the gate
+  # An unavailable verb is never dispatched, so a footer that names ⇧E in a state the gate
   # refuses promises a key that does NOTHING — no dialog, no status line. That is every state
   # but one: a finished, non-empty, not-yet-saved run. It was worst right after a save and
   # right after a restore, where the pane already says `saved #N` and the key still looked live.
-  it "names ⇧S only while the save verb would actually fire" do
+  it "names ⇧E only while the save verb would actually fire" do
     with_fuzz_restore_project do |host, sessions|
       controller = FuzzerController.new(host)
       view = controller.current_view.not_nil!
@@ -313,7 +313,7 @@ describe "FuzzerController saved-run restore" do
     end
   end
 
-  it "carries the stop row across a Shift-S save into the permanent run (#1270)" do
+  it "carries the stop row across a Shift-E save into the permanent run (#1270)" do
     with_fuzz_restore_project do |host, sessions|
       controller = FuzzerController.new(host)
       view = controller.current_view.not_nil!

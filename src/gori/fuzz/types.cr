@@ -439,7 +439,7 @@ module Gori
     record ErrorEvent, message : String
 
     # Which result rows a run's ARCHIVE keeps — the CLI/MCP saved run and the TUI spool behind
-    # Shift-S. The live views (the TUI pane, MCP's live cache, the CLI's printed rows) are not
+    # Shift-E. The live views (the TUI pane, MCP's live cache, the CLI's printed rows) are not
     # governed by it.
     #
     # `Interesting` keeps the rows `Result#interesting?` names and drops the rest. The run's
