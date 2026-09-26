@@ -194,6 +194,7 @@ module Gori
         issue = store.get_probe_issue(id)
         return not_found("no probe issue with id #{id}") unless issue
         landed = Probe::Triage.toggle_dismiss(store, issue)
+        return busy("dismiss NOT applied (store busy or unwritable); finding #{id} is unchanged") if landed == issue.status
         Result.new({"id" => issue.id, "status" => landed.label}.to_json)
       end
 

@@ -334,6 +334,7 @@ module Gori
           elsif iid = id
             issue = store.get_probe_issue(iid) || abort("gori run probe dismiss: no probe finding with id #{iid}")
             landed = Probe::Triage.toggle_dismiss(store, issue)
+            abort "gori run probe dismiss: NOT applied (project busy) — finding ##{iid} is unchanged" if landed == issue.status
             puts "Finding ##{issue.id} is now #{landed.label}."
           end
         ensure

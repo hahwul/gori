@@ -140,3 +140,11 @@ describe "gori run probe — the scan progress meter" do
     meter.call(1, 100).should be_nil # off-beat tick: throttled, prints nothing
   end
 end
+
+describe "gori run probe dismiss write failure" do
+  it "aborts when toggling dismiss does not commit to the store" do
+    src = File.read(File.join(__DIR__, "..", "..", "..", "src", "gori", "cli", "run", "probe.cr"))
+    body = src[/private def self\.cmd_probe_dismiss\(.*?\n      end\n/m]
+    body.should contain(%q(NOT applied (project busy) — finding ##{iid} is unchanged" if landed == issue.status))
+  end
+end
