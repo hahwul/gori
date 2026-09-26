@@ -70,7 +70,7 @@ module Gori
         end)
       end
 
-      @[Tool("create_session_slot", gated: true, agent_action: true)]
+      @[Tool("create_session_slot", gated: true, agent_action: true, permission: "write")]
       private def create_session_slot(h) : Result
         name = str(h, "name").try(&.strip)
         return err("missing required 'name'", "INVALID_ARGUMENT", field: "name") if name.nil? || name.empty?
@@ -198,7 +198,7 @@ module Gori
       # A partial update: an argument left out keeps what the slot already has. That is the
       # shape an agent needs to rotate ONE cookie without having to re-send the rule list it
       # never read (and would blank).
-      @[Tool("update_session_slot", gated: true, agent_action: true)]
+      @[Tool("update_session_slot", gated: true, agent_action: true, permission: "write")]
       private def update_session_slot(h) : Result
         name = str(h, "name").try(&.strip)
         return err("missing required 'name'", "INVALID_ARGUMENT", field: "name") if name.nil? || name.empty?
@@ -241,7 +241,7 @@ module Gori
         {set_headers, [] of String}
       end
 
-      @[Tool("delete_session_slot", gated: true, agent_action: true)]
+      @[Tool("delete_session_slot", gated: true, agent_action: true, permission: "write")]
       private def delete_session_slot(h) : Result
         name = str(h, "name").try(&.strip)
         return err("missing required 'name'", "INVALID_ARGUMENT", field: "name") if name.nil? || name.empty?
@@ -264,7 +264,7 @@ module Gori
 
       # The send context for THIS server process. `name: null` (or omitted) deactivates, which
       # is `as-captured`: no header overlay, `$NAME` out of the global binding table.
-      @[Tool("set_active_session_slot", gated: true, agent_action: true)]
+      @[Tool("set_active_session_slot", gated: true, agent_action: true, permission: "write")]
       private def set_active_session_slot(h) : Result
         registry = fresh_slots
         raw = str(h, "name").try(&.strip)
@@ -325,7 +325,7 @@ module Gori
       # gates `send_request`. A deterministic refusal (no such slot, no steps) is
       # INVALID_ARGUMENT; a refresh that RAN and failed is a normal reply with `ok: false`, since
       # the step's answer is the result the caller asked for.
-      @[Tool("refresh_session_slot", gated: true, agent_action: true, env_refresh: true)]
+      @[Tool("refresh_session_slot", gated: true, agent_action: true, env_refresh: true, permission: "send")]
       private def refresh_session_slot(h) : Result
         name = str(h, "name").try(&.strip)
         return err("missing required 'name'", "INVALID_ARGUMENT", field: "name") if name.nil? || name.empty?

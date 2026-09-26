@@ -96,6 +96,24 @@ module Gori::CLI
     # Logs to STDERR ONLY — STDOUT is reserved for the JSON-RPC stream.
     Log.setup(:info, Log::IOBackend.new(STDERR))
     Settings.load # send_request's repeater engines read the upstream-proxy setting from here
+    # Preferences › AI › MCP permissions, latched for this process like `mcp_channels`, and
+    # never failing open: a settings file this start could not read in full denies every group
+    # rather than serving them all (`mcp_enforced_denials`).
+    denied, denial_warning = Settings.mcp_enforced_denials
+    Log.warn { "mcp: #{denial_warning}" } if denial_warning
+    unless (groups = Settings.mcp_permission_groups(denied)).empty?
+      Log.info { "mcp: switched off in Preferences (AI › MCP permissions): #{groups.join(", ", &.title)}" }
+      advertised = MCP::Tools.served_names(tool_filter, !read_only, denied)
+      # The `--read-only` refusal above, for the switches: a spec whose every tool is in a
+      # group the operator turned off would start a server with an empty tools/list, which an
+      # agent cannot tell from a gori without the feature. Refused here, AFTER the install
+      # branch — an installed command outlives today's switches.
+      if tool_filter && advertised.empty?
+        abort "gori mcp: every tool --tools=#{tools_spec} selects is switched off in Preferences " \
+              "(AI › MCP permissions: #{groups.join(", ", &.title)}), so the server would advertise " \
+              "nothing. Allow a group there, or name a read tool."
+      end
+    end
 
     # The catalogue is the first thing this server spends, and it spends it on the operator's
     # behalf before a question is asked: an MCP client loads every tool description into the
@@ -103,7 +121,7 @@ module Gori::CLI
     # it is HERE and not beside the bound server below: an unbound start (outside a git
     # workspace, `--no-project`, or a database that would not open) spends exactly the same
     # context and used to say nothing at all.
-    Log.info { mcp_catalogue_banner(tool_filter, read_only) }
+    Log.info { mcp_catalogue_banner(tool_filter, read_only, denied) }
 
     selection, bind_error = if no_project
                               {MCP::ProjectResolver::Selection.new(nil, nil, nil, "unbound"), nil}
@@ -117,11 +135,11 @@ module Gori::CLI
     project_id = selection.project_id
 
     unless selection.bound?
-      log_unbound_binders(advertised, tools_spec, read_only)
+      log_unbound_binders(advertised, tool_filter, read_only, denied)
       server = MCP::Server.new(nil, allow_actions: !read_only, verify_upstream: !insecure_upstream,
         project_name: nil, project_slug: nil, db_path: nil,
         selection_source: selection.source, workspace_root: nil, project_id: nil,
-        bind_error: bind_error, tool_filter: tool_filter)
+        bind_error: bind_error, tool_filter: tool_filter, denied_permissions: denied)
       server.run
       return
     end
@@ -163,11 +181,11 @@ module Gori::CLI
         # gets. Without it, a filtered server whose database would not open told the agent
         # "the operator must restart" while the operator's own stderr said only that the file
         # was bad (#1136).
-        log_unbound_binders(advertised, tools_spec, read_only)
+        log_unbound_binders(advertised, tool_filter, read_only, denied)
         server = MCP::Server.new(nil, allow_actions: !read_only, verify_upstream: !insecure_upstream,
           project_name: nil, project_slug: nil, db_path: nil,
           selection_source: "unbound", workspace_root: nil, project_id: nil,
-          bind_error: reason, tool_filter: tool_filter)
+          bind_error: reason, tool_filter: tool_filter, denied_permissions: denied)
         server.run
         return
       end
@@ -176,7 +194,7 @@ module Gori::CLI
       server = MCP::Server.new(store, allow_actions: !read_only, verify_upstream: !insecure_upstream,
         project_name: project_name, project_slug: project_slug, db_path: resolved,
         selection_source: selection.source, workspace_root: selection.workspace_root,
-        project_id: project_id, tool_filter: tool_filter)
+        project_id: project_id, tool_filter: tool_filter, denied_permissions: denied)
       server.run # blocks until STDIN EOF (client closed)
     ensure
       store.close
@@ -210,10 +228,11 @@ module Gori::CLI
   # WEIGHT is measured from the very listing the client will be handed, rather than written
   # into help or docs, for the reason `mcp_tools_help` gives. One JSON build per start — the
   # same work the server's first `declared_args` does again, off any hot path.
-  def self.mcp_catalogue_banner(tool_filter : MCP::ToolFilter?, read_only : Bool) : String
-    advertised = MCP::Tools.served_names(tool_filter, !read_only)
+  def self.mcp_catalogue_banner(tool_filter : MCP::ToolFilter?, read_only : Bool,
+                                denied : Set(String)? = nil) : String
+    advertised = MCP::Tools.served_names(tool_filter, !read_only, denied)
     total = MCP::Tools::TOOL_NAMES.size
-    weight = MCP::Tools.catalogue_weight(tool_filter, !read_only)
+    weight = MCP::Tools.catalogue_weight(tool_filter, !read_only, denied)
     if f = tool_filter
       "mcp: --tools=#{f.spec} advertises #{advertised.size} of #{total} tools (#{weight}): #{advertised.sort.join(", ")}"
     else
@@ -234,14 +253,25 @@ module Gori::CLI
   # so serving it alone buys the agent a listing and a refusal per entry. That is an operator
   # mistake, made at start-up, and stderr is the only surface the operator is looking at when
   # it is made — the agent never sees it (#1136).
-  private def self.log_unbound_binders(advertised : Array(String), tools_spec : String?,
-                                       read_only : Bool) : Nil
+  private def self.log_unbound_binders(advertised : Array(String), tool_filter : MCP::ToolFilter?,
+                                       read_only : Bool, denied : Set(String)) : Nil
+    tools_spec = tool_filter.try(&.spec)
     if MCP::Tools::PROJECT_PICKERS.none? { |n| advertised.includes?(n) }
       Log.warn do
         spec = tools_spec ? "--tools=#{tools_spec} advertises" : "this server advertises"
+        fixes = [] of String
+        if MCP::Tools.denied_permission(denied, "switch_project")
+          fixes << "allow Manage projects in Preferences (AI › MCP permissions)"
+        end
+        # Every cause that removed the binder, not the first one found: fixing one of two
+        # leaves the server exactly as unbindable as it was.
+        if fixes.empty? || (tool_filter && !tool_filter.allows?("switch_project"))
+          fixes << "add switch_project to --tools"
+        end
+        fix = "or #{fixes.join(" and ")}"
         "mcp: unbound (no project) and #{spec} neither of " \
         "#{MCP::Tools::PROJECT_PICKERS.join(", ")} — no call can bind a project. " \
-        "Restart with --project/--db, or add switch_project to --tools"
+        "Restart with --project/--db, #{fix}"
       end
     else
       usable = MCP::Tools::PROJECT_BINDERS.select { |n| advertised.includes?(n) }

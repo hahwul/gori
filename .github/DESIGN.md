@@ -2979,10 +2979,11 @@ authority.
 **But `--read-only` is not `--tools`, and the difference is the whole point of that
 paragraph.** A gated tool is absent and restorable — saying so is why the read-only sentence
 exists, and it legitimately names tools the current listing does not carry. A filtered tool is
-absent and not coming back. `Tools#advertises?` reads the `--tools` filter *only*, which makes
-it exactly the predicate for "would this be here if the gate were lifted" — so the read-only
-paragraph runs its names through the same call and promises only what a restart would
-actually restore.
+absent and not coming back. `Tools#advertises?` reads everything *but* the gate — the `--tools`
+filter and the operator's Preferences permission switches (see the 2026-09-27 entry) — which
+makes it exactly the predicate for "would this be here if the gate were lifted" — so the
+read-only paragraph runs its names through the same call and promises only what a restart
+would actually restore.
 
 **And the catalogue's cost is now said out loud on every start.** 179 tools is ~197 KB, about
 50,000 tokens an MCP client loads before the first question and keeps for the session;
@@ -4053,3 +4054,28 @@ capitals, which never reach Global.
   answer, `>` and `Z` included, so there the next letter meets the strip's raw keys: `> f` opens
   the sub-tab picker and the Comparer's `Z t` marks the chip. Both stay strip-local and `esc`
   undoes them, so they are allowlisted by name rather than routed through the strip's handler.
+
+### 2026-09-27: MCP permission groups are a third reason a tool is absent
+
+Preferences › AI › MCP permissions switches off groups of `gori mcp` tools from gori itself, where
+`--read-only` and `--tools` are decided in the agent's install. Four groups — `send`, `intercept`,
+`write`, `projects` (`Settings::MCP_PERMISSIONS`) — all on by default. Reading is never a group.
+
+- **Declared per tool, next to its handler**: `@[Tool(permission:)]`, required on every
+  `agent_action` tool by the registry macro, and on every other writer by
+  `spec/mcp/tool_permissions_spec.cr`, which names the operator channel as the one exemption.
+  A group never splits a `requires:` workflow.
+- **The same two answers as `--read-only`**: absent from `tools/list` and refused with
+  `TOOL_DISABLED`, and the three predicates compose (`Tools.serves?`). `advertises?` reads the
+  switches, because a restart without `--read-only` does not bring a switched-off tool back.
+- **The arguments decide where one mode sends**: `Tools#call_denied_permission` is the one place
+  for that — `probe_scan{active}` and `set_probe_mode` raised to an active mode are `send`. A new
+  call-shaped sender goes there, not into its handler.
+- **Latched at start and never fail-open.** Read once per `gori mcp` process, like `channels`. A
+  settings file the start could not read in full is re-read for this section alone, and denies
+  every group when even that fails.
+- **Its own settings section** (`mcp_permissions`), because the save merge reconciles whole
+  sections: sharing `mcp` with `channels` let one window's stale copy of the denials win.
+- **Groups are capabilities, not destinations.** Intercept control still lets an agent forward
+  an edited held request, and those bytes reach the target with Send traffic off. Turning off
+  both is what stops an agent's bytes reaching a target; the docs say so.

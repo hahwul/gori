@@ -224,7 +224,7 @@ module Gori
         drafted.as(Gori::MockFromFlow::Draft)
       end
 
-      @[Tool("create_rule", gated: true, agent_action: true)]
+      @[Tool("create_rule", gated: true, agent_action: true, permission: "write")]
       private def create_rule(h) : Result
         draft = mock_flow_draft(h)
         return draft if draft.is_a?(Result)
@@ -337,7 +337,7 @@ module Gori
       # indistinguishable from a hand-authored one and is editable/disable-able/deletable (P4).
       # Returns the ids created; a partial write (some rows committed, one refused) reports
       # what landed rather than pretending it was all-or-nothing.
-      @[Tool("create_rule_from_preset", gated: true, agent_action: true)]
+      @[Tool("create_rule_from_preset", gated: true, agent_action: true, permission: "write")]
       private def create_rule_from_preset(h) : Result
         key = str(h, "preset")
         return err("missing required 'preset' (see list_rule_presets)", "INVALID_ARGUMENT", field: "preset") if key.nil? || key.empty?
@@ -372,7 +372,7 @@ module Gori
         err(ex.message || "invalid preset arguments", "INVALID_ARGUMENT")
       end
 
-      @[Tool("update_rule", gated: true, agent_action: true)]
+      @[Tool("update_rule", gated: true, agent_action: true, permission: "write")]
       private def update_rule(h) : Result
         id = int(h, "id")
         return err(id_error(h, "id"), "INVALID_ARGUMENT", field: "id") unless id
@@ -560,7 +560,7 @@ module Gori
       # For a global rule this writes THIS PROJECT's override by default — the same meaning `x`
       # has in the Rewriter tab. `everywhere: true` changes the library's own default instead,
       # which reaches every project that has not overridden it.
-      @[Tool("set_rule_enabled", gated: true, agent_action: true)]
+      @[Tool("set_rule_enabled", gated: true, agent_action: true, permission: "write")]
       private def set_rule_enabled(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
@@ -597,7 +597,7 @@ module Gori
         err("#{rule.inert_reason} — cannot enable this rule with this gori; use a newer version or delete it", "INVALID_ARGUMENT", field: "enabled")
       end
 
-      @[Tool("delete_rule", gated: true, agent_action: true)]
+      @[Tool("delete_rule", gated: true, agent_action: true, permission: "write")]
       private def delete_rule(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
@@ -756,7 +756,7 @@ module Gori
         err("'pos_end' must be greater than 'pos_start' for kind=position", "INVALID_ARGUMENT", field: "pos_end")
       end
 
-      @[Tool("create_extract_rule", gated: true, agent_action: true)]
+      @[Tool("create_extract_rule", gated: true, agent_action: true, permission: "write")]
       private def create_extract_rule(h) : Result
         name = extract_name_arg(str(h, "name"))
         return err("missing required 'name'", "INVALID_ARGUMENT", field: "name") unless name
@@ -805,7 +805,7 @@ module Gori
         busy("extract rule created but the disable did not persist (store busy or unwritable); retry")
       end
 
-      @[Tool("update_extract_rule", gated: true, agent_action: true)]
+      @[Tool("update_extract_rule", gated: true, agent_action: true, permission: "write")]
       private def update_extract_rule(h) : Result
         id = int(h, "id")
         return err(id_error(h, "id"), "INVALID_ARGUMENT", field: "id") unless id
@@ -843,7 +843,7 @@ module Gori
         end)
       end
 
-      @[Tool("set_extract_rule_enabled", gated: true, agent_action: true)]
+      @[Tool("set_extract_rule_enabled", gated: true, agent_action: true, permission: "write")]
       private def set_extract_rule_enabled(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
@@ -854,7 +854,7 @@ module Gori
         Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "enabled", enabled } })
       end
 
-      @[Tool("delete_extract_rule", gated: true, agent_action: true)]
+      @[Tool("delete_extract_rule", gated: true, agent_action: true, permission: "write")]
       private def delete_extract_rule(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id

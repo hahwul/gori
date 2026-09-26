@@ -29,6 +29,84 @@ module Gori::Settings
   # to find out.
   class_property? mcp_channels : Bool = DEFAULT_MCP_CHANNELS
 
+  # One coarse on/off switch over a group of `gori mcp` tools. Reading the capture is not a
+  # group: it is what an attached agent is FOR, and a server with nothing to read is not a
+  # narrower server but a broken one.
+  record McpPermission, key : String, title : String, summary : String
+
+  # The groups, in the order Preferences draws them. `key` is what `settings.json` stores and
+  # what a tool's `@[Tool(permission:)]` names (the registry macro refuses any other value),
+  # so it is never renamed: a stored `false` under an old key would quietly turn back on.
+  MCP_PERMISSIONS = [
+    McpPermission.new("send", "Send traffic",
+      "replay, race, fuzz, mine, discover, authorize, sequence, retest and OAST — every tool that dials a target"),
+    McpPermission.new("intercept", "Intercept control",
+      "forward, drop, edit and re-filter held traffic, and switch intercept on or off"),
+    McpPermission.new("write", "Edit project data",
+      "issues, notes, repeaters, rules, scope, env, session slots and the other project records"),
+    McpPermission.new("projects", "Manage projects",
+      "create, switch, delete, import and export projects"),
+  ]
+
+  # The same keys as a literal, for the `@[Tool]` registry macro, which can read a constant
+  # only when its value IS a literal. spec/settings/mcp_spec.cr holds the two in step.
+  MCP_PERMISSION_KEYS = %w[send intercept write projects]
+
+  # Every group is allowed by default, which is what `gori mcp` did before the switches
+  # existed. Stored as the DENIED keys, because that is the only thing the file records: a
+  # default install writes no `mcp_permissions` section at all. A key this gori does not know
+  # (a newer gori's group) is kept and written back, never dropped — it grants nothing here.
+  #
+  # Its OWN top-level section, not a key inside `mcp`: the save merge reconciles whole
+  # sections (`merge_with_disk`), so sharing one with `channels` let a window that only
+  # toggled Channel delivery write its stale copy of the denials back over another window's.
+  #
+  # Read at `gori mcp` start like `mcp_channels` (through `mcp_enforced_denials`), so a change
+  # reaches an agent whose server is started after it; the Preferences rows say so.
+  class_property mcp_denied_permissions : Set(String) = Set(String).new
+
+  # The group `key` names, or nil for a key this gori does not know.
+  def self.mcp_permission(key : String) : McpPermission?
+    MCP_PERMISSIONS.find(&.key.==(key))
+  end
+
+  # The groups among `keys`, in Preferences order; a key this gori does not know is skipped.
+  def self.mcp_permission_groups(keys : Enumerable(String)) : Array(McpPermission)
+    MCP_PERMISSIONS.select { |p| keys.includes?(p.key) }
+  end
+
+  def self.mcp_permitted?(key : String) : Bool
+    !mcp_denied_permissions.includes?(key)
+  end
+
+  def self.set_mcp_permitted(key : String, allowed : Bool) : Nil
+    denied = mcp_denied_permissions.dup
+    allowed ? denied.delete(key) : denied.add(key)
+    self.mcp_denied_permissions = denied
+  end
+
+  # The denials `gori mcp` enforces. A security switch must not fail OPEN: when the last `load`
+  # left sections at their defaults (`load_degraded?` — a section above this one raised, the
+  # file is not JSON, or it could not be read) the in-memory set says "all allowed" about a
+  # file nobody finished reading. The section is then read on its own from the raw file, and
+  # when even that is impossible every group is denied, with the reason on stderr.
+  def self.mcp_enforced_denials : {Set(String), String?}
+    return {mcp_denied_permissions.dup, nil} unless load_degraded?
+    root = begin
+      JSON.parse(File.read(path))
+    rescue
+      nil
+    end
+    if root && (h = root.as_h?)
+      return {mcp_denials_from(h["mcp_permissions"]?) || Set(String).new, nil}
+    end
+    {MCP_PERMISSION_KEYS.to_set, "#{path} could not be read, so every MCP permission group is off until it is fixed"}
+  end
+
+  private def self.mcp_denials_from(node : JSON::Any?) : Set(String)?
+    node.try(&.as_h?).try &.compact_map { |k, v| k if v.as_bool? == false }.to_set
+  end
+
   # Tolerant mcp section: absent/non-object keeps current.
   private def self.parse_mcp(node : JSON::Any?) : Nil
     return unless o = node.try(&.as_h?)
@@ -36,10 +114,22 @@ module Gori::Settings
     self.mcp_channels = load_bool_h(o, "channels", mcp_channels?)
   end
 
-  # Factory reset for this section (dispatched by Settings.reset_to_factory). One assignment
-  # per field serialize_mcp writes.
+  # An object replaces the whole set: the file records only denials, so a key it no longer
+  # names is one somebody turned back on. Absent or non-object keeps the current set.
+  private def self.parse_mcp_permissions(node : JSON::Any?) : Nil
+    if denied = mcp_denials_from(node)
+      self.mcp_denied_permissions = denied
+    end
+  end
+
+  # Factory reset for these sections (dispatched by Settings.reset_to_factory). One assignment
+  # per field serialize_mcp / serialize_mcp_permissions write.
   private def self.reset_mcp : Nil
     self.mcp_channels = DEFAULT_MCP_CHANNELS
+  end
+
+  private def self.reset_mcp_permissions : Nil
+    self.mcp_denied_permissions = Set(String).new
   end
 
   # Omitted entirely while every field is at its factory default, so a default install's
@@ -51,6 +141,13 @@ module Gori::Settings
           j.field "channels", mcp_channels?
         end
       end
+    end
+  end
+
+  private def self.serialize_mcp_permissions(j : JSON::Builder) : Nil
+    return if mcp_denied_permissions.empty?
+    j.field "mcp_permissions" do
+      j.object { mcp_denied_permissions.to_a.sort!.each { |k| j.field k, false } }
     end
   end
 end

@@ -40,6 +40,7 @@ private RESET_FIXTURE = <<-JSON
     "saved_views": { "next_view_id": 7, "views": [ { "id": 1, "name": "v1", "query": "src:proxy" } ] },
     "redaction": { "active": "p1", "default": true, "salt": "abcd", "profiles": [ { "name": "p1", "json_fields": ["password"] } ] },
     "mcp": { "channels": true },
+    "mcp_permissions": { "send": false },
     "user_agents": [ "Fixture/1.0" ]
   }
   JSON

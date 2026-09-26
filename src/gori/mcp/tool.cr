@@ -92,6 +92,16 @@ module Gori
     #   if the operator explicitly excludes one while retaining its parent, startup refuses
     #   the conflicting filter rather than widening the allowlist or advertising a broken
     #   workflow.
+    # - `permission` — the operator's coarse switch this tool sits behind, one of
+    #   `Settings::MCP_PERMISSION_KEYS` (Preferences › AI › MCP permissions): `send` for a
+    #   tool that dials a target or an OAST server (and the pollers of the jobs those start),
+    #   `intercept` for the tools that act on held traffic, `projects` for the ones that move
+    #   the binding or copy a project in or out, `write` for every other in-project write. A
+    #   denied group is left out of `tools/list` and refused with TOOL_DISABLED, the same two
+    #   answers `--read-only` gives. Required on every `agent_action` tool; the rest of the
+    #   writers that carry one are named in spec/mcp/tool_permissions_spec.cr, which also holds the
+    #   three that are deliberately unswitched: the operator channel (`operator_messages`,
+    #   `reply_to_operator`) and `probe_scan`, whose `active: true` mode is refused per call.
     annotation Tool
     end
   end

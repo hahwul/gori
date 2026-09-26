@@ -37,8 +37,8 @@ module Gori
         now_ms = Time.utc.to_unix_ms
         items = token.empty? ? [] of Store::HeldRow : store.intercept_held(token)
         # Stamp viewed_ms so the capturing instance's auto-forward reaper sees the agent is
-        # watching (only meaningful when we can actually act; skip in read-only mode).
-        store.touch_intercept_held(token, items.map(&.item_id), now_ms) if @allow_actions && !items.empty?
+        # watching (only meaningful when we can actually act — see `touches_held?`).
+        store.touch_intercept_held(token, items.map(&.item_id), now_ms) if touches_held? && !items.empty?
         Result.new(JSON.build do |j|
           j.object do
             j.field "available", true
@@ -57,6 +57,15 @@ module Gori
         end)
       end
 
+      # Whether reading a held item may stamp `viewed_ms`. The capturing instance's reaper
+      # reads that stamp as "an agent is handling this hold" and stops auto-forwarding it, so
+      # only an agent that CAN forward or drop may claim it: under --read-only, or with
+      # "Intercept control" switched off, a polling agent would otherwise park the operator's
+      # traffic until they came to the Intercept tab themselves.
+      private def touches_held? : Bool
+        @allow_actions && denied_permission("intercept_forward").nil?
+      end
+
       @[Tool("intercept_get")]
       private def intercept_get(h) : Result
         item_id = int(h, "item_id")
@@ -67,7 +76,7 @@ module Gori
         token = bridge["session_token"]?.try(&.as_s?) || ""
         row = token.empty? ? nil : store.intercept_held(token).find { |r| r.item_id == item_id }
         return not_found("held item #{item_id} is not currently held (already forwarded/dropped, or never held)") unless row
-        store.touch_intercept_held(token, [row.item_id], Time.utc.to_unix_ms) if @allow_actions
+        store.touch_intercept_held(token, [row.item_id], Time.utc.to_unix_ms) if touches_held?
         Result.new(JSON.build { |j| Serialize.intercept_item_detail(j, row, include_sensitive, Time.utc.to_unix_ms) })
       end
 
@@ -101,21 +110,21 @@ module Gori
         hb > 0 && (Time.utc.to_unix_ms - hb) < INTERCEPT_LIVE_MS
       end
 
-      @[Tool("intercept_forward", gated: true, agent_action: true)]
+      @[Tool("intercept_forward", gated: true, agent_action: true, permission: "intercept")]
       private def intercept_forward(h) : Result
         id = int(h, "item_id")
         return err(id_error(h, "item_id"), "INVALID_ARGUMENT", field: "item_id") unless id
         enqueue_intercept("forward", item_id: id)
       end
 
-      @[Tool("intercept_drop", gated: true, agent_action: true)]
+      @[Tool("intercept_drop", gated: true, agent_action: true, permission: "intercept")]
       private def intercept_drop(h) : Result
         id = int(h, "item_id")
         return err(id_error(h, "item_id"), "INVALID_ARGUMENT", field: "item_id") unless id
         enqueue_intercept("drop", item_id: id)
       end
 
-      @[Tool("intercept_forward_edit", gated: true, agent_action: true)]
+      @[Tool("intercept_forward_edit", gated: true, agent_action: true, permission: "intercept")]
       private def intercept_forward_edit(h) : Result
         id = int(h, "item_id")
         return err(id_error(h, "item_id"), "INVALID_ARGUMENT", field: "item_id") unless id
@@ -210,14 +219,14 @@ module Gori
         RequestBuilder.normalize_raw(raw)
       end
 
-      @[Tool("intercept_toggle", gated: true, agent_action: true)]
+      @[Tool("intercept_toggle", gated: true, agent_action: true, permission: "intercept")]
       private def intercept_toggle(h) : Result
         want = optional_bool_arg(h, "enable")
         return err("missing required 'enable' (true or false)", "INVALID_ARGUMENT", field: "enable") if want.nil?
         enqueue_intercept("toggle", arg: want ? "true" : "false")
       end
 
-      @[Tool("intercept_set_filter", gated: true, agent_action: true)]
+      @[Tool("intercept_set_filter", gated: true, agent_action: true, permission: "intercept")]
       private def intercept_set_filter(h) : Result
         q = str(h, "query")
         return err("missing required 'query' (empty string to clear)", "INVALID_ARGUMENT", field: "query") if q.nil?
@@ -233,7 +242,7 @@ module Gori
         enqueue_intercept("set_filter", arg: q)
       end
 
-      @[Tool("intercept_set_direction", gated: true, agent_action: true)]
+      @[Tool("intercept_set_direction", gated: true, agent_action: true, permission: "intercept")]
       private def intercept_set_direction(h) : Result
         raw = str(h, "direction").try(&.strip).presence
         unless raw

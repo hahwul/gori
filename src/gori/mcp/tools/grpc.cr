@@ -19,7 +19,7 @@ module Gori
       # tree (or a file-loaded lens) until it asks for this, which is P4 in the one place an
       # agent could most easily be surprised by an outbound request.
 
-      @[Tool("grpc_reflect", gated: true, agent_action: true)]
+      @[Tool("grpc_reflect", gated: true, agent_action: true, permission: "send")]
       private def grpc_reflect(h) : Result
         raw = str(h, "url")
         return err("missing required 'url'", "INVALID_ARGUMENT", field: "url") if raw.nil? || raw.empty?
@@ -132,7 +132,7 @@ module Gori
 
       # Drop one cached reflection target (or all of them). The operator's/agent's exit from
       # a schema fetched earlier — nothing here expires on its own.
-      @[Tool("grpc_forget", gated: true, agent_action: true)]
+      @[Tool("grpc_forget", gated: true, agent_action: true, permission: "write")]
       private def grpc_forget(h) : Result
         target = str(h, "target")
         all = bool_arg(h, "all", false)

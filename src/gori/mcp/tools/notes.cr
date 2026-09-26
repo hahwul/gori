@@ -68,7 +68,7 @@ module Gori
       # `Notes.create` runs the read and the write inside one `BEGIN IMMEDIATE` (see
       # `Store#mutate_setting`), and mints the id from the set the transaction read — so two
       # concurrent creates get two ids and both notes survive.
-      @[Tool("create_note", gated: true, agent_action: true)]
+      @[Tool("create_note", gated: true, agent_action: true, permission: "write")]
       private def create_note(h) : Result
         text = str(h, "text") || ""
         new_id = Notes.create(store, text)
@@ -82,7 +82,7 @@ module Gori
         end)
       end
 
-      @[Tool("update_note", gated: true, agent_action: true)]
+      @[Tool("update_note", gated: true, agent_action: true, permission: "write")]
       private def update_note(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
@@ -107,7 +107,7 @@ module Gori
         end)
       end
 
-      @[Tool("delete_note", gated: true, agent_action: true)]
+      @[Tool("delete_note", gated: true, agent_action: true, permission: "write")]
       private def delete_note(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id

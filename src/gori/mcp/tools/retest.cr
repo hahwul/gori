@@ -50,7 +50,7 @@ module Gori
         end)
       end
 
-      @[Tool("add_retest_step", gated: true, agent_action: true)]
+      @[Tool("add_retest_step", gated: true, agent_action: true, permission: "write")]
       private def add_retest_step(h) : Result
         issue_id = int(h, "issue_id")
         return Result.new(id_error(h, "issue_id"), is_error: true) unless issue_id
@@ -74,7 +74,7 @@ module Gori
         retest_step_reply(id, "added")
       end
 
-      @[Tool("update_retest_step", gated: true, agent_action: true)]
+      @[Tool("update_retest_step", gated: true, agent_action: true, permission: "write")]
       private def update_retest_step(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
@@ -105,7 +105,7 @@ module Gori
       end
 
       # `position` is 1-based and CLAMPED to the list, so `position:1` always means "first".
-      @[Tool("move_retest_step", gated: true, agent_action: true)]
+      @[Tool("move_retest_step", gated: true, agent_action: true, permission: "write")]
       private def move_retest_step(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
@@ -123,7 +123,7 @@ module Gori
         retest_step_reply(id, "moved")
       end
 
-      @[Tool("remove_retest_step", gated: true, agent_action: true)]
+      @[Tool("remove_retest_step", gated: true, agent_action: true, permission: "write")]
       private def remove_retest_step(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
@@ -140,7 +140,7 @@ module Gori
 
       # The CLI's `retest clear`. Steps only — the runs are the record of what already
       # happened, and re-planning a check does not un-run it.
-      @[Tool("clear_retest_steps", gated: true, agent_action: true)]
+      @[Tool("clear_retest_steps", gated: true, agent_action: true, permission: "write")]
       private def clear_retest_steps(h) : Result
         issue_id = int(h, "issue_id")
         return Result.new(id_error(h, "issue_id"), is_error: true) unless issue_id
@@ -156,7 +156,7 @@ module Gori
       # under a scope since fixed. Without it an agent could record a run it cannot undo,
       # while `get_issue`'s `retest` object keeps advertising that verdict as the issue's
       # last answer.
-      @[Tool("delete_retest_run", gated: true, agent_action: true)]
+      @[Tool("delete_retest_run", gated: true, agent_action: true, permission: "write")]
       private def delete_retest_run(h) : Result
         id = int(h, "run_id")
         return Result.new(id_error(h, "run_id"), is_error: true) unless id
@@ -169,7 +169,7 @@ module Gori
 
       # The one tool here that SENDS. Every step goes out through the project's scope and
       # Sandbox gates and is recorded in History as `src:retest`.
-      @[Tool("run_retest", gated: true, agent_action: true, env_refresh: true)]
+      @[Tool("run_retest", gated: true, agent_action: true, env_refresh: true, permission: "send")]
       private def run_retest(h) : Result
         issue_id = int(h, "issue_id")
         return Result.new(id_error(h, "issue_id"), is_error: true) unless issue_id

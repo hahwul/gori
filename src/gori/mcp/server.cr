@@ -44,12 +44,14 @@ module Gori
                      db_path : String? = nil, selection_source : String? = nil,
                      workspace_root : String? = nil, project_id : String? = nil,
                      bind_error : String? = nil, tool_filter : ToolFilter? = nil,
+                     denied_permissions : Set(String)? = nil,
                      @input : IO = STDIN, @output : IO = STDOUT)
         @allow_actions = allow_actions
         @tools = Tools.new(store, allow_actions, verify_upstream,
           project_name: project_name, project_slug: project_slug, db_path: db_path,
           selection_source: selection_source, workspace_root: workspace_root,
-          project_id: project_id, bind_error: bind_error, tool_filter: tool_filter)
+          project_id: project_id, bind_error: bind_error, tool_filter: tool_filter,
+          denied_permissions: denied_permissions)
         @initialized = false
         # Set when the output pipe breaks (client vanished mid-write): the loop then
         # stops rather than thrashing on a dead stream or raising an unhandled error.
@@ -661,6 +663,7 @@ module Gori
                "microseconds plus *_iso RFC3339 fields where available.#{failure}#{binding_note}"
         text = @allow_actions ? "#{base}#{actions_note}#{projects_note}" : "#{base}#{read_only_note}#{projects_note}"
         text += operator_messages_note
+        text += permissions_note
         # The backstop for every name above, and for any added later without this treatment:
         # when a filter is in force at all, say so and name the authority. A sentence that
         # survives a future edit while its tool does not is then at least contradicted.
@@ -696,7 +699,7 @@ module Gori
           # time, that nothing it can call will change that — while the `NO_PROJECT` error it
           # was about to hit said so outright. Same words, from `Tools` (#1136).
           if @tools.unbindable?
-            b << " And " << Tools::NO_BINDER_RECOVERY << "."
+            b << " And " << @tools.no_binder_recovery << "."
           elsif !hints.empty?
             b << " Call " << hints.join(", or ") << " before using traffic tools."
           end
@@ -833,6 +836,16 @@ module Gori
       private def projects_note : String
         picks = advertised("list_projects", "create_project", "switch_project", "delete_project")
         picks ? " Projects can be managed via #{picks}." : ""
+      end
+
+      # The Preferences switches, named by group rather than by tool: the tools are simply
+      # absent from tools/list, and what the agent needs is the reason and who can change it —
+      # otherwise a missing send_request reads as a gori that cannot send.
+      private def permissions_note : String
+        groups = @tools.denied_groups
+        return "" if groups.empty?
+        " The operator has switched off #{groups.join(", ", &.title)} in gori Preferences " \
+        "(AI › MCP permissions), so those tools are not served; ask the operator if you need them."
       end
 
       # Said once, when `--tools` narrowed the catalogue: whatever the prose above named, the

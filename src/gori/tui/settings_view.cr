@@ -253,19 +253,28 @@ module Gori::Tui
         "push \"Tell the agent…\" messages as a claude/channel event when no confirmed route answers — research preview, needs Claude Code launched with --dangerously-load-development-channels server:gori; the inbox socket, codex queue, operator_messages poll and tool-result carry run either way, and a confirmed route is always tried first; applies to agents started after the change — ←/→/space toggles",
         bool: true),
     ]
+    # MCP permissions: one row per `Settings::MCP_PERMISSIONS` group, in its order, so a group
+    # added there is a row here without a second list to keep in step.
+    MCP_PERMISSION_FIELDS = Settings::MCP_PERMISSIONS.map do |perm|
+      Field.new(perm.title,
+        "let an attached agent use #{perm.summary} — off leaves those tools out of gori mcp's tools/list " \
+        "and refuses them; reading the capture is always allowed; applies to agents started after the change — ←/→/space toggles",
+        bool: true)
+    end
     SECTIONS = {
-      :network       => NETWORK_FIELDS,
-      :editor        => EDITOR_FIELDS,
-      :mouse         => MOUSE_FIELDS,
-      :keys          => KEYS_FIELDS,
-      :theme         => THEME_FIELDS,
-      :layout        => LAYOUT_FIELDS,
-      :statusline    => STATUSLINE_FIELDS,
-      :display       => DISPLAY_FIELDS,
-      :companion     => COMPANION_FIELDS,
-      :notifications => NOTIFICATIONS_FIELDS,
-      :general       => GENERAL_FIELDS,
-      :mcp           => MCP_FIELDS,
+      :network         => NETWORK_FIELDS,
+      :editor          => EDITOR_FIELDS,
+      :mouse           => MOUSE_FIELDS,
+      :keys            => KEYS_FIELDS,
+      :theme           => THEME_FIELDS,
+      :layout          => LAYOUT_FIELDS,
+      :statusline      => STATUSLINE_FIELDS,
+      :display         => DISPLAY_FIELDS,
+      :companion       => COMPANION_FIELDS,
+      :notifications   => NOTIFICATIONS_FIELDS,
+      :general         => GENERAL_FIELDS,
+      :mcp             => MCP_FIELDS,
+      :mcp_permissions => MCP_PERMISSION_FIELDS,
     }
 
     # Max theme rows shown at once before the list scrolls (the box also shrinks to the
@@ -297,18 +306,19 @@ module Gori::Tui
       @section = section
       Theme.load_custom if section == :theme # pick up theme files dropped since startup
       @values = case section
-                when :editor        then editor_values
-                when :mouse         then mouse_values
-                when :keys          then keys_values
-                when :theme         then [Theme.canonical(Settings.theme)]
-                when :layout        then layout_values
-                when :statusline    then statusline_values
-                when :display       then display_values
-                when :companion     then companion_values
-                when :notifications then [Settings.notify_bell? ? "on" : "off", Settings.notify_toast? ? "on" : "off", Settings.notify_retention.to_s]
-                when :general       then general_values
-                when :mcp           then mcp_values
-                else                     network_values
+                when :editor          then editor_values
+                when :mouse           then mouse_values
+                when :keys            then keys_values
+                when :theme           then [Theme.canonical(Settings.theme)]
+                when :layout          then layout_values
+                when :statusline      then statusline_values
+                when :display         then display_values
+                when :companion       then companion_values
+                when :notifications   then [Settings.notify_bell? ? "on" : "off", Settings.notify_toast? ? "on" : "off", Settings.notify_retention.to_s]
+                when :general         then general_values
+                when :mcp             then mcp_values
+                when :mcp_permissions then mcp_permission_values
+                else                       network_values
                 end
       @focused = 0
       @cursor = @values[0].size
@@ -388,7 +398,8 @@ module Gori::Tui
                 when :mcp then [
                   Settings::DEFAULT_MCP_CHANNELS ? "on" : "off",
                 ]
-                else [Settings::DEFAULT_BIND_HOST, Settings::DEFAULT_BIND_PORT.to_s,
+                when :mcp_permissions then Settings::MCP_PERMISSIONS.map { "on" } # every group allowed
+                else                       [Settings::DEFAULT_BIND_HOST, Settings::DEFAULT_BIND_PORT.to_s,
                       "none", "", "",
                       Settings::DEFAULT_UPSTREAM_PROXY_CA,
                       Settings::DEFAULT_UPSTREAM_PROXY_INSECURE ? "off" : "on",
@@ -585,6 +596,11 @@ module Gori::Tui
       [
         Settings.mcp_channels? ? "on" : "off",
       ]
+    end
+
+    # Positional over `Settings::MCP_PERMISSIONS`, the list MCP_PERMISSION_FIELDS is built from.
+    private def mcp_permission_values : Array(String)
+      Settings::MCP_PERMISSIONS.map { |perm| Settings.mcp_permitted?(perm.key) ? "on" : "off" }
     end
 
     # ↑/↓: move between fields — except in the THEME section, whose single field IS a
@@ -858,6 +874,15 @@ module Gori::Tui
       if @section == :mcp
         Settings.mcp_channels = @values[0] == "on"
         @values = mcp_values
+        return persist
+      end
+      if @section == :mcp_permissions
+        # Per group, never a rebuilt set: a key this gori does not draw (a newer gori's group)
+        # stays denied rather than being dropped by a save from here.
+        Settings::MCP_PERMISSIONS.each_with_index do |perm, i|
+          Settings.set_mcp_permitted(perm.key, @values[i] == "on")
+        end
+        @values = mcp_permission_values
         return persist
       end
       if err = Settings.bind_host_error(@values[NETWORK_BIND_HOST])

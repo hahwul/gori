@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- MCP: Preferences → AI → MCP permissions switches off what an attached agent may do, one group at a time (send traffic, intercept control, project edits, project management); every group stays on by default and reading the capture is always allowed (#1327)
 - TUI: new `solarized_dark` (dark) and `everforest_light` (light) themes, and the theme picker lists `dancheong` and `hanji` right after `goridark` and `goriday` (#1325)
 - CLI: `gori run oast resume` waits for a busy project as long as `oast listen --save` does, instead of giving up after one second while it saves callbacks (#1321)
 - Network: environment proxy selection applies its loopback and NO_PROXY CIDR exceptions to resolver-recognized numeric IPv4 aliases (#1318)
