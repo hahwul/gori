@@ -254,27 +254,36 @@ describe "RepeaterView gRPC reframe toggle" do
 
   # Drawn AND hit-testable, in both halves of the gRPC branch — the defect `␣Pw:KEY` had, and
   # the state matters most exactly while the payload is being hex-edited.
-  it "draws a clickable ␣Pr:FRAME badge in both the MSG and HEX states" do
-    grpc_tmp_store do |store|
-      view = unary.call(store)
-      view.focus_pane(:request)
-      rect = Rect.new(0, 0, 160, 24)
-      border_y = rect.y + 3
+  # The badge's menu path is the registry's (`Hotkeys.menu_chip`, #1295): `␣` plus the keys
+  # that reach Protocol…'s reframe row, and a bare `␣` in a view nobody gave a registry.
+  it "draws a clickable FRAME badge in both the MSG and HEX states" do
+    reg = Gori::Verbs.registry
+    chip = "#{Gori::Hotkeys.menu_chip(reg, "repeater.toggle-grpc-reframe")}:FRAME"
+    chip.should eq("␣#{reg.menu_keys("repeater.toggle-grpc-reframe").not_nil!.join}:FRAME")
+    {reg, nil}.each do |registry|
+      label = registry ? chip : "␣:FRAME"
+      grpc_tmp_store do |store|
+        view = unary.call(store)
+        view.menu_registry = registry
+        view.focus_pane(:request)
+        rect = Rect.new(0, 0, 160, 24)
+        border_y = rect.y + 3
 
-      b = MemoryBackend.new(160, 24)
-      view.render(Screen.new(b), rect)
-      row = b.row(border_y)
-      row.should contain("␣Pr:FRAME")
-      col = row.index("␣Pr:FRAME").not_nil!
-      view.chrome_hit(rect, col + 1, border_y).should eq(:grpc_reframe)
+        b = MemoryBackend.new(160, 24)
+        view.render(Screen.new(b), rect)
+        row = b.row(border_y)
+        row.should contain(label)
+        col = row.index(label).not_nil!
+        view.chrome_hit(rect, col + 1, border_y).should eq(:grpc_reframe)
 
-      view.toggle_request_hex.should be_true
-      b2 = MemoryBackend.new(160, 24)
-      view.render(Screen.new(b2), rect)
-      row2 = b2.row(border_y)
-      row2.should contain("␣Pr:FRAME")
-      col2 = row2.index("␣Pr:FRAME").not_nil!
-      view.chrome_hit(rect, col2 + 1, border_y).should eq(:grpc_reframe)
+        view.toggle_request_hex.should be_true
+        b2 = MemoryBackend.new(160, 24)
+        view.render(Screen.new(b2), rect)
+        row2 = b2.row(border_y)
+        row2.should contain(label)
+        col2 = row2.index(label).not_nil!
+        view.chrome_hit(rect, col2 + 1, border_y).should eq(:grpc_reframe)
+      end
     end
   end
 

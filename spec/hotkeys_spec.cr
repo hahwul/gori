@@ -173,6 +173,16 @@ describe Gori::Hotkeys do
 
   # A palette-only verb (`menu: :palette`, #1282) has no menu path, so a `{space:…}` token or a
   # Help row naming it reads as the route that does exist: its chord, else the palette search.
+  describe ".menu_chip" do
+    it "spells a menu path compactly from the registry, and a bare ␣ without one (#1295)" do
+      reg = Gori::Verbs.registry
+      Gori::Hotkeys.menu_chip(reg, "repeater.toggle-grpc-reframe").should eq("␣#{reg.menu_keys("repeater.toggle-grpc-reframe").not_nil!.join}")
+      Gori::Hotkeys.menu_chip(reg, "sitemap.toggle-static").should eq("␣Zs")
+      Gori::Hotkeys.menu_chip(nil, "sitemap.toggle-static").should eq("␣")
+      Gori::Hotkeys.menu_chip(reg, "no.such-verb").should eq("␣")
+    end
+  end
+
   describe ".route" do
     it "is the menu path for a menu row, the chord or ^P → title for a palette-only verb" do
       reg = Gori::Verbs.registry

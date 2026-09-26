@@ -8,7 +8,9 @@ class Gori::Tui::RepeaterView
   # hit-test below. `␣Pw:KEY` was drawn from one place and hit-tested from another, and the
   # second one did not list it: the badge was a dead cell, while HTTP's `^L:CL`/`^U:PRETTY`
   # next to it have always been clickable.
-  WS_BADGES = [{:send, "^R", "SEND"}, {:ws_key, "␣Pw", "KEY"}] of {Symbol, String, String}
+  private def ws_badges : Array({Symbol, String, String})
+    [{:send, "^R", "SEND"}, {:ws_key, menu_chip("repeater.toggle-ws-key"), "KEY"}] of {Symbol, String, String}
+  end
 
   # Border-chrome hit-test for REQUEST/RESPONSE toggle chips. Shares geometry with
   # render_request / render_response_chrome (label strings + start_x / right chain).
@@ -78,13 +80,13 @@ class Gori::Tui::RepeaterView
                  # Chains left of whichever hex chip is drawn — in BOTH states, matching
                  # render_request. Recompute the 5-byte length prefix over the payload, or send
                  # the captured one in front of it (DESIGN.md §7).
-                 b << {:grpc_reframe, "␣Pr", "FRAME"} if @grpc_reframable
+                 b << {:grpc_reframe, menu_chip("repeater.toggle-grpc-reframe"), "FRAME"} if @grpc_reframable
                  # Same condition `render_request` draws it under, so the live cells are
                  # exactly the painted ones — the rule this list already keeps for FRAME.
-                 b << {:grpc_fields, "␣Pf", "FIELDS"} if grpc_fields_available?
+                 b << {:grpc_fields, menu_chip("repeater.toggle-grpc-fields"), "FIELDS"} if grpc_fields_available?
                  b
                elsif ws_mode?
-                 WS_BADGES # ^R:SEND + ␣Pw:KEY — the list render_request draws from
+                 ws_badges # ^R:SEND + the WS key chip — the list render_request draws from
                elsif @req_hex_edit
                  [{:send, "^R", "SEND"}, {:req_hex, "^X", "HEX"}] of {Symbol, String, String}
                else

@@ -162,8 +162,12 @@ module Gori::Tui
 
     # The registry the query dropdown reads menu letters from (`SitemapView.ql_help`).
     def set_registry(registry : Verb::Registry) : Nil
+      @registry = registry
       @ql_help = SitemapView.ql_help(registry)
     end
+
+    # The registry the hints read menu letters from; nil until `#set_registry`.
+    @registry : Verb::Registry? = nil
 
     def set_hide_static(hide : Bool) : Nil
       @hide_static = hide
@@ -411,12 +415,20 @@ module Gori::Tui
       end
       # Same note History carries, for the same reason: an empty tree cannot say WHY it is empty.
       return "no scope rules — nothing is in scope" if QL.uses_scope?(residual) && !lens.try(&.configured?)
-      return STATIC_HIDDEN_NOTE if @hide_static
+      return static_hidden_note if @hide_static
       nil
     end
 
-    # History's note, pointing at the one door this tab has: the space menu (no `v` picker here).
-    STATIC_HIDDEN_NOTE = "static assets hidden — ␣Zs shows them"
+    # History's note, pointing at the one door this tab has: the space menu (no `v` picker here),
+    # spelled from the registry (`Hotkeys.menu_chip`, #1295).
+    private def static_hidden_note : String
+      "static assets hidden — #{static_chip} shows them"
+    end
+
+    # `␣Zs`: Display…'s static-assets row, the way back from the hide-static lens.
+    private def static_chip : String
+      Hotkeys.menu_chip(@registry, "sitemap.toggle-static")
+    end
 
     # Split `tag:` terms out of the query. Cut with the SHARED lexer, not `String#split`:
     # hand-tokenising saw no quotes (`tag:"my tag"` became `tag:"my` + `tag"`) and no
@@ -1211,11 +1223,11 @@ module Gori::Tui
             # endpoints match" unless we say why — @query_note distinguishes it.
             {@query_note || "no endpoints match", querying? ? "esc clears the filter" : "/ to edit the filter"}
           elsif @hide_static && @scope.try(&.active?) != true
-            {"only static assets so far — they are hidden", "␣Zs shows static assets"}
+            {"only static assets so far — they are hidden", "#{static_chip} shows static assets"}
           elsif filtering? # in-scope subset is empty (Scope lens, no QL query)
             # Name the hide-static lens too when it is also on: turning `s` off is not the only
             # way back, and may not be the one that explains the empty tree.
-            {"no endpoints in scope", @hide_static ? "static assets are hidden too — ␣Zs shows them" : nil}
+            {"no endpoints in scope", @hide_static ? "static assets are hidden too — #{static_chip} shows them" : nil}
           else
             TrafficEmptyState.render(screen, tree, variant: :sitemap, listen: listen, capturing: capturing)
             return

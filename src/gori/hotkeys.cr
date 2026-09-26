@@ -337,6 +337,18 @@ module Gori
       compact ? "␣ #{keys.join(' ')}" : "space → #{keys.join(' ')}"
     end
 
+    # What a chip, a badge or a tight hint prints for `id`'s menu path: `␣Pr` for `space → P r`,
+    # the prefix of a card-border badge like ` ␣Pr:FRAME `. Read from the registry like
+    # #menu_path, so a moved letter moves every chip that names it; a hand-typed `␣<key>` is
+    # what `spec/verb/hint_token_expands_spec.cr` refuses. With no registry, or no menu row, it
+    # is the bare `␣` (CHIP_FALLBACK): still "the space menu", never a letter nobody checked.
+    def self.menu_chip(registry : Verb::Registry?, id : String) : String
+      keys = registry.try(&.menu_keys(id))
+      keys ? "#{CHIP_FALLBACK}#{keys.join}" : CHIP_FALLBACK
+    end
+
+    CHIP_FALLBACK = "␣"
+
     # How to reach `id` without typing its chord from memory: its space-menu path, or for a
     # palette-only verb (`menu: :palette`, #1282) its effective chord when it has one, else the
     # palette search that finds it — `^P → Use as refresh for slot…`, the palette's own
