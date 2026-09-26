@@ -213,11 +213,11 @@ module Gori
       def self.sitemap_js_row_json(j : JSON::Builder, e : JsRefs::Endpoint) : Nil
         j.object do
           j.field "scheme", e.scheme
-          j.field "host", CLI::Output.term_safe(e.host)
+          CLI::Output.json_captured(j, "host", e.host)
           j.field "port", e.port
-          j.field "path", CLI::Output.term_safe(e.path)
-          j.field "target", CLI::Output.term_safe(e.target)
-          j.field "url", CLI::Output.term_safe(e.url)
+          CLI::Output.json_captured(j, "path", e.path)
+          CLI::Output.json_captured(j, "target", e.target)
+          CLI::Output.json_captured(j, "url", e.url)
           j.field "requested", e.requested
           j.field "flows", e.flows
           j.field "in_comment", e.in_comment
@@ -227,7 +227,7 @@ module Gori
           j.field "offset", e.offset
           j.field "line", e.line
           j.field "literal", e.literal.scrub
-          j.field "source_url", e.source_url.try { |u| CLI::Output.term_safe(u) }
+          CLI::Output.json_captured(j, "source_url", e.source_url)
         end
       end
     end

@@ -189,9 +189,9 @@ module Gori
       def self.param_row_json(j : JSON::Builder, r : ParamInventory::Row, include_sensitive : Bool) : Nil
         redacted = r.sensitive && !include_sensitive
         j.object do
-          j.field "host", CLI::Output.term_safe(r.host)
-          j.field "method", CLI::Output.term_safe(r.method)
-          j.field "path", CLI::Output.term_safe(r.path)
+          CLI::Output.json_captured(j, "host", r.host)
+          CLI::Output.json_captured(j, "method", r.method)
+          CLI::Output.json_captured(j, "path", r.path)
           j.field "location", r.location.label
           j.field "name", r.name.scrub
           j.field "count", r.count

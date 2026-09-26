@@ -76,3 +76,23 @@ describe "gori run sitemap — the params verb" do
     src.should match(/reserved_query_verb_error\(positional, "sitemap", \[[^\]]*"params"[^\]]*\]/)
   end
 end
+
+# JSON is for scripts: host/method/path keep NBSP/ZWSP/bidi as-is (a JSON string carries
+# them safely), like `name` and `samples` beside them. Only invalid UTF-8 is scrubbed.
+describe "gori run sitemap params — json keeps hidden Unicode" do
+  it "emits host, method and path without terminal badges" do
+    row = spi_row("q", host: "a\u{a0}.test", path: "/p\u{200b}\u{202e}")
+    doc = Gori::CLI::Run.params_json(SPI::Report.new([row], 1, false), include_sensitive: false)
+    doc.should_not contain("⟨")
+    obj = JSON.parse(doc).as_a[0]
+    obj["host"].as_s.should eq("a\u{a0}.test")
+    obj["path"].as_s.should eq("/p\u{200b}\u{202e}")
+  end
+
+  it "still scrubs invalid UTF-8 so the document parses" do
+    row = spi_row("q", path: String.new(Bytes[0x2f, 0xff]))
+    doc = Gori::CLI::Run.params_json(SPI::Report.new([row], 1, false), include_sensitive: false)
+    doc.valid_encoding?.should be_true
+    JSON.parse(doc).as_a[0]["path"].as_s.should eq("/\u{fffd}")
+  end
+end

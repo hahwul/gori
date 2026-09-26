@@ -129,7 +129,7 @@ module Gori
           # `Store::WsMessage#emit_shape_json` uses.
           advisories = row.advisories
           unless advisories.empty?
-            j.field("advisory") { j.array { advisories.each { |l| j.string(term_safe(l)) } } }
+            j.field("advisory") { j.array { advisories.each { |l| j.string(l.scrub) } } }
           end
           redacted = false
           if head = request_head
@@ -164,15 +164,17 @@ module Gori
       private def self.columns_json(j : JSON::Builder, columns : Array({String, String})) : Nil
         j.object do
           DisplayColumns.fold_by_label(columns).each do |(label, values)|
-            # `term_safe` on the KEY as well as the value. `DisplayColumns.parse_spec` already
+            # `scrub` on the KEY as well as the value. `DisplayColumns.parse_spec` already
             # scrubs a label off ARGV, and a stored label comes from a TextField — this is the
             # backstop that makes the emitter safe on its own, since a raw key that is not valid
-            # UTF-8 poisons the whole document rather than its own row.
-            key = term_safe(label)
+            # UTF-8 poisons the whole document rather than its own row. Not `term_safe`: its
+            # badges are a terminal projection, and a JSON string carries NBSP/ZWSP/bidi as-is
+            # (see `json_captured`).
+            key = label.scrub
             if values.size == 1
-              j.field key, term_safe(values.first)
+              j.field key, values.first.scrub
             else
-              j.field(key) { j.array { values.each { |v| j.string(term_safe(v)) } } }
+              j.field(key) { j.array { values.each { |v| j.string(v.scrub) } } }
             end
           end
         end
@@ -1300,15 +1302,16 @@ module Gori
       private def self.sitemap_host_json(io : IO, host : Sitemap::Node) : Nil
         io << '{'
         # host.label/tag are captured/user data and can be invalid UTF-8 (see
-        # Sitemap.template_class) — term_safe scrubs that (and strips control bytes),
-        # so this stays valid UTF-8 JSON like the text/paths formats already are.
+        # Sitemap.template_class) — `scrub` keeps this valid UTF-8 JSON. Not `term_safe`:
+        # `to_json` escapes control bytes, and its badges would rewrite the value a script
+        # reads (see `json_captured`).
         io << %("host":)
-        term_safe(host.label).to_json(io)
+        host.label.scrub.to_json(io)
         io << %(,"endpoints":)
         host.endpoints.to_json(io)
         if t = host.tag
           io << %(,"tag":)
-          term_safe(t).to_json(io)
+          t.scrub.to_json(io)
         end
         io << %(,"unrequested":true) if host.unrequested?
         sitemap_children_json(io, host)
@@ -1320,7 +1323,7 @@ module Gori
       private def self.sitemap_node_json_open(io : IO, node : Sitemap::Node) : Nil
         io << '{'
         io << %("label":)
-        term_safe(node.label).to_json(io)
+        node.label.scrub.to_json(io)
         # A fold is synthetic — its `path` is always "" and carries no meaning, so it is
         # omitted rather than emitted as an empty string. `template` names the id class
         # so a consumer can tell an id fold from a numeric run without parsing labels.
@@ -1334,13 +1337,13 @@ module Gori
             # `queries` is how many query strings it stands for (the variants are still
             # nested as children, each with its own full path).
             io << %(,"query_fold":true,"path":)
-            term_safe(node.path).to_json(io)
+            node.path.scrub.to_json(io)
             io << %(,"queries":)
             Sitemap.query_variants(node).to_json(io)
           end
         else
           io << %(,"path":)
-          term_safe(node.path).to_json(io)
+          node.path.scrub.to_json(io)
         end
         # On a fold these are the union of its children's verbs, not its own.
         verbs = node.grouped ? node.fold_methods : node.methods
@@ -1348,13 +1351,13 @@ module Gori
           io << %(,"methods":[)
           verbs.each_with_index do |m, i|
             io << ',' if i > 0
-            term_safe(m).to_json(io)
+            m.scrub.to_json(io)
           end
           io << ']'
         end
         if t = node.tag
           io << %(,"tag":)
-          term_safe(t).to_json(io)
+          t.scrub.to_json(io)
         end
         # `path` here is a PREFIX of the captured target — see Sitemap::MAX_DEPTH. Emitted
         # so a consumer can tell a real leaf from a cut one instead of trusting the path.
