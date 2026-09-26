@@ -25,11 +25,15 @@ require "../spec_helper"
 #     Sidebar → Global (`Runner#current_scope`), never through the tab's own scope.
 #
 # A family row (#1274 WP9) is a menu letter like any other at level 1, so its key is swept
-# too, as the row `family:<id>` drawn wherever the scope registers a member. Level-2 letters
-# are exempt: they are reached after two keys, never by a dropped space (DESIGN.md §7). The
-# SUB-TABS bucket is one such row in a pane view, `family:subtabs` on `T` (#1274 Decision
-# 8); its rows are level-1 letters only where the strip or the tab bar has focus, unless
-# `pinned:`.
+# too, as the row `family:<id>` drawn wherever the scope registers a member. The SUB-TABS
+# bucket is one such row in a pane view, `family:subtabs` on `T` (#1274 Decision 8); its rows
+# are level-1 letters only where the strip or the tab bar has focus, unless `pinned:`.
+#
+# A level-2 letter is swept too, wherever a dropped `space` leaves its level-1 key answering
+# nothing (`bare_answer`): the key is then a no-op and the letter behind it is read bare, so
+# `Z c` with no family opener stopped capture. Where the key opens the card (`Family#chord`)
+# the letter is only ever read inside it. The strip swallows any key it does not answer, so
+# there a level-2 letter always meets the strip's raw keys (DESIGN.md §7, 2026-09-26).
 #
 # It covers the SHIPPED defaults. A user rebind can recreate a clash at runtime; the Hotkeys
 # editor's Conflicts check owns that.
@@ -110,6 +114,27 @@ module MenuLetterMeaning
       Row.new("family:#{fold.id}", fold.key, scope, (panes + [:common]).uniq!)
     end
     verbs + families + folds
+  end
+
+  # One level-2 row behind the level-1 key `opener`: a family member on its family table's
+  # letter, or a folded SUB-TABS verb on its own letter behind Sub-tabs…'s `T`. `row.sections`
+  # is where the card holding it is drawn, which is also where the opener is pressed.
+  record Level2, opener : Char, row : Row
+
+  def level2_rows : Array(Level2)
+    reg = Gori::Verbs.registry
+    listed = reg.select { |v| !v.hidden? && !v.scope.global? && !v.scope.editor? }
+    members = listed.compact_map do |v|
+      next unless (fid = v.family) && (k = reg.l2_key(v))
+      Level2.new(reg.family(fid).not_nil!.key, Row.new(v.id, k, v.scope, drawn_in(v)))
+    end
+    fold = Gori::Verb::Registry::SUBTABS_FOLD
+    folded = listed.compact_map do |v|
+      next unless Gori::Verb::Registry.folded?(v) && (k = v.menu_key)
+      panes = listed.select { |o| o.scope == v.scope }.map(&.section).uniq!.reject { |sec| strip_section?(sec) }
+      Level2.new(fold.key, Row.new(v.id, k, v.scope, (panes + [:common]).uniq!))
+    end
+    members + folded
   end
 
   def strip_section?(section : Symbol) : Bool
@@ -194,12 +219,17 @@ module MenuLetterMeaning
     found = Hash(Pair, Set(String)).new { |h, k| h[k] = Set(String).new }
     menu = rows
     bar = tab_bar_rows
+    deep = level2_rows
     Gori::Verb::OsProfile::Os.each do |os|
       Gori::Verb::Keyset::Kind.each do |ks|
         keymap = Gori::Verb::Keymap.build(Gori::Verbs.registry, os, Gori::Verb::Keymap::NO_OVERRIDES, ks)
         where = "#{Gori::Verb::Keyset.name_of(ks)}/#{os.to_s.downcase}"
         menu.each { |v| check_keymap(found, keymap, v, where, ks) }
         bar.each { |v| check_tab_bar(found, keymap, v, where, ks) }
+        deep.each do |l2|
+          next if bare_answer(keymap, chord_for(l2.opener), l2.row)
+          check_keymap(found, keymap, l2.row, where, ks)
+        end
       end
     end
     menu.each do |v|
@@ -207,7 +237,30 @@ module MenuLetterMeaning
         found[{v.id, other}] << "strip"
       end
     end
+    # The strip swallows a key it does not answer, so a family key typed there without its
+    # `space` is always a no-op and the level-2 letter meets the strip's raw keys next.
+    deep.each do |l2|
+      if other = strip_clash(l2.row)
+        found[{l2.row.id, other}] << "strip, level 2"
+      end
+    end
     found
+  end
+
+  # What a bare press of `chord` answers wherever `v` is drawn — the Editor link where every
+  # view of the row is an editor pane, the tab's scope where its chord is live in every such
+  # view, else Global — or nil when a press can reach nothing. Nil means a dropped `space`
+  # before a level-1 key that opens a card is a no-op, so the card's next letter is read
+  # bare too: `Z c` then stops capture exactly as a level-1 `c` would.
+  def bare_answer(keymap : Gori::Verb::Keymap, chord : Gori::Verb::Chord, v : Row) : String?
+    reg = Gori::Verbs.registry
+    if editor_only?(v) && (e = keymap.lookup_in(chord, Gori::Verb::Scope::Editor))
+      return e if live_everywhere_shown?(reg[e], v)
+    end
+    if id = keymap.lookup_in(chord, v.scope)
+      return id if live_everywhere_shown?(reg[id], v)
+    end
+    keymap.lookup_in(chord, Gori::Verb::Scope::Global)
   end
 
   # The Editor link first (it answers ahead of the tab in an editor pane), then the tab's own
@@ -295,6 +348,9 @@ MENU_LETTER_ALLOWED = {
   {"colormarker.color-add", "colormarker.add"}           => "false positive: handle_colors_key answers `a` in the colours pane",
   {"colormarker.color-edit", "colormarker.edit"}         => "false positive: handle_colors_key answers `e` in the colours pane",
   {"colormarker.color-delete", "colormarker.delete"}     => "false positive: handle_colors_key answers `d` in the colours pane",
+  # Level 2 on a focused strip, which swallows the family key and reads the next letter raw.
+  {"repeater.fuzz", "strip:find"}        => "level 2 on the strip: `>` is swallowed there and `f` opens the sub-tab picker, strip-local and closed by esc",
+  {"comparer.toggle-pane", "strip:mark"} => "level 2 on the strip: `Z` is swallowed there and `t` marks the chip, strip-local and cleared by esc",
   # The tab bar (Sidebar → Global), each on the letter Global answers.
   {"probe.dismiss-selected", "capture.toggle"} => TAB_BAR_GLOBAL_WINS,
   {"probe.dismiss", "capture.toggle"}          => TAB_BAR_GLOBAL_WINS,

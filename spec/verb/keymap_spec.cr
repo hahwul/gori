@@ -64,7 +64,7 @@ describe Gori::Verb::Keymap do
       reg = Gori::Verbs.registry
       gt = Chord.new(">")
       km = Keymap.build(reg, OsProfile::Os::Linux, {"nav.next-tab" => [gt]})
-      openers = reg.select { |v| reg.opens_family(v.id) }
+      openers = reg.select { |v| reg.opens_family(v.id) == :send_flow }
       openers.size.should be > 5
       openers.each do |opener|
         km.lookup(gt, opener.scope).should eq("nav.next-tab"), opener.scope.to_s

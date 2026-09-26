@@ -4028,3 +4028,28 @@ The math is a pure `Repeater::Timing::Stats` (percentile quartiles + a two-sided
 on the order bias, `Math.erfc` for the tail, a `SMALL_SAMPLE` floor that clamps to Inconclusive) and
 a shared `Timing::Present` renderer, the `Sequencer::Stats`/`Present` split — so the CLI `--format
 json` and the MCP tool cannot drift, and the TUI card reuses `Spark` for the distribution.
+
+### 2026-09-26: Display… and Protocol… open bare too, and R1 sweeps level 2 behind a dead key
+
+Revises: "a family's key works bare" above ("Display… and Protocol… keep `space`") and the
+verb-family entry's "R1 governs level 1 only". #1310.
+
+A level-2 letter is not always reached after two keys. With no bare binding for `Z`, a dropped
+`space` made `Z` a no-op and read the member letter bare: `Z c` (Columns…) stopped capture on
+History, `P c` (auto Content-Length) did the same in the Repeater, `P 2` (HTTP/2) jumped to the
+second tab, and `Z x` selected a line under the helix keyset. Before the families, those rows were
+capitals, which never reach Global.
+
+- **Both toggle families bind their key bare**, `⇧Z` and `⇧P`, as Send flow to… binds `>`:
+  a hidden opener per scope that has a member, never Global. No scope, keyset or Global bound
+  either key where a member is drawn; `⇧P` stays previous-item in the detail views and the
+  Comparer, which have no Protocol… member. The member letters do not move, so one intent still
+  reads one letter on every tab.
+- **The R1 guard sweeps level 2 wherever the family key answers nothing** (`bare_answer`: the
+  Editor link, the tab's scope where the chord is live in every view of the row, then Global),
+  checking each member letter as it checks a level-1 row. A family with a working bare key is
+  not swept, because its letters are only ever read inside the card.
+- **The strip is the exception it reports.** A focused strip swallows any key it does not
+  answer, `>` and `Z` included, so there the next letter meets the strip's raw keys: `> f` opens
+  the sub-tab picker and the Comparer's `Z t` marks the chip. Both stay strip-local and `esc`
+  undoes them, so they are allowlisted by name rather than routed through the strip's handler.
