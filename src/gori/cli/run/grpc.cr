@@ -179,7 +179,7 @@ module Gori
         # `open_store` already published this project's schema (`Schemas.load_project`), so
         # what is printed here is exactly what every other surface renders through.
         store = open_store(resolve_read_project(project_name, db_path), read_only: true)
-        reflections = store.grpc_reflections
+        reflections = Gori::Protobuf::Schemas.reflections(store)
         store.close
 
         sources = Gori::Protobuf::Schemas.sources
@@ -267,7 +267,7 @@ module Gori
 
         store = open_store(resolve_read_project(project_name, db_path))
         begin
-          known = store.grpc_reflections.map(&.target)
+          known = Gori::Protobuf::Schemas.reflections(store).map(&.target)
           if (t = chosen) && !known.includes?(t)
             # A typo'd target must not print "forgotten" — that reads as "the schema is gone"
             # while the lens is still in place.
