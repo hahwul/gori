@@ -1,4 +1,6 @@
 # `gori run repeater` — re-send a captured flow, or list/create repeater sessions.
+require "../../repeater/timing"
+
 module Gori
   module CLI
     module Run
@@ -72,6 +74,7 @@ module Gori
       @[Subcommand("repeater", help: [
         {"repeater", "Re-send a captured flow; list/create/send (replay, incl. WebSocket) repeater sessions"},
         {"repeater race", "Fire several saved sessions as one synchronized race (h1 last-byte, h2 single-packet)"},
+        {"repeater timing", "Differential timing analysis of two saved sessions (which is consistently slower, by response order and quartiles)"},
         {"repeater minimize", "Strip noise from a saved request, keeping the response the same"},
         {"repeater move", "Rearrange the sub-tab strip: move a session to a tab number (--to N) or one place (--up/--down)"},
         {"repeater delete", "Delete saved repeater sessions by id (needs --yes)"},
@@ -89,6 +92,9 @@ module Gori
           return
         elsif sub == "race"
           cmd_repeater_race(args[1..])
+          return
+        elsif sub == "timing"
+          cmd_repeater_timing(args[1..])
           return
         elsif sub == "minimize"
           cmd_repeater_minimize(args[1..])
@@ -1149,6 +1155,124 @@ module Gori
         exit 1 unless results.any?(&.ok?)
       end
 
+      private def self.cmd_repeater_timing(args : Array(String)) : Nil
+        db_path : String? = nil
+        project_name : String? = nil
+        insecure = false
+        timeout : Time::Span? = nil
+        allow_unscoped = false
+        verbatim = false
+        slot : String? = nil
+        reframe_grpc = false
+        tls_preset : String? = nil
+        force_http2 : Bool? = nil
+        count = Repeater::Timing::Stats::DEFAULT_ITERATIONS
+        warmup = Repeater::Timing::Stats::DEFAULT_WARMUP
+        interleaved = false
+        format = :text
+        positional = [] of String
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run repeater timing <idA> <idB> [options]\n\n" \
+                     "Differential TIMING analysis of exactly TWO saved repeater sessions (A vs B):\n" \
+                     "send the pair many times and decide which is CONSISTENTLY slower by response\n" \
+                     "ORDER and quartiles, not eyeballed latency. Both must share one origin and\n" \
+                     "transport. Each pair is released together (h2 single-packet / h1 last-byte-sync)\n" \
+                     "unless --interleaved sends them sequentially."
+          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          p.on("-k", "--insecure-upstream", "Do not verify the upstream TLS certificate") { insecure = true }
+          p.on("--timeout=SEC", "Per-operation connect + idle timeout (seconds)") { |v| timeout = parse_count(v, "--timeout").seconds }
+          p.on("--count=N", "How many A/B pairs to send after warm-up (1-#{Repeater::Timing::Stats::MAX_ITERATIONS}; default #{Repeater::Timing::Stats::DEFAULT_ITERATIONS})") { |v| count = parse_count(v, "--count") }
+          p.on("--warmup=N", "Initial pairs discarded before measuring (default #{Repeater::Timing::Stats::DEFAULT_WARMUP})") { |v| warmup = parse_count(v, "--warmup") }
+          p.on("--interleaved", "Send A then B sequentially (alternating order) instead of the synchronized race") { interleaved = true }
+          p.on("--http2", "Send over HTTP/2 (single-packet), overriding the sessions' stored setting") { force_http2 = true }
+          p.on("--http1", "Send over HTTP/1.1 (last-byte sync), overriding the sessions' stored setting") { force_http2 = false }
+          p.on("--allow-unscoped", "Send even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
+          p.on("--verbatim", "Send the stored bytes EXACTLY: no token expansion, no Content-Length resync") { verbatim = true }
+          p.on("--slot=NAME", "Send as this SESSION SLOT — its header overlay and $BIND table for both variants") { |v| slot = v.strip }
+          p.on("--reframe-grpc", "HTTP/2 only: recompute the gRPC length prefix over the body being sent") { reframe_grpc = true }
+          p.on("--tls-preset=NAME", "#{TLS_PRESET_HELP}, overriding the sessions' stored one") { |v| tls_preset = v }
+          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |before, after| positional = before + after }
+          p.invalid_option { |f| abort "gori run repeater timing: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run repeater timing: missing value for #{f}" }
+        end
+        parser.parse(args)
+        ids = timing_member_ids(positional, parser)
+        count = count.clamp(1, Repeater::Timing::Stats::MAX_ITERATIONS)
+        warmup = warmup.clamp(0, count - 1)
+
+        project = resolve_read_project(project_name, db_path)
+        loaded, host_overrides, mode = load_timing_members(project, ids, verbatim, force_http2)
+
+        activate_slot(slot, "gori run repeater timing")
+        outbound = project_outbound(project_name, db_path, allow_unscoped)
+        # Reuse the race's origin/transport unification — a differential pair rides one connection
+        # shape too, so a mismatch is refused before any send.
+        plan, labels = build_cli_race_plan(loaded, mode, outbound, insecure, host_overrides,
+          verbatim, timeout, reframe_grpc, tls_preset, cmd_label: "gori run repeater timing")
+
+        abort_if_out_of_scope!(outbound, plan, "gori run repeater timing")
+        abort_if_blocked!(plan, "gori run repeater timing")
+
+        run_mode = interleaved ? Repeater::Timing::Mode::Interleaved : Repeater::Timing::Mode::Auto
+        rep = Repeater::Timing.run(plan, iterations: count, mode: run_mode, warmup: warmup)
+        outbound.close
+        transport = interleaved ? "interleaved" : (plan.http2? ? "single-packet h2" : "last-byte-sync h1")
+        subject = Repeater::Timing::Present::Subject.new(
+          a_label: labels[0]? || "A", b_label: labels[1]? || "B",
+          origin: "#{plan.scheme}://#{plan.host}:#{plan.port}", transport: transport,
+          mode: run_mode.to_s.underscore)
+        if format == :json
+          STDOUT.puts Repeater::Timing::Present.report_json(rep, subject)
+        else
+          STDOUT.print Repeater::Timing::Present.report_text(rep, subject)
+        end
+        # A run that never got a single usable pair (every send errored) is a failure, like a race
+        # with no ok result.
+        exit 1 if rep.pairs_valid == 0
+      end
+
+      # Timing analysis compares EXACTLY two variants (a differential oracle, not an N-way race).
+      private def self.timing_member_ids(positional : Array(String), parser : OptionParser) : Array(Int64)
+        unless positional.size == 2
+          abort "gori run repeater timing: needs exactly two <repeater-id>s — timing analysis compares a pair (A vs B)\n#{parser}"
+        end
+        positional.map { |s| s.to_i64? || abort("gori run repeater timing: invalid repeater id '#{s}'") }
+      end
+
+      # Load the pair (read-only), refusing a live §…§ marker unless verbatim, and resolve the shared
+      # transport (forced by --http1/--http2, else the sessions' agreed setting). Aborts, closing the
+      # store, on a missing session or a mixed-transport pair. Extracted from `cmd_repeater_timing`
+      # so its body stays under the complexity gate.
+      private def self.load_timing_members(project, ids : Array(Int64), verbatim : Bool,
+                                           force_http2 : Bool?) : {Array({Int64, Store::RepeaterRecord}), Gori::HostOverrides?, Bool}
+        store = open_store(project, read_only: true)
+        loaded, host_overrides = begin
+          rows = ids.map do |id|
+            rec = store.get_repeater_full(id)
+            abort "gori run repeater timing: no repeater session ##{id}" unless rec
+            if !verbatim && Repeater::DraftMarkers.live?(store, rec)
+              abort "gori run repeater timing: #{Repeater::DraftMarkers.refusal(id, MARKER_REMEDY)}"
+            end
+            {id, rec}
+          end
+          {rows, Gori::HostOverrides.load(store)}
+        ensure
+          store.close
+        end
+
+        mode = force_http2
+        if mode.nil?
+          modes = loaded.map { |(_, rec)| rec.http2? }.uniq!
+          abort "gori run repeater timing: the sessions mix HTTP/1.1 and HTTP/2 — pass --http1 or --http2 to force one" if modes.size > 1
+          mode = modes.first
+        end
+        {loaded, host_overrides, mode}
+      end
+
       # The validated race member ids: at least two integers, within `--max-requests` and the
       # race ceiling. A race is sent whole (never split), so a group over a cap is refused here,
       # before any dial.
@@ -1175,7 +1299,8 @@ module Gori
                                            outbound : Gori::Outbound, insecure : Bool,
                                            host_overrides : Gori::HostOverrides?, verbatim : Bool,
                                            timeout : Time::Span?, reframe_grpc : Bool,
-                                           tls_preset : String?) : {Repeater::Plan, Array(String)}
+                                           tls_preset : String?,
+                                           cmd_label : String = "gori run repeater race") : {Repeater::Plan, Array(String)}
         # The dial SIGNATURE every member must share: the group rides ONE Sender built from the
         # anchor, so a member whose origin, effective Content-Length policy, SNI or TLS preset
         # differs would be silently sent under the anchor's — refuse instead of flattening it.
@@ -1190,7 +1315,7 @@ module Gori
               reframe_grpc, tls_preset), outbound)
           rescue ex : Repeater::PlanError
             outbound.close
-            repeater_plan_abort("gori run repeater race", ex, "session ##{id}")
+            repeater_plan_abort(cmd_label, ex, "session ##{id}")
           end
           sigs << {probe.scheme, probe.host, probe.port, !verbatim && rec.auto_content_length?,
                    rec.sni, tls_preset || rec.tls_preset}
@@ -1200,7 +1325,7 @@ module Gori
         first = sigs.first
         unless sigs.all? { |s| s == first }
           outbound.close
-          abort "gori run repeater race: the sessions differ in origin, Content-Length policy, SNI or " \
+          abort "#{cmd_label}: the sessions differ in origin, Content-Length policy, SNI or " \
                 "TLS preset — a race rides one connection shape (origins: " \
                 "#{sigs.map { |(s, h, po, _, _, _)| "#{s}://#{h}:#{po}" }.uniq!.join(", ")})"
         end
@@ -1214,7 +1339,7 @@ module Gori
             verify: !insecure, overrides: host_overrides, tls_preset: tls_preset || anchor.tls_preset), outbound)
         rescue ex : Repeater::PlanError
           outbound.close
-          repeater_plan_abort("gori run repeater race", ex)
+          repeater_plan_abort(cmd_label, ex)
         end
         {plan, labels}
       end

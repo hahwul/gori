@@ -99,7 +99,7 @@ describe "MCP tool registry" do
     # a slot's Repeater steps and binds through the extract rules, so it needs both the env
     # and the rule set a peer may have changed since the last call.
     Gori::MCP::Tools::ENV_REFRESH_TOOLS.should eq(Set{"send_request", "send_websocket", "race_requests",
-                                                      "refresh_session_slot",
+                                                      "timing_requests", "refresh_session_slot",
                                                       "fuzz_start", "mine_start",
                                                       "sequence_start", "discover_start", "run_retest",
                                                       "minimize_repeater", "probe_scan", "authorize_start",

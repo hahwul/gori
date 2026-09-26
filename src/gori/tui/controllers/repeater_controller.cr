@@ -14,6 +14,7 @@ require "../../repeater/h2_engine"
 require "../../repeater/ws_engine"
 require "../../repeater/minimize"
 require "../../repeater/plan"
+require "../../repeater/timing"
 require "../../fuzz/engine"
 
 module Gori::Tui
@@ -108,6 +109,16 @@ module Gori::Tui
       # cleared together with it; `stop` on it is what makes the background fiber stop reaching
       # the origin (see Repeater::Minimize::Stop).
       @minimize_stop = nil.as(Repeater::Minimize::Stop?)
+      # Differential timing analysis (#1246): the fiber streams a progress tick (pairs done) here
+      # and one terminal Report; `drain_results` shows progress and stashes the finished report
+      # for the shell to open as a card. `@timing_cancel` is the Atomic the fiber polls so esc can
+      # stop a long run mid-flight (bounded, but seconds when N is large). Its `@timing_view` is the
+      # sub-tab it runs against (its inflight? gate is the one-run lock, like a send).
+      @timing_progress = Channel(Int32).new(4)
+      @timing_done = Channel({RepeaterView, Repeater::Timing::Stats::Report, Repeater::Timing::Present::Subject}).new(1)
+      @timing_cancel = Atomic(Bool).new(false)
+      @timing_view = nil.as(RepeaterView?)
+      @timing_report = nil.as({Repeater::Timing::Stats::Report, Repeater::Timing::Present::Subject}?)
       # A refusal was applied to a view inline since the last drain (see #apply_refusal) — the
       # next drain_results reports it so the shell still recomputes ^F hits and re-renders.
       @refusal_applied = false
@@ -1575,6 +1586,7 @@ module Gori::Tui
         end
         applied = true
       end
+      applied = true if drain_timing
       applied
     end
 
@@ -2700,6 +2712,119 @@ module Gori::Tui
     private def race_member_label(view : RepeaterView, draft : Bytes) : String
       line = String.new(draft[0, {draft.size, 200}.min]).lines.first?.try(&.strip)
       line && !line.empty? ? line : view.label
+    end
+
+    # Whether a differential-timing run is in flight (its sub-tab is the one holding the lock).
+    def timing_running? : Bool
+      !!@timing_view.try(&.inflight?)
+    end
+
+    # esc while a run is in flight sets the cancel flag the fiber polls; `Timing.run` stops after
+    # the current pair and analyzes what it has.
+    def cancel_timing : Nil
+      return unless timing_running?
+      @timing_cancel.set(true)
+      @host.status("timing: cancelling…", :busy)
+    end
+
+    # Prepare the A/B pair from EXACTLY two marked sub-tabs: reuse the race collector (one origin,
+    # one transport, no live §…§ marker), then require the pair. nil (after a status) when it can't
+    # run. The order is the marked strip order, so "A" is the earlier sub-tab.
+    def prepare_timing_pair : {RepeaterView, Repeater::Plan, Array(String)}?
+      refs = batch_subtab_refs
+      unless refs
+        @host.status("mark exactly 2 sub-tabs (t) to compare their timing")
+        return nil
+      end
+      tabs = refs.compact_map { |r| @repeaters.find(&.view.same?(r)) }
+      unless tabs.size == 2
+        @host.status("timing analysis compares a pair — mark exactly 2 sub-tabs (t), not #{tabs.size}")
+        return nil
+      end
+      anchor = tabs.first
+      return nil unless (view = anchor.view).loaded?
+      if view.inflight?
+        @host.status("repeater already in flight…")
+        return nil
+      end
+      return nil unless collected = collect_race_members(tabs) # sets its own status on a refusal
+      drafts, labels = collected
+      return nil unless plan = repeater_plan(view, drafts, http2: view.http2?)
+      {view, plan, labels}
+    end
+
+    # Fire the differential-timing run off the UI fiber. `Timing.run` sends the pair `iterations`
+    # times, and each progress tick / the terminal report ride their own channels, drained by
+    # `drain_results`. One run at a time (the view's inflight? gate), like a send.
+    def launch_timing(view : RepeaterView, plan : Repeater::Plan, labels : Array(String),
+                      iterations : Int32, interleaved : Bool) : Nil
+      return if view.inflight?
+      view.inflight = true
+      @timing_view = view
+      @timing_cancel.set(false)
+      prog = @timing_progress
+      done = @timing_done
+      cancel = @timing_cancel
+      mode = interleaved ? Repeater::Timing::Mode::Interleaved : Repeater::Timing::Mode::Auto
+      transport = interleaved ? "interleaved" : (plan.http2? ? "single-packet h2" : "last-byte-sync h1")
+      subject = Repeater::Timing::Present::Subject.new(
+        a_label: labels[0]? || "A", b_label: labels[1]? || "B",
+        origin: "#{plan.scheme}://#{plan.host}:#{plan.port}", transport: transport,
+        mode: mode.to_s.underscore)
+      @host.status("timing → #{plan.host}:#{plan.port} · #{iterations} pairs (#{transport}) · esc to cancel…#{unrecorded_note("timing")}", :busy)
+      spawn(name: "gori-repeater-timing") do
+        rep = Repeater::Timing.run(plan, iterations: iterations, mode: mode,
+          cancel: -> { cancel.get },
+          progress: ->(n : Int32) {
+            select
+            when prog.send(n)
+            else
+            end
+          })
+        select
+        when done.send({view, rep, subject})
+        else
+        end
+      rescue ex
+        ::Log.error(exception: ex) { "repeater timing fiber died" }
+      ensure
+        view.inflight = false
+      end
+    end
+
+    # The finished timing report the shell should open as a card, taken once (cleared on read).
+    def take_timing_report : {Repeater::Timing::Stats::Report, Repeater::Timing::Present::Subject}?
+      r = @timing_report
+      @timing_report = nil
+      r
+    end
+
+    # Non-blocking drains for the timing channels, folded into drain_results.
+    private def drain_timing : Bool
+      applied = false
+      loop do
+        select
+        when pairs = @timing_progress.receive
+          @host.status("timing #{pairs} pairs… · esc to cancel", :busy)
+          applied = true
+        else
+          break
+        end
+      end
+      loop do
+        select
+        when triple = @timing_done.receive
+          _, rep, subject = triple
+          @timing_view = nil
+          # Hand the report to the shell to open as a card (a controller cannot open an overlay).
+          @timing_report = {rep, subject}
+          @host.status("timing: #{rep.verdict.label} · #{rep.rationale}", rep.verdict.no_difference? ? :done : :warn)
+          applied = true
+        else
+          break
+        end
+      end
+      applied
     end
 
     def current_session_db_id : Int64?

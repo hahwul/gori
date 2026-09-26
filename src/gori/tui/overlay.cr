@@ -119,6 +119,9 @@ module Gori::Tui
     # `NamePromptOverlay` because the accepted forms have to be readable WHILE it is typed —
     # see `RetestAssertOverlay`.
     RetestAssert
+    # The differential-timing verdict card (#1246), opened when the repeater.timing-analysis
+    # fiber finishes: a read-only report over marked Repeater sub-tabs.
+    TimingReport
 
     def to_sym : Symbol
       {% begin %}
