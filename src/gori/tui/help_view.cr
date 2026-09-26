@@ -172,7 +172,7 @@ module Gori::Tui
         Item.new("set editor", "↹/↑↓ fields · List = multi-line · wordlist path auto-completes · esc applies"),
         Item.new("{fuzz.run} · {fuzz.stop}", "run · stop"),
         Item.new("↑/↓ · ↵", "results: select · open detail"),
-        Item.new("o · m", "sort · matched-only"),
+        Item.new("{space:fuzz.sort} · {fuzz.matched}", "sort · matched-only"),
         Item.new("e", "rename the sub-tab (on the strip)"),
         Item.new("⇧←/→", "detail: scroll a long line sideways"),
       ]},
@@ -336,7 +336,7 @@ module Gori::Tui
       ]},
       {"REWRITER", [
         Item.new("{rewriter.add} · ↵/e", "add a Match & Replace rule · edit the selected one"),
-        Item.new("x · {rewriter.delete}", "enable/disable in this project · delete the selected rule"),
+        Item.new("{rewriter.toggle} · {rewriter.delete}", "enable/disable in this project · delete the selected rule"),
         Item.new("{space:rewriter.scope} · {space:rewriter.toggle-default}", "move the rule global ⇄ project · flip a global rule's default everywhere"),
         Item.new("G / P column", "global (every project) or project · G* = this project overrides its default"),
         Item.new("{rewriter.move-down} / {rewriter.move-up}", "reorder within a scope — globals apply first, then project rules"),
