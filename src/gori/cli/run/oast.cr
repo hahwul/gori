@@ -545,7 +545,9 @@ module Gori
         parser.parse(args)
 
         id = oast_session_id(id_arg, "resume")
-        store = open_store(resolve_read_project(project_name, db_path))
+        # `long_running`: like `listen --save`, the handle is held through the whole poll loop,
+        # which persists every new callback and stamps last_poll_at on each tick.
+        store = open_store(resolve_read_project(project_name, db_path), long_running: true)
         failed =
           begin
             bound = oast_bind_session(store, id, "resume")

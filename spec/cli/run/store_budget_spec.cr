@@ -40,7 +40,7 @@ describe "gori run — the SQLite wait budget a subcommand opens with" do
       {"run/import.cr", 1},    # a HAR stream, chunk by chunk
       {"run/probe.cr", 1},     # a scan over every selected flow, --active sends
       {"run/retest.cr", 1},    # the live backend and the run summary
-      {"run/oast.cr", 1},      # --save touches the session row on every poll tick
+      {"run/oast.cr", 2},      # listen --save and resume touch the session row every poll tick
       {"run/intercept.cr", 4}, # only has a job when a TUI is capturing into the project
     }.each do |file, expected|
       cli_src(file).scan(/open_store\(.*long_running: true\)/).size.should eq(expected),
