@@ -181,7 +181,7 @@ describe "Gori::Verbs.register_issues" do
       r["issue.set-severity"].chords.should be_empty
       r["issue.set-severity"].menu_key.should eq('s')
       r["issue.set-status"].chords.should be_empty
-      r["issue.set-status"].menu_key.should eq('c')
+      r["issue.set-status"].menu_key.should eq('C') # never `c`: a dropped space stops capture (#1295)
       verb_intents(r, "issue.set-severity").should eq([:issue_set_severity])
       verb_intents(r, "issue.set-status").should eq([:issue_set_status])
     end

@@ -285,6 +285,7 @@ cannot drift apart on it:
 | `E` | Export |
 | `K` | Clear the workbench input (asks first) |
 | `I` | Insert a `§` marker |
+| `C` | Clear every `§` marker · set an issue's status · duplicate a rule |
 | `L` · `H` | Link… (attach to an issue or note, or manage links) · add the host to scope |
 | `X` | Wipe the tab (asks first), and nothing else |
 
@@ -292,6 +293,10 @@ cannot drift apart on it:
 other row wears the letter. The rest are the action's wherever it exists and free for a tab-local row where it
 does not. Rewriter and Colormarker's **Enable/disable everywhere** is `T` for this reason: `X`
 wipes.
+
+No row is `c` or `i` on a tab that does not bind the letter itself. There a press that loses its
+`Space` reaches the global keys, and those two stop capture and hold all traffic. That is why
+status, rule duplicates and marker clears are `C`, and Diff's **Add issue** is `F`, its own `⇧F`.
 
 ### Send flow to… {#send-flow-to}
 

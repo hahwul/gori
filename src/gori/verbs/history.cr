@@ -402,7 +402,7 @@ module Gori
         available: in_repeater, mnemonic: 'a', section: :request) { |ctx| ctx.repeater_auto_mark; nil }
       r.register Verb::Definition.new(
         "repeater.clear-marks", "Clear markers", "Strip every §…§ marker (and its attached chain)",
-        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'c', section: :request) { |ctx| ctx.repeater_clear_marks; nil }
+        Verb::Scope::Repeater, available: in_repeater, intent: :clear_marks, section: :request) { |ctx| ctx.repeater_clear_marks; nil }
       # ^Q, not ^Y: `^Y` is now Copy in every text box (see `in_repeater_copy`), and Copy is
       # the far more frequent action of the two, so it takes the chord whose letter means
       # something. attach-chain keeps a CTRL chord rather than falling back to its space-menu
@@ -879,7 +879,7 @@ module Gori
         available: in_fuzzer, intent: :http2, section: :template) { |ctx| ctx.fuzz_toggle_http2; nil }
       r.register Verb::Definition.new(
         "fuzz.clear-marks", "Clear markers", "Strip every §…§ marker (and its attached chain) from the template",
-        Verb::Scope::Fuzzer, available: in_fuzzer, mnemonic: 'c', section: :template) { |ctx| ctx.fuzz_clear_marks; nil }
+        Verb::Scope::Fuzzer, available: in_fuzzer, intent: :clear_marks, section: :template) { |ctx| ctx.fuzz_clear_marks; nil }
       # Target-pane toggle (SNI override), the twin of repeater.toggle-sni: same ^S, same
       # two-line editor, same focus rule. `FuzzerView` already carried @sni, persisted it
       # with the session and handed it to build_engine — a session seeded from History had
