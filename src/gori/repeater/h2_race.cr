@@ -101,8 +101,8 @@ module Gori
           finish(started)
         end
 
-        # Fail a still-open stream with `message` — the connection's shared HPACK state broke, so
-        # nothing more this stream receives can be decoded. A stream already done keeps its result.
+        # Fail a still-open stream with `message`. A stream already done keeps its result; the
+        # caller decides whether the error is local here or makes the shared connection unusable.
         def fail(message : String, started : Time::Instant) : Nil
           return if @done
           @failure = message
@@ -127,6 +127,10 @@ module Gori
             @clean_eos = true
             finish(started)
           end
+        ensure
+          # In particular, release a completed but over-limit block when its stream is rejected
+          # locally and the reader continues with its siblings.
+          @header_buf.clear
         end
 
         private def finish(started : Time::Instant) : Bool
@@ -383,13 +387,21 @@ module Gori
         end
       end
 
-      # `route_stream_frame`, or nil once a header block the origin chose broke the decode
-      # (`hpack: …`). The HPACK table is connection-wide, so no later block on this connection can
-      # be trusted: every stream still open fails with that error and the finished ones keep their
-      # results — what `exchange` reports for the same origin, instead of raising out of the race.
+      # `route_stream_frame`, or nil once an HPACK/framing error leaves the connection's shared
+      # decoder unusable. A cleanly decoded but over-limit header list is stream-local: the decoder
+      # has consumed the whole block and applied its table updates, so only that stream is failed.
       private def self.route_or_fail(io : IO, conn : Conn, streams : Hash(UInt32, PacketStream),
                                      frame : Frame::Header, started : Time::Instant) : {Bool, Bool}?
         route_stream_frame(io, conn, streams, frame, started)
+      rescue ex : HPACK::HeaderListTooLarge
+        if st = streams[frame.stream_id]?
+          st.fail(ex.message || "hpack: header list too large", started)
+          {true, true}
+        else
+          msg = ex.message || "hpack: header list too large"
+          streams.each_value(&.fail(msg, started))
+          nil
+        end
       rescue ex
         msg = ex.message || "h2 response decode failed"
         streams.each_value(&.fail(msg, started))

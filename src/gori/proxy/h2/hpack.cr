@@ -305,6 +305,15 @@ module Gori::Proxy::H2
       end
     end
 
+    # The block decoded cleanly, but its projected field list exceeded our cap. Callers that
+    # multiplex streams can reject only this stream: the decoder has consumed the whole block
+    # and applied every dynamic-table instruction before raising.
+    class HeaderListTooLarge < Gori::Error
+      def initialize
+        super("hpack: header list too large")
+      end
+    end
+
     # Per-direction decoder holding the dynamic table (RFC 7541 §2.3.2).
     class Decoder
       ENTRY_OVERHEAD = 32 # per-entry accounting cost (§4.1)
@@ -313,7 +322,8 @@ module Gori::Proxy::H2
       # is already capped (assembler MAX_HEADER_BLOCK ~1 MiB), but HPACK indexing +
       # Huffman can amplify a tiny block into a huge list of tiny headers; bound the
       # decoded total so a crafted block can't spike memory. Far above any real
-      # header set (cookies included); overflow → the projection is skipped.
+      # header set (cookies included); overflow → the projection is skipped after
+      # the whole block is decoded, so connection-scoped dynamic-table changes stay in sync.
       MAX_HEADER_LIST = 16 * 1024 * 1024
 
       getter max_size : Int32
@@ -333,21 +343,24 @@ module Gori::Proxy::H2
       # want the projection are unaffected.
       def decode_fields(block : Bytes) : Array(Field)
         headers = [] of Field
-        list_size = 0
+        list_size = 0_i64
+        too_large = false
         pos = 0
         while pos < block.size
+          name : String
+          value : String
+          never = false
           b = block[pos]
           if b & 0x80 != 0
             # §6.1 Indexed Header Field
             index, pos = read_int(block, pos, 7)
-            headers << Field.new(*lookup(index))
+            name, value = lookup(index)
           elsif b & 0x40 != 0
             # §6.2.1 Literal with Incremental Indexing
             index, pos = read_int(block, pos, 6)
             name, pos = field_name(block, pos, index)
             value, pos = read_string(block, pos)
             add(name, value)
-            headers << Field.new(name, value)
           elsif b & 0x20 != 0
             # §6.3 Dynamic Table Size Update
             new_max, pos = read_int(block, pos, 5)
@@ -361,12 +374,18 @@ module Gori::Proxy::H2
             index, pos = read_int(block, pos, 4)
             name, pos = field_name(block, pos, index)
             value, pos = read_string(block, pos)
-            headers << Field.new(name, value, never)
           end
-          f = headers[-1]
-          list_size += f.name.bytesize + f.value.bytesize + ENTRY_OVERHEAD
-          raise Gori::Error.new("hpack: header list too large") if list_size > MAX_HEADER_LIST
+          unless too_large
+            list_size += name.bytesize.to_i64 + value.bytesize.to_i64 + ENTRY_OVERHEAD
+            if list_size > MAX_HEADER_LIST
+              headers.clear
+              too_large = true
+            else
+              headers << Field.new(name, value, never)
+            end
+          end
         end
+        raise HeaderListTooLarge.new if too_large
         headers
       end
 
