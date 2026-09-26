@@ -3926,3 +3926,7 @@ Refines: the R1 guard entry above. #1295.
   by id (`VIM_MOTIONS`) under that keyset only. Undo (`u`) and helix's `i` insert are not in
   it, and an example fails if an exempt verb moves into an acting band (send, triage, danger,
   wipe) or out of the vim table.
+- **The strip's rename key is `e`.** The menu's Rename is `e` on all nine strips and its `r`
+  is Send/Run on four of them, so the strip moves to the menu's letter rather than the menu to
+  the strip's, and strip `r` does nothing (`^R` still sends from the Repeater strip). The
+  project picker already renamed on `e`.

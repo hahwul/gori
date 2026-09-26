@@ -3143,7 +3143,7 @@ module Gori::Tui
           if @tabs[@active_tab]?.try(&.subtabs_fixed?)
             return "←/→ switch sub-tab · ↓/↵ enter · ⇧1-9 jump · ↑/esc tabs"
           end
-          rn = renameable_subtabs? ? " · r rename" : ""
+          rn = renameable_subtabs? ? " · e rename" : ""
           mk = subtab_marks_shown? ? " · t mark" : ""
           # With marks set, esc no longer leaves the strip — it drops the selection first, and
           # the row has to say so rather than keep advertising the gesture it used to be.
@@ -4197,10 +4197,12 @@ module Gori::Tui
       end
     end
 
-    # `r` (no modifiers) on a renameable sub-tab strip opens the rename prompt. Factored
-    # out of handle_subtabs_key's case so its conditions don't inflate that method.
+    # `e` (no modifiers) on a renameable sub-tab strip opens the rename prompt: the menu's
+    # Rename letter on all nine strips, so `e` renames whichever way it is reached (#1295).
+    # It was `r`, which the menu spends on Send/Run in four of those tabs. Factored out of
+    # handle_subtabs_key's case so its conditions don't inflate that method.
     private def rename_chord?(ev : Termisu::Event::Key) : Bool
-      renameable_subtabs? && ev.key.lower_r? && !ev.ctrl? && !ev.alt?
+      renameable_subtabs? && ev.key.lower_e? && !ev.ctrl? && !ev.alt?
     end
 
     # The tabs whose sub-tab chips carry a custom name (Repeater + Fuzzer + Decoder + Miner + Comparer).

@@ -55,7 +55,7 @@ module MenuLetterMeaning
   # question from the menu (nil: no verb does — marking one chip is strip-only). Rename is
   # live on every strip but Notes (`Runner#renameable_subtabs?`).
   STRIP_KEYS = {
-    'r' => {"rename", "rename-subtab"},
+    'e' => {"rename", "rename-subtab"},
     't' => {"mark", "subtab-mark"},
     'T' => {"mark-all", "subtab-mark-all"},
     'f' => {"find", "find-subtab"},
@@ -246,11 +246,6 @@ MENU_LETTER_ALLOWED = {
   {"colormarker.color-add", "colormarker.add"}           => "false positive: handle_colors_key answers `a` in the colours pane",
   {"colormarker.color-edit", "colormarker.edit"}         => "false positive: handle_colors_key answers `e` in the colours pane",
   {"colormarker.color-delete", "colormarker.delete"}     => "false positive: handle_colors_key answers `d` in the colours pane",
-  # WP2 #10 — the strip's `r` renames and `t` marks a chip.
-  {"repeater.send", "strip:rename"} => "WP2 #10: strip `r` renames, the menu's `r` sends (hotkeys.md)",
-  {"fuzz.run", "strip:rename"}      => "WP2 #10: strip `r` renames, the menu's `r` runs (hotkeys.md)",
-  {"mine.run", "strip:rename"}      => "WP2 #10: strip `r` renames, the menu's `r` runs (hotkeys.md)",
-  {"sequence.run", "strip:rename"}  => "WP2 #10: strip `r` renames, the menu's `r` runs (hotkeys.md)",
 } of MenuLetterMeaning::Pair => String
 
 describe "space-menu letters vs the keys the same tab answers (R1)" do

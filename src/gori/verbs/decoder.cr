@@ -26,9 +26,8 @@ module Gori
       # Rename the active sub-tab's chip — mirrors repeater.rename-subtab/fuzz.rename-subtab
       # (verbs/history.cr): Decoder is also in renameable_subtabs? (runner.cr), but had no
       # :subtab verb of its own, so its sub-tab-strip space menu was flat COMMON with no
-      # way to rename. 'e' — the letter rename carries on all nine strips (see
-      # `repeater.rename-subtab`); the key audit briefly put it on the strip's 'r' here,
-      # which the four Send/Run tabs can never match.
+      # way to rename. 'e' — the letter rename carries on all nine strips and on the strip
+      # itself (see `repeater.rename-subtab`).
       r.register Verb::Definition.new(
         "decoder.rename-subtab", "Rename subtab", "Rename the active conversion's sub-tab chip",
         Verb::Scope::Decoder, available: in_decoder, intent: :rename, section: :subtab) { |ctx| ctx.decoder_rename_subtab; nil }

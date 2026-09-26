@@ -41,7 +41,7 @@ Rules of thumb:
 - **`s` goes to the source, or flips the scope lens.** Those are its only two meanings. `s` opens the tab a row lives in — the Evidence archive, an Issue's RELATED card, and the Probe list and detail — and everywhere it is not one of those, it is the Global scope lens. What it stopped meaning: swap A ⇄ B on the Comparer and the Diff (now **`w`**), and global ⇄ project on the Colormarker and Match & Replace rule lists (now `Space` menu entries, so the lens is no longer shadowed there). One shadow is left and named: the Project **ACTIVITY** feed's `s` cycles the source chip, because that pane's `/` bar is a free-text query and does not parse `source:` / `level:` / `actor:` to fold the three chips into.
 - The space menu is **not** an INS fallback: text editors swallow keys upstream, so `Space` stays a literal character there. An action that has to be reachable while typing needs a Ctrl chord, and a mnemonic alone is not enough. (This is why `Ctrl-Q`, not the space menu alone, carries the Repeater/Fuzzer decoder-chain editor after it gave `Ctrl-Y` up to Copy.)
 - **History → Repeater** and **Repeater send** stay on **`Ctrl-R`** (same muscle memory). Do not move History→Repeater to bare `r`.
-- **`r` sends to the Repeater; `Ctrl-R` runs.** Bare `r` is "send this row to the Repeater" in the five scopes that have a flow to send, and nothing elsewhere: the Diff's Run moved to `Ctrl-R` (which already owns Run in nine scopes), OAST's Resume listener moved to `Shift-R`, and the Project ACTIVITY feed's Refresh is a `Space` menu entry — a feed with a refresh key probably wants none at all, since it already re-reads on entry, on a peer's write and on the poll. The sub-tab strip's `r` = rename is a different tier and is unaffected.
+- **`r` sends to the Repeater; `Ctrl-R` runs.** Bare `r` is "send this row to the Repeater" in the five scopes that have a flow to send, and nothing elsewhere: the Diff's Run moved to `Ctrl-R` (which already owns Run in nine scopes), OAST's Resume listener moved to `Shift-R`, and the Project ACTIVITY feed's Refresh is a `Space` menu entry — a feed with a refresh key probably wants none at all, since it already re-reads on entry, on a peer's write and on the poll. The sub-tab strip renames on `e`, the menu's Rename letter, not `r`.
 - Match & Replace and Notifications ship keyless (palette / badge); rebind them if you want a Global chord.
 
 ## One bare letter, one question {#grammar}
@@ -242,7 +242,7 @@ the row; it never spends that letter on something else.
 | `n` | New sub-tab | `Ctrl-N` |
 | `w` | Close sub-tab (or every marked one) | `Ctrl-W` |
 | `d` | Duplicate sub-tab | |
-| `e` | Rename sub-tab | `r` on the strip |
+| `e` | Rename sub-tab | `e` on the strip |
 | `t` | Mark or unmark the active sub-tab | `t` on the strip |
 | `f` | Search sub-tabs — the `⌕` picker | `f` on the strip, `⇧0` anywhere |
 | `/` | Filter the strip (name / host / method / tag) | |
@@ -493,7 +493,7 @@ An absent action uses the profile default. Unknown ids and unparseable chords ar
 - Only an action's **primary** chord is shown/edited; navigation aliases (e.g. the arrow-key duplicates of `j` / `k`) aren't listed.
 - Every surface that names a rebindable chord reads it from the effective keymap: the **command palette**, the **space menu**, the **Help** tab and its popup, the status-bar hint strips, and the empty-state cards. What stays literal is not a verb: the claimed `^P` / `^N` / `^W` / `^1-9` family (the sub-tab alias) and structural keys (`esc`, `↵`, arrows, `↹`).
 - Space-menu **mnemonic** letters are stable action identities (Helix-like); rebinding changes the *direct* chord, not the space-menu letter.
-- Where the **sub-tab strip** already binds a letter for an action, the menu spells that action with the same letter where it can: `f` lists and searches the sub-tabs and `⇧T` marks the whole strip. Marking a single chip is the strip's own `t`, which has no menu row. Rename is the one it cannot match — the strip binds `r`, and `r` is `Run`/`Send` (the menu echo of `Ctrl-R`) in the Repeater, Fuzzer, Miner and Sequencer, where a rename does not get to displace it. One action must not have two spellings across the nine strips, so rename is **`e` on all of them** and the strip's `r` stays a raw chord. See [the space menu](#space-menu) for the whole table.
+- Where the **sub-tab strip** binds a letter for an action, the menu spells that action with the same letter: `t` marks the sub-tab, `f` lists and searches the sub-tabs, `⇧T` marks the whole strip, and `e` renames. Rename used to be `r` on the strip, but `r` is `Run`/`Send` (the menu echo of `Ctrl-R`) in the Repeater, Fuzzer, Miner and Sequencer, so the strip moved to the menu's `e` rather than the other way round; `r` on the strip now does nothing. See [the space menu](#space-menu) for the whole table.
 - The editor actions are rebindable individually, and as a set via [Editor keysets](#editor-keysets). What the rebind editor will not move is the handful whose chord a hardcoded guard answers first: `Esc` (back to READ), `Ctrl-Z`, `Ctrl-F` and `Ctrl-G`. They are listed in the Help sheet so you can read them, and a keyset can give them a second, bare spelling — which is how `vim-ish` reaches `u` and `/`.
 - Press **`?`** from a navigable context to jump to the **Help** tab (mitmproxy-style cheat-sheet).
 

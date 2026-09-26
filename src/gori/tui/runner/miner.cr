@@ -47,7 +47,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     miner_controller.miner_duplicate
   end
 
-  # The strip's raw `r` rename / ^W close, promoted to verbs. `Runner#renameable_subtabs?`
+  # The strip's raw `e` rename / ^W close, promoted to verbs. `Runner#renameable_subtabs?`
   # and `#subtab_close` have listed :miner all along; only the VERBS were missing, so the
   # `:subtab` space-menu group here held Duplicate alone and neither key was rebindable.
   def miner_rename_subtab : Nil

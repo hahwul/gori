@@ -14,7 +14,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     resolve_subtab_focus # don't strand on a now-hidden strip
   end
 
-  # Space-menu (:subtab) counterpart of the strip's `r` rename chord — reuses the
+  # Space-menu (:subtab) counterpart of the strip's `e` rename chord — reuses the
   # SAME shell-owned rename prompt as Repeater/Fuzzer (open_rename already handles
   # Decoder generically via view_at).
   def decoder_rename_subtab : Nil

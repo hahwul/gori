@@ -30,7 +30,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     sequencer_controller.sequence_run
   end
 
-  # The strip's raw `r` rename / ^W close, promoted to verbs — `Runner#renameable_subtabs?`
+  # The strip's raw `e` rename / ^W close, promoted to verbs — `Runner#renameable_subtabs?`
   # and `#subtab_close` have listed :sequencer all along, but there were no verbs, so this
   # tab had NO `:subtab` menu group at all and neither key could be rebound.
   def sequencer_rename_subtab : Nil
