@@ -603,6 +603,11 @@ module Gori::Tui
             ev = @term.poll_event(50)
             dirty = false
             if ev
+              # Was she on screen BEFORE this input? A held reply is released only by input
+              # the operator gave while it was showing; a key typed into the body editor, a
+              # menu or an overlay that hides her says nothing about a bubble they never saw.
+              shown = companion_on_screen?
+              @operator_input = false
               handle(ev)
               dirty = true
               # Drain any input already queued behind `ev` in the SAME tick, then
@@ -614,7 +619,10 @@ module Gori::Tui
               # scrolling tracks the input. Bounded so an infinitely-held key can't
               # starve the render / async-channel drains below.
               keys_drained = drain_burst
-              @companion.wake_on_input # any key/click re-arms Miss Ring's idle clock
+              # Any event re-arms Miss Ring's idle clock; only a key or click (anywhere in the
+              # burst, set by #handle) that she was on screen for releases a held reply. A
+              # resize or a terminal mode change is the terminal moving, not the operator.
+              @companion.wake_on_input(@operator_input && shown)
               # Tell the stall guard how DENSE this tick was: only a burst means the paste is
               # still streaming. Key events only — see `PasteStall#saw`.
               @paste_stall.saw(Time.instant, keys_drained)
@@ -1375,6 +1383,9 @@ module Gori::Tui
       # xterm mode 1002 reports pointer motion continuously, and a drag would otherwise retry
       # (and log) the broken render at the mouse's rate.
       @safe_frame = nil if ev.is_a?(Termisu::Event::Key)
+      # The operator did something (see the run loop's `wake_on_input`). Set per event, so a
+      # key drained behind a resize in the same burst still counts.
+      @operator_input = true if ev.is_a?(Termisu::Event::Key) || ev.is_a?(Termisu::Event::Mouse)
       # A PasteStart arriving while a paste is ALREADY open means the previous one was abandoned
       # (its marker lost) and a new one is beginning. Close the old one first, or there is no
       # start transition for the new one and it silently inherits the abandoned paste's
@@ -2443,6 +2454,10 @@ module Gori::Tui
 
     @filing_origin : FilingOrigin? = nil
 
+    # Did the events handled this tick include a key or click? Reset by the run loop before
+    # each burst and read after it, to decide whether Miss Ring may release a held reply.
+    @operator_input : Bool = false
+
     # The tab's own name, as the bar spells it — the word the toast promises esc will take you
     # back to, so it has to be the one on screen.
     def self.filing_origin_label(tab : Symbol) : String
@@ -3277,6 +3292,10 @@ module Gori::Tui
       notice = Settings.companion_in_bar? ? @companion.frame.try(&.bubble) : nil
       return format_status_message(toast) unless notice
       return notice unless toast && (at = @toast_at)
+      # A HELD reply keeps the slot against a newer toast, as it keeps her bubble against a
+      # newer note: the toast a job result raises must not hide what an agent said. The
+      # operator's own next key releases the hold, so the feedback for THAT key still shows.
+      return notice if @companion.holding?
       @companion.bubble_at.try { |b| b > at } ? notice : format_status_message(toast)
     end
 

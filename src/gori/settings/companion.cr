@@ -38,15 +38,25 @@ module Gori::Settings
   # nothing and needs no speech bubble: the status row already carries the toast for
   # exactly these notifications.
   DEFAULT_COMPANION_PLACEMENT = "body" # "body" | "bar"
+  # How long she keeps saying an agent's reply (`reply_to_operator`). "hold" keeps it in the
+  # bubble — or the status row, in `bar` — until the operator's next key or click; "timed"
+  # lets it go after the few seconds every other notice gets. HOLD BY DEFAULT because a reply
+  # is the one notice written TO the operator, and the only live copy of it: an agent that
+  # answered while they were reading a response in another pane was, on a 3.5s bubble,
+  # an agent that had not answered at all. A later job result does not take a held bubble;
+  # a later reply does.
+  DEFAULT_COMPANION_REPLIES = "hold" # "hold" | "timed"
 
   # All read live at the tick/draw sites, so a save takes effect on the next frame.
   class_property? companion : Bool = DEFAULT_COMPANION
   class_property companion_motion : String = DEFAULT_COMPANION_MOTION
   class_property? companion_notices : Bool = DEFAULT_COMPANION_NOTICES
   class_property companion_placement : String = DEFAULT_COMPANION_PLACEMENT
+  class_property companion_replies : String = DEFAULT_COMPANION_REPLIES
 
   COMPANION_MOTIONS    = {"lively", "calm", "still"}
   COMPANION_PLACEMENTS = {"body", "bar"}
+  COMPANION_REPLIES    = {"hold", "timed"}
 
   # NAMED POSITIVELY, not as "not calm". This read `!= "calm"` while there were two modes,
   # which is the same answer written the way that does not survive a third: "still" would
@@ -64,6 +74,10 @@ module Gori::Settings
     companion_placement == "bar"
   end
 
+  def self.companion_holds_replies? : Bool
+    companion_replies == "hold"
+  end
+
   # Allowed motion modes; anything else falls back to the default.
   def self.normalize_companion_motion(s : String) : String
     COMPANION_MOTIONS.includes?(s) ? s : DEFAULT_COMPANION_MOTION
@@ -71,6 +85,10 @@ module Gori::Settings
 
   def self.normalize_companion_placement(s : String) : String
     COMPANION_PLACEMENTS.includes?(s) ? s : DEFAULT_COMPANION_PLACEMENT
+  end
+
+  def self.normalize_companion_replies(s : String) : String
+    COMPANION_REPLIES.includes?(s) ? s : DEFAULT_COMPANION_REPLIES
   end
 
   # Tolerant companion section: absent/non-object keeps current.
@@ -81,6 +99,7 @@ module Gori::Settings
     self.companion_notices = load_bool_h(o, "notices", companion_notices?)
     o["motion"]?.try(&.as_s?).try { |v| self.companion_motion = normalize_companion_motion(v) }
     o["placement"]?.try(&.as_s?).try { |v| self.companion_placement = normalize_companion_placement(v) }
+    o["replies"]?.try(&.as_s?).try { |v| self.companion_replies = normalize_companion_replies(v) }
   end
 
   # Factory reset for this section (dispatched by Settings.reset_to_factory). One assignment
@@ -92,6 +111,7 @@ module Gori::Settings
     self.companion_placement = DEFAULT_COMPANION_PLACEMENT
     self.companion_motion = DEFAULT_COMPANION_MOTION
     self.companion_notices = DEFAULT_COMPANION_NOTICES
+    self.companion_replies = DEFAULT_COMPANION_REPLIES
   end
 
   # Omitted entirely while every field is at its factory default, so a default install's
@@ -100,13 +120,15 @@ module Gori::Settings
     unless companion? == DEFAULT_COMPANION &&
            companion_motion == DEFAULT_COMPANION_MOTION &&
            companion_notices? == DEFAULT_COMPANION_NOTICES &&
-           companion_placement == DEFAULT_COMPANION_PLACEMENT
+           companion_placement == DEFAULT_COMPANION_PLACEMENT &&
+           companion_replies == DEFAULT_COMPANION_REPLIES
       j.field "companion" do
         j.object do
           j.field "enabled", companion?
           j.field "placement", companion_placement
           j.field "motion", companion_motion
           j.field "notices", companion_notices?
+          j.field "replies", companion_replies
         end
       end
     end

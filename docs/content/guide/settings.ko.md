@@ -71,7 +71,7 @@ gori에 저장되는 모든 환경설정은 하나의 화면, **Preferences** �
 | **Theme** | 오프너: 테마 선택기(내장 테마와 직접 만든 테마) |
 | **Display** | Default detail pane, History list time, Line numbers, Wrap long lines, Preview body limit (KiB), Resource meter, Terminal title |
 | **Layout** | History Req/Res preview, Probe issue preview, Issues preview, History list order, Sitemap expand depth, Tab numbers, Tab bar slots |
-| **Companion** | Companion (Miss Ring), Placement, Motion, Notices |
+| **Companion** | Companion (Miss Ring), Placement, Motion, Notices, Agent replies |
 
 Theme 행은 현재 테마를 인라인으로 미리 보여줍니다. 이름과 팔레트 스와치가 함께 표시됩니다. [테마 가이드](/ko/guide/themes/)를 참고하세요.
 
@@ -82,6 +82,8 @@ Companion은 기본값이 on입니다. 아예 끄려면 **Companion → off**고
 독립 실행 화면 두 곳에도 Miss Ring이 나옵니다. **설정 마법사**에는 COMPANION 단계가 있습니다. 켜기/끄기 선택과 모션 옆에 정지 이미지가 놓이므로, 처음 실행하는 사용자가 Miss Ring을 만나기 전에 원하는지 먼저 정할 수 있습니다. 마칠 때까지 아무것도 기록되지 않으므로 Esc로 빠져나가면 설정은 원래대로 남습니다. **가이드 투어**(`gori tutorial`)는 Miss Ring이 안내에 실제로 참여하는 유일한 곳입니다. 카드 오른쪽에 서서 탭 전환, 팔레트 열기, 액션 메뉴, INS 모드를 각각 한 번씩 해낼 때마다 확인해 주고, 마지막에 인사하고 물러납니다. 좁은 터미널에서 Miss Ring을 떨어뜨리는 대신 투어가 자기 카드를 좁혀 자리를 내주므로 80칸부터 함께합니다. Companion이 꺼져 있으면 카드는 원래 폭을 유지하고 투어도 예전과 똑같이 그려집니다. 수업 내용 자체는 카드에 있고 Miss Ring은 반응만 하므로, Notices를 꺼도 잃는 것은 그 격려뿐이고 투어 내용은 그대로입니다.
 
 Placement는 *세션에서의* 비용을 결정합니다 (선택 화면에는 자리가 하나뿐입니다). `body`는 탭 본문 우하단에 8&times;3 스프라이트를 두며, 세 줄을 가리고 결과를 말풍선으로 알립니다. `bar`는 상태 줄 맨 오른쪽, 시계보다 더 바깥에 여덟 칸짜리 칩을 둡니다. 고리의 위아래를 뺀 얼굴과 기분 배지가 들어갑니다. 아무것도 가리지 않고 말풍선도 사라집니다. 대사가 상태 줄의 텍스트 슬롯을 통해 나가기 때문입니다. 반응을 칩에서 읽을 수 있게 해 주는 것이 이 배지입니다. 배지가 없으면 칩은 "뭔가 잘못됐다"를 금색이 조금 붉어지는 것만으로 말하게 되는데, 색이 바랜 터미널에서 가장 먼저 사라지는 신호가 그것입니다. 이렇게 가장자리에 앉을 수 있는 건 어떤 표정에서도 폭이 같기 때문입니다. 눈을 깜빡여도 시계나 CPU/MEM 표시가 밀리지 않습니다. 그 슬롯은 메시지를 하나만 담으므로, 토스트와 Miss Ring의 알림은 더 최신인 쪽이 이깁니다. Notices는 어느 쪽이든 하단 상태바 토스트와 독립적으로 동작합니다. 두 배치 모두에서 Miss Ring을 클릭할 수 있습니다. 누르면 알림 목록이 열립니다. Miss Ring이 그 목록의 얼굴이고, 방금 말한 그 줄이 목록의 가장 최신 항목입니다.
+
+**Agent replies**는 에이전트가 MCP `reply_to_operator` 도구로 보낸 말을 Miss Ring이 얼마나 오래 들고 있을지 정합니다. 기본값 `hold`에서는 답장이 다음 키 입력이나 클릭까지 말풍선(`bar`에서는 상태 줄)에 남습니다. 그 뒤에 도착한 작업 결과는 표정만 바꾸고 대사는 바꾸지 못하며, 더 새 답장만 그 자리를 차지합니다. 답장이 도착할 때 이미 누르던 키가 그것을 지우지는 못합니다. 다른 알림이 받는 몇 초는 여전히 떠 있습니다. `timed`는 답장도 다른 알림처럼 그 몇 초 뒤에 내립니다. 어느 쪽이든 열려 있는 창의 알림이지 우편함이 아닙니다. 프로젝트에 gori TUI가 열려 있지 않을 때 온 답장은 나중에 알려 주지 않으며, 에이전트도 그 사실을 전달받습니다.
 
 ### Editor & Keys {#editor-keys}
 

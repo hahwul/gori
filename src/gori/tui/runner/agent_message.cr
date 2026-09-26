@@ -174,7 +174,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
 
   # The agent's replies, the same way: a note per reply, the summary as its line and the
   # long form behind ↵. `source: "agent"` renders with the AI marker, and Miss Ring speaks
-  # the summary because she consumes this ring.
+  # the summary because she consumes this ring — `addressed:` so she keeps saying it until
+  # the operator's next key or click, not for a few seconds they may have spent elsewhere.
   def drain_agent_replies : Bool
     high = @session.store.last_agent_delivery_id
     page = @session.store.agent_replies_after(@agent_reply_cursor, AGENT_DELIVERY_BATCH)
@@ -182,7 +183,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     return false if page.rows.empty?
     page.rows.each do |row|
       level, message = AgentMessageNotes.reply_line(row)
-      @notifications.push(level, message, nil, source: "agent", detail: row.detail)
+      @notifications.push(level, message, nil, source: "agent", detail: row.detail, addressed: true)
     end
     true
   end

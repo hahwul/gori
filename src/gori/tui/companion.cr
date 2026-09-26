@@ -202,6 +202,11 @@ module Gori::Tui
       @bubble = nil.as(String?)
       @bubble_at = nil.as(Time::Instant?)
       @bubble_until = nil.as(Time::Instant?)
+      # Non-nil while the bubble is HELD — an addressed note (an agent's reply) waiting for the
+      # operator's next key or click, with no @bubble_until of its own. The value is the
+      # earliest the bubble may leave once released: its ordinary TTL from when it landed, so
+      # a key that was already on its way when the reply arrived cannot erase it unread.
+      @bubble_floor = nil.as(Time::Instant?)
       @mood = :info
       @mood_beat = 0
       @mood_until = nil.as(Time::Instant?)
@@ -283,10 +288,29 @@ module Gori::Tui
     end
 
     # Wake hook for the input path. Self-gated so a keystroke costs nothing at all while
-    # she's disabled — the run loop calls this on every key and click.
-    def wake_on_input : Nil
+    # she's disabled — the run loop calls this on every key and click. `acknowledge` is false
+    # for input that is not the operator answering anything (a resize): it wakes her, but a
+    # held reply stays up.
+    def wake_on_input(acknowledge : Bool = true) : Nil
       return unless Settings.companion?
-      poke(Time.instant)
+      now = Time.instant
+      release_bubble(now) if acknowledge
+      poke(now)
+    end
+
+    # The operator has done something, so a held reply has had its chance: from here it
+    # leaves like any other bubble, at the end of its ordinary TTL or now, whichever is later.
+    # #expire_bubble does the clearing on the next tick.
+    # Is a reply being held? The host's status row asks, in `bar`, where the bubble shares a
+    # slot with the toast.
+    def holding? : Bool
+      !@bubble_floor.nil?
+    end
+
+    def release_bubble(now : Time::Instant) : Nil
+      return unless floor = @bubble_floor
+      @bubble_floor = nil
+      @bubble_until = {now, floor}.max
     end
 
     # Back to the state a freshly-constructed Companion is in. The BEAT-DERIVED deadlines have to
@@ -305,6 +329,7 @@ module Gori::Tui
       @bubble = nil
       @bubble_at = nil
       @bubble_until = nil
+      @bubble_floor = nil
       @mood = :info
       @mood_until = nil
       @restless = false
@@ -580,6 +605,7 @@ module Gori::Tui
       @bubble = GREETING
       @bubble_at = now
       @bubble_until = now + GREET_TTL
+      @bubble_floor = nil
       @restless = true
     end
 
@@ -604,6 +630,7 @@ module Gori::Tui
       @bubble = condense(message)
       @bubble_at = now
       @bubble_until = now + bubble_ttl(mood)
+      @bubble_floor = nil
       apply_mood(mood, now)
       @restless = true
       poke(now)
@@ -612,13 +639,38 @@ module Gori::Tui
     private def consume_note(now : Time::Instant) : Nil
       id = @notes.latest_id
       return if id <= @seen_id # empty, unchanged, or post-clear
+      seen = @seen_id
       @seen_id = id
-      return unless note = @notes.latest
+      return unless latest = @notes.latest
       return unless Settings.companion_notices?
+      # She reads one note per tick. A reply is the one worth reaching back for, in either
+      # replies mode: `timed` changes how long it stays, not whether it is said.
+      note = latest.addressed? ? latest : (@notes.latest_addressed_after(seen) || latest)
+      # A HELD reply outranks the notices that land behind it. Holding exists so the operator
+      # gets to read what an agent said to them; a fuzzer finishing thirty seconds later would
+      # otherwise take the bubble and leave the reply to be found in the ring after all. The
+      # later note still gets her face and the toast — only the words stay. A newer REPLY does
+      # take the bubble: between two things said to the operator, the newest is the one.
+      if @bubble_floor && !note.addressed?
+        apply_mood(mood_of(note.level), now)
+        @restless = true
+        poke(now)
+        return
+      end
       @bubble = condense(note.message)
       @bubble_at = now
-      @bubble_until = now + bubble_ttl(mood_of(note.level))
+      timed = now + bubble_ttl(mood_of(note.level))
+      if note.addressed? && Settings.companion_holds_replies?
+        @bubble_until = nil
+        @bubble_floor = timed
+      else
+        @bubble_until = timed
+        @bubble_floor = nil
+      end
       apply_mood(mood_of(note.level), now)
+      # A note that landed behind the reply in the same tick still gets her face, exactly as
+      # it would a tick later (the held branch above); #apply_mood keeps the higher rank.
+      apply_mood(mood_of(latest.level), now) unless latest.same?(note)
       @restless = true
       poke(now) # a result is worth waking up for
     end

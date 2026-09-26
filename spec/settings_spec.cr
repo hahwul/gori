@@ -807,10 +807,12 @@ describe Gori::Settings do
     Dir.mkdir_p(dir)
     prev = ENV["GORI_HOME"]?
     prev_companion = {Gori::Settings.companion?, Gori::Settings.companion_placement,
-                      Gori::Settings.companion_motion, Gori::Settings.companion_notices?}
+                      Gori::Settings.companion_motion, Gori::Settings.companion_notices?,
+                      Gori::Settings.companion_replies}
     begin
       ENV["GORI_HOME"] = dir
       Gori::Settings.companion = true
+      Gori::Settings.companion_replies = "timed"
       Gori::Settings.companion_placement = "bar"
       Gori::Settings.companion_motion = "calm"
       Gori::Settings.companion_notices = false
@@ -821,8 +823,10 @@ describe Gori::Settings do
       Gori::Settings.companion_placement = "body"
       Gori::Settings.companion_motion = "lively"
       Gori::Settings.companion_notices = true
+      Gori::Settings.companion_replies = "hold"
       Gori::Settings.load
       Gori::Settings.companion?.should be_true
+      Gori::Settings.companion_replies.should eq("timed")
       Gori::Settings.companion_placement.should eq("bar")
       Gori::Settings.companion_motion.should eq("calm")
       Gori::Settings.companion_notices?.should be_false # a stored false survives the reload
@@ -836,6 +840,11 @@ describe Gori::Settings do
       File.write(Gori::Settings.path, %({"companion":{"enabled":true,"placement":"corner"}}))
       Gori::Settings.load
       Gori::Settings.companion_placement.should eq(Gori::Settings::DEFAULT_COMPANION_PLACEMENT)
+
+      # ...and so does a hand-edited replies mode.
+      File.write(Gori::Settings.path, %({"companion":{"enabled":true,"replies":"forever"}}))
+      Gori::Settings.load
+      Gori::Settings.companion_replies.should eq(Gori::Settings::DEFAULT_COMPANION_REPLIES)
 
       # An explicit OFF differs from the factory default now, so it is written out and read
       # back — the answer someone gives once has to survive every later upgrade.
@@ -862,6 +871,7 @@ describe Gori::Settings do
       Gori::Settings.companion_placement = Gori::Settings::DEFAULT_COMPANION_PLACEMENT
       Gori::Settings.companion_motion = Gori::Settings::DEFAULT_COMPANION_MOTION
       Gori::Settings.companion_notices = Gori::Settings::DEFAULT_COMPANION_NOTICES
+      Gori::Settings.companion_replies = Gori::Settings::DEFAULT_COMPANION_REPLIES
       Gori::Settings.save
       File.read(Gori::Settings.path).should_not contain(%("companion"))
     ensure
@@ -869,6 +879,7 @@ describe Gori::Settings do
       FileUtils.rm_rf(dir)
       Gori::Settings.companion, Gori::Settings.companion_placement = prev_companion[0], prev_companion[1]
       Gori::Settings.companion_motion, Gori::Settings.companion_notices = prev_companion[2], prev_companion[3]
+      Gori::Settings.companion_replies = prev_companion[4]
     end
   end
 
