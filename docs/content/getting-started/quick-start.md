@@ -90,7 +90,7 @@ Before memorizing tab-specific keys, learn the two places almost everything live
 
 | Surface | Key | What it is for |
 |---------|-----|----------------|
-| **Command palette** | `Ctrl-P` | App-wide control: settings, Open browser, Export CA, jump actions, anything global |
+| **Command palette** | `Ctrl-P` | App-wide control: settings, Open browser, Copy CA certificate path, jump actions, anything global |
 | **Space menu** | `Space` | Actions for whatever has focus right now (History row, detail pane, Repeater, …) |
 
 The palette is the map of the whole tool. The space menu is the map of *this* pane. Both show key hints, so if you forget a chord, open one of them.
@@ -174,11 +174,11 @@ This is the loop you'll spend most of your time in: take a captured request, cha
 5. The response, its timing, and a diff against the previous reply appear on the right. `Tab` cycles target → request → response.
 
 <figure class="tui-shot">
-  <img src="/images/tui/repeater.svg" alt="gori Repeater tab showing an editable request pane beside the response pane, with a status line reading replayed 200 in 1152ms">
+  <img src="/images/tui/repeater.svg" alt="gori Repeater tab showing an editable request pane beside the response pane, with a status line reading sent → 200 in 114ms">
   <figcaption><strong>Repeater</strong> edits any part of a request and re-sends it; the response, timing, and a diff against the last reply sit side by side.</figcaption>
 </figure>
 
-**Checkpoint.** The Repeater status line reads something like `replayed 200 in … ms`, and you can re-send with `Ctrl-R` as many times as you like. That is the full capture → inspect → replay loop.
+**Checkpoint.** The Repeater status line reads something like `sent → 200 in … ms`, and you can re-send with `Ctrl-R` as many times as you like. That is the full capture → inspect → replay loop.
 
 ## 7. Where to go next
 

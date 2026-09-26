@@ -56,7 +56,7 @@ gori run discover --target https://api.example.com \
 
 ## 4. Read and act on the surface
 
-A Discover finding is more than a URL. gori stores the request it framed and the response the origin sent, so the tree is evidence you can read. Select a discovered node and press `Enter` to open that exchange in the same detail view History uses: headers, body, pretty-printed JSON. From there `^R` sends it to the **Repeater** to start poking at it by hand.
+A Discover finding is more than a URL. gori stores the request it framed and the response the origin sent, so the tree is evidence you can read. Select a discovered node and press `o` to open that exchange in the same detail view History uses (`Enter` only expands or collapses a node): headers, body, pretty-printed JSON. From there `^R` sends it to the **Repeater** to start poking at it by hand.
 
 As you triage, mark the paths that matter with `t` (a run of `t` marks consecutive rows), and use the `Space` menu to tag them or add the host to scope from right here, so the endpoints you care about survive the next capture. Nothing sends traffic on its own; you decide what to open and what to chase.
 

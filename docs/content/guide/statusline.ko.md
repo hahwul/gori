@@ -16,7 +16,7 @@ group = "커스터마이즈"
 
 ## 켜기
 
-`Ctrl-,`로 Preferences를 열고 **General**로 가면 **Statusline** 행들이 있습니다. `Enabled`, `Command` 입력란, 그리고 `Interval`과 `Timeout` 초입니다. 명령을 입력하면 상태 바 아래에 행이 나타납니다.
+`Ctrl-,`로 Preferences를 열고 **General**로 가면 **Statusline** 행들이 있습니다. **Statusline** 토글(기본 꺼짐), `Command` 입력란, 그리고 `Interval`과 `Timeout` 초입니다. 토글을 켜고 명령을 주면 상태 바 아래에 행이 나타납니다.
 
 `settings.json`으로는 이렇습니다:
 
@@ -61,7 +61,7 @@ jq -rn --argjson exp "$(gori run jwt "$(cat "${GORI_HOME:-$HOME/.gori}/token.jwt
 
 {% preset(title="타깃이 5xx를 뱉기 시작했는지", src="/images/tui/statusline-errors.svg", alt="빨간색 statusline 한 줄: 1 × 5xx", note="타이머로 도는 History 쿼리입니다. History가 지금 걸어 둔 필터가 아니라 프로젝트 전체에 묻고, 타깃이 멀쩡한 동안은 아무것도 출력하지 않습니다 — 그래서 무언가 무너지는 순간에만 행이 나타납니다.") %}
 ```sh
-p=$(jq -r .project); gori run history --project "$p" -q 'status:>=500' --format json 2>/dev/null | jq -rs 'length | if . == 0 then "" else "\u001b[31m\(.) × 5xx\u001b[0m" end'
+p=$(jq -r .project); gori run history --project "$p" -q 'status:>=500' -n 100000 --format json 2>/dev/null | jq -rs 'length | if . == 0 then "" else "\u001b[31m\(.) × 5xx\u001b[0m" end'
 ```
 {% end %}
 
@@ -105,7 +105,7 @@ project=$(printf '%s' "$ctx" | jq -r .project)
 
 token=$(jq -rn --argjson exp "$(gori run jwt "$(cat "${GORI_HOME:-$HOME/.gori}/token.jwt")" --format json | jq .payload.exp)" \
   '(($exp - now) / 60 | floor) as $m | if $m < 5 then "\u001b[31m⚠ token \($m)m left\u001b[0m" else "\u001b[32m●\u001b[0m token \($m)m left" end')
-errors=$(gori run history --project "$project" -q 'status:>=500' --format json 2>/dev/null |
+errors=$(gori run history --project "$project" -q 'status:>=500' -n 100000 --format json 2>/dev/null |
   jq -rs 'length | if . == 0 then "" else "\u001b[31m\(.) × 5xx\u001b[0m" end')
 todo=$(gori run notes --all --project "$project" |
   awk '/^- \[ \]/ { n++; if (n == 1) first = substr($0, 7) } END { if (n) printf "todo %d · %s", n, first }')
@@ -176,7 +176,7 @@ ctx=$(cat); printf '%s · %s flows' "$(echo "$ctx" | jq -r .project)" "$(echo "$
 
 ## 명령이 실패했을 때 {#failures}
 
-아무것도 출력하지 못하고 실패한 명령은 행을 비워 두는 대신 종료 상태를 보고합니다. 명령을 찾지 못했으면 `⋯ (exit 127)`, 시그널로 끝났으면 `⋯ (killed)`. `timeout`을 넘긴 실행은 종료되고 행은 `⋯ (timed out)`이 됩니다. 정상 종료했는데 출력이 없으면 행은 비어 있습니다(스크립트가 그렇게 할 수 있는 정당한 선택입니다). 어느 쪽이든 stderr는 버려집니다.
+아무것도 출력하지 못하고 실패한 명령은 행을 비워 두는 대신 종료 상태를 보고합니다. 명령을 찾지 못했으면 `⋯ (exit 127)`, 시그널로 끝났으면 `⋯ (killed)`. `timeout`을 넘긴 실행은 종료되고 행은 `⋯ (timed out)`이 되며, gori가 명령을 아예 시작하지 못하면 `⋯ (statusline failed)`(내부 오류라면 `⋯ (statusline error)`)가 됩니다. 정상 종료했는데 출력이 없으면 행은 비어 있습니다(스크립트가 그렇게 할 수 있는 정당한 선택입니다). 어느 쪽이든 stderr는 버려집니다.
 
 이 표식들은 본문 색이 아니라 주의 색으로 그려지므로, 멈춰 버린 statusline이 "나쁜 소식을 전하는 멀쩡한 statusline"으로 읽히지 않습니다.
 

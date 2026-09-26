@@ -21,7 +21,7 @@ Ctrl-P  → settings:hotkeys
 | 등급 | 가격 | 언제 | 예시 |
 |------|-------|------|----------|
 | **L0 구조적** | `Esc` `Enter` `Tab` 화살표 `Space`(리더) | 항상 | 포커스, 열기/닫기, READ/INS, space 메뉴 |
-| **L1 루프** | 맨 글자 또는 스티키 패밀리(`^R`) | 분당 여러 번 | History/Issues `j/k` `/` `y` `t`(표시) `v`(뷰), 서브탭 스트립 `t`(표시), Repeater 전송 |
+| **L1 루프** | 맨 글자 또는 스티키 패밀리(`^R`) | 분당 여러 번 | History/Issues `j/k` `/` `y` `t`(표시), History `v`(뷰), 서브탭 스트립 `t`(표시), Repeater 전송 |
 | **L2 세션 호흡** | Global 맨 글자(상한: `c` `i` `s`만) | 세션당 여러 번 | capture, intercept, scope 렌즈 |
 | **L3 맥락적** | `Space` 다음 니모닉 | 가끔, 패널 로컬 | compare, mine, send-group, copy-as |
 | **L4 드문 동작 / 설정** | 팔레트(`Ctrl-P`) 또는 Preferences(`Ctrl-,`) | 드물게 | 설정, Match & Replace, 알림 |
@@ -37,7 +37,7 @@ Ctrl-P  → settings:hotkeys
 - **복사할 것이 있는 목록은 모두 `y`를 바인딩합니다.** 바이트나 행, 기록 한 줄을 보여주면서 `y`에 아무 반응이 없는 패널은 설계가 아니라 구멍입니다. Intercept 큐, Evidence 보관함, 프로젝트 ACTIVITY 피드, OAST 콜백 상세가 각각 그런 구멍이었고 이제 모두 이 글자에 응답합니다. 한 곳에 복사가 둘 있고 서로 반대 방향을 가리킬 때는 — OAST 목록은 gori가 *보낸* 페이로드를, 상세는 *돌아온* 것을 복사합니다 — 코드는 하나만 가질 수 있고(키맵에는 포커스 차원이 없습니다), 나머지는 스페이스 메뉴 글자를 유지합니다.
 - **`/`는 지금 보고 있는 목록을 거릅니다.** 스크롤이 필요한 목록은 모두 이 키에 응답하며, 그렇지 않던 세 규칙 목록 — Colormarker, Match & Replace, Probe **RULES** 하위 탭(세 섹션에 걸친 내장 규칙 약 40개) — 도 이제 포함됩니다. 이 바는 **렌즈**입니다. 행을 숨길 뿐 비활성화하지 않으며, `Esc`로 지웁니다. 바뀌는 것은 순서 변경 하나뿐입니다: 어떤 규칙이 이기는지를 순서가 결정하는 두 목록에서는, 질의가 걸린 동안 이동이 거절됩니다. 걸러진 목록은 규칙 엔진이 들고 있는 순서가 아니기 때문입니다.
 - **`f`는 두 계층과 예외 하나를 가집니다.** 증거 맥락(Issue의 RELATED 카드, 증거 뷰어)에서는 **freeze**이고, 하위 탭 스트립에서는 **find**입니다 — 계층이 다르므로 충돌할 수 없습니다. History의 follow와 Comparer의 변경 없는 줄 접기는 대신 `Space` 메뉴 항목입니다. 둘 다 세션에 한 번 뒤집는 토글이고, 그것이 L3의 용도입니다. 예외는 **Intercept 큐**입니다. 거기서 `f`는 잡아둔 요청을 전달하고 `⇧F`는 전부 전달합니다. 그 탭 고유의 루프 키이고 `f`/`⇧F` 가족이 그 자체로 일관되므로, 옮기는 대신 문서로 남깁니다 — History → Repeater가 `Ctrl-R`에서 받은 것과 같은 판단입니다.
-- **`x`는 줄을 선택하고, `t`는 행의 플래그를 뒤집습니다.** `x`는 열네 개 스코프에서 "이 줄 선택"이고, 네 곳(Colormarker·Match & Replace·Probe **RULES** 목록·OAST providers)에서만 "이 규칙 활성/비활성"이었습니다. 이제 그 넷은 `t`에 응답합니다. `t`는 History·Issues·Sitemap·Intercept 큐에서 이미 **표시(mark)**를 뜻하고, 규칙 목록에는 표시가 없으므로 충돌하지 않습니다. 덕분에 Rewriter의 토글도 손으로 짠 컨트롤러 키를 벗어나 평범한 재지정 가능 코드가 되었습니다.
+- **`x`는 줄을 선택하고, `t`는 행의 플래그를 뒤집습니다.** `x`는 열다섯 개 스코프에서 "이 줄 선택"이고, 네 곳(Colormarker·Match & Replace·Probe **RULES** 목록·OAST providers)에서만 "이 규칙 활성/비활성"이었습니다. 이제 그 넷은 `t`에 응답합니다. `t`는 History·Issues·Sitemap·Intercept 큐에서 이미 **표시(mark)**를 뜻하고, 규칙 목록에는 표시가 없으므로 충돌하지 않습니다. 덕분에 Rewriter의 토글도 손으로 짠 컨트롤러 키를 벗어나 평범한 재지정 가능 코드가 되었습니다.
 - **`s`는 출처로 가거나, scope 렌즈를 뒤집습니다.** 의미는 이 둘뿐입니다. `s`는 행이 사는 탭을 엽니다(Evidence 보관함, Issue의 RELATED 카드, Probe 목록과 상세). 그 밖의 모든 곳에서는 전역 scope 렌즈입니다. 더 이상 뜻하지 않게 된 것: Comparer와 Diff의 A ⇄ B 교체(이제 **`w`**), Colormarker와 Match & Replace 규칙 목록의 global ⇄ project(이제 `Space` 메뉴 항목이라 렌즈를 가리지 않습니다). 가리는 곳이 한 군데 남아 있고 그것은 이름을 붙여 둡니다: 프로젝트 **ACTIVITY** 피드의 `s`는 source 칩을 순환합니다. 그 패널의 `/` 바는 자유 텍스트 질의라 `source:` / `level:` / `actor:`를 파싱하지 않아 세 칩을 접어 넣을 곳이 없기 때문입니다.
 - space 메뉴는 INS의 대체 수단이 **아닙니다**. 텍스트 에디터가 키를 먼저 소비하므로 그곳에서 `Space`는 그냥 문자입니다. 타이핑 중에도 닿아야 하는 동작에는 Ctrl 코드가 필요하고, 니모닉만으로는 부족합니다. (Repeater/Fuzzer의 디코더 체인 편집기가 `Ctrl-Y`를 Copy에 넘겨준 뒤 space 메뉴만이 아니라 `Ctrl-Q`에 실린 이유가 이것입니다.)
 - **History → Repeater**와 **Repeater 전송**은 **`Ctrl-R`**로 유지됩니다(동일한 근육 기억). History→Repeater를 맨 글자 `r`로 옮기지 마세요.
@@ -91,7 +91,7 @@ Ctrl-P  → settings:hotkeys
 
 ## 충돌 {#conflicts}
 
-두 동작은 **다른** 위치에서 발생할 때만 키를 공유할 수 있습니다. 이는 의도된 동작입니다(`s`는 거의 모든 곳에서 "scope 렌즈"지만 Probe에서는 "출처로 가기", `c`는 Intercept 큐에서 catch 방향을 순환하는 것을 제외하면 어디서나 "toggle capture"). 에디터는 **같은 위치**의 충돌만 막습니다. 거기서는 키맵이 둘 중 하나만 남길 수 있기 때문입니다.
+두 동작은 **다른** 위치에서 발생할 때만 키를 공유할 수 있습니다. 이는 의도된 동작입니다(`s`는 거의 모든 곳에서 "scope 렌즈"지만 Probe에서는 "출처로 가기", `c`는 전역으로는 "toggle capture"지만 Intercept 큐에서는 catch 방향을 순환하고, Probe에서는 dismiss, Cookie에서는 crack, Evidence에서는 compare, Sequencer에서는 재설정). 에디터는 **같은 위치**의 충돌만 막습니다. 거기서는 키맵이 둘 중 하나만 남길 수 있기 때문입니다.
 
 ## 숫자 키 패밀리 {#digits}
 
@@ -423,7 +423,7 @@ gori의 텍스트 패널은 **모달**입니다. `Esc`와 `i`로 READ와 INSERT�
 - **종료**: `Ctrl-C`, `Ctrl-D`.
 - **명명된 키와 구별 불가**: `Ctrl-M` / `Ctrl-J` (Enter), `Ctrl-I` (Tab), `Ctrl-H` (Backspace), `Ctrl-[` (Escape).
 - **구조적**: `Enter`, `Esc`, `Tab`, `Backspace`, `Space`(space 메뉴 리더), 그리고 맨 `:`(명령줄).
-- **키맵보다 먼저 점유되는 gori 단축키**: `Ctrl-G` (go to line), `Ctrl-F` (find, `Tab`으로 find & replace), `Ctrl-B` (reveal whitespace), `Ctrl-E` (external editor), `Ctrl-P` (command palette), `Ctrl-N` (new repeater/fuzz/note), `Ctrl-W` (서브탭 닫기, 마크가 있으면 전부), `Ctrl-Z` (undo. 모든 텍스트 에디터가 소비합니다: Repeater, Fuzzer, Notes, Issues, Intercept, Decoder, JWT, Rewriter, Project 설명), `Ctrl-,` (Preferences), 그리고 `Ctrl-1`…`Ctrl-9` (switch sub-tab — `⇧1`–`⇧9`의 **별칭**입니다. [숫자 키 패밀리](#digits) 참고). 이들은 키맵보다 먼저 하드코딩된 가드로 처리되므로, 여기에 바인딩해도 절대 발동하지 않습니다. 같은 이유로 **Command palette**, **Reveal whitespace**, **New repeater request**, **New fuzz session**은 에디터에 나열되지 않습니다. 그 키는 고정입니다.
+- **키맵보다 먼저 점유되는 gori 단축키**: `Ctrl-G` (go to line), `Ctrl-F` (find, `Tab`으로 find & replace), `Ctrl-B` (reveal whitespace), `Ctrl-E` (external editor), `Ctrl-P` (command palette), `Ctrl-N` (new repeater/fuzz/note), `Ctrl-W` (서브탭 닫기, 마크가 있으면 전부), `Ctrl-Z` (undo. 모든 텍스트 에디터가 소비합니다: Repeater, Fuzzer, Notes, Issues, Intercept, Decoder, JWT, Rewriter, Project 설명), `Ctrl-,` (Preferences), 그리고 `Ctrl-1`…`Ctrl-9` (switch sub-tab — `⇧1`–`⇧9`의 **별칭**입니다. [숫자 키 패밀리](#digits) 참고). 이들은 키맵보다 먼저 하드코딩된 가드로 처리되므로, 여기에 바인딩해도 절대 발동하지 않습니다. 같은 이유로 **Command palette**, **Reveal whitespace**, **Quit**, **Back to projects**, 각 탭의 **New …**(Repeater, Fuzzer, Decoder, JWT, Cookie, Notes, Comparer)와 서브탭 닫기 동작은 에디터에 나열되지 않습니다. 그 키는 고정입니다.
 
   `Ctrl-G` / `Ctrl-F`는 포커스가 있는 여러 줄 패널에 적용됩니다. Repeater의 요청/응답, History 상세, Intercept 편집기, Notes, Project 설명, Decoder의 INPUT/OUTPUT, Fuzzer의 템플릿/결과 상세입니다. 편집 가능한 여섯 곳에서는 `Tab`이 find를 find & replace로 바꿉니다. 나머지는 읽기 전용이고, 프롬프트가 할 수 없는 교체를 제안하는 대신 그렇다고 알려줍니다.
 

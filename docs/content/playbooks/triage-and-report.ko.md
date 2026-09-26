@@ -21,7 +21,7 @@ group = "마무리"
 
 ```bash
 gori run probe                       # 패시브 발견만
-gori run probe --severity high       # high 심각도 행만
+gori run probe --severity high       # high와 critical (하한선)
 gori run probe --category cors       # 단일 카테고리
 ```
 
@@ -29,7 +29,7 @@ gori run probe --category cors       # 단일 카테고리
 
 ## 2. 이슈 파일링 {#2-file-an-issue}
 
-**Issues**는 결국 리포트에 넘길 트리아지 목록입니다. **History** 플로우나 Repeater 전송에서 `Shift-F`를 눌러 하나를 파일링하고, **Probe** 발견은 Probe 탭에서 이슈로 승격합니다. 심각도(`info`부터 `critical`까지)와 상태(`open`, `confirmed`, `false-positive`, `resolved`)를 부여하세요. 파일링한 플로우가 증거로 링크되므로 이슈가 스스로 증거를 담습니다. 이슈에서 `Enter`를 누르면 그 교환으로 바로 돌아갑니다.
+**Issues**는 결국 리포트에 넘길 트리아지 목록입니다. **History** 플로우에서 `Shift-F`를 눌러 하나를 파일링하고(Repeater 탭에서는 `Space` → **Link…** → `+ New issue…`), **Probe** 발견은 Probe 탭에서 이슈로 승격합니다. 심각도(`info`부터 `critical`까지)와 상태(`open`, `confirmed`, `false-positive`, `resolved`)를 부여하세요. 파일링한 플로우가 증거로 링크되므로 이슈가 스스로 증거를 담습니다. 이슈에서 `Enter`를 누르면 이슈가 열리고, 그 플로우는 **RELATED** 행에 있습니다. 그 행에서 `↵`는 교환을 제자리에서 보여 주고 `s`는 History에서 엽니다.
 
 <figure class="tui-shot">
   <img src="/images/tui/issues.svg" alt="gori Issues tab listing triaged findings with severity, status, host and title columns, one row selected and its linked evidence flow shown">
@@ -44,7 +44,7 @@ gori run issues update 7 --status confirmed --notes "Verified on staging"
 gori run probe promote 12            # Probe 발견을 Issues로 확정
 ```
 
-**체크포인트.** **Issues** 탭에 심각도와 함께 이슈가 보이고, 그것을 열면 증거 플로우로 점프합니다.
+**체크포인트.** **Issues** 탭에 심각도와 함께 이슈가 보이고, 그것을 열면 **RELATED** 아래에 증거 플로우가 보입니다.
 
 ## 3. Comparer로 증명하기 {#3-prove-it-with-the-comparer}
 
@@ -108,7 +108,7 @@ gh api -X POST /repos/OWNER/REPO/code-scanning/sarifs \
   -f sarif="$(gzip -c issues.sarif | base64 | tr -d '\n')"
 ```
 
-이슈 하나가 result 하나로, URL과 심각도를 싣고 도착합니다. 플로우를 링크해 두었다면 실제 요청·응답이 `webRequest`/`webResponse`로 함께 갑니다. `false-positive`나 `resolved`로 트리아지한 이슈는 SARIF *suppression*으로 나가므로, gori에서 정리한 발견은 대시보드에서도 정리된 상태로 남고 다시 열리지 않습니다.
+이슈 하나가 result 하나로, URL과 심각도를 싣고 도착합니다. 플로우를 링크해 두었다면 실제 요청·응답이 `webRequest`/`webResponse`로 함께 갑니다(`--include-sensitive`를 주지 않으면 Authorization, Cookie, Set-Cookie, API 키 헤더 값은 `[REDACTED]`로 나갑니다). `false-positive`나 `resolved`로 트리아지한 이슈는 SARIF *suppression*으로 나가므로, gori에서 정리한 발견은 대시보드에서도 정리된 상태로 남고 다시 열리지 않습니다.
 
 발견 뒤의 원본 트래픽까지(요약본만이 아니라) 넘기려면, History 쿼리를 하나의 HAR 로그로 내보내세요. STDOUT으로 쓰이고, Burp·Charles·브라우저 네트워크 패널로 불러들일 수 있으며, gori로 그대로 다시 임포트됩니다:
 

@@ -4,7 +4,7 @@ description = "History, Sitemap, Probe, Issues, Intercept, MCP 도구 전반에�
 weight = 30
 +++
 
-gori에는 플로우를 걸러내는 작은 쿼리 언어(QL)가 있습니다. 같은 문법이 TUI 필터 바, `gori run`(`-q`/`--query` 또는 위치 인자), 그리고 MCP 도구에서 동일하게 동작합니다. 내장 레퍼런스는 `gori run history --help`와 `ql_reference` MCP 도구로도 볼 수 있습니다.
+gori에는 플로우를 걸러내는 작은 쿼리 언어(QL)가 있습니다. 같은 문법이 TUI 필터 바, `gori run`(`-q`/`--query` 또는 위치 인자), 그리고 MCP 도구에서 동일하게 동작합니다. 내장 레퍼런스는 TUI Help의 **Query** 페이지와 `ql_reference` MCP 도구로도 볼 수 있습니다.
 
 ## 필드 {#fields}
 
@@ -13,7 +13,7 @@ gori에는 플로우를 걸러내는 작은 쿼리 언어(QL)가 있습니다. �
 | Field | Matches |
 |-------|---------|
 | `host` | 요청 호스트 |
-| `path` | 요청 경로 |
+| `path` | 요청 경로와 **쿼리 문자열**. 그래서 `-path:x`는 `?q=x`도 걸러 냅니다 |
 | `url` | 전체 URL |
 | `method` | HTTP 메서드 |
 | `scheme` | `http` / `https` |
@@ -28,6 +28,7 @@ gori에는 플로우를 걸러내는 작은 쿼리 언어(QL)가 있습니다. �
 | `stub` | `true` / `false`. 원본에 닿지 않고 [short-circuit 규칙](/ko/guide/proxy/#short-circuit)이 gori 자신이 답한 플로우 |
 | `static` | `true` / `false`. 이미지, 폰트, 오디오·비디오. 응답 Content-Type으로 판단하고, 없으면 경로 확장자를 봅니다. SVG·CSS·JS와 이미지 프록시(`?url=`)는 제외하고, 성공한 응답(2xx 또는 304)만 해당합니다. `-static:true`가 [정적 에셋 숨기기 렌즈](/ko/guide/proxy/#hide-static)입니다 |
 | `scope` | `in` / `out`. 프로젝트 스코프 규칙([아래](#scope-in-scope-out)) |
+| `cache` | `hit` / `miss` / `dynamic` / `none`: 응답의 캐시 헤더(`Age`, `X-Cache`, `CF-Cache-Status`, `Cache-Status` 등)에서 읽은 캐시 판정. `none`도 실제 값입니다(판정 없음, 대기 중인 플로우 포함). `cache:` 쿼리를 쓰면 History에 CACHE 열이 붙습니다 |
 
 ```text
 host:example.com
@@ -173,7 +174,7 @@ method~^P(OST|UT|ATCH)$                쓰기 메서드 전부를 한 항목으�
 - `OR`는 둘 중 하나를 매칭합니다. `NOT`과 `-` 접두사는 모두 부정입니다.
 - 괄호로 묶을 수 있습니다. 우선순위는 `NOT`, `AND`, `OR` 순입니다.
 - `field:`가 없는 단순 단어는 method, host, target을 대상으로 하는 자유 텍스트 검색입니다.
-- 존재하지 않는 `field:` 이름은 의도한 자유 텍스트가 아닙니다. `gori run history`, `gori run sitemap`, `gori run probe`는 이를 **거절**하고 가장 가까운 실제 필드를 알려준 뒤 0이 아닌 코드로 종료합니다. `--lenient`를 주면 그 토큰을 텍스트로 검색합니다(예전에 모든 표면이 조용히 하던 동작으로, `methd:GET`은 아무것도 매칭하지 않아 프로젝트가 비어 보였습니다). TUI 필터 바는 타이핑 중인 이름을 그대로 받습니다.
+- 존재하지 않는 `field:` 이름은 의도한 자유 텍스트가 아닙니다. `gori run history`, `gori run sitemap`(과 그 `params`, `js`, `export` 동사), `gori run probe`는 이를 **거절**하고 가장 가까운 실제 필드를 알려준 뒤 0이 아닌 코드로 종료합니다. `--lenient`를 주면 그 토큰을 텍스트로 검색합니다(예전에 모든 표면이 조용히 하던 동작으로, `methd:GET`은 아무것도 매칭하지 않아 프로젝트가 비어 보였습니다). TUI 필터 바는 타이핑 중인 이름을 그대로 받습니다.
 
 ```text
 host:example.com status:5xx           둘 다 매칭되어야 함
@@ -242,6 +243,15 @@ Intercept 바와 컬러 규칙 바 모두 입력하는 동안 필드 이름과 �
 - **컬러 규칙**에서 `body:`는 항상 훑고, 각 방향 첫 64 KiB를 읽습니다. 인덱싱은 캡처 이후에 일어나는데 규칙은 방금 도착한 행을 칠해야 하니 훑는 것 말고는 정답이 없고, 64 KiB 한계는 큰 본문 한 화면이 목록을 멈춰 세우지 않게 하는 장치입니다. 그래서 컬러 규칙은 똑같은 쿼리가 목록에 못 띄우는 행도 칠하지만, 64 KiB를 넘어가는 매치는 칠하지 않습니다.
 
 모든 화면의 `body:`는 **와이어에 흐른 그대로의 바이트**를 읽습니다. 그래서 어느 것도 gzip 본문 안의 문자열은 찾지 못합니다. Extract 규칙 조건도 마찬가지입니다. 조건은 응답을 디코드하기 *전에* 평가되고, 압축 해제된 텍스트를 보는 것은 그 뒤에 이어지는 추출뿐입니다. 압축된 내용을 걸러야 한다면 그 바깥을 거세요: 헤더, 경로, 또는 응답 크기.
+
+## 주의할 점 {#caveats}
+
+쿼리가 실제로는 제대로 보지 않았는데도 깨끗해 보이는 경우가 몇 가지 있습니다.
+
+- **대기 중인 플로우**에는 상태, 지속 시간, 응답 크기가 없어 `status:`와 `-status:` 양쪽에서 모두 빠집니다(`dur`, `respsize`도 같습니다).
+- **버려진 항목은 쿼리를 넓힙니다.** gori가 읽을 수 없는 값(`status:>=foo`)은 거부되지 않고 무시됩니다. 무엇이 남았는지는 `ql_explain`으로 확인하세요.
+- **잘못된 정규식은 오류입니다.** 조용히 버려지지 않고 `body~[`는 쿼리 전체를 실패시킵니다.
+- **큰 본문에 `-body:`**를 쓰면 8 KiB 인덱스 한도 너머의 일치를 인덱스가 보지 못해 그대로 남깁니다.
 
 ## 예제 {#examples}
 

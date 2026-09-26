@@ -90,7 +90,7 @@ gori는 요청 시 루트로부터 호스트별 리프 인증서를 발급하므
 
 | 표면 | 키 | 용도 |
 |---------|-----|----------------|
-| **커맨드 팔레트** | `Ctrl-P` | 앱 전역 제어: 설정, Open browser, Export CA, 이동 동작 등 전역적인 모든 것 |
+| **커맨드 팔레트** | `Ctrl-P` | 앱 전역 제어: 설정, Open browser, Copy CA certificate path, 이동 동작 등 전역적인 모든 것 |
 | **space 메뉴** | `Space` | 지금 포커스를 가진 대상에 대한 동작(History 행, 상세 패널, Repeater, …) |
 
 팔레트는 도구 전체의 지도입니다. space 메뉴는 *이* 패널의 지도입니다. 둘 다 키 힌트를 보여주니, 키 조합이 기억나지 않으면 둘 중 하나를 여세요.
@@ -174,11 +174,11 @@ method:POST body:password
 5. 응답과 타이밍, 이전 응답 대비 diff가 오른쪽에 나타납니다. `Tab`으로 target → request → response를 순회합니다.
 
 <figure class="tui-shot">
-  <img src="/images/tui/repeater.svg" alt="편집 가능한 요청 패널이 응답 패널 옆에 있고, replayed 200 in 1152ms라는 상태 줄이 보이는 gori Repeater 탭">
+  <img src="/images/tui/repeater.svg" alt="편집 가능한 요청 패널이 응답 패널 옆에 있고, sent → 200 in 114ms라는 상태 줄이 보이는 gori Repeater 탭">
   <figcaption><strong>Repeater</strong>는 요청의 어느 부분이든 편집해 재전송합니다. 응답, 타이밍, 그리고 마지막 응답 대비 diff가 나란히 놓입니다.</figcaption>
 </figure>
 
-**확인.** Repeater 상태 줄에 `replayed 200 in … ms` 같은 문구가 보이고, `Ctrl-R`로 원하는 만큼 재전송할 수 있습니다. 이것이 완전한 캡처 → 검사 → 리플레이 루프입니다.
+**확인.** Repeater 상태 줄에 `sent → 200 in … ms` 같은 문구가 보이고, `Ctrl-R`로 원하는 만큼 재전송할 수 있습니다. 이것이 완전한 캡처 → 검사 → 리플레이 루프입니다.
 
 ## 7. 다음으로 갈 곳 {#7-where-to-go-next}
 
