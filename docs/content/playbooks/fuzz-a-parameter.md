@@ -95,7 +95,7 @@ Timing is noisy (a shared origin, a slow hop, one unlucky pause), so treat a `--
 
 The finding is the row that doesn't match its neighbours: an unexpected `200` or `500` where the rest `404`, or a length that jumps when one payload lands differently. That row is a lead, not a conclusion: from a result, its `Space` menu sends it on to the **Repeater**, or to the **Comparer** to diff it against the baseline, so you keep probing the one payload that stood out by hand.
 
-To keep the complete run, leave the editor in READ mode and press **`Shift-S`** after it finishes. During the sweep gori privately spools every full request/wire/response row to disk while the pane stays bounded to 5,000 rows / 64 MiB; Shift-S promotes the complete spool into the project. The latest successful run reopens automatically as a bounded window with its Fuzzer session; **Run history** (type it into `Ctrl-P`) selects an older run, while CLI/MCP can page the whole archive. Headless, make persistence explicit and inspect it by id:
+To keep the complete run, leave the editor in READ mode and press **`Shift-E`** after it finishes. During the sweep gori privately spools every full request/wire/response row to disk while the pane stays bounded to 5,000 rows / 64 MiB; Shift-E promotes the complete spool into the project. The latest successful run reopens automatically as a bounded window with its Fuzzer session; **Run history** (type it into `Ctrl-P`) selects an older run, while CLI/MCP can page the whole archive. Headless, make persistence explicit and inspect it by id:
 
 ```bash
 gori run fuzz save <flow-id> --auto --wordlist params.txt --mc 200,302
