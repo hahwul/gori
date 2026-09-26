@@ -33,7 +33,7 @@ Press `i` on the tab to open the identities card. A fresh project starts with tw
 | `b` | Make this one the baseline |
 | `esc` | Close |
 
-The add / edit form has three fields: a **name** (unique, because two rows under one label would make the results table unreadable, and all three surfaces refuse a duplicate; names are compared case-insensitively), the headers to **set**, one `Name: value` per line, and the headers to **remove**, comma-separated. `⇥` moves between fields, `↵` saves. A header line whose name is not a valid token, or whose value carries a CR or LF, is refused with the offending line named rather than silently dropped.
+The add / edit form has four fields: a **name** (unique, because two rows under one label would make the results table unreadable, and all three surfaces refuse a duplicate; names are compared case-insensitively), the headers to **set**, one `Name: value` per line, the headers to **remove**, comma-separated, and **refresh before** (`off`, `jwt-exp` or `ttl=10m`; see [Refreshing a slot](#refreshing-a-slot)); the slot's refresh steps are listed read-only beside it. `⇥` moves between fields, `↵` saves (inside the set-headers editor it inserts a newline). A header line whose name is not a valid token, or whose value carries a CR or LF, is refused with the offending line named rather than silently dropped.
 
 Identities are saved with the project, so `gori run authorize` and the MCP tools default to the same set you configured here. The list shows header *names* only. A session cookie is a credential, and a list that paints it on screen leaks it to anyone glancing at your terminal. The form shows values, because that is what editing means.
 
@@ -48,7 +48,7 @@ Picking the active one is a separate action from editing the list, because it is
 | Surface | Pick the active slot | Edit the list |
 |---------|----------------------|---------------|
 | TUI | `Ctrl-P` → **Session slot**, or click the `session:NAME` chip | `i` on this tab |
-| `gori run` | `--slot NAME` on the sending command | `gori run session list \| show \| add \| edit \| rm \| baseline` |
+| `gori run` | `--slot NAME` on the sending command | `gori run session list \| show \| add \| from-flow \| from-request \| edit \| rm \| baseline \| refresh` |
 | MCP | `set_active_session_slot` | `list_session_slots`, `create_session_slot`, `update_session_slot`, `delete_session_slot` |
 
 What the active slot changes, on `send_request`, a Repeater or Fuzzer send, and an intercept forward:
@@ -211,7 +211,7 @@ gori run session baseline as-captured
 gori run session rm low-priv
 ```
 
-There is no `gori run session activate`: a `gori run` process sends and exits, so the active pointer has nothing to span. Name the identity on the send instead: `--slot NAME` works on `repeater`, `fuzz`, `mine`, `sequence` and `discover`, and applies before `--bind-from` replays its seed, so the seed fills the slot the run then sends as.
+There is no `gori run session activate`: a `gori run` process sends and exits, so the active pointer has nothing to span. Name the identity on the send instead: `--slot NAME` works on `send`, `repeater`, `repeater minimize`, `fuzz`, `mine`, `sequence`, `discover` and `retest run`, and applies before `--bind-from` replays its seed, so the seed fills the slot the run then sends as.
 
 `--format jsonl` streams one object per request as it lands; `--format json` buffers and emits a single array at the end. Both carry the decoded body size the verdict actually compared alongside the wire size, which a gzipped response makes disagree by an order of magnitude. Full flags are in the [CLI Reference](/reference/cli/#run-authorize).
 
@@ -221,7 +221,7 @@ Four MCP tools drive the same engine as a background job: `authorize_start` (ret
 
 `authorize_results` puts the answer first. `access_control` names the outcome in one token (`BYPASS`, `enforced`, `review`, `error`, or `nothing_sent`; the last two both mean nothing was compared), `summary` says it in a sentence, and `bypasses` lists every request where a non-baseline identity was served the baseline's response, flat and never paged. An agent that reads nothing else still gets the finding.
 
-Five more manage the slots themselves: `list_session_slots` (with the active one named, header values `[REDACTED]` unless you ask), `create_session_slot`, `update_session_slot`, `delete_session_slot`, and `set_active_session_slot`, which picks the identity every *other* tool's sends go out as, for the life of that server process.
+Six more manage the slots themselves: `list_session_slots` (with the active one named, header values `[REDACTED]` unless you ask), `create_session_slot`, `update_session_slot`, `delete_session_slot`, `set_active_session_slot`, which picks the identity every *other* tool's sends go out as, for the life of that server process, and `refresh_session_slot`, which runs a slot's refresh steps now.
 
 A run is capped at 2,000 sends, and the cap counts `flows × identities`: a 500-row query under four identities is refused up front, naming both factors, rather than truncated into a run that would report "enforced" for flows it never sent. Layer-1 scope is strict here: an out-of-scope target needs an explicit `allow_unscoped:true`, because nobody eyeballed it.
 

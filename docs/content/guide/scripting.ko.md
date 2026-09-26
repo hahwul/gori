@@ -54,7 +54,8 @@ gori run issues --db /path/to/project.db --format json
 | 서브커맨드 | `--format json` | `--format jsonl` |
 |-----------|-----------------|------------------|
 | `capture`, `history` | 한 줄에 JSON 객체 하나 | `json`의 별칭, 출력 동일 |
-| `fuzz`, `mine`, `discover` | 버퍼링 후 마지막에 JSON 배열 하나 | 결과가 나올 때마다 한 줄씩 |
+| `fuzz`, `mine`, `discover`, `authorize` | 버퍼링 후 마지막에 JSON 배열 하나 | 결과가 나올 때마다 한 줄씩 |
+| `sequence` | 보고서 하나 | 샘플이 나올 때마다 한 줄씩, 마지막에 보고서 |
 
 긴 스윕을 진행 중에 소비하려면 `jsonl`을, 끝에 문서 하나를 받으려면 `json`을 씁니다.
 
@@ -64,9 +65,10 @@ gori run issues --db /path/to/project.db --format json
 |------|------|
 | `0` | 성공 |
 | `1` | 오류: 전송 실패, 열 수 없는 프로젝트, 적용되지 못한 변경 |
-| `3` | `gori run fuzz --fail-if-no-matches`가 정상 완료했지만 매칭이 하나도 없음 |
+| `3` | `gori run fuzz --fail-if-no-matches`가 정상 완료했지만 매칭이 하나도 없음(`--stop-on` / `--stop-after-matches`가 발동했다면 `0`) |
+| `130` | SIGINT/SIGTERM으로 중단. `fuzz`, `mine`, `discover`, `sequence`, `authorize`, `repeater minimize`는 모아 둔 것을 먼저 내보내므로, `&& next-step`이 잘린 실행을 끝난 실행으로 오해하지 않습니다 |
 
-매칭이 없으면서 *동시에* 모든 전송이 실패한 fuzz 실행(대상 다운, TLS 실패, 스코프 차단)은 `3`이 아니라 `1`로 끝납니다. `--fail-if-no-matches` 없이도 스크립트가 "결과 없음"과 "대상에 닿지도 못함"을 구분할 수 있습니다.
+매칭이 없으면서 *동시에* 모든 전송이 실패한 fuzz 실행(대상 다운, TLS 실패, 스코프 차단)은 `1`로 끝나므로, `--fail-if-no-matches` 없이도 스크립트가 "결과 없음"과 "대상에 닿지도 못함"을 구분할 수 있습니다(플래그를 주면 `3`이 우선합니다).
 
 **닫힌 파이프는 오류가 아닙니다.** `gori run history | head -5`는 여느 유닉스 필터처럼 조용히 `0`으로 끝납니다.
 
@@ -125,8 +127,8 @@ gori에는 플러그인 SDK가 없고 앞으로도 없습니다. 변환을 *계�
 gori run rewriter add --op=pipe --match=regex --part=body \
   --find='eyJ[A-Za-z0-9._-]+' --value='./resign.sh --key dev.pem'
 
-# base64 바디를 디코드해 내 파서에 통과시키고 예쁘게 출력한다.
-gori run decoder 'base64-decode > exec:./parse-envelope --json > json-pretty' "$BLOB"
+# base64 바디를 디코드해 내 파서에 통과시킨다.
+gori run decoder 'base64-decode > exec:./parse-envelope --json' "$BLOB"
 
 # 정규식 대신 진짜 탐지기가 판정하게 한다.
 gori run probe rules add --title 'envelope leak' --exec --pattern './detect-leak --stdin'
