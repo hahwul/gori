@@ -317,6 +317,25 @@ describe Gori::Export::OpenApi do
     end
   end
 
+  # The profile lists leaves (`passcode`, `sid`); a query or form nests them in brackets, and
+  # none of these four is a word the `secret_name?` net catches.
+  it "redacts profile-listed secrets under bracketed query and form names" do
+    with_salt do
+      with_store do |store|
+        body = "user[passcode]=987654&user[national_id]=AB1234567&user[name]=ada"
+        oa_flow(store, "/verify?filter[sid]=abcdef0123&codes[totp]=424242", method: "POST", body: body,
+          req_headers: "Content-Type: application/x-www-form-urlencoded\r\nContent-Length: #{body.bytesize}\r\n")
+        result = OA.build(store, OA::Options.new(examples: true))
+        text = OA.to_json(result.doc)
+        {"987654", "AB1234567", "abcdef0123", "424242"}.each { |s| text.should_not contain(s) }
+        post = op(result.doc, "/verify", "post")
+        param(post, "filter[sid]", "query").not_nil!["example"].as_s.should start_with("[REDACTED:")
+        post["requestBody"]["content"]["application/x-www-form-urlencoded"]["example"]["user[name]"].should eq("ada")
+        result.report.redacted.should eq(4)
+      end
+    end
+  end
+
   it "redacts a credential in a value that also holds an invalid byte" do
     with_salt do
       with_store do |store|

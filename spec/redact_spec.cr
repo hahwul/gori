@@ -278,8 +278,25 @@ describe Gori::Redact do
       end
     end
 
+    # A bracket-nested query or form name is looked up by its leaf as well, as a form body is
+    # (#1265): the default profile lists `passcode`, not `user[passcode]`.
+    it "redacts a bracket-nested name by its leaf" do
+      with_salt do
+        m = matcher(Gori::Redact::DEFAULT_PROFILE)
+        hits = [] of Gori::Redact::Hit
+        m.named_value("user[passcode]", "987654", hits).should eq(Gori::Redact.placeholder("987654"))
+        m.named_value("user[national_id]", "AB1234567", hits).should start_with("[REDACTED:")
+        m.named_value("filter[sid]", "abcdef0123", hits).should start_with("[REDACTED:")
+        m.named_value("codes[totp][]", "123456", hits).should start_with("[REDACTED:")
+        m.named_value("filter[lang]", "en", hits).should eq("en")
+        hits.map(&.rule).should eq(["form_key passcode", "form_key national_id", "form_key sid", "form_key totp"])
+        hits.first.path.should eq("user[passcode]")
+      end
+    end
+
     it "answers whether the profile names a field or key" do
       m = matcher(Gori::Redact::DEFAULT_PROFILE)
+      m.named?("user[ssn]").should be_true
       m.named?("SSN").should be_true
       m.named?("jsessionid").should be_true # json_fields only
       m.named?("lang").should be_false

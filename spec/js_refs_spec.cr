@@ -522,6 +522,25 @@ describe "Gori::Sitemap.attach_js_refs!" do
     end
   end
 
+  # The host rule reads each reference's URL, so a scope include on `api.x.test/v1` admits
+  # `/v1/users` alone whichever reference sorted first, as `JsRefs.list` does.
+  it "judges every reference under a host it grew, not only the first" do
+    hosts = Gori::Sitemap.build([{"shop.test", "GET", "/"}])
+    refs = {"/admin", "/v1/users", "/zzz"}.map { |p| Gori::Store::JsRefNode.new("https", "api.x.test", 443, p, 1) }.to_a
+    path = File.tempname("gori-jsattach", ".db")
+    store = Gori::Store.open(path)
+    begin
+      store.add_scope_rule("include", "string", "api.x.test/v1")
+      JR.attach!(hosts, refs, Gori::Scope.load(store), lens: false)
+      api = hosts.find!(&.label.==("api.x.test"))
+      api.children.map(&.label).should eq(["v1"])
+      api.children[0].children.map(&.path).should eq(["/v1/users"])
+    ensure
+      store.close
+      File.delete?(path)
+    end
+  end
+
   it "adds a host the block allows, flagged unrequested" do
     hosts = Gori::Sitemap.build([{"shop.test", "GET", "/"}])
     Gori::Sitemap.attach_js_refs!(hosts, [Gori::Store::JsRefNode.new("https", "api.shop.test", 443, "/v1/me", 1)]) { true }
