@@ -67,6 +67,28 @@ private def write_minimal_current_database(path : String) : Nil
   end
 end
 
+# Rewrite the database inside an exported archive, as a hand-crafted archive would.
+private def tamper_archive_database(archive_path : String, scratch : String, &) : Nil
+  entries = read_archive(archive_path)
+  database_path = File.join(scratch, "tampered.db")
+  File.write(database_path, entries["gori.db"])
+  DB.open("sqlite3:#{database_path}") do |db|
+    db.using_connection { |conn| yield conn }
+  end
+  entries["gori.db"] = File.read(database_path)
+  write_archive(archive_path, entries.to_a)
+  File.delete(database_path)
+end
+
+private def export_archive(project : Gori::Project, path : String) : String
+  exported = Gori::ProjectArchive.prepare_export(project)
+  begin
+    exported.write(path)
+  ensure
+    exported.close
+  end
+end
+
 class ProjectArchiveFallbackExportSpec < Gori::ProjectArchive::PreparedExport
   getter? link_attempted : Bool
 
@@ -524,6 +546,152 @@ describe Gori::ProjectArchive do
 
       error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }
       error.message.not_nil!.should contain("uncompressed size limit")
+    end
+  end
+
+  it "refuses an archive whose rule labels hide a NUL byte from the sanitizer" do
+    with_archive_project do |_registry, project, store, root|
+      store.insert_rule(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+        "GET", "id", Gori::Store::RuleOp::Pipe)
+      store.insert_probe_custom_rule("exec rule", "", "response", "body", "exec", "id",
+        Gori::Store::Severity::Medium)
+      archive_path = export_archive(project, File.join(root, "nul.gori"))
+      original = File.read(archive_path)
+
+      # The store reads a TEXT label up to its first NUL, so each of these would load as the
+      # dangerous kind while the sanitizer's whole-string comparison saw something else.
+      {
+        "UPDATE match_rules SET op = 'pipe' || char(0) || 'x'",
+        "UPDATE match_rules SET op = 'short_circuit' || char(0), body_file = '/tmp/importer-secret'",
+        "UPDATE probe_custom_rules SET kind = 'exec' || char(0) || 'x'",
+      }.each do |statement|
+        File.write(archive_path, original)
+        tamper_archive_database(archive_path, root) { |conn| conn.exec(statement) }
+        error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }
+        error.message.not_nil!.should contain("NUL byte")
+      end
+    end
+  end
+
+  it "drops the exporter's global rule overrides so they cannot enable the importer's rules" do
+    with_archive_project do |registry, project, store, root|
+      store.set_rewriter_override(1_i64, true)
+      store.set_colormarker_override(2_i64, true)
+      archive_path = export_archive(project, File.join(root, "overrides.gori"))
+
+      prepared = Gori::ProjectArchive.prepare_import(archive_path)
+      begin
+        prepared.inventory.reset_global_overrides.should eq(2)
+        Gori::ProjectArchive.disclosure(prepared.inventory).should contain("2 global rule overrides")
+        imported = prepared.import_into(registry, "Overrides copy")
+        copied = Gori::Store.open(imported.db_path)
+        begin
+          copied.setting(Gori::Store::REWRITER_OVERRIDES_KEY).should be_nil
+          copied.setting(Gori::Store::COLORMARKER_OVERRIDES_KEY).should be_nil
+          copied.rewriter_overrides.should be_empty
+        ensure
+          copied.close
+        end
+      ensure
+        prepared.close
+      end
+    end
+  end
+
+  it "resets an imported active Probe mode to passive and says so" do
+    with_archive_project do |registry, project, store, root|
+      store.set_probe_mode(Gori::Probe::Mode::Aggressive)
+      archive_path = export_archive(project, File.join(root, "probe-mode.gori"))
+
+      prepared = Gori::ProjectArchive.prepare_import(archive_path)
+      begin
+        prepared.inventory.reset_probe_mode.should eq(Gori::Probe::Mode::Aggressive)
+        Gori::ProjectArchive.disclosure(prepared.inventory).should contain("Probe mode from aggressive to passive")
+        imported = prepared.import_into(registry, "Probe copy")
+        copied = Gori::Store.open(imported.db_path)
+        begin
+          copied.setting(Gori::Probe::MODE_SETTING_KEY).should be_nil
+          copied.probe_mode.should eq(Gori::Probe::Mode::Passive)
+        ensure
+          copied.close
+        end
+      ensure
+        prepared.close
+      end
+    end
+  end
+
+  it "says nothing about Probe mode when the archive was already passive" do
+    with_archive_project do |_registry, project, _store, root|
+      archive_path = export_archive(project, File.join(root, "passive.gori"))
+      prepared = Gori::ProjectArchive.prepare_import(archive_path)
+      begin
+        prepared.inventory.reset_probe_mode.should be_nil
+        Gori::ProjectArchive.disclosure(prepared.inventory).should_not contain("Probe mode")
+      ensure
+        prepared.close
+      end
+    end
+  end
+
+  it "turns off imported session-slot auto-refresh but keeps the refresh steps" do
+    with_archive_project do |registry, project, store, root|
+      slots = [
+        Gori::SessionSlot.new("admin", [{"Cookie", "sid=1"}], refresh: [7_i64],
+          refresh_before: Gori::SessionSlot::RefreshBefore.parse?("ttl=10m").not_nil!),
+        Gori::SessionSlot.new("user", [{"Cookie", "sid=2"}], refresh: [8_i64]),
+      ]
+      store.set_setting(Gori::Store::SESSION_SLOTS_KEY, Gori::SessionSlot.serialize(slots))
+      archive_path = export_archive(project, File.join(root, "refresh.gori"))
+
+      prepared = Gori::ProjectArchive.prepare_import(archive_path)
+      begin
+        prepared.inventory.disabled_auto_refresh_slots.should eq(1)
+        Gori::ProjectArchive.disclosure(prepared.inventory).should contain("automatic refresh on 1 session slot")
+        imported = prepared.import_into(registry, "Refresh copy")
+        copied = Gori::Store.open(imported.db_path)
+        begin
+          restored = Gori::SessionSlot.parse_json(copied.setting(Gori::Store::SESSION_SLOTS_KEY))
+          restored.map(&.name).should eq(["admin", "user"])
+          restored.map(&.refresh).should eq([[7_i64], [8_i64]])
+          restored.none?(&.auto_refresh?).should be_true
+          restored.first.set_headers.should eq([{"Cookie", "sid=1"}])
+        ensure
+          copied.close
+        end
+      ensure
+        prepared.close
+      end
+    end
+  end
+
+  it "discloses stored exec: chain steps without rewriting them" do
+    with_archive_project do |registry, project, store, root|
+      request = "GET /?q=\u00a7v\u00a6exec:/usr/bin/id\u00a7 HTTP/1.1\r\nHost: archive.test\r\n\r\n"
+      store.insert_repeater("https://archive.test", request.to_slice, false, true, nil, 0)
+      store.insert_repeater("https://archive.test", "GET / HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 1)
+      store.insert_fuzz_session("https://archive.test", request, false, nil, "", nil, 0)
+      store.set_setting(Gori::Env::PROJECT_VARS_KEY,
+        Gori::Env.serialize_vars([{"ENC", "EXEC:/bin/sh -c id"}, {"HOST", "archive.test"}]))
+      archive_path = export_archive(project, File.join(root, "exec-chains.gori"))
+
+      prepared = Gori::ProjectArchive.prepare_import(archive_path)
+      begin
+        prepared.inventory.exec_repeaters.should eq(1)
+        prepared.inventory.exec_fuzz_templates.should eq(1)
+        prepared.inventory.exec_env_vars.should eq(1)
+        disclosure = Gori::ProjectArchive.disclosure(prepared.inventory)
+        disclosure.should contain("1 Repeater tab, 1 Fuzzer template and 1 project env var contain exec:")
+        imported = prepared.import_into(registry, "Exec copy")
+        copied = Gori::Store.open(imported.db_path)
+        begin
+          copied.repeaters.map { |r| String.new(r.request) }.should contain(request)
+        ensure
+          copied.close
+        end
+      ensure
+        prepared.close
+      end
     end
   end
 end

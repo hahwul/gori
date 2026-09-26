@@ -230,7 +230,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `delete_flow` / `clear_history` | 플로우 하나 삭제, 또는 캡처된 History 전체 삭제 |
 | `set_sitemap_tag` | Sitemap 경로에 자유 형식 메모 고정 |
 | `create_project` / `switch_project` / `delete_project` | 프로젝트 생성 또는 다시 열기, 이 서버를 다른 프로젝트로 전환, 프로젝트 삭제. 삭제는 2단계로, `dry_run` 후 확인 토큰 필요 |
-| `export_project` / `import_project` | 프로젝트를 이식 가능한 [`.gori` 아카이브](/ko/guide/proxy/#project-archives)로 쓰거나, 아카이브를 새 프로젝트로 가져옵니다. `gori run project export` / `import`와 같은 엔진을 씁니다. 두 경로 모두 MCP 서버의 파일시스템 기준입니다. 내보내기는 `project`로 다른 프로젝트를 지정하지 않으면 바인딩된 프로젝트를 쓰고, `overwrite:true` 없이는 기존 파일을, gori 홈 디렉터리 안의 경로는 항상 거부하며, 결과에 아카이브가 마스킹되지 않았다고 밝힙니다. 가져오기는 `confirm:true` 전까지 아카이브의 인벤토리, 공개 문구, 이름 사용 가능 여부를 담아 `CONFIRM_REQUIRED`로 답하고, 같은 가져오기 안전 조치(실행형·파일 기반 규칙 비활성화, 프로젝트 라우팅 초기화, 2 GiB 상한)를 적용하며, 새 프로젝트로 전환하지는 않습니다 |
+| `export_project` / `import_project` | 프로젝트를 이식 가능한 [`.gori` 아카이브](/ko/guide/proxy/#project-archives)로 쓰거나, 아카이브를 새 프로젝트로 가져옵니다. `gori run project export` / `import`와 같은 엔진을 씁니다. 두 경로 모두 MCP 서버의 파일시스템 기준입니다. 내보내기는 `project`로 다른 프로젝트를 지정하지 않으면 바인딩된 프로젝트를 쓰고, `overwrite:true` 없이는 기존 파일을, gori 홈 디렉터리 안의 경로는 항상 거부하며, 결과에 아카이브가 마스킹되지 않았다고 밝힙니다. 가져오기는 `confirm:true` 전까지 아카이브의 인벤토리, 공개 문구, 이름 사용 가능 여부를 담아 `CONFIRM_REQUIRED`로 답하고, 같은 가져오기 안전 조치(실행형·파일 기반 규칙 비활성화, 프로젝트 라우팅·전역 규칙 오버라이드·Probe 모드·슬롯 자동 갱신 초기화, 2 GiB 상한)를 적용하며, 새 프로젝트로 전환하지는 않습니다 |
 | `add_scope_rule` / `update_scope_rule` / `delete_scope_rule` / `set_scope_enabled` | 프로젝트의 include / exclude 규칙 편집과 스코프 렌즈 토글 |
 | `set_sandbox` | 하드 컨테인먼트. 켜면 프록시가 스코프가 허용한 것만 전달하고 나머지는 차단 |
 | `set_env_var` / `delete_env_var` | 치환이 읽는 프로젝트 env 토큰 관리. 키는 bare로 저장되며, 참조는 `$ENV.KEY`로, `bare` 옵트아웃에서는 `$KEY`로 씁니다. 이 설치가 어느 쪽인지는 `list_env`의 `syntax` / `example`이 말해 줍니다 |

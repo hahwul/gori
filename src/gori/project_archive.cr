@@ -10,6 +10,7 @@ require "./session_slot"
 require "./env"
 require "./settings/network"
 require "./settings/project_network"
+require "./probe/mode"
 require "./store/schema"
 
 module Gori
@@ -24,6 +25,8 @@ module Gori
     # together may use at most 2 GiB uncompressed; reserve the full manifest ceiling here.
     MAX_UNCOMPRESSED_BYTES = 2_i64 * 1024 * 1024 * 1024
     MAX_DATABASE_BYTES     = MAX_UNCOMPRESSED_BYTES - MAX_MANIFEST_BYTES
+    # Per-project answers to the exporter's GLOBAL rule libraries, keyed by that machine's ids.
+    GLOBAL_OVERRIDE_KEYS = {Store::REWRITER_OVERRIDES_KEY, Store::COLORMARKER_OVERRIDES_KEY}
     # How the CLI and the picker name another project when the archive's own name is unusable.
     DEFAULT_RENAME_HINT = "with `--name NAME` or choose one in the project picker"
 
@@ -58,7 +61,13 @@ module Gori
       disabled_exec_probe_rules : Int32,
       disabled_body_file_stubs : Int32,
       reset_network_settings : Int32,
-      reset_host_overrides : Int32 do
+      reset_host_overrides : Int32,
+      reset_global_overrides : Int32,
+      disabled_auto_refresh_slots : Int32,
+      reset_probe_mode : Probe::Mode?,
+      exec_repeaters : Int32,
+      exec_fuzz_templates : Int32,
+      exec_env_vars : Int32 do
       def summary : String
         "#{flows} #{flows == 1 ? "flow" : "flows"}, " \
         "#{session_slots} #{session_slots == 1 ? "session slot" : "session slots"}, " \
@@ -67,11 +76,26 @@ module Gori
       end
 
       def import_safety : String
-        "disable #{disabled_pipe_rules} pipe Rewriter #{disabled_pipe_rules == 1 ? "rule" : "rules"}, " \
-        "#{disabled_exec_probe_rules} exec Probe #{disabled_exec_probe_rules == 1 ? "rule" : "rules"}, and " \
-        "#{disabled_body_file_stubs} file-backed short-circuit #{disabled_body_file_stubs == 1 ? "stub" : "stubs"}; " \
-        "reset #{reset_network_settings} project network #{reset_network_settings == 1 ? "setting" : "settings"} and " \
-        "#{reset_host_overrides} host #{reset_host_overrides == 1 ? "override" : "overrides"}"
+        sentence = "disable #{disabled_pipe_rules} pipe Rewriter #{disabled_pipe_rules == 1 ? "rule" : "rules"}, " \
+                   "#{disabled_exec_probe_rules} exec Probe #{disabled_exec_probe_rules == 1 ? "rule" : "rules"}, and " \
+                   "#{disabled_body_file_stubs} file-backed short-circuit #{disabled_body_file_stubs == 1 ? "stub" : "stubs"}; " \
+                   "reset #{reset_network_settings} project network #{reset_network_settings == 1 ? "setting" : "settings"}, " \
+                   "#{reset_host_overrides} host #{reset_host_overrides == 1 ? "override" : "overrides"}, and " \
+                   "#{reset_global_overrides} global rule #{reset_global_overrides == 1 ? "override" : "overrides"}; " \
+                   "turn off automatic refresh on #{disabled_auto_refresh_slots} session " \
+                   "#{disabled_auto_refresh_slots == 1 ? "slot" : "slots"}"
+        reset_probe_mode.try { |mode| sentence += "; and reset Probe mode from #{mode.label} to passive" }
+        sentence
+      end
+
+      # Stored `exec:` chain steps stay as the operator-visible bytes they are; they run a local
+      # command only on an explicit send, so they are disclosed rather than rewritten.
+      def exec_chains : String?
+        return nil if exec_repeaters + exec_fuzz_templates + exec_env_vars == 0
+        "#{exec_repeaters} Repeater #{exec_repeaters == 1 ? "tab" : "tabs"}, " \
+        "#{exec_fuzz_templates} Fuzzer #{exec_fuzz_templates == 1 ? "template" : "templates"} and " \
+        "#{exec_env_vars} project #{exec_env_vars == 1 ? "env var" : "env vars"} contain exec:, " \
+        "a chain step that runs a local command when that request is sent."
       end
     end
 
@@ -391,7 +415,8 @@ module Gori
     # The one operator-facing disclosure used before an archive is written or installed.
     def self.disclosure(inventory : Inventory) : String
       "Contains the complete project database: #{inventory.summary}. " \
-      "Import will #{inventory.import_safety}. The archive is unredacted and may contain " \
+      "Import will #{inventory.import_safety}. #{inventory.exec_chains.try { |text| "#{text} " }}" \
+      "The archive is unredacted and may contain " \
       "captured request/response credentials, session and env values, and upstream proxy credentials. " \
       "OAST sessions and provider tokens, plus Authorize identities, remain in the imported copy. " \
       "Keep the archive as carefully as the source project."
@@ -492,9 +517,45 @@ module Gori
                                  0
                                end
       reset_host_overrides = tables.includes?("host_overrides") ? count_rows(conn, "SELECT COUNT(*) FROM host_overrides") : 0
+      reset_global_overrides = GLOBAL_OVERRIDE_KEYS.sum { |key| override_entries(setting(conn, key)) }
+      disabled_auto_refresh_slots = SessionSlot.parse_json(raw_slots).count { |slot| !slot.refresh_before.off? }
+      reset_probe_mode = setting(conn, Probe::MODE_SETTING_KEY).try do |raw|
+        mode = Probe::Mode.from_setting(raw)
+        mode unless mode.passive?
+      end
+      exec_repeaters = tables.includes?("repeaters") ? count_exec_chains(conn, "repeaters", "request") : 0
+      exec_fuzz_templates = tables.includes?("fuzz_sessions") ? count_exec_chains(conn, "fuzz_sessions", "template") : 0
+      exec_env_vars = setting(conn, Env::PROJECT_VARS_KEY).try do |raw|
+        Env.parse_vars_json(raw).count { |(_, value)| exec_text?(value) }
+      end || 0
       Inventory.new(flows, slots, env_vars, upstream_credentials,
         disabled_pipe_rules, disabled_exec_probe_rules, disabled_body_file_stubs,
-        reset_network_settings, reset_host_overrides)
+        reset_network_settings, reset_host_overrides, reset_global_overrides,
+        disabled_auto_refresh_slots, reset_probe_mode,
+        exec_repeaters, exec_fuzz_templates, exec_env_vars)
+    end
+
+    # The entries the store's tolerant reader would honor (`Store#rewriter_overrides`).
+    private def self.override_entries(raw : String?) : Int32
+      return 0 if raw.nil? || raw.strip.empty?
+      JSON.parse(raw).as_h?.try(&.count { |key, value| key.to_i64? && !value.as_bool?.nil? }) || 0
+    rescue JSON::ParseException
+      0
+    end
+
+    # Read as bytes: a TEXT read stops at a NUL, and a marker behind one still reaches the wire.
+    private def self.count_exec_chains(conn : DB::Connection, table : String, column : String) : Int32
+      count = 0
+      conn.query_each("SELECT CAST(#{column} AS BLOB) FROM #{table}") do |rs|
+        count += 1 if rs.read(Bytes?).try { |bytes| exec_text?(String.new(bytes)) }
+      end
+      count
+    end
+
+    # `Decoder.exec_spec` matches the step case-insensitively; a substring is the disclosure's
+    # honest over-approximation (a `$KEY` in a chain spec can spell the step from an env var).
+    private def self.exec_text?(text : String) : Bool
+      text.downcase.includes?("exec:")
     end
 
     private def self.validate_core_schema!(conn : DB::Connection, version : Int32,
@@ -551,10 +612,16 @@ module Gori
         db.using_connection do |conn|
           conn.exec("BEGIN IMMEDIATE")
           begin
+            refuse_hidden_labels!(conn)
             if table_exists?(conn, "settings")
               Settings::PROJECT_NETWORK_KEYS.each do |key|
                 conn.exec("DELETE FROM settings WHERE key = ?", key.key)
               end
+              GLOBAL_OVERRIDE_KEYS.each { |key| conn.exec("DELETE FROM settings WHERE key = ?", key) }
+              # Probe mode is authorization, not configuration: an archive must not arm active
+              # probes that fire at the stored flows the moment the copy is opened.
+              conn.exec("DELETE FROM settings WHERE key = ?", Probe::MODE_SETTING_KEY)
+              disable_slot_auto_refresh(conn)
             end
             conn.exec("DELETE FROM host_overrides") if table_exists?(conn, "host_overrides")
             if table_exists?(conn, "match_rules")
@@ -573,6 +640,52 @@ module Gori
           end
         end
       end
+    end
+
+    # The labels the store maps to behavior, per table. The store reads each through a TEXT
+    # read that stops at the first NUL, while the sanitizer's SQL compares the whole value, so
+    # `pipe\0x` would pass as unknown here and load as an enabled pipe rule. gori never writes
+    # a NUL into one of these, so an archive that has one is refused rather than repaired.
+    BEHAVIOR_LABELS = {
+      "match_rules"        => %w[target part op match_kind respond],
+      "probe_custom_rules" => %w[side region kind severity],
+    }
+
+    private def self.refuse_hidden_labels!(conn : DB::Connection) : Nil
+      BEHAVIOR_LABELS.each do |table, labels|
+        next unless table_exists?(conn, table)
+        present = table_columns(conn, table)
+        labels.each do |column|
+          next unless present.includes?(column)
+          next if count_rows(conn, "SELECT COUNT(*) FROM #{table} WHERE instr(CAST(#{column} AS BLOB), X'00') > 0") == 0
+          raise Gori::Error.new("project archive database has a NUL byte in #{table}.#{column}; refusing to import it")
+        end
+      end
+    end
+
+    # Automatic refresh runs an archive-authored Repeater step before a send as the slot; an
+    # imported slot keeps its steps (an explicit refresh still works) but never refreshes on
+    # its own. Edited at the JSON level, as `SessionSlot.detach_refresh` is, so an entry this
+    # build does not fully understand loses nothing but the one key.
+    private def self.disable_slot_auto_refresh(conn : DB::Connection) : Nil
+      raw = setting(conn, Store::SESSION_SLOTS_KEY)
+      return if raw.nil?
+      entries = begin
+        JSON.parse(raw).as_a?
+      rescue JSON::ParseException
+        nil
+      end
+      return unless entries
+      touched = false
+      fresh = entries.map do |entry|
+        o = entry.as_h?
+        next entry unless o && o.has_key?("refresh_before")
+        touched = true
+        copy = o.dup
+        copy.delete("refresh_before")
+        JSON::Any.new(copy)
+      end
+      conn.exec("UPDATE settings SET value = ? WHERE key = ?", fresh.to_json, Store::SESSION_SLOTS_KEY) if touched
     end
 
     private def self.table_exists?(conn : DB::Connection, table : String) : Bool
