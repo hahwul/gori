@@ -94,7 +94,7 @@ module Gori
       # No network, no gate — a file path and a cache row.
       @[Tool("grpc_schema")]
       private def grpc_schema(h) : Result
-        reflections = store.grpc_reflections
+        reflections = Gori::Protobuf::Schemas.reflections
         Result.new(JSON.build do |j|
           j.object do
             j.field "spec", Gori::Protobuf::Schemas.spec
@@ -141,7 +141,7 @@ module Gori
         else
           return err("missing required 'target' (or all:true)", "INVALID_ARGUMENT", field: "target") if target.nil? || target.empty?
         end
-        known = store.grpc_reflections.map(&.target)
+        known = Gori::Protobuf::Schemas.reflections.map(&.target)
         if (t = target) && !all && !known.includes?(t)
           return not_found("no cached reflection for '#{t}'")
         end

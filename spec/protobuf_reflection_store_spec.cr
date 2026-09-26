@@ -180,6 +180,60 @@ describe "gRPC reflection cache" do
       end
     end
 
+    it "drops a target from memory even when deletion does not commit" do
+      path = File.tempname("gori-reflect-forget-busy", ".db")
+      store = Gori::Store.open(path, busy_timeout_ms: 200)
+      peer = DB.open("sqlite3:#{path}?busy_timeout=100")
+      cn = peer.checkout
+      begin
+        Schemas.load_project(store)
+        set = Reflection.descriptor_set([demo_file_descriptor])
+        Schemas.adopt(store, "https://api.test:443", Reflection::SERVICE_V1, 1, 1, set).should be_true
+        Schemas.resolve("/demo.Users/GetUser", request: true).should_not be_nil
+
+        cn.exec("BEGIN IMMEDIATE")
+        Schemas.forget(store, "https://api.test:443").should be_false
+        Schemas.resolve("/demo.Users/GetUser", request: true).should be_nil
+        Schemas.reflections.map(&.target).should_not contain("https://api.test:443")
+      ensure
+        cn.exec("ROLLBACK") rescue nil
+        cn.release rescue nil
+        peer.close rescue nil
+        Schemas.clear
+        store.close
+        File.delete?(path)
+        File.delete?("#{path}-wal")
+        File.delete?("#{path}-shm")
+      end
+    end
+
+    it "drops all targets from memory even when clear does not commit" do
+      path = File.tempname("gori-reflect-clear-busy", ".db")
+      store = Gori::Store.open(path, busy_timeout_ms: 200)
+      peer = DB.open("sqlite3:#{path}?busy_timeout=100")
+      cn = peer.checkout
+      begin
+        Schemas.load_project(store)
+        set = Reflection.descriptor_set([demo_file_descriptor])
+        Schemas.adopt(store, "https://api.test:443", Reflection::SERVICE_V1, 1, 1, set).should be_true
+        Schemas.resolve("/demo.Users/GetUser", request: true).should_not be_nil
+
+        cn.exec("BEGIN IMMEDIATE")
+        Schemas.forget(store, nil).should be_false
+        Schemas.resolve("/demo.Users/GetUser", request: true).should be_nil
+        Schemas.reflections.should be_empty
+      ensure
+        cn.exec("ROLLBACK") rescue nil
+        cn.release rescue nil
+        peer.close rescue nil
+        Schemas.clear
+        store.close
+        File.delete?(path)
+        File.delete?("#{path}-wal")
+        File.delete?("#{path}-shm")
+      end
+    end
+
     it "keeps the reflected sources when the descriptor PATH is edited" do
       with_store do |store|
         set = Reflection.descriptor_set([demo_file_descriptor])

@@ -167,7 +167,16 @@ module Gori::Protobuf
     # operator's exit from a schema they fetched — nothing here expires on its own.
     def self.forget(store : Store, target : String?) : Bool
       committed = target ? store.delete_grpc_reflection(target) : store.clear_grpc_reflections
-      @@reflections = store.grpc_reflections
+      # Drop the target from memory even when the delete did not commit (the caller reports
+      # persisted: false on a busy project, and the lens drops either way for this process).
+      # Reject directly rather than reload `store.grpc_reflections`: an uncommitted delete
+      # would otherwise restore the row from the store, and an unpersisted reflection in
+      # memory would be wiped by a reload.
+      @@reflections = if target
+                        @@reflections.reject(&.target.==(target))
+                      else
+                        [] of Store::GrpcReflection
+                      end
       rebuild
       committed
     end
