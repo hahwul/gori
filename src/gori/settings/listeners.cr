@@ -50,7 +50,7 @@ module Gori::Settings
   #               SNI or a `Host` header. For the client that can be pointed at a proxy but not
   #               at an HTTP one — an `ALL_PROXY=socks5://` tool, a runtime whose only proxy
   #               setting is SOCKS. gori already speaks the other end of this protocol
-  #               (`network.upstream_rules`, kind `socks5`); this is the same vocabulary,
+  #               (`upstream_rules`, kind `socks5`); this is the same vocabulary,
   #               inbound. NO-AUTH only, like the `proxy` listener beside it.
   LISTENER_MODES = ["proxy", "transparent", "reverse", "socks5"]
 

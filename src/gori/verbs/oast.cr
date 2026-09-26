@@ -13,7 +13,7 @@ module Gori
         Verb::Scope::OastCallbacks, [Verb::Chord.new("r", ctrl: true)], mnemonic: 'r') { |ctx| ctx.oast_listen; nil }
 
       r.register Verb::Definition.new(
-        "oast.stop", "Stop listening", "Stop polling the selected provider (deregisters)",
+        "oast.stop", "Stop listening", "Stop polling the selected provider (keeps the session — Resume listener… picks it up again)",
         Verb::Scope::OastCallbacks, [Verb::Chord.new("x", ctrl: true)], intent: :stop) { |ctx| ctx.oast_stop; nil }
 
       # `g` carries its chord HERE rather than in the controller's key handler, which is where it
