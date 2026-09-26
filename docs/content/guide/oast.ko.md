@@ -9,7 +9,7 @@ group = "워크벤치"
 
 어떤 버그는 응답에 절대 드러나지 않습니다. blind SSRF, blind XXE, out-of-band SQL injection, 또는 백오피스 브라우저에서만 발동하는 stored payload는 요청한 쪽에 답하는 대신 *다른 어딘가의 서버*로 손을 뻗습니다. **OAST**(Out-of-band Application Security Testing)는 바로 그 서버를 제공합니다. gori가 interaction 리스너에 payload URL을 등록하고, 그 payload를 요청에 심어 두면, 대상이 그 서버로 보내는 DNS, HTTP, SMTP 콜백이 hit로 나타납니다.
 
-**OAST** 탭은 기본적으로 표시됩니다(Fuzzer 옆). 두 개의 서브탭이 있습니다. **Callbacks**(hit 목록, 기본)와 **Providers**(설정한 리스너)입니다.
+**OAST** 탭은 기본적으로 탭 바 밖에 있습니다. **`0`**을 누르고 "oast"를 입력하거나, 명령 팔레트(`Ctrl-P` → **Go to OAST**)를 쓰거나, Preferences에서 슬롯을 하나 주세요. 두 개의 서브탭이 있습니다. **Callbacks**(hit 목록, 기본)와 **Providers**(설정한 리스너)입니다.
 
 <figure class="tui-shot">
   <img src="/images/tui/oast.svg" alt="interactsh payload로 들어온 복호화된 콜백 4건(DNS A 조회 2건, HTTP GET 2건)이 각각 source IP와 목적지 payload와 함께 나열된 gori OAST 탭의 Callbacks 테이블">
@@ -36,7 +36,7 @@ group = "워크벤치"
 | `interactsh` | 자체 호스팅 또는 public [interactsh](https://github.com/projectdiscovery/interactsh) 서버. 암호화된 **DNS, HTTP, SMTP** 콜백을 잡습니다. Public preset: `oast.pro`, `oast.live`, `oast.site`, `oast.fun`, `oast.me`. 기본값입니다. |
 | `custom-http` | 직접 운영하며 hit를 폴링하는 평범한 HTTP 엔드포인트. |
 | `webhook.site` | public [webhook.site](https://webhook.site) 서비스(HTTP 전용). |
-| `BOAST` | [BOAST](https://github.com/firebasextended/boast) 서버(public preset `odiss.eu`). |
+| `BOAST` | [BOAST](https://github.com/marcohextor/BOAST) 서버(public preset `odiss.eu`). |
 | `postbin` | PostBin 인스턴스(`postb.in`). |
 
 interactsh를 쓰면 gori가 로컬에서 RSA 키 쌍을 생성해 공개 키를 등록하고 각 콜백을 복호화합니다(비밀 키는 프로젝트 데이터베이스에 `0600`으로 저장되며 로그에 남지 않습니다). payload id는 correlation id로부터 로컬에서 파생되므로, 한 번의 등록으로 별도의 왕복 없이 여러 payload를 발급할 수 있습니다.

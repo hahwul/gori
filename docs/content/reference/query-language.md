@@ -4,7 +4,7 @@ description = "The filter syntax used across History, Sitemap, Probe, Issues, In
 weight = 30
 +++
 
-gori has a small query language (QL) for filtering flows. The same syntax works in the TUI filter bars, in `gori run` (`-q`/`--query`, or positionally), and through the MCP tools. The built-in reference is also available as `gori run history --help` and the `ql_reference` MCP tool.
+gori has a small query language (QL) for filtering flows. The same syntax works in the TUI filter bars, in `gori run` (`-q`/`--query`, or positionally), and through the MCP tools. The built-in reference is also available as the TUI's Help **Query** page and the `ql_reference` MCP tool.
 
 ## Fields
 
@@ -13,7 +13,7 @@ Match a field with `field:value` (substring or exact, depending on the field):
 | Field | Matches |
 |-------|---------|
 | `host` | Request host |
-| `path` | Request path |
+| `path` | Request path **and query string**, so `-path:x` also drops `?q=x` |
 | `url` | Full URL |
 | `method` | HTTP method |
 | `scheme` | `http` / `https` |
@@ -28,6 +28,7 @@ Match a field with `field:value` (substring or exact, depending on the field):
 | `stub` | `true` / `false`. Flows gori answered itself from a [short-circuit rule](/guide/proxy/#short-circuit), with no origin involved |
 | `static` | `true` / `false`. Images, fonts and audio/video, by response Content-Type (by path extension when there is none). Not SVG, CSS, JS or an image proxy (`?url=`), and only a successful fetch (2xx or 304). `-static:true` is the [hide-static lens](/guide/proxy/#hide-static) |
 | `scope` | `in` / `out`. The project's scope rules ([below](#scope-in-scope-out)) |
+| `cache` | `hit` / `miss` / `dynamic` / `none`: the cache verdict read from the response's cache headers (`Age`, `X-Cache`, `CF-Cache-Status`, `Cache-Status`, …). `none` is a real value (no verdict, which includes a pending flow). A `cache:` query adds a CACHE column to History |
 
 ```text
 host:example.com
@@ -173,7 +174,7 @@ dropped and reported, the same way a bad numeric value is, rather than searched 
 - `OR` matches either side. `NOT` and a `-` prefix both negate.
 - Parentheses group. Precedence is `NOT` then `AND` then `OR`.
 - A bare word (no `field:`) is free text over method, host, and target.
-- A `field:` name that does not exist is not free text you meant to write: `gori run history`, `gori run sitemap` and `gori run probe` **refuse** it, name the nearest real field, and exit non-zero. `--lenient` searches the token as text instead (what every surface used to do silently: `methd:GET` matched nothing, which reads as an empty project). The TUI filter bar still accepts a half-typed name as you type it.
+- A `field:` name that does not exist is not free text you meant to write: `gori run history`, `gori run sitemap` (and its `params`, `js` and `export` verbs) and `gori run probe` **refuse** it, name the nearest real field, and exit non-zero. `--lenient` searches the token as text instead (what every surface used to do silently: `methd:GET` matched nothing, which reads as an empty project). The TUI filter bar still accepts a half-typed name as you type it.
 
 ```text
 host:example.com status:5xx           both must match
@@ -242,6 +243,15 @@ One deliberate difference between the two, worth knowing before you write a rule
 - In a **colour rule**, `body:` always scans, and reads the first 64 KiB of each side. Indexing happens after capture and a rule has to paint the row that just arrived, so scanning is the only way to be right; the 64 KiB bound is what keeps a screenful of large bodies from stalling the list. A colour rule therefore paints rows the identical query does not list, but a match past 64 KiB is not painted.
 
 Every `body:` term, on every surface, reads the bytes **as they went over the wire**, so none of them finds a string inside a gzipped body. That includes an extract rule's condition, which is evaluated before the response is decoded; only the extraction that follows sees decompressed text. To match on compressed content, match something outside it: a header, the path, or the response size.
+
+## Caveats
+
+A few shapes let a query look clean while it did not look:
+
+- **A pending flow** has no status, duration or response size, so it drops out of both `status:` and `-status:` (and the same for `dur` and `respsize`).
+- **A dropped term widens the query.** A value gori cannot read (`status:>=foo`) is ignored, not refused. Check what survived with `ql_explain`.
+- **A bad regex is an error**, never silently dropped: `body~[` fails the whole query.
+- **`-body:` on a big body** keeps a hit past the 8 KiB index bound, because the index never saw it.
 
 ## Examples
 

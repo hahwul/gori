@@ -18,9 +18,9 @@ The **Sequencer** tab is off the bar by default. Press **`0`** and type "seq", o
 
 ## Two Ways to Feed It
 
-**Live.** Point it at a request that hands out a fresh token, and gori replays that request many times, pulling the token out of each response. From **History**, select the flow that sets the token and `Space` `>` `s` (**Send flow to…** → **Send to Sequencer**); gori auto-detects the likely session cookie. Tune the token location and sample size with `c` (reconfigure), then `Ctrl-R` to collect and `Ctrl-X` to stop.
+**Live.** Point it at a request that hands out a fresh token, and gori replays that request many times, pulling the token out of each response. From **History**, select the flow that sets the token and `Space` `>` `s` (**Send flow to…** → **Send to Sequencer**). A **SEND TO SEQUENCER** card opens over the current tab with the likely session cookie auto-detected; set the token location, sample goal and concurrency there, and **Start** collects in the background without leaving the tab. On the Sequencer tab, `c` reconfigures a session, `Ctrl-R` collects again, and `Ctrl-X` stops.
 
-**Manual.** Already have a list of tokens? Paste them (one per line) for a pure statistical analysis with no network traffic.
+**Manual.** Already have a list of tokens? Select them in a text pane (one per line) and `Space` `S` (**Send selection to…**) → `s` **Sequencer** for a pure statistical analysis with no network traffic; sending more into an idle manual session appends them and re-analyzes. Headless, the same is `gori run sequence --tokens FILE`.
 
 Extract the token from any of these locations:
 
@@ -36,7 +36,7 @@ Live collection defaults to **concurrency 1**, because session tokens are often 
 
 ## Reading the Grade
 
-The headline is **effective entropy** in bits: a conservative estimate of how much real unpredictability each token carries, measured across the sample. The rating follows from it:
+The headline is **effective entropy** in bits: a conservative estimate of how much real unpredictability each token carries, measured across the sample. It sets the base rating, and every statistical test below that fails drops it one tier:
 
 | Rating | Effective entropy |
 |--------|-------------------|

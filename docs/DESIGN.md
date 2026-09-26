@@ -12,7 +12,7 @@ The implementation stays native to Hwaro: Crinja templates, the existing Markdow
 
 ## Information architecture
 
-The current build contains 82 pages across English and Korean. Each language has 14 Guide articles and 12 Playbook chapters, plus their section covers. Both languages must expose the same page set and ordering.
+The current build contains 84 pages across English and Korean. Each language has 15 Guide articles and 12 Playbook chapters, plus their section covers. Both languages must expose the same page set and ordering.
 
 General documentation uses a compact manual navigation:
 
@@ -49,7 +49,7 @@ Keyboard and screen-reader behavior is part of the design. Native links, buttons
 
 Before merging documentation design changes:
 
-1. Run `hwaro build -i docs` and confirm all 82 content pages render without template or front-matter errors.
+1. Run `hwaro build -i docs` and confirm all 84 content pages render without template or front-matter errors.
 2. Run `hwaro serve -i docs` and inspect the generated site in a browser at narrow mobile, tablet, laptop, and wide desktop viewports.
 3. Check light and dark themes, English and Korean, long titles, code blocks, tables, and pages with deep heading trees.
 4. Verify the compact manual navigation, active Guide group, Playbook cover, chapter numbering, current Playbook part, mobile navigation toggle, previous/next paths, and the return to Guide.

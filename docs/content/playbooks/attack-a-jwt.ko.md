@@ -26,7 +26,7 @@ JWT는 서버가 서명을 검사하는 만큼만 믿을 수 있습니다. 이 �
 
 ## 2. 클레임 변조 {#2-tamper-a-claim}
 
-`Ctrl-T`로 Encode 렌즈로 전환하거나, `l`을 눌러 디코드된 토큰을 곧장 Encode 편집기로 불러오세요. **PAYLOAD** JSON을 편집합니다. `role`을 올리고, `sub`를 바꾸고, `exp`를 늘리세요. `Ctrl-A`로 알고리즘을 고르고(HMAC 계열 → `RS`/`PS`/`ES`의 256/384/512 → `EdDSA` → `none` 순환), HMAC 알고리즘이면 **SECRET**을 설정하거나 비대칭 알고리즘이면 **KEY** 카드에 PEM 개인키 경로를 지정하면, 다시 서명된 토큰이 OUTPUT에 라이브로 나타납니다. `y`로 복사하세요.
+`Ctrl-T`로 Encode 렌즈로 전환하거나, `Space` → **Load decoded claims**로 디코드된 토큰을 곧장 Encode 편집기로 불러오세요. **PAYLOAD** JSON을 편집합니다. `role`을 올리고, `sub`를 바꾸고, `exp`를 늘리세요. `Ctrl-A`로 알고리즘을 고르고(HMAC 계열 → `RS`/`PS`/`ES`의 256/384/512 → `EdDSA` → `none` 순환), HMAC 알고리즘이면 **SECRET**을 설정하거나 비대칭 알고리즘이면 **KEY** 카드에 PEM 개인키 경로를 지정하면, 다시 서명된 토큰이 OUTPUT에 라이브로 나타납니다. `y`로 복사하세요.
 
 같은 클레임 편집이 헤드리스로도 실행되며, 토큰은 인수나 stdin에서 받습니다. `--set KEY=VALUE`는 클레임 하나를 패치하고(반복 가능), `--payload`는 클레임을 통째로 교체합니다:
 

@@ -13,7 +13,7 @@ gori에는 수동 테스트와 나란히 돌아가는 자동 분석 기능이 �
 
 **Probe**는 보안 이슈를 유형과 심각도로 묶습니다. 패시브 체크는 브라우징하는 동안 실행되며(추가 요청은 전혀 없이) **History** 플로우와 **Repeater** 전송 결과를 검사합니다.
 
-**액티브** 체크는 의도적으로 *light-touch*로 설계되었습니다. 이미 캡처한 트래픽에 대해 안전하고 저용량인 프로브 몇 개를 보낼 뿐입니다. 기본적으로 안전한 메서드(`GET` / `HEAD`)만 프로브하고, 고유한 표면마다 한 번씩만 테스트하며, 액티브 모드를 활성화하기 전에는 아무것도 나가지 않습니다. 흔적을 최소로 남기면서 빠른 직감을 확인하도록(파라미터가 반사되는지, origin이 허용되는지) 만들어졌습니다.
+**액티브** 체크는 의도적으로 *light-touch*로 설계되었습니다. 이미 캡처한 트래픽에 대해 안전하고 저용량인 프로브 몇 개를 보낼 뿐입니다. 기본적으로 안전한 메서드(`GET` / `HEAD`)만 프로브하고, 고유한 표면마다 한 번씩만 테스트하며, 액티브 모드를 활성화하기 전에는 아무것도 나가지 않습니다. Probe 탭에서 `m`(**Set mode**)을 누르거나 `gori run probe mode active`를 실행하세요. 새 프로젝트는 `passive`로 시작합니다. 흔적을 최소로 남기면서 빠른 직감을 확인하도록(파라미터가 반사되는지, origin이 허용되는지) 만들어졌습니다.
 
 안전하지 않은 메서드(`POST` / `PUT` / `PATCH` / `DELETE`)를 다시 보내면 서버 상태가 변경될 수 있으므로 항상 명시적으로 켜야 합니다. 플로우별 *Run active scan* 팝업에서 **unsafe methods**를 체크해 한 번만 의도적으로 재전송하거나, Probe를 **AGGRESSIVE** 모드로 전환하면 안전하지 않은 메서드도 자동으로 프로브하고 룰별 상한을 높입니다(더 넓은 파라미터 집합, 더 넓은 forbidden-bypass 헤더 집합). 두 경우 모두 프로젝트 스코프 안에서만 동작하므로 스코프를 벗어난 호스트는 절대 건드리지 않습니다.
 
@@ -30,14 +30,17 @@ gori에는 수동 테스트와 나란히 돌아가는 자동 분석 기능이 �
 | `infoleak` | 본문 노출, URL / WS 프레임의 비밀 값, GraphQL introspection, 프로덕션 스크립트에 딸려 나간 소스맵, 디렉터리 리스팅, JWT 페이로드의 민감한 클레임, 클라이언트에 노출된 설정·진단 파일(`.env`, `.git/config`, `phpinfo()`, `.htpasswd`, `wp-config` 자격증명, Spring actuator env), 프로덕션에서 닿는 프레임워크 디버그 모드와 대화형 디버거(Symfony, Werkzeug/Flask, Django, Laravel, Rails, ASP.NET), 의심되는 서브도메인 테이크오버, 응답 헤더에 적힌 내부 호스트명 또는 RFC 1918 주소, 그리고 쿠키·파라미터·hidden 필드에 실린 네이티브 직렬화 블롭(Java, .NET `BinaryFormatter`/ViewState, PHP), 즉 안전하지 않은 역직렬화 표면, 노출된 API 문서·스키마와 대화형 GraphQL IDE(Swagger UI, OpenAPI/Swagger 스펙, GraphiQL, GraphQL Playground, ReDoc), 그리고 요청 URL에 실린 알려진 프레임워크 세션 식별자 |
 | `cors` | 와일드카드 / null origin / 자격 증명 관련 오설정; `Vary: Origin` 없이 캐시된 반사 origin; 액티브 origin 반사; 모든 오리진을 허용하는 Flash/Silverlight 크로스 도메인 정책(`domain="*"`) |
 | `client` | 페이지·번들 스크립트의 클라이언트 사이드 의심 지점: DOM 기반 XSS(소스가 싱크로 흐름), DOM 클로버링, 프로토타입 오염, postMessage 취약점. 휴리스틱이므로 확인이 필요한 단서로 다루세요 |
-| `active` | light-touch 프로브로 확인됨: 반사되는 파라미터, backslash-powered 주입 지점, 오픈 리다이렉트, CRLF/응답 헤더·호스트 헤더 인젝션, 접근 제어 우회(위조된 클라이언트 IP / 경로 정규화 / URL-rewrite 헤더), NGINX alias·파라미터 경로 탐색, 서버 사이드 템플릿 인젝션(SSTI), Next.js 서버 액션 인가 누락(`Next-Action` 요청을 세션 쿠키/Authorization 제거 후 재전송. 액션은 POST라 unsafe/AGGRESSIVE 필요). 에러 기반 SQL 인젝션(쿼리 파라미터마다 구문을 깨는 페이로드를 붙이고, 깨끗한 baseline에는 없는 데이터베이스 오류 서명이 프로브 응답에만 나타나면 보고), 그리고 **대역 외**로 확인하는 블라인드 SSRF. URL 파라미터를 [OAST](/ko/guide/oast/) 페이로드로 향하게 하고 서버가 콜백을 걸면 발견으로 올립니다. 블라인드 OS 커맨드 인젝션도 같은 방식으로 확인합니다. 명령/진단 파라미터(`cmd`, `ping`, `host` 등)에 셸 브레이크아웃 페이로드를 덧붙이고, 서버의 셸이 OAST 리스너에 콜백을 걸면 발견으로 올립니다. 원격 파일 포함(RFI)도 `file`, `page`, `template`, `lang` 같은 포함형 파라미터에 PHP/JSP/ASP 표식이 담긴 OAST 리소스를 주입해 같은 방식으로 확인합니다. GraphQL introspection도 액티브로 확인됩니다(`infoleak`에 기록). 접근 제어 우회는 HTTP 메서드 트릭도 다룹니다 — 기본은 메서드 대소문자 변형(`gET`), unsafe 옵트인에서 메서드 오버라이드 헤더(`X-HTTP-Method-Override`)와 대체 verb. **레이트리밋 우회**는 `429` 요청을 위조된 클라이언트 IP 헤더와 함께 재전송해, 깨끗한 control은 여전히 제한되는데 해당 요청은 처리되면 보고합니다. **안전하지 않은 HTTP 메서드**는 `OPTIONS`와 `TRACE`를 보내 Cross-Site Tracing(요청을 되비추는 TRACE)과 `Allow`에 광고된 위험 메서드를 표시합니다 |
+| `active` | light-touch 프로브로 확인됨: 반사되는 파라미터, backslash-powered 주입 지점, 오픈 리다이렉트, CRLF/응답 헤더·호스트 헤더 인젝션, 접근 제어 우회(위조된 클라이언트 IP / 경로 정규화 / URL-rewrite 헤더), NGINX alias·파라미터 경로 탐색, 서버 사이드 템플릿 인젝션(SSTI), Next.js 서버 액션 인가 누락(`Next-Action` 요청을 세션 쿠키/Authorization 제거 후 재전송. 액션은 POST라 unsafe/AGGRESSIVE 필요). 에러 기반 SQL 인젝션(쿼리 파라미터마다 구문을 깨는 페이로드를 붙이고, 깨끗한 baseline에는 없는 데이터베이스 오류 서명이 프로브 응답에만 나타나면 보고), 불리언 기반 블라인드 SQL 인젝션(파라미터마다 항상 참인 브레이크아웃과 항상 거짓인 브레이크아웃을 보내, 참 쪽은 baseline과 같고 거짓 쪽은 다르면 보고), 시간 기반 블라인드 SQL 인젝션(기본 비활성, 아래 참고), 그리고 **대역 외**로 확인하는 블라인드 SSRF. URL 파라미터를 [OAST](/ko/guide/oast/) 페이로드로 향하게 하고 서버가 콜백을 걸면 발견으로 올립니다. 블라인드 OS 커맨드 인젝션도 같은 방식으로 확인합니다. 명령/진단 파라미터(`cmd`, `ping`, `host` 등)에 셸 브레이크아웃 페이로드를 덧붙이고, 서버의 셸이 OAST 리스너에 콜백을 걸면 발견으로 올립니다. 원격 파일 포함(RFI)도 `file`, `page`, `template`, `lang` 같은 포함형 파라미터에 PHP/JSP/ASP 표식이 담긴 OAST 리소스를 주입해 같은 방식으로 확인합니다. GraphQL introspection도 액티브로 확인됩니다(`infoleak`에 기록). 접근 제어 우회는 HTTP 메서드 트릭도 다룹니다 — 기본은 메서드 대소문자 변형(`gET`), unsafe 옵트인에서 메서드 오버라이드 헤더(`X-HTTP-Method-Override`)와 대체 verb. **레이트리밋 우회**는 `429` 요청을 위조된 클라이언트 IP 헤더와 함께 재전송해, 깨끗한 control은 여전히 제한되는데 해당 요청은 처리되면 보고합니다. **안전하지 않은 HTTP 메서드**는 `OPTIONS`와 `TRACE`를 보내 Cross-Site Tracing(요청을 되비추는 TRACE)과 `Allow`에 광고된 위험 메서드를 표시합니다 |
 
 일부 액티브 룰은 나머지와 다르게 동작하며, Rules 서브탭이 해당 행에 이를 표시합니다.
 
-- **HTTP 요청 스머글링**(CL.TE / TE.CL / TE.TE 디싱크)은 **비활성**으로 출하됩니다. POST 본문과 함께 불완전한 프레이밍 프로브를 보내고 프런트엔드/백엔드 디싱크를 타이밍 행으로 확인하는데, 여기 있는 어떤 룰보다 대상에게 무겁고 덜 정중한 일입니다. 행에는 `opt-in` 배지가 붙습니다. `gori run probe rules enable request_smuggling`으로 의도적으로 무장하고, 차분 확인은 `--aggressive --unsafe` 단계로 읽으세요.
+- **HTTP 요청 스머글링**(CL.TE / TE.CL / TE.TE 디싱크)은 **비활성**으로 출하됩니다. POST 본문과 함께 불완전한 프레이밍 프로브를 보내고 프런트엔드/백엔드 디싱크를 타이밍 행으로 확인하는데, 여기 있는 어떤 룰보다 대상에게 무겁고 덜 정중한 일입니다. 행에는 `opt-in` 배지가 붙습니다. `gori run probe rules enable request_smuggling`으로 의도적으로 무장하고, 차분 확인은 `--aggressive --unsafe` 단계로 읽으세요. 활성화해도 unsafe 메서드(팝업의 옵트인, `--unsafe`, AGGRESSIVE) 없이는 프로브를 만들지 않습니다. 프로브가 모두 POST이기 때문입니다.
+- **시간 기반 블라인드 SQL 인젝션**(`sqli_time_based`)도 **비활성**으로 출하됩니다. 확인 단계마다 실제로 몇 초씩 기다리기 때문입니다. Rules 서브탭이나 `gori run probe rules enable sqli_time_based`로 켜세요.
 - **대역 외 룰**(블라인드 SSRF, 블라인드 OS 커맨드 인젝션, XML 외부 엔티티, 원격 파일 포함)은 **활성이지만 작동하지 않는** 상태로 출하됩니다. 프로젝트에 등록된 OAST 리스너가 있어야만 페이로드를 찍어 보낼 수 있기 때문입니다. 이건 토글이 아니라 능력이라, 행에 `needs OAST` 배지가 붙고 리스너가 생기기 전까지는 그 요청 비용이 추정치에서 빠집니다.
 
 블라인드 SSRF는 쿼리, 폼 필드, 최상위 JSON 문자열 중 URL 형태의 첫 번째 값만 요청 1개로 검사합니다. RFI도 첫 번째 경로·URL·파일명 형태 값 또는 관습적인 포함 파라미터 하나만 검사하며, OAST URL에 PHP/JSP/ASP 표식을 담습니다. POST 등 안전하지 않은 메서드는 명시적 허용이 필요합니다. `xxe_oast`도 명시적 unsafe 허용이 필요하며, XML 외부 파라미터 엔티티 참조를 담은 요청 1개를 보내고 OAST 콜백이 도착해야 탐지합니다. 원래 문서를 유지하며, 기존 DTD가 있거나 압축·청크 전송을 사용하는 요청, 잘린 본문, 64 KiB를 넘는 본문, 지원하지 않는 인코딩은 건너뜁니다. 페이로드 목록을 순회하거나 확인용 재요청을 보내지 않습니다.
+
+**커스텀 룰**은 `custom` 카테고리 아래에 직접 만든 검사를 더합니다. 캡처된 모든 플로우의 한 영역(요청 또는 응답의 전체, 헤더, 본문)에 문자열, 정규식, 또는 명령을 적용해 걸리면 발견을 올립니다. Rules 서브탭에서 `a`로 추가, `e`나 `↵`로 편집, `d`로 삭제, `t`로 어떤 룰이든 켜고 끄며, `/`로 목록을 거릅니다. 헤드리스로는 `gori run probe rules add`, `delete`, `enable`, `disable`입니다.
 
 심각도는 `info`, `low`, `medium`, `high`, `critical` 순입니다. 헤드리스 `gori run probe`는 기본적으로 **패시브** 체크를 실행하며, `--active` 플래그를 추가하면 액티브 체크도 함께 수행합니다.
 
@@ -50,7 +53,7 @@ gori run probe                       # passive issues
 gori run probe --active              # include active checks (sends probe requests)
 gori run probe --active --unsafe     # also re-send unsafe methods (may mutate server data)
 gori run probe --active --aggressive # wider caps + unsafe methods (authorized targets only)
-gori run probe --severity high       # only high-severity
+gori run probe --severity high       # high and critical (a floor)
 gori run probe --category cors       # a single category
 gori run probe -q 'host:example.com' # filter History with QL (Repeater still scanned)
 ```
@@ -145,7 +148,7 @@ History와 같은 방식으로 표시합니다. `t`를 누르면 커서의 이�
 분석을 거드는 도구가 두 가지 더 있습니다.
 
 - **Notes**: 자유 형식의 프로젝트별 마크다운 문서(프로젝트당 여러 노트). Notes 탭에서 노트를 생성, 편집, 닫을 수 있고, `gori run notes` / `gori run notes --all`로 헤드리스에서 목록을 보거나 덤프할 수 있습니다. 에이전트는 MCP(`list_notes`, `get_note`, `create_note`, …)로 노트를 관리할 수 있습니다.
-- **Comparer**: 두 메시지를 슬롯 A와 B에 불러와 나란히 diff합니다. 요청 간 응답이 어떻게 바뀌었는지 파악하는 데 유용합니다.
+- **Comparer**: 두 메시지를 슬롯 A와 B에 불러와 나란히 diff합니다. 요청 간 응답이 어떻게 바뀌었는지 파악하는 데 유용합니다. 이 탭은 기본적으로 탭 바 밖에 있으니 **`0`**을 누르고 "comparer"를 입력하거나, 플로우를 보내 여세요.
 
   슬롯은 요청과 응답을 쥔 곳이면 어디서든 채울 수 있습니다. History, Sitemap, Repeater 탭(마지막 전송), Fuzzer 결과 행에서 `Space` `>` `c`(**Send flow to…** → **Send to Comparer**), 또는 Comparer 탭에서 `a` / `b`로 캡처된 플로우를 직접 고르면 됩니다. 이 피커는 History·Sitemap과 마찬가지로 활성 Scope 렌즈를 따르므로, 스코프 밖 플로우를 고르려면 렌즈를 꺼야 합니다. Repeater 전송과 퍼즈 결과는 캡처를 남기지 않으므로, 그 둘이 diff로 들어올 수 있는 경로는 이것뿐입니다.
 
@@ -157,11 +160,11 @@ History와 같은 방식으로 표시합니다. `t`를 누르면 커서의 이�
   |-----|--------|
   | `←` / `→` | 요청끼리 / 응답끼리 비교 전환 |
   | `⇧N` / `⇧P` | 다음 / 이전 **변경** 행으로 점프 (순환하며, 푸터에 `3/8` 표시) |
-  | `f` | 동일 구간을 `⋯ N unchanged lines ⋯`로 접기 (변경 지점 주변 3줄은 유지) |
+  | `Space` `Z` `z` | 동일 구간을 `⋯ N unchanged lines ⋯`로 접기 (변경 지점 주변 3줄은 유지, **Display…** → **Fold unchanged**) |
   | `↑` / `↓`, `⇧↑` / `⇧↓` | 행 커서 이동 · 행 단위 선택 확장 |
   | `y` | 선택 영역(없으면 diff 전체)을 unified 텍스트로 복사 |
   | `⇧←` / `⇧→` | 두 열을 함께 가로 스크롤 |
-  | `s` | A ⇄ B 교환 |
+  | `w` | A ⇄ B 교환 |
 
   변경된 행에서는 실제로 다른 부분만 빨강/초록으로 강조되고 양쪽이 공유하는 부분은 흐리게 표시됩니다. 재서명된 토큰이나 JSON 값 하나가 바뀐 경우를 줄 전체를 읽지 않고도 찾을 수 있습니다.
 

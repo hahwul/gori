@@ -64,7 +64,8 @@ The JSON that `gori run` emits is a stable, documented shape meant to be parsed,
 | Subcommand | `--format json` | `--format jsonl` |
 |------------|-----------------|------------------|
 | `capture`, `history` | One JSON object per line | Alias for `json`, same output |
-| `fuzz`, `mine`, `discover` | Buffered; one JSON array at the end | One object per line, as each result lands |
+| `fuzz`, `mine`, `discover`, `authorize` | Buffered; one JSON array at the end | One object per line, as each result lands |
+| `sequence` | The single report | Each sample as it lands, then the report |
 
 Reach for `jsonl` when you want to consume a long sweep while it runs, and `json` when you want one document at the end.
 
@@ -74,9 +75,10 @@ Reach for `jsonl` when you want to consume a long sweep while it runs, and `json
 |------|---------|
 | `0` | Success |
 | `1` | Error: a failed send, an unreadable project, a mutation that could not be applied |
-| `3` | `gori run fuzz --fail-if-no-matches` completed cleanly but nothing matched |
+| `3` | `gori run fuzz --fail-if-no-matches` completed cleanly but nothing matched (a `--stop-on` / `--stop-after-matches` that fired exits `0`) |
+| `130` | Interrupted by SIGINT/SIGTERM. `fuzz`, `mine`, `discover`, `sequence`, `authorize` and `repeater minimize` flush what they collected first, so `&& next-step` does not treat a truncated run as a finished one |
 
-A fuzz run where nothing matched *and* every send errored (target down, TLS failure, scope-blocked) exits `1`, not `3`, so a script can tell "no findings" apart from "never reached the target" without `--fail-if-no-matches`.
+A fuzz run where nothing matched *and* every send errored (target down, TLS failure, scope-blocked) exits `1`, so a script can tell "no findings" apart from "never reached the target" even without `--fail-if-no-matches` (with the flag, `3` wins).
 
 **A closed pipe is not an error.** `gori run history | head -5` exits `0` and stays quiet, the way any Unix filter should.
 
@@ -135,8 +137,8 @@ whole extension surface, and it is the same primitive at four seams.
 gori run rewriter add --op=pipe --match=regex --part=body \
   --find='eyJ[A-Za-z0-9._-]+' --value='./resign.sh --key dev.pem'
 
-# Decode a base64 body, run it through your own parser, pretty-print the result.
-gori run decoder 'base64-decode > exec:./parse-envelope --json > json-pretty' "$BLOB"
+# Decode a base64 body and run it through your own parser.
+gori run decoder 'base64-decode > exec:./parse-envelope --json' "$BLOB"
 
 # Let a real detector decide, instead of a regex.
 gori run probe rules add --title 'envelope leak' --exec --pattern './detect-leak --stdin'

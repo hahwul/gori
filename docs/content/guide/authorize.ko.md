@@ -33,7 +33,7 @@ group = "워크벤치"
 | `b` | 이 아이덴티티를 기준선으로 지정 |
 | `esc` | 닫기 |
 
-추가·편집 폼은 세 개의 필드로 되어 있습니다. **이름**(고유해야 합니다. 같은 라벨의 행이 둘이면 결과 테이블을 읽을 수 없게 되므로 세 surface 모두 중복을 거부하며, 이름은 대소문자를 구분하지 않고 비교합니다), **set**할 헤더(한 줄에 `Name: value` 하나씩), 그리고 **remove**할 헤더(쉼표로 구분)입니다. `⇥`로 필드를 옮기고 `↵`로 저장합니다. 이름이 유효한 토큰이 아니거나 값에 CR/LF가 들어간 줄은 조용히 버려지지 않고, 해당 줄을 지목하면서 거부됩니다.
+추가·편집 폼은 네 개의 필드로 되어 있습니다. **이름**(고유해야 합니다. 같은 라벨의 행이 둘이면 결과 테이블을 읽을 수 없게 되므로 세 surface 모두 중복을 거부하며, 이름은 대소문자를 구분하지 않고 비교합니다), **set**할 헤더(한 줄에 `Name: value` 하나씩), **remove**할 헤더(쉼표로 구분), 그리고 **refresh before**(`off`, `jwt-exp`, `ttl=10m`. [슬롯 갱신](#refreshing-a-slot) 참고)입니다. 슬롯의 갱신 단계는 그 옆에 읽기 전용으로 표시됩니다. `⇥`로 필드를 옮기고 `↵`로 저장합니다(set 헤더 편집기 안에서는 줄바꿈을 넣습니다). 이름이 유효한 토큰이 아니거나 값에 CR/LF가 들어간 줄은 조용히 버려지지 않고, 해당 줄을 지목하면서 거부됩니다.
 
 아이덴티티는 프로젝트에 저장되므로 `gori run authorize`와 MCP 도구도 여기서 설정한 집합을 기본으로 씁니다. 목록에는 헤더 *이름*만 표시됩니다. 세션 쿠키는 자격증명이고, 그것을 화면에 그려 두는 목록은 터미널을 흘깃 보는 누구에게나 값을 넘겨주기 때문입니다. 폼에는 값이 보입니다. 편집이란 그런 것이니까요.
 
@@ -48,7 +48,7 @@ group = "워크벤치"
 | 표면 | 활성 슬롯 고르기 | 목록 편집 |
 |------|------------------|-----------|
 | TUI | `Ctrl-P` → **Session slot**, 또는 `session:NAME` 칩 클릭 | 이 탭에서 `i` |
-| `gori run` | 보내는 명령에 `--slot NAME` | `gori run session list \| show \| add \| edit \| rm \| baseline` |
+| `gori run` | 보내는 명령에 `--slot NAME` | `gori run session list \| show \| add \| from-flow \| from-request \| edit \| rm \| baseline \| refresh` |
 | MCP | `set_active_session_slot` | `list_session_slots`, `create_session_slot`, `update_session_slot`, `delete_session_slot` |
 
 활성 슬롯이 `send_request`, Repeater/Fuzzer 전송, 인터셉트 forward에서 바꾸는 것은 둘입니다.
@@ -211,7 +211,7 @@ gori run session baseline as-captured
 gori run session rm low-priv
 ```
 
-`gori run session activate`는 없습니다. `gori run` 프로세스는 보내고 끝나므로 활성 포인터가 걸쳐 있을 시간이 없습니다. 대신 전송 명령에서 아이덴티티를 지명하세요. `--slot NAME`은 `repeater`, `fuzz`, `mine`, `sequence`, `discover`에서 동작하며, `--bind-from`이 시드를 재생하기 전에 적용되므로 시드가 채운 슬롯으로 실행이 전송됩니다.
+`gori run session activate`는 없습니다. `gori run` 프로세스는 보내고 끝나므로 활성 포인터가 걸쳐 있을 시간이 없습니다. 대신 전송 명령에서 아이덴티티를 지명하세요. `--slot NAME`은 `send`, `repeater`, `repeater minimize`, `fuzz`, `mine`, `sequence`, `discover`, `retest run`에서 동작하며, `--bind-from`이 시드를 재생하기 전에 적용되므로 시드가 채운 슬롯으로 실행이 전송됩니다.
 
 `--format jsonl`은 요청이 끝나는 대로 한 줄에 하나씩 흘려보내고, `--format json`은 버퍼링했다가 마지막에 배열 하나를 냅니다. 둘 다 와이어 크기와 함께 판정이 실제로 비교한 디코딩 후 크기를 담습니다. gzip 응답이라면 이 두 숫자는 자릿수가 달라집니다. 전체 플래그는 [CLI 레퍼런스](/ko/reference/cli/#run-authorize)에 있습니다.
 
@@ -221,7 +221,7 @@ gori run session rm low-priv
 
 `authorize_results`는 답을 맨 앞에 놓습니다. `access_control`이 결과를 한 단어로 말하고(`BYPASS`, `enforced`, `review`, `error`, `nothing_sent`. 뒤의 둘은 비교된 것이 없다는 뜻), `summary`가 한 문장으로 풀어 주며, `bypasses`는 기준선이 아닌 아이덴티티가 기준선의 응답을 받은 요청을 페이징 없이 전부 나열합니다. 다른 것을 하나도 읽지 않는 에이전트도 발견 사항만은 받게 됩니다.
 
-슬롯 자체를 관리하는 도구가 다섯 개 더 있습니다. `list_session_slots`(활성 슬롯을 이름으로 표시하며, 요청하지 않는 한 헤더 값은 `[REDACTED]`), `create_session_slot`, `update_session_slot`, `delete_session_slot`, 그리고 `set_active_session_slot`입니다. 마지막 것은 그 서버 프로세스가 살아 있는 동안 *다른* 모든 도구의 전송이 어떤 아이덴티티로 나갈지 고릅니다.
+슬롯 자체를 관리하는 도구가 여섯 개 더 있습니다. `list_session_slots`(활성 슬롯을 이름으로 표시하며, 요청하지 않는 한 헤더 값은 `[REDACTED]`), `create_session_slot`, `update_session_slot`, `delete_session_slot`, `set_active_session_slot`, 그리고 `refresh_session_slot`입니다. `set_active_session_slot`은 그 서버 프로세스가 살아 있는 동안 *다른* 모든 도구의 전송이 어떤 아이덴티티로 나갈지 고르고, `refresh_session_slot`은 슬롯의 갱신 단계를 지금 실행합니다.
 
 한 번의 실행은 전송 2,000건으로 제한되며, 이 상한은 `플로우 × 아이덴티티`를 셉니다. 500행 쿼리에 아이덴티티 넷이면 잘려서 실행되는 대신 두 요인을 모두 명시하며 시작 전에 거부됩니다. 잘린 실행은 보내지도 않은 플로우를 "enforced"로 보고하게 되기 때문입니다. 여기서는 Layer 1 스코프가 엄격합니다. 스코프 밖 대상은 `allow_unscoped:true`를 명시해야 합니다. 아무도 그 대상을 눈으로 확인하지 않았기 때문입니다.
 

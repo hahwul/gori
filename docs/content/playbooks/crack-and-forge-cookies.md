@@ -9,7 +9,7 @@ group = "Workbenches"
 
 A signed session cookie stops the server from trusting a value the client can change, as long as the signing secret stays secret. This playbook reads a captured Flask, Rack, or Django cookie, tries candidate secrets against it, brute-forces the one that signs it, and re-signs a cookie carrying claims of your choosing, then replays it to see whether the server accepts the forgery. Budget about ten minutes, plus however long a wordlist takes to run.
 
-gori has no cookie tab in the TUI; the whole workflow is the `gori run cookie` subcommand (store-free local compute, with the cookie taken from the argument or stdin) and its four MCP tools. Everything below runs from the shell.
+The **Cookie** tab does all of this interactively (it is off the bar by default: press **`0`** and type "cookie", or `Ctrl-P` → **Go to Cookie**; see the [Cookie guide](/guide/cookie/)). This playbook drives the same engine from the shell instead, so every step is scriptable: the `gori run cookie` subcommand (store-free local compute, with the cookie taken from the argument or stdin) and its four MCP tools.
 
 > **Before you begin.** Have gori running as a proxy and capture a response that sets a signed session cookie; the `Set-Cookie` header on a login response is the usual source. The crack step also needs a wordlist of candidate secrets, one per line. Only test cookies from a host you're authorized to attack; the examples target `api.example.com`.
 

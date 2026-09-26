@@ -26,7 +26,7 @@ Each flow records the full request and response: start line, headers, and body (
 
 ## Intercept
 
-Press `i` to enable **Intercept**. When on, matching requests (and optionally responses) are held so you can forward, drop, or edit them before they continue. A filter bar at the top of the Intercept tab lets you choose the direction to catch and narrow what gets held with a query-language expression, so you only pause on the traffic you care about. On this tab `c` cycles the catch direction (all / requests / responses) and `/` edits the condition; the capture toggle is `c` everywhere else. Turning intercept **off** releases everything still held with its original bytes, so an edit you had not yet forwarded is discarded.
+Press `i` to enable **Intercept**. When on, matching requests (and optionally responses) are held so you can forward, drop, or edit them before they continue. A filter bar at the top of the Intercept tab lets you choose the direction to catch and narrow what gets held with a query-language expression, so you only pause on the traffic you care about. While the `s` scope lens is on, only in-scope traffic is held, whatever the condition says. On this tab `c` cycles the catch direction (all / requests / responses) and `/` edits the condition; the capture toggle is `c` everywhere else. Turning intercept **off** releases everything still held with its original bytes, so an edit you had not yet forwarded is discarded.
 
 <figure class="tui-shot">
   <img src="/images/tui/intercept.svg" alt="gori Intercept tab with a filter bar for catch direction and a query condition, and a card explaining forward and drop while catch is off">
@@ -35,7 +35,7 @@ Press `i` to enable **Intercept**. When on, matching requests (and optionally re
 
 The queue takes the same **multi-select** as the History list ([Marking flows](#marking-flows), below): `t` marks the held message under the cursor and steps down, `Shift-↑` / `Shift-↓` extend a contiguous range, `Shift-T` marks the whole queue, and `Esc` clears. Forward (`f`) and drop (`d`) then act on **the marks if any are set, else the cursor row**, so a burst of holds can be released or killed in one keystroke. `Shift-F` still forwards the entire queue whether anything is marked or not. Marked rows get a full bar in the gutter and the filter row shows a live `3 marked` count; a mark disappears the moment its message leaves the queue, so the count never outlives what is on screen.
 
-Reading a held message needs no marks and no editor. The preview soft-wraps, so nothing runs off to the side; scroll it with the wheel, or press `↵` / `e` to open the editor, where `PgUp` / `PgDn` page the text. `PgUp` / `PgDn` / `Home` / `End` page the **queue**, the same list `↑` / `↓` walk, as they do on every other list tab.
+Reading a held message needs no marks and no editor. The preview soft-wraps, so nothing runs off to the side; scroll it with the wheel, or press `↵` / `e` to open the editor, where `PgUp` / `PgDn` page the text and `Ctrl-R` forwards the edited message (`Esc` leaves the editor and keeps the edit). `PgUp` / `PgDn` / `Home` / `End` page the **queue**, the same list `↑` / `↓` walk, as they do on every other list tab.
 
 Each row carries how long its message has been waiting, so a burst of holds reads as a queue and not just a list — a hold is a real client blocked on your decision. The catch bar above it shows the condition that is actually armed, including one an agent set through MCP or `gori run intercept filter`. And when a gate cannot hold something it was armed for — a body over the buffer ceiling, which is forwarded rather than truncated — it says so in the notification centre instead of leaving you waiting on a row that will never appear.
 
@@ -62,7 +62,7 @@ A held message goes in the same queue as a held request, with a `WS↑` or `WS�
 - **A held message blocks its whole direction** until you decide it. Later messages from that peer queue behind it, and they are released in arrival order however you decide them: decide message 5 before 3 and it still goes out third. The **opposite direction keeps running**, and so do `PING`/`PONG` in both, so the socket does not die while you read. There is no way to let one message past another; a WebSocket has no message identifiers to reorder.
 - **A dropped message is invisible to both endpoints.** Nothing is written, and a WebSocket stream has no message identity for the peer to notice a hole in: no error, no gap, no retry. That is weaker than dropping an HTTP/1.1 request (which answers a `502`) or an HTTP/2 one (which cancels the stream), and gori keeps no message-log row for it either. If you need the attempt on record, note it yourself.
 - **A binary message (opcode 2) opens the hex editor**, not the text one. `↵` / `e` gives you the same byte editor the Repeater's `Ctrl-X` does: `0`-`9`/`a`-`f` overtype the nibble under the cursor, `Ins` inserts a `00` byte, `Del`/`⌫` remove one, arrows and `Home`/`End` move. The bytes never become a string, so protobuf, msgpack and CBOR survive an edit intact, which is why the text editor is not offered here, and why `Ctrl-E` (external editor) is refused on one. The card says `HEX` where it says `EDIT` on a text message, and the queue row shows the size instead of a preview.
-- **Editing a text message changes its line endings.** The editor normalises `CRLF` to `LF`, shared with the Repeater and the HTTP intercept editor. `$BIND.NAME` bindings are *not* expanded in a WebSocket payload (a `$` there is a byte, not a reference), so what you type is what is sent.
+- **Editing a text message keeps its line endings.** The payload goes out with every line's original terminator, as the Repeater and the HTTP intercept editor keep theirs. `$BIND.NAME` bindings are *not* expanded in a WebSocket payload (a `$` there is a byte, not a reference), so what you type is what is sent.
 - **An edited message is re-framed as one frame** and a client → server message is re-masked with a fresh key, exactly as a [Match & Replace rule](#match-replace-websocket) does. A message you forward unchanged keeps the sender's own frame and mask key.
 - **A hold has about 5 seconds left once the peer closes the other direction.** gori waits that long for the closing handshake to finish and then tears the socket down; anything still held is forwarded unedited. The same happens if a `CLOSE` arrives in the direction you are holding: everything undecided goes out in order, then the `CLOSE`, because the protocol forbids data frames after one.
 - **Only data messages are held.** `PING`, `PONG` and `CLOSE` always pass: holding a ping breaks keepalive by construction, and holding a close strands the tunnel.
@@ -81,7 +81,7 @@ Intercept works on HTTP/2 without downgrading the connection, so gRPC clients ke
 - **A held request delays later requests on the same connection.** HTTP/2 requires new streams to reach the origin in order, so requests that start *after* a held one wait for your decision, including while gori is still buffering that request's body. Requests already in flight keep uploading, all responses keep arriving, and a held *response* delays nothing at all.
 - **Match & Replace on a *body* still downgrades the connection to HTTP/1.1**, even though a hold can now edit one. They are different bargains: a hold buffers a single message you are already waiting on, under a length it can see, while a body rule would have to rewrite every matching message unattended, including the streaming ones a hold declines to buffer.
 
-Everything a head rule cannot express on HTTP/2 ([Head rules on HTTP/2](#head-rules-on-http2), below) applies to a head you edit by hand too.
+Everything a head rule cannot express on HTTP/2 ([Head rules on HTTP/2](#head-rules-on-http-2), below) applies to a head you edit by hand too.
 
 ## Scope
 
@@ -93,11 +93,11 @@ The **Sandbox** is a hard containment gate for staying strictly in-bounds during
 
 Because it is an allowlist, a scope with no include rules blocks all traffic, so add an include for your target first (enabling the sandbox with an empty scope asks you to confirm exactly this). A red `sandbox` chip in the top bar stays lit whenever it's on, and the Project settings row spells out the current effect right next to the toggle.
 
-The sandbox governs proxied and captured traffic only. Repeater, Fuzzer, Miner, and the MCP `send_request` tool enforce scope on their own (they refuse an out-of-scope target with `SCOPE_BLOCKED`). For HTTPS the sandbox relies on TLS interception to read request URLs: a host that can't be in scope is refused at the `CONNECT` step, and every request on a host that gets through is checked individually. That per-request check runs on HTTP/2 as well, per stream, so the sandbox no longer costs a host its protocol and gRPC clients keep working while it's on. Cleartext HTTP/2 tunnelled inside `CONNECT` (h2c, rare) gets the same per-stream check as any other HTTP/2 connection: the tunnel opens, and each out-of-scope stream on it is cancelled individually.
+The sandbox also stops gori's own sends: a Repeater, Fuzzer, Miner, `gori run` or MCP request to a host outside the allowlist is refused, even when the scope check was waived with `--allow-unscoped` / `allow_unscoped:true`. That up-front scope check is per surface: MCP refuses any target that is not in scope with `SCOPE_BLOCKED`, even when the project has no scope yet; `gori run` refuses a target outside a configured scope; the TUI's Repeater and sweeps have no up-front check, so only the sandbox and explicit excludes stop them. For HTTPS the sandbox relies on TLS interception to read request URLs: a host that can't be in scope is refused at the `CONNECT` step, and every request on a host that gets through is checked individually. That per-request check runs on HTTP/2 as well, per stream, so the sandbox no longer costs a host its protocol and gRPC clients keep working while it's on. Cleartext HTTP/2 tunnelled inside `CONNECT` (h2c, rare) gets the same per-stream check as any other HTTP/2 connection: the tunnel opens, and each out-of-scope stream on it is cancelled individually.
 
 ## Sitemap
 
-The **Sitemap** tab collapses History into a deduplicated tree of `host → path` endpoints, with method chips and scope markers. It's a quick way to see the shape of a target's attack surface. Press `g` to fold path-param ids, so `/user/1` and `/user/2` share one node and `/user/<uuid>` collapses into a single `{uuid}`. Query strings fold on their own axis: `/search?q=widgets` and `/search?q=<payload>` are one `/search` row, expandable to the variants, and `⇧G` turns that off.
+The **Sitemap** tab collapses History into a deduplicated tree of `host → path` endpoints, with method chips and scope markers. It's a quick way to see the shape of a target's attack surface. Path-param ids are folded by default, so `/user/1` and `/user/2` share one node and `/user/<uuid>` collapses into a single `{uuid}`; press `g` to show the literal ids. Query strings fold on their own axis: `/search?q=widgets` and `/search?q=<payload>` are one `/search` row, expandable to the variants, and `⇧G` turns that off.
 
 <figure class="tui-shot">
   <img src="/images/tui/sitemap.svg" alt="gori Sitemap tab showing captured hosts expanded into a tree of paths with method chips and per-host path counts">
@@ -114,6 +114,7 @@ Marks change **what the action menu acts on**, not which actions exist. The effe
 |--------|-----|-----------|
 | Tag path | `Space` `m` | One editor, one memo, applied to every marked path (blank clears them all) |
 | Send to Repeater | `r` | One sub-tab per marked endpoint, deduplicated by captured flow (max 20) |
+| Export OpenAPI | `⇧E` | One document covering every marked path |
 
 So `/ status:5xx` → `⇧T` marks every path the filter shows (or mark them one at a time with `t`) → `Space` → `m` → `auth` tags the lot, and `tag:auth` brings them back later. The menu title reads `SPACE · 3 MARKED` and the entries rename themselves (`Tag 3 paths`, `Send 3 paths to Repeater`). Discover and the Sequencer stay single-target (they scan one subtree / collect one endpoint's token), and their menu entries say `(cursor)` while marks are set.
 
@@ -202,7 +203,7 @@ Two payloads deliberately stay hex, on every surface:
 - **A compressed message.** The gRPC frame's `0x01` flag says the payload is compressed, and `grpc-encoding` names the codec. Compressed bytes are not a protobuf message until something inflates them, and gori does not, so the frame is shown as bytes with a note saying why.
 - **A grpc-web trailer frame.** Its payload is ASCII header lines, not protobuf.
 
-The tree is on every surface: the TUI's History and Repeater panes (`p` toggles between the tree and the byte preview; `^X` still gives the byte-exact dump), `gori run history show --format json` and the MCP `get_flow` tool (both as `grpc_messages[].protobuf`). A truncated or hostile message decodes as far as it parses and is marked `complete: false` rather than being rejected; the octets stay reachable either way.
+The tree is on every surface: the TUI's History and Repeater panes (`p` toggles between the tree and the byte preview; `^X` still gives the byte-exact dump), `gori run history show --format json` (as `grpc_messages[].protobuf`) and the MCP `get_flow` tool (as `request_grpc_messages` / `response_grpc_messages`). A truncated or hostile message decodes as far as it parses and is marked `complete: false` rather than being rejected; the octets stay reachable either way.
 
 ### …and with one {#proto-schema}
 
@@ -222,7 +223,7 @@ A descriptor set is itself protobuf, so gori parses one with its own decoder and
 
 - **A field number the schema does not declare is still shown**, drawn exactly as it is with no schema at all: every reading that fits, under `(undeclared)`. An undocumented field is often why you are reading the wire in the first place.
 - **A wire type the declaration contradicts is reported as a disagreement**, not quietly re-read: the row says what the schema declared and what actually arrived, and the raw reading is drawn underneath it. Either side can be the finding: a server that changed a field's type without a new number, or a stale `.desc`.
-- **The raw tree never goes away.** `gori run history show --format json` and MCP `get_flow` keep emitting `grpc_messages[].protobuf` unchanged and add `schema` beside it; `^X` still gives the byte-exact dump.
+- **The raw tree never goes away.** `gori run history show --format json` and MCP `get_flow` keep emitting the raw `protobuf` tree unchanged and add `schema` beside it; `^X` still gives the byte-exact dump.
 
 A gap in the schema is distinguished from a conflict with it: an enum value with no name, or a message type the set does not carry, is a note saying the schema is short, not a claim that the bytes are wrong. With no descriptor set loaded, every surface renders exactly what it did before.
 
@@ -331,7 +332,7 @@ gori run history -q 'status:5xx host:api.example.com'
 
 ## Views (`v`) {#views}
 
-A **view** is a named query the list narrows to, and it is a **mode**: press `v`, pick one, and it keeps narrowing while you type unrelated filters. That is the difference between a view and the filter bar: a view is ANDed *over* whatever you type, the same way the `s` scope lens is, so `/ status:5xx` refines the view instead of replacing it. The filter row carries a `v:name` chip so what you are looking at is never a guess. It is lowercase like the `f:follow` and ``s` scope` chips beside it, and abbreviated where a name is too wide for the row (`History + Repeater` shows as `v:history+rptr`). The name itself is unchanged everywhere it is a name (the picker, `gori run views`, `--view`, MCP), and `--view` ignores case, so `--view history` finds `History`.
+A **view** is a named query the list narrows to, and it is a **mode**: press `v`, pick one, and it keeps narrowing while you type unrelated filters. That is the difference between a view and the filter bar: a view is ANDed *over* whatever you type, the same way the `s` scope lens is, so `/ status:5xx` refines the view instead of replacing it. The filter row carries a `v:name` chip so what you are looking at is never a guess. It is lowercase like the `⌁follow` and `s scope` chips beside it, and abbreviated where a name is too wide for the row (`History + Repeater` shows as `v:history+rptr`). The name itself is unchanged everywhere it is a name (the picker, `gori run views`, `--view`, MCP), and `--view` ignores case, so `--view history` finds `History`.
 
 Seven views ship with every project, on two axes. The **source** views answer *is this evidence about the target, or something gori did?*; the **protocol** ones answer *which conversation am I reading?*
 
@@ -414,7 +415,7 @@ gori run ls --format json --column 'T=regex:tok=(\w+)'
 
 A `--column` spec is `[LABEL=][req|res:]kind:selector`. The label defaults to the selector, and the side to the response. A `=` only separates the label when it comes *before* the first `:`, so `regex:token=(\w+)` is the pattern you wrote and not a column called `regex:token`. MCP's `list_history` takes the same specs under a `columns` argument and carries the values back on each row. It is opt-in there, since a per-row block an agent did not ask for is paid for on every row of the page.
 
-## Marking flows (multi-select)
+## Marking flows (multi-select) {#marking-flows}
 
 Press `t` to **mark** the flow under the cursor and step to the next older one, so a run of `t` marks consecutive rows (in either list order). `Shift-↑` / `Shift-↓` extend a contiguous range from where you started, `Shift-T` marks everything the current filter shows, and `Esc` clears the marks. Marked rows get a full bar in the gutter and the filter row shows a live `3 marked` count.
 
@@ -424,7 +425,7 @@ Marks change **what the space menu acts on**, not which actions exist:
 
 > the effective target is **the marks if any are set, else the cursor row**
 
-So `/ status:5xx` → `Shift-T` → `Space` → `d` deletes every error in one confirm, and `Space` → `Y` copies all their URLs. The menu title reads `SPACE · 3 MARKED` and the entries rename themselves (`Delete 3 flows`, `Mine 3 flows`) so a batch is never a surprise.
+So `/ status:5xx` → `Shift-T` → `Space` → `d` deletes every error in one confirm, and `y` copies all their URLs. The menu title reads `SPACE · 3 MARKED` and the entries rename themselves (`Delete 3 flows`, `Mine 3 flows`) so a batch is never a surprise.
 
 | Action | Key | Over marks |
 |--------|-----|-----------|
@@ -439,7 +440,7 @@ So `/ status:5xx` → `Shift-T` → `Space` → `d` deletes every error in one c
 | Add host to scope | `Space` `H` | Hosts deduplicated: 12 flows on 2 hosts adds 2 rules |
 | Send to Comparer | `Space` `>` `c` | Exactly 2 marked fills A (older) and B (newer) directly |
 
-Marks survive a filter change, a re-sort, and leaving the tab and coming back; the count chip tells you how many are currently off-screen. Anything that sends traffic still asks first and still honours scope per request; marking changes the request count, never the gate. A few actions stay single-target because they only make sense for one flow (opening the detail, the Sequencer, opening a response in the browser, mocking a response); their menu entries say `(cursor)` while marks are set.
+Marks survive a filter change, a re-sort, and leaving the tab and coming back; the count chip tells you how many are currently off-screen. Anything that sends traffic still asks first and still honours scope per request; marking changes the request count, never the gate. A few actions stay single-target because they only make sense for one flow (opening the detail, the Sequencer, opening a response in the browser, mocking a response); the first three say `(cursor)` in the menu while marks are set.
 
 ## Copy a request as code {#copy-as-code}
 
@@ -481,13 +482,13 @@ Four things are worth knowing before you press it.
 
 **Relative assets will not load.** gori does not inject a `<base href>`, because that would make the page fetch its real CSS and JS from the live origin, traffic you did not ask for. So a page whose assets are relative renders unstyled. This shows you what the *response* said; point the [proxied browser](#clients-without-proxy) at the URL when you want what the *site* looks like.
 
-**HTML runs.** Opening a target's page in a browser executes its JavaScript, from a `file://` origin that cannot reach the target's cookies, the same bargain Burp's "Show response in browser" makes. gori does not strip scripts, because a neutered render is a different document from the one under test. The status line says so when the document is one a browser will execute, which is why the key is `Shift-B` rather than a bare letter.
+**HTML runs.** Opening a target's page in a browser executes its JavaScript, from a `file://` origin that cannot reach the target's cookies, the same bargain Burp's "Show response in browser" makes. gori does not strip scripts, because a neutered render is a different document from the one under test. The status line says so when the document is one a browser will execute, which is why it has no bare-letter key and lives in the menu (`Space` `>` `b`).
 
 The preview directory is gori's, mode `0700`, and swept to the newest 32 files on every write; wiping `~/.gori` takes it with them.
 
 ## Match & Replace (Rewriter tab) {#match-replace}
 
-The **Rewriter** tab is the Match & Replace editor: rules that rewrite requests and responses in flight. It sits on the tab bar right of Comparer, and the command palette reaches it too (`Ctrl-P` → **Match & Replace**, or **Go to Rewriter**).
+The **Rewriter** tab is the Match & Replace editor: rules that rewrite requests and responses in flight. It is off the tab bar by default: press **`0`** and type "rewriter", use the command palette (`Ctrl-P` → **Match & Replace**, or **Go to Rewriter**), or give it a slot in Preferences.
 
 Each rule has an operation:
 
@@ -497,7 +498,8 @@ Each rule has an operation:
 | **Add header** | Append a `Name: value` header |
 | **Set header** | Replace a header's value by name, or add it if absent |
 | **Remove header** | Drop a header by name |
-| **Short circuit** | Answer the request from the rule, without dialing the origin at all |
+| **Short circuit** (`stub` in the editor) | Answer the request from the rule, without dialing the origin at all |
+| **Pipe** | Run a command (no shell), feed it the matched bytes on stdin, and replace them with its stdout |
 
 A **Replace** rule targets the request or response, and the **head** (request/status line + headers), the **body** (the entity), or **ws** (a WebSocket message; see [Match & Replace on WebSocket](#match-replace-websocket) below). Choose literal or regex matching; a regex replacement supports `$1`/`$2` capture-group interpolation (write `$$` for a literal `$`). Header operations always act on the head and match by header name, case-insensitively. An empty value deletes the matched text or removes the header.
 
@@ -532,7 +534,7 @@ Every rule lives in one of two places, shown in the `G`/`P` column of the list:
 - **Project** rules are stored in the project database. They are what this engagement needs and nothing else sees them.
 - **Global** rules are stored in the `rewriter` section of `settings.json` and apply in **every** project: a standing policy like "strip CSP on `*.corp.internal`" that you do not want to rebuild per engagement.
 
-Set the scope in the editor's `scope:` row when you create a rule, or press `s` on the list to move an existing one between the two. The rule keeps its fields and its state where you are standing; what changes is who else sees it.
+Set the scope in the editor's `scope:` row when you create a rule, or `Space` → `s` on the list to move an existing one between the two. The rule keeps its fields and its state where you are standing; what changes is who else sees it.
 
 Global rules apply **first**, in their own order, then the project's own: the standing layer, then the local one. `Shift-J`/`Shift-K` reorder within a scope and never across it, because the boundary is not a position.
 
@@ -573,7 +575,7 @@ A rule rewrites in flight and nothing pauses. To stop a message and decide about
 
 ### Short circuit: answer without an origin {#short-circuit}
 
-The other four operations rewrite a message that already exists. **Short circuit** answers instead: the request is matched, gori replies with a response you wrote, and the origin is never dialed. That covers what a Replace rule structurally cannot: the endpoint 404s or 500s, the origin is offline or behind an auth wall, or the body has to be constructed rather than derived.
+The other operations rewrite a message that already exists. **Short circuit** answers instead: the request is matched, gori replies with a response you wrote, and the origin is never dialed. That covers what a Replace rule structurally cannot: the endpoint 404s or 500s, the origin is offline or behind an auth wall, or the body has to be constructed rather than derived.
 
 It is how you ask *"is this check enforced anywhere but the client?"*: force an authorization probe to return `{"isAdmin": true}`, flip an entitlement the client is trusted to honour, inject a payload into a JSON field to reach a DOM sink, or serve a malformed body to test the client's parsing.
 
@@ -652,7 +654,7 @@ Each rule carries a condition, a colour, and a style:
 | `full` | Tints the whole History row's background |
 | `strip` | Paints one colour cell in a narrow column ahead of `TIME`, a stripe down the left edge of the list |
 
-Both styles coexist: use `strip` for noise you want to be able to skip past, `full` for the rows you want to be unable to miss. Six colours (`red`, `orange`, `yellow`, `green`, `blue`, `purple`), resolved through the active theme, so they read correctly on light and dark palettes alike.
+Both styles coexist: use `strip` for noise you want to be able to skip past, `full` for the rows you want to be unable to miss. Six colours (`red`, `orange`, `yellow`, `green`, `blue`, `purple`), resolved through the active theme, so they read correctly on light and dark palettes alike. The tab's custom-colours pane adds named hex colours of your own; those are global and do not follow the theme.
 
 The tint **mixes into** the cursor and mark bands rather than replacing them, so a selected coloured row still reads as selected, and a marked one keeps its full gutter bar. The swatch column is only reserved while a `strip` rule is enabled, so a project with no colour rules renders exactly as before.
 
@@ -745,7 +747,7 @@ Projects can contain request and response credentials, session slots, env values
 
 ## Host Overrides
 
-Host overrides are a `/etc/hosts`-style map: dial a specific IP for a hostname without changing DNS. Two layers exist:
+Host overrides are a `/etc/hosts`-style map: dial a specific IP (or `IP:PORT`) for a hostname without changing DNS. Two layers exist:
 
 | Layer | Where | Precedence |
 |-------|-------|------------|
@@ -754,7 +756,11 @@ Host overrides are a `/etc/hosts`-style map: dial a specific IP for a hostname w
 
 Useful for staging hosts, IP-based virtual hosts, or pointing a production hostname at a lab box while keeping the `Host` header intact.
 
-## Clients That Cannot Use a Proxy
+## Upstream Proxy {#upstream-proxy}
+
+gori can dial through another proxy instead of going direct, for a corporate egress, a SOCKS tunnel, or a second tool chained behind it. Set it in Preferences (`Ctrl-,`) → **Network & Tabs** → **Network**: **Proxy protocol** (`None`, `HTTP`, `HTTP+TLS`, `SOCKS5` which resolves names locally, or `SOCKS5H` which resolves them at the proxy), **Proxy host** and **Proxy port**, plus **Proxy TLS CA** and **Verify proxy TLS** for an `HTTP+TLS` hop. A project can pin its own with `gori run project network set upstream_proxy=socks5h://127.0.0.1:1080` (with `upstream_destination_host` and `upstream_auth` beside it), which wins over the global value for that project only. `network.upstream_rules` routes individual hosts differently. While the protocol is `None` and nothing else claims a host, gori follows `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` from its environment (honouring `NO_PROXY`, and keeping localhost direct); the **Environment proxy** row shows what is in effect. The keys are in the [configuration reference](/reference/config/#network).
+
+## Clients That Cannot Use a Proxy {#clients-without-proxy}
 
 Some clients ignore proxy settings entirely: embedded devices, statically-linked binaries, anything that never reads `HTTP_PROXY`. For those, run a **transparent listener** and redirect traffic into it with your firewall; no client-side configuration is needed at all.
 
@@ -839,7 +845,7 @@ detail rather than whole facts.
 | **Scope** | Include/exclude rules (host, string, or regex) |
 | **Host overrides** | Per-project dial map |
 | **Env** | Per-project `$ENV.KEY` variables for outbound requests. See [Repeater & Fuzzer](/guide/repeater-and-fuzzer/#environment-variables) |
-| **Project settings** | Scope-lens + **sandbox** toggles, per-project network pins (bind / upstream) that override the global Settings default, and the gRPC [`.proto` schema](#proto-schema) path |
+| **Project settings** | Scope-lens + **sandbox** toggles, per-project network pins (bind, upstream proxy, timeouts, capture limit) that override the global Settings default, and the gRPC [`.proto` schema](#proto-schema) path |
 | **Activity** | Who changed what on this project: the append-only event feed, newest first. Config changes (scope rules, the sandbox, host overrides, `$ENV.KEY` vars, rewrite rules, the network pins) are recorded wherever they are made, and every row names the **actor** that made it: `tui`, `cli`, or `agent`. Background job results and agent tool calls land here too, and so does an operator message sent to an attached agent — source `operator`, one row per delivery, naming which layer it went out through (or why it did not). Filter by `s` source, `l` level, `a` actor or `/` text; `↵` opens the flow or session an event names, and `⇧X` empties the feed (it asks first, since the agent audit trail goes with it). `⇧X` is the same key that clears History, Probe issues, the Issues list and the Authorize queue, each in its own tab; plain `c` stays the capture toggle here as it does everywhere else. This is where a hook or a session binding that failed *without* raising a notification becomes visible |
 
 Scope rules and host overrides are also scriptable: `gori run project scope add --kind=include --type=host --pattern=api.example.com`, `gori run project host-override add --host=api.example.com --ip=10.0.0.1`. Full flags are in the [CLI Reference](/reference/cli/#run-project).

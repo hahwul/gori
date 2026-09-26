@@ -13,7 +13,7 @@ The **Decoder** runs a value through a chain of converters (base64, URL, JWT, a 
 
 ## 1. Open the Decoder and paste input
 
-Open the **Decoder** tab (from the tab bar, or `Ctrl-P` → **Go to Decoder**). Four cards stack top to bottom: **INPUT** (the source text), **CHAIN** (the converter spec), **PIPELINE** (one row per step), and **OUTPUT** (the final result). Put the cursor in **INPUT** and paste the value you want to work on: a cookie, a token, a Base64 blob lifted from a captured flow.
+Open the **Decoder** tab (off the bar by default: press **`0`** and type "decoder", or `Ctrl-P` → **Go to Decoder**). Four cards stack top to bottom: **INPUT** (the source text), **CHAIN** (the converter spec), **PIPELINE** (one row per step), and **OUTPUT** (the final result). Put the cursor in **INPUT** and paste the value you want to work on: a cookie, a token, a Base64 blob lifted from a captured flow.
 
 Each open conversion is a **sub-tab**, and sub-tabs are saved with the project, so a scratch pad you leave open comes back the next time you open that project and never follows you into another.
 

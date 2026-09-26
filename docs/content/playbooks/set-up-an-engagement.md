@@ -7,7 +7,7 @@ weight = 10
 group = "Foundations"
 +++
 
-Before you capture a single request, you set the boundaries of the test: which project holds the traffic, which hosts are in scope, and whether gori is allowed to touch anything else at all. This playbook walks all three. It takes about five minutes, and it is what makes every later step safe: Repeater, Fuzzer, and the scanners all refuse to fire at a target you haven't scoped.
+Before you capture a single request, you set the boundaries of the test: which project holds the traffic, which hosts are in scope, and whether gori is allowed to touch anything else at all. This playbook walks all three. It takes about five minutes, and it is what makes every later step safe: headless and agent sends refuse a target you haven't scoped, and the sandbox stops every surface, the TUI included.
 
 > **Before you begin.** Work through the [Quick Start](/getting-started/quick-start/) first, so gori is running and you can move between tabs. Have the host you're authorized to test in mind; the examples use `api.example.com` as a stand-in.
 
@@ -36,11 +36,11 @@ gori run project scope add --kind=exclude --type=regex --pattern='\.(css|js|png|
 
 Scope is evaluated as an **allowlist**: a flow is in scope when at least one include rule matches and no exclude rule does. That definition drives the next two steps.
 
-**Checkpoint.** `gori run project scope` (or the Scope sub-tab) lists both rules. Nothing is filtered or blocked yet; you've only described the boundary.
+**Checkpoint.** `gori run project scope` (or the Scope sub-tab) lists both rules. Nothing is filtered in the TUI yet; you've only described the boundary. One thing does change: `gori run` now refuses an active send to a host outside this scope.
 
 ## 3. Focus your view with the scope lens
 
-Press `s` anywhere to toggle the **scope lens**. It filters History, the Sitemap, and the other views down to in-scope traffic, so a busy capture collapses to just your target. It is a *lens*, not a gate: out-of-scope flows are still captured and reappear the moment you toggle it back off.
+Press `s` anywhere to toggle the **scope lens**. It filters History, the Sitemap, and the other views down to in-scope traffic, so a busy capture collapses to just your target, and it narrows what Intercept holds to in-scope requests. It is a *lens*, not a gate: out-of-scope flows are still captured and reappear the moment you toggle it back off.
 
 **Checkpoint.** With the lens on, History shows only `api.example.com` rows. Press `s` again and the rest of the traffic returns.
 
@@ -70,7 +70,7 @@ gori run project host-override add --host=api.example.com --ip=10.0.0.1
 
 ## Why scope comes first
 
-Scope isn't only a filter. The active tools enforce it on their own: **Repeater**, **Fuzzer**, **Miner**, and the MCP `send_request` tool refuse an out-of-scope target with a `SCOPE_BLOCKED` error, whether or not the sandbox is on. That is the guardrail that stops a stray replay or a fuzzing run from reaching a host you never meant to touch. Set scope once, here, and every later playbook inherits it.
+Scope isn't only a filter. The headless and agent surfaces enforce it on their own, whether or not the sandbox is on: `gori run` refuses an active send to a host outside a configured scope, and every MCP action tool refuses one that is not in scope with a `SCOPE_BLOCKED` error, even before any scope exists. In the TUI you typed the target yourself, so Repeater and the sweeps skip that check and the sandbox is what holds them in. Together that is the guardrail that stops a stray replay or a fuzzing run from reaching a host you never meant to touch. Set scope once, here, and every later playbook inherits it.
 
 ## Next Steps
 

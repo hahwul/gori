@@ -21,7 +21,7 @@ Read the same set headless, which also sends nothing on its own:
 
 ```bash
 gori run probe                       # passive findings only
-gori run probe --severity high       # only the high-severity rows
+gori run probe --severity high       # high and critical (a floor)
 gori run probe --category cors       # a single category
 ```
 
@@ -29,7 +29,7 @@ gori run probe --category cors       # a single category
 
 ## 2. File an issue
 
-**Issues** is the triage list you eventually hand to a report. Press `Shift-F` on a **History** flow or a Repeater send to file one; promote a **Probe** finding into an issue from the Probe tab. Give it a severity (`info` through `critical`) and a status (`open`, `confirmed`, `false-positive`, `resolved`). The flow you filed it from is linked as evidence, so the issue carries its own proof: `Enter` on the issue jumps straight back to that exchange.
+**Issues** is the triage list you eventually hand to a report. Press `Shift-F` on a **History** flow to file one (from a Repeater tab, `Space` → **Link…** → `+ New issue…`); promote a **Probe** finding into an issue from the Probe tab. Give it a severity (`info` through `critical`) and a status (`open`, `confirmed`, `false-positive`, `resolved`). The flow you filed it from is linked as evidence, so the issue carries its own proof: `Enter` opens the issue, where the flow is a **RELATED** row. `↵` on it shows the exchange in place and `s` opens it in History.
 
 <figure class="tui-shot">
   <img src="/images/tui/issues.svg" alt="gori Issues tab listing triaged findings with severity, status, host and title columns, one row selected and its linked evidence flow shown">
@@ -44,7 +44,7 @@ gori run issues update 7 --status confirmed --notes "Verified on staging"
 gori run probe promote 12            # confirm a Probe finding into Issues
 ```
 
-**Checkpoint.** The **Issues** tab shows your issue with its severity, and opening it jumps to the evidence flow.
+**Checkpoint.** The **Issues** tab shows your issue with its severity, and opening it lists the evidence flow under **RELATED**.
 
 ## 3. Prove it with the Comparer
 
@@ -108,7 +108,7 @@ gh api -X POST /repos/OWNER/REPO/code-scanning/sarifs \
   -f sarif="$(gzip -c issues.sarif | base64 | tr -d '\n')"
 ```
 
-Each issue arrives as one result carrying its URL, its severity, and, when you linked a flow, the actual request and response as `webRequest`/`webResponse`. An issue you triaged to `false-positive` or `resolved` exports as a SARIF *suppression*, so dismissing a finding in gori dismisses it in the dashboard rather than filing it again.
+Each issue arrives as one result carrying its URL, its severity, and, when you linked a flow, the actual request and response as `webRequest`/`webResponse` (with Authorization, Cookie, Set-Cookie and API-key header values as `[REDACTED]` unless you pass `--include-sensitive`). An issue you triaged to `false-positive` or `resolved` exports as a SARIF *suppression*, so dismissing a finding in gori dismisses it in the dashboard rather than filing it again.
 
 To hand over the raw traffic behind a finding, and not only the write-up, export a History query as one HAR log. It writes to STDOUT, loads into Burp, Charles, or a browser's network panel, and imports straight back into gori:
 

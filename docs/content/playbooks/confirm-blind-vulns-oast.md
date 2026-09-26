@@ -13,7 +13,7 @@ A blind SSRF, a blind XXE, remote file inclusion, or an out-of-band injection: n
 
 ## 1. Start a listener and grab a payload
 
-Open the **OAST** tab (visible by default, next to Fuzzer) and press `Ctrl-R` to start listening. gori registers with a provider (public `interactsh` by default) and mints a **payload**: a unique hostname/URL that belongs to you for this session. Copy it with `g` (get payload).
+Open the **OAST** tab (off the bar by default: press **`0`** and type "oast", or `Ctrl-P` → **Go to OAST**) and press `Ctrl-R` to start listening. gori registers with a provider (public `interactsh` by default) and mints a **payload**: a unique hostname/URL that belongs to you for this session. Copy it with `g` (get payload).
 
 Headless, when you want the listener in a script or an agent loop:
 
@@ -22,7 +22,7 @@ gori run oast listen         # ad-hoc: the registration dies with the process
 gori run oast listen --save  # …or keep it as a project session
 ```
 
-A bare `listen` is store-free and its registration dies with the process, which for a callback that arrives hours later means the payload is already dead. `--save` writes it into the project instead — `gori run oast list` shows it, `gori run oast resume ID` picks it up in a later process, and `gori run oast release ID` is the teardown. Over MCP the same switch is `oast_start` with `persist: true`. The TUI's `Ctrl-R` has always saved one; resume it with `r`.
+A bare `listen` is store-free and its registration dies with the process, which for a callback that arrives hours later means the payload is already dead. `--save` writes it into the project instead — `gori run oast list` shows it, `gori run oast resume ID` picks it up in a later process, and `gori run oast release ID` is the teardown. Over MCP the same switch is `oast_start` with `persist: true`. The TUI's `Ctrl-R` has always saved one; resume it with `Shift-R`.
 
 **Checkpoint.** The OAST tab shows a live payload URL, and the **Callbacks** table is empty and waiting.
 
@@ -34,7 +34,7 @@ Take that payload URL and put it where the target might dereference it. Send the
 
 ## 3. Watch for a callback
 
-Back on the **OAST** tab, callbacks land in the **Callbacks** table as the target's infrastructure resolves the name or connects back, each with its protocol (`dns` / `http` / `smtp`), source IP, timestamp, and the sub-identifier that tells you which payload fired. `Ctrl-X` stops polling but keeps the registration, so a payload you already planted keeps resolving; press `r` to resume later and pick up whatever the provider buffered while you were away.
+Back on the **OAST** tab, callbacks land in the **Callbacks** table as the target's infrastructure resolves the name or connects back, each with its protocol (`dns` / `http` / `smtp`), source IP, timestamp, and the sub-identifier that tells you which payload fired. `Ctrl-X` stops polling but keeps the registration, so a payload you already planted keeps resolving; press `Shift-R` to resume later and pick up whatever the provider buffered while you were away.
 
 <figure class="tui-shot">
   <img src="/images/tui/oast.svg" alt="gori OAST tab with a Callbacks table of four decrypted hits on an interactsh payload: two DNS A lookups and two HTTP GET requests, each with a source IP and the payload as destination">

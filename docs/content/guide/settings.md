@@ -21,7 +21,7 @@ The palette entries and the modal's sections come from the same list, so anythin
 
 ## Moving Around
 
-The modal has a group strip across the top (four groups) and the focused group's sections below it. Focus starts on the strip when you open with `Ctrl-,`, and on a field when you jump in from the palette.
+The modal has a group strip across the top (five groups) and the focused group's sections below it. Focus starts on the strip when you open with `Ctrl-,`, and on a field when you jump in from the palette.
 
 | Key | Action |
 |-----|--------|
@@ -30,9 +30,9 @@ The modal has a group strip across the top (four groups) and the focused group's
 | `↑` / `↓` | Move between fields; `↑` from the first field returns to the strip |
 | `↵` | Save the current section, or open a section's editor |
 | `Ctrl-R` | Reset the focused section to its defaults |
-| `Esc` | Close, discarding unsaved edits |
+| `Esc` | Close; with unsaved edits the first press warns and a second discards them |
 
-Edits are a working copy: nothing is written until you press `↵`, and `Esc` throws them away. Saving applies live, with no restart.
+Edits are a working copy: nothing is written until you press `↵`, and `Esc` twice throws them away (the first press names the unsaved sections). Saving applies live, with no restart.
 
 `Ctrl-R` follows the same rule on a field row: it restores that section's defaults into the working copy, and still needs `↵`. On an **opener** row there is no working copy to edit, so it asks first and then writes immediately: the tab bar, the theme, and your hotkeys can each be put back that way. **Env**, **User-Agents** and **Hostname overrides** hold entries you typed rather than preferences, so `Ctrl-R` there says so instead of quietly emptying them. The factory reset below is what clears those, and it warns you.
 
@@ -45,7 +45,7 @@ Edits are a working copy: nothing is written until you press `↵`, and `Esc` th
 | **Choice** | `←` / `→` cycles the options |
 | **Opener** | `↵` opens that section's own editor |
 
-Openers exist where a section needs more than a row of fields: the theme list, the tab bar, environment variables, hotkeys, and hostname overrides.
+Openers exist where a section needs more than a row of fields: the theme list, the tab bar, environment variables, hotkeys, hostname overrides, and the User-Agent list.
 
 ## The Sections
 
@@ -60,9 +60,9 @@ Openers exist where a section needs more than a row of fields: the theme list, t
 
 Notifications fire on background results from the Miner, Fuzzer, Probe, and Discover. The [Statusline](/guide/statusline/) runs a shell command on an interval and renders its stdout as the bottom row; the command reads a [JSON context](/guide/statusline/#context) describing the live session on stdin, and there are [ready-made commands](/guide/statusline/#presets) to paste into it.
 
-**Reset** is the whole file, not one section. `↵` (or `Ctrl-P` → **Settings: Reset**) asks, then puts `settings.json` back to a fresh install's state and applies it live: theme, keymap, tab bar, list and preview prefs, and the proxy bind. It also drops the data that lives in the same file: your global env values, hostname overrides, OAST provider tokens, saved decoder chains, and global rewriter and colormarker rules. Projects and their captures are untouched, and so are a project's own pinned bind and env.
+**Reset** is the whole file, not one section. `↵` (or `Ctrl-P` → **Settings: Reset**) asks, then puts `settings.json` back to a fresh install's state and applies it live: theme, keymap, tab bar, list and preview prefs, and the proxy bind. It also drops the data that lives in the same file: your global env values, hostname overrides, global OAST providers, saved decoder chains, global rewriter, colormarker and Probe rules, saved views, redaction profiles, upstream rules, outbound TLS settings, extra listeners, and the User-Agent list. Projects and their captures are untouched, and so are a project's own pinned bind and env.
 
-One thing survives on purpose: the global rule-id counters. A project can override a global rewriter or colormarker rule by id, and those overrides live in the project's own database, which a settings reset never opens. Rewinding the counter would hand a fresh rule an id an old override still names, so it keeps counting up and `settings.json` keeps a rules-less block to remember where it got to.
+Two things survive on purpose. The redaction salt is kept, because discarding it would break every placeholder in an artifact already written. And so are the global rule-id counters. A project can override a global rewriter or colormarker rule by id, and those overrides live in the project's own database, which a settings reset never opens. Rewinding the counter would hand a fresh rule an id an old override still names, so it keeps counting up and `settings.json` keeps a rules-less block to remember where it got to.
 
 ### Appearance
 
@@ -89,7 +89,7 @@ Placement decides what she costs *in a session* (the picker has only the one spo
 |---------|--------|
 | **Editor** | External editor, Markdown highlight, Pretty-print bodies |
 | **Mouse** | Mouse, Drag release |
-| **Keys** | Command modifier |
+| **Keys** | Command modifier, Editor keyset |
 | **Env** | Opener: global `$ENV.KEY` variables for outbound requests. It also reports the token grammar in force; switching that is [`gori settings env-syntax`](/reference/cli/#env-syntax), which re-spells the tokens already stored |
 | **User-Agents** | Opener: your own list for `$GEN.USER_AGENT`, one per line. It replaces the built-in browser list; empty means the built-in one |
 | **Hotkeys** | Opener: rebind any shortcut, or pick an OS default profile |
@@ -98,7 +98,7 @@ Placement decides what she costs *in a session* (the picker has only the one spo
 
 **Mouse** covers the pointer. Turning it off restores your terminal's own text selection; gori stops claiming click, wheel and drag entirely. **Drag release** decides what letting go of a drag over a text pane does: `select only` leaves the band highlighted and waits for the copy key (`y` in READ, `^Y` while typing), which is how gori has always behaved; `select + copy` also puts it on the clipboard there and then, the way a terminal's own primary selection does. A plain click selects nothing, so under `select + copy` it still copies nothing. The mode only ever acts on a band a drag actually built, and it copies through the same path the copy key uses, so the toast and the per-tab meaning of "copy" are identical either way.
 
-**Keys** and **Hotkeys** are the pair: Keys picks *which modifier* fronts gori's built-in chord family (`^P` `^N` `^W` `^1-9`); `Option (⌥)` adds `⌥` aliases without giving up Ctrl, for terminals that never deliver the Ctrl form. Hotkeys rebinds *individual actions*. See [Command modifier](/guide/hotkeys/#command-modifier), [Hotkeys](/guide/hotkeys/) and [environment variables](/guide/repeater-and-fuzzer/#environment-variables).
+**Keys** and **Hotkeys** are the pair: Keys picks *which modifier* fronts gori's built-in chord family (`^P` `^N` `^W` `^1-9`); `Option (⌥)` adds `⌥` aliases without giving up Ctrl, for terminals that never deliver the Ctrl form. Hotkeys rebinds *individual actions*. Keys also picks the **Editor keyset** (`helix` or `vim`), which respells a text pane's READ-mode keys; see [Editor keysets](/guide/hotkeys/#editor-keysets). See [Command modifier](/guide/hotkeys/#command-modifier), [Hotkeys](/guide/hotkeys/) and [environment variables](/guide/repeater-and-fuzzer/#environment-variables).
 
 ### Network & Tabs
 
@@ -119,7 +119,7 @@ How `gori mcp` delivers a "Tell the agent…" message to an attached agent. The 
 
 ## In the Project Picker
 
-`Ctrl-,` opens the same modal from the project picker, before any project is loaded, so you can set your theme on first launch. Every form section is editable there, and **Theme** is the one opener that works. The sections that need a live project (Tabs, Env, Hotkeys, and hostname overrides) stay hidden or report that you need to open a project first, and so does **Reset**, because a factory reset has to be applied to a running session.
+`Ctrl-,` opens the same modal from the project picker, before any project is loaded, so you can set your theme on first launch. Every form section is editable there, and **Theme** is the one opener that works. The sections that need a live project (Tabs, Env, Hotkeys, hostname overrides, and User-Agents) stay hidden or report that you need to open a project first, and so does **Reset**, because a factory reset has to be applied to a running session.
 
 ## Where Settings Live
 

@@ -25,7 +25,7 @@ gori settings          # print the settings.json path
 gori settings --edit   # open it in your editor
 ```
 
-You rarely need to edit the file by hand. Everything in it is editable in-app from one surface, the **Preferences** modal, grouped into four sub-tabs (General, Appearance, Editor & Keys, Network & Tabs):
+You rarely need to edit the file by hand. Everything in it is editable in-app from one surface, the **Preferences** modal, grouped into five sub-tabs (General, Appearance, Editor & Keys, Network & Tabs, AI):
 
 | Open it with | Lands on |
 |--------------|----------|
@@ -47,7 +47,7 @@ When nothing is set, the factory default is `127.0.0.1:8070`, direct. If `networ
 
 ## The Root CA
 
-To intercept HTTPS, clients must trust gori's root certificate, kept in `~/.gori/ca` as `root.crt.pem` and `root.key.pem`.
+To intercept HTTPS, clients must trust gori's root certificate, kept in `$GORI_HOME/ca` (`~/.gori/ca` by default) as `root.crt.pem` and `root.key.pem`.
 
 ```bash
 gori ca                       # print the certificate path

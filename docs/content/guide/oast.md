@@ -9,7 +9,7 @@ group = "Workbenches"
 
 Some bugs never show up in the response. A blind SSRF, a blind XXE, an out-of-band SQL injection, or a stored payload that only fires in a back-office browser all reach out to *some other server* instead of answering you. **OAST** (Out-of-band Application Security Testing) gives you that server: gori registers a payload URL with an interaction listener, you plant the payload in a request, and any DNS, HTTP, or SMTP callback the target makes to it shows up as a hit.
 
-The **OAST** tab is visible by default (next to Fuzzer). It has two sub-tabs: **Callbacks** (the hits, default) and **Providers** (the listeners you've configured).
+The **OAST** tab is off the bar by default: press **`0`** and type "oast", use the command palette (`Ctrl-P` → **Go to OAST**), or give it a slot in Preferences. It has two sub-tabs: **Callbacks** (the hits, default) and **Providers** (the listeners you've configured).
 
 <figure class="tui-shot">
   <img src="/images/tui/oast.svg" alt="gori OAST tab with a Callbacks table of four decrypted hits on an interactsh payload: two DNS A lookups and two HTTP GET requests, each with a source IP and the payload as destination">
@@ -36,7 +36,7 @@ The bar above the callbacks table selects which provider `g` and `Ctrl-R` act on
 | `interactsh` | Self-hosted or public [interactsh](https://github.com/projectdiscovery/interactsh) servers. Catches encrypted **DNS, HTTP, and SMTP** callbacks. Public presets: `oast.pro`, `oast.live`, `oast.site`, `oast.fun`, `oast.me`. Default. |
 | `custom-http` | A plain HTTP endpoint you control and poll for hits. |
 | `webhook.site` | The public [webhook.site](https://webhook.site) service (HTTP only). |
-| `BOAST` | A [BOAST](https://github.com/firebasextended/boast) server (public preset `odiss.eu`). |
+| `BOAST` | A [BOAST](https://github.com/marcohextor/BOAST) server (public preset `odiss.eu`). |
 | `postbin` | A PostBin instance (`postb.in`). |
 
 With interactsh, gori generates an RSA key pair locally, registers the public key, and decrypts each callback (the private key is stored `0600` in the project database and never logged). The payload id is derived locally from the correlation id, so you can mint many payloads from one registration without another round trip.

@@ -15,7 +15,7 @@ Repeater는 요청 워크벤치입니다. 플로우를 보내고, 요청의 어�
 
 **curl 명령을 붙여넣어** 시작할 수도 있습니다. Space → **Paste cURL**(`U`)이나 팔레트에서 붙여넣기 상자를 열고 붙여넣은 뒤 `Enter`를 누르면 요청마다 새 서브탭이 열립니다. 모든 플래그를 curl 자신의 의미로 읽고(`-b`는 쿠키, `-d`는 본문, `-u`는 basic 인증, `-G`는 데이터를 쿼리로 옮김), `-H` 줄은 입력한 그대로 순서도 유지하며, curl 자체의 `User-Agent`/`Accept`는 넣지 않습니다. 그래서 **Copy as → cURL**로 내보낸 요청이 바이트 그대로 돌아옵니다. 셸처럼 `\`로 끝나거나 따옴표가 열린 명령에서는 `Enter`가 다음 줄로 이어집니다. 전송 플래그(`-k`, `-x`, `-L`, `--resolve`, 타임아웃)는 gori가 자체 네트워크 설정으로 보내므로 무시하고 상태줄에 이름을 밝히며, 로컬 파일을 읽는 플래그(`-d @body.json`, `-F f=@a.png`, `-T`)는 이유와 함께 거부합니다. gori는 명령을 해석할 뿐 실행하지 않습니다.
 
-세션이 수십 개 쌓이면 칩 스트립이 스크롤되기 시작하고, `←`/`→`로 훑어 찾는 건 더 이상 현실적이지 않습니다. 스트립 위 어느 칩에서든 **`f`**를 누르면 전체 세션 목록이 뜹니다. 타이핑하면 이름·메서드·경로·대상 호스트·`#태그`로 걸러지고, `Enter`로 고른 세션으로 점프합니다. 같은 목록이 스트립 왼쪽 끝의 **`⌕`** 뒤에도 있습니다. 클릭하거나, 첫 칩에서 `←`로 이동하면 됩니다. Fuzzer, Notes, Decoder, JWT, Comparer, Miner, Sequencer 등 모든 워크벤치 스트립에 동일하게 있습니다.
+세션이 수십 개 쌓이면 칩 스트립이 스크롤되기 시작하고, `←`/`→`로 훑어 찾는 건 더 이상 현실적이지 않습니다. 스트립 위 어느 칩에서든 **`f`**를 누르면 전체 세션 목록이 뜹니다. 타이핑하면 이름·메서드·경로·대상 호스트·`#태그`로 걸러지고, `Enter`로 고른 세션으로 점프합니다. 같은 목록이 스트립 왼쪽 끝의 **`⌕`** 뒤에도 있습니다. 클릭하거나, 첫 칩에서 `←`로 이동하면 됩니다. Fuzzer, Notes, Decoder, JWT, Cookie, Comparer, Miner, Sequencer 등 모든 워크벤치 스트립에 동일하게 있습니다.
 
 서브탭은 일괄 처리를 위해 **마크**할 수도 있습니다. 스트립에서 `t`는 서 있는 칩을 마크하고 오른쪽으로 한 칸 이동하며, `Shift-T`는 `/` 필터가 보여주는 칩을 전부 마크하고, `Esc`는 스트립을 떠나기 전에 먼저 마크를 지웁니다. 마크된 칩에는 `▌` 막대가 붙습니다. 마크는 **서브탭 동작이 무엇에 작용하는지**를 바꾸는 것이지 동작 자체를 늘리는 게 아닙니다. History 목록이 이미 따르는 규칙과 같습니다.
 
@@ -23,8 +23,10 @@ Repeater는 요청 워크벤치입니다. 플로우를 보내고, 요청의 어�
 
 그래서 `Shift-T` → `Ctrl-W`는 열린 세션 전부를 confirm 한 번으로 닫고, `Ctrl-R`은 마크된 세션을 함께 보내며(각각 자기 연결로, 최대 20개, confirm 후), `Space` → `d`는 전부 복제하고, `Space` → `g`는 입력한 태그를 전부에 붙입니다(스트립의 `t`도, 메뉴의 `t`도 마크이므로 태그는 자기 글자를 따로 씁니다). 본문 패널에서는 같은 행들이 `Space` → `T`(**Sub-tabs…**) 아래 한 단계에 있습니다. 스트립에서 연 space 메뉴는 `SPACE · 3 MARKED`로 읽히고 항목 이름이 스스로 바뀝니다(`Close 3 sub-tabs`, `Send 3 sub-tabs`). 단일 대상으로 남는 동작은 `(cursor)`라고 말합니다. 필터가 가리고 있는 마크는 조용히 닫히지 않고 confirm에 드러납니다. Fuzzer, Notes, Decoder, JWT, Cookie, Comparer, Miner, Sequencer 등 모든 워크벤치 스트립이 같은 방식으로 마크·닫기·복제하며, 전송은 Repeater의 것입니다.
 
+요청 패널에는 요청을 한 번에 여러 개 보내는 동작이 두 가지 있습니다. `Space` → `G`(**Race marked sub-tabs**)는 마크한 서브탭(최소 2개, 최대 20개)을 하나의 동기화된 레이스로 보냅니다. HTTP/1.1에서는 요청마다 자기 연결로 보내고 마지막 바이트를 함께 풀며, HTTP/2에서는 single-packet으로 보냅니다. 마크한 탭은 모두 같은 오리진과 전송을 써야 하고, 응답마다 타이밍이 함께 표시됩니다. 헤드리스에서는 `gori run repeater race <id> <id>…`([CLI Reference](/ko/reference/cli/#run-repeater)), MCP에서는 `race_requests`입니다. `Space` → `g`(**Send group (one connection)**)는 패널의 요청들을 단독 `%%%` 줄로 나눠 keep-alive 연결 하나로 파이프라이닝하고 각 응답을 보여 주며, HTTP/1.1 일반 텍스트 모드에서만 동작합니다.
+
 <figure class="tui-shot">
-  <img src="/images/tui/repeater.svg" alt="편집 가능한 HTTP/2 요청 패널, 헤더와 JSON 본문을 보여주는 응답 패널, 그리고 1152ms 만에 재전송된 200 상태 줄을 갖춘 gori Repeater 탭">
+  <img src="/images/tui/repeater.svg" alt="편집 가능한 HTTP/2 요청 패널, 헤더와 JSON 본문을 보여주는 응답 패널, 그리고 sent → 200 상태 줄을 갖춘 gori Repeater 탭">
   <figcaption><strong>Repeater</strong>: 왼쪽에 편집 가능한 요청, 오른쪽에 실시간 응답과 소요 시간, 이전 전송과의 diff.</figcaption>
 </figure>
 
@@ -56,7 +58,7 @@ gori run repeater <flow-id> --target https://staging.example.com --diff
 | 토큰 | 해석 대상 | 시점 |
 |------|-----------|------|
 | `$ENV.KEY` | 전역 또는 프로젝트 환경 변수 | 빌드 시점, 요청을 구성하기 전 |
-| `$BIND.NAME` | extract 규칙이 채운 [세션 바인딩](/guide/proxy/#session-bindings) | 전송 시점, 활성 신원의 테이블에서 |
+| `$BIND.NAME` | extract 규칙이 채운 [세션 바인딩](/ko/guide/proxy/#session-bindings) | 전송 시점, 활성 신원의 테이블에서 |
 | `$GEN.NAME` | 내장 값 생성기 | 전송 시점, 아웃바운드 요청마다 한 번 |
 
 토큰은 에디터에서 리터럴 텍스트로 남아 있다가 나가는 길에서만 확장됩니다. Repeater, Fuzzer, Miner, Intercept 포워드, `gori run`, MCP `send_request`가 그 지점입니다.
@@ -148,13 +150,15 @@ Fuzzer는 Intruder 스타일 엔진입니다. 요청에서 위치를 표시하�
 
 요청에서 `§…§` 마커로 위치를 표시하거나, gori가 자동으로 배치하게 하세요. 페이로드 세트는 내장 프리셋(`sqli`, `xss`, `traversal`, `format-string`, `bad-strings`, `command-injection`, `cache-delimiters`. 파일 없이 바로 시작), 워드리스트, 명시적 목록, 숫자 범위, N개의 빈(null) 페이로드, 또는 무차별 대입 문자 세트가 될 수 있습니다. 프리셋은 추가 파일을 병합(내장 우선, 중복 제거)할 수 있고 다른 세트와 조합됩니다. 프로세서를 사용하면 나가는 각 페이로드를 변환할 수 있습니다: prefix/suffix, URL/base64/hex 인코딩, 대소문자 변환, 해싱, 정규식 치환.
 
-마커 하나에 자체 Decoder 체인을 붙일 수도 있습니다. 커서를 마커 안에 두고 `Ctrl-Q`를 누르면 체인 편집기가 열리고, 보내기 전에 값이 각 단계를 거치는 모습을 미리 보여 줍니다. [Decoder 라이브러리에 저장해 둔 체인](/ko/guide/decoder/#building-a-chain)은 여기서 이름으로 부를 수 있어서, 한 번 만들어 둔 체인이 마커 안에서는 단어 하나가 됩니다: `§admin¦myenc > url-encode§`. Repeater 마커도 동일합니다.
+마커 하나에 자체 Decoder 체인을 붙일 수도 있습니다. 커서를 마커 안에 두고 `Ctrl-Q`를 누르면 체인 편집기가 열리고, 보내기 전에 값이 각 단계를 거치는 모습을 미리 보여 줍니다. [Decoder 라이브러리에 저장해 둔 체인](/ko/guide/decoder/#building-a-chain)은 여기서 이름으로 부를 수 있어서, 한 번 만들어 둔 체인이 마커 안에서는 단어 하나가 됩니다: `§admin¦myenc > url-encode§`. Repeater 마커도 TUI 탭에서는 동일하게 동작합니다. 마커는 탭이 전송할 때 렌더링하는 초안 언어이므로 헤드리스 표면은 렌더링하지 않습니다. `gori run repeater send`, MCP `send_request`, 재테스트 단계는 탭이라면 렌더링했을 `§…§`가 든 세션을 리터럴 `§` 바이트로 내보내지 않고 **거부**합니다. 거기서 보내려면 마커를 지우거나, 마크된 요청을 Fuzzer 템플릿으로 스윕하거나(`gori run fuzz --request=FILE`, `fuzz_start{template}`), `--verbatim` / `verbatim:true`로 저장된 바이트가 곧 메시지라고 밝히세요. 캡처 자체에 들어 있던 `§`는 건드리지 않습니다. gori는 그것을 직접 입력한 것과 구분할 수 없으므로 탭은 그대로 두고, 모든 표면이 바이트 그대로 재생합니다.
 
 gRPC 메시지는 마커가 유용하게 쓰이지 않는 유일한 곳입니다. 위치가 바이트 범위가 아니라 스키마가 아는 필드인 [gRPC 필드 스윕](#sweeping-a-grpc-field)을 보세요.
 
 ### 매칭 {#matching}
 
-ffuf 스타일 matcher와 filter로 status, size, words, lines, 왕복 시간(`--mt`/`--ft`, ms 단위. 시간 기반 블라인드 페이로드의 유일한 증거가 되는 차원), 본문 정규식에 대해 결과를 필터링합니다. 여기에 시끄러운 기준선을 걸러내는 자동 보정까지 더해집니다. 자동 보정은 스윕 전에 대상을 여러 번 샘플링한 뒤, 각 응답을 모든 샘플 형태와 비교하되 그 샘플들이 스스로 보여 준 흔들림만큼 폭을 넓혀서 비교합니다. 그래서 요청마다 달라지는 id나 타임스탬프를 품은 페이지는 걸러지고, 샘플이 전부 동일했던 대상은 여전히 정확히 비교됩니다. 매칭된 응답은 강조되며 캡처 정규식으로 추출할 수 있습니다.
+ffuf 스타일 matcher와 filter로 status, size, words, lines, 왕복 시간(`--mt`/`--ft`, ms 단위. 시간 기반 블라인드 페이로드의 유일한 증거가 되는 차원), 본문 정규식에 대해 결과를 필터링합니다(헤드리스에서는 `--mh`/`--fh`로 응답 헤드 부분 문자열, `--mg`/`--fg`로 gRPC status도). 여기에 시끄러운 기준선을 걸러내는 자동 보정까지 더해집니다. 자동 보정은 스윕 전에 대상을 여러 번 샘플링한 뒤, 각 응답을 모든 샘플 형태와 비교하되 그 샘플들이 스스로 보여 준 흔들림만큼 폭을 넓혀서 비교합니다. 그래서 요청마다 달라지는 id나 타임스탬프를 품은 페이지는 걸러지고, 샘플이 전부 동일했던 대상은 여전히 정확히 비교됩니다. 매칭된 응답은 강조되며 캡처 정규식으로 추출할 수 있습니다.
+
+ADVANCED 카드에는 실행을 다듬는 행도 있습니다. **Stop after N hits**와 **Stop on (DIM:SPEC)**은 matcher가 N번 히트했거나 응답이 조건 하나를 만족하면 스윕을 일찍 끝내며, 이렇게 멈춘 실행은 `stopped`가 아니라 `condition_met`으로 끝납니다. **Keep interesting only**는 저장한 실행에 매칭·오류·정지 행만 남깁니다. **Race (N conns)**는 페이로드 스윕 대신 요청 복사본 N개를 함께 풀어 보내고(last-byte sync), **Max requests**는 실제 와이어 요청 수에 상한을 둡니다. 헤드리스에서는 `--stop-after-matches`, `--stop-on`, `--keep`, `--race`, `--max-requests`입니다. [CLI Reference](/ko/reference/cli/#run-fuzz)를 참고하세요.
 
 ### 실행 저장과 다시 열기 {#saving-and-reopening-runs}
 

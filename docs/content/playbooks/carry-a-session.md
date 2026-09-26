@@ -38,21 +38,23 @@ For a token in a JSON body instead, use `--kind jsonpath --selector '$.access_to
 
 ## 3. Write it back on every request
 
-Binding the name only captured the value; a **Match & Replace** rule is what puts it back on the wire. On the **Rewriter** tab add a **set header** rule on the **request** side that sets `Authorization` (or `Cookie`) to `$BIND.SESSION`. The `$BIND.SESSION` is resolved when each request goes out, not when you saved the rule, so every Repeater and Fuzzer send from here leaves authenticated.
+Binding the name only captured the value; you still have to put it back on the wire, and how depends on who sends. For traffic through the proxy (your browser or client), a **Match & Replace** rule does it: on the **Rewriter** tab add a **set header** rule on the **request** side that sets `Authorization` (or `Cookie`) to `$BIND.SESSION`. The `$BIND.SESSION` is resolved when each request goes out, not when you saved the rule, so every proxied request from here leaves authenticated.
 
 ```bash
 gori run rewriter add --op set_header --target request \
   --find Authorization --value 'Bearer $BIND.SESSION' --host '*.example.com'
 ```
 
-**Checkpoint.** A Repeater replay of a protected endpoint that returned `401` before now returns `200`. If the rule is skipped instead, the events feed says the name resolved to nothing; recapture the login to rebind it.
+Match & Replace rules touch proxied traffic only: a Repeater or Fuzzer send goes out exactly as you wrote it. So for those, write the name into the request itself. An `Authorization: Bearer $BIND.SESSION` line in the Repeater editor or a fuzz template is resolved at send time the same way, and a session slot (step 5) adds the header for you without editing each request.
+
+**Checkpoint.** A request through the proxy to a protected endpoint that returned `401` before now returns `200`, and so does a Repeater send whose `Authorization` line reads `Bearer $BIND.SESSION`. If the rule is skipped instead, the events feed says the name resolved to nothing; recapture the login to rebind it.
 
 ## 4. Do it headless
 
-`gori run` is one process per invocation, and a binding lives only in the memory of the process that observed the login, so a fresh `fuzz` or `mine` has nothing to resolve `$BIND.SESSION` with and is refused before it sends. A sweep is deliberately not an extraction source either: a response echoing an attack payload back could otherwise rebind your session to a payload-derived value. `--bind-from` closes the gap. It replays one captured flow, the login, first, so its response fills the binding table for the rest of the run in the same process:
+`gori run` is one process per invocation, and a binding lives only in the memory of the process that observed the login, so a fresh `fuzz` or `mine` has nothing to resolve `$BIND.SESSION` with, and the token goes out as literal text. A sweep is deliberately not an extraction source either: a response echoing an attack payload back could otherwise rebind your session to a payload-derived value. `--bind-from` closes the gap. It replays one captured flow, the login, first, so its response fills the binding table for the rest of the run in the same process. The template has to name the token, so fuzz a request file whose `Authorization` line reads `Bearer $BIND.SESSION` (a captured flow's own bytes never mention it; step 5's `--slot` adds the header to those):
 
 ```bash
-gori run fuzz 42 --bind-from 17 --wordlist ids.txt
+gori run fuzz --request req.http --target https://api.example.com --bind-from 17 --wordlist ids.txt
 # bind-from: flow #17 replayed → bound $BIND.SESSION
 ```
 

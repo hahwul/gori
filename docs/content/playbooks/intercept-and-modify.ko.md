@@ -13,7 +13,7 @@ Repeater는 사후에 사본을 편집하지만, 인터셉트는 클라이언트
 
 ## 1. 인터셉트 무장 {#1-arm-intercept}
 
-`i`를 눌러 **Intercept**를 켜거나, **Intercept** 탭을 열어 거기서 catch를 무장합니다. 조건이 비어 있으면 *모든 것*을 붙잡습니다(프록시를 지나는 모든 요청이 결정을 내릴 때까지 멈춥니다). 그러니 풀어놓기 전에 필터 바에서 쿼리 언어 표현식으로 좁히세요:
+`i`를 눌러 **Intercept**를 켜거나, **Intercept** 탭을 열어 거기서 catch를 무장합니다. 조건이 비어 있으면 *모든 것*을 붙잡습니다(프록시를 지나는 모든 요청이 결정을 내릴 때까지 멈춥니다. `s` 스코프 렌즈가 켜져 있으면 스코프 안의 모든 것). 그러니 풀어놓기 전에 필터 바에서 쿼리 언어 표현식으로 좁히세요:
 
 ```text
 host:api.example.com method:POST
@@ -32,7 +32,7 @@ host:api.example.com method:POST
 
 ## 2. 요청을 잡아 편집하기 {#2-catch-a-request-and-edit-it}
 
-클라이언트에서 매칭되는 요청을 발생시킵니다: 브라우저 클릭, `curl`, Repeater 전송 등. 요청은 떠나는 대신 Intercept 큐에 멈춥니다. 그것을 선택하고 `↵` / `e`를 눌러 raw 바이트를 에디터에서 열고(Repeater가 쓰는 것과 같은 INS 모드 에디터), 필요한 것을 바꾼 뒤(헤더 값, JSON 필드, 경로 등) `f`로 편집된 요청을 **forward**(전달)합니다. `Esc`는 전송 없이 에디터를 빠져나옵니다.
+클라이언트에서 매칭되는 요청을 발생시킵니다: 브라우저 클릭, `curl`, Repeater 전송 등. 요청은 떠나는 대신 Intercept 큐에 멈춥니다. 그것을 선택하고 `↵` / `e`를 눌러 raw 바이트를 에디터에서 열고(Repeater가 쓰는 것과 같은 INS 모드 에디터), 필요한 것을 바꾼 뒤(헤더 값, JSON 필드, 경로 등) `Ctrl-R`로 편집된 요청을 **forward**(전달)합니다. `Esc`는 전송 없이 에디터를 빠져나오되 편집은 유지하므로, 큐에서 `f`를 눌러도 전달됩니다. 에디터 안에서 `f`는 그냥 `f`를 입력합니다.
 
 Headless로는 같은 큐를 실행 중인 TUI에 대해 두 번째 터미널에서 조종할 수 있습니다:
 
@@ -41,7 +41,7 @@ gori run intercept                       # 붙잡힌 항목 + catch 상태 나�
 gori run intercept edit 3 --raw-file edited.txt   # 편집된 바이트로 항목 3 전달
 ```
 
-편집된 요청은 `Content-Length`가 재동기화되고(기본 켜짐, `Ctrl-L`로 토글) `$ENV.KEY` [환경 변수](/ko/guide/repeater-and-fuzzer/#environment-variables)가 확장되어 전달됩니다(텍스트 그대로 보내려면 `$$ENV.KEY`). extract 규칙의 `$BIND.NAME` 바인딩은 이 경로에서 해석되지 않습니다. 그 외에는 입력한 그대로 나갑니다.
+TUI 에디터에서 편집된 요청은 `Content-Length`가 재동기화되고(기본 켜짐, `Ctrl-L`로 토글) `$ENV.KEY` [환경 변수](/ko/guide/repeater-and-fuzzer/#environment-variables)와 `$GEN.*` 토큰이 확장되어 전달됩니다(텍스트 그대로 보내려면 `$$ENV.KEY`). extract 규칙의 `$BIND.NAME` 바인딩은 이 경로에서 해석되지 않습니다. `gori run intercept edit`는 아무것도 확장하지 않습니다. 본문은 그대로 나가고, `--no-update-content-length`를 주면 선언한 `Content-Length`를 유지합니다. 그 외에는 입력한 그대로 나갑니다.
 
 **체크포인트.** 편집된 요청이 origin에 닿습니다. **History**로 전환해 그 플로우를 읽어 변경과 origin의 응답을 확인하세요.
 
@@ -55,11 +55,11 @@ gori run intercept edit 3 --raw-file edited.txt   # 편집된 바이트로 항�
 
 Forward와 drop은 마킹된 행이 있으면 그것에, 없으면 커서 행에 작용합니다. 그래서 `t`로 여러 행을 마킹하고 `f` 한 번이면 함께 풀립니다. 각각은 운영자가 결정하며, 자동으로 적용되는 것은 없습니다.
 
-**체크포인트.** 요청 하나는 손대지 않고 전달하고 다른 하나는 drop했으며, History가 둘 다 기록합니다. drop은 취소된 플로우로 남습니다.
+**체크포인트.** 요청 하나는 손대지 않고 전달하고 다른 하나는 drop했으며, History가 둘 다 기록합니다. drop은 `dropped by intercept (request)` 메모가 붙은 aborted 플로우로 남습니다.
 
 ## 4. Match & Replace로 편집을 영구화하기 {#4-make-an-edit-permanent-with-match-replace}
 
-같은 편집을 손으로 하려고 매 요청을 붙잡는 것은 금세 지칩니다. 상시 편집은 **Rewriter** 탭에 속합니다(Match & Replace 에디터, 탭 바에서 Comparer 오른쪽, 또는 `Ctrl-P` → **Match & Replace**). 연산이 있는 규칙을 추가하고(헤드나 본문의 텍스트를 **Replace**, 헤더를 **Add** / **Set** / **Remove**, 또는 origin을 전혀 다이얼하지 않고 규칙에서 요청에 답하는 **Short circuit**), 매칭되는 트래픽에만 발동하도록 host glob으로 스코프를 겁니다:
+같은 편집을 손으로 하려고 매 요청을 붙잡는 것은 금세 지칩니다. 상시 편집은 **Rewriter** 탭에 속합니다(Match & Replace 에디터. 기본적으로 탭 바 밖에 있으니 **`0`**을 누르고 "rewriter"를 입력하거나 `Ctrl-P` → **Match & Replace**). 연산이 있는 규칙을 추가하고(헤드나 본문의 텍스트를 **Replace**, 헤더를 **Add** / **Set** / **Remove**, origin을 전혀 다이얼하지 않고 규칙에서 요청에 답하는 **Short circuit**, 또는 매칭된 바이트를 명령에 넘기는 **Pipe**), 매칭되는 트래픽에만 발동하도록 host glob으로 스코프를 겁니다:
 
 ```bash
 gori run rewriter add --op set_header --target request \
@@ -74,4 +74,4 @@ gori run rewriter add --op set_header --target request \
 
 - [파라미터 퍼징](/ko/playbooks/fuzz-a-parameter/): 이 요청 중 하나를 가져와 값을 워드리스트로 훑습니다
 - [Proxy & History](/ko/guide/proxy/#intercept): Intercept 전체 레퍼런스, HTTP/2와 WebSocket 규칙
-- [Match & Replace](/ko/guide/proxy/): 모든 rewrite 연산, short-circuit 스텁, global 대 project 스코프
+- [Match & Replace](/ko/guide/proxy/#match-replace): 모든 rewrite 연산, short-circuit 스텁, global 대 project 스코프
