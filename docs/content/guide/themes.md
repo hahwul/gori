@@ -7,7 +7,7 @@ weight = 100
 group = "Customize"
 +++
 
-gori ships thirty built-in colour themes: `goridark` (the default), `goriday`, `latte`, `espresso`, `tokyonight`, `gruvbox`, `nord`, `dracula`, `solarized_light`, `rosepine_dawn`, `catppuccin_mocha`, `monokai`, `everforest`, `onedark`, `kanagawa`, `github_dark`, `zenburn`, `synthwave84`, `cyberpunk`, `matrix`, `cobalt2`, `high_contrast`, `github_light`, `gruvbox_light`, `one_light`, `ayu_light`, `rosepine`, `tokyonight_day`, `dancheong`, and `hanji`.
+gori ships thirty-two built-in colour themes: `goridark` (the default), `goriday`, `dancheong`, `hanji`, `latte`, `espresso`, `tokyonight`, `gruvbox`, `nord`, `dracula`, `solarized_light`, `rosepine_dawn`, `catppuccin_mocha`, `monokai`, `everforest`, `onedark`, `kanagawa`, `github_dark`, `zenburn`, `synthwave84`, `cyberpunk`, `matrix`, `cobalt2`, `high_contrast`, `github_light`, `gruvbox_light`, `one_light`, `ayu_light`, `rosepine`, `tokyonight_day`, `solarized_dark`, and `everforest_light`.
 
 ## Switching Themes
 

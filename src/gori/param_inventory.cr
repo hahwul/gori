@@ -92,7 +92,7 @@ module Gori
       # The name as a wordlist entry: a JSON row contributes its LEAF member (what Miner's
       # Json location injects), everything else its name. nil for an array-element leaf.
       def word : String?
-        location.json? ? Params.json_leaf(name) : name
+        ParamInventory.word(location, name)
       end
     end
 
@@ -371,6 +371,59 @@ module Gori
       rows.each { |r| (w = r.word) && own << w if r.host.downcase == h && r.path == path }
       neighbors = rows.select { |r| r.host.downcase == h && r.path != path }
       wordlist(neighbors).reject { |w| own.includes?(w) }
+    end
+
+    # A parameter's name as a wordlist entry: a JSON parameter contributes its LEAF member
+    # (what Miner's Json location injects), everything else its name. nil for an array leaf.
+    def word(location : Miner::Location, name : String) : String?
+      location.json? ? Params.json_leaf(name) : name
+    end
+
+    # Newest flows `seed_names` reads for one host. A Miner seed is a guess list, not a report,
+    # so it reads fewer than the Params sub-tab does.
+    SEED_MAX_FLOWS = 2000
+
+    # `neighbor_names` for the endpoint each of `flows` stands on, by flow id, read straight
+    # from the store: what a History mine seeds with, where no Params scan is on screen to
+    # read. One walk per HOST, however many of the flows share it, over the same newest-first
+    # flow set `build` walks — but names only: request head and body alone (no response BLOB
+    # is read), and no rows, samples, sensitivity or reflection. Names come newest sighting
+    # first, so a request-capped mine spends its budget on what the host uses now. A host
+    # `stop` cut short gets no entries.
+    def seed_names(store : Store, flows : Enumerable(Store::FlowRow), max_flows : Int32 = SEED_MAX_FLOWS,
+                   stop : -> Bool = -> { false }) : Hash(Int64, Array(String))
+      out = {} of Int64 => Array(String)
+      flows.group_by(&.host.downcase).each do |host, group|
+        break if stop.call
+        sightings = host_words(store, host, max_flows, stop)
+        break if stop.call # a walk `stop` cut short read a partial host
+        group.each do |f|
+          path = endpoint_path(f.target)
+          own = sightings.compact_map { |(p, w)| w if p == path }.to_set
+          names = Set(String).new
+          sightings.each { |(p, w)| names << w if p != path && !own.includes?(w) }
+          out[f.id] = names.to_a
+        end
+      end
+      out
+    end
+
+    # {endpoint path, word} per distinct sighting on `host`, newest flow first. Header names
+    # are left out (see `wordlist`), as are words the wordlist format cannot carry.
+    private def host_words(store : Store, host : String, max_flows : Int32, stop : -> Bool) : Array({String, String})
+      seen = Set({String, String}).new
+      out = [] of {String, String}
+      each_flow(store, host_filter(Options.new(host: host)), max_flows, ->(_row : Store::FlowRow) { true },
+        -> { stop.call || out.size >= ROW_CAP }) do |row|
+        next unless parts = store.request_parts(row.id)
+        path = endpoint_path(row.target)
+        Params.each(parts[0], parts[1]) do |p|
+          next if p.loc.headers?
+          next unless (w = word(p.loc, p.name)) && wordlist_safe?(w)
+          out << {path, w} if seen.add?({path, w})
+        end
+      end
+      out
     end
   end
 end

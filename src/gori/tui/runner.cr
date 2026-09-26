@@ -808,6 +808,7 @@ module Gori::Tui
             dirty = true if sitemap_controller.drain_export
             dirty = true if sitemap_controller.drain_js_scan
             dirty = true if target_controller.params.drain_build
+            dirty = true if miner_controller.drain_seed_names
             dirty = true if drain_import_events
             # Tick the top-bar clock: dirty only when the displayed minute changes, so the
             # idle loop wakes once a minute to repaint rather than every second.
@@ -5292,7 +5293,8 @@ module Gori::Tui
 
     # --- Miner ExecContext / cross-tab mediators ---
 
-    private def open_mine_config(seed : MineSeed?, extra : Array(MineSeed) = [] of MineSeed) : Nil
+    # The popup it opened, or nil when it refused (the toast says why).
+    private def open_mine_config(seed : MineSeed?, extra : Array(MineSeed) = [] of MineSeed) : MineConfigOverlay?
       unless seed
         @toast = "can't mine this request"
         return
@@ -5307,7 +5309,11 @@ module Gori::Tui
       # its header names the flow count, so N sessions are never a surprise (P4).
       ov.on_commit = -> {
         if ov.any_checked?
-          status("mine prefs applied — could not save to #{Settings.path}", :error) unless ov.save_prefs
+          saved = ov.save_prefs
+          # Start does not wait on the inventory scan: it ends here, and the run tests the
+          # wordlist alone. Said below, so an unseeded run is not taken for a seeded one.
+          unseeded = ov.seeding?
+          miner_controller.cancel_seed_scan
           miner_controller.start_session(ov.seed, ov.build_config)
           started = 1
           ov.extra_seeds.each do |s|
@@ -5316,11 +5322,20 @@ module Gori::Tui
             # on a marked GET. build_config returns a fresh Config each call.
             cfg = ov.build_config
             cfg.locations = cfg.locations & s.applicable
+            cfg.seed_names = s.names # its own endpoint's neighbours, not the first seed's
             next if cfg.locations.empty?
             miner_controller.start_session(s, cfg)
             started += 1
           end
-          @toast = "mining #{started} flows in the background" unless ov.extra_seeds.empty?
+          # One message, most important first: a failed save is an error the operator must
+          # see, so neither of the others may replace it.
+          if !saved
+            status("mine prefs applied — could not save to #{Settings.path}", :error)
+          elsif !ov.extra_seeds.empty?
+            @toast = "mining #{started} flows in the background#{unseeded ? " — inventory scan unfinished, no names seeded" : ""}"
+          elsif unseeded
+            @toast = "inventory scan unfinished — mining without its names"
+          end
           true
         else
           @toast = "select at least one location to mine"
@@ -5328,6 +5343,7 @@ module Gori::Tui
         end
       }
       open_overlay(ov)
+      ov
     end
 
     # --- Sequencer ExecContext / cross-tab mediators ---

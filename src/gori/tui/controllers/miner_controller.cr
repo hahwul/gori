@@ -4,6 +4,7 @@ require "../mine_config_overlay"
 require "../../store"
 require "../../miner"
 require "../../env"
+require "../../param_inventory"
 
 module Gori::Tui
   # One open mining session (a sub-tab under the Miner tab). `flow_id` is the source
@@ -28,6 +29,7 @@ module Gori::Tui
       end
       @current_idx = @miners.empty? ? -1 : 0
       @mine_events = Channel({MinerView, Miner::Event}).new(256)
+      @seed_names = Channel({Int64, MineConfigOverlay, Hash(Int64, Array(String))?}).new(1)
     end
 
     def tab : Symbol
@@ -505,6 +507,54 @@ module Gori::Tui
       appl = Miner::Plan.applicable_locations(built.bytes)
       summary = request_summary(built.bytes)
       MineSeed.new(built.target, built.bytes, built.http2, nil, id, summary, appl.applicable, appl.default)
+    end
+
+    # Bumped by every `scan_seed_names` and by `cancel_seed_scan`: a scan whose generation
+    # moved stops walking, and `drain_seed_names` drops what it sends.
+    getter seed_generation : Int64 = 0_i64
+
+    # A History mine's seed names (#1231): the parameter inventory's neighbour names for each
+    # flow `ov` seeds, read on a WORKER fiber — the scan walks flows, and on the one
+    # cooperative scheduler a synchronous walk would freeze the popup it is filling (P6). They
+    # land through `drain_seed_names`. The scan is superseded, never stopped by what is on
+    # screen: a confirm dialog that covers the popup for a moment must not cut it short.
+    def scan_seed_names(ov : MineConfigOverlay) : Nil
+      ids = ([ov.seed] + ov.extra_seeds).compact_map(&.flow_id)
+      return if ids.empty?
+      gen = (@seed_generation += 1)
+      ov.begin_seeding
+      store = @host.session.store
+      results = @seed_names
+      me = self
+      spawn(name: "gori-mine-seed-names") do
+        # nil = the scan raised; the popup then says seeding failed instead of spinning on.
+        by_flow = begin
+          ParamInventory.seed_names(store, store.flow_rows(ids), stop: -> { me.seed_generation != gen })
+        rescue ex
+          ::Log.warn(exception: ex) { "mine seed-name scan failed" }
+          nil
+        end
+        results.send({gen, ov, by_flow})
+      end
+    end
+
+    # The popup started its mine (or went away): its scan has nothing left to feed.
+    def cancel_seed_scan : Nil
+      @seed_generation += 1
+    end
+
+    # Each run-loop tick: land the current seed-name scan on its popup. True when it landed
+    # (→ a frame); a superseded or cancelled scan's answer is dropped.
+    def drain_seed_names : Bool
+      select
+      when landed = @seed_names.receive
+        gen, ov, by_flow = landed
+        return false unless gen == @seed_generation
+        ov.land_seed_names(by_flow)
+        true
+      else
+        false
+      end
     end
 
     def build_seed_from_request(target : String, request_text : String, http2 : Bool, sni : String?) : MineSeed

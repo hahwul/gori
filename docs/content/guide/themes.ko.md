@@ -7,7 +7,7 @@ weight = 100
 group = "커스터마이즈"
 +++
 
-gori는 30개의 내장 컬러 테마를 제공합니다: `goridark`(기본값), `goriday`, `latte`, `espresso`, `tokyonight`, `gruvbox`, `nord`, `dracula`, `solarized_light`, `rosepine_dawn`, `catppuccin_mocha`, `monokai`, `everforest`, `onedark`, `kanagawa`, `github_dark`, `zenburn`, `synthwave84`, `cyberpunk`, `matrix`, `cobalt2`, `high_contrast`, `github_light`, `gruvbox_light`, `one_light`, `ayu_light`, `rosepine`, `tokyonight_day`, `dancheong`, `hanji`.
+gori는 32개의 내장 컬러 테마를 제공합니다: `goridark`(기본값), `goriday`, `dancheong`, `hanji`, `latte`, `espresso`, `tokyonight`, `gruvbox`, `nord`, `dracula`, `solarized_light`, `rosepine_dawn`, `catppuccin_mocha`, `monokai`, `everforest`, `onedark`, `kanagawa`, `github_dark`, `zenburn`, `synthwave84`, `cyberpunk`, `matrix`, `cobalt2`, `high_contrast`, `github_light`, `gruvbox_light`, `one_light`, `ayu_light`, `rosepine`, `tokyonight_day`, `solarized_dark`, `everforest_light`.
 
 ## 테마 전환 {#switching-themes}
 
