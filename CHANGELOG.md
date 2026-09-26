@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Network: environment proxy selection applies its loopback and NO_PROXY CIDR exceptions to resolver-recognized numeric IPv4 aliases (#1318)
 - Repeater: differential **timing analysis** of two request variants — send the A/B pair many times (synchronized single-packet/last-byte race, or interleaved) and get a verdict (which is consistently slower) from the response order and per-variant quartiles, never a single number. `Space` → `B` over two marked sub-tabs, `gori run repeater timing <idA> <idB>`, and MCP `timing_requests` (#1246)
 - TUI: `>`, `?`, `{` and `}` work in terminals that report Shift along with a shifted punctuation key, where they did nothing before (#1295)
 - TUI: no space-menu row is `c` or `i` on a tab that leaves that letter to the global keys, so a press that loses its `Space` no longer stops capture or holds all traffic. Set status, Duplicate rule, Clear markers and JWT's Copy attack token move to `C`, and Diff's Add issue to `F` (#1295)

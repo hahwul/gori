@@ -244,9 +244,72 @@ module Gori::Settings
   private def self.environment_loopback_host?(host : String) : Bool
     bare = HostPattern.normalize(host)
     return true if bare == "localhost"
+    bare = canonical_environment_ipv4(bare) || bare
     ip = Socket::IPAddress.new(bare, 0) rescue nil
     return false unless ip
     ip.loopback? || ip.unspecified?
+  end
+
+  # A leading zero means octal in abbreviated resolver forms. Linux resolves a four-part
+  # dotted quad with legacy octal components; Darwin reads those fields as decimal.
+  private ENVIRONMENT_IPV4_OCTAL_QUAD = {% if flag?(:linux) %}true{% else %}false{% end %}
+
+  # Canonicalize numeric IPv4 forms accepted by the platform resolver without resolving names.
+  # Both the environment loopback carve-out and NO_PROXY CIDR matcher use this so route checks
+  # agree on the address the dial resolver will reach, while callers keep the original host.
+  private def self.canonical_environment_ipv4(host : String) : String?
+    values = environment_ipv4_values(host)
+    return unless values
+    address = environment_ipv4_number(values)
+    return unless address
+
+    "#{(address >> 24) & 0xff_u32}.#{(address >> 16) & 0xff_u32}." \
+    "#{(address >> 8) & 0xff_u32}.#{address & 0xff_u32}"
+  end
+
+  private def self.environment_ipv4_values(host : String) : Array(UInt32)?
+    return nil unless environment_ipv4_text?(host)
+    parts = host.split('.')
+    return nil if parts.size > 4 || parts.any?(&.empty?)
+
+    values = [] of UInt32
+    parts.each do |part|
+      value = environment_ipv4_component(part, parts.size)
+      return nil unless value
+      values << value
+    end
+    values
+  end
+
+  private def self.environment_ipv4_text?(host : String) : Bool
+    return false if host.empty?
+    host.each_byte do |byte|
+      next if byte == 0x2e || byte == 0x78 || byte == 0x58 ||
+              byte.in?(0x30_u8..0x39_u8) || byte.in?(0x41_u8..0x46_u8) || byte.in?(0x61_u8..0x66_u8)
+      return false
+    end
+    true
+  end
+
+  private def self.environment_ipv4_component(part : String, count : Int32) : UInt32?
+    if part.starts_with?("0x") || part.starts_with?("0X")
+      part[2..]?.presence.try(&.to_u32?(16))
+    elsif part.size > 1 && part.starts_with?('0') && (count < 4 || ENVIRONMENT_IPV4_OCTAL_QUAD)
+      part[1..].to_u32?(8)
+    else
+      part.to_u32?(10)
+    end
+  end
+
+  private def self.environment_ipv4_number(values : Array(UInt32)) : UInt32?
+    last = values[-1]
+    lead = values[0...(values.size - 1)]
+    return nil if lead.any? { |value| value > 0xff }
+    return nil if last.to_u64 > (1_u64 << (8 * (4 - lead.size))) - 1
+
+    address = 0_u32
+    lead.each_with_index { |value, index| address |= value << (8 * (3 - index)) }
+    address | last
   end
 
   # HTTP_PROXY and friends conventionally carry a proxy URL, but the bare host:port form
@@ -474,6 +537,7 @@ module Gori::Settings
     length = bits.to_i?
     return false unless length
     dest = HostPattern.bare(host)
+    dest = canonical_environment_ipv4(dest) || dest
     if (net4 = Socket::IPAddress.parse_v4_fields?(prefix)) && (addr4 = Socket::IPAddress.parse_v4_fields?(dest))
       return false unless length.in?(0..32)
       cidr_prefix_equal?(net4.to_slice, addr4.to_slice, length)
