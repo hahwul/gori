@@ -22,6 +22,7 @@ require "./controllers/issues_controller"
 require "./controllers/evidence_controller"
 require "./controllers/probe_controller"
 require "./controllers/project_controller"
+require "./timing_report_overlay"
 require "./controllers/repeater_controller"
 require "./controllers/fuzzer_controller"
 require "./controllers/miner_controller"
@@ -626,6 +627,12 @@ module Gori::Tui
             dirty = true if drain_events # always drains; true if anything arrived
             if repeater_controller.drain_results
               search_recompute # a ^F over a now-updated response keeps fresh hits
+              dirty = true
+            end
+            # A finished differential-timing run (#1246) opens its verdict card — but not over a
+            # modal the operator raised meanwhile; the report stays pending until the seam is clear.
+            if active_overlay.nil? && (rpt = repeater_controller.take_timing_report)
+              open_overlay(TimingReportOverlay.new(rpt[0], rpt[1]))
               dirty = true
             end
             dirty = true if fuzzer_controller.drain_events
@@ -1505,6 +1512,14 @@ module Gori::Tui
         return
       end
       @quit_armed = false
+
+      # esc cancels a differential-timing run in flight (#1246), when no modal is up to claim the
+      # key first — the run is bounded but can be seconds at a large N. Only on the Repeater tab's
+      # own inflight run; anywhere else esc keeps its meaning.
+      if ov.nil? && ev.key.escape? && repeater_controller.timing_running?
+        repeater_controller.cancel_timing
+        return
+      end
 
       @toast = nil # clear last action's feedback; a new action may set it again
       # In hotkey CAPTURE mode the next key IS the new binding — intercept it before the

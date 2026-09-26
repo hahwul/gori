@@ -3999,3 +3999,32 @@ of being edited in place.
   <owner>)" and sends an edit to the owner's row.
 - **The hint scan reads every spelling of a path.** Besides `space → X` and `␣X`, it refuses an
   arrowless `space X` / `Space X` and a spaced `␣ X` chip in a non-comment source line.
+
+### 2026-09-26: timing analysis lives in the Repeater, is synchronous, and compares a pair (#1246)
+
+The differential timing oracle from PortSwigger's "Listen to the whispers" — send two variants
+many times and judge which is slower by response ORDER and quartiles, not eyeballed latency — is
+the measurement layer on top of the #1236 synchronized-release race. Three decisions, so a later
+reader does not re-litigate them:
+
+- **Repeater, not the Comparer** (the issue's title said `feat(comparer)`). The Comparer is a
+  static two-sample diff: `ComparerSlot` holds a snapshot's bytes, the diff rows are memoized, and
+  there is no repetition, engine hookup or async-result channel anywhere in it. The selection this
+  feature wants is two LIVE drafts sharing one origin and transport — which is exactly what the
+  marked sub-tab gesture (`t`) and `collect_race_members` already produce for `repeater.send-race`.
+  So the verb is `repeater.timing-analysis`, a sibling of send-race, and reuses its collector,
+  origin/transport signature check, and off-fiber launch. Folding a run loop into the Comparer
+  would have fought its whole design.
+- **Synchronous, not a background job.** gori's other repeated-sampling tools (Fuzzer, Sequencer,
+  Miner, Discover) are start/status/results/stop jobs because they can run unbounded. Timing is a
+  bounded pair-vs-pair measurement (`Stats::MAX_ITERATIONS`), so it is one call that returns a
+  `Report`, the shape `race_requests` has — one MCP tool, one CLI subcommand, and the TUI wraps the
+  same call in a fiber for progress + an esc-cancel, rather than four job verbs per surface.
+- **A pair only in v1.** The engine (`Repeater::Timing`) races whatever it is handed, but the order
+  test and the verdict are defined over two variants; `>2` is left to a later change, as the issue
+  scoped it.
+
+The math is a pure `Repeater::Timing::Stats` (percentile quartiles + a two-sided binomial sign test
+on the order bias, `Math.erfc` for the tail, a `SMALL_SAMPLE` floor that clamps to Inconclusive) and
+a shared `Timing::Present` renderer, the `Sequencer::Stats`/`Present` split — so the CLI `--format
+json` and the MCP tool cannot drift, and the TUI card reuses `Spark` for the distribution.

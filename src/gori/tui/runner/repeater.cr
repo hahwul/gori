@@ -44,6 +44,24 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     repeater_controller.repeater_send_race
   end
 
+  # Differential timing analysis over EXACTLY two marked sub-tabs (#1246): validate the pair,
+  # prompt for how many A/B pairs to send, then run it off the UI fiber and open a verdict card.
+  def repeater_timing_analysis : Nil
+    prepared = repeater_controller.prepare_timing_pair
+    return unless prepared
+    view, plan, labels = prepared
+    default_n = Gori::Repeater::Timing::Stats::DEFAULT_ITERATIONS
+    max_n = Gori::Repeater::Timing::Stats::MAX_ITERATIONS
+    subject = "#{labels[0]? || "A"}  vs  #{labels[1]? || "B"} → #{plan.host}:#{plan.port}"
+    np = NamePromptOverlay.new("TIMING ANALYSIS", subject, default_n.to_s, action: "run", noun: "pairs")
+    np.on_commit = -> {
+      n = (np.name.to_i? || default_n).clamp(1, max_n)
+      repeater_controller.launch_timing(view, plan, labels, n, interleaved: false)
+      true
+    }
+    open_overlay(np)
+  end
+
   # Open the Repeater sub-tab search picker (`repeater.find-subtab`, space → f). Snapshots
   # the open sessions; the picker filters them in memory and jumps on ↵.
   def repeater_find_subtab : Nil

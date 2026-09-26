@@ -73,7 +73,7 @@ gori mcp --read-only
 
 | 시작 방법 | 도구 | `tools/list` | 토큰 | 용도 |
 | --- | ---: | ---: | ---: | --- |
-| `gori mcp` | 188 | ~225 KB | ~58k | 전부 (기본값) |
+| `gori mcp` | 189 | ~227 KB | ~58k | 전부 (기본값) |
 | `--read-only` | 62 | ~72 KB | ~18k | 읽기 도구와 순수 연산; 실제 요청 전송 없음 |
 | `--tools=@recon` | 37 | ~54 KB | ~14k | 캡처를 읽고 파악, 요청 재전송, 이슈·노트 기록 |
 | `--tools=@recon --read-only` | 28 | ~39 KB | ~10k | `--read-only`가 끄는 도구를 뺀 `@recon` |
@@ -198,13 +198,14 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `ql_reference` | 쿼리 언어 레퍼런스 |
 | `ql_explain` | 쿼리를 실행하지 않고 진단. 요청을 쓰기 전에 필터를 점검할 때 사용 |
 
-**액션 도구**(`--read-only`로 비활성화됨. 단, `switch_project`는 항상 동작하고 `create_project`는 서버가 언바운드일 때 동작합니다). 소켓을 여는 도구(`send_request`, `send_websocket`, `fuzz_*`, `mine_*`, `authorize_*`, `cache_deception_check`, `sequence_*`, `discover_*`, `grpc_reflect`, `minimize_repeater`, `race_requests`, `run_retest`, `refresh_session_slot`, 그리고 `active:true`를 준 `probe_scan`)는 모두 스코프 게이트를 지납니다. 설정된 스코프 밖의 대상, 또는 스코프가 없는 대상은 호출에 명시적 예외 선언인 `allow_unscoped:true`를 주지 않는 한 `SCOPE_BLOCKED`로 거부되며, 그때도 샌드박스와 명시적 제외 규칙은 그대로 적용됩니다.
+**액션 도구**(`--read-only`로 비활성화됨. 단, `switch_project`는 항상 동작하고 `create_project`는 서버가 언바운드일 때 동작합니다). 소켓을 여는 도구(`send_request`, `send_websocket`, `fuzz_*`, `mine_*`, `authorize_*`, `cache_deception_check`, `sequence_*`, `discover_*`, `grpc_reflect`, `minimize_repeater`, `race_requests`, `timing_requests`, `run_retest`, `refresh_session_slot`, 그리고 `active:true`를 준 `probe_scan`)는 모두 스코프 게이트를 지납니다. 설정된 스코프 밖의 대상, 또는 스코프가 없는 대상은 호출에 명시적 예외 선언인 `allow_unscoped:true`를 주지 않는 한 `SCOPE_BLOCKED`로 거부되며, 그때도 샌드박스와 명시적 제외 규칙은 그대로 적용됩니다.
 
 | 도구 | 용도 |
 |------|---------|
 | `send_request` | HTTP 요청 전송 / 재전송(액티브; 기본적으로 History에 기록, `$ENV.KEY` 환경 토큰과 `$BIND.NAME` 바인딩을 확장, 명시적으로 요청하지 않는 한 민감한 응답 헤더 값을 가림). `reframe_grpc: true`는 실제 전송되는 본문에 맞춰 단항 gRPC 메시지의 5바이트 길이 접두사를 다시 계산합니다. 기본값은 꺼짐이므로 편집된 메시지도 캡처 당시의 접두사 그대로 나갑니다 |
 | `send_websocket` | 저장된 WebSocket Repeater 세션을 실행하고 응답을 수집 |
 | `race_requests` | 저장된 HTTP Repeater 세션 둘 이상(`repeater_ids`)을 하나의 동기화된 레이스로 발사: HTTP/1.1 last-byte sync, 또는 `http2:true`로 HTTP/2 single-packet 공격. 모든 멤버는 같은 오리진과 전송을 공유해야 하며, 결과에 멤버별 타이밍이 담깁니다 |
+| `timing_requests` | 저장된 HTTP Repeater 세션 정확히 두 개(`repeater_ids`)의 차등 타이밍 분석: A/B 쌍을 `count`번 보내(동기화된 single-packet/last-byte 레이스, 또는 `interleaved:true`) 판정(`a_slower` / `b_slower` / `no_difference` / `inconclusive`)과 순서 편향 비율, 이항 p-값, 변형별 사분위수를 돌려줍니다 — 단일 숫자가 아닙니다 |
 | `create_repeater` / `update_repeater` / `delete_repeater` | Repeater 세션 하나를 관리. 모든 응답이 `id` 옆에 `tui_index`를 싣고, 삭제는 없앤 탭 번호(`was_tui_index`)를 밝힌 뒤 나머지를 다시 번호 매깁니다. `create_repeater{curl}`은 복사한 curl 명령으로 세션을 만듭니다 |
 | `create_repeaters` | 캡처된 flow 여러 개에서 탭을 하나씩 시드합니다. OpenAPI 임포트의 두 번째 단계입니다(아래 참고). 첫 세션을 만들기 전에 모든 flow의 존재를 확인합니다 |
 | `delete_repeaters` / `update_repeaters` | 일괄 닫기, 일괄 재라벨(태그와 이름 접사만. 요청 바이트를 쓰는 건 `update_repeater`입니다). 둘 다 필터가 아니라 명시적 id만 받습니다: 먼저 `get_repeater_context{filter}`로 좁혀서, 읽은 집합과 작용한 집합이 같게. 삭제는 `confirm:true`가 필요하고, 모르는 id 하나면 호출 전체를 거절합니다 |

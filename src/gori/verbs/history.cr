@@ -493,6 +493,10 @@ module Gori
         "repeater.send-race", "Race marked sub-tabs",
         "Fire the MARKED sub-tabs (mark with t) as one synchronized race — N DISTINCT requests on the wire together to hit a multi-endpoint TOCTOU window (h1 last-byte-sync, h2 single-packet). One origin, one transport; shows each response with its timing",
         Verb::Scope::Repeater, available: in_repeater, mnemonic: 'G', section: :request) { |ctx| ctx.repeater_send_race; nil }
+      r.register Verb::Definition.new(
+        "repeater.timing-analysis", "Timing analysis (A vs B)",
+        "Differential TIMING analysis of EXACTLY two marked sub-tabs (mark with t): send the A/B pair many times and decide which is CONSISTENTLY slower by response ORDER and quartiles, not eyeballed latency (PortSwigger \"Listen to the whispers\"). Each pair is released together (h2 single-packet / h1 last-byte-sync) so common network/load noise cancels. One origin, one transport; the result is a verdict + per-variant quartiles + distribution, never a single number",
+        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'B', section: :request) { |ctx| ctx.repeater_timing_analysis; nil }
 
       # --- RESPONSE pane (diff / pretty via keymap so rebind works; hex stays
       # controller-owned on the response pane because plain `x` is also select-line

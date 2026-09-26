@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Repeater: differential **timing analysis** of two request variants — send the A/B pair many times (synchronized single-packet/last-byte race, or interleaved) and get a verdict (which is consistently slower) from the response order and per-variant quartiles, never a single number. `Space` → `B` over two marked sub-tabs, `gori run repeater timing <idA> <idB>`, and MCP `timing_requests` (#1246)
 - TUI: `>`, `?`, `{` and `}` work in terminals that report Shift along with a shifted punctuation key, where they did nothing before (#1295)
 - TUI: no space-menu row is `c` or `i` on a tab that leaves that letter to the global keys, so a press that loses its `Space` no longer stops capture or holds all traffic. Set status, Duplicate rule, Clear markers and JWT's Copy attack token move to `C`, and Diff's Add issue to `F` (#1295)
 - TUI: on the nine tabs with a sub-tab strip, the strip's actions are one `T` **Sub-tabs…** row in a pane's space menu (Mark all sub-tabs is now `T T` from a pane), and stay drawn in full with the strip focused; the menu gains **Mark sub-tab** on `t`, the Repeater's Tag moves to `g`, Paste cURL keeps its own `U` row, and the strip renames on `e`, the menu's Rename letter, instead of `r`, which now does nothing there (#1274, #1295)

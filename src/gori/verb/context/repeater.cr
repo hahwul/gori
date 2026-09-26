@@ -9,6 +9,7 @@ abstract class Gori::Verb::ExecContext
   abstract def repeater_send : Nil                       # resend the (edited) request to the target
   abstract def repeater_send_group : Nil                 # pipeline %%%-split requests on one connection
   abstract def repeater_send_race : Nil                  # race the marked sub-tabs together (h1 last-byte / h2 single-packet)
+  abstract def repeater_timing_analysis : Nil            # differential timing of the two marked sub-tabs (order + quartiles, #1246)
   abstract def repeater_find_subtab : Nil                # open the sub-tab search picker (filter + jump)
   abstract def repeater_subtab_count : Int32             # open repeater session count (gates the search menu entry)
   abstract def repeater_rename_subtab : Nil              # open the rename prompt for the active sub-tab

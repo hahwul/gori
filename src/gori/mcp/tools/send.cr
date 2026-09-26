@@ -7,6 +7,7 @@ require "../../repeater/engine"
 require "../../repeater/h2_engine"
 require "../../repeater/flow_request"
 require "../../repeater/plan"
+require "../../repeater/timing"
 require "../../repeater/ws_engine"
 require "../../repeater/draft_markers"
 require "../../flow_mapper"
@@ -307,6 +308,62 @@ module Gori
             end
           end
         end
+      end
+
+      @[Tool("timing_requests", gated: true, agent_action: true, env_refresh: true)]
+      private def timing_requests(h) : Result
+        members = timing_member_ids(h)
+        return members if members.is_a?(Result)
+        force_http2 = present?(h, "http2") ? bool_arg(h, "http2", false) : nil
+        verbatim = bool_arg(h, "verbatim", false)
+        insecure = bool_arg(h, "insecure", false)
+        timeout = send_timeout(h)
+        iterations = int_or(h, "count", Repeater::Timing::Stats::DEFAULT_ITERATIONS).clamp(1, Repeater::Timing::Stats::MAX_ITERATIONS)
+        warmup = int_or(h, "warmup", Repeater::Timing::Stats::DEFAULT_WARMUP).clamp(0, iterations - 1)
+        interleaved = bool_arg(h, "interleaved", false)
+        ob = outbound(bool_arg(h, "allow_unscoped", false))
+
+        # The same origin/transport unification the race uses — a differential pair rides one
+        # connection shape too, so a mismatch is refused rather than flattened.
+        built = build_race_plan(members, force_http2, insecure, verbatim, timeout, store, ob)
+        return built if built.is_a?(Result)
+        plan, labels = built
+
+        gate = send_gate(ob, plan)
+        return gate if gate.is_a?(Result)
+
+        mode = interleaved ? Repeater::Timing::Mode::Interleaved : Repeater::Timing::Mode::Auto
+        rep = Repeater::Timing.run(plan, iterations: iterations, mode: mode, warmup: warmup)
+        transport = interleaved ? "interleaved" : (plan.http2? ? "single-packet h2" : "last-byte-sync h1")
+        Log.info { "timing_requests #{plan.scheme}://#{plan.host}:#{plan.port} x#{rep.iterations} (#{transport}) -> #{rep.verdict}" }
+        subject = Repeater::Timing::Present::Subject.new(
+          a_label: labels[0]? || "A", b_label: labels[1]? || "B",
+          origin: "#{plan.scheme}://#{plan.host}:#{plan.port}", transport: transport, mode: mode.to_s.underscore)
+        Result.new(JSON.build { |j| Repeater::Timing::Present.report_object(j, rep, subject) })
+      end
+
+      # Timing analysis compares EXACTLY two variants (a differential oracle, not an N-way race).
+      private def timing_member_ids(h) : Array(Int64) | Result
+        ids_json = h["repeater_ids"]?.try(&.as_a?)
+        unless ids_json && ids_json.size == 2
+          return err("'repeater_ids' must be an array of exactly two saved HTTP repeater ids — timing analysis compares a pair (A vs B)",
+            "INVALID_ARGUMENT", field: "repeater_ids")
+        end
+        members = [] of Int64
+        ids_json.each do |v|
+          id = v.as_i64?
+          return err("'repeater_ids' must be integers", "INVALID_ARGUMENT", field: "repeater_ids") unless id
+          members << id
+        end
+        members
+      end
+
+      # An integer argument with a default (count / warmup) — tolerant of a JSON number or a
+      # numeric string, like the other optional int args.
+      private def int_or(h, key : String, default : Int32) : Int32
+        v = h[key]?
+        return default unless v
+        (v.as_i? || v.as_i64?.try(&.to_i) || v.as_s?.try(&.to_i?)) || default
       end
 
       # The two arguments that name a request gori has ALREADY stored. Exactly one may be given.
@@ -1799,6 +1856,30 @@ module Gori
           s.field "repeater_ids", JSON.parse(%({"type":"array","description":"two or more saved HTTP repeater ids (from list_history / the Repeater workbench) to race together; all must share one origin and transport","items":{"type":"integer"},"minItems":2})), required: true
           s.field "http2", boolprop("race over HTTP/2 (single-packet attack); default: the sessions' shared stored setting (refused if they disagree)")
           s.field "verbatim", boolprop("send each member's bytes EXACTLY: no token expansion, no Content-Length resync (see send_request.verbatim). Default false")
+          s.field "timeout_ms", intprop("per-operation connect + idle timeout in milliseconds (1-600000)")
+          s.field "insecure", boolprop("skip upstream TLS verification (default false)")
+          s.field "allow_unscoped", boolprop("send even when the shared origin is outside (or without) a configured scope — Sandbox/exclude still apply (default false)")
+        end
+
+        tool j, "timing_requests",
+          "Differential TIMING analysis of exactly TWO saved HTTP repeaters (A vs B): send the " \
+          "pair many times and decide which is CONSISTENTLY slower by response ORDER and " \
+          "quartiles, not eyeballed latency (PortSwigger \"Listen to the whispers\"). ACTIVE: " \
+          "makes real outbound requests. Each iteration releases A and B together in one narrow " \
+          "window (HTTP/2 single-packet on one connection, HTTP/1.1 last-byte-sync on two) so " \
+          "their common network/load noise cancels and the SIGN of (A-B) survives — pass " \
+          "interleaved:true to send them sequentially instead. BOTH must resolve to ONE origin " \
+          "and share the transport, or the call is REFUSED. The result is a VERDICT " \
+          "(a_slower / b_slower / no_difference / inconclusive) with the order-bias fraction, a " \
+          "binomial p-value, per-variant quartiles (min/q1/median/q3/max, microseconds) and " \
+          "distribution histograms — never a single number. Use it for unkeyed-parameter, " \
+          "blind-injection and scoped-SSRF oracles." do |s|
+          s.field "repeater_ids", JSON.parse(%({"type":"array","description":"exactly two saved HTTP repeater ids (from list_history / the Repeater workbench): the A and B variants to compare; both must share one origin and transport","items":{"type":"integer"},"minItems":2,"maxItems":2})), required: true
+          s.field "count", intprop("how many A/B pairs to send after warm-up (1-#{Repeater::Timing::Stats::MAX_ITERATIONS}; default #{Repeater::Timing::Stats::DEFAULT_ITERATIONS}). Below #{Repeater::Timing::Stats::SMALL_SAMPLE} usable pairs the verdict is clamped to inconclusive")
+          s.field "warmup", intprop("initial pairs discarded before measuring, to absorb TLS/connection warm-up (default #{Repeater::Timing::Stats::DEFAULT_WARMUP})")
+          s.field "interleaved", boolprop("send A then B sequentially (alternating order each iteration) instead of the synchronized single-packet/last-byte race — noisier, but the fallback when a race cannot assemble (default false)")
+          s.field "http2", boolprop("send over HTTP/2 (single-packet); default: the sessions' shared stored setting (refused if they disagree)")
+          s.field "verbatim", boolprop("send each member's bytes EXACTLY: no token expansion, no Content-Length resync (default false)")
           s.field "timeout_ms", intprop("per-operation connect + idle timeout in milliseconds (1-600000)")
           s.field "insecure", boolprop("skip upstream TLS verification (default false)")
           s.field "allow_unscoped", boolprop("send even when the shared origin is outside (or without) a configured scope — Sandbox/exclude still apply (default false)")

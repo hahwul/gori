@@ -73,7 +73,7 @@ By default `gori mcp` advertises every tool, so an agent can reach the whole wor
 
 | Start with | Tools | `tools/list` | Tokens | For |
 | --- | ---: | ---: | ---: | --- |
-| `gori mcp` | 188 | ~225 KB | ~58k | Everything (the default) |
+| `gori mcp` | 189 | ~227 KB | ~58k | Everything (the default) |
 | `--read-only` | 62 | ~72 KB | ~18k | Read tools and pure compute; no live requests |
 | `--tools=@recon` | 37 | ~54 KB | ~14k | Read and map the capture, replay a request, record issues and notes |
 | `--tools=@recon --read-only` | 28 | ~39 KB | ~10k | `@recon` minus what `--read-only` disables |
@@ -198,13 +198,14 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 | `ql_reference` | The query-language reference |
 | `ql_explain` | Diagnose a query without running it, to check a filter before spending requests on it |
 
-**Action tools** (disabled by `--read-only`, except `switch_project`, which always works, and `create_project`, which works while the server is unbound). Every one that opens a socket (`send_request`, `send_websocket`, `fuzz_*`, `mine_*`, `authorize_*`, `cache_deception_check`, `sequence_*`, `discover_*`, `grpc_reflect`, `minimize_repeater`, `race_requests`, `run_retest`, `refresh_session_slot`, and `probe_scan` with `active:true`) is scope-gated: a target outside, or without, a configured scope is refused with `SCOPE_BLOCKED` unless the call passes `allow_unscoped:true`, the explicit waiver, and the sandbox and explicit excludes apply even then.
+**Action tools** (disabled by `--read-only`, except `switch_project`, which always works, and `create_project`, which works while the server is unbound). Every one that opens a socket (`send_request`, `send_websocket`, `fuzz_*`, `mine_*`, `authorize_*`, `cache_deception_check`, `sequence_*`, `discover_*`, `grpc_reflect`, `minimize_repeater`, `race_requests`, `timing_requests`, `run_retest`, `refresh_session_slot`, and `probe_scan` with `active:true`) is scope-gated: a target outside, or without, a configured scope is refused with `SCOPE_BLOCKED` unless the call passes `allow_unscoped:true`, the explicit waiver, and the sandbox and explicit excludes apply even then.
 
 | Tool | Purpose |
 | ------ | --------- |
 | `send_request` | Send / resend an HTTP request (active; records History by default, expands `$ENV.KEY` env tokens and `$BIND.NAME` bindings, and redacts sensitive response-header values unless explicitly requested). `reframe_grpc: true` recomputes a unary gRPC message's 5-byte length prefix over the body actually sent. Off by default, so an edited message ships with the prefix it was captured with |
 | `send_websocket` | Execute a saved WebSocket Repeater session and collect the replies |
 | `race_requests` | Fire two or more saved HTTP Repeater sessions (`repeater_ids`) as one synchronized race: HTTP/1.1 last-byte sync, or the HTTP/2 single-packet attack with `http2:true`. Every member must share one origin and transport; the result reports per-member timing |
+| `timing_requests` | Differential timing analysis of exactly two saved HTTP Repeater sessions (`repeater_ids`): send the A/B pair `count` times (synchronized single-packet/last-byte race, or `interleaved:true`) and return a verdict (`a_slower` / `b_slower` / `no_difference` / `inconclusive`) with the order-bias fraction, a binomial p-value and per-variant quartiles — never a single number |
 | `create_repeater` / `update_repeater` / `delete_repeater` | Manage one Repeater session. Every reply carries `tui_index` beside `id`; a delete names the tab it destroyed (`was_tui_index`) and renumbers the rest. `create_repeater{curl}` builds the session from a copied curl command |
 | `create_repeaters` | Seed a tab from each of several captured flows, the second hop of an OpenAPI import (see below). Checks every flow exists before creating the first session |
 | `delete_repeaters` / `update_repeaters` | Bulk close, and bulk re-label (tags and name affixes only; `update_repeater` is the one that writes request bytes). Both take explicit ids, never a filter: narrow with `get_repeater_context{filter}` first, so the set you read is the set acted on. Delete needs `confirm:true`, and an unknown id refuses the whole call |
