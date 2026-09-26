@@ -772,7 +772,7 @@ module Gori::Proxy
           "connection closed while answering Expect: 100-continue")
         return false
       end
-      buffered, body_complete = Codec::Body.read_complete(@io, req_framing, req_len)
+      stored, trunc, size, body_complete = drain_request_body(req_framing, req_len)
       unless body_complete
         # Nothing was answered, so this is not a short-circuited flow — record it as the
         # truncation it is (mirrors the hold / body-rewrite paths).
@@ -782,7 +782,6 @@ module Gori::Proxy
 
       # Recorded BEFORE the answer, so a request held by a rule's delay shows in History as
       # pending while it waits, the way a fault's does (`serve_fault`).
-      stored, trunc, size = capped(buffered)
       flow_id = @sink.on_request(FlowMapper.request(record_req,
         scheme: scheme, host: host, port: port, created_at: created_at,
         body: stored, body_truncated: trunc, body_size: size, short_circuited: true, source: FlowSource::Kind::Proxy,
@@ -861,15 +860,13 @@ module Gori::Proxy
                             sent_req : Codec::RawRequest, record_req : Codec::RawRequest,
                             host : String, port : Int32, scheme : String, created_at : Int64,
                             req_framing : Codec::BodyFraming, req_len : Int64) : Bool
-      buffered = nil.as(Bytes?)
-      unless req_framing.none? || expect_continue?(req)
-        buffered, body_complete = Codec::Body.read_complete(@io, req_framing, req_len)
-        unless body_complete
-          record_error(sent_req, scheme, host, port, created_at, "client truncated request body")
-          return false
-        end
+      # A withheld body is not read at all: `None` records it as absent, as before.
+      framing = expect_continue?(req) ? Codec::BodyFraming::None : req_framing
+      stored, trunc, size, body_complete = drain_request_body(framing, req_len)
+      unless body_complete
+        record_error(sent_req, scheme, host, port, created_at, "client truncated request body")
+        return false
       end
-      stored, trunc, size = capped(buffered)
       flow_id = @sink.on_request(FlowMapper.request(record_req,
         scheme: scheme, host: host, port: port, created_at: created_at,
         body: stored, body_truncated: trunc, body_size: size, short_circuited: true,
@@ -2737,6 +2734,20 @@ module Gori::Proxy
       return {nil, false, nil} unless body
       return {body, false, nil} if body.size <= Settings.capture_max
       {body[0, Settings.capture_max].dup, true, body.size.to_i64}
+    end
+
+    # A request body a short-circuit or fault answers without forwarding (#1237): drained off
+    # the socket so the connection stays framed, and stored exactly as `capped` would store it
+    # (the first `capture_max` octets, the truncation mark, the true size) without holding more
+    # than that. Buffering the whole entity first, as this path did, let a client grow the heap
+    # by whatever it chose to send — nothing bounds a chunked upload — while all the path needs
+    # is to get past the bytes. Returns {stored, truncated, size, complete}.
+    private def drain_request_body(framing : Codec::BodyFraming, len : Int64) : {Bytes?, Bool, Int64?, Bool}
+      return {nil, false, nil, true} if framing.none?
+      capture = Codec::CaptureBuffer.new(Settings.capture_max, capture_hint(framing, len))
+      complete = Codec::Body.stream(@io, Codec::DiscardIO.new, framing, len, capture)
+      trunc = capture.truncated?
+      {capture.to_slice, trunc, trunc ? capture.total : nil, complete}
     end
 
     private def record_error(req, scheme, host, port, created_at, message) : Nil
