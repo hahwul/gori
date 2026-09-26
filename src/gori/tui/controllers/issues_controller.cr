@@ -22,6 +22,7 @@ module Gori::Tui
     def initialize(host : Host)
       super(host)
       @issues = IssuesView.new
+      @issues.menu_registry = host.session.registry
       # The peer notes value an `esc` overwrite is currently armed against — see
       # `save_notes_or_report`. nil when nothing is armed, which is every state but the one
       # right after a refusal the operator has read.

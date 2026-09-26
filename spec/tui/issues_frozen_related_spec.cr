@@ -43,6 +43,7 @@ describe "the Issues detail's RELATED card with frozen evidence" do
       status.ok?.should be_true
 
       view = IssuesView.new
+      view.menu_registry = Gori::Verbs.registry
       view.reload(store)
       view.open_detail(store).should be_true
       rows = view.related_rows
@@ -76,7 +77,7 @@ describe "the Issues detail's RELATED card with frozen evidence" do
       backend.fg_at(rel.x + 2, rel.y + 1).should eq(Theme.muted)
       # The border count SPLITS once a frozen copy is in the card: one live pointer, one copy.
       # `2` alone was true of the row count and false of everything an operator reads it for.
-      backend.row(rel.y).should contain("1 · 1 frozen · space l")
+      backend.row(rel.y).should contain("1 · 1 frozen · ␣L")
     end
   end
 
@@ -93,6 +94,7 @@ describe "the Issues detail's RELATED card with frozen evidence" do
       store.delete_flows([src]).should be_true
 
       view = IssuesView.new
+      view.menu_registry = Gori::Verbs.registry
       view.reload(store)
       view.open_detail(store).should be_true
       view.related_rows.size.should eq(1)
@@ -119,11 +121,12 @@ describe "the Issues detail's RELATED card with frozen evidence" do
       store.freeze_evidence(issue, Gori::Evidence.from_flow(store.get_flow(src).not_nil!))[1].ok?.should be_true
 
       view = IssuesView.new
+      view.menu_registry = Gori::Verbs.registry
       view.reload(store)
       view.open_detail(store).should be_true
       backend = render(view)
       rel, _ = view.detail_split(Rect.new(0, 0, 100, 22))
-      backend.row(rel.y).should contain("1 · 1 frozen · space l")
+      backend.row(rel.y).should contain("1 · 1 frozen · ␣L")
       # The primary flow is RELATED's FIRST row, live-badged like any other pointer…
       backend.row(rel.y + 1).should contain("LIVE")
       backend.row(rel.y + 1).should contain("GET acme.test/only")
@@ -140,11 +143,12 @@ describe "the Issues detail's RELATED card with frozen evidence" do
       issue = store.insert_issue("t", Gori::Store::Severity::Low, "acme.test", nil)
       store.add_link(Gori::Store::LinkOwnerKind::Issue, issue, Gori::Store::LinkRefKind::Flow, live)
       view = IssuesView.new
+      view.menu_registry = Gori::Verbs.registry
       view.reload(store)
       view.open_detail(store).should be_true
       rel, _ = view.detail_split(Rect.new(0, 0, 100, 22))
       row = render(view).row(rel.y)
-      row.should contain("1 · space l")
+      row.should contain("1 · ␣L")
       row.should_not contain("frozen")
     end
   end
@@ -157,6 +161,7 @@ describe "the Issues detail's RELATED card with frozen evidence" do
       a, _ = store.freeze_evidence(issue, snap)
       b, _ = store.freeze_evidence(issue, snap)
       view = IssuesView.new
+      view.menu_registry = Gori::Verbs.registry
       view.reload(store)
       view.open_detail(store).should be_true
       view.select_evidence(b)
@@ -182,6 +187,7 @@ describe "the Issues detail's RELATED card with frozen evidence" do
         Gori::Store::LinkRefKind::Flow, after)
 
       view = IssuesView.new
+      view.menu_registry = Gori::Verbs.registry
       view.reload(store)
       view.open_detail(store).should be_true
       view.move_links(1)
@@ -202,6 +208,7 @@ describe "the Issues detail's RELATED card with frozen evidence" do
       status.ok?.should be_true
 
       view = IssuesView.new
+      view.menu_registry = Gori::Verbs.registry
       view.reload(store)
       view.open_detail(store).should be_true
       view.selected_evidence.not_nil!.id.should eq(eid)
