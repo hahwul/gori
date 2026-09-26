@@ -52,7 +52,8 @@ module Gori
         :stop            => Entry.new('s', :preferred),
         :export          => Entry.new('E', :preferred),
         :clear_input     => Entry.new('K', :preferred), # the workbench clears, which ask first
-        :duplicate_rule  => Entry.new('c', :preferred),
+        :clear_marks     => Entry.new('C', :preferred), # never `c`: a dropped space stops capture
+        :duplicate_rule  => Entry.new('C', :preferred), # never `c`: a dropped space stops capture
         :move_up         => Entry.new('u', :preferred),
         :move_down       => Entry.new('n', :preferred),
         :insert_marker   => Entry.new('I', :preferred), # `i` is INSERT in an editor pane
@@ -61,7 +62,7 @@ module Gori
         :decoder_chain   => Entry.new('D', :preferred),
         :mock            => Entry.new('M', :preferred),
         :set_severity    => Entry.new('s', :preferred),
-        :set_status      => Entry.new('c', :preferred),
+        :set_status      => Entry.new('C', :preferred), # never `c`: a dropped space stops capture
         :set_cvss        => Entry.new('V', :preferred),
         :link            => Entry.new('L', :preferred), # attach to an issue/note, or manage its links
         :scope_add       => Entry.new('H', :preferred), # add the flow's host to the scope

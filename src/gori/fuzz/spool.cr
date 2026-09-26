@@ -127,7 +127,7 @@ module Gori
           return false if failed? || finished?
           # `keep: interesting` (issue #1240) drops a row the spool does not keep — accepted
           # (true) and never charged against the byte budget, so a huge sweep that keeps 12 of
-          # 100k rows spools 12. Shift-S then copies exactly those (`each_result`), and the
+          # 100k rows spools 12. Shift-E then copies exactly those (`each_result`), and the
           # whole-run counters `finish` records stay complete.
           return true unless @persistence.keep.keeps?(result)
           row = Persistence.write_row(result)

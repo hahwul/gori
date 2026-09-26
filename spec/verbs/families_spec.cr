@@ -199,7 +199,7 @@ describe "Display… and Protocol… (#1274 WP9)" do
       repeater.toggle-grpc-fields repeater.toggle-grpc-reframe repeater.toggle-http2
       repeater.toggle-sni repeater.toggle-ws-key
     ])
-    # Save results left `P` for the family; it is palette-only now (#1282), on its `⇧S`.
+    # Save results left `P` for the family; it is palette-only now (#1282), on its `⇧E` (#1295).
     Gori::Verbs.registry["fuzz.save-results"].palette_only?.should be_true
   end
 

@@ -41,7 +41,7 @@ Ctrl-P  → settings:hotkeys
 - **`s`는 출처로 가거나, scope 렌즈를 뒤집습니다.** 의미는 이 둘뿐입니다. `s`는 행이 사는 탭을 엽니다(Evidence 보관함, Issue의 RELATED 카드, Probe 목록과 상세). 그 밖의 모든 곳에서는 전역 scope 렌즈입니다. 더 이상 뜻하지 않게 된 것: Comparer와 Diff의 A ⇄ B 교체(이제 **`w`**), Colormarker와 Match & Replace 규칙 목록의 global ⇄ project(이제 `Space` 메뉴 항목이라 렌즈를 가리지 않습니다). 가리는 곳이 한 군데 남아 있고 그것은 이름을 붙여 둡니다: 프로젝트 **ACTIVITY** 피드의 `s`는 source 칩을 순환합니다. 그 패널의 `/` 바는 자유 텍스트 질의라 `source:` / `level:` / `actor:`를 파싱하지 않아 세 칩을 접어 넣을 곳이 없기 때문입니다.
 - space 메뉴는 INS의 대체 수단이 **아닙니다**. 텍스트 에디터가 키를 먼저 소비하므로 그곳에서 `Space`는 그냥 문자입니다. 타이핑 중에도 닿아야 하는 동작에는 Ctrl 코드가 필요하고, 니모닉만으로는 부족합니다. (Repeater/Fuzzer의 디코더 체인 편집기가 `Ctrl-Y`를 Copy에 넘겨준 뒤 space 메뉴만이 아니라 `Ctrl-Q`에 실린 이유가 이것입니다.)
 - **History → Repeater**와 **Repeater 전송**은 **`Ctrl-R`**로 유지됩니다(동일한 근육 기억). History→Repeater를 맨 글자 `r`로 옮기지 마세요.
-- **`r`는 Repeater로 보내고, `Ctrl-R`는 실행합니다.** 맨 `r`는 보낼 플로우가 있는 다섯 스코프에서 "이 행을 Repeater로 보내기"이고, 그 밖에서는 아무것도 아닙니다. Diff의 Run은 `Ctrl-R`로 옮겼고(아홉 스코프에서 이미 Run을 맡고 있습니다), OAST의 Resume listener는 `Shift-R`로, 프로젝트 ACTIVITY 피드의 Refresh는 `Space` 메뉴 항목이 되었습니다 — 진입할 때·피어가 쓸 때·폴링할 때 이미 다시 읽으므로, 새로고침 키가 필요한 피드라면 아예 키가 없는 편이 낫습니다. 하위 탭 스트립의 `r`=이름 변경은 다른 계층이라 영향이 없습니다.
+- **`r`는 Repeater로 보내고, `Ctrl-R`는 실행합니다.** 맨 `r`는 보낼 플로우가 있는 다섯 스코프에서 "이 행을 Repeater로 보내기"이고, 그 밖에서는 아무것도 아닙니다. Diff의 Run은 `Ctrl-R`로 옮겼고(아홉 스코프에서 이미 Run을 맡고 있습니다), OAST의 Resume listener는 `Shift-R`로, 프로젝트 ACTIVITY 피드의 Refresh는 `Space` 메뉴 항목이 되었습니다 — 진입할 때·피어가 쓸 때·폴링할 때 이미 다시 읽으므로, 새로고침 키가 필요한 피드라면 아예 키가 없는 편이 낫습니다. 하위 탭 스트립은 `r`이 아니라 메뉴의 Rename 글자인 `e`로 이름을 바꿉니다.
 - Match & Replace와 알림은 키 없이(팔레트 / 배지) 제공됩니다. Global 키 조합을 원하면 재지정하세요.
 
 ## 맨 글자 하나에 질문 하나 {#grammar}
@@ -190,7 +190,7 @@ space 메뉴는 자주 누르는 것을 위한 곳이고, 드물게 쓰는 것�
 | Repeater | Mark word · Edit decoder chain · Pretty-print request | `Ctrl-K` · `Ctrl-Q` · `Ctrl-U` |
 | Repeater | Minimize request · Use as refresh for slot… | 팔레트 |
 | Fuzzer | Mark word · Edit decoder chain · Pretty-print template | `Ctrl-K` · `Ctrl-Q` · `Ctrl-U` |
-| Fuzzer | Add List payload set · Save results | `Ctrl-L` · `⇧S` |
+| Fuzzer | Add List payload set · Save results | `Ctrl-L` · `⇧E` |
 | Fuzzer | Run history | 팔레트 |
 | History | gRPC: reflect schema | 팔레트 |
 | JWT · Cookie | Toggle decode/encode (decode/forge) · Cycle signing alg (format) | `Ctrl-T` · `Ctrl-A` |
@@ -233,7 +233,7 @@ Cookie, Comparer, Notes. 예전에는 스트립 자신의 액션도 다른 컨�
 | `n` | 새 서브탭 | `Ctrl-N` |
 | `w` | 서브탭 닫기 (마크된 것 전부) | `Ctrl-W` |
 | `d` | 서브탭 복제 | |
-| `e` | 서브탭 이름 변경 | 스트립에서 `r` |
+| `e` | 서브탭 이름 변경 | 스트립에서 `e` |
 | `t` | 현재 서브탭 마크 / 해제 | 스트립에서 `t` |
 | `f` | 서브탭 검색 — `⌕` 피커 | 스트립에서 `f`, 어디서나 `⇧0` |
 | `/` | 스트립 필터 (이름 / 호스트 / 메서드 / 태그) | |
@@ -274,12 +274,17 @@ Repeater/Fuzzer 편집기의 Mark word와 JWT·Cookie의 렌즈 토글(지금은
 | `E` | 내보내기 |
 | `K` | 워크벤치 입력 비우기 (먼저 확인을 묻습니다) |
 | `I` | `§` 마커 삽입 |
+| `C` | `§` 마커 전부 지우기 · 이슈 상태 설정 · 규칙 복제 |
 | `L` · `H` | Link…(이슈나 노트에 첨부, 또는 링크 관리) · 호스트를 스코프에 추가 |
 | `X` | 탭 비우기 (먼저 확인을 묻습니다). 다른 용도로는 쓰지 않습니다 |
 
 `/` `d` `x` `y` `Y` `S` `t` `T` `N`과 `X`는 **예약**입니다. 그 동작이 있는 탭에서는 다른 행이 그 글자를 쓰지 않습니다.
 나머지는 그 동작이 있는 곳에서는 그 동작의 글자이고, 없는 탭에서는 탭 고유의 행이 써도 됩니다.
 Rewriter와 Colormarker의 **Enable/disable everywhere**가 `T`인 이유가 이것입니다. `X`는 비우기입니다.
+
+그 글자를 직접 바인딩하지 않는 탭에서는 어떤 행도 `c`나 `i`를 쓰지 않습니다. 거기서 `Space`를 빠뜨린
+입력은 전역 키로 넘어가는데, 그 두 키는 캡처를 멈추고 모든 트래픽을 잡아 둡니다. 그래서 상태 설정,
+규칙 복제, 마커 지우기는 `C`이고, Diff의 **Add issue**는 자기 `⇧F`와 같은 `F`입니다.
 
 ### Send flow to… {#send-flow-to}
 
@@ -351,7 +356,7 @@ Rewriter와 Colormarker의 **Enable/disable everywhere**가 `T`인 이유가 이
 옮겨진 것: 헥스는 History 상세에서 `e`, Repeater 요청 패널에서 `x`, 응답 패널에서 `h`였고 이제
 셋 모두 `Z` `x`입니다. Probe의 **Show closed**와 Params 탭의 **All headers**는 `Space` `a`였고
 이제 `Z` `a`이며, Params의 Mine parameters는 `Space` `m`에서 `>` `m`으로 옮겼습니다. 맨 `a`와
-`m`은 그대로 동작합니다. Fuzzer의 결과 저장은 `P`를 내주었습니다(`⇧S`이며, [팔레트 전용](#palette-only)입니다).
+`m`은 그대로 동작합니다. Fuzzer의 결과 저장은 `P`를 내주었습니다(내보내기 코드인 `⇧E`이며, [팔레트 전용](#palette-only)입니다).
 History 상세의 **Copy flow** 행은 없어졌습니다. REQUEST 패널에서 `Space` `Y`(Copy as…)의
 **Raw request**가 같은 텍스트입니다.
 
@@ -403,6 +408,8 @@ gori의 텍스트 패널은 **모달**입니다. `Esc`와 `i`로 READ와 INSERT�
 그래서 카드가 둘 중 어느 쪽인지 짐작하게 만드는 대신 양쪽을 모두 가르쳐 줍니다. 아홉 개 `SUB-TABS` 글자(`n` `w` `d` `e` `t` `f` `/` `T` `N`, 패널에서는 **Sub-tabs…** 안)도 어떤 키셋을 고르든 아홉 스트립 전부에서 같은 뜻입니다. 두 네임스페이스는 충돌할 수 없습니다. 메뉴는 모달이고, 키셋은 키맵에만 씁니다.
 
 `/`도 마찬가지입니다. `SUB-TABS` 글자이면서 동시에 `vim-ish`의 찾기 키지만, 둘은 다른 계층입니다 — 메뉴 글자는 카드가 떠 있는 동안 스트립에 작용하고, 키 조합은 지금 서 있는 텍스트 패널을 검색합니다. 의도적으로 겹치는 패널 키 하나는 Repeater의 읽기 전용 응답에서 쓰는 `u`입니다. 표시 전용 JSON 유니코드 디코딩을 켜고 끕니다. 요청 편집기는 여전히 Editor 스코프에 있어 `u`가 실행 취소입니다. `validate_chords!`는 부팅 시 같은 스코프 안의 충돌을 검사하며, 이 교차 스코프 예외는 `spec/verb/keyset_spec.cr`에 고정했습니다.
+
+몇몇 메뉴 글자는 편집기 패널에서 `vim-ish` 모션이기도 합니다. Auto-mark `a`(append), Repeater·Cookie·이슈 상세의 `g`(맨 위), Send race `⇧G`(맨 아래), Set CVSS `V`(줄 선택), Notes 스트립의 `/`(찾기)입니다. 그 앞의 `Space`를 빠뜨리면 키는 vim이 하는 대로 동작하며, 이동하거나 선택할 뿐 보내거나 쓰거나 지우지 않습니다. 이 겹침은 의도한 것이고, 패널에서 그 밖의 동작에 걸리는 메뉴 글자는 허용하지 않습니다.
 
 ### 무엇을 고르든 그대로인 것
 
@@ -479,7 +486,7 @@ Ctrl이 계속 살아있으므로 Option을 골라도 팔레트에 못 들어가
 - 동작의 **주** 키 조합만 표시/편집됩니다. 탐색 별칭(예: `j` / `k`의 화살표 키 중복)은 나열되지 않습니다.
 - 재지정 가능한 키 조합을 표시하는 모든 화면은 유효 키맵에서 읽습니다. **커맨드 팔레트**, **space 메뉴**, **Help** 탭과 팝업, 상태 표시줄의 힌트 스트립, 빈 상태 카드가 여기에 해당합니다. 리터럴로 남는 것은 동작(verb)이 아닌 키입니다. 예약된 `^P` / `^N` / `^W` / `^1-9` 계열과 구조 키(`esc`, `↵`, 화살표, `↹`)가 그렇습니다.
 - Space 메뉴 **니모닉** 글자는 동작을 가리키는 안정적인 식별자입니다(Helix와 비슷). 재지정은 *직접* 누르는 키 조합만 바꿀 뿐 space 메뉴 글자는 바꾸지 않습니다.
-- **하위 탭 스트립**이 어떤 동작에 이미 글자를 바인딩해 두었다면 메뉴도 가능한 한 같은 글자로 그 동작을 씁니다: `f`는 하위 탭 목록·검색, `⇧T`는 스트립 전체 마크입니다. 칩 하나를 마크하는 것은 스트립 자체의 `t`이고 메뉴 행은 없습니다. 맞출 수 없는 하나가 이름 변경입니다. 스트립은 `r`을 바인딩하지만 Repeater·Fuzzer·Miner·Sequencer에서 `r`은 `Ctrl-R`을 메뉴에서 되울리는 Run/Send이고, 이름 변경이 그 자리를 빼앗을 수는 없습니다. 아홉 스트립에 걸쳐 한 동작이 두 가지로 불려서는 안 되므로, 이름 변경은 **전부 `e`**이고 스트립의 `r`은 원시 코드로 남습니다. 전체 표는 [space 메뉴](#space-menu)를 참고하세요.
+- **하위 탭 스트립**이 어떤 동작에 글자를 바인딩해 두었다면 메뉴도 같은 글자로 그 동작을 씁니다: `t`는 하위 탭 마크, `f`는 하위 탭 목록·검색, `⇧T`는 스트립 전체 마크, `e`는 이름 변경입니다. 이름 변경은 원래 스트립에서 `r`이었지만, Repeater·Fuzzer·Miner·Sequencer에서 `r`은 `Ctrl-R`을 메뉴에서 되울리는 Run/Send이므로, 메뉴를 바꾸는 대신 스트립이 메뉴의 `e`로 옮겼습니다. 이제 스트립의 `r`은 아무 동작도 하지 않습니다. 전체 표는 [space 메뉴](#space-menu)를 참고하세요.
 - 에디터 동작은 개별로도, [에디터 키셋](#editor-keysets)으로 한 벌씩도 재지정할 수 있습니다. 재지정 에디터가 옮기지 않는 것은 하드코딩된 가드가 먼저 응답하는 몇 개뿐입니다 — `Esc`(READ로 복귀), `Ctrl-Z`, `Ctrl-F`, `Ctrl-G`. 읽을 수 있도록 Help 시트에는 실려 있고, 키셋은 여기에 두 번째 맨 글자 표기를 줄 수 있습니다. `vim-ish`가 `u`와 `/`에 도달하는 방식이 바로 이것입니다.
 - 탐색 가능한 컨텍스트에서 **`?`**를 누르면 **Help** 탭(mitmproxy 스타일 치트시트)으로 점프합니다.
 

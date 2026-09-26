@@ -85,11 +85,10 @@ module Gori
         available: in_comparer, intent: :new,
         section: :subtab) { |ctx| ctx.comparer_new; nil }
 
-      # 'e'. The key audit briefly put this on 'r' — the letter the STRIP binds — which is
-      # right on the four tabs that can afford it and impossible on the four whose COMMON 'r'
-      # is Send/Run. Two spellings for one action across the nine strips is the thing the
-      # SUB-TABS bucket exists to end, so rename is 'e' everywhere and `r` on the strip stays
-      # the raw chord it always was.
+      # 'e'. The key audit briefly put this on 'r' — the letter the strip bound then — which
+      # is impossible on the four tabs whose COMMON 'r' is Send/Run. Two spellings for one
+      # action across the nine strips is the thing the SUB-TABS bucket exists to end, so
+      # rename is 'e' everywhere, and the strip's raw rename key is `e` too (#1295).
       r.register Verb::Definition.new(
         "comparer.rename-subtab", "Rename comparison", "Rename the active comparison chip",
         Verb::Scope::Comparer, available: in_comparer, intent: :rename,

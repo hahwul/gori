@@ -110,7 +110,7 @@ module Gori::Tui
       {"REPEATER", [
         Item.new("^R", "send the request", "repeater.send"),
         Item.new("^N / ^W", "new / close a sub-tab — from any pane, not just the strip"),
-        Item.new("r", "rename the sub-tab (on the strip)"),
+        Item.new("e", "rename the sub-tab (on the strip)"),
         Item.new("/", "filter sub-tabs (tag: name: host: method:)", "repeater.filter-subtabs"),
         Item.new("↹", "complete filter field/value while filtering"),
         # The menu path, not a bare `t`: on the strip `t` MARKS a chip and `⇧T` marks the whole
@@ -173,7 +173,7 @@ module Gori::Tui
         Item.new("{fuzz.run} · {fuzz.stop}", "run · stop"),
         Item.new("↑/↓ · ↵", "results: select · open detail"),
         Item.new("o · m", "sort · matched-only"),
-        Item.new("r", "rename the sub-tab (on the strip)"),
+        Item.new("e", "rename the sub-tab (on the strip)"),
         Item.new("⇧←/→", "detail: scroll a long line sideways"),
       ]},
       # Miner, OAST and JWT had NO section at all, while Sequencer — also a default-hidden
@@ -240,7 +240,7 @@ module Gori::Tui
         Item.new("{sequence.run} · {sequence.stop}", "run collection · stop"),
         Item.new("↹", "cycle config → samples → analysis"),
         Item.new("↑/↓ · ↵", "samples: select · open detail"),
-        Item.new("^W · r", "close · rename the sub-tab (on the strip)"),
+        Item.new("^W · e", "close · rename the sub-tab (on the strip)"),
       ]},
       {"COMPARER", [
         Item.new("{comparer.pick-a} · {comparer.pick-b}", "pick flow A · flow B"),
@@ -249,7 +249,7 @@ module Gori::Tui
         Item.new("{space:comparer.toggle-fold}", "fold the unchanged runs, keeping context", "comparer.toggle-fold"),
         Item.new("⇧←/→", "h-scroll both columns (long lines)"),
         Item.new("w", "swap A ⇄ B", "comparer.swap"),
-        Item.new("^N / ^W · r", "new / close / rename comparison sub-tab"),
+        Item.new("^N / ^W · e", "new / close / rename comparison sub-tab"),
         Item.new("{space:history.compare}", "Send to Comparer, from History — fills the active sub-tab", "history.compare"),
       ]},
       {"EDITORS", [
@@ -331,7 +331,7 @@ module Gori::Tui
         Item.new("{decoder.save} · {decoder.load}", "save the chain under a name · pick from the saved chains"),
         Item.new("chain library", "shared by every project · picker: type to filter · ^X deletes an entry"),
         Item.new("^N · ^W", "new · close conversion sub-tab"),
-        Item.new("⇧1-9 · r", "switch sub-tab · rename (on the strip)"),
+        Item.new("⇧1-9 · e", "switch sub-tab · rename (on the strip)"),
         Item.new("space", "command menu from the strip, tab bar, INPUT READ or OUTPUT (a literal space while typing)"),
       ]},
       {"REWRITER", [

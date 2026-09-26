@@ -274,7 +274,7 @@ module Gori::Tui
       @run_tls_preset = nil.as(String?)
       @run_websocket = false
       @run_max_requests = nil.as(Int64?)
-      # The archive policy this run's spool/Shift-S was frozen under (issue #1240) — captured at
+      # The archive policy this run's spool/Shift-E was frozen under (issue #1240) — captured at
       # `begin_run` like the other `@run_*` snapshot fields, so a post-run config edit does not
       # change what the saved run records.
       @run_keep = Fuzz::Keep::All
@@ -1016,7 +1016,7 @@ module Gori::Tui
         @run_status = value
       end
       # Only a `condition_met` ending has a stop row — the same rule the Store's terminal
-      # update applies, so the live pane and the run ⇧S saves cannot disagree about it.
+      # update applies, so the live pane and the run ⇧E saves cannot disagree about it.
       @run_stop_idx = @run_status == "condition_met" ? stop_idx : nil
       @result_io_state = archive_ready ? ResultIoState::Ready : ResultIoState::Failed
     end
@@ -3205,7 +3205,7 @@ module Gori::Tui
         # written with no reader at all: the spool's failure was announced once, on the
         # run-start status line, and the completion toast then overwrote it — so a sweep whose
         # archive died read exactly like one that can still be promoted, and the only remaining
-        # difference was a ⇧S that quietly does nothing. Beside `saved ##{id}` because the two
+        # difference was a ⇧E that quietly does nothing. Beside `saved ##{id}` because the two
         # answer the same question and are mutually exclusive (a failed archive is never Saved).
         archive = archive_failed? ? " · archive unavailable" : ""
         saved = @saved_run_id.try { |id| " · saved ##{id}" } || ""
@@ -3650,7 +3650,7 @@ module Gori::Tui
     # What the two detail panes say for a row the BOUNDED DISPLAY dropped. Deliberately NOT
     # phrased as "not retained": `FuzzerResultWindow` projects a row past its 64 MiB ceiling
     # down to metrics, and the run kept every byte — they are in the spool, and in the archive
-    # once ⇧S has run. One definition per pane, because the request half was already written
+    # once ⇧E has run. One definition per pane, because the request half was already written
     # out twice (the detail pane and the seed note the Repeater/Comparer carry) and a third
     # copy is how the two come to word one fact differently.
     def self.display_omitted_request_note : String
@@ -3822,7 +3822,7 @@ module Gori::Tui
       # The DISPLAY window dropped this row's bytes, the run did not — the third answer this
       # pane did not have. `FuzzerResultWindow` projects a row over its 64 MiB ceiling to
       # metrics only while the archive still holds every byte, so reporting it as "not
-      # retained by this run" tells the operator the evidence does not exist at the moment ⇧S
+      # retained by this run" tells the operator the evidence does not exist at the moment ⇧E
       # is about to save it. `detail_request_lines` has always drawn the distinction
       # (`ResultRequest#display_omitted`); this pane read a nil `head` as the retention policy.
       if result_display_truncated?(r)

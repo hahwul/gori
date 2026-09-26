@@ -54,7 +54,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     repeater_controller.count
   end
 
-  # Space-menu (:subtab) counterparts of the strip's `r` rename chord / ^W close —
+  # Space-menu (:subtab) counterparts of the strip's `e` rename chord / ^W close —
   # reuse the SAME shell-owned rename prompt / confirm-gated close, not a new path.
   def repeater_rename_subtab : Nil
     open_rename(current_subtab_index)

@@ -3920,3 +3920,39 @@ above. #1295.
   header over the family row alone (ProbeDetail's `─ SEND ─`).
 - **Show all is one Display… intent** (`:show_all`, `a`): Probe's closed issues and the Params
   tab's standard headers are the same lens, on the letter both tabs already answer bare.
+
+### 2026-09-26: no level-1 `c` or `i` where the tab leaves the letter to Global
+
+Closes: #1274 Decision 10 (the eight Global fall-through pairs in the R1 guard). #1295.
+
+Global binds three bare letters, `c` (stop capture), `i` (hold all traffic) and `s` (the scope
+lens). On a tab that does not bind the letter itself, a menu row on it is one dropped `space`
+away from the Global action, and for `c` and `i` that action is silent and changes what the
+proxy does. The scope lens stays excused: it is a view filter the next `s` undoes.
+
+- **The rows move.** `:set_status`, `:duplicate_rule` and the new `:clear_marks` (the Repeater
+  and Fuzzer marker clears, one intent now) are `C` in the lexicon, so each moves on every tab
+  at once. JWT's Copy attack token is `C`, like Copy re-signed token in the pane beside it.
+  Diff's Add issue is `F`, its own `⇧F`, since `a` is Diff's pick-A.
+- **The guard is the rule.** The R1 guard already reports a Global fall-through; with the
+  eight allowlist lines gone, a new `c`/`i` row on such a tab fails it, and the only way back is
+  an allowlist line with a reason. A tab that binds the letter itself (Probe's `c` dismiss) is
+  unaffected, because the press never reaches Global.
+
+### 2026-09-26: the other R1 pairs, closed by a rule or a move
+
+Refines: the R1 guard entry above. #1295.
+
+- **vim motions are a rule, not eight allowlist lines.** Under the `vim` keyset an editor pane
+  answers `a` `g` `⇧G` `/` and `⇧V` with append, top, bottom, find and select line, and eight
+  menu rows share those letters. A dropped space there runs the motion a vim hand expects,
+  which moves or selects and never writes, sends or deletes, so the guard exempts those verbs
+  by id (`VIM_MOTIONS`) under that keyset only. Undo (`u`) and helix's `i` insert are not in
+  it, and an example fails if an exempt verb moves into an acting band (send, triage, danger,
+  wipe) or out of the vim table.
+- **The strip's rename key is `e`.** The menu's Rename is `e` on all nine strips and its `r`
+  is Send/Run on four of them, so the strip moves to the menu's letter rather than the menu to
+  the strip's, and strip `r` does nothing (`^R` still sends from the Repeater strip). The
+  project picker already renamed on `e`.
+- **The Fuzzer's Save results is `⇧E`,** the Export chord of four tabs. Its `⇧S` was also
+  what a typed menu `S` (Send selection to…, on every Fuzzer view) sends to the keymap.

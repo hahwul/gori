@@ -130,12 +130,12 @@ Marks change **what the space menu acts on**, not which actions exist:
 
 > the effective target is **the marks if any are set, else the cursor row**
 
-So `/ status:open severity:low` → `Shift-T` → `Space` → `c` → **False positive** re-triages the whole batch in one pick. The menu title reads `SPACE · 3 MARKED` and the entries rename themselves (`Delete 3 issues`) so a batch is never a surprise.
+So `/ status:open severity:low` → `Shift-T` → `Space` → `C` → **False positive** re-triages the whole batch in one pick. The menu title reads `SPACE · 3 MARKED` and the entries rename themselves (`Delete 3 issues`) so a batch is never a surprise.
 
 | Action | Key | Over marks |
 |--------|-----|-----------|
 | Set severity | `Space` `s` | One pick, written to every marked issue |
-| Set status | `Space` `c` | One pick: the bulk "false positive" / "resolved" pass |
+| Set status | `Space` `C` | One pick: the bulk "false positive" / "resolved" pass |
 | Delete | `Space` `d` | One confirm for the whole set |
 
 Marks survive a filter change, a re-sort (including the one your own severity edit causes), and leaving the tab and coming back; the count chip tells you how many are currently off-screen. Opening an issue pins the actions to that one issue; marks are a list-level idea. Export always writes the **full** report, so its menu entry says `(all)` while marks are set.

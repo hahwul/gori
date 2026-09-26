@@ -53,10 +53,12 @@ module Gori
         "jwt.copy-token", "Copy re-signed token", "Copy the OUTPUT token to the clipboard",
         Verb::Scope::Jwt, available: in_jwt, mnemonic: 'C', section: :output) { |ctx| ctx.jwt_copy_token; nil }
 
-      # Copy the selected ATTACK payload — tagged :attacks (the payload list pane).
+      # Copy the selected ATTACK payload — tagged :attacks (the payload list pane). `C` like
+      # copy-token beside it ("copy this pane's token"), never `c`: the tab does not bind `c`,
+      # so a dropped space would reach Global and stop capture (#1295).
       r.register Verb::Definition.new(
         "jwt.copy-attack", "Copy attack token", "Copy the selected testing payload to the clipboard",
-        Verb::Scope::Jwt, available: in_jwt, mnemonic: 'c', section: :attacks) { |ctx| ctx.jwt_copy_attack; nil }
+        Verb::Scope::Jwt, available: in_jwt, mnemonic: 'C', section: :attacks) { |ctx| ctx.jwt_copy_attack; nil }
 
       # Sub-tab chip rename + content clone — tagged :subtab (mirrors Decoder).
       r.register Verb::Definition.new(

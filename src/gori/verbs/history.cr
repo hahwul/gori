@@ -321,17 +321,15 @@ module Gori
         # to… (#1274).
         intent: :find_subtab, section: :tab) { |ctx| ctx.repeater_find_subtab; nil }
 
-      # Sub-tab rename/close — today's raw key-dispatch on the strip (`r` rename, ^W
+      # Sub-tab rename/close — today's raw key-dispatch on the strip (`e` rename, ^W
       # close) promoted to verbs so the :subtab space-menu group (reachable from the
       # strip) isn't empty. Reuse the SAME shell rename prompt + confirm-gated close
       # (no new logic).
       #
-      # 'e' and NOT the 'r' the strip binds, which is the one place the key audit's
-      # "menu letter = strip key" rule cannot be met: COMMON's 'r' here is
-      # `repeater.send`, the menu echo of `^R`, and COMMON renders inside the :subtab
-      # view. A rename does not take the Send letter. Same trade in Fuzzer, Miner and
-      # Sequencer (`*.run`); Comparer, Decoder, JWT and Cookie have no COMMON 'r' and
-      # all four spell rename 'r'.
+      # 'e' and NOT 'r': COMMON's 'r' here is `repeater.send`, the menu echo of `^R`, and
+      # COMMON renders inside the :subtab view. A rename does not take the Send letter.
+      # Same trade in Fuzzer, Miner and Sequencer (`*.run`), so rename is 'e' on all nine
+      # strips, and the strip's own raw key followed it from `r` to `e` (#1295).
       r.register Verb::Definition.new(
         "repeater.rename-subtab", "Rename subtab", "Rename the active repeater sub-tab's chip",
         Verb::Scope::Repeater, available: in_repeater, intent: :rename, section: :subtab) { |ctx| ctx.repeater_rename_subtab; nil }
@@ -402,7 +400,7 @@ module Gori
         available: in_repeater, mnemonic: 'a', section: :request) { |ctx| ctx.repeater_auto_mark; nil }
       r.register Verb::Definition.new(
         "repeater.clear-marks", "Clear markers", "Strip every §…§ marker (and its attached chain)",
-        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'c', section: :request) { |ctx| ctx.repeater_clear_marks; nil }
+        Verb::Scope::Repeater, available: in_repeater, intent: :clear_marks, section: :request) { |ctx| ctx.repeater_clear_marks; nil }
       # ^Q, not ^Y: `^Y` is now Copy in every text box (see `in_repeater_copy`), and Copy is
       # the far more frequent action of the two, so it takes the chord whose letter means
       # something. attach-chain keeps a CTRL chord rather than falling back to its space-menu
@@ -763,12 +761,14 @@ module Gori
         "fuzz.dist", "Distribution sidebar", "RESULTS: show/hide the status and length distribution",
         Verb::Scope::Fuzzer, [Verb::Chord.new("v")], available: in_fuzzer, intent: :distribution, section: :results,
         chord_sections: [:results]) { |ctx| ctx.fuzz_toggle_dist; nil }
-      # Palette-only (#1282), on `⇧S`; its menu letter was the export `E`, which freed `P` for
-      # Protocol… (#1274). Shift-S is intentionally READ-mode-only: in a template editor it remains a literal
-      # uppercase S. Ctrl-S already edits the target's SNI and cannot be repurposed.
+      # Palette-only (#1282), on `⇧E`, the Export chord of Issues, Sitemap, Evidence and the
+      # Sequencer; its menu letter was the export `E`, which freed `P` for Protocol… (#1274).
+      # It was `⇧S`, which a typed menu `S` (Send selection to…, on every Fuzzer view) also
+      # is (#1295). READ-mode-only: in a template editor it remains a literal uppercase E.
+      # Ctrl-S already edits the target's SNI and cannot be repurposed.
       r.register Verb::Definition.new(
         "fuzz.save-results", "Save results", "Permanently save every result and its full request/response in this project",
-        Verb::Scope::Fuzzer, [Verb::Chord.new("s", shift: true)],
+        Verb::Scope::Fuzzer, [Verb::Chord.new("e", shift: true)],
         available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :fuzzer && ctx.fuzzer_results_saveable? },
         intent: :export, menu: :palette) { |ctx| ctx.fuzz_save_results; nil }
       r.register Verb::Definition.new(
@@ -830,10 +830,10 @@ module Gori
         Verb::Scope::Fuzzer, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :fuzzer && ctx.subtab_marked_count > 0 }, intent: :mark_clear, section: :subtab) { |ctx| ctx.subtab_mark_clear; nil }
 
       # Sub-tab rename/close — mirrors repeater.rename-subtab/repeater.close-subtab above:
-      # the strip's raw `r` rename / ^W close, promoted to verbs so :subtab isn't
+      # the strip's raw `e` rename / ^W close, promoted to verbs so :subtab isn't
       # empty. 'e'/'w' are free in COMMON ∪ :subtab (Fuzzer COMMON keys: r/s/y/k/u/S/v).
       #
-      # 'e' and NOT the 'r' the strip binds: COMMON's 'r' here is `fuzz.run`, the menu echo of
+      # 'e' and NOT 'r': COMMON's 'r' here is `fuzz.run`, the menu echo of
       # `^R`, and COMMON renders inside the :subtab view. A rename does not take the Run
       # letter — see `repeater.rename-subtab` for the full note.
       r.register Verb::Definition.new(
@@ -885,7 +885,7 @@ module Gori
         available: in_fuzzer, intent: :http2, section: :template) { |ctx| ctx.fuzz_toggle_http2; nil }
       r.register Verb::Definition.new(
         "fuzz.clear-marks", "Clear markers", "Strip every §…§ marker (and its attached chain) from the template",
-        Verb::Scope::Fuzzer, available: in_fuzzer, mnemonic: 'c', section: :template) { |ctx| ctx.fuzz_clear_marks; nil }
+        Verb::Scope::Fuzzer, available: in_fuzzer, intent: :clear_marks, section: :template) { |ctx| ctx.fuzz_clear_marks; nil }
       # Target-pane toggle (SNI override), the twin of repeater.toggle-sni: same ^S, same
       # two-line editor, same focus rule. `FuzzerView` already carried @sni, persisted it
       # with the session and handed it to build_engine — a session seeded from History had
@@ -957,7 +957,7 @@ module Gori
       r.register Verb::Definition.new(
         "mine.duplicate-subtab", "Duplicate subtab", "Open a new miner session with the same request and config",
         Verb::Scope::Miner, available: in_miner, intent: :duplicate, section: :subtab) { |ctx| ctx.miner_duplicate_subtab; nil }
-      # The strip's `r` rename / ^W close, which `Runner#renameable_subtabs?` and
+      # The strip's `e` rename / ^W close, which `Runner#renameable_subtabs?` and
       # `#subtab_close` have supported for :miner all along with no verbs to show for it —
       # so this `:subtab` group held Duplicate alone while six other multi-session tabs
       # (Repeater, Fuzzer, Comparer, Decoder, JWT, Notes) list all three. 'e'/'w' are free

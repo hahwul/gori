@@ -231,7 +231,7 @@ module Gori::Tui
     # #897's two-line messages ran past it, and each lost exactly the clause that said what
     # would happen: `CLOSE FUZZER` drew "Its template/config, private temporary spool, and
     # eve…" and dropped "ry saved run are deleted." — the only warning an operator gets that
-    # `^W` destroys every run ⇧S promoted into the project.
+    # `^W` destroys every run ⇧E promoted into the project.
     #
     # Wrapping HERE and not at each call site is the point: a hand-wrapped sentence is correct
     # until someone edits it, and this is the third message to acquire the same bug. `render`

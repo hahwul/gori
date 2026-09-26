@@ -63,7 +63,7 @@ module Gori
         Verb::Scope::Sequencer, [] of Verb::Chord, available: has_report,
         intent: :file_issue) { |ctx| ctx.sequence_promote; nil }
 
-      # The strip's `r` rename / ^W close. `Runner#renameable_subtabs?` and `#subtab_close`
+      # The strip's `e` rename / ^W close. `Runner#renameable_subtabs?` and `#subtab_close`
       # have listed :sequencer all along, but with no verbs this tab had NO `:subtab` menu
       # group at all — the only multi-session tab without one. 'e'/'w' are free in
       # COMMON ∪ :subtab (COMMON: r/s/c/i/x/y/v/S/E/J).

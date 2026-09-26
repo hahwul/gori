@@ -202,7 +202,7 @@ module Gori::Tui
       y = Hotkeys.binding_label(reg, "fuzzer.copy", "y")
       run = Hotkeys.binding_label(reg, "fuzz.run", "^R")
       stop = Hotkeys.binding_label(reg, "fuzz.stop", "^X")
-      save_key = Hotkeys.binding_label(reg, "fuzz.save-results", "⇧S")
+      save_key = Hotkeys.binding_label(reg, "fuzz.save-results", "⇧E")
       # One phrasing for the marker trio, shared with the Repeater's request footer. This
       # used to name `^A` in both modes and `^K` in INSERT only, and `^T` nowhere.
       params = Hotkeys.binding_label(reg, "fuzz.automark", "^A")
@@ -236,7 +236,7 @@ module Gori::Tui
         end
       when :config then config_hint(v, run)
       when :results
-        # ⇧S only while the verb would actually fire. `fuzz.save-results` is gated on
+        # ⇧E only while the verb would actually fire. `fuzz.save-results` is gated on
         # `fuzzer_results_saveable?` (verbs/history.cr), which is false while a run is going,
         # while a save/load is in flight, with no results, and once the run has been saved or
         # restored — and an unavailable verb is never dispatched, so the key did NOTHING and
@@ -728,7 +728,7 @@ module Gori::Tui
       when key.enter?                  then activate_config_row(v)
       when key.delete?, key.backspace? then v.form_delete
       when (c = ev.char || key.to_char) && !ev.ctrl? && !ev.alt? && !c.control?
-        return false # Shift-S save and other Fuzzer keymap verbs
+        return false # Shift-E save and other Fuzzer keymap verbs
       end
       true
     end
@@ -1174,7 +1174,7 @@ module Gori::Tui
       end
     end
 
-    # The archive died mid-sweep. The run itself is untouched — this only says ⇧S is gone,
+    # The archive died mid-sweep. The run itself is untouched — this only says ⇧E is gone,
     # while it can still be acted on rather than only mourned.
     private def apply_spool_lost(event : SpoolLost) : Nil
       return unless @fuzzers.any?(&.view.same?(event.view))
@@ -1590,7 +1590,7 @@ module Gori::Tui
       current_view.try(&.results_saveable?) == true
     end
 
-    # Shift-S copies the complete private spool into the project. The bounded pane is only a
+    # Shift-E copies the complete private spool into the project. The bounded pane is only a
     # display window and is never the persistence source.
     def fuzz_save_results : Nil
       return unless tab = current_tab_obj

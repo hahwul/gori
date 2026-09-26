@@ -41,7 +41,7 @@ module Gori::Tui
   # and handle_body_key always returns true: the Decoder verbs' single-letter
   # mnemonics never collide with literal text (`:` stays literal) — they're reached
   # only from the space menu + palette. A runner-owned sub-tab strip appears from the
-  # first session (^N new · ^W close · ^1-9/←→ switch · r rename); open sessions persist
+  # first session (^N new · ^W close · ^1-9/←→ switch · e rename); open sessions persist
   # to THIS project's store (`Store::DECODER_SESSIONS_KEY`), so switching projects opens a
   # clean workbench instead of carrying the previous engagement's material across. The
   # named chains a conversion can load stay in the global settings.json — a chain spec is
