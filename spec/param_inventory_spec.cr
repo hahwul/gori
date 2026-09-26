@@ -302,6 +302,44 @@ describe Gori::ParamInventory do
     end
   end
 
+  describe ".seed_names" do
+    it "gives each flow its own endpoint's neighbour names, one build per host" do
+      with_store do |store|
+        orders = pi_flow(store, "/orders?tenant=1&page=2")
+        invoices = pi_flow(store, "/invoices?page=1")
+        pi_flow(store, "/x?elsewhere=1", host: "other.test")
+        rows = store.flow_rows([orders, invoices])
+        got = PI.seed_names(store, rows)
+        got[invoices].should eq(["tenant"])
+        got[orders].should be_empty # /invoices carries only `page`, which /orders already has
+      end
+    end
+
+    it "leaves header names out and reads the host case-insensitively" do
+      with_store do |store|
+        pi_flow(store, "/a?q=1", host: "Shop.test", req_headers: "X-Tenant: 1\r\n")
+        id = pi_flow(store, "/b", host: "shop.test")
+        PI.seed_names(store, store.flow_rows([id]))[id].should eq(["q"])
+      end
+    end
+
+    it "lists the newest sighting first" do
+      with_store do |store|
+        pi_flow(store, "/a?old=1")
+        pi_flow(store, "/b?new=1")
+        id = pi_flow(store, "/c")
+        PI.seed_names(store, store.flow_rows([id]))[id].should eq(["new", "old"])
+      end
+    end
+
+    it "gives no entry to a flow whose host scan was stopped" do
+      with_store do |store|
+        id = pi_flow(store, "/b?x=1")
+        PI.seed_names(store, store.flow_rows([id]), stop: -> { true }).should be_empty
+      end
+    end
+  end
+
   it "masks bracket-nested sensitive names" do
     with_store do |store|
       pi_flow(store, "/login", method: "POST", req_headers: "Content-Type: application/x-www-form-urlencoded\r\n",

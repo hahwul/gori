@@ -3,15 +3,45 @@ require "../support/memory_backend"
 
 include Gori::Tui
 
-private def seed(applicable, default) : MineSeed
+private def seed(applicable, default, flow_id : Int64? = nil) : MineSeed
   MineSeed.new(
     target: "http://h.test",
     request: "GET /api HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice,
-    http2: false, sni: nil, flow_id: nil, summary: "GET /api",
+    http2: false, sni: nil, flow_id: flow_id, summary: "GET /api",
     applicable: applicable, default: default)
 end
 
 describe Gori::Tui::MineConfigOverlay do
+  it "lands inventory seed names on each seed by flow id (#1231)" do
+    q = [Gori::Miner::Location::Query]
+    ov = MineConfigOverlay.new(seed(q, q, 1_i64), [seed(q, q, 2_i64), seed(q, q)])
+    ov.begin_seeding
+    ov.seeding?.should be_true
+    ov.build_config.seed_names.should be_empty # Start before it lands tests the wordlist alone
+    ov.seed_status.to_s.should contain("seeding names")
+    ov.land_seed_names({1_i64 => ["tenant"], 2_i64 => ["org"]})
+    ov.seeding?.should be_false
+    ov.seed_status.should eq("seeded names tested first on 2 of 3 flows")
+    ov.build_config.seed_names.should eq(["tenant"])
+    ov.extra_seeds.map(&.names).should eq([["org"], [] of String])
+  end
+
+  it "says nothing about seeding for a plain wordlist mine, and counts a single seed's names" do
+    q = [Gori::Miner::Location::Query]
+    MineConfigOverlay.new(seed(q, q)).seed_status.should be_nil
+    MineConfigOverlay.new(seed(q, q).copy_with(names: ["a", "b"])).seed_status.should eq("+2 seeded names, tested first")
+  end
+
+  it "keeps every seed's names when the scan failed" do
+    q = [Gori::Miner::Location::Query]
+    ov = MineConfigOverlay.new(seed(q, q, 1_i64).copy_with(names: ["kept"]))
+    ov.begin_seeding
+    ov.land_seed_names(nil)
+    ov.seeding?.should be_false
+    ov.seed_status.to_s.should contain("seeding failed")
+    ov.build_config.seed_names.should eq(["kept"])
+  end
+
   it "pre-checks the default locations and excludes others" do
     ov = MineConfigOverlay.new(seed(
       [Gori::Miner::Location::Query, Gori::Miner::Location::Json, Gori::Miner::Location::Headers],

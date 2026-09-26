@@ -18,8 +18,9 @@ module Gori::Tui
     summary : String,
     applicable : Array(Miner::Location),
     default : Array(Miner::Location),
-    # Names tested FIRST (`Miner::Config#seed_names`) — the Params sub-tab's neighbour names
-    # (#1231). Not free text, so the no-text-field rule below still holds.
+    # Names tested FIRST (`Miner::Config#seed_names`) — the parameter inventory's neighbour
+    # names (#1231), from the Params sub-tab's scan or, for a History mine, one run for the
+    # popup (`land_seed_names`). Not free text, so the no-text-field rule below still holds.
     names : Array(String) = [] of String
 
   # The small config popup shown before a mine starts: adaptive location checkboxes,
@@ -46,6 +47,12 @@ module Gori::Tui
     # body location checked on a POST is simply not mined on a GET.
     getter extra_seeds : Array(MineSeed)
 
+    # True while a History mine's inventory scan is still running: its names land after the
+    # popup opens (`land_seed_names`), because the scan reads flows and must not freeze the
+    # frame. Start does not wait for it; the Runner says so when it did not finish.
+    getter? seeding = false
+    @seed_failed = false
+
     def initialize(@seed : MineSeed, @extra_seeds : Array(MineSeed) = [] of MineSeed)
       @checked = Hash(Miner::Location, Bool).new
       @seed.applicable.each { |l| @checked[l] = @seed.default.includes?(l) }
@@ -55,6 +62,24 @@ module Gori::Tui
       @keep_alive = true
       @selected = 0
       restore_saved_prefs
+    end
+
+    def begin_seeding : Nil
+      @seeding = true
+    end
+
+    # Land the inventory scan: each seed's neighbour names, by flow id. nil = the scan failed,
+    # and every seed keeps what it had.
+    def land_seed_names(by_flow : Hash(Int64, Array(String))?) : Nil
+      @seeding = false
+      @seed_failed = by_flow.nil?
+      return unless by_flow
+      @seed = with_names(@seed, by_flow)
+      @extra_seeds = @extra_seeds.map { |s| with_names(s, by_flow).as(MineSeed) }
+    end
+
+    private def with_names(s : MineSeed, by_flow : Hash(Int64, Array(String))) : MineSeed
+      (id = s.flow_id) && (names = by_flow[id]?) ? s.copy_with(names: names) : s
     end
 
     # Remember the last confirmed overlay for the next History/Repeater mine.
@@ -222,9 +247,23 @@ module Gori::Tui
     # the cycler's value means N × that many requests in flight, and a reader who takes the "10"
     # below as a batch-wide ceiling would be off by a factor of N.
     private def header_summary : String
-      seeded = @seed.names.empty? ? "" : " · +#{@seed.names.size} seeded name#{@seed.names.size == 1 ? "" : "s"}"
-      return "#{@seed.summary}#{seeded}" if @extra_seeds.empty?
+      return @seed.summary if @extra_seeds.empty?
       "#{target_count} flows · one session each · concurrency is per session"
+    end
+
+    # The line under the summary: where the names tested FIRST stand — the inventory scan
+    # still running, failed, or what it seeded (per flow, for a batch). nil when nothing was
+    # seeded and nothing is pending: a plain wordlist mine.
+    def seed_status : String?
+      return "seeding names from the parameter inventory…" if seeding?
+      return "name seeding failed — the wordlist alone is tested" if @seed_failed
+      seeds = [@seed] + @extra_seeds
+      if @extra_seeds.empty?
+        n = @seed.names.size
+        return n.zero? ? nil : "+#{n} seeded name#{n == 1 ? "" : "s"}, tested first"
+      end
+      k = seeds.count { |s| !s.names.empty? }
+      k.zero? ? nil : "seeded names tested first on #{k} of #{seeds.size} flows"
     end
 
     def overlay_box(area : Rect) : Rect?
@@ -242,6 +281,9 @@ module Gori::Tui
       end
       Frame.card(screen, box, "MINE PARAMETERS", border: Theme.border_focus)
       screen.text(box.x + 2, box.y + 1, header_summary, Theme.text_bright, Theme.panel, Attribute::Bold, width: box.w - 4)
+      if line = seed_status
+        screen.text(box.x + 2, box.y + 2, line, Theme.muted, Theme.panel, width: box.w - 4)
+      end
       first = box.y + 3
       row_count.times do |i|
         py = first + i
