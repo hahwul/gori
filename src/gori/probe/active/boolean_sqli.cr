@@ -104,7 +104,7 @@ module Gori
 
         def dedup_key(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : String?
           s, slots = injectables(detail, opts) || return nil
-          InsertionPoints.dedup_key("sqli_boolean_based", detail, s.method, s.path, slots)
+          key_string(detail, s.method, s.path, slots, opts)
         end
 
         def plan(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : Plan?
@@ -124,7 +124,7 @@ module Gori
             end
             params << Param.new(slot.loc.label, slot.name, slot.raw_value)
           end
-          key = InsertionPoints.dedup_key("sqli_boolean_based", detail, s.method, s.path, slots)
+          key = key_string(detail, s.method, s.path, slots, opts)
           Plan.new(baseline, params, key, followups)
         end
 
@@ -244,6 +244,14 @@ module Gori
           slots = s.slots.first(cap)
           return nil if slots.empty?
           {s, slots}
+        end
+
+        # Suffix with |aggr under aggressive opts: aggressive introduces numeric breakout
+        # contexts (not just string contexts), so the ACTIVE↔AGGRESSIVE backfill re-arm must
+        # not suppress an already-seen surface before the wider breakouts run.
+        private def key_string(detail : Store::FlowDetail, method : String, path : String,
+                               slots : Array(InsertionPoints::Slot), opts : Options) : String
+          "#{InsertionPoints.dedup_key("sqli_boolean_based", detail, method, path, slots)}#{opts.aggressive ? "|aggr" : ""}"
         end
       end
     end
