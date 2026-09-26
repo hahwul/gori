@@ -216,8 +216,12 @@ module Gori
                          keyset : String = editor_keyset) : Verb::Chord?
       verb = registry[id]?
       return nil unless verb
-      chord = Verb::Keymap.effective_chords(verb, Verb::OsProfile.resolve(profile), overrides,
-        Verb::Keyset.resolve(keyset)).first?
+      os = Verb::OsProfile.resolve(profile)
+      ks = Verb::Keyset.resolve(keyset)
+      # Never a chord the keymap fires as another verb: a default the operator's rebind of a
+      # same-scope verb took is not this verb's key any more (`Keymap.displaced?`).
+      chord = Verb::Keymap.effective_chords(verb, os, overrides, ks)
+        .find { |c| !Verb::Keymap.displaced?(registry, verb, c, os, overrides, ks) }
       # A keyless verb that another verb's chord reaches (`Definition#chord_of`) names that chord.
       if chord.nil? && (via = verb.chord_of)
         return binding_for(registry, via, overrides, profile, keyset)

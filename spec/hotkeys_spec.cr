@@ -91,6 +91,23 @@ describe Gori::Hotkeys do
       Gori::Hotkeys.binding_for(reg, "app.notifications").should be_nil
     end
 
+    # #1297 moved Save results ⇧S → ⇧E, which was free in the Fuzzer before, so an operator
+    # may already have put another Fuzzer verb there. That rebind wins the key (`Keymap.build`
+    # writes the user layer last); the footer, Help and the palette must not keep saying ⇧E.
+    it "does not advertise a default chord a same-scope rebind took" do
+      reg = Gori::Verbs.registry
+      e = Gori::Verb::Chord.new("e", shift: true)
+      Gori::Hotkeys.binding_for(reg, "fuzz.save-results", {} of String => Array(Gori::Verb::Chord)).should eq(e)
+      took = {"fuzzer.oast-insert" => [e]}
+      km = Gori::Verb::Keymap.build(reg, Gori::Verb::OsProfile::Os::Linux, took)
+      km.lookup(e, Gori::Verb::Scope::Fuzzer).should eq("fuzzer.oast-insert")
+      Gori::Hotkeys.binding_for(reg, "fuzz.save-results", took).should be_nil
+      Gori::Hotkeys.binding_for(reg, "fuzzer.oast-insert", took).should eq(e)
+      # The same chord taken in ANOTHER scope displaces nothing: the Fuzzer still answers it.
+      elsewhere = {"repeater.send" => [e]}
+      Gori::Hotkeys.binding_for(reg, "fuzz.save-results", elsewhere).should eq(e)
+    end
+
     it "names the chord of the verb a keyless one declares `chord_of:`, and follows its rebind (#1295)" do
       reg = Gori::Verbs.registry
       reg["repeater.toggle-resp-hex"].chords.should be_empty

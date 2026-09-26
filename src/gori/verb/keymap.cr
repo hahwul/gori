@@ -23,16 +23,7 @@ module Gori
         # steal a chord that the operator or keyset assigned to another verb.
         layers = Array.new(4) { [] of Definition }
         registry.each do |verb|
-          priority = if overrides.has_key?(verb.id)
-                       3
-                     elsif keyset_overrides.has_key?(verb.id)
-                       2
-                     elsif os_overrides.has_key?(verb.id)
-                       1
-                     else
-                       0
-                     end
-          layers[priority] << verb
+          layers[layer_of(verb.id, overrides, keyset_overrides, os_overrides)] << verb
         end
         claimed = global_claims(layers, os, overrides, keyset)
         layers.each do |layer|
@@ -45,6 +36,45 @@ module Gori
           end
         end
         new(by_scope)
+      end
+
+      # Which configuration layer binds `id`: 3 the user's rebind, 2 a keyset row, 1 an OS
+      # row, 0 the verb's declared chords. `#build` writes the layers in that order, so on a
+      # shared chord in one scope the higher layer is the one the key fires.
+      def self.layer_of(id : String, overrides : Hash(String, Array(Chord)),
+                        keyset_overrides : Hash(String, Array(Chord)),
+                        os_overrides : Hash(String, Array(Chord))) : Int32
+        if overrides.has_key?(id)
+          3
+        elsif keyset_overrides.has_key?(id)
+          2
+        elsif os_overrides.has_key?(id)
+          1
+        else
+          0
+        end
+      end
+
+      # Whether `chord`, one of `verb`'s effective chords, fires another verb instead: a higher
+      # layer put it on a verb of the same scope, and `#build` let that one win. What a hint
+      # must not advertise — a default ⇧E Save results that the operator's own ⇧E rebind took
+      # (`Hotkeys.binding_for`). Only the configured rows can outrank a verb, so it reads those
+      # rather than the whole registry.
+      def self.displaced?(registry : Registry, verb : Definition, chord : Chord,
+                          os : OsProfile::Os, overrides : Hash(String, Array(Chord)),
+                          keyset : Keyset::Kind) : Bool
+        keyset_overrides = Keyset.overrides_for(keyset)
+        os_overrides = OsProfile.overrides_for(os)
+        mine = layer_of(verb.id, overrides, keyset_overrides, os_overrides)
+        return false if mine == 3
+        {overrides, keyset_overrides, os_overrides}.any? do |rows|
+          rows.each_key.any? do |id|
+            next false if id == verb.id
+            next false unless (other = registry[id]?) && other.scope == verb.scope
+            next false unless layer_of(id, overrides, keyset_overrides, os_overrides) > mine
+            effective_chords(other, os, overrides, keyset).includes?(chord)
+          end
+        end
       end
 
       # The chords a configured layer (user, keyset or OS row) puts on a GLOBAL verb. A family
