@@ -324,7 +324,13 @@ module Gori::Discover
       # keep-alive so much as the absence of a request to close: HTTP/1.1's default is
       # persistent, and an origin that disagrees says so in its own `Connection` header,
       # which `reusable_response?` reads.
-      conn = @keep_alive ? "" : "Connection: close\r\n"
+      #
+      # Never on h2, pooled or not: `Connection` is a connection-specific field a conforming
+      # server MUST treat as malformed (RFC 9113 §8.2.2), and `H2Engine` deliberately carries
+      # it to the wire as-is, because that is right for an operator's own bytes. These are
+      # gori's, so the h1 instruction is simply not written — as `Fuzz::Engine` does for its
+      # redirect hops.
+      conn = @keep_alive || @http2 ? "" : "Connection: close\r\n"
       "GET #{target} HTTP/1.1\r\nHost: #{hostline}\r\n#{header_block}#{conn}\r\n".to_slice
     end
   end
