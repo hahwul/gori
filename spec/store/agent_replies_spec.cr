@@ -34,6 +34,18 @@ describe Gori::Store, "#1090 agent replies" do
       d.should end_with("… (cut)")
     end
   end
+
+  # `scrub` writes one U+FFFD per stray byte, so a cut inside a 3- or 4-byte character left
+  # one or two of them behind the text.
+  it "leaves no replacement character when the cut splits a 3- or 4-byte character" do
+    max = Gori::AgentReply::DETAIL_MAX
+    (1..3).each do |over|
+      d = Gori::AgentReply.cap_detail("a" * (max - over) + "😀" * 4).not_nil!
+      d.should_not contain('\uFFFD')
+      d.should eq("a" * (max - over) + "\n… (cut)")
+    end
+    Gori::AgentReply.cap_detail("a" * (max - 1) + "한글").not_nil!.should_not contain('\uFFFD')
+  end
 end
 
 # #1322: the per-project "last reply a window showed" watermark, and the two reads the away

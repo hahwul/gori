@@ -141,8 +141,14 @@ module Gori
     def self.cap_detail(detail : String?) : String?
       d = detail
       return d unless d && d.bytesize > DETAIL_MAX
-      # `scrub` turns a split sequence into U+FFFD, dropped.
-      String.new(d.to_slice[0, DETAIL_MAX]).scrub.rchop('\uFFFD') + "\n… (cut)"
+      # Back the cut off to a character boundary: `scrub` writes one U+FFFD per stray byte of a
+      # split sequence, so dropping a single trailing one left 1-2 behind.
+      bytes = d.to_slice
+      cut = DETAIL_MAX
+      while cut > 0 && bytes[cut] & 0xC0 == 0x80
+        cut -= 1
+      end
+      String.new(bytes[0, cut]).scrub + "\n… (cut)"
     end
 
     # The first line of what the agent sent, capped — the rest belongs in `detail`.
