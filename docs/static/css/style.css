@@ -234,6 +234,12 @@ body.is-doc::before {
   opacity: 0.09;
 }
 
+/* The landing's hero is the wallpaper painting, which carries its own cloud
+   line-work; the contour overlay on top of it only doubled the strokes. */
+body:has(.home-main)::before {
+  display: none;
+}
+
 body.is-doc::after {
   opacity: 0.4;
 }
@@ -657,11 +663,11 @@ kbd {
   padding: var(--header-h) 1.25rem 0;
 }
 
-/* The hero photograph: two interlocked gold rings over dark marbled night,
-   full-bleed across the top of the page. The copy now sits centered on top of
-   it, so the seating scrim is a vertical veil — heaviest where the headline
-   is, dissolving before the showcase frame arrives — and the photo is framed
-   so the ring knot glows behind and above the type instead of beside it. */
+/* The hero art: the brand wallpaper (ink, gold leaf, brushed cloud; the plain
+   cut, since the marked one centres the logo right behind the headline),
+   full-bleed across the top of the page. The copy sits centered on top of it,
+   so the seating scrim is a vertical veil, heaviest where the headline is and
+   dissolving before the showcase frame arrives. */
 .home-main::before {
   content: "";
   position: absolute;
@@ -669,12 +675,16 @@ kbd {
   right: 0;
   left: 0;
   height: min(115vh, 68rem);
+  /* The painting is busier than a photograph, so a third, oval veil sits
+     right under the copy column: the gold leaf keeps the edges and never
+     runs behind the lede or the buttons. */
   background:
+    radial-gradient(42rem 26rem at 50% 44%, rgb(8 10 17 / 0.72), rgb(8 10 17 / 0) 72%),
     radial-gradient(64rem 30rem at 50% 78%, rgb(8 10 17 / 0.88), rgb(8 10 17 / 0) 70%),
-    linear-gradient(180deg, rgb(6 8 14 / 0.66) 0%, rgb(6 8 14 / 0.5) 38%, rgb(6 8 14 / 0.18) 62%, rgb(8 10 17 / 0) 80%),
-    url("../images/hero-orbits.webp") 58% 26% / cover no-repeat;
-  -webkit-mask: linear-gradient(180deg, #000 55%, transparent 96%);
-  mask: linear-gradient(180deg, #000 55%, transparent 96%);
+    linear-gradient(180deg, rgb(6 8 14 / 0.62) 0%, rgb(6 8 14 / 0.44) 38%, rgb(6 8 14 / 0.3) 62%, rgb(8 10 17 / 0) 80%),
+    url("../images/wallpaper.webp") 50% 40% / cover no-repeat;
+  -webkit-mask: linear-gradient(180deg, #000 48%, transparent 84%);
+  mask: linear-gradient(180deg, #000 48%, transparent 84%);
 }
 
 /* On paper the photograph flips to ink: invert turns the night to cream and
@@ -759,6 +769,14 @@ kbd {
   background-clip: text;
   -webkit-text-fill-color: transparent;
   padding-right: 0.06em;
+}
+
+/* The hero's own word keeps the wordmark's gold (bronze on paper), so the
+   headline matches the logo above it; section titles use the brighter gild. */
+.gild.hero-em {
+  background: var(--grad-logo);
+  -webkit-background-clip: text;
+  background-clip: text;
 }
 
 .hero-lede {
@@ -3592,9 +3610,10 @@ html.search-lock body {
   .home-main::before {
     height: min(90vh, 46rem);
     background:
+      radial-gradient(30rem 24rem at 50% 42%, rgb(8 10 17 / 0.7), rgb(8 10 17 / 0) 72%),
       radial-gradient(40rem 22rem at 50% 72%, rgb(8 10 17 / 0.9), rgb(8 10 17 / 0) 72%),
       linear-gradient(180deg, rgb(6 8 14 / 0.72) 0%, rgb(6 8 14 / 0.5) 42%, rgb(6 8 14 / 0) 78%),
-      url("../images/hero-orbits.webp") 44% 30% / cover no-repeat;
+      url("../images/wallpaper.webp") 30% 40% / cover no-repeat;
   }
 
   .home-hero h1 {
