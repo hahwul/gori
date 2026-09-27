@@ -2544,13 +2544,6 @@ html.js .flow-shot.is-active .flow-shot-frame {
      shown as a black square on a black square. */
   background: var(--plate, #0a0a0b);
 }
-/* The two wallpaper cuts differ in ratio (2:1 with the mark, 16:9 plain);
-   previewed in one 16:9 frame so the plates and their captions line up. The
-   downloads are the untouched files. */
-.art-gallery--wide img {
-  aspect-ratio: 16 / 9;
-  object-fit: cover;
-}
 .art-gallery figcaption {
   margin-top: 0.5rem;
   color: var(--muted);
