@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- History: after a clear, a new HTTP/2 connection's raw frame log no longer mixes in the frames of a connection the browser kept open (#1341)
 - Import: OpenAPI operations honor their path item's or their own `servers`, so a multi-host document from gori's OpenAPI export re-imports against the right hosts, and percent-encoded `$ref` pointers such as `#/paths/~1users~1%7Bid%7D` resolve (#1341)
 - Redaction: a profile pattern whose capture group sits in a lookahead no longer writes the secret back out after its placeholder, and one whose group sits in a lookbehind no longer fails the export or copy (#1341)
 - Network: HTTPS interception mints a new host's certificate context in ~0.1 ms instead of ~3.7 ms and ~1 MB less memory (it no longer loads the system CA bundle into each), caches up to 1024 of them, and upstream DNS answers are reused for 10 seconds, so an `/etc/hosts` edit or a rebinding record can take that long to be seen (#1340)
