@@ -408,6 +408,18 @@ describe Gori::JsRefs do
         store.js_ref_nodes[0].map(&.path).should eq(["/api/two"])
       end
     end
+
+    # The memo keyed only on the reference tables, so traffic to a referenced host arriving
+    # after the scan left it "never requested" until the next scan.
+    it "clears host_captured when traffic to the host arrives after the scan" do
+      with_store do |store|
+        jr_flow(store, "/a.js", %(fetch("https://other.test/x")))
+        JR.scan(store)
+        store.js_ref_nodes[0].find!(&.host.==("other.test")).host_captured.should be_false
+        jr_flow(store, "/logo.png", "png", host: "other.test", ctype: "image/png")
+        store.js_ref_nodes[0].find!(&.host.==("other.test")).host_captured.should be_true
+      end
+    end
   end
 
   describe ".unrequested_node?" do
@@ -450,6 +462,21 @@ describe Gori::JsRefs do
         scoped = JR.list(store, JR::ListOptions.new, Gori::Scope.load(store))
         scoped.endpoints.map(&.host).should eq(["api.shop.test"])
         JR.list(store, JR::ListOptions.new(all_hosts: true)).endpoints.size.should eq(2)
+      end
+    end
+
+    # `in_scope` is the Burp rule the scan's own read and `list_params in_scope` use: under an
+    # exclude-only scope everything not excluded is in scope. It used the outbound allowlist,
+    # which needs an include rule, and listed nothing.
+    it "keeps references under an exclude-only scope in the in_scope listing" do
+      with_store do |store|
+        jr_flow(store, "/app.js", %(fetch("/api/unrequested")))
+        JR.scan(store)
+        store.add_scope_rule("exclude", "host", "*.analytics.test")
+        scope = Gori::Scope.load(store)
+        JR.list(store, JR::ListOptions.new(in_scope: true), scope).endpoints.map(&.path).should eq(["/api/unrequested"])
+        store.add_scope_rule("exclude", "host", "shop.test")
+        JR.list(store, JR::ListOptions.new(in_scope: true), Gori::Scope.load(store)).endpoints.should be_empty
       end
     end
 

@@ -51,7 +51,7 @@ module Gori
         ensure
           store.close
         end
-        emit_sitemap_js(report, o) if report
+        emit_sitemap_js(report, o)
       end
 
       private def self.sitemap_js_parser(o : SitemapJsArgs) : OptionParser
@@ -119,12 +119,13 @@ module Gori
       end
 
       # Per-reference scope, like `sitemap params --in-scope`: unconfigured scope is an empty
-      # list with a note, never a silent read of everything.
-      private def self.sitemap_js_list(store : Store, o : SitemapJsArgs) : JsRefs::ListReport?
+      # list with a note, never a silent read of everything — and still a list, so `--format json`
+      # prints `[]` rather than nothing.
+      private def self.sitemap_js_list(store : Store, o : SitemapJsArgs) : JsRefs::ListReport
         scope = Scope.load(store)
         if o.in_scope? && !scope.configured?
           STDERR.puts "gori run sitemap js: --in-scope, but no scope rules are configured — nothing is in scope"
-          return nil
+          return JsRefs::ListReport.new([] of JsRefs::Endpoint, 0, false, store.js_scanned_count(JsRefs::VERSION), false)
         end
         opts = JsRefs::ListOptions.new(host: o.host, path_prefix: o.path_prefix, include_requested: o.all?,
           all_hosts: o.all_hosts?, in_scope: o.in_scope?, include_comments: o.comments?)

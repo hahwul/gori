@@ -531,7 +531,9 @@ module Gori
       return false if (prefix = opts.path_prefix.presence) && !ep.path.starts_with?(prefix)
       return false if ep.requested == true && !opts.include_requested
       return false if ep.in_comment && !opts.include_comments
-      !opts.in_scope || (!scope.nil? && scope.matches_url?(ep.url, ep.host))
+      # The Burp rule, like the scan's own `in_scope` read (`scope.filter(force: true)`) and the
+      # Params listing: `matches_url?` is the outbound allowlist, false under an exclude-only scope.
+      !opts.in_scope || (!scope.nil? && scope.listed_in_scope?(ep.url, ep.host))
     end
 
     # The host rule, shared with the tree (`Sitemap.attach_js_refs!` takes it as `new_host`): a

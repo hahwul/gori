@@ -270,6 +270,13 @@ module Gori
       end
     end
 
+    # The Burp rule `in_scope_url?` applies, REGARDLESS of the `s` display lens: the row-by-row
+    # twin of `filter(force: true)`, for a listing asked for "in scope" explicitly. False with no
+    # rules at all — such a caller refuses an unconfigured scope first.
+    def listed_in_scope?(url : String, host : String) : Bool
+      @mutex.synchronize { matches_url_unlocked?(url, host) }
+    end
+
     # Evaluate include/exclude rules against a URL REGARDLESS of the `s` display lens.
     # Used by Probe Active probes. Differs from the Burp display filter in one safety
     # way: at least one INCLUDE rule is required (excludes-only would otherwise mean

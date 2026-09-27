@@ -56,6 +56,25 @@ describe "gori run sitemap js — json" do
   end
 end
 
+module Gori::CLI::Run
+  def self.sitemap_js_in_scope_list_for_spec(store : Gori::Store) : Gori::JsRefs::ListReport
+    o = SitemapJsArgs.new
+    o.in_scope = true
+    sitemap_js_list(store, o)
+  end
+end
+
+describe "gori run sitemap js — --in-scope without scope rules" do
+  # It returned nil there and `--format json` printed nothing, not the array it promises.
+  it "is an empty list, so json still prints []" do
+    with_store do |store|
+      report = Gori::CLI::Run.sitemap_js_in_scope_list_for_spec(store)
+      report.endpoints.should be_empty
+      Gori::CLI::Run.sitemap_js_json(report.endpoints).strip.should eq("[]")
+    end
+  end
+end
+
 describe "gori run sitemap js — notes" do
   it "names an unscanned project, hidden hosts and an unverifiable traffic check" do
     notes = Gori::CLI::Run.sitemap_js_notes(SJ::ListReport.new([] of SJ::Endpoint, 3, true, 0, false))

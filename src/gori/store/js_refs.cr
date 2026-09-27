@@ -73,9 +73,11 @@ module Gori
     # The Sitemap reloads on every data_version tick while capture runs, and this aggregate
     # scans the whole table — so it is memoized on a fingerprint that moves whenever the rows
     # can have: the marker count (a flow deleted with its references), the newest marker time
-    # (a flow scanned, references or not) and the newest reference id (rows inserted). A count
-    # over the per-flow marker table (one row per scanned flow, not per reference) plus two
-    # index-end reads, instead of a GROUP BY over every reference per tick (P6).
+    # (a flow scanned, references or not) and the newest reference id (rows inserted) — plus the
+    # newest FLOW id, because each node's `host_captured` reads `flows`: traffic reaching a
+    # referenced host after the scan has to clear its "never requested" flag. A count over the
+    # per-flow marker table (one row per scanned flow, not per reference) plus three index-end
+    # reads, instead of a GROUP BY over every reference per tick (P6).
     def js_ref_nodes(limit : Int32 = SITEMAP_MAX) : {Array(JsRefNode), Bool}
       print = js_ref_fingerprint
       if (memo = @js_ref_nodes_memo) && memo[0] == {print, limit}
@@ -100,13 +102,14 @@ module Gori
       {[] of JsRefNode, false}
     end
 
-    @js_ref_nodes_memo : { { {Int64, Int64, Int64}, Int32 }, {Array(JsRefNode), Bool} }? = nil
+    @js_ref_nodes_memo : { { {Int64, Int64, Int64, Int64}, Int32 }, {Array(JsRefNode), Bool} }? = nil
 
-    private def js_ref_fingerprint : {Int64, Int64, Int64}
+    private def js_ref_fingerprint : {Int64, Int64, Int64, Int64}
       scans = @db.scalar("SELECT COUNT(*) FROM js_ref_scans").as(Int64)
       newest = @db.query_one("SELECT COALESCE(MAX(scanned_at), 0) FROM js_ref_scans", as: Int64)
       top = @db.query_one("SELECT COALESCE(MAX(id), 0) FROM js_refs", as: Int64)
-      {scans, newest, top}
+      flows = @db.query_one("SELECT COALESCE(MAX(id), 0) FROM flows", as: Int64)
+      {scans, newest, top, flows}
     end
 
     # Forget that the flows matching `filter` were scanned, so the next scan reads them again
