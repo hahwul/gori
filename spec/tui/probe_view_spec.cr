@@ -381,4 +381,75 @@ describe Gori::Tui::ProbeView do
       b.row(0).should contain("m:PASSIVE") # the mode chip text survives intact
     end
   end
+
+  # The list holds `Store#probe_issue_rows` — a URL COUNT, not the URLs. Every place that shows
+  # or copies URLs reads the full row by id, so these pin that each one still gets them.
+  describe "on the list projection" do
+    it "draws the row's ×N from the count and the preview's URLs from the selected row" do
+      prev = Gori::Settings.probe_preview
+      Gori::Settings.probe_preview = true
+      begin
+        view_store do |store|
+          %w[/a /b /c].each do |path|
+            store.upsert_probe_issue(Gori::Probe::Detection.new("missing_hsts", "headers", "a.test",
+              "https://a.test#{path}", "Missing HSTS", Gori::Store::Severity::Low))
+          end
+          store.upsert_probe_issue(Gori::Probe::Detection.new("missing_csp", "headers", "b.test",
+            "https://b.test/only", "Missing CSP", Gori::Store::Severity::Info))
+          view = Gori::Tui::ProbeView.new
+          view.reload(store)
+          b = MemoryBackend.new(100, 30)
+          view.render(Gori::Tui::Screen.new(b), Gori::Tui::Rect.new(0, 0, 100, 30))
+          b.contains?("×3").should be_true
+          b.contains?("AFFECTED (3)").should be_true
+          b.contains?("https://a.test/c").should be_true
+
+          # The cursor moves with no store in reach; the tab's draw syncs the preview first.
+          view.move(1)
+          view.sync_preview(store)
+          b2 = MemoryBackend.new(100, 30)
+          view.render(Gori::Tui::Screen.new(b2), Gori::Tui::Rect.new(0, 0, 100, 30))
+          b2.contains?("AFFECTED (1)").should be_true
+          b2.contains?("https://b.test/only").should be_true
+          b2.contains?("https://a.test/c").should be_false
+        end
+      ensure
+        Gori::Settings.probe_preview = prev
+      end
+    end
+
+    it "opens the detail on the full finding, URLs included" do
+      view_store do |store|
+        %w[/a /b].each do |path|
+          store.upsert_probe_issue(Gori::Probe::Detection.new("missing_hsts", "headers", "a.test",
+            "https://a.test#{path}", "t", Gori::Store::Severity::Low))
+        end
+        view = Gori::Tui::ProbeView.new
+        view.reload(store)
+        view.selected_issue.not_nil!.affected_count.should eq(2)
+        view.open_detail(store).should be_true
+        view.detail_issue.not_nil!.affected.should eq(["https://a.test/a", "https://a.test/b"])
+      end
+    end
+
+    it "targets the row as it is NOW, and opens nothing for a row deleted since the reload" do
+      view_store do |store|
+        seed(store, "missing_hsts", "a.test")
+        view = Gori::Tui::ProbeView.new
+        view.reload(store)
+        id = view.target_issue.not_nil!.id
+        # A peer dismisses it after this view's reload: the fresh read sees it, the list does not.
+        store.update_probe_issue_status(id, Gori::Store::Status::FalsePositive)
+        view.target_issue.not_nil!.status.open?.should be_true
+        view.fresh_target_issue(store).not_nil!.status.false_positive?.should be_true
+        # …so `c` re-opens it (the toggle of its CURRENT status) instead of dismissing it again.
+        view.toggle_dismiss(store).try(&.open?).should be_true
+
+        store.delete_probe_issue(id)
+        view.fresh_target_issue(store).should be_nil
+        view.open_detail(store).should be_false
+        view.detail_open?.should be_false
+      end
+    end
+  end
 end

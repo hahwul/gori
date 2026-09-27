@@ -160,7 +160,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # Promote a machine-found Probe issue to a human-confirmed Issue (the bridge to the
   # Issues report). Reuses Store#insert_issue; the issue's severity/host/sample flow carry over.
   def probe_promote : Nil
-    return unless i = probe_controller.view.target_issue
+    return unless probe_controller.view.target_issue
+    # The row as it is NOW: promotion copies its sample flow into the new Issue and keys
+    # "already promoted" off its status, and the list's copy of either can be a reload old.
+    return (@toast = "issue no longer exists") unless i = probe_controller.view.fresh_target_issue(@session.store)
     # Same call the CLI/MCP promote paths make. A store-busy Failed must NOT read as
     # "already promoted" — that would tell the user to stop retrying the one thing that
     # would fix it.

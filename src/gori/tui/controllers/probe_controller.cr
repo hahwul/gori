@@ -203,6 +203,7 @@ module Gori::Tui
           @rules.render(screen, content, focused)
         else
           proxy = @host.session.proxy
+          @probe.sync_preview(@host.session.store) # the preview's URLs, only when the cursor moved
           @probe.render(screen, content, focused: focused,
             listen: {proxy.host, proxy.port}, capturing: @host.session.capturing?)
         end
@@ -607,9 +608,10 @@ module Gori::Tui
     def probe_dismiss : Nil
       return unless @probe.target_issue
       st = @probe.toggle_dismiss(@host.session.store)
+      return @host.status("issue no longer exists") unless st
       # A synchronous user action → transient toast (the list updates in place too),
       # matching the rest of the app; the notification center is for async events.
-      @host.status(st.try(&.open?) ? "issue re-opened" : "issue dismissed")
+      @host.status(st.open? ? "issue re-opened" : "issue dismissed")
     end
 
     # `a`: flip the open-only ⇄ show-closed lens.
@@ -664,7 +666,7 @@ module Gori::Tui
     # rather than a number of rows it merely attempted.
     def self.dismiss_open_by_code(store : Store, scope : Scope?, code : String) : Int32
       lens = scope.try(&.active?) == true ? scope : nil
-      targets = store.probe_issues.select do |i|
+      targets = store.probe_issue_rows.select do |i|
         i.code == code && i.status.open? && (lens.nil? || lens.host_in_scope?(i.host))
       end
       targets.count { |i| store.update_probe_issue_status(i.id, Store::Status::FalsePositive) }
@@ -957,7 +959,9 @@ module Gori::Tui
     # under the cursor as a report line with its affected URLs beneath (#964's shape).
     def probe_copy : Nil
       return probe_detail_copy if probe_detail_readable?
-      return unless (issue = @probe.selected_issue) && probe_issue_selected?
+      return unless @probe.selected_issue && probe_issue_selected?
+      # The list row carries only the URL COUNT; the copy wants the URLs, read fresh by id.
+      return @host.status("issue no longer exists") unless issue = @probe.fresh_target_issue(@host.session.store)
       head = "[#{issue.severity}] #{issue.title} · #{issue.host}"
       copy_text(issue.affected.empty? ? head : "#{head}\n#{issue.affected.join('\n')}", "issue")
     end
