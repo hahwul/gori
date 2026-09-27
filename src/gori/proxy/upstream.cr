@@ -785,8 +785,7 @@ module Gori::Proxy
       # when the one before it ended in LF: the CRLF closing an exactly-limit-long header came
       # back alone and read as the blank terminator, opening a tunnel on an incomplete reply.
       unless status.ends_with?('\n')
-        return DialError.new(DialErrorKind::Proxy,
-          "#{proxy_label(route)} sent an oversized CONNECT status line (> #{MAX_CONNECT_LINE} bytes)")
+        return DialError.new(DialErrorKind::Proxy, status.bytesize >= MAX_CONNECT_LINE ? "#{proxy_label(route)} sent an oversized CONNECT status line (> #{MAX_CONNECT_LINE} bytes)" : "#{proxy_label(route)} sent an incomplete CONNECT reply before the terminating blank line: #{status_text(status)}")
       end
       parts = status.chomp.split(' ', 3)
       code = parts.size >= 2 ? (parts[1].to_i? || 0) : 0

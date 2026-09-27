@@ -287,6 +287,33 @@ describe Gori::Proxy::Upstream do
 
     # `gets` returns an over-long line in pieces; the CRLF of a header exactly MAX_CONNECT_LINE
     # long came back alone and was read as the blank line, so an incomplete reply opened a tunnel.
+    it "calls a short status line cut off by EOF incomplete, not oversized" do
+      proxy = TCPServer.new("127.0.0.1", 0)
+      pport = proxy.local_address.port
+      spawn do
+        conn = proxy.accept
+        Gori::Proxy::Codec::Http1.read_head(conn)
+        conn << "HTTP/1.1 200 OK"
+        conn.flush
+        conn.close
+      rescue
+      end
+
+      previous = Gori::Settings.upstream_proxy
+      Gori::Settings.upstream_proxy = "127.0.0.1:#{pport}"
+      begin
+        sock, error = Gori::Proxy::Upstream.dial_result("example.test", 443)
+        sock.try(&.close)
+        sock.should be_nil
+        detail = error.not_nil!.detail.not_nil!
+        detail.should contain("incomplete CONNECT reply")
+        detail.should_not contain("oversized")
+      ensure
+        Gori::Settings.upstream_proxy = previous
+        proxy.close rescue nil
+      end
+    end
+
     it "does not take the CRLF of a limit-long header for the terminator" do
       proxy = TCPServer.new("127.0.0.1", 0)
       pport = proxy.local_address.port
