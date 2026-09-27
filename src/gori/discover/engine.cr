@@ -7,6 +7,7 @@ require "./calibrate"
 require "../repeater/engine"
 require "../repeater/h2_engine"
 require "../repeater/conn_pool"
+require "../repeater/h2_pool"
 require "../env"
 require "../session_refresh/hook"
 require "../proxy/codec/content_decode"
@@ -127,14 +128,14 @@ module Gori::Discover
     MAX_IDLE_PER_POOL = 32
 
     @header_block : String
-    @pools : Hash(String, Repeater::ConnPool)?
+    @pools : Hash(String, Repeater::Pool)?
     @keep_alive : Bool
     @idle_conns : Int32
 
-    # `keep_alive` reuses one HTTP/1.1 connection across many sends per origin (see
-    # `Repeater::ConnPool`). It is the single largest cost of a run against a remote origin:
-    # a brute-force pass is ~315 sends PER DIRECTORY, and dial-per-send paid a TCP — and on
-    # https a TLS — handshake for every one of them. `idle_conns` bounds the sockets one
+    # `keep_alive` reuses one connection across many sends per origin — `Repeater::ConnPool`
+    # on HTTP/1.1, `Repeater::H2Pool` on h2. It is the single largest cost of a run against a
+    # remote origin: a brute-force pass is ~315 sends PER DIRECTORY, and dial-per-send paid a
+    # TCP — and on https a TLS — handshake for every one of them. `idle_conns` bounds the sockets one
     # origin may park and should be the run's concurrency (one per worker fiber is the most
     # that can ever be checked out at once), capped at MAX_IDLE_PER_POOL.
     # `sni` overrides the name in the ClientHello (and, under verify, the name the certificate
@@ -156,12 +157,13 @@ module Gori::Discover
       @header_generators = Env.may_contain_tokens?(@header_block, Env::Owns::Gen)
       @header_resolved = nil.as(String?)
       @header_rev = 0_u64
-      # h2 is excluded for the reason Fuzz::Sender excludes it: H2Engine frames its own
-      # connection per send, and multiplexing it is a separate change with its own
-      # stream-state rules.
-      @keep_alive = keep_alive && !@http2
+      # h2 pools too, the way `Fuzz::Sender` has since #881: `H2Pool` reuses a connection
+      # SERIALLY (stream 1, then 3, then 5), which is not multiplexing but is the whole
+      # handshake win — and an h2 origin is https in practice, so dial-per-send paid a TCP
+      # handshake, a TLS handshake and an h2 preface round per probe.
+      @keep_alive = keep_alive
       @idle_conns = idle_conns.clamp(1, MAX_IDLE_PER_POOL)
-      @pools = @keep_alive ? Hash(String, Repeater::ConnPool).new : nil
+      @pools = @keep_alive ? Hash(String, Repeater::Pool).new : nil
     end
 
     # The name this sender presents in the ClientHello, and whether it frames HTTP/2. Exposed
@@ -170,8 +172,9 @@ module Gori::Discover
     getter sni : String?
     getter? http2 : Bool
 
-    # Handshake accounting summed over every origin's pool. Nil when keep-alive is off — the
-    # question "how many handshakes did this run pay" has no pool to ask.
+    # Handshake accounting summed over every origin's pool, h1 and h2 alike (the counters mean
+    # the same on both — see `Repeater::Pool`). Nil when keep-alive is off — the question "how
+    # many handshakes did this run pay" has no pool to ask.
     def pool_stats : PoolStats?
       pools = @pools
       return nil unless pools
@@ -201,11 +204,11 @@ module Gori::Discover
       # slot's overlay — the crawl then carries the rebound credential. See `Repeater::Sender#wire`.
       Gori::SessionRefresh.before_send(Gori::Env.active_slot_name)
       req = request_head(scheme, host, port, target)
-      result = if @http2
+      result = if pool = pool_for(scheme, host, port)
+                 pool.send(req)
+               elsif @http2
                  Repeater::H2Engine.send(req, scheme: scheme, host: host, port: port,
                    verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides)
-               elsif pool = pool_for(scheme, host, port)
-                 pool.send(req)
                else
                  Repeater::Engine.send(req, scheme: scheme, host: host, port: port,
                    verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides)
@@ -246,10 +249,10 @@ module Gori::Discover
     #
     # N worker fibers call this concurrently, and the lookup-then-insert below is not atomic
     # in general. It is here: the scheduler is single-threaded (no `-Dpreview_mt`) and nothing
-    # between the `[]?` and the store yields — `ConnPool.new` only allocates — so no worker
-    # can observe the map mid-insert or race a second pool onto the same origin. Same argument
-    # the pool itself relies on for its idle list.
-    private def pool_for(scheme : String, host : String, port : Int32) : Repeater::ConnPool?
+    # between the `[]?` and the store yields — `ConnPool.new` / `H2Pool.new` only allocate — so
+    # no worker can observe the map mid-insert or race a second pool onto the same origin. Same
+    # argument the pool itself relies on for its idle list.
+    private def pool_for(scheme : String, host : String, port : Int32) : Repeater::Pool?
       pools = @pools
       return nil unless pools
       key = "#{scheme}://#{host}:#{port}"
@@ -271,8 +274,13 @@ module Gori::Discover
       # boundary loses pooling for the origins past the fourth) and is the price of the fd
       # bound MAX_POOLS exists to hold.
       return nil if pools.size >= MAX_POOLS
-      pool = Repeater::ConnPool.new(scheme, host, port, @verify, @sni, @timeout,
-        @overrides, @idle_conns)
+      pool = if @http2
+               Repeater::H2Pool.new(scheme, host, port, @verify, @sni, @timeout,
+                 @overrides, @idle_conns).as(Repeater::Pool)
+             else
+               Repeater::ConnPool.new(scheme, host, port, @verify, @sni, @timeout,
+                 @overrides, @idle_conns).as(Repeater::Pool)
+             end
       pools[key] = pool
       pool
     end

@@ -95,4 +95,68 @@ describe "Discover over HTTP/2" do
       origin.close
     end
   end
+
+  # The same handshake win `Fuzz::Sender` has had since #881: `H2Pool` carries the probes
+  # serially over one connection instead of paying a dial — on https a TLS handshake, and an
+  # h2 preface round — per probe.
+  it "serves many probes off ONE h2 connection with keep-alive on" do
+    origin = H2DiscoverOrigin.new
+    s = h2_sender(true)
+    10.times { |i| s.fetch("http", "127.0.0.1", origin.port, "/probe#{i}").error.should be_nil }
+    origin.requests.should eq(10)
+    origin.connections.should eq(1)
+    stats = s.pool_stats.not_nil!
+    stats.dialed.should eq(1)
+    stats.reused.should eq(9)
+    s.close
+    origin.close
+  end
+
+  it "still dials once per probe with keep-alive off" do
+    origin = H2DiscoverOrigin.new
+    s = h2_sender(false)
+    5.times { |i| s.fetch("http", "127.0.0.1", origin.port, "/probe#{i}").error.should be_nil }
+    origin.connections.should eq(5)
+    s.pool_stats.should be_nil
+    s.close
+    origin.close
+  end
+
+  # The fd bound holds for h2 pools exactly as for h1 ones: past MAX_POOLS an origin dials per
+  # send, and `pool_stats` sums every pool whichever protocol it carries.
+  it "pools per origin and falls back to dial-per-send past MAX_POOLS" do
+    origins = Array.new(D::Sender::MAX_POOLS + 1) { H2DiscoverOrigin.new }
+    s = h2_sender(true)
+    origins.each do |o|
+      2.times { s.fetch("http", "127.0.0.1", o.port, "/a").error.should be_nil }
+    end
+    origins[0, D::Sender::MAX_POOLS].each(&.connections.should(eq(1)))
+    origins.last.connections.should eq(2)
+    s.pool_stats.not_nil!.reused.should eq(D::Sender::MAX_POOLS.to_i64)
+    s.close
+    origins.each(&.close)
+  end
+
+  # Through `Plan.build`, the one constructor every surface uses — so `--http2` with the
+  # default keep-alive reaches the wire on all three, and a finished run releases the pool.
+  it "reaches the wire through the plan builder, and the finished run releases the pool" do
+    {true => 1, false => 3}.each do |keep_alive, expected_connections|
+      origin = H2DiscoverOrigin.new
+      cfg = D::Config.new(concurrency: 1, spider: false, bruteforce: true, retries: 0,
+        max_depth: 0, containment: D::Containment::SameOrigin, keep_alive: keep_alive,
+        max_requests: 3_i64)
+      plan = D::Plan.build(
+        D::PlanOptions.new("http://127.0.0.1:#{origin.port}/", config: cfg, verify: false, http2: true),
+        ungated_outbound)
+      plan.engine.run { |_| }
+      origin.requests.should eq(3)
+      origin.connections.should eq(expected_connections)
+      # `close_all` drained the idle list when the engine finished, so a further send dials.
+      before = origin.connections
+      plan.sender.fetch("http", "127.0.0.1", origin.port, "/after")
+      origin.connections.should eq(before + 1)
+      plan.sender.close
+      origin.close
+    end
+  end
 end
