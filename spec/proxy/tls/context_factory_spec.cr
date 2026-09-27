@@ -51,14 +51,18 @@ describe Gori::Proxy::Tls::ContextFactory do
       client_ctx = OpenSSL::SSL::Context::Client.new
       LibCrypto.x509_store_add_cert(LibSSL.ssl_ctx_get_cert_store(client_ctx.to_unsafe), root.handle)
       client_ctx.alpn_protocol = "h2"
+      # The client stays open until the server has answered: TLS 1.3 servers write their session
+      # tickets right after the handshake, and a client that closes first turns that write into
+      # EPIPE on a loaded machine.
+      client = nil
       begin
-        ssl = OpenSSL::SSL::Socket::Client.new(TCPSocket.new("127.0.0.1", port), context: client_ctx,
+        client = OpenSSL::SSL::Socket::Client.new(TCPSocket.new("127.0.0.1", port), context: client_ctx,
           sync_close: true, hostname: "ctx.test")
-        ssl.close rescue nil
       rescue ex
         done.send("client-error: #{ex.message}")
       end
       done.receive.should eq("h2")
+      client.try { |c| c.close rescue nil }
       server.close
     end
   end
