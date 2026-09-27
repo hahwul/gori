@@ -184,7 +184,17 @@ module Gori
         next if child.starts_with?('.')
         next unless child.ends_with?(".json")
         path = File.join(dir, child)
-        probe = File.open(path, "r") rescue (unsure.try(&.call); next) # flock works on a read-only fd
+        probe = begin
+          File.open(path, "r") # flock works on a read-only fd
+        rescue File::NotFoundError
+          # Gone since the listing: its owner withdrew it, or a peer swept it. Either way it
+          # is not live, which is an answer, not a "cannot tell" — a window closing while an
+          # agent replied would otherwise turn every other window's count into nil.
+          next
+        rescue
+          unsure.try(&.call)
+          next
+        end
         begin
           begin
             probe.flock_exclusive(blocking: false)

@@ -256,6 +256,11 @@ module Gori::Tui
       # as a single twitch), and the peak face held REACT_PEAK - 1 beats.
       stepped = step_beat(now)
       consume_note(now)
+      # A hold outlives nothing but the mode that asked for it: switched to `timed`, a reply
+      # already held leaves like one that had just landed under it — its ordinary TTL counted
+      # from NOW, since the switch is made in a Preferences modal that hides her, and a reply
+      # held for a minute would otherwise be gone before the modal closed.
+      release_bubble(now, restart: true) unless Settings.companion_holds_replies?
       expire_bubble(now)
       expire_mood(now)
       repaint(stepped)
@@ -298,18 +303,24 @@ module Gori::Tui
       poke(now)
     end
 
-    # The operator has done something, so a held reply has had its chance: from here it
-    # leaves like any other bubble, at the end of its ordinary TTL or now, whichever is later.
-    # #expire_bubble does the clearing on the next tick.
     # Is a reply being held? The host's status row asks, in `bar`, where the bubble shares a
     # slot with the toast.
     def holding? : Bool
       !@bubble_floor.nil?
     end
 
-    def release_bubble(now : Time::Instant) : Nil
+    # The operator has done something, so a held reply has had its chance: from here it
+    # leaves like any other bubble, at the end of its ordinary TTL or now, whichever is later.
+    # #expire_bubble does the clearing on the next tick.
+    #
+    # `restart` counts that TTL from `now` instead of from when the reply landed: for a
+    # release nobody watched happen (see #tick).
+    def release_bubble(now : Time::Instant, restart : Bool = false) : Nil
       return unless floor = @bubble_floor
       @bubble_floor = nil
+      if restart && (at = @bubble_at)
+        floor = now + (floor - at)
+      end
       @bubble_until = {now, floor}.max
     end
 

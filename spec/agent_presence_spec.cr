@@ -229,6 +229,24 @@ describe Gori::AgentPresence do
     end
   end
 
+  # A marker listed and then gone before it could be opened (a window closing, a peer's
+  # sweep) is not live, which is an answer: `count?` must not turn it into "cannot tell".
+  # A dangling symlink holds that listed-but-unopenable state still for the spec.
+  it "counts a marker that vanished after the listing as gone, not unsure" do
+    with_project do |_registry, project|
+      window = Gori::AgentPresence.announce(project.db_path, client: "gori tui",
+        client_version: nil, read_only: false, selection_source: nil,
+        kind: Gori::AgentPresence::KIND_TUI).not_nil!
+      begin
+        dir = Gori::AgentPresence.dir_for(project.db_path, Gori::AgentPresence::KIND_TUI)
+        File.symlink(File.join(dir, "gone-target"), File.join(dir, "1-deadbeef.json"))
+        Gori::AgentPresence.count?(project.db_path, kind: Gori::AgentPresence::KIND_TUI).should eq(1)
+      ensure
+        window.close
+      end
+    end
+  end
+
   it "answers nothing for :memory: and the empty path" do
     Gori::AgentPresence.announce(":memory:", client: "c", client_version: nil,
       read_only: false, selection_source: nil).should be_nil

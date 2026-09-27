@@ -3731,7 +3731,8 @@ module Gori::Tui
     def toggle_companion : Nil
       Settings.companion = !Settings.companion?
       saved = Settings.save
-      @companion.wake_on_input
+      # `false`: a settings write is not the operator reading a held reply (see #apply_companion).
+      @companion.wake_on_input(false)
       # The toggle has ALREADY applied in memory either way, so a failed save must still
       # report the new state — "could not save" alone reads as though nothing happened.
       # Same shape as the tabs/hotkeys/env/hosts toasts.
@@ -6679,7 +6680,7 @@ module Gori::Tui
       history_controller.view.reload(@session.store)
       history_controller.refresh_preview
       sitemap_controller.view.reload(@session.store) if sitemap_controller.view.loaded?
-      @companion.wake_on_input
+      @companion.wake_on_input(false) # not an acknowledgement — see #apply_companion
       project_controller.refresh_network
       settle_hidden_active_tab # tab_prefs is empty now — the default hidden set applies again
       @resized = true          # theme + tab strip changed behind the modal
@@ -6755,8 +6756,14 @@ module Gori::Tui
 
     # Enable/disable and the motion change land on the SAME frame as the save rather than
     # up to one BEAT later; Companion#tick self-gates on Settings.companion? for the rest.
+    #
+    # `false`: this wakes her, it does not release a held reply. The save is made from
+    # Preferences, which hides her, and the key that made it already went through the run
+    # loop's own release gate — so a reply that landed while the modal was up would otherwise
+    # be let go by a motion change the operator made without ever seeing it. Switching
+    # `replies` to `timed` releases a held one in Companion#tick.
     private def apply_companion(save_msg : String) : String
-      @companion.wake_on_input
+      @companion.wake_on_input(false)
       save_msg
     end
 
