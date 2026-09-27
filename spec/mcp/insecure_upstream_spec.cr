@@ -13,15 +13,13 @@ private def with_self_signed_origin(&)
   spawn do
     while raw = server.accept?
       spawn_with(raw) do |c|
-        begin
-          ssl = OpenSSL::SSL::Socket::Server.new(c, ctx, sync_close: true)
-          Gori::Proxy::Codec::Http1.read_head(ssl)
-          ssl << "HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\nhit"
-          ssl.flush
-          ssl.close rescue nil
-        rescue
-          c.close rescue nil
-        end
+        ssl = OpenSSL::SSL::Socket::Server.new(c, ctx, sync_close: true)
+        Gori::Proxy::Codec::Http1.read_head(ssl)
+        ssl << "HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\nhit"
+        ssl.flush
+        ssl.close rescue nil
+      rescue
+        c.close rescue nil
       end
     end
   rescue

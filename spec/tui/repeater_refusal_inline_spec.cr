@@ -399,17 +399,15 @@ private class TimingCountingOrigin
     spawn do
       while c = (@server.accept? rescue nil)
         spawn_with(c) do |conn|
-          begin
-            while Gori::Proxy::Codec::Http1.read_head(conn)
-              @hits.add(1)
-              sleep @delay
-              conn << "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"
-              conn.flush
-            end
-          rescue
-          ensure
-            conn.close rescue nil
+          while Gori::Proxy::Codec::Http1.read_head(conn)
+            @hits.add(1)
+            sleep @delay
+            conn << "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"
+            conn.flush
           end
+        rescue
+        ensure
+          conn.close rescue nil
         end
       end
     end
