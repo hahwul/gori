@@ -162,6 +162,15 @@ describe "the delivery drain's wiring" do
     lines.any?(&.includes?("@companion.wake_on_input(@operator_input && shown)")).should be_true
     lines.any?(&.includes?("shown = companion_on_screen?")).should be_true
   end
+
+  # The other wake sites (a Preferences save, the companion toggle, a factory reset) run
+  # behind a modal that hides her; the default `acknowledge` there let a reply that landed
+  # while it was open go unseen.
+  it "wakes her without releasing a held reply everywhere else in the Runner" do
+    wakes = src("tui", "runner.cr").select(&.includes?("@companion.wake_on_input"))
+    wakes.size.should be >= 4
+    wakes.each(&.should(match(/@companion\.wake_on_input\((false|@operator_input && shown)\)/)))
+  end
 end
 
 describe Gori::Tui::AgentsOverlay, "tell affordance (#1090)" do

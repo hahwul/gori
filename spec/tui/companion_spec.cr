@@ -811,6 +811,29 @@ describe Gori::Tui::Companion do
     end
   end
 
+  # Switching the mode to `timed` while a reply is held must let that reply go too: no input
+  # has to arrive (the switch is made from a Preferences modal that hides her), and it leaves
+  # no sooner than its ordinary TTL.
+  it "releases a reply already held when replies switches to timed" do
+    with_companion(true) do
+      with_replies("hold") do
+        notes = Notifications.new
+        companion = Companion.new(notes)
+        t0 = Time.instant
+        companion.tick(t0)
+        notes.push(:info, "done", source: "agent", addressed: true)
+        companion.tick(t0 + Companion::BEAT)
+        companion.holding?.should be_true
+        Gori::Settings.companion_replies = "timed"
+        companion.tick(t0 + Companion::BEAT * 2)
+        companion.holding?.should be_false
+        companion.frame.not_nil!.bubble.should eq("done")
+        beats(companion, t0, 60)
+        companion.frame.not_nil!.bubble.should be_nil
+      end
+    end
+  end
+
   # Holding exists so the reply gets read; a job result landing behind it would otherwise
   # take the bubble and send the operator to the ring after all. A newer REPLY does take it.
   it "keeps a held reply in front of later notices, but not of a later reply" do

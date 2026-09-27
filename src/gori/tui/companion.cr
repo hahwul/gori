@@ -256,6 +256,9 @@ module Gori::Tui
       # as a single twitch), and the peak face held REACT_PEAK - 1 beats.
       stepped = step_beat(now)
       consume_note(now)
+      # A hold outlives nothing but the mode that asked for it: switched to `timed` (here or
+      # in another window's save), a reply already held leaves like one that landed under it.
+      release_bubble(now) unless Settings.companion_holds_replies?
       expire_bubble(now)
       expire_mood(now)
       repaint(stepped)
