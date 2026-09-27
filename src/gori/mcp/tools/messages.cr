@@ -263,8 +263,10 @@ module Gori
       private def reply_note(windows : Int32?) : String
         case windows
         when 0
-          "no gori TUI is open on this project, so nobody was shown this: it is kept only in " \
-          "the project's Activity record. Tell the operator in your own output as well"
+          "no gori TUI is open on this project, so nobody was shown this yet: the next gori TUI " \
+          "to open on it summarizes the replies that arrived while it was closed in one note, and " \
+          "the full text stays in the project's Activity record. Tell the operator in your own " \
+          "output as well"
         when nil
           "this server cannot tell whether a gori TUI is open. If one is, the summary is in its " \
           "notification ring and Miss Ring's bubble and the detail opens from the ring; if not, " \

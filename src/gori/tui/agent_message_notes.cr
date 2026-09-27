@@ -84,12 +84,74 @@ module Gori::Tui
     # `{level, message}` for one reply: the client's name and the one line it sent. The level
     # is the agent's own, already clamped to the feed's four by the store.
     def self.reply_line(reply : Gori::AgentReply) : {Symbol, String}
-      who = AgentsOverlay.safe_client(reply.target_label.split(" pid ").first?) || "agent"
+      who = sender(reply)
       level = {"success" => :success, "warn" => :warn, "error" => :error}[reply.level]? || :info
       # The client NAME is width-capped (`safe`), but the SUMMARY is not: it is the message,
       # and the surfaces size it themselves — the ring row truncates to one line, Miss Ring's
       # bubble wraps it to three. Capping it here would flatten both to a client-name width.
       {level, "#{who}: #{scrub_line(reply.summary)}"}
+    end
+
+    # How much of ONE reply's detail the away summary carries. The summary is one note, and a
+    # note's detail is a card the operator scrolls: fifty replies at the full `DETAIL_MAX`
+    # each would be 1.6 MB of card for a notice whose job is to say "these arrived".
+    MISSED_DETAIL_MAX = 2_000
+
+    # `{level, message, detail}` for the one note a window opens with when replies landed
+    # while no window was open (#1322). `rows` is the page the note lists (oldest first) and
+    # `total` how many there really were, which the page may be short of.
+    #
+    # ONE note, not the replies replayed: a project reopened after a night of an agent working
+    # would otherwise open onto a ring it has to page through, and Miss Ring would say only the
+    # last of them. The level is the most severe one sent, so a single `error` among the
+    # `info`s still colours the row (and rings the bell, when that is on).
+    def self.missed_replies(rows : Array(Gori::AgentReply), total : Int32) : {Symbol, String, String}
+      names = rows.map { |r| sender(r) }.uniq!
+      count = {total, rows.size}.max
+      noun = count == 1 ? "reply" : "replies"
+      message =
+        if names.size == 1
+          "#{names.first} sent #{count} #{noun} while you were away"
+        else
+          shown = names.first(3).join(", ")
+          shown += ", …" if names.size > 3
+          "#{count} #{noun} arrived while you were away (#{shown})"
+        end
+      {worst_level(rows), message, missed_detail(rows, count)}
+    end
+
+    # The replies, one block each: who and when, then what they said.
+    private def self.missed_detail(rows : Array(Gori::AgentReply), count : Int32) : String
+      String.build do |io|
+        rows.each_with_index do |r, i|
+          io << "\n\n" if i > 0
+          at = Time.unix_ms(r.created_at // 1000).to_local.to_s("%Y-%m-%d %H:%M")
+          io << sender(r) << " · " << r.level << " · " << at << '\n'
+          io << scrub_line(r.summary)
+          if (d = r.detail) && !d.empty?
+            io << "\n\n"
+            if d.size > MISSED_DETAIL_MAX
+              io << d[0, MISSED_DETAIL_MAX] << "\n… (cut here; the full reply is in the Activity pane)"
+            else
+              io << d
+            end
+          end
+        end
+        if count > rows.size
+          io << "\n\n… and " << (count - rows.size) << " more in the Project tab's Activity pane."
+        end
+      end
+    end
+
+    # The client's name as a ring row shows it (`claude-code`, not `claude-code pid 48213`).
+    private def self.sender(reply : Gori::AgentReply) : String
+      AgentsOverlay.safe_client(reply.target_label.split(" pid ").first?) || "agent"
+    end
+
+    private def self.worst_level(rows : Array(Gori::AgentReply)) : Symbol
+      rank = {"info" => 0, "success" => 1, "warn" => 2, "error" => 3}
+      worst = rows.max_of? { |r| rank[r.level]? || 0 } || 0
+      {:info, :success, :warn, :error}[worst]
     end
 
     # Peer-written text with the control characters removed and whitespace collapsed, but no

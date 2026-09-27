@@ -185,6 +185,55 @@ module Gori
       ReplyPage.new(rows, scanned, full)
     end
 
+    # The NEWEST `limit` replies in `(after_id, upto_id]`, oldest first. The away summary lists
+    # a page of what landed, and when there are more than a page the ones to show are the
+    # latest: an agent's last word on a task supersedes its first.
+    def agent_replies_between(after_id : Int64, upto_id : Int64, limit : Int32) : Array(AgentReply)
+      rows = [] of AgentReply
+      return rows if upto_id <= after_id
+      @db.query("SELECT #{EVENT_COLS} FROM events WHERE id > ? AND id <= ? AND kind = ? ORDER BY id DESC LIMIT ?",
+        args: [after_id, upto_id, AgentReply::KIND, limit.to_i64] of DB::Any) do |rs|
+        rs.each { AgentReply.from_row(read_event(rs)).try { |r| rows << r } }
+      end
+      rows.reverse!
+    end
+
+    # How many replies landed in `(after_id, upto_id]`. The count behind "sent 7 replies while
+    # you were away", which has to be the real number even when the note lists only a page.
+    def agent_reply_count_between(after_id : Int64, upto_id : Int64) : Int32
+      return 0 if upto_id <= after_id
+      @db.scalar("SELECT COUNT(*) FROM events WHERE id > ? AND id <= ? AND kind = ?",
+        after_id, upto_id, AgentReply::KIND).as(Int64).to_i32
+    end
+
+    # The last feed id whose replies a TUI window has shown the operator (#1322): the ring
+    # announced them while it was open, and the window then closed or had its ring opened.
+    # A reply past it was written while nobody was watching, and the next window to open says
+    # so once. In the PROJECT, not settings.json: two projects are two feeds.
+    #
+    # nil for a project no window has ever recorded one on, which is every project that
+    # predates this key — and a project an agent created and replied into before the operator
+    # first opened it, which is the case the watermark exists for. The caller reads nil as 0.
+    AGENT_REPLY_SEEN_KEY = "agent_reply_seen"
+
+    def agent_reply_seen : Int64?
+      setting(AGENT_REPLY_SEEN_KEY).try(&.to_i64?)
+    end
+
+    # Move the watermark to `id`, never back. Two windows on one project close in either
+    # order, and the one that opened first holds the lower cursor: a plain overwrite would
+    # hand the second window's replies back to the next open as unseen. The comparison is in
+    # the statement, so a peer's write that lands between a read and this one cannot undo it.
+    def mark_agent_replies_seen(id : Int64) : Bool
+      return false if read_only?
+      exec_task_ok ->(c : DB::Connection) {
+        c.exec("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = " \
+               "CASE WHEN CAST(value AS INTEGER) >= CAST(excluded.value AS INTEGER) THEN value ELSE excluded.value END",
+          AGENT_REPLY_SEEN_KEY, id.to_s)
+        nil
+      }
+    end
+
     # One page of the kind-filtered feed. `scanned_max` is the id of the LAST ROW THE SQL PAGE
     # RETURNED, matching or not, and `full` says the page hit its limit — a cursor must advance
     # to `scanned_max` when full (there may be more behind it) and may jump to the feed's

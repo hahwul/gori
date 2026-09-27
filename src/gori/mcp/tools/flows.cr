@@ -682,8 +682,9 @@ module Gori
             "info (default) | success | warn | error. `in_reply_to` links it to the operator_messages " \
             "id you are answering. Use it for the answer to a question they sent or the outcome of a " \
             "task they asked for — not for narration. It is a NOTIFICATION, not a mailbox: it " \
-            "shows only in a gori TUI that is open on this project when it lands (Miss Ring keeps " \
-            "it up until their next key or click), and the ring forgets it when the TUI closes. " \
+            "shows in a gori TUI that is open on this project when it lands (Miss Ring keeps " \
+            "it up until their next key or click), and the ring forgets it when the TUI closes; " \
+            "one sent while no TUI is open is only summarized, in a single note, when one next opens. " \
             "The result's `tui` says whether a window was open (`windows: 0` = nobody was shown " \
             "it; `unknown` = cannot tell). Keep anything that must last in your own output as well." do |s|
             s.field "summary", strprop("one line, ≤200 characters; the rest goes in detail"), required: true

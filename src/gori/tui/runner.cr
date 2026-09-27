@@ -284,7 +284,9 @@ module Gori::Tui
       @intercept_cmd_watermark = 0_i64
       # #1090: same "seed at now" rule one line up, for the operator→agent channel's replies.
       # A project keeps every delivery row a courier ever wrote; opening it must not replay them
-      # into the notification ring as things that just happened.
+      # into the notification ring as things that just happened. Replies are the one kind the
+      # operator was owed: those written while no window was open are summarized ONCE, in a
+      # single note, by `announce_missed_replies` against the project's watermark (#1322).
       @agent_delivery_cursor = @session.store.last_agent_delivery_id
       @agent_reply_cursor = @agent_delivery_cursor
       # #123 safety net: auto-forward a held item nobody is watching after this many ms, so a
@@ -560,6 +562,10 @@ module Gori::Tui
       announce_env_syntax_migration
       project_controller.reload
       open_focus_flow
+      # Replies an agent sent while no window was open (#1322): one note, before the first
+      # paint so Miss Ring has it to say. After `Runner#initialize` seeded the reply cursor,
+      # which is what bounds "while you were away".
+      announce_missed_replies
       render # initial paint (the loop below only re-renders when something changed)
       # The render loop polls input on a 50ms cadence (so async channels are still
       # checked ≤50ms), but RENDER only runs when the frame would actually change —
@@ -887,6 +893,13 @@ module Gori::Tui
         # anyway, but a project the operator LEFT for the picker keeps the process alive, and
         # an agent must not be told a window is up for a project nobody is looking at.
         release_tui_presence
+        # Every reply this window announced has been in front of the operator (#1322); the
+        # next window to open summarizes only what lands after this.
+        begin
+          mark_agent_replies_seen
+        rescue ex
+          Log.warn(exception: ex) { "tui: could not record the agent-reply watermark" }
+        end
         @import_cancel = true
         history_controller.cancel_searches
         # Drop the per-tab window title back to a neutral "𝓰𝓸𝓻𝓲" on leave — the shared term
@@ -3892,6 +3905,7 @@ module Gori::Tui
       ov.on_palette = -> { leave_overlay; open_palette }
       open_overlay(ov)
       @notifications.mark_all_read
+      mark_agent_replies_seen
     end
 
     # One notification's long form (#1090), opened with ↵ on a ring row that carries a

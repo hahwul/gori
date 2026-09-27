@@ -35,3 +35,32 @@ describe Gori::Store, "#1090 agent replies" do
     end
   end
 end
+
+# #1322: the per-project "last reply a window showed" watermark, and the two reads the away
+# note is built from.
+describe Gori::Store, "#1322 agent reply watermark" do
+  it "is nil until a window records one, then only moves forward" do
+    with_store do |store|
+      store.agent_reply_seen.should be_nil
+      store.mark_agent_replies_seen(10_i64).should be_true
+      store.agent_reply_seen.should eq(10)
+      # A window that opened earlier closes later with a lower cursor: it must not hand the
+      # replies between back to the next open as unseen.
+      store.mark_agent_replies_seen(4_i64).should be_true
+      store.agent_reply_seen.should eq(10)
+      store.mark_agent_replies_seen(12_i64)
+      store.agent_reply_seen.should eq(12)
+    end
+  end
+
+  it "counts the replies in a range and lists the newest of them, oldest first" do
+    with_store do |store|
+      ids = (1..5).map { |i| store.record_agent_reply("r#{i}", nil, "info", "a pid 1", 1_i64) }
+      store.insert_event("probe", "job_done", "info", "not a reply")
+      store.agent_reply_count_between(ids[0], ids[4]).should eq(4)
+      store.agent_reply_count_between(ids[4], ids[0]).should eq(0)
+      page = store.agent_replies_between(0_i64, ids[4], 3)
+      page.map(&.summary).should eq(["r3", "r4", "r5"])
+    end
+  end
+end
