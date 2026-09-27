@@ -712,6 +712,7 @@ module Gori
       @h2_frames_dropped = Atomic(Int32).new(0)
       @inserts_since_prune = 0
       @events_since_trim = 0
+      @h2_unattributed_reaped = false # writer-fiber-only; see `prune`
       # Writer-fiber-only hint: does `flows.fts_dirty = 1` possibly have rows? Starts true so a
       # db reopened with a backlog (a killed process, or a batch dropped under saturation) gets
       # drained without waiting for a capture to hint at it; set false the moment an indexing
@@ -1559,6 +1560,11 @@ module Gori
     # of 20, where nothing at all should have been dropped. Irreversible, and reported as an
     # ordinary retention drop. `Compact.prune_old_flows` already documents and fixes this exact
     # arithmetic; the two sweeps now share one definition of "the newest N".
+    #
+    # Found from the LOW end (`oldest_excess_cutoff`) rather than by walking the newest
+    # `@retention_flows` rows down from the top: that walk read up to the cap's worth of table
+    # rows (100k by default), leaf pages of head/body bytes and all, on every sweep — measured
+    # ~1.2 s cold / 5 ms warm for 40k of 50k×8 KB flows — while most sweeps drop nothing.
     private def prune(conn : DB::Connection) : Nil
       # BEFORE the retention early-returns. The reap below is not retention — it removes frames
       # whose connection row does not exist, which no cap has any opinion about — and putting it
@@ -1567,9 +1573,11 @@ module Gori
       # `cutoff <= 0`. The comment there promised a db carrying frames from an older build would
       # heal itself; for those it did not.
       #
-      # Still on the prune cadence (once per PRUNE_INTERVAL inserts), so a project that never
-      # inserts another flow heals only via `compact` — which reaps the same rows.
-      reap_unattributed_h2_frames(conn)
+      # Once per Store instance, on the first sweep, not on every one: it is a full scan of
+      # `h2_frames` (~35 ms per million frames) and what it heals is LEGACY — the guard in
+      # `insert_h2_frame` stops new ones. A project that never inserts another flow heals only
+      # via `compact`, which reaps the same rows. Retried on the next sweep if it failed.
+      @h2_unattributed_reaped = reap_unattributed_h2_frames(conn) unless @h2_unattributed_reaped
       # Each of the three sweeps below runs on the SAME connection, and the suspect flag is only
       # read back when the loop next asks for one — i.e. after this method returns. So a sweep
       # that has already condemned this connection must stop rather than let the next two burn a
@@ -1585,13 +1593,7 @@ module Gori
       trim_events(conn)
       return if @writer_conn_suspect # as above: do not run the retention sweep on a dead connection
       return if @retention_flows <= 0
-      # Served by the primary key: a rightmost-leaf descending scan of @retention_flows rows.
-      oldest_kept = conn.query_one?(
-        "SELECT MIN(id) FROM (SELECT id FROM flows ORDER BY id DESC LIMIT ?)",
-        @retention_flows, as: Int64?)
-      return unless oldest_kept # no flows at all
-      cutoff = oldest_kept - 1  # everything strictly below the oldest survivor goes
-      return if cutoff <= 0
+      return unless cutoff = oldest_excess_cutoff(conn, "flows", @retention_flows)
       dropped = 0_i64
       write_transaction(conn) do |c|
         # NOTE (known limitation): a WebSocket flow still streaming frames after `retention_flows`
@@ -1648,31 +1650,45 @@ module Gori
     # `h2_connections.id` is an INTEGER PRIMARY KEY so the subquery yields no NULL, which is what
     # makes `NOT IN` safe here. Served by `idx_h2_frames_conn`. Its own transaction and its own
     # rescue, like the sweep it runs ahead of: this must never cost the batch that just committed.
-    private def reap_unattributed_h2_frames(conn : DB::Connection) : Nil
+    #
+    # Answers whether the reap ran, so a failed one is retried on the next sweep.
+    private def reap_unattributed_h2_frames(conn : DB::Connection) : Bool
       conn.exec("DELETE FROM h2_frames WHERE conn_id NOT IN (SELECT id FROM h2_connections)")
+      true
     rescue ex
       ::Log.warn { "unattributed h2-frame reap failed (will retry): #{ex.message}" } # gori.log (#411)
       # A failed statement outlives the call that issued it — the driver leaves it un-reset.
       mark_writer_conn_suspect
+      false
     end
 
-    # Keep the newest EVENTS_RETENTION rows. Shaped like the flows sweep — find the oldest
-    # survivor by walking the primary key backwards, then delete strictly below it — so the
-    # common case (already under the cap) costs one indexed lookup and no delete at all.
+    # Keep the newest EVENTS_RETENTION rows. Shaped like the flows sweep — `oldest_excess_cutoff`,
+    # then delete up to it — so the common case (already under the cap) costs one COUNT and no
+    # delete at all.
     #
     # `id` is AUTOINCREMENT, so it is monotonic and never reused: deleting below a cutoff can
     # never take a row a reader's watermark has not already passed.
     private def trim_events(conn : DB::Connection) : Nil
-      oldest_kept = conn.query_one?(
-        "SELECT MIN(id) FROM (SELECT id FROM events ORDER BY id DESC LIMIT ?)",
-        @events_retention, as: Int64?)
-      return unless oldest_kept
-      cutoff = oldest_kept - 1
-      return if cutoff <= 0
+      return unless cutoff = oldest_excess_cutoff(conn, "events", @events_retention)
       conn.exec("DELETE FROM events WHERE id <= ?", cutoff)
     rescue ex
       ::Log.warn { "event-log trim failed (will retry): #{ex.message}" } # gori.log (#411)
       mark_writer_conn_suspect
+    end
+
+    # The id of the newest row that has to go for `table` to hold at most `keep` rows, or nil
+    # when it already does. Everything `id <= cutoff` is then exactly the oldest excess.
+    #
+    # Counted and then seeked from the LOW end, not by walking the newest `keep` rows down from
+    # the top: `COUNT(*)` reads the smallest index (or the table's leaf pages without decoding a
+    # row), and the OFFSET walks only the excess, which a sweep every PRUNE_INTERVAL inserts
+    # keeps about that size. Still gap-safe for the reason `prune` spells out: it counts rows
+    # that exist, never `MAX(id) - keep`.
+    private def oldest_excess_cutoff(conn : DB::Connection, table : String, keep : Int32) : Int64?
+      return nil if keep <= 0 # a non-positive cap is "unlimited", as the old `LIMIT` read it
+      excess = conn.scalar("SELECT COUNT(*) FROM #{table}").as(Int64) - keep
+      return nil if excess <= 0
+      conn.query_one?("SELECT id FROM #{table} ORDER BY id LIMIT 1 OFFSET ?", excess - 1, as: Int64)
     end
 
     # One gori.log line per sweep that actually removed history, naming the setting that
