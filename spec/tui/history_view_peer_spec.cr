@@ -216,6 +216,59 @@ describe "HistoryController — the active view under a peer" do
     end
   end
 
+  # A mark is an id, and after a peer clear the next capture takes the same id: the mark moved
+  # onto a flow nobody marked, and Delete destroyed it. The preview likewise kept the old bytes.
+  it "drops a mark and the preview whose flow a peer replaced under the same id" do
+    with_history_controller do |ctrl, _host, session|
+      prev = Gori::Settings.history_preview
+      Gori::Settings.history_preview = true
+      ctrl.view.reload_handler = nil
+      peer = Gori::Store.open(session.project.db_path)
+      begin
+        old_id = add_peer_history_flow(peer, "/old", "old-body-marker", 1_i64)
+        keep_id = add_peer_history_flow(peer, "/keep", "keep", 3_i64)
+        ctrl.view.reload(session.store)
+        ctrl.view.mark_all
+        ctrl.view.select_row(ctrl.view.rows.index!(&.id.==(old_id)))
+        ctrl.view.refresh_preview(session.store)
+
+        peer.clear_flows.should be_true
+        add_peer_history_flow(peer, "/new", "new-body-marker", 2_i64).should eq(old_id)
+        ctrl.on_external_change
+        ctrl.view.reload(session.store)
+        ctrl.view.marked?(old_id).should be_false
+        ctrl.view.marked?(keep_id).should be_false # gone with the clear
+        ctrl.view.mark_count.should eq(0)
+
+        ctrl.view.select_row(0)
+        ctrl.view.refresh_preview(session.store)
+        b = MemoryBackend.new(140, 40)
+        ctrl.view.render_list(Screen.new(b), Rect.new(0, 0, 140, 40))
+        b.contains?("old-body-marker").should be_false
+      ensure
+        Gori::Settings.history_preview = prev
+        peer.close
+      end
+    end
+  end
+
+  it "keeps marks on flows a peer change did not touch" do
+    with_history_controller do |ctrl, _host, session|
+      ctrl.view.reload_handler = nil
+      peer = Gori::Store.open(session.project.db_path)
+      begin
+        a = add_peer_history_flow(peer, "/a", "a", 1_i64)
+        ctrl.view.reload(session.store)
+        ctrl.view.mark_all
+        add_peer_history_flow(peer, "/b", "b", 2_i64)
+        ctrl.on_external_change
+        ctrl.view.marked?(a).should be_true
+      ensure
+        peer.close
+      end
+    end
+  end
+
   it "picks up a view a peer created, without a restart" do
     with_history_controller do |ctrl, _host, session|
       session.store.insert_saved_view("peer view", "status:404").should_not eq(0)

@@ -609,6 +609,7 @@ module Gori::Tui
     def on_external_change : Nil
       reload_columns
       @history.forget_all_row_memos
+      @history.prune_reused_marks(@host.session.store)
       # A peer can create, edit or DELETE a view between frames — through the CLI, through MCP,
       # or from another gori against the same project. Re-resolving here (rather than only at
       # construction) is what keeps the chip and the list agreeing with the stores.
