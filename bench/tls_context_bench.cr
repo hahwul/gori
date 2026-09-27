@@ -2,19 +2,40 @@
 # `Context::Server.new` (which loads the system CA bundle into every context) against
 # `ContextFactory.lean_server` (the same defaults without it).
 #
+# `authority` is the whole cached leaf as CertAuthority keeps it (keygen, cert, context),
+# which is what sizes MAX_LEAVES.
+#
 # One mode per process, so the RSS column is not polluted by the other variant's heap:
 #
 #   crystal build --release --no-debug bench/tls_context_bench.cr -o bin/tls_context_bench
 #   bin/tls_context_bench stdlib 256
 #   bin/tls_context_bench lean 256
+#   bin/tls_context_bench authority 1024
+require "file_utils"
 require "../src/gori"
 
 mode = ARGV[0]? || "lean"
 n = (ARGV[1]? || "256").to_i
-abort "mode must be lean or stdlib" unless mode.in?("lean", "stdlib")
+abort "mode must be lean, stdlib or authority" unless mode.in?("lean", "stdlib", "authority")
 
 def rss_kb : Int64
   `ps -o rss= -p #{Process.pid}`.strip.to_i64
+end
+
+if mode == "authority"
+  dir = File.tempname("gori-ctx-bench")
+  begin
+    ca = Gori::Proxy::Tls::CertAuthority.load_or_create(dir)
+    before = rss_kb
+    elapsed = Time.measure { n.times { |i| ca.context_for("h#{i}.bench.test") } }
+    GC.collect
+    grown = rss_kb - before
+    printf("authority n=%d  %.3f ms/leaf  rss +%.1f MB (%.3f MB/leaf)\n", n,
+      elapsed.total_milliseconds / n, grown / 1024.0, grown / 1024.0 / n)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+  exit
 end
 
 root, root_key = Gori::Proxy::Tls::CertBuilder.build_root("gori bench")

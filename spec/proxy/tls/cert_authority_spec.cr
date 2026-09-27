@@ -385,6 +385,19 @@ describe Gori::Proxy::Tls::CertAuthority do
     end
   end
 
+  it "holds MAX_LEAVES hosts and evicts the least recently used past that" do
+    with_ca_dir do |dir|
+      ca = Gori::Proxy::Tls::CertAuthority.load_or_create(dir)
+      max = Gori::Proxy::Tls::CertAuthority::MAX_LEAVES
+      built = (0...max).map { |i| ca.context_for("h#{i}.test") }
+      ca.context_for("h0.test").should be(built[0]) # exactly at the cap: nothing evicted
+      ca.context_for("h#{max}.test")                # one past it evicts the oldest: h1, as h0 was just bumped
+      ca.context_for("h0.test").should be(built[0])
+      ca.context_for("h#{max - 1}.test").should be(built[max - 1])
+      ca.context_for("h1.test").should_not be(built[1]) # rebuilt
+    end
+  end
+
   it "regenerates a fresh root in place — persisted, leaf cache dropped, key 0600" do
     with_ca_dir do |dir|
       ca = Gori::Proxy::Tls::CertAuthority.load_or_create(dir)
