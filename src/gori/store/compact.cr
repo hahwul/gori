@@ -196,7 +196,7 @@ class Gori::Store
                 "WHERE request_body IS NOT NULL AND LENGTH(request_body) > 0")
     end
     # Dropping a body drops what `body:` searches, so the FTS index has to go with it. Both
-    # siblings already maintain it — `delete_flow_one` deletes the row's entry, `clear_flows`
+    # siblings already maintain it — `delete_flow_set` deletes the row's entry, `clear_flows`
     # issues `'delete-all'` — and only this path skipped it, so `body:secret` kept hitting a
     # flow whose body is gone AND that body's own trigram tokens (up to `FTS_INDEX_MAX` of
     # them) stayed in the file, which is the opposite of what compact is asked for.
@@ -209,7 +209,7 @@ class Gori::Store
     # never touched — until a drain that runs 32 rows per tick on the single writer fiber,
     # behind which live capture blocks and which `index_pending!` makes the first `body:`
     # query wait for. It also regrew the trigram index immediately after the VACUUM the
-    # operator had just paid for. The two siblings delete precise rowids (`delete_flow_one`,
+    # operator had just paid for. The two siblings delete precise rowids (`delete_flow_set`,
     # `prune_old_flows`) and only `clear_flows` wipes, because there nothing survives.
     if plan.response_bodies || plan.request_bodies
       conn.exec("DELETE FROM flows_fts WHERE rowid IN (SELECT id FROM flows WHERE #{emptied_where(plan)})")

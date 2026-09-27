@@ -1469,7 +1469,7 @@ module Gori
 
       # V35 — endpoints referenced in captured JavaScript (#1243). DERIVED rows: `JsRefs.scan`
       # reads bodies already in the store and sends nothing, so every row here is a projection
-      # of a flow and is deleted WITH that flow (`delete_flow_one`, `clear_flows`, both retention
+      # of a flow and is deleted WITH that flow (`delete_flow_set`, `clear_flows`, both retention
       # sweeps). Not flows, deliberately: a Pending or stub flow would read as "a request was
       # attempted" in History, QL and every export, and nothing was.
       #
