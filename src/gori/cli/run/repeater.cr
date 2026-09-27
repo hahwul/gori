@@ -770,7 +770,9 @@ module Gori
               tgt_str = bt ? bt : ""
             end
 
-            unless http2_given
+            # A `--curl` request already said which protocol it speaks (`--http2` or not), and with
+            # it `--flow` is provenance only — as MCP `create_repeater{curl, flow_id}` reads it.
+            unless http2_given || curl_path
               http2 = built.http2
             end
 
