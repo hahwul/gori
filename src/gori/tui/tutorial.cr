@@ -8,7 +8,9 @@ require "./layout"
 require "./mascot"
 require "./notifications"
 require "./companion"
+require "./palette"
 require "../settings"
+require "../verb"
 
 module Gori::Tui
   # A guided, standalone tour of gori's TUI, shown right after the setup wizard
@@ -17,9 +19,15 @@ module Gori::Tui
   # so it fully captures input and can't disturb any real session.
   #
   # It teaches the four moves a new user reaches for most — moving between
-  # tabs/panes, the command palette (^P), the action menu (space), and edit mode
+  # tabs/panes, the action menu (space), the command palette (^P), and edit mode
   # (READ/INS) — each on a harmless MOCK of the real UI (nothing here is real),
   # drawn with the same Screen/Frame/Theme primitives the app uses.
+  #
+  # The menu comes before the palette because the palette's hint column SPELLS menu paths
+  # (`Hotkeys.menu_path`, #1282): a search result tells you the letters that reach it next
+  # time, and those read as noise to someone who has not yet opened the menu once. The two
+  # mocks' rows are real verbs read from the registry, so their letters and keys are the
+  # app's, and move when the app's do.
   #
   # Flow: short explanation + looping demo on each lesson, with a soft "try it"
   # goal so users press the real key at least once; then a hands-on Practice
@@ -38,12 +46,16 @@ module Gori::Tui
     # are most likely to be running.
     TABS = %w[Project Target History Intercept Repeater]
 
+    # The mock tab the menu and palette lessons stand on: their rows are History's, so the bar
+    # has to say History, not whichever tab the previous lesson left highlighted.
+    HISTORY_TAB = 2
+
     # Short labels for the progress rail (keep narrow so 7 chips fit).
     STEP_RAIL = [
       {"intro", Step::Welcome},
       {"nav", Step::Navigate},
-      {"palette", Step::Palette},
       {"menu", Step::SpaceMenu},
+      {"palette", Step::Palette},
       {"edit", Step::Edit},
       {"try", Step::Practice},
       {"done", Step::Done},
@@ -92,16 +104,116 @@ module Gori::Tui
     # bar now (Chrome::DEFAULT_HIDDEN), which is exactly why its row still reads "Open Help"
     # and carries no number: the palette is one of the doors (`?`, `0`, ^P) that reach a tab
     # no digit does.
+    #
+    # These are the APP half, the one an empty query browses. `Settings: Companion` is there so
+    # the lesson's query (PALETTE_DEMO_QUERY) finds a row in both groups, as it does in the app.
     PALETTE_ROWS = [
       {"»", "Go to Repeater", 4},
       {"≡", "Settings: Theme", nil},
+      {"≡", "Settings: Companion", nil},
       {"×", "Quit gori", nil},
-      {"→", "Go to History", 2},
+      {"»", "Go to History", 2},
       {"?", "Open Help", nil},
     ]
 
-    # Fake space-menu rows (mnemonic key + label).
-    SPACE_ROWS = [{'o', "Open"}, {'r', "Repeater"}, {'y', "Copy"}, {'/', "Filter"}]
+    # The palette's THIS TAB half (#1282): real History verbs, read from the registry when the
+    # tour starts. Each row's hint is the one the real palette prints beside it — the direct
+    # key, else the space-menu path — so a rebind or a moved letter moves it here too. Send to
+    # Comparer comes first because it has NO key: its hint is the menu path, which is the
+    # lesson (search once, and the palette tells you the short route for next time).
+    PALETTE_TAB_VERBS = %w[history.compare history.fuzz history.repeater history.copy history.query]
+
+    # What the palette lesson asks the user to type, and what its demo types: it finds Send to
+    # Comparer under THIS TAB and a Settings row under APP, so both groups are on screen.
+    PALETTE_DEMO_QUERY = "comp"
+
+    # The mock space menu over History's list: its level-1 rows, and the second card that the
+    # Send flow to… family row opens (#1274). Verb ids, never letters — the letters come from
+    # the registry (`Tutorial.space_rows`), and a hand-typed one is what
+    # spec/verb/hint_token_expands_spec.cr exists to refuse.
+    SPACE_VERBS = %w[body.open history.repeater history.copy history.query]
+    SEND_VERBS  = %w[history.repeater history.fuzz history.compare]
+
+    # Where the family row sits among SPACE_VERBS: after the Repeater row, as in the real card's
+    # SEND group, and high enough to stay drawn when a short card clips the list.
+    SEND_ROW_AT = 2
+
+    # Cap on the mock menu's width: enough for the second card's `SPACE › SEND FLOW TO` title.
+    SPACE_MENU_W = 30
+
+    # One row of the mock space menu: the letter that runs it, the verb's title, the right-hand
+    # column (the direct key, or `›` on a row that opens a second card), and whether it opens
+    # one instead of running.
+    record MenuRow, key : Char, title : String, hint : String, opens : Bool = false
+
+    # One command of the mock palette: sigil, label, hint column, the fake tab a "Go to …" row
+    # switches to, and whether it is one of the focused tab's own actions (THIS TAB).
+    record PalRow, sigil : String, label : String, hint : String, tab : Int32?, this_tab : Bool
+
+    def self.space_rows(registry : Verb::Registry) : Array(MenuRow)
+      rows = SPACE_VERBS.compact_map { |id| level1_row(registry, id) }
+      fam = Verbs::SEND_FLOW
+      rows.insert({SEND_ROW_AT, rows.size}.min, MenuRow.new(fam.key, fam.title, "›", opens: true))
+    end
+
+    # The family's card, lettered by the family table (`Registry#l2_key`), which is the same on
+    # every tab — the thing worth seeing once.
+    def self.send_rows(registry : Verb::Registry) : Array(MenuRow)
+      SEND_VERBS.compact_map do |id|
+        next unless (v = registry[id]?) && (k = registry.l2_key(v))
+        MenuRow.new(k, v.title, chord_hint(registry, id))
+      end
+    end
+
+    # The second card's title, as the real one reads (`SPACE › SEND FLOW TO`).
+    def self.send_card_title : String
+      "SPACE › #{Verbs::SEND_FLOW.title.rchop('…').upcase}"
+    end
+
+    # The same column `PaletteState#fast_path` draws for a tab row: the chord's label, else the
+    # compact menu path.
+    def self.palette_tab_rows(registry : Verb::Registry) : Array(PalRow)
+      PALETTE_TAB_VERBS.compact_map do |id|
+        next unless v = registry[id]?
+        hint = Hotkeys.binding_for(registry, id).try(&.label) ||
+               Hotkeys.menu_path(registry, id, compact: true) || ""
+        PalRow.new("▸", v.title, hint, nil, true)
+      end
+    end
+
+    # The palette's commands for `query`, THIS TAB first. An empty query is the app-wide
+    # browse and lists no tab rows, as in the app.
+    def self.palette_matches(query : String, tab_rows : Array(PalRow)) : Array(PalRow)
+      app = PALETTE_ROWS.map { |(sig, label, tab)| PalRow.new(sig, label, "", tab, false) }
+      q = query.downcase
+      return app if q.empty?
+      (tab_rows + app).select(&.label.downcase.includes?(q))
+    end
+
+    # The drawn rows: a group header, or an index into `matches`. Grouped only when a tab row
+    # matched, the rule `PaletteState#display_rows` follows, so the browse stays a flat list.
+    def self.palette_display(matches : Array(PalRow)) : Array({String, Int32?})
+      tab = matches.count(&.this_tab)
+      rows = [] of {String, Int32?}
+      if tab > 0
+        rows << {PaletteState::TAB_HEADER, nil}
+        tab.times { |i| rows << {"", i} }
+        rows << {PaletteState::APP_HEADER, nil} if matches.size > tab
+        (tab...matches.size).each { |i| rows << {"", i} }
+      else
+        matches.each_index { |i| rows << {"", i} }
+      end
+      rows
+    end
+
+    private def self.level1_row(registry : Verb::Registry, id : String) : MenuRow?
+      return nil unless (v = registry[id]?) && (keys = registry.menu_keys(id)) && keys.size == 1
+      MenuRow.new(keys[0], v.title, chord_hint(registry, id))
+    end
+
+    private def self.chord_hint(registry : Verb::Registry, id : String) : String
+      (c = Hotkeys.binding_for(registry, id)) ? Hotkeys.display_label(c) : ""
+    end
 
     FLOW_ROWS = [{"GET ", "/api/users", 200}, {"POST", "/login", 401}, {"GET ", "/admin", 500}]
 
@@ -121,8 +233,8 @@ module Gori::Tui
     enum Step
       Welcome
       Navigate
-      Palette
       SpaceMenu
+      Palette
       Edit
       Practice # hands-on sandbox: the user drives the mock
       Done
@@ -188,8 +300,8 @@ module Gori::Tui
       case step
       when Step::Welcome   then "↵/n start · esc esc leave"
       when Step::Navigate  then "2/↓/↑ move · n next · b back"
-      when Step::Palette   then Hotkeys.retag("^P palette · n next · b back")
       when Step::SpaceMenu then "space menu · n next · b back"
+      when Step::Palette   then Hotkeys.retag("^P palette · n next · b back")
       when Step::Edit      then "i INS · n next · b back"
       when Step::Practice  then "n next · b back · keep trying"
       when Step::Done      then "↵/n finish · esc esc leave"
@@ -198,15 +310,23 @@ module Gori::Tui
     end
 
     def self.done_extra_lines(width : Int32) : {String, String}
-      if width < 71
-        {Hotkeys.retag("Keys: 1-9 tabs · ^P · space · i"), "Re-run: gori tutorial"}
+      if width < 50
+        {Hotkeys.retag("Keys: 1-9 · space · ^P · ? help"), "Re-run: gori tutorial"}
+      elsif width < 71
+        {Hotkeys.retag("Keys: 1-9 tabs · space menu · ^P find · ? help"), "Re-run: gori tutorial"}
       else
-        {Hotkeys.retag("Cheat-sheet:  1-9 tabs · 0 all tabs · ^P palette · space menu · i/↵ INS"),
+        {Hotkeys.retag("Cheat-sheet:  1-9 tabs · space menu · ^P find by name · ? help · i INS"),
          "Re-run this tour anytime:  gori tutorial"}
       end
     end
 
-    def initialize(@term : Termisu, @handoff : Handoff = Handoff::Shell)
+    # `registry` is the session's when the tour runs from inside one (Runner#open_tutorial), so
+    # the mock menus read the same letters and keys the user just left.
+    def initialize(@term : Termisu, @handoff : Handoff = Handoff::Shell,
+                   registry : Verb::Registry = Verbs.registry)
+      @space_rows = Tutorial.space_rows(registry)
+      @send_rows = Tutorial.send_rows(registry)
+      @pal_tab_rows = Tutorial.palette_tab_rows(registry)
       # Held as the base Backend: TermisuBackend is generic over the terminal type.
       @backend = TermisuBackend.new(@term).as(Backend)
       @step = Step::Welcome
@@ -239,6 +359,7 @@ module Gori::Tui
       @pal_sel = 0
       @pal_query = "" # live filter string (palette lesson + practice)
       @space_sel = 0
+      @space_level = 1 # 1 = the menu, 2 = the Send flow to… card its family row opens
       @edit_insert = false
       @edit_typed = ""
       # Once the user touches keys on Navigate, stop the auto-demo and hand over.
@@ -305,8 +426,8 @@ module Gori::Tui
     # the user actually configured, exactly as the card titles do.
     COMPANION_LINES = [
       {:nav, "that's it — tab bar up top, body below"},
-      {:palette, "^P from anywhere, any tab"},
       {:space, "space acts on whatever's selected"},
+      {:palette, "type a name, and it shows you the key"},
       {:edit, "INS to type, esc back to READ"},
       {:practice, "all four! you're ready"},
       {:done, "that's the tour — go break something"},
@@ -463,16 +584,21 @@ module Gori::Tui
           handle_live_shell_key(ev, practice: false)
           return
         end
-      when Step::Palette
-        if palette_open_key?(ev)
-          open_palette
-          @tried_palette = true
-          return
-        end
+        # Opening either one is not the try-it: the ✓ waits for the move each lesson is about —
+        # a search that turns up THIS TAB rows, a second card or a row run (#note_palette_try,
+        # #open_send_card, #run_space_row).
       when Step::SpaceMenu
         if space_open_key?(ev)
           open_space
-          @tried_space = true
+          return
+        end
+        if send_open_key?(ev)
+          open_send_card
+          return
+        end
+      when Step::Palette
+        if palette_open_key?(ev)
+          open_palette
           return
         end
       when Step::Edit
@@ -591,6 +717,13 @@ module Gori::Tui
       if space_open_key?(ev)
         open_space
         @p_space = true if practice
+        return
+      end
+      # The bare family key opens its card from a pane, as in the app (#1295). Practice only:
+      # Navigate is about moving, and a card popping up there would be a lesson out of turn.
+      if practice && @p_level == :body && send_open_key?(ev)
+        open_send_card
+        @p_space = true
         return
       end
 
@@ -755,8 +888,9 @@ module Gori::Tui
         @running = false
         return
       end
+      # esc steps back ONE level, as in the app: out of the second card to the menu, then shut.
       if key.escape?
-        close_overlay
+        @overlay == :space && @space_level == 2 ? space_back : close_overlay
         return
       end
       if key.enter?
@@ -786,44 +920,77 @@ module Gori::Tui
           @pal_sel = Tutorial.wrap_sel(@pal_sel, +1, n)
         elsif key.backspace?
           @pal_query = @pal_query[0...-1] unless @pal_query.empty?
-          @pal_sel = 0
+          note_palette_try
         elsif (ch = Tutorial.typed_char(ev)) && @pal_query.size < 20
           @pal_query += ch
-          @pal_sel = 0
+          note_palette_try
         end
       when :space
         # Mnemonic FIRST, then the j/k fallback — the helix-leader order
-        # Runner#handle_space_menu_key spells out. No SPACE_ROWS key is j or k today, so
-        # this changes nothing now and cannot go wrong the day one is.
+        # Runner#handle_space_menu_key spells out. No menu row is lettered h/j/k/l
+        # (`Family::NAV_LETTERS`, checked at boot), so the fallback can never shadow a row.
+        rows = space_level_rows
         bare = Tutorial.bare_char(ev)
-        if bare && SPACE_ROWS.any? { |(k, _)| k == bare }
-          close_overlay # mnemonic runs the row
+        if bare && (row = rows.find { |r| r.key == bare })
+          run_space_row(row)
+        elsif key.backspace? && @space_level == 2
+          space_back # the app's other way back a level
         elsif key.up? || bare == 'k'
-          @space_sel = (@space_sel - 1) % SPACE_ROWS.size
+          @space_sel = Tutorial.wrap_sel(@space_sel, -1, rows.size)
         elsif key.down? || bare == 'j'
-          @space_sel = (@space_sel + 1) % SPACE_ROWS.size
+          @space_sel = Tutorial.wrap_sel(@space_sel, +1, rows.size)
         end
       end
     end
 
-    private def filtered_palette : Array({String, String, Int32?})
-      q = @pal_query.downcase
-      return PALETTE_ROWS if q.empty?
-      PALETTE_ROWS.select { |(_, label, _)| label.downcase.includes?(q) }
+    private def filtered_palette : Array(PalRow)
+      Tutorial.palette_matches(@pal_query, @pal_tab_rows)
+    end
+
+    # The query changed: back to the first row, and — on the palette lesson — the ✓ once the
+    # search has turned up one of the tab's own actions, which is what the lesson is about.
+    private def note_palette_try : Nil
+      @pal_sel = 0
+      @tried_palette = true if @step.palette? && filtered_palette.any?(&.this_tab)
     end
 
     private def run_overlay_selection : Nil
+      if @overlay == :space
+        if row = space_level_rows[@space_sel]?
+          run_space_row(row)
+        else
+          close_overlay
+        end
+        return
+      end
       if @overlay == :palette
         rows = filtered_palette
         if row = rows[@pal_sel]?
+          @tried_palette = true if @step.palette?
           # Mirror a couple of real "Go to …" actions so the palette feels alive.
-          if tab = row[2]
+          if tab = row.tab
             @p_tab = tab
             mark_switch
           end
         end
       end
       close_overlay
+    end
+
+    # The rows of the card on screen: the menu, or the second card its family row opened.
+    private def space_level_rows : Array(MenuRow)
+      @space_level == 2 ? @send_rows : @space_rows
+    end
+
+    # A row that opens a card opens it; any other row "runs", which in a mock means the menu
+    # closes, as the real one does after running a row.
+    private def run_space_row(row : MenuRow) : Nil
+      if row.opens
+        open_send_card
+      else
+        @tried_space = true if @step.space_menu?
+        close_overlay
+      end
     end
 
     private def practice_done? : Bool
@@ -845,6 +1012,7 @@ module Gori::Tui
       @pal_sel = 0
       @pal_query = ""
       @space_sel = 0
+      @space_level = 1
       @edit_insert = false
       @edit_typed = ""
       @nav_live = false
@@ -855,11 +1023,12 @@ module Gori::Tui
       @pal_sel = 0
       @pal_query = ""
       @space_sel = 0
+      @space_level = 1
       @edit_insert = false
       @edit_typed = ""
       @nav_live = false
       @p_level = :menu
-      @p_tab = 0
+      @p_tab = @step.space_menu? || @step.palette? ? HISTORY_TAB : 0
       @p_pane = 0
       @p_flow = 0
     end
@@ -882,12 +1051,31 @@ module Gori::Tui
 
     private def open_space : Nil
       @overlay = :space
+      @space_level = 1
       @space_sel = 0
       @edit_insert = false
     end
 
+    # The Send flow to… card — from its menu row, or straight from the pane on the bare family
+    # key. Reaching it is the space lesson's try-it: a second level is the one thing about the
+    # menu a user cannot guess from the first.
+    private def open_send_card : Nil
+      @overlay = :space
+      @space_level = 2
+      @space_sel = 0
+      @edit_insert = false
+      @tried_space = true if @step.space_menu?
+    end
+
+    # Back from the card to the menu, on the row that opened it.
+    private def space_back : Nil
+      @space_level = 1
+      @space_sel = @space_rows.index(&.opens) || 0
+    end
+
     private def close_overlay : Nil
       @overlay = :none
+      @space_level = 1
       @pal_query = ""
     end
 
@@ -926,6 +1114,12 @@ module Gori::Tui
 
     private def space_open_key?(ev : Termisu::Event::Key) : Bool
       Tutorial.bare_char(ev) == ' '
+    end
+
+    # The Send flow to… family's own key (`Family#key`, the same as its chord), read from the
+    # family rather than spelled here.
+    private def send_open_key?(ev : Termisu::Event::Key) : Bool
+      Tutorial.bare_char(ev) == Verbs::SEND_FLOW.key
     end
 
     private def edit_enter_key?(ev : Termisu::Event::Key) : Bool
@@ -983,19 +1177,21 @@ module Gori::Tui
         # offset by the same scroll window `render_fake_palette` used, not by `rows.size`:
         # the two disagreed, so a click on the overlay's bottom border ran a command the user
         # could not see.
-        rows = filtered_palette
-        vis = Tutorial.palette_rows_visible(@palette_rect)
-        top = Tutorial.palette_scroll(@pal_sel.clamp(0, {rows.size - 1, 0}.max), rows.size, vis)
+        # A group header is not a command: a click on one does nothing.
+        display, top, vis = palette_window(@palette_rect, filtered_palette, @pal_sel)
         row = my - (@palette_rect.y + 3)
-        if row >= 0 && row < {vis, rows.size - top}.min
-          @pal_sel = top + row
+        if row >= 0 && row < {vis, display.size - top}.min && (idx = display[top + row][1])
+          @pal_sel = idx
           run_overlay_selection
         end
       when :space
+        rows = space_level_rows
+        vis = {@space_rect.h - 2, 0}.max
+        top = Tutorial.palette_scroll(@space_sel, rows.size, vis)
         row = my - (@space_rect.y + 1)
-        if row >= 0 && row < SPACE_ROWS.size
-          @space_sel = row
-          close_overlay
+        if row >= 0 && row < {vis, rows.size - top}.min
+          @space_sel = top + row
+          run_space_row(rows[@space_sel])
         end
       end
     end
@@ -1121,8 +1317,8 @@ module Gori::Tui
       case @step
       when Step::Welcome   then render_welcome(screen, box)
       when Step::Navigate  then render_navigate(screen, box)
-      when Step::Palette   then render_palette(screen, box)
       when Step::SpaceMenu then render_spacemenu(screen, box)
+      when Step::Palette   then render_palette(screen, box)
       when Step::Edit      then render_edit(screen, box)
       when Step::Practice  then render_practice(screen, box)
       when Step::Done      then render_done(screen, box)
@@ -1434,21 +1630,22 @@ module Gori::Tui
         else
           "try 2, then ↓ · #{tour} to skip"
         end
-      when Step::Palette
-        if @overlay == :palette
-          "type · ↑/↓ · ↵ run · esc close"
-        elsif @tried_palette
-          "✓ #{tour}"
-        else
-          Hotkeys.retag("try ^P · #{tour} to skip")
-        end
       when Step::SpaceMenu
         if @overlay == :space
-          "↑/↓ · letter · ↵ · esc close · then n/Next" # n/b belong to the menu here — see Practice
+          # n/b belong to the menu here — see Practice.
+          @space_level == 2 ? "letter runs · esc back a level · then n/Next" : "letter runs · › opens a card · esc close · then n/Next"
         elsif @tried_space
           "✓ #{tour}"
         else
-          "try space · #{tour} to skip"
+          "try space, then #{Verbs::SEND_FLOW.key} · #{tour} to skip"
+        end
+      when Step::Palette
+        if @overlay == :palette
+          "type a name · ↑/↓ · ↵ run · esc close"
+        elsif @tried_palette
+          "✓ #{tour}"
+        else
+          Hotkeys.retag("try ^P, then type #{PALETTE_DEMO_QUERY} · #{tour} to skip")
         end
       when Step::Edit
         if @edit_insert
@@ -1515,8 +1712,8 @@ module Gori::Tui
       y = box.y + 2
       moves = [
         "1.  tabs & panes     1-9  ·  ←/→  ·  ↓  ·  esc  ·  ⇥",
-        Hotkeys.retag("2.  command palette  ^P   — jump to any action"),
-        "3.  action menu      space — commands for this pane",
+        "2.  action menu      space — what you do most, right here",
+        Hotkeys.retag("3.  command palette  ^P   — find any action by name"),
         "4.  edit mode        READ / INS — browse, then type",
       ]
       gaps = Tutorial.prose_gaps(box, moves.size + 4, 2)
@@ -1590,54 +1787,81 @@ module Gori::Tui
       end
     end
 
+    private def render_spacemenu(screen : Screen, box : Rect) : Nil
+      ix = box.x + 2
+      iw = {box.w - 4, 1}.max
+      y = box.y + 2
+      fam = Verbs::SEND_FLOW
+      detail = [
+        "a letter runs its row · › opens a second card · esc goes back",
+        "the key on the right is the row's shortcut, for next time",
+      ]
+      keep, sy = Tutorial.lesson_split(box, fixed: 2, detail: detail.size)
+      screen.text(ix, y, "space lists what you do most in the pane you're in.", Theme.text_bright, Theme.panel, width: iw)
+      y += 1
+      detail[0, keep].each do |ln|
+        screen.text(ix, y, ln, Theme.muted, Theme.panel, width: iw)
+        y += 1
+      end
+      draw_try_line(screen, ix, y, iw, "Try: space, then #{fam.key} for #{fam.title} — esc steps back.", @tried_space)
+
+      shell = Rect.new(box.x + 2, sy, box.w - 4, {box.bottom - 1 - sy, 3}.max)
+      live = @overlay == :space
+      demo = live || @tried_space ? nil : space_demo_frame
+      # @p_tab, not a hardcoded tab: `render_tab_bar` registers a hit rect for every chip it
+      # draws, so a click on one moves @p_tab — this lesson used to ignore it, leaving the
+      # chips looking clickable and behaving dead.
+      render_shell(screen, shell, @p_tab, true, 0, demo.try(&.[2]) || "", flow: 0)
+      if live
+        draw_space_overlay(screen, shell, @space_level, @space_sel, live: true)
+      elsif demo
+        draw_space_overlay(screen, shell, demo[0], demo[1], live: false)
+      end
+    end
+
+    # The space lesson's looping demo: {level, selected row, key shown}. It walks down to the
+    # family row, opens the card on the family's key, walks the card, and steps back on esc —
+    # the whole of what the menu has that a user cannot guess, in about four seconds.
+    private def space_demo_frame : {Int32, Int32, String}
+      fam = @space_rows.index(&.opens) || 0
+      last = {@send_rows.size - 1, 0}.max
+      phase = (@tick // 10) % 8
+      case phase
+      when 0    then {1, 0, "space"}
+      when 1, 2 then {1, {phase, fam}.min, ""}
+      when 3    then {2, 0, Verbs::SEND_FLOW.key.to_s}
+      when 7    then {1, fam, "esc"}
+      else           {2, {phase - 3, last}.min, ""}
+      end
+    end
+
     private def render_palette(screen : Screen, box : Rect) : Nil
       ix = box.x + 2
       iw = {box.w - 4, 1}.max
       y = box.y + 2
-      keep, sy = Tutorial.lesson_split(box, fixed: 2, detail: 1)
-      screen.text(ix, y, "Jump to any action without hunting tabs or memorizing chords.", Theme.text_bright, Theme.panel, width: iw)
+      detail = [
+        "this tab's actions list first, each with its key or menu path",
+        "rarely used actions live only here — the menu stays short",
+      ]
+      keep, sy = Tutorial.lesson_split(box, fixed: 2, detail: detail.size)
+      screen.text(ix, y, Hotkeys.retag("^P finds any action by name — this tab's, then the app's."), Theme.text_bright, Theme.panel, width: iw)
       y += 1
-      if keep > 0
-        screen.text(ix, y, Hotkeys.retag("^P opens it · type to fuzzy-filter · ↑/↓ move · ↵ run · esc close"),
-          Theme.muted, Theme.panel, width: iw)
+      detail[0, keep].each do |ln|
+        screen.text(ix, y, ln, Theme.muted, Theme.panel, width: iw)
         y += 1
       end
-      draw_try_line(screen, ix, y, iw, Hotkeys.retag("Try: press ^P, filter, ↵ to run a command."), @tried_palette)
+      draw_try_line(screen, ix, y, iw, Hotkeys.retag("Try: press ^P, type #{PALETTE_DEMO_QUERY}, then ↵ to run it."), @tried_palette)
 
       shell = Rect.new(box.x + 2, sy, box.w - 4, {box.bottom - 1 - sy, 3}.max)
-      render_shell(screen, shell, @p_tab, false, 0, "", flow: 0)
+      # In the body, on History's list: the THIS TAB rows are History's, and the real palette
+      # finds a tab's actions from wherever in it you press ^P.
+      render_shell(screen, shell, @p_tab, true, 0, "", flow: 0)
       # Demo auto-overlay only until the user has tried — after they close it,
       # leave a clean shell so it doesn't look like the palette is still open.
       if @overlay == :palette
         draw_palette_overlay(screen, shell, live: true)
       elsif !@tried_palette
         draw_palette_overlay(screen, shell, live: false)
-      end
-    end
-
-    private def render_spacemenu(screen : Screen, box : Rect) : Nil
-      ix = box.x + 2
-      iw = {box.w - 4, 1}.max
-      y = box.y + 2
-      keep, sy = Tutorial.lesson_split(box, fixed: 2, detail: 1)
-      screen.text(ix, y, "space opens actions for whatever area has focus.", Theme.text_bright, Theme.panel, width: iw)
-      y += 1
-      if keep > 0
-        screen.text(ix, y, "each row has a mnemonic key — press it to run · ↑/↓ move · esc dismiss",
-          Theme.muted, Theme.panel, width: iw)
-        y += 1
-      end
-      draw_try_line(screen, ix, y, iw, "Try: press space, move with ↑/↓, run with a letter or ↵.", @tried_space)
-
-      shell = Rect.new(box.x + 2, sy, box.w - 4, {box.bottom - 1 - sy, 3}.max)
-      # @p_tab, not a hardcoded 0: `render_tab_bar` registers a hit rect for every chip it
-      # draws, so a click on one was already moving @p_tab — this lesson was the only one
-      # that then ignored it, leaving the chips looking clickable and behaving dead.
-      render_shell(screen, shell, @p_tab, true, 0, "", flow: 0)
-      if @overlay == :space
-        draw_space_overlay(screen, shell, live: true)
-      elsif !@tried_space
-        draw_space_overlay(screen, shell, live: false)
       end
     end
 
@@ -1686,7 +1910,7 @@ module Gori::Tui
       y = box.y + 2
       goals = [
         {"1-5 tab", @p_switch}, {"↓ body", @p_enter}, {"↑/esc tabs", @p_up},
-        {Hotkeys.retag("^P"), @p_palette}, {"space", @p_space}, {"i INS", @p_edit},
+        {"space", @p_space}, {Hotkeys.retag("^P"), @p_palette}, {"i INS", @p_edit},
       ]
       # Practice carries two rows of prose the other lessons don't — the six goal chips — and
       # at the shortest card that costs the mock a FLOWS row, on the one step whose key line
@@ -1714,7 +1938,7 @@ module Gori::Tui
 
       case @overlay
       when :palette then draw_palette_overlay(screen, shell, live: true)
-      when :space   then draw_space_overlay(screen, shell, live: true)
+      when :space   then draw_space_overlay(screen, shell, @space_level, @space_sel, live: true)
       end
 
       return if pad == 0
@@ -1725,7 +1949,7 @@ module Gori::Tui
             elsif @edit_insert
               "INS mode — type, then esc back to READ."
             else
-              Hotkeys.retag("1-5/←→ tabs · ↓ body · ↑ tabs · ↓ list · ⇥ panes · esc · ^P · space · i")
+              Hotkeys.retag("1-5/←→ tabs · ↓ body · ↑ tabs · ↓ list · ⇥ panes · esc · space · ^P · i")
             end
       screen.text(ix, box.bottom - 2, msg, practice_done? ? Theme.green : Theme.muted, Theme.panel, width: iw)
     end
@@ -1933,10 +2157,10 @@ module Gori::Tui
     end
 
     private def draw_palette_overlay(screen : Screen, shell : Rect, *, live : Bool) : Nil
-      pw = { {shell.w - 8, 36}.min, 24 }.max
-      # Tall enough for every row when the shell can spare it: border + query + divider +
-      # rows + border. The old cap of 8 was fixed at four rows short of PALETTE_ROWS, so the
-      # fifth was unreachable even on a 200-row terminal — see `palette_rows_visible`.
+      pw = { {shell.w - 8, 40}.min, 24 }.max
+      # Tall enough for the whole browse when the shell can spare it: border + query + divider
+      # + rows + border. Sized by the browse, not by the current matches, so the card does not
+      # jump as the query narrows; a longer list scrolls (`palette_rows_visible`).
       ph = { {shell.h - 1, PALETTE_ROWS.size + 4}.min, 6 }.max
       px = shell.x + {(shell.w - pw) // 2, 0}.max
       py = shell.y + {(shell.h - ph) // 2, 0}.max
@@ -1945,25 +2169,43 @@ module Gori::Tui
       render_fake_palette(screen, rect, live: live)
     end
 
-    private def draw_space_overlay(screen : Screen, shell : Rect, *, live : Bool) : Nil
-      mw = 16
-      mh = SPACE_ROWS.size + 2
-      mx = shell.right - mw - 1
-      # One row up from the shell's floor: the panes' bottom border sits on `shell.bottom - 1`,
-      # and a menu whose own border landed on that row drew `╰────╰────╯╯` — two frames
-      # fused where a popup should float clear of the pane it is over.
+    # The menu floats over the panes' bottom-right, as the real card floats over the pane.
+    # Clamped to the shell, one row clear of the floor: the panes' bottom border sits on
+    # `shell.bottom - 1`, and a menu whose own border landed on that row drew `╰────╰────╯╯` —
+    # two frames fused where a popup should float clear of the pane it is over. A short shell
+    # clips the list, which then scrolls with the selection (the family row sits high,
+    # SEND_ROW_AT, so it is drawn even at the smallest card).
+    private def draw_space_overlay(screen : Screen, shell : Rect, level : Int32, sel : Int32, *, live : Bool) : Nil
+      rows = level == 2 ? @send_rows : @space_rows
+      title = level == 2 ? Tutorial.send_card_title : "SPACE"
+      mw = {SPACE_MENU_W, shell.w - 3}.min
+      mh = {rows.size + 2, shell.h - 1}.min
+      mx = shell.right - mw - 2 # one column clear of the pane's right border
       my = {shell.bottom - mh - 1, shell.y}.max
-      return unless mx > shell.x
+      return unless mx > shell.x && mh >= 3
       rect = Rect.new(mx, my, mw, mh)
       @space_rect = rect if live
-      render_fake_space_menu(screen, rect, SPACE_ROWS, live: live)
+      render_fake_space_menu(screen, rect, title, rows, sel)
+    end
+
+    # The drawn rows, the first one on screen, and how many fit — ONE home for the draw loop
+    # and the click hit-test, which have drifted apart here before (see
+    # `palette_rows_visible`). The window scrolls by the selection's DRAWN row, so a group
+    # header above it counts, as in `PaletteState#ensure_visible`.
+    private def palette_window(rect : Rect, rows : Array(PalRow), sel : Int32) : {Array({String, Int32?}), Int32, Int32}
+      display = Tutorial.palette_display(rows)
+      sel_row = display.index { |(_, i)| i == sel } || 0
+      vis = Tutorial.palette_rows_visible(rect)
+      {display, Tutorial.palette_scroll(sel_row, display.size, vis), vis}
     end
 
     private def render_fake_palette(screen : Screen, rect : Rect, *, live : Bool) : Nil
       return if rect.w < 12 || rect.h < 4
       Frame.card(screen, rect, "COMMANDS", border: Theme.border_focus)
       screen.text(rect.x + 2, rect.y + 1, "›", Theme.accent, Theme.panel)
-      q = live ? @pal_query : ""
+      # The demo types the lesson's query a letter at a time, then holds it: an empty browse
+      # first, then the grouped result, which is the picture the lesson is about.
+      q = live ? @pal_query : PALETTE_DEMO_QUERY[0, ((@tick // 5) % 16 - 3).clamp(0, PALETTE_DEMO_QUERY.size)]
       qx = rect.x + 4
       qw = {rect.right - 2 - qx, 1}.max
       if q.empty?
@@ -1978,30 +2220,35 @@ module Gori::Tui
       end
       Frame.tee_divider(screen, rect, rect.y + 2)
 
-      rows = live ? filtered_palette : PALETTE_ROWS
-      sel = if live
-              rows.empty? ? 0 : @pal_sel.clamp(0, rows.size - 1)
-            else
-              (@tick // 10) % PALETTE_ROWS.size
-            end
-      vis = Tutorial.palette_rows_visible(rect)
-      top = Tutorial.palette_scroll(sel, rows.size, vis)
+      rows = live ? filtered_palette : Tutorial.palette_matches(q, @pal_tab_rows)
+      sel = live && !rows.empty? ? @pal_sel.clamp(0, rows.size - 1) : 0
+      display, top, vis = palette_window(rect, rows, sel)
       yy = rect.y + 3
-      rows[top, vis].each_with_index do |(sig, label), i|
-        s = top + i == sel
+      display[top, vis].each do |(header, idx)|
+        unless idx
+          screen.fill(Rect.new(rect.x + 1, yy, rect.w - 2, 1), Theme.panel)
+          screen.text(rect.x + 3, yy, "─ #{header} ─", Theme.muted, Theme.panel)
+          yy += 1
+          next
+        end
+        row = rows[idx]
+        s = idx == sel
         bg = s ? Theme.accent_bg : Theme.panel
         screen.fill(Rect.new(rect.x + 1, yy, rect.w - 2, 1), bg)
         screen.cell(rect.x + 1, yy, s ? '▎' : ' ', Theme.accent, bg)
-        screen.text(rect.x + 3, yy, sig, Theme.muted, bg)
-        screen.text(rect.x + 5, yy, label, s ? Theme.text_bright : Theme.text, bg,
-          width: {rect.right - 1 - (rect.x + 5), 1}.max)
+        screen.text(rect.x + 3, yy, row.sigil, Theme.muted, bg)
+        # The hint column is the lesson (the route to the row), so the label gives way to it.
+        hx = rect.right - 2 - Screen.draw_width(row.hint)
+        screen.text(rect.x + 5, yy, row.label, s ? Theme.text_bright : Theme.text, bg,
+          width: {hx - 1 - (rect.x + 5), 1}.max)
+        screen.text(hx, yy, row.hint, Theme.muted, bg) unless row.hint.empty?
         yy += 1
       end
       # A scrolled list says so, on the border row it is covering — otherwise a window showing
       # 2 of 5 reads as a palette with only 2 commands in it. Rows BELOW the window, not rows
       # hidden in total: it is painted at the bottom edge, so it can only be read as "more
       # that way", and it went on claiming "+3" with the user parked on the last row.
-      below = rows.size - top - vis
+      below = display.size - top - vis
       if vis > 0 && below > 0
         more = "+#{below}"
         screen.text({rect.right - 1 - more.size, rect.x + 1}.max, rect.bottom - 1, more, Theme.muted, Theme.panel)
@@ -2011,21 +2258,23 @@ module Gori::Tui
       end
     end
 
-    private def render_fake_space_menu(screen : Screen, rect : Rect,
-                                       rows : Array({Char, String}), *, live : Bool) : Nil
+    private def render_fake_space_menu(screen : Screen, rect : Rect, title : String,
+                                       rows : Array(MenuRow), sel : Int32) : Nil
       return if rect.w < 8 || rect.h < 3
-      Frame.card(screen, rect, "SPACE", border: Theme.border_focus)
-      sel = live ? @space_sel : (@tick // 10) % rows.size
+      Frame.card(screen, rect, title, border: Theme.border_focus)
+      vis = rect.h - 2
+      top = Tutorial.palette_scroll(sel, rows.size, vis)
       yy = rect.y + 1
-      rows.each_with_index do |(key, label), i|
-        break if yy >= rect.bottom - 1
-        s = i == sel
+      rows[top, vis].each_with_index do |row, i|
+        s = top + i == sel
         bg = s ? Theme.accent_bg : Theme.panel
         screen.fill(Rect.new(rect.x + 1, yy, rect.w - 2, 1), bg)
         screen.cell(rect.x + 1, yy, s ? '▎' : ' ', Theme.accent, bg)
-        screen.cell(rect.x + 3, yy, key, Theme.accent, bg, attr: Attribute::Bold)
-        screen.text(rect.x + 5, yy, label, s ? Theme.text_bright : Theme.text, bg,
-          width: {rect.right - 1 - (rect.x + 5), 1}.max)
+        screen.cell(rect.x + 3, yy, row.key, Theme.accent, bg, attr: Attribute::Bold)
+        hx = rect.right - 2 - Screen.draw_width(row.hint)
+        screen.text(rect.x + 5, yy, row.title, s ? Theme.text_bright : Theme.text, bg,
+          width: {hx - 1 - (rect.x + 5), 1}.max)
+        screen.text(hx, yy, row.hint, row.opens ? Theme.accent : Theme.muted, bg) unless row.hint.empty?
         yy += 1
       end
     end

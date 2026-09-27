@@ -23,7 +23,7 @@ module Gori
   # - `gori run <sub>`              → non-interactive CLI (see Gori::CLI::Run)
   # - `gori mcp`                    → MCP (Model Context Protocol) server over stdio
   # - `gori wizard`                 → interactive first-run setup wizard (bind/theme)
-  # - `gori tutorial`               → guided TUI tour (navigation, palette, menu, edit)
+  # - `gori tutorial`               → guided TUI tour (navigation, menu, palette, edit)
   # - `gori update`                 → channel-aware self-update (binary / brew / snap / AUR)
   module CLI
     def self.run(argv : Array(String) = ARGV) : Nil
@@ -174,7 +174,7 @@ module Gori
       puts "  ca        Print the root CA path, or regenerate it (see gori ca --help)"
       puts "  run       Non-interactive CLI: capture, history, show, repeater, issues, project"
       puts "  wizard    Interactive setup wizard (bind, theme, companion) — also runs on first launch"
-      puts "  tutorial  Guided TUI tour with try-it steps (nav, palette, menu, edit)"
+      puts "  tutorial  Guided TUI tour with try-it steps (nav, menu, palette, edit)"
       puts "  mcp       Start an MCP server over stdio (AI/tool integration)"
       puts "  update    Update gori (channel-aware: binary download or package manager)"
       puts ""

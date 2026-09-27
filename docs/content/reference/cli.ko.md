@@ -18,7 +18,7 @@ gori [command] [options]
 | `ca` | 루트 CA 경로 / PEM 출력, 또는 CA 재생성 / 가져오기 |
 | `settings` | `settings.json` 표시 또는 편집 |
 | `wizard` | 대화형 최초 실행 설정 |
-| `tutorial` | 가이드형 TUI 투어 (탐색, 팔레트, 스페이스 메뉴, 편집 모드) |
+| `tutorial` | 가이드형 TUI 투어 (탐색, space 메뉴, 팔레트, 편집 모드) |
 | `update` | 채널 인식 자체 업데이트 (바이너리 / Homebrew / Snap / AUR / Nix) |
 
 전역 플래그: `-v` / `-V` / `--version`, `-h` / `--help`, 그리고 `--config PATH`(이번 실행에만 쓸 설정 파일, 아래 [`--config PATH`](#config-flag) 참고).
@@ -1959,7 +1959,7 @@ gori wizard
 gori tutorial
 ```
 
-목업 UI에서 TUI를 대화형으로 둘러봅니다: 탭/패널 탐색, 커맨드 팔레트(`Ctrl-P`), 스페이스 메뉴(`Space`), READ/INS 편집 모드. 각 레슨은 동작을 시연하고 키를 직접 눌러 보도록 안내하며, 마지막 연습 단계에는 네 가지 동작에 걸친 선택적 확인 항목 여섯 개가 있습니다. 마지막 카드는 투어를 마친 뒤 이어질 프로젝트 선택 화면, `--db` 프로젝트(열기에 실패하면 선택 화면), 셸, 현재 세션에 맞는 다음 단계를 안내합니다. `gori wizard` 끝에서 제공되고, 세션 안에서는 팔레트 명령 **Guided tour**(`Ctrl-P`)로 열 수 있습니다. 실제 프록시 세션 없이도 언제든 안전하게 다시 실행할 수 있습니다. [빠른 시작](/ko/getting-started/quick-start/)을 참고하세요.
+목업 UI에서 TUI를 대화형으로 둘러봅니다: 탭/패널 탐색, space 메뉴(`Space`)와 두 번째 카드, 커맨드 팔레트 검색(`Ctrl-P`), READ/INS 편집 모드. 목업 메뉴의 글자와 키는 설치된 gori에서 읽어 옵니다. 각 레슨은 동작을 시연하고 키를 직접 눌러 보도록 안내하며, 마지막 연습 단계에는 네 가지 동작에 걸친 선택적 확인 항목 여섯 개가 있습니다. 마지막 카드는 투어를 마친 뒤 이어질 프로젝트 선택 화면, `--db` 프로젝트(열기에 실패하면 선택 화면), 셸, 현재 세션에 맞는 다음 단계를 안내합니다. `gori wizard` 끝에서 제공되고, 세션 안에서는 팔레트 명령 **Guided tour**(`Ctrl-P`)로 열 수 있습니다. 실제 프록시 세션 없이도 언제든 안전하게 다시 실행할 수 있습니다. [빠른 시작](/ko/getting-started/quick-start/)과 [space 메뉴와 팔레트](/ko/guide/space-menu-and-palette/)를 참고하세요.
 
 ## gori update {#gori-update}
 

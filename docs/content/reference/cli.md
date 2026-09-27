@@ -18,7 +18,7 @@ gori [command] [options]
 | `ca` | Print the root CA path / PEM, or regenerate / import the CA |
 | `settings` | Show or edit `settings.json` |
 | `wizard` | Interactive first-run setup |
-| `tutorial` | Guided TUI tour (navigation, palette, space menu, edit mode) |
+| `tutorial` | Guided TUI tour (navigation, space menu, palette, edit mode) |
 | `update` | Channel-aware self-update (binary / Homebrew / Snap / AUR / Nix) |
 
 Global flags: `-v` / `-V` / `--version`, `-h` / `--help`, and `--config PATH` (a settings file for one run; see [`--config PATH`](#config-path) below).
@@ -1967,7 +1967,7 @@ Runs the interactive setup (global proxy bind default, then theme, then the Miss
 gori tutorial
 ```
 
-Interactive tour of the TUI on a mock UI: tab/pane navigation, the command palette (`Ctrl-P`), the space menu (`Space`), and READ/INS edit mode. Each lesson demos the move and prompts you to try the key; practice has six optional checks across those four moves. The last card guides you from the screen you return to: picker, a `--db` project (with picker fallback), shell, or current session. Offered at the end of `gori wizard`, and available inside a session as the palette command **Guided tour** (`Ctrl-P`); safe to re-run anytime without a live proxy session. See the [Quick Start](/getting-started/quick-start/).
+Interactive tour of the TUI on a mock UI: tab/pane navigation, the space menu (`Space`) and its second cards, the command palette's search (`Ctrl-P`), and READ/INS edit mode. The mock menus read their letters and keys from your install. Each lesson demos the move and prompts you to try the key; practice has six optional checks across those four moves. The last card guides you from the screen you return to: picker, a `--db` project (with picker fallback), shell, or current session. Offered at the end of `gori wizard`, and available inside a session as the palette command **Guided tour** (`Ctrl-P`); safe to re-run anytime without a live proxy session. See the [Quick Start](/getting-started/quick-start/) and [Space Menu & Palette](/guide/space-menu-and-palette/).
 
 ## gori update
 

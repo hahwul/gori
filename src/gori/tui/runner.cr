@@ -3950,7 +3950,7 @@ module Gori::Tui
       borrowed = !Settings.mouse
       @term.enable_mouse if borrowed
       begin
-        Tutorial.new(@term, Tutorial::Handoff::Session).run
+        Tutorial.new(@term, Tutorial::Handoff::Session, @session.registry).run
       ensure
         @term.disable_mouse if borrowed
       end
