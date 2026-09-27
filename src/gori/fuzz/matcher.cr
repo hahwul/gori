@@ -234,15 +234,38 @@ module Gori::Fuzz
       return "stop_on term #{spec.inspect}: unknown dimension #{dim.inspect} " \
              "(status|grpc|size|words|lines|time|header|regex, optionally !-negated)"
     end
+    return stop_term_repeated(spec, key) if stop_term_set?(m, key, neg)
     (neg ? setters[1] : setters[0]).call(m, val)
     nil
   end
 
   private def self.apply_stop_regex(m : Matcher, val : String, neg : Bool) : String?
+    return stop_term_repeated(val, "regex") if (neg ? m.filter_regex : m.match_regex)
     re = (Regex.new(val) rescue nil)
     return "stop_on regex #{val.inspect} is not a valid regular expression" unless re
     neg ? (m.filter_regex = re) : (m.match_regex = re)
     nil
+  end
+
+  # A second term on the same side of the same dimension used to REPLACE the first:
+  # `--stop-on status:500 --stop-on status:302` kept only 302, and a 500 never stopped the run.
+  # Terms of different dimensions AND, so a repeat is refused rather than guessed at.
+  private def self.stop_term_set?(m : Matcher, key : String, neg : Bool) : Bool
+    current = case key
+              when "status" then neg ? m.filter_status : m.match_status
+              when "grpc"   then neg ? m.filter_grpc : m.match_grpc
+              when "size"   then neg ? m.filter_size : m.match_size
+              when "words"  then neg ? m.filter_words : m.match_words
+              when "lines"  then neg ? m.filter_lines : m.match_lines
+              when "time"   then neg ? m.filter_time : m.match_time
+              when "header" then neg ? m.filter_header : m.match_header
+              end
+    !current.nil? && !current.blank?
+  end
+
+  private def self.stop_term_repeated(spec : String, key : String) : String
+    hint = key == "regex" ? "join them into one pattern (a|b)" : "list the values in one term (#{key}:500,302)"
+    "stop_on term #{spec.inspect}: #{key} is already set by an earlier term — #{hint}"
   end
 
   # Decides whether a response is "interesting" and extracts a value from it.
