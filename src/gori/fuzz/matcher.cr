@@ -222,6 +222,17 @@ module Gori::Fuzz
     "header" => {->(m : Matcher, v : String) { m.match_header = v }, ->(m : Matcher, v : String) { m.filter_header = v }},
   }
 
+  # The same dimensions' current {match, filter} spec, so a repeated term can be refused.
+  STOP_STRING_GETTERS = {
+    "status" => {->(m : Matcher) { m.match_status }, ->(m : Matcher) { m.filter_status }},
+    "grpc"   => {->(m : Matcher) { m.match_grpc }, ->(m : Matcher) { m.filter_grpc }},
+    "size"   => {->(m : Matcher) { m.match_size }, ->(m : Matcher) { m.filter_size }},
+    "words"  => {->(m : Matcher) { m.match_words }, ->(m : Matcher) { m.filter_words }},
+    "lines"  => {->(m : Matcher) { m.match_lines }, ->(m : Matcher) { m.filter_lines }},
+    "time"   => {->(m : Matcher) { m.match_time }, ->(m : Matcher) { m.filter_time }},
+    "header" => {->(m : Matcher) { m.match_header }, ->(m : Matcher) { m.filter_header }},
+  }
+
   def self.apply_stop_term(spec : String, m : Matcher) : String?
     neg = spec.starts_with?('!')
     dim, sep, val = (neg ? spec[1..] : spec).partition(':')
@@ -251,15 +262,8 @@ module Gori::Fuzz
   # `--stop-on status:500 --stop-on status:302` kept only 302, and a 500 never stopped the run.
   # Terms of different dimensions AND, so a repeat is refused rather than guessed at.
   private def self.stop_term_set?(m : Matcher, key : String, neg : Bool) : Bool
-    current = case key
-              when "status" then neg ? m.filter_status : m.match_status
-              when "grpc"   then neg ? m.filter_grpc : m.match_grpc
-              when "size"   then neg ? m.filter_size : m.match_size
-              when "words"  then neg ? m.filter_words : m.match_words
-              when "lines"  then neg ? m.filter_lines : m.match_lines
-              when "time"   then neg ? m.filter_time : m.match_time
-              when "header" then neg ? m.filter_header : m.match_header
-              end
+    return false unless getters = STOP_STRING_GETTERS[key]?
+    current = (neg ? getters[1] : getters[0]).call(m)
     !current.nil? && !current.blank?
   end
 

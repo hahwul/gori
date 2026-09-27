@@ -184,7 +184,7 @@ describe Gori::Import::Oas do
       JSON
     with_spec(body, ".json") do |path|
       result = Gori::Import::Oas.parse_file(path)
-      result.flows.map { |f| {f.request.method, f.request.host} }.sort.should eq(
+      result.flows.map { |f| {f.request.method, f.request.host} }.sort!.should eq(
         [{"GET", "a.test"}, {"GET", "b.test"}, {"POST", "c.test"}])
     end
   end
