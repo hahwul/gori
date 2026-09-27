@@ -252,6 +252,26 @@ describe "HistoryController — the active view under a peer" do
     end
   end
 
+  # `on_external_change` goes to the active tab only, so a clear while History was in the
+  # background has to be caught on the way back in.
+  it "drops a reused-id mark on returning to the tab" do
+    with_history_controller do |ctrl, _host, session|
+      ctrl.view.reload_handler = nil
+      peer = Gori::Store.open(session.project.db_path)
+      begin
+        old_id = add_peer_history_flow(peer, "/old", "old", 1_i64)
+        ctrl.view.reload(session.store)
+        ctrl.view.mark_all
+        peer.clear_flows.should be_true
+        add_peer_history_flow(peer, "/new", "new", 2_i64).should eq(old_id)
+        ctrl.on_enter
+        ctrl.view.marked?(old_id).should be_false
+      ensure
+        peer.close
+      end
+    end
+  end
+
   it "keeps marks on flows a peer change did not touch" do
     with_history_controller do |ctrl, _host, session|
       ctrl.view.reload_handler = nil
