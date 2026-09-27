@@ -1599,9 +1599,9 @@ module Gori
     # another PRUNE_INTERVAL inserts, simply tries again).
     #
     # The cutoff is the id of the OLDEST flow that SURVIVES, seeked from the rows that actually
-    # exist — deliberately not `MAX(id) - @retention_flows`. `flows.id` is monotonic but NOT
-    # gapless (`delete_flow`/`delete_flows` remove
-    # arbitrary mid-history ids from the History tab, MCP and `gori run history`), and that
+    # exist — deliberately not `MAX(id) - @retention_flows`. `flows.id` is monotonic (AUTOINCREMENT
+    # since V39) but NOT gapless (`delete_flow`/`delete_flows` remove arbitrary mid-history ids
+    # from the History tab, MCP and `gori run history`), and that
     # arithmetic is "the newest N" only on a gap-free space. With 10 flows of which 6
     # mid-history ones were hand-deleted (1, 2, 9, 10 survive) and 15 more captured, a cap of 20
     # computed `cutoff = 25 - 20 = 5` and destroyed flows 1 and 2 — out of 19 rows, under a cap

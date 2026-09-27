@@ -95,11 +95,14 @@ end
 # rowid clause), so `migrate!` has to take the rebuild. Same statement shape the edit itself uses,
 # DEFENSIVE lifted the same way (macOS's system SQLite has it on).
 private def force_rebuild(c : DB::Connection) : Nil
+  edit_flows_create(c, "INTEGER PRIMARY KEY", "INTEGER  PRIMARY KEY")
+end
+
+private def edit_flows_create(c : DB::Connection, from : String, to : String) : Nil
   c.as(SQLite3::Connection).gori_swap_defensive(false)
   cookie = c.scalar("PRAGMA schema_version").as(Int64)
   c.exec("PRAGMA writable_schema = ON")
-  c.exec("UPDATE sqlite_master SET sql = replace(sql, 'INTEGER PRIMARY KEY', 'INTEGER  PRIMARY KEY') " \
-         "WHERE type = 'table' AND name = 'flows'")
+  c.exec("UPDATE sqlite_master SET sql = replace(sql, ?, ?) WHERE type = 'table' AND name = 'flows'", from, to)
   c.exec("PRAGMA schema_version = #{cookie + 1}")
   c.exec("PRAGMA writable_schema = OFF")
 end
@@ -399,6 +402,106 @@ describe "Store::Schema V39 on an old project" do
           expect_raises(Gori::Error, /does not match the original/) { Gori::Store::Schema.verify_v39_copy(c) }
         end
       end
+    end
+  end
+end
+
+private def user_version(path : String) : Int64
+  DB.open("sqlite3:#{path}") { |db| db.scalar("PRAGMA user_version").as(Int64) }
+end
+
+private def raw_create_sql(path : String, name : String) : String?
+  DB.open("sqlite3:#{path}") do |db|
+    db.query_one?("SELECT sql FROM sqlite_master WHERE name = ?", name, as: String)
+  end
+end
+
+describe "Store::Schema V39 when a path fails part-way" do
+  # Eligible for the edit (one rowid clause, no AUTOINCREMENT), but `PRIMARY KEY AUTOINCREMENT
+  # ASC` does not parse: the UPDATE lands, the reparse after the cookie bump fails, and the
+  # savepoint has to put the old text back before the rebuild can run on it.
+  it "rolls a landed edit back and rebuilds when the edited text does not reparse" do
+    path = build_pre_v39 do |c|
+      plant_project(c)
+      edit_flows_create(c, "id                      INTEGER PRIMARY KEY,", "id                      INTEGER PRIMARY KEY ASC,")
+    end
+    begin
+      raw_create_sql(path, "flows").not_nil!.should contain("INTEGER PRIMARY KEY ASC,")
+      before = snapshot(path)
+      open_and(path) do |store|
+        store.@db.scalar("PRAGMA user_version").as(Int64).should eq(Gori::Store::Schema::VERSION.to_i64)
+        store.@db.scalar("PRAGMA integrity_check").as(String).should eq("ok")
+        store.insert_flow(request("/after")).should eq(61_i64)
+      end
+      # The rebuild's own CREATE (RENAME TO quotes the name), not the edited one.
+      sql = raw_create_sql(path, "flows").not_nil!
+      sql.should start_with(%(CREATE TABLE "flows"))
+      sql.should contain("INTEGER PRIMARY KEY AUTOINCREMENT,")
+      sql.should_not contain("ASC")
+      after = snapshot(path)
+      after.rows[0...before.rows.size].should eq(before.rows) # plus the one inserted above
+      after.fts.should eq(before.fts)
+      after.indexes.should eq(before.indexes)
+    ensure
+      cleanup(path)
+    end
+  end
+
+  # A copy that differs from its original must never be committed. `port` declared BLOB keeps a
+  # TEXT '443' as text; the rebuilt table's INTEGER column converts it to 443, and `'443' IS 443`
+  # is false — exactly the kind of silent rewrite the full-column check exists to catch.
+  it "leaves the project at v38 and intact when the copy does not verify" do
+    path = build_pre_v39 do |c|
+      plant_project(c)
+      edit_flows_create(c, "port                    INTEGER NOT NULL", "port                    BLOB    NOT NULL")
+      force_rebuild(c)
+      c.exec("UPDATE flows SET port = '443' WHERE id = 5")
+    end
+    begin
+      before = snapshot(path)
+      create_before = raw_create_sql(path, "flows")
+      expect_raises(Gori::Error, /does not match the original.*rows differ outside the bodies/) do
+        Gori::Store.open(path)
+      end
+      user_version(path).should eq(38_i64)
+      raw_create_sql(path, "flows").should eq(create_before)
+      raw_create_sql(path, "flows_v39").should be_nil
+      raw_create_sql(path, "h2_connections").not_nil!.should_not contain("AUTOINCREMENT")
+      snapshot(path).should eq(before)
+    ensure
+      cleanup(path)
+    end
+  end
+
+  it "says how much free space the rebuild needs when the disk fills" do
+    path = build_pre_v39 do |c|
+      plant_project(c)
+      c.exec("BEGIN")
+      (100_i64...400_i64).each { |id| plant_flow(c, id, "/fill/#{id}", "fill " * 800) }
+      c.exec("COMMIT")
+      force_rebuild(c)
+    end
+    begin
+      before = snapshot(path)
+      db = DB.open("sqlite3:#{path}?max_pool_size=1")
+      begin
+        db.using_connection do |c|
+          # A disk with room for a few more pages than the project already has.
+          c.exec("PRAGMA max_page_count = #{c.scalar("PRAGMA page_count").as(Int64) + 8}")
+        end
+        expect_raises(Gori::Error, /not enough free disk space.*about \d+ MB free/) do
+          Gori::Store::Schema.migrate!(db)
+        end
+      ensure
+        # `sqlite3_finalize` hands back the failed step's SQLITE_FULL once more when the cached
+        # statement is closed; `Store.open` closes a failed pool the same way (`rescue nil`).
+        db.close rescue nil
+      end
+      user_version(path).should eq(38_i64)
+      raw_create_sql(path, "flows_v39").should be_nil
+      snapshot(path).should eq(before)
+    ensure
+      cleanup(path)
     end
   end
 end

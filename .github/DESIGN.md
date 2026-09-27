@@ -4122,14 +4122,20 @@ defence in depth.
   the next rowid is picked, so `Schema.autoincrement_in_place` edits the stored CREATE text and
   bumps `schema_version`, the change SQLite documents for format-preserving edits. 2–7 ms at
   1 GB and at 3.4 GB. The V10-style rebuild that #552 measured and refused on open (16 s at
-  50k flows) is 4–5 s per GB under the write lock, and it leaves the file twice its size until
-  a compact, because the old table's pages go to the freelist.
+  50k flows) is 5–7 s per GB under the write lock with its verification, and it leaves the file
+  twice its size until a compact, because the old table's pages go to the freelist.
 - **The rebuild stays as the definition and the fallback.** V39's statements are the rebuild, so
   a bare connection replays one definition, and `migrate!` runs them whenever the edit is
-  refused or the CREATE text is not the one V1 wrote. The edit lifts
+  refused, the CREATE text is not the one V1 wrote, or the edited text does not reparse to the
+  same columns (the savepoint puts the old text back first). The edit lifts
   SQLITE_DBCONFIG_DEFENSIVE for its statements, because macOS's system libsqlite3 has it on and
-  refuses `writable_schema`. The fallback verifies its copy before any DROP (`verify_v39_copy`)
-  and rolls the whole upgrade back on a mismatch.
+  refuses `writable_schema`.
+- **The fallback proves its copy before any DROP.** `verify_v39_copy` compares every non-BLOB
+  column of every row, by value and storage class (`IS` alone compares under column affinity,
+  so a TEXT `'443'` equals the INTEGER a copy converted it to), plus BLOB lengths, sampled BLOB
+  bytes, the FTS rowids at both ends and every `h2_connections` row. A mismatch rolls the whole
+  upgrade back. A disk that fills during the copy is reported with the free space it needs
+  (about twice the project file), not as a bare SQLITE_FULL.
 - **Seeded past every reference, not `MAX(id)`.** `sqlite_sequence` starts above every column
   that can hold a flow id, the FTS rowids and the negated evidence sources, so an emptied table
   cannot hand a stranded reference its id back. V10's rule, applied to `flows`.

@@ -1595,7 +1595,7 @@ module Gori
       # These statements are the REBUILD, the V10 shape: new table, enumerated copy (never
       # `SELECT *`), drop, rename, every index recreated, then the seed — which must follow the
       # rename, because `sqlite_sequence` rows follow `RENAME TO` and the seed reads the table
-      # by its final name. Between the copy and the drop `migrate!` runs `verify_v39_copy`,
+      # by its final name. Between the copy and the drop `rebuild_v39` runs `verify_v39_copy`,
       # which a bare replay skips: it is there for tables with rows in them. The column order is
       # V1's with V2..V31's ADD COLUMNs appended, and it is kept exactly: everything after the
       # body BLOBs is an overflow-chain walk, and V31, V37 and V38 are built on that. No trigger
@@ -1680,7 +1680,7 @@ module Gori
       ]
 
       # Nothing here runs before `Schema.verify_v39_copy` has compared the copies with the
-      # originals (see `migrate!`): a DROP is the one statement that cannot be taken back.
+      # originals (see `rebuild_v39`): a DROP is the one statement that cannot be taken back.
       V39_SWAP = [
         "DROP TABLE flows",
         "ALTER TABLE flows_v39 RENAME TO flows",
@@ -1817,13 +1817,8 @@ module Gori
             conn.as(SQLite3::Connection).gori_install_scope_match if current < VERSION
             MIGRATIONS[current..]?.try &.each_with_index(offset: current) do |statements, idx|
               if statements.same?(V39)
-                if autoincrement_in_place(conn.as(SQLite3::Connection))
-                  statements = V39_SEED
-                else
-                  V39_COPY.each { |sql| conn.exec(sql) }
-                  verify_v39_copy(conn)
-                  statements = V39_SWAP + V39_SEED
-                end
+                rebuild_v39(conn) unless autoincrement_in_place(conn.as(SQLite3::Connection))
+                statements = V39_SEED
               end
               statements.each { |sql| conn.exec(sql) }
               BACKFILLS[idx + 1]?.try { |sql| conn.exec(sql) }
@@ -1897,6 +1892,30 @@ module Gori
                        "COALESCE(dflt_value, '-') || '|' || pk FROM pragma_table_info(?)", table, as: String)
       end
 
+      # V39's fallback: copy, verify, swap (see V39). It writes a second copy of the History
+      # table inside one transaction, so the WAL grows by the table's size and the file by as
+      # much again at the checkpoint. A disk that fills part-way answers SQLITE_FULL, which
+      # would otherwise reach the operator as "database or disk is full" with no hint that this
+      # open needs room for a one-time rebuild, or how much.
+      def self.rebuild_v39(conn : DB::Connection) : Nil
+        need = 2_i64 * conn.scalar("PRAGMA page_count").as(Int64) * conn.scalar("PRAGMA page_size").as(Int64)
+        begin
+          V39_COPY.each { |sql| conn.exec(sql) }
+          verify_v39_copy(conn)
+          V39_SWAP.each { |sql| conn.exec(sql) }
+        rescue ex : SQLite3::Exception
+          raise ex unless ex.code == LibSQLite3::Code::FULL.value
+          raise Gori::Error.new("not enough free disk space to upgrade this project: this gori rebuilds " \
+                                "its History table once, which needs about #{approx_size(need)} free " \
+                                "(twice the project file). Nothing was changed; free some space and open it again")
+        end
+      end
+
+      private def self.approx_size(bytes : Int64) : String
+        return "#{(bytes / 1_073_741_824).round(1)} GB" if bytes >= 1_073_741_824
+        "#{(bytes / 1_048_576).ceil.to_i} MB"
+      end
+
       private V39_BLOBS = {"request_head", "request_body", "response_head", "response_body"}
 
       # Compare V39's copies with the tables they replace, BEFORE either original is dropped, and
@@ -1905,16 +1924,23 @@ module Gori
       # table, and that is the one outcome of this migration nobody can undo.
       #
       # Whole-table: row count, lowest and highest id, and the summed length of every BLOB
-      # column (`length()` of a BLOB reads the record header, not the overflow chain, so this
-      # stays a leaf scan). Per row, for a sample: every column of the lowest, the highest and
-      # up to 64 random ids compared with `IS`. And the FTS rowids at both ends of the index
-      # must still name a row exactly where they named one before, since the contentless index
-      # is keyed by `flows.id` and is not copied at all.
+      # column (`length()` of a BLOB reads the record header, not the overflow chain). Every
+      # row: every non-BLOB column compared with `IS` — the columns after the BLOBs walk each
+      # overflow chain, which the fallback can afford, since it holds the write lock for
+      # seconds anyway. The body BYTES of the lowest, the highest and up to 64 random ids are
+      # compared too; the rest are checked by length. And the FTS rowids at both ends of the
+      # index must still name a row exactly where they named one before, since the contentless
+      # index is keyed by `flows.id` and is not copied at all.
       def self.verify_v39_copy(conn : DB::Connection) : Nil
         totals = "COUNT(*), MIN(id), MAX(id), " + V39_BLOBS.join(", ") { |c| "SUM(length(#{c}))" }
         before = conn.query_one("SELECT #{totals} FROM flows", as: {Int64, Int64?, Int64?, Int64?, Int64?, Int64?, Int64?})
         after = conn.query_one("SELECT #{totals} FROM flows_v39", as: {Int64, Int64?, Int64?, Int64?, Int64?, Int64?, Int64?})
         v39_copy_mismatch("flows totals #{before} became #{after}") unless before == after
+
+        plain = V39_FLOW_COLUMNS.split(", ").reject { |c| V39_BLOBS.includes?(c) }
+        same = plain.join(" AND ") { |c| v39_same(c) }
+        equal = conn.scalar("SELECT COUNT(*) FROM flows o JOIN flows_v39 n ON n.id = o.id WHERE #{same}").as(Int64)
+        v39_copy_mismatch("#{before[0] - equal} of #{before[0]} rows differ outside the bodies") unless equal == before[0]
 
         sample = [] of Int64
         conn.query("SELECT id FROM (SELECT id FROM flows ORDER BY random() LIMIT 64) " \
@@ -1922,10 +1948,10 @@ module Gori
           rs.each { rs.read(Int64?).try { |id| sample << id } }
         end
         unless sample.empty?
-          same = V39_FLOW_COLUMNS.split(", ").join(" AND ") { |c| "o.#{c} IS n.#{c}" }
+          bodies = V39_BLOBS.join(" AND ") { |c| v39_same(c) }
           equal = conn.scalar("SELECT COUNT(*) FROM flows o JOIN flows_v39 n ON n.id = o.id " \
-                              "WHERE o.id IN (#{sample.join(", ")}) AND #{same}").as(Int64)
-          v39_copy_mismatch("#{sample.size - equal} of #{sample.size} sampled rows differ") unless equal == sample.size
+                              "WHERE o.id IN (#{sample.join(", ")}) AND #{bodies}").as(Int64)
+          v39_copy_mismatch("#{sample.size - equal} of #{sample.size} sampled bodies differ") unless equal == sample.size
         end
 
         fts = [] of Int64
@@ -1938,10 +1964,21 @@ module Gori
           v39_copy_mismatch("search index entry #{id} resolved to #{was} row(s), now #{now}") unless was == now
         end
 
-        h2 = "SELECT COUNT(*), MIN(id), MAX(id) FROM "
-        h2_before = conn.query_one(h2 + "h2_connections", as: {Int64, Int64?, Int64?})
-        h2_after = conn.query_one(h2 + "h2_connections_v39", as: {Int64, Int64?, Int64?})
-        v39_copy_mismatch("h2_connections #{h2_before} became #{h2_after}") unless h2_before == h2_after
+        h2_count = conn.scalar("SELECT COUNT(*) FROM h2_connections").as(Int64)
+        h2_same = conn.scalar("SELECT COUNT(*) FROM h2_connections o JOIN h2_connections_v39 n ON n.id = o.id " \
+                              "WHERE o.created_at IS n.created_at AND o.host IS n.host AND o.port IS n.port " \
+                              "AND o.alpn IS n.alpn").as(Int64)
+        h2_copied = conn.scalar("SELECT COUNT(*) FROM h2_connections_v39").as(Int64)
+        unless h2_same == h2_count && h2_copied == h2_count
+          v39_copy_mismatch("h2_connections: #{h2_count} rows, #{h2_copied} copied, #{h2_same} identical")
+        end
+      end
+
+      # One column of `o` (the original) and `n` (the copy) holding the same value. `IS` alone
+      # compares under column affinity, so a TEXT '443' in a column the copy declares INTEGER
+      # reads as equal to the 443 the copy converted it to; the storage class has to match too.
+      private def self.v39_same(column : String) : String
+        "o.#{column} IS n.#{column} AND typeof(o.#{column}) = typeof(n.#{column})"
       end
 
       private def self.v39_copy_mismatch(what : String) : NoReturn
