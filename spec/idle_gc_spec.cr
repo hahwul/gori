@@ -105,9 +105,10 @@ describe "Gori::Store.write_ops" do
     t0 = Time.instant
     quiet = Gori::IdleGc::QUIET_FOR.total_seconds.to_i
     tunnel = Gori::IdleGc.new(t0, sample)
-    (1..quiet + 5).count { |sec|
+    moving = (1..quiet + 5).count do |sec|
       tunnel.tick(t0 + sec.seconds, Gori::IdleGc::Sample.new(0_u64, 200_u64 * MIB, 0_u64, 0_i64, sec.to_i64, 0))
-    }.should eq(0)
+    end
+    moving.should eq(0)
     streaming = Gori::IdleGc.new(t0, sample)
     busy = Gori::IdleGc::Sample.new(0_u64, 200_u64 * MIB, 0_u64, 0_i64, 0_i64, 1)
     run_quiet(streaming, t0, 1, quiet + 5, busy).should eq(0)
