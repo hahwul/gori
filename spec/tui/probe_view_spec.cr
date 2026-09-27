@@ -440,6 +440,32 @@ describe Gori::Tui::ProbeView do
       end
     end
 
+    # A MAX(last_seen) key missed any UPDATE whose stamp was not the table's newest: here one
+    # row carries a stamp from a clock running ahead, so a peer's dismiss of ANOTHER row, stamped
+    # with the real time, never raised the maximum and the list kept showing it open.
+    it "sees a peer's triage when another row is stamped ahead of this clock" do
+      path = File.tempname("gori-probeview-skew", ".db")
+      store = Gori::Store.open(path)
+      peer = Gori::Store.open(path)
+      begin
+        seed(store, "missing_hsts", "a.test")
+        seed(store, "missing_csp", "b.test")
+        future = Time.utc.to_unix * 1_000_000 + 3_600_000_000_i64
+        store.@db.exec("UPDATE probe_issues SET last_seen = ? WHERE code = 'missing_hsts'", future)
+        view = Gori::Tui::ProbeView.new
+        view.reload(store)
+        id = store.probe_issues.find!(&.code.==("missing_csp")).id
+        peer.update_probe_issue_status(id, Gori::Store::Status::FalsePositive)
+        view.issues_moved?(store, peers: true).should be_true
+      ensure
+        peer.close
+        store.close
+        File.delete?(path)
+        File.delete?("#{path}-wal")
+        File.delete?("#{path}-shm")
+      end
+    end
+
     # The one write the fingerprint does not see: a history clear nulling a finding's sample
     # flow. The detail re-reads its own row on every data_version tick (`reload_meta`), so it
     # still drops the dead link without a list reload.

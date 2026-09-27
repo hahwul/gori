@@ -327,14 +327,18 @@ module Gori
     #
     # Every write path moves at least one of the three: an insert adds a row and a new id, a
     # delete or a clear drops the count, and every UPDATE (re-hit, status change, bulk dismiss)
-    # stamps `last_seen` with the time of the write. The one write that moves none is
+    # stamps `last_seen` with the time of the write. The third is a SUM, not a MAX: a stamp that
+    # is not the table's newest — a peer whose `now_us` was taken before it waited on the write
+    # lock, or any row stamped ahead of this clock (an archive from a fast machine) — leaves the
+    # MAX where it was. Summed over the low 32 bits so 250k rows cannot overflow SQLite's
+    # integer SUM (which raises rather than wraps). The one write that moves none is
     # `detach_flow_refs` nulling a `sample_flow_id` — a reader that acts on a sample flow reads
     # the row fresh (`get_probe_issue`) rather than trusting a listed copy.
     #
     # Served from `idx_probe_issues_triage` as a covering scan, so it never walks the `affected`
     # overflow pages: ~0.2 ms at 5k findings.
     def probe_issues_fingerprint : {Int64, Int64, Int64}
-      @db.query_one("SELECT COUNT(*), COALESCE(MAX(id), 0), COALESCE(MAX(last_seen), 0) FROM probe_issues",
+      @db.query_one("SELECT COUNT(*), COALESCE(MAX(id), 0), COALESCE(SUM(last_seen & 4294967295), 0) FROM probe_issues",
         as: {Int64, Int64, Int64})
     rescue
       {-1_i64, -1_i64, -1_i64} # unreadable: differs from every real key, so a reader re-reads
