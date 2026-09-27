@@ -47,16 +47,16 @@ module Gori
         # a false-positive magnet. An unquoted boolean (`"showPassword": false`) never matches the
         # `"…"` value; quoted UI-state values are screened while the scan CONTINUES, so an earlier
         # `"showPassword":"false"` cannot hide a later real `"password":"…"` member.
-        JSON_CREDENTIAL = /"([A-Za-z0-9_.\[\]-]*(?:password|passwd|pwd)|pass|passphrase|client[_-]?secret|secret|api[_-]?(?:key|secret))"\s*:\s*"((?:[^"\\]|\\.)+)"/i
+        JSON_CREDENTIAL = Utf8.tolerant(/"([A-Za-z0-9_.\[\]-]*(?:password|passwd|pwd)|pass|passphrase|client[_-]?secret|secret|api[_-]?(?:key|secret))"\s*:\s*"((?:[^"\\]|\\.)+)"/i)
 
         # `<input … type=password>`. The negative lookbehind is the same one the neighbouring HTML
         # scans use: without it a `data-type="password"` attribute matches, because `\b` treats the
         # hyphen as a boundary.
-        PASSWORD_INPUT = /<input\b[^>]*(?<![-\w])type\s*=\s*["']?password\b/i
+        PASSWORD_INPUT = Utf8.tolerant(/<input\b[^>]*(?<![-\w])type\s*=\s*["']?password\b/i)
         # Cheap necessary-condition gate for it, a REGEX for the reason `body_leaks` documents at
         # length: PCRE2 memchr-skips a literal where `String#includes?` walks every offset, and
         # PASSWORD_INPUT itself opens on `<input`, which a form-heavy page carries everywhere.
-        PASSWORD_GATE = /password/i
+        PASSWORD_GATE = Utf8.tolerant(/password/i)
 
         def check(ctx : Context, acc : Array(Detection)) : Nil
           return unless ctx.scheme == "http"

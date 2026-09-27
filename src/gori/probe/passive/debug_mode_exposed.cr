@@ -40,7 +40,7 @@ module Gori
         # LITERAL REGEX (~19µs, not an `includes?`) only where the confirming pattern genuinely
         # cannot anchor itself — today just the Rails web-console alternation, which opens on
         # `<[^>]+` and costs ~178µs unguarded.
-        SIGNATURES = [
+        SIGNATURES = ([
           # Werkzeug/Flask interactive debugger — a live Python console (RCE if the PIN is off or
           # brute-forced). The title string is emitted only by the debugger page.
           {nil,
@@ -79,7 +79,7 @@ module Gori
           {nil,
            /Extracted source \(around line/,
            "Rails development error page", Store::Severity::Medium},
-        ] of {Regex?, Regex, String, Store::Severity}
+        ] of {Regex?, Regex, String, Store::Severity}).map { |(prefilter, pattern, label, severity)| {Utf8.tolerant(prefilter), Utf8.tolerant(pattern), label, severity} }
 
         def check(ctx : Context, acc : Array(Detection)) : Nil
           return unless ctx.response
@@ -121,8 +121,10 @@ module Gori
         # naive scan (~85µs) in front of a ~22µs one. The two `includes?` below it stay: they are
         # reached only once the banner has ALREADY matched, i.e. on an actual ASP.NET error page,
         # so they cost nothing on the ordinary responses this rule spends its time on.
+        ASPNET_BANNER = Utf8.tolerant(/Server Error in '[^']*' Application/)
+
         private def check_aspnet(ctx : Context, acc : Array(Detection), text : String) : Nil
-          return unless /Server Error in '[^']*' Application/.matches?(text)
+          return unless ASPNET_BANNER.matches?(text)
           return unless text.includes?("Stack Trace:")
           return if text.includes?("prevent the details of the application error from being viewed")
           acc << det(ctx, "ASP.NET detailed error page", Store::Severity::Medium)

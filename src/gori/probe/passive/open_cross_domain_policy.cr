@@ -23,13 +23,13 @@ module Gori
 
         # Prefilter: the policy root element. An ordinary XML/HTML body never carries it, so the
         # wildcard scan is skipped for essentially all traffic.
-        ROOT = /<(?:cross-domain-policy|access-policy)\b/i
+        ROOT = Utf8.tolerant(/<(?:cross-domain-policy|access-policy)\b/i)
 
         # A wildcard grant in either dialect: Flash `<allow-access-from domain="*">` /
         # `<allow-http-request-headers-from domain="*">`, or Silverlight `<domain uri="*">`. The
         # value must be exactly `*` (closing quote right after), so a `domain="*.example.com"`
         # subdomain grant is not read as fully open.
-        WILDCARD = /<(?:allow-access-from|allow-http-request-headers-from)\b[^>]*\bdomain\s*=\s*["']\*["']|<domain\b[^>]*\buri\s*=\s*["']\*["']/i
+        WILDCARD = Utf8.tolerant(/<(?:allow-access-from|allow-http-request-headers-from)\b[^>]*\bdomain\s*=\s*["']\*["']|<domain\b[^>]*\buri\s*=\s*["']\*["']/i)
 
         def check(ctx : Context, acc : Array(Detection)) : Nil
           return unless ctx.response

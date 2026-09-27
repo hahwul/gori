@@ -53,7 +53,7 @@ module Gori
         # in a script or a second form while the input that actually carries the blob is
         # `__VIEWSTATE`, and a whole-body test then labels the ASP.NET finding as JSF.
         VIEWSTATE_INPUT =
-          /<input\b(?=[^>]*\bname\s*=\s*["'](__VIEWSTATE|javax\.faces\.ViewState)["'])[^>]*\bvalue\s*=\s*["']([^"']*)["']/i
+          Utf8.tolerant(/<input\b(?=[^>]*\bname\s*=\s*["'](__VIEWSTATE|javax\.faces\.ViewState)["'])[^>]*\bvalue\s*=\s*["']([^"']*)["']/i)
 
         # Cheap gate in front of VIEWSTATE_INPUT, whose `<input\b(?=…` opening gives PCRE no
         # literal to skip on. It is a REGEX, not the pair of `String#includes?("VIEWSTATE")` /
@@ -69,7 +69,7 @@ module Gori
         # page would then pay a whole-body `scan(VIEWSTATE_INPUT)`, whose `[^>]*`+`\bvalue`
         # backtracks per `<input` tag. Naming the fields keeps the /i widening (the lowercase
         # field is still caught) without opening the gate onto ordinary SPA bundles.
-        VIEWSTATE_MARKER = /__VIEWSTATE|javax\.faces\.ViewState/i
+        VIEWSTATE_MARKER = Utf8.tolerant(/__VIEWSTATE|javax\.faces\.ViewState/i)
 
         def check(ctx : Context, acc : Array(Detection)) : Nil
           # evidence => severity, deduped within the flow (a cookie echoed in both the request

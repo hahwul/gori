@@ -67,7 +67,7 @@ module Gori
            ["vercel.app", "vercel.com", "now.sh"], Store::Severity::Medium},
           {/Whatever you were looking for doesn[’']t currently exist at this address/, "unclaimed Tumblr blog",
            ["tumblr.com"], Store::Severity::Medium},
-        ]
+        ].map { |(marker, label, suffixes, severity)| {Utf8.tolerant(marker), label, suffixes, severity} }
 
         # One alternation pass instead of ten on the miss — and the miss is every ordinary 404,
         # which is the volume this rule actually sees. Each branch is the shortest literal that
@@ -75,7 +75,7 @@ module Gori
         # the second stage runs on almost nothing. Same two-stage shape as `sourcemap`/`exposed_config`;
         # the gate is a REGEX rather than a chain of `String#includes?` for the reason spelled out
         # there — PCRE2 memchr-skips a literal where `includes?` walks every offset.
-        NEEDLE = /NoSuchBucket|GitHub Pages site here|no-such-app\.html|know of the site which you seek|shop is currently unavailable|Fastly error: unknown domain|Web [Ss]ite not found|Web app not found|Help Center Closed|DEPLOYMENT_NOT_FOUND|currently exist at this address/
+        NEEDLE = Utf8.tolerant(/NoSuchBucket|GitHub Pages site here|no-such-app\.html|know of the site which you seek|shop is currently unavailable|Fastly error: unknown domain|Web [Ss]ite not found|Web app not found|Help Center Closed|DEPLOYMENT_NOT_FOUND|currently exist at this address/)
 
         def check(ctx : Context, acc : Array(Detection)) : Nil
           return unless resp = ctx.response

@@ -24,17 +24,17 @@ module Gori
 
         # Assignment into a prototype key, dot or (possibly quoted) bracket form, plus the
         # deep-merge/assign APIs most commonly behind real CVEs.
-        SINK_PATTERNS = [
+        SINK_PATTERNS = ([
           {/\.__proto__\s*=(?!=)/, "__proto__ assignment"},
           {/\[\s*["'`]__proto__["'`]\s*\]\s*=(?!=)/, "__proto__ key assignment"},
           {/\bconstructor\s*\.\s*prototype\s*\[/, "constructor.prototype[] write"},
           {/\bObject\s*\.\s*prototype\s*\[/, "Object.prototype[] write"},
           {/\$\s*\.\s*extend\s*\(\s*true\b/, "$.extend(true) deep merge"},
           {/\b_\s*\.\s*(?:merge|mergeWith|defaultsDeep|set|setWith)\s*\(/, "lodash deep merge/set"},
-        ] of {Regex, String}
+        ] of {Regex, String}).map { |(re, label)| {Utf8.tolerant(re), label} }
 
         # A prototype key inside a request body region (urlencoded / JSON / bracketed).
-        REQ_BODY_PROTO = /(?:["'\[]\s*__proto__|__proto__\s*[\]"':=]|constructor(?:\[|%5[Bb]).{0,12}prototype)/i
+        REQ_BODY_PROTO = Utf8.tolerant(/(?:["'\[]\s*__proto__|__proto__\s*[\]"':=]|constructor(?:\[|%5[Bb]).{0,12}prototype)/i)
 
         # Every alternative of REQ_BODY_PROTO needs one of these two literals, so their absence
         # from the body is proof the pattern cannot match. Lowercase because the pattern is /i and

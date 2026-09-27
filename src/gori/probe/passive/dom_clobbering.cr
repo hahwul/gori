@@ -26,7 +26,7 @@ module Gori
         # fired on ubiquitous benign iteration like `document.images[0]`. Runs over stripped
         # client_code, which blanks a string's contents but KEEPS its opening quote, so the
         # quoted form still matches post-strip (`document.forms['x']` → `document.forms['']`).
-        NAMED_COLLECTION = /\bdocument\.(?:forms|images|embeds|links|anchors|scripts|applets|all)\s*(?:\[\s*["'`]|\.namedItem\b)/
+        NAMED_COLLECTION = Utf8.tolerant(/\bdocument\.(?:forms|images|embeds|links|anchors|scripts|applets|all)\s*(?:\[\s*["'`]|\.namedItem\b)/)
         # `window.foo = window.foo || "…"` — reads a global back before defining it; a clobbering
         # element with that id/name can have already set it. Backreference pins both sides.
         #
@@ -43,7 +43,7 @@ module Gori
         # of them with an element breaks the page loudly instead of exploiting it. Runs over
         # stripped client_code, which blanks a string's CONTENTS but keeps its opening quote,
         # so the string-literal form still matches post-strip.
-        CLOBBER_GUARD = /\bwindow\.([A-Za-z_$][\w$]*)\s*=\s*window\.\1\s*\|\|\s*["'`]/
+        CLOBBER_GUARD = Utf8.tolerant(/\bwindow\.([A-Za-z_$][\w$]*)\s*=\s*window\.\1\s*\|\|\s*["'`]/)
 
         def check(ctx : Context, acc : Array(Detection)) : Nil
           scripts = ctx.client_code

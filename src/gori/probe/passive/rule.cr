@@ -1,5 +1,6 @@
 require "../issue"
 require "./context"
+require "../../utf8"
 
 module Gori
   module Probe

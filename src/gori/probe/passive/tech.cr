@@ -220,14 +220,14 @@ module Gori
         # for prototype-pollution / clobbering findings). Info, and each doubles as a project
         # tech fact via FIXED_TECH_LABELS. Nuxt implies Vue and Next implies React by design —
         # both are reported when both markers are present.
-        FRAMEWORK_MARKERS = [
+        FRAMEWORK_MARKERS = ([
           {/\bdata-reactroot\b|__REACT_DEVTOOLS_GLOBAL_HOOK__|\breact-dom(?:[.-][\w.]*)?\.js\b/, "tech_react", "React", false},
           {/\b__NEXT_DATA__\b|\/_next\/static\//, "tech_nextjs", "Next.js", false},
           {/\bwindow\.__NUXT__\b|\/_nuxt\//, "tech_nuxt", "Nuxt", false},
           {/\bdata-v-[0-9a-f]{6,10}\b|\b__VUE__\b|\bVue\.createApp\b/, "tech_vue", "Vue", false},
           {/\bng-version\s*=\s*"([^"]+)"|\bng-app\b|\[ng-version\]/, "tech_angular", "Angular", true},
           {/\bjquery[-.](\d+\.\d+(?:\.\d+)?)(?:\.min)?\.js\b|\bjQuery\.fn\.jquery\b|\/jquery(?:\.min)?\.js\b/, "tech_jquery", "jQuery", true},
-        ] of {Regex, String, String, Bool}
+        ] of {Regex, String, String, Bool}).map { |(re, code, label, has_version)| {Utf8.tolerant(re), code, label, has_version} }
 
         private def check_frameworks(ctx : Context, acc : Array(Detection)) : Nil
           return unless ctx.html? || ctx.js?
