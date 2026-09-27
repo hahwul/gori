@@ -273,6 +273,29 @@ describe "Store::Schema V40 (AUTOINCREMENT on eight tables)" do
   end
 
   # One table whose CREATE text gori did not write does not cost the others their in-place edit.
+  # A CREATE text gori did not write must never be edited in place: here the only uppercase
+  # rowid phrase sits inside a CHECK, where a blind edit would break every row.
+  it "rebuilds a crafted CREATE text instead of editing inside it" do
+    path = build_pre_v40 do |c|
+      TABLES.each { |t| plant_rows(c, t) }
+      plant_crafted_create(c, "scope_rules")
+      c.scalar("PRAGMA integrity_check").as(String).should eq("ok")
+    end
+    begin
+      before = snapshot_file(path, "scope_rules")[0]
+      open_and(path) do |store|
+        store.@db.scalar("PRAGMA integrity_check").as(String).should eq("ok")
+        create_sql(store, "scope_rules").should contain("INTEGER PRIMARY KEY AUTOINCREMENT")
+        create_sql(store, "scope_rules").starts_with?(%(CREATE TABLE "scope_rules")).should be_true # rebuilt
+        create_sql(store, "issues").starts_with?(%(CREATE TABLE "issues")).should be_false          # others in place
+      end
+      snapshot_file(path, "scope_rules")[0].should eq(before)
+      open_and(path) { |store| delete_newest_then_insert(store, "scope_rules").should eq(5_i64) }
+    ensure
+      cleanup(path)
+    end
+  end
+
   it "rebuilds only the tables it cannot edit in place" do
     path = build_pre_v40 do |c|
       TABLES.each { |t| plant_rows(c, t) }

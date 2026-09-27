@@ -229,6 +229,27 @@ describe "Store::Schema V39" do
     end
   end
 
+  # The phrase the edit replaces sits only inside a CHECK here, with the real rowid clause in
+  # lowercase: editing in place would fail every flow against its own CHECK.
+  it "rebuilds a crafted History CREATE text instead of editing inside it" do
+    path = build_pre_v39 do |c|
+      plant_project(c)
+      plant_crafted_create(c, "flows")
+      Gori::Store::Schema.in_place_eligible?(c, "flows").should be_false
+    end
+    begin
+      open_and(path) do |store|
+        store.@db.scalar("PRAGMA integrity_check").as(String).should eq("ok")
+        create_sql(store, "flows").should contain("INTEGER PRIMARY KEY AUTOINCREMENT")
+        store.flow_rows([1_i64, 5_i64, 9_i64]).map { |r| {r.id, r.target} }.sort!
+          .should eq([{1_i64, "/one"}, {5_i64, "/five"}, {9_i64, "/nine"}])
+        store.search(Gori::QL.parse("body:bravo-body"), 10).map(&.id).should eq([5_i64])
+      end
+    ensure
+      cleanup(path)
+    end
+  end
+
   it "refuses the in-place edit on a CREATE text it was not written for, changing nothing" do
     path = build_pre_v39 { |c| plant_project(c); force_rebuild(c) }
     begin

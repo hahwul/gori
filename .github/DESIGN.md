@@ -4159,10 +4159,15 @@ the deleted rule's suppressions and dismissed rows. `add_retest_step` with a wip
 passed the gone-issue guard. V40 does all eight in one migration.
 
 - **In place per table, rebuilt where it must be.** `migrate_v40` hands every eligible table to
-  V39's `autoincrement_in_place`, now given a table list, in one edit: the same eligibility check
-  (one rowid clause, no AUTOINCREMENT yet), savepoint, cookie read-back and column-shape check.
-  An ADD COLUMN appends to the stored CREATE text and leaves the rowid clause alone, so every
-  table any gori wrote is eligible. A table that is not, or all eight when SQLite refuses the
+  V39's `autoincrement_in_place`, now given a table list, in one edit: the same savepoint, cookie
+  read-back and column-shape check. The edit is a blind `replace()` of the rowid phrase, so
+  eligibility (V39's too) is anchored to what gori writes: the first column is
+  `id INTEGER PRIMARY KEY`, the phrase appears once in any case or spacing, and the text has no
+  AUTOINCREMENT, CHECK, GENERATED or comment. A crafted archive with the real clause lowercased
+  and the phrase inside a CHECK would otherwise have the edit land in the CHECK and fail every
+  row. As a second guard, `PRAGMA quick_check` must pass on each edited table before the
+  savepoint is released. An ADD COLUMN appends a plain declaration and leaves the rowid clause
+  alone, so every table any gori wrote is eligible. A table that is not, or all eight when SQLite refuses the
   edit, takes the V10-shaped rebuild, which V40's statements spell and a bare replay runs.
   `Schema::TableRebuild` spells each table once and derives the copy, the swap and the seed.
   One table that must be rebuilt does not cost the others their edit. On a 466 MiB project with
