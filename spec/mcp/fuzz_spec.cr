@@ -1107,6 +1107,7 @@ describe "MCP fuzz tools" do
       own_ref.should start_with("#{job_id}@")
 
       store.clear_flows.should be_true
+      reissue_rowids(store)
       # What the other process writes: the same job id and sequence, its own nonce.
       foreign = own_ref.sub(/@[0-9a-f]+:/, "@000000:")
       store.insert_flow(Gori::Store::CapturedRequest.new(
@@ -1136,6 +1137,7 @@ describe "MCP fuzz tools" do
       next_ref = "#{job_id}:#{original_ref.split(':').last.to_i + 1}"
 
       store.clear_flows.should be_true
+      reissue_rowids(store)
       reused_id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: Time.utc.to_unix_ms * 1000_i64, scheme: "http", host: "ref.test", port: 80,
         method: "GET", target: "/same-job-result", http_version: "HTTP/1.1",
@@ -1149,6 +1151,7 @@ describe "MCP fuzz tools" do
       result["flow_id"]?.should be_nil
 
       store.clear_flows.should be_true
+      reissue_rowids(store)
       reused_id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: Time.utc.to_unix_ms * 1000_i64, scheme: "http", host: "ref.test", port: 80,
         method: "GET", target: "/unrelated", http_version: "HTTP/1.1",

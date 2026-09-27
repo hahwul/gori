@@ -166,8 +166,8 @@ describe ParamsController do
     end
   end
 
-  # A History clear restarts flow ids: the scan's ids then name whatever was captured next,
-  # and ↵ / Mine must refuse rather than open or seed that unrelated request.
+  # A History clear restarted flow ids before V39: the scan's ids then named whatever was
+  # captured next, and ↵ / Mine must still refuse rather than open or seed that request.
   it "refuses a row whose flow id now names another request" do
     with_params_controller do |ctl, _, session|
       seed_params_flow(session.store, "https://acme.test/search?q=shoes")
@@ -177,6 +177,7 @@ describe ParamsController do
       ctl.carrying_flow_id(row).should eq(row.last_flow_id)
       session.store.clear_flows.should be_true
       ctl.carrying_flow_id(row).should be_nil # pruned
+      reissue_rowids(session.store)
       seed_params_flow(session.store, "https://other.test/admin?role=1")
       session.store.flow_row(row.last_flow_id).should_not be_nil # the id was reused
       ctl.carrying_flow_id(row).should be_nil

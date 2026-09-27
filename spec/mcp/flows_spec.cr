@@ -32,7 +32,7 @@ describe Gori::MCP::Server do
       end
     end
 
-    # `flows.id` is a REUSABLE rowid, so a clear restarts numbering and a forward cursor held
+    # `flows.id` was a REUSABLE rowid until V39, so a clear restarted numbering and a forward cursor held
     # from before it is permanently ahead of every row. `since` then returned `[]` forever
     # while the rows sat right there — "no new flows" and "your cursor is stranded" were the
     # same answer, and an agent polling this feed simply went blind.
@@ -40,6 +40,7 @@ describe Gori::MCP::Server do
       with_store do |store|
         3.times { |i| mcp_seed_flow(store, "h.test", "GET", "/p#{i}", 200) }
         store.clear_flows
+        reissue_rowids(store)
         fresh = mcp_seed_flow(store, "h.test", "GET", "/after-clear", 200)
         fresh.should eq(1) # ids really do restart — that is what strands the cursor
 
@@ -402,8 +403,9 @@ describe Gori::MCP::Server do
         page.call(tools, old_id, 0_i64)["text"].as_s.should start_with("OLD OLD")
         # Deleted OUTSIDE this Tools (the TUI, another agent): nothing clears the memo.
         store.delete_flow(old_id).should be_true
+        reissue_rowids(store)
         new_id = mcp_seed_flow(store, "ex.test", "GET", "/new", 200, resp_head: head, resp_body: gzip_bytes("NEW " * 1000))
-        new_id.should eq(old_id) # INTEGER PRIMARY KEY without AUTOINCREMENT reuses the max id
+        new_id.should eq(old_id) # the pre-V39 allocator, handing the max id out again
         page.call(tools, new_id, 1000_i64)["text"].as_s.should start_with("NEW NEW")
       end
     end

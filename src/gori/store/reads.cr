@@ -582,10 +582,10 @@ module Gori
         c.exec("DELETE FROM flows")
         c.exec("DELETE FROM h2_frames")
         # The `h2_connections` rows stay, as they do on an explicit delete (`delete_flow_set`):
-        # a browser's h2 connections outlive the clear and keep logging, and with the table
-        # emptied the next connection reused id 1 — an INTEGER PRIMARY KEY without AUTOINCREMENT
-        # — and shared its frame log with the still-open one. The retention sweep's
-        # activity-gated reap drops each row once its connection goes quiet.
+        # a browser's h2 connections outlive the clear and keep logging, and before V39 (no
+        # AUTOINCREMENT) the table emptied here handed the next connection id 1, which shared its
+        # frame log with the still-open one. The retention sweep's activity-gated reap drops each
+        # row once its connection goes quiet.
         # No index backlog bookkeeping to undo: a pending re-index is the row's own
         # `fts_dirty` flag, so deleting the rows deletes the backlog with them.
         nil
@@ -620,9 +620,9 @@ module Gori
       # is gone).
       #
       # The `h2_connections` row itself stays, for the retention sweep's activity-gated reap.
-      # Its id is an INTEGER PRIMARY KEY without AUTOINCREMENT, and the connection may still be
-      # open and logging: dropping the row here let the next connection reuse its id and inherit
-      # every frame (and flow) the live one wrote afterwards.
+      # The connection may still be open and logging, and before V39 (no AUTOINCREMENT) dropping
+      # the row here let the next connection reuse its id and inherit every frame (and flow) the
+      # live one wrote afterwards.
       #
       # `NOT EXISTS` is a seek on idx_flows_h2_conn; the `? NOT IN (SELECT h2_conn_id …)` it
       # replaces built the whole column into an ephemeral table twice per connection. Same
@@ -651,8 +651,8 @@ module Gori
     # delete them beside this call — and so do the two retention sweeps (`Store#prune`,
     # `prune_old_flows`), which never reach this method.
     #
-    # `flows.id` is a plain `INTEGER PRIMARY KEY`, i.e. the rowid, which SQLite REUSES: delete
-    # the newest flow (or clear the project) and the next capture is handed the same id. These
+    # Until V39 `flows.id` was a plain `INTEGER PRIMARY KEY`, i.e. the rowid, which SQLite REUSES:
+    # delete the newest flow (or clear the project) and the next capture was handed the same id. These
     # columns were deliberately left dangling on the assumption that they would resolve to
     # "gone" — they do not, they re-point at whatever traffic takes the id next. Measured: a
     # probe finding promoted to an Issue after a clear cited a flow captured afterwards, and
@@ -664,10 +664,10 @@ module Gori
     # `entity_links` is DELETED rather than kept-and-marked-stale (`links.cr` renders a
     # dangling ref as `(stale)`, which reads better) for the same reason: while ids are
     # reusable, a kept pointer re-binds, and re-binding is strictly worse than losing the
-    # pointer. Marking stale becomes the right answer only once ids are monotonic — which
-    # needs a `flows` table rebuild, measured at 16.1 s on a 50k-flow project against a 5 s
-    # `busy_timeout`, i.e. a hard `database is locked` for every other gori process. That
-    # belongs in an opt-in maintenance command, not on open.
+    # pointer. Marking stale becomes the right answer once ids are monotonic, which V39 made
+    # them — by an in-place schema edit, not the table rebuild this comment once measured at
+    # 16.1 s and refused on open. Moving `entity_links` to kept-and-stale is its own change;
+    # until then the delete stays, and so does the NULLing, as defence in depth.
     #
     # `issue_retest_run_steps.flow_id` is nullable, so a saved result loses only its live link;
     # the result row, verdict and copied observation stay intact. `issue_evidence.source_id` is
@@ -681,7 +681,7 @@ module Gori
     # `probe_oast_probes` belongs here even though nothing READS its `flow_id` for display: it
     # COPIES it into a new finding. An outstanding out-of-band probe deliberately outlives the
     # scan that planted it (that is the whole point of the table), so a `history clear` leaves the
-    # row while resetting the rowid counter — and when the payload finally calls home,
+    # row while (before V39) resetting the rowid counter — and when the payload finally calls home,
     # `Probe::OutOfBand.detection_for` passes `p.flow_id` into the `Detection`, which
     # `upsert_probe_issue` writes as `probe_issues.sample_flow_id`. So the very failure the note
     # above records as MEASURED — "a probe finding promoted to an Issue after a clear cited a flow

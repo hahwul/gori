@@ -232,6 +232,16 @@ def with_store(&)
   end
 end
 
+# Hand `table`'s next insert the id `max(id)+1` again, the way every capture was allocated
+# before V39. `flows` and `h2_connections` are AUTOINCREMENT now, so an id is never issued twice
+# — but the guards #1342 put in each consumer of a flow id stay, as defence in depth, and a spec
+# that proves one needs a reused id to prove it against. With no `sqlite_sequence` row SQLite
+# falls back to the largest rowid, so call this after the delete and before the insert that
+# should take the id back.
+def reissue_rowids(store : Gori::Store, table : String = "flows") : Nil
+  store.@db.exec("DELETE FROM sqlite_sequence WHERE name = ?", table)
+end
+
 # `with_store` for an example that writes the project env or bindings layer: the
 # process-global `Settings.project_env_vars` and `Env.layer` are put back on the way out
 # and the highlight revision bumped, so a `$KEY` an example set cannot leak into the next

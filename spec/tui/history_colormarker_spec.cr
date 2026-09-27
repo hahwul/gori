@@ -243,7 +243,7 @@ describe "History — Colormarker row marks" do
     end
   end
 
-  # `flows.id` is a REUSABLE rowid, so a delete is the one event after which a memo keyed by it
+  # `flows.id` was a REUSABLE rowid until V39, so a delete was the one event after which a memo keyed by it
   # can be asked about a DIFFERENT flow — and the colour memo is keyed by the BARE id, with no
   # `{created_at, state}` near-miss to fall back on. Delete the only flow, capture one more, and
   # the new row was painted by a rule it does not match.
@@ -261,6 +261,7 @@ describe "History — Colormarker row marks" do
         painted.grid[3][1].should eq('█') # the premise: the swatch is drawn and memoised
 
         view.delete_ids(store, [id]).should be_true
+        reissue_rowids(store)
         add_flow(store, host: "good.test").should eq(id) # the rowid really is handed out again
         view.reload(store)
         after = MemoryBackend.new(80, 12)
@@ -282,6 +283,7 @@ describe "History — Colormarker row marks" do
       first.contains?("/deleted-secret").should be_true # the premise: it is drawn and memoised
 
       view.delete_ids(store, [id]).should be_true
+      reissue_rowids(store)
       add_flow(store, target: "/brand-new").should eq(id)
       view.reload(store)
       after = MemoryBackend.new(120, 12)
@@ -291,7 +293,7 @@ describe "History — Colormarker row marks" do
     end
   end
 
-  # `clear` is the sharper case: it RESTARTS rowid numbering, so the next capture is id 1 —
+  # `clear` is the sharper case: before V39 it RESTARTED rowid numbering, so the next capture is id 1 —
   # which is the id the memo is most likely to still be holding an answer for.
   it "does not paint the first flow after a clear with the wiped flow's colour" do
     with_globals do
@@ -305,6 +307,7 @@ describe "History — Colormarker row marks" do
         view.render_list(Screen.new(MemoryBackend.new(80, 12)), Rect.new(0, 0, 80, 12))
 
         view.clear(store).should be_true
+        reissue_rowids(store)
         add_flow(store, host: "good.test", target: "/brand-new").should eq(1_i64)
         view.reload(store)
         after = MemoryBackend.new(120, 12)

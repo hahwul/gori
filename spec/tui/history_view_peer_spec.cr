@@ -199,6 +199,7 @@ describe "HistoryController — the active view under a peer" do
         before.grid[3][1].should eq('█')
 
         peer.clear_flows.should be_true
+        reissue_rowids(peer)
         add_peer_history_flow(peer, "/new", "new-secret", 2_i64).should eq(old_id)
         session.store.flow_row(old_id).not_nil!.target.should eq("/new")
         ctrl.on_external_change
@@ -233,6 +234,7 @@ describe "HistoryController — the active view under a peer" do
         ctrl.view.refresh_preview(session.store)
 
         peer.clear_flows.should be_true
+        reissue_rowids(peer)
         add_peer_history_flow(peer, "/new", "new-body-marker", 2_i64).should eq(old_id)
         ctrl.on_external_change
         ctrl.view.reload(session.store)
@@ -263,6 +265,7 @@ describe "HistoryController — the active view under a peer" do
         ctrl.view.reload(session.store)
         ctrl.view.mark_all
         peer.clear_flows.should be_true
+        reissue_rowids(peer)
         add_peer_history_flow(peer, "/new", "new", 2_i64).should eq(old_id)
         ctrl.on_enter
         ctrl.view.marked?(old_id).should be_false
