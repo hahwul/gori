@@ -139,7 +139,8 @@ module Gori::Tui
       # after a peer clears History the next capture takes id 1 again — and a bare id mark moved
       # onto it, where Delete would destroy a flow nobody marked. See `prune_reused_marks`.
       @mark_stamps = {} of Int64 => Int64
-      @mark_anchor = nil.as(Int64?) # id-keyed range anchor for the ⇧arrow extend
+      @marks_seen_max = nil.as(Int64?) # `prune_reused_marks`' last MAX(id)
+      @mark_anchor = nil.as(Int64?)    # id-keyed range anchor for the ⇧arrow extend
       # Ids the CURRENT ⇧arrow gesture added, so shrinking the range gives them back — a GUI
       # shift+click shrinks the selection, where a plain union would only ever grow. Scoped to
       # the gesture, so marks made by `t`/⇧T outside the range are never disturbed. Cleared
@@ -770,6 +771,8 @@ module Gori::Tui
     # Load flows applying the Scope lens AND the QL query. store.search returns
     # newest-first (ORDER BY id DESC); reverse when the layout pref is oldest-first.
     def reload(store : Store) : Nil
+      # The first baseline for `prune_reused_marks`' MAX(id) comparison; later ones are its own.
+      @marks_seen_max ||= store.max_flow_id || 0_i64
       if handler = @reload_handler
         handler.call(store)
       elsif request = prepare_search(store)
@@ -1385,10 +1388,18 @@ module Gori::Tui
     end
 
     # Drop every mark whose flow is gone or is now a DIFFERENT flow under the same id — the
-    # peer-change check (`HistoryController#on_external_change`). One batched read of the marked
-    # rows, and only while something is marked.
-    def prune_reused_marks(store : Store) : Nil
+    # peer-change check (`HistoryController#on_external_change`, and `on_enter` with
+    # `full: true`). An id is reused only after `MAX(id)` fell below it (no AUTOINCREMENT), so a
+    # tick reads that one index end and pays for the batched read of every marked row only when
+    # it dropped; the capture's own commits move `data_version` every poll and never lower it.
+    # Tab entry checks in full: the drop may have happened, and been climbed back past, while
+    # History was not the tab being told.
+    def prune_reused_marks(store : Store, *, full : Bool = false) : Nil
+      top = store.max_flow_id || 0_i64
+      last = @marks_seen_max
+      @marks_seen_max = top
       return if @marks.empty?
+      return unless full || (last && top < last)
       now = {} of Int64 => Int64
       @marks.to_a.each_slice(500) { |ids| store.flow_rows(ids).each { |r| now[r.id] = r.created_at } }
       gone = @marks.select { |id| (at = now[id]?).nil? || ((was = @mark_stamps[id]?) && was != at) }

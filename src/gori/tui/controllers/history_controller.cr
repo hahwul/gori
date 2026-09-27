@@ -582,7 +582,7 @@ module Gori::Tui
       @history.forget_all_row_memos
       # The same reason as the view below: a peer clear while the operator sat on another tab
       # reaches `on_external_change` only on the tab that was active.
-      @history.prune_reused_marks(@host.session.store)
+      @history.prune_reused_marks(@host.session.store, full: true)
       # Re-resolve BEFORE the reload, and not only in `on_external_change`: the runner
       # dispatches that to `@tabs[@active_tab]` alone, so a peer deleting the active view while
       # the operator sat on another tab left History filtering by a view that no longer exists —
