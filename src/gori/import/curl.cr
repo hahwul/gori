@@ -143,7 +143,7 @@ module Gori
           end
         end
         return Parsed.new(requests, skipped, notes) if saw_curl
-        bare_url(commands) || raise Gori::Error.new("not a curl command — paste a command starting with `curl` (or a single URL)")
+        bare_url(commands, text) || raise Gori::Error.new("not a curl command — paste a command starting with `curl` (or a single URL)")
       rescue ex : Gori::Error
         raise ex
       rescue
@@ -197,9 +197,16 @@ module Gori
         groups.reject(&.empty?)
       end
 
-      private def self.bare_url(commands : Array(Shell::Command)) : Parsed?
-        return nil unless commands.size == 1 && commands[0].words.size == 1
-        word = commands[0].words[0]
+      # A lone URL is also read as the TEXT itself when it holds no whitespace or shell quoting:
+      # the shell grammar splits an unquoted query at its `&` (`?x=1&y=2` is two commands), which
+      # is right inside a curl command but not for a pasted address.
+      private def self.bare_url(commands : Array(Shell::Command), text : String) : Parsed?
+        word = if commands.size == 1 && commands[0].words.size == 1
+                 commands[0].words[0]
+               elsif (raw = text.strip).includes?('&') && raw.each_char.none? { |c| c.whitespace? || c.in?('\'', '"', '\\', '`', '$', ';', '|', '<', '>', '(', ')') }
+                 raw
+               end
+        return nil unless word
         return nil if word.starts_with?('-')
         inv = Invocation.new([word], nil, default_scheme: "https")
         Parsed.new(inv.requests, [] of String, [] of String)

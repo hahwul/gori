@@ -316,6 +316,9 @@ describe Gori::Import::Curl do
     it "reads a lone URL or bare host as a GET, https:// by default" do
       Gori::Import::Curl.parse("https://acme.test/p?q=1").requests.first.url.should eq("https://acme.test/p?q=1")
       Gori::Import::Curl.parse("acme.test").requests.first.url.should eq("https://acme.test/")
+      # Unquoted, the shell grammar splits at `&` — a pasted address is still one URL.
+      Gori::Import::Curl.parse("https://acme.test/p?x=1&y=2\n").requests.map(&.url).should eq(["https://acme.test/p?x=1&y=2"])
+      expect_raises(Gori::Error, /not a curl command/) { Gori::Import::Curl.parse("a.test&b;c") }
     end
 
     it "strips a pasted shell prompt" do
