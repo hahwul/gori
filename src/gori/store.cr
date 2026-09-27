@@ -404,6 +404,24 @@ module Gori
     # per connection below.
     MMAP_SIZE = 256 * 1024 * 1024
 
+    # WAL pages the writer lets accumulate before its COMMIT runs an automatic checkpoint
+    # (SQLite's default is 1000). That checkpoint runs synchronously inside the writer's
+    # COMMIT, on the one scheduler thread every proxy fiber shares, and on macOS the system
+    # SQLite is built with `checkpoint_fullfsync` on, so each one is ~2 F_FULLFSYNC (~4 ms).
+    # Profiled under keep-alive proxy load it was 11-31% of busy time (h1) and 28% (h2).
+    # 4000 pages (~16 MB at 4 KiB) runs a quarter as many checkpoints, and hot index pages
+    # rewritten between them are copied back once instead of four times. The cost is a longer
+    # single stall when one does run (max ~16-20 ms vs ~12-16 ms in a commit-latency bench
+    # with the fsyncs in, while commits over 2 ms fell from ~88 to ~21 per 6000).
+    # checkpoint_fullfsync stays on: it is what makes a checkpoint durable on Apple hardware.
+    WAL_AUTOCHECKPOINT_PAGES = 4000
+
+    # `journal_size_limit`: after a checkpoint resets the WAL, the next write truncates the
+    # file back to this size. Without it the `-wal` keeps its high-water mark forever — a
+    # long-lived reader (a second `gori mcp`, a slow export) that holds a checkpoint back
+    # can grow it far past the autocheckpoint size, and it would stay that big on disk.
+    WAL_SIZE_LIMIT = 64 * 1024 * 1024
+
     # THE one place a fresh pool connection is configured.
     #
     # crystal-db's `setup_connection` ASSIGNS its block (`@setup_connection = proc` in
@@ -1201,10 +1219,10 @@ module Gori
       @writer_conn_suspect = false
       conn || begin
         fresh = @db.checkout
-        # Bound the WAL file so it doesn't grow without limit under sustained writes (the
-        # default is 1000 pages; set it explicitly on the writer). Per CONNECTION, so it has to
-        # be re-issued on every one the writer takes, not once at startup.
-        fresh.exec("PRAGMA wal_autocheckpoint=1000") rescue nil
+        # Both per CONNECTION, so they have to be re-issued on every one the writer takes, not
+        # once at startup. See WAL_AUTOCHECKPOINT_PAGES / WAL_SIZE_LIMIT.
+        fresh.exec("PRAGMA wal_autocheckpoint=#{WAL_AUTOCHECKPOINT_PAGES}") rescue nil
+        fresh.exec("PRAGMA journal_size_limit=#{WAL_SIZE_LIMIT}") rescue nil
         @writer_conn = fresh
       end
     end
