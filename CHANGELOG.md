@@ -74,7 +74,7 @@
 - TUI: History refreshes path and colour data after a peer clears or deletes flows, including when returning to the tab (#1202)
 - History: deleted flows detach retest and frozen-evidence links, and MCP fuzz results omit stale flow IDs before reuse (#1208, #1212)
 - Proxy: malformed response status lines use explicit body framing and retire the origin connection (#1207)
-- HTTP/2: refuse duplicate pseudo-headers and conflicting `:authority`/`host` fields under the sandbox (#1210)
+- HTTP/2: refuse duplicate pseudo-headers and conflicting `:authority`/`host` fields under the sandbox, and check a stream that names another port than its tunnel's against the tunnel's own port too, so a port-scoped exclude cannot be walked around (#1210, #1341)
 - Proxy: reject incomplete upstream CONNECT replies and keep the failure reason on the CONNECT flow (#1211)
 - Proxy: reject nonnumeric CONNECT ports with a recorded 400 instead of defaulting to 443 (#1213)
 - Proxy: frame lowercase extension methods by their response headers instead of treating them as HEAD or CONNECT (#1214)
