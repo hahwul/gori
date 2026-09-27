@@ -354,6 +354,35 @@ module Gori::Tui
       end
     end
 
+    # --- bracketed paste, in bulk (see TabController#accepts_bulk_paste?) ---
+    # The two multi-line editors: INPUT in INSERT (re-decodes per edit) and the always-insert
+    # PAYLOAD (re-forges per edit). Key by key a paste re-ran that over the whole buffer per
+    # character — quadratic, on the scheduler the proxy shares. A pasted ↹ now lands as a tab
+    # character instead of moving the focus ring mid-paste and typing the rest into the next
+    # pane. The single-line SECRET / SALT fields keep the key path.
+    def accepts_bulk_paste? : Bool
+      !bulk_paste_editor.nil?
+    end
+
+    def paste_text(text : String) : Bool
+      ed = bulk_paste_editor
+      return false unless ed
+      s = cur
+      ed.insert_text(text)
+      report_replaced(ed.last_replaced) # a paste over a selection REPLACES it
+      ed.set_preedit("")
+      ed.same?(s.input) ? recompute_decode(s) : recompute_forge(s)
+      true
+    end
+
+    private def bulk_paste_editor : TextArea?
+      s = cur
+      case s.pane
+      when :input   then s.input if s.input_mode == InputMode::Insert
+      when :payload then s.payload
+      end
+    end
+
     def handle_body_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
       c = ev.char || key.to_char

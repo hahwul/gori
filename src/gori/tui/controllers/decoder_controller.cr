@@ -595,6 +595,28 @@ module Gori::Tui
       true
     end
 
+    # --- bracketed paste, in bulk (see TabController#accepts_bulk_paste?) ---
+    # The INPUT editor in INSERT — the pane a captured token or body gets pasted into. Taken
+    # a key at a time, every character re-ran the whole chain over the whole buffer
+    # (`touch`), so a paste cost its length squared: 160 KB took ~15 s on the scheduler the
+    # proxy shares. One splice, one recompute. The text is what the keystroke path would have
+    # typed — ↵ was already a newline here and ↹ a tab (`handle_editor_tab`) — minus what
+    # `Runner#buffer_bulk_paste` drops for every bulk editor (arrows and control keys the
+    # clipboard never held as text). The CHAIN line is single-line and keeps the key path.
+    def accepts_bulk_paste? : Bool
+      editor_captures_tab?
+    end
+
+    def paste_text(text : String) : Bool
+      return false unless accepts_bulk_paste?
+      s = cur
+      s.input.insert_text(text)
+      report_replaced(s.input.last_replaced) # a paste over a selection REPLACES it
+      s.input.set_preedit("")
+      touch
+      true
+    end
+
     # --- focus ring (Tab/Shift-Tab): menu ▸ input ▸ chain ▸ output ▸ menu ---
     # OUTPUT is read-only but joins the ring so it can be focused + scrolled.
     PANE_ORDER = [:input, :chain, :output]

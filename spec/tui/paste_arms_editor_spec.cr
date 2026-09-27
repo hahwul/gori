@@ -105,3 +105,89 @@ describe "NotesController — the pane a paste is most often aimed at" do
     end
   end
 end
+
+# The workbench inputs a token or a body gets pasted into. Key by key, each character re-ran
+# the tab's whole derivation (the Decoder chain, the JWT decode / encode, the cookie decode /
+# forge) over the whole buffer, so a paste cost its length squared — 160 KB was ~15 s of the
+# scheduler the proxy shares. In bulk it is one splice, one derivation and one undo step, and
+# the buffer is what the key path would have typed: ↵ a newline, ↹ a tab.
+describe "workbench inputs take a paste in bulk" do
+  pasted = "line one\n\tline two"
+
+  it "Decoder INPUT: only in INSERT, one splice, the chain re-run once" do
+    TuiContract.with_session("paste-bulk-decoder") do |session|
+      host = TuiContract::Host.new(session)
+      controller = DecoderController.new(host)
+      host.tab = :decoder
+      TuiContract.render(controller)
+      s = controller.@sessions[controller.@idx]
+      s.pane = :input
+      controller.accepts_bulk_paste?.should be_false # READ
+      controller.paste_text("x").should be_false
+
+      controller.editor_enter_insert.should be_true
+      controller.accepts_bulk_paste?.should be_true
+      controller.paste_text(pasted).should be_true
+      s.input.text.should eq(pasted)
+      String.new(s.result.input).should eq(pasted) # the chain saw the whole paste
+      s.input.undo
+      s.input.text.should eq("") # one undo step, not one per character
+
+      s.pane = :chain # the single-line spec keeps the key path
+      controller.accepts_bulk_paste?.should be_false
+    end
+  end
+
+  it "JWT: INPUT in INSERT and the HEADER / PAYLOAD editors, each re-derived once" do
+    TuiContract.with_session("paste-bulk-jwt") do |session|
+      host = TuiContract::Host.new(session)
+      controller = JwtController.new(host)
+      host.tab = :jwt
+      TuiContract.render(controller)
+      s = controller.@sessions[controller.@idx]
+      s.pane = :input
+      controller.accepts_bulk_paste?.should be_false # READ
+      controller.editor_enter_insert.should be_true
+      token = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.sig"
+      controller.paste_text(token).should be_true
+      s.input.text.should eq(token)
+      s.decoded.should contain("HS256")
+
+      s.pane = :payload
+      controller.accepts_bulk_paste?.should be_true
+      before = s.output
+      s.payload.set_text("")
+      controller.paste_text(%({"sub":\t"y"})).should be_true
+      s.payload.text.should eq(%({"sub":\t"y"}))
+      s.output.should_not eq(before)
+
+      s.pane = :secret
+      controller.accepts_bulk_paste?.should be_false
+      controller.paste_text("k").should be_false
+    end
+  end
+
+  it "Cookie: INPUT in INSERT and the PAYLOAD editor, each re-derived once" do
+    TuiContract.with_session("paste-bulk-cookie") do |session|
+      host = TuiContract::Host.new(session)
+      controller = CookieController.new(host)
+      host.tab = :cookie
+      TuiContract.render(controller)
+      s = controller.@sessions[controller.@idx]
+      s.pane = :input
+      controller.accepts_bulk_paste?.should be_false # READ
+      controller.editor_enter_insert.should be_true
+      controller.paste_text(pasted).should be_true
+      s.input.text.should eq(pasted)
+      s.decoded.should_not be_empty # decoded (or its error) for the pasted text
+
+      s.pane = :payload
+      controller.accepts_bulk_paste?.should be_true
+      controller.paste_text("{}").should be_true
+      s.payload.text.should end_with("{}")
+
+      s.pane = :secret
+      controller.accepts_bulk_paste?.should be_false
+    end
+  end
+end
