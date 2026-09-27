@@ -50,6 +50,17 @@ module Gori
       def initialize(@identity, @baseline, @meta, @verdict, @delta, @summary,
                      @request, @response_head, @response_body)
       end
+
+      # This trial without the bytes only the TUI's detail pane reads: the sent request and the
+      # response body (up to the body cap each) are dropped, the response HEAD is kept (cache
+      # deception classifies it). Every field a verdict, a row or a summary reads — `meta`,
+      # `verdict`, `delta`, `summary` — was computed off those bytes already and is carried
+      # unchanged. For a headless surface that HOLDS its targets (`--format json`, an MCP job),
+      # where keeping bodies nobody will ever print is what made a run's memory grow with it.
+      def without_bytes : Trial
+        Trial.new(@identity, @baseline, @meta, @verdict, @delta, @summary,
+          Bytes.empty, @response_head, nil)
+      end
     end
 
     # Every identity's trial for ONE seeded request.
@@ -67,6 +78,11 @@ module Gori
       getter blocked_reason : String?
 
       def initialize(@flow_id, @method, @url, @trials, @blocked = 0_i64, @blocked_reason = nil)
+      end
+
+      # Every trial `without_bytes` — see there. Nothing a verdict or a count reads changes.
+      def without_bytes : Target
+        Target.new(@flow_id, @method, @url, @trials.map(&.without_bytes), @blocked, @blocked_reason)
       end
 
       # Nothing in this request actually reached the origin.

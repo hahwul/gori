@@ -123,7 +123,9 @@ module Gori
         ajob.bypasses += target.same_count
         ajob.reviews += target.trials.count { |t| !t.baseline? && t.verdict.review? }
         if ajob.results.size < AUTHORIZE_MAX_STORED
-          ajob.results << target
+          # Stored for the life of the job, and no payload reads the request or body bytes: the
+          # counts above were taken from the full target, the stored one keeps only the head.
+          ajob.results << target.without_bytes
         else
           ajob.truncated = true
         end

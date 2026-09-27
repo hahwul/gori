@@ -267,9 +267,12 @@ module Gori
       # every run-producing tool (fuzz, mine, discover, sequence) draws it this way.
       private def self.emit_authorize_target(t : Authorize::Target, format : Symbol, index : Int32,
                                              buffered : Array(Authorize::Target)) : Nil
+        # `json` holds every target until the drain ends, so it keeps only what
+        # `authorize_array_json` prints — the request and body bytes are the TUI's
+        # (`Target#without_bytes`).
         case format
         when :jsonl then puts CLI::Output.authorize_target_json(t)
-        when :json  then buffered << t
+        when :json  then buffered << t.without_bytes
         else
           puts "" if index > 0
           puts CLI::Output.authorize_target_text(t)
