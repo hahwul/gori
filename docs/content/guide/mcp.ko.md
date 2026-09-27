@@ -73,9 +73,9 @@ gori mcp --read-only
 
 | 묶음 | 끄면 빠지는 도구 |
 |------|------------------|
-| **Send traffic** | 대상이나 OAST 서버로 요청을 보내는 모든 도구와, 그 도구가 시작한 작업의 폴러: `send_request`, `send_websocket`, `race_requests`, `timing_requests`, `fuzz_*`, `mine_*`, `discover_*`, `authorize_*`, `sequence_*`(`sequence_analyze` 제외), `run_retest`, `minimize_repeater`, `cache_deception_check`, `scan_js_endpoints`, `grpc_reflect`, `refresh_session_slot`, `oast_*`(`oast_presets` 제외), `list_jobs` / `get_job` / `stop_job`, `active:true`인 `probe_scan`, `active`나 `aggressive`로 올리는 `set_probe_mode` |
+| **Send traffic** | 대상이나 OAST 서버로 요청을 보내는 모든 도구와, 그 도구가 시작한 작업의 폴러: `send_request`, `send_websocket`, `race_requests`, `timing_requests`, `fuzz_*`, `mine_*`, `discover_*`, `authorize_*`, `sequence_*`(`sequence_analyze` 제외), `run_retest`, `minimize_repeater`, `cache_deception_check`, `grpc_reflect`, `refresh_session_slot`, `oast_*`(`oast_presets` 제외), `list_jobs` / `get_job` / `stop_job`, `active:true`인 `probe_scan`, `active`나 `aggressive`로 올리는 `set_probe_mode` |
 | **Intercept control** | `intercept_forward`, `intercept_forward_edit`, `intercept_drop`, `intercept_toggle`, `intercept_set_filter`, `intercept_set_direction` |
-| **Edit project data** | 그 밖의 프로젝트 쓰기 전부: 이슈, 노트, repeater, 규칙, scope와 sandbox, env, host override, 세션 슬롯, evidence, 링크, 뷰, probe 스캔과 판정(수동 `probe_scan`도 찾은 결과를 기록합니다), flow·히스토리 삭제 |
+| **Edit project data** | 그 밖의 프로젝트 쓰기 전부: 이슈, 노트, repeater, 규칙, scope와 sandbox, env, host override, 세션 슬롯, evidence, 링크, 뷰, probe 스캔과 판정(수동 `probe_scan`도 찾은 결과를 기록합니다), JavaScript 엔드포인트 스캔(`scan_js_endpoints`는 읽은 것을 저장할 뿐 요청은 보내지 않습니다), flow·히스토리 삭제 |
 | **Manage projects** | `create_project`, `switch_project`, `delete_project`, `import_project`, `export_project` |
 
 캡처를 읽는 것은 묶음이 아닙니다. 읽기 도구와 `operator_messages` / `reply_to_operator`는 항상 제공됩니다. 꺼진 묶음의 도구는 `tools/list`에서 빠지고, 그래도 호출하면 `TOOL_DISABLED`로 거부되며, 핸드셰이크 instructions가 에이전트에게 어떤 묶음이 꺼졌는지 알려줍니다. 이 스위치는 `--read-only`, `--tools`와 함께 적용되어 셋 모두가 허용한 도구만 제공됩니다. `gori mcp` 프로세스가 시작할 때 읽으므로, 이미 떠 있는 에이전트는 서버를 다시 시작할 때까지 받았던 도구를 그대로 씁니다. 그 시점에 설정 파일을 읽지 못하면 모든 묶음을 켜는 대신 끕니다.
