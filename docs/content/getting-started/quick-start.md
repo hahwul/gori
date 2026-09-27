@@ -88,19 +88,24 @@ A phone can't read the CA off your filesystem, so gori serves it over the networ
 
 ## 3. Learn the two discovery surfaces
 
-Before memorizing tab-specific keys, learn the two places almost everything lives.
+You don't need to memorize tab-specific keys. Two keys reach every action:
 
 | Surface | Key | What it is for |
 |---------|-----|----------------|
-| **Command palette** | `Ctrl-P` | App-wide control: settings, Open browser, Copy CA certificate path, jump actions, anything global |
-| **Space menu** | `Space` | Actions for whatever has focus right now (History row, detail pane, Repeater, …) |
+| **Space menu** | `Space` | What you do most in the pane you are in (a History row, a flow's detail, the Repeater editor, …), one letter per action |
+| **Command palette** | `Ctrl-P` | Every action, found by typing its name: the pane's own actions first, then app-wide ones such as settings and **Open browser** |
 
-The palette is the map of the whole tool. The space menu is the map of *this* pane. Both show key hints, so if you forget a chord, open one of them.
+Both show each action's shortcut beside it, so opening them is also how you learn the keys. Try it now on the flow you just captured:
+
+1. In **History**, press `↓` to select your flow, then `Space`. The letter on the left of a row runs it; the key on the right (`^R` beside **Repeater flow**) does the same without the menu. A row marked `›`, such as `>` **Send flow to…**, opens a second card; `Esc` steps back. Press `Esc` until the menu closes.
+2. Press `Ctrl-P` and type `send`. The History actions come first under `THIS TAB`, each with the key or menu path that reaches it (`␣ > c` means `Space`, `>`, `c`). Press `Esc`.
 
 <figure class="tui-shot">
-  <img src="/images/tui/command-palette.svg" alt="gori command palette open over the History tab, listing settings, navigation and export actions with a filter box">
-  <figcaption>The command palette (<kbd>Ctrl-P</kbd>): fuzzy-filter every app-wide action, from settings to <em>Open browser</em> to tab jumps.</figcaption>
+  <img src="/images/tui/command-palette.svg" alt="gori command palette over the History tab with the query send: THIS TAB lists the send actions with their keys or menu paths, then APP lists matching app commands">
+  <figcaption>The command palette (<kbd>Ctrl-P</kbd>) with <code>send</code> typed on History: the tab's own actions first, each with the shorter route to it, then app-wide commands.</figcaption>
 </figure>
+
+[Space Menu & Palette](/guide/space-menu-and-palette/) covers both in depth, including the `Z` **Display…** and `P` **Protocol…** cards and the actions that only the palette lists.
 
 Three global toggles are worth knowing from the start:
 
@@ -196,15 +201,17 @@ Keep this table nearby until the chords stick:
 
 | Key | Where | Action |
 |-----|--------|--------|
-| `Ctrl-P` | Anywhere | Command palette (settings, Match & Replace, notifications, …) |
+| `Space` | Focused pane | Space menu: this pane's actions, one letter each |
+| `Ctrl-P` | Anywhere | Command palette: type any action's name |
+| `?` | Anywhere | Help: the full key sheet |
 | `Ctrl-,` | Anywhere | Preferences (all settings in one modal) |
-| `Space` | Focused pane | Area action menu |
 | `c` / `i` / `s` | Anywhere | Capture / intercept / scope lens |
 | `[` `]` · `1`-`9` | Anywhere | Switch tabs |
 | `/` | History | Query-language filter |
 | `Enter` | History | Open flow detail |
 | `Ctrl-R` | History | → Repeater |
 | `Shift-I` | History | → Fuzzer |
+| `>` | History | Send flow to… any tool (`>` `c` → Comparer) |
 | `Ctrl-R` | Repeater / Fuzzer | Send request / run fuzz |
 | `Esc` | Most places | Back out one level |
 
@@ -222,15 +229,15 @@ The final **Review** step recaps what you picked and carries one editable row: *
 
 ## Guided UI tour
 
-A mock-UI walkthrough of tab/pane navigation, the palette, the space menu, and READ/INS edit mode. It is safe to run without a live proxy session. Each lesson shows a short demo and asks you to try the real key; the final step is a hands-on sandbox for all four moves, then a first-session checklist.
+A mock-UI walkthrough of tab/pane navigation, the space menu (including its second cards), the command palette's search, and READ/INS edit mode. It is safe to run without a live proxy session. Each lesson shows a short demo and asks you to try the real key; the final step is a hands-on sandbox for all four moves, then a first-session checklist. The mock menus use the same letters and keys as your install, rebinds included.
 
 ```bash
 gori tutorial
 ```
 
 <figure class="tui-shot">
-  <img src="/images/tui/tutorial.svg" alt="gori guided tour welcome card explaining the four core moves: tabs and panes, the command palette, the action menu, and edit mode">
-  <figcaption>The guided tour walks through tabs and panes, the palette, the space menu, and READ / INS edit mode. Try each key, then practice all four in a harmless sandbox.</figcaption>
+  <img src="/images/tui/tutorial.svg" alt="gori guided tour welcome card explaining the four core moves: tabs and panes, the action menu, the command palette, and edit mode">
+  <figcaption>The guided tour walks through tabs and panes, the space menu, the palette, and READ / INS edit mode. Try each key, then practice all four in a harmless sandbox.</figcaption>
 </figure>
 
 It is also offered at the end of the first-run wizard, and from inside a session as the palette command **Guided tour** (`Ctrl-P`). Its last card tells you whether finishing leads to the project picker, a `--db` session, the shell, or your current session.
@@ -241,4 +248,5 @@ It is also offered at the end of the first-run wizard, and from inside a session
 - [Proxy & History](/guide/proxy/): capture, intercept, scope, import, match & replace
 - [Repeater & Fuzzer](/guide/repeater-and-fuzzer/): the testing workbench and env tokens
 - [Query Language](/reference/query-language/): full filter syntax
+- [Space Menu & Palette](/guide/space-menu-and-palette/): find any action without memorizing keys
 - [Hotkeys](/guide/hotkeys/): rebind any of the chords above

@@ -159,6 +159,8 @@ flag a terminal reports beside it (kitty's report-all-keys, xterm's `modifyOther
 
 ## The space menu {#space-menu}
 
+> **Learning the menus?** [Space Menu & Palette](/guide/space-menu-and-palette/) walks through the space menu, its second cards and the palette's search, with a five-minute exercise. This section is the reference: the rules behind every letter and the full tables.
+
 `Space` in a navigable pane opens the action menu for **where you are standing** — the
 pane's own verbs, grouped under `COMMON` and the focused area's label, each fronted by one
 mnemonic letter. It is not the palette: there is no typing and no filter, just one keypress
@@ -272,7 +274,7 @@ actions gave the nine up: Mark word in the Repeater/Fuzzer editors and the JWT a
 toggles (now [palette-only](#palette-only) on `Ctrl-K` and `Ctrl-T`), JWT and Cookie's copy
 OUTPUT (`C`) and Notes' `$EDITOR` (`o`). They keep those letters for now.
 
-### One intent, one letter
+### One intent, one letter {#one-intent-one-letter}
 
 An action that recurs across tabs has the same menu letter on every tab that has it. The
 letter comes from one table in the source (`Verb::Lexicon`), not from each row, so two tabs
