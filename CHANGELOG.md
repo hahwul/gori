@@ -80,7 +80,7 @@
 - Import: generated Insomnia, Postman, and OpenAPI query parameters now stay before URL fragments (#1184)
 - CLI: piped decoder and minimized request output stay byte-exact, while forged cookies and encoded JWTs retain a trailing newline for text pipelines (#1185)
 - Decoder: Base32 rejects impossible tail lengths and malformed padding while Base32 and Base64 accept decodable tails with non-zero unused bits (#1186)
-- Postman: URL variables replace path placeholders only, leaving query and fragment values intact (#1187)
+- Postman: URL variables replace path placeholders only, leaving query and fragment values intact, including in URLs with non-ASCII characters (#1187, #1341)
 - CLI: a `--db` file that is not a gori project (another tool's SQLite database, or an empty file on a read command) is refused before anything touches it, instead of having gori's schema migrated into it (#1171)
 - Projects: a name that points at two projects (one's slug and another's display name, or a display name two projects share) is refused on every `--project`, MCP `switch_project`, `delete_project` and `diff_projects` with each one's slug and short id, instead of silently picking one, and create or rename refuses a name that is already another project's slug or short id (#1163)
 - Retest: deleting a Repeater session marks the issue retest steps that used it as deleted, so they keep refusing to run instead of silently re-binding to the next session that reuses its id (#1160); `json:` and `json-absent:` read the same JSON paths as `--jsonpath` and bindings (`$.data.items[0]`, `items.0`), and a path none of them can read (`..`, `*`, a filter, an unclosed bracket) is refused instead of passing `json-absent:` (#1201)

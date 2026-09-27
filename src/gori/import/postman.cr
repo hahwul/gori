@@ -184,10 +184,12 @@ module Gori
         bounds = path_bounds(url)
         return url unless bounds
 
+        # BYTE offsets, each at an ASCII `/`, `?` or `#`, so every slice lands on a
+        # character boundary — a character slice would shift after a non-ASCII segment.
         start, path_end = bounds
-        path = url[start...path_end]
+        path = url.byte_slice(start, path_end - start)
         replaced = path.gsub(PATH_PARAM) { |full, m| table[m[1]]?.try { |v| Vars.expand(v, vars) } || full }
-        "#{url[0...start]}#{replaced}#{url[path_end..]}"
+        "#{url.byte_slice(0, start)}#{replaced}#{url.byte_slice(path_end)}"
       end
 
       private def self.path_bounds(url : String) : {Int32, Int32}?
@@ -210,8 +212,8 @@ module Gori
       end
 
       private def self.authority_end(url : String) : Int32
-        if scheme_sep = url.index("://")
-          return scheme_sep + 3 if url[0...scheme_sep].matches?(SCHEME_NAME)
+        if scheme_sep = url.byte_index("://")
+          return scheme_sep + 3 if url.byte_slice(0, scheme_sep).matches?(SCHEME_NAME)
         end
         url.starts_with?("//") ? 2 : 0
       end
