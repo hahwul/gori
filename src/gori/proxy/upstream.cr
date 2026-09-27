@@ -781,20 +781,29 @@ module Gori::Proxy
         return DialError.new(DialErrorKind::Proxy,
           "#{proxy_label(route)} closed the connection without answering CONNECT #{authority}")
       end
+      # `gets` with a limit hands an over-long line back in pieces, so a piece is a LINE only
+      # when the one before it ended in LF: the CRLF closing an exactly-limit-long header came
+      # back alone and read as the blank terminator, opening a tunnel on an incomplete reply.
+      unless status.ends_with?('\n')
+        return DialError.new(DialErrorKind::Proxy,
+          "#{proxy_label(route)} sent an oversized CONNECT status line (> #{MAX_CONNECT_LINE} bytes)")
+      end
       parts = status.chomp.split(' ', 3)
       code = parts.size >= 2 ? (parts[1].to_i? || 0) : 0
       read = 0
       headers_complete = false
+      at_line_start = true
       while line = sock.gets('\n', MAX_CONNECT_LINE)
         read += line.bytesize
         if read > MAX_CONNECT_HEADERS
           return DialError.new(DialErrorKind::Proxy,
             "#{proxy_label(route)} sent an oversized CONNECT reply header section (> #{MAX_CONNECT_HEADERS} bytes)")
         end
-        if line.chomp.empty?
+        if at_line_start && line.chomp.empty?
           headers_complete = true
           break
         end
+        at_line_start = line.ends_with?('\n')
       end
       unless headers_complete
         return DialError.new(DialErrorKind::Proxy,

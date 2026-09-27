@@ -76,7 +76,7 @@
 - History: deleted flows detach retest and frozen-evidence links, and MCP fuzz results omit stale flow IDs before reuse, including one another `gori mcp` recorded under the same job id (#1208, #1212, #1341)
 - Proxy: malformed response status lines use explicit body framing and retire the origin connection (#1207)
 - HTTP/2: refuse duplicate pseudo-headers and conflicting `:authority`/`host` fields under the sandbox, and check a stream that names another port than its tunnel's against the tunnel's own port too, so a port-scoped exclude cannot be walked around (#1210, #1341)
-- Proxy: reject incomplete upstream CONNECT replies and keep the failure reason on the CONNECT flow (#1211)
+- Proxy: reject incomplete upstream CONNECT replies, including one whose last header line is exactly the line limit long, and keep the failure reason on the CONNECT flow (#1211, #1341)
 - Proxy: reject nonnumeric CONNECT ports with a recorded 400 instead of defaulting to 443 (#1213)
 - Proxy: frame lowercase extension methods by their response headers instead of treating them as HEAD or CONNECT (#1214)
 - Issues: the SARIF export keeps each `Set-Cookie` field separate instead of comma-joining cookies into one fabricated value, joins repeated `Cookie` fields with `; `, and writes credential header values as `[REDACTED]` unless `gori run issues --include-sensitive` asks for them (#1190, #1191)
