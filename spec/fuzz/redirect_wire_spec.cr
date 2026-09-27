@@ -221,3 +221,93 @@ describe "Fuzz::Engine redirect following" do
     wire.join.should_not contain("evil.test")
   end
 end
+
+# A keep-alive origin: many requests per connection, each request's head recorded against the
+# connection it arrived on. `wire_of` closes after every answer, so it cannot show reuse.
+private class KeepAliveRedirectOrigin
+  getter port : Int32
+  getter heads = [] of Array(String)
+
+  def initialize
+    @server = TCPServer.new("127.0.0.1", 0)
+    @port = @server.local_address.port
+    spawn { accept_loop }
+  end
+
+  def close : Nil
+    @server.close rescue nil
+  end
+
+  private def accept_loop : Nil
+    while conn = @server.accept?
+      seen = [] of String
+      @heads << seen
+      spawn serve(conn, seen)
+    end
+  rescue
+  end
+
+  private def serve(conn : TCPSocket, seen : Array(String)) : Nil
+    conn.read_timeout = 5.seconds
+    loop do
+      head = Gori::Proxy::Codec::Http1.read_head(conn)
+      break unless head
+      text = String.new(head)
+      seen << text
+      if text.starts_with?("GET /start")
+        conn << "HTTP/1.1 302 Found\r\nLocation: /next\r\nContent-Length: 0\r\n\r\n"
+      else
+        conn << "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"
+      end
+      conn.flush
+    end
+  rescue
+  ensure
+    conn.close rescue nil
+  end
+end
+
+describe "Fuzz::Engine redirect following on a keep-alive run" do
+  # The hop is a bodyless GET gori wrote. With `Connection: close` on it the pool could never
+  # park its socket (`ConnPool.reusable_request?`), so every hop of a pooled sweep dialed a
+  # fresh connection. Asserted on the wire AND on the pool's own counters.
+  it "writes no Connection: close on a pooled hop, and the hop reuses the parked socket" do
+    origin = KeepAliveRedirectOrigin.new
+    tmpl = F::Template.parse("GET /start?q=§a§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+    set = F::PayloadSet.new(F::InlineList.new(["one", "two"]))
+    cfg = F::Config.new(mode: F::Mode::Sniper, concurrency: 1, follow_redirects: true,
+      max_redirects: 3, timeout: 2.seconds, keep_alive: true)
+    backend = F::Sender.new(F::Origin.new("http", "127.0.0.1", origin.port), ungated_outbound,
+      http2: false, verify: false, keep_alive: true, idle_conns: 1)
+    backend.pooled?.should be_true
+    results = [] of F::Result
+    F::Engine.new(F::Generator.new(tmpl, [set], cfg), F::Matcher.new, backend, cfg).run do |ev|
+      results << ev.result if ev.is_a?(F::ResultEvent)
+    end
+
+    results.map(&.status).should eq([200, 200])
+    # Two payloads, each followed once: four requests over ONE connection.
+    origin.heads.size.should eq(1)
+    lines = origin.heads[0].map(&.lines.first)
+    lines.should eq(["GET /start?q=one HTTP/1.1", "GET /next HTTP/1.1",
+                     "GET /start?q=two HTTP/1.1", "GET /next HTTP/1.1"])
+    origin.heads[0][1].should match(/\AGET \/next HTTP\/1\.1\r\nHost: 127\.0\.0\.1:\d+\r\n\r\n\z/)
+    pool = backend.pool.should_not be_nil
+    pool.dialed.should eq(1_i64)
+    pool.reused.should eq(3_i64)
+    backend.close
+    origin.close
+  end
+
+  # `pooled?` is read through whatever wrapper the engine holds, as `http2?` is.
+  it "reports pooled? through the wrapper backends" do
+    origin = F::Origin.new("http", "127.0.0.1", 1)
+    pooled = F::Sender.new(origin, ungated_outbound, http2: false, verify: false, keep_alive: true)
+    plain = F::Sender.new(origin, ungated_outbound, http2: false, verify: false)
+    plain.pooled?.should be_false
+    F::CappedBackend.new(pooled, nil).pooled?.should be_true
+    F::CappedBackend.new(plain, nil).pooled?.should be_false
+    F::GatedBackend.new(pooled, ungated_outbound).pooled?.should be_true
+    pooled.close
+  end
+end
