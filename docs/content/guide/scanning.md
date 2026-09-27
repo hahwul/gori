@@ -5,6 +5,7 @@ weight = 30
 
 [extra]
 group = "Core"
+shot = "probe"
 +++
 
 gori includes automated analysis that runs alongside your manual testing. **Probe** watches traffic for issues, the **Param Miner** discovers hidden inputs, and **Issues** is where results get triaged.

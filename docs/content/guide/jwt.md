@@ -5,6 +5,7 @@ weight = 50
 
 [extra]
 group = "Workbenches"
+shot = "jwt"
 +++
 
 The **JWT** tab is a workbench for JSON Web Tokens: decode one, edit its claims and re-sign it, and generate the classic attack payloads to test against the server. It goes further than the [Decoder](/guide/decoder/)'s read-only `jwt-decode` converter, which only shows you the parts.

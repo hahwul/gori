@@ -5,6 +5,7 @@ weight = 120
 
 [extra]
 group = "커스터마이즈"
+shot = "statusline"
 +++
 
 **statusline**은 TUI 맨 아래에 선택적으로 붙는 행입니다. gori가 일정 간격으로 셸 명령을 실행하고 그 stdout을 그 행에 렌더링합니다 — 직접 쓰는 상태 바이고, Claude Code의 상태 표시줄에서 영감을 받았습니다. 기본적으로 꺼져 있으며, 무언가 바꾸기 전까지 `statusline` 섹션은 `settings.json`에 들어가지 않습니다.

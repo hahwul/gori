@@ -14,7 +14,7 @@
       <p class="home-kicker">{{ "home.kicker" | t }}</p>
       {# Three spans so the emphasized word carries the serif-italic gilding;
          locales place the emphasis where their grammar puts the word. #}
-      <h1 id="home-title">{{ "home.title_pre" | t }}<em class="hero-em">{{ "home.title_em" | t }}</em>{{ "home.title_post" | t }}</h1>
+      <h1 id="home-title">{{ "home.title_pre" | t }}<em class="gild hero-em">{{ "home.title_em" | t }}</em>{{ "home.title_post" | t }}</h1>
       <p class="hero-lede">{{ "home.lede" | t }}</p>
       <div class="home-actions" aria-label="Primary links">
         <a class="button button-primary" href="{{ base_url }}{{ lang_prefix }}/getting-started/">{{ "home.cta_start" | t }}</a>
@@ -134,58 +134,55 @@
     <div class="structure-copy">
       <h2 id="structure-title">{{ "home.structure_title" | t }}</h2>
       <p>{{ "home.structure_lede" | t }}</p>
-      <div class="structure-grid" aria-label="{{ "home.structure_grid_aria" | t }}">
-        <div>
-          <strong>{{ "home.structure_1_title" | t }}</strong>
-          <span>{{ "home.structure_1_desc" | t }}</span>
-        </div>
-        <div>
-          <strong>{{ "home.structure_2_title" | t }}</strong>
-          <span>{{ "home.structure_2_desc" | t }}</span>
-        </div>
-        <div>
-          <strong>{{ "home.structure_3_title" | t }}</strong>
-          <span>{{ "home.structure_3_desc" | t }}</span>
-        </div>
+    </div>
+    <div class="structure-grid" aria-label="{{ "home.structure_grid_aria" | t }}">
+      <div>
+        <strong>{{ "home.structure_1_title" | t }}</strong>
+        <span>{{ "home.structure_1_desc" | t }}</span>
+      </div>
+      <div>
+        <strong>{{ "home.structure_2_title" | t }}</strong>
+        <span>{{ "home.structure_2_desc" | t }}</span>
+      </div>
+      <div>
+        <strong>{{ "home.structure_3_title" | t }}</strong>
+        <span>{{ "home.structure_3_desc" | t }}</span>
       </div>
     </div>
   </section>
 
-  <section class="home-flow rv" aria-labelledby="flow-title">
-    <h2 id="flow-title">{{ "home.flow_title" | t }}</h2>
-    <div class="flow-list">
-      <div class="rv">
-        <div class="flow-copy">
-          <span>{{ "home.flow_1_label" | t }}</span>
-          <p>{{ "home.flow_1_desc" | t }}</p>
-        </div>
-        <figure class="flow-shot">
-          <img src="{{ base_url }}/images/tui/response-detail.svg" alt="{{ "home.flow_1_alt" | t }}">
-        </figure>
-      </div>
-      <div class="rv">
-        <div class="flow-copy">
-          <span>{{ "home.flow_2_label" | t }}</span>
-          <p>{{ "home.flow_2_desc" | t }}</p>
-        </div>
-        <figure class="flow-shot">
-          <img src="{{ base_url }}/images/tui/fuzzer.svg" alt="{{ "home.flow_2_alt" | t }}">
-        </figure>
-      </div>
-      <div class="rv">
-        <div class="flow-copy">
-          <span>{{ "home.flow_3_label" | t }}</span>
-          <p>{{ "home.flow_3_desc" | t }}</p>
-        </div>
-        <figure class="flow-shot">
-          <img src="{{ base_url }}/images/tui/issues.svg" alt="{{ "home.flow_3_alt" | t }}">
-        </figure>
-      </div>
+  {# Sticky walkthrough: the title and the three steps park on the left while
+     the captures scroll past on the right; home.js lights the step whose
+     capture crosses the middle of the viewport. The left list is a visual
+     index only (aria-hidden): each figure carries its own step as a caption,
+     which is also what the stacked narrow layout shows. #}
+  <section class="home-flow" aria-labelledby="flow-title">
+    <div class="flow-rail rv">
+      <h2 id="flow-title">{{ "home.flow_title_pre" | t }}<em class="gild">{{ "home.flow_title_em" | t }}</em>{{ "home.flow_title_post" | t }}</h2>
+      <ol class="flow-steps" aria-hidden="true">
+        <li data-step="1" class="is-active"><span>{{ "home.flow_1_label" | t }}</span><p>{{ "home.flow_1_desc" | t }}</p></li>
+        <li data-step="2"><span>{{ "home.flow_2_label" | t }}</span><p>{{ "home.flow_2_desc" | t }}</p></li>
+        <li data-step="3"><span>{{ "home.flow_3_label" | t }}</span><p>{{ "home.flow_3_desc" | t }}</p></li>
+      </ol>
+    </div>
+    <div class="flow-shots">
+      <figure class="flow-shot is-active" data-step="1">
+        <figcaption><span>{{ "home.flow_1_label" | t }}</span> {{ "home.flow_1_desc" | t }}</figcaption>
+        <div class="flow-shot-frame"><img src="{{ base_url }}/images/tui/response-detail.svg" alt="{{ "home.flow_1_alt" | t }}" loading="lazy"></div>
+      </figure>
+      <figure class="flow-shot" data-step="2">
+        <figcaption><span>{{ "home.flow_2_label" | t }}</span> {{ "home.flow_2_desc" | t }}</figcaption>
+        <div class="flow-shot-frame"><img src="{{ base_url }}/images/tui/fuzzer.svg" alt="{{ "home.flow_2_alt" | t }}" loading="lazy"></div>
+      </figure>
+      <figure class="flow-shot" data-step="3">
+        <figcaption><span>{{ "home.flow_3_label" | t }}</span> {{ "home.flow_3_desc" | t }}</figcaption>
+        <div class="flow-shot-frame"><img src="{{ base_url }}/images/tui/issues.svg" alt="{{ "home.flow_3_alt" | t }}" loading="lazy"></div>
+      </figure>
     </div>
   </section>
 
   <section class="home-agent rv" aria-labelledby="agent-title">
-    <h2 id="agent-title">{{ "home.agent_title" | t }}</h2>
+    <h2 id="agent-title">{{ "home.agent_title_pre" | t }}<em class="gild">{{ "home.agent_title_em" | t }}</em>{{ "home.agent_title_post" | t }}</h2>
     <p class="agent-intro">{{ "home.agent_intro" | t }}</p>
     <figure class="agent-seam" aria-label="{{ "home.agent_seam_aria" | t }}">
       <div class="seam-node">

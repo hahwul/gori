@@ -5,6 +5,7 @@ weight = 60
 
 [extra]
 group = "Workbenches"
+shot = "sequencer"
 +++
 
 If a session cookie, CSRF token, password-reset code, or API key is predictable, an attacker can forge or guess it. The **Sequencer** collects a sample of tokens and grades how random they really are, the gori counterpart of Burp Sequencer or the Caido Sequencer.

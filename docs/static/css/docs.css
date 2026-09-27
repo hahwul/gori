@@ -1,10 +1,23 @@
 /* Documentation: terminal panel hierarchy for lookup, a book for practice.
    Brand/color/type tokens live in style.css. Layers: inherited header/modal;
    sticky rails stay in normal flow. No animation is needed to read a page. */
-.is-doc { background: var(--bg); }
+/* The reading column stays on flat night; only the top of the page carries
+   the brand's light, an indigo cloud and a gold glow behind the title that
+   are gone before the first paragraph ends. Painted on body, so it costs no
+   layer and cannot widen the page. */
+.is-doc {
+  background:
+    radial-gradient(56rem 22rem at 58% -4rem, rgb(var(--cloud-rgb) / 0.16), transparent 70%),
+    radial-gradient(30rem 14rem at 36% -2rem, rgb(var(--accent-rgb) / 0.09), transparent 72%),
+    var(--bg);
+}
+/* On paper the taupe cloud reads as a smudge; only the gold light stays. */
+:root[data-theme="light"] .is-doc {
+  background: radial-gradient(44rem 18rem at 50% -4rem, rgb(var(--accent-rgb) / 0.1), transparent 72%), var(--bg);
+}
 .is-doc::before, .is-doc::after { display: none; }
-.is-doc .docs-header { border-bottom: 1px solid var(--line); background: var(--bg); backdrop-filter: none; }
-.is-doc .top-nav a { border-radius: 3px; }
+.is-doc .docs-header { border-bottom: 1px solid var(--line); }
+.is-doc .top-nav a { border-radius: var(--radius-xs); }
 .is-doc .top-nav a.active { background: var(--selection); color: var(--accent-strong); }
 .is-doc :focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 4px; }
 .docs-container {
@@ -14,10 +27,13 @@
   width: min(100%, 1600px);
   padding-inline: 30px;
   column-gap: clamp(28px, 3.5vw, 64px);
+  /* The rail's divider is painted on the container, not the sticky aside: the
+     aside is only as tall as its links, so a border on it stopped mid-page on
+     every short section. This one runs the full height of the page body. */
+  background: linear-gradient(var(--line), var(--line)) calc(30px + var(--sidebar-w)) 0 / 1px 100% no-repeat;
 }
 .docs-sidebar {
   padding: 30px 18px 32px 0;
-  border-right: 1px solid var(--line);
   mask-image: none;
   -webkit-mask-image: none;
 }
@@ -49,7 +65,7 @@
   color: var(--text);
   font-size: 13px;
   line-height: 1.5;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
 }
 .nav-group summary::-webkit-details-marker { display: none; }
 .nav-group summary::before { content: "+"; width: 10px; color: var(--muted); font: 14px var(--font-mono); }
@@ -62,26 +78,30 @@
   display: block;
   position: relative;
   padding: 7px 10px 7px 15px;
+  border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
   color: var(--muted);
   font-size: 13px;
   line-height: 1.5;
   text-decoration: none;
 }
-.nav-overview { padding-left: 10px; margin: 2px 0 4px; }
+.nav-overview { padding-left: 10px; margin: 2px 0 4px; border-radius: var(--radius-xs); }
 .manual-nav a.active { color: var(--accent-strong); background: var(--selection); }
 .nav-links a.active::before { content: ""; position: absolute; left: -1px; top: 0; bottom: 0; width: 2px; background: var(--accent); }
 .book-promo {
   display: block;
-  padding: 16px 12px 16px 17px;
+  padding: 16px 14px;
   margin: 24px 0;
-  border: 1px solid var(--line-strong);
-  border-left: 3px solid var(--accent);
-  background: var(--bg-soft);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background:
+    linear-gradient(var(--bg-soft), var(--bg-soft)) padding-box,
+    linear-gradient(135deg, rgb(var(--accent-rgb) / 0.75), var(--line) 55%) border-box;
   text-decoration: none;
+  transition: box-shadow var(--transition);
 }
 .book-promo span { display: block; color: var(--muted); font-size: 11px; margin-bottom: 6px; }
 .book-promo strong { color: var(--accent-strong); font-size: 15px; font-weight: 550; }
-.book-promo:hover { border-color: var(--accent); }
+.book-promo:hover { box-shadow: 0 0 36px rgb(var(--accent-rgb) / 0.14); }
 .docs-main { padding-top: 28px; padding-bottom: 60px; width: 100%; }
 .document-path {
   display: flex;
@@ -100,20 +120,28 @@
 .docs-main h1 { max-width: 18em; font-size: clamp(32px, 3.4vw, 48px); font-weight: 650; letter-spacing: -.045em; line-height: 1.12; text-wrap: pretty; }
 .document-body { font-size: 16px; line-height: 1.8; overflow-wrap: anywhere; }
 .document-body > p:first-child { font-size: 17px; line-height: 1.8; }
-.document-body h2 { font-size: 26px; letter-spacing: -.025em; margin-top: 48px; padding-top: 22px; font-weight: 620; }
+.document-body h2 { position: relative; font-size: 26px; letter-spacing: -.025em; margin-top: 48px; padding-top: 22px; font-weight: 620; }
+/* Every section rule opens with a short gold-leaf segment, the same device the
+   landing's path rails use, so the long pages carry the brand at each turn. */
+.document-body > h2::before { content: ""; position: absolute; top: -1px; left: 0; width: 40px; height: 2px; background: var(--grad-gold-leaf); }
 .document-body h3 { font-size: 19px; font-weight: 620; margin-top: 28px; }
 .document-body p { margin-bottom: 20px; }
 .document-body li { margin-bottom: 7px; }
-.document-body pre { border-radius: 4px; border-color: var(--line-strong); box-shadow: none; font-size: 13px; }
+.document-body pre { border-radius: var(--radius-sm); border-color: var(--line-strong); box-shadow: none; font-size: 13px; }
 .document-body pre code { overflow-wrap: normal; }
 .document-body blockquote { border-left: 2px solid var(--accent); background: var(--bg-soft); border-radius: 0; padding: 18px 22px; }
 .document-body blockquote p:last-child { margin-bottom: 0; }
-.document-body table { display: block; max-width: 100%; overflow-x: auto; border-radius: 3px; font-size: 14px; line-height: 1.65; }
+.document-body table { display: block; max-width: 100%; overflow-x: auto; border-radius: var(--radius-sm); font-size: 14px; line-height: 1.65; }
 .docs-toc-rail { padding-top: 32px; mask-image: none; -webkit-mask-image: none; }
 .docs-toc-rail .toc-title { color: var(--muted); font-size: 10px; margin-bottom: 16px; }
 .docs-toc-rail a { font-size: 12px; line-height: 1.6; padding-block: 5px; }
 .docs-toc-rail ul ul a { font-size: 11px; }
 .docs-toc-rail nav > ul { border-left-style: dashed; }
+/* The active marker glides along the rail (toc.js sets --toc-y/--toc-h). The
+   link's own left border stays the no-script fallback. */
+.docs-toc-rail nav > ul::before { content: ""; position: absolute; top: 0; left: -1px; width: 2px; height: var(--toc-h, 0); transform: translateY(var(--toc-y, 0)); background: var(--grad-gold-leaf); box-shadow: 0 0 10px rgb(var(--accent-rgb) / 0.55); opacity: 0; transition: transform 420ms cubic-bezier(0.16, 1, 0.3, 1), height 420ms cubic-bezier(0.16, 1, 0.3, 1); }
+.docs-toc-rail nav > ul.has-bar::before { opacity: 1; }
+.docs-toc-rail nav > ul.has-bar a.active { border-left-color: transparent; }
 .docs-toc-rail .toc-mobile-title { display: none; }
 .page-navigation { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 64px; padding-top: 22px; border-top: 1px solid var(--line-strong); }
 .page-navigation a { display: flex; flex-direction: column; gap: 9px; padding-block: 8px; text-decoration: none; min-width: 0; }
@@ -127,15 +155,65 @@
 .title-cursor { color: var(--accent); }
 .docs-main .section-description { margin-top: 20px; margin-bottom: 0; font-size: 17px; line-height: 1.75; max-width: 38em; }
 .tool-catalog { margin-block: 34px; }
-.catalog-group { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 24px; padding: 24px 0; border-bottom: 1px solid var(--line); }
+/* Each group is a bento of tiles: two columns, and an odd last tile runs the
+   full width so a group never ends on a hole. Capture tiles show the real TUI
+   screen; type-only tiles carry a gold-and-indigo wash instead, so the rows
+   read as one set rather than pictures beside gaps. */
+.catalog-group { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; padding: 28px 0; border-bottom: 1px solid var(--line); }
 .catalog-group:first-child { padding-top: 0; }
 .docs-main .catalog-group h2 { border: 0; margin: 4px 0 0; padding: 0; font: 12px/1.6 var(--font-mono); color: var(--accent-strong); }
-.catalog-links { display: grid; gap: 4px; }
-.catalog-links a { display: block; padding: 10px 12px; margin-inline: -12px; text-decoration: none; border-radius: 3px; }
-.catalog-links a:hover { background: var(--bg-panel); }
-.catalog-title { display: flex; gap: 14px; justify-content: space-between; font-size: 17px; font-weight: 600; line-height: 1.5; color: var(--heading); }
-.catalog-title > span { color: var(--accent); font-weight: 400; }
-.catalog-description { display: block; color: var(--muted); margin-top: 5px; font-size: 13px; line-height: 1.7; }
+.docs-main .catalog-group h2::before { content: none; }
+.catalog-links { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.catalog-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  text-decoration: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background:
+    linear-gradient(var(--bg-panel), var(--bg-panel)) padding-box,
+    linear-gradient(135deg, var(--line-strong), var(--line) 60%) border-box;
+  transition: transform 320ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 320ms ease, background 320ms ease;
+}
+.catalog-card:not(.has-shot) {
+  position: relative;
+  justify-content: flex-end;
+  min-height: 150px;
+  background:
+    radial-gradient(120% 90% at 100% 0%, rgb(var(--accent-rgb) / 0.12), transparent 60%),
+    radial-gradient(90% 90% at 0% 100%, rgb(var(--cloud-rgb) / 0.12), transparent 70%),
+    linear-gradient(var(--bg-panel), var(--bg-panel)) padding-box,
+    linear-gradient(135deg, var(--line-strong), var(--line) 60%) border-box;
+}
+/* Type-only tiles carry the gori mark, gilded and faint, in the corner the
+   wash lights: brand art rather than an empty space where a capture would be. */
+.catalog-card:not(.has-shot)::before { content: ""; position: absolute; top: 18px; right: 18px; width: 64px; height: 64px; background: var(--grad-gild); -webkit-mask: url("../images/gori.png") center / contain no-repeat; mask: url("../images/gori.png") center / contain no-repeat; opacity: 0.22; transition: opacity 320ms ease, transform 420ms cubic-bezier(0.16, 1, 0.3, 1); }
+.catalog-card:not(.has-shot):hover::before { opacity: 0.4; transform: rotate(-8deg) scale(1.06); }
+.catalog-card:not(.has-shot):last-child:nth-child(odd) { min-height: 112px; }
+.catalog-card:not(.has-shot) .catalog-text { padding-right: 96px; }
+.catalog-card:hover, .catalog-card:focus-visible {
+  transform: translateY(-2px);
+  background:
+    linear-gradient(var(--bg-panel-strong), var(--bg-panel-strong)) padding-box,
+    linear-gradient(135deg, rgb(var(--accent-rgb) / 0.9), var(--line-strong) 55%, rgb(var(--accent-rgb) / 0.4)) border-box;
+  box-shadow: 0 18px 40px rgb(0 0 0 / 0.28), 0 0 60px rgb(var(--accent-rgb) / 0.1);
+}
+:root[data-theme="light"] .catalog-card:hover, :root[data-theme="light"] .catalog-card:focus-visible { box-shadow: 0 16px 34px rgb(60 50 30 / 0.14); }
+.catalog-card:last-child:nth-child(odd) { grid-column: 1 / -1; }
+.catalog-shot { display: block; aspect-ratio: 1206 / 520; overflow: hidden; border-bottom: 1px solid var(--line); background: var(--pre-bg); }
+.catalog-shot img { width: 100%; height: 100%; object-fit: cover; object-position: top left; transition: transform 600ms cubic-bezier(0.16, 1, 0.3, 1); }
+.catalog-card:hover .catalog-shot img { transform: scale(1.035); }
+/* A full-width capture tile lies on its side: text left, screen right. */
+.catalog-card.has-shot:last-child:nth-child(odd) { flex-direction: row-reverse; align-items: stretch; }
+.catalog-card.has-shot:last-child:nth-child(odd) .catalog-shot { flex: 0 0 55%; aspect-ratio: auto; border-bottom: 0; border-left: 1px solid var(--line); }
+.catalog-card.has-shot:last-child:nth-child(odd) .catalog-text { align-self: flex-end; }
+.catalog-text { display: block; padding: 14px 16px 16px; }
+.catalog-title { display: flex; gap: 14px; justify-content: space-between; font-size: 16px; font-weight: 620; line-height: 1.4; color: var(--heading); }
+.catalog-title > span { color: var(--accent); font-weight: 400; transition: transform var(--transition); }
+.catalog-card:hover .catalog-title > span { transform: translate(2px, -2px); }
+.catalog-description { display: block; color: var(--muted); margin-top: 5px; font-size: 13px; line-height: 1.65; }
 .learning-link { display: flex; align-items: center; gap: 24px; justify-content: space-between; border-block: 1px solid var(--line-strong); padding: 22px 0; text-decoration: none; margin: 36px 0; }
 .learning-link > span { color: var(--muted); font-size: 13px; }
 .learning-link strong { color: var(--accent-strong); font-size: 15px; font-weight: 550; }
@@ -147,7 +225,7 @@
 .book-subtitle { margin-top: 28px; font-size: 20px; line-height: 1.6; color: var(--heading); max-width: 23em; }
 .book-description { color: var(--muted); font-size: 16px; line-height: 1.85; max-width: 31em; margin-top: 16px; }
 .book-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 26px; margin-top: 30px; }
-.book-actions .button { border-radius: 3px; gap: 24px; }
+.book-actions .button { gap: 24px; }
 .book-actions > a:not(.button) { font-size: 13px; color: var(--text); text-underline-offset: 5px; }
 .book-object {
   position: relative;
@@ -211,7 +289,7 @@ html[lang="ko"] .book-reader .docs-main h1 { font-family: var(--font-sans); font
   .book-contents { gap: 48px; }
 }
 @media (max-width: 860px) {
-  .docs-container { display: block; padding-inline: 24px; }
+  .docs-container { display: block; padding-inline: 24px; background: none; }
   .docs-sidebar { display: block; position: relative; top: auto; padding: 0; max-height: none; border-right: 0; border-bottom: 1px solid var(--line); overflow: visible; }
   .docs-navigation-toggle { display: flex; justify-content: space-between; padding: 16px 0; font: 12px/1.5 var(--font-mono); color: var(--text); cursor: pointer; list-style: none; }
   .docs-navigation-toggle::-webkit-details-marker { display: none; }
@@ -243,6 +321,10 @@ html[lang="ko"] .book-reader .docs-main h1 { font-family: var(--font-sans); font
   .docs-main h1 { font-size: 32px; }
   .section-heading h1 { font-size: 52px; }
   .catalog-group { grid-template-columns: 1fr; gap: 12px; }
+  .catalog-links { grid-template-columns: 1fr; }
+  .catalog-card.has-shot:last-child:nth-child(odd) { flex-direction: column; }
+  .catalog-card.has-shot:last-child:nth-child(odd) .catalog-shot { flex: none; aspect-ratio: 1206 / 520; border-left: 0; border-bottom: 1px solid var(--line); }
+  .catalog-card.has-shot:last-child:nth-child(odd) .catalog-text { align-self: auto; }
   .catalog-title { font-size: 16px; }
   .document-body { font-size: 15px; }
   .document-body > p:first-child { font-size: 16px; }
