@@ -143,4 +143,16 @@ describe Gori::Redact::Matcher do
       end
     end
   end
+
+  # `\C` matches one code unit, so a match could end inside a multibyte character and the next
+  # NO_UTF_CHECK match would start mid-character — undefined behaviour. Refused up front.
+  describe "a \\C pattern" do
+    it "is refused into pattern_errors, while an escaped backslash before C is not" do
+      m = Gori::Redact::Matcher.new(Gori::Redact::Profile.new(name: "p", patterns: ["a\\C", "x\\\\C", "\\\\\\C"]))
+      m.pattern_errors.size.should eq(2)
+      m.pattern_errors[0].should start_with("a\\C:")
+      m.pattern_errors[1].should start_with("\\\\\\C:")
+      Gori::Redact::Matcher.single_code_unit?("x\\\\C").should be_false
+    end
+  end
 end

@@ -49,6 +49,14 @@ module Gori
         @patterns = [] of {Regex, String}
         @profile.patterns.each do |src|
           next if src.strip.empty?
+          # `\C` matches one code UNIT, so a match can end inside a multibyte character. That
+          # breaks what `replace_all`'s NO_UTF_CHECK rests on (every boundary on a character),
+          # and a PCRE2 build without JIT would accept it. Refused like a pattern that fails to
+          # compile.
+          if Matcher.single_code_unit?(src)
+            @pattern_errors << "#{src}: \\C (a single code unit) can split a character and is not supported"
+            next
+          end
           begin
             @patterns << {Regex.new(src, Regex::Options::IGNORE_CASE), "pattern #{src}"}
           rescue ex
@@ -57,6 +65,17 @@ module Gori
         end
         BUILTIN_PATTERNS.each { |(rx, label)| @patterns << {rx, label} }
         @text_rules = build_text_rules
+      end
+
+      # Whether `src` spells the `\C` escape: a `C` after an odd run of backslashes (an even
+      # run is escaped backslashes followed by a literal `C`).
+      def self.single_code_unit?(src : String) : Bool
+        run = 0
+        src.each_byte do |b|
+          return true if b == 'C'.ord && run.odd?
+          run = b == '\\'.ord ? run + 1 : 0
+        end
+        false
       end
 
       # The derived name=value / "name": "value" regexes — how a profile's FIELD NAMES keep
@@ -384,7 +403,7 @@ module Gori
           stop = md.byte_end(group)
           whole_end = md.byte_end(0)
           before = pos
-          if stop == start
+          if stop <= start # `<=`: a `\K` in a lookaround can report start past stop
             # A zero-width GROUP has nothing to replace; copy the match through rather than
             # minting a placeholder for the empty string.
             clean.write bytes[before, whole_end - before]
