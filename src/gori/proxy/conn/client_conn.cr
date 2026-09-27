@@ -1,6 +1,7 @@
 require "uri"
 require "../codec/http1"
 require "../codec/body"
+require "./copy_buf_pool"
 require "../codec/content_decode"
 require "../sink"
 require "../head_rewriter"
@@ -205,10 +206,6 @@ module Gori::Proxy
       @upstream = nil.as(IO?)
       @up_host = nil.as(String?)
       @up_port = 0
-      # One 64 KiB copy buffer reused across every request AND response body forwarded on
-      # this connection (see `copy_buf`), so a keep-alive stream stops churning a large-object
-      # allocation per body. Lazily allocated on the first body copy.
-      @copy_buf = nil.as(Bytes?)
       # Why the most recent upstream dial failed, set by `open_upstream` and read only when a
       # dial returned nil — lets a failed flow distinguish unreachable from a TLS/verify
       # rejection (the #323 case, whose fix is --insecure-upstream) and from an upstream proxy
@@ -261,11 +258,13 @@ module Gori::Proxy
       @origin_dst.try(&.[0])
     end
 
-    # The connection-lifetime scratch buffer for body forwarding, allocated on first use.
-    # Safe to share across the request and response streams because they run sequentially on
-    # this one fiber (the request body is fully forwarded before the response head is read).
-    private def copy_buf : Bytes
-      @copy_buf ||= Bytes.new(Codec::Body::BUFSIZE)
+    # `Codec::Body.stream` through a 64 KiB copy buffer LENT for this one body (see
+    # CopyBufPool), so a keep-alive connection pins no buffer between bodies. A bodyless frame
+    # never touches a buffer, so it borrows none.
+    private def stream_body(src : IO, dst : IO, framing : Codec::BodyFraming, length : Int64,
+                            tee : IO) : Bool
+      return Codec::Body.stream(src, dst, framing, length, tee) if framing.none?
+      CopyBufPool.lend { |buf| Codec::Body.stream(src, dst, framing, length, tee, buf) }
     end
 
     # One-shot teardown claim shared between a relaxed-stream copy and its client-abort watcher
@@ -610,7 +609,7 @@ module Gori::Proxy
           early_head, early_head_failure, send_body, client_gone = settle_expectation(up)
         end
         if send_body
-          req_complete = Codec::Body.stream(@io, up, req_framing, req_len, req_capture, copy_buf)
+          req_complete = stream_body(@io, up, req_framing, req_len, req_capture)
           up.flush
         end
         true
@@ -1584,11 +1583,11 @@ module Gori::Proxy
     private def stream_response_body(upstream : IO, resp_framing : Codec::BodyFraming,
                                      resp_len : Int64, resp_capture : Codec::CaptureBuffer,
                                      relaxed : Bool) : Bool
-      return Codec::Body.stream(upstream, @io, resp_framing, resp_len, resp_capture, copy_buf) unless relaxed
+      return stream_body(upstream, @io, resp_framing, resp_len, resp_capture) unless relaxed
       latch = TeardownLatch.new
       spawn watch_client_abort(upstream, latch)
       begin
-        Codec::Body.stream(upstream, @io, resp_framing, resp_len, resp_capture, copy_buf)
+        stream_body(upstream, @io, resp_framing, resp_len, resp_capture)
       ensure
         # Claim teardown so a still-parked watcher can't close `upstream` after we hand it back.
         # Losing the claim means the watcher already fired (client gone, upstream closed under the
@@ -1646,7 +1645,7 @@ module Gori::Proxy
                                                 ttfb : Int64, started : Time::Instant,
                                                 extract_ref : ExtractRef? = nil) : Bool
       buf = Codec::Body.presized_capture(resp_framing, resp_len)
-      resp_complete = Codec::Body.stream(upstream, buf, resp_framing, resp_len, Codec::DiscardIO.new, copy_buf)
+      resp_complete = stream_body(upstream, buf, resp_framing, resp_len, Codec::DiscardIO.new)
       rw = @rewriter
       # `live` is false when only a body-scoped EXTRACT rule brought this response here, or
       # when a rewrite rule exists only for another host: no applicable rewrite lost its
@@ -1737,7 +1736,7 @@ module Gori::Proxy
       buf = Codec::Body.presized_capture(resp_framing, resp_len)
       # tee into a discard sink, not a second IO::Memory — the body is already buffered in
       # `buf`; a throwaway IO::Memory would hold the whole response a second time.
-      resp_complete = Codec::Body.stream(upstream, buf, resp_framing, resp_len, Codec::DiscardIO.new, copy_buf)
+      resp_complete = stream_body(upstream, buf, resp_framing, resp_len, Codec::DiscardIO.new)
       # `buf` is filled once and never written again, and build_message copies head+body into
       # a fresh buffer, so `buf.to_slice` is a stable view — no defensive dup (which would hold
       # the whole body a second time). Mirrors the non-hold M&R path above.

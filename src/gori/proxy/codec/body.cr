@@ -232,11 +232,11 @@ module Gori::Proxy::Codec
     # followed by a keep-alive request without desyncing the peer).
     #
     # `buf` is the scratch copy buffer. When nil (Repeater/Fuzz/Miner callers) a body
-    # allocates a fresh 64 KiB slice, as before. A caller that forwards many bodies on
-    # one connection (ClientConn) passes ONE reused buffer so a keep-alive stream stops
-    # churning a large-object 64 KiB allocation per body — safe because a body is pumped
-    # one direction on one fiber, so the request and response bodies copy sequentially,
-    # never overlapping (the same argument copy_chunked already uses across its chunks).
+    # allocates a fresh 64 KiB slice, as before. ClientConn, which forwards many bodies,
+    # passes one borrowed from `Proxy::CopyBufPool` for the length of this call, so a
+    # keep-alive stream stops churning a large-object 64 KiB allocation per body — safe
+    # because a body is pumped one direction on one fiber and the buffer never leaves this
+    # call (the same argument copy_chunked already uses across its chunks).
     # A body-less frame (None) never touches the buffer, so a bodyless request never allocates.
     def self.stream(src : IO, dst : IO, framing : BodyFraming, length : Int64, tee : IO, buf : Bytes? = nil) : Bool
       complete =
