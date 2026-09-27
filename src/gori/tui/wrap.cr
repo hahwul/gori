@@ -701,7 +701,7 @@ module Gori::Tui
       # `ascii` is `Screen.printable_ascii?(src)` and `marks` the scan's grapheme checkpoints
       # (nil on that ASCII path), both held by the `SearchScan` so neither is a per-row walk.
       def initialize(@src : String, @conceal : Array({Int32, Int32})?, lo : Int32,
-                     @reveal : Bool = false, @ascii : Bool = Screen.printable_ascii?(@src),
+                     @reveal : Bool, @ascii : Bool,
                      @marks : ClusterMarks? = nil)
         @len = @src.size
         @lo = lo.clamp(0, @len)

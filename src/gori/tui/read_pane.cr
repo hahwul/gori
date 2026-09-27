@@ -143,7 +143,12 @@ module Gori::Tui
     end
 
     # The ^F query to band in `render`. "" clears it.
-    setter search_hl : String
+    # An empty query frees the memo's whole-line scans now, not at this pane's next render: a
+    # pane that is not drawn again (the Repeater's hidden decoded/editor twin) would keep them.
+    def search_hl=(q : String) : Nil
+      @search_hl = q
+      @search_memo.clear if q.empty?
+    end
 
     # ^F search: 0-based indices of the lines containing `query`, case-insensitively.
     #
