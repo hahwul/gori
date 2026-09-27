@@ -177,7 +177,7 @@ describe "Store#delete_flows detaching references" do
     end
   end
 
-  it "reclaims an h2 connection's log only once no surviving flow still uses it" do
+  it "reclaims an h2 connection's frames only once no surviving flow still uses it, keeping its row" do
     raw_detach_store do |store, db|
       shared_a = ref_flow(store, "/shared-a")
       shared_b = ref_flow(store, "/shared-b")
@@ -192,13 +192,15 @@ describe "Store#delete_flows detaching references" do
 
       store.delete_flows([shared_a, solo]).should be_true
       store.flush
-      db.query_all("SELECT id FROM h2_connections ORDER BY id", as: Int64).should eq([1_i64])
       db.query_all("SELECT conn_id FROM h2_frames", as: Int64).should eq([1_i64])
 
       store.delete_flow(shared_b).should be_true
       store.flush
-      db.scalar("SELECT COUNT(*) FROM h2_connections").as(Int64).should eq(0)
       db.scalar("SELECT COUNT(*) FROM h2_frames").as(Int64).should eq(0)
+      # The rows stay for the retention sweep's activity-gated reap: the connection may still be
+      # open, and a dropped INTEGER PRIMARY KEY id is handed to the next connection, which would
+      # then inherit every frame the live one logs afterwards.
+      db.query_all("SELECT id FROM h2_connections ORDER BY id", as: Int64).should eq([1_i64, 2_i64])
     end
   end
 end

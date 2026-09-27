@@ -612,7 +612,13 @@ module Gori
       # An HTTP/2 connection multiplexes many flows/streams, so only drop its log once NO
       # surviving flow still references it. The retention prune's activity gate would keep
       # a recent flow's log unreclaimed until later captures advance the floor, so an
-      # explicit user delete reclaims it directly here (no activity gate — this flow is gone).
+      # explicit user delete reclaims the frames directly here (no activity gate — this flow
+      # is gone).
+      #
+      # The `h2_connections` row itself stays, for the retention sweep's activity-gated reap.
+      # Its id is an INTEGER PRIMARY KEY without AUTOINCREMENT, and the connection may still be
+      # open and logging: dropping the row here let the next connection reuse its id and inherit
+      # every frame (and flow) the live one wrote afterwards.
       #
       # `NOT EXISTS` is a seek on idx_flows_h2_conn; the `? NOT IN (SELECT h2_conn_id …)` it
       # replaces built the whole column into an ephemeral table twice per connection. Same
@@ -620,7 +626,6 @@ module Gori
       # three-valued trap (any NULL in the list makes it NULL, i.e. never delete) could not arise.
       h2_conns.each do |cid|
         conn.exec("DELETE FROM h2_frames WHERE conn_id = ? AND NOT EXISTS (SELECT 1 FROM flows WHERE h2_conn_id = ?)", cid, cid)
-        conn.exec("DELETE FROM h2_connections WHERE id = ? AND NOT EXISTS (SELECT 1 FROM flows WHERE h2_conn_id = ?)", cid, cid)
       end
     end
 
