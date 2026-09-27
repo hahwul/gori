@@ -49,7 +49,7 @@ describe "MCP issue retest" do
   end
 
   # #1160: after its session is deleted a step names the id it had, flags it deleted, and
-  # does not resolve to the next session that takes that id.
+  # does not resolve to a session at that id — which V40 no longer creates, so it is planted.
   it "lists a step whose session was deleted as deleted, even after the id is reused" do
     with_store do |store|
       iid = retest_issue(store)
@@ -57,7 +57,8 @@ describe "MCP issue retest" do
       tools = tools_for(store)
       mcp_ok_json(tools, "add_retest_step", %({"issue_id":#{iid},"repeater_id":#{rid},"assertion":"status:403"}))
       mcp_ok_json(tools, "delete_repeater", %({"id":#{rid}}))
-      retest_repeater(store, "unrelated", "GET /public HTTP/1.1\r\nHost: acme.test\r\n\r\n").should eq(rid)
+      retest_repeater(store, "unrelated", "GET /other HTTP/1.1\r\nHost: acme.test\r\n\r\n").should_not eq(rid)
+      plant_repeater_at(store, rid, "https://acme.test", "GET /public HTTP/1.1\r\nHost: acme.test\r\n\r\n")
 
       step = mcp_ok_json(tools, "list_retest_steps", %({"issue_id":#{iid}}))["steps"][0]
       step["ref_id"].as_i64.should eq(rid)

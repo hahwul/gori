@@ -132,8 +132,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       return
     end
     if m = row.frozen
-      # An id ALONE is not the source: `repeaters.id` is reused, so a tab opened after the
-      # source tab was closed can inherit its id while the copy outlives the close (#1048).
+      # An id ALONE is not the source: `repeaters.id` was reused until V40, so a tab opened
+      # after the source tab was closed could inherit its id while the copy outlived the
+      # close (#1048), and a copy frozen before the upgrade can still name such an id.
       return (@toast = EVIDENCE_SOURCE_REUSED) if evidence_source_reused?(m)
       unless @session.store.evidence_source_alive?(m)
         @toast = "the original #{m.source_label} is gone — the frozen copy is all there is"
@@ -324,9 +325,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
 
   # `s` (open original source) is offered only when the live object this copy came FROM is
   # still that object — `Store#evidence_source_alive?`, the predicate `evidence_count_for`'s
-  # marker already counted by. Existence alone was the bug: a Repeater id is reused, so after
-  # closing the source tab and opening another, `s` navigated to an unrelated tab and
-  # presented it as the original.
+  # marker already counted by. Existence alone was the bug: a Repeater id was reused until
+  # V40, so after closing the source tab and opening another, `s` navigated to an unrelated
+  # tab and presented it as the original.
   def evidence_source_available? : Bool
     meta = evidence_controller.view.selected || return false
     @session.store.evidence_source_alive?(meta)

@@ -49,8 +49,8 @@ module Gori
     # `csrf-fetch → login`. Each step's response goes through the slot's own extract rules,
     # which is what rebinds it; see `SessionRefresh`. Ids, because a session's name is not
     # unique. A NEGATIVE id is a step whose session was deleted (`Store#delete_repeater`):
-    # `repeaters.id` has no AUTOINCREMENT, so a positive id left behind would re-bind to the
-    # next tab that takes it (#1160's encoding, for the same reason). It keeps its place in
+    # before V40 `repeaters.id` had no AUTOINCREMENT, so a positive id left behind would re-bind
+    # to the next tab that took it (#1160's encoding, for the same reason). It keeps its place in
     # the list and refuses to run until it is removed.
     getter refresh : Array(Int64)
     # WHEN the refresh runs on its own, before a send that goes out as this slot. `off` — the

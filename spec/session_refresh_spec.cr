@@ -475,12 +475,11 @@ describe Gori::SessionRefresh do
       server, port = start_login_origin(seen)
       begin
         _, _, slots, _, login = refresh_fixture(store, port, Policy.parse?("ttl=10m").not_nil!)
-        # Deleted on disk only: this process's cached list still names the positive id. The
-        # login is the HIGHEST id, so the next tab takes it (`repeaters.id` has no AUTOINCREMENT).
+        # Deleted on disk only: this process's cached list still names the positive id. Before
+        # V40 the next tab took the login's id (it is the HIGHEST); a successor is planted there,
+        # the shape an upgraded project can still hold.
         store.delete_repeater(login).should be_true
-        reused = store.insert_repeater("http://127.0.0.1:#{port}", "GET /unrelated HTTP/1.1\r\n\r\n".to_slice,
-          false, true, nil, 5)
-        reused.should eq(login)
+        plant_repeater_at(store, login, "http://127.0.0.1:#{port}", "GET /unrelated HTTP/1.1\r\n\r\n", 5)
         slots.find("admin").not_nil!.refresh.last.should eq(login)
         Gori::SessionRefresh.before_send("admin")
         # Step 1 ran; step 2 refused as deleted instead of replaying the unrelated tab.

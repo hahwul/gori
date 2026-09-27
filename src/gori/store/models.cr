@@ -785,8 +785,8 @@ module Gori
       # Whether the object this step named was deleted (#1160). Stored as the NEGATED id —
       # no migration, and it fails closed: every resolver looks the raw `ref_id` up, finds no
       # row with a negative id, and reports the step missing, which is also all an older gori
-      # reading this database can do with it. A positive id could be taken again by the next
-      # repeater (`repeaters.id` has no AUTOINCREMENT) and the step would re-bind to it.
+      # reading this database can do with it. Before V40 a positive id could be taken again by
+      # the next repeater (`repeaters.id` had no AUTOINCREMENT) and the step would re-bind to it.
       def detached? : Bool
         @ref_id < 0
       end

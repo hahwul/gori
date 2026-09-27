@@ -9,9 +9,9 @@ module Gori
     # the transaction, but the batch can still roll back afterwards (a COMMIT-time
     # SQLITE_FULL/IOERR, or an unrelated co-submitted write raising — writer_loop batches
     # up to BATCH_MAX ops from every fiber into one transaction). Returning the captured
-    # id there handed out the rowid of an issue that does not exist, and because
-    # `issues.id` is INTEGER PRIMARY KEY without AUTOINCREMENT the next issue created is
-    # handed that same id and silently adopts any entity_links written against it.
+    # id there handed out the rowid of an issue that does not exist, and the next issue
+    # created is handed that same id — `sqlite_sequence` rolls back with the insert, so V40's
+    # AUTOINCREMENT does not retire it — and silently adopts any entity_links written against it.
     #
     # `notes` defaults to the `''` this always wrote, so no existing caller changes. It is a
     # parameter at all for the create-with-a-body path (`gori run issues create --notes…`,

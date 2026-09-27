@@ -412,7 +412,8 @@ describe "MCP entity links" do
   # counter resets and the very next tab takes the dead id. The link then resolved
   # `stale: false` to an unrelated request — an issue's evidence pointer naming a different
   # URL. A pointer that starts lying is worse than either honest answer, so this one cascades.
-  it "drops a repeater link when the repeater is deleted, because its id can be reused" do
+  # V40 stopped handing the id out again; a successor planted at it pins the cascade anyway.
+  it "drops a repeater link when the repeater is deleted, so no tab at its id inherits it" do
     with_store do |store|
       rid = store.insert_repeater("https://victim.test/a", "GET /a HTTP/1.1\r\nHost: victim.test\r\n\r\n".to_slice,
         false, true, nil, 0)
@@ -423,10 +424,8 @@ describe "MCP entity links" do
       store.delete_repeater(rid)
       mcp_ok_json(tools, "list_links", %({"owner_kind":"issue","owner_id":#{iid}}))["total"].as_i.should eq(0)
 
-      # The id comes straight back — which is exactly why the link could not be left behind.
-      again = store.insert_repeater("https://unrelated.test/z", "GET /z HTTP/1.1\r\nHost: unrelated.test\r\n\r\n".to_slice,
-        false, true, nil, 0)
-      again.should eq(rid)
+      # A tab at the same id — what the counter handed out before V40.
+      plant_repeater_at(store, rid, "https://unrelated.test/z", "GET /z HTTP/1.1\r\nHost: unrelated.test\r\n\r\n")
       mcp_ok_json(tools, "list_links", %({"owner_kind":"issue","owner_id":#{iid}}))["total"].as_i.should eq(0)
     end
   end

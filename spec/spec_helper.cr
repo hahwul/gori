@@ -212,6 +212,17 @@ def ungated_outbound : Gori::Outbound
   Gori::Outbound.waived(nil, Gori::Outbound::Reason::NoProject)
 end
 
+# A Repeater tab AT an explicit id, created now. Since V40 `repeaters.id` is never handed out
+# twice, so a spec that pins a guard against a REUSED id plants the successor itself: the shape a
+# project that reused ids before its upgrade can still hold.
+def plant_repeater_at(store : Gori::Store, id : Int64, target : String, request : String,
+                      position : Int32 = 0) : Int64
+  now = (Time.utc - Time::UNIX_EPOCH).total_microseconds.to_i64
+  store.@db.exec("INSERT INTO repeaters (id, created_at, updated_at, target, request, position) " \
+                 "VALUES (?, ?, ?, ?, ?, ?)", id, now, now, target, request.to_slice, position)
+  id
+end
+
 # A throwaway on-disk Store for one example: opened on a fresh temp path, closed and
 # deleted (with its WAL/SHM sidecars) on the way out, whether or not the block raised. This
 # is the harness behind most store-backed examples in the tree; it used to be pasted into

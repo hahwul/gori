@@ -327,9 +327,11 @@ describe "Gori::Retest.plan" do
     end
   end
 
-  # #1160: `repeaters.id` has no AUTOINCREMENT, so deleting the newest session frees its id
-  # for the next one. A step left pointing at the old id silently re-bound to the new,
-  # unrelated session, and `retest run` sent it and recorded a verdict on the issue.
+  # #1160: before V40 `repeaters.id` had no AUTOINCREMENT, so deleting the newest session freed
+  # its id for the next one. A step left pointing at the old id silently re-bound to the new,
+  # unrelated session, and `retest run` sent it and recorded a verdict on the issue. V40 no
+  # longer hands the id out, so the successor is planted AT the old id by hand — the shape a
+  # project that reused ids before its upgrade can still hold — and the detach must still hold.
   it "never re-binds a step to a later session that reuses its deleted session's id" do
     with_store do |store|
       iid = issue(store)
@@ -337,8 +339,8 @@ describe "Gori::Retest.plan" do
       sid, _ = store.add_retest_step(iid, :variant, Gori::Store::LinkRefKind::Repeater, rid, "status:404")
       store.delete_repeater(rid).should be_true
 
-      reused = repeater(store, "unrelated", "https://b.test")
-      reused.should eq(rid) # the hazard: the freed id comes straight back
+      repeater(store, "unrelated", "https://b.test").should_not eq(rid)
+      plant_repeater_at(store, rid, "https://b.test", "GET / HTTP/1.1\r\nHost: b.test\r\n\r\n", 1)
 
       step = store.get_retest_step(sid).not_nil!
       step.detached?.should be_true
@@ -371,6 +373,24 @@ describe "Gori::Retest.plan" do
       # Deleting again (a peer's stale delete) must not flip the sign back.
       store.delete_repeater(gone).should be_true
       store.retest_steps(a_issue).first.detached?.should be_true
+    end
+  end
+end
+
+# Before V40 a wipe freed every issue id, so an agent still holding one added a step to whatever
+# issue was filed next: `IssueGone` was never reached. The id stays gone now.
+describe "Store retest steps after an issue wipe (V40)" do
+  it "refuses a step for a wiped issue as gone, even after another issue is filed" do
+    with_store do |store|
+      stale = issue(store, "SQLi in /login")
+      store.clear_issues.should be_true
+      fresh = issue(store, "unrelated low")
+      fresh.should_not eq(stale)
+      tab = repeater(store, "probe")
+      id, status = store.add_retest_step(stale, Gori::Store::RetestRole::Variant, Gori::Store::LinkRefKind::Repeater, tab)
+      status.issue_gone?.should be_true
+      id.should eq(0)
+      store.retest_steps(fresh).should be_empty
     end
   end
 end
