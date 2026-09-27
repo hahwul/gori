@@ -991,16 +991,17 @@ module Gori::Decoder
       i = 0
       while i < bytes.size
         if word = rfc2047_word_at(bytes, i, required_encoding)
-          run_start = i
+          words = [{i, word}]
           data = IO::Memory.new
           data.write(word.data)
           i = word.next_pos
           resume = nil.as(Int32?)
           while (gap_end = rfc2047_fws_end(bytes, i)) > i && (following = rfc2047_word_at(bytes, gap_end, required_encoding))
-            if following.charset.compare(word.charset, case_insensitive: true) != 0
+            if rfc2047_charset_key(following.charset) != rfc2047_charset_key(word.charset)
               resume = gap_end # a charset change ends the run; the gap between words is still dropped
               break
             end
+            words << {gap_end, following}
             data.write(following.data)
             i = following.next_pos
           end
@@ -1008,7 +1009,7 @@ module Gori::Decoder
             sink << text
             i = resume if resume
           else
-            sink.write(bytes[run_start, i - run_start])
+            rfc2047_write_words(sink, bytes, words)
           end
           next
         end
@@ -1018,6 +1019,35 @@ module Gori::Decoder
         i += width
       end
       String.new(sink.to_slice)
+    end
+
+    # A run whose joined bytes did not decode, word by word: one bad word used to leave every
+    # valid neighbour literal too. A word that decodes alone is written decoded; one that does not
+    # stays literal, and so does the whitespace beside it (it is ordinary text now).
+    private def rfc2047_write_words(sink : IO, bytes : Bytes, words : Array({Int32, Rfc2047RawWord})) : Nil
+      prev_end = nil.as(Int32?)
+      prev_literal = false
+      words.each do |(start, w)|
+        text = (rfc2047_charset_decode(w.charset, w.data) rescue nil)
+        if pe = prev_end
+          sink.write(bytes[pe, start - pe]) if prev_literal || text.nil?
+        end
+        text ? (sink << text) : sink.write(bytes[start, w.next_pos - start])
+        prev_literal = text.nil?
+        prev_end = w.next_pos
+      end
+    end
+
+    # The charset names `rfc2047_charset_decode` treats as one, so `utf-8` beside `UTF8` still
+    # joins into one run (a character may be split across them).
+    private def rfc2047_charset_key(charset : String) : String
+      case cs = charset.downcase
+      when "utf8"                           then "utf-8"
+      when "ascii"                          then "us-ascii"
+      when "iso8859-1", "latin1", "latin-1" then "iso-8859-1"
+      when "cp1252"                         then "windows-1252"
+      else                                       cs
+      end
     end
 
     # A single encoded-word, payload-decoded but not yet charset-decoded: adjacent words are
