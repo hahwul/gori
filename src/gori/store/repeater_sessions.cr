@@ -292,12 +292,14 @@ module Gori
     # Returns whether the write committed (false = store busy/locked/closing).
     #
     # Cascades `entity_links`, unlike the deliberately-dangling FLOW case, and the difference
-    # is id REUSE. `repeaters.id` is `INTEGER PRIMARY KEY` without AUTOINCREMENT, and repeaters
-    # are routinely deleted at the TOP of the id space — closing the newest tab — which resets
-    # the counter immediately. So a link left pointing at repeater #1 read `#1 (gone)` for as
-    # long as it took to open one more tab, and then resolved, `stale: false`, to an
-    # UNRELATED request: an issue's evidence pointer confidently naming a different URL, in
-    # the TUI overlay, both exports and MCP `list_links`.
+    # was id REUSE. Until V40 `repeaters.id` was `INTEGER PRIMARY KEY` without AUTOINCREMENT,
+    # and repeaters are routinely deleted at the TOP of the id space — closing the newest tab —
+    # which reset the counter immediately. So a link left pointing at repeater #1 read
+    # `#1 (gone)` for as long as it took to open one more tab, and then resolved,
+    # `stale: false`, to an UNRELATED request: an issue's evidence pointer confidently naming a
+    # different URL, in the TUI overlay, both exports and MCP `list_links`. V40 made the id
+    # permanent; the cascades stay, because a pointer at a tab that is gone still points at
+    # nothing an operator can open.
     #
     # A flow link left dangling by retention pruning cannot re-bind: both prune paths delete
     # from the bottom (`WHERE id <= cutoff`), so `MAX(id)` survives and the next insert is
@@ -313,11 +315,16 @@ module Gori
     # the steps left can then PASS an issue its missing step would have failed. A detached
     # step keeps its row and keeps refusing as missing until it is removed and re-added; see
     # `Store::RetestStep#detached?` for the encoding.
+    #
+    # A Probe finding raised by a Repeater send names its tab in `sample_repeater_id`, and
+    # promoting the finding links the new issue to that id. Left behind, it linked whatever tab
+    # took the id next; it is cleared here, and the finding keeps its host, URLs and evidence.
     def delete_repeater(id : Int64) : Bool
       ts = now_us
       exec_task_ok ->(c : DB::Connection) {
         c.exec("DELETE FROM ws_messages WHERE repeater_id = ?", id)
         c.exec("DELETE FROM entity_links WHERE ref_kind = 'repeater' AND ref_id = ?", id)
+        c.exec("UPDATE probe_issues SET sample_repeater_id = NULL WHERE sample_repeater_id = ?", id)
         c.exec("UPDATE issue_retest_steps SET ref_id = -ref_id, updated_at = ? " \
                "WHERE ref_kind = 'repeater' AND ref_id = ? AND ref_id > 0", ts, id)
         # A session slot's REFRESH steps (#1233) name repeaters by id too, and are detached the
