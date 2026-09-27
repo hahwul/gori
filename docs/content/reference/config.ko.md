@@ -825,6 +825,67 @@ salt는 **비밀**이며, `env`의 토큰 값과 같은 조건으로 보관됩�
 
 프로젝트 범위 프로파일은 여기가 아니라 프로젝트 데이터베이스에 있습니다. [프로젝트별 오버라이드](#per-project-overrides)를 보세요.
 
+### rewriter, colormarker, saved_views, decoder {#global-libraries}
+
+이 네 섹션은 스위치가 아니라 라이브러리를 담습니다. `rewriter`, `colormarker`, `saved_views`는 Match & Replace 규칙, History 색상 규칙, History 뷰의 **전역** 행입니다. 프로젝트는 자기 행을 프로젝트 데이터베이스에 따로 두고, 전역 행의 켜짐/꺼짐 상태도 거기서 오버라이드할 수 있습니다. `decoder`는 이름 붙인 Decoder 체인을 담습니다. 각 탭에서, 또는 [`gori run rewriter`](/ko/reference/cli/#run-rewriter), [`gori run colormarker`](/ko/reference/cli/#run-colormarker), [`gori run views`](/ko/reference/cli/#run-views)에 `--scope global`을 붙여 만들고 편집하세요. 이 경로들은 행마다 검증을 거칩니다. 기록되는 형태는 다음과 같습니다.
+
+```json
+{
+  "rewriter": {
+    "next_rule_id": 3,
+    "rules": [
+      {
+        "id": 1, "enabled": true, "name": "no CSP",
+        "target": "response", "part": "head", "op": "remove_header", "match_kind": "literal",
+        "pattern": "Content-Security-Policy", "replacement": "", "host": "", "body_file": ""
+      },
+      {
+        "id": 2, "enabled": true, "name": "",
+        "target": "request", "part": "head", "op": "short_circuit", "match_kind": "literal",
+        "pattern": "/api/pay", "replacement": "", "host": "example.com", "body_file": "",
+        "respond": "fault", "respond_args": "{\"fault\":\"reset\",\"delay_ms\":500}"
+      }
+    ]
+  },
+  "colormarker": {
+    "next_rule_id": 2,
+    "rules": [
+      { "id": 1, "enabled": true, "name": "admin", "when": "path:/admin", "color": "teal", "style": "full" }
+    ],
+    "colors": [ { "name": "teal", "hex": "#2aa198" } ]
+  },
+  "saved_views": {
+    "next_view_id": 2,
+    "views": [ { "id": 1, "name": "APIs", "query": "path:/api" } ]
+  },
+  "decoder": {
+    "chains": [ { "name": "myenc", "spec": "base64-encode > url-encode" } ]
+  }
+}
+```
+
+`rewriter` 규칙의 필드는 `gori run rewriter add` 플래그와 이렇게 대응합니다.
+
+| 키 | 플래그 | 설명 |
+|-----|------|-------------|
+| `id` | | 전역 규칙 id. 프로젝트의 오버라이드는 이 id로 규칙을 가리킵니다 |
+| `enabled` | `--disabled` | 규칙의 기본 상태. `enabled` 키가 없는 규칙은 꺼진 것으로 읽습니다 |
+| `name` | `--name` | 규칙 목록에 보이는 라벨 |
+| `target` | `--target` | `request` 또는 `response` |
+| `part` | `--part` | `head`, `body`, `ws` |
+| `op` | `--op` | `replace`, `add_header`, `set_header`, `remove_header`, `short_circuit`, `pipe` |
+| `match_kind` | `--match` | `literal` 또는 `regex` |
+| `pattern` | `--find` | 매칭할 대상. `pattern`이 비어 있는 규칙은 파일을 읽을 때 버려집니다 |
+| `replacement` | `--value` | 치환 텍스트, 헤더 값, 미리 정한 응답, 또는 `pipe` 명령 |
+| `host` | `--host` | 호스트 glob. 비어 있으면 어디에나 적용됩니다 |
+| `body_file` | `--body-file`, `--map-dir` | `short_circuit` 규칙이 제공하는 파일, 또는 매핑하는 디렉터리 |
+| `respond` | | `short_circuit` 규칙이 답하는 방식: `inline`, `file`, `dir`, `fault`. `body_file`이 암시하는 값(있으면 `file`, 없으면 `inline`)이고 `respond_args`가 없으면 생략됩니다 |
+| `respond_args` | `--strip-prefix`, `--fallthrough`, `--fault`, `--delay`, `--hang` | **문자열로 저장된** JSON 객체. `strip_prefix`, `fallthrough`, `fault`(`close`/`reset`/`hang`), `delay_ms`, `hang_ms`를 담습니다 |
+
+`colormarker` 규칙은 `when`(History QL 조건, `--when`), `color`(`red`, `orange`, `yellow`, `green`, `blue`, `purple`, 또는 `colors`에 있는 항목의 이름), `style`(`full`은 행 전체를 칠하고 `strip`은 한 칸만 칠함)을 가집니다. 색상 규칙은 트래픽을 건드리지 않으므로 `enabled` 키가 없으면 켜진 것으로 읽습니다. `colors`는 `gori run colormarker color add --name --hex`가 쓰는 사용자 팔레트이며, 이름이 비었거나 겹치거나 hex를 읽을 수 없는 항목은 버려집니다. `saved_views` 항목은 `id`, `name`, History QL `query`로 이루어집니다. `decoder` 체인은 `name`과 실행할 `spec`이며, Decoder 탭의 **Save chain by name**이 기록합니다.
+
+`next_rule_id`와 `next_view_id`는 늘어나기만 합니다. 프로젝트의 오버라이드는 전역 행을 id로 가리키므로, id를 재사용하면 옛 오버라이드가 새 규칙에 붙어 버립니다. 그래서 이 카운터는 규칙을 모두 지워도, 공장 초기화를 해도 남습니다. `rewriter` 규칙에서 이 gori가 모르는 라벨(더 새로운 빌드가 쓴 값)은 기본값으로 바뀌지 않고 적힌 그대로 남아 규칙을 비활성 상태로 묶어 두며, 추가 키도 마찬가지입니다.
+
 ### 그 외 섹션 {#other-sections}
 
 | Section | Description |
@@ -840,11 +901,11 @@ salt는 **비밀**이며, `env`의 토큰 값과 같은 조건으로 보관됩�
 | `user_agents` | `$GEN.USER_AGENT`가 쓰는 직접 만든 목록으로, 내장 목록을 대체합니다. 위의 [user_agents](#user-agents) 참고 |
 | `hotkeys` | 키바인딩 오버라이드 (`os` 계층 + `command_modifier` + `keyset` + `bindings`). [단축키 가이드](/ko/guide/hotkeys/) 참고 |
 | `hooks` | 외부 프로세스 훅: `timeout_secs`(기본 5, 1~60으로 클램프)는 모든 이음매에서 훅 한 번이 받는 벽시계 예산입니다. [프로세스 훅](/ko/guide/scripting/#process-hooks) 참고 |
-| `decoder` | 이름 붙인 Decoder 체인. 모든 프로젝트가 공유하며 체인 단계에서 이름으로 부를 수 있습니다(열려 있는 서브탭은 프로젝트 DB에 있습니다) |
-| `rewriter` | 전역 Match & Replace 규칙. 모든 프로젝트에 적용되며 각 규칙의 기본 켜짐/꺼짐 상태는 프로젝트가 오버라이드할 수 있습니다. [전역 규칙과 프로젝트 규칙](/ko/guide/proxy/#global-and-project-rules) 참고 |
-| `colormarker` | 전역 History 행 색상 규칙과 사용자 색상 팔레트. `rewriter`와 동일한 전역/프로젝트 분리 구조입니다. 표시 전용이며 트래픽을 수정하지 않습니다. [run colormarker](/ko/reference/cli/#run-colormarker) 참고 |
+| `decoder` | 이름 붙인 Decoder 체인. 모든 프로젝트가 공유하며 체인 단계에서 이름으로 부를 수 있습니다(열려 있는 서브탭은 프로젝트 DB에 있습니다). [위](#global-libraries) 참고 |
+| `rewriter` | 전역 Match & Replace 규칙. 모든 프로젝트에 적용되며 각 규칙의 기본 켜짐/꺼짐 상태는 프로젝트가 오버라이드할 수 있습니다. [전역 규칙과 프로젝트 규칙](/ko/guide/proxy/#global-and-project-rules) 참고. 행 형태는 [위](#global-libraries)에 있습니다 |
+| `colormarker` | 전역 History 행 색상 규칙과 사용자 색상 팔레트. `rewriter`와 동일한 전역/프로젝트 분리 구조입니다. 표시 전용이며 트래픽을 수정하지 않습니다. [run colormarker](/ko/reference/cli/#run-colormarker) 참고. 행 형태는 [위](#global-libraries)에 있습니다 |
 | `mine` | Param Miner의 저장된 기본값. 위 [mine](#mine) 참고 |
-| `saved_views` | 전역 History **뷰** 라이브러리. 이름 붙은 QL 쿼리를 렌즈로 적용하며, `rewriter`와 같은 전역/프로젝트 분리를 씁니다. [run views](/ko/reference/cli/#run-views) 참고 |
+| `saved_views` | 전역 History **뷰** 라이브러리. 이름 붙은 QL 쿼리를 렌즈로 적용하며, `rewriter`와 같은 전역/프로젝트 분리를 씁니다. [run views](/ko/reference/cli/#run-views) 참고. 행 형태는 [위](#global-libraries)에 있습니다 |
 | `companion` | 마스코트 Miss Ring: `enabled`(기본 on), `placement`(`body` \| `bar`), `motion`(`lively` \| `calm` \| `still`), `notices`, `replies`(`hold` \| `timed`: 에이전트 답장을 다음 키 입력이나 클릭까지 남길지). [Settings 가이드](/ko/guide/settings/) 참고 |
 | `layout` | History / Probe / Issues 미리보기, History 목록 순서, Sitemap 펼침 깊이, 탭 바 번호와 슬롯. 위의 [layout](#layout) 참고 |
 | `statusline` | 일정 간격으로 명령을 실행하는 하단 상태 행. 위의 [statusline](#statusline) 참고 |

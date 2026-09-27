@@ -827,6 +827,67 @@ The salt is a **secret**, kept beside `env`'s token values on the same terms (th
 
 Project-scoped profiles live in the project database rather than here; see [Per-Project Overrides](#per-project-overrides).
 
+### rewriter, colormarker, saved_views and decoder {#global-libraries}
+
+These four sections hold libraries rather than switches. `rewriter`, `colormarker` and `saved_views` are the **global** rows of the Match & Replace rules, the History colour rules and the History views; a project keeps its own rows in its database and can override a global row's on/off state there. `decoder` holds the named Decoder chains. Create and edit them from their tabs or with [`gori run rewriter`](/reference/cli/#run-rewriter), [`gori run colormarker`](/reference/cli/#run-colormarker) and [`gori run views`](/reference/cli/#run-views) and `--scope global`, which validate each row. What they write looks like this:
+
+```json
+{
+  "rewriter": {
+    "next_rule_id": 3,
+    "rules": [
+      {
+        "id": 1, "enabled": true, "name": "no CSP",
+        "target": "response", "part": "head", "op": "remove_header", "match_kind": "literal",
+        "pattern": "Content-Security-Policy", "replacement": "", "host": "", "body_file": ""
+      },
+      {
+        "id": 2, "enabled": true, "name": "",
+        "target": "request", "part": "head", "op": "short_circuit", "match_kind": "literal",
+        "pattern": "/api/pay", "replacement": "", "host": "example.com", "body_file": "",
+        "respond": "fault", "respond_args": "{\"fault\":\"reset\",\"delay_ms\":500}"
+      }
+    ]
+  },
+  "colormarker": {
+    "next_rule_id": 2,
+    "rules": [
+      { "id": 1, "enabled": true, "name": "admin", "when": "path:/admin", "color": "teal", "style": "full" }
+    ],
+    "colors": [ { "name": "teal", "hex": "#2aa198" } ]
+  },
+  "saved_views": {
+    "next_view_id": 2,
+    "views": [ { "id": 1, "name": "APIs", "query": "path:/api" } ]
+  },
+  "decoder": {
+    "chains": [ { "name": "myenc", "spec": "base64-encode > url-encode" } ]
+  }
+}
+```
+
+A `rewriter` rule's fields map onto the `gori run rewriter add` flags:
+
+| Key | Flag | Description |
+|-----|------|-------------|
+| `id` | | Global rule id. A project's override names the rule by this id |
+| `enabled` | `--disabled` | The rule's default state. A rule with no `enabled` key reads as off |
+| `name` | `--name` | Label in the rule list |
+| `target` | `--target` | `request` or `response` |
+| `part` | `--part` | `head`, `body` or `ws` |
+| `op` | `--op` | `replace`, `add_header`, `set_header`, `remove_header`, `short_circuit` or `pipe` |
+| `match_kind` | `--match` | `literal` or `regex` |
+| `pattern` | `--find` | What to match. A rule with an empty `pattern` is dropped when the file loads |
+| `replacement` | `--value` | Replacement text, header value, canned response, or the `pipe` command |
+| `host` | `--host` | Host glob; empty applies everywhere |
+| `body_file` | `--body-file`, `--map-dir` | The file a `short_circuit` rule serves, or the directory it maps |
+| `respond` | | How a `short_circuit` rule answers: `inline`, `file`, `dir` or `fault`. Omitted when it is what `body_file` implies (`file` with one, `inline` without) and there are no `respond_args` |
+| `respond_args` | `--strip-prefix`, `--fallthrough`, `--fault`, `--delay`, `--hang` | A JSON object **stored as a string**, with `strip_prefix`, `fallthrough`, `fault` (`close`/`reset`/`hang`), `delay_ms` and `hang_ms` |
+
+A `colormarker` rule carries `when` (the History QL condition, `--when`), `color` (`red`, `orange`, `yellow`, `green`, `blue`, `purple`, or the name of an entry in `colors`) and `style` (`full` tints the row, `strip` paints one cell). A rule with no `enabled` key reads as on, since a colour rule never touches traffic. `colors` is the custom palette `gori run colormarker color add --name --hex` writes, and an entry with a blank or duplicate name or an unreadable hex is dropped. A `saved_views` entry is an `id`, a `name` and a History QL `query`. A `decoder` chain is a `name` and the `spec` it runs; the Decoder tab's **Save chain by name** writes it.
+
+`next_rule_id` and `next_view_id` only ever count up. A project's overrides refer to global rows by id, and a reused id would hand an old override to a new rule, so these counters survive deleting every rule and a factory reset. In a `rewriter` rule, a label this gori does not know (one a newer build wrote) is kept as written and holds the rule inert instead of being rewritten to a default, and so does an extra key.
+
 ### Other sections
 
 | Section | Description |
@@ -842,11 +903,11 @@ Project-scoped profiles live in the project database rather than here; see [Per-
 | `user_agents` | Your own list for `$GEN.USER_AGENT`, replacing the built-in one. See [user_agents](#user-agents) above |
 | `hotkeys` | Keybinding overrides (`os` layer + `command_modifier` + `keyset` + `bindings`). See the [Hotkeys guide](/guide/hotkeys/) |
 | `hooks` | External process hooks: `timeout_secs` (default 5, clamped 1-60) is the wall-clock budget one hook run gets at every seam. See [Process hooks](/guide/scripting/#process-hooks) |
-| `decoder` | Named Decoder chain specs, shared by every project and callable as a chain step by name (open sub-tabs live in the project database) |
-| `rewriter` | GLOBAL Match & Replace rules, applied in every project, each with a default on/off state a project can override. See [Global and project rules](/guide/proxy/#global-and-project-rules) |
-| `colormarker` | GLOBAL History row-colour rules and the custom colour palette, with the same global/project split as `rewriter`. Display only: a colour rule never modifies traffic. See [run colormarker](/reference/cli/#run-colormarker) |
+| `decoder` | Named Decoder chain specs, shared by every project and callable as a chain step by name (open sub-tabs live in the project database). See [above](#global-libraries) |
+| `rewriter` | GLOBAL Match & Replace rules, applied in every project, each with a default on/off state a project can override. See [Global and project rules](/guide/proxy/#global-and-project-rules); the row shape is [above](#global-libraries) |
+| `colormarker` | GLOBAL History row-colour rules and the custom colour palette, with the same global/project split as `rewriter`. Display only: a colour rule never modifies traffic. See [run colormarker](/reference/cli/#run-colormarker); the row shape is [above](#global-libraries) |
 | `mine` | Saved Param Miner defaults. See [mine](#mine) above |
-| `saved_views` | The GLOBAL History **views** library: named QL queries applied as a lens, with the same global/project split `rewriter` has. See [run views](/reference/cli/#run-views) |
+| `saved_views` | The GLOBAL History **views** library: named QL queries applied as a lens, with the same global/project split `rewriter` has. See [run views](/reference/cli/#run-views); the row shape is [above](#global-libraries) |
 | `companion` | Miss Ring, the mascot: `enabled` (on by default), `placement` (`body` \| `bar`), `motion` (`lively` \| `calm` \| `still`), `notices` and `replies` (`hold` \| `timed`: whether an agent's reply stays until your next key or click). See the [Settings guide](/guide/settings/) |
 | `layout` | History / Probe / Issues previews, History list order, Sitemap expand depth, tab-bar numbers and slots. See [layout](#layout) above |
 | `statusline` | Bottom status row that runs a command on an interval. See [statusline](#statusline) above |

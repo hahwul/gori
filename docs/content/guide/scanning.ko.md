@@ -32,6 +32,8 @@ gori에는 수동 테스트와 나란히 돌아가는 자동 분석 기능이 �
 | `client` | 페이지·번들 스크립트의 클라이언트 사이드 의심 지점: DOM 기반 XSS(소스가 싱크로 흐름), DOM 클로버링, 프로토타입 오염, postMessage 취약점. 휴리스틱이므로 확인이 필요한 단서로 다루세요 |
 | `active` | light-touch 프로브로 확인됨: 반사되는 파라미터, backslash-powered 주입 지점, 오픈 리다이렉트, CRLF/응답 헤더·호스트 헤더 인젝션, 접근 제어 우회(위조된 클라이언트 IP / 경로 정규화 / URL-rewrite 헤더), NGINX alias·파라미터 경로 탐색, 서버 사이드 템플릿 인젝션(SSTI), Next.js 서버 액션 인가 누락(`Next-Action` 요청을 세션 쿠키/Authorization 제거 후 재전송. 액션은 POST라 unsafe/AGGRESSIVE 필요). 에러 기반 SQL 인젝션(파라미터마다 구문을 깨는 페이로드를 붙이고, 깨끗한 baseline에는 없는 데이터베이스 오류 서명이 프로브 응답에만 나타나면 보고), 불리언 기반 블라인드 SQL 인젝션(파라미터마다 항상 참인 브레이크아웃과 항상 거짓인 브레이크아웃을 보내, 참 쪽은 baseline과 같고 거짓 쪽은 다르면 보고), 시간 기반 블라인드 SQL 인젝션(기본 비활성, 아래 참고), 그리고 **대역 외**로 확인하는 블라인드 SSRF. URL 파라미터를 [OAST](/ko/guide/oast/) 페이로드로 향하게 하고 서버가 콜백을 걸면 발견으로 올립니다. 블라인드 OS 커맨드 인젝션도 같은 방식으로 확인합니다. 명령/진단 파라미터(`cmd`, `ping`, `host` 등)에 셸 브레이크아웃 페이로드를 덧붙이고, 서버의 셸이 OAST 리스너에 콜백을 걸면 발견으로 올립니다. 원격 파일 포함(RFI)도 `file`, `page`, `template`, `lang` 같은 포함형 파라미터에 PHP/JSP/ASP 표식이 담긴 OAST 리소스를 주입해 같은 방식으로 확인합니다. GraphQL introspection도 액티브로 확인됩니다(`infoleak`에 기록). 접근 제어 우회는 HTTP 메서드 트릭도 다룹니다 — 기본은 메서드 대소문자 변형(`gET`), unsafe 옵트인에서 메서드 오버라이드 헤더(`X-HTTP-Method-Override`)와 대체 verb. **레이트리밋 우회**는 `429` 요청을 위조된 클라이언트 IP 헤더와 함께 재전송해, 깨끗한 control은 여전히 제한되는데 해당 요청은 처리되면 보고합니다. **안전하지 않은 HTTP 메서드**는 `OPTIONS`와 `TRACE`를 보내 Cross-Site Tracing(요청을 되비추는 TRACE)과 `Allow`에 광고된 위험 메서드를 표시합니다 |
 
+내장 룰 전체는 범주와 요청 비용과 함께 [Probe 룰 레퍼런스](/ko/reference/probe-rules/)에 id별로 나와 있습니다. `gori run probe rules enable`/`disable`이 받는 것이 이 id입니다.
+
 일부 액티브 룰은 나머지와 다르게 동작하며, Rules 서브탭이 해당 행에 이를 표시합니다.
 
 - **HTTP 요청 스머글링**(CL.TE / TE.CL / TE.TE 디싱크)은 **비활성**으로 출하됩니다. POST 본문과 함께 불완전한 프레이밍 프로브를 보내고 프런트엔드/백엔드 디싱크를 타이밍 행으로 확인하는데, 여기 있는 어떤 룰보다 대상에게 무겁고 덜 정중한 일입니다. 행에는 `opt-in` 배지가 붙습니다. `gori run probe rules enable request_smuggling`으로 의도적으로 무장하고, 차분 확인은 `--aggressive --unsafe` 단계로 읽으세요. 활성화해도 unsafe 메서드(팝업의 옵트인, `--unsafe`, AGGRESSIVE) 없이는 프로브를 만들지 않습니다. 프로브가 모두 POST이기 때문입니다.
@@ -240,4 +242,5 @@ Issue 상세에서 `⇧R`(**Retest…**)을 누릅니다. `a`로 아무 Repeater
 
 - [MCP Server](/ko/guide/mcp/): 에이전트가 스캔을 실행하고 이슈를 읽게 합니다
 - [CLI Reference](/ko/reference/cli/): `probe`, `mine`, `issues`, `notes` 플래그
+- [Probe 룰](/ko/reference/probe-rules/): 내장 스캔 룰 전체를 id별로
 - [Query Language](/ko/reference/query-language/): 스캔 범위를 좁힙니다

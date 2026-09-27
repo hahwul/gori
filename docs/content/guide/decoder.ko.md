@@ -57,7 +57,7 @@ myenc > url-encode
 
 | 범주 | 예시 |
 |----------|----------|
-| **Encoding** | `base64-encode` / `base64-decode`, `base64url-encode`, `url-encode` / `url-decode`, `url-encode-all`(모든 바이트를 인코딩, WAF 우회용), `hex-encode` / `hex-decode`, `base32`, `ascii85`, `base58`, `base36`, `base62`, `quoted-printable`, `punycode-encode` / `punycode-decode`(별칭 `idn-encode` / `idn-decode`), `nfc` / `nfd` / `nfkc` / `nfkd`, `rfc2047-q-encode` / `rfc2047-b-encode`, `rfc2047-q-decode` / `rfc2047-b-decode` / `rfc2047-decode`, `windows-bestfit-<codepage>`, `codepoint-overflow` |
+| **Encoding** | `base64-encode` / `base64-decode`, `base64url-encode`, `url-encode` / `url-decode`, `url-encode-all`(모든 바이트를 인코딩, WAF 우회용), `hex-encode` / `hex-decode`, `base32-encode` / `base32-decode`, `ascii85-encode` / `ascii85-decode`, `base58-encode` / `base58-decode`, `base36-encode` / `base36-decode`, `base62-encode` / `base62-decode`, `quoted-printable-encode` / `quoted-printable-decode`, `punycode-encode` / `punycode-decode`(별칭 `idn-encode` / `idn-decode`), `nfc` / `nfd` / `nfkc` / `nfkd`, `rfc2047-q-encode` / `rfc2047-b-encode`, `rfc2047-q-decode` / `rfc2047-b-decode` / `rfc2047-decode`, `windows-bestfit-<codepage>`, `codepoint-overflow` |
 | **Number bases** | `decimal-encode` / `decimal-decode`, `binary-encode` / `binary-decode`, `octal-encode` / `octal-decode` |
 | **Compression** | `gzip-compress` / `gzip-decompress`, `zlib-compress` / `zlib-decompress`, `raw-deflate` / `raw-inflate` (헤더 없는 RFC 1951), `brotli-decompress`, `zstd-decompress` |
 | **Serialization** | `msgpack-decode`, `cbor-decode`(바이너리 문서를 JSON 텍스트로), 그리고 네이티브 직렬화 리더 `java-deserialize`, `dotnet-viewstate`, `php-unserialize`, `pickle-disasm` |

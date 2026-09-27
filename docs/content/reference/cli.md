@@ -775,20 +775,20 @@ A bare `probe` scans and prints. The persisted findings behind the TUI's Probe t
 ```bash
 gori run probe issues --severity high            # the triage list, with the ids below take
 gori run probe promote 12                        # confirm one into Issues
-gori run probe dismiss --code missing-hsts       # mute in bulk by rule code or --host
+gori run probe dismiss --code missing_hsts       # mute in bulk by finding code or --host
 gori run probe delete --all --yes
 gori run probe rules --kind active               # list scan rules and which are armed
-gori run probe rules enable <rule-id>            # ids come from `probe rules`
+gori run probe rules enable <rule-id>            # ids: `probe rules`, or the Probe rules reference
 gori run probe mode passive                      # off | passive | active | aggressive
 ```
 
 | Verb | Options |
 | ------ | --------- |
 | `issues` | `-a`/`--all` (include dismissed / confirmed / resolved), `--severity`, `--category`, `--host` |
-| `dismiss <id>` | With an id, toggles that finding dismissed ⇄ open; `--code=CODE` / `--host=HOST` dismiss every open finding sharing it. A dismiss the project could not write exits `1` and leaves the finding unchanged |
+| `dismiss <id>` | With an id, toggles that finding dismissed ⇄ open; `--code=CODE` / `--host=HOST` dismiss every open finding sharing it. The code is the finding's (the `probe issues` column, such as `missing_hsts`), not its rule id, and must match exactly. A dismiss the project could not write exits `1` and leaves the finding unchanged |
 | `promote <id>` | Promote a finding to a human-confirmed Issue |
 | `delete <id>` | Or `--all --yes` |
-| `rules [list\|enable\|disable\|add\|delete]` | `list` takes `--kind=passive\|active\|custom`; `enable`/`disable`/`delete` take a `<rule-id>` from that list; `add` takes `-t`/`--title` (required), `-p`/`--pattern` (required), `--description`, `--side` (`request`\|`response`, default `response`), `--region` (`whole`\|`header`\|`body`, default `body`), `--regex`, `--exec` (run `--pattern` as a [process hook](/guide/scripting/#process-hooks): exit 0 raises the finding, stdout is the evidence), `-s`/`--severity` (default `info`) |
+| `rules [list\|enable\|disable\|add\|delete]` | `list` takes `--kind=passive\|active\|custom`; `enable`/`disable`/`delete` take a `<rule-id>` from that list (the built-ins are in [Probe rules](/reference/probe-rules/)); `add` takes `-t`/`--title` (required), `-p`/`--pattern` (required), `--description`, `--side` (`request`\|`response`, default `response`), `--region` (`whole`\|`header`\|`body`, default `body`), `--regex`, `--exec` (run `--pattern` as a [process hook](/guide/scripting/#process-hooks): exit 0 raises the finding, stdout is the evidence), `-s`/`--severity` (default `info`) |
 | `mode [off\|passive\|active\|aggressive]` | Print the project's scan mode, or set it |
 
 ### run discover

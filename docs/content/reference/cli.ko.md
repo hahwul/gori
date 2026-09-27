@@ -767,20 +767,20 @@ gori run probe -a
 ```bash
 gori run probe issues --severity high            # 아래 동사들이 받는 id가 함께 나오는 트리아지 목록
 gori run probe promote 12                        # 하나를 Issue로 확정
-gori run probe dismiss --code missing-hsts       # 룰 코드나 --host로 일괄 무시
+gori run probe dismiss --code missing_hsts       # 발견 코드나 --host로 일괄 무시
 gori run probe delete --all --yes
 gori run probe rules --kind active               # 스캔 룰 목록과 무장 여부
-gori run probe rules enable <rule-id>            # id는 `probe rules`에서
+gori run probe rules enable <rule-id>            # id는 `probe rules`나 Probe 룰 레퍼런스에서
 gori run probe mode passive                      # off | passive | active | aggressive
 ```
 
 | Verb | Options |
 |------|---------|
 | `issues` | `-a`/`--all`(무시·확정·해결된 항목 포함), `--severity`, `--category`, `--host` |
-| `dismiss <id>` | id를 주면 그 발견 항목을 무시 ⇄ 열림으로 토글하고, `--code=CODE` / `--host=HOST`는 그 값을 공유하는 열린 항목을 모두 무시합니다. 프로젝트에 쓰지 못한 dismiss는 항목을 바꾸지 않고 `1`로 끝납니다 |
+| `dismiss <id>` | id를 주면 그 발견 항목을 무시 ⇄ 열림으로 토글하고, `--code=CODE` / `--host=HOST`는 그 값을 공유하는 열린 항목을 모두 무시합니다. 코드는 룰 id가 아니라 발견의 코드(`probe issues`에 나오는 `missing_hsts` 같은 값)이며 정확히 일치해야 합니다. 프로젝트에 쓰지 못한 dismiss는 항목을 바꾸지 않고 `1`로 끝납니다 |
 | `promote <id>` | 발견 항목을 사람이 확인한 Issue로 승격 |
 | `delete <id>` | 또는 `--all --yes` |
-| `rules [list\|enable\|disable\|add\|delete]` | `list`는 `--kind=passive\|active\|custom`. `enable`/`disable`/`delete`는 그 목록의 `<rule-id>`를 받습니다. `add`는 `-t`/`--title`(필수), `-p`/`--pattern`(필수), `--description`, `--side`(`request`\|`response`, 기본 `response`), `--region`(`whole`\|`header`\|`body`, 기본 `body`), `--regex`, `--exec`(`--pattern`을 [프로세스 훅](/ko/guide/scripting/#process-hooks)으로 실행: exit 0이면 발견, stdout이 근거), `-s`/`--severity`(기본 `info`) |
+| `rules [list\|enable\|disable\|add\|delete]` | `list`는 `--kind=passive\|active\|custom`. `enable`/`disable`/`delete`는 그 목록의 `<rule-id>`를 받습니다(내장 룰은 [Probe 룰](/ko/reference/probe-rules/)에 있습니다). `add`는 `-t`/`--title`(필수), `-p`/`--pattern`(필수), `--description`, `--side`(`request`\|`response`, 기본 `response`), `--region`(`whole`\|`header`\|`body`, 기본 `body`), `--regex`, `--exec`(`--pattern`을 [프로세스 훅](/ko/guide/scripting/#process-hooks)으로 실행: exit 0이면 발견, stdout이 근거), `-s`/`--severity`(기본 `info`) |
 | `mode [off\|passive\|active\|aggressive]` | 프로젝트의 스캔 모드를 출력하거나 설정 |
 
 ### run discover {#run-discover}
