@@ -427,6 +427,21 @@ describe "gori run repeater — Layer-1 scope gate (#406)" do
   end
 end
 
+describe "gori run repeater race/timing — Layer-1 scope gate over every member" do
+  it "refuses a group whose later member is out of scope" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      scope.add("include", "string", "in.test/api/")
+      wires = ["GET /api/ok HTTP/1.1\r\nHost: in.test\r\n\r\n", "GET /internal HTTP/1.1\r\nHost: in.test\r\n\r\n"]
+      plan = Gori::Repeater::Plan.build(
+        Gori::Repeater::PlanOptions.new(wires.map(&.to_slice), target: "http://in.test/"),
+        Gori::Outbound.cli(scope, false))
+      Gori::CLI::Run.repeater_out_of_scope_for_spec(Gori::Outbound.cli(scope, false), plan).should be_true
+      Gori::CLI::Run.repeater_out_of_scope_for_spec(Gori::Outbound.cli(scope, true), plan).should be_false
+    end
+  end
+end
+
 describe "gori run repeater send (session row → PlanOptions mapping)" do
   it "maps the session's target, http2, SNI and auto-CL toggle onto the plan" do
     rec = Gori::Store::RepeaterRecord.new(1_i64, "https://h.test:8443",

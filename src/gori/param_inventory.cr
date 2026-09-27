@@ -166,7 +166,8 @@ module Gori
       # array step answers to `-` and to any numeric index: one element masked is enough.
       private def json_path?(path : String) : Bool
         segs = Params.json_segments(path)
-        return Params.json_leaf(path).try { |l| @names.includes?(l.downcase) } || false if segs.empty?
+        # `json_leaf` reads the same segments, so a path they cannot parse has no leaf either.
+        return false if segs.empty?
         return true if segs.any? { |s| s && @names.includes?(s.downcase) }
         @pointers.any? do |want|
           next false if want.size > segs.size

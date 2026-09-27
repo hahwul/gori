@@ -76,11 +76,34 @@ module Gori
     # (a flow scanned, references or not) and the newest reference id (rows inserted). A count
     # over the per-flow marker table (one row per scanned flow, not per reference) plus two
     # index-end reads, instead of a GROUP BY over every reference per tick (P6).
+    #
+    # `host_captured` also reads `flows`, which that fingerprint does not see: traffic reaching a
+    # referenced host after the scan has to clear its "never requested" flag. So when the newest
+    # flow id has moved, only the hosts still flagged uncaptured are asked again — one indexed
+    # probe each (`idx_flows_sitemap` leads with host), not the aggregate.
     def js_ref_nodes(limit : Int32 = SITEMAP_MAX) : {Array(JsRefNode), Bool}
       print = js_ref_fingerprint
-      if (memo = @js_ref_nodes_memo) && memo[0] == {print, limit}
-        return memo[1]
+      top_flow = @db.query_one("SELECT COALESCE(MAX(id), 0) FROM flows", as: Int64)
+      memo = @js_ref_nodes_memo
+      unless memo && memo[0] == {print, limit}
+        memo = { {print, limit}, js_ref_aggregate(limit), top_flow }
+        @js_ref_nodes_memo = memo
       end
+      key, result, seen_top = memo
+      return result if seen_top == top_flow
+      nodes, capped = result
+      hosts = nodes.reject(&.host_captured).map(&.host).uniq!
+      now = hosts.select { |h| @db.query_one?("SELECT 1 FROM flows WHERE host = ? LIMIT 1", h, as: Int64) }.to_set
+      nodes = nodes.map { |n| now.includes?(n.host) ? n.copy_with(host_captured: true) : n } unless now.empty?
+      result = {nodes, capped}
+      @js_ref_nodes_memo = {key, result, top_flow}
+      result
+    rescue
+      # Never crash a Sitemap poll over a read (mirrors sitemap_tags / sitemap_entries).
+      {[] of JsRefNode, false}
+    end
+
+    private def js_ref_aggregate(limit : Int32) : {Array(JsRefNode), Bool}
       out = [] of JsRefNode
       @db.query("SELECT scheme, host, port, path, COUNT(DISTINCT flow_id), " \
                 "EXISTS (SELECT 1 FROM flows f WHERE f.host = js_refs.host) FROM js_refs " \
@@ -92,15 +115,10 @@ module Gori
       end
       capped = out.size > limit
       out.pop if capped
-      result = {out, capped}
-      @js_ref_nodes_memo = { {print, limit}, result }
-      result
-    rescue
-      # Never crash a Sitemap poll over a read (mirrors sitemap_tags / sitemap_entries).
-      {[] of JsRefNode, false}
+      {out, capped}
     end
 
-    @js_ref_nodes_memo : { { {Int64, Int64, Int64}, Int32 }, {Array(JsRefNode), Bool} }? = nil
+    @js_ref_nodes_memo : { { {Int64, Int64, Int64}, Int32 }, {Array(JsRefNode), Bool}, Int64 }? = nil
 
     private def js_ref_fingerprint : {Int64, Int64, Int64}
       scans = @db.scalar("SELECT COUNT(*) FROM js_ref_scans").as(Int64)

@@ -32,7 +32,7 @@ module Gori
     #   * sqli_time_based — time-based blind SQLi confirms an injection purely in RESPONSE LATENCY,
     #     so every confirming leg deliberately WAITS multiple seconds. Harmless but slow, it would
     #     add real wall-clock to the automatic scan of every in-scope flow, so the operator opts
-    #     in when they want it (a manual per-flow scan enables it for that run either way).
+    #     in when they want it (the Rules sub-tab; a manual per-flow scan honours the same switch).
     # Both are the user-decided posture: off-by-default, opt-in only.
     #
     # The per-project `probe_disabled_rules` store records the operator's DEVIATION FROM DEFAULT,

@@ -770,7 +770,9 @@ module Gori
               tgt_str = bt ? bt : ""
             end
 
-            unless http2_given
+            # A `--curl` request already said which protocol it speaks (`--http2` or not), and with
+            # it `--flow` is provenance only — as MCP `create_repeater{curl, flow_id}` reads it.
+            unless http2_given || curl_path
               http2 = built.http2
             end
 
@@ -945,9 +947,19 @@ module Gori
       # without the process-exiting `abort`. Returns the whole Verdict, not just `blocked?`,
       # because the REMEDY differs by why it was refused (an EXCLUDE match cannot be undone
       # by adding an include rule).
+      #
+      # Every request in the plan is asked, as Layer 2 already is: a race or timing group shares
+      # one origin but not one path. The first blocked member's verdict wins, else the first's.
       private def self.repeater_scope_verdict(outbound : Gori::Outbound, plan : Repeater::Plan) : Gori::Outbound::Verdict
         target = (bytes = plan.requests.first?) ? Gori::Outbound.request_target(bytes) : "/"
-        outbound.check_request(plan.scheme, plan.host, target, plan.port)
+        first = outbound.check_request(plan.scheme, plan.host, target, plan.port)
+        return first if first.blocked?
+        plan.requests.each_with_index do |req, i|
+          next if i == 0
+          verdict = outbound.check_request(plan.scheme, plan.host, Gori::Outbound.request_target(req), plan.port)
+          return verdict if verdict.blocked?
+        end
+        first
       end
 
       private def self.repeater_out_of_scope?(outbound : Gori::Outbound, plan : Repeater::Plan) : Bool

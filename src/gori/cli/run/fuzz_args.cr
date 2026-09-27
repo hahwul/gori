@@ -114,9 +114,9 @@ module Gori
 
       # One `--stop-on DIM:SPEC` term, folded into the run's stop-condition matcher `m`. The
       # grammar's one home is `Fuzz.apply_stop_term` (shared with the TUI Advanced row); this
-      # only turns its error sentence into the command's `abort`. A repeated dimension
-      # overwrites, exactly as a repeated `--mc` does; a value-level typo flows through
-      # `Matcher#spec_error` with every other dimension.
+      # only turns its error sentence into the command's `abort`. A repeated dimension is refused
+      # there (the terms AND, so a second `status:` would silently replace the first); a
+      # value-level typo flows through `Matcher#spec_error` with every other dimension.
       private def self.parse_stop_on(spec : String, m : Fuzz::Matcher) : Nil
         if err = Fuzz.apply_stop_term(spec, m)
           abort "gori run fuzz: #{err}"

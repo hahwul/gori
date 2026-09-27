@@ -398,9 +398,9 @@ module Gori::Repeater
     end
 
     # The same target and gated dialer carrying different wire bytes — for a surface that
-    # rewrites the request AFTER assembly. MCP's opt-in Match&Replace parity is the only
-    # such caller: its rules key off the dialed host, which is not known until the plan
-    # resolved it, so the rewrite cannot happen before `build`.
+    # rewrites the request AFTER assembly: MCP's opt-in Match&Replace parity, whose rules key off
+    # the dialed host (not known until the plan resolved it, so the rewrite cannot happen before
+    # `build`), and `Timing.run`, which swaps a race pair's release order every other pair.
     #
     # Reusing the SAME `Sender` is the point: the scope verdict was taken against this
     # origin, and a rewrite must not be able to move the dial target out from under it.

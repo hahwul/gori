@@ -958,9 +958,15 @@ module Gori
           @engine.stop
         end
 
+        # `fz_N` restarts at 1 in every `gori mcp` process, so a bare `fz_1:1` recorded by
+        # ANOTHER server on this project (or before a switch_project) matched this job's ref, and
+        # `fuzz_results` credited that process's flow to this job. The per-process nonce is what
+        # makes the ref this job's alone.
+        HISTORY_REF_NONCE = Random::Secure.hex(3)
+
         def next_history_source_ref : String
           @history_ref_seq += 1
-          "#{@id}:#{@history_ref_seq}"
+          "#{@id}@#{HISTORY_REF_NONCE}:#{@history_ref_seq}"
         end
       end
 
@@ -1296,6 +1302,8 @@ module Gori
       #                     additionally refused after a cancel (see the tool).
       #   run_retest        yes — `Retest::Engine` polls it before every step; the steps that
       #                     did run keep their History rows (P7: record the wire).
+      #   timing_requests   yes — `Repeater::Timing.run` polls it between pairs; up to
+      #                     MAX_ITERATIONS pairs of real requests to the target.
       #   cookie_crack      NO. It is pure CPU over a wordlist with no outbound and no yield
       #                     point, so the reader fiber never runs during it and the
       #                     notification is not even PARSED until it finishes — a check there

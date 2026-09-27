@@ -923,7 +923,7 @@ module Gori
           mock_rule_props(s)
           s.field "match", enumprop("for replace: how `pattern` is read (default literal). Regex supports $1/\\1 capture groups", RULE_MATCHES)
           s.field "name", strprop("optional label for the rule")
-          s.field "host", strprop("optional host glob scoping the rule (e.g. 'example.com' substring, '*.example.com' wildcard; empty = all hosts)")
+          s.field "host", strprop("optional host glob scoping the rule (e.g. 'example.com' substring, '*.example.com' wildcard; empty = all hosts). With from_flow_id an empty host keeps the flow's own host — pass '*' for all hosts")
           s.field "enabled", boolprop("create the rule already enabled (default true); pass false for an atomic disabled creation (no live window before you can preview/adjust it)")
         end
 

@@ -41,8 +41,10 @@ class Gori::Proxy::H2::StreamGate
   #     `acme.test` connection, because the URL it tested was the connection's, not the
   #     request's.
   #
-  # So both are tested and either refusal is a refusal. On an ordinary connection the two
-  # names are equal and the second test is skipped, so the common path costs one evaluation.
+  # So both are tested and either refusal is a refusal. "The two differ" is host OR port: a
+  # stream claiming `:authority: acme.test:443` on a tunnel CONNECTed to `acme.test:8443` still
+  # goes to 8443, and a port-scoped exclude on 8443 has to see that. On an ordinary connection
+  # the two are equal and the second test is skipped, so the common path costs one evaluation.
   private def sandbox_blocked_url(block : HeadRewrite::Block) : {String, String, String}?
     fields = block.fields
     scheme = HeadCodec.pseudo_of(fields, ":scheme") || "https"
@@ -63,7 +65,7 @@ class Gori::Proxy::H2::StreamGate
     # bytes are untouched (P7); only the url the decision is made on changes.
     target = Gori::Url.origin_path(HeadCodec.pseudo_of(fields, ":path") || "/")
     blocked = @interceptor.sandbox_blocks?(scheme, host, target, port) ||
-              (host != @host && @interceptor.sandbox_blocks?(scheme, @host, target, @port))
+              ((host != @host || port != @port) && @interceptor.sandbox_blocks?(scheme, @host, target, @port))
     blocked ? {scheme, host, target} : nil
   end
 

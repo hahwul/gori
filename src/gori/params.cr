@@ -131,14 +131,9 @@ module Gori
     # `["a.b"]` → `a.b` — which is what Miner's Json location injects (a key into an object
     # node, not a path). nil when the path ends in an array (`tags[]`), which has no name.
     def json_leaf(path : String) : String?
-      return nil if path.ends_with?("[]")
-      if path.ends_with?("\"]") && (open = path.rindex("[\""))
-        return String.from_json(path[(open + 1)...-1]) rescue nil
-      end
-      dot = path.rindex('.')
-      br = path.rindex(']')
-      cut = [dot, br].compact.max?
-      cut ? path[(cut + 1)..].presence : path
+      # Through `json_segments`, not a backwards search for `["`: that also matches INSIDE a
+      # quoted key (`["x["]`), and the name dropped out of wordlists and Miner seeds.
+      json_segments(path).last?
     end
 
     # Every step of a JSON path as `each_json_leaf` spells it, root first: a member's name, or

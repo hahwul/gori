@@ -461,6 +461,16 @@ module Gori::Proxy::Codec
       n
     end
 
+    @@streamed = 0_i64
+
+    # Body bytes the copy loops below have moved, cumulative for the process. `IdleGc` reads its
+    # change between two ticks: a body streaming past the capture limit writes nothing to the
+    # Store and allocates nothing per chunk, but bytes still move. One add per read, on the
+    # fiber that already owns the loop (single-threaded scheduler).
+    def self.streamed : Int64
+      @@streamed
+    end
+
     # Copies exactly `n` bytes; returns false if the source EOF'd early (a
     # truncated Content-Length body), true once all `n` were transferred.
     # `buf` is the scratch copy buffer. When nil a fresh 64 KiB slice is allocated (one
@@ -476,6 +486,7 @@ module Gori::Proxy::Codec
         want = remaining < cap ? remaining.to_i : cap
         read = src.read(cbuf[0, want])
         break if read == 0 # premature EOF
+        @@streamed &+= read
         slice = cbuf[0, read]
         dst.write(slice)
         tee.write(slice)
@@ -487,6 +498,7 @@ module Gori::Proxy::Codec
     private def self.copy_until_eof(src : IO, dst : IO, tee : IO, buf : Bytes? = nil) : Nil
       cbuf = buf || Bytes.new(BUFSIZE)
       while (read = src.read(cbuf)) > 0
+        @@streamed &+= read
         slice = cbuf[0, read]
         dst.write(slice)
         tee.write(slice)

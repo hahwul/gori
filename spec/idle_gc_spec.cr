@@ -101,7 +101,7 @@ describe "Gori::Store.write_ops" do
 
   # A blind CONNECT tunnel and a body streaming past the capture limit write nothing to the Store
   # and allocate nothing per chunk; a collection there would pause live traffic.
-  it "counts tunnel bytes and a lent copy buffer as traffic" do
+  it "counts tunnel bytes and streamed body bytes as traffic" do
     t0 = Time.instant
     quiet = Gori::IdleGc::QUIET_FOR.total_seconds.to_i
     tunnel = Gori::IdleGc.new(t0, sample)
@@ -110,8 +110,20 @@ describe "Gori::Store.write_ops" do
     end
     moving.should eq(0)
     streaming = Gori::IdleGc.new(t0, sample)
-    busy = Gori::IdleGc::Sample.new(0_u64, 200_u64 * MIB, 0_u64, 0_i64, 0_i64, 1)
-    run_quiet(streaming, t0, 1, quiet + 5, busy).should eq(0)
+    flowing = (1..quiet + 5).count do |sec|
+      streaming.tick(t0 + sec.seconds, Gori::IdleGc::Sample.new(0_u64, 200_u64 * MIB, 0_u64, 0_i64, 0_i64, sec.to_i64 * 4096))
+    end
+    flowing.should eq(0)
+  end
+
+  # An open SSE or long-poll body holds its copy buffer for its whole life. Counting the loan
+  # as traffic kept the process "busy" for hours while nothing moved.
+  it "collects while a stream stays open but moves no bytes" do
+    t0 = Time.instant
+    quiet = Gori::IdleGc::QUIET_FOR.total_seconds.to_i
+    open_stream = Gori::IdleGc::Sample.new(0_u64, 200_u64 * MIB, 0_u64, 0_i64, 0_i64, 12_345_i64)
+    gc = Gori::IdleGc.new(t0, open_stream)
+    run_quiet(gc, t0, 1, quiet + 5, open_stream).should be > 0
   end
 
   it "sees the proxy counters move" do
@@ -121,8 +133,9 @@ describe "Gori::Store.write_ops" do
     w.close
     Gori::Proxy::Pump.copy(r, IO::Memory.new)
     (Gori::Proxy::Pump.forwarded - before).should eq(3)
-    Gori::Proxy::CopyBufPool.lent.should eq(0)
-    Gori::Proxy::CopyBufPool.lend { Gori::Proxy::CopyBufPool.lent.should eq(1) }
-    Gori::Proxy::CopyBufPool.lent.should eq(0)
+    streamed = Gori::Proxy::Codec::Body.streamed
+    Gori::Proxy::Codec::Body.stream(IO::Memory.new("hello"), IO::Memory.new,
+      Gori::Proxy::Codec::BodyFraming::Length, 5_i64, IO::Memory.new)
+    (Gori::Proxy::Codec::Body.streamed - streamed).should eq(5)
   end
 end

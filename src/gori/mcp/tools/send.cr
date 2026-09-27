@@ -267,7 +267,7 @@ module Gori
         Repeater::PlanOptions.new(requests,
           default_target: rec.target, http2: http2, sni: rec.sni, timeout: timeout,
           expand_request: !verbatim, expand_bindings: !verbatim, preserve_field_case: verbatim,
-          auto_content_length: !verbatim && rec.auto_content_length?, verify: !insecure,
+          auto_content_length: !verbatim && rec.auto_content_length?, verify: !insecure && @verify_upstream,
           overrides: overrides, tls_preset: rec.tls_preset)
       end
 
@@ -318,8 +318,12 @@ module Gori
         verbatim = bool_arg(h, "verbatim", false)
         insecure = bool_arg(h, "insecure", false)
         timeout = send_timeout(h)
-        iterations = int_or(h, "count", Repeater::Timing::Stats::DEFAULT_ITERATIONS).clamp(1, Repeater::Timing::Stats::MAX_ITERATIONS)
-        warmup = int_or(h, "warmup", Repeater::Timing::Stats::DEFAULT_WARMUP).clamp(0, iterations - 1)
+        # The shared bounded reader: an unreadable value is INVALID_ARGUMENT (not the default), and
+        # one past Int32 is clamped rather than raising OverflowError as INTERNAL.
+        iterations = bounded_int_arg(h, "count", Repeater::Timing::Stats::DEFAULT_ITERATIONS.to_i64,
+          min: 1, max: Repeater::Timing::Stats::MAX_ITERATIONS.to_i64).to_i
+        warmup = bounded_int_arg(h, "warmup", Repeater::Timing::Stats::DEFAULT_WARMUP.to_i64,
+          min: 0, max: (iterations - 1).to_i64).to_i
         interleaved = bool_arg(h, "interleaved", false)
         ob = outbound(bool_arg(h, "allow_unscoped", false))
 
@@ -333,7 +337,8 @@ module Gori
         return gate if gate.is_a?(Result)
 
         mode = interleaved ? Repeater::Timing::Mode::Interleaved : Repeater::Timing::Mode::Auto
-        rep = Repeater::Timing.run(plan, iterations: iterations, mode: mode, warmup: warmup)
+        rep = Repeater::Timing.run(plan, iterations: iterations, mode: mode, warmup: warmup,
+          cancel: -> { cancelled? })
         transport = interleaved ? "interleaved" : (plan.http2? ? "single-packet h2" : "last-byte-sync h1")
         Log.info { "timing_requests #{plan.scheme}://#{plan.host}:#{plan.port} x#{rep.iterations} (#{transport}) -> #{rep.verdict}" }
         subject = Repeater::Timing::Present::Subject.new(
@@ -356,14 +361,6 @@ module Gori
           members << id
         end
         members
-      end
-
-      # An integer argument with a default (count / warmup) — tolerant of a JSON number or a
-      # numeric string, like the other optional int args.
-      private def int_or(h, key : String, default : Int32) : Int32
-        v = h[key]?
-        return default unless v
-        (v.as_i? || v.as_i64?.try(&.to_i) || v.as_s?.try(&.to_i?)) || default
       end
 
       # The two arguments that name a request gori has ALREADY stored. Exactly one may be given.
@@ -604,9 +601,19 @@ module Gori
       # it that way, and MCP used to let allow_unscoped:true walk straight past it. It used to
       # carry the unbound-binding rule too; that rule is gone (see `Env.unbound`), so every
       # refusal reaching here is a Sandbox one again.
+      #
+      # Layer 1 is asked of EVERY request in the plan, like Layer 2 (`Plan#refusal`): a race or
+      # timing group shares one origin but not one path, so gating on the first member alone
+      # let an out-of-scope path ride behind an in-scope one. One blocked member refuses the
+      # group; the first member's verdict is the one reported.
       private def send_gate(ob : Outbound, plan : Repeater::Plan) : ScopeCheck | Result
         sc = ob.check(request_scope_url(plan), plan.host, request_exclude_url(plan))
         return scope_blocked(sc) if sc.blocked?
+        plan.requests.each_with_index do |req, i|
+          next if i == 0
+          member = ob.check(request_scope_url(plan, req), plan.host, request_exclude_url(plan, req))
+          return scope_blocked(member, "member #{i + 1} (#{request_target(req)})") if member.blocked?
+        end
         if reason = plan.refusal
           return sandbox_blocked(reason, plan.host, "url")
         end
@@ -1730,8 +1737,17 @@ module Gori
       # A refusal to send an active request outside (or without) scope.
       # SCOPE_BLOCKED is not retryable — the caller must add a scope include rule
       # or pass allow_unscoped:true.
-      private def scope_blocked(sc : ScopeCheck) : Result
-        reason = sc.unscoped? ? "no scope is configured for this project, so active requests are refused by default" : "target host #{sc.host} is outside the project's configured scope"
+      # `what` names the request when it is not the first of a group: a path rule can refuse a
+      # later race/timing member on a host the first one was allowed, and "target host is outside
+      # the scope" would send the agent to add a host include that changes nothing.
+      private def scope_blocked(sc : ScopeCheck, what : String? = nil) : Result
+        reason = if sc.unscoped?
+                   "no scope is configured for this project, so active requests are refused by default"
+                 elsif what
+                   "#{what} on #{sc.host} is outside the project's configured scope"
+                 else
+                   "target host #{sc.host} is outside the project's configured scope"
+                 end
         err("#{reason}; #{Outbound.remedy(sc, "allow_unscoped:true")}",
           "SCOPE_BLOCKED", field: "url",
           details: JSON.parse({"scope_decision" => sc.decision, "host" => sc.host}.to_json))
@@ -1757,14 +1773,14 @@ module Gori
       # The URL the scope gate evaluates, anchored on the DIAL target rather than the request
       # LINE's host. The rule itself now lives in the seam (`Outbound.scope_url`) so the sweep
       # and Repeater paths get the same absolute-form handling this used to have alone.
-      private def request_scope_url(plan : Repeater::Plan) : String
-        Outbound.scope_url(plan.scheme, plan.host, request_target(plan.bytes))
+      private def request_scope_url(plan : Repeater::Plan, bytes : Bytes = plan.bytes) : String
+        Outbound.scope_url(plan.scheme, plan.host, request_target(bytes))
       end
 
       # The same url WITH the plan's dial port, which the EXCLUDE side reads, or nil on a
       # default port where there is no second spelling to ask about (#884).
-      private def request_exclude_url(plan : Repeater::Plan) : String?
-        Outbound.exclude_url(plan.scheme, plan.host, request_target(plan.bytes), plan.port)
+      private def request_exclude_url(plan : Repeater::Plan, bytes : Bytes = plan.bytes) : String?
+        Outbound.exclude_url(plan.scheme, plan.host, request_target(bytes), plan.port)
       end
 
       # Passive-scan a just-saved Repeater send into probe_issues when mode is Passive/Active.

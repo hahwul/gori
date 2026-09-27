@@ -209,17 +209,26 @@ module Gori::Fuzz
   # first, so a regex may contain them. It never raises and never aborts: a value-level typo
   # (`status:2OO`) parses lenient here and is caught by `Matcher#spec_error`, exactly as a
   # `--mc 2OO` is; only a bad DIMENSION or an uncompilable regex is reported here.
-  # The non-regex `stop_on` dimensions, each as a {set-match, set-filter} pair — a table
-  # rather than a `case` so `apply_stop_term` stays one lookup, not one branch per dimension.
+  # The non-regex `stop_on` dimensions, each as {set-match, set-filter, get-match, get-filter}
+  # — ONE table, so a dimension added here is both settable and refused when repeated; a
+  # table rather than a `case` so `apply_stop_term` stays one lookup, not one branch per
+  # dimension.
   # `regex` is not here: it compiles its value, which the plain string setters do not.
-  STOP_STRING_SETTERS = {
-    "status" => {->(m : Matcher, v : String) { m.match_status = v }, ->(m : Matcher, v : String) { m.filter_status = v }},
-    "grpc"   => {->(m : Matcher, v : String) { m.match_grpc = v }, ->(m : Matcher, v : String) { m.filter_grpc = v }},
-    "size"   => {->(m : Matcher, v : String) { m.match_size = v }, ->(m : Matcher, v : String) { m.filter_size = v }},
-    "words"  => {->(m : Matcher, v : String) { m.match_words = v }, ->(m : Matcher, v : String) { m.filter_words = v }},
-    "lines"  => {->(m : Matcher, v : String) { m.match_lines = v }, ->(m : Matcher, v : String) { m.filter_lines = v }},
-    "time"   => {->(m : Matcher, v : String) { m.match_time = v }, ->(m : Matcher, v : String) { m.filter_time = v }},
-    "header" => {->(m : Matcher, v : String) { m.match_header = v }, ->(m : Matcher, v : String) { m.filter_header = v }},
+  STOP_DIMENSIONS = {
+    "status" => {->(m : Matcher, v : String) { m.match_status = v }, ->(m : Matcher, v : String) { m.filter_status = v },
+                 ->(m : Matcher) { m.match_status }, ->(m : Matcher) { m.filter_status }},
+    "grpc" => {->(m : Matcher, v : String) { m.match_grpc = v }, ->(m : Matcher, v : String) { m.filter_grpc = v },
+               ->(m : Matcher) { m.match_grpc }, ->(m : Matcher) { m.filter_grpc }},
+    "size" => {->(m : Matcher, v : String) { m.match_size = v }, ->(m : Matcher, v : String) { m.filter_size = v },
+               ->(m : Matcher) { m.match_size }, ->(m : Matcher) { m.filter_size }},
+    "words" => {->(m : Matcher, v : String) { m.match_words = v }, ->(m : Matcher, v : String) { m.filter_words = v },
+                ->(m : Matcher) { m.match_words }, ->(m : Matcher) { m.filter_words }},
+    "lines" => {->(m : Matcher, v : String) { m.match_lines = v }, ->(m : Matcher, v : String) { m.filter_lines = v },
+                ->(m : Matcher) { m.match_lines }, ->(m : Matcher) { m.filter_lines }},
+    "time" => {->(m : Matcher, v : String) { m.match_time = v }, ->(m : Matcher, v : String) { m.filter_time = v },
+               ->(m : Matcher) { m.match_time }, ->(m : Matcher) { m.filter_time }},
+    "header" => {->(m : Matcher, v : String) { m.match_header = v }, ->(m : Matcher, v : String) { m.filter_header = v },
+                 ->(m : Matcher) { m.match_header }, ->(m : Matcher) { m.filter_header }},
   }
 
   def self.apply_stop_term(spec : String, m : Matcher) : String?
@@ -229,20 +238,40 @@ module Gori::Fuzz
     return "stop_on term #{spec.inspect}: empty value" if val.blank?
     key = dim.strip.downcase
     return apply_stop_regex(m, val, neg) if key == "regex"
-    setters = STOP_STRING_SETTERS[key]?
+    setters = STOP_DIMENSIONS[key]?
     unless setters
       return "stop_on term #{spec.inspect}: unknown dimension #{dim.inspect} " \
              "(status|grpc|size|words|lines|time|header|regex, optionally !-negated)"
     end
+    return stop_term_repeated(spec, key) if stop_term_set?(m, key, neg)
     (neg ? setters[1] : setters[0]).call(m, val)
     nil
   end
 
   private def self.apply_stop_regex(m : Matcher, val : String, neg : Bool) : String?
+    return stop_term_repeated(val, "regex") if (neg ? m.filter_regex : m.match_regex)
     re = (Regex.new(val) rescue nil)
     return "stop_on regex #{val.inspect} is not a valid regular expression" unless re
     neg ? (m.filter_regex = re) : (m.match_regex = re)
     nil
+  end
+
+  # A second term on the same side of the same dimension used to REPLACE the first:
+  # `--stop-on status:500 --stop-on status:302` kept only 302, and a 500 never stopped the run.
+  # Terms of different dimensions AND, so a repeat is refused rather than guessed at.
+  private def self.stop_term_set?(m : Matcher, key : String, neg : Bool) : Bool
+    return false unless dim = STOP_DIMENSIONS[key]?
+    current = (neg ? dim[3] : dim[2]).call(m)
+    !current.nil? && !current.blank?
+  end
+
+  private def self.stop_term_repeated(spec : String, key : String) : String
+    hint = case key
+           when "regex"  then "join them into one pattern (a|b)"
+           when "header" then "a header term is one substring; use regex:(a|b) for either"
+           else               "list the values in one term (#{key}:500,302)"
+           end
+    "stop_on term #{spec.inspect}: #{key} is already set by an earlier term — #{hint}"
   end
 
   # Decides whether a response is "interesting" and extracts a value from it.

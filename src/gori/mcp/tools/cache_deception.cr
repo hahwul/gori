@@ -47,18 +47,23 @@ module Gori
 
         timeout = optional_int_arg(h, "timeout_ms").try(&.clamp(1_i64, 600_000_i64).milliseconds) ||
                   Authorize::ACTIVE_TIMEOUT
-        verify = bool_arg(h, "verify", true)
+        # `gori mcp --insecure-upstream` waives verification for every tool that sends.
+        verify = bool_arg(h, "verify", true) && @verify_upstream
         engine = Authorize::Engine.live(ob, verify, timeout, overrides: HostOverrides.load(store))
         report =
           begin
             CacheDeception.check(engine, detail, -> { cancelled? })
+          rescue ex : Gori::Error
+            ob.close
+            return err("cache-deception check failed: #{ex.message}", "INVALID_ARGUMENT")
           rescue ex
             ob.close
-            return err("cache-deception check failed: #{ex.message}", "INTERNAL_ERROR")
+            return err("cache-deception check failed: #{ex.message}", "INTERNAL")
           end
         ob.close
         # `check` returns nil when cancellation stops the run before its trials complete.
-        return err("cache-deception check produced no result", "INTERNAL_ERROR") unless report
+        # `INTERNAL`, the code every other tool uses — `INTERNAL_ERROR` was this tool's alone.
+        return err("cache-deception check produced no result", "INTERNAL") unless report
 
         Log.info { "cache_deception_check flow=#{flow_id} verdict=#{report.verdict.label} cache=#{report.cache.token}" }
         Result.new(cache_deception_json(report))

@@ -33,6 +33,12 @@ module Gori::Probe
     ensure
       release_worker_sender
     end
+
+    # The kept-alive worker sender WITHOUT releasing it between calls, the way consecutive tasks
+    # for one origin see it.
+    def spec_worker_sender(detail : Store::FlowDetail) : Fuzz::Sender
+      worker_sender(detail)
+    end
   end
 end
 
@@ -258,6 +264,22 @@ describe "Probe::Analyzer honours the project host overrides (live TUI)" do
       end
     ensure
       responder.close
+    end
+  end
+
+  # The worker keeps one sender per origin across tasks, and a pool dials once — so an override
+  # added mid-run kept riding the parked socket to the old address while tasks kept coming.
+  it "rebuilds the kept-alive sender when the host's override changes" do
+    with_ov_store do |store|
+      scope = Gori::Scope.load(store)
+      ov = Gori::HostOverrides.load(store)
+      detail = store.get_flow(seed_flow(store, 9)).not_nil!
+      analyzer = Gori::Probe::Analyzer.new(store, scope,
+        Channel(Gori::Store::FlowEvent).new(1), Gori::Probe::Mode::Active, false, overrides: ov)
+      first = analyzer.spec_worker_sender(detail)
+      analyzer.spec_worker_sender(detail).should be(first)
+      ov.add("nonexistent.invalid", "127.0.0.1:9").should be_true
+      analyzer.spec_worker_sender(detail).should_not be(first)
     end
   end
 

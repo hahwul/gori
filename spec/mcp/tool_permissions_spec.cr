@@ -122,6 +122,15 @@ describe "MCP tool permissions" do
     end
   end
 
+  # It reads captured JS and stores what it finds; it dials nothing. It sat under Send traffic,
+  # so "Edit project data" off did not stop its writes and "Send traffic" off hid it.
+  it "switches scan_js_endpoints with Edit project data, not Send traffic" do
+    with_store do |store|
+      denied_tools(store, "write").call("scan_js_endpoints", JSON.parse("{}")).error_code.should eq("TOOL_DISABLED")
+      denied_tools(store, "send").call("scan_js_endpoints", JSON.parse("{}")).is_error.should be_false
+    end
+  end
+
   # Raising the scan mode arms the capture pipeline's automatic active probes: a send by proxy.
   it "refuses raising the probe mode to an active one when Send traffic is off, not lowering it" do
     with_store do |store|

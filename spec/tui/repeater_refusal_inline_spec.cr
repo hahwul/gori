@@ -386,3 +386,128 @@ describe "Gori::Tui::RepeaterController#save_current_repeater — a frame write 
     end
   end
 end
+
+# An origin that counts requests and answers each after `delay`, so "is the run still sending?"
+# is observable between two reads of the counter.
+private class TimingCountingOrigin
+  getter hits = Atomic(Int32).new(0)
+  getter port : Int32
+
+  def initialize(@delay : Time::Span)
+    @server = TCPServer.new("127.0.0.1", 0)
+    @port = @server.local_address.port
+    spawn do
+      while c = (@server.accept? rescue nil)
+        spawn_with(c) do |conn|
+          while Gori::Proxy::Codec::Http1.read_head(conn)
+            @hits.add(1)
+            sleep @delay
+            conn << "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"
+            conn.flush
+          end
+        rescue
+        ensure
+          conn.close rescue nil
+        end
+      end
+    end
+  end
+
+  def close : Nil
+    @server.close rescue nil
+  end
+end
+
+# Two marked tabs against a live origin, sandbox OFF, and a timing run already sending.
+private def with_timing_run(pairs : Int32, *, expect_running : Bool = true, &)
+  origin = TimingCountingOrigin.new(10.milliseconds)
+  root = File.tempname("gori-timing-run")
+  Dir.mkdir_p(root)
+  project = Gori::ProjectRegistry.new(root).temp("timing")
+  session = Gori::Session.open(Gori::Config.new(listen: "127.0.0.1", port: 0),
+    shared_ca, Gori::Verbs.registry, project)
+  begin
+    3.times do |i|
+      req = "GET /t#{i} HTTP/1.1\r\nHost: 127.0.0.1:#{origin.port}\r\n\r\n"
+      session.store.insert_repeater("http://127.0.0.1:#{origin.port}/", req.to_slice, false, true, nil, i)
+    end
+    host = FakeHost.new(session)
+    controller = RepeaterController.new(host)
+    controller.toggle_subtab_mark(0)
+    controller.toggle_subtab_mark(1)
+    view, plan, labels = controller.prepare_timing_pair.not_nil!
+    controller.launch_timing(view, plan, labels, pairs, interleaved: false)
+    sleep 100.milliseconds
+    controller.timing_running?.should be_true if expect_running
+    yield controller, host, origin
+  ensure
+    origin.close
+    session.close
+    FileUtils.rm_rf(root) if Dir.exists?(root)
+  end
+end
+
+private def requests_after(origin : TimingCountingOrigin, wait : Time::Span = 400.milliseconds) : Int32
+  before = origin.hits.get
+  sleep wait
+  origin.hits.get - before
+end
+
+describe "Gori::Tui::RepeaterController — stopping a timing run" do
+  # The flag the fiber polled was an `Atomic(Bool)`, a struct, so the fiber held its own copy and
+  # esc changed nothing: every remaining pair still went out under "timing: cancelling…".
+  it "stops sending once esc cancels it" do
+    with_timing_run(200) do |controller, host, origin|
+      controller.cancel_timing
+      host.statuses.last.should contain("cancelling")
+      sleep 60.milliseconds # the pair in flight finishes
+      requests_after(origin).should eq(0)
+    end
+  end
+
+  it "stops sending when the project is left" do
+    with_timing_run(200) do |controller, _, origin|
+      controller.stop_all
+      sleep 60.milliseconds
+      requests_after(origin).should eq(0)
+    end
+  end
+
+  # Closing a sub-tab stopped the run only when it was the pair's anchor (A); closing B left the
+  # fiber sending the closed tab's request.
+  it "stops sending when either sub-tab of the pair is closed" do
+    with_timing_run(200) do |controller, _, origin|
+      controller.jump_subtab(1)
+      controller.close_repeater_tab
+      sleep 60.milliseconds
+      requests_after(origin).should eq(0)
+    end
+  end
+
+  # A finished run's report, drained after the next run began, cleared the lock of that next run.
+  it "keeps a new run locked when the previous run's report is drained after it starts" do
+    with_timing_run(2, expect_running: false) do |controller, _, _|
+      deadline = Time.instant + 10.seconds
+      while controller.timing_running?
+        raise "first run never finished" if Time.instant > deadline
+        sleep 20.milliseconds
+      end
+      view, plan, labels = controller.prepare_timing_pair.not_nil!
+      controller.launch_timing(view, plan, labels, 200, interleaved: false)
+      controller.drain_results # the FIRST run's report
+      controller.timing_running?.should be_true
+      controller.cancel_timing
+    end
+  end
+
+  # A second pair started beside the first; whichever finished first cleared the one-run lock.
+  it "refuses a second run while one is in flight" do
+    with_timing_run(200) do |controller, host, _|
+      controller.toggle_subtab_mark(0)
+      controller.toggle_subtab_mark(2)
+      controller.prepare_timing_pair.should be_nil
+      host.statuses.last.should contain("already in flight")
+      controller.cancel_timing
+    end
+  end
+end

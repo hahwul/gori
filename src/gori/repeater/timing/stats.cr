@@ -77,7 +77,7 @@ module Gori::Repeater::Timing
       b_slower : Int32, # pairs where B arrived after A
       ties : Int32,     # pairs with identical microsecond durations
       a_slower_frac : Float64,
-      median_gap_us : Float64, # median(A) − median(B); sign matches the verdict, |·| is the effect
+      median_gap_us : Float64, # median(A) − median(B); the verdict is from pair order, so the sign can disagree
       p_value : Float64,
       verdict : Verdict do
       # One line for the verdict banner / the CLI summary — the shape `Sequencer::Report#rationale`
@@ -95,10 +95,17 @@ module Gori::Repeater::Timing
         in Verdict::NoDifference
           "A slower in #{a_slower}/#{decisive} decisive pairs (#{pct(a_slower_frac)}, p=#{Stats.fmt_p(p_value)} — within noise)"
         in Verdict::ASlower
-          "A slower in #{a_slower}/#{decisive} decisive pairs (#{pct(a_slower_frac)}) · median +#{Stats.fmt_us(median_gap_us.abs.round.to_i64)} (p=#{Stats.fmt_p(p_value)})"
+          "A slower in #{a_slower}/#{decisive} decisive pairs (#{pct(a_slower_frac)}) · median #{signed_gap(median_gap_us)} (p=#{Stats.fmt_p(p_value)})"
         in Verdict::BSlower
-          "B slower in #{b_slower}/#{decisive} decisive pairs (#{pct(1.0 - a_slower_frac)}) · median +#{Stats.fmt_us(median_gap_us.abs.round.to_i64)} (p=#{Stats.fmt_p(p_value)})"
+          "B slower in #{b_slower}/#{decisive} decisive pairs (#{pct(1.0 - a_slower_frac)}) · median #{signed_gap(-median_gap_us)} (p=#{Stats.fmt_p(p_value)})"
         end
+      end
+
+      # The slower side's median minus the other's. Usually positive, but the verdict counts
+      # which response came last in each pair, and a few very slow outliers on the other side
+      # can put its median higher — say so rather than print the magnitude as a `+`.
+      private def signed_gap(gap_us : Float64) : String
+        "#{gap_us < 0 ? "−" : "+"}#{Stats.fmt_us(gap_us.abs.round.to_i64)}"
       end
 
       # The two variants' shared microsecond scale, for a histogram drawn with both rows

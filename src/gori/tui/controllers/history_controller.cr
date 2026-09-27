@@ -580,6 +580,9 @@ module Gori::Tui
     def on_enter : Nil
       reload_columns
       @history.forget_all_row_memos
+      # The same reason as the view below: a peer clear while the operator sat on another tab
+      # reaches `on_external_change` only on the tab that was active.
+      @history.prune_reused_marks(@host.session.store, full: true)
       # Re-resolve BEFORE the reload, and not only in `on_external_change`: the runner
       # dispatches that to `@tabs[@active_tab]` alone, so a peer deleting the active view while
       # the operator sat on another tab left History filtering by a view that no longer exists —
@@ -609,6 +612,7 @@ module Gori::Tui
     def on_external_change : Nil
       reload_columns
       @history.forget_all_row_memos
+      @history.prune_reused_marks(@host.session.store)
       # A peer can create, edit or DELETE a view between frames — through the CLI, through MCP,
       # or from another gori against the same project. Re-resolving here (rather than only at
       # construction) is what keeps the chip and the list agreeing with the stores.

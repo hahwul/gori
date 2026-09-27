@@ -53,6 +53,33 @@ describe Gori::MCP::Server do
       end
     end
 
+    # Layer 1 is asked of every member, not just the first: an out-of-scope path behind an
+    # in-scope one used to go out, while the same request alone through send_request was refused.
+    it "refuses the whole race when any member is out of scope, sending nothing" do
+      with_store do |store|
+        seen = Channel(String).new(4)
+        port = start_mcp_race_origin(seen)
+        Gori::Scope.load(store).add("include", "string", "127.0.0.1/api/")
+        a = seed_race_repeater(store, port, "/api/ok")
+        b = seed_race_repeater(store, port, "/internal/delete-all")
+        tools = tools_for(store)
+        # The first member alone is in scope: the refusal below is about the second.
+        tools.call("send_request", JSON.parse(%({"repeater_id":#{a}}))).is_error.should be_false
+        seen.receive.strip.should eq("GET /api/ok HTTP/1.1")
+        {"race_requests", "timing_requests"}.each do |tool|
+          r = tools.call(tool, JSON.parse(%({"repeater_ids":[#{a},#{b}]})))
+          r.is_error.should be_true
+          r.error_code.should eq("SCOPE_BLOCKED")
+          r.text.should contain("member 2 (/internal/delete-all)")
+        end
+        select
+        when line = seen.receive
+          fail "a request went out: #{line}"
+        when timeout(100.milliseconds)
+        end
+      end
+    end
+
     it "refuses a race of fewer than two members" do
       with_store do |store|
         rid = seed_race_repeater(store, 9, "/only")

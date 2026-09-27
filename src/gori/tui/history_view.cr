@@ -135,7 +135,12 @@ module Gori::Tui
       # out of the current filter/window stays marked (marked_hidden_count reports it);
       # a mark whose flow is gone simply fails to resolve at the verb.
       @marks = Set(Int64).new
-      @mark_anchor = nil.as(Int64?) # id-keyed range anchor for the ⇧arrow extend
+      # Each mark's capture time. `flows.id` is an INTEGER PRIMARY KEY without AUTOINCREMENT, so
+      # after a peer clears History the next capture takes id 1 again — and a bare id mark moved
+      # onto it, where Delete would destroy a flow nobody marked. See `prune_reused_marks`.
+      @mark_stamps = {} of Int64 => Int64
+      @marks_seen_max = nil.as(Int64?) # `prune_reused_marks`' last MAX(id)
+      @mark_anchor = nil.as(Int64?)    # id-keyed range anchor for the ⇧arrow extend
       # Ids the CURRENT ⇧arrow gesture added, so shrinking the range gives them back — a GUI
       # shift+click shrinks the selection, where a plain union would only ever grow. Scoped to
       # the gesture, so marks made by `t`/⇧T outside the range are never disturbed. Cleared
@@ -359,8 +364,10 @@ module Gori::Tui
       if @preview_id != id
         @preview_scroll_req = 0
         @preview_scroll_res = 0
-      elsif (d = @preview_detail) && d.row.state.complete? && d.row.status != 101 && d.h2_conn_id.nil?
-        # Same flow, already cached, and its captured bytes are immutable (Complete,
+      elsif (d = @preview_detail) && d.row.created_at == selected_row.try(&.created_at) &&
+            d.row.state.complete? && d.row.status != 101 && d.h2_conn_id.nil?
+        # Same flow (same id AND capture time: after a peer clear a new capture reuses the id),
+        # already cached, and its captured bytes are immutable (Complete,
         # non-streaming) — a data_version poke from OTHER flows committing has nothing
         # to pick up here. Skip the SQLite round-trip + body re-split every render tick
         # (mirrors refresh_detail's guard). A pending / 101 / h2 flow still re-fetches.
@@ -764,6 +771,8 @@ module Gori::Tui
     # Load flows applying the Scope lens AND the QL query. store.search returns
     # newest-first (ORDER BY id DESC); reverse when the layout pref is oldest-first.
     def reload(store : Store) : Nil
+      # The first baseline for `prune_reused_marks`' MAX(id) comparison; later ones are its own.
+      @marks_seen_max ||= store.max_flow_id || 0_i64
       if handler = @reload_handler
         handler.call(store)
       elsif request = prepare_search(store)
@@ -1352,7 +1361,13 @@ module Gori::Tui
     # orders. The anchor lands on the row just toggled, so `t` then ⇧↓ extends from it.
     def toggle_mark : Nil
       return unless id = selected_id
-      @marks.includes?(id) ? @marks.delete(id) : @marks.add(id)
+      if @marks.includes?(id)
+        @marks.delete(id)
+        @mark_stamps.delete(id)
+      else
+        @marks.add(id)
+        selected_row.try { |r| @mark_stamps[id] = r.created_at }
+      end
       step_cursor(newest_first? ? 1 : -1)
       @mark_anchor = id
       @mark_extent.clear
@@ -1361,14 +1376,34 @@ module Gori::Tui
     # ⇧T — mark every row in the CURRENT filtered list, unioned with what's already
     # marked (so narrowing the filter twice accumulates rather than replaces).
     def mark_all : Nil
-      @rows.each { |r| @marks.add(r.id) }
+      @rows.each { |r| @marks.add(r.id); @mark_stamps[r.id] = r.created_at }
       @mark_anchor = selected_id
       @mark_extent.clear
     end
 
     def clear_marks : Nil
       @marks.clear
+      @mark_stamps.clear
       reset_mark_anchor
+    end
+
+    # Drop every mark whose flow is gone or is now a DIFFERENT flow under the same id — the
+    # peer-change check (`HistoryController#on_external_change`, and `on_enter` with
+    # `full: true`). An id is reused only after `MAX(id)` fell below it (no AUTOINCREMENT), so a
+    # tick reads that one index end and pays for the batched read of every marked row only when
+    # it dropped; the capture's own commits move `data_version` every poll and never lower it.
+    # Tab entry checks in full: the drop may have happened, and been climbed back past, while
+    # History was not the tab being told.
+    def prune_reused_marks(store : Store, *, full : Bool = false) : Nil
+      top = store.max_flow_id || 0_i64
+      last = @marks_seen_max
+      @marks_seen_max = top
+      return if @marks.empty?
+      return unless full || (last && top < last)
+      now = {} of Int64 => Int64
+      @marks.to_a.each_slice(500) { |ids| store.flow_rows(ids).each { |r| now[r.id] = r.created_at } }
+      gone = @marks.select { |id| (at = now[id]?).nil? || ((was = @mark_stamps[id]?) && was != at) }
+      unmark_ids(gone) unless gone.empty?
     end
 
     # Forget where a range gesture started (and what it had added), so the next ⇧arrow anchors
@@ -1387,7 +1422,7 @@ module Gori::Tui
     # the caller can say so rather than let a range vanish silently.
     def end_mark_gesture : Int32
       before = @marks.size
-      @mark_extent.each { |id| @marks.delete(id) }
+      @mark_extent.each { |id| @marks.delete(id); @mark_stamps.delete(id) }
       reset_mark_anchor
       before - @marks.size
     end
@@ -1395,7 +1430,7 @@ module Gori::Tui
     # Drop specific marks — the post-batch-delete prune, so a deleted flow's id can't
     # linger in the set and inflate the next count.
     def unmark_ids(ids : Enumerable(Int64)) : Nil
-      ids.each { |id| @marks.delete(id); @mark_extent.delete(id) }
+      ids.each { |id| @marks.delete(id); @mark_stamps.delete(id); @mark_extent.delete(id) }
       reset_mark_anchor if (a = @mark_anchor) && !@marks.includes?(a) && index_of(a).nil?
     end
 
@@ -1413,11 +1448,11 @@ module Gori::Tui
       step_cursor(delta)
       lo, hi = {anchor_idx, @selected}.minmax
       wanted = Set(Int64).new
-      (lo..hi).each { |i| @rows[i]?.try { |r| wanted.add(r.id) } }
+      (lo..hi).each { |i| @rows[i]?.try { |r| wanted.add(r.id); @mark_stamps[r.id] ||= r.created_at } }
       # Give back what THIS gesture added but the new range no longer covers, so ⇧↑ after ⇧↓⇧↓
       # leaves two rows marked rather than three. @mark_extent holds only ids the gesture itself
       # added, so a mark made earlier by `t`/⇧T survives a range sweeping over it and back off.
-      (@mark_extent - wanted).each { |id| @marks.delete(id) }
+      (@mark_extent - wanted).each { |id| @marks.delete(id); @mark_stamps.delete(id) }
       added = wanted - @marks
       @marks.concat(added)
       @mark_extent = (@mark_extent & wanted) | added

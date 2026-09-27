@@ -649,8 +649,12 @@ module Gori::Tui
               dirty = true
             end
             # A finished differential-timing run (#1246) opens its verdict card — but not over a
-            # modal the operator raised meanwhile; the report stays pending until the seam is clear.
-            if active_overlay.nil? && (rpt = repeater_controller.take_timing_report)
+            # modal the operator raised meanwhile (the palette and a History detail are overlays
+            # `active_overlay` does not return, and the space menu, pickers and bottom prompts are
+            # none); the report stays pending until the seam is clear.
+            if @overlay.none? && !@space_menu_open && !copy_as_shown? && !send_to_shown? &&
+               !@goto_open && !@search_open && !@rename_open && !@tag_edit_open &&
+               (rpt = repeater_controller.take_timing_report)
               open_overlay(TimingReportOverlay.new(rpt[0], rpt[1]))
               dirty = true
             end
@@ -1559,14 +1563,6 @@ module Gori::Tui
       end
       @quit_armed = false
 
-      # esc cancels a differential-timing run in flight (#1246), when no modal is up to claim the
-      # key first — the run is bounded but can be seconds at a large N. Only on the Repeater tab's
-      # own inflight run; anywhere else esc keeps its meaning.
-      if ov.nil? && ev.key.escape? && repeater_controller.timing_running?
-        repeater_controller.cancel_timing
-        return
-      end
-
       @toast = nil # clear last action's feedback; a new action may set it again
       # In hotkey CAPTURE mode the next key IS the new binding — intercept it before the
       # ^G/^F/^B guards (and everything else) so those chords can be recorded.
@@ -1616,6 +1612,16 @@ module Gori::Tui
       # Migrated modals (Overlay base) dispatch generically — no per-modal handle_*_key.
       if ov = active_overlay
         dispatch_overlay_key(ov, ev)
+        return
+      end
+      # esc cancels a differential-timing run in flight (#1246) — the run is bounded but can be
+      # seconds at a large N. Only on the Repeater tab and outside text entry, and only once every
+      # modal, prompt, picker and the space menu above has had the key: this arm used to sit
+      # before them, so esc could not close a space menu (or the palette) anywhere while a run
+      # was in flight.
+      if ev.key.escape? && @active_tab == :repeater && @overlay.none? && !text_input_active? &&
+         repeater_controller.timing_running?
+        repeater_controller.cancel_timing
         return
       end
       # THE DIGIT FAMILY, claimed here and nowhere else.

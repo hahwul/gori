@@ -1621,11 +1621,11 @@ module Gori
       # `cutoff <= 0`. The comment there promised a db carrying frames from an older build would
       # heal itself; for those it did not.
       #
-      # Once per Store instance, on the first sweep, and again after a `clear_flows` — not on
-      # every one: it is a full scan of `h2_frames` (~35 ms per million frames). Orphans come
-      # from a db an older build wrote, or from a clear that dropped the rows of connections a
-      # browser keeps open and logging (the guard in `insert_h2_frame` only refuses id <= 0), and
-      # `clear_flows` re-arms the flag for the second. Retried on the next sweep if it failed.
+      # Once per Store instance, on the first sweep — not on every one: it is a full scan of
+      # `h2_frames` (~35 ms per million frames). Orphans come from a db an older build wrote,
+      # whose clear dropped the rows of connections a browser kept open and logging (the guard in
+      # `insert_h2_frame` only refuses id <= 0); `clear_flows` now keeps those rows. Retried on
+      # the next sweep if it failed.
       @h2_unattributed_reaped = reap_unattributed_h2_frames(conn) unless @h2_unattributed_reaped
       # Each of the three sweeps below runs on the SAME connection, and the suspect flag is only
       # read back when the loop next asks for one — i.e. after this method returns. So a sweep

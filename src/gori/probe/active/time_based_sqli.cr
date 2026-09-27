@@ -28,10 +28,10 @@ module Gori
       # P6: this rule DELIBERATELY waits. It never runs on the proxy data path — it rides the active
       # probe worker like every other active rule — but because each confirming leg costs real
       # wall-clock seconds, it ships DEFAULT-OFF (see `Probe::DEFAULT_DISABLED_RULES`), opt-in from
-      # the Rules sub-tab or a manual per-flow scan, the same posture as `request_smuggling`. The
-      # delays are kept well under the analyzer's per-probe socket timeout (ACTIVE_TIMEOUT, 10 s) so
-      # a real sleep returns rather than erroring; a leg that DID error or time out is skipped, not
-      # read as a signal.
+      # the Rules sub-tab (a manual per-flow scan honours the same switch), the same posture as
+      # `request_smuggling`. The delays are kept well under the analyzer's per-probe socket
+      # timeout (ACTIVE_TIMEOUT, 10 s) so a real sleep returns rather than erroring; a leg that
+      # DID error or time out is skipped, not read as a signal.
       #
       # A confirmed injection reports Critical, outranking `error_based_sqli`'s High. The differential
       # reads only LATENCY, but a delay landing requires a body-bearing request, so — like the sibling

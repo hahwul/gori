@@ -179,6 +179,21 @@ describe "Fuzz.apply_stop_term" do
     m.filter_regex.try(&.source).should eq("Invalid password")
   end
 
+  # A repeat used to replace the earlier term silently, so `status:500` never stopped the run.
+  it "refuses a second term on the same side of a dimension, and keeps the first" do
+    m = F::Matcher.new
+    F.apply_stop_term("status:500", m).should be_nil
+    F.apply_stop_term("status:302", m).not_nil!.should contain("status:500,302")
+    m.match_status.should eq("500")
+    F.apply_stop_term("regex:admin", m).should be_nil
+    F.apply_stop_term("regex:Welcome", m).not_nil!.should contain("already set")
+    m.match_regex.try(&.source).should eq("admin")
+    # The other side of a dimension, or another dimension, is a separate term.
+    F.apply_stop_term("!status:404", m).should be_nil
+    F.apply_stop_term("!regex:Invalid", m).should be_nil
+    F.apply_stop_term("size:>100", m).should be_nil
+  end
+
   it "refuses an unknown dimension and an uncompilable regex" do
     F.apply_stop_term("bogus:1", F::Matcher.new).should_not be_nil
     F.apply_stop_term("noколon", F::Matcher.new).should_not be_nil

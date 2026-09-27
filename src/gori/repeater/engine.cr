@@ -69,8 +69,14 @@ module Gori
       # leaves the sweep to the compiler.
       def initialize(@head, @body, @response, @duration_us, @error = nil, @incomplete = false, *,
                      @delivered = false, @timed_out = false, @retried = false,
-                     @wire : Bytes? = nil, @retryable_stale = false)
+                     @wire : Bytes? = nil, @retryable_stale = false, @cut_short = false)
       end
+
+      # An h2 single-packet race member whose stream was still open when the read ended (the
+      # deadline, a GOAWAY, the socket dropping): its response is kept, incomplete, but its
+      # `duration_us` is when the collector closed it — in member order — not an arrival time.
+      # `Timing` drops it as a sample; the race itself still reports the response.
+      getter? cut_short : Bool
 
       # The same outcome, carrying the bytes that produced it. A struct, so this returns a
       # copy: the seam that knows the wire (`Fuzz::Sender`) is one layer above the engine that
@@ -78,7 +84,7 @@ module Gori
       def with_wire(wire : Bytes) : Result
         Result.new(@head, @body, @response, @duration_us, @error, @incomplete,
           delivered: @delivered, timed_out: @timed_out, retried: @retried, wire: wire,
-          retryable_stale: @retryable_stale)
+          retryable_stale: @retryable_stale, cut_short: @cut_short)
       end
 
       def ok? : Bool

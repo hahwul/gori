@@ -120,21 +120,22 @@ describe "the unattributed-frame reap and retention" do
     end
   end
 
-  # The reap runs once per Store, not per sweep, so the one runtime source of orphans — a clear
-  # that drops the rows of connections a browser keeps open — has to re-arm it.
-  it "runs again on the sweep after a clear, for frames a still-open connection logged" do
+  # A clear used to drop every connection row, so the next connection reused id 1 and shared
+  # its frame log with a still-open one. The rows now stay, as they do on an explicit delete.
+  it "keeps connection rows through a clear, so a new connection gets a fresh id" do
     h2_store(retention: 1000, prune_interval: 1) do |store|
       real = store.insert_h2_connection("acme.test", 443, "h2")
       store.insert_flow(h2_request("/first", real))
-      store.flush # first sweep: the once-per-Store reap has run
+      store.flush
       store.clear_flows.should be_true
-      # The connection is still open and keeps logging under the id whose row the clear dropped.
+      # The connection is still open and keeps logging under its own id.
       3.times { |i| store.insert_h2_frame(real, "out", 1_u8, 0_u8, (i + 1).to_u32, "late#{i}".to_slice) }
+      fresh = store.insert_h2_connection("acme.test", 443, "h2")
+      fresh.should be > real
+      store.insert_flow(h2_request("/next", fresh))
       store.flush
-      store.@db.scalar("SELECT COUNT(*) FROM h2_frames").as(Int64).should eq(3_i64)
-      store.insert_flow(h2_request("/next", nil))
-      store.flush
-      store.@db.scalar("SELECT COUNT(*) FROM h2_frames").as(Int64).should eq(0_i64)
+      store.h2_frames(real).size.should eq(3)
+      store.h2_frames(fresh).size.should eq(0)
     end
   end
 end

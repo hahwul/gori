@@ -1088,6 +1088,37 @@ describe "MCP fuzz tools" do
     end
   end
 
+  # Job ids restart at fz_1 in every `gori mcp` process, so another server's `fz_1` flow at
+  # the same History id carried this job's ref and was reported as this job's result.
+  it "does not credit a flow another server recorded under the same job id" do
+    port = start_origin
+    with_store do |store|
+      tools = tools_for(store)
+      start = call_json(tools, "fuzz_start",
+        {"template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+         "url"            => "http://127.0.0.1:#{port}",
+         "payloads"       => %([{"list":["a"]}]),
+         "record_history" => "all",
+         "allow_unscoped" => true}.to_json)
+      job_id = start["job_id"].as_s
+      wait_fuzz_done(tools, job_id)
+      own = call_json(tools, "fuzz_results", {job_id: job_id}.to_json)["results"][0]["flow_id"].as_i64
+      own_ref = store.flow_row(own).not_nil!.source_ref.not_nil!
+      own_ref.should start_with("#{job_id}@")
+
+      store.clear_flows.should be_true
+      # What the other process writes: the same job id and sequence, its own nonce.
+      foreign = own_ref.sub(/@[0-9a-f]+:/, "@000000:")
+      store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: Time.utc.to_unix_ms * 1000_i64, scheme: "http", host: "b.test", port: 80,
+        method: "GET", target: "/from-B", http_version: "HTTP/1.1",
+        head: "GET /from-B HTTP/1.1\r\nHost: b.test\r\n\r\n".to_slice,
+        source: Gori::FlowSource::Kind::Fuzzer, source_surface: Gori::FlowSource::Surface::Mcp,
+        source_ref: foreign)).should eq(own)
+      call_json(tools, "fuzz_results", {job_id: job_id}.to_json)["results"][0]["flow_id"]?.should be_nil
+    end
+  end
+
   it "omits a recorded result's flow_id after History reuses it" do
     port = start_origin
     with_store do |store|

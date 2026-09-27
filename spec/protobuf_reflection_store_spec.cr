@@ -132,6 +132,35 @@ describe "gRPC reflection cache" do
       end
     end
 
+    # A committed adopt used to reload the list from the store, which dropped what this
+    # process held only in memory: an earlier unpersisted adopt fell out of the lens, and an
+    # unpersisted forget came back into it.
+    it "keeps memory-only adopts and forgets when a later adopt commits" do
+      path = File.tempname("gori-reflect-mixed", ".db")
+      store = Gori::Store.open(path, busy_timeout_ms: 200)
+      peer = DB.open("sqlite3:#{path}?busy_timeout=100")
+      cn = peer.checkout
+      begin
+        Schemas.load_project(store)
+        set = Reflection.descriptor_set([demo_file_descriptor])
+        Schemas.adopt(store, "https://gone.test:443", Reflection::SERVICE_V1, 1, 1, set).should be_true
+        cn.exec("BEGIN IMMEDIATE")
+        Schemas.adopt(store, "https://a.test:443", Reflection::SERVICE_V1, 1, 1, set).should be_false
+        Schemas.forget(store, "https://gone.test:443").should be_false
+        cn.exec("ROLLBACK")
+        Schemas.adopt(store, "https://b.test:443", Reflection::SERVICE_V1, 1, 1, set).should be_true
+        Schemas.reflections.map(&.target).should eq(["https://a.test:443", "https://b.test:443"])
+      ensure
+        cn.release
+        peer.close
+        Schemas.clear
+        store.close
+        File.delete?(path)
+        File.delete?("#{path}-wal")
+        File.delete?("#{path}-shm")
+      end
+    end
+
     it "names the reflected target in the settings row's status" do
       with_store do |store|
         set = Reflection.descriptor_set([demo_file_descriptor])

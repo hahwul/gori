@@ -22,4 +22,22 @@ describe Gori::UnicodeReveal do
     Gori::UnicodeReveal.visible("e\u{301}").should be_nil
     Gori::UnicodeReveal.visible("plain ASCII and 中文").should be_nil
   end
+
+  it "keeps one VS16 after any emoji base, text-default ones included" do
+    ["▶\u{fe0f} Play", "ℹ\u{fe0f}", "⬆\u{fe0f}", "⭐\u{fe0f}", "©\u{fe0f}", "™\u{fe0f}", "↔\u{fe0f}",
+     "〰\u{fe0f}", "❤\u{fe0f}", "1\u{fe0f}\u{20e3}", "❤\u{fe0f}\u{200d}🔥", "👁\u{fe0f}\u{200d}🗨\u{fe0f}"].each do |s|
+      Gori::UnicodeReveal.visible(s).should be_nil
+    end
+  end
+
+  # A run of selectors after an emoji draws nothing, which is how "emoji smuggling" hides bytes.
+  it "names selectors that do not choose a presentation, even after an emoji" do
+    Gori::UnicodeReveal.visible("😀\u{e0100}\u{e0101}").should eq("😀⟨VS17⟩⟨VS18⟩")
+    Gori::UnicodeReveal.visible("😀\u{fe01}").should eq("😀⟨VS2⟩")
+    Gori::UnicodeReveal.visible("❤\u{fe0f}\u{fe0f}").should eq("❤\u{fe0f}⟨VS16⟩")
+    Gori::UnicodeReveal.visible("a\u{fe0f}").should eq("a⟨VS16⟩")
+    Gori::UnicodeReveal.visible("葛\u{e0100}").should eq("葛⟨VS17⟩")
+    # A geometric shape beside the emoji ones is not an emoji base.
+    Gori::UnicodeReveal.visible("▲\u{fe0f}").should eq("▲⟨VS16⟩")
+  end
 end

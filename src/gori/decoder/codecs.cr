@@ -991,24 +991,25 @@ module Gori::Decoder
       i = 0
       while i < bytes.size
         if word = rfc2047_word_at(bytes, i, required_encoding)
-          run_start = i
+          words = [{i, word}]
           data = IO::Memory.new
           data.write(word.data)
           i = word.next_pos
           resume = nil.as(Int32?)
           while (gap_end = rfc2047_fws_end(bytes, i)) > i && (following = rfc2047_word_at(bytes, gap_end, required_encoding))
-            if following.charset.compare(word.charset, case_insensitive: true) != 0
+            if rfc2047_charset_key(following.charset) != rfc2047_charset_key(word.charset)
               resume = gap_end # a charset change ends the run; the gap between words is still dropped
               break
             end
+            words << {gap_end, following}
             data.write(following.data)
             i = following.next_pos
           end
           if text = (rfc2047_charset_decode(word.charset, data.to_slice) rescue nil)
             sink << text
             i = resume if resume
-          else
-            sink.write(bytes[run_start, i - run_start])
+          elsif rfc2047_write_words(sink, bytes, words)
+            i = resume if resume # the run ended on a decoded word, so its gap to the next is dropped
           end
           next
         end
@@ -1018,6 +1019,39 @@ module Gori::Decoder
         i += width
       end
       String.new(sink.to_slice)
+    end
+
+    # A run whose joined bytes did not decode, word by word: one bad word used to leave every
+    # valid neighbour literal too. A word that decodes alone is written decoded; one that does not
+    # stays literal, and so does the whitespace beside it (it is ordinary text now).
+    #
+    # Answers whether the LAST word decoded, so the caller knows whether the gap after the run
+    # sits between two encoded-words (dropped) or beside literal text (kept).
+    private def rfc2047_write_words(sink : IO, bytes : Bytes, words : Array({Int32, Rfc2047RawWord})) : Bool
+      prev_end = nil.as(Int32?)
+      prev_literal = false
+      words.each do |(start, w)|
+        text = (rfc2047_charset_decode(w.charset, w.data) rescue nil)
+        if pe = prev_end
+          sink.write(bytes[pe, start - pe]) if prev_literal || text.nil?
+        end
+        text ? (sink << text) : sink.write(bytes[start, w.next_pos - start])
+        prev_literal = text.nil?
+        prev_end = w.next_pos
+      end
+      !prev_literal
+    end
+
+    # The charset names `rfc2047_charset_decode` treats as one, so `utf-8` beside `UTF8` still
+    # joins into one run (a character may be split across them).
+    private def rfc2047_charset_key(charset : String) : String
+      case cs = charset.downcase
+      when "utf8"                           then "utf-8"
+      when "ascii"                          then "us-ascii"
+      when "iso8859-1", "latin1", "latin-1" then "iso-8859-1"
+      when "cp1252"                         then "windows-1252"
+      else                                       cs
+      end
     end
 
     # A single encoded-word, payload-decoded but not yet charset-decoded: adjacent words are
@@ -1153,17 +1187,19 @@ module Gori::Decoder
     end
 
     private def rfc2047_charset_decode(charset : String, data : Bytes) : String
-      case charset.downcase
-      when "utf-8", "utf8"
+      # Through `rfc2047_charset_key`, so the aliases a run joins on and the ones decoded here
+      # are one list.
+      case rfc2047_charset_key(charset)
+      when "utf-8"
         text = String.new(data)
         raise DecoderError.new("invalid UTF-8 in RFC 2047 encoded-word") unless text.valid_encoding?
         text
-      when "us-ascii", "ascii"
+      when "us-ascii"
         raise DecoderError.new("non-ASCII byte in RFC 2047 US-ASCII word") if data.any? { |b| b >= 0x80 }
         String.new(data)
-      when "iso-8859-1", "iso8859-1", "latin1", "latin-1"
+      when "iso-8859-1"
         String.build { |io| data.each { |b| io << b.to_i.chr } }
-      when "windows-1252", "cp1252"
+      when "windows-1252"
         String.build { |io| data.each { |b| io << windows_1252_scalar(b).chr } }
       else
         raise DecoderError.new("unsupported RFC 2047 charset: #{charset}")

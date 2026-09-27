@@ -50,16 +50,17 @@ private class Rig
   # `:authority` may differ from (RFC 9113 §9.1.1). `indexing` makes the stand-in client encoder
   # insert into its dynamic table, i.e. behave like a browser rather than like gori's own
   # literal-only encoder.
-  def initialize(@ic : Gori::Interceptor, host : String = "api.example.com", indexing : Bool = false)
+  def initialize(@ic : Gori::Interceptor, host : String = "api.example.com", indexing : Bool = false,
+                 port : Int32 = 443)
     @sink = RecSink.new
     @upstream = IO::Memory.new
     @client = IO::Memory.new
     @enc_out = HPACK::Encoder.new(indexing: indexing)
-    @assembler = Gori::Proxy::H2::Assembler.new(@sink, host, 443, 1_i64)
+    @assembler = Gori::Proxy::H2::Assembler.new(@sink, host, port, 1_i64)
     @heads_out = Gori::Proxy::H2::HeadRewrite.new("out", nil, @assembler, host)
     @heads_in = Gori::Proxy::H2::HeadRewrite.new("in", nil, @assembler, host)
-    @c2s = Gate.new("out", @upstream, 1_i64, @sink, @assembler, host, 443, @ic, @heads_out)
-    @s2c = Gate.new("in", @client, 1_i64, @sink, @assembler, host, 443, @ic, @heads_in)
+    @c2s = Gate.new("out", @upstream, 1_i64, @sink, @assembler, host, port, @ic, @heads_out)
+    @s2c = Gate.new("in", @client, 1_i64, @sink, @assembler, host, port, @ic, @heads_in)
     @c2s.peer = @s2c
     @s2c.peer = @c2s
   end
@@ -1154,6 +1155,24 @@ describe Gori::Proxy::H2::StreamGate do
       rig.c2s.accept(data(1_u32, "A" * 500))
       rig.to_origin.map(&.frame_type).should contain(Frame::Type::Data)
       rig.to_client.select { |f| f.frame_type == Frame::Type::WindowUpdate }.should be_empty
+    end
+  end
+
+  # The connection test was skipped whenever the stream named the connection's own HOST, so a
+  # stream claiming `:443` on a tunnel CONNECTed to `:8443` was judged on the port it claimed,
+  # while its bytes went to 8443 — past an exclude that names that port.
+  it "tests the connection's own port when a stream claims another one" do
+    with_ic(intercept: false) do |ic, scope|
+      scope.add("include", "host", "api.example.com")
+      scope.add("exclude", "string", "https://api.example.com:8443/")
+      scope.enable_sandbox
+      rig = Rig.new(ic, port: 8443)
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(request("/admin", "api.example.com:443"))))
+      rig.to_origin.should be_empty
+      # The same stream on a connection to 443 is in scope.
+      ok = Rig.new(ic)
+      ok.c2s.accept(headers(1_u32, ok.enc_out.encode(request("/admin", "api.example.com:443"))))
+      ok.to_origin.map(&.frame_type).should contain(Frame::Type::Headers)
     end
   end
 

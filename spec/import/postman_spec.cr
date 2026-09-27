@@ -176,6 +176,15 @@ describe Gori::Import::Postman do
     result.flows.first.request.port.should eq(8443)
   end
 
+  it "substitutes URL variables in a path with non-ASCII segments or host" do
+    variables = JSON.parse(%([{"key":"id","value":"1"}]))
+    table = Gori::Import::Vars::Table.new
+    fill = ->(url : String) { Gori::Import::Postman.fill_path_params_for_spec(url, variables, table) }
+    fill.call("https://a.test/사용자/:id").should eq("https://a.test/사용자/1")
+    fill.call("https://例え.jp/users/:id?q=1").should eq("https://例え.jp/users/1?q=1")
+    fill.call("https://a.test/users/:id/é?x=:id").should eq("https://a.test/users/1/é?x=:id")
+  end
+
   it "substitutes URL variables in the path but leaves query and fragment data unchanged" do
     variables = JSON.parse(%([{"key":"id","value":"42"}]))
     raw = "http://a.test/items/:id?filter=:id#client/:id"

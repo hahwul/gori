@@ -36,8 +36,8 @@ module Gori::Proxy
       end
     end
 
-    # Buffers out on loan right now: a body is being streamed, even one past the capture limit
-    # that no longer allocates or writes the Store (`IdleGc`).
+    # Buffers out on loan right now. For specs and benches (`IdleGc` reads bytes moving,
+    # `Codec::Body.streamed`, not this: an idle SSE body holds its loan for hours).
     def self.lent : Int32
       @@lent
     end
