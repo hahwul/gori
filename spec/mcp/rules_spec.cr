@@ -312,6 +312,18 @@ describe Gori::MCP::Server do
       end
     end
 
+    # An explicit "" is "all hosts", as the schema and `gori run rewriter add --from-flow --host ''`
+    # say; `.presence` folded it into "take the flow's host".
+    it "keeps an explicit empty host over the flow's draft" do
+      with_store do |store|
+        flow = mcp_seed_flow(store, "api.acme.test", "GET", "/me", 200,
+          "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n", "ok".to_slice)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_rule","arguments":{"op":"short_circuit","from_flow_id":#{flow},"host":""}}})
+        mcp_tool_payload(mcp_drive(store, call)[0])
+        store.match_rules.first.host.should eq("")
+      end
+    end
+
     # A partial update keeps every sub-kind field it does not name.
     it "updates one mock argument and keeps the others" do
       with_store do |store|

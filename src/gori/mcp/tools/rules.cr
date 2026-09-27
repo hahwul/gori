@@ -255,9 +255,12 @@ module Gori
         unless valid_rule_regex?(op, match_kind, pattern)
           return err("invalid regex pattern (failed to compile)", "INVALID_ARGUMENT", field: "pattern")
         end
-        replacement = str(h, "replacement").presence || draft.try(&.replacement) || ""
+        # `present?`, not `.presence`: an explicit "" is an answer — `host: ""` is "all hosts" (the
+        # schema says so, and `gori run rewriter add --from-flow --host ''` stores it), and
+        # `replacement: ""` an empty body — so only an ABSENT key takes the flow's draft.
+        replacement = present?(h, "replacement") ? (str(h, "replacement") || "") : (draft.try(&.replacement) || "")
         name = str(h, "name") || ""
-        host = str(h, "host").presence || draft.try(&.host) || ""
+        host = present?(h, "host") ? (str(h, "host") || "") : (draft.try(&.host) || "")
         mock = mock_rule_args(h, op, str(h, "body_file") || "")
         return mock if mock.is_a?(Result)
         respond, respond_args, body_file = mock
