@@ -268,7 +268,11 @@ module Gori::Fuzz
   end
 
   private def self.stop_term_repeated(spec : String, key : String) : String
-    hint = key == "regex" ? "join them into one pattern (a|b)" : "list the values in one term (#{key}:500,302)"
+    hint = case key
+           when "regex"  then "join them into one pattern (a|b)"
+           when "header" then "a header term is one substring; use regex:(a|b) for either"
+           else               "list the values in one term (#{key}:500,302)"
+           end
     "stop_on term #{spec.inspect}: #{key} is already set by an earlier term — #{hint}"
   end
 
