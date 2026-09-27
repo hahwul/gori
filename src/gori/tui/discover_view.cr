@@ -179,6 +179,7 @@ module Gori::Tui
       @filter = RowFilter.new # the FINDINGS `/` filter
       @vis = [] of Int32      # visible finding indices, memoised over {run, rev, query}
       @vis_key = {0_u64, 0, ""}
+      @vis_n = 0 # findings.size when @vis was computed — the tail `visible` resumes from
     end
 
     # --- the FINDINGS `/` filter -------------------------------------------------------------
@@ -212,11 +213,29 @@ module Gori::Tui
       @filter.set_preedit(text)
     end
 
+    # Recomputed on every `rev` bump — i.e. per finding while a crawl runs — so it must not
+    # rebuild and downcase a haystack for every finding each time: 10k findings cost that per
+    # frame. The empty query (the resting state) keeps every row and builds no haystack; a
+    # live query only filters the findings appended since the last call. Appending is the
+    # only change a run makes besides `begin_run`'s clear, and both bump `rev` by exactly one,
+    # so "rev moved by as much as the list grew" is exactly "nothing but appends happened".
     private def visible(r : DiscoverRun) : Array(Int32)
-      key = {r.object_id, r.rev, @filter.query}
+      q = @filter.query
+      key = {r.object_id, r.rev, q}
       return @vis if key == @vis_key
-      @vis = (0...r.findings.size).select { |i| @filter.matches?(finding_haystack(r.findings[i])) }
+      prev_run, prev_rev, prev_q = @vis_key
+      n = r.findings.size
+      from = 0
+      if prev_run == r.object_id && prev_q == q && n - @vis_n == r.rev - prev_rev && n >= @vis_n
+        from = @vis_n # appends only: keep the verdicts already made
+      else
+        @vis = [] of Int32
+      end
+      (from...n).each do |i|
+        @vis << i if q.empty? || finding_haystack(r.findings[i]).downcase.includes?(q)
+      end
       @vis_key = key
+      @vis_n = n
       @vis
     end
 
