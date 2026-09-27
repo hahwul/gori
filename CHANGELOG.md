@@ -73,7 +73,7 @@
 - Proxy: host-scoped body rules no longer buffer unrelated request and response bodies before streaming them (#1219)
 - MCP: `list_history` flags stale `since` cursors even when History is empty, so clients can reset after a clear (#1199)
 - TUI: History refreshes path and colour data after a peer clears or deletes flows, including when returning to the tab, and no longer carries a mark or the preview over to a new flow that reuses a cleared flow's id, where a batch Delete would have destroyed it (#1202, #1341)
-- History: deleted flows detach retest and frozen-evidence links, and MCP fuzz results omit stale flow IDs before reuse (#1208, #1212)
+- History: deleted flows detach retest and frozen-evidence links, and MCP fuzz results omit stale flow IDs before reuse, including one another `gori mcp` recorded under the same job id (#1208, #1212, #1341)
 - Proxy: malformed response status lines use explicit body framing and retire the origin connection (#1207)
 - HTTP/2: refuse duplicate pseudo-headers and conflicting `:authority`/`host` fields under the sandbox, and check a stream that names another port than its tunnel's against the tunnel's own port too, so a port-scoped exclude cannot be walked around (#1210, #1341)
 - Proxy: reject incomplete upstream CONNECT replies and keep the failure reason on the CONNECT flow (#1211)

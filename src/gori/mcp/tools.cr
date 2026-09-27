@@ -958,9 +958,15 @@ module Gori
           @engine.stop
         end
 
+        # `fz_N` restarts at 1 in every `gori mcp` process, so a bare `fz_1:1` recorded by
+        # ANOTHER server on this project (or before a switch_project) matched this job's ref, and
+        # `fuzz_results` credited that process's flow to this job. The per-process nonce is what
+        # makes the ref this job's alone.
+        HISTORY_REF_NONCE = Random::Secure.hex(3)
+
         def next_history_source_ref : String
           @history_ref_seq += 1
-          "#{@id}:#{@history_ref_seq}"
+          "#{@id}@#{HISTORY_REF_NONCE}:#{@history_ref_seq}"
         end
       end
 
