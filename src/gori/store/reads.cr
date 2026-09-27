@@ -582,6 +582,10 @@ module Gori
         c.exec("DELETE FROM flows")
         c.exec("DELETE FROM h2_frames")
         c.exec("DELETE FROM h2_connections")
+        # A browser's h2 connections outlive the clear and keep logging under ids that no longer
+        # have a row, so let the next sweep run the unattributed-frame reap again (see `prune`).
+        # Runs on the writer fiber, the flag's only reader.
+        @h2_unattributed_reaped = false
         # No index backlog bookkeeping to undo: a pending re-index is the row's own
         # `fts_dirty` flag, so deleting the rows deletes the backlog with them.
         nil
