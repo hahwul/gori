@@ -52,6 +52,27 @@ describe Gori::Tui::FuzzerResultWindow do
     kept.wire.should be_nil
   end
 
+  # Eviction looks for another row with the evicted index only when that index is MARKED
+  # (an unmarked delete is a no-op), so the mark has to live exactly as long as a projected
+  # copy of its index is still in the window — and never appear for one that was not.
+  it "keeps a projection mark while its index is still in the window, and drops it after" do
+    small = Gori::Tui::FuzzerResultWindow.result_bytes(window_result(0_i64))
+    cap = small * 3 + 50_i64
+    window = Gori::Tui::FuzzerResultWindow.new(3, cap)
+    window.append(window_result(5_i64, (cap + 100).to_i32)) # oversized → projected
+    window.projected?(5_i64).should be_true
+    window.append(window_result(5_i64)) # the same index again (a resend), small
+    window.append(window_result(6_i64))
+    window.append(window_result(7_i64)).should eq(1) # evicts the projected copy of 5
+    window.rows.map(&.index).should eq([5_i64, 6_i64, 7_i64])
+    window.projected?(5_i64).should be_true # another row with index 5 is still shown
+    window.append(window_result(8_i64)).should eq(1)
+    window.projected?(5_i64).should be_false # its last copy is gone
+    [6_i64, 7_i64, 8_i64].each { |i| window.projected?(i).should be_false }
+    200.times { |i| window.append(window_result(100_i64 + i)) }
+    window.rows.map(&.index).should eq([297_i64, 298_i64, 299_i64])
+  end
+
   it "bounds oversized scalar text and marks the display projection" do
     row = Gori::Fuzz::Result.new(12_i64, ["p" * 500], nil, 500, 0_i64, 0, 0,
       1_i64, "e" * 500, false, false, "x" * 500)

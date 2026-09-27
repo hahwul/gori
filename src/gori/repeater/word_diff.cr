@@ -27,9 +27,10 @@ module Gori
       # can style the pieces and lose nothing.
       def self.pieces(a : String, b : String) : {Array(Piece), Array(Piece)}
         return whole(a, b) if a.empty? || b.empty?
-        at = tokenize(a)
-        bt = tokenize(b)
-        return whole(a, b) if at.size > MAX_TOKENS || bt.size > MAX_TOKENS
+        at = tokenize(a, MAX_TOKENS)
+        return whole(a, b) unless at
+        bt = tokenize(b, MAX_TOKENS)
+        return whole(a, b) unless bt
 
         ids = {} of String => Int32
         aid = at.map { |s| ids[s]? || (ids[s] = ids.size) }
@@ -122,7 +123,12 @@ module Gori
       # the ASCII class test only: a non-ASCII byte is "not a word character", so a CJK or
       # UTF-8 run becomes one token rather than being split mid-codepoint. Built by
       # slicing on CHAR boundaries so every piece is a valid string.
-      private def self.tokenize(s : String) : Array(String)
+      #
+      # nil once the line has more than `limit` tokens. The caller falls back to `whole` at
+      # that point anyway, so the walk stops there instead of splitting the rest of the line:
+      # two 1.6 MB minified lines were tokenized in full (~280 MB of token Strings, 50-60 ms)
+      # only to be thrown away for the fallback.
+      private def self.tokenize(s : String, limit : Int32) : Array(String)?
         out = [] of String
         buf = String::Builder.new
         cur = nil.as(Bool?)
@@ -132,6 +138,7 @@ module Gori
             cur = w
           elsif w != cur
             out << buf.to_s
+            return nil if out.size > limit
             buf = String::Builder.new
             cur = w
           end
@@ -139,7 +146,7 @@ module Gori
         end
         tail = buf.to_s
         out << tail unless tail.empty?
-        out
+        out.size > limit ? nil : out
       end
 
       private def self.word_char?(c : Char) : Bool

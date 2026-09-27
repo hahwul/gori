@@ -270,7 +270,7 @@ module Gori::Sequencer
       # would fail every bit test even when the underlying value is perfectly random.
       # Byte → alphabet index as a flat 256-entry LUT rather than a Hash. This is probed once
       # per sample byte by three separate loops below (the bit-bias scan, symbol_bits and
-      # symbol_seq), and the sample reaches millions of bytes, so a direct index beats hashing
+      # serial_test), and the sample reaches millions of bytes, so a direct index beats hashing
       # every one of them. -1 marks a byte absent from the alphabet (never hit: the table is
       # built from the bytes actually present).
       idx_of = Array(Int32).new(256, -1)
@@ -291,7 +291,6 @@ module Gori::Sequencer
       bits = symbol_bits(region_bytes, idx_of, bps)
       # Monobit / Runs / Long run / Cusum all read this ONE walk of the bitstream — see `BitScan`.
       bit_scan = scan_bits(bits)
-      sym_seq = symbol_seq(region_bytes, idx_of)
       # Over the WHOLE tokens, not the region: whether one value follows another is a property
       # of the value an operator was issued, and a counter hidden behind a constant prefix is
       # exactly what `detect_sequential` already goes out of its way to find.
@@ -307,7 +306,7 @@ module Gori::Sequencer
       tests << gate_bits(runs_test(bit_scan, small), pow2)
       tests << gate_bits(longrun_test(bit_scan, small), pow2)
       tests << chi_square_test(gcounts, present, total_bytes, small)
-      tests << serial_test(sym_seq, small)
+      tests << serial_test(region_bytes, idx_of, small)
       tests << compression_test(region_bytes, total_bytes, charset_size, small)
       tests << gate_bits(bit_bias_test(ones_at, n, small, structural, bps), pow2)
       # The three NIST-style additions. Each reads the SAME symbol bitstream the four classic
@@ -637,14 +636,20 @@ module Gori::Sequencer
     # Lag-1 serial correlation over the concatenated SYMBOL stream (detects structure /
     # transitions a uniform frequency table would miss), using the alphabet indices so a
     # hex/base64 encoding doesn't inject spurious correlation.
-    private def self.serial_test(seq : Array(Int32), small : Bool) : TestRow
-      m = seq.size
+    #
+    # The indices are read straight off the region's bytes through `idx_of` rather than from a materialized index array: that array was one Int32 per region
+    # byte (6.4 MB on a 50k×32 hex sample) on a path the TUI re-runs on a throttle and every MCP
+    # poll re-runs from scratch. Same sums in the same order, so `r` is bit-identical.
+    private def self.serial_test(region : Bytes, idx_of : Array(Int32), small : Bool) : TestRow
+      m = region.size
       return insufficient("Serial corr", "#{m} symbols") if m < 100
       sx = 0.0; sy = 0.0; sxy = 0.0; sx2 = 0.0; sy2 = 0.0
       pairs = m - 1
-      (0...pairs).each do |i|
-        x = seq[i].to_f; y = seq[i + 1].to_f
+      x = idx_of.unsafe_fetch(region.unsafe_fetch(0)).to_f
+      (1..pairs).each do |i|
+        y = idx_of.unsafe_fetch(region.unsafe_fetch(i)).to_f
         sx += x; sy += y; sxy += x * y; sx2 += x * x; sy2 += y * y
+        x = y
       end
       den = Math.sqrt((pairs * sx2 - sx * sx) * (pairs * sy2 - sy * sy))
       r = den == 0 ? 0.0 : (pairs * sxy - sx * sy) / den
@@ -1226,13 +1231,6 @@ module Gori::Sequencer
         (bps - 1).downto(0) { |k| bits << ((v >> k) & 1).to_u8 }
       end
       bits
-    end
-
-    # The sequence of alphabet indices (for serial correlation). Presized for the same reason.
-    private def self.symbol_seq(region : Bytes, idx_of : Array(Int32)) : Array(Int32)
-      seq = Array(Int32).new(region.size)
-      region.each { |b| seq << idx_of.unsafe_fetch(b) }
-      seq
     end
 
     private def self.shannon(counts : Array(Int32), n : Int64) : Float64

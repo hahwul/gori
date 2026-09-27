@@ -66,8 +66,7 @@ module Gori
             d.code, d.host, as: {Int64, String, Int32, String?, String})
           if existing
             id, aff_json, sev, prev_evidence, prev_title = existing
-            urls = parse_affected(aff_json)
-            urls << d.url if !urls.includes?(d.url) && urls.size < PROBE_AFFECTED_CAP
+            new_aff = merged_affected(d.code, d.host, aff_json, d.url)
             new_sev = sev > d.severity.value ? sev : d.severity.value
             # Keep the title in sync with the highest-severity observation: a code whose title
             # is severity-dependent (reflected_param: HTML ⇒ Medium "Reflected parameter" vs
@@ -80,9 +79,15 @@ module Gori
             # isn't masked by the first-wins COALESCE. Other codes keep their first
             # representative sample.
             new_evidence = Store.accumulate_evidence?(d.code) ? Store.merge_evidence(prev_evidence, d.evidence) : (prev_evidence || d.evidence)
-            c.exec("UPDATE probe_issues SET hit_count = hit_count + 1, affected = ?, severity = ?, " \
-                   "title = ?, evidence = ?, last_seen = ? WHERE id = ?",
-              urls.to_json, new_sev, new_title, new_evidence, ts, id)
+            if new_aff
+              c.exec("UPDATE probe_issues SET hit_count = hit_count + 1, affected = ?, severity = ?, " \
+                     "title = ?, evidence = ?, last_seen = ? WHERE id = ?",
+                new_aff, new_sev, new_title, new_evidence, ts, id)
+            else # `affected` would be written back byte for byte — see `merged_affected`
+              c.exec("UPDATE probe_issues SET hit_count = hit_count + 1, severity = ?, " \
+                     "title = ?, evidence = ?, last_seen = ? WHERE id = ?",
+                new_sev, new_title, new_evidence, ts, id)
+            end
           else
             # OR IGNORE: this is a SELECT-then-INSERT across a transaction, so a peer process that
             # inserted the same (code, host) in between would land on the table\'s UNIQUE — and a
@@ -411,6 +416,91 @@ module Gori
       Array(String).from_json(json)
     rescue
       [] of String
+    end
+
+    # The `affected` column after one more hit on `url`: parse it, add the URL unless it is
+    # already there or the list is at PROBE_AFFECTED_CAP, serialize — or nil when that would
+    # write back exactly the bytes already stored, so the UPDATE can leave the column alone.
+    #
+    # During a fuzz run the passive rules re-detect the same issue on every result, and the
+    # list is already full (or already holds the URL) for nearly all of them: the parse of a
+    # 50-URL array and its re-serialization ran per result on the writer fiber, the capture
+    # path's one writer (P6). `AffectedMemo` holds what the last write to a (code, host) made
+    # of its list, and answers only while the stored string is byte-identical to it, so a
+    # write from anywhere else — another process, a delete and re-insert — is a miss, and a
+    # miss is the full path, verbatim. Writer-fiber-only, like every other writer cache.
+    private def merged_affected(code : String, host : String, stored : String, url : String) : String?
+      key = {code, host}
+      memo = @probe_affected_memo[key]?
+      if memo && memo.json == stored
+        return nil if memo.includes?(url) || memo.size >= PROBE_AFFECTED_CAP
+        json = memo.append(url)
+        @probe_affected_memo.delete(key) unless memo.valid?
+        return json
+      end
+      urls = parse_affected(stored)
+      urls << url if !urls.includes?(url) && urls.size < PROBE_AFFECTED_CAP
+      json = urls.to_json
+      @probe_affected_memo.clear if @probe_affected_memo.size >= PROBE_AFFECTED_MEMO_CAP
+      if m = AffectedMemo.from_json?(json)
+        @probe_affected_memo[key] = m
+      else
+        @probe_affected_memo.delete(key)
+      end
+      json
+    end
+
+    # Bounds `@probe_affected_memo`: the issues a run keeps re-hitting are a handful, and a
+    # miss is only the full path plus one parse to seed the entry.
+    PROBE_AFFECTED_MEMO_CAP = 64
+
+    @probe_affected_memo = {} of {String, String} => AffectedMemo
+
+    # One `affected` string and what `parse_affected` makes of it — the membership and the
+    # count the cap/dedup rule reads — held only while writing the parsed list back
+    # reproduces the string exactly (`valid?`). That is the property that lets an unchanged
+    # hit skip the rewrite and an append be a splice: both are then byte-identical to the
+    # parse/add/`to_json` they stand in for. A string it does not hold (a URL that does not
+    # survive a JSON round trip, say) is simply never memoised, and takes the full path.
+    private class AffectedMemo
+      getter json : String
+      getter size : Int32
+      getter? valid : Bool = true
+
+      def self.from_json?(json : String) : AffectedMemo?
+        urls = Array(String).from_json(json)
+        return nil unless urls.to_json == json
+        new(json, urls)
+      rescue
+        nil
+      end
+
+      def initialize(@json : String, urls : Array(String))
+        @urls = urls.to_set
+        @size = urls.size
+      end
+
+      def includes?(url : String) : Bool
+        @urls.includes?(url)
+      end
+
+      # The json the full path writes after appending `url` (`to_json` of the parsed list plus
+      # `url`: the stored string minus its `]`, a comma, the new element), and the memo moved
+      # onto it. The parsed form of the new element must serialize back to the same bytes for
+      # the memo to stay exact; when it does not, `valid?` goes false and the caller drops it.
+      def append(url : String) : String
+        element = url.to_json
+        @json = String.build do |io|
+          io.write(@json.to_slice[0, @json.bytesize - 1])
+          io << ',' unless @size == 0
+          io << element << ']'
+        end
+        parsed = String.from_json(element)
+        @valid = parsed.to_json == element
+        @urls << parsed
+        @size += 1
+        @json
+      end
     end
   end
 end

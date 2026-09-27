@@ -48,7 +48,10 @@ module Gori::Tui
       while @rows.size > @row_cap || @bytes > @byte_cap
         removed = @rows.shift
         @bytes -= @charges.shift
-        unless @rows.any? { |row| row.index == removed.index }
+        # The scan only matters for an index that is marked: unmarked, the delete is a no-op
+        # whatever the other rows hold. Most rows never are, and scanning the full window on
+        # every eviction past the cap made each append O(ROW_CAP) for the rest of the run.
+        if @projected_indices.includes?(removed.index) && @rows.none? { |row| row.index == removed.index }
           @projected_indices.delete(removed.index)
         end
         evicted += 1

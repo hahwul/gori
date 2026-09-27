@@ -369,16 +369,112 @@ describe "Gori::Tui::Wrap.mark_search (single unwrapped row)" do
       end
     end
 
-    it "agrees when the caller hoists `lower` beside the line" do
-      # `read_pane` hands in `line.downcase` so a wrapped line is not downcased once per
-      # drawn row; the scan must be the same either way.
+    it "agrees when the caller hands in a pane's SearchMemo" do
       line = "AB" * 20
       got = MemoryBackend.new(48, 1)
       want = MemoryBackend.new(48, 1)
-      Wrap.mark_search(Screen.new(got), 0, 0, line, 0, line.size, "ab", 40, lower: line.downcase)
+      Wrap.mark_search(Screen.new(got), 0, 0, line, 0, line.size, "ab", 40, memo: Wrap::SearchMemo.new)
       reference_mark(Screen.new(want), 0, 0, line, 0, line.size, "ab", 40)
       got.bg_grid.should eq(want.bg_grid)
       got.cluster_grid.should eq(want.cluster_grid)
+    end
+  end
+
+  # The memo keeps one line's scan across every row that draws it and across frames, and the
+  # per-row work becomes a binary search into the scan's hits. Each case here draws EVERY
+  # wrapped row of a line through one memo, in order and then again (the next frame), and
+  # compares each row with the retired loop — so a hit found by the search but not by the
+  # walk, a column cursor resumed from a grapheme checkpoint, or a stale entry would all
+  # show up as a cell that differs.
+  describe "with a SearchMemo over every wrapped row (differential)" do
+    w = 24
+
+    frame = ->(line : String, query : String, memo : Wrap::SearchMemo?, conceal : Array({Int32, Int32})?, oracle : Bool) do
+      # The real row bounds: `layout` never breaks inside a cluster, which `ColRun` assumes.
+      lay = Wrap.layout(line, w, conceal)
+      (0...lay.rows).map do |r|
+        a = lay.start_of(r)
+        b = lay.end_of(r)
+        bk = MemoryBackend.new(w + 8, 1)
+        if oracle
+          reference_mark(Screen.new(bk), 2, 0, line, a, b, query, w + 2, conceal)
+        else
+          Wrap.mark_search(Screen.new(bk), 2, 0, line, a, b, query, w + 2, conceal, memo: memo)
+        end
+        {bk.bg_grid, bk.cluster_grid}
+      end
+    end
+
+    zwj = "\u{1F468}\u{200D}\u{1F4BB}"
+    flag = "\u{1F1F0}\u{1F1F7}" # a regional-indicator pair: its pairing state rides the walk
+    cases = {
+      "ASCII, overlapping query"      => {"aaaaaaa" * 30 + "b", "aa", nil},
+      "ASCII, case-insensitive"       => {"xNeEdLex" * 40, "NEEDLE", nil},
+      "ASCII, straddling every break" => {("." * 21 + "needle") * 20, "needle", nil},
+      "ASCII, no match"               => {"abc" * 100, "zzz", nil},
+      "CJK, dense"                    => {"世界" * 1500, "界", nil},
+      "one é in a long ASCII line"    => {"é" + "user1,user2," * 400, "user", nil},
+      "ZWJ + flags between matches"   => {(zwj + "ab" + flag + flag + "needle ") * 200, "needle", nil},
+      "combining mark, mid-cluster"   => {"éx" * 800, "́", nil},
+      "U+212A (bytes shrink)"         => {"aK bK " * 300, "k", nil},
+      "conceal runs"                  => {"a¦hid§needle" * 40, "needle", [{1, 6}, {13, 18}]},
+    }
+
+    cases.each do |name, (line, query, conceal)|
+      it "agrees row for row on #{name}, frame after frame" do
+        memo = Wrap::SearchMemo.new
+        want = frame.call(line, query, nil, conceal, true)
+        frame.call(line, query, memo, conceal, false).should eq(want)
+        frame.call(line, query, memo, conceal, false).should eq(want) # warm memo
+        frame.call(line, query, nil, conceal, false).should eq(want)  # no memo
+      end
+    end
+
+    it "agrees on the U+0130 whole-line fallback (downcase grows the line)" do
+      line = "İ foo " * 50
+      memo = Wrap::SearchMemo.new
+      got = MemoryBackend.new(48, 1)
+      want = MemoryBackend.new(48, 1)
+      2.times { Wrap.mark_search(Screen.new(got), 0, 0, line, 0, line.size, "foo", 40, memo: memo) }
+      reference_mark(Screen.new(want), 0, 0, line, 0, line.size, "foo", 40)
+      got.bg_grid.should eq(want.bg_grid)
+      got.cluster_grid.should eq(want.cluster_grid)
+    end
+
+    it "agrees when the rows are drawn out of order (checkpoints resumed backwards)" do
+      line = ("é" + "needle " * 300) * 3
+      memo = Wrap::SearchMemo.new
+      lay = Wrap.layout(line, w)
+      rows = lay.rows
+      order = (0...rows).to_a.reverse + [rows // 2, 0, rows - 1]
+      order.each do |r|
+        a = lay.start_of(r)
+        b = lay.end_of(r)
+        got = MemoryBackend.new(w + 8, 1)
+        want = MemoryBackend.new(w + 8, 1)
+        Wrap.mark_search(Screen.new(got), 0, 0, line, a, b, "needle", w, memo: memo)
+        reference_mark(Screen.new(want), 0, 0, line, a, b, "needle", w)
+        got.bg_grid.should eq(want.bg_grid)
+      end
+    end
+
+    it "re-scans when the query or the line changes, and adopts a fresh equal String" do
+      memo = Wrap::SearchMemo.new
+      big = "foo bar " * 1000 # past SearchMemo::BIG, so it takes the long-lived slot
+      foo = memo.scan(big, "foo")
+      foo.hit_chars.size.should eq(1000)
+      bar = memo.scan(big, "bar")
+      bar.hit_chars.first.should eq(4)
+      bar.text.should be(foo.text) # a new query keeps the line's downcase + checkpoints
+      edited = big.sub("bar", "BA!")
+      memo.scan(edited, "bar").hit_chars.first.should eq(12)
+      copy = String.new(edited.to_slice) # equal content, a different object
+      s = memo.scan(copy, "bar")
+      s.should be(memo.scan(edited, "bar"))
+      s.line.should be(edited)
+      # A short line takes the other slot and does not evict the long one.
+      memo.scan("bar", "bar").hit_chars.should eq([0])
+      memo.scan(edited, "bar").should be(s)
     end
   end
 end

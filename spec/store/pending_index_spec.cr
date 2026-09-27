@@ -45,6 +45,7 @@ describe "pending-flow index schema V36" do
       # Back to the V35 shape: no index, an older user_version.
       store.@db.exec("UPDATE flows SET unsent = 1 WHERE id = ?", unsent)
       store.@db.exec("DROP INDEX idx_flows_pending")
+      store.@db.exec("DROP INDEX idx_flows_list") # V37's, which a V35 project never had
       store.@db.exec("PRAGMA user_version = 35")
       store.close
 

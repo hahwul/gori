@@ -174,10 +174,9 @@ class Gori::Tui::RepeaterView
     # (it is 7 rows showing a 4-5 line head — there is nothing to scroll to).
     rows = active ? resp_rows(cw, body.h, total, line_text) : resp_static_rows(cw, body.h, total, line_text)
     xs = active ? resp_xscroll : 0
-    # The search band's downcased copy of the logical line, made once per line rather than
-    # once per drawn row (a wrapped line can fill the pane) — the `ReadPane` hoist.
-    searching = !@search_hl.empty?
-    lower = Wrap::LowerMemo.new
+    # The search band's whole-line scan, kept per pane across rows and frames (a wrapped line
+    # can fill the pane) — `Wrap::SearchMemo`.
+    searching = resp_searching?
     rows.each_with_index do |vr, i|
       y = body.y + i
       draw_resp_gutter(screen, body.x, y, gw, vr, lit)
@@ -191,7 +190,7 @@ class Gori::Tui::RepeaterView
       paint_resp_line_chrome(screen, body.x + gw, y, vr.li, text, lit, sel_spans, vr.a, vr.b,
         clip_x: body.x + gw, clip_w: cw)
       next unless searching
-      Wrap.mark_search(screen, body.x + gw, y, text, vr.a, vr.b, @search_hl, body.x + gw + cw, xoff: xs, lower: lower.for(vr.li, text))
+      Wrap.mark_search(screen, body.x + gw, y, text, vr.a, vr.b, @search_hl, body.x + gw + cw, xoff: xs, memo: @resp_search_memo)
     end
     Frame.scroll_gauge(screen, body, total, @scroll, lit) if active
   end
@@ -270,8 +269,7 @@ class Gori::Tui::RepeaterView
     line_text = ->(i : Int32) { lines[i][0] }
     rows = active ? resp_rows(cw, body.h, lines.size, line_text) : resp_static_rows(cw, body.h, lines.size, line_text)
     xs = active ? resp_xscroll : 0
-    searching = !@search_hl.empty?
-    lower = Wrap::LowerMemo.new
+    searching = resp_searching?
     rows.each_with_index do |vr, i|
       text, color = lines[vr.li]
       y = body.y + i
@@ -283,7 +281,7 @@ class Gori::Tui::RepeaterView
       paint_resp_line_chrome(screen, body.x + gw, y, vr.li, text, lit, sel_spans, vr.a, vr.b,
         clip_x: body.x + gw, clip_w: cw)
       next unless searching
-      Wrap.mark_search(screen, body.x + gw, y, text, vr.a, vr.b, @search_hl, body.x + gw + cw, xoff: xs, lower: lower.for(vr.li, text))
+      Wrap.mark_search(screen, body.x + gw, y, text, vr.a, vr.b, @search_hl, body.x + gw + cw, xoff: xs, memo: @resp_search_memo)
     end
     Frame.scroll_gauge(screen, body, lines.size, @scroll, lit) if active
   end
@@ -302,8 +300,7 @@ class Gori::Tui::RepeaterView
     # RAW line and the wrap of the revealed line are the same break — no second layout.
     rows = resp_rows(cw, rect.h, total, ->(i : Int32) { lines[i] })
     xs = resp_xscroll
-    searching = !@search_hl.empty?
-    lower = Wrap::LowerMemo.new
+    searching = resp_searching?
     rows.each_with_index do |vr, i|
       y = rect.y + i
       line = lines[vr.li]
@@ -318,7 +315,7 @@ class Gori::Tui::RepeaterView
         clip_x: rect.x + gw, clip_w: cw, reveal: true)
       next unless searching
       Wrap.mark_search(screen, rect.x + gw, y, line, vr.a, vr.b, @search_hl, rect.x + gw + cw, xoff: xs,
-        lower: lower.for(vr.li, line), reveal: true)
+        memo: @resp_search_memo, reveal: true)
     end
   end
 
@@ -364,8 +361,7 @@ class Gori::Tui::RepeaterView
     # describes both and the colours cannot land a column off the glyphs.
     rows = resp_rows(cw, rect.h, total, ->(i : Int32) { resp_line_text(rv, i) })
     xs = resp_xscroll
-    searching = !@search_hl.empty?
-    lower = Wrap::LowerMemo.new
+    searching = resp_searching?
     rows.each_with_index do |vr, i|
       li = vr.li
       y = rect.y + i
@@ -378,7 +374,7 @@ class Gori::Tui::RepeaterView
       paint_resp_line_chrome(screen, rect.x + gw, y, li, text, focused, sel_spans, vr.a, vr.b,
         clip_x: rect.x + gw, clip_w: cw) if text
       if (t = text) && searching
-        Wrap.mark_search(screen, rect.x + gw, y, t, vr.a, vr.b, @search_hl, rect.x + gw + cw, xoff: xs, lower: lower.for(li, t))
+        Wrap.mark_search(screen, rect.x + gw, y, t, vr.a, vr.b, @search_hl, rect.x + gw + cw, xoff: xs, memo: @resp_search_memo)
       end
     end
   end
@@ -465,8 +461,7 @@ class Gori::Tui::RepeaterView
     _, decorated, _ = resp_drawn_source
     rows = resp_rows(cw, rect.h, data.size, decorated)
     xs = resp_xscroll
-    searching = !@search_hl.empty?
-    lower = Wrap::LowerMemo.new
+    searching = resp_searching?
     rows.each_with_index do |vr, i|
       d = data[vr.li]
       y = rect.y + i
@@ -491,7 +486,14 @@ class Gori::Tui::RepeaterView
       # Mark only the line text, so the highlights match what response_search_lines
       # counts (d.text) rather than the diff decoration.
       next unless searching
-      Wrap.mark_search(screen, tx, y, d.text, ts, te, @search_hl, rect.x + gw + cw, xoff: xs, lower: lower.for(vr.li, d.text))
+      Wrap.mark_search(screen, tx, y, d.text, ts, te, @search_hl, rect.x + gw + cw, xoff: xs, memo: @resp_search_memo)
     end
+  end
+
+  # Whether a ^F query is live. An empty one frees the memo's whole-line scans (`Wrap::SearchMemo`).
+  private def resp_searching? : Bool
+    return true unless @search_hl.empty?
+    @resp_search_memo.clear
+    false
   end
 end

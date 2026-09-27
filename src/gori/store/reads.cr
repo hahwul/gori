@@ -823,6 +823,12 @@ module Gori
     # `offset` is what makes the cut above a PAGE rather than a ceiling: the ordering is
     # total, so `offset` walks the whole set deterministically instead of leaving everything
     # past `limit` permanently out of reach.
+    #
+    # The GROUP BY is spelled in the ORDER BY's order, which is `idx_flows_sitemap`'s (V38):
+    # the planner then groups straight off the covering index and stops after the page. In
+    # the old order (`scheme, host, …`) it scanned the table and sorted every row twice. The
+    # group set is the same either way. The order inside `statuses` was never specified and
+    # follows whichever index the planner picks for the filter (ascending off this one).
     def sitemap_entries_detailed(filter : QL::Filter = QL::EMPTY, limit : Int32 = SITEMAP_MAX, *,
                                  offset : Int32 = 0,
                                  raise_on_error : Bool = false) : Array(SitemapEntry)
@@ -836,7 +842,7 @@ module Gori
             "SUM(CASE WHEN status = 0 OR status >= 400 THEN 1 ELSE 0 END), " \
             "MIN(created_at), MAX(created_at) " \
             "FROM flows WHERE #{filter.sql} " \
-            "GROUP BY scheme, host, port, http_version, method, target " \
+            "GROUP BY host, target, method, scheme, port, http_version " \
             "ORDER BY host, target, method, scheme, port, http_version LIMIT ? OFFSET ?"
       @db.query(sql, args: args) do |rs|
         rs.each do
@@ -918,7 +924,8 @@ module Gori
     # ORDER BY names every GROUP BY column, so the ordering is TOTAL and the `LIMIT` cut is
     # deterministic — same reason as `sitemap_entries_detailed`, and the same consequence
     # if it were not: with no cursor on this read, a group that loses an arbitrary tiebreak
-    # is not on a later page, it is unreachable.
+    # is not on a later page, it is unreachable. It reads `idx_flows_sitemap` (V38) covered;
+    # the grouping still sorts, because that index keys the transport ahead of `status`.
     def endpoint_observations(filter : QL::Filter = QL::EMPTY, limit : Int32 = ENDPOINT_OBSERVATION_MAX, *,
                               raise_on_error : Bool = false) : Array(EndpointObservation)
       rows = [] of EndpointObservation
@@ -927,7 +934,7 @@ module Gori
       sql = "SELECT host, method, target, status, content_type, COUNT(*), " \
             "MIN(response_size), MAX(response_size), MIN(created_at), MAX(created_at), MAX(id) " \
             "FROM flows WHERE #{filter.sql} " \
-            "GROUP BY host, method, target, status, content_type " \
+            "GROUP BY host, target, method, status, content_type " \
             "ORDER BY host, target, method, status, content_type LIMIT ?"
       @db.query(sql, args: args) do |rs|
         rs.each do

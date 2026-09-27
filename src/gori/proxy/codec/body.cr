@@ -33,6 +33,9 @@ module Gori::Proxy::Codec
     def initialize(@limit : Int32, @hint : Int64 = 0_i64)
       @mem = nil.as(IO::Memory?)
       @sealed = false
+      # The capacity @mem was created with, until the one `grow_to_hint` decision has been
+      # made; Int32::MAX after it (IO::Memory's own growth from then on).
+      @reserved = 0
     end
 
     def write(slice : Bytes) : Nil
@@ -44,14 +47,19 @@ module Gori::Proxy::Codec
       # store first so the handed-out slice stays a stable copy — copy-on-write, paid only in
       # that adversarial case, never on the normal read-once path.
       reseat_after_seal if @sealed
-      mem = (@mem ||= IO::Memory.new(initial_capacity))
+      mem = @mem || begin
+        @reserved = initial_capacity
+        @mem = IO::Memory.new(@reserved)
+      end
       stored = mem.bytesize
       if stored < @limit
         room = @limit - stored
-        if slice.size <= room
+        take = slice.size <= room ? slice.size : room
+        mem = grow_to_hint(mem, stored + take) if stored + take > @reserved
+        if take == slice.size
           mem.write(slice)
         else
-          mem.write(slice[0, room])
+          mem.write(slice[0, take])
           @truncated = true
         end
       else
@@ -81,6 +89,27 @@ module Gori::Proxy::Codec
       return unless old
       fresh = IO::Memory.new(old.bytesize > 0 ? old.bytesize : 64)
       fresh.write(old.to_slice)
+      @mem = fresh
+      @reserved = Int32::MAX
+    end
+
+    # The body has outgrown the presize, so more than PRESIZE_CAP bytes REALLY arrived: now the
+    # declared length is worth one allocation that fits it (bounded by the capture limit),
+    # instead of IO::Memory doubling from 256 KiB — which allocated 256+512+1024+2048 KiB for a
+    # 1.5 MB body and kept it as a view into the 2 MiB block. A header that lies HIGH can force
+    # at most the capture limit, and only after PRESIZE_CAP bytes were sent; one that lies LOW
+    # (or no length at all) leaves IO::Memory's own growth in charge. Decided once per capture.
+    private def grow_to_hint(mem : IO::Memory, need : Int32) : IO::Memory
+      @reserved = Int32::MAX
+      target = @hint > @limit ? @limit : @hint.to_i
+      return mem if target < need
+      # The hint is the peer's unverified claim, and the limit can be raised to GiBs: a
+      # response that declares 1 TB, sends just past the presize and stalls must not reserve the
+      # whole limit. Jump only when the claim is within a few doublings of what really arrived;
+      # past that, IO::Memory's doubling keeps the allocation within 2x of the bytes received.
+      return mem if target // 8 > need
+      fresh = IO::Memory.new(target)
+      fresh.write(mem.to_slice)
       @mem = fresh
     end
 
@@ -232,11 +261,11 @@ module Gori::Proxy::Codec
     # followed by a keep-alive request without desyncing the peer).
     #
     # `buf` is the scratch copy buffer. When nil (Repeater/Fuzz/Miner callers) a body
-    # allocates a fresh 64 KiB slice, as before. A caller that forwards many bodies on
-    # one connection (ClientConn) passes ONE reused buffer so a keep-alive stream stops
-    # churning a large-object 64 KiB allocation per body — safe because a body is pumped
-    # one direction on one fiber, so the request and response bodies copy sequentially,
-    # never overlapping (the same argument copy_chunked already uses across its chunks).
+    # allocates a fresh 64 KiB slice, as before. ClientConn, which forwards many bodies,
+    # passes one borrowed from `Proxy::CopyBufPool` for the length of this call, so a
+    # keep-alive stream stops churning a large-object 64 KiB allocation per body — safe
+    # because a body is pumped one direction on one fiber and the buffer never leaves this
+    # call (the same argument copy_chunked already uses across its chunks).
     # A body-less frame (None) never touches the buffer, so a bodyless request never allocates.
     def self.stream(src : IO, dst : IO, framing : BodyFraming, length : Int64, tee : IO, buf : Bytes? = nil) : Bool
       complete =

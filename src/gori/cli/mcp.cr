@@ -96,6 +96,8 @@ module Gori::CLI
     # Logs to STDERR ONLY — STDOUT is reserved for the JSON-RPC stream.
     Log.setup(:info, Log::IOBackend.new(STDERR))
     Settings.load # send_request's repeater engines read the upstream-proxy setting from here
+    # A fuzz or mine job grows the heap the way capture does; give it back once the agent is idle.
+    IdleGc.start
     # Preferences › AI › MCP permissions, latched for this process like `mcp_channels`, and
     # never failing open: a settings file this start could not read in full denies every group
     # rather than serving them all (`mcp_enforced_denials`).

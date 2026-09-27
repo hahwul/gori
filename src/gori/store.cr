@@ -328,16 +328,15 @@ module Gori
       # catches exactly this), and copying just the `.db` loses the tail. gori's close path
       # depends on the pool closing every connection to get SQLite's last-connection
       # checkpoint, and that only holds at 1. Raise this only with that fixed first.
-      # MEASURED, so nobody re-proposes it: a COVERING INDEX over every column `SELECT_ROW`
-      # reads was tried on top of this and reverted. It is genuinely used (EXPLAIN QUERY PLAN
-      # says `SCAN flows USING COVERING INDEX`), but on the worst case it exists for — a filter
-      # matching almost nothing, so SQLite cannot stop early — it bought 7.5 ms -> 6.5 ms at
-      # 100k rows with 8 KB bodies, for 3% off sustained INSERT throughput and ~20 MB per 100k
-      # rows. The reason it pays so little is the line below: with a 64 MiB page cache the
-      # table pages are already resident, so the overflow-chain traversal the index was meant
-      # to avoid is not what the query was spending its time on. The two genuinely slow filters
-      # (`header:` 164 ms, `body:` LIKE 452 ms) scan the BLOBs themselves and no projection
-      # index can touch them.
+      # The COVERING INDEX over every column `SELECT_ROW` reads (`idx_flows_list`, schema V37)
+      # was tried once on top of this (#665) and reverted: with 8 KB bodies it bought
+      # 7.5 ms -> 6.5 ms at 100k rows, because every row fit its leaf page and this cache held
+      # them. That measurement was the wrong corpus, not the wrong idea. With realistic MB
+      # bodies (200k flows / 6.5 GB, 2% of 0.5–2 MB) the leaf pages scatter between overflow
+      # pages across the whole file, no cache holds them, and every column after the BLOBs is
+      # an overflow-chain walk — `host:` with no match took 121 ms, `src:repeater` 1061 ms;
+      # the index answers both in under 10 ms (V37 has the numbers). The filters that scan the
+      # BLOBs themselves (`header:`, index-free `body:`, `body~`) are still out of its reach.
       #
       # `max_pool_size` is bounded BECAUSE of `cache_size`: crystal-db's default is unlimited,
       # and 64 MiB is a per-CONNECTION ceiling, so N concurrent readers (the TUI render fiber,
@@ -404,6 +403,32 @@ module Gori
     # foreign_keys, journal_mode, synchronous and wal_autocheckpoint, so this one is issued
     # per connection below.
     MMAP_SIZE = 256 * 1024 * 1024
+
+    # WAL pages the writer lets accumulate before its COMMIT runs an automatic checkpoint
+    # (SQLite's default is 1000). That checkpoint runs synchronously inside the writer's
+    # COMMIT, on the one scheduler thread every proxy fiber shares, and on macOS the system
+    # SQLite is built with `checkpoint_fullfsync` on, so each one is ~2 F_FULLFSYNC (~4 ms).
+    # Profiled under keep-alive proxy load it was 11-31% of busy time (h1) and 28% (h2).
+    # 4000 pages (~16 MB at 4 KiB) runs a quarter as many checkpoints, and hot index pages
+    # rewritten between them are copied back once instead of four times. The cost is a longer
+    # single stall when one does run (max ~16-20 ms vs ~12-16 ms in a commit-latency bench
+    # with the fsyncs in, while commits over 2 ms fell from ~88 to ~21 per 6000).
+    # checkpoint_fullfsync stays on: it is what makes a checkpoint durable on Apple hardware.
+    WAL_AUTOCHECKPOINT_PAGES = 4000
+
+    # `journal_size_limit`: after a checkpoint resets the WAL, the next write truncates the
+    # file back to this size. Without it the `-wal` keeps its high-water mark forever — a
+    # long-lived reader (a second `gori mcp`, a slow export) that holds a checkpoint back
+    # can grow it far past the autocheckpoint size, and it would stay that big on disk.
+    WAL_SIZE_LIMIT = 64 * 1024 * 1024
+
+    # The writer's own page cache, in KiB (negative = KiB, as in the URL's -64000). The pool's
+    # 64 MiB is sized for READERS re-scanning BLOB-heavy `flows` pages under a History filter;
+    # the writer holds its connection for the life of the store and mostly appends, so its
+    # cache fills with pages it never reads again and stays resident. Measured over 60 s of
+    # keep-alive proxy load (`gori run capture`): throughput no lower at 8 MiB, peak RSS
+    # 185 -> 129 MB.
+    WRITER_CACHE_KIB = -8000
 
     # THE one place a fresh pool connection is configured.
     #
@@ -781,6 +806,16 @@ module Gori
     # scheduler: plain Int64 is enough (no -Dpreview_mt).
     def probe_generation : Int64
       @probe_generation
+    end
+
+    # Ops taken by EVERY store's writer fiber in this process, cumulative. A liveness signal,
+    # not a count of rows: a change between two reads means something wrote in between (read
+    # by `IdleGc` so it never collects under capture). Process-wide on purpose, since the GC
+    # heap it guards is. Single-threaded scheduler: plain Int64 (no -Dpreview_mt).
+    @@write_ops = 0_i64
+
+    def self.write_ops : Int64
+      @@write_ops
     end
 
     # --- write API (called from proxy fibers) --------------------------------
@@ -1202,10 +1237,13 @@ module Gori
       @writer_conn_suspect = false
       conn || begin
         fresh = @db.checkout
-        # Bound the WAL file so it doesn't grow without limit under sustained writes (the
-        # default is 1000 pages; set it explicitly on the writer). Per CONNECTION, so it has to
-        # be re-issued on every one the writer takes, not once at startup.
-        fresh.exec("PRAGMA wal_autocheckpoint=1000") rescue nil
+        # Both per CONNECTION, so they have to be re-issued on every one the writer takes, not
+        # once at startup. See WAL_AUTOCHECKPOINT_PAGES / WAL_SIZE_LIMIT / WRITER_CACHE_KIB.
+        # The connection goes back to the pool only at teardown, so readers keep the URL's
+        # 64 MiB.
+        fresh.exec("PRAGMA wal_autocheckpoint=#{WAL_AUTOCHECKPOINT_PAGES}") rescue nil
+        fresh.exec("PRAGMA journal_size_limit=#{WAL_SIZE_LIMIT}") rescue nil
+        fresh.exec("PRAGMA cache_size=#{WRITER_CACHE_KIB}") rescue nil
         @writer_conn = fresh
       end
     end
@@ -1376,6 +1414,7 @@ module Gori
           while ops.size < BATCH_MAX && (extra = drain_one)
             ops << extra
           end
+          @@write_ops &+= ops.size
 
           # Batch the burst into one transaction (amortize fsync, P6), then fire
           # replies + events only AFTER commit so nothing observes uncommitted
@@ -1540,7 +1579,15 @@ module Gori
         # the connection is half-closed and `#close` must not re-close the pool (see there).
         if last = @writer_conn
           @writer_conn = nil
-          @writer_conn_suspect ? retire_writer_conn(last) : last.release
+          if @writer_conn_suspect
+            retire_writer_conn(last)
+          else
+            # Back to the pool, where a reader may take it for the rest of the session (a writer
+            # fiber that died mid-loop leaves the store open): undo the writer-only page cache
+            # (WRITER_CACHE_KIB) so it serves reads with the pool's -64000 like every other.
+            last.exec("PRAGMA cache_size=-64000") rescue nil
+            last.release
+          end
         end
       end
     end

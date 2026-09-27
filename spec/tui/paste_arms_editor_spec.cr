@@ -35,7 +35,7 @@ describe "Runner — a paste into a READ editor" do
   # `begin_bulk_paste?` says no and `paste_runs_as_commands?` says yes — the refusal this
   # replaces, now with a mode flip left behind it.
   it "opens the pane before either paste question is asked" do
-    body = method_body("runner.cr", "private def handle(ev : Termisu::Event::Any) : Nil")
+    body = method_body("runner.cr", "private def handle(ev : Termisu::Event::Any) : Bool")
     arm = body.index("arm_editor_for_paste")
     bulk = body.index("begin_bulk_paste?")
     cmds = body.index("paste_runs_as_commands?")
@@ -103,5 +103,120 @@ describe "NotesController — the pane a paste is most often aimed at" do
       controller.paste_text("GET /a HTTP/1.1\nHost: x").should be_true
       controller.view.current_text.should eq("GET /a HTTP/1.1\nHost: x")
     end
+  end
+end
+
+# The workbench inputs a token or a body gets pasted into. Key by key, each character re-ran
+# the tab's whole derivation (the Decoder chain, the JWT decode / encode, the cookie decode /
+# forge) over the whole buffer, so a paste cost its length squared — 160 KB was ~15 s of the
+# scheduler the proxy shares. In bulk it is one splice, one derivation and one undo step, and
+# the buffer is what the key path would have typed: ↵ a newline, ↹ a tab.
+describe "workbench inputs take a paste in bulk" do
+  pasted = "line one\n\tline two"
+
+  it "Decoder INPUT: only in INSERT, one splice, the chain re-run once" do
+    TuiContract.with_session("paste-bulk-decoder") do |session|
+      host = TuiContract::Host.new(session)
+      controller = DecoderController.new(host)
+      host.tab = :decoder
+      TuiContract.render(controller)
+      s = controller.@sessions[controller.@idx]
+      s.pane = :input
+      controller.accepts_bulk_paste?.should be_false # READ
+      controller.paste_text("x").should be_false
+
+      controller.editor_enter_insert.should be_true
+      controller.accepts_bulk_paste?.should be_true
+      controller.paste_text(pasted).should be_true
+      s.input.text.should eq(pasted)
+      String.new(s.result.input).should eq(pasted) # the chain saw the whole paste
+      s.input.undo
+      s.input.text.should eq("") # one undo step, not one per character
+
+      s.pane = :chain # the single-line spec keeps the key path
+      controller.accepts_bulk_paste?.should be_false
+    end
+  end
+
+  it "JWT: INPUT in INSERT and the HEADER / PAYLOAD editors, each re-derived once" do
+    TuiContract.with_session("paste-bulk-jwt") do |session|
+      host = TuiContract::Host.new(session)
+      controller = JwtController.new(host)
+      host.tab = :jwt
+      TuiContract.render(controller)
+      s = controller.@sessions[controller.@idx]
+      s.pane = :input
+      controller.accepts_bulk_paste?.should be_false # READ
+      controller.editor_enter_insert.should be_true
+      token = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.sig"
+      controller.paste_text(token).should be_true
+      s.input.text.should eq(token)
+      s.decoded.should contain("HS256")
+
+      s.pane = :payload
+      controller.accepts_bulk_paste?.should be_true
+      before = s.output
+      s.payload.set_text("")
+      controller.paste_text(%({"sub":\t"y"})).should be_true
+      s.payload.text.should eq(%({"sub":\t"y"}))
+      s.output.should_not eq(before)
+
+      s.pane = :secret
+      controller.accepts_bulk_paste?.should be_false
+      controller.paste_text("k").should be_false
+    end
+  end
+
+  it "Cookie: INPUT in INSERT and the PAYLOAD editor, each re-derived once" do
+    TuiContract.with_session("paste-bulk-cookie") do |session|
+      host = TuiContract::Host.new(session)
+      controller = CookieController.new(host)
+      host.tab = :cookie
+      TuiContract.render(controller)
+      s = controller.@sessions[controller.@idx]
+      s.pane = :input
+      controller.accepts_bulk_paste?.should be_false # READ
+      controller.editor_enter_insert.should be_true
+      controller.paste_text(pasted).should be_true
+      s.input.text.should eq(pasted)
+      s.decoded.should_not be_empty # decoded (or its error) for the pasted text
+
+      s.pane = :payload
+      controller.accepts_bulk_paste?.should be_true
+      controller.paste_text("{}").should be_true
+      s.payload.text.should end_with("{}")
+
+      s.pane = :secret
+      controller.accepts_bulk_paste?.should be_false
+    end
+  end
+end
+
+# A key a paste in progress absorbs changes nothing on screen until the paste closes, so the
+# run loop must not render a frame for it: a 1 MB bulk paste is ~32k ticks, and rendering the
+# same frame on each was 63% of the main thread the proxy shares. `handle` says whether an
+# event could have changed the frame, and the loop dirties the tick on that answer alone.
+describe "Runner — a paste in progress does not re-render per key" do
+  it "reports buffered, dropped and mid-paste-swallowed input as not changing the frame" do
+    body = method_body("runner.cr", "private def handle(ev : Termisu::Event::Any) : Bool")
+    body.should contain("return false if buffer_bulk_paste(ev)")
+    body.should contain("return false if @paste_dropped")
+    # A swallowed event is inert only strictly INSIDE a paste: the markers themselves (and a
+    # PasteStart that closed an abandoned paste) are transitions that flush, toast or arm.
+    body.should contain("return !(was_pasting && @paste_newline.pasting?) if swallowed")
+    body.should match(/handle_mouse\(ev\).*\n\s+true\n\s+end\z/m)
+  end
+
+  it "dirties the tick from those answers, first event and burst alike" do
+    src = tui_src("runner.cr")
+    src.should contain("dirty = handle(ev)")
+    src.should contain("dirty ||= burst_changed")
+    src.should_not match(/handle\(ev\)\n\s+dirty = true/)
+    method_body("runner.cr", "private def drain_burst : {Int32, Bool}")
+      .should contain("changed = true if handle(more)")
+  end
+
+  it "still feeds the stall guard every drained key (PasteStall is unchanged)" do
+    tui_src("runner.cr").should contain("@paste_stall.saw(Time.instant, keys_drained)")
   end
 end

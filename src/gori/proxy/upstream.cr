@@ -4,6 +4,7 @@ require "openssl"
 require "../settings"
 require "../host_overrides"
 require "./socket_tuning"
+require "./resolver_cache"
 require "./socks5"
 require "./tls/client_shape"
 
@@ -375,25 +376,43 @@ module Gori::Proxy
     # to 127.0.0.1, and a refused origin surfaced as a later option or read failure rather than
     # a connect error. Reading SO_ERROR after the connect is correct on every platform; on one
     # without the quirk it is 0 and costs one syscall per address.
+    #
+    # The addresses come from `ResolverCache` (a blocking `getaddrinfo` per dial stalled the
+    # scheduler). When none of them accepts, the answer is dropped so the next dial asks the
+    # resolver again rather than retrying a stale record until its TTL runs out. The error
+    # raised when every address fails is the one `Socket::Addrinfo.tcp`'s block form raised.
     private def self.tcp_connect(host : String, port : Int32, timeout : Time::Span?) : TCPSocket
-      ::Socket::Addrinfo.tcp(host, port) do |addrinfo|
+      last = nil.as(Exception?)
+      ResolverCache.shared.resolve(host, port).each do |addrinfo|
         # A family the host cannot open (IPv6 disabled, yet `localhost` still resolves ::1
         # first) is one more address that failed, not the end of the walk.
         sock = begin
           TCPSocket.new(addrinfo.family)
         rescue ex : ::Socket::Error
-          next ex
+          last = ex
+          next
         end
         if err = sock.connect(addrinfo, timeout: timeout) { |e| e }
           sock.close
-          next err
+          last = err
+          next
         end
         if errno = pending_error(sock)
           sock.close
-          next ::Socket::ConnectError.from_os_error("connect", errno)
+          last = ::Socket::ConnectError.from_os_error("connect", errno)
+          next
         end
-        sock
-      end || raise ::Socket::ConnectError.new("connect: no address for #{host}")
+        return sock
+      end
+      ResolverCache.shared.forget(host, port)
+      case last
+      when ::Socket::ConnectError
+        raise ::Socket::ConnectError.from_os_error("Error connecting to '#{host}:#{port}'", last.os_error)
+      when Exception
+        raise last
+      else
+        raise ::Socket::ConnectError.new("connect: no address for #{host}")
+      end
     end
 
     # The error a non-blocking connect left on `sock`, or nil. A getsockopt that itself fails
@@ -635,6 +654,8 @@ module Gori::Proxy
         sock.try(&.close) rescue nil
         sock = nil
       end
+      # No locally-resolved address got a tunnel: re-resolve next time (see tcp_connect).
+      ResolverCache.shared.forget(bare_host(host), port) unless route.remote_dns?
       if handshake_error
         return {nil, DialError.new(DialErrorKind::Proxy, "#{proxy_label(route)}: the SOCKS5 handshake failed")}
       end
@@ -652,7 +673,7 @@ module Gori::Proxy
       return [host] if route.remote_dns?
       bare = bare_host(host)
       return [bare] if parse_ip(bare)
-      addresses = Socket::Addrinfo.tcp(bare, port).map(&.ip_address.address)
+      addresses = ResolverCache.shared.resolve(bare, port).map(&.ip_address.address)
       addresses.uniq!
       addresses
     end

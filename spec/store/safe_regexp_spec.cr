@@ -237,26 +237,32 @@ describe Gori::SafeRegexp do
       end
     end
 
-    it "gives the same answer whichever validation route the sampler picked" do
-      # The two routes (let PCRE2 reject an invalid subject, or scrub before matching) are a
-      # cost choice, never a meaning choice. Drive enough rows to flip the sampler and assert
-      # the query still answers identically.
+    it "answers a mixed corpus exactly as scrub-then-match does" do
+      # The callback decides validity once and hands PCRE2 either the bytes or their scrubbed
+      # projection, never validating twice. Whatever route a row takes, the answer must be the
+      # one `String#scrub` + `Regex#matches?` gives — including for a pattern that can only
+      # match the U+FFFD a scrub writes, and for truncated sequences at the very end.
       with_store do |store|
-        wanted = [] of Int64
-        600.times do |i|
-          body = i % 3 == 0 ? "plain ABC#{i} text".to_slice : Bytes[0xFF, 0xFE, 0x00, 0x41, 0x42, 0x43, 0x37]
-          id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        bodies = [
+          "plain ABC12 text".to_slice,
+          Bytes[0xFF, 0xFE, 0x00, 0x41, 0x42, 0x43, 0x37],
+          Bytes[0x41, 0x42, 0x43, 0x39, 0xE2, 0x82],       # valid prefix, cut-off sequence
+          "caf\u{00e9} ABC\u{1F600}5".to_slice,            # valid multi-byte
+          Bytes[0xED, 0xA0, 0x80, 0x41, 0x42, 0x43, 0x30], # a surrogate: invalid, 3 x U+FFFD
+          Bytes[0xC0, 0xAF, 0x78],                         # overlong
+        ]
+        ids = bodies.map_with_index do |body, i|
+          store.insert_flow(Gori::Store::CapturedRequest.new(
             created_at: i.to_i64 + 1, scheme: "http", host: "h.test", port: 80,
             method: "POST", target: "/#{i}", http_version: "HTTP/1.1",
             head: "POST /#{i} HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice,
             body: body, source: Gori::FlowSource::Kind::Proxy))
-          wanted << id
         end
-        query = -> { store.search(Gori::QL.parse("body~ABC\\d+"), 1000, raise_on_error: true).map(&.id).sort! }
-        first = query.call
-        first.should eq(wanted.sort)
-        # The second run is the one that reads whatever the first run's sample decided.
-        query.call.should eq(first)
+        ["ABC\\d+", "\\x{FFFD}{3}A", "^\\x{FFFD}\\x{FFFD}x$", "caf.\\s", "\\d$", "[^\\x00-\\x7F]"].each do |re|
+          want = bodies.each_with_index.select { |(b, _)| old_answer(re, b) }.map { |(_, i)| ids[i] }.to_a.sort!
+          got = store.search(Gori::QL.parse("req.body~#{re}"), 50, raise_on_error: true).map(&.id).sort!
+          got.should eq(want), re
+        end
       end
     end
   end
