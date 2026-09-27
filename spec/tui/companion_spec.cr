@@ -834,6 +834,29 @@ describe Gori::Tui::Companion do
     end
   end
 
+  # …and a reply held for longer than its TTL must not vanish the moment the mode changes:
+  # the switch is made behind a modal, so its TTL restarts from the switch.
+  it "restarts a long-held reply's TTL when replies switches to timed" do
+    with_companion(true) do
+      with_replies("hold") do
+        notes = Notifications.new
+        companion = Companion.new(notes)
+        t0 = Time.instant
+        companion.tick(t0)
+        notes.push(:info, "done", source: "agent", addressed: true)
+        companion.tick(t0 + Companion::BEAT)
+        beats(companion, t0, 60) # held well past its ordinary TTL
+        switch = t0 + Companion::BEAT * 61
+        Gori::Settings.companion_replies = "timed"
+        companion.tick(switch)
+        companion.tick(switch + Companion::BEAT)
+        companion.frame.not_nil!.bubble.should eq("done")
+        beats(companion, switch, 60)
+        companion.frame.not_nil!.bubble.should be_nil
+      end
+    end
+  end
+
   # Holding exists so the reply gets read; a job result landing behind it would otherwise
   # take the bubble and send the operator to the ring after all. A newer REPLY does take it.
   it "keeps a held reply in front of later notices, but not of a later reply" do
