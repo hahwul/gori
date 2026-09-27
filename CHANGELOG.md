@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Docs: the landing walks from capture to issue beside its captures as you scroll, the Guide and Reference indexes become tiles with a TUI capture per tool, and pages gain gold accents on section rules and a gliding table-of-contents marker, in light and dark.
+- Docs: the Brand Kit's plain wallpaper is now a 1920 × 1080 desktop size, and the landing hero is painted from it.
 - Guided tour: `gori tutorial` teaches the space menu before the palette, with its second cards (`>` **Send flow to…**, `esc` back a level) and the palette search that lists a tab's own actions with the key or menu path that reaches each, all read from your keymap; the docs gain a **Space Menu & Palette** guide with a five-minute exercise (#1333)
 - Probe: a headless active scan (`gori run probe --active`, MCP `probe_scan`) probes each request surface once however many times it was captured, instead of re-probing every repeat and spending its active budget on it (#1332)
 - Probe: the live active scanner reuses one keep-alive connection across a flow's rules rather than opening a fresh one per rule (#1332)
