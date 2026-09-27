@@ -1800,7 +1800,7 @@ module Gori
     # A failure here must not kill the writer or lose capture: it runs in its own
     # transaction and swallows errors, leaving the rows dirty for the next attempt.
     private def index_pending_batch(conn : DB::Connection, *, try_lock : Bool = false) : Int32?
-      rows = [] of {Int64, Bytes, Bytes?, Bytes?, Bytes?, String?}
+      rows = [] of {Int64, Bytes, Int64?, Bytes?, Int64?, String?}
       begin
         # Cheap lock-free probe first, served by the partial index on `fts_dirty`. An idle
         # writer runs this every FTS_IDLE_TICK, and an empty backlog must not open a write
@@ -1823,20 +1823,29 @@ module Gori
           # path skipped binary bodies on. A synthesised response (an import, a test double) can
           # carry a content type that never appeared in its head bytes, and deriving the marker
           # from the head would silently start indexing a binary body those callers marked.
+          #
+          # TWO phases, so a body the skip rule rejects is never read: `substr(body, 1, N)` loads
+          # the WHOLE blob before cutting it (only `length()` is served from the record header),
+          # so an image or a gzip stream was copied out in full just to be thrown away. Phase one
+          # reads what decides the skip — heads, content_type, body lengths; phase two fetches
+          # the capped body for the sides that will actually be indexed.
           c.query(
-            "SELECT id, request_head, substr(request_body, 1, ?), response_head, substr(response_body, 1, ?), " \
-            "content_type FROM flows WHERE fts_dirty = 1 ORDER BY id LIMIT ?",
-            FTS_INDEX_MAX, FTS_INDEX_MAX, FTS_BATCH) do |rs|
+            "SELECT id, request_head, length(request_body), response_head, length(response_body), " \
+            "content_type FROM flows WHERE fts_dirty = 1 ORDER BY id LIMIT ?", FTS_BATCH) do |rs|
             rs.each do
-              rows << {rs.read(Int64), rs.read(Bytes), rs.read(Bytes?),
-                       rs.read(Bytes?), rs.read(Bytes?), rs.read(String?)}
+              rows << {rs.read(Int64), rs.read(Bytes), rs.read(Int64?),
+                       rs.read(Bytes?), rs.read(Int64?), rs.read(String?)}
             end
           end
-          rows.each do |(id, req_head, req_body, resp_head, resp_body, resp_ct)|
+          rows.each do |(id, req_head, req_len, resp_head, resp_len, resp_ct)|
             # The request side has no content_type column, so its marker comes from its head —
-            # exactly what the old path did for the request body.
-            req = Store.body_fts_text(req_head, req_body)
-            resp = resp_head.nil? ? "" : Store.body_fts_text(resp_head, resp_body, resp_ct)
+            # exactly what the old path did for the request body. The same rule as
+            # `body_fts_text`, split so it runs before the body is fetched.
+            want_req = (req_len || 0) > 0 && Store.body_fts_indexed?(req_head)
+            want_resp = (resp_len || 0) > 0 && !resp_head.nil? && Store.body_fts_indexed?(resp_head, resp_ct)
+            req_body, resp_body = fts_capped_bodies(c, id, want_req, want_resp)
+            req = req_body.try { |b| String.new(b) } || ""
+            resp = resp_body.try { |b| String.new(b) } || ""
             # Contentless FTS5 forbids UPDATE, so a refresh is DELETE (a cheap tombstone under
             # contentless_delete=1) + INSERT. Unconditional rather than tracking whether this row
             # was ever indexed: it makes a re-index idempotent — and a double index pass, or one
@@ -1861,6 +1870,21 @@ module Gori
       end
     end
 
+    # Phase two of `index_pending_batch`: the FTS_INDEX_MAX-capped bodies of the sides it will
+    # index (nil for a side it skips), in one point read on the primary key.
+    private def fts_capped_bodies(conn : DB::Connection, id : Int64, req : Bool, resp : Bool) : {Bytes?, Bytes?}
+      if req && resp
+        conn.query_one("SELECT substr(request_body, 1, ?), substr(response_body, 1, ?) FROM flows WHERE id = ?",
+          FTS_INDEX_MAX, FTS_INDEX_MAX, id, as: {Bytes?, Bytes?})
+      elsif req
+        {conn.query_one("SELECT substr(request_body, 1, ?) FROM flows WHERE id = ?", FTS_INDEX_MAX, id, as: Bytes?), nil}
+      elsif resp
+        {nil, conn.query_one("SELECT substr(response_body, 1, ?) FROM flows WHERE id = ?", FTS_INDEX_MAX, id, as: Bytes?)}
+      else
+        {nil, nil}
+      end
+    end
+
     # The FTS text for one side, given that side's raw head and its already-capped body.
     # Skips a body that is binary by content type or compressed by Content-Encoding — the same
     # rule the old on-commit path applied. `ct`, when given (the response side), is the stored
@@ -1872,8 +1896,15 @@ module Gori
     # that the indexer then skips would flip the same search's answer once the backlog drains.
     def self.body_fts_text(head : Bytes, body : Bytes?, ct : String? = nil) : String
       return "" if body.nil? || body.empty?
-      return "" if ct && binary_content?(ct)
-      skip_body_fts?(head) ? "" : String.new(body)
+      body_fts_indexed?(head, ct) ? String.new(body) : ""
+    end
+
+    # The skip half of `body_fts_text`, for a caller that decides before it has the body (the
+    # indexer does, so it never reads a body it would drop): does a non-empty body under this
+    # head and content type get indexed at all?
+    def self.body_fts_indexed?(head : Bytes, ct : String? = nil) : Bool
+      return false if ct && binary_content?(ct)
+      !skip_body_fts?(head)
     end
 
     # Does this op leave a flow row `fts_dirty`? (Only flow writes touch the index.)
