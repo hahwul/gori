@@ -161,8 +161,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   #
   # The test is deliberately NARROW, and errs toward delivering the paste: everything modal
   # owns its own keymap and a stray paste inside it is contained, so only the surfaces that
-  # reach the SHELL's keymap answer true — the tab bar, the sub-tab strip, and a body that
-  # is not currently an editor. `:detail` is in that set for the same reason
+  # reach the SHELL's keymap answer true — the tab bar, the sub-tab strip, a body that is not
+  # currently an editor, and the space menu and its two pickers. Those three are NOT
+  # containers: the paste's first key runs a row or closes them, and the rest reach the
+  # tab's keymap (`Space` then a pasted `zc` stopped capture). `:detail` is in that set for the same reason
   # `drag_press_target?` puts it there: it is a History body drill-in, not a capturing modal,
   # so its keystrokes are the tab's.
   #
@@ -174,7 +176,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   private def paste_runs_as_commands? : Bool
     return false unless @overlay.none? || @overlay.detail?
     return false if modal_overlay? # palette / any migrated modal
-    return false if @space_menu_open || copy_as_shown? || send_to_shown?
+    return true if @space_menu_open || copy_as_shown? || send_to_shown?
     return false if @goto_open || @search_open || @rename_open || @tag_edit_open
     return false if @tabs[@active_tab]?.try(&.subtab_filter_editing?)
     return false if @focus == :body && @tabs[@active_tab]?.try(&.body_badge) == :editor

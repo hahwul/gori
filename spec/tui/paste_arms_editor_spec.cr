@@ -220,3 +220,15 @@ describe "Runner — a paste in progress does not re-render per key" do
     tui_src("runner.cr").should contain("@paste_stall.saw(Time.instant, keys_drained)")
   end
 end
+
+describe "Runner — a paste while the space menu or a picker is up" do
+  # They are not containers: the paste's first key runs a row or closes them and the rest
+  # reached the tab's keymap — `Space`, then a pasted `zc`, closed the menu and stopped capture.
+  # So a paste there is refused like one at the tab bar, before anything else is asked.
+  it "is refused rather than run as commands" do
+    body = method_body("runner/paste.cr", "private def paste_runs_as_commands? : Bool")
+    body.should contain("return true if @space_menu_open || copy_as_shown? || send_to_shown?")
+    body.should_not contain("return false if @space_menu_open")
+    body.index!("return true if @space_menu_open").should be < body.index!("@goto_open")
+  end
+end

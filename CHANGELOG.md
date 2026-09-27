@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- TUI: a paste while the space menu, Copy as… or Send selection to… is open is ignored instead of running as keys, where a pasted `zc` could close the menu and stop capture (#1341)
 - History: after a clear, a new HTTP/2 connection's raw frame log no longer mixes in the frames of a connection the browser kept open (#1341)
 - Import: OpenAPI operations honor their path item's or their own `servers`, so a multi-host document from gori's OpenAPI export re-imports against the right hosts, and percent-encoded `$ref` pointers such as `#/paths/~1users~1%7Bid%7D` resolve (#1341)
 - Redaction: a profile pattern whose capture group sits in a lookahead no longer writes the secret back out after its placeholder, and one whose group sits in a lookbehind no longer fails the export or copy (#1341)
