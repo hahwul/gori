@@ -47,7 +47,8 @@ module Gori::Proxy
     end
 
     # The addresses for `host:port`, from the cache when a live entry exists. Raises
-    # `Socket::Addrinfo::Error` exactly as `Socket::Addrinfo.tcp` does.
+    # `Socket::Addrinfo::Error` exactly as `Socket::Addrinfo.tcp` does. A cached answer is the
+    # cache's own Array: callers only iterate it, and must never reorder or trim it in place.
     def resolve(host : String, port : Int32) : Array(::Socket::Addrinfo)
       return @lookup.call(host, port) if ::Socket::IPAddress.valid?(host)
       key = {host, port}

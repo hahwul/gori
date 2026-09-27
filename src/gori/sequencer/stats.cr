@@ -636,8 +636,8 @@ module Gori::Sequencer
     # Lag-1 serial correlation over the concatenated SYMBOL stream (detects structure /
     # transitions a uniform frequency table would miss), using the alphabet indices so a
     # hex/base64 encoding doesn't inject spurious correlation.
-    # Lag-1 correlation of the region's alphabet indices, read straight off the bytes through
-    # `idx_of` rather than from a materialized index array: that array was one Int32 per region
+    #
+    # The indices are read straight off the region's bytes through `idx_of` rather than from a materialized index array: that array was one Int32 per region
     # byte (6.4 MB on a 50k×32 hex sample) on a path the TUI re-runs on a throttle and every MCP
     # poll re-runs from scratch. Same sums in the same order, so `r` is bit-identical.
     private def self.serial_test(region : Bytes, idx_of : Array(Int32), small : Bool) : TestRow

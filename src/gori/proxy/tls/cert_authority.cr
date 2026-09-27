@@ -21,7 +21,8 @@ module Gori::Proxy::Tls
     # (ContextFactory.lean_server): ~0.1 ms to mint and 0.02-0.16 MB of RSS per cached leaf
     # (bench/tls_context_bench.cr `authority` mode vs a live proxy under load), against
     # ~3.7 ms and ~1.1 MB before. At 256, ~400 rotating HTTPS hosts thrashed the LRU and
-    # re-minted on nearly every visit; 1024 leaves stay under what 256 used to cost.
+    # re-minted on nearly every visit; 1024 leaves stay under what 256 used to cost. A leaf
+    # is keyed by host and whether it advertises h2, so that is 512-1024 hosts.
     MAX_LEAVES = 1024
 
     getter ca_cert_path : String
