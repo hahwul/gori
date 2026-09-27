@@ -461,13 +461,6 @@ module Gori::Proxy::Codec
       n
     end
 
-    # Copies exactly `n` bytes; returns false if the source EOF'd early (a
-    # truncated Content-Length body), true once all `n` were transferred.
-    # `buf` is the scratch copy buffer. When nil a fresh 64 KiB slice is allocated (one
-    # alloc per body); a caller that reuses one buffer across a whole connection or across
-    # copy_chunked's chunks passes it in (a chunked body used to allocate a fresh 64 KiB
-    # per chunk — a 100 MB response in 16 KB chunks churned ~400 MB of throwaway buffers).
-    # Safe to share: a body is pumped one direction on one fiber, so chunks copy sequentially.
     @@streamed = 0_i64
 
     # Body bytes the copy loops below have moved, cumulative for the process. `IdleGc` reads its
@@ -478,6 +471,13 @@ module Gori::Proxy::Codec
       @@streamed
     end
 
+    # Copies exactly `n` bytes; returns false if the source EOF'd early (a
+    # truncated Content-Length body), true once all `n` were transferred.
+    # `buf` is the scratch copy buffer. When nil a fresh 64 KiB slice is allocated (one
+    # alloc per body); a caller that reuses one buffer across a whole connection or across
+    # copy_chunked's chunks passes it in (a chunked body used to allocate a fresh 64 KiB
+    # per chunk — a 100 MB response in 16 KB chunks churned ~400 MB of throwaway buffers).
+    # Safe to share: a body is pumped one direction on one fiber, so chunks copy sequentially.
     private def self.copy_n(src : IO, dst : IO, tee : IO, n : Int64, buf : Bytes? = nil) : Bool
       cbuf = buf || Bytes.new(BUFSIZE)
       cap = cbuf.size # a caller may pass a right-sized (sub-BUFSIZE) buffer — bound the read to IT, not the constant
