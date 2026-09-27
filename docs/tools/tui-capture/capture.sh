@@ -355,8 +355,13 @@ shoot_all() {
   local theme="$1"
   run_scene history      26 "gori · History"                   3 SLEEP1 Enter
   run_scene response-detail 26 "gori · Response detail"        3 SLEEP0.6 Enter SLEEP0.3 Down Down SLEEP0.3 Enter SLEEP1 Right SLEEP1
-  run_scene command-palette 26 "gori · Command palette · Ctrl-P" 3 SLEEP0.8 C-p SLEEP1
+  # The palette WITH a query: typing is what lists the tab's own actions under THIS TAB,
+  # each with the key or the menu path that reaches it (#1282), and `send` turns up both
+  # kinds. The empty browse is settings rows only, which teaches nothing the guide says.
+  run_scene command-palette 26 "gori · Command palette · Ctrl-P" 3 SLEEP0.8 C-p SLEEP0.6 send SLEEP1
   run_scene space-menu   26 "gori · Space menu"                3 SLEEP0.8 Down SLEEP0.3 Space SLEEP1
+  # The second level (#1274): the Send flow to… row's card, opened from the menu with `>`.
+  run_scene space-menu-send 26 "gori · Space menu › Send flow to…" 3 SLEEP0.8 Down SLEEP0.3 Space SLEEP0.6 ">" SLEEP1
   run_scene sitemap      26 "gori · Sitemap"                   2 SLEEP1.2
   run_scene project      26 "gori · Project"                   1 SLEEP1.2
   run_scene intercept    26 "gori · Intercept"                 4 SLEEP1.2
@@ -397,8 +402,9 @@ shoot_all() {
   # The Sequencer shot is the SEND TO SEQUENCER card over History, not the tab
   # (which is hidden and empty until something is sent to it). Down x7 lands on
   # the /cookies/set flow — the one with a Set-Cookie for the config card to
-  # auto-detect — and `q` is that verb's space-menu mnemonic.
-  run_scene sequencer    26 "gori · Sequencer"                 3 SLEEP1.4 Down Down Down Down Down Down Down SLEEP0.5 Space SLEEP0.4 q SLEEP1.4
+  # auto-detect — and `> s` is that verb's space-menu path (Send flow to… → Sequencer,
+  # #1274; it was a level-1 `q` before the family, and a bare `q` now does nothing there).
+  run_scene sequencer    26 "gori · Sequencer"                 3 SLEEP1.4 Down Down Down Down Down Down Down SLEEP0.5 Space SLEEP0.4 ">" SLEEP0.4 s SLEEP1.4
   run_scene repeater     26 "gori · Repeater"                  3 SLEEP0.6 Enter SLEEP0.4 C-r SLEEP1.2 C-r SLEEP3
   run_scene fuzzer       34 "gori · Fuzzer"                    3 SLEEP0.6 Enter SLEEP0.3 Down SLEEP0.3 I SLEEP1 C-a SLEEP0.6 C-l SLEEP0.8 admin Enter root SLEEP0.5 Escape SLEEP0.7 C-r SLEEP5
   # JWT is off the bar, so this reaches it the way the guide tells a reader to (`0`, type,
