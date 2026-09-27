@@ -107,13 +107,15 @@ module Gori::UnicodeReveal
     text.each_grapheme do |grapheme|
       source = grapheme.to_s
       source_width = Termisu::UnicodeWidth.grapheme_width(source)
+      prev = nil.as(Char?)
       source.each_char do |char|
         if name = label(char.ord)
-          if !(source_width > 0 && contextual_invisible?(char, source, name))
+          if !(source_width > 0 && contextual_invisible?(char, source, name, prev))
             needs_badge = true
             break
           end
         end
+        prev = char
       end
       break if needs_badge
     end
@@ -123,9 +125,12 @@ module Gori::UnicodeReveal
     text.each_grapheme do |grapheme|
       source = grapheme.to_s
       source_width = Termisu::UnicodeWidth.grapheme_width(source)
+      prev = nil.as(Char?)
       source.each_char do |char|
+        prev_char = prev
+        prev = char
         if name = label(char.ord)
-          if source_width > 0 && contextual_invisible?(char, source, name)
+          if source_width > 0 && contextual_invisible?(char, source, name, prev_char)
             # Keep combining marks and emoji shaping controls attached to visible text;
             # their grapheme still renders, so replacing the control would break the glyph.
             out << char
@@ -140,11 +145,11 @@ module Gori::UnicodeReveal
     out.to_s
   end
 
-  private def self.contextual_invisible?(char : Char, grapheme : String, name : String) : Bool
+  private def self.contextual_invisible?(char : Char, grapheme : String, name : String, prev : Char?) : Bool
     cp = char.ord
     return false if (0xe0020..0xe007f).includes?(cp)
     return emoji_sequence?(grapheme) if cp == 0x200d
-    return emoji_base?(grapheme) || keycap_sequence?(grapheme) if variation_selector?(cp)
+    return presentation_selector?(cp, grapheme, prev) if variation_selector?(cp)
     # Only unnamed combining/emoji extenders may stay attached to a visible grapheme. Explicitly
     # named format controls such as CGJ must remain visible even when grapheme segmentation
     # attaches them to a printable neighbor.
@@ -154,14 +159,23 @@ module Gori::UnicodeReveal
     !char.control? && Termisu::UnicodeWidth.codepoint_width(cp) == 0
   end
 
+  # Only VS15/VS16 choose how an emoji draws, and only ONE, directly after its base. Every
+  # other selector — VS1-14, VS17-256, or a repeat — changes nothing on screen, which is what
+  # makes a run of them after an emoji a place to hide bytes ("emoji smuggling"); it is named.
+  private def self.presentation_selector?(cp : Int32, grapheme : String, prev : Char?) : Bool
+    return false unless cp == 0xfe0e || cp == 0xfe0f
+    return false unless prev && label(prev.ord).nil?
+    emoji_base?(prev.ord) || (keycap_sequence?(grapheme) && keycap_base?(prev))
+  end
+
+  private def self.keycap_base?(char : Char) : Bool
+    (char >= '0' && char <= '9') || char == '#' || char == '*'
+  end
+
   private def self.emoji_sequence?(grapheme : String) : Bool
     count = 0
     grapheme.each_char { |char| count += 1 if emoji_base?(char.ord) }
     count >= 2
-  end
-
-  private def self.emoji_base?(grapheme : String) : Bool
-    grapheme.each_char.any? { |char| emoji_base?(char.ord) }
   end
 
   private def self.keycap_sequence?(grapheme : String) : Bool
@@ -175,9 +189,17 @@ module Gori::UnicodeReveal
     keycap && base
   end
 
+  # Emoji=Yes bases, the BMP text-default ones included (©, ™, ↔, ▶, ⬆, ⭐, 〰, ㊗…), so their
+  # VS16 stays attached rather than drawing `▶⟨VS16⟩`.
   private def self.emoji_base?(codepoint : Int32) : Bool
-    (0x2300..0x23ff).includes?(codepoint) || (0x2600..0x27ff).includes?(codepoint) ||
-      (0x1f000..0x1faff).includes?(codepoint)
+    case codepoint
+    when 0x00a9, 0x00ae, 0x203c, 0x2049, 0x2122, 0x2139, 0x24c2, 0x3030, 0x303d, 0x3297, 0x3299,
+         0x2194..0x21aa, 0x2300..0x23ff, 0x25aa..0x25fe, 0x2600..0x27ff, 0x2934..0x2935,
+         0x2b05..0x2b55, 0x1f000..0x1faff
+      true
+    else
+      false
+    end
   end
 
   private def self.variation_selector?(codepoint : Int32) : Bool
