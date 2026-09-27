@@ -518,14 +518,22 @@ module Gori::Tui
     # cooperative scheduler a synchronous walk would freeze the popup it is filling (P6). They
     # land through `drain_seed_names`. The scan is superseded, never stopped by what is on
     # screen: a confirm dialog that covers the popup for a moment must not cut it short.
+    # Dismissing the popup (esc, a click outside) does stop it, through its `on_close`, which a
+    # covering child modal does not run.
     def scan_seed_names(ov : MineConfigOverlay) : Nil
       ids = ([ov.seed] + ov.extra_seeds).compact_map(&.flow_id)
       return if ids.empty?
       gen = (@seed_generation += 1)
       ov.begin_seeding
+      prior = ov.on_close
+      me = self
+      ov.on_close = -> {
+        me.cancel_seed_scan(gen)
+        prior.try(&.call)
+        nil
+      }
       store = @host.session.store
       results = @seed_names
-      me = self
       spawn(name: "gori-mine-seed-names") do
         # nil = the scan raised; the popup then says seeding failed instead of spinning on.
         by_flow = begin
@@ -538,9 +546,11 @@ module Gori::Tui
       end
     end
 
-    # The popup started its mine (or went away): its scan has nothing left to feed.
-    def cancel_seed_scan : Nil
-      @seed_generation += 1
+    # The popup started its mine (or went away): its scan has nothing left to feed. With
+    # `gen`, only while that scan is still the current one, so a popup closing late cannot
+    # cancel a newer popup's scan.
+    def cancel_seed_scan(gen : Int64? = nil) : Nil
+      @seed_generation += 1 if gen.nil? || gen == @seed_generation
     end
 
     # Each run-loop tick: land the current seed-name scan on its popup. True when it landed

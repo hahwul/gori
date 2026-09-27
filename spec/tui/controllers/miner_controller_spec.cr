@@ -76,6 +76,29 @@ describe MinerController do
       end
     end
 
+    # esc or a click outside runs the popup's on_close: its scan stops there instead of reading
+    # every host's flows for a popup nobody sees. A popup closing after a newer one opened
+    # must not cancel the newer scan.
+    it "cancels the scan when its popup is dismissed, and only its own" do
+      with_miner_controller do |ctl, session|
+        seed_miner_flow(session.store, "https://acme.test/orders?tenant=1")
+        id = seed_miner_flow(session.store, "https://acme.test/invoices?page=1")
+        seed = ctl.build_seed_from_flow(id) || raise "no seed for flow #{id}"
+        old = MineConfigOverlay.new(seed)
+        ctl.scan_seed_names(old)
+        gen = ctl.seed_generation
+        old.on_close.not_nil!.call
+        ctl.seed_generation.should_not eq(gen)
+
+        fresh = MineConfigOverlay.new(seed)
+        ctl.scan_seed_names(fresh)
+        old.on_close.not_nil!.call # late: the newer scan stays current
+        drain_until_landed(ctl)
+        fresh.build_config.seed_names.should eq(["tenant"])
+        old.build_config.seed_names.should be_empty
+      end
+    end
+
     it "does not scan for a seed with no flow behind it" do
       with_miner_controller do |ctl, _|
         seed = ctl.build_seed_from_request("https://acme.test", "GET /x HTTP/1.1\nHost: acme.test\n\n", false, nil)
