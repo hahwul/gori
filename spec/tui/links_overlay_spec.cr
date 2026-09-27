@@ -132,7 +132,8 @@ describe Gori::Tui::LinksOverlay do
       issue = store.insert_issue("t", Gori::Store::Severity::Low, nil, nil)
       shown = store.add_link(Gori::Store::LinkOwnerKind::Issue, issue, Gori::Store::LinkRefKind::Flow, 7_i64).not_nil!
       stale = store.list_links(Gori::Store::LinkOwnerKind::Issue, issue).first
-      store.remove_link(shown).should be_true # a peer removes it…
+      # A peer removes it…
+      store.remove_link(Gori::Store::LinkOwnerKind::Issue, issue, Gori::Store::LinkRefKind::Flow, 7_i64).should be_true
       store.add_link(Gori::Store::LinkOwnerKind::Issue, issue, Gori::Store::LinkRefKind::Flow, 8_i64).should eq(shown)
       store.remove_link(stale.owner_kind, stale.owner_id, stale.ref_kind, stale.ref_id).should be_true
       store.list_links(Gori::Store::LinkOwnerKind::Issue, issue).map(&.ref_id).should eq([8_i64])
@@ -147,10 +148,10 @@ describe Gori::Tui::LinksOverlay do
     begin
       store = Gori::Store.open(path)
       issue = store.insert_issue("t", Gori::Store::Severity::Low, nil, nil)
-      link = store.add_link(Gori::Store::LinkOwnerKind::Issue, issue,
-        Gori::Store::LinkRefKind::Flow, 7_i64).not_nil!
+      store.add_link(Gori::Store::LinkOwnerKind::Issue, issue,
+        Gori::Store::LinkRefKind::Flow, 7_i64).should_not be_nil
       store.close
-      store.remove_link(link).should be_false
+      store.remove_link(Gori::Store::LinkOwnerKind::Issue, issue, Gori::Store::LinkRefKind::Flow, 7_i64).should be_false
 
       body = runner_remove_link_body
       refusal = body.index("unless @session.store.remove_link(link.owner_kind, link.owner_id, link.ref_kind, link.ref_id)").not_nil!

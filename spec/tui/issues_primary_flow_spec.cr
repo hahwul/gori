@@ -81,7 +81,7 @@ describe "an issue's primary flow in RELATED" do
       primary = answered_flow(store, "/legacy")
       issue = store.insert_issue("old finding", Gori::Store::Severity::Medium, "acme.test", primary)
       link = store.list_links(Gori::Store::LinkOwnerKind::Issue, issue)[0]
-      store.remove_link(link.id).should be_true
+      store.remove_link(link.owner_kind, link.owner_id, link.ref_kind, link.ref_id).should be_true
 
       view = detail(store)
       view.related_rows.size.should eq(1)

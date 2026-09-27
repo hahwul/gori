@@ -92,10 +92,6 @@ module Gori
     # `exec_task_ok`: the store answers whether the write COMMITTED, and dropping that made
     # every caller report the change for a rolled-back batch. Same conversion as `delete_flows`
     # (`reads.cr`), whose comment states the reasoning once.
-    def remove_link(id : Int64) : Bool
-      exec_task_ok ->(c : DB::Connection) { c.exec("DELETE FROM entity_links WHERE id = ?", id); nil }
-    end
-
     def remove_link(owner_kind : LinkOwnerKind, owner_id : Int64, ref_kind : LinkRefKind, ref_id : Int64) : Bool
       exec_task_ok ->(c : DB::Connection) {
         c.exec(

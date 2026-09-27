@@ -348,7 +348,8 @@ describe "MCP issue links" do
     with_store do |store|
       primary = mcp_seed_flow(store, "/legacy")
       iid = store.insert_issue("old", Gori::Store::Severity::Low, "acme.test", primary)
-      store.remove_link(store.list_links(Gori::Store::LinkOwnerKind::Issue, iid)[0].id).should be_true
+      link = store.list_links(Gori::Store::LinkOwnerKind::Issue, iid)[0]
+      store.remove_link(link.owner_kind, link.owner_id, link.ref_kind, link.ref_id).should be_true
 
       got = mcp_ok_json(tools_for(store), "get_issue", %({"id":#{iid}}))
       links = got["links"].as_a

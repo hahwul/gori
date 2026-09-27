@@ -60,7 +60,7 @@ describe "entity_links (V21)" do
         Gori::Store::LinkRefKind::Flow, 42_i64).should be_nil
       store.list_links(Gori::Store::LinkOwnerKind::Issue, issue_id).size.should eq(1)
       link = store.list_links(Gori::Store::LinkOwnerKind::Issue, issue_id)[0]
-      store.remove_link(link.id)
+      store.remove_link(link.owner_kind, link.owner_id, link.ref_kind, link.ref_id)
       store.list_links(Gori::Store::LinkOwnerKind::Issue, issue_id).should be_empty
     end
   end
@@ -128,7 +128,7 @@ describe Gori::Links do
       fid = seeded_flow(store)
       issue_id = store.insert_issue("t", Gori::Store::Severity::Info, nil, fid)
       link = store.list_links(Gori::Store::LinkOwnerKind::Issue, issue_id)[0]
-      store.remove_link(link.id).should be_true
+      store.remove_link(link.owner_kind, link.owner_id, link.ref_kind, link.ref_id).should be_true
       raw = store.list_links(Gori::Store::LinkOwnerKind::Issue, issue_id)
       raw.should be_empty
 
