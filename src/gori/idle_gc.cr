@@ -1,7 +1,7 @@
 require "log"
 require "./store"
 require "./proxy/pump"
-require "./proxy/conn/copy_buf_pool"
+require "./proxy/codec/body"
 
 {% unless flag?(:gc_none) %}
   lib LibGC
@@ -51,9 +51,11 @@ module Gori
     # their CHANGE between two ticks matters.
     #
     # Traffic that neither writes the Store nor allocates is still traffic: a blind CONNECT
-    # tunnel (`forwarded` moves) and a body streaming past the capture limit (`lent` > 0).
+    # tunnel (`forwarded` moves) and a body streaming past the capture limit (`streamed` moves).
+    # Bytes MOVING, not a buffer on loan: an open SSE or long-poll body holds its lent copy
+    # buffer for hours while nothing flows, and that kept the process "busy" for as long.
     record Sample, allocated : UInt64, free : UInt64, since_gc : UInt64, writes : Int64,
-      forwarded : Int64 = 0_i64, lent : Int32 = 0
+      forwarded : Int64 = 0_i64, streamed : Int64 = 0_i64
 
     getter collections : Int32 = 0
 
@@ -64,7 +66,7 @@ module Gori
     # One check. True when the caller should collect now.
     def tick(now : Time::Instant, sample : Sample) : Bool
       busy = sample.writes != @last.writes || sample.allocated &- @last.allocated >= BUSY_ALLOC_BYTES ||
-             sample.forwarded != @last.forwarded || sample.lent > 0
+             sample.forwarded != @last.forwarded || sample.streamed != @last.streamed
       @last = sample
       if busy
         @quiet_since = now
@@ -83,7 +85,7 @@ module Gori
     def self.sample : Sample
       s = GC.stats
       Sample.new(s.total_bytes, s.free_bytes, s.bytes_since_gc, Store.write_ops,
-        Proxy::Pump.forwarded, Proxy::CopyBufPool.lent)
+        Proxy::Pump.forwarded, Proxy::Codec::Body.streamed)
     end
 
     def self.collect : Nil

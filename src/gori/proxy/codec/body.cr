@@ -468,6 +468,16 @@ module Gori::Proxy::Codec
     # copy_chunked's chunks passes it in (a chunked body used to allocate a fresh 64 KiB
     # per chunk — a 100 MB response in 16 KB chunks churned ~400 MB of throwaway buffers).
     # Safe to share: a body is pumped one direction on one fiber, so chunks copy sequentially.
+    @@streamed = 0_i64
+
+    # Body bytes the copy loops below have moved, cumulative for the process. `IdleGc` reads its
+    # change between two ticks: a body streaming past the capture limit writes nothing to the
+    # Store and allocates nothing per chunk, but bytes still move. One add per read, on the
+    # fiber that already owns the loop (single-threaded scheduler).
+    def self.streamed : Int64
+      @@streamed
+    end
+
     private def self.copy_n(src : IO, dst : IO, tee : IO, n : Int64, buf : Bytes? = nil) : Bool
       cbuf = buf || Bytes.new(BUFSIZE)
       cap = cbuf.size # a caller may pass a right-sized (sub-BUFSIZE) buffer — bound the read to IT, not the constant
@@ -476,6 +486,7 @@ module Gori::Proxy::Codec
         want = remaining < cap ? remaining.to_i : cap
         read = src.read(cbuf[0, want])
         break if read == 0 # premature EOF
+        @@streamed &+= read
         slice = cbuf[0, read]
         dst.write(slice)
         tee.write(slice)
@@ -487,6 +498,7 @@ module Gori::Proxy::Codec
     private def self.copy_until_eof(src : IO, dst : IO, tee : IO, buf : Bytes? = nil) : Nil
       cbuf = buf || Bytes.new(BUFSIZE)
       while (read = src.read(cbuf)) > 0
+        @@streamed &+= read
         slice = cbuf[0, read]
         dst.write(slice)
         tee.write(slice)
