@@ -2793,17 +2793,14 @@ module Gori::Tui
       return if view.inflight? || timing_running?
       view.inflight = true
       @timing_view = view
-      @timing_members = (pp = @timing_prepared) && pp[0].same?(view) ? pp[1] : [view]
+      @timing_members = timing_pair_of(view)
       stop = @timing_stop = Repeater::Minimize::Stop.new
       prog = @timing_progress
       done = @timing_done
       failed = @timing_failed
       mode = interleaved ? Repeater::Timing::Mode::Interleaved : Repeater::Timing::Mode::Auto
       transport = interleaved ? "interleaved" : (plan.http2? ? "single-packet h2" : "last-byte-sync h1")
-      subject = Repeater::Timing::Present::Subject.new(
-        a_label: labels[0]? || "A", b_label: labels[1]? || "B",
-        origin: "#{plan.scheme}://#{plan.host}:#{plan.port}", transport: transport,
-        mode: mode.to_s.underscore)
+      subject = timing_subject(plan, labels, transport, mode)
       @host.status("timing → #{plan.host}:#{plan.port} · #{iterations} pairs (#{transport}) · #{TIMING_CANCEL_HINT}…#{unrecorded_note("timing")}", :busy)
       spawn(name: "gori-repeater-timing") do
         rep = Repeater::Timing.run(plan, iterations: iterations, mode: mode,
@@ -2827,6 +2824,19 @@ module Gori::Tui
       ensure
         view.inflight = false
       end
+    end
+
+    # Both sub-tabs of the pair `prepare_timing_pair` validated for `view`, or just `view`.
+    private def timing_pair_of(view : RepeaterView) : Array(RepeaterView)
+      (pp = @timing_prepared) && pp[0].same?(view) ? pp[1] : [view]
+    end
+
+    private def timing_subject(plan : Repeater::Plan, labels : Array(String), transport : String,
+                               mode : Repeater::Timing::Mode) : Repeater::Timing::Present::Subject
+      Repeater::Timing::Present::Subject.new(
+        a_label: labels[0]? || "A", b_label: labels[1]? || "B",
+        origin: "#{plan.scheme}://#{plan.host}:#{plan.port}", transport: transport,
+        mode: mode.to_s.underscore)
     end
 
     # esc cancels only on the Repeater tab (the shell leaves esc to every other tab's own keys),
