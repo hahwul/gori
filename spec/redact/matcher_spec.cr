@@ -131,6 +131,24 @@ describe Gori::Redact::Matcher do
       end
     end
 
+    it "does not raise on a lookbehind group that starts before the previous match's end" do
+      with_salt do
+        prof = Gori::Redact::Profile.new("p", patterns: ["(?<=(ab))a"])
+        r = Gori::Redact::Matcher.new(prof).body("ababa".to_slice, "text/plain")
+        ph = Gori::Redact.placeholder("ab")
+        r.text.should eq("#{ph}a#{ph}a")
+        r.count.should eq(2)
+      end
+    end
+
+    it "does not write a lookahead group's secret back out after its placeholder" do
+      with_salt do
+        prof = Gori::Redact::Profile.new("p", patterns: ["key(?==(\\w+))"])
+        r = Gori::Redact::Matcher.new(prof).body("key=SECRET&x=1".to_slice, "text/plain")
+        r.text.should eq("key=#{Gori::Redact.placeholder("SECRET")}&x=1")
+      end
+    end
+
     it "matches a large non-ASCII body with many hits exactly" do
       with_salt do
         prof = Gori::Redact::Profile.new("p", json_fields: ["password", "token", "secret"])

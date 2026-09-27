@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Redaction: a profile pattern whose capture group sits in a lookahead no longer writes the secret back out after its placeholder, and one whose group sits in a lookbehind no longer fails the export or copy (#1341)
 - Network: HTTPS interception mints a new host's certificate context in ~0.1 ms instead of ~3.7 ms and ~1 MB less memory (it no longer loads the system CA bundle into each), caches up to 1024 of them, and upstream DNS answers are reused for 10 seconds, so an `/etc/hosts` edit or a rebinding record can take that long to be seen (#1340)
 - Performance: capture stalls less on SQLite checkpoints, an idle gori hands its freed memory back to the OS, and idle keep-alive connections and large captured bodies hold far less memory (#1340)
 - History/MCP: filters that match few rows (`host:`, `path:`, `src:`, `status:2xx`, size ranges) and Sitemap listings answer from covering indexes on large projects, e.g. `src:repeater` 1 s → 7 ms and a `list_sitemap` page 1.2 s → 0.2 ms, and `body~` regex filters run about twice as fast; the first open after upgrading builds the indexes once, which takes a few seconds on a multi-GB project (#1340)

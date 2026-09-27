@@ -403,19 +403,29 @@ module Gori
           stop = md.byte_end(group)
           whole_end = md.byte_end(0)
           before = pos
-          if stop <= start # `<=`: a `\K` in a lookaround can report start past stop
-            # A zero-width GROUP has nothing to replace; copy the match through rather than
-            # minting a placeholder for the empty string.
+          # A group inside a lookaround can reach outside the whole match: back past the
+          # cursor (`(?<=(ab))a`, where the previous match already copied part of it) or on
+          # past `whole_end` (`key(?==(\w+))`). Replace only what has not been written yet, and
+          # move the cursor past the group so the tail copy cannot write the secret back out.
+          emitted_to = whole_end
+          if stop <= start || stop <= before # `<=`: a `\K` in a lookaround can report start past stop
+            # A zero-width GROUP (or one already written out) has nothing to replace; copy the
+            # match through rather than minting a placeholder for the empty string.
             clean.write bytes[before, whole_end - before]
           else
-            clean.write bytes[before, start - before]
+            from = Math.max(start, before)
+            clean.write bytes[before, from - before]
             ph = Redact.placeholder(text.byte_slice(start, stop - start))
             hits << Hit.new(path, rule, ph)
             clean << ph
-            clean.write bytes[stop, whole_end - stop] if whole_end > stop
+            if whole_end > stop
+              clean.write bytes[stop, whole_end - stop]
+            else
+              emitted_to = stop
+            end
           end
-          if whole_end > before
-            pos = whole_end
+          if emitted_to > before
+            pos = emitted_to
           else
             # A zero-width WHOLE match (`x*` against `y`) leaves the cursor where it was, so the
             # same empty match would be found forever. Step one CHARACTER (not one byte: that
