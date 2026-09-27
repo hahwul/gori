@@ -82,17 +82,17 @@ TUI에서 기능적인 색을 유지하는 것은 HTTP 상태뿐이며, 그건 �
 ## 월페이퍼 {#wallpaper}
 
 먹과 금박, 그리고 붓으로 그린 구름 선묘. 팔레트 전체를 여기서 샘플링했습니다.
-두 가지 컷이며, 존재하는 크기는 이게 전부입니다.
+두 가지 컷이며, 둘 다 1920 × 1080 데스크톱 크기입니다.
 
 <div class="art-gallery">
   <figure>
     <img src="/images/gori-wallpaper.webp" alt="양식화된 구름과 물결을 먹과 금으로 그린 어두운 월페이퍼. 가운데에 금색 gori 마크와 워드마크가 있다">
-    <figcaption><strong>마크 포함</strong> — 1984 × 992<br>
+    <figcaption><strong>마크 포함</strong> — 1920 × 1080<br>
       <a href="/images/gori-wallpaper.webp" download="gori-wallpaper.webp">WebP</a></figcaption>
   </figure>
   <figure>
     <img src="/images/wallpaper.webp" alt="같은 먹과 금의 구름·물결 그림에서 로고를 뺀 버전">
-    <figcaption><strong>로고 없음</strong> — 1152 × 768<br>
+    <figcaption><strong>로고 없음</strong> — 1920 × 1080<br>
       <a href="/images/wallpaper.webp" download="gori-wallpaper-plain.webp">WebP</a></figcaption>
   </figure>
 </div>

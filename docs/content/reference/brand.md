@@ -83,17 +83,17 @@ thirty-two built-in palettes.
 ## Wallpaper {#wallpaper}
 
 Ink, gold leaf and brushed cloud line-work: the painting the whole palette was
-sampled from. Two cuts, at the only sizes that exist.
+sampled from. Two cuts, both at the 1920 × 1080 desktop size.
 
 <div class="art-gallery">
   <figure>
     <img src="/images/gori-wallpaper.webp" alt="Dark ink-and-gold wallpaper of stylised clouds and waves, with the gold gori mark and wordmark centred">
-    <figcaption><strong>With the mark</strong> — 1984 × 992<br>
+    <figcaption><strong>With the mark</strong> — 1920 × 1080<br>
       <a href="/images/gori-wallpaper.webp" download="gori-wallpaper.webp">WebP</a></figcaption>
   </figure>
   <figure>
     <img src="/images/wallpaper.webp" alt="The same ink-and-gold cloud and wave painting without any logo">
-    <figcaption><strong>Plain</strong> — 1152 × 768<br>
+    <figcaption><strong>Plain</strong> — 1920 × 1080<br>
       <a href="/images/wallpaper.webp" download="gori-wallpaper-plain.webp">WebP</a></figcaption>
   </figure>
 </div>

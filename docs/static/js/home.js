@@ -233,3 +233,34 @@
     });
   }
 })();
+
+/* Flow walkthrough: light the step whose capture is crossing the middle of
+   the viewport. A thin band at the centre line is the trigger, so exactly one
+   capture is inside it at a time while scrolling through the section. Pure
+   state, no animation of its own: the transitions live in the stylesheet
+   (and collapse under reduced motion). Without IntersectionObserver the first
+   step simply stays lit. */
+(function () {
+  var flow = document.querySelector(".home-flow");
+  if (!flow || !("IntersectionObserver" in window)) return;
+  var shots = flow.querySelectorAll(".flow-shot[data-step]");
+  var steps = flow.querySelectorAll(".flow-steps li[data-step]");
+
+  function activate(step) {
+    var i;
+    for (i = 0; i < shots.length; i++) {
+      shots[i].classList.toggle("is-active", shots[i].getAttribute("data-step") === step);
+    }
+    for (i = 0; i < steps.length; i++) {
+      steps[i].classList.toggle("is-active", steps[i].getAttribute("data-step") === step);
+    }
+  }
+
+  var io = new IntersectionObserver(function (entries) {
+    for (var i = 0; i < entries.length; i++) {
+      if (entries[i].isIntersecting) activate(entries[i].target.getAttribute("data-step"));
+    }
+  }, { rootMargin: "-45% 0px -45% 0px", threshold: 0 });
+
+  for (var i = 0; i < shots.length; i++) io.observe(shots[i]);
+})();

@@ -5,6 +5,7 @@ weight = 120
 
 [extra]
 group = "Customize"
+shot = "statusline"
 +++
 
 The **statusline** is an opt-in row at the very bottom of the TUI. gori runs a shell command on an interval and renders its stdout as that row — a status bar you write yourself, inspired by Claude Code's status line. It ships off, and the `statusline` section stays out of `settings.json` until you change something.

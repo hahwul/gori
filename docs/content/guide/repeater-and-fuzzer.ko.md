@@ -5,6 +5,7 @@ weight = 20
 
 [extra]
 group = "핵심"
+shot = "repeater"
 +++
 
 흥미로운 플로우를 캡처했다면, **Repeater**와 **Fuzzer**가 그 플로우를 테스트하는 곳입니다.

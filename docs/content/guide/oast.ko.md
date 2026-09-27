@@ -5,6 +5,7 @@ weight = 70
 
 [extra]
 group = "워크벤치"
+shot = "oast"
 +++
 
 어떤 버그는 응답에 절대 드러나지 않습니다. blind SSRF, blind XXE, out-of-band SQL injection, 또는 백오피스 브라우저에서만 발동하는 stored payload는 요청한 쪽에 답하는 대신 *다른 어딘가의 서버*로 손을 뻗습니다. **OAST**(Out-of-band Application Security Testing)는 바로 그 서버를 제공합니다. gori가 interaction 리스너에 payload URL을 등록하고, 그 payload를 요청에 심어 두면, 대상이 그 서버로 보내는 DNS, HTTP, SMTP 콜백이 hit로 나타납니다.

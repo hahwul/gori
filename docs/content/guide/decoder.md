@@ -5,6 +5,7 @@ weight = 40
 
 [extra]
 group = "Workbenches"
+shot = "decoder"
 +++
 
 The **Decoder** tab is a scratch workbench for encoding, decoding, hashing, and transforming data. Paste input, build a chain of converters, and read the intermediate and final results.

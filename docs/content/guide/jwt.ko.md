@@ -5,6 +5,7 @@ weight = 50
 
 [extra]
 group = "워크벤치"
+shot = "jwt"
 +++
 
 **JWT** 탭은 JSON Web Token을 위한 워크벤치입니다. 토큰을 디코드하고, claim을 편집해 재서명하며, 서버를 상대로 테스트할 고전적인 공격 페이로드를 생성합니다. 파트를 보여주기만 하는 [Decoder](/ko/guide/decoder/)의 읽기 전용 `jwt-decode` 컨버터보다 한 걸음 더 나아갑니다.
