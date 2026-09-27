@@ -650,9 +650,10 @@ module Gori::Tui
             end
             # A finished differential-timing run (#1246) opens its verdict card — but not over a
             # modal the operator raised meanwhile (the palette and a History detail are overlays
-            # `active_overlay` does not return, and the space menu and pickers are none); the
-            # report stays pending until the seam is clear.
+            # `active_overlay` does not return, and the space menu, pickers and bottom prompts are
+            # none); the report stays pending until the seam is clear.
             if @overlay.none? && !@space_menu_open && !copy_as_shown? && !send_to_shown? &&
+               !@goto_open && !@search_open && !@rename_open && !@tag_edit_open &&
                (rpt = repeater_controller.take_timing_report)
               open_overlay(TimingReportOverlay.new(rpt[0], rpt[1]))
               dirty = true
