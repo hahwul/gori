@@ -296,8 +296,9 @@ module Gori::Proxy::Codec
     end
 
     # A capture buffer presized to a known Length body (bounded by PRESIZE_CAP); default
-    # growth for unknown-length (chunked / close-delimited) framings.
-    private def self.presized_capture(framing : BodyFraming, length : Int64) : IO::Memory
+    # growth for unknown-length (chunked / close-delimited) framings. Public for the h1 paths
+    # in `ClientConn` that buffer a whole response body (a body rule, a held response).
+    def self.presized_capture(framing : BodyFraming, length : Int64) : IO::Memory
       return IO::Memory.new unless framing.length? && length > 0
       cap = length > CaptureBuffer::PRESIZE_CAP ? CaptureBuffer::PRESIZE_CAP : length.to_i
       IO::Memory.new(cap)

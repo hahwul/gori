@@ -1645,7 +1645,7 @@ module Gori::Proxy
                                                 resp_framing : Codec::BodyFraming, resp_len : Int64,
                                                 ttfb : Int64, started : Time::Instant,
                                                 extract_ref : ExtractRef? = nil) : Bool
-      buf = IO::Memory.new
+      buf = Codec::Body.presized_capture(resp_framing, resp_len)
       resp_complete = Codec::Body.stream(upstream, buf, resp_framing, resp_len, Codec::DiscardIO.new, copy_buf)
       rw = @rewriter
       # `live` is false when only a body-scoped EXTRACT rule brought this response here, or
@@ -1734,7 +1734,7 @@ module Gori::Proxy
       # Buffer the body, tracking completeness (Codec::Body.read drops it). A
       # truncated/misframed body must NOT leave the upstream parked — its stray
       # unread bytes would become the next reused request's response (desync).
-      buf = IO::Memory.new
+      buf = Codec::Body.presized_capture(resp_framing, resp_len)
       # tee into a discard sink, not a second IO::Memory — the body is already buffered in
       # `buf`; a throwaway IO::Memory would hold the whole response a second time.
       resp_complete = Codec::Body.stream(upstream, buf, resp_framing, resp_len, Codec::DiscardIO.new, copy_buf)
@@ -2110,9 +2110,9 @@ module Gori::Proxy
     # did to the head on its own account, and what is wrong with the head the origin sent.
     # Newline-separated, which is the shape `Store::FlowRow#advisories` splits back apart.
     private def response_advisory(body : String?) : String?
-      notes = [body, @alt_svc_note, @status_line_note].compact
-      return nil if notes.empty?
-      notes.join("\n")
+      # Almost every response has nothing to say: skip the two Arrays that answer nil.
+      return nil if body.nil? && @alt_svc_note.nil? && @status_line_note.nil?
+      [body, @alt_svc_note, @status_line_note].compact.join("\n")
     end
 
     # The sentence for a response whose start-line is not a status line, or nil for one that
@@ -2721,7 +2721,7 @@ module Gori::Proxy
       raw = req.raw_head
       nl = raw.index(0x0a_u8) || return raw # no LF at all? leave as-is
       header_block = raw[(nl + 1)..]        # everything after the first CRLF
-      io = IO::Memory.new
+      io = IO::Memory.new(raw.size)         # origin-form is usually shorter: one allocation
       io << req.method << ' ' << origin_target << ' ' << req.version << "\r\n"
       io.write(header_block)
       io.to_slice
