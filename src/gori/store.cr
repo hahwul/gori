@@ -1908,18 +1908,26 @@ module Gori
       # No response means no static classification yet. `update_one` makes the one decision
       # after a completed response lands.
       args << 0
-      res = conn.exec(
-        "INSERT INTO flows " \
-        "(created_at, scheme, host, port, method, target, http_version, " \
-        " sni, alpn, tls_version, request_head, request_body, request_size, state, " \
-        " h2_conn_id, h2_stream_id, request_body_truncated, unsent, short_circuited, advisory, " \
-        " request_content_type, connect_protocol, source, source_surface, source_ref, static_asset, fts_dirty) " \
-        "VALUES (?,?,?,?,?,?,?,?,?,?,#{head_slot},?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)", args: args)
+      res = conn.exec(head_slot == "?" ? SQL_INSERT_FLOW : SQL_INSERT_FLOW_EMPTY_HEAD, args: args)
       # The INSERT's own result carries the rowid — no separate `SELECT last_insert_rowid()`.
       # No flows_fts write here: `fts_dirty = 1` hands the trigram work to the off-commit
       # indexer, so a capture commit no longer pays for tokenization (see V4 / await_op).
       res.last_insert_id
     end
+
+    # `insert_one`'s statement, once per `Store.blob_slot` answer for `request_head` — built at
+    # first use rather than interpolated on every captured flow, like `SQL_INSERT_H2_FRAME_*`.
+    private def self.sql_insert_flow(head_slot : String) : String
+      "INSERT INTO flows " \
+      "(created_at, scheme, host, port, method, target, http_version, " \
+      " sni, alpn, tls_version, request_head, request_body, request_size, state, " \
+      " h2_conn_id, h2_stream_id, request_body_truncated, unsent, short_circuited, advisory, " \
+      " request_content_type, connect_protocol, source, source_surface, source_ref, static_asset, fts_dirty) " \
+      "VALUES (?,?,?,?,?,?,?,?,?,?,#{head_slot},?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)"
+    end
+
+    private SQL_INSERT_FLOW            = sql_insert_flow("?")
+    private SQL_INSERT_FLOW_EMPTY_HEAD = sql_insert_flow("X''")
 
     private def update_one(conn : DB::Connection, resp : CapturedResponse) : Nil
       body_size = resp.body_size || resp.body.try(&.size.to_i64) || 0_i64
@@ -2042,11 +2050,17 @@ module Gori
       # owns it, so the rule has a single implementation rather than this copy plus that one.
       slot = Store.blob_slot(args, op.payload)
       Store.bind_ws_shape(args, op.shape)
-      conn.exec(
-        "INSERT INTO ws_messages (flow_id, repeater_id, created_at, direction, opcode, payload, " \
-        "fin, rsv, masked, mask_key, frames, declared_len) " \
-        "VALUES (?,?,?,?,?,#{slot},?,?,?,?,?,?)", args: args)
+      conn.exec(slot == "?" ? SQL_INSERT_WS : SQL_INSERT_WS_EMPTY_PAYLOAD, args: args)
     end
+
+    private SQL_INSERT_WS =
+      "INSERT INTO ws_messages (flow_id, repeater_id, created_at, direction, opcode, payload, " \
+      "fin, rsv, masked, mask_key, frames, declared_len) " \
+      "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"
+    private SQL_INSERT_WS_EMPTY_PAYLOAD =
+      "INSERT INTO ws_messages (flow_id, repeater_id, created_at, direction, opcode, payload, " \
+      "fin, rsv, masked, mask_key, frames, declared_len) " \
+      "VALUES (?,?,?,?,?,X'',?,?,?,?,?,?)"
 
     # Append `value` to `args` and answer the placeholder to write in its slot — `X''` for an
     # EMPTY slice, `?` otherwise.
