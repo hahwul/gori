@@ -19,3 +19,16 @@ describe "Runner hide-static view picker" do
     toggle.should contain("params_controller.run if @active_tab == :target && target_controller.params_active?")
   end
 end
+
+describe "Runner saved-view delete" do
+  # A peer can make a view active after this TUI loaded its lens, so the pointer is cleared by
+  # what the project has SAVED (`SavedViews.clear_active_if`), the same call MCP and the CLI make —
+  # and outside the lens check, which only decides whether THIS TUI's filter drops back to All.
+  it "clears the saved pointer by the setting, not by its own lens" do
+    body = runner_views_source.split("private def delete_view", 2)[1].split("\n  end", 2)[0]
+    clear = body.index("SavedViews.clear_active_if(store, view)").not_nil!
+    lens = body.index("if (active = history_controller.view.active_view) && active.key == view.key").not_nil!
+    clear.should be < lens
+    body.should_not contain("SavedViews.set_active(store, nil)")
+  end
+end
