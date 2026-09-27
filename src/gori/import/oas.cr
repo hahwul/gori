@@ -73,8 +73,8 @@ module Gori
         # OpenAPI 3 lets an operation or a path item name its own servers, overriding the
         # root list — gori's own export writes one per path when a capture spans hosts.
         unless swagger2
-          base = server_url(op.as_h?.try(&.["servers"]?)) ||
-                 server_url(item.as_h?.try(&.["servers"]?)) || base
+          base = local_server_url(op.as_h?.try(&.["servers"]?)) ||
+                 local_server_url(item.as_h?.try(&.["servers"]?)) || base
         end
         {operation_to_flow(now, base, url_path, method, op, item, spec, swagger2,
           schemes, root_security, prov), true}
@@ -116,6 +116,15 @@ module Gori
       private def self.server_base(spec : JSON::Any) : String
         server_url(spec["servers"]?) ||
           raise Gori::Error.new("OpenAPI spec missing servers — add a servers[0].url block")
+      end
+
+      # A path-item or operation `servers[0].url` to send to instead of the root one, or nil to
+      # keep the root: a relative (`/v2`) or templated (`https://{region}.api.test`) entry is valid
+      # OpenAPI but names no host by itself, and used to import against the root server — so it
+      # still does, rather than skipping the operation.
+      private def self.local_server_url(servers : JSON::Any?) : String?
+        url = server_url(servers) rescue nil
+        url unless url.nil? || url.includes?('{')
       end
 
       # `servers[0].url` of a root, path-item or operation `servers` list, or nil when the

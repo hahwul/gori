@@ -189,6 +189,21 @@ describe Gori::Import::Oas do
     end
   end
 
+  it "keeps the root server for a relative or templated path-level server" do
+    body = <<-JSON
+      {"openapi":"3.0.3","info":{"title":"t","version":"1"},
+       "servers":[{"url":"https://a.test"}],
+       "paths":{"/rel":{"servers":[{"url":"/v2"}],"get":{"responses":{"200":{"description":"OK"}}}},
+                "/tpl":{"get":{"servers":[{"url":"https://{region}.b.test","variables":{"region":{"default":"eu"}}}],
+                               "responses":{"200":{"description":"OK"}}}}}}
+      JSON
+    with_spec(body, ".json") do |path|
+      result = Gori::Import::Oas.parse_file(path)
+      result.skipped.should eq(0)
+      result.flows.map(&.request.host).should eq(["a.test", "a.test"])
+    end
+  end
+
   it "resolves a percent-encoded $ref pointer" do
     body = <<-JSON
       {"openapi":"3.0.3","info":{"title":"t","version":"1"},
