@@ -1221,6 +1221,10 @@ module Gori::Proxy::WS
                            flow_id : Int64, sink : FlowSink, message_opcode : UInt8,
                            shape : MessageShape) : IO::Memory
       return assembling unless frame.data?
+      if whole_message?(frame, assembling)
+        sink.on_ws_message(flow_id, direction, message_opcode.to_i, frame.payload, shape.take)
+        return assembling
+      end
       remaining = MAX_MESSAGE - assembling.size
       # Exactly the frame that crosses the cap, so one notice per message rather than one
       # per frame: after this, `remaining` is 0 for every later fragment.
@@ -1256,6 +1260,15 @@ module Gori::Proxy::WS
       return assembling unless frame.fin?
       sink.on_ws_message(flow_id, direction, message_opcode.to_i, assembling.to_slice.dup, shape.take)
       assembling.size > RESET_THRESHOLD ? IO::Memory.new : assembling.tap(&.clear)
+    end
+
+    # A whole message in one frame, with nothing assembled ahead of it and inside the capture
+    # cap: its payload IS the message, so `capture_frame` hands it to the sink as-is rather
+    # than through the reassembly buffer and a `dup`. Safe because every caller's frame comes
+    # from `WS.read_body`, which allocates the payload (or the raw buffer it views) fresh per
+    # frame, and nothing writes to it once the frame has been forwarded.
+    private def self.whole_message?(frame : WS::Frame, assembling : IO::Memory) : Bool
+      frame.fin? && assembling.size == 0 && !frame.payload.empty? && frame.payload.size <= MAX_MESSAGE
     end
 
     # Forwards a frame whose payload exceeds MAX_FRAME byte-exact (P7) by streaming

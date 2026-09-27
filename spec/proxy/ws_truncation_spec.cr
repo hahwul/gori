@@ -59,6 +59,36 @@ describe "WS capture truncation" do
     payload[2].size.should eq(WS::Relay::MAX_MESSAGE)
   end
 
+  # A lone FIN frame with nothing assembled normally skips the buffer; one past the cap must
+  # still take the truncating path, so the row stops at MAX_MESSAGE and says so.
+  it "marks a single FIN frame that overruns the capture cap on its own" do
+    sink = TruncSink.new
+    shape = WS::MessageShape.new
+    shape.note(true, 0_u8, false, nil)
+    WS::Relay.capture_frame(data_frame(true, Bytes.new(WS::Relay::MAX_MESSAGE + 8, 'A'.ord.to_u8)),
+      IO::Memory.new, "in", 1_i64, sink, WS::OP_TEXT, shape)
+
+    sink.rows.size.should eq(2)
+    WS.notice?(sink.rows[0][2]).should be_true
+    sink.rows[1][2].size.should eq(WS::Relay::MAX_MESSAGE)
+  end
+
+  it "hands a single FIN frame's payload over whole, with its shape" do
+    sink = TruncSink.new
+    shape = WS::MessageShape.new
+    key = Bytes[1_u8, 2_u8, 3_u8, 4_u8]
+    shape.note(true, 4_u8, true, key)
+    buf = IO::Memory.new
+    WS::Relay.capture_frame(data_frame(true, "whole".to_slice), buf, "out", 1_i64, sink,
+      WS::OP_TEXT, shape).should be(buf)
+
+    sink.rows.should eq([{"out", 1, "whole".to_slice}])
+    sink.shapes[0].frames.should eq(1)
+    sink.shapes[0].rsv.should eq(4)
+    sink.shapes[0].mask_key.should eq(key)
+    shape.frames.should eq(0) # taken, so the next message starts clean
+  end
+
   it "does not mark a message that fits, and emits it once on FIN" do
     sink = TruncSink.new
     shape = WS::MessageShape.new
