@@ -124,6 +124,21 @@ describe Gori::Tui::LinksOverlay do
     end
   end
 
+  # `entity_links.id` is a rowid: after a peer removed the link on screen and added another, the
+  # stale row id names the new one. MCP `remove_link` and `gori run links rm` remove by the pair.
+  it "removes the link by what it links, not by its row id" do
+    runner_remove_link_body.should_not contain("remove_link(link.id)")
+    with_store do |store|
+      issue = store.insert_issue("t", Gori::Store::Severity::Low, nil, nil)
+      shown = store.add_link(Gori::Store::LinkOwnerKind::Issue, issue, Gori::Store::LinkRefKind::Flow, 7_i64).not_nil!
+      stale = store.list_links(Gori::Store::LinkOwnerKind::Issue, issue).first
+      store.remove_link(shown).should be_true # a peer removes it…
+      store.add_link(Gori::Store::LinkOwnerKind::Issue, issue, Gori::Store::LinkRefKind::Flow, 8_i64).should eq(shown)
+      store.remove_link(stale.owner_kind, stale.owner_id, stale.ref_kind, stale.ref_id).should be_true
+      store.list_links(Gori::Store::LinkOwnerKind::Issue, issue).map(&.ref_id).should eq([8_i64])
+    end
+  end
+
   it "does not claim a link was removed when the store refused the write" do
     # A closed writer is the deterministic stand-in for the same `exec_task_ok == false`
     # contract a cross-process SQLite busy/lock takes. The lower layer proves the trigger;
@@ -138,7 +153,7 @@ describe Gori::Tui::LinksOverlay do
       store.remove_link(link).should be_false
 
       body = runner_remove_link_body
-      refusal = body.index("unless @session.store.remove_link(link.id)").not_nil!
+      refusal = body.index("unless @session.store.remove_link(link.owner_kind, link.owner_id, link.ref_kind, link.ref_id)").not_nil!
       reload = body.index("lo.reload(@session.store)").not_nil!
       success = body.index(%(@toast = "link removed")).not_nil!
       refusal.should be < reload
