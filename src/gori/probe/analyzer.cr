@@ -52,7 +52,7 @@ module Gori
       @oob_watermark : Int64 = 0_i64 # highest oast_callbacks id already swept
       # The active worker's keep-alive sender and the dial it was built for. See `worker_sender`.
       @worker_sender : Fuzz::Sender? = nil
-      @worker_sender_key : {String, String, Int32, Bool, Bool}? = nil
+      @worker_sender_key : {String, String, Int32, Bool, Bool, String?}? = nil
 
       # One enabled active rule that WOULD run against a given flow, plus the request count it
       # sends. `active_estimate` returns these (empty when nothing applies) so the manual "Run
@@ -722,14 +722,17 @@ module Gori
       # against one flow, and `maybe_enqueue_active` queues a flow's rules back to back — so a
       # sender per task paid a fresh TCP+TLS handshake for every rule of every new surface,
       # ~25 of them to one origin in a row. Rebuilt when the dial changes: another origin, the
-      # other protocol, or the live `verify_upstream` toggle (read here, so a flip still takes
-      # effect on the next probe). ConnPool parks only cleanly framed exchanges and checks a
+      # other protocol, the live `verify_upstream` toggle (read here, so a flip still takes
+      # effect on the next probe), or the host's override address — a pool dials only once, so
+      # without it an override the operator just added (prod → staging) kept riding the parked
+      # socket to the old address for as long as tasks kept arriving. ConnPool parks only cleanly framed exchanges and checks a
       # parked socket for residue at checkout, so a rule's ambiguous-framing probe cannot leak
       # into the next rule's response. Only the worker fiber touches it — the manual path
       # (`run_active_now`) runs in its own fiber with its own sender.
       private def worker_sender(detail : Store::FlowDetail) : Fuzz::Sender
         row = detail.row
-        key = {row.scheme, row.host, row.port, detail.http_version.starts_with?("HTTP/2"), @verify_upstream}
+        key = {row.scheme, row.host, row.port, detail.http_version.starts_with?("HTTP/2"), @verify_upstream,
+               @overrides.try(&.connect_address(row.host))}
         if (s = @worker_sender) && @worker_sender_key == key
           return s
         end
