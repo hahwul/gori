@@ -99,6 +99,21 @@ describe "MCP ask_operator (#1324)" do
     end
   end
 
+  # The courier forgets a question as soon as it reads the answer; after that, an operator who
+  # empties the feed must not turn the answered question into an "expired" one.
+  it "does not expire a question the courier saw answered, even once the feed is cleared" do
+    with_store do |store|
+      t = tools_for(store)
+      id = JSON.parse(ask(t, %({"question":"q","choices":["a","b"],"expires_in_minutes":1})).text)["id"].as_i64
+      q = store.open_agent_questions(id - 1, 0_i64).first
+      store.close_agent_question(q, Gori::AgentQuestion::OUTCOME_ANSWERED, "a", "operator", "tui")
+      t.forget_question(id)
+      store.clear_events.should be_true
+      t.expire_asked_questions((Time.utc + 2.minutes).to_unix_ms * 1000).should eq(0)
+      store.events_after(0, 10).should be_empty
+    end
+  end
+
   it "hands the answer to operator_messages with the question it closes" do
     with_store do |store|
       t = tools_for(store)

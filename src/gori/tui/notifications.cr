@@ -35,9 +35,8 @@ module Gori::Tui
       # The feed id of the `ask_operator` question this note announced (#1324), or nil for
       # every other note. ↵ on the row opens the answer card while `question_open?` holds.
       getter question_id : Int64?
-      # How the question ended, once it has: `:answered`, `:dismissed`, `:expired`, or `:gone`
-      # (the agent that asked detached, so nothing would read an answer). nil while it is still
-      # open. Mutable because the note is announced before the answer exists, and the ring row
+      # How the question ended, once it has: `:answered`, `:dismissed`, `:expired`, or `:closed`
+      # (another window answered it). nil while it is still open. Mutable because the note is announced before the answer exists, and the ring row
       # has to stop offering a card the moment another window or the expiry closes it.
       property question_state : Symbol?
 

@@ -17,8 +17,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # Every question still open, oldest first — including one whose asker is not attached right
   # now; `answerable_questions` is the subset the card and the chip offer.
   @pending_questions : Array(Gori::AgentQuestion) = [] of Gori::AgentQuestion
-  # Where the next open-question scan starts when nothing is pending, and the feed's
-  # high-water mark at the last scan (-1: never scanned, so the first poll reads them all).
+  # The feed's high-water mark at the last scan, and so where the next one starts (-1: never
+  # scanned, so the first poll reads every open question from the start of the feed).
   @question_floor : Int64 = 0_i64
   @question_seen_high : Int64 = -1_i64
   # The ids already put in the ring, so a question announces once however many polls see it.
@@ -26,22 +26,31 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
 
   # Called every DV_POLL_INTERVAL tick, after the presence scan it reads the askers from.
   # Returns true when the ring or the chip changed.
+  #
+  # Incremental: each scan reads only the rows written since the last one — what closed among
+  # the questions already held, and what was newly asked. The feed has no index on `kind`, so
+  # re-reading from the oldest open question would walk up to a day of feed on every tick an
+  # event lands, for a question whose asker may be long gone.
   def drain_agent_questions : Bool
     store = @session.store
     now = now_us
     before = answerable_questions.map(&.id)
     high = store.last_event_id
     if high != @question_seen_high
-      # From just below the oldest one still pending, so a pending question closed since the
-      # last scan is seen closed; from the last high-water mark when none is.
-      floor = @pending_questions.min_of?(&.id).try { |id| id - 1 } || @question_floor
-      open = store.open_agent_questions(floor, now)
-      open_ids = open.map(&.id).to_set
-      # Closed by another window, or by the asking server's expiry.
-      @pending_questions.each do |q|
-        settle_question(q, q.expired?(now) ? :expired : :closed) unless open_ids.includes?(q.id)
+      floor = @question_floor
+      unless @pending_questions.empty?
+        # Closed by an answer from another window, or by the asking server's expiry.
+        closed = store.agent_questions_closed_after(floor)
+        @pending_questions.reject! do |q|
+          next false unless closed.includes?(q.id)
+          settle_question(q, q.expired?(now) ? :expired : :closed)
+          true
+        end
       end
-      @pending_questions = open
+      # A row committed between reading `high` and this query is read now AND next time, so
+      # an id already held is not added twice.
+      held = @pending_questions.map(&.id).to_set
+      store.open_agent_questions(floor, now).each { |q| @pending_questions << q unless held.includes?(q.id) }
       @question_floor = high
       @question_seen_high = high
     end
@@ -52,11 +61,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       settle_question(q, :expired)
       true
     end
-    # An announced question whose asker detached can no longer be answered — nothing would
-    # read the row.
-    @pending_questions.each do |q|
-      settle_question(q, :gone) if @questions_announced.includes?(q.id) && !asker_attached?(q)
-    end
+    # Only questions whose asker is attached are announced and offered. A detached asker is
+    # NOT settled here: one presence scan that missed a marker must not retire a question for
+    # good, so it simply drops out of `answerable_questions` until the asker is seen again.
     announced = false
     answerable_questions.each do |q|
       next if @questions_announced.includes?(q.id)
@@ -110,8 +117,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   private def commit_question(q : Gori::AgentQuestion, ov : AgentQuestionOverlay) : Bool
     who = AgentMessageNotes.question_sender(q)
     unless attached_agents.any? { |e| e.pid == q.pid }
+      # Not settled: the question stays pending and returns to the chip if the asker is seen
+      # again, and leaves on the clock if it is not.
       @toast = "#{who} is no longer attached — nothing would read the answer"
-      settle_question(q, :gone)
       return true
     end
     choice = ov.decided_choice

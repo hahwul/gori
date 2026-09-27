@@ -165,11 +165,22 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     page = @session.store.agent_deliveries_after(@agent_delivery_cursor, AGENT_DELIVERY_BATCH)
     @agent_delivery_cursor = page.full ? {@agent_delivery_cursor, page.scanned_max}.max : {@agent_delivery_cursor, page.scanned_max, high}.max
     return false if page.rows.empty?
+    pushed = false
     page.rows.each do |row|
+      next if expiry_delivery?(row)
       level, message = AgentMessageNotes.line(row)
       @notifications.push(level, message, nil, source: "app")
+      pushed = true
     end
-    true
+    pushed
+  end
+
+  # A delivery of the row an agent's own server wrote when its `ask_operator` question expired
+  # (#1324). The operator sent nothing, so "→ claude-code got it" would announce a message
+  # they never wrote; the expiry itself shows on the question's ring row. One lookup per
+  # delivery row, which is rare, and only the message's own row.
+  private def expiry_delivery?(row : Gori::AgentDelivery) : Bool
+    @session.store.agent_message(row.message_id).try(&.outcome) == Gori::AgentQuestion::OUTCOME_EXPIRED
   end
 
   # The agent's replies, the same way: a note per reply, the summary as its line and the

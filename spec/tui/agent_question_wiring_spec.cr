@@ -78,3 +78,21 @@ describe "the Runner's question wiring" do
     body.should match(/unless attached_agents\.any\? \{ \|e\| e\.pid == q\.pid \}[\s\S]*close_agent_question/)
   end
 end
+
+describe "the Runner's question wiring after review" do
+  # One presence scan that missed a marker must not retire a question for good.
+  it "never settles a question as gone" do
+    src("tui", "runner", "agent_question.cr").join('\n').should_not contain(":gone")
+  end
+
+  it "reads only what changed since the last scan" do
+    body = src("tui", "runner", "agent_question.cr").join('\n')
+    body.should contain("store.agent_questions_closed_after(floor)")
+    body.should contain("store.open_agent_questions(floor, now)")
+    body.should contain("@question_floor = high")
+  end
+
+  it "keeps an agent's own expiry out of the ring's delivery notes" do
+    src("tui", "runner", "agent_message.cr").join('\n').should match(/next if expiry_delivery\?\(row\)/)
+  end
+end

@@ -31,8 +31,12 @@ private class Rig
       codex: -> { @codex_lookups += 1; @codex },
       claim: ->(id : Int64) { @claimed_ids << id; @claimable },
       release: ->(id : Int64) { @released_ids << id; nil },
-      expire: -> { @expiries += 1; nil })
+      expire: -> { @expiries += 1; nil },
+      answered: ->(qid : Int64) { @answered << qid; nil })
   end
+
+  # The question ids the courier reported closed as it read their rows.
+  getter answered = [] of Int64
 end
 
 private def with_fake_inbox(&)
@@ -432,6 +436,22 @@ describe Gori::MCP::Courier, "ask_operator answers" do
         content.should contain(%("yes"))
         content.should contain("not an authorization")
       end
+    end
+  end
+
+  # Read is enough: the expiry check cannot see an answer the operator has since cleared from
+  # the feed, so the clock stops the moment the courier reads the row.
+  it "reports each closing row as it reads it, delivered or not" do
+    with_store do |store|
+      rig = Rig.new(store)
+      c = rig.courier(77_i64)
+      qid = store.record_agent_question("q", nil, ["a", "b"], nil, "claude-code pid 77", 77_i64, Int64::MAX)
+      q = store.open_agent_questions(qid - 1, 0_i64).first
+      c.tick
+      store.post_agent_message("unrelated", "all", nil)
+      store.close_agent_question(q, Gori::AgentQuestion::OUTCOME_DISMISSED, nil, "operator", "tui")
+      c.tick
+      rig.answered.should eq([qid])
     end
   end
 

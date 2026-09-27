@@ -58,7 +58,8 @@ module Gori::MCP
                    @codex : Proc(CodexQueue::Session?) = -> { CodexQueue.discover },
                    @claim : Proc(Int64, Bool) = ->(_id : Int64) { true },
                    @release : Proc(Int64, Nil) = ->(_id : Int64) { nil },
-                   @expire : Proc(Nil) = -> { nil })
+                   @expire : Proc(Nil) = -> { nil },
+                   @answered : Proc(Int64, Nil) = ->(_id : Int64) { nil })
       @cursor = 0_i64
       # The store the cursor was taken against — a REFERENCE, never its object_id: a bare id
       # can be reused by the next store the GC hands out at the same address, and a cursor
@@ -139,6 +140,11 @@ module Gori::MCP
       # call the agent makes. Without the test, a message the agent already has is written to
       # its inbox socket or queued into its Codex thread a second time, which for Codex is a
       # whole extra turn spent on an instruction it already acted on.
+      # Every row that closes one of this process's `ask_operator` questions (#1324) ends its
+      # expiry clock HERE, as it is read, whatever route then carries it: the expiry check's
+      # own look for the answer row cannot find one the operator has since cleared from the
+      # feed, and "expired" after an answer the agent already acted on is a contradiction.
+      page.rows.each { |m| m.in_reply_to.try { |qid| @answered.call(qid) } }
       already = claimed(store, page)
       before = @cursor
       held = nil.as(Int64?)

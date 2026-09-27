@@ -305,12 +305,16 @@ module Gori
         windows = AgentPresence.tui_windows?(@db_path)
         expires_at = (Time.utc + minutes.minutes).to_unix_ms * 1000
         st = store
+        pid = Process.pid.to_i64
+        label = session_label
         id = st.record_agent_question(question, str(h, "detail").presence, choices, default,
-          session_label, Process.pid.to_i64, expires_at)
+          label, pid, expires_at)
         return busy("ask_operator: the question was not written (project busy or unwritable); retry, or ask in your own output") if id <= 0
-        if q = st.open_agent_questions(id - 1, 0_i64).find { |row| row.id == id }
-          @asked_questions[id] = {q, st}
-        end
+        # Built from what was just written rather than read back: the expiry needs only the id,
+        # the question line, the asker and the time, and a read-back that missed would leave a
+        # question this server never expires.
+        @asked_questions[id] = {AgentQuestion.new(id, AgentReply.summary_line(question), nil, choices, default,
+          label, pid, expires_at, Time.utc.to_unix_ms * 1000), st}
         Result.new(JSON.build do |j|
           j.object do
             j.field "ok", true
@@ -366,6 +370,11 @@ module Gori
           "shown in the notification ring and Miss Ring's bubble of the gori TUI open on this " \
           "project, and on its ask: chip until answered. " + tail
         end
+      end
+
+      # Stop the expiry clock on question `id`: the courier read a row that closes it.
+      def forget_question(id : Int64) : Nil
+        @asked_questions.delete(id)
       end
 
       # Close every question this server asked whose time is up, as expired. From the

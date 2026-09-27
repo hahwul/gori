@@ -136,6 +136,15 @@ module Gori
       nil
     end
 
+    # A detail cut to `DETAIL_MAX` on a character boundary, with a trailing marker saying so.
+    # One home for the cut, shared by replies and `ask_operator` questions (#1324).
+    def self.cap_detail(detail : String?) : String?
+      d = detail
+      return d unless d && d.bytesize > DETAIL_MAX
+      # `scrub` turns a split sequence into U+FFFD, dropped.
+      String.new(d.to_slice[0, DETAIL_MAX]).scrub.rchop('\uFFFD') + "\n… (cut)"
+    end
+
     # The first line of what the agent sent, capped — the rest belongs in `detail`.
     def self.summary_line(text : String) : String
       line = text.each_line.first? || ""
@@ -201,10 +210,7 @@ module Gori
     private def reply_row(detail : String?, level : String, target : String, pid : Int64,
                           in_reply_to : Int64?) : {String, String}
       level = AgentReply::LEVELS.includes?(level) ? level : "info"
-      if (d = detail) && d.bytesize > AgentReply::DETAIL_MAX
-        # Cut on a character boundary: `scrub` turns a split sequence into U+FFFD, dropped.
-        detail = String.new(d.to_slice[0, AgentReply::DETAIL_MAX]).scrub.rchop('\uFFFD') + "\n… (cut)"
-      end
+      detail = AgentReply.cap_detail(detail)
       payload = JSON.build do |j|
         j.object do
           j.field "target", target

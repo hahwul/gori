@@ -153,7 +153,13 @@ module Gori::Tui
 
     # The client's name as a ring row shows it (`claude-code`, not `claude-code pid 48213`).
     private def self.sender(reply : Gori::AgentReply) : String
-      AgentsOverlay.safe_client(reply.target_label.split(" pid ").first?) || "agent"
+      sender_of(reply.target_label)
+    end
+
+    # `claude-code pid 48213` → `claude-code`, scrubbed: the one derivation of a client's name
+    # from a feed row's label, for a reply and a question alike.
+    private def self.sender_of(label : String) : String
+      AgentsOverlay.safe_client(label.split(" pid ").first?) || "agent"
     end
 
     private def self.worst_level(rows : Array(Gori::AgentReply)) : Symbol
@@ -208,7 +214,7 @@ module Gori::Tui
 
     # The asking client, as a ring row names it.
     def self.question_sender(q : Gori::AgentQuestion) : String
-      AgentsOverlay.safe_client(q.target_label.split(" pid ").first?) || "agent"
+      sender_of(q.target_label)
     end
 
     # `scrub_line` for a caller outside this module (the question card).

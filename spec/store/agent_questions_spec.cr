@@ -97,3 +97,30 @@ describe Gori::Store, "#1324 agent questions" do
     end
   end
 end
+
+# The reads the TUI's incremental poll and its delivery filter use.
+describe Gori::Store, "#1324 question reads" do
+  it "reports which questions closed after a point, and looks up one message by id" do
+    with_store do |store|
+      a = ask(store)
+      b = ask(store)
+      mark = store.last_event_id
+      store.agent_questions_closed_after(mark).should be_empty
+      mid = store.close_agent_question(b, Gori::AgentQuestion::OUTCOME_EXPIRED, nil, "agent", "mcp")
+      store.agent_questions_closed_after(mark).should eq(Set{b.id})
+      store.agent_message(mid).not_nil!.outcome.should eq("expired")
+      store.agent_message(a.id).should be_nil # a question row is not a message
+      store.agent_message(999_999_i64).should be_nil
+    end
+  end
+end
+
+describe Gori::AgentReply, ".cap_detail" do
+  it "leaves a short detail alone and cuts a long one on a character boundary" do
+    Gori::AgentReply.cap_detail(nil).should be_nil
+    Gori::AgentReply.cap_detail("short").should eq("short")
+    cut = Gori::AgentReply.cap_detail("é" * Gori::AgentReply::DETAIL_MAX).not_nil!
+    cut.valid_encoding?.should be_true
+    cut.should end_with("… (cut)")
+  end
+end

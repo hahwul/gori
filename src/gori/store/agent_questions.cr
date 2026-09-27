@@ -82,11 +82,8 @@ module Gori
     def record_agent_question(question : String, detail : String?, choices : Array(String),
                               default : String?, target : String, pid : Int64,
                               expires_at : Int64) : Int64
-      if (d = detail) && d.bytesize > AgentReply::DETAIL_MAX
-        detail = String.new(d.to_slice[0, AgentReply::DETAIL_MAX]).scrub.rchop('�') + "\n… (cut)"
-      end
       insert_event("agent", AgentQuestion::KIND, "info", AgentReply.summary_line(question),
-        payload: AgentQuestion.payload_json(detail, choices, default, target, pid, expires_at), actor: "mcp")
+        payload: AgentQuestion.payload_json(AgentReply.cap_detail(detail), choices, default, target, pid, expires_at), actor: "mcp")
     end
 
     # The questions after `since_id` that are still open at `now_us`: not past their expiry,
@@ -108,6 +105,23 @@ module Gori
       return found if found.empty?
       closed = closed_question_ids(@db, found.min_of(&.id))
       found.reject { |q| closed.includes?(q.id) }
+    end
+
+    # The ids of the questions an `agent_message` after `since_id` closed. For a reader that
+    # keeps the open set itself and only needs to hear what closed since it last looked — the
+    # TUI's poll, which then never re-walks the feed from its oldest open question (#1324).
+    def agent_questions_closed_after(since_id : Int64) : Set(Int64)
+      closed_question_ids(@db, since_id)
+    end
+
+    # One operator message by its feed id, or nil when it is gone or is not one. The TUI asks
+    # it of a delivery row, whose own payload carries only the message id.
+    def agent_message(id : Int64) : AgentMessage?
+      @db.query("SELECT #{EVENT_COLS} FROM events WHERE id = ? AND kind = ?",
+        args: [id, AgentMessage::KIND] of DB::Any) do |rs|
+        rs.each { return AgentMessage.from_row(read_event(rs)) }
+      end
+      nil
     end
 
     # Close `question` with its one closing message. `outcome` is one of
