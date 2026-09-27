@@ -29,7 +29,9 @@ module Gori::Probe
   class Analyzer
     def spec_execute_active(rule : Active::Rule, plan : Active::Plan,
                             detail : Store::FlowDetail) : Int32?
-      execute_active(rule, plan, detail)
+      execute_active(rule, plan, detail, worker_sender(detail))
+    ensure
+      release_worker_sender
     end
   end
 end

@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-- Probe: passive scanning no longer scrubs and pattern-scans a binary response body (images, fonts, audio/video, wasm) — a mislabelled text body is still read — so a captured image costs ~3µs instead of ~600µs on the fiber capture shares (#0000)
+- Probe: a headless active scan (`gori run probe --active`, MCP `probe_scan`) probes each request surface once however many times it was captured, instead of re-probing every repeat and spending its active budget on it (#1332)
+- Probe: the live active scanner reuses one keep-alive connection across a flow's rules rather than opening a fresh one per rule (#1332)
+- Probe: passive scanning no longer scrubs and pattern-scans a binary response body (images, fonts, audio/video, wasm) — a mislabelled text body is still read — so a captured image costs ~3µs instead of ~600µs on the fiber capture shares (#1332)
 - Network: on macOS 27 a refused connection is no longer taken for an open one, so a host whose first address refuses (`localhost` resolving `::1` first) falls through to its next address instead of failing (#1329)
 - Miss Ring keeps an agent's reply up until your next key or click, and later notices no longer push it out (Settings → Companion → Agent replies). MCP `reply_to_operator` now tells the agent whether a gori window was open to show it (#1328)
 - MCP: Preferences → AI → MCP permissions switches off what an attached agent may do, one group at a time (send traffic, intercept control, project edits, project management); every group stays on by default and reading the capture is always allowed (#1327)

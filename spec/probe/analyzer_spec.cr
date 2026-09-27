@@ -735,3 +735,97 @@ describe "Gori::Probe.cwe" do
     parsed.as_h.has_key?("cwe_name").should be_false
   end
 end
+
+# The worker's send seam, driven directly (it runs on a spawned fiber in production) — the
+# reopen idiom `host_overrides_wiring_spec.cr` uses.
+module Gori::Probe
+  class Analyzer
+    def spec_worker_task(rule : Active::Rule, plan : Active::Plan, detail : Store::FlowDetail) : Int32?
+      execute_active(rule, plan, detail, worker_sender(detail))
+    end
+
+    def spec_release_worker_sender : Nil
+      release_worker_sender
+    end
+  end
+end
+
+# A keep-alive origin that counts the connections it accepted and the requests it answered.
+private class KeepAliveOrigin
+  getter accepted = 0
+  getter requests = 0
+
+  def initialize
+    @server = TCPServer.new("127.0.0.1", 0)
+    spawn do
+      while conn = @server.accept?
+        @accepted += 1
+        serve(conn)
+      end
+    rescue
+      # closed under the accept loop — teardown
+    end
+  end
+
+  def port : Int32
+    @server.local_address.port
+  end
+
+  def close : Nil
+    @server.close rescue nil
+  end
+
+  private def serve(conn : TCPSocket) : Nil
+    spawn do
+      while conn.gets("\r\n", chomp: true)
+        while (line = conn.gets("\r\n", chomp: true)) && !line.empty?
+        end
+        @requests += 1
+        conn << "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 2\r\n\r\nok"
+        conn.flush
+      end
+    rescue
+    ensure
+      conn.close rescue nil
+    end
+  end
+end
+
+describe "Probe::Analyzer active worker sender" do
+  # Each queued task is ONE rule against one flow, and a flow's rules are queued back to back.
+  # A sender per task paid a fresh TCP (+TLS) handshake for every one of them.
+  it "reuses one keep-alive connection across consecutive tasks to the same origin" do
+    origin = KeepAliveOrigin.new
+    begin
+      with_store do |store|
+        head = "GET /s?q=hi HTTP/1.1\r\nHost: 127.0.0.1:#{origin.port}\r\n\r\n"
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "127.0.0.1", port: origin.port,
+          method: "GET", target: "/s?q=hi", http_version: "HTTP/1.1", head: head.to_slice,
+          source: Gori::FlowSource::Kind::Proxy))
+        store.update_response(Gori::Store::CapturedResponse.new(
+          flow_id: id, status: 200,
+          head: "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 2\r\n\r\n".to_slice,
+          body: "ok".to_slice, duration_us: 1_i64))
+        detail = store.get_flow(id).not_nil!
+        a = Gori::Probe::Analyzer.new(store, Gori::Scope.load(store),
+          Channel(Gori::Store::FlowEvent).new(1), Gori::Probe::Mode::Active, false)
+        plans = Gori::Probe::Active::RULES.compact_map do |rule|
+          next if Gori::Probe.rule_disabled?(rule.info.id, Set(String).new)
+          plan = rule.plan(detail, Gori::Probe::Active::Options::DEFAULT)
+          plan && {rule, plan}
+        end
+        plans.size.should be >= 2
+        begin
+          plans.each { |(rule, plan)| a.spec_worker_task(rule, plan, detail) }
+        ensure
+          a.spec_release_worker_sender
+        end
+        origin.requests.should be >= plans.size
+        origin.accepted.should eq(1)
+      end
+    ensure
+      origin.close
+    end
+  end
+end

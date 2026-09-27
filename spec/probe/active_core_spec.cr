@@ -362,6 +362,59 @@ describe "Gori::Probe::Active (safety + coverage)" do
     end
   end
 
+  # --- surface dedup across one scan (`seen:`) --------------------------------------------
+
+  it "probes a surface once per `seen` set, whatever its parameter values" do
+    with_store do |store|
+      first = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=one", content_type: nil)
+      again = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=two", content_type: nil)
+      other = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/t?q=one", content_type: nil)
+      fake = CountingBackend.new(Gori::Fuzz::Origin.new(first.row.scheme, first.row.host, first.row.port))
+      seen = Set(String).new
+      Gori::Probe::Active.analyze(first, outbound: ungated_outbound, overrides: nil, backend: fake, seen: seen)
+      once = fake.sent
+      once.should be > 0
+      seen.should_not be_empty
+      # Same method, path and parameter NAMES: every rule's dedup key is already in the set.
+      Gori::Probe::Active.fresh?(again, Gori::Probe::Active::Options::DEFAULT, Set(String).new, seen).should be_false
+      Gori::Probe::Active.analyze(again, outbound: ungated_outbound, overrides: nil, backend: fake, seen: seen)
+      fake.sent.should eq(once)
+      # A different path is a different surface.
+      Gori::Probe::Active.fresh?(other, Gori::Probe::Active::Options::DEFAULT, Set(String).new, seen).should be_true
+      Gori::Probe::Active.analyze(other, outbound: ungated_outbound, overrides: nil, backend: fake, seen: seen)
+      fake.sent.should be > once
+    end
+  end
+
+  it "reports a short-circuited flow as not fresh (so it never spends the active budget)" do
+    with_store do |store|
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "acme.test", port: 443,
+        method: "GET", target: "/s?q=hi", http_version: "HTTP/1.1",
+        head: "GET /s?q=hi HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice, body: nil,
+        short_circuited: true, source: Gori::FlowSource::Kind::Proxy))
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice))
+      detail = store.get_flow(id).not_nil!
+      # A rule WOULD apply to this surface — the only reason it is not fresh is the stub —
+      # so this proves the short-circuit guard, not a missing insertion point.
+      Gori::Probe::Active.fresh?(detail, Gori::Probe::Active::Options::DEFAULT,
+        Set(String).new, Set(String).new).should be_false
+    end
+  end
+
+  it "keeps probing every flow in isolation when no `seen` set is passed" do
+    with_store do |store|
+      first = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=one", content_type: nil)
+      again = probe_capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=two", content_type: nil)
+      fake = CountingBackend.new(Gori::Fuzz::Origin.new(first.row.scheme, first.row.host, first.row.port))
+      Gori::Probe::Active.analyze(first, outbound: ungated_outbound, overrides: nil, backend: fake)
+      once = fake.sent
+      Gori::Probe::Active.analyze(again, outbound: ungated_outbound, overrides: nil, backend: fake)
+      fake.sent.should eq(once * 2)
+    end
+  end
+
   # --- per-rule error isolation (the headless path used to have none) ---------------------
   #
   # The TUI analyzer has always wrapped each rule in its own rescue (execute_active), so a rule

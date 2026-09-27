@@ -21,10 +21,14 @@ module Gori
     # so the Repeater tab / CLI / MCP can feed the same passive engine without going through
     # the History event channel.
     class Analyzer
-      ANALYZED_CAP     = 10_000     # bound the seen-flow set (memory plateaus on long runs)
-      ACTIVE_SEEN_CAP  =  5_000     # bound the active dedup set
-      ACTIVE_QUEUE     =    128     # bounded active task queue (drop on overflow)
-      ACTIVE_TIMEOUT   = 10.seconds # per-probe socket timeout
+      ANALYZED_CAP    = 10_000     # bound the seen-flow set (memory plateaus on long runs)
+      ACTIVE_SEEN_CAP =  5_000     # bound the active dedup set
+      ACTIVE_QUEUE    =    128     # bounded active task queue (drop on overflow)
+      ACTIVE_TIMEOUT  = 10.seconds # per-probe socket timeout
+      # How long the active worker keeps its keep-alive sender after the queue goes quiet. Long
+      # enough to span the gap between one flow's rules and the next flow's; short enough that
+      # an idle session does not hold a parked socket to the last host it probed.
+      ACTIVE_IDLE      = 5.seconds
       ACTIVE_BACKFILL  = 300        # recent History rows to re-arm when Active is enabled
       WS_MSG_CAP       = 200        # max WS messages loaded per flow for passive scan
       CATCHUP_INTERVAL = 30.seconds # how often the passive catch-up sweep runs
@@ -46,6 +50,9 @@ module Gori
       @warned_degraded : Bool        # one-shot: the "active skipped, list unreadable" warning
       @oob : OutOfBand::Minter?      # OAST payload minter — nil until this project registers one
       @oob_watermark : Int64 = 0_i64 # highest oast_callbacks id already swept
+      # The active worker's keep-alive sender and the dial it was built for. See `worker_sender`.
+      @worker_sender : Fuzz::Sender? = nil
+      @worker_sender_key : {String, String, Int32, Bool, Bool}? = nil
 
       # One enabled active rule that WOULD run against a given flow, plus the request count it
       # sends. `active_estimate` returns these (empty when nothing applies) so the manual "Run
@@ -387,16 +394,23 @@ module Gori
           supervise("manual active scan") do
             found = 0
             errored = false
-            Active::RULES.each do |rule|
-              break if @stopped
-              next if Probe.rule_disabled?(rule.info.id, @disabled)
-              plan = rule.plan(detail, opts)
-              next unless plan
-              if wrote = execute_active(rule, plan, detail, repeater_id: repeater_id, notify: notify)
-                found += wrote
-              else
-                errored = true # send failure already posted its own error notification
+            # ONE keep-alive sender for every rule of this run: one origin, sequential sends,
+            # so the handshake is paid once instead of once per rule.
+            sender = new_sender(detail)
+            begin
+              Active::RULES.each do |rule|
+                break if @stopped
+                next if Probe.rule_disabled?(rule.info.id, @disabled)
+                plan = rule.plan(detail, opts)
+                next unless plan
+                if wrote = execute_active(rule, plan, detail, sender, repeater_id: repeater_id, notify: notify)
+                  found += wrote
+                else
+                  errored = true # send failure already posted its own error notification
+                end
               end
+            ensure
+              sender.close
             end
             # Always mode wants a "done, nothing found" note — but only for a scan that actually
             # completed cleanly (WhenFound/Off stay quiet; a real finding or an error already posted).
@@ -685,11 +699,58 @@ module Gori
 
       private def active_loop : Nil
         loop do
-          task = @active_jobs.receive?
+          task = if @worker_sender
+                   select
+                   when t = @active_jobs.receive?
+                     t
+                   when timeout(ACTIVE_IDLE)
+                     release_worker_sender
+                     next
+                   end
+                 else
+                   @active_jobs.receive?
+                 end
           break if task.nil?
           run_active(task)
         end
       rescue Channel::ClosedError
+      ensure
+        release_worker_sender
+      end
+
+      # The worker's sender for `detail`'s origin, reused across TASKS. Each task is one rule
+      # against one flow, and `maybe_enqueue_active` queues a flow's rules back to back — so a
+      # sender per task paid a fresh TCP+TLS handshake for every rule of every new surface,
+      # ~25 of them to one origin in a row. Rebuilt when the dial changes: another origin, the
+      # other protocol, or the live `verify_upstream` toggle (read here, so a flip still takes
+      # effect on the next probe). ConnPool parks only cleanly framed exchanges and checks a
+      # parked socket for residue at checkout, so a rule's ambiguous-framing probe cannot leak
+      # into the next rule's response. Only the worker fiber touches it — the manual path
+      # (`run_active_now`) runs in its own fiber with its own sender.
+      private def worker_sender(detail : Store::FlowDetail) : Fuzz::Sender
+        row = detail.row
+        key = {row.scheme, row.host, row.port, detail.http_version.starts_with?("HTTP/2"), @verify_upstream}
+        if (s = @worker_sender) && @worker_sender_key == key
+          return s
+        end
+        release_worker_sender
+        @worker_sender_key = key
+        @worker_sender = new_sender(detail)
+      end
+
+      private def release_worker_sender : Nil
+        @worker_sender.try(&.close)
+        @worker_sender = nil
+        @worker_sender_key = nil
+      end
+
+      # A keep-alive sender to `detail`'s origin. `idle_conns: 1` because every caller sends
+      # sequentially: one socket is the most that is ever checked out. The caller closes it.
+      private def new_sender(detail : Store::FlowDetail) : Fuzz::Sender
+        row = detail.row
+        Fuzz::Sender.new(Fuzz::Origin.new(row.scheme, row.host, row.port), @outbound,
+          detail.http_version.starts_with?("HTTP/2"), @verify_upstream, timeout: ACTIVE_TIMEOUT,
+          keep_alive: true, idle_conns: 1, overrides: @overrides)
       end
 
       private def run_active(task : ActiveTask) : Nil
@@ -704,7 +765,7 @@ module Gori
           @active_seen.delete(task.plan.dedup_key)
           return
         end
-        execute_active(task.rule, task.plan, task.detail)
+        execute_active(task.rule, task.plan, task.detail, worker_sender(task.detail))
       end
 
       # Send a rule's built probe(s) and fold the response(s) into issues + a notification. Shared by
@@ -716,18 +777,13 @@ module Gori
       # closing) — so a manual run doesn't post an "all clean" completion over a failed scan.
       # `notify` gates the per-finding notification: Off emits the list-refresh IssueEvent WITHOUT
       # a summary (no tray post); WhenFound/Always attach it (the automatic path stays WhenFound).
+      # `sender` is a keep-alive sender to `detail`'s origin, OWNED BY THE CALLER (the worker's
+      # `worker_sender`, or the manual run's own): it carries this rule's primary probe, its
+      # followups and its pipeline group, and then the next rule's.
       private def execute_active(rule : Active::Rule, plan : Active::Plan, detail : Store::FlowDetail,
-                                 repeater_id : Int64? = nil,
+                                 sender : Fuzz::Sender, repeater_id : Int64? = nil,
                                  notify : Miner::NotifyMode = Miner::NotifyMode::WhenFound) : Int32?
         row = detail.row
-        origin = Fuzz::Origin.new(row.scheme, row.host, row.port)
-        http2 = detail.http_version.starts_with?("HTTP/2")
-        # Keep-alive for the same reason `Active.analyze` has it: this one sender carries the
-        # rule's PRIMARY probe, then its followups (a differential rule sends baseline vs `\`
-        # vs `\\`), then its pipeline group — several requests to one origin, sequentially, so
-        # `idle_conns: 1` is the whole need. Closed in the ensure below.
-        sender = Fuzz::Sender.new(origin, @outbound, http2, @verify_upstream, timeout: ACTIVE_TIMEOUT,
-          keep_alive: true, idle_conns: 1, overrides: @overrides)
         # The WHOLE probe is captured evidence plus this rule's own canary — see
         # `Fuzz::Backend.all_verbatim` for why nothing in it is eligible for session-binding
         # expansion. This loop is the TWIN of the one in `Active.analyze`: same plans, same
@@ -785,10 +841,6 @@ module Gori
       rescue ex
         emit_active_error(detail.row.host, ex.message || "error")
         nil
-      ensure
-        # Release the parked socket whatever happened above — a rule that raises must not
-        # leak an fd per execution. After every rescue: `ensure` has to be the last clause.
-        sender.try(&.close)
       end
 
       # --- out-of-band (OAST) ------------------------------------------------------------
