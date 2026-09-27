@@ -267,7 +267,7 @@ module Gori
         Repeater::PlanOptions.new(requests,
           default_target: rec.target, http2: http2, sni: rec.sni, timeout: timeout,
           expand_request: !verbatim, expand_bindings: !verbatim, preserve_field_case: verbatim,
-          auto_content_length: !verbatim && rec.auto_content_length?, verify: !insecure,
+          auto_content_length: !verbatim && rec.auto_content_length?, verify: !insecure && @verify_upstream,
           overrides: overrides, tls_preset: rec.tls_preset)
       end
 

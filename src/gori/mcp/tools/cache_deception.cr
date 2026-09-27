@@ -47,7 +47,8 @@ module Gori
 
         timeout = optional_int_arg(h, "timeout_ms").try(&.clamp(1_i64, 600_000_i64).milliseconds) ||
                   Authorize::ACTIVE_TIMEOUT
-        verify = bool_arg(h, "verify", true)
+        # `gori mcp --insecure-upstream` waives verification for every tool that sends.
+        verify = bool_arg(h, "verify", true) && @verify_upstream
         engine = Authorize::Engine.live(ob, verify, timeout, overrides: HostOverrides.load(store))
         report =
           begin
