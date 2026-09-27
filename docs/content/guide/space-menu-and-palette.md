@@ -5,6 +5,7 @@ weight = 5
 
 [extra]
 group = "Core"
+shot = "space-menu"
 +++
 
 gori has hundreds of actions, and you do not need to learn their keys up front. Two keys reach all of them:

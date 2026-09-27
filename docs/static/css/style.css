@@ -50,6 +50,8 @@
   /* Wordmark/brand-mark gold, sampled from the logo in gori-wallpaper.webp
      (highlight #f1e1b1 → body #d9c28b) so the nav matches downloadable brand assets. */
   --grad-logo: linear-gradient(135deg, #f1e1b1 0%, #eedca5 40%, #d9c28b 100%);
+  /* Gilded display words (hero, section titles). On night it is the logo gold. */
+  --grad-gild: linear-gradient(120deg, #f4e6b8 0%, #e6cf92 38%, #c8a860 72%, #e9d49c 100%);
   --selection: rgb(var(--accent-rgb) / 0.26);
   --shadow: 0 24px 80px rgb(2 3 9 / 0.62);
   --shadow-soft: 0 14px 44px rgb(2 3 9 / 0.5);
@@ -64,9 +66,15 @@
   --syn-number: #ca9b6a;
   --syn-name: #82a8c4;
   --syn-title: #fafafa;
+  /* One corner scale for the whole site: buttons and chips are pills, panels
+     and frames take --radius / --radius-sm, rows and inline controls --radius-xs. */
   --radius: 14px;
   --radius-sm: 10px;
+  --radius-xs: 6px;
   --radius-pill: 999px;
+  /* The landing's content axis: the showcase frame's width, which every
+     section below it lines up on. */
+  --home-w: 1180px;
   /* Spacing scale (~1.4–1.5 ratio) fitted to the hand-tuned values already in
      this file: 1–4 are the micro clusters, 5–8 the section-rhythm steps. Values
      that sit deliberately off this ladder (0.62, 1.35, 4.5…) stay as literals. */
@@ -113,6 +121,10 @@
      cream (the old #b08d3f sat at 3.0:1). The lightest stop leads the 135deg
      sweep, so 4.9:1 there is the floor for the whole mark. */
   --grad-logo: linear-gradient(135deg, #776d57 0%, #524a3a 55%, #332f26 100%);
+  /* Display gold on paper: the bronze logo ramp reads as grey at 6rem, so the
+     gilded words keep real gold here. Its lightest stop clears 3:1 on cream,
+     the large-text floor. */
+  --grad-gild: linear-gradient(120deg, #b98a2e 0%, #9a6a12 45%, #7a520c 100%);
   --selection: rgb(var(--accent-rgb) / 0.2);
   --shadow: 0 22px 70px rgb(60 50 30 / 0.16);
   --shadow-soft: 0 12px 34px rgb(60 50 30 / 0.12);
@@ -168,24 +180,36 @@ body {
    top-right, behind the hero art, and dissolves at its own edges. */
 body::before {
   content: "";
-  position: fixed;
-  inset: 0;
+  /* Absolute, not fixed: the line-work belongs to the top of the page (hero and
+     showcase) and scrolls away with it, instead of running under every body
+     paragraph further down. */
+  position: absolute;
+  inset: 0 0 auto;
+  height: 190vh;
   z-index: 0;
   pointer-events: none;
   opacity: 0.46;
   /* The wave colour is baked into the SVG, so this is a plain background-image
-     (cheap) rather than an image mask. A single linear-gradient mask keeps the
-     line-work in the right half, clear of the headline. */
+     (cheap) rather than an image mask. Two masks intersect: the horizontal one
+     keeps the line-work in the right half, clear of the headline; the vertical
+     one dissolves it before the first content section. */
   background: url("../images/contour-waves.svg") 118% -8% / 128% auto no-repeat;
-  -webkit-mask: linear-gradient(90deg, transparent 0%, transparent 42%, #000 64%);
-  mask: linear-gradient(90deg, transparent 0%, transparent 42%, #000 64%);
+  -webkit-mask:
+    linear-gradient(90deg, transparent 0%, transparent 42%, #000 64%),
+    linear-gradient(180deg, #000 0%, #000 45%, transparent 100%);
+  -webkit-mask-composite: source-in;
+  mask:
+    linear-gradient(90deg, transparent 0%, transparent 42%, #000 64%),
+    linear-gradient(180deg, #000 0%, #000 45%, transparent 100%);
+  mask-composite: intersect;
 }
 
 /* Scattered gold-leaf flecks, clustered toward the top-right of the night field. */
 body::after {
   content: "";
-  position: fixed;
-  inset: 0;
+  position: absolute;
+  inset: 0 0 auto;
+  height: 160vh;
   z-index: 0;
   pointer-events: none;
   opacity: 0.75;
@@ -208,6 +232,12 @@ body::after {
    sitting under body text. The landing keeps the full treatment. */
 body.is-doc::before {
   opacity: 0.09;
+}
+
+/* The landing's hero is the wallpaper painting, which carries its own cloud
+   line-work; the contour overlay on top of it only doubled the strokes. */
+body:has(.home-main)::before {
+  display: none;
 }
 
 body.is-doc::after {
@@ -276,6 +306,13 @@ img {
   background: var(--header-bg);
   backdrop-filter: blur(22px) saturate(145%);
   -webkit-backdrop-filter: blur(22px) saturate(145%);
+}
+
+/* On the landing the logo and the tools sit on the sections' own edges (the
+   1180 axis) instead of the window's, so the mark lines up with every
+   headline below it. The 1.25rem floor is .home-main's own gutter. */
+.is-home .docs-header {
+  padding-inline: max(1.25rem, (100% - var(--home-w)) / 2);
 }
 
 .logo {
@@ -608,7 +645,7 @@ kbd {
   min-height: 1.38rem;
   padding: 0.08rem 0.42rem;
   border: 1px solid var(--line);
-  border-radius: 7px;
+  border-radius: var(--radius-xs);
   background: rgb(var(--ink-rgb) / 0.08);
   color: var(--muted);
   font-family: var(--font-mono);
@@ -616,17 +653,21 @@ kbd {
   line-height: 1;
 }
 
+/* clip, not hidden: hidden makes this a scroll container, and a scroll
+   container ancestor silently turns the flow walkthrough's sticky rail into
+   a plain block. hidden stays as the fallback where clip is unsupported. */
 .home-main {
   position: relative;
   overflow: hidden;
+  overflow: clip;
   padding: var(--header-h) 1.25rem 0;
 }
 
-/* The hero photograph: two interlocked gold rings over dark marbled night,
-   full-bleed across the top of the page. The copy now sits centered on top of
-   it, so the seating scrim is a vertical veil — heaviest where the headline
-   is, dissolving before the showcase frame arrives — and the photo is framed
-   so the ring knot glows behind and above the type instead of beside it. */
+/* The hero art: the brand wallpaper (ink, gold leaf, brushed cloud; the plain
+   cut, since the marked one centres the logo right behind the headline),
+   full-bleed across the top of the page. The copy sits centered on top of it,
+   so the seating scrim is a vertical veil, heaviest where the headline is and
+   dissolving before the showcase frame arrives. */
 .home-main::before {
   content: "";
   position: absolute;
@@ -634,12 +675,16 @@ kbd {
   right: 0;
   left: 0;
   height: min(115vh, 68rem);
+  /* The painting is busier than a photograph, so a third, oval veil sits
+     right under the copy column: the gold leaf keeps the edges and never
+     runs behind the lede or the buttons. */
   background:
+    radial-gradient(42rem 26rem at 50% 44%, rgb(8 10 17 / 0.72), rgb(8 10 17 / 0) 72%),
     radial-gradient(64rem 30rem at 50% 78%, rgb(8 10 17 / 0.88), rgb(8 10 17 / 0) 70%),
-    linear-gradient(180deg, rgb(6 8 14 / 0.66) 0%, rgb(6 8 14 / 0.5) 38%, rgb(6 8 14 / 0.18) 62%, rgb(8 10 17 / 0) 80%),
-    url("../images/hero-orbits.webp") 58% 26% / cover no-repeat;
-  -webkit-mask: linear-gradient(180deg, #000 55%, transparent 96%);
-  mask: linear-gradient(180deg, #000 55%, transparent 96%);
+    linear-gradient(180deg, rgb(6 8 14 / 0.62) 0%, rgb(6 8 14 / 0.44) 38%, rgb(6 8 14 / 0.3) 62%, rgb(8 10 17 / 0) 80%),
+    url("../images/hero-wallpaper.webp") 50% 40% / cover no-repeat;
+  -webkit-mask: linear-gradient(180deg, #000 48%, transparent 84%);
+  mask: linear-gradient(180deg, #000 48%, transparent 84%);
 }
 
 /* On paper the photograph flips to ink: invert turns the night to cream and
@@ -655,10 +700,11 @@ kbd {
 .home-paths,
 .home-structure,
 .home-flow,
+.home-agent,
 .home-meaning {
   position: relative;
   z-index: 1;
-  width: min(100%, 1380px);
+  width: min(100%, var(--home-w));
   margin: 0 auto;
 }
 
@@ -712,17 +758,25 @@ kbd {
 /* The emphasized word turns editorial: the reading serif's italic, gilded
    with the same ramp as the wordmark. --accent is the flat fallback where
    background-clip text is unsupported. */
-.hero-em {
+.gild {
   font-family: var(--font-serif);
   font-style: italic;
   font-weight: 400;
   letter-spacing: -0.01em;
   color: var(--accent);
-  background: var(--grad-logo);
+  background: var(--grad-gild);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
   padding-right: 0.06em;
+}
+
+/* The hero's own word keeps the wordmark's gold (bronze on paper), so the
+   headline matches the logo above it; section titles use the brighter gild. */
+.gild.hero-em {
+  background: var(--grad-logo);
+  -webkit-background-clip: text;
+  background-clip: text;
 }
 
 .hero-lede {
@@ -880,7 +934,7 @@ kbd {
   height: 2rem;
   padding: 0;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-xs);
   background: none;
   color: var(--muted);
   cursor: pointer;
@@ -953,20 +1007,31 @@ kbd {
   position: relative;
   width: min(100%, 1180px);
   margin: 0;
-  border: 1px solid var(--line-strong);
-  border-radius: 16px;
-  background: var(--bg-panel);
+  /* A gilded edge: the border box shows a gold-leaf sweep that is brightest at
+     the top-left corner and settles into the plain hairline along the sides,
+     the way light catches the rim of a lacquered case. */
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background:
+    linear-gradient(var(--bg-panel), var(--bg-panel)) padding-box,
+    linear-gradient(135deg,
+      rgb(var(--accent-rgb) / 0.85) 0%,
+      rgb(var(--accent-rgb) / 0.22) 18%,
+      rgb(var(--ink-rgb) / 0.14) 40%,
+      rgb(var(--ink-rgb) / 0.14) 72%,
+      rgb(var(--accent-rgb) / 0.45) 100%) border-box;
   box-shadow:
-    0 0 0 1px rgb(var(--accent-rgb) / 0.07),
+    inset 0 1px 0 rgb(255 255 255 / 0.05),
     0 30px 90px rgb(0 0 0 / 0.55),
-    0 0 120px rgb(var(--accent-rgb) / 0.07);
+    0 0 160px rgb(var(--accent-rgb) / 0.12);
   overflow: hidden;
 }
 
 :root[data-theme="light"] .showcase-frame {
   box-shadow:
-    0 0 0 1px rgb(var(--accent-rgb) / 0.08),
-    0 24px 70px rgb(60 50 30 / 0.2);
+    inset 0 1px 0 rgb(255 255 255 / 0.6),
+    0 24px 70px rgb(60 50 30 / 0.2),
+    0 0 120px rgb(var(--accent-rgb) / 0.12);
 }
 
 /* Status bar: traffic lights, the project name, and the proxy state — the
@@ -1061,7 +1126,7 @@ kbd {
   flex: none;
   padding: 0.3rem 0.6rem;
   border: 1px solid transparent;
-  border-radius: 7px;
+  border-radius: var(--radius-xs);
   background: none;
   color: var(--muted);
   font-family: var(--font-mono);
@@ -1254,7 +1319,7 @@ kbd {
    1180 is the frame's width, so the rails start and end where it does. */
 .path-grid {
   display: grid;
-  grid-template-columns: 1.15fr 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 2.4rem;
   width: min(100%, 1180px);
   margin-inline: auto;
@@ -1317,7 +1382,6 @@ kbd {
   text-transform: uppercase;
 }
 
-.flow-list span,
 .structure-grid strong {
   color: var(--accent-strong);
   font-weight: 760;
@@ -1337,70 +1401,58 @@ kbd {
 }
 
 .path-link p {
-  max-width: 30ch;
+  max-width: 34ch;
+  text-wrap: pretty;
   margin-top: 0.45rem;
   color: var(--muted);
   font-size: 0.9rem;
   line-height: 1.55;
 }
 
-.path-link-lead h2 {
-  font-size: 1.55rem;
-}
-
 .home-structure {
   display: grid;
-  grid-template-columns: minmax(340px, 0.92fr) minmax(0, 1.08fr);
-  gap: 2rem;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 3.5rem 4rem;
   align-items: center;
   padding: 2rem 0 var(--space-8);
 }
 
-/* A gold-ringed disc matching the hero orb: the same ink-and-gold wallpaper art
-   fills it as a backdrop, with the real Space-menu capture floating on top like
-   a window resting on the art. A soft radial scrim sinks the wallpaper behind
-   the screenshot so the terminal stays the focal point. */
+/* A panel of the ink-and-gold wallpaper with the real Space-menu capture
+   resting on it as a window, offset toward the bottom-right so the art keeps
+   the top-left corner. Rectangular, like every other capture on the page: a
+   terminal cropped to a circle lost its own edges. */
 .structure-art {
   position: relative;
-  justify-self: center;
-  width: min(92%, 30rem);
-  aspect-ratio: 1;
+  width: 100%;
+  aspect-ratio: 5 / 4;
+  margin: 0;
   overflow: hidden;
-  border-radius: 50%;
+  border: 1px solid rgb(var(--accent-rgb) / 0.3);
+  border-radius: var(--radius);
   background:
-    radial-gradient(circle at 50% 46%, transparent 30%, rgb(4 5 10 / 0.55) 78%),
+    radial-gradient(90% 80% at 70% 70%, rgb(4 5 10 / 0.6), transparent 70%),
     #0a0a0b url("../images/wallpaper.webp") left / cover;
   box-shadow: var(--shadow-soft);
-  outline: 1px solid rgb(var(--accent-rgb) / 0.2);
-  outline-offset: 1.5rem;
 }
 
-.structure-art::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  border: 1px solid rgb(var(--accent-rgb) / 0.28);
-  border-radius: 50%;
-}
-
-/* The screenshot floats centred as a window; the wallpaper shows around it
-   (mostly above/below, since the capture is wide). The light twin swaps in via
-   the theme-swap JS and pops even harder against the dark art. */
+/* The window is anchored to the panel's bottom-right and bleeds past both
+   edges: the menu card (left of centre in the capture) lands mid-panel. The
+   light twin swaps in via the theme-swap JS. */
 .structure-art img {
   position: absolute;
-  top: 50%;
-  max-width: 800px;
+  top: 18%;
+  left: 6%;
+  width: 100%;
+  max-width: none;
   height: auto;
-  transform: translate(-20%, -50%);
-  border-radius: 9px;
-  box-shadow: 0 22px 55px rgb(0 0 0 / 0.55);
-  outline: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 26px 60px rgb(0 0 0 / 0.6);
+  outline: 1px solid rgb(255 255 255 / 0.1);
   outline-offset: -1px;
 }
 
 .structure-copy {
-  padding: 1rem 0 1rem 1rem;
+  padding: 1rem 0;
 }
 
 .structure-copy h2,
@@ -1421,122 +1473,205 @@ kbd {
   font-size: 1.02rem;
 }
 
-/* No boxes: a hairline and the space around it separate these three. */
+/* No boxes: a hairline and the space around it separate these three. The row
+   runs under both columns, on the same rails as the path links above. */
 .structure-grid {
+  grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: 1.15fr 0.95fr 0.9fr;
-  gap: 1.5rem;
-  margin-top: 2rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 2.4rem;
 }
 
 .structure-grid div {
-  padding-top: 0.85rem;
+  position: relative;
+  padding-top: 1.1rem;
   border-top: 1px solid var(--line-strong);
+}
+
+.structure-grid div::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  left: 0;
+  width: 2.4rem;
+  height: 1px;
+  background: var(--accent);
+}
+
+.structure-grid code {
+  white-space: nowrap;
 }
 
 .structure-grid span {
   display: block;
+  max-width: 34ch;
   margin-top: 0.4rem;
   color: var(--muted);
   font-size: 0.92rem;
 }
 
+/* --- From capture to issue: a sticky walkthrough ----------------------- */
+
+/* Two tracks: the title and the step index park on the left while the three
+   captures scroll past on the right. home.js marks the step whose capture is
+   crossing the middle of the viewport; without it every step reads at full
+   strength and the page is simply a list of captures. */
 .home-flow {
-  padding: 1.5rem 0 4.5rem;
+  display: grid;
+  grid-template-columns: minmax(0, 0.78fr) minmax(0, 1.22fr);
+  gap: 4.5rem;
+  align-items: start;
+  padding: 2rem 0 var(--space-8);
 }
 
-/* Title and list share one centered column on the showcase frame's axis, so
-   the section reads as a block under the frame instead of hugging the left
-   edge of the wider band. `text-wrap: balance` (inherited from the shared
-   heading rule) keeps the line breaks even at this width, so widening the
-   box changes the alignment without stretching the title into one long line. */
+/* Parked about mid-screen, but never closer to the header than 2rem: on a
+   short laptop viewport the ~33rem rail would otherwise run off the bottom. */
+.flow-rail {
+  position: sticky;
+  top: max(var(--header-h) + 2rem, 50vh - 16rem);
+}
+
 .home-flow h2 {
-  width: min(100%, 1180px);
-  max-width: 1180px;
-  margin-inline: auto;
+  max-width: 9em;
 }
 
-.flow-list {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 0;
-  width: min(100%, 1180px);
-  margin: 1.6rem auto 0;
-  border-top: 1px solid var(--line);
+.flow-steps {
+  position: relative;
+  margin: 2.4rem 0 0;
+  padding: 0;
+  list-style: none;
+  border-left: 1px solid var(--line-strong);
 }
 
-/* Each step alternates copy / screenshot so the workflow reads as a walkthrough,
-   not three identical cards. */
-.flow-list > div {
-  display: grid;
-  grid-template-columns: minmax(0, 0.82fr) minmax(0, 1.18fr);
-  gap: 2.6rem;
-  align-items: center;
-  padding: 2.4rem 0;
-  border-bottom: 1px solid var(--line);
+.flow-steps li {
+  position: relative;
+  padding: 0.85rem 0 0.85rem 1.4rem;
+  transition: opacity 420ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* Even rows mirror the layout (screenshot on the left). The columns are swapped
-   too so the screenshot keeps the wide 1.18fr track — otherwise `order` would
-   drop it into the narrow track and it would render smaller than its neighbours. */
-.flow-list > div:nth-child(even) {
-  grid-template-columns: minmax(0, 1.18fr) minmax(0, 0.82fr);
+/* The active step takes a gold-leaf segment on the index rule. */
+.flow-steps li::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -1px;
+  width: 2px;
+  background: var(--grad-gold-leaf);
+  transform: scaleY(0);
+  transform-origin: top;
+  transition: transform 520ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.flow-list > div:nth-child(even) .flow-shot {
-  order: -1;
-}
-
-.flow-copy span {
+.flow-steps span {
   display: block;
-  margin-bottom: 0.55rem;
+  color: var(--heading);
+  font-size: 1.15rem;
+  font-weight: 720;
+  letter-spacing: -0.01em;
+  transition: color var(--transition);
 }
 
-.flow-list p {
+/* Hangul wraps between words, not mid-syllable-run. */
+.home-main:lang(ko) {
+  word-break: keep-all;
+}
+
+.flow-steps p {
+  max-width: 36ch;
+  margin-top: 0.3rem;
   color: var(--muted);
-  max-width: 34ch;
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+html.js .flow-steps li:not(.is-active) {
+  opacity: 0.45;
+}
+
+html.js .flow-steps li.is-active::before {
+  transform: none;
+}
+
+html.js .flow-steps li.is-active span {
+  color: var(--accent-strong);
+}
+
+/* Each capture sits a good scroll apart, so the index has time to follow. */
+.flow-shots {
+  display: grid;
+  gap: 18vh;
+  padding-block: 0 4vh;
+}
+
+.flow-shot {
+  margin: 0;
+}
+
+/* The step lives in the caption for readers and the stacked layout; beside
+   the index it would say everything twice, so wide screens keep it for
+   assistive tech only. */
+.flow-shot figcaption {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.flow-shot figcaption span {
+  color: var(--accent-strong);
+  font-weight: 720;
 }
 
 /* Every shot is framed to the same 1206:520 box so the three steps read as one
    uniform set. The Fuzzer capture is taller (34 rows vs 26), so it is cropped
-   from the top — the marked request and payload config stay in view, only the
+   from the top: the marked request and payload config stay in view, only the
    empty results/hint strip at the bottom is trimmed. */
-.flow-shot {
-  margin: 0;
+.flow-shot-frame {
   aspect-ratio: 1206 / 520;
   overflow: hidden;
-  border-radius: 12px;
-  outline: 1px solid rgb(var(--ink-rgb) / 0.1);
-  outline-offset: -1px;
-  box-shadow: 0 16px 40px rgb(0 0 0 / 0.36);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 14px 30px rgb(0 0 0 / 0.22);
+  transition: border-color 520ms ease, box-shadow 520ms ease, opacity 520ms ease, transform 620ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-:root[data-theme="light"] .flow-shot {
+:root[data-theme="light"] .flow-shot-frame {
   box-shadow: 0 14px 34px rgb(60 50 30 / 0.16);
 }
 
-.flow-shot img {
+html.js .flow-shot:not(.is-active) .flow-shot-frame {
+  opacity: 0.5;
+  transform: scale(0.97);
+}
+
+/* The capture in focus picks up the showcase's gold rim and aura. */
+html.js .flow-shot.is-active .flow-shot-frame {
+  border-color: rgb(var(--accent-rgb) / 0.45);
+  box-shadow:
+    0 14px 30px rgb(0 0 0 / 0.22),
+    0 0 48px rgb(var(--accent-rgb) / 0.08);
+}
+
+.flow-shot-frame img {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
   object-position: top;
-  transform-origin: top center;
-  transition: transform 600ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-/* The whole row is the hover surface, so reading the copy also leans the
-   capture in. Origin stays at the top: the crop keeps its upper edge. */
-.flow-list > div:hover .flow-shot img {
-  transform: scale(1.02);
 }
 
 /* --- Hand it to an agent (the MCP seam) ------------------------------- */
 
+/* A pool of gold light under the seam: the one place below the hero where
+   the page glows, because it is where gori hands its work to something else. */
 .home-agent {
-  padding: 1.5rem 0 5.5rem;
+  padding: 4.5rem 0 5.5rem;
   border-top: 1px solid var(--line);
   text-align: center;
+  background: radial-gradient(46rem 20rem at 50% 64%, rgb(var(--accent-rgb) / 0.09), transparent 70%);
 }
 
 .home-agent h2 {
@@ -1573,10 +1708,18 @@ kbd {
   flex-direction: column;
   gap: 0.45rem;
   padding: 1.3rem 1.45rem;
-  border: 1px solid var(--line-strong);
+  /* Same gilded rim as the showcase frame, lit from the side facing the wire. */
+  border: 1px solid transparent;
   border-radius: var(--radius);
-  background: var(--bg-panel);
+  background:
+    linear-gradient(var(--bg-panel), var(--bg-panel)) padding-box,
+    linear-gradient(var(--seam-rim, 90deg), rgb(var(--ink-rgb) / 0.16) 45%, rgb(var(--accent-rgb) / 0.6)) border-box;
+  box-shadow: var(--shadow-soft);
   text-align: left;
+}
+
+.seam-node:last-child {
+  --seam-rim: 270deg;
 }
 
 .seam-kicker {
@@ -1628,6 +1771,7 @@ kbd {
   height: 2px;
   background: var(--grad-gold-leaf);
   border-radius: 2px;
+  box-shadow: 0 0 14px rgb(var(--accent-rgb) / 0.45);
 }
 
 /* A light runs the wire, out and back: the call going over, the answer
@@ -1648,7 +1792,7 @@ kbd {
   inset: 0;
   right: auto;
   width: 34%;
-  background: linear-gradient(90deg, transparent, var(--accent-strong), transparent);
+  background: linear-gradient(90deg, transparent, #fff6dc, transparent);
   opacity: 0;
   transform: translateX(-100%);
 }
@@ -1688,15 +1832,20 @@ kbd {
 }
 
 /* Narrow: stack the seam vertically and turn the wire on its end. */
-@media (max-width: 720px) {
+@media (max-width: 860px) {
   .agent-seam {
     flex-direction: column;
     max-width: 26rem;
   }
 
   .seam-node {
+    --seam-rim: 180deg;
     text-align: center;
     align-items: center;
+  }
+
+  .seam-node:last-child {
+    --seam-rim: 0deg;
   }
 
   .seam-link {
@@ -2292,7 +2441,7 @@ kbd {
   padding: 0.06rem 0.36rem;
   border: 1px solid var(--line-strong);
   border-bottom-width: 2px;
-  border-radius: 5px;
+  border-radius: var(--radius-xs);
   background: var(--bg-panel);
   color: var(--heading);
   font-family: var(--font-mono);
@@ -2352,7 +2501,7 @@ kbd {
   width: auto;
   max-width: 100%;
   height: auto;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
 }
 .preset-card-note {
   margin: 0.75rem 0 0;
@@ -2471,7 +2620,7 @@ hr {
    code from reading as a link, and keeps the gold for things you can click. */
 code {
   padding: 0.14rem 0.36rem;
-  border-radius: 5px;
+  border-radius: var(--radius-xs);
   background: rgb(var(--ink-rgb) / 0.08);
   color: var(--heading);
   font-family: var(--font-mono);
@@ -2513,7 +2662,7 @@ pre {
   height: 2rem;
   padding: 0;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-xs);
   background: var(--bg-panel);
   color: var(--muted);
   cursor: pointer;
@@ -2881,6 +3030,12 @@ nav.pagination a:hover,
   text-align: center;
 }
 
+/* On the landing the footer rule ends where every section's rails do. */
+.is-home .docs-footer {
+  width: min(100% - 2.5rem, var(--home-w));
+  padding-inline: 0;
+}
+
 .docs-footer p {
   margin: 0;
 }
@@ -2988,7 +3143,7 @@ html.search-lock body {
   overflow: hidden;
   align-self: flex-start;
   border: 1px solid var(--line-strong);
-  border-radius: 16px;
+  border-radius: var(--radius);
   background: var(--modal-bg);
   box-shadow: var(--shadow), 0 0 0 1px rgb(var(--accent-rgb) / 0.08);
 }
@@ -3284,56 +3439,6 @@ html.search-lock body {
     transform: none;
   }
 
-  /* Flow: the section reveal carries only the title; each row then fades in
-     on its own, copy and capture sliding from the sides they occupy (the
-     even rows mirror, matching their swapped columns). */
-  html.js .home-flow.rv {
-    opacity: 1;
-    transform: none;
-  }
-
-  html.js .home-flow.rv h2 {
-    opacity: 0;
-    transform: translateY(22px);
-    transition: opacity 700ms cubic-bezier(0.16, 1, 0.3, 1), transform 700ms cubic-bezier(0.16, 1, 0.3, 1);
-  }
-
-  html.js .home-flow.rv.in h2 {
-    opacity: 1;
-    transform: none;
-  }
-
-  html.js .flow-list > .rv {
-    transform: none;
-  }
-
-  html.js .flow-list > .rv .flow-copy,
-  html.js .flow-list > .rv .flow-shot {
-    transition: transform 750ms cubic-bezier(0.16, 1, 0.3, 1);
-  }
-
-  html.js .flow-list > .rv .flow-copy {
-    transform: translateX(-24px);
-  }
-
-  html.js .flow-list > .rv .flow-shot {
-    transform: translateX(30px);
-    transition-delay: 90ms;
-  }
-
-  html.js .flow-list > .rv:nth-child(even) .flow-copy {
-    transform: translateX(24px);
-  }
-
-  html.js .flow-list > .rv:nth-child(even) .flow-shot {
-    transform: translateX(-30px);
-  }
-
-  html.js .flow-list > .rv.in .flow-copy,
-  html.js .flow-list > .rv.in .flow-shot {
-    transform: none;
-  }
-
   /* Agent: the nodes arrive from both ends and the wire closes the seam,
      growing outward from the MCP chip at its middle. */
   html.js .home-agent.rv {
@@ -3410,7 +3515,7 @@ html.search-lock body {
 
 /* The stacked seam (narrow layout) turns the wire on its end: the closing
    scale and the running light swap to the vertical axis. */
-@media (max-width: 720px) and (prefers-reduced-motion: no-preference) {
+@media (max-width: 860px) and (prefers-reduced-motion: no-preference) {
   html.js .home-agent.rv .seam-wire {
     transform: scaleY(0);
   }
@@ -3458,11 +3563,7 @@ html.search-lock body {
   /* h1 tracks the viewport via clamp(); no fixed override needed here. */
 
   .home-structure {
-    grid-template-columns: 1fr;
-  }
-
-  .structure-copy {
-    padding-left: 0;
+    gap: 2.4rem 2.6rem;
   }
 }
 
@@ -3509,9 +3610,10 @@ html.search-lock body {
   .home-main::before {
     height: min(90vh, 46rem);
     background:
+      radial-gradient(30rem 24rem at 50% 42%, rgb(8 10 17 / 0.7), rgb(8 10 17 / 0) 72%),
       radial-gradient(40rem 22rem at 50% 72%, rgb(8 10 17 / 0.9), rgb(8 10 17 / 0) 72%),
       linear-gradient(180deg, rgb(6 8 14 / 0.72) 0%, rgb(6 8 14 / 0.5) 42%, rgb(6 8 14 / 0) 78%),
-      url("../images/hero-orbits.webp") 44% 30% / cover no-repeat;
+      url("../images/hero-wallpaper.webp") 30% 40% / cover no-repeat;
   }
 
   .home-hero h1 {
@@ -3523,9 +3625,22 @@ html.search-lock body {
     font-size: 3rem;
   }
 
+  /* Stacked: the art runs the full column like every capture below it,
+     at a wider ratio so it does not tower over the copy. */
+  .home-structure {
+    grid-template-columns: 1fr;
+  }
+
   .structure-art {
-    width: min(88%, 26rem);
-    outline-offset: 1.1rem;
+    aspect-ratio: 16 / 10;
+  }
+
+  .is-home .docs-header {
+    padding-inline: 1rem;
+  }
+
+  .is-home .docs-footer {
+    width: min(100% - 2rem, var(--home-w));
   }
 
   .home-paths {
@@ -3547,14 +3662,48 @@ html.search-lock body {
     grid-template-columns: 1fr;
   }
 
-  .flow-list > div,
-  .flow-list > div:nth-child(even) {
+  /* Stacked: no sticky index; each capture carries its step as a caption. */
+  .home-flow {
     grid-template-columns: 1fr;
-    gap: 1.1rem;
+    gap: 0;
   }
 
-  .flow-list > div:nth-child(even) .flow-shot {
-    order: 0;
+  .flow-rail {
+    position: static;
+  }
+
+  .flow-steps {
+    display: none;
+  }
+
+  .flow-shots {
+    gap: 2.6rem;
+    padding-block: 1.8rem 0;
+  }
+
+  .flow-shot figcaption {
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip-path: none;
+    white-space: normal;
+    margin-bottom: 0.9rem;
+    color: var(--muted);
+  }
+
+  .flow-shot figcaption span {
+    display: block;
+    margin-bottom: 0.2rem;
+  }
+
+  html.js .flow-shot:not(.is-active) .flow-shot-frame {
+    opacity: 1;
+    transform: none;
+  }
+
+  .home-structure {
+    gap: 2.4rem;
   }
 
   .home-meaning {

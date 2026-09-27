@@ -5,6 +5,7 @@ weight = 5
 
 [extra]
 group = "핵심"
+shot = "space-menu"
 +++
 
 gori에는 수백 가지 동작이 있지만, 그 키를 미리 외울 필요는 없습니다. 두 개의 키로 모든 동작에 닿습니다.

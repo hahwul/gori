@@ -5,6 +5,7 @@ weight = 20
 
 [extra]
 group = "Core"
+shot = "repeater"
 +++
 
 Once you've captured an interesting flow, **Repeater** and the **Fuzzer** are where you test it.

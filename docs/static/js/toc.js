@@ -62,16 +62,28 @@
     }
     if (placeholder) placeholder.hidden = true;
     disclosure.open = !compact.matches;
+    placeBar();
   }
   placeContents();
   compact.addEventListener('change', placeContents);
 
   var active = null;
+  // The gold marker on the rail is the list's own ::before, placed from here
+  // through two custom properties so it glides between entries instead of
+  // jumping; the stylesheet owns the look and the transition.
+  function placeBar() {
+    var link = links[active];
+    if (!link || !link.offsetHeight) return;
+    list.style.setProperty('--toc-y', link.offsetTop + 'px');
+    list.style.setProperty('--toc-h', link.offsetHeight + 'px');
+    list.classList.add('has-bar');
+  }
   function activate(id) {
     if (active === id) return;
     if (links[active]) { links[active].classList.remove('active'); links[active].removeAttribute('aria-current'); }
     active = id;
     if (links[id]) { links[id].classList.add('active'); links[id].setAttribute('aria-current', 'location'); }
+    placeBar();
   }
   // Reconcile headings only when a section crosses the reading line. Reading
   // their current positions here also handles jumps over several sections;
@@ -91,7 +103,8 @@
     heads.forEach(function (heading) { observer.observe(heading); });
   }
   observeHeadings();
-  window.addEventListener('resize', observeHeadings);
+  window.addEventListener('resize', function () { observeHeadings(); placeBar(); });
+  disclosure.addEventListener('toggle', placeBar);
   rail.addEventListener('click', function (event) {
     var link = event.target.closest('a[data-target]');
     if (link) activate(link.dataset.target);

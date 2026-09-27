@@ -115,7 +115,10 @@ structure_2_desc = "A compiled proxy with SQLite-backed projects that stay respo
 structure_3_title = "Scriptable and AI"
 structure_3_desc = "Everything reachable headless via <code>gori run</code>, and open to AI agents through the built-in MCP server."
 
-flow_title = "From capture to issue."
+# Section titles gild one word the way the hero does (pre/em/post).
+flow_title_pre = "From capture to "
+flow_title_em = "issue."
+flow_title_post = ""
 flow_1_label = "Capture"
 flow_1_desc = "Run the proxy, trust the CA once, and every request flows into History with full HTTP/2, WebSocket, and gRPC detail."
 flow_1_alt = "gori flow detail on the response tab, showing an HTTP/2 200 status and syntax-highlighted response headers"
@@ -126,7 +129,9 @@ flow_3_label = "Report"
 flow_3_desc = "Triage results into Issues, take notes, and export, or hand the whole project to an agent over MCP."
 flow_3_alt = "gori Issues tab listing triaged findings with severity and status columns: permissive CORS, missing Content-Security-Policy, and missing HSTS, each with an affected host"
 
-agent_title = "Or hand it to an agent."
+agent_title_pre = "Or hand it to an "
+agent_title_em = "agent."
+agent_title_post = ""
 agent_intro = "gori has no chat window baked in. It exposes your project over <strong>MCP</strong>, so any agent (Claude, Codex, Grok) reads your captured traffic and drives the tools through one clean seam. You pick the model; your traffic stays where you put it."
 agent_seam_aria = "An AI agent connects to a gori project through the MCP server: the agent calls tools like list_history and send_request, and gori returns flows and issues"
 agent_seam_1_kicker = "AI agent"
