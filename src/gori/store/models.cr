@@ -994,6 +994,38 @@ module Gori
       end
     end
 
+    # The Probe tab's LIST projection of the same row (`Store#probe_issue_rows`): every
+    # `ProbeIssue` field except the affected-URL list, which is replaced by its COUNT, taken in
+    # SQL. A list draws `×N`; parsing up to PROBE_AFFECTED_CAP URLs per row to get N was most
+    # of what a reload cost. A separate type rather than a `ProbeIssue` with an empty list, so
+    # a caller that needs the URLs cannot compile against a row that does not carry them — it
+    # fetches the full row (`get_probe_issue`) instead.
+    struct ProbeIssueRow
+      getter id : Int64
+      getter code : String
+      getter category : String
+      getter host : String
+      getter title : String
+      getter severity : Severity
+      getter status : Status
+      getter hit_count : Int64
+      getter affected_count : Int32
+      getter sample_flow_id : Int64?
+      getter evidence : String?
+      getter first_seen : Int64
+      getter last_seen : Int64
+      getter sample_repeater_id : Int64?
+
+      def initialize(@id, @code, @category, @host, @title, @severity, @status, @hit_count,
+                     @affected_count, @sample_flow_id, @evidence, @first_seen, @last_seen,
+                     @sample_repeater_id = nil)
+      end
+    end
+
+    # Either shape of a probe finding — what code that reads only the shared fields (the
+    # Probe filter, the list's lenses) accepts.
+    alias AnyProbeIssue = ProbeIssue | ProbeIssueRow
+
     # Which side of a flow a Match&Replace rule rewrites. Stored as the lowercase
     # member name ("request"/"response").
     enum RuleTarget

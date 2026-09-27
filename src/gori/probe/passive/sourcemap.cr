@@ -28,7 +28,7 @@ module Gori
 
         # `//# sourceMappingURL=…`, the legacy `//@` form, and the block-comment `/*# … */` form.
         # The value stops at whitespace, a quote, or a `*` (the block comment's terminator).
-        MARKER = /\/[\/*][#@]\s*sourceMappingURL\s*=\s*([^\s'"*]+)/
+        MARKER = Utf8.tolerant(/\/[\/*][#@]\s*sourceMappingURL\s*=\s*([^\s'"*]+)/)
         # MARKER opens on `//`, a byte pair that occurs constantly in a minified bundle (every
         # URL, every regex literal), so PCRE's first-byte optimization can't skip ahead on it and
         # a prefilter really does pay here. But the prefilter has to be a REGEX, not a
@@ -37,7 +37,7 @@ module Gori
         # it is a naive byte search, while PCRE2 memchr-skips a pure literal in 69.5µs. Same
         # trap the `includes?` guards in `debug_mode_exposed` fell into; the fix is the same, and
         # the two-stage structure is kept because here the second stage genuinely is the slow one.
-        NEEDLE = /sourceMappingURL/
+        NEEDLE = Utf8.tolerant(/sourceMappingURL/)
 
         # The comment sits at the very END of a bundle, i.e. exactly where the shared body prefix
         # (Context::CLIENT_BODY_CAP) gets cut — the big production bundles that matter most would

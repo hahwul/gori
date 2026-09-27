@@ -383,7 +383,7 @@ module Gori
         end
         # A REQUEST part is stored wire bytes, not a content-encoded response entity: there is
         # nothing to decode and decoding would be a lie about what is on disk.
-        decoded, decode_note = (options.raw || options.request?) ? {nil, nil} : Proxy::Codec::ContentDecode.decode(head, stored)
+        decoded, decode_note = (options.raw || options.request?) ? {nil, nil} : decode_for_chunk(head, stored)
         bytes = decoded || stored
         total = bytes.size.to_i64
         # The decoded view is capped at ContentDecode::MAX_OUT (decompression-bomb ceiling).
@@ -489,6 +489,30 @@ module Gori
         {body || Bytes.new(0), true}
       end
 
+      # The last response body `get_response_body_chunk` decoded: {head, stored bytes, decoded,
+      # decode note}. One entry, because an agent pages ONE body front to back — and every page
+      # used to inflate the whole thing again (up to ContentDecode::MAX_OUT, 32 MiB) to slice
+      # 64 KiB out of it: 257 pages over a 16 MiB gzip body cost 1.1 s, nearly all of it decode.
+      @body_chunk_memo : {Bytes?, Bytes, Bytes?, String?}? = nil
+
+      # `ContentDecode.decode`, reusing the memo when the head and stored bytes are the SAME
+      # BYTES it was computed from. Keyed on content, not on a flow id, on purpose: ids are not
+      # AUTOINCREMENT, so a deleted flow's id comes back — from this server, or from the TUI
+      # or another agent writing the same project — and a flow's response is written after
+      # its request. A content key cannot serve bytes of any flow but the one just read, and
+      # decode is deterministic, so a hit is exactly what a fresh decode would return. The
+      # compare is a memcmp over bytes this call has already read, cheap next to an inflate.
+      private def decode_for_chunk(head : Bytes?, stored : Bytes) : {Bytes?, String?}
+        if (memo = @body_chunk_memo) && memo[0] == head && memo[1] == stored
+          return {memo[2], memo[3]}
+        end
+        decoded, note = Proxy::Codec::ContentDecode.decode(head, stored)
+        # Only a body that decoding changed is worth holding: for an identity body the page is
+        # sliced from `stored` directly and there is nothing to save.
+        @body_chunk_memo = decoded ? {head, stored, decoded, note} : nil
+        {decoded, note}
+      end
+
       # The bytes this chunk pages over: {head-for-decoding, payload}.
       private def load_chunk_source(options : BodyChunkOptions) : ChunkSource | Result
         return load_response_body(options.flow_id, options.repeater_id) unless options.request?
@@ -506,8 +530,7 @@ module Gori
           # is the paged route to the same bytes plus the body, for a request too big to inline.
           head = detail.request_head || Bytes.new(0)
           body = detail.request_body
-          {nil, body ? Bytes.new(head.size + body.size) { |i| i < head.size ? head[i] : body[i - head.size] } : head,
-           detail.request_body_truncated?}
+          {nil, body ? join_bytes(head, body) : head, detail.request_body_truncated?}
         else
           Result.new("pass exactly one of flow_id or repeater_id", is_error: true)
         end
@@ -523,6 +546,7 @@ module Gori
         # "does this exist?" — a 40 MB response would be read and discarded.
         return not_found("no flow with id #{id}") unless store.flow_row(id)
         return busy("flow NOT deleted (store busy or unwritable); it is unchanged") unless store.delete_flow(id)
+        @body_chunk_memo = nil # correct either way (content-keyed); this just frees the buffer
         Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "deleted", true } })
       end
 
@@ -539,14 +563,26 @@ module Gori
             details: JSON.parse({"flows" => n}.to_json))
         end
         return busy("history NOT cleared (store busy or unwritable); every flow is still there") unless store.clear_flows
+        @body_chunk_memo = nil
         Result.new({"deleted" => n, "cleared" => true}.to_json)
+      end
+
+      # head+body as one buffer, copied in two block moves (a per-byte block over a request of
+      # several MiB was a closure call per byte).
+      private def join_bytes(head : Bytes, body : Bytes) : Bytes
+        joined = Bytes.new(head.size + body.size)
+        head.copy_to(joined)
+        body.copy_to(joined + head.size)
+        joined
       end
 
       private def load_response_body(flow_id : Int64?, repeater_id : Int64?) : ChunkSource | Result
         if id = flow_id
-          detail = store.get_flow(id)
-          return not_found("no flow with id #{id}") unless detail
-          {detail.response_head, detail.response_body, detail.response_body_truncated?}
+          # The response side only: the request BLOBs are never paged here, and `get_flow`
+          # read them for every page.
+          parts = store.response_parts(id)
+          return not_found("no flow with id #{id}") unless parts
+          parts
         elsif id = repeater_id
           repeater = store.get_repeater_full(id)
           return not_found("no repeater with id #{id}") unless repeater

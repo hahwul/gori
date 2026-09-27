@@ -258,33 +258,44 @@ module Gori::Proxy::H2
       fsm = @@fsm
       nxt = fsm.next_state
       emit = fsm.emit
-      buf = IO::Memory.new(data.size * 2)
-      state = 0
-      data.each do |byte|
-        idx = (state << 4) | (byte >> 4) # high nibble
-        n = nxt.unsafe_fetch(idx)
-        raise Gori::Error.new("hpack: invalid huffman code") if n == FSM_FAIL
-        s = emit.unsafe_fetch(idx)
-        buf.write_byte(s.to_u8) if s >= 0
-        state = n.to_i32
+      # Decode straight into the String's own buffer (no IO::Memory + copy). The
+      # shortest Huffman code is 5 bits, so n input octets carry at most 8n/5
+      # symbols: the capacity bound holds for any input, hostile ones included.
+      String.new(data.size * 8 // 5 + 1) do |dst|
+        len = 0
+        state = 0
+        data.each do |byte|
+          idx = (state << 4) | (byte >> 4) # high nibble
+          n = nxt.unsafe_fetch(idx)
+          raise Gori::Error.new("hpack: invalid huffman code") if n == FSM_FAIL
+          s = emit.unsafe_fetch(idx)
+          if s >= 0
+            dst[len] = s.to_u8
+            len += 1
+          end
+          state = n.to_i32
 
-        idx = (state << 4) | (byte & 0x0f) # low nibble
-        n = nxt.unsafe_fetch(idx)
-        raise Gori::Error.new("hpack: invalid huffman code") if n == FSM_FAIL
-        s = emit.unsafe_fetch(idx)
-        buf.write_byte(s.to_u8) if s >= 0
-        state = n.to_i32
+          idx = (state << 4) | (byte & 0x0f) # low nibble
+          n = nxt.unsafe_fetch(idx)
+          raise Gori::Error.new("hpack: invalid huffman code") if n == FSM_FAIL
+          s = emit.unsafe_fetch(idx)
+          if s >= 0
+            dst[len] = s.to_u8
+            len += 1
+          end
+          state = n.to_i32
+        end
+        if state != 0
+          # Non-root end state → a trailing partial code. RFC 7541 §5.2: padding that
+          # isn't the EOS prefix (i.e. any 0 bit, or > 7 leftover bits) is a decoding
+          # error — else distinct byte sequences decode to the same value (a
+          # non-canonical-encoding bypass). Order matches the old bit-loop: length
+          # first, then the all-ones check.
+          raise Gori::Error.new("hpack: truncated huffman code") if fsm.depth.unsafe_fetch(state) > 7
+          raise Gori::Error.new("hpack: invalid huffman padding") unless fsm.all_ones.unsafe_fetch(state)
+        end
+        {len, 0}
       end
-      if state != 0
-        # Non-root end state → a trailing partial code. RFC 7541 §5.2: padding that
-        # isn't the EOS prefix (i.e. any 0 bit, or > 7 leftover bits) is a decoding
-        # error — else distinct byte sequences decode to the same value (a
-        # non-canonical-encoding bypass). Order matches the old bit-loop: length
-        # first, then the all-ones check.
-        raise Gori::Error.new("hpack: truncated huffman code") if fsm.depth.unsafe_fetch(state) > 7
-        raise Gori::Error.new("hpack: invalid huffman padding") unless fsm.all_ones.unsafe_fetch(state)
-      end
-      String.new(buf.to_slice)
     end
 
     # One decoded header field. Carries the §6.2.3 "never indexed" marking next to
@@ -335,14 +346,20 @@ module Gori::Proxy::H2
 
       # Decodes one header block into an ordered list of (name, value) pairs.
       def decode(block : Bytes) : Array({String, String})
-        decode_fields(block).map(&.to_tuple)
+        decode_list(block) { |name, value, _never| {name, value} }
       end
 
       # Same decode, keeping each field's §6.2.3 never-indexed marking (see
       # `Field`). `decode` is this minus that bit, so existing callers that only
       # want the projection are unaffected.
       def decode_fields(block : Bytes) : Array(Field)
-        headers = [] of Field
+        decode_list(block) { |name, value, never| Field.new(name, value, never) }
+      end
+
+      # The one decode loop behind both projections; the block builds each list
+      # element directly, so `decode` allocates no intermediate `Array(Field)`.
+      private def decode_list(block : Bytes, & : String, String, Bool -> T) : Array(T) forall T
+        headers = [] of T
         list_size = 0_i64
         too_large = false
         pos = 0
@@ -381,7 +398,7 @@ module Gori::Proxy::H2
               headers.clear
               too_large = true
             else
-              headers << Field.new(name, value, never)
+              headers << yield name, value, never
             end
           end
         end

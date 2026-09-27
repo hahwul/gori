@@ -28,7 +28,7 @@ module Gori
 
         # Both tag types in ONE pattern: scanning for them separately walked the same (up to
         # 256 KiB) document twice.
-        TAG              = /<(?:script|link)(?=[\t\n\f\r \/>])(?:[^"'<>]++|"[^"]*"|'[^']*')*>/i
+        TAG              = Utf8.tolerant(/<(?:script|link)(?=[\t\n\f\r \/>])(?:[^"'<>]++|"[^"]*"|'[^']*')*>/i)
         STYLESHEET_TOKEN = /(?:\A|[\t\n\f\r ])stylesheet(?:[\t\n\f\r ]|\z)/i
         # Empty or unsupported-only metadata is ignored by SRI. Do not require the digest
         # to have a correct length: recognized but mismatching hashes BLOCK the resource.
@@ -50,7 +50,7 @@ module Gori
         # UNTERMINATED comment matches nothing and its tags stay reported — the previous
         # behaviour, and the safe direction (a lead, not a silence) when the 256 KiB body prefix
         # cut the closing `-->` off.
-        COMMENT = /<!--[\s\S]*?-->/
+        COMMENT = Utf8.tolerant(/<!--[\s\S]*?-->/)
 
         def check(ctx : Context, acc : Array(Detection)) : Nil
           return unless ctx.response

@@ -299,4 +299,68 @@ describe "contentless FTS (V24)" do
       names.should_not contain("flows_fts_content") # present only for content-storing FTS5
     end
   end
+
+  # The indexer decides the skip from heads + content_type BEFORE it fetches a body, so it never
+  # copies out an image or a gzip stream it would drop. Differential against the one-read rule it
+  # replaced: every flow's capped bodies run through `Store.body_fts_text` into a twin contentless
+  # table, and the two indexes must hold exactly the same (term, row, column, offset) instances.
+  it "indexes exactly what the single-read rule would, across text, binary and compressed bodies" do
+    fts_store do |store|
+      big = "headofbigbody" + ("y" * Gori::Store::FTS_INDEX_MAX) + "tailofbigbody"
+      cases = [
+        {req_with_body("/text", nil), "jsontexttoken here", "application/json", nil},
+        {req_with_body("/img", nil), "pngbytestoken", "image/png", nil},
+        {req_with_body("/gz", nil), "gzipbodytoken", "text/html", "gzip"},
+        {req_with_body("/big", nil), big, "text/plain", nil},
+        {req_with_body("/empty", nil), "", "text/html", nil},
+        {req_with_body("/nobody", nil), nil, "text/html", nil},
+        {req_with_body("/post", "posttexttoken", "POST", "application/json"), "okbody", "application/json", nil},
+        {req_with_body("/upload", "uploadbintoken", "POST", "application/octet-stream"), "okbody", "text/plain", nil},
+        {req_with_body("/pending", "pendingreqtoken", "POST"), nil, nil, nil}, # no response at all
+      ]
+      cases.each do |(req, body, ct, ce)|
+        id = store.insert_flow(req)
+        next unless ct
+        head = String.build do |io|
+          io << "HTTP/1.1 200 OK\r\ncontent-type: " << ct << "\r\n"
+          io << "content-encoding: " << ce << "\r\n" if ce
+          io << "\r\n"
+        end
+        store.update_response(Gori::Store::CapturedResponse.new(flow_id: id, status: 200,
+          head: head.to_slice, body: body.try(&.to_slice), content_type: ct, content_encoding: ce))
+      end
+      store.flush
+      store.fts_backlog.should eq(0)
+
+      store.@db.using_connection do |c|
+        c.exec("CREATE VIRTUAL TABLE temp.expect_fts USING fts5(req, resp, content='', contentless_delete=1, tokenize='trigram')")
+        expected = [] of {Int64, String, String}
+        c.query("SELECT id, request_head, substr(request_body, 1, ?), response_head, substr(response_body, 1, ?), " \
+                "content_type FROM flows ORDER BY id", Gori::Store::FTS_INDEX_MAX, Gori::Store::FTS_INDEX_MAX) do |rs|
+          rs.each do
+            id, req_head, req_body = rs.read(Int64), rs.read(Bytes), rs.read(Bytes?)
+            resp_head, resp_body, resp_ct = rs.read(Bytes?), rs.read(Bytes?), rs.read(String?)
+            expected << {id, Gori::Store.body_fts_text(req_head, req_body),
+                         resp_head.nil? ? "" : Gori::Store.body_fts_text(resp_head, resp_body, resp_ct)}
+          end
+        end
+        expected.size.should eq(cases.size)
+        expected.each { |(id, req, resp)| c.exec("INSERT INTO temp.expect_fts(rowid, req, resp) VALUES (?, ?, ?)", id, req, resp) }
+        c.exec("CREATE VIRTUAL TABLE temp.got_vocab USING fts5vocab(main, flows_fts, instance)")
+        c.exec("CREATE VIRTUAL TABLE temp.want_vocab USING fts5vocab(temp, expect_fts, instance)")
+        instances = ->(t : String) {
+          c.query_all("SELECT term, doc, col, offset FROM temp.#{t} ORDER BY doc, col, offset, term",
+            as: {String, Int64, String, Int64})
+        }
+        got = instances.call("got_vocab")
+        got.should eq(instances.call("want_vocab"))
+        got.map(&.[0]).should contain("jso")     # the text body really was indexed...
+        got.map(&.[0]).should_not contain("png") # ...and the skipped ones really were not
+        got.map(&.[0]).should_not contain("gzi")
+        c.exec("DROP TABLE temp.got_vocab")
+        c.exec("DROP TABLE temp.want_vocab")
+        c.exec("DROP TABLE temp.expect_fts")
+      end
+    end
+  end
 end

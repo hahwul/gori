@@ -88,6 +88,10 @@ module Gori::Miner
       @inner.evidence?
     end
 
+    def pooled? : Bool
+      @inner.pooled?
+    end
+
     def close : Nil
       @inner.close
     end

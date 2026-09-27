@@ -65,7 +65,7 @@ module Gori
           # Spring Boot Actuator /env (or /configprops): the response envelope is distinctive.
           {/"propertySources"\s*:\s*\[/,
            "Spring actuator env", Store::Severity::Medium},
-        ]
+        ].map { |(pattern, label, severity)| {Utf8.tolerant(pattern), label, severity} }
 
         # A `.env` file is the one artifact with no structural envelope — it is just
         # `KEY=value` lines, which is also what a great many ordinary text responses look like.
@@ -77,7 +77,7 @@ module Gori
         # essentially every response body, so one would cost a full byte scan and reject
         # nothing. The content-type gate below is the real filter, and after it PCRE's own
         # first-byte set (the key initials following a newline) does the skipping.
-        DOTENV = /(?:\A|\n)(?:DB_PASSWORD|DB_USERNAME|DATABASE_URL|APP_KEY|APP_SECRET|SECRET_KEY|SECRET_KEY_BASE|AWS_SECRET_ACCESS_KEY|STRIPE_SECRET_KEY|JWT_SECRET|MAIL_PASSWORD|REDIS_PASSWORD)\s*=\s*\S/
+        DOTENV = Utf8.tolerant(/(?:\A|\n)(?:DB_PASSWORD|DB_USERNAME|DATABASE_URL|APP_KEY|APP_SECRET|SECRET_KEY|SECRET_KEY_BASE|AWS_SECRET_ACCESS_KEY|STRIPE_SECRET_KEY|JWT_SECRET|MAIL_PASSWORD|REDIS_PASSWORD)\s*=\s*\S/)
 
         # Every artifact here DECLARES ITSELF in its opening bytes: `[core]` opens a git config,
         # `<title>phpinfo()</title>` is in the document head, an `.htpasswd` record is line one,

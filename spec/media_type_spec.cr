@@ -8,7 +8,124 @@ end
 
 # Five surfaces had grown their own copy of this scan and they did not agree — which is how a
 # body ends up parsed on one surface and shown as an ordinary request on the next.
+# The `String` scan `MediaType.of` was, frozen here as the oracle for its byte-scan fast path
+# (and still the path any head with a byte >= 0x80 takes). The fast path is only correct if it
+# answers EXACTLY this on every ASCII head, hostile ones included — the chomp, the blank-line
+# stop, the first colon and `strip`'s whitespace set are all part of that answer.
+private def legacy_of(h : Bytes) : String?
+  String.new(h).scrub.each_line do |raw|
+    line = raw.chomp
+    break if line.empty?
+    idx = line.index(':') || next
+    next unless line[0, idx].strip.compare("content-type", case_insensitive: true) == 0
+    return line[(idx + 1)..].strip
+  end
+  nil
+end
+
+# Heads that pull on every rule the byte scan re-implements. Each is also run with CRLF → LF
+# and CRLF → CR CR LF, and cut at every length, below.
+private HOSTILE_HEADS = [
+  "",
+  "\n",
+  "\r\n",
+  "\r",
+  "\r\r\n",
+  "\r\r\r\n",
+  "Content-Type: a/b",
+  "Content-Type: a/b\r",
+  "Content-Type: a/b\r\r",
+  "Content-Type: a/b\r\n",
+  "POST / HTTP/1.1\r\nContent-Type: application/json\r\n\r\n",
+  "POST / HTTP/1.1\r\nHost: a\r\n\r\nContent-Type: after-blank\r\n",
+  "POST / HTTP/1.1\r\nHost: a\r\r\nContent-Type: after-cr-cr-blank\r\n",
+  "POST / HTTP/1.1\r\nHost: a\r\n\r\r\nContent-Type: after-cr-blank\r\n",
+  "POST / HTTP/1.1\r\nHost: a\r\n\r\r\r\nContent-Type: not-blank-3cr\r\n",
+  "POST / HTTP/1.1\r\nHost: a\n\r\rContent-Type: bare-cr-last",
+  "POST / HTTP/1.1\r\nHost: a\r\nContent-Type: no-blank-line",
+  "POST / HTTP/1.1\r\nHost: a\r\nContent-Type: no-blank-line\r",
+  "POST / HTTP/1.1\r\nContent-Type: first\r\nContent-Type: second\r\n\r\n",
+  "POST / HTTP/1.1\r\ncontent-type: lower\r\n\r\n",
+  "POST / HTTP/1.1\r\nCONTENT-TYPE:upper\r\n\r\n",
+  "POST / HTTP/1.1\r\n  Content-Type  :  padded  \r\n\r\n",
+  "POST / HTTP/1.1\r\n\tContent-Type\t:\ttabbed\t\r\n\r\n",
+  "POST / HTTP/1.1\r\n\v\fContent-Type\v\f:\v\fvt-ff\v\f\r\n\r\n",
+  "POST / HTTP/1.1\r\n\x1cContent-Type\x1f: not-strip-ws\r\n\r\n",
+  "POST / HTTP/1.1\r\nContent-Type: \x1c keeps-x1c \x1f\r\n\r\n",
+  "POST / HTTP/1.1\r\nContent-Type:\r\n\r\n",
+  "POST / HTTP/1.1\r\nContent-Type:   \r\n\r\n",
+  "POST / HTTP/1.1\r\nContent-Type\r\nContent-Type: after-no-colon\r\n\r\n",
+  "POST / HTTP/1.1\r\nContent-Type: a:b:c\r\n\r\n",
+  "POST / HTTP/1.1\r\nContent:Type: colon-in-name\r\n\r\n",
+  "POST / HTTP/1.1\r\nContent-Typ: short\r\nContent-Types: long\r\n\r\n",
+  "POST / HTTP/1.1\r\nContent-Type : a\r\n folded-continuation\r\n\r\n",
+  "POST / HTTP/1.1\r\nX: a\r\n Content-Type: folded-looking\r\n\r\n",
+  "POST / HTTP/1.1\r\nContent-Type: a\rContent-Type: bare-cr-mid\r\n\r\n",
+  "POST / HTTP/1.1\r\nX: y\rContent-Type: after-bare-cr\r\n\r\n",
+  "POST / HTTP/1.1\r\nContent-Type: nul\0inside\r\n\r\n",
+  "POST / HTTP/1.1\r\nContent-Type\0: nul-in-name\r\n\r\n",
+  "\0\r\nContent-Type: after-nul-line\r\n\r\n",
+  "Content-Type: request-line-slot\r\n\r\n",
+  "GET http://h:8080/x HTTP/1.1\r\nContent-Type: after-colon-request-line\r\n\r\n",
+  "content-type: http://h/ HTTP/1.1\r\n\r\n",
+  ":\r\n: empty-name\r\nContent-Type: x\r\n\r\n",
+  "   \r\nContent-Type: after-space-only-line\r\n\r\n",
+  "\t\r\nContent-Type: after-tab-only-line\r\n\r\n",
+  "Content-Type: multipart/form-data; boundary=\"----X\"\r\n\r\n",
+  "Content-Type: \"x\"; Charset=UTF-8 \r\n\r\n",
+  "Content-Type: trailing-lf-only\n",
+  "Content-Type: trailing-lf-lf\n\n",
+  "\nContent-Type: after-leading-lf\n",
+]
+
+private def variants(s : String) : Array(Bytes)
+  forms = [s, s.gsub("\r\n", "\n"), s.gsub("\r\n", "\r\r\n")].uniq!.map(&.to_slice)
+  # Every prefix too: a head cut mid-line, mid-CRLF or mid-name is exactly what a truncated
+  # capture looks like.
+  forms.flat_map { |b| (0..b.size).map { |n| b[0, n] } }
+end
+
 describe Gori::MediaType do
+  describe ".of against the String scan it replaced (differential)" do
+    it "answers what the String scan answers on every hostile ASCII head and every prefix" do
+      HOSTILE_HEADS.each do |s|
+        variants(s).each do |h|
+          Gori::AsciiBytes.ascii_only?(h).should be_true
+          MT.of(h).should eq(legacy_of(h)), "diverged on #{String.new(h).inspect}"
+        end
+      end
+    end
+
+    it "answers what the String scan answers on random heads over the scan's own alphabet" do
+      # Every byte the scan branches on, plus header-name fragments so a match is common.
+      alphabet = ["\r", "\n", "\r\n", ":", " ", "\t", "\v", "\f", "\0", "\x1c", "a", "Z",
+                  "Content-Type", "content-type", "CONTENT-TYPE", "Content-Typ", "e", ";"]
+      rng = Random.new(1895)
+      5000.times do
+        s = String.build { |io| rng.rand(1..24).times { io << alphabet.sample(rng) } }
+        h = s.to_slice
+        MT.of(h).should eq(legacy_of(h)), "diverged on #{s.inspect}"
+      end
+    end
+
+    it "takes the String scan for a head with any byte >= 0x80, and still agrees" do
+      [
+        "POST / HTTP/1.1\r\nX: d\u00e4rk\r\nContent-Type: after-utf8\r\n\r\n",
+        "POST / HTTP/1.1\r\nContent-Type:\u00a0nbsp-is-unicode-ws\u00a0\r\n\r\n",
+        "POST / HTTP/1.1\r\nContent-Type: a\u2028b\r\n\r\n",
+        "POST / HTTP/1.1\r\nContent-\u212Aype: kelvin-sign\r\n\r\n",
+      ].each do |s|
+        h = s.to_slice
+        Gori::AsciiBytes.ascii_only?(h).should be_false
+        MT.of(h).should eq(legacy_of(h))
+      end
+      invalid = Bytes[0x43, 0x6f, 0x6e, 0x74, 0x65, 0x6e, 0x74, 0x2d, 0x54, 0x79, 0x70, 0x65,
+        0x3a, 0x20, 0xff, 0x78, 0x0d, 0x0a, 0x0d, 0x0a]
+      MT.of(invalid).should eq(legacy_of(invalid))
+      MT.of(invalid).should eq("\uFFFDx")
+    end
+  end
+
   describe ".of" do
     it "reads the value whatever the spacing and case of the name" do
       MT.of(head("Content-Type: application/json")).should eq("application/json")

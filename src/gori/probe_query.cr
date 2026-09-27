@@ -193,18 +193,20 @@ module Gori
         @tree.try(&.leaves.any? { |t| t.kind == :status }) || false
       end
 
-      def apply(issues : Array(Store::ProbeIssue)) : Array(Store::ProbeIssue)
+      # Either shape: the Probe tab filters its list projection (`ProbeIssueRow`), and every
+      # field a term reads is on both.
+      def apply(issues : Array(T)) : Array(T) forall T
         return issues if @tree.nil?
         issues.select { |i| matches?(i) }
       end
 
-      def matches?(i : Store::ProbeIssue) : Bool
+      def matches?(i : Store::AnyProbeIssue) : Bool
         tree = @tree
         return true unless tree
         eval(tree, i)
       end
 
-      private def eval(tree : FilterAst::Tree(Term), i : Store::ProbeIssue) : Bool
+      private def eval(tree : FilterAst::Tree(Term), i : Store::AnyProbeIssue) : Bool
         case tree.op
         in .leaf? then match_term(tree.leaf, i)
         in .not?  then !eval(tree.children.first, i)
@@ -244,7 +246,7 @@ module Gori
         {:eq, value}
       end
 
-      private def match_term(t : Term, i : Store::ProbeIssue) : Bool
+      private def match_term(t : Term, i : Store::AnyProbeIssue) : Bool
         # An incomplete term (e.g. mid-typing `host:` or `-host:`) filters nothing — match all.
         # (Previously a NEGATED empty term matched nothing and blanked the whole list.)
         return true if t.text.empty?
@@ -259,7 +261,7 @@ module Gori
         t.negate ? !hit : hit
       end
 
-      private def free_text(text : String, i : Store::ProbeIssue) : Bool
+      private def free_text(text : String, i : Store::AnyProbeIssue) : Bool
         return true if text.empty?
         i.title.downcase.includes?(text) || i.host.downcase.includes?(text) || i.code.downcase.includes?(text)
       end

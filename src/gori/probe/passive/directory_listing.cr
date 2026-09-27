@@ -31,16 +31,16 @@ module Gori
         # from `debug_mode_exposed` / `sourcemap` / `serialized_object` / `exposed_config`.
         # (`AsciiBytes` remains the right tool only for a SHORT or possibly-invalid-UTF-8
         # subject, where PCRE2 would raise; a scrubbed body text is neither.)
-        NEEDLE = /Index of \//
+        NEEDLE = Utf8.tolerant(/Index of \//)
 
-        TITLE = /<title>\s*Index of \/[^<]*<\/title>/i
+        TITLE = Utf8.tolerant(/<title>\s*Index of \/[^<]*<\/title>/i)
         # Second marker, any one of: the autoindex heading, Apache's parent link text, or the
         # `../` anchor nginx opens its <pre> block with.
         STRUCTURE = [
           /<h1>\s*Index of \//i,
           /Parent Directory/i,
           /<a href="\.\.\/?">/i,
-        ]
+        ].map { |pattern| Utf8.tolerant(pattern) }
 
         def check(ctx : Context, acc : Array(Detection)) : Nil
           return unless resp = ctx.response

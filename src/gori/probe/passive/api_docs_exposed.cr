@@ -26,7 +26,7 @@ module Gori
         # global/init call, an asset filename, or a DOM id / custom element — not the bare product
         # name, so prose that names the tool ("we disabled GraphiQL in prod") does not match.
         # Interactive IDEs are Medium (they run live queries from the browser); a static UI is Low.
-        HTML_SIGNATURES = [
+        HTML_SIGNATURES = ([
           {/GraphQLPlayground|react-graphql-playground|graphql-playground-react/i,
            "GraphQL Playground (interactive)", Store::Severity::Medium},
           {/graphiql(?:\.min)?\.(?:js|css)|renderGraphiQL|GraphiQL\.createFetcher/i,
@@ -35,14 +35,14 @@ module Gori
            "Swagger UI", Store::Severity::Low},
           {/<redoc[\s>]|redoc(?:\.standalone)?(?:\.min)?\.js|Redoc\.init/i,
            "ReDoc API reference", Store::Severity::Low},
-        ] of {Regex, String, Store::Severity}
+        ] of {Regex, String, Store::Severity}).map { |(pattern, label, severity)| {Utf8.tolerant(pattern), label, severity} }
 
         # OpenAPI 3 (`"openapi": "3…"`) or Swagger 2 (`"swagger": "2…"`) next to a top-level
         # "paths" object. Requiring "paths" keeps a JSON response that merely carries an "openapi"
         # field out. (A spec larger than Context::BODY_CAP whose "paths" sits past the 64 KiB cap
         # is a known miss — requiring "paths" is the deliberate low-FP trade.)
-        SPEC_VERSION = /"openapi"\s*:\s*"3|"swagger"\s*:\s*"2/
-        SPEC_PATHS   = /"paths"\s*:/
+        SPEC_VERSION = Utf8.tolerant(/"openapi"\s*:\s*"3|"swagger"\s*:\s*"2/)
+        SPEC_PATHS   = Utf8.tolerant(/"paths"\s*:/)
 
         def check(ctx : Context, acc : Array(Detection)) : Nil
           return unless ctx.response

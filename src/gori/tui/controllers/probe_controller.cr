@@ -203,6 +203,7 @@ module Gori::Tui
           @rules.render(screen, content, focused)
         else
           proxy = @host.session.proxy
+          @probe.sync_preview(@host.session.store) # the preview's URLs, only when the cursor moved
           @probe.render(screen, content, focused: focused,
             listen: {proxy.host, proxy.port}, capturing: @host.session.capturing?)
         end
@@ -456,12 +457,26 @@ module Gori::Tui
       refresh_from_store
     end
 
+    # data_version moved: a commit landed — this process's own (a capture, every ~750 ms while
+    # capturing, or the intercept heartbeat) or a peer's. The finding list is re-read only when
+    # it actually moved (the fingerprint is what sees a peer's write); everything else on the
+    # tab is cheap and is refreshed on every commit, as before.
+    #
+    # A moved list takes the same spacing as the tick paths: during an active scan this tick
+    # and the generation poll see the same stream of writes. A peer's change that has to wait
+    # is remembered by the view (`issues_moved?` is sticky until a reload), so the poll lands it.
     def on_external_change : Nil
-      refresh_from_store
+      store = @host.session.store
+      if @probe.issues_moved?(store, peers: true)
+        reloaded, _ = refresh_if_moved
+        return if reloaded
+      end
+      @probe.reload_meta(store)
+      @rules.reload(store)
     end
 
-    # Re-query the issue list from the store. Called from on_enter, data_version
-    # soft-sync, IssueEvent drain, and Runner's per-tick Store#probe_generation poll.
+    # Re-query the issue list from the store, unconditionally. Called from on_enter, and by
+    # the two gated paths below once they know the list moved.
     # Returns whether the number of listed rows CHANGED. The caller uses that to decide
     # between a full terminal repaint and the cell diff: a row added or removed can leave a
     # stale tail the diff will not repair, but a row whose contents merely changed cannot.
@@ -472,6 +487,29 @@ module Gori::Tui
       @rules.reload(store)
       @probe.row_count != before
     end
+
+    # The live-refresh paths — the IssueEvent drain and the Runner's per-tick
+    # `probe_generation` poll. Both fire for the SAME commit (the analyzer bumps the generation
+    # and then sends its event), and the data_version tick is a third signal for it, so each
+    # used to re-read the whole list: up to three reloads per tick for one write. At most one
+    # reload per generation now. Returns {reloaded, row count changed}.
+    #
+    # And at most one per RELOAD_SPACING: an active scan commits a finding nearly every tick,
+    # and a reload per tick is a list read per 50 ms on the fiber the proxy shares. The first
+    # change after a quiet spell still lands at once (leading edge); the rest wait for the
+    # spacing, and because the Runner calls this every tick while the tab is up, the last one
+    # lands on the first tick past it (trailing edge) — no final state is ever dropped.
+    def refresh_if_moved(now : Time::Instant = Time.instant) : {Bool, Bool}
+      return {false, false} unless @probe.issues_moved?(@host.session.store)
+      if (at = @probe.loaded_at) && now - at < RELOAD_SPACING
+        return {false, false}
+      end
+      {true, refresh_from_store}
+    end
+
+    # See `refresh_if_moved`. Well under the data_version cadence (750 ms), and short enough
+    # that a list under an active scan still reads as live.
+    RELOAD_SPACING = 500.milliseconds
 
     # Drain the analyzer's events (called each main-loop tick from the Runner).
     # List data is primarily refreshed via Runner's Store#probe_generation poll
@@ -519,7 +557,7 @@ module Gori::Tui
           @host.status("Probe: #{ev.message}") if Settings.notify_toast?
         end
       end
-      refresh_from_store if needs_refresh && @host.active_tab == :probe
+      refresh_if_moved if needs_refresh && @host.active_tab == :probe
       drained
     end
 
@@ -607,9 +645,10 @@ module Gori::Tui
     def probe_dismiss : Nil
       return unless @probe.target_issue
       st = @probe.toggle_dismiss(@host.session.store)
+      return @host.status("issue no longer exists") unless st
       # A synchronous user action → transient toast (the list updates in place too),
       # matching the rest of the app; the notification center is for async events.
-      @host.status(st.try(&.open?) ? "issue re-opened" : "issue dismissed")
+      @host.status(st.open? ? "issue re-opened" : "issue dismissed")
     end
 
     # `a`: flip the open-only ⇄ show-closed lens.
@@ -664,7 +703,7 @@ module Gori::Tui
     # rather than a number of rows it merely attempted.
     def self.dismiss_open_by_code(store : Store, scope : Scope?, code : String) : Int32
       lens = scope.try(&.active?) == true ? scope : nil
-      targets = store.probe_issues.select do |i|
+      targets = store.probe_issue_rows.select do |i|
         i.code == code && i.status.open? && (lens.nil? || lens.host_in_scope?(i.host))
       end
       targets.count { |i| store.update_probe_issue_status(i.id, Store::Status::FalsePositive) }
@@ -957,7 +996,9 @@ module Gori::Tui
     # under the cursor as a report line with its affected URLs beneath (#964's shape).
     def probe_copy : Nil
       return probe_detail_copy if probe_detail_readable?
-      return unless (issue = @probe.selected_issue) && probe_issue_selected?
+      return unless @probe.selected_issue && probe_issue_selected?
+      # The list row carries only the URL COUNT; the copy wants the URLs, read fresh by id.
+      return @host.status("issue no longer exists") unless issue = @probe.fresh_target_issue(@host.session.store)
       head = "[#{issue.severity}] #{issue.title} · #{issue.host}"
       copy_text(issue.affected.empty? ? head : "#{head}\n#{issue.affected.join('\n')}", "issue")
     end

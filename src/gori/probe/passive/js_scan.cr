@@ -1,3 +1,5 @@
+require "../../utf8"
+
 module Gori
   module Probe
     module Passive
@@ -22,7 +24,7 @@ module Gori
         # Inline <script>…</script>; group 1 = attributes, group 2 = body. `[\s\S]` matches
         # across newlines without depending on the DOTALL flag; non-greedy stops at the first
         # closing tag.
-        SCRIPT_BLOCK = /<script\b([^>]*)>([\s\S]*?)<\/script\s*>/i
+        SCRIPT_BLOCK = Utf8.tolerant(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/i)
         # A src= attribute (external script — its inline body is empty) or a non-executable
         # <script type> (data/template island, not JS).
         HAS_SRC     = /\bsrc\s*=/i
@@ -40,7 +42,7 @@ module Gori
         # which a statement carrying several sources is labelled. `source_spans` fills these
         # buckets with fewer scans than there are entries (see SOURCE_SCANS) but keeps this
         # order, so the label a window reports is unchanged.
-        SOURCES = [
+        SOURCES = ([
           {/\blocation\.hash\b/, "location.hash"},
           {/\blocation\.search\b/, "location.search"},
           {/\blocation\.(?:href|pathname)\b/, "location.href"},
@@ -64,7 +66,7 @@ module Gori
           # What it did contribute is a false pair on ordinary SPA code:
           # `location.href = "/x?" + new URLSearchParams(form)` — untainted input, benign
           # navigation — reported as DOM-XSS against the `location assignment` sink below.
-        ] of {Regex, String}
+        ] of {Regex, String}).map { |(re, label)| {Utf8.tolerant(re), label} }
 
         # How `source_spans` actually walks the script. Nine of the SOURCES entries above share a
         # literal prefix — `location.` (3) and `document.` (6) — and scanning them one pattern at
@@ -83,11 +85,11 @@ module Gori
         # The captured alternative decides which SOURCES bucket a span lands in, so the resulting
         # index is IDENTICAL to the one 14 separate scans produced — same buckets, same order,
         # same spans — and `source_in_window`'s priority semantics are untouched.
-        SOURCE_SCANS = [
+        SOURCE_SCANS = ([
           {/\blocation\.(hash|search|href|pathname)\b/, {"hash" => 0, "search" => 1, "href" => 2, "pathname" => 2}},
           {/\bdocument\.(URL|documentURI|baseURI|referrer|cookie|location)\b/,
            {"URL" => 3, "documentURI" => 4, "baseURI" => 5, "referrer" => 6, "cookie" => 7, "location" => 8}},
-        ] of {Regex, Hash(String, Int32)}
+        ] of {Regex, Hash(String, Int32)}).map { |(re, slots)| {Utf8.tolerant(re), slots} }
 
         # SOURCES entries no SOURCE_SCANS group covers, scanned individually. DERIVED, not
         # written out: a hardcoded index list is a silent-failure shape here, because a new
@@ -101,7 +103,7 @@ module Gori
         # optimisation skips clean code fast (like body_leaks' per-pattern loop). Sinks whose
         # payload is normally a string (setTimeout/eval) still work post-strip: a `foo+source`
         # concatenation leaves `source` as code even after the string half is blanked.
-        SINKS = [
+        SINKS = ([
           {/\.(?:inner|outer)HTML\s*\+?=(?!=)/, "innerHTML"},
           {/\.insertAdjacentHTML\s*\(/, "insertAdjacentHTML"},
           {/\bdocument\.write(?:ln)?\s*\(/, "document.write"},
@@ -125,7 +127,7 @@ module Gori
           # as innerHTML once the result is inserted.
           {/\.createContextualFragment\s*\(/, "createContextualFragment"},
           {/\bparseFromString\s*\(/, "DOMParser.parseFromString"},
-        ] of {Regex, String}
+        ] of {Regex, String}).map { |(re, label)| {Utf8.tolerant(re), label} }
 
         # A random-access `Char` view over ASCII bytes, used instead of `String#chars` on the
         # (overwhelmingly common) all-ASCII script. `chars` builds an `Array(Char)` sized to the

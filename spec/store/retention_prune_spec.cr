@@ -85,4 +85,33 @@ describe "Store#prune retention cutoff" do
       ids.select { |id| store.flow_row(id) }.should eq(ids)
     end
   end
+
+  # One sweep, placed exactly: the interval equals the number of inserts, so it runs once, after
+  # the last one, over a space with a hole in it. The cutoff is counted from the LOW end
+  # (`oldest_excess_cutoff`), so these pin that the count lands on the right side of the hole.
+  it "drops exactly the oldest excess when one sweep crosses an id gap" do
+    # 10 captures, 3..8 hand-deleted (survivors 1, 2, 9, 10), 3 more (11..13): 7 rows over a cap
+    # of 6, so flow 1 — and nothing else — goes.
+    prune_store(6, 13) do |store|
+      ids = (1..10).map { |i| store.insert_flow(pruned_request("/#{i}")) }
+      store.flush
+      store.delete_flows(ids[2..7])
+      store.flush
+      more = (11..13).map { |i| store.insert_flow(pruned_request("/#{i}")) }
+      store.flush
+      (ids + more).select { |id| store.flow_row(id) }.should eq([ids[1], ids[8], ids[9]] + more)
+    end
+  end
+
+  it "drops nothing when the same gapped space sits exactly at the cap" do
+    prune_store(7, 13) do |store|
+      ids = (1..10).map { |i| store.insert_flow(pruned_request("/#{i}")) }
+      store.flush
+      store.delete_flows(ids[2..7])
+      store.flush
+      more = (11..13).map { |i| store.insert_flow(pruned_request("/#{i}")) }
+      store.flush
+      (ids + more).select { |id| store.flow_row(id) }.should eq([ids[0], ids[1], ids[8], ids[9]] + more)
+    end
+  end
 end

@@ -22,7 +22,7 @@ module Gori
         #     "__schema" doc mention;
         #   * sits at the very START of the body, so it survives the 64 KiB body-prefix cap no
         #     matter how large the `types` array is — no longer needs `queryType` to also fit.
-        INTROSPECTION_RESULT = /"__schema"\s*:\s*\{/
+        INTROSPECTION_RESULT = Utf8.tolerant(/"__schema"\s*:\s*\{/)
 
         def check(ctx : Context, acc : Array(Detection)) : Nil
           return unless ctx.response

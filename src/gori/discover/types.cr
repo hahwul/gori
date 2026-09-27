@@ -209,8 +209,8 @@ module Gori
       property retries : Int32
       property retry_pause : Time::Span
       property max_requests : Int64? # GLOBAL hard ceiling (CappedBackend) across BOTH engines
-      # Reuse one HTTP/1.1 connection per origin across many sends instead of dialing per
-      # request (see `Repeater::ConnPool`). On by default, and worth more here than anywhere
+      # Reuse one connection per origin across many sends instead of dialing per request
+      # (`Repeater::ConnPool`, or `Repeater::H2Pool` under `--http2`). On by default, and worth more here than anywhere
       # else in gori: a brute-force pass is one send per wordlist entry per DIRECTORY, so a
       # run pays one TCP — and on https one TLS — handshake per worker instead of per probe.
       # Turn it off to make every request a fresh connection: per-connection origin state (a

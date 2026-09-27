@@ -554,6 +554,54 @@ describe "Body.stream reused buffers (perf: per-connection copy buffer + chunked
   end
 end
 
+# `parse_chunk_size` answers a bare hex size + CRLF/LF from the bytes and hands every other
+# line to the strict reader. It must never disagree with that reader: a line the strict one
+# refuses stays refused, and nothing it would parse one way is parsed another (P7).
+describe "Body.parse_chunk_size byte fast path" do
+  it "agrees with the strict reader on a hostile corpus" do
+    corpus = [
+      "0\r\n", "5\r\n", "5\n", "5", "5\r", "a\r\n", "A\r\n", "1f40\r\n", "1F40\n", "00005\r\n",
+      "fffffffffffffff\r\n", "FFFFFFFFFFFFFFF\n", "0000000000000005\r\n", "7fffffffffffffff\r\n",
+      "8000000000000000\r\n", "ffffffffffffffff\r\n", "000000000000000000000001\r\n",
+      "5;ext\r\n", "5;name=value\r\n", "5 ;ext\r\n", "5; ext\r\n", ";ext\r\n", "5;\r\n",
+      " 5\r\n", "5 \r\n", "\t5\r\n", "5\t\r\n", "5 5\r\n", "+5\r\n", "-5\r\n", "-0\r\n",
+      "0x5\r\n", "0X5\r\n", "5_0\r\n", "g\r\n", "5g\r\n", "", "\r\n", "\n", "\r", "\r\r\n",
+      "5\r\r\n", "5\n\n", "5\n\r", "\r5\r\n", "5\u00a0\r\n", "\u00a05\r\n", "5\u000b\r\n",
+      "5\u000c\r\n", "5\u0000\r\n", "\u00005\r\n",
+    ].map(&.to_slice)
+    corpus << Bytes[0x35, 0xff, 0x0d, 0x0a] << Bytes[0xef, 0xbb, 0xbf, 0x35, 0x0a]
+    corpus.each do |line|
+      Body.parse_chunk_size(line).should eq(Body.parse_chunk_size_strict(line)),
+        "diverged on #{String.new(line).inspect}"
+    end
+  end
+
+  it "reads the plain sizes the fast path answers" do
+    Body.parse_chunk_size("1f40\r\n".to_slice).should eq(0x1f40)
+    Body.parse_chunk_size("1F40\n".to_slice).should eq(0x1f40)
+    Body.parse_chunk_size("0\r\n".to_slice).should eq(0)
+    Body.parse_chunk_size("fffffffffffffff\r\n".to_slice).should eq(0xfffffffffffffff_i64)
+    Body.parse_chunk_size("+5\r\n".to_slice).should be_nil
+    Body.parse_chunk_size("\r\n".to_slice).should be_nil
+  end
+
+  it "agrees with the strict reader over random short lines" do
+    alphabet = "0123456789abcdefABCDEFgxX+-_; =\t\r\n".bytes + [0x00_u8, 0x0b_u8, 0xa0_u8, 0xff_u8]
+    rng = Random.new(0xc4c5)
+    hex = "0123456789abcdefABCDEF".bytes
+    ends = ["", "\n", "\r\n", "\r", "\r\r\n", "\n\n", " \r\n", ";x\r\n"]
+    5000.times do
+      line = Bytes.new(rng.rand(0..20)) { alphabet.sample(rng) }
+      Body.parse_chunk_size(line).should eq(Body.parse_chunk_size_strict(line)),
+        "diverged on #{String.new(line).inspect}"
+      # ...and lines shaped like the fast path's own, 0-17 hex digits around its 15 limit.
+      shaped = String.new(Bytes.new(rng.rand(0..17)) { hex.sample(rng) }) + ends.sample(rng)
+      Body.parse_chunk_size(shaped.to_slice).should eq(Body.parse_chunk_size_strict(shaped.to_slice)),
+        "diverged on #{shaped.inspect}"
+    end
+  end
+end
+
 describe Gori::Proxy::Codec::ContentDecode do
   head = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n".to_slice
 

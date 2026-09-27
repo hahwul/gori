@@ -96,6 +96,26 @@ describe Gori::Proxy::H2::HPACK do
     expect_raises(Gori::Error, /truncated huffman code/) { HPACK.huffman_decode(Bytes[0xff_u8, 0xff_u8]) }
   end
 
+  it "Huffman decode fills its output exactly at the densest input (all 5-bit codes)" do
+    # The decoder writes into a String presized to 8n/5 + 1 octets, the bound for the
+    # shortest (5-bit) code. Symbols that are all 5-bit codes hit it for every
+    # padding remainder; an empty input decodes to an empty string.
+    HPACK.huffman_decode(Bytes.empty).should eq("")
+    (1..64).each do |n|
+      s = "0" * n
+      HPACK.huffman_decode(HPACK.huffman_encode(s)).should eq(s)
+      mixed = String.new(Bytes.new(n) { |i| "012aceiost".byte_at(i % 10) })
+      HPACK.huffman_decode(HPACK.huffman_encode(mixed)).should eq(mixed)
+    end
+  end
+
+  it "rejects an explicit EOS symbol inside the data (RFC 7541 §5.2)" do
+    # EOS is 30 one-bits; a string that contains it is a decoding error, whether it
+    # ends the input or is followed by more code bits.
+    expect_raises(Gori::Error, /huffman/) { HPACK.huffman_decode(Bytes[0xff, 0xff, 0xff, 0xfc]) }
+    expect_raises(Gori::Error, /huffman/) { HPACK.huffman_decode(Bytes[0xff, 0xff, 0xff, 0xff, 0x00]) }
+  end
+
   it "Huffman decode is exact over many random byte strings (FSM regression guard)" do
     # The nibble-driven decode FSM must reproduce the bit-by-bit walk for every input.
     # Seeded so it's deterministic; round-trips a broad spread of byte values/lengths.

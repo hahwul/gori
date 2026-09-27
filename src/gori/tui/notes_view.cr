@@ -50,8 +50,11 @@ module Gori::Tui
       # to the chip width, else a positional fallback so empty notes are still
       # addressable. The title rule itself lives in `Notes.title` — the single
       # source of truth the CLI listing reads too, so labels can't drift.
+      #
+      # Read off the editor's lines, not `@area.text`: the strip calls this for every chip
+      # several times a frame, and `text` joins the whole note to read its first line.
       def label(idx : Int32) : String
-        if t = Notes.title(@area.text)
+        if t = Notes.title(@area.each_line)
           t.size > 15 ? "#{t[0, 14]}…" : t
         else
           "note #{idx + 1}"
@@ -79,6 +82,10 @@ module Gori::Tui
       @unpersisted = Set(Int64).new
       @mode = InputMode::Read
       @read = TextReadState.new
+      # The two stored rows (DOCS_KEY, LEGACY_KEY) the note list was last merged FROM — see
+      # `reload`. nil until the first merge, and dropped by every save: after one the list is
+      # this session's own edits, not a merge of any row, so the next reload has to merge.
+      @merged_raw = nil.as({String?, String?}?)
     end
 
     # Allocate a cross-session-unique note id. A random 63-bit id (not a shared
@@ -117,9 +124,27 @@ module Gori::Tui
     # unchanged — that preserves caret, scroll, and read-mode selection across
     # capture/ui_state writes that falsely look like "external" commits.
     # Dirty buffers are never touched (caller should also skip when dirty).
+    #
+    # Returns early when the stored rows are byte-for-byte the ones the list was last merged
+    # from: re-merging them would change nothing — `soft_merge_from` keeps every unchanged note
+    # as it is — and it is not cheap. This runs on every data_version tick while the tab is up
+    # (~1.3x a second during capture, every ~3 s idle), and the merge JSON-parses the whole set
+    # and re-joins each editor buffer to compare it; 4 notes of 750 KB was ~20 ms and 11 MB of
+    # garbage per tick for a set nobody had touched. The shortcut holds because the list only
+    # leaves "merged from `@merged_raw`" through a local change, which sets `@dirty` (and so
+    # returns above) until a save — and a save drops `@merged_raw`.
+    #
+    # The comparison runs in SQLite (`setting_is?`), so an unchanged set is not even copied
+    # out of the store.
     def reload(store : Store) : Nil
       return if @dirty
-      soft_merge_from(Notes.load(store))
+      if (m = @merged_raw) && store.setting_is?(Notes::DOCS_KEY, m[0]) &&
+         store.setting_is?(Notes::LEGACY_KEY, m[1])
+        return
+      end
+      raw = {store.setting(Notes::DOCS_KEY), store.setting(Notes::LEGACY_KEY)}
+      soft_merge_from(Notes.doc_from(raw[0], raw[1]))
+      @merged_raw = raw
     end
 
     # Apply a loaded Doc onto the live note list by stable note id.
@@ -558,6 +583,8 @@ module Gori::Tui
       # newly-minted note persisted, so its id leaves `@unpersisted` here and nowhere else.
       @next_id = merged.next_id
       merged.notes.each { |n| @unpersisted.delete(n.id) }
+      # The list is our edits now, not a merge of any stored row — see `reload`.
+      @merged_raw = nil
       # …and `@dirty` only comes down on a write that COMMITTED. Clearing it regardless meant
       # a rolled-back write (project busy) silently dropped the operator's notes: the flag was
       # the only thing that would have made a later exit path try again. Same correction as

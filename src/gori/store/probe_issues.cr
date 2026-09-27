@@ -13,6 +13,17 @@ module Gori
     PROBE_COLS = "id, code, category, host, title, severity, status, hit_count, affected, " \
                  "sample_flow_id, evidence, first_seen, last_seen, sample_repeater_id"
 
+    # PROBE_COLS with `affected` replaced by its element count — the `ProbeIssueRow` shape.
+    # Guarded so a row whose JSON will not parse counts 0 (what `parse_affected` answers for it)
+    # instead of `json_array_length` raising and failing the whole list read. One knowing
+    # difference: a well-formed array of NON-strings (never written by gori — a foreign or
+    # corrupt row) counts its elements, where the full parse answers []. Checking every element's
+    # type in SQL tripled the read's cost to cover a row nothing produces.
+    PROBE_ROW_COLS = "id, code, category, host, title, severity, status, hit_count, " \
+                     "CASE WHEN json_valid(affected) AND json_type(affected) = 'array' " \
+                     "THEN json_array_length(affected) ELSE 0 END, " \
+                     "sample_flow_id, evidence, first_seen, last_seen, sample_repeater_id"
+
     # Group-merge upsert keyed by (code, host): a read-modify-write run INSIDE the writer
     # closure (atomic — the writer is the only writer), which a plain ON CONFLICT can't do
     # because it must dedup+cap the affected-URL JSON and raise severity to the max seen.
@@ -163,6 +174,27 @@ module Gori
       [] of ProbeIssue # never crash the run loop over a read
     end
 
+    # Every finding, in `probe_issues`' order, WITHOUT the affected-URL lists: the Probe tab's
+    # list read. Whole for the reasons `ProbeView#reload` gives (its lenses, filter and tallies
+    # run over the full set), but no longer paying a JSON parse of up to PROBE_AFFECTED_CAP URLs
+    # per row for a list that only draws the count — at 5k findings x 50 URLs that parse was
+    # ~90% of a reload. A caller that needs the URLs reads one row with `get_probe_issue`.
+    def probe_issue_rows : Array(ProbeIssueRow)
+      list = [] of ProbeIssueRow
+      @db.query("SELECT #{PROBE_ROW_COLS} FROM probe_issues ORDER BY severity DESC, last_seen DESC") do |rs|
+        rs.each do
+          list << ProbeIssueRow.new(
+            rs.read(Int64), rs.read(String), rs.read(String), rs.read(String), rs.read(String),
+            Severity.new(rs.read(Int32)), Status.new(rs.read(Int32)), rs.read(Int64),
+            rs.read(Int64).to_i32, rs.read(Int64?), rs.read(String?),
+            rs.read(Int64), rs.read(Int64), rs.read(Int64?))
+        end
+      end
+      list
+    rescue
+      [] of ProbeIssueRow # never crash the run loop over a read
+    end
+
     # One PAGE plus the true total, both decided in SQL.
     #
     # `probe_issues` grows as (code x host), so a wide crawl reaches hundreds of thousands of
@@ -287,6 +319,29 @@ module Gori
 
     private def bump_probe_generation : Nil
       @probe_generation += 1
+    end
+
+    # A cheap "has probe_issues moved?" key for a reader that has to notice a PEER process's
+    # writes too — `probe_generation` counts this process's commits only, so an MCP
+    # `probe_dismiss` or a `gori run probe` against the same project never moves it.
+    #
+    # Every write path moves at least one of the three: an insert adds a row and a new id, a
+    # delete or a clear drops the count, and every UPDATE (re-hit, status change, bulk dismiss)
+    # stamps `last_seen` with the time of the write. The third is a SUM, not a MAX: a stamp that
+    # is not the table's newest — a peer whose `now_us` was taken before it waited on the write
+    # lock, or any row stamped ahead of this clock (an archive from a fast machine) — leaves the
+    # MAX where it was. Summed over the low 32 bits so 250k rows cannot overflow SQLite's
+    # integer SUM (which raises rather than wraps). The one write that moves none is
+    # `detach_flow_refs` nulling a `sample_flow_id` — a reader that acts on a sample flow reads
+    # the row fresh (`get_probe_issue`) rather than trusting a listed copy.
+    #
+    # Served from `idx_probe_issues_triage` as a covering scan, so it never walks the `affected`
+    # overflow pages: ~0.2 ms at 5k findings.
+    def probe_issues_fingerprint : {Int64, Int64, Int64}
+      @db.query_one("SELECT COUNT(*), COALESCE(MAX(id), 0), COALESCE(SUM(last_seen & 4294967295), 0) FROM probe_issues",
+        as: {Int64, Int64, Int64})
+    rescue
+      {-1_i64, -1_i64, -1_i64} # unreadable: differs from every real key, so a reader re-reads
     end
 
     def count_probe_issues : Int32

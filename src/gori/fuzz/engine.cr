@@ -100,6 +100,15 @@ module Gori::Fuzz
       false
     end
 
+    # Whether this backend parks connections for reuse (a keep-alive `Repeater::Pool`). Read by
+    # `Engine#redirect_request` for the h1 twin of the reason it reads `http2?`: a hop is a
+    # bodyless GET gori wrote itself, and `Connection: close` on it made
+    # `ConnPool.reusable_request?` refuse the socket, so every hop of a pooled sweep dialed a
+    # fresh one. Delegated by the wrappers, as `http2?` is.
+    def pooled? : Bool
+      false
+    end
+
     # Sends this backend REFUSED before the socket — Sandbox, an explicit exclude rule, or
     # a session binding nothing has bound yet. Zero for a backend with no gate.
     #
@@ -561,6 +570,10 @@ module Gori::Fuzz
       @http2
     end
 
+    def pooled? : Bool
+      !@pool.nil?
+    end
+
     def extra_requests : Int64
       (@pool.try(&.stale_retries) || 0_i64) + @race_warmups
     end
@@ -727,6 +740,10 @@ module Gori::Fuzz
       @inner.http2?
     end
 
+    def pooled? : Bool
+      @inner.pooled?
+    end
+
     def send(bytes : Bytes) : Repeater::Result
       send(bytes, nil)
     end
@@ -819,6 +836,10 @@ module Gori::Fuzz
 
     def http2? : Bool
       @inner.http2?
+    end
+
+    def pooled? : Bool
+      @inner.pooled?
     end
 
     def send(bytes : Bytes) : Repeater::Result
@@ -1421,7 +1442,7 @@ module Gori::Fuzz
         # the origin may have re-encoded, moved or duplicated the payload on its way through
         # `Location`, so locating them again is guesswork with a credential as the stake.
         # Excluding the whole message needs no guess and gives up nothing: every byte of `nxt`
-        # is either a literal gori wrote (`GET`, `Host:`, `Connection: close`) or the origin's
+        # is either a literal gori wrote (`GET`, `Host:`, maybe `Connection: close`) or the origin's
         # own `Location`. Neither is a place an operator could have written a `$NAME` for a
         # binding to resolve, so there is nothing here to substitute in the first place.
         # A hop is a REQUEST, so it owes the operator's rate the same as any other. Only the
@@ -1482,11 +1503,13 @@ module Gori::Fuzz
       # literal bracketed (`Host: ::1:8080` is not a host and a port, it is a parse error), the
       # port dropped when it is the scheme default.
       host = Repeater::FlowRequest.authority(o.scheme, o.host, o.port)
-      # `Connection: close` is an h1 instruction — it hands the hop its own socket instead of
-      # the keep-alive pool's parked one. On h2 it is a connection-specific field a conforming
-      # server MUST reject (RFC 9113 §8.2.2), and it went out on every hop of an h2 sweep; the
-      # hop rides the h2 pool like any other request there. See `Backend#http2?`.
-      conn = @backend.http2? ? "" : "Connection: close\r\n"
+      # `Connection: close` is an h1 instruction, and it is only written when nothing pools: on
+      # a pooled h1 run it made `ConnPool.reusable_request?` refuse the socket, so every hop
+      # dialed a fresh one for a bodyless GET gori wrote itself — no operator bytes to keep.
+      # On h2 it is a connection-specific field a conforming server MUST reject (RFC 9113
+      # §8.2.2), and it went out on every hop of an h2 sweep. Either way the hop now rides the
+      # run's pool like any other request. See `Backend#http2?` / `Backend#pooled?`.
+      conn = @backend.http2? || @backend.pooled? ? "" : "Connection: close\r\n"
       {"GET #{path} HTTP/1.1\r\nHost: #{host}\r\n#{conn}\r\n".to_slice, path}
     end
 

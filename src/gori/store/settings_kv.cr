@@ -45,6 +45,14 @@ module Gori
       @db.query_one?("SELECT value FROM settings WHERE key = ?", key, as: String)
     end
 
+    # Does `key` hold exactly `value` right now (nil = no row)? Compared inside SQLite, so a
+    # caller polling a large value for change — the Notes set is one JSON row, megabytes for a
+    # big engagement — does not copy the whole value out on every poll just to find it equal.
+    def setting_is?(key : String, value : String?) : Bool
+      hit = @db.query_one?("SELECT value IS ? FROM settings WHERE key = ?", value, key, as: Int64)
+      value.nil? ? hit.nil? : hit == 1
+    end
+
     # Returns whether the write committed (false = store busy/locked/closing). Most callers
     # (high-frequency UI-state writes) ignore it; a caller that must confirm the value
     # persisted (an MCP mutation tool) checks it and surfaces PROJECT_BUSY on false.

@@ -68,7 +68,11 @@ module Gori::Proxy::H2
       # merges trailers into `headers` (that merge is what makes grpc-status reachable), and
       # after it nothing distinguished a trailer from a real response header. Recorded here
       # so the stored head can say which is which — see HeadCodec::TRAILER_MARKER.
-      getter trailer_names = [] of String
+      #
+      # All four trailer collections below stay nil until a trailing block names something:
+      # almost no exchange has one, and building them eagerly cost two Arrays and two Sets per
+      # side of every stream.
+      getter trailer_names : Array(String)? = nil
       # Membership index for `trailer_names`, which stays an ordered Array because
       # `HeadCodec::TRAILER_MARKER` joins the names in arrival order. Deduping with
       # `Array#includes?` is a linear scan, so one legal 1 MiB trailer block (~174k
@@ -76,7 +80,7 @@ module Gori::Proxy::H2
       # `finish_header_block`) cost O(N^2) String compares — ~40s of uninterruptible
       # CPU inside `@mutex`, which on Crystal's single-threaded scheduler freezes the
       # TUI, every other connection and the Store writer fiber (P6).
-      getter trailer_seen = Set(String).new
+      @trailer_seen : Set(String)? = nil
       # Pseudo-header names a TRAILING block carried, which RFC 9113 §8.1 forbids in a trailer
       # section. Kept apart from `trailer_names` rather than filed with it: the marker's
       # contract is "look these names up in the head above", and `synth_response` /
@@ -84,14 +88,35 @@ module Gori::Proxy::H2
       # a dangling reference, pointing at a name no surface can show. It is a finding, not a
       # trailer, so it goes to the flow's `advisory` (see `note_trailer_pseudo`). Same
       # Array + Set pair as above, for the same O(N^2) reason.
-      getter trailer_pseudo = [] of String
-      getter trailer_pseudo_seen = Set(String).new
+      getter trailer_pseudo : Array(String)? = nil
+      @trailer_pseudo_seen : Set(String)? = nil
       # The status of an INTERIM header block that arrived after the final response — the one
       # §8.1 violation that has a name of its own (RFC 9110 §15.2: a 1xx precedes the final
       # response, it is not one). Kept apart from `trailer_pseudo` so the advisory can name the
       # event the way `Repeater::H2Engine`'s `late_interim` clause does: one wire fact, one
       # sentence, whichever surface the operator is reading.
       property trailer_interim : Int32? = nil
+
+      # File a regular field name from a trailing block, once per name.
+      def add_trailer_name(name : String) : Nil
+        seen = @trailer_seen ||= Set(String).new
+        (@trailer_names ||= [] of String) << name if seen.add?(name)
+      end
+
+      # File a pseudo-header name from a trailing block, once per name.
+      def add_trailer_pseudo(name : String) : Nil
+        seen = @trailer_pseudo_seen ||= Set(String).new
+        (@trailer_pseudo ||= [] of String) << name if seen.add?(name)
+      end
+
+      # Forget every trailer record: the head they were filed against was replaced.
+      def clear_trailers : Nil
+        @trailer_names = nil
+        @trailer_seen = nil
+        @trailer_pseudo = nil
+        @trailer_pseudo_seen = nil
+        @trailer_interim = nil
+      end
     end
 
     private class Stream
@@ -124,7 +149,9 @@ module Gori::Proxy::H2
       # because the producers run at different moments (a request-direction advisory before
       # `emit_request`, a response-direction one before `emit_response`) and the stream is
       # the only thing that spans both.
-      getter advisories = [] of String
+      #
+      # nil until the first one: almost every exchange has none.
+      @advisories : Array(String)? = nil
       # The WebSocket transcript of an RFC 8441 extended CONNECT stream (#733), or nil for
       # every other stream — which is all of them on an ordinary connection.
       property ws : WsCapture? = nil
@@ -139,6 +166,17 @@ module Gori::Proxy::H2
       # capture printer event must wait until END_STREAM/RST/connection close flushes frames.
       property? websocket_accepted = false
       property? tunnel_completion_notified = false
+
+      # Record an advisory once; the same sentence from two producers is one line.
+      def advise(text : String) : Nil
+        list = @advisories ||= [] of String
+        list << text unless list.includes?(text)
+      end
+
+      # The advisories as one newline-joined column value, or nil when there are none.
+      def advisory : String?
+        @advisories.try { |list| list.empty? ? nil : list.join('\n') }
+      end
     end
 
     # `connection_created_at` is kept as a positional argument for call-site compatibility
@@ -230,7 +268,7 @@ module Gori::Proxy::H2
           next if @streams.size >= MAX_LIVE_STREAMS
           stream = @streams[stream_id] = Stream.new
         end
-        stream.advisories << text unless stream.advisories.includes?(text)
+        stream.advise(text)
       end
     end
 
@@ -436,11 +474,7 @@ module Gori::Proxy::H2
         # A final status block REPLACES an interim one, so anything recorded as a trailer
         # against the interim head belongs to a head that no longer exists.
         # Both halves, or the index would keep suppressing a name for a head that is gone.
-        side.trailer_names.clear
-        side.trailer_seen.clear
-        side.trailer_pseudo.clear
-        side.trailer_pseudo_seen.clear
-        side.trailer_interim = nil
+        side.clear_trailers
       end
     ensure
       # Always reset, even if decode raised (feed rescues HPACK/framing errors and
@@ -463,10 +497,10 @@ module Gori::Proxy::H2
     private def record_trailer_names(side : Side, decoded : Array({String, String})) : Nil
       decoded.each do |(name, value)|
         unless name.starts_with?(':')
-          side.trailer_names << name if side.trailer_seen.add?(name)
+          side.add_trailer_name(name)
           next
         end
-        side.trailer_pseudo << name if side.trailer_pseudo_seen.add?(name)
+        side.add_trailer_pseudo(name)
         next unless name == ":status" && side.trailer_interim.nil?
         code = value.to_i?
         side.trailer_interim = code if code && 100 <= code < 200
@@ -501,8 +535,8 @@ module Gori::Proxy::H2
       # As DATA on the flow row, not only as the `X-Gori-Pushed` line inside the projected
       # head: History, QL, the Sitemap and every JSON feed read the row, and a row the ORIGIN
       # authored must not be indistinguishable there from one the client sent.
-      promised.advisories << "server push: this request was invented by the origin in a " \
-                             "PUSH_PROMISE on stream #{frame.stream_id} — the client never sent it"
+      promised.advise("server push: this request was invented by the origin in a " \
+                      "PUSH_PROMISE on stream #{frame.stream_id} — the client never sent it")
       emit_request(promised_id, promised)
     end
 
@@ -635,7 +669,7 @@ module Gori::Proxy::H2
     # direction is what tells an operator which peer did it.
     private def note_trailer_pseudo(stream : Stream, side : Side, direction : String) : Nil
       names = side.trailer_pseudo
-      return if names.empty?
+      return if names.nil? || names.empty?
       late = direction == "response" ? side.trailer_interim : nil
       text = if late
                # The named special case, worded as `Repeater::H2Engine`'s `late_interim` clause
@@ -657,7 +691,7 @@ module Gori::Proxy::H2
                "#{names.join(", ")}, which RFC 9113 §8.1 forbids in a trailer section — " \
                "gori did not act on #{names.size == 1 ? "it" : "them"}"
              end
-      stream.advisories << text unless stream.advisories.includes?(text)
+      stream.advise(text)
     end
 
     # The stream's advisories as one newline-joined column value, or nil when there are none.
@@ -666,7 +700,7 @@ module Gori::Proxy::H2
     # the column outright (nil leaves it alone), so a response-direction advisory that carried
     # only its own line would erase what `emit_request` already stored.
     private def advisory_of(stream : Stream) : String?
-      stream.advisories.empty? ? nil : stream.advisories.join('\n')
+      stream.advisory
     end
 
     # Flush a stream that ended abnormally (RST_STREAM or the connection closed at a
@@ -826,7 +860,7 @@ module Gori::Proxy::H2
       protocol = extended_connect_protocol(headers)
       return unless protocol
       text = extended_connect_sentence(stream, protocol)
-      stream.advisories << text unless stream.advisories.includes?(text)
+      stream.advise(text)
     end
 
     # The same sentence as an ABORT reason's tail. An aborted 8441 stream's own reason

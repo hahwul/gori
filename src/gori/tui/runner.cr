@@ -570,11 +570,10 @@ module Gori::Tui
       last_wf = @session.store.write_failures
       last_dv = @session.store.data_version # SQLite change counter for cross-process refresh
       last_dv_poll = Time.instant
-      last_probe_gen = @session.store.probe_generation # committed probe_issues mutations
-      last_spin = Time.instant                         # advances the background-job spinner frame
-      last_clock = clock_minute                        # status-row wall clock; re-render only when the minute rolls over
-      last_hold_tick = Time.instant                    # advances the Intercept queue's waiting-age column
-      last_ui_ident = nil.as(UiIdentity?)              # last-written ui-state identity (see UI_STATE_THROTTLE)
+      last_spin = Time.instant            # advances the background-job spinner frame
+      last_clock = clock_minute           # status-row wall clock; re-render only when the minute rolls over
+      last_hold_tick = Time.instant       # advances the Intercept queue's waiting-age column
+      last_ui_ident = nil.as(UiIdentity?) # last-written ui-state identity (see UI_STATE_THROTTLE)
       last_ui_write = Time.instant
       last_pub_rev = -1                                                     # #123: last interceptor revision mirrored to the store (-1 = publish on first tick)
       last_pub_edit_id = nil.as(Int64?)                                     # #123: held item the mirrored snapshot last reported an operator edit on
@@ -662,26 +661,28 @@ module Gori::Tui
               dirty = true
             end
             # Probe list live refresh: Store#probe_generation increments after every
-            # committed probe_issues write (upsert/delete/status). Poll every tick —
+            # committed probe_issues write (upsert/delete/status). Polled every tick —
             # do NOT rely on the droppable analyzer event channel or PRAGMA data_version.
             # Reload the (full-table SELECT + filter) list ONLY when Probe is the active tab:
             # nothing in the always-visible chrome reads it (toasts arrive via drain_events),
             # and on_enter reloads on tab switch, so an off-tab bump is caught up on return.
-            # `last_probe_gen` still advances so returning to Probe doesn't reload redundantly.
-            # When Probe is visible, force a full terminal sync (not just cell-diff) so a
-            # new/removed row cannot stick as a stale paint.
-            if (pgen = @session.store.probe_generation) != last_probe_gen
-              last_probe_gen = pgen
-              if @active_tab == :probe
-                # Force a FULL terminal sync only when the row COUNT moved. That is the case
-                # the cell diff cannot cover — a removed row leaves a stale tail. A row whose
-                # contents merely changed is exactly what the diff is for, and during an
-                # active scan `probe_generation` bumps on every committed write, so the
-                # unconditional version was repainting the whole screen up to 20 times a
-                # second and bypassing both diff layers to do it.
-                @resized = true if probe_controller.refresh_from_store
-                dirty = true
-              end
+            #
+            # EVERY tick, not only on a generation change: `refresh_if_moved` spaces reloads
+            # RELOAD_SPACING apart while a scan keeps the generation moving, and a change it
+            # deferred is landed by a later tick's call here — the trailing edge. The check is
+            # an int compare until there is something to read (the view remembers the
+            # generation it last loaded, so `drain_events` above reloading for the same commit
+            # makes this a no-op).
+            if @active_tab == :probe
+              reloaded, rows_moved = probe_controller.refresh_if_moved
+              # Force a FULL terminal sync only when the row COUNT moved. That is the case
+              # the cell diff cannot cover — a removed row leaves a stale tail. A row whose
+              # contents merely changed is exactly what the diff is for, and during an
+              # active scan `probe_generation` bumps on every committed write, so the
+              # unconditional version was repainting the whole screen up to 20 times a
+              # second and bypassing both diff layers to do it.
+              @resized = true if rows_moved
+              dirty = true if reloaded
             end
             # Live store refresh: PRAGMA data_version bumps when the writer fiber (or a
             # second gori process) commits. Own captures/saves bump it too — soft-sync

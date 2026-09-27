@@ -608,3 +608,45 @@ describe Gori::Authorize::Engine do
     fake.sent[0].should eq(wire)
   end
 end
+
+# A headless surface that HOLDS its targets (`--format json`, an MCP job) keeps them
+# `without_bytes`. Every field a verdict, a row or a serializer reads was computed off the bytes
+# before they were dropped, so the stripped target must say exactly what the full one says.
+describe Gori::Authorize::Target do
+  it "drops the request and body without_bytes, and every verdict and summary field survives" do
+    page = "the full admin dashboard with billing and every user record and control panel here"
+    responses = {
+      "*"          => ok_resp(200, page),
+      "X-Id: user" => ok_resp(200, page),
+      "X-Id: anon" => ok_resp(403, "Forbidden"),
+      "X-Id: dead" => err_resp,
+    }
+    ids = [
+      Identity.new("admin", baseline: true),
+      Identity.new("user", set_headers: [{"X-Id", "user"}]),
+      Identity.new("anon", remove_headers: ["Cookie"], set_headers: [{"X-Id", "anon"}]),
+      Identity.new("dead", set_headers: [{"X-Id", "dead"}]),
+    ]
+    full = engine(responses).run(detail, ids).not_nil!
+    lean = full.without_bytes
+
+    full.trials.first.response_body.should_not be_nil
+    full.trials.first.request.should_not be_empty
+    lean.trials.size.should eq(full.trials.size)
+    lean.trials.zip(full.trials) do |l, f|
+      l.request.should be_empty
+      l.response_body.should be_nil
+      l.response_head.should eq(f.response_head)
+      {l.identity, l.baseline?, l.verdict, l.delta}.should eq({f.identity, f.baseline?, f.verdict, f.delta})
+      l.meta.should eq(f.meta)
+      {l.summary.status, l.summary.size, l.summary.simhash, l.summary.error}
+        .should eq({f.summary.status, f.summary.size, f.summary.simhash, f.summary.error})
+    end
+    {lean.flow_id, lean.method, lean.url, lean.blocked, lean.blocked_reason}
+      .should eq({full.flow_id, full.method, full.url, full.blocked, full.blocked_reason})
+    {lean.same_count, lean.uncompared?, lean.fully_blocked?, lean.baseline_denied?}
+      .should eq({full.same_count, full.uncompared?, full.fully_blocked?, full.baseline_denied?})
+    Gori::CLI::Output.authorize_target_json(lean).should eq(Gori::CLI::Output.authorize_target_json(full))
+    Gori::CLI::Output.authorize_target_text(lean).should eq(Gori::CLI::Output.authorize_target_text(full))
+  end
+end

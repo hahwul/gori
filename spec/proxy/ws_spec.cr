@@ -1769,6 +1769,56 @@ describe "Gori::Proxy::WS::Relay frame shape capture (V7)" do
   end
 end
 
+# Keeps each captured payload BY REFERENCE, so a buffer the relay reused or mutated after
+# handing it over would show up as a changed row.
+private class RefSink < Gori::Proxy::FlowSink
+  getter rows = [] of {Int32, Bytes}
+
+  def on_request(req : Gori::Store::CapturedRequest) : Int64
+    1_i64
+  end
+
+  def on_response(resp : Gori::Store::CapturedResponse) : Nil
+  end
+
+  def on_ws_message(flow_id : Int64, direction : String, opcode : Int32, payload : Bytes,
+                    shape : Gori::Proxy::WS::Shape = Gori::Proxy::WS::Shape::DEFAULT) : Nil
+    @rows << {opcode, payload}
+  end
+end
+
+describe "Gori::Proxy::WS::Relay single-frame capture" do
+  # A single FIN frame with nothing assembled ahead of it is handed to the sink without the
+  # reassembly buffer. Its row must be the exact payload, masked or not, and must stay that
+  # payload after later frames (fragmented ones included) have gone through the same pump.
+  it "captures each single-frame message byte-exact, and later frames never disturb it" do
+    all = Bytes.new(256, &.to_u8)
+    rev = all.dup.reverse!
+    wire = client_frame(Gori::Proxy::WS::OP_BIN, all) +
+           client_frame(Gori::Proxy::WS::OP_BIN, rev, mask: nil) +
+           client_frame(Gori::Proxy::WS::OP_TEXT, "frag1|".to_slice, fin: false) +
+           client_frame(Gori::Proxy::WS::OP_CONT, "frag2".to_slice) +
+           client_frame(Gori::Proxy::WS::OP_TEXT, "after".to_slice) +
+           client_frame(Gori::Proxy::WS::OP_BIN, Bytes.empty)
+    want = [{2, all}, {2, rev}, {1, "frag1|frag2".to_slice}, {1, "after".to_slice},
+            {2, Bytes.empty}]
+    [nil, WsRewriter.new(to_server: {"absent", "x"})].each do |rewriter|
+      cs_r, cs_w = IO.pipe
+      ts_r, ts_w = IO.pipe
+      ss_r, ss_w = IO.pipe
+      tc_r, tc_w = IO.pipe
+      cs_w.write(wire); cs_w.close
+      ss_w.close
+      sink = RefSink.new
+      Gori::Proxy::WS::Relay.run(IO::Stapled.new(cs_r, tc_w), IO::Stapled.new(ss_r, ts_w), 7_i64,
+        sink, rewriter, rewriter ? WS_CTX : Gori::Proxy::WS::Context::NONE)
+      ts_w.close
+      _ = {ts_r, tc_r}
+      sink.rows.should eq(want)
+    end
+  end
+end
+
 # An IO whose READ RAISES where a pipe would report end of stream — a transport reset, the
 # other of the two ways a WebSocket ends without a CLOSE frame. gori distinguishes them
 # (a FIN is `read_fully?` → nil, a reset raises) and used to throw the difference away, so an

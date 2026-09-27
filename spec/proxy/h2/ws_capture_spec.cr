@@ -153,6 +153,21 @@ describe Gori::Proxy::H2::WsCapture do
     sink.frames.map(&.text).should eq(["one", "two", "three"])
   end
 
+  # A single-frame message is handed to the sink without a copy through the reassembly
+  # buffer, so its row must not alias the DATA frame it arrived in: the h2 reader is free to
+  # reuse that buffer, and a later frame must not rewrite a row already captured.
+  it "keeps a single-frame row intact after its DATA buffer is reused" do
+    sink = WsSink.new
+    a = open_socket(sink)
+    wire = ws_in(WS::OP_TEXT, "first message")
+    a.feed("in", data_frame(1_u32, 0_u8, wire))
+    wire.fill(0_u8)
+    a.feed("out", data_frame(1_u32, 0_u8, ws_out(WS::OP_TEXT, "masked message")))
+    a.feed("in", data_frame(1_u32, 0_u8, ws_in(WS::OP_TEXT, "second message")))
+
+    sink.frames.map(&.text).should eq(["first message", "masked message", "second message"])
+  end
+
   # A fragmented message is ONE row, and the row says it was fragmented — the same fact the h1
   # path records, from the same `MessageShape` accumulator.
   it "reassembles a fragmented message into one row that reports its frame count" do

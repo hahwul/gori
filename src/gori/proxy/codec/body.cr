@@ -296,8 +296,9 @@ module Gori::Proxy::Codec
     end
 
     # A capture buffer presized to a known Length body (bounded by PRESIZE_CAP); default
-    # growth for unknown-length (chunked / close-delimited) framings.
-    private def self.presized_capture(framing : BodyFraming, length : Int64) : IO::Memory
+    # growth for unknown-length (chunked / close-delimited) framings. Public for the h1 paths
+    # in `ClientConn` that buffer a whole response body (a body rule, a held response).
+    def self.presized_capture(framing : BodyFraming, length : Int64) : IO::Memory
       return IO::Memory.new unless framing.length? && length > 0
       cap = length > CaptureBuffer::PRESIZE_CAP ? CaptureBuffer::PRESIZE_CAP : length.to_i
       IO::Memory.new(cap)
@@ -563,7 +564,38 @@ module Gori::Proxy::Codec
     # Parse a chunk-size line: hex digits before any ';' chunk-extension. Returns
     # nil for a malformed, signed, or out-of-range size so the caller can abort
     # (a fabricated 0 would be read as the terminating chunk and desync the body).
-    private def self.parse_chunk_size(line : Bytes) : Int64?
+    #
+    # The line nearly every peer sends is bare hex digits then CRLF (or LF), and that one is
+    # answered straight from the bytes. Anything else — an extension, whitespace, a sign, an
+    # empty size, 16+ digits — goes to `parse_chunk_size_strict` unchanged, so a malformed
+    # line is judged exactly as before (P7). The fast answer is the strict one by
+    # construction: the strict reader strips the same terminator, finds no ';', and parses
+    # the same all-hex token, and 15 hex digits cannot overflow Int64. Public (with the
+    # strict reader) only so the codec spec can hold the two to the same answers.
+    def self.parse_chunk_size(line : Bytes) : Int64?
+      stop = line.size
+      stop -= 1 if stop > 0 && line.unsafe_fetch(stop - 1) == 0x0a_u8 # LF
+      stop -= 1 if stop > 0 && line.unsafe_fetch(stop - 1) == 0x0d_u8 # CR
+      return parse_chunk_size_strict(line) unless 0 < stop <= 15
+      n = 0_i64
+      stop.times do |i|
+        digit = hex_digit(line.unsafe_fetch(i))
+        return parse_chunk_size_strict(line) unless digit
+        n = (n << 4) | digit
+      end
+      n
+    end
+
+    private def self.hex_digit(b : UInt8) : Int64?
+      case b
+      when 0x30_u8..0x39_u8 then (b - 0x30_u8).to_i64 # 0-9
+      when 0x61_u8..0x66_u8 then (b - 0x57_u8).to_i64 # a-f
+      when 0x41_u8..0x46_u8 then (b - 0x37_u8).to_i64 # A-F
+      end
+    end
+
+    # The general reader `parse_chunk_size` falls back to.
+    def self.parse_chunk_size_strict(line : Bytes) : Int64?
       s = String.new(line).strip
       semi = s.index(';')
       hex = (semi ? s[0...semi] : s).strip

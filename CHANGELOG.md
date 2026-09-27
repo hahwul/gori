@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Performance: capture spends less time on the fiber the proxy shares — Content-Type and header scans, HPACK decoding, chunk-size lines and WebSocket messages no longer re-parse or copy per flow — and passive Probe scans run 2–3× faster on HTML and JavaScript bodies (#1337)
+- TUI: the Probe tab no longer re-reads and parses every finding on each tick while traffic flows, which cut proxy throughput up to 4× with the tab open, and large Notes stop copying their whole text every frame (#1337)
+- History: deleting many flows holds the capture writer for milliseconds instead of seconds, deleting an HTTP/2 flow no longer fails, and opening or closing a large project no longer scans every stored body (#1337)
+- Import: Burp exports import in linear time (an 11 MB export in 0.1 s instead of 12–46 s), and messages whose base64 is wrapped in CDATA are imported instead of skipped (#1337)
+- Discover: `--http2` reuses one connection per worker instead of dialling per request and no longer sends a `connection: close` header that makes an h2 request malformed; a large wordlist no longer materializes every probe up front, and Fuzzer redirect hops reuse the keep-alive connection (#1337)
+- CLI/MCP: redacting a large non-ASCII body takes milliseconds instead of seconds, `get_response_body_chunk` stops re-decoding a compressed body for every page, and headless Authorize runs keep response heads but not bodies of finished targets (#1337)
 - Docs: the landing walks from capture to issue beside its captures as you scroll, the Guide and Reference indexes become tiles with a TUI capture per tool, and pages gain gold accents on section rules and a gliding table-of-contents marker, in light and dark.
 - Docs: both Brand Kit wallpapers (with and without the mark) now come at the 1920 × 1080 desktop size, and the landing hero is painted from the plain one.
 - Guided tour: `gori tutorial` teaches the space menu before the palette, with its second cards (`>` **Send flow to…**, `esc` back a level) and the palette search that lists a tab's own actions with the key or menu path that reaches each, all read from your keymap; the docs gain a **Space Menu & Palette** guide with a five-minute exercise (#1333)

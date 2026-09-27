@@ -54,8 +54,11 @@ module Gori::Tui
     getter mode : Probe::Mode
 
     def initialize
-      @all = [] of Store::ProbeIssue
-      @issues = [] of Store::ProbeIssue
+      # The LIST projection (no affected URLs, just their count) — see `Store#probe_issue_rows`.
+      # The two places that show URLs hold a full row of their own: `@detail`, and `@preview`
+      # for the list's bottom pane.
+      @all = [] of Store::ProbeIssueRow
+      @issues = [] of Store::ProbeIssueRow
       @counts = StaticArray(Int32, 5).new(0) # severity tallies (Info..Critical) over @all
       @tech = [] of String
       @mode = Probe::Mode::Passive
@@ -63,6 +66,9 @@ module Gori::Tui
       @scroll = 0
       @detail = nil.as(Store::ProbeIssue?)
       @detail_flow = nil.as(Store::FlowRow?)
+      # The selected row's FULL finding, for the preview pane's URL lines. Fetched by id on
+      # demand (`sync_preview`) and dropped on every reload, so it is never older than the list.
+      @preview = nil.as(Store::ProbeIssue?)
       # The AFFECTED URLS list in the detail: caret, selection, scroll and draw. The list is the
       # finding's evidence and had no caret and no copy — the one thing an operator wants out of a
       # scan issue is the URLs it fired on.
@@ -99,7 +105,21 @@ module Gori::Tui
       # description in place of the (absent) built-in remediation. Rebuilt on reload; a deleted
       # rule falls back to a generic note.
       @custom_desc = {} of String => String
+      # What the last `reload` read, so a caller can tell whether another would read anything
+      # new — see `issues_moved?`. -1 / nil until the first reload, which is therefore "moved".
+      @loaded_gen = -1_i64
+      @loaded_fp = nil.as({Int64, Int64, Int64}?)
+      # The tech rows the last reload read, so `reload_meta` can re-apply the scope lens to
+      # them without a query.
+      @tech_rows = [] of {String, String, String?}
+      # A peer's write, once `issues_moved?(peers: true)` has seen it: kept until the reload
+      # that reads it, since the fingerprint check is not repeated on every tick.
+      @peer_moved = false
+      @loaded_at = nil.as(Time::Instant?)
     end
+
+    # When the last `reload` ran — the controller spaces live reloads off it.
+    getter loaded_at : Time::Instant?
 
     def preview_enabled? : Bool
       Settings.probe_preview
@@ -118,10 +138,9 @@ module Gori::Tui
       @issues.size
     end
 
-    # Reads the WHOLE table, deliberately, and this is the one place it still hurts: at 250k
-    # findings (a wide crawl — the rows are (code x host)) a refresh is ~107 ms, and the
-    # Runner re-runs it on every `probe_generation` bump, which during an active scan is
-    # close to every tick.
+    # Reads the WHOLE table, deliberately. It is the list projection (`probe_issue_rows`, no URL
+    # lists), and the live-refresh paths call it only when the findings actually moved
+    # (`issues_moved?`), but it is still linear in the table.
     #
     # `Store#probe_issues_page` exists and MCP uses it, but a bounded read is not a drop-in
     # here, because everything below `apply_filter` runs in Crystal over `@all`: the triage
@@ -134,12 +153,42 @@ module Gori::Tui
     # is a change to a query surface rather than to this view. Left whole until then: honest
     # and slow beats fast and misleading on a triage list.
     def reload(store : Store) : Nil
-      @all = store.probe_issues
+      # Stamped BEFORE the read: a write that lands after it moves the key again, so it is
+      # never mistaken for one this read already saw.
+      @loaded_gen = store.probe_generation
+      @loaded_fp = store.probe_issues_fingerprint
+      @peer_moved = false
+      @loaded_at = Time.instant
+      @all = store.probe_issue_rows
       @host_pool = nil
       @code_pool = nil
+      @tech_rows = store.probe_tech_rows
+      reload_meta(store)
+    end
+
+    # Would a `reload` read different findings than the last one did? `probe_generation` is
+    # this process's commit counter — an int compare, cheap enough for every tick. `peers`
+    # also asks the store's fingerprint (one indexed read), which is the only way to see a
+    # PEER process's write (MCP `probe_dismiss`, `gori run probe`, a second TUI): the
+    # data_version path passes it, since that is the signal a peer committed.
+    #
+    # A peer change seen once stays "moved" until a reload reads it, so a caller that defers the
+    # reload (the controller's spacing) can land it from a tick that does not pass `peers`.
+    def issues_moved?(store : Store, *, peers : Bool = false) : Bool
+      return true if @peer_moved || store.probe_generation != @loaded_gen
+      return false unless peers
+      @peer_moved = store.probe_issues_fingerprint != @loaded_fp
+    end
+
+    # Everything the tab shows that is not READ from the finding list: the MODE band, the
+    # custom rules' descriptions, the scope lens over the rows already held (the list and the
+    # tech chips), and the open detail and preview rows (each one row read by id). Cheap, so
+    # the data_version path runs it on every commit — a peer's mode, rule or SCOPE change, or
+    # a history clear detaching a sample flow, lands even when no finding moved.
+    def reload_meta(store : Store) : Nil
       @mode = store.probe_mode
-      @tech = scoped_tech(store.probe_tech_rows)
       @custom_desc = Probe.custom_rules(store).to_h { |r| {r.code, r.description} }
+      @tech = scoped_tech(@tech_rows)
       apply_filter
       refresh_detail(store)
     end
@@ -151,7 +200,7 @@ module Gori::Tui
       Probe.tech_summary(rows.map { |(code, _, ev)| {code, ev} })
     end
 
-    private def recount(base : Array(Store::ProbeIssue)) : Nil
+    private def recount(base : Array(Store::ProbeIssueRow)) : Nil
       @counts = StaticArray(Int32, 5).new(0)
       base.each do |i|
         v = i.severity.value
@@ -205,12 +254,35 @@ module Gori::Tui
       @show_closed
     end
 
-    # Re-fetch the open detail (its status/affected may have changed) and its sample flow.
+    # Re-fetch the open detail (its status/affected may have changed) and its sample flow, and
+    # the preview's row with it.
     private def refresh_detail(store : Store) : Nil
       if d = @detail
         @detail = store.get_probe_issue(d.id)
         @detail_flow = @detail.try(&.sample_flow_id).try { |fid| store.flow_row(fid) }
       end
+      @preview = nil
+      sync_preview(store)
+    end
+
+    # Point the preview pane's full row at the list selection. The list holds no URLs, so the
+    # pane's AFFECTED lines come from one row read by id — only when the selection has moved
+    # off the row already held (a reload drops it). Called before every draw of the tab, so a
+    # keypress that moved the cursor is answered on the frame it paints.
+    def sync_preview(store : Store) : Nil
+      return unless preview_enabled?
+      row = @issues[@selected]?
+      return @preview = nil unless row
+      return if @preview.try(&.id) == row.id
+      @preview = store.get_probe_issue(row.id)
+    end
+
+    # The FULL, current finding the action verbs target: the open detail, else the list
+    # selection, re-read from the store by id. A verb that writes or navigates acts on the row as
+    # it is NOW — its status, its sample flow — rather than on the list's copy, and the one that
+    # needs the URLs (copy) gets them. nil when nothing is targeted or the row is gone.
+    def fresh_target_issue(store : Store) : Store::ProbeIssue?
+      target_issue.try { |t| store.get_probe_issue(t.id) }
     end
 
     def move(delta : Int32) : Nil
@@ -231,7 +303,7 @@ module Gori::Tui
     end
 
     # The issue under the cursor, or nil on an empty (or fully filtered) list.
-    def selected_issue : Store::ProbeIssue?
+    def selected_issue : Store::ProbeIssueRow?
       @issues[@selected]?
     end
 
@@ -313,8 +385,9 @@ module Gori::Tui
       @detail_flow
     end
 
-    # The issue an action targets: the open detail, else the list selection.
-    def target_issue : Store::ProbeIssue?
+    # The issue an action targets: the open detail, else the list selection. The list's shape
+    # has no URLs — see `fresh_target_issue` for the full row.
+    def target_issue : Store::AnyProbeIssue?
       @detail || @issues[@selected]?
     end
 
@@ -473,7 +546,7 @@ module Gori::Tui
       @code_pool = distinct(&.code)
     end
 
-    private def distinct(& : Store::ProbeIssue -> String) : Array(String)
+    private def distinct(& : Store::ProbeIssueRow -> String) : Array(String)
       seen = Set(String).new
       @all.each do |i|
         v = yield i
@@ -504,7 +577,11 @@ module Gori::Tui
     # --- detail / mutations ---------------------------------------------------
 
     def open_detail(store : Store) : Bool
-      issue = @issues[@selected]?
+      row = @issues[@selected]?
+      return false unless row
+      # The list row has no URLs; the detail is the full finding. Gone since the last reload (a
+      # peer deleted it) opens nothing — the next reload drops the row too.
+      issue = store.get_probe_issue(row.id)
       return false unless issue
       @detail = issue
       @detail_flow = issue.sample_flow_id.try { |fid| store.flow_row(fid) }
@@ -789,9 +866,17 @@ module Gori::Tui
     # `c`: one-key dismiss for the targeted issue. open → false-positive (mute), anything
     # already triaged → back to open (un-mute). Dismiss is the high-value triage action for
     # a passive scanner; the full open/confirmed/fp/resolved picker was over-built for
-    # machine-found issues (promote handles "this is real → Issue"). Returns the new state.
+    # machine-found issues (promote handles "this is real → Issue"). Returns the new state, or
+    # nil when the targeted row no longer exists (the list is re-read so it drops out).
+    #
+    # Toggles from the row's CURRENT status, not the list's copy: a peer that triaged it since
+    # the last reload would otherwise have its change undone by a toggle aimed the other way.
     def toggle_dismiss(store : Store) : Store::Status?
-      return nil unless issue = target_issue
+      return nil unless target_issue
+      unless issue = fresh_target_issue(store)
+        reload(store)
+        return nil
+      end
       next_status = Probe::Triage.toggle_dismiss(store, issue)
       reload(store)
       next_status
@@ -820,7 +905,7 @@ module Gori::Tui
     end
 
     # A row is admitted by the active scope lens (always true when the lens is off).
-    private def lens_admits?(issue : Store::ProbeIssue) : Bool
+    private def lens_admits?(issue : Store::ProbeIssueRow) : Bool
       return true unless scope_active?
       @scope.try(&.host_in_scope?(issue.host)) == true
     end
@@ -924,7 +1009,7 @@ module Gori::Tui
       return if body.h < 1
       screen.fill(body, Theme.selection_dim) if active
       bg = active ? Theme.selection_dim : Theme.bg
-      lines = preview_lines(issue)
+      lines = preview_lines(issue, @preview.try { |p| p.id == issue.id ? p : nil })
       # Write the clamp back (like render_detail) so overscrolling a short preview can't inflate
       # @preview_scroll and leave later scroll-up presses dead until it drains back into range.
       @preview_scroll = @preview_scroll.clamp(0, {lines.size - 1, 0}.max)
@@ -939,7 +1024,9 @@ module Gori::Tui
       Frame.scroll_gauge(screen, body, lines.size, sc, false, bg)
     end
 
-    private def preview_lines(issue : Store::ProbeIssue) : Array({Color, String})
+    # `full` is the same finding with its URLs (`sync_preview`); without it — a draw that no
+    # sync preceded — the pane says how many there are and lists none.
+    private def preview_lines(issue : Store::ProbeIssueRow, full : Store::ProbeIssue?) : Array({Color, String})
       lines = [] of {Color, String}
       lines << {Theme.text_bright, "#{severity_badge(issue.severity)}  #{issue.title}"}
       meta = "#{issue.host}  ·  #{issue.category}  ·  #{issue.status.label}  ·  ×#{Fmt.count(issue.hit_count)}"
@@ -954,14 +1041,17 @@ module Gori::Tui
       end
       rem = Probe.remediation(issue.code)
       lines << {Theme.muted, rem} unless rem.empty?
-      lines << {Theme.accent, "AFFECTED (#{issue.affected.size})"}
-      issue.affected.first(8).each { |u| lines << {Theme.text, u} }
-      more = issue.affected.size - 8
-      lines << {Theme.muted, "… +#{more} more"} if more > 0
+      urls = full.try(&.affected)
+      lines << {Theme.accent, "AFFECTED (#{urls.try(&.size) || issue.affected_count})"}
+      if urls
+        urls.first(8).each { |u| lines << {Theme.text, u} }
+        more = urls.size - 8
+        lines << {Theme.muted, "… +#{more} more"} if more > 0
+      end
       lines
     end
 
-    private def draw_row(screen : Screen, rect : Rect, issue : Store::ProbeIssue,
+    private def draw_row(screen : Screen, rect : Rect, issue : Store::ProbeIssueRow,
                          y : Int32, selected : Bool, focused : Bool) : Nil
       bg = selected ? (focused ? Theme.accent_bg : Theme.selection_dim) : Theme.bg
       if selected
@@ -988,8 +1078,8 @@ module Gori::Tui
         screen.text(hx, y, issue.host, Theme.muted, bg, width: {rx - hx, 0}.max)
         rx = hx - 1
       end
-      if issue.affected.size > 1
-        cnt = "×#{issue.affected.size}"
+      if issue.affected_count > 1
+        cnt = "×#{issue.affected_count}"
         cx = {rx - cnt.size, rect.x}.max
         screen.text(cx, y, cnt, Theme.muted, bg, width: {rx - cx, 0}.max)
         rx = cx - 1

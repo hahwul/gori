@@ -1,3 +1,5 @@
+require "./ascii_bytes"
+
 module Gori
   # The `Content-Type` of a message head, and the questions every body decoder asks of it.
   #
@@ -20,8 +22,26 @@ module Gori
     # The `Content-Type` header VALUE — media type plus parameters, original case — or nil
     # when the head carries none. `scrub`bed: a head is read straight off the wire and a
     # hostile one is not guaranteed to be valid UTF-8.
+    #
+    # Two paths, one answer. `insert_one` reads this for EVERY captured flow on the Store
+    # writer fiber, and the `String` scan below copied the whole head, scrubbed it and built a
+    # `String` per line to find one header (4.9µs / 2.2 KB on a 14-header POST). A pure-ASCII
+    # head — every real one — is walked as bytes instead (`AsciiBytes.each_head_field`, the
+    # same line/chomp/colon/strip rules), allocating only the returned value. Any byte ≥ 0x80
+    # takes the `String` scan verbatim, since `scrub`, Unicode `strip` and Unicode case
+    # folding only differ there. `spec/media_type_spec.cr` holds the two to one answer.
     def of(head : Bytes?) : String?
       h = head || return nil
+      return of_string(h) unless AsciiBytes.ascii_only?(h)
+      AsciiBytes.each_head_field(h) do |na, nz, va, vz|
+        return String.new(h[va, vz - va]) if AsciiBytes.range_eq_ci?(h, na, nz, CONTENT_TYPE)
+      end
+      nil
+    end
+
+    private CONTENT_TYPE = "content-type".to_slice
+
+    private def of_string(h : Bytes) : String?
       String.new(h).scrub.each_line do |raw|
         line = raw.chomp
         break if line.empty? # the blank line ends the head — the body is not searched

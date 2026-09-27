@@ -287,6 +287,17 @@ module Gori
       nil
     end
 
+    # The RESPONSE side's mirror of `request_parts`: head, body and the capture-truncation flag,
+    # without the request BLOBs — what a pager over one response body needs on every page,
+    # where `get_flow` would also materialize the request body only to drop it. The outer nil
+    # is "no such flow"; a flow with no response yet has a nil head and body.
+    def response_parts(id : Int64) : {Bytes?, Bytes?, Bool}?
+      @db.query("SELECT response_head, response_body, response_body_truncated FROM flows WHERE id = ?", id) do |rs|
+        return {rs.read(Bytes?), rs.read(Bytes?), rs.read(Int64) != 0} if rs.move_next
+      end
+      nil
+    end
+
     # Single-row projection, e.g. to refresh a row after an :inserted/:updated
     # event without re-reading the whole page.
     def flow_row(id : Int64) : FlowRow?
@@ -516,15 +527,21 @@ module Gori
     # did not. Returns whether the delete actually committed.
     def delete_flow(id : Int64) : Bool
       exec_task_ok ->(c : DB::Connection) {
-        delete_flow_one(c, id)
+        delete_flow_set(c, [id])
         nil
       }
     end
 
     # Batch form of delete_flow — the History list's multi-select delete (#442). ONE
     # exec_task_ok, so 20 marked flows cost one transaction and one fsync instead of 20
-    # (P6 — never stall the data path). Same per-id cascade, so a batch of one is
-    # byte-identical to delete_flow.
+    # (P6 — never stall the data path). Same cascade, so a batch of one is byte-identical to
+    # delete_flow.
+    #
+    # SET-wise per ID_CHUNK, not per id: most of the columns `detach_flow_refs` nulls are
+    # unindexed (`events` up to EVENTS_RETENTION rows, `probe_issues` unbounded), so a per-id
+    # cascade was ~11 full scans PER FLOW while capture queued behind the writer — measured
+    # ~0.9 s for a 500-flow delete against 50k events + 20k probe findings, now one scan per
+    # table per chunk (bench/delete_flows_bench.cr).
     #
     # exec_task_OK, not exec_task: a DELETE reports nothing through last_insert_rowid, so a
     # batch rolled back by an unrelated co-submitted write (the writer loop batches ops into one
@@ -534,7 +551,7 @@ module Gori
     def delete_flows(ids : Array(Int64)) : Bool
       return true if ids.empty?
       exec_task_ok ->(c : DB::Connection) {
-        ids.each { |id| delete_flow_one(c, id) }
+        ids.each_slice(ID_CHUNK) { |slice| delete_flow_set(c, slice) }
         nil
       }
     end
@@ -565,31 +582,54 @@ module Gori
         c.exec("DELETE FROM flows")
         c.exec("DELETE FROM h2_frames")
         c.exec("DELETE FROM h2_connections")
+        # A browser's h2 connections outlive the clear and keep logging under ids that no longer
+        # have a row, so let the next sweep run the unattributed-frame reap again (see `prune`).
+        # Runs on the writer fiber, the flag's only reader.
+        @h2_unattributed_reaped = false
         # No index backlog bookkeeping to undo: a pending re-index is the row's own
         # `fts_dirty` flag, so deleting the rows deletes the backlog with them.
         nil
       }
     end
 
-    # Cascade for one flow id (writer connection). Shared by delete_flow.
-    private def delete_flow_one(conn : DB::Connection, id : Int64) : Nil
-      conn.exec("DELETE FROM ws_messages WHERE flow_id = ? AND repeater_id IS NULL", id)
-      conn.exec("DELETE FROM flows_fts WHERE rowid = ?", id)
-      conn.exec("DELETE FROM entity_links WHERE ref_kind = 'flow' AND ref_id = ?", id)
-      detach_flow_refs(conn, id)
-      conn.exec("DELETE FROM js_refs WHERE flow_id = ?", id)
-      conn.exec("DELETE FROM js_ref_scans WHERE flow_id = ?", id)
-      # The h2 frame log (often the flow's bulk bytes) — capture the conn BEFORE deleting
-      # the flow row so we can reclaim it if this was the last flow on that connection.
-      h2_conn = conn.query_one?("SELECT h2_conn_id FROM flows WHERE id = ?", id, as: Int64?)
-      conn.exec("DELETE FROM flows WHERE id = ?", id)
+    # Cascade for a set of flow ids, at most ID_CHUNK of them (writer connection). Shared by
+    # delete_flow and delete_flows. Every statement is keyed by the whole set, so the end state
+    # is the one the old per-id loop reached — including the h2 reclaim below, which only ever
+    # asks whether any SURVIVING flow still names the connection.
+    private def delete_flow_set(conn : DB::Connection, ids : Array(Int64)) : Nil
+      marks = Array.new(ids.size, "?").join(", ")
+      args = ids.map(&.as(DB::Any))
+      conn.exec("DELETE FROM ws_messages WHERE flow_id IN (#{marks}) AND repeater_id IS NULL", args: args)
+      conn.exec("DELETE FROM flows_fts WHERE rowid IN (#{marks})", args: args)
+      conn.exec("DELETE FROM entity_links WHERE ref_kind = 'flow' AND ref_id IN (#{marks})", args: args)
+      detach_flow_refs(conn, ids)
+      conn.exec("DELETE FROM js_refs WHERE flow_id IN (#{marks})", args: args)
+      conn.exec("DELETE FROM js_ref_scans WHERE flow_id IN (#{marks})", args: args)
+      # The h2 frame log (often the flow's bulk bytes) — capture the conns BEFORE deleting
+      # the flow rows so we can reclaim each one this set was the last user of.
+      h2_conns = [] of Int64
+      conn.query("SELECT DISTINCT h2_conn_id FROM flows WHERE id IN (#{marks}) AND h2_conn_id IS NOT NULL",
+        args: args) do |rs|
+        rs.each { h2_conns << rs.read(Int64) }
+      end
+      conn.exec("DELETE FROM flows WHERE id IN (#{marks})", args: args)
       # An HTTP/2 connection multiplexes many flows/streams, so only drop its log once NO
       # surviving flow still references it. The retention prune's activity gate would keep
       # a recent flow's log unreclaimed until later captures advance the floor, so an
-      # explicit user delete reclaims it directly here (no activity gate — this flow is gone).
-      if cid = h2_conn
-        conn.exec("DELETE FROM h2_frames WHERE conn_id = ? AND ? NOT IN (SELECT h2_conn_id FROM flows WHERE h2_conn_id IS NOT NULL)", cid, cid)
-        conn.exec("DELETE FROM h2_connections WHERE id = ? AND id NOT IN (SELECT h2_conn_id FROM flows WHERE h2_conn_id IS NOT NULL)", cid, cid)
+      # explicit user delete reclaims the frames directly here (no activity gate — this flow
+      # is gone).
+      #
+      # The `h2_connections` row itself stays, for the retention sweep's activity-gated reap.
+      # Its id is an INTEGER PRIMARY KEY without AUTOINCREMENT, and the connection may still be
+      # open and logging: dropping the row here let the next connection reuse its id and inherit
+      # every frame (and flow) the live one wrote afterwards.
+      #
+      # `NOT EXISTS` is a seek on idx_flows_h2_conn; the `? NOT IN (SELECT h2_conn_id …)` it
+      # replaces built the whole column into an ephemeral table twice per connection. Same
+      # answer: that subquery filtered `IS NOT NULL` and `cid` is never NULL, so NOT IN's
+      # three-valued trap (any NULL in the list makes it NULL, i.e. never delete) could not arise.
+      h2_conns.each do |cid|
+        conn.exec("DELETE FROM h2_frames WHERE conn_id = ? AND NOT EXISTS (SELECT 1 FROM flows WHERE h2_conn_id = ?)", cid, cid)
       end
     end
 
@@ -602,8 +642,9 @@ module Gori
       nil
     end
 
-    # Every table that cross-references a flow by id, in one place. `id` nil = every flow is
-    # going (a clear), so every reference is dangling.
+    # Every table that cross-references a flow by id, in one place. `ids` nil = every flow is
+    # going (a clear), so every reference is dangling; otherwise at most ID_CHUNK ids, detached
+    # with one statement per table (see `delete_flows`).
     #
     # Not here, because they are DELETED rather than detached: `js_refs` and `js_ref_scans`
     # (V35) are projections of the flow's own body, meaningless without it, so both callers
@@ -635,7 +676,7 @@ module Gori
     # live sources; the negative value is never a valid History id.
     #
     # `ws_messages.flow_id` is NOT NULL, so a repeater-owned WS row (`repeater_id` set, which
-    # `delete_flow_one` deliberately spares) keeps its id. Its session is covered instead:
+    # `delete_flow_set` deliberately spares) keeps its id. Its session is covered instead:
     # `repeaters.flow_id` is nulled here, which is where a surface reads the provenance from.
     # `probe_oast_probes` belongs here even though nothing READS its `flow_id` for display: it
     # COPIES it into a new finding. An outstanding out-of-band probe deliberately outlives the
@@ -648,25 +689,30 @@ module Gori
     # does not help when the value is re-supplied afterwards from a row that kept it. This table
     # arrived in a later migration than the list, which is how it came to be missing from a
     # comment that says "every table".
-    private def detach_flow_refs(conn : DB::Connection, id : Int64?) : Nil
-      {"issues", "repeaters", "fuzz_sessions", "miner_sessions", "sequencer_sessions",
-       "issue_retest_run_steps", "events", "intercept_held", "probe_oast_probes"}.each do |table|
-        if fid = id
-          conn.exec("UPDATE #{table} SET flow_id = NULL WHERE flow_id = ?", fid)
-        else
+    private def detach_flow_refs(conn : DB::Connection, ids : Array(Int64)?) : Nil
+      if ids
+        marks = Array.new(ids.size, "?").join(", ")
+        args = ids.map(&.as(DB::Any))
+        FLOW_REF_TABLES.each do |table|
+          conn.exec("UPDATE #{table} SET flow_id = NULL WHERE flow_id IN (#{marks})", args: args)
+        end
+        conn.exec("UPDATE probe_issues SET sample_flow_id = NULL WHERE sample_flow_id IN (#{marks})", args: args)
+        # `source_id > 0` keeps a row from being negated twice (a repeated id in the set).
+        conn.exec("UPDATE issue_evidence SET source_id = -source_id " \
+                  "WHERE source_kind = 'flow' AND source_id IN (#{marks}) AND source_id > 0", args: args)
+      else
+        FLOW_REF_TABLES.each do |table|
           conn.exec("UPDATE #{table} SET flow_id = NULL WHERE flow_id IS NOT NULL")
         end
-      end
-      if fid = id
-        conn.exec("UPDATE probe_issues SET sample_flow_id = NULL WHERE sample_flow_id = ?", fid)
-        conn.exec("UPDATE issue_evidence SET source_id = -source_id " \
-                  "WHERE source_kind = 'flow' AND source_id = ? AND source_id > 0", fid)
-      else
         conn.exec("UPDATE probe_issues SET sample_flow_id = NULL WHERE sample_flow_id IS NOT NULL")
         conn.exec("UPDATE issue_evidence SET source_id = -source_id " \
                   "WHERE source_kind = 'flow' AND source_id > 0")
       end
     end
+
+    # The tables whose `flow_id` column `detach_flow_refs` nulls.
+    private FLOW_REF_TABLES = {"issues", "repeaters", "fuzz_sessions", "miner_sessions", "sequencer_sessions",
+                               "issue_retest_run_steps", "events", "intercept_held", "probe_oast_probes"}
 
     # Distinct host values for History QL Tab-complete (`host:`). Prefix-filtered
     # (case-insensitive), hard-capped so a huge capture history never materialises

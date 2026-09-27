@@ -1,3 +1,5 @@
+require "../../utf8"
+
 module Gori
   module Probe
     module Passive
@@ -87,7 +89,7 @@ module Gori
             (?!password@|changeme@|secret@|yourpass)[^\s:@\/]{8,}
             @(?!localhost|127\.0\.0\.1|\[::1\]|example\.(?:com|org|net)\b)[\w.\-]+/x,
            "database URI with inline credentials"},
-        ]
+        ].map { |(pat, label)| {Utf8.tolerant(pat), label} }
 
         # A JSON Web Token, held OUT of PATTERNS on purpose.
         #
@@ -106,7 +108,7 @@ module Gori
         # Each segment ≥10 chars keeps random dotted tokens out; "eyJ" (base64url for `{"`) is the
         # distinctive first-byte anchor. Token weaknesses themselves (alg:none, missing exp, …)
         # are the separate `jwt` rule, which decodes the tokens a flow AUTHENTICATES with.
-        JWT = {/\beyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\b/, "JSON Web Token"}
+        JWT = {Utf8.tolerant(/\beyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\b/), "JSON Web Token"}
       end
     end
   end
