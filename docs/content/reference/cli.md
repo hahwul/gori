@@ -90,6 +90,7 @@ gori run <subcommand> [verb] [options]
 | `cookie [<cookie>]` | Decode, verify, brute-force, or forge a Flask / Rack / Django session cookie |
 | `decoder <chain> [input]` | Run a Decoder encode / decode / hash chain |
 | `notes [<n>]` · `create` · `delete` | Read, write, or delete project notes (`delete` needs `--yes`) |
+| `notify <summary>` | Show the operator one line in the gori TUI (the ring and Miss Ring), from a script |
 | `issues` · `create` · `update` · `delete` | List / export issues, or write and remove issues (`delete` needs `--yes`) |
 | `links` · `add` · `delete` | Evidence pointers from an issue or note to a flow, Repeater session, or job |
 | `evidence` | Freeze, list, show, link, unlink, or delete frozen request+response copies |
@@ -1121,6 +1122,23 @@ gori run notes delete 2 --yes
 | `delete <n>` (`rm`) | Delete the note at index `n`; `-y`/`--yes` is required |
 
 A note is prose that exists nowhere else — no capture or re-run reproduces one — and the index is a **list position**, so `notes delete 2` names a different note once an earlier one is gone. `delete` therefore refuses without `-y`/`--yes` (there is no interactive prompt), and the refusal quotes the note's first line, when it has one, so a wrong number is visible before it costs anything.
+
+### run notify
+
+`notify` is how a script reaches the operator in the TUI, the way an agent does with MCP `reply_to_operator`. The summary is one line for the notification ring and Miss Ring's bubble; `--detail` (or `--detail-file`, `-` for STDIN) is the long form the ring opens on `↵`:
+
+```bash
+gori run fuzz --flow 42 --auto --preset sqli > hits.txt && gori run notify "fuzz on flow 42 done" --level success --detail-file hits.txt
+./nightly-scan.sh 2>&1 | tail -20 | gori run notify "nightly scan finished" --detail-file -
+```
+
+| Option | Description |
+| -------- | ------------- |
+| `--detail=TEXT` / `--detail-file=PATH` | The long form (≤32 KiB); `-` reads STDIN. Mutually exclusive |
+| `--level=LEVEL` | `info` (default) \| `success` \| `warn` \| `error`; anything else is refused |
+| `--format json` / `--json` | `{ok, id, project, summary, tui}`, where `tui` is `{live, windows}` or `{unknown: true}` — the shape MCP `reply_to_operator` and `get_current_context` use |
+
+The line is written to the project's event feed under the `script` source, so the ring shows it without the `ai` marker an agent's reply carries, and the Activity pane can filter it. It is written whether or not a TUI is open, and `notify` exits `0` either way; the output says whether a window was there to show it. When none was, the next TUI to open on the project sums it up in one note along with any agent replies that also arrived while it was closed.
 
 ### run links
 

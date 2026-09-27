@@ -88,17 +88,17 @@ gori mcp --read-only
 
 | 시작 방법 | 도구 | `tools/list` | 토큰 | 용도 |
 | --- | ---: | ---: | ---: | --- |
-| `gori mcp` | 189 | ~227 KB | ~58k | 전부 (기본값) |
+| `gori mcp` | 190 | ~229 KB | ~59k | 전부 (기본값) |
 | `--read-only` | 62 | ~72 KB | ~18k | 읽기 도구와 순수 연산; 실제 요청 전송 없음 |
-| `--tools=@recon` | 37 | ~54 KB | ~14k | 캡처를 읽고 파악, 요청 재전송, 이슈·노트 기록 |
+| `--tools=@recon` | 38 | ~56 KB | ~14k | 캡처를 읽고 파악, 요청 재전송, 이슈·노트 기록 |
 | `--tools=@recon --read-only` | 28 | ~39 KB | ~10k | `--read-only`가 끄는 도구를 뺀 `@recon` |
-| `--tools=@minimal` | 17 | ~26 KB | ~7k | History와 flow, 현재 TUI 컨텍스트를 읽고 오퍼레이터와 대화 |
+| `--tools=@minimal` | 18 | ~28 KB | ~7k | History와 flow, 현재 TUI 컨텍스트를 읽고 오퍼레이터와 대화 |
 
 토큰은 바이트 ÷ 4로 잡은 JSON 어림값이며, 실제 값은 클라이언트의 토크나이저가 정합니다.
 
 | 프로필 | 도구 |
 | --- | --- |
-| `@minimal` | `project_info`, `list_projects`, `switch_project`, `create_project`, `ql_reference`, `ql_explain`, `list_history`, `get_flow`, `get_response_body_chunk`, `get_current_context`, `get_repeater_context`, `get_issue`, `list_sitemap`, `intercept_get`, `intercept_list`, `operator_messages`, `reply_to_operator` |
+| `@minimal` | `project_info`, `list_projects`, `switch_project`, `create_project`, `ql_reference`, `ql_explain`, `list_history`, `get_flow`, `get_response_body_chunk`, `get_current_context`, `get_repeater_context`, `get_issue`, `list_sitemap`, `intercept_get`, `intercept_list`, `operator_messages`, `reply_to_operator`, `ask_operator` |
 | `@recon` | `@minimal`에 더해 `list_scope`, `list_params`, `list_js_endpoints`, `scan_js_endpoints`, `compare_flows`, `list_env`, `decode`, `jwt_decode`, `jwt_verify`, `probe_issues`, `probe_promote`, `probe_dismiss`, `list_issues`, `list_notes`, `get_note`, `send_request`, `create_issue`, `update_issue`, `create_note`, `update_note` |
 
 프로필은 글롭이 아니라 고정된 이름 목록이므로, 이후 버전이 `list_*` 도구를 추가해도 `@recon`이 조용히 커지지 않습니다. 둘 다 `switch_project`와 `create_project`를 포함하므로, 프로젝트가 하나도 없는 머신에서 바인딩 없이 시작해도 동작합니다.
@@ -161,14 +161,15 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 
 ## 도구 {#tools}
 
-**읽기 도구**(`--read-only`에서도 사용 가능. 단, 다음 네 가지 `scan_js_endpoints`, `oast_payload`, `oast_poll`, `reply_to_operator`는 제외):
+**읽기 도구**(`--read-only`에서도 사용 가능. 단, 다음 다섯 가지 `scan_js_endpoints`, `oast_payload`, `oast_poll`, `reply_to_operator`, `ask_operator`는 제외):
 
 | 도구 | 용도 |
 |------|---------|
 | `list_history` | 최신순으로 플로우 나열, 선택적 QL과 페이지네이션 포함. 각 행에 `source`가 실립니다(클라이언트가 보낸 트래픽은 `proxy`, `send_request`(기본으로 기록됩니다)는 `repeater`, 그 밖에 `discover`·`import` …). 그래서 gori가 만든 플로우가 대상에 대한 증거로 잘못 읽히지 않습니다. `src:`로 필터링합니다. `columns`에 `gori run ls --column`과 같은 `[LABEL=][req\|res:]kind:selector` 스펙을 주면 행마다 추출한 값(헤더, JSON 필드, 정규식 캡처)을 `columns` 객체로 함께 싣습니다. QL로 *거를* 수는 있어도 볼 수는 없던 값을 [보여 주는](/ko/guide/proxy/#columns) 쪽입니다. 행마다 읽기가 한 번 늘어나므로 명시할 때만 동작합니다. `hide_static:true`는 TUI의 정적 파일 숨기기 렌즈(`-static:true`)와 같아서 정적 자산(이미지, 폰트, 오디오/비디오)을 뺍니다. `list_sitemap`과 `list_params`도 같은 인자를 받습니다. `ids`를 주면 정확히 그 집합을 한 번에 가져옵니다 — `get_current_context`가 `selection.ids`로 돌려주는, 사용자가 마크한 행들입니다. 요청한 순서 그대로 오고, `limit`과 두 커서는 적용되지 않으며, 행이 없는 id는 `missing_ids`로, `query`가 뺀 것은 `filtered_out_ids`로 이름을 부릅니다. 답이 짧으면 어느 쪽 때문에 짧은지 항상 말해 줍니다 |
 | `list_events` | 작업 수명주기와 에이전트 활동을 추가 전용 피드로 전방 커서 조회. 플로우가 여전히 전체 스트림이며, 이 피드는 플로우 행을 중복하지 않음. 모든 이벤트가 `actor`(행위 표면: `tui` / `cli` / `mcp`)를 담고 있어 에이전트가 자기 쓰기와 운영자의 쓰기를 구분할 수 있으며, 설정 변경은 누가 하든 기록됩니다. 사람은 같은 피드를 **Project → Activity** 패널에서 읽습니다 |
 | `operator_messages` | 오퍼레이터가 gori TUI에서 여러분에게 입력한 메시지("Tell the agent…")입니다. 이 세션 또는 붙어 있는 모든 에이전트에게 보낸 것을 전방 커서로 읽습니다. gori는 가능하면 즉시 전달하고(Claude Code의 피어 메시지, Codex의 `codex queue` 전달, 채널 이벤트) 그래도 남은 것은 여러분의 다음 tool result에 실어 보냅니다. 이 도구는 모든 에이전트가 가진 폴백입니다 — 턴을 시작할 때 호출하세요. 반환한 메시지는 전달됨으로 표시되어 오퍼레이터의 알림 링에 "picked up"으로 보입니다 |
-| `reply_to_operator` | gori의 오퍼레이터에게 답합니다. `summary`는 알림 링과 Miss Ring 말풍선에 보이는 한 줄, `detail`은 링에서 ↵로 여는 긴 본문, `level`은 색, `in_reply_to`는 답하는 오퍼레이터 메시지 id입니다. 여러분의 터미널이 아니라 gori에 있는 사람에게 답이 닿는 방법입니다 — 알림이므로 그 프로젝트에 gori TUI가 열려 있을 때만 보입니다 |
+| `reply_to_operator` | gori의 오퍼레이터에게 답합니다. `summary`는 알림 링과 Miss Ring 말풍선에 보이는 한 줄, `detail`은 링에서 ↵로 여는 긴 본문, `level`은 색, `in_reply_to`는 답하는 오퍼레이터 메시지 id입니다. 여러분의 터미널이 아니라 gori에 있는 사람에게 답이 닿는 방법입니다 — 알림이므로 그 프로젝트에 gori TUI가 열려 있으면 바로 뜨고, 닫혀 있었다면 다음에 열 때 노트 하나로 요약됩니다 |
+| `ask_operator` | gori의 오퍼레이터에게 결정을 선택 카드로 묻습니다. `question`은 한 줄, `choices`는 2~4개의 라벨, `detail`은 선택적인 설명, `default`는 카드가 처음 가리키는 선택지, `expires_in_minutes`는 기다리는 시간(기본 30분)입니다. 질문 `id`를 담아 바로 반환하고, 답은 나중에 `in_reply_to`가 그 id이고 `outcome`이 `answered`, `dismissed`, `expired` 중 하나인 오퍼레이터 메시지로, `operator_messages`가 다루는 모든 경로를 타고 돌아옵니다. 결과에는 `reply_to_operator`처럼 `tui`가 실립니다 |
 | `list_views` | 프로젝트의 History [뷰](/ko/guide/proxy/#views). `list_history{view}`가 렌즈로 적용하는 이름 붙은 QL 쿼리로, `query`를 대체하지 않고 그 위에 AND로 얹힙니다. 기본 뷰 7종(`All`, `History`, `History + Repeater`(기본값), `WebSocket`, `gRPC`, `SSE`, `Errors`) → 글로벌 라이브러리 → 프로젝트 순이며, `active`는 TUI가 보고 있는 뷰를 표시할 뿐 `list_history`에 적용되지 **않습니다**. 그쪽은 넘긴 `view`로만 거릅니다 |
 | `get_flow` | 한 플로우의 전체 요청 + 응답. [리댁션 프로파일](/ko/reference/cli/#run-redact)이 기본 적용된 곳에서는 본문이 정제되어 `body_redaction` 객체와 함께 돌아옵니다. `include_sensitive:true`는 헤더 리댁션과 함께 그것도 끕니다 |
 | `get_response_body_chunk` | 인라인 64 KiB 상한을 넘는 디코드(또는 원시) 플로우/Repeater 응답을 페이지 단위로 조회 |
@@ -312,11 +313,15 @@ create_repeaters{flow_ids: [...], name_prefix: "oas: ", tags: "spec"}
 
 돌아오는 길은 `reply_to_operator`입니다. 핸드셰이크 instructions가 에이전트에게, 여러분이 그 터미널로 옮겨가지 않아도 되도록 이 도구로 답하라고 알려줍니다. 한 줄 `summary`는 클라이언트 이름과 함께 링(그리고 Miss Ring)에 뜨고, `detail`은 링에서 `↵`로 열립니다 — 발견 사항, diff, 엔드포인트 목록 같은 것. 같은 피드의 행이라 Claude가 아닌 에이전트에서도 동작하고(`--read-only`로 띄운 에이전트는 제외), `agent` 소스로 프로젝트 기록에 남습니다.
 
+에이전트가 결과를 알리는 게 아니라 결정을 받아야 할 때는 `ask_operator`에 한 줄 질문과 2~4개의 선택지를 넘깁니다("add api.example.com to scope?" — `yes` / `no`). 질문은 포커스를 뺏지 않습니다. 링에 `?` 표시와 함께 뜨고(Miss Ring이 답장처럼 들고 있습니다), 주황색 `ask:N` 칩이 기다리는 질문 수를 셉니다. 카드는 그 링 행에서 `↵`, 칩 클릭, 또는 명령 팔레트의 **Answer the agent…**로 엽니다. 선택지의 숫자를 누르거나(`↑`/`↓`로 옮기고 `↵`), `x`로 고르지 않고 무시하거나, `esc`로 나중으로 미룹니다. 답은 `in_reply_to`가 그 질문인 오퍼레이터 메시지로, 여러분이 입력하는 메시지와 같은 경로로 돌아가므로, 더 빠른 경로가 없어도 에이전트의 다음 tool result에 실립니다. 아무도 답하지 않은 질문은 만료되고(에이전트가 따로 정하지 않았다면 30분), 에이전트도 그 사실을 전달받습니다. 카드는 질문한 에이전트가 아직 붙어 있는 동안에만 열리며, gori가 닫혀 있는 동안 들어온 질문은 열었을 때 기다리고 있습니다.
+
+스크립트도 [`gori run notify`](/ko/reference/cli/#run-notify)로 같은 방식으로 닿을 수 있습니다. 그 줄은 `script` 소스로, `ai` 태그 없이 링과 Miss Ring에 뜹니다.
+
 의지하기 전에 알아둘 한계가 몇 가지 있습니다.
 
 - **재전송되지 않습니다.** 메시지는 *보내는 그 순간* 붙어 있던 에이전트에게만 전달됩니다. 그 뒤에 붙은 에이전트는 소급해서 받지 않습니다 — `operator_messages`는 언제나 그 세션에 아직 남아 있는 것만 돌려주고, 이미 전달한 것을 두 번 전달하지 않습니다.
-- **동의가 아니라 요청입니다.** 어느 층으로 가든, 피어가 프레이밍한 메시지는 모델에게 뭔가를 해 달라고 요청할 뿐 그 자체로 무언가를 승인하지 않으며, 에이전트는 자신이 동의하지 않는 다른 지시와 똑같이 이를 거절할 수 있습니다.
-- **답장은 우편함이 아니라 알림입니다.** 답장이 도착한 순간 그 프로젝트에 열려 있는 gori TUI에서만 뜹니다. 그 창에서는 Miss Ring이 다음 키 입력이나 클릭까지 답장을 들고 있지만(Settings → Companion → Agent replies), 링은 TUI를 닫으면 비워지고, 나중에 연 TUI는 그 전에 쓰인 답장을 알리지 않습니다 — Activity 패널에만 남습니다. 도구도 에이전트에게 같은 말을 하고, 결과에 `get_current_context`와 같은 형태의 `tui`를 실어 주므로 `windows: 0`을 받은 에이전트는 자신의 출력으로 말해야 한다는 걸 압니다.
+- **동의가 아니라 요청입니다.** 어느 층으로 가든, 피어가 프레이밍한 메시지는 모델에게 뭔가를 해 달라고 요청할 뿐 그 자체로 무언가를 승인하지 않으며, 에이전트는 자신이 동의하지 않는 다른 지시와 똑같이 이를 거절할 수 있습니다. `ask_operator`의 답도 마찬가지입니다. 카드에서 `yes`를 고르는 것은 에이전트에게 넘기는 결정이지 권한 부여가 아니며, 무엇을 보낼 수 있는지는 여전히 scope, 샌드박스, MCP 권한 스위치가 정합니다.
+- **답장은 우편함이 아니라 알림입니다.** 답장이 도착한 순간 그 프로젝트에 열려 있는 gori TUI에 뜹니다. 그 창에서는 Miss Ring이 다음 키 입력이나 클릭까지 답장을 들고 있지만(Settings → Companion → Agent replies), 링은 TUI를 닫으면 비워집니다. TUI가 닫혀 있는 동안 쓰인 답장은 하나씩 다시 띄우지 않습니다. 다음에 그 프로젝트를 여는 TUI가 링에 노트 하나(`claude-code sent 2 replies while you were away`)를 올리고, 그 detail에 답장들이 나열되며, 전체 본문은 Activity 패널에 남습니다. 도구도 에이전트에게 같은 말을 하고, 결과에 `get_current_context`와 같은 형태의 `tui`를 실어 주므로 `windows: 0`을 받은 에이전트는 자신의 출력으로 말해야 한다는 걸 압니다.
 - **Channel 전달은 research preview입니다.** 아직 출시되지 않은 Claude Code 플래그와 Anthropic이 정한 허용 목록에 의존하며, 둘 다 `mcp.channels`가 모르는 사이 바뀔 수 있습니다 — inbox socket과 poll 도구가 따로 존재하는 이유는 그 플래그가 사라지는 날에도 기능이 계속 동작하게 하기 위해서입니다.
 
 ## 프로토콜 리비전 {#protocol-revisions}

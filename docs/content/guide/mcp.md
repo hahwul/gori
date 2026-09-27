@@ -88,17 +88,17 @@ By default `gori mcp` advertises every tool, so an agent can reach the whole wor
 
 | Start with | Tools | `tools/list` | Tokens | For |
 | --- | ---: | ---: | ---: | --- |
-| `gori mcp` | 189 | ~227 KB | ~58k | Everything (the default) |
+| `gori mcp` | 190 | ~229 KB | ~59k | Everything (the default) |
 | `--read-only` | 62 | ~72 KB | ~18k | Read tools and pure compute; no live requests |
-| `--tools=@recon` | 37 | ~54 KB | ~14k | Read and map the capture, replay a request, record issues and notes |
+| `--tools=@recon` | 38 | ~56 KB | ~14k | Read and map the capture, replay a request, record issues and notes |
 | `--tools=@recon --read-only` | 28 | ~39 KB | ~10k | `@recon` minus what `--read-only` disables |
-| `--tools=@minimal` | 17 | ~26 KB | ~7k | Read History, flows and the current TUI context; talk to the operator |
+| `--tools=@minimal` | 18 | ~28 KB | ~7k | Read History, flows and the current TUI context; talk to the operator |
 
 Tokens are bytes ÷ 4, a rough rule for JSON; your client's tokenizer has the final word.
 
 | Profile | Tools |
 | --- | --- |
-| `@minimal` | `project_info`, `list_projects`, `switch_project`, `create_project`, `ql_reference`, `ql_explain`, `list_history`, `get_flow`, `get_response_body_chunk`, `get_current_context`, `get_repeater_context`, `get_issue`, `list_sitemap`, `intercept_get`, `intercept_list`, `operator_messages`, `reply_to_operator` |
+| `@minimal` | `project_info`, `list_projects`, `switch_project`, `create_project`, `ql_reference`, `ql_explain`, `list_history`, `get_flow`, `get_response_body_chunk`, `get_current_context`, `get_repeater_context`, `get_issue`, `list_sitemap`, `intercept_get`, `intercept_list`, `operator_messages`, `reply_to_operator`, `ask_operator` |
 | `@recon` | `@minimal`, plus `list_scope`, `list_params`, `list_js_endpoints`, `scan_js_endpoints`, `compare_flows`, `list_env`, `decode`, `jwt_decode`, `jwt_verify`, `probe_issues`, `probe_promote`, `probe_dismiss`, `list_issues`, `list_notes`, `get_note`, `send_request`, `create_issue`, `update_issue`, `create_note`, `update_note` |
 
 A profile is a fixed list of names, not a glob, so a later gori that adds a `list_*` tool does not quietly grow `@recon`. Both keep `switch_project` and `create_project`, so they work on an unbound start, even on a machine with no project yet.
@@ -161,14 +161,15 @@ Every flag you pass alongside `--install-*` is written into the installed comman
 
 ## Tools
 
-**Read tools** (available under `--read-only`, except these four: `scan_js_endpoints`, `oast_payload`, `oast_poll`, and `reply_to_operator`):
+**Read tools** (available under `--read-only`, except these five: `scan_js_endpoints`, `oast_payload`, `oast_poll`, `reply_to_operator`, and `ask_operator`):
 
 | Tool | Purpose |
 | ------ | --------- |
 | `list_history` | List flows newest-first, with optional QL and pagination. Every row carries `source` (`proxy` for traffic a client sent, `repeater` for a `send_request` (including your own, which records by default), `discover`, `import`, …), so a flow gori made is never read back as evidence about the target. Filter with `src:`. Pass `columns` (the same `[LABEL=][req\|res:]kind:selector` specs `gori run ls --column` takes) to carry an extracted value per row (a header, a JSON field, a regex capture) under a `columns` object: what QL can *filter* on, [shown](/guide/proxy/#columns). Opt-in, since it costs a read per row. `hide_static:true` leaves out static assets (images, fonts, audio/video), the TUI's hide-static lens (`-static:true`), and `list_sitemap` and `list_params` take it too. Pass `ids` to fetch an EXACT set in one call — the rows `get_current_context` reports as `selection.ids` — returned in the order asked for; `limit` and the two cursors do not apply, an id with no row comes back in `missing_ids`, and anything `query` excluded comes back in `filtered_out_ids`, so a short answer always says which kind of short it is |
 | `list_events` | Tail an append-only feed of job lifecycle and agent activity, by forward cursor. Flows stay the firehose; this never duplicates flow rows. Every event carries `actor`, the surface that acted (`tui` / `cli` / `mcp`), so an agent can tell its own writes from the operator's, and config changes are recorded whoever makes them. The human reads the same feed on the **Project → Activity** pane |
 | `operator_messages` | What the operator typed for you in the gori TUI ("Tell the agent…"), addressed to this session or to all attached agents, forward-cursored; gori delivers these live when it can (a peer note in Claude Code, a `codex queue` hand-off in Codex, a channel event) and rides any that are still pending back on your next tool result; this is the fallback every agent has — call it at the start of a turn. Marks what it returns as delivered so the operator's ring can say "picked up" |
-| `reply_to_operator` | Answer the operator in gori: `summary` is one line for the notification ring and Miss Ring's bubble, `detail` the long form the ring opens on ↵, `level` its colour, `in_reply_to` the operator message it answers. This is how a reply reaches someone who is in gori, not in your terminal — as a notification, so only while a gori TUI is open on the project |
+| `reply_to_operator` | Answer the operator in gori: `summary` is one line for the notification ring and Miss Ring's bubble, `detail` the long form the ring opens on ↵, `level` its colour, `in_reply_to` the operator message it answers. This is how a reply reaches someone who is in gori, not in your terminal — as a notification: live while a gori TUI is open on the project, summarized in one note when one next opens otherwise |
+| `ask_operator` | Put a decision to the operator as a choice card in gori: `question` is one line, `choices` two to four labels, `detail` optional context, `default` the choice the card starts on, `expires_in_minutes` how long it waits (30 by default). Returns at once with the question's `id`; the answer comes back later as an operator message with `in_reply_to` set to that id and `outcome` `answered`, `dismissed` or `expired`, by every route `operator_messages` covers. The result carries `tui` like `reply_to_operator` |
 | `list_views` | The project's History [views](/guide/proxy/#views): named QL queries `list_history{view}` applies as a lens, ANDed over `query` rather than replacing it. Seven built-ins (`All`, `History`, `History + Repeater` (the default), `WebSocket`, `gRPC`, `SSE`, `Errors`), then the global library, then the project's own; `active` marks the one the TUI is showing, which does **not** apply to `list_history`, which filters only by the `view` you pass it |
 | `get_flow` | Full request + response for one flow. Bodies come back sanitized, with a `body_redaction` object, where a [redaction profile](/reference/cli/#run-redact) is on by default; `include_sensitive:true` turns that off along with the header redaction |
 | `get_response_body_chunk` | Page through decoded (or raw) flow/Repeater responses beyond the inline 64 KiB cap |
@@ -312,11 +313,15 @@ Each delivery attempt writes an `agent_delivery` row, and you see the outcome wi
 
 The way back is `reply_to_operator`. The handshake instructions tell the agent to use it to answer you without you switching to its terminal: the one-line `summary` lands in the ring (and on Miss Ring), tagged with the client's name, and `detail` opens from the ring with `↵` — a finding, a diff, a list of endpoints. It is a row in the same feed, so it works for every agent, Claude or not (though not one started with `--read-only`), and it stays on the project's record under the `agent` source.
 
+When the agent needs a decision rather than to report one, it calls `ask_operator` with a one-line question and two to four choices ("add api.example.com to scope?" — `yes` / `no`). The question does not take focus: it lands in the ring (Miss Ring holds it like a reply), marked `?`, and an orange `ask:N` chip counts what is waiting. Open the card with `↵` on that ring row, a click on the chip, or **Answer the agent…** in the command palette; press a choice's digit (or move with `↑`/`↓` and press `↵`), `x` to dismiss it without choosing, or `esc` to leave it for later. Your answer goes back as an operator message with `in_reply_to` set to the question, over the same routes as anything you type, so the agent gets it on its next tool result if nothing faster reaches it. A question nobody answers expires (after 30 minutes unless the agent chose otherwise), and the agent is told that too. The card is offered only while the agent that asked is still attached; a question asked while gori was closed is waiting when you open it.
+
+A script can reach you the same way with [`gori run notify`](/reference/cli/#run-notify): its line shows in the ring and on Miss Ring without the `ai` tag, under the `script` source.
+
 A few limits worth knowing before you rely on this:
 
 - **Nothing is replayed.** A message is delivered to the agents attached *at the moment you send it*. An agent that attaches afterward does not receive it retroactively — `operator_messages` only ever answers with what is still pending for that session, and a delivery already made is not made twice.
-- **It is a request, not consent.** Whichever layer carries it, a peer-framed message asks the model to do something; it does not authorize anything on its own, and the agent may decline exactly as it would any other instruction it disagrees with.
-- **A reply is a notification, not a mailbox.** It shows only in a gori TUI that is open on the project when it lands. There, Miss Ring keeps it up until your next key or click (Settings → Companion → Agent replies), but the ring is emptied when the TUI closes, and a TUI opened afterwards does not announce replies written before it: they are only in the Activity pane. The tool tells the agent the same, and its result carries `tui` in the shape `get_current_context` uses, so an agent that sees `windows: 0` knows to say it in its own output.
+- **It is a request, not consent.** Whichever layer carries it, a peer-framed message asks the model to do something; it does not authorize anything on its own, and the agent may decline exactly as it would any other instruction it disagrees with. The same holds for an `ask_operator` answer: choosing `yes` on a card is a decision you hand the agent, not a grant — scope, the sandbox and the MCP permission switches still decide what it can send.
+- **A reply is a notification, not a mailbox.** It shows in a gori TUI that is open on the project when it lands. There, Miss Ring keeps it up until your next key or click (Settings → Companion → Agent replies), but the ring is emptied when the TUI closes. Replies written while no TUI was open are not replayed one by one: the next TUI to open on the project puts one note in the ring (`claude-code sent 2 replies while you were away`) whose detail lists them, and the full text stays in the Activity pane. The tool tells the agent the same, and its result carries `tui` in the shape `get_current_context` uses, so an agent that sees `windows: 0` knows to say it in its own output.
 - **Channel delivery is a research preview.** It depends on an unreleased Claude Code flag and Anthropic's own curated allowlist, both of which can change out from under `mcp.channels` — the inbox socket and the poll tool exist so the feature still works the day that flag does not.
 
 ## Protocol Revisions

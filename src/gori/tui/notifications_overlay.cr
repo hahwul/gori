@@ -273,11 +273,14 @@ module Gori::Tui
       # opens a card rather than jumping to a result, and those are different enough that the
       # row has to say which one it is before the operator presses it. The message gives up
       # the two columns it takes, so the marker cannot land on top of the text.
-      marker = note.detail ? "›" : ""
+      # An agent's question still waiting on the operator (#1324) wears `?` instead, in the
+      # `ask:` chip's colour: ↵ there opens the answer card, not the long form.
+      marker = note.question_open? ? "?" : (note.detail ? "›" : "")
+      marker_fg = note.question_open? ? Theme.orange : Theme.muted
       tail = stamp.size + 1 + (marker.empty? ? 0 : 2)
       msg_w = {box.right - 1 - msg_x - tail, 1}.max
       screen.text(msg_x, py, note.message, fg, bg, bold, width: msg_w)
-      screen.text(box.right - 1 - stamp.size - 2, py, marker, Theme.muted, bg) unless marker.empty?
+      screen.text(box.right - 1 - stamp.size - 2, py, marker, marker_fg, bg) unless marker.empty?
       screen.text(box.right - 1 - stamp.size, py, stamp, Theme.muted, bg)
     end
 

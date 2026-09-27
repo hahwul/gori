@@ -63,7 +63,7 @@ module Gori
       MINIMAL = %w[project_info list_projects switch_project create_project
         ql_reference ql_explain list_history get_flow get_response_body_chunk
         get_current_context get_repeater_context get_issue list_sitemap intercept_get intercept_list
-        operator_messages reply_to_operator]
+        operator_messages reply_to_operator ask_operator]
 
       # …plus the rest of the capture an agent maps a target from, the pure decoders it reads
       # tokens with, ONE request replayed, and the issues and notes it records findings in.

@@ -72,6 +72,13 @@ module Gori
         "app.tell-agent", "Tell the agent…", "Send one line to an attached agent's session (delivery shows in the ring)",
         Verb::Scope::Global, category: Verb::Category::Action) { |ctx| ctx.tell_agent; nil }
 
+      # …and the way back for a DECISION (#1324): the oldest `ask_operator` question waiting,
+      # on its answer card. Palette-only for tell-agent's reason, with the `ask:N` chip and the
+      # ring's ↵ as the other two ways in — the chip is how the operator learns one is waiting.
+      r.register Verb::Definition.new(
+        "app.answer-agent", "Answer the agent…", "Open the oldest question an attached agent asked (the ask: chip)",
+        Verb::Scope::Global, category: Verb::Category::Action) { |ctx| ctx.answer_agent_question; nil }
+
       # The ACTIVE session slot — which identity the next Repeater/Fuzzer/intercept-forward
       # send goes out as. Global and palette-only, with the `session:NAME` chip as the other
       # way in: it is a session-wide send context, not a tab's action, and it is deliberately

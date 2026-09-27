@@ -100,8 +100,8 @@ module Gori
     #   denied group is left out of `tools/list` and refused with TOOL_DISABLED, the same two
     #   answers `--read-only` gives. Required on every `agent_action` tool; the rest of the
     #   writers that carry one are swept by spec/mcp/tool_permissions_spec.cr, which also names
-    #   the two that are deliberately unswitched: the operator channel (`operator_messages`,
-    #   `reply_to_operator`). A tool whose one mode sends sits in its own group AND is refused
+    #   the ones that are deliberately unswitched: the operator channel (`operator_messages`,
+    #   `reply_to_operator`, `ask_operator`). A tool whose one mode sends sits in its own group AND is refused
     #   per call under `send` (`Tools#call_denied_permission`): `probe_scan`'s `active: true`,
     #   and `set_probe_mode` raising the mode to one that probes actively.
     annotation Tool

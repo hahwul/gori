@@ -90,6 +90,7 @@ gori run <subcommand> [verb] [options]
 | `cookie [<cookie>]` | Flask / Rack / Django 세션 쿠키 디코드, 검증, 브루트포스, 위조 |
 | `decoder <chain> [input]` | Decoder 인코드 / 디코드 / 해시 체인 실행 |
 | `notes [<n>]` · `create` · `delete` | 프로젝트 노트 읽기, 작성, 삭제 (`delete`는 `--yes` 필요) |
+| `notify <summary>` | 스크립트에서 gori TUI의 오퍼레이터에게 한 줄 보여주기 (알림 링과 Miss Ring) |
 | `issues` · `create` · `update` · `delete` | 이슈 목록 / 내보내기, 또는 이슈 작성과 삭제 (`delete`는 `--yes` 필요) |
 | `links` · `add` · `delete` | 이슈나 노트에서 플로우, Repeater 세션, 잡으로 이어지는 증거 포인터 |
 | `evidence` | 고정한 요청+응답 사본을 만들고, 나열·조회·연결·연결 해제·삭제 |
@@ -1113,6 +1114,23 @@ gori run notes delete 2 --yes
 | `delete <n>` (`rm`) | 인덱스 `n`의 노트 삭제. `-y`/`--yes` 필요 |
 
 노트는 어디에도 다시 없는 글입니다 — 캡처를 다시 하거나 실행을 반복해서 복원할 수 있는 대상이 아닙니다. 게다가 인덱스는 **목록 위치**라서, 앞의 노트가 하나 사라지면 `notes delete 2`가 가리키는 노트도 달라집니다. 그래서 `delete`는 `-y`/`--yes` 없이는 거부하고(대화형 확인 절차는 없습니다), 거부 메시지에 노트의 첫 줄(빈 노트라면 생략)을 인용해 번호를 잘못 짚었는지 삭제 전에 확인할 수 있게 합니다.
+
+### run notify {#run-notify}
+
+`notify`는 에이전트가 MCP `reply_to_operator`로 하는 일을 스크립트가 하는 방법입니다. summary는 알림 링과 Miss Ring 말풍선에 뜨는 한 줄이고, `--detail`(또는 `--detail-file`, `-`면 STDIN)은 링에서 `↵`로 여는 긴 본문입니다:
+
+```bash
+gori run fuzz --flow 42 --auto --preset sqli > hits.txt && gori run notify "fuzz on flow 42 done" --level success --detail-file hits.txt
+./nightly-scan.sh 2>&1 | tail -20 | gori run notify "nightly scan finished" --detail-file -
+```
+
+| Option | Description |
+|--------|-------------|
+| `--detail=TEXT` / `--detail-file=PATH` | 긴 본문(≤32 KiB). `-`는 STDIN. 둘은 함께 쓸 수 없음 |
+| `--level=LEVEL` | `info`(기본) \| `success` \| `warn` \| `error`. 그 밖의 값은 거부 |
+| `--format json` / `--json` | `{ok, id, project, summary, tui}`. `tui`는 `{live, windows}` 또는 `{unknown: true}` — MCP `reply_to_operator`, `get_current_context`와 같은 형태 |
+
+이 줄은 프로젝트 이벤트 피드에 `script` 소스로 기록되므로, 링에는 에이전트 답장에 붙는 `ai` 표시 없이 뜨고 Activity 패널에서 따로 걸러 볼 수 있습니다. TUI가 열려 있든 아니든 기록되고 `notify`는 어느 쪽이든 `0`으로 끝나며, 출력이 창이 있어 보여줬는지를 알려줍니다. 창이 없었다면 다음에 그 프로젝트를 여는 TUI가, 그동안 도착한 에이전트 답장과 함께 노트 하나로 요약해 보여줍니다.
 
 ### run links {#run-links}
 

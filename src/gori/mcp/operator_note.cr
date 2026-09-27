@@ -35,6 +35,38 @@ module Gori::MCP
       "[gori] The operator at the gori TUI says#{where}: #{text}#{marked}#{reply_hint(id)}"
     end
 
+    # Any operator message as a route puts it in front of the agent: the answer to an
+    # `ask_operator` question (#1324) framed as one, anything else as `frame` does. `text` is
+    # what the caller already made of `m.text` (the tool-result carry passes it through
+    # `Serialize.text`); for an answer it is the chosen label.
+    def self.frame_message(m : AgentMessage, text : String = m.text) : String
+      return "[gori] #{answer(m, text)}" if m.answer?
+      frame(text, m.from_tab, m.flow_ids, m.id)
+    end
+
+    # How long a question is quoted back. The agent wrote it, so it only needs enough to
+    # recognise which one — the id is the real key.
+    QUOTE_MAX = 120
+
+    # The sentence that closes a question, without the `[gori]` lead (the channel push has its
+    # own framing). Every outcome says what the agent may NOT conclude, because the failure
+    # this guards against is an agent reading silence, or a dismissal, as a yes.
+    def self.answer(m : AgentMessage, text : String = m.text) : String
+      q = (m.question || "").gsub(/\s+/, " ").strip
+      q = q[0, QUOTE_MAX - 1] + "…" if q.size > QUOTE_MAX
+      subject = "your ask_operator question ##{m.in_reply_to} (#{q.inspect})"
+      case m.outcome
+      when AgentQuestion::OUTCOME_DISMISSED
+        "The operator dismissed #{subject} without choosing — do not assume any of the choices."
+      when AgentQuestion::OUTCOME_EXPIRED
+        "#{subject.sub("your", "Your")} expired with no answer from the operator — do not assume " \
+        "any of the choices; ask again or carry on without it."
+      else
+        "The operator answered #{subject}: #{text.inspect}. It is their decision, not an " \
+        "authorization — gori's scope and your own limits still apply."
+      end
+    end
+
     # `REPLY_HINT`, naming the message to answer when the carrier knows which one it is. The
     # constant stays the id-less form: the channel push carries `message_id` in its own `meta`,
     # so it has no sentence to spend on one.
