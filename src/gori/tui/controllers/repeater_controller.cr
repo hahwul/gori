@@ -111,15 +111,17 @@ module Gori::Tui
       @minimize_stop = nil.as(Repeater::Minimize::Stop?)
       # Differential timing analysis (#1246): the fiber streams a progress tick (pairs done) here
       # and one terminal Report; `drain_results` shows progress and stashes the finished report
-      # for the shell to open as a card. `@timing_cancel` is the Atomic the fiber polls so esc can
-      # stop a long run mid-flight (bounded, but seconds when N is large). Its `@timing_view` is the
-      # sub-tab it runs against (its inflight? gate is the one-run lock, like a send).
+      # for the shell to open as a card. `@timing_stop` is the flag the fiber polls so esc, closing
+      # the sub-tab or leaving the project can stop a long run mid-flight (bounded, but seconds
+      # when N is large). A REFERENCE, one per run: it used to be an `Atomic(Bool)`, a struct, so
+      # the fiber polled its own copy and no cancel ever reached it. `@timing_view` is the sub-tab
+      # it runs against (its inflight? gate is the one-run lock, like a send).
       @timing_progress = Channel(Int32).new(4)
       @timing_done = Channel({RepeaterView, Repeater::Timing::Stats::Report, Repeater::Timing::Present::Subject}).new(1)
       # The fiber's own death (a bug, not a transport outcome — `Timing.run` gets failures back as
       # results): the message the drain shows in place of the busy status it would otherwise leave.
       @timing_failed = Channel({RepeaterView, String}).new(1)
-      @timing_cancel = Atomic(Bool).new(false)
+      @timing_stop = nil.as(Repeater::Minimize::Stop?)
       @timing_view = nil.as(RepeaterView?)
       @timing_report = nil.as({Repeater::Timing::Stats::Report, Repeater::Timing::Present::Subject}?)
       # A refusal was applied to a view inline since the last drain (see #apply_refusal) — the
@@ -2097,6 +2099,8 @@ module Gori::Tui
         @minimize_job = nil
         @minimize_stop = nil
       end
+      # A timing run against the tab being closed stops too, for the same reason.
+      @timing_stop.try(&.stop) if @timing_view.try(&.same?(closing))
       # `delete_repeater` has always reported whether the DELETE committed (it is `exec_task_ok`)
       # and this was the last caller ignoring it; MCP's `delete_repeater` already surfaces it.
       orphaned = (id = @repeaters[idx].db_id) ? !@host.session.store.delete_repeater(id) : false # also propagates the close to peer sessions
@@ -2121,7 +2125,11 @@ module Gori::Tui
     #     row vanished, the leave-confirm reported the job stopped, and the fiber kept sending
     #     to the origin up to Minimize::SEND_CAP times. It has a seam now
     #     (Repeater::Minimize::Stop), on the shape of DiscoverRun#request_stop.
+    #
+    # A timing run is a bounded probe run as well — up to MAX_ITERATIONS pairs — so it is stopped
+    # here too; it has no job row to finish.
     def stop_all : Nil
+      @timing_stop.try(&.stop)
       return unless mj = @minimize_job
       @minimize_stop.try(&.stop)
       @host.jobs.finish(mj[1], :stopped, "project closed")
@@ -2731,7 +2739,7 @@ module Gori::Tui
     # the current pair and analyzes what it has.
     def cancel_timing : Nil
       return unless timing_running?
-      @timing_cancel.set(true)
+      @timing_stop.try(&.stop)
       @host.status("timing: cancelling…", :busy)
     end
 
@@ -2751,8 +2759,10 @@ module Gori::Tui
       end
       anchor = tabs.first
       return nil unless (view = anchor.view).loaded?
-      if view.inflight?
-        @host.status("repeater already in flight…")
+      # One timing run at a time: a second pair on other sub-tabs used to start beside it, and
+      # the first to finish cleared the lock and could overwrite the other's pending report.
+      if view.inflight? || timing_running?
+        @host.status(timing_running? ? "a timing run is already in flight — esc to cancel it" : "repeater already in flight…")
         return nil
       end
       return nil unless collected = collect_race_members(tabs) # sets its own status on a refusal
@@ -2772,14 +2782,13 @@ module Gori::Tui
     # `drain_results`. One run at a time (the view's inflight? gate), like a send.
     def launch_timing(view : RepeaterView, plan : Repeater::Plan, labels : Array(String),
                       iterations : Int32, interleaved : Bool) : Nil
-      return if view.inflight?
+      return if view.inflight? || timing_running?
       view.inflight = true
       @timing_view = view
-      @timing_cancel.set(false)
+      stop = @timing_stop = Repeater::Minimize::Stop.new
       prog = @timing_progress
       done = @timing_done
       failed = @timing_failed
-      cancel = @timing_cancel
       mode = interleaved ? Repeater::Timing::Mode::Interleaved : Repeater::Timing::Mode::Auto
       transport = interleaved ? "interleaved" : (plan.http2? ? "single-packet h2" : "last-byte-sync h1")
       subject = Repeater::Timing::Present::Subject.new(
@@ -2789,7 +2798,7 @@ module Gori::Tui
       @host.status("timing → #{plan.host}:#{plan.port} · #{iterations} pairs (#{transport}) · esc to cancel…#{unrecorded_note("timing")}", :busy)
       spawn(name: "gori-repeater-timing") do
         rep = Repeater::Timing.run(plan, iterations: iterations, mode: mode,
-          cancel: -> { cancel.get },
+          cancel: -> { stop.stopped? },
           progress: ->(n : Int32) {
             select
             when prog.send(n)
