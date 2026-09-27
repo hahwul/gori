@@ -333,7 +333,8 @@ module Gori
         return gate if gate.is_a?(Result)
 
         mode = interleaved ? Repeater::Timing::Mode::Interleaved : Repeater::Timing::Mode::Auto
-        rep = Repeater::Timing.run(plan, iterations: iterations, mode: mode, warmup: warmup)
+        rep = Repeater::Timing.run(plan, iterations: iterations, mode: mode, warmup: warmup,
+          cancel: -> { cancelled? })
         transport = interleaved ? "interleaved" : (plan.http2? ? "single-packet h2" : "last-byte-sync h1")
         Log.info { "timing_requests #{plan.scheme}://#{plan.host}:#{plan.port} x#{rep.iterations} (#{transport}) -> #{rep.verdict}" }
         subject = Repeater::Timing::Present::Subject.new(

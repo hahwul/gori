@@ -1296,6 +1296,8 @@ module Gori
       #                     additionally refused after a cancel (see the tool).
       #   run_retest        yes — `Retest::Engine` polls it before every step; the steps that
       #                     did run keep their History rows (P7: record the wire).
+      #   timing_requests   yes — `Repeater::Timing.run` polls it between pairs; up to
+      #                     MAX_ITERATIONS pairs of real requests to the target.
       #   cookie_crack      NO. It is pure CPU over a wordlist with no outbound and no yield
       #                     point, so the reader fiber never runs during it and the
       #                     notification is not even PARSED until it finishes — a check there

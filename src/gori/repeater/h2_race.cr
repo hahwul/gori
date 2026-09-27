@@ -98,8 +98,13 @@ module Gori
         # Mark the stream closed by a connection-level event (GOAWAY, or the socket dropping)
         # without an END_STREAM of its own — kept incomplete.
         def close_incomplete(started : Time::Instant) : Nil
+          @cut_short = true
           finish(started)
         end
+
+        # Still open when the read ended (deadline, GOAWAY, socket drop). Its duration is when
+        # the collector closed it — in member order — not when anything arrived.
+        getter? cut_short = false
 
         # Fail a still-open stream with `message`. A stream already done keeps its result; the
         # caller decides whether the error is local here or makes the shared connection unusable.
@@ -428,8 +433,11 @@ module Gori
         end
         head = synth_head(reply)
         resp = Proxy::Codec::Http1.parse_response_head(head)
+        # A stream the read left open is an error, as an h1 member's body read timeout is:
+        # otherwise its collector-order duration counts as a timing sample (B always "last").
+        error = reply.rst || (st.cut_short? ? "race: response still streaming when the read ended (h2 single-packet)" : nil)
         Result.new(head, reply.body, resp, st.duration_us,
-          error: reply.rst,
+          error: error,
           incomplete: !reply.clean_eos, delivered: true)
       end
 

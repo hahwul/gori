@@ -169,4 +169,27 @@ describe "Repeater::H2Engine.single_packet" do
     elapsed.should be < 3.seconds
     results.each(&.incomplete?.should(be_true))
   end
+
+  # A stream still open when the read ends was closed by the collector in member order, so its
+  # duration said B always finished last. Kept as data but failed, like an h1 body read timeout,
+  # so a timing run does not count it as a sample.
+  it "fails a stream the read left open instead of reporting it ok" do
+    port = start_h2_scripted_origin(2, hold: 2.seconds) do |io, ended|
+      ended.each do |(sid, _)|
+        h2_headers(io, sid, [{":status", "200"}], end_stream: false)
+        h2_data(io, sid, "partial", end_stream: false)
+      end
+    end
+
+    results = Gori::Repeater::H2Engine.single_packet(race_wires("/a", "/b"),
+      scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false,
+      timeout: 150.milliseconds)
+
+    results.each do |r|
+      r.ok?.should be_false
+      r.incomplete?.should be_true
+      r.error.not_nil!.should contain("still streaming")
+      r.response.not_nil!.status.should eq(200)
+    end
+  end
 end
