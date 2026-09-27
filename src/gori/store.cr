@@ -807,6 +807,16 @@ module Gori
       @probe_generation
     end
 
+    # Ops taken by EVERY store's writer fiber in this process, cumulative. A liveness signal,
+    # not a count of rows: a change between two reads means something wrote in between (read
+    # by `IdleGc` so it never collects under capture). Process-wide on purpose, since the GC
+    # heap it guards is. Single-threaded scheduler: plain Int64 (no -Dpreview_mt).
+    @@write_ops = 0_i64
+
+    def self.write_ops : Int64
+      @@write_ops
+    end
+
     # --- write API (called from proxy fibers) --------------------------------
     #
     # BARRIER NOTE: a returned flow write is committed and readable through every projection
@@ -1403,6 +1413,7 @@ module Gori
           while ops.size < BATCH_MAX && (extra = drain_one)
             ops << extra
           end
+          @@write_ops &+= ops.size
 
           # Batch the burst into one transaction (amortize fsync, P6), then fire
           # replies + events only AFTER commit so nothing observes uncommitted

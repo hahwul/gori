@@ -7,6 +7,7 @@ require "./project"
 require "./project_registry"
 require "./session"
 require "./store"
+require "./idle_gc"
 require "./proxy/tls/cert_authority"
 require "./cli/output"
 require "./capture_completion"
@@ -164,6 +165,7 @@ module Gori
       # depends on landing in gori.log. Re-assert gori's binding now that Termisu has had its
       # say (same memoized io — no new fd, no duplicate lines).
       Tui.bind_log_file
+      IdleGc.start # hand the heap a capture burst grew back to the OS once the process is idle
 
       begin
         # Armed FIRST, before anything else in this block: `open_terminal` above has ALREADY
@@ -286,6 +288,7 @@ module Gori
         exit 1
       end
       print_banner(session)
+      IdleGc.start # hand the heap a capture burst grew back to the OS once the process is idle
       spawn { capture_printer(session, format, max) }
       reload_stop = spawn_reload_loop(session)
       signaled = false
