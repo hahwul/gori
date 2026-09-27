@@ -208,8 +208,8 @@ describe Gori::Import::Burp do
   #
   # `parse_file` used to `.scrub` the WHOLE FILE before the `<request>` bytes were cut out
   # of it, on the theory that "scrubbing keeps the scanner's ASCII needles working". The
-  # scanner never needed it — `String#index` and `String#[]` agree on char boundaries and
-  # `String#[](a, n)` copies bytes — but a `base64="false"` item, which carries its message
+  # scanner never needed it — its needles are ASCII and it cuts with `byte_slice`, which
+  # copies bytes — but a `base64="false"` item, which carries its message
   # inline rather than encoded, went through that scrub with everything else. Measured
   # through `gori run import --burp` into a real SQLite store, source body
   # `a=1&bin=<ff fe 01 02>&b=2`:
@@ -266,6 +266,54 @@ describe Gori::Import::Burp do
       pair.request.target.should eq("/p?q=1")
       pair.request.scheme.should eq("https")
     end
+  end
+
+  # The scanner walks BYTE offsets (it walked chars, which made every item O(file) on any
+  # export that is not pure ASCII). A mixed export — non-ASCII text between the tags, inline
+  # messages with Korean text AND invalid bytes, base64 items after them — must come out as
+  # the same flows, in order, with every message byte for byte.
+  it "imports a mixed non-ASCII / invalid UTF-8 export item by item, byte for byte" do
+    bin = Bytes[0xFF, 0xFE, 0xC3, 0x28, 0xE2, 0x82] # stray, overlong-ish and truncated sequences
+    raw_body = String.build { |io| io << "이름=홍길동&bin="; io.write(bin); io << "&끝=1" }
+    inline_req = "POST /한글 HTTP/1.1\r\nHost: target.test\r\nContent-Length: #{raw_body.bytesize}\r\n\r\n#{raw_body}"
+    inline_resp = String.build { |io| io << "HTTP/1.1 200 OK\r\n\r\n응답 "; io.write(bin) }
+    b64_req = "GET /ascii HTTP/1.1\r\nHost: target.test\r\n\r\n"
+    b64_resp = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n본문 😀"
+    non_cdata_req = String.build { |io| io << "PUT /n HTTP/1.1\r\nHost: target.test\r\n\r\n값 "; io.write(bin) }
+    xml = items(
+      item("https://target.test/ascii", b64_req, b64_resp),
+      <<-XML,
+        <item>
+          <time>Tue Mar 05 12:34:56 GMT 2024</time>
+          <url><![CDATA[https://target.test/%ED%95%9C%EA%B8%80]]></url>
+          <comment>메모 ─ 비고</comment>
+          <request base64="false"><![CDATA[#{inline_req}]]></request>
+          <responselength>99</responselength>
+          <response base64="false"><![CDATA[#{inline_resp}]]></response>
+        </item>
+        XML
+      <<-XML,
+        <item>
+          <url><![CDATA[https://target.test/n]]></url>
+          <request base64="false">#{non_cdata_req}</request>
+        </item>
+        XML
+      item("https://target.test/ascii", b64_req, b64_resp),
+    )
+    result = parse(xml)
+    result.skipped.should eq(0)
+    result.flows.size.should eq(4)
+
+    whole = ->(req : Gori::Store::CapturedRequest) { req.head.to_a + (req.body.try(&.to_a) || [] of UInt8) }
+    [0, 3].each do |i|
+      whole.call(result.flows[i].request).should eq(b64_req.to_slice.to_a)
+      resp = result.flows[i].response.not_nil!
+      String.new(resp.body.not_nil!).should eq("본문 😀")
+    end
+    whole.call(result.flows[1].request).should eq(inline_req.to_slice.to_a)
+    result.flows[1].request.target.should eq("/한글") # the request line, verbatim
+    result.flows[1].response.not_nil!.body.not_nil!.to_a.should eq(("응답 ".to_slice.to_a + bin.to_a))
+    whole.call(result.flows[2].request).should eq(non_cdata_req.to_slice.to_a)
   end
 
   # COMPLEMENT: an ordinary base64 export — the shape Burp writes by default — is untouched
