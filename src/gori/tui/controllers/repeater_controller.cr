@@ -116,13 +116,20 @@ module Gori::Tui
       # when N is large). A REFERENCE, one per run: it used to be an `Atomic(Bool)`, a struct, so
       # the fiber polled its own copy and no cancel ever reached it. `@timing_view` is the sub-tab
       # it runs against (its inflight? gate is the one-run lock, like a send).
+      # Each run's stop flag doubles as its identity on these channels: a finished run's message
+      # clears the lock only if it is still the CURRENT run's, so a report drained after a new run
+      # began (on the same sub-tab or another) cannot unlock that one.
       @timing_progress = Channel(Int32).new(4)
-      @timing_done = Channel({RepeaterView, Repeater::Timing::Stats::Report, Repeater::Timing::Present::Subject}).new(1)
+      @timing_done = Channel({Repeater::Minimize::Stop, Repeater::Timing::Stats::Report, Repeater::Timing::Present::Subject}).new(1)
       # The fiber's own death (a bug, not a transport outcome — `Timing.run` gets failures back as
       # results): the message the drain shows in place of the busy status it would otherwise leave.
-      @timing_failed = Channel({RepeaterView, String}).new(1)
+      @timing_failed = Channel({Repeater::Minimize::Stop, String}).new(1)
       @timing_stop = nil.as(Repeater::Minimize::Stop?)
       @timing_view = nil.as(RepeaterView?)
+      # Both sub-tabs of the running pair (closing either stops the run), and the pair the last
+      # `prepare_timing_pair` validated, keyed by its anchor for `launch_timing`.
+      @timing_members = [] of RepeaterView
+      @timing_prepared = nil.as({RepeaterView, Array(RepeaterView)}?)
       @timing_report = nil.as({Repeater::Timing::Stats::Report, Repeater::Timing::Present::Subject}?)
       # A refusal was applied to a view inline since the last drain (see #apply_refusal) — the
       # next drain_results reports it so the shell still recomputes ^F hits and re-renders.
@@ -2099,8 +2106,8 @@ module Gori::Tui
         @minimize_job = nil
         @minimize_stop = nil
       end
-      # A timing run against the tab being closed stops too, for the same reason.
-      @timing_stop.try(&.stop) if @timing_view.try(&.same?(closing))
+      # A timing run against the tab being closed — either half of its pair — stops too.
+      @timing_stop.try(&.stop) if timing_running? && @timing_members.any?(&.same?(closing))
       # `delete_repeater` has always reported whether the DELETE committed (it is `exec_task_ok`)
       # and this was the last caller ignoring it; MCP's `delete_repeater` already surfaces it.
       orphaned = (id = @repeaters[idx].db_id) ? !@host.session.store.delete_repeater(id) : false # also propagates the close to peer sessions
@@ -2774,6 +2781,7 @@ module Gori::Tui
         @host.status("timing: #{reason}")
         return nil
       end
+      @timing_prepared = {view, tabs.map(&.view)}
       {view, plan, labels}
     end
 
@@ -2785,6 +2793,7 @@ module Gori::Tui
       return if view.inflight? || timing_running?
       view.inflight = true
       @timing_view = view
+      @timing_members = (pp = @timing_prepared) && pp[0].same?(view) ? pp[1] : [view]
       stop = @timing_stop = Repeater::Minimize::Stop.new
       prog = @timing_progress
       done = @timing_done
@@ -2795,7 +2804,7 @@ module Gori::Tui
         a_label: labels[0]? || "A", b_label: labels[1]? || "B",
         origin: "#{plan.scheme}://#{plan.host}:#{plan.port}", transport: transport,
         mode: mode.to_s.underscore)
-      @host.status("timing → #{plan.host}:#{plan.port} · #{iterations} pairs (#{transport}) · esc to cancel…#{unrecorded_note("timing")}", :busy)
+      @host.status("timing → #{plan.host}:#{plan.port} · #{iterations} pairs (#{transport}) · #{TIMING_CANCEL_HINT}…#{unrecorded_note("timing")}", :busy)
       spawn(name: "gori-repeater-timing") do
         rep = Repeater::Timing.run(plan, iterations: iterations, mode: mode,
           cancel: -> { stop.stopped? },
@@ -2806,19 +2815,23 @@ module Gori::Tui
             end
           })
         select
-        when done.send({view, rep, subject})
+        when done.send({stop, rep, subject})
         else
         end
       rescue ex
         ::Log.error(exception: ex) { "repeater timing fiber died" }
         select
-        when failed.send({view, "timing failed: #{ex.message}"})
+        when failed.send({stop, "timing failed: #{ex.message}"})
         else
         end
       ensure
         view.inflight = false
       end
     end
+
+    # esc cancels only on the Repeater tab (the shell leaves esc to every other tab's own keys),
+    # and the status line is drawn on every tab, so it says where.
+    TIMING_CANCEL_HINT = "esc in Repeater to cancel"
 
     # The finished timing report the shell should open as a card, taken once (cleared on read).
     def take_timing_report : {Repeater::Timing::Stats::Report, Repeater::Timing::Present::Subject}?
@@ -2833,7 +2846,7 @@ module Gori::Tui
       loop do
         select
         when pairs = @timing_progress.receive
-          @host.status("timing #{pairs} pairs… · esc to cancel", :busy)
+          @host.status("timing #{pairs} pairs… · #{TIMING_CANCEL_HINT}", :busy)
           applied = true
         else
           break
@@ -2842,8 +2855,8 @@ module Gori::Tui
       loop do
         select
         when triple = @timing_done.receive
-          _, rep, subject = triple
-          @timing_view = nil
+          run, rep, subject = triple
+          @timing_view = nil if @timing_stop.same?(run)
           # Hand the report to the shell to open as a card (a controller cannot open an overlay).
           @timing_report = {rep, subject}
           @host.status("timing: #{rep.verdict.label} · #{rep.rationale}", rep.verdict.no_difference? ? :done : :warn)
@@ -2854,7 +2867,7 @@ module Gori::Tui
       end
       select
       when pair = @timing_failed.receive
-        @timing_view = nil
+        @timing_view = nil if @timing_stop.same?(pair[0])
         @host.status(pair[1], :warn)
         applied = true
       else

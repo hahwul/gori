@@ -419,7 +419,7 @@ private class TimingCountingOrigin
 end
 
 # Two marked tabs against a live origin, sandbox OFF, and a timing run already sending.
-private def with_timing_run(pairs : Int32, &)
+private def with_timing_run(pairs : Int32, *, expect_running : Bool = true, &)
   origin = TimingCountingOrigin.new(10.milliseconds)
   root = File.tempname("gori-timing-run")
   Dir.mkdir_p(root)
@@ -438,7 +438,7 @@ private def with_timing_run(pairs : Int32, &)
     view, plan, labels = controller.prepare_timing_pair.not_nil!
     controller.launch_timing(view, plan, labels, pairs, interleaved: false)
     sleep 100.milliseconds
-    controller.timing_running?.should be_true
+    controller.timing_running?.should be_true if expect_running
     yield controller, host, origin
   ensure
     origin.close
@@ -470,6 +470,33 @@ describe "Gori::Tui::RepeaterController — stopping a timing run" do
       controller.stop_all
       sleep 60.milliseconds
       requests_after(origin).should eq(0)
+    end
+  end
+
+  # Closing a sub-tab stopped the run only when it was the pair's anchor (A); closing B left the
+  # fiber sending the closed tab's request.
+  it "stops sending when either sub-tab of the pair is closed" do
+    with_timing_run(200) do |controller, _, origin|
+      controller.jump_subtab(1)
+      controller.close_repeater_tab
+      sleep 60.milliseconds
+      requests_after(origin).should eq(0)
+    end
+  end
+
+  # A finished run's report, drained after the next run began, cleared the lock of that next run.
+  it "keeps a new run locked when the previous run's report is drained after it starts" do
+    with_timing_run(2, expect_running: false) do |controller, _, _|
+      deadline = Time.instant + 10.seconds
+      while controller.timing_running?
+        raise "first run never finished" if Time.instant > deadline
+        sleep 20.milliseconds
+      end
+      view, plan, labels = controller.prepare_timing_pair.not_nil!
+      controller.launch_timing(view, plan, labels, 200, interleaved: false)
+      controller.drain_results # the FIRST run's report
+      controller.timing_running?.should be_true
+      controller.cancel_timing
     end
   end
 
