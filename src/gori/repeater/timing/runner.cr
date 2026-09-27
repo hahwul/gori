@@ -43,11 +43,15 @@ module Gori::Repeater::Timing
     warmup = warmup.clamp(0, iterations - 1)
 
     samples = [] of Stats::Sample
+    # The race releases its members in request order, and whichever sits first has a fixed edge
+    # (it is written first, and read back in fiber-resume order) — identical requests came out
+    # "A slower" at p≈1e-14. Swap the release order every other pair, as Interleaved does.
+    swapped = mode.race? ? plan.with_requests(plan.requests.reverse) : plan
     total = warmup + iterations
     sent = 0
     while sent < total
       break if cancel.call
-      pair = send_pair(plan, mode, sent)
+      pair = send_pair(plan, swapped, mode, sent)
       sent += 1
       next if sent <= warmup # discard the warm-up pairs (TLS / connection warm-up)
       samples << pair
@@ -59,10 +63,17 @@ module Gori::Repeater::Timing
 
   # One A/B pair → its two release-relative durations. A member that errored (timeout, reset, a
   # refusal) contributes `nil` — no valid arrival time — so `Stats` drops it from that pair.
-  private def self.send_pair(plan : Repeater::Plan, mode : Mode, index : Int32) : Stats::Sample
+  private def self.send_pair(plan : Repeater::Plan, swapped : Repeater::Plan, mode : Mode,
+                             index : Int32) : Stats::Sample
     if mode.race?
-      results = plan.send_race # [A, B] in request order, both released together
-      Stats::Sample.new(duration_of(results[0]?), duration_of(results[1]?))
+      # Both released together; on odd pairs B goes first. Record by MEMBER, not release order.
+      if index.even?
+        results = plan.send_race
+        Stats::Sample.new(duration_of(results[0]?), duration_of(results[1]?))
+      else
+        results = swapped.send_race
+        Stats::Sample.new(duration_of(results[1]?), duration_of(results[0]?))
+      end
     else
       # ALTERNATE order each iteration to cancel first-mover advantage; record by MEMBER, not by
       # send order.

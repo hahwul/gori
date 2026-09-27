@@ -87,6 +87,18 @@ describe Gori::Repeater::Timing::Stats do
       rep.pairs_valid.should eq(1) # only the second pair had both
     end
 
+    it "signs the rationale's median gap by the medians, not by the verdict" do
+      # A trails B by a hair in 30 of 40 pairs, while in the other 10 A is fast and B very
+      # slow: A is "slower" by pair order but its median is lower.
+      samples = Array(Stats::Sample).new(0)
+      30.times { |i| samples << sample(101_i64 + i * 10, 100_i64 + i * 10) }
+      10.times { samples << sample(50_i64, 10_000_i64) }
+      rep = Stats.analyze(samples)
+      rep.verdict.should eq(Stats::Verdict::ASlower)
+      rep.median_gap_us.should be < 0
+      rep.rationale.should contain("median −")
+    end
+
     it "keeps the rationale's percentage and count on the same (decisive) denominator when ties exist" do
       # 23 A-slower, 2 B-slower, 5 ties → decisive = 25, pairs_valid = 30.
       samples = Array(Stats::Sample).new(0)
