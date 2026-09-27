@@ -171,6 +171,38 @@ describe Gori::Import::Oas do
     end
   end
 
+  # The shape `Export::OpenApi` writes when a capture spans hosts: root lists every server,
+  # and each path item names the one it was captured on.
+  it "sends an operation to its path item's or its own servers over the root list" do
+    body = <<-JSON
+      {"openapi":"3.0.3","info":{"title":"t","version":"1"},
+       "servers":[{"url":"https://a.test"},{"url":"https://b.test"}],
+       "paths":{"/only-b":{"servers":[{"url":"https://b.test"}],
+                           "get":{"responses":{"200":{"description":"OK"}}},
+                           "post":{"servers":[{"url":"https://c.test"}],"responses":{"200":{"description":"OK"}}}},
+                "/root":{"get":{"responses":{"200":{"description":"OK"}}}}}}
+      JSON
+    with_spec(body, ".json") do |path|
+      result = Gori::Import::Oas.parse_file(path)
+      result.flows.map { |f| {f.request.method, f.request.host} }.sort.should eq(
+        [{"GET", "a.test"}, {"GET", "b.test"}, {"POST", "c.test"}])
+    end
+  end
+
+  it "resolves a percent-encoded $ref pointer" do
+    body = <<-JSON
+      {"openapi":"3.0.3","info":{"title":"t","version":"1"},
+       "servers":[{"url":"https://a.test"}],
+       "paths":{"/users/{id}":{"get":{"responses":{"200":{"description":"OK"}}}},
+                "/alias/{id}":{"$ref":"#/paths/~1users~1%7Bid%7D"}}}
+      JSON
+    with_spec(body, ".json") do |path|
+      result = Gori::Import::Oas.parse_file(path)
+      result.skipped.should eq(0)
+      result.flows.size.should eq(2)
+    end
+  end
+
   it "bounds local ref cycles and counts the affected operation as skipped" do
     body = <<-JSON
       {"openapi":"3.0.3","info":{"title":"t","version":"1"},

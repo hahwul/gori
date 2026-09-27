@@ -70,6 +70,12 @@ module Gori
         op = item[method]? rescue nil
         return {nil, false} unless op
         op = resolve_ref(spec, op)
+        # OpenAPI 3 lets an operation or a path item name its own servers, overriding the
+        # root list — gori's own export writes one per path when a capture spans hosts.
+        unless swagger2
+          base = server_url(op.as_h?.try(&.["servers"]?)) ||
+                 server_url(item.as_h?.try(&.["servers"]?)) || base
+        end
         {operation_to_flow(now, base, url_path, method, op, item, spec, swagger2,
           schemes, root_security, prov), true}
       rescue ex : RemoteReference
@@ -108,7 +114,13 @@ module Gori
       end
 
       private def self.server_base(spec : JSON::Any) : String
-        servers = spec["servers"]?
+        server_url(spec["servers"]?) ||
+          raise Gori::Error.new("OpenAPI spec missing servers — add a servers[0].url block")
+      end
+
+      # `servers[0].url` of a root, path-item or operation `servers` list, or nil when the
+      # list is absent or empty.
+      private def self.server_url(servers : JSON::Any?) : String?
         if servers && (arr = servers.as_a?) && (first = arr[0]?)
           # `servers: ["https://api.example.com"]` is a common YAML shorthand but not the
           # OpenAPI shape, and `as_a?` proves only that the ELEMENT exists, not that it is an
@@ -141,7 +153,7 @@ module Gori
           end
           return url
         end
-        raise Gori::Error.new("OpenAPI spec missing servers — add a servers[0].url block")
+        nil
       end
 
       # Swagger 2.0 puts the authority and base path in separate root fields. Its `schemes`
@@ -378,8 +390,12 @@ module Gori
         node = root
         reference[2..].split('/', remove_empty: false).each do |escaped|
           token = escaped.gsub("~1", "/").gsub("~0", "~")
+          # A `$ref` is a URI fragment, so its tokens are percent-encoded first (RFC 6901 §6):
+          # `#/paths/~1users~1%7Bid%7D`. The raw token is still tried for a spec that wrote a
+          # bare `%` in a key.
+          decoded = escaped.includes?('%') ? (URI.decode(escaped).gsub("~1", "/").gsub("~0", "~") rescue token) : token
           child = if object = node.as_h?
-                    object[token]?
+                    object[decoded]? || object[token]?
                   elsif array = node.as_a?
                     numeric = !token.empty? && token.each_byte.all? { |byte| byte >= 0x30_u8 && byte <= 0x39_u8 }
                     index = numeric ? token.to_i? : nil
