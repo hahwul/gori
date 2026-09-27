@@ -1707,17 +1707,27 @@ module Gori
     # (import reference placeholders that were never sent) are EXCLUDED — they are permanently
     # Pending by design, not orphaned in-flight captures, so finalising them to Error would
     # fabricate a network failure for data the operator imported (#408).
+    #
+    # The WHERE is PENDING_WHERE, literal and not bound, so it matches `idx_flows_pending`'s
+    # (V36) and the SELECT reads only that index; the UPDATE then touches the collected rows by
+    # primary key, in the same transaction, so nothing can turn Pending in between.
     private def abandon_all_pending(conn : DB::Connection, message : String) : Array(Int64)
       ids = [] of Int64
-      conn.query("SELECT id FROM flows WHERE state = ? AND unsent = 0", FlowState::Pending.value) do |rs|
+      conn.query("SELECT id FROM flows WHERE #{PENDING_WHERE}") do |rs|
         rs.each { ids << rs.read(Int64) }
       end
-      return ids if ids.empty?
-      conn.exec(
-        "UPDATE flows SET state = ?, error = ?, status = 0, static_asset = 0 WHERE state = ? AND unsent = 0",
-        FlowState::Error.value, message, FlowState::Pending.value)
+      ids.each_slice(ID_CHUNK) do |slice|
+        args = [FlowState::Error.value, message] of DB::Any
+        slice.each { |id| args << id }
+        conn.exec("UPDATE flows SET state = ?, error = ?, status = 0, static_asset = 0 " \
+                  "WHERE id IN (#{Array.new(slice.size, "?").join(", ")})", args: args)
+      end
       ids
     end
+
+    # The rows `abandon_all_pending` finalises, spelled exactly as `idx_flows_pending`'s WHERE:
+    # SQLite picks a partial index only for a query carrying the same literal terms.
+    PENDING_WHERE = "state = #{FlowState::Pending.value} AND unsent = 0"
 
     # Non-blocking receive for batching a burst (no `try_receive?` in stdlib).
     # Returns the next immediately-available op, or nil if none/closed.

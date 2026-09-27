@@ -1515,6 +1515,21 @@ module Gori
           SQL
       ]
 
+      # V36 — the rows `Store#abandon_all_pending` finalises: Pending captures that were sent.
+      # It runs on the writer at every session open and twice at close, and without this its
+      # `state = 0 AND unsent = 0` was a full scan of `flows` — and both columns sit past the
+      # body BLOBs (see V31), so it walked every row's overflow chain. The index holds only
+      # in-flight flows, so it stays a handful of entries on any project, and a capture pays
+      # one small insert/delete pair for it.
+      #
+      # `0` is `FlowState::Pending.value`, spelled literally because SQLite uses a partial index
+      # only for a query whose WHERE carries the same literal (a bound `?` never matches);
+      # `abandon_all_pending` interpolates the enum, and `spec/store/pending_index_spec.cr`
+      # holds the two together and checks the plan.
+      V36 = [
+        "CREATE INDEX idx_flows_pending ON flows (id) WHERE state = 0 AND unsent = 0",
+      ]
+
       # Data statements that call gori's OWN SQL functions, run by `migrate!` right after the
       # version they complete. Kept out of MIGRATIONS because that list is plain schema that a
       # bare connection can replay (specs build every historical shape that way), and a bare
@@ -1537,7 +1552,7 @@ module Gori
 
       MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17,
                     V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29, V30, V31, V32, V33,
-                    V34, V35]
+                    V34, V35, V36]
 
       def self.migrate!(db : DB::Database, read_only : Bool = false) : Nil
         db.using_connection do |conn|
