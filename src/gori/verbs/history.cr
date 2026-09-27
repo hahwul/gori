@@ -648,11 +648,14 @@ module Gori
         mnemonic: 'r', intent: :to_repeater, pinned: true, group: :send) { |ctx| ctx.close_detail; ctx.repeater_selected; nil }
 
       # Create an issue while reading the flow — the natural moment to file one.
-      # Without this, ⇧F silently dead-ends in the detail (it's a Body-scope verb).
+      # Without this, ⇧F silently dead-ends in the detail (it's a Body-scope verb). The form
+      # opens OVER the drill-in (it stays on History), so esc lands back on the flow and the
+      # filed issue's esc returns to it (`Runner#open_filed_issue`); only the verbs that jump
+      # to another tab close the detail first.
       r.register Verb::Definition.new(
         "detail.issue", "Add issue", "Create an issue from this flow",
         Verb::Scope::HistoryDetail, [Verb::Chord.new("f", shift: true)],
-        intent: :file_issue, group: :triage) { |ctx| ctx.close_detail; ctx.issue_create; nil }
+        intent: :file_issue, group: :triage) { |ctx| ctx.issue_create; nil }
 
       # Send the open flow to the Comparer (mirrors history.compare from the list).
       r.register Verb::Definition.new(
@@ -666,11 +669,11 @@ module Gori
         Verb::Scope::HistoryDetail, intent: :to_browser, group: :view) { |ctx| ctx.open_response_external; nil }
 
       # The drill-in's twin of history.mock-response: the moment you decide to fake a response is
-      # the moment you are reading it. Closes the detail first, like detail.issue.
+      # the moment you are reading it. The rule form opens over the drill-in, like detail.issue.
       r.register Verb::Definition.new(
         "detail.mock-response", "Mock this response",
         "Draft a short-circuit rule that answers this request with this captured response, then edit it before saving",
-        Verb::Scope::HistoryDetail, intent: :mock, group: :send) { |ctx| ctx.close_detail; ctx.mock_response_from_flow; nil }
+        Verb::Scope::HistoryDetail, intent: :mock, group: :send) { |ctx| ctx.mock_response_from_flow; nil }
 
       # The single smart Copy over the navigable detail text: the selection when one is held,
       # else the whole pane (the rule every other tab's Copy already follows — see
@@ -703,10 +706,10 @@ module Gori
         Verb::Scope::HistoryDetail, intent: :scope_add, group: :scope) { |ctx| ctx.scope_add_host; nil }
 
       # Run the Probe active checks against the open flow (mirrors history.probe-active 'A' from
-      # the list) — close the detail first so the confirm dialog isn't buried under it.
+      # the list). The confirm opens over the drill-in, like detail.issue.
       r.register Verb::Definition.new(
         "detail.probe-active", "Run active scan", "Run the Probe active checks against this flow (shows the request count first)",
-        Verb::Scope::HistoryDetail, mnemonic: 'A', group: :send) { |ctx| ctx.close_detail; ctx.probe_active_selected; nil }
+        Verb::Scope::HistoryDetail, mnemonic: 'A', group: :send) { |ctx| ctx.probe_active_selected; nil }
 
       # Delete the open flow (mirrors history.delete, and its letter): menu-only `d`, so the
       # drill-in does not read `X` as "this one" while the list one keystroke away reads it as

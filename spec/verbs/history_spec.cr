@@ -161,15 +161,18 @@ describe "Gori::Verbs.register_history" do
     # over the destination tab. Order is the whole point of the assertion.
     it "closes the detail before jumping to another tab" do
       verb_intents(r, "detail.repeater").should eq([:close_detail, :repeater_selected])
-      verb_intents(r, "detail.issue").should eq([:close_detail, :issue_create])
       verb_intents(r, "detail.fuzz").should eq([:close_detail, :fuzz_selected])
       verb_intents(r, "detail.mine").should eq([:close_detail, :mine_selected])
       verb_intents(r, "detail.sequence").should eq([:close_detail, :sequence_selected])
-      verb_intents(r, "detail.probe-active").should eq([:close_detail, :probe_active_selected])
-      verb_intents(r, "detail.mock-response").should eq([:close_detail, :mock_response_from_flow])
     end
 
+    # A verb that only raises a card stays on History, so the card opens OVER the flow and
+    # esc lands back on it (`Overlay#over_detail?`); closing first dropped the operator on
+    # the list instead.
     it "keeps the in-place actions from closing the detail" do
+      verb_intents(r, "detail.issue").should eq([:issue_create])
+      verb_intents(r, "detail.probe-active").should eq([:probe_active_selected])
+      verb_intents(r, "detail.mock-response").should eq([:mock_response_from_flow])
       verb_intents(r, "detail.compare").should eq([:comparer_add_selected])
       verb_intents(r, "detail.copy").should eq([:detail_copy])
       r["detail.copy-flow"]?.should be_nil # Copy as… → Raw request (#1274)

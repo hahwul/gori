@@ -165,6 +165,14 @@ module Gori::Tui
     abstract def active_tab : Symbol # read the active tab (Repeater reconcile gates on it)
     abstract def focus : Symbol      # read the focus model (:menu | :subtabs | :body)
 
+    # Is the History drill-in on screen, up itself or under a card opened over it? What
+    # History DRAWS on; `overlay == :detail` stays what its keys gate on, since a card up
+    # takes the keys. CONCRETE for the spec doubles, like `status(message, kind)` below;
+    # Runner overrides it with the card-aware answer.
+    def detail_shown? : Bool
+      overlay == :detail
+    end
+
     # A toast WITH a status-strip glyph: `:busy` (spinner), `:done` (✓) or `:error` (✗) — see
     # `Runner#format_status_message` for why the glyph is a kind on the call and not a prefix
     # of the text. CONCRETE with a plain-toast fallback for the same reason `subtab_find_focused?`
