@@ -354,3 +354,39 @@ describe "Gori::Tui::RepeaterView response read motion" do
     view.resp_line_edge(-1).should be_false
   end
 end
+
+# The diff pane's decorated line ("+ "/"- "/"  " + text) is memoised on the last line asked
+# for, since every drawn row of a wrapped line asks for it. The memo is keyed by the line's
+# own String and kind, so it must never hand one line's decoration to another: each line of a
+# mixed diff keeps its own prefix, a repeat frame is cell-identical, and a new send redraws.
+describe "Gori::Tui::RepeaterView diff pane decoration memo" do
+  it "draws every line with its own prefix, frame after frame, and follows a new send" do
+    view = Gori::Tui::RepeaterView.new
+    view.load_blank
+    view.focus_pane(:response)
+    hdr = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n"
+    long = "W" * 150
+    view.apply(Gori::Repeater::Result.new(hdr.to_slice, "alpha\nkeep\n".to_slice, nil, 1000_i64))
+    view.apply(Gori::Repeater::Result.new(hdr.to_slice, "beta\nkeep\n#{long}".to_slice, nil, 1000_i64))
+    view.toggle_resp_mode # → diff
+    rect = Rect.new(0, 0, 80, 20)
+    frames = Array.new(3) do
+      fb = MemoryBackend.new(80, 20)
+      view.render(Screen.new(fb), rect)
+      fb
+    end
+    b = frames[0]
+    b.contains?("- alpha").should be_true
+    b.contains?("+ beta").should be_true
+    b.contains?("  keep").should be_true
+    b.contains?("+ WWW").should be_true
+    (0...20).count { |y| b.row(y).includes?("WWWW") }.should be > 1 # the long line wraps
+    frames.each { |f| (0...20).map { |y| f.row(y) }.should eq((0...20).map { |y| b.row(y) }) }
+
+    view.apply(Gori::Repeater::Result.new(hdr.to_slice, "gamma\nkeep\n".to_slice, nil, 1000_i64))
+    b2 = MemoryBackend.new(80, 20)
+    view.render(Screen.new(b2), rect)
+    b2.contains?("+ gamma").should be_true
+    b2.contains?("- WWW").should be_true # now on the baseline side, as a deletion
+  end
+end

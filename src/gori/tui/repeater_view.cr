@@ -190,6 +190,10 @@ module Gori::Tui
       @resp_text_i = -1
       @resp_text = ""
       @resp_search_memo = Wrap::SearchMemo.new # ^F whole-line scans of the response pane
+      # One-entry memo of the DIFF pane's decorated line — see `diff_decorated`.
+      @diff_deco_text = nil.as(String?)
+      @diff_deco_kind = Repeater::DiffKind::Same
+      @diff_deco = ""
       # Gutter + content width from the LAST render of whichever response pane is active.
       # Hit-testing and the scroll walkers read these rather than re-deriving them, because
       # the per-mode line counts the gutter is sized from are not all the same

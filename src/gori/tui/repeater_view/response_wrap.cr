@@ -169,17 +169,28 @@ class Gori::Tui::RepeaterView
   private def resp_drawn_source : {Int32, Proc(Int32, String), Int32}
     if transcript_rows?.nil? && !@reveal && @resp_mode == :diff
       data = diff_lines
-      return {data.size, ->(i : Int32) do
-        d = data[i]
-        prefix = case d.kind
-                 when .add? then '+'
-                 when .del? then '-'
-                 else            ' '
-                 end
-        "#{prefix} #{d.text}"
-      end, DIFF_PREFIX_COLS}
+      return {data.size, ->(i : Int32) { diff_decorated(data[i]) }, DIFF_PREFIX_COLS}
     end
     size, line_at = resp_line_source
     {size, line_at, 0}
+  end
+
+  # `d` as the diff pane draws it: the "+ "/"- "/"  " decoration, then the text. Memoised on
+  # the last line asked for, because every drawn row asks — `render_diff` slices the row out
+  # of it, and under wrap one minified body line is the whole viewport. Built per call, each
+  # of those rows copied the line and walked it for its char count before slicing: 19-26 ms a
+  # keystroke on a 1.7 MB body. The key is the line's own String and kind, which are all the
+  # result is made of, so a rebuilt `diff_lines` holding the same text still hits.
+  private def diff_decorated(d : Repeater::DiffLine) : String
+    text = d.text
+    return @diff_deco if text.same?(@diff_deco_text) && d.kind == @diff_deco_kind
+    prefix = case d.kind
+             when .add? then '+'
+             when .del? then '-'
+             else            ' '
+             end
+    @diff_deco_text = text
+    @diff_deco_kind = d.kind
+    @diff_deco = "#{prefix} #{text}"
   end
 end
