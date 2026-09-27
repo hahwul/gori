@@ -50,8 +50,11 @@ module Gori::Tui
       # to the chip width, else a positional fallback so empty notes are still
       # addressable. The title rule itself lives in `Notes.title` — the single
       # source of truth the CLI listing reads too, so labels can't drift.
+      #
+      # Read off the editor's lines, not `@area.text`: the strip calls this for every chip
+      # several times a frame, and `text` joins the whole note to read its first line.
       def label(idx : Int32) : String
-        if t = Notes.title(@area.text)
+        if t = Notes.title(@area.each_line)
           t.size > 15 ? "#{t[0, 14]}…" : t
         else
           "note #{idx + 1}"

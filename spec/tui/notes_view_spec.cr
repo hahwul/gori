@@ -618,3 +618,33 @@ describe "NotesView READ selection across a document hand-over" do
     end
   end
 end
+
+# `Note#label` reads the title off the editor's lines (`TextArea#each_line`) instead of the
+# joined `text` it used to hand `Notes.title`. Same scan, different source — so the gate is
+# that every shape of note gets the label the joined text gave it.
+describe "NotesView::Note#label (line source)" do
+  it "labels every edge-case note exactly as the joined-text title did" do
+    invalid = String.new(Bytes[0x23, 0x20, 0x68, 0x80, 0x0a, 0x62]) # "# h\x80\nb"
+    texts = [
+      "", "\n", "\n\n\n", "   \n\t\n", "plain", "plain\nsecond",
+      "\n\n  leading blanks then text  \nnext",
+      "# Heading\n\nbody", "## closed ##\nbody", "#\n\nfalls through", "##   \n#\n  ###  \nreal",
+      "#hashtag", "    # indented code", "####### seven",
+      "crlf title\r\nbody\r\n", "\r\n\r\n# crlf heading\r\n", "lone\rcr inside\nx",
+      "trailing cr\r", "title\r\r\r\nx", "#\r\nafter bare crlf marker",
+      "a very long first line that is well past the fifteen column chip width",
+      "한국어 제목\n본문", invalid, "x" * 20 + "\n" + "y" * 100_000,
+    ]
+    texts.each do |text|
+      note = Gori::Tui::NotesView::Note.new(1_i64, text)
+      want = if t = Gori::Notes.title(note.area.text)
+               t.size > 15 ? "#{t[0, 14]}…" : t
+             else
+               "note 4"
+             end
+      note.label(3).should eq(want), "label differs for #{text[0, 40].inspect}"
+      Gori::Notes.title_and_detail(note.area.each_line)
+        .should eq(Gori::Notes.title_and_detail(note.area.text)), "detail differs for #{text[0, 40].inspect}"
+    end
+  end
+end

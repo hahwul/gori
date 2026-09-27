@@ -328,6 +328,12 @@ module Gori
       title_and_detail(text)[0]
     end
 
+    # The same title, from a buffer already split into lines — the TUI editor's own shape
+    # (`TextArea#each_line`). See the Iterator overload of `title_and_detail`.
+    def self.title(lines : Iterator(String)) : String?
+      title_and_detail(lines)[0]
+    end
+
     # `title`, plus the first non-blank line AFTER the one the title came from — the second
     # line a picker row shows beside the name. Both come off ONE scan because a caller that
     # re-derives "line one is the title" gets it wrong the moment a title falls through an
@@ -346,8 +352,18 @@ module Gori
     # pre-Markdown path — `line.strip`, exactly what this returned before — and the caller's
     # own scrubber still gets its turn on the way out.
     def self.title_and_detail(text : String) : {String?, String}
+      title_and_detail(text.each_line)
+    end
+
+    # The scan itself, over lines with their `\n` already gone — `String#each_line` for a
+    # stored body, or `TextArea#each_line` for the TUI's live buffer, whose `text` JOINS the
+    # whole note to hand it here. That join is what the chip labels paid, per chip, several
+    # times a frame: 4 notes of 750 KB was ~3 MB allocated per `subtab_labels` call to read
+    # one line of each. The two sources yield the same lines (a TextArea line never holds a
+    # `\n`; a `\r` before one is stripped below either way), so the answer is the same.
+    def self.title_and_detail(lines : Iterator(String)) : {String?, String}
       title = nil.as(String?)
-      text.each_line do |raw|
+      lines.each do |raw|
         line = raw.rstrip('\r')
         next if line.blank?
         if found = title

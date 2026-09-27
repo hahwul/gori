@@ -377,6 +377,12 @@ module Gori::Tui
       @lines.map(&.itself)
     end
 
+    # The buffer's lines, lazily and without a copy — for a caller that reads a PREFIX of the
+    # document (a title, a label) and must not pay `text`'s whole-buffer join to get it.
+    def each_line : Iterator(String)
+      @lines.each
+    end
+
     # First line with non-whitespace content — used to derive a label/preview
     # (e.g. a Notes sub-tab title) without joining the whole buffer. nil when the
     # document is entirely blank.
