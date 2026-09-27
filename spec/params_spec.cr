@@ -141,6 +141,8 @@ describe Gori::Params do
       Gori::Params.json_leaf("q").should eq("q")
       Gori::Params.json_leaf(%(a["b.c"])).should eq("b.c")
       Gori::Params.json_leaf("tags[]").should be_nil
+      Gori::Params.json_leaf(%(["x["])).should eq("x[")
+      Gori::Params.json_leaf(%(a["q\\"["])).should eq(%(q"[))
     end
   end
 
