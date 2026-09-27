@@ -1578,7 +1578,15 @@ module Gori
         # the connection is half-closed and `#close` must not re-close the pool (see there).
         if last = @writer_conn
           @writer_conn = nil
-          @writer_conn_suspect ? retire_writer_conn(last) : last.release
+          if @writer_conn_suspect
+            retire_writer_conn(last)
+          else
+            # Back to the pool, where a reader may take it for the rest of the session (a writer
+            # fiber that died mid-loop leaves the store open): undo the writer-only page cache
+            # (WRITER_CACHE_KIB) so it serves reads with the pool's -64000 like every other.
+            last.exec("PRAGMA cache_size=-64000") rescue nil
+            last.release
+          end
         end
       end
     end
