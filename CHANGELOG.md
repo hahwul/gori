@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Network: HTTPS interception mints a new host's certificate context in ~0.1 ms instead of ~3.7 ms and ~1 MB less memory (it no longer loads the system CA bundle into each), caches up to 1024 of them, and upstream DNS answers are reused for 10 seconds, so an `/etc/hosts` edit or a rebinding record can take that long to be seen (#1340)
+- Performance: capture stalls less on SQLite checkpoints, an idle gori hands its freed memory back to the OS, and idle keep-alive connections and large captured bodies hold far less memory (#1340)
+- History/MCP: filters that match few rows (`host:`, `path:`, `src:`, `status:2xx`, size ranges) and Sitemap listings answer from covering indexes on large projects, e.g. `src:repeater` 1 s → 7 ms and a `list_sitemap` page 1.2 s → 0.2 ms, and `body~` regex filters run about twice as fast; the first open after upgrading builds the indexes once, which takes a few seconds on a multi-GB project (#1340)
+- TUI: `^F` over a large one-line body no longer rescans the whole line for every drawn row (60–150 ms a frame → under 1 ms), pastes into the Decoder, JWT and Cookie editors land in one step (160 KB: 15 s → 0.5 s) and a long paste no longer redraws per key, and the Repeater diff and Comparer word diff of large bodies stay responsive (#1340)
 - Performance: capture spends less time on the fiber the proxy shares — Content-Type and header scans, HPACK decoding, chunk-size lines and WebSocket messages no longer re-parse or copy per flow — and passive Probe scans run 2–3× faster on HTML and JavaScript bodies (#1337)
 - TUI: the Probe tab no longer re-reads and parses every finding on each tick while traffic flows, which cut proxy throughput up to 4× with the tab open, and large Notes stop copying their whole text every frame (#1337)
 - History: deleting many flows holds the capture writer for milliseconds instead of seconds, deleting an HTTP/2 flow no longer fails, and opening or closing a large project no longer scans every stored body (#1337)
