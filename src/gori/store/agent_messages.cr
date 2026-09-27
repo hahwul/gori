@@ -92,10 +92,18 @@ module Gori
   # The agent's answer to the operator (#1090): one line for the ring and Miss Ring's bubble,
   # an optional long form the ring opens on ↵. `source: "agent"`, `kind: "agent_reply"`,
   # `actor: "mcp"` — the same row shape the agent's other actions already leave in the feed.
+  #
+  # The KIND means "addressed to the operator", and `source` says who is speaking: a script's
+  # `gori run notify` (#1323) writes the same kind under `source: "script"`, `actor: "cli"`, so
+  # one drain and one watermark (#1322) serve both, and the ring's `ai` marker — which reads the
+  # source — never claims a shell loop is an agent.
   record AgentReply, id : Int64, summary : String, detail : String?, level : String,
-    target_label : String, pid : Int64, in_reply_to : Int64?, created_at : Int64 do
-    KIND   = "agent_reply"
-    LEVELS = %w[info success warn error]
+    target_label : String, pid : Int64, in_reply_to : Int64?, created_at : Int64,
+    source : String = SOURCE_AGENT do
+    KIND          = "agent_reply"
+    SOURCE_AGENT  = "agent"
+    SOURCE_SCRIPT = "script"
+    LEVELS        = %w[info success warn error]
     # A summary is ONE line for a one-row ring; a detail is bounded like any stored blob.
     SUMMARY_MAX = 200
     DETAIL_MAX  = 32 * 1024
@@ -105,7 +113,7 @@ module Gori
       h = row.payload.try { |p| JSON.parse(p).as_h? } || {} of String => JSON::Any
       new(row.id, row.message, h["detail"]?.try(&.as_s?), row.level,
         h["target"]?.try(&.as_s?) || "agent", h["pid"]?.try(&.as_i64?) || 0_i64,
-        h["in_reply_to"]?.try(&.as_i64?), row.created_at)
+        h["in_reply_to"]?.try(&.as_i64?), row.created_at, row.source)
     rescue JSON::ParseException
       nil
     end
@@ -159,6 +167,21 @@ module Gori
     # to `DETAIL_MAX` on a character boundary (the row says so with a trailing marker).
     def record_agent_reply(summary : String, detail : String?, level : String, target : String,
                            pid : Int64, in_reply_to : Int64? = nil) : Int64
+      level, payload = reply_row(detail, level, target, pid, in_reply_to)
+      insert_event("agent", AgentReply::KIND, level, AgentReply.summary_line(summary), payload: payload, actor: "mcp")
+    end
+
+    # A script's line for the operator (`gori run notify`, #1323): the reply's row shape under
+    # its own source, so the ring shows it without the `ai` marker. `target` names the sender
+    # the way a ring row reads it (`gori run pid 4242`).
+    def record_script_notice(summary : String, detail : String?, level : String, target : String,
+                             pid : Int64) : Int64
+      level, payload = reply_row(detail, level, target, pid, nil)
+      insert_event("script", AgentReply::KIND, level, AgentReply.summary_line(summary), payload: payload, actor: "cli")
+    end
+
+    private def reply_row(detail : String?, level : String, target : String, pid : Int64,
+                          in_reply_to : Int64?) : {String, String}
       level = AgentReply::LEVELS.includes?(level) ? level : "info"
       if (d = detail) && d.bytesize > AgentReply::DETAIL_MAX
         # Cut on a character boundary: `scrub` turns a split sequence into U+FFFD, dropped.
@@ -172,7 +195,7 @@ module Gori
           j.field "in_reply_to", in_reply_to if in_reply_to
         end
       end
-      insert_event("agent", AgentReply::KIND, level, AgentReply.summary_line(summary), payload: payload, actor: "mcp")
+      {level, payload}
     end
 
     record ReplyPage, rows : Array(AgentReply), scanned_max : Int64, full : Bool

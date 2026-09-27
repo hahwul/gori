@@ -233,7 +233,7 @@ module Gori
         # this reply; one counted here was open first and will. Counting after would claim that
         # late window as a reader. nil is "cannot tell" (`--db :memory:`, an unbound start, a
         # marker directory this process cannot probe), never a guessed 0.
-        windows = @db_path.try { |path| AgentPresence.count?(path, kind: AgentPresence::KIND_TUI) }
+        windows = AgentPresence.tui_windows?(@db_path)
         pid = Process.pid.to_i64
         id = store.record_agent_reply(summary, str(h, "detail").presence, level || "info",
           session_label, pid, optional_int_arg(h, "in_reply_to"))
@@ -245,16 +245,7 @@ module Gori
             j.field "id", id
             j.field "summary", Serialize.text(AgentReply.summary_line(summary))
             # The shape get_current_context reports the same fact in.
-            j.field("tui") do
-              j.object do
-                if windows
-                  j.field "live", windows > 0
-                  j.field "windows", windows
-                else
-                  j.field "unknown", true
-                end
-              end
-            end
+            j.field("tui") { AgentPresence.tui_json(j, windows) }
             j.field "note", reply_note(windows)
           end
         end)

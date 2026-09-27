@@ -176,6 +176,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # long form behind ↵. `source: "agent"` renders with the AI marker, and Miss Ring speaks
   # the summary because she consumes this ring — `addressed:` so she keeps saying it until
   # the operator's next key or click, not for a few seconds they may have spent elsewhere.
+  # A script's `gori run notify` (#1323) is the same row under `source: "script"`, and its
+  # note keeps that source, so the marker never calls a shell loop an agent.
   def drain_agent_replies : Bool
     high = @session.store.last_agent_delivery_id
     page = @session.store.agent_replies_after(@agent_reply_cursor, AGENT_DELIVERY_BATCH)
@@ -183,7 +185,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     return false if page.rows.empty?
     page.rows.each do |row|
       level, message = AgentMessageNotes.reply_line(row)
-      @notifications.push(level, message, nil, source: "agent", detail: row.detail, addressed: true)
+      @notifications.push(level, message, nil, source: AgentMessageNotes.note_source(row), detail: row.detail, addressed: true)
     end
     # Announced is shown: a second window opening on this project must not summarize these as
     # missed while this one is still up with them in its ring (#1322).
@@ -219,7 +221,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     rows = store.agent_replies_between(seen, upto, MISSED_REPLY_ROWS)
     return false if rows.empty?
     level, message, detail = AgentMessageNotes.missed_replies(rows, total)
-    @notifications.push(level, message, nil, source: "agent", detail: detail, addressed: true)
+    source = rows.any? { |r| AgentMessageNotes.note_source(r) == "agent" } ? "agent" : "script"
+    @notifications.push(level, message, nil, source: source, detail: detail, addressed: true)
     true
   rescue ex
     # A window that cannot read its own feed still opens; the replies stay in Activity.

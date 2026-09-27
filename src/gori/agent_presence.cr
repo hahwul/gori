@@ -170,6 +170,30 @@ module Gori
       nil
     end
 
+    # How many gori TUI windows could show the operator a line written NOW, or nil when this
+    # process cannot tell. The one answer `reply_to_operator`, `ask_operator` and
+    # `gori run notify` (#1323) give about reach, so the three cannot disagree about what
+    # "nobody saw it" means. Asked BEFORE the write: a window seeds its cursors at the feed's
+    # end when it opens, so one that opens after the write never shows that line live, and
+    # counting it afterwards would claim it as a reader.
+    def self.tui_windows?(db_path : String?) : Int32?
+      return nil if db_path.nil? || db_path.empty?
+      count?(db_path, kind: KIND_TUI)
+    end
+
+    # That answer as the `tui` object every one of those results carries — `{live, windows}`,
+    # or `{unknown: true}` rather than a guessed 0.
+    def self.tui_json(j : JSON::Builder, windows : Int32?) : Nil
+      j.object do
+        if windows
+          j.field "live", windows > 0
+          j.field "windows", windows
+        else
+          j.field "unknown", true
+        end
+      end
+    end
+
     # Walk the marker directory, sweeping any marker whose owner is gone (its flock is free),
     # and yield the path of each LIVE one. The shared core of `live` and `count`: liveness and
     # the stale sweep are decided here once, so the two callers cannot drift on either.

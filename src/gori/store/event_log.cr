@@ -11,7 +11,8 @@ module Gori
     # empty feed that reads as "nothing happened".
     #
     # Ordered the way a reader wants them: who acted first (`agent`, `config`, `issues`), then
-    # the background producers.
+    # the background producers. `script` is a `gori run notify` line for the operator (#1323) —
+    # its own word rather than `agent`, because a shell loop is not one.
     #
     # `issues` is the one that proves the list has to live here. `runner/evidence.cr` started
     # writing it (an operator froze a copy of a flow onto an issue) without registering it, and
@@ -19,7 +20,7 @@ module Gori
     # Activity pane's `s` chip could never narrow to them, and MCP `list_events{source:"issues"}`
     # was REFUSED as invalid while naming a set that omitted a source the project writes. A
     # writer that is not in this list is reachable only by reading the whole feed.
-    EVENT_SOURCES = %w[agent operator config issues bindings session rewriter probe discover fuzzer miner sequencer]
+    EVENT_SOURCES = %w[agent operator script config issues bindings session rewriter probe discover fuzzer miner sequencer]
 
     # Every `level` the feed carries, in the order the Activity pane's `l` chip cycles them.
     # Here for the reason EVENT_SOURCES is: the column is a free string and this is the list of

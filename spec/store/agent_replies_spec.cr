@@ -64,3 +64,34 @@ describe Gori::Store, "#1322 agent reply watermark" do
     end
   end
 end
+
+# #1323: a script's line is a reply-shaped row under its own source, so the one drain and the
+# one watermark serve it while the ring's `ai` marker (which reads the source) stays off it.
+describe Gori::Store, "#1323 script notices" do
+  it "writes the reply kind under the script source and the cli actor" do
+    with_store do |store|
+      id = store.record_script_notice("fuzz done\nsecond line", "3 hits", "shout", "gori run pid 42", 42_i64)
+      row = store.events_after(0, 10).first
+      row.source.should eq("script")
+      row.kind.should eq("agent_reply")
+      row.actor.should eq("cli")
+      row.level.should eq("info")
+      r = store.agent_replies_after(0, 10).rows.first
+      r.id.should eq(id)
+      r.summary.should eq("fuzz done")
+      r.detail.should eq("3 hits")
+      r.source.should eq(Gori::AgentReply::SOURCE_SCRIPT)
+      Gori::Tui::AgentMessageNotes.note_source(r).should eq("script")
+      Gori::Tui::AgentMessageNotes.reply_line(r).should eq({:info, "gori run: fuzz done"})
+    end
+  end
+
+  it "keeps an agent's reply under the agent source" do
+    with_store do |store|
+      store.record_agent_reply("x", nil, "info", "claude-code pid 1", 1_i64)
+      r = store.agent_replies_after(0, 10).rows.first
+      r.source.should eq("agent")
+      Gori::Tui::AgentMessageNotes.note_source(r).should eq("agent")
+    end
+  end
+end

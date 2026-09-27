@@ -149,9 +149,10 @@ describe "the delivery drain's wiring" do
 
   # The one argument that makes Miss Ring hold a real reply: the companion specs push
   # addressed notes by hand, so without this a drain that lost it would leave them green.
-  it "pushes each reply as an addressed note" do
+  it "pushes each reply as an addressed note, under the row's own source" do
     src("tui", "runner", "agent_message.cr").any? do |l|
-      l.includes?("@notifications.push(") && l.includes?("source: \"agent\"") && l.includes?("addressed: true")
+      l.includes?("@notifications.push(") && l.includes?("source: AgentMessageNotes.note_source(row)") &&
+        l.includes?("addressed: true")
     end.should be_true
   end
 

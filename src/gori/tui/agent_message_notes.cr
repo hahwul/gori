@@ -92,6 +92,14 @@ module Gori::Tui
       {level, "#{who}: #{scrub_line(reply.summary)}"}
     end
 
+    # The ring source a reply's note carries: `script` for a `gori run notify` line (#1323),
+    # `agent` for everything else — including a row whose source is some word this build does
+    # not know, which is the direction that still shows it with the marker rather than hides
+    # who sent it.
+    def self.note_source(reply : Gori::AgentReply) : String
+      reply.source == Gori::AgentReply::SOURCE_SCRIPT ? "script" : "agent"
+    end
+
     # How much of ONE reply's detail the away summary carries. The summary is one note, and a
     # note's detail is a card the operator scrolls: fifty replies at the full `DETAIL_MAX`
     # each would be 1.6 MB of card for a notice whose job is to say "these arrived".
