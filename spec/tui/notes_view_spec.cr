@@ -101,6 +101,55 @@ describe Gori::Tui::NotesView do
     end
   end
 
+  # `reload` skips the merge when the stored rows are the bytes it last merged. A save must
+  # drop that memory: afterwards the list is this session's edits, and a peer writing back the
+  # EXACT bytes the list was last merged from is a real change that has to land.
+  it "merges a peer's write after a save even when it restores the bytes last merged" do
+    with_store do |store|
+      view = NotesView.new
+      view.reload(store)
+      type(view, "one")
+      view.save(store)
+      view.reload(store) # merged from the saved row, which is now remembered
+      id = view.current_note_id
+      merged_bytes = store.setting("notes.docs").not_nil!
+
+      view.enter_insert!
+      type(view, " two")
+      view.save(store).should be_true
+      view.current_text.should eq("one two")
+
+      store.set_setting("notes.docs", merged_bytes) # a peer puts the old document back
+      view.reload(store)
+      view.current_text.should eq("one")
+      view.current_note_id.should eq(id)
+    end
+  end
+
+  it "skips the merge for an unchanged row, and still merges the next change" do
+    with_store do |store|
+      view = NotesView.new
+      view.reload(store)
+      type(view, "stable")
+      view.save(store)
+      view.reload(store)
+      view.@merged_raw.should_not be_nil
+      remembered = view.@merged_raw.not_nil![0].not_nil!
+
+      # Nothing moved: the same rows, not re-merged — the remembered row is still the string
+      # the FIRST read returned (a merge would have stored this read's copy).
+      view.reload(store)
+      view.@merged_raw.not_nil![0].not_nil!.same?(remembered).should be_true
+      view.current_text.should eq("stable")
+
+      id = view.current_note_id
+      store.set_setting("notes.docs",
+        %({"cur":0,"next_id":#{id + 1},"notes":[{"id":#{id},"text":"moved"}]}))
+      view.reload(store)
+      view.current_text.should eq("moved")
+    end
+  end
+
   # Regression: NoteEntry#text is whatever was written into the JSON KV, verbatim, and several
   # writers store wire CRLF — MCP create_note/update_note pass the caller's string straight
   # through, and `gori run notes create` takes its body from --text / positional args / STDIN
