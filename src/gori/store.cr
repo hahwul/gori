@@ -1685,11 +1685,17 @@ module Gori
     # row), and the OFFSET walks only the excess, which a sweep every PRUNE_INTERVAL inserts
     # keeps about that size. Still gap-safe for the reason `prune` spells out: it counts rows
     # that exist, never `MAX(id) - keep`.
+    #
+    # ONE statement, so the count and the seek read one snapshot. As two autocommit statements a
+    # peer process (a second gori on the project running its own sweep) could delete low rows in
+    # between, and the stale count would push the offset past the excess and drop rows that were
+    # meant to stay — irreversibly. The old single-statement form could only ever under-delete.
     private def oldest_excess_cutoff(conn : DB::Connection, table : String, keep : Int32) : Int64?
       return nil if keep <= 0 # a non-positive cap is "unlimited", as the old `LIMIT` read it
-      excess = conn.scalar("SELECT COUNT(*) FROM #{table}").as(Int64) - keep
-      return nil if excess <= 0
-      conn.query_one?("SELECT id FROM #{table} ORDER BY id LIMIT 1 OFFSET ?", excess - 1, as: Int64)
+      conn.query_one?(
+        "SELECT id FROM #{table} WHERE (SELECT COUNT(*) FROM #{table}) > ?1 " \
+        "ORDER BY id LIMIT 1 OFFSET (SELECT COUNT(*) FROM #{table}) - ?1 - 1",
+        keep, as: Int64)
     end
 
     # One gori.log line per sweep that actually removed history, naming the setting that
