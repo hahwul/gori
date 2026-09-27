@@ -68,6 +68,25 @@ describe Gori::Repeater::WordDiff do
     la[0].changed.should be_true
   end
 
+  # The tokenizer stops at MAX_TOKENS + 1 instead of splitting a whole minified line it is
+  # about to discard; the verdict has to be the one a full count gives, at the edge itself.
+  # `(0...n).map { "wN&" }` is exactly 2n tokens (a word run, then a "&" run).
+  it "decides the MAX_TOKENS fallback exactly at the edge, on either side" do
+    at_cap = (0...WD::MAX_TOKENS // 2).map { |i| "w#{i}&" }.join # MAX_TOKENS tokens
+    edited = at_cap.sub("w1&", "wX&")
+    la, lb = lossless(at_cap, edited)
+    la.size.should be > 1 # at the cap: the intra-line pass still runs
+    changed_text(la).should eq("w1")
+    changed_text(lb).should eq("wX")
+
+    over = at_cap + "z" # one more token, and it is the trailing run
+    {lossless(over, edited), lossless(edited, over)}.each do |(x, y)|
+      x.size.should eq(1)
+      y.size.should eq(1)
+      x[0].changed.should be_true
+    end
+  end
+
   it "keeps a non-ASCII run whole instead of slicing a codepoint" do
     la, lb = lossless("name=한글값", "name=다른값")
     la.join(&.text).valid_encoding?.should be_true
