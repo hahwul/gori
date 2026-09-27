@@ -1,5 +1,7 @@
 require "log"
 require "./store"
+require "./proxy/pump"
+require "./proxy/conn/copy_buf_pool"
 
 {% unless flag?(:gc_none) %}
   lib LibGC
@@ -47,7 +49,11 @@ module Gori
     # What one tick looks at. `allocated` is the process's cumulative GC allocation, `writes`
     # the cumulative count of ops the Store writers have taken (see `Store.write_ops`): only
     # their CHANGE between two ticks matters.
-    record Sample, allocated : UInt64, free : UInt64, since_gc : UInt64, writes : Int64
+    #
+    # Traffic that neither writes the Store nor allocates is still traffic: a blind CONNECT
+    # tunnel (`forwarded` moves) and a body streaming past the capture limit (`lent` > 0).
+    record Sample, allocated : UInt64, free : UInt64, since_gc : UInt64, writes : Int64,
+      forwarded : Int64 = 0_i64, lent : Int32 = 0
 
     getter collections : Int32 = 0
 
@@ -57,7 +63,8 @@ module Gori
 
     # One check. True when the caller should collect now.
     def tick(now : Time::Instant, sample : Sample) : Bool
-      busy = sample.writes != @last.writes || sample.allocated &- @last.allocated >= BUSY_ALLOC_BYTES
+      busy = sample.writes != @last.writes || sample.allocated &- @last.allocated >= BUSY_ALLOC_BYTES ||
+             sample.forwarded != @last.forwarded || sample.lent > 0
       @last = sample
       if busy
         @quiet_since = now
@@ -75,7 +82,8 @@ module Gori
 
     def self.sample : Sample
       s = GC.stats
-      Sample.new(s.total_bytes, s.free_bytes, s.bytes_since_gc, Store.write_ops)
+      Sample.new(s.total_bytes, s.free_bytes, s.bytes_since_gc, Store.write_ops,
+        Proxy::Pump.forwarded, Proxy::CopyBufPool.lent)
     end
 
     def self.collect : Nil

@@ -98,4 +98,30 @@ describe "Gori::Store.write_ops" do
       Gori::Store.write_ops.should be > before
     end
   end
+
+  # A blind CONNECT tunnel and a body streaming past the capture limit write nothing to the Store
+  # and allocate nothing per chunk; a collection there would pause live traffic.
+  it "counts tunnel bytes and a lent copy buffer as traffic" do
+    t0 = Time.instant
+    quiet = Gori::IdleGc::QUIET_FOR.total_seconds.to_i
+    tunnel = Gori::IdleGc.new(t0, sample)
+    (1..quiet + 5).count { |sec|
+      tunnel.tick(t0 + sec.seconds, Gori::IdleGc::Sample.new(0_u64, 200_u64 * MIB, 0_u64, 0_i64, sec.to_i64, 0))
+    }.should eq(0)
+    streaming = Gori::IdleGc.new(t0, sample)
+    busy = Gori::IdleGc::Sample.new(0_u64, 200_u64 * MIB, 0_u64, 0_i64, 0_i64, 1)
+    run_quiet(streaming, t0, 1, quiet + 5, busy).should eq(0)
+  end
+
+  it "sees the proxy counters move" do
+    before = Gori::Proxy::Pump.forwarded
+    r, w = IO.pipe
+    w.write("abc".to_slice)
+    w.close
+    Gori::Proxy::Pump.copy(r, IO::Memory.new)
+    (Gori::Proxy::Pump.forwarded - before).should eq(3)
+    Gori::Proxy::CopyBufPool.lent.should eq(0)
+    Gori::Proxy::CopyBufPool.lend { Gori::Proxy::CopyBufPool.lent.should eq(1) }
+    Gori::Proxy::CopyBufPool.lent.should eq(0)
+  end
 end

@@ -5,6 +5,14 @@ module Gori::Proxy
   module Pump
     BUFSIZE = 64 * 1024
 
+    @@forwarded = 0_i64
+
+    # Bytes every `copy` has moved, process-wide and cumulative. A blind tunnel writes nothing to
+    # the Store and allocates nothing per chunk, so this is the only sign it is busy (`IdleGc`).
+    def self.forwarded : Int64
+      @@forwarded
+    end
+
     # Copies bytes both directions between a and b until either side EOFs.
     #
     # Returns how much each direction moved, named for the ARGUMENTS: `a_to_b` is what flowed
@@ -43,6 +51,7 @@ module Gori::Proxy
           dst.write(buf[0, n])
           dst.flush
           total &+= n
+          @@forwarded &+= n
         end
       rescue
         # peer reset / closed: end this direction quietly

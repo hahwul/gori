@@ -21,16 +21,25 @@ module Gori::Proxy
     MAX_IDLE = 64
 
     @@idle = [] of Bytes
+    @@lent = 0
 
     # Yields a SIZE-byte buffer for the duration of the block, then takes it back. The block must
     # not let the buffer (or a slice of it) escape.
     def self.lend(& : Bytes -> T) : T forall T
       buf = @@idle.pop? || Bytes.new(SIZE)
+      @@lent += 1
       begin
         yield buf
       ensure
+        @@lent -= 1
         @@idle << buf if @@idle.size < MAX_IDLE
       end
+    end
+
+    # Buffers out on loan right now: a body is being streamed, even one past the capture limit
+    # that no longer allocates or writes the Store (`IdleGc`).
+    def self.lent : Int32
+      @@lent
     end
 
     # Buffers waiting to be lent. For specs and benches.
