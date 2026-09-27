@@ -827,8 +827,8 @@ module Gori
     # The GROUP BY is spelled in the ORDER BY's order, which is `idx_flows_sitemap`'s (V38):
     # the planner then groups straight off the covering index and stops after the page. In
     # the old order (`scheme, host, …`) it scanned the table and sorted every row twice. The
-    # group set is the same either way. The order inside `statuses` was never specified; off
-    # the index it is ascending, the order the index hands a group's rows over in.
+    # group set is the same either way. The order inside `statuses` was never specified and
+    # follows whichever index the planner picks for the filter (ascending off this one).
     def sitemap_entries_detailed(filter : QL::Filter = QL::EMPTY, limit : Int32 = SITEMAP_MAX, *,
                                  offset : Int32 = 0,
                                  raise_on_error : Bool = false) : Array(SitemapEntry)
