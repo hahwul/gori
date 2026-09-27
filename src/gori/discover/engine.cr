@@ -390,13 +390,14 @@ module Gori::Discover
     Fetch     # GET robots.txt / sitemap.xml, extract seeds
     Calibrate # build a DirBaseline for a directory (K bogus probes)
     Probe     # brute-force one wordlist entry against a calibrated dir
+    Sweep     # a calibrated dir's waiting probes — expanded on the orchestrator, never dispatched
   end
 
   # A directory's live brute-force state, shared BY REFERENCE with every Probe task that
   # directory queued. A record would be wrong here, and that is the whole point:
-  # `enqueue_probes` fills the frontier with hundreds of tasks at once, so the only way a
-  # RE-MEASURED baseline can reach the ones that have not run yet is for them to hold a
-  # mutable reference rather than a copy.
+  # `enqueue_probes` admits hundreds of candidates at once, so the only way a RE-MEASURED
+  # baseline can reach the ones that have not run yet is for them to hold a mutable reference
+  # rather than a copy.
   #
   # Owned by the ORCHESTRATOR — every field is written only there. Workers READ `baseline` in
   # `process_probe`, and on the single-threaded scheduler (no -Dpreview_mt) nothing yields
@@ -425,6 +426,36 @@ module Gori::Discover
     property recalibrations : Int32 = 0
 
     def initialize(@baseline : Calibrate::DirBaseline)
+    end
+  end
+
+  # A calibrated directory's admitted candidates, in the order `enqueue_probes` admitted them,
+  # waiting in the frontier as ONE task. Everything that decides WHICH candidates go out —
+  # `@seen`, the scope gate, `per_dir_cap`, the request cap — still runs when the directory
+  # calibrates, so the traffic is exactly what one Task per candidate produced; only the Task
+  # itself is deferred. The record plus Deque growth slack was about half of what a waiting
+  # candidate cost beside the URL string `@seen` keeps anyway (bench/discover_frontier_bench.cr:
+  # 299 → 153 B), multiplied by every candidate of every calibrated directory from the moment
+  # it calibrated: 30 directories of a 30k-word list with two extensions is 2.7M of them
+  # before the first probe leaves.
+  #
+  # `Engine#frontier_head` turns the next batch into Probe tasks in front of the Sweep when
+  # it reaches the head, so a directory's probes keep the frontier position they were queued
+  # at. Orchestrator-owned, like `DirState`.
+  private class Sweep
+    def initialize(@urls : Array(String))
+      @next = 0
+    end
+
+    def remaining : Int32
+      @urls.size - @next
+    end
+
+    # The next `n` URLs, in admission order.
+    def take(n : Int32) : Array(String)
+      batch = @urls[@next, n]
+      @next += batch.size
+      batch
     end
   end
 
@@ -460,7 +491,9 @@ module Gori::Discover
     # A Calibrate task queued ONLY to gate robots.txt/sitemap.xml against a soft-404
     # baseline (see enqueue_seed_only_calibration) — never feeds enqueue_probes, so it
     # can't expand the brute-force wordlist onto a directory outside the run's own scope.
-    seed_only : Bool = false
+    seed_only : Bool = false,
+    # A Sweep task's waiting probes. Nil for every other kind.
+    sweep : Sweep? = nil
 
   # `declared` — did the response NAME this as a link (an attribute, a `<meta refresh>`, a
   # robots.txt value, a sitemap `<loc>`), or did the endpoint pass infer it from a quoted string
@@ -635,6 +668,10 @@ module Gori::Discover
     @discovered : Channel(Outcome)
     @finished : Channel(Nil)
     @frontier : Deque(Task)
+    # Probes still inside a `Sweep` task, and the number of Sweep tasks in `@frontier` — what
+    # turns `@frontier.size` back into the count of real tasks waiting (`frontier_count`).
+    @sweep_queued : Int32 = 0
+    @sweeps : Int32 = 0
     @seen : Set(String)
     @templates : Hash(String, Int32)
     @dirs : Set(String)
@@ -796,7 +833,7 @@ module Gori::Discover
       @phase = Phase::Crawling
       loop do
         break if @state == State::Stopped
-        if job = @frontier.first?
+        if job = frontier_head
           park_if_paused
           break if @state == State::Stopped || @capped.cap_reached?
           # select so we never block solely on send while a worker blocks solely on
@@ -986,7 +1023,40 @@ module Gori::Discover
       in TaskKind::Calibrate              then handle_calibrate(oc)
       in TaskKind::Probe                  then handle_probe(oc)
       in TaskKind::Crawl, TaskKind::Fetch then handle_crawl(oc)
+      in TaskKind::Sweep                  then raise SWEEP_DISPATCHED
       end
+    end
+
+    # A Sweep is expanded by `frontier_head` before anything can dispatch it.
+    SWEEP_DISPATCHED = "discover: a Sweep task reached a worker"
+
+    # The frontier's head, once a Sweep there has put its next batch of Probe tasks in front
+    # of itself. The batch is the run's concurrency — enough to keep every worker fed until
+    # the Sweep is the head again — and the Sweep goes back directly behind it, so a
+    # directory's probes hold the place in the frontier they were queued at, ahead of
+    # anything queued after the directory calibrated. `unshift` keeps a recalibration queued
+    # at the front (`enqueue_recalibration`) ahead of them, as before.
+    private def frontier_head : Task?
+      while (head = @frontier.first?) && (sweep = head.sweep)
+        @frontier.shift
+        batch = sweep.take(@concurrency)
+        @sweep_queued -= batch.size
+        if sweep.remaining > 0
+          @frontier.unshift(head)
+        else
+          @sweeps -= 1
+        end
+        batch.reverse_each do |url|
+          @frontier.unshift(Task.new(TaskKind::Probe, url, head.depth, Source::Bruteforced,
+            dir: head.dir, state: head.state))
+        end
+      end
+      @frontier.first?
+    end
+
+    # Real tasks waiting: the frontier's own, with each Sweep counted as the probes it holds.
+    private def frontier_count : Int32
+      @frontier.size - @sweeps + @sweep_queued
     end
 
     # The run stopped SHORT of its work because `max_requests` ran out — not merely reached
@@ -1472,7 +1542,7 @@ module Gori::Discover
     private def enqueue_probes(task : Task, state : DirState) : Nil
       bl = state.baseline
       cap = @config.per_dir_cap
-      count = 0
+      urls = [] of String
       exts = @config.extensions
       # Parse the DIRECTORY once for the whole wordlist. `Url.probe` can then derive each
       # candidate's Parts and its one shared `visit_key`/`normalize` string by concatenation,
@@ -1494,28 +1564,32 @@ module Gori::Discover
       ext_pairs = exts.map { |e| {e, ".#{e}".downcase} }
       @words.each do |w|
         break if @capped.cap_reached?
-        break if cap > 0 && count >= cap
-        count += 1 if enqueue_probe(task, state, base, w)
-        count += enqueue_extension_probes(task, state, base, w, ext_pairs, cap, count)
+        break if cap > 0 && urls.size >= cap
+        admit_probe(urls, state, base, w)
+        admit_extension_probes(urls, state, base, w, ext_pairs, cap)
       end
+      return if urls.empty?
+      # ONE Sweep task for the lot, at the frontier position the probes would have taken.
+      @sweeps += 1
+      @sweep_queued += urls.size
+      @frontier << Task.new(TaskKind::Sweep, bl.dir, task.depth, Source::Bruteforced,
+        dir: bl.dir, state: state, sweep: Sweep.new(urls))
     end
 
-    # The `word.ext` half of one wordlist entry, and the number of candidates it queued.
+    # The `word.ext` half of one wordlist entry.
     #
     # Its own method because the per-directory cap and `redundant_extension?` between them put
     # as many branches in this loop as there are in the one above it.
-    private def enqueue_extension_probes(task : Task, state : DirState, base : Url::Parts?,
-                                         word : String, ext_pairs : Array({String, String}),
-                                         cap : Int32, count : Int32) : Int32
-      return 0 if ext_pairs.empty?
+    private def admit_extension_probes(urls : Array(String), state : DirState, base : Url::Parts?,
+                                       word : String, ext_pairs : Array({String, String}),
+                                       cap : Int32) : Nil
+      return if ext_pairs.empty?
       lower = word.downcase
-      added = 0
       ext_pairs.each do |ext, dotted|
-        break if cap > 0 && count + added >= cap
+        break if cap > 0 && urls.size >= cap
         next if redundant_extension?(lower, dotted)
-        added += 1 if enqueue_probe(task, state, base, "#{word}.#{ext}")
+        admit_probe(urls, state, base, "#{word}.#{ext}")
       end
-      added
     end
 
     # Would appending this extension re-state one the word already carries? `admin.php` with
@@ -1531,11 +1605,11 @@ module Gori::Discover
       word.bytesize > dotted.bytesize && word.ends_with?(dotted)
     end
 
-    # One brute-force candidate against a calibrated directory. True when it entered the
-    # frontier — and therefore counts against the per-directory cap — false when it was
-    # unparseable, already seen, or refused by the gates.
-    private def enqueue_probe(task : Task, state : DirState,
-                              base : Url::Parts?, cand : String) : Bool
+    # One brute-force candidate against a calibrated directory, appended to `urls` (and so
+    # counted against the per-directory cap) unless it is unparseable, already seen, or
+    # refused by the gates.
+    private def admit_probe(urls : Array(String), state : DirState,
+                            base : Url::Parts?, cand : String) : Nil
       dir = state.baseline.dir
       p, key, url =
         if base && (pr = Url.probe(base, dir, cand))
@@ -1544,17 +1618,15 @@ module Gori::Discover
           {pr.parts, pr.url, pr.url}
         else
           slow = Url.parse("#{dir}#{cand}")
-          return false unless slow
+          return unless slow
           {slow, Url.visit_key(slow), Url.normalize(slow)}
         end
       # @seen first: it is a hash lookup, while probe_allowed? walks every scope rule
       # under a mutex with PCRE2. Same verdict either way — this runs 315 words × dirs.
-      return false if @seen.includes?(key)
-      return false unless probe_allowed?(p)
+      return if @seen.includes?(key)
+      return unless probe_allowed?(p)
       @seen << key
-      @frontier << Task.new(TaskKind::Probe, url, task.depth,
-        Source::Bruteforced, dir: dir, state: state)
-      true
+      urls << url
     end
 
     # Containment (origin/subdomain/scope-aware) + the injected scope policy + path confine.
@@ -1688,6 +1760,7 @@ module Gori::Discover
       in TaskKind::Crawl, TaskKind::Fetch then process_fetch(task)
       in TaskKind::Calibrate              then process_calibrate(task)
       in TaskKind::Probe                  then process_probe(task)
+      in TaskKind::Sweep                  then raise SWEEP_DISPATCHED
       end
     end
 
@@ -2097,7 +2170,7 @@ module Gori::Discover
     end
 
     private def progress_snapshot : Progress
-      Progress.new(@capped.sent, est_total, @found, @errors, @frontier.size + @pending, @phase)
+      Progress.new(@capped.sent, est_total, @found, @errors, frontier_count + @pending, @phase)
     end
 
     # A moving estimate that RISES as directories calibrate and pages are visited — a live
@@ -2106,7 +2179,7 @@ module Gori::Discover
       return nil if @capped.sent == 0
       per_dir = @words.size.to_i64 * (1 + @config.extensions.size)
       brute = @config.bruteforce? ? @dirs.size.to_i64 * per_dir : 0_i64
-      crawl = @pages.to_i64 + @frontier.size.to_i64
+      crawl = @pages.to_i64 + frontier_count.to_i64
       brute + crawl
     end
 
