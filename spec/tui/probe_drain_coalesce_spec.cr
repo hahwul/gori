@@ -260,11 +260,41 @@ describe "Gori::Tui::ProbeController#drain_events" do
       (controller.reloads - before).should eq(1)
       controller.view.row_count.should eq(1)
 
-      # The event channel is droppable; the generation poll alone still lands the write.
+      # The event channel is droppable; the generation poll alone still lands the write (past
+      # the spacing — see the next example).
       seed_issue(session.store, 2)
-      controller.refresh_if_moved.should eq({true, true})
+      later = controller.view.loaded_at.not_nil! + Gori::Tui::ProbeController::RELOAD_SPACING
+      controller.refresh_if_moved(later).should eq({true, true})
       controller.view.row_count.should eq(2)
       (controller.reloads - before).should eq(2)
+    end
+  end
+
+  # An active scan moves the generation nearly every tick. Reloads are spaced RELOAD_SPACING
+  # apart, and the change a spaced-out tick skipped is landed by the first tick past the
+  # spacing — the Runner calls `refresh_if_moved` every tick while the tab is up.
+  it "spaces reloads while the generation keeps moving, and still lands the final state" do
+    with_probe_controller do |controller, host, session|
+      host.active_tab = :probe
+      spacing = Gori::Tui::ProbeController::RELOAD_SPACING
+      seed_issue(session.store, 1)
+      controller.refresh_if_moved.should eq({true, true}) # leading edge: at once
+      t0 = controller.view.loaded_at.not_nil!
+      before = controller.reloads
+
+      # Three more writes inside the window: none is read yet.
+      (2..4).each do |n|
+        seed_issue(session.store, n)
+        controller.refresh_if_moved(t0 + (spacing / 4) * (n - 1)).should eq({false, false})
+      end
+      controller.view.row_count.should eq(1)
+      (controller.reloads - before).should eq(0)
+
+      # The scan stops. The next tick past the spacing reads everything it skipped, once.
+      controller.refresh_if_moved(t0 + spacing).should eq({true, true})
+      controller.view.row_count.should eq(4)
+      controller.refresh_if_moved(t0 + spacing * 3).should eq({false, false})
+      (controller.reloads - before).should eq(1)
     end
   end
 
@@ -286,9 +316,15 @@ describe "Gori::Tui::ProbeController#drain_events" do
         peer.close
       end
       controller.refresh_if_moved.should eq({false, false})
+      # Seen by the data_version tick — which, this soon after `on_enter`, spaces it like the
+      # generation poll would. The view remembers the peer's change, so the poll lands it.
       controller.on_external_change
+      controller.view.issues_moved?(session.store).should be_true
+      later = controller.view.loaded_at.not_nil! + Gori::Tui::ProbeController::RELOAD_SPACING
+      controller.refresh_if_moved(later).should eq({true, true})
       (controller.reloads - before).should eq(1)
       controller.view.row_count.should eq(1)
+      controller.view.issues_moved?(session.store, peers: true).should be_false
     end
   end
 

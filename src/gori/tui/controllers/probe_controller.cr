@@ -461,14 +461,18 @@ module Gori::Tui
     # capturing, or the intercept heartbeat) or a peer's. The finding list is re-read only when
     # it actually moved (the fingerprint is what sees a peer's write); everything else on the
     # tab is cheap and is refreshed on every commit, as before.
+    #
+    # A moved list takes the same spacing as the tick paths: during an active scan this tick
+    # and the generation poll see the same stream of writes. A peer's change that has to wait
+    # is remembered by the view (`issues_moved?` is sticky until a reload), so the poll lands it.
     def on_external_change : Nil
       store = @host.session.store
       if @probe.issues_moved?(store, peers: true)
-        refresh_from_store
-      else
-        @probe.reload_meta(store)
-        @rules.reload(store)
+        reloaded, _ = refresh_if_moved
+        return if reloaded
       end
+      @probe.reload_meta(store)
+      @rules.reload(store)
     end
 
     # Re-query the issue list from the store, unconditionally. Called from on_enter, and by
@@ -489,10 +493,23 @@ module Gori::Tui
     # and then sends its event), and the data_version tick is a third signal for it, so each
     # used to re-read the whole list: up to three reloads per tick for one write. At most one
     # reload per generation now. Returns {reloaded, row count changed}.
-    def refresh_if_moved : {Bool, Bool}
+    #
+    # And at most one per RELOAD_SPACING: an active scan commits a finding nearly every tick,
+    # and a reload per tick is a list read per 50 ms on the fiber the proxy shares. The first
+    # change after a quiet spell still lands at once (leading edge); the rest wait for the
+    # spacing, and because the Runner calls this every tick while the tab is up, the last one
+    # lands on the first tick past it (trailing edge) — no final state is ever dropped.
+    def refresh_if_moved(now : Time::Instant = Time.instant) : {Bool, Bool}
       return {false, false} unless @probe.issues_moved?(@host.session.store)
+      if (at = @probe.loaded_at) && now - at < RELOAD_SPACING
+        return {false, false}
+      end
       {true, refresh_from_store}
     end
+
+    # See `refresh_if_moved`. Well under the data_version cadence (750 ms), and short enough
+    # that a list under an active scan still reads as live.
+    RELOAD_SPACING = 500.milliseconds
 
     # Drain the analyzer's events (called each main-loop tick from the Runner).
     # List data is primarily refreshed via Runner's Store#probe_generation poll

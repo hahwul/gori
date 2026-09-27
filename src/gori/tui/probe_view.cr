@@ -112,7 +112,14 @@ module Gori::Tui
       # The tech rows the last reload read, so `reload_meta` can re-apply the scope lens to
       # them without a query.
       @tech_rows = [] of {String, String, String?}
+      # A peer's write, once `issues_moved?(peers: true)` has seen it: kept until the reload
+      # that reads it, since the fingerprint check is not repeated on every tick.
+      @peer_moved = false
+      @loaded_at = nil.as(Time::Instant?)
     end
+
+    # When the last `reload` ran — the controller spaces live reloads off it.
+    getter loaded_at : Time::Instant?
 
     def preview_enabled? : Bool
       Settings.probe_preview
@@ -150,6 +157,8 @@ module Gori::Tui
       # never mistaken for one this read already saw.
       @loaded_gen = store.probe_generation
       @loaded_fp = store.probe_issues_fingerprint
+      @peer_moved = false
+      @loaded_at = Time.instant
       @all = store.probe_issue_rows
       @host_pool = nil
       @code_pool = nil
@@ -162,9 +171,13 @@ module Gori::Tui
     # also asks the store's fingerprint (one indexed read), which is the only way to see a
     # PEER process's write (MCP `probe_dismiss`, `gori run probe`, a second TUI): the
     # data_version path passes it, since that is the signal a peer committed.
+    #
+    # A peer change seen once stays "moved" until a reload reads it, so a caller that defers the
+    # reload (the controller's spacing) can land it from a tick that does not pass `peers`.
     def issues_moved?(store : Store, *, peers : Bool = false) : Bool
-      return true if store.probe_generation != @loaded_gen
-      peers && store.probe_issues_fingerprint != @loaded_fp
+      return true if @peer_moved || store.probe_generation != @loaded_gen
+      return false unless peers
+      @peer_moved = store.probe_issues_fingerprint != @loaded_fp
     end
 
     # Everything the tab shows that is not READ from the finding list: the MODE band, the
