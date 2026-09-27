@@ -1187,17 +1187,19 @@ module Gori::Decoder
     end
 
     private def rfc2047_charset_decode(charset : String, data : Bytes) : String
-      case charset.downcase
-      when "utf-8", "utf8"
+      # Through `rfc2047_charset_key`, so the aliases a run joins on and the ones decoded here
+      # are one list.
+      case rfc2047_charset_key(charset)
+      when "utf-8"
         text = String.new(data)
         raise DecoderError.new("invalid UTF-8 in RFC 2047 encoded-word") unless text.valid_encoding?
         text
-      when "us-ascii", "ascii"
+      when "us-ascii"
         raise DecoderError.new("non-ASCII byte in RFC 2047 US-ASCII word") if data.any? { |b| b >= 0x80 }
         String.new(data)
-      when "iso-8859-1", "iso8859-1", "latin1", "latin-1"
+      when "iso-8859-1"
         String.build { |io| data.each { |b| io << b.to_i.chr } }
-      when "windows-1252", "cp1252"
+      when "windows-1252"
         String.build { |io| data.each { |b| io << windows_1252_scalar(b).chr } }
       else
         raise DecoderError.new("unsupported RFC 2047 charset: #{charset}")
