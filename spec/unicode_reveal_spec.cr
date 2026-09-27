@@ -37,5 +37,7 @@ describe Gori::UnicodeReveal do
     Gori::UnicodeReveal.visible("❤\u{fe0f}\u{fe0f}").should eq("❤\u{fe0f}⟨VS16⟩")
     Gori::UnicodeReveal.visible("a\u{fe0f}").should eq("a⟨VS16⟩")
     Gori::UnicodeReveal.visible("葛\u{e0100}").should eq("葛⟨VS17⟩")
+    # A geometric shape beside the emoji ones is not an emoji base.
+    Gori::UnicodeReveal.visible("▲\u{fe0f}").should eq("▲⟨VS16⟩")
   end
 end
