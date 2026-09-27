@@ -165,9 +165,11 @@ describe "the delivery drain's wiring" do
 
   # The other wake sites (a Preferences save, the companion toggle, a factory reset) run
   # behind a modal that hides her; the default `acknowledge` there let a reply that landed
-  # while it was open go unseen.
+  # while it was open go unseen. The Runner's reopen slices under runner/ are the same class.
   it "wakes her without releasing a held reply everywhere else in the Runner" do
-    wakes = src("tui", "runner.cr").select(&.includes?("@companion.wake_on_input"))
+    slices = Dir.children(File.join(__DIR__, "..", "..", "src", "gori", "tui", "runner"))
+      .select(&.ends_with?(".cr")).flat_map { |f| src("tui", "runner", f) }
+    wakes = (src("tui", "runner.cr") + slices).select(&.includes?("@companion.wake_on_input"))
     wakes.size.should be >= 4
     wakes.each(&.should(match(/@companion\.wake_on_input\((false|@operator_input && shown)\)/)))
   end
