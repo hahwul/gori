@@ -35,7 +35,7 @@ describe "Runner — a paste into a READ editor" do
   # `begin_bulk_paste?` says no and `paste_runs_as_commands?` says yes — the refusal this
   # replaces, now with a mode flip left behind it.
   it "opens the pane before either paste question is asked" do
-    body = method_body("runner.cr", "private def handle(ev : Termisu::Event::Any) : Nil")
+    body = method_body("runner.cr", "private def handle(ev : Termisu::Event::Any) : Bool")
     arm = body.index("arm_editor_for_paste")
     bulk = body.index("begin_bulk_paste?")
     cmds = body.index("paste_runs_as_commands?")
@@ -189,5 +189,34 @@ describe "workbench inputs take a paste in bulk" do
       s.pane = :secret
       controller.accepts_bulk_paste?.should be_false
     end
+  end
+end
+
+# A key a paste in progress absorbs changes nothing on screen until the paste closes, so the
+# run loop must not render a frame for it: a 1 MB bulk paste is ~32k ticks, and rendering the
+# same frame on each was 63% of the main thread the proxy shares. `handle` says whether an
+# event could have changed the frame, and the loop dirties the tick on that answer alone.
+describe "Runner — a paste in progress does not re-render per key" do
+  it "reports buffered, dropped and mid-paste-swallowed input as not changing the frame" do
+    body = method_body("runner.cr", "private def handle(ev : Termisu::Event::Any) : Bool")
+    body.should contain("return false if buffer_bulk_paste(ev)")
+    body.should contain("return false if @paste_dropped")
+    # A swallowed event is inert only strictly INSIDE a paste: the markers themselves (and a
+    # PasteStart that closed an abandoned paste) are transitions that flush, toast or arm.
+    body.should contain("return !(was_pasting && @paste_newline.pasting?) if swallowed")
+    body.should match(/handle_mouse\(ev\).*\n\s+true\n\s+end\z/m)
+  end
+
+  it "dirties the tick from those answers, first event and burst alike" do
+    src = tui_src("runner.cr")
+    src.should contain("dirty = handle(ev)")
+    src.should contain("dirty ||= burst_changed")
+    src.should_not match(/handle\(ev\)\n\s+dirty = true/)
+    method_body("runner.cr", "private def drain_burst : {Int32, Bool}")
+      .should contain("changed = true if handle(more)")
+  end
+
+  it "still feeds the stall guard every drained key (PasteStall is unchanged)" do
+    tui_src("runner.cr").should contain("@paste_stall.saw(Time.instant, keys_drained)")
   end
 end

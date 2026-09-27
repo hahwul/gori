@@ -607,8 +607,12 @@ module Gori::Tui
               # menu or an overlay that hides her says nothing about a bubble they never saw.
               shown = companion_on_screen?
               @operator_input = false
-              handle(ev)
-              dirty = true
+              # Only input that could have changed the frame dirties it. A key a paste in
+              # progress absorbed (into the bulk buffer, or dropped) changes nothing on screen
+              # until the paste closes, and a 1 MB paste is ~32k such ticks: marking each one
+              # rendered the unchanged frame 32k times, 63% of the main thread (P6). The close
+              # itself — the marker or the watchdog — dirties the frame it lands on.
+              dirty = handle(ev)
               # Drain any input already queued behind `ev` in the SAME tick, then
               # render once. A fast scroll arrives as a burst — held ↑/↓/j/k key
               # repeat, or (under the terminal's alternate-scroll mode) a mouse wheel
@@ -617,7 +621,8 @@ module Gori::Tui
               # the user stopped. Draining applies the whole burst before the frame, so
               # scrolling tracks the input. Bounded so an infinitely-held key can't
               # starve the render / async-channel drains below.
-              keys_drained = drain_burst
+              keys_drained, burst_changed = drain_burst
+              dirty ||= burst_changed
               # Any event re-arms Miss Ring's idle clock; only a key or click (anywhere in the
               # burst, set by #handle) that she was on screen for releases a held reply. A
               # resize or a terminal mode change is the terminal moving, not the operator.
@@ -1007,19 +1012,21 @@ module Gori::Tui
     # frame.
     #
     # Returns how many KEY events were drained behind the tick's first one — the density
-    # `PasteStall` reads to tell a paste still streaming from a person typing.
+    # `PasteStall` reads to tell a paste still streaming from a person typing — and whether any
+    # of them could have changed the frame (`handle`).
     #
     # Keys only, deliberately. The budgets below still count every event (a wheel burst must be
     # bounded like any other), but mouse reports must not feed the paste-stall clock: gori
     # enables xterm mode 1002, so a press-and-drag reports pointer motion continuously and would
     # clear the burst threshold by itself — handing the wedge back to the operator most likely to
     # be dragging, the one whose keyboard just went dead.
-    private def drain_burst : Int32
+    private def drain_burst : {Int32, Bool}
       chars = 0
       nav = 0
       keys = 0
+      changed = false
       while more = @term.poll_event(0)
-        handle(more)
+        changed = true if handle(more)
         keys += 1 if more.is_a?(Termisu::Event::Key)
         if coalesceable_char?(more)
           chars += 1
@@ -1029,7 +1036,7 @@ module Gori::Tui
           break if nav >= 256
         end
       end
-      keys
+      {keys, changed}
     end
 
     # Braille spinner frames (U+2800–U+28FF: EAW-Neutral width 1, no emoji/VS16).
@@ -1378,7 +1385,13 @@ module Gori::Tui
     # Bounds a paste whose end marker never comes — the decision lives there, not here.
     @paste_stall = PasteStall.new
 
-    private def handle(ev : Termisu::Event::Any) : Nil
+    #
+    # Returns false only for an event a paste IN PROGRESS absorbed without touching anything on
+    # screen — a key buffered for the bulk insert or dropped by a refused paste, the LF half of
+    # a pasted CRLF, a click swallowed mid-paste — so the run loop does not re-render an
+    # unchanged frame per pasted key. Every paste transition, and everything outside a paste,
+    # answers true as before.
+    private def handle(ev : Termisu::Event::Any) : Bool
       # A key retires the reduced frame (see `absorb_tick_error`): the next render is the
       # real one, and if it fails again the reduced frame simply comes back. Keys only —
       # xterm mode 1002 reports pointer motion continuously, and a drag would otherwise retry
@@ -1417,11 +1430,11 @@ module Gori::Tui
       elsif was_pasting && !@paste_newline.pasting?
         close_paste
       end
-      return if swallowed
+      return !(was_pasting && @paste_newline.pasting?) if swallowed
       case ev
       when Termisu::Event::Key
-        return if @paste_dropped
-        return if buffer_bulk_paste(ev)
+        return false if @paste_dropped
+        return false if buffer_bulk_paste(ev)
         handle_key(ev)
       when Termisu::Event::Mouse
         # A click is not part of a paste, and acting on one mid-paste moves the target out from
@@ -1430,7 +1443,7 @@ module Gori::Tui
         # thing to `replay_paste`, i.e. N keystrokes through the keymap — commands, and the
         # per-character edit cycle this bulk path exists to avoid. Swallowed until the paste
         # resolves, which the stall guard bounds.
-        return if @paste_newline.pasting?
+        return false if @paste_newline.pasting?
         handle_mouse(ev)
       when Termisu::Event::Resize
         # termisu already resized its cell buffer to these dims (prepare_event). Re-fit the
@@ -1441,6 +1454,7 @@ module Gori::Tui
       when Termisu::Event::Preedit
         apply_preedit(ev.text)
       end
+      true
     end
 
     # The surfaces with no text field that own the keys while up — the IME's composing text
