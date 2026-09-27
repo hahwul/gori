@@ -1920,8 +1920,25 @@ module Gori::Tui
     # Open a migrated modal: it becomes @active_overlay and syncs @overlay to its key
     # (so modal_overlay? + residual `@overlay ==` checks keep working during migration).
     private def open_overlay(ov : Overlay) : Nil
+      ov.over_detail = detail_shown?
       @active_overlay = ov
       @overlay = ov.key
+    end
+
+    # Is the History drill-in on screen: up itself, or under the card that sits on it? The
+    # drill-in and every modal share the one `@overlay` slot, so a card opened over a flow
+    # used to draw the bare list behind it and, for a card with no restore of its own (the
+    # issue form, the mock-rule form, active scan), close onto that list too (#1282 fixed the
+    # palette's close, not its backdrop). History renders the detail on this answer, and
+    # `open_overlay` stamps it on each card so a nested one inherits it.
+    def detail_shown? : Bool
+      Runner.detail_beneath?(@overlay, @palette_return, active_overlay)
+    end
+
+    def self.detail_beneath?(overlay : OverlayKind, palette_return : OverlayKind, modal : Overlay?) : Bool
+      return true if overlay.detail?
+      return palette_return.detail? if overlay.palette?
+      modal.try(&.over_detail?) || false
     end
 
     # Close `ov` and run its on_close — the nested-modal seam (overlay.cr). A modal opened
@@ -1948,9 +1965,14 @@ module Gori::Tui
     # Drop the active modal WITHOUT running its on_close. For an exit that goes somewhere
     # else entirely — the ^P jump to the command palette — where a nested modal's pop-back
     # would otherwise re-open on top of the destination.
+    #
+    # A card opened over the History drill-in drops back INTO it (`Overlay#over_detail?`), on
+    # the History tab only: a commit that moved the operator to another tab has already said
+    # where they go. The ^P jump takes it along, so the palette closes onto the same flow.
     private def leave_overlay : Nil
+      back = active_overlay.try(&.over_detail?) && @active_tab == :history
       @active_overlay = nil
-      @overlay = OverlayKind::None
+      @overlay = back ? OverlayKind::Detail : OverlayKind::None
     end
 
     # The active migrated modal, but ONLY while @overlay still names it. @overlay is the
@@ -2133,6 +2155,9 @@ module Gori::Tui
       # captured @overlay back rather than dropping to the bare body (#413). Before this, declining
       # the quit confirm over the palette silently closed it.
       return (@overlay = displaced) if kind.none? && MODAL_OVERLAYS.includes?(displaced)
+      # A :none confirm over the History drill-in (the opt-in quit confirm) leaves the flow up:
+      # `leave_overlay` has already put the drill-in back, and :none asked for no change.
+      return if kind.none? && @overlay.detail?
       # No object to restore — either nothing was displaced (a :none confirm over the bare
       # body or the History Detail drill-in), or `return_to:` names a state the shell routes
       # BY STATE. Setting @overlay alone is right for None / Detail / an unmigrated
@@ -4982,8 +5007,8 @@ module Gori::Tui
     end
 
     # The flow a detail.* jump verb was READING when it closed the overlay, held for the rest
-    # of the event that closed it. Those verbs (`detail.repeater`, `.issue`, `.fuzz`, `.mine`,
-    # `.sequence`, `.probe-active`) run `close_detail` first so the overlay does not float over
+    # of the event that closed it. Those verbs (`detail.repeater`, `.fuzz`, `.mine`,
+    # `.sequence`) run `close_detail` first so the overlay does not float over
     # the destination tab — and with `@overlay` already `:none` the two resolvers above and
     # below fell back to the marks (or to a cursor follow mode had moved to the newest capture),
     # sending flows the operator never had on screen. `Runner#close_detail` sets it and

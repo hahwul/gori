@@ -411,4 +411,23 @@ describe Gori::Tui::PaletteState, "tab actions" do
     Runner.palette_return(OverlayKind::None).should eq(OverlayKind::None)
     Runner.palette_return(OverlayKind::Confirm).should eq(OverlayKind::None)
   end
+
+  # ^P over the History drill-in drew the bare list behind the palette: the palette takes
+  # the `@overlay` slot the drill-in holds, and History drew on `overlay == :detail`. The same
+  # went for every card opened over the flow. What History draws on now, and what a card
+  # opened over it inherits.
+  it "keeps the History drill-in beneath the palette and the cards over it" do
+    none = OverlayKind::None
+    Runner.detail_beneath?(OverlayKind::Detail, none, nil).should be_true
+    Runner.detail_beneath?(none, none, nil).should be_false
+
+    Runner.detail_beneath?(OverlayKind::Palette, OverlayKind::Detail, nil).should be_true
+    Runner.detail_beneath?(OverlayKind::Palette, none, nil).should be_false
+
+    card = ConfirmDialog.new("DELETE", "delete it?")
+    Runner.detail_beneath?(card.key, none, card).should be_false
+    card.over_detail = true # stamped by open_overlay over the drill-in; a nested card inherits it
+    Runner.detail_beneath?(card.key, none, card).should be_true
+    Runner.detail_beneath?(card.key, none, nil).should be_false # a reset @overlay leaves no card
+  end
 end

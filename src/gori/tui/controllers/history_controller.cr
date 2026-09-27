@@ -106,7 +106,9 @@ module Gori::Tui
       @history.pretty = @host.pretty? # propagate the global pretty-print pref
       # List (optionally + bottom Req/Res preview) or full detail drill-in.
       proxy = @host.session.proxy
-      if @host.overlay == :detail
+      # `detail_shown?`, not `overlay == :detail`: a card over the flow (^P, a form) keeps it
+      # drawn behind, not the list it would close onto.
+      if @host.detail_shown?
         # Two-level detail focus: the STRIP (chip row) vs the BODY. When the strip holds
         # focus the frame greys and the caret/selection stand down (gated on `focused`),
         # while the active chip lights a gold pill (strip_focused).

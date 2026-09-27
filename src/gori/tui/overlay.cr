@@ -291,6 +291,12 @@ module Gori::Tui
     # where the user asked to go.
     property on_close : Proc(Nil)?
 
+    # Whether this modal was opened over the History drill-in, written by
+    # `Runner#open_overlay`. The drill-in is an `@overlay` state too, so the modal replaces
+    # it there; this is what keeps the flow drawn behind the card and puts the drill-in back
+    # when the card closes, instead of both falling to the bare list (`Runner.detail_beneath?`).
+    property? over_detail : Bool = false
+
     # The `@overlay` state this modal sets, written by `Runner#open_overlay`.
     #
     # It is NOT what makes the modal capture input: a migrated modal's member is deleted
