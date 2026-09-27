@@ -57,7 +57,8 @@ module Gori::MCP
                    @inbox : Proc(String?) = -> { ClaudeInbox.discover },
                    @codex : Proc(CodexQueue::Session?) = -> { CodexQueue.discover },
                    @claim : Proc(Int64, Bool) = ->(_id : Int64) { true },
-                   @release : Proc(Int64, Nil) = ->(_id : Int64) { nil })
+                   @release : Proc(Int64, Nil) = ->(_id : Int64) { nil },
+                   @expire : Proc(Nil) = -> { nil })
       @cursor = 0_i64
       # The store the cursor was taken against — a REFERENCE, never its object_id: a bare id
       # can be reused by the next store the GC hands out at the same address, and a cursor
@@ -106,6 +107,16 @@ module Gori::MCP
       store = @store.call
       return 0 unless store
       rebase(store)
+      # The `ask_operator` questions this process asked whose time ran out (#1324). BEFORE the
+      # idle gate below, which only opens when the feed grew — an expiry is a clock event, and
+      # on a quiet project nothing else would ever move it. The row it writes is then a
+      # message like any other, carried on this tick or the next. Its own rescue: a failed
+      # expiry costs that pass, not this tick's deliveries.
+      begin
+        @expire.call
+      rescue ex
+        Log.warn(exception: ex) { "mcp: could not expire asked questions" }
+      end
       # The high-water mark is read BEFORE the page: the TUI is another process, and a row it
       # commits between the two queries must land inside the next page, not behind the cursor.
       # It is also the idle gate: one `MAX(id)` off the rowid index per tick, and the page
@@ -189,7 +200,7 @@ module Gori::MCP
     #     did answer, or into the poll deposit when none did.
     private def deliver(store : Store, m : AgentMessage) : Nil
       label = session_label
-      note = OperatorNote.frame(m.text, m.from_tab, m.flow_ids, m.id)
+      note = OperatorNote.frame_message(m)
       # `route` is assigned BEFORE each hand-off, never after: the rescue below can only name
       # the route it was trying if the route is already on the local when the trying starts.
       # What an earlier route SAID on its way past goes here — the operator gets one row per
@@ -277,12 +288,16 @@ module Gori::MCP
           j.field "method", "notifications/claude/channel"
           j.field "params" do
             j.object do
-              j.field "content", m.text + OperatorNote::REPLY_HINT
+              j.field "content", m.answer? ? OperatorNote.answer(m) : m.text + OperatorNote::REPLY_HINT
               j.field "meta" do
                 j.object do
                   j.field "message_id", m.id.to_s
                   j.field "from_tab", m.from_tab || ""
                   j.field "flow_ids", m.flow_ids.join(",") unless m.flow_ids.empty?
+                  if qid = m.in_reply_to
+                    j.field "in_reply_to", qid.to_s
+                    j.field "outcome", m.outcome || ""
+                  end
                 end
               end
             end

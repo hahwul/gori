@@ -162,6 +162,60 @@ module Gori::Tui
       {:info, :success, :warn, :error}[worst]
     end
 
+    # --- ask_operator (#1324) ---------------------------------------------------------------
+
+    # The ring line that announces a question: `claude-code asks: Add api.example.com to scope?`.
+    def self.question_line(q : Gori::AgentQuestion) : String
+      "#{question_sender(q)} asks: #{scrub_line(q.question)}"
+    end
+
+    # The note's long form, what ↵ shows once the question is closed and the card is no
+    # longer offered: the context and the choices it was asked with.
+    def self.question_detail(q : Gori::AgentQuestion) : String
+      String.build do |io|
+        if (d = q.detail) && !d.strip.empty?
+          io << d.rstrip << "\n\n"
+        end
+        io << "Choices: " << q.choices.map { |c| scrub_line(c) }.join(" · ")
+      end
+    end
+
+    # The card's second line: how long it has waited and how long it has left.
+    def self.question_meta(q : Gori::AgentQuestion, now_us : Int64) : String
+      # Compared before subtracting: `expires_at` came off a feed row another process wrote,
+      # and a hand-written one far in the past would overflow the difference.
+      waited = now_us > q.created_at ? (now_us - q.created_at) // 1000 : 0_i64
+      asked = AgentsOverlay.relative_time(waited.milliseconds)
+      left = q.expires_at > now_us ? (q.expires_at - now_us) // 1_000_000 : 0_i64
+      expires =
+        if left <= 0
+          "expired"
+        elsif left < 60
+          "expires in <1m"
+        elsif left < 3600
+          "expires in #{left // 60}m"
+        else
+          "expires in #{left // 3600}h#{(left % 3600) // 60 > 0 ? " #{(left % 3600) // 60}m" : ""}"
+        end
+      "asked #{asked} · #{expires}"
+    end
+
+    # The toast after the operator answered.
+    def self.question_answered(q : Gori::AgentQuestion, choice : String?) : String
+      who = question_sender(q)
+      choice ? "answered #{who}: #{scrub_line(choice)}" : "dismissed #{who}'s question"
+    end
+
+    # The asking client, as a ring row names it.
+    def self.question_sender(q : Gori::AgentQuestion) : String
+      AgentsOverlay.safe_client(q.target_label.split(" pid ").first?) || "agent"
+    end
+
+    # `scrub_line` for a caller outside this module (the question card).
+    def self.scrub(text : String) : String
+      scrub_line(text)
+    end
+
     # Peer-written text with the control characters removed and whitespace collapsed, but no
     # width cap — for a line the drawing surface will size.
     private def self.scrub_line(text : String) : String

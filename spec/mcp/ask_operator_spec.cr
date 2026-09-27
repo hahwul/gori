@@ -1,0 +1,162 @@
+require "../spec_helper"
+require "../support/mcp_harness"
+require "file_utils"
+
+# MCP `ask_operator` (#1324): a question the operator answers on a card in the TUI. The tool
+# returns at once; the answer comes back later as an operator message with `in_reply_to`.
+private def ask(t : Gori::MCP::Tools, args : String) : Gori::MCP::Tools::Result
+  t.call("ask_operator", JSON.parse(args))
+end
+
+describe "MCP ask_operator (#1324)" do
+  it "writes the question and answers at once with its id and expiry" do
+    with_store do |store|
+      t = tools_for(store)
+      r = ask(t, %({"question":"Add api.example.com to scope?","choices":["yes","no"],"default":"no","detail":"same cookie","expires_in_minutes":5}))
+      r.is_error.should be_false
+      j = JSON.parse(r.text)
+      j["ok"].as_bool.should be_true
+      j["question"].as_s.should eq("Add api.example.com to scope?")
+      j["choices"].as_a.map(&.as_s).should eq(["yes", "no"])
+      j["default"].as_s.should eq("no")
+      j["tui"]["unknown"].as_bool.should be_true
+      j["note"].as_s.should contain("in_reply_to")
+      j["note"].as_s.should contain("not an authorization")
+      j["expires_at_iso"].as_s.should_not be_empty
+      q = store.open_agent_questions(0_i64, 0_i64).first
+      q.id.should eq(j["id"].as_i64)
+      q.pid.should eq(Process.pid.to_i64)
+      q.detail.should eq("same cookie")
+      left = q.expires_at - Time.utc.to_unix_ms * 1000
+      left.should be > 4 * 60_000_000_i64
+      left.should be <= 5 * 60_000_000_i64
+    end
+  end
+
+  it "accepts the choices as a JSON-encoded string, the way agents often send an array" do
+    with_store do |store|
+      r = ask(tools_for(store), %({"question":"go?","choices":"[\\"go\\",\\"stop\\"]"}))
+      r.is_error.should be_false
+      JSON.parse(r.text)["choices"].as_a.map(&.as_s).should eq(["go", "stop"])
+    end
+  end
+
+  it "refuses what the card could not offer" do
+    with_store do |store|
+      t = tools_for(store)
+      {
+        %({"choices":["a","b"]})                                          => "question",
+        %({"question":"q"})                                               => "choices",
+        %({"question":"q","choices":["only"]})                            => "choices",
+        %({"question":"q","choices":["a","b","c","d","e"]})               => "choices",
+        %({"question":"q","choices":["a",""]})                            => "choices",
+        %({"question":"q","choices":["Yes","yes"]})                       => "choices",
+        %({"question":"q","choices":["a","#{"x" * 41}"]})                 => "choices",
+        %({"question":"q","choices":["a","b"],"default":"c"})             => "default",
+        %({"question":"q","choices":["a","b"],"expires_in_minutes":0})    => "expires_in_minutes",
+        %({"question":"q","choices":["a","b"],"expires_in_minutes":1441}) => "expires_in_minutes",
+      }.each do |args, field|
+        r = ask(t, args)
+        r.is_error.should be_true
+        r.field.should eq(field)
+      end
+      store.open_agent_questions(0_i64, 0_i64).should be_empty
+    end
+  end
+
+  it "is not served by a read-only server" do
+    with_store do |store|
+      JSON.parse(JSON.build { |j| tools_for(store, allow_actions: false).list(j) }).as_a
+        .map(&.["name"].as_s).should_not contain("ask_operator")
+    end
+  end
+
+  # The asking process is the one that expires its question: with no TUI open nothing else
+  # would ever tell the agent, and the row it writes goes back to it like an answer.
+  it "expires its own unanswered question once its time is up, and only once" do
+    with_store do |store|
+      t = tools_for(store)
+      id = JSON.parse(ask(t, %({"question":"q","choices":["a","b"],"expires_in_minutes":1})).text)["id"].as_i64
+      t.expire_asked_questions(Time.utc.to_unix_ms * 1000).should eq(0) # not yet
+      later = (Time.utc + 2.minutes).to_unix_ms * 1000
+      t.expire_asked_questions(later).should eq(1)
+      t.expire_asked_questions(later).should eq(0)
+      m = store.agent_messages_after(id, Process.pid.to_i64, 10).rows.first
+      m.in_reply_to.should eq(id)
+      m.outcome.should eq("expired")
+      store.events_after(0, 20).find(&.kind.==("agent_message")).not_nil!.source.should eq("agent")
+    end
+  end
+
+  it "does not expire a question the operator already answered" do
+    with_store do |store|
+      t = tools_for(store)
+      id = JSON.parse(ask(t, %({"question":"q","choices":["a","b"],"expires_in_minutes":1})).text)["id"].as_i64
+      q = store.open_agent_questions(id - 1, 0_i64).first
+      store.close_agent_question(q, Gori::AgentQuestion::OUTCOME_ANSWERED, "a", "operator", "tui")
+      t.expire_asked_questions((Time.utc + 2.minutes).to_unix_ms * 1000).should eq(0)
+      store.agent_messages_after(id, Process.pid.to_i64, 10).rows.map(&.outcome).should eq(["answered"])
+    end
+  end
+
+  it "hands the answer to operator_messages with the question it closes" do
+    with_store do |store|
+      t = tools_for(store)
+      id = JSON.parse(ask(t, %({"question":"q","choices":["a","b"]})).text)["id"].as_i64
+      q = store.open_agent_questions(id - 1, 0_i64).first
+      store.close_agent_question(q, Gori::AgentQuestion::OUTCOME_ANSWERED, "b", "operator", "tui", "history")
+      msgs = JSON.parse(t.call("operator_messages", JSON.parse("{}")).text)["messages"].as_a
+      msgs.size.should eq(1)
+      msgs.first["text"].as_s.should eq("b")
+      msgs.first["in_reply_to"].as_i64.should eq(id)
+      msgs.first["outcome"].as_s.should eq("answered")
+    end
+  end
+
+  it "rides the answer on the next tool result, framed as one" do
+    with_store do |store|
+      t = tools_for(store)
+      id = JSON.parse(ask(t, %({"question":"send anyway?","choices":["send","skip"]})).text)["id"].as_i64
+      q = store.open_agent_questions(id - 1, 0_i64).first
+      store.close_agent_question(q, Gori::AgentQuestion::OUTCOME_DISMISSED, nil, "operator", "tui")
+      note = t.pending_operator_note("list_history").not_nil!
+      note.text.should contain("dismissed your ask_operator question ##{id}")
+      t.release_operator_note(note)
+    end
+  end
+end
+
+# With a real project path the server can count the gori TUI windows that would show the card.
+describe "ask_operator reach" do
+  it "says when no window is open that the next one will show it" do
+    home = File.tempname("gori-ask-reach")
+    saved = ENV["GORI_HOME"]?
+    ENV["GORI_HOME"] = home
+    begin
+      project = Gori::ProjectRegistry.new(Gori::Paths.projects_dir).create("target")
+      store = Gori::Store.open(project.db_path)
+      t = Gori::MCP::Tools.new(store, true, false, project_name: project.name, db_path: project.db_path,
+        selection_source: "workspace-created")
+      begin
+        j = JSON.parse(ask(t, %({"question":"q","choices":["a","b"]})).text)
+        j["tui"]["windows"].as_i.should eq(0)
+        j["note"].as_s.should contain("next gori TUI to open on it shows it")
+        window = Gori::AgentPresence.announce(project.db_path, client: "gori tui", client_version: "1",
+          read_only: false, selection_source: nil, kind: Gori::AgentPresence::KIND_TUI).not_nil!
+        begin
+          j = JSON.parse(ask(t, %({"question":"q2","choices":["a","b"]})).text)
+          j["tui"]["windows"].as_i.should eq(1)
+          j["note"].as_s.should contain("ask: chip")
+        ensure
+          window.close
+        end
+      ensure
+        t.release_presence
+        store.close
+      end
+    ensure
+      saved ? (ENV["GORI_HOME"] = saved) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(home)
+    end
+  end
+end

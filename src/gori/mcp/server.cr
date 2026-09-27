@@ -896,7 +896,8 @@ module Gori
           channels: -> { @channel_declared },
           emit: ->(frame : String) { send(frame) },
           claim: ->(mid : Int64) { @tools.claim_message(mid) },
-          release: ->(mid : Int64) { @tools.release_message(mid) })
+          release: ->(mid : Int64) { @tools.release_message(mid) },
+          expire: -> { @tools.expire_asked_questions; nil })
         courier.start
         @courier = courier
       end

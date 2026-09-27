@@ -11,16 +11,33 @@ module Gori
   # (`AgentPresence::Entry#pid` for a kind-`mcp` entry) — the one thing the TUI can name and
   # the one thing the courier inside that process knows about itself. Not the agent's own
   # pid: the TUI never sees it, and it differs per client.
+  #
+  # A message that CLOSES an `ask_operator` question (#1324) carries `in_reply_to` (the
+  # question's feed id), `outcome` (`AgentQuestion::OUTCOMES`) and the question's own line, so
+  # every route that carries a message frames it as the answer it is — the socket and the
+  # tool-result carry see only this row, never the question. `text` is then the chosen label,
+  # or a placeholder for a dismissal or an expiry.
   record AgentMessage, id : Int64, text : String, target : String, from_tab : String?,
-    flow_ids : Array(Int64), created_at : Int64 do
-    def self.payload_json(target : String, from_tab : String?, flow_ids : Array(Int64)) : String
+    flow_ids : Array(Int64), created_at : Int64, in_reply_to : Int64? = nil,
+    outcome : String? = nil, question : String? = nil do
+    def self.payload_json(target : String, from_tab : String?, flow_ids : Array(Int64),
+                          in_reply_to : Int64? = nil, outcome : String? = nil,
+                          question : String? = nil) : String
       JSON.build do |j|
         j.object do
           j.field "target", target
           j.field "from_tab", from_tab if from_tab
           j.field("flow_ids") { j.array { flow_ids.each { |id| j.number(id) } } } unless flow_ids.empty?
+          j.field "in_reply_to", in_reply_to if in_reply_to
+          j.field "outcome", outcome if outcome
+          j.field "question", question if question
         end
       end
+    end
+
+    # Does this message close a question rather than say something new?
+    def answer? : Bool
+      !in_reply_to.nil?
     end
 
     # A feed row → a message, or nil when the payload does not parse as one (a hand-written
@@ -31,7 +48,8 @@ module Gori
       return nil unless h
       target = h["target"]?.try(&.as_s?) || return nil
       ids = h["flow_ids"]?.try(&.as_a?).try(&.compact_map(&.as_i64?)) || [] of Int64
-      new(row.id, row.message, target, h["from_tab"]?.try(&.as_s?), ids, row.created_at)
+      new(row.id, row.message, target, h["from_tab"]?.try(&.as_s?), ids, row.created_at,
+        h["in_reply_to"]?.try(&.as_i64?), h["outcome"]?.try(&.as_s?), h["question"]?.try(&.as_s?))
     rescue JSON::ParseException
       nil
     end

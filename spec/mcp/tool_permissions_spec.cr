@@ -11,6 +11,7 @@ private UNSWITCHED_WRITERS = {
   # agent capability the operator is fencing.
   "operator_messages" => "operator channel",
   "reply_to_operator" => "operator channel",
+  "ask_operator"      => "operator channel",
 }
 
 private def denied_tools(store, *keys : String) : Gori::MCP::Tools

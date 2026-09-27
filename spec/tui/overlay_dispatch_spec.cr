@@ -34,7 +34,7 @@ private EXPECTED_OVERLAY_SYMS = {
   :oast_provider_pick, :oast_session,
   :probe_rule, :rewriter_rule, :colormarker_rule, :colormarker_color, :extract_rule, :rewriter_stub, :rewriter_respond, :authorize_identities, :authorize_identity, :ca_import, :import, :curl_paste, :export, :scope_rule, :sequence_config,
   :mine_config, :name_prompt, :columns, :column, :library_pick, :cvss_calculator, :copy_as, :send_to,
-  :evidence, :retest, :retest_assert, :timing_report,
+  :evidence, :retest, :retest_assert, :timing_report, :agent_question,
 }
 
 # The migration ledger — THE one line a Phase 1 batch edits in this file. Each batch
@@ -144,6 +144,8 @@ private MIGRATED_KINDS = [
   OverlayKind::TabGoto,
   # TimingReport — the differential-timing verdict card (#1246), an Overlay from birth.
   OverlayKind::TimingReport,
+  # AgentQuestion (#1324) — the ask_operator answer card, an Overlay from birth.
+  OverlayKind::AgentQuestion,
 ]
 
 # Never in MODAL_OVERLAYS by design, migrated or not. `None` is "no modal at all" and

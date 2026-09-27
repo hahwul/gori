@@ -118,6 +118,7 @@ require "../scope"
 require "../rules"
 require "../import"
 require "./runner/agent_message"
+require "./runner/agent_question"
 require "./runner/agent_presence"
 require "./runner/authorize"
 require "./runner/colormarker"
@@ -716,6 +717,11 @@ module Gori::Tui
               # come. Reports dirty only when a note was actually pushed.
               dirty = true if drain_agent_deliveries
               dirty = true if drain_agent_replies
+              # Questions an agent put with `ask_operator` (#1324): after the presence scan
+              # above, because a question is offered only while the agent that asked is
+              # attached. Outside the data_version branch for the same reason as the two
+              # drains beside it, and for one of its own: a question expires on the clock.
+              dirty = true if drain_agent_questions
               # Our own marker's capture bit, on the same tick and for the same reason it is
               # not in the data_version branch (#1091). Writes only when `c` actually moved
               # the lock, and never reports dirty — nothing on screen reads it.
@@ -2911,7 +2917,8 @@ module Gori::Tui
         unread: @notifications.unread, capturing: @session.capturing?,
         write_failures: @session.store.write_failures, bypass: Settings.passthrough_count,
         listeners: listener_chip_count, listener_errors: @session.listener_errors.size,
-        authorize: authorize_chip_label, session: session_slot_chip, agents: agent_chip)
+        authorize: authorize_chip_label, session: session_slot_chip, agents: agent_chip,
+        asks: answerable_questions.size)
       Chrome.render_rule(screen, layout.rule)
       # One reconcile per frame: the menu strip, the off-bar count AND the slot numbers all
       # derive from the same tab reconcile — split_tabs computes them in a single pass.
@@ -2969,7 +2976,8 @@ module Gori::Tui
         unread: @notifications.unread, capturing: @session.capturing?,
         write_failures: @session.store.write_failures, bypass: Settings.passthrough_count,
         listeners: listener_chip_count, listener_errors: @session.listener_errors.size,
-        authorize: authorize_chip_label, session: session_slot_chip, agents: agent_chip)
+        authorize: authorize_chip_label, session: session_slot_chip, agents: agent_chip,
+        asks: answerable_questions.size)
       Chrome.render_rule(screen, layout.rule)
       vis_tabs, _, slots = effective_bar
       Chrome.render_menu(screen, layout.menu, active_tab: @active_tab,
@@ -3883,11 +3891,16 @@ module Gori::Tui
       # by the close that follows it. So the commit only RECORDS which note to open, and
       # on_close — which runs after the drop — is what raises it.
       detail_note = nil.as(Notifications::Note?)
+      # …and an agent's open question (#1324) raises its answer card the same way, from
+      # on_close, carrying the row's id so the card hands the operator back to it.
+      question = nil.as({Gori::AgentQuestion, Int32}?)
       # The jump itself lands on the target tab, and focus_tab already clears @overlay —
       # so the shell's close-on-commit is a no-op after it, not a second dismissal.
       ov.on_commit = -> {
         note = ov.selected_note
-        if note && note.detail
+        if note && (q = answerable_question_for(note))
+          question = {q, note.id}
+        elsif note && note.detail
           detail_note = note
         else
           run_goto(note.try(&.goto))
@@ -3895,7 +3908,12 @@ module Gori::Tui
         true
       }
       ov.on_close = -> {
-        (note = detail_note) ? open_note_detail(note, from_ring: true) : nil
+        if asked = question
+          open_question_card(asked[0], from_ring: asked[1])
+        elsif note = detail_note
+          open_note_detail(note, from_ring: true)
+        end
+        nil
       }
       # Close BEFORE raising the palette: the reverse order would drop @active_overlay on
       # top of the modal we just opened.

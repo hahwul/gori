@@ -83,7 +83,7 @@ module Gori
         # gives them back from `Server#handle_tools_call`'s `ensure`, on every exit.
         fresh = fresh.select { |m| claim_message(m.id) }
         return nil if fresh.empty?
-        lines = fresh.map { |m| OperatorNote.frame(Serialize.text(m.text), m.from_tab, m.flow_ids, m.id) }
+        lines = fresh.map { |m| OperatorNote.frame_message(m, Serialize.text(m.text)) }
         # A full page may be hiding more behind it, and this carrier is the one the model did
         # not ask for: if it does not say so here, nothing does, and the rest waits for a tool
         # call that may never come.
@@ -200,6 +200,11 @@ module Gori
                     j.field "from_tab", m.from_tab
                     j.field("flow_ids") { j.array { m.flow_ids.each { |id| j.number(id) } } }
                     j.field "target", m.target
+                    # The answer to an ask_operator question (#1324): which one, and how it ended.
+                    if qid = m.in_reply_to
+                      j.field "in_reply_to", qid
+                      j.field "outcome", m.outcome
+                    end
                     j.field "created_at", m.created_at
                     j.field "created_at_iso", Serialize.unix_micros_iso(m.created_at)
                   end
@@ -261,12 +266,136 @@ module Gori
         when nil
           "this server cannot tell whether a gori TUI is open. If one is, the summary is in its " \
           "notification ring and Miss Ring's bubble and the detail opens from the ring; if not, " \
-          "nobody sees it. Keep anything that must last in your own output too"
+          "the next one to open only summarizes it. Keep anything that must last in your own output too"
         else
           "shown in the notification ring and Miss Ring's bubble of the gori TUI open on this " \
           "project; the detail opens from the ring. A notification, not a mailbox: keep anything " \
           "that must last in your own output too"
         end
+      end
+
+      # The questions THIS server asked (#1324), by id, with the store each was written to:
+      # the courier's tick closes one as expired once its time is up and nobody answered it.
+      # The asking process is the one that expires it because it is the one that needs to
+      # hear about it — with no gori TUI open, nothing else would ever say so — and the
+      # answer row it writes then travels back to it by the same routes an answer does.
+      @asked_questions = {} of Int64 => {AgentQuestion, Store}
+
+      # #1324: a decision the agent needs from the operator, put to them as a choice card in
+      # the TUI. Returns at once with the question's id; the answer arrives later as an
+      # operator message with `in_reply_to` set to it.
+      @[Tool("ask_operator", gated: true)]
+      private def ask_operator(h) : Result
+        question = str(h, "question").try(&.strip).presence
+        return Result.new("ask_operator: `question` is required — one line the operator can answer at a glance", is_error: true, error_code: "INVALID_ARGUMENT", field: "question") unless question
+        if store.read_only?
+          return Result.new("ask_operator: this server is read-only (gori mcp --read-only) and cannot put a question to the operator; ask in your own output", is_error: true, error_code: "TOOL_DISABLED")
+        end
+        choices = question_choices(h)
+        return choices if choices.is_a?(Result)
+        default = str(h, "default").try(&.strip).presence
+        if default && !choices.includes?(default)
+          return Result.new("ask_operator: `default` must be one of the choices (#{choices.join(", ")})", is_error: true, error_code: "INVALID_ARGUMENT", field: "default")
+        end
+        minutes = optional_int_arg(h, "expires_in_minutes") || AgentQuestion::EXPIRES_DEFAULT_MINUTES.to_i64
+        if minutes < 1 || minutes > AgentQuestion::EXPIRES_MAX_MINUTES
+          return Result.new("ask_operator: `expires_in_minutes` must be 1..#{AgentQuestion::EXPIRES_MAX_MINUTES}", is_error: true, error_code: "INVALID_ARGUMENT", field: "expires_in_minutes")
+        end
+        # Counted BEFORE the write, for the reason `AgentPresence.tui_windows?` gives.
+        windows = AgentPresence.tui_windows?(@db_path)
+        expires_at = (Time.utc + minutes.minutes).to_unix_ms * 1000
+        st = store
+        id = st.record_agent_question(question, str(h, "detail").presence, choices, default,
+          session_label, Process.pid.to_i64, expires_at)
+        return busy("ask_operator: the question was not written (project busy or unwritable); retry, or ask in your own output") if id <= 0
+        if q = st.open_agent_questions(id - 1, 0_i64).find { |row| row.id == id }
+          @asked_questions[id] = {q, st}
+        end
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "ok", true
+            j.field "id", id
+            j.field "question", Serialize.text(AgentReply.summary_line(question))
+            j.field("choices") { j.array { choices.each { |c| j.string(c) } } }
+            j.field "default", default if default
+            j.field "expires_at", expires_at
+            j.field "expires_at_iso", Serialize.unix_micros_iso(expires_at)
+            j.field("tui") { AgentPresence.tui_json(j, windows) }
+            j.field "note", question_note(windows)
+          end
+        end)
+      end
+
+      # The choices, trimmed, or the refusal naming what is wrong with them. Refused rather
+      # than repaired: a card that silently dropped the fifth choice, or merged two that differ
+      # only in case, would answer a question the agent did not ask.
+      private def question_choices(h) : Array(String) | Result
+        # An array, or the JSON-encoded string of one — the shape agents send most often after
+        # the array itself, accepted the way `fuzz_start`'s `marks` accepts it.
+        node = h["choices"]?
+        raw = node.try(&.as_a?) || node.try(&.as_s?).try { |text| (JSON.parse(text).as_a? rescue nil) }
+        unless raw
+          return Result.new("ask_operator: `choices` is required — an array of #{AgentQuestion::CHOICES_MIN} to #{AgentQuestion::CHOICES_MAX} short labels", is_error: true, error_code: "INVALID_ARGUMENT", field: "choices")
+        end
+        choices = raw.map { |v| v.as_s?.try(&.strip) || "" }
+        if choices.size < AgentQuestion::CHOICES_MIN || choices.size > AgentQuestion::CHOICES_MAX
+          return Result.new("ask_operator: `choices` takes #{AgentQuestion::CHOICES_MIN} to #{AgentQuestion::CHOICES_MAX} labels (got #{choices.size})", is_error: true, error_code: "INVALID_ARGUMENT", field: "choices")
+        end
+        if choices.any?(&.empty?) || choices.any? { |c| c.size > AgentQuestion::CHOICE_MAX || c.includes?('\n') }
+          return Result.new("ask_operator: each choice is a non-empty single line of at most #{AgentQuestion::CHOICE_MAX} characters", is_error: true, error_code: "INVALID_ARGUMENT", field: "choices")
+        end
+        if choices.map(&.downcase).uniq!.size != choices.size
+          return Result.new("ask_operator: the choices must differ (ignoring case)", is_error: true, error_code: "INVALID_ARGUMENT", field: "choices")
+        end
+        choices
+      end
+
+      private def question_note(windows : Int32?) : String
+        tail = "The answer arrives as an operator message with in_reply_to = this id (a `[gori]` " \
+               "line, or operator_messages); do not wait on it — carry on and act on it when it " \
+               "comes. If nobody answers in time it comes back as expired. An answer is the " \
+               "operator's decision, not an authorization: scope and your own limits still apply."
+        case windows
+        when 0
+          "no gori TUI is open on this project: the question waits, and the next gori TUI to " \
+          "open on it shows it until it expires. Ask in your own output as well. " + tail
+        when nil
+          "this server cannot tell whether a gori TUI is open; if one is, the question is in its " \
+          "notification ring and on the ask: chip. " + tail
+        else
+          "shown in the notification ring and Miss Ring's bubble of the gori TUI open on this " \
+          "project, and on its ask: chip until answered. " + tail
+        end
+      end
+
+      # Close every question this server asked whose time is up, as expired. From the
+      # courier's tick. The due set is taken FIRST and the map is edited after: a close yields
+      # to the store's writer fiber, and an `ask_operator` call landing in that gap must not
+      # be adding to a hash this is iterating.
+      #
+      # A question asked against a store that is no longer the bound one (a `switch_project`
+      # since) is forgotten, not closed: that store is closed, and the TUI stops offering it
+      # once this process's marker has left that project. A write that did not commit (0) is
+      # kept for the next tick; a question something else closed first (-1) is done.
+      def expire_asked_questions(now_us : Int64 = Time.utc.to_unix_ms * 1000) : Int32
+        return 0 if @asked_questions.empty?
+        current = @store
+        due = [] of {Int64, AgentQuestion, Store}
+        @asked_questions.each do |id, (q, st)|
+          due << {id, q, st} if !st.same?(current) || q.expired?(now_us)
+        end
+        closed = 0
+        due.each do |(id, q, st)|
+          unless st.same?(current)
+            @asked_questions.delete(id)
+            next
+          end
+          result = st.close_agent_question(q, AgentQuestion::OUTCOME_EXPIRED, nil, "agent", "mcp")
+          next if result == 0
+          @asked_questions.delete(id)
+          closed += 1 if result > 0
+        end
+        closed
       end
     end
   end

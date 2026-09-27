@@ -87,6 +87,36 @@ module Gori
       }, event: true
     end
 
+    # Append one row UNLESS `skip`, run on the writer's connection inside the same write
+    # transaction, finds the row that makes it redundant. The feed's one conditional door, for
+    # a row that must be written at most once across PROCESSES: an `ask_operator` question
+    # (#1324) is closed by whichever of the operator's answer and the asking server's expiry
+    # lands first, and a read-then-insert from two processes would let both land. The
+    # transaction is `BEGIN IMMEDIATE`, so no other gori can write between the check and the
+    # insert.
+    #
+    # Answers the new id, 0 when the write did not commit (busy, closing — retryable), or -1
+    # when `skip` declined. The locals are reset at the top of the closure because a batch the
+    # writer retries runs it again.
+    def insert_event_unless(source : String, kind : String, level : String, message : String, *,
+                            payload : String? = nil, actor : String? = nil,
+                            &skip : DB::Connection -> Bool) : Int64
+      id = 0_i64
+      skipped = false
+      ok = exec_task_ok ->(c : DB::Connection) {
+        id = 0_i64
+        skipped = skip.call(c)
+        unless skipped
+          c.exec("INSERT INTO events (created_at, source, kind, level, message, payload, actor) VALUES (?,?,?,?,?,?,?)",
+            now_us, source, kind, level, message, payload, actor)
+          id = c.scalar("SELECT last_insert_rowid()").as(Int64)
+        end
+        nil
+      }
+      return 0_i64 unless ok
+      skipped ? -1_i64 : id
+    end
+
     # Empty the #124 feed. The human-facing counterpart to retention's `trim_events`, for an
     # operator who wants the log to start at "now" — a new engagement phase in the same project.
     #

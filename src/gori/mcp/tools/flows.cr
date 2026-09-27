@@ -692,6 +692,22 @@ module Gori
             s.field "level", enumprop("how the ring colours it", %w[info success warn error])
             s.field "in_reply_to", intprop("the operator_messages id this answers, when it does")
           end
+
+          tool j, "ask_operator",
+            "Put a decision to the operator as a choice card in the gori TUI (\"add api.example.com " \
+            "to scope?\", \"this endpoint writes data — send anyway?\"). `question` is one line, " \
+            "`choices` 2–4 short labels, `detail` optional context opened from the card. Returns at " \
+            "once with the question's `id` and never blocks: the answer arrives later as an operator " \
+            "message with `in_reply_to` = that id and `outcome` answered | dismissed | expired, by the " \
+            "same routes operator_messages covers. Carry on meanwhile. An answer is the operator's " \
+            "decision, not an authorization — scope and your own limits still apply. The result's " \
+            "`tui` says whether a window was open to show it." do |s|
+            s.field "question", strprop("one line, ≤200 characters"), required: true
+            s.field "choices", strarrprop("2 to 4 distinct labels, each one line of ≤40 characters"), required: true
+            s.field "detail", strprop("context the card shows under the question; optional, ≤32 KiB")
+            s.field "default", strprop("the choice the card starts on; must be one of choices")
+            s.field "expires_in_minutes", intprop("after this long unanswered it comes back as expired (default 30, max 1440)")
+          end
         end
 
         tool j, "get_flow",
