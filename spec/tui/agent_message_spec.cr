@@ -218,9 +218,13 @@ describe "Runner agent-reply watermark wiring" do
     body.should match(/release_tui_presence\s*\n(?:.*\n){0,3}\s*mark_agent_replies_seen/)
   end
 
-  it "moves it after the live drain announced a reply, and pushes the away note addressed" do
+  it "moves it after the live drain and the away note announced, and pushes that note addressed" do
     lines = src("tui", "runner", "agent_message.cr")
-    lines.count(&.includes?("mark_agent_replies_seen")).should be >= 2
+    lines.count(&.includes?("mark_agent_replies_seen")).should be >= 3
+    body = lines.join('\n')
+    body.should match(/AgentMessageNotes\.missed_replies[\s\S]*?addressed: true\)\s*\n\s*mark_agent_replies_seen/)
+    # No watermark yet looks back a day, not to the project's first reply.
+    body.should contain("first_event_id_since")
     lines.any? { |l| l.includes?("AgentMessageNotes.missed_replies") }.should be_true
     lines.count { |l| l.includes?("@notifications.push(") && l.includes?("addressed: true") }.should be >= 2
   end

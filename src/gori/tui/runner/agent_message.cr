@@ -209,12 +209,21 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   #
   # Pushed with `addressed: true`, like the replies it stands for, so Miss Ring keeps it up
   # until the operator's first key rather than for the few seconds after a window opens that
-  # they are least likely to be reading her. The watermark is NOT moved here: the operator has
-  # not seen anything yet. Opening the ring or closing the window moves it.
+  # they are least likely to be reading her. Announced is shown, as it is for the live drain:
+  # the watermark moves right after, so a second window opening on the project while this one
+  # is up does not push the same note again.
+  #
+  # A project with no watermark yet looks back one day, not to its first reply: every project
+  # that predates the key would otherwise open onto a note summing up its whole history.
+  MISSED_REPLY_LOOKBACK = 1.day
+
   def announce_missed_replies : Bool
     store = @session.store
-    seen = store.agent_reply_seen || 0_i64
     upto = @agent_reply_cursor
+    seen = store.agent_reply_seen || begin
+      since = (Time.utc - MISSED_REPLY_LOOKBACK).to_unix_ms * 1000
+      store.first_event_id_since(since).try { |id| id - 1 } || upto
+    end
     return false if upto <= seen
     total = store.agent_reply_count_between(seen, upto)
     return false if total <= 0
@@ -223,6 +232,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     level, message, detail = AgentMessageNotes.missed_replies(rows, total)
     source = rows.any? { |r| AgentMessageNotes.note_source(r) == "agent" } ? "agent" : "script"
     @notifications.push(level, message, nil, source: source, detail: detail, addressed: true)
+    mark_agent_replies_seen
     true
   rescue ex
     # A window that cannot read its own feed still opens; the replies stay in Activity.

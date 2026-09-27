@@ -254,8 +254,16 @@ module Gori
     #
     # nil for a project no window has ever recorded one on, which is every project that
     # predates this key — and a project an agent created and replied into before the operator
-    # first opened it, which is the case the watermark exists for. The caller reads nil as 0.
+    # first opened it, which is the case the watermark exists for. The caller reads nil as "the
+    # last day" (`first_event_id_since`), so an upgrade does not replay a project's history.
     AGENT_REPLY_SEEN_KEY = "agent_reply_seen"
+
+    # The first feed id written at or after `created_at_us` (unix micros), or nil when none
+    # was. Where the away summary starts on a project with no watermark yet: it bounds "while
+    # you were away" to a recent window instead of the project's whole history.
+    def first_event_id_since(created_at_us : Int64) : Int64?
+      @db.scalar("SELECT MIN(id) FROM events WHERE created_at >= ?", created_at_us).as(Int64?)
+    end
 
     def agent_reply_seen : Int64?
       setting(AGENT_REPLY_SEEN_KEY).try(&.to_i64?)

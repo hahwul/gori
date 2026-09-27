@@ -95,3 +95,14 @@ describe Gori::Store, "#1323 script notices" do
     end
   end
 end
+
+describe Gori::Store, "#1322 away-summary lookback" do
+  it "finds the first feed row written since a time, or nil when none was" do
+    with_store do |store|
+      store.first_event_id_since(0_i64).should be_nil
+      id = store.record_agent_reply("r", nil, "info", "a pid 1", 1_i64)
+      store.first_event_id_since(0_i64).should eq(id)
+      store.first_event_id_since((Time.utc + 1.hour).to_unix_ms * 1000).should be_nil
+    end
+  end
+end
