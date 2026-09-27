@@ -4,6 +4,12 @@ require "socket"
 private alias Frame = Gori::Proxy::H2::Frame
 private alias HPACK = Gori::Proxy::H2::HPACK
 
+module Gori::Repeater::Timing
+  def self.duration_for_spec(result : Repeater::Result) : Int64?
+    duration_of(result)
+  end
+end
+
 # A cleartext-h2 origin for `H2Engine.single_packet` that waits until `expect` streams have
 # ended, then hands the connection and the `{stream id, :path}` list to `answer`, which writes
 # whatever frames the example needs. The connection stays open until `hold` has passed.
@@ -171,9 +177,9 @@ describe "Repeater::H2Engine.single_packet" do
   end
 
   # A stream still open when the read ends was closed by the collector in member order, so its
-  # duration said B always finished last. Kept as data but failed, like an h1 body read timeout,
-  # so a timing run does not count it as a sample.
-  it "fails a stream the read left open instead of reporting it ok" do
+  # duration said B always finished last. Kept as the race's data, flagged so a timing run does
+  # not count it as a sample.
+  it "flags a stream the read left open, and timing drops it" do
     port = start_h2_scripted_origin(2, hold: 2.seconds) do |io, ended|
       ended.each do |(sid, _)|
         h2_headers(io, sid, [{":status", "200"}], end_stream: false)
@@ -186,10 +192,11 @@ describe "Repeater::H2Engine.single_packet" do
       timeout: 150.milliseconds)
 
     results.each do |r|
-      r.ok?.should be_false
+      r.ok?.should be_true
       r.incomplete?.should be_true
-      r.error.not_nil!.should contain("still streaming")
+      r.cut_short?.should be_true
       r.response.not_nil!.status.should eq(200)
     end
+    Gori::Repeater::Timing.duration_for_spec(results[0]).should be_nil
   end
 end

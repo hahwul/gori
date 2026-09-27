@@ -87,6 +87,7 @@ module Gori::Repeater::Timing
 
   private def self.duration_of(result : Repeater::Result?) : Int64?
     return nil unless result
+    return nil if result.cut_short? # closed by the collector, not arrived — see `Result#cut_short?`
     result.error.nil? ? result.duration_us : nil
   end
 end

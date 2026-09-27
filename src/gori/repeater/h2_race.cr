@@ -433,12 +433,11 @@ module Gori
         end
         head = synth_head(reply)
         resp = Proxy::Codec::Http1.parse_response_head(head)
-        # A stream the read left open is an error, as an h1 member's body read timeout is:
-        # otherwise its collector-order duration counts as a timing sample (B always "last").
-        error = reply.rst || (st.cut_short? ? "race: response still streaming when the read ended (h2 single-packet)" : nil)
+        # A stream the read left open is flagged `cut_short`: its collector-order duration is no
+        # timing sample (B would always read "last"), while the race still reports what arrived.
         Result.new(head, reply.body, resp, st.duration_us,
-          error: error,
-          incomplete: !reply.clean_eos, delivered: true)
+          error: reply.rst,
+          incomplete: !reply.clean_eos, delivered: true, cut_short: st.cut_short?)
       end
 
       private def self.finalize(results : Array(Result?), n : Int32) : Array(Result)
