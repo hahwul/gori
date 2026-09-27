@@ -287,6 +287,17 @@ module Gori
       nil
     end
 
+    # The RESPONSE side's mirror of `request_parts`: head, body and the capture-truncation flag,
+    # without the request BLOBs — what a pager over one response body needs on every page,
+    # where `get_flow` would also materialize the request body only to drop it. The outer nil
+    # is "no such flow"; a flow with no response yet has a nil head and body.
+    def response_parts(id : Int64) : {Bytes?, Bytes?, Bool}?
+      @db.query("SELECT response_head, response_body, response_body_truncated FROM flows WHERE id = ?", id) do |rs|
+        return {rs.read(Bytes?), rs.read(Bytes?), rs.read(Int64) != 0} if rs.move_next
+      end
+      nil
+    end
+
     # Single-row projection, e.g. to refresh a row after an :inserted/:updated
     # event without re-reading the whole page.
     def flow_row(id : Int64) : FlowRow?

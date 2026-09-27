@@ -350,6 +350,65 @@ describe Gori::MCP::Server do
     end
   end
 
+  # One `Tools` keeps the last decoded body between pages instead of inflating it again for
+  # each. What must not change: the pages still tile the decoded body exactly, a second body
+  # interleaved between them is its own, and an id that is deleted and handed to a new flow
+  # pages the NEW flow's bytes — the memo is keyed on the stored bytes, not on the id.
+  describe "get_response_body_chunk sequential paging" do
+    page = ->(tools : Gori::MCP::Tools, id : Int64, offset : Int64) do
+      mcp_ok_json(tools, "get_response_body_chunk", %({"flow_id":#{id},"offset":#{offset},"limit":1000}))
+    end
+
+    it "tiles a compressed body exactly, page after page, with another body interleaved" do
+      with_store do |store|
+        text_a = String.build { |io| 900.times { |i| io << "row " << i << " ã\n" } }
+        text_b = "other body " * 300
+        head = "HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\n\r\n"
+        a = mcp_seed_flow(store, "ex.test", "GET", "/a", 200, resp_head: head, resp_body: gzip_bytes(text_a))
+        b = mcp_seed_flow(store, "ex.test", "GET", "/b", 200, resp_head: head, resp_body: gzip_bytes(text_b))
+        tools = tools_for(store, allow_actions: false)
+        got_a = IO::Memory.new
+        got_b = IO::Memory.new
+        off_a = 0_i64
+        off_b = 0_i64
+        done_a = done_b = false
+        until done_a && done_b
+          unless done_a
+            p = page.call(tools, a, off_a)
+            p["representation"].as_s.should eq("decoded")
+            p["total_bytes"].as_i64.should eq(text_a.bytesize)
+            # A page boundary can split the 2-byte ã, and such a page comes back as base64.
+            got_a.write(p["encoding"].as_s == "base64" ? Base64.decode(p["base64"].as_s) : p["text"].as_s.to_slice)
+            off_a = p["next_offset"].as_i64? || off_a
+            done_a = p["complete"].as_bool
+          end
+          unless done_b
+            p = page.call(tools, b, off_b)
+            got_b << p["text"].as_s
+            off_b = p["next_offset"].as_i64? || off_b
+            done_b = p["complete"].as_bool
+          end
+        end
+        got_a.to_s.should eq(text_a)
+        got_b.to_s.should eq(text_b)
+      end
+    end
+
+    it "pages the new flow's bytes after the id it memoized is deleted and reused" do
+      with_store do |store|
+        head = "HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\n\r\n"
+        old_id = mcp_seed_flow(store, "ex.test", "GET", "/old", 200, resp_head: head, resp_body: gzip_bytes("OLD " * 1000))
+        tools = tools_for(store, allow_actions: false)
+        page.call(tools, old_id, 0_i64)["text"].as_s.should start_with("OLD OLD")
+        # Deleted OUTSIDE this Tools (the TUI, another agent): nothing clears the memo.
+        store.delete_flow(old_id).should be_true
+        new_id = mcp_seed_flow(store, "ex.test", "GET", "/new", 200, resp_head: head, resp_body: gzip_bytes("NEW " * 1000))
+        new_id.should eq(old_id) # INTEGER PRIMARY KEY without AUTOINCREMENT reuses the max id
+        page.call(tools, new_id, 1000_i64)["text"].as_s.should start_with("NEW NEW")
+      end
+    end
+  end
+
   describe "get_response_body_chunk offset validation" do
     it "flags an out-of-range offset instead of silently clamping" do
       with_store do |store|
