@@ -682,7 +682,7 @@ kbd {
     radial-gradient(42rem 26rem at 50% 44%, rgb(8 10 17 / 0.72), rgb(8 10 17 / 0) 72%),
     radial-gradient(64rem 30rem at 50% 78%, rgb(8 10 17 / 0.88), rgb(8 10 17 / 0) 70%),
     linear-gradient(180deg, rgb(6 8 14 / 0.62) 0%, rgb(6 8 14 / 0.44) 38%, rgb(6 8 14 / 0.3) 62%, rgb(8 10 17 / 0) 80%),
-    url("../images/wallpaper.webp") 50% 40% / cover no-repeat;
+    url("../images/hero-wallpaper.webp") 50% 40% / cover no-repeat;
   -webkit-mask: linear-gradient(180deg, #000 48%, transparent 84%);
   mask: linear-gradient(180deg, #000 48%, transparent 84%);
 }
@@ -3613,7 +3613,7 @@ html.search-lock body {
       radial-gradient(30rem 24rem at 50% 42%, rgb(8 10 17 / 0.7), rgb(8 10 17 / 0) 72%),
       radial-gradient(40rem 22rem at 50% 72%, rgb(8 10 17 / 0.9), rgb(8 10 17 / 0) 72%),
       linear-gradient(180deg, rgb(6 8 14 / 0.72) 0%, rgb(6 8 14 / 0.5) 42%, rgb(6 8 14 / 0) 78%),
-      url("../images/wallpaper.webp") 30% 40% / cover no-repeat;
+      url("../images/hero-wallpaper.webp") 30% 40% / cover no-repeat;
   }
 
   .home-hero h1 {
