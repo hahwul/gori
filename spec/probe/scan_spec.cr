@@ -110,3 +110,82 @@ describe Gori::Probe::Scan do
     end
   end
 end
+
+# Answers every request with a small 200 and records its request line. Loopback-only, reached
+# through a host override, so a probe can only arrive here if the scan actually sent it.
+private class LineRecorder
+  getter lines = [] of String
+
+  def initialize
+    @server = TCPServer.new("127.0.0.1", 0)
+    spawn do
+      while conn = @server.accept?
+        serve(conn)
+      end
+    rescue
+      # closed under the accept loop — teardown
+    end
+  end
+
+  def port : Int32
+    @server.local_address.port
+  end
+
+  def close : Nil
+    @server.close rescue nil
+  end
+
+  private def serve(conn : TCPSocket) : Nil
+    spawn do
+      if first = conn.gets("\r\n", chomp: true)
+        @lines << first
+      end
+      while (line = conn.gets("\r\n", chomp: true)) && !line.empty?
+      end
+      conn << "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
+      conn.flush rescue nil
+      conn.close rescue nil
+    rescue
+      conn.close rescue nil
+    end
+  end
+end
+
+private def seed_unresolvable(store : Gori::Store, port : Int32, target : String) : Int64
+  head = "GET #{target} HTTP/1.1\r\nHost: nonexistent.invalid:#{port}\r\n\r\n"
+  id = store.insert_flow(Gori::Store::CapturedRequest.new(
+    created_at: 1_i64, scheme: "http", host: "nonexistent.invalid", port: port,
+    method: "GET", target: target, http_version: "HTTP/1.1", head: head.to_slice,
+    source: Gori::FlowSource::Kind::Proxy))
+  store.update_response(Gori::Store::CapturedResponse.new(
+    flow_id: id, status: 200,
+    head: "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 2\r\n\r\n".to_slice,
+    body: "ok".to_slice, duration_us: 1_i64))
+  id
+end
+
+describe "Probe::Scan active surface dedup" do
+  # Repeat captures of one endpoint used to be probed once EACH, and each spent a unit of the
+  # active cap — so with MCP's cap of 500, a busy endpoint captured 500 times left every other
+  # endpoint unprobed while the scan reported itself complete.
+  it "probes a repeated surface once and does not spend the active cap on its repeats" do
+    rec = LineRecorder.new
+    begin
+      with_store do |store|
+        ov = Gori::HostOverrides.load(store)
+        ov.add("nonexistent.invalid", "127.0.0.1:#{rec.port}").should be_true
+        ids = (1..4).map { |i| seed_unresolvable(store, rec.port, "/s?q=v#{i}") }
+        ids << seed_unresolvable(store, rec.port, "/t?q=v")
+        budget = Gori::Probe::Scan::Budget.new(2)
+        Gori::Probe::Scan.scan_flows(store, ids, active: true, verify_upstream: false,
+          allow_unscoped: true, active_budget: budget, overrides: ov)
+        budget.exhausted?.should be_false
+        rec.lines.any?(&.includes?("/t")).should be_true
+        # Only the first capture's value went out: the three repeats sent nothing.
+        %w[v2 v3 v4].each { |v| rec.lines.any?(&.includes?("q=#{v}")).should be_false }
+      end
+    ensure
+      rec.close
+    end
+  end
+end

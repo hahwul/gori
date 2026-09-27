@@ -264,13 +264,19 @@ module Gori
                      active_budget : Budget? = nil,
                      overrides : Gori::HostOverrides? = nil,
                      stop : Proc(Bool)? = nil,
-                     on_error : Proc(String, Exception, Nil)? = nil) : Array(Detection)
+                     on_error : Proc(String, Exception, Nil)? = nil,
+                     active_seen : Set(String)? = nil) : Array(Detection)
         cfg = rules || RuleConfig.load(store)
         outbound = outbound_for(scope, allow_unscoped)
         ov = overrides_for(store, active, overrides)
         detections = [] of Detection
         budget = active_budget || Budget.new(active_limit)
         opts = with_oob(store, opts, active)
+        # Surfaces already probed in this scan (`Plan#dedup_key`s). Without it a project holding
+        # 200 captures of `GET /api/items?page=` sent every rule's probes 200 times, and — worse —
+        # spent 200 units of `active_limit` on one surface, so the distinct endpoints after it
+        # were never probed at all while the scan reported itself complete.
+        seen = active_seen || Set(String).new
         ids.each_with_index do |id, i|
           # Before the flow is READ, not merely before its active probes: a stop is the caller
           # saying the whole scan is over, so it must cost the store nothing further either.
@@ -290,11 +296,11 @@ module Gori
               # `FlowRow#url` embeds a non-default port, so a string/regex include of
               # `https://acme.test/` would miss `https://acme.test:8443/…` and silently
               # skip every active probe on that origin while the lens still shows it in-scope.
-              if active_now?(active, cfg, outbound, detail.row, budget)
+              if active_now?(active, cfg, outbound, detail.row, budget) { Active.fresh?(detail, opts, cfg.disabled, seen) }
                 detections.concat(Active.analyze(detail, verify_upstream, outbound: outbound,
                   overrides: ov, opts: opts,
                   disabled: cfg.disabled, on_error: on_error,
-                  on_oob: oob_sink(store, detail.row, id)))
+                  on_oob: oob_sink(store, detail.row, id), seen: seen))
               end
             end
           rescue ex : DB::Error | SQLite3::Exception
@@ -392,7 +398,7 @@ module Gori
             scan_repeater_ws_frames(store, detail, rec.id, cfg).each do |d|
               detections << Probe.with_source(d, flow_id: rec.flow_id, repeater_id: rec.id)
             end
-            if active_now?(active, cfg, outbound, detail.row, budget)
+            if active_now?(active, cfg, outbound, detail.row, budget) { true }
               Active.analyze(detail, verify_upstream, outbound: outbound, overrides: ov, opts: opts,
                 disabled: cfg.disabled, on_error: on_error,
                 on_oob: oob_sink(store, detail.row, rec.flow_id)).each do |d|
@@ -416,9 +422,17 @@ module Gori
       #
       # `!cfg.degraded`: the disabled-rule set could not be read, so gori does not know which
       # ACTIVE rules the operator switched off — see `RuleConfig`.
+      #
+      # `fresh` answers "would this item send anything new?" and sits just before the charge, for
+      # the same reason: a flow that only repeats surfaces this scan already probed must not
+      # spend the cap. Repeater tabs pass `{ true }` — each is an operator-authored request,
+      # probed on its own terms rather than deduped against the flows. `budget.take?` stays LAST
+      # because it is what charges: asking it before the scope/fresh gates would spend a unit on
+      # a send that never happens and make `exhausted?` report a truncation that truncated
+      # nothing (see `Budget#exhausted?`).
       private def active_now?(active : Bool, cfg : RuleConfig, outbound : Outbound,
-                              row : Store::FlowRow, budget : Budget) : Bool
-        active && !cfg.degraded && allows_row?(outbound, row) && budget.take?
+                              row : Store::FlowRow, budget : Budget, & : -> Bool) : Bool
+        active && !cfg.degraded && allows_row?(outbound, row) && yield && budget.take?
       end
 
       # Has the caller asked this scan to stop? ONE home, read from three loops, so a later

@@ -39,6 +39,7 @@ module Gori
         @cache_control : Array(String)?
         @html : Bool?
         @js : Bool?
+        @binary_media : Bool?
         @websocket : Bool?
 
         def initialize(@detail : Store::FlowDetail, @ws_messages = [] of Store::WsMessage)
@@ -109,6 +110,33 @@ module Gori
           h = @html
           return h unless h.nil?
           @html = !!ct_low.try(&.includes?("text/html"))
+        end
+
+        # Media types whose body is binary by design: raster images, audio, video, fonts, wasm,
+        # archives. `image/svg+xml` is XML text (and an XSS carrier), so it is not one of them.
+        # `application/octet-stream` is deliberately absent: it is the sniffable type
+        # `MimeConfusion` and `ExposedConfig` read, and it labels served text files routinely.
+        BINARY_MEDIA_PREFIXES = {"image/", "audio/", "video/", "font/"}
+        BINARY_MEDIA_TYPES    = {"application/wasm", "application/font-woff", "application/x-font-woff",
+                                 "application/x-font-ttf", "application/x-font-otf",
+                                 "application/vnd.ms-fontobject", "application/zip",
+                                 "application/gzip", "application/x-gzip"}
+
+        # The response DECLARES a binary media type. Only half of `body_text`'s skip: the body
+        # must also fail UTF-8 validation, so a text error page mislabelled `image/png` is still
+        # read.
+        def binary_media? : Bool
+          b = @binary_media
+          return b unless b.nil?
+          @binary_media = binary_media_type?(ct_low)
+        end
+
+        private def binary_media_type?(low : String?) : Bool
+          return false unless low
+          semi = low.index(';')
+          media = (semi ? low[0, semi] : low).strip
+          return false if media.includes?("svg")
+          BINARY_MEDIA_PREFIXES.any? { |p| media.starts_with?(p) } || BINARY_MEDIA_TYPES.includes?(media)
         end
 
         # A JavaScript response (external bundle / module), distinct from an HTML document with
@@ -198,11 +226,23 @@ module Gori
         # own worst case (bench/probe_passive_bench's 256 KiB JS bundle): 0.90ms → 0.10ms, and
         # 0.69ms → 0.08ms over the 200 KiB HTML page. The repair itself is unchanged — an
         # invalid body still ends up scrubbed, at ~5% for the second walk. See `Gori::Utf8`.
+        #
+        # A body that is binary by declaration AND by content (`binary_media?` plus invalid
+        # UTF-8) has no text: nil, as if empty. Scrubbing one turned every stray byte into a
+        # 3-byte U+FFFD, so a 64 KiB image became ~100-190 KiB of replacement characters that
+        # every body regex then walked — ~600µs per image, on the same fiber as the rest of
+        # capture, to scan a PNG for stack traces and API keys. Nothing a body rule matches
+        # survives in compressed pixel data; a mislabelled TEXT body is still valid UTF-8 and
+        # is still read.
         def body_text : String?
           return @body_text if @body_text_done
           @body_text_done = true
           bytes = decoded_body
-          @body_text = (bytes && !bytes.empty?) ? Utf8.text(bytes[0, {bytes.size, BODY_CAP}.min]) : nil
+          return @body_text = nil if bytes.nil? || bytes.empty?
+          slice = bytes[0, {bytes.size, BODY_CAP}.min]
+          # Validated on the slice, before any copy: a real image fails within its first bytes.
+          return @body_text = nil if binary_media? && !Unicode.valid?(slice)
+          @body_text = Utf8.text(slice)
         end
 
         # Decoded, larger-capped (CLIENT_BODY_CAP), scrubbed body — computed once and shared by

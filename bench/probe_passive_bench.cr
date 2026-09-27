@@ -153,8 +153,10 @@ BIG_HTML_FLOW = flow("GET", "/docs", "text/html; charset=utf-8",
 # scrubs to 102,612 bytes — a 1.57× blow-up here, and up to 3× on a body with no ASCII at all.
 # (The fixture is 180 KiB so the cap really bites; only its first 64 KiB is ever scanned.)
 # Nothing in the BODY can produce a detection — the two the fixture reports are header-only, the
-# nginx `Server:` fingerprint and missing HSTS — so the body scan is pure overhead on the fiber
-# the passive scan shares with the proxy, and it is invisible in any all-text fixture.
+# nginx `Server:` fingerprint and missing HSTS — so the body scan was pure overhead on the fiber
+# the passive scan shares with the proxy (615µs / 277 kB per image), invisible in any all-text
+# fixture. `Context#body_text` now reads a declared-binary, invalid-UTF-8 body as no text at all;
+# this row is what keeps that skip from quietly regressing.
 BIN_BODY = Bytes.new(180 * 1024) { |i| ((i.to_u64 &* 2654435761_u64) >> 13).to_u8! }
 
 BIN_RESP_HEAD = ("HTTP/1.1 200 OK\r\nContent-Type: image/png\r\n" \
