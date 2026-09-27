@@ -174,8 +174,8 @@ module Gori
         else
           case region
           when "header" then ctx.response_head_text
-          when "body"   then ctx.body_text
-          else               ctx.response_whole_text
+          when "body"   then ctx.operator_body_text
+          else               ctx.operator_whole_text
           end
         end
       end

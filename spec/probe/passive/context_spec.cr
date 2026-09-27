@@ -67,6 +67,33 @@ describe Gori::Probe::Passive::Context do
         .body_text.should eq("Traceback (most recent call last):")
     end
 
+    # The cap can split the last character of a mislabelled text body; that tail used to fail
+    # the UTF-8 check, so a >64 KiB text page served as an image read as no text at all.
+    it "still reads a mislabelled text body whose last character the cap splits" do
+      cap = Passive::Context::BODY_CAP
+      text = "Traceback (most recent call last):\n" + "x" * (cap - 37) + "한글 tail"
+      ctx_for(text.to_slice, "image/png", PNG_HEAD).body_text.not_nil!.should start_with("Traceback")
+    end
+
+    # The skip is for the built-ins; an operator's custom rule may be hunting exactly what hides
+    # in a declared-binary body (a GIF/PHP polyglot).
+    it "hands custom rules the scrubbed text of a declared-binary body" do
+      io = IO::Memory.new
+      io.write Bytes[0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0xff, 0xfe, 0x00, 0x80]
+      io << "<?php system($_GET['c']); ?>"
+      ctx = ctx_for(io.to_slice, "image/gif", "HTTP/1.1 200 OK\r\nContent-Type: image/gif\r\n\r\n")
+      ctx.body_text.should be_nil
+      ctx.operator_body_text.not_nil!.should contain("<?php")
+      ctx.operator_whole_text.not_nil!.should contain("image/gif")
+      {"body", "whole"}.each do |region|
+        r = Gori::Probe::CustomRule.new("1", "polyglot", "d", "response", region, "regex", "<\\?php",
+          Gori::Store::Severity::High, "project", true)
+        acc = [] of Gori::Probe::Detection
+        r.check(ctx, acc)
+        acc.map(&.code).should eq(["custom_p_1"])
+      end
+    end
+
     # SVG is XML text — and a script carrier — so it is never treated as binary; neither is
     # octet-stream, the sniffable type MimeConfusion reads.
     it "keeps repairing SVG and octet-stream bodies" do

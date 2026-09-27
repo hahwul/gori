@@ -29,6 +29,10 @@ module Gori
         @decoded_body_done = false
         @body_text : String?
         @body_text_done = false
+        @operator_body_text : String?
+        @operator_body_text_done = false
+        @operator_whole_text : String?
+        @operator_whole_text_done = false
         @client_body_text : String?
         @client_body_text_done = false
         @client_scripts : Array(String)?
@@ -241,8 +245,45 @@ module Gori
           return @body_text = nil if bytes.nil? || bytes.empty?
           slice = bytes[0, {bytes.size, BODY_CAP}.min]
           # Validated on the slice, before any copy: a real image fails within its first bytes.
-          return @body_text = nil if binary_media? && !Unicode.valid?(slice)
+          # A cap can split the last character of a mislabelled text body, so that tail is not
+          # held against it.
+          return @body_text = nil if binary_media? && !Unicode.valid?(Context.whole_chars(slice))
           @body_text = Utf8.text(slice)
+        end
+
+        # `body_text` WITHOUT the binary skip, for the operator's custom rules. The skip was
+        # measured against the built-ins, which match nothing in pixel data; an operator's rule
+        # can be looking for exactly what hides there (`<?php` in a GIF polyglot served as
+        # `image/gif`), and it used to see the scrubbed text.
+        def operator_body_text : String?
+          return @operator_body_text if @operator_body_text_done
+          @operator_body_text_done = true
+          @operator_body_text = body_text || begin
+            bytes = decoded_body
+            Utf8.text(bytes[0, {bytes.size, BODY_CAP}.min]) if bytes && !bytes.empty?
+          end
+        end
+
+        # `response_whole_text` over `operator_body_text`.
+        def operator_whole_text : String?
+          return @operator_whole_text if @operator_whole_text_done
+          @operator_whole_text_done = true
+          @operator_whole_text = body_text ? response_whole_text : join_region(response_head_text, operator_body_text)
+        end
+
+        # `s` without a trailing sequence the slice cut short — at most three continuation
+        # bytes and the lead byte they belong to.
+        protected def self.whole_chars(s : Bytes) : Bytes
+          i = s.size
+          back = 0
+          while i > 0 && back < 3 && s[i - 1] & 0xC0 == 0x80
+            i -= 1
+            back += 1
+          end
+          return s unless i > 0 && s[i - 1] >= 0xC0
+          lead = s[i - 1]
+          need = lead >= 0xF0 ? 4 : (lead >= 0xE0 ? 3 : 2)
+          s.size - (i - 1) < need ? s[0, i - 1] : s
         end
 
         # Decoded, larger-capped (CLIENT_BODY_CAP), scrubbed body — computed once and shared by
