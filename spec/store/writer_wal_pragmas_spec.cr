@@ -18,4 +18,17 @@ describe "Gori::Store writer connection WAL pragmas" do
       conn.scalar("PRAGMA journal_size_limit").as(Int64).should eq(Gori::Store::WAL_SIZE_LIMIT)
     end
   end
+
+  it "shrinks the page cache on the writer's connection only, leaving readers at 64 MiB" do
+    with_store do |store|
+      store.insert_flow(capture(1)).should be > 0
+      writer = store.@writer_conn.not_nil!
+      writer.scalar("PRAGMA cache_size").as(Int64).should eq(Gori::Store::WRITER_CACHE_KIB)
+      # A reader checked out while the writer holds its own connection is a different one.
+      store.@db.using_connection do |reader|
+        reader.should_not be(writer)
+        reader.scalar("PRAGMA cache_size").as(Int64).should eq(-64000)
+      end
+    end
+  end
 end

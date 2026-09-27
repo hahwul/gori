@@ -421,6 +421,14 @@ module Gori
     # can grow it far past the autocheckpoint size, and it would stay that big on disk.
     WAL_SIZE_LIMIT = 64 * 1024 * 1024
 
+    # The writer's own page cache, in KiB (negative = KiB, as in the URL's -64000). The pool's
+    # 64 MiB is sized for READERS re-scanning BLOB-heavy `flows` pages under a History filter;
+    # the writer holds its connection for the life of the store and mostly appends, so its
+    # cache fills with pages it never reads again and stays resident. Measured over 60 s of
+    # keep-alive proxy load (`gori run capture`): throughput no lower at 8 MiB, peak RSS
+    # 185 -> 129 MB.
+    WRITER_CACHE_KIB = -8000
+
     # THE one place a fresh pool connection is configured.
     #
     # crystal-db's `setup_connection` ASSIGNS its block (`@setup_connection = proc` in
@@ -1219,9 +1227,12 @@ module Gori
       conn || begin
         fresh = @db.checkout
         # Both per CONNECTION, so they have to be re-issued on every one the writer takes, not
-        # once at startup. See WAL_AUTOCHECKPOINT_PAGES / WAL_SIZE_LIMIT.
+        # once at startup. See WAL_AUTOCHECKPOINT_PAGES / WAL_SIZE_LIMIT / WRITER_CACHE_KIB.
+        # The connection goes back to the pool only at teardown, so readers keep the URL's
+        # 64 MiB.
         fresh.exec("PRAGMA wal_autocheckpoint=#{WAL_AUTOCHECKPOINT_PAGES}") rescue nil
         fresh.exec("PRAGMA journal_size_limit=#{WAL_SIZE_LIMIT}") rescue nil
+        fresh.exec("PRAGMA cache_size=#{WRITER_CACHE_KIB}") rescue nil
         @writer_conn = fresh
       end
     end
