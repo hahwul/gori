@@ -358,7 +358,8 @@ module Gori
 
       # The automatic run itself, over a FRESHLY read list: `Store#delete_repeater` detaches a
       # closed tab's id in the persisted row, and a step id this process still holds positive
-      # could by now name whatever tab took that id next (`repeaters.id` has no AUTOINCREMENT).
+      # names a tab that is gone — and, before V40 gave `repeaters.id` AUTOINCREMENT, could
+      # name whatever tab took that id next.
       # One settings read, and only when a refresh is actually about to run.
       private def run_fresh(name : String, outbound : Outbound) : Nil
         slots = @bindings.slots

@@ -183,6 +183,39 @@ describe "Gori::Store custom-rule config" do
   end
 end
 
+# A project rule's id IS its finding code (`custom_p_<id>`), and `probe_issues`/`probe_suppressions`
+# key on that code. Before V40 deleting the newest rule and creating another handed the new rule the
+# old id, so its hits landed on the old rule's suppressions and dismissed rows and were never shown.
+describe "Gori::Store custom-rule ids (V40)" do
+  it "gives a rule created after the newest was deleted a code of its own" do
+    with_store do |store|
+      old = store.insert_probe_custom_rule("old broad", "", "response", "body", "string", "foo", Gori::Store::Severity::Low)
+      old_code = "custom_p_#{old}"
+      {"a.test", "b.test"}.each do |host|
+        store.upsert_probe_issue(Gori::Probe::Detection.new(old_code, "custom", host, "https://#{host}/", "old broad",
+          Gori::Store::Severity::Low))
+      end
+      a = store.probe_issues.find!(&.host.==("a.test"))
+      b = store.probe_issues.find!(&.host.==("b.test"))
+      store.delete_probe_issue(a.id).should be_true # hard delete → suppression (old_code, a.test)
+      Gori::Probe::Triage.toggle_dismiss(store, b)  # dismissed as a false positive
+      store.delete_probe_custom_rule(old).should be_true
+
+      fresh = store.insert_probe_custom_rule("new precise", "", "response", "body", "string", "secret", Gori::Store::Severity::High)
+      fresh.should_not eq(old)
+      code = "custom_p_#{fresh}"
+      {"a.test", "b.test"}.each do |host|
+        store.upsert_probe_issue(Gori::Probe::Detection.new(code, "custom", host, "https://#{host}/x", "new precise",
+          Gori::Store::Severity::High))
+      end
+      rows = store.probe_issues.select(&.code.==(code))
+      rows.map(&.host).sort!.should eq(["a.test", "b.test"])
+      rows.all?(&.status.open?).should be_true
+      rows.all?(&.title.==("new precise")).should be_true
+    end
+  end
+end
+
 describe "Gori::Probe.custom_rules merge" do
   it "unions the global library with the project rules, tagged by scope" do
     with_store do |store|

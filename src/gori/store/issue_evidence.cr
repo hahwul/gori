@@ -171,9 +171,10 @@ module Gori
     # How many frozen copies exist of one live source — the History detail's and the
     # Repeater's marker, which says "a frozen copy exists", never "this is immutable".
     #
-    # A Repeater id is REUSED: `repeaters.id` has no AUTOINCREMENT and the newest tab is the
-    # one closed most often, so a fresh tab can inherit the id of a closed one whose copies
-    # deliberately outlive it (`delete_repeater` leaves `issue_evidence` alone). Counting by
+    # A Repeater id was REUSED until V40: `repeaters.id` had no AUTOINCREMENT and the newest
+    # tab is the one closed most often, so a fresh tab could inherit the id of a closed one
+    # whose copies deliberately outlive it (`delete_repeater` leaves `issue_evidence` alone),
+    # and a copy frozen before the upgrade can still carry such an id. Counting by
     # id alone would badge that new tab with an exchange it never had. A copy is taken from
     # a tab that already exists, so only copies frozen AT OR AFTER the current row's
     # `created_at` can be this tab's; the rest belong to a predecessor. Flow ids can return,
@@ -192,9 +193,9 @@ module Gori
 
     # Is the LIVE object a frozen copy came from still the one it was copied from? The Evidence
     # tab's `s` (open original source) asks this, and "a row with that id exists" is not the
-    # same question — for the same reason `evidence_count_for` guards its COUNT: `repeaters.id`
-    # has no AUTOINCREMENT, so a tab opened after the source tab was closed can inherit its id
-    # while the copy (deliberately) outlives the close. Navigating there would present an
+    # same question — for the same reason `evidence_count_for` guards its COUNT: before V40
+    # `repeaters.id` had no AUTOINCREMENT, so a tab opened after the source tab was closed could
+    # inherit its id while the copy (deliberately) outlived the close. Navigating there would present an
     # unrelated tab as "the original". A copy is always taken from a tab that already exists,
     # so the source is alive only when the row's `created_at` is at or before the copy's; a
     # newer row under the same id is a successor. A deleted flow source carries a negative id,

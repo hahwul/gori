@@ -181,8 +181,9 @@ describe "`s` on a RELATED row" do
     method_body("issue_related_goto?").should contain("selected_related")
   end
 
-  # A frozen copy outlives the tab it came from, and `repeaters.id` has no AUTOINCREMENT — so a
-  # tab opened afterwards can inherit the id. `s` must refuse rather than present a stranger as
+  # A frozen copy outlives the tab it came from, and before V40 `repeaters.id` had no
+  # AUTOINCREMENT — so a tab opened afterwards could inherit the id, and an upgraded project can
+  # still hold one that did. `s` must refuse rather than present a stranger as
   # the original (#1048); the wiring order is pinned in evidence_source_reuse_spec.
   it "refuses a FROZEN row whose repeater id was reused" do
     with_store do |store|
@@ -194,8 +195,8 @@ describe "`s` on a RELATED row" do
       eid, status = store.freeze_evidence(issue, snap)
       status.ok?.should be_true
       store.delete_repeater(rid).should be_true
-      reused = store.insert_repeater("https://other.test", "GET /b HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0)
-      reused.should eq(rid)
+      store.insert_repeater("https://other.test", "GET /c HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0).should_not eq(rid)
+      plant_repeater_at(store, rid, "https://other.test", "GET /b HTTP/1.1\r\n\r\n")
 
       meta = store.get_evidence(eid).not_nil!.meta
       store.get_repeater(meta.source_id).should_not be_nil # the id resolves…

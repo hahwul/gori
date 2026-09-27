@@ -116,7 +116,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
 
   private def remove_selected_link(lo : LinksOverlay) : Nil
     return unless link = lo.selected_entity_link
-    unless @session.store.remove_link(link.id)
+    # By what the row LINKS, as MCP `remove_link` and `gori run links rm` do, not by its row id:
+    # `entity_links.id` is a rowid, so after a peer removed this link and added another, the
+    # id on screen can name the other one.
+    unless @session.store.remove_link(link.owner_kind, link.owner_id, link.ref_kind, link.ref_id)
       @toast = "link NOT removed (project busy) — it is unchanged"
       return
     end

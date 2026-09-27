@@ -163,9 +163,10 @@ module Gori
         unless SavedViews.remove(store, found)
           return busy(scope == "global" ? "failed to delete global view (settings not writable)" : "failed to delete view (store busy or unwritable)")
         end
-        # THIS project's pointer is cleared; another project's stays inert, because ids come
-        # from monotonic counters and are never reused.
-        SavedViews.set_active(store, nil) if store.setting(SavedViews::ACTIVE_KEY) == found.key
+        # THIS project's pointer is cleared (see `clear_active_if`). Only a GLOBAL view can be
+        # named from another project, and that pointer stays inert: global ids come from a
+        # monotonic counter and are never reused. A project view's id is a rowid and is not.
+        SavedViews.clear_active_if(store, found)
         Result.new(JSON.build do |j|
           j.object do
             j.field "deleted", found.name

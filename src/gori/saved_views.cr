@@ -328,6 +328,16 @@ module Gori
       store.set_setting(ACTIVE_KEY, v.key)
     end
 
+    # After `view` is deleted: point this project back at All when its SAVED pointer names the
+    # view, and leave it alone otherwise. The saved setting, never a process's own lens — a
+    # peer may have pointed the project at this view since, or away from it. A project view's
+    # id is a rowid that the next view created can take, so a pointer left naming it would
+    # turn that view on. Returns false only when a needed write did not commit.
+    def self.clear_active_if(store : Store, view : View) : Bool
+      return true unless store.setting(ACTIVE_KEY) == view.key
+      set_active(store, nil)
+    end
+
     # --- scope-aware CRUD --------------------------------------------------------------------
     # Each dispatches on the {id, scope} pair the key carries, so no caller needs to know which
     # of the two stores a view lives in. Every answer is a COMMIT answer: false/0 means the

@@ -342,3 +342,47 @@ describe "Gori::Store repeater tabs (v9)" do
     end
   end
 end
+
+# A Probe finding raised by a Repeater send names its tab, and promoting the finding links the new
+# issue to that id. Closing the tab must take the name with it, and (V40) the id must not come back.
+describe "Gori::Store delete_repeater and a Probe finding's sample tab" do
+  req = "GET / HTTP/1.1\r\nHost: a.test\r\n\r\n".to_slice
+
+  it "clears the finding's sample tab, so a promotion links no successor" do
+    with_store do |store, _|
+      r1 = store.insert_repeater("https://a.test", req, false, true, nil, 0)
+      store.upsert_probe_issue(Gori::Probe::Detection.new("missing_hsts", "headers", "a.test", "https://a.test/", "t",
+        Gori::Store::Severity::Low, repeater_id: r1))
+      store.probe_issues.first.sample_repeater_id.should eq(r1)
+      store.delete_repeater(r1).should be_true
+      store.probe_issues.first.sample_repeater_id.should be_nil
+
+      r2 = store.insert_repeater("https://other.test", "POST /admin/delete HTTP/1.1\r\nHost: other.test\r\n\r\n".to_slice,
+        false, true, nil, 0)
+      r2.should_not eq(r1) # V40: closing the newest tab no longer frees its id
+      res = Gori::Probe::Triage.promote(store, store.probe_issues.first)
+      res.promoted?.should be_true
+      store.list_links(Gori::Store::LinkOwnerKind::Issue, res.issue_id.not_nil!).should be_empty
+    end
+  end
+
+  # It runs on the writer fiber at every tab close, so it must not scan every finding.
+  it "finds the tab's findings through the partial index" do
+    with_store do |store, _|
+      plan = store.@db.query_all("EXPLAIN QUERY PLAN UPDATE probe_issues SET sample_repeater_id = NULL " \
+                                 "WHERE sample_repeater_id = ?", 1_i64, as: {Int64, Int64, Int64, String}).map(&.[3])
+      plan.join(" ").should contain("idx_probe_issues_sample_repeater")
+    end
+  end
+
+  it "leaves a finding sampled from another tab alone" do
+    with_store do |store, _|
+      keep = store.insert_repeater("https://a.test", req, false, true, nil, 0)
+      gone = store.insert_repeater("https://b.test", req, false, true, nil, 1)
+      store.upsert_probe_issue(Gori::Probe::Detection.new("missing_hsts", "headers", "a.test", "https://a.test/", "t",
+        Gori::Store::Severity::Low, repeater_id: keep))
+      store.delete_repeater(gone).should be_true
+      store.probe_issues.first.sample_repeater_id.should eq(keep)
+    end
+  end
+end

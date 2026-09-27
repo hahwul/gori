@@ -200,9 +200,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       return
     end
     # Deleting the ACTIVE view leaves a dangling pointer; drop back to All rather than keep
-    # filtering by something no longer in the list.
+    # filtering by something no longer in the list. The saved pointer and this TUI's lens are
+    # separate questions: a peer may have pointed the project at this view since.
+    SavedViews.clear_active_if(store, view)
     if (active = history_controller.view.active_view) && active.key == view.key
-      SavedViews.set_active(store, nil)
       history_controller.view.set_view(nil)
       history_controller.view.reload(store)
     end

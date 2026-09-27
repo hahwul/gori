@@ -204,9 +204,11 @@ module Gori
             abort "gori run views rm: failed to delete the view (#{views_write_hint(scope)})"
           end
           # A project pointing at this view keeps a `history_view` key naming it. THIS project's
-          # is cleared below; another project's stays inert, because ids come from monotonic
-          # counters and are never reused — the same reasoning `colormarker rm` records.
-          views_clear_active_if(store, view)
+          # is cleared (see `clear_active_if`). Only a GLOBAL view can be named from another
+          # project, and that pointer stays inert: global ids come from a monotonic counter and
+          # are never reused — the same reasoning `colormarker rm` records. A project view's id
+          # is a rowid and is not.
+          SavedViews.clear_active_if(store, view)
           puts scope == "global" ? "Global view '#{view.name}' deleted — from every project." : "View '#{view.name}' deleted."
         end
       end
@@ -368,11 +370,6 @@ module Gori
           abort "gori run views #{sub}: no #{scope} view named '#{name}' (it exists in another scope — pass --scope)"
         end
         abort "gori run views #{sub}: no view named '#{name}'"
-      end
-
-      private def self.views_clear_active_if(store : Store, view : SavedViews::View) : Nil
-        return unless store.setting(SavedViews::ACTIVE_KEY) == view.key
-        SavedViews.set_active(store, nil)
       end
 
       private def self.views_repoint_active(store : Store, from : SavedViews::View,

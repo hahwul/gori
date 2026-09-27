@@ -364,6 +364,46 @@ describe Gori::SavedViews do
     end
   end
 
+  # Every surface's delete clears the pointer through this, judged by the SAVED setting: a TUI
+  # used to compare its own lens, so a view a peer had since made active kept being named after
+  # the delete, and a project view's id is a rowid that the next view created takes.
+  describe ".clear_active_if" do
+    it "clears the saved pointer that names the deleted view, whatever a lens says" do
+      with_globals do
+        with_store do |store|
+          store.insert_saved_view("gone", "status:500")
+          gone = Gori::SavedViews.merged(store).find!(&.name.==("gone"))
+          Gori::SavedViews.set_active(store, gone).should be_true
+          Gori::SavedViews.remove(store, gone).should be_true
+          Gori::SavedViews.clear_active_if(store, gone).should be_true
+          store.setting(Gori::SavedViews::ACTIVE_KEY).should eq(Gori::SavedViews.all_view.key)
+
+          # The id comes back for the next project view, and the pointer does not follow it.
+          store.insert_saved_view("stranger", "host:x")
+          stranger = Gori::SavedViews.merged(store).find!(&.name.==("stranger"))
+          stranger.key.should eq(gone.key)
+          Gori::SavedViews.active(store).not_nil!.key.should eq(Gori::SavedViews.all_view.key)
+        end
+      end
+    end
+
+    it "leaves a pointer that names another view alone" do
+      with_globals do
+        with_store do |store|
+          store.insert_saved_view("kept", "status:500")
+          store.insert_saved_view("gone", "host:x")
+          views = Gori::SavedViews.merged(store)
+          kept = views.find!(&.name.==("kept"))
+          gone = views.find!(&.name.==("gone"))
+          Gori::SavedViews.set_active(store, kept).should be_true
+          Gori::SavedViews.remove(store, gone).should be_true
+          Gori::SavedViews.clear_active_if(store, gone).should be_true
+          store.setting(Gori::SavedViews::ACTIVE_KEY).should eq(kept.key)
+        end
+      end
+    end
+  end
+
   describe "write-commit reporting" do
     it "answers nil from add when the GLOBAL write did not reach disk, and keeps memory clean" do
       with_globals do

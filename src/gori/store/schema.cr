@@ -1736,6 +1736,288 @@ module Gori
 
       V39 = V39_COPY + V39_SWAP + V39_SEED
 
+      # One table V40 moves to `INTEGER PRIMARY KEY AUTOINCREMENT`, spelled once. `copy` and
+      # `swap` are its V10-shaped rebuild (read V10's comment): an enumerated copy into
+      # `<table>_autoinc`, then — only after `verify_rebuilt_copies` has compared it with the
+      # original — drop, rename, every index recreated. `seed` starts `sqlite_sequence` past the
+      # highest id the table or anything outside it still holds, whichever path moved it.
+      # `refs` are those outside holders, one `SELECT <value> AS v FROM …` each, a row per value
+      # (the seed takes the maximum). `body` is the column list exactly as V39 left it, the
+      # ADD COLUMNs appended in order.
+      record TableRebuild, table : String, columns : Array(String), body : String,
+        indexes : Array(String), refs : Array(String) do
+        def temp : String
+          "#{table}_autoinc"
+        end
+
+        def copy : Array(String)
+          cols = columns.join(", ")
+          ["CREATE TABLE #{temp} (\n#{body}\n)",
+           "INSERT INTO #{temp} (#{cols}) SELECT #{cols} FROM #{table}"]
+        end
+
+        def swap : Array(String)
+          ["DROP TABLE #{table}", "ALTER TABLE #{temp} RENAME TO #{table}"] + indexes
+        end
+
+        # After EVERY swap, because a ref can name another rebuilt table by its final name.
+        # Only an integer below SEED_CEILING counts, filtered inside each ref BEFORE its maximum
+        # is taken, so one odd value cannot hide the real ones beside it. No gori issues ids at
+        # the ceiling, and a sequence at the top of the int64 range would make every later
+        # insert fail with SQLITE_FULL; text or a REAL is not an id at all. SQLite still never
+        # hands out an id at or below `MAX(id)`. A ref over one indexed column keeps its
+        # min/max lookup: the subquery flattens to `MAX(col) … WHERE col < ceiling`.
+        def seed : Array(String)
+          values = (["SELECT id AS v FROM #{table}"] + refs).join("\n              UNION ALL ") do |ref|
+            "SELECT MAX(v) AS v FROM (#{ref}) WHERE v < #{SEED_CEILING} AND typeof(v) = 'integer'"
+          end
+          ["DELETE FROM sqlite_sequence WHERE name = '#{table}'",
+           "INSERT INTO sqlite_sequence (name, seq)\n" \
+           "  SELECT '#{table}', COALESCE(MAX(v), 0) FROM (\n              #{values}\n  )"]
+        end
+      end
+
+      SEED_CEILING = 1_i64 << 62
+
+      # `ABS` raises on the one int64 it cannot negate; a negation there turns REAL instead, and
+      # the seed drops it. Negative ids are DETACHED references (see `delete_repeater`).
+      private def self.magnitude(col : String) : String
+        "CASE WHEN #{col} < 0 THEN -#{col} ELSE #{col} END"
+      end
+
+      # The N of a project custom probe rule's finding code, `custom_p_<N>`.
+      private def self.custom_rule_n(col : String, from : String) : String
+        "SELECT CAST(substr(#{col}, 10) AS INTEGER) AS v FROM #{from} " \
+        "WHERE #{col} GLOB 'custom_p_[0-9]*' AND substr(#{col}, 10) NOT GLOB '*[^0-9]*'"
+      end
+
+      # V40 — an id on these eight tables, once issued, is never issued again (#1344).
+      #
+      # Each was `INTEGER PRIMARY KEY` without AUTOINCREMENT, so SQLite handed a new row
+      # `max(rowid)+1` and a delete of the newest rows, or a wipe, gave the next insert an id
+      # that had named another row. Whatever still held the old id then acted on the new row
+      # without noticing, and the holder is usually another PROCESS (`gori mcp`, `gori run`, a
+      # peer TUI) that never saw the delete: a Probe finding's `sample_repeater_id` linked an
+      # issue to an unrelated tab, a recreated custom rule inherited the deleted one's finding
+      # code (`custom_p_<id>`) and with it the suppressions and false-positive rows, a stale
+      # `add_retest_step` passed the gone-issue guard, a stale `delete_scope_rule` could drop
+      # an EXCLUDE, a stale `delete_fuzz_run` removed another saved run. V10 did this for the
+      # fuzz and miner sessions and V39 for `flows`; this is the same decision for the rest
+      # (DESIGN.md §7).
+      #
+      # Seeded past every reference a surviving row can hold: the columns and polymorphic refs
+      # that name each table, negated (detached) refs by magnitude, the session slots' refresh
+      # steps and the disabled-rule set in `settings` (their keys spelled out, not read from
+      # `SESSION_SLOTS_KEY`/`PROBE_DISABLED_KEY`: a migration is history and must not follow a
+      # later rename), the custom rule codes, and the provenance a flow row carries in
+      # `source_ref` ("12" for a Repeater send, "issue #3 step 1", "project rule #4 · …") —
+      # read from `idx_flows_list`, which covers `source`/`source_ref`, never from `flows`.
+      #
+      # Moved the way V39 moves `flows` (read its comment): `migrate_v40` edits each eligible
+      # table's stored CREATE text in place (`autoincrement_in_place`), which is milliseconds
+      # and touches no row, and gives any table it cannot edit the verified rebuild — cheap
+      # here, since these tables hold hundreds to a few thousand rows. Every table V1 or a
+      # later ADD COLUMN wrote is eligible; the rebuild is for a SQLite that refuses the edit or
+      # a CREATE text gori did not write. The statements below are that rebuild, which is what
+      # a bare replay runs.
+      ID_REBUILDS = [
+        TableRebuild.new("repeaters",
+          %w[id created_at updated_at target request http2 auto_content_length flow_id position
+            response_head response_body response_error response_duration_us name sni tags
+            ws_keep_key ws_http_only tls_preset response_request_sha256],
+          <<-SQL,
+            id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at              INTEGER NOT NULL,
+            updated_at              INTEGER NOT NULL,
+            target                  TEXT    NOT NULL,
+            request                 TEXT    NOT NULL,
+            http2                   INTEGER NOT NULL DEFAULT 0,
+            auto_content_length     INTEGER NOT NULL DEFAULT 1,
+            flow_id                 INTEGER,
+            position                INTEGER NOT NULL DEFAULT 0,
+            response_head           BLOB,
+            response_body           BLOB,
+            response_error          TEXT,
+            response_duration_us    INTEGER,
+            name                    TEXT,
+            sni                     TEXT,
+            tags                    TEXT,
+            ws_keep_key             INTEGER NOT NULL DEFAULT 0,
+            ws_http_only            INTEGER NOT NULL DEFAULT 0,
+            tls_preset              TEXT,
+            response_request_sha256 TEXT
+            SQL
+          ["CREATE INDEX idx_repeaters_position ON repeaters (position, id)"],
+          ["SELECT repeater_id AS v FROM ws_messages",
+           "SELECT ref_id AS v FROM entity_links WHERE ref_kind = 'repeater'",
+           "SELECT #{magnitude("ref_id")} AS v FROM issue_retest_steps WHERE ref_kind = 'repeater'",
+           "SELECT #{magnitude("ref_id")} AS v FROM issue_retest_run_steps WHERE ref_kind = 'repeater'",
+           "SELECT #{magnitude("source_id")} AS v FROM issue_evidence WHERE source_kind = 'repeater'",
+           "SELECT sample_repeater_id AS v FROM probe_issues",
+           # `json_each` raises on text that is not JSON, and `e.value` of a non-object entry
+           # is not a JSON object: both are routed to an empty one rather than abort the upgrade.
+           "SELECT #{magnitude("r.value")} AS v FROM settings s, " \
+           "json_each(CASE WHEN json_valid(s.value) THEN s.value ELSE '[]' END) e, " \
+           "json_each(CASE WHEN e.type = 'object' THEN e.value ELSE '{}' END, '$.refresh') r " \
+           "WHERE s.key = 'authorize_identities' AND r.type = 'integer'",
+           "SELECT CAST(source_ref AS INTEGER) AS v FROM flows WHERE source = 'repeater' " \
+           "AND source_ref GLOB '[0-9]*' AND source_ref NOT GLOB '*[^0-9]*'"]),
+
+        TableRebuild.new("probe_custom_rules",
+          %w[id title description side region kind pattern severity enabled],
+          <<-SQL,
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            title       TEXT    NOT NULL,
+            description TEXT    NOT NULL DEFAULT '',
+            side        TEXT    NOT NULL,
+            region      TEXT    NOT NULL,
+            kind        TEXT    NOT NULL,
+            pattern     TEXT    NOT NULL,
+            severity    TEXT    NOT NULL,
+            enabled     INTEGER NOT NULL DEFAULT 1
+            SQL
+          [] of String,
+          [custom_rule_n("code", "probe_issues"),
+           custom_rule_n("code", "probe_suppressions"),
+           custom_rule_n("code", "probe_oast_probes"),
+           custom_rule_n("rule_id", "probe_oast_probes"),
+           custom_rule_n("d.value", "settings s, json_each(CASE WHEN json_valid(s.value) THEN s.value ELSE '[]' END) d") +
+           " AND s.key = 'probe_disabled_rules' AND d.type = 'text'"]),
+
+        TableRebuild.new("probe_issues",
+          %w[id code category host title severity status hit_count affected sample_flow_id
+            sample_repeater_id evidence first_seen last_seen],
+          <<-SQL,
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            code               TEXT    NOT NULL,
+            category           TEXT    NOT NULL,
+            host               TEXT    NOT NULL,
+            title              TEXT    NOT NULL,
+            severity           INTEGER NOT NULL,
+            status             INTEGER NOT NULL DEFAULT 0,
+            hit_count          INTEGER NOT NULL DEFAULT 1,
+            affected           TEXT    NOT NULL DEFAULT '[]',
+            sample_flow_id     INTEGER,
+            sample_repeater_id INTEGER,
+            evidence           TEXT,
+            first_seen         INTEGER NOT NULL,
+            last_seen          INTEGER NOT NULL,
+            UNIQUE(code, host)
+            SQL
+          ["CREATE INDEX idx_probe_issues_cat ON probe_issues (category, host)",
+           "CREATE INDEX idx_probe_issues_triage ON probe_issues (severity DESC, last_seen DESC)"],
+          [] of String),
+
+        TableRebuild.new("issues",
+          %w[id created_at updated_at title severity host flow_id notes status cvss],
+          <<-SQL,
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            title      TEXT    NOT NULL,
+            severity   INTEGER NOT NULL,
+            host       TEXT,
+            flow_id    INTEGER,
+            notes      TEXT    NOT NULL DEFAULT '',
+            status     INTEGER NOT NULL DEFAULT 0,
+            cvss       TEXT
+            SQL
+          ["CREATE INDEX idx_issues_severity ON issues (severity)",
+           "CREATE INDEX idx_issues_triage ON issues (severity DESC, created_at DESC)"],
+          ["SELECT owner_id AS v FROM entity_links WHERE owner_kind = 'issue'",
+           "SELECT issue_id AS v FROM evidence_issue_links",
+           "SELECT issue_id AS v FROM issue_retest_steps",
+           "SELECT issue_id AS v FROM issue_retest_runs",
+           "SELECT CAST(substr(source_ref, 8) AS INTEGER) AS v FROM flows " \
+           "WHERE source = 'retest' AND source_ref GLOB 'issue #[0-9]*'"]),
+
+        TableRebuild.new("match_rules",
+          %w[id enabled target pattern replacement position part op match_kind name host
+            body_file respond respond_args],
+          <<-SQL,
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            enabled      INTEGER NOT NULL DEFAULT 1,
+            target       TEXT    NOT NULL,
+            pattern      TEXT    NOT NULL,
+            replacement  TEXT    NOT NULL DEFAULT '',
+            position     INTEGER NOT NULL DEFAULT 0,
+            part         TEXT    NOT NULL DEFAULT 'head',
+            op           TEXT    NOT NULL DEFAULT 'replace',
+            match_kind   TEXT    NOT NULL DEFAULT 'literal',
+            name         TEXT    NOT NULL DEFAULT '',
+            host         TEXT    NOT NULL DEFAULT '',
+            body_file    TEXT    NOT NULL DEFAULT '',
+            respond      TEXT    NOT NULL DEFAULT 'inline',
+            respond_args TEXT    NOT NULL DEFAULT ''
+            SQL
+          [] of String,
+          # A mocked flow names the rule that answered it (`Rules#stub_ref`).
+          ["SELECT CAST(substr(source_ref, 15) AS INTEGER) AS v FROM flows " \
+           "WHERE source_ref GLOB 'project rule #[0-9]*'"]),
+
+        TableRebuild.new("scope_rules",
+          %w[id kind match_type pattern],
+          <<-SQL,
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind       TEXT NOT NULL DEFAULT 'include',
+            match_type TEXT NOT NULL DEFAULT 'host',
+            pattern    TEXT NOT NULL,
+            UNIQUE(kind, match_type, pattern)
+            SQL
+          [] of String, [] of String),
+
+        TableRebuild.new("host_overrides",
+          %w[id host ip],
+          <<-SQL,
+            id   INTEGER PRIMARY KEY AUTOINCREMENT,
+            host TEXT NOT NULL UNIQUE,
+            ip   TEXT NOT NULL
+            SQL
+          [] of String, [] of String),
+
+        # The spool is a private file per run and holds nothing this project's ids index.
+        TableRebuild.new("fuzz_runs",
+          %w[id session_id created_at finished_at target mode total sent matched errors status
+            http2 sni tls_preset websocket surface source_ref snapshot_version keep stop_idx],
+          <<-SQL,
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id       INTEGER,
+            created_at       INTEGER NOT NULL,
+            finished_at      INTEGER,
+            target           TEXT    NOT NULL,
+            mode             TEXT    NOT NULL,
+            total            INTEGER,
+            sent             INTEGER NOT NULL DEFAULT 0,
+            matched          INTEGER NOT NULL DEFAULT 0,
+            errors           INTEGER NOT NULL DEFAULT 0,
+            status           TEXT    NOT NULL DEFAULT 'running',
+            http2            INTEGER NOT NULL DEFAULT 0,
+            sni              TEXT,
+            tls_preset       TEXT,
+            websocket        INTEGER NOT NULL DEFAULT 0,
+            surface          TEXT,
+            source_ref       TEXT,
+            snapshot_version INTEGER NOT NULL DEFAULT 0,
+            keep             TEXT    NOT NULL DEFAULT 'all',
+            stop_idx         INTEGER
+            SQL
+          ["CREATE INDEX idx_fuzz_runs_session ON fuzz_runs (session_id, id)"],
+          ["SELECT run_id AS v FROM fuzz_results"]),
+      ]
+
+      V40_COPY = ID_REBUILDS.flat_map(&.copy)
+      V40_SWAP = ID_REBUILDS.flat_map(&.swap)
+
+      # Run on either path, after the move. The index is new in V40: closing a Repeater tab
+      # clears it from the findings it raised (`delete_repeater`), on the writer fiber, and
+      # without it that scans every finding.
+      V40_AFTER = [
+        "CREATE INDEX idx_probe_issues_sample_repeater ON probe_issues (sample_repeater_id) " \
+        "WHERE sample_repeater_id IS NOT NULL",
+      ] + ID_REBUILDS.flat_map(&.seed)
+
+      V40 = V40_COPY + V40_SWAP + V40_AFTER
+
       # Data statements that call gori's OWN SQL functions, run by `migrate!` right after the
       # version they complete. Kept out of MIGRATIONS because that list is plain schema that a
       # bare connection can replay (specs build every historical shape that way), and a bare
@@ -1758,7 +2040,7 @@ module Gori
 
       MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17,
                     V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29, V30, V31, V32, V33,
-                    V34, V35, V36, V37, V38, V39]
+                    V34, V35, V36, V37, V38, V39, V40]
 
       def self.migrate!(db : DB::Database, read_only : Bool = false) : Nil
         db.using_connection do |conn|
@@ -1819,6 +2101,9 @@ module Gori
               if statements.same?(V39)
                 rebuild_v39(conn) unless autoincrement_in_place(conn.as(SQLite3::Connection))
                 statements = V39_SEED
+              elsif statements.same?(V40)
+                migrate_v40(conn.as(SQLite3::Connection))
+                statements = V40_AFTER
               end
               statements.each { |sql| conn.exec(sql) }
               BACKFILLS[idx + 1]?.try { |sql| conn.exec(sql) }
@@ -1835,6 +2120,7 @@ module Gori
       # The tables V39 moves to AUTOINCREMENT, and the one clause each CREATE text carries.
       private AUTOINCREMENT_TABLES = {"flows", "h2_connections"}
       private ROWID_CLAUSE         = "INTEGER PRIMARY KEY"
+      private ROWID_DECLARATION    = /\(\s*"?id"?\s+INTEGER PRIMARY KEY\s*,/
 
       # V39 without the copy: rewrite each table's stored CREATE to say AUTOINCREMENT and bump
       # `schema_version`, so every connection — this one included, verified — reparses it. The
@@ -1848,41 +2134,77 @@ module Gori
       # and a `schema_version` write — and some builds turn it on by default (macOS's system
       # libsqlite3 does, checked), so it is lifted for these statements and put back. The
       # read-back of the cookie is the check that the bump landed (without it, the other
-      # connections would keep the old definition), and the reparsed columns must match the old
-      # ones exactly, or the savepoint is rolled back and the verified rebuild runs instead.
-      def self.autoincrement_in_place(conn : SQLite3::Connection) : Bool
-        eligible = AUTOINCREMENT_TABLES.all? do |table|
-          sql = conn.query_one?("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?", table, as: String)
-          !sql.nil? && sql.scan(ROWID_CLAUSE).size == 1 && !sql.includes?("AUTOINCREMENT")
-        end
-        return false unless eligible
+      # connections would keep the old definition), the reparsed columns must match the old
+      # ones exactly, and `PRAGMA quick_check` must pass on every edited table — a text edit
+      # that reached anything but the rowid clause would fail the rows against it — or the
+      # savepoint is rolled back and the verified rebuild runs instead.
+      #
+      # `tables` defaults to V39's; V40 passes the ones `in_place_eligible?` accepts.
+      def self.autoincrement_in_place(conn : SQLite3::Connection,
+                                      tables : Enumerable(String) = AUTOINCREMENT_TABLES) : Bool
+        return false if tables.empty? || !tables.all? { |table| in_place_eligible?(conn, table) }
 
-        shape = AUTOINCREMENT_TABLES.map { |table| column_shape(conn, table) }
+        shape = tables.map { |table| column_shape(conn, table) }
         defensive = conn.gori_swap_defensive(false)
-        conn.exec("SAVEPOINT v39_in_place")
+        conn.exec("SAVEPOINT autoincrement_in_place")
         begin
           cookie = conn.scalar("PRAGMA schema_version").as(Int64)
           conn.exec("PRAGMA writable_schema = ON")
-          names = AUTOINCREMENT_TABLES.join(", ") { |t| "'#{t}'" }
+          names = tables.join(", ") { |t| "'#{t}'" }
           conn.exec("UPDATE sqlite_master SET sql = replace(sql, '#{ROWID_CLAUSE}', '#{ROWID_CLAUSE} AUTOINCREMENT') " \
                     "WHERE type = 'table' AND name IN (#{names})")
           conn.exec("PRAGMA schema_version = #{cookie + 1}")
           conn.exec("PRAGMA writable_schema = OFF")
           moved = conn.scalar("PRAGMA schema_version").as(Int64) == cookie + 1 &&
-                  AUTOINCREMENT_TABLES.map { |table| column_shape(conn, table) } == shape
+                  tables.map { |table| column_shape(conn, table) } == shape &&
+                  tables.all? { |table| conn.query_all("PRAGMA quick_check(#{table})", as: String) == ["ok"] }
         rescue SQLite3::Exception
           moved = false
         end
         if moved
-          conn.exec("RELEASE v39_in_place")
+          conn.exec("RELEASE autoincrement_in_place")
         else
           conn.exec("PRAGMA writable_schema = OFF") rescue nil
-          conn.exec("ROLLBACK TO v39_in_place")
-          conn.exec("RELEASE v39_in_place")
+          conn.exec("ROLLBACK TO autoincrement_in_place")
+          conn.exec("RELEASE autoincrement_in_place")
         end
         moved
       ensure
         conn.gori_swap_defensive(defensive) unless defensive.nil?
+      end
+
+      # The stored CREATE text is the one gori wrote: its FIRST column is `id INTEGER PRIMARY KEY`,
+      # spelled as V1 spells it, the phrase appears nowhere else in any case or spacing (the edit
+      # is a blind `replace()`), there is no AUTOINCREMENT yet, and there is nothing a text edit
+      # could reach into unseen — no CHECK or GENERATED expression, no comment. ADD COLUMNs
+      # append plain declarations, so every table any gori wrote passes; anything else, such as
+      # a crafted archive, takes the verified rebuild.
+      def self.in_place_eligible?(conn : DB::Connection, table : String) : Bool
+        sql = conn.query_one?("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?", table, as: String)
+        return false if sql.nil? || sql.includes?("--") || sql.includes?("/*")
+        return false if sql.matches?(/\b(CHECK|GENERATED|AUTOINCREMENT)\b/i)
+        sql.matches?(ROWID_DECLARATION) && sql.scan(/integer\s+primary\s+key/i).size == 1
+      end
+
+      # V40's move: every eligible table in place, in one edit; the rest — or all of them, when
+      # SQLite refuses the edit — by the verified rebuild. The seed and the new index follow in
+      # `V40_AFTER` either way. Returns the tables that were rebuilt.
+      def self.migrate_v40(conn : SQLite3::Connection) : Array(String)
+        eligible = ID_REBUILDS.select { |r| in_place_eligible?(conn, r.table) }
+        eligible.clear unless autoincrement_in_place(conn, eligible.map(&.table))
+        rebuild = ID_REBUILDS - eligible
+        return [] of String if rebuild.empty?
+        begin
+          rebuild.each { |r| r.copy.each { |sql| conn.exec(sql) } }
+          verify_rebuilt_copies(conn, rebuild, 40)
+          rebuild.each { |r| r.swap.each { |sql| conn.exec(sql) } }
+        rescue ex : SQLite3::Exception
+          raise ex unless ex.code == LibSQLite3::Code::FULL.value
+          raise Gori::Error.new("not enough free disk space to upgrade this project: this gori rebuilds " \
+                                "#{rebuild.join(", ", &.table)} once. Nothing was changed; free some space " \
+                                "and open it again")
+        end
+        rebuild.map(&.table)
       end
 
       # Each column as SQLite parses it — position, name, type, NOT NULL, default, key — so the
@@ -1985,6 +2307,49 @@ module Gori
         raise Gori::Error.new("schema v39: the rebuilt History table does not match the original " \
                               "(#{what}); the upgrade was rolled back and nothing was changed")
       end
+
+      # Compare each rebuild's copy with the table it replaces, BEFORE any original is dropped,
+      # and raise on any difference: `migrate!` then rolls the whole upgrade back and the project
+      # stays on the version it had, whole. A DROP is the one statement here nobody can take
+      # back, so a bug in a copy must not reach it.
+      #
+      # The column names first, both tables against the rebuild's list. Then totals (row count,
+      # lowest and highest id, the summed `length()` of every column), which name WHAT differs.
+      # Then every row, since these tables are small: joined on id, each column compared the way
+      # V39's check compares (`v39_same`: `IS` and the same storage class), so a NULL matches
+      # only a NULL and a BLOB compares by its bytes. With the counts equal and `id` unique on
+      # both sides, every row matching is the whole table matching.
+      def self.verify_rebuilt_copies(conn : DB::Connection, rebuilds : Enumerable(TableRebuild), version : Int32) : Nil
+        rebuilds.each do |r|
+          # The list is the copy's AND the comparison's, so a column missing from it would vanish
+          # unnoticed.
+          {r.table, r.temp}.each do |t|
+            names = conn.query_all("SELECT name FROM pragma_table_info(?) ORDER BY cid", t, as: String)
+            rebuild_mismatch(version, r.table, "#{t} has columns #{names}") unless names == r.columns
+          end
+          totals = "COUNT(*), MIN(id), MAX(id), " + r.columns.join(", ") { |c| "SUM(length(#{c}))" }
+          before = int_row(conn, "SELECT #{totals} FROM #{r.table}")
+          after = int_row(conn, "SELECT #{totals} FROM #{r.temp}")
+          unless before == after
+            rebuild_mismatch(version, r.table, "totals #{before} became #{after}")
+          end
+          same = r.columns.join(" AND ") { |c| v39_same(c) }
+          equal = conn.scalar("SELECT COUNT(*) FROM #{r.table} o JOIN #{r.temp} n ON n.id = o.id WHERE #{same}").as(Int64)
+          count = before.first || 0_i64
+          rebuild_mismatch(version, r.table, "#{count - equal} of #{count} rows differ") unless equal == count
+        end
+      end
+
+      private def self.int_row(conn : DB::Connection, sql : String) : Array(Int64?)
+        row = [] of Int64?
+        conn.query_one(sql) { |rs| rs.column_count.times { row << rs.read(Int64?) } }
+        row
+      end
+
+      private def self.rebuild_mismatch(version : Int32, table : String, what : String) : NoReturn
+        raise Gori::Error.new("schema v#{version}: the rebuilt #{table} table does not match the original " \
+                              "(#{what}); the upgrade was rolled back and nothing was changed")
+      end
     end
   end
 end
@@ -1998,7 +2363,8 @@ class SQLite3::Connection
   private DBCONFIG_DEFENSIVE = 1010
 
   # Set SQLITE_DBCONFIG_DEFENSIVE on this connection and return what it was, so a caller can
-  # put it back. Only V39's in-place edit lifts it (see `Schema.autoincrement_in_place`).
+  # put it back. Only the in-place AUTOINCREMENT edit (V39, V40) lifts it (see
+  # `Schema.autoincrement_in_place`).
   def gori_swap_defensive(on : Bool) : Bool
     was = 0
     LibSQLite3.db_config(@db, DBCONFIG_DEFENSIVE, -1, pointerof(was))

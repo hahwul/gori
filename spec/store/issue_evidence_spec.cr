@@ -240,12 +240,11 @@ describe "Store#freeze_evidence (V26)" do
       store.freeze_evidence(issue, snap)[1].ok?.should be_true
       store.evidence_count_for(Gori::Store::LinkRefKind::Repeater, rid).should eq(1)
 
-      # Close the newest tab: `repeaters.id` has no AUTOINCREMENT, so the next tab takes the
-      # same id — while the copy (deliberately) survives the close.
+      # Close the newest tab: before V40 the next tab took the same id — while the copy
+      # (deliberately) survives the close. The successor is planted, as an upgraded project can hold.
       store.delete_repeater(rid).should be_true
       sleep 2.milliseconds
-      reused = store.insert_repeater("https://other.test", "GET /b HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0)
-      reused.should eq(rid)
+      reused = plant_repeater_at(store, rid, "https://other.test", "GET /b HTTP/1.1\r\n\r\n")
       store.issue_evidence(issue).size.should eq(1)
       store.evidence_count_for(Gori::Store::LinkRefKind::Repeater, reused).should eq(0)
       # …and a copy taken FROM the new tab counts for it.
@@ -273,8 +272,7 @@ describe "Store#freeze_evidence (V26)" do
       store.evidence_source_alive?(meta).should be_false # nothing under the id at all
 
       sleep 2.milliseconds
-      reused = store.insert_repeater("https://other.test", "GET /b HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0)
-      reused.should eq(rid)
+      reused = plant_repeater_at(store, rid, "https://other.test", "GET /b HTTP/1.1\r\n\r\n")
       store.get_repeater(reused).should_not be_nil       # the id resolves…
       store.evidence_source_alive?(meta).should be_false # …to a tab this copy never came from
     end

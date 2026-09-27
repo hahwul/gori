@@ -179,8 +179,8 @@ describe "the Issues detail's RELATED card with frozen evidence" do
       selected = frozen_flow(store, "/selected")
       after = frozen_flow(store, "/after")
       issue = store.insert_issue("t", Gori::Store::Severity::Low, nil, nil)
-      first_link = store.add_link(Gori::Store::LinkOwnerKind::Issue, issue,
-        Gori::Store::LinkRefKind::Flow, first).not_nil!
+      store.add_link(Gori::Store::LinkOwnerKind::Issue, issue,
+        Gori::Store::LinkRefKind::Flow, first).should_not be_nil
       store.add_link(Gori::Store::LinkOwnerKind::Issue, issue,
         Gori::Store::LinkRefKind::Flow, selected)
       store.add_link(Gori::Store::LinkOwnerKind::Issue, issue,
@@ -193,7 +193,7 @@ describe "the Issues detail's RELATED card with frozen evidence" do
       view.move_links(1)
       view.selected_resolved_link.not_nil!.link.ref_id.should eq(selected)
 
-      store.remove_link(first_link).should be_true
+      store.remove_link(Gori::Store::LinkOwnerKind::Issue, issue, Gori::Store::LinkRefKind::Flow, first).should be_true
       view.reload_detail_links(store)
       view.selected_resolved_link.not_nil!.link.ref_id.should eq(selected)
     end

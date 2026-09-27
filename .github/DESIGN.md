@@ -4145,3 +4145,56 @@ defence in depth.
 - **Not done here.** `entity_links` still deletes a flow's links rather than keeping them as
   `(stale)`, and the History marks, colour memos and MCP `since` check still guard against a
   reused id. Each can be relaxed on its own now that ids are monotonic.
+
+### 2026-09-27: eight more tables get AUTOINCREMENT, the way `flows` did (#1344)
+
+Extends V10 (fuzz and miner sessions) and the `flows` entry above to every other table whose id
+leaves the process: `repeaters`, `probe_custom_rules`, `probe_issues`, `issues`, `match_rules`,
+`scope_rules`, `host_overrides` and `fuzz_runs`. Each was `INTEGER PRIMARY KEY` without
+AUTOINCREMENT, so deleting the newest row or wiping the table gave the next insert an id that had
+named another row. The holder is usually another process (`gori mcp`, `gori run`, a peer TUI),
+which never saw the delete. The audit reproduced three cases. A promoted Probe finding linked its
+issue to an unrelated Repeater tab. A recreated custom rule inherited `custom_p_<id>` and with it
+the deleted rule's suppressions and dismissed rows. `add_retest_step` with a wiped issue's id
+passed the gone-issue guard. V40 does all eight in one migration.
+
+- **In place per table, rebuilt where it must be.** `migrate_v40` hands every eligible table to
+  V39's `autoincrement_in_place`, now given a table list, in one edit: the same savepoint, cookie
+  read-back and column-shape check. The edit is a blind `replace()` of the rowid phrase, so
+  eligibility (V39's too) is anchored to what gori writes: the first column is
+  `id INTEGER PRIMARY KEY`, the phrase appears once in any case or spacing, and the text has no
+  AUTOINCREMENT, CHECK, GENERATED or comment. A crafted archive with the real clause lowercased
+  and the phrase inside a CHECK would otherwise have the edit land in the CHECK and fail every
+  row. As a second guard, `PRAGMA quick_check` must pass on each edited table before the
+  savepoint is released. An ADD COLUMN appends a plain declaration and leaves the rowid clause
+  alone, so every table any gori wrote is eligible. A table that is not, or all eight when SQLite refuses the
+  edit, takes the V10-shaped rebuild, which V40's statements spell and a bare replay runs.
+  `Schema::TableRebuild` spells each table once and derives the copy, the swap and the seed.
+  One table that must be rebuilt does not cost the others their edit. On a 466 MiB project with
+  5,000 Repeater tabs (50 MB of responses), 10,000 findings and 100k flows: 16 ms in place,
+  about 0.2 s rebuilt.
+- **The rebuild proves its copy before any DROP.** `verify_rebuilt_copies` checks the column list
+  on both sides, then totals (count, MIN/MAX id, `SUM(length())` per column), then every column of
+  every row, BLOBs included, by value and storage class (V39's `v39_same`). These tables are
+  small enough for that; the `flows` fallback samples its BLOB bytes. A mismatch rolls the whole
+  upgrade back, and a disk that fills names the tables it was rebuilding.
+- **Seeded past everything that still names a row.** That covers the columns and polymorphic refs
+  (negated, detached ones by magnitude), the session slots' refresh steps and the disabled-rule
+  set in `settings`, and the custom rule codes in findings, suppressions and OAST probes. It also
+  covers the provenance a flow carries in `source_ref`: a Repeater tab id, `issue #N step M`,
+  `project rule #N`. That text is read from `idx_flows_list`, which covers it, never from `flows`.
+  Only an integer below 2^62 counts, judged per reference before its maximum is taken, so one
+  odd value (an imported file named `issue #999…`, text in an id column) cannot hide the real
+  ones beside it. No gori issues such an id, and a sequence at the top of int64 would fail every
+  later insert with SQLITE_FULL.
+- **The consumer guards stay.** Detached retest and refresh steps, `evidence_source_alive?` and
+  the Repeater evidence count still guard, because a database upgraded from before V40 can hold
+  references that were already re-bound. Closing a Repeater tab now also clears
+  `probe_issues.sample_repeater_id`, since a pointer at a closed tab opens nothing. That runs on
+  the writer fiber at every close, so V40 adds a partial index on the column, on either path,
+  rather than scan every finding ([P6](#p6)).
+- **Not migrated.** `extract_rules`, `oast_providers`, `color_rules`, `saved_views` and
+  `entity_links` keep reusable ids. Where one leaves the process the surfaces address it another
+  way. A saved view's pointer is cleared by the saved setting on every surface
+  (`SavedViews.clear_active_if`). A link is removed by its (owner, ref) pair, which is UNIQUE, and
+  never by its row id.

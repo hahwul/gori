@@ -168,7 +168,8 @@ describe Gori::Issues::Export do
           method: "GET", target: "/legacy", http_version: "HTTP/1.1",
           head: "GET /legacy HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, source: Gori::FlowSource::Kind::Proxy))
         iid = store.insert_issue("old", Gori::Store::Severity::Low, "h.test", fid)
-        store.remove_link(store.list_links(Gori::Store::LinkOwnerKind::Issue, iid)[0].id).should be_true
+        link = store.list_links(Gori::Store::LinkOwnerKind::Issue, iid)[0]
+        store.remove_link(link.owner_kind, link.owner_id, link.ref_kind, link.ref_id).should be_true
 
         md = Gori::Issues::Export.markdown(store.issues, store, "proj")
         md.should contain("### Related")
