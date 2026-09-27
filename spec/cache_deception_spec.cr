@@ -199,7 +199,7 @@ describe Gori::CacheDeception do
         detail = store.get_flow(id).not_nil!
         expect_raises(Gori::Repeater::FlowRequest::PseudoHeaderHead) { Gori::Repeater::FlowRequest.build(detail) }
         # A skip, not an error: MCP answers INVALID_ARGUMENT with this label instead of an
-        # INTERNAL_ERROR, and the CLI moves on to the next flow.
+        # INTERNAL error, and the CLI moves on to the next flow.
         CD.skip_reason(detail, false).should eq(:pseudo_header_head)
         CD.skip_reason(detail, true).should eq(:pseudo_header_head)
         CD.reason_label(:pseudo_header_head).should contain("HTTP/2 field list")

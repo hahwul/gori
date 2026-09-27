@@ -101,4 +101,20 @@ describe Gori::MCP::Server do
       end
     end
   end
+
+  # `count`/`warmup` went through a reader that raised OverflowError (INTERNAL) past Int32 and
+  # silently took the default for a value it could not read.
+  it "refuses an unreadable count and clamps a huge one" do
+    with_store do |store|
+      a = store.insert_repeater(target: "http://127.0.0.1:9", request: "GET /a HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice,
+        http2: false, auto_cl: true, flow_id: nil, position: 0, sni: nil)
+      b = store.insert_repeater(target: "http://127.0.0.1:9", request: "GET /b HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice,
+        http2: false, auto_cl: true, flow_id: nil, position: 1, sni: nil)
+      tools = tools_for(store)
+      bad = tools.call("timing_requests", JSON.parse(%({"repeater_ids":[#{a},#{b}],"count":"lots","allow_unscoped":true})))
+      bad.error_code.should eq("INVALID_ARGUMENT")
+      huge = tools.call("timing_requests", JSON.parse(%({"repeater_ids":[#{a},#{b}],"count":1,"warmup":10000000000,"allow_unscoped":true})))
+      huge.error_code.should_not eq("INTERNAL")
+    end
+  end
 end

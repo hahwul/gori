@@ -318,8 +318,12 @@ module Gori
         verbatim = bool_arg(h, "verbatim", false)
         insecure = bool_arg(h, "insecure", false)
         timeout = send_timeout(h)
-        iterations = int_or(h, "count", Repeater::Timing::Stats::DEFAULT_ITERATIONS).clamp(1, Repeater::Timing::Stats::MAX_ITERATIONS)
-        warmup = int_or(h, "warmup", Repeater::Timing::Stats::DEFAULT_WARMUP).clamp(0, iterations - 1)
+        # The shared bounded reader: an unreadable value is INVALID_ARGUMENT (not the default), and
+        # one past Int32 is clamped rather than raising OverflowError as INTERNAL.
+        iterations = bounded_int_arg(h, "count", Repeater::Timing::Stats::DEFAULT_ITERATIONS.to_i64,
+          min: 1, max: Repeater::Timing::Stats::MAX_ITERATIONS.to_i64).to_i
+        warmup = bounded_int_arg(h, "warmup", Repeater::Timing::Stats::DEFAULT_WARMUP.to_i64,
+          min: 0, max: (iterations - 1).to_i64).to_i
         interleaved = bool_arg(h, "interleaved", false)
         ob = outbound(bool_arg(h, "allow_unscoped", false))
 
@@ -357,14 +361,6 @@ module Gori
           members << id
         end
         members
-      end
-
-      # An integer argument with a default (count / warmup) — tolerant of a JSON number or a
-      # numeric string, like the other optional int args.
-      private def int_or(h, key : String, default : Int32) : Int32
-        v = h[key]?
-        return default unless v
-        (v.as_i? || v.as_i64?.try(&.to_i) || v.as_s?.try(&.to_i?)) || default
       end
 
       # The two arguments that name a request gori has ALREADY stored. Exactly one may be given.
