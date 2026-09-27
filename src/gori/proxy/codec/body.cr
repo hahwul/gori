@@ -103,6 +103,11 @@ module Gori::Proxy::Codec
       @reserved = Int32::MAX
       target = @hint > @limit ? @limit : @hint.to_i
       return mem if target < need
+      # The hint is the peer's unverified claim, and the limit can be raised to GiBs: a
+      # response that declares 1 TB, sends just past the presize and stalls must not reserve the
+      # whole limit. Jump only when the claim is within a few doublings of what really arrived;
+      # past that, IO::Memory's doubling keeps the allocation within 2x of the bytes received.
+      return mem if target // 8 > need
       fresh = IO::Memory.new(target)
       fresh.write(mem.to_slice)
       @mem = fresh

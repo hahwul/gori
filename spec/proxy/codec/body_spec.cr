@@ -93,6 +93,17 @@ describe Gori::Proxy::Codec::CaptureBuffer do
       cap.truncated?.should be_false
     end
 
+    # The operator can raise the limit to GiBs; a peer that claims 1 TB and stalls just past the
+    # presize must not reserve all of it.
+    it "does not jump to a raised limit on a claim far past the bytes that arrived" do
+      body = pattern.call(presize + 10)
+      cap = CaptureBuffer.new(256 * 1024 * 1024, 1_i64 << 40)
+      cap.write(body[0, presize])
+      cap.write(body[presize, 10])
+      capacity.call(cap).should be <= 2 * (presize + 10)
+      cap.to_slice.should eq(body)
+    end
+
     it "a length that lies LOW falls back to ordinary growth, byte-exact" do
       body = pattern.call(1_000_000)
       cap = CaptureBuffer.new(Body::CAPTURE_MAX, (presize + 1).to_i64)
