@@ -357,46 +357,64 @@ module Gori
       # TEXT and rebuilding "the match with its group replaced" from that re-finds the group by
       # value — which picks the wrong occurrence whenever the context around it repeats the
       # secret. Offsets cannot be wrong that way.
+      #
+      # Every offset here is a BYTE offset. `Regex#match(text, pos)`, `MatchData#begin` and
+      # `String#[a...b]` all count characters, and on a non-ASCII string each one walks from
+      # the start to find its byte — per match, so a 1 MB Korean JSON body with 4000 secrets took
+      # 9.2 s. The byte forms below are O(1) each and produce the identical string.
+      #
+      # `NO_UTF_CHECK` skips PCRE2's whole-subject validation on every call, which is safe ONLY
+      # because `apply_text_rules` returns early unless `text.valid_encoding?`, and everything
+      # this method builds stays valid: in UTF mode PCRE2 match boundaries always fall on
+      # character boundaries, the zero-width step below advances by a whole character, and a
+      # placeholder is ASCII. So the next rule's input is valid too. Do not call this on a
+      # string that has not passed that gate — NO_UTF_CHECK on invalid UTF-8 is undefined.
       private def replace_all(text : String, rx : Regex, rule : String, path : String,
                               hits : Array(Hit)) : String
-        md = rx.match(text)
+        md = rx.match_at_byte_index(text, 0, options: Regex::MatchOptions::NO_UTF_CHECK)
         return text unless md
-        clean = String::Builder.new
+        bytes = text.to_slice
+        clean = String::Builder.new(text.bytesize)
         pos = 0
         while md
           # `md.begin(1)` RAISES for a group that did not participate, so the group is chosen
           # by asking whether it captured anything at all, never by the pattern's shape.
           group = md[1]?.nil? ? 0 : 1
-          start = md.begin(group)
-          stop = md.end(group)
-          whole_end = md.end(0)
+          start = md.byte_begin(group)
+          stop = md.byte_end(group)
+          whole_end = md.byte_end(0)
           before = pos
-          value = text[start...stop]
-          if value.empty?
+          if stop == start
             # A zero-width GROUP has nothing to replace; copy the match through rather than
             # minting a placeholder for the empty string.
-            clean << text[before...whole_end]
+            clean.write bytes[before, whole_end - before]
           else
-            clean << text[before...start]
-            ph = Redact.placeholder(value)
+            clean.write bytes[before, start - before]
+            ph = Redact.placeholder(text.byte_slice(start, stop - start))
             hits << Hit.new(path, rule, ph)
             clean << ph
-            clean << text[stop...whole_end] if whole_end > stop
+            clean.write bytes[stop, whole_end - stop] if whole_end > stop
           end
           if whole_end > before
             pos = whole_end
           else
             # A zero-width WHOLE match (`x*` against `y`) leaves the cursor where it was, so the
-            # same empty match would be found forever. Step one character — and COPY it, which
-            # the branch above could not: skipping without copying silently deletes a byte of
-            # the operator's evidence at every such position.
-            clean << text[before, 1] if before < text.size
-            pos = before + 1
+            # same empty match would be found forever. Step one CHARACTER (not one byte: that
+            # would land inside a multibyte char) — and COPY it, which the branch above could
+            # not: skipping without copying silently deletes a character of the operator's
+            # evidence at every such position.
+            if before < bytes.size
+              width = Char::Reader.new(text, pos: before).current_char_width
+              clean.write bytes[before, width]
+              pos = before + width
+            else
+              pos = before + 1
+            end
           end
-          break if pos > text.size
-          md = rx.match(text, pos)
+          break if pos > bytes.size
+          md = rx.match_at_byte_index(text, pos, options: Regex::MatchOptions::NO_UTF_CHECK)
         end
-        clean << text[pos..] if pos <= text.size
+        clean.write bytes[pos, bytes.size - pos] if pos <= bytes.size
         clean.to_s
       end
 
