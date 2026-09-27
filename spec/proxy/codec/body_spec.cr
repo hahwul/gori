@@ -60,6 +60,65 @@ describe Gori::Proxy::Codec::CaptureBuffer do
     cap.total.should eq(4)
   end
 
+  describe "growth past the presize" do
+    presize = CaptureBuffer::PRESIZE_CAP
+    pattern = ->(n : Int32) { Bytes.new(n) { |i| (i % 251).to_u8 } }
+    # Streamed in 64 KiB reads, the way the proxy tees a Content-Length body.
+    tee = ->(cap : CaptureBuffer, body : Bytes) {
+      src = IO::Memory.new(body, writable: false)
+      Body.stream(src, IO::Memory.new, BodyFraming::Length, body.size.to_i64, cap).should be_true
+    }
+    capacity = ->(cap : CaptureBuffer) { cap.@mem.not_nil!.@capacity }
+
+    [100 * 1024, presize - 1, presize, presize + 1, 1_500_000, Body::CAPTURE_MAX].each do |n|
+      it "captures a #{n}-byte body with a true length byte-exact, in one right-sized block" do
+        body = pattern.call(n)
+        cap = CaptureBuffer.new(Body::CAPTURE_MAX, n.to_i64)
+        tee.call(cap, body)
+        cap.to_slice.should eq(body)
+        cap.truncated?.should be_false
+        cap.total.should eq(n)
+        capacity.call(cap).should eq(n) # sized to the declared length, never a doubling past it
+      end
+    end
+
+    it "a length that lies HIGH forces at most the capture limit, and only once bytes past the presize arrived" do
+      body = pattern.call(presize + 10)
+      cap = CaptureBuffer.new(Body::CAPTURE_MAX, 1_i64 << 40)
+      cap.write(body[0, presize])
+      capacity.call(cap).should eq(presize) # nothing past the presize yet: no jump
+      cap.write(body[presize, 10])
+      capacity.call(cap).should eq(Body::CAPTURE_MAX)
+      cap.to_slice.should eq(body)
+      cap.truncated?.should be_false
+    end
+
+    it "a length that lies LOW falls back to ordinary growth, byte-exact" do
+      body = pattern.call(1_000_000)
+      cap = CaptureBuffer.new(Body::CAPTURE_MAX, (presize + 1).to_i64)
+      off = 0
+      while off < body.size
+        k = Math.min(65536, body.size - off)
+        cap.write(body[off, k])
+        off += k
+      end
+      cap.to_slice.should eq(body)
+      cap.truncated?.should be_false
+      cap.total.should eq(body.size)
+    end
+
+    it "truncates at the capture limit when the declared length is past it" do
+      limit = 1024 * 1024
+      body = pattern.call(1_500_000)
+      cap = CaptureBuffer.new(limit, body.size.to_i64)
+      tee.call(cap, body)
+      cap.to_slice.should eq(body[0, limit])
+      cap.truncated?.should be_true
+      cap.total.should eq(body.size)
+      capacity.call(cap).should eq(limit)
+    end
+  end
+
   it "keeps an already-returned slice stable across a later write (copy-on-write)" do
     cap = CaptureBuffer.new(64)
     cap.write("first".to_slice)

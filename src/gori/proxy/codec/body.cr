@@ -33,6 +33,9 @@ module Gori::Proxy::Codec
     def initialize(@limit : Int32, @hint : Int64 = 0_i64)
       @mem = nil.as(IO::Memory?)
       @sealed = false
+      # The capacity @mem was created with, until the one `grow_to_hint` decision has been
+      # made; Int32::MAX after it (IO::Memory's own growth from then on).
+      @reserved = 0
     end
 
     def write(slice : Bytes) : Nil
@@ -44,14 +47,19 @@ module Gori::Proxy::Codec
       # store first so the handed-out slice stays a stable copy — copy-on-write, paid only in
       # that adversarial case, never on the normal read-once path.
       reseat_after_seal if @sealed
-      mem = (@mem ||= IO::Memory.new(initial_capacity))
+      mem = @mem || begin
+        @reserved = initial_capacity
+        @mem = IO::Memory.new(@reserved)
+      end
       stored = mem.bytesize
       if stored < @limit
         room = @limit - stored
-        if slice.size <= room
+        take = slice.size <= room ? slice.size : room
+        mem = grow_to_hint(mem, stored + take) if stored + take > @reserved
+        if take == slice.size
           mem.write(slice)
         else
-          mem.write(slice[0, room])
+          mem.write(slice[0, take])
           @truncated = true
         end
       else
@@ -81,6 +89,22 @@ module Gori::Proxy::Codec
       return unless old
       fresh = IO::Memory.new(old.bytesize > 0 ? old.bytesize : 64)
       fresh.write(old.to_slice)
+      @mem = fresh
+      @reserved = Int32::MAX
+    end
+
+    # The body has outgrown the presize, so more than PRESIZE_CAP bytes REALLY arrived: now the
+    # declared length is worth one allocation that fits it (bounded by the capture limit),
+    # instead of IO::Memory doubling from 256 KiB — which allocated 256+512+1024+2048 KiB for a
+    # 1.5 MB body and kept it as a view into the 2 MiB block. A header that lies HIGH can force
+    # at most the capture limit, and only after PRESIZE_CAP bytes were sent; one that lies LOW
+    # (or no length at all) leaves IO::Memory's own growth in charge. Decided once per capture.
+    private def grow_to_hint(mem : IO::Memory, need : Int32) : IO::Memory
+      @reserved = Int32::MAX
+      target = @hint > @limit ? @limit : @hint.to_i
+      return mem if target < need
+      fresh = IO::Memory.new(target)
+      fresh.write(mem.to_slice)
       @mem = fresh
     end
 
