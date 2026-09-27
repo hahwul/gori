@@ -312,15 +312,19 @@ describe Gori::MCP::Server do
       end
     end
 
-    # An explicit "" is "all hosts", as the schema and `gori run rewriter add --from-flow --host ''`
-    # say; `.presence` folded it into "take the flow's host".
-    it "keeps an explicit empty host over the flow's draft" do
+    # A client that sends every schema property sends "" for the ones it leaves alone, so with
+    # from_flow_id an empty host or replacement keeps the flow's draft; '*' is all hosts.
+    it "keeps the draft for empty fields and takes '*' as all hosts" do
       with_store do |store|
         flow = mcp_seed_flow(store, "api.acme.test", "GET", "/me", 200,
           "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n", "ok".to_slice)
-        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_rule","arguments":{"op":"short_circuit","from_flow_id":#{flow},"host":""}}})
-        mcp_tool_payload(mcp_drive(store, call)[0])
-        store.match_rules.first.host.should eq("")
+        filled = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_rule","arguments":{"op":"short_circuit","from_flow_id":#{flow},"host":"","replacement":"","pattern":""}}})
+        mcp_tool_payload(mcp_drive(store, filled)[0])
+        store.match_rules.last.host.should eq("api.acme.test")
+        all = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"create_rule","arguments":{"op":"short_circuit","from_flow_id":#{flow},"host":"*"}}})
+        mcp_tool_payload(mcp_drive(store, all)[0])
+        store.match_rules.last.host.should eq("*")
+        Gori::Rules.host_matches?("*", "other.test").should be_true
       end
     end
 
