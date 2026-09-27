@@ -190,4 +190,35 @@ describe Gori::AsciiBytes do
       Gori::Store::FlowRow.absolute_form?(String.new(Bytes[0x48, 0x54, 0x54, 0x50, 0x3a, 0x2f, 0x2f, 0x80])).should be_true
     end
   end
+
+  describe ".ascii_only?" do
+    it "is true for empty and pure-ASCII input, false for any byte >= 0x80 wherever it sits" do
+      Gori::AsciiBytes.ascii_only?(Bytes.empty).should be_true
+      Gori::AsciiBytes.ascii_only?(Bytes.new(300) { |i| (i % 128).to_u8 }).should be_true
+      [0, 1, 7, 8, 31, 32, 299].each do |at|
+        Gori::AsciiBytes.ascii_only?(Bytes.new(300) { |i| i == at ? 0x80_u8 : 0x41_u8 }).should be_false
+      end
+    end
+  end
+
+  describe ".range_eq_ci?" do
+    it "folds A-Z only and requires the exact length" do
+      h = "xContent-TYPEx".to_slice
+      Gori::AsciiBytes.range_eq_ci?(h, 1, 13, "content-type".to_slice).should be_true
+      Gori::AsciiBytes.range_eq_ci?(h, 1, 12, "content-type".to_slice).should be_false
+      Gori::AsciiBytes.range_eq_ci?(h, 0, 13, "content-type".to_slice).should be_false
+      Gori::AsciiBytes.range_eq_ci?("[]".to_slice, 0, 2, "{}".to_slice).should be_false
+    end
+  end
+
+  describe ".each_head_field" do
+    it "yields trimmed name/value offsets per colon line and stops at the blank line" do
+      h = "GET / HTTP/1.1\r\n A :  b \r\nnocolon\r\nC:\r\n\r\nD: e\r\n".to_slice
+      seen = [] of {String, String}
+      Gori::AsciiBytes.each_head_field(h) do |na, nz, va, vz|
+        seen << {String.new(h[na, nz - na]), String.new(h[va, vz - va])}
+      end
+      seen.should eq([{"A", "b"}, {"C", ""}])
+    end
+  end
 end
