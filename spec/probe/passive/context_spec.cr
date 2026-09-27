@@ -21,6 +21,7 @@ end
 
 private HTML_HEAD = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n"
 private PNG_HEAD  = "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\n\r\n"
+private TEXT_HEAD = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n"
 
 private DOC = <<-HTML
   <!doctype html><html><body><script>
@@ -35,7 +36,7 @@ describe Gori::Probe::Passive::Context do
     # hands this string to PCRE2, which RAISES on invalid UTF-8 rather than failing to match —
     # so "always valid" is a correctness property, not a nicety.
     it "repairs a body that is not valid UTF-8" do
-      ctx = ctx_for(Bytes[0x41, 0xff, 0xfe, 0x42], "image/png", PNG_HEAD)
+      ctx = ctx_for(Bytes[0x41, 0xff, 0xfe, 0x42], "text/plain", TEXT_HEAD)
       text = ctx.body_text.not_nil!
       text.valid_encoding?.should be_true
       text.should eq(String.new(Bytes[0x41, 0xff, 0xfe, 0x42]).scrub)
@@ -48,6 +49,30 @@ describe Gori::Probe::Passive::Context do
 
     it "is nil when there is no body" do
       ctx_for(nil, "text/html", HTML_HEAD).body_text.should be_nil
+    end
+
+    # Scrubbing a binary body turned each stray byte into a 3-byte U+FFFD that every body rule
+    # then walked (~600µs per image) — see `bench/probe_passive_bench.cr`'s binary row.
+    it "reads a declared-binary body that is not UTF-8 as no text" do
+      png = Bytes[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0xff]
+      ctx_for(png, "image/png", PNG_HEAD).body_text.should be_nil
+      ctx_for(png, "font/woff2", PNG_HEAD).body_text.should be_nil
+      ctx_for(png, "application/wasm", PNG_HEAD).body_text.should be_nil
+    end
+
+    # The skip needs BOTH halves: a text error page served under an image type is still read,
+    # because what it carries (a stack trace, a key) is exactly what the body rules look for.
+    it "still reads a text body mislabelled with a binary type" do
+      ctx_for("Traceback (most recent call last):".to_slice, "image/png", PNG_HEAD)
+        .body_text.should eq("Traceback (most recent call last):")
+    end
+
+    # SVG is XML text — and a script carrier — so it is never treated as binary; neither is
+    # octet-stream, the sniffable type MimeConfusion reads.
+    it "keeps repairing SVG and octet-stream bodies" do
+      bad = Bytes[0x3c, 0x73, 0x76, 0x67, 0xff]
+      ctx_for(bad, "image/svg+xml", PNG_HEAD).body_text.should eq(String.new(bad).scrub)
+      ctx_for(bad, "application/octet-stream", PNG_HEAD).body_text.should eq(String.new(bad).scrub)
     end
   end
 
