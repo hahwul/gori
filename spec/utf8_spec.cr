@@ -48,3 +48,41 @@ describe "Gori::Utf8.tolerant" do
     Gori::Probe::Passive::Tech::FRAMEWORK_MARKERS.each { |(rx, _, _, _)| rx.options.includes?(flag).should be_true }
   end
 end
+
+# `Utf8.scrub` replaces `String#scrub` on every path that repairs a body before PCRE2 sees it,
+# so it must produce the SAME bytes — a regex matches the repaired projection, and a different
+# projection is a different answer. Checked against the stdlib on inputs built to hit every
+# decode edge: truncated sequences at the end, overlongs, surrogates, > U+10FFFF, bare
+# continuation bytes, NUL.
+describe "Gori::Utf8.scrub" do
+  edge = [0x41, 0x00, 0x7F, 0x80, 0xBF, 0xC0, 0xC1, 0xC2, 0xC3, 0xA9, 0xDF, 0xE0, 0xA0, 0x9F,
+          0xE2, 0x82, 0xAC, 0xED, 0x9F, 0xEF, 0xF0, 0x90, 0x8F, 0x9F, 0x98, 0xF4, 0x8F, 0xF5, 0xFF].map(&.to_u8)
+
+  it "is byte-identical to String#scrub on random input" do
+    rng = Random.new(20260927)
+    50_000.times do
+      len = rng.rand(24)
+      bytes = Bytes.new(len) { rng.rand(3) == 0 ? rng.rand(256).to_u8 : edge.sample(rng) }
+      got = Gori::Utf8.scrub(bytes)
+      want = String.new(bytes).scrub
+      got.to_slice.should eq(want.to_slice), "#{bytes}"
+      got.valid_encoding?.should be_true
+      got.size.should eq(want.size)
+    end
+  end
+
+  it "agrees on a large binary body and keeps valid text untouched" do
+    big = Bytes.new(300_000) { |i| (i.to_i64 * 7919 % 251).to_u8 }
+    Gori::Utf8.scrub(big).should eq(String.new(big).scrub)
+    text = "caf\u{00e9} \u{1F600} 한글 plain".to_slice
+    Gori::Utf8.scrub(text).to_slice.should eq(text)
+    Gori::Utf8.text(text).to_slice.should eq(text)
+    Gori::Utf8.text(Bytes.empty).should eq("")
+  end
+
+  it "gives text and subject the same repaired projection" do
+    bytes = Bytes[0x61, 0xFF, 0xE2, 0x82, 0x62, 0xF0, 0x9F, 0x98]
+    Gori::Utf8.text(bytes).should eq(String.new(bytes).scrub)
+    Gori::Utf8.subject(String.new(bytes)).should eq(String.new(bytes).scrub)
+  end
+end

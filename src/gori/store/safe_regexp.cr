@@ -4,6 +4,7 @@ require "sqlite3"
 # Crystal resolves the cycle by skipping the re-entry, and neither file reads the other's
 # constants at load time.
 require "./scope_match"
+require "../utf8" # `Utf8.text`, the PCRE2 subject the non-literal path matches
 
 # The shard binds value_text but not value_bytes; add it so the REGEXP haystack can
 # be read by its true byte length (value_text alone is NUL-terminated). Re-opening
@@ -26,8 +27,8 @@ module Gori
   # We re-register `regexp` on every pooled connection with a version that scrubs the
   # haystack to valid UTF-8 (invalid sequences → U+FFFD) and rescues any residual error,
   # so a regex scan can never crash and a binary body simply fails to match a text
-  # pattern. The scrub sits on the ERROR path, not in front of every row: PCRE2 does that
-  # same UTF-8 validation itself, so scrubbing up front paid for it twice (see `FN`).
+  # pattern. The scrub is paid only by a haystack that needs it: validity is checked once
+  # over SQLite's buffer and a valid one goes to PCRE2 unchanged (see `match_bytes`).
   # Unlike the upstream function (which reads the haystack via `value_text`, a
   # NUL-terminated pointer, and so silently stops scanning at the first embedded NUL),
   # we read the FULL byte length via `value_bytes` so content past a NUL — common in a
@@ -330,52 +331,36 @@ module Gori
 
     # --- the PCRE2 path, for everything the literal search declined --------------
     #
-    # Whether to `scrub` before matching, rather than letting PCRE2 reject an invalid subject.
-    # Both routes give the IDENTICAL answer; this only picks the cheaper one for the corpus in
-    # hand, and they are far apart in both directions. Per 1KB body, measured: PCRE2 validates
-    # the subject itself at 0.26us, so scrubbing up front pays for that pass twice and costs
-    # 4.7us on a VALID body against 0.29us — but a body PCRE2 REJECTS unwinds a Crystal
-    # exception at 11.3us against the 6.5us scrubbing it would have cost. Break-even is around
-    # two invalid bodies in five, and a capture holds whatever the target served: mostly text
-    # from an API, mostly compressed bytes from a site. So sample the recent rows rather than
-    # assume either shape. `scrub` returns the string ITSELF when it was already valid, which
-    # is how the scrub-first route keeps feeding the sample that may switch it back off.
-    SAMPLE_ROWS = 512
-    @@rows_seen = 0
-    @@rows_invalid = 0
-    @@scrub_first = false
+    # PCRE2 is handed the SCRUBBED projection of the haystack — every invalid byte reads as
+    # U+FFFD, exactly as `String#scrub` spells it — because Crystal compiles every Regex in
+    # UTF mode and an invalid subject is an error, not a mismatch. How that projection is
+    # built is nearly the whole cost of a `body~` scan over real captures, so:
+    #
+    #   · `Utf8.text` builds it: validity decided ONCE, by the `Unicode.valid?` DFA over
+    #     SQLite's own buffer (it stops at the first bad byte of a binary body), then either one
+    #     copy of a valid haystack or one exact-size scrub of an invalid one;
+    #   · PCRE2 is then told not to validate again (NO_UTF_CHECK).
+    #
+    # The copy of a valid haystack stays because the public `Regex` API takes a String and
+    # nothing else — handing SQLite's pointer to PCRE2 would mean reaching into `Regex`'s
+    # private `@re`, for a copy that costs about what the match does.
+    #
+    # This replaced a sampler choosing between letting PCRE2 reject the subject (a Crystal
+    # raise per binary body, then `String#scrub`) and scrubbing every row up front. Both
+    # routes paid `String#scrub`, which decodes char by char into a doubling builder — 7.6 ms
+    # and 8 MB for a 2 MB binary body — and scrub-first paid ~6.8 ms for every VALID 2 MB body
+    # as well, walking it only to return it unchanged (bench/regex_scan_bench.cr).
 
     # :nodoc: — internal (called from FN, which needs an explicit receiver)
-    def self.match_text(pattern : String, text : String) : Bool
+    def self.match_bytes(pattern : String, ptr : Pointer(UInt8), len : Int32) : Bool
       rx = compile(pattern)
-      if @@scrub_first
-        scrubbed = text.scrub
-        note_subject(!scrubbed.same?(text))
-        # Scrubbed => valid by construction, so PCRE2's own check is pure overhead now.
-        rx.matches_at_byte_index?(scrubbed, 0, Regex::MatchOptions::NO_UTF_CHECK)
-      else
-        begin
-          matched = rx.matches?(text)
-          note_subject(false)
-          matched
-        rescue
-          note_subject(true)
-          rx.matches_at_byte_index?(text.scrub, 0, Regex::MatchOptions::NO_UTF_CHECK)
-        end
-      end
+      subject = len <= 0 ? "" : Utf8.text(Bytes.new(ptr, len, read_only: true))
+      # Valid by construction (`Utf8.text`), so PCRE2's own check would be pure overhead.
+      rx.matches_at_byte_index?(subject, 0, Regex::MatchOptions::NO_UTF_CHECK)
     rescue
       # A pattern that will not compile, or a residual engine error: never a raise out of a C
       # callback, which would abort the whole query (see the module comment).
       false
-    end
-
-    private def self.note_subject(invalid : Bool) : Nil
-      @@rows_seen += 1
-      @@rows_invalid += 1 if invalid
-      return if @@rows_seen < SAMPLE_ROWS
-      @@scrub_first = @@rows_invalid * 5 > @@rows_seen * 2 # more than two in five
-      @@rows_seen = 0
-      @@rows_invalid = 0
     end
 
     # Everything the callback needs about one pattern, looked up by the raw SQLite bytes.
@@ -427,7 +412,7 @@ module Gori
            !(answer = SafeRegexp.literal_match?(hay_ptr, hay_len, lit)).nil?
           answer
         else
-          SafeRegexp.match_text(slot.pattern, empty ? "" : String.new(hay_ptr, hay_len))
+          SafeRegexp.match_bytes(slot.pattern, hay_ptr, empty ? 0 : hay_len)
         end
       LibSQLite3.result_int(context, matched ? 1 : 0)
       nil

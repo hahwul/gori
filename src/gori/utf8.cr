@@ -14,23 +14,110 @@ module Gori
   # unrolled DFA over the raw bytes. Measured on a valid 216 KB response body: 681µs for
   # `scrub`, 81µs for `valid_encoding?` — 8.4x, per response, on every path that sets a regex.
   #
-  # So: ask the cheap question first, and scrub only what needs it. An invalid body re-walks
-  # (`valid_encoding?` then `scrub`), which is the right trade at roughly one body in a run.
+  # So: ask the cheap question first, and scrub only what needs it — and scrub with `scrub`
+  # below, not `String#scrub`. The stdlib one also decodes char by char into a doubling
+  # builder, so a 2 MB binary body cost 7.6 ms and 8 MB to repair; this one counts, allocates
+  # the exact size once and copies valid runs whole, byte-identical output.
   #
   # This lived as a private helper inside `Discover::Extract` while the fuzz matcher and the
   # intercept filter each carried the slow spelling; one home is what keeps the reasoning
   # attached to every caller.
   module Utf8
-    # A response/message body as a String safe to hand to PCRE2.
+    # A response/message body as a String safe to hand to PCRE2. One copy when the bytes are
+    # valid, one exact-size scrub when they are not — never both.
     def self.text(bytes : Bytes) : String
-      subject(String.new(bytes))
+      Unicode.valid?(bytes) ? String.new(bytes) : scrub(bytes)
     end
 
     # The same guarantee for a String that already exists — a haystack assembled from wire
     # bytes somewhere upstream. Returns `str` itself when it is already valid, so the common
     # path allocates nothing at all.
     def self.subject(str : String) : String
-      str.valid_encoding? ? str : str.scrub
+      str.valid_encoding? ? str : scrub(str.to_slice)
+    end
+
+    # `String.new(bytes).scrub`, byte for byte, without the intermediate copy or the builder:
+    # one pass counts the invalid bytes (each becomes the three bytes of U+FFFD), the second
+    # copies valid runs whole into a String of exactly the right size. "Invalid" is exactly
+    # `Char::Reader`'s verdict, which is what `String#scrub` walks: a sequence it would decode
+    # is kept at its width, anything else is ONE byte replaced, and a sequence cut off by the
+    # end of the buffer is invalid byte by byte. `spec/utf8_spec.cr` holds the two together on
+    # random input.
+    def self.scrub(bytes : Bytes) : String
+      ptr = bytes.to_unsafe
+      len = bytes.size
+      invalid = 0
+      i = 0
+      while i < len
+        w = width_at(ptr, i, len)
+        if w == 0
+          invalid += 1
+          i += 1
+        else
+          i += w
+        end
+      end
+      return String.new(bytes) if invalid == 0
+      String.new(len + invalid * 2) do |buf|
+        o = 0
+        run = 0
+        i = 0
+        while i < len
+          w = width_at(ptr, i, len)
+          if w == 0
+            n = i - run
+            (buf + o).copy_from(ptr + run, n)
+            o += n
+            buf[o] = 0xEF_u8
+            buf[o + 1] = 0xBF_u8
+            buf[o + 2] = 0xBD_u8
+            o += 3
+            i += 1
+            run = i
+          else
+            i += w
+          end
+        end
+        n = len - run
+        (buf + o).copy_from(ptr + run, n)
+        {o + n, 0}
+      end
+    end
+
+    # The width of the UTF-8 sequence starting at `i`, or 0 where `Char::Reader` would call it
+    # an error (its `decode_char_at`: no overlong forms, no surrogates, nothing past U+10FFFF).
+    # A byte past `len` is never a continuation byte, as the reader's NUL terminator is not.
+    @[AlwaysInline]
+    private def self.width_at(ptr : Pointer(UInt8), i : Int32, len : Int32) : Int32
+      first = ptr[i]
+      return 1 if first < 0x80
+      need = lead_width(first)
+      return 0 if need == 0 || i + need > len
+      (1...need).each { |k| return 0 unless (ptr[i + k] & 0xC0) == 0x80 }
+      second_in_range?(first, ptr[i + 1]) ? need : 0
+    end
+
+    # The sequence length a non-ASCII lead byte announces; 0 for a byte that cannot lead
+    # (a continuation byte, the overlong C0/C1, or F5 and up).
+    @[AlwaysInline]
+    private def self.lead_width(first : UInt8) : Int32
+      return 0 if first < 0xC2
+      return 2 if first < 0xE0
+      return 3 if first < 0xF0
+      first < 0xF5 ? 4 : 0
+    end
+
+    # The four lead bytes whose SECOND byte is narrower than any continuation byte: E0 and F0
+    # (overlong forms), ED (UTF-16 surrogates), F4 (past U+10FFFF).
+    @[AlwaysInline]
+    private def self.second_in_range?(first : UInt8, second : UInt8) : Bool
+      case first
+      when 0xE0 then second >= 0xA0
+      when 0xED then second < 0xA0
+      when 0xF0 then second >= 0x90
+      when 0xF4 then second < 0x90
+      else           true
+      end
     end
 
     # The compile option `tolerant` adds: PCRE2_MATCH_INVALID_UTF, or nothing where it is not
