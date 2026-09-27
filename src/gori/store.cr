@@ -1979,8 +1979,35 @@ module Gori
     end
 
     # {Content-Type, Content-Encoding} header values from a raw head BLOB (either nil), read
-    # in a single pass so a skip decision costs one scan, not one per header.
-    private def self.head_markers(head : Bytes) : {String?, String?}
+    # in a single pass so a skip decision costs one scan, not one per header. The LAST of a
+    # repeated header wins (unlike `MediaType.of`, which takes the first).
+    #
+    # Run per flow by the FTS indexer, so a pure-ASCII head is walked as bytes
+    # (`AsciiBytes.each_head_field`, the same line/chomp/colon/strip rules as the `String` scan
+    # below) and allocates only the two values; a head with any byte >= 0x80 takes the
+    # `String` scan verbatim (1.9µs / 2.5 KB → 0.18µs / 80 B, `bench/head_markers_bench.cr`).
+    # Public (`:nodoc:`) only so `spec/store/head_markers_spec.cr` can hold the two paths to
+    # one answer.
+    #
+    # :nodoc:
+    def self.head_markers(head : Bytes) : {String?, String?}
+      return head_markers_string(head) unless AsciiBytes.ascii_only?(head)
+      ct = nil.as(String?)
+      ce = nil.as(String?)
+      AsciiBytes.each_head_field(head) do |na, nz, va, vz|
+        if AsciiBytes.range_eq_ci?(head, na, nz, CONTENT_TYPE_NAME)
+          ct = String.new(head[va, vz - va])
+        elsif AsciiBytes.range_eq_ci?(head, na, nz, CONTENT_ENCODING_NAME)
+          ce = String.new(head[va, vz - va])
+        end
+      end
+      {ct, ce}
+    end
+
+    private CONTENT_TYPE_NAME     = "content-type".to_slice
+    private CONTENT_ENCODING_NAME = "content-encoding".to_slice
+
+    private def self.head_markers_string(head : Bytes) : {String?, String?}
       ct = nil.as(String?)
       ce = nil.as(String?)
       String.new(head).each_line do |raw|
