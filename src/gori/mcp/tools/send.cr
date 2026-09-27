@@ -604,9 +604,19 @@ module Gori
       # it that way, and MCP used to let allow_unscoped:true walk straight past it. It used to
       # carry the unbound-binding rule too; that rule is gone (see `Env.unbound`), so every
       # refusal reaching here is a Sandbox one again.
+      #
+      # Layer 1 is asked of EVERY request in the plan, like Layer 2 (`Plan#refusal`): a race or
+      # timing group shares one origin but not one path, so gating on the first member alone
+      # let an out-of-scope path ride behind an in-scope one. One blocked member refuses the
+      # group; the first member's verdict is the one reported.
       private def send_gate(ob : Outbound, plan : Repeater::Plan) : ScopeCheck | Result
         sc = ob.check(request_scope_url(plan), plan.host, request_exclude_url(plan))
         return scope_blocked(sc) if sc.blocked?
+        plan.requests.each_with_index do |req, i|
+          next if i == 0
+          member = ob.check(request_scope_url(plan, req), plan.host, request_exclude_url(plan, req))
+          return scope_blocked(member) if member.blocked?
+        end
         if reason = plan.refusal
           return sandbox_blocked(reason, plan.host, "url")
         end
@@ -1757,14 +1767,14 @@ module Gori
       # The URL the scope gate evaluates, anchored on the DIAL target rather than the request
       # LINE's host. The rule itself now lives in the seam (`Outbound.scope_url`) so the sweep
       # and Repeater paths get the same absolute-form handling this used to have alone.
-      private def request_scope_url(plan : Repeater::Plan) : String
-        Outbound.scope_url(plan.scheme, plan.host, request_target(plan.bytes))
+      private def request_scope_url(plan : Repeater::Plan, bytes : Bytes = plan.bytes) : String
+        Outbound.scope_url(plan.scheme, plan.host, request_target(bytes))
       end
 
       # The same url WITH the plan's dial port, which the EXCLUDE side reads, or nil on a
       # default port where there is no second spelling to ask about (#884).
-      private def request_exclude_url(plan : Repeater::Plan) : String?
-        Outbound.exclude_url(plan.scheme, plan.host, request_target(plan.bytes), plan.port)
+      private def request_exclude_url(plan : Repeater::Plan, bytes : Bytes = plan.bytes) : String?
+        Outbound.exclude_url(plan.scheme, plan.host, request_target(bytes), plan.port)
       end
 
       # Passive-scan a just-saved Repeater send into probe_issues when mode is Passive/Active.
