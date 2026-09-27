@@ -32,6 +32,7 @@ describe "Store flow references after deletion" do
 
       store.delete_flow(flow_id).should be_true
       store.flush
+      reissue_rowids(store)
       ref_flow(store, "/unrelated").should eq(flow_id)
       store.flush
 
@@ -49,6 +50,7 @@ describe "Store flow references after deletion" do
 
       store.delete_flow(flow_id).should be_true
       store.flush
+      reissue_rowids(store)
       ref_flow(store, "/unrelated").should eq(flow_id)
       store.flush
 
@@ -70,6 +72,7 @@ describe "Store flow references after deletion" do
 
       store.clear_flows.should be_true
       store.flush
+      reissue_rowids(store)
       ref_flow(store, "/unrelated").should eq(flow_id)
       store.flush
 

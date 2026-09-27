@@ -222,9 +222,9 @@ describe "HistoryView — user-defined columns" do
     end
   end
 
-  # `flows.id` is a REUSABLE rowid: a clear restarts numbering, and the next capture lands on
-  # an id the memo may still be holding. Keying on the id alone painted the CLEARED flow's
-  # value on the new one's row — the one failure a display column must never have.
+  # `flows.id` was a REUSABLE rowid before V39: a clear restarted numbering, and the next
+  # capture landed on an id the memo may still be holding. Keying on the id alone painted the
+  # CLEARED flow's value on the new one's row — the one failure a display column must never have.
   it "does not serve a cleared flow's value to a new flow that reuses its rowid" do
     tmp_store do |store|
       old_id = add_flow(store, "before-clear")
@@ -239,6 +239,7 @@ describe "HistoryView — user-defined columns" do
       # own clear/delete paths, and this is the case those two cannot cover: a peer process
       # wiping the project. The `{id, created_at}` key is what has to hold here.
       store.clear_flows
+      reissue_rowids(store)
       new_id = add_flow(store, "after-clear")
       new_id.should eq(old_id) # the rowid really was reused — otherwise this proves nothing
 

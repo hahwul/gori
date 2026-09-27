@@ -852,6 +852,7 @@ describe Gori::Store do
           Gori::Store::Severity::High, "victim.test", id)
 
         store.delete_flow(id)
+        reissue_rowids(store) # the pre-V39 allocator: the guard is what this example proves
         reused = store.insert_flow(Gori::Store::CapturedRequest.new(
           created_at: 2_i64, scheme: "http", host: "unrelated.test", port: 80,
           method: "GET", target: "/UNRELATED-ADMIN-PANEL", http_version: "HTTP/1.1",

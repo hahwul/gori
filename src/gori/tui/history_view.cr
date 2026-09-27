@@ -135,9 +135,10 @@ module Gori::Tui
       # out of the current filter/window stays marked (marked_hidden_count reports it);
       # a mark whose flow is gone simply fails to resolve at the verb.
       @marks = Set(Int64).new
-      # Each mark's capture time. `flows.id` is an INTEGER PRIMARY KEY without AUTOINCREMENT, so
-      # after a peer clears History the next capture takes id 1 again — and a bare id mark moved
-      # onto it, where Delete would destroy a flow nobody marked. See `prune_reused_marks`.
+      # Each mark's capture time. Before V39 `flows.id` had no AUTOINCREMENT, so after a peer
+      # cleared History the next capture took id 1 again — and a bare id mark moved onto it,
+      # where Delete would destroy a flow nobody marked. Kept as defence in depth now that ids
+      # are never reissued. See `prune_reused_marks`.
       @mark_stamps = {} of Int64 => Int64
       @marks_seen_max = nil.as(Int64?) # `prune_reused_marks`' last MAX(id)
       @mark_anchor = nil.as(Int64?)    # id-keyed range anchor for the ⇧arrow extend
@@ -164,9 +165,9 @@ module Gori::Tui
       #
       # Keyed by `{id, created_at, state}`, and every part of that is load-bearing.
       #
-      # NOT id alone: `flows.id` is a REUSABLE rowid, so a `history clear` (or deleting the
-      # newest flow) restarts numbering and the next capture lands on an id this memo may still
-      # be holding — which would paint one flow's extracted values on a different flow's row, the
+      # NOT id alone: `flows.id` was a REUSABLE rowid before V39, so a `history clear` (or
+      # deleting the newest flow) restarted numbering and the next capture landed on an id this
+      # memo may still be holding — which would paint one flow's extracted values on a different flow's row, the
       # one failure a display column must never have. The capture instant settles it: a reused
       # rowid belongs to a flow recorded later.
       #
@@ -1389,7 +1390,7 @@ module Gori::Tui
 
     # Drop every mark whose flow is gone or is now a DIFFERENT flow under the same id — the
     # peer-change check (`HistoryController#on_external_change`, and `on_enter` with
-    # `full: true`). An id is reused only after `MAX(id)` fell below it (no AUTOINCREMENT), so a
+    # `full: true`). An id could be reused only after `MAX(id)` fell below it (before V39), so a
     # tick reads that one index end and pays for the batched read of every marked row only when
     # it dropped; the capture's own commits move `data_version` every poll and never lower it.
     # Tab entry checks in full: the drop may have happened, and been climbed back past, while
@@ -1500,8 +1501,8 @@ module Gori::Tui
       close_detail if @detail.try(&.row.id).try { |d| ids.includes?(d) }
       clear_preview if @preview_id.try { |p| ids.includes?(p) }
       unmark_ids(ids)
-      # `flows.id` is a REUSABLE rowid, so a delete is the one event after which a memo keyed by
-      # id could be asked about a DIFFERENT flow. The `{id, created_at, state}` key already makes
+      # `flows.id` was a REUSABLE rowid before V39, so a delete was the one event after which a
+      # memo keyed by id could be asked about a DIFFERENT flow. The `{id, created_at, state}` key already makes
       # that collision require a shared capture microsecond; dropping the memo here removes it
       # outright for every deletion gori itself performs.
       forget_column_values

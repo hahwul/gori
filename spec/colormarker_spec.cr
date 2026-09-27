@@ -944,7 +944,7 @@ describe Gori::Colormarker do
   end
 
   describe "#forget_all" do
-    # `flows.id` is a reusable rowid: delete the flow a store-tier rule was asked about, capture
+    # `flows.id` was a reusable rowid until V39: delete the flow a store-tier rule was asked about, capture
     # another, and SQLite hands the new one the same id. Without a wholesale drop the memo
     # answered for the DELETED flow's bytes and painted a row that matches nothing.
     it "stops a reused flow id from inheriting the deleted flow's answer" do
@@ -956,6 +956,7 @@ describe Gori::Colormarker do
           cm.match(hit).try(&.color).should eq(RED)
 
           store.delete_flows([hit.id]).should be_true
+          reissue_rowids(store)
           reused = captured(store, "b.test", "/", body: "nothing here")
           reused.id.should eq(hit.id)                  # the premise: the rowid really is handed out again
           cm.match(reused).try(&.color).should eq(RED) # the stale answer, still cached

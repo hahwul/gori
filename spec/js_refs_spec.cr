@@ -311,8 +311,9 @@ describe Gori::JsRefs do
         store.clear_flows.should be_true
         ref_count(store).should eq(0)
         marker_count(store).should eq(0)
+        reissue_rowids(store)
         reused = jr_flow(store, "/b.js", %(fetch("/api/after")))
-        reused.should eq(first) # SQLite hands the rowid out again
+        reused.should eq(first) # the pre-V39 allocator hands the rowid out again
         JR.scan(store).flows_scanned.should eq(1)
         refs_of(store).map(&.path).should eq(["/api/after"])
       end

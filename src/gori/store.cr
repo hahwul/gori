@@ -1600,7 +1600,7 @@ module Gori
     #
     # The cutoff is the id of the OLDEST flow that SURVIVES, seeked from the rows that actually
     # exist — deliberately not `MAX(id) - @retention_flows`. `flows.id` is monotonic but NOT
-    # gapless (INTEGER PRIMARY KEY without AUTOINCREMENT, and `delete_flow`/`delete_flows` remove
+    # gapless (`delete_flow`/`delete_flows` remove
     # arbitrary mid-history ids from the History tab, MCP and `gori run history`), and that
     # arithmetic is "the newest N" only on a gap-free space. With 10 flows of which 6
     # mid-history ones were hand-deleted (1, 2, 9, 10 survive) and 15 more captured, a cap of 20

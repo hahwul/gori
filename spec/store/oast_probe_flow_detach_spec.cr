@@ -46,9 +46,10 @@ describe "an outstanding OAST probe whose flow is gone" do
       store.probe_oast_pending.first.flow_id.should eq(planted)
 
       # The probe deliberately OUTLIVES the traffic that planted it — that is what the table is
-      # for — so the clear leaves the row and resets the rowid counter.
+      # for — so the clear leaves the row, and (as every clear did before V39) resets the rowid counter.
       store.clear_flows.should be_true
       store.flush
+      reissue_rowids(store)
       reused = store.insert_flow(detach_request("/unrelated"))
       store.flush
       reused.should eq(planted) # the id really is handed out again

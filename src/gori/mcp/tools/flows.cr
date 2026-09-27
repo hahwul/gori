@@ -51,10 +51,12 @@ module Gori
           return err("pass only one of 'since' (tail newer, oldest-first) or 'before_id' (page older, newest-first)",
             "INVALID_ARGUMENT", field: "since")
         end
-        # `flows.id` is a REUSABLE rowid, so a clear (or deleting the newest flow) restarts
-        # numbering. A cursor ahead of the new maximum is stranded; during the empty interval
-        # `max_flow_id` is nil and used to skip that diagnosis, letting the caller keep a cursor
-        # that would strand it as soon as low ids came back. Treat that interval as stale too.
+        # Before V39 `flows.id` was a REUSABLE rowid, so a clear (or deleting the newest flow)
+        # restarted numbering. Ids are never reissued now, so such a cursor would see the next
+        # capture after all, but one ahead of the maximum is still refused rather than trusted:
+        # it may come from another project, and saying so costs a caller one restart. During the
+        # empty interval `max_flow_id` is nil and used to skip that diagnosis, letting the caller
+        # keep a cursor that would strand it as soon as low ids came back. Treat that as stale too.
         # `count?` distinguishes an empty table from a transient failure in `max_flow_id`.
         if (cur = since_id) && cur > 0
           newest = store.max_flow_id
@@ -182,8 +184,8 @@ module Gori
       # Three things this must keep apart, because "fewer rows than I asked for" has three
       # different causes and only one of them is the caller's mistake:
       #
-      #   * `missing_ids` — no such row. Reported, never dropped: `flows.id` is a REUSABLE
-      #     rowid, so a remembered id can be gone OR now belong to a different flow, and an
+      #   * `missing_ids` — no such row. Reported, never dropped: a remembered id can be gone
+      #     (or, before V39 made `flows.id` AUTOINCREMENT, belong to a different flow), and an
       #     agent replaying a stale set needs to hear it. Not a whole-call refusal, unlike
       #     `delete_repeaters`: this is a READ, retention or `clear_history` can legitimately
       #     have eaten one row, and refusing would cost the caller the rows that do exist.

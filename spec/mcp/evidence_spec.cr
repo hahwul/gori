@@ -66,6 +66,7 @@ describe "MCP frozen evidence" do
         "evidence"]["id"].as_i64
 
       store.clear_flows.should be_true
+      reissue_rowids(store)
       mcp_seed_flow(store, "acme.test", "GET", "/unrelated", 200).should eq(fid)
 
       evidence = mcp_ok_json(tools, "get_evidence", %({"id":#{eid}}))

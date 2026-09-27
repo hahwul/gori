@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- History: a flow id is never handed out twice, so after a clear or deleting the newest flows new captures keep counting up instead of restarting at 1, and a mark, link, evidence source or MCP cursor can no longer end up naming a different flow; HTTP/2 connection ids likewise. The first open after upgrading makes the switch in milliseconds at any project size, or, on a SQLite build that refuses that, rebuilds the History table once at roughly 4–5 s per GB (#1343)
 - TUI: a paste while the space menu, Copy as… or Send selection to… is open is ignored instead of running as keys, where a pasted `zc` could close the menu and stop capture (#1342)
 - History: after a clear, a new HTTP/2 connection's raw frame log no longer mixes in the frames of a connection the browser kept open (#1342)
 - Import: OpenAPI operations honor their path item's or their own `servers`, so a multi-host document from gori's OpenAPI export re-imports against the right hosts, and percent-encoded `$ref` pointers such as `#/paths/~1users~1%7Bid%7D` resolve (#1342)
