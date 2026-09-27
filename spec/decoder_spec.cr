@@ -389,6 +389,7 @@ describe Gori::Decoder do
       conv("rfc2047-decode", "=?UTF-8?Q?a?= =?UTF-8?Q?b?= =?UTF-8?Q?=FF?=").should eq "ab =?UTF-8?Q?=FF?="
       # Charset aliases join into one run, so a character split across them decodes.
       conv("rfc2047-decode", "=?utf-8?q?=E2=82?= =?UTF8?Q?=AC?=").should eq "€"
+      conv("rfc2047-decode", "=?UTF-8?Q?=FF?= =?UTF-8?Q?a?= =?ISO-8859-1?Q?b?=").should eq "=?UTF-8?Q?=FF?= ab"
       # Marker-shaped text that is not a whole word never reaches the charset check
       conv("rfc2047-decode", "=?shift_jis?Q?a b?=").should eq "=?shift_jis?Q?a b?="
       conv("rfc2047-decode", "=?Windows-1252?Q?=80?=").should eq "€"

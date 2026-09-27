@@ -1008,8 +1008,8 @@ module Gori::Decoder
           if text = (rfc2047_charset_decode(word.charset, data.to_slice) rescue nil)
             sink << text
             i = resume if resume
-          else
-            rfc2047_write_words(sink, bytes, words)
+          elsif rfc2047_write_words(sink, bytes, words)
+            i = resume if resume # the run ended on a decoded word, so its gap to the next is dropped
           end
           next
         end
@@ -1024,7 +1024,10 @@ module Gori::Decoder
     # A run whose joined bytes did not decode, word by word: one bad word used to leave every
     # valid neighbour literal too. A word that decodes alone is written decoded; one that does not
     # stays literal, and so does the whitespace beside it (it is ordinary text now).
-    private def rfc2047_write_words(sink : IO, bytes : Bytes, words : Array({Int32, Rfc2047RawWord})) : Nil
+    #
+    # Answers whether the LAST word decoded, so the caller knows whether the gap after the run
+    # sits between two encoded-words (dropped) or beside literal text (kept).
+    private def rfc2047_write_words(sink : IO, bytes : Bytes, words : Array({Int32, Rfc2047RawWord})) : Bool
       prev_end = nil.as(Int32?)
       prev_literal = false
       words.each do |(start, w)|
@@ -1036,6 +1039,7 @@ module Gori::Decoder
         prev_literal = text.nil?
         prev_end = w.next_pos
       end
+      !prev_literal
     end
 
     # The charset names `rfc2047_charset_decode` treats as one, so `utf-8` beside `UTF8` still
