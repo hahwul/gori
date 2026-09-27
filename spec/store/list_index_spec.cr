@@ -63,11 +63,20 @@ describe "History list covering index (schema V37)" do
       ["host:api", "path:/admin", "url:example.com/api", "method:DELETE", "scheme:https",
        "src:repeater", "src:gori", "size:>1000", "reqsize:>1000", "respsize:>1mb", "dur:>800ms",
        "stub:true", "static:false", "-status:200", "proto:grpc", "proto:sse", "host~^cdn",
-       "path~/v2/.*/items", "zzqxnomatch"].each do |q|
+       "path~/v2/.*/items", "zzqxnomatch",
+       # A two-sided status range is spelled `+status` so it does not take idx_flows_status
+       # and sort every matching row (ql.cr's `status_cond`), and proto:ws carries one too.
+       "status:2xx", "status:5xx", "proto:ws", "proto:http", "status:>=500"].each do |q|
         plan = search_plan(store, q)
         plan.should contain("COVERING INDEX idx_flows_list"), "#{q}: #{plan}"
         plan.should_not contain("TEMP B-TREE"), "#{q}: #{plan}"
       end
+    end
+  end
+
+  it "keeps an exact status on its own index" do
+    with_store do |store|
+      search_plan(store, "status:500").should contain("INDEX idx_flows_status (status=?)")
     end
   end
 

@@ -895,8 +895,11 @@ module Gori
     # half requires the 101; see `Proto.websocket_connect?`, which this mirrors exactly.
     # Every leaf carries an IS NOT NULL guard so the whole term is 0/1 rather than NULL on a
     # pending flow, which is what lets `http` below negate it NULL-safely.
+    #
+    # The 2xx range is `+status` for the reason `status_cond` gives: indexed, it made the whole
+    # OR a MULTI-INDEX read of every 2xx row plus a sort.
     WS_SQL = "((status IS NOT NULL AND status = 101) OR " \
-             "(status IS NOT NULL AND status >= 200 AND status < 300 AND " \
+             "(status IS NOT NULL AND +status >= 200 AND +status < 300 AND " \
              "connect_protocol IS NOT NULL AND lower(connect_protocol) = 'websocket'))"
 
     private def self.proto_cond(value : String) : {String, Array(DB::Any)}?
@@ -1055,6 +1058,12 @@ module Gori
 
       # status class: 2xx / 4xx / 5xx — honour any comparison operator against the
       # class bounds (e.g. status:>=5xx → status >= 500; bare status:4xx → 400-499).
+      # The two-sided class range is spelled `+status` — the unary plus is a no-op on the
+      # value but takes the term away from `idx_flows_status`. Given a bounded range on that
+      # index the planner reads every matching row off the table and sorts them (`status:2xx`
+      # is most of a project) instead of walking `idx_flows_list` newest-first and stopping at
+      # the page: 889 ms -> 0.57 ms for `status:2xx` at 200k flows. A one-sided range it
+      # already declines, and an equality stays on the index, which is right for it.
       # Case-insensitive, because `InterceptFilter` (the same predicate over a live message) folds
       # the value before its class test, so `status:5XX` painted a colour rule's row while the
       # History query for the same string was silently dropped — one string, two answers.
@@ -1066,7 +1075,7 @@ module Gori
         when ">"  then return {"status >= ?", [base + 100] of DB::Any}
         when "<=" then return {"status < ?", [base + 100] of DB::Any}
         when "<"  then return {"status < ?", [base] of DB::Any}
-        else           return {"(status >= ? AND status < ?)", [base, base + 100] of DB::Any}
+        else           return {"(+status >= ? AND +status < ?)", [base, base + 100] of DB::Any}
         end
       end
 

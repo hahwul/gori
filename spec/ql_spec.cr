@@ -50,7 +50,7 @@ describe Gori::QL do
 
   it "compiles a status class to a range" do
     f = Gori::QL.parse("status:4xx")
-    f.sql.should eq("((status >= ? AND status < ?))") # clause-wrap around the range term
+    f.sql.should eq("((+status >= ? AND +status < ?))") # clause-wrap around the range term
     f.args.should eq([400, 500])
     # Case-insensitively: `InterceptFilter` folds the value before its class test, so a colour
     # rule's `status:5XX` painted rows while the History query for the same string was DROPPED.
@@ -421,11 +421,11 @@ describe Gori::QL do
   it "compiles proto: over BOTH WS transports (grpc either side, sse by response)" do
     Gori::QL.parse("proto:ws").sql.should eq(
       "(((status IS NOT NULL AND status = 101) OR " \
-      "(status IS NOT NULL AND status >= 200 AND status < 300 AND " \
+      "(status IS NOT NULL AND +status >= 200 AND +status < 300 AND " \
       "connect_protocol IS NOT NULL AND lower(connect_protocol) = 'websocket')))")
     Gori::QL.parse("proto:websocket").sql.should eq( # alias
 "(((status IS NOT NULL AND status = 101) OR " \
-"(status IS NOT NULL AND status >= 200 AND status < 300 AND " \
+"(status IS NOT NULL AND +status >= 200 AND +status < 300 AND " \
 "connect_protocol IS NOT NULL AND lower(connect_protocol) = 'websocket')))")
     Gori::QL.parse("proto:grpc").sql.should eq(
       "(((content_type IS NOT NULL AND lower(content_type) LIKE 'application/grpc%') OR " \
@@ -439,7 +439,7 @@ describe Gori::QL do
   it "compiles proto:http as a NULL-safe negation (pending/typeless flows count as http)" do
     Gori::QL.parse("proto:http").sql.should eq(
       "(NOT ((status IS NOT NULL AND status = 101) OR " \
-      "(status IS NOT NULL AND status >= 200 AND status < 300 AND " \
+      "(status IS NOT NULL AND +status >= 200 AND +status < 300 AND " \
       "connect_protocol IS NOT NULL AND lower(connect_protocol) = 'websocket')) " \
       "AND NOT ((content_type IS NOT NULL AND lower(content_type) LIKE 'application/grpc%') OR " \
       "(request_content_type IS NOT NULL AND lower(request_content_type) LIKE 'application/grpc%')) " \
@@ -459,7 +459,7 @@ describe Gori::QL do
   it "compiles the transport spellings the PROTO column prints as protocol AND scheme" do
     Gori::QL.parse("proto:wss").sql.should eq(
       "((((status IS NOT NULL AND status = 101) OR " \
-      "(status IS NOT NULL AND status >= 200 AND status < 300 AND " \
+      "(status IS NOT NULL AND +status >= 200 AND +status < 300 AND " \
       "connect_protocol IS NOT NULL AND lower(connect_protocol) = 'websocket'))) " \
       "AND scheme = 'https')")
     Gori::QL.parse("proto:grpcs").sql.should eq(
