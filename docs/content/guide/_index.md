@@ -10,7 +10,7 @@ New to gori? Run the [Quick Start](/getting-started/quick-start/) first. When yo
 
 ## The Interface at a Glance
 
-gori is organized into tabs; move between them with `[` / `]` or jump with number keys. Two discovery surfaces cover almost everything: `Ctrl-P` opens the **command palette** (app-wide), and `Space` opens the **space menu** (actions for the focused pane). Day-1 chords live in the [Quick Start](/getting-started/quick-start/).
+gori is organized into tabs; move between them with `[` / `]` or jump with number keys. Two keys reach every action: `Space` opens the **space menu** (what you do most in the focused pane, one letter each), and `Ctrl-P` opens the **command palette** (any action, by typing its name). [Space Menu & Palette](/guide/space-menu-and-palette/) teaches both; Day-1 chords live in the [Quick Start](/getting-started/quick-start/).
 
 | Tab | Purpose |
 |-----|---------|

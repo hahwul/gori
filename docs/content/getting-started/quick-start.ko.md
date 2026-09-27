@@ -88,19 +88,24 @@ gori는 요청 시 루트로부터 호스트별 리프 인증서를 발급하므
 
 ## 3. 두 가지 탐색 표면 익히기 {#3-learn-the-two-discovery-surfaces}
 
-탭별 단축키를 외우기 전에, 거의 모든 것이 있는 두 곳을 먼저 익히세요.
+탭별 단축키를 외울 필요는 없습니다. 두 개의 키로 모든 동작에 닿습니다.
 
 | 표면 | 키 | 용도 |
 |---------|-----|----------------|
-| **커맨드 팔레트** | `Ctrl-P` | 앱 전역 제어: 설정, Open browser, Copy CA certificate path, 이동 동작 등 전역적인 모든 것 |
-| **space 메뉴** | `Space` | 지금 포커스를 가진 대상에 대한 동작(History 행, 상세 패널, Repeater, …) |
+| **space 메뉴** | `Space` | 지금 있는 패널(History 행, 플로우 상세, Repeater 편집기, …)에서 가장 자주 하는 동작, 동작마다 글자 하나 |
+| **커맨드 팔레트** | `Ctrl-P` | 모든 동작을 이름을 입력해 찾기: 그 패널의 동작이 먼저, 이어서 설정이나 **Open browser** 같은 앱 전역 동작 |
 
-팔레트는 도구 전체의 지도입니다. space 메뉴는 *이* 패널의 지도입니다. 둘 다 키 힌트를 보여주니, 키 조합이 기억나지 않으면 둘 중 하나를 여세요.
+둘 다 동작 옆에 그 단축키를 보여주므로, 열어 보는 것 자체가 키를 익히는 방법입니다. 방금 캡처한 플로우로 바로 해 보세요.
+
+1. **History**에서 `↓`로 플로우를 고른 뒤 `Space`를 누릅니다. 행 왼쪽 글자는 그 행을 실행하고, 오른쪽 키(**Repeater flow** 옆의 `^R`)는 메뉴 없이 같은 일을 합니다. `>` **Send flow to…**처럼 `›`가 붙은 행은 두 번째 카드를 열고, `Esc`는 한 단계 뒤로 갑니다. 메뉴가 닫힐 때까지 `Esc`를 누르세요.
+2. `Ctrl-P`를 누르고 `send`를 입력합니다. History의 동작이 `THIS TAB` 아래 먼저 나오고, 각각 닿는 키나 메뉴 경로가 함께 보입니다(`␣ > c`는 `Space`, `>`, `c` 순서). `Esc`를 누릅니다.
 
 <figure class="tui-shot">
-  <img src="/images/tui/command-palette.svg" alt="History 탭 위에 열린 gori 커맨드 팔레트로, 필터 상자와 함께 설정, 이동, 내보내기 동작을 나열한다">
-  <figcaption>커맨드 팔레트(<kbd>Ctrl-P</kbd>): 설정부터 <em>Open browser</em>, 탭 이동까지 앱 전역의 모든 동작을 퍼지 필터로 찾습니다.</figcaption>
+  <img src="/images/tui/command-palette.svg" alt="History 탭 위에서 send를 입력한 gori 커맨드 팔레트. THIS TAB 아래 보내기 동작이 키나 메뉴 경로와 함께 나오고, 이어서 APP 아래 일치하는 앱 명령이 나온다">
+  <figcaption>History에서 <code>send</code>를 입력한 커맨드 팔레트(<kbd>Ctrl-P</kbd>): 그 탭의 동작이 더 빠른 길과 함께 먼저 나오고, 앱 전역 명령이 뒤따릅니다.</figcaption>
 </figure>
+
+[space 메뉴와 팔레트](/ko/guide/space-menu-and-palette/)에서 `Z` **Display…**, `P` **Protocol…** 카드와 팔레트에만 있는 동작까지 자세히 다룹니다.
 
 처음부터 알아 두면 좋은 전역 토글 세 가지입니다:
 
@@ -196,15 +201,17 @@ method:POST body:password
 
 | 키 | 위치 | 동작 |
 |-----|--------|--------|
-| `Ctrl-P` | 어디서나 | 커맨드 팔레트(설정, Match & Replace, 알림, …) |
+| `Space` | 포커스된 패널 | space 메뉴: 이 패널의 동작, 동작마다 글자 하나 |
+| `Ctrl-P` | 어디서나 | 커맨드 팔레트: 아무 동작이나 이름으로 찾기 |
+| `?` | 어디서나 | Help: 전체 키 목록 |
 | `Ctrl-,` | 어디서나 | Preferences(모든 설정을 담은 하나의 모달) |
-| `Space` | 포커스된 패널 | 영역 동작 메뉴 |
 | `c` / `i` / `s` | 어디서나 | 캡처 / 인터셉트 / 스코프 렌즈 |
 | `[` `]` · `1`-`9` | 어디서나 | 탭 전환 |
 | `/` | History | 쿼리 언어 필터 |
 | `Enter` | History | 플로우 상세 열기 |
 | `Ctrl-R` | History | → Repeater |
 | `Shift-I` | History | → Fuzzer |
+| `>` | History | Send flow to…로 아무 도구에나 보내기(`>` `c` → Comparer) |
 | `Ctrl-R` | Repeater / Fuzzer | 요청 전송 / 퍼즈 실행 |
 | `Esc` | 대부분의 곳 | 한 단계 뒤로 |
 
@@ -222,15 +229,15 @@ gori wizard
 
 ## 가이드 UI 투어 {#guided-ui-tour}
 
-탭/패널 이동, 팔레트, space 메뉴, READ/INS 편집 모드를 목업 UI로 따라가는 안내입니다. 실제 프록시 세션 없이 안전하게 실행할 수 있습니다. 각 레슨은 짧은 데모를 보여주고 실제 키를 눌러 보도록 요청하며, 마지막 단계는 네 가지 동작 모두를 직접 해보는 실습 샌드박스와 첫 세션 체크리스트입니다.
+탭/패널 이동, space 메뉴(두 번째 카드 포함), 커맨드 팔레트 검색, READ/INS 편집 모드를 목업 UI로 따라가는 안내입니다. 실제 프록시 세션 없이 안전하게 실행할 수 있습니다. 각 레슨은 짧은 데모를 보여주고 실제 키를 눌러 보도록 요청하며, 마지막 단계는 네 가지 동작 모두를 직접 해보는 실습 샌드박스와 첫 세션 체크리스트입니다. 목업 메뉴는 재지정한 키를 포함해 설치된 gori와 같은 글자와 키를 씁니다.
 
 ```bash
 gori tutorial
 ```
 
 <figure class="tui-shot">
-  <img src="/images/tui/tutorial.svg" alt="탭과 패널, 커맨드 팔레트, 동작 메뉴, 편집 모드라는 네 가지 핵심 동작을 설명하는 gori 가이드 투어 환영 카드">
-  <figcaption>가이드 투어는 탭과 패널, 팔레트, space 메뉴, 그리고 READ / INS 편집 모드를 안내합니다. 각 키를 눌러 본 뒤, 안전한 샌드박스에서 네 가지를 모두 연습하세요.</figcaption>
+  <img src="/images/tui/tutorial.svg" alt="탭과 패널, 동작 메뉴, 커맨드 팔레트, 편집 모드라는 네 가지 핵심 동작을 설명하는 gori 가이드 투어 환영 카드">
+  <figcaption>가이드 투어는 탭과 패널, space 메뉴, 팔레트, 그리고 READ / INS 편집 모드를 안내합니다. 각 키를 눌러 본 뒤, 안전한 샌드박스에서 네 가지를 모두 연습하세요.</figcaption>
 </figure>
 
 이 투어는 첫 실행 마법사의 마지막에도 제안되며, 세션 안에서는 팔레트 명령 **Guided tour**(`Ctrl-P`)로 열 수 있습니다. 마지막 카드에는 투어를 마치면 프로젝트 선택 화면, `--db` 세션, 셸, 현재 세션 중 어디로 이어지는지 안내합니다.
@@ -241,4 +248,5 @@ gori tutorial
 - [Proxy & History](/ko/guide/proxy/): 캡처, 인터셉트, 스코프, 가져오기, match & replace
 - [Repeater & Fuzzer](/ko/guide/repeater-and-fuzzer/): 테스트 워크벤치와 env 토큰
 - [Query Language](/ko/reference/query-language/): 전체 필터 문법
+- [space 메뉴와 팔레트](/ko/guide/space-menu-and-palette/): 키를 외우지 않고 모든 동작 찾기
 - [Hotkeys](/ko/guide/hotkeys/): 위의 키 조합을 원하는 대로 재지정

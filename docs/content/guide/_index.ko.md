@@ -10,7 +10,7 @@ gori가 처음이라면 [Quick Start](/ko/getting-started/quick-start/)부터 �
 
 ## 인터페이스 한눈에 보기 {#the-interface-at-a-glance}
 
-gori는 탭으로 구성됩니다. `[` / `]`로 탭 사이를 이동하거나 숫자 키로 바로 점프합니다. 거의 모든 기능은 두 개의 탐색 표면으로 접근합니다. `Ctrl-P`는 **커맨드 팔레트**(앱 전역)를 열고, `Space`는 **space 메뉴**(포커스된 패널의 동작)를 엽니다. 첫날에 익힐 키 조합은 [Quick Start](/ko/getting-started/quick-start/)에 있습니다.
+gori는 탭으로 구성됩니다. `[` / `]`로 탭 사이를 이동하거나 숫자 키로 바로 점프합니다. 두 개의 키로 모든 동작에 닿습니다. `Space`는 **space 메뉴**(포커스된 패널에서 가장 자주 하는 동작, 동작마다 글자 하나)를 열고, `Ctrl-P`는 **커맨드 팔레트**(아무 동작이나 이름으로 찾기)를 엽니다. 둘 다 [space 메뉴와 팔레트](/ko/guide/space-menu-and-palette/)에서 익힐 수 있고, 첫날에 익힐 키 조합은 [Quick Start](/ko/getting-started/quick-start/)에 있습니다.
 
 | 탭 | 용도 |
 |-----|---------|
