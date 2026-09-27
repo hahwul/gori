@@ -16,7 +16,6 @@
 #
 # Build: crystal build bench/mark_search_bench.cr -o bin/mark_search_bench --release
 # Run:   bin/mark_search_bench
-require "benchmark"
 require "../src/gori"
 
 include Gori::Tui
@@ -96,22 +95,45 @@ puts "no-match scan (one byte_index pass, no cursor built — should be flat per
 end
 
 # A VIEWPORT of wrapped rows over one long line, the shape every read pane draws when a
-# minified body is on screen with a live ^F. `mark_search` needs the downcased line to match
-# in; without `lower:` each drawn row downcases the whole logical line again, so the pane paid
-# for one `downcase` of an 800k line PER ROW per frame. `ReadPane` hoists it beside the line
-# it caches per logical line; the History detail and the Repeater response panes do the same
-# now, and this is the difference that hoist buys.
-ROWS_PER_FRAME = 40
+# minified body is on screen with a live ^F — and the TUI shares its scheduler with the
+# proxy, so a slow frame here is a capture stall (P6). The whole-line work (downcase, match
+# walk, ASCII verdicts, char↔byte bookkeeping, the grapheme walk up to the row) used to be
+# redone per DRAWN row: 60-150 ms a frame on a 1.6 MB ASCII line, ~1.5 s once a single
+# non-ASCII char sent the column cursor down its grapheme walk from the head. A pane's
+# `Wrap::SearchMemo` keeps it across rows and frames; a row is then a binary search.
+ROWS_PER_FRAME =  40
+FW             = 150
+fscreen = Screen.new(SinkBackend.new(FW, ROWS_PER_FRAME))
+
+body = String.build do |io|
+  12_000.times do |i|
+    io << %({"id":#{i},"name":"user#{i}","email":"u#{i}@example.com","tags":["a","b","0.123"],)
+    io << %("nested":{"x":#{i * 2},"y":[1,2,3],"z":null,"ok":true}},)
+  end
+end
+
+def frame(screen : Screen, line : String, start : Int32, q : String, memo : Wrap::SearchMemo?) : Nil
+  ROWS_PER_FRAME.times do |r|
+    a = start + r * FW
+    Wrap.mark_search(screen, 0, r, line, a, a + FW, q, FW, memo: memo)
+  end
+end
 
 puts
-puts "one wrapped 800k-char line, #{ROWS_PER_FRAME} drawn rows per frame, query 'ab'"
-big = "ab" * 400_000
-lower = big.downcase
-Benchmark.ips do |x|
-  x.report("downcase per row (no lower:)") do
-    ROWS_PER_FRAME.times { |i| Wrap.mark_search(screen, 0, 0, big, i * W, (i + 1) * W, "ab", W) }
-  end
-  x.report("downcase once per line (lower:)") do
-    ROWS_PER_FRAME.times { |i| Wrap.mark_search(screen, 0, 0, big, i * W, (i + 1) * W, "ab", W, lower: lower) }
+puts "one wrapped #{body.bytesize // 1024} KB line, #{ROWS_PER_FRAME} rows of #{FW} per frame (ms/frame)"
+puts "  line          query  rows at      per-row scan   memo, cold   memo, warm"
+{"ASCII" => body, "one é" => body.sub("user5", "usér5")}.each do |label, line|
+  {"user", "zzz"}.each do |q|
+    {0, line.size // 2, line.size - ROWS_PER_FRAME * FW}.each do |start|
+      # No memo builds the whole-line scan per call — the order of work every row did
+      # before the memo, which is the cost it takes off the frame.
+      slow = timed(1) { frame(fscreen, line, start, q, nil) }
+      memo = Wrap::SearchMemo.new
+      t0 = Time.instant
+      frame(fscreen, line, start, q, memo)
+      cold = (Time.instant - t0).total_milliseconds
+      warm = timed(REPS) { frame(fscreen, line, start, q, memo) }
+      printf("  %-12s  %-5s  %-12d %10.2f   %10.2f   %10.4f\n", label, q, start, slow, cold, warm)
+    end
   end
 end

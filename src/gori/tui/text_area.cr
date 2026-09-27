@@ -86,11 +86,12 @@ module Gori::Tui
       @styled_kind = nil.as(Symbol?)
       @styled_rev = Theme.revision
       @styled_env_rev = Env.highlight_rev
-      @gutter = false          # left line-number gutter (on for the Repeater request body)
-      @search_hl = ""          # active ^F query → matches highlighted in render
-      @reveal = false          # show whitespace (space ·, tab →) instead of syntax colours
-      @edits = 0               # monotonic content-change counter — cheap cache key for owners
-      @lc_lines = [] of String # downcased lines for ^F search, memoized on @edits
+      @gutter = false                     # left line-number gutter (on for the Repeater request body)
+      @search_hl = ""                     # active ^F query → matches highlighted in render
+      @search_memo = Wrap::SearchMemo.new # that query's whole-line scans, kept across frames
+      @reveal = false                     # show whitespace (space ·, tab →) instead of syntax colours
+      @edits = 0                          # monotonic content-change counter — cheap cache key for owners
+      @lc_lines = [] of String            # downcased lines for ^F search, memoized on @edits
       @lc_lines_rev = -1
       # Opt-in background tints: [start, end) FULL-buffer char offsets + colour, painted
       # UNDER the text (over syntax/plain, beneath search + cursor). Empty for every editor
@@ -1406,6 +1407,7 @@ module Gori::Tui
         ensure_visible_x(cw) # slide @xscroll so the caret stays on screen (no-op unless follow_x?)
       end
       styled = highlight ? highlighted(highlight) : nil
+      @search_memo.clear if @search_hl.empty?
       rows = visible_rows(cw, rect.h)
       @last_rows = rows
       # The visual row the caret lives on, decided ONCE by Wrap::Layout#row_of — the same
@@ -1506,7 +1508,7 @@ module Gori::Tui
           # constant (the two editors with conceal both wrapped); the Display preference can
           # now send them down this path.
           Wrap.mark_search(screen, cx0, rect.y + i, line, a, b, @search_hl, cx0 + cw, cr,
-            xoff: @xscroll, reveal: @reveal)
+            xoff: @xscroll, memo: @search_memo, reveal: @reveal)
         end
         # The INS selection tint, over the text and the search marks, under the caret —
         # the same stacking (and the same `Theme.accent_bg`) the READ-mode over-painter

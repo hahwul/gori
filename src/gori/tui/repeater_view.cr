@@ -189,6 +189,7 @@ module Gori::Tui
       # One-entry memo for the PLAIN text of a response line — see `resp_line_text`.
       @resp_text_i = -1
       @resp_text = ""
+      @resp_search_memo = Wrap::SearchMemo.new # ^F whole-line scans of the response pane
       # Gutter + content width from the LAST render of whichever response pane is active.
       # Hit-testing and the scroll walkers read these rather than re-deriving them, because
       # the per-mode line counts the gutter is sized from are not all the same

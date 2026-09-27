@@ -287,6 +287,7 @@ module Gori::Tui
       # One-entry memo for the PLAIN text of a detail line — see `detail_line_text`.
       @detail_text_i = -1
       @detail_text = ""
+      @detail_search_memo = Wrap::SearchMemo.new # ^F whole-line scans of the detail body
       @detail_pane = initial_detail_pane
       @detail_focus = :strip                 # :strip (chip row) | :body (caret/text) — two-level detail focus
       @search_hl = ""                        # active ^F query → highlight in the detail body
@@ -3713,11 +3714,11 @@ module Gori::Tui
       # describes both and the colours cannot land a column off the glyphs.
       rows = detail_rows(cw, body.h, total, ->(i : Int32) { detail_line_text(dv, i) })
       xs = detail_xscroll
-      # The search band scans a DOWNCASED copy of the whole logical line, and under wrap one
-      # minified body line can fill the viewport — so the copy is made once per logical line
-      # here, not once per drawn row (the `ReadPane` hoist; `mark_search`'s `lower:`).
+      # The search band scans the whole logical line, and under wrap one minified body line
+      # can fill the viewport — so the scan is kept per pane across rows and frames
+      # (`Wrap::SearchMemo`), not redone per drawn row.
       searching = !@search_hl.empty?
-      lower = Wrap::LowerMemo.new
+      @detail_search_memo.clear unless searching
       rows.each_with_index do |vr, i|
         li = vr.li
         y = body.y + i
@@ -3731,7 +3732,7 @@ module Gori::Tui
         # The plain-text line feeds ONLY the search overlay, so skip it when no query is
         # active (else every frame builds/scans discarded strings per row).
         if (text = plain) && searching
-          Wrap.mark_search(screen, body.x + gw, y, text, vr.a, vr.b, @search_hl, body.x + gw + cw, xoff: xs, lower: lower.for(li, text))
+          Wrap.mark_search(screen, body.x + gw, y, text, vr.a, vr.b, @search_hl, body.x + gw + cw, xoff: xs, memo: @detail_search_memo)
         end
       end
       # The detail body scrolls (`@detail_scroll`) and had no gauge, while the Repeater's
@@ -3766,7 +3767,7 @@ module Gori::Tui
       rows = detail_rows(cw, body.h, total, ->(i : Int32) { lines[i] })
       xs = detail_xscroll
       searching = !@search_hl.empty?
-      lower = Wrap::LowerMemo.new
+      @detail_search_memo.clear unless searching
       rows.each_with_index do |vr, i|
         y = body.y + i
         line = lines[vr.li]
@@ -3781,7 +3782,7 @@ module Gori::Tui
           reveal: true)
         next unless searching
         Wrap.mark_search(screen, body.x + gw, y, line, vr.a, vr.b, @search_hl, body.x + gw + cw,
-          xoff: xs, lower: lower.for(vr.li, line), reveal: true)
+          xoff: xs, memo: @detail_search_memo, reveal: true)
       end
     end
 

@@ -80,6 +80,7 @@ module Gori::Tui
     # the band from one place — the hand-rolled `Wrap.mark_search` call sites this component
     # was extracted from are exactly the drift that argument is about.
     @search_hl = ""
+    @search_memo = Wrap::SearchMemo.new
 
     # `gutter` draws 1-based line numbers (`Gutter`), like the Decoder OUTPUT and the Repeater
     # panes; a pane whose rows are not source lines (the Comparer's diff rows, a field list)
@@ -482,10 +483,9 @@ module Gori::Tui
       # case wrap exists to display.
       cached_li = -1
       cached_line = ""
-      # Hoisted beside the line for the same reason the line itself is: `mark_search` scans a
-      # downcased copy of the WHOLE logical line, so computing it inside the row loop would
-      # downcase a viewport-filling line once per drawn row. Built only while a query is live.
-      cached_lower = ""
+      # `mark_search` scans the WHOLE logical line; the pane's memo keeps that scan across the
+      # rows and frames that draw the same line (see `Wrap::SearchMemo`).
+      @search_memo.clear if @search_hl.empty?
       # …and the STYLED line, which had been left out of that rule even though it is the more
       # expensive of the two providers: `styled_at` tokenises the line where `line_at` only
       # materialises it, and `draw_row` was calling it once per DRAWN ROW. A wrapped 4 KB JSON
@@ -497,7 +497,6 @@ module Gori::Tui
         if vr.li != cached_li
           cached_li = vr.li
           cached_line = @line_at.call(vr.li)
-          cached_lower = @search_hl.empty? ? "" : cached_line.downcase
           cached_styled = styled_at.try(&.call(vr.li))
         end
         draw_row(screen, rect, rect.y + i, vr, cached_line, gw, cw, focused, cached_styled, fg, bg)
@@ -506,7 +505,7 @@ module Gori::Tui
         # match the ^F prompt just jumped to still shows where the cursor sits inside it.
         unless @search_hl.empty?
           Wrap.mark_search(screen, rect.x + gw, rect.y + i, cached_line, vr.a, vr.b,
-            @search_hl, rect.x + gw + cw, xoff: @xscroll, lower: cached_lower)
+            @search_hl, rect.x + gw + cw, xoff: @xscroll, memo: @search_memo)
         end
         paint_chrome(screen, rect.x + gw, rect.y + i, vr, cached_line, spans, focused, cw)
       end
