@@ -327,16 +327,15 @@ module Gori
       # catches exactly this), and copying just the `.db` loses the tail. gori's close path
       # depends on the pool closing every connection to get SQLite's last-connection
       # checkpoint, and that only holds at 1. Raise this only with that fixed first.
-      # MEASURED, so nobody re-proposes it: a COVERING INDEX over every column `SELECT_ROW`
-      # reads was tried on top of this and reverted. It is genuinely used (EXPLAIN QUERY PLAN
-      # says `SCAN flows USING COVERING INDEX`), but on the worst case it exists for — a filter
-      # matching almost nothing, so SQLite cannot stop early — it bought 7.5 ms -> 6.5 ms at
-      # 100k rows with 8 KB bodies, for 3% off sustained INSERT throughput and ~20 MB per 100k
-      # rows. The reason it pays so little is the line below: with a 64 MiB page cache the
-      # table pages are already resident, so the overflow-chain traversal the index was meant
-      # to avoid is not what the query was spending its time on. The two genuinely slow filters
-      # (`header:` 164 ms, `body:` LIKE 452 ms) scan the BLOBs themselves and no projection
-      # index can touch them.
+      # The COVERING INDEX over every column `SELECT_ROW` reads (`idx_flows_list`, schema V37)
+      # was tried once on top of this (#665) and reverted: with 8 KB bodies it bought
+      # 7.5 ms -> 6.5 ms at 100k rows, because every row fit its leaf page and this cache held
+      # them. That measurement was the wrong corpus, not the wrong idea. With realistic MB
+      # bodies (200k flows / 6.5 GB, 2% of 0.5–2 MB) the leaf pages scatter between overflow
+      # pages across the whole file, no cache holds them, and every column after the BLOBs is
+      # an overflow-chain walk — `host:` with no match took 121 ms, `src:repeater` 1061 ms;
+      # the index answers both in under 10 ms (V37 has the numbers). The filters that scan the
+      # BLOBs themselves (`header:`, index-free `body:`, `body~`) are still out of its reach.
       #
       # `max_pool_size` is bounded BECAUSE of `cache_size`: crystal-db's default is unlimited,
       # and 64 MiB is a per-CONNECTION ceiling, so N concurrent readers (the TUI render fiber,

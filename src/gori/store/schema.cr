@@ -1530,6 +1530,30 @@ module Gori
         "CREATE INDEX idx_flows_pending ON flows (id) WHERE state = 0 AND unsent = 0",
       ]
 
+      # V37 — the History list, answered without touching a `flows` row. Every column
+      # `Store::SELECT_ROW` reads, plus every non-BLOB column a QL term filters on
+      # (`static_asset`), so a list page and a QL filter over the projection are one scan of
+      # this index. `id` LEADS, so the index is in rowid order and `ORDER BY id DESC LIMIT n`
+      # still stops after n matches instead of sorting.
+      #
+      # Round 1 tried this shape and measured nothing worth keeping (see the note in
+      # `Store.open`): with 8 KB bodies every row fit its leaf page and the 64 MiB cache held
+      # them. Real captures carry MB bodies, and then the leaf pages are spread through the
+      # whole file between overflow pages, and every column stored after the BLOBs (`status`
+      # onwards) is an overflow-chain walk. At 200k flows / 6.5 GB, 2% with 0.5–2 MB bodies:
+      # `host:` with no match 121 -> 9.4 ms, `src:repeater` 1061 -> 7.3 ms, `respsize:>1.5M`
+      # 252 -> 1.9 ms. ~121 B per flow on disk, ~1.3% more instructions per captured flow.
+      #
+      # A column added to `SELECT_ROW` or read by a new QL term belongs HERE too (a new
+      # version recreating the index), or every list read falls back to the table:
+      # `spec/store/list_index_spec.cr` pins the plans so that fails loudly.
+      V37 = [
+        "CREATE INDEX idx_flows_list ON flows (id, created_at, scheme, method, host, port, target, " \
+        "status, request_size, response_size, state, duration_us, content_type, short_circuited, " \
+        "advisory, request_content_type, connect_protocol, source, source_surface, source_ref, " \
+        "static_asset)",
+      ]
+
       # Data statements that call gori's OWN SQL functions, run by `migrate!` right after the
       # version they complete. Kept out of MIGRATIONS because that list is plain schema that a
       # bare connection can replay (specs build every historical shape that way), and a bare
@@ -1552,7 +1576,7 @@ module Gori
 
       MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17,
                     V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29, V30, V31, V32, V33,
-                    V34, V35, V36]
+                    V34, V35, V36, V37]
 
       def self.migrate!(db : DB::Database, read_only : Bool = false) : Nil
         db.using_connection do |conn|
