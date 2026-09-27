@@ -70,6 +70,7 @@ describe Gori::MCP::Server do
           r = tools.call(tool, JSON.parse(%({"repeater_ids":[#{a},#{b}]})))
           r.is_error.should be_true
           r.error_code.should eq("SCOPE_BLOCKED")
+          r.text.should contain("member 2 (/internal/delete-all)")
         end
         select
         when line = seen.receive

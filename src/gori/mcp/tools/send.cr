@@ -612,7 +612,7 @@ module Gori
         plan.requests.each_with_index do |req, i|
           next if i == 0
           member = ob.check(request_scope_url(plan, req), plan.host, request_exclude_url(plan, req))
-          return scope_blocked(member) if member.blocked?
+          return scope_blocked(member, "member #{i + 1} (#{request_target(req)})") if member.blocked?
         end
         if reason = plan.refusal
           return sandbox_blocked(reason, plan.host, "url")
@@ -1737,8 +1737,17 @@ module Gori
       # A refusal to send an active request outside (or without) scope.
       # SCOPE_BLOCKED is not retryable — the caller must add a scope include rule
       # or pass allow_unscoped:true.
-      private def scope_blocked(sc : ScopeCheck) : Result
-        reason = sc.unscoped? ? "no scope is configured for this project, so active requests are refused by default" : "target host #{sc.host} is outside the project's configured scope"
+      # `what` names the request when it is not the first of a group: a path rule can refuse a
+      # later race/timing member on a host the first one was allowed, and "target host is outside
+      # the scope" would send the agent to add a host include that changes nothing.
+      private def scope_blocked(sc : ScopeCheck, what : String? = nil) : Result
+        reason = if sc.unscoped?
+                   "no scope is configured for this project, so active requests are refused by default"
+                 elsif what
+                   "#{what} on #{sc.host} is outside the project's configured scope"
+                 else
+                   "target host #{sc.host} is outside the project's configured scope"
+                 end
         err("#{reason}; #{Outbound.remedy(sc, "allow_unscoped:true")}",
           "SCOPE_BLOCKED", field: "url",
           details: JSON.parse({"scope_decision" => sc.decision, "host" => sc.host}.to_json))
