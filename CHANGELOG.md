@@ -2,10 +2,10 @@
 
 ## Unreleased
 
-- TUI: a paste while the space menu, Copy as… or Send selection to… is open is ignored instead of running as keys, where a pasted `zc` could close the menu and stop capture (#1341)
-- History: after a clear, a new HTTP/2 connection's raw frame log no longer mixes in the frames of a connection the browser kept open (#1341)
-- Import: OpenAPI operations honor their path item's or their own `servers`, so a multi-host document from gori's OpenAPI export re-imports against the right hosts, and percent-encoded `$ref` pointers such as `#/paths/~1users~1%7Bid%7D` resolve (#1341)
-- Redaction: a profile pattern whose capture group sits in a lookahead no longer writes the secret back out after its placeholder (#1341)
+- TUI: a paste while the space menu, Copy as… or Send selection to… is open is ignored instead of running as keys, where a pasted `zc` could close the menu and stop capture (#1342)
+- History: after a clear, a new HTTP/2 connection's raw frame log no longer mixes in the frames of a connection the browser kept open (#1342)
+- Import: OpenAPI operations honor their path item's or their own `servers`, so a multi-host document from gori's OpenAPI export re-imports against the right hosts, and percent-encoded `$ref` pointers such as `#/paths/~1users~1%7Bid%7D` resolve (#1342)
+- Redaction: a profile pattern whose capture group sits in a lookahead no longer writes the secret back out after its placeholder (#1342)
 - Network: HTTPS interception mints a new host's certificate context in ~0.1 ms instead of ~3.7 ms and ~1 MB less memory (it no longer loads the system CA bundle into each), caches up to 1024 of them, and upstream DNS answers are reused for 10 seconds, so an `/etc/hosts` edit or a rebinding record can take that long to be seen (#1340)
 - Performance: capture stalls less on SQLite checkpoints, an idle gori hands its freed memory back to the OS, and idle keep-alive connections and large captured bodies hold far less memory (#1340)
 - History/MCP: filters that match few rows (`host:`, `path:`, `src:`, `status:2xx`, size ranges) and Sitemap listings answer from covering indexes on large projects, e.g. `src:repeater` 1 s → 7 ms and a `list_sitemap` page 1.2 s → 0.2 ms, and `body~` regex filters run about twice as fast; the first open after upgrading builds the indexes once, which takes a few seconds on a multi-GB project (#1340)
@@ -72,10 +72,10 @@
 - Proxy: `text/event-streaming` and other media types that only share the SSE prefix are treated as ordinary bodies, so response rules still apply (#1220)
 - Proxy: host-scoped body rules no longer buffer unrelated request and response bodies before streaming them (#1219)
 - MCP: `list_history` flags stale `since` cursors even when History is empty, so clients can reset after a clear (#1199)
-- TUI: History refreshes path and colour data after a peer clears or deletes flows, including when returning to the tab, and no longer carries a mark or the preview over to a new flow that reuses a cleared flow's id, where a batch Delete would have destroyed it (#1202, #1341)
+- TUI: History refreshes path and colour data after a peer clears or deletes flows, including when returning to the tab, and no longer carries a mark or the preview over to a new flow that reuses a cleared flow's id, where a batch Delete would have destroyed it (#1202, #1342)
 - History: deleted flows detach retest and frozen-evidence links, and MCP fuzz results omit stale flow IDs before reuse (#1208, #1212)
 - Proxy: malformed response status lines use explicit body framing and retire the origin connection (#1207)
-- HTTP/2: refuse duplicate pseudo-headers and conflicting `:authority`/`host` fields under the sandbox, and check a stream that names another port than its tunnel's against the tunnel's own port too, so a port-scoped exclude cannot be walked around (#1210, #1341)
+- HTTP/2: refuse duplicate pseudo-headers and conflicting `:authority`/`host` fields under the sandbox, and check a stream that names another port than its tunnel's against the tunnel's own port too, so a port-scoped exclude cannot be walked around (#1210, #1342)
 - Proxy: reject incomplete upstream CONNECT replies and keep the failure reason on the CONNECT flow (#1211)
 - Proxy: reject nonnumeric CONNECT ports with a recorded 400 instead of defaulting to 443 (#1213)
 - Proxy: frame lowercase extension methods by their response headers instead of treating them as HEAD or CONNECT (#1214)
