@@ -11,16 +11,33 @@ module Gori
   # (`AgentPresence::Entry#pid` for a kind-`mcp` entry) — the one thing the TUI can name and
   # the one thing the courier inside that process knows about itself. Not the agent's own
   # pid: the TUI never sees it, and it differs per client.
+  #
+  # A message that CLOSES an `ask_operator` question (#1324) carries `in_reply_to` (the
+  # question's feed id), `outcome` (`AgentQuestion::OUTCOMES`) and the question's own line, so
+  # every route that carries a message frames it as the answer it is — the socket and the
+  # tool-result carry see only this row, never the question. `text` is then the chosen label,
+  # or a placeholder for a dismissal or an expiry.
   record AgentMessage, id : Int64, text : String, target : String, from_tab : String?,
-    flow_ids : Array(Int64), created_at : Int64 do
-    def self.payload_json(target : String, from_tab : String?, flow_ids : Array(Int64)) : String
+    flow_ids : Array(Int64), created_at : Int64, in_reply_to : Int64? = nil,
+    outcome : String? = nil, question : String? = nil do
+    def self.payload_json(target : String, from_tab : String?, flow_ids : Array(Int64),
+                          in_reply_to : Int64? = nil, outcome : String? = nil,
+                          question : String? = nil) : String
       JSON.build do |j|
         j.object do
           j.field "target", target
           j.field "from_tab", from_tab if from_tab
           j.field("flow_ids") { j.array { flow_ids.each { |id| j.number(id) } } } unless flow_ids.empty?
+          j.field "in_reply_to", in_reply_to if in_reply_to
+          j.field "outcome", outcome if outcome
+          j.field "question", question if question
         end
       end
+    end
+
+    # Does this message close a question rather than say something new?
+    def answer? : Bool
+      !in_reply_to.nil?
     end
 
     # A feed row → a message, or nil when the payload does not parse as one (a hand-written
@@ -31,7 +48,8 @@ module Gori
       return nil unless h
       target = h["target"]?.try(&.as_s?) || return nil
       ids = h["flow_ids"]?.try(&.as_a?).try(&.compact_map(&.as_i64?)) || [] of Int64
-      new(row.id, row.message, target, h["from_tab"]?.try(&.as_s?), ids, row.created_at)
+      new(row.id, row.message, target, h["from_tab"]?.try(&.as_s?), ids, row.created_at,
+        h["in_reply_to"]?.try(&.as_i64?), h["outcome"]?.try(&.as_s?), h["question"]?.try(&.as_s?))
     rescue JSON::ParseException
       nil
     end
@@ -92,10 +110,18 @@ module Gori
   # The agent's answer to the operator (#1090): one line for the ring and Miss Ring's bubble,
   # an optional long form the ring opens on ↵. `source: "agent"`, `kind: "agent_reply"`,
   # `actor: "mcp"` — the same row shape the agent's other actions already leave in the feed.
+  #
+  # The KIND means "addressed to the operator", and `source` says who is speaking: a script's
+  # `gori run notify` (#1323) writes the same kind under `source: "script"`, `actor: "cli"`, so
+  # one drain and one watermark (#1322) serve both, and the ring's `ai` marker — which reads the
+  # source — never claims a shell loop is an agent.
   record AgentReply, id : Int64, summary : String, detail : String?, level : String,
-    target_label : String, pid : Int64, in_reply_to : Int64?, created_at : Int64 do
-    KIND   = "agent_reply"
-    LEVELS = %w[info success warn error]
+    target_label : String, pid : Int64, in_reply_to : Int64?, created_at : Int64,
+    source : String = SOURCE_AGENT do
+    KIND          = "agent_reply"
+    SOURCE_AGENT  = "agent"
+    SOURCE_SCRIPT = "script"
+    LEVELS        = %w[info success warn error]
     # A summary is ONE line for a one-row ring; a detail is bounded like any stored blob.
     SUMMARY_MAX = 200
     DETAIL_MAX  = 32 * 1024
@@ -105,9 +131,18 @@ module Gori
       h = row.payload.try { |p| JSON.parse(p).as_h? } || {} of String => JSON::Any
       new(row.id, row.message, h["detail"]?.try(&.as_s?), row.level,
         h["target"]?.try(&.as_s?) || "agent", h["pid"]?.try(&.as_i64?) || 0_i64,
-        h["in_reply_to"]?.try(&.as_i64?), row.created_at)
+        h["in_reply_to"]?.try(&.as_i64?), row.created_at, row.source)
     rescue JSON::ParseException
       nil
+    end
+
+    # A detail cut to `DETAIL_MAX` on a character boundary, with a trailing marker saying so.
+    # One home for the cut, shared by replies and `ask_operator` questions (#1324).
+    def self.cap_detail(detail : String?) : String?
+      d = detail
+      return d unless d && d.bytesize > DETAIL_MAX
+      # `scrub` turns a split sequence into U+FFFD, dropped.
+      String.new(d.to_slice[0, DETAIL_MAX]).scrub.rchop('\uFFFD') + "\n… (cut)"
     end
 
     # The first line of what the agent sent, capped — the rest belongs in `detail`.
@@ -159,11 +194,23 @@ module Gori
     # to `DETAIL_MAX` on a character boundary (the row says so with a trailing marker).
     def record_agent_reply(summary : String, detail : String?, level : String, target : String,
                            pid : Int64, in_reply_to : Int64? = nil) : Int64
+      level, payload = reply_row(detail, level, target, pid, in_reply_to)
+      insert_event("agent", AgentReply::KIND, level, AgentReply.summary_line(summary), payload: payload, actor: "mcp")
+    end
+
+    # A script's line for the operator (`gori run notify`, #1323): the reply's row shape under
+    # its own source, so the ring shows it without the `ai` marker. `target` names the sender
+    # the way a ring row reads it (`gori run pid 4242`).
+    def record_script_notice(summary : String, detail : String?, level : String, target : String,
+                             pid : Int64) : Int64
+      level, payload = reply_row(detail, level, target, pid, nil)
+      insert_event("script", AgentReply::KIND, level, AgentReply.summary_line(summary), payload: payload, actor: "cli")
+    end
+
+    private def reply_row(detail : String?, level : String, target : String, pid : Int64,
+                          in_reply_to : Int64?) : {String, String}
       level = AgentReply::LEVELS.includes?(level) ? level : "info"
-      if (d = detail) && d.bytesize > AgentReply::DETAIL_MAX
-        # Cut on a character boundary: `scrub` turns a split sequence into U+FFFD, dropped.
-        detail = String.new(d.to_slice[0, AgentReply::DETAIL_MAX]).scrub.rchop('\uFFFD') + "\n… (cut)"
-      end
+      detail = AgentReply.cap_detail(detail)
       payload = JSON.build do |j|
         j.object do
           j.field "target", target
@@ -172,7 +219,7 @@ module Gori
           j.field "in_reply_to", in_reply_to if in_reply_to
         end
       end
-      insert_event("agent", AgentReply::KIND, level, AgentReply.summary_line(summary), payload: payload, actor: "mcp")
+      {level, payload}
     end
 
     record ReplyPage, rows : Array(AgentReply), scanned_max : Int64, full : Bool
@@ -183,6 +230,63 @@ module Gori
         AgentReply.from_row(row).try { |r| rows << r }
       end
       ReplyPage.new(rows, scanned, full)
+    end
+
+    # The NEWEST `limit` replies in `(after_id, upto_id]`, oldest first. The away summary lists
+    # a page of what landed, and when there are more than a page the ones to show are the
+    # latest: an agent's last word on a task supersedes its first.
+    def agent_replies_between(after_id : Int64, upto_id : Int64, limit : Int32) : Array(AgentReply)
+      rows = [] of AgentReply
+      return rows if upto_id <= after_id
+      @db.query("SELECT #{EVENT_COLS} FROM events WHERE id > ? AND id <= ? AND kind = ? ORDER BY id DESC LIMIT ?",
+        args: [after_id, upto_id, AgentReply::KIND, limit.to_i64] of DB::Any) do |rs|
+        rs.each { AgentReply.from_row(read_event(rs)).try { |r| rows << r } }
+      end
+      rows.reverse!
+    end
+
+    # How many replies landed in `(after_id, upto_id]`. The count behind "sent 7 replies while
+    # you were away", which has to be the real number even when the note lists only a page.
+    def agent_reply_count_between(after_id : Int64, upto_id : Int64) : Int32
+      return 0 if upto_id <= after_id
+      @db.scalar("SELECT COUNT(*) FROM events WHERE id > ? AND id <= ? AND kind = ?",
+        after_id, upto_id, AgentReply::KIND).as(Int64).to_i32
+    end
+
+    # The last feed id whose replies a TUI window has shown the operator (#1322): the ring
+    # announced them while it was open, and the window then closed or had its ring opened.
+    # A reply past it was written while nobody was watching, and the next window to open says
+    # so once. In the PROJECT, not settings.json: two projects are two feeds.
+    #
+    # nil for a project no window has ever recorded one on, which is every project that
+    # predates this key — and a project an agent created and replied into before the operator
+    # first opened it, which is the case the watermark exists for. The caller reads nil as "the
+    # last day" (`first_event_id_since`), so an upgrade does not replay a project's history.
+    AGENT_REPLY_SEEN_KEY = "agent_reply_seen"
+
+    # The first feed id written at or after `created_at_us` (unix micros), or nil when none
+    # was. Where the away summary starts on a project with no watermark yet: it bounds "while
+    # you were away" to a recent window instead of the project's whole history.
+    def first_event_id_since(created_at_us : Int64) : Int64?
+      @db.scalar("SELECT MIN(id) FROM events WHERE created_at >= ?", created_at_us).as(Int64?)
+    end
+
+    def agent_reply_seen : Int64?
+      setting(AGENT_REPLY_SEEN_KEY).try(&.to_i64?)
+    end
+
+    # Move the watermark to `id`, never back. Two windows on one project close in either
+    # order, and the one that opened first holds the lower cursor: a plain overwrite would
+    # hand the second window's replies back to the next open as unseen. The comparison is in
+    # the statement, so a peer's write that lands between a read and this one cannot undo it.
+    def mark_agent_replies_seen(id : Int64) : Bool
+      return false if read_only?
+      exec_task_ok ->(c : DB::Connection) {
+        c.exec("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = " \
+               "CASE WHEN CAST(value AS INTEGER) >= CAST(excluded.value AS INTEGER) THEN value ELSE excluded.value END",
+          AGENT_REPLY_SEEN_KEY, id.to_s)
+        nil
+      }
     end
 
     # One page of the kind-filtered feed. `scanned_max` is the id of the LAST ROW THE SQL PAGE

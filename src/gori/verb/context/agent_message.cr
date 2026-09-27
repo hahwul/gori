@@ -11,6 +11,11 @@ module Gori
       # verb that stopped after the picker would be an intent nobody means on its own — the
       # same reason `link_attach` is one intent over a picker that can also create.
       abstract def tell_agent : Nil
+
+      # "Answer the agent…" (#1324) — the oldest `ask_operator` question an attached agent is
+      # waiting on, on its answer card. Global for tell_agent's reason: the question belongs
+      # to the session, not to whichever tab the operator happens to be on.
+      abstract def answer_agent_question : Nil
     end
   end
 end

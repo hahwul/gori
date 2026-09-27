@@ -35,3 +35,74 @@ describe Gori::Store, "#1090 agent replies" do
     end
   end
 end
+
+# #1322: the per-project "last reply a window showed" watermark, and the two reads the away
+# note is built from.
+describe Gori::Store, "#1322 agent reply watermark" do
+  it "is nil until a window records one, then only moves forward" do
+    with_store do |store|
+      store.agent_reply_seen.should be_nil
+      store.mark_agent_replies_seen(10_i64).should be_true
+      store.agent_reply_seen.should eq(10)
+      # A window that opened earlier closes later with a lower cursor: it must not hand the
+      # replies between back to the next open as unseen.
+      store.mark_agent_replies_seen(4_i64).should be_true
+      store.agent_reply_seen.should eq(10)
+      store.mark_agent_replies_seen(12_i64)
+      store.agent_reply_seen.should eq(12)
+    end
+  end
+
+  it "counts the replies in a range and lists the newest of them, oldest first" do
+    with_store do |store|
+      ids = (1..5).map { |i| store.record_agent_reply("r#{i}", nil, "info", "a pid 1", 1_i64) }
+      store.insert_event("probe", "job_done", "info", "not a reply")
+      store.agent_reply_count_between(ids[0], ids[4]).should eq(4)
+      store.agent_reply_count_between(ids[4], ids[0]).should eq(0)
+      page = store.agent_replies_between(0_i64, ids[4], 3)
+      page.map(&.summary).should eq(["r3", "r4", "r5"])
+    end
+  end
+end
+
+# #1323: a script's line is a reply-shaped row under its own source, so the one drain and the
+# one watermark serve it while the ring's `ai` marker (which reads the source) stays off it.
+describe Gori::Store, "#1323 script notices" do
+  it "writes the reply kind under the script source and the cli actor" do
+    with_store do |store|
+      id = store.record_script_notice("fuzz done\nsecond line", "3 hits", "shout", "gori run pid 42", 42_i64)
+      row = store.events_after(0, 10).first
+      row.source.should eq("script")
+      row.kind.should eq("agent_reply")
+      row.actor.should eq("cli")
+      row.level.should eq("info")
+      r = store.agent_replies_after(0, 10).rows.first
+      r.id.should eq(id)
+      r.summary.should eq("fuzz done")
+      r.detail.should eq("3 hits")
+      r.source.should eq(Gori::AgentReply::SOURCE_SCRIPT)
+      Gori::Tui::AgentMessageNotes.note_source(r).should eq("script")
+      Gori::Tui::AgentMessageNotes.reply_line(r).should eq({:info, "gori run: fuzz done"})
+    end
+  end
+
+  it "keeps an agent's reply under the agent source" do
+    with_store do |store|
+      store.record_agent_reply("x", nil, "info", "claude-code pid 1", 1_i64)
+      r = store.agent_replies_after(0, 10).rows.first
+      r.source.should eq("agent")
+      Gori::Tui::AgentMessageNotes.note_source(r).should eq("agent")
+    end
+  end
+end
+
+describe Gori::Store, "#1322 away-summary lookback" do
+  it "finds the first feed row written since a time, or nil when none was" do
+    with_store do |store|
+      store.first_event_id_since(0_i64).should be_nil
+      id = store.record_agent_reply("r", nil, "info", "a pid 1", 1_i64)
+      store.first_event_id_since(0_i64).should eq(id)
+      store.first_event_id_since((Time.utc + 1.hour).to_unix_ms * 1000).should be_nil
+    end
+  end
+end

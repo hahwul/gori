@@ -32,11 +32,24 @@ module Gori::Tui
       # notes too, and "the agent forwarded #3" is a report, not something said to anyone.
       getter? addressed : Bool
       property read : Bool
+      # The feed id of the `ask_operator` question this note announced (#1324), or nil for
+      # every other note. ↵ on the row opens the answer card while `question_open?` holds.
+      getter question_id : Int64?
+      # How the question ended, once it has: `:answered`, `:dismissed`, `:expired`, or `:closed`
+      # (another window answered it). nil while it is still open. Mutable because the note is announced before the answer exists, and the ring row
+      # has to stop offering a card the moment another window or the expiry closes it.
+      property question_state : Symbol?
 
       def initialize(@id, @level, @message, @goto = nil, @source = "app", @detail = nil,
-                     @addressed = false)
+                     @addressed = false, @question_id = nil)
         @created_at = Time.instant
         @read = false
+        @question_state = nil
+      end
+
+      # A question that can still be answered from this note.
+      def question_open? : Bool
+        !@question_id.nil? && @question_state.nil?
       end
 
       # AI/agent-originated notes get a distinct marker in the overlay.
@@ -54,8 +67,8 @@ module Gori::Tui
     # summary keep compiling untouched — a note carries a long form only when its producer
     # had one to carry (see Note#detail).
     def push(level : Symbol, message : String, goto : Jobs::Goto? = nil, source : String = "app",
-             detail : String? = nil, addressed : Bool = false) : Note
-      n = Note.new((@next_id += 1), level, message, goto, source, detail, addressed)
+             detail : String? = nil, addressed : Bool = false, question_id : Int64? = nil) : Note
+      n = Note.new((@next_id += 1), level, message, goto, source, detail, addressed, question_id)
       @notes << n
       # Drain to the live retention setting (CAP is the default; user may lower it).
       while @notes.size > Settings.notify_retention
@@ -115,6 +128,11 @@ module Gori::Tui
 
     def mark_read(id : Int32) : Nil
       @notes.find { |n| n.id == id }.try(&.read=(true))
+    end
+
+    # The note that announced question `id`, while it is still in the ring.
+    def for_question(id : Int64) : Note?
+      @notes.find { |n| n.question_id == id }
     end
 
     def mark_all_read : Nil

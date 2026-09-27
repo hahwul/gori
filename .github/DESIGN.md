@@ -4079,3 +4079,32 @@ Preferences › AI › MCP permissions switches off groups of `gori mcp` tools f
 - **Groups are capabilities, not destinations.** Intercept control still lets an agent forward
   an edited held request, and those bytes reach the target with Send traffic off. Turning off
   both is what stops an agent's bytes reaching a target; the docs say so.
+
+### 2026-09-27: what the operator is owed from the agent channel while nobody is watching
+
+#1090 made the channel a notification, not a mailbox: a TUI seeds its tails at the feed's end
+when it opens. Three follow-ups keep that rule and carve out what the operator is owed.
+#1322, #1323, #1324.
+
+- **Replies get a watermark, not a replay.** `agent_reply_seen` in the project's `settings`
+  table (two projects are two feeds) records the last reply a window showed. It moves forward
+  only. A window writes it when its live drain announces a reply, when the ring opens and when
+  it closes. The next window to open pushes ONE addressed note for `(watermark, cursor]`, whose
+  detail lists the newest fifty. Delivery rows and every other feed row keep the seed-at-now rule.
+- **"Addressed to the operator" is the kind; who is speaking is the source.** `gori run notify`
+  writes the `agent_reply` shape under a new `script` source (`actor: cli`), so one drain and one
+  watermark serve both, and the ring's `ai` marker, which reads the source, stays off a shell loop.
+- **A question is closed by exactly one message.** An `ask_operator` question is an
+  `agent_question` row with no state column. It stays open until an `agent_message` with
+  `in_reply_to` exists, and that message is also how the answer travels, so every delivery route
+  carries it without a route of its own. `Store#insert_event_unless` checks and inserts in one
+  `BEGIN IMMEDIATE` transaction, so the operator's answer and the expiry cannot both land.
+- **The asker expires its own question.** The `gori mcp` courier closes an unanswered question
+  when its time is up. It is the one process that must hear about it, and with no TUI open
+  nothing else would write it. The TUI also stops offering it on the clock and when the asker's
+  marker is gone, because an answer addressed to a dead pid is read by nobody.
+- **A question never takes focus.** It is a ring note Miss Ring holds, plus an `ask:N` chip. The
+  card opens only from the ring's `↵`, the chip or `app.answer-agent`, because a card that
+  appeared mid-edit would turn the next keystroke into an answer. `esc` means "later", and `x` is
+  the explicit dismissal the agent hears. An answer is a request, like any operator message: the
+  frame says it authorizes nothing, and scope still decides what is sent.

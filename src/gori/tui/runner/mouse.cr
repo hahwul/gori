@@ -487,9 +487,16 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       unread: @notifications.unread, capturing: @session.capturing?,
       write_failures: @session.store.write_failures, bypass: Settings.passthrough_count,
       listeners: listener_chip_count, listener_errors: @session.listener_errors.size,
-      authorize: authorize_chip_label, session: session_slot_chip, agents: agent_chip)
+      authorize: authorize_chip_label, session: session_slot_chip, agents: agent_chip,
+      asks: answerable_questions.size)
     return false unless tag
+    run_top_bar_chip(tag)
+    true
+  end
 
+  # What a top-bar chip does when pressed, by its tag — split from the hit test above so each
+  # stays one decision.
+  private def run_top_bar_chip(tag : Symbol) : Nil
     case tag
     when :notify    then open_notifications
     when :scope     then scope_toggle_lens
@@ -498,11 +505,11 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     when :listeners then open_listeners
     when :session   then open_session_slots
     when :agents    then open_agents
+    when :ask       then answer_agent_question
     when :listen    then toggle_capture
     when :palette   then open_palette
     when :settings  then open_preferences
     end
-    true
   end
 
   private def click_palette(area : Rect, mx : Int32, my : Int32) : Nil

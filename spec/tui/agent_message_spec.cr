@@ -149,9 +149,10 @@ describe "the delivery drain's wiring" do
 
   # The one argument that makes Miss Ring hold a real reply: the companion specs push
   # addressed notes by hand, so without this a drain that lost it would leave them green.
-  it "pushes each reply as an addressed note" do
+  it "pushes each reply as an addressed note, under the row's own source" do
     src("tui", "runner", "agent_message.cr").any? do |l|
-      l.includes?("@notifications.push(") && l.includes?("source: \"agent\"") && l.includes?("addressed: true")
+      l.includes?("@notifications.push(") && l.includes?("source: AgentMessageNotes.note_source(row)") &&
+        l.includes?("addressed: true")
     end.should be_true
   end
 
@@ -198,5 +199,33 @@ describe Gori::Tui::AgentsOverlay, "tell affordance (#1090)" do
     one.on_tell = ->(_e : Gori::AgentPresence::Entry) { told += 1; nil }
     one.handle_key(tkey(:ctrl))
     told.should eq(0) # ^T is not the mnemonic
+  end
+end
+
+# #1322 wiring: the away note is pushed once before the first paint, and the watermark moves
+# when a window has shown replies — its live drain, its ring, its close.
+describe "Runner agent-reply watermark wiring" do
+  it "summarizes missed replies before the first paint" do
+    lines = src("tui", "runner.cr")
+    announce = lines.index(&.includes?("announce_missed_replies")).not_nil!
+    paint = lines.index(&.includes?("render # initial paint")).not_nil!
+    announce.should be < paint
+  end
+
+  it "moves the watermark on the ring's open and in run's ensure" do
+    body = src("tui", "runner.cr").join('\n')
+    body.should match(/@notifications\.mark_all_read\s*\n\s*mark_agent_replies_seen/)
+    body.should match(/release_tui_presence\s*\n(?:.*\n){0,3}\s*mark_agent_replies_seen/)
+  end
+
+  it "moves it after the live drain and the away note announced, and pushes that note addressed" do
+    lines = src("tui", "runner", "agent_message.cr")
+    lines.count(&.includes?("mark_agent_replies_seen")).should be >= 3
+    body = lines.join('\n')
+    body.should match(/AgentMessageNotes\.missed_replies[\s\S]*?addressed: true\)\s*\n\s*mark_agent_replies_seen/)
+    # No watermark yet looks back a day, not to the project's first reply.
+    body.should contain("first_event_id_since")
+    lines.any? { |l| l.includes?("AgentMessageNotes.missed_replies") }.should be_true
+    lines.count { |l| l.includes?("@notifications.push(") && l.includes?("addressed: true") }.should be >= 2
   end
 end

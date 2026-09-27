@@ -165,17 +165,30 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     page = @session.store.agent_deliveries_after(@agent_delivery_cursor, AGENT_DELIVERY_BATCH)
     @agent_delivery_cursor = page.full ? {@agent_delivery_cursor, page.scanned_max}.max : {@agent_delivery_cursor, page.scanned_max, high}.max
     return false if page.rows.empty?
+    pushed = false
     page.rows.each do |row|
+      next if expiry_delivery?(row)
       level, message = AgentMessageNotes.line(row)
       @notifications.push(level, message, nil, source: "app")
+      pushed = true
     end
-    true
+    pushed
+  end
+
+  # A delivery of the row an agent's own server wrote when its `ask_operator` question expired
+  # (#1324). The operator sent nothing, so "→ claude-code got it" would announce a message
+  # they never wrote; the expiry itself shows on the question's ring row. One lookup per
+  # delivery row, which is rare, and only the message's own row.
+  private def expiry_delivery?(row : Gori::AgentDelivery) : Bool
+    @session.store.agent_message(row.message_id).try(&.outcome) == Gori::AgentQuestion::OUTCOME_EXPIRED
   end
 
   # The agent's replies, the same way: a note per reply, the summary as its line and the
   # long form behind ↵. `source: "agent"` renders with the AI marker, and Miss Ring speaks
   # the summary because she consumes this ring — `addressed:` so she keeps saying it until
   # the operator's next key or click, not for a few seconds they may have spent elsewhere.
+  # A script's `gori run notify` (#1323) is the same row under `source: "script"`, and its
+  # note keeps that source, so the marker never calls a shell loop an agent.
   def drain_agent_replies : Bool
     high = @session.store.last_agent_delivery_id
     page = @session.store.agent_replies_after(@agent_reply_cursor, AGENT_DELIVERY_BATCH)
@@ -183,8 +196,68 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     return false if page.rows.empty?
     page.rows.each do |row|
       level, message = AgentMessageNotes.reply_line(row)
-      @notifications.push(level, message, nil, source: "agent", detail: row.detail, addressed: true)
+      @notifications.push(level, message, nil, source: AgentMessageNotes.note_source(row), detail: row.detail, addressed: true)
     end
+    # Announced is shown: a second window opening on this project must not summarize these as
+    # missed while this one is still up with them in its ring (#1322).
+    mark_agent_replies_seen
     true
+  end
+
+  # --- replies nobody was shown (#1322)----------------------------------------------------
+
+  # How many of the missed replies the away note lists. The count in its line is the real
+  # total; past this the detail points at the Activity pane.
+  MISSED_REPLY_ROWS = 50
+
+  # The watermark this window last wrote, so opening the ring ten times writes it once.
+  @agent_reply_seen_written : Int64 = 0_i64
+
+  # Once, when the window opens: if replies landed between the last window that showed the
+  # operator anything and now, say so in ONE note. `@agent_reply_cursor` was seeded at the
+  # feed's end in `Runner#initialize`, so `(watermark, cursor]` is exactly what no window has
+  # announced — everything past the cursor, the live drain above will.
+  #
+  # Pushed with `addressed: true`, like the replies it stands for, so Miss Ring keeps it up
+  # until the operator's first key rather than for the few seconds after a window opens that
+  # they are least likely to be reading her. Announced is shown, as it is for the live drain:
+  # the watermark moves right after, so a second window opening on the project while this one
+  # is up does not push the same note again.
+  #
+  # A project with no watermark yet looks back one day, not to its first reply: every project
+  # that predates the key would otherwise open onto a note summing up its whole history.
+  MISSED_REPLY_LOOKBACK = 1.day
+
+  def announce_missed_replies : Bool
+    store = @session.store
+    upto = @agent_reply_cursor
+    seen = store.agent_reply_seen || begin
+      since = (Time.utc - MISSED_REPLY_LOOKBACK).to_unix_ms * 1000
+      store.first_event_id_since(since).try { |id| id - 1 } || upto
+    end
+    return false if upto <= seen
+    total = store.agent_reply_count_between(seen, upto)
+    return false if total <= 0
+    rows = store.agent_replies_between(seen, upto, MISSED_REPLY_ROWS)
+    return false if rows.empty?
+    level, message, detail = AgentMessageNotes.missed_replies(rows, total)
+    source = rows.any? { |r| AgentMessageNotes.note_source(r) == "agent" } ? "agent" : "script"
+    @notifications.push(level, message, nil, source: source, detail: detail, addressed: true)
+    mark_agent_replies_seen
+    true
+  rescue ex
+    # A window that cannot read its own feed still opens; the replies stay in Activity.
+    Log.warn(exception: ex) { "tui: could not summarize agent replies from while the TUI was closed" }
+    false
+  end
+
+  # Record that this window has put every reply up to its cursor in front of the operator:
+  # the live drain announced some, the ring was opened, or the window is closing. Closing
+  # counts because the drain announced each of them while the window was up — the watermark is
+  # about replies no window was open for, not about whether each one was read.
+  def mark_agent_replies_seen : Nil
+    upto = @agent_reply_cursor
+    return if upto <= @agent_reply_seen_written
+    @agent_reply_seen_written = upto if @session.store.mark_agent_replies_seen(upto)
   end
 end

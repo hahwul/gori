@@ -241,16 +241,23 @@ module Gori::Tui
     # one is bound to a dialog that sizes ITSELF to the wrapped result and this one wraps to
     # a card whose width is already fixed.
     private def wrap(width : Int32) : Array(String)
-      rows = [] of String
       detail = @note.detail
-      return rows if detail.nil?
-      detail.split('\n') { |line| wrap_line(line.chomp('\r'), width, rows) }
+      return [] of String if detail.nil?
+      NoteDetailOverlay.wrap_text(detail, width)
+    end
+
+    # The same wrap for another card that shows peer-written prose at a fixed width — the
+    # `ask_operator` card's detail (#1324) — so there is one column-measured wrap for agent
+    # text rather than a third copy of it.
+    def self.wrap_text(text : String, width : Int32) : Array(String)
+      rows = [] of String
+      text.split('\n') { |line| wrap_line(line.chomp('\r'), width, rows) }
       rows
     end
 
     # Greedy word wrap measured in terminal COLUMNS, not characters, so a CJK reply wraps
     # where it is drawn rather than where its character count happens to land.
-    private def wrap_line(line : String, width : Int32, into : Array(String)) : Nil
+    private def self.wrap_line(line : String, width : Int32, into : Array(String)) : Nil
       if width <= 0 || Screen.display_width(line) <= width
         into << line
         return
@@ -277,7 +284,7 @@ module Gori::Tui
     # that identifies it. `Screen.column_for` floors to a cluster start, so a wide glyph is
     # never split down the middle; `{cut, 1}.max` keeps a single glyph wider than the budget
     # from looping forever.
-    private def hard_split(word : String, width : Int32) : Array(String)
+    private def self.hard_split(word : String, width : Int32) : Array(String)
       return [word] if Screen.display_width(word) <= width
       parts = [] of String
       rest = word

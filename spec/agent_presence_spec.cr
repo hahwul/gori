@@ -368,3 +368,14 @@ describe "TUI window presence" do
     end
   end
 end
+
+# The reach answer `reply_to_operator` and `gori run notify` share (#1323).
+describe Gori::AgentPresence, ".tui_windows? / .tui_json" do
+  it "cannot tell without a path, and says so rather than guessing 0" do
+    Gori::AgentPresence.tui_windows?(nil).should be_nil
+    Gori::AgentPresence.tui_windows?("").should be_nil
+    JSON.parse(JSON.build { |j| Gori::AgentPresence.tui_json(j, nil) }).should eq(JSON.parse(%({"unknown":true})))
+    JSON.parse(JSON.build { |j| Gori::AgentPresence.tui_json(j, 2) }).should eq(JSON.parse(%({"live":true,"windows":2})))
+    JSON.parse(JSON.build { |j| Gori::AgentPresence.tui_json(j, 0) }).should eq(JSON.parse(%({"live":false,"windows":0})))
+  end
+end

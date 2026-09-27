@@ -22,13 +22,21 @@ private class Rig
   def initialize(@store)
   end
 
+  # How many times the courier asked the process to expire its questions (#1324).
+  getter expiries = 0
+
   def courier(pid = 77_i64) : Courier
     Courier.new(pid: pid, store: -> { @store.as(Gori::Store?) }, client: -> { @client },
       channels: -> { @channels }, emit: ->(f : String) { @frames << f; nil }, inbox: -> { @inbox },
       codex: -> { @codex_lookups += 1; @codex },
       claim: ->(id : Int64) { @claimed_ids << id; @claimable },
-      release: ->(id : Int64) { @released_ids << id; nil })
+      release: ->(id : Int64) { @released_ids << id; nil },
+      expire: -> { @expiries += 1; nil },
+      answered: ->(qid : Int64) { @answered << qid; nil })
   end
+
+  # The question ids the courier reported closed as it read their rows.
+  getter answered = [] of Int64
 end
 
 private def with_fake_inbox(&)
@@ -392,5 +400,67 @@ describe Gori::MCP::Courier do
         store.agent_deliveries_after(m, 10).rows.first.via.should eq(Gori::AgentDelivery::VIA_SOCKET)
       end
     end
+  end
+end
+
+# #1324: `ask_operator` answers ride this courier like any operator message, framed as the
+# answer they are, and the courier's tick is what expires this process's questions.
+describe Gori::MCP::Courier, "ask_operator answers" do
+  it "asks for expiries on every tick, even when the feed has not moved" do
+    with_store do |store|
+      rig = Rig.new(store)
+      c = rig.courier
+      c.tick
+      c.tick
+      rig.expiries.should eq(2)
+    end
+  end
+
+  it "writes an answer to the inbox socket framed as the answer to that question" do
+    with_store do |store|
+      with_fake_inbox do |path, got|
+        rig = Rig.new(store)
+        rig.inbox = path
+        c = rig.courier(77_i64)
+        qid = store.record_agent_question("Add api.example.com to scope?", nil, ["yes", "no"], nil, "claude-code pid 77", 77_i64, Int64::MAX)
+        q = store.open_agent_questions(qid - 1, 0_i64).first
+        c.tick
+        store.close_agent_question(q, Gori::AgentQuestion::OUTCOME_ANSWERED, "yes", "operator", "tui")
+        c.tick.should eq(1)
+        deadline = Time.instant + 2.seconds
+        until got.size >= 1 || Time.instant >= deadline
+          sleep 20.milliseconds
+        end
+        content = JSON.parse(got.last)["message"]["content"].as_s
+        content.should start_with("[gori] The operator answered your ask_operator question ##{qid}")
+        content.should contain(%("yes"))
+        content.should contain("not an authorization")
+      end
+    end
+  end
+
+  # Read is enough: the expiry check cannot see an answer the operator has since cleared from
+  # the feed, so the clock stops the moment the courier reads the row.
+  it "reports each closing row as it reads it, delivered or not" do
+    with_store do |store|
+      rig = Rig.new(store)
+      c = rig.courier(77_i64)
+      qid = store.record_agent_question("q", nil, ["a", "b"], nil, "claude-code pid 77", 77_i64, Int64::MAX)
+      q = store.open_agent_questions(qid - 1, 0_i64).first
+      c.tick
+      store.post_agent_message("unrelated", "all", nil)
+      store.close_agent_question(q, Gori::AgentQuestion::OUTCOME_DISMISSED, nil, "operator", "tui")
+      c.tick
+      rig.answered.should eq([qid])
+    end
+  end
+
+  it "names the question and the outcome in a channel push" do
+    m = Gori::AgentMessage.new(9_i64, "(expired without an answer)", "pid:1", nil, [] of Int64, 0_i64,
+      in_reply_to: 5_i64, outcome: "expired", question: "send anyway?")
+    frame = JSON.parse(Courier.channel_frame(m))["params"]
+    frame["content"].as_s.should contain("expired with no answer")
+    frame["meta"]["in_reply_to"].as_s.should eq("5")
+    frame["meta"]["outcome"].as_s.should eq("expired")
   end
 end

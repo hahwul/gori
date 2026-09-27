@@ -350,7 +350,7 @@ module Gori::Tui
                             write_failures : Int32 = 0, bypass : Int32 = 0,
                             listeners : Int32 = 0, listener_errors : Int32 = 0,
                             authorize : String = "", session : String = "",
-                            agents : String = "") : Nil
+                            agents : String = "", asks : Int32 = 0) : Nil
       # Logo row sits flush on the canvas — no lifted panel band (tabs/status keep panel).
       screen.fill(rect, Theme.bg)
       x = render_wordmark(screen, rect.x + 1, rect.y, bg: Theme.bg)
@@ -378,7 +378,7 @@ module Gori::Tui
         sandbox: sandbox, listen: listen, unread: unread, capturing: capturing,
         write_failures: write_failures, bypass: bypass,
         listeners: listeners, listener_errors: listener_errors, authorize: authorize,
-        session: session, agents: agents)
+        session: session, agents: agents, asks: asks)
 
       # Bound the project name and floor the chips past it, so neither overwrites the
       # other at narrow widths (previously the name was unbounded and render_chips got
@@ -397,7 +397,7 @@ module Gori::Tui
                                    write_failures : Int32, bypass : Int32 = 0,
                                    listeners : Int32 = 0, listener_errors : Int32 = 0,
                                    authorize : String = "", session : String = "",
-                                   agents : String = "") : Array(Chip)
+                                   agents : String = "", asks : Int32 = 0) : Array(Chip)
       chips = [] of Chip
       chips << Chip.new(:notify, "notify:#{unread}", Theme.accent, clickable: true) if unread > 0
       unless scope.empty?
@@ -447,6 +447,12 @@ module Gori::Tui
       # while nothing is attached, like authorize/session, so its appearance is the signal.
       # Clickable: opens the AGENTS card.
       chips << Chip.new(:agents, agents, Theme.accent, clickable: true) unless agents.empty?
+      # Questions an attached agent put to the operator with `ask_operator` and nobody has
+      # answered yet (#1324). Right of the agents chip because it is those agents asking.
+      # ORANGE, the bar's "wants you" colour short of red: nothing is blocked, but something is
+      # waiting on a person. Absent at zero, so its appearance is the signal; clickable, it
+      # opens the oldest question's card — the same card the ring's ↵ and app.answer-agent open.
+      chips << Chip.new(:ask, "ask:#{asks}", Theme.orange, clickable: true) if asks > 0
       chips << Chip.new(:rules, rules, Theme.text) unless rules.empty?
       chips << Chip.new(:intercept, intercept, Theme.red) unless intercept.empty?
       # TLS passthrough (#497): N hosts gori relayed WITHOUT decrypting, so nothing was
@@ -538,11 +544,11 @@ module Gori::Tui
                                listen : String, unread : Int32 = 0, capturing : Bool = true,
                                write_failures : Int32 = 0, bypass : Int32 = 0,
                                authorize : String = "", session : String = "",
-                               agents : String = "") : Rect?
+                               agents : String = "", asks : Int32 = 0) : Rect?
       chips = top_bar_chips(scope: scope, probe: probe, rules: rules, intercept: intercept,
         sandbox: sandbox, listen: listen, unread: unread, capturing: capturing,
         write_failures: write_failures, bypass: bypass, authorize: authorize, session: session,
-        agents: agents)
+        agents: agents, asks: asks)
       idx = chips.index { |c| c.tag == tag }
       return nil unless idx
       name_x = rect.x + 1 + Screen.display_width(WORDMARK) + 1
@@ -559,13 +565,13 @@ module Gori::Tui
                              capturing : Bool = true, write_failures : Int32 = 0,
                              bypass : Int32 = 0, listeners : Int32 = 0,
                              listener_errors : Int32 = 0, authorize : String = "",
-                             session : String = "", agents : String = "") : Symbol?
+                             session : String = "", agents : String = "", asks : Int32 = 0) : Symbol?
       return nil unless rect.contains?(mx, my)
       chips = top_bar_chips(scope: scope, probe: probe, rules: rules, intercept: intercept,
         sandbox: sandbox, listen: listen, unread: unread, capturing: capturing,
         write_failures: write_failures, bypass: bypass,
         listeners: listeners, listener_errors: listener_errors, authorize: authorize,
-        session: session, agents: agents)
+        session: session, agents: agents, asks: asks)
       name_x = rect.x + 1 + Screen.display_width(WORDMARK) + 1
       rects = chip_layout(rect, chips, name_x + 1)
       chips.each_with_index do |chip, i|

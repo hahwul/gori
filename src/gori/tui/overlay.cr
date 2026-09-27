@@ -122,6 +122,9 @@ module Gori::Tui
     # The differential-timing verdict card (#1246), opened when the repeater.timing-analysis
     # fiber finishes: a read-only report over marked Repeater sub-tabs.
     TimingReport
+    # An agent's `ask_operator` question (#1324): its choices on digit keys, opened by the
+    # operator from the ring, the `ask:` chip or app.answer-agent — never by the question.
+    AgentQuestion
 
     def to_sym : Symbol
       {% begin %}

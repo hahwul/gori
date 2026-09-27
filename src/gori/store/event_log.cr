@@ -11,7 +11,8 @@ module Gori
     # empty feed that reads as "nothing happened".
     #
     # Ordered the way a reader wants them: who acted first (`agent`, `config`, `issues`), then
-    # the background producers.
+    # the background producers. `script` is a `gori run notify` line for the operator (#1323) —
+    # its own word rather than `agent`, because a shell loop is not one.
     #
     # `issues` is the one that proves the list has to live here. `runner/evidence.cr` started
     # writing it (an operator froze a copy of a flow onto an issue) without registering it, and
@@ -19,7 +20,7 @@ module Gori
     # Activity pane's `s` chip could never narrow to them, and MCP `list_events{source:"issues"}`
     # was REFUSED as invalid while naming a set that omitted a source the project writes. A
     # writer that is not in this list is reachable only by reading the whole feed.
-    EVENT_SOURCES = %w[agent operator config issues bindings session rewriter probe discover fuzzer miner sequencer]
+    EVENT_SOURCES = %w[agent operator script config issues bindings session rewriter probe discover fuzzer miner sequencer]
 
     # Every `level` the feed carries, in the order the Activity pane's `l` chip cycles them.
     # Here for the reason EVENT_SOURCES is: the column is a free string and this is the list of
@@ -84,6 +85,36 @@ module Gori
           now_us, source, kind, level, message, goto_tab, goto_session_id, flow_id, payload, actor)
         nil
       }, event: true
+    end
+
+    # Append one row UNLESS `skip`, run on the writer's connection inside the same write
+    # transaction, finds the row that makes it redundant. The feed's one conditional door, for
+    # a row that must be written at most once across PROCESSES: an `ask_operator` question
+    # (#1324) is closed by whichever of the operator's answer and the asking server's expiry
+    # lands first, and a read-then-insert from two processes would let both land. The
+    # transaction is `BEGIN IMMEDIATE`, so no other gori can write between the check and the
+    # insert.
+    #
+    # Answers the new id, 0 when the write did not commit (busy, closing — retryable), or -1
+    # when `skip` declined. The locals are reset at the top of the closure because a batch the
+    # writer retries runs it again.
+    def insert_event_unless(source : String, kind : String, level : String, message : String, *,
+                            payload : String? = nil, actor : String? = nil,
+                            &skip : DB::Connection -> Bool) : Int64
+      id = 0_i64
+      skipped = false
+      ok = exec_task_ok ->(c : DB::Connection) {
+        id = 0_i64
+        skipped = skip.call(c)
+        unless skipped
+          c.exec("INSERT INTO events (created_at, source, kind, level, message, payload, actor) VALUES (?,?,?,?,?,?,?)",
+            now_us, source, kind, level, message, payload, actor)
+          id = c.scalar("SELECT last_insert_rowid()").as(Int64)
+        end
+        nil
+      }
+      return 0_i64 unless ok
+      skipped ? -1_i64 : id
     end
 
     # Empty the #124 feed. The human-facing counterpart to retention's `trim_events`, for an

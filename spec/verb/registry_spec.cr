@@ -62,6 +62,10 @@ private class FakeContext < ExecContext
     @calls << :tell_agent
   end
 
+  def answer_agent_question : Nil
+    @calls << :answer_agent_question
+  end
+
   def open_session_slots : Nil
     @calls << :open_session_slots
   end
