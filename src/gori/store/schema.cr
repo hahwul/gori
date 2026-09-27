@@ -1554,6 +1554,25 @@ module Gori
         "static_asset)",
       ]
 
+      # V38 — `idx_flows_sitemap` widened from (host, target, method) to every column the
+      # Sitemap reads. `sitemap_entries_detailed` (MCP list_sitemap, `gori run sitemap`) and
+      # `endpoint_observations` (the retest diff) read `status`, `created_at`, `content_type`
+      # and `response_size`, all stored after the body BLOBs, so each page walked every row's
+      # overflow chain: ~1.2 s per page at 200k flows / 6.5 GB, at ANY offset, because the
+      # GROUP BY had to see every row before the first one came out. Covered, and grouped in
+      # the index's order (both queries spell their GROUP BY in their ORDER BY order), a page
+      # stops after its groups. The DISTINCT tree query, the host completion and the
+      # (host, target) lookups keep the prefix they used, now covered too.
+      #
+      # `static_asset` rides along so the hide-static lens stays covered on the wide query;
+      # the plain DISTINCT with the lens on still prefers `idx_flows_sitemap_nonstatic`, which
+      # is smaller. `spec/store/sitemap_index_spec.cr` pins the plans.
+      V38 = [
+        "DROP INDEX idx_flows_sitemap",
+        "CREATE INDEX idx_flows_sitemap ON flows (host, target, method, scheme, port, http_version, " \
+        "status, created_at, content_type, response_size, static_asset)",
+      ]
+
       # Data statements that call gori's OWN SQL functions, run by `migrate!` right after the
       # version they complete. Kept out of MIGRATIONS because that list is plain schema that a
       # bare connection can replay (specs build every historical shape that way), and a bare
@@ -1576,7 +1595,7 @@ module Gori
 
       MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17,
                     V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29, V30, V31, V32, V33,
-                    V34, V35, V36, V37]
+                    V34, V35, V36, V37, V38]
 
       def self.migrate!(db : DB::Database, read_only : Bool = false) : Nil
         db.using_connection do |conn|
