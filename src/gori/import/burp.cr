@@ -201,7 +201,10 @@ module Gori
         attrs, inner = el
         return nil if inner.empty?
         if attrs.includes?(%(base64="true")) || attrs.includes?("base64='true'")
-          Base64.decode(inner.strip)
+          # Burp wraps the base64 payload in CDATA too (`<request base64="true"><![CDATA[R0VU…
+          # ]]></request>`). `Base64.decode` raises on the `<` of the wrapper, and the item
+          # was then counted as skipped — so a real export imported next to nothing.
+          Base64.decode((XmlText.cdata?(inner) ? XmlText.uncdata(inner) : inner).strip)
         else
           (XmlText.cdata?(inner) ? XmlText.uncdata(inner) : XmlText.unescape(inner)).to_slice
         end

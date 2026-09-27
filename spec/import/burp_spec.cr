@@ -153,6 +153,24 @@ describe Gori::Import::Burp do
     String.new(result.flows.first.request.head).should eq(req)
   end
 
+  it "decodes a base64 message wrapped in CDATA, the shape Burp actually writes" do
+    req = "POST /c HTTP/1.1\r\nHost: target.test\r\nContent-Length: 3\r\n\r\n\xFFab"
+    resp = "HTTP/1.1 201 Created\r\nContent-Type: text/plain\r\n\r\ncreated"
+    xml = items(<<-XML)
+      <item>
+        <url><![CDATA[https://target.test/c]]></url>
+        <request base64="true"><![CDATA[#{Base64.strict_encode(req)}]]></request>
+        <response base64="true"><![CDATA[#{Base64.strict_encode(resp)}]]></response>
+      </item>
+      XML
+    result = parse(xml)
+    result.skipped.should eq(0)
+    pair = result.flows.first
+    (pair.request.head.to_a + pair.request.body.not_nil!.to_a).should eq(req.to_slice.to_a)
+    pair.response.not_nil!.status.should eq(201)
+    String.new(pair.response.not_nil!.body.not_nil!).should eq("created")
+  end
+
   it "falls back to protocol/host/port when the item has no <url>" do
     xml = items(<<-XML)
       <item>
