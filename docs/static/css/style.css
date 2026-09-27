@@ -302,6 +302,13 @@ img {
   -webkit-backdrop-filter: blur(22px) saturate(145%);
 }
 
+/* On the landing the logo and the tools sit on the sections' own edges (the
+   1180 axis) instead of the window's, so the mark lines up with every
+   headline below it. The 1.25rem floor is .home-main's own gutter. */
+.is-home .docs-header {
+  padding-inline: max(1.25rem, (100% - var(--home-w)) / 2);
+}
+
 .logo {
   display: inline-flex;
   align-items: center;
@@ -640,9 +647,13 @@ kbd {
   line-height: 1;
 }
 
+/* clip, not hidden: hidden makes this a scroll container, and a scroll
+   container ancestor silently turns the flow walkthrough's sticky rail into
+   a plain block. hidden stays as the fallback where clip is unsupported. */
 .home-main {
   position: relative;
   overflow: hidden;
+  overflow: clip;
   padding: var(--header-h) 1.25rem 0;
 }
 
@@ -1290,7 +1301,7 @@ kbd {
    1180 is the frame's width, so the rails start and end where it does. */
 .path-grid {
   display: grid;
-  grid-template-columns: 1.15fr 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 2.4rem;
   width: min(100%, 1180px);
   margin-inline: auto;
@@ -1372,15 +1383,12 @@ kbd {
 }
 
 .path-link p {
-  max-width: 30ch;
+  max-width: 34ch;
+  text-wrap: pretty;
   margin-top: 0.45rem;
   color: var(--muted);
   font-size: 0.9rem;
   line-height: 1.55;
-}
-
-.path-link-lead h2 {
-  font-size: 1.55rem;
 }
 
 .home-structure {
@@ -1472,6 +1480,10 @@ kbd {
   background: var(--accent);
 }
 
+.structure-grid code {
+  white-space: nowrap;
+}
+
 .structure-grid span {
   display: block;
   max-width: 34ch;
@@ -1494,9 +1506,11 @@ kbd {
   padding: 2rem 0 var(--space-8);
 }
 
+/* Parked about mid-screen, but never closer to the header than 2rem: on a
+   short laptop viewport the ~33rem rail would otherwise run off the bottom. */
 .flow-rail {
   position: sticky;
-  top: calc(var(--header-h) + 14vh);
+  top: max(var(--header-h) + 2rem, 50vh - 16rem);
 }
 
 .home-flow h2 {
@@ -1569,7 +1583,7 @@ html.js .flow-steps li.is-active span {
 .flow-shots {
   display: grid;
   gap: 18vh;
-  padding-block: 6vh 4vh;
+  padding-block: 0 4vh;
 }
 
 .flow-shot {
@@ -1800,7 +1814,7 @@ html.js .flow-shot.is-active .flow-shot-frame {
 }
 
 /* Narrow: stack the seam vertically and turn the wire on its end. */
-@media (max-width: 720px) {
+@media (max-width: 860px) {
   .agent-seam {
     flex-direction: column;
     max-width: 26rem;
@@ -3483,7 +3497,7 @@ html.search-lock body {
 
 /* The stacked seam (narrow layout) turns the wire on its end: the closing
    scale and the running light swap to the vertical axis. */
-@media (max-width: 720px) and (prefers-reduced-motion: no-preference) {
+@media (max-width: 860px) and (prefers-reduced-motion: no-preference) {
   html.js .home-agent.rv .seam-wire {
     transform: scaleY(0);
   }
@@ -3531,11 +3545,7 @@ html.search-lock body {
   /* h1 tracks the viewport via clamp(); no fixed override needed here. */
 
   .home-structure {
-    grid-template-columns: 1fr;
-  }
-
-  .structure-copy {
-    padding-left: 0;
+    gap: 2.4rem 2.6rem;
   }
 }
 
@@ -3596,9 +3606,22 @@ html.search-lock body {
     font-size: 3rem;
   }
 
+  /* Stacked: the art runs the full column like every capture below it,
+     at a wider ratio so it does not tower over the copy. */
+  .home-structure {
+    grid-template-columns: 1fr;
+  }
+
   .structure-art {
-    width: min(88%, 26rem);
-    outline-offset: 1.1rem;
+    aspect-ratio: 16 / 10;
+  }
+
+  .is-home .docs-header {
+    padding-inline: 1rem;
+  }
+
+  .is-home .docs-footer {
+    width: min(100% - 2rem, var(--home-w));
   }
 
   .home-paths {

@@ -16,7 +16,9 @@
   background: radial-gradient(44rem 18rem at 50% -4rem, rgb(var(--accent-rgb) / 0.1), transparent 72%), var(--bg);
 }
 .is-doc::before, .is-doc::after { display: none; }
-.is-doc .docs-header { border-bottom: 1px solid var(--line); }
+/* The header's edges are the container's: the logo sits over the rail and
+   the tools end over the TOC, at every width up to and past 1600. */
+.is-doc .docs-header { border-bottom: 1px solid var(--line); padding-inline: max(30px, (100% - 1600px) / 2 + 30px); }
 .is-doc .top-nav a { border-radius: var(--radius-xs); }
 .is-doc .top-nav a.active { background: var(--selection); color: var(--accent-strong); }
 .is-doc :focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 4px; }
@@ -290,6 +292,7 @@ html[lang="ko"] .book-reader .docs-main h1 { font-family: var(--font-sans); font
 }
 @media (max-width: 860px) {
   .docs-container { display: block; padding-inline: 24px; background: none; }
+  .is-doc .docs-header { padding-inline: 24px; }
   .docs-sidebar { display: block; position: relative; top: auto; padding: 0; max-height: none; border-right: 0; border-bottom: 1px solid var(--line); overflow: visible; }
   .docs-navigation-toggle { display: flex; justify-content: space-between; padding: 16px 0; font: 12px/1.5 var(--font-mono); color: var(--text); cursor: pointer; list-style: none; }
   .docs-navigation-toggle::-webkit-details-marker { display: none; }
@@ -318,6 +321,7 @@ html[lang="ko"] .book-reader .docs-main h1 { font-family: var(--font-sans); font
 }
 @media (max-width: 600px) {
   .docs-container { padding-inline: 20px; }
+  .is-doc .docs-header { padding-inline: 20px; }
   .docs-main h1 { font-size: 32px; }
   .section-heading h1 { font-size: 52px; }
   .catalog-group { grid-template-columns: 1fr; gap: 12px; }
