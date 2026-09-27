@@ -679,8 +679,12 @@ module Gori::Tui
                 # active scan `probe_generation` bumps on every committed write, so the
                 # unconditional version was repainting the whole screen up to 20 times a
                 # second and bypassing both diff layers to do it.
-                @resized = true if probe_controller.refresh_from_store
-                dirty = true
+                #
+                # `refresh_if_moved`, because `drain_events` above has usually just reloaded for
+                # the same commit — its IssueEvent follows the generation bump.
+                reloaded, rows_moved = probe_controller.refresh_if_moved
+                @resized = true if rows_moved
+                dirty = true if reloaded
               end
             end
             # Live store refresh: PRAGMA data_version bumps when the writer fiber (or a

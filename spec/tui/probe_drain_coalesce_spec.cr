@@ -244,6 +244,81 @@ describe "Gori::Tui::ProbeController#drain_events" do
     end
   end
 
+  # One commit reaches this controller three ways in the same tick: the IssueEvent (drained
+  # above), the Runner's `probe_generation` poll, and — every ~750 ms while capturing — the
+  # data_version tick's `on_external_change`. Each used to re-read the whole list.
+  it "reads the list once per generation, however many of the three signals arrive" do
+    with_probe_controller do |controller, host, session|
+      host.active_tab = :probe
+      seed_issue(session.store, 1)
+      before = controller.reloads
+
+      session.probe.events.send(issue_event(1))
+      controller.drain_events.should be_true
+      controller.refresh_if_moved.should eq({false, false}) # the poll, same tick
+      controller.on_external_change                         # the data_version tick
+      (controller.reloads - before).should eq(1)
+      controller.view.row_count.should eq(1)
+
+      # The event channel is droppable; the generation poll alone still lands the write.
+      seed_issue(session.store, 2)
+      controller.refresh_if_moved.should eq({true, true})
+      controller.view.row_count.should eq(2)
+      (controller.reloads - before).should eq(2)
+    end
+  end
+
+  it "re-reads on the data_version tick only when a finding moved — a peer's write included" do
+    with_probe_controller do |controller, host, session|
+      host.active_tab = :probe
+      controller.on_enter
+      before = controller.reloads
+
+      # An own capture moved data_version, but no finding: nothing to re-read.
+      controller.on_external_change
+      (controller.reloads - before).should eq(0)
+
+      # A peer process (MCP, `gori run probe`) never moves this process's generation.
+      peer = Gori::Store.open(session.project.db_path)
+      begin
+        seed_issue(peer, 3)
+      ensure
+        peer.close
+      end
+      controller.refresh_if_moved.should eq({false, false})
+      controller.on_external_change
+      (controller.reloads - before).should eq(1)
+      controller.view.row_count.should eq(1)
+    end
+  end
+
+  # The list read is skipped when no finding moved — but the scope lens over it is not a
+  # finding. A peer's scope edit (MCP `add_scope_rule`, `gori run project scope add`) reaches
+  # this tab through the same data_version tick, and has to re-filter the rows already held.
+  it "re-applies a peer's scope change on the data_version tick without re-reading the list" do
+    with_probe_controller do |controller, host, session|
+      host.active_tab = :probe
+      seed_issue(session.store, 1)
+      seed_issue(session.store, 2)
+      session.scope.add("include", "host", "h1.test")
+      session.scope.enable
+      controller.on_enter
+      controller.view.row_count.should eq(1)
+      before = controller.reloads
+
+      peer = Gori::Store.open(session.project.db_path)
+      begin
+        Gori::Scope.load(peer).add("include", "host", "h2.test")
+      ensure
+        peer.close
+      end
+      session.scope.reload # what Runner#apply_external_change does first
+      controller.on_external_change
+      (controller.reloads - before).should eq(0)
+      controller.view.row_count.should eq(2)
+    end
+  end
+
   it "stops at DRAIN_CAP events per tick and finishes the rest on the next one" do
     prev_toast = Gori::Settings.notify_toast?
     begin

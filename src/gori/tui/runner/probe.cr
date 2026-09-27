@@ -54,7 +54,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # Jump from an issue to its sample evidence: History flow when present, else the
   # Repeater tab that first produced the hit (Repeater-sourced passive issues).
   def probe_open_flow : Nil
-    return unless i = probe_controller.view.target_issue
+    return unless i = probe_target_now
     if fid = i.sample_flow_id
       if history_controller.view.open_detail_id(fid, @session.store)
         @active_tab = :history
@@ -107,7 +107,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # Send an issue's sample flow to Repeater to re-test it (mirrors issue_repeater_flow).
   # When the only evidence is a Repeater tab, jump there instead of re-spawning.
   def probe_repeater_flow : Nil
-    return unless i = probe_controller.view.target_issue
+    return unless i = probe_target_now
     if fid = i.sample_flow_id
       if @session.store.get_flow(fid)
         repeater_flow(fid)
@@ -142,7 +142,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
 
   # Probe findings list → the selected issue's sample flow (re-test the evidence in place).
   def probe_active_rescan : Nil
-    return (@toast = "select an issue first") unless i = probe_controller.view.target_issue
+    return (@toast = "select an issue first") unless probe_controller.view.target_issue
+    return unless i = probe_target_now
     fid = i.sample_flow_id
     return (@toast = "this issue has no captured flow to re-scan") unless fid
     detail = @session.store.get_flow(fid)
@@ -160,10 +161,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # Promote a machine-found Probe issue to a human-confirmed Issue (the bridge to the
   # Issues report). Reuses Store#insert_issue; the issue's severity/host/sample flow carry over.
   def probe_promote : Nil
-    return unless probe_controller.view.target_issue
     # The row as it is NOW: promotion copies its sample flow into the new Issue and keys
-    # "already promoted" off its status, and the list's copy of either can be a reload old.
-    return (@toast = "issue no longer exists") unless i = probe_controller.view.fresh_target_issue(@session.store)
+    # "already promoted" off its status.
+    return unless i = probe_target_now
     # Same call the CLI/MCP promote paths make. A store-busy Failed must NOT read as
     # "already promoted" — that would tell the user to stop retrying the one thing that
     # would fix it.
@@ -176,6 +176,18 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       probe_controller.view.reload(@session.store)
       @toast = "promoted to issue — see the Issues tab"
     end
+  end
+
+  # The targeted finding as it is NOW, for a verb that follows its sample flow or writes it
+  # (see ProbeView#fresh_target_issue). The list is re-read only when a finding moves, and a
+  # history clear nulls `sample_flow_id` without moving one — so the listed copy can name a flow
+  # id the clear has since handed to a DIFFERENT capture. nil with nothing targeted, and nil
+  # with a toast when the row is gone.
+  private def probe_target_now : Store::ProbeIssue?
+    return nil unless probe_controller.view.target_issue
+    issue = probe_controller.view.fresh_target_issue(@session.store)
+    @toast = "issue no longer exists" unless issue
+    issue
   end
 
   def probe_rule_toggle : Nil

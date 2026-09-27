@@ -105,6 +105,13 @@ module Gori::Tui
       # description in place of the (absent) built-in remediation. Rebuilt on reload; a deleted
       # rule falls back to a generic note.
       @custom_desc = {} of String => String
+      # What the last `reload` read, so a caller can tell whether another would read anything
+      # new — see `issues_moved?`. -1 / nil until the first reload, which is therefore "moved".
+      @loaded_gen = -1_i64
+      @loaded_fp = nil.as({Int64, Int64, Int64}?)
+      # The tech rows the last reload read, so `reload_meta` can re-apply the scope lens to
+      # them without a query.
+      @tech_rows = [] of {String, String, String?}
     end
 
     def preview_enabled? : Bool
@@ -124,10 +131,9 @@ module Gori::Tui
       @issues.size
     end
 
-    # Reads the WHOLE table, deliberately, and this is the one place it still hurts: at 250k
-    # findings (a wide crawl — the rows are (code x host)) a refresh is ~107 ms, and the
-    # Runner re-runs it on every `probe_generation` bump, which during an active scan is
-    # close to every tick.
+    # Reads the WHOLE table, deliberately. It is the list projection (`probe_issue_rows`, no URL
+    # lists), and the live-refresh paths call it only when the findings actually moved
+    # (`issues_moved?`), but it is still linear in the table.
     #
     # `Store#probe_issues_page` exists and MCP uses it, but a bounded read is not a drop-in
     # here, because everything below `apply_filter` runs in Crystal over `@all`: the triage
@@ -140,12 +146,36 @@ module Gori::Tui
     # is a change to a query surface rather than to this view. Left whole until then: honest
     # and slow beats fast and misleading on a triage list.
     def reload(store : Store) : Nil
+      # Stamped BEFORE the read: a write that lands after it moves the key again, so it is
+      # never mistaken for one this read already saw.
+      @loaded_gen = store.probe_generation
+      @loaded_fp = store.probe_issues_fingerprint
       @all = store.probe_issue_rows
       @host_pool = nil
       @code_pool = nil
+      @tech_rows = store.probe_tech_rows
+      reload_meta(store)
+    end
+
+    # Would a `reload` read different findings than the last one did? `probe_generation` is
+    # this process's commit counter — an int compare, cheap enough for every tick. `peers`
+    # also asks the store's fingerprint (one indexed read), which is the only way to see a
+    # PEER process's write (MCP `probe_dismiss`, `gori run probe`, a second TUI): the
+    # data_version path passes it, since that is the signal a peer committed.
+    def issues_moved?(store : Store, *, peers : Bool = false) : Bool
+      return true if store.probe_generation != @loaded_gen
+      peers && store.probe_issues_fingerprint != @loaded_fp
+    end
+
+    # Everything the tab shows that is not READ from the finding list: the MODE band, the
+    # custom rules' descriptions, the scope lens over the rows already held (the list and the
+    # tech chips), and the open detail and preview rows (each one row read by id). Cheap, so
+    # the data_version path runs it on every commit — a peer's mode, rule or SCOPE change, or
+    # a history clear detaching a sample flow, lands even when no finding moved.
+    def reload_meta(store : Store) : Nil
       @mode = store.probe_mode
-      @tech = scoped_tech(store.probe_tech_rows)
       @custom_desc = Probe.custom_rules(store).to_h { |r| {r.code, r.description} }
+      @tech = scoped_tech(@tech_rows)
       apply_filter
       refresh_detail(store)
     end

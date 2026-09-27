@@ -6,7 +6,8 @@
 # `affected` array (up to PROBE_AFFECTED_CAP URLs) only for the list to draw its COUNT; it now
 # reads `Store#probe_issue_rows`, which takes the count in SQL.
 #
-# Measured (5000 x 50, release): reload 68 ms -> ~10 ms; the store read alone 65 ms -> ~7 ms.
+# Measured (5000 x 50, release): reload 68 ms -> ~9 ms; the store read alone 65 ms -> ~9 ms;
+# a data_version tick with no finding moved (skips the list read) 0.14 ms.
 #
 # Seeds BENCH_ISSUES findings x BENCH_URLS affected URLs (defaults 5000 x 50, the cap), then
 # times the view's reload against the two store reads it could be built on.
@@ -58,6 +59,10 @@ begin
     ms_per(RUNS) { store.probe_issues })
   printf("  Store#probe_issue_rows  %8.2f ms  (list projection: count taken in SQL)\n",
     ms_per(RUNS) { store.probe_issue_rows })
+  # What a data_version tick costs the tab when no finding moved (an own capture's commit):
+  # the moved? check, then the non-list refresh. It used to be a full reload.
+  printf("  unchanged tick          %8.2f ms  (issues_moved?(peers) + reload_meta)\n",
+    ms_per(RUNS) { raise "moved" if view.issues_moved?(store, peers: true); view.reload_meta(store) })
 ensure
   store.close
   File.delete?(path)

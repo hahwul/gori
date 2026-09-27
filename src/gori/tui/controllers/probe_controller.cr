@@ -457,12 +457,22 @@ module Gori::Tui
       refresh_from_store
     end
 
+    # data_version moved: a commit landed — this process's own (a capture, every ~750 ms while
+    # capturing, or the intercept heartbeat) or a peer's. The finding list is re-read only when
+    # it actually moved (the fingerprint is what sees a peer's write); everything else on the
+    # tab is cheap and is refreshed on every commit, as before.
     def on_external_change : Nil
-      refresh_from_store
+      store = @host.session.store
+      if @probe.issues_moved?(store, peers: true)
+        refresh_from_store
+      else
+        @probe.reload_meta(store)
+        @rules.reload(store)
+      end
     end
 
-    # Re-query the issue list from the store. Called from on_enter, data_version
-    # soft-sync, IssueEvent drain, and Runner's per-tick Store#probe_generation poll.
+    # Re-query the issue list from the store, unconditionally. Called from on_enter, and by
+    # the two gated paths below once they know the list moved.
     # Returns whether the number of listed rows CHANGED. The caller uses that to decide
     # between a full terminal repaint and the cell diff: a row added or removed can leave a
     # stale tail the diff will not repair, but a row whose contents merely changed cannot.
@@ -472,6 +482,16 @@ module Gori::Tui
       @probe.reload(store)
       @rules.reload(store)
       @probe.row_count != before
+    end
+
+    # The live-refresh paths — the IssueEvent drain and the Runner's per-tick
+    # `probe_generation` poll. Both fire for the SAME commit (the analyzer bumps the generation
+    # and then sends its event), and the data_version tick is a third signal for it, so each
+    # used to re-read the whole list: up to three reloads per tick for one write. At most one
+    # reload per generation now. Returns {reloaded, row count changed}.
+    def refresh_if_moved : {Bool, Bool}
+      return {false, false} unless @probe.issues_moved?(@host.session.store)
+      {true, refresh_from_store}
     end
 
     # Drain the analyzer's events (called each main-loop tick from the Runner).
@@ -520,7 +540,7 @@ module Gori::Tui
           @host.status("Probe: #{ev.message}") if Settings.notify_toast?
         end
       end
-      refresh_from_store if needs_refresh && @host.active_tab == :probe
+      refresh_if_moved if needs_refresh && @host.active_tab == :probe
       drained
     end
 

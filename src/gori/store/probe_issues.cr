@@ -321,6 +321,25 @@ module Gori
       @probe_generation += 1
     end
 
+    # A cheap "has probe_issues moved?" key for a reader that has to notice a PEER process's
+    # writes too — `probe_generation` counts this process's commits only, so an MCP
+    # `probe_dismiss` or a `gori run probe` against the same project never moves it.
+    #
+    # Every write path moves at least one of the three: an insert adds a row and a new id, a
+    # delete or a clear drops the count, and every UPDATE (re-hit, status change, bulk dismiss)
+    # stamps `last_seen` with the time of the write. The one write that moves none is
+    # `detach_flow_refs` nulling a `sample_flow_id` — a reader that acts on a sample flow reads
+    # the row fresh (`get_probe_issue`) rather than trusting a listed copy.
+    #
+    # Served from `idx_probe_issues_triage` as a covering scan, so it never walks the `affected`
+    # overflow pages: ~0.2 ms at 5k findings.
+    def probe_issues_fingerprint : {Int64, Int64, Int64}
+      @db.query_one("SELECT COUNT(*), COALESCE(MAX(id), 0), COALESCE(MAX(last_seen), 0) FROM probe_issues",
+        as: {Int64, Int64, Int64})
+    rescue
+      {-1_i64, -1_i64, -1_i64} # unreadable: differs from every real key, so a reader re-reads
+    end
+
     def count_probe_issues : Int32
       @db.scalar("SELECT COUNT(*) FROM probe_issues").as(Int64).to_i
     rescue
