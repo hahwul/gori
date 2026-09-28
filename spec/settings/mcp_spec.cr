@@ -169,6 +169,22 @@ describe "Settings mcp section" do
       end
     end
 
+    # `scope` was split out of `write` after both had shipped, so a file written before the
+    # split must not read as "scope allowed" — and a save from here must keep `write` off
+    # with `scope` on from reading back as both off.
+    it "reads a pre-split write:false as scope denied, and round-trips write off with scope on" do
+      with_mcp_home do
+        Gori::Settings.import_document(%({"mcp_permissions":{"write":false}}))
+        Gori::Settings.mcp_permitted?("scope").should be_false
+        Gori::Settings.set_mcp_permitted("scope", true)
+        doc = Gori::Settings.export_document(["mcp_permissions"])
+        Gori::Settings.mcp_denied_permissions = Set(String).new
+        Gori::Settings.import_document(doc)
+        Gori::Settings.mcp_permitted?("write").should be_false
+        Gori::Settings.mcp_permitted?("scope").should be_true
+      end
+    end
+
     it "keeps the current set for an absent or non-object section" do
       with_mcp_home do
         Gori::Settings.set_mcp_permitted("send", false)

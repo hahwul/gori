@@ -95,8 +95,9 @@ module Gori
     # - `permission` — the operator's coarse switch this tool sits behind, one of
     #   `Settings::MCP_PERMISSION_KEYS` (Preferences › AI › MCP permissions): `send` for a
     #   tool that dials a target or an OAST server (and the pollers of the jobs those start),
-    #   `intercept` for the tools that act on held traffic, `projects` for the ones that move
-    #   the binding or copy a project in or out, `write` for every other in-project write. A
+    #   `intercept` for the tools that act on held traffic, `scope` for the ones that change
+    #   scope rules, the scope lens or the sandbox, `projects` for the ones that move the
+    #   binding or copy a project in or out, `write` for every other in-project write. A
     #   denied group is left out of `tools/list` and refused with TOOL_DISABLED, the same two
     #   answers `--read-only` gives. Required on every `agent_action` tool; the rest of the
     #   writers that carry one are swept by spec/mcp/tool_permissions_spec.cr, which also names

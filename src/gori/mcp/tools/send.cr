@@ -1759,7 +1759,9 @@ module Gori
       # allow_unscoped:true walk straight past it), so the message must not offer that flag
       # as the fix.
       private def sandbox_blocked(reason : String, host : String, field : String) : Result
-        err("#{reason} — Sandbox mode blocks every request outside the scope allowlist; turn Sandbox off or add a scope include rule",
+        # With the scope writers switched off the agent can do neither, so it is told who can.
+        fix = serves?("set_sandbox") ? "turn Sandbox off or add a scope include rule" : "ask the operator to turn Sandbox off or add a scope include rule"
+        err("#{reason} — Sandbox mode blocks every request outside the scope allowlist; #{fix}",
           "SCOPE_BLOCKED", field: field,
           details: JSON.parse({"scope_decision" => "sandbox", "host" => host}.to_json))
       end

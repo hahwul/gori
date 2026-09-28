@@ -1,4 +1,5 @@
 require "../spec_helper"
+require "../support/mcp_harness"
 
 # Preferences › AI › MCP permissions: coarse switches over groups of `gori mcp` tools
 # (`Settings::MCP_PERMISSIONS`), declared per tool as `@[Tool(permission:)]`. A switched-off
@@ -128,6 +129,58 @@ describe "MCP tool permissions" do
     with_store do |store|
       denied_tools(store, "write").call("scan_js_endpoints", JSON.parse("{}")).error_code.should eq("TOOL_DISABLED")
       denied_tools(store, "send").call("scan_js_endpoints", JSON.parse("{}")).is_error.should be_false
+    end
+  end
+
+  # Scope and the sandbox are the fence around what an agent may reach, so they have their own
+  # switch: an operator can let an agent record issues without letting it move the fence.
+  it "switches the scope and sandbox writers with Change scope & sandbox, not Edit project data" do
+    with_store do |store|
+      tools = denied_tools(store, "scope")
+      %w[add_scope_rule update_scope_rule delete_scope_rule set_scope_enabled set_sandbox].each do |name|
+        tools.serves?(name).should be_false
+      end
+      tools.serves?("list_scope").should be_true
+      tools.serves?("create_note").should be_true
+      r = tools.call("set_sandbox", JSON.parse(%({"enabled":true})))
+      r.error_code.should eq("TOOL_DISABLED")
+      r.text.should contain("Change scope & sandbox")
+      tools.call("add_scope_rule", JSON.parse(%({"pattern":"example.com"}))).error_code.should eq("TOOL_DISABLED")
+      scope = Gori::Scope.load(store)
+      scope.sandbox?.should be_false
+      scope.rules.should be_empty
+
+      # Sandbox's own refusal names the operator, not two tools the agent cannot call.
+      scope.enable_sandbox.should be_true
+      blocked = tools.call("send_request", JSON.parse(%({"url":"http://out.test/","allow_unscoped":true})))
+      blocked.error_code.should eq("SCOPE_BLOCKED")
+      blocked.text.should contain("ask the operator to turn Sandbox off")
+      scope.disable_sandbox.should be_true
+
+      writes_off = denied_tools(store, "write")
+      writes_off.call("add_scope_rule", JSON.parse(%({"pattern":"example.com"}))).is_error.should be_false
+      writes_off.call("set_sandbox", JSON.parse(%({"enabled":true}))).is_error.should be_false
+      Gori::Scope.load(store).sandbox?.should be_true
+    end
+  end
+
+  # A hint naming add_scope_rule on a server that does not serve it sends the agent at a
+  # TOOL_DISABLED; it names the operator instead.
+  it "points the scope hints at the operator when the scope writers are switched off" do
+    with_store do |store|
+      id = mcp_seed_flow(store, "ex.test", "GET", "/", 200)
+      notes = ->(t : Gori::MCP::Tools) {
+        [
+          JSON.parse(t.call("list_scope", JSON.parse("{}")).text)["active_send_gate_note"].as_s,
+          JSON.parse(t.call("ql_explain", JSON.parse(%({"query":"scope:in"}))).text)["warnings"].as_a.join(" "),
+          JSON.parse(t.call("list_history", JSON.parse(%({"in_scope":true,"ids":[#{id}]}))).text)["filtered_out_note"].as_s,
+        ]
+      }
+      notes.call(tools_for(store)).each(&.should(contain("add_scope_rule")))
+      notes.call(denied_tools(store, "scope")).each do |off|
+        off.should_not contain("add_scope_rule")
+        off.should contain("ask the operator")
+      end
     end
   end
 
