@@ -40,9 +40,27 @@ format = "fuse_json"
 [og]
 type = "article"
 twitter_card = "summary_large_image"
-# Brand card rendered by tools/og-card/generate.sh; per-page override is an
-# `image` key in front matter.
+# Brand card rendered by tools/og-card/generate.sh. The two landing pages set
+# it as their `image`; every other page gets a generated card (below).
 default_image = "/images/og-card.png"
+
+# Per-page cards: the page title over the ink-and-gold wallpaper with the
+# gold mark at the top. Both committed inputs come from tools/og-card/.
+[og.auto_image]
+enabled = true
+style = "framed"
+background = "#080a11"
+text_color = "#f6f5f1"
+accent_color = "#c8a860"
+background_image = "tools/og-card/backdrop.png"
+# The backdrop is pre-dimmed in generate.sh; an overlay here would dim the mark too.
+overlay_opacity = 0.0
+# 0.0 would mean "auto" (a hard-edged 0.55 panel for `framed` over a photo);
+# 0.01 is the smallest value that switches the panel off.
+text_panel = 0.01
+# Hangul-only subset: Latin falls through to hwaro's bundled Space Grotesk,
+# and the CI image has no CJK font of its own (see hangul-font.sh).
+font_path = "tools/og-card/hangul-bold.otf"
 
 [markdown]
 emoji = true
