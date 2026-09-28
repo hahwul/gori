@@ -142,6 +142,65 @@ describe "MCP ask_operator (#1324)" do
 end
 
 # With a real project path the server can count the gori TUI windows that would show the card.
+# A registry home for a server bound the way `gori mcp` binds one, so switch_project works.
+private def with_bound_home(tag, &)
+  home = File.tempname(tag)
+  saved = ENV["GORI_HOME"]?
+  ENV["GORI_HOME"] = home
+  begin
+    yield Gori::ProjectRegistry.new(Gori::Paths.projects_dir)
+  ensure
+    saved ? (ENV["GORI_HOME"] = saved) : ENV.delete("GORI_HOME")
+    FileUtils.rm_rf(home)
+  end
+end
+
+private def bound_tools(project) : Gori::MCP::Tools
+  Gori::MCP::Tools.new(Gori::Store.open(project.db_path), true, false, project_name: project.name,
+    db_path: project.db_path, selection_source: "workspace-created")
+end
+
+describe "ask_operator across switch_project" do
+  # A switch opens a new Store on the same file, and the TUI offers the question again as soon
+  # as this process's marker is back — so its expiry clock must survive the switch.
+  it "still expires a question after a switch to the project already bound" do
+    with_bound_home("gori-ask-same") do |reg|
+      project = reg.create("target")
+      t = bound_tools(project)
+      begin
+        id = JSON.parse(ask(t, %({"question":"q","choices":["a","b"],"expires_in_minutes":1})).text)["id"].as_i64
+        t.call("switch_project", JSON.parse(%({"project":"target"}))).is_error.should be_false
+        t.expire_asked_questions((Time.utc + 2.minutes).to_unix_ms * 1000).should eq(1)
+        t.current_store.not_nil!.agent_messages_after(id, Process.pid.to_i64, 10).rows.map(&.outcome).should eq(["expired"])
+      ensure
+        t.release_presence
+        t.current_store.try(&.close)
+      end
+    end
+  end
+
+  it "keeps a question's clock while bound elsewhere, and expires it on the way back" do
+    with_bound_home("gori-ask-away") do |reg|
+      project = reg.create("target")
+      reg.create("other")
+      t = bound_tools(project)
+      begin
+        id = JSON.parse(ask(t, %({"question":"q","choices":["a","b"],"expires_in_minutes":5})).text)["id"].as_i64
+        t.call("switch_project", JSON.parse(%({"project":"other"}))).is_error.should be_false
+        # A due tick while away writes nothing into the project that is bound instead.
+        t.expire_asked_questions((Time.utc + 6.minutes).to_unix_ms * 1000).should eq(0)
+        t.current_store.not_nil!.events_after(0, 10).count(&.kind.==("agent_message")).should eq(0)
+        t.call("switch_project", JSON.parse(%({"project":"target"}))).is_error.should be_false
+        t.current_store.not_nil!.open_agent_questions(0_i64, Time.utc.to_unix_ms * 1000).map(&.id).should eq([id])
+        t.expire_asked_questions((Time.utc + 6.minutes).to_unix_ms * 1000).should eq(1)
+      ensure
+        t.release_presence
+        t.current_store.try(&.close)
+      end
+    end
+  end
+end
+
 describe "ask_operator reach" do
   it "says when no window is open that the next one will show it" do
     home = File.tempname("gori-ask-reach")

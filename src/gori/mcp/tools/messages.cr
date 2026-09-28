@@ -274,12 +274,17 @@ module Gori
         end
       end
 
-      # The questions THIS server asked (#1324), by id, with the store each was written to:
+      # The questions THIS server asked (#1324), by the project's db path and the question id:
       # the courier's tick closes one as expired once its time is up and nobody answered it.
       # The asking process is the one that expires it because it is the one that needs to
       # hear about it — with no gori TUI open, nothing else would ever say so — and the
       # answer row it writes then travels back to it by the same routes an answer does.
-      @asked_questions = {} of Int64 => {AgentQuestion, Store}
+      #
+      # Keyed by PATH, not by the Store object: a `switch_project` (back to this project, or to
+      # the one already bound) opens a new Store on the same file, and the TUI offers the
+      # question again as soon as this process's marker is back. The id alone is not a key
+      # either — another project's question can hold the same id.
+      @asked_questions = {} of {String, Int64} => AgentQuestion
 
       # #1324: a decision the agent needs from the operator, put to them as a choice card in
       # the TUI. Returns at once with the question's id; the answer arrives later as an
@@ -313,8 +318,8 @@ module Gori
         # Built from what was just written rather than read back: the expiry needs only the id,
         # the question line, the asker and the time, and a read-back that missed would leave a
         # question this server never expires.
-        @asked_questions[id] = {AgentQuestion.new(id, AgentReply.summary_line(question), nil, choices, default,
-          label, pid, expires_at, Time.utc.to_unix_ms * 1000), st}
+        @asked_questions[{question_key, id}] = AgentQuestion.new(id, AgentReply.summary_line(question), nil, choices, default,
+          label, pid, expires_at, Time.utc.to_unix_ms * 1000)
         Result.new(JSON.build do |j|
           j.object do
             j.field "ok", true
@@ -374,7 +379,14 @@ module Gori
 
       # Stop the expiry clock on question `id`: the courier read a row that closes it.
       def forget_question(id : Int64) : Nil
-        @asked_questions.delete(id)
+        @asked_questions.delete({question_key, id})
+      end
+
+      # The bound project's half of an `@asked_questions` key. "" for a server bound to a
+      # store with no path (`--db` given only as a Store, as the specs do), which no switch
+      # can reach, so it is only ever compared with itself.
+      private def question_key : String
+        @db_path || ""
       end
 
       # Close every question this server asked whose time is up, as expired. From the
@@ -382,26 +394,22 @@ module Gori
       # to the store's writer fiber, and an `ask_operator` call landing in that gap must not
       # be adding to a hash this is iterating.
       #
-      # A question asked against a store that is no longer the bound one (a `switch_project`
-      # since) is forgotten, not closed: that store is closed, and the TUI stops offering it
-      # once this process's marker has left that project. A write that did not commit (0) is
-      # kept for the next tick; a question something else closed first (-1) is done.
+      # A question asked in a project that is not the bound one (a `switch_project` since) is
+      # KEPT, not closed and not forgotten: its store is closed and this process's marker has
+      # left that project, so the TUI does not offer it — but a switch back puts the marker
+      # back and the question on the card again, and it must still expire then. A write that
+      # did not commit (0) is kept for the next tick; a question something else closed first
+      # (-1) is done.
       def expire_asked_questions(now_us : Int64 = Time.utc.to_unix_ms * 1000) : Int32
         return 0 if @asked_questions.empty?
-        current = @store
-        due = [] of {Int64, AgentQuestion, Store}
-        @asked_questions.each do |id, (q, st)|
-          due << {id, q, st} if !st.same?(current) || q.expired?(now_us)
-        end
+        return 0 unless st = @store
+        here = question_key
+        due = @asked_questions.select { |(path, _), q| path == here && q.expired?(now_us) }
         closed = 0
-        due.each do |(id, q, st)|
-          unless st.same?(current)
-            @asked_questions.delete(id)
-            next
-          end
+        due.each do |key, q|
           result = st.close_agent_question(q, AgentQuestion::OUTCOME_EXPIRED, nil, "agent", "mcp")
           next if result == 0
-          @asked_questions.delete(id)
+          @asked_questions.delete(key)
           closed += 1 if result > 0
         end
         closed
