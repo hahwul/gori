@@ -164,8 +164,7 @@ module Gori
             truthy = results[start + j]?
             falsy = results[start + j + 1]?
             j += 2
-            next unless truthy && falsy && truthy.ok? && falsy.ok?
-            next if truthy.incomplete? || falsy.incomplete?
+            next unless truthy && falsy && Evidence.complete?(truthy) && Evidence.complete?(falsy)
             return true if same?(fingerprint(truthy), base) && !same?(fingerprint(falsy), base)
           end
           false
@@ -178,8 +177,7 @@ module Gori
         private def stable_baseline(results : Array(Repeater::Result)) : {Int32, UInt64}?
           base1 = results[0]?
           base2 = results[1]?
-          return nil unless base1 && base1.ok? && base2 && base2.ok?
-          return nil if base1.incomplete? || base2.incomplete?
+          return nil unless base1 && base2 && Evidence.complete?(base1) && Evidence.complete?(base2)
           fp1 = fingerprint(base1)
           same?(fp1, fingerprint(base2)) ? fp1 : nil
         end

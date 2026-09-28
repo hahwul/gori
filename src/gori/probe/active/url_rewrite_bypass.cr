@@ -63,13 +63,12 @@ module Gori
         # results = [probe, control, control2].
         def detections_all(plan : Plan, results : Array(Repeater::Result), detail : Store::FlowDetail) : Array(Detection)
           probe = results[0]?
-          return [] of Detection unless probe && probe.ok?
+          return [] of Detection unless probe && Evidence.complete?(probe)
           # A TRUNCATED probe (origin closed early, or the capture ceiling) is `ok?` but its body
           # is short of what the origin framed, so `body_size` below is not the real size. The
           # whole finding is "the probe body differs from the root", and a truncation makes it
           # differ for a reason that is not a bypass — decline rather than report on a body the
           # origin never finished. (Mirrors NextjsActionNoAuth's incomplete guard.)
-          return [] of Detection if probe.incomplete?
           ps = probe_status(probe)
           return [] of Detection unless (200..299).includes?(ps)
           cs, csize = stable_root(results) || return [] of Detection
@@ -114,10 +113,9 @@ module Gori
         private def stable_root(results : Array(Repeater::Result)) : {Int32, Int32}?
           a = results[1]?
           b = results[2]?
-          return nil unless a && a.ok? && b && b.ok?
+          return nil unless a && b && Evidence.complete?(a) && Evidence.complete?(b)
           # A truncated control (ok? but short-bodied) has an unreliable size; comparing the probe
           # against it would judge a bypass on a body the origin never finished. Decline.
-          return nil if a.incomplete? || b.incomplete?
           fp = {probe_status(a), body_size(a)}
           fp == {probe_status(b), body_size(b)} ? fp : nil
         end

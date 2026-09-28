@@ -34,6 +34,16 @@ describe Gori::Probe::Passive::ApiDocsExposed do
     end
   end
 
+  it "finds a bounded OpenAPI spec whose paths object is past the normal body prefix" do
+    with_store do |store|
+      padding = "x" * (Gori::Probe::Passive::Context::BODY_CAP + 1024)
+      json = %({"openapi":"3.0.3","info":{"description":"#{padding}"},"paths":{"/late":{}}})
+      probe_codes_of(probe_analyze(store,
+        resp_head: "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n",
+        content_type: "application/json", body: json)).should contain("api_docs_exposed")
+    end
+  end
+
   it "does not flag ordinary pages or JSON that merely names the format" do
     with_store do |store|
       probe_codes_of(probe_analyze_html(store, "<h1>Welcome</h1><p>Our API is documented elsewhere.</p>"))

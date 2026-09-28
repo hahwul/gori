@@ -104,13 +104,12 @@ module Gori
             single = results[2 + 2 * i]?
             double = results[3 + 2 * i]?
             next unless single && double
-            next unless single.ok? && double.ok? # a failed leg ⇒ incomplete comparison, skip
+            next unless Evidence.complete?(single) && Evidence.complete?(double)
             # A TRUNCATED leg (origin closed early, or the capture ceiling) is `ok?` but carries
             # a short body, so its length/error-class fingerprint is not the whole response. A
             # flake landing on the `\` leg and not its `\\` twin reproduces this rule's exact
             # asymmetry with no escaping involved — the false positive NextjsActionNoAuth guards
-            # against with the same `incomplete?` check. Skip the param rather than report it.
-            next if single.incomplete? || double.incomplete?
+            # against with the same completeness check. Skip the param rather than report it.
             sa = attrs(single, with_size)
             da = attrs(double, with_size)
             # The asymmetry that marks an escape being interpreted. A reflecting/echoing endpoint
@@ -164,11 +163,10 @@ module Gori
         private def stable_baseline(results : Array(Repeater::Result)) : { {Int32, String?, Int32}, Bool }?
           first = results[0]?
           second = results[1]?
-          return nil unless first && first.ok? && second && second.ok?
+          return nil unless first && second && Evidence.complete?(first) && Evidence.complete?(second)
           # A truncated baseline (ok? but short-bodied) cannot anchor a length comparison: its
           # fingerprint is a fraction of the real response, so every probe would diff against a
           # phantom. Decline rather than measure the endpoint against a body it never finished.
-          return nil if first.incomplete? || second.incomplete?
           sized = attrs(first, true)
           return {sized, true} if sized == attrs(second, true)
           blind = attrs(first, false)

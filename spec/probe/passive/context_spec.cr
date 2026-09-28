@@ -132,4 +132,18 @@ describe Gori::Probe::Passive::Context do
       ctx.client_scripts_nocomment.should be_empty
     end
   end
+
+  describe "#structured_body_text" do
+    it "extends JSON only when a structured rule asks for it" do
+      body = %({"openapi":"3.0.3","info":{"description":"#{"x" * 70_000}"},"paths":{}})
+      ctx = ctx_for(body.to_slice, "application/json", "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n")
+      ctx.body_text.not_nil!.bytesize.should eq(Passive::Context::BODY_CAP)
+      ctx.structured_body_text.not_nil!.bytesize.should be > Passive::Context::BODY_CAP
+      ctx.structured_body_text.should eq(ctx.structured_body_text)
+    end
+
+    it "does not decode non-JSON bodies through the structured path" do
+      ctx_for("x".to_slice, "text/plain", TEXT_HEAD).structured_body_text.should be_nil
+    end
+  end
 end

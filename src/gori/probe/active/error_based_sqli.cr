@@ -148,7 +148,7 @@ module Gori
           hits = [] of String
           plan.params.each_with_index do |param, i|
             probe = results[2 + i]?
-            next unless probe && probe.ok?
+            next unless probe && Evidence.complete?(probe)
             probe_body = decoded_text(probe)
             next if probe_body.empty?
             sig = new_db_error(probe_body, base_body, base_low)
@@ -180,8 +180,7 @@ module Gori
         private def baseline_text(results : Array(Repeater::Result)) : String?
           base1 = results[0]?
           base2 = results[1]?
-          return nil unless base1 && base1.ok? && base2 && base2.ok?
-          return nil if base1.incomplete? || base2.incomplete?
+          return nil unless base1 && base2 && Evidence.complete?(base1) && Evidence.complete?(base2)
           "#{decoded_text(base1)}\n#{decoded_text(base2)}"
         end
 

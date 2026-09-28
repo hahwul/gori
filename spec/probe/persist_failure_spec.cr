@@ -1,4 +1,5 @@
 require "../spec_helper"
+require "../support/probe_harness"
 
 # A store whose issue write fails with a NON-DB error. DB::Error/SQLite3::Exception are
 # deliberately re-raised by the analyzer (they mean the project is unusable, not that one
@@ -32,6 +33,22 @@ private def with_failing_store(&)
     File.delete?(path)
     File.delete?("#{path}-wal")
     File.delete?("#{path}-shm")
+  end
+end
+
+module Gori::Probe
+  class Analyzer
+    def spec_analyzed : Set(Int64)
+      @analyzed
+    end
+
+    def spec_rescan_ws(flow_id : Int64, detail : Gori::Store::FlowDetail? = nil) : Bool
+      rescan_ws(flow_id, detail)
+    end
+
+    def spec_ws_hwm(flow_id : Int64) : Int64?
+      @ws_hwm[flow_id]?
+    end
   end
 end
 
@@ -73,6 +90,50 @@ describe "Probe::Analyzer#scan_detail persistence failure" do
       when timeout(5.seconds)
         fail "findings were dropped with no ErrorEvent"
       end
+    end
+  end
+
+  it "does not acknowledge a live flow whose passive write failed" do
+    with_failing_store do |store|
+      scope = Gori::Scope.load(store)
+      input = Channel(Gori::Store::FlowEvent).new(1)
+      analyzer = Gori::Probe::Analyzer.new(
+        store, scope, input, Gori::Probe::Mode::Passive, true)
+      detail = seed_flow(store)
+      analyzer.start
+      input.send(Gori::Store::FlowEvent.new(detail.row.id, :updated))
+
+      select
+      when ev = analyzer.events.receive
+        ev.should be_a(Gori::Probe::ErrorEvent)
+      when timeout(5.seconds)
+        fail "failed flow was not reported"
+      end
+      analyzer.spec_analyzed.should_not contain(detail.row.id)
+      analyzer.stop
+    end
+  end
+
+  it "does not advance the WebSocket cursor before its page is persisted" do
+    with_failing_store do |store|
+      head = "GET /ws HTTP/1.1\r\nHost: acme.test\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "acme.test", port: 443,
+        method: "GET", target: "/ws", http_version: "HTTP/1.1", head: head.to_slice,
+        source: Gori::FlowSource::Kind::Proxy))
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: id, status: 101,
+        head: "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n".to_slice,
+        body: nil, reason: "Switching Protocols", content_type: nil, duration_us: 1_i64))
+      store.insert_ws_message(id, "in", 1, "token=#{PROBE_AWS_KEY_ID}".to_slice)
+      detail = store.get_flow(id).not_nil!
+      analyzer = Gori::Probe::Analyzer.new(
+        store, Gori::Scope.load(store), Channel(Gori::Store::FlowEvent).new(1),
+        Gori::Probe::Mode::Passive, true)
+
+      analyzer.spec_rescan_ws(id, detail).should be_false
+      analyzer.spec_ws_hwm(id).should be_nil
+      analyzer.stop
     end
   end
 end

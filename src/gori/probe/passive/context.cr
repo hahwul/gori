@@ -17,6 +17,10 @@ module Gori
         # A larger ceiling used ONLY by the client-side rules: DOM sinks in real minified SPA
         # bundles routinely sit past the 64 KiB body_text prefix, so those rules decode more.
         CLIENT_BODY_CAP = 256 * 1024
+        # Structured JSON evidence gets the same bounded ceiling, but only when a rule asks for
+        # it after the ordinary prefix was inconclusive. This keeps the common body scan at
+        # BODY_CAP while allowing an OpenAPI `paths` object to sit after a large `components` block.
+        STRUCTURED_BODY_CAP = 256 * 1024
 
         getter detail : Store::FlowDetail
         getter ws_messages : Array(Store::WsMessage)
@@ -35,6 +39,8 @@ module Gori
         @operator_whole_text_done = false
         @client_body_text : String?
         @client_body_text_done = false
+        @structured_body_text : String?
+        @structured_body_text_done = false
         @client_scripts : Array(String)?
         @client_scripts_nocomment : Array(String)?
         @client_code : Array(String)?
@@ -295,6 +301,20 @@ module Gori
           return @client_body_text = nil unless html? || js?
           bytes = decoded_body
           @client_body_text = (bytes && !bytes.empty?) ? Utf8.text(bytes[0, {bytes.size, CLIENT_BODY_CAP}.min]) : nil
+        end
+
+        # A bounded, lazy extension for structured JSON rules. It deliberately re-decodes rather
+        # than widening `decoded_body` for every rule: BodyLeaks and the other broad scans retain
+        # their measured 64 KiB hot path, while a gated API-spec check can recover a marker that
+        # is legitimately late in a large document.
+        def structured_body_text : String?
+          return @structured_body_text if @structured_body_text_done
+          @structured_body_text_done = true
+          return @structured_body_text = nil unless ct_low.try(&.includes?("json"))
+          decoded, _ = Proxy::Codec::ContentDecode.decode(
+            @detail.response_head, @detail.response_body, STRUCTURED_BODY_CAP)
+          bytes = decoded || @detail.response_body
+          @structured_body_text = (bytes && !bytes.empty?) ? Utf8.text(bytes[0, {bytes.size, STRUCTURED_BODY_CAP}.min]) : nil
         end
 
         # RAW executable JS fragments (inline <script> bodies for HTML, whole body for JS),

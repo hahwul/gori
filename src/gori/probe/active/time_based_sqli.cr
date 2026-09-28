@@ -160,7 +160,7 @@ module Gori
         private def stable_baseline(results : Array(Repeater::Result)) : Int64?
           base1 = results[0]?
           base2 = results[1]?
-          return nil unless base1 && base1.ok? && base2 && base2.ok?
+          return nil unless base1 && base2 && Evidence.complete?(base1) && Evidence.complete?(base2)
           d1 = base1.duration_us
           d2 = base2.duration_us
           return nil if (d1 - d2).abs >= MIN_SHORT_DELTA_US
@@ -178,7 +178,7 @@ module Gori
             long = results[start + fam * 2 + 1]?
             j = fam
             fam += 1
-            next unless short && long && short.ok? && long.ok?
+            next unless short && long && Evidence.complete?(short) && Evidence.complete?(long)
             next unless scales?(t0, short.duration_us, long.duration_us)
             return FAMILIES[j]?.try(&.label) || "sqli"
           end

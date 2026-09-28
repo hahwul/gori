@@ -59,9 +59,20 @@ module Gori
               next unless pattern.matches?(text)
               return emit(acc, ctx, label, severity)
             end
-          elsif json && SPEC_VERSION.matches?(text) && SPEC_PATHS.matches?(text)
-            emit(acc, ctx, "OpenAPI/Swagger specification", Store::Severity::Low)
+          elsif json
+            check_json(ctx, acc, text)
           end
+        end
+
+        private def check_json(ctx : Context, acc : Array(Detection), text : String) : Nil
+          # A normal JSON response stays on the shared 64 KiB prefix. Only a capped prefix
+          # that does not already contain the complete structural pair gets the bounded second
+          # look, preventing broad large-body work while recovering late `paths` objects.
+          if ctx.body_capped? && !(SPEC_VERSION.matches?(text) && SPEC_PATHS.matches?(text))
+            text = ctx.structured_body_text
+          end
+          return unless text && SPEC_VERSION.matches?(text) && SPEC_PATHS.matches?(text)
+          emit(acc, ctx, "OpenAPI/Swagger specification", Store::Severity::Low)
         end
 
         private def emit(acc : Array(Detection), ctx : Context, label : String, sev : Store::Severity) : Nil

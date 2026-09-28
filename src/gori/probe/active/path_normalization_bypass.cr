@@ -65,7 +65,7 @@ module Gori
           control = results[plan.params.size]?
           # No usable control ⇒ no attribution. Refuse rather than fall back to the captured status:
           # that fallback IS the false positive this leg exists to remove.
-          return [] of Detection unless control && control.ok?
+          return [] of Detection unless control && Evidence.complete?(control)
           # The canonical path serves 2xx now too ⇒ the gate is simply open (a transient/rate-limited
           # 403 that cleared), and every variant "flip" below is that same clearing, not a bypass.
           return [] of Detection if (200..299).includes?(probe_status(control))
@@ -73,7 +73,7 @@ module Gori
           hits = [] of String
           plan.params.each_with_index do |param, i|
             r = results[i]?
-            next unless r && r.ok?
+            next unless r && Evidence.complete?(r)
             next unless (200..299).includes?(probe_status(r))
             hits << param.name
           end

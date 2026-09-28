@@ -740,6 +740,28 @@ end
 # reopen idiom `host_overrides_wiring_spec.cr` uses.
 module Gori::Probe
   class Analyzer
+    def spec_enqueue_active(detail : Gori::Store::FlowDetail) : Bool
+      maybe_enqueue_active(detail)
+    end
+
+    def spec_active_retry : Set(Int64)
+      @active_retry
+    end
+
+    def spec_fill_active_queue(detail : Gori::Store::FlowDetail, count : Int32) : Int32
+      opts = Gori::Probe::Active::Options::DEFAULT
+      sent = 0
+      count.times do
+        select
+        when @active_jobs.send(ActiveTask.new(detail, opts, [] of String))
+          sent += 1
+        else
+          break
+        end
+      end
+      sent
+    end
+
     def spec_worker_task(rule : Active::Rule, plan : Active::Plan, detail : Store::FlowDetail) : Int32?
       execute_active(rule, plan, detail, worker_sender(detail))
     end
@@ -826,6 +848,35 @@ describe "Probe::Analyzer active worker sender" do
       end
     ensure
       origin.close
+    end
+  end
+end
+
+describe "Probe::Analyzer active queue admission" do
+  it "coalesces each flow and retains overflow for a later retry" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "acme.test")
+      analyzer = Gori::Probe::Analyzer.new(store, scope,
+        Channel(Gori::Store::FlowEvent).new(1), Gori::Probe::Mode::Active, true)
+
+      first = probe_capture_flow(store,
+        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n",
+        target: "/active-first?q=hi", body: "<p>ok</p>")
+      second = probe_capture_flow(store,
+        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n",
+        target: "/active-second?q=hi", body: "<p>ok</p>")
+      analyzer.spec_enqueue_active(first).should be_true
+      filled = analyzer.spec_fill_active_queue(first, Gori::Probe::Analyzer::ACTIVE_QUEUE - 1)
+
+      # A flow occupies one queue slot even though it may expand into many active rules on the
+      # worker. The overflowing distinct surface is not silently lost when the bounded queue is full.
+      (filled + 1).should eq(Gori::Probe::Analyzer::ACTIVE_QUEUE)
+      analyzer.spec_active_retry.should be_empty
+      analyzer.spec_enqueue_active(second).should be_false
+      analyzer.spec_active_retry.should contain(second.row.id)
+      analyzer.spec_enqueue_active(first).should be_false
+      analyzer.stop
     end
   end
 end
