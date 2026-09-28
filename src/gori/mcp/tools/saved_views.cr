@@ -160,13 +160,15 @@ module Gori
         return scope if scope.is_a?(Result)
         found = find_view(name, scope)
         return found if found.is_a?(Result)
+        # THIS project's pointer is cleared first (see `clear_active_if`). Only a GLOBAL view can
+        # be named from another project, and that pointer stays inert: global ids come from a
+        # monotonic counter and are never reused. A project view's id is a rowid and is not.
+        unless SavedViews.clear_active_if(store, found)
+          return busy("failed to reset the project's active view, so the view was NOT deleted (store busy or unwritable); retry")
+        end
         unless SavedViews.remove(store, found)
           return busy(scope == "global" ? "failed to delete global view (settings not writable)" : "failed to delete view (store busy or unwritable)")
         end
-        # THIS project's pointer is cleared (see `clear_active_if`). Only a GLOBAL view can be
-        # named from another project, and that pointer stays inert: global ids come from a
-        # monotonic counter and are never reused. A project view's id is a rowid and is not.
-        SavedViews.clear_active_if(store, found)
         Result.new(JSON.build do |j|
           j.object do
             j.field "deleted", found.name
@@ -216,22 +218,24 @@ module Gori
         return busy("failed to move view to #{dest} — it was left where it was") unless moved
         # The move minted a new id in the destination store, so a `history_view` pointer naming
         # the old one is now dangling.
-        repoint_active_view(view, moved)
-        view_result(moved, "moved")
+        # The move itself committed, so a refused re-point is a warning on the success, never a
+        # retryable error: the same call would now find the view already moved.
+        warning = SavedViews.repoint_active_if(store, view, moved) ? nil : MOVE_POINTER_WARNING
+        view_result(moved, "moved", warning)
       end
 
-      private def repoint_active_view(from : SavedViews::View, to : SavedViews::View) : Nil
-        return unless store.setting(SavedViews::ACTIVE_KEY) == from.key
-        SavedViews.set_active(store, to)
-      end
+      private MOVE_POINTER_WARNING = "the view moved, but the project's active view was NOT re-pointed to it " \
+                                     "(store busy or unwritable) and still names its old id, which the next " \
+                                     "project view created can take and turn on"
 
-      private def view_result(view : SavedViews::View, action : String) : Result
+      private def view_result(view : SavedViews::View, action : String, warning : String? = nil) : Result
         Result.new(JSON.build do |j|
           j.object do
             j.field action, view.name
             j.field "name", view.name
             j.field "query", view.query
             j.field "scope", view.scope
+            j.field "warning", warning if warning
           end
         end)
       end

@@ -328,14 +328,25 @@ module Gori
       store.set_setting(ACTIVE_KEY, v.key)
     end
 
-    # After `view` is deleted: point this project back at All when its SAVED pointer names the
+    # Before `view` is deleted: point this project back at All when its SAVED pointer names the
     # view, and leave it alone otherwise. The saved setting, never a process's own lens — a
     # peer may have pointed the project at this view since, or away from it. A project view's
     # id is a rowid that the next view created can take, so a pointer left naming it would
-    # turn that view on. Returns false only when a needed write did not commit.
+    # turn that view on. Returns false only when a needed write did not commit, and the caller
+    # then deletes nothing: cleared first, a failure leaves the view and its pointer as they
+    # were and the same delete can be retried, where cleared after, it left a pointer nothing
+    # could reset.
     def self.clear_active_if(store : Store, view : View) : Bool
       return true unless store.setting(ACTIVE_KEY) == view.key
       set_active(store, nil)
+    end
+
+    # After a move (`set_scope`) minted `to` a new id: point this project's SAVED pointer at it
+    # when it named `from`, which no longer resolves (and, for a project view, is a rowid the
+    # next view created can take). Returns false only when a needed write did not commit.
+    def self.repoint_active_if(store : Store, from : View, to : View) : Bool
+      return true unless store.setting(ACTIVE_KEY) == from.key
+      set_active(store, to)
     end
 
     # --- scope-aware CRUD --------------------------------------------------------------------

@@ -402,6 +402,42 @@ describe Gori::SavedViews do
         end
       end
     end
+
+    # The callers delete only on true, so a refused write must say so rather than read as done.
+    it "answers false, and changes nothing, when the pointer write does not commit" do
+      with_globals do
+        with_store do |store|
+          store.insert_saved_view("gone", "status:500")
+          gone = Gori::SavedViews.merged(store).find!(&.name.==("gone"))
+          Gori::SavedViews.set_active(store, gone).should be_true
+          block_active_view_writes(store)
+          Gori::SavedViews.clear_active_if(store, gone).should be_false
+          store.setting(Gori::SavedViews::ACTIVE_KEY).should eq(gone.key)
+        end
+      end
+    end
+  end
+
+  describe ".repoint_active_if" do
+    it "moves the saved pointer to the moved view, and answers false when that does not commit" do
+      with_globals do
+        with_store do |store|
+          store.insert_saved_view("here", "status:500")
+          here = Gori::SavedViews.merged(store).find!(&.name.==("here"))
+          Gori::SavedViews.set_active(store, here).should be_true
+          moved = Gori::SavedViews.set_scope(store, here, "global").not_nil!
+          block_active_view_writes(store)
+          Gori::SavedViews.repoint_active_if(store, here, moved).should be_false
+          store.setting(Gori::SavedViews::ACTIVE_KEY).should eq(here.key)
+          unblock_active_view_writes(store)
+          Gori::SavedViews.repoint_active_if(store, here, moved).should be_true
+          store.setting(Gori::SavedViews::ACTIVE_KEY).should eq(moved.key)
+          # A pointer that names some other view is not this move's to change.
+          Gori::SavedViews.repoint_active_if(store, here, Gori::SavedViews.all_view).should be_true
+          store.setting(Gori::SavedViews::ACTIVE_KEY).should eq(moved.key)
+        end
+      end
+    end
   end
 
   describe "write-commit reporting" do

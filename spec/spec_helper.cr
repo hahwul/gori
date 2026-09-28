@@ -268,6 +268,19 @@ def reissue_rowids(store : Gori::Store, table : String = "flows") : Nil
   store.@db.exec("DELETE FROM sqlite_sequence WHERE name = ?", table)
 end
 
+# Refuse every write of the project's active-view pointer (`SavedViews::ACTIVE_KEY`), the shape
+# of a busy store for that one setting, until `unblock_active_view_writes`.
+def block_active_view_writes(store : Gori::Store) : Nil
+  {"insert", "update"}.each do |op|
+    store.@db.exec("CREATE TRIGGER block_active_view_#{op} BEFORE #{op.upcase} ON settings " \
+                   "WHEN NEW.key = '#{Gori::SavedViews::ACTIVE_KEY}' BEGIN SELECT RAISE(ABORT, 'blocked'); END")
+  end
+end
+
+def unblock_active_view_writes(store : Gori::Store) : Nil
+  {"insert", "update"}.each { |op| store.@db.exec("DROP TRIGGER block_active_view_#{op}") }
+end
+
 # `with_store` for an example that writes the project env or bindings layer: the
 # process-global `Settings.project_env_vars` and `Env.layer` are put back on the way out
 # and the highlight revision bumped, so a `$KEY` an example set cannot leak into the next

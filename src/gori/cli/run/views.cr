@@ -200,15 +200,18 @@ module Gori
 
         with_views_store(project_name, db_path) do |store|
           view = views_find_or_abort(store, name, scope, "rm")
-          unless SavedViews.remove(store, view)
-            abort "gori run views rm: failed to delete the view (#{views_write_hint(scope)})"
-          end
           # A project pointing at this view keeps a `history_view` key naming it. THIS project's
-          # is cleared (see `clear_active_if`). Only a GLOBAL view can be named from another
+          # is cleared first (see `clear_active_if`). Only a GLOBAL view can be named from another
           # project, and that pointer stays inert: global ids come from a monotonic counter and
           # are never reused — the same reasoning `colormarker rm` records. A project view's id
           # is a rowid and is not.
-          SavedViews.clear_active_if(store, view)
+          unless SavedViews.clear_active_if(store, view)
+            abort "gori run views rm: failed to reset the project's active view, so nothing was deleted " \
+                  "(#{views_write_hint("project")})"
+          end
+          unless SavedViews.remove(store, view)
+            abort "gori run views rm: failed to delete the view (#{views_write_hint(scope)})"
+          end
           puts scope == "global" ? "Global view '#{view.name}' deleted — from every project." : "View '#{view.name}' deleted."
         end
       end
@@ -305,7 +308,10 @@ module Gori
           # The move minted a new id in the destination store, so a `history_view` key naming
           # the OLD one is now dangling. Re-point it rather than leaving the project to fall
           # back to All on the next open.
-          views_repoint_active(store, view, moved)
+          unless SavedViews.repoint_active_if(store, view, moved)
+            abort "gori run views scope: view '#{moved.name}' moved to #{dest}, but the project's active view " \
+                  "still names its old id (#{views_write_hint("project")}), which the next project view created can take"
+          end
           puts "View '#{moved.name}' moved to #{dest}."
         end
       end
@@ -370,12 +376,6 @@ module Gori
           abort "gori run views #{sub}: no #{scope} view named '#{name}' (it exists in another scope — pass --scope)"
         end
         abort "gori run views #{sub}: no view named '#{name}'"
-      end
-
-      private def self.views_repoint_active(store : Store, from : SavedViews::View,
-                                            to : SavedViews::View) : Nil
-        return unless store.setting(SavedViews::ACTIVE_KEY) == from.key
-        SavedViews.set_active(store, to)
       end
     end
   end

@@ -29,6 +29,9 @@ describe "Runner saved-view delete" do
     clear = body.index("SavedViews.clear_active_if(store, view)").not_nil!
     lens = body.index("if (active = history_controller.view.active_view) && active.key == view.key").not_nil!
     clear.should be < lens
+    # Cleared BEFORE the delete, and a refused write deletes nothing.
+    clear.should be < body.index("SavedViews.remove(store, view)").not_nil!
+    body.should contain("unless SavedViews.clear_active_if(store, view) && SavedViews.remove(store, view)")
     body.should_not contain("SavedViews.set_active(store, nil)")
   end
 end
