@@ -56,6 +56,19 @@ describe Gori::Store, "#1324 agent questions" do
     end
   end
 
+  # Its expiry row lands on the asker's next courier tick, which an open card can outlast;
+  # an answer in that gap would reach an agent already told the question comes back expired.
+  it "refuses an answer or a dismissal past the question's expiry, but not the expiry itself" do
+    with_store do |store|
+      past = Time.utc.to_unix_ms * 1000 - 60_000_000
+      q = ask(store, expires_at: past)
+      store.close_agent_question(q, Gori::AgentQuestion::OUTCOME_ANSWERED, "yes", "operator", "tui").should eq(-1)
+      store.close_agent_question(q, Gori::AgentQuestion::OUTCOME_DISMISSED, nil, "operator", "tui").should eq(-1)
+      store.events_after(0, 10).count(&.kind.==("agent_message")).should eq(0)
+      store.close_agent_question(q, Gori::AgentQuestion::OUTCOME_EXPIRED, nil, "agent", "mcp").should be > 0
+    end
+  end
+
   it "names a dismissal and an expiry in the message text" do
     with_store do |store|
       a = ask(store)

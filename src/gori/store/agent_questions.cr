@@ -129,9 +129,15 @@ module Gori
     # name who closed it: the operator in the TUI, or the asking server's expiry.
     #
     # Answers the message id, 0 when the write did not commit (retryable), or -1 when the
-    # question was already closed — by another window, or by an expiry that landed first.
+    # question was already closed — by another window, or by an expiry that landed first —
+    # or when an answer or a dismissal comes after `expires_at`. The asker was told an
+    # unanswered question comes back expired, and its expiry row lands on the courier's next
+    # tick, which a card left open (or an asker bound elsewhere for a while) can outlast; an
+    # "answered" written in that gap reaches an agent that has already been told otherwise.
     def close_agent_question(question : AgentQuestion, outcome : String, answer : String?,
-                             source : String, actor : String, from_tab : String? = nil) : Int64
+                             source : String, actor : String, from_tab : String? = nil,
+                             now_us : Int64 = Time.utc.to_unix_ms * 1000) : Int64
+      return -1_i64 if outcome != AgentQuestion::OUTCOME_EXPIRED && question.expired?(now_us)
       text =
         case outcome
         when AgentQuestion::OUTCOME_ANSWERED  then answer || ""
