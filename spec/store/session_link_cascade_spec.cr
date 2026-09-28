@@ -123,7 +123,7 @@ end
 # DELETE matches zero rows. What this example actually pins is that the delete still works and
 # is harmless with the extra statement in it, so the line does not rot before the day it
 # matters. If a `Sequencer` variant is ever added, replace this with the real fuzz/miner shape
-# above — and give sequencer_sessions the V10 AUTOINCREMENT rebuild it was left out of.
+# above; the ids are already AUTOINCREMENT (V41).
 describe "delete_sequencer_session" do
   it "deletes the session and is a no-op on entity_links, which cannot reference it" do
     with_store do |store|
