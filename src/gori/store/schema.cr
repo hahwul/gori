@@ -2134,10 +2134,15 @@ module Gori
       # and a `schema_version` write — and some builds turn it on by default (macOS's system
       # libsqlite3 does, checked), so it is lifted for these statements and put back. The
       # read-back of the cookie is the check that the bump landed (without it, the other
-      # connections would keep the old definition), the reparsed columns must match the old
-      # ones exactly, and `PRAGMA quick_check` must pass on every edited table — a text edit
-      # that reached anything but the rowid clause would fail the rows against it — or the
-      # savepoint is rolled back and the verified rebuild runs instead.
+      # connections would keep the old definition), and the reparsed columns must match the old
+      # ones exactly — or the savepoint is rolled back and the verified rebuild runs instead.
+      #
+      # Nothing here reads a row: every check is on the schema. `PRAGMA quick_check` did stand
+      # here, and it walks the whole table, bodies' overflow chains included — 10-16 s on a
+      # 3.3 GB History, measured, under the write lock a peer waits 5 s for. What it guarded (an
+      # edit landing somewhere other than the rowid clause) is what `in_place_eligible?` rules
+      # out before the edit, from the text alone: with the phrase present exactly once and first,
+      # the blind `replace()` can only extend the rowid clause.
       #
       # `tables` defaults to V39's; V40 passes the ones `in_place_eligible?` accepts.
       def self.autoincrement_in_place(conn : SQLite3::Connection,
@@ -2156,8 +2161,7 @@ module Gori
           conn.exec("PRAGMA schema_version = #{cookie + 1}")
           conn.exec("PRAGMA writable_schema = OFF")
           moved = conn.scalar("PRAGMA schema_version").as(Int64) == cookie + 1 &&
-                  tables.map { |table| column_shape(conn, table) } == shape &&
-                  tables.all? { |table| conn.query_all("PRAGMA quick_check(#{table})", as: String) == ["ok"] }
+                  tables.map { |table| column_shape(conn, table) } == shape
         rescue SQLite3::Exception
           moved = false
         end
@@ -2176,13 +2180,14 @@ module Gori
       # The stored CREATE text is the one gori wrote: its FIRST column is `id INTEGER PRIMARY KEY`,
       # spelled as V1 spells it, the phrase appears nowhere else in any case or spacing (the edit
       # is a blind `replace()`), there is no AUTOINCREMENT yet, and there is nothing a text edit
-      # could reach into unseen — no CHECK or GENERATED expression, no comment. ADD COLUMNs
+      # could reach into unseen — no CHECK or GENERATED expression, no comment — nor a WITHOUT
+      # ROWID tail, where SQLite refuses AUTOINCREMENT outright. ADD COLUMNs
       # append plain declarations, so every table any gori wrote passes; anything else, such as
       # a crafted archive, takes the verified rebuild.
       def self.in_place_eligible?(conn : DB::Connection, table : String) : Bool
         sql = conn.query_one?("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?", table, as: String)
         return false if sql.nil? || sql.includes?("--") || sql.includes?("/*")
-        return false if sql.matches?(/\b(CHECK|GENERATED|AUTOINCREMENT)\b/i)
+        return false if sql.matches?(/\b(CHECK|GENERATED|AUTOINCREMENT)\b/i) || sql.matches?(/\bWITHOUT\s+ROWID\b/i)
         sql.matches?(ROWID_DECLARATION) && sql.scan(/integer\s+primary\s+key/i).size == 1
       end
 

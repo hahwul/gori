@@ -48,12 +48,30 @@ describe Gori::MCP::Server do
         resp = mcp_drive(store, call)[0]
         resp["result"]["isError"].as_bool.should be_true
         text = resp["result"]["content"][0]["text"].as_s
-        text.should contain("ahead of the newest flow")
+        text.should contain("ahead of every flow id this project has issued (1)")
         text.should contain("since=0")
       end
     end
 
-    it "rejects a nonzero 'since' cursor while history is empty after a clear" do
+    # Since V39 an id is never reissued, so a cursor at the newest flow stays good through a
+    # delete of that flow or a clear: the next capture lands above it. Refusing it sent a tailing
+    # agent back to since=0 to re-read everything it had already seen.
+    it "keeps tailing from a cursor whose flow was deleted, or across a clear" do
+      with_store do |store|
+        3.times { |i| mcp_seed_flow(store, "h.test", "GET", "/p#{i}", 200) }
+        top = store.max_flow_id.not_nil!
+        store.delete_flow(top).should be_true
+        tail = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_history","arguments":{"since":#{top}}}})
+        mcp_tool_payload(mcp_drive(store, tail)[0])["flows"].as_a.should be_empty
+
+        store.clear_flows.should be_true
+        mcp_tool_payload(mcp_drive(store, tail)[0])["flows"].as_a.should be_empty
+        fresh = mcp_seed_flow(store, "h.test", "GET", "/after-clear", 200)
+        mcp_tool_payload(mcp_drive(store, tail)[0])["flows"].as_a.map(&.["id"].as_i64).should eq([fresh])
+      end
+    end
+
+    it "rejects a 'since' cursor beyond every id the project has issued, even when it is empty" do
       with_store do |store|
         3.times { |i| mcp_seed_flow(store, "h.test", "GET", "/p#{i}", 200) }
         store.clear_flows.should be_true
@@ -62,8 +80,17 @@ describe Gori::MCP::Server do
         resp = mcp_drive(store, call)[0]
         resp["result"]["isError"].as_bool.should be_true
         text = resp["result"]["content"][0]["text"].as_s
-        text.should contain("history was cleared")
+        text.should contain("ahead of every flow id this project has issued (3)")
         text.should contain("since=0")
+      end
+    end
+
+    it "rejects a nonzero 'since' cursor on a project that never captured a flow" do
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_history","arguments":{"since":1}}})
+        resp = mcp_drive(store, call)[0]
+        resp["result"]["isError"].as_bool.should be_true
+        resp["result"]["content"][0]["text"].as_s.should contain("ahead of every flow id this project has issued (0)")
       end
     end
 

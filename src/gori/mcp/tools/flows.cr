@@ -51,20 +51,18 @@ module Gori
           return err("pass only one of 'since' (tail newer, oldest-first) or 'before_id' (page older, newest-first)",
             "INVALID_ARGUMENT", field: "since")
         end
-        # Before V39 `flows.id` was a REUSABLE rowid, so a clear (or deleting the newest flow)
-        # restarted numbering. Ids are never reissued now, so such a cursor would see the next
-        # capture after all, but one ahead of the maximum is still refused rather than trusted:
-        # it may come from another project, and saying so costs a caller one restart. During the
-        # empty interval `max_flow_id` is nil and used to skip that diagnosis, letting the caller
-        # keep a cursor that would strand it as soon as low ids came back. Treat that as stale too.
-        # `count?` distinguishes an empty table from a transient failure in `max_flow_id`.
+        # A forward cursor is judged against the highest id this project has EVER issued, not
+        # the newest surviving flow. Since V39 an id is never reissued, so a cursor at a deleted
+        # newest flow, or one held across a clear, still sees the next capture: refusing it (as
+        # the `MAX(id)` check did) sent a tailing agent back to since=0 to re-read everything.
+        # One beyond the high-water mark was not issued here as the project stands (another
+        # project's cursor, an older copy, a reset sequence), and waiting on it would answer `[]`
+        # until capture happened to climb past it, so it is still named. A failed read refuses
+        # nothing, as before.
         if (cur = since_id) && cur > 0
-          newest = store.max_flow_id
-          stale = newest ? cur > newest : store.count? == 0
-          if stale
-            newest_label = newest.try(&.to_s) || "none"
-            return err("cursor #{cur} is ahead of the newest flow #{newest_label} — history was cleared " \
-                       "or the flows were deleted; restart from since=0",
+          if (issued = store.flow_id_high_water) && cur > issued
+            return err("cursor #{cur} is ahead of every flow id this project has issued (#{issued}), " \
+                       "so it does not come from this project's history as it stands; restart from since=0",
               "INVALID_ARGUMENT", field: "since")
           end
         end
@@ -232,8 +230,8 @@ module Gori
               j.field "missing_ids", missing
               j.field "missing_ids_note",
                 "#{missing.size} of the #{ids.size} ids have no flow — deleted, or lost to retention. " \
-                "flows.id is a reusable rowid, so re-read the set from get_current_context rather " \
-                "than replaying a remembered one"
+                "A flow id is never reissued, so a missing id stays missing: re-read the set from " \
+                "get_current_context rather than replaying a remembered one"
             end
             unless filtered_out.empty?
               j.field "filtered_out_ids", filtered_out
@@ -626,8 +624,8 @@ module Gori
             "\"as_requested\", not newest-first) and duplicates collapse to the first occurrence. " \
             "`limit`, `before_id` and `since` do not apply — the list IS the page, and the two " \
             "cursors are refused beside it. An id with no row is REPORTED in `missing_ids`, never " \
-            "dropped: flow ids are REUSED after a delete, so re-read the set from " \
-            "get_current_context rather than replaying a remembered one. `query`/`view`/`in_scope`/`hide_static` " \
+            "dropped: a deleted flow's id is never reissued, so it stays missing — re-read the set " \
+            "from get_current_context rather than replaying a remembered one. `query`/`view`/`in_scope`/`hide_static` " \
             "still narrow WITHIN the set, and what they removed comes back as `filtered_out_ids` — " \
             "so a short answer always says which kind of short it is. " \
             "At most #{MCP_HISTORY_IDS_MAX} ids per call")

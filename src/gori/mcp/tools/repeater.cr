@@ -846,7 +846,7 @@ module Gori
         missing = ids.reject { |i| by_id.has_key?(i) }
         unless missing.empty?
           return err("no repeater with id #{missing.join(", ")} — NOTHING was changed. " \
-                     "Ids are per-project and are REUSED after a session is deleted, so re-read them " \
+                     "Ids are per-project and a deleted session's id is never reissued, so re-read them " \
                      "from get_repeater_context rather than replaying a remembered list",
             "NOT_FOUND", field: key,
             details: JSON.parse({"missing" => missing}.to_json))

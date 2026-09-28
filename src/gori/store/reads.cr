@@ -642,6 +642,20 @@ module Gori
       nil
     end
 
+    # The highest flow id this project has ever issued, deleted or not: `sqlite_sequence`'s
+    # high-water mark for `flows` (V39), or `MAX(id)` where that row is missing — before the
+    # first insert, or on a table whose sequence was reset. 0 when no flow was ever captured. The
+    # sequence is CAST because it is only ever an integer when gori wrote it, so a crafted TEXT
+    # value still bounds by its number instead of failing the read. nil on a failed read. A forward
+    # cursor at or below it is still valid after a delete or a clear, because the next capture is
+    # issued above it; only one beyond it cannot come from here.
+    def flow_id_high_water : Int64?
+      @db.query_one?("SELECT MAX(COALESCE((SELECT CAST(seq AS INTEGER) FROM sqlite_sequence WHERE name = 'flows'), 0), " \
+                     "COALESCE((SELECT MAX(id) FROM flows), 0))", as: Int64)
+    rescue
+      nil
+    end
+
     # Every table that cross-references a flow by id, in one place. `ids` nil = every flow is
     # going (a clear), so every reference is dangling; otherwise at most ID_CHUNK ids, detached
     # with one statement per table (see `delete_flows`).
