@@ -1698,41 +1698,37 @@ module Gori
         "ALTER TABLE h2_connections_v39 RENAME TO h2_connections",
       ]
 
-      V39_SEED = [
-        "DELETE FROM sqlite_sequence WHERE name IN ('flows', 'h2_connections')",
-        <<-SQL,
-          INSERT INTO sqlite_sequence (name, seq)
-            SELECT 'flows', COALESCE(MAX(v), 0) FROM (
-              SELECT MAX(id) AS v FROM flows
-              UNION ALL SELECT (SELECT rowid FROM flows_fts ORDER BY rowid DESC LIMIT 1)
-              UNION ALL SELECT MAX(flow_id) FROM ws_messages
-              UNION ALL SELECT MAX(flow_id) FROM js_refs
-              UNION ALL SELECT MAX(flow_id) FROM js_ref_scans
-              UNION ALL SELECT MAX(flow_id) FROM issues
-              UNION ALL SELECT MAX(flow_id) FROM repeaters
-              UNION ALL SELECT MAX(flow_id) FROM fuzz_sessions
-              UNION ALL SELECT MAX(flow_id) FROM miner_sessions
-              UNION ALL SELECT MAX(flow_id) FROM sequencer_sessions
-              UNION ALL SELECT MAX(flow_id) FROM issue_retest_run_steps
-              UNION ALL SELECT MAX(flow_id) FROM events
-              UNION ALL SELECT MAX(flow_id) FROM intercept_held
-              UNION ALL SELECT MAX(flow_id) FROM probe_oast_probes
-              UNION ALL SELECT MAX(sample_flow_id) FROM probe_issues
-              UNION ALL SELECT MAX(ref_id) FROM entity_links WHERE ref_kind = 'flow'
-              UNION ALL SELECT MAX(ref_id) FROM issue_retest_steps WHERE ref_kind = 'flow'
-              UNION ALL SELECT MAX(ref_id) FROM issue_retest_run_steps WHERE ref_kind = 'flow'
-              UNION ALL SELECT MAX(ABS(source_id)) FROM issue_evidence WHERE source_kind = 'flow'
-            )
-          SQL
-        <<-SQL,
-          INSERT INTO sqlite_sequence (name, seq)
-            SELECT 'h2_connections', COALESCE(MAX(v), 0) FROM (
-              SELECT MAX(id) AS v FROM h2_connections
-              UNION ALL SELECT MAX(h2_conn_id) FROM flows
-              UNION ALL SELECT MAX(conn_id) FROM h2_frames
-            )
-          SQL
-      ]
+      # The same filtered seed V40 uses (`Schema.seed_sql`): a crafted archive's TEXT, REAL or
+      # top-of-int64 value in one of these columns would otherwise win the maximum, and hide the
+      # real references, or leave every later capture failing with SQLITE_FULL. `magnitude`, not
+      # `ABS`, which raises on the one int64 it cannot negate and would abort the upgrade. Each ref
+      # keeps its seek: rowid, `idx_flows_h2_conn` (never the row, whose `h2_conn_id` sits after
+      # the bodies), and the FTS index read from its top end.
+      V39_SEED = seed_sql("flows", [
+        "SELECT id AS v FROM flows",
+        "SELECT rowid AS v FROM flows_fts WHERE rowid < #{SEED_CEILING} ORDER BY rowid DESC LIMIT 1",
+        "SELECT flow_id AS v FROM ws_messages",
+        "SELECT flow_id AS v FROM js_refs",
+        "SELECT flow_id AS v FROM js_ref_scans",
+        "SELECT flow_id AS v FROM issues",
+        "SELECT flow_id AS v FROM repeaters",
+        "SELECT flow_id AS v FROM fuzz_sessions",
+        "SELECT flow_id AS v FROM miner_sessions",
+        "SELECT flow_id AS v FROM sequencer_sessions",
+        "SELECT flow_id AS v FROM issue_retest_run_steps",
+        "SELECT flow_id AS v FROM events",
+        "SELECT flow_id AS v FROM intercept_held",
+        "SELECT flow_id AS v FROM probe_oast_probes",
+        "SELECT sample_flow_id AS v FROM probe_issues",
+        "SELECT ref_id AS v FROM entity_links WHERE ref_kind = 'flow'",
+        "SELECT ref_id AS v FROM issue_retest_steps WHERE ref_kind = 'flow'",
+        "SELECT ref_id AS v FROM issue_retest_run_steps WHERE ref_kind = 'flow'",
+        "SELECT #{magnitude("source_id")} AS v FROM issue_evidence WHERE source_kind = 'flow'",
+      ]) + seed_sql("h2_connections", [
+        "SELECT id AS v FROM h2_connections",
+        "SELECT h2_conn_id AS v FROM flows",
+        "SELECT conn_id AS v FROM h2_frames",
+      ])
 
       V39 = V39_COPY + V39_SWAP + V39_SEED
 
@@ -1761,23 +1757,28 @@ module Gori
         end
 
         # After EVERY swap, because a ref can name another rebuilt table by its final name.
-        # Only an integer below SEED_CEILING counts, filtered inside each ref BEFORE its maximum
-        # is taken, so one odd value cannot hide the real ones beside it. No gori issues ids at
-        # the ceiling, and a sequence at the top of the int64 range would make every later
-        # insert fail with SQLITE_FULL; text or a REAL is not an id at all. SQLite still never
-        # hands out an id at or below `MAX(id)`. A ref over one indexed column keeps its
-        # min/max lookup: the subquery flattens to `MAX(col) … WHERE col < ceiling`.
         def seed : Array(String)
-          values = (["SELECT id AS v FROM #{table}"] + refs).join("\n              UNION ALL ") do |ref|
-            "SELECT MAX(v) AS v FROM (#{ref}) WHERE v < #{SEED_CEILING} AND typeof(v) = 'integer'"
-          end
-          ["DELETE FROM sqlite_sequence WHERE name = '#{table}'",
-           "INSERT INTO sqlite_sequence (name, seq)\n" \
-           "  SELECT '#{table}', COALESCE(MAX(v), 0) FROM (\n              #{values}\n  )"]
+          Schema.seed_sql(table, ["SELECT id AS v FROM #{table}"] + refs)
         end
       end
 
       SEED_CEILING = 1_i64 << 62
+
+      # Start `table`'s `sqlite_sequence` row at the highest of `refs`, one `SELECT <value> AS v
+      # FROM …` each (V39 and V40 both). Only an integer below SEED_CEILING counts, filtered inside
+      # each ref BEFORE its maximum is taken, so one odd value cannot hide the real ones beside it.
+      # No gori issues ids at the ceiling, and a sequence at the top of the int64 range would make
+      # every later insert fail with SQLITE_FULL; text or a REAL is not an id at all. SQLite still
+      # never hands out an id at or below `MAX(id)`. A ref over one indexed column keeps its
+      # min/max lookup: the subquery flattens to `MAX(col) … WHERE col < ceiling`.
+      def self.seed_sql(table : String, refs : Array(String)) : Array(String)
+        values = refs.join("\n              UNION ALL ") do |ref|
+          "SELECT MAX(v) AS v FROM (#{ref}) WHERE v < #{SEED_CEILING} AND typeof(v) = 'integer'"
+        end
+        ["DELETE FROM sqlite_sequence WHERE name = '#{table}'",
+         "INSERT INTO sqlite_sequence (name, seq)\n" \
+         "  SELECT '#{table}', COALESCE(MAX(v), 0) FROM (\n              #{values}\n  )"]
+      end
 
       # `ABS` raises on the one int64 it cannot negate; a negation there turns REAL instead, and
       # the seed drops it. Negative ids are DETACHED references (see `delete_repeater`).
