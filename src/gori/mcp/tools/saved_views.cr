@@ -160,19 +160,25 @@ module Gori
         return scope if scope.is_a?(Result)
         found = find_view(name, scope)
         return found if found.is_a?(Result)
-        # THIS project's pointer is cleared first (see `clear_active_if`). Only a GLOBAL view can
+        # THIS project's pointer is kept off it (see `SavedViews.delete`). Only a GLOBAL view can
         # be named from another project, and that pointer stays inert: global ids come from a
         # monotonic counter and are never reused. A project view's id is a rowid and is not.
-        unless SavedViews.clear_active_if(store, found)
+        warning = nil.as(String?)
+        case SavedViews.delete(store, found)
+        in SavedViews::DeleteOutcome::NotDeleted
           return busy("failed to reset the project's active view, so the view was NOT deleted (store busy or unwritable); retry")
-        end
-        unless SavedViews.remove(store, found)
-          return busy(scope == "global" ? "failed to delete global view (settings not writable)" : "failed to delete view (store busy or unwritable)")
+        in SavedViews::DeleteOutcome::RemoveRefused
+          what = scope == "global" ? "failed to delete global view (settings not writable)" : "failed to delete view (store busy or unwritable)"
+          return busy("#{what}; if it was the project's active view, that is All now")
+        in SavedViews::DeleteOutcome::PointerLeft
+          warning = VIEW_POINTER_LEFT
+        in SavedViews::DeleteOutcome::Deleted
         end
         Result.new(JSON.build do |j|
           j.object do
             j.field "deleted", found.name
             j.field "scope", found.scope
+            j.field "warning", warning if warning
           end
         end)
       end
@@ -223,6 +229,10 @@ module Gori
         warning = SavedViews.repoint_active_if(store, view, moved) ? nil : MOVE_POINTER_WARNING
         view_result(moved, "moved", warning)
       end
+
+      private VIEW_POINTER_LEFT = "the view was deleted, but another gori made it the project's active view meanwhile " \
+                                  "and that pointer could not be reset (store busy or unwritable): it names the deleted " \
+                                  "id, which the next project view created can take and turn on"
 
       private MOVE_POINTER_WARNING = "the view moved, but the project's active view was NOT re-pointed to it " \
                                      "(store busy or unwritable) and still names its old id, which the next " \

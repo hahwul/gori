@@ -201,16 +201,22 @@ module Gori
         with_views_store(project_name, db_path) do |store|
           view = views_find_or_abort(store, name, scope, "rm")
           # A project pointing at this view keeps a `history_view` key naming it. THIS project's
-          # is cleared first (see `clear_active_if`). Only a GLOBAL view can be named from another
+          # is kept off it (see `SavedViews.delete`). Only a GLOBAL view can be named from another
           # project, and that pointer stays inert: global ids come from a monotonic counter and
           # are never reused — the same reasoning `colormarker rm` records. A project view's id
           # is a rowid and is not.
-          unless SavedViews.clear_active_if(store, view)
+          case SavedViews.delete(store, view)
+          in SavedViews::DeleteOutcome::NotDeleted
             abort "gori run views rm: failed to reset the project's active view, so nothing was deleted " \
                   "(#{views_write_hint("project")})"
-          end
-          unless SavedViews.remove(store, view)
-            abort "gori run views rm: failed to delete the view (#{views_write_hint(scope)})"
+          in SavedViews::DeleteOutcome::RemoveRefused
+            abort "gori run views rm: failed to delete the view (#{views_write_hint(scope)}); " \
+                  "if it was the project's active view, that is All now"
+          in SavedViews::DeleteOutcome::PointerLeft
+            STDERR.puts "gori run views rm: warning: another gori made '#{view.name}' the project's active view " \
+                        "meanwhile and that pointer could not be reset (#{views_write_hint("project")}); it names " \
+                        "the deleted id, which the next project view created can take"
+          in SavedViews::DeleteOutcome::Deleted
           end
           puts scope == "global" ? "Global view '#{view.name}' deleted — from every project." : "View '#{view.name}' deleted."
         end
@@ -308,9 +314,12 @@ module Gori
           # The move minted a new id in the destination store, so a `history_view` key naming
           # the OLD one is now dangling. Re-point it rather than leaving the project to fall
           # back to All on the next open.
+          # The move itself committed, so a refused re-point is a warning with a success exit,
+          # never a failure: a retry would find the view already moved (MCP answers the same way).
           unless SavedViews.repoint_active_if(store, view, moved)
-            abort "gori run views scope: view '#{moved.name}' moved to #{dest}, but the project's active view " \
-                  "still names its old id (#{views_write_hint("project")}), which the next project view created can take"
+            STDERR.puts "gori run views scope: warning: the project's active view was not re-pointed to " \
+                        "'#{moved.name}' (#{views_write_hint("project")}) and still names its old id, which the " \
+                        "next project view created can take"
           end
           puts "View '#{moved.name}' moved to #{dest}."
         end

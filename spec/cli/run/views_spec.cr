@@ -139,15 +139,15 @@ describe "gori run history — the empty-listing sentence" do
   end
 end
 
-# The command ends in `abort`, so its order is pinned from the source: the active-view pointer is
-# reset BEFORE the delete, and a refused reset aborts with nothing deleted. After the delete, a
-# refused reset left a pointer at a project view's rowid under a "deleted" line.
+# The command ends in `abort`, so what it calls is pinned from the source: the one delete every
+# surface shares (`SavedViews.delete`, whose outcomes spec/saved_views_spec.cr drives), never a
+# bare remove that leaves the active-view pointer to a second write.
 describe "gori run views rm — the active-view pointer" do
-  it "resets the pointer first and deletes nothing when that does not commit" do
+  it "deletes through SavedViews.delete" do
     body = File.read("#{__DIR__}/../../../src/gori/cli/run/views.cr")
       .split("def self.cmd_views_rm", 2)[1].split("\n      end\n", 2)[0]
-    clear = body.index("unless SavedViews.clear_active_if(store, view)").not_nil!
-    clear.should be < body.index("SavedViews.remove(store, view)").not_nil!
+    body.should contain("case SavedViews.delete(store, view)")
+    body.should_not contain("SavedViews.remove(")
   end
 
   it "reports a move whose pointer could not follow it" do
