@@ -338,7 +338,9 @@ module Gori::Tui
       return render_too_small(screen, area) if box.w < 24 || box.h < 10
       Frame.card(screen, box, "PREFERENCES", border: Theme.border_focus)
       strip = Rect.new(box.x + 2, box.y + 2, box.w - 4, 1)
-      @strip_start = Chrome.render_tab_strip(screen, strip, GROUP_LABELS, @group, @on_strip, @strip_start)
+      # `bg: Theme.panel`: the strip sits inside the card, not on the canvas — the default
+      # painted each unselected group label on its own black band.
+      @strip_start = Chrome.render_tab_strip(screen, strip, GROUP_LABELS, @group, @on_strip, @strip_start, bg: Theme.panel)
       # `tee_divider`, not a bare hline: the seam now lands ├ and ┤ ON the card's side borders
       # instead of butting `─` straight into `│`, which is the whole reason frame.cr grew the
       # helper. Same focus tint as before.

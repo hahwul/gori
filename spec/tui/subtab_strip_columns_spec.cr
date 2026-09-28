@@ -93,6 +93,27 @@ describe "Chrome sub-tab strip — chip geometry in display columns" do
     backend.row(0)[seg.x + 1].should eq(CJK_LABEL[0])
   end
 
+  # `bg:` is the surface the strip sits on. Inside a card (the Preferences modal) the canvas
+  # default painted each inactive label on its own black band, flush to the text, while the
+  # pad and gap columns kept the card's colour — so every cell the strip paints outside a
+  # pill must take the surface, and the receded gold must be blended over it.
+  it "paints every non-pill cell on the surface it is handed" do
+    Theme.panel.should_not eq(Theme.bg) # else this example proves nothing
+    labels = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta"]
+    rect = Rect.new(0, 0, 24, 1) # narrow: the active chip scrolls the window, so both markers show
+    backend = MemoryBackend.new(rect.w, 1)
+    Screen.new(backend).fill(rect, Theme.panel)
+    start = Chrome.render_tab_strip(Screen.new(backend), rect, labels, 3, focused: false, bg: Theme.panel)
+    start.should be > 0
+    backend.row(0)[0].should eq('‹')
+    backend.row(0)[rect.right - 1].should eq('›')
+    pill = Chrome.strip_segments(rect, labels, 3, start).find! { |(i, _)| i == 3 }[1]
+    dim = Theme.blend(Theme.focus_gold, Theme.panel, Chrome::SUBTAB_DIM_GOLD)
+    rect.w.times do |x|
+      backend.bg_at(x, 0).should eq(pill.contains?(x, 0) ? dim : Theme.panel)
+    end
+  end
+
   it "keeps the ASCII strip byte-for-byte where it was" do
     # display_width takes its printable-ASCII fast path here, so the common strip must not
     # have moved a single column.

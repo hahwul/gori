@@ -184,6 +184,23 @@ describe Gori::Tui::PreferencesView do
     end
   end
 
+  # The group strip sits inside the card, so its inactive labels take the card's colour: the
+  # strip's canvas default drew a black band hugging each one, flush to the text.
+  it "draws the group strip on the card's own surface" do
+    Theme.panel.should_not eq(Theme.bg) # else this example proves nothing
+    v = PreferencesView.new
+    v.open(:network) # focus in the body: the active pill is the receded gold, not the strip's
+    area = Rect.new(0, 0, 100, 40)
+    backend = MemoryBackend.new(area.w, area.h)
+    v.render(Screen.new(backend), area)
+    box = v.overlay_box(area)
+    y = box.y + 2
+    backend.row(y).includes?("Appearance").should be_true
+    ((box.x + 1)...(box.right - 1)).each do |x|
+      backend.bg_at(x, y).should_not eq(Theme.bg)
+    end
+  end
+
   # The cue is pinned to the card's right edge and the label is clipped to what is left. The
   # 43-character :action label used to push the cue PAST `content.right` — `screen.text` clips
   # at the screen, not the card — so the row ate the right border and the cue vanished.
