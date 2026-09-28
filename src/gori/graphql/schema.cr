@@ -25,7 +25,9 @@ module Gori
         List
         NonNull
 
-        def self.parse?(s : String?) : Kind?
+        # The `__TypeKind` spelling. Not `parse?`, which every enum already has with a different
+        # grammar (case-insensitive, underscores ignored) that must not be shadowed.
+        def self.from_wire(s : String?) : Kind?
           case s
           when "SCALAR"       then Scalar
           when "OBJECT"       then Object
@@ -136,7 +138,7 @@ module Gori
           raise Gori::Error.new("the response carries no __schema — send the introspection query first")
         end
         types = {} of String => Type
-        schema["types"]?.try(&.as_a?).try &.each do |t|
+        each_of(schema["types"]?) do |t|
           if type = parse_type(t)
             types[type.name] = type
           end
@@ -159,28 +161,19 @@ module Gori
 
       private def self.parse_type(t : JSON::Any) : Type?
         h = t.as_h? || return nil
-        kind = Kind.parse?(h["kind"]?.try(&.as_s?)) || return nil
+        kind = Kind.from_wire(h["kind"]?.try(&.as_s?)) || return nil
+        # A named type is never a wrapper; a `types` entry claiming LIST or NON_NULL is not one.
+        return nil if kind.list? || kind.non_null?
         name = h["name"]?.try(&.as_s?) || return nil
         return nil unless name?(name)
         fields = [] of Field
-        h["fields"]?.try(&.as_a?).try &.each do |f|
+        each_of(h["fields"]?) do |f|
           if field = parse_field(f)
             fields << field
           end
         end
-        enum_values = [] of String
-        h["enumValues"]?.try(&.as_a?).try &.each do |v|
-          if (n = v.as_h?.try(&.["name"]?).try(&.as_s?)) && name?(n)
-            enum_values << n
-          end
-        end
-        possible = [] of String
-        h["possibleTypes"]?.try(&.as_a?).try &.each do |p|
-          if (n = p.as_h?.try(&.["name"]?).try(&.as_s?)) && name?(n)
-            possible << n
-          end
-        end
-        Type.new(kind, name, fields, input_values(h["inputFields"]?), enum_values, possible)
+        Type.new(kind, name, fields, input_values(h["inputFields"]?), names(h["enumValues"]?),
+          names(h["possibleTypes"]?))
       end
 
       private def self.parse_field(f : JSON::Any) : Field?
@@ -189,7 +182,7 @@ module Gori
         return nil unless name?(name)
         type = type_ref(h["type"]?, 0) || return nil
         args = [] of InputValue
-        h["args"]?.try(&.as_a?).try &.each do |a|
+        each_of(h["args"]?) do |a|
           if v = input_value(a)
             args << v
           elsif a.as_h?.try(&.["type"]?).try(&.as_h?).try(&.["kind"]?).try(&.as_s?) == "NON_NULL"
@@ -203,13 +196,32 @@ module Gori
       end
 
       private def self.input_values(raw : JSON::Any?) : Array(InputValue)
-        out = [] of InputValue
-        raw.try(&.as_a?).try &.each do |a|
+        acc = [] of InputValue
+        each_of(raw) do |a|
           if v = input_value(a)
-            out << v
+            acc << v
           end
         end
-        out
+        acc
+      end
+
+      # The valid `name`s of a list of `{name: …}` objects (enum values, union members).
+      private def self.names(raw : JSON::Any?) : Array(String)
+        acc = [] of String
+        each_of(raw) do |v|
+          if (n = v.as_h?.try(&.["name"]?).try(&.as_s?)) && name?(n)
+            acc << n
+          end
+        end
+        acc
+      end
+
+      # Each element of `raw` when it is a JSON array; anything else (absent, null, an object)
+      # yields nothing, since introspection answers `null` for the lists a kind does not have.
+      private def self.each_of(raw : JSON::Any?, & : JSON::Any ->) : Nil
+        if arr = raw.try(&.as_a?)
+          arr.each { |e| yield e }
+        end
       end
 
       private def self.input_value(a : JSON::Any) : InputValue?
@@ -223,7 +235,7 @@ module Gori
       private def self.type_ref(raw : JSON::Any?, depth : Int32) : TypeRef?
         return nil if depth > MAX_WRAPPERS
         h = raw.try(&.as_h?) || return nil
-        kind = Kind.parse?(h["kind"]?.try(&.as_s?)) || return nil
+        kind = Kind.from_wire(h["kind"]?.try(&.as_s?)) || return nil
         if kind.list? || kind.non_null?
           inner = type_ref(h["ofType"]?, depth + 1) || return nil
           # `[T]!!` is not a type. A non-null directly wrapping a non-null cannot be written in a

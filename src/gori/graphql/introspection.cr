@@ -4,8 +4,8 @@ require "uri"
 module Gori
   module Graphql
     # The introspection request an operator puts in a Repeater tab to ask a GraphQL endpoint for
-    # its schema. Burp's Repeater offers the same two queries; the operator sends one, reads the
-    # answer, and imports the operations it names (`Import::GraphqlOps`).
+    # its schema. Burp's Repeater offers the same two queries; the operator sends one and reads
+    # the answer, which `Schema.parse` turns into the operations `Operations.generate` writes.
     #
     # This module builds the request and never sends it: the operator sends it from the tab, where
     # the scope gate and the session they are already testing with apply as for any other send.
@@ -161,7 +161,7 @@ module Gori
           raise Gori::Error.new("the request line is not METHOD TARGET VERSION — fix it and try again")
         end
         payload = body(legacy)
-        out = ["POST #{post_target(parts[1])} #{parts[2]}"]
+        acc = ["POST #{post_target(parts[1])} #{parts[2]}"]
         placed = false
         lines[1..].each do |line|
           name = line.partition(':')[0].strip.downcase
@@ -169,15 +169,15 @@ module Gori
             # The new pair goes where the first framing header stood, so a request whose headers
             # are in a deliberate order keeps it.
             unless placed
-              out << "Content-Type: application/json" << "Content-Length: #{payload.bytesize}"
+              acc << "Content-Type: application/json" << "Content-Length: #{payload.bytesize}"
               placed = true
             end
             next
           end
-          out << line
+          acc << line
         end
-        out << "Content-Type: application/json" << "Content-Length: #{payload.bytesize}" unless placed
-        "#{out.join('\n')}\n\n#{payload}"
+        acc << "Content-Type: application/json" << "Content-Length: #{payload.bytesize}" unless placed
+        "#{acc.join('\n')}\n\n#{payload}"
       end
 
       # The target with the GET binding's parameters removed, in origin or absolute form alike.

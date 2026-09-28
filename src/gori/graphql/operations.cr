@@ -4,8 +4,7 @@ require "./schema"
 module Gori
   module Graphql
     # One request per root field of a schema: every query and every mutation, written the way an
-    # operator would start one by hand, so it can be sent from History or the Repeater, or handed
-    # to the Fuzzer, Miner or Authorize, as it is.
+    # operator would start one by hand, so each is a request that can be sent as it is.
     #
     #   query user($id: ID!, $filter: UserFilter) {
     #     user(id: $id, filter: $filter) {
@@ -21,7 +20,7 @@ module Gori
     # what the field returns.
     #
     # Subscriptions are listed in the notes and not generated: they run over a WebSocket, and a
-    # History request template is an HTTP request.
+    # generated operation is sent as an HTTP request.
     module Operations
       extend self
 
@@ -67,7 +66,7 @@ module Gori
         Generated.new(ops, notes)
       end
 
-      private def operation(schema : Schema, kind : String, field : Field) : Operation
+      private def operation(schema : Schema, kind : String, field : Schema::Field) : Operation
         doc = ""
         MAX_DEPTH.downto(0) do |depth|
           doc = document(schema, kind, field, depth)
@@ -76,7 +75,7 @@ module Gori
         Operation.new(kind, field.name, doc, variables(schema, field))
       end
 
-      private def document(schema : Schema, kind : String, field : Field, depth : Int32) : String
+      private def document(schema : Schema, kind : String, field : Schema::Field, depth : Int32) : String
         String.build do |io|
           io << kind << ' ' << field.name
           unless field.args.empty?
@@ -109,40 +108,47 @@ module Gori
       private def selection(schema : Schema, name : String, depth : Int32, max : Int32, pad : String) : String?
         type = schema.types[name]? || return nil
         case type.kind
-        when .object?, .interface?
-          lines = [] of String
-          type.fields.each do |f|
-            break if lines.size >= MAX_FIELDS
-            next if f.name.starts_with?("__")
-            # A field with a required argument cannot be selected without a value for it.
-            next if f.args.any?(&.required?)
-            inner = f.type.named || next
-            it = schema.types[inner]? || next
-            if it.kind.leaf?
-              lines << "#{pad}#{f.name}"
-            elsif depth < max
-              if sub = selection(schema, inner, depth + 1, max, pad + "  ")
-                lines << "#{pad}#{f.name} {\n#{sub}\n#{pad}}"
-              end
-            end
-          end
-          lines.empty? ? "#{pad}__typename" : lines.join('\n')
-        when .union?
-          lines = ["#{pad}__typename"]
-          if depth < max
-            type.possible_types.each do |member|
-              break if lines.size > MAX_FIELDS
-              if sub = selection(schema, member, depth + 1, max, pad + "  ")
-                lines << "#{pad}... on #{member} {\n#{sub}\n#{pad}}"
-              end
-            end
-          end
-          lines.join('\n')
+        when .object?, .interface? then field_selection(schema, type, depth, max, pad)
+        when .union?               then union_selection(schema, type, depth, max, pad)
         end
       end
 
+      # An object or interface: its own fields, descending into object-typed ones while `depth`
+      # is under `max`.
+      private def field_selection(schema : Schema, type : Schema::Type, depth : Int32, max : Int32, pad : String) : String
+        lines = [] of String
+        type.fields.each do |f|
+          break if lines.size >= MAX_FIELDS
+          next if f.name.starts_with?("__")
+          # A field with a required argument cannot be selected without a value for it.
+          next if f.args.any?(&.required?)
+          inner = f.type.named || next
+          inner_type = schema.types[inner]? || next
+          if inner_type.kind.leaf?
+            lines << "#{pad}#{f.name}"
+          elsif depth < max && (sub = selection(schema, inner, depth + 1, max, pad + "  "))
+            lines << "#{pad}#{f.name} {\n#{sub}\n#{pad}}"
+          end
+        end
+        lines.empty? ? "#{pad}__typename" : lines.join('\n')
+      end
+
+      # A union has no fields of its own: `__typename`, then an inline fragment per member.
+      private def union_selection(schema : Schema, type : Schema::Type, depth : Int32, max : Int32, pad : String) : String
+        lines = ["#{pad}__typename"]
+        if depth < max
+          type.possible_types.each do |member|
+            break if lines.size > MAX_FIELDS
+            if sub = selection(schema, member, depth + 1, max, pad + "  ")
+              lines << "#{pad}... on #{member} {\n#{sub}\n#{pad}}"
+            end
+          end
+        end
+        lines.join('\n')
+      end
+
       # `{"id": ""}` for the required arguments, or nil when there are none.
-      private def variables(schema : Schema, field : Field) : String?
+      private def variables(schema : Schema, field : Schema::Field) : String?
         required = field.args.select(&.required?)
         return nil if required.empty?
         JSON.build do |j|
