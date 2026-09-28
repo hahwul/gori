@@ -480,7 +480,7 @@ module Gori
           validate_core_schema!(conn, version, tables)
           quick_check = conn.scalar("PRAGMA quick_check").as(String)
           raise Gori::Error.new("project database integrity check failed: #{quick_check}") unless quick_check == "ok"
-          refuse_exhausted_ids!(conn, tables) if importing
+          refuse_exhausted_ids!(conn, tables, version) if importing
           flows = conn.scalar("SELECT COUNT(*) FROM flows").as(Int64)
           {version, build_inventory(conn, tables, flows)}
         end
@@ -670,7 +670,15 @@ module Gori
     # imported project would record no capture at all, under a "database or disk is full" that
     # sends the operator to the disk. gori never issues an id at `Schema::SEED_CEILING` (2^62)
     # and only ever writes an integer there, so such an archive is refused rather than repaired.
-    private def self.refuse_exhausted_ids!(conn : DB::Connection, tables : Array(String)) : Nil
+    #
+    # Every table this build keeps AUTOINCREMENT is read (`Schema.autoincrement_tables`), not a
+    # list of the ones a recent migration moved: a table that was already AUTOINCREMENT before
+    # V39 (`events`, the retest tables, …) can hold its top id with no `sqlite_sequence` row,
+    # which SQLite then seeds from MAX(rowid), and a table an archive predates the move of is
+    # seeded by that migration from what it holds. A pre-V10 archive is also checked for the
+    # other half of V10's seed: it shipped taking an unfiltered MAX of the fuzz/miner
+    # `entity_links` refs, so a ref there becomes the counter too.
+    private def self.refuse_exhausted_ids!(conn : DB::Connection, tables : Array(String), version : Int32) : Nil
       ceiling = Store::Schema::SEED_CEILING
       counted = [] of String
       if table_exists?(conn, "sqlite_sequence")
@@ -680,12 +688,19 @@ module Gori
         end
         counted = conn.query_all("SELECT name FROM sqlite_sequence WHERE typeof(name) = 'text'", as: String)
       end
-      monotonic = counted + %w[flows h2_connections] + Store::Schema::ID_REBUILDS.map(&.table)
+      monotonic = counted + Store::Schema.autoincrement_tables.to_a
       (monotonic.uniq & tables).each do |table|
         id_columns(conn, table).each do |column|
           col = quote_ident(column)
           top = conn.query_one?("SELECT MAX(#{col}) FROM #{quote_ident(table)} WHERE typeof(#{col}) = 'integer'", as: Int64?)
           raise exhausted_ids(table) if top && top >= ceiling
+        end
+      end
+      if version < 10 && tables.includes?("entity_links")
+        {"fuzz" => "fuzz_sessions", "miner" => "miner_sessions"}.each do |kind, table|
+          bad = conn.query_one?("SELECT 1 FROM entity_links WHERE ref_kind = ? " \
+                                "AND (typeof(ref_id) != 'integer' OR ref_id >= ?) LIMIT 1", kind, ceiling, as: Int64)
+          raise exhausted_ids(table) if bad
         end
       end
     end

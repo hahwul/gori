@@ -396,3 +396,18 @@ describe "Store::Schema V40 (AUTOINCREMENT on eight tables)" do
     end
   end
 end
+
+describe "Gori::Store::Schema.autoincrement_tables" do
+  # Derived from the migrations rather than listed, so a table a later migration moves to
+  # AUTOINCREMENT joins the archive's exhausted-counter check without anyone adding it. Held
+  # equal to what the migrations actually produce, both ways.
+  it "names exactly the tables a fresh store keeps AUTOINCREMENT" do
+    with_store do |store|
+      live = store.@db.query_all("SELECT name FROM sqlite_master WHERE type = 'table' " \
+                                 "AND sql LIKE '%AUTOINCREMENT%'", as: String).to_set
+      live.should contain("events")
+      live.should contain("fuzz_sessions")
+      Gori::Store::Schema.autoincrement_tables.should eq(live)
+    end
+  end
+end

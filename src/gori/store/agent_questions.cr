@@ -1,4 +1,6 @@
 require "json"
+require "termisu"
+require "../unicode_reveal"
 require "./agent_messages"
 
 module Gori
@@ -18,10 +20,35 @@ module Gori
     KIND = "agent_question"
 
     # Two to four short labels: enough for a real decision, few enough that each keeps a
-    # digit key on the card and a row the operator can read in one glance.
+    # digit key on the card and a row the operator can read in one glance. CHOICE_MAX is in
+    # terminal COLUMNS (`label_width`), not characters: a full-width card draws the default's
+    # label in 58 of them, so forty wide CJK characters (80 columns) were clipped, and two
+    # labels differing only at the end read the same while the agent got different answers.
     CHOICES_MIN =  2
     CHOICES_MAX =  4
     CHOICE_MAX  = 40
+
+    # The columns the card draws `label` in, the way `Tui::Screen.display_width` counts them:
+    # an invisible codepoint is drawn as its `UnicodeReveal` badge, so it costs the badge's
+    # width rather than the 0 a raw width table gives it.
+    def self.label_width(label : String) : Int32
+      w = 0
+      label.each_grapheme do |g|
+        grapheme = g.to_s
+        if badge = UnicodeReveal.visible(grapheme)
+          badge.each_grapheme { |glyph| w += Termisu::UnicodeWidth.grapheme_width(glyph.to_s) }
+        else
+          w += Termisu::UnicodeWidth.grapheme_width(grapheme)
+        end
+      end
+      w
+    end
+
+    # A choice the card can draw whole: at most CHOICE_MAX columns, and at most CHOICE_MAX
+    # characters too, since a combining mark stacked on a visible glyph costs no column.
+    def self.choice_fits?(label : String) : Bool
+      label.size <= CHOICE_MAX && label_width(label) <= CHOICE_MAX
+    end
 
     # Minutes until an unanswered question expires. Half an hour by default: long enough for
     # an operator who stepped away for a coffee, short enough that an agent waiting on it
@@ -129,9 +156,15 @@ module Gori
     # name who closed it: the operator in the TUI, or the asking server's expiry.
     #
     # Answers the message id, 0 when the write did not commit (retryable), or -1 when the
-    # question was already closed — by another window, or by an expiry that landed first.
+    # question was already closed — by another window, or by an expiry that landed first —
+    # or when an answer or a dismissal comes after `expires_at`. The asker was told an
+    # unanswered question comes back expired, and its expiry row lands on the courier's next
+    # tick, which a card left open (or an asker bound elsewhere for a while) can outlast; an
+    # "answered" written in that gap reaches an agent that has already been told otherwise.
     def close_agent_question(question : AgentQuestion, outcome : String, answer : String?,
-                             source : String, actor : String, from_tab : String? = nil) : Int64
+                             source : String, actor : String, from_tab : String? = nil,
+                             now_us : Int64 = Time.utc.to_unix_ms * 1000) : Int64
+      return -1_i64 if outcome != AgentQuestion::OUTCOME_EXPIRED && question.expired?(now_us)
       text =
         case outcome
         when AgentQuestion::OUTCOME_ANSWERED  then answer || ""

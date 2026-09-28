@@ -457,7 +457,7 @@ module Gori
           scope = Scope.load(store)
           unless scope.configured?
             return err("in_scope:true but no scope rules are configured — nothing is in scope; " \
-                       "add scope rules or drop in_scope", "INVALID_ARGUMENT", field: "in_scope")
+                       "#{add_scope_rule_hint} or drop in_scope", "INVALID_ARGUMENT", field: "in_scope")
           end
           filter = QL.and(scope.filter(force: true), filter)
         end

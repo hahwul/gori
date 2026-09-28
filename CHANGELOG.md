@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- MCP: `minimize_repeater` reports a refusal by a configured scope as `scope_decision: out_of_scope`, as `send_request` does, instead of calling every scope refusal `unscoped` (#1349)
 - TUI: the Preferences group strip (General, Appearance, …) draws its unselected groups on the card's own background instead of a black band hugging each label (#1346)
 - History: flow and HTTP/2 connection ids are never reused, so after a clear or deleting the newest flows a mark, link, evidence source or MCP cursor can no longer name a different flow, and an MCP `list_history` cursor keeps tailing instead of being sent back to the start. The first open after upgrading switches over in milliseconds, or rebuilds the History table once (about 5–7 s per GB) on a SQLite that refuses the in-place change (#1343, #1345)
 - Repeater tabs, issues, Probe findings, custom Probe rules, project Rewriter rules, scope rules, host overrides and saved fuzz runs never reuse an id, so after deleting the newest or wiping, an id an agent, a script or another gori still holds is refused as gone instead of acting on the new row, and a recreated custom Probe rule no longer inherits the deleted one's suppressions and dismissals. Closing a Repeater tab also clears it from the Probe findings it raised, so promoting one no longer links another tab (#1344)

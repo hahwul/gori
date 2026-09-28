@@ -443,11 +443,12 @@ module Gori
           t = timeout
           step_timeout = t.nil? ? Retest::LiveBackend::DEFAULT_TIMEOUT : t
           outbound = project_outbound(project_name, db_path, allow_unscoped)
+          outbound.waiver = "--allow-unscoped"
           backend = Retest::LiveBackend.new(store, outbound,
             issue_id: iid, surface: Gori::FlowSource::Surface::Cli,
             overrides: overrides, verify: !insecure,
             timeout: step_timeout,
-            record_history: record_history, waiver: "--allow-unscoped")
+            record_history: record_history)
           report = Retest.execute(store, planned, backend,
             issue_id: iid, surface: Gori::FlowSource::Surface::Cli,
             allow_cleanup: allow_cleanup)

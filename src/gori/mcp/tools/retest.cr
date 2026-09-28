@@ -198,8 +198,7 @@ module Gori
           # STRICTER, never lift a `gori mcp --insecure` the operator set for the process.
           verify: bool_arg(h, "verify", true) && @verify_upstream,
           timeout: retest_timeout(h),
-          record_history: bool_arg(h, "record_history", true),
-          waiver: "allow_unscoped:true")
+          record_history: bool_arg(h, "record_history", true))
         # `stop:` — the engine polls it before each step, so a cancelled call stops dialling
         # (#1103). The sends that DID happen keep their History rows and the run row keeps its
         # `Skipped` remainder: that is a truthful record of what reached the target (P7), and

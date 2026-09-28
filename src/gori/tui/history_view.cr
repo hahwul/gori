@@ -1542,10 +1542,9 @@ module Gori::Tui
       close_detail
       clear_preview
       clear_marks
-      forget_column_values # see delete_ids: a clear RESTARTS rowid numbering
-      # And the id-keyed memos, for the same reason one line up — with the collision no longer
-      # hypothetical: after a wipe the next capture is rowid 1, which is the id these are most
-      # likely to still be holding an answer for.
+      forget_column_values # see delete_ids
+      # And the id-keyed memos: every flow they answered for is gone. (Before V39 a clear also
+      # restarted rowid numbering, so the next capture reused the id they most likely held.)
       forget_all_row_memos
       @rows.clear
       @selected = 0

@@ -118,9 +118,8 @@ module Gori
       # acting on the wrong tab is how an audit trail gets polluted.
       #
       # It is a RANK, not an address, and no tool here accepts it as a selector. It shifts on
-      # every create, delete and move; `repeaters.id` is itself REUSED after a top-of-space
-      # delete (`Store#delete_repeater` documents why that matters), so a caller acting on a
-      # remembered number could reach a session it never read. `id` stays the only address.
+      # every create, delete and move, so a caller acting on a remembered number could reach
+      # a session it never read. `id` stays the only address (never reused since V40).
       #
       # Unsaved and ephemeral sub-tabs (a gRPC or split-decode duplicate, `db_id == nil`) have
       # no row at all; `reconcile` sorts them after every saved one, so they never shift these.

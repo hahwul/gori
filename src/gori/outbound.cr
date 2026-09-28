@@ -148,10 +148,29 @@ module Gori
     # the "add a scope include rule" advice for a target an EXCLUDE rule matched, where no
     # include will ever help. `waiver` is the surface's own spelling of the override flag
     # (`--allow-unscoped`, `allow_unscoped:true`); nil when the surface has none.
-    def self.remedy(verdict : Verdict, waiver : String?) : String
-      return "delete or narrow the scope EXCLUDE rule that matches it (an include rule cannot override an exclude)" if verdict.excluded?
+    # `add_include: false` / `edit_exclude: false` is a reader that cannot make that fix
+    # itself (an agent whose scope tools are switched off): it is then the operator's, and for
+    # an excluded target, which no waiver lifts, the operator is the only fix offered.
+    def self.remedy(verdict : Verdict, waiver : String?, *, add_include : Bool = true,
+                    edit_exclude : Bool = true) : String
+      if verdict.excluded?
+        fix = "delete or narrow the scope EXCLUDE rule that matches it (an include rule cannot override an exclude)"
+        return edit_exclude ? fix : "ask the operator to #{fix}"
+      end
       base = "add a scope include rule"
-      waiver ? "#{base} or pass #{waiver}" : base
+      return (waiver ? "#{base} or pass #{waiver}" : base) if add_include
+      waiver ? "pass #{waiver}, or ask the operator to #{base}" : "ask the operator to #{base}"
+    end
+
+    # `Outbound.remedy` for a refusal a core engine phrases on this Outbound's behalf (a
+    # retest step, a session-slot refresh, a gRPC reflection), in the spelling of the surface
+    # that built it. All three default to what a surface that sets none has always printed.
+    property waiver : String? = nil
+    property? can_add_include : Bool = true
+    property? can_edit_exclude : Bool = true
+
+    def remedy(verdict : Verdict) : String
+      Outbound.remedy(verdict, @waiver, add_include: @can_add_include, edit_exclude: @can_edit_exclude)
     end
 
     getter scope : Scope?

@@ -33,6 +33,16 @@ describe "MCP ask_operator (#1324)" do
     end
   end
 
+  # The one string-list rule every MCP list slot follows: a scalar entry is its text.
+  it "reads scalar choices as their text, and forty columns of wide ones as fitting" do
+    with_store do |store|
+      r = ask(tools_for(store), %({"question":"which port?","choices":[80,443]}))
+      r.is_error.should be_false
+      JSON.parse(r.text)["choices"].as_a.map(&.as_s).should eq(["80", "443"])
+      ask(tools_for(store), %({"question":"q","choices":["a","#{"가" * 20}"]})).is_error.should be_false
+    end
+  end
+
   it "accepts the choices as a JSON-encoded string, the way agents often send an array" do
     with_store do |store|
       r = ask(tools_for(store), %({"question":"go?","choices":"[\\"go\\",\\"stop\\"]"}))
@@ -45,13 +55,21 @@ describe "MCP ask_operator (#1324)" do
     with_store do |store|
       t = tools_for(store)
       {
-        %({"choices":["a","b"]})                                          => "question",
-        %({"question":"q"})                                               => "choices",
-        %({"question":"q","choices":["only"]})                            => "choices",
-        %({"question":"q","choices":["a","b","c","d","e"]})               => "choices",
-        %({"question":"q","choices":["a",""]})                            => "choices",
-        %({"question":"q","choices":["Yes","yes"]})                       => "choices",
-        %({"question":"q","choices":["a","#{"x" * 41}"]})                 => "choices",
+        %({"choices":["a","b"]})                            => "question",
+        %({"question":"q"})                                 => "choices",
+        %({"question":"q","choices":["only"]})              => "choices",
+        %({"question":"q","choices":["a","b","c","d","e"]}) => "choices",
+        %({"question":"q","choices":["a",""]})              => "choices",
+        %({"question":"q","choices":["Yes","yes"]})         => "choices",
+        %({"question":"q","choices":["a","#{"x" * 41}"]})   => "choices",
+        # Twenty-one wide characters are 42 columns: the card clips them, and two that
+        # differ only at the end would read the same.
+        %({"question":"q","choices":["a","#{"가" * 21}"]}) => "choices",
+        %({"question":"q","choices":["a",{"label":"b"}]}) => "choices",
+        # A zero-width codepoint costs no column in a raw width table, but the card draws it
+        # as a badge, and forty of them are forty characters besides.
+        %({"question":"q","choices":["a","ok#{"\u200B" * 8}"]})           => "choices",
+        %({"question":"q","choices":["a","a#{"\u0301" * 45}"]})           => "choices",
         %({"question":"q","choices":["a","b"],"default":"c"})             => "default",
         %({"question":"q","choices":["a","b"],"expires_in_minutes":0})    => "expires_in_minutes",
         %({"question":"q","choices":["a","b"],"expires_in_minutes":1441}) => "expires_in_minutes",
@@ -137,6 +155,65 @@ describe "MCP ask_operator (#1324)" do
       note = t.pending_operator_note("list_history").not_nil!
       note.text.should contain("dismissed your ask_operator question ##{id}")
       t.release_operator_note(note)
+    end
+  end
+end
+
+# A registry home for a server bound the way `gori mcp` binds one, so switch_project works.
+private def with_bound_home(tag, &)
+  home = File.tempname(tag)
+  saved = ENV["GORI_HOME"]?
+  ENV["GORI_HOME"] = home
+  begin
+    yield Gori::ProjectRegistry.new(Gori::Paths.projects_dir)
+  ensure
+    saved ? (ENV["GORI_HOME"] = saved) : ENV.delete("GORI_HOME")
+    FileUtils.rm_rf(home)
+  end
+end
+
+private def bound_tools(project) : Gori::MCP::Tools
+  Gori::MCP::Tools.new(Gori::Store.open(project.db_path), true, false, project_name: project.name,
+    db_path: project.db_path, selection_source: "workspace-created")
+end
+
+describe "ask_operator across switch_project" do
+  # A switch opens a new Store on the same file, and the TUI offers the question again as soon
+  # as this process's marker is back — so its expiry clock must survive the switch.
+  it "still expires a question after a switch to the project already bound" do
+    with_bound_home("gori-ask-same") do |reg|
+      project = reg.create("target")
+      t = bound_tools(project)
+      begin
+        id = JSON.parse(ask(t, %({"question":"q","choices":["a","b"],"expires_in_minutes":1})).text)["id"].as_i64
+        t.call("switch_project", JSON.parse(%({"project":"target"}))).is_error.should be_false
+        t.expire_asked_questions((Time.utc + 2.minutes).to_unix_ms * 1000).should eq(1)
+        t.current_store.not_nil!.agent_messages_after(id, Process.pid.to_i64, 10).rows.map(&.outcome).should eq(["expired"])
+      ensure
+        t.release_presence
+        t.current_store.try(&.close)
+      end
+    end
+  end
+
+  it "keeps a question's clock while bound elsewhere, and expires it on the way back" do
+    with_bound_home("gori-ask-away") do |reg|
+      project = reg.create("target")
+      reg.create("other")
+      t = bound_tools(project)
+      begin
+        id = JSON.parse(ask(t, %({"question":"q","choices":["a","b"],"expires_in_minutes":5})).text)["id"].as_i64
+        t.call("switch_project", JSON.parse(%({"project":"other"}))).is_error.should be_false
+        # A due tick while away writes nothing into the project that is bound instead.
+        t.expire_asked_questions((Time.utc + 6.minutes).to_unix_ms * 1000).should eq(0)
+        t.current_store.not_nil!.events_after(0, 10).count(&.kind.==("agent_message")).should eq(0)
+        t.call("switch_project", JSON.parse(%({"project":"target"}))).is_error.should be_false
+        t.current_store.not_nil!.open_agent_questions(0_i64, Time.utc.to_unix_ms * 1000).map(&.id).should eq([id])
+        t.expire_asked_questions((Time.utc + 6.minutes).to_unix_ms * 1000).should eq(1)
+      ensure
+        t.release_presence
+        t.current_store.try(&.close)
+      end
     end
   end
 end
