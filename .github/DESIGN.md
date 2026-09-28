@@ -4247,4 +4247,6 @@ is denied, and the serializer writes `scope: true` for the one combination that 
   told SCOPE_BLOCKED still needs to see why. The hints that name `add_scope_rule` (`list_scope`,
   `ql_explain`'s `scope:` note, `list_history`'s `in_scope` note) name the operator instead
   when it is not served (`Tools#add_scope_rule_hint`), the way `no_binder_recovery` does for
-  the binders.
+  the binders. So does a SCOPE_BLOCKED remedy (`Tools#scope_remedy`): "add an include" becomes
+  the operator's beside `allow_unscoped:true`, and "delete the EXCLUDE rule", which no waiver
+  lifts, names only the operator.

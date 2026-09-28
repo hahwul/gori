@@ -184,6 +184,65 @@ describe "MCP tool permissions" do
     end
   end
 
+  # SCOPE_BLOCKED's own remedy is two scope writes. With them switched off, "add an include"
+  # is the operator's to do, and "delete the EXCLUDE rule" is the only fix at all.
+  it "names the operator in a SCOPE_BLOCKED remedy when the scope writers are switched off" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "in.test").should be_true
+      scope.add("exclude", "host", "ex.in.test").should be_true
+      off = denied_tools(store, "scope")
+
+      out = off.call("send_request", JSON.parse(%({"url":"http://out.test/"})))
+      out.error_code.should eq("SCOPE_BLOCKED")
+      out.text.should contain("pass allow_unscoped:true, or ask the operator to add a scope include rule")
+      tools_for(store).call("send_request", JSON.parse(%({"url":"http://out.test/"})))
+        .text.should contain("add a scope include rule or pass allow_unscoped:true")
+
+      excluded = off.call("send_request", JSON.parse(%({"url":"http://ex.in.test/"})))
+      excluded.error_code.should eq("SCOPE_BLOCKED")
+      excluded.text.should contain("ask the operator to delete or narrow the scope EXCLUDE rule")
+
+      # minimize's refusal takes the same remedy, and reports the decision it was given
+      # rather than calling every configured-scope miss "unscoped".
+      id = store.insert_repeater("http://out.test/", "GET / HTTP/1.1\r\nHost: out.test\r\n\r\n".to_slice,
+        false, true, nil, 1)
+      mini = off.call("minimize_repeater", JSON.parse(%({"id":#{id}})))
+      mini.error_code.should eq("SCOPE_BLOCKED")
+      mini.text.should contain("ask the operator to add a scope include rule")
+      mini.details.not_nil!["scope_decision"].as_s.should eq("out_of_scope")
+
+      flow = mcp_seed_flow(store, "out.test", "GET", "/", 200)
+      authz = off.call("authorize_start", JSON.parse(
+        %({"flow_ids":[#{flow}],"identities":[{"name":"anon","set":[{"name":"X-Id","value":"1"}]}]})))
+      authz.error_code.should eq("SCOPE_BLOCKED")
+      authz.text.should contain("ask the operator to add a scope include rule")
+
+      # A refusal a core engine phrases (here a session-slot refresh) reads the same
+      # spelling off the Outbound the server built for it.
+      rid = store.insert_repeater("http://out.test/", "GET / HTTP/1.1\r\nHost: out.test\r\n\r\n".to_slice,
+        false, true, nil, 1)
+      tools_for(store).call("create_session_slot", JSON.parse(%({"name":"s","refresh":[#{rid}]}))).is_error.should be_false
+      refresh = JSON.parse(off.call("refresh_session_slot", JSON.parse(%({"name":"s"}))).text).to_json
+      refresh.should contain("pass allow_unscoped:true, or ask the operator to add a scope include rule")
+
+      # …and so does a retest step, which the retest engine refuses on the run's behalf.
+      iid = store.insert_issue("idor", Gori::Store::Severity::High, "out.test", nil)
+      tools_for(store).call("add_retest_step", JSON.parse(
+        %({"issue_id":#{iid},"repeater_id":#{rid},"assertion":"status:403"}))).is_error.should be_false
+      off.call("run_retest", JSON.parse(%({"issue_id":#{iid}})))
+        .text.should contain("pass allow_unscoped:true, or ask the operator to add a scope include rule")
+    end
+  end
+
+  it "names the operator in export_openapi's in_scope refusal when the scope writers are switched off" do
+    with_store do |store|
+      text = denied_tools(store, "scope").call("export_openapi", JSON.parse(%({"in_scope":true}))).text
+      text.should contain("ask the operator to add a scope rule")
+      tools_for(store).call("export_openapi", JSON.parse(%({"in_scope":true}))).text.should contain("add_scope_rule")
+    end
+  end
+
   # Raising the scan mode arms the capture pipeline's automatic active probes: a send by proxy.
   it "refuses raising the probe mode to an active one when Send traffic is off, not lowering it" do
     with_store do |store|

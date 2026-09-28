@@ -665,7 +665,7 @@ module Gori
         b = Gori::Bindings.load(s, Gori::SessionSlots.load(s))
         @bindings = b
         Env.layer = b
-        @refresher = Gori::SessionRefresh::Runner.new(s, b, -> { Outbound.agent(Scope.load(s), false) },
+        @refresher = Gori::SessionRefresh::Runner.new(s, b, -> { agent_outbound(Scope.load(s), false, waiver: false) },
           verify: @verify_upstream).install
       end
 
@@ -837,6 +837,26 @@ module Gori
       # a hint naming a tool the agent cannot call is a dead end it will try anyway.
       def add_scope_rule_hint : String
         serves?("add_scope_rule") ? "add a scope rule with add_scope_rule" : "ask the operator to add a scope rule"
+      end
+
+      # Whether this server lets the agent write scope rules — the fix every SCOPE_BLOCKED
+      # remedy names. Off, the remedy names the operator instead (`Outbound.remedy`).
+      def scope_editable? : Bool
+        serves?("add_scope_rule") && serves?("delete_scope_rule")
+      end
+
+      def scope_remedy(verdict : ScopeCheck) : String
+        Outbound.remedy(verdict, "allow_unscoped:true", scope_editable: scope_editable?)
+      end
+
+      # `Outbound.agent` spelled for this server's refusals: the ones a core engine phrases
+      # (retest, session refresh, gRPC reflection) then offer the agent's own waiver and fix.
+      # `waiver` is left nil for a caller with no allow_unscoped to pass.
+      def agent_outbound(scope : Scope, allow_unscoped : Bool, *, waiver : Bool = true) : Outbound
+        ob = Outbound.agent(scope, allow_unscoped)
+        ob.waiver = "allow_unscoped:true" if waiver
+        ob.scope_editable = scope_editable?
+        ob
       end
 
       # Ceiling (seconds) a delete_project dry-run confirmation token stays valid.

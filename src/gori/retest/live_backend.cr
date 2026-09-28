@@ -89,7 +89,7 @@ module Gori
         verdict = @outbound.check_request(plan.scheme, plan.host, target, plan.port)
         if verdict.blocked?
           return Observation.new(blocked_reason: Retest.clip(
-            "#{plan.host} is out of the project scope — #{Gori::Outbound.remedy(verdict, @waiver)}"))
+            "#{plan.host} is out of the project scope — #{Gori::Outbound.remedy(verdict, @waiver, scope_editable: @outbound.scope_editable?)}"))
         end
         if reason = plan.refusal
           return Observation.new(blocked_reason: Retest.clip(reason))

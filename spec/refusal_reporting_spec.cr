@@ -42,6 +42,18 @@ describe "refusal reporting" do
       Gori::Outbound.remedy(plain, "--allow-unscoped").should eq("add a scope include rule or pass --allow-unscoped")
       Gori::Outbound.remedy(plain, nil).should eq("add a scope include rule")
     end
+
+    it "hands both fixes to the operator when the reader cannot edit the scope" do
+      excluded = Gori::Outbound::Verdict.new("out_of_scope", "h", nil, true, true)
+      plain = Gori::Outbound::Verdict.new("out_of_scope", "h", nil, true, false)
+
+      Gori::Outbound.remedy(plain, "allow_unscoped:true", scope_editable: false)
+        .should eq("pass allow_unscoped:true, or ask the operator to add a scope include rule")
+      Gori::Outbound.remedy(plain, nil, scope_editable: false).should eq("ask the operator to add a scope include rule")
+      # No waiver lifts an exclude, so the operator is the only fix offered.
+      Gori::Outbound.remedy(excluded, "allow_unscoped:true", scope_editable: false)
+        .should eq("ask the operator to delete or narrow the scope EXCLUDE rule that matches it (an include rule cannot override an exclude)")
+    end
   end
 
   describe "Gori::Fuzz::Backend#blocked" do

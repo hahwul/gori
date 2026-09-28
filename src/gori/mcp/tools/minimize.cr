@@ -242,7 +242,7 @@ module Gori
         end
         sc = ob.check_request(scheme, host, target, port)
         return nil unless sc.blocked?
-        err("#{host} is outside — or without — a configured scope; pass allow_unscoped:true to minimize anyway",
+        err("#{host} is outside — or without — a configured scope; #{scope_remedy(sc)}",
           "SCOPE_BLOCKED", field: "repeater_id",
           details: JSON.parse({"scope_decision" => sc.decision, "host" => host}.to_json))
       end

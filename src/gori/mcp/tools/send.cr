@@ -1731,7 +1731,7 @@ module Gori
       # `insecure: 1` came back as a retryable NETWORK_ERROR — sending an agent into a retry
       # loop over an argument mistake. Same reasoning as `RequestBuilder.verbatim?`.
       private def outbound(allow_unscoped : Bool) : Outbound
-        Outbound.agent(Scope.load(store), allow_unscoped)
+        agent_outbound(Scope.load(store), allow_unscoped)
       end
 
       # A refusal to send an active request outside (or without) scope.
@@ -1748,7 +1748,7 @@ module Gori
                  else
                    "target host #{sc.host} is outside the project's configured scope"
                  end
-        err("#{reason}; #{Outbound.remedy(sc, "allow_unscoped:true")}",
+        err("#{reason}; #{scope_remedy(sc)}",
           "SCOPE_BLOCKED", field: "url",
           details: JSON.parse({"scope_decision" => sc.decision, "host" => sc.host}.to_json))
       end
