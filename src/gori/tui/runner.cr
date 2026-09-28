@@ -6977,7 +6977,9 @@ module Gori::Tui
         return @toast = "shell: #{problem}"
       end
       authority = ShellEnv.dial_authority(@session.proxy.host, @session.proxy.port)
-      before = @session.store.max_flow_id || 0_i64
+      # The highest id ever issued, not `MAX(id)`: after a clear or a delete of the newest flows
+      # the next capture lands above every id handed out before (V39), and the gap would count.
+      before = Runner.flow_mark(@session.store)
       args = ["run", "shell", "--proxy", authority, "--ca-dir", File.dirname(@session.ca.ca_cert_path)]
       started = Time.instant
       status = nil.as(Process::Status?)
@@ -6996,7 +6998,17 @@ module Gori::Tui
         return @toast = "shell failed: #{ex.message}"
       end
       reclaim_terminal
-      @toast = Runner.shell_exit_toast(status, Time.instant - started, (@session.store.max_flow_id || 0_i64) - before)
+      @toast = Runner.shell_exit_toast(status, Time.instant - started, Runner.flows_issued_since(@session.store, before))
+    end
+
+    # The highest flow id ever issued (`Store#flow_id_high_water`), 0 on a failed read.
+    def self.flow_mark(store : Store) : Int64
+      store.flow_id_high_water || 0_i64
+    end
+
+    # How many flow ids were issued since the `flow_mark` `before`. A failed read counts none.
+    def self.flows_issued_since(store : Store, before : Int64) : Int64
+      (store.flow_id_high_water || before) - before
     end
 
     # Reclaim the terminal's foreground process group after a child process exits (#1250).
