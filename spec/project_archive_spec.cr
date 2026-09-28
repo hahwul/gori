@@ -89,6 +89,31 @@ private def export_archive(project : Gori::Project, path : String) : String
   end
 end
 
+# A pre-V10 archive of an empty project, with `row` (if any) written into it: the V1..V9
+# schema built from the migrations themselves, one issue for a link to hang off.
+private def with_v9_archive(row : String?, &)
+  with_archive_project do |_registry, project, _store, root|
+    archive_path = export_archive(project, File.join(root, "v9.gori"))
+    entries = read_archive(archive_path)
+    old_db = File.join(root, "v9.db")
+    DB.open("sqlite3:#{old_db}") do |db|
+      db.using_connection do |c|
+        Gori::Store::Schema::MIGRATIONS[0...9].each { |statements| statements.each { |sql| c.exec(sql) } }
+        c.exec("PRAGMA user_version = 9")
+        c.exec("INSERT INTO issues (created_at, updated_at, title, severity) VALUES (0, 0, 'i', 1)")
+        c.exec(row) if row
+      end
+    end
+    manifest = JSON.parse(entries["manifest.json"]).as_h
+    manifest["schema_version"] = JSON::Any.new(9_i64)
+    manifest["flow_count"] = JSON::Any.new(0_i64)
+    entries["manifest.json"] = manifest.to_json
+    entries["gori.db"] = File.read(old_db)
+    write_archive(archive_path, entries.to_a)
+    yield archive_path
+  end
+end
+
 class ProjectArchiveFallbackExportSpec < Gori::ProjectArchive::PreparedExport
   getter? link_attempted : Bool
 
@@ -597,6 +622,47 @@ describe Gori::ProjectArchive do
         error.message.not_nil!.should contain(%(past 2^62 in "flows"))
       end
     end
+  end
+
+  # `events` was AUTOINCREMENT long before V39, so it is on no migration's list — but with its
+  # `sqlite_sequence` row gone SQLite seeds the counter from MAX(id), and every job, agent
+  # action and operator message after the import would fail with SQLITE_FULL.
+  it "refuses an archive whose events counter is exhausted without a sequence row" do
+    with_archive_project do |_registry, project, store, root|
+      store.insert_flow(archive_request("/a"))
+      store.flush
+      archive_path = export_archive(project, File.join(root, "events.gori"))
+      tamper_archive_database(archive_path, root) do |conn|
+        conn.exec("INSERT INTO events (id, created_at, source, kind, level, message) " \
+                  "VALUES (9223372036854775807, 0, 'x', 'x', 'info', 'top')")
+        conn.exec("DELETE FROM sqlite_sequence WHERE name = 'events'")
+      end
+      error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }
+      error.message.not_nil!.should contain(%(past 2^62 in "events"))
+    end
+  end
+
+  # V10 shipped seeding the fuzz and miner counters from an unfiltered MAX of their ids and
+  # their `entity_links` refs, so in a pre-V10 archive either one IS the counter the migration
+  # makes — on a table that is not AUTOINCREMENT yet, and has no sequence row to read.
+  {
+    "fuzz link" => {"fuzz_sessions", "INSERT INTO entity_links (owner_kind, owner_id, ref_kind, ref_id, created_at) " \
+                                     "VALUES ('issue', 1, 'fuzz', 9223372036854775807, 0)"},
+    "miner session" => {"miner_sessions", "INSERT INTO miner_sessions (id, created_at, updated_at, target, request) " \
+                                          "VALUES (9223372036854775807, 0, 0, 'http://x.test/', X'00')"},
+    "fuzz session" => {"fuzz_sessions", "INSERT INTO fuzz_sessions (id, created_at, updated_at, target, template) " \
+                                        "VALUES (9223372036854775807, 0, 0, 'http://x.test/', 'GET / HTTP/1.1')"},
+  }.each do |what, (table, row)|
+    it "refuses a pre-V10 archive whose #{what} would exhaust V10's seed" do
+      with_v9_archive(row) do |archive_path|
+        error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }
+        error.message.not_nil!.should contain(%(past 2^62 in "#{table}"))
+      end
+    end
+  end
+
+  it "keeps a pre-V10 archive importable" do
+    with_v9_archive(nil) { |archive_path| Gori::ProjectArchive.prepare_import(archive_path).close }
   end
 
   it "drops the exporter's global rule overrides so they cannot enable the importer's rules" do

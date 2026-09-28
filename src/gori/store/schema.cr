@@ -2120,8 +2120,21 @@ module Gori
 
       # The tables V39 moves to AUTOINCREMENT, and the one clause each CREATE text carries.
       private AUTOINCREMENT_TABLES = {"flows", "h2_connections"}
-      private ROWID_CLAUSE         = "INTEGER PRIMARY KEY"
-      private ROWID_DECLARATION    = /\(\s*"?id"?\s+INTEGER PRIMARY KEY\s*,/
+
+      # Every table the CURRENT schema keeps as AUTOINCREMENT, read off the migrations rather
+      # than listed: a CREATE that says AUTOINCREMENT (a `_vNN` or `_autoinc` copy renamed onto
+      # its table counts as that table), V39's in-place tables and V40's. An archive written
+      # before one of them got there has no sequence row for it, and the migration seeds one
+      # from what the table holds, so the archive check reads them all (`ProjectArchive`).
+      # spec/store/table_id_autoincrement_migration_spec.cr holds it equal to a fresh store's.
+      class_getter autoincrement_tables : Set(String) do
+        created = MIGRATIONS.flat_map(&.to_a).flat_map do |sql|
+          sql.scan(/CREATE TABLE(?: IF NOT EXISTS)?\s+"?(\w+)"?\s*\(([^;]*?\bAUTOINCREMENT\b)/i).map(&.[1].sub(/_(?:v\d+|autoinc)\z/, ""))
+        end
+        (created + AUTOINCREMENT_TABLES.to_a + ID_REBUILDS.map(&.table)).to_set
+      end
+      private ROWID_CLAUSE      = "INTEGER PRIMARY KEY"
+      private ROWID_DECLARATION = /\(\s*"?id"?\s+INTEGER PRIMARY KEY\s*,/
 
       # V39 without the copy: rewrite each table's stored CREATE to say AUTOINCREMENT and bump
       # `schema_version`, so every connection — this one included, verified — reparses it. The
