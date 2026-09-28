@@ -557,6 +557,19 @@ module Gori::Tui
       set_text(with_wire_eols(lf_text))
     end
 
+    # A decoded request edit can change the BODY's line count while the request HEAD still needs
+    # its captured terminators. Keep the exact head eols when the transform crossed that boundary;
+    # new body lines use LF because their old counterparts no longer have a reliable one-to-one
+    # mapping. Same-line transforms continue through `set_text_keeping_eols` above, preserving
+    # the body's mixed endings too.
+    def set_text_keeping_head_eols(lf_text : String) : Nil
+      wire = with_wire_eols(lf_text)
+      if wire == lf_text && @eols.any? { |e| e != "\n" && !e.empty? }
+        wire = with_wire_head_eols(lf_text)
+      end
+      set_text(wire)
+    end
+
     # ditto, for the transforms that must stay ONE undoable edit (marker strip).
     def replace_all_keeping_eols(lf_text : String, caret : Int32) : Nil
       replace_all(with_wire_eols(lf_text), caret)
@@ -570,6 +583,25 @@ module Gori::Tui
         parts.each_with_index do |p, i|
           io << p
           io << @eols[i]
+        end
+      end
+    end
+
+    private def with_wire_head_eols(lf_text : String) : String
+      parts = lf_text.split('\n')
+      old_blank = @lines.index(&.empty?) || return lf_text
+      new_blank = parts.index(&.empty?) || return lf_text
+      return lf_text unless old_blank == new_blank
+      return lf_text unless @eols[old_blank]? && !@eols[old_blank].empty?
+
+      String.build do |io|
+        parts.each_with_index do |part, i|
+          io << part
+          if i <= new_blank
+            io << @eols[i]
+          elsif i < parts.size - 1
+            io << '\n'
+          end
         end
       end
     end

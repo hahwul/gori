@@ -488,6 +488,13 @@ describe Gori::Tui::TextArea do
       ta.wire_text.should eq("a\nb\nc\n")
     end
 
+    it "keeps request head terminators when only the body line count moves" do
+      ta = TextArea.new("POST /x HTTP/1.1\r\nHost: h\r\n\r\nold\r\nbody")
+      ta.set_text_keeping_head_eols("POST /x HTTP/1.1\nHost: h\n\nnew\nbody\nexpanded")
+      ta.wire_text.should start_with("POST /x HTTP/1.1\r\nHost: h\r\n\r\n")
+      ta.wire_text.should eq("POST /x HTTP/1.1\r\nHost: h\r\n\r\nnew\nbody\nexpanded")
+    end
+
     it "is a no-op on a buffer that had no CRs to restore" do
       ta = TextArea.new("a\nb\n")
       ta.set_text_keeping_eols("a\nbX\n")
