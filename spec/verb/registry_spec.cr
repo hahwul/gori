@@ -378,6 +378,10 @@ private class FakeContext < ExecContext
     @calls << :repeater_pretty_request
   end
 
+  def repeater_graphql_introspection(legacy : Bool) : Nil
+    @calls << (legacy ? :repeater_graphql_introspection_legacy : :repeater_graphql_introspection)
+  end
+
   def repeater_minimize : Nil
     @calls << :repeater_minimize
   end

@@ -107,6 +107,39 @@ describe "RepeaterView split-decode (SAML/GraphQL)" do
       q.should contain("ENVEDIT") # the envelope edit reached decoded
       q.should contain("PLUS")    # the decoded edit merged back
     end
+
+    # `repeater.graphql-introspection` in a split tab rewrites the ENVELOPE, then re-decodes.
+    it "inserts the introspection query into the envelope and re-targets the splice to the JSON body" do
+      get_target = "/graphql?query=#{URI.encode_www_form("query Q { a }")}&k=v"
+      get_head = "GET #{get_target} HTTP/1.1\r\nHost: api.test\r\n\r\n"
+      op = Gori::Graphql.from_flow(get_target, get_head.to_slice, nil).not_nil!
+      view = RepeaterView.new
+      view.load_graphql(detail_of(get_target, get_head, ""), op)
+
+      view.insert_graphql_introspection(false).should contain("inserted the introspection query")
+      view.req_pane.should eq(:envelope)
+      view.request_text.should start_with("POST /graphql?k=v HTTP/1.1\nHost: api.test\n")
+      view.toggle_req_pane.should eq(:decoded)
+      view.edit_buffer_text.should contain("query IntrospectionQuery")
+
+      # A decoded edit now goes into the JSON body, not back into a `?query=` the request lost.
+      view.replace_edit_buffer(view.edit_buffer_text.sub("query IntrospectionQuery", "query EDITED"))
+      raw = String.new(view.request_bytes)
+      raw.each_line.first.should eq("POST /graphql?k=v HTTP/1.1")
+      JSON.parse(raw.split("\r\n\r\n", 2)[1])["query"].as_s.should contain("EDITED")
+    end
+
+    it "commits a pending decoded edit first, so it cannot land on the new query later" do
+      view = load_gql(gql_head, gql_body)
+      view.toggle_req_pane.should eq(:decoded)
+      move_to_line_end(view)
+      " STALE".each_char { |c| view.edit_insert(c) }
+      view.insert_graphql_introspection(true)
+      view.edit_buffer_text.should contain("query IntrospectionQuery")
+      body = String.new(view.request_bytes).split("\r\n\r\n", 2)[1]
+      body.should_not contain("STALE")
+      JSON.parse(body)["query"].as_s.should eq(Gori::Graphql::Introspection::LEGACY_QUERY)
+    end
   end
 
   # The shapes that used to open as an ordinary raw tab because nothing could write the pane
@@ -187,6 +220,16 @@ describe "RepeaterView split-decode (SAML/GraphQL)" do
       pair = body.split('&').find(&.starts_with?("SAMLResponse=")).not_nil!
       decoded = Gori::Saml.decode_value(URI.decode_www_form(pair.split('=', 2)[1])).not_nil!
       decoded[0].should contain("<!--x-->")
+    end
+
+    it "refuses to insert a GraphQL introspection query" do
+      doc = Gori::Saml.from_flow("/acs", saml_head.to_slice, saml_body.to_slice, nil, nil).not_nil!
+      view = RepeaterView.new
+      view.load_saml(detail_of("/acs", saml_head, saml_body), doc)
+      before = view.request_text
+      view.insert_graphql_introspection(false).should contain("SAML")
+      view.request_text.should eq(before)
+      view.dirty?.should be_false
     end
   end
 

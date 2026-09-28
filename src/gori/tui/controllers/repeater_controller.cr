@@ -928,6 +928,11 @@ module Gori::Tui
       end
     end
 
+    def repeater_graphql_introspection(legacy : Bool) : Nil
+      return unless view = current_view
+      @host.status(view.insert_graphql_introspection(legacy))
+    end
+
     def repeater_auto_mark : Nil
       return unless view = current_view
       @host.status(view.auto_mark)

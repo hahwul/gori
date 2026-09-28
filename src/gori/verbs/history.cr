@@ -438,6 +438,15 @@ module Gori
         "repeater.pretty-request", "Pretty-print request", "Format the request body in-place (JSON/XML/form-urlencoded)",
         Verb::Scope::Repeater, [Verb::Chord.new("u", ctrl: true)],
         available: in_repeater, section: :request, menu: :palette) { |ctx| ctx.repeater_pretty_request; nil }
+      # Once-a-target actions with no chord: the palette finds them by typing "graphql".
+      r.register Verb::Definition.new(
+        "repeater.graphql-introspection", "GraphQL: insert introspection query", "Rewrite the request as a POST of the standard introspection query to the same endpoint, keeping the other headers",
+        Verb::Scope::Repeater, [] of Verb::Chord,
+        available: in_repeater, section: :request, menu: :palette) { |ctx| ctx.repeater_graphql_introspection(legacy: false); nil }
+      r.register Verb::Definition.new(
+        "repeater.graphql-introspection-legacy", "GraphQL: insert legacy introspection query", "The introspection query without subscriptionType and directives, for a server that rejects the standard one",
+        Verb::Scope::Repeater, [] of Verb::Chord,
+        available: in_repeater, section: :request, menu: :palette) { |ctx| ctx.repeater_graphql_introspection(legacy: true); nil }
 
       # Target-pane toggle (SNI override) — tagged :target so it fronts the space menu
       # when the TARGET field has focus (previously ctrl-only ⇒ invisible there).
