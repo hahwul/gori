@@ -336,9 +336,10 @@ module Gori
     # is not the table's newest — a peer whose `now_us` was taken before it waited on the write
     # lock, or any row stamped ahead of this clock (an archive from a fast machine) — leaves the
     # MAX where it was. Summed over the low 32 bits so 250k rows cannot overflow SQLite's
-    # integer SUM (which raises rather than wraps). The one write that moves none is
-    # `detach_flow_refs` nulling a `sample_flow_id` — a reader that acts on a sample flow reads
-    # the row fresh (`get_probe_issue`) rather than trusting a listed copy.
+    # integer SUM (which raises rather than wraps). The two writes that move none are
+    # `detach_flow_refs` nulling a `sample_flow_id` and `delete_repeater` nulling a
+    # `sample_repeater_id` — a reader that acts on either sample reads the row fresh
+    # (`get_probe_issue`) rather than trusting a listed copy.
     #
     # Served from `idx_probe_issues_triage` as a covering scan, so it never walks the `affected`
     # overflow pages: ~0.2 ms at 5k findings.
