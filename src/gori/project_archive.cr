@@ -682,13 +682,30 @@ module Gori
       end
       monotonic = counted + %w[flows h2_connections] + Store::Schema::ID_REBUILDS.map(&.table)
       (monotonic.uniq & tables).each do |table|
-        top = begin
-          conn.query_one?("SELECT MAX(rowid) FROM \"#{table.gsub('"', "\"\"")}\"", as: Int64?)
-        rescue SQLite3::Exception
-          nil # no rowid (WITHOUT ROWID): nothing for AUTOINCREMENT to exhaust
+        id_columns(conn, table).each do |column|
+          col = quote_ident(column)
+          top = conn.query_one?("SELECT MAX(#{col}) FROM #{quote_ident(table)} WHERE typeof(#{col}) = 'integer'", as: Int64?)
+          raise exhausted_ids(table) if top && top >= ceiling
         end
-        raise exhausted_ids(table) if top && top >= ceiling
       end
+    end
+
+    # The columns that hold a table's id, BY NAME, never `rowid`: a crafted table can declare a
+    # real column called `rowid` (or `_rowid_`, `oid`), which shadows the alias. The INTEGER
+    # PRIMARY KEY is the rowid itself; an `id` column is what a migration's rebuild copies into
+    # one.
+    private def self.id_columns(conn : DB::Connection, table : String) : Array(String)
+      info = conn.query_all("SELECT name, type, pk FROM pragma_table_info(?)", table, as: {String, String, Int64})
+      keys = info.select { |(_, _, pk)| pk > 0 }
+      columns = info.select { |(name, _, _)| name.downcase == "id" }.map(&.[0])
+      if keys.size == 1 && keys[0][1].upcase == "INTEGER"
+        columns << keys[0][0]
+      end
+      columns.uniq
+    end
+
+    private def self.quote_ident(name : String) : String
+      %("#{name.gsub('"', %(""))}")
     end
 
     private def self.exhausted_ids(table : String) : Gori::Error

@@ -588,9 +588,11 @@ describe Gori::ProjectArchive do
         "UPDATE sqlite_sequence SET seq = 9223372036854775807 WHERE name = 'flows'",
         "UPDATE sqlite_sequence SET seq = '9223372036854775807' WHERE name = 'flows'",
         "UPDATE flows SET id = 9223372036854775807",
+        # A real column named `rowid` shadows the alias, so the id is read by its own name.
+        "ALTER TABLE flows ADD COLUMN rowid INTEGER; UPDATE flows SET id = 9223372036854775807, rowid = 1",
       }.each do |statement|
         File.write(archive_path, original)
-        tamper_archive_database(archive_path, root) { |conn| conn.exec(statement) }
+        tamper_archive_database(archive_path, root) { |conn| statement.split("; ").each { |sql| conn.exec(sql) } }
         error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }
         error.message.not_nil!.should contain(%(past 2^62 in "flows"))
       end
