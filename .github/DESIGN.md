@@ -4198,3 +4198,31 @@ passed the gone-issue guard. V40 does all eight in one migration.
   way. A saved view's pointer is cleared by the saved setting on every surface
   (`SavedViews.clear_active_if`). A link is removed by its (owner, ref) pair, which is UNIQUE, and
   never by its row id.
+
+### 2026-09-28: the in-place AUTOINCREMENT edit reads no row, and `since` trusts the high-water mark
+
+Two statements above are overturned here rather than edited in place. The #1344 entry's "as a
+second guard, `PRAGMA quick_check` must pass on each edited table" no longer holds, and neither
+does the #1343 entry's listing of the MCP `since` check among the guards against a reused id.
+
+#1344 added `quick_check` on every edited table as a second guard behind eligibility. On `flows`
+that walks the whole table, every body's overflow chain included: 10–16 s through `migrate!` on a
+3.3 GB project, against 0.1–0.15 s without it, measured. That undid V39's reason for editing in
+place: a peer waiting on the 5 s `busy_timeout` got `database is locked` on the first open after
+an upgrade, and `gori mcp --read-only` held the write lock as long.
+
+- **Eligibility is the guard, and it is read from the text.** What `quick_check` caught, an edit
+  that landed somewhere other than the rowid clause, is what eligibility rules out before the
+  edit: the phrase exactly once and as the first column, no CHECK, GENERATED, comment or
+  AUTOINCREMENT, and now no WITHOUT ROWID tail either (SQLite refuses AUTOINCREMENT there). Under
+  those conditions the blind `replace()` can only extend the rowid clause, so a read-back of the
+  edited text would compare it with itself and was not added. The cookie read-back and the
+  column-shape check stay. A spec cuts a body's overflow chain on disk and requires the edit to
+  succeed regardless, so a check that reads rows cannot come back unnoticed.
+- **MCP `since` is judged against the high-water mark.** `list_history` refused a cursor above
+  `MAX(id)`, which before V39 meant the ids had restarted. Afterwards it meant "the newest flow was
+  deleted" or "history was cleared", and the refusal sent a tailing agent back to since=0 to
+  re-read everything, although the next capture lands above its cursor. The bound is now the
+  highest id ever issued (`sqlite_sequence`, or `MAX(id)` where that row is missing).
+  A cursor beyond it was not issued by the project as it stands and is still refused, without
+  guessing why.
