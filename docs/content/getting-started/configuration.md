@@ -1,5 +1,5 @@
 +++
-title = "Configuration"
+title = "Configure gori and Its Root CA"
 description = "Where gori stores data, how to configure the network, and the root CA."
 weight = 40
 +++

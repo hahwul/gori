@@ -1,5 +1,5 @@
 +++
-title = "Themes"
+title = "TUI Themes"
 description = "Switch between gori's built-in colour themes, or drop in your own."
 weight = 100
 

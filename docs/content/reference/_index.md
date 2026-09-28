@@ -1,6 +1,6 @@
 +++
-title = "Reference"
-description = "CLI commands, configuration keys, and the query language."
+title = "CLI, Configuration, and Query Reference"
+description = "The gori reference for CLI commands, configuration keys, query language syntax, and Probe rules."
 weight = 30
 +++
 

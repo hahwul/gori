@@ -1,6 +1,6 @@
 +++
-title = "Getting Started"
-description = "Install gori, trust its CA, and capture your first request."
+title = "Install gori and Capture Your First Request"
+description = "Install gori, trust its CA, and capture your first HTTP request with the terminal proxy."
 weight = 10
 +++
 

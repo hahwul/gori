@@ -1,5 +1,5 @@
 +++
-title = "Settings"
+title = "TUI Settings"
 description = "The Preferences modal: one place for every gori setting, reachable from anywhere."
 weight = 90
 

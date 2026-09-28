@@ -1,5 +1,5 @@
 +++
-title = "쿼리 언어"
+title = "gori 쿼리 언어"
 description = "History, Sitemap, Probe, Issues, Intercept, MCP 도구 전반에서 쓰는 필터 문법."
 weight = 30
 +++

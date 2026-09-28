@@ -1,5 +1,5 @@
 +++
-title = "Quick Start"
+title = "gori Quick Start"
 description = "A hands-on walkthrough: trust the CA, capture a real request, inspect it, and replay it in Repeater."
 weight = 20
 +++

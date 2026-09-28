@@ -1,5 +1,5 @@
 +++
-title = "Sequencer"
+title = "토큰 무작위성 테스트"
 description = "세션 token, CSRF token, 리셋 코드의 무작위성을 예측 가능성 관점에서 등급 매기기."
 weight = 60
 

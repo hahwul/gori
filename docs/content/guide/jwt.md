@@ -1,6 +1,6 @@
 +++
-title = "JWT"
-description = "Decode, verify, edit and re-sign JSON Web Tokens across HMAC and the asymmetric algorithms, and generate alg:none, weak-secret, header-injection and algorithm-confusion payloads."
+title = "JWT Security Testing"
+description = "Decode, verify, edit, and re-sign JSON Web Tokens, then generate alg:none, weak-secret, header-injection, and algorithm-confusion test payloads."
 weight = 50
 
 [extra]

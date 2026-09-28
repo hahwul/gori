@@ -1,5 +1,5 @@
 +++
-title = "설정"
+title = "gori 설정과 루트 CA"
 description = "gori가 데이터를 저장하는 위치, 네트워크 설정 방법, 그리고 루트 CA를 다룹니다."
 weight = 40
 +++

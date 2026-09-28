@@ -1,5 +1,5 @@
 +++
-title = "Cookie"
+title = "Session Cookie Security"
 description = "Decode, verify, crack, and re-sign Flask, Rack, and Django signed session cookies."
 weight = 55
 

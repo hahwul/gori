@@ -1,5 +1,5 @@
 +++
-title = "Configuration"
+title = "Configuration Reference"
 description = "The settings.json keys and the GORI_HOME storage layout."
 weight = 20
 +++

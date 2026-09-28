@@ -1,5 +1,5 @@
 +++
-title = "Scanning & Issues"
+title = "Web Security Scanning and Issues"
 description = "The Probe scanner, the Param Miner, and triaging results into Issues."
 weight = 30
 

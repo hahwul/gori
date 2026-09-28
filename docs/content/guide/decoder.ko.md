@@ -1,5 +1,5 @@
 +++
-title = "Decoder"
+title = "Decoder: 인코드, 디코드, 해시"
 description = "TUI 안에서 다단계 파이프라인으로 데이터를 인코드, 디코드, 해시, 변환합니다."
 weight = 40
 

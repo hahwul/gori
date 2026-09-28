@@ -1,5 +1,5 @@
 +++
-title = "설정"
+title = "TUI 설정"
 description = "Preferences 모달: gori의 모든 설정을 한곳에서, 어디서나."
 weight = 90
 

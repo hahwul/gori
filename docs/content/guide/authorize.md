@@ -1,5 +1,5 @@
 +++
-title = "Authorize"
+title = "Authorization Testing"
 description = "Replay a captured request under several identities and diff the verdicts to find broken access control."
 weight = 75
 

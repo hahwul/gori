@@ -1,6 +1,6 @@
 +++
-title = "시작하기"
-description = "gori를 설치하고, CA를 신뢰하고, 첫 요청을 캡처합니다."
+title = "gori 설치와 첫 요청 캡처"
+description = "gori를 설치하고 CA를 신뢰한 뒤 터미널 프록시로 첫 HTTP 요청을 캡처합니다."
 weight = 10
 +++
 

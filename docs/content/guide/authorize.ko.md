@@ -1,5 +1,5 @@
 +++
-title = "Authorize"
+title = "접근 제어 테스트"
 description = "캡처한 요청을 여러 아이덴티티로 재전송하고 판정을 비교해 접근 제어 결함을 찾습니다."
 weight = 75
 

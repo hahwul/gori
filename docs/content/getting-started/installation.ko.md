@@ -1,5 +1,5 @@
 +++
-title = "설치"
+title = "gori 설치"
 description = "curl, Homebrew, AUR, Snap, Nix, Docker, 사전 빌드 바이너리, 또는 소스에서 gori를 설치합니다."
 weight = 10
 +++

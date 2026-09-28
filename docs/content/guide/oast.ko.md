@@ -1,5 +1,5 @@
 +++
-title = "OAST"
+title = "Blind 취약점 검증을 위한 OAST"
 description = "out-of-band 콜백(interactsh 등)을 잡아 blind SSRF, XXE, injection, 원격 파일 포함을 확인하세요."
 weight = 70
 

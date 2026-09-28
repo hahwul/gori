@@ -1,6 +1,6 @@
 +++
-title = "Gori - Hack from the terminal"
-description = "Sit in the loop. A fast, keyboard-driven HTTP intercepting proxy and web-hacking toolkit for the terminal."
+title = "Gori: HTTP Intercepting Proxy for the Terminal"
+description = "gori is a fast, keyboard-driven HTTP/HTTPS intercepting proxy and web security toolkit for authorized testing in the terminal."
 image = "/images/og-card.png"
 +++
 

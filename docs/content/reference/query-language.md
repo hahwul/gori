@@ -1,5 +1,5 @@
 +++
-title = "Query Language"
+title = "gori Query Language"
 description = "The filter syntax used across History, Sitemap, Probe, Issues, Intercept, and the MCP tools."
 weight = 30
 +++

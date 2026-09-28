@@ -1,5 +1,5 @@
 +++
-title = "스캐닝 & Issues"
+title = "웹 보안 스캐닝과 Issues"
 description = "Probe 스캐너, Param Miner, 그리고 결과를 Issues로 트리아지하기."
 weight = 30
 

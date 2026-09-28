@@ -16,17 +16,27 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="{{ page.description | default(site.description, true) | e }}">
+  {% if page.url == "/404.html" %}<meta name="robots" content="noindex, follow">{% endif %}
   <title>{% if page.section == "" %}{{ page.title | e }}{% else %}{% if page.title is present %}{{ page.title | e }} - {% endif %}{{ site.title | e }}{% endif %}</title>
-  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
-  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
-  <link rel="shortcut icon" href="/icons/favicon.ico" />
-  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <link rel="icon" type="image/png" href="{{ base_url }}/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="{{ base_url }}/icons/favicon.svg" />
+  <link rel="shortcut icon" href="{{ base_url }}/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="{{ base_url }}/icons/apple-touch-icon.png" />
   <meta name="apple-mobile-web-app-title" content="Gori" />
-  <link rel="manifest" href="/icons/site.webmanifest" />
+  <link rel="manifest" href="{{ base_url }}/icons/site.webmanifest" />
   {{ og_all_tags }}
+  <meta property="og:site_name" content="{{ site.title | e }}">
+  <meta property="og:locale" content="{% if page_language == "ko" %}ko_KR{% else %}en_US{% endif %}">
+  {% for t in page.translations %}{% if not t.is_current %}<meta property="og:locale:alternate" content="{% if t.code == "ko" %}ko_KR{% else %}en_US{% endif %}">
+  {% endif %}{% endfor %}
   {{ canonical_tag }}
+  {% if page.section == "" and page.url != "/404.html" %}
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"gori","url":"{{ base_url }}/","description":"{{ site.description | e }}","applicationCategory":"SecurityApplication","operatingSystem":"Linux, macOS","isAccessibleForFree":true,"codeRepository":"https://github.com/hahwul/gori","license":"https://www.apache.org/licenses/LICENSE-2.0","offers":{"@type":"Offer","price":0,"priceCurrency":"USD"}}</script>
+  {% endif %}
   {{ jsonld }}
   {{ hreflang_tags }}
+  {% for t in page.translations %}{% if t.code == "en" %}<link rel="alternate" hreflang="x-default" href="{{ base_url }}{{ t.url }}">
+  {% endif %}{% endfor %}
   {{ pagination_seo_links }}
   <link rel="stylesheet" href="{{ base_url }}/css/style.css">
   {% if page.section != "" %}<link rel="stylesheet" href="{{ base_url }}/css/docs.css">{% endif %}

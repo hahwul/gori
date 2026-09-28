@@ -1,5 +1,5 @@
 +++
-title = "Quick Start"
+title = "gori 빠른 시작"
 description = "직접 따라 하는 튜토리얼: CA를 신뢰하고, 실제 요청을 캡처해 살펴본 뒤 Repeater에서 재전송합니다."
 weight = 20
 +++

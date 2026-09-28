@@ -1,5 +1,5 @@
 +++
-title = "AI 설정"
+title = "gori MCP와 AI 에이전트 설정"
 description = "MCP로 AI 에이전트를 gori에 연결합니다: 클라이언트에 서버 설치, 프로젝트 고정, 그리고 첫 요청 구동."
 weight = 30
 +++
