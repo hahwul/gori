@@ -305,7 +305,7 @@ describe "Store::Schema V40 (AUTOINCREMENT on eight tables)" do
       DB.open("sqlite3:#{path}") do |db|
         db.using_connection do |c|
           c.exec("BEGIN IMMEDIATE")
-          Gori::Store::Schema.migrate_v40(c.as(SQLite3::Connection)).should eq(["issues"])
+          Gori::Store::Schema.move_to_autoincrement(c.as(SQLite3::Connection), Gori::Store::Schema::ID_REBUILDS, 40).should eq(["issues"])
           c.exec("COMMIT")
           TABLES.each do |t|
             c.scalar("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?", t).as(String)

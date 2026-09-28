@@ -4250,3 +4250,18 @@ is denied, and the serializer writes `scope: true` for the one combination that 
   the binders. So does a SCOPE_BLOCKED remedy (`Tools#scope_remedy`): "add an include" becomes
   the operator's beside `allow_unscoped:true`, and "delete the EXCLUDE rule", which no waiver
   lifts, names only the operator.
+
+### 2026-09-28: `sequencer_sessions` is AUTOINCREMENT too (#1354)
+
+V10 left `sequencer_sessions` out because no link can name a session (`LinkRefKind` has no
+`Sequencer` variant), and #1344 did not revisit it. A link is not the only holder. A peer TUI
+keeps each tab's row id, and closing the newest session and opening another handed that id to the
+new row. A peer whose tab was locked (unsaved edit, collection running) then took the new row for
+its own tab in `reconcile`, and its next save overwrote the other operator's session. An Activity
+row's `goto_session_id` opened the new session the same way. The test for leaving a table out is
+"can anything outside this process hold its id", not "can a link name it".
+
+- **V41 moves it the way V40 moved eight tables.** `migrate_v40` became
+  `move_to_autoincrement(conn, rebuilds, version)`, shared by V40 and V41: in place where the
+  CREATE text is gori's, the verified rebuild otherwise. The seed reads the events that point at a
+  Sequencer session and any `sequencer` link, filtered like every other seed.

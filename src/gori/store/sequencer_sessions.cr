@@ -73,15 +73,11 @@ module Gori
     # flow|repeater|fuzz|miner and no link can name a sequencer session — the DELETE below
     # matches zero rows by construction. It is here because this delete was the last one in the
     # family written the way fuzz's and miner's were, and those two shipped a real bug (#574):
-    # an uncascaded link outlives its session, and because `id` is `INTEGER PRIMARY KEY`
-    # without AUTOINCREMENT the next insert reuses the id and the stray link silently re-binds
-    # to a different target.
+    # an uncascaded link outlives its session.
     #
-    # So, for whoever adds a `Sequencer` variant to `LinkRefKind`: this line already covers the
-    # delete path, but the OTHER half is missing. `sequencer_sessions` was deliberately left
-    # out of the V10 rebuild that gave fuzz/miner `AUTOINCREMENT` (there was no id to protect),
-    # and it needs its own migration on that day — otherwise reuse makes a stray dangerous
-    # rather than merely dead. See the V10 comment in schema.cr for the shape.
+    # The id itself is never handed out again (V41, AUTOINCREMENT), so a peer TUI still holding
+    # this session's tab, or an Activity row pointing at it, finds it gone instead of adopting
+    # the next session created.
     # Returns whether the delete COMMITTED, like `delete_repeater` and `delete_fuzz_session`: a
     # rolled-back batch leaves the row, so the tab the operator closed reappears on the next open.
     def delete_sequencer_session(id : Int64) : Bool

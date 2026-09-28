@@ -762,10 +762,9 @@ module Gori
       # then rebuilds it here in the same transaction: microseconds on an empty table, and it
       # keeps every database, new or migrated, on exactly one definition.
       #
-      # `sequencer_sessions` is NOT rebuilt. `LinkRefKind.parse` accepts only
-      # flow|repeater|fuzz|miner, so nothing can reference a sequencer session and there is no
-      # id to protect today — `delete_sequencer_session` takes the cascade pre-emptively, and
-      # its comment says that whoever adds a `Sequencer` variant needs this rebuild too.
+      # `sequencer_sessions` is NOT rebuilt here: no link can name one (`LinkRefKind.parse`
+      # accepts only flow|repeater|fuzz|miner). That undercounted its holders — a peer TUI's tab
+      # and an Activity row keep a session id too — and V41 moves it.
       # `flows` is not swept either, and must not be: the prune paths delete from the BOTTOM
       # (`id <= cutoff`), so `MAX(id)` survives and a pruned flow's id never returns — its
       # links are already safely `(gone)`.
@@ -1814,12 +1813,12 @@ module Gori
       # `source_ref` ("12" for a Repeater send, "issue #3 step 1", "project rule #4 · …") —
       # read from `idx_flows_list`, which covers `source`/`source_ref`, never from `flows`.
       #
-      # Moved the way V39 moves `flows` (read its comment): `migrate_v40` edits each eligible
-      # table's stored CREATE text in place (`autoincrement_in_place`), which is milliseconds
-      # and touches no row, and gives any table it cannot edit the verified rebuild — cheap
-      # here, since these tables hold hundreds to a few thousand rows. Every table V1 or a
-      # later ADD COLUMN wrote is eligible; the rebuild is for a SQLite that refuses the edit or
-      # a CREATE text gori did not write. The statements below are that rebuild, which is what
+      # Moved the way V39 moves `flows` (read its comment): `move_to_autoincrement` edits each
+      # eligible table's stored CREATE text in place (`autoincrement_in_place`), which is
+      # milliseconds and touches no row, and gives any table it cannot edit the verified
+      # rebuild — cheap here, since these tables hold hundreds to a few thousand rows. Every
+      # table V1 or a later ADD COLUMN wrote is eligible; the rebuild is for a SQLite that
+      # refuses the edit or a CREATE text gori did not write. The statements below are that rebuild, which is what
       # a bare replay runs.
       ID_REBUILDS = [
         TableRebuild.new("repeaters",
@@ -2019,6 +2018,38 @@ module Gori
 
       V40 = V40_COPY + V40_SWAP + V40_AFTER
 
+      # V41 — `sequencer_sessions` gets V40's treatment, which V10 withheld because no link could
+      # name a session. A link is not the only holder: a peer TUI keeps its tab's row id, and a
+      # delete of the newest session followed by a new one handed that id to the new row, which
+      # the peer's `reconcile` took for its own tab and its next save overwrote. An Activity row's
+      # `goto_session_id` opened the new session the same way. Moved as V40 moves its tables
+      # (`move_to_autoincrement`), and seeded past both holders the project keeps: the events
+      # that point at a session, and a `sequencer` link, which `LinkRefKind` cannot make today
+      # but `delete_sequencer_session` already cascades.
+      V41_REBUILDS = [
+        TableRebuild.new("sequencer_sessions",
+          %w[id created_at updated_at target request http2 sni config flow_id position name],
+          <<-SQL,
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            target     TEXT    NOT NULL,
+            request    BLOB    NOT NULL,
+            http2      INTEGER NOT NULL DEFAULT 0,
+            sni        TEXT,
+            config     TEXT    NOT NULL DEFAULT '',
+            flow_id    INTEGER,
+            position   INTEGER NOT NULL DEFAULT 0,
+            name       TEXT
+            SQL
+          ["CREATE INDEX idx_sequencer_sessions_position ON sequencer_sessions (position, id)"],
+          ["SELECT goto_session_id AS v FROM events WHERE goto_tab = 'sequencer'",
+           "SELECT ref_id AS v FROM entity_links WHERE ref_kind = 'sequencer'"]),
+      ]
+
+      V41_AFTER = V41_REBUILDS.flat_map(&.seed)
+      V41       = V41_REBUILDS.flat_map(&.copy) + V41_REBUILDS.flat_map(&.swap) + V41_AFTER
+
       # Data statements that call gori's OWN SQL functions, run by `migrate!` right after the
       # version they complete. Kept out of MIGRATIONS because that list is plain schema that a
       # bare connection can replay (specs build every historical shape that way), and a bare
@@ -2041,7 +2072,7 @@ module Gori
 
       MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17,
                     V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29, V30, V31, V32, V33,
-                    V34, V35, V36, V37, V38, V39, V40]
+                    V34, V35, V36, V37, V38, V39, V40, V41]
 
       def self.migrate!(db : DB::Database, read_only : Bool = false) : Nil
         db.using_connection do |conn|
@@ -2103,8 +2134,11 @@ module Gori
                 rebuild_v39(conn) unless autoincrement_in_place(conn.as(SQLite3::Connection))
                 statements = V39_SEED
               elsif statements.same?(V40)
-                migrate_v40(conn.as(SQLite3::Connection))
+                move_to_autoincrement(conn.as(SQLite3::Connection), ID_REBUILDS, 40)
                 statements = V40_AFTER
+              elsif statements.same?(V41)
+                move_to_autoincrement(conn.as(SQLite3::Connection), V41_REBUILDS, 41)
+                statements = V41_AFTER
               end
               statements.each { |sql| conn.exec(sql) }
               BACKFILLS[idx + 1]?.try { |sql| conn.exec(sql) }
@@ -2123,15 +2157,15 @@ module Gori
 
       # Every table the CURRENT schema keeps as AUTOINCREMENT, read off the migrations rather
       # than listed: a CREATE that says AUTOINCREMENT (a `_vNN` or `_autoinc` copy renamed onto
-      # its table counts as that table), V39's in-place tables and V40's. An archive written
-      # before one of them got there has no sequence row for it, and the migration seeds one
-      # from what the table holds, so the archive check reads them all (`ProjectArchive`).
+      # its table counts as that table), V39's in-place tables, and V40's and V41's. An archive
+      # written before one of them got there has no sequence row for it, and the migration seeds
+      # one from what the table holds, so the archive check reads them all (`ProjectArchive`).
       # spec/store/table_id_autoincrement_migration_spec.cr holds it equal to a fresh store's.
       class_getter autoincrement_tables : Set(String) do
         created = MIGRATIONS.flat_map(&.to_a).flat_map do |sql|
           sql.scan(/CREATE TABLE(?: IF NOT EXISTS)?\s+"?(\w+)"?\s*\(([^;]*?\bAUTOINCREMENT\b)/i).map(&.[1].sub(/_(?:v\d+|autoinc)\z/, ""))
         end
-        (created + AUTOINCREMENT_TABLES.to_a + ID_REBUILDS.map(&.table)).to_set
+        (created + AUTOINCREMENT_TABLES.to_a + (ID_REBUILDS + V41_REBUILDS).map(&.table)).to_set
       end
       private ROWID_CLAUSE      = "INTEGER PRIMARY KEY"
       private ROWID_DECLARATION = /\(\s*"?id"?\s+INTEGER PRIMARY KEY\s*,/
@@ -2158,7 +2192,7 @@ module Gori
       # out before the edit, from the text alone: with the phrase present exactly once and first,
       # the blind `replace()` can only extend the rowid clause.
       #
-      # `tables` defaults to V39's; V40 passes the ones `in_place_eligible?` accepts.
+      # `tables` defaults to V39's; V40 and V41 pass the ones `in_place_eligible?` accepts.
       def self.autoincrement_in_place(conn : SQLite3::Connection,
                                       tables : Enumerable(String) = AUTOINCREMENT_TABLES) : Bool
         return false if tables.empty? || !tables.all? { |table| in_place_eligible?(conn, table) }
@@ -2205,17 +2239,19 @@ module Gori
         sql.matches?(ROWID_DECLARATION) && sql.scan(/integer\s+primary\s+key/i).size == 1
       end
 
-      # V40's move: every eligible table in place, in one edit; the rest — or all of them, when
-      # SQLite refuses the edit — by the verified rebuild. The seed and the new index follow in
-      # `V40_AFTER` either way. Returns the tables that were rebuilt.
-      def self.migrate_v40(conn : SQLite3::Connection) : Array(String)
-        eligible = ID_REBUILDS.select { |r| in_place_eligible?(conn, r.table) }
+      # V40's and V41's move: every eligible table in place, in one edit; the rest — or all of
+      # them, when SQLite refuses the edit — by the verified rebuild. The seed (and V40's new
+      # index) follow in the version's `_AFTER` statements either way. Returns the tables that
+      # were rebuilt.
+      def self.move_to_autoincrement(conn : SQLite3::Connection, rebuilds : Array(TableRebuild),
+                                     version : Int32) : Array(String)
+        eligible = rebuilds.select { |r| in_place_eligible?(conn, r.table) }
         eligible.clear unless autoincrement_in_place(conn, eligible.map(&.table))
-        rebuild = ID_REBUILDS - eligible
+        rebuild = rebuilds - eligible
         return [] of String if rebuild.empty?
         begin
           rebuild.each { |r| r.copy.each { |sql| conn.exec(sql) } }
-          verify_rebuilt_copies(conn, rebuild, 40)
+          verify_rebuilt_copies(conn, rebuild, version)
           rebuild.each { |r| r.swap.each { |sql| conn.exec(sql) } }
         rescue ex : SQLite3::Exception
           raise ex unless ex.code == LibSQLite3::Code::FULL.value
@@ -2382,7 +2418,7 @@ class SQLite3::Connection
   private DBCONFIG_DEFENSIVE = 1010
 
   # Set SQLITE_DBCONFIG_DEFENSIVE on this connection and return what it was, so a caller can
-  # put it back. Only the in-place AUTOINCREMENT edit (V39, V40) lifts it (see
+  # put it back. Only the in-place AUTOINCREMENT edit (V39, V40, V41) lifts it (see
   # `Schema.autoincrement_in_place`).
   def gori_swap_defensive(on : Bool) : Bool
     was = 0
