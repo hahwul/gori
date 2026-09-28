@@ -240,10 +240,11 @@ module Gori
           return err("#{reason} — minimize refuses to send", "SCOPE_BLOCKED",
             field: "repeater_id", details: JSON.parse({"scope_decision" => "sandbox"}.to_json))
         end
-        return nil unless ob.check_request(scheme, host, target, port).blocked?
+        sc = ob.check_request(scheme, host, target, port)
+        return nil unless sc.blocked?
         err("#{host} is outside — or without — a configured scope; pass allow_unscoped:true to minimize anyway",
           "SCOPE_BLOCKED", field: "repeater_id",
-          details: JSON.parse({"scope_decision" => "unscoped", "host" => host}.to_json))
+          details: JSON.parse({"scope_decision" => sc.decision, "host" => host}.to_json))
       end
 
       # The tools/list schemas for the request-minimizer tools, kept beside the handlers that

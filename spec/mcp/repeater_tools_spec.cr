@@ -351,6 +351,19 @@ describe "MCP minimize_repeater" do
       r = tools.call("minimize_repeater", JSON.parse(%({"repeater_id":#{id}})))
       r.is_error.should be_true
       r.text.should contain("scope")
+      # The decision the gate made, as send_request reports it: a configured scope that does
+      # not cover the host is out_of_scope, not "unscoped".
+      r.details.not_nil!["scope_decision"].as_s.should eq("out_of_scope")
+    end
+  end
+
+  it "reports an unconfigured scope's refusal as unscoped" do
+    with_store do |store|
+      id = store.insert_repeater("https://acme.test/", "GET / HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice,
+        false, true, nil, 0)
+      r = tools_for(store).call("minimize_repeater", JSON.parse(%({"repeater_id":#{id}})))
+      r.error_code.should eq("SCOPE_BLOCKED")
+      r.details.not_nil!["scope_decision"].as_s.should eq("unscoped")
     end
   end
 
