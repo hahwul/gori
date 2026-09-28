@@ -350,7 +350,7 @@ module Gori
 
       begin
         manifest = parse_manifest(extract_entries(source, database))
-        version, inventory = inspect_database(database, reject_user_schema_objects: true)
+        version, inventory = inspect_database(database, importing: true)
         validate_manifest_database!(manifest, version, inventory)
         sanitize_import_database(database)
         prepared = PreparedImport.new(workdir, database, manifest, inventory)
@@ -460,14 +460,14 @@ module Gori
       raise Gori::Error.new("could not create a private temporary directory")
     end
 
-    private def self.inspect_database(path : String, *, reject_user_schema_objects : Bool = false) : {Int32, Inventory}
+    private def self.inspect_database(path : String, *, importing : Bool = false) : {Int32, Inventory}
       DB.open("sqlite3:#{path}?busy_timeout=5000") do |db|
         db.using_connection do |conn|
           conn.exec("PRAGMA query_only = ON")
           version = conn.scalar("PRAGMA user_version").as(Int64).to_i
           unsupported_objects = conn.query_all("SELECT type FROM sqlite_master " \
                                                "WHERE type IN ('trigger', 'view') AND name NOT LIKE 'sqlite_%'", as: String)
-          if reject_user_schema_objects && !unsupported_objects.empty?
+          if importing && !unsupported_objects.empty?
             raise Gori::Error.new("project archive database contains unsupported SQLite triggers or views")
           end
           tables = conn.query_all("SELECT name FROM sqlite_master WHERE type = 'table' " \
@@ -480,6 +480,7 @@ module Gori
           validate_core_schema!(conn, version, tables)
           quick_check = conn.scalar("PRAGMA quick_check").as(String)
           raise Gori::Error.new("project database integrity check failed: #{quick_check}") unless quick_check == "ok"
+          refuse_exhausted_ids!(conn, tables) if importing
           flows = conn.scalar("SELECT COUNT(*) FROM flows").as(Int64)
           {version, build_inventory(conn, tables, flows)}
         end
@@ -661,6 +662,55 @@ module Gori
           raise Gori::Error.new("project archive database has a NUL byte in #{table}.#{column}; refusing to import it")
         end
       end
+    end
+
+    # An id counter an archive could leave at the top of int64: a `sqlite_sequence` row, or the
+    # largest rowid of a table that is (or, once this build migrates it, will be) AUTOINCREMENT.
+    # There SQLite fails every insert with SQLITE_FULL rather than pick another id, so the
+    # imported project would record no capture at all, under a "database or disk is full" that
+    # sends the operator to the disk. gori never issues an id at `Schema::SEED_CEILING` (2^62)
+    # and only ever writes an integer there, so such an archive is refused rather than repaired.
+    private def self.refuse_exhausted_ids!(conn : DB::Connection, tables : Array(String)) : Nil
+      ceiling = Store::Schema::SEED_CEILING
+      counted = [] of String
+      if table_exists?(conn, "sqlite_sequence")
+        if bad = conn.query_one?("SELECT COALESCE(CAST(name AS TEXT), '') FROM sqlite_sequence " \
+                                 "WHERE typeof(seq) != 'integer' OR seq >= ? LIMIT 1", ceiling, as: String)
+          raise exhausted_ids(bad)
+        end
+        counted = conn.query_all("SELECT name FROM sqlite_sequence WHERE typeof(name) = 'text'", as: String)
+      end
+      monotonic = counted + %w[flows h2_connections] + Store::Schema::ID_REBUILDS.map(&.table)
+      (monotonic.uniq & tables).each do |table|
+        id_columns(conn, table).each do |column|
+          col = quote_ident(column)
+          top = conn.query_one?("SELECT MAX(#{col}) FROM #{quote_ident(table)} WHERE typeof(#{col}) = 'integer'", as: Int64?)
+          raise exhausted_ids(table) if top && top >= ceiling
+        end
+      end
+    end
+
+    # The columns that hold a table's id, BY NAME, never `rowid`: a crafted table can declare a
+    # real column called `rowid` (or `_rowid_`, `oid`), which shadows the alias. The INTEGER
+    # PRIMARY KEY is the rowid itself; an `id` column is what a migration's rebuild copies into
+    # one.
+    private def self.id_columns(conn : DB::Connection, table : String) : Array(String)
+      info = conn.query_all("SELECT name, type, pk FROM pragma_table_info(?)", table, as: {String, String, Int64})
+      keys = info.select { |(_, _, pk)| pk > 0 }
+      columns = info.select { |(name, _, _)| name.downcase == "id" }.map(&.[0])
+      if keys.size == 1 && keys[0][1].upcase == "INTEGER"
+        columns << keys[0][0]
+      end
+      columns.uniq
+    end
+
+    private def self.quote_ident(name : String) : String
+      %("#{name.gsub('"', %(""))}")
+    end
+
+    private def self.exhausted_ids(table : String) : Gori::Error
+      Gori::Error.new("project archive database has an id at or past 2^62 in #{table.inspect}, which gori never " \
+                      "issues; every new row there would fail, so it is refused")
     end
 
     # Automatic refresh runs an archive-authored Repeater step before a send as the slot; an

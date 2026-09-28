@@ -96,6 +96,43 @@ describe "Runner.shell_exit_toast" do
   end
 end
 
+# The count is ids issued since the shell opened. It was a `MAX(id)` difference, which since V39
+# counted every deleted newest flow (or a whole cleared History) as captured by the shell.
+describe "Runner.flows_issued_since" do
+  it "counts only the captures after the baseline, past a delete of the newest flows" do
+    with_store do |store|
+      req = ->(target : String) {
+        Gori::Store::CapturedRequest.new(
+          created_at: 0_i64, scheme: "https", host: "shell.test", port: 443, method: "GET",
+          target: target, http_version: "HTTP/1.1", head: "GET #{target} HTTP/1.1\r\n\r\n".to_slice,
+          source: Gori::FlowSource::Kind::Proxy)
+      }
+      ids = Array.new(5) { |i| store.insert_flow(req.call("/#{i}")) }
+      store.delete_flows(ids[1..]).should be_true
+      before = Runner.flow_mark(store)
+      store.insert_flow(req.call("/from-the-shell"))
+      Runner.flows_issued_since(store, before).should eq(1)
+    end
+  end
+
+  it "counts none when the baseline could not be read" do
+    with_store do |store|
+      store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 0_i64, scheme: "https", host: "shell.test", port: 443, method: "GET",
+        target: "/", http_version: "HTTP/1.1", head: "GET / HTTP/1.1\r\n\r\n".to_slice,
+        source: Gori::FlowSource::Kind::Proxy))
+      Runner.flows_issued_since(store, nil).should eq(0)
+    end
+  end
+
+  it "is what the shell's toast is built from" do
+    body = File.read("#{__DIR__}/../../src/gori/tui/runner.cr").split("private def open_shell_here", 2)[1].split("\n    end\n", 2)[0]
+    body.should contain("before = Runner.flow_mark(@session.store)")
+    body.should contain("Runner.flows_issued_since(@session.store, before)")
+    body.should_not contain("max_flow_id")
+  end
+end
+
 describe "Runner.copy_shell_command" do
   it "uses the absolute path of the running gori binary and quotes arguments" do
     cmd_posix = Runner.copy_shell_command("127.0.0.1:8070", "/path/with space/ca",

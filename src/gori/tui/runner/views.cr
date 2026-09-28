@@ -143,19 +143,21 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # ↵ — make this the project's view, and persist it. The toast names the QUERY as well as the
   # name: a view is a standing filter the operator may not revisit for days, and the one moment
   # it can be explained for free is the moment it is switched on.
-  private def activate_view(view : SavedViews::View?) : Nil
-    return unless view
+  # Answers whether the view is now active; a refused write has set the toast.
+  private def activate_view(view : SavedViews::View?) : Bool
+    return false unless view
     store = @session.store
     unless SavedViews.set_active(store, view)
       # The store refused the write (busy/locked/closing). Applying the view in memory anyway
       # would leave the list filtered by something the next restart forgets, with no way to tell
       # the two states apart — so refuse both halves and say so.
       @toast = "could not save the view — the project store is busy"
-      return
+      return false
     end
     history_controller.view.set_view(view)
     history_controller.view.reload(store)
     @toast = view.narrowing? ? "view: #{view.name} — #{view.query}" : "view: #{view.name} — no narrowing"
+    true
   end
 
   # ^E — load the view's query into the filter bar and open it for editing. This is the ONLY
@@ -195,14 +197,23 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       return
     end
     store = @session.store
-    unless SavedViews.remove(store, view)
-      @toast = "could not delete #{view.name} — the store is busy"
-      return
-    end
     # Deleting the ACTIVE view leaves a dangling pointer; drop back to All rather than keep
-    # filtering by something no longer in the list. The saved pointer and this TUI's lens are
+    # filtering by something no longer in the list. `SavedViews.delete` keeps the SAVED pointer
+    # off it, the same call MCP and the CLI make. The saved pointer and this TUI's lens are
     # separate questions: a peer may have pointed the project at this view since.
-    SavedViews.clear_active_if(store, view)
+    left = false
+    case SavedViews.delete(store, view)
+    in SavedViews::DeleteOutcome::NotDeleted
+      return @toast = "could not delete #{view.name} — the store is busy"
+    in SavedViews::DeleteOutcome::RemoveRefused
+      # The pointer may already say All: re-read it, so this lens agrees with what was saved.
+      history_controller.resolve_active_view
+      history_controller.view.reload(store)
+      return @toast = "could not delete #{view.name} — the store is busy; if it was the active view, that is All now"
+    in SavedViews::DeleteOutcome::PointerLeft
+      left = true
+    in SavedViews::DeleteOutcome::Deleted
+    end
     if (active = history_controller.view.active_view) && active.key == view.key
       history_controller.view.set_view(nil)
       history_controller.view.reload(store)
@@ -210,7 +221,12 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     fresh = SavedViews.merged(store)
     bar = history_controller.view.query
     lp.set_rows(view_rows(fresh, history_controller.view.active_view, bar))
-    @toast = "deleted view #{view.name}"
+    @toast = if left
+               "deleted view #{view.name}, but another gori made it the active view meanwhile and the " \
+               "project store refused the reset — pick another view"
+             else
+               "deleted view #{view.name}"
+             end
     # The card stays up and its rows were just replaced, so the closures the open-site installed
     # are now indexing a stale array. Reinstall them against the fresh one.
     install_view_hooks(lp, fresh, bar)
@@ -267,8 +283,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       unless SavedViews.update(store, same, name, query)
         return @toast = "could not update #{name} — the store is busy"
       end
-      activate_view(SavedViews::View.new(same.id, name, query, scope))
-      @toast = "updated view #{name} (#{scope})"
+      done = "updated view #{name} (#{scope})"
+      activated_toast(activate_view(SavedViews::View.new(same.id, name, query, scope)), done)
     elsif other
       # The name exists in the OTHER scope. Re-home it and take the new query with it, rather
       # than leaving two views one `--view NAME` would silently have to choose between.
@@ -278,14 +294,18 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       unless moved = SavedViews.set_scope(store, other, scope, name, query)
         return @toast = "could not move #{name} to #{scope} — the store is busy"
       end
-      activate_view(moved)
-      @toast = "moved view #{name} to #{scope}"
+      # A refused activation here also leaves a pointer that named the view at its OLD id.
+      activated_toast(activate_view(moved), "moved view #{name} to #{scope}")
     else
       unless created = SavedViews.add(store, name, query, scope)
         return @toast = "could not save #{name} — the store is busy"
       end
-      activate_view(created)
-      @toast = "saved view #{name} (#{scope})"
+      activated_toast(activate_view(created), "saved view #{name} (#{scope})")
     end
+  end
+
+  # The save committed either way; a refused activation must not be toasted over as plain done.
+  private def activated_toast(activated : Bool, done : String) : Nil
+    @toast = activated ? done : "#{done}, but could not make it the active view — the project store is busy"
   end
 end

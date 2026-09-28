@@ -573,6 +573,32 @@ describe Gori::ProjectArchive do
     end
   end
 
+  # An AUTOINCREMENT id counter at the top of int64 fails every insert with SQLITE_FULL, so the
+  # imported project would capture nothing under a "database or disk is full". `flows` became
+  # AUTOINCREMENT in V39; a row alone is enough, since SQLite no longer falls back to a random id.
+  it "refuses an archive whose id counter is exhausted" do
+    with_archive_project do |_registry, project, store, root|
+      store.insert_flow(archive_request("/a"))
+      store.flush
+      archive_path = export_archive(project, File.join(root, "ids.gori"))
+      original = File.read(archive_path)
+      Gori::ProjectArchive.prepare_import(archive_path).close # the untampered copy imports
+
+      {
+        "UPDATE sqlite_sequence SET seq = 9223372036854775807 WHERE name = 'flows'",
+        "UPDATE sqlite_sequence SET seq = '9223372036854775807' WHERE name = 'flows'",
+        "UPDATE flows SET id = 9223372036854775807",
+        # A real column named `rowid` shadows the alias, so the id is read by its own name.
+        "ALTER TABLE flows ADD COLUMN rowid INTEGER; UPDATE flows SET id = 9223372036854775807, rowid = 1",
+      }.each do |statement|
+        File.write(archive_path, original)
+        tamper_archive_database(archive_path, root) { |conn| statement.split("; ").each { |sql| conn.exec(sql) } }
+        error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }
+        error.message.not_nil!.should contain(%(past 2^62 in "flows"))
+      end
+    end
+  end
+
   it "drops the exporter's global rule overrides so they cannot enable the importer's rules" do
     with_archive_project do |registry, project, store, root|
       store.set_rewriter_override(1_i64, true)

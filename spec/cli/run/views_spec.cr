@@ -138,3 +138,20 @@ describe "gori run history — the empty-listing sentence" do
       .should eq(%(no flows written to the HAR (view "Errors")))
   end
 end
+
+# The command ends in `abort`, so what it calls is pinned from the source: the one delete every
+# surface shares (`SavedViews.delete`, whose outcomes spec/saved_views_spec.cr drives), never a
+# bare remove that leaves the active-view pointer to a second write.
+describe "gori run views rm — the active-view pointer" do
+  it "deletes through SavedViews.delete" do
+    body = File.read("#{__DIR__}/../../../src/gori/cli/run/views.cr")
+      .split("def self.cmd_views_rm", 2)[1].split("\n      end\n", 2)[0]
+    body.should contain("case SavedViews.delete(store, view)")
+    body.should_not contain("SavedViews.remove(")
+  end
+
+  it "reports a move whose pointer could not follow it" do
+    File.read("#{__DIR__}/../../../src/gori/cli/run/views.cr")
+      .should contain("unless SavedViews.repoint_active_if(store, view, moved)")
+  end
+end

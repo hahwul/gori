@@ -187,6 +187,32 @@ describe "Store::Schema V39" do
     end
   end
 
+  # What a crafted archive can carry in a reference column. Unfiltered, `ABS` of the lowest int64
+  # aborted the upgrade (the project would not open), a value at the top of int64 became the
+  # sequence (every capture failed with SQLITE_FULL), and one TEXT value won `MAX` over the real
+  # references, so the stranded link at 40 was handed a new flow's id again.
+  it "seeds past the real references when a crafted one is not an id" do
+    path = build_pre_v39 do |c|
+      plant_project(c)
+      c.exec("INSERT INTO issue_evidence (created_at, source_kind, source_id, method, url, request_head, " \
+             "request_sha256, bytes) VALUES (0, 'flow', -9223372036854775808, 'GET', 'https://v39.test/', X'', '', 0)")
+      c.exec("INSERT INTO events (created_at, source, kind, level, message, flow_id) " \
+             "VALUES (0, 'x', 'x', 'info', 'top', 9223372036854775807), (0, 'x', 'x', 'info', 'text', 'junk'), " \
+             "(0, 'x', 'x', 'info', 'real', 1.5e300)")
+      c.exec("INSERT INTO h2_frames (conn_id, created_at, direction, stream_id, type, flags, length, payload) " \
+             "VALUES ('junk', 0, 'out', 1, 0, 0, 0, X'')")
+    end
+    begin
+      open_and(path) do |store|
+        seq_of(store, "flows").should eq(60_i64)
+        seq_of(store, "h2_connections").should eq(12_i64)
+        store.insert_flow(request("/next")).should eq(61_i64)
+      end
+    ensure
+      cleanup(path)
+    end
+  end
+
   it "keeps ids growing through a history clear and a delete of the newest flows" do
     with_store do |store|
       ids = Array.new(3) { |i| store.insert_flow(request("/before-#{i}")) }

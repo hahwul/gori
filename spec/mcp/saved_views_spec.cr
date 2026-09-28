@@ -144,6 +144,7 @@ describe "MCP saved views" do
 
         moved = call_json(t, "update_view", %({"name":"acme 5xx","new_scope":"global"}))
         moved["scope"].as_s.should eq("global")
+        moved["warning"]?.should be_nil
         call_json(t, "list_views", %({"scope":"project"}))["count"].as_i.should eq(0)
         call_json(t, "list_views", %({"scope":"global"}))["count"].as_i.should eq(1)
       end
@@ -234,6 +235,44 @@ describe "MCP saved views" do
         # Cleared, not left dangling: a pointer that survives could be re-pointed by a future
         # view landing on the same id, which is what the never-reused counters exist to stop.
         Gori::SavedViews.active(store).not_nil!.name.should eq("All")
+      end
+    end
+  end
+
+  # The pointer is cleared BEFORE the delete: after it, a refused write left a pointer at a
+  # project view's rowid with no tool to reset it, under a result that said "deleted".
+  it "deletes nothing when the project's active view cannot be reset" do
+    with_globals do
+      with_store do |store|
+        t = tools_for(store)
+        call_json(t, "create_view", %({"name":"mine","query":"src:proxy"}))
+        view = Gori::SavedViews.merged(store).find(&.project?).not_nil!
+        Gori::SavedViews.set_active(store, view).should be_true
+        block_active_view_writes(store)
+
+        text, err = call_raw(t, "delete_view", %({"name":"mine"}))
+        err.should be_true
+        text.should contain("NOT deleted")
+        Gori::SavedViews.merged(store).any?(&.name.==("mine")).should be_true
+        store.setting(Gori::SavedViews::ACTIVE_KEY).should eq(view.key)
+      end
+    end
+  end
+
+  it "says so when a move cannot re-point the project's active view" do
+    with_globals do
+      with_store do |store|
+        t = tools_for(store)
+        call_json(t, "create_view", %({"name":"mine","query":"src:proxy"}))
+        view = Gori::SavedViews.merged(store).find(&.project?).not_nil!
+        Gori::SavedViews.set_active(store, view).should be_true
+        block_active_view_writes(store)
+
+        # The move committed, so this is the success with a warning, not a retryable error: the
+        # same call would now find the view already moved.
+        moved = call_json(t, "update_view", %({"name":"mine","new_scope":"global"}))
+        moved["scope"].as_s.should eq("global")
+        moved["warning"].as_s.should contain("NOT re-pointed")
       end
     end
   end

@@ -328,14 +328,40 @@ module Gori
       store.set_setting(ACTIVE_KEY, v.key)
     end
 
-    # After `view` is deleted: point this project back at All when its SAVED pointer names the
-    # view, and leave it alone otherwise. The saved setting, never a process's own lens — a
-    # peer may have pointed the project at this view since, or away from it. A project view's
-    # id is a rowid that the next view created can take, so a pointer left naming it would
-    # turn that view on. Returns false only when a needed write did not commit.
+    # Point this project back at All when its SAVED pointer names `view`, and leave it alone
+    # otherwise. The saved setting, never a process's own lens — a peer may have pointed the
+    # project at this view since, or away from it. A project view's id is a rowid that the next
+    # view created can take, so a pointer left naming a deleted one would turn that view on.
+    # Returns false only when a needed write did not commit.
     def self.clear_active_if(store : Store, view : View) : Bool
       return true unless store.setting(ACTIVE_KEY) == view.key
       set_active(store, nil)
+    end
+
+    # How `delete` ended, so every surface says the same thing about it.
+    enum DeleteOutcome
+      Deleted       # gone, and the project's pointer does not name it
+      NotDeleted    # the pointer could not be reset first, so nothing changed
+      RemoveRefused # the view stayed, and a pointer that named it now says All
+      PointerLeft   # gone, but a pointer a peer set during the delete still names it
+    end
+
+    # Delete `view` and keep this project's active pointer off it. The pointer is cleared BEFORE
+    # the delete, so a refused write deletes nothing and the same delete can be retried: cleared
+    # only after, a refusal left a pointer at the deleted id with no tool to reset it. It is
+    # checked again AFTER, because a peer can point the project at the view between the two.
+    def self.delete(store : Store, view : View) : DeleteOutcome
+      return DeleteOutcome::NotDeleted unless clear_active_if(store, view)
+      return DeleteOutcome::RemoveRefused unless remove(store, view)
+      clear_active_if(store, view) ? DeleteOutcome::Deleted : DeleteOutcome::PointerLeft
+    end
+
+    # After a move (`set_scope`) minted `to` a new id: point this project's SAVED pointer at it
+    # when it named `from`, which no longer resolves (and, for a project view, is a rowid the
+    # next view created can take). Returns false only when a needed write did not commit.
+    def self.repoint_active_if(store : Store, from : View, to : View) : Bool
+      return true unless store.setting(ACTIVE_KEY) == from.key
+      set_active(store, to)
     end
 
     # --- scope-aware CRUD --------------------------------------------------------------------

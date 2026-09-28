@@ -402,6 +402,106 @@ describe Gori::SavedViews do
         end
       end
     end
+
+    # The callers delete only on true, so a refused write must say so rather than read as done.
+    it "answers false, and changes nothing, when the pointer write does not commit" do
+      with_globals do
+        with_store do |store|
+          store.insert_saved_view("gone", "status:500")
+          gone = Gori::SavedViews.merged(store).find!(&.name.==("gone"))
+          Gori::SavedViews.set_active(store, gone).should be_true
+          block_active_view_writes(store)
+          Gori::SavedViews.clear_active_if(store, gone).should be_false
+          store.setting(Gori::SavedViews::ACTIVE_KEY).should eq(gone.key)
+        end
+      end
+    end
+  end
+
+  # Each outcome every surface maps to its own message. The pointer is cleared before the remove
+  # (a refusal deletes nothing) and checked again after (a peer can set it in between).
+  describe ".delete" do
+    it "deletes, and resets the pointer that named the view" do
+      with_globals do
+        with_store do |store|
+          store.insert_saved_view("gone", "status:500")
+          gone = Gori::SavedViews.merged(store).find!(&.name.==("gone"))
+          Gori::SavedViews.set_active(store, gone).should be_true
+          Gori::SavedViews.delete(store, gone).should eq(Gori::SavedViews::DeleteOutcome::Deleted)
+          Gori::SavedViews.merged(store).any?(&.name.==("gone")).should be_false
+          store.setting(Gori::SavedViews::ACTIVE_KEY).should eq(Gori::SavedViews.all_view.key)
+        end
+      end
+    end
+
+    it "deletes nothing when the pointer cannot be reset" do
+      with_globals do
+        with_store do |store|
+          store.insert_saved_view("kept", "status:500")
+          kept = Gori::SavedViews.merged(store).find!(&.name.==("kept"))
+          Gori::SavedViews.set_active(store, kept).should be_true
+          block_active_view_writes(store)
+          Gori::SavedViews.delete(store, kept).should eq(Gori::SavedViews::DeleteOutcome::NotDeleted)
+          Gori::SavedViews.merged(store).any?(&.name.==("kept")).should be_true
+          store.setting(Gori::SavedViews::ACTIVE_KEY).should eq(kept.key)
+        end
+      end
+    end
+
+    it "says the pointer is All now when the remove itself is refused" do
+      with_globals do
+        with_store do |store|
+          store.insert_saved_view("kept", "status:500")
+          kept = Gori::SavedViews.merged(store).find!(&.name.==("kept"))
+          Gori::SavedViews.set_active(store, kept).should be_true
+          store.@db.exec("CREATE TRIGGER keep_views BEFORE DELETE ON saved_views BEGIN SELECT RAISE(ABORT, 'blocked'); END")
+          Gori::SavedViews.delete(store, kept).should eq(Gori::SavedViews::DeleteOutcome::RemoveRefused)
+          Gori::SavedViews.merged(store).any?(&.name.==("kept")).should be_true
+          store.setting(Gori::SavedViews::ACTIVE_KEY).should eq(Gori::SavedViews.all_view.key)
+        end
+      end
+    end
+
+    it "reports a pointer a peer set during the delete that could not be reset" do
+      with_globals do
+        with_store do |store|
+          store.insert_saved_view("gone", "status:500")
+          gone = Gori::SavedViews.merged(store).find!(&.name.==("gone"))
+          all = Gori::SavedViews.all_view.key
+          Gori::SavedViews.set_active(store, nil).should be_true
+          # The peer: points the project at the view as the row goes, then the reset is refused.
+          store.@db.exec("CREATE TRIGGER peer_points AFTER DELETE ON saved_views BEGIN " \
+                         "UPDATE settings SET value = '#{gone.key}' WHERE key = '#{Gori::SavedViews::ACTIVE_KEY}'; END")
+          store.@db.exec("CREATE TRIGGER refuse_reset BEFORE UPDATE ON settings WHEN NEW.value = '#{all}' " \
+                         "BEGIN SELECT RAISE(ABORT, 'blocked'); END")
+          Gori::SavedViews.delete(store, gone).should eq(Gori::SavedViews::DeleteOutcome::PointerLeft)
+          Gori::SavedViews.merged(store).any?(&.name.==("gone")).should be_false
+          store.setting(Gori::SavedViews::ACTIVE_KEY).should eq(gone.key)
+        end
+      end
+    end
+  end
+
+  describe ".repoint_active_if" do
+    it "moves the saved pointer to the moved view, and answers false when that does not commit" do
+      with_globals do
+        with_store do |store|
+          store.insert_saved_view("here", "status:500")
+          here = Gori::SavedViews.merged(store).find!(&.name.==("here"))
+          Gori::SavedViews.set_active(store, here).should be_true
+          moved = Gori::SavedViews.set_scope(store, here, "global").not_nil!
+          block_active_view_writes(store)
+          Gori::SavedViews.repoint_active_if(store, here, moved).should be_false
+          store.setting(Gori::SavedViews::ACTIVE_KEY).should eq(here.key)
+          unblock_active_view_writes(store)
+          Gori::SavedViews.repoint_active_if(store, here, moved).should be_true
+          store.setting(Gori::SavedViews::ACTIVE_KEY).should eq(moved.key)
+          # A pointer that names some other view is not this move's to change.
+          Gori::SavedViews.repoint_active_if(store, here, Gori::SavedViews.all_view).should be_true
+          store.setting(Gori::SavedViews::ACTIVE_KEY).should eq(moved.key)
+        end
+      end
+    end
   end
 
   describe "write-commit reporting" do
