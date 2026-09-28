@@ -1,4 +1,5 @@
 require "json"
+require "termisu"
 require "./agent_messages"
 
 module Gori
@@ -18,10 +19,19 @@ module Gori
     KIND = "agent_question"
 
     # Two to four short labels: enough for a real decision, few enough that each keeps a
-    # digit key on the card and a row the operator can read in one glance.
+    # digit key on the card and a row the operator can read in one glance. CHOICE_MAX is in
+    # terminal COLUMNS (`label_width`), not characters: a full-width card draws the default's
+    # label in 58 of them, so forty wide CJK characters (80 columns) were clipped, and two
+    # labels differing only at the end read the same while the agent got different answers.
     CHOICES_MIN =  2
     CHOICES_MAX =  4
     CHOICE_MAX  = 40
+
+    def self.label_width(label : String) : Int32
+      w = 0
+      label.each_grapheme { |g| w += Termisu::UnicodeWidth.grapheme_width(g.to_s) }
+      w
+    end
 
     # Minutes until an unanswered question expires. Half an hour by default: long enough for
     # an operator who stepped away for a coffee, short enough that an agent waiting on it

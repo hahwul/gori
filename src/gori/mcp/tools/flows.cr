@@ -703,7 +703,7 @@ module Gori
             "decision, not an authorization — scope and your own limits still apply. The result's " \
             "`tui` says whether a window was open to show it." do |s|
             s.field "question", strprop("one line, ≤200 characters"), required: true
-            s.field "choices", strarrprop("2 to 4 distinct labels, each one line of ≤40 characters"), required: true
+            s.field "choices", strarrprop("2 to 4 distinct labels, each one line ≤40 columns wide (a wide CJK character or emoji counts as two)"), required: true
             s.field "detail", strprop("context the card shows under the question; optional, ≤32 KiB")
             s.field "default", strprop("the choice the card starts on; must be one of choices")
             s.field "expires_in_minutes", intprop("after this long unanswered it comes back as expired (default 30, max 1440)")

@@ -33,6 +33,16 @@ describe "MCP ask_operator (#1324)" do
     end
   end
 
+  # The one string-list rule every MCP list slot follows: a scalar entry is its text.
+  it "reads scalar choices as their text, and forty columns of wide ones as fitting" do
+    with_store do |store|
+      r = ask(tools_for(store), %({"question":"which port?","choices":[80,443]}))
+      r.is_error.should be_false
+      JSON.parse(r.text)["choices"].as_a.map(&.as_s).should eq(["80", "443"])
+      ask(tools_for(store), %({"question":"q","choices":["a","#{"가" * 20}"]})).is_error.should be_false
+    end
+  end
+
   it "accepts the choices as a JSON-encoded string, the way agents often send an array" do
     with_store do |store|
       r = ask(tools_for(store), %({"question":"go?","choices":"[\\"go\\",\\"stop\\"]"}))
@@ -45,13 +55,17 @@ describe "MCP ask_operator (#1324)" do
     with_store do |store|
       t = tools_for(store)
       {
-        %({"choices":["a","b"]})                                          => "question",
-        %({"question":"q"})                                               => "choices",
-        %({"question":"q","choices":["only"]})                            => "choices",
-        %({"question":"q","choices":["a","b","c","d","e"]})               => "choices",
-        %({"question":"q","choices":["a",""]})                            => "choices",
-        %({"question":"q","choices":["Yes","yes"]})                       => "choices",
-        %({"question":"q","choices":["a","#{"x" * 41}"]})                 => "choices",
+        %({"choices":["a","b"]})                            => "question",
+        %({"question":"q"})                                 => "choices",
+        %({"question":"q","choices":["only"]})              => "choices",
+        %({"question":"q","choices":["a","b","c","d","e"]}) => "choices",
+        %({"question":"q","choices":["a",""]})              => "choices",
+        %({"question":"q","choices":["Yes","yes"]})         => "choices",
+        %({"question":"q","choices":["a","#{"x" * 41}"]})   => "choices",
+        # Twenty-one wide characters are 42 columns: the card clips them, and two that
+        # differ only at the end would read the same.
+        %({"question":"q","choices":["a","#{"가" * 21}"]})                 => "choices",
+        %({"question":"q","choices":["a",{"label":"b"}]})                 => "choices",
         %({"question":"q","choices":["a","b"],"default":"c"})             => "default",
         %({"question":"q","choices":["a","b"],"expires_in_minutes":0})    => "expires_in_minutes",
         %({"question":"q","choices":["a","b"],"expires_in_minutes":1441}) => "expires_in_minutes",

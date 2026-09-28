@@ -339,19 +339,23 @@ module Gori
       # than repaired: a card that silently dropped the fifth choice, or merged two that differ
       # only in case, would answer a question the agent did not ask.
       private def question_choices(h) : Array(String) | Result
-        # An array, or the JSON-encoded string of one — the shape agents send most often after
-        # the array itself, accepted the way `fuzz_start`'s `marks` accepts it.
-        node = h["choices"]?
-        raw = node.try(&.as_a?) || node.try(&.as_s?).try { |text| (JSON.parse(text).as_a? rescue nil) }
-        unless raw
+        # `str_list`, the one list reader: an array, the JSON-encoded string of one, or a bare
+        # string as one label; a scalar entry is its text (`[80, 443]` are two ports to pick
+        # from), and only a container or null entry is refused, by name.
+        raw = begin
+          str_list(h, "choices")
+        rescue ex : Gori::Error
+          return Result.new("ask_operator: #{ex.message}", is_error: true, error_code: "INVALID_ARGUMENT", field: "choices")
+        end
+        if raw.empty?
           return Result.new("ask_operator: `choices` is required — an array of #{AgentQuestion::CHOICES_MIN} to #{AgentQuestion::CHOICES_MAX} short labels", is_error: true, error_code: "INVALID_ARGUMENT", field: "choices")
         end
-        choices = raw.map { |v| v.as_s?.try(&.strip) || "" }
+        choices = raw.map(&.strip)
         if choices.size < AgentQuestion::CHOICES_MIN || choices.size > AgentQuestion::CHOICES_MAX
           return Result.new("ask_operator: `choices` takes #{AgentQuestion::CHOICES_MIN} to #{AgentQuestion::CHOICES_MAX} labels (got #{choices.size})", is_error: true, error_code: "INVALID_ARGUMENT", field: "choices")
         end
-        if choices.any?(&.empty?) || choices.any? { |c| c.size > AgentQuestion::CHOICE_MAX || c.includes?('\n') }
-          return Result.new("ask_operator: each choice is a non-empty single line of at most #{AgentQuestion::CHOICE_MAX} characters", is_error: true, error_code: "INVALID_ARGUMENT", field: "choices")
+        if choices.any?(&.empty?) || choices.any? { |c| AgentQuestion.label_width(c) > AgentQuestion::CHOICE_MAX || c.includes?('\n') }
+          return Result.new("ask_operator: each choice is a non-empty single line at most #{AgentQuestion::CHOICE_MAX} columns wide (a wide CJK character or emoji counts as two)", is_error: true, error_code: "INVALID_ARGUMENT", field: "choices")
         end
         if choices.map(&.downcase).uniq!.size != choices.size
           return Result.new("ask_operator: the choices must differ (ignoring case)", is_error: true, error_code: "INVALID_ARGUMENT", field: "choices")
