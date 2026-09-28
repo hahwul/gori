@@ -236,8 +236,8 @@ module Gori
             unless filtered_out.empty?
               j.field "filtered_out_ids", filtered_out
               j.field "filtered_out_note",
-                scope_unconfigured ? "in_scope:true with no scope rules configured excludes every flow — add_scope_rule, or drop in_scope" : "#{filtered_out.size} of the ids exist but were excluded by 'query'/'view'/'in_scope'/'hide_static' — " \
-                                                                                                                                             "drop the narrowing to see them"
+                scope_unconfigured ? "in_scope:true with no scope rules configured excludes every flow — #{add_scope_rule_hint}, or drop in_scope" : "#{filtered_out.size} of the ids exist but were excluded by 'query'/'view'/'in_scope'/'hide_static' — " \
+                                                                                                                                                     "drop the narrowing to see them"
             end
             j.field "flows" do
               j.array { rows.each { |r| Serialize.flow_row(j, r, row_columns(r, prepared)) } }

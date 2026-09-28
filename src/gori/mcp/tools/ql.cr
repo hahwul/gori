@@ -181,7 +181,7 @@ module Gori
                 if scope_unconfigured
                   j.string "no scope rules are configured, so nothing is in scope: `scope:in` and " \
                            "`scope:out` both match NOTHING here (and a negated `-scope:in` matches " \
-                           "every flow) — add scope rules with add_scope_rule, or drop the term"
+                           "every flow) — #{add_scope_rule_hint}, or drop the term"
                 end
                 if scope_unbound
                   j.string "no project is selected, so the `scope:` term was compiled without one: " \

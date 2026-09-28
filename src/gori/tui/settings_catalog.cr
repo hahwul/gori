@@ -108,7 +108,7 @@ module Gori::Tui
       # What an attached agent may DO: coarse switches over groups of `gori mcp` tools. All on
       # by default, which is what gori mcp served before they existed.
       Section.new(:mcp_permissions, "settings.mcp-permissions", "MCP permissions",
-        "Which tool groups an agent attached over gori mcp may use — send traffic, intercept control, project edits, project management; reading the capture is always allowed", :ai, :form),
+        "Which tool groups an agent attached over gori mcp may use — send traffic, intercept control, project edits, scope & sandbox, project management; reading the capture is always allowed", :ai, :form),
     ]
 
     # Every section, in registration order — drives the palette verb loop.

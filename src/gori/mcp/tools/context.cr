@@ -33,7 +33,7 @@ module Gori
               scope.configured? ? "active requests (send_request, send_websocket, fuzz_*, mine_*, probe active) " \
                                   "are matched against the rules below whatever `enabled` says; an unmatched " \
                                   "target is refused SCOPE_BLOCKED unless you pass allow_unscoped:true" : "no scope rules are configured, so EVERY active request is refused " \
-                                                                                                          "SCOPE_BLOCKED unless you pass allow_unscoped:true — add_scope_rule to change that"
+                                                                                                        "SCOPE_BLOCKED unless you pass allow_unscoped:true — #{add_scope_rule_hint} to change that"
             j.field "rules" do
               j.array do
                 store.scope_rules.each do |(id, kind, match_type, pattern)|

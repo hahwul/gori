@@ -832,6 +832,13 @@ module Gori
         "operator must restart gori mcp with a project (--project/--db), or #{fixes.join(" and ")}"
       end
 
+      # How a hint says "add a scope rule": the tool while this server serves it, the operator
+      # once `--read-only`, `--tools` or the "Change scope & sandbox" switch has taken it away —
+      # a hint naming a tool the agent cannot call is a dead end it will try anyway.
+      def add_scope_rule_hint : String
+        serves?("add_scope_rule") ? "add a scope rule with add_scope_rule" : "ask the operator to add a scope rule"
+      end
+
       # Ceiling (seconds) a delete_project dry-run confirmation token stays valid.
       DELETE_TOKEN_TTL = 300
 

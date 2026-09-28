@@ -43,14 +43,18 @@ module Gori::Settings
     McpPermission.new("intercept", "Intercept control",
       "forward, drop, edit and re-filter held traffic, and switch intercept on or off"),
     McpPermission.new("write", "Edit project data",
-      "issues, notes, repeaters, rules, scope, env, session slots and the other project records"),
+      "issues, notes, repeaters, rules, env, session slots and the other project records"),
+    # Its own group, not part of `write`: scope and the sandbox are the fence around what an
+    # agent may reach, so an operator who lets it take notes need not let it move the fence.
+    McpPermission.new("scope", "Change scope & sandbox",
+      "add, edit and delete scope rules, and switch the scope lens and the sandbox on or off"),
     McpPermission.new("projects", "Manage projects",
       "create, switch, delete, import and export projects"),
   ]
 
   # The same keys as a literal, for the `@[Tool]` registry macro, which can read a constant
   # only when its value IS a literal. spec/settings/mcp_spec.cr holds the two in step.
-  MCP_PERMISSION_KEYS = %w[send intercept write projects]
+  MCP_PERMISSION_KEYS = %w[send intercept write scope projects]
 
   # Every group is allowed by default, which is what `gori mcp` did before the switches
   # existed. Stored as the DENIED keys, because that is the only thing the file records: a
@@ -104,7 +108,15 @@ module Gori::Settings
   end
 
   private def self.mcp_denials_from(node : JSON::Any?) : Set(String)?
-    node.try(&.as_h?).try &.compact_map { |k, v| k if v.as_bool? == false }.to_set
+    return nil unless h = node.try(&.as_h?)
+    denied = h.compact_map { |k, v| k if v.as_bool? == false }.to_set
+    # `scope` was split out of `write` after both had shipped on main, and a `write: false`
+    # written before the split meant "no scope edits" too. Reading it as "scope allowed" would
+    # turn a security switch back on across an upgrade, so an ABSENT `scope` beside a denied
+    # `write` is denied; `serialize_mcp_permissions` writes `scope: true` for the one
+    # combination that has to say otherwise.
+    denied.add("scope") if denied.includes?("write") && !h.has_key?("scope")
+    denied
   end
 
   # Tolerant mcp section: absent/non-object keeps current.
@@ -147,7 +159,11 @@ module Gori::Settings
   private def self.serialize_mcp_permissions(j : JSON::Builder) : Nil
     return if mcp_denied_permissions.empty?
     j.field "mcp_permissions" do
-      j.object { mcp_denied_permissions.to_a.sort!.each { |k| j.field k, false } }
+      j.object do
+        mcp_denied_permissions.to_a.sort!.each { |k| j.field k, false }
+        # See `mcp_denials_from`: without it, `write` off and `scope` on reads back as both off.
+        j.field "scope", true if mcp_denied_permissions.includes?("write") && !mcp_denied_permissions.includes?("scope")
+      end
     end
   end
 end

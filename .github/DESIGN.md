@@ -4226,3 +4226,25 @@ an upgrade, and `gori mcp --read-only` held the write lock as long.
   highest id ever issued (`sqlite_sequence`, or `MAX(id)` where that row is missing).
   A cursor beyond it was not issued by the project as it stands and is still refused, without
   guessing why.
+
+### 2026-09-28: scope and the sandbox are their own MCP permission group (#1348)
+
+The 2026-09-27 groups put the five scope writers (`add_scope_rule`, `update_scope_rule`,
+`delete_scope_rule`, `set_scope_enabled`, `set_sandbox`) under `write`, so an operator could not
+let an agent record issues and notes without also letting it widen the scope or turn the sandbox
+off. They now sit in a fifth group, `scope` ("Change scope & sandbox"), and `write` no longer
+covers them. #1327 was untagged but already on main, so a `write: false` written by that build
+must not read as "scope allowed" after the upgrade: an absent `scope` beside a denied `write`
+is denied, and the serializer writes `scope: true` for the one combination that needs it.
+
+- **It fences the fence, not the send.** `allow_unscoped:true` still lifts Layer 1 for a send
+  with this group off; Layer 2 (the sandbox and explicit excludes) still applies to the bound
+  project. Stopping an agent's out-of-scope sends is Send traffic's switch, the same
+  "capabilities, not destinations" rule as Intercept control. Two writers outside the group also
+  move where a request lands, and are deliberately left where they are: host overrides (`write`)
+  remap an in-scope hostname's address, and `projects` can bind a project with no sandbox.
+- **Reading stays ungrouped.** `list_scope` is served with the group off: an agent that is
+  told SCOPE_BLOCKED still needs to see why. The hints that name `add_scope_rule` (`list_scope`,
+  `ql_explain`'s `scope:` note, `list_history`'s `in_scope` note) name the operator instead
+  when it is not served (`Tools#add_scope_rule_hint`), the way `no_binder_recovery` does for
+  the binders.

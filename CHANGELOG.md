@@ -30,7 +30,7 @@
 - Miss Ring keeps an agent's reply up until your next key or click, and later notices no longer push it out (Settings → Companion → Agent replies). MCP `reply_to_operator` now tells the agent whether a gori window was open to show it, and replies sent while none was are summed up in one note when the next one opens (#1328, #1322)
 - CLI: `gori run notify` puts a line from a script in the gori TUI's notification ring and Miss Ring, and says whether a window was open to show it (#1323)
 - MCP: `ask_operator` puts a question with two to four choices in front of the operator; they answer from the ring, the `ask:` chip or Answer the agent…, and the answer, a dismissal or an expiry comes back to the agent as an operator message (#1324)
-- MCP: Preferences → AI → MCP permissions switches off what an attached agent may do, one group at a time (send traffic, intercept control, project edits, project management); every group stays on by default and reading the capture is always allowed (#1327)
+- MCP: Preferences → AI → MCP permissions switches off what an attached agent may do, one group at a time (send traffic, intercept control, project edits, scope and sandbox changes, project management); every group stays on by default and reading the capture is always allowed (#1327, #1348)
 - TUI: new `solarized_dark` (dark) and `everforest_light` (light) themes, and the theme picker lists `dancheong` and `hanji` right after `goridark` and `goriday` (#1325)
 - CLI: `gori run oast resume` waits for a busy project as long as `oast listen --save` does, instead of giving up after one second while it saves callbacks (#1321)
 - Network: environment proxy selection applies its loopback and NO_PROXY CIDR exceptions to resolver-recognized numeric IPv4 aliases (#1318)
