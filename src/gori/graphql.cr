@@ -2,6 +2,9 @@ require "json"
 require "uri"
 require "./media_type"
 require "./entity"
+require "./graphql/introspection"
+require "./graphql/schema"
+require "./graphql/operations"
 
 module Gori
   # Parses the GraphQL operation a flow carries — a POST JSON body

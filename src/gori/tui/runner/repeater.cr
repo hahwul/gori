@@ -153,6 +153,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     repeater_controller.repeater_pretty_request
   end
 
+  def repeater_graphql_introspection(legacy : Bool) : Nil
+    repeater_controller.repeater_graphql_introspection(legacy)
+  end
+
   def repeater_minimize : Nil
     repeater_controller.repeater_minimize
   end

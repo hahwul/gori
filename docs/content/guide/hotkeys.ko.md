@@ -197,7 +197,7 @@ space 메뉴는 자주 누르는 것을 위한 곳이고, 드물게 쓰는 것�
 | 탭 | 동작 | 키 |
 |-----|--------|-----|
 | Repeater | Mark word · Edit decoder chain · Pretty-print request | `Ctrl-K` · `Ctrl-Q` · `Ctrl-U` |
-| Repeater | Minimize request · Use as refresh for slot… | 팔레트 |
+| Repeater | Minimize request · Use as refresh for slot… · GraphQL: insert introspection query · GraphQL: insert legacy introspection query | 팔레트 |
 | Fuzzer | Mark word · Edit decoder chain · Pretty-print template | `Ctrl-K` · `Ctrl-Q` · `Ctrl-U` |
 | Fuzzer | Add List payload set · Save results | `Ctrl-L` · `⇧E` |
 | Fuzzer | Run history | 팔레트 |

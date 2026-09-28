@@ -2420,6 +2420,86 @@ describe Gori::Tui::RepeaterView do
     end
   end
 
+  # `repeater.graphql-introspection[-legacy]`. The split GraphQL tab (and the SAML refusal) is
+  # in repeater_decode_spec.cr, beside the split-decode fixtures it needs.
+  describe "insert_graphql_introspection" do
+    get_request = "GET /graphql?query=%7Bme%7D&apikey=k HTTP/1.1\nHost: api.test\nAuthorization: Bearer t\n\n"
+
+    it "rewrites the request as the introspection POST and leaves the target alone" do
+      view = RepeaterView.new
+      view.restore("https://api.test", get_request, false, true)
+      view.insert_graphql_introspection(false).should eq("inserted the introspection query — send it with ^R")
+      head, _, body = view.request_text.partition("\n\n")
+      head.should eq("POST /graphql?apikey=k HTTP/1.1\nHost: api.test\nAuthorization: Bearer t\n" \
+                     "Content-Type: application/json\nContent-Length: #{body.bytesize}")
+      body.should eq(Gori::Graphql::Introspection.body)
+      view.target.should eq("https://api.test")
+      view.dirty?.should be_true
+    end
+
+    it "inserts the legacy query under its own status line" do
+      view = RepeaterView.new
+      view.restore("https://api.test", get_request, false, true)
+      view.insert_graphql_introspection(true).should eq("inserted the legacy introspection query — send it with ^R")
+      view.request_text.partition("\n\n")[2].should eq(Gori::Graphql::Introspection.body(legacy: true))
+    end
+
+    it "turns a rewrite error into the status line and edits nothing" do
+      view = RepeaterView.new
+      view.restore("https://api.test", "not a request line\nHost: api.test\n\n", false, true)
+      view.insert_graphql_introspection(false).should contain("request line")
+      view.request_text.should eq("not a request line\nHost: api.test\n\n")
+      view.dirty?.should be_false
+    end
+
+    it "is one undoable edit" do
+      view = RepeaterView.new
+      view.restore("https://api.test", get_request, false, true)
+      view.insert_graphql_introspection(false)
+      view.focus_pane(:request)
+      view.edit_undo
+      view.request_text.should eq(get_request)
+    end
+
+    it "refuses a %%% send group rather than drop every request after the first" do
+      group = "GET /graphql HTTP/1.1\nHost: a\n\n%%%\nGET /b HTTP/1.1\nHost: a\n\n"
+      view = RepeaterView.new
+      view.restore("https://a", group, false, true)
+      view.insert_graphql_introspection(false).should contain("%%%")
+      view.request_text.should eq(group)
+    end
+
+    it "refuses in hex mode" do
+      view = RepeaterView.new
+      view.restore("https://api.test", get_request, false, true)
+      view.toggle_request_hex.should be_true
+      view.insert_graphql_introspection(false).should contain("hex mode")
+      String.new(view.request_bytes).should start_with("GET /graphql?query=")
+    end
+
+    it "refuses in a WebSocket tab and in a gRPC tab" do
+      row = ->(target : String) {
+        Gori::Store::FlowRow.new(
+          id: 1_i64, created_at: 0_i64, scheme: "https", method: "GET", host: "api.test",
+          port: 443, target: target, status: 101, size: 0_i64, state: Gori::Store::FlowState::Complete)
+      }
+      ws_head = "GET /ws HTTP/1.1\r\nHost: api.test\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" \
+                "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+      ws = RepeaterView.new
+      ws.load_ws(Gori::Store::FlowDetail.new(row.call("/ws"), "HTTP/1.1", ws_head.to_slice, nil, nil, nil),
+        [] of Gori::Store::WsOutMessage)
+      ws.insert_graphql_introspection(false).should contain("WebSocket")
+      ws.request_text.should start_with("GET /ws HTTP/1.1")
+
+      grpc_head = "POST /demo.Greeter/SayHello HTTP/2\r\nHost: api.test\r\ncontent-type: application/grpc\r\n\r\n"
+      grpc = RepeaterView.new
+      grpc.load_grpc(Gori::Store::FlowDetail.new(row.call("/demo.Greeter/SayHello"), "HTTP/2",
+        grpc_head.to_slice, Bytes[0, 0, 0, 0, 0], nil, nil))
+      grpc.insert_graphql_introspection(false).should contain("gRPC")
+      grpc.request_text.should start_with("POST /demo.Greeter/SayHello HTTP/2")
+    end
+  end
+
   # The single-pane REQUEST column, through the shared hit-test seam
   # (`request_hit`/`request_sub_rect`/`place_request_caret`) the split panes now share. There
   # was no drag or double-click coverage anywhere in the suite before, so the seam's
