@@ -23,7 +23,7 @@ module Gori
     class Analyzer
       ANALYZED_CAP    = 10_000     # bound the seen-flow set (memory plateaus on long runs)
       ACTIVE_SEEN_CAP =  5_000     # bound the active dedup set
-      ACTIVE_QUEUE    =    128     # bounded active task queue (drop on overflow)
+      ACTIVE_QUEUE    =    128     # bounded active flow queue (retry on overflow)
       ACTIVE_TIMEOUT  = 10.seconds # per-probe socket timeout
       # How long the active worker keeps its keep-alive sender after the queue goes quiet. Long
       # enough to span the gap between one flow's rules and the next flow's; short enough that
@@ -59,7 +59,12 @@ module Gori
       # active scan" confirm can show a per-rule breakdown + total before any request goes out.
       record ActiveEstimate, info : RuleInfo, requests : Range(Int32, Int32)
 
-      private record ActiveTask, rule : Active::Rule, plan : Active::Plan, detail : Store::FlowDetail
+      # One queued flow expands into its enabled rules on the worker. Keeping a flow together
+      # avoids retaining the same FlowDetail once per rule and, more importantly, gives a full
+      # surface one queue admission instead of allowing the later rules to disappear behind a
+      # burst. `keys` are the cheap dedup keys reserved at admission; the seen-set keeps the old
+      # "queued means claimed" behavior while the worker drains the task.
+      private record ActiveTask, detail : Store::FlowDetail, opts : Active::Options, keys : Array(String)
 
       # The project's HOST OVERRIDES table, dialed through by every active probe this analyzer
       # sends (`execute_active`). Held as the SESSION'S LIVE INSTANCE — the same mutex-guarded
@@ -86,12 +91,17 @@ module Gori
         # live probe exactly as they already stopped `gori run probe` / MCP probe_scan.
         @outbound = Outbound.allowlist(@scope)
         @analyzed = Set(Int64).new
+        @retry_flows = Set(Int64).new # passive scans that failed or were incomplete
+        @flow_cursor = 0_i64
+        @catchup_seeded = false
         @ws_hwm = {} of Int64 => Int64 # per-socket high-water-mark: max ws_message id already scanned
         # Cache each socket's handshake FlowDetail — it NEVER changes frame-to-frame, but
         # InsertWs republishes :updated per frame, so rescan_ws re-read it from SQLite (heads +
         # bodies) on every frame of a chatty socket. Evicted in lock-step with @ws_hwm.
         @ws_detail = {} of Int64 => Store::FlowDetail
         @active_seen = Set(String).new
+        @active_queued_keys = Set(String).new
+        @active_retry = Set(Int64).new
         @active_error_hosts = Set(String).new # rate-limit probe-failure notifications per host
         @h3_announced_hosts = Set(String).new # rate-limit Alt-Svc h3 event-feed entries per host
         @suppressed = Set(String).new         # "code|host" hard-deleted this session
@@ -128,6 +138,9 @@ module Gori
         # listener is not a probe-config edit, so it does not route here).
         @oob = load_oob
         @analyzed.clear
+        @retry_flows.clear
+        @catchup_seeded = false
+        @flow_cursor = 0_i64
       end
 
       # Re-resolve the OAST minter after a listener is registered or resumed, so the out-of-band
@@ -313,28 +326,25 @@ module Gori
                       enqueue_active : Bool = false) : Nil
         return if @stopped
         return unless @mode.scanning?
-        # Only ANALYSIS gets the silent skip. That is what the blanket rescue was written for
-        # ("a single detail's analysis blew up"), and the only step where nothing has been
-        # produced yet, so there is nothing to report losing.
-        detections =
-          begin
-            Passive.analyze(detail, ws_messages, disabled: @disabled, custom: @custom)
-          rescue ex : DB::Error | SQLite3::Exception
-            raise ex
-          rescue
-            return
-          end
+        completed = scan_detail_result(detail, ws_messages: ws_messages, repeater_id: repeater_id)
+        maybe_enqueue_active(detail) if completed && enqueue_active
+      end
+
+      # The live feed needs to know whether it may acknowledge a flow. Keeping that answer
+      # separate from the public fire-and-forget API prevents a failed passive write from being
+      # mistaken for a clean scan. Store errors still propagate to the caller that owns the
+      # project, while hostile captured bytes are isolated to this flow and remain retryable.
+      private def scan_detail_result(detail : Store::FlowDetail, *,
+                                     ws_messages : Array(Store::WsMessage),
+                                     repeater_id : Int64?) : Bool
+        detections = Passive.analyze(detail, ws_messages, disabled: @disabled, custom: @custom)
         persist(detections, flow_id: detail.row.id, repeater_id: repeater_id)
-        maybe_enqueue_active(detail) if enqueue_active
+        true
       rescue ex : DB::Error | SQLite3::Exception
         raise ex
       rescue ex
-        # Past this point findings HAVE been made, so a failure is a loss worth naming rather
-        # than the same silent skip: the operator otherwise sees a scan that completed and no
-        # issues, with no way to tell that apart from a clean target. Still never raises into
-        # the caller — the TUI event loop has no catch-all — and `emit` is non-blocking, so a
-        # headless run with no drainer is unaffected.
         emit(ErrorEvent.new("probe: findings for flow #{detail.row.id} were not recorded: #{ex.message}"))
+        false
       end
 
       # Per-flow active-scan estimate for the manual "Run active scan" action: every ENABLED
@@ -430,40 +440,46 @@ module Gori
           next if @stopped
           next unless @mode.scanning?
           next unless ev.kind == :updated # analyze when the response side exists
-          begin
-            if @analyzed.includes?(ev.id)
-              # Already did the full pass — only re-scan WebSocket payloads if this is a 101
-              # flow that may have new frames (InsertWs republishes :updated).
-              rescan_ws(ev.id)
-              next
-            end
-            detail = @store.get_flow(ev.id)
-            next unless detail
-            # BEFORE the `@analyzed` insert, exactly as in `catch_up` — the order is load-bearing,
-            # not style. `@analyzed` is capped at ANALYZED_CAP and `trim` drops the OLDEST ids, so
-            # marking a flow this feed does not scan spends a slot on it and evicts a real proxy
-            # flow's id instead. That evicted id is then absent when `catch_up` re-reads
-            # `recent_flows`, the sweep scans it a SECOND time, and `upsert_probe_issues`
-            # (`(code, host)` → `hit_count = hit_count + 1`) walks the count up and flips
-            # `sample_flow_id` — the very double-count this guard was added to stop, arriving
-            # through the other door.
-            next unless passive_feed?(detail.row)
-            @analyzed << ev.id
-            trim(@analyzed, ANALYZED_CAP)
-            # HTTP/non-WS rules run once here; WS payloads are ALWAYS handled by the hwm-gated,
-            # gap-free rescan_ws so a socket evicted from @analyzed and re-scanned (or one with a
-            # backlog > WS_MSG_CAP) never re-detects already-scanned frames or skips a band of them.
-            scan_detail(detail, enqueue_active: true)
-            rescan_ws(ev.id, detail) if Probe.ws_transcript_possible?(detail) # reuse the detail just loaded
-          rescue DB::Error | SQLite3::Exception
-            # A transient store error (e.g. SQLITE_BUSY) must NOT kill the scanner for the rest
-            # of the session — skip this flow and keep draining. On real shutdown the input
-            # channel is closed, so the next receive? returns nil and the loop exits cleanly.
-            next
-          end
+          process_passive_event(ev)
         end
       rescue Channel::ClosedError
         # input closed during shutdown — exit quietly
+      end
+
+      private def process_passive_event(ev : Store::FlowEvent) : Nil
+        if @analyzed.includes?(ev.id)
+          # Already did the full pass — only re-scan WebSocket payloads if this is a 101
+          # flow that may have new frames (InsertWs republishes :updated).
+          remember_retry(@retry_flows, ev.id) unless rescan_ws(ev.id)
+          return
+        end
+        detail = @store.get_flow(ev.id)
+        return unless detail
+        unless detail.row.state.complete?
+          remember_retry(@retry_flows, ev.id)
+          return
+        end
+        return unless passive_feed?(detail.row)
+        # HTTP/non-WS rules run once here; WS payloads are ALWAYS handled by the hwm-gated,
+        # gap-free rescan_ws so a socket evicted from @analyzed and re-scanned (or one with a
+        # backlog > WS_MSG_CAP) never re-detects already-scanned frames or skips a band of them.
+        if scan_detail_result(detail, ws_messages: [] of Store::WsMessage, repeater_id: nil)
+          mark_analyzed(ev.id)
+        else
+          remember_retry(@retry_flows, ev.id)
+        end
+        # Active admission is independent of passive persistence. A transient passive error
+        # must not hide an otherwise eligible active surface, and a full queue is retried by
+        # the cursor/recovery sweep rather than acknowledged here.
+        maybe_enqueue_active(detail)
+        if Probe.ws_transcript_possible?(detail) && !rescan_ws(ev.id, detail)
+          remember_retry(@retry_flows, ev.id)
+        end
+      rescue DB::Error | SQLite3::Exception
+        # A transient store error (e.g. SQLITE_BUSY) must NOT kill the scanner for the rest
+        # of the session — skip this flow and keep draining. On real shutdown the input
+        # channel is closed, so the next receive? returns nil and the loop exits cleanly.
+        remember_retry(@retry_flows, ev.id)
       end
 
       # Periodic catch-up for the LOSSY passive feed. Store#publish sends each flow's :updated to
@@ -483,25 +499,84 @@ module Gori
       private def catch_up : Nil
         return if @stopped
         return unless @mode.scanning?
-        @store.recent_flows(CATCHUP_SCAN).each do |row|
+        # The first sweep preserves the old bounded startup backfill. Once seeded, the forward
+        # cursor consumes every newer flow, so a burst larger than CATCHUP_SCAN cannot permanently
+        # hide rows below the newest window. Incomplete/failed rows live in @retry_flows and are
+        # revisited on every tick until they complete.
+        rows = if @catchup_seeded
+                 @store.recent_flows(CATCHUP_SCAN, since_id: @flow_cursor)
+               else
+                 @catchup_seeded = true
+                 @store.recent_flows(CATCHUP_SCAN).sort_by(&.id)
+               end
+        rows.each do |row|
           break if @stopped || !@mode.scanning?
-          next if @analyzed.includes?(row.id)
-          next unless row.state.complete?
-          # Same guard as the live feed, and it is not redundant: this sweep re-reads
-          # `recent_flows` with no source filter, so a gori-originated row the live path
-          # skipped (or dropped) would arrive here instead. Checked BEFORE `get_flow` — the
-          # row already carries the answer, and not marking it `@analyzed` costs one set
-          # lookup per sweep rather than a detail read.
-          next unless passive_feed?(row)
-          detail = @store.get_flow(row.id)
-          next unless detail && detail.response_head
-          @analyzed << row.id
-          trim(@analyzed, ANALYZED_CAP)
-          scan_detail(detail, enqueue_active: true)
-          rescan_ws(row.id, detail) if Probe.ws_transcript_possible?(detail) # reuse the detail just loaded
+          @flow_cursor = row.id if row.id > @flow_cursor
+          process_catch_up_row(row)
+        end
+        retry_active
+        @retry_flows.to_a.each do |id|
+          break if @stopped || !@mode.scanning?
+          row = @store.recent_flows(1, since_id: id - 1).find(&.id.==(id))
+          if row
+            process_catch_up_row(row)
+          else
+            @retry_flows.delete(id)
+          end
         end
       rescue DB::Error | SQLite3::Exception
       rescue Channel::ClosedError
+      end
+
+      private def process_catch_up_row(row : Store::FlowRow) : Nil
+        unless row.state.complete?
+          remember_retry(@retry_flows, row.id)
+          return
+        end
+        unless passive_feed?(row)
+          @retry_flows.delete(row.id)
+          return
+        end
+        detail = @store.get_flow(row.id)
+        unless detail
+          remember_retry(@retry_flows, row.id)
+          return
+        end
+
+        unless @analyzed.includes?(row.id)
+          if scan_detail_result(detail, ws_messages: [] of Store::WsMessage, repeater_id: nil)
+            mark_analyzed(row.id)
+          else
+            remember_retry(@retry_flows, row.id)
+          end
+        end
+        # Re-check active coverage even when passive already acknowledged the row. The two
+        # pipelines have different dedup sets, and this recovers an active task dropped by a full
+        # queue without re-counting passive findings.
+        maybe_enqueue_active(detail)
+        ws_ok = !Probe.ws_transcript_possible?(detail) || rescan_ws(row.id, detail)
+        remember_retry(@retry_flows, row.id) unless ws_ok
+        @retry_flows.delete(row.id) if @analyzed.includes?(row.id) && ws_ok
+      rescue DB::Error | SQLite3::Exception
+        remember_retry(@retry_flows, row.id)
+      end
+
+      private def retry_active : Nil
+        @active_retry.to_a.each do |id|
+          break if @stopped || !@mode.probes_actively?
+          row = @store.recent_flows(1, since_id: id - 1).find(&.id.==(id))
+          unless row && row.state.complete?
+            @active_retry.delete(id) unless row
+            next
+          end
+          detail = @store.get_flow(id)
+          unless detail
+            next
+          end
+          maybe_enqueue_active(detail)
+          @active_retry.delete(id) unless active_work_pending?(detail)
+        end
+      rescue DB::Error | SQLite3::Exception
       end
 
       # Does this flow belong on the PASSIVE feed — is it traffic gori observed, rather than
@@ -546,6 +621,17 @@ module Gori
         !row.source.try(&.self_scanned?)
       end
 
+      private def mark_analyzed(id : Int64) : Nil
+        @retry_flows.delete(id)
+        @analyzed << id
+        trim(@analyzed, ANALYZED_CAP)
+      end
+
+      private def remember_retry(set : Set(Int64), id : Int64) : Nil
+        set << id
+        trim(set, ANALYZED_CAP)
+      end
+
       # Scan the WS frames a socket has accumulated since the last scan — each frame exactly
       # once. InsertWs republishes :updated on every frame, so re-scanning the whole buffer each
       # time would re-detect a still-buffered secret (inflating hit_count) and re-run the regex
@@ -553,20 +639,20 @@ module Gori
       # last scanned id: with a hwm it reads the OLDEST unscanned frames (so a >WS_MSG_CAP backlog
       # from a dropped-event burst is covered without skipping a band, and an evicted-then-re-
       # scanned flow doesn't re-detect old frames); the first pass (no hwm) reads the last window.
-      private def rescan_ws(flow_id : Int64, detail : Store::FlowDetail? = nil) : Nil
+      private def rescan_ws(flow_id : Int64, detail : Store::FlowDetail? = nil) : Bool
         # A mark must never advance over frames no rule READ. With every WS rule disabled the
         # loop below would still page the buffer and note it scanned, so re-enabling the built-in
         # could never reach those frames: reload_rule_config's @analyzed.clear recovers HTTP
         # flows, but the catch-up sweep's WS leg re-enters here and pages forward from the
         # unreset hwm. Skipping outright leaves the hwm where it was, so the next rescan after a
         # re-enable covers exactly the missed band and re-detects nothing already scanned.
-        return if Passive::WS_RULES.all? { |r| Probe.rule_disabled?(r.info.id, @disabled) }
+        return true if Passive::WS_RULES.all? { |r| Probe.rule_disabled?(r.info.id, @disabled) }
         # Reuse a detail the caller already loaded, else the per-flow cache, else read it once
         # and cache it — the 101 handshake is immutable, so subsequent frames skip the DB read.
         d = detail || @ws_detail[flow_id]? || @store.get_flow(flow_id)
-        return unless d
+        return true unless d
         detail = d
-        return unless Probe.ws_transcript_possible?(detail)
+        return true unless Probe.ws_transcript_possible?(detail)
         # Cache the immutable handshake; note_ws_scanned evicts it with @ws_hwm, but a socket
         # that never delivers a new frame wouldn't hit that path, so bound it here too.
         @ws_detail[flow_id] = detail
@@ -579,13 +665,19 @@ module Gori
           after = @ws_hwm[flow_id]? || 0_i64
           msgs = @store.ws_messages_after(flow_id, after, WS_MSG_CAP)
           break if msgs.empty?
-          note_ws_scanned(flow_id, msgs) # ordered asc → advance the hwm to the last id in the batch
           detections = Passive.analyze_ws(detail, msgs, disabled: @disabled)
           persist(detections, flow_id: flow_id, repeater_id: nil)
+          # A failed analysis or write must leave the cursor before this page so the next event or
+          # catch-up retry reads the same frames again. Advancing first made a transient exception
+          # indistinguishable from a successful scan and permanently lost the payloads.
+          note_ws_scanned(flow_id, msgs)  # ordered asc → advance after the page was persisted
           break if msgs.size < WS_MSG_CAP # fewer than a full page ⇒ backlog drained
         end
+        true
       rescue DB::Error | SQLite3::Exception
+        false
       rescue
+        false
       end
 
       # Advance the newest ws_message id scanned for a flow so future rescans page past it. Bounded
@@ -628,13 +720,13 @@ module Gori
         emit(IssueEvent.new(host || ""))
       end
 
-      private def maybe_enqueue_active(detail : Store::FlowDetail) : Nil
-        return if @stopped
-        return unless @mode.probes_actively?
-        return if active_degraded? # fail closed: unknown which rules are disabled
+      private def maybe_enqueue_active(detail : Store::FlowDetail) : Bool
+        return false if @stopped
+        return false unless @mode.probes_actively?
+        return false if active_degraded? # fail closed: unknown which rules are disabled
         # Skipped here too, purely to keep stubbed flows out of the queue — `Active.analyze`
         # is the refusal that matters and would reject this job anyway (#511).
-        return if detail.row.short_circuited?
+        return false if detail.row.short_circuited?
         row = detail.row
         # Active probes only on hosts/paths covered by Project scope INCLUDE rules
         # (the Outbound ALLOWLIST gate — lens-independent; requires ≥1 include so
@@ -642,10 +734,46 @@ module Gori
         # permissive when the `s` display lens is off. AGGRESSIVE never widens this.
         # Gate on the port-less scope URL (check_request), not FlowRow#url — a non-default
         # port in the latter made string/regex includes miss every active probe on that origin.
-        return if @outbound.check_request(row.scheme, row.host, row.target, row.port).blocked?
+        return false if @outbound.check_request(row.scheme, row.host, row.target, row.port).blocked?
         opts = active_opts
-        Active::RULES.each { |rule| enqueue_probe(rule, detail, opts) unless Probe.rule_disabled?(rule.info.id, @disabled) }
+        keys = active_keys(detail, opts)
+        return false if keys.empty?
+
+        enqueue_active(detail, opts, keys)
       rescue Channel::ClosedError
+        false
+      end
+
+      private def active_keys(detail : Store::FlowDetail, opts : Active::Options) : Array(String)
+        keys = [] of String
+        Active::RULES.each do |rule|
+          next if Probe.rule_disabled?(rule.info.id, @disabled)
+          key = active_dedup_key(rule, detail, opts)
+          next unless key
+          next if @active_seen.includes?(key) || @active_queued_keys.includes?(key)
+          keys << key
+        end
+        keys
+      end
+
+      private def enqueue_active(detail : Store::FlowDetail, opts : Active::Options,
+                                 keys : Array(String)) : Bool
+        select
+        when @active_jobs.send(ActiveTask.new(detail, opts, keys))
+          keys.each { |key| @active_queued_keys << key }
+          # Record admission immediately, as the old per-rule queue did. This makes a queued
+          # surface claimed before its first network send, so a slow origin cannot make callers
+          # observe a partially populated seen-set or enqueue duplicate work. release_active_task
+          # removes keys that never reached a plan (mode/config changed while waiting).
+          keys.each { |key| @active_seen << key }
+          trim(@active_seen, ACTIVE_SEEN_CAP)
+          true
+        else
+          # The producer never waits behind outbound I/O. Keep the flow eligible so the forward
+          # cursor/recovery window can admit it once the worker drains the bounded queue.
+          remember_retry(@active_retry, detail.row.id)
+          false
+        end
       end
 
       # The Active::Options the AUTOMATIC pipeline runs with, derived from the live mode. ACTIVE
@@ -676,22 +804,25 @@ module Gori
       rescue Channel::ClosedError
       end
 
-      private def enqueue_probe(rule : Active::Rule, detail : Store::FlowDetail, opts : Active::Options) : Nil
-        # Cheap dedup key FIRST: a repeat surface (the norm in steady browsing) is rejected here
-        # WITHOUT the full plan build (canary generation, JSON re-serialize, request rebuild).
-        key = rule.dedup_key(detail, opts)
-        return unless key
-        return if @active_seen.includes?(key)
-        plan = rule.plan(detail, opts)
-        return unless plan
-        select
-        when @active_jobs.send(ActiveTask.new(rule, plan, detail))
-          # Record the dedup key ONLY once the task is actually queued, so a target dropped on
-          # a full queue is re-probed when its next flow arrives (not suppressed forever).
-          @active_seen << plan.dedup_key
-          trim(@active_seen, ACTIVE_SEEN_CAP)
-        else
-          # queue full — drop without recording; the next matching flow re-attempts.
+      private def active_dedup_key(rule : Active::Rule, detail : Store::FlowDetail,
+                                   opts : Active::Options) : String?
+        rule.dedup_key(detail, opts)
+      rescue ex
+        ::Log.debug(exception: ex) { "probe: #{rule.info.id} active gate raised" }
+        nil
+      end
+
+      private def active_work_pending?(detail : Store::FlowDetail) : Bool
+        return false unless @mode.probes_actively?
+        return false if active_degraded?
+        return false if detail.row.short_circuited?
+        row = detail.row
+        return false if @outbound.check_request(row.scheme, row.host, row.target, row.port).blocked?
+        opts = active_opts
+        Active::RULES.any? do |rule|
+          next false if Probe.rule_disabled?(rule.info.id, @disabled)
+          key = active_dedup_key(rule, detail, opts)
+          !key.nil? && !@active_seen.includes?(key) && !@active_queued_keys.includes?(key)
         end
       end
 
@@ -718,10 +849,10 @@ module Gori
         release_worker_sender
       end
 
-      # The worker's sender for `detail`'s origin, reused across TASKS. Each task is one rule
-      # against one flow, and `maybe_enqueue_active` queues a flow's rules back to back — so a
-      # sender per task paid a fresh TCP+TLS handshake for every rule of every new surface,
-      # ~25 of them to one origin in a row. Rebuilt when the dial changes: another origin, the
+      # The worker's sender for `detail`'s origin, reused across FLOW TASKS. Each flow task runs
+      # all of its rules sequentially, so the sender amortises the handshake across the whole
+      # surface and avoids retaining one copy of the FlowDetail per rule. Rebuilt when the dial
+      # changes: another origin, the
       # other protocol, the live `verify_upstream` toggle (read here, so a flip still takes
       # effect on the next probe), or the host's override address — a pool dials only once, so
       # without it an override the operator just added (prod → staging) kept riding the parked
@@ -757,18 +888,48 @@ module Gori
       end
 
       private def run_active(task : ActiveTask) : Nil
+        processed_keys = Set(String).new
         return if @stopped # winding down: don't fire outbound probes (or touch a closing store)
-        # After the operator left Active mode, set_mode(Passive/Off) can't unqueue tasks already
-        # sitting in @active_jobs (up to ACTIVE_QUEUE deep) — the enqueue side only gates NEW work
-        # — so the consumer MUST re-check the live mode, or buffered canary/CORS probes keep hitting
-        # the target after Active was turned off. RELEASE the dedup key when dropping for this
-        # reason: it was recorded at enqueue, and keeping it would suppress the surface forever if
-        # active probing is re-enabled (arm_active_backfill would skip it as already-seen).
+        # A flow task is admitted once, then expands here. Re-check the live mode before every
+        # rule so disabling Active never leaves buffered canaries on the wire.
         unless @mode.probes_actively?
-          @active_seen.delete(task.plan.dedup_key)
           return
         end
-        execute_active(task.rule, task.plan, task.detail, worker_sender(task.detail))
+
+        sender = worker_sender(task.detail)
+        Active::RULES.each do |rule|
+          next if @stopped || !@mode.probes_actively?
+          next if Probe.rule_disabled?(rule.info.id, @disabled)
+          key = active_dedup_key(rule, task.detail, task.opts)
+          next unless key && task.keys.includes?(key)
+          next if processed_keys.includes?(key)
+          begin
+            plan = rule.plan(task.detail, task.opts)
+            unless plan
+              next
+            end
+            # Admission already claimed the key. Mark it processed before the send so a failed
+            # origin is not hammered again by every later captured flow, matching the old
+            # per-rule queue semantics. A queue overflow remains retryable because it never
+            # enters this method.
+            processed_keys << plan.dedup_key
+            execute_active(rule, plan, task.detail, sender)
+          rescue ex
+            ::Log.debug(exception: ex) { "probe: #{rule.info.id} active task raised" }
+          end
+        end
+      ensure
+        release_active_task(task, processed_keys || Set(String).new)
+      end
+
+      private def release_active_task(task : ActiveTask, processed_keys : Set(String)) : Nil
+        task.keys.each do |key|
+          @active_queued_keys.delete(key)
+          # A rule may be disabled, become ineligible, or fail to build after admission. Do not
+          # let such a key remain claimed forever; a later mode/config reload must be able to
+          # recover it. Processed keys stay seen even when their outbound send failed.
+          @active_seen.delete(key) unless processed_keys.includes?(key)
+        end
       end
 
       # Send a rule's built probe(s) and fold the response(s) into issues + a notification. Shared by

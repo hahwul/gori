@@ -80,12 +80,11 @@ module Gori
         end
 
         def detections(plan : Plan, result : Repeater::Result, detail : Store::FlowDetail) : Array(Detection)
-          return [] of Detection unless result.ok?
+          return [] of Detection unless Evidence.complete?(result)
           # A truncated probe response (the origin closed early, or the body hit the capture
           # ceiling) can't be trusted for the status/size comparison below — treat it as no
           # evidence rather than risk a false positive on a privileged-looking fragment, or a
           # false negative on a body cut short below the baseline. (See Repeater::Result#incomplete?.)
-          return [] of Detection if result.incomplete?
 
           resp = Proxy::Codec::Http1.parse_response_head(result.head)
           status = resp.status

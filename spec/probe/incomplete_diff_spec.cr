@@ -23,10 +23,10 @@ private def capture_flow(store, resp_head : String, *, target = "/", status = 20
 end
 
 # A response result; `incomplete:` marks it as an origin-truncated / capped body.
-private def result(status : Int32, body : String, incomplete = false) : Gori::Repeater::Result
+private def result(status : Int32, body : String, incomplete = false, timed_out = false) : Gori::Repeater::Result
   head = "HTTP/1.1 #{status} X\r\nContent-Type: text/html\r\n\r\n"
   Gori::Repeater::Result.new(head.to_slice, body.empty? ? Bytes.empty : body.to_slice,
-    nil, 1_i64, nil, incomplete)
+    nil, 1_i64, nil, incomplete, timed_out: timed_out)
 end
 
 describe "Gori::Probe::Active body-differential incomplete-response guard" do
@@ -73,6 +73,17 @@ describe "Gori::Probe::Active body-differential incomplete-response guard" do
       # carries it. Without an incomplete guard this reads as an induced error.
       results = [result(200, "prefix", incomplete: true), result(200, "prefix", incomplete: true),
                  result(200, "prefix You have an error in your SQL syntax near ...")]
+      probe.detections_all(plan, results, detail).should be_empty
+    end
+  end
+
+  it "rejects a timed-out result even when it is marked complete" do
+    with_store do |store|
+      probe = Gori::Probe::Active::ErrorBasedSqli.new
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?id=1")
+      plan = probe.plan(detail).not_nil!
+      results = [result(200, "welcome home", timed_out: true), result(200, "welcome home"),
+                 result(200, "You have an error in your SQL syntax near '\"'")]
       probe.detections_all(plan, results, detail).should be_empty
     end
   end
