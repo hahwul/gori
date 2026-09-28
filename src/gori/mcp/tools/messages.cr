@@ -354,8 +354,8 @@ module Gori
         if choices.size < AgentQuestion::CHOICES_MIN || choices.size > AgentQuestion::CHOICES_MAX
           return Result.new("ask_operator: `choices` takes #{AgentQuestion::CHOICES_MIN} to #{AgentQuestion::CHOICES_MAX} labels (got #{choices.size})", is_error: true, error_code: "INVALID_ARGUMENT", field: "choices")
         end
-        if choices.any?(&.empty?) || choices.any? { |c| AgentQuestion.label_width(c) > AgentQuestion::CHOICE_MAX || c.includes?('\n') }
-          return Result.new("ask_operator: each choice is a non-empty single line at most #{AgentQuestion::CHOICE_MAX} columns wide (a wide CJK character or emoji counts as two)", is_error: true, error_code: "INVALID_ARGUMENT", field: "choices")
+        if choices.any?(&.empty?) || choices.any? { |c| !AgentQuestion.choice_fits?(c) || c.includes?('\n') }
+          return Result.new("ask_operator: each choice is a non-empty single line of at most #{AgentQuestion::CHOICE_MAX} characters that fits in #{AgentQuestion::CHOICE_MAX} columns (a wide CJK character or emoji takes two; an invisible one is drawn as a wider badge)", is_error: true, error_code: "INVALID_ARGUMENT", field: "choices")
         end
         if choices.map(&.downcase).uniq!.size != choices.size
           return Result.new("ask_operator: the choices must differ (ignoring case)", is_error: true, error_code: "INVALID_ARGUMENT", field: "choices")

@@ -1,5 +1,6 @@
 require "json"
 require "termisu"
+require "../unicode_reveal"
 require "./agent_messages"
 
 module Gori
@@ -27,10 +28,26 @@ module Gori
     CHOICES_MAX =  4
     CHOICE_MAX  = 40
 
+    # The columns the card draws `label` in, the way `Tui::Screen.display_width` counts them:
+    # an invisible codepoint is drawn as its `UnicodeReveal` badge, so it costs the badge's
+    # width rather than the 0 a raw width table gives it.
     def self.label_width(label : String) : Int32
       w = 0
-      label.each_grapheme { |g| w += Termisu::UnicodeWidth.grapheme_width(g.to_s) }
+      label.each_grapheme do |g|
+        grapheme = g.to_s
+        if badge = UnicodeReveal.visible(grapheme)
+          badge.each_grapheme { |glyph| w += Termisu::UnicodeWidth.grapheme_width(glyph.to_s) }
+        else
+          w += Termisu::UnicodeWidth.grapheme_width(grapheme)
+        end
+      end
       w
+    end
+
+    # A choice the card can draw whole: at most CHOICE_MAX columns, and at most CHOICE_MAX
+    # characters too, since a combining mark stacked on a visible glyph costs no column.
+    def self.choice_fits?(label : String) : Bool
+      label.size <= CHOICE_MAX && label_width(label) <= CHOICE_MAX
     end
 
     # Minutes until an unanswered question expires. Half an hour by default: long enough for

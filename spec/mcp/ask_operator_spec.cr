@@ -64,8 +64,12 @@ describe "MCP ask_operator (#1324)" do
         %({"question":"q","choices":["a","#{"x" * 41}"]})   => "choices",
         # Twenty-one wide characters are 42 columns: the card clips them, and two that
         # differ only at the end would read the same.
-        %({"question":"q","choices":["a","#{"가" * 21}"]})                 => "choices",
-        %({"question":"q","choices":["a",{"label":"b"}]})                 => "choices",
+        %({"question":"q","choices":["a","#{"가" * 21}"]}) => "choices",
+        %({"question":"q","choices":["a",{"label":"b"}]}) => "choices",
+        # A zero-width codepoint costs no column in a raw width table, but the card draws it
+        # as a badge, and forty of them are forty characters besides.
+        %({"question":"q","choices":["a","ok#{"\u200B" * 8}"]})           => "choices",
+        %({"question":"q","choices":["a","a#{"\u0301" * 45}"]})           => "choices",
         %({"question":"q","choices":["a","b"],"default":"c"})             => "default",
         %({"question":"q","choices":["a","b"],"expires_in_minutes":0})    => "expires_in_minutes",
         %({"question":"q","choices":["a","b"],"expires_in_minutes":1441}) => "expires_in_minutes",
@@ -155,7 +159,6 @@ describe "MCP ask_operator (#1324)" do
   end
 end
 
-# With a real project path the server can count the gori TUI windows that would show the card.
 # A registry home for a server bound the way `gori mcp` binds one, so switch_project works.
 private def with_bound_home(tag, &)
   home = File.tempname(tag)
@@ -215,6 +218,7 @@ describe "ask_operator across switch_project" do
   end
 end
 
+# With a real project path the server can count the gori TUI windows that would show the card.
 describe "ask_operator reach" do
   it "says when no window is open that the next one will show it" do
     home = File.tempname("gori-ask-reach")
