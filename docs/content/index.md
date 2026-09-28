@@ -1,6 +1,7 @@
 +++
 title = "Gori - Hack from the terminal"
 description = "Sit in the loop. A fast, keyboard-driven HTTP intercepting proxy and web-hacking toolkit for the terminal."
+image = "/images/og-card.png"
 +++
 
 <!-- The landing page is fully template-driven (templates/page.html, the
