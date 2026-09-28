@@ -140,6 +140,16 @@ describe "RepeaterView split-decode (SAML/GraphQL)" do
       body.should_not contain("STALE")
       JSON.parse(body)["query"].as_s.should eq(Gori::Graphql::Introspection::LEGACY_QUERY)
     end
+
+    it "keeps captured header terminators when it commits a decoded edit first" do
+      view = load_gql(gql_head, gql_body)
+      view.toggle_req_pane.should eq(:decoded)
+      move_to_line_end(view)
+      view.edit_insert('!')
+
+      view.insert_graphql_introspection(false)
+      view.request_text.should start_with("POST /graphql HTTP/1.1\r\nHost: api.test\r\nContent-Type: application/json\r\n")
+    end
   end
 
   # The shapes that used to open as an ordinary raw tab because nothing could write the pane

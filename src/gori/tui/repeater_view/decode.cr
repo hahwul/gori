@@ -118,7 +118,7 @@ class Gori::Tui::RepeaterView
     # Honour the Auto-Content-Length toggle like the plain / MARK send paths do; with
     # Auto-CL off, an intentionally-desynced length (a smuggling test) must survive.
     spliced = splice_decoded_into(@editor.text)
-    @editor.set_text(@auto_content_length ? sync_cl_text(spliced) : spliced)
+    @editor.set_text_keeping_head_eols(@auto_content_length ? sync_cl_text(spliced) : spliced)
     @decoded_dirty = false
   end
 
