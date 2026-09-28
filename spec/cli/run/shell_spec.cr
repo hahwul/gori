@@ -62,7 +62,7 @@ describe "gori run shell — flags" do
     Gori::CLI::Run.shell_proxy_authority("[::1]:8070").should eq("[::1]:8070")
     Gori::CLI::Run.shell_proxy_authority("localhost:9000").should eq("localhost:9000")
     ["", "127.0.0.1", "127.0.0.1:0", "127.0.0.1:70000", "u:p@127.0.0.1:8070",
-     "127.0.0.1:8070/path", "socks5://127.0.0.1:1080"].each do |bad|
+     "127.0.0.1:8070/path", "127.0.0.1:99999999999", "socks5://127.0.0.1:1080"].each do |bad|
       Gori::CLI::Run.shell_proxy_authority(bad).should be_nil, bad
     end
   end

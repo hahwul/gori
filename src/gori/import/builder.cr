@@ -149,6 +149,11 @@ module Gori
         path = uri.path.presence || "/"
         target = uri.query ? "#{path}?#{uri.query}" : path
         {scheme, host, port, target}
+      rescue URI::Error | ArgumentError | OverflowError
+        # Import callers speak Gori::Error so one malformed URL skips its entry instead of
+        # unwinding the whole collection. URI.parse raises OverflowError for a port that does
+        # not fit Int32, rather than returning an invalid URI.
+        raise Gori::Error.new("invalid URL (unparseable): #{url.inspect}")
       end
 
       # Headers are an ORDERED list of {name, value} pairs, not a map, so a repeated

@@ -152,7 +152,7 @@ module Gori
         port = uri.port
         return nil unless host && port && port.in?(1..65_535)
         ShellEnv.dial_authority(host, port)
-      rescue URI::Error | ArgumentError
+      rescue URI::Error | ArgumentError | OverflowError
         nil
       end
 

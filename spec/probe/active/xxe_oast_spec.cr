@@ -101,7 +101,7 @@ describe Gori::Probe::Active::XxeOast do
         oob: XmlMinter.new(quoted))).not_nil!
       String.new(plan.request).should contain("SYSTEM '#{quoted}'")
       ["file:///tmp/example", "https://oast.example/xml123#fragment", "https://oast.example/a\nb",
-       "https://oast.example/\"'"].each do |payload|
+       "https://oast.example/\"'", "https://oast.example:99999999999/xml123"].each do |payload|
         rule.plan(detail, Gori::Probe::Active::Options.new(allow_unsafe: true,
           oob: XmlMinter.new(payload))).should be_nil
       end

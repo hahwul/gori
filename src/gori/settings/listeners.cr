@@ -128,7 +128,7 @@ module Gori::Settings
     return nil if host.empty?
     port = uri.port || (scheme == "https" ? 443 : 80)
     1 <= port <= 65535 ? {scheme, host, port} : nil
-  rescue URI::Error
+  rescue URI::Error | ArgumentError | OverflowError
     nil
   end
 

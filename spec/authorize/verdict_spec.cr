@@ -111,6 +111,11 @@ describe Gori::Authorize::Judge do
         .should eq(Verdict::Different)
     end
 
+    it "is Different when a Location port overflows URI parsing" do
+      Judge.verdict(redirect(302, "http://api.acme.test:99999999999/a"),
+        redirect(302, "http://api.acme.test:99999999999/b")).should eq(Verdict::Different)
+    end
+
     # No Location on one side and there is nothing to compare — fall back to the body, which
     # is what every non-redirect pair uses.
     it "falls back to the body when a Location is missing" do
