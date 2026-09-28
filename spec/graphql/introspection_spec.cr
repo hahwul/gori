@@ -80,6 +80,25 @@ describe Gori::Graphql::Introspection do
       rewritten.should contain("\n\n{")
     end
 
+    it "keeps each kept line's own terminator and gives gori's lines the request line's" do
+      text = "GET /graphql HTTP/1.1\r\nHost: api.test\r\nX-A: v\r\r\nX-B: w\n\r\n"
+      Introspection.rewrite_request(text).should eq(
+        "POST /graphql HTTP/1.1\r\nHost: api.test\r\nX-A: v\r\r\nX-B: w\n" \
+        "Content-Type: application/json\r\nContent-Length: #{Introspection.body.bytesize}\r\n\r\n#{Introspection.body}")
+    end
+
+    it "moves a folded continuation with its header, dropped or kept" do
+      text = "POST /graphql HTTP/1.1\nContent-Type: application/x-www-form-urlencoded;\n charset=utf-8\n" \
+             "X-Foo: bar\n baz\n\nquery=x"
+      lines, _ = split_request(Introspection.rewrite_request(text))
+      lines[1..].should eq([
+        "Content-Type: application/json",
+        "Content-Length: #{Introspection.body.bytesize}",
+        "X-Foo: bar",
+        " baz",
+      ])
+    end
+
     it "refuses a request line that is not METHOD TARGET VERSION" do
       expect_raises(Gori::Error, /request line/) { Introspection.rewrite_request("garbage\nHost: x\n\n") }
       expect_raises(Gori::Error, /request line/) { Introspection.rewrite_request("") }
@@ -91,8 +110,8 @@ describe Gori::Graphql::Introspection do
       Introspection.post_target("/graphql").should eq("/graphql")
     end
 
-    it "matches a percent-encoded binding key and keeps the fragment" do
-      Introspection.post_target("/g?%71uery=x&a=1#frag").should eq("/g?a=1#frag")
+    it "matches binding keys verbatim, as Graphql.from_query reads them, and keeps the fragment" do
+      Introspection.post_target("/g?query=x&%71uery=y&a=1#frag").should eq("/g?%71uery=y&a=1#frag")
     end
   end
 end

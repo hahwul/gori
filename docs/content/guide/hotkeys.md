@@ -206,7 +206,7 @@ exactly as before, and Help names the route: the key, or `^P → <name>` for an 
 | Tab | Action | Key |
 |-----|--------|-----|
 | Repeater | Mark word · Edit decoder chain · Pretty-print request | `Ctrl-K` · `Ctrl-Q` · `Ctrl-U` |
-| Repeater | Minimize request · Use as refresh for slot… | palette |
+| Repeater | Minimize request · Use as refresh for slot… · GraphQL: insert introspection query · GraphQL: insert legacy introspection query | palette |
 | Fuzzer | Mark word · Edit decoder chain · Pretty-print template | `Ctrl-K` · `Ctrl-Q` · `Ctrl-U` |
 | Fuzzer | Add List payload set · Save results | `Ctrl-L` · `⇧E` |
 | Fuzzer | Run history | palette |

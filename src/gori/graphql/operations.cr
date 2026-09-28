@@ -43,6 +43,26 @@ module Gori
       # How deep a placeholder input object is filled in. Past it, a required nested input is `{}`.
       MAX_INPUT_DEPTH = 5
 
+      # Placeholder values written per operation. The depth cap alone does not bound the work: a
+      # schema of input types each with 50 required fields of the next is 50^5 values at depth 5,
+      # and the schema is the target's text.
+      MAX_PLACEHOLDERS = 1024
+
+      # A countdown shared by one document's (or one `variables` object's) recursive writers, so
+      # the work is bounded by what is written rather than by how far the schema fans out.
+      private class Budget
+        def initialize(@left : Int32)
+        end
+
+        def spend(n : Int32) : Nil
+          @left -= n
+        end
+
+        def spent? : Bool
+          @left < 0
+        end
+      end
+
       def generate(schema : Schema) : Generated
         ops = [] of Operation
         notes = [] of String
@@ -69,20 +89,23 @@ module Gori
       private def operation(schema : Schema, kind : String, field : Schema::Field) : Operation
         doc = ""
         MAX_DEPTH.downto(0) do |depth|
-          doc = document(schema, kind, field, depth)
-          break if doc.bytesize <= MAX_DOCUMENT
+          # The budget stops a level that blows past the size cap while it is being written, not
+          # after a multi-MB document has been built only to be thrown away.
+          budget = Budget.new(MAX_DOCUMENT)
+          doc = document(schema, kind, field, depth, budget)
+          break unless budget.spent? || doc.bytesize > MAX_DOCUMENT
         end
         Operation.new(kind, field.name, doc, variables(schema, field))
       end
 
-      private def document(schema : Schema, kind : String, field : Schema::Field, depth : Int32) : String
+      private def document(schema : Schema, kind : String, field : Schema::Field, depth : Int32, budget : Budget) : String
         String.build do |io|
           io << kind << ' ' << field.name
           unless field.args.empty?
             io << '('
             field.args.each_with_index do |arg, i|
               io << ", " if i > 0
-              io << '$' << arg.name << ": " << arg.type
+              io << '$' << arg.name << ": " << variable_type(arg)
             end
             io << ')'
           end
@@ -95,30 +118,40 @@ module Gori
             end
             io << ')'
           end
-          if (named = field.type.named) && (sel = selection(schema, named, 1, depth, "    "))
+          if (named = field.type.named) && (sel = selection(schema, named, 1, depth, "    ", budget))
             io << " {\n" << sel << "\n  }"
           end
           io << "\n}"
         end
       end
 
+      # The type a variable is declared with. A defaulted non-null argument is declared NULLABLE:
+      # it is left out of `variables`, and GraphQL lets a nullable variable reach a non-null
+      # argument only because the argument has a default to fall back to. Declared `Int!`, the
+      # omitted variable is an error and the request cannot be sent as generated.
+      private def variable_type(arg : Schema::InputValue) : String
+        type = arg.type
+        inner = type.of_type
+        type.non_null? && arg.default_value && inner ? inner.to_s : type.to_s
+      end
+
       # The selection set for a value of type `name`, or nil for a leaf (a scalar or an enum is
       # selected by naming it, with no braces). An object with nothing selectable at this depth
       # still gets `__typename`, because an empty selection set is a syntax error.
-      private def selection(schema : Schema, name : String, depth : Int32, max : Int32, pad : String) : String?
+      private def selection(schema : Schema, name : String, depth : Int32, max : Int32, pad : String, budget : Budget) : String?
         type = schema.types[name]? || return nil
         case type.kind
-        when .object?, .interface? then field_selection(schema, type, depth, max, pad)
-        when .union?               then union_selection(schema, type, depth, max, pad)
+        when .object?, .interface? then field_selection(schema, type, depth, max, pad, budget)
+        when .union?               then union_selection(schema, type, depth, max, pad, budget)
         end
       end
 
       # An object or interface: its own fields, descending into object-typed ones while `depth`
       # is under `max`.
-      private def field_selection(schema : Schema, type : Schema::Type, depth : Int32, max : Int32, pad : String) : String
+      private def field_selection(schema : Schema, type : Schema::Type, depth : Int32, max : Int32, pad : String, budget : Budget) : String
         lines = [] of String
         type.fields.each do |f|
-          break if lines.size >= MAX_FIELDS
+          break if lines.size >= MAX_FIELDS || budget.spent?
           next if f.name.starts_with?("__")
           # A field with a required argument cannot be selected without a value for it.
           next if f.args.any?(&.required?)
@@ -126,21 +159,24 @@ module Gori
           inner_type = schema.types[inner]? || next
           if inner_type.kind.leaf?
             lines << "#{pad}#{f.name}"
-          elsif depth < max && (sub = selection(schema, inner, depth + 1, max, pad + "  "))
+            budget.spend(pad.bytesize + f.name.bytesize + 1)
+          elsif depth < max && (sub = selection(schema, inner, depth + 1, max, pad + "  ", budget))
             lines << "#{pad}#{f.name} {\n#{sub}\n#{pad}}"
+            budget.spend(2 * pad.bytesize + f.name.bytesize + 4) # the braces; `sub` spent its own
           end
         end
         lines.empty? ? "#{pad}__typename" : lines.join('\n')
       end
 
       # A union has no fields of its own: `__typename`, then an inline fragment per member.
-      private def union_selection(schema : Schema, type : Schema::Type, depth : Int32, max : Int32, pad : String) : String
+      private def union_selection(schema : Schema, type : Schema::Type, depth : Int32, max : Int32, pad : String, budget : Budget) : String
         lines = ["#{pad}__typename"]
         if depth < max
           type.possible_types.each do |member|
-            break if lines.size > MAX_FIELDS
-            if sub = selection(schema, member, depth + 1, max, pad + "  ")
+            break if lines.size >= MAX_FIELDS || budget.spent?
+            if sub = selection(schema, member, depth + 1, max, pad + "  ", budget)
               lines << "#{pad}... on #{member} {\n#{sub}\n#{pad}}"
+              budget.spend(2 * pad.bytesize + member.bytesize + 12)
             end
           end
         end
@@ -151,11 +187,12 @@ module Gori
       private def variables(schema : Schema, field : Schema::Field) : String?
         required = field.args.select(&.required?)
         return nil if required.empty?
+        budget = Budget.new(MAX_PLACEHOLDERS)
         JSON.build do |j|
           j.object do
             required.each do |arg|
               j.field arg.name do
-                placeholder(schema, arg.type, 0, j)
+                placeholder(schema, arg.type, 0, j, budget)
               end
             end
           end
@@ -164,17 +201,18 @@ module Gori
 
       # A value of the right shape for `ref`: `0`, `0.0`, `false`, `""`, an enum's first value, a
       # one-element list, or an input object with its own required fields filled in.
-      private def placeholder(schema : Schema, ref : Schema::TypeRef, depth : Int32, j : JSON::Builder) : Nil
+      private def placeholder(schema : Schema, ref : Schema::TypeRef, depth : Int32, j : JSON::Builder, budget : Budget) : Nil
+        budget.spend(1)
         case ref.kind
         when .non_null?
           if inner = ref.of_type
-            placeholder(schema, inner, depth, j)
+            placeholder(schema, inner, depth, j, budget)
           else
             j.null
           end
         when .list?
           j.array do
-            ref.of_type.try { |inner| placeholder(schema, inner, depth, j) }
+            ref.of_type.try { |inner| placeholder(schema, inner, depth, j, budget) }
           end
         else
           name = ref.name || return j.null
@@ -185,12 +223,12 @@ module Gori
           when "String", "ID"
             j.string("")
           else
-            named_placeholder(schema, schema.types[name]?, depth, j)
+            named_placeholder(schema, schema.types[name]?, depth, j, budget)
           end
         end
       end
 
-      private def named_placeholder(schema : Schema, type : Schema::Type?, depth : Int32, j : JSON::Builder) : Nil
+      private def named_placeholder(schema : Schema, type : Schema::Type?, depth : Int32, j : JSON::Builder, budget : Budget) : Nil
         unless type
           j.string("")
           return
@@ -206,9 +244,10 @@ module Gori
           j.object do
             if depth < MAX_INPUT_DEPTH
               type.input_fields.each do |f|
+                break if budget.spent? # past it, the rest of a huge input is the operator's to fill
                 next unless f.required?
                 j.field f.name do
-                  placeholder(schema, f.type, depth + 1, j)
+                  placeholder(schema, f.type, depth + 1, j, budget)
                 end
               end
             end

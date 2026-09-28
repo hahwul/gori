@@ -185,7 +185,7 @@ module Gori
         each_of(h["args"]?) do |a|
           if v = input_value(a)
             args << v
-          elsif a.as_h?.try(&.["type"]?).try(&.as_h?).try(&.["kind"]?).try(&.as_s?) == "NON_NULL"
+          elsif required_raw?(a)
             # An argument that did not parse is one the generated call cannot pass. Dropping it
             # is harmless when it is optional, but without a REQUIRED one every request the field
             # would produce is invalid, so the field goes with it.
@@ -193,6 +193,15 @@ module Gori
           end
         end
         Field.new(name, args, type)
+      end
+
+      # Whether an unparsed argument was REQUIRED, by the rule `InputValue#required?` applies:
+      # non-null and no default. A defaulted `Int! = 5` can be left out, so it does not sink its
+      # field.
+      private def self.required_raw?(a : JSON::Any) : Bool
+        h = a.as_h? || return false
+        h["type"]?.try(&.as_h?).try(&.["kind"]?).try(&.as_s?) == "NON_NULL" &&
+          h["defaultValue"]?.try(&.as_s?).nil?
       end
 
       private def self.input_values(raw : JSON::Any?) : Array(InputValue)

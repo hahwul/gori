@@ -2452,6 +2452,23 @@ describe Gori::Tui::RepeaterView do
       view.dirty?.should be_false
     end
 
+    it "is one undoable edit" do
+      view = RepeaterView.new
+      view.restore("https://api.test", get_request, false, true)
+      view.insert_graphql_introspection(false)
+      view.focus_pane(:request)
+      view.edit_undo
+      view.request_text.should eq(get_request)
+    end
+
+    it "refuses a %%% send group rather than drop every request after the first" do
+      group = "GET /graphql HTTP/1.1\nHost: a\n\n%%%\nGET /b HTTP/1.1\nHost: a\n\n"
+      view = RepeaterView.new
+      view.restore("https://a", group, false, true)
+      view.insert_graphql_introspection(false).should contain("%%%")
+      view.request_text.should eq(group)
+    end
+
     it "refuses in hex mode" do
       view = RepeaterView.new
       view.restore("https://api.test", get_request, false, true)

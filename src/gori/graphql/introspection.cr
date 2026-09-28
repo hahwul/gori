@@ -1,11 +1,11 @@
 require "json"
-require "uri"
 
 module Gori
   module Graphql
     # The introspection request an operator puts in a Repeater tab to ask a GraphQL endpoint for
     # its schema. Burp's Repeater offers the same two queries; the operator sends one and reads
-    # the answer, which `Schema.parse` turns into the operations `Operations.generate` writes.
+    # the answer. `Schema.parse` and `Operations.generate` can read that answer into requests, but
+    # no surface calls them yet.
     #
     # This module builds the request and never sends it: the operator sends it from the tab, where
     # the scope gate and the session they are already testing with apply as for any other send.
@@ -135,8 +135,10 @@ module Gori
         GRAPHQL
 
       # Parameters of a GET GraphQL binding. They are dropped from the target when the request is
-      # turned into a POST, because a server that reads both would otherwise see two operations.
-      # Every other parameter (an API key, a tenant id) stays where the operator put it.
+      # turned into a POST, because a server that reads both would otherwise see two operations
+      # (or a persisted-query hash that no longer matches the document). Every other parameter
+      # (an API key, a tenant id) stays where the operator put it. Keys match VERBATIM, as
+      # `Graphql.from_query` reads them: `%71uery` is not the binding there, so it is not here.
       BINDING_PARAMS = {"query", "operationName", "variables", "extensions"}
 
       # Headers the new body makes wrong. Each is written again (Content-Type, Content-Length) or
@@ -148,36 +150,74 @@ module Gori
         {"operationName" => "IntrospectionQuery", "query" => (legacy ? LEGACY_QUERY : QUERY)}.to_json
       end
 
-      # `text` (a Repeater request: LF line breaks, head, a blank line, body) rewritten into the
-      # introspection request for the same endpoint: `POST` to the same path, the operator's other
-      # headers (the session under test) kept in order, a JSON body, and Content-Length set to it.
-      # Raises `Gori::Error` when there is no request line to rewrite.
+      # `text` (a Repeater request in its editor's wire form: head, a blank line, body) rewritten
+      # into the introspection request for the same endpoint: `POST` to the same path, the
+      # operator's other headers (the session under test) kept in order, a JSON body, and
+      # Content-Length set to it. Raises `Gori::Error` when there is no request line to rewrite.
+      #
+      # A kept line keeps its own terminator, so an `X-A: v\r\r\n` the operator wrote goes out
+      # as written (P7); a line gori writes takes the request line's. An obs-fold continuation
+      # (a line opening with SP/HTAB) belongs to the header above it and goes wherever that
+      # header goes, so a folded Content-Type cannot leave its tail on the new Content-Length.
       def rewrite_request(text : String, legacy : Bool = false) : String
-        sep = text.index("\n\n")
-        head = sep ? text[0, sep] : text.rstrip('\n')
-        lines = head.split('\n')
-        parts = lines.first?.try(&.split(' ')) || [] of String
-        if parts.size != 3 || parts[1].empty?
+        head, blank_eol = split_head(text)
+        first = head.first?
+        parts = first.try(&.[0].split(' ')) || [] of String
+        if first.nil? || parts.size != 3 || parts[1].empty?
           raise Gori::Error.new("the request line is not METHOD TARGET VERSION — fix it and try again")
         end
+        eol = first[1].empty? ? "\n" : first[1] # not `presence`: "\r\n" is blank to it
         payload = body(legacy)
-        acc = ["POST #{post_target(parts[1])} #{parts[2]}"]
+        framing = [{"Content-Type: application/json", eol}, {"Content-Length: #{payload.bytesize}", eol}]
+        acc = [{"POST #{post_target(parts[1])} #{parts[2]}", eol}]
+        acc.concat(rewrite_headers(head, framing, eol))
+        String.build do |io|
+          acc.each { |(line, line_eol)| io << line << line_eol }
+          io << (blank_eol || eol) << payload
+        end
+      end
+
+      # The header lines after the request line, with every framing header (and its folded
+      # continuations) dropped and `framing` put where the first of them stood — or appended
+      # when there was none — so a request whose headers are in a deliberate order keeps it.
+      private def rewrite_headers(head : Array({String, String}), framing : Array({String, String}),
+                                  eol : String) : Array({String, String})
+        acc = [] of {String, String}
         placed = false
-        lines[1..].each do |line|
-          name = line.partition(':')[0].strip.downcase
-          if FRAMING_HEADERS.includes?(name)
-            # The new pair goes where the first framing header stood, so a request whose headers
-            # are in a deliberate order keeps it.
-            unless placed
-              acc << "Content-Type: application/json" << "Content-Length: #{payload.bytesize}"
-              placed = true
-            end
+        dropping = false
+        head.each(within: 1..) do |(line, line_eol)|
+          kept = {line, line_eol.empty? ? eol : line_eol}
+          if line.starts_with?(' ') || line.starts_with?('\t')
+            acc << kept unless dropping
             next
           end
-          acc << line
+          dropping = FRAMING_HEADERS.includes?(line.partition(':')[0].strip.downcase)
+          if !dropping
+            acc << kept
+          elsif !placed
+            acc.concat(framing)
+            placed = true
+          end
         end
-        acc << "Content-Type: application/json" << "Content-Length: #{payload.bytesize}" unless placed
-        "#{acc.join('\n')}\n\n#{payload}"
+        acc.concat(framing) unless placed
+        acc
+      end
+
+      # The head of `text` as {line, terminator} pairs, and the blank line's own terminator (nil
+      # when the text has no body separator). A terminator is `\r\n` or `\n`; a CR before it
+      # that is not part of it stays in the line, as the Repeater editor keeps it.
+      private def split_head(text : String) : {Array({String, String}), String?}
+        lines = [] of {String, String}
+        pos = 0
+        while pos < text.size
+          nl = text.index('\n', pos)
+          raw = nl ? text[pos...nl] : text[pos..]
+          pos = nl ? nl + 1 : text.size
+          line, line_eol = nl && raw.ends_with?('\r') ? {raw.rchop, "\r\n"} : {raw, nl ? "\n" : ""}
+          return {lines, line_eol} if line.empty? && nl
+          lines << {line, line_eol}
+        end
+        {lines, nil}
       end
 
       # The target with the GET binding's parameters removed, in origin or absolute form alike.
@@ -189,10 +229,7 @@ module Gori
           fragment = query[hash..]
           query = query[0, hash]
         end
-        kept = query.split('&').reject do |pair|
-          key = pair.partition('=')[0]
-          pair.empty? || BINDING_PARAMS.includes?((URI.decode_www_form(key) rescue key))
-        end
+        kept = query.split('&').reject { |pair| pair.empty? || BINDING_PARAMS.includes?(pair.partition('=')[0]) }
         kept.empty? ? "#{path}#{fragment}" : "#{path}?#{kept.join('&')}#{fragment}"
       end
     end

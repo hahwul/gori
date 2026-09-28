@@ -156,6 +156,34 @@ describe Gori::Graphql::Operations do
     doc.should contain("    title")
   end
 
+  it "declares a defaulted non-null argument nullable, since it is left out of variables" do
+    query = type(S::Kind::Object, "Query", [
+      fld("users", ref("String"), [arg("first", nn(ref("Int")), "10"), arg("after", nn(ref("ID")))]),
+    ])
+    users = op(Ops.generate(schema_of([query])), "query", "users")
+    users.document.should start_with("query users($first: Int, $after: ID!) {")
+    JSON.parse(users.variables.not_nil!).should eq(JSON.parse(%({"after":""})))
+  end
+
+  it "stops filling placeholders at a budget however far required inputs fan out" do
+    chain = (1..5).map do |i|
+      next_type = i < 5 ? ref("In#{i + 1}", S::Kind::InputObject) : ref("String")
+      type(S::Kind::InputObject, "In#{i}", inputs: (0...50).map { |n| arg("f#{n}", nn(next_type)) })
+    end
+    query = type(S::Kind::Object, "Query", [fld("q", ref("String"), [arg("input", nn(ref("In1", S::Kind::InputObject)))])])
+    vars = op(Ops.generate(schema_of(chain + [query])), "query", "q").variables.not_nil!
+    vars.scan(/"f\d+"/).size.should be <= Ops::MAX_PLACEHOLDERS + Ops::MAX_INPUT_DEPTH
+    JSON.parse(vars)["input"]["f0"]["f0"]["f0"]["f0"]["f0"].should eq(JSON::Any.new(""))
+  end
+
+  it "caps a union's inline fragments at MAX_FIELDS lines" do
+    members = (0...70).map { |i| type(S::Kind::Object, "M#{i}", [fld("id", ref("ID"))]) }
+    hit = type(S::Kind::Union, "Hit", members: members.map(&.name))
+    query = type(S::Kind::Object, "Query", [fld("hit", ref("Hit", S::Kind::Union))])
+    doc = op(Ops.generate(schema_of(members + [hit, query])), "query", "hit").document
+    (doc.scan(/\.\.\. on /).size + 1).should eq(Ops::MAX_FIELDS) # + the __typename line
+  end
+
   it "notes a root type the schema names but does not describe" do
     g = Ops.generate(schema_of([] of S::Type, "Query", "Mutation"))
     g.operations.should be_empty

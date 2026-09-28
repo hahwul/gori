@@ -118,7 +118,7 @@ describe "RepeaterView split-decode (SAML/GraphQL)" do
 
       view.insert_graphql_introspection(false).should contain("inserted the introspection query")
       view.req_pane.should eq(:envelope)
-      view.request_text.should start_with("POST /graphql?k=v HTTP/1.1\nHost: api.test\n")
+      view.request_text.should start_with("POST /graphql?k=v HTTP/1.1\r\nHost: api.test\r\n") # the capture's CRLFs kept
       view.toggle_req_pane.should eq(:decoded)
       view.edit_buffer_text.should contain("query IntrospectionQuery")
 

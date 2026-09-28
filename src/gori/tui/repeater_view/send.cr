@@ -366,25 +366,40 @@ class Gori::Tui::RepeaterView
   # the request text changes: the target, the session slot and the operator's other headers
   # stay as they are, so the query goes out with the session under test. Returns the status.
   def insert_graphql_introspection(legacy : Bool) : String
-    return "hex mode active — leave it to insert the introspection query" if request_hex?
-    return "a WebSocket tab has no HTTP body to put the introspection query in" if @ws_mode
-    return "a gRPC tab sends protobuf, not a GraphQL query" if @grpc_mode
-    return "a SAML tab — open the GraphQL endpoint in a tab of its own" if @decode_kind == :saml
+    if refusal = graphql_introspection_refusal
+      return refusal
+    end
     graphql_split = @decode_kind == :graphql
     # A GraphQL split tab: the ENVELOPE is the request. A pending decoded edit goes into it
     # first, so what the rewrite keeps (the headers) is what the operator last typed.
     commit_decoded if graphql_split
     begin
-      rewritten = Graphql::Introspection.rewrite_request(@editor.text, legacy)
+      # `wire_text`, so every kept header keeps the terminator it was written with.
+      rewritten = Graphql::Introspection.rewrite_request(@editor.wire_text, legacy)
     rescue ex : Gori::Error
       return ex.message || "the request could not be rewritten"
     end
-    @editor.set_text(rewritten)
+    # ONE undoable edit: a wrong palette row is a ^Z away, not a lost request.
+    @editor.replace_all(rewritten, 0)
     # Re-decode so the DECODED pane shows the new query and the splice target is the JSON body
     # it now lives in — a GET binding's `?query=` is gone from the request line.
     refresh_decoded if graphql_split
     @dirty = true
     "inserted the #{legacy ? "legacy " : ""}introspection query — send it with ^R"
+  end
+
+  # Why this tab cannot take the introspection query, or nil. `ws_mode?`, not `@ws_mode`: a
+  # handshake the operator switched to plain HTTP sends as one, so it rewrites as one.
+  private def graphql_introspection_refusal : String?
+    return "hex mode active — leave it to insert the introspection query" if request_hex?
+    return "a WebSocket tab has no HTTP body to put the introspection query in" if ws_mode?
+    return "a gRPC tab sends protobuf, not a GraphQL query" if @grpc_mode
+    return "a SAML tab — open the GraphQL endpoint in a tab of its own" if @decode_kind == :saml
+    if group_document?(@editor.wire_lines)
+      return "request holds a %%% separator, so the rewrite would drop every request after the " \
+             "first — insert the query in a tab of its own"
+    end
+    nil
   end
 
   def apply(result : Repeater::Result) : Nil

@@ -63,8 +63,10 @@ describe Gori::Graphql::Schema do
         # an unparseable REQUIRED argument takes the field with it…
         {"name" => "needs", "args" => [{"name" => "x y", "type" => non_null(named("SCALAR", "ID"))}],
          "type" => named("SCALAR", "String")},
-        # …an unparseable optional one is only dropped
+        # …an unparseable optional one is only dropped, and a defaulted non-null one is optional
         {"name" => "opt", "args" => [{"name" => "x y", "type" => named("SCALAR", "ID")}],
+         "type" => named("SCALAR", "String")},
+        {"name" => "defaulted", "args" => [{"name" => "x y", "type" => non_null(named("SCALAR", "Int")), "defaultValue" => "5"}],
          "type" => named("SCALAR", "String")},
       ]),
       {"kind" => "ENUM", "name" => "Role", "enumValues" => [{"name" => "ADMIN"}, {"name" => "no-pe"}]},
@@ -72,7 +74,7 @@ describe Gori::Graphql::Schema do
       {"kind" => "OBJECT", "name" => "not valid", "fields" => [] of String},
     ]
     schema = Schema.parse(result_json(types, query: "Query", mutation: "bad name"))
-    schema.types["Query"].fields.map(&.name).should eq(["ok", "opt"])
+    schema.types["Query"].fields.map(&.name).should eq(["ok", "opt", "defaulted"])
     schema.types["Query"].fields.last.args.should be_empty
     schema.types["Role"].enum_values.should eq(["ADMIN"])
     schema.types["Hit"].possible_types.should eq(["User"])
