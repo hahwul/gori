@@ -235,6 +235,33 @@ describe "MCP tool permissions" do
     end
   end
 
+  # Each fix is the agent's when the one tool it needs is served: `--tools` can hand it
+  # add_scope_rule without delete_scope_rule, and the include advice must stay its own.
+  it "judges each SCOPE_BLOCKED fix by the tool that makes it" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "in.test").should be_true
+      scope.add("exclude", "host", "ex.in.test").should be_true
+      filter = Gori::MCP::ToolFilter.parse("send_request,add_scope_rule", Gori::MCP::Tools::TOOL_NAMES,
+        Gori::MCP::Tools::TOOL_DEPENDENCIES).as(Gori::MCP::ToolFilter)
+      adds_only = Gori::MCP::Tools.new(store, true, false, tool_filter: filter)
+
+      adds_only.call("send_request", JSON.parse(%({"url":"http://out.test/"})))
+        .text.should contain("add a scope include rule or pass allow_unscoped:true")
+      adds_only.call("send_request", JSON.parse(%({"url":"http://ex.in.test/"})))
+        .text.should contain("ask the operator to delete or narrow the scope EXCLUDE rule")
+
+      filter = Gori::MCP::ToolFilter.parse("send_request,delete_scope_rule", Gori::MCP::Tools::TOOL_NAMES,
+        Gori::MCP::Tools::TOOL_DEPENDENCIES).as(Gori::MCP::ToolFilter)
+      deletes_only = Gori::MCP::Tools.new(store, true, false, tool_filter: filter)
+      deletes_only.call("send_request", JSON.parse(%({"url":"http://out.test/"})))
+        .text.should contain("ask the operator to add a scope include rule")
+      text = deletes_only.call("send_request", JSON.parse(%({"url":"http://ex.in.test/"}))).text
+      text.should contain("delete or narrow the scope EXCLUDE rule")
+      text.should_not contain("ask the operator")
+    end
+  end
+
   it "names the operator in export_openapi's in_scope refusal when the scope writers are switched off" do
     with_store do |store|
       text = denied_tools(store, "scope").call("export_openapi", JSON.parse(%({"in_scope":true}))).text

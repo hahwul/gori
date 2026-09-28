@@ -839,14 +839,19 @@ module Gori
         serves?("add_scope_rule") ? "add a scope rule with add_scope_rule" : "ask the operator to add a scope rule"
       end
 
-      # Whether this server lets the agent write scope rules — the fix every SCOPE_BLOCKED
-      # remedy names. Off, the remedy names the operator instead (`Outbound.remedy`).
-      def scope_editable? : Bool
-        serves?("add_scope_rule") && serves?("delete_scope_rule")
+      # Whether this server lets the agent make each fix a SCOPE_BLOCKED remedy names: add an
+      # include rule, or delete (or narrow) the EXCLUDE rule that matched. One the agent cannot
+      # make is named as the operator's (`Outbound.remedy`).
+      def can_add_include? : Bool
+        serves?("add_scope_rule")
+      end
+
+      def can_edit_exclude? : Bool
+        serves?("delete_scope_rule") || serves?("update_scope_rule")
       end
 
       def scope_remedy(verdict : ScopeCheck) : String
-        Outbound.remedy(verdict, "allow_unscoped:true", scope_editable: scope_editable?)
+        Outbound.remedy(verdict, "allow_unscoped:true", add_include: can_add_include?, edit_exclude: can_edit_exclude?)
       end
 
       # `Outbound.agent` spelled for this server's refusals: the ones a core engine phrases
@@ -855,7 +860,8 @@ module Gori
       def agent_outbound(scope : Scope, allow_unscoped : Bool, *, waiver : Bool = true) : Outbound
         ob = Outbound.agent(scope, allow_unscoped)
         ob.waiver = "allow_unscoped:true" if waiver
-        ob.scope_editable = scope_editable?
+        ob.can_add_include = can_add_include?
+        ob.can_edit_exclude = can_edit_exclude?
         ob
       end
 

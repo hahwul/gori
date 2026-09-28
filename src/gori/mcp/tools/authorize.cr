@@ -575,11 +575,8 @@ module Gori
                  else
                    "every selected flow's host (#{hosts.join(", ")}) is outside the project's configured scope"
                  end
-        remedy = if sc
-                   scope_remedy(sc)
-                 else
-                   serves?("add_scope_rule") ? "add a scope include rule or pass allow_unscoped:true" : "pass allow_unscoped:true, or ask the operator to add a scope include rule"
-                 end
+        # No verdict to phrase from (the first flow is gone): an out-of-scope one reads the same.
+        remedy = scope_remedy(sc || ScopeCheck.new(Outbound::OUT_OF_SCOPE, "", nil, true))
         err("#{reason}; #{remedy}", "SCOPE_BLOCKED", field: "allow_unscoped",
           details: JSON.parse({
             "scope_decision" => sc.try(&.decision) || "out_of_scope",

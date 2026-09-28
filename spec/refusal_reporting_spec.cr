@@ -43,16 +43,22 @@ describe "refusal reporting" do
       Gori::Outbound.remedy(plain, nil).should eq("add a scope include rule")
     end
 
-    it "hands both fixes to the operator when the reader cannot edit the scope" do
+    it "hands a fix the reader cannot make to the operator, one fix at a time" do
       excluded = Gori::Outbound::Verdict.new("out_of_scope", "h", nil, true, true)
       plain = Gori::Outbound::Verdict.new("out_of_scope", "h", nil, true, false)
 
-      Gori::Outbound.remedy(plain, "allow_unscoped:true", scope_editable: false)
+      Gori::Outbound.remedy(plain, "allow_unscoped:true", add_include: false)
         .should eq("pass allow_unscoped:true, or ask the operator to add a scope include rule")
-      Gori::Outbound.remedy(plain, nil, scope_editable: false).should eq("ask the operator to add a scope include rule")
+      Gori::Outbound.remedy(plain, nil, add_include: false).should eq("ask the operator to add a scope include rule")
       # No waiver lifts an exclude, so the operator is the only fix offered.
-      Gori::Outbound.remedy(excluded, "allow_unscoped:true", scope_editable: false)
+      Gori::Outbound.remedy(excluded, "allow_unscoped:true", edit_exclude: false)
         .should eq("ask the operator to delete or narrow the scope EXCLUDE rule that matches it (an include rule cannot override an exclude)")
+      # Each fix is judged on its own: a reader that may add an include but not delete one
+      # is still told to add one.
+      Gori::Outbound.remedy(plain, "allow_unscoped:true", edit_exclude: false)
+        .should eq("add a scope include rule or pass allow_unscoped:true")
+      Gori::Outbound.remedy(excluded, nil, add_include: false).should contain("delete or narrow")
+      Gori::Outbound.remedy(excluded, nil, add_include: false).should_not contain("ask the operator")
     end
   end
 

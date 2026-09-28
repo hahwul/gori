@@ -42,14 +42,14 @@ module Gori
       # `Authorize::ACTIVE_TIMEOUT`'s reasoning: a step that hangs stalls every step after it.
       DEFAULT_TIMEOUT = 20.seconds
 
-      # `waiver` is how THIS surface spells "send anyway" (`--allow-unscoped`,
-      # `allow_unscoped:true`, or nil in the TUI, which has no flag) — it only shapes the
-      # refusal sentence, never the decision.
+      # How THIS surface spells "send anyway" (`--allow-unscoped`, `allow_unscoped:true`, or
+      # nil in the TUI, which has no flag) rides on `outbound` (`Outbound#waiver`): it only
+      # shapes the refusal sentence, never the decision.
       def initialize(@store : Store, @outbound : Gori::Outbound, *,
                      @issue_id : Int64, @surface : FlowSource::Surface,
                      @overrides : Gori::HostOverrides? = nil, @verify : Bool = true,
                      @timeout : Time::Span = DEFAULT_TIMEOUT,
-                     @record_history : Bool = true, @waiver : String? = nil,
+                     @record_history : Bool = true,
                      @close_outbound : Bool = true)
       end
 
@@ -89,7 +89,7 @@ module Gori
         verdict = @outbound.check_request(plan.scheme, plan.host, target, plan.port)
         if verdict.blocked?
           return Observation.new(blocked_reason: Retest.clip(
-            "#{plan.host} is out of the project scope — #{Gori::Outbound.remedy(verdict, @waiver, scope_editable: @outbound.scope_editable?)}"))
+            "#{plan.host} is out of the project scope — #{@outbound.remedy(verdict)}"))
         end
         if reason = plan.refusal
           return Observation.new(blocked_reason: Retest.clip(reason))

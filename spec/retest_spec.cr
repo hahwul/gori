@@ -406,3 +406,24 @@ describe "Gori::Retest.confirm_note" do
     RT.confirm_note(plan).not_nil!.should contain("1 request will be sent, 1 of them state-changing (POST)")
   end
 end
+
+describe Gori::Retest::LiveBackend do
+  # The surface's spelling of "send anyway" rides on the Outbound it hands over, the one
+  # source every engine-phrased refusal reads (`Outbound#remedy`).
+  it "phrases a scope refusal in the waiver the surface put on its Outbound" do
+    with_store_env do |store|
+      Gori::Scope.load(store).add("include", "host", "in.test").should be_true
+      rid = store.insert_repeater("http://out.test", "GET / HTTP/1.1\r\nHost: out.test\r\n\r\n".to_slice,
+        false, true, nil, 0)
+      step = Gori::Store::RetestStep.new(1_i64, 1_i64, 1, Gori::Store::RetestRole::Variant,
+        Gori::Store::LinkRefKind::Repeater, rid, "", 0_i64, 0_i64)
+      planned = Gori::Retest::Planned.new(step, "GET", "http://out.test/", "repeater ##{rid}")
+      outbound = Gori::Outbound.cli(Gori::Scope.load(store), false)
+      outbound.waiver = "--allow-unscoped"
+      backend = Gori::Retest::LiveBackend.new(store, outbound, issue_id: 1_i64, surface: Gori::FlowSource::Surface::Cli)
+      obs = backend.send(planned)
+      obs.blocked_reason.not_nil!.should contain("add a scope include rule or pass --allow-unscoped")
+      backend.finish
+    end
+  end
+end
