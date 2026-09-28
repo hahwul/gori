@@ -1,5 +1,5 @@
 +++
-title = "AI Setup"
+title = "gori MCP and AI Agent Setup"
 description = "Connect an AI agent to gori over MCP: install the server into your client, pin the project, and drive your first request."
 weight = 30
 +++

@@ -1,5 +1,5 @@
 +++
-title = "테마"
+title = "TUI 테마"
 description = "gori의 내장 컬러 테마를 전환하거나, 직접 만든 테마를 넣습니다."
 weight = 100
 

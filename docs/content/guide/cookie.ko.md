@@ -1,5 +1,5 @@
 +++
-title = "Cookie"
+title = "세션 쿠키 보안"
 description = "Flask, Rack, Django의 서명된 세션 쿠키를 디코드, 검증, 크랙, 재서명합니다."
 weight = 55
 

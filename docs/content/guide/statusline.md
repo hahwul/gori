@@ -1,5 +1,5 @@
 +++
-title = "Statusline"
+title = "Custom TUI Statusline"
 description = "An extra row at the bottom of the TUI, filled by a shell command of your own."
 weight = 120
 

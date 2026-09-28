@@ -1,5 +1,5 @@
 +++
-title = "스크립팅"
+title = "gori run 스크립팅"
 description = "gori run으로 gori를 헤드리스로 구동합니다. TUI와 같은 프로젝트·같은 엔진을 파이프라인과 CI에 맞춘 형태로 제공합니다."
 weight = 80
 

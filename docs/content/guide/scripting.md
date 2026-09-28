@@ -1,5 +1,5 @@
 +++
-title = "Scripting"
+title = "CLI Scripting with gori run"
 description = "Drive gori headless with gori run: the same project and engines as the TUI, shaped for pipelines and CI."
 weight = 80
 

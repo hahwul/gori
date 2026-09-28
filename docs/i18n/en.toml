@@ -58,7 +58,7 @@ search = "Search the docs"
 kicker = "HTTP intercepting proxy · TUI"
 # The headline is set in three spans so the emphasized word can carry the
 # serif-italic gold treatment; pre/post may be empty per locale.
-title_pre = "Hack from the "
+title_pre = "HTTP security testing from the "
 title_em = "terminal."
 title_post = ""
 lede = "A fast, keyboard-driven HTTP/HTTPS proxy and security toolkit. Capture, repeater, fuzz, scan, or drive it all from an AI agent."

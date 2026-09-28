@@ -1,5 +1,5 @@
 +++
-title = "JWT"
+title = "JWT 보안 테스트"
 description = "JSON Web Token을 HMAC과 비대칭 알고리즘 전반에서 디코드·검증·편집·재서명하고, alg:none, weak-secret, header-injection, algorithm-confusion 페이로드를 생성합니다."
 weight = 50
 

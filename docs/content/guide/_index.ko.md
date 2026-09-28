@@ -1,6 +1,6 @@
 +++
-title = "가이드"
-description = "gori 워크벤치 심화 가이드: 프록시, 리피터, 퍼징, 스캐닝, MCP."
+title = "HTTP 프록시와 웹 보안 가이드"
+description = "HTTP 인터셉트, Repeater, 퍼징, 스캐닝, MCP 워크플로우를 다루는 gori 심화 가이드입니다."
 weight = 20
 +++
 

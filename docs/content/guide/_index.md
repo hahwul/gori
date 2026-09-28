@@ -1,6 +1,6 @@
 +++
-title = "Guide"
-description = "In-depth guides to the gori workbench: proxy, repeater, fuzzing, scanning, and MCP."
+title = "HTTP Proxy and Web Security Guides"
+description = "In-depth gori guides for HTTP interception, Repeater, fuzzing, scanning, and MCP workflows."
 weight = 20
 +++
 

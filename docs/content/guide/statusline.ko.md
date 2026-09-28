@@ -1,5 +1,5 @@
 +++
-title = "Statusline"
+title = "사용자 지정 TUI Statusline"
 description = "직접 작성한 셸 명령이 채우는, TUI 맨 아래의 한 줄."
 weight = 120
 

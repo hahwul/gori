@@ -1,5 +1,5 @@
 +++
-title = "Decoder"
+title = "Decoder: Encode, Decode, and Hash"
 description = "Encode, decode, hash, and transform data in a multi-step pipeline inside the TUI."
 weight = 40
 

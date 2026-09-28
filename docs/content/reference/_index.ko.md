@@ -1,6 +1,6 @@
 +++
-title = "레퍼런스"
-description = "CLI 명령, 설정 키, 쿼리 언어."
+title = "CLI, 설정, 쿼리 레퍼런스"
+description = "gori CLI 명령, 설정 키, 쿼리 언어 문법과 Probe 룰을 모은 레퍼런스입니다."
 weight = 30
 +++
 

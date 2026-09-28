@@ -1,5 +1,5 @@
 +++
-title = "단축키"
+title = "키보드 단축키"
 description = "Preferences 모달에서 gori의 단축키를 재지정합니다."
 weight = 110
 

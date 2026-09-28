@@ -1,5 +1,5 @@
 +++
-title = "Sequencer"
+title = "Token Randomness Testing"
 description = "Grade the randomness of session tokens, CSRF tokens, and reset codes for predictability."
 weight = 60
 

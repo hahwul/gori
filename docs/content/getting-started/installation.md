@@ -1,5 +1,5 @@
 +++
-title = "Installation"
+title = "Install gori"
 description = "Install gori via curl, Homebrew, the AUR, Snap, Nix, Docker, a pre-built binary, or from source."
 weight = 10
 +++

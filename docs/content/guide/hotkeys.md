@@ -1,5 +1,5 @@
 +++
-title = "Hotkeys"
+title = "Keyboard Shortcuts"
 description = "Rebind gori's keyboard shortcuts from the Preferences modal."
 weight = 110
 

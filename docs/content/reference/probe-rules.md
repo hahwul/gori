@@ -1,5 +1,5 @@
 +++
-title = "Probe Rules"
+title = "Probe Scan Rules"
 description = "Every built-in Probe scan rule by id: what it checks, its category, and what an active rule costs per flow."
 weight = 35
 +++

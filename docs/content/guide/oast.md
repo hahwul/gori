@@ -1,5 +1,5 @@
 +++
-title = "OAST"
+title = "OAST for Blind Vulnerabilities"
 description = "Catch out-of-band callbacks (interactsh & friends) to confirm blind SSRF, XXE, injection, and remote file inclusion."
 weight = 70
 

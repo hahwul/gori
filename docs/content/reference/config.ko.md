@@ -1,5 +1,5 @@
 +++
-title = "설정"
+title = "설정 레퍼런스"
 description = "settings.json 키와 GORI_HOME 저장소 레이아웃."
 weight = 20
 +++

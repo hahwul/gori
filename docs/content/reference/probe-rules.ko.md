@@ -1,5 +1,5 @@
 +++
-title = "Probe 룰"
+title = "Probe 스캔 룰"
 description = "Probe 내장 스캔 룰 전체를 id별로: 무엇을 검사하는지, 범주, 액티브 룰의 플로우당 요청 비용."
 weight = 35
 +++
