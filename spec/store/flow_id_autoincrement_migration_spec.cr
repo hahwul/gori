@@ -201,6 +201,27 @@ describe "Store::Schema V39" do
     end
   end
 
+  # The bound MCP's `since` check reads: the highest id ever issued, not the newest survivor.
+  it "reports the highest flow id ever issued, past a delete and a clear" do
+    with_store do |store|
+      store.flow_id_high_water.should eq(0)
+      store.insert_flow(request("/a"))
+      top = store.insert_flow(request("/b"))
+      store.delete_flow(top).should be_true
+      store.flow_id_high_water.should eq(top)
+      store.clear_flows.should be_true
+      store.flow_id_high_water.should eq(top)
+      # Only gori writes an integer there; a crafted archive's TEXT still reads as its number.
+      store.@db.exec("UPDATE sqlite_sequence SET seq = '40' WHERE name = 'flows'")
+      store.flow_id_high_water.should eq(40)
+      # With no sequence row, SQLite itself falls back to the largest rowid, and so does this.
+      reissue_rowids(store)
+      again = store.insert_flow(request("/c"))
+      store.@db.exec("DELETE FROM sqlite_sequence WHERE name = 'flows'")
+      store.flow_id_high_water.should eq(again)
+    end
+  end
+
   it "never hands out a reaped h2 connection's id again" do
     with_store do |store|
       first = store.insert_h2_connection("v39.test", 443, "h2")
@@ -229,6 +250,40 @@ describe "Store::Schema V39" do
     end
   end
 
+  # The in-place edit is a schema change, so its cost must not grow with History. A check that
+  # walked the table (`PRAGMA quick_check` once stood here) read every body's overflow chain:
+  # 10-16 s on a 3.3 GB project, under the write lock a peer waits 5 s for. Proven by a body
+  # whose overflow chain is cut short on disk: a walk of it fails, and the edit must not care.
+  it "switches in place without reading a row, even one whose body it could not read" do
+    path = build_pre_v39 do |c|
+      plant_project(c)
+      c.scalar("PRAGMA freelist_count").as(Int64).should eq(0) # new pages go on at the end of the file
+      # Inserted last and outside the FTS index, so nothing is allocated after its body.
+      c.exec("INSERT INTO flows (id, created_at, scheme, host, port, method, target, http_version, " \
+             "request_head, response_body, state) VALUES (20, 0, 'https', 'v39.test', 443, 'GET', '/big', " \
+             "'HTTP/1.1', X'00', zeroblob(64000), 2)")
+    end
+    begin
+      File.open(path, "r+") do |f|
+        page = f.seek(16) { f.read_bytes(UInt16, IO::ByteFormat::BigEndian) }.to_i64
+        last = f.size // page
+        # The body's last two overflow pages are the file's last two: the first names the second.
+        f.seek((last - 2) * page) { f.read_bytes(UInt32, IO::ByteFormat::BigEndian).should eq(last) }
+        f.seek((last - 2) * page) { f.write_bytes(0_u32, IO::ByteFormat::BigEndian) }
+      end
+      DB.open("sqlite3:#{path}") do |db|
+        db.using_connection { |c| c.scalar("PRAGMA quick_check(flows)").as(String).should_not eq("ok") }
+      end
+      open_and(path) do |store|
+        create_sql(store, "flows").should contain("INTEGER PRIMARY KEY AUTOINCREMENT")
+        create_sql(store, "flows").starts_with?(%(CREATE TABLE "flows")).should be_false # not rebuilt
+        store.flow_rows([1_i64, 5_i64, 9_i64]).map(&.target).sort!.should eq(["/five", "/nine", "/one"])
+      end
+    ensure
+      cleanup(path)
+    end
+  end
+
   # The phrase the edit replaces sits only inside a CHECK here, with the real rowid clause in
   # lowercase: editing in place would fail every flow against its own CHECK.
   it "rebuilds a crafted History CREATE text instead of editing inside it" do
@@ -247,6 +302,19 @@ describe "Store::Schema V39" do
       end
     ensure
       cleanup(path)
+    end
+  end
+
+  # With the row check gone, eligibility is the whole guard: a WITHOUT ROWID table has no rowid
+  # for AUTOINCREMENT to govern, and SQLite refuses the clause there.
+  it "is not eligible for the in-place edit on a WITHOUT ROWID table" do
+    DB.open("sqlite3::memory:") do |db|
+      db.using_connection do |c|
+        c.exec("CREATE TABLE t (id INTEGER PRIMARY KEY, x TEXT) WITHOUT ROWID")
+        c.exec("CREATE TABLE u (id INTEGER PRIMARY KEY, x TEXT)")
+        Gori::Store::Schema.in_place_eligible?(c, "t").should be_false
+        Gori::Store::Schema.in_place_eligible?(c, "u").should be_true
+      end
     end
   end
 
