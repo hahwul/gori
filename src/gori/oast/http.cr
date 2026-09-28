@@ -44,7 +44,16 @@ module Gori::Oast
     def request(method : String, url : String,
                 headers : Hash(String, String) = {} of String => String,
                 body : String? = nil) : Response
-      uri = URI.parse(url)
+      # Provider endpoints are operator configuration, but they still cross Crystal's URI
+      # parser with values that may be hand-edited. A malformed port can raise URI::Error or
+      # ArgumentError, and an oversized one raises OverflowError before the transfer rescue
+      # below is entered; catch all three so the TUI/CLI/MCP callers retain their normal
+      # provider-error path.
+      uri = begin
+        URI.parse(url)
+      rescue ex : URI::Error | ArgumentError | OverflowError
+        raise Gori::Error.new("OAST: invalid URL #{url.inspect}: #{ex.message}")
+      end
       host = uri.host
       raise Gori::Error.new("OAST: invalid URL #{url}") unless host
       client = Gori::HttpTransport.client(uri, verify_tls: @verify_tls,

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- OAST: malformed provider URLs now report a clean configuration error instead of crashing before the HTTP transport (#1359)
 - Repeater: **GraphQL: insert introspection query** (and its legacy variant for older servers) in the `Ctrl-P` palette rewrites the tab's request into a POST of the introspection query to the same endpoint, keeping its other headers (#1355)
 - MCP: `minimize_repeater` reports a refusal by a configured scope as `scope_decision: out_of_scope`, as `send_request` does, instead of calling every scope refusal `unscoped` (#1349)
 - TUI: the Preferences group strip (General, Appearance, …) draws its unselected groups on the card's own background instead of a black band hugging each label (#1346)
