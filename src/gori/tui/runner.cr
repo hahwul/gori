@@ -7001,13 +7001,15 @@ module Gori::Tui
       @toast = Runner.shell_exit_toast(status, Time.instant - started, Runner.flows_issued_since(@session.store, before))
     end
 
-    # The highest flow id ever issued (`Store#flow_id_high_water`), 0 on a failed read.
-    def self.flow_mark(store : Store) : Int64
-      store.flow_id_high_water || 0_i64
+    # The highest flow id ever issued (`Store#flow_id_high_water`), nil on a failed read.
+    def self.flow_mark(store : Store) : Int64?
+      store.flow_id_high_water
     end
 
-    # How many flow ids were issued since the `flow_mark` `before`. A failed read counts none.
-    def self.flows_issued_since(store : Store, before : Int64) : Int64
+    # How many flow ids were issued since the `flow_mark` `before`. A failed read, either one,
+    # counts none: a baseline of 0 would count the whole History as the shell's.
+    def self.flows_issued_since(store : Store, before : Int64?) : Int64
+      return 0_i64 unless before
       (store.flow_id_high_water || before) - before
     end
 

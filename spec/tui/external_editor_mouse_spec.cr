@@ -115,6 +115,16 @@ describe "Runner.flows_issued_since" do
     end
   end
 
+  it "counts none when the baseline could not be read" do
+    with_store do |store|
+      store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 0_i64, scheme: "https", host: "shell.test", port: 443, method: "GET",
+        target: "/", http_version: "HTTP/1.1", head: "GET / HTTP/1.1\r\n\r\n".to_slice,
+        source: Gori::FlowSource::Kind::Proxy))
+      Runner.flows_issued_since(store, nil).should eq(0)
+    end
+  end
+
   it "is what the shell's toast is built from" do
     body = File.read("#{__DIR__}/../../src/gori/tui/runner.cr").split("private def open_shell_here", 2)[1].split("\n    end\n", 2)[0]
     body.should contain("before = Runner.flow_mark(@session.store)")
