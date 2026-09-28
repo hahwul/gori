@@ -54,8 +54,8 @@ describe "list_history{ids}" do
       payload = history(store, %({"ids":[#{ids[0]},9999,#{ids[1]}]}))
       payload["flows"].as_a.map(&.["id"].as_i64).should eq(ids)
       payload["missing_ids"].as_a.map(&.as_i64).should eq([9999_i64])
-      # flow ids are REUSABLE rowids, so "gone" and "now somebody else" are the same symptom.
-      payload["missing_ids_note"].as_s.should contain("reusable")
+      # Since V39 a flow id is never reissued, so a missing id stays missing: the note says so.
+      payload["missing_ids_note"].as_s.should contain("never reissued")
     end
   end
 
