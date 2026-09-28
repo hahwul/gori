@@ -1740,7 +1740,7 @@ module Gori
       # `what` names the request when it is not the first of a group: a path rule can refuse a
       # later race/timing member on a host the first one was allowed, and "target host is outside
       # the scope" would send the agent to add a host include that changes nothing.
-      private def scope_blocked(sc : ScopeCheck, what : String? = nil) : Result
+      private def scope_blocked(sc : ScopeCheck, what : String? = nil, field : String = "url") : Result
         reason = if sc.unscoped?
                    "no scope is configured for this project, so active requests are refused by default"
                  elsif what
@@ -1749,7 +1749,7 @@ module Gori
                    "target host #{sc.host} is outside the project's configured scope"
                  end
         err("#{reason}; #{scope_remedy(sc)}",
-          "SCOPE_BLOCKED", field: "url",
+          "SCOPE_BLOCKED", field: field,
           details: JSON.parse({"scope_decision" => sc.decision, "host" => sc.host}.to_json))
       end
 
