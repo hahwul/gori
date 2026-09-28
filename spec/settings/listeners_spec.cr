@@ -128,6 +128,15 @@ describe Gori::Settings do
       Gori::Settings.parse_origin("").should be_nil
     end
 
+    it "refuses an origin whose port overflows URI parsing" do
+      Gori::Settings.parse_origin("http://api.acme.test:99999999999/").should be_nil
+      with_listeners("127.0.0.1", 8070, [] of Gori::Settings::Listener) do
+        Gori::Settings.listener_error(listener("127.0.0.1", 9000, "reverse",
+          origin: "http://api.acme.test:99999999999/")).to_s
+          .should contain("absolute http(s) URL")
+      end
+    end
+
     it "requires an origin in reverse mode and refuses one outside it" do
       with_listeners("127.0.0.1", 8070, [] of Gori::Settings::Listener) do
         Gori::Settings.listener_error(listener("127.0.0.1", 9000, "reverse")).to_s

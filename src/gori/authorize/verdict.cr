@@ -254,7 +254,7 @@ module Gori
       private def self.same_destination?(a : String, b : String) : Bool
         ua, ub = URI.parse(a), URI.parse(b)
         ua.scheme == ub.scheme && ua.host == ub.host && ua.port == ub.port && ua.path == ub.path
-      rescue URI::Error
+      rescue URI::Error | ArgumentError | OverflowError
         false
       end
 

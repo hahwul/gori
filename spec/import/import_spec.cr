@@ -1049,6 +1049,12 @@ describe Gori::Import::Builder do
     end
   end
 
+  it "turns an overflowing URL port into a clean import error" do
+    expect_raises(Gori::Error, /unparseable/) do
+      Gori::Import::Builder.endpoint("https://api.example.test:99999999999/")
+    end
+  end
+
   it "stores an IPv6 host bracket-free but re-brackets it in the Host header line" do
     pair = Gori::Import::Builder.pending_request(0_i64, "https://[::1]:9443/probe")
     pair.request.host.should eq("::1") # bare, matching the CONNECT path

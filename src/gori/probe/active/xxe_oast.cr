@@ -101,7 +101,7 @@ module Gori
           return "\"#{url}\"" unless url.includes?('"')
           return "'#{url}'" unless url.includes?('\'')
           nil
-        rescue URI::Error
+        rescue URI::Error | ArgumentError | OverflowError
           nil
         end
 
