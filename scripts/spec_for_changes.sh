@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Print the spec files that mirror what changed against BASE_REF, one per line — the input
-# to `just test-changed`, the pre-flight before `just test`.
+# to `just test-changed` and CI's fast pull-request test lane.
 #
 # Usage: scripts/spec_for_changes.sh [BASE_REF]   (default origin/main)
 #
@@ -23,7 +23,8 @@
 #                         with NO mirror at all does the same: a miss must be loud, because
 #                         "nothing to run" reads as clean.
 #
-# Deleted files are skipped. scripts/, bench/, docs and lib/ map to nothing.
+# Deleted files are skipped. scripts/, bench/, docs and lib/ map to nothing, except the MCP
+# guide: `spec/mcp/catalogue_size_spec.cr` reads both guide translations directly.
 set -euo pipefail
 
 base=${1:-origin/main}
@@ -72,6 +73,8 @@ while IFS= read -r f; do
     src/gori.cr|src/main.cr|spec/spec_helper.cr|spec/support/*) all=1 ;;
     src/gori/verb/context.cr|src/gori/verb/context/*.cr)
       while IFS= read -r c; do add "$c"; done < <(context_specs) ;;
+    docs/content/guide/mcp.md|docs/content/guide/mcp.ko.md)
+      add spec/mcp/catalogue_size_spec.cr ;;
     src/gori/*.cr)
       rel=${f#src/gori/}
       if ! mirror "${rel%.cr}"; then
