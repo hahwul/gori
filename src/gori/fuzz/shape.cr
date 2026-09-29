@@ -338,9 +338,7 @@ module Gori
                                 unit_cap : Int32 = Int32::MAX) : {UInt64, Bool}
         limit = bytes.size
         units = 0
-        first = StaticArray(Bool, 256).new(false)
-        needles.each { |nd| first[nd.unsafe_fetch(0)] = true }
-        any_needle = !needles.empty?
+        first, any_needle = needle_first_bytes(needles)
         sink = Sink.new
         cls = CLASS.to_unsafe
         i = 0
@@ -367,6 +365,17 @@ module Gori
           end
         end
         {mix_u64(h, sink.finish), i >= limit}
+      end
+
+      private def self.needle_first_bytes(needles : Array(Bytes)) : {StaticArray(Bool, 256), Bool}
+        first = StaticArray(Bool, 256).new(false)
+        any_needle = false
+        needles.each do |nd|
+          next if nd.empty?
+          first[nd.unsafe_fetch(0)] = true
+          any_needle = true
+        end
+        {first, any_needle}
       end
 
       # Byte classes for `mix_text`, one load per byte. Ordered so `>= C_DIGIT` is "part of a
@@ -479,7 +488,7 @@ module Gori
 
       private def self.needle_at(bytes : Bytes, i : Int32, limit : Int32, needles : Array(Bytes)) : Int32?
         needles.each do |nd|
-          next if i + nd.size > limit
+          next if nd.empty? || i + nd.size > limit
           return nd.size if bytes[i, nd.size] == nd
         end
         nil

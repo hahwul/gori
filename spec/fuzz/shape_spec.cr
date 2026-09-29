@@ -117,6 +117,17 @@ describe Gori::Fuzz::Shape do
     F::Shape.error_class("#{Gori::RequestMacro::ERROR_PREFIX}failed at step 1 (login → timed out)").should eq(F::Shape::ErrorClass::Other)
   end
 
+  it "ignores empty needles without crashing or changing the shape" do
+    head = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice
+    body = "needle appears here".to_slice
+    no_needles = F::Shape.compute(200_i32, nil, nil, false, false, head, body)
+    empty_only = F::Shape.compute(200_i32, nil, nil, false, false, head, body, [Bytes.empty])
+    mixed = F::Shape.compute(200_i32, nil, nil, false, false, head, body,
+      [Bytes.empty, "needle".to_slice])
+    empty_only.should eq(no_needles)
+    mixed.should_not eq(no_needles)
+  end
+
   it "separates a truncated body from a complete one" do
     shape("<p>partial").should_not eq(shape("<p>partial", incomplete: true))
     shape("<p>partial", incomplete: true).should_not eq(shape("<p>partial", incomplete: true, timed_out: true))
