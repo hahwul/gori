@@ -321,9 +321,17 @@ describe Gori::WordlistCatalog do
     end
   end
 
-  # What a one-value-per-line file cannot carry: `save_values` refuses on it.
-  describe ".line_break?" do
-    it "is a CR or LF and nothing else" do
+  # What a one-value-per-line file cannot carry is decided in ONE place: `save_values` refuses on
+  # it, and a caller that read its values from a source drops them through `one_per_line`
+  # (the CLI's and MCP's `--payload-from` saves both do).
+  describe ".one_per_line" do
+    it "keeps the values a file can carry, in order, and counts the rest" do
+      kept, skipped = Catalog.one_per_line(["a", "", "b\nc", "d\re", "f\r\ng", "#h", " i "])
+      kept.should eq(["a", "", "#h", " i "]) # blank, `#` and edge whitespace are payloads, kept as given
+      skipped.should eq(3)
+    end
+
+    it "agrees with save_values about what a line break is" do
       Catalog.line_break?("a\nb").should be_true
       Catalog.line_break?("a\rb").should be_true
       Catalog.line_break?("a\tb").should be_false

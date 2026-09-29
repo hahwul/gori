@@ -14,7 +14,7 @@ module Gori
         requires: ["mine_status", "mine_results", "mine_stop"], permission: "send")]
       private def mine_start(h) : Result
         ob = outbound(bool_arg(h, "allow_unscoped", false))
-        engine, origin, total = build_mine_job(h, ob)
+        engine, origin, total, project_reports = build_mine_job(h, ob)
         sc = ob.check("#{origin.scheme}://#{origin.host}/", origin.host,
           Outbound.exclude_url(origin.scheme, origin.host, "/", origin.port))
         return scope_blocked(sc) if sc.blocked?
@@ -28,7 +28,21 @@ module Gori
         @mine_jobs[id] = mjob
         Log.info { "mine_start #{id} #{origin.scheme}://#{origin.host}:#{origin.port} scope=#{sc.decision} names=#{total}" }
         spawn(name: "mcp-mine-#{id}") { run_mine_job(mjob, engine) }
-        Result.new(JSON.build { |j| j.object { j.field "job_id", id; j.field "names", total; j.field "status", "running"; emit_scope(j, sc) } })
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "job_id", id
+            j.field "names", total
+            j.field "status", "running"
+            emit_scope(j, sc)
+            # What each `payload_from` name source read (#1352): flows and names counted, the
+            # sensitive-value policy, what cut it short. Only when the run had one.
+            unless project_reports.empty?
+              j.field "payload_sources" do
+                payload_reports_json(j, project_reports)
+              end
+            end
+          end
+        end)
       rescue ex : FuzzArgError
         Result.new(ex.message || "invalid mine arguments", is_error: true)
       end
@@ -219,7 +233,7 @@ module Gori
 
       # Build a ready-to-run mining engine + its origin + name count. Raises FuzzArgError
       # (clean message) on malformed input. Reuses the fuzz timeout helper.
-      private def build_mine_job(h, ob : Outbound) : {Miner::Engine, Fuzz::Origin, Int64}
+      private def build_mine_job(h, ob : Outbound) : {Miner::Engine, Fuzz::Origin, Int64, Array(PayloadFrom::Report)}
         text, default_target, src_h2, evidence = mine_template_source(h)
         config = Miner::Config.new
         config.concurrency = clamp(optional_int_arg(h, "concurrency"), 10, MINE_MAX_CONCURRENCY)
@@ -253,11 +267,34 @@ module Gori
           # route to it at all, so a param-mine against a vhost whose SNI must differ from the
           # Host header — exactly what this tool exists for — was unreachable from an agent.
           sni: str(h, "sni"),
-          overrides: HostOverrides.load(store))
+          overrides: HostOverrides.load(store),
+          # Candidate names read from the project's own captured data (#1352), tested after
+          # `names` and before the built-in list and `wordlist`. Resolved by the plan builder.
+          project_names: mine_project_names(h), project: store)
         plan = Miner::Plan.build(options, ob)
-        {plan.engine, plan.origin, plan.total_names}
+        {plan.engine, plan.origin, plan.total_names, plan.project_reports}
       rescue ex : Miner::PlanError
         raise FuzzArgError.new(mine_plan_error(ex))
+      rescue ex : PayloadFrom::Error
+        raise FuzzArgError.new(ex.message || "invalid payload_from")
+      end
+
+      # `payload_from`: a list of `<QL> param-names` descriptors (a bare string is one), with the
+      # shared policy beside it as `payload_from_include_sensitive` / `_locations` / `_max_flows` /
+      # `_max_values`. A projection other than param-names is refused: a Miner source is a list of
+      # NAMES, and the values of a parameter are `fuzz_start`'s business.
+      private def mine_project_names(h) : Array(PayloadFrom::Spec)
+        descs = str_list(h, "payload_from")
+        return [] of PayloadFrom::Spec if descs.empty?
+        policy = payload_policy_arg(h, "payload_from_")
+        descs.map do |d|
+          spec = payload_spec_arg(d, "payload_from")
+          unless spec.projection.param_names?
+            raise FuzzArgError.new("'payload_from' on mine_start reads parameter NAMES — use the param-names projection " \
+                                   "(got #{spec.projection.label}; its values are for fuzz_start)")
+          end
+          spec.apply(policy)
+        end
       end
 
       # MCP's wording for a plan the args can't produce — the builder reports the
@@ -347,6 +384,11 @@ module Gori
           s.field "locations", strprop("comma list of where to mine: #{MINE_LOCATIONS.join(",")} (default: auto-detect; multipart is applicable but off by default — pass it explicitly)")
           s.field "wordlist", strprop("path to an extra param-name wordlist, or the name of a saved list (list_wordlists); merged with the built-in list")
           s.field "names", strarrprop("names to test FIRST, ahead of the built-in list and any wordlist — e.g. list_params names seen on this host's other endpoints but not on this one")
+          s.field "payload_from", strarrprop("candidate names read from the project's captured data, each '<QL> param-names' (e.g. 'host:api.example param-names'): tested after `names` and BEFORE the built-in list and `wordlist`. Reads the project, sends nothing; the reply's payload_sources says what each read. Cookies and headers are not read unless payload_from_locations names them")
+          s.field "payload_from_include_sensitive", boolprop("also read credential material for payload_from (default false; a NAME is never withheld, so this only matters for cookie/header locations you name)")
+          s.field "payload_from_locations", strprop("locations payload_from reads, comma list of query,form,multipart,json,headers,cookies (default query,form,multipart,json)")
+          s.field "payload_from_max_flows", intprop("newest flows each payload_from source reads (default #{PayloadFrom::DEFAULT_MAX_FLOWS}, max #{PayloadFrom::MAX_FLOWS})")
+          s.field "payload_from_max_values", intprop("distinct names each payload_from source keeps (default #{PayloadFrom::DEFAULT_MAX_VALUES}, max #{PayloadFrom::MAX_VALUES})")
           s.field "bucket", intprop("names stuffed per request before bisection (per location)")
           s.field "concurrency", intprop("parallel requests (default 10, max #{MINE_MAX_CONCURRENCY})")
           s.field "rate", numprop("requests/sec cap, fractional allowed (0 = unlimited; 0.5 = one request every two seconds)")

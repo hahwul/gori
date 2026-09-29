@@ -555,6 +555,7 @@ WebSocket 핸드셰이크인 요청은 평범한 요청으로 나가고 그 `101
 | Mode | `--mode=` `sniper` (기본값), `batteringram`, `pitchfork`, `clusterbomb`. 앞의 둘은 페이로드 세트를 **하나만**, 뒤의 둘은 표시된 위치마다 하나씩 사용합니다. 모드가 쓰지 않을 세트는 실행 전에 알려 줍니다 |
 | gRPC fields | `--field=SPEC`(반복 가능)는 단항 gRPC 요청의 옥텟 대신 **스키마가 아는 필드**를 스윕합니다. `SPEC`은 필드 이름, 중첩 메시지 경로(`profile.age`), 필드 번호, 반복 필드의 특정 occurrence(`name[i]`)이며, `name¦chain`은 선언된 타입이 바이트로 인코딩하기 **전에** Decoder 체인을 돌립니다. 필드는 캡처된 메시지에 이미 있어야 하며(gori는 기존 occurrence를 바꿀 뿐 새로 추가하지 않습니다), `bytes` 필드의 페이로드는 **hex**(`de ad be ef`)로 읽습니다. 페이로드는 필드 선언을 거쳐 바이트가 되고(`-3`은 `int32`·`sint32`·`bool`·enum마다 다른 옥텟입니다), 메시지의 나머지 바이트는 캡처에서 그대로 복사되며, 5바이트 길이 접두사는 다시 계산됩니다. 해당 rpc를 해석할 descriptor set이 필요합니다(`gori run grpc schema`). 필드 위치는 템플릿 자신의 `§…§` 위치 뒤에 붙으므로 `--mode`와 페이로드 세트의 의미는 그대로입니다. 스키마가 선언하지 않은 필드, 선언과 와이어 타입이 충돌하는 필드, 선언된 타입이 담을 수 없는 페이로드는 모두 첫 요청 전에 거부됩니다 |
 | Payloads | `-w`/`--wordlist`(파일, 또는 저장한 목록의 이름), `--preset=NAME[:FILE]` (내장: `sqli`, `xss`, `traversal`, `format-string`, `bad-strings`, `command-injection`, `cache-delimiters`), `--payloads=LIST`, `--numbers=FROM-TO[:STEP]`, `--null=N`, `--brute=CHARSET:MIN-MAX` |
+| 프로젝트 데이터 | `--payload-from='<QL> <projection>'`(반복 가능)은 프로젝트가 이미 캡처한 데이터에서 읽은 페이로드 세트입니다: `param-names`, `param-values`, `path-segments`, `js-endpoints`, `extracted`. 프로젝트를 읽기만 하고 아무것도 보내지 않으며, 직접 지정한 프로젝트(`--flow`, `--repeater`, `--project`, `--db`)가 필요합니다. `--payload-from-sensitive`는 자격 증명 값을 읽게 하고(기본은 제외, `extracted`는 필수), `--payload-from-locations=LIST`는 `headers`/`cookies`를 더하며, `--payload-from-max-flows=N`(2000)과 `--payload-from-max-values=N`(10000)은 한도를 올립니다. 모두 모든 `--payload-from`에 적용됩니다. 각 소스가 무엇을 읽었는지는 stderr에 나옵니다. [프로젝트에서 가져오는 페이로드](/ko/guide/repeater-and-fuzzer/#payloads-from-the-project) 참고 |
 | Encoding | **쿼리 문자열**이나 **form-urlencoded 본문** 값에 치환되는 페이로드는 기본으로 URL 인코딩됩니다. 경로 세그먼트·JSON/원시 본문·헤더·쿠키는 그대로 나갑니다. `--no-encode`는 쿼리/폼 위치도 원시로 보냅니다. 페이로드 자체가 이미 퍼센트 이스케이프인 경우에 쓰세요(`%00`이 `%2500`으로 나가므로, origin의 디코더 자체를 겨눈 `%00` / `%c0%af` / `%2e%2e%2f` 탐침은 그냥 텍스트로 도착합니다). `--encode`를 명시하면 기본 인코딩을 대체하며, 그 파이프라인이 모든 위치에 적용됩니다. `--prefix` / `--suffix` / `--case` / `--hash` / `--regex-replace`는 대체하지 않습니다: 페이로드가 무엇인지를 말할 뿐 와이어가 그것을 어떻게 적는지는 말하지 않으므로, 그 출력도 쿼리/폼 위치에서는 인코딩됩니다 |
 | Processors | `--prefix`, `--suffix`, `--encode` (`url`\|`urlall`\|`base64`\|`hex`), `--case` (`upper`\|`lower`), `--hash` (`md5`\|`sha1`\|`sha256`), `--regex-replace=/pat/rep/` |
 | Rate | `--concurrency` (20), `--rate=RPS`, `--throttle=MS`, `--timeout=SEC`, `--retries=N`, `--max-requests=N` (총 요청 상한. 재시도와 리다이렉트 홉도 포함), `--follow-redirects`, `--no-keep-alive` |
@@ -601,6 +602,7 @@ gori run mine <flow-id> --locations query,headers --wordlist params.txt
 | `--locations=LIST` | `query`, `form`, `multipart`, `json`, `headers`, `cookies`. 기본값은 `query`이고, 요청 본문이 폼이나 JSON이면 `form`이나 `json`이 더해집니다. `multipart`, `headers`, `cookies`는 명시해야만 실행됩니다 |
 | `--wordlist`, `--bucket=N` | 후보 이름(파일, 또는 저장한 [wordlist](#run-wordlist)의 이름)과 버킷 크기 |
 | `--name=NAME` | 워드리스트보다 먼저 시험할 이름(여러 번 지정하거나 쉼표로 구분). 예: `sitemap params`가 다른 엔드포인트에서 찾은 이름 |
+| `--payload-from='<QL> param-names'` | 프로젝트의 캡처 데이터에서 읽은 후보 이름. `--name` 다음, 내장 목록과 `--wordlist`보다 **앞서** 시험합니다(반복 가능, `--flow`/`--project`/`--db` 필요). `--payload-from-sensitive`, `--payload-from-locations`, `--payload-from-max-flows`, `--payload-from-max-values`는 `fuzz`와 똑같이 적용됩니다 |
 | `--concurrency` (10), `--rate`, `--throttle`, `--timeout`, `--retries` (1), `--max-requests=N` | 속도 제어 |
 | `--no-keep-alive` | 연결 재사용 대신 프로브마다 새로 연결 |
 | `--hook=ARGV` | 조립된 각 요청을 보내기 전에 외부 명령(argv, 셸 없음)으로 변환합니다. 서명 / HMAC이 붙는 API용. [프로세스 훅](/ko/guide/scripting/#process-hooks) 참고 |
@@ -833,7 +835,7 @@ gori run wordlist delete api-v2-params.txt --yes
 |------|-------------|
 | `wordlist` · `list` (`ls`) | 이름, 크기, 수정 시각. 값은 절대 출력하지 않습니다. `--format text` \| `json` |
 | `show <name>` | 경로, 크기, 줄 수(최대 32 MiB까지 세며, 목록이 더 길면 `more than N`). `--head=N`은 첫 N줄(최대 1000)도 출력합니다. 값이므로 민감할 수 있습니다 |
-| `save <name>` | 소스를 정확히 하나만 골라 목록을 저장: `--from=FILE`(`-`는 stdin), `--value=V` 하나 이상, 또는 stdin으로 넘긴 목록. 바이트는 준 그대로 유지하므로 빈 줄이나 `#` 줄도 그대로 남고, `--value`에는 줄바꿈을 넣을 수 없습니다. 원자적이고 소유자 전용이며, `--overwrite`가 아니면 이미 있는 이름은 거부합니다 |
+| `save <name>` | 소스를 정확히 하나만 골라 목록을 저장: `--from=FILE`(`-`는 stdin), `--value=V` 하나 이상, stdin으로 넘긴 목록, 또는 `--project`/`--db`와 함께 쓰는 `--payload-from='<QL> <projection>'`(그 프로젝트의 캡처 데이터에서 읽은 값. `fuzz`와 같은 `--payload-from-*` 정책이 적용되고, 줄바꿈이 든 값은 빼고 셉니다). 바이트는 준 그대로 유지하므로 빈 줄이나 `#` 줄도 그대로 남고, `--value`에는 줄바꿈을 넣을 수 없습니다. 원자적이고 소유자 전용이며, `--overwrite`가 아니면 이미 있는 이름은 거부합니다 |
 | `rename <old> <new>` (`mv`) | 목록 이름 변경. `--overwrite`가 아니면 이미 있는 `<new>`는 거부합니다 |
 | `delete <name>` (`rm`) | 목록 삭제(`--yes`가 확인이며 프롬프트는 없습니다). 심볼릭 링크는 링크만 지우고 가리키는 파일은 지우지 않습니다 |
 

@@ -173,7 +173,7 @@ module Gori::Tui
         Item.new("^O", "focus the config pane (payload sets · Mode · Advanced · Run)"),
         Item.new("config", "↑/↓ rows · ↵ edit a set / Add / Advanced / Run · ←/→ Mode · Del remove a set"),
         Item.new("^L", "add a List payload set (one value per line, paste splits)", "fuzz.list-paste"),
-        Item.new("set editor", "↹/↑↓ fields · List: ^S saves it as a wordlist · esc applies"),
+        Item.new("set editor", "↹/↑↓ fields · List: ^S saves it as a wordlist · Project: captured data · esc applies"),
         Item.new("{fuzz.run} · {fuzz.stop}", "run · stop"),
         Item.new("↑/↓ · ↵", "results: select · open detail"),
         Item.new("{space:fuzz.sort} · {fuzz.matched}", "sort · matched-only"),

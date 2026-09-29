@@ -3,6 +3,7 @@ require "../fuzz/content_length"
 require "../fuzz/engine"
 require "../host_overrides"
 require "../outbound"
+require "../payload_from"
 require "../process_hook"
 require "../repeater/flow_request"
 require "../settings"
@@ -103,6 +104,17 @@ module Gori::Miner
     # The project's hostname overrides, or nil when the surface has no project to load
     # them from. Only a surface can reach a Store, so this is passed in rather than loaded.
     property overrides : Gori::HostOverrides?
+    # Candidate names read from the project's own captured data (#1352): each `param-names`
+    # source names a QL-selected flow set whose parameter names are tested BEFORE the built-in
+    # list and the user wordlist (after any explicit `config.seed_names`). Only that projection
+    # is a list of NAMES; another is refused by name. Resolved by `Plan.build`, against `project`.
+    property project_names : Array(PayloadFrom::Spec)
+    # The project `project_names` are read from — passed in like `overrides`, since only a surface
+    # can reach a store. A name source with no project to read is refused.
+    property project : Gori::Store?
+    # Drain the off-commit search index before a `body:`/free-text source query, and refuse when it
+    # cannot: the default for one-shot CLI and MCP. The live TUI passes false.
+    property? project_drain_fts : Bool
 
     def initialize(@request : String = "",
                    *,
@@ -115,7 +127,10 @@ module Gori::Miner
                    @config : Config = Config.new,
                    @verify : Bool = true,
                    @sni : String? = nil,
-                   @overrides : Gori::HostOverrides? = nil)
+                   @overrides : Gori::HostOverrides? = nil,
+                   @project_names : Array(PayloadFrom::Spec) = [] of PayloadFrom::Spec,
+                   @project : Gori::Store? = nil,
+                   @project_drain_fts : Bool = true)
     end
   end
 
@@ -156,8 +171,14 @@ module Gori::Miner
     getter request : Bytes
     # The request-target of the request's first line, for the Layer-1 scope check.
     getter request_target : String
-    # The candidate parameter names (built-in list + the user wordlist).
+    # The candidate parameter names, in the order they are tested: the explicit `seed_names`,
+    # then the names read from the project (`PlanOptions#project_names`), then the built-in list,
+    # then the user wordlist — de-duplicated, the first sighting keeping its place.
     getter names : Array(String)
+
+    # What each project name source read (#1352), in the order given: flows, names, what a
+    # cap cut short. Never carries a value beyond the names themselves, which are `names`.
+    getter project_reports : Array(PayloadFrom::Report)
 
     # Named locations that `Detect` says do NOT apply to this request, dropped from the run —
     # a surface can only reach these by naming them explicitly, so each one says so
@@ -167,7 +188,8 @@ module Gori::Miner
     def initialize(@engine : Engine, @sender : Fuzz::Sender, @config : Config,
                    @origin : Fuzz::Origin, @http2 : Bool, @request : Bytes,
                    @request_target : String, @names : Array(String),
-                   @inapplicable : Array(Location))
+                   @inapplicable : Array(Location),
+                   @project_reports : Array(PayloadFrom::Report) = [] of PayloadFrom::Report)
     end
 
     # The run's keep-alive pool, or nil when it runs connection-per-send (h2, or
@@ -234,7 +256,8 @@ module Gori::Miner
         config.locations.each { |loc| config.bucket_size[loc] = b }
       end
 
-      names = load_names(config.user_wordlist, config.seed_names)
+      project_reports = [] of PayloadFrom::Report
+      names = load_names(config.user_wordlist, config.seed_names, resolve_project_names(options, project_reports))
       # `evidence:` carries the branch above to the SEND seam, where session bindings resolve
       # (`Fuzz::Sender#evidence?`). Round 6 marked the miner's INJECTED candidates verbatim
       # and cleared the carrier as safe because gori's canaries cannot contain a `$` — true
@@ -270,7 +293,27 @@ module Gori::Miner
         Gori::Settings.hook_timeout_secs.seconds, hook_env(origin)) : sender
       new(engine: Engine.new(request, options.http2?, names, backend, config, inapplicable), sender: sender,
         config: config, origin: origin, http2: options.http2?, request: request,
-        request_target: request_target, names: names, inapplicable: inapplicable)
+        request_target: request_target, names: names, inapplicable: inapplicable,
+        project_reports: project_reports)
+    end
+
+    # The names the project's own traffic offers (#1352), read HERE — the one place a store is
+    # read for a mine, so every surface gets the same caps, secret policy and refusals. Header
+    # and cookie NAMES are not withheld (a name is not a value); an unknown location is refused
+    # by the source's own policy, and the run's location checks still decide which candidate is
+    # tested where (`Miner::Engine#skipped_names`).
+    private def self.resolve_project_names(options : PlanOptions, reports : Array(PayloadFrom::Report)) : Array(String)
+      options.project_names.flat_map do |spec|
+        unless spec.projection.param_names?
+          raise PayloadFrom::Error.new("a Miner name source reads parameter NAMES: use the param-names projection " \
+                                       "(got #{spec.projection.label} in #{spec.label.inspect})")
+        end
+        store = options.project || raise PayloadFrom::Error.new(
+          "payload source #{spec.label.inspect} reads the project's captured data, and this run has no project to read")
+        resolved = PayloadFrom.resolve(store, spec, drain_fts: options.project_drain_fts?)
+        reports << resolved.report
+        resolved.values
+      end
     end
 
     # Re-frame the head when `Env.expand_wire` changed the BODY's byte length.
@@ -410,13 +453,24 @@ module Gori::Miner
         "unresolved env #{detail}", detail)
     end
 
-    # Seed names, then the built-in names plus the optional user file, read HERE so a bad path
-    # surfaces as a PlanError at build time rather than from inside a worker fiber.
-    private def self.load_names(user_wordlist : String?, seeds : Array(String)) : Array(String)
+    # The candidate list, in the order it is TESTED (which is what a `max_requests`-capped run
+    # spends its budget on, so it is the likeliest-first order):
+    #
+    #   1. the explicit `seed_names` (`--name`, MCP `names`) — the operator's own guesses;
+    #   2. the names read from the project (`--payload-from '<QL> param-names'`) — vocabulary the
+    #      target has already used, ahead of any generic list;
+    #   3. the built-in list;
+    #   4. the user wordlist (`--wordlist`).
+    #
+    # De-duplicated with the first sighting keeping its place, so a name the project offers is
+    # tested at ITS position and not again where the built-in list has it. The user file is read
+    # HERE so a bad path surfaces as a PlanError at build time rather than from inside a worker
+    # fiber.
+    private def self.load_names(user_wordlist : String?, seeds : Array(String),
+                                project : Array(String) = [] of String) : Array(String)
       names = Wordlist.load(user_wordlist)
-      names = EmbeddedList.dedup(seeds.reject(&.strip.empty?) + names) unless seeds.empty?
-      # `Wordlist.load` always prepends the compiled-in list, so an empty result means the
-      # candidate set is gone entirely — a run that would send nothing but a baseline.
+      front = (seeds + project).reject(&.strip.empty?)
+      names = EmbeddedList.dedup(front + names) unless front.empty?
       raise PlanError.new(PlanError::Reason::NoNames, "the candidate name list is empty") if names.empty?
       names
       # `IO::Error`, not `File::Error`: a missing path raises the latter, but a path that

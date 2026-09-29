@@ -334,6 +334,15 @@ module Gori
       value.includes?('\n') || value.includes?('\r')
     end
 
+    # `values` without those a list file cannot hold, and how many that dropped. For a caller
+    # that READS its values from a source it does not control (project data) and chooses to
+    # leave them out and say so; `save_values` itself refuses the whole save instead. One
+    # predicate, so what a file cannot carry is decided in one place.
+    def one_per_line(values : Array(String)) : {Array(String), Int32}
+      kept = values.reject { |v| line_break?(v) }
+      {kept, values.size - kept.size}
+    end
+
     # Save `values` as list `name`, one value per line, EXACTLY as given (a blank value is a
     # blank line, a value starting with `#` stays one, leading and trailing whitespace stays).
     # A value holding a CR or LF cannot be one line of the file and is refused rather than

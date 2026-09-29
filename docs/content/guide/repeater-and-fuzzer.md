@@ -175,6 +175,36 @@ gori run sitemap params --host api.example.com --format names | gori run wordlis
 gori run mine 42 --wordlist api-params.txt
 ```
 
+### Payloads from the Project
+
+The project already holds the target's own vocabulary: the parameter names its endpoints take, the values its clients send, the paths it serves, the endpoints its JavaScript points at, the tokens your extract rules pull out. A **project payload source** turns a slice of that into a set without a wordlist file to write first. It has two parts: a [QL query](/reference/query-language/) that picks the flows, and a **projection** that turns them into values.
+
+```bash
+gori run fuzz 42 --auto --payload-from 'host:api.example.com param-values'
+gori run mine 42 --payload-from 'host:api.example.com param-names'
+```
+
+| Projection | Values |
+| ---------- | ------ |
+| `param-names` | Parameter names of the selected requests (a JSON member contributes its leaf name) |
+| `param-values` | Parameter values, decoded once (`hello%20world` is `hello world`), so a query or form position encodes them exactly once |
+| `path-segments` | Request-path segments as captured (percent-encoded, which a path position takes raw) |
+| `js-endpoints` | Endpoint paths found in the selected flows' JavaScript. It reads what `gori run sitemap js --scan` stored and scans nothing |
+| `extracted` | Values your stored [extract rules](/guide/proxy/#session-bindings) pull out of the selected flows' stored responses (`extracted:NAME` for one rule): the rule's host glob and condition apply as they do live. Needs the sensitive opt-in |
+
+The descriptor is `<QL> <projection>`: the **last word** is the projection, and everything before it is the query (quote a value containing spaces, as QL always asks). A lone projection reads every flow. It reads the project and **sends nothing**: a source is built with nothing resolved, and the plan builder reads the project once, the same way on every surface, so the request count in the preflight and the confirm is the resolved size.
+
+- **The selection is strict.** A field QL does not have (`methd:GET`), a term QL would silently drop (`status:>=oops`, which would otherwise select the whole host) and a regex that cannot compile are refused, naming the term. A source is an exact selection, not a search you can eyeball.
+- **Bounded and reproducible.** It reads the newest 2000 flows, keeps at most 10,000 distinct values within an 8 MiB budget, skips a value over 4096 bytes and counts it. The order is newest flow first and first sighting wins, so the same project and options give the same list. What ended a read short is said, never silent: `--payload-from-max-flows` and `--payload-from-max-values` raise the first two. `js-endpoints` is one read of the stored references, so `--payload-from-max-flows` does not apply to it and its value cap tops out just under 50,000 (the report names the cap it applied).
+- **Secrets stay out by default.** Only the request's own inputs (query, form, multipart, JSON) are read; cookies and headers need `--payload-from-locations`. A value the project's redaction policy would mask (a credential-named field, a JWT or key shape, a JavaScript endpoint with a token in its path) is withheld and **counted**. A parameter *name* is never withheld, because a name is not a value. `--payload-from-sensitive` (MCP `include_sensitive`) is the explicit opt-in; it is reported on the run, and `extracted` refuses to run without it. The live session-binding table is never read: `extracted` re-applies the stored rules to stored responses and stores nothing.
+- **Values are kept as captured.** Nothing is trimmed or filtered. A value holding CR, LF or NUL is kept and counted in the report (`framing_values`), and what a position does with it is that position's own rule: query and form positions percent-encode it, a path position takes it raw.
+- **An empty source is a refusal**, not a clean run of zero requests. The message says why: no flow matched, nothing of that kind was in them, or everything was withheld as sensitive.
+- **Where it works.** `gori run fuzz` and `mine` (repeatable `--payload-from`, with `--payload-from-sensitive`, `--payload-from-locations` and the two caps applying to every source; a run with no `--flow`/`--project`/`--db` has no project to read and says so); MCP `fuzz_start` (`{"payload_from": "<QL> <projection>"}` in `payloads`, with `include_sensitive`, `locations`, `max_flows`, `max_values` beside it) and `mine_start` (`payload_from` plus `payload_from_*`); the Fuzzer's **Project** payload type, which asks for the query, the projection and the opt-in (off) and reads the project when the run starts. The run says what each source read, and never returns a value: `payload_sources` in the MCP reply, one `payload-from:` line on stderr, the run-start line in the TUI.
+- **In the Miner** a source must be `param-names`, and its names are tested in a fixed order: your explicit `--name`s, the project's names, the built-in list, then `--wordlist`, each name once at its first position. The TUI Miner popup has no text field, so it keeps seeding a mine with the host's other endpoints' names automatically; `--payload-from` is the headless spelling of choosing the slice yourself.
+- **Keep one for later.** `gori run wordlist save NAME --payload-from '<QL> <projection>' --project NAME` (MCP `save_wordlist{payload_from}`) saves the result as a list in the [catalog](#wordlist-catalog): an explicit act that names a project. It leaves out a value with a line break (a file holds one value per line) and counts it.
+
+This first version reports provenance per source (which query and projection, how many flows and values) and not per value.
+
 ### Matching
 
 Filter results with ffuf-style matchers and filters on status, size, words, round-trip time (`--mt`/`--ft`, in ms, the dimension a time-based blind payload is the only evidence for), and body regex (headless also line count with `--ml`/`--fl`, a response-head substring with `--mh`/`--fh` and gRPC status with `--mg`/`--fg`), plus auto-calibration to drop noisy baselines. Auto-calibration samples the target several times before the sweep and compares each response against every sampled shape, widened by the jitter those samples themselves showed, so a page carrying a per-request id or timestamp calibrates out, while a target whose samples were identical is still compared exactly. Matched responses are highlighted, and headless a value can be extracted from each response with a capture regex (`--extract`, MCP `extract`).

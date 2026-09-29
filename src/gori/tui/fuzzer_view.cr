@@ -213,6 +213,7 @@ module Gori::Tui
       @unframed_body = false
       @unframed_body_rev = -1
       @unused_sets = 0
+      @payload_reports = [] of Gori::PayloadFrom::Report
       @sel = 0
       @scroll = 0
       @sort = :index
@@ -1409,6 +1410,10 @@ module Gori::Tui
     # block forever. Those report nil → the Run row just omits the count; the exact
     # total is still computed off this path when the run actually starts.
     private def estimated_set_size(s : SetSpec) : Int64?
+      # A project set is a read of the store: never on the render fiber, every frame. Its size is
+      # known when the run is built (`Plan.build` resolves it), which is when the confirm and the
+      # run-start line say it.
+      return nil if s.kind == :project
       if s.kind == :file
         # The file the engine will open, not the text in the field: a bare name is a catalog list
         # (`Fuzz::WordlistFile` resolves it the same way), and stat'ing it from the working
@@ -1550,7 +1555,8 @@ module Gori::Tui
     # proxy path uses (`Proxy::Upstream.dial`). It still DEFAULTS to nil for the specs and any
     # caller with no project to load one from, not because the tab skips them.
     def build_engine(verify : Bool, scope : Gori::Scope,
-                     overrides : Gori::HostOverrides? = nil) : {Fuzz::Engine?, String?}
+                     overrides : Gori::HostOverrides? = nil,
+                     project : Gori::Store? = nil) : {Fuzz::Engine?, String?}
       commit_buffers
       if err = regex_error
         return {nil, err} # don't silently run match-everything on a bad pattern
@@ -1586,8 +1592,13 @@ module Gori::Tui
         target: @target, http2: @http2,
         sources: @sets.map { |s| build_source(s) }, config: @config, matcher: @matcher,
         grpc_fields: grpc_field_specs,
-        verify: verify, sni: sni_override, overrides: overrides, env_vars: operator_env_vars)
+        verify: verify, sni: sni_override, overrides: overrides, env_vars: operator_env_vars,
+        # The project a Project set reads (#1352). The live TUI reports the search-index backlog
+        # instead of waiting on a writer (`project_drain_fts: false`): this runs on the event loop.
+        project: project, project_drain_fts: false)
+      @payload_reports = [] of Gori::PayloadFrom::Report # a failed build must not leave the last run's
       plan = Fuzz::Plan.build(options, Gori::Outbound.interactive(scope))
+      @payload_reports = plan.payload_reports
       @pending_template = plan.template # committed to @run_template in begin_run (see result_request)
       # Freeze the CL knobs + retention policy the same way: the reconstruction in
       # `result_request` has to reproduce what THIS run's generator did, and its note has to
@@ -1801,6 +1812,12 @@ module Gori::Tui
       @unused_sets
     end
 
+    # What each Project set read for the plan just built (#1352): flows and values counted, the
+    # sensitive-value policy, what cut it short. Empty for a run with none. Never a value.
+    def payload_reports : Array(Gori::PayloadFrom::Report)
+      @payload_reports
+    end
+
     # The sentence, built rather than a constant: unlike `CL_REWRITE_NOTE` the count and the
     # mode are both in it, and the remedy differs by mode — too many sets under Sniper wants a
     # different mode, while too many under Pitchfork wants another marked position.
@@ -1853,11 +1870,18 @@ module Gori::Tui
       when :list    then Fuzz::InlineList.new(SetSpec.list_values(s.value))
       when :file    then Fuzz::WordlistFile.new(s.value)
       when :preset  then Fuzz::PresetSource.new(s.value)
+      when :project then build_project_source(s)
       when :null    then Fuzz::NullPayloads.new(s.value.to_i? || 1)
       when :numbers then build_numbers(s.value)
       when :brute   then build_brute(s.value)
       else               Fuzz::InlineList.new([s.value])
       end
+    end
+
+    # A `:project` set as the source the plan builder reads (#1352). Nothing is read here.
+    private def build_project_source(s : SetSpec) : Fuzz::PayloadSource
+      spec = s.project_spec || raise Gori::Error.new("a project payload set could not be read back — edit it and choose its source again")
+      Fuzz::ProjectSource.new(spec)
     end
 
     private def build_numbers(value : String) : Fuzz::NumberRange
@@ -2738,6 +2762,7 @@ module Gori::Tui
       when "list"    then :list
       when "file"    then :file
       when "preset"  then :preset
+      when "project" then :project
       when "numbers" then :numbers
       when "null"    then :null
       when "brute"   then :brute

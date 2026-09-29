@@ -74,11 +74,20 @@ module Gori
       # is the leniency `str_list` gives an argument where that is the point. A scalar in an
       # entry is coerced and a container refused (`str_entry`), and a value with a line break
       # is refused by the catalog rather than split into two.
+      #
+      # `payload_from` is the other source (#1352): values read out of the BOUND project's
+      # captured data (`'<QL> <projection>'`, the same descriptor `fuzz_start` takes), saved as a
+      # global list. It is an explicit act on both ends — the project is the one this server is
+      # bound to, and credential material stays out unless `include_sensitive` says otherwise —
+      # and the reply carries the source's report. A value that cannot be one line of the file (it
+      # holds a line break) is left out and COUNTED, since the format cannot carry it.
       @[Tool("save_wordlist", gated: true, agent_action: true, unbound: true, permission: "write")]
       private def save_wordlist(h) : Result
         name = wordlist_name_arg(h, "name") || return wordlist_name_missing("name")
-        values = wordlist_values_arg(h) || return err("missing required 'values'", "INVALID_ARGUMENT", field: "values")
         overwrite = bool_arg(h, "overwrite", false)
+        source = wordlist_save_source(h)
+        return source if source.is_a?(Result)
+        values, report, skipped = source
         replaced = !WordlistCatalog.entry(name).nil?
         entry = begin
           WordlistCatalog.save_values(name, values, overwrite: overwrite)
@@ -91,10 +100,41 @@ module Gori
             j.field "path", entry.path
             j.field "values", values.size
             j.field "replaced", replaced && overwrite
+            if r = report
+              j.field "payload_source" do
+                payload_report_json(j, r)
+              end
+              j.field("skipped_line_break", skipped) if skipped > 0
+            end
             j.field "message", "Wordlist saved. Pass name #{entry.name.to_json} as `wordlist` to fuzz_start, " \
                                "mine_start or discover_start."
           end
         end)
+      end
+
+      # The values to save and where they came from: the `values` array, or the bound project's
+      # captured data read through `payload_from`, or the refusal. `{values, report, skipped}` —
+      # the report is the source's when it was `payload_from`, and `skipped` counts the values a
+      # one-value-per-line file cannot carry (they hold a line break).
+      private def wordlist_save_source(h) : {Array(String), PayloadFrom::Report?, Int32} | Result
+        desc = str(h, "payload_from").try(&.presence)
+        values = wordlist_values_arg(h)
+        if desc && values
+          return err("pass 'values' or 'payload_from', not both", "INVALID_ARGUMENT", field: "payload_from")
+        end
+        return {values, nil, 0} if values
+        unless desc
+          return err("missing required 'values' (or 'payload_from')", "INVALID_ARGUMENT", field: "values")
+        end
+        return no_project if unbound?
+        spec = payload_spec_arg(desc, "payload_from").apply(payload_policy_arg(h))
+        resolved = begin
+          PayloadFrom.resolve(store, spec)
+        rescue ex : PayloadFrom::Error
+          return err(ex.message || "payload_from failed", "INVALID_ARGUMENT", field: "payload_from")
+        end
+        lines, skipped = WordlistCatalog.one_per_line(resolved.values)
+        {lines, resolved.report, skipped}
       end
 
       @[Tool("rename_wordlist", gated: true, agent_action: true, unbound: true, permission: "write")]
@@ -220,10 +260,17 @@ module Gori
 
         tool j, "save_wordlist",
           "Save a list in the global catalog, one value per line exactly as given (a blank or `#` line stays a " \
-          "payload). Atomic and owner-only; refuses to replace an existing list unless overwrite:true. " \
-          "A value cannot contain a line break." do |s|
+          "payload), from `values` or from the bound project's data with `payload_from`. Atomic and owner-only; " \
+          "refuses to replace an existing list unless overwrite:true. A value cannot contain a line break." do |s|
           s.field "name", strprop("catalog name: letters, digits, _ . + - and inner spaces; not a path"), required: true
-          s.field "values", strarrprop("the values, one per line"), required: true
+          s.field "values", strarrprop("the values, one per line (or use payload_from)")
+          s.field "payload_from", strprop("instead of values: read them from the bound project's captured data, '<QL> <projection>' " \
+                                          "(param-names | param-values | path-segments | js-endpoints | extracted; e.g. 'host:api.example param-names'). " \
+                                          "Credential material stays out unless include_sensitive; values with a line break are left out and counted")
+          s.field "include_sensitive", boolprop("with payload_from: also save credential material (default false; `extracted` needs it)")
+          s.field "locations", strprop("with payload_from: comma list of query,form,multipart,json,headers,cookies (default query,form,multipart,json)")
+          s.field "max_flows", intprop("with payload_from: newest flows read (default #{PayloadFrom::DEFAULT_MAX_FLOWS}, max #{PayloadFrom::MAX_FLOWS})")
+          s.field "max_values", intprop("with payload_from: distinct values kept (default #{PayloadFrom::DEFAULT_MAX_VALUES}, max #{PayloadFrom::MAX_VALUES})")
           s.field "overwrite", boolprop("replace a list of that name (default false)")
         end
 

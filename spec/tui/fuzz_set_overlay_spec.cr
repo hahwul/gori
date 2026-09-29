@@ -98,7 +98,7 @@ describe Gori::Tui::FuzzSetOverlay do
 
   it "cycling the Type row wraps back to List" do
     ov = FuzzSetOverlay.for_list
-    6.times { ov.handle_key(okey(Termisu::Input::Key::Right)) } # list→…→brute→preset→list
+    7.times { ov.handle_key(okey(Termisu::Input::Key::Right)) } # list→…→brute→preset→project→list
     ov.handle_key(okey(Termisu::Input::Key::Down))              # values editor
     otype(ov, "x")
     ov.build_spec.not_nil!.kind.should eq(:list)
@@ -106,7 +106,7 @@ describe Gori::Tui::FuzzSetOverlay do
 
   it "Preset: selecting the type yields a :preset set with a built-in name (←/→ cycles)" do
     ov = FuzzSetOverlay.for_list
-    5.times { ov.handle_key(okey(Termisu::Input::Key::Right)) } # List → … → Preset (last)
+    5.times { ov.handle_key(okey(Termisu::Input::Key::Right)) } # List → … → Preset
     spec = ov.build_spec.not_nil!
     spec.kind.should eq(:preset)
     Gori::Fuzz::Presets.names.should contain(spec.value) # a real preset name

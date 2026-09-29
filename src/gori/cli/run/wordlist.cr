@@ -189,16 +189,26 @@ module Gori
         from : String? = nil
         values = [] of String
         overwrite = false
+        db_path : String? = nil
+        project_name : String? = nil
+        payload_from = PayloadFromFlags.new
+        pf_specs = [] of PayloadFrom::Spec
         positional = [] of String
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run wordlist save <name> [--from FILE|-] [--value V]... [options]\n\n" \
                      "Save a list under #{Paths.wordlists_dir}, atomically and owner-only. The bytes\n" \
                      "are kept exactly (a blank or `#` line stays a line), so a Fuzzer run sends what\n" \
                      "you saved. Source, exactly one of: --from FILE (`-` = stdin), one or more\n" \
-                     "--value, or a list piped on stdin. Refuses to replace an existing list."
+                     "--value, a list piped on stdin, or --payload-from (values read from a project's\n" \
+                     "captured data; needs --project/--db). Refuses to replace an existing list."
           p.on("--from=FILE", "Copy this file (`-` reads stdin)") { |v| from = v }
           p.on("--value=V", "One value (repeatable); a value cannot contain a line break") { |v| values << v }
           p.on("--overwrite", "Replace a list of that name if there is one") { overwrite = true }
+          # The project's data into a GLOBAL list is an explicit act: it needs a named project, and
+          # the sensitive opt-in is the same one `fuzz` and `mine` ask for.
+          payload_from_flags(p, "gori run wordlist save", payload_from, "Save") { |spec| pf_specs << spec }
+          p.on("--project=NAME", "Project --payload-from reads") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file --payload-from reads") { |v| db_path = v }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
@@ -210,10 +220,11 @@ module Gori
         if msg = extra_positional_error(positional, "gori run wordlist save", "wordlist name")
           abort msg
         end
-        abort "gori run wordlist save: --from and --value name more than one source — pick one" if from && !values.empty?
+        refuse_orphan_payload_from_flags("gori run wordlist save", payload_from, !pf_specs.empty?)
+        refuse_conflicting_save_sources(from, values, pf_specs, project_name || db_path)
 
         entry = begin
-          wordlist_save_entry(name, from, values, overwrite)
+          wordlist_save_entry(name, from, values, pf_specs.map(&.apply(payload_from.policy)), overwrite, project_name, db_path)
         rescue ex : WordlistCatalog::Error
           wordlist_error("save", ex)
         end
@@ -226,16 +237,66 @@ module Gori
 
       # The one source `save` was given, saved.
       private def self.wordlist_save_entry(name : String, from : String?, values : Array(String),
-                                           overwrite : Bool) : WordlistCatalog::Entry
+                                           specs : Array(PayloadFrom::Spec), overwrite : Bool,
+                                           project_name : String?, db_path : String?) : WordlistCatalog::Entry
         if src = from
           wordlist_save_from(name, src, overwrite)
+        elsif !specs.empty?
+          wordlist_save_from_project(name, specs, overwrite, project_name, db_path)
         elsif !values.empty?
           WordlistCatalog.save_values(name, values, overwrite: overwrite)
         elsif !STDIN.tty?
           WordlistCatalog.save_io(name, STDIN, overwrite: overwrite)
         else
-          abort "gori run wordlist save: no source — give --from FILE, --value V, or pipe the list on stdin"
+          abort "gori run wordlist save: no source — give --from FILE, --value V, --payload-from, or pipe the list on stdin"
         end
+      end
+
+      # Exactly one source. `--project`/`--db` only make sense with `--payload-from`, and are refused
+      # otherwise rather than ignored.
+      private def self.refuse_conflicting_save_sources(from : String?, values : Array(String),
+                                                       pf_specs : Array(PayloadFrom::Spec), project : String?) : Nil
+        if [!from.nil?, !values.empty?, !pf_specs.empty?].count(true) > 1
+          abort "gori run wordlist save: --from, --value and --payload-from name more than one source — pick one"
+        end
+        return unless pf_specs.empty? && project
+        abort "gori run wordlist save: --project/--db select the project --payload-from reads, and none was given"
+      end
+
+      # Values read out of the project (`--payload-from`), saved as a global list. Both halves are
+      # the operator's explicit choice: the project is named (there is no ambient default here) and
+      # sensitive values stay out unless `--payload-from-sensitive` said otherwise. A value that
+      # cannot be one line of the file — it holds a CR or LF — is left out AND counted, because the
+      # file format cannot carry it (the same values `fuzz --payload-from` would send verbatim).
+      private def self.wordlist_save_from_project(name : String, specs : Array(PayloadFrom::Spec), overwrite : Bool,
+                                                  project_name : String?, db_path : String?) : WordlistCatalog::Entry
+        WordlistCatalog.check_name!(name) # refuse a bad name before the project is opened
+        store = open_payload_from_store("gori run wordlist save", specs, !!(project_name || db_path), project_name, db_path) ||
+                abort("gori run wordlist save: --payload-from needs a project to read")
+        values = [] of String
+        seen = Set(String).new
+        reports = [] of PayloadFrom::Report
+        begin
+          specs.each do |spec|
+            resolved = begin
+              PayloadFrom.resolve(store, spec)
+            rescue ex : PayloadFrom::Error
+              store.close
+              abort "gori run wordlist save: #{ex.message}"
+            end
+            reports << resolved.report
+            resolved.values.each { |v| values << v if seen.add?(v) }
+          end
+        ensure
+          store.close
+        end
+        note_payload_from("gori run wordlist save", reports)
+        lines, skipped = WordlistCatalog.one_per_line(values)
+        if skipped > 0
+          STDERR.puts "gori run wordlist save: #{skipped} value#{skipped == 1 ? "" : "s"} left out — a wordlist file holds one value per line, " \
+                      "and #{skipped == 1 ? "it contains" : "they contain"} a line break"
+        end
+        WordlistCatalog.save_values(name, lines, overwrite: overwrite)
       end
 
       private def self.wordlist_save_from(name : String, src : String, overwrite : Bool) : WordlistCatalog::Entry

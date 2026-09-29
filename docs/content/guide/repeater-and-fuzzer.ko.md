@@ -174,6 +174,36 @@ gori run sitemap params --host api.example.com --format names | gori run wordlis
 gori run mine 42 --wordlist api-params.txt
 ```
 
+### 프로젝트에서 가져오는 페이로드 {#payloads-from-the-project}
+
+프로젝트에는 이미 대상 자신의 어휘가 들어 있습니다. 엔드포인트가 받는 파라미터 이름, 클라이언트가 보내는 값, 서비스하는 경로, JavaScript가 가리키는 엔드포인트, extract 규칙이 뽑아내는 토큰입니다. **프로젝트 페이로드 소스**는 그 일부를 wordlist 파일을 먼저 만들지 않고도 세트로 바꿔 줍니다. 두 부분으로 되어 있습니다. flow를 고르는 [QL 쿼리](/ko/reference/query-language/)와, 그 flow를 값으로 바꾸는 **프로젝션**입니다.
+
+```bash
+gori run fuzz 42 --auto --payload-from 'host:api.example.com param-values'
+gori run mine 42 --payload-from 'host:api.example.com param-names'
+```
+
+| 프로젝션 | 값 |
+| -------- | -- |
+| `param-names` | 선택한 요청의 파라미터 이름(JSON 멤버는 마지막 키 이름) |
+| `param-values` | 한 번 디코딩한 파라미터 값(`hello%20world`는 `hello world`)이라 query·form 위치가 정확히 한 번만 인코딩합니다 |
+| `path-segments` | 캡처된 그대로의 요청 경로 세그먼트(percent-encoded, 경로 위치는 이를 raw로 받습니다) |
+| `js-endpoints` | 선택한 flow의 JavaScript에서 찾은 엔드포인트 경로. `gori run sitemap js --scan`이 저장해 둔 것을 읽을 뿐 스캔하지 않습니다 |
+| `extracted` | 저장된 [extract 규칙](/ko/guide/proxy/#session-bindings)이 선택한 flow의 저장된 응답에서 뽑아내는 값(`extracted:NAME`은 규칙 하나). 규칙의 호스트 glob과 조건은 라이브와 똑같이 적용됩니다. 민감 값 opt-in이 필요합니다 |
+
+디스크립터는 `<QL> <projection>`입니다. **마지막 단어**가 프로젝션이고 그 앞은 전부 쿼리입니다(공백이 든 값은 QL 규칙대로 따옴표로 묶으세요). 프로젝션만 있으면 모든 flow를 읽습니다. 프로젝트를 읽기만 하고 **아무것도 보내지 않습니다**. 소스는 아무것도 해석하지 않은 채 만들어지고, plan builder가 모든 표면에서 똑같이 프로젝트를 한 번 읽으므로 preflight와 확인창의 요청 수는 해석된 크기입니다.
+
+- **선택은 엄격합니다.** QL에 없는 필드(`methd:GET`), QL이 조용히 버릴 항(`status:>=oops`. 그대로면 호스트 전체가 선택됩니다), 컴파일되지 않는 정규식은 해당 항을 밝히며 거부합니다. 소스는 눈으로 확인하는 검색이 아니라 정확한 선택입니다.
+- **한도가 있고 재현됩니다.** 최근 flow 2000개를 읽고, 서로 다른 값을 최대 10,000개, 8 MiB 예산 안에서 보관하며, 4096바이트가 넘는 값은 건너뛰고 셉니다. 순서는 최신 flow가 먼저이고 처음 본 것이 자리를 지키므로, 같은 프로젝트와 옵션이면 같은 목록이 나옵니다. 읽기를 멈춘 원인은 조용히 넘어가지 않고 알려 줍니다. `--payload-from-max-flows`와 `--payload-from-max-values`로 앞의 두 한도를 올립니다. `js-endpoints`는 저장된 참조를 한 번에 읽으므로 `--payload-from-max-flows`가 적용되지 않고, 값 한도는 50,000개 바로 아래까지만 올라갑니다(리포트에 실제로 적용한 한도가 나옵니다).
+- **비밀은 기본적으로 빠집니다.** 요청 자체의 입력(query, form, multipart, JSON)만 읽고, 쿠키와 헤더는 `--payload-from-locations`가 필요합니다. 프로젝트의 redaction 정책이 가릴 값(자격 증명 이름의 필드, JWT나 키 형태, 경로에 토큰이 들어 있는 JavaScript 엔드포인트)은 제외하고 **셉니다**. 파라미터 *이름*은 값이 아니므로 절대 제외하지 않습니다. `--payload-from-sensitive`(MCP `include_sensitive`)가 명시적 opt-in이고, 실행에 보고되며, `extracted`는 이것 없이는 실행을 거부합니다. 라이브 세션 바인딩 테이블은 읽지 않습니다. `extracted`는 저장된 규칙을 저장된 응답에 다시 적용할 뿐 아무것도 저장하지 않습니다.
+- **값은 캡처된 그대로 유지됩니다.** 다듬거나 거르지 않습니다. CR, LF, NUL이 든 값은 남겨 두고 보고서(`framing_values`)에 세며, 그 값을 위치가 어떻게 다루는지는 그 위치 자신의 규칙입니다. query·form 위치는 percent-encode하고 경로 위치는 raw로 받습니다.
+- **빈 소스는 거부합니다.** 요청 0개짜리 정상 실행이 아닙니다. 이유(맞는 flow가 없음, 그 종류의 값이 없음, 전부 민감하다고 제외됨)를 알려 줍니다.
+- **쓸 수 있는 곳.** `gori run fuzz`와 `mine`(반복 가능한 `--payload-from`, 모든 소스에 적용되는 `--payload-from-sensitive`, `--payload-from-locations`, 두 한도. `--flow`/`--project`/`--db`가 없는 실행은 읽을 프로젝트가 없다고 말합니다), MCP `fuzz_start`(`payloads` 안의 `{"payload_from": "<QL> <projection>"}`과 그 옆의 `include_sensitive`, `locations`, `max_flows`, `max_values`)와 `mine_start`(`payload_from`과 `payload_from_*`), Fuzzer의 **Project** 페이로드 타입(쿼리, 프로젝션, opt-in(꺼짐)을 묻고 실행이 시작될 때 프로젝트를 읽습니다). 실행은 각 소스가 무엇을 읽었는지 알려 주되 값은 돌려주지 않습니다. MCP 응답의 `payload_sources`, stderr의 `payload-from:` 한 줄, TUI의 실행 시작 줄이 그것입니다.
+- **Miner에서는** 소스가 `param-names`여야 하고, 이름은 정해진 순서로 시험합니다. 명시한 `--name`, 프로젝트의 이름, 내장 목록, `--wordlist` 순이며 각 이름은 처음 나온 자리에서 한 번만 시험합니다. TUI Miner 팝업에는 텍스트 필드가 없어서 계속 호스트의 다른 엔드포인트 이름을 자동으로 시드합니다. `--payload-from`은 그 조각을 직접 고르는 헤드리스 방식입니다.
+- **나중을 위해 보관.** `gori run wordlist save NAME --payload-from '<QL> <projection>' --project NAME`(MCP `save_wordlist{payload_from}`)은 결과를 [카탈로그](#wordlist-catalog)의 목록으로 저장합니다. 프로젝트를 지정해야 하는 명시적 행위이며, 줄바꿈이 든 값(파일은 한 줄에 값 하나)은 빼고 셉니다.
+
+이 첫 버전은 출처를 값 단위가 아니라 소스 단위(어떤 쿼리와 프로젝션, flow와 값이 몇 개)로 보고합니다.
+
 ### 매칭 {#matching}
 
 ffuf 스타일 matcher와 filter로 status, size, words, 왕복 시간(`--mt`/`--ft`, ms 단위. 시간 기반 블라인드 페이로드의 유일한 증거가 되는 차원), 본문 정규식에 대해 결과를 필터링합니다(헤드리스에서는 `--ml`/`--fl`로 줄 수, `--mh`/`--fh`로 응답 헤드 부분 문자열, `--mg`/`--fg`로 gRPC status도). 여기에 시끄러운 기준선을 걸러내는 자동 보정까지 더해집니다. 자동 보정은 스윕 전에 대상을 여러 번 샘플링한 뒤, 각 응답을 모든 샘플 형태와 비교하되 그 샘플들이 스스로 보여 준 흔들림만큼 폭을 넓혀서 비교합니다. 그래서 요청마다 달라지는 id나 타임스탬프를 품은 페이지는 걸러지고, 샘플이 전부 동일했던 대상은 여전히 정확히 비교됩니다. 매칭된 응답은 강조되며, 헤드리스에서는 캡처 정규식으로 각 응답에서 값을 추출할 수 있습니다(`--extract`, MCP `extract`).

@@ -20,6 +20,8 @@ module Gori
         locations : Array(Miner::Location)? = nil
         wordlist : String? = nil
         seed_names = [] of String
+        payload_from = PayloadFromFlags.new
+        name_specs = [] of PayloadFrom::Spec
         bucket : Int32? = nil
         concurrency = 10
         rate : Float64? = nil
@@ -53,6 +55,9 @@ module Gori
               seed_names << s unless s.empty?
             end
           end
+          # Candidate names the project already used (#1352): tested after `--name` and BEFORE the
+          # built-in list and `--wordlist`. Only the param-names projection is a list of names.
+          payload_from_flags(p, "gori run mine", payload_from, "Candidate names") { |spec| name_specs << spec }
           p.on("--bucket=N", "Names stuffed per request before bisection (per location)") { |v| bucket = parse_count(v, "--bucket") }
           p.on("--concurrency=N", "Parallel requests (default 10)") { |v| concurrency = parse_count(v, "--concurrency") }
           p.on("--rate=RPS", "Cap requests/sec (0 = unlimited)") { |v| rate = parse_rate(v) }
@@ -73,6 +78,16 @@ module Gori
         end
         parser.parse(args)
         refresh_verify_upstream(!insecure)
+
+        refuse_orphan_payload_from_flags("gori run mine", payload_from, !name_specs.empty?)
+        # A Miner name source is a list of NAMES. Refused before anything is read or sent, naming
+        # the flag, rather than reaching the builder's own (identical) refusal after a project open.
+        name_specs.each do |spec|
+          next if spec.projection.param_names?
+          abort "gori run mine: --payload-from #{spec.label.inspect}: a Miner name source reads parameter NAMES — " \
+                "use the param-names projection (#{spec.projection.label} is a value list; feed it to `gori run fuzz`)"
+        end
+        name_specs = name_specs.map(&.apply(payload_from.policy))
 
         abort "gori run mine: too many arguments (expected at most one <flow-id>)" if positional.size > 1
         abort "gori run mine: --request and --flow cannot be combined — pick one template source" if request_file && flow_id
@@ -102,6 +117,9 @@ module Gori
         if (loc = locations) && loc.empty?
           abort "gori run mine: --locations was empty — name at least one of query|form|multipart|json|headers|cookies (or omit it to auto-detect)"
         end
+        # The project any `--payload-from` reads, open only for the plan build below.
+        payload_store = open_payload_from_store("gori run mine", name_specs,
+          !!(flow_id || project_name || db_path), project_name, db_path)
         options = Miner::PlanOptions.new(text,
           # A `--flow` request is CAPTURED; --request/stdin is a draft the operator authored.
           # See `Miner::PlanOptions#evidence?`.
@@ -112,7 +130,8 @@ module Gori
           # request; an explicit but unusable list is an error above, never a silent default.
           locations: locations,
           config: config, verify: !insecure, sni: sni,
-          overrides: cli_host_overrides(project_name, db_path, flow_id))
+          overrides: cli_host_overrides(project_name, db_path, flow_id),
+          project_names: name_specs, project: payload_store)
         # Scope gate — see cmd_fuzz / optional_project_outbound: refuse an out-of-scope host unless
         # --allow-unscoped, and enforce Sandbox + exclude rules on every send.
         # Ahead of Plan.build — see CLI::Run.preflight_bind_from (the builder's unresolved-env
@@ -127,8 +146,16 @@ module Gori
           Miner::Plan.build(options, outbound)
         rescue ex : Miner::PlanError
           outbound.close
+          payload_store.try(&.close)
           abort "gori run mine: #{mine_plan_error(ex)}"
+        rescue ex : PayloadFrom::Error
+          outbound.close
+          payload_store.try(&.close)
+          abort "gori run mine: #{ex.message}"
         end
+        # Everything a `--payload-from` needed is in memory now: release the project before the run.
+        payload_store.try(&.close)
+        note_payload_from("gori run mine", plan.project_reports)
         warn_mine_locations(plan)
         origin = plan.origin
         unless origin.scheme.in?("http", "https")

@@ -8,6 +8,7 @@ require "./path_complete"
 require "../settings"
 require "../fuzz/presets"
 require "../wordlist_catalog"
+require "../payload_from"
 
 module Gori::Tui
   # One payload set: a source kind + a value string in the compact grammar the Fuzz
@@ -33,9 +34,44 @@ module Gori::Tui
       value.chomp(LIST_SEP).split(LIST_SEP)
     end
 
+    # A `:project` set (#1352) keeps its source as JSON in `value` — a query, a projection, the
+    # sensitive opt-in — because it is a structured thing and a session persists `kind` and `value`
+    # as two strings. Read back through `project_spec`, which is nil for a value that no longer
+    # parses (a session written by a later gori), so a set row never raises.
+    def self.project(query : String, projection : PayloadFrom::Projection, sensitive : Bool,
+                     rule : String? = nil) : SetSpec
+      new(:project, JSON.build do |j|
+        j.object do
+          j.field "query", query
+          j.field "projection", projection.label
+          j.field "rule", rule if rule
+          j.field "sensitive", sensitive
+        end
+      end)
+    end
+
+    def project_spec : PayloadFrom::Spec?
+      return nil unless kind == :project
+      obj = JSON.parse(value).as_h? || return nil
+      projection = PayloadFrom::Projection.parse?(obj["projection"]?.try(&.as_s?) || "") || return nil
+      PayloadFrom::Spec.new((obj["query"]?.try(&.as_s?) || "").strip, projection,
+        obj["rule"]?.try(&.as_s?), include_sensitive: obj["sensitive"]?.try(&.as_bool?) || false)
+    rescue JSON::ParseException
+      nil
+    end
+
     # ONE line, for a set row and a signature. The stored form of a list carries newlines.
     def display : String
-      kind == :list ? SetSpec.list_values(value).join(',') : value
+      case kind
+      when :list    then SetSpec.list_values(value).join(',')
+      when :project then project_display
+      else               value
+      end
+    end
+
+    private def project_display : String
+      spec = project_spec || return "(unreadable project source)"
+      "#{spec.label}#{spec.include_sensitive ? " · SENSITIVE" : ""}"
     end
   end
 
@@ -51,7 +87,7 @@ module Gori::Tui
   # writes build_spec back into @sets; :stay otherwise. There is no cancel: every exit
   # applies, which is what the shell's apply_close_fuzz_set did on all three paths.
   class FuzzSetOverlay < Overlay
-    PTYPES = [:list, :numbers, :wordlist, :null, :brute, :preset]
+    PTYPES = [:list, :numbers, :wordlist, :null, :brute, :preset, :project]
 
     getter edit_index : Int32?
 
@@ -68,6 +104,8 @@ module Gori::Tui
         :min     => TextField.new("1"),
         :max     => TextField.new("3"),
         :path    => TextField.new(""),
+        # The Project type's QL (#1352); its projection and opt-in are selectors below.
+        :project_query => TextField.new(""),
       }
       @values = TextArea.new
       # Soft wrap, like the template this list feeds. One line is one payload, and a payload
@@ -76,6 +114,11 @@ module Gori::Tui
       # the same time, in the pane whose whole job is checking what you are about to send.
       @values.wrap = true
       @path_complete = PathComplete.new(wordlist_history: true)
+      # The Project type (#1352): the QL that picks flows is a field like the others; the
+      # projection and the sensitive opt-in are selectors, `←/→` and `␣`, and start at the
+      # safe answer.
+      @project_projection = PayloadFrom::Projection::ParamNames
+      @project_sensitive = false
       # The "Save as" name prompt (`^S` in the List editor), nil while it is closed; the last
       # save's outcome, shown on the hint row until the next key; and the name whose "already
       # exists" refusal a second ↵ has been told to override.
@@ -131,6 +174,13 @@ module Gori::Tui
       when :preset
         @ptype = :preset
         @preset_name = spec.value if Gori::Fuzz::Presets.exists?(spec.value)
+      when :project
+        @ptype = :project
+        if ps = spec.project_spec
+          @fields[:project_query].set(ps.query)
+          @project_projection = ps.projection
+          @project_sensitive = ps.include_sensitive
+        end
       end
     end
 
@@ -143,6 +193,7 @@ module Gori::Tui
       when :null     then [:count]
       when :brute    then [:charset, :min, :max]
       when :preset   then [:preset_name]
+      when :project  then [:project_query, :project_projection, :project_sensitive]
       else                [:values]
       end
     end
@@ -253,6 +304,39 @@ module Gori::Tui
       :stay
     end
 
+    # The Project type's two selector rows (#1352). `←/→` cycle the projection; `␣` or `←/→` flip
+    # the sensitive opt-in; ↑/↓ move rows; ↵ applies from the last row and moves on from the
+    # other. The opt-in starts OFF and is drawn where it cannot be missed once it is on.
+    private def handle_project_selector(ev : Termisu::Event::Key, f : Symbol) : Symbol
+      key = ev.key
+      case
+      when key.left?  then cycle_project(f, -1)
+      when key.right? then cycle_project(f, 1)
+      when space_key?(ev)
+        @project_sensitive = !@project_sensitive if f == :project_sensitive
+      when key.up?   then move_row(-1)
+      when key.down? then move_row(1)
+      when key.enter?
+        return :commit if on_last_row?
+        move_row(1)
+      end
+      :stay
+    end
+
+    private def space_key?(ev : Termisu::Event::Key) : Bool
+      ev.key.space? || (ev.char == ' ' && !ev.ctrl? && !ev.alt?)
+    end
+
+    # ←/→ on a Project selector: the projection cycles through the five, the opt-in flips.
+    private def cycle_project(f : Symbol, d : Int32) : Nil
+      if f == :project_projection
+        all = PayloadFrom::Projection.values
+        @project_projection = all[(all.index!(@project_projection) + d) % all.size]
+      else
+        @project_sensitive = !@project_sensitive
+      end
+    end
+
     private def cycle_preset(d : Int32) : Nil
       names = Gori::Fuzz::Presets.names
       return if names.empty?
@@ -317,6 +401,7 @@ module Gori::Tui
 
     private def handle_field(ev : Termisu::Event::Key, f : Symbol) : Symbol
       return handle_preset_name(ev) if f == :preset_name # a selector row, not a TextField
+      return handle_project_selector(ev, f) if f == :project_projection || f == :project_sensitive
       key = ev.key
       tf = @fields[f]? || return :stay
       # ^D (browser-bookmark convention): toggle the CURRENTLY TYPED path in/out of
@@ -453,6 +538,8 @@ module Gori::Tui
         cs.empty? ? nil : SetSpec.new(:brute, "#{cs}:#{num(:min, 1)}-#{num(:max, 1)}")
       when :preset
         SetSpec.new(:preset, @preset_name)
+      when :project
+        SetSpec.project(@fields[:project_query].value.strip, @project_projection, @project_sensitive)
       end
     end
 
@@ -478,30 +565,37 @@ module Gori::Tui
       when :wordlist then "Wordlist"
       when :null     then "Null"
       when :brute    then "Brute"
+      when :project  then "Project"
       else                "List"
       end
     end
 
+    FIELD_LABELS = {
+      :from               => "From",
+      :to                 => "To",
+      :step               => "Step",
+      :count              => "Count",
+      :charset            => "Charset",
+      :min                => "Min",
+      :max                => "Max",
+      :path               => "Path",
+      :preset_name        => "Preset",
+      :project_query      => "Query",
+      :project_projection => "Reads",
+      :project_sensitive  => "Secrets",
+    }
+
     private def field_label(f : Symbol) : String
-      case f
-      when :from        then "From"
-      when :to          then "To"
-      when :step        then "Step"
-      when :count       then "Count"
-      when :charset     then "Charset"
-      when :min         then "Min"
-      when :max         then "Max"
-      when :path        then "Path"
-      when :preset_name then "Preset"
-      else                   ""
-      end
+      FIELD_LABELS[f]? || ""
     end
 
     # --- rendering -----------------------------------------------------------
     LABEL_W = 9 # value column offset (widest field label "Charset" + padding)
 
     def overlay_box(area : Rect) : Rect?
-      w = {area.w - 4, 66}.min
+      # 76 wide at most: the Type row carries seven labels now (Project joined Preset) and the
+      # last of them did not fit in 66 columns, which drops it from the row without a word.
+      w = {area.w - 4, 76}.min
       h = {area.h - 2, 20}.min
       return nil if w < 34 || h < 8
       Rect.new(area.x + (area.w - w) // 2, area.y + (area.h - h) // 2, w, h)
@@ -523,9 +617,10 @@ module Gori::Tui
       render_type_row(screen, box)
       Frame.tee_divider(screen, box, box.y + 2, Theme.bg)
       case @ptype
-      when :list   then render_values(screen, box)
-      when :preset then render_preset(screen, box)
-      else              render_fields(screen, box)
+      when :list    then render_values(screen, box)
+      when :preset  then render_preset(screen, box)
+      when :project then render_project(screen, box)
+      else               render_fields(screen, box)
       end
       render_save_prompt(screen, box)
       render_hint(screen, box)
@@ -604,6 +699,52 @@ module Gori::Tui
       screen.text(box.x + 2, box.bottom - 3, meta, Theme.muted, Theme.bg, width: box.w - 4) unless meta.empty?
     end
 
+    # The Project type (#1352): a QL field, then two selector rows. The projection row lists the five
+    # projections the way the preset row lists presets; the opt-in row says what it lets in, and turns
+    # loud when it is on.
+    private def render_project(screen : Screen, box : Rect) : Nil
+      vx = box.x + 2 + LABEL_W
+      vw = {box.right - 2 - vx, 1}.max
+      field_rows.each_with_index do |f, i|
+        y = box.y + 3 + i
+        break if y >= box.bottom - 3
+        foc = @sel == i + 1
+        bg = foc ? Theme.accent_bg : Theme.bg
+        screen.fill(Rect.new(box.x + 1, y, box.w - 2, 1), bg) if foc
+        screen.text(box.x + 2, y, field_label(f), foc ? Theme.text_bright : Theme.muted, bg)
+        render_project_value(screen, box, f, y, vx, vw, foc, bg)
+      end
+      meta = "reads captured data · sends nothing · the run reports what it read"
+      screen.text(box.x + 2, box.bottom - 4, meta, Theme.muted, Theme.bg, width: box.w - 4)
+    end
+
+    PROJECTION_HINTS = {
+      PayloadFrom::Projection::ParamNames   => "parameter names of the selected requests",
+      PayloadFrom::Projection::ParamValues  => "parameter values, decoded once",
+      PayloadFrom::Projection::PathSegments => "request-path segments, as captured",
+      PayloadFrom::Projection::JsEndpoints  => "endpoints found in captured JavaScript",
+      PayloadFrom::Projection::Extracted    => "extract-rule values (needs Secrets)",
+    }
+
+    # One Project row's value column: the QL field, the projection chips, or the opt-in's state.
+    private def render_project_value(screen : Screen, box : Rect, f : Symbol, y : Int32, vx : Int32,
+                                     vw : Int32, foc : Bool, bg : Color) : Nil
+      case f
+      when :project_query
+        @fields[f].render(screen, vx, y, vw, foc, foc ? Theme.text_bright : Theme.text, bg)
+      when :project_projection
+        # The selected projection and what it reads — the Mode row's shape. All five did not fit as
+        # chips at the card's width, and a chip nobody can see is a projection nobody can pick.
+        current = "‹ #{@project_projection.label} ›"
+        screen.text(vx, y, current, foc ? Theme.text_bright : Theme.text, bg)
+        hint = PROJECTION_HINTS[@project_projection]
+        screen.text(vx + current.size + 2, y, hint, Theme.muted, bg, width: {vw - current.size - 2, 1}.max)
+      else
+        label = @project_sensitive ? "ON — cookies, credentials and extracted values can be read" : "off — credential material stays out"
+        screen.text(vx, y, label, @project_sensitive ? Theme.accent : Theme.text, bg, width: vw)
+      end
+    end
+
     # The selected preset's payload count for the meta line — nil (count hidden) if the
     # embedded set somehow fails to load, so a render never raises.
     private def preset_count(name : String) : Int32?
@@ -653,6 +794,7 @@ module Gori::Tui
         when :list     then @saving ? "↵ save the list · esc cancel" : "↵ new value · ⇥ field · ^S save list · esc applies"
         when :wordlist then "filter · ↹/↵ complete · ^D favorite · ⇥ field · esc applies"
         when :preset   then "←/→ choose preset · ⇥ type · esc applies & closes"
+        when :project  then "QL · ←/→ projection · ␣ sensitive · ⇥ field · esc applies"
         else                "⇥/↑↓ field · ↵ next · esc applies & closes"
         end
       screen.text(box.x + 2, box.bottom - 2, hint, Theme.muted, Theme.bg, width: box.w - 4)
