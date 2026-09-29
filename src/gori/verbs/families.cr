@@ -51,6 +51,7 @@ module Gori
       {:js_refs, 'J'},
       {:matched_only, 'm'},
       {:distribution, 'v'},
+      {:shape_groups, 'G'},
       {:compare_pane, 't'},
       {:fold_unchanged, 'z'},
       {:show_all, 'a'},

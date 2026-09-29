@@ -39,7 +39,8 @@ module Gori::Tui
     # metrics-only, and that bit does not survive being re-appended into another window.
     record LoadDone, view : FuzzerView, generation : Int64, job_id : Int32,
       session_id : Int64, automatic : Bool, run : Store::FuzzRunRecord?,
-      window : FuzzerResultWindow, error : String?
+      window : FuzzerResultWindow, error : String?,
+      clusters : Fuzz::Clusters? = nil
     # The run fiber's one report that the temporary archive stopped accepting rows. Sent at
     # the FIRST rejection, not at the end: a rejected append makes the whole run unsaveable,
     # and learning that after a 100k-request sweep is learning it too late to act on.
@@ -114,6 +115,7 @@ module Gori::Tui
       case verb_id
       when "fuzz.matched"      then SpaceMenu.on_off(v.matched_only?)
       when "fuzz.dist"         then SpaceMenu.on_off(v.dist_shown?)
+      when "fuzz.group"        then SpaceMenu.on_off(v.grouped?)
       when "fuzz.toggle-http2" then SpaceMenu.on_off(v.http2?)
       when "fuzz.toggle-sni"   then SpaceMenu.on_off(!v.sni_override.nil?)
       end
@@ -251,7 +253,8 @@ module Gori::Tui
         # printed the literal `{fuzz.sort} sort` into the footer, braces and all, and the one
         # key it named answered "nothing bound here". The `space:` form spells the menu path
         # from the registry, as the Rewriter does for its own menu-only action.
-        "↑/↓ select · ↵ detail · #{keys("{space:fuzz.sort} sort · {fuzz.matched} matched · {fuzz.dist} dist")}#{save} · " \
+        fold = v.grouped? ? " · ←/→ fold" : ""
+        "↑/↓ select · ↵ detail#{fold} · #{keys("{space:fuzz.sort} sort · {fuzz.matched} matched · {fuzz.dist} dist · {space:fuzz.group} shapes")}#{save} · " \
         "#{run} run · #{stop} stop · space cmds · esc sub-tabs"
       when :detail then "↑/↓ move · #{read_common} · ←/→ pane · ^F find · esc back"
       else              "↹/esc sub-tabs"
@@ -755,6 +758,9 @@ module Gori::Tui
       when key.enter?              then v.open_detail
       when key.up?, key.lower_k?   then v.results_at_top? ? v.pane_advance(-1) : v.results_move(-1)
       when key.down?, key.lower_j? then v.results_move(1)
+        # Grouped by shape (#1351): → opens the selected cluster, ← folds it (from a member too).
+      when key.right? then v.fold_group(true)
+      when key.left?  then v.fold_group(false)
         # `m` matched / `v` dist are verbs — they fall through to the keymap. `o` is NOT one:
         # `fuzz.sort` is menu-only, so `o` falls through to "nothing bound here" and the
         # footer sends the hand to `space` instead.
@@ -1214,7 +1220,7 @@ module Gori::Tui
         if old = @spool_runs.delete(event.view)
           @spool.delete(old)
         end
-        event.view.load_saved_run(run, event.window)
+        event.view.load_saved_run(run, event.window, event.clusters)
         # Off the VIEW, not the handover window: this sentence claims what the pane is
         # showing, so it has to be counted where the pane reads.
         shown_rows = event.view.retained_result_count
@@ -1580,6 +1586,11 @@ module Gori::Tui
       @host.status(v.toggle_dist)
     end
 
+    def fuzz_toggle_group : Nil
+      return @host.status("no fuzz session") unless v = current_view
+      @host.status(v.toggle_grouped)
+    end
+
     def fuzz_stop : Nil
       return unless (v = current_view) && v.running?
       v.request_stop
@@ -1738,6 +1749,7 @@ module Gori::Tui
         total = store.fuzz_result_count(id)
         offset = {total - FuzzerResultWindow::ROW_CAP, 0_i64}.max
         window = FuzzerResultWindow.new
+        clusters = Fuzz::Clusters.new
         seen = 0
         cancelled = false
         begin
@@ -1747,13 +1759,14 @@ module Gori::Tui
             seen += 1
             Fiber.yield if seen % 64 == 0
           end
+          aggregate_saved_clusters(store, id, view, clusters)
         rescue ResultIoCancelled
           cancelled = true
         end
         fresh = store.get_fuzz_run(id)
         if !cancelled && fresh && fresh.session_id == session_id
           completions.send(LoadDone.new(view, generation, job, session_id, automatic,
-            fresh, window, nil))
+            fresh, window, nil, clusters))
         else
           message = cancelled ? "saved-run load cancelled" : "saved fuzz run ##{id} was deleted while it loaded"
           completions.send(LoadDone.new(view, generation, job, session_id, automatic,
@@ -1764,6 +1777,19 @@ module Gori::Tui
           FuzzerResultWindow.new, "could not load fuzz run ##{id}: #{ex.message}"))
       ensure
         end_worker(view)
+      end
+    end
+
+    # The shape clusters of a reopened run count the WHOLE run (#1351), not the window: one
+    # more pass on the loader fiber, over the scalar projection, holding one entry per shape.
+    private def aggregate_saved_clusters(store : Store, id : Int64, view : FuzzerView,
+                                         clusters : Fuzz::Clusters) : Nil
+      seen = 0
+      store.each_fuzz_result_summary(id) do |record|
+        raise ResultIoCancelled.new if @closing || @cancelled_views.includes?(view)
+        clusters.add(Fuzz::Persistence.result(record))
+        seen += 1
+        Fiber.yield if seen % 256 == 0
       end
     end
 

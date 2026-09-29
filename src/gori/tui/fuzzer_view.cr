@@ -65,6 +65,10 @@ module Gori::Tui
 
     @results : Deque(Fuzz::Result)
 
+    # One line of the GROUPED results list (#1351): a cluster's header — its representative
+    # row — or one of its members when the cluster is expanded. Parallel to `sorted_results`.
+    record GroupLine, cluster : Fuzz::Clusters::Cluster, header : Bool
+
     STATUS_MAX_ROWS =  6 # ≤ this many distinct codes → per-code bars; else collapse to classes
     DIST_MIN_TOTAL  = 60 # narrowest bottom width that still earns a sidebar
     DIST_MIN_VW     = 22 # min / max sidebar width
@@ -217,6 +221,16 @@ module Gori::Tui
       @scroll = 0
       @sort = :index
       @matched_only = false
+      # Group RESULTS by response shape (#1351): one representative row per cluster, folded
+      # by default and expanded with →. `@clusters` counts the WHOLE run — every appended
+      # result, or every stored row of a reopened run — while the members a cluster expands to
+      # are the rows still in the display window. The order is `o`'s value while grouped.
+      @grouped = false
+      @group_order = Fuzz::Clusters::Order::Rare
+      @expanded = Set(Int64).new
+      @expanded_rev = 0
+      @clusters = Fuzz::Clusters.new
+      @group_lines = [] of GroupLine
       # §-region offsets, recomputed only when the buffer changes (keyed on @editor.edits).
       # Backs BOTH the template tint colours and the Sets→marker chips, so they can't disagree.
       @marker_text_rev = -1
@@ -262,6 +276,7 @@ module Gori::Tui
       @sorted_cache_rev = -1_i64
       @sorted_cache_sort = :index
       @sorted_cache_matched = false
+      @sorted_cache_group = nil.as({Fuzz::Clusters::Order, Int32}?)
       @sorted_cache_at = Time.instant # see SORT_REFRESH
       @progress = nil.as(Fuzz::Progress?)
       @run_total = nil.as(Int64?)
@@ -466,6 +481,7 @@ module Gori::Tui
       @name = SubtabClone.copy_name(src.name)
       @dirty = true
       @result_window.clear
+      reset_clusters
       @run_result_count = 0_i64
       @run_matched_count = 0_i64
       @run_error_count = 0_i64
@@ -966,6 +982,7 @@ module Gori::Tui
     def begin_run(total : Int64?) : Nil
       @run_generation += 1
       @result_window.clear
+      reset_clusters
       @run_result_count = 0_i64
       @run_matched_count = 0_i64
       @run_error_count = 0_i64
@@ -1037,8 +1054,9 @@ module Gori::Tui
       @run_result_count += 1
       @run_matched_count += 1 if r.matched?
       @run_error_count += 1 if r.error
+      @clusters.add(r)
       evicted = @result_window.append(r)
-      if evicted > 0 && @sort == :index && !@matched_only
+      if evicted > 0 && @sort == :index && !@matched_only && !@grouped
         @sel = {@sel - evicted, 0}.max
         @scroll = {@scroll - evicted, 0}.max
       end
@@ -1142,23 +1160,37 @@ module Gori::Tui
     def load_saved_run(run : Store::FuzzRunRecord,
                        records : Array(Store::FuzzResultRecord)) : Nil
       window = FuzzerResultWindow.new
-      records.each { |record| window.append(Fuzz::Persistence.result(record)) }
-      load_saved_run(run, window)
+      clusters = Fuzz::Clusters.new
+      records.each do |record|
+        result = Fuzz::Persistence.result(record)
+        clusters.add(result)
+        window.append(result)
+      end
+      load_saved_run(run, window, clusters)
     end
 
     # The production restore path. It takes the WINDOW the reader fiber filled, not its rows:
     # `adopt` carries the projection marks across, and re-appending already-projected rows
     # would drop them (see `FuzzerResultWindow#adopt`).
-    def load_saved_run(run : Store::FuzzRunRecord, window : FuzzerResultWindow) : Nil
+    #
+    # `clusters` is the reader's aggregate over EVERY stored row of the run, not just the
+    # window's; without one (a caller that only has the window) the window is grouped.
+    def load_saved_run(run : Store::FuzzRunRecord, window : FuzzerResultWindow,
+                       clusters : Fuzz::Clusters? = nil) : Nil
       @run_generation += 1
       @result_window.adopt(window)
+      reset_clusters(clusters || Fuzz::Clusters.new.tap { |c| window.rows.each { |row| c.add(row) } })
       apply_saved_run(run)
     end
 
     def load_saved_run(run : Store::FuzzRunRecord, rows : Array(Fuzz::Result)) : Nil
       @run_generation += 1
       @result_window.clear
-      rows.each { |row| @result_window.append(row) }
+      reset_clusters
+      rows.each do |row|
+        @clusters.add(row)
+        @result_window.append(row)
+      end
       apply_saved_run(run)
     end
 
@@ -1204,6 +1236,7 @@ module Gori::Tui
       if @loaded_saved_run
         @run_generation += 1
         @result_window.clear
+        reset_clusters
         @run_result_count = 0_i64
         @run_matched_count = 0_i64
         @run_error_count = 0_i64
@@ -1893,10 +1926,65 @@ module Gori::Tui
     end
 
     def cycle_sort : String
+      # Grouped, the list is clusters and `o` orders THEM: rare first (the odd answers), then
+      # the largest, then by first appearance.
+      if @grouped
+        @group_order = Fuzz::Clusters::Order.from_value((@group_order.value + 1) % Fuzz::Clusters::Order.values.size)
+        @sel = 0
+        return "cluster order: #{@group_order.label}"
+      end
       order = [:index, :status, :length, :words, :time]
       i = order.index(@sort) || 0
       @sort = order[(i + 1) % order.size]
       "sort: #{@sort}"
+    end
+
+    # The `o` chip on the RESULTS border: the sort column, or the cluster order while grouped.
+    # One spelling for the draw and the hit-test.
+    private def sort_chip : String
+      @grouped ? @group_order.label : @sort.to_s
+    end
+
+    getter? grouped : Bool
+
+    # The run's response-shape clusters (#1351) — whole-run, whatever the window holds.
+    getter clusters : Fuzz::Clusters
+
+    def toggle_grouped : String
+      @grouped = !@grouped
+      @sel = 0
+      @scroll = 0
+      return "showing every result" unless @grouped
+      n = @clusters.size
+      more = @clusters.truncated? ? "+" : ""
+      "grouped by response shape · #{n}#{more} cluster#{n == 1 ? "" : "s"} · ←/→ fold · o order"
+    end
+
+    # The grouped line under the cursor, nil when the list is not grouped.
+    def selected_group_line : GroupLine?
+      return nil unless @grouped
+      sorted_results # the lines are built with the view
+      @group_lines[@sel]?
+    end
+
+    # → / ← on a grouped list: expand the selected cluster, or fold it back to its header.
+    # Folding from a member lands the cursor on that cluster's header. True when it acted.
+    def fold_group(expand : Bool) : Bool
+      return false unless line = selected_group_line
+      id = line.cluster.id
+      changed = expand ? @expanded.add?(id) : @expanded.delete(id)
+      return false unless changed
+      @expanded_rev += 1
+      view = sorted_results
+      at = (0...view.size).find { |i| (g = @group_lines[i]?) && g.header && g.cluster.id == id }
+      @sel = at || 0
+      true
+    end
+
+    private def reset_clusters(clusters : Fuzz::Clusters = Fuzz::Clusters.new) : Nil
+      @clusters = clusters
+      @expanded.clear
+      @expanded_rev += 1
     end
 
     def matched_only? : Bool
@@ -2207,6 +2295,7 @@ module Gori::Tui
     private def reusable_sorted_cache : Array(Fuzz::Result)?
       c = @sorted_cache
       return nil unless c && @sorted_cache_sort == @sort && @sorted_cache_matched == @matched_only
+      return nil unless @sorted_cache_group == group_key
       return c if @sorted_cache_rev == @results_rev
       return c if @running && copies_results? && Time.instant - @sorted_cache_at < SORT_REFRESH
       nil
@@ -2220,17 +2309,22 @@ module Gori::Tui
       end
       rows = @matched_only ? @results.select(&.matched?) : @results.to_a
       sorted =
-        case @sort
-        when :status then rows.sort_by { |r| r.status || -1 }
-        when :length then rows.sort_by(&.length)
-        when :words  then rows.sort_by(&.words)
-        when :time   then rows.sort_by(&.duration_us)
-        else              rows
+        if @grouped
+          group_rows(rows)
+        else
+          case @sort
+          when :status then rows.sort_by { |r| r.status || -1 }
+          when :length then rows.sort_by(&.length)
+          when :words  then rows.sort_by(&.words)
+          when :time   then rows.sort_by(&.duration_us)
+          else              rows
+          end
         end
       @sorted_cache = sorted
       @sorted_cache_rev = @results_rev
       @sorted_cache_sort = @sort
       @sorted_cache_matched = @matched_only
+      @sorted_cache_group = group_key
       @sorted_cache_at = Time.instant
       sorted
     end
@@ -2239,7 +2333,39 @@ module Gori::Tui
     # matched-only filter is the identity, and an identity needs neither a rebuild nor a
     # throttle — this is what keeps the default view perfectly live.
     private def copies_results? : Bool
-      @sort != :index || @matched_only
+      @sort != :index || @matched_only || @grouped
+    end
+
+    # What the grouped projection depends on beyond the rows: its order and which clusters are
+    # open. nil when ungrouped, so a cached flat list is never mistaken for a grouped one.
+    private def group_key : {Fuzz::Clusters::Order, Int32}?
+      @grouped ? {@group_order, @expanded_rev} : nil
+    end
+
+    # The grouped list: each cluster's header (its lowest-index member still in the window, or
+    # the cluster's own metrics-only representative once the window has evicted them all), then
+    # its window members in index order when it is expanded. `@group_lines` is rebuilt beside
+    # it, so line `i` describes row `i`. `rows` is already matched-only-filtered when that lens
+    # is on, and then only clusters holding a match are listed.
+    private def group_rows(rows : Array(Fuzz::Result)) : Array(Fuzz::Result)
+      members = Hash(Int64, Array(Fuzz::Result)).new
+      rows.each { |r| (members[Fuzz::Clusters.key(r)[0]] ||= [] of Fuzz::Result) << r }
+      lines = [] of GroupLine
+      out = [] of Fuzz::Result
+      @clusters.sorted(@group_order).each do |c|
+        next if @matched_only && c.matched == 0
+        mem = members[c.id]?.try(&.sort_by!(&.index)) || [] of Fuzz::Result
+        out << (mem.first? || c.representative)
+        lines << GroupLine.new(c, true)
+        next unless @expanded.includes?(c.id)
+        mem.each_with_index do |m, k|
+          next if k == 0
+          out << m
+          lines << GroupLine.new(c, false)
+        end
+      end
+      @group_lines = lines
+      out
     end
 
     # --- target editing ------------------------------------------------------
@@ -3222,7 +3348,7 @@ module Gori::Tui
         # The row the run ended on (issue #1270), standing — the row itself can be scrolled
         # away, windowed out, or hidden by the matched-only lens.
         stop = FuzzerView.stop_chip(@run_stop_idx)
-        "#{result_count} sent#{extra} · #{matched_count} hit#{stop}#{window}#{archive}#{saved}"
+        "#{result_count} sent#{extra} · #{matched_count} hit#{stop}#{window}#{archive}#{saved}#{shapes_chip}"
       end
     end
 
@@ -3238,7 +3364,7 @@ module Gori::Tui
       min_x = rect.x + 11 + count.size + 1 # badges never overwrite the count
       rx = Frame.toggle_badge(screen, rect.right - 1, rect.y, min_x, "v", "DIST", @show_dist)
       rx = Frame.toggle_badge(screen, rx, rect.y, min_x, "m", "MATCH", @matched_only)
-      Frame.toggle_badge(screen, rx, rect.y, min_x, "o", @sort.to_s, false) # sort: a value chip, never lit
+      Frame.toggle_badge(screen, rx, rect.y, min_x, "o", sort_chip, false) # sort: a value chip, never lit
       inner = rect.inset(1, 1)
       view = sorted_results
       @sel = @sel.clamp(0, {view.size - 1, 0}.max)
@@ -3251,17 +3377,26 @@ module Gori::Tui
         TrafficEmptyState.render(screen, inner, variant: :fuzzer_results, running: @running)
         return
       end
-      header = "  #   payload                 status  len      words   time"
+      # Grouped, the first column is the cluster's size (`▸×12`, `▾` when open) and a member's
+      # index is indented under it, so the column is two cells wider.
+      header = @grouped ? "  ×N     payload                 status  len      words   time" : "  #   payload                 status  len      words   time"
       screen.text(inner.x, inner.y, header, Theme.muted, Theme.bg, width: inner.w)
       rows_h = {inner.h - 1, 0}.max
       (0...rows_h).each do |i|
         ri = @scroll + i
         break if ri >= view.size
-        render_result_row(screen, inner, inner.y + 1 + i, view[ri], ri == @sel)
+        render_result_row(screen, inner, inner.y + 1 + i, view[ri], ri == @sel, @grouped ? @group_lines[ri]? : nil)
       end
       # Gauge rides the rows region (below the header row), so its track lines up with
       # what @scroll actually windows.
       Frame.scroll_gauge(screen, Rect.new(inner.x, inner.y + 1, inner.w, rows_h), view.size, @scroll, focused)
+    end
+
+    # ` · N shapes` while the list is grouped — the one place the cluster count stands.
+    private def shapes_chip : String
+      return "" unless @grouped
+      n = @clusters.size
+      " · #{n}#{@clusters.truncated? ? "+" : ""} shape#{n == 1 ? "" : "s"}"
     end
 
     STOP_ROW_MARK = "stop row"
@@ -3279,12 +3414,15 @@ module Gori::Tui
       !@run_stop_idx.nil? && r.index == @run_stop_idx
     end
 
-    private def render_result_row(screen : Screen, inner : Rect, y : Int32, r : Fuzz::Result, selected : Bool) : Nil
+    private def render_result_row(screen : Screen, inner : Rect, y : Int32, r : Fuzz::Result, selected : Bool,
+                                  group : GroupLine? = nil) : Nil
       bg = selected ? Theme.accent_bg : Theme.bg
       screen.fill(Rect.new(inner.x, y, inner.w, 1), bg) if selected
-      screen.cell(inner.x, y, selected ? '▎' : (r.matched? ? '✓' : ' '), r.matched? ? Theme.accent : Theme.muted, bg)
+      # A cluster header is ✓ when ANY member matched, not only its representative.
+      hit = group && group.header ? group.cluster.matched > 0 : r.matched?
+      screen.cell(inner.x, y, selected ? '▎' : (hit ? '✓' : ' '), hit ? Theme.accent : Theme.muted, bg)
       payload = r.payloads.join(", ")
-      line = "#{r.index.to_s.ljust(4)} #{payload_cell(payload)}"
+      line = "#{index_cell(r, group)} #{payload_cell(payload)}"
       # `width:` on BOTH of these: they used to draw unclamped, so a payload cell that
       # measured short (see payload_cell) pushed the status cell past `inner.right`, over
       # the card's right border and across the gap into the DIST sidebar.
@@ -3335,6 +3473,15 @@ module Gori::Tui
           screen.text(x, y, line, selected ? Theme.text : Theme.muted, bg, width: {inner.right - x, 0}.max)
         end
       end
+    end
+
+    # The first column: the row's index, or grouped (#1351) the cluster size on a header row
+    # (`▸×12` folded, `▾×12` open) and the index indented beneath it on a member row.
+    private def index_cell(r : Fuzz::Result, group : GroupLine?) : String
+      return r.index.to_s.ljust(4) unless @grouped
+      return "  #{r.index}".ljust(6) unless group && group.header
+      glyph = @expanded.includes?(group.cluster.id) ? '▾' : '▸'
+      "#{glyph}×#{group.cluster.count}".ljust(6)
     end
 
     # The payload cell, exactly PAYLOAD_COL_W display COLUMNS wide — never `String#size`.
@@ -4063,7 +4210,7 @@ module Gori::Tui
       Frame.right_badge_hit(mx, my, pane.y, pane.right - 1, min_x, [
         {:dist, "v", "DIST"},
         {:match, "m", "MATCH"},
-        {:sort, "o", @sort.to_s},
+        {:sort, "o", sort_chip},
       ] of {Symbol, String, String})
     end
 
