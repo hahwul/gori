@@ -54,6 +54,8 @@ One thing to know before you run: **a payload spliced into a query-string or for
 gori run fuzz <flow-id> --auto --mode sniper --wordlist params.txt
 ```
 
+A list you will reach for again belongs in the [wordlist catalog](/guide/repeater-and-fuzzer/#wordlist-catalog) (`~/.gori/wordlists`): save it once (`gori run wordlist save params.txt --from params.txt`, or `Ctrl-S` in the Fuzzer's List payload editor) and `--wordlist params.txt` finds it by name from any directory. The project is a payload source too. `--payload-from 'host:api.example.com param-values'` builds the set from the values the app's own clients already sent (`param-names`, `path-segments` and `js-endpoints` read other slices), and in the TUI it is the **Project** payload type. It reads the project and sends nothing, and a value that looks like a credential stays out unless you opt in; see [Payloads from the Project](/guide/repeater-and-fuzzer/#payloads-from-the-project).
+
 **Checkpoint.** CONFIG lists your payload set, and if you gave a marker a chain, the `Ctrl-Q` preview shows what it makes of that marker's value. `gori run fuzz` also says once, before the first request, how many query/form positions it is encoding for.
 
 ## 4. Set a matcher and run
@@ -73,6 +75,8 @@ gori run fuzz <flow-id> \
 ```
 
 A run can also stop itself once it has what you came for. `--stop-after-matches 1` ends it on the first matcher hit, and `--stop-on` names a separate condition (`status:500`, or `'!regex:Invalid password'` for the first body that no longer carries it). Either lands the run as `condition_met`, with the row that tripped it recorded. In the TUI both are rows on the **ADVANCED** card, opened from the CONFIG pane's **Advanced** row.
+
+If the first candidate comes back `200` and every one after it `403`, the request carries a CSRF token or nonce the app accepts once. Give the run a request-time macro that fetches a fresh one before each candidate; [Carry a session](/playbooks/carry-a-session/#6-fetch-a-fresh-token-for-every-request) walks through it.
 
 ### When the only difference is the clock
 
@@ -96,6 +100,8 @@ Timing is noisy (a shared origin, a slow hop, one unlucky pause), so treat a `--
 ## 5. Read results and seed the next step
 
 The finding is the row that doesn't match its neighbours: an unexpected `200` or `500` where the rest `404`, or a length that jumps when one payload lands differently. That row is a lead, not a conclusion: from a result, its `Space` menu sends it on to the **Repeater**, or to the **Comparer** to diff it against the baseline, so you keep probing the one payload that stood out by hand.
+
+A sweep of thousands outgrows sorting. **Group by shape** (`Space` → `Z` **Display…**, then **Group by shape**) folds RESULTS into one row per distinct answer, with payload echoes, ids, numbers, timestamps and per-response headers ignored, and lists the rare shapes first, so the one response that behaved differently sits at the top instead of at row 7,312. `→` opens a cluster to its members and `←` folds it again. Headless, a saved run answers the same question with `gori run fuzz show RUN_ID --clusters`; see [Grouping Results by Response Shape](/guide/repeater-and-fuzzer/#grouping-results-by-response-shape).
 
 To keep the complete run, leave the editor in READ mode and press **`Shift-E`** after it finishes. During the sweep gori privately spools every full request/wire/response row to disk while the pane stays bounded to 5,000 rows / 64 MiB; Shift-E promotes the complete spool into the project. The latest successful run reopens automatically as a bounded window with its Fuzzer session; **Run history** (type it into `Ctrl-P`) selects an older run, while CLI/MCP can page the whole archive. Headless, make persistence explicit and inspect it by id:
 

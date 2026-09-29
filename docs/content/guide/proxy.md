@@ -450,7 +450,7 @@ Marks survive a filter change, a re-sort, and leaving the tab and coming back; t
 | Row | What lands on the clipboard |
 |-----|-----------------------------|
 | URL / Headers / Body / Cookies | The parts on their own; a row is dropped when the request has nothing to put in it |
-| cURL | A runnable `curl` command |
+| cURL | A runnable `curl` command that sends what was captured: a path with `..` segments carries `--path-as-is`, and a body captured without a `Content-Type` carries `-H 'Content-Type:'`, so curl rewrites neither |
 | Python | A `requests` script |
 | fetch | A JavaScript `fetch()` call |
 | Go | A `net/http` program |

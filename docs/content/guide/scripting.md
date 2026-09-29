@@ -172,7 +172,10 @@ probe with a reason** rather than sending an unsigned request that the app would
 miner would then read as a clean negative. The timeout is the same `hooks.timeout_secs` budget,
 **per outbound request**, and a mine's request count is bounded by `--max-requests` and its own
 bucket/bisection/confirm tree, so the total hook cost is bounded with it. The miner is
-latency-bound (it counts round-trips), so a hook adds one fork-and-wait to each of them.
+latency-bound (it counts round-trips), so a hook adds one fork-and-wait to each of them. A hook
+is for a value your command can *compute*; a nonce or CSRF token the *server* hands out is fetched
+instead by a [request-time macro](/guide/repeater-and-fuzzer/#rotating-tokens-with-a-macro)
+(`--macro`), which replays a saved Repeater session before each probe.
 
 **Two things hooks are deliberately not wired into.** The MCP `decode` tool refuses an `exec:`
 step (saved chains included); it is exposed read-only and unbound, and stays pure compute; an
