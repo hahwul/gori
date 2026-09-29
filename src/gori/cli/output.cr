@@ -1283,7 +1283,8 @@ module Gori
       #
       # Emitted by hand to an IO rather than through JSON::Builder: the tree nests one
       # object + one "children" array per path segment (~2 JSON levels each), and
-      # JSON::Builder hard-caps nesting at 100, so a captured path ~45 segments deep tore
+      # JSON::Builder capped nesting at 100 (1024 now, see json_nesting.cr — still a cap a
+      # path can reach), so a captured path ~45 segments deep tore
       # the whole report down with `JSON::Error: Nesting of 100 is too deep`. A security
       # tool must not silently truncate the endpoint tree, so we drop the artificial
       # ceiling instead — String#to_json still does every value's escaping, so the bytes

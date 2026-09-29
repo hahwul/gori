@@ -98,9 +98,10 @@ module Gori
                        # raised — a `JSON::Error`, which the clause above does not cover. Three
                        # ordinary hand-written specs reach it, so the message says what was
                        # attempted rather than guessing which one: a self-referential anchor
-                       # (`a: &x` / `b: *x`) yields a CYCLIC `YAML::Any` and trips the nesting
-                       # guard, `maximum: .inf` and `.nan` are legal YAML scalars with no JSON
-                       # spelling, and a legitimately deep spec trips the same guard acyclically.
+                       # (`a: &x` / `b: *x`) yields a CYCLIC `YAML::Any` and trips the builder's
+                       # nesting guard (1024, see json_nesting.cr), `maximum: .inf` and `.nan` are
+                       # legal YAML scalars with no JSON spelling, and a chain of aliases can stack
+                       # an acyclic spec past the same guard.
                        # `ex.message` separates them for anyone who needs to know which.
                        raise Gori::Error.new(
                          "OpenAPI spec cannot be represented as JSON — a self-referential anchor, " \

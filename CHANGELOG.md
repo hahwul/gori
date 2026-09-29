@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- JSON nested 100 to 512 levels deep — a captured body, JWT, cookie, GraphQL request or imported example, or a protobuf message about 33 levels deep — no longer fails with "Nesting of 100 is too deep" in the JWT and cookie tools, redaction (a redacted HAR export stopped mid-file), `jsonpath:` columns, retests, extract rules, `get_flow`, `gori run show --format json` or the OpenAPI export
 - TUI: an error while opening a project — reading a tab's stored data or drawing the first frame — is reported in the status line and `gori.log` like any later one, instead of ending gori before its first frame
 - Import: a Postman or Insomnia variable that multiplies itself (`a = "{{a}}{{a}}…"`) skips that request instead of expanding to gigabytes and running gori out of memory
 - CLI: a `--ca-dir` or `GORI_HOME` gori cannot create, and `gori settings user-agents --set` naming a directory, print one line saying so instead of a backtrace
