@@ -2050,6 +2050,15 @@ module Gori
       V41_AFTER = V41_REBUILDS.flat_map(&.seed)
       V41       = V41_REBUILDS.flat_map(&.copy) + V41_REBUILDS.flat_map(&.swap) + V41_AFTER
 
+      # V42 — the response-shape fingerprint of each saved fuzz result (#1351): `Fuzz::Shape`,
+      # computed by `Matcher#build` over the decoded body before the retention policy drops it,
+      # so a saved run clusters by shape even when its bodies were not kept. A signed INTEGER
+      # holding the FNV-1a 64 bits. NULL on every row written before this column; those rows
+      # cluster by `Shape.approximate` (outcome + metrics), and the surfaces say so.
+      V42 = [
+        "ALTER TABLE fuzz_results ADD COLUMN shape INTEGER",
+      ]
+
       # Data statements that call gori's OWN SQL functions, run by `migrate!` right after the
       # version they complete. Kept out of MIGRATIONS because that list is plain schema that a
       # bare connection can replay (specs build every historical shape that way), and a bare
@@ -2072,7 +2081,7 @@ module Gori
 
       MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17,
                     V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29, V30, V31, V32, V33,
-                    V34, V35, V36, V37, V38, V39, V40, V41]
+                    V34, V35, V36, V37, V38, V39, V40, V41, V42]
 
       def self.migrate!(db : DB::Database, read_only : Bool = false) : Nil
         db.using_connection do |conn|
@@ -2139,6 +2148,11 @@ module Gori
               elsif statements.same?(V41)
                 move_to_autoincrement(conn.as(SQLite3::Connection), V41_REBUILDS, 41)
                 statements = V41_AFTER
+              elsif statements.same?(V42) && column?(conn, "fuzz_results", "shape")
+                # SQLite has no `ADD COLUMN IF NOT EXISTS`, and every migration since V36 is
+                # replay-safe: a project whose `user_version` was wound back (the index specs
+                # rebuild an older shape that way) already holds the column.
+                statements = [] of String
               end
               statements.each { |sql| conn.exec(sql) }
               BACKFILLS[idx + 1]?.try { |sql| conn.exec(sql) }
@@ -2150,6 +2164,11 @@ module Gori
             raise ex
           end
         end
+      end
+
+      private def self.column?(conn : DB::Connection, table : String, column : String) : Bool
+        !conn.query_one?("SELECT 1 FROM pragma_table_info(?) WHERE name = ?", table, column,
+          as: Int64).nil?
       end
 
       # The tables V39 moves to AUTOINCREMENT, and the one clause each CREATE text carries.

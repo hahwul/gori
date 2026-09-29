@@ -231,7 +231,7 @@ module Gori
           result.incomplete?, result.extracted, result.request, result.head, result.body,
           result.retried?, result.chain_error, result.grpc_status, result.grpc_message,
           result.timed_out?, result.resent_count, result.wire, result.ws_close_code,
-          result.ws_frames_in)
+          result.ws_frames_in, result.shape)
       end
 
       # Record -> write is deliberately field-for-field. This is the spool copy seam: parsing
@@ -243,7 +243,7 @@ module Gori
           record.incomplete?, record.extracted, record.request, record.response_head,
           record.response_body, record.retried?, record.chain_error, record.grpc_status,
           record.grpc_message, record.timed_out?, record.resent_count, record.wire,
-          record.ws_close_code, record.ws_frames_in)
+          record.ws_close_code, record.ws_frames_in, record.shape)
       end
 
       # Deterministic transaction budget: every variable-width field plus a fixed allowance for
@@ -283,7 +283,8 @@ module Gori
           record.incomplete?, record.extracted, record.response_head, record.response_body,
           record.request, record.retried?, record.chain_error, record.grpc_status,
           record.grpc_message, record.timed_out?, record.resent_count, record.wire,
-          ws_close_code: record.ws_close_code, ws_frames_in: record.ws_frames_in)
+          ws_close_code: record.ws_close_code, ws_frames_in: record.ws_frames_in,
+          shape: record.shape)
       end
 
       private def accepting? : Bool

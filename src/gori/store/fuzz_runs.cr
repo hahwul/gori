@@ -7,7 +7,7 @@ module Gori
     FUZZ_RESULT_COLS = "id, run_id, idx, payloads, status, length, words, lines, duration_us, error, matched, " \
                        "extracted, request, response_head, response_body, position, incomplete, retried, " \
                        "chain_error, grpc_status, grpc_message, timed_out, resent_count, wire, " \
-                       "ws_close_code, ws_frames_in"
+                       "ws_close_code, ws_frames_in, shape"
     # Same positional projection as FUZZ_RESULT_COLS, but no captured bytes cross the SQLite
     # boundary. Returning FuzzResultRecord keeps metric-only callers compatible with the full
     # API while the nil byte fields truthfully say this projection did not fetch content.
@@ -15,7 +15,7 @@ module Gori
       "id, run_id, idx, payloads, status, length, words, lines, duration_us, error, matched, " \
       "extracted, NULL AS request, NULL AS response_head, NULL AS response_body, position, " \
       "incomplete, retried, chain_error, grpc_status, grpc_message, timed_out, resent_count, " \
-      "NULL AS wire, ws_close_code, ws_frames_in"
+      "NULL AS wire, ws_close_code, ws_frames_in, shape"
     # Same positional record projection, but each BLOB is a SQL-capped prefix followed by its
     # full nullable size. The prefix limits are bound parameters in request/head/body/wire order.
     FUZZ_RESULT_PREVIEW_COLS =
@@ -25,7 +25,7 @@ module Gori
       "CASE WHEN response_body IS NULL THEN NULL WHEN LENGTH(response_body) = 0 THEN response_body ELSE substr(response_body, 1, ?) END, " \
       "position, incomplete, retried, chain_error, grpc_status, grpc_message, timed_out, " \
       "resent_count, CASE WHEN wire IS NULL THEN NULL WHEN LENGTH(wire) = 0 THEN wire ELSE substr(wire, 1, ?) END, " \
-      "ws_close_code, ws_frames_in, LENGTH(request), LENGTH(response_head), " \
+      "ws_close_code, ws_frames_in, shape, LENGTH(request), LENGTH(response_head), " \
       "LENGTH(response_body), LENGTH(wire)"
 
     def insert_fuzz_run(session_id : Int64?, target : String, mode : String, total : Int64?, *,
@@ -369,9 +369,9 @@ module Gori
         row.chain_error << row.grpc_status << row.grpc_message << (row.timed_out? ? 1 : 0) <<
         row.resent_count
       wire_slot = Store.optional_blob_slot(args, row.wire)
-      args << row.ws_close_code << row.ws_frames_in
-      c.exec("INSERT INTO fuzz_results (run_id, idx, payloads, status, length, words, lines, duration_us, error, matched, extracted, request, response_head, response_body, position, incomplete, retried, chain_error, grpc_status, grpc_message, timed_out, resent_count, wire, ws_close_code, ws_frames_in) " \
-             "VALUES (?,?,?,?,?,?,?,?,?,?,?,#{request_slot},#{response_head_slot},#{response_body_slot},?,?,?,?,?,?,?,?,#{wire_slot},?,?)",
+      args << row.ws_close_code << row.ws_frames_in << row.shape
+      c.exec("INSERT INTO fuzz_results (run_id, idx, payloads, status, length, words, lines, duration_us, error, matched, extracted, request, response_head, response_body, position, incomplete, retried, chain_error, grpc_status, grpc_message, timed_out, resent_count, wire, ws_close_code, ws_frames_in, shape) " \
+             "VALUES (?,?,?,?,?,?,?,?,?,?,?,#{request_slot},#{response_head_slot},#{response_body_slot},?,?,?,?,?,?,?,?,#{wire_slot},?,?,?)",
         args: args)
     end
 
@@ -470,7 +470,7 @@ module Gori
         rs.read(Int32) != 0, rs.read(String?), rs.read(Bytes?), rs.read(Bytes?), rs.read(Bytes?),
         rs.read(Int32?), rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(String?),
         rs.read(Int32?), rs.read(String?), rs.read(Int32) != 0, rs.read(Int32),
-        rs.read(Bytes?), rs.read(Int32?), rs.read(Int32?))
+        rs.read(Bytes?), rs.read(Int32?), rs.read(Int32?), rs.read(Int64?))
     end
 
     private def read_fuzz_result_preview(rs : DB::ResultSet) : FuzzResultPreview

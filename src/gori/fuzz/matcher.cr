@@ -4,6 +4,7 @@ require "../intercept_filter"
 require "../repeater/engine"
 require "../ascii_bytes"
 require "../utf8"
+require "./shape"
 
 module Gori::Fuzz
   # gRPC facts a fuzz run needs off raw wire bytes: the CALL's outcome (which for gRPC is
@@ -593,6 +594,10 @@ module Gori::Fuzz
       # ended the run, and dropping its request/response would leave the operator the verdict
       # with no evidence for it.
       keep = keep?(matched) || stop_hit
+      # The response-shape key `Fuzz::Clusters` groups by (#1351), on this same decode and
+      # before the bytes below are dropped by the retention policy.
+      shape = Shape.compute(status, grpc_status, raw.error, raw.incomplete?, raw.timed_out?,
+        raw.head, body, Shape.needles(job))
 
       Result.new(
         index: job.index, payloads: job.payloads, position: job.position,
@@ -604,7 +609,8 @@ module Gori::Fuzz
         wire: keep ? raw.wire.try { |w| present(w) } : nil,
         chain_error: job.chain_error,
         grpc_status: grpc_status, grpc_message: grpc_message,
-        timed_out: raw.timed_out?, resent_count: resent_count, stop_hit: stop_hit)
+        timed_out: raw.timed_out?, resent_count: resent_count, stop_hit: stop_hit,
+        shape: shape)
     end
 
     # Count a rendered request whose gRPC framing a payload broke. Only reached while

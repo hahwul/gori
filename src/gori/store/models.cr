@@ -2082,13 +2082,16 @@ module Gori
       getter wire : Bytes?
       getter ws_close_code : Int32?
       getter ws_frames_in : Int32?
+      # `Fuzz::Result#shape` (#1351); nil only on a row copied from a pre-V42 record.
+      getter shape : Int64?
 
       def initialize(@idx, @payloads, @position, @status, @length, @words, @lines,
                      @duration_us, @error, @matched, @incomplete, @extracted,
                      @request = nil, @response_head = nil, @response_body = nil,
                      @retried = false, @chain_error = nil, @grpc_status = nil,
                      @grpc_message = nil, @timed_out = false, @resent_count = 0,
-                     @wire = nil, @ws_close_code = nil, @ws_frames_in = nil)
+                     @wire = nil, @ws_close_code = nil, @ws_frames_in = nil,
+                     @shape = nil)
       end
     end
 
@@ -2122,6 +2125,8 @@ module Gori
       getter wire : Bytes?
       getter ws_close_code : Int32?
       getter ws_frames_in : Int32?
+      # The response-shape fingerprint (V42, #1351). NULL on a row saved before it existed.
+      getter shape : Int64?
 
       def initialize(@id, @run_id, @idx, @payloads, @status, @length, @words, @lines,
                      @duration_us, @error, @matched, @extracted,
@@ -2129,7 +2134,7 @@ module Gori
                      @position = nil, @incomplete = false, @retried = false,
                      @chain_error = nil, @grpc_status = nil, @grpc_message = nil,
                      @timed_out = false, @resent_count = 0, @wire = nil,
-                     @ws_close_code = nil, @ws_frames_in = nil)
+                     @ws_close_code = nil, @ws_frames_in = nil, @shape = nil)
       end
     end
 
