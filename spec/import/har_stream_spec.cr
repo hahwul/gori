@@ -180,3 +180,21 @@ describe "Import.import_file streams a HAR" do
     end
   end
 end
+
+describe "Import::Har startedDateTime" do
+  # `9999-12-31T23:59:59-23:59` is year 10000 in UTC: the stored `created_at` raised in every
+  # later `Time.unix`, and the TUI's Project tab could not open the project. `2024-02-31` is
+  # well-formed but impossible, and its ArgumentError dropped the whole entry.
+  it "stamps an out-of-range or impossible date as now, and keeps the entry" do
+    before = Time.utc.to_unix_ms * 1_000
+    {"9999-12-31T23:59:59-23:59", "0001-01-01T00:00:00+23:59", "2024-02-31T00:00:00Z"}.each do |t|
+      entry = har_entry(1).sub("2026-06-01T12:00:00.000Z", t)
+      with_har(%({"log":{"entries":[#{entry}]}})) do |path|
+        result = Gori::Import::Har.parse_file(path)
+        result.skipped.should eq(0)
+        result.flows.size.should eq(1)
+        result.flows.first.request.created_at.should be >= before
+      end
+    end
+  end
+end

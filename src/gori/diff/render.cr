@@ -107,8 +107,11 @@ module Gori::Diff
       a == b ? a : "#{a} → #{b}"
     end
 
+    # A `created_at` past year 9999 raises in the Span addition; `—` like `iso` below.
     private def self.utc_date(micros : Int64) : String
       (Time.utc(1970, 1, 1) + (micros // 1_000_000).seconds).to_s("%Y-%m-%d")
+    rescue ArgumentError
+      "—"
     end
 
     # RFC3339 UTC at millisecond precision from unix micros — the `*_iso` convention every
@@ -118,6 +121,8 @@ module Gori::Diff
     def self.iso(micros : Int64) : String
       sec, micro = micros.divmod(1_000_000)
       (Time.utc(1970, 1, 1) + sec.seconds + micro.microseconds).to_s("%Y-%m-%dT%H:%M:%S.%LZ")
+    rescue ArgumentError
+      "—"
     end
 
     # ── markdown ────────────────────────────────────────────────────────────────

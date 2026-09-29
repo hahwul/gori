@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Import: a HAR or Burp timestamp past year 9999 once its offset is applied, or an impossible date such as `2024-02-31`, is stamped with the import time instead of being stored as is or dropping the request; a project that already holds such a row opens again, and History, HAR export and `gori run diff` read it instead of failing
 - Import: an OpenAPI YAML spec whose mapping key is not a string is refused with a message — two cyclic anchors used as keys overflowed the stack and ended gori — and a `!!binary` value or a `+99:00` timestamp offset is reported as the spec's error instead of a backtrace
 - OAST: malformed provider URLs now report a clean configuration error instead of crashing before the HTTP transport (#1359)
 - Repeater: **GraphQL: insert introspection query** (and its legacy variant for older servers) in the `Ctrl-P` palette rewrites the tab's request into a POST of the introspection query to the same endpoint, keeping its other headers and their captured line endings (#1355)
