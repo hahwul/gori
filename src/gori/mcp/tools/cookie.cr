@@ -202,7 +202,7 @@ module Gori
           "and/or a 'wordlist' file path. Pure offline compute: no network. Returns {found, secret, format}." do |s|
           s.field "cookie", strprop("the raw cookie value"), required: true
           s.field "secrets", strarrprop("inline candidate secrets to try (in order)")
-          s.field "wordlist", strprop("path to a newline-delimited wordlist file")
+          s.field "wordlist", strprop("path to a newline-delimited wordlist file, or the name of a saved list (list_wordlists)")
           s.field "format", enumprop("force a format (default auto-detect)", Cookie::FORMATS)
           s.field "salt", strprop("Flask/Django signing salt")
           s.field "algorithm", enumprop("Django HMAC algorithm (auto-detected from the signature length when unset)", Cookie::Django::SUPPORTED_ALGOS)

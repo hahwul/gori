@@ -56,6 +56,7 @@ module Gori
         grpc_fields = [] of String
         mode = Fuzz::Mode::Sniper
         sources = [] of Fuzz::PayloadSource
+        payload_from = PayloadFromFlags.new
         processors = [] of Fuzz::Processor
         auto_encode = true
         concurrency = 20
@@ -120,12 +121,16 @@ module Gori
           p.on("--ws-keep-key", "WebSocket: send the template's own Sec-WebSocket-Key instead of a fresh one per session (lets an absent/short/duplicate/non-base64 key be the thing under test)") { ws_keep_key = true }
           p.on("--ws-http-only", "Sweep a WebSocket template as plain HTTP: the handshake goes out as an ordinary request and its own answer (a 101, or the 2xx of an RFC 8441 extended CONNECT) is read as the response, instead of the framed exchange. The bytes are unchanged — this selects the engine, not a rewrite") { ws_http_only = true }
           p.on("--mode=MODE", "#{Fuzz::Mode.names.join(" | ")} (default sniper)") { |v| mode = parse_mode(v) }
-          p.on("-wPATH", "--wordlist=PATH", "Payload set: a wordlist file (repeatable; order → positions)") { |v| sources << Fuzz::WordlistFile.new(v) }
+          p.on("-wPATH", "--wordlist=PATH", "Payload set: a wordlist file, or the NAME of a saved list (`gori run wordlist`); repeatable, order → positions") { |v| sources << Fuzz::WordlistFile.new(v) }
           p.on("--preset=NAME", "Payload set: a built-in preset (#{Fuzz::Presets.names.join("|")}); NAME:FILE merges a user file into it") { |v| sources << parse_preset(v) }
           p.on("--payloads=LIST", "Payload set: inline comma list (a,b,c)") { |v| sources << Fuzz::InlineList.new(v.split(',')) }
           p.on("--numbers=SPEC", "Payload set: FROM-TO[:STEP] (e.g. 1-100 or 0-255:5)") { |v| sources << parse_numbers(v) }
           p.on("--null=N", "Payload set: N empty payloads") { |v| sources << Fuzz::NullPayloads.new(parse_count(v, "--null")) }
           p.on("--brute=SPEC", "Payload set: CHARSET:MIN-MAX (e.g. abc:1-3)") { |v| sources << parse_brute(v) }
+          # Values the project already captured (#1352): a QL picks the flows, a projection turns
+          # them into a set. Built with no project attached; the plan builder reads it, so the
+          # secret policy, the caps and the request preflight are the same on every surface.
+          payload_from_flags(p, command, payload_from, "Payload set") { |spec| sources << Fuzz::ProjectSource.new(spec) }
           p.on("--prefix=STR", "Processing: prepend STR to each payload") { |v| processors << Fuzz::Prefix.new(v) }
           p.on("--suffix=STR", "Processing: append STR to each payload") { |v| processors << Fuzz::Suffix.new(v) }
           p.on("--encode=KIND", "Processing: url | urlall | base64 | hex") { |v| processors << Fuzz::Encode.new(parse_encode(v)) }
@@ -225,6 +230,11 @@ module Gori
         end
         parser.parse(args)
         refresh_verify_upstream(!insecure)
+
+        # The run-wide `--payload-from-*` knobs, applied to every source now that argv is known,
+        # so a flag modifies its sources wherever it was typed.
+        refuse_orphan_payload_from_flags(command, payload_from, sources.any?(Fuzz::ProjectSource))
+        sources = sources.map { |src| src.is_a?(Fuzz::ProjectSource) ? src.with_policy(payload_from.policy).as(Fuzz::PayloadSource) : src }
 
         abort "gori run fuzz: too many arguments (expected at most one <flow-id>)" if positional.size > 1
         # One template source only. `--repeater` joins `--flow`/`--request` as a third mutually
@@ -358,6 +368,12 @@ module Gori
         # JSON and JSONL both stream rows now; neither adds a second full-run Result buffer.
         matcher.keep_bodies = save_results ? :all : record_policy
 
+        # The project any `--payload-from` reads, open only for the plan build below. After every
+        # refusal above, so a run that never builds holds no handle.
+        payload_specs = sources.compact_map { |src| src.as?(Fuzz::ProjectSource).try(&.spec) }
+        payload_store = open_payload_from_store(command, payload_specs,
+          !!(flow_id || repeater_id || project_name || db_path), project_name, db_path)
+
         options = Fuzz::PlanOptions.new(text,
           # A `--flow` template is a CAPTURED request; --request/stdin is a draft the operator
           # authored. See `Fuzz::PlanOptions#evidence?`.
@@ -376,7 +392,8 @@ module Gori
             tls_preset: tls_preset),
           ws_messages: ws_messages,
           matcher: matcher, verify: !insecure, sni: sni,
-          overrides: cli_host_overrides(project_name, db_path, flow_id, repeater_id))
+          overrides: cli_host_overrides(project_name, db_path, flow_id, repeater_id),
+          project: payload_store)
         # Gate outbound traffic through the ONE seam every surface shares (Gori::Outbound):
         # the up-front check refuses an out-of-scope host unless --allow-unscoped, and the
         # sender enforces Sandbox mode + explicit exclude rules on EVERY send regardless of
@@ -395,6 +412,7 @@ module Gori
           Fuzz::Plan.build(options, outbound)
         rescue ex : Fuzz::PlanError
           outbound.close
+          payload_store.try(&.close)
           abort "gori run fuzz: #{fuzz_plan_error(ex, text)}"
           # `Gori::Error` too — `Fuzz::ChainError` and `Fuzz::WsError` are both raised by the
           # builder and both were escaping this rescue, so the gate stayed OPEN on the way out
@@ -402,8 +420,13 @@ module Gori
           # `outbound.close` this block exists for).
         rescue ex : Gori::Error
           outbound.close
+          payload_store.try(&.close)
           abort "gori run fuzz: #{ex.message}"
         end
+        # Everything a `--payload-from` needed is in memory now: release the project before the
+        # run, which can be long.
+        payload_store.try(&.close)
+        note_payload_from(command, plan.payload_reports)
         warn_fuzz_marks(plan)
         warn_fuzz_content_length(plan)
         warn_fuzz_unframed_body(plan)
@@ -507,7 +530,7 @@ module Gori
         in Fuzz::PlanError::Reason::BadTarget
           "could not determine a target host"
         in Fuzz::PlanError::Reason::NoPayloads
-          "no payloads — add -w/--preset/--payloads/--numbers/--null/--brute"
+          "no payloads — add -w/--preset/--payloads/--numbers/--null/--brute/--payload-from"
         in Fuzz::PlanError::Reason::UnresolvedEnv
           env_unresolved_error(ex.detail)
         in Fuzz::PlanError::Reason::BadRaceCount

@@ -152,11 +152,58 @@ The first two take **one** payload set; the last two take one per marked positio
 
 ### Positions and Payloads
 
-Mark positions with `§…§` markers in the request, or let gori place them automatically. Payload sets can be a built-in preset (`sqli`, `xss`, `traversal`, `format-string`, `bad-strings`, `command-injection`, `cache-delimiters`) for a fast start with no file, a wordlist, an explicit list, a numeric range, N empty (null) payloads, or brute-force character sets. A preset can merge an extra file (built-in first, de-duped), and composes with any other set. Processors let you transform each payload on the way out: prefix/suffix, URL/base64/hex encoding, case folding, hashing, or a regex replace.
+Mark positions with `§…§` markers in the request, or let gori place them automatically. Payload sets can be a built-in preset (`sqli`, `xss`, `traversal`, `format-string`, `bad-strings`, `command-injection`, `cache-delimiters`) for a fast start with no file, a wordlist (a file, or the name of a list in the [catalog](#wordlist-catalog)), an explicit list, a numeric range, N empty (null) payloads, or brute-force character sets. A preset can merge an extra file (built-in first, de-duped), and composes with any other set. Processors let you transform each payload on the way out: prefix/suffix, URL/base64/hex encoding, case folding, hashing, or a regex replace.
 
 A gRPC message is the one place a marker cannot go usefully; see [Sweeping a gRPC Field](#sweeping-a-grpc-field), where the position is a schema-known field rather than a byte range.
 
 A single marker can also carry a Decoder chain of its own. Put the cursor inside it and press `Ctrl-Q` to open the chain editor, which previews the marker's value through each step before you send (an `exec:` step is withheld from the preview and runs only on send). Anything you [saved in the Decoder library](/guide/decoder/#building-a-chain) can be called there by name, so a chain you built once is one word in a marker: `§admin¦myenc > url-encode§`. Repeater markers work the same way — in the TUI tab. Markers are a drafting language the tab renders on send, so the headless surfaces do not render them: `gori run repeater send`, MCP `send_request` and a retest step **refuse** a session whose `§…§` the tab would render, rather than put the literal `§` bytes on the wire. Remove the markers before sending from there, sweep the marked request as a Fuzzer template (`gori run fuzz --request=FILE`, `fuzz_start{template}`), or pass `--verbatim` / `verbatim:true` to say the stored bytes are the message. A `§` the capture itself carried is untouched: gori cannot tell it from one you typed, so the tab leaves it inert and every surface replays it byte-exact.
+
+### Wordlist Catalog
+
+Lists you reuse live in one place, `wordlists/` under `GORI_HOME` (`~/.gori/wordlists` by default). Every file there is a **named list**, and a name works anywhere a wordlist path does, from any working directory: `gori run fuzz -w common.txt`, `gori run mine --wordlist common.txt`, `discover --wordlist`, `cookie --crack --wordlist`, the Wordlist payload set in the Fuzzer, and the `wordlist` argument of the MCP `fuzz_start`, `mine_start`, `discover_start` and `cookie_crack`.
+
+- **Resolution.** A value with a `/` in it is a path and is opened exactly as given. A bare name is looked up in the **current directory first**, then in the catalog, so a file you have right here still wins over a saved list of the same name. A bare name found in neither place is refused as not found; `fuzz -w` and Cookie cracking also say the two places they looked.
+- **Names.** Letters and digits of any script, `_`, `.`, `+`, `-` and inner spaces, at most 200 bytes, never starting with `.` or `-`. A name is a file name, not a path: nothing that can leave the directory is accepted, and `gori` refuses to write through or over a symlink you keep there.
+- **The bytes are never normalized.** A list is the raw file. A blank line and a line starting with `#` are payloads to the Fuzzer, while the Miner and Discover keep reading those two shapes as formatting, exactly as they do for a path. Saving keeps every line as given.
+- **Managing lists.** `gori run wordlist` lists, shows, saves, renames and deletes them (see the [CLI reference](/reference/cli/#run-wordlist)); in the TUI, `Ctrl-S` in the List payload editor saves the values as a list, the Wordlist type's blank-field dropdown offers your favorites, recents and the catalog (by name), and `w` on the Target → Params sub-tab saves the listed parameter names into it; agents use `list_wordlists`, `get_wordlist`, `save_wordlist`, `rename_wordlist` and `delete_wordlist` (the [MCP guide](/guide/mcp/) lists them).
+- **Safe by default.** Listings and `show` never print a list's values (a list can be a credential list): `gori run wordlist show NAME --head N` and MCP `get_wordlist{include_values:true}` are the explicit ask, and both are bounded. Saved lists are owner-only (`0600` in a `0700` directory), written atomically, and never replace an existing list unless you say so (`--overwrite`, `overwrite:true`, or a second `Enter` in the TUI). Listing a multi-GB list costs a `stat`; a line count reads at most 32 MiB.
+- **Not a project feature.** The catalog is global, and a project never silently inherits a list: a name is something you typed. Contents are newline-delimited text; there are no descriptions or tags.
+
+```bash
+# a list saved once, used from anywhere
+gori run sitemap params --host api.example.com --format names | gori run wordlist save api-params.txt
+gori run mine 42 --wordlist api-params.txt
+```
+
+### Payloads from the Project
+
+The project already holds the target's own vocabulary: the parameter names its endpoints take, the values its clients send, the paths it serves, the endpoints its JavaScript points at, the tokens your extract rules pull out. A **project payload source** turns a slice of that into a set without a wordlist file to write first. It has two parts: a [QL query](/reference/query-language/) that picks the flows, and a **projection** that turns them into values.
+
+```bash
+gori run fuzz 42 --auto --payload-from 'host:api.example.com param-values'
+gori run mine 42 --payload-from 'host:api.example.com param-names'
+```
+
+| Projection | Values |
+| ---------- | ------ |
+| `param-names` | Parameter names of the selected requests (a JSON member contributes its leaf name) |
+| `param-values` | Parameter values, decoded once (`hello%20world` is `hello world`), so a query or form position encodes them exactly once |
+| `path-segments` | Request-path segments as captured (percent-encoded, which a path position takes raw) |
+| `js-endpoints` | Endpoint paths found in the selected flows' JavaScript. It reads what `gori run sitemap js --scan` stored and scans nothing |
+| `extracted` | Values your stored [extract rules](/guide/proxy/#session-bindings) pull out of the selected flows' stored responses (`extracted:NAME` for one rule): the rule's host glob and condition apply as they do live. Needs the sensitive opt-in |
+
+The descriptor is `<QL> <projection>`: the **last word** is the projection, and everything before it is the query (quote a value containing spaces, as QL always asks). A lone projection reads every flow. It reads the project and **sends nothing**: a source is built with nothing resolved, and the plan builder reads the project once, the same way on every surface, so the request count in the preflight and the confirm is the resolved size.
+
+- **The selection is strict.** A field QL does not have (`methd:GET`), a term QL would silently drop (`status:>=oops`, which would otherwise select the whole host) and a regex that cannot compile are refused, naming the term. A source is an exact selection, not a search you can eyeball.
+- **Bounded and reproducible.** It reads the newest 2000 flows, keeps at most 10,000 distinct values within an 8 MiB budget, skips a value over 4096 bytes and counts it. The order is newest flow first and first sighting wins, so the same project and options give the same list. What ended a read short is said, never silent: `--payload-from-max-flows` and `--payload-from-max-values` raise the first two. `js-endpoints` is one read of the stored references, so `--payload-from-max-flows` does not apply to it and its value cap tops out just under 50,000 (the report names the cap it applied).
+- **Secrets stay out by default.** Only the request's own inputs (query, form, multipart, JSON) are read; cookies and headers need `--payload-from-locations`. A value the project's redaction policy would mask (a credential-named field, a JWT or key shape, a JavaScript endpoint with a token in its path) is withheld and **counted**. A parameter *name* is never withheld, because a name is not a value. `--payload-from-sensitive` (MCP `include_sensitive`) is the explicit opt-in; it is reported on the run, and `extracted` refuses to run without it. The live session-binding table is never read: `extracted` re-applies the stored rules to stored responses and stores nothing.
+- **Values are kept as captured.** Nothing is trimmed or filtered. A value holding CR, LF or NUL is kept and counted in the report (`framing_values`), and what a position does with it is that position's own rule: query and form positions percent-encode it, a path position takes it raw.
+- **An empty source is a refusal**, not a clean run of zero requests. The message says why: no flow matched, nothing of that kind was in them, or everything was withheld as sensitive.
+- **Where it works.** `gori run fuzz` and `mine` (repeatable `--payload-from`, with `--payload-from-sensitive`, `--payload-from-locations` and the two caps applying to every source; a run with no `--flow`/`--project`/`--db` has no project to read and says so); MCP `fuzz_start` (`{"payload_from": "<QL> <projection>"}` in `payloads`, with `include_sensitive`, `locations`, `max_flows`, `max_values` beside it) and `mine_start` (`payload_from` plus `payload_from_*`); the Fuzzer's **Project** payload type, which asks for the query, the projection and the opt-in (off) and reads the project when the run starts. The run says what each source read, and never returns a value: `payload_sources` in the MCP reply, one `payload-from:` line on stderr, the run-start line in the TUI.
+- **In the Miner** a source must be `param-names`, and its names are tested in a fixed order: your explicit `--name`s, the project's names, the built-in list, then `--wordlist`, each name once at its first position. The TUI Miner popup has no text field, so it keeps seeding a mine with the host's other endpoints' names automatically; `--payload-from` is the headless spelling of choosing the slice yourself.
+- **Keep one for later.** `gori run wordlist save NAME --payload-from '<QL> <projection>' --project NAME` (MCP `save_wordlist{payload_from}`) saves the result as a list in the [catalog](#wordlist-catalog): an explicit act that names a project. It leaves out a value with a line break (a file holds one value per line) and counts it.
+
+This first version reports provenance per source (which query and projection, how many flows and values) and not per value.
 
 ### Matching
 

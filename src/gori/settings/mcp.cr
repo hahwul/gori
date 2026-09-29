@@ -43,7 +43,7 @@ module Gori::Settings
     McpPermission.new("intercept", "Intercept control",
       "forward, drop, edit and re-filter held traffic, and switch intercept on or off"),
     McpPermission.new("write", "Edit project data",
-      "issues, notes, repeaters, rules, env, session slots and the other project records"),
+      "issues, notes, repeaters, rules, env, session slots, saved wordlists and the other records"),
     # Its own group, not part of `write`: scope and the sandbox are the fence around what an
     # agent may reach, so an operator who lets it take notes need not let it move the fence.
     McpPermission.new("scope", "Change scope & sandbox",

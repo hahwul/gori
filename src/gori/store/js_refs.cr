@@ -137,6 +137,34 @@ module Gori
       }
     end
 
+    # The distinct endpoint PATHS the JavaScript of the flows `filter` selects referenced, newest
+    # source flow first and then by path — the read behind `PayloadFrom`'s `js-endpoints`
+    # projection (#1352). One indexed query bounded by `limit`, over the stored references only:
+    # nothing is scanned or written. `filter` is spliced the way `forget_js_scans` splices it
+    # (a subselect of the flows), so any QL the surfaces compile works here. Raises on a read
+    # error: a payload list built from a failed read would be a silently short one.
+    def js_ref_paths(filter : QL::Filter, limit : Int32) : Array(String)
+      out = [] of String
+      args = filter.args.dup
+      args << limit.clamp(1, JS_REF_READ_MAX).to_i64
+      @db.query("SELECT path, MAX(flow_id) AS newest FROM js_refs " \
+                "WHERE flow_id IN (SELECT id FROM flows WHERE #{filter.sql}) " \
+                "GROUP BY path ORDER BY newest DESC, path LIMIT ?", args: args) do |rs|
+        rs.each do
+          out << rs.read(String)
+          rs.read(Int64)
+        end
+      end
+      out
+    end
+
+    # How many of the flows `filter` selects have stored JavaScript references — what
+    # `js-endpoints` reports as the flows it read.
+    def js_ref_flow_count(filter : QL::Filter) : Int32
+      @db.scalar("SELECT COUNT(DISTINCT flow_id) FROM js_refs " \
+                 "WHERE flow_id IN (SELECT id FROM flows WHERE #{filter.sql})", args: filter.args).as(Int64).to_i32
+    end
+
     # Distinct referenced (host, path) pairs — what a scan reports as "new" by comparing the
     # count before and after.
     def js_ref_endpoint_count : Int32

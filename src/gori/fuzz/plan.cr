@@ -215,6 +215,15 @@ module Gori::Fuzz
     # spelling: the handshake is part 0 of the run's position space (see `Fuzz::WsScript`), so
     # `auto_mark`, `marks`, `sources`, `processors` and `auto_encode` all keep their meaning.
     property ws_messages : Array(WsMessageSource)?
+    # The project a `ProjectSource` in `sources` reads (#1352), or nil when the surface has no
+    # project to read. Passed in rather than loaded, like `overrides`: only a surface can reach a
+    # store. `Plan.build` resolves every `ProjectSource` against it — the one place a project is
+    # read for a run — and a source with no project to read is refused there, by name.
+    property project : Gori::Store?
+    # Drain the off-commit search index before a `body:`/free-text source query runs, and refuse
+    # when it cannot (the default: one-shot CLI and MCP). The live TUI passes false — it must not
+    # stall its frame waiting for a writer — and reads the backlog off the report instead.
+    property? project_drain_fts : Bool
 
     def initialize(@template : String = "",
                    *,
@@ -234,7 +243,9 @@ module Gori::Fuzz
                    @overrides : Gori::HostOverrides? = nil,
                    @env_vars : Hash(String, String)? = nil,
                    @grpc_fields : Array(String) = [] of String,
-                   @ws_messages : Array(WsMessageSource)? = nil)
+                   @ws_messages : Array(WsMessageSource)? = nil,
+                   @project : Gori::Store? = nil,
+                   @project_drain_fts : Bool = true)
     end
   end
 
@@ -350,6 +361,12 @@ module Gori::Fuzz
     # `config` — `config.tls_preset` is what the operator typed, this is what the dial uses.
     getter tls_preset : String?
 
+    # What each project-derived payload set (`ProjectSource`, #1352) read: its source, how many
+    # flows and values, what was withheld as sensitive, and what cut it short — in the order the
+    # sets were given. Empty for a run with none. A fact about the run only the builder can see,
+    # said once up front by whichever surface asked, and never carrying a value.
+    getter payload_reports : Array(PayloadFrom::Report)
+
     def initialize(@engine : Engine, @generator : Generator, @matcher : Matcher,
                    @config : Config, @origin : Origin, @template : Template,
                    @http2 : Bool, @request_target : String,
@@ -362,7 +379,8 @@ module Gori::Fuzz
                    @ws_script : WsScript? = nil,
                    @ws_ignored_knobs : Array(Symbol) = [] of Symbol,
                    @grpc_fields : GrpcFieldTemplate? = nil,
-                   @tls_preset : String? = nil)
+                   @tls_preset : String? = nil,
+                   @payload_reports : Array(PayloadFrom::Report) = [] of PayloadFrom::Report)
     end
 
     # Does this run sweep a WebSocket script rather than an HTTP request?
@@ -519,6 +537,10 @@ module Gori::Fuzz
 
       origin = resolve_origin(options)
 
+      # Project-derived sets are read HERE, before the sets are paired with the processing
+      # pipeline: every surface hands over the same `ProjectSource`, and this is the one place a
+      # store is read for a run. Skipped for a race, which draws from no set at all.
+      payload_reports = race_count ? [] of PayloadFrom::Report : resolve_project_sources(options)
       sets = options.sources.map { |src| PayloadSet.new(src, options.processors) }
       raise PlanError.new(PlanError::Reason::NoPayloads, "no payload sets") if sets.empty? && !race_count
 
@@ -596,7 +618,21 @@ module Gori::Fuzz
         unframed_body: unframed_body?(config, generator.baseline_raw),
         shadowed_marks: shadowed_marks, unused_payload_sets: unused_sets, auto_encode: auto_encode,
         ws_script: ws_script, ws_ignored_knobs: ws_ignored, grpc_fields: grpc_fields,
-        tls_preset: sender.tls_preset)
+        tls_preset: sender.tls_preset, payload_reports: payload_reports)
+    end
+
+    # Resolve every `ProjectSource` against the project the surface handed over (#1352). A
+    # reading run with no project to read is refused by name rather than reaching `size` and
+    # failing there with no context. The reports come back in set order.
+    private def self.resolve_project_sources(options : PlanOptions) : Array(PayloadFrom::Report)
+      reports = [] of PayloadFrom::Report
+      options.sources.each do |src|
+        next unless src.is_a?(ProjectSource)
+        store = options.project || raise PayloadFrom::Error.new(
+          "payload source #{src.spec.label.inspect} reads the project's captured data, and this run has no project to read")
+        reports << src.resolve!(store, drain_fts: options.project_drain_fts?)
+      end
+      reports
     end
 
     # Will this run put an UNFRAMED body on the wire? See `Plan#unframed_body?`.

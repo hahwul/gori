@@ -1,5 +1,6 @@
 require "../embedded_list"
 require "../tty_path"
+require "../wordlist_catalog"
 
 module Gori::Miner
   # The candidate parameter names. The built-in list is baked into the binary at
@@ -22,7 +23,9 @@ module Gori::Miner
       names = builtin.dup
       if path = user_path.try(&.strip) # open the STRIPPED path (the emptiness check used it too)
         unless path.empty?
-          merge_user_file(path) { |line| names << line }
+          # A bare name is a list in the current directory or the global catalog (#1353); a
+          # path is opened exactly as given.
+          merge_user_file(WordlistCatalog.resolve_path(path)) { |line| names << line }
         end
       end
       EmbeddedList.dedup(names)

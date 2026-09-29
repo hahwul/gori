@@ -421,7 +421,7 @@ module Gori
           s.field "spider", boolprop("follow links (default true)")
           s.field "bruteforce", boolprop("brute-force directory/path names (default true)")
           s.field "max_depth", intprop("spider depth from the seed (default 4, max #{DISCOVER_MAX_DEPTH})")
-          s.field "wordlist", strprop("path to an extra path wordlist (merged with the built-in list)")
+          s.field "wordlist", strprop("path to an extra path wordlist, or the name of a saved list (list_wordlists); merged with the built-in list")
           s.field "extensions", strprop("comma list of extensions to also probe (e.g. php,json,bak)")
           s.field "headers", header_map_prop("custom request headers added to every probe (e.g. Authorization/Cookie): a name->value map, or a [{\"name\",\"value\"}] list; overrides Accept/User-Agent, Host/Connection are ignored")
           s.field "containment", enumprop("how far off the seed the crawl may wander (default scope-aware)", DISCOVER_CONTAINMENTS)

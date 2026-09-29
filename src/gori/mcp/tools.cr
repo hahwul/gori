@@ -54,6 +54,8 @@ require "./tools/retest"
 require "./tools/mine"
 require "./tools/minimize"
 require "./tools/notes"
+require "./tools/wordlists"
+require "./tools/payload_from"
 require "./tools/oast_providers"
 require "./tools/oast_sessions"
 require "./tools/probe"
@@ -1296,6 +1298,7 @@ module Gori
           list_host_overrides_tools j
           list_session_slots_tools j
           list_notes_tools j
+          list_wordlists_tools j
           list_decode_tools j
           list_cookie_tools j
           list_sequence_tools j

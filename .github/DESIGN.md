@@ -4330,3 +4330,101 @@ Known gaps, each a heuristic trade-off rather than an oversight:
 also changes its 5-byte prefix and varint lengths, and a gRPC sweep can split one answer into a
 few shapes by payload length. Deframing with `Grpc.scan_wire` first is the fix when it matters;
 `grpc_status` is already its own key part, so a denied call never merges with a granted one.
+
+### 2026-09-29: a wordlist is a file in a global catalog, and a bare name reads the working directory first (#1353)
+
+`~/.gori/wordlists` was a convention only the TUI Fuzzer knew: its completion listed it, and inserted
+an absolute path because the engine opened whatever it was handed relative to the working directory.
+CLI, MCP, Miner and Discover took a path and nothing else, so a list saved once could not be picked
+by name outside one text field. `Gori::WordlistCatalog` is the naming and placement layer over that
+directory, and nothing more.
+
+- **The contents stay files.** Not `settings.json` and not a project database: a file keeps the
+  global-versus-project boundary (a project never inherits a list; a name is something the operator
+  typed), reads lazily (`Fuzz::WordlistFile` walks a multi-GB list without materializing it) and is
+  what an operator already drops in that directory by hand.
+- **One resolution rule, in one place.** `WordlistCatalog.resolve` returns a value containing `/`
+  unchanged, byte for byte, and looks a bare name up in the current directory first and the catalog
+  second, so a file you have right here still beats a saved list of the same name. A bare name found
+  nowhere comes back as typed and the consumer reports it in its own words, now saying where it
+  looked. `Fuzz::WordlistFile`, `Fuzz::Presets` (the `NAME:FILE` merge), `Miner::Wordlist` and
+  `Discover::Wordlist` call it, so the CLI, MCP and the TUI Fuzzer agree without a per-surface copy.
+  The TUI cookie-crack field does not: it takes an inline secret list as well as a path, and a bare
+  word there resolving to a file would replace a secret the operator typed.
+- **The bytes are never normalized.** A blank line and a `#` line are payloads to the Fuzzer and
+  formatting to the Miner and Discover (`merge_user_file`), and both are right for their tool. The
+  catalog writes and copies verbatim and lists from `stat`; a line count reads at most 32 MiB and a
+  value preview only happens on request, bounded. Values appear in no listing.
+- **A name is a filename, never a path.** Letters and digits of any script, `_ . + -` and inner
+  spaces, at most 200 bytes, never leading with `.` or `-`. No separator or control character can
+  occur, and the staging file (`.NAME.gori….tmp`) is a hidden name the catalog never lists.
+- **Writes are atomic, owner-only, and never an accident.** `DurableFile` stages the file at 0600 in
+  the 0700 directory. Without `overwrite` the install is a hard link, which fails when the name is
+  taken, so a save that races another lands as a refusal and not a replace; the `exists?` before it
+  only stops a doomed save from staging gigabytes. A symlink a save would write through, or replace,
+  is refused (delete it first), and `rename` moves a link as a link.
+- **MCP treats it as a write.** `save_wordlist`, `rename_wordlist` and `delete_wordlist` sit in the
+  `write` group (the catalog is a global record an operator lets an agent keep), work with no project
+  bound, and `delete_wordlist` needs `confirm:true` like the other irreversible ones. `get_wordlist`
+  returns values only with `include_values:true`.
+- **The history remembers names, and the path when the name would lie.** `Settings.canonical_wordlist`
+  is the key: a catalog list and the absolute path an older gori inserted are one entry.
+  `Settings.remembered_wordlist` is what is stored, the name unless a file of that name in the working
+  directory would shadow it (a bare name reads the directory first). There the path is kept, because
+  the pick was inserted as a path for exactly that reason and the entry must not turn into the
+  working-directory file the next time. The completion asks `resolve` when it inserts — its rule is
+  not copied — so it still writes the shorter spelling whenever the name is enough. Two spellings
+  that differ only by that shadow share a key, so starring or recording one replaces the other rather
+  than listing a file the history cannot tell apart twice. The LIVE Run-row estimate stats the same
+  `resolve_path` the engine opens.
+- **Every writer goes through the catalog.** The Params `w` export used to write its own 0644 file
+  and replace one of the same name. It now saves through `save_values`: 0600 like the rest, and a
+  second press in the same second takes the next free `-2`, `-3` name rather than failing.
+
+### 2026-09-29: a project payload source is read by the plan builder, and secrets stay out unless asked (#1352)
+
+Fuzzer and Miner could only take values typed, listed in a file, or generated, while the project
+already held the target's own vocabulary. `Gori::PayloadFrom` is a QL selector plus a projection
+(`param-names`, `param-values`, `path-segments`, `js-endpoints`, `extracted`), and a surface only
+parses its own syntax into a normalized `Spec`.
+
+- **The plan builder reads the project.** `Fuzz::ProjectSource` and `Miner::PlanOptions#project_names`
+  are built with nothing resolved, and `Plan.build` resolves them against `PlanOptions#project`,
+  before the sets are paired with the pipeline. That is the same seam every tool has, so the CLI, MCP
+  and the TUI cannot differ on caps, secrets or refusals, and the resolved size is what the preflight
+  and the confirm already count. The read is never on the proxy path or the Store writer (P6): it is
+  the parameter inventory's newest-first, id-cursor-paged walk, one flow in hand at a time.
+- **Strict, bounded, reproducible.** The QL is refused for an unknown field, a dropped term (which
+  would broaden the selection) or a regex that cannot compile. Flows, distinct values, total bytes
+  and one value's length are capped, and what ended a read is on its report. `js-endpoints` is one
+  store read (`JS_REF_READ_MAX`), so it applies one less than that as its value cap and the report
+  names the cap that applied; `max_flows` does not bound it. The order is the walk's,
+  first sighting wins. An empty source is a refusal, because a zero-request run reads as "nothing
+  there".
+- **Values are the captured value (P7).** A source does not trim, filter for framing bytes or
+  re-encode. `param-values` are decoded once, as `Params` reads them, so a query or form position's
+  own rule encodes them once; `path-segments` stay as captured, which is what a path position takes.
+  A value holding CR, LF or NUL is kept and counted, because dropping it would decide for the operator
+  which captured bytes are payloads.
+- **Secrets are opt-in, and the opt-in is reported.** The default reads query, form, multipart and
+  JSON only, and withholds any value `ParamInventory::Sensitivity` would mask (the same policy, now
+  public, rather than a second list of secrets), a JavaScript endpoint with a credential-shaped
+  segment included. Names are not withheld: a name is not a value. `extracted` is credential
+  material by nature and refuses without the opt-in. Every report carries the policy and, on MCP,
+  no value at all. The opt-in is an argument the caller passes, as `get_flow`'s `include_sensitive`
+  is: an agent that may read a flow's raw headers may also ask for these, and the run says
+  `SENSITIVE INCLUDED`.
+- **Nothing live becomes durable.** `extracted` re-applies the stored extract rules (their host glob,
+  their condition, `TokenExtract`) to stored responses, as a History display column does. The
+  memory-only binding table (#501) is not read, and saving a list from project data is its own
+  explicit act (`wordlist save --payload-from`, `save_wordlist{payload_from}`) that names the project.
+  A value a one-value-per-line file cannot carry (it holds a line break) is left out of that save
+  and counted, through `WordlistCatalog.one_per_line`: the predicate `save_values` refuses on, so
+  what a file cannot hold is decided in one place.
+- **A run with no named project reads nothing.** `--request` and stdin are deliberately outside any
+  project, so a source there is refused rather than pointed at the most recent project.
+- **Miner precedence is fixed.** Explicit names, the project's names, the built-in list, then the
+  user wordlist, first sighting wins. The TUI Miner popup keeps its no-text-field rule and keeps
+  seeding neighbour names itself; the Fuzzer's payload editor gets a Project type.
+- **Left for later.** Provenance is per source (query, projection, counts), not per value; a
+  per-value flow id would cost memory the caps are there to bound.

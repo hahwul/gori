@@ -151,11 +151,58 @@ Fuzzer는 Intruder 스타일 엔진입니다. 요청에서 위치를 표시하�
 
 ### 위치와 페이로드 {#positions-and-payloads}
 
-요청에서 `§…§` 마커로 위치를 표시하거나, gori가 자동으로 배치하게 하세요. 페이로드 세트는 내장 프리셋(`sqli`, `xss`, `traversal`, `format-string`, `bad-strings`, `command-injection`, `cache-delimiters`. 파일 없이 바로 시작), 워드리스트, 명시적 목록, 숫자 범위, N개의 빈(null) 페이로드, 또는 무차별 대입 문자 세트가 될 수 있습니다. 프리셋은 추가 파일을 병합(내장 우선, 중복 제거)할 수 있고 다른 세트와 조합됩니다. 프로세서를 사용하면 나가는 각 페이로드를 변환할 수 있습니다: prefix/suffix, URL/base64/hex 인코딩, 대소문자 변환, 해싱, 정규식 치환.
+요청에서 `§…§` 마커로 위치를 표시하거나, gori가 자동으로 배치하게 하세요. 페이로드 세트는 내장 프리셋(`sqli`, `xss`, `traversal`, `format-string`, `bad-strings`, `command-injection`, `cache-delimiters`. 파일 없이 바로 시작), 워드리스트(파일, 또는 [카탈로그](#wordlist-catalog)에 있는 목록의 이름), 명시적 목록, 숫자 범위, N개의 빈(null) 페이로드, 또는 무차별 대입 문자 세트가 될 수 있습니다. 프리셋은 추가 파일을 병합(내장 우선, 중복 제거)할 수 있고 다른 세트와 조합됩니다. 프로세서를 사용하면 나가는 각 페이로드를 변환할 수 있습니다: prefix/suffix, URL/base64/hex 인코딩, 대소문자 변환, 해싱, 정규식 치환.
 
 마커 하나에 자체 Decoder 체인을 붙일 수도 있습니다. 커서를 마커 안에 두고 `Ctrl-Q`를 누르면 체인 편집기가 열리고, 보내기 전에 마커의 값이 각 단계를 거치는 모습을 미리 보여 줍니다(`exec:` 단계는 미리보기에서 빠지고 전송할 때만 실행됩니다). [Decoder 라이브러리에 저장해 둔 체인](/ko/guide/decoder/#building-a-chain)은 여기서 이름으로 부를 수 있어서, 한 번 만들어 둔 체인이 마커 안에서는 단어 하나가 됩니다: `§admin¦myenc > url-encode§`. Repeater 마커도 TUI 탭에서는 동일하게 동작합니다. 마커는 탭이 전송할 때 렌더링하는 초안 언어이므로 헤드리스 표면은 렌더링하지 않습니다. `gori run repeater send`, MCP `send_request`, 재테스트 단계는 탭이라면 렌더링했을 `§…§`가 든 세션을 리터럴 `§` 바이트로 내보내지 않고 **거부**합니다. 거기서 보내려면 마커를 지우거나, 마크된 요청을 Fuzzer 템플릿으로 스윕하거나(`gori run fuzz --request=FILE`, `fuzz_start{template}`), `--verbatim` / `verbatim:true`로 저장된 바이트가 곧 메시지라고 밝히세요. 캡처 자체에 들어 있던 `§`는 건드리지 않습니다. gori는 그것을 직접 입력한 것과 구분할 수 없으므로 탭은 그대로 두고, 모든 표면이 바이트 그대로 재생합니다.
 
 gRPC 메시지는 마커가 유용하게 쓰이지 않는 유일한 곳입니다. 위치가 바이트 범위가 아니라 스키마가 아는 필드인 [gRPC 필드 스윕](#sweeping-a-grpc-field)을 보세요.
+
+### Wordlist 카탈로그 {#wordlist-catalog}
+
+다시 쓰는 목록은 `GORI_HOME` 아래 `wordlists/`(기본값 `~/.gori/wordlists`) 한 곳에 둡니다. 그곳의 파일은 하나하나가 **이름 붙은 목록**이고, 이름은 wordlist 경로를 받는 어디에서나 어느 작업 디렉터리에서든 쓸 수 있습니다: `gori run fuzz -w common.txt`, `gori run mine --wordlist common.txt`, `discover --wordlist`, `cookie --crack --wordlist`, Fuzzer의 Wordlist 페이로드 세트, 그리고 MCP `fuzz_start`, `mine_start`, `discover_start`, `cookie_crack`의 `wordlist` 인자.
+
+- **해석 규칙.** 값에 `/`가 있으면 경로이고 주어진 그대로 엽니다. 이름만 있으면 **현재 디렉터리를 먼저**, 그다음 카탈로그를 찾습니다. 지금 이 디렉터리에 있는 파일이 같은 이름의 저장 목록보다 우선합니다. 어느 쪽에도 없는 이름은 찾을 수 없다는 오류로 거부되고, `fuzz -w`와 Cookie 크래킹은 찾아본 두 곳도 함께 알려 줍니다.
+- **이름.** 어느 문자든 글자와 숫자, `_`, `.`, `+`, `-`, 안쪽 공백. 최대 200바이트이고 `.`이나 `-`로 시작할 수 없습니다. 이름은 파일 이름이지 경로가 아닙니다. 디렉터리를 벗어날 수 있는 값은 받지 않고, 그 안에 둔 심볼릭 링크를 통과하거나 덮어쓰지도 않습니다.
+- **바이트는 절대 정규화하지 않습니다.** 목록은 원본 파일입니다. 빈 줄과 `#`로 시작하는 줄은 Fuzzer에서는 페이로드이고, Miner와 Discover는 경로를 줄 때와 똑같이 그 두 형태를 서식으로 읽습니다. 저장은 모든 줄을 준 그대로 유지합니다.
+- **목록 관리.** `gori run wordlist`로 나열·보기·저장·이름 변경·삭제를 합니다([CLI 레퍼런스](/ko/reference/cli/#run-wordlist)). TUI에서는 List 페이로드 편집기의 `Ctrl-S`가 값들을 목록으로 저장하고, Wordlist 타입의 빈 필드 드롭다운이 즐겨찾기·최근 항목·카탈로그를 이름으로 보여 주며, Target → Params 서브탭의 `w`가 나열된 파라미터 이름을 카탈로그에 저장합니다. 에이전트는 `list_wordlists`, `get_wordlist`, `save_wordlist`, `rename_wordlist`, `delete_wordlist`를 씁니다([MCP 가이드](/ko/guide/mcp/)에 나열).
+- **기본값이 안전합니다.** 목록 조회와 `show`는 값을 절대 출력하지 않습니다(목록은 자격 증명 목록일 수 있습니다). `gori run wordlist show NAME --head N`과 MCP `get_wordlist{include_values:true}`가 명시적 요청이고 둘 다 상한이 있습니다. 저장한 목록은 소유자 전용(`0700` 디렉터리 안의 `0600`)이며 원자적으로 쓰고, 명시하지 않으면 기존 목록을 덮어쓰지 않습니다(`--overwrite`, `overwrite:true`, TUI에서는 `Enter` 한 번 더). 수 GB 목록을 나열하는 비용은 `stat` 한 번이고, 줄 수 세기는 최대 32 MiB만 읽습니다.
+- **프로젝트 기능이 아닙니다.** 카탈로그는 전역이며, 프로젝트가 목록을 조용히 물려받는 일은 없습니다. 이름은 직접 입력한 것입니다. 내용은 줄바꿈으로 구분한 텍스트이고 설명이나 태그는 없습니다.
+
+```bash
+# 한 번 저장한 목록을 어디서든 사용
+gori run sitemap params --host api.example.com --format names | gori run wordlist save api-params.txt
+gori run mine 42 --wordlist api-params.txt
+```
+
+### 프로젝트에서 가져오는 페이로드 {#payloads-from-the-project}
+
+프로젝트에는 이미 대상 자신의 어휘가 들어 있습니다. 엔드포인트가 받는 파라미터 이름, 클라이언트가 보내는 값, 서비스하는 경로, JavaScript가 가리키는 엔드포인트, extract 규칙이 뽑아내는 토큰입니다. **프로젝트 페이로드 소스**는 그 일부를 wordlist 파일을 먼저 만들지 않고도 세트로 바꿔 줍니다. 두 부분으로 되어 있습니다. flow를 고르는 [QL 쿼리](/ko/reference/query-language/)와, 그 flow를 값으로 바꾸는 **프로젝션**입니다.
+
+```bash
+gori run fuzz 42 --auto --payload-from 'host:api.example.com param-values'
+gori run mine 42 --payload-from 'host:api.example.com param-names'
+```
+
+| 프로젝션 | 값 |
+| -------- | -- |
+| `param-names` | 선택한 요청의 파라미터 이름(JSON 멤버는 마지막 키 이름) |
+| `param-values` | 한 번 디코딩한 파라미터 값(`hello%20world`는 `hello world`)이라 query·form 위치가 정확히 한 번만 인코딩합니다 |
+| `path-segments` | 캡처된 그대로의 요청 경로 세그먼트(percent-encoded, 경로 위치는 이를 raw로 받습니다) |
+| `js-endpoints` | 선택한 flow의 JavaScript에서 찾은 엔드포인트 경로. `gori run sitemap js --scan`이 저장해 둔 것을 읽을 뿐 스캔하지 않습니다 |
+| `extracted` | 저장된 [extract 규칙](/ko/guide/proxy/#session-bindings)이 선택한 flow의 저장된 응답에서 뽑아내는 값(`extracted:NAME`은 규칙 하나). 규칙의 호스트 glob과 조건은 라이브와 똑같이 적용됩니다. 민감 값 opt-in이 필요합니다 |
+
+디스크립터는 `<QL> <projection>`입니다. **마지막 단어**가 프로젝션이고 그 앞은 전부 쿼리입니다(공백이 든 값은 QL 규칙대로 따옴표로 묶으세요). 프로젝션만 있으면 모든 flow를 읽습니다. 프로젝트를 읽기만 하고 **아무것도 보내지 않습니다**. 소스는 아무것도 해석하지 않은 채 만들어지고, plan builder가 모든 표면에서 똑같이 프로젝트를 한 번 읽으므로 preflight와 확인창의 요청 수는 해석된 크기입니다.
+
+- **선택은 엄격합니다.** QL에 없는 필드(`methd:GET`), QL이 조용히 버릴 항(`status:>=oops`. 그대로면 호스트 전체가 선택됩니다), 컴파일되지 않는 정규식은 해당 항을 밝히며 거부합니다. 소스는 눈으로 확인하는 검색이 아니라 정확한 선택입니다.
+- **한도가 있고 재현됩니다.** 최근 flow 2000개를 읽고, 서로 다른 값을 최대 10,000개, 8 MiB 예산 안에서 보관하며, 4096바이트가 넘는 값은 건너뛰고 셉니다. 순서는 최신 flow가 먼저이고 처음 본 것이 자리를 지키므로, 같은 프로젝트와 옵션이면 같은 목록이 나옵니다. 읽기를 멈춘 원인은 조용히 넘어가지 않고 알려 줍니다. `--payload-from-max-flows`와 `--payload-from-max-values`로 앞의 두 한도를 올립니다. `js-endpoints`는 저장된 참조를 한 번에 읽으므로 `--payload-from-max-flows`가 적용되지 않고, 값 한도는 50,000개 바로 아래까지만 올라갑니다(리포트에 실제로 적용한 한도가 나옵니다).
+- **비밀은 기본적으로 빠집니다.** 요청 자체의 입력(query, form, multipart, JSON)만 읽고, 쿠키와 헤더는 `--payload-from-locations`가 필요합니다. 프로젝트의 redaction 정책이 가릴 값(자격 증명 이름의 필드, JWT나 키 형태, 경로에 토큰이 들어 있는 JavaScript 엔드포인트)은 제외하고 **셉니다**. 파라미터 *이름*은 값이 아니므로 절대 제외하지 않습니다. `--payload-from-sensitive`(MCP `include_sensitive`)가 명시적 opt-in이고, 실행에 보고되며, `extracted`는 이것 없이는 실행을 거부합니다. 라이브 세션 바인딩 테이블은 읽지 않습니다. `extracted`는 저장된 규칙을 저장된 응답에 다시 적용할 뿐 아무것도 저장하지 않습니다.
+- **값은 캡처된 그대로 유지됩니다.** 다듬거나 거르지 않습니다. CR, LF, NUL이 든 값은 남겨 두고 보고서(`framing_values`)에 세며, 그 값을 위치가 어떻게 다루는지는 그 위치 자신의 규칙입니다. query·form 위치는 percent-encode하고 경로 위치는 raw로 받습니다.
+- **빈 소스는 거부합니다.** 요청 0개짜리 정상 실행이 아닙니다. 이유(맞는 flow가 없음, 그 종류의 값이 없음, 전부 민감하다고 제외됨)를 알려 줍니다.
+- **쓸 수 있는 곳.** `gori run fuzz`와 `mine`(반복 가능한 `--payload-from`, 모든 소스에 적용되는 `--payload-from-sensitive`, `--payload-from-locations`, 두 한도. `--flow`/`--project`/`--db`가 없는 실행은 읽을 프로젝트가 없다고 말합니다), MCP `fuzz_start`(`payloads` 안의 `{"payload_from": "<QL> <projection>"}`과 그 옆의 `include_sensitive`, `locations`, `max_flows`, `max_values`)와 `mine_start`(`payload_from`과 `payload_from_*`), Fuzzer의 **Project** 페이로드 타입(쿼리, 프로젝션, opt-in(꺼짐)을 묻고 실행이 시작될 때 프로젝트를 읽습니다). 실행은 각 소스가 무엇을 읽었는지 알려 주되 값은 돌려주지 않습니다. MCP 응답의 `payload_sources`, stderr의 `payload-from:` 한 줄, TUI의 실행 시작 줄이 그것입니다.
+- **Miner에서는** 소스가 `param-names`여야 하고, 이름은 정해진 순서로 시험합니다. 명시한 `--name`, 프로젝트의 이름, 내장 목록, `--wordlist` 순이며 각 이름은 처음 나온 자리에서 한 번만 시험합니다. TUI Miner 팝업에는 텍스트 필드가 없어서 계속 호스트의 다른 엔드포인트 이름을 자동으로 시드합니다. `--payload-from`은 그 조각을 직접 고르는 헤드리스 방식입니다.
+- **나중을 위해 보관.** `gori run wordlist save NAME --payload-from '<QL> <projection>' --project NAME`(MCP `save_wordlist{payload_from}`)은 결과를 [카탈로그](#wordlist-catalog)의 목록으로 저장합니다. 프로젝트를 지정해야 하는 명시적 행위이며, 줄바꿈이 든 값(파일은 한 줄에 값 하나)은 빼고 셉니다.
+
+이 첫 버전은 출처를 값 단위가 아니라 소스 단위(어떤 쿼리와 프로젝션, flow와 값이 몇 개)로 보고합니다.
 
 ### 매칭 {#matching}
 

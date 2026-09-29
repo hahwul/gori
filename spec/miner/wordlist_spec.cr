@@ -76,3 +76,33 @@ describe Gori::Miner::Wordlist do
     end
   end
 end
+
+describe "Gori::Miner::Wordlist with the global catalog (#1353)" do
+  it "merges a list named in the catalog, from any working directory" do
+    with_wordlist_home do
+      Gori::WordlistCatalog.save_values("names.txt", ["zzcatalog1", "", "# comment", "zzcatalog2"])
+      merged = Gori::Miner::Wordlist.load("names.txt")
+      merged.should contain("zzcatalog1")
+      merged.should contain("zzcatalog2")
+      merged.none?(&.starts_with?('#')).should be_true # the Miner's own line semantics, unchanged
+      merged.none?(&.empty?).should be_true
+    end
+  end
+
+  it "prefers a file of that name in the current directory" do
+    with_wordlist_home do
+      Gori::WordlistCatalog.save_values("names.txt", ["zzfromcatalog"])
+      File.write("names.txt", "zzfromcwd\n")
+      merged = Gori::Miner::Wordlist.load("names.txt")
+      merged.should contain("zzfromcwd")
+      merged.should_not contain("zzfromcatalog")
+    end
+  end
+
+  it "reads a path as given, never from the catalog" do
+    with_wordlist_home do
+      Gori::WordlistCatalog.save_values("names.txt", ["zzfromcatalog"])
+      expect_raises(File::NotFoundError) { Gori::Miner::Wordlist.load("./names.txt") }
+    end
+  end
+end

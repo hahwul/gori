@@ -90,7 +90,7 @@ private def with_params_controller(&)
   begin
     host = FakeHost.new(session)
     sitemap = SitemapController.new(host)
-    yield ParamsController.new(host, sitemap.view), sitemap, session
+    yield ParamsController.new(host, sitemap.view), sitemap, session, host
   ensure
     session.close
     FileUtils.rm_rf(root) if Dir.exists?(root)
@@ -216,5 +216,64 @@ describe ParamsController do
     v.target = ParamsView::Target.new("ACME.TEST", nil, "ACME.TEST")
     v.rows.map(&.name).should eq(["a"])
     v.host_rows("Acme.Test").map(&.name).should eq(["a"])
+  end
+end
+
+# `w` on the Params sub-tab (#1353): the names go into the global wordlist catalog — a list
+# the Fuzzer picks by name and `gori run mine --wordlist NAME` takes from any directory —
+# saved through the catalog, so owner-only, atomic, and never over an existing list.
+describe ParamsController do
+  it "exports the visible names as a catalog list, owner-only" do
+    with_wordlist_home do
+      with_params_controller do |ctl, _, session|
+        seed_params_flow(session.store, "https://acme.test/search?q=shoes&page=2")
+        ctl.run
+        drain_until_landed(ctl)
+        ctl.export_wordlist
+        entries = Gori::WordlistCatalog.list.entries
+        entries.size.should eq(1)
+        entries.first.name.should match(/\Aparams-.*-\d{8}-\d{6}\.txt\z/)
+        File.read(entries.first.path).lines.sort!.should eq(["page", "q"])
+        (File.info(entries.first.path).permissions.value & 0o777).should eq(0o600)
+      end
+    end
+  end
+
+  # The stamp has one-second resolution and the catalog never replaces: the second press takes
+  # the next free name rather than failing against the first press's file (or replacing it).
+  it "takes the next free name when two exports share a stamp" do
+    with_wordlist_home do
+      with_params_controller do |ctl, _, session, host|
+        seed_params_flow(session.store, "https://acme.test/search?q=shoes&page=2")
+        ctl.run
+        drain_until_landed(ctl)
+        3.times { ctl.export_wordlist("20260929-101500") }
+        entries = Gori::WordlistCatalog.list.entries
+        names = entries.map(&.name)
+        names.size.should eq(3)
+        names.should contain("params-all-20260929-101500.txt")
+        names.should contain("params-all-20260929-101500-2.txt")
+        names.should contain("params-all-20260929-101500-3.txt")
+        host.statuses.none?(&.starts_with?("wordlist export failed")).should be_true
+        entries.each { |e| File.read(e.path).lines.sort!.should eq(["page", "q"]) }
+      end
+    end
+  end
+
+  it "clips a very long host so the list name stays a valid catalog name" do
+    with_wordlist_home do
+      with_params_controller do |ctl, _, session|
+        long = "a" * 60 + "." + "b" * 60 + "." + "c" * 60 + ".test"
+        seed_params_flow(session.store, "https://#{long}/x?q=1")
+        ctl.run
+        drain_until_landed(ctl)
+        ctl.set_target(ParamsView::Target.new(long, nil, long))
+        drain_until_landed(ctl)
+        ctl.export_wordlist
+        entries = Gori::WordlistCatalog.list.entries
+        entries.size.should eq(1)
+        Gori::WordlistCatalog.valid_name?(entries.first.name).should be_true
+      end
+    end
   end
 end

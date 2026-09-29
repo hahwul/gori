@@ -482,6 +482,20 @@ describe Gori::Tui::FuzzerView do
       view.run_request_count.should be_nil # File.info? → nil → unknown, never a blocking read
     end
 
+    # A list the completion inserted by NAME (#1353) is counted like any other: the estimate
+    # stats the file the engine will open (`WordlistCatalog.resolve_path`), not the bare word,
+    # which does not exist in the working directory.
+    it "run_request_count counts a wordlist chosen by its catalog name" do
+      with_wordlist_home do |wl|
+        Dir.mkdir_p(wl)
+        File.write(File.join(wl, "common.txt"), "a\nb\nc\n")
+        view = FuzzerView.new
+        view.load_request("https://h", "GET /?x=§1§ HTTP/1.1\r\nHost: h\r\n\r\n", false, "")
+        view.apply_set(nil, Gori::Tui::SetSpec.new(:file, "common.txt"))
+        view.run_request_count.should eq(3_i64)
+      end
+    end
+
     it "advanced_snapshot round-trips through apply_advanced" do
       view = loaded_fuzzer
       snap = view.advanced_snapshot
@@ -1127,24 +1141,45 @@ describe Gori::Tui::PathComplete do
     end
   end
 
-  it "completes bare names from ~/.gori/wordlists with an ABSOLUTE insert (G1)" do
-    home = File.tempname("gori_home")
-    wl = File.join(home, "wordlists")
-    Dir.mkdir_p(wl)
-    File.write(File.join(wl, "rockyou.txt"), "")
-    old = ENV["GORI_HOME"]?
-    ENV["GORI_HOME"] = home
-    begin
+  # A list in the global catalog is inserted by NAME (#1353): the engine resolves a bare name
+  # against the working directory and then the catalog, so the name is enough (it used to have to
+  # be the absolute path, because a wordlists-dir-only name failed at run time). The one case a
+  # name is NOT enough is a same-named file in the working directory, which a bare name would
+  # read instead — there the absolute path is inserted.
+  it "completes bare names from ~/.gori/wordlists, inserting the bare name (G1)" do
+    with_wordlist_home do |wl|
+      Dir.mkdir_p(wl)
+      File.write(File.join(wl, "rockyou.txt"), "")
       pc = PathComplete.new
       pc.refresh("rock")
-      hit = pc.entries.find { |e| e.label.starts_with?("rockyou.txt") }.not_nil!
-      # The engine opens wordlist paths relative to CWD, so a wordlists-dir-only name
-      # MUST resolve absolutely — a bare "rockyou.txt" insert would fail at run time.
-      hit.insert.should eq(File.join(wl, "rockyou.txt"))
+      hit = pc.entries.find(&.label.starts_with?("rockyou.txt")).not_nil!
+      hit.insert.should eq("rockyou.txt")
       hit.label.should contain("·~/.gori")
-    ensure
-      old ? (ENV["GORI_HOME"] = old) : ENV.delete("GORI_HOME")
-      FileUtils.rm_rf(home)
+    end
+  end
+
+  it "inserts the absolute path for a catalog list a same-named file in the working directory shadows" do
+    with_wordlist_home do |wl|
+      Dir.mkdir_p(wl)
+      File.write(File.join(wl, "rockyou.txt"), "")
+      File.write("rockyou.txt", "cwd copy\n")
+      pc = PathComplete.new
+      pc.refresh("rock")
+      global = pc.entries.find(&.label.includes?("·~/.gori")).not_nil!
+      global.insert.should eq(File.join(wl, "rockyou.txt"))
+      # …while the working directory's own file is offered as the bare name it resolves to.
+      pc.entries.find { |e| e.label == "rockyou.txt" }.not_nil!.insert.should eq("rockyou.txt")
+    end
+  end
+
+  it "keeps the absolute path for a catalog file whose name the catalog cannot address" do
+    with_wordlist_home do |wl|
+      Dir.mkdir_p(wl)
+      File.write(File.join(wl, "trailing.dot."), "")
+      pc = PathComplete.new
+      pc.refresh("trail")
+      hit = pc.entries.find(&.label.starts_with?("trailing.dot.")).not_nil!
+      hit.insert.should eq(File.join(wl, "trailing.dot."))
     end
   end
 
@@ -1235,6 +1270,126 @@ describe Gori::Tui::PathComplete do
       old_home ? (ENV["GORI_HOME"] = old_home) : ENV.delete("GORI_HOME")
       FileUtils.rm_rf(home)
       FileUtils.rm_rf(cwd)
+    end
+  end
+
+  describe "the global wordlist catalog picker (#1353)" do
+    it "lists the catalog under its own heading after favorites and recents, sized, inserting names" do
+      with_wordlist_home do
+        Gori::WordlistCatalog.save_values("common.txt", ["a"] * 10)
+        Gori::WordlistCatalog.save_values("api.txt", ["x"])
+        Gori::Settings.fuzz_favorite_wordlists = ["/elsewhere/fav.txt"]
+        Gori::Settings.fuzz_recent_wordlists = ["/elsewhere/recent.txt"]
+        begin
+          pc = PathComplete.new(wordlist_history: true)
+          pc.refresh("")
+          pc.entries.map(&.label).should eq(["★ Favorites", "/elsewhere/fav.txt", "🕒 Recent", "/elsewhere/recent.txt",
+                                             "📚 Wordlists (~/.gori)", "api.txt  2B", "common.txt  20B"])
+          pc.entries.last.insert.should eq("common.txt")
+          pc.entries.last.dir.should be_false
+          pc.entries.count(&.header).should eq(3)
+        ensure
+          Gori::Settings.fuzz_favorite_wordlists = [] of String
+          Gori::Settings.fuzz_recent_wordlists = [] of String
+        end
+      end
+    end
+
+    it "shows a catalog list once, under the first heading that claims it, whatever spelling was stored" do
+      with_wordlist_home do |wl|
+        Gori::WordlistCatalog.save_values("common.txt", ["a"])
+        Gori::WordlistCatalog.save_values("api.txt", ["a"])
+        # an entry an OLDER gori stored as the absolute path completion used to insert
+        Gori::Settings.fuzz_favorite_wordlists = [File.join(wl, "common.txt")]
+        Gori::Settings.fuzz_recent_wordlists = ["common.txt", "api.txt"]
+        begin
+          pc = PathComplete.new(wordlist_history: true)
+          pc.refresh("")
+          pc.entries.map(&.label).should eq(["★ Favorites", "common.txt", "🕒 Recent", "api.txt"])
+          pc.entries[1].insert.should eq("common.txt")
+        ensure
+          Gori::Settings.fuzz_favorite_wordlists = [] of String
+          Gori::Settings.fuzz_recent_wordlists = [] of String
+        end
+      end
+    end
+
+    it "drops a favorite or recent that pointed into the catalog and no longer exists" do
+      with_wordlist_home do |wl|
+        Gori::WordlistCatalog.save_values("kept.txt", ["a"])
+        Gori::Settings.fuzz_favorite_wordlists = [File.join(wl, "deleted.txt"), "/elsewhere/gone.txt"]
+        Gori::Settings.fuzz_recent_wordlists = [File.join(wl, "kept.txt")]
+        begin
+          pc = PathComplete.new(wordlist_history: true)
+          pc.refresh("")
+          labels = pc.entries.map(&.label)
+          labels.should_not contain(File.join(wl, "deleted.txt"))
+          labels.should_not contain("deleted.txt")
+          labels.should contain("/elsewhere/gone.txt") # a path outside the catalog is shown as stored, present or not
+          labels.should contain("kept.txt")
+        ensure
+          Gori::Settings.fuzz_favorite_wordlists = [] of String
+          Gori::Settings.fuzz_recent_wordlists = [] of String
+        end
+      end
+    end
+
+    it "shows a bare-name history entry that the working directory's own file answers exactly as stored" do
+      with_wordlist_home do
+        Gori::WordlistCatalog.save_values("common.txt", ["a"])
+        File.write("common.txt", "cwd copy\n")
+        Gori::Settings.fuzz_recent_wordlists = ["common.txt"]
+        begin
+          pc = PathComplete.new(wordlist_history: true)
+          pc.refresh("")
+          # `common.txt` here is the working directory's file: not a catalog entry, shown as stored
+          pc.entries.map(&.label).should contain("common.txt")
+          pc.entries.find(&.label.starts_with?("common.txt")).not_nil!.insert.should eq("common.txt")
+        ensure
+          Gori::Settings.fuzz_recent_wordlists = [] of String
+        end
+      end
+    end
+
+    # The completion inserts the PATH for a catalog list a working-directory file shadows, and the
+    # set is applied with that path. Remembering it as the bare name would lose the reason: next
+    # time the entry would insert `common.txt`, which reads the working directory's file.
+    it "remembers a shadowed catalog pick as its path, so picking it again reads the catalog list" do
+      with_wordlist_home do |wl|
+        Gori::WordlistCatalog.save_values("common.txt", ["a"])
+        File.write("common.txt", "cwd copy\n")
+        Gori::Settings.fuzz_recent_wordlists = [] of String
+        Gori::Settings.fuzz_favorite_wordlists = [] of String
+        begin
+          Gori::Settings.record_recent_wordlist(File.join(wl, "common.txt"))
+          Gori::Settings.fuzz_recent_wordlists.should eq([File.join(wl, "common.txt")])
+          pc = PathComplete.new(wordlist_history: true)
+          pc.refresh("")
+          hit = pc.entries.find { |e| !e.header && e.label.starts_with?("common.txt") }
+          hit.try(&.insert).should eq(File.join(wl, "common.txt"))
+          # the ★ toggle remembers it the same way, and reads back as the same entry
+          Gori::Settings.toggle_favorite_wordlist(File.join(wl, "common.txt")).should be_true
+          Gori::Settings.fuzz_favorite_wordlists.should eq([File.join(wl, "common.txt")])
+          Gori::Settings.favorite_wordlist?(File.join(wl, "common.txt")).should be_true
+        ensure
+          Gori::Settings.fuzz_recent_wordlists = [] of String
+          Gori::Settings.fuzz_favorite_wordlists = [] of String
+        end
+      end
+    end
+
+    it "does not show the catalog to an instance that did not opt into wordlist history" do
+      with_wordlist_home do
+        Gori::WordlistCatalog.save_values("common.txt", ["a"])
+        Gori::Settings.fuzz_recent_wordlists = ["/elsewhere/recent.txt"]
+        begin
+          pc = PathComplete.new
+          pc.refresh("")
+          pc.entries.map(&.label).should_not contain("📚 Wordlists (~/.gori)")
+        ensure
+          Gori::Settings.fuzz_recent_wordlists = [] of String
+        end
+      end
     end
   end
 

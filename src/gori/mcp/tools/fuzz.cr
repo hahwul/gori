@@ -19,7 +19,7 @@ module Gori
       private def fuzz_start(h) : Result
         ob = outbound(bool_arg(h, "allow_unscoped", false))
         save_results = bool_arg(h, "save_results", false)
-        engine, origin, total, http2, shadowed_marks, ws_frames, ws_ignored, grpc, tls_preset, mode_label, effective_sni, effective_max_requests, sets_warn =
+        engine, origin, total, http2, shadowed_marks, ws_frames, ws_ignored, grpc, tls_preset, mode_label, effective_sni, effective_max_requests, sets_warn, payload_reports =
           build_fuzz_job(h, ob, save_results)
         # Scope gate before launching any real send (host-level: fuzz sweeps many
         # paths against one origin, so evaluate the origin host).
@@ -75,7 +75,7 @@ module Gori
         # Audit on STDERR — never STDOUT (reserved for JSON-RPC).
         Log.info { "fuzz_start #{id} #{origin.scheme}://#{origin.host}:#{origin.port} scope=#{sc.decision} record=#{fjob.record_history} total=#{total || "?"}" }
         spawn(name: "mcp-fuzz-#{id}") { run_fuzz_job(fjob, engine) }
-        Result.new(fuzz_start_echo(id, total, fjob, sc, ws_frames, ws_ignored, warn, marks_warn, sets_warn, grpc))
+        Result.new(fuzz_start_echo(id, total, fjob, sc, ws_frames, ws_ignored, warn, marks_warn, sets_warn, grpc, payload_reports))
       rescue ex : FuzzArgError
         Result.new(ex.message || "invalid fuzz arguments", is_error: true)
       end
@@ -95,7 +95,8 @@ module Gori
       private def fuzz_start_echo(id : String, total : Int64?, fjob : FuzzJob, sc,
                                   ws_frames : Int32?, ws_ignored : Array(Symbol),
                                   warn : String?, marks_warn : String?, sets_warn : String? = nil,
-                                  grpc : Fuzz::GrpcFieldTemplate? = nil) : String
+                                  grpc : Fuzz::GrpcFieldTemplate? = nil,
+                                  payload_reports : Array(PayloadFrom::Report) = [] of PayloadFrom::Report) : String
         JSON.build do |j|
           j.object do
             j.field "job_id", id
@@ -118,6 +119,14 @@ module Gori
             # for the same reason: the job runs either way, and an agent that passed two
             # wordlists under the default `sniper` and heard nothing concludes both were swept.
             j.field("payload_sets_warning", sets_warn) if sets_warn
+            # What each `payload_from` set read (#1352): the source, flows and values counted,
+            # the sensitive-value policy that applied, and what cut it short — never a value.
+            # Present only when the run had one, so every other echo is byte-identical.
+            unless payload_reports.empty?
+              j.field "payload_sources" do
+                payload_reports_json(j, payload_reports)
+              end
+            end
             # WHICH rpc and message the named `fields` resolved through, and what each one is
             # declared as. The same fact `gori run fuzz` prints once up front and for the same
             # reason: the caller passed a NAME and gori bound it to a declaration in a `.proto`
@@ -560,7 +569,7 @@ module Gori
       # tokens that made no position of their own (`Fuzz::Plan#shadowed_marks`, reported by
       # `fuzz_start`) from the tool args. Raises FuzzArgError (clean message) on any malformed
       # input.
-      private def build_fuzz_job(h, ob : Outbound, save_results : Bool = false) : {Fuzz::Engine, Fuzz::Origin, Int64?, Bool, Array(String), Int32?, Array(Symbol), Fuzz::GrpcFieldTemplate?, String?, String, String?, Int64?, String?}
+      private def build_fuzz_job(h, ob : Outbound, save_results : Bool = false) : {Fuzz::Engine, Fuzz::Origin, Int64?, Bool, Array(String), Int32?, Array(Symbol), Fuzz::GrpcFieldTemplate?, String?, String, String?, Int64?, String?, Array(PayloadFrom::Report)}
         text, default_target, src_h2, evidence, src_sni, src_tls_preset = fuzz_template_source(h)
         use_h2 = bool_arg(h, "http2", false) || src_h2
         mode = fuzz_mode(h)
@@ -650,7 +659,9 @@ module Gori
           # An explicit `sni` wins; otherwise the source's own (a repeater session's stored SNI).
           sni: effective_sni,
           overrides: HostOverrides.load(store),
-          ws_messages: ws_messages)
+          ws_messages: ws_messages,
+          # The bound project, for any `payload_from` set: the plan builder reads it there.
+          project: store)
         plan = Fuzz::Plan.build(options, ob)
         # `ws_frames` is nil for an HTTP sweep and the OUTBOUND frame count for a WebSocket one,
         # so `fuzz_start`'s echo can say which engine the job actually took. An agent that seeded
@@ -659,7 +670,7 @@ module Gori
          plan.ws_script.try(&.frames.size), plan.ws_ignored_knobs, plan.grpc_fields,
          plan.tls_preset,
          plan.engine.race_count.try { |n| "race ×#{n}" } || mode.label,
-         effective_sni, config.max_requests, unused_sets_warning(plan)}
+         effective_sni, config.max_requests, unused_sets_warning(plan), plan.payload_reports}
       rescue ex : Fuzz::PlanError
         raise FuzzArgError.new(fuzz_plan_error(ex, text))
       rescue ex : File::Error
@@ -1084,15 +1095,28 @@ module Gori
           # with the list, rather than let it surface as an empty run.
           raise FuzzArgError.new("unknown preset #{preset.inspect} (available: #{Fuzz::Presets.names.join(", ")})") unless Fuzz::Presets.exists?(preset)
           Fuzz::PresetSource.new(preset, demanded_jstr(obj, "file", "payload set").try(&.presence))
+        elsif desc = obj["payload_from"]?
+          # Values the project already captured (#1352): `"payload_from":"host:api.example
+          # param-names"`, with `include_sensitive` / `locations` / `max_flows` / `max_values` beside
+          # it. Built with no project attached — `Fuzz::Plan.build` reads it, so the caps, the
+          # sensitive-value policy and the request budget are the same as on every other surface.
+          text = desc.as_s? || raise FuzzArgError.new("'payload_from' must be a string: \"<QL> <projection>\" (projection one of #{PayloadFrom::Projection.labels.join(", ")})")
+          Fuzz::ProjectSource.new(payload_spec_arg(text, "payload_from").apply(payload_policy_arg(obj)))
         elsif nums = obj["numbers"]?
           fuzz_numbers(nums)
-        elsif (nul = obj["null"]?) && (n = (nul.as_i64? || nul.as_s?.try(&.to_i64?)))
+        elsif n = fuzz_null_count(obj)
           Fuzz::NullPayloads.new(n.clamp(0_i64, FUZZ_MAX_REQUESTS).to_i) # clamp before .to_i so a huge count can't OverflowError past the clean-error handler
         elsif br = obj["brute"]?
           fuzz_brute(br)
         else
-          raise FuzzArgError.new("unknown payload set #{spec} (use list/list_base64/wordlist/preset/numbers/null/brute)")
+          raise FuzzArgError.new("unknown payload set #{spec} (use list/list_base64/wordlist/preset/payload_from/numbers/null/brute)")
         end
+      end
+
+      # `{"null": N}`'s N — an integer or a string of one — or nil when the set is not a null set.
+      private def fuzz_null_count(obj : Hash(String, JSON::Any)) : Int64?
+        nul = obj["null"]? || return nil
+        nul.as_i64? || nul.as_s?.try(&.to_i64?)
       end
 
       # One base64 payload → its exact octets. Invalid base64 is a hard error, not a skip: a
@@ -1495,7 +1519,7 @@ module Gori
           s.field "marks", strarrprop("literal tokens to mark as §…§ positions (each occurrence, mirrors CLI --mark); alternative to embedding §…§ in template. An occurrence already inside a §…§ (or flush against one) is skipped — re-wrapping it would merge the two positions — and a token left with none of its own is named in `marks_warning`")
           s.field "fields", strarrprop("schema-known gRPC fields of a UNARY request to sweep, each a field name, a path into a nested message ('profile.age'), or a field number, with [i] for one occurrence of a repeated field ('tags[1]'); append ¦chain to run a Decoder chain over the payload BEFORE the declared type encodes it. Each payload goes through the field's DECLARATION on its way to bytes (-3 is a different set of octets as int32, sint32, bool or an enum), every other byte of the message is copied from the capture, and the 5-byte gRPC length prefix is recomputed. Needs a descriptor set that resolves the rpc (see grpc_schema / grpc_reflect). These positions follow the template's own §…§ positions in the run's index space, so 'mode' and 'payloads' keep their meaning. A field the schema does not declare, one whose wire type the declaration contradicts, and a payload the declared type cannot hold are all refused before the first request. The field must be PRESENT on the captured message — gori replaces an occurrence, it never adds one, so a proto3 field left at its default is not a position. Payloads for a `bytes` field are read as HEX ('de ad be ef').")
           s.field "mode", enumprop("how payload sets are combined across marks (default sniper)", FUZZ_MODES)
-          s.field "payloads", arrprop(%(array of payload sets, e.g. [{"list":["a","b"]},{"list_base64":["gA==","/w=="]},{"preset":"sqli"},{"numbers":"1-100"},{"wordlist":"/p.txt"},{"null":5},{"brute":"abc:1-3"}] — JSON array, NOT a string. "preset" is a built-in curated set — one of #{Fuzz::Presets.names.join(", ")} — for a fast start with no file; add "file":"/extra.txt" to merge a user file into it (built-in first, de-duped). "list_base64" is the byte-exact list: use it for payloads a JSON string cannot carry (0x00, 0x80-0xFF, invalid/overlong UTF-8), since "list" entries go on the wire as their UTF-8 encoding. numbers/brute also accept a structured object: {"numbers":{"from":1,"to":100,"step":2}}, {"brute":{"charset":"abc","min":1,"max":3}}. Brute lengths are capped at #{BRUTE_MAX_LEN}.))
+          s.field "payloads", arrprop(%(array of payload sets, e.g. [{"list":["a","b"]},{"list_base64":["gA==","/w=="]},{"preset":"sqli"},{"numbers":"1-100"},{"wordlist":"/p.txt"},{"null":5},{"brute":"abc:1-3"}] — JSON array, NOT a string. "wordlist" is a path on the server or the name of a saved list (list_wordlists). "payload_from" reads values the PROJECT already captured — {"payload_from":"host:api.example param-names"}: a QL query, then a projection (param-names, param-values, path-segments, js-endpoints, extracted); optional siblings include_sensitive (default false: credential material stays out, and `extracted` needs it), locations, max_flows, max_values. Reads the project and sends nothing; the reply's payload_sources says what each read, never the values. "preset" is a built-in curated set — one of #{Fuzz::Presets.names.join(", ")} — for a fast start with no file; add "file":"/extra.txt" to merge a user file into it (built-in first, de-duped). "list_base64" is the byte-exact list: use it for payloads a JSON string cannot carry (0x00, 0x80-0xFF, invalid/overlong UTF-8), since "list" entries go on the wire as their UTF-8 encoding. numbers/brute also accept a structured object: {"numbers":{"from":1,"to":100,"step":2}}, {"brute":{"charset":"abc","min":1,"max":3}}. Brute lengths are capped at #{BRUTE_MAX_LEN}.))
           s.field "processors", arrprop(%(ordered pipeline applied to EVERY payload before it's spliced in (mirrors CLI --prefix/--suffix/--encode/--case/--hash/--regex-replace) — e.g. [{"type":"encode","kind":"url"}]. Query-string and form-urlencoded body positions are ALREADY percent-encoded by default (see "no_encode"), so this is for the other positions — a path segment, a JSON body, a header or a cookie value — where a payload carrying a raw space, CRLF or quote would otherwise corrupt the request line/framing instead of reaching the app. An "encode" step here REPLACES the default encoding (it applies to every position, so it is not stacked on top); the other step types say what the PAYLOAD is rather than how the wire spells it, so the query/form default still applies to their output. Entries: {"type":"prefix","text":".."} {"type":"suffix","text":".."} {"type":"encode","kind":"url|urlall|base64|hex"} {"type":"case","kind":"upper|lower"} {"type":"hash","algo":"md5|sha1|sha256"} {"type":"regex_replace","pattern":"..","replacement":".."}))
           s.field "no_encode", boolprop("send payloads into query-string / form-body positions RAW — turns off the default percent-encoding for those positions (path, JSON body, header and cookie positions are raw either way). For a payload that IS the raw byte: parameter pollution with a bare &, a request-line CRLF probe. Also for a payload that is ALREADY a percent-escape and aims at the origin's own decoder — %00, %c0%af, %2e%2e%2f — which the default encodes again (%00 -> %2500) so it arrives as text, testing something else. An explicit 'encode' step in 'processors' already replaces the default.")
           s.field "match", jsonprop(%(keep only responses matching, e.g. {"status":"200,500-599","size":">1000","regex":"err"} — object or JSON string. "time" is the ROUND TRIP in milliseconds ({"time":">=5000"}), the dimension a time-based blind injection is the only evidence for: `' OR SLEEP(5)--` comes back with the same status, the same byte length and the same body as the payload that did nothing, and differs only in how long it took. A send that TIMED OUT counts as a match on "time" (it is the loudest form of the same signal) and on nothing else. "grpc" matches the grpc-status TRAILER (e.g. "7", ">0", "1-16") — the HTTP/2 trailer for native gRPC, and the in-body TRAILER frame for grpc-web, which has no HTTP trailers to send: for a gRPC target the HTTP status is 200 on every response, granted or denied, so "status" cannot separate them — every result row also carries grpc_status/grpc_status_name/grpc_message. "header" is a case-insensitive SUBSTRING of the response HEAD (e.g. "x-powered-by: php", "set-cookie") — "regex" only ever sees the BODY, so this is the only way to name a header the payload changed))

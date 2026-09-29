@@ -77,3 +77,31 @@ describe Gori::Discover::Wordlist do
     end
   end
 end
+
+describe "Gori::Discover::Wordlist with the global catalog (#1353)" do
+  it "merges a list named in the catalog, from any working directory" do
+    with_wordlist_home do
+      Gori::WordlistCatalog.save_values("paths.txt", ["zzcatalog1", "zzcatalog2"])
+      merged = Gori::Discover::Wordlist.load("paths.txt")
+      merged.should contain("zzcatalog1")
+      merged.should contain("zzcatalog2")
+    end
+  end
+
+  it "prefers a file of that name in the current directory" do
+    with_wordlist_home do
+      Gori::WordlistCatalog.save_values("paths.txt", ["zzfromcatalog"])
+      File.write("paths.txt", "zzfromcwd\n")
+      merged = Gori::Discover::Wordlist.load("paths.txt")
+      merged.should contain("zzfromcwd")
+      merged.should_not contain("zzfromcatalog")
+    end
+  end
+
+  it "reads a path as given, never from the catalog" do
+    with_wordlist_home do
+      Gori::WordlistCatalog.save_values("paths.txt", ["zzfromcatalog"])
+      expect_raises(File::NotFoundError) { Gori::Discover::Wordlist.load("./paths.txt") }
+    end
+  end
+end

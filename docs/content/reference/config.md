@@ -17,7 +17,7 @@ Everything lives under `GORI_HOME` (`$GORI_HOME` if set and non-empty, otherwise
 | `projects/` | One subdirectory per named project, each with its own DB |
 | `ca/` | Root CA: `root.crt.pem` and `root.key.pem` |
 | `themes/` | User themes |
-| `wordlists/` | Fuzzer / miner wordlists |
+| `wordlists/` | The global [wordlist catalog](/guide/repeater-and-fuzzer/#wordlist-catalog): named lists for the Fuzzer, Miner, Discover and Cookie cracking (owner-only files) |
 | `protos/` | gRPC descriptor sets (`protoc --descriptor_set_out`), loaded by any project with no path of its own |
 | `active_project` | Marker for the most-recently-used project |
 | `gori.log` | The TUI's log |
@@ -772,7 +772,7 @@ The last three are state gori maintains; only `check_enabled` is meant to be edi
 
 ### fuzzer
 
-Wordlist paths remembered by the Fuzzer's Payload overlay. Scratch state, not project data.
+Wordlists remembered by the Fuzzer's Payload overlay. Scratch state, not project data. A list in the [wordlist catalog](/guide/repeater-and-fuzzer/#wordlist-catalog) is stored by its name (`common.txt`), or by its path when a file of that name in the working directory would shadow the name; an entry an older gori stored as the absolute path into the catalog reads the same. Any other path is kept exactly as given.
 
 ```json
 {
@@ -785,8 +785,8 @@ Wordlist paths remembered by the Fuzzer's Payload overlay. Scratch state, not pr
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `recent_wordlists` | array | Most-recently-applied wordlist paths, newest first, capped at 10 |
-| `favorite_wordlists` | array | Paths starred in the Path field, offered ahead of the recents |
+| `recent_wordlists` | array | Most-recently-applied wordlists (catalog names, or paths), newest first, capped at 10 |
+| `favorite_wordlists` | array | Wordlists starred in the Path field (catalog names, or paths), offered ahead of the recents |
 
 Omitted until you apply or star a wordlist.
 

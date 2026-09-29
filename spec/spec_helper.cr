@@ -373,3 +373,27 @@ def receive_within(chan : Channel(T), seconds : Int32 = 20, what : String = "a v
     raise "nothing arrived on the channel within #{seconds}s (expected #{what})"
   end
 end
+
+# A throwaway `$GORI_HOME` for one example, so a spec that saves, lists or resolves wordlists
+# (`Gori::WordlistCatalog`, #1353) sees an empty global catalog of its own and never the suite's
+# shared one. Yields the catalog directory (`Paths.wordlists_dir`), which does NOT exist yet — a
+# fresh home has none, and `save` creates it — and restores the previous `GORI_HOME`.
+#
+# The working directory is a fresh empty one too (`Dir.cd`, restored), because a bare wordlist
+# name resolves against it before the catalog: an example run from the repo root would find a
+# `shard.yml`-adjacent file of the same name and pass or fail for the wrong reason.
+def with_wordlist_home(&)
+  prev = ENV["GORI_HOME"]?
+  home = File.tempname("gori-wl-home")
+  cwd = File.tempname("gori-wl-cwd")
+  Dir.mkdir_p(home)
+  Dir.mkdir_p(cwd)
+  ENV["GORI_HOME"] = home
+  begin
+    Dir.cd(cwd) { yield Gori::Paths.wordlists_dir }
+  ensure
+    prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+    FileUtils.rm_rf(home)
+    FileUtils.rm_rf(cwd)
+  end
+end

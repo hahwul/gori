@@ -2,6 +2,8 @@ require "./screen"
 require "./theme"
 require "../fuzzy"
 require "../paths"
+require "../wordlist_catalog"
+require "./fmt"
 require "../settings"
 require "./viewport"
 
@@ -15,7 +17,7 @@ module Gori::Tui
   class PathComplete
     CAP = 60
 
-    # `header` rows (section labels "★ Favorites" / "🕒 Recent") are unselectable —
+    # `header` rows (section labels "★ Favorites" / "🕒 Recent" / "📚 Wordlists") are unselectable —
     # `move` steps over them and `refresh`/`accept` never land the cursor on one.
     record Entry, label : String, insert : String, dir : Bool, header : Bool = false
 
@@ -86,41 +88,88 @@ module Gori::Tui
         end
         merge_cap(merged)
       else
-        # bare name → cwd (bare insert) + ~/.gori/wordlists (ABSOLUTE insert: the
-        # engine opens wordlist paths relative to CWD, so a wordlists-dir-only name
-        # MUST resolve absolutely or it would fail at run time). Both sources are
-        # ranked TOGETHER so a prefix/wordlist hit isn't buried under cwd fuzz.
+        # bare name → cwd (bare insert) + ~/.gori/wordlists (the catalog: see `catalog_insert`
+        # for what a pick inserts). Both sources are ranked TOGETHER so a prefix/wordlist hit
+        # isn't buried under cwd fuzz.
         wl = Gori::Paths.wordlists_dir
         merged = ranked(Dir.current, value).map do |name, is_dir, rank|
           {Entry.new(name, "#{name}#{is_dir ? "/" : ""}", is_dir), rank}
         end
         ranked(wl, value).each do |name, is_dir, rank|
-          merged << {Entry.new("#{name}  ·~/.gori", "#{File.join(wl, name)}#{is_dir ? "/" : ""}", is_dir), rank}
+          insert = is_dir ? "#{File.join(wl, name)}/" : catalog_insert(name)
+          merged << {Entry.new("#{name}  ·~/.gori", insert, is_dir), rank}
         end
         merge_cap(merged)
       end
     end
 
+    # What picking a list from the GLOBAL catalog puts in the field: its bare name when the
+    # engine will resolve that name to this very list, and its absolute path when it would not.
+    #
+    # It used to be the absolute path always, because the engine opened wordlist paths relative
+    # to the working directory and a name that lived only under ~/.gori/wordlists would have
+    # failed at run time. `WordlistCatalog.resolve` closed that (#1353), so the name is enough —
+    # and it is what the operator would type, what `gori run fuzz -w NAME` takes, and what the
+    # recent/favorite lists remember. The one case it is NOT enough is a same-named file in the
+    # current directory (a bare name reads the working directory first): there the name would
+    # run the wrong list, so the path is inserted instead. `resolve` is the judge, not a copy of
+    # its rule.
+    private def catalog_insert(name : String) : String
+      Gori::WordlistCatalog.resolve(name).source.catalog? ? name : File.join(Gori::Paths.wordlists_dir, name)
+    end
+
+    # Favorites, then recents, then the catalog: a blank field is "what do I usually reach for",
+    # and the operator's saved lists (`Gori::WordlistCatalog`) are the third answer to it. An
+    # entry is shown once under the first heading that claims it, whichever spelling it was
+    # stored in (`Settings.canonical_wordlist`).
     private def recent_and_favorite_entries : Array(Entry)
       favs = Gori::Settings.fuzz_favorite_wordlists
-      recents = Gori::Settings.fuzz_recent_wordlists.reject { |p| favs.includes?(p) }
+      fav_keys = favs.map { |p| Gori::Settings.canonical_wordlist(p) }.to_set
+      recents = Gori::Settings.fuzz_recent_wordlists.reject { |p| fav_keys.includes?(Gori::Settings.canonical_wordlist(p)) }
       entries = [] of Entry
-      unless favs.empty?
+      shown = Set(String).new
+      favorite_rows = favs.compact_map { |p| history_entry(p) }.select { |e| shown.add?(e.label) }
+      unless favorite_rows.empty?
         entries << Entry.new("★ Favorites", "", false, header: true)
-        favs.first(CAP).each { |p| entries << history_entry(p) }
+        favorite_rows.first(CAP).each { |e| entries << e }
       end
-      unless recents.empty?
+      recent_rows = recents.compact_map { |p| history_entry(p) }.select { |e| shown.add?(e.label) }
+      unless recent_rows.empty?
         entries << Entry.new("🕒 Recent", "", false, header: true)
-        recents.first(CAP).each { |p| entries << history_entry(p) }
+        recent_rows.first(CAP).each { |e| entries << e }
       end
+      # Only WITH history: a fresh install with saved lists but no history falls through to the
+      # plain cwd + catalog listing (`candidates`), which already shows them.
+      entries.concat(catalog_entries(shown)) unless entries.empty?
       entries
+    end
+
+    # The catalog's lists under their own heading, minus those already shown above. Labelled
+    # with their size — `stat` only, never a read (`WordlistCatalog.list`).
+    private def catalog_entries(shown : Set(String)) : Array(Entry)
+      rows = Gori::WordlistCatalog.list(CAP).entries.reject { |e| shown.includes?(e.name) }
+      return [] of Entry if rows.empty?
+      out = [Entry.new("📚 Wordlists (~/.gori)", "", false, header: true)]
+      rows.each { |e| out << Entry.new("#{e.name}  #{Fmt.size(e.bytes)}", catalog_insert(e.name), false) }
+      out
     end
 
     # A history (recent/favorite) pick's dir-ness must be checked against the
     # filesystem — unlike the fuzzy-search entries below, these paths didn't just
     # come from listing a directory, so accept()'s close-vs-keep-drilling
     # semantics would silently pick the wrong one otherwise.
-    private def history_entry(p : String) : Entry
+    #
+    # A list in the catalog is shown, and inserted, by NAME (`catalog_insert`) — including an
+    # old entry stored as the absolute path an earlier gori inserted — and is dropped when it
+    # no longer exists: those are files gori manages, so a list deleted or renamed by
+    # `gori run wordlist` (or by hand) must not linger as a dead favorite. Every other entry is
+    # shown exactly as stored, present or not, as it always was.
+    private def history_entry(p : String) : Entry?
+      name = Gori::Settings.canonical_wordlist(p)
+      if name != p || Gori::WordlistCatalog.resolve(name).source.catalog?
+        return nil unless Gori::WordlistCatalog.entry(name)
+        return Entry.new(name, catalog_insert(name), false)
+      end
       dir = File.directory?(p)
       Entry.new(p, "#{p}#{dir ? "/" : ""}", dir)
     end

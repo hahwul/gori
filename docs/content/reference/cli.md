@@ -77,6 +77,7 @@ gori run <subcommand> [verb] [options]
 | `probe issues` · `dismiss` · `promote` · `delete` | Triage persisted Probe findings |
 | `probe rules` · `mode` | List / arm scan rules; get or set the scan mode |
 | `discover` | Spider and brute-force endpoints into the Sitemap |
+| `wordlist` (`list`) · `show` · `save` · `rename` · `delete` | The global wordlist catalog: named lists any `--wordlist` / `-w` takes by name (`delete` needs `--yes`) |
 | `import` | Bulk-import flows into History from a HAR / URL list / OpenAPI / Postman / Insomnia / Burp / WSDL file, or a curl command |
 | `sitemap [QL]` | Host → path endpoint tree |
 | `sitemap tag` | Pin, clear, or list a free-text memo on a sitemap path |
@@ -561,7 +562,8 @@ Sources: `--flow=ID`, `--repeater=ID`, `--request=FILE`, or stdin. Positions: `�
 | Transport | `--target=URL` (required for `--request`/stdin), `--http2`, `--sni=HOST`, `--tls-preset=NAME` (one [TLS fingerprint](#per-send-tls-fingerprints) for the whole run), `-k`/`--insecure-upstream` |
 | Mode | `--mode=` `sniper` (default), `batteringram`, `pitchfork`, `clusterbomb`. The first two draw from **one** payload set, the last two from one per marked position; a set the mode will never draw from is named before the run starts |
 | gRPC fields | `--field=SPEC` (repeatable) sweeps a **schema-known field** of a unary gRPC request instead of its octets. `SPEC` is a field name, a path into a nested message (`profile.age`), a field number, or `name[i]` for one occurrence of a repeated field; `name¦chain` runs a Decoder chain over the payload **before** the declared type encodes it. The field must already be present on the captured message (gori replaces an occurrence, never adds one), and payloads for a `bytes` field are read as **hex** (`de ad be ef`). Each payload goes through the field's declaration on its way to bytes (`-3` is a different set of octets as `int32`, `sint32`, `bool` or an enum), every other byte of the message is copied from the capture, and the 5-byte length prefix is recomputed. Needs a descriptor set that resolves the rpc (`gori run grpc schema`). Field positions follow the template's own `§…§` positions in the run's index space, so `--mode` and the payload sets keep their meaning. An undeclared field, one whose wire type the declaration contradicts, and a payload the declared type cannot hold are all refused before the first request |
-| Payloads | `-w`/`--wordlist`, `--preset=NAME[:FILE]` (built-in: `sqli`, `xss`, `traversal`, `format-string`, `bad-strings`, `command-injection`, `cache-delimiters`), `--payloads=LIST`, `--numbers=FROM-TO[:STEP]`, `--null=N`, `--brute=CHARSET:MIN-MAX` |
+| Payloads | `-w`/`--wordlist` (a file, or the name of a saved list), `--preset=NAME[:FILE]` (built-in: `sqli`, `xss`, `traversal`, `format-string`, `bad-strings`, `command-injection`, `cache-delimiters`), `--payloads=LIST`, `--numbers=FROM-TO[:STEP]`, `--null=N`, `--brute=CHARSET:MIN-MAX` |
+| Project data | `--payload-from='<QL> <projection>'` (repeatable) is a payload set read from the project's own captured data: `param-names`, `param-values`, `path-segments`, `js-endpoints` or `extracted`. Reads the project, sends nothing, and needs a project you named (`--flow`, `--repeater`, `--project` or `--db`). `--payload-from-sensitive` lets it read credential material (withheld by default; `extracted` needs it), `--payload-from-locations=LIST` adds `headers`/`cookies`, `--payload-from-max-flows=N` (2000) and `--payload-from-max-values=N` (10000) raise the caps; all of them apply to every `--payload-from`. What each source read goes to stderr. See [Payloads from the Project](/guide/repeater-and-fuzzer/#payloads-from-the-project) |
 | Encoding | A payload spliced into a **query-string** or **form-urlencoded body** value is URL-encoded by default; path segments, JSON/raw bodies, headers and cookies stay raw. `--no-encode` sends the query/form ones raw too. Use it for a payload that is *already* a percent-escape (`%00` would go out as `%2500`, so the `%00` / `%c0%af` / `%2e%2e%2f` probes aimed at the origin's own decoder arrive as text). An explicit `--encode` replaces the default and applies to every position. `--prefix` / `--suffix` / `--case` / `--hash` / `--regex-replace` do not: they say what the payload is, not how the wire spells it, so their output is still encoded for a query/form position |
 | Processors | `--prefix`, `--suffix`, `--encode` (`url`\|`urlall`\|`base64`\|`hex`), `--case` (`upper`\|`lower`), `--hash` (`md5`\|`sha1`\|`sha256`), `--regex-replace=/pat/rep/` |
 | Rate | `--concurrency` (20), `--rate=RPS`, `--throttle=MS`, `--timeout=SEC`, `--retries=N`, `--max-requests=N` (hard cap, retries and redirect hops count), `--follow-redirects`, `--no-keep-alive` |
@@ -608,8 +610,9 @@ gori run mine <flow-id> --locations query,headers --wordlist params.txt
 | `--flow`, `--request`, `--target`, `--sni`, `--http2`, `-k` | Request source and transport |
 | `--allow-unscoped` | Send even if the target is outside the project scope (Sandbox and explicit excludes still apply) |
 | `--locations=LIST` | `query`, `form`, `multipart`, `json`, `headers`, `cookies`. Default: `query`, plus `form` or `json` when the request body is one; `multipart`, `headers` and `cookies` run only when named |
-| `--wordlist`, `--bucket=N` | Candidate names and bucket size |
+| `--wordlist`, `--bucket=N` | Candidate names (a file, or the name of a saved [wordlist](#run-wordlist)) and bucket size |
 | `--name=NAME` | Test this name first, ahead of the wordlists (repeatable or comma-separated), for example a name `sitemap params` found on another endpoint |
+| `--payload-from='<QL> param-names'` | Candidate names read from the project's captured data, tested after `--name` and **before** the built-in list and `--wordlist` (repeatable; needs `--flow`/`--project`/`--db`). `--payload-from-sensitive`, `--payload-from-locations`, `--payload-from-max-flows` and `--payload-from-max-values` apply as on `fuzz` |
 | `--concurrency` (10), `--rate`, `--throttle`, `--timeout`, `--retries` (1), `--max-requests=N` | Rate control |
 | `--no-keep-alive` | Dial a fresh connection per probe instead of reusing one |
 | `--hook=ARGV` | Transform each assembled request through an external command (argv, no shell) before it is sent, for signed / HMAC'd APIs. See [Process hooks](/guide/scripting/#process-hooks) |
@@ -807,7 +810,7 @@ gori run discover --target https://target.example --max-depth 3 --extensions php
 | `--target=URL` | Seed origin or path subtree to explore (required) |
 | `--max-depth=N` | Spider depth from the seed (default 4) |
 | `--no-spider` / `--no-bruteforce` | Disable link crawling / directory brute-forcing |
-| `--wordlist=PATH` | Extra path wordlist, merged with the built-in list |
+| `--wordlist=PATH` | Extra path wordlist (a file, or the name of a saved [wordlist](#run-wordlist)), merged with the built-in list |
 | `--extensions=LIST` | Also probe these extensions (e.g. `php,json,bak`) |
 | `-H`, `--header=HEADER` | Custom header on every probe (repeatable) |
 | `--containment=MODE` | `same-origin` \| `scope-aware` (default) \| `host+subdomains` |
@@ -824,6 +827,29 @@ gori run discover --target https://target.example --max-depth 3 --extensions php
 | `--format` | `text`, `json`, or `jsonl` |
 
 Connections are reused per origin by default, so a brute-force pass pays one TCP (and on https one TLS) handshake per worker rather than one per probe. The `connections · N dialed · M reused` line at the end of a run is where you see whether the target honoured it. Turn it off with `--no-keep-alive` when the target behaves per-connection.
+
+### run wordlist
+
+The global wordlist catalog: named lists under `$GORI_HOME/wordlists` (`~/.gori/wordlists`), each a plain file. A name is accepted anywhere a wordlist path is (`fuzz -w`, `mine --wordlist`, `discover --wordlist`, `cookie --crack --wordlist`) from any working directory. A value with a `/` is a path and is read as given; a bare name is looked up in the current directory first, then in the catalog. Nothing here needs a project, and nothing sends a request. See the [guide](/guide/repeater-and-fuzzer/#wordlist-catalog) for the whole model.
+
+```bash
+gori run sitemap params --host api.example.com --format names | gori run wordlist save api-params.txt
+gori run wordlist                       # what you have: names and sizes
+gori run mine 42 --wordlist api-params.txt
+gori run wordlist show api-params.txt --head 5
+gori run wordlist rename api-params.txt api-v2-params.txt
+gori run wordlist delete api-v2-params.txt --yes
+```
+
+| Verb | Description |
+| ------ | ------------- |
+| `wordlist` · `list` (`ls`) | Names, sizes and modified times. Never prints a value. `--format text` \| `json` |
+| `show <name>` | Path, size and a line count (over at most 32 MiB; `more than N` when the list is longer). `--head=N` also prints the first N lines (at most 1000): values, which may be sensitive |
+| `save <name>` | Save a list from exactly one source: `--from=FILE` (`-` reads stdin), one or more `--value=V`, a list piped on stdin, or `--payload-from='<QL> <projection>'` with `--project`/`--db` (values read from that project's captured data, with the same `--payload-from-*` policy as `fuzz`; a value with a line break is left out and counted). Bytes are kept as given, so a blank or `#` line stays a line; a `--value` cannot hold a line break. Atomic and owner-only; refuses an existing name unless `--overwrite` |
+| `rename <old> <new>` (`mv`) | Rename a list; refuses an existing `<new>` unless `--overwrite` |
+| `delete <name>` (`rm`) | Delete a list (`--yes` is the confirmation; there is no prompt). A symlink is removed, never the file it names |
+
+A name is letters and digits of any script, `_`, `.`, `+`, `-` and inner spaces (at most 200 bytes, not starting with `.` or `-`); anything with a path separator is refused. All verbs take `-h`; a mutating verb that is refused exits `1` and says why.
 
 ### Session bindings from the command line
 
@@ -1043,7 +1069,7 @@ gori run cookie --forge --type flask --secret s3cret --payload '{"user":"admin"}
 | `--crack` | Brute-force the secret over `--secrets` or `--wordlist` |
 | `--forge` | Re-sign `--payload` (or a Rack `--value`) with `--secret` |
 | `--type=T` | `flask` \| `rack` \| `django` (default: auto-detect) |
-| `--secret=S`, `--secrets=LIST`, `--wordlist=PATH` | The signing secret, a comma-separated candidate list, or a newline-delimited file |
+| `--secret=S`, `--secrets=LIST`, `--wordlist=PATH` | The signing secret, a comma-separated candidate list, or a newline-delimited file (or the name of a saved [wordlist](#run-wordlist)) |
 | `--payload=JSON` | Session JSON to sign (Flask / Django `--forge`) |
 | `--value=B64` | Base64 Marshal cookie value (Rack `--forge`, opaque) |
 | `--salt=SALT` | Flask / Django signing salt |

@@ -1428,7 +1428,7 @@ module Gori::Tui
       # "done", orphaned bottom-bar spinner). Draining now settles the old job first.
       drain_events
       engine, err = v.build_engine(!@host.session.config.insecure_upstream?,
-        @host.session.scope, @host.session.host_overrides)
+        @host.session.scope, @host.session.host_overrides, @host.session.store)
       unless engine
         @host.status(err || "can't run")
         return
@@ -1447,7 +1447,7 @@ module Gori::Tui
         # Name the archive policy: `keep: interesting` spools only the interesting rows, so the
         # confirm should not promise "every result is spooled" (issue #1240).
         spooled = v.config.keep.interesting? ? "Only interesting results (matched + error/re-send/incomplete/stop) are spooled" : "Every result is privately spooled"
-        @host.confirm("RUN FUZZ", "Send #{bound ? bound.to_s : "an unknown number of"} requests to #{v.target_origin}?\n#{spooled}; the pane keeps at most 5,000 rows / 64 MiB.",
+        @host.confirm("RUN FUZZ", "Send #{bound ? bound.to_s : "an unknown number of"} requests to #{v.target_origin}?\n#{spooled}; the pane keeps at most 5,000 rows / 64 MiB.#{payload_confirm(v)}",
           confirm_label: "run", danger: false) { start_run(v, e, total) }
       else
         start_run(v, engine, total)
@@ -1535,7 +1535,7 @@ module Gori::Tui
         end_worker(v)
       end
       archive = spool_run ? "" : " · complete archive unavailable"
-      @host.status("fuzzing #{v.target_origin} — ^X stop#{archive}#{framing_note(v)}#{sets_note(v)}", :busy)
+      @host.status("fuzzing #{v.target_origin} — ^X stop#{archive}#{framing_note(v)}#{sets_note(v)}#{payload_note(v)}", :busy)
     end
 
     # How this run frames its body, for the run-start line — the way `gori run fuzz` prints it
@@ -1555,6 +1555,22 @@ module Gori::Tui
       else
         ""
       end
+    end
+
+    # What each Project payload set read (#1352), on the run-start line: the values and flows it
+    # counted, and — first, so a long line cannot cut it off — that the sensitive-value opt-in is ON.
+    # Empty for a run with none.
+    private def payload_note(v : FuzzerView) : String
+      reports = v.payload_reports
+      return "" if reports.empty?
+      " · payload-from: #{reports.map(&.summary).join(" · ")}"
+    end
+
+    # The same facts for the confirm card, one line per source: the operator is about to send
+    # requests built from values nobody typed, and the card is where they decide.
+    private def payload_confirm(v : FuzzerView) : String
+      lines = v.payload_reports.map { |r| "\npayload-from: #{r.summary}" }
+      lines.join
     end
 
     # Payload-set rows this run's MODE will never draw from, on the same run-start line and for

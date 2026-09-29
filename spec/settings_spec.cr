@@ -2665,3 +2665,84 @@ describe "per-project network overrides" do
     Gori::Settings.project_capture_max_mib = nil
   end
 end
+
+# A list in the global wordlist catalog is remembered by NAME (#1353), whichever spelling it was
+# picked or stored under, and anything else is remembered exactly as given.
+describe "Settings wordlist history and the catalog" do
+  around_each do |example|
+    Gori::Settings.fuzz_recent_wordlists = [] of String
+    Gori::Settings.fuzz_favorite_wordlists = [] of String
+    with_wordlist_home { |_| example.run }
+    Gori::Settings.fuzz_recent_wordlists = [] of String
+    Gori::Settings.fuzz_favorite_wordlists = [] of String
+  end
+
+  it "canonicalizes an absolute path into the catalog to its name and leaves everything else alone" do
+    dir = Gori::Paths.wordlists_dir
+    Gori::Settings.canonical_wordlist(File.join(dir, "common.txt")).should eq("common.txt")
+    Gori::Settings.canonical_wordlist("  #{File.join(dir, "common.txt")}  ").should eq("common.txt")
+    Gori::Settings.canonical_wordlist("common.txt").should eq("common.txt")
+    Gori::Settings.canonical_wordlist("/tmp/common.txt").should eq("/tmp/common.txt")
+    Gori::Settings.canonical_wordlist("./common.txt").should eq("./common.txt")
+    # a subdirectory of the catalog, a hidden file and a name the catalog cannot address are paths
+    Gori::Settings.canonical_wordlist(File.join(dir, "sub", "x.txt")).should eq(File.join(dir, "sub", "x.txt"))
+    Gori::Settings.canonical_wordlist(File.join(dir, ".hidden")).should eq(File.join(dir, ".hidden"))
+    Gori::Settings.canonical_wordlist(File.join(dir, "trailing.")).should eq(File.join(dir, "trailing."))
+    # a sibling directory that merely shares the prefix is not the catalog
+    Gori::Settings.canonical_wordlist("#{dir}-other/x.txt").should eq("#{dir}-other/x.txt")
+  end
+
+  it "records a catalog pick by name, and an absolute spelling of it is the same entry" do
+    dir = Gori::Paths.wordlists_dir
+    Gori::Settings.record_recent_wordlist(File.join(dir, "common.txt"))
+    Gori::Settings.fuzz_recent_wordlists.should eq(["common.txt"])
+    Gori::Settings.record_recent_wordlist("/tmp/other.txt")
+    Gori::Settings.record_recent_wordlist("common.txt")
+    Gori::Settings.fuzz_recent_wordlists.should eq(["common.txt", "/tmp/other.txt"])
+  end
+
+  it "replaces an entry an older gori stored as the absolute path instead of listing it twice" do
+    dir = Gori::Paths.wordlists_dir
+    Gori::Settings.fuzz_recent_wordlists = ["/tmp/other.txt", File.join(dir, "common.txt")]
+    Gori::Settings.record_recent_wordlist("common.txt")
+    Gori::Settings.fuzz_recent_wordlists.should eq(["common.txt", "/tmp/other.txt"])
+  end
+
+  it "treats a path and the name of the same catalog list as one favorite" do
+    dir = Gori::Paths.wordlists_dir
+    Gori::Settings.fuzz_favorite_wordlists = [File.join(dir, "common.txt")] # stored by an older gori
+    Gori::Settings.favorite_wordlist?("common.txt").should be_true
+    Gori::Settings.favorite_wordlist?(File.join(dir, "common.txt")).should be_true
+    Gori::Settings.favorite_wordlist?("other.txt").should be_false
+    # toggling by the name removes the old spelling, rather than adding a second entry
+    Gori::Settings.toggle_favorite_wordlist("common.txt").should be_false
+    Gori::Settings.fuzz_favorite_wordlists.should be_empty
+    Gori::Settings.toggle_favorite_wordlist(File.join(dir, "common.txt")).should be_true
+    Gori::Settings.fuzz_favorite_wordlists.should eq(["common.txt"])
+  end
+
+  # A bare name reads the working directory first. Where a file of that name sits beside the
+  # catalog's list, the PATH is what keeps meaning "the catalog list", so it is what is stored —
+  # while the key stays the name, so it is still one entry however it was written.
+  it "remembers the path, not the name, of a catalog list a working-directory file shadows" do
+    path = File.join(Gori::Paths.wordlists_dir, "common.txt")
+    Gori::WordlistCatalog.save_values("common.txt", ["a"])
+    Gori::Settings.remembered_wordlist(path).should eq("common.txt") # nothing shadows it: the name is enough
+    File.write("common.txt", "cwd copy\n")
+    Gori::Settings.remembered_wordlist(path).should eq(path)
+    Gori::Settings.remembered_wordlist("common.txt").should eq("common.txt") # a bare name stays as typed
+    Gori::Settings.remembered_wordlist("/tmp/x.txt").should eq("/tmp/x.txt")
+    Gori::Settings.record_recent_wordlist(path)
+    Gori::Settings.fuzz_recent_wordlists.should eq([path])
+    Gori::Settings.record_recent_wordlist(path) # the same pick again changes nothing
+    Gori::Settings.fuzz_recent_wordlists.should eq([path])
+    Gori::Settings.record_recent_wordlist("common.txt") # same key: replaces, never lists it twice
+    Gori::Settings.fuzz_recent_wordlists.should eq(["common.txt"])
+  end
+
+  it "keeps a path outside the catalog exactly as given" do
+    Gori::Settings.toggle_favorite_wordlist("/home/me/lists/api.txt").should be_true
+    Gori::Settings.fuzz_favorite_wordlists.should eq(["/home/me/lists/api.txt"])
+    Gori::Settings.favorite_wordlist?("api.txt").should be_false # a bare name is not that path
+  end
+end

@@ -3,6 +3,7 @@ require "./sitemap"
 require "./entity"
 require "./redact"
 require "./redact/headers"
+require "./redact/policy"
 require "./ql"
 require "./store"
 
@@ -117,12 +118,15 @@ module Gori
       end
     end
 
+    # Public (#1352): `PayloadFrom` withholds the same values the inventory masks, from the
+    # same policy, rather than keeping a second list of what is a secret.
+    #
     # What counts as credential material for one build: the fixed header list, the built-in
     # profile's names and value shapes, AND the project's configured redaction profile — the
     # same one `get_flow` masks with — so a field the operator told gori to redact is not
     # printed here as an ordinary sample. Read without `Policy.resolve`, which would mint and
     # persist the placeholder salt as a side effect of a read.
-    private class Sensitivity
+    class Sensitivity
       @names : Set(String)
       @patterns : Array(Regex)
       # Each `json_pointers` entry as its RFC 6901 tokens (`Redact::Matcher.pointer_tokens`).

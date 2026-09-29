@@ -131,7 +131,7 @@ Sitemap 행에서 `p`를 누르면 그 호스트나 하위 트리로 좁힌 **Pa
 | --- | --- | --- |
 | 플로우 열기 | `↵` | 그 이름이 들어 있던 가장 최근 요청을 History 상세로 엽니다 |
 | 복사 | `y` / `⇧Y` | 이름 하나, 또는 목록의 모든 이름을 한 줄에 하나씩 |
-| 워드리스트 내보내기 | `w` | 목록의 이름(JSON은 마지막 키 이름, 헤더 제외)을 `~/.gori/wordlists/` 아래 파일로 저장합니다 |
+| 워드리스트 내보내기 | `w` | 목록의 이름(JSON은 마지막 키 이름, 헤더 제외)을 [wordlist 카탈로그](/ko/guide/repeater-and-fuzzer/#wordlist-catalog)(`~/.gori/wordlists/`)의 목록으로, 소유자 전용, `params-HOST-TIMESTAMP.txt`라는 이름으로 저장합니다 |
 | 마이닝 | `m` | 이 엔드포인트로 Miner를 열고, 같은 호스트의 다른 엔드포인트에서 본 이름을 먼저 시험합니다 |
 
 같은 목록을 CLI에서는 `gori run sitemap params`, MCP에서는 `list_params`로 볼 수 있습니다.

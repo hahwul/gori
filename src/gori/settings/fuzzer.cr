@@ -1,4 +1,5 @@
 require "json"
+require "../wordlist_catalog"
 
 # FUZZER section: recently-used + favorited wordlist file paths for the Payload
 # overlay's wordlist Path field (global scratch/prefs, not project data). See
@@ -11,30 +12,68 @@ module Gori::Settings
   class_property fuzz_recent_wordlists : Array(String) = [] of String
   class_property fuzz_favorite_wordlists : Array(String) = [] of String
 
-  # Move `path` to the front (deduped), capped. Called once a wordlist payload set
-  # is actually applied to the Fuzzer session, not on every keystroke — but that's
-  # still once per esc/↵ on an UNCHANGED existing set, so skip the array rebuild +
-  # disk save entirely when `path` is already the most-recent entry (a no-op).
-  def self.record_recent_wordlist(path : String) : Nil
+  # The KEY a wordlist is compared and de-duplicated by (#1353). A list in the global catalog is
+  # keyed by NAME — `common.txt`, which every consumer now resolves (`WordlistCatalog.resolve`) —
+  # so the absolute path an older gori's completion inserted and the name are one entry.
+  # Everything else (a path elsewhere, a name from the working directory, a subdirectory of the
+  # catalog) is its own key, exactly as given: this never rewrites one it cannot vouch for.
+  # What is STORED is `remembered_wordlist`, which is not always the key.
+  def self.canonical_wordlist(path : String) : String
     p = path.strip
-    return if p.empty? || fuzz_recent_wordlists.first? == p
-    self.fuzz_recent_wordlists = ([p] + fuzz_recent_wordlists.reject { |e| e == p }).first(RECENT_WORDLISTS_CAP)
+    dir = Paths.wordlists_dir
+    prefix = dir.ends_with?(File::SEPARATOR) ? dir : dir + File::SEPARATOR
+    return p unless p.starts_with?(prefix)
+    name = p[prefix.size..]
+    WordlistCatalog.valid_name?(name) ? name : p
+  end
+
+  # The spelling a wordlist is REMEMBERED under: its name, so the recent/favorite lists say what
+  # the operator would type and survive a moved `$GORI_HOME` — unless the name would not read
+  # the same list from here. A bare name reads the working directory first, so where a file of
+  # that name sits beside the catalog's list the completion inserted the PATH, and the set was
+  # applied with it; remembering the name would lose that, and the entry would insert the
+  # working-directory file next time. There the path is kept, and the completion, which asks
+  # `resolve` again when it inserts, still shortens it whenever the name is enough.
+  def self.remembered_wordlist(path : String) : String
+    p = path.strip
+    name = canonical_wordlist(p)
+    return p if name == p
+    WordlistCatalog.resolve(name).source.cwd? ? p : name
+  end
+
+  # Move `path` to the front (deduped), capped. Called once a wordlist payload set is
+  # actually applied to the Fuzzer session, not on every keystroke — but that's still once per
+  # esc/↵ on an UNCHANGED existing set, so skip the array rebuild + disk save entirely when
+  # `path` is already the most-recent entry (a no-op).
+  #
+  # Compared by `canonical_wordlist` and stored as `remembered_wordlist`, so an entry written as
+  # an absolute path into the catalog and the same list picked by name are one entry, not two.
+  def self.record_recent_wordlist(path : String) : Nil
+    kept = remembered_wordlist(path)
+    return if kept.empty? || fuzz_recent_wordlists.first? == kept
+    key = canonical_wordlist(kept)
+    self.fuzz_recent_wordlists = ([kept] + fuzz_recent_wordlists.reject { |e| canonical_wordlist(e) == key }).first(RECENT_WORDLISTS_CAP)
     save
   end
 
   # Add/remove `path` from favorites. Returns the NEW favorite state so the caller
-  # (the Path field's ★ indicator) can reflect it without a second lookup.
+  # (the Path field's ★ indicator) can reflect it without a second lookup. A path and the
+  # catalog name for the same list are one favorite (`canonical_wordlist`).
   def self.toggle_favorite_wordlist(path : String) : Bool
-    p = path.strip
-    return false if p.empty?
-    now_favorite = !fuzz_favorite_wordlists.includes?(p)
-    self.fuzz_favorite_wordlists = now_favorite ? [p] + fuzz_favorite_wordlists : fuzz_favorite_wordlists.reject { |e| e == p }
+    kept = remembered_wordlist(path)
+    return false if kept.empty?
+    key = canonical_wordlist(kept)
+    now_favorite = !favorite_wordlist?(kept)
+    rest = fuzz_favorite_wordlists.reject { |e| canonical_wordlist(e) == key }
+    self.fuzz_favorite_wordlists = now_favorite ? [kept] + rest : rest
     save
     now_favorite
   end
 
   def self.favorite_wordlist?(path : String) : Bool
-    fuzz_favorite_wordlists.includes?(path.strip)
+    p = canonical_wordlist(path)
+    return false if p.empty?
+    fuzz_favorite_wordlists.any? { |e| canonical_wordlist(e) == p }
   end
 
   private def self.parse_fuzzer_prefs(node : JSON::Any?) : Nil
