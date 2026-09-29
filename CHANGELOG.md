@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- TUI: an error while opening a project — reading a tab's stored data or drawing the first frame — is reported in the status line and `gori.log` like any later one, instead of ending gori before its first frame
 - Import: a Postman or Insomnia variable that multiplies itself (`a = "{{a}}{{a}}…"`) skips that request instead of expanding to gigabytes and running gori out of memory
 - CLI: a `--ca-dir` or `GORI_HOME` gori cannot create, and `gori settings user-agents --set` naming a directory, print one line saying so instead of a backtrace
 - Network: an HTTP/2 or WebSocket frame that declares a large length and then stalls holds only the bytes that actually arrived, instead of the declared 16 MB per connection, so a client or origin can no longer run gori out of memory with a few bytes per connection

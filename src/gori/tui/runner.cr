@@ -527,8 +527,11 @@ module Gori::Tui
       # integrations (`gori mcp --use-active-project`). Workspace-aware MCP launches use
       # their path binding instead, preventing a different repository from inheriting this.
       Paths.write_active_project(@session.project.db_path)
-      history_controller.view.reload(@session.store)
-      notes_controller.view.reload(@session.store) # load persisted notes up front so the tab is ready before it's ever focused
+      # Every stored-data read and the first paint before the loop go through `startup_step`:
+      # the loop's rescue cannot reach them, and one hostile row read here (a `created_at` past
+      # year 9999 in the Project tab's reload) ended the process before the operator saw a frame.
+      startup_step(:input) { history_controller.view.reload(@session.store) }
+      startup_step(:input) { notes_controller.view.reload(@session.store) } # load persisted notes up front so the tab is ready before it's ever focused
       # Surface the bind outcome on entry: capture-off if nothing could bind, or a
       # port-fallback note if the configured port was taken and we picked another.
       requested = @session.config.port
@@ -561,13 +564,15 @@ module Gori::Tui
       # (#listen_chip_label), the status line, the listeners overlay, the traffic empty states
       # — all of which read `@session.proxy.port` directly — plus the toast above.
       announce_env_syntax_migration
-      project_controller.reload
-      open_focus_flow
+      startup_step(:input) { project_controller.reload }
+      startup_step(:input) { open_focus_flow }
       # Replies an agent sent while no window was open (#1322): one note, before the first
       # paint so Miss Ring has it to say. After `Runner#initialize` seeded the reply cursor,
       # which is what bounds "while you were away".
       announce_missed_replies
-      render # initial paint (the loop below only re-renders when something changed)
+      startup_step(:render) do
+        render # initial paint (the loop below only re-renders when something changed)
+      end
       # The render loop polls input on a 50ms cadence (so async channels are still
       # checked ≤50ms), but RENDER only runs when the frame would actually change —
       # input handled, flow events / repeater results drained, the interceptor queue
@@ -1018,6 +1023,17 @@ module Gori::Tui
       # the next keypress, and this is the one message an operator should be able to re-read.
       status("recovered from an internal error — details in gori.log (#{ex.class}: #{ex.message})", :error)
       true
+    end
+
+    # One step of `run`'s setup, absorbed the way a tick is (`absorb_tick_error`). A failed
+    # paint puts the reduced frame up on the loop's first tick, and a failed read leaves that
+    # tab empty until its next reload — either way the session opens and says what broke.
+    private def startup_step(phase : Symbol, &) : Nil
+      yield
+    rescue ex : Gori::Error
+      raise ex
+    rescue ex
+      raise ex unless absorb_tick_error(ex, phase)
     end
 
     # A plain printable char (a paste/typed character), as opposed to a nav/control
