@@ -171,3 +171,32 @@ describe "preset in a fuzz plan" do
     plan.total.should eq(sqli * inline.size)
   end
 end
+
+describe "Gori::Fuzz::Presets merge file with the global catalog (#1353)" do
+  it "merges a list named in the catalog (`--preset sqli:mine.txt`), keeping every line" do
+    with_wordlist_home do
+      Gori::WordlistCatalog.save_values("mine.txt", ["CUSTOM-CATALOG-1", "", "# hash-led", "CUSTOM-CATALOG-2"])
+      builtin = F::Presets.builtin("sqli")
+      merged = F::Presets.load("sqli", "mine.txt")
+      merged[0, builtin.size].should eq(builtin)
+      merged.last(4).should eq(["CUSTOM-CATALOG-1", "", "# hash-led", "CUSTOM-CATALOG-2"])
+    end
+  end
+
+  it "prefers a file of that name in the current directory" do
+    with_wordlist_home do
+      Gori::WordlistCatalog.save_values("mine.txt", ["CUSTOM-CATALOG"])
+      File.write("mine.txt", "CUSTOM-CWD\n")
+      merged = F::Presets.load("sqli", "mine.txt")
+      merged.should contain("CUSTOM-CWD")
+      merged.should_not contain("CUSTOM-CATALOG")
+    end
+  end
+
+  it "does not look a path up in the catalog" do
+    with_wordlist_home do
+      Gori::WordlistCatalog.save_values("mine.txt", ["CUSTOM-CATALOG"])
+      expect_raises(Gori::Error, /preset merge file not found: \.\/mine\.txt/) { F::Presets.load("sqli", "./mine.txt") }
+    end
+  end
+end

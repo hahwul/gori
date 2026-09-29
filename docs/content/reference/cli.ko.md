@@ -77,6 +77,7 @@ gori run <subcommand> [verb] [options]
 | `probe issues` · `dismiss` · `promote` · `delete` | 저장된 Probe 발견 항목 트리아지 |
 | `probe rules` · `mode` | 스캔 규칙 목록 / 무장, 스캔 모드 조회 및 설정 |
 | `discover` | 엔드포인트를 스파이더링 & 브루트포스하여 Sitemap으로 반영 |
+| `wordlist` (`list`) · `show` · `save` · `rename` · `delete` | 전역 wordlist 카탈로그: 모든 `--wordlist` / `-w`가 이름으로 받는 이름 붙은 목록(`delete`는 `--yes` 필요) |
 | `import` | HAR / URL 목록 / OpenAPI / Postman / Insomnia / Burp / WSDL 파일 또는 curl 명령에서 History로 플로우 일괄 임포트 |
 | `sitemap [QL]` | 호스트 → 경로 엔드포인트 트리 |
 | `sitemap tag` | Sitemap 경로에 자유 텍스트 메모를 고정 / 해제 / 목록 |
@@ -553,7 +554,7 @@ WebSocket 핸드셰이크인 요청은 평범한 요청으로 나가고 그 `101
 | Transport | `--target=URL` (`--request`/stdin에 필수), `--http2`, `--sni=HOST`, `--tls-preset=NAME`(실행 전체에 쓰는 [TLS 지문](#per-send-tls-fingerprints) 하나), `-k`/`--insecure-upstream` |
 | Mode | `--mode=` `sniper` (기본값), `batteringram`, `pitchfork`, `clusterbomb`. 앞의 둘은 페이로드 세트를 **하나만**, 뒤의 둘은 표시된 위치마다 하나씩 사용합니다. 모드가 쓰지 않을 세트는 실행 전에 알려 줍니다 |
 | gRPC fields | `--field=SPEC`(반복 가능)는 단항 gRPC 요청의 옥텟 대신 **스키마가 아는 필드**를 스윕합니다. `SPEC`은 필드 이름, 중첩 메시지 경로(`profile.age`), 필드 번호, 반복 필드의 특정 occurrence(`name[i]`)이며, `name¦chain`은 선언된 타입이 바이트로 인코딩하기 **전에** Decoder 체인을 돌립니다. 필드는 캡처된 메시지에 이미 있어야 하며(gori는 기존 occurrence를 바꿀 뿐 새로 추가하지 않습니다), `bytes` 필드의 페이로드는 **hex**(`de ad be ef`)로 읽습니다. 페이로드는 필드 선언을 거쳐 바이트가 되고(`-3`은 `int32`·`sint32`·`bool`·enum마다 다른 옥텟입니다), 메시지의 나머지 바이트는 캡처에서 그대로 복사되며, 5바이트 길이 접두사는 다시 계산됩니다. 해당 rpc를 해석할 descriptor set이 필요합니다(`gori run grpc schema`). 필드 위치는 템플릿 자신의 `§…§` 위치 뒤에 붙으므로 `--mode`와 페이로드 세트의 의미는 그대로입니다. 스키마가 선언하지 않은 필드, 선언과 와이어 타입이 충돌하는 필드, 선언된 타입이 담을 수 없는 페이로드는 모두 첫 요청 전에 거부됩니다 |
-| Payloads | `-w`/`--wordlist`, `--preset=NAME[:FILE]` (내장: `sqli`, `xss`, `traversal`, `format-string`, `bad-strings`, `command-injection`, `cache-delimiters`), `--payloads=LIST`, `--numbers=FROM-TO[:STEP]`, `--null=N`, `--brute=CHARSET:MIN-MAX` |
+| Payloads | `-w`/`--wordlist`(파일, 또는 저장한 목록의 이름), `--preset=NAME[:FILE]` (내장: `sqli`, `xss`, `traversal`, `format-string`, `bad-strings`, `command-injection`, `cache-delimiters`), `--payloads=LIST`, `--numbers=FROM-TO[:STEP]`, `--null=N`, `--brute=CHARSET:MIN-MAX` |
 | Encoding | **쿼리 문자열**이나 **form-urlencoded 본문** 값에 치환되는 페이로드는 기본으로 URL 인코딩됩니다. 경로 세그먼트·JSON/원시 본문·헤더·쿠키는 그대로 나갑니다. `--no-encode`는 쿼리/폼 위치도 원시로 보냅니다. 페이로드 자체가 이미 퍼센트 이스케이프인 경우에 쓰세요(`%00`이 `%2500`으로 나가므로, origin의 디코더 자체를 겨눈 `%00` / `%c0%af` / `%2e%2e%2f` 탐침은 그냥 텍스트로 도착합니다). `--encode`를 명시하면 기본 인코딩을 대체하며, 그 파이프라인이 모든 위치에 적용됩니다. `--prefix` / `--suffix` / `--case` / `--hash` / `--regex-replace`는 대체하지 않습니다: 페이로드가 무엇인지를 말할 뿐 와이어가 그것을 어떻게 적는지는 말하지 않으므로, 그 출력도 쿼리/폼 위치에서는 인코딩됩니다 |
 | Processors | `--prefix`, `--suffix`, `--encode` (`url`\|`urlall`\|`base64`\|`hex`), `--case` (`upper`\|`lower`), `--hash` (`md5`\|`sha1`\|`sha256`), `--regex-replace=/pat/rep/` |
 | Rate | `--concurrency` (20), `--rate=RPS`, `--throttle=MS`, `--timeout=SEC`, `--retries=N`, `--max-requests=N` (총 요청 상한. 재시도와 리다이렉트 홉도 포함), `--follow-redirects`, `--no-keep-alive` |
@@ -598,7 +599,7 @@ gori run mine <flow-id> --locations query,headers --wordlist params.txt
 | `--flow`, `--request`, `--target`, `--sni`, `--http2`, `-k` | 요청 소스와 트랜스포트 |
 | `--allow-unscoped` | 대상이 프로젝트 스코프 밖이어도 전송(샌드박스와 명시적 제외 규칙은 그대로 적용) |
 | `--locations=LIST` | `query`, `form`, `multipart`, `json`, `headers`, `cookies`. 기본값은 `query`이고, 요청 본문이 폼이나 JSON이면 `form`이나 `json`이 더해집니다. `multipart`, `headers`, `cookies`는 명시해야만 실행됩니다 |
-| `--wordlist`, `--bucket=N` | 후보 이름과 버킷 크기 |
+| `--wordlist`, `--bucket=N` | 후보 이름(파일, 또는 저장한 [wordlist](#run-wordlist)의 이름)과 버킷 크기 |
 | `--name=NAME` | 워드리스트보다 먼저 시험할 이름(여러 번 지정하거나 쉼표로 구분). 예: `sitemap params`가 다른 엔드포인트에서 찾은 이름 |
 | `--concurrency` (10), `--rate`, `--throttle`, `--timeout`, `--retries` (1), `--max-requests=N` | 속도 제어 |
 | `--no-keep-alive` | 연결 재사용 대신 프로브마다 새로 연결 |
@@ -797,7 +798,7 @@ gori run discover --target https://target.example --max-depth 3 --extensions php
 | `--target=URL` | 탐색할 시드 origin 또는 경로 하위 트리(필수) |
 | `--max-depth=N` | 시드로부터의 스파이더 깊이(기본값 4) |
 | `--no-spider` / `--no-bruteforce` | 링크 크롤링 / 디렉터리 브루트포스 비활성화 |
-| `--wordlist=PATH` | 내장 목록과 병합할 추가 경로 워드리스트 |
+| `--wordlist=PATH` | 내장 목록과 병합할 추가 경로 워드리스트(파일, 또는 저장한 [wordlist](#run-wordlist)의 이름) |
 | `--extensions=LIST` | 이 확장자도 프로브(예: `php,json,bak`) |
 | `-H`, `--header=HEADER` | 모든 프로브에 붙일 커스텀 헤더(반복 가능) |
 | `--containment=MODE` | `same-origin` \| `scope-aware`(기본) \| `host+subdomains` |
@@ -814,6 +815,29 @@ gori run discover --target https://target.example --max-depth 3 --extensions php
 | `--format` | `text`, `json`, 또는 `jsonl` |
 
 기본적으로 origin별로 연결을 재사용합니다. 브루트포스 한 번이 프로브마다가 아니라 워커마다 TCP(https라면 TLS) 핸드셰이크를 한 번씩만 치릅니다. 실행이 끝날 때 나오는 `connections · N dialed · M reused` 줄에서 대상이 이를 지켰는지 확인할 수 있습니다. 대상이 연결 단위로 동작한다면 `--no-keep-alive`로 끕니다.
+
+### run wordlist {#run-wordlist}
+
+전역 wordlist 카탈로그: `$GORI_HOME/wordlists`(`~/.gori/wordlists`) 아래의 이름 붙은 목록이며 하나하나가 평범한 파일입니다. wordlist 경로를 받는 곳(`fuzz -w`, `mine --wordlist`, `discover --wordlist`, `cookie --crack --wordlist`)이면 어느 작업 디렉터리에서든 이름을 쓸 수 있습니다. `/`가 있는 값은 경로이므로 주어진 그대로 읽고, 이름만 있으면 현재 디렉터리를 먼저, 그다음 카탈로그를 찾습니다. 여기서는 프로젝트가 필요 없고 요청도 보내지 않습니다. 전체 모델은 [가이드](/ko/guide/repeater-and-fuzzer/#wordlist-catalog)를 보세요.
+
+```bash
+gori run sitemap params --host api.example.com --format names | gori run wordlist save api-params.txt
+gori run wordlist                       # 가진 목록: 이름과 크기
+gori run mine 42 --wordlist api-params.txt
+gori run wordlist show api-params.txt --head 5
+gori run wordlist rename api-params.txt api-v2-params.txt
+gori run wordlist delete api-v2-params.txt --yes
+```
+
+| Verb | Description |
+|------|-------------|
+| `wordlist` · `list` (`ls`) | 이름, 크기, 수정 시각. 값은 절대 출력하지 않습니다. `--format text` \| `json` |
+| `show <name>` | 경로, 크기, 줄 수(최대 32 MiB까지 세며, 목록이 더 길면 `more than N`). `--head=N`은 첫 N줄(최대 1000)도 출력합니다. 값이므로 민감할 수 있습니다 |
+| `save <name>` | 소스를 정확히 하나만 골라 목록을 저장: `--from=FILE`(`-`는 stdin), `--value=V` 하나 이상, 또는 stdin으로 넘긴 목록. 바이트는 준 그대로 유지하므로 빈 줄이나 `#` 줄도 그대로 남고, `--value`에는 줄바꿈을 넣을 수 없습니다. 원자적이고 소유자 전용이며, `--overwrite`가 아니면 이미 있는 이름은 거부합니다 |
+| `rename <old> <new>` (`mv`) | 목록 이름 변경. `--overwrite`가 아니면 이미 있는 `<new>`는 거부합니다 |
+| `delete <name>` (`rm`) | 목록 삭제(`--yes`가 확인이며 프롬프트는 없습니다). 심볼릭 링크는 링크만 지우고 가리키는 파일은 지우지 않습니다 |
+
+이름은 어느 문자든 글자와 숫자, `_`, `.`, `+`, `-`, 안쪽 공백(최대 200바이트, `.`이나 `-`로 시작할 수 없음)이며 경로 구분자가 든 값은 거부합니다. 모든 verb가 `-h`를 받고, 거부된 변경 verb는 `1`로 종료하며 이유를 알려 줍니다.
 
 ### 명령줄에서 세션 바인딩 쓰기 {#session-bindings-from-the-command-line}
 
@@ -1033,7 +1057,7 @@ gori run cookie --forge --type flask --secret s3cret --payload '{"user":"admin"}
 | `--crack` | `--secrets` 또는 `--wordlist`로 시크릿 브루트포스 |
 | `--forge` | `--payload`(Rack은 `--value`)를 `--secret`으로 재서명 |
 | `--type=T` | `flask` \| `rack` \| `django`(기본: 자동 판별) |
-| `--secret=S`, `--secrets=LIST`, `--wordlist=PATH` | 서명 시크릿, 쉼표로 구분한 후보 목록, 또는 줄 단위 파일 |
+| `--secret=S`, `--secrets=LIST`, `--wordlist=PATH` | 서명 시크릿, 쉼표로 구분한 후보 목록, 또는 줄 단위 파일(혹은 저장한 [wordlist](#run-wordlist)의 이름) |
 | `--payload=JSON` | 서명할 세션 JSON(Flask / Django `--forge`) |
 | `--value=B64` | base64 Marshal 쿠키 값(Rack `--forge`, 불투명) |
 | `--salt=SALT` | Flask / Django 서명 솔트 |

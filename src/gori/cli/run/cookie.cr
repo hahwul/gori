@@ -37,7 +37,7 @@ module Gori
           p.on("--type=T", "Cookie format: flask | rack | django (default: auto-detect)") { |v| type = v.downcase }
           p.on("--secret=S", "Signing secret (for --verify / --forge)") { |v| secret = v }
           p.on("--secrets=LIST", "Comma-separated candidate secrets (for --crack)") { |v| secrets = v.split(',') }
-          p.on("--wordlist=PATH", "Newline-delimited wordlist file (for --crack)") { |v| wordlist = v }
+          p.on("--wordlist=PATH", "Newline-delimited wordlist file, or the NAME of a saved list (for --crack)") { |v| wordlist = v }
           p.on("--payload=JSON", "Session JSON to sign (Flask/Django --forge)") { |v| payload = v }
           p.on("--value=B64", "Base64 Marshal cookie value (Rack --forge, opaque)") { |v| value = v }
           p.on("--salt=SALT", "Flask/Django signing salt") { |v| salt = v }

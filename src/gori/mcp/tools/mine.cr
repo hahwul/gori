@@ -345,7 +345,7 @@ module Gori
           s.field "flow_id", intprop("seed the request from a captured flow id (instead of template)")
           s.field "url", strprop("absolute target URL (scheme+host) that sets the origin — a 'template' or 'flow_id' is still REQUIRED; url alone does NOT define the request (unlike send_request)")
           s.field "locations", strprop("comma list of where to mine: #{MINE_LOCATIONS.join(",")} (default: auto-detect; multipart is applicable but off by default — pass it explicitly)")
-          s.field "wordlist", strprop("path to an extra param-name wordlist (merged with the built-in list)")
+          s.field "wordlist", strprop("path to an extra param-name wordlist, or the name of a saved list (list_wordlists); merged with the built-in list")
           s.field "names", strarrprop("names to test FIRST, ahead of the built-in list and any wordlist — e.g. list_params names seen on this host's other endpoints but not on this one")
           s.field "bucket", intprop("names stuffed per request before bisection (per location)")
           s.field "concurrency", intprop("parallel requests (default 10, max #{MINE_MAX_CONCURRENCY})")

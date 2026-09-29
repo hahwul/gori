@@ -322,3 +322,139 @@ describe Gori::Tui::FuzzSetOverlay do
     pre.supports_drag?.should be_false
   end
 end
+
+# `^S` in the List editor keeps the values as a named list in the global wordlist catalog
+# (#1353). What these pin: it saves exactly what the set would send (the List editor's own
+# grammar), it never replaces a list without a second, deliberate ↵, and a refusal is shown —
+# never raised, and never closes the overlay or loses the values.
+private def ctrl_s : Termisu::Event::Key
+  Termisu::Event::Key.new(Termisu::Input::Key::LowerS, Termisu::Input::Modifier::Ctrl)
+end
+
+private def list_overlay(*values : String) : FuzzSetOverlay
+  ov = FuzzSetOverlay.for_list
+  ov.handle_key(okey(Termisu::Input::Key::Down)) # Type row → the values editor
+  values.each_with_index do |v, i|
+    ov.handle_key(okey(Termisu::Input::Key::Enter)) if i > 0
+    otype(ov, v)
+  end
+  ov
+end
+
+private def render_text(ov : FuzzSetOverlay) : String
+  backend = MemoryBackend.new(120, 30)
+  ov.render(Screen.new(backend), Rect.new(0, 0, 120, 30))
+  (0...30).map { |y| backend.row(y) }.join("\n")
+end
+
+private def clear_name(ov : FuzzSetOverlay) : Nil
+  40.times { ov.handle_key(okey(Termisu::Input::Key::Backspace)) }
+end
+
+describe Gori::Tui::FuzzSetOverlay do
+  describe "^S save list" do
+    it "opens a name prompt prefilled with a timestamped name, and saves what the set would send" do
+      with_wordlist_home do |dir|
+        ov = list_overlay("  admin  ", "", "root")
+        ov.handle_key(ctrl_s).should eq(:stay)
+        render_text(ov).should contain("Save as")
+        render_text(ov).should match(/payloads-\d{8}-\d{6}\.txt/)
+        clear_name(ov)
+        otype(ov, "creds.txt")
+        ov.handle_key(okey(Termisu::Input::Key::Enter)).should eq(:stay)
+        File.read(File.join(dir, "creds.txt")).should eq("admin\nroot\n") # trimmed, no blank line: the List grammar
+        text = render_text(ov)
+        text.should contain("saved 2 values as creds.txt")
+        text.should_not contain("Save as")
+        # the set itself is untouched and still applies
+        ov.build_spec.not_nil!.value.should eq("admin\nroot\n")
+        ov.handle_key(okey(Termisu::Input::Key::Escape)).should eq(:commit)
+      end
+    end
+
+    it "refuses an empty list without opening a prompt" do
+      with_wordlist_home do |dir|
+        ov = FuzzSetOverlay.for_list
+        ov.handle_key(okey(Termisu::Input::Key::Down))
+        ov.handle_key(ctrl_s)
+        text = render_text(ov)
+        text.should contain("nothing to save")
+        text.should_not contain("Save as")
+        Dir.exists?(dir).should be_false
+      end
+    end
+
+    it "esc cancels the prompt only — the overlay stays open and nothing is written" do
+      with_wordlist_home do |dir|
+        ov = list_overlay("a", "b")
+        ov.handle_key(ctrl_s)
+        ov.handle_key(okey(Termisu::Input::Key::Escape)).should eq(:stay)
+        render_text(ov).should_not contain("Save as")
+        Dir.exists?(dir).should be_false
+        ov.handle_key(okey(Termisu::Input::Key::Escape)).should eq(:commit) # the NEXT esc applies as always
+      end
+    end
+
+    it "asks for a second ↵ before replacing a list, and a new name is a new question" do
+      with_wordlist_home do |dir|
+        Gori::WordlistCatalog.save_values("creds.txt", ["old"])
+        ov = list_overlay("new1", "new2")
+        ov.handle_key(ctrl_s)
+        clear_name(ov)
+        otype(ov, "creds.txt")
+        ov.handle_key(okey(Termisu::Input::Key::Enter))
+        render_text(ov).should contain("already exists")
+        File.read(File.join(dir, "creds.txt")).should eq("old\n")
+        # editing the name withdraws the override: the next ↵ on ANOTHER existing name asks again
+        Gori::WordlistCatalog.save_values("other.txt", ["keep"])
+        ov.handle_key(okey(Termisu::Input::Key::Backspace))
+        ov.handle_key(okey(Termisu::Input::Key::Backspace))
+        ov.handle_key(okey(Termisu::Input::Key::Backspace))
+        ov.handle_key(okey(Termisu::Input::Key::Backspace))
+        otype(ov, ".txt") # → "creds.txt" again — same name, but the override was reset by the edit
+        ov.handle_key(okey(Termisu::Input::Key::Enter))
+        File.read(File.join(dir, "creds.txt")).should eq("old\n")
+        # …and ↵ once more on the unchanged name is the deliberate replace
+        ov.handle_key(okey(Termisu::Input::Key::Enter))
+        File.read(File.join(dir, "creds.txt")).should eq("new1\nnew2\n")
+        render_text(ov).should contain("saved 2 values as creds.txt")
+        File.read(File.join(dir, "other.txt")).should eq("keep\n")
+      end
+    end
+
+    it "shows a refusal and keeps the prompt open for a name that is a path" do
+      with_wordlist_home do |dir|
+        ov = list_overlay("a")
+        ov.handle_key(ctrl_s)
+        clear_name(ov)
+        otype(ov, "../escape.txt")
+        ov.handle_key(okey(Termisu::Input::Key::Enter)).should eq(:stay)
+        text = render_text(ov)
+        text.should contain("invalid wordlist name")
+        text.should contain("Save as") # still open: fix the name
+        Dir.exists?(dir).should be_false
+        File.exists?(File.join(File.dirname(dir), "escape.txt")).should be_false
+      end
+    end
+
+    it "does not take a pasted line break for the answer to the name prompt" do
+      with_wordlist_home do
+        ov = list_overlay("a")
+        enter = okey(Termisu::Input::Key::Enter)
+        ov.takes_pasted?(enter).should be_true # the List editor takes a pasted newline
+        ov.handle_key(ctrl_s)
+        ov.takes_pasted?(enter).should be_false
+      end
+    end
+
+    it "is only in the List editor" do
+      with_wordlist_home do
+        ov = FuzzSetOverlay.for_list
+        ov.handle_key(okey(Termisu::Input::Key::Right)) # → Numbers
+        ov.handle_key(okey(Termisu::Input::Key::Down))
+        ov.handle_key(ctrl_s)
+        render_text(ov).should_not contain("Save as")
+      end
+    end
+  end
+end

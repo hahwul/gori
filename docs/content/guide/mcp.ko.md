@@ -75,7 +75,7 @@ gori mcp --read-only
 |------|------------------|
 | **Send traffic** | 대상이나 OAST 서버로 요청을 보내는 모든 도구와, 그 도구가 시작한 작업의 폴러: `send_request`, `send_websocket`, `race_requests`, `timing_requests`, `fuzz_*`, `mine_*`, `discover_*`, `authorize_*`, `sequence_*`(`sequence_analyze` 제외), `run_retest`, `minimize_repeater`, `cache_deception_check`, `grpc_reflect`, `refresh_session_slot`, `oast_*`(`oast_presets` 제외), `list_jobs` / `get_job` / `stop_job`, `active:true`인 `probe_scan`, `active`나 `aggressive`로 올리는 `set_probe_mode` |
 | **Intercept control** | `intercept_forward`, `intercept_forward_edit`, `intercept_drop`, `intercept_toggle`, `intercept_set_filter`, `intercept_set_direction` |
-| **Edit project data** | 그 밖의 프로젝트 쓰기 전부: 이슈, 노트, repeater, 규칙, env, host override, 세션 슬롯, evidence, 링크, 뷰, probe 스캔과 판정(수동 `probe_scan`도 찾은 결과를 기록합니다), JavaScript 엔드포인트 스캔(`scan_js_endpoints`는 읽은 것을 저장할 뿐 요청은 보내지 않습니다), flow·히스토리 삭제 |
+| **Edit project data** | 그 밖의 프로젝트 쓰기 전부: 이슈, 노트, repeater, 규칙, env, host override, 세션 슬롯, evidence, 링크, 뷰, 저장된 wordlist(`save_wordlist`, `rename_wordlist`, `delete_wordlist`: 프로젝트가 아니라 전역 카탈로그), probe 스캔과 판정(수동 `probe_scan`도 찾은 결과를 기록합니다), JavaScript 엔드포인트 스캔(`scan_js_endpoints`는 읽은 것을 저장할 뿐 요청은 보내지 않습니다), flow·히스토리 삭제 |
 | **Change scope & sandbox** | `add_scope_rule`, `update_scope_rule`, `delete_scope_rule`, `set_scope_enabled`, `set_sandbox`(`list_scope`는 계속 제공) |
 | **Manage projects** | `create_project`, `switch_project`, `delete_project`, `import_project`, `export_project` |
 
@@ -89,8 +89,8 @@ gori mcp --read-only
 
 | 시작 방법 | 도구 | `tools/list` | 토큰 | 용도 |
 | --- | ---: | ---: | ---: | --- |
-| `gori mcp` | 190 | ~229 KB | ~59k | 전부 (기본값) |
-| `--read-only` | 62 | ~72 KB | ~18k | 읽기 도구와 순수 연산; 실제 요청 전송 없음 |
+| `gori mcp` | 195 | ~232 KB | ~59k | 전부 (기본값) |
+| `--read-only` | 64 | ~73 KB | ~19k | 읽기 도구와 순수 연산; 실제 요청 전송 없음 |
 | `--tools=@recon` | 38 | ~56 KB | ~14k | 캡처를 읽고 파악, 요청 재전송, 이슈·노트 기록 |
 | `--tools=@recon --read-only` | 28 | ~39 KB | ~10k | `--read-only`가 끄는 도구를 뺀 `@recon` |
 | `--tools=@minimal` | 18 | ~28 KB | ~7k | History와 flow, 현재 TUI 컨텍스트를 읽고 오퍼레이터와 대화 |
@@ -192,6 +192,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `intercept_list` / `intercept_get` | 라이브 인터셉트 큐와 홀드된 항목 하나의 전체 내용 조회 |
 | `list_projects` | 이 호스트에서 프로젝트 **찾기**. 최근 활동순 **한 페이지**를 돌려줍니다. `query`는 표시 이름·디렉터리 슬러그·짧은 id·바인딩된 워크스페이스 경로에 포함되는지로 걸러내고, `limit`/`offset`으로 페이지를 넘깁니다(기본 50, 최대 500). 현재 서빙 중인 프로젝트는 페이지와 별개로 `current_project`에 실리므로 좁힌 목록에서도 "지금 어느 프로젝트인가"에 답할 수 있고, `total` 옆의 `total_projects` 덕분에 매치 0건이 "프로젝트가 하나도 없다"로 읽히지 않습니다 |
 | `list_notes` / `get_note` | 프로젝트 노트 읽기 |
+| `list_wordlists` / `get_wordlist` | 전역 [wordlist 카탈로그](/ko/guide/repeater-and-fuzzer/#wordlist-catalog): `GORI_HOME/wordlists` 아래의 이름 붙은 목록을 이름·크기·수정 시각만으로 나열합니다. `get_wordlist`는 경로와 최대 32 MiB까지 읽어 센 줄 수(`lines_complete:false`면 목록이 더 깁니다)를 더하고, **값**은 `include_values:true`일 때만 돌려줍니다(`max_lines` 기본 20, 최대 200). 목록이 자격 증명 목록일 수 있기 때문입니다. 프로젝트가 바인딩되지 않아도 쓸 수 있습니다 |
 | `list_rule_presets` | 응답 수정 [프리셋](/ko/guide/proxy/#rewriter-presets). 평범한 Match & Replace 규칙을 설치하는 이름 붙은 출발점(hidden 필드 드러내기, disabled 컨트롤 활성화, `maxlength` 제거, 클라이언트 검증 제거, CSP / 보안 헤더 제거, SRI 비활성화). 각 행이 설치할 규칙을 밝힙니다 |
 | `list_extract_rules` | 프로젝트의 **extract** 규칙. [세션 바인딩](/ko/guide/proxy/#session-bindings)의 읽는 쪽 절반. 각각 응답을 관찰해 `$BIND.NAME` 하나를 메모리에 묶고, Match & Replace 규칙이 그것을 주입합니다 |
 | `list_color_rules` / `list_custom_colors` | [Colormarker](/ko/guide/proxy/#colouring-rows-colormarker-tab) 규칙을 우선순위 순으로, 그리고 규칙의 `color`가 참조할 수 있는 전역 커스텀 색상. 표시 전용이며 색상 규칙은 트래픽을 건드리지 않습니다 |
@@ -235,6 +236,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `run_retest` | 프로젝트 스코프와 Sandbox 게이트를 거쳐 실행하고 `pass` / `fail` / `inconclusive` / `blocked` 판정과 단계별 행을 반환합니다(`pass`가 아니면 `isError`). 상태를 바꾸는 메서드가 포함된 배치는 정확한 요청 수와 함께 거부되며 `confirm:true`가 필요합니다. gori가 전송을 거부하면 그 뒤는 모두 건너뛰고 cleanup도 `allow_cleanup:true` 없이는 보내지 않습니다. 모든 전송은 History에 `src:retest`로 기록됩니다 |
 | `clear_retest_steps` / `delete_retest_run` | Issue 리테스트의 모든 단계를 지우거나(실행 기록은 유지 — 검사를 다시 짠다고 실행이 없던 일이 되지는 않습니다), 실행 요약과 결과 행 하나를 지웁니다. 단계와 각 전송이 기록한 History 플로우는 그대로 남습니다: `delete_retest_run`이 지우는 것은 보고이지 증거가 아닙니다 |
 | `create_note` / `update_note` / `delete_note` | 프로젝트 노트 관리 |
+| `save_wordlist` / `rename_wordlist` / `delete_wordlist` | 전역 wordlist 카탈로그 관리. `save_wordlist`는 `values` 배열을 한 줄에 하나씩 그대로 저장하고(빈 줄과 `#` 줄도 payload로 남고, 줄바꿈이 든 값은 거부됩니다) 원자적으로, 소유자 전용으로 쓰며, `overwrite:true`가 아니면 기존 목록을 덮어쓰지 않습니다. `rename_wordlist`도 같고, `delete_wordlist`는 `confirm:true`가 필요합니다. 이름은 파일 이름이며 경로가 아닙니다. 저장한 이름은 `fuzz_start`, `mine_start`, `discover_start`의 `wordlist`로 쓸 수 있습니다. **Edit project data** 그룹이며, 프로젝트가 바인딩되지 않아도 쓸 수 있습니다 |
 | `create_rule` / `update_rule` / `set_rule_enabled` / `delete_rule` | Match & Replace 규칙 생성, 편집, 토글, 삭제(오가는 요청/응답의 헤드 또는 본문을 그 자리에서 재작성). 각각 `scope`를 받습니다: `project`(기본값) 또는 모든 프로젝트에 적용되는 `global`. `short_circuit` 규칙은 [모킹](/ko/guide/proxy/#mocking) 인자도 받습니다: `dir`/`strip_prefix`/`fallthrough`, `fault`/`hang_ms`, `delay_ms`, 그리고 캡처된 응답으로 초안을 잡는 `from_flow_id` |
 | `create_rule_from_preset` | 프리셋(`list_rule_presets` 참고)을 평범한 Match & Replace 규칙으로 설치. 규칙마다 `create_rule`을 한 번씩 부른 것과 같은 결과라, 설치 후에도 보이고 편집·비활성화됩니다. 생성된 id를 반환 |
 | `create_extract_rule` / `update_extract_rule` / `set_extract_rule_enabled` / `delete_extract_rule` | 응답에서 `$BIND.NAME`을 묶는 extract 규칙 관리. 이름을 바꾸면 옛 이름에 묶인 값은 라벨만 갈아 끼우는 게 아니라 버려지고, 비활성화하면 이름 자체가 **선언 해제**되어 그것을 주입하던 규칙이 낡은 값을 보내는 대신 다시 거부합니다 |

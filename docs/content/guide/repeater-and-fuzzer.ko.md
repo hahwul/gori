@@ -151,11 +151,28 @@ Fuzzer는 Intruder 스타일 엔진입니다. 요청에서 위치를 표시하�
 
 ### 위치와 페이로드 {#positions-and-payloads}
 
-요청에서 `§…§` 마커로 위치를 표시하거나, gori가 자동으로 배치하게 하세요. 페이로드 세트는 내장 프리셋(`sqli`, `xss`, `traversal`, `format-string`, `bad-strings`, `command-injection`, `cache-delimiters`. 파일 없이 바로 시작), 워드리스트, 명시적 목록, 숫자 범위, N개의 빈(null) 페이로드, 또는 무차별 대입 문자 세트가 될 수 있습니다. 프리셋은 추가 파일을 병합(내장 우선, 중복 제거)할 수 있고 다른 세트와 조합됩니다. 프로세서를 사용하면 나가는 각 페이로드를 변환할 수 있습니다: prefix/suffix, URL/base64/hex 인코딩, 대소문자 변환, 해싱, 정규식 치환.
+요청에서 `§…§` 마커로 위치를 표시하거나, gori가 자동으로 배치하게 하세요. 페이로드 세트는 내장 프리셋(`sqli`, `xss`, `traversal`, `format-string`, `bad-strings`, `command-injection`, `cache-delimiters`. 파일 없이 바로 시작), 워드리스트(파일, 또는 [카탈로그](#wordlist-catalog)에 있는 목록의 이름), 명시적 목록, 숫자 범위, N개의 빈(null) 페이로드, 또는 무차별 대입 문자 세트가 될 수 있습니다. 프리셋은 추가 파일을 병합(내장 우선, 중복 제거)할 수 있고 다른 세트와 조합됩니다. 프로세서를 사용하면 나가는 각 페이로드를 변환할 수 있습니다: prefix/suffix, URL/base64/hex 인코딩, 대소문자 변환, 해싱, 정규식 치환.
 
 마커 하나에 자체 Decoder 체인을 붙일 수도 있습니다. 커서를 마커 안에 두고 `Ctrl-Q`를 누르면 체인 편집기가 열리고, 보내기 전에 마커의 값이 각 단계를 거치는 모습을 미리 보여 줍니다(`exec:` 단계는 미리보기에서 빠지고 전송할 때만 실행됩니다). [Decoder 라이브러리에 저장해 둔 체인](/ko/guide/decoder/#building-a-chain)은 여기서 이름으로 부를 수 있어서, 한 번 만들어 둔 체인이 마커 안에서는 단어 하나가 됩니다: `§admin¦myenc > url-encode§`. Repeater 마커도 TUI 탭에서는 동일하게 동작합니다. 마커는 탭이 전송할 때 렌더링하는 초안 언어이므로 헤드리스 표면은 렌더링하지 않습니다. `gori run repeater send`, MCP `send_request`, 재테스트 단계는 탭이라면 렌더링했을 `§…§`가 든 세션을 리터럴 `§` 바이트로 내보내지 않고 **거부**합니다. 거기서 보내려면 마커를 지우거나, 마크된 요청을 Fuzzer 템플릿으로 스윕하거나(`gori run fuzz --request=FILE`, `fuzz_start{template}`), `--verbatim` / `verbatim:true`로 저장된 바이트가 곧 메시지라고 밝히세요. 캡처 자체에 들어 있던 `§`는 건드리지 않습니다. gori는 그것을 직접 입력한 것과 구분할 수 없으므로 탭은 그대로 두고, 모든 표면이 바이트 그대로 재생합니다.
 
 gRPC 메시지는 마커가 유용하게 쓰이지 않는 유일한 곳입니다. 위치가 바이트 범위가 아니라 스키마가 아는 필드인 [gRPC 필드 스윕](#sweeping-a-grpc-field)을 보세요.
+
+### Wordlist 카탈로그 {#wordlist-catalog}
+
+다시 쓰는 목록은 `GORI_HOME` 아래 `wordlists/`(기본값 `~/.gori/wordlists`) 한 곳에 둡니다. 그곳의 파일은 하나하나가 **이름 붙은 목록**이고, 이름은 wordlist 경로를 받는 어디에서나 어느 작업 디렉터리에서든 쓸 수 있습니다: `gori run fuzz -w common.txt`, `gori run mine --wordlist common.txt`, `discover --wordlist`, `cookie --crack --wordlist`, Fuzzer의 Wordlist 페이로드 세트, 그리고 MCP `fuzz_start`, `mine_start`, `discover_start`, `cookie_crack`의 `wordlist` 인자.
+
+- **해석 규칙.** 값에 `/`가 있으면 경로이고 주어진 그대로 엽니다. 이름만 있으면 **현재 디렉터리를 먼저**, 그다음 카탈로그를 찾습니다. 지금 이 디렉터리에 있는 파일이 같은 이름의 저장 목록보다 우선합니다. 어느 쪽에도 없는 이름은 찾을 수 없다는 오류로 거부되고, `fuzz -w`와 Cookie 크래킹은 찾아본 두 곳도 함께 알려 줍니다.
+- **이름.** 어느 문자든 글자와 숫자, `_`, `.`, `+`, `-`, 안쪽 공백. 최대 200바이트이고 `.`이나 `-`로 시작할 수 없습니다. 이름은 파일 이름이지 경로가 아닙니다. 디렉터리를 벗어날 수 있는 값은 받지 않고, 그 안에 둔 심볼릭 링크를 통과하거나 덮어쓰지도 않습니다.
+- **바이트는 절대 정규화하지 않습니다.** 목록은 원본 파일입니다. 빈 줄과 `#`로 시작하는 줄은 Fuzzer에서는 페이로드이고, Miner와 Discover는 경로를 줄 때와 똑같이 그 두 형태를 서식으로 읽습니다. 저장은 모든 줄을 준 그대로 유지합니다.
+- **목록 관리.** `gori run wordlist`로 나열·보기·저장·이름 변경·삭제를 합니다([CLI 레퍼런스](/ko/reference/cli/#run-wordlist)). TUI에서는 List 페이로드 편집기의 `Ctrl-S`가 값들을 목록으로 저장하고, Wordlist 타입의 빈 필드 드롭다운이 즐겨찾기·최근 항목·카탈로그를 이름으로 보여 주며, Target → Params 서브탭의 `w`가 나열된 파라미터 이름을 카탈로그에 저장합니다. 에이전트는 `list_wordlists`, `get_wordlist`, `save_wordlist`, `rename_wordlist`, `delete_wordlist`를 씁니다([MCP 가이드](/ko/guide/mcp/)에 나열).
+- **기본값이 안전합니다.** 목록 조회와 `show`는 값을 절대 출력하지 않습니다(목록은 자격 증명 목록일 수 있습니다). `gori run wordlist show NAME --head N`과 MCP `get_wordlist{include_values:true}`가 명시적 요청이고 둘 다 상한이 있습니다. 저장한 목록은 소유자 전용(`0700` 디렉터리 안의 `0600`)이며 원자적으로 쓰고, 명시하지 않으면 기존 목록을 덮어쓰지 않습니다(`--overwrite`, `overwrite:true`, TUI에서는 `Enter` 한 번 더). 수 GB 목록을 나열하는 비용은 `stat` 한 번이고, 줄 수 세기는 최대 32 MiB만 읽습니다.
+- **프로젝트 기능이 아닙니다.** 카탈로그는 전역이며, 프로젝트가 목록을 조용히 물려받는 일은 없습니다. 이름은 직접 입력한 것입니다. 내용은 줄바꿈으로 구분한 텍스트이고 설명이나 태그는 없습니다.
+
+```bash
+# 한 번 저장한 목록을 어디서든 사용
+gori run sitemap params --host api.example.com --format names | gori run wordlist save api-params.txt
+gori run mine 42 --wordlist api-params.txt
+```
 
 ### 매칭 {#matching}
 

@@ -67,7 +67,7 @@ gori run probe -q 'host:example.com' # filter History with QL (Repeater still sc
 
 ## Param Miner {#param-miner}
 
-**Miner**는 서버가 받아들이지만 드러내지 않는 파라미터를 발견합니다. 플로우를 지정하면 쿼리 문자열, 폼 본문, multipart/form-data, JSON(중첩 객체와 배열 루트 포함), 헤더, 쿠키 등 여러 위치에서 후보 이름을 프로브하고, 추측을 효율적으로 버킷으로 묶어 응답을 변화시키는 것들을 보고합니다. multipart도 대상이지만 기본은 꺼져 있습니다(캡처된 파일 파트가 요청마다 다시 전송되기 때문). `--locations multipart` 또는 해당 체크박스로 켜세요. 이미 아는 이름은 먼저 시험합니다. `--name`(반복 가능, MCP `mine_start`의 `names`)은 워드리스트보다 앞서 그 이름을 시험하고, Target → Params 서브탭의 `m`(**Mine parameters**)은 같은 호스트의 다른 엔드포인트에서 본 이름부터 시험하며 선택한 엔드포인트를 마이닝합니다.
+**Miner**는 서버가 받아들이지만 드러내지 않는 파라미터를 발견합니다. 플로우를 지정하면 쿼리 문자열, 폼 본문, multipart/form-data, JSON(중첩 객체와 배열 루트 포함), 헤더, 쿠키 등 여러 위치에서 후보 이름을 프로브하고, 추측을 효율적으로 버킷으로 묶어 응답을 변화시키는 것들을 보고합니다. multipart도 대상이지만 기본은 꺼져 있습니다(캡처된 파일 파트가 요청마다 다시 전송되기 때문). `--locations multipart` 또는 해당 체크박스로 켜세요. `--wordlist`(MCP `wordlist`)는 파일이거나 [wordlist 카탈로그](/ko/guide/repeater-and-fuzzer/#wordlist-catalog)에 있는 목록의 이름입니다. 이미 아는 이름은 먼저 시험합니다. `--name`(반복 가능, MCP `mine_start`의 `names`)은 워드리스트보다 앞서 그 이름을 시험하고, Target → Params 서브탭의 `m`(**Mine parameters**)은 같은 호스트의 다른 엔드포인트에서 본 이름부터 시험하며 선택한 엔드포인트를 마이닝합니다.
 
 ```bash
 gori run mine <flow-id> \

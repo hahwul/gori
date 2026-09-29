@@ -1410,7 +1410,10 @@ module Gori::Tui
     # total is still computed off this path when the run actually starts.
     private def estimated_set_size(s : SetSpec) : Int64?
       if s.kind == :file
-        info = File.info?(s.value)
+        # The file the engine will open, not the text in the field: a bare name is a catalog list
+        # (`Fuzz::WordlistFile` resolves it the same way), and stat'ing it from the working
+        # directory would drop the count for every list the completion inserts by name.
+        info = File.info?(Gori::WordlistCatalog.resolve_path(s.value))
         return nil unless info && info.type.file? && info.size <= COUNT_FILE_CAP
       end
       Fuzz::PayloadSet.new(build_source(s)).size

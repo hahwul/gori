@@ -1,4 +1,5 @@
 require "../tty_path"
+require "../wordlist_catalog"
 require "uri"
 require "base64"
 require "digest/md5"
@@ -74,10 +75,19 @@ module Gori::Fuzz
   # the second `open` blocks forever). Such a path is read ONCE into an `InlineList`
   # instead, and both `size` and every cursor are served from it — the same materializing
   # shape `Miner::Wordlist.load` already uses, which is why `mine -w /dev/stdin` works.
+  #
+  # `spec` is what the operator typed and `path` is what is read. They differ when `spec` is a
+  # bare name that is not in the current directory but is a list in the global catalog
+  # (`WordlistCatalog.resolve`, #1353): `-w common.txt` then reads `$GORI_HOME/wordlists/common.txt`
+  # from any working directory. A spec with a `/` in it is a path and is read exactly as given.
   class WordlistFile < PayloadSource
+    getter spec : String
     getter path : String
 
-    def initialize(@path : String)
+    def initialize(@spec : String)
+      resolution = WordlistCatalog.resolve(@spec)
+      @path = resolution.path
+      @not_found_hint = WordlistCatalog.missing_hint(resolution)
       @count = nil.as(Int64?)
       @counted = false
       @cache = nil.as(InlineList?)
@@ -147,7 +157,10 @@ module Gori::Fuzz
     # `File::NotFoundError: Error opening file with mode 'r'` backtrace out of the
     # File.each_line / File.open below.
     private def ensure_readable : Nil
-      raise Gori::Error.new("wordlist not found: #{@path}") unless File.exists?(@path)
+      unless File.exists?(@path)
+        hint = @not_found_hint
+        raise Gori::Error.new("wordlist not found: #{@path}#{hint ? " (#{hint})" : ""}")
+      end
       raise Gori::Error.new("wordlist is a directory, not a file: #{@path}") if File.directory?(@path)
       raise Gori::Error.new("wordlist not readable: #{@path}") unless File::Info.readable?(@path)
       # A terminal is a character device that never ends: the count pass below would block on

@@ -1,4 +1,5 @@
 require "../embedded_list"
+require "../wordlist_catalog"
 require "./payload"
 
 module Gori::Fuzz
@@ -51,6 +52,9 @@ module Gori::Fuzz
       values = builtin(name).dup
       if path = user_path.try(&.strip)
         unless path.empty?
+          # A bare name is a list in the current directory or the global catalog (#1353); a
+          # path is opened exactly as given.
+          path = WordlistCatalog.resolve_path(path)
           raise Gori::Error.new("preset merge file not found: #{path}") unless File.exists?(path)
           raise Gori::Error.new("preset merge file is a directory, not a file: #{path}") if File.directory?(path)
           raise Gori::Error.new("preset merge file not readable: #{path}") unless File::Info.readable?(path)

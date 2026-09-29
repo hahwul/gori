@@ -1,5 +1,6 @@
 require "../embedded_list"
 require "../tty_path"
+require "../wordlist_catalog"
 
 module Gori::Discover
   # The candidate directory/path names for the brute-forcer. The built-in list is baked
@@ -23,7 +24,9 @@ module Gori::Discover
       names = builtin.dup
       if path = user_path.try(&.strip)
         unless path.empty?
-          merge_user_file(path) { |line| names << line }
+          # A bare name is a list in the current directory or the global catalog (#1353); a
+          # path is opened exactly as given.
+          merge_user_file(WordlistCatalog.resolve_path(path)) { |line| names << line }
         end
       end
       EmbeddedList.dedup(names)

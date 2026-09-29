@@ -116,3 +116,59 @@ describe Gori::Fuzz::WordlistFile do
     end
   end
 end
+
+# The global catalog (#1353): a bare name that is not in the current directory reads the list
+# of that name under `$GORI_HOME/wordlists`, from any working directory. Anything with a `/`
+# in it is a path and behaves as it always did.
+describe Gori::Fuzz::WordlistFile do
+  it "reads a bare name from the global catalog, lazily, from any working directory" do
+    with_wordlist_home do |dir|
+      Gori::WordlistCatalog.save_values("common.txt", ["alpha", "", "# beta", " gamma "])
+      wl = Gori::Fuzz::WordlistFile.new("common.txt")
+      wl.spec.should eq("common.txt")
+      wl.path.should eq(File.join(dir, "common.txt"))
+      wl.size.should eq(4_i64)
+      # every line is a payload: the blank one, the `#` one and the padded one included
+      collect_within(wl, 5).should eq(["alpha", "", "# beta", " gamma "])
+    end
+  end
+
+  it "prefers a file of that name in the current directory over the catalog's" do
+    with_wordlist_home do
+      Gori::WordlistCatalog.save_values("common.txt", ["from-catalog"])
+      File.write("common.txt", "from-cwd\n")
+      wl = Gori::Fuzz::WordlistFile.new("common.txt")
+      wl.path.should eq("common.txt")
+      collect_within(wl, 5).should eq(["from-cwd"])
+    end
+  end
+
+  it "does not look a path up in the catalog" do
+    with_wordlist_home do
+      Gori::WordlistCatalog.save_values("common.txt", ["from-catalog"])
+      wl = Gori::Fuzz::WordlistFile.new("./common.txt")
+      wl.path.should eq("./common.txt")
+      expect_raises(Gori::Error, /wordlist not found: \.\/common\.txt$/) { wl.size }
+    end
+  end
+
+  it "says where a bare name was looked up when it is nowhere" do
+    with_wordlist_home do |dir|
+      wl = Gori::Fuzz::WordlistFile.new("nope.txt")
+      ex = expect_raises(Gori::Error, /wordlist not found: nope\.txt/) { wl.size }
+      ex.message.to_s.should contain("looked up in the current directory, then in #{dir}")
+    end
+  end
+
+  it "keeps the byte and line behaviour of an explicit path exactly" do
+    with_wordlist_home do |dir|
+      Dir.mkdir_p(dir)
+      body = Bytes[0x61, 0x0d, 0x0a, 0xff, 0x0a, 0x23, 0x62]
+      File.write(File.join(dir, "raw.txt"), body)
+      via_name = collect_within(Gori::Fuzz::WordlistFile.new("raw.txt"), 5).not_nil!
+      via_path = collect_within(Gori::Fuzz::WordlistFile.new(File.join(dir, "raw.txt")), 5).not_nil!
+      via_name.should eq(via_path)
+      via_name.map(&.to_slice).should eq([Bytes[0x61], Bytes[0xff], Bytes[0x23, 0x62]])
+    end
+  end
+end

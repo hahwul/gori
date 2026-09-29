@@ -131,7 +131,7 @@ The scan reads the flows the Sitemap shows, so the `/` query and the `s` scope l
 | --- | --- | --- |
 | Open flow | `↵` | The newest request that carried the name, in the History detail |
 | Copy | `y` / `⇧Y` | The name, or every listed name one per line |
-| Export wordlist | `w` | The listed names (JSON leaf names, no headers) to a file under `~/.gori/wordlists/` |
+| Export wordlist | `w` | The listed names (JSON leaf names, no headers) as a list in the [wordlist catalog](/guide/repeater-and-fuzzer/#wordlist-catalog) (`~/.gori/wordlists/`), owner-only, named `params-HOST-TIMESTAMP.txt` |
 | Mine | `m` | Opens the Miner on this endpoint with the names seen on the host's other endpoints tested first |
 
 The same inventory is `gori run sitemap params` on the CLI and `list_params` over MCP.

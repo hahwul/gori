@@ -118,7 +118,8 @@ describe "MCP tool registry" do
     tools = Gori::MCP::Tools.new(nil, allow_actions: true, verify_upstream: false)
     both = Gori::MCP::Tools::UNBOUND_SAFE & Gori::MCP::Tools::GATED_TOOLS
     both.should eq(Set{"oast_start", "oast_stop", "oast_poll", "oast_payload", "delete_project",
-                       "export_project", "import_project"})
+                       "export_project", "import_project",
+                       "save_wordlist", "rename_wordlist", "delete_wordlist"})
     safe_args = {
       "oast_start"     => %({"provider":"no-such-provider"}),
       "oast_stop"      => %({}),
@@ -127,6 +128,11 @@ describe "MCP tool registry" do
       "delete_project" => %({}),
       "export_project" => %({}),
       "import_project" => %({}),
+      # The global wordlist catalog (#1353) is not project data, so its writes work unbound;
+      # an empty call is refused for its missing `name` before any file is touched.
+      "save_wordlist"   => %({}),
+      "rename_wordlist" => %({}),
+      "delete_wordlist" => %({}),
     }
     both.each do |name|
       r = tools.call(name, JSON.parse(safe_args[name]))

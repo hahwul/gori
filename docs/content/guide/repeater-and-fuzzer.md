@@ -152,11 +152,28 @@ The first two take **one** payload set; the last two take one per marked positio
 
 ### Positions and Payloads
 
-Mark positions with `§…§` markers in the request, or let gori place them automatically. Payload sets can be a built-in preset (`sqli`, `xss`, `traversal`, `format-string`, `bad-strings`, `command-injection`, `cache-delimiters`) for a fast start with no file, a wordlist, an explicit list, a numeric range, N empty (null) payloads, or brute-force character sets. A preset can merge an extra file (built-in first, de-duped), and composes with any other set. Processors let you transform each payload on the way out: prefix/suffix, URL/base64/hex encoding, case folding, hashing, or a regex replace.
+Mark positions with `§…§` markers in the request, or let gori place them automatically. Payload sets can be a built-in preset (`sqli`, `xss`, `traversal`, `format-string`, `bad-strings`, `command-injection`, `cache-delimiters`) for a fast start with no file, a wordlist (a file, or the name of a list in the [catalog](#wordlist-catalog)), an explicit list, a numeric range, N empty (null) payloads, or brute-force character sets. A preset can merge an extra file (built-in first, de-duped), and composes with any other set. Processors let you transform each payload on the way out: prefix/suffix, URL/base64/hex encoding, case folding, hashing, or a regex replace.
 
 A gRPC message is the one place a marker cannot go usefully; see [Sweeping a gRPC Field](#sweeping-a-grpc-field), where the position is a schema-known field rather than a byte range.
 
 A single marker can also carry a Decoder chain of its own. Put the cursor inside it and press `Ctrl-Q` to open the chain editor, which previews the marker's value through each step before you send (an `exec:` step is withheld from the preview and runs only on send). Anything you [saved in the Decoder library](/guide/decoder/#building-a-chain) can be called there by name, so a chain you built once is one word in a marker: `§admin¦myenc > url-encode§`. Repeater markers work the same way — in the TUI tab. Markers are a drafting language the tab renders on send, so the headless surfaces do not render them: `gori run repeater send`, MCP `send_request` and a retest step **refuse** a session whose `§…§` the tab would render, rather than put the literal `§` bytes on the wire. Remove the markers before sending from there, sweep the marked request as a Fuzzer template (`gori run fuzz --request=FILE`, `fuzz_start{template}`), or pass `--verbatim` / `verbatim:true` to say the stored bytes are the message. A `§` the capture itself carried is untouched: gori cannot tell it from one you typed, so the tab leaves it inert and every surface replays it byte-exact.
+
+### Wordlist Catalog
+
+Lists you reuse live in one place, `wordlists/` under `GORI_HOME` (`~/.gori/wordlists` by default). Every file there is a **named list**, and a name works anywhere a wordlist path does, from any working directory: `gori run fuzz -w common.txt`, `gori run mine --wordlist common.txt`, `discover --wordlist`, `cookie --crack --wordlist`, the Wordlist payload set in the Fuzzer, and the `wordlist` argument of the MCP `fuzz_start`, `mine_start`, `discover_start` and `cookie_crack`.
+
+- **Resolution.** A value with a `/` in it is a path and is opened exactly as given. A bare name is looked up in the **current directory first**, then in the catalog, so a file you have right here still wins over a saved list of the same name. A bare name found in neither place is refused as not found; `fuzz -w` and Cookie cracking also say the two places they looked.
+- **Names.** Letters and digits of any script, `_`, `.`, `+`, `-` and inner spaces, at most 200 bytes, never starting with `.` or `-`. A name is a file name, not a path: nothing that can leave the directory is accepted, and `gori` refuses to write through or over a symlink you keep there.
+- **The bytes are never normalized.** A list is the raw file. A blank line and a line starting with `#` are payloads to the Fuzzer, while the Miner and Discover keep reading those two shapes as formatting, exactly as they do for a path. Saving keeps every line as given.
+- **Managing lists.** `gori run wordlist` lists, shows, saves, renames and deletes them (see the [CLI reference](/reference/cli/#run-wordlist)); in the TUI, `Ctrl-S` in the List payload editor saves the values as a list, the Wordlist type's blank-field dropdown offers your favorites, recents and the catalog (by name), and `w` on the Target → Params sub-tab saves the listed parameter names into it; agents use `list_wordlists`, `get_wordlist`, `save_wordlist`, `rename_wordlist` and `delete_wordlist` (the [MCP guide](/guide/mcp/) lists them).
+- **Safe by default.** Listings and `show` never print a list's values (a list can be a credential list): `gori run wordlist show NAME --head N` and MCP `get_wordlist{include_values:true}` are the explicit ask, and both are bounded. Saved lists are owner-only (`0600` in a `0700` directory), written atomically, and never replace an existing list unless you say so (`--overwrite`, `overwrite:true`, or a second `Enter` in the TUI). Listing a multi-GB list costs a `stat`; a line count reads at most 32 MiB.
+- **Not a project feature.** The catalog is global, and a project never silently inherits a list: a name is something you typed. Contents are newline-delimited text; there are no descriptions or tags.
+
+```bash
+# a list saved once, used from anywhere
+gori run sitemap params --host api.example.com --format names | gori run wordlist save api-params.txt
+gori run mine 42 --wordlist api-params.txt
+```
 
 ### Matching
 

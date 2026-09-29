@@ -3,7 +3,7 @@ require "../params_view"
 require "../sitemap_view"
 require "../../param_inventory"
 require "../../paths"
-require "../../durable_file"
+require "../../wordlist_catalog"
 
 module Gori::Tui
   # The Params sub-tab (under Target): the parameter inventory (#1231) over the flows the
@@ -213,20 +213,38 @@ module Gori::Tui
       id if flow && ParamInventory.carries?(row, flow)
     end
 
-    # `w`: the visible names as a wordlist under `Paths.wordlists_dir`, where the Fuzzer's
-    # path completion and `gori run mine --wordlist` both find it. Header names are left
-    # out: a Miner wordlist is one parameter namespace.
-    def export_wordlist : Nil
+    # `w`: the visible names saved as a list in the global wordlist catalog (`Paths.wordlists_dir`,
+    # #1353), where the Fuzzer's completion finds it by name and `gori run mine --wordlist NAME`
+    # takes it from any directory. Header names are left out: a Miner wordlist is one parameter
+    # namespace. Saved through the catalog, so it is atomic, owner-only, and never replaces a
+    # list already there.
+    def export_wordlist(stamp : String = Time.local.to_s("%Y%m%d-%H%M%S")) : Nil
       names = ParamInventory.wordlist(@params.rows)
       return @host.status("no parameter names to export") if names.empty?
       host = @params.target.try(&.host) || "all"
-      stamp = Time.local.to_s("%Y%m%d-%H%M%S")
-      path = File.join(Paths.wordlists_dir, "params-#{host.scrub.gsub(/[^A-Za-z0-9._-]/, "_")}-#{stamp}.txt")
-      Dir.mkdir_p(Paths.wordlists_dir)
-      DurableFile.write(path, names.join("\n") + "\n", perm: File::Permissions.new(0o644))
-      @host.status("wrote #{names.size} names → #{path}")
-    rescue ex : IO::Error | File::Error
+      # A host label is clipped so the whole name stays inside the catalog's byte limit
+      # however long the hostname is.
+      label = host.scrub.gsub(/[^A-Za-z0-9._-]/, "_")[0, 100]
+      entry = save_under_free_name("params-#{label}-#{stamp}", names)
+      @host.status("saved #{names.size} names as #{entry.name} → #{entry.path}")
+    rescue ex : WordlistCatalog::Error
       @host.status("wordlist export failed: #{ex.message}")
+    end
+
+    # The stamp has one-second resolution and the catalog never replaces a list, so a second
+    # `w` within the same second (a key repeat, a scripted run) takes the next free `-2`, `-3`…
+    # name instead of failing against the first press's file.
+    private def save_under_free_name(stem : String, names : Array(String)) : WordlistCatalog::Entry
+      attempt = 1
+      loop do
+        name = attempt == 1 ? "#{stem}.txt" : "#{stem}-#{attempt}.txt"
+        begin
+          return WordlistCatalog.save_values(name, names)
+        rescue ex : WordlistCatalog::Error
+          raise ex unless ex.reason.exists? && attempt < 20
+        end
+        attempt += 1
+      end
     end
   end
 end

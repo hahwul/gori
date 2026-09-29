@@ -7,6 +7,7 @@ require "./text_field"
 require "./path_complete"
 require "../settings"
 require "../fuzz/presets"
+require "../wordlist_catalog"
 
 module Gori::Tui
   # One payload set: a source kind + a value string in the compact grammar the Fuzz
@@ -75,6 +76,12 @@ module Gori::Tui
       # the same time, in the pane whose whole job is checking what you are about to send.
       @values.wrap = true
       @path_complete = PathComplete.new(wordlist_history: true)
+      # The "Save as" name prompt (`^S` in the List editor), nil while it is closed; the last
+      # save's outcome, shown on the hint row until the next key; and the name whose "already
+      # exists" refusal a second ↵ has been told to override.
+      @saving = nil.as(TextField?)
+      @notice = nil.as(String?)
+      @replace_name = nil.as(String?)
     end
 
     # Open pre-seeded to List (the ^L / "Add a List payload set" verb).
@@ -146,6 +153,7 @@ module Gori::Tui
 
     # Which pasted keystrokes reach this card (see `Overlay#takes_pasted?`): the VALUES editor takes a line break as a newline; the other rows keep the default.
     def takes_pasted?(ev : Termisu::Event::Key) : Bool
+      return !ev.key.enter? if @saving # a pasted line break must not answer the name prompt
       focused == :values || !ev.key.enter?
     end
 
@@ -181,6 +189,7 @@ module Gori::Tui
     end
 
     def hint : String
+      return "↵ save the list · esc cancel" if @saving
       "↑/↓/⇥ field · ←/→ type/caret · ↵ new value/next · esc applies & closes"
     end
 
@@ -190,16 +199,14 @@ module Gori::Tui
     def handle_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
       f = focused
+      @notice = nil # an outcome is shown until the next key, then gone
+      if sv = @saving
+        return handle_save_name(ev, sv)
+      end
 
       # The wordlist Path dropdown owns navigation keys while it's open.
-      if f == :path && @path_complete.open?
-        case
-        when key.tab?, key.enter?   then return accept_path
-        when key.back_tab?, key.up? then @path_complete.move(-1); return :stay
-        when key.down?              then @path_complete.move(1); return :stay
-        when key.escape?            then @path_complete.close; return :stay
-        else # printables fall through → edit + refilter
-        end
+      if outcome = path_dropdown_key(ev, f)
+        return outcome
       end
 
       return :commit if key.escape?
@@ -212,6 +219,24 @@ module Gori::Tui
       return handle_type_row(ev) if f == :type
       return handle_values(ev) if f == :values
       handle_field(ev, f)
+    end
+
+    # The Path dropdown's navigation while it is open on the Path row; nil when the key is not
+    # its business (a printable falls through to edit the field and refilter the list).
+    private def path_dropdown_key(ev : Termisu::Event::Key, f : Symbol) : Symbol?
+      return nil unless f == :path && @path_complete.open?
+      key = ev.key
+      case
+      when key.tab?, key.enter?   then accept_path
+      when key.back_tab?, key.up? then @path_complete.move(-1); :stay
+      when key.down?              then @path_complete.move(1); :stay
+      when key.escape?            then @path_complete.close; :stay
+      end
+    end
+
+    # `^S` in the List editor: keep the values as a named wordlist.
+    private def save_chord?(ev : Termisu::Event::Key) : Bool
+      ev.ctrl? && !ev.alt? && !ev.shift? && ev.key.lower_s?
     end
 
     # The built-in-preset selector row: ←/→ cycle the preset name, ↑/↓ move rows, ↵ applies
@@ -262,6 +287,7 @@ module Gori::Tui
       # line the Notes and Project-description editors draw.
       crossing = !ev.shift? && !ev.ctrl? && !ev.alt?
       case
+      when save_chord?(ev)                             then start_save
       when key.up? && crossing && @values.at_top?      then move_row(-1)
       when key.down? && crossing && @values.at_bottom? then nil             # the last value is the floor
       else                                                  edit_values(ev) # enter = new value line, else edit/caret
@@ -308,6 +334,60 @@ module Gori::Tui
       :stay
     end
 
+    # ── Save the list as a named wordlist (#1353) ──────────────────────────────
+
+    # The List type holds values typed or pasted here; `^S` keeps them as a list in the global
+    # catalog (`gori run fuzz -w NAME`, this overlay's Wordlist type and every other tool's
+    # `--wordlist` then find it by name). What is saved is exactly what this set would send —
+    # the values as `build_spec` reads them, one per line, trimmed and without blank lines,
+    # which is the List editor's own grammar (a list that needs a blank or a padded payload is
+    # saved with `gori run wordlist save`).
+    private def start_save : Nil
+      if list_values.empty?
+        @notice = "nothing to save — the list is empty"
+        return
+      end
+      @replace_name = nil
+      @saving = TextField.new("payloads-#{Time.local.to_s("%Y%m%d-%H%M%S")}.txt")
+    end
+
+    private def handle_save_name(ev : Termisu::Event::Key, name : TextField) : Symbol
+      key = ev.key
+      case
+      when key.escape?
+        @saving = nil
+        @replace_name = nil
+      when key.enter?
+        commit_save(name.value.strip)
+      else
+        before = name.value
+        name.handle_edit_key(ev)
+        @replace_name = nil if name.value != before # a new name is a new question
+      end
+      :stay
+    end
+
+    # A refusal is shown, not raised: an existing name asks for a second ↵ (the operator's
+    # explicit "replace it"), anything else — a name that is a path, an unwritable directory —
+    # says why and leaves the prompt open to fix the name.
+    private def commit_save(name : String) : Nil
+      values = list_values
+      begin
+        entry = Gori::WordlistCatalog.save_values(name, values, overwrite: @replace_name == name)
+        @saving = nil
+        @replace_name = nil
+        @notice = "saved #{values.size} value#{values.size == 1 ? "" : "s"} as #{entry.name} — " \
+                  "pick it under Wordlist, or run with -w #{entry.name}"
+      rescue ex : Gori::WordlistCatalog::Error
+        if ex.reason.exists?
+          @replace_name = name
+          @notice = "#{name} already exists — ↵ again replaces it, or edit the name"
+        else
+          @notice = ex.message
+        end
+      end
+    end
+
     private def toggle_favorite_path : Symbol
       Gori::Settings.toggle_favorite_wordlist(@fields[:path].value)
       :stay
@@ -343,6 +423,10 @@ module Gori::Tui
     end
 
     def set_preedit(text : String) : Nil
+      if sv = @saving
+        sv.set_preedit(text)
+        return
+      end
       case focused
       when :values then @values.set_preedit(text)
       else              @fields[focused]?.try(&.set_preedit(text))
@@ -443,6 +527,7 @@ module Gori::Tui
       when :preset then render_preset(screen, box)
       else              render_fields(screen, box)
       end
+      render_save_prompt(screen, box)
       render_hint(screen, box)
       render_path_dropdown(screen, box) if @ptype == :wordlist
     end
@@ -532,7 +617,8 @@ module Gori::Tui
     # used to re-derive this expression by hand, one copy away from drifting.
     private def values_rect(box : Rect) : Rect
       top = box.y + 3
-      Rect.new(box.x + 2, top, box.w - 4, {(box.bottom - 2) - top, 1}.max)
+      reserved = @saving ? 1 : 0 # the "Save as" row sits above the hint
+      Rect.new(box.x + 2, top, box.w - 4, {(box.bottom - 2 - reserved) - top, 1}.max)
     end
 
     private def render_values(screen : Screen, box : Rect) : Nil
@@ -546,10 +632,25 @@ module Gori::Tui
       end
     end
 
+    # The "Save as" row: a label and the name field, on the row above the hint. Only while
+    # the prompt is open; `render_values` has already given up that row (`values_rect`).
+    private def render_save_prompt(screen : Screen, box : Rect) : Nil
+      return unless (sv = @saving) && @ptype == :list
+      y = box.bottom - 3
+      screen.fill(Rect.new(box.x + 1, y, box.w - 2, 1), Theme.accent_bg)
+      screen.text(box.x + 2, y, "Save as", Theme.text_bright, Theme.accent_bg)
+      vx = box.x + 2 + LABEL_W
+      sv.render(screen, vx, y, {box.right - 2 - vx, 1}.max, true, Theme.text_bright, Theme.accent_bg)
+    end
+
     private def render_hint(screen : Screen, box : Rect) : Nil
+      if notice = @notice
+        screen.text(box.x + 2, box.bottom - 2, notice, Theme.accent, Theme.bg, width: box.w - 4)
+        return
+      end
       hint =
         case @ptype
-        when :list     then "one value per line · ↵ new value · ⇥ field · esc applies"
+        when :list     then @saving ? "↵ save the list · esc cancel" : "↵ new value · ⇥ field · ^S save list · esc applies"
         when :wordlist then "filter · ↹/↵ complete · ^D favorite · ⇥ field · esc applies"
         when :preset   then "←/→ choose preset · ⇥ type · esc applies & closes"
         else                "⇥/↑↓ field · ↵ next · esc applies & closes"

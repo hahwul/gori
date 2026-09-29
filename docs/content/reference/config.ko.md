@@ -17,7 +17,7 @@ gori는 전역 환경설정을 `settings.json`에, 각 프로젝트를 자체 SQ
 | `projects/` | 이름이 지정된 프로젝트마다 하나의 하위 디렉터리, 각각 자체 DB 보유 |
 | `ca/` | 루트 CA: `root.crt.pem`과 `root.key.pem` |
 | `themes/` | 사용자 테마 |
-| `wordlists/` | Fuzzer / miner 워드리스트 |
+| `wordlists/` | 전역 [wordlist 카탈로그](/ko/guide/repeater-and-fuzzer/#wordlist-catalog): Fuzzer, Miner, Discover, Cookie 크래킹이 쓰는 이름 붙은 목록(소유자 전용 파일) |
 | `protos/` | gRPC 디스크립터 셋(`protoc --descriptor_set_out`). 자체 경로를 지정하지 않은 프로젝트가 여기서 읽습니다 |
 | `active_project` | 가장 최근에 사용한 프로젝트 마커 |
 | `gori.log` | TUI 로그 |
@@ -770,7 +770,7 @@ retention은 **새 기능이 아닙니다**. gori는 프로젝트 DB가 무한�
 
 ### fuzzer {#fuzzer}
 
-Fuzzer의 Payload 오버레이가 기억하는 워드리스트 경로입니다. 프로젝트 데이터가 아니라 임시 상태입니다.
+Fuzzer의 Payload 오버레이가 기억하는 워드리스트입니다. 프로젝트 데이터가 아니라 임시 상태입니다. [wordlist 카탈로그](/ko/guide/repeater-and-fuzzer/#wordlist-catalog)에 있는 목록은 이름(`common.txt`)으로 저장되고(작업 디렉터리에 같은 이름의 파일이 있어 이름이 그 파일을 가리키게 되면 경로로 저장), 이전 gori가 카탈로그 안의 절대 경로로 저장한 항목도 같게 읽힙니다. 그 밖의 경로는 준 그대로 보관합니다.
 
 ```json
 {
@@ -783,8 +783,8 @@ Fuzzer의 Payload 오버레이가 기억하는 워드리스트 경로입니다. 
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `recent_wordlists` | array | 최근 적용한 워드리스트 경로. 최신순이며 최대 10개 |
-| `favorite_wordlists` | array | Path 필드에서 별표를 단 경로. 최근 목록보다 먼저 제안됨 |
+| `recent_wordlists` | array | 최근 적용한 워드리스트(카탈로그 이름 또는 경로). 최신순이며 최대 10개 |
+| `favorite_wordlists` | array | Path 필드에서 별표를 단 워드리스트(카탈로그 이름 또는 경로). 최근 목록보다 먼저 제안됨 |
 
 워드리스트를 적용하거나 별표를 달기 전까지는 기록되지 않습니다.
 

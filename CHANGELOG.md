@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Wordlists: a list saved once under `GORI_HOME/wordlists` is picked by name (`-w common.txt`, `--wordlist common.txt`, MCP `wordlist`) by the Fuzzer, Miner and Discover, and by Cookie cracking on the CLI and MCP, from any directory (the current directory first; a path is read as given). Manage lists with `gori run wordlist`, the MCP `list_wordlists` … `delete_wordlist` tools, or `Ctrl-S` in the Fuzzer's List editor; values are never printed unless asked, saves are atomic and owner-only (the Params `w` export included, which now takes the next free name instead of replacing), and nothing is overwritten unless you say so (#1353)
 - Import: hostile HAR, Burp, OpenAPI YAML and Postman/Insomnia files can no longer crash gori or lock a project — an out-of-range or impossible timestamp gets the import time (a project already holding one opens again), and a non-string YAML key, a `!!binary` value or a self-multiplying `{{variable}}` is refused with a message
 - JSON 100–512 levels deep in a captured body, JWT, cookie, GraphQL request or imported example (or a protobuf message ~33 levels deep) no longer fails with "Nesting of 100 is too deep" in the JWT and cookie tools, redaction, `jsonpath:` columns, retests, extract rules, `get_flow`, `gori run show --format json` or the OpenAPI export
 - TUI: an error while opening a project — reading a tab's stored data or drawing the first frame — is reported in the status line and `gori.log` like any later one, instead of ending gori before its first frame
