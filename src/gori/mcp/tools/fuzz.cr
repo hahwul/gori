@@ -31,7 +31,7 @@ module Gori
         # `budget_warning` below says it will not check every candidate. An unknown total is
         # still let through — the engine's own cap is never above FUZZ_MAX_REQUESTS.
         caller_cap = optional_int_arg(h, "max_requests")
-        if (bound = Fuzz.request_bound(total, caller_cap)) && bound > FUZZ_MAX_REQUESTS
+        if (bound = Fuzz.request_bound(total, caller_cap, engine.macro_requests(total))) && bound > FUZZ_MAX_REQUESTS
           return err("too many requests (#{bound} > #{FUZZ_MAX_REQUESTS}); narrow positions/payloads " \
                      "or pass max_requests (at most #{FUZZ_MAX_REQUESTS})", "BUDGET_EXHAUSTED")
         end
@@ -108,6 +108,7 @@ module Gori
             # play. Named on the START echo and on every `fuzz_status` so a result set read
             # later still says which side of a fingerprint A/B it is.
             j.field("tls_preset", fjob.tls_preset) if fjob.tls_preset
+            emit_request_macro_plan(j, fjob.engine.request_macro.try(&.info(fjob.engine.concurrency, fjob.engine.race_count)))
             if wf = ws_frames
               j.field "websocket", true
               j.field "ws_frames_out", wf
@@ -447,6 +448,7 @@ module Gori
             j.field "record_history", fjob.record_history.to_s
             emit_fuzz_save_state(j, fjob)
             j.field("tls_preset", fjob.tls_preset) if fjob.tls_preset
+            emit_request_macro_status(j, fjob.engine.request_macro)
             j.field "recorded_flows", fjob.recorded_flows
             j.field "history_truncated", fjob.history_truncated?
             j.field "job_complete", fjob.status != :running
@@ -1466,6 +1468,9 @@ module Gori
         # An unknown NAME is not folded away — `Fuzz::Plan.build` refuses it, so the agent is
         # told rather than left with a sweep that silently used gori's bare hello.
         cfg.tls_preset = present?(h, "tls_preset") ? str(h, "tls_preset").try(&.strip.presence) : seed_tls_preset
+        # The request-time macro (#1350): parsed here, wired by `Plan.build` like every other
+        # config knob, so the same spec means the same run on all three surfaces.
+        cfg.request_macro = request_macro_spec(h)
         # Race condition (last-byte-sync): bypasses `mode`/`payloads` entirely — see
         # `Fuzz::Config#race_count`. Clamped at the same deepest point the CLI and the engine
         # itself both clamp at (`Fuzz::Engine::MAX_RACE_SIZE`).
@@ -1546,6 +1551,7 @@ module Gori
           s.field "save_results", boolprop("persist EVERY result permanently in this project, including full rendered request, final wire request, response head and response body. Independent of record_history and of the bounded live-job cache. The start/status/results replies include run_id + save_status; inspect it later with list_fuzz_runs/get_fuzz_run.")
           s.field "update_content_length", boolprop("recompute Content-Length after each payload is spliced into the body, AND add one when the request carries a body but declares none (default true). Set FALSE to send your template's framing verbatim — a Content-Length shorter or longer than the body, or Content-Length alongside Transfer-Encoding, is the canonical request-smuggling primitive, and with the default on every payload is silently re-framed to fit before it leaves. Note that false also leaves a body with no Content-Length and no chunked Transfer-Encoding UNFRAMED, which an HTTP/1.1 origin reads as a zero-length body. Mirrors CLI `gori run fuzz --verbatim` and intercept_forward_edit{update_content_length:false}.")
           s.field "reframe_grpc", boolprop("recompute the gRPC 5-byte length prefix after each payload is spliced into a gRPC message body (default FALSE). With the default, a payload that changes the message length leaves the prefix declaring the old one — a real gRPC server rejects those, and fuzz_status reports it as grpc_stale_prefix rather than silently repairing the operator's bytes (a deliberately-wrong length prefix is a standard parser test). Set TRUE for an ordinary unary sweep where framing rejections are noise rather than the test. Applies to unary messages only; a client-streaming body is left alone and still reported. Mirrors CLI `gori run fuzz --reframe-grpc`.")
+          request_macro_props(s, "candidate", race: true)
           s.field "race_count", intprop("Race condition (last-byte-sync) mode: dial this many DEDICATED connections, hold back the request's final byte on each, then release every held-back byte in one tight write loop so the target receives all of them as close to simultaneously as this process can manage — for finding TOCTOU bugs (double-spend, coupon reuse, limit bypass). BYPASSES mode/payloads/marks entirely: the template is sent byte-identical on every connection (no §…§ substitution), so `template`/`flow_id` alone is enough — set match:{status:...} so 'matched' in fuzz_results marks the success response (a correctly-guarded endpoint should show at most one). Max #{Fuzz::Engine::MAX_RACE_SIZE}. This is HTTP/1.1-only (h2 degrades to independent per-connection sends — true single-packet HTTP/2 racing is not yet implemented).")
           s.field "race_warmup", strprop("race_count only: a raw HTTP request sent, and its response fully read, on each connection BEFORE it holds the race request — equalizes per-connection TLS-handshake/accept latency, which narrows the achievable release window. Sent EXACTLY as given (no §…§, no Env expansion) — use something harmless (e.g. a plain GET) against the same origin, never the race request itself (which would perform its side effect once per connection before the timed attempt).")
           s.field "messages", ws_out_messages_prop(%(WebSocket only: the outbound frame script, REPLACING the frames a flow_id/repeater_id seed carried. Each entry is a plain string (a TEXT frame), a WsFrameSpec string ("opcode=ping,text=hi"), or the object form — the same grammar send_websocket takes. Mark §…§ positions IN THESE PAYLOADS: that is what a WebSocket sweep fuzzes. One variation = one full RFC 6455 session (dial, handshake, send the script, drain, close), so concurrency N means N simultaneous sockets. A WebSocket seed with no frames and no 'messages' is swept as plain HTTP.))

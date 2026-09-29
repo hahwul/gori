@@ -5424,7 +5424,7 @@ module Gori::Tui
         @toast = "no mineable locations for this request"
         return
       end
-      ov = MineConfigOverlay.new(seed, extra)
+      ov = MineConfigOverlay.new(seed, extra, macro_session_choices)
       # Start commits: require ≥1 location (keep the form up otherwise), then kick off the
       # BACKGROUND mine and stay where we are. This popup IS the gate for the batch case —
       # its header names the flow count, so N sessions are never a surprise (P4).
@@ -5465,6 +5465,17 @@ module Gori::Tui
       }
       open_overlay(ov)
       ov
+    end
+
+    # The project's saved Repeater sessions as `{id, label}`, for the Miner overlay's macro step
+    # cycler (#1350). The label is the tab's name, or `METHOD path` — the same words the
+    # refresh steps and every macro message use (`SessionRefresh.step_label`). One small read of
+    # request-side rows when the popup opens; a store that cannot answer leaves the row saying
+    # there is nothing to pick.
+    private def macro_session_choices : Array({Int64, String})
+      @session.store.repeaters_mcp.map { |r| {r.id, SessionRefresh.step_label(r)} }
+    rescue
+      [] of {Int64, String}
     end
 
     # --- Sequencer ExecContext / cross-tab mediators ---

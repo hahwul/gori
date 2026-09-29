@@ -57,6 +57,7 @@ module Gori
         mode = Fuzz::Mode::Sniper
         sources = [] of Fuzz::PayloadSource
         payload_from = PayloadFromFlags.new
+        macro_flags = RequestMacroFlags.new
         processors = [] of Fuzz::Processor
         auto_encode = true
         concurrency = 20
@@ -215,6 +216,11 @@ module Gori
           # truncated capture, the stop row), so a huge sweep does not write one archive row per
           # request. The run's counters stay whole-run and `idx` stays the payload position.
           p.on("--keep=POLICY", "Which result rows `fuzz save` stores: all (default) | interesting (matched + error/re-send/incomplete/stop rows only)") { |v| keep = parse_keep(v) }
+          # A rotating CSRF token or nonce (#1350): Repeater sessions replayed before a candidate,
+          # so the value they leave in the session bindings is fresh when the candidate resolves
+          # its $BIND.NAME. The candidate must name the binding (a draft template or the active
+          # slot's header) — the plan says so when it cannot carry one.
+          request_macro_flags(p, macro_flags, "candidate")
           p.on("--ac", "Auto-calibrate: sample the target's noise and drop matching responses") { auto_cal = true }
           p.on("--format=FMT", "Output: text (default) | json | jsonl") { |v| format = parse_format(v, [:text, :json, :jsonl]) }
           p.on("--force", "Run even when the request count is huge or unknown") { force = true }
@@ -235,6 +241,8 @@ module Gori
         # so a flag modifies its sources wherever it was typed.
         refuse_orphan_payload_from_flags(command, payload_from, sources.any?(Fuzz::ProjectSource))
         sources = sources.map { |src| src.is_a?(Fuzz::ProjectSource) ? src.with_policy(payload_from.policy).as(Fuzz::PayloadSource) : src }
+
+        request_macro = request_macro_spec("gori run fuzz", macro_flags)
 
         abort "gori run fuzz: too many arguments (expected at most one <flow-id>)" if positional.size > 1
         # One template source only. `--repeater` joins `--flow`/`--request` as a third mutually
@@ -371,8 +379,12 @@ module Gori
         # The project any `--payload-from` reads, open only for the plan build below. After every
         # refusal above, so a run that never builds holds no handle.
         payload_specs = sources.compact_map { |src| src.as?(Fuzz::ProjectSource).try(&.spec) }
-        payload_store = open_payload_from_store(command, payload_specs,
-          !!(flow_id || repeater_id || project_name || db_path), project_name, db_path)
+        named_project = !!(flow_id || repeater_id || project_name || db_path)
+        payload_store = open_payload_from_store(command, payload_specs, named_project, project_name, db_path)
+        # …and the project a `--macro` reads its sessions from, on the same terms and released at
+        # the same moment: the plan freezes the steps, so nothing reads it during the run. When a
+        # `--payload-from` already opened the project, that handle serves both.
+        payload_store ||= open_request_macro_store(command, request_macro, named_project, project_name, db_path)
 
         options = Fuzz::PlanOptions.new(text,
           # A `--flow` template is a CAPTURED request; --request/stdin is a draft the operator
@@ -389,7 +401,8 @@ module Gori
             race_warmup: race_warmup_file.try { |f| read_input_file(f, "gori run fuzz").to_slice },
             ws_idle: ws_idle,
             ws_keep_key: ws_keep_key,
-            tls_preset: tls_preset),
+            tls_preset: tls_preset,
+            request_macro: request_macro),
           ws_messages: ws_messages,
           matcher: matcher, verify: !insecure, sni: sni,
           overrides: cli_host_overrides(project_name, db_path, flow_id, repeater_id),
@@ -427,6 +440,7 @@ module Gori
         # run, which can be long.
         payload_store.try(&.close)
         note_payload_from(command, plan.payload_reports)
+        note_request_macro(command, plan.request_macro_info)
         warn_fuzz_marks(plan)
         warn_fuzz_content_length(plan)
         warn_fuzz_unframed_body(plan)
@@ -464,7 +478,10 @@ module Gori
         # storage. Opened only after every preflight/refusal, so a run that never sends does not
         # create an empty saved-run row.
         # `long_running`: held for the whole sweep, with a result or History batch per round trip.
-        write_store = (record_policy == :none && !save_results) ? nil : open_store(resolve_read_project(project_name, db_path), long_running: true)
+        # …and for a `--macro`, whose steps are recorded in History (source `macro`) and whose
+        # failures are logged as events — traffic nobody typed at that moment, so it is on the record.
+        write_store = (record_policy == :none && !save_results && plan.request_macro.nil?) ? nil : open_store(resolve_read_project(project_name, db_path), long_running: true)
+        attach_request_macro_store(plan.request_macro, write_store)
         saved = nil.as(Fuzz::Persistence?)
         # Calibration SENDS, so it belongs inside the block that releases the read
         # connection — a raise in there would otherwise leak it. The permanent row is created
@@ -1033,7 +1050,7 @@ module Gori
         STDERR.puts "fuzzing #{scheme}://#{host}:#{port} · #{total || "?"} requests · #{label}#{tls}"
         # Judged on what the run can SEND, not the candidate count: `--max-requests` is a hard
         # cap, so a capped run of a huge set is as bounded as a small one (#1209).
-        bound = Fuzz.request_bound(total, max_requests)
+        bound = Fuzz.request_bound(total, max_requests, engine.macro_requests(total))
         if (bound.nil? || bound > FUZZ_AUTO_CAP) && !force
           outbound.close
           abort "gori run fuzz: refusing to send #{bound ? bound.to_s : "an unbounded number of"} requests without --force " \
@@ -1136,6 +1153,7 @@ module Gori
         warn_fuzz_budget(p, max_requests)
         warn_fuzz_grpc_framing(p, reframe_grpc)
         warn_fuzz_ws_notes(p)
+        note_request_macro_result("gori run fuzz", p.request_macro)
         warn_fuzz_race(p, race, matcher_constrained)
         # Sends stopped BEFORE the socket (Sandbox, an exclude rule). They already appear as
         # per-row errors, but a run that is 100% refused reads as "the target is down" unless

@@ -143,6 +143,12 @@ module Gori
       def self.error_class(error : String?) : ErrorClass?
         return nil unless error
         return ErrorClass::RedirectRefused if error.starts_with?(REDIRECT_HOP_REFUSED)
+        # A candidate the request-time macro did not send. Ahead of ERROR_WORDS: the sentence
+        # embeds the step's own failure ("connection refused", "timed out"), and that must not
+        # file an unsent row under a network class. The prefix is `RequestMacro::ERROR_PREFIX`;
+        # this file cannot require that module (Matcher benches build without the store).
+        # `spec/fuzz/shape_spec.cr` pins the two together.
+        return ErrorClass::Other if error.starts_with?("macro:")
         e = error.downcase
         ERROR_WORDS.each do |(klass, words)|
           return klass if words.any? { |w| e.includes?(w) }

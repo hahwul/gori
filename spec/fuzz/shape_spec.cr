@@ -109,6 +109,12 @@ describe Gori::Fuzz::Shape do
     F::Shape.error_class(Gori::Outbound::EXCLUDE_SWEEP_ERROR).should eq(F::Shape::ErrorClass::Blocked)
     F::Shape.error_class(F::CappedBackend::CAP_ERROR).should eq(F::Shape::ErrorClass::Budget)
     F::Shape.error_class("#{F::REDIRECT_HOP_REFUSED}boom").should eq(F::Shape::ErrorClass::RedirectRefused)
+    # An unsent macro row embeds the step's own failure. That wording must not file it under
+    # a network class. The prefix is matched as text so `shape.cr` need not require the macro.
+    Gori::RequestMacro::ERROR_PREFIX.should start_with("macro:")
+    refused = "#{Gori::RequestMacro::ERROR_PREFIX}failed at step 1 (login → connection refused) — the candidate was not sent"
+    F::Shape.error_class(refused).should eq(F::Shape::ErrorClass::Other)
+    F::Shape.error_class("#{Gori::RequestMacro::ERROR_PREFIX}failed at step 1 (login → timed out)").should eq(F::Shape::ErrorClass::Other)
   end
 
   it "separates a truncated body from a complete one" do

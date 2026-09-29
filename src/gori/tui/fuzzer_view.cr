@@ -165,6 +165,14 @@ module Gori::Tui
       # cleared mid-edit" reason.
       @s_stop_after = ""
       @s_stop_on = ""
+      # The request-time macro (#1350), as typed in the ADVANCED card. Buffers, not a `Spec`, for
+      # the reason the ones above are: a half-typed cadence must not break the overlay, and what
+      # the operator typed is what the card shows again. `commit_buffers` builds the spec
+      # (`Fuzz::Config#request_macro`); `macro_error` names a value that does not read.
+      @s_macro_steps = ""
+      @s_macro_every = ""
+      @s_macro_expect = ""
+      @s_macro_on_failure = ""
       # Memoized "Run · N requests" count, recomputed only when the config signature
       # (mode + sets + marker count) changes, so the summary row never rebuilds sources each frame.
       @run_count_cache = nil.as(Int64?)
@@ -219,6 +227,7 @@ module Gori::Tui
       @unframed_body_rev = -1
       @unused_sets = 0
       @payload_reports = [] of Gori::PayloadFrom::Report
+      @macro_info = nil.as(Gori::RequestMacro::Info?)
       @sel = 0
       @scroll = 0
       @sort = :index
@@ -1358,7 +1367,9 @@ module Gori::Tui
         tls_preset: @config.tls_preset || "",
         m_time: @matcher.match_time || "", f_time: @matcher.filter_time || "",
         stop_after: @s_stop_after, stop_on: @s_stop_on,
-        keep_interesting: @config.keep.interesting?)
+        keep_interesting: @config.keep.interesting?,
+        macro_steps: @s_macro_steps, macro_every: @s_macro_every,
+        macro_expect: @s_macro_expect, macro_on_failure: @s_macro_on_failure)
     end
 
     # Write the overlay's edited knobs back into the engine buffers (regexes stay as
@@ -1404,6 +1415,10 @@ module Gori::Tui
       @s_stop_after = s.stop_after
       @s_stop_on = s.stop_on
       @config.keep = s.keep_interesting ? Fuzz::Keep::Interesting : Fuzz::Keep::All
+      @s_macro_steps = s.macro_steps
+      @s_macro_every = s.macro_every
+      @s_macro_expect = s.macro_expect
+      @s_macro_on_failure = s.macro_on_failure
       @dirty = true
     end
 
@@ -1516,6 +1531,43 @@ module Gori::Tui
       # rides through on a built matcher and is named by `@matcher.spec_error`.
       @config.stop_after_matches = @s_stop_after.to_i?.try { |n| n > 0 ? n : nil }
       @matcher.stop_condition = compiled_stop_condition
+      @config.request_macro = macro_spec
+    end
+
+    # The ADVANCED card's macro rows as a spec, or nil when no steps are named (which is every
+    # run that came before). A cadence or policy that does not read leaves the default here and
+    # is named by `macro_error` — `commit_buffers` may fall back, `build_engine` may not.
+    private def macro_spec : Gori::RequestMacro::Spec?
+      steps = Gori::RequestMacro::Spec.parse_steps(@s_macro_steps)
+      return nil if steps.empty?
+      cadence = Gori::RequestMacro::Cadence.parse?(@s_macro_every) || Gori::RequestMacro::Cadence.request
+      policy = Gori::RequestMacro::OnFailure.parse?(@s_macro_on_failure) || Gori::RequestMacro::OnFailure::Skip
+      expect = @s_macro_expect.split(',').map(&.strip).reject(&.empty?)
+      Gori::RequestMacro::Spec.new(steps, cadence, policy, expect)
+    end
+
+    # A macro row that is non-blank and does not read, named — the twin of `buffer_error`. Rows
+    # with no steps typed are ignored on purpose (that is "no macro"), but a cadence typed beside
+    # no steps is a knob that would silently do nothing, so it is named too.
+    private def macro_error : String?
+      steps = Gori::RequestMacro::Spec.parse_steps(@s_macro_steps)
+      every = @s_macro_every.strip
+      policy = @s_macro_on_failure.strip
+      if steps.empty?
+        stray = [] of String
+        stray << "Macro cadence" unless every.empty?
+        stray << "Macro must rebind" unless @s_macro_expect.strip.empty?
+        stray << "Macro on failure" unless policy.empty?
+        return nil if stray.empty?
+        return "#{stray.join(", ")} only apply to a macro — name its steps in Macro steps, or clear them"
+      end
+      if !every.empty? && Gori::RequestMacro::Cadence.parse?(every).nil?
+        return "invalid Macro cadence: #{every} (request, off, or a number of requests)"
+      end
+      if !policy.empty? && Gori::RequestMacro::OnFailure.parse?(policy).nil?
+        return "invalid Macro on failure: #{policy} (skip or stop)"
+      end
+      nil
     end
 
     # The `@s_stop_on` buffer compiled to a condition matcher, or nil — split out of
@@ -1616,6 +1668,11 @@ module Gori::Tui
       if err = stop_on_error
         return {nil, err}
       end
+      # A macro row that does not read (a cadence of `sometimes`) — named, not applied as the
+      # default, which would run a per-request macro the operator did not ask for.
+      if err = macro_error
+        return {nil, err}
+      end
       # A status/size/… spec that can never fire (`2OO`, `>1O0`) ran the whole sweep as
       # `N sent · 0 hit`, byte-identical to "nothing there" — the CLI and MCP refuse the same
       # typo up front through this one validator. See `Fuzz::Matcher#spec_error`.
@@ -1642,8 +1699,10 @@ module Gori::Tui
         # instead of waiting on a writer (`project_drain_fts: false`): this runs on the event loop.
         project: project, project_drain_fts: false)
       @payload_reports = [] of Gori::PayloadFrom::Report # a failed build must not leave the last run's
+      @macro_info = nil                                  # …nor its macro
       plan = Fuzz::Plan.build(options, Gori::Outbound.interactive(scope))
       @payload_reports = plan.payload_reports
+      @macro_info = plan.request_macro_info
       @pending_template = plan.template # committed to @run_template in begin_run (see result_request)
       # Freeze the CL knobs + retention policy the same way: the reconstruction in
       # `result_request` has to reproduce what THIS run's generator did, and its note has to
@@ -1861,6 +1920,13 @@ module Gori::Tui
     # sensitive-value policy, what cut it short. Empty for a run with none. Never a value.
     def payload_reports : Array(Gori::PayloadFrom::Report)
       @payload_reports
+    end
+
+    # What the request-time macro does to the run just built (#1350): the steps, the cadence, and
+    # the parallelism it leaves. nil for a run with none. Read by the controller for the run-start
+    # line, the way `payload_reports` and `unused_sets_note` are.
+    def macro_info : Gori::RequestMacro::Info?
+      @macro_info
     end
 
     # The sentence, built rather than a constant: unlike `CL_REWRITE_NOTE` the count and the
@@ -2820,6 +2886,12 @@ module Gori::Tui
           # ADVANCED card has to show again, and a spec that no longer resolves (the descriptor
           # set moved) must come back as itself rather than silently vanish on restore.
           j.field "grpc_fields", @s_grpc_fields
+          # The request-time macro (#1350), as typed — the same "store what the operator typed"
+          # reasoning as `grpc_fields` and `stop_on`.
+          j.field "macro_steps", @s_macro_steps
+          j.field "macro_every", @s_macro_every
+          j.field "macro_expect", @s_macro_expect
+          j.field "macro_on_failure", @s_macro_on_failure
         end
       end
     end
@@ -2871,6 +2943,7 @@ module Gori::Tui
       @matcher.filter_regex = obj["filter_regex"]?.try(&.as_s?).try { |s| Regex.new(s) rescue nil }
       @matcher.extract = obj["extract"]?.try(&.as_s?).try { |s| Regex.new(s) rescue nil }
       @s_grpc_fields = string_knob(obj, "grpc_fields")
+      apply_macro_json(obj)
       sync_buffers # mirror the restored config/matcher into the editable buffers
     rescue
       # tolerate a malformed/older config blob — keep defaults
@@ -2892,6 +2965,16 @@ module Gori::Tui
     # to be added has one example to follow instead of a fourth spelling.
     private def string_knob(obj : Hash(String, JSON::Any), key : String) : String
       obj[key]?.try(&.as_s?) || ""
+    end
+
+    # The macro rows, restored together — split out of `apply_config_json` so that method stays
+    # under the complexity ceiling. Absent (a session saved before the feature) reads as blank,
+    # i.e. no macro.
+    private def apply_macro_json(obj : Hash(String, JSON::Any)) : Nil
+      @s_macro_steps = string_knob(obj, "macro_steps")
+      @s_macro_every = string_knob(obj, "macro_every")
+      @s_macro_expect = string_knob(obj, "macro_expect")
+      @s_macro_on_failure = string_knob(obj, "macro_on_failure")
     end
 
     private def apply_sets_json(arr : JSON::Any?) : Nil

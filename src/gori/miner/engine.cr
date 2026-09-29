@@ -5,6 +5,7 @@ require "./fingerprint"
 require "./baseline"
 require "../fuzz/engine"
 require "../fuzz/matcher"
+require "../request_macro/lane"
 require "../pacing"
 
 module Gori::Miner
@@ -20,6 +21,9 @@ module Gori::Miner
   # the call. Both loops ask this; neither names a refusal constant of its own.
   def self.permanent_refusal?(err : String?) : Bool
     return true if err.try(&.starts_with?(HookBackend::HOOK_ERROR_PREFIX))
+    # A failed request-time macro (#1350): the probe was never sent, and a retry would only run
+    # the same failing steps against the endpoint that just refused them.
+    return true if Gori::RequestMacro.failed?(err)
     err == Fuzz::CappedBackend::CAP_ERROR || Gori::Outbound.permanent_refusal?(err)
   end
 
@@ -131,9 +135,16 @@ module Gori::Miner
     # beside `skipped_names` (MCP's `not-applicable` rows).
     getter inapplicable : Array(Location)
 
+    # The run's request-time macro (#1350), or nil. The engine does not gate sends with it —
+    # `MacroBackend` is in the backend chain for that — it only binds it to this run's budget,
+    # rate and stop flag, and ends the run when the macro has.
+    getter request_macro : Gori::RequestMacro::Lane?
+    @macro_abort_sent = false
+
     def initialize(@base : Bytes, @http2 : Bool, @names : Array(String),
                    backend : Fuzz::Backend, @config : Config,
-                   @inapplicable : Array(Location) = [] of Location)
+                   @inapplicable : Array(Location) = [] of Location,
+                   @request_macro : Gori::RequestMacro::Lane? = nil)
       # Wrap the backend so max_requests is enforced at every real send (baseline,
       # bucket, and confirm), not just as a racy pre-dispatch check.
       @backend = Fuzz::CappedBackend.new(backend, @config.max_requests)
@@ -155,6 +166,15 @@ module Gori::Miner
       @carriable = Hash(Location, Array(String)).new
       @valid = Hash(Location, Array(String)).new
       @encoded = Hash(String, Int32).new
+      # The macro's steps are this run's traffic: charged to its budget (the same
+      # `CappedBackend` every probe goes through), held to its rate, and stopped with it.
+      @request_macro.try(&.attach(@backend, -> { pace(pace_interval) }, -> { @state.stopped? }))
+    end
+
+    # The worker count the engine actually runs at, after the deepest-point clamp — what a
+    # macro's `Info#concurrency` is bounded by.
+    def concurrency : Int32
+      @concurrency
     end
 
     # The number of distinct (name × location) tests this run will perform — the stable
@@ -224,6 +244,10 @@ module Gori::Miner
       # A stop that landed DURING calibration, which the check above cannot catch: the predicate
       # handed to `Baseline` kept the remaining probes off the wire, so `report` describes a wave
       # that never finished. Publishing it would claim a baseline was established.
+      #
+      # …or the macro ended the run in there (#1350): a baseline whose probes never carried a
+      # fresh value describes nothing, and the macro's own sentence is the reason.
+      note_macro_abort
       if @state.stopped?
         @events.send(DoneEvent.new(snapshot, true))
         return
@@ -413,15 +437,7 @@ module Gori::Miner
         return [] of Task
       end
       raw = send_with_retries(bytes, spans)
-      if err = raw.error
-        # A max-requests cap refusal isn't a network error — don't let it inflate @errors.
-        unless err == Fuzz::CappedBackend::CAP_ERROR
-          @errors += 1
-          @first_error ||= err
-        end
-        mark_done(task.names.size) # keep the bar monotonic; this bucket is inconclusive
-        return [] of Task
-      end
+      return [] of Task if bucket_untested?(raw, task)
 
       probe = Fingerprint.probe(raw)
       decision = Miner.decide(report, probe, pairs, task.location, ref, byte_delta(pairs, ref, task.location))
@@ -856,10 +872,26 @@ module Gori::Miner
     end
 
     private def snapshot : Progress
-      Progress.new(@names_total, @names_done, @backend.sent, @found, @errors)
+      Progress.new(@names_total, @names_done, @backend.sent, @found, @errors, @request_macro.try(&.tally))
     end
 
     # ── sending / pacing ────────────────────────────────────────────────────────────
+
+    # An errored probe ends the bucket. A stop that landed while it waited at the macro gate
+    # sent nothing, so the names stay untested and uncounted — the bar is left short on purpose.
+    # A cap refusal is not a network error. Anything else is counted, then marked done so the
+    # bar stays monotonic for an inconclusive bucket.
+    private def bucket_untested?(raw : Repeater::Result, task : Task) : Bool
+      return false unless err = raw.error
+      unless Gori::RequestMacro.stopped_unsent?(err)
+        unless err == Fuzz::CappedBackend::CAP_ERROR
+          @errors += 1
+          @first_error ||= err
+        end
+        mark_done(task.names.size)
+      end
+      true
+    end
 
     private def send_with_retries(bytes : Bytes, verbatim : Array({Int32, Int32})?) : Repeater::Result
       attempts = 0
@@ -869,6 +901,7 @@ module Gori::Miner
           @successful_sends += 1
           return raw
         end
+        note_macro_abort if Gori::RequestMacro.failed?(raw.error)
         # A PERMANENT refusal is not worth a retry. All three siblings exempt the cap
         # explicitly (`Fuzz::Engine#run_one`, `Discover`'s `send_with_retries`,
         # `Sequencer`'s), and miner had no exemption at all — so once `--max-requests` tripped,
@@ -894,6 +927,17 @@ module Gori::Miner
 
     private def permanent_refusal?(err : String?) : Bool
       Miner.permanent_refusal?(err)
+    end
+
+    # End the run when the macro has ended it: a failure under `stop`, or too many in a row. The
+    # ErrorEvent is what turns the run's verdict into `error` on every surface, so a mine the
+    # macro killed can never finish as a clean one; `stop` lets what is in flight complete.
+    private def note_macro_abort : Nil
+      return if @macro_abort_sent
+      return unless (lane = @request_macro) && (reason = lane.abort_reason)
+      @macro_abort_sent = true
+      stop
+      @events.send(ErrorEvent.new(reason))
     end
 
     private def park_if_paused : Nil

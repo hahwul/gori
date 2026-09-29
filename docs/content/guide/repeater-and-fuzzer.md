@@ -321,6 +321,40 @@ Results read like any other sweep, because the inbound frames **are** the respon
 
 Six knobs do not apply: three are refused and three are inert. `--race` is refused outright (a race group is byte-identical copies of one request, which has no framed-exchange form), and so is `--record-history`, because a framed exchange is not a request/response flow and writing one would produce a History entry that claims to be a WebSocket with an empty transcript. `--http2` is refused only on an `Upgrade: websocket` template: HTTP/2 has no upgrade mechanism (RFC 9113 §8.1), so a WebSocket over h2 is opened by an RFC 8441 extended `CONNECT` instead, and a seed that IS one sweeps over HTTP/2 with no flag needed, because the handshake bytes say so. `--follow-redirects`, `--timeout` and `--ac` are simply inert here and the run says so once, up front, rather than pretending otherwise. Each refusal names `--ws-http-only` where that is the way to get what you asked for; under that flag the run is an ordinary HTTP sweep, so all three work, recording included. A WebSocket seed that carries no outbound frames is swept as plain HTTP too: a handshake-only “framed” run would dial a socket per payload just to send nothing.
 
+### Rotating Tokens with a Macro
+
+Some applications hand out a new form token or nonce on every page load or API call. A sweep then gets `200` for the first candidate and `403` for every one after it, because they all carry the value captured before the run. Waiting for a session to expire does not help: the value dies long before its session does. A **macro** fixes it: a short list of saved Repeater sessions that runs **before** a candidate, so the value its extract rule leaves in the [session bindings](/guide/proxy/#session-bindings) is fresh when the candidate resolves its `$BIND.NAME`. The Fuzzer and the Param Miner both have one.
+
+There is nothing new to learn about extraction or injection. The steps go through the Repeater's own send path, so the [extract rule](/guide/proxy/#session-bindings) you wrote for the token works unchanged, and the candidate names the value where it belongs with `$BIND.NAME` in the template or in a header of the [active session slot](/guide/authorize/#session-slots-one-list-two-readers). A macro only decides **when** the steps run:
+
+| Cadence | What it does |
+| --- | --- |
+| `request` (default) | The steps run before every candidate. A one-time value is never shared, so the sweep goes **one candidate at a time**: the plan says so before the first request |
+| `N` | The steps run before the first candidate and then after every N. Those N share the value and may run at once; the next value is fetched only after all N have finished, so no candidate can pick up the following one's value |
+| `off` | The steps stay configured and nothing runs |
+
+Candidates are counted in the order they reach the macro, which is generation order with one worker and dispatch order in practice with several. A calibration sample counts as a candidate, since it carries the same template. A `--race` run is one unit: the steps run once, before the group is dialled, and every member carries that one value, which is exactly the experiment "redeem one single-use token from N connections at once". So the cadence must be at least the group size, and a shorter one is refused rather than silently shared.
+
+A failed macro never sends a stale or empty value. The steps fail when one errors, answers `4xx`/`5xx` or is refused by the scope, and when they answer but no extract rule rebound anything (or, with `--macro-expect NAME`, the binding you named). The candidate is **not sent**: its row is an error row starting `macro:`, it is counted in the run's errors, and it is never retried, because the steps would only fail again against the same endpoint. `--macro-on-failure skip` (default) ends the run after three failures in a row, so a broken login is not sent once per payload; `stop` ends it on the first. There is deliberately no "send it anyway with the last value": that row's verdict would be about a stale token. A run the macro ended finishes as an error on every surface.
+
+Everything the steps send is on the record and inside the same limits as the rest of the run:
+
+- Each step lands in History with source `macro` (`src:macro`, SRC `MACRO`, `source_ref` `macro step N`) and each failure writes an event; the run's own status counts runs, requests and failures, and never a value.
+- They are sent as the active session slot, overlay included, so a page that needs your session cookie gets it.
+- They pass the surface's scope check when the run is built and again for every run of the steps, and Sandbox and explicit excludes hold for them as they do for the candidates.
+- They are charged to `--max-requests` and held to `--rate`; a stop lands between two steps.
+
+The macro is refused, before anything is sent, when a step is a session that still holds `§…§` markers or a WebSocket handshake, when the project has no extract rule the steps could rebind, and when no candidate can carry the value: a **captured flow's** template is sent exactly as captured and substitutes nothing, so seed the run from a Repeater session or a draft, or put the token in a header of the active slot.
+
+| Surface | How |
+| --- | --- |
+| TUI, Fuzzer | **ADVANCED**: *Macro steps* (session ids or tab names, comma-separated), *Macro cadence*, *Macro must rebind*, *Macro on failure* |
+| TUI, Miner | The **MINE PARAMETERS** popup picks one saved session (*macro step*), its cadence and its failure policy |
+| `gori run` | `fuzz` / `mine` `--macro=STEPS [--macro-every=request\|N\|off] [--macro-expect=NAME] [--macro-on-failure=skip\|stop]`; needs a project you named (`--project`, `--db`, `--flow` or `--repeater`) |
+| MCP | `fuzz_start` / `mine_start` `macro_steps`, `macro_every`, `macro_expect`, `macro_on_failure`; the reply's `request_macro` describes the plan and `fuzz_status` / `mine_status` report what it did |
+
+The Miner's macro runs before **every request it sends**, the baseline calibration included: an application that rotates a token per request answers an un-tokened calibration probe with the same `403` as a candidate, and a baseline of `403`s makes every real response look like a finding. Its TUI popup takes one session; several steps and `--macro-expect` are on the CLI and MCP.
+
 ### Connection Reuse
 
 A sweep reuses one connection across many requests, so a run pays one TCP (and, on `https`, one TLS) handshake per worker instead of one per request. Against a remote origin that is usually the largest single cost of a run.

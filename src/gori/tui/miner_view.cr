@@ -42,6 +42,7 @@ module Gori::Tui
       @sni = ""
       @evidence = false
       @config = Miner::Config.new
+      @macro_info = nil.as(Gori::RequestMacro::Info?)
       @last_synced_config = "" # last store config blob applied (reconcile equality)
       @name = nil.as(String?)
       @dirty = false
@@ -455,8 +456,13 @@ module Gori::Tui
     # pane). It has NO default on purpose: the Miner tab ignored them for as long as the
     # tab has existed (#367), which pinned a host to a staging IP everywhere except here,
     # so a call site that forgets them again has to be a compile error.
+    #
+    # `project` is the project the run's request-time macro reads its Repeater sessions from
+    # (#1350) — passed in like `overrides`, since only a surface can reach a store. Defaulted
+    # because most callers have no macro to read for.
     def build_engine(verify : Bool, scope : Gori::Scope,
-                     overrides : Gori::HostOverrides?) : {Miner::Engine?, String?}
+                     overrides : Gori::HostOverrides?,
+                     project : Gori::Store? = nil) : {Miner::Engine?, String?}
       # @request / @target keep their `$VAR` tokens (that is what gets persisted and what
       # the operator sees); Miner::Plan expands both exactly once, at build time — unless
       # these bytes are EVIDENCE, in which case it expands neither and refuses neither.
@@ -466,11 +472,17 @@ module Gori::Tui
       options = Miner::PlanOptions.new(String.new(@request), evidence: @evidence,
         target: @target, http2: @http2,
         locations: @config.locations, config: @config, verify: verify, sni: sni_override,
-        overrides: overrides)
+        overrides: overrides, project: project)
+      @macro_info = nil # a failed build must not leave the last run's macro
       plan = Miner::Plan.build(options, Gori::Outbound.interactive(scope))
+      @macro_info = plan.request_macro_info
       {plan.engine, nil}
     rescue ex : Miner::PlanError
       {nil, mine_plan_error(ex)}
+    rescue ex : Gori::Error
+      # `RequestMacro::Error` names its own step and remedy in words that read the same on every
+      # surface; a "config error:" prefix would only bury them.
+      {nil, ex.message || "the run could not be built"}
     rescue ex
       {nil, "config error: #{ex.message}"}
     end
@@ -513,8 +525,22 @@ module Gori::Tui
           if w = @config.user_wordlist
             j.field "user_wordlist", w
           end
+          # The request-time macro (#1350). Absent for a mine without one, so every older row
+          # and every macro-less session serialises byte-for-byte as before.
+          if m = @config.request_macro
+            j.field "request_macro" do
+              m.to_json(j)
+            end
+          end
         end
       end
+    end
+
+    # What the request-time macro does to the run just built (#1350) — the steps, the cadence,
+    # and the parallelism it leaves. nil for a mine with none. Read by the controller for the
+    # run-start line.
+    def macro_info : Gori::RequestMacro::Info?
+      @macro_info
     end
 
     private def apply_config_json(s : String) : Nil
@@ -542,6 +568,7 @@ module Gori::Tui
         end
       end
       any["user_wordlist"]?.try(&.as_s?).try { |w| @config.user_wordlist = w }
+      @config.request_macro = Gori::RequestMacro::Spec.from_json?(any["request_macro"]?)
     rescue
       # malformed persisted config → keep defaults
     end

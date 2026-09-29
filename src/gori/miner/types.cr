@@ -1,3 +1,5 @@
+require "../request_macro/lane" # RequestMacro::Spec / Tally — a run's macro and what it reports
+
 module Gori
   # The parameter-mining engine ("Param Miner"): discovers hidden/unlinked
   # parameters a server accepts but that aren't in the captured request. It stuffs a
@@ -139,7 +141,11 @@ module Gori
       names_done : Int64,
       sent : Int64,
       found : Int32,
-      errors : Int64
+      errors : Int64,
+      # The run's request-time macro (#1350): how often its steps ran, how many failed, and how
+      # many probes that cost. nil for a run with no macro. `sent` already includes the steps'
+      # requests — they are charged to the same budget — so this is the breakdown, not an addend.
+      request_macro : Gori::RequestMacro::Tally? = nil
 
     # Engine → consumer events. A union of records (matches Fuzz's pattern so a
     # Channel(Event) carries them without boxing). Progress is droppable (latest wins);
@@ -296,6 +302,12 @@ module Gori
       # `Plan.build` so a bad argv is a `PlanError` before the run starts, not a per-worker
       # surprise. See `Miner::HookBackend` for the timeout unit and where the cost lands.
       property hook : String?
+      # The run's request-time macro (#1350): Repeater sessions replayed before a probe so a
+      # per-request CSRF token or nonce is fresh when the probe resolves its `$BIND.NAME`. The
+      # native answer to the rotating-token target the hook above reaches by forking a command.
+      # nil is every run that came before. See `Miner::MacroBackend` for what a "request" is
+      # here, and `Fuzz::Config#request_macro` — this is the same spec on the same terms.
+      property request_macro : Gori::RequestMacro::Spec?
       property notify : NotifyMode
       # Reuse one connection across the run's sends instead of dialing a fresh one per probe —
       # `Repeater::ConnPool` on HTTP/1.1, `Repeater::H2Pool` on h2, both wired in `Plan.build`. ON by default, as it is for the
@@ -330,7 +342,8 @@ module Gori
                      @stability_rounds = 4, @confirm_rounds = 2, @max_requests = nil,
                      @add_content_length_when_missing = false, @user_wordlist = nil,
                      @hook = nil,
-                     @notify = NotifyMode::WhenFound, @keep_alive = true)
+                     @notify = NotifyMode::WhenFound, @keep_alive = true,
+                     @request_macro = nil)
       end
 
       def bucket_for(loc : Location) : Int32

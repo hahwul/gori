@@ -3,6 +3,7 @@ require "../env"
 require "../host_overrides"
 require "../outbound"
 require "../repeater/flow_request"
+require "../request_macro"
 require "./content_length"
 require "./engine"
 require "./generator"
@@ -367,6 +368,11 @@ module Gori::Fuzz
     # said once up front by whichever surface asked, and never carrying a value.
     getter payload_reports : Array(PayloadFrom::Report)
 
+    # The run's request-time macro (#1350), or nil when it has none. The same object the engine
+    # gates every candidate through; a surface reads `request_macro_info` for the plan-time line
+    # and `Progress#request_macro` for what happened.
+    getter request_macro : RequestMacro::Lane?
+
     def initialize(@engine : Engine, @generator : Generator, @matcher : Matcher,
                    @config : Config, @origin : Origin, @template : Template,
                    @http2 : Bool, @request_target : String,
@@ -380,7 +386,16 @@ module Gori::Fuzz
                    @ws_ignored_knobs : Array(Symbol) = [] of Symbol,
                    @grpc_fields : GrpcFieldTemplate? = nil,
                    @tls_preset : String? = nil,
-                   @payload_reports : Array(PayloadFrom::Report) = [] of PayloadFrom::Report)
+                   @payload_reports : Array(PayloadFrom::Report) = [] of PayloadFrom::Report,
+                   @request_macro : RequestMacro::Lane? = nil)
+    end
+
+    # What the macro does to this run, said before it starts: the steps, the cadence, whether a
+    # value is shared between candidates, and the parallelism that leaves the run. nil without a
+    # macro. The engine's OWN clamped concurrency and race size, so the line cannot describe a
+    # number the run will not use.
+    def request_macro_info : RequestMacro::Info?
+      @request_macro.try(&.info(@engine.concurrency, @engine.race_count))
     end
 
     # Does this run sweep a WebSocket script rather than an HTTP request?
@@ -537,6 +552,18 @@ module Gori::Fuzz
 
       origin = resolve_origin(options)
 
+      # The request-time macro (#1350), validated HERE for the reason every other refusal is:
+      # before a wordlist is read or a socket is dialled. Its steps are the FIRST traffic the run
+      # produces, and a macro that cannot work must not send a request to find out.
+      request_macro = build_request_macro(options, outbound, race_count,
+        [text] + (ws_texts || [] of String))
+      # The group's own size was judged above, before the macro existed. The steps run once
+      # before the group and cannot be split off it, so they count toward the same cap.
+      if request_macro
+        validate_race_budget(race_count, options.config, options.http2?,
+          request_macro.macro_requests(1_i64))
+      end
+
       # Project-derived sets are read HERE, before the sets are paired with the processing
       # pipeline: every surface hands over the same `ProjectSource`, and this is the one place a
       # store is read for a run. Skipped for a race, which draws from no set at all.
@@ -609,7 +636,7 @@ module Gori::Fuzz
         # bare hello. `config` — not `options` — is the carrier, because a finished run has to
         # be able to say which handshake produced its results.
         tls_preset: tls_preset)
-      new(engine: Engine.new(generator, matcher, sender, config), generator: generator,
+      new(engine: Engine.new(generator, matcher, sender, config, request_macro), generator: generator,
         matcher: matcher, config: config, origin: origin, template: template,
         http2: options.http2?, request_target: request_target, mark_matches: mark_matches,
         pool: sender.pool,
@@ -618,7 +645,43 @@ module Gori::Fuzz
         unframed_body: unframed_body?(config, generator.baseline_raw),
         shadowed_marks: shadowed_marks, unused_payload_sets: unused_sets, auto_encode: auto_encode,
         ws_script: ws_script, ws_ignored_knobs: ws_ignored, grpc_fields: grpc_fields,
-        tls_preset: sender.tls_preset, payload_reports: payload_reports)
+        tls_preset: sender.tls_preset, payload_reports: payload_reports,
+        request_macro: request_macro)
+    end
+
+    # The run's macro lane, or nil when it has none (or has it `off`).
+    #
+    # Refused, in this order and each with the words the operator can act on: no project to read
+    # the steps from; a race whose group the cadence cannot cover; a step that cannot run
+    # (`Runner.build` names it); a request that can never carry what the steps produce.
+    #
+    # The race rule is the "unsafe combination" the issue names. A race releases N copies of ONE
+    # request together, so they can only share one value; a cadence shorter than the group would
+    # promise a fresh value per request (or per few) that N identical, simultaneous requests
+    # cannot have. Refusing is the honest answer — silently sharing would change the test the
+    # cadence describes. With `every >= N` the group is one epoch: the steps run once, before the
+    # group is dialled, and every member carries what they left, which is also exactly the
+    # experiment "redeem one single-use token from N connections at once".
+    private def self.build_request_macro(options : PlanOptions, outbound : Gori::Outbound,
+                                         race : Int32?, candidates : Array(String)) : RequestMacro::Lane?
+      spec = options.config.request_macro
+      return nil unless spec && spec.active?
+      store = options.project || raise RequestMacro::Error.new(
+        "a macro reads its steps from the project's Repeater sessions, and this run has no project attached — " \
+        "open one (--project / --db), or seed the run from a captured flow or a Repeater session")
+      if race
+        group = Math.min(race, Engine::MAX_RACE_SIZE)
+        if spec.cadence.every < group
+          raise RequestMacro::Error.new(
+            "a race sends #{group} identical requests together, so they can only share ONE macro value, " \
+            "but this macro runs #{spec.cadence.label} — set the cadence to at least #{group} " \
+            "(the macro then runs once, before the group is dialled), or turn the macro off")
+        end
+      end
+      runner = RequestMacro::Runner.build(spec, store, outbound,
+        overrides: options.overrides, verify: options.verify?)
+      runner.check_reachable!(candidates, options.evidence?)
+      RequestMacro::Lane.new(spec, runner, "fuzzer")
     end
 
     # Resolve every `ProjectSource` against the project the surface handed over (#1352). A
@@ -806,15 +869,17 @@ module Gori::Fuzz
     # send time. Counts the group as the engine will run it (clamped to `MAX_RACE_SIZE`),
     # plus one warm-up per connection when the run carries one — not under h2, where
     # `Sender#send_race` degrades to independent sends and never sends the warm-up.
-    private def self.validate_race_budget(race_count : Int32?, config : Config, http2 : Bool) : Nil
+    private def self.validate_race_budget(race_count : Int32?, config : Config, http2 : Bool,
+                                          extra : Int64 = 0_i64) : Nil
       return unless (n = race_count) && (cap = config.max_requests) && cap > 0
       conns = n.clamp(1, Engine::MAX_RACE_SIZE).to_i64
       warmup = config.race_warmup && !http2
-      needed = warmup ? conns * 2 : conns
+      needed = (warmup ? conns * 2 : conns) + extra
       return if needed <= cap
       warm = warmup ? " (a warm-up and the race request on each connection)" : ""
+      steps = extra > 0 ? " plus #{extra} macro step#{extra == 1 ? "" : "s"} before the group" : ""
       raise PlanError.new(PlanError::Reason::BadRaceCount,
-        "a race of #{conns} connections sends #{needed} requests#{warm}, over the " \
+        "a race of #{conns} connections sends #{needed} requests#{warm}#{steps}, over the " \
         "#{cap}-request cap; a race group is sent whole, never split", needed.to_s)
     end
 

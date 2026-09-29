@@ -62,7 +62,8 @@ describe Gori::Tui::MineConfigOverlay do
 
   it "cycles max-requests, concurrency and notification on their rows and reports the Start row" do
     ov = MineConfigOverlay.new(seed([Gori::Miner::Location::Query], [Gori::Miner::Location::Query]))
-    # rows: [0]=query, [1]=max requests, [2]=concurrency, [3]=notification, [4]=keep-alive, [5]=start
+    # rows: [0]=query, [1]=max requests, [2]=concurrency, [3]=notification, [4]=keep-alive,
+    #       [5]=macro step, [6]=macro cadence, [7]=macro on failure, [8]=start
     ov.build_config.max_requests.should be_nil # uncapped is the first choice, and the default
     ov.move(1)                                 # max requests row
     ov.adjust(1)
@@ -75,8 +76,73 @@ describe Gori::Tui::MineConfigOverlay do
     ov.build_config.notify.should eq(Gori::Miner::NotifyMode::Off)
     ov.move(1) # keep-alive row
     ov.on_start_row?.should be_false
+    3.times { ov.move(1) } # the three macro rows (#1350)
+    ov.on_start_row?.should be_false
     ov.move(1) # start row
     ov.on_start_row?.should be_true
+  end
+
+  describe "request-time macro rows (#1350)" do
+    q = [Gori::Miner::Location::Query]
+    sessions = [{3_i64, "csrf-fetch"}, {7_i64, "GET /form"}] of {Int64, String}
+
+    it "builds no macro until a step is picked — every mine that came before" do
+      ov = MineConfigOverlay.new(seed(q, q), macro_sessions: sessions)
+      ov.build_config.request_macro.should be_nil
+    end
+
+    it "picks one saved session by id, with the cadence and failure policy beside it" do
+      ov = MineConfigOverlay.new(seed(q, q), macro_sessions: sessions)
+      ov.set_selected(5) # macro step
+      ov.adjust(1)
+      ov.set_selected(6) # cadence: request → 2
+      ov.adjust(1)
+      ov.set_selected(7) # on failure: skip → stop
+      ov.adjust(1)
+      spec = ov.build_config.request_macro.not_nil!
+      spec.steps.should eq(["3"])
+      spec.cadence.every.should eq(2)
+      spec.on_failure.should eq(Gori::RequestMacro::OnFailure::Stop)
+      ov.set_selected(5)
+      ov.adjust(1) # the second session
+      ov.build_config.request_macro.not_nil!.steps.should eq(["7"])
+      ov.adjust(1) # …and back to off
+      ov.build_config.request_macro.should be_nil
+    end
+
+    it "leaves the cadence and failure rows inert while no step is picked" do
+      ov = MineConfigOverlay.new(seed(q, q), macro_sessions: sessions)
+      ov.set_selected(6)
+      ov.adjust(1)
+      ov.set_selected(7)
+      ov.adjust(1)
+      ov.set_selected(5)
+      ov.adjust(1) # now a step is picked
+      spec = ov.build_config.request_macro.not_nil!
+      spec.cadence.per_request?.should be_true # the earlier presses changed nothing
+      spec.on_failure.should eq(Gori::RequestMacro::OnFailure::Skip)
+    end
+
+    it "has nothing to pick in a project with no saved session, and says so" do
+      ov = MineConfigOverlay.new(seed(q, q))
+      ov.set_selected(5)
+      ov.adjust(1)
+      ov.toggle
+      ov.build_config.request_macro.should be_nil
+      backend = MemoryBackend.new(80, 24)
+      ov.render(Screen.new(backend), Rect.new(0, 0, 80, 24))
+      backend.contains?("no Repeater session in this project").should be_true
+    end
+
+    it "draws the picked step's name" do
+      ov = MineConfigOverlay.new(seed(q, q), macro_sessions: sessions)
+      ov.set_selected(5)
+      ov.adjust(1)
+      backend = MemoryBackend.new(100, 30)
+      ov.render(Screen.new(backend), Rect.new(0, 0, 100, 30))
+      backend.contains?("csrf-fetch").should be_true
+      backend.contains?("macro cadence").should be_true
+    end
   end
 
   it "reuses connections by default and turns pooling off from its own row" do
