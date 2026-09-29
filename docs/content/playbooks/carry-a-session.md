@@ -7,7 +7,7 @@ weight = 50
 group = "The manual loop"
 +++
 
-An authenticated test is a login you do once and a token you carry everywhere after. This playbook captures the login, binds its rotating token to a name, writes that name onto every later request, does the same thing headless in a single command, and then carries several sessions side by side. Budget about ten minutes.
+An authenticated test is a login you do once and a token you carry everywhere after. This playbook captures the login, binds its rotating token to a name, writes that name onto every later request, does the same thing headless in a single command, carries several sessions side by side, and finally fetches a fresh token for every request when the app hands out single-use ones. Budget about ten minutes.
 
 > **Before you begin.** [Set up an engagement](/playbooks/set-up-an-engagement/) first, and be able to log into the target through the proxy so its auth response is captured. Only replay sessions against a target you are authorized to test; the examples use `api.example.com` as a stand-in.
 
@@ -93,6 +93,27 @@ Two limits worth knowing before you lean on it. The active slot is **never persi
 For a run long enough to outlive the token, give the slot **refresh steps**: the Repeater sessions that log in, in order. `gori run session edit admin --refresh 12,14 --refresh-before jwt-exp` makes a `--slot admin` send refresh the slot first whenever its bound JWT is about to expire, and `gori run session refresh admin` runs the steps by hand to check them. In the TUI, `Ctrl-P` → **Use as refresh for slot…** on a Repeater sub-tab appends that sub-tab to a slot's steps. It acts before a send and never retries after a `401`. See [refresh steps](/reference/cli/#refresh-steps).
 
 **Checkpoint.** `gori run session list` shows both slots, and a `--slot low-priv` run prints `slot: sending as low-priv` before its first request.
+
+## 6. Fetch a fresh token for every request
+
+Some values die long before the session does: a form's CSRF token or a nonce the app hands out on each page load and accepts once. Refresh steps renew a value before it *expires*, but a sweep still spends one value on every candidate, so the first candidate gets `200` and every one after it `403`. A **request-time macro** fetches a new one each time: a saved Repeater session that runs **before** each candidate, so the extract rule from step 2 rebinds the name just in time.
+
+Save the request that serves the token (the form page, or the API call that returns the nonce) as a Repeater session, and keep an extract rule that binds it:
+
+```bash
+gori run rewriter extract add --name CSRF --kind regex \
+  --selector 'name="csrf" value="([^"]+)"' --when 'path:/profile AND status:200'
+```
+
+Then write `$BIND.CSRF` where the token goes in the request you sweep: a Repeater session (here `12`) whose body reads `csrf=$BIND.CSRF&email=§x§`. Name the token's session (here `15`) as the macro:
+
+```bash
+gori run fuzz --repeater 12 --macro 15 --wordlist emails.txt
+```
+
+The default cadence runs the macro before every candidate, which means the sweep goes one candidate at a time; `--macro-every 10` lets ten share a value when the app allows it. A macro that fails (an error, a `4xx`/`5xx`, or no binding rebound) never sends its candidate with a stale token, and three failures in a row end the run. The sweep has to be seeded from a Repeater session or a draft, because a captured flow is sent exactly as captured and never mentions `$BIND.CSRF`; a token that travels in a header can ride the active slot's overlay instead. In the TUI the macro is a row on the Fuzzer's **ADVANCED** card and in the Miner's popup, and over MCP it is `macro_steps` on `fuzz_start` / `mine_start`. See [Rotating Tokens with a Macro](/guide/repeater-and-fuzzer/#rotating-tokens-with-a-macro).
+
+**Checkpoint.** Rows after the first come back with real answers instead of a wall of `403`s, and `gori run history -q 'src:macro'` lists the macro's steps.
 
 ## Next Steps
 

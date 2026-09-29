@@ -448,7 +448,7 @@ gori run ls --format json --column 'T=regex:tok=(\w+)'
 | 항목 | 클립보드에 담기는 것 |
 |------|----------------------|
 | URL / Headers / Body / Cookies | 각 부분만. 요청에 담을 내용이 없는 항목은 아예 나타나지 않습니다 |
-| cURL | 실행 가능한 `curl` 명령 |
+| cURL | 캡처한 그대로를 보내는 실행 가능한 `curl` 명령. `..` 세그먼트가 있는 경로에는 `--path-as-is`가, `Content-Type` 없이 캡처된 본문에는 `-H 'Content-Type:'`이 붙어 curl이 어느 쪽도 고쳐 쓰지 않습니다 |
 | Python | `requests` 스크립트 |
 | fetch | JavaScript `fetch()` 호출 |
 | Go | `net/http` 프로그램 |

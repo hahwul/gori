@@ -7,7 +7,7 @@ weight = 50
 group = "수동 루프"
 +++
 
-인증된 테스트란 한 번 하는 로그인과 그 뒤로 계속 지니고 다니는 토큰입니다. 이 플레이북은 로그인을 캡처하고, 회전하는 토큰을 이름에 바인딩하고, 그 이름을 이후의 모든 요청에 써 넣은 뒤, 같은 일을 헤드리스에서 명령 하나로 해내고, 여러 세션을 나란히 들고 다닙니다. 약 10분 잡으세요.
+인증된 테스트란 한 번 하는 로그인과 그 뒤로 계속 지니고 다니는 토큰입니다. 이 플레이북은 로그인을 캡처하고, 회전하는 토큰을 이름에 바인딩하고, 그 이름을 이후의 모든 요청에 써 넣은 뒤, 같은 일을 헤드리스에서 명령 하나로 해내고, 여러 세션을 나란히 들고 다니고, 마지막으로 앱이 일회용 토큰을 내줄 때 요청마다 새 토큰을 가져옵니다. 약 10분 잡으세요.
 
 > **시작하기 전에.** 먼저 [엔게이지먼트 준비](/ko/playbooks/set-up-an-engagement/)를 끝내고, 프록시를 통해 대상에 로그인할 수 있어 그 인증 응답이 캡처되게 하세요. 테스트 권한이 있는 대상만 상대로 세션을 재전송하세요. 예시는 `api.example.com`을 대역으로 씁니다.
 
@@ -93,6 +93,27 @@ gori run fuzz 42 --slot low-priv --bind-from 17 --wordlist ids.txt
 토큰보다 오래 가는 실행이라면 슬롯에 **갱신 단계**(refresh steps)를 주세요. 순서대로 로그인하는 Repeater 세션들입니다. `gori run session edit admin --refresh 12,14 --refresh-before jwt-exp`를 하면 `--slot admin` 전송은 바인딩된 JWT가 곧 만료될 때마다 먼저 슬롯을 갱신하고, `gori run session refresh admin`은 그 단계를 손으로 돌려 확인합니다. TUI에서는 Repeater 서브탭에서 `Ctrl-P` → **Use as refresh for slot…**으로 그 서브탭을 슬롯의 단계에 덧붙입니다. 갱신은 전송 전에 동작하며 `401` 뒤에 재시도하지 않습니다. [갱신 단계](/ko/reference/cli/#refresh-steps)를 참고하세요.
 
 **체크포인트.** `gori run session list`가 두 슬롯을 보여 주고, `--slot low-priv` 실행은 첫 요청 전에 `slot: sending as low-priv`를 찍습니다.
+
+## 6. 요청마다 새 토큰 가져오기 {#6-fetch-a-fresh-token-for-every-request}
+
+세션보다 훨씬 먼저 죽는 값이 있습니다. 페이지를 열 때마다 앱이 내주고 한 번만 받아 주는 폼의 CSRF 토큰이나 nonce가 그렇습니다. 갱신 단계는 값이 *만료되기* 전에 새로 받아 오지만, 스윕은 여전히 후보마다 값 하나를 써 버리므로 첫 후보만 `200`을 받고 그 뒤로는 전부 `403`입니다. **요청 시점 매크로**는 매번 새 값을 가져옵니다. 후보마다 **앞서** 실행되는 저장된 Repeater 세션이라, 2단계의 extract 규칙이 제때 이름을 다시 바인딩합니다.
+
+토큰을 내주는 요청(폼 페이지, 또는 nonce를 돌려주는 API 호출)을 Repeater 세션으로 저장하고, 그 값을 바인딩하는 extract 규칙을 둡니다:
+
+```bash
+gori run rewriter extract add --name CSRF --kind regex \
+  --selector 'name="csrf" value="([^"]+)"' --when 'path:/profile AND status:200'
+```
+
+그다음 스윕할 요청에서 토큰이 들어갈 자리에 `$BIND.CSRF`를 적습니다. 본문이 `csrf=$BIND.CSRF&email=§x§`인 Repeater 세션(여기서는 `12`)입니다. 토큰을 내주는 세션(여기서는 `15`)을 매크로로 지정합니다:
+
+```bash
+gori run fuzz --repeater 12 --macro 15 --wordlist emails.txt
+```
+
+기본 주기는 후보마다 매크로를 실행하므로 스윕은 후보를 하나씩 보냅니다. 앱이 허락한다면 `--macro-every 10`으로 열 개가 값 하나를 나눠 쓰게 할 수 있습니다. 실패한 매크로(오류, `4xx`/`5xx`, 또는 다시 바인딩된 값 없음)는 낡은 토큰으로 후보를 보내지 않으며, 세 번 연달아 실패하면 실행이 끝납니다. 캡처된 플로우는 캡처한 그대로 나가서 `$BIND.CSRF`를 담을 수 없으므로, 스윕은 Repeater 세션이나 초안에서 시작해야 합니다. 헤더로 오가는 토큰이라면 활성 슬롯의 오버레이에 실어도 됩니다. TUI에서 매크로는 Fuzzer **ADVANCED** 카드의 행과 Miner 팝업에 있고, MCP에서는 `fuzz_start` / `mine_start`의 `macro_steps`입니다. [매크로로 회전하는 토큰 다루기](/ko/guide/repeater-and-fuzzer/#rotating-tokens-with-a-macro)를 참고하세요.
+
+**체크포인트.** 첫 행 뒤의 행들이 `403` 벽 대신 제대로 된 응답으로 돌아오고, `gori run history -q 'src:macro'`가 매크로의 단계를 나열합니다.
 
 ## 다음 단계 {#next-steps}
 

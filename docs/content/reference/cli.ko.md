@@ -729,7 +729,7 @@ gori run session from-flow 4211 --name admin
 gori run repeater 900 --slot admin        # 플로우 900을 그 신원으로 재전송
 ```
 
-오버레이는 **리터럴**입니다. 로그인이 돌려준 바이트 그대로 프로젝트에 저장됩니다. 스스로 재인증하지는 않으므로, *회전하는* 토큰(수명 짧은 JWT, 요청마다 바뀌는 CSRF 값)은 extract 규칙 경로가 맞습니다: `gori run rewriter extract`에 `--bind-from FLOW`를 더하면 실행마다 값을 새로 발급받습니다. 슬롯에 [갱신 단계](#refresh-steps)를 붙이는 방법도 있습니다. 이름은 플로우를 읽기 전에 검사하므로, 중복된 이름은 "그 플로우는 로그인이 아니다"가 아니라 이름 충돌로 보고됩니다.
+오버레이는 **리터럴**입니다. 로그인이 돌려준 바이트 그대로 프로젝트에 저장됩니다. 스스로 재인증하지는 않으므로, *회전하는* 토큰(수명 짧은 JWT, 요청마다 바뀌는 CSRF 값)은 extract 규칙 경로가 맞습니다: `gori run rewriter extract`에 `--bind-from FLOW`를 더하면 실행마다 값을 새로 발급받습니다. 슬롯에 [갱신 단계](#refresh-steps)를 붙이는 방법도 있고, 요청마다 바뀌는 값이라면 Fuzzer나 Miner의 [요청 시점 매크로](/ko/guide/repeater-and-fuzzer/#rotating-tokens-with-a-macro)(`--macro`)를 쓰세요. 이름은 플로우를 읽기 전에 검사하므로, 중복된 이름은 "그 플로우는 로그인이 아니다"가 아니라 이름 충돌로 보고됩니다.
 
 **`from-request`는 캡처된 요청에서 지정한 헤더를 복사합니다.** 인증 정보나 CSRF 값이 요청에 이미 있거나, 로그인 교환의 모든 헤더가 아닌 필요한 헤더만 의도적으로 스냅샷할 때 유용합니다. `--copy-header`를 헤더마다 반복하고, 하나 이상 지정해야 합니다. `Content-Length`, `Transfer-Encoding`, `Host`는 거부됩니다. 슬롯은 본문과 대상이 다른 메시지에 적용되므로, 이 헤더를 복사하면 이후 모든 전송의 프레이밍이나 라우팅이 어긋납니다. 저장되는 값은 리터럴 바이트이며, `--show-values`를 주지 않으면 표준 출력은 `[REDACTED]`로 가립니다. STDERR의 provenance는 복사한 헤더 이름만 출력하고 값은 출력하지 않습니다. 슬롯은 **호스트 범위가 없습니다**. `--slot NAME`을 명시한 모든 전송에 해당 슬롯의 헤더가 적용되므로, 슬롯은 의도한 신원 하나에만 사용하세요.
 
@@ -739,7 +739,7 @@ gori run session from-request 4211 --name admin \
 gori run repeater 900 --slot admin        # 해당 헤더 스냅샷으로 전송
 ```
 
-이는 로그인 매크로가 아닌 **리터럴 스냅샷**입니다. 스스로 재인증하거나 회전하는 토큰을 갱신하지 않습니다. 수명이 짧은 JWT, 요청마다 바뀌는 CSRF 값처럼 다시 발급해야 하는 값은 `gori run rewriter extract`와 `--bind-from FLOW`를 사용해 실행마다 새로 추출하거나, 슬롯에 [갱신 단계](#refresh-steps)를 붙이세요.
+이는 로그인 매크로가 아닌 **리터럴 스냅샷**입니다. 스스로 재인증하거나 회전하는 토큰을 갱신하지 않습니다. 수명이 짧은 JWT, 요청마다 바뀌는 CSRF 값처럼 다시 발급해야 하는 값은 `gori run rewriter extract`와 `--bind-from FLOW`를 사용해 실행마다 새로 추출하거나, 슬롯에 [갱신 단계](#refresh-steps)를 붙이세요. 요청마다 바뀌는 값이라면 Fuzzer나 Miner의 [요청 시점 매크로](/ko/guide/repeater-and-fuzzer/#rotating-tokens-with-a-macro)(`--macro`)를 쓰세요.
 
 <a id="refresh-steps"></a>**갱신 단계는 슬롯을 다시 인증합니다.** `--refresh 12,14`는 로그인하는 Repeater 세션(`gori run repeater list`)을 실행 순서대로 지정합니다. 보통 CSRF를 가져오는 요청, 그다음 `$BIND.CSRF`를 싣는 로그인 요청입니다. 각 단계의 응답은 슬롯 자신의 extract 규칙을 거치고, 그것이 슬롯을 다시 바인딩합니다. 단계는 *그 슬롯의* `$BIND.NAME` 값을 해소하고 슬롯 헤더 오버레이는 **싣지 않으므로**, 로그인 요청이 교체하려는 만료된 자격 증명을 보내지 않습니다. 모든 단계는 source `refresh`(`src:refresh`)로 History에 기록되고, 갱신마다 이벤트 하나(`list_events`, source `session`)가 남습니다. 이벤트에는 바인딩 이름만 있고 값은 없습니다.
 

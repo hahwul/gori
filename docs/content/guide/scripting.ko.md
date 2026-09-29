@@ -158,7 +158,10 @@ gori run mine 42 --locations=query --hook './sign.sh'
 없는 훅은 **이유를 밝히며 그 프로브를 건너뜁니다.** 서명 없는 요청을 보내면 앱이 거절하고 마이너는 그것을
 깨끗한 음성으로 읽을 것이기 때문입니다. 타임아웃은 같은 `hooks.timeout_secs` 예산이며 **아웃바운드 요청
 단위**입니다. 마인의 요청 수는 `--max-requests`와 자체 버킷/이분/확인 트리로 묶여 있으므로 훅 비용 총량도
-함께 묶입니다. 마이너는 왕복을 세는 지연 바운드 작업이라, 훅은 그 왕복마다 fork-and-wait 하나를 더합니다.
+함께 묶입니다. 마이너는 왕복을 세는 지연 바운드 작업이라, 훅은 그 왕복마다 fork-and-wait 하나를 더합니다. 훅은 명령이
+*계산할 수 있는* 값을 위한 것입니다. *서버가* 내주는 nonce나 CSRF 토큰은 대신
+[요청 시점 매크로](/ko/guide/repeater-and-fuzzer/#rotating-tokens-with-a-macro)(`--macro`)가 가져옵니다.
+매크로는 프로브마다 앞서 저장된 Repeater 세션을 재생합니다.
 
 **의도적으로 연결하지 않은 두 곳.** MCP `decode` 툴은 `exec:` 스텝을 거부합니다(저장된 체인
 포함). read-only·unbound로 노출되는 툴이라 순수 계산으로 남깁니다. 훅이 필요한 에이전트는 `pipe`

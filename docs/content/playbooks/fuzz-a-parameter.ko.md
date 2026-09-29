@@ -54,6 +54,8 @@ gori run fuzz <flow-id> --auto --mode sniper
 gori run fuzz <flow-id> --auto --mode sniper --wordlist params.txt
 ```
 
+다시 쓸 목록은 [wordlist 카탈로그](/ko/guide/repeater-and-fuzzer/#wordlist-catalog)(`~/.gori/wordlists`)에 두세요. 한 번 저장하면(`gori run wordlist save params.txt --from params.txt`, 또는 Fuzzer의 List 페이로드 에디터에서 `Ctrl-S`) 어느 디렉터리에서든 `--wordlist params.txt`가 이름으로 찾습니다. 프로젝트도 페이로드 출처가 됩니다. `--payload-from 'host:api.example.com param-values'`는 앱의 클라이언트가 이미 보낸 값으로 세트를 만들고(`param-names`, `path-segments`, `js-endpoints`는 다른 조각을 읽습니다), TUI에서는 **Project** 페이로드 타입입니다. 프로젝트를 읽을 뿐 아무것도 보내지 않으며, 자격 증명처럼 보이는 값은 명시적으로 허용하지 않는 한 빠집니다. [프로젝트에서 가져오는 페이로드](/ko/guide/repeater-and-fuzzer/#payloads-from-the-project)를 참고하세요.
+
 **체크포인트.** CONFIG에 페이로드 세트가 나열되고, 마커에 체인을 붙였다면 `Ctrl-Q` 미리보기가 그 마커의 값이 체인을 거친 결과를 보여 줍니다. `gori run fuzz`도 첫 요청 전에 몇 개의 쿼리/폼 위치를 인코딩하는지 한 번 알려 줍니다.
 
 ## 4. 매처 설정하고 실행하기 {#4-set-a-matcher-and-run}
@@ -73,6 +75,8 @@ gori run fuzz <flow-id> \
 ```
 
 원하는 것을 얻으면 실행이 스스로 멈추게 할 수도 있습니다. `--stop-after-matches 1`은 첫 매처 히트에서 실행을 끝내고, `--stop-on`은 별도의 조건을 지정합니다(`status:500`, 또는 본문에서 그 문자열이 처음 사라지는 순간을 잡는 `'!regex:Invalid password'`). 어느 쪽이든 실행은 `condition_met`으로 끝나고, 멈추게 한 행이 기록됩니다. TUI에서는 둘 다 CONFIG 창의 **Advanced** 행으로 여는 **ADVANCED** 카드에 있는 행입니다.
+
+첫 후보는 `200`인데 그 뒤로는 전부 `403`이라면, 요청에 앱이 한 번만 받아 주는 CSRF 토큰이나 nonce가 실려 있는 것입니다. 후보마다 앞서 새 값을 가져오는 요청 시점 매크로를 실행에 붙이세요. [세션 이어 가기](/ko/playbooks/carry-a-session/#6-fetch-a-fresh-token-for-every-request)에서 차례로 다룹니다.
 
 ### 차이가 시계뿐일 때 {#when-the-only-difference-is-the-clock}
 
@@ -96,6 +100,8 @@ gori run fuzz <flow-id> --auto -w sleep-payloads.txt --mt '>=4500' --timeout 15
 ## 5. 결과 읽고 다음 단계의 씨앗 심기 {#5-read-results-and-seed-the-next-step}
 
 발견은 이웃과 어울리지 않는 행입니다. 나머지가 `404`인데 혼자 뜬금없는 `200`이나 `500`, 또는 페이로드 하나가 다르게 안착하며 길이가 튀는 곳. 그 행은 결론이 아니라 실마리입니다. 결과에서 `Space` 메뉴로 **Repeater**에 넘기거나 **Comparer**로 기준선과 diff를 떠서, 튀어나온 그 페이로드 하나를 손으로 계속 파고드세요.
+
+수천 행짜리 스윕은 정렬만으로는 감당이 안 됩니다. **Group by shape**(`Space` → `Z` **Display…**, 그다음 **Group by shape**)는 RESULTS를 서로 다른 응답마다 한 행으로 접습니다. 페이로드 반사, id, 숫자, 타임스탬프, 응답마다 바뀌는 헤더는 무시하고 드문 모양부터 나열하므로, 혼자 다르게 반응한 응답이 7,312번째 행이 아니라 맨 위에 옵니다. `→`는 클러스터를 펼쳐 구성원을 보여 주고 `←`는 다시 접습니다. 헤드리스에서는 저장된 실행에 `gori run fuzz show RUN_ID --clusters`로 같은 질문을 합니다. [응답 모양으로 결과 묶기](/ko/guide/repeater-and-fuzzer/#grouping-results-by-response-shape)를 참고하세요.
 
 실행 전체를 남기려면, 끝난 뒤 에디터를 READ 모드에 둔 채 **`Shift-E`**를 누르세요. 스윕이 도는 동안 gori는 완전한 요청/와이어/응답 행을 전부 디스크에 비공개로 스풀하고, 화면은 5,000행 / 64 MiB로 제한된 창을 유지합니다. Shift-E는 그 완전한 스풀을 프로젝트로 승격시킵니다. 마지막으로 성공한 실행은 해당 Fuzzer 세션과 함께 제한된 창으로 자동으로 다시 열리고, `Ctrl-P`에서 **Run history**로 더 오래된 실행을 고를 수 있으며, CLI/MCP는 아카이브 전체를 페이지 단위로 읽습니다. 헤드리스에서는 영구 저장을 명시하고 id로 들여다봅니다:
 
