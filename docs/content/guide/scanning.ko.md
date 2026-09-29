@@ -78,6 +78,8 @@ gori run mine <flow-id> \
 
 마이닝은 CPU가 아니라 지연 시간에 묶여 있습니다. 버킷을 보내고 기다리고, 이분 탐색하고 또 기다리므로 비용의 대부분이 왕복 횟수입니다. 이를 줄이는 장치가 두 가지입니다. 프로브 사이에 연결을 재사용하고(프로브마다가 아니라 워커마다 TCP, https라면 TLS 핸드셰이크를 한 번씩만 치릅니다. 대상이 연결 단위로 동작한다면 **reuse connections** 체크박스나 `--no-keep-alive`, `keep_alive: false`로 끕니다), 모든 location을 하나의 워커 풀에서 함께 처리합니다. 그래서 location 세 개가 하나의 세 배가 되지 않고, 이분 탐색의 끝자락이 혼자 돌지도 않습니다.
 
+요청마다 CSRF 토큰이나 nonce를 회전시키는 대상은 낡은 값을 들고 온 프로브를 모두 거부하고, 기준선이 가장 먼저 거부되므로 마이닝 결과는 아무것도 없거나 전부가 됩니다. 실행에 [요청 시점 매크로](/ko/guide/repeater-and-fuzzer/#rotating-tokens-with-a-macro)(`--macro`, MCP `macro_steps`, 또는 마이닝 팝업의 **macro step** 행)를 주세요. 요청마다 앞서 실행되어 세션 바인딩에 새 값을 남기는 저장된 Repeater 세션입니다.
+
 > Miner 탭은 기본적으로 바 위에 없습니다. `0`으로 열거나, `settings:tabs`에서 슬롯을 주세요.
 
 ## Discover: 스파이더 & 브루트포스 {#discover-spider-brute-force}

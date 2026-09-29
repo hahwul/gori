@@ -4428,3 +4428,76 @@ parses its own syntax into a normalized `Spec`.
   seeding neighbour names itself; the Fuzzer's payload editor gets a Project type.
 - **Left for later.** Provenance is per source (query, projection, counts), not per value; a
   per-value flow id would cost memory the caps are there to bound.
+
+### 2026-09-29: a request-time macro is a gate on WHEN saved sessions run, and a failure is never a clean row (#1350)
+
+Refines: [P1](#p1), [P6](#p6), [P7](#p7). Issue #1350, the follow-up to #1233.
+
+A form token or nonce that rotates on every page load dies long before its session does, so #1233's
+clock (`jwt-exp`, a `ttl`) cannot refresh it: a sweep gets `200` for its first candidate and `403`
+for the rest, and reads as "the payloads were tried". A macro is a list of saved Repeater sessions a
+Fuzzer or Miner run replays BEFORE a candidate. It adds no extraction and no injection mechanism.
+
+- **Extraction and injection are the ones that exist.** The steps go through `Repeater::Plan`, so the
+  existing extract rules (`TokenExtract`, `Bindings#observe`) rebind `$BIND.NAME`, and the candidate
+  resolves it at send time (`Fuzz::Sender#send`) or through the active slot's header overlay. The
+  placeholder is `$BIND.NAME`; `§…§` is a payload position, and reusing it for a non-fuzzing value
+  would have made one marker mean two things. Steps are sent as the ACTIVE slot, overlay included,
+  the opposite of a #1233 refresh, which must not carry the credential it replaces: a CSRF page
+  needs the session the candidates are sent as, and the rebind lands in the table they resolve from.
+- **`Config#request_macro` is the whole interface.** A surface parses its own input (`--macro*`,
+  MCP `macro_*`, the ADVANCED rows / the mine popup) into a `RequestMacro::Spec`; `Plan.build`
+  freezes the sessions, validates them, and builds a `Lane`. Nothing surface-specific exists below
+  that line. The error is a `Gori::Error`, not a `PlanError::Reason` (three surfaces `case` that
+  exhaustively, and the sentence names sessions and extract rules, which read the same everywhere);
+  `Fuzz::ChainError` is the precedent.
+- **An epoch is the unit of sharing, and a barrier is what makes it true.** `every N` means a value is
+  used by the next N candidates; the steps of epoch k+1 do not start until every candidate of epoch
+  k has left. Without the barrier, "N candidates share a value" is a hope: a slow candidate could
+  pick up the next epoch's value at its send. The consequence is stated in the plan before the first
+  request: `every 1` (the default) serialises the run, because a one-time value cannot be shared by
+  two workers without changing the test, and `every N` leaves `min(concurrency, N)`. Candidates are
+  counted in the order they reach the gate. A race is one unit (the steps run once, before the
+  group is dialled) and the cadence must cover the group, or it is refused rather than silently
+  shared. Answers to the issue's open questions: the steps run before the first candidate (it opens
+  the first epoch); a failed macro skips the candidate or stops the run, and never sends the last
+  value; `$BIND.NAME` only.
+- **A failure is an error row, never a clean one.** The candidate is not sent; its row carries
+  `RequestMacro::ERROR_PREFIX`, is counted in `errors`, and is not retried (the steps would fail again
+  against the endpoint that just failed). A failed run opens no epoch, so the next candidate tries
+  again. `skip` ends the run after `FAILURE_LIMIT` failures in a row (#1233's reasoning: a broken
+  login must not be sent once per payload), `stop` on the first; ending a run is the engine's act,
+  through the `ErrorEvent` every surface already turns into `error`. A budget spent or a stop between
+  two steps is the run ending, not the macro breaking, and is not counted. There is no "send anyway
+  with the last value": that row's verdict would be about a stale token.
+- **The steps are the run's traffic.** Layer 1 at build and on every run (a scope edited mid-run
+  stops the next one) and Layer 2 as `sweep_block`, not `send_block`: an automated sweep's traffic
+  holds an operator's exclude. They are charged to `max_requests` through `Budget` (`CappedBackend`
+  implements it, so `Progress#requests` counts them), held to the run's rate through its `pace`, and
+  a stop lands between two steps. A Miner probe the gate refused after the cap had charged it is
+  refunded, since the cap sits outside that decorator; a `reserve` that does not fit sticks
+  `cap_reached?`, so that refund cannot reopen the budget and let the mine mark every remaining
+  name tested. The plan-time race budget counts the macro's one run of steps with the group, and
+  calibration holds back one candidate plus its steps, because neither can be split at the cap.
+- **A macro that cannot change what is sent is refused.** Extraction and injection meet at a
+  `$BIND.NAME` in the request the candidate goes out as. If no candidate can name a binding the steps
+  rebind (a captured template is sent as captured and substitutes nothing, `Fuzz::Sender#evidence?`),
+  every candidate would carry the stale value and the sweep would report `403` as verdicts, so the
+  plan refuses, naming the two ways out. Same for a project with no enabled extract rule, and a step
+  holding live `§…§` markers or a WebSocket handshake.
+- **Where it hooks.** The Fuzzer gates each candidate attempt in the engine (`candidate_send`,
+  `ws_send`, `race_send`, the calibration samples; not a redirect hop, which carries no template).
+  The Miner has no fixed candidate list, so it gates each request the engine puts on the wire with a
+  `Fuzz::Backend` decorator (`Miner::MacroBackend`), like `HookBackend`, which is what reaches the
+  baseline: an app that rotates a token per request answers an un-tokened calibration probe with
+  the same `403` as a candidate.
+- **Visible, and never a value.** History rows with source `macro` (`source_ref` `macro step N`), one
+  event per failure (capped per run), a plan line before the run, a tally in `Progress`. Messages carry
+  binding names and counts. The TUI Miner popup, which has no text field, picks one saved session by
+  id from the project; several steps and `expect` are CLI and MCP. Left for later: a per-slot
+  macro (the steps a slot owns and a run can borrow); per-worker token contexts, which would let a
+  per-request macro keep its concurrency for a target whose token is per connection rather than per
+  session; and recording the macro on a saved fuzz run, which is a `fuzz_runs` column and so a
+  schema change for a reporting field. Until then a saved run's macro is in the plan line it
+  printed, the `macro`-sourced History rows, and the `macro:`-prefixed rows of any candidate it
+  failed.

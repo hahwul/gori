@@ -1323,10 +1323,17 @@ module Gori::Tui
         when "condition_met" then ev.stop_reason ? " (#{ev.stop_reason})" : " (condition met)"
         else                      ""
         end
-      msg = "Fuzzer: #{n} hit#{n == 1 ? "" : "s"} / #{v.result_count} sent#{wire} on #{v.summary}#{ending}"
+      msg = "Fuzzer: #{n} hit#{n == 1 ? "" : "s"} / #{v.result_count} sent#{wire} on #{v.summary}#{ending}#{macro_failure_note(p)}"
       log_event(v, level, msg)
       @host.notifications.push(level, msg, goto_for(v), source: "fuzzer")
       @host.status(msg, :done) if Settings.notify_toast?
+    end
+
+    # A macro that FAILED is the reason some rows are errors rather than answers, and the
+    # completion line is where an operator who was not watching looks. A macro that worked adds
+    # nothing to say (its steps are in History, source `macro`).
+    private def macro_failure_note(p : Fuzz::Progress) : String
+      (t = p.request_macro) && t.failed > 0 ? " · macro: #{t.summary}" : ""
     end
 
     # #124: append every fuzz completion/error to the store event feed UNCONDITIONALLY
@@ -1441,7 +1448,7 @@ module Gori::Tui
       end
       # Judged, like `gori run fuzz`'s and MCP's gates, on what the run can SEND: a positive
       # Max requests caps the wire, so it bounds the prompt too (#1209).
-      bound = Fuzz.request_bound(total, v.config.max_requests)
+      bound = Fuzz.request_bound(total, v.config.max_requests, engine.macro_requests(total))
       if bound.nil? || bound > CONFIRM_THRESHOLD
         e = engine
         # Name the archive policy: `keep: interesting` spools only the interesting rows, so the
@@ -1535,7 +1542,15 @@ module Gori::Tui
         end_worker(v)
       end
       archive = spool_run ? "" : " · complete archive unavailable"
-      @host.status("fuzzing #{v.target_origin} — ^X stop#{archive}#{framing_note(v)}#{sets_note(v)}#{payload_note(v)}", :busy)
+      @host.status("fuzzing #{v.target_origin} — ^X stop#{archive}#{framing_note(v)}#{sets_note(v)}#{payload_note(v)}#{macro_note(v)}", :busy)
+    end
+
+    # What the request-time macro does to this run (#1350), on the run-start line: the steps, the
+    # cadence, and — the part that changes how long the run takes — whether a one-time value
+    # serialises it. The sweep runs either way, and an operator who set a per-request macro on a
+    # 20-worker run otherwise finds out from the stopwatch. Empty for a run with none.
+    private def macro_note(v : FuzzerView) : String
+      (info = v.macro_info) ? " · #{info.line}" : ""
     end
 
     # How this run frames its body, for the run-start line — the way `gori run fuzz` prints it

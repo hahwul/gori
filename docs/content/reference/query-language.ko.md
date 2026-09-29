@@ -69,6 +69,7 @@ NOT (req.body:token OR resp.body:token)
 | `discover` | 크롤러가 가져온 것(Discover는 기본으로 저장합니다) |
 | `retest` | Issue 리테스트의 한 단계(`gori run retest run`, MCP `run_retest`, TUI의 RETEST 카드). `repeater`가 아니라 별도 값입니다 — 사람이 직접 보낸 요청과 gori가 실행한 검사의 한 단계는 같은 바이트에 대한 다른 사실이기 때문입니다 |
 | `refresh` | 세션 슬롯 [갱신](/ko/guide/authorize/#refreshing-a-slot)의 한 단계. 수동이든 전송 직전 자동이든 같습니다(`source_ref`에 `slot NAME step N`). `RFRSH`로 표시됩니다 |
+| `macro` | Fuzzer나 Miner 실행의 [요청 시점 매크로](/ko/guide/repeater-and-fuzzer/#rotating-tokens-with-a-macro)가 후보 앞에서 실행한 한 단계(`source_ref`에 `macro step N`). `MACRO`로 표시됩니다 |
 | `miner`, `sequencer`, `authorize`, `probe` | 예약됨. 아직 플로우를 기록하지 않는 도구들 |
 | `import` | HAR, Burp export, `--urls`, OpenAPI 문서에서 읽어 들인 것 |
 | `gori` | gori가 **보낸** 모든 출처. 가운데 행들의 합집합이며 `import`는 **포함하지 않습니다** |

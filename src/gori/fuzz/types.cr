@@ -1,5 +1,6 @@
 require "../proxy/ws/frame"     # Proxy::WS::Shape — the frame shape a WS fuzz job carries
 require "../repeater/ws_engine" # WsEngine::DEFAULT_IDLE — the WS transport's own pacing default
+require "../request_macro/lane" # RequestMacro::Spec / Tally — a run's macro and what it reports
 require "./shape"
 
 module Gori
@@ -360,7 +361,15 @@ module Gori
       # failed send would both inflate the error tally and flip the exit code of a clean run.
       # And not dropped, which is the silent false negative this field exists to prevent.
       ws_notes : Int64 = 0_i64,
-      ws_note_reason : String? = nil
+      ws_note_reason : String? = nil,
+      # The run's request-time macro (#1350): how often its steps ran, how many failed, how many
+      # candidates that cost, and the first failure's sentence. nil for a run with no macro.
+      #
+      # Carried on Progress for the reason `blocked` / `ws_notes` are: a surface that must not
+      # render a run whose macro failed as `50 sent · 0 errors` only ever sees events. The
+      # skipped candidates ARE errors (their rows carry `RequestMacro::ERROR_PREFIX`), so
+      # `errors` already says so; this is what says WHY.
+      request_macro : Gori::RequestMacro::Tally? = nil
 
     # The prefix `Engine#follow_redirects` puts on a row's `error` when a hop it CHOSE to follow
     # failed — the gate refused the origin's `Location`, or the hop's socket died — while the
@@ -376,10 +385,15 @@ module Gori
     # What the surfaces' huge-run gates judge (`gori run fuzz`'s `--force`, MCP's
     # BUDGET_EXHAUSTED), so a run the operator already capped is not refused for a candidate
     # count it will never send (#1209).
-    def self.request_bound(total : Int64?, max_requests : Int64?) : Int64?
+    #
+    # `macro_requests` is what a request-time macro's steps add to the candidates (#1350): they
+    # are the run's traffic and are charged to the same cap, so a per-request macro over a set
+    # near a gate's ceiling is over it, and saying so before the run beats stopping half of it.
+    def self.request_bound(total : Int64?, max_requests : Int64?, macro_requests : Int64 = 0_i64) : Int64?
       cap = max_requests.try { |m| m > 0 ? m : nil }
       return cap unless total
-      cap ? {total, cap}.min : total
+      wire = total > Int64::MAX - macro_requests ? Int64::MAX : total + macro_requests
+      cap ? {wire, cap}.min : wire
     end
 
     # How a finished run ended. An ENUM so a consumer can `case … in` it and a new verdict is
@@ -611,6 +625,14 @@ module Gori
       # the JA3/JA4 that actually goes out.
       property tls_preset : String?
 
+      # The run's request-time macro (#1350): Repeater sessions replayed before a candidate so a
+      # per-request CSRF token or nonce is fresh when the candidate resolves its `$BIND.NAME`.
+      # nil (and `off`) is every run that came before. RUN-level and carried here, like
+      # `tls_preset`, because a finished run has to be able to say which macro produced its
+      # results, and `Config` is what every surface already reads a run's settings back off.
+      # `Plan.build` turns it into a `RequestMacro::Lane` and refuses one it cannot honour.
+      property request_macro : Gori::RequestMacro::Spec?
+
       def initialize(@mode : Mode = Mode::Sniper,
                      @concurrency : Int32 = 20,
                      @rps : Float64? = nil,
@@ -634,7 +656,8 @@ module Gori
                      @race_warmup : Bytes? = nil,
                      @ws_idle : Time::Span = Repeater::WsEngine::DEFAULT_IDLE,
                      @ws_keep_key : Bool = false,
-                     @tls_preset : String? = nil)
+                     @tls_preset : String? = nil,
+                     @request_macro : Gori::RequestMacro::Spec? = nil)
       end
     end
   end

@@ -21,6 +21,7 @@ module Gori
         wordlist : String? = nil
         seed_names = [] of String
         payload_from = PayloadFromFlags.new
+        macro_flags = RequestMacroFlags.new
         name_specs = [] of PayloadFrom::Spec
         bucket : Int32? = nil
         concurrency = 10
@@ -66,6 +67,11 @@ module Gori
           p.on("--retries=N", "Retries on a network error") { |v| retries = parse_nonneg(v, "--retries") }
           p.on("--max-requests=N", "Hard cap on total requests sent") { |v| max_requests = parse_count(v, "--max-requests").to_i64 }
           p.on("--hook=ARGV", "Transform each assembled request through an external command (argv, no shell) before it is sent — for signed/HMAC'd APIs") { |v| hook = v }
+          # A rotating CSRF token or nonce (#1350), answered natively: Repeater sessions replayed
+          # before each request — the baseline's included — so the value they leave in the session
+          # bindings is fresh when the request resolves its $BIND.NAME. `--hook` is the same job
+          # for a scheme that needs a command to compute the value.
+          request_macro_flags(p, macro_flags, "request")
           p.on("--no-keep-alive", "Dial a fresh connection for every probe (default: reuse)") { keep_alive = false }
           p.on("--bind-from=FLOW-ID", "Replay this captured flow FIRST so its response fills session bindings ($BIND.NAME; bare syntax: $NAME)") { |v| bind_from = parse_flow_id(v, "gori run mine") }
           p.on("--slot=NAME", "Send as this SESSION SLOT — its header overlay, and its binding table for $BIND.NAME tokens (bare syntax: $NAME)") { |v| slot = v.strip }
@@ -88,6 +94,7 @@ module Gori
                 "use the param-names projection (#{spec.projection.label} is a value list; feed it to `gori run fuzz`)"
         end
         name_specs = name_specs.map(&.apply(payload_from.policy))
+        request_macro = request_macro_spec("gori run mine", macro_flags)
 
         abort "gori run mine: too many arguments (expected at most one <flow-id>)" if positional.size > 1
         abort "gori run mine: --request and --flow cannot be combined — pick one template source" if request_file && flow_id
@@ -112,14 +119,18 @@ module Gori
         config.seed_names = seed_names
         config.hook = hook
         config.keep_alive = keep_alive
+        config.request_macro = request_macro
         # `--locations=` with no usable value (empty, or only blanks/commas) is an operator
         # mistake, not a request to auto-detect — abort instead of silently mining defaults.
         if (loc = locations) && loc.empty?
           abort "gori run mine: --locations was empty — name at least one of query|form|multipart|json|headers|cookies (or omit it to auto-detect)"
         end
         # The project any `--payload-from` reads, open only for the plan build below.
-        payload_store = open_payload_from_store("gori run mine", name_specs,
-          !!(flow_id || project_name || db_path), project_name, db_path)
+        named_project = !!(flow_id || project_name || db_path)
+        payload_store = open_payload_from_store("gori run mine", name_specs, named_project, project_name, db_path)
+        # …and the project a `--macro` reads its sessions from, on the same terms and released at
+        # the same moment: the plan freezes the steps, so nothing reads it during the run.
+        payload_store ||= open_request_macro_store("gori run mine", request_macro, named_project, project_name, db_path)
         options = Miner::PlanOptions.new(text,
           # A `--flow` request is CAPTURED; --request/stdin is a draft the operator authored.
           # See `Miner::PlanOptions#evidence?`.
@@ -148,7 +159,9 @@ module Gori
           outbound.close
           payload_store.try(&.close)
           abort "gori run mine: #{mine_plan_error(ex)}"
-        rescue ex : PayloadFrom::Error
+        rescue ex : Gori::Error
+          # `PayloadFrom::Error` and `RequestMacro::Error` both: each builder writes its own
+          # sentence, and it reads the same on every surface.
           outbound.close
           payload_store.try(&.close)
           abort "gori run mine: #{ex.message}"
@@ -156,6 +169,7 @@ module Gori
         # Everything a `--payload-from` needed is in memory now: release the project before the run.
         payload_store.try(&.close)
         note_payload_from("gori run mine", plan.project_reports)
+        note_request_macro("gori run mine", plan.request_macro_info)
         warn_mine_locations(plan)
         origin = plan.origin
         unless origin.scheme.in?("http", "https")
@@ -163,6 +177,10 @@ module Gori
           abort "gori run mine: unsupported target scheme #{origin.scheme.inspect} (use http:// or https://)"
         end
         guard_outbound(outbound, origin.scheme, origin.host, plan.request_target, origin.port, "gori run mine")
+        # A writable handle for the run when it has a macro: the steps are recorded in History
+        # (source `macro`) and their failures logged, and that is traffic nobody typed at the time.
+        write_store = plan.request_macro ? open_store(resolve_read_project(project_name, db_path), long_running: true) : nil
+        attach_request_macro_store(plan.request_macro, write_store)
         begin
           # See CLI::Run.seed_bindings — a headless process holds no binding from a previous
           # invocation, so `--bind-from` replays one here. An unseeded `$NAME` ships literally
@@ -171,6 +189,7 @@ module Gori
           run_mine_stream(plan.engine, origin.scheme, origin.host, origin.port, plan.config, format, plan.pool)
         ensure
           outbound.close
+          write_store.try(&.close)
         end
       end
 
@@ -274,7 +293,7 @@ module Gori
           when Miner::BaselineEvent then mine_baseline(ev)
           when Miner::FindingEvent  then findings << ev.finding; emit_mine_finding(ev.finding, format)
           when Miner::ProgressEvent then mine_progress(ev, total)
-          when Miner::DoneEvent     then mine_done(ev, findings.size, config); mine_connections(pool)
+          when Miner::DoneEvent     then mine_done(ev, findings.size, config); note_request_macro_result("gori run mine", ev.progress.request_macro); mine_connections(pool)
           when Miner::ErrorEvent    then had_error = true; STDERR.puts "mine error: #{ev.message}"
           end
         end

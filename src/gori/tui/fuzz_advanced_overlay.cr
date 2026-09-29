@@ -37,7 +37,18 @@ module Gori::Tui
     # compiling and none can silently clear them.
     stop_after : String = "",
     stop_on : String = "",
-    keep_interesting : Bool = false
+    keep_interesting : Bool = false,
+    # The request-time macro (#1350) — `gori run fuzz --macro*` and MCP `macro_*`. Raw text, as the
+    # operator typed it: `steps` is a comma list of Repeater session ids or tab names, `every` is
+    # `request` | `off` | a number (blank = request), `expect` a comma list of binding names, and
+    # `on_failure` is `skip` | `stop` (blank = skip). Turned into a `RequestMacro::Spec` by the
+    # view at build time, where a value that does not read is named rather than dropped. All
+    # DEFAULTED, so every construction site that predates them keeps compiling and none can
+    # silently clear them.
+    macro_steps : String = "",
+    macro_every : String = "",
+    macro_expect : String = "",
+    macro_on_failure : String = ""
 
   # The full-area popup for the Fuzzer's advanced run settings. Every engine / match
   # / filter knob gets its OWN labeled row (no more horizontal fields walked by ↑/↓,
@@ -146,6 +157,16 @@ module Gori::Tui
       # spool one row per request. The pane, the counters and `idx` are unaffected. A toggle
       # because the policy is exactly two-valued (all / interesting).
       {:keep_interesting, "Keep interesting only", :toggle},
+      # The request-time macro (#1350): Repeater sessions replayed BEFORE a candidate so a
+      # rotating CSRF token or nonce is fresh when the candidate resolves its `$BIND.NAME`.
+      # Blank steps = no macro, which is every sweep that came before. The four rows are one
+      # feature and are text rows like their neighbours; a value that does not read is named by
+      # `FuzzerView#build_engine` when the run starts, never applied-as-nothing. Appended LAST for
+      # the reason every row above was: it renumbers no row a spec reaches by index.
+      {:macro_steps, "Macro steps", :text},
+      {:macro_every, "Macro cadence", :text},
+      {:macro_expect, "Macro must rebind", :text},
+      {:macro_on_failure, "Macro on failure", :text},
     ]
     LABEL_W = 22 # value column offset (widest label "gRPC reframe (unary)" + padding)
 
@@ -159,26 +180,30 @@ module Gori::Tui
       @reframe_grpc = snap.reframe_grpc
       @keep_interesting = snap.keep_interesting
       @fields = {
-        :conc         => TextField.new(snap.conc),
-        :rate         => TextField.new(snap.rate),
-        :timeout      => TextField.new(snap.timeout),
-        :retries      => TextField.new(snap.retries),
-        :max_requests => TextField.new(snap.max_requests),
-        :race         => TextField.new(snap.race),
-        :m_status     => TextField.new(snap.m_status),
-        :m_size       => TextField.new(snap.m_size),
-        :m_words      => TextField.new(snap.m_words),
-        :m_regex      => TextField.new(snap.m_regex),
-        :f_status     => TextField.new(snap.f_status),
-        :f_size       => TextField.new(snap.f_size),
-        :f_words      => TextField.new(snap.f_words),
-        :f_regex      => TextField.new(snap.f_regex),
-        :grpc_fields  => TextField.new(snap.grpc_fields),
-        :tls_preset   => TextField.new(snap.tls_preset),
-        :m_time       => TextField.new(snap.m_time),
-        :f_time       => TextField.new(snap.f_time),
-        :stop_after   => TextField.new(snap.stop_after),
-        :stop_on      => TextField.new(snap.stop_on),
+        :conc             => TextField.new(snap.conc),
+        :rate             => TextField.new(snap.rate),
+        :timeout          => TextField.new(snap.timeout),
+        :retries          => TextField.new(snap.retries),
+        :max_requests     => TextField.new(snap.max_requests),
+        :race             => TextField.new(snap.race),
+        :m_status         => TextField.new(snap.m_status),
+        :m_size           => TextField.new(snap.m_size),
+        :m_words          => TextField.new(snap.m_words),
+        :m_regex          => TextField.new(snap.m_regex),
+        :f_status         => TextField.new(snap.f_status),
+        :f_size           => TextField.new(snap.f_size),
+        :f_words          => TextField.new(snap.f_words),
+        :f_regex          => TextField.new(snap.f_regex),
+        :grpc_fields      => TextField.new(snap.grpc_fields),
+        :tls_preset       => TextField.new(snap.tls_preset),
+        :m_time           => TextField.new(snap.m_time),
+        :f_time           => TextField.new(snap.f_time),
+        :stop_after       => TextField.new(snap.stop_after),
+        :stop_on          => TextField.new(snap.stop_on),
+        :macro_steps      => TextField.new(snap.macro_steps),
+        :macro_every      => TextField.new(snap.macro_every),
+        :macro_expect     => TextField.new(snap.macro_expect),
+        :macro_on_failure => TextField.new(snap.macro_on_failure),
       }
     end
 
@@ -281,7 +306,9 @@ module Gori::Tui
         tls_preset: @fields[:tls_preset].value,
         m_time: @fields[:m_time].value, f_time: @fields[:f_time].value,
         stop_after: @fields[:stop_after].value, stop_on: @fields[:stop_on].value,
-        keep_interesting: @keep_interesting)
+        keep_interesting: @keep_interesting,
+        macro_steps: @fields[:macro_steps].value, macro_every: @fields[:macro_every].value,
+        macro_expect: @fields[:macro_expect].value, macro_on_failure: @fields[:macro_on_failure].value)
     end
 
     # --- rendering ----------------------------------------------------------

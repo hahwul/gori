@@ -726,7 +726,7 @@ module Gori::Tui
       # the proxy reads that one and the Project tab edits it (Mutex-guarded), so a second
       # copy would freeze this run's pins at whatever they were when the tab opened (#367).
       engine, err = view.build_engine(!@host.session.config.insecure_upstream?,
-        @host.session.scope, @host.session.host_overrides)
+        @host.session.scope, @host.session.host_overrides, @host.session.store)
       unless engine
         @host.status(err || "can't mine")
         return
@@ -776,7 +776,10 @@ module Gori::Tui
       ensure
         view.finish_run # backstop — the drain's Done also clears it
       end
-      @host.status("mining #{view.target_origin} in the background — watch the bottom bar / notifications")
+      # The request-time macro, when the run has one (#1350): said up front, because a per-request
+      # macro serialises the mine and an operator otherwise learns that from the stopwatch.
+      macro_line = (info = view.macro_info) ? " · #{info.line}" : ""
+      @host.status("mining #{view.target_origin} in the background — watch the bottom bar / notifications#{macro_line}")
     end
 
     # --- run controls (mine.run re-runs the current session; mine.stop halts it) ---
@@ -855,11 +858,17 @@ module Gori::Tui
              else
                ""
              end
-      msg = "Miner: #{n} param#{n == 1 ? "" : "s"} found on #{v.summary}#{tail}"
+      msg = "Miner: #{n} param#{n == 1 ? "" : "s"} found on #{v.summary}#{tail}#{macro_failure_note(ev.progress)}"
       level = n > 0 ? :success : :info
       log_event(v, level, msg)
       push_mine_notification(v, level, msg, found: n)
       @host.status(msg) if v.config.notify.posts_notification?(n)
+    end
+
+    # A macro that FAILED is the reason some probes are errors rather than answers, and the
+    # completion line is where an operator who was not watching looks.
+    private def macro_failure_note(p : Miner::Progress) : String
+      (t = p.request_macro) && t.failed > 0 ? " · macro: #{t.summary}" : ""
     end
 
     private def push_mine_notification(v : MinerView, level : Symbol, msg : String, found : Int32 = 0) : Nil

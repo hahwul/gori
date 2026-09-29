@@ -6,10 +6,12 @@ require "../outbound"
 require "../payload_from"
 require "../process_hook"
 require "../repeater/flow_request"
+require "../request_macro"
 require "../settings"
 require "./detect"
 require "./engine"
 require "./hook_backend"
+require "./macro_backend"
 require "./types"
 require "./wordlist"
 
@@ -185,11 +187,25 @@ module Gori::Miner
     # (`gori run mine` per location on stderr, MCP as `not-applicable` skipped rows).
     getter inapplicable : Array(Location)
 
+    # The run's request-time macro (#1350), or nil when it has none. The lane the engine's
+    # `MacroBackend` gates every request through; a surface reads `request_macro_info` for the
+    # plan-time line and `Progress#request_macro` for what happened.
+    getter request_macro : RequestMacro::Lane?
+
     def initialize(@engine : Engine, @sender : Fuzz::Sender, @config : Config,
                    @origin : Fuzz::Origin, @http2 : Bool, @request : Bytes,
                    @request_target : String, @names : Array(String),
                    @inapplicable : Array(Location),
-                   @project_reports : Array(PayloadFrom::Report) = [] of PayloadFrom::Report)
+                   @project_reports : Array(PayloadFrom::Report) = [] of PayloadFrom::Report,
+                   @request_macro : RequestMacro::Lane? = nil)
+    end
+
+    # What the macro does to this run, said before it starts: the steps, the cadence, whether a
+    # value is shared between requests, and the parallelism that leaves the run. nil without a
+    # macro. The engine's OWN clamped concurrency, so the line cannot describe a number the run
+    # will not use.
+    def request_macro_info : RequestMacro::Info?
+      @request_macro.try(&.info(@engine.concurrency))
     end
 
     # The run's keep-alive pool, or nil when it runs connection-per-send (h2, or
@@ -271,6 +287,10 @@ module Gori::Miner
       # session-slot overlay: a hook must sign the FINAL bytes, so when one is present the overlay
       # becomes the hook wrapper's job and the sender must not also apply it (see below).
       hook_argv = resolve_hook_argv(config)
+      # The request-time macro (#1350), validated HERE for the reason the hook is: a build-time
+      # refusal before a request is sent, not a per-worker surprise. Its steps are the first
+      # traffic the run produces.
+      request_macro = build_request_macro(options, outbound, request)
       # `idle_conns: concurrency` — one parked socket per worker fiber is the most that can
       # ever be checked out at once, so a larger pool would only hold dead sockets open.
       #
@@ -291,10 +311,30 @@ module Gori::Miner
       # the plan holds for `pool`/`blocked` reporting; `HookBackend` delegates those down to it.
       backend = hook_argv ? HookBackend.new(sender, hook_argv,
         Gori::Settings.hook_timeout_secs.seconds, hook_env(origin)) : sender
-      new(engine: Engine.new(request, options.http2?, names, backend, config, inapplicable), sender: sender,
+      # The macro OUTSIDE the hook, so the value it leaves is bound before the hook expands the
+      # request and signs it (see `MacroBackend`).
+      backend = MacroBackend.new(backend, request_macro) if request_macro
+      new(engine: Engine.new(request, options.http2?, names, backend, config, inapplicable, request_macro),
+        sender: sender,
         config: config, origin: origin, http2: options.http2?, request: request,
         request_target: request_target, names: names, inapplicable: inapplicable,
-        project_reports: project_reports)
+        project_reports: project_reports, request_macro: request_macro)
+    end
+
+    # The run's macro lane, or nil when it has none (or has it `off`). Refused with the words the
+    # operator can act on: no project to read the steps from; a step that cannot run
+    # (`Runner.build` names it); a request that can never carry what the steps produce.
+    private def self.build_request_macro(options : PlanOptions, outbound : Gori::Outbound,
+                                         request : Bytes) : RequestMacro::Lane?
+      spec = options.config.request_macro
+      return nil unless spec && spec.active?
+      store = options.project || raise RequestMacro::Error.new(
+        "a macro reads its steps from the project's Repeater sessions, and this run has no project attached — " \
+        "open one (--project / --db), or seed the run from a captured flow or a Repeater session")
+      runner = RequestMacro::Runner.build(spec, store, outbound,
+        overrides: options.overrides, verify: options.verify?)
+      runner.check_reachable!([String.new(request)], options.evidence?)
+      RequestMacro::Lane.new(spec, runner, "miner", "request")
     end
 
     # The names the project's own traffic offers (#1352), read HERE — the one place a store is

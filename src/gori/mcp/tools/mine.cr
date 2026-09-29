@@ -34,6 +34,7 @@ module Gori
             j.field "names", total
             j.field "status", "running"
             emit_scope(j, sc)
+            emit_request_macro_plan(j, engine.request_macro.try(&.info(engine.concurrency)))
             # What each `payload_from` name source read (#1352): flows and names counted, the
             # sensitive-value policy, what cut it short. Only when the run had one.
             unless project_reports.empty?
@@ -110,6 +111,7 @@ module Gori
             j.field "sent", mjob.sent
             j.field "found", mjob.found
             j.field "errors", mjob.errors
+            emit_request_macro_status(j, mjob.engine.request_macro)
             j.field "baseline_stable", mjob.baseline_stable?
             # How this run had to be calibrated: the status varied, the endpoint echoes any
             # input (reflection detection is then OFF at those locations), it never answered at
@@ -249,6 +251,8 @@ module Gori
           raise FuzzArgError.new(ex.message || "invalid 'names'")
         end
         config.hook = str(h, "hook").presence
+        # The request-time macro (#1350), parsed here and wired by `Plan.build`.
+        config.request_macro = request_macro_spec(h)
         optional_int_arg(h, "throttle_ms").try { |v| config.throttle_ms = v.clamp(0_i64, 600_000_i64).to_i }
         config.keep_alive = bool_arg(h, "keep_alive", true)
         options = Miner::PlanOptions.new(text,
@@ -275,8 +279,10 @@ module Gori
         {plan.engine, plan.origin, plan.total_names, plan.project_reports}
       rescue ex : Miner::PlanError
         raise FuzzArgError.new(mine_plan_error(ex))
-      rescue ex : PayloadFrom::Error
-        raise FuzzArgError.new(ex.message || "invalid payload_from")
+      rescue ex : Gori::Error
+        # `PayloadFrom::Error` and `RequestMacro::Error` both: each builder writes its own
+        # sentence, and it reads the same on every surface.
+        raise FuzzArgError.new(ex.message || "invalid mine arguments")
       end
 
       # `payload_from`: a list of `<QL> param-names` descriptors (a bare string is one), with the
@@ -400,6 +406,7 @@ module Gori
           s.field "sni", strprop("TLS SNI override, independent of the Host header — the vhost-confusion / domain-fronting test (mirrors CLI --sni)")
           s.field "max_requests", intprop("caller cap on total requests")
           s.field "hook", strprop("transform each assembled request through an external command (argv, no shell — e.g. \"./sign.sh\") before it is sent; its stdout is the request that ships. For a signed/HMAC'd/nonce API where a raw candidate is rejected before the miner learns anything. A hook that fails to run SKIPS the candidate with a reported reason (never a clean negative). One #{Gori::Settings.hook_timeout_secs}s (settings.hooks.timeout_secs) budget PER request; a mine's request count is bounded by max_requests, so the total hook cost is too.")
+          request_macro_props(s, "request")
           s.field "keep_alive", boolprop("reuse one HTTP/1.1 connection across the mine's probes (default true) — one TCP/TLS handshake per worker instead of per probe, which is most of a mine's wall clock. Set false to dial a fresh connection per probe, which is what you want when the target behaves per-connection (connection-scoped rate limits, a load balancer pinning by connection).")
           s.field "allow_unscoped", boolprop("run even when the target host is outside the project's configured scope — REQUIRED to run against an out-of-scope target, or when no scope is configured at all (active requests are refused by default without a matching scope)")
         end

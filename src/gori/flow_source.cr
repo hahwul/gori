@@ -48,6 +48,13 @@ module Gori
       # at that moment, and "log freely" is the half of the rule that makes that acceptable:
       # `source_ref` carries `slot NAME step N`.
       Refresh
+      # A Fuzzer or Miner run's request-time macro (#1350): a saved Repeater session replayed
+      # before a candidate to mint a fresh CSRF token or nonce. Its own member for the reason
+      # `Refresh` is — it is traffic nobody typed at that moment, so it has to be
+      # distinguishable — and not `Refresh`, because the two answer different questions: a
+      # `refresh` row re-authenticates a SLOT, a `macro` row belongs to one RUN and is sent as
+      # the slot that is active for it, overlay included. `source_ref` carries `macro step N`.
+      Macro
       # Read out of a file someone else captured (HAR, Burp, `--urls`, an OpenAPI document).
       # Deliberately NOT `sent_by_gori?`: gori never put these on a wire, and calling them its
       # own traffic would answer "is this evidence about the target?" the wrong way.
@@ -76,6 +83,7 @@ module Gori
         in Probe     then "PROBE"
         in Retest    then "RTEST"
         in Refresh   then "RFRSH"
+        in Macro     then "MACRO"
         in Import    then "IMPRT"
         end
       end
@@ -88,7 +96,7 @@ module Gori
       def sent_by_gori? : Bool
         case self
         in Proxy, Import then false
-        in Repeater, Fuzzer, Miner, Sequencer, Discover, Authorize, Probe, Retest, Refresh
+        in Repeater, Fuzzer, Miner, Sequencer, Discover, Authorize, Probe, Retest, Refresh, Macro
           true
         end
       end
@@ -128,7 +136,7 @@ module Gori
       def self_scanned? : Bool
         case self
         in Repeater, Fuzzer then true
-        in Proxy, Miner, Sequencer, Discover, Authorize, Probe, Retest, Refresh, Import
+        in Proxy, Miner, Sequencer, Discover, Authorize, Probe, Retest, Refresh, Macro, Import
           false
         end
       end

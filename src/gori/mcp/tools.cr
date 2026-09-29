@@ -40,6 +40,7 @@ require "./tools/grpc"
 require "./tools/env"
 require "./tools/flows"
 require "./tools/fuzz"
+require "./tools/request_macro"
 require "./tools/fuzz_runs"
 require "./tools/fuzz_clusters"
 require "./tools/host_overrides"
@@ -986,6 +987,10 @@ module Gori
         getter audit : JobAudit
 
         getter db_path : String?
+
+        # The run's engine, for the queries that are safe to ask while it is live (the macro's
+        # tally, `fuzz_status`).
+        getter engine : Fuzz::Engine
 
         def initialize(@id : String, @total : Int64?, @engine : Fuzz::Engine,
                        @record_history : Symbol, @origin : Fuzz::Origin, @http2 : Bool,
