@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Network: an HTTP/2 or WebSocket frame that declares a large length and then stalls holds only the bytes that actually arrived, instead of the declared 16 MB per connection, so a client or origin can no longer run gori out of memory with a few bytes per connection
 - Fuzzer: a cluster bomb over tens of thousands of positions — `auto_mark` on a large captured form body reaches that — runs instead of overflowing the stack and ending gori
 - Import: a HAR or Burp timestamp past year 9999 once its offset is applied, or an impossible date such as `2024-02-31`, is stamped with the import time instead of being stored as is or dropping the request; a project that already holds such a row opens again, and History, HAR export and `gori run diff` read it instead of failing
 - Import: an OpenAPI YAML spec whose mapping key is not a string is refused with a message — two cyclic anchors used as keys overflowed the stack and ended gori — and a `!!binary` value or a `+99:00` timestamp offset is reported as the spec's error instead of a backtrace

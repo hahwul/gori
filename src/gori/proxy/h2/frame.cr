@@ -1,3 +1,5 @@
+require "../grow_read"
+
 module Gori::Proxy::H2
   # Pure, byte-exact HTTP/2 framing (sans-IO), mirroring the h1 codec's stance:
   # the raw payload bytes ARE the truth (P7); per-type interpretation (HPACK,
@@ -160,12 +162,10 @@ module Gori::Proxy::H2
 
       # One contiguous buffer holds header + payload so the relay can forward the
       # frame verbatim (wire_bytes) without a second alloc + payload memcpy.
-      # `payload` is a view into it (read directly into buf[9..]).
-      buf = Bytes.new(HEADER_SIZE + len)
-      hslice.copy_to(buf)
-      payload = buf[HEADER_SIZE, len]
-      read_exact(io, payload) if len > 0
-      Header.new(type, flags, stream_id, payload, buf)
+      # `payload` is a view into it. `GrowRead`, because `len` is only the peer's claim:
+      # sized from the header alone, ten bytes and a stall held 16 MiB per connection.
+      buf = GrowRead.read?(io, hslice, len) || raise Gori::Error.new("h2: unexpected EOF mid-frame")
+      Header.new(type, flags, stream_id, buf[HEADER_SIZE, len], buf)
     end
 
     # Reads the 24-octet client preface from `io`, returning the exact bytes.
