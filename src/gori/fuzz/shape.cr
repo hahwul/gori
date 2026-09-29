@@ -61,9 +61,12 @@ module Gori
 
       # Markers folded in place of a masked span, mixed as two bytes behind a 0xff lead. A
       # literal 0xff body byte is mixed as 0xff 0x00, so no body can spell a marker.
+      #
+      # A number and an id-like token fold to the SAME `MARK_VALUE`: a random hex id is
+      # sometimes all digits (`1201083555725435` beside `5397ae9c4b977308`), and one marker per
+      # kind split exactly those rows off into their own shape.
       private MARK_PAYLOAD = 0x01_u8
-      private MARK_NUMBER  = 0x02_u8
-      private MARK_TOKEN   = 0x03_u8
+      private MARK_VALUE   = 0x02_u8
       private MARK_SPACE   = 0x04_u8
 
       # Header names whose PRESENCE varies per response, per cache state or with body size, and
@@ -392,8 +395,8 @@ module Gori
       end
 
       # One pass over the token at `i`: where it ends, and either the marker it folds to
-      # (`MARK_NUMBER` / `MARK_TOKEN`) or 0 with the hash of its normalized form — so a kept
-      # word costs one sink step rather than one per letter.
+      # (`MARK_VALUE`) or 0 with the hash of its normalized form — so a kept word costs one
+      # sink step rather than one per letter.
       private def self.scan_token(bytes : Bytes, i : Int32, limit : Int32) : {Int32, UInt8, UInt64}
         cls = CLASS.to_unsafe
         j = i
@@ -420,9 +423,9 @@ module Gori
           j += 1
         end
         size = j - i
-        return {j, MARK_NUMBER, 0_u64} unless alpha
+        return {j, MARK_VALUE, 0_u64} unless alpha
         if (digit && (size >= TOKEN_MIN || (hex && size >= 4))) || size >= LONG_TOKEN
-          return {j, MARK_TOKEN, 0_u64}
+          return {j, MARK_VALUE, 0_u64}
         end
         {j, 0_u8, t ^ size.to_u64}
       end

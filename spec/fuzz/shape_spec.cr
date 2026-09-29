@@ -56,6 +56,10 @@ describe Gori::Fuzz::Shape do
     a.should eq(b)
   end
 
+  it "folds a random hex id that happens to be all digits like any other id" do
+    shape("<!-- req 5397ae9c4b977308 -->").should eq(shape("<!-- req 1201083555725435 -->"))
+  end
+
   it "ignores volatile headers and their values, but not a cookie being set" do
     plain = "HTTP/1.1 200 OK\r\nDate: Mon, 01 Jan 2024 00:00:00 GMT\r\nX-Request-Id: abc\r\n\r\n"
     later = "HTTP/1.1 200 OK\r\nDate: Tue, 02 Jan 2024 09:09:09 GMT\r\nContent-Length: 2\r\n\r\n"
