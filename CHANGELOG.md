@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Import: a Postman or Insomnia variable that multiplies itself (`a = "{{a}}{{a}}…"`) skips that request instead of expanding to gigabytes and running gori out of memory
 - CLI: a `--ca-dir` or `GORI_HOME` gori cannot create, and `gori settings user-agents --set` naming a directory, print one line saying so instead of a backtrace
 - Network: an HTTP/2 or WebSocket frame that declares a large length and then stalls holds only the bytes that actually arrived, instead of the declared 16 MB per connection, so a client or origin can no longer run gori out of memory with a few bytes per connection
 - Fuzzer: a cluster bomb over tens of thousands of positions — `auto_mark` on a large captured form body reaches that — runs instead of overflowing the stack and ending gori

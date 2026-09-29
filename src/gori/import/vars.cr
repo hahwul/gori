@@ -27,16 +27,33 @@ module Gori
       # placeholder (the same stance `oas.cr` takes with its `PLACEHOLDER` header values);
       # only the URL is checked for leftovers, by the callers, because there a leftover
       # would become a literal stored host (see `unresolved`).
+      #
+      # Growth is budgeted, and the budget is checked inside the pass, as each placeholder is
+      # replaced: a collection defining `a = "{{a}}{{a}}…"` (k copies) and a URL of `{{a}}` is a
+      # few hundred bytes of JSON that expands to k^5 copies over the five passes — 10^10 for
+      # k = 100 — and one pass alone multiplies by k. Past the budget the entry is refused
+      # (the callers' per-entry rescue skips it) rather than built.
       def self.expand(text : String, table : Table) : String
         out = text
+        budget = MAX_GROWTH
         MAX_PASSES.times do
           break unless out.includes?("{{")
-          pass = out.gsub(PLACEHOLDER) { |full, m| table[m[1]]? || full }
+          pass = out.gsub(PLACEHOLDER) do |full, m|
+            value = table[m[1]]?
+            next full unless value
+            budget -= value.bytesize - full.bytesize
+            raise Gori::Error.new("variables expand past #{MAX_GROWTH} bytes (a self-multiplying {{#{m[1]}}}?)") if budget < 0
+            value
+          end
           break if pass == out # nothing left this table can resolve
           out = pass
         end
         out
       end
+
+      # How many bytes `expand` may add to one value, over all of its passes. Far past any real
+      # collection's variables, and well short of what a self-multiplying one reaches.
+      MAX_GROWTH = 16 * 1024 * 1024
 
       # The placeholder NAMES still present after `expand`. Callers use this both to reject
       # an entry and to report which variables were missing when a whole file resolves to

@@ -111,6 +111,24 @@ describe Gori::Import::Postman do
     end
   end
 
+  # `a = "{{a}}" × 30` and a URL of `{{a}}`: ~200 bytes of JSON, 30^5 copies (121 MB) after
+  # the five passes — and k = 100 is 10^10. The entry is refused past the growth budget; the
+  # collection's other entries still import.
+  it "refuses a self-multiplying variable instead of expanding it" do
+    bomb = "{{a}}" * 30
+    result = parse(<<-JSON)
+      {"info": {"name": "n"},
+       "variable": [{"key": "a", "value": "#{bomb}"}],
+       "item": [{"request": {"method": "GET", "url": "https://h.test/{{a}}"}},
+                {"request": {"method": "GET", "url": "https://h.test/ok"}}]}
+      JSON
+    result.flows.map(&.request.target).should eq(["/ok"])
+    result.skipped.should eq(1)
+    expect_raises(Gori::Error, /expand past/) do
+      Gori::Import::Vars.expand("{{a}}", Gori::Import::Vars::Table{"a" => bomb})
+    end
+  end
+
   it "skips a URL with a braced host but keeps a brace in the path" do
     # `Vars.unresolved` only sees `{{`, and `Builder::HOST_INVALID` does not reject `{`/`}`,
     # so a single-brace host (a template form this parser does not speak, or a variable whose
