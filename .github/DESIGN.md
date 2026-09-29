@@ -4265,3 +4265,68 @@ row's `goto_session_id` opened the new session the same way. The test for leavin
   `move_to_autoincrement(conn, rebuilds, version)`, shared by V40 and V41: in place where the
   CREATE text is gori's, the verified rebuild otherwise. The seed reads the events that point at a
   Sequencer session and any `sequencer` link, filtered like every other seed.
+
+### 2026-09-29: a fuzz result's shape is a versioned fingerprint of its answer, and one aggregator clusters it (#1351)
+
+The Distribution sidebar answers "how are the metrics spread", not "which responses are actually
+different". Every result now carries `Fuzz::Result#shape`, and `Fuzz::Clusters` groups rows by it
+for the TUI, `gori run fuzz show --clusters` and MCP `fuzz_results` / `get_fuzz_run`. The issue's
+four open questions, answered:
+
+- **What the key holds.** The outcome (a response, or a failed send folded to a coarse
+  `Shape::ErrorClass`, since raw error text quotes hosts, ports and timings), status, gRPC
+  status, the incomplete/timed-out flags, the WebSocket close code (folded in by
+  `Result#with_ws`, the one seam that has it), the set of header names minus the ones that vary
+  per response or with body size, the normalized `Location` and `Content-Type` values, and the
+  decoded body with the job's own payload bytes masked (as generated, as spliced after a `¦chain`,
+  HTML-escaped in each server's quote spelling (`&#39;`, `&#039;`, `&#x27;`, `&#34;`, `&apos;`),
+  percent- and JSON-escaped, the last also Go-style `\u003c`), numbers and id-like tokens
+  folded to one value marker (a random hex id is sometimes all digits), whitespace runs folded. NOT
+  `length`, `words` or `lines`: a reflected payload moves all three, which is the split the
+  masking exists to prevent; a cluster reports their range. No JSON-structure parse: the token
+  normalization already folds values, and a structural walk would be a second decode (P6).
+- **Stable across runs, within one `Shape::VERSION`.** FNV-1a over a versioned normalization, not
+  Crystal's per-process seeded `#hash`, because the id is persisted (`fuzz_results.shape`, V42)
+  and compared between a live job and its saved run. A normalization change bumps the version,
+  which changes every id rather than silently merging old rows with new ones. Rows saved before
+  V42 have no shape; they cluster by `Shape.approximate` (outcome + words/lines) in a separate key
+  space and every surface marks those clusters approximate.
+- **The representative is the lowest-index member.** Live results arrive out of order and a saved
+  run is read in index order; the lowest index is the one rule both pick the same row under, and
+  it makes offset paging deterministic (ties break on it too).
+- **Opt-in arguments, not a `fuzz_clusters` tool.** `clusters: true` and `cluster: "<id>"` on the
+  two tools that already page a run's rows keep one paging contract and one place an agent looks.
+  The default row page is byte-identical.
+
+Bounded throughout: the fingerprint reads the decoded body's first 16,384 NORMALIZED units (a
+masked payload, a value, a word, a whitespace run or a punctuation byte each count one), capped at
+256 KiB raw, plus one bit for whether the body went on (~46 µs on a large page, 0 B/op,
+`bench/fuzz_shape_bench.cr`). Units, not bytes: a result page that echoes the query at its top
+shifts every later byte by the payload's length, so a raw-byte window ended at a different place
+for every payload and split the very cluster it existed to form. The price is that a difference
+far below the window does not split a shape; the cluster's length range still shows it.
+`Clusters` holds at most 4096 shapes and
+counts later new ones as `overflow_rows`, and a saved run aggregates from the keyset-paged scalar
+stream. There is deliberately no SQL `GROUP BY` twin: legacy rows cannot be grouped in SQL, and a
+second implementation of one predicate is the drift the Scope SQL/in-memory pair already taught.
+A live MCP job's aggregate sees every result while its row cache keeps only `interesting?` rows,
+so a cluster of ordinary answers may list no member rows; the page says so (`members_retained`,
+`members_note`) instead of implying the cluster is empty. The TUI's header drawn from a cluster's
+metrics-only representative (its members all evicted from the display window) says the row left
+the window, never "not retained", and seeds no Repeater/Comparer tab.
+
+Known gaps, each a heuristic trade-off rather than an oversight:
+
+- A needle is tried where a normalized unit starts, never inside a letter/digit token, and it
+  has no word boundary. The two pull against each other: masking inside tokens would catch a
+  marker spliced into an existing value (`user=adm§x§` echoed as `admx'`), and masking anywhere
+  already lets a common-word payload (`div`, `header` from a content-discovery list) mask the
+  page's own markup, so identical 404s split. Neither is fixed by a rule the fingerprint can
+  apply to one response alone; the second is the one worth revisiting (e.g. not masking a
+  plain-word needle inside markup).
+- A failed send's class is read off its message text, so a host name in the message can pick
+  it (`tls-gw.example.com`). A structured error kind on `Repeater::Result` is the real fix.
+- A gRPC body is hashed as its wire bytes, so a payload that changes a message's length
+also changes its 5-byte prefix and varint lengths, and a gRPC sweep can split one answer into a
+few shapes by payload length. Deframing with `Grpc.scan_wire` first is the fix when it matters;
+`grpc_status` is already its own key part, so a denied call never merges with a granted one.

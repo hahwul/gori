@@ -49,7 +49,7 @@ describe Gori::Fuzz::Persistence do
         3_i64, [String.new(Bytes[0xff])], 0, 200, 2_i64, 1, 1, 99_i64, nil, true, true, "hit",
         Bytes[0x48, 0x00], Bytes[0xff, 0x00], Bytes[0x47, 0xff], true,
         "transform failed", 7, "denied", true, 2, Bytes[0x47, 0xfe],
-        ws_close_code: 1008, ws_frames_in: 5)
+        ws_close_code: 1008, ws_frames_in: 5, shape: -0x1234_5678_9abc_def0_i64)
 
       saved.append(result).should be_true
       saved.finish(1_i64, 1_i64, 2_i64, "done", 88_i64).should be_true
@@ -69,6 +69,14 @@ describe Gori::Fuzz::Persistence do
       rebuilt.resent_count.should eq(2)
       rebuilt.grpc_status.should eq(7)
       rebuilt.ws_close_code.should eq(1008)
+      # The shape fingerprint (#1351) — signed, since it is the FNV-1a 64 bits — through every
+      # projection, and the preview's trailing LENGTH() reads still land on their own columns.
+      rebuilt.shape.should eq(-0x1234_5678_9abc_def0_i64)
+      store.get_fuzz_result_summary(saved.run_id, 3_i64).not_nil!.shape.should eq(-0x1234_5678_9abc_def0_i64)
+      preview = store.get_fuzz_result_preview(saved.run_id, 3_i64, 16, 16, 16, 16).not_nil!
+      preview.row.shape.should eq(-0x1234_5678_9abc_def0_i64)
+      preview.request_size.should eq(2)
+      preview.wire_size.should eq(2)
     end
   end
 
@@ -241,7 +249,7 @@ describe Gori::Fuzz::Persistence do
         7_i64, [String.new(Bytes[0xff])], 2, 206, 3_i64, 2, 1, 55_i64, "partial", true,
         true, "token", Bytes[0x48, 0xff], Bytes[0x00, 0xfe], Bytes[0x47, 0xfd], true,
         "chain", 13, "internal", true, 4, Bytes[0x47, 0xfc],
-        ws_close_code: 1002, ws_frames_in: 9)
+        ws_close_code: 1002, ws_frames_in: 9, shape: 42_i64)
       source.append(original).should be_true
       source.finish(1_i64, 1_i64, 5_i64, "done").should be_true
       source_record = store.get_fuzz_result(source.run_id, 7_i64).not_nil!

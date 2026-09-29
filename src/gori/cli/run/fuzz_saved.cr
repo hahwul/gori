@@ -67,6 +67,9 @@ module Gori
         matched_only = false
         format = :text
         positional = [] of String
+        clusters = false
+        cluster : Int64? = nil
+        order = Fuzz::Clusters::Order::Rare
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run fuzz show RUN_ID [RESULT_INDEX] [options]"
@@ -74,7 +77,14 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("-nN", "--limit=N", "Result rows to return (default 200, max 5000)") { |v| limit = parse_count(v, "--limit").clamp(1, 5000) }
           p.on("--offset=N", "Result rows to skip") { |v| offset = parse_nonneg(v, "--offset") }
-          p.on("--matched-only", "Only matcher hits") { matched_only = true }
+          p.on("--matched-only", "Only matcher hits (with --clusters: only clusters holding one)") { matched_only = true }
+          p.on("--clusters", "One row per distinct response SHAPE instead of per result") { clusters = true }
+          p.on("--cluster=ID", "Only the results of this cluster (an id from --clusters)") do |v|
+            cluster = Fuzz::Shape.parse_hex?(v) || abort "gori run fuzz show: invalid --cluster #{v.inspect} (a 16-hex-digit id from --clusters)"
+          end
+          p.on("--order=ORDER", "Cluster order: rare (default, smallest first) | common | first") do |v|
+            order = Fuzz::Clusters::Order.parse?(v) || abort "gori run fuzz show: invalid --order #{v.inspect} (#{Fuzz::Clusters::Order.names.join("|")})"
+          end
           p.on("--format=FMT", "Output: text (default) | json | jsonl") { |v| format = parse_format(v, [:text, :json, :jsonl]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
@@ -85,11 +95,16 @@ module Gori
         abort "gori run fuzz show: expected RUN_ID and optional RESULT_INDEX" unless positional.size.in?(1, 2)
         run_id = parse_flow_id(positional[0], "gori run fuzz show")
         result_idx = positional[1]?.try { |v| parse_flow_id(v, "gori run fuzz show") }
+        check_fuzz_show_modes(clusters, cluster, result_idx)
 
         store = open_store(resolve_read_project(project_name, db_path), read_only: true)
         begin
           run = store.get_fuzz_run(run_id) || abort "gori run fuzz show: no saved run ##{run_id}"
-          if idx = result_idx
+          if clusters
+            show_saved_fuzz_clusters(store, run, order, matched_only, limit, offset, format)
+          elsif id = cluster
+            show_saved_fuzz_cluster_members(store, run, id, matched_only, limit, offset, format)
+          elsif idx = result_idx
             row = store.get_fuzz_result(run_id, idx) ||
                   abort "gori run fuzz show: run ##{run_id} has no result ##{idx}"
             show_saved_fuzz_result_detail(run, row, format)
@@ -177,6 +192,89 @@ module Gori
           puts fuzz_saved_run_header(run)
           rows.each { |row| puts CLI::Output.fuzz_row_text(Fuzz::Persistence.result(row)) }
           STDERR.puts "showing #{offset + 1}-#{offset + rows.size} of #{total}" unless rows.empty?
+        end
+      end
+
+      # The three `fuzz show` modes are exclusive: a cluster page, one cluster's rows, one row.
+      private def self.check_fuzz_show_modes(clusters : Bool, cluster : Int64?, result_idx : Int64?) : Nil
+        abort "gori run fuzz show: pass --clusters or --cluster ID, not both" if clusters && cluster
+        return unless result_idx && (clusters || cluster)
+        abort "gori run fuzz show: RESULT_INDEX names one result; drop it to list clusters"
+      end
+
+      # `fuzz show --clusters` (#1351): the run grouped by response shape through
+      # `Fuzz::Clusters`, the aggregator MCP and the TUI use, fed by the keyset-paged scalar
+      # stream so a million-row run holds one entry per shape. JSON carries the same cluster
+      # fields MCP's `get_fuzz_run{clusters}` emits; the representative is a `fuzz show` row.
+      private def self.show_saved_fuzz_clusters(store : Store, run : Store::FuzzRunRecord,
+                                                order : Fuzz::Clusters::Order, matched_only : Bool,
+                                                limit : Int32, offset : Int32, format : Symbol,
+                                                io : IO = STDOUT, err : IO = STDERR) : Nil
+        clusters = Fuzz::Persistence.clusters(store, run.id)
+        list = clusters.sorted(order, matched_only)
+        page = list[offset, limit]? || [] of Fuzz::Clusters::Cluster
+        scrub = ->(t : String) { t.scrub }
+        case format
+        when :json
+          io.puts(JSON.build do |j|
+            j.object do
+              j.field("run") { fuzz_saved_run_json(j, run, store.fuzz_result_count(run.id)) }
+              j.field("clusters") do
+                j.array { page.each { |c| Fuzz::Clusters.emit(j, c, scrub) { |rep| CLI::Output.fuzz_row_fields(j, rep) } } }
+              end
+              j.field "cluster_order", order.label
+              j.field "offset", offset
+              j.field "returned", page.size
+              j.field "total_available", list.size
+              j.field "matched_only", matched_only
+              Fuzz::Clusters.emit_summary(j, clusters)
+            end
+          end)
+        when :jsonl
+          page.each do |c|
+            io.puts(JSON.build { |j| Fuzz::Clusters.emit(j, c, scrub) { |rep| CLI::Output.fuzz_row_fields(j, rep) } })
+          end
+        else
+          io.puts fuzz_saved_run_header(run)
+          page.each { |c| io.puts CLI::Output.fuzz_cluster_text(c) }
+          note = "#{list.size} cluster#{list.size == 1 ? "" : "s"} over #{clusters.rows} result#{clusters.rows == 1 ? "" : "s"}"
+          note += " (showing #{offset + 1}-#{offset + page.size})" if page.size < list.size && !page.empty?
+          note += " · #{clusters.overflow_rows} results past the #{clusters.max_clusters}-cluster cap not grouped" if clusters.truncated?
+          note += " · ≈ approximate: saved before response shapes were recorded" if page.any?(&.approximate?)
+          note += " · keep:#{run.keep} archive, only kept rows are grouped" if run.filtered?
+          err.puts note
+        end
+      end
+
+      # `fuzz show --cluster ID`: that shape's results, in the ordinary `fuzz show` row shapes.
+      # The same stream aggregates the cluster and picks this page, so nothing past one page of
+      # rows is held.
+      private def self.show_saved_fuzz_cluster_members(store : Store, run : Store::FuzzRunRecord, id : Int64,
+                                                       matched_only : Bool, limit : Int32, offset : Int32,
+                                                       format : Symbol, io : IO = STDOUT, err : IO = STDERR) : Nil
+        clusters, records, seen = Fuzz::Persistence.cluster_members(store, run.id, id, matched_only, offset, limit)
+        rows = records.map { |rec| Fuzz::Persistence.result(rec) }
+        cluster = clusters[id]? || abort "gori run fuzz show: run ##{run.id} has no cluster #{Fuzz::Shape.hex(id)}"
+        case format
+        when :json
+          io.puts(JSON.build do |j|
+            j.object do
+              j.field("run") { fuzz_saved_run_json(j, run, store.fuzz_result_count(run.id)) }
+              j.field("cluster") { Fuzz::Clusters.emit(j, cluster, ->(t : String) { t.scrub }) { |rep| CLI::Output.fuzz_row_fields(j, rep) } }
+              j.field("results") { j.array { rows.each { |r| CLI::Output.fuzz_row_fields(j, r) } } }
+              j.field "offset", offset
+              j.field "returned", rows.size
+              j.field "total_available", seen
+              j.field "matched_only", matched_only
+            end
+          end)
+        when :jsonl
+          rows.each { |r| io.puts CLI::Output.fuzz_row_json(r) }
+        else
+          io.puts fuzz_saved_run_header(run)
+          io.puts CLI::Output.fuzz_cluster_text(cluster)
+          rows.each { |r| io.puts CLI::Output.fuzz_row_text(r) }
+          err.puts "showing #{offset + 1}-#{offset + rows.size} of #{seen} in cluster #{cluster.hex}" unless rows.empty?
         end
       end
 

@@ -147,6 +147,8 @@ describe "FuzzerController saved-run restore" do
       view.retained_result_count.should eq(Gori::Tui::FuzzerResultWindow::ROW_CAP)
       view.results_windowed?.should be_true
       view.results_count_label.should contain("showing 5000")
+      # The shape clusters (#1351) count every stored row, not the restored window.
+      view.clusters.rows.should eq(5_001_i64)
       controller.stop_all
     end
   end

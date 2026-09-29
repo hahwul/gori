@@ -1,5 +1,6 @@
 require "../proxy/ws/frame"     # Proxy::WS::Shape — the frame shape a WS fuzz job carries
 require "../repeater/ws_engine" # WsEngine::DEFAULT_IDLE — the WS transport's own pacing default
+require "./shape"
 
 module Gori
   # The fuzzer / intruder engine: takes a base HTTP request with marked positions,
@@ -266,8 +267,15 @@ module Gori
                      @chain_error = nil, @grpc_status = nil, @grpc_message = nil,
                      @timed_out = false, @resent_count = 0, @wire = nil, *,
                      @ws_close_code : Int32? = nil, @ws_frames_in : Int32? = nil,
-                     @stop_hit : Bool = false)
+                     @stop_hit : Bool = false, @shape : Int64? = nil)
       end
+
+      # The response-shape fingerprint (`Fuzz::Shape`, issue #1351) — the key
+      # `Fuzz::Clusters` groups rows by. Computed by `Matcher#build` over the body it already
+      # decoded, so it survives a row whose bytes the run did not keep. nil only on a row read
+      # back from a run saved before shapes were recorded; `Clusters` keys that one by
+      # `Shape.approximate`.
+      getter shape : Int64?
 
       # This row met the run's separate STOP condition (`StopOn#condition`) — the row that
       # ended, or paused, the sweep. Distinct from `matched?`: the condition is its own
@@ -292,12 +300,16 @@ module Gori
       # site for every `Fuzz::Result` and it reads the SYNTHESIZED `Repeater::Result` alone —
       # keeping it ignorant of `WsOutcome` is what makes "the matcher is unchanged" true rather
       # than nearly true. `Engine#run_one_ws` applies this at the one seam that has both.
+      #
+      # The close code joins the shape here, the one seam holding both: `status` is 101 for
+      # every session, so without it an accepted and a policy-closed session were one cluster.
       def with_ws(o : WsOutcome) : Result
         Result.new(@index, @payloads, @position, @status, @length, @words, @lines,
           @duration_us, @error, @matched, @incomplete, @extracted,
           @head, @body, @request, @retried, @chain_error, @grpc_status, @grpc_message,
           @timed_out, @resent_count, @wire,
-          ws_close_code: o.close_code, ws_frames_in: o.frames_in, stop_hit: @stop_hit)
+          ws_close_code: o.close_code, ws_frames_in: o.frames_in, stop_hit: @stop_hit,
+          shape: Shape.with_ws(@shape, o.close_code, o.frames_in))
       end
     end
 

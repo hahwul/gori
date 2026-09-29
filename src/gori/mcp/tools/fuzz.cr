@@ -182,6 +182,7 @@ module Gori
           # Permanent storage is deliberately independent of the selective/capped live cache.
           # A write failure is absorbed by Persistence and never stops outbound traffic.
           fjob.persistence.try(&.append(ev.result))
+          fjob.clusters.add(ev.result)
           flow_id, flow_ref = maybe_record_fuzz_flow(fjob, ev.result)
           store_fuzz_result(fjob, ev.result, flow_id, flow_ref)
         when Fuzz::DoneEvent
@@ -459,6 +460,9 @@ module Gori
       private def fuzz_results(h) : Result
         fjob = lookup_fuzz_job(h)
         return fjob if fjob.is_a?(Result)
+        cluster_args = fuzz_cluster_args(h)
+        return cluster_args if cluster_args.is_a?(Result)
+        return fuzz_results_clusters(fjob, h, cluster_args) if cluster_args.requested?
         # `matched_only` FILTERS, and it has to: the stored set is not matched-only. Since
         # `store_fuzz_result` began keeping a row whose request was re-sent, retried or came
         # back truncated, `fuzz_results` has mixed matches with non-matches — and the row
@@ -470,8 +474,6 @@ module Gori
         # index-aligned with `results`, and a filtered page still has to point each row at the
         # History flow that IS its evidence.
         rows = fjob.results
-        flow_ids = fjob.result_flow_ids
-        flow_refs = fjob.result_flow_source_refs
         matched_only = bool_arg(h, "matched_only", false)
         picked = (0...rows.size).to_a
         picked.select! { |i| rows[i].matched? } if matched_only
@@ -481,31 +483,13 @@ module Gori
         limit = clamp(req_lim, 100, 1000)
         last = offset < picked.size ? Math.min(offset + limit, picked.size) : offset
         returned = last - offset
-        # A live MCP job can outlast a peer's History clear. Its saved bare ids must only be
-        # returned while they still name this exact result's Fuzzer row; a later Import/capture
-        # or another result from the same job may otherwise inherit the id.
-        page_flow_ids = [] of Int64
-        (offset...last).each do |k|
-          flow_ids[picked[k]]?.try { |id| page_flow_ids << id }
-        end
-        current_flow_refs = {} of Int64 => String
-        store.flow_rows(page_flow_ids.uniq).each do |row|
-          if row.source.try(&.fuzzer?) == true
-            row.source_ref.try { |ref| current_flow_refs[row.id] = ref }
-          end
-        end
+        page = picked[offset...last]? || [] of Int32
+        page_flow_ids = validated_fuzz_flow_ids(fjob, page)
         Result.new(JSON.build do |j|
           j.object do
             j.field "results" do
               j.array do
-                (offset...last).each do |k|
-                  flow_id = flow_ids[picked[k]]?
-                  if fid = flow_id
-                    expected_ref = flow_refs[picked[k]]?
-                    flow_id = nil unless expected_ref && current_flow_refs[fid]? == expected_ref
-                  end
-                  Serialize.fuzz_result(j, rows[picked[k]], flow_id)
-                end
+                page.each_with_index { |pos, k| Serialize.fuzz_result(j, rows[pos], page_flow_ids[k]) }
               end
             end
             j.field "returned", returned
@@ -529,6 +513,30 @@ module Gori
             emit_fuzz_save_state(j, fjob)
           end
         end)
+      end
+
+      # The History flow id of each cached result at `positions` (indices into `fjob.results`),
+      # aligned with them. A live MCP job can outlast a peer's History clear, so a saved bare id
+      # is returned only while it still names THIS result's Fuzzer row; a later Import/capture
+      # or another result from the same job may otherwise inherit the id.
+      private def validated_fuzz_flow_ids(fjob : FuzzJob, positions : Array(Int32)) : Array(Int64?)
+        flow_ids = fjob.result_flow_ids
+        flow_refs = fjob.result_flow_source_refs
+        wanted = positions.compact_map { |pos| flow_ids[pos]? }
+        current_flow_refs = {} of Int64 => String
+        store.flow_rows(wanted.uniq).each do |row|
+          if row.source.try(&.fuzzer?) == true
+            row.source_ref.try { |ref| current_flow_refs[row.id] = ref }
+          end
+        end
+        positions.map do |pos|
+          flow_id = flow_ids[pos]?
+          if fid = flow_id
+            expected_ref = flow_refs[pos]?
+            flow_id = nil unless expected_ref && current_flow_refs[fid]? == expected_ref
+          end
+          flow_id
+        end
       end
 
       @[Tool("fuzz_stop", gated: true, agent_action: true, permission: "send")]
@@ -1534,11 +1542,16 @@ module Gori
           "Paged matched results for a fuzz job (status/length/words/lines/duration/" \
           "extracted, plus a per-result flow_id when the run used record_history and its History row still exists. No raw " \
           "bodies are inlined: fetch a hit's full request+response with get_flow(flow_id), " \
-          "or re-issue it with send_request by substituting the payload into your template." do |s|
+          "or re-issue it with send_request by substituting the payload into your template. " \
+          "On a large run, pass clusters:true first: one entry per distinct response shape, " \
+          "then cluster:<id> for the members of the ones worth reading." do |s|
           s.field "job_id", strprop("id from fuzz_start"), required: true
           s.field "offset", intprop("start row (default 0)")
           s.field "limit", intprop("max rows (default 100, max 1000)")
-          s.field "matched_only", boolprop("return only rows the matcher accepted (default false). The stored set is NOT matched-only: a row that FAILED is kept too — the send errored (dead target, TLS, refused by scope), a §…§ position's ¦chain could not run on that payload so it went out UNTRANSFORMED, or a gRPC field's declaration could not hold it so that field kept the capture's own value (both `chain_error`, whose sentence says which), the request was re-sent or retried, or the response came back truncated — so the unfiltered page mixes matches with non-matches. Every row carries `matched` either way, and failures can never crowd matches out of the buffer.")
+          s.field "clusters", boolprop("return one entry per RESPONSE SHAPE instead of rows (default false): responses that are the same answer — payload echoes, numbers, ids, timestamps and volatile headers normalized away — group together, counted over EVERY result of the job (not only the stored rows). Each cluster has an id, count, matched/errored/incomplete counts, status/grpc_status/ws_close_code or error_class, metric ranges, the lowest member indices (sample_indices) and a representative row. Paged by offset/limit (default 50, max 500 clusters). Start here on a large run: the rare clusters are usually the interesting ones.")
+          s.field "cluster", strprop("a cluster id from clusters:true — return that cluster's member ROWS (same row shape as the default page) plus its summary. The live cache keeps only interesting rows, so members_retained can be below count; a save_results run pages every member through get_fuzz_run{cluster}.")
+          s.field "cluster_order", enumprop("order of clusters:true (default rare = smallest cluster first; common = largest first; first = by first appearance)", Fuzz::Clusters::Order.names)
+          s.field "matched_only", boolprop("return only rows the matcher accepted (default false; with clusters:true, only clusters holding a match). The stored set is NOT matched-only: a row that FAILED is kept too — the send errored (dead target, TLS, refused by scope), a §…§ position's ¦chain could not run on that payload so it went out UNTRANSFORMED, or a gRPC field's declaration could not hold it so that field kept the capture's own value (both `chain_error`, whose sentence says which), the request was re-sent or retried, or the response came back truncated — so the unfiltered page mixes matches with non-matches. Every row carries `matched` either way, and failures can never crowd matches out of the buffer.")
         end
 
         tool j, "fuzz_stop", "Stop a running fuzz job (in-flight requests finish)." do |s|

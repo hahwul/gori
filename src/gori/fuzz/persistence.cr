@@ -2,6 +2,7 @@ require "json"
 require "base64"
 require "../store"
 require "./types"
+require "./clusters"
 
 module Gori
   module Fuzz
@@ -231,7 +232,7 @@ module Gori
           result.incomplete?, result.extracted, result.request, result.head, result.body,
           result.retried?, result.chain_error, result.grpc_status, result.grpc_message,
           result.timed_out?, result.resent_count, result.wire, result.ws_close_code,
-          result.ws_frames_in)
+          result.ws_frames_in, result.shape)
       end
 
       # Record -> write is deliberately field-for-field. This is the spool copy seam: parsing
@@ -243,7 +244,7 @@ module Gori
           record.incomplete?, record.extracted, record.request, record.response_head,
           record.response_body, record.retried?, record.chain_error, record.grpc_status,
           record.grpc_message, record.timed_out?, record.resent_count, record.wire,
-          record.ws_close_code, record.ws_frames_in)
+          record.ws_close_code, record.ws_frames_in, record.shape)
       end
 
       # Deterministic transaction budget: every variable-width field plus a fixed allowance for
@@ -283,7 +284,44 @@ module Gori
           record.incomplete?, record.extracted, record.response_head, record.response_body,
           record.request, record.retried?, record.chain_error, record.grpc_status,
           record.grpc_message, record.timed_out?, record.resent_count, record.wire,
-          ws_close_code: record.ws_close_code, ws_frames_in: record.ws_frames_in)
+          ws_close_code: record.ws_close_code, ws_frames_in: record.ws_frames_in,
+          shape: record.shape)
+      end
+
+      # A saved run's response-shape clusters (#1351), from the keyset-paged scalar stream so
+      # no retained byte crosses SQLite and one entry per shape is all that is held. The block
+      # runs once per row — a surface's cancellation check and fiber yield. The one saved-run
+      # aggregation MCP, the CLI and the TUI restore share.
+      def self.clusters(store : Store, run_id : Int64, &each : -> Nil) : Clusters
+        clusters = Clusters.new
+        store.each_fuzz_result_summary(run_id) do |record|
+          each.call
+          clusters.add(result(record))
+        end
+        clusters
+      end
+
+      def self.clusters(store : Store, run_id : Int64) : Clusters
+        clusters(store, run_id) { }
+      end
+
+      # One page of one cluster's member rows, in index order, with the run's clusters (for the
+      # cluster's own summary) and how many members the filter selects in all. The same pass
+      # aggregates and pages, so nothing past one page of rows is held.
+      def self.cluster_members(store : Store, run_id : Int64, id : Int64, matched_only : Bool,
+                               offset : Int32, limit : Int32) : {Clusters, Array(Store::FuzzResultRecord), Int32}
+        clusters = Clusters.new
+        page = [] of Store::FuzzResultRecord
+        seen = 0
+        store.each_fuzz_result_summary(run_id) do |record|
+          row = result(record)
+          clusters.add(row)
+          next unless Clusters.key(row)[0] == id
+          next if matched_only && !row.matched?
+          page << record if seen >= offset && page.size < limit
+          seen += 1
+        end
+        {clusters, page, seen}
       end
 
       private def accepting? : Bool

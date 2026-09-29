@@ -454,6 +454,10 @@ private class FakeContext < ExecContext
     @calls << :fuzz_toggle_dist
   end
 
+  def fuzz_toggle_group : Nil
+    @calls << :fuzz_toggle_group
+  end
+
   def fuzz_save_results : Nil
     @calls << :fuzz_save_results
   end

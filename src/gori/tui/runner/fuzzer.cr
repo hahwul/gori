@@ -56,6 +56,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     fuzzer_controller.fuzz_toggle_dist
   end
 
+  def fuzz_toggle_group : Nil
+    fuzzer_controller.fuzz_toggle_group
+  end
+
   def fuzz_save_results : Nil
     fuzzer_controller.fuzz_save_results
   end

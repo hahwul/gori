@@ -22,6 +22,39 @@ module Gori::CLI::Run
   def self.fuzz_saved_run_header_for_spec(run : Store::FuzzRunRecord) : String
     fuzz_saved_run_header(run)
   end
+
+  def self.show_saved_fuzz_clusters_for_spec(store : Store, run : Store::FuzzRunRecord,
+                                             format : Symbol, order = Fuzz::Clusters::Order::Rare,
+                                             matched_only = false, limit = 200, offset = 0) : {String, String}
+    io, err = IO::Memory.new, IO::Memory.new
+    show_saved_fuzz_clusters(store, run, order, matched_only, limit, offset, format, io, err)
+    {io.to_s, err.to_s}
+  end
+
+  def self.show_saved_fuzz_cluster_members_for_spec(store : Store, run : Store::FuzzRunRecord, id : Int64,
+                                                    format : Symbol, limit = 200, offset = 0) : {String, String}
+    io, err = IO::Memory.new, IO::Memory.new
+    show_saved_fuzz_cluster_members(store, run, id, false, limit, offset, format, io, err)
+    {io.to_s, err.to_s}
+  end
+end
+
+# A saved run of six results in three shapes: four reflected 401s, one 200 hit, one timeout.
+private def with_clustered_run(&)
+  with_store do |store|
+    persist = Gori::Fuzz::Persistence.new(store,
+      Gori::Fuzz::SavedRunMeta.new(nil, "http://h.test", "sniper", 6_i64, surface: "cli"))
+    {0, 1, 2, 3}.each do |i|
+      persist.append(Gori::Fuzz::Result.new(i.to_i64, ["user#{"x" * i}"], 0, 401, 30_i64 + i, 5, 1,
+        10_i64, nil, false, false, nil, shape: 0x401_i64)).should be_true
+    end
+    persist.append(Gori::Fuzz::Result.new(4_i64, ["admin"], 0, 200, 90_i64, 12, 3, 10_i64, nil,
+      true, false, nil, shape: 0x200_i64)).should be_true
+    persist.append(Gori::Fuzz::Result.new(5_i64, ["boom"], 0, nil, 0_i64, 0, 0, 10_i64,
+      "Read timed out", false, false, nil, shape: 0xe_i64)).should be_true
+    persist.finish(6_i64, 1_i64, 1_i64, "done").should be_true
+    yield store, store.get_fuzz_run(persist.run_id).not_nil!
+  end
 end
 
 private def saved_run(snapshot : Int32 = 1, http2 : Bool = false, websocket : Bool = false,
@@ -173,5 +206,57 @@ describe "gori run fuzz saved runs" do
       saved_run(finished: nil), 0_i64)).as_h
     cli["finished_at"].raw.should be_nil
     cli["finished_at_iso"].raw.should be_nil
+  end
+
+  it "groups a saved run by response shape, rare first, as text, json and jsonl (#1351)" do
+    with_clustered_run do |store, run|
+      out, note = Gori::CLI::Run.show_saved_fuzz_clusters_for_spec(store, run, :text)
+      lines = out.lines
+      lines[0].should contain("fuzz run ##{run.id}")
+      lines[1].should start_with("0000000000000200  ×1")
+      lines[1].should contain("1 hit")
+      lines[1].should contain("#4 admin")
+      lines[2].should contain("ERR timeout")
+      lines[3].should start_with("0000000000000401  ×4")
+      lines[3].should contain("#0 user")
+      note.should contain("3 clusters over 6 results")
+
+      json = JSON.parse(Gori::CLI::Run.show_saved_fuzz_clusters_for_spec(store, run, :json)[0])
+      json["clusters"].as_a.map(&.["count"].as_i).should eq([1, 1, 4])
+      json["clusters"][2]["id"].as_s.should eq("0000000000000401")
+      json["clusters"][2]["sample_indices"].as_a.map(&.as_i).should eq([0, 1, 2, 3])
+      json["clusters"][2]["representative"]["index"].as_i.should eq(0)
+      json["cluster_count"].as_i.should eq(3)
+      json["run"]["id"].as_i64.should eq(run.id)
+
+      common = JSON.parse(Gori::CLI::Run.show_saved_fuzz_clusters_for_spec(store, run, :json,
+        Gori::Fuzz::Clusters::Order::Common)[0])
+      common["clusters"][0]["count"].as_i.should eq(4)
+      hits = JSON.parse(Gori::CLI::Run.show_saved_fuzz_clusters_for_spec(store, run, :json, matched_only: true)[0])
+      hits["clusters"].as_a.map(&.["id"].as_s).should eq(["0000000000000200"])
+
+      jsonl = Gori::CLI::Run.show_saved_fuzz_clusters_for_spec(store, run, :jsonl)[0].lines
+      jsonl.size.should eq(3)
+      JSON.parse(jsonl[2])["count"].as_i.should eq(4)
+    end
+  end
+
+  it "pages one cluster's members in the ordinary row shapes" do
+    with_clustered_run do |store, run|
+      json = JSON.parse(Gori::CLI::Run.show_saved_fuzz_cluster_members_for_spec(store, run, 0x401_i64,
+        :json, limit: 3)[0])
+      json["results"].as_a.map(&.["index"].as_i).should eq([0, 1, 2])
+      json["total_available"].as_i.should eq(4)
+      json["cluster"]["count"].as_i.should eq(4)
+      rest = JSON.parse(Gori::CLI::Run.show_saved_fuzz_cluster_members_for_spec(store, run, 0x401_i64,
+        :json, limit: 3, offset: 3)[0])
+      rest["results"].as_a.map(&.["index"].as_i).should eq([3])
+
+      text, note = Gori::CLI::Run.show_saved_fuzz_cluster_members_for_spec(store, run, 0x401_i64, :text)
+      text.lines.size.should eq(6) # header + cluster line + four rows
+      note.should contain("of 4 in cluster 0000000000000401")
+      jsonl = Gori::CLI::Run.show_saved_fuzz_cluster_members_for_spec(store, run, 0x200_i64, :jsonl)[0]
+      JSON.parse(jsonl)["index"].as_i.should eq(4)
+    end
   end
 end

@@ -177,6 +177,7 @@ module Gori::Tui
         Item.new("{fuzz.run} · {fuzz.stop}", "run · stop"),
         Item.new("↑/↓ · ↵", "results: select · open detail"),
         Item.new("{space:fuzz.sort} · {fuzz.matched}", "sort · matched-only"),
+        Item.new("{space:fuzz.group}", "group results by response shape · ←/→ fold · {space:fuzz.sort} orders rare/common/first", "fuzz.group"),
         Item.new("e", "rename the sub-tab (on the strip)"),
         Item.new("⇧←/→", "detail: scroll a long line sideways"),
       ]},

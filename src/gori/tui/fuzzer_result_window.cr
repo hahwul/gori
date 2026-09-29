@@ -164,7 +164,8 @@ module Gori::Tui
         result.matched?, result.incomplete?, extracted, nil, nil, nil,
         result.retried?, chain_error, result.grpc_status, grpc_message,
         result.timed_out?, result.resent_count, nil,
-        ws_close_code: result.ws_close_code, ws_frames_in: result.ws_frames_in)
+        ws_close_code: result.ws_close_code, ws_frames_in: result.ws_frames_in,
+        shape: result.shape)
     end
   end
 end

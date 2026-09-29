@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fuzzer: results group by response shape, one representative row per distinct answer with payload echoes, ids, numbers and volatile headers ignored, rare shapes first (TUI **Display… → Group by shape**, `gori run fuzz show --clusters`, MCP `fuzz_results` / `get_fuzz_run` with `clusters: true`) (#1351)
 - Import: hostile HAR, Burp, OpenAPI YAML and Postman/Insomnia files can no longer crash gori or lock a project — an out-of-range or impossible timestamp gets the import time (a project already holding one opens again), and a non-string YAML key, a `!!binary` value or a self-multiplying `{{variable}}` is refused with a message
 - JSON 100–512 levels deep in a captured body, JWT, cookie, GraphQL request or imported example (or a protobuf message ~33 levels deep) no longer fails with "Nesting of 100 is too deep" in the JWT and cookie tools, redaction, `jsonpath:` columns, retests, extract rules, `get_flow`, `gori run show --format json` or the OpenAPI export
 - TUI: an error while opening a project — reading a tab's stored data or drawing the first frame — is reported in the status line and `gori.log` like any later one, instead of ending gori before its first frame
