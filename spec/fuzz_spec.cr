@@ -408,6 +408,44 @@ describe F::Generator do
     seen.should eq(9)
   end
 
+  it "walks cluster bomb combinations in order, position 0 outermost" do
+    tmpl = F::Template.parse("GET /?a=§1§&b=§2§&c=§3§ HTTP/1.1\r\nHost: h\r\n\r\n")
+    sets = [F::PayloadSet.new(F::InlineList.new(["x", "y"])),
+            F::PayloadSet.new(F::InlineList.new(["p", "q", "r"])),
+            F::PayloadSet.new(F::InlineList.new(["1", "2"]))]
+    seen = [] of Array(String)
+    F::Generator.new(tmpl, sets, F::Config.new(mode: F::Mode::ClusterBomb)).each { |j| seen << j.payloads }
+    expected = [] of Array(String)
+    %w[x y].each { |a| %w[p q r].each { |b| %w[1 2].each { |c| expected << [a, b, c] } } }
+    seen.should eq(expected)
+    empty = sets.dup
+    empty[1] = F::PayloadSet.new(F::InlineList.new([] of String))
+    count = 0
+    F::Generator.new(tmpl, empty, F::Config.new(mode: F::Mode::ClusterBomb)).each { count += 1 }
+    count.should eq(0)
+  end
+
+  # One stack frame per position overflowed the Engine fiber's stack at ~40k positions: a
+  # SIGSEGV, so without the fix this example takes the spec binary down rather than failing.
+  # `auto_mark` reaches it from a captured form body of that many pairs.
+  it "walks a cluster bomb over 60k positions on a fiber without overflowing its stack" do
+    body = (0...60_000).map { |i| "k#{i}=1" }.join('&')
+    raw = F::Template.auto_mark("POST /api HTTP/1.1\r\nHost: t.test\r\n" \
+                                "Content-Type: application/x-www-form-urlencoded\r\n" \
+                                "Content-Length: #{body.bytesize}\r\n\r\n#{body}")
+    tmpl = F::Template.parse(raw)
+    tmpl.position_count.should be >= 60_000
+    g = F::Generator.new(tmpl, [F::PayloadSet.new(F::InlineList.new(["x"]))],
+      F::Config.new(mode: F::Mode::ClusterBomb))
+    done = Channel(Int32).new
+    spawn do
+      n = 0
+      g.each { n += 1 }
+      done.send(n)
+    end
+    done.receive.should eq(1)
+  end
+
   it "applies a position's inline Decoder chain to the payload on the wire" do
     reg = Gori::Decoder.default_registry
     chained = F::Template.parse("GET /?a=§1¦base64-encode§&b=§2§ HTTP/1.1\r\nHost: h\r\n\r\n")

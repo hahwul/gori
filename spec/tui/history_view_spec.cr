@@ -3289,3 +3289,31 @@ describe Gori::Tui::Keybind do
     Keybind.from_event(up).should eq(Gori::Verb::Chord.new("up"))
   end
 end
+
+describe "HistoryView time column out of range" do
+  # A `created_at` past year 9999 (an imported HAR with a `-23:59` offset on 9999-12-31, or a
+  # foreign database) raised in `Time.unix` on every frame the row was drawn.
+  it "draws a row whose instant Time cannot hold, in both time formats" do
+    prev_pv, prev_tf = Gori::Settings.history_preview, Gori::Settings.history_time_format
+    begin
+      Gori::Settings.history_preview = false
+      {"absolute", "relative"}.each do |fmt|
+        Gori::Settings.history_time_format = fmt
+        with_store do |store|
+          store.insert_flow(Gori::Store::CapturedRequest.new(
+            created_at: 253_402_387_139_000_000_i64, scheme: "http", host: "h.test", port: 80,
+            method: "GET", target: "/far", http_version: "HTTP/1.1",
+            head: "GET /far HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, source: Gori::FlowSource::Kind::Proxy))
+          view = HistoryView.new
+          view.reload(store)
+          backend = MemoryBackend.new(120, 12)
+          view.render_list(Screen.new(backend), Rect.new(0, 0, 120, 12))
+          (0...12).map { |y| backend.row(y) }.join("\n").should contain("/far")
+        end
+      end
+    ensure
+      Gori::Settings.history_preview = prev_pv
+      Gori::Settings.history_time_format = prev_tf
+    end
+  end
+end

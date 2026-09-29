@@ -3363,10 +3363,13 @@ module Gori::Tui
     # relative age per Settings.history_time_format. The absolute date makes flows
     # captured across days/sessions legible at a glance; relative is handier during a
     # live session. created_at is unix microseconds.
+    # `LocalTime.at`, not `Time.unix`: a `created_at` past year 9999 (an imported or foreign
+    # row) raised on every frame the row was drawn, and the tab never drew again.
     private def fmt_time(created_at : Int64) : String
-      t = Time.unix(created_at // 1_000_000)
+      t = LocalTime.at(created_at)
+      return "—" unless t
       return fmt_time_relative(t) if Settings.history_time_format == "relative"
-      LocalTime.of(t).to_s("%m-%d %H:%M:%S")
+      t.to_s("%m-%d %H:%M:%S")
     end
 
     # `fmt_time` through the memo — for the ABSOLUTE format only. A relative age is a

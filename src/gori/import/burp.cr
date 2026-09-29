@@ -103,10 +103,10 @@ module Gori
         time =
           begin
             Time.parse_rfc3339(s)
-          rescue Time::Format::Error
+          rescue Time::Format::Error | ArgumentError
             java_date(s)
           end
-        time ? time.to_unix * 1_000_000 : now
+        time && Builder.representable?(time) ? time.to_unix * 1_000_000 : now
       end
 
       private def self.java_date(s : String) : Time?
@@ -115,7 +115,7 @@ module Gori
         zone = m[2].upcase
         loc = zone.in?("UTC", "GMT", "Z") ? Time::Location::UTC : Time::Location.local
         Time.parse("#{m[1]} #{m[3]}", "%b %d %H:%M:%S %Y", loc)
-      rescue Time::Format::Error
+      rescue Time::Format::Error | ArgumentError
         nil
       end
 

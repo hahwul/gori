@@ -148,6 +148,20 @@ private def reimport(har : String) : Gori::Store::FlowDetail
 end
 
 describe Gori::Export::Har do
+  # `iso_micros` raised on a `created_at` outside the years 1–9999 and cut the HAR off
+  # mid-document; `startedDateTime` is required, so it is clamped to the nearest end.
+  it "writes a startedDateTime for an instant Time cannot hold" do
+    with_store do |store|
+      far = capture_flow(store, created_at: 253_402_387_139_000_000_i64)
+      early = capture_flow(store, created_at: -62_135_683_140_000_000_i64)
+      har, report = export([far, early])
+      report.written.should eq(2)
+      entries = JSON.parse(har)["log"]["entries"].as_a
+      entries[0]["startedDateTime"].as_s.should eq("9999-12-31T23:59:59.999Z")
+      entries[1]["startedDateTime"].as_s.should eq("0001-01-01T00:00:00.000Z")
+    end
+  end
+
   it "writes a HAR 1.2 log with the fields a reader needs" do
     with_store do |store|
       har, report = export([capture_flow(store)])

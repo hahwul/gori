@@ -51,6 +51,19 @@ private def items(*body : String) : String
 end
 
 describe Gori::Import::Burp do
+  # A legal wall-clock date whose offset carries it past year 9999 stored a `created_at` that
+  # raised in every later `Time.unix`; an impossible date raised ArgumentError, not the
+  # `Time::Format::Error` the parser rescued. Both read as an unparseable stamp: "now".
+  it "stamps an out-of-range or impossible time as now instead of storing or raising it" do
+    req = "GET / HTTP/1.1\r\nHost: target.test\r\n\r\n"
+    before = Time.utc.to_unix * 1_000_000
+    {"9999-12-31T23:59:59-23:59", "2024-02-31T00:00:00Z"}.each do |t|
+      result = parse(items(item("https://target.test/", req, time: t)))
+      result.flows.size.should eq(1)
+      result.flows.first.request.created_at.should be >= before
+    end
+  end
+
   it "imports the request AND response of a saved item" do
     req = "POST /api/x?q=1 HTTP/1.1\r\nHost: target.test\r\nContent-Length: 9\r\n\r\nhello=abc"
     resp = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"ok\":true}"

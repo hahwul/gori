@@ -1,4 +1,5 @@
 require "../h2/head_codec" # PROTOCOL_MARKER — see `extended_connect_request?`
+require "../grow_read"
 
 module Gori::Proxy::WS
   # RFC 6455 opcodes.
@@ -402,11 +403,14 @@ module Gori::Proxy::WS
                      idle : Time::Span? = nil) : Frame?
     hlen = h.bytes.size
     n = h.len.to_i
-    buf = Bytes.new(hlen + n)
-    h.bytes.copy_to(buf[0, hlen])
-    if n > 0
-      ok = deadline ? fill_to_deadline?(io, buf[hlen, n], deadline, idle) : io.read_fully?(buf[hlen, n])
-      return nil unless ok
+    if deadline
+      buf = Bytes.new(hlen + n)
+      h.bytes.copy_to(buf[0, hlen])
+      return nil if n > 0 && !fill_to_deadline?(io, buf[hlen, n], deadline, idle)
+    else
+      # The relay path: `GrowRead`, because `n` is only the peer's claim — sized from the
+      # header alone, a 16 MiB length and a stall held 16 MiB per connection.
+      buf = GrowRead.read?(io, h.bytes, n) || return nil
     end
 
     payload =

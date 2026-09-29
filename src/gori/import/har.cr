@@ -488,16 +488,20 @@ module Gori
       # of flows captured inside one second all collapsed onto the same timestamp.
       private def self.parse_started(s : String) : Int64
         return Time.utc.to_unix_ms * 1_000 unless s.presence
+        # `ArgumentError` beside `Time::Format::Error`: a well-formed stamp naming an impossible
+        # date (`2024-02-31`, hour 25) raises it, and the entry's own rescue then dropped the
+        # whole request.
         time =
           begin
             Time.parse_rfc3339(s)
-          rescue Time::Format::Error
+          rescue Time::Format::Error | ArgumentError
             begin
               Time.parse(s.gsub(/\.\d+/, ""), "%FT%T", Time::Location::UTC)
-            rescue Time::Format::Error
+            rescue Time::Format::Error | ArgumentError
               Time.utc
             end
           end
+        time = Time.utc unless Builder.representable?(time)
         time.to_unix_ms * 1_000
       end
 

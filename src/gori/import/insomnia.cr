@@ -48,7 +48,7 @@ module Gori
           found += 1
           # One bad request skips; the rest of the export still imports.
           begin
-            pairs << resource_to_flow(now, h, vars, missing, prov)
+            pairs << Vars.per_entry { resource_to_flow(now, h, vars, missing, prov) }
           rescue
             skipped += 1
           end

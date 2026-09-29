@@ -170,8 +170,11 @@ module Gori::Tui
       earliest = store.earliest_created_at
       # earliest_created_at is unix MICROSECONDS (the flows.created_at unit) — decoder
       # to seconds for Time.unix, like History's fmt_time does. (Passing micros makes
-      # Time.unix raise "seconds out of range".)
-      @created = earliest ? Time.unix(earliest // 1_000_000) : project.created
+      # Time.unix raise "seconds out of range".) Through `LocalTime.at`, because a stored
+      # micros value past year 9999 raises the same way — and this runs in the Runner's first
+      # `reload`, before the tick loop that absorbs a raise, so one imported row with such a
+      # stamp made the project impossible to open.
+      @created = (earliest && LocalTime.at(earliest)) || project.created
 
       # An UNSAVED buffer is not refreshed from the store: `save` only clears `@desc_dirty`
       # once the write committed, so a still-dirty buffer means the operator's text has not

@@ -212,6 +212,27 @@ describe "ProjectView created time" do
   end
 end
 
+describe "ProjectView created time out of range" do
+  # An imported HAR dated `9999-12-31T23:59:59-23:59` stored an instant past year 9999, and
+  # `reload` — which the Runner calls before its tick loop can absorb a raise — read it back
+  # through `Time.unix`: the project could not be opened at all.
+  it "opens a project whose earliest flow is outside the years Time can hold" do
+    {253_402_387_139_000_000_i64, -62_135_683_140_000_000_i64}.each do |us|
+      with_store do |store|
+        store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: us, scheme: "http", host: "h.test", port: 80,
+          method: "GET", target: "/", http_version: "HTTP/1.1",
+          head: "GET / HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
+        project = Gori::Project.new("t", File.tempname("gori-projview-range"))
+        view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
+        view.reload(project, store)
+        b = MemoryBackend.new(120, 30)
+        view.render(Screen.new(b), Rect.new(0, 0, 120, 30), focused: false)
+      end
+    end
+  end
+end
+
 describe "ProjectView SCOPE list" do
   it "shows the onboarding card (art + TARGETS card) when empty" do
     with_store do |store|

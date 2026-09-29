@@ -36,6 +36,19 @@ module Gori
         {body, true_size > size, true_size}
       end
 
+      # Whether a timestamp parsed from an import file names an instant `Time` can hold. The
+      # parsers accept an offset that carries a legal wall-clock date past either end of the
+      # range (`9999-12-31T23:59:59-23:59` is year 10000 in UTC), and the resulting `created_at`
+      # then raises in every `Time.unix` that reads it back — the TUI's Project tab did so before
+      # its first frame, so the project could not be opened at all. An importer treats such a
+      # stamp like an unparseable one.
+      def self.representable?(time : Time) : Bool
+        Time.unix(time.to_unix)
+        true
+      rescue ArgumentError
+        false
+      end
+
       # Add generated query parameters before a URL fragment: the query is part of the request
       # target, while a `#fragment` is not sent and must not swallow it.
       def self.append_query(url : String, query : String) : String

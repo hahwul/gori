@@ -322,7 +322,8 @@ module Gori
       # 0644: public certificates, read by whatever the operator runs in the shell.
       DurableFile.write(path, content, perm: File::Permissions.new(0o644))
       path
-    rescue ex : File::Error | IO::Error
+    rescue ex : File::Error | IO::Error | Gori::Error
+      # `Gori::Error` too: `Paths.ensure_dir` converts a failed mkdir into one.
       raise Error.new("cannot write the CA bundle under #{dir}: #{ex.message}")
     end
 

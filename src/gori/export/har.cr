@@ -688,10 +688,18 @@ module Gori
       # Unix micros → RFC 3339 with milliseconds, the precision HAR generators conventionally
       # emit. `Import::Har.parse_started` keeps those milliseconds, so export→import→export
       # is stable (the sub-millisecond remainder does not survive a re-import).
+      #
+      # A `created_at` outside the years 1–9999 (a foreign or hand-edited row) raised here and
+      # cut the HAR off mid-document, so it is clamped to the nearest instant `Time` can hold:
+      # `startedDateTime` is required, and the clamped end is the closest true statement.
       private def self.iso_micros(micros : Int64) : String
+        micros = micros.clamp(MIN_MICROS, MAX_MICROS)
         (Time.unix(micros // 1_000_000) + (micros % 1_000_000).microseconds)
           .to_utc.to_rfc3339(fraction_digits: 3)
       end
+
+      private MIN_MICROS = Time.utc(1, 1, 1).to_unix * 1_000_000
+      private MAX_MICROS = Time.utc(9999, 12, 31, 23, 59, 59, nanosecond: 999_000_000).to_unix_ms * 1_000
 
       # Unix micros → a Unix timestamp in SECONDS, the unit Chrome writes
       # `_webSocketMessages[].time` in.
