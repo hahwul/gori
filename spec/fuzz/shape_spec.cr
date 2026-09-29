@@ -123,12 +123,30 @@ describe Gori::Fuzz::Shape do
     base.with_ws(F::WsOutcome.failed).shape.should eq(base.shape)
   end
 
-  it "reads a long body's head and tail window, and its size class" do
-    filler = "<p>row</p>\n" * 10_000 # ~110 KB, past SCAN_HEAD + SCAN_TAIL
-    base = shape("<h1>Welcome</h1>#{filler}<footer>ok</footer>")
-    shape("<h1>Denied!!</h1>#{filler}<footer>ok</footer>").should_not eq(base)
-    shape("<h1>Welcome</h1>#{filler}<footer>no</footer>").should_not eq(base)
-    shape("<h1>Welcome</h1>#{filler * 3}<footer>ok</footer>").should_not eq(base)
+  it "reads a long body's first BODY_UNITS units, and whether it went on" do
+    filler = "<p>row</p>\n" * 10_000 # ~90k units, well past the window
+    base = shape("<h1>Welcome</h1>#{filler}")
+    shape("<h1>Denied!!</h1>#{filler}").should_not eq(base)
+    # Past the window only "the body went on" is kept: a short page with the same start differs,
+    shape("<h1>Welcome</h1><p>row</p>\n").should_not eq(base)
+    # but a difference far below the window does not split the answer.
+    shape("<h1>Welcome</h1>#{filler}<footer>no</footer>").should eq(base)
+  end
+
+  it "keeps a long page that echoes the payload near its top in one shape" do
+    # Search and result pages are the big ones, and they echo the query first.
+    filler = "<p>row</p>\n" * 10_000
+    shape("<h1>You searched apple</h1>#{filler}", "apple")
+      .should eq(shape("<h1>You searched banana-split-sundae</h1>#{filler}", "banana-split-sundae"))
+  end
+
+  it "masks a payload echoed JSON-escaped" do
+    a = shape(%({"error":"no such user: \\"o'hara\\""}), %(o'hara"))
+    b = shape(%({"error":"no such user: \\"x\\" OR 1=1--\\""}), %(x" OR 1=1--"))
+    a.should eq(b)
+    go1 = shape(%({"q":"\\u003cscript\\u003e"}), "<script>")
+    go2 = shape(%({"q":"\\u003cimg src=x\\u003e"}), "<img src=x>")
+    go1.should eq(go2)
   end
 
   it "does not mask a payload too short to be told from the page's own text" do
@@ -140,7 +158,7 @@ describe Gori::Fuzz::Shape do
     # FNV-1a over a versioned normalization, never the per-process seeded `#hash`. A change
     # here is a change to every persisted id — bump `Shape::VERSION` with it.
     F::Shape.hex(shape("<p>hello</p>")).should eq(F::Shape.hex(shape("<p>hello</p>")))
-    F::Shape.hex(shape("<p>hello</p>")).should eq("31f349134549627f")
+    F::Shape.hex(shape("<p>hello</p>")).should eq("29c7a9bebbb25c1a")
   end
 
   it "round-trips its printed id" do

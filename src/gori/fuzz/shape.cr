@@ -1,4 +1,5 @@
 require "html"
+require "json"
 require "uri"
 
 module Gori
@@ -9,8 +10,8 @@ module Gori
     # handful of distinct answers it actually got.
     #
     # Computed ONCE, in `Matcher#build`, over the body that call already decoded (P6: never a
-    # second decode) and bounded to `SCAN_HEAD + SCAN_TAIL` bytes of it. The key is the response's outcome
-    # rather than its bytes:
+    # second decode) and bounded to the body's first `BODY_UNITS` normalized units. The key is
+    # the response's outcome rather than its bytes:
     #
     #   * the outcome class — a response, or a failed send folded to a coarse `error_class`
     #     (raw error text names hosts, ports and timings, and would split every row);
@@ -20,8 +21,8 @@ module Gori
     #   * the SET of response header names minus the ones that vary per response or with body
     #     size (`VOLATILE_HEADERS`), plus the normalized `Location` and `Content-Type` values;
     #   * the decoded body with the job's OWN payload bytes masked (so a reflected payload does
-    #     not make every row its own shape), digit runs, hex-ish and long random tokens
-    #     collapsed, and whitespace runs folded.
+    #     not make every row its own shape) — as sent, and HTML-, percent- and JSON-escaped —
+    #     digit runs, hex-ish and long random tokens collapsed, and whitespace runs folded.
     #
     # Deliberately NOT in the key: `length`, `words` and `lines`. A reflected payload moves all
     # three by its own size, which is exactly the split the masking exists to prevent — the
@@ -34,17 +35,26 @@ module Gori
     module Shape
       VERSION = 1_u8
 
-      # Decoded body bytes folded into the signature: the first `SCAN_HEAD`, and for a longer
-      # body its last `SCAN_TAIL` (where a result count or a trailing error block sits) plus a
-      # log2 size bucket. The normalization is ~1.3 ns/byte on token-dense HTML
+      # How much of the decoded body the signature reads: its first `BODY_UNITS` NORMALIZED
+      # units — a masked payload, a folded value, a word, a whitespace run or one punctuation
+      # byte each count one — and never more than `BODY_RAW_MAX` raw bytes.
+      #
+      # Units, not bytes, because the cut has to land on the same CONTENT in two responses
+      # that differ only by the payload they echo: a search page that echoes its query at the
+      # top moves every later byte by the payload's length, so a raw-byte window ended at a
+      # different place in the page for every payload (and split the one cluster it exists
+      # to form). Whether the body continued past the window is folded in as one bit.
+      #
+      # `BODY_RAW_MAX` is the cost bound: the normalization is ~1.3 ns/byte on token-dense HTML
       # (`bench/fuzz_shape_bench.cr`), so a whole 8 MiB capture would cost milliseconds per
-      # response; this bounds it to ~100 µs, the order of the `count_metrics` pass beside it.
-      SCAN_HEAD = 64 * 1024
-      SCAN_TAIL = 16 * 1024
+      # response. Only a body of long unbroken tokens reaches it before `BODY_UNITS`.
+      BODY_UNITS   = 16_384
+      BODY_RAW_MAX = 256 * 1024
       # A payload shorter than this is not masked: masking every `a` in a body would make two
       # identical bodies hash differently for the payloads `a` and `b`.
       MIN_NEEDLE   = 3
       private HTML_SPECIAL = StaticArray['&'.ord.to_u8, '<'.ord.to_u8, '>'.ord.to_u8, '"'.ord.to_u8, '\''.ord.to_u8]
+      private JSON_SPECIAL = StaticArray['"'.ord.to_u8, '\\'.ord.to_u8, '<'.ord.to_u8, '>'.ord.to_u8, '&'.ord.to_u8]
 
       # Shared and never mutated: the default of `compute`, so a caller without a job pays no
       # allocation for it.
@@ -151,8 +161,9 @@ module Gori
           # Built only when they can differ: the common payload is plain text, and two string
           # allocations per response to learn that would be the fingerprint's whole garbage.
           if payload.valid_encoding? && payload.bytesize >= MIN_NEEDLE
-            add_needle(list, HTML.escape(payload).to_slice) if payload.each_byte.any? { |b| HTML_SPECIAL.includes?(b) }
-            add_needle(list, URI.encode_www_form(payload, space_to_plus: false).to_slice) unless payload.each_byte.all? { |b| URI.unreserved?(b) }
+            add_needle(list, HTML.escape(payload).to_slice) if payload.to_slice.any? { |b| HTML_SPECIAL.includes?(b) }
+            add_needle(list, URI.encode_www_form(payload, space_to_plus: false).to_slice) unless payload.to_slice.all? { |b| URI.unreserved?(b) }
+            add_json_needles(list, payload)
           end
         end
         job.payload_spans.each do |(start, len)|
@@ -166,6 +177,17 @@ module Gori
         # Longest first, so a payload and the longer escaped form containing it mask as one span.
         list.sort! { |a, b| b.size <=> a.size }
         list
+      end
+
+      # A JSON API echoes a payload inside a string literal: `"` as `\"`, a control byte as
+      # `\n`/`\u0001`, and — Go's `encoding/json`, among others — `<`, `>` and `&` as `\u003c`,
+      # `\u003e` and `\u0026`. Both spellings, built only for a payload that has such a byte.
+      private def self.add_json_needles(list : Array(Bytes), payload : String) : Nil
+        return unless payload.to_slice.any? { |b| b < 0x20 || JSON_SPECIAL.includes?(b) }
+        std = payload.to_json[1...-1]
+        add_needle(list, std.to_slice) unless std == payload
+        go = std.gsub('<', "\\u003c").gsub('>', "\\u003e").gsub('&', "\\u0026")
+        add_needle(list, go.to_slice) unless go == std
       end
 
       private def self.add_needle(list : Array(Bytes), bytes : Bytes) : Nil
@@ -190,14 +212,9 @@ module Gori
         if status
           h = mix_head(h, head, needles)
           h = mix(h, 'B'.ord.to_u8)
-          if body.size <= SCAN_HEAD + SCAN_TAIL
-            h = mix_text(h, body, needles)
-          else
-            h = mix_text(h, body[0, SCAN_HEAD], needles)
-            h = mix(h, 'T'.ord.to_u8)
-            h = mix_text(h, body[body.size - SCAN_TAIL, SCAN_TAIL], needles)
-            h = mix_i32(h, 64 - body.size.to_u64.leading_zeros_count)
-          end
+          raw = body.size > BODY_RAW_MAX ? body[0, BODY_RAW_MAX] : body
+          h, whole = mix_text(h, raw, needles, BODY_UNITS)
+          h = mix(h, whole && raw.size == body.size ? 1_u8 : 0_u8)
         end
         h.to_i64!
       end
@@ -282,17 +299,20 @@ module Gori
         h = mix(h, 'H'.ord.to_u8)
         names.each { |v| h = mix_u64(h, v) }
         h = mix(h, 'L'.ord.to_u8)
-        h = mix_text(h, location, needles)
+        h = mix_text(h, location, needles)[0]
         h = mix(h, 'C'.ord.to_u8)
-        mix_text(h, content_type, needles)
+        mix_text(h, content_type, needles)[0]
       end
 
       # One pass over `bytes`: payload spans, digit runs, id-like tokens and
       # whitespace runs each fold to a marker; every other byte folds as itself. The normalized
       # stream goes through a `Sink`, which packs it eight bytes to a multiply — this runs over
-      # up to `SCAN_HEAD + SCAN_TAIL` bytes of every response.
-      private def self.mix_text(h : UInt64, bytes : Bytes, needles : Array(Bytes)) : UInt64
+      # up to `BODY_UNITS` units of every response. Returns the hash and whether it read to the
+      # end of `bytes` (rather than stopping at `unit_cap`).
+      private def self.mix_text(h : UInt64, bytes : Bytes, needles : Array(Bytes),
+                                unit_cap : Int32 = Int32::MAX) : {UInt64, Bool}
         limit = bytes.size
+        units = 0
         first = StaticArray(Bool, 256).new(false)
         needles.each { |nd| first[nd.unsafe_fetch(0)] = true }
         any_needle = !needles.empty?
@@ -300,13 +320,15 @@ module Gori
         cls = CLASS.to_unsafe
         i = 0
         while i < limit
+          break if units >= unit_cap
+          units += 1 # every branch below folds exactly one unit
           b = bytes.unsafe_fetch(i)
           c = cls[b]
           if any_needle && first.unsafe_fetch(b) && (len = needle_at(bytes, i, limit, needles))
             sink.mark(MARK_PAYLOAD)
             i += len
           elsif c >= C_DIGIT
-            j, kind, word = scan_token(bytes, i, limit)
+            j, kind, word = scan_token(bytes, i, limit, cls)
             kind == 0_u8 ? sink.word(word) : sink.mark(kind)
             i = j
           elsif c == C_SPACE
@@ -319,7 +341,7 @@ module Gori
             i += 1
           end
         end
-        mix_u64(h, sink.finish)
+        {mix_u64(h, sink.finish), i >= limit}
       end
 
       # Byte classes for `mix_text`, one load per byte. Ordered so `>= C_DIGIT` is "part of a
@@ -397,8 +419,8 @@ module Gori
       # One pass over the token at `i`: where it ends, and either the marker it folds to
       # (`MARK_VALUE`) or 0 with the hash of its normalized form — so a kept word costs one
       # sink step rather than one per letter.
-      private def self.scan_token(bytes : Bytes, i : Int32, limit : Int32) : {Int32, UInt8, UInt64}
-        cls = CLASS.to_unsafe
+      private def self.scan_token(bytes : Bytes, i : Int32, limit : Int32,
+                                  cls : Pointer(UInt8)) : {Int32, UInt8, UInt64}
         j = i
         digit = false
         alpha = false

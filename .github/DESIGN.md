@@ -4279,7 +4279,8 @@ four open questions, answered:
   `Result#with_ws`, the one seam that has it), the set of header names minus the ones that vary
   per response or with body size, the normalized `Location` and `Content-Type` values, and the
   decoded body with the job's own payload bytes masked (as generated, as spliced after a `¦chain`,
-  HTML-escaped and percent-encoded), digit runs, id-like tokens and whitespace runs folded. NOT
+  HTML-, percent- and JSON-escaped, the last also Go-style `\u003c`), numbers and id-like tokens
+  folded to one value marker (a random hex id is sometimes all digits), whitespace runs folded. NOT
   `length`, `words` or `lines`: a reflected payload moves all three, which is the split the
   masking exists to prevent; a cluster reports their range. No JSON-structure parse: the token
   normalization already folds values, and a structural walk would be a second decode (P6).
@@ -4296,11 +4297,24 @@ four open questions, answered:
   two tools that already page a run's rows keep one paging contract and one place an agent looks.
   The default row page is byte-identical.
 
-Bounded throughout: the fingerprint reads the first 64 KiB and the last 16 KiB of the decoded body
-(~1.3 ns/byte, `bench/fuzz_shape_bench.cr`, 0 B/op), `Clusters` holds at most 4096 shapes and
+Bounded throughout: the fingerprint reads the decoded body's first 16,384 NORMALIZED units (a
+masked payload, a value, a word, a whitespace run or a punctuation byte each count one), capped at
+256 KiB raw, plus one bit for whether the body went on (~46 µs on a large page, 0 B/op,
+`bench/fuzz_shape_bench.cr`). Units, not bytes: a result page that echoes the query at its top
+shifts every later byte by the payload's length, so a raw-byte window ended at a different place
+for every payload and split the very cluster it existed to form. The price is that a difference
+far below the window does not split a shape; the cluster's length range still shows it.
+`Clusters` holds at most 4096 shapes and
 counts later new ones as `overflow_rows`, and a saved run aggregates from the keyset-paged scalar
 stream. There is deliberately no SQL `GROUP BY` twin: legacy rows cannot be grouped in SQL, and a
 second implementation of one predicate is the drift the Scope SQL/in-memory pair already taught.
 A live MCP job's aggregate sees every result while its row cache keeps only `interesting?` rows,
 so a cluster of ordinary answers may list no member rows; the page says so (`members_retained`,
-`members_note`) instead of implying the cluster is empty.
+`members_note`) instead of implying the cluster is empty. The TUI's header drawn from a cluster's
+metrics-only representative (its members all evicted from the display window) says the row left
+the window, never "not retained", and seeds no Repeater/Comparer tab.
+
+A known gap: a gRPC body is hashed as its wire bytes, so a payload that changes a message's length
+also changes its 5-byte prefix and varint lengths, and a gRPC sweep can split one answer into a
+few shapes by payload length. Deframing with `Grpc.scan_wire` first is the fix when it matters;
+`grpc_status` is already its own key part, so a denied call never merges with a granted one.

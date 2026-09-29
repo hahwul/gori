@@ -2,14 +2,14 @@
 #
 # `Matcher#build` runs once per response, and `Shape.compute` now runs inside it over the body
 # that call already decoded. This measures it against the build it rides in, on a 216 KB HTML
-# body, a 1.2 MB one past the scan window, and a small JSON answer,
+# body, a 1.2 MB one, and a small JSON answer,
 # with and without a reflected payload to mask. The number that matters is the allocation
 # column: the fingerprint must not add a per-response buffer (P6).
 #
-# Measured (M-series, --release): `Shape.compute` is 0 B/op; `Shape.needles` 176 B/op, only for
-# the needle Array (the HTML/percent variants are built only for a payload that has them). Time:
-# ~0.35 µs on the small answer, ~105 µs on anything past the scan window — ~1.3 ns/byte of
-# token-dense HTML, flat from 184 KB to 1.2 MB because only `SCAN_HEAD + SCAN_TAIL` is read.
+# Measured (M-series, --release): `Shape.compute` is 0 B/op; `Shape.needles` 80 B/op, only for the
+# needle Array (the HTML/percent/JSON variants are built only for a payload that has them).
+# Time: ~0.6 µs on the small answer, ~46 µs on anything past the scan window — flat from 184 KB
+# to 1.2 MB because only the first `BODY_UNITS` normalized units are read.
 #
 # Build: crystal build bench/fuzz_shape_bench.cr -o bin/fuzz_shape_bench --release
 # Run:   bin/fuzz_shape_bench

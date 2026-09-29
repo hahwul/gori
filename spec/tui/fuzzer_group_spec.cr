@@ -108,6 +108,29 @@ describe "FuzzerView grouped by response shape" do
     backend.contains?("▸×1").should be_true
   end
 
+  it "never claims a header drawn from an evicted representative is not retained, and seeds nothing from it" do
+    view = grouped_fuzzer(FuzzerResultWindow.new(row_cap: 2))
+    view.toggle_grouped
+    view.selected_result.not_nil!.index.should eq(3) # B: its only member was evicted
+    view.outside_window?(view.selected_result.not_nil!).should be_true
+    view.result_display_truncated?(view.selected_result.not_nil!).should be_true
+    view.open_detail
+    text = view.detail_plain_lines.join('\n')
+    text.should contain("has left the bounded display window")
+    text.should_not contain("not retained")
+    view.result_request_note(view.selected_result.not_nil!).not_nil!.should contain("left the bounded display window")
+  end
+
+  it "says how many of an outgrown cluster's members the window still lists" do
+    view = grouped_fuzzer(FuzzerResultWindow.new(row_cap: 2))
+    view.toggle_grouped
+    view.results_move(1) # C: both members still in the window
+    backend = MemoryBackend.new(160, 30)
+    view.render(Screen.new(backend), Rect.new(0, 0, 160, 30))
+    backend.contains?("0/3 in window").should be_true # A
+    backend.contains?("2/2 in window").should be_false
+  end
+
   it "draws folded and open headers, and the matched mark for a cluster with a hit" do
     view = grouped_fuzzer
     view.toggle_grouped

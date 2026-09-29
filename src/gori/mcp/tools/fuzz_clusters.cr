@@ -40,31 +40,40 @@ module Gori
           Fuzz::Clusters::Order.parse?(order) || Fuzz::Clusters::Order::Rare)
       end
 
-      # The cluster list page. `matched_only` keeps the clusters holding at least one matcher hit.
-      private def emit_fuzz_cluster_page(j : JSON::Builder, clusters : Fuzz::Clusters,
-                                         args : FuzzClusterArgs, matched_only : Bool,
-                                         req_off : Int64?, req_lim : Int64?,
-                                         &row : Fuzz::Result ->) : Nil
+      # One page of a cluster list: the clusters on it, and the paging facts about it.
+      private record FuzzClusterPage, page : Array(Fuzz::Clusters::Cluster), total : Int32,
+        offset : Int32, limit : Int32
+
+      # `matched_only` keeps the clusters holding at least one matcher hit.
+      private def fuzz_cluster_page(clusters : Fuzz::Clusters, args : FuzzClusterArgs,
+                                    matched_only : Bool, req_off : Int64?, req_lim : Int64?) : FuzzClusterPage
         offset = clamp_nonneg(req_off)
         limit = clamp(req_lim, 50, 500)
         list = clusters.sorted(args.order)
         list.select! { |c| c.matched > 0 } if matched_only
-        last = offset < list.size ? Math.min(offset + limit, list.size) : offset
+        FuzzClusterPage.new(list[offset, limit]? || [] of Fuzz::Clusters::Cluster, list.size, offset, limit)
+      end
+
+      private def emit_fuzz_cluster_page(j : JSON::Builder, clusters : Fuzz::Clusters, pg : FuzzClusterPage,
+                                         args : FuzzClusterArgs, matched_only : Bool,
+                                         req_off : Int64?, req_lim : Int64?,
+                                         &row : Fuzz::Result ->) : Nil
+        last = pg.offset + pg.page.size
         j.field("clusters") do
           j.array do
-            (offset...last).each do |k|
-              Fuzz::Clusters.emit(j, list[k], ->(t : String) { Serialize.text(t) }) { |rep| row.call(rep) }
+            pg.page.each do |c|
+              Fuzz::Clusters.emit(j, c, ->(t : String) { Serialize.text(t) }) { |rep| row.call(rep) }
             end
           end
         end
         j.field "cluster_order", args.order.label
-        j.field "returned", last - offset
-        j.field "offset", offset
-        j.field "limit", limit
-        emit_clamp(j, req_off, offset, req_lim, limit)
-        j.field "total_available", list.size
-        j.field "has_more", last < list.size
-        j.field "page_complete", last >= list.size
+        j.field "returned", pg.page.size
+        j.field "offset", pg.offset
+        j.field "limit", pg.limit
+        emit_clamp(j, req_off, pg.offset, req_lim, pg.limit)
+        j.field "total_available", pg.total
+        j.field "has_more", last < pg.total
+        j.field "page_complete", last >= pg.total
         j.field "matched_only", matched_only
         Fuzz::Clusters.emit_summary(j, clusters)
       end
@@ -118,14 +127,18 @@ module Gori
         end
 
         # The representative's row from the cache when it is there, so its flow_id (the
-        # History evidence) rides along; the cluster's metrics-only copy otherwise.
+        # History evidence) rides along; the cluster's metrics-only copy otherwise. The page's
+        # flow ids are validated in one Store read, not one per cluster.
+        pg = fuzz_cluster_page(fjob.clusters, args, matched_only, req_off, req_lim)
         cached = {} of Int64 => Int32
         rows.each_with_index { |r, i| cached[r.index] = i }
+        positions = pg.page.compact_map { |c| cached[c.representative.index]? }
+        flow_of = positions.zip(validated_fuzz_flow_ids(fjob, positions)).to_h
         Result.new(JSON.build do |j|
           j.object do
-            emit_fuzz_cluster_page(j, fjob.clusters, args, matched_only, req_off, req_lim) do |rep|
+            emit_fuzz_cluster_page(j, fjob.clusters, pg, args, matched_only, req_off, req_lim) do |rep|
               if pos = cached[rep.index]?
-                Serialize.fuzz_result(j, rows[pos], validated_fuzz_flow_ids(fjob, [pos]).first)
+                Serialize.fuzz_result(j, rows[pos], flow_of[pos]?)
               else
                 Serialize.fuzz_result(j, rep)
               end
@@ -169,8 +182,11 @@ module Gori
         Result.new(JSON.build do |j|
           j.object do
             j.field("run") { Serialize.saved_fuzz_run(j, run, store.fuzz_result_count(run.id)) }
-            emit_fuzz_cluster_page(j, clusters, args, bool_arg(h, "matched_only", false),
-              optional_int_arg(h, "offset"), optional_int_arg(h, "limit")) do |rep|
+            matched_only = bool_arg(h, "matched_only", false)
+            req_off = optional_int_arg(h, "offset")
+            req_lim = optional_int_arg(h, "limit")
+            pg = fuzz_cluster_page(clusters, args, matched_only, req_off, req_lim)
+            emit_fuzz_cluster_page(j, clusters, pg, args, matched_only, req_off, req_lim) do |rep|
               j.object { Serialize.fuzz_result_fields(j, rep) }
             end
           end

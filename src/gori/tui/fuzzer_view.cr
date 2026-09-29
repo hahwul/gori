@@ -67,7 +67,8 @@ module Gori::Tui
 
     # One line of the GROUPED results list (#1351): a cluster's header — its representative
     # row — or one of its members when the cluster is expanded. Parallel to `sorted_results`.
-    record GroupLine, cluster : Fuzz::Clusters::Cluster, header : Bool
+    # `in_window` is how many of the cluster's members the display window still holds.
+    record GroupLine, cluster : Fuzz::Clusters::Cluster, header : Bool, in_window : Int32 = 0
 
     STATUS_MAX_ROWS =  6 # ≤ this many distinct codes → per-code bars; else collapse to classes
     DIST_MIN_TOTAL  = 60 # narrowest bottom width that still earns a sidebar
@@ -231,6 +232,9 @@ module Gori::Tui
       @expanded_rev = 0
       @clusters = Fuzz::Clusters.new
       @group_lines = [] of GroupLine
+      # Header rows drawn from a cluster's metrics-only representative (no member left in the
+      # window), by result index — see `outside_window?`.
+      @outside_reps = Set(Int64).new
       # §-region offsets, recomputed only when the buffer changes (keyed on @editor.edits).
       # Backs BOTH the template tint colours and the Sets→marker chips, so they can't disagree.
       @marker_text_rev = -1
@@ -1079,8 +1083,16 @@ module Gori::Tui
       @result_window.bytes
     end
 
+    # Also true for a grouped header drawn from its cluster's own metrics-only representative
+    # (#1351) — the window no longer holds that row, so neither pane has its bytes to show and
+    # no Repeater/Comparer seed may be cut from it.
     def result_display_truncated?(result : Fuzz::Result) : Bool
-      @result_window.projected?(result.index)
+      @result_window.projected?(result.index) || outside_window?(result)
+    end
+
+    # A grouped header whose representative has left the display window (#1351).
+    def outside_window?(result : Fuzz::Result) : Bool
+      @grouped && @outside_reps.includes?(result.index)
     end
 
     def results_windowed? : Bool
@@ -2352,19 +2364,26 @@ module Gori::Tui
       rows.each { |r| (members[Fuzz::Clusters.key(r)[0]] ||= [] of Fuzz::Result) << r }
       lines = [] of GroupLine
       out = [] of Fuzz::Result
+      outside = Set(Int64).new
       @clusters.sorted(@group_order).each do |c|
         next if @matched_only && c.matched == 0
         mem = members[c.id]?.try(&.sort_by!(&.index)) || [] of Fuzz::Result
-        out << (mem.first? || c.representative)
-        lines << GroupLine.new(c, true)
+        if first = mem.first?
+          out << first
+        else
+          out << c.representative
+          outside << c.representative.index
+        end
+        lines << GroupLine.new(c, true, mem.size)
         next unless @expanded.includes?(c.id)
         mem.each_with_index do |m, k|
           next if k == 0
           out << m
-          lines << GroupLine.new(c, false)
+          lines << GroupLine.new(c, false, mem.size)
         end
       end
       @group_lines = lines
+      @outside_reps = outside
       out
     end
 
@@ -3462,6 +3481,7 @@ module Gori::Tui
         line += "  ⚠ incomplete" if r.incomplete?
         line += "  ⟳ ×#{r.resent_count}" if r.resent?
         line += "  #{STOP_ROW_MARK}" if stop
+        line += window_note(group)
         # For a gRPC target the h2 `:status` to the left is 200 by definition; THIS is the
         # call's real outcome. Only rendered when the response carried it, so a non-gRPC row
         # is unchanged — same fields `cli/output.cr:fuzz_row_text` already renders.
@@ -3473,6 +3493,13 @@ module Gori::Tui
           screen.text(x, y, line, selected ? Theme.text : Theme.muted, bg, width: {inner.right - x, 0}.max)
         end
       end
+    end
+
+    # On a grouped header whose cluster outgrew the display window: how many of its members
+    # the window still lists, so an open `▾×5000` over three rows does not read as complete.
+    private def window_note(group : GroupLine?) : String
+      return "" unless group && group.header && group.in_window < group.cluster.count
+      "  #{group.in_window}/#{group.cluster.count} in window"
     end
 
     # The first column: the row's index, or grouped (#1351) the cluster size on a header row
@@ -3814,6 +3841,13 @@ module Gori::Tui
       "(request unavailable in the bounded display — exact fields remain in the saved archive)"
     end
 
+    # A grouped header drawn from its cluster's representative after the display window let
+    # that row go (#1351). Neither "not retained" nor "in the archive": the pane cannot know
+    # which, since the cluster keeps the row's metrics and never its bytes.
+    def self.outside_window_note(index : Int64) : String
+      "(result ##{index} has left the bounded display window — → lists this cluster's members still in it; a saved run keeps every row)"
+    end
+
     def self.display_omitted_response_note : String
       "(response unavailable in the bounded display — exact bytes remain in the saved archive)"
     end
@@ -3901,7 +3935,7 @@ module Gori::Tui
     # the detail pane shows.
     def result_request_note(r : Fuzz::Result) : String?
       if result_display_truncated?(r)
-        return FuzzerView.display_omitted_request_note
+        return outside_window?(r) ? FuzzerView.outside_window_note(r.index) : FuzzerView.display_omitted_request_note
       end
       return nil unless r.request.nil?
       note = FuzzerView.reconstruction_note(run_policy[2])
@@ -3941,7 +3975,7 @@ module Gori::Tui
     private def detail_request_lines(r : Fuzz::Result, notes : Array(String)) : Array(String)
       req = result_request(r)
       if req.display_omitted
-        notes << FuzzerView.display_omitted_request_note
+        notes << (outside_window?(r) ? FuzzerView.outside_window_note(r.index) : FuzzerView.display_omitted_request_note)
         return [] of String
       end
       lines = String.new(req.bytes).scrub.split('\n').map(&.rstrip('\r'))
@@ -3983,7 +4017,7 @@ module Gori::Tui
       # is about to save it. `detail_request_lines` has always drawn the distinction
       # (`ResultRequest#display_omitted`); this pane read a nil `head` as the retention policy.
       if result_display_truncated?(r)
-        notes << FuzzerView.display_omitted_response_note
+        notes << (outside_window?(r) ? FuzzerView.outside_window_note(r.index) : FuzzerView.display_omitted_response_note)
         return [] of String
       end
       head = r.head
