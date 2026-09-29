@@ -1968,8 +1968,9 @@ module Gori::Tui
       @scroll = 0
       return "showing every result" unless @grouped
       n = @clusters.size
-      more = @clusters.truncated? ? "+" : ""
-      "grouped by response shape · #{n}#{more} cluster#{n == 1 ? "" : "s"} · ←/→ fold · o order"
+      # `{space:fuzz.sort}`, never a bare `o`: the sort is menu-only in the Fuzzer. The
+      # controller expands the token through the registry.
+      "grouped by response shape · #{n} cluster#{n == 1 ? "" : "s"}#{overflow_chip} · ←/→ fold · {space:fuzz.sort} order"
     end
 
     # The grouped line under the cursor, nil when the list is not grouped.
@@ -2365,14 +2366,16 @@ module Gori::Tui
       lines = [] of GroupLine
       out = [] of Fuzz::Result
       outside = Set(Int64).new
-      @clusters.sorted(@group_order).each do |c|
-        next if @matched_only && c.matched == 0
+      @clusters.sorted(@group_order, @matched_only).each do |c|
         mem = members[c.id]?.try(&.sort_by!(&.index)) || [] of Fuzz::Result
         if first = mem.first?
           out << first
         else
-          out << c.representative
-          outside << c.representative.index
+          # Under the matched-only lens the header is the cluster's first HIT, never a row the
+          # lens hides.
+          rep = (@matched_only ? c.matched_representative : nil) || c.representative
+          out << rep
+          outside << rep.index
         end
         lines << GroupLine.new(c, true, mem.size)
         next unless @expanded.includes?(c.id)
@@ -3415,7 +3418,15 @@ module Gori::Tui
     private def shapes_chip : String
       return "" unless @grouped
       n = @clusters.size
-      " · #{n}#{@clusters.truncated? ? "+" : ""} shape#{n == 1 ? "" : "s"}"
+      " · #{n} shape#{n == 1 ? "" : "s"}#{overflow_chip}"
+    end
+
+    # Rows past `Clusters::MAX_CLUSTERS` distinct shapes are in no cluster, so no grouped row
+    # lists them; say how many, and how many of them were hits, rather than let them vanish.
+    private def overflow_chip : String
+      return "" unless @clusters.truncated?
+      hits = @clusters.overflow_matched
+      " · #{@clusters.overflow_rows} ungrouped#{hits > 0 ? " (#{hits} hit#{hits == 1 ? "" : "s"})" : ""}"
     end
 
     STOP_ROW_MARK = "stop row"
@@ -3498,8 +3509,11 @@ module Gori::Tui
     # On a grouped header whose cluster outgrew the display window: how many of its members
     # the window still lists, so an open `▾×5000` over three rows does not read as complete.
     private def window_note(group : GroupLine?) : String
-      return "" unless group && group.header && group.in_window < group.cluster.count
-      "  #{group.in_window}/#{group.cluster.count} in window"
+      return "" unless group && group.header
+      # Against what the lens lists: the members in the window are hits only under matched-only.
+      total = @matched_only ? group.cluster.matched : group.cluster.count
+      return "" unless group.in_window < total
+      "  #{group.in_window}/#{total} in window"
     end
 
     # The first column: the row's index, or grouped (#1351) the cluster size on a header row

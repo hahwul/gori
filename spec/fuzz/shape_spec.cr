@@ -50,6 +50,17 @@ describe Gori::Fuzz::Shape do
     shape("<a href=\"/s?q=a%20b%20c\">", "a b c").should eq(shape("<a href=\"/s?q=x%20y%20zz\">", "x y zz"))
   end
 
+  it "masks the quote spellings of PHP, Python, Go and XML escapers, not only its own" do
+    {"&#039;", "&#x27;", "&#39;", "&apos;"}.each do |q|
+      a = shape("<p>No results for 1#{q} OR 1=1--</p>", %(1' OR 1=1--))
+      b = shape("<p>No results for admin#{q}--</p>", %(admin'--))
+      a.should eq(b), q
+    end
+    go1 = shape("<p>No results for &#34;a&#34;</p>", %("a"))
+    go2 = shape("<p>No results for &#34;bcd&#34;</p>", %("bcd"))
+    go1.should eq(go2)
+  end
+
   it "collapses timestamps, uuids, hex tokens and csrf nonces" do
     a = shape(%({"ts":1727600000,"id":"550e8400-e29b-41d4-a716-446655440000","csrf":"f3a9c1d2e4b5a6f7"}))
     b = shape(%({"ts":1727600999,"id":"123e4567-e89b-12d3-a456-426614174000","csrf":"0b1c2d3e4f5a6b7c"}))

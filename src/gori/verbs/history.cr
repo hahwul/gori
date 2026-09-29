@@ -779,7 +779,7 @@ module Gori
       # Response-shape clusters (#1351): one representative row per distinct answer, rare
       # first, folded with ←/→. A Display… member with no bare chord of its own.
       r.register Verb::Definition.new(
-        "fuzz.group", "Group by shape", "RESULTS: one row per distinct response shape (←/→ fold, o order)",
+        "fuzz.group", "Group by shape", "RESULTS: one row per distinct response shape (←/→ fold; Cycle sort orders the clusters)",
         Verb::Scope::Fuzzer, available: in_fuzzer, intent: :shape_groups, section: :results) { |ctx| ctx.fuzz_toggle_group; nil }
       # Palette-only (#1282), on `⇧E`, the Export chord of Issues, Sitemap, Evidence and the
       # Sequencer; its menu letter was the export `E`, which freed `P` for Protocol… (#1274).

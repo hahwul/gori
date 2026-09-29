@@ -65,6 +65,9 @@ module Gori
         getter incomplete : Int64 = 0_i64
         getter representative : Result
         getter first_matched_index : Int64?
+        # The lowest-index MATCHED member, metrics-only — what a matched-only view heads the
+        # cluster with, so it never shows a row the lens would have hidden.
+        getter matched_representative : Result?
         getter length_min : Int64
         getter length_max : Int64
         getter words_min : Int32
@@ -93,7 +96,10 @@ module Gori
           if r.matched?
             @matched += 1
             first = @first_matched_index
-            @first_matched_index = r.index if first.nil? || r.index < first
+            if first.nil? || r.index < first
+              @first_matched_index = r.index
+              @matched_representative = Clusters.metrics_only(r)
+            end
           end
           @representative = Clusters.metrics_only(r) if r.index < @representative.index
           widen(r)
@@ -202,8 +208,11 @@ module Gori
         @overflow_matched = 0_i64
       end
 
-      def sorted(order : Order = Order::Rare) : Array(Cluster)
+      # `matched_only` keeps the clusters holding at least one matcher hit — the one filter
+      # every surface's matched-only lens applies to a cluster list.
+      def sorted(order : Order = Order::Rare, matched_only : Bool = false) : Array(Cluster)
         list = @by_id.values
+        list.select! { |c| c.matched > 0 } if matched_only
         case order
         in Order::Rare   then list.sort_by! { |c| {c.count, c.representative.index} }
         in Order::Common then list.sort_by! { |c| {-c.count, c.representative.index} }

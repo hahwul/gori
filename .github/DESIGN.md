@@ -4279,7 +4279,8 @@ four open questions, answered:
   `Result#with_ws`, the one seam that has it), the set of header names minus the ones that vary
   per response or with body size, the normalized `Location` and `Content-Type` values, and the
   decoded body with the job's own payload bytes masked (as generated, as spliced after a `¦chain`,
-  HTML-, percent- and JSON-escaped, the last also Go-style `\u003c`), numbers and id-like tokens
+  HTML-escaped in each server's quote spelling (`&#39;`, `&#039;`, `&#x27;`, `&#34;`, `&apos;`),
+  percent- and JSON-escaped, the last also Go-style `\u003c`), numbers and id-like tokens
   folded to one value marker (a random hex id is sometimes all digits), whitespace runs folded. NOT
   `length`, `words` or `lines`: a reflected payload moves all three, which is the split the
   masking exists to prevent; a cluster reports their range. No JSON-structure parse: the token
@@ -4314,7 +4315,18 @@ so a cluster of ordinary answers may list no member rows; the page says so (`mem
 metrics-only representative (its members all evicted from the display window) says the row left
 the window, never "not retained", and seeds no Repeater/Comparer tab.
 
-A known gap: a gRPC body is hashed as its wire bytes, so a payload that changes a message's length
+Known gaps, each a heuristic trade-off rather than an oversight:
+
+- A needle is tried where a normalized unit starts, never inside a letter/digit token, and it
+  has no word boundary. The two pull against each other: masking inside tokens would catch a
+  marker spliced into an existing value (`user=adm§x§` echoed as `admx'`), and masking anywhere
+  already lets a common-word payload (`div`, `header` from a content-discovery list) mask the
+  page's own markup, so identical 404s split. Neither is fixed by a rule the fingerprint can
+  apply to one response alone; the second is the one worth revisiting (e.g. not masking a
+  plain-word needle inside markup).
+- A failed send's class is read off its message text, so a host name in the message can pick
+  it (`tls-gw.example.com`). A structured error kind on `Repeater::Result` is the real fix.
+- A gRPC body is hashed as its wire bytes, so a payload that changes a message's length
 also changes its 5-byte prefix and varint lengths, and a gRPC sweep can split one answer into a
 few shapes by payload length. Deframing with `Grpc.scan_wire` first is the fix when it matters;
 `grpc_status` is already its own key part, so a denied call never merges with a granted one.

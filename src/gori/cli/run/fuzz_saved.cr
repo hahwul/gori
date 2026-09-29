@@ -210,10 +210,8 @@ module Gori
                                                 order : Fuzz::Clusters::Order, matched_only : Bool,
                                                 limit : Int32, offset : Int32, format : Symbol,
                                                 io : IO = STDOUT, err : IO = STDERR) : Nil
-        clusters = Fuzz::Clusters.new
-        store.each_fuzz_result_summary(run.id) { |rec| clusters.add(Fuzz::Persistence.result(rec)) }
-        list = clusters.sorted(order)
-        list.select! { |c| c.matched > 0 } if matched_only
+        clusters = Fuzz::Persistence.clusters(store, run.id)
+        list = clusters.sorted(order, matched_only)
         page = list[offset, limit]? || [] of Fuzz::Clusters::Cluster
         scrub = ->(t : String) { t.scrub }
         case format
@@ -254,17 +252,8 @@ module Gori
       private def self.show_saved_fuzz_cluster_members(store : Store, run : Store::FuzzRunRecord, id : Int64,
                                                        matched_only : Bool, limit : Int32, offset : Int32,
                                                        format : Symbol, io : IO = STDOUT, err : IO = STDERR) : Nil
-        clusters = Fuzz::Clusters.new
-        rows = [] of Fuzz::Result
-        seen = 0
-        store.each_fuzz_result_summary(run.id) do |rec|
-          result = Fuzz::Persistence.result(rec)
-          clusters.add(result)
-          next unless Fuzz::Clusters.key(result)[0] == id
-          next if matched_only && !result.matched?
-          rows << result if seen >= offset && rows.size < limit
-          seen += 1
-        end
+        clusters, records, seen = Fuzz::Persistence.cluster_members(store, run.id, id, matched_only, offset, limit)
+        rows = records.map { |rec| Fuzz::Persistence.result(rec) }
         cluster = clusters[id]? || abort "gori run fuzz show: run ##{run.id} has no cluster #{Fuzz::Shape.hex(id)}"
         case format
         when :json

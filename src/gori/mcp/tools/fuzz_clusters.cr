@@ -49,8 +49,7 @@ module Gori
                                     matched_only : Bool, req_off : Int64?, req_lim : Int64?) : FuzzClusterPage
         offset = clamp_nonneg(req_off)
         limit = clamp(req_lim, 50, 500)
-        list = clusters.sorted(args.order)
-        list.select! { |c| c.matched > 0 } if matched_only
+        list = clusters.sorted(args.order, matched_only)
         FuzzClusterPage.new(list[offset, limit]? || [] of Fuzz::Clusters::Cluster, list.size, offset, limit)
       end
 
@@ -177,8 +176,7 @@ module Gori
         if id = args.id
           return saved_fuzz_cluster_members(run, h, id, caps)
         end
-        clusters = Fuzz::Clusters.new
-        store.each_fuzz_result_summary(run.id) { |rec| clusters.add(Fuzz::Persistence.result(rec)) }
+        clusters = Fuzz::Persistence.clusters(store, run.id)
         Result.new(JSON.build do |j|
           j.object do
             j.field("run") { Serialize.saved_fuzz_run(j, run, store.fuzz_result_count(run.id)) }
@@ -202,17 +200,7 @@ module Gori
         req_lim = optional_int_arg(h, "limit")
         offset = clamp_nonneg(req_off)
         limit = clamp(req_lim, caps.include_content ? 25 : 100, caps.include_content ? 25 : 1000)
-        clusters = Fuzz::Clusters.new
-        page = [] of Store::FuzzResultRecord
-        seen = 0
-        store.each_fuzz_result_summary(run.id) do |rec|
-          result = Fuzz::Persistence.result(rec)
-          clusters.add(result)
-          next unless Fuzz::Clusters.key(result)[0] == id
-          next if matched_only && !rec.matched?
-          page << rec if seen >= offset && page.size < limit
-          seen += 1
-        end
+        clusters, page, seen = Fuzz::Persistence.cluster_members(store, run.id, id, matched_only, offset, limit)
         cluster = clusters[id]?
         return not_found("no cluster #{Fuzz::Shape.hex(id)} in saved fuzz run #{run.id}") unless cluster
         Result.new(JSON.build do |j|

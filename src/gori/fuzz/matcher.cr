@@ -596,8 +596,9 @@ module Gori::Fuzz
       keep = keep?(matched) || stop_hit
       # The response-shape key `Fuzz::Clusters` groups by (#1351), on this same decode and
       # before the bytes below are dropped by the retention policy.
+      # A failed send has no body to mask, so its needles are never built.
       shape = Shape.compute(status, grpc_status, raw.error, raw.incomplete?, raw.timed_out?,
-        raw.head, body, Shape.needles(job))
+        raw.head, body, status ? Shape.needles(job) : Shape::NO_NEEDLES)
 
       Result.new(
         index: job.index, payloads: job.payloads, position: job.position,

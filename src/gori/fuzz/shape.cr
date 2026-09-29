@@ -59,7 +59,7 @@ module Gori
       # Shared and never mutated: the default of `compute`, so a caller without a job pays no
       # allocation for it.
       NO_NEEDLES  = [] of Bytes
-      MAX_NEEDLES = 16
+      MAX_NEEDLES = 32
       # A token (a run of ASCII letters and digits) that mixes in a digit and is at least this
       # long, or is all-hex with a digit, is an id/nonce/hash and collapses to one marker.
       TOKEN_MIN = 8
@@ -156,16 +156,9 @@ module Gori
       # buffers the job already holds, except the two encoded variants.
       def self.needles(job : Job) : Array(Bytes)
         list = Array(Bytes).new(job.payloads.size + job.payload_spans.size)
-        job.payloads.each do |payload|
-          add_needle(list, payload.to_slice)
-          # Built only when they can differ: the common payload is plain text, and two string
-          # allocations per response to learn that would be the fingerprint's whole garbage.
-          if payload.valid_encoding? && payload.bytesize >= MIN_NEEDLE
-            add_needle(list, HTML.escape(payload).to_slice) if payload.to_slice.any? { |b| HTML_SPECIAL.includes?(b) }
-            add_needle(list, URI.encode_www_form(payload, space_to_plus: false).to_slice) unless payload.to_slice.all? { |b| URI.unreserved?(b) }
-            add_json_needles(list, payload)
-          end
-        end
+        # The bytes themselves first, so a many-position job that reaches `MAX_NEEDLES` drops an
+        # escaped variant rather than what actually went on the wire.
+        job.payloads.each { |payload| add_needle(list, payload.to_slice) }
         job.payload_spans.each do |(start, len)|
           add_needle(list, job.bytes[start, len]) if start >= 0 && len > 0 && start + len <= job.bytes.size
         end
@@ -174,10 +167,36 @@ module Gori
             add_needle(list, frame.payload[start, len]) if start >= 0 && len > 0 && start + len <= frame.payload.size
           end
         end
+        job.payloads.each do |payload|
+          # Built only when they can differ: the common payload is plain text, and string
+          # allocations per response to learn that would be the fingerprint's whole garbage.
+          next unless payload.valid_encoding? && payload.bytesize >= MIN_NEEDLE
+          add_html_needles(list, payload)
+          add_needle(list, URI.encode_www_form(payload, space_to_plus: false).to_slice) unless payload.to_slice.all? { |b| URI.unreserved?(b) }
+          add_json_needles(list, payload)
+        end
         # Longest first, so a payload and the longer escaped form containing it mask as one span.
         list.sort! { |a, b| b.size <=> a.size }
         list
       end
+
+      # An HTML page echoes `<>&` one way and a quote several: `HTML.escape` writes `&#39;` and
+      # `&quot;`, PHP's htmlspecialchars `&#039;`, Python's `html.escape` `&#x27;`, Go's
+      # html/template `&#34;`, and XML-minded servers `&apos;`. A SQLi or XSS list puts a quote
+      # in nearly every payload, so masking one spelling left every other server's echo split
+      # into one cluster per payload.
+      private def self.add_html_needles(list : Array(Bytes), payload : String) : Nil
+        return unless payload.to_slice.any? { |b| HTML_SPECIAL.includes?(b) }
+        base = HTML.escape(payload)
+        add_needle(list, base.to_slice)
+        return unless payload.includes?('\'') || payload.includes?('"')
+        HTML_QUOTE_SPELLINGS.each do |(single, double)|
+          add_needle(list, base.gsub("&#39;", single).gsub("&quot;", double).to_slice)
+        end
+      end
+
+      # {`'`, `"`} as the servers above write them, beside `HTML.escape`'s own.
+      private HTML_QUOTE_SPELLINGS = [{"&#039;", "&quot;"}, {"&#x27;", "&quot;"}, {"&#39;", "&#34;"}, {"&apos;", "&quot;"}]
 
       # A JSON API echoes a payload inside a string literal: `"` as `\"`, a control byte as
       # `\n`/`\u0001`, and — Go's `encoding/json`, among others — `<`, `>` and `&` as `\u003c`,

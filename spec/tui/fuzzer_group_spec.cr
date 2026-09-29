@@ -121,6 +121,32 @@ describe "FuzzerView grouped by response shape" do
     view.result_request_note(view.selected_result.not_nil!).not_nil!.should contain("left the bounded display window")
   end
 
+  it "heads a matched-only cluster with its first hit, even after the window let both go" do
+    view = FuzzerView.new(FuzzerResultWindow.new(row_cap: 2))
+    view.load_request("https://h", "GET /?x=1 HTTP/1.1\r\nHost: h\r\n\r\n", false, "")
+    view.focus_pane(:results)
+    view.begin_run(4_i64)
+    [shaped(0, 0xa), shaped(1, 0xa, matched: true), shaped(2, 0xb), shaped(3, 0xb)].each { |r| view.append_result(r) }
+    view.finish_run("done")
+    view.toggle_grouped
+    view.toggle_matched_only
+    view.selected_result.not_nil!.index.should eq(1) # the hit, not the lower-index miss #0
+    backend = MemoryBackend.new(160, 30)
+    view.render(Screen.new(backend), Rect.new(0, 0, 160, 30))
+    backend.contains?("0/1 in window").should be_true
+  end
+
+  it "counts the rows past the cluster cap, and the hits among them, on the border" do
+    view = grouped_fuzzer
+    clusters = Gori::Fuzz::Clusters.new(max_clusters: 1)
+    [shaped(0, 0xa), shaped(1, 0xb, matched: true), shaped(2, 0xc)].each { |r| clusters.add(r) }
+    run = Gori::Store::FuzzRunRecord.new(1_i64, nil, 1_i64, 2_i64, "https://h", "sniper", 3_i64,
+      3_i64, 1_i64, 0_i64, "done", false, nil, nil, false, "tui", nil, 1)
+    view.load_saved_run(run, FuzzerResultWindow.new, clusters)
+    view.toggle_grouped.should contain("2 ungrouped (1 hit)")
+    view.results_count_label.should contain("1 shape · 2 ungrouped (1 hit)")
+  end
+
   it "says how many of an outgrown cluster's members the window still lists" do
     view = grouped_fuzzer(FuzzerResultWindow.new(row_cap: 2))
     view.toggle_grouped
