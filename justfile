@@ -89,7 +89,7 @@ container-build tag="gori:dev":
 container-run tag="gori:dev" *args:
     container run --rm -it -v gori:/data {{tag}} {{args}}
 
-# Run all tests. `--no-debug` because the suite is one 7,000-unit binary whose compile the
+# Run all tests. `--no-debug` because the suite is one ~17,700-example binary whose compile the
 # object cache barely helps (~35 s warm), and skipping DWARF takes ~17% off that. What it
 # costs: an UNEXPECTED exception's backtrace shows mangled names without file:line —
 # assertion failures still print `# spec/x_spec.cr:LINE`. CI keeps debug info (ci.yml).
@@ -102,8 +102,9 @@ test:
     crystal spec --no-debug
 
 # Run the specs that mirror what changed against BASE (scripts/spec_for_changes.sh) —
-# the pre-flight before `just test`: a change's own specs compile in 3–9 s where the
-# whole suite takes ~35 s. `just test-changed HEAD` covers uncommitted edits only.
+# the fast path used before `just test` and by CI for localized pull requests. A change's
+# own specs compile in 3–9 s where the whole suite takes ~35 s. `just test-changed HEAD`
+# covers uncommitted edits only; shared-source changes deliberately return the whole suite.
 [group('development')]
 test-changed base="origin/main":
     #!/usr/bin/env bash
@@ -113,9 +114,9 @@ test-changed base="origin/main":
     echo "$files" | sed 's/^/  /'
     crystal spec --no-debug $files
 
-# Run the spec files CI's matrix gives one runner, e.g. `just test-shard 2` for the
-# third of four. The partition is a function of the tree (scripts/spec_shard.sh), so
-# this reproduces exactly what a red shard in Actions ran — CI calls the same script.
+# Run one full-suite spec shard locally, e.g. `just test-shard 2` for the third of four.
+# CI's full path calls the same tree-derived partition script. Localized PRs use
+# `just test-changed` instead and do not enter this matrix.
 
 # Run one CI spec shard locally (INDEX is 0-based).
 [group('development')]

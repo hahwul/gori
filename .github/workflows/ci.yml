@@ -8,9 +8,11 @@ on:
       - shard.yml
       - shard.lock
       - "**/*.cr"
-      # Three shell scripts the jobs below actually execute, none of which matches
-      # `**/*.cr`: without these lines a change to the spec partition or to the bench
-      # type-check would merge without the job that runs it ever waking up.
+      # Shell scripts the jobs below actually execute, none of which matches `**/*.cr`:
+      # without these lines a change to the spec selector, partition or type-check would
+      # merge without the job that runs it ever waking up.
+      - scripts/ci_test_scope.sh
+      - scripts/spec_for_changes.sh
       - scripts/spec_shard.sh
       - scripts/bench_check.sh
       - scripts/script_check.sh
@@ -197,26 +199,82 @@ jobs:
         run: shards install
       - name: No changed file may gain ameba findings
         run: scripts/ameba_gate.sh "origin/${{ github.base_ref }}"
+  test-scope:
+    # Pull requests use the existing source-to-spec mirror for a fast feedback path.
+    # Changes to the selector, shard machinery, dependency set or a shared source file
+    # promote themselves to the full suite. Pushes, merge groups and manual runs always
+    # select the full suite below.
+    runs-on: ubuntu-latest
+    outputs:
+      mode: ${{ steps.scope.outputs.mode }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # The selector compares against the merge base, so a shallow checkout is not
+          # enough for pull_request runs.
+          fetch-depth: 0
+      - id: scope
+        name: Select test scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "mode=full" >> "$GITHUB_OUTPUT"
+            echo "CI test scope: full ($EVENT_NAME)"
+            exit 0
+          fi
+          mode=$(scripts/ci_test_scope.sh "origin/$BASE_REF")
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          echo "CI test scope: $mode"
+
+  changed-tests:
+    needs: test-scope
+    if: ${{ needs.test-scope.outputs.mode == 'changed' }}
+    name: tests (changed)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: 1.21.0
+      - name: Install native link dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libbrotli-dev libzstd-dev libsqlite3-dev
+      - name: Install dependencies
+        # `--production`: see the note on the same step in `build-crystal`.
+        run: shards install --production
+      - name: Run selected tests
+        # Keep the same linker workaround as the full-suite path. The changed-spec binary
+        # is smaller today, but its size grows with the code selected by the mapper.
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+        run: |
+          mapfile -t files < <(scripts/spec_for_changes.sh "$BASE_REF")
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "changed test mode selected no specs" >&2
+            exit 1
+          fi
+          for file in "${files[@]}"; do
+            printf '  %s\n' "$file"
+          done
+          crystal spec --link-flags "-Wl,--no-export-dynamic" "${files[@]}"
+
   tests:
-    # Sharded, because `crystal spec` compiles the whole suite into ONE binary and runs
-    # its ~10,900 examples in ONE single-threaded fiber scheduler — so this job was the
-    # only thing anybody waited for: 8.5 of the workflow's 8.5 minutes, while `format`
-    # finished in 18 seconds and the other two in under three minutes.
+    needs: test-scope
+    if: ${{ needs.test-scope.outputs.mode == 'full' }}
+    # Sharded because `crystal spec` compiles the whole suite into one binary and runs
+    # its ~17,700 examples in one single-threaded fiber scheduler. Recent shards execute
+    # for roughly two to two and a half minutes, so four runners keep the wall clock near
+    # four minutes while preserving the process isolation that loopback specs need.
     #
-    # Measured on this tree, the run splits roughly 1:5 between compiling (~35 s) and
-    # executing (~370 s), and the executing half is barely CPU-bound at all — the suite
-    # spends most of it parked on real sockets and deliberate sleeps that hold a
-    # connection open so a stall stays distinguishable from a hangup. That is time four
-    # runners can wait through at once, and the four-way split takes the job to well
-    # under four minutes. It is NOT free: each shard pays the compile again, so the
-    # workflow burns more runner-minutes than it did. Four is where that trade stops
-    # paying — at six the compile plus job setup is already most of a shard's wall
-    # clock, and the longest shard barely moves (43 s of examples against 49 s at four)
-    # because the heaviest spec FILE cannot be split any finer than itself.
-    #
-    # Sharding by PROCESS rather than by threads inside one is deliberate: several
-    # specs bind a fixed loopback port, and two of them in one process — or two
-    # processes on one runner — would collide. One shard per runner keeps them apart.
+    # Sharding by PROCESS rather than by threads inside one is deliberate: several specs
+    # bind a fixed loopback port, and two of them in one process — or two processes on one
+    # runner — would collide. One shard per runner keeps them apart.
     strategy:
       # A failing shard must not cancel the other three. The whole point of the split is
       # that one run tells you everything that is broken; fail-fast would turn it back
@@ -274,7 +332,9 @@ jobs:
         # locally with one command. It partitions by walking the tree, never by a list
         # checked in here: a hardcoded split stops covering whatever spec file is added
         # next and nothing goes red to say so.
-        run: crystal spec --link-flags "-Wl,--no-export-dynamic" $(scripts/spec_shard.sh ${{ matrix.shard }} 4)
+        run: |
+          mapfile -t files < <(scripts/spec_shard.sh "${{ matrix.shard }}" 4)
+          crystal spec --link-flags "-Wl,--no-export-dynamic" "${files[@]}"
 # No `build-docker` job here. It used to build docker/Dockerfile for amd64 and
 # arm64 on every PR, and those two builds — each compiling a static Crystal
 # binary from source, the arm64 one on a native runner because QEMU is far too
