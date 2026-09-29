@@ -3379,7 +3379,7 @@ module Gori::Tui
       end
       # Grouped, the first column is the cluster's size (`▸×12`, `▾` when open) and a member's
       # index is indented under it, so the column is two cells wider.
-      header = @grouped ? "  ×N     payload                 status  len      words   time" : "  #   payload                 status  len      words   time"
+      header = @grouped ? "  ×N    payload                 status  len      words   time" : "  #   payload                 status  len      words   time"
       screen.text(inner.x, inner.y, header, Theme.muted, Theme.bg, width: inner.w)
       rows_h = {inner.h - 1, 0}.max
       (0...rows_h).each do |i|
