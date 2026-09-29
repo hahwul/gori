@@ -899,10 +899,14 @@ module Gori
         rep = c.representative
         String.build do |io|
           io << c.hex << "  ×" << c.count.to_s.ljust(6)
-          outcome = c.status.try(&.to_s) || "ERR #{c.error_class.try(&.label)}"
-          io << "  " << outcome.ljust(4)
-          io << "  " << range_text(human_size(c.length_min), human_size(c.length_max)).ljust(15)
-          io << "  " << range_text(c.words_min.to_s, c.words_max.to_s).ljust(9) << 'w'
+          if c.status
+            io << "  " << c.status.to_s.ljust(4)
+            io << "  " << range_text(human_size(c.length_min), human_size(c.length_max)).ljust(15)
+            io << "  " << "#{range_text(c.words_min.to_s, c.words_max.to_s)}w".ljust(10)
+          else
+            # A failed send has no response to measure: its class is the whole row.
+            io << "  " << "ERR #{c.error_class.try(&.label)}".ljust(33)
+          end
           io << "  grpc " << rep.grpc_status if rep.grpc_status
           io << "  ws close " << rep.ws_close_code if rep.ws_close_code
           io << "  " << c.matched << " hit" if c.matched > 0
