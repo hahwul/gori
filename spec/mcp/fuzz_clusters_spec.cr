@@ -112,8 +112,10 @@ describe "MCP fuzz clusters" do
       text.should contain("16-hex-digit")
       _, err = call_raw(tools, "fuzz_results", {job_id: job_id, cluster: "0123456789abcdef"})
       err.should be_true
-      _, err = call_raw(tools, "fuzz_results", {job_id: job_id, clusters: true, cluster: "0123456789abcdef"})
+      real = call_json(tools, "fuzz_results", {job_id: job_id, clusters: true})["clusters"][0]["id"].as_s
+      text, err = call_raw(tools, "fuzz_results", {job_id: job_id, clusters: true, cluster: real})
       err.should be_true
+      text.should contain("not both")
       _, err = call_raw(tools, "fuzz_results", {job_id: job_id, clusters: true, cluster_order: "sideways"})
       err.should be_true
     end
