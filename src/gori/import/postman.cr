@@ -74,7 +74,7 @@ module Gori
           # One bad request (unresolved variable, non-http scheme, host-less URL) skips
           # rather than aborting the collection — the contract every import parser shares.
           begin
-            pairs << request_to_flow(now, req, scoped, scoped_auth, missing, prov)
+            pairs << Vars.per_entry { request_to_flow(now, req, scoped, scoped_auth, missing, prov) }
           rescue
             skipped += 1
           end

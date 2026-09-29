@@ -129,6 +129,21 @@ describe Gori::Import::Postman do
     end
   end
 
+  # The budget is the ENTRY's, not each field's: a 1 MB variable in 20 headers is 20 MB for one
+  # request although no single header comes near the budget — and 200 headers of a 14 MB chain
+  # was gigabytes.
+  it "charges every field of one request to the same growth budget" do
+    headers = (1..20).map { |i| %({"key": "X-#{i}", "value": "{{big}}"}) }.join(", ")
+    result = parse(<<-JSON)
+      {"info": {"name": "n"},
+       "variable": [{"key": "big", "value": "#{"x" * 1_000_000}"}],
+       "item": [{"request": {"method": "GET", "url": "https://h.test/many", "header": [#{headers}]}},
+                {"request": {"method": "GET", "url": "https://h.test/one", "header": [{"key": "X", "value": "{{big}}"}]}}]}
+      JSON
+    result.flows.map(&.request.target).should eq(["/one"])
+    result.skipped.should eq(1)
+  end
+
   it "skips a URL with a braced host but keeps a brace in the path" do
     # `Vars.unresolved` only sees `{{`, and `Builder::HOST_INVALID` does not reject `{`/`}`,
     # so a single-brace host (a template form this parser does not speak, or a variable whose
