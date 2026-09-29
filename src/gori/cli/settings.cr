@@ -496,9 +496,11 @@ module Gori::CLI
         if Gori::TtyPath.terminal?(from)
           abort "gori settings user-agents: #{from} is a terminal, not a file — pipe the list in with --set -"
         end
+        # `IO::Error`, not `File::Error`: a directory OPENS fine and fails on the read, with the
+        # parent class — so `--set <dir>` reached the operator as a backtrace.
         begin
           File.read(from)
-        rescue ex : File::Error
+        rescue ex : IO::Error
           abort "gori settings user-agents: cannot read #{from}: #{ex.message}"
         end
       end
