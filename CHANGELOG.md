@@ -2,14 +2,13 @@
 
 ## Unreleased
 
-- JSON nested 100 to 512 levels deep — a captured body, JWT, cookie, GraphQL request or imported example, or a protobuf message about 33 levels deep — no longer fails with "Nesting of 100 is too deep" in the JWT and cookie tools, redaction (a redacted HAR export stopped mid-file), `jsonpath:` columns, retests, extract rules, `get_flow`, `gori run show --format json` or the OpenAPI export
+- Import: an OpenAPI YAML spec with a non-string mapping key (two cyclic anchors as keys crashed gori), a `!!binary` value or a `+99:00` offset, and a Postman or Insomnia variable that multiplies itself, are refused with a message instead of a crash, a backtrace or running out of memory
+- JSON 100–512 levels deep in a captured body, JWT, cookie, GraphQL request or imported example (or a protobuf message ~33 levels deep) no longer fails with "Nesting of 100 is too deep" in the JWT and cookie tools, redaction, `jsonpath:` columns, retests, extract rules, `get_flow`, `gori run show --format json` or the OpenAPI export
 - TUI: an error while opening a project — reading a tab's stored data or drawing the first frame — is reported in the status line and `gori.log` like any later one, instead of ending gori before its first frame
-- Import: a Postman or Insomnia variable that multiplies itself (`a = "{{a}}{{a}}…"`) skips that request instead of expanding to gigabytes and running gori out of memory
 - CLI: a `--ca-dir` or `GORI_HOME` gori cannot create, and `gori settings user-agents --set` naming a directory, print one line saying so instead of a backtrace
 - Network: an HTTP/2 or WebSocket frame that declares a large length and then stalls holds only the bytes that actually arrived, instead of the declared 16 MB per connection, so a client or origin can no longer run gori out of memory with a few bytes per connection
 - Fuzzer: a cluster bomb over tens of thousands of positions — `auto_mark` on a large captured form body reaches that — runs instead of overflowing the stack and ending gori
 - Import: a HAR or Burp timestamp past year 9999 once its offset is applied, or an impossible date such as `2024-02-31`, is stamped with the import time instead of being stored as is or dropping the request; a project that already holds such a row opens again, and History, HAR export and `gori run diff` read it instead of failing
-- Import: an OpenAPI YAML spec whose mapping key is not a string is refused with a message — two cyclic anchors used as keys overflowed the stack and ended gori — and a `!!binary` value or a `+99:00` timestamp offset is reported as the spec's error instead of a backtrace
 - OAST: malformed provider URLs now report a clean configuration error instead of crashing before the HTTP transport (#1359)
 - Repeater: **GraphQL: insert introspection query** (and its legacy variant for older servers) in the `Ctrl-P` palette rewrites the tab's request into a POST of the introspection query to the same endpoint, keeping its other headers and their captured line endings (#1355)
 - Probe: passive scans recover dropped or failed flows, active work is coalesced and retried instead of disappearing on queue bursts, differential probes reject timed-out evidence, and large JSON API specs get a bounded late-body check.
