@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Import: an OpenAPI YAML spec whose mapping key is not a string is refused with a message — two cyclic anchors used as keys overflowed the stack and ended gori — and a `!!binary` value or a `+99:00` timestamp offset is reported as the spec's error instead of a backtrace
 - OAST: malformed provider URLs now report a clean configuration error instead of crashing before the HTTP transport (#1359)
 - Repeater: **GraphQL: insert introspection query** (and its legacy variant for older servers) in the `Ctrl-P` palette rewrites the tab's request into a POST of the introspection query to the same endpoint, keeping its other headers and their captured line endings (#1355)
 - Probe: passive scans recover dropped or failed flows, active work is coalesced and retried instead of disappearing on queue bursts, differential probes reject timed-out evidence, and large JSON API specs get a bounded late-body check.

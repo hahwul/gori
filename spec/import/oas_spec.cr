@@ -278,6 +278,44 @@ describe Gori::Import::Oas do
     end
   end
 
+  # `YAML.parse` compares mapping keys while it builds the Hash, and two CYCLIC sequence keys
+  # recurse in `YAML::Any#==` until the stack overflows: a SIGSEGV, which no clause can rescue.
+  # So this example does not fail without the pre-scan — it takes the spec binary down.
+  it "refuses cyclic anchors used as mapping keys before YAML.parse compares them" do
+    body = "openapi: 3.0.0\npaths: {}\nx: {? &a [*a] : 1, ? &b [*b] : 2}\n"
+    with_spec(body, ".yaml") do |path|
+      expect_raises(Gori::Error, /mapping key that is not a string \(line 3\)/) { Gori::Import::Oas.parse_file(path) }
+    end
+  end
+
+  it "refuses a non-string mapping key" do
+    with_spec("openapi: 3.0.0\npaths: {}\nx: {? [1, 2] : 1}\n", ".yaml") do |path|
+      expect_raises(Gori::Error, /mapping key that is not a string/) { Gori::Import::Oas.parse_file(path) }
+    end
+  end
+
+  it "reports a YAML value the core schema cannot carry into JSON as the spec's error" do
+    {"x: !!binary aGVsbG8=\n", "x: 2001-12-14t21:59:43.10+99:00\n"}.each do |body|
+      with_spec("openapi: 3.0.0\npaths: {}\n#{body}", ".yaml") do |path|
+        expect_raises(Gori::Error, /could not be read as YAML/) { Gori::Import::Oas.parse_file(path) }
+      end
+    end
+  end
+
+  it "still imports a spec that reuses an anchor as an ordinary value" do
+    body = <<-YAML
+      openapi: 3.0.0
+      servers: [{url: "http://api.test"}]
+      components: {schemas: {S: &s {type: string}}}
+      paths:
+        /a: {get: {responses: {"200": {description: ok}}, x-s: *s}}
+        /b: {get: {responses: {"200": {description: ok}}, x-s: *s}}
+      YAML
+    with_spec(body, ".yaml") do |path|
+      Gori::Import::Oas.parse_file(path).flows.size.should eq(2)
+    end
+  end
+
   it "still reports ordinary malformed YAML as bad YAML" do
     with_spec("openapi: [unclosed\n", ".yaml") do |path|
       expect_raises(Gori::Error, /not valid YAML/) { Gori::Import::Oas.parse_file(path) }

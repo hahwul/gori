@@ -89,6 +89,7 @@ module Gori
         json_raw = case File.extname(path).downcase
                    when ".yaml", ".yml"
                      begin
+                       yaml_prescan!(raw)
                        YAML.parse(raw).to_json
                      rescue ex : YAML::ParseException
                        raise Gori::Error.new("OpenAPI spec is not valid YAML: #{ex.message}")
@@ -104,6 +105,15 @@ module Gori
                        raise Gori::Error.new(
                          "OpenAPI spec cannot be represented as JSON — a self-referential anchor, " \
                          "an infinite/NaN number, or nesting past the reader's limit: #{ex.message}")
+                     rescue ex : Gori::Error
+                       raise ex
+                     rescue ex
+                       # The YAML core schema reaches further than the two classes above: a
+                       # `!!binary` scalar parses to a Slice that `to_json` refuses with a bare
+                       # `Exception`, and a timestamp with a `+99:00` offset raises
+                       # `Time::Location::InvalidTimezoneOffsetError` inside `YAML.parse`. Both are
+                       # the spec's content, so they are the spec's error, not a backtrace.
+                       raise Gori::Error.new("OpenAPI spec could not be read as YAML (#{ex.class}): #{ex.message}")
                      end
                    else
                      raw
@@ -111,6 +121,32 @@ module Gori
         JSON.parse(json_raw)
       rescue ex : JSON::ParseException
         raise Gori::Error.new("OpenAPI spec is not valid JSON: #{ex.message}")
+      end
+
+      # Refuse, before `YAML.parse`, a mapping key that is not a scalar. `YAML.parse` inserts
+      # every key into a Hash, and comparing two keys that are CYCLIC sequences
+      # (`{? &a [*a] : 1, ? &b [*b] : 2}`) recurses in `YAML::Any#==` until the stack
+      # overflows — a SIGSEGV no rescue reaches, so a three-line file ended the process.
+      # OpenAPI keys are strings, so nothing real is lost. The walk is iterative and over
+      # `YAML::Nodes`, where an alias is a node pointing at its anchor rather than a copy of
+      # it, so it visits each written node once and never follows a cycle. (An alias bomb
+      # needs no guard here: the stdlib pull parser refuses "excessive aliasing" itself.)
+      private def self.yaml_prescan!(raw : String) : Nil
+        stack = YAML::Nodes.parse(raw).nodes.dup
+        while node = stack.pop?
+          case node
+          when YAML::Nodes::Mapping
+            node.nodes.each_slice(2) do |(key, _)|
+              k = key.is_a?(YAML::Nodes::Alias) ? key.value : key
+              next if k.is_a?(YAML::Nodes::Scalar)
+              raise Gori::Error.new(
+                "OpenAPI spec has a YAML mapping key that is not a string (line #{key.start_line})")
+            end
+            stack.concat(node.nodes)
+          when YAML::Nodes::Sequence
+            stack.concat(node.nodes)
+          end
+        end
       end
 
       private def self.server_base(spec : JSON::Any) : String
