@@ -93,6 +93,9 @@ describe "toggle-family row state (#1274 WP9)" do
       ctl.menu_state("fuzz.dist").should eq("on") # the sidebar starts shown
       ctl.fuzz_toggle_dist
       ctl.menu_state("fuzz.dist").should eq("off")
+      ctl.menu_state("fuzz.group").should eq("off")
+      ctl.fuzz_toggle_group
+      ctl.menu_state("fuzz.group").should eq("on")
       h2 = ctl.menu_state("fuzz.toggle-http2")
       ctl.fuzz_toggle_http2
       ctl.menu_state("fuzz.toggle-http2").should_not eq(h2)

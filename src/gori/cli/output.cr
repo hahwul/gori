@@ -892,6 +892,35 @@ module Gori
         end
       end
 
+      # One response-shape cluster (#1351) as a text line: its id (what `--cluster` takes), size,
+      # outcome, metric ranges, hit count and the representative row's index and payload. Same
+      # term-safety seam as `fuzz_row_text`: the payload is operator bytes.
+      def self.fuzz_cluster_text(c : Fuzz::Clusters::Cluster) : String
+        rep = c.representative
+        String.build do |io|
+          io << c.hex << "  ×" << c.count.to_s.ljust(6)
+          if c.status
+            io << "  " << c.status.to_s.ljust(4)
+            io << "  " << range_text(human_size(c.length_min), human_size(c.length_max)).ljust(15)
+            io << "  " << "#{range_text(c.words_min.to_s, c.words_max.to_s)}w".ljust(10)
+          else
+            # A failed send has no response to measure: its class is the whole row.
+            io << "  " << "ERR #{c.error_class.try(&.label)}".ljust(33)
+          end
+          io << "  grpc " << rep.grpc_status if rep.grpc_status
+          io << "  ws close " << rep.ws_close_code if rep.ws_close_code
+          io << "  " << c.matched << " hit" if c.matched > 0
+          io << "  " << c.errored << " err" if c.errored > 0 && c.status
+          io << "  " << c.incomplete << " incomplete" if c.incomplete > 0
+          io << "  ≈" if c.approximate?
+          io << "  #" << rep.index << ' ' << term_safe(rep.payloads.join(", "))
+        end
+      end
+
+      private def self.range_text(lo : String, hi : String) : String
+        lo == hi ? lo : "#{lo}–#{hi}"
+      end
+
       # The WebSocket half of a fuzz row. A separate method rather than two more branches inline:
       # `fuzz_row_text` sits exactly at the complexity limit, and these are the only clauses in
       # it that describe a different protocol.

@@ -21,6 +21,38 @@ private def fuzz_write(idx : Int64, request : Bytes? = nil, response_head : Byte
 end
 
 describe "Gori::Store fuzz persistence" do
+  it "migrates a V41 project: its saved results gain a NULL shape and cluster approximately" do
+    path = File.tempname("gori-fuzz-v42", ".db")
+    begin
+      store = Gori::Store.open(path, retention_flows: 0)
+      run = store.insert_fuzz_run(nil, "http://h", "sniper", 2_i64)
+      store.@db.exec("ALTER TABLE fuzz_results DROP COLUMN shape")
+      store.@db.exec("INSERT INTO fuzz_results (run_id, idx, payloads, status, length, words, lines, duration_us, matched) " \
+                     "VALUES (?, 0, '[\"a\"]', 200, 5, 1, 1, 10, 0), (?, 1, '[\"b\"]', 200, 5, 1, 1, 10, 0)", run, run)
+      store.@db.exec("PRAGMA user_version = 41")
+      store.close
+
+      store = Gori::Store.open(path, retention_flows: 0)
+      begin
+        store.@db.scalar("PRAGMA user_version").as(Int64).should eq(Gori::Store::Schema::VERSION.to_i64)
+        rows = [] of Gori::Store::FuzzResultRecord
+        store.each_fuzz_result_summary(run) { |r| rows << r }
+        rows.map(&.shape).should eq([nil, nil])
+        clusters = Gori::Fuzz::Clusters.new
+        rows.each { |r| clusters.add(Gori::Fuzz::Persistence.result(r)) }
+        clusters.size.should eq(1)
+        clusters.sorted.first.approximate?.should be_true
+      ensure
+        store.close
+      end
+    ensure
+      File.delete?(path)
+      File.delete?("#{path}-wal")
+      File.delete?("#{path}-shm")
+      File.delete?("#{path}.open.lock")
+    end
+  end
+
   it "round-trips a fuzz session" do
     with_store do |store|
       id = store.insert_fuzz_session("http://h", "GET /?x=§1§ HTTP/1.1\r\n\r\n", false, nil,

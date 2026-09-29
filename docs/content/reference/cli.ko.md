@@ -586,6 +586,8 @@ gori run fuzz save --request request.txt --target https://api.example.com --proj
 |------|------|
 | `fuzz list` | 저장된 실행을 최신순으로 나열합니다. `--session=ID`는 TUI Fuzzer 세션 하나로 좁히고, `--offset`, `--limit`(기본 50, 최대 1000), `--format text\|json`이 페이지와 형식을 정합니다 |
 | `fuzz show RUN_ID` | 실행 하나의 요약과, 보관된 BLOB을 읽지 않는 스칼라 전용 결과 지표 페이지를 보여 줍니다. `--offset`, `--limit`(기본 200, 최대 5000), `--matched-only`, `--format text\|json\|jsonl`을 지원하며, 진행 중인 실행에 `--format json`을 주면 보관 행 전체를 버퍼링하지 않고 유효한 배열 하나를 스트리밍합니다 |
+| `fuzz show RUN_ID --clusters` | 실행의 결과를 **응답 모양**으로 묶습니다. 서로 다른 응답마다 한 줄씩(페이로드 반사, 숫자, id, 타임스탬프, 매번 바뀌는 헤더는 정규화해 무시) id, 개수, 상태 또는 오류 분류, 길이/단어 범위, 히트 수, 대표 결과를 보여 줍니다. `--order rare\|common\|first`(기본 `rare`, 작은 묶음부터), `--matched-only`는 히트가 있는 묶음만 남기고, `--limit`/`--offset`은 묶음 단위로 페이지를 나누며, `--format json\|jsonl`은 MCP `get_fuzz_run{clusters}`와 같은 필드를 내보냅니다. 모양이 기록되기 전에 저장된 실행은 상태/오류/단어/줄 수로 묶고 그 묶음에 `≈`(`approximate`)를 표시합니다 |
+| `fuzz show RUN_ID --cluster ID` | 묶음 하나(`--clusters`가 준 id)의 결과를 일반 `fuzz show` 행 형식으로 페이지 단위로 보여 줍니다 |
 | `fuzz show RUN_ID RESULT_INDEX` | 보관된 요청/와이어/응답 바이트를 포함해 결과 하나를 정확히 보여 줍니다. 텍스트 출력은 터미널 제어 시퀀스를 무력화하고, JSON은 유효하지 않은 UTF-8을 base64로 내보냅니다. 상세 보기는 `text` 또는 `json`을 지원하며, 현재 형식 이전의 불완전한 스냅숏은 실행 메타데이터에 legacy로 표시됩니다 |
 | `fuzz delete RUN_ID --yes` | 종료된 실행 하나와 저장된 결과 행 전부를 삭제합니다. 저장이 진행 중이면 거부하며, `--force-stale`은 죽은 기록자가 남긴 `running`/`saving` 행을 지웁니다. 다른 gori가 저장 중일 때는 절대 쓰면 안 됩니다 |
 

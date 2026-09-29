@@ -52,6 +52,9 @@ module Gori
         head_cap = clamp(optional_int_arg(h, "max_head_bytes"),
           Serialize::SAVED_HEAD_PREVIEW_BYTES, Serialize::MAX_TEXT)
         message_source_cap = head_cap + Serialize::SAVED_SOURCE_BYTES + 4
+        caps = SavedFuzzCaps.new(include_content, include_sensitive, body_cap, head_cap, message_source_cap)
+        # `clusters` / `cluster` (#1351): a cluster page, or that cluster's members.
+        get_fuzz_run_clusters(run, h, caps).try { |clustered| return clustered }
         if idx = optional_int_arg(h, "result_index")
           return err("result_index must be non-negative", "INVALID_ARGUMENT", field: "result_index") if idx < 0
           if include_content
@@ -170,7 +173,10 @@ module Gori
           s.field "result_index", intprop("optional exact result index (zero-based)")
           s.field "offset", intprop("result rows to skip (default 0)")
           s.field "limit", intprop("rows to return (default 100 metrics / 25 with content; max 1000 / 25)")
-          s.field "matched_only", boolprop("only matcher hits (default false)")
+          s.field "matched_only", boolprop("only matcher hits (default false; with clusters:true, only clusters holding a match)")
+          s.field "clusters", boolprop("return one entry per RESPONSE SHAPE instead of rows (default false), aggregated over every stored row with the same fields fuzz_results{clusters} emits; paged by offset/limit (default 50, max 500). A run saved before shapes were recorded clusters by status/error/words/lines and marks those clusters approximate:true; a keep:interesting run clusters only the rows it kept (run.filtered).")
+          s.field "cluster", strprop("a cluster id from clusters:true — page that cluster's member rows (the default row shape; include_content applies)")
+          s.field "cluster_order", enumprop("order of clusters:true (default rare = smallest first; common; first)", Fuzz::Clusters::Order.names)
           s.field "include_content", boolprop("include request/wire/response content summaries (default false)")
           s.field "include_sensitive", boolprop("include unredacted exact raw request/wire/head base64 when content is requested (default false)")
           s.field "max_body_bytes", intprop("decoded body/raw inline cap (default 2048, max #{Serialize::MAX_TEXT})")

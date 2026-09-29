@@ -41,6 +41,7 @@ require "./tools/env"
 require "./tools/flows"
 require "./tools/fuzz"
 require "./tools/fuzz_runs"
+require "./tools/fuzz_clusters"
 require "./tools/host_overrides"
 require "./tools/session_slots"
 require "./tools/import"
@@ -957,6 +958,9 @@ module Gori
         # `switch_project`/`delete_project` for the rest of the session. Callers still see
         # the true count in `error_msg`; only the LOGGING is capped (see LOG_CAP).
         property drain_errors = 0
+        # Every result's response shape (#1351), fed before the selective row cache below, so
+        # `fuzz_results{clusters:true}` counts the whole run rather than the rows it kept.
+        getter clusters = Fuzz::Clusters.new
         getter results = [] of Fuzz::Result
         # How many of `results` the matcher REJECTED — the counter `FUZZ_MAX_STORED_UNMATCHED`
         # is enforced against, so a run's failures can never crowd its findings out of the
