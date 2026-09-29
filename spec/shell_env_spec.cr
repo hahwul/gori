@@ -229,6 +229,19 @@ describe Gori::ShellEnv do
     end
   end
 
+  # `Paths.ensure_dir` raises `Gori::Error` for a mkdir that fails, not the `File::Error` the
+  # bundle writer's clause named — so the failure lost its "cannot write the CA bundle" context.
+  it "says it cannot write the bundle when its directory cannot be created" do
+    with_shell_fixture do |root, ca, system|
+      blocker = File.join(root, "not-a-dir")
+      File.write(blocker, "")
+      expect_raises(Gori::ShellEnv::Error, /cannot write the CA bundle/) do
+        Gori::ShellEnv.build("127.0.0.1:8070", ca, env: {} of String => String,
+          dir: File.join(blocker, "shell"), system_source: {system, nil})
+      end
+    end
+  end
+
   it "refuses a CA it cannot read rather than exporting a bundle that trusts nothing of gori's" do
     with_shell_fixture do |root, _ca, system|
       expect_raises(Gori::ShellEnv::Error, /cannot read gori's CA certificate/) do

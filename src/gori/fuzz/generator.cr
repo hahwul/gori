@@ -41,7 +41,7 @@ module Gori::Fuzz
     # all three types answer that vector identically (`position_count`, `positions`,
     # `default_payloads`, `apply_chains{,_reported}`). Only the SPLICE differs — one buffer,
     # a handshake plus N frames, or a head plus a re-encoded protobuf message — so only `emit`
-    # and `baseline_raw` branch, and `sniper`/`battering`/`pitchfork`/`cluster`/`recurse`/`total`
+    # and `baseline_raw` branch, and `sniper`/`battering`/`pitchfork`/`cluster`/`total`
     # are untouched.
     def initialize(marked : Template | WsScript | GrpcFieldTemplate,
                    @sets : Array(PayloadSet), @config : Config,
@@ -422,7 +422,7 @@ module Gori::Fuzz
 
     private def cluster_total : Int64?
       return nil if @sets.empty?
-      # Use set_for(p) (with the set-0 fallback) exactly like each()/recurse() do —
+      # Use set_for(p) (with the set-0 fallback) exactly like each()/cluster() do —
       # otherwise a run with fewer payload sets than positions reports an unknown
       # ('?') total and demands --force, even though it's perfectly bounded.
       acc = 1_i64.as(Int64?)

@@ -563,13 +563,13 @@ module Gori::Tui
       # every surface that answers "where am I listening": the top-bar chip
       # (#listen_chip_label), the status line, the listeners overlay, the traffic empty states
       # — all of which read `@session.proxy.port` directly — plus the toast above.
-      announce_env_syntax_migration
+      startup_step(:input) { announce_env_syntax_migration }
       startup_step(:input) { project_controller.reload }
       startup_step(:input) { open_focus_flow }
       # Replies an agent sent while no window was open (#1322): one note, before the first
       # paint so Miss Ring has it to say. After `Runner#initialize` seeded the reply cursor,
       # which is what bounds "while you were away".
-      announce_missed_replies
+      startup_step(:input) { announce_missed_replies }
       startup_step(:render) do
         render # initial paint (the loop below only re-renders when something changed)
       end
@@ -1025,15 +1025,22 @@ module Gori::Tui
       true
     end
 
-    # One step of `run`'s setup, absorbed the way a tick is (`absorb_tick_error`). A failed
-    # paint puts the reduced frame up on the loop's first tick, and a failed read leaves that
-    # tab empty until its next reload — either way the session opens and says what broke.
+    # One step of `run`'s setup, which the loop's rescue cannot reach. A failed paint goes the
+    # way a failed render does (`absorb_tick_error`: the reduced frame, no strike). A failed
+    # read is logged and reported, and leaves that tab empty until its next reload — but is NOT
+    # a strike: the breaker's window is the loop's, and a store that fails three reads here
+    # would otherwise trip it before the first frame, which is what this exists to prevent.
     private def startup_step(phase : Symbol, &) : Nil
       yield
     rescue ex : Gori::Error
       raise ex
     rescue ex
-      raise ex unless absorb_tick_error(ex, phase)
+      if phase == :render
+        raise ex unless absorb_tick_error(ex, phase)
+      else
+        ::Log.error(exception: ex) { "TUI startup step raised" }
+        status("part of this project failed to load — details in gori.log (#{ex.class}: #{ex.message})", :error)
+      end
     end
 
     # A plain printable char (a paste/typed character), as opposed to a nav/control
