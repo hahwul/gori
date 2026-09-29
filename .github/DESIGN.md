@@ -4265,3 +4265,42 @@ row's `goto_session_id` opened the new session the same way. The test for leavin
   `move_to_autoincrement(conn, rebuilds, version)`, shared by V40 and V41: in place where the
   CREATE text is gori's, the verified rebuild otherwise. The seed reads the events that point at a
   Sequencer session and any `sequencer` link, filtered like every other seed.
+
+### 2026-09-29: a fuzz result's shape is a versioned fingerprint of its answer, and one aggregator clusters it (#1351)
+
+The Distribution sidebar answers "how are the metrics spread", not "which responses are actually
+different". Every result now carries `Fuzz::Result#shape`, and `Fuzz::Clusters` groups rows by it
+for the TUI, `gori run fuzz show --clusters` and MCP `fuzz_results` / `get_fuzz_run`. The issue's
+four open questions, answered:
+
+- **What the key holds.** The outcome (a response, or a failed send folded to a coarse
+  `Shape::ErrorClass`, since raw error text quotes hosts, ports and timings), status, gRPC
+  status, the incomplete/timed-out flags, the WebSocket close code (folded in by
+  `Result#with_ws`, the one seam that has it), the set of header names minus the ones that vary
+  per response or with body size, the normalized `Location` and `Content-Type` values, and the
+  decoded body with the job's own payload bytes masked (as generated, as spliced after a `¦chain`,
+  HTML-escaped and percent-encoded), digit runs, id-like tokens and whitespace runs folded. NOT
+  `length`, `words` or `lines`: a reflected payload moves all three, which is the split the
+  masking exists to prevent; a cluster reports their range. No JSON-structure parse: the token
+  normalization already folds values, and a structural walk would be a second decode (P6).
+- **Stable across runs, within one `Shape::VERSION`.** FNV-1a over a versioned normalization, not
+  Crystal's per-process seeded `#hash`, because the id is persisted (`fuzz_results.shape`, V42)
+  and compared between a live job and its saved run. A normalization change bumps the version,
+  which changes every id rather than silently merging old rows with new ones. Rows saved before
+  V42 have no shape; they cluster by `Shape.approximate` (outcome + words/lines) in a separate key
+  space and every surface marks those clusters approximate.
+- **The representative is the lowest-index member.** Live results arrive out of order and a saved
+  run is read in index order; the lowest index is the one rule both pick the same row under, and
+  it makes offset paging deterministic (ties break on it too).
+- **Opt-in arguments, not a `fuzz_clusters` tool.** `clusters: true` and `cluster: "<id>"` on the
+  two tools that already page a run's rows keep one paging contract and one place an agent looks.
+  The default row page is byte-identical.
+
+Bounded throughout: the fingerprint reads the first 64 KiB and the last 16 KiB of the decoded body
+(~1.3 ns/byte, `bench/fuzz_shape_bench.cr`, 0 B/op), `Clusters` holds at most 4096 shapes and
+counts later new ones as `overflow_rows`, and a saved run aggregates from the keyset-paged scalar
+stream. There is deliberately no SQL `GROUP BY` twin: legacy rows cannot be grouped in SQL, and a
+second implementation of one predicate is the drift the Scope SQL/in-memory pair already taught.
+A live MCP job's aggregate sees every result while its row cache keeps only `interesting?` rows,
+so a cluster of ordinary answers may list no member rows; the page says so (`members_retained`,
+`members_note`) instead of implying the cluster is empty.
