@@ -269,26 +269,40 @@ module Gori::Fuzz
       end
     end
 
+    # An odometer over one iterator per position, not a recursion per position: a stack frame
+    # per marked position overflowed the Engine fiber's stack at ~40k positions — a SIGSEGV
+    # that ended the process — and `Template.auto_mark` reaches that from a ~400 KB captured
+    # form body. With a one-value set the total is 1, so nothing upstream asks first. The
+    # order is the recursion's (position 0 outermost), and an exhausted position re-opens
+    # from the start for the next value of the one before it, as the nested `each` did.
     private def cluster(emit_to : Job ->) : Nil
       count = @marked.position_count
       return if count == 0
       idx = 0_i64
       acc = Array.new(count, "")
-      combo = ->(payloads : Array(String)) do
-        emit_to.call(emit(idx, payloads, nil))
-        idx += 1
-      end
-      recurse(0, count, acc, combo)
-    end
-
-    private def recurse(level : Int32, count : Int32, acc : Array(String), emit_combo : Array(String) ->) : Nil
-      if level == count
-        emit_combo.call(acc.dup)
-        return
-      end
-      set_for(level).each do |v|
-        acc[level] = v
-        recurse(level + 1, count, acc, emit_combo)
+      iters = Array(SetIterator?).new(count, nil)
+      begin
+        level = 0
+        loop do
+          it = (iters[level] ||= set_for(level).open_iterator)
+          if v = it.next_value
+            acc[level] = v
+            if level == count - 1
+              emit_to.call(emit(idx, acc.dup, nil))
+              idx += 1
+            else
+              level += 1
+            end
+          else
+            it.close
+            iters[level] = nil
+            break if level == 0
+            level -= 1
+          end
+        end
+      ensure
+        # A raise out of `emit_to` (a stopped run) still closes every file-backed set open.
+        iters.each { |open| open.try(&.close) }
       end
     end
 
