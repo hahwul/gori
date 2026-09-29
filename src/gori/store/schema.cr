@@ -2139,22 +2139,7 @@ module Gori
             # idempotent, so a Store connection pays nothing.
             conn.as(SQLite3::Connection).gori_install_scope_match if current < VERSION
             MIGRATIONS[current..]?.try &.each_with_index(offset: current) do |statements, idx|
-              if statements.same?(V39)
-                rebuild_v39(conn) unless autoincrement_in_place(conn.as(SQLite3::Connection))
-                statements = V39_SEED
-              elsif statements.same?(V40)
-                move_to_autoincrement(conn.as(SQLite3::Connection), ID_REBUILDS, 40)
-                statements = V40_AFTER
-              elsif statements.same?(V41)
-                move_to_autoincrement(conn.as(SQLite3::Connection), V41_REBUILDS, 41)
-                statements = V41_AFTER
-              elsif statements.same?(V42) && column?(conn, "fuzz_results", "shape")
-                # SQLite has no `ADD COLUMN IF NOT EXISTS`, and every migration since V36 is
-                # replay-safe: a project whose `user_version` was wound back (the index specs
-                # rebuild an older shape that way) already holds the column.
-                statements = [] of String
-              end
-              statements.each { |sql| conn.exec(sql) }
+              run_statements(conn, statements).each { |sql| conn.exec(sql) }
               BACKFILLS[idx + 1]?.try { |sql| conn.exec(sql) }
               conn.exec("PRAGMA user_version = #{idx + 1}")
             end
@@ -2163,6 +2148,28 @@ module Gori
             conn.exec("ROLLBACK") rescue nil
             raise ex
           end
+        end
+      end
+
+      # The statements one MIGRATIONS entry actually runs. V39–V41 do their table move in code
+      # first and leave only their seeds; V42 is skipped when its column is already there.
+      private def self.run_statements(conn : DB::Connection, statements : Array(String)) : Array(String)
+        if statements.same?(V39)
+          rebuild_v39(conn) unless autoincrement_in_place(conn.as(SQLite3::Connection))
+          V39_SEED
+        elsif statements.same?(V40)
+          move_to_autoincrement(conn.as(SQLite3::Connection), ID_REBUILDS, 40)
+          V40_AFTER
+        elsif statements.same?(V41)
+          move_to_autoincrement(conn.as(SQLite3::Connection), V41_REBUILDS, 41)
+          V41_AFTER
+        elsif statements.same?(V42) && column?(conn, "fuzz_results", "shape")
+          # SQLite has no `ADD COLUMN IF NOT EXISTS`, and every migration since V36 is
+          # replay-safe: a project whose `user_version` was wound back (the index specs rebuild
+          # an older shape that way) already holds the column.
+          [] of String
+        else
+          statements
         end
       end
 
