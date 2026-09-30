@@ -1048,7 +1048,7 @@ gori run jwt eyJhbGci... --attacks --key ./public.pem
 | -------- | ------------- |
 | `--decode` | Decode header / payload / signature (default) |
 | `--encode` | Re-sign the token's claims with `--alg` and `--secret` / `--key` |
-| `--verify` | Check the token's own signature against `--secret` / `--key`; prints `verified: yes\|no` (a `no` is an answer, not a failure — exit status stays 0) |
+| `--verify` | Check the token's own signature against `--secret` / `--key` (one is required; `--secret ''` checks the empty secret); prints `verified: yes\|no` and a `reason`, and exits 1 unless it verifies. `--format json` adds a `code` (`signature_mismatch`, `unsigned`, `alg_unsupported`, …) |
 | `--attacks` | Generate testing payloads (alg:none, weak-secret, header injection) |
 | `--alg=ALG` | Signing alg for `--encode`: `HS256` (default) \| `HS384` \| `HS512` \| `RS256/384/512` \| `PS256/384/512` \| `ES256/384/512` \| `EdDSA` \| `none` |
 | `--secret=SECRET` | HMAC secret, for an HS algorithm |

@@ -76,13 +76,15 @@ module Gori
       end
     end
 
-    # {alg, verified, reason} for `Jwt.verify`. `verified` is the answer; `reason` is present
-    # only when the "no" needs explaining (unsigned token, alg gori cannot check).
+    # {alg, verified, code, reason} for `Jwt.verify`. `verified` is the answer; on a "no",
+    # `code` is the `VerifyCode` label to branch on and `reason` the prose. Both keys are
+    # always present, null on a yes, so a consumer never has to test for their absence.
     def verify_json(v : Verification) : String
       JSON.build do |j|
         j.object do
           j.field "alg", v.alg
           j.field "verified", v.verified
+          j.field "code", v.code.try(&.label)
           j.field "reason", v.reason
         end
       end

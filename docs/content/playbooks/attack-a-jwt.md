@@ -41,7 +41,7 @@ If the token is `ES256` / `RS256` / `EdDSA` and you hold the signing key, `--key
 
 ```bash
 gori run jwt eyJhbGci... --encode --alg ES256 --key ./private.pem --set role=admin
-gori run jwt eyJhbGci... --verify --key ./public.pem                # verified: yes | no
+gori run jwt eyJhbGci... --verify --key ./public.pem                # verified: yes | no (exit 0 | 1)
 ```
 
 **Checkpoint.** OUTPUT holds a token carrying your edited claim, re-signed with the algorithm and secret you chose.
