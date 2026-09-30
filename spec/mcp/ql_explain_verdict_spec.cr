@@ -119,4 +119,15 @@ describe "MCP ql_explain verdict" do
       end
     end
   end
+
+  it "reports id:1 in unknown_fields and refused_by_query_tools with ids hint" do
+    with_store do |store|
+      j = explain(store, "id:1")
+      j["unknown_fields"].as_a.size.should eq(1)
+      j["unknown_fields"][0]["name"].as_s.should eq("id")
+      j["refused_by_query_tools"].as_bool.should be_true
+      w = j["warnings"].as_a.map(&.as_s)
+      w.find(&.includes?("no such field")).not_nil!.should contain("use the 'ids' argument")
+    end
+  end
 end

@@ -89,6 +89,8 @@ describe Gori::Sequencer::Stats do
   # ── classify: byte-set → charset label ──────────────────────────────────────────
 
   it "labels each ASCII byte-set family via the classify precedence chain" do
+    # digits only → digits (before hex check)
+    S.analyze(Array.new(5, "1234567890")).charset_label.should eq("digits")
     # digits + uppercase A–F only → upper-hex (lower-hex requires a..f, so 'A' skips it)
     S.analyze(Array.new(5, "A1B2C3")).charset_label.should eq("upper-hex")
     # both cases of hex present → neither lower- nor upper-hex, but still hex

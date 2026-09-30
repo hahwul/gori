@@ -902,7 +902,9 @@ module Gori::Tui
         return nil unless active_view && (vf = view_filter)
         return fts_backlog_note(vf, store)
       end
-      return "invalid filter — no valid terms" if QL.reject_empty?(@query, filter)
+      if QL.reject_empty?(@query, filter)
+        return QL.reject_empty_reason(@query, scope: lens) || "invalid filter — no valid terms"
+      end
       bad = QL.invalid_regex_terms(@query)
       return "invalid regex in #{bad.first}" unless bad.empty?
       # A `field:` QL does not implement free-texts the WHOLE token, so `hostt:api` runs a

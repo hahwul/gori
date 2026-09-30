@@ -1587,6 +1587,9 @@ module Gori
         if near = QL.suggest_field(use.name)
           "gori run #{cmd}: unknown query field `#{bad}` — did you mean " \
           "`#{near}#{use.regex ? '~' : ':'}`? (#{tail})"
+        elsif FilterAst::ID_FIELDS.includes?(use.name.downcase)
+          "gori run #{cmd}: unknown query field `#{bad}` — QL has no `#{use.name}:` field; " \
+          "use the flow id argument (e.g. `gori run show <id>`) to select flows by id (#{tail})"
         else
           "gori run #{cmd}: unknown query field `#{bad}` — QL has no such field. " \
           "Fields: #{QL::FIELDS.join(' ')} (#{tail})"
