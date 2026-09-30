@@ -1661,6 +1661,7 @@ module Gori
         # JS references are derived from their flow's body (V35) and go with it.
         c.exec("DELETE FROM js_refs WHERE flow_id <= ?", cutoff)
         c.exec("DELETE FROM js_ref_scans WHERE flow_id <= ?", cutoff)
+        c.exec("DELETE FROM intercept_originals WHERE flow_id <= ?", cutoff)
         c.exec("DELETE FROM flows WHERE id <= ?", cutoff)
         # Read changes() IMMEDIATELY after the flows delete — it reports the most recent
         # statement, so any query in between (including the h2 reaping below) would replace it.
@@ -2024,7 +2025,13 @@ module Gori
       # The INSERT's own result carries the rowid — no separate `SELECT last_insert_rowid()`.
       # No flows_fts write here: `fts_dirty = 1` hands the trigram work to the off-commit
       # indexer, so a capture commit no longer pays for tokenization (see V4 / await_op).
-      res.last_insert_id
+      id = res.last_insert_id
+      # An Intercept edit's pre-edit request (V44), in the flow's own transaction so the row
+      # never reads as edited without its original, nor the other way round.
+      if orig = req.intercept_original
+        conn.exec("INSERT OR REPLACE INTO intercept_originals (flow_id, request) VALUES (?, ?)", id, orig)
+      end
+      id
     end
 
     # `insert_one`'s statement, once per `Store.blob_slot` answer for `request_head` — built at
@@ -2361,10 +2368,11 @@ module Gori
       source = rs.read(String?).try { |t| FlowSource::Kind.parse?(t) }
       source_surface = rs.read(String?).try { |t| FlowSource::Surface.parse?(t) }
       source_ref = rs.read(String?)
+      intercept_edited = rs.read(Int64) != 0
       FlowRow.new(id, created_at, scheme, method, host, port, target,
         status, req_size + (resp_size || 0_i64), state, resp_size, duration_us, content_type,
         short_circuited, advisory, request_content_type, connect_protocol,
-        source, source_surface, source_ref)
+        source, source_surface, source_ref, intercept_edited)
     end
 
     # Column order MUST match EVENT_COLS.
