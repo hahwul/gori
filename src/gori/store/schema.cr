@@ -2110,6 +2110,28 @@ module Gori
           SQL
       ]
 
+      # V45 — the interim 1xx responses an origin sent before a flow's final one (`Interims`):
+      # a 103 Early Hints, a 100 Continue. The proxy relayed them and kept only the final head.
+      # A side table for V44's reasons — almost no flow has one, and a `flows` BLOB would sit
+      # after the body BLOBs — and not a prefix of `response_head`, which every reader parses as
+      # one response. One row per kept head, `seq` in wire order; `relayed` is 0 for a head the
+      # client never received (an HTTP/1.0 client, or one gone mid-write). `omitted` is the
+      # flow's count of heads past the caps, repeated on each of its rows so it needs no table
+      # of its own.
+      V45 = [
+        <<-SQL,
+          CREATE TABLE IF NOT EXISTS flow_interims (
+            flow_id INTEGER NOT NULL,
+            seq     INTEGER NOT NULL,
+            status  INTEGER NOT NULL,
+            head    BLOB    NOT NULL,
+            relayed INTEGER NOT NULL DEFAULT 1,
+            omitted INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (flow_id, seq)
+          ) WITHOUT ROWID
+          SQL
+      ]
+
       # Data statements that call gori's OWN SQL functions, run by `migrate!` right after the
       # version they complete. Kept out of MIGRATIONS because that list is plain schema that a
       # bare connection can replay (specs build every historical shape that way), and a bare
@@ -2132,7 +2154,7 @@ module Gori
 
       MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17,
                     V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29, V30, V31, V32, V33,
-                    V34, V35, V36, V37, V38, V39, V40, V41, V42, V43, V44]
+                    V34, V35, V36, V37, V38, V39, V40, V41, V42, V43, V44, V45]
 
       def self.migrate!(db : DB::Database, read_only : Bool = false) : Nil
         db.using_connection do |conn|

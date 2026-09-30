@@ -263,6 +263,9 @@ module Gori::Tui
       # The request as the client sent it, when the operator edited it at Intercept (#1378) —
       # the ORIGINAL pane. nil for every flow nobody edited, so the pane is not offered.
       @detail_original = nil.as(Bytes?)
+      # The interim 1xx responses the origin sent before the final one (`Store::Interims`) —
+      # the INTERIM pane. nil for every flow that had none, so the pane is not offered.
+      @detail_interims = nil.as(Store::Interims?)
       @detail_sse = false # response is a text/event-stream → offer the EVENTS pane
       # Decoded protocol projections, parsed once per opened flow (no DB table) — each
       # drives an optional detail pane like EVENTS. nil/empty ⇒ the pane isn't offered.
@@ -1785,6 +1788,7 @@ module Gori::Tui
       @detail_frames_total = 0
       @detail_ws_total = 0
       @detail_original = nil
+      @detail_interims = nil
       @detail_sse = false
       @detail_saml = nil
       @detail_jwts = [] of Jwt::Found
@@ -1826,6 +1830,8 @@ module Gori::Tui
       end
       # One primary-key read, and only for a row the list already flags as edited.
       @detail_original = detail.try { |d| store.intercept_original(d.row.id) if d.row.intercept_edited? }
+      # A primary-key range read that finds nothing for almost every flow.
+      @detail_interims = detail.try { |d| store.interims(d.row.id) }
       # SSE events are a derived view (parsed from the stored response body at
       # render time — no table), so here we only flag whether to offer the pane.
       @detail_sse = !!(detail && sse_response?(detail))
@@ -2698,9 +2704,29 @@ module Gori::Tui
                    when :response then {detail.response_head, detail.response_body}
                    when :request  then {detail.request_head, detail.request_body}
                    when :original then {@detail_original, nil}
+                   when :interim  then {@detail_interims.try(&.wire), nil}
                    else                {nil, nil} # messages/frames/events: no raw-bytes hex
                    end
       @detail_hex_bytes = combine_bytes(head, body)
+    end
+
+    # The INTERIM pane: each 1xx head in wire order, styled like a response head (one the client
+    # never received says so above it), and the cap's sentence when the origin sent more than
+    # gori kept. Bounded by `Store::Interims`, so it is
+    # built eagerly like the other log panes.
+    private def interim_view(interims : Store::Interims) : DetailView
+      lines = [] of Highlight::Line
+      interims.heads.each_with_index do |h, i|
+        lines << Highlight::Line.new if i > 0
+        lines << [Highlight::Span.new("— not relayed to the client —", Theme.yellow)] unless h.relayed?
+        lines.concat(Highlight.message(h.head, nil, false))
+      end
+      trailer = [] of Highlight::Line
+      if note = interims.omitted_note
+        trailer << Highlight::Line.new
+        trailer << [Highlight::Span.new("— #{note} —", Theme.yellow)]
+      end
+      DetailView.new(lines, EMPTY_BODY, :text, trailer)
     end
 
     # The stored original message (head + body in one BLOB) back into its two halves, split
@@ -2726,6 +2752,9 @@ module Gori::Tui
     # conditional, so a plain HTTP flow still has exactly two. ←/→ walk this chain; Tab cycles it.
     private def detail_panes : Array(Symbol)
       panes = [:request, :response]
+      # INTERIM: the 1xx heads (a 103 Early Hints, a 100 Continue) the origin sent ahead of
+      # RESPONSE, beside the response they preceded.
+      panes << :interim if @detail_interims
       # ORIGINAL: the client's request before the operator's Intercept edit (#1378). REQUEST
       # stays what went upstream; this is what it replaced.
       panes << :original if @detail_original
@@ -2755,7 +2784,7 @@ module Gori::Tui
       when :events then "EVENTS (sse)"
       when :jwt    then @detail_jwts.size > 1 ? "JWT (#{@detail_jwts.size})" : "JWT"
         # The panes whose chip is simply their name.
-      when :saml, :graphql, :params, :original then pane.to_s.upcase
+      when :saml, :graphql, :params, :original, :interim then pane.to_s.upcase
         # Named after the FRAMING, not after gori's module — an operator working a Socket.IO
         # app is looking for a chip that says Socket.IO. Fixed for the life of the opened flow
         # (see decode_protocols); "WS PROTO" only until the first rebuild names one.
@@ -3726,6 +3755,12 @@ module Gori::Tui
       if detail.row.intercept_edited?
         lines << [Highlight::Span.new("! edited at Intercept — the client's original request is in ORIGINAL", Theme.yellow)]
       end
+      # Interim 1xx responses ahead of the final one: a fact about the exchange, not a warning.
+      if interims = @detail_interims
+        n = interims.heads.size + interims.omitted
+        lines << [Highlight::Span.new(
+          "the origin sent #{n} interim 1xx response#{n == 1 ? "" : "s"} before this one — see INTERIM", Theme.muted)]
+      end
       # What gori has to say about this exchange that its bytes cannot (`FlowRow#advisory`).
       detail.row.advisories.each do |a|
         lines << [Highlight::Span.new("! #{a}", Theme.yellow)]
@@ -4382,6 +4417,9 @@ module Gori::Tui
       # eagerly (bounded; shared with `gori run show` / MCP).
       if dv = decoded_pane_view
         return dv
+      end
+      if @detail_pane == :interim && (interims = @detail_interims)
+        return interim_view(interims)
       end
       # ORIGINAL is a request too, and renders through the same path as REQUEST.
       original = @detail_pane == :original ? @detail_original : nil

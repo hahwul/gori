@@ -774,8 +774,9 @@ module Gori
                                 ws_msgs : Array(Store::WsMessage) = [] of Store::WsMessage,
                                 include_sensitive : Bool = false,
                                 body_cap : Int32 = MAX_TEXT, body_omit : Bool = false,
-                                redaction : RedactionNote? = nil, body_more : {String, String}? = nil) : String
-        JSON.build { |j| flow_detail(j, detail, ws_msgs, include_sensitive, body_cap, body_omit, redaction, body_more) }
+                                redaction : RedactionNote? = nil, body_more : {String, String}? = nil,
+                                *, interims : Store::Interims? = nil) : String
+        JSON.build { |j| flow_detail(j, detail, ws_msgs, include_sensitive, body_cap, body_omit, redaction, body_more, interims: interims) }
       end
 
       # `body_more` is the {request, response} pointer a display-capped body carries
@@ -784,7 +785,8 @@ module Gori
                            ws_msgs : Array(Store::WsMessage) = [] of Store::WsMessage,
                            include_sensitive : Bool = false,
                            body_cap : Int32 = MAX_TEXT, body_omit : Bool = false,
-                           redaction : RedactionNote? = nil, body_more : {String, String}? = nil) : Nil
+                           redaction : RedactionNote? = nil, body_more : {String, String}? = nil,
+                           *, interims : Store::Interims? = nil) : Nil
         row = detail.row
         j.object do
           j.field "id", row.id
@@ -841,6 +843,7 @@ module Gori
             detail.request_body_truncated?, body_cap, body_omit, include_sensitive,
             source_size: detail.request_body_truncated? ? detail.request_wire_body_size : nil,
             more: body_more.try(&.[0]))
+          emit_interims(j, interims, include_sensitive) if interims
           j.field "response_head", redact_head_opt(head_text(detail.response_head), include_sensitive)
           emit_head_base64(j, "response_head", detail.response_head, include_sensitive)
           j.field "sensitive_headers_redacted", true unless include_sensitive
@@ -857,6 +860,27 @@ module Gori
             detail.row.target, request: false)
           emit_decoded(j, detail, ws_msgs)
         end
+      end
+
+      # The interim 1xx responses the origin sent before `response_head` (`Store::Interims`),
+      # in wire order — the same `interim` / `interim_omitted` pair `gori run show --format json`
+      # emits, present only on a flow that had one, with `relayed: false` on a head the client
+      # never received (an HTTP/1.0 client). Each head gets `response_head`'s treatment:
+      # a 1xx is a header block like any other and may carry a cookie.
+      def self.emit_interims(j : JSON::Builder, interims : Store::Interims, include_sensitive : Bool) : Nil
+        j.field "interim" do
+          j.array do
+            interims.heads.each do |h|
+              j.object do
+                j.field "status", h.status
+                j.field "relayed", h.relayed?
+                j.field "head", redact_head_opt(head_text(h.head), include_sensitive)
+                emit_head_base64(j, "head", h.head, include_sensitive)
+              end
+            end
+          end
+        end
+        j.field "interim_omitted", interims.omitted if interims.omitted > 0
       end
 
       GRPC_MSGS_MAX  =  200 # cap gRPC messages serialised for an LLM client

@@ -87,8 +87,10 @@ module Gori::Proxy
   # streams the response back.
   class ClientConn
     # Max consecutive interim 1xx responses to forward before giving up — a guard
-    # against a hostile upstream streaming an unbounded run of body-less 103s.
-    MAX_INTERIM = 64
+    # against a hostile upstream streaming an unbounded run of body-less 103s. Its home is
+    # `Store::Interims::MAX_RUN`, so the h2 capture, which cannot refuse the run, stops
+    # counting at the same number.
+    MAX_INTERIM = Store::Interims::MAX_RUN
 
     # How many DISTINCT compressed-body Match&Replace refusals one connection writes to
     # `gori.log` before it stops (#745). A tunnel is pinned to one host and can only reach two
@@ -226,6 +228,11 @@ module Gori::Proxy
       # folded into the record by `response_advisory`, exactly like `@alt_svc_note` above —
       # and reset the same way, by being assigned unconditionally at that seam.
       @status_line_note = nil.as(String?)
+      # The interim 1xx responses the origin sent before THIS response's final head
+      # (`Store::Interims`), carried to whichever record site the response takes. Assigned
+      # unconditionally at the top of `handle_response` — seeded with what the Expect
+      # settlement relayed, if anything — which is what resets it between keep-alive requests.
+      @interims = nil.as(Store::Interims?)
       # Hosts whose h3 `Alt-Svc` strip this connection has already written to `gori.log`. The
       # advisory is the record an operator reads; the log line is for the one debugging a
       # client that stopped using QUIC, and an origin that sends `Alt-Svc` on every response
@@ -611,13 +618,15 @@ module Gori::Proxy
       expects_continue = expect_continue?(req) && !req_framing.none?
       early_head = nil.as(Bytes?)
       early_head_failure = nil.as(Codec::Http1::HeadReadResult?)
+      early_interims = nil.as(Store::Interims?)
       send_body = true
       client_gone = false
       upstream, reused, sent = acquire_and_send(host, port, dial_tls?(scheme), retryable) do |up|
         up.write(sent_head)
         if expects_continue
           up.flush # the head must be ON THE WIRE before there is anything to wait for
-          early_head, early_head_failure, send_body, client_gone = settle_expectation(up)
+          early_interims = Store::Interims.new
+          early_head, early_head_failure, send_body, client_gone = settle_expectation(up, early_interims)
         end
         if send_body
           req_complete = stream_body(@io, up, req_framing, req_len, req_capture)
@@ -632,12 +641,13 @@ module Gori::Proxy
         return false
       end
       if client_gone
-        # The client vanished while gori was answering its expectation. Nothing was forwarded
-        # and nothing will be; record it rather than leave the flow Pending (mirrors the same
-        # guard inside `skip_interim_responses`).
+        # The client vanished while gori was answering its expectation. Nothing more will be
+        # forwarded; record it rather than leave the flow Pending (mirrors the same guard inside
+        # `skip_interim_responses`), with any 1xx the origin had already answered with.
         release_upstream
         record_error(record_req, scheme, host, port, created_at,
-          "connection closed while answering Expect: 100-continue")
+          "connection closed while answering Expect: 100-continue",
+          interims: early_interims.try { |i| i unless i.empty? })
         return false
       end
       req_body = req_framing.none? ? nil : req_capture.to_slice
@@ -646,12 +656,13 @@ module Gori::Proxy
         body_truncated: req_capture.truncated?, body_size: req_capture.total, source: FlowSource::Kind::Proxy))
       unless req_complete # client cut the request body short — don't reuse the connection
         release_upstream
-        @sink.on_response(FlowMapper.error_response(flow_id, "client truncated request body"))
+        @sink.on_response(FlowMapper.error_response(flow_id, "client truncated request body",
+          interims: early_interims.try { |i| i unless i.empty? }))
         return false
       end
       keep = handle_response(upstream, req, flow_id, started, host, port, scheme,
         reused: reused, sent_head: sent_head, can_retry: retryable, sent_req: sent_req,
-        pre_read_head: early_head, pre_read_failure: early_head_failure)
+        pre_read_head: early_head, pre_read_failure: early_head_failure, pre_interims: early_interims)
       # The expectation was settled without the body being pumped, so neither leg is reusable:
       # the client still owes those bytes, and gori sent the origin a head declaring a body it
       # never got — either socket's next bytes are ambiguous, which is where a desync starts.
@@ -1104,11 +1115,15 @@ module Gori::Proxy
     # skips is the stale-reuse redial, which cannot apply once a head has been read.
     # `pre_read_failure` carries an unfinished or rejected head from that same settlement; its
     # bytes have already been consumed, so it is recorded and the upstream connection retired.
+    # `pre_interims` is what that settlement relayed ahead of either one — the 100 or 103 the
+    # origin answered the expectation with — so the record keeps them.
     private def handle_response(upstream : IO, req : Codec::RawRequest, flow_id : Int64,
                                 started : Time::Instant, host : String, port : Int32, scheme : String,
                                 *, reused : Bool, sent_head : Bytes, can_retry : Bool,
                                 sent_req : Codec::RawRequest, pre_read_head : Bytes? = nil,
-                                pre_read_failure : Codec::Http1::HeadReadResult? = nil) : Bool
+                                pre_read_failure : Codec::Http1::HeadReadResult? = nil,
+                                pre_interims : Store::Interims? = nil) : Bool
+      @interims = pre_interims.try { |i| i unless i.empty? }
       if pre_read_failure
         record_response_head_failure(flow_id, pre_read_failure)
         release_upstream
@@ -1313,7 +1328,7 @@ module Gori::Proxy
         # body as the next response, don't reuse the upstream).
         if interim_has_body?(resp)
           @sink.on_response(FlowMapper.error_response(flow_id, "malformed interim 1xx response (declared a body)",
-            head: resp.raw_head))
+            head: resp.raw_head, interims: @interims))
           release_upstream
           return nil
         end
@@ -1321,24 +1336,32 @@ module Gori::Proxy
         # body-less 103s can't spin this fiber forever / flood the client (per-conn DoS).
         interim_seen += 1
         if interim_seen > MAX_INTERIM
-          @sink.on_response(FlowMapper.error_response(flow_id, "too many interim 1xx responses (>#{MAX_INTERIM})"))
+          @sink.on_response(FlowMapper.error_response(flow_id, "too many interim 1xx responses (>#{MAX_INTERIM})",
+            interims: @interims))
           release_upstream
           return nil
         end
+        # Each one is kept for the record as the origin sent it (capped, see `Store::Interims`),
+        # marked with whether the client got it — a 1.0 client below never does.
+        interims = @interims ||= Store::Interims.new
         # RFC 9110 §15.2 / RFC 7231: a proxy MUST NOT forward a 1xx to an HTTP/1.0
         # client (it can't parse it). Read past it for everyone; forward only to 1.1.
-        if req.version == "HTTP/1.1"
+        relay = req.version == "HTTP/1.1"
+        if relay
           begin
             @io.write(resp_head) # forward byte-exact (P6/P7); no rewrite on interim
             @io.flush
           rescue
             # Client gone mid-1xx (Stop / max-time / RST). Every other exit from this
             # method records on_response; an unguarded raise left the flow Pending forever.
-            @sink.on_response(FlowMapper.error_response(flow_id, "connection closed while forwarding interim 1xx response"))
+            interims.add(resp.status, resp_head, relayed: false)
+            @sink.on_response(FlowMapper.error_response(flow_id, "connection closed while forwarding interim 1xx response",
+              interims: @interims))
             release_upstream
             return nil
           end
         end
+        interims.add(resp.status, resp_head, relayed: relay)
         read_result = safe_read_head(upstream)
         unless resp_head = read_result.head?
           record_response_head_failure(flow_id, read_result, "upstream closed after interim 1xx response")
@@ -1355,7 +1378,7 @@ module Gori::Proxy
                                              empty_message : String = "no response from upstream") : Nil
       message = result.state == Codec::Http1::HeadReadResult::State::Empty ? empty_message : result.failure_message("response head",
         deadline: SocketTuning::HEAD_DEADLINE)
-      @sink.on_response(FlowMapper.error_response(flow_id, message, head: result.bytes))
+      @sink.on_response(FlowMapper.error_response(flow_id, message, head: result.bytes, interims: @interims))
     end
 
     # Does this request withhold its body until it is answered? RFC 9110 §10.1.1: `Expect` is a
@@ -1412,7 +1435,11 @@ module Gori::Proxy
     #     (Cost of the self-issued 100: a duplicate is possible when the origin's own 100 lands
     #     just after the deadline. RFC 9110 §15.2 requires a client to tolerate 1xx it did not
     #     even ask for, so a second one is harmless.)
-    private def settle_expectation(upstream : IO) : {Bytes?, Codec::Http1::HeadReadResult?, Bool, Bool}
+    #
+    # Every origin 1xx it relays is also added to `interims`, for the flow's record — marked
+    # unrelayed when the client was gone before the write landed. The 100 gori writes itself
+    # is not: the origin never sent it.
+    private def settle_expectation(upstream : IO, interims : Store::Interims) : {Bytes?, Codec::Http1::HeadReadResult?, Bool, Bool}
       # ONE budget for the whole settlement, not one per read. A per-iteration timeout is no
       # timeout at all against an origin that emits a 103 every EXPECT_CONTINUE_WAIT - 1ms: it
       # never technically times out and the exchange never finishes. Each pass gets only what is
@@ -1442,8 +1469,10 @@ module Gori::Proxy
           @io.write(head)
           @io.flush
         rescue
+          interims.add(resp.status, head, relayed: false) # the record's copy: it never arrived
           return {nil, nil, false, true}
         end
+        interims.add(resp.status, head) # the record's copy; the relay above is unchanged
         # THE settlement: only a 100 releases the body.
         return {nil, nil, true, false} if resp.status == 100
         # Reuse the run cap `skip_interim_responses` enforces rather than inventing a second
@@ -1544,7 +1573,7 @@ module Gori::Proxy
       Codec::Body.response_framing(resp, method)
     rescue ex : Gori::Error
       @sink.on_response(FlowMapper.error_response(flow_id, "response framing rejected: #{ex.message}",
-        head: resp.raw_head))
+        head: resp.raw_head, interims: @interims))
       release_upstream
       nil
     end
@@ -1640,7 +1669,7 @@ module Gori::Proxy
         flow_id: flow_id, body: resp_framing.none? ? nil : resp_capture.to_slice,
         ttfb_us: ttfb, duration_us: duration,
         body_truncated: resp_capture.truncated?, body_size: resp_capture.total,
-        state: state, error: error, advisory: response_advisory(nil)))
+        state: state, error: error, advisory: response_advisory(nil), interims: @interims))
     end
 
     # The buffered response-body path (no intercept): buffer the whole body, rewrite the entity,
@@ -1694,7 +1723,7 @@ module Gori::Proxy
       @sink.on_response(FlowMapper.response(sent_resp,
         flow_id: flow_id, body: stored, ttfb_us: ttfb, duration_us: duration,
         body_truncated: trunc, body_size: size, state: state, error: error,
-        advisory: response_advisory(advisory)))
+        advisory: response_advisory(advisory), interims: @interims))
       # Reuse iff the origin kept its side AND we read the whole body; a truncated body
       # was forwarded short, so close the client connection (return false) rather than
       # block its next keep-alive request on the missing bytes.
@@ -1774,7 +1803,7 @@ module Gori::Proxy
       duration = (Time.instant - started).total_microseconds.to_i64
       if decision.action.drop?
         @sink.on_response(FlowMapper.aborted_response(flow_id, Gori::Interceptor::DROP_RESPONSE_REASON,
-          ttfb_us: ttfb, duration_us: duration))
+          ttfb_us: ttfb, duration_us: duration, interims: @interims))
         write_intercept_drop
         release_upstream
         return false
@@ -1808,12 +1837,14 @@ module Gori::Proxy
           out_head, out_body || Bytes.empty)
         @sink.on_response(FlowMapper.response(sent_resp,
           flow_id: flow_id, body: stored, ttfb_us: ttfb, duration_us: duration,
-          body_truncated: trunc, body_size: size, advisory: response_advisory(advisory)))
+          body_truncated: trunc, body_size: size, advisory: response_advisory(advisory),
+          interims: @interims))
       else
         @sink.on_response(FlowMapper.response(sent_resp,
           flow_id: flow_id, body: stored, ttfb_us: ttfb, duration_us: duration,
           body_truncated: trunc, body_size: size, advisory: response_advisory(advisory),
-          state: Store::FlowState::Aborted, error: "connection closed while forwarding held response"))
+          state: Store::FlowState::Aborted, error: "connection closed while forwarding held response",
+          interims: @interims))
       end
       # Reuse the upstream iff we read the WHOLE body cleanly AND the origin kept its
       # side alive. Origin side keys on sent_req (what the origin received); the CLIENT
@@ -2793,11 +2824,11 @@ module Gori::Proxy
     end
 
     private def record_error(req, scheme, host, port, created_at, message, *,
-                             intercept_original : Bytes? = nil) : Nil
+                             intercept_original : Bytes? = nil, interims : Store::Interims? = nil) : Nil
       flow_id = @sink.on_request(FlowMapper.request(req,
         scheme: scheme, host: host, port: port, created_at: created_at, body: nil, source: FlowSource::Kind::Proxy,
         intercept_original: intercept_original))
-      @sink.on_response(FlowMapper.error_response(flow_id, message))
+      @sink.on_response(FlowMapper.error_response(flow_id, message, interims: interims))
     end
 
     # The client's head outgrew `MAX_HEAD_BYTES` before its CRLFCRLF: record what arrived, answer

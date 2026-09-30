@@ -350,7 +350,8 @@ module Gori
         return opts if opts.is_a?(Result)
         cap, omit = opts
         more = auto ? {body_more_hint("flow_id: #{id}, part: \"request\"", "request, head included"), body_more_hint("flow_id: #{id}")} : nil
-        Result.new(Serialize.flow_detail_json(detail, ws_msgs, include_sensitive, cap, omit, redaction, more))
+        Result.new(Serialize.flow_detail_json(detail, ws_msgs, include_sensitive, cap, omit, redaction, more,
+          interims: store.interims(id)))
       end
 
       # Safe evidence export applied to the projection an AGENT reads (#1035).

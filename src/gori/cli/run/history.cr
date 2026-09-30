@@ -894,9 +894,9 @@ module Gori
         # project's own profiles off the settings row, and its refusal ("no profile named …")
         # has to be reported AFTER the close.
         store = open_store(resolve_read_project(project_name, db_path), read_only: true)
-        detail, ws_msgs, choice = begin
+        detail, ws_msgs, choice, interims = begin
           d = store.get_flow(id)
-          {d, show_ws_messages(store, d), redact_choice(store, redaction)}
+          {d, show_ws_messages(store, d), redact_choice(store, redaction), d.try { store.interims(id) }}
         ensure
           store.close
         end
@@ -906,7 +906,7 @@ module Gori
 
         show_request = !resp_only
         show_response = !req_only
-        show_format(format, detail, show_request, show_response, ws_msgs, cap)
+        show_format(format, detail, show_request, show_response, ws_msgs, cap, interims)
         # After the document, like every other caveat this command reports, and on STDERR so
         # `--format har > evidence.har` still writes a pure HAR.
         redact_notes(redact_one(redact_report), choice, "show")
@@ -918,9 +918,9 @@ module Gori
       private def self.show_format(format : Symbol, detail : Store::FlowDetail,
                                    show_request : Bool, show_response : Bool,
                                    ws_msgs : Array(Store::WsMessage),
-                                   cap : BodyCap = BodyCap.new) : Nil
+                                   cap : BodyCap = BodyCap.new, interims : Store::Interims? = nil) : Nil
         case format
-        when :raw    then show_raw(detail, show_request, show_response)
+        when :raw    then show_raw(detail, show_request, show_response, interims)
         when :har    then show_har(detail, ws_msgs)
         when :curl   then show_curl(detail, ws_msgs)
         when :python then show_code(detail, ws_msgs, :python)
@@ -928,8 +928,8 @@ module Gori
         when :go     then show_code(detail, ws_msgs, :go)
         when :httpie then show_code(detail, ws_msgs, :httpie)
         when :csrf   then show_code(detail, ws_msgs, :csrf)
-        when :json   then puts show_json(detail, show_request, show_response, ws_msgs, cap)
-        else              show_text(detail, show_request, show_response, ws_msgs, cap)
+        when :json   then puts show_json(detail, show_request, show_response, ws_msgs, cap, interims)
+        else              show_text(detail, show_request, show_response, ws_msgs, cap, interims)
         end
       end
 
@@ -1158,23 +1158,36 @@ module Gori
       # the origin's. Every sibling format already says so — `show_text` inline, `show_har`
       # and the code formats on STDERR — and this one is the one an operator pipes into a
       # file and diffs. On STDERR, like those, so STDOUT stays byte-pure.
-      private def self.show_raw(detail : Store::FlowDetail, req : Bool, resp : Bool) : Nil
+      #
+      # An interim 1xx the origin sent before the final response (`Store::Interims`) is written
+      # ahead of it, in wire order, when gori relayed it: those octets reached the client first.
+      # One the client never received (an HTTP/1.0 client) is left out of the bytes and named on
+      # STDERR; `--format json` lists it with `relayed: false`.
+      private def self.show_raw(detail : Store::FlowDetail, req : Bool, resp : Bool,
+                                interims : Store::Interims? = nil) : Nil
+        write_raw(STDOUT, detail, req, resp, interims)
+        STDOUT.flush
+        raw_truncation_notes(detail, req, resp, interims).each { |n| STDERR.puts "gori run show: #{n}" }
+      end
+
+      # The octets `--format raw` prints, in the order they crossed the wire.
+      private def self.write_raw(io : IO, detail : Store::FlowDetail, req : Bool, resp : Bool,
+                                 interims : Store::Interims?) : Nil
         if req
-          STDOUT.write(detail.request_head)
+          io.write(detail.request_head)
           if b = detail.request_body
-            STDOUT.write(b)
+            io.write(b)
           end
         end
         if resp
+          io.write(interims.relayed_wire) if interims
           if h = detail.response_head
-            STDOUT.write(h)
+            io.write(h)
           end
           if b = detail.response_body
-            STDOUT.write(b)
+            io.write(b)
           end
         end
-        STDOUT.flush
-        raw_truncation_notes(detail, req, resp).each { |n| STDERR.puts "gori run show: #{n}" }
       end
 
       # What `--format raw` left out, one line per side, or empty when the bytes are whole.
@@ -1183,8 +1196,15 @@ module Gori
       #
       # Keyed on the side actually PRINTED — `--request-only` on a flow whose response was
       # capped must not warn about bytes it did not write.
-      private def self.raw_truncation_notes(detail : Store::FlowDetail, req : Bool, resp : Bool) : Array(String)
+      private def self.raw_truncation_notes(detail : Store::FlowDetail, req : Bool, resp : Bool,
+                                            interims : Store::Interims? = nil) : Array(String)
         notes = [] of String
+        if resp && (note = interims.try(&.unrelayed_note))
+          notes << "flow ##{detail.row.id}: #{note}; they are not in these bytes (--format json lists them)"
+        end
+        if resp && (note = interims.try(&.omitted_note))
+          notes << "flow ##{detail.row.id}: #{note}"
+        end
         {"request"  => req && detail.request_body_truncated?,
          "response" => resp && detail.response_body_truncated?}.each do |side, capped|
           next unless capped
@@ -1200,7 +1220,8 @@ module Gori
       # screen, and an SSE stream's events or a socket's frames are the same bulk again. A derived
       # section with a count is still NAMED, so its absence is never read as "there was none".
       private def self.show_text(detail : Store::FlowDetail, req : Bool, resp : Bool,
-                                 ws_msgs : Array(Store::WsMessage), cap : BodyCap = BodyCap.new) : Nil
+                                 ws_msgs : Array(Store::WsMessage), cap : BodyCap = BodyCap.new,
+                                 interims : Store::Interims? = nil) : Nil
         # FIRST, above the bytes it is about: what gori DID to this exchange that the bytes
         # cannot show — a Match&Replace rule it could not run, a request the origin invented.
         # The WebSocket half of this has been readable here since #518 (`[gori] …` rows in the
@@ -1218,6 +1239,10 @@ module Gori
         end
         if resp
           puts "" if req
+          if interims
+            print_interims_text(interims)
+            puts ""
+          end
           puts "=== RESPONSE ==="
           if err = detail.error
             puts "error: #{err}"
@@ -1248,6 +1273,19 @@ module Gori
           end
         end
         print_decoded_text(detail, req, resp, ws_msgs) if cap.whole?
+      end
+
+      # The interim 1xx heads that preceded the response, above it and in wire order.
+      private def self.print_interims_text(interims : Store::Interims) : Nil
+        interims.heads.each_with_index do |h, i|
+          puts "" if i > 0
+          relayed = h.relayed? ? "" : ", not relayed to the client"
+          puts "=== INTERIM #{h.status} (#{i + 1} of #{interims.heads.size}#{relayed}) ==="
+          print_message_text(h.head, nil)
+        end
+        if note = interims.omitted_note
+          puts "  [#{note}]"
+        end
       end
 
       # Parsed SSE events when the response is a text/event-stream, else nil. Like
@@ -1460,7 +1498,8 @@ module Gori
       # derived from bodies left out — except that a transcript's COUNT stays, as an object with
       # `omitted: true`, so a script can still tell "had frames" from "had none".
       private def self.show_json(detail : Store::FlowDetail, req : Bool, resp : Bool,
-                                 ws_msgs : Array(Store::WsMessage), cap : BodyCap = BodyCap.new) : String
+                                 ws_msgs : Array(Store::WsMessage), cap : BodyCap = BodyCap.new,
+                                 interims : Store::Interims? = nil) : String
         JSON.build do |j|
           j.object do
             j.field "flow" do
@@ -1492,6 +1531,7 @@ module Gori
             if resp
               j.field "response" do
                 j.object do
+                  emit_interims_json(j, interims) if interims
                   j.field "head", scrub(detail.response_head)
                   emit_body_json(j, "body", detail.response_head, detail.response_body, detail.response_body_truncated?, cap,
                     source_size: detail.response_body_truncated? ? detail.response_wire_body_size : nil)
@@ -1506,6 +1546,24 @@ module Gori
             end
           end
         end
+      end
+
+      # The interim 1xx heads before the final response — the same `interim` / `interim_omitted`
+      # pair MCP `get_flow` emits, present only on a flow that had one. `relayed` is false for a
+      # head the client never received.
+      private def self.emit_interims_json(j : JSON::Builder, interims : Store::Interims) : Nil
+        j.field "interim" do
+          j.array do
+            interims.heads.each do |h|
+              j.object do
+                j.field "status", h.status
+                j.field "relayed", h.relayed?
+                j.field "head", scrub(h.head)
+              end
+            end
+          end
+        end
+        j.field "interim_omitted", interims.omitted if interims.omitted > 0
       end
 
       # A WebSocket flow's transcript for `show --format json`. Under `--headers-only` /

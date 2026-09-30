@@ -51,12 +51,21 @@ end
 # only an explicit-receiver call from outside is not).
 module Gori::CLI::Run
   def self.show_json_for_spec(detail : Store::FlowDetail, req : Bool, resp : Bool,
-                              ws_msgs : Array(Store::WsMessage) = [] of Store::WsMessage) : String
-    show_json(detail, req, resp, ws_msgs)
+                              ws_msgs : Array(Store::WsMessage) = [] of Store::WsMessage,
+                              interims : Store::Interims? = nil) : String
+    show_json(detail, req, resp, ws_msgs, interims: interims)
   end
 
-  def self.raw_truncation_notes_for_spec(detail : Store::FlowDetail, req : Bool, resp : Bool) : Array(String)
-    raw_truncation_notes(detail, req, resp)
+  def self.raw_truncation_notes_for_spec(detail : Store::FlowDetail, req : Bool, resp : Bool,
+                                         interims : Store::Interims? = nil) : Array(String)
+    raw_truncation_notes(detail, req, resp, interims)
+  end
+
+  def self.write_raw_for_spec(detail : Store::FlowDetail, req : Bool, resp : Bool,
+                              interims : Store::Interims?) : String
+    io = IO::Memory.new
+    write_raw(io, detail, req, resp, interims)
+    io.to_s
   end
 end
 
@@ -1339,6 +1348,53 @@ describe "gori run show --format raw" do
     doc["response"]["body"]["source_size"].should eq(7000)
     whole = capped_detail(request_capped: false, response_capped: false)
     JSON.parse(Gori::CLI::Run.show_json_for_spec(whole, true, true))["request"]["body"]["source_size"]?.should be_nil
+  end
+
+  # The interim 1xx heads went to the client before the final response, so the exact-bytes view
+  # prints them there — and only on the side it prints.
+  it "writes the interim 1xx heads ahead of the final response, in wire order" do
+    hint = "HTTP/1.1 103 Early Hints\r\nLink: </a.css>; rel=preload\r\n\r\n"
+    interims = Gori::Store::Interims.new
+    interims.add(103, hint.to_slice)
+    detail = flow_detail("http", "example.test", 80, "GET / HTTP/1.1\r\nHost: example.test\r\n\r\n",
+      response_head: "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n", response_body: "ok")
+    Gori::CLI::Run.write_raw_for_spec(detail, true, true, interims).should eq(
+      "GET / HTTP/1.1\r\nHost: example.test\r\n\r\n" + hint + "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+    Gori::CLI::Run.write_raw_for_spec(detail, true, false, interims).should_not contain("103")
+
+    doc = JSON.parse(Gori::CLI::Run.show_json_for_spec(detail, true, true, interims: interims))
+    doc["response"]["interim"].as_a.map { |e| {e["status"].as_i, e["head"].as_s} }.should eq([{103, hint}])
+    doc["response"]["interim_omitted"]?.should be_nil
+    doc["response"]["head"].as_s.should start_with("HTTP/1.1 200 OK")
+    JSON.parse(Gori::CLI::Run.show_json_for_spec(detail, true, true))["response"]["interim"]?.should be_nil
+  end
+
+  # A head the client never received (an HTTP/1.0 client) is not part of the exchange's bytes:
+  # raw leaves it out and says so, JSON keeps it with `relayed: false`.
+  it "leaves an unrelayed interim out of the raw bytes and marks it in JSON" do
+    hint = "HTTP/1.1 103 Early Hints\r\n\r\n"
+    interims = Gori::Store::Interims.new
+    interims.add(103, hint.to_slice, relayed: false)
+    detail = flow_detail("http", "example.test", 80, "GET / HTTP/1.0\r\n\r\n",
+      response_head: "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n", response_body: "ok")
+    Gori::CLI::Run.write_raw_for_spec(detail, false, true, interims).should eq("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+    notes = Gori::CLI::Run.raw_truncation_notes_for_spec(detail, false, true, interims)
+    notes.size.should eq(1)
+    notes.first.should contain("not relayed to the client")
+    entry = JSON.parse(Gori::CLI::Run.show_json_for_spec(detail, true, true, interims: interims))["response"]["interim"][0]
+    entry["relayed"].as_bool.should be_false
+    entry["head"].as_s.should eq(hint)
+  end
+
+  it "names the interims the cap left out, on the response side only" do
+    interims = Gori::Store::Interims.new
+    (Gori::Store::Interims::MAX_KEPT + 1).times { interims.add(103, "HTTP/1.1 103 Early Hints\r\n\r\n".to_slice) }
+    detail = capped_detail(request_capped: false, response_capped: false)
+    notes = Gori::CLI::Run.raw_truncation_notes_for_spec(detail, true, true, interims)
+    notes.size.should eq(1)
+    notes.first.should contain("did not record the other 1")
+    Gori::CLI::Run.raw_truncation_notes_for_spec(detail, true, false, interims).should be_empty
+    JSON.parse(Gori::CLI::Run.show_json_for_spec(detail, true, true, interims: interims))["response"]["interim_omitted"].as_i.should eq(1)
   end
 
   it "stays silent for a flow whose bodies are whole" do

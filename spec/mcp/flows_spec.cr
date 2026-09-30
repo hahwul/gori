@@ -222,6 +222,33 @@ describe Gori::MCP::Server do
   end
 
   describe "get_flow" do
+    # The same `interim` / `interim_omitted` pair `gori run show --format json` emits; each head
+    # redacted like `response_head`, since a 1xx is a header block like any other.
+    it "lists the interim 1xx heads that preceded the response, redacted like response_head" do
+      with_store do |store|
+        id = mcp_seed_flow(store, "ex.test", "GET", "/page", 200)
+        interims = Gori::Store::Interims.new
+        interims.add(103, "HTTP/1.1 103 Early Hints\r\nLink: </a.css>; rel=preload\r\nSet-Cookie: sid=secret\r\n\r\n".to_slice)
+        store.update_response(Gori::Store::CapturedResponse.new(flow_id: id, status: 200,
+          head: "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n".to_slice, interims: interims))
+        plain = mcp_seed_flow(store, "ex.test", "GET", "/plain", 200)
+
+        call = %({"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"get_flow","arguments":{"id":#{id}}}})
+        payload = mcp_tool_payload(mcp_drive(store, call)[0])
+        entries = payload["interim"].as_a
+        entries.size.should eq(1)
+        entries[0]["status"].as_i.should eq(103)
+        entries[0]["relayed"].as_bool.should be_true
+        entries[0]["head"].as_s.should contain("Link: </a.css>; rel=preload")
+        entries[0]["head"].as_s.should_not contain("secret")
+        payload["interim_omitted"]?.should be_nil
+        payload["response_head"].as_s.should start_with("HTTP/1.1 200 OK")
+
+        call = %({"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"get_flow","arguments":{"id":#{plain}}}})
+        mcp_tool_payload(mcp_drive(store, call)[0])["interim"]?.should be_nil
+      end
+    end
+
     it "decodes a gzip response body to text" do
       with_store do |store|
         id = mcp_seed_flow(store, "ex.test", "GET", "/", 200,
