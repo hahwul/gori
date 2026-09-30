@@ -851,3 +851,5 @@ module Gori
     end
   end
 end
+
+require "./sitemap/tag_filter"
