@@ -1037,7 +1037,7 @@ gori run jwt eyJhbGci... --attacks --key ./public.pem
 |--------|-------------|
 | `--decode` | header / payload / signature 디코드(기본) |
 | `--encode` | `--alg`와 `--secret` / `--key`로 토큰 클레임 재서명 |
-| `--verify` | 토큰 자신의 서명을 `--secret` / `--key`로 검증; `verified: yes\|no`를 출력합니다(`no`도 실패가 아니라 답이므로 종료 코드는 0) |
+| `--verify` | 토큰 자신의 서명을 `--secret` / `--key`로 검증(둘 중 하나 필수, `--secret ''`은 빈 secret 확인); `verified: yes\|no`와 `reason`을 출력하고 검증되지 않으면 1로 종료합니다. `--format json`은 `code`(`signature_mismatch`, `unsigned`, `alg_unsupported`, …)를 더합니다 |
 | `--attacks` | 테스트 페이로드 생성(alg:none, weak-secret, header injection) |
 | `--alg=ALG` | `--encode`용 서명 alg: `HS256`(기본) \| `HS384` \| `HS512` \| `RS256/384/512` \| `PS256/384/512` \| `ES256/384/512` \| `EdDSA` \| `none` |
 | `--secret=SECRET` | HS 알고리즘용 HMAC 시크릿 |

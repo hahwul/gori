@@ -12,7 +12,7 @@ module Gori
       private def self.cmd_jwt(args : Array(String)) : Nil
         action = :decode
         alg = "HS256"
-        secret = ""
+        secret = nil.as(String?) # nil = not passed; "" = the empty HMAC secret, deliberately
         key = ""
         format = :text
         payload_override = nil.as(String?)
@@ -25,7 +25,7 @@ module Gori
                      "from the <token> argument, or from STDIN when none is given."
           p.on("--decode", "Decode header / payload / signature (default)") { action = :decode }
           p.on("--encode", "Re-sign the token's claims with --alg and --secret / --key") { action = :encode }
-          p.on("--verify", "Check the token's own signature against --secret / --key") { action = :verify }
+          p.on("--verify", "Check the token's own signature against --secret / --key; exits 1 unless it verifies") { action = :verify }
           p.on("--attacks", "Generate testing payloads (alg:none, weak-secret, header injection)") { action = :attacks }
           p.on("--alg=ALG", "Signing alg for --encode: HS256 (default) | HS384 | HS512 | " \
                             "RS/PS/ES with 256/384/512 | EdDSA | none") { |v| alg = v }
@@ -59,15 +59,17 @@ module Gori
         end
       end
 
-      private def self.jwt_key(secret : String, key : String) : String
-        Jwt.key_material(secret, key)
+      # An unpassed `--secret` is the empty secret here: `--encode` has always signed with it,
+      # and `--verify` refused the keyless call before reaching this.
+      private def self.jwt_key(secret : String?, key : String) : String
+        Jwt.key_material(secret || "", key)
       rescue ex : Jwt::ForgeError
         abort "gori run jwt: --key: #{ex.message}"
       end
 
       # The flag combinations that would otherwise resolve silently, and wrongly.
       private def self.jwt_refuse_conflicts(action : Symbol, payload_override : String?,
-                                            sets : Array(String), secret : String, key : String) : Nil
+                                            sets : Array(String), secret : String?, key : String) : Nil
         # --payload and --set are two ways to write the same claims object; taking both would
         # make the result depend on apply order, so refuse it rather than pick one.
         abort "gori run jwt: --payload and --set are mutually exclusive" if payload_override && !sets.empty?
@@ -76,9 +78,26 @@ module Gori
         if action != :encode && (payload_override || !sets.empty?)
           abort "gori run jwt: --payload / --set apply to --encode only"
         end
-        # --secret and --key fill the SAME slot (the engine takes one key string, and the alg
-        # decides how to read it). Taking both would silently pick one, so refuse.
-        abort "gori run jwt: --secret and --key are two names for the same key — pass one" if !secret.empty? && !key.empty?
+        if refusal = jwt_key_refusal(action, secret, key)
+          abort "gori run jwt: #{refusal}"
+        end
+      end
+
+      # Why the key flags given cannot run `action`, or nil when they can. Checked before the
+      # token is read, so a refused call does not consume STDIN.
+      #
+      # --secret and --key fill the SAME slot (the engine takes one key string, and the alg
+      # decides how to read it), so naming both is refused rather than silently picking one —
+      # an explicit `--secret ''` included, since that asks for the empty secret by name.
+      #
+      # Naming NO key used to make `--verify` check the empty secret and print a bare
+      # `verified: no`, which reads exactly like a wrong key. The empty secret is still one
+      # `--secret ''` away: it is a real weak secret (the first of `Jwt::WEAK_SECRETS`), so it
+      # is refused only when unasked.
+      def self.jwt_key_refusal(action : Symbol, secret : String?, key : String) : String?
+        return "--secret and --key are two names for the same key — pass one" if secret && !key.empty?
+        return nil unless action == :verify && secret.nil? && key.presence.nil?
+        "--verify needs --secret (HMAC) or --key (PEM) — pass --secret '' to check the empty secret"
       end
 
       private def self.jwt_token_input(positional : Array(String)) : String
@@ -105,27 +124,43 @@ module Gori
         abort "gori run jwt: #{ex.message}"
       end
 
-      # Verify the token's own signature. `verified: false` is a legitimate ANSWER, not a
-      # failure — it exits 0 in text form and emits `{"verified":false}` in JSON, so a script
-      # reads the field rather than the exit code.
+      # Verify the token's own signature. The answer is printed in either format, and the exit
+      # status carries it too — 0 only when the token verifies, as `gori run cookie --verify`
+      # does — so `gori run jwt "$T" --verify --secret "$S" && …` gates on it. `code` / `reason`
+      # say why a "no" is a no; a key that does not load is a usage error, not an answer.
       private def self.emit_jwt_verify(token : String, key : String, format : Symbol) : Nil
-        v = Jwt.verify(token, key)
+        v = begin
+          Jwt.verify(token, key)
+        rescue ex : Jwt::ForgeError
+          abort "gori run jwt: #{ex.message}"
+        end
         if format == :json
           puts Jwt.verify_json(v)
         else
-          jwt_verify_lines(v).each { |line| puts line }
+          jwt_verify_lines(v, empty_secret: key.empty?).each { |line| puts line }
         end
-      rescue ex : Jwt::ForgeError
-        abort "gori run jwt: #{ex.message}"
+        exit jwt_verify_status(v)
+      end
+
+      # The `--verify` exit status: 0 when the token verifies, 1 on any "no".
+      def self.jwt_verify_status(v : Jwt::Verification) : Int32
+        v.verified ? 0 : 1
       end
 
       # The text form of a Verification, as the lines to print. Split out so it is assertable:
       # BOTH lines carry the token's own `alg`, which is captured — attacker-chosen — text, and
       # a header of {"alg":"<ESC>[2J<ESC>]0;pwn<BEL>"} cleared the operator's screen and rewrote
       # its title from the `verified:` line, the one line here that was not neutralized.
-      def self.jwt_verify_lines(v : Jwt::Verification) : Array(String)
-        alg = v.alg.empty? ? "" : " (alg #{CLI::Output.term_safe(v.alg)})"
-        lines = ["verified: #{v.verified ? "yes" : "no"}#{alg}"]
+      #
+      # `empty_secret` names the key when it is the empty string, so `--secret "$UNSET"` does
+      # not pass for a real secret that failed. Only on an HMAC token: an asymmetric alg never
+      # reads the key as a secret (an empty PEM does not load and never gets this far).
+      def self.jwt_verify_lines(v : Jwt::Verification, empty_secret : Bool = false) : Array(String)
+        bits = [] of String
+        bits << "alg #{CLI::Output.term_safe(v.alg)}" unless v.alg.empty?
+        bits << "empty secret" if empty_secret && Jwt::HMAC_DIGEST.has_key?(v.alg)
+        detail = bits.empty? ? "" : " (#{bits.join(", ")})"
+        lines = ["verified: #{v.verified ? "yes" : "no"}#{detail}"]
         if reason = v.reason
           lines << "reason: #{CLI::Output.term_safe(reason)}"
         end

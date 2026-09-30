@@ -2,6 +2,7 @@ require "../spec_helper"
 require "base64"
 require "json"
 require "openssl/hmac"
+require "../support/jose_keys"
 
 private def b64(s : String) : String
   Base64.urlsafe_encode(s, padding: false)
@@ -250,5 +251,115 @@ describe Gori::Jwt do
       Gori::Jwt.sign("#{header}.#{payload}", "HS256", "").should eq(sig)
       JSON.parse(String.new(Base64.decode(header)))["kid"].as_s.should contain("dev/null")
     end
+  end
+end
+
+# #1370: a "no" from `Jwt.verify` used to come back with `reason: nil` whenever the signature
+# was simply wrong, so an agent could not tell a bad key from a token no key would ever pass.
+describe "Gori::Jwt.verify codes" do
+  hs = Gori::Jwt.encode("{}", %({"s":1}), "HS256", "k")
+  h, p, sig = hs.split('.')
+
+  it "names every kind of no with a code and a reason" do
+    rows = [
+      {"eyJhbGciOiJIUzI1NiJ9", Gori::Jwt::VerifyCode::Malformed},
+      {"#{hs}.SMUGGLED", Gori::Jwt::VerifyCode::ExtraSegments},
+      {"#{b64("{}")}.#{p}.#{sig}", Gori::Jwt::VerifyCode::NoAlg},
+      {Gori::Jwt.encode("{}", %({"s":1}), "none", ""), Gori::Jwt::VerifyCode::Unsigned},
+      {"#{h}.#{p}", Gori::Jwt::VerifyCode::Unsigned},
+      {"#{b64(%({"alg":"ES256K"}))}.#{p}.AAAA", Gori::Jwt::VerifyCode::AlgUnsupported},
+      {"#{h}.#{p}.!!!not-base64!!!", Gori::Jwt::VerifyCode::SignatureMalformed},
+      # Decodes, but no HS256 key makes a 3-byte MAC: another key is not worth trying.
+      {"#{h}.#{p}.AAAA", Gori::Jwt::VerifyCode::SignatureMalformed},
+      {hs, Gori::Jwt::VerifyCode::SignatureMismatch},
+    ]
+    rows.each do |(token, code)|
+      v = Gori::Jwt.verify(token, "wrong")
+      v.verified.should be_false
+      v.code.should eq(code)
+      v.reason.not_nil!.should_not be_empty
+    end
+    # The table is the whole enum except Jwe (jwe_spec pins it, it needs a real JWE) and
+    # KeyMismatch (needs a PEM, pinned below), so a new code cannot land without a row here.
+    covered = rows.map(&.[1]).uniq! + [Gori::Jwt::VerifyCode::Jwe, Gori::Jwt::VerifyCode::KeyMismatch]
+    covered.sort!.should eq(Gori::Jwt::VerifyCode.values.sort!)
+  end
+
+  it "leaves code and reason nil on a yes" do
+    v = Gori::Jwt.verify(hs, "k")
+    v.verified.should be_true
+    v.code.should be_nil
+    v.reason.should be_nil
+  end
+
+  it "answers key_mismatch, not an error, for a key of the wrong kind for the token's alg" do
+    # The alg is the token's — captured text — so "this RSA key cannot serve ES256" is the
+    # answer to "would a server holding it accept this token", not the caller's mistake.
+    es = Gori::Jwt.encode("{}", %({"s":1}), "ES256", JoseKeys::EC256)
+    v = Gori::Jwt.verify(es, JoseKeys::RSA_PUB)
+    v.verified.should be_false
+    v.code.should eq(Gori::Jwt::VerifyCode::KeyMismatch)
+    v.reason.not_nil!.should contain("needs an EC key")
+    # A P-384 key under ES256 is the size half of the same check.
+    Gori::Jwt.verify(es, JoseKeys::EC384_PUB).code.should eq(Gori::Jwt::VerifyCode::KeyMismatch)
+  end
+
+  it "calls a signature of a width no key produces malformed" do
+    es = Gori::Jwt.encode("{}", %({"s":1}), "ES256", JoseKeys::EC256)
+    eh, ep, _ = es.split('.')
+    v = Gori::Jwt.verify("#{eh}.#{ep}.#{Gori::Jwt.b64url(Bytes.new(63))}", JoseKeys::EC256_PUB)
+    v.code.should eq(Gori::Jwt::VerifyCode::SignatureMalformed)
+    v.reason.not_nil!.should contain("63 bytes")
+    # RS width is the modulus, which only the key knows: a short one stays a mismatch.
+    rs = Gori::Jwt.encode("{}", %({"s":1}), "RS256", JoseKeys::RSA)
+    rh, rp, _ = rs.split('.')
+    Gori::Jwt.verify("#{rh}.#{rp}.AAAA", JoseKeys::RSA_PUB).code.should eq(Gori::Jwt::VerifyCode::SignatureMismatch)
+  end
+
+  it "says which alg a case variant resembles instead of calling it unknown" do
+    lower = "#{b64(%({"alg":"hs256"}))}.#{p}.#{sig}"
+    v = Gori::Jwt.verify(lower, "k")
+    v.code.should eq(Gori::Jwt::VerifyCode::AlgUnsupported)
+    v.reason.not_nil!.should contain("is not HS256: alg names are case-sensitive")
+  end
+
+  it "names the empty secret in a mismatch against it, on every surface" do
+    Gori::Jwt.verify(hs, "").reason.not_nil!.should contain("under the EMPTY secret")
+    Gori::Jwt.verify(hs, "wrong").reason.not_nil!.should contain("under this key")
+  end
+
+  it "reports a wrong PEM as a mismatch, not a malformed signature" do
+    es = Gori::Jwt.encode("{}", %({"s":1}), "ES256", JoseKeys::EC256)
+    other = Gori::Jwt.encode("{}", %({"s":2}), "ES256", JoseKeys::EC256)
+    tampered = "#{es.split('.')[0]}.#{other.split('.')[1]}.#{es.split('.')[2]}"
+    Gori::Jwt.verify(tampered, JoseKeys::EC256_PUB).code.should eq(Gori::Jwt::VerifyCode::SignatureMismatch)
+  end
+
+  it "still raises for a key that does not load, even over an undecodable signature" do
+    # The malformed-signature answer must not hide the caller's own mistake: the key is loaded
+    # before the signature's shape is judged.
+    es = Gori::Jwt.encode("{}", %({"s":1}), "ES256", JoseKeys::EC256)
+    garbled = "#{es.split('.')[0]}.#{es.split('.')[1]}.!!!"
+    expect_raises(Gori::Jwt::ForgeError) { Gori::Jwt.verify(garbled, "-----BEGIN PUBLIC KEY-----\nnope\n-----END PUBLIC KEY-----") }
+  end
+
+  it "refuses an empty key file rather than HMAC with its empty contents" do
+    path = File.tempname("gori-empty", ".pem")
+    File.write(path, "")
+    begin
+      expect_raises(Gori::Jwt::ForgeError, "key file is empty") { Gori::Jwt.key_material("", path) }
+    ensure
+      File.delete(path)
+    end
+  end
+
+  it "treats the empty key as the empty HMAC secret, which is a real weak secret" do
+    Gori::Jwt.verify(Gori::Jwt.encode("{}", %({"s":1}), "HS256", ""), "").verified.should be_true
+  end
+
+  it "spells each code as its snake_case label" do
+    Gori::Jwt::VerifyCode::SignatureMismatch.label.should eq("signature_mismatch")
+    Gori::Jwt::VerifyCode::AlgUnsupported.label.should eq("alg_unsupported")
+    Gori::Jwt::VerifyCode::Jwe.label.should eq("jwe")
   end
 end

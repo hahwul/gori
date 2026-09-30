@@ -102,6 +102,7 @@ describe "JWE across the derived projections" do
     v.verified.should be_false
     v.reason.not_nil!.should contain("JWE")
     v.reason.not_nil!.should contain("not a signature")
+    v.code.should eq(Gori::Jwt::VerifyCode::Jwe)
   end
 
   it "the decoder codec renders it rather than warning about extra segments" do

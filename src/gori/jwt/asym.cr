@@ -133,6 +133,9 @@ module Gori
         if File.size(path) > MAX_KEY_BYTES
           raise ForgeError.new("key file is larger than #{MAX_KEY_BYTES // 1024} KiB — not a PEM key")
         end
+        # An empty file is no PEM, and an HS alg would otherwise HMAC with its "" contents:
+        # the empty secret, reached by a truncated key file rather than by asking for it.
+        raise ForgeError.new("key file is empty — not a PEM key") if File.size(path) == 0
         File.read(path)
       rescue IO::Error | ArgumentError # a race, a directory, a permission denial, a bad path
         raise ForgeError.new("cannot read the key file")
@@ -232,16 +235,17 @@ module Gori
 
       # Refuse an alg/key mismatch by name. Without this an RSA key under `ES256` would sign
       # happily (PKCS#1 over SHA-256) and emit 256 bytes that `der_to_raw` then tears apart
-      # into nonsense, or worse, parses by accident.
+      # into nonsense, or worse, parses by accident. `KeyMismatch`, so `Jwt.verify` can tell
+      # this answer apart from a key that does not load.
       private def check_key!(alg : String, key : PKey) : Nil
         id = LibCrypto.evp_pkey_base_id(key.handle)
         case alg[0, 2]
         when "RS", "PS"
           unless id == NID_RSA || id == NID_RSA_PSS
-            raise ForgeError.new("#{alg} needs an RSA key (this key is #{key_kind(id)})")
+            raise KeyMismatch.new("#{alg} needs an RSA key (this key is #{key_kind(id)})")
           end
         when "ES"
-          raise ForgeError.new("#{alg} needs an EC key (this key is #{key_kind(id)})") unless id == NID_EC
+          raise KeyMismatch.new("#{alg} needs an EC key (this key is #{key_kind(id)})") unless id == NID_EC
           # Size, not curve NAME: `EVP_PKEY_get_group_name` is 3.0-only and the 1.1.1 route to
           # the NID goes through EC_KEY accessors 3.0 deprecates, so there is no portable
           # spelling. The gap that leaves is a same-width non-NIST curve — a secp256k1 key
@@ -250,12 +254,12 @@ module Gori
           want = ec_bits(alg)
           got = LibCrypto.evp_pkey_bits(key.handle)
           if got != want
-            raise ForgeError.new("#{alg} needs a P-#{want} curve (this key is a #{got}-bit curve)")
+            raise KeyMismatch.new("#{alg} needs a P-#{want} curve (this key is a #{got}-bit curve)")
           end
         else # EdDSA
           unless id == NID_ED25519
             hint = id == NID_ED448 ? "Ed448, which JOSE does not define an alg for" : key_kind(id)
-            raise ForgeError.new("EdDSA needs an Ed25519 key (this key is #{hint})")
+            raise KeyMismatch.new("EdDSA needs an Ed25519 key (this key is #{hint})")
           end
         end
       end
