@@ -106,7 +106,27 @@ describe Gori::Tui::RepeaterView do
     backend.contains?("https://example.com").should be_true # target field
     backend.contains?("GET / HTTP/1.1").should be_true      # scaffold request line
     backend.contains?("Host: example.com").should be_true   # scaffold header
-    backend.contains?("— not sent — press ^R to resend —").should be_true
+    backend.contains?("not sent yet").should be_true
+    backend.contains?("press ^R to send").should be_true
+  end
+
+  it "uses live response key bindings and describes an unsent response as a first send" do
+    previous = Gori::Settings.keymap_overrides
+    begin
+      Gori::Settings.keymap_overrides = {"repeater.toggle-diff" => ["shift-e"], "repeater.send" => ["alt-r"]}
+      view = RepeaterView.new
+      view.menu_registry = Gori::Verbs.registry
+      view.load_blank
+      backend = MemoryBackend.new(120, 20)
+      view.render(Screen.new(backend), Rect.new(0, 0, 120, 20))
+      backend.contains?("⇧E:diff").should be_true
+      backend.contains?("d:diff").should be_false
+      backend.contains?("not sent yet").should be_true
+      backend.contains?("press ⌥R to send").should be_true
+      backend.contains?("resend").should be_false
+    ensure
+      Gori::Settings.keymap_overrides = previous
+    end
   end
 
   it "mirrors the target host into the Host header on the first edit of a blank tab" do
@@ -308,7 +328,7 @@ describe Gori::Tui::RepeaterView do
     backend.contains?("PONG").should be_true
     # plain response mode: the diff toggle chip is inactive (muted), not lit — the
     # pane no longer carries a separate "response" chip (it's titled RESPONSE).
-    ry = (0...20).find { |y| backend.row(y).includes?("d:diff") }.not_nil!
+    ry = (0...20).find { |y| backend.row(y).includes?("⇧D:diff") }.not_nil!
     dx = backend.row(ry).index("diff").not_nil!
     backend.fg_at(dx, ry).should eq(Theme.muted) # diff segment inactive
   end
@@ -366,7 +386,7 @@ describe Gori::Tui::RepeaterView do
       view.render(Screen.new(backend), Rect.new(0, 0, 120, 20))
       backend.contains?("NEW").should be_true
       # response view kept — the diff toggle was NOT auto-opened (muted, inactive)
-      ry = (0...20).find { |y| backend.row(y).includes?("d:diff") }.not_nil!
+      ry = (0...20).find { |y| backend.row(y).includes?("⇧D:diff") }.not_nil!
       dx = backend.row(ry).index("diff").not_nil!
       backend.fg_at(dx, ry).should eq(Theme.muted) # diff tab NOT auto-opened
     end
@@ -386,7 +406,7 @@ describe Gori::Tui::RepeaterView do
     view.render(Screen.new(backend), Rect.new(0, 0, 120, 20))
     backend.contains?("repeater error: connection refused").should be_true
     # fell back to the response view — the diff toggle is inactive (muted)
-    ry = (0...20).find { |y| backend.row(y).includes?("d:diff") }.not_nil!
+    ry = (0...20).find { |y| backend.row(y).includes?("⇧D:diff") }.not_nil!
     dx = backend.row(ry).index("diff").not_nil!
     backend.fg_at(dx, ry).should eq(Theme.muted)
   end
@@ -1860,7 +1880,8 @@ describe Gori::Tui::RepeaterView do
     view.restore("https://api.test", "GET / HTTP/1.1\n\n", false, true)
     backend = MemoryBackend.new(120, 20)
     view.render(Screen.new(backend), Rect.new(0, 0, 120, 20))
-    backend.contains?("— not sent — press ^R to resend —").should be_true
+    backend.contains?("not sent yet").should be_true
+    backend.contains?("press ^R to send").should be_true
   end
 
   it "restore re-populates a persisted last response (survives a reopen)" do

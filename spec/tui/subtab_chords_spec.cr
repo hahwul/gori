@@ -16,6 +16,13 @@ private RUNNER  = File.read(File.join(__DIR__, "..", "..", "src", "gori", "tui",
 private SUBTABS = File.read(File.join(__DIR__, "..", "..", "src", "gori", "tui", "runner", "subtabs.cr"))
 
 describe "^N / ^W on the nine sub-tab strips" do
+  it "lets Global chords through the strip without dispatching into the body" do
+    strip = SUBTABS[/private def handle_subtabs_key.*?^  end/m].not_nil!
+    strip.should contain("dispatch_global_chord(ev)")
+    strip.should_not contain("dispatch_chord(ev")
+    RUNNER.should contain("@keymap.resolve_global(chord, @session.registry, self)")
+  end
+
   it "routes both through the strip's own contract, in ONE guard each" do
     guard = RUNNER[/\^N \/ \^W create and close a sub-tab.*?^      end\n\n      if.*?^      end/m]
     guard.should_not be_nil
@@ -57,5 +64,18 @@ describe "^N / ^W on the nine sub-tab strips" do
     %w[repeater fuzzer miner sequencer decoder jwt cookie notes comparer].each do |t|
       dispatch_close.should contain(":#{t}")
     end
+  end
+end
+
+describe "Global toggles from body focus" do
+  it "keeps Global c/i/s out of read-only body panes after local keymap resolution" do
+    route = RUNNER[/suppress_global_toggle = body_suppresses_global_toggle\?.*?^      end/m].not_nil!
+    route.should contain("dispatch_chord(ev, chord, global_fallback: !suppress_global_toggle)")
+    helper = RUNNER[/private def body_suppresses_global_toggle\?.*?^    end/m].not_nil!
+    helper.should contain("@focus == :body && !text_input_active?")
+    helper.should contain("when \"capture.toggle\"")
+    helper.should contain("\"scope.toggle-lens\"")
+    helper.should contain("when \"intercept.toggle\"")
+    helper.should contain("@active_tab != :intercept")
   end
 end

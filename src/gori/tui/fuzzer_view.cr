@@ -33,6 +33,7 @@ require "../form_data"
 require "./subtab_clone"
 require "./fuzzer_result_window"
 require "./subtab_marks"
+require "../hotkeys"
 
 module Gori::Tui
   # One Fuzzer/Intruder session (a sub-tab under the Fuzzer tab). Holds the editable
@@ -44,6 +45,7 @@ module Gori::Tui
   # `mode clusterbomb`, `list a,b,c`, `match status:200,500`, `concurrency 50`.
   class FuzzerView
     include SubtabRef # a sub-tab strip may hold a mark on this view (#683)
+    @registry : Verb::Registry? = nil
     enum ResultIoState
       Idle
       Spooling
@@ -98,6 +100,18 @@ module Gori::Tui
     # `DoneEvent#stop_index`, or a reopened run's `fuzz_runs.stop_idx`, so both mark the same
     # row. Nil unless the run ended `condition_met`.
     getter run_stop_idx : Int64?
+
+    def set_registry(registry : Verb::Registry) : Nil
+      @registry = registry
+    end
+
+    private def key_label(id : String, fallback : String) : String
+      if registry = @registry
+        Hotkeys.binding_label(registry, id, fallback)
+      else
+        fallback
+      end
+    end
 
     PANE_ORDER = [:target, :template, :config, :results]
 
@@ -3166,8 +3180,10 @@ module Gori::Tui
       # Repeater's ^R:SEND so the muscle memory transfers. A gold button while idle, recessed
       # while a run streams (^X stops it). The old CONFIG "Run" row is gone; the request-count
       # estimate stays there as a passive summary (render_run_summary).
-      run_x = Frame.action_badge(screen, rect.right - 1, rect.y, min_x, "^R", "RUN", !running?)
-      pretty_x = Frame.toggle_badge(screen, run_x, rect.y, min_x, "^U", "PRETTY", false)
+      run_x = Frame.action_badge(screen, rect.right - 1, rect.y, min_x,
+        key_label("fuzz.run", "^R"), "RUN", !running?)
+      pretty_x = Frame.toggle_badge(screen, run_x, rect.y, min_x,
+        key_label("fuzz.pretty-template", "^U"), "PRETTY", false)
       # The mode chip states the pane's REAL mode, not `focused && …`: `template_chrome_hit` and
       # `apply_chrome_click` both read `template_insert?` alone, so gating the LABEL on focus made
       # an unfocused pane that had retained INS draw " ↵:READ " (8 cols) over a 5-col " INS " hit
@@ -3495,9 +3511,12 @@ module Gori::Tui
       # that resumes after it (`╭─ RESULTS 0 sent · 0 hit────` read as one glued token).
       screen.text(rect.x + 11, rect.y, "#{count} ", Theme.muted, Theme.bg)
       min_x = rect.x + 11 + count.size + 1 # badges never overwrite the count
-      rx = Frame.toggle_badge(screen, rect.right - 1, rect.y, min_x, "v", "DIST", @show_dist)
-      rx = Frame.toggle_badge(screen, rx, rect.y, min_x, "m", "MATCH", @matched_only)
-      Frame.toggle_badge(screen, rx, rect.y, min_x, "o", sort_chip, false) # sort: a value chip, never lit
+      rx = Frame.toggle_badge(screen, rect.right - 1, rect.y, min_x,
+        key_label("fuzz.dist", "v"), "DIST", @show_dist)
+      rx = Frame.toggle_badge(screen, rx, rect.y, min_x,
+        key_label("fuzz.matched", "m"), "MATCH", @matched_only)
+      Frame.toggle_badge(screen, rx, rect.y, min_x,
+        key_label("fuzz.sort", "o"), sort_chip, false) # sort: a value chip, never lit
       inner = rect.inset(1, 1)
       view = sorted_results
       @sel = @sel.clamp(0, {view.size - 1, 0}.max)
@@ -4367,9 +4386,9 @@ module Gori::Tui
       return nil if pane.w < 2 || my != pane.y
       min_x = pane.x + 11 + results_count_label.size + 1
       Frame.right_badge_hit(mx, my, pane.y, pane.right - 1, min_x, [
-        {:dist, "v", "DIST"},
-        {:match, "m", "MATCH"},
-        {:sort, "o", sort_chip},
+        {:dist, key_label("fuzz.dist", "v"), "DIST"},
+        {:match, key_label("fuzz.matched", "m"), "MATCH"},
+        {:sort, key_label("fuzz.sort", "o"), sort_chip},
       ] of {Symbol, String, String})
     end
 
@@ -4388,7 +4407,10 @@ module Gori::Tui
       label = @http2 ? "TEMPLATE (h2)" : "TEMPLATE"
       min_x = left.x + label.size + 4
       right_edge = left.right - 1
-      badges = [{:run, "^R", "RUN"}, {:pretty, "^U", "PRETTY"}] of {Symbol, String, String}
+      badges = [
+        {:run, key_label("fuzz.run", "^R"), "RUN"},
+        {:pretty, key_label("fuzz.pretty-template", "^U"), "PRETTY"},
+      ] of {Symbol, String, String}
       if hit = Frame.right_badge_hit(mx, my, left.y, right_edge, min_x, badges)
         return hit
       end

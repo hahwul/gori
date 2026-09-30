@@ -73,14 +73,14 @@ class Gori::Tui::RepeaterView
     right_edge = rect.right - 1     # leave the right border cell untouched
     # Primary action rides the REQUEST border (discoverable without the footer chord):
     # rightmost, a gold button while idle, recessed while a send is in flight.
-    send_edge = Frame.action_badge(screen, right_edge, rect.y, min_x, "^R", "SEND", !@inflight)
+    send_edge = Frame.action_badge(screen, right_edge, rect.y, min_x, key_label("repeater.send", "^R"), "SEND", !@inflight)
     if @grpc_mode # head as text; a unary call's payload is hex-editable (^X → MSG/HEX)
       # `␣Pr:FRAME` chains left of the hex chip and is drawn in BOTH halves of this branch,
       # because the state it reports matters most exactly while the payload is being hex-edited:
       # off, the five captured length bytes go out in front of the edited payload. Drawn only
       # where it is live (`grpc_reframable?`) — the same condition `chrome_hit` lists it under.
       if h = @req_hex_edit
-        hex_edge = Frame.toggle_badge(screen, send_edge, rect.y, min_x, "^X", "HEX", true)
+        hex_edge = Frame.toggle_badge(screen, send_edge, rect.y, min_x, key_label("repeater.toggle-hex", "^X"), "HEX", true)
         hex_edge = Frame.toggle_badge(screen, hex_edge, rect.y, min_x, menu_chip("repeater.toggle-grpc-reframe"), "FRAME", @grpc_reframe) if @grpc_reframable
         # `␣Pf:FIELDS` chains left of FRAME in every state it is available in, for the same
         # reason FRAME is drawn in both hex states: the operator has to be able to SEE that a
@@ -91,14 +91,14 @@ class Gori::Tui::RepeaterView
         # The FIELDS form replaces the head editor the way the hex buffer does — one pane,
         # one editor, and `␣Pf` is the way back to the head.
         fields_edge = send_edge
-        fields_edge = Frame.toggle_badge(screen, fields_edge, rect.y, min_x, "^X", "MSG", false) if @grpc_reframable
+        fields_edge = Frame.toggle_badge(screen, fields_edge, rect.y, min_x, key_label("repeater.toggle-hex", "^X"), "MSG", false) if @grpc_reframable
         fields_edge = Frame.toggle_badge(screen, fields_edge, rect.y, min_x, menu_chip("repeater.toggle-grpc-reframe"), "FRAME", @grpc_reframe) if @grpc_reframable
         Frame.toggle_badge(screen, fields_edge, rect.y, min_x, menu_chip("repeater.toggle-grpc-fields"), "FIELDS", true)
         render_grpc_fields(screen, rect.inset(1, 1), focused)
       else
         msg_edge = send_edge
         if @grpc_reframable
-          msg_edge = Frame.toggle_badge(screen, send_edge, rect.y, min_x, "^X", "MSG", false)
+          msg_edge = Frame.toggle_badge(screen, send_edge, rect.y, min_x, key_label("repeater.toggle-hex", "^X"), "MSG", false)
           msg_edge = Frame.toggle_badge(screen, msg_edge, rect.y, min_x, menu_chip("repeater.toggle-grpc-reframe"), "FRAME", @grpc_reframe)
         end
         msg_edge = Frame.toggle_badge(screen, msg_edge, rect.y, min_x, menu_chip("repeater.toggle-grpc-fields"), "FIELDS", false) if grpc_fields_available?
@@ -132,12 +132,12 @@ class Gori::Tui::RepeaterView
       return
     end
     if h = @req_hex_edit
-      Frame.toggle_badge(screen, send_edge, rect.y, min_x, "^X", "HEX", true)
+      Frame.toggle_badge(screen, send_edge, rect.y, min_x, key_label("repeater.toggle-hex", "^X"), "HEX", true)
       @scroll_req = h.render(screen, rect.inset(1, 1), focused, @scroll_req)
       return
     end
-    cl_x = Frame.toggle_badge(screen, send_edge, rect.y, min_x, "^L", "CL", @auto_content_length)
-    mode_x = Frame.toggle_badge(screen, cl_x, rect.y, min_x, "^U", "PRETTY", false)
+    cl_x = Frame.toggle_badge(screen, send_edge, rect.y, min_x, key_label("repeater.toggle-auto-content-length", "^L"), "CL", @auto_content_length)
+    mode_x = Frame.toggle_badge(screen, cl_x, rect.y, min_x, key_label("repeater.pretty-request", "^U"), "PRETTY", false)
     mark_x = Frame.mode_badge(screen, mode_x, rect.y, min_x, request_insert?) # the REAL mode — see Frame.mode_badge
     # The INERT half only. `literal_markers?` is a state nothing else on screen shows: the
     # `§` in this buffer are the capture's own bytes, they will go out verbatim, and `^T`
@@ -153,7 +153,7 @@ class Gori::Tui::RepeaterView
     # SAML/GraphQL tab `^T` switches ENVELOPE ⇄ DECODED instead of inserting a §, so a badge
     # reading `^T:MARK` there names a key that does something else entirely.
     if !decode_mode? && literal_markers?
-      Frame.toggle_badge(screen, mark_x, rect.y, min_x, "^T", "MARK", false)
+      Frame.toggle_badge(screen, mark_x, rect.y, min_x, key_label("repeater.toggle-decoded", "^T"), "MARK", false)
     end
     update_request_marker_tint
     render_plain_request_editor(screen, rect.inset(1, 1), focused, ins)

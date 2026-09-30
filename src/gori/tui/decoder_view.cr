@@ -10,6 +10,7 @@ require "./viewport"
 require "./gutter"
 require "./text_field"
 require "../decoder"
+require "../hotkeys"
 require "./subtab_marks"
 
 module Gori::Tui
@@ -21,6 +22,7 @@ module Gori::Tui
   # only) — render is a pure read, per the render-hot-path discipline.
   class DecoderView
     include SubtabRef # a sub-tab strip may hold a mark on this view (#683)
+    @registry : Verb::Registry? = nil
     record Regions, input : Rect, chain : Rect, pipeline : Rect, output : Rect
 
     # The ^X display cycle: auto (text, base64 fallback for binary) → hex → base64.
@@ -28,6 +30,10 @@ module Gori::Tui
 
     # Custom sub-tab chip label (nil = derive from the chain spec); set by rename.
     property name : String? = nil
+
+    def set_registry(registry : Verb::Registry) : Nil
+      @registry = registry
+    end
 
     # How much of a step's output feeds its PIPELINE preview. A multiple of 3 so the
     # base64 of the prefix IS the prefix of the base64 (no phantom padding mid-row), and
@@ -196,7 +202,8 @@ module Gori::Tui
       # is forced (HEX/B64), muted for AUTO (which just follows the bytes). Replaces the
       # old title-embedded mode label so the chord is discoverable in place.
       name, forced = out_mode_badge
-      Frame.toggle_badge(screen, card.right - 1, card.y, card.x + header.size + 4, "^X", name, forced)
+      Frame.toggle_badge(screen, card.right - 1, card.y, card.x + header.size + 4,
+        key_label("decoder.mode", "^X"), name, forced)
       render_output(screen, card.inset(1, 1), result, focused: active)
     end
 
@@ -463,8 +470,16 @@ module Gori::Tui
       name, _ = out_mode_badge
       min_x = card.x + output_header(result).size + 4
       !Frame.right_badge_hit(mx, my, card.y, card.right - 1, min_x, [
-        {:mode, "^X", name},
+        {:mode, key_label("decoder.mode", "^X"), name},
       ] of {Symbol, String, String}).nil?
+    end
+
+    private def key_label(id : String, fallback : String) : String
+      if registry = @registry
+        Hotkeys.binding_label(registry, id, fallback)
+      else
+        fallback
+      end
     end
 
     # Whether the OUTPUT is scrolled to the top — ↑ here pops focus up to CHAIN

@@ -21,6 +21,7 @@ module Gori::Tui
       super(host)
       @history = history
       @history.set_scope(@host.session.scope)
+      @history.set_registry(@host.session.registry)
       @history.set_hide_static(StaticAsset.hidden?(@host.session.store))
       @history.set_colormarker(@host.session.colormarker)
       reload_columns

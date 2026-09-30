@@ -6,6 +6,7 @@ require "./input_mode"
 require "./text_read_state"
 require "./viewport"
 require "../cookie"
+require "../hotkeys"
 require "./subtab_marks"
 
 module Gori::Tui
@@ -20,8 +21,13 @@ module Gori::Tui
   # render hot path). Modelled column-for-column on JwtView.
   class CookieView
     include SubtabRef # a sub-tab strip may hold a mark on this view (#683)
+    @registry : Verb::Registry? = nil
     # Custom sub-tab chip label (nil = derive from the detected format); set by rename.
     property name : String? = nil
+
+    def set_registry(registry : Verb::Registry) : Nil
+      @registry = registry
+    end
 
     OPTS_H   = 3 # OPTIONS: a fixed single-line salt field, framed top + bottom (badges on border).
     SECRET_H = 3 # SECRET: a fixed single-line key field (verify state on the border).
@@ -183,7 +189,8 @@ module Gori::Tui
       Frame.card(screen, card, "OPTIONS", bg: Theme.bg, border: Frame.pane_border(active))
       min_x = card.x + OPTS_MIN_X
       # ^A:format — always lit (there is always a format in play).
-      fx = Frame.toggle_badge(screen, card.right - 1, card.y, min_x, "^A", format, true)
+      fx = Frame.toggle_badge(screen, card.right - 1, card.y, min_x,
+        key_label("cookie.cycle-format", "^A"), format, true)
       # algo:<hmac> then salt:<preset> — click-only chips chained left, drawn only for Django.
       if resolved == "django"
         ax = Frame.toggle_badge(screen, fx, card.y, min_x, "algo", algorithm, true)
@@ -222,12 +229,20 @@ module Gori::Tui
     # to match render; `format` (display) is the ^A label whose WIDTH positions the rest.
     def opts_badge_hit(card : Rect, mx : Int32, my : Int32, format : String, resolved : String,
                        algorithm : String, salt_preset : String) : Symbol?
-      badges = [{:format, "^A", format}] of {Symbol, String, String}
+      badges = [{:format, key_label("cookie.cycle-format", "^A"), format}] of {Symbol, String, String}
       if resolved == "django"
         badges << {:algorithm, "algo", algorithm}
         badges << {:salt, "salt", salt_preset}
       end
       Frame.right_badge_hit(mx, my, card.y, card.right - 1, card.x + OPTS_MIN_X, badges)
+    end
+
+    private def key_label(id : String, fallback : String) : String
+      if registry = @registry
+        Hotkeys.binding_label(registry, id, fallback)
+      else
+        fallback
+      end
     end
 
     # ---- SECRET single-line field + verify state on the border ----

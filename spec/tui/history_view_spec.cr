@@ -72,6 +72,25 @@ private def tmp_counting_store(&)
 end
 
 describe Gori::Tui::HistoryView do
+  it "uses live keys in the scope and saved-view chips" do
+    previous = Gori::Settings.keymap_overrides
+    begin
+      Gori::Settings.keymap_overrides = {"scope.toggle-lens" => ["shift-s"], "history.view" => ["shift-v"]}
+      with_store do |store|
+        view = HistoryView.new
+        view.set_registry(Gori::Verbs.registry)
+        view.reload(store)
+        backend = MemoryBackend.new(100, 12)
+        view.render_list(Screen.new(backend), Rect.new(0, 0, 100, 12))
+        backend.contains?("⇧S scope:off").should be_true
+        backend.contains?("⇧V:all").should be_true
+        backend.contains?("v:all").should be_false
+      end
+    ensure
+      Gori::Settings.keymap_overrides = previous
+    end
+  end
+
   # These specs assert on RAW body rendering; keep the display-only pretty-printer off
   # so a (future) valid-JSON/XML fixture can't silently reflow and shift assertions.
   before_each { Gori::Settings.pretty_bodies_default = false }

@@ -85,7 +85,7 @@ class Gori::Tui::RepeaterView
                      else
                        {Theme.text_bright, Theme.accent_bg, Attribute::None}
                      end
-      Frame.state_badge(screen, tr_edge, rect.y, target_chip_min(rect), "^V", transport_label, fg, bg, attr)
+      Frame.state_badge(screen, tr_edge, rect.y, target_chip_min(rect), key_label("repeater.toggle-http2", "^V"), transport_label, fg, bg, attr)
     end
     url_active = focused && @target_field == :url
     sni_active_row = focused && @target_field == :sni

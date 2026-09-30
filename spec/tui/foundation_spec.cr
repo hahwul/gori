@@ -602,12 +602,13 @@ describe Gori::Tui::Chrome do
     backend.contains?("capture:on").should be_false # merged into the listen chip, not a separate label
   end
 
-  it "dims the top-bar listen chip when capture is paused" do
+  it "marks the top-bar listen chip yellow and says OFF when capture is paused" do
     backend = MemoryBackend.new(80, 1)
     Chrome.render_top_bar(Screen.new(backend), Rect.new(0, 0, 80, 1),
       project: "acme", listen: "127.0.0.1:8080", scope: "scope:2", capturing: false)
+    backend.row(0).should contain("OFF")
     fx = backend.row(0).index("127.0.0.1:8080").not_nil!
-    backend.fg_at(fx, 0).should eq(Theme.muted)
+    backend.fg_at(fx, 0).should eq(Theme.yellow)
   end
 
   it "turns the top-bar listen chip red with the drop count when writes are failing" do

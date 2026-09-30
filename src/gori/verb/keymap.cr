@@ -189,11 +189,19 @@ module Gori
       # (`Definition#chord_live?`). A link that fails either does not block the links behind
       # it. `Runner#resolve_verb_id` is this with the live context; it lives here, pure, so a
       # spec can walk the chain without a terminal.
-      def resolve(chord : Chord, scope : Scope, registry : Registry, ctx : ExecContext) : String?
+      def resolve(chord : Chord, scope : Scope, registry : Registry, ctx : ExecContext,
+                  *, global_fallback : Bool = true) : String?
         if ctx.editor_pane? && (id = live_in(chord, Scope::Editor, registry, ctx))
           return id
         end
-        live_in(chord, scope, registry, ctx) || live_in(chord, Scope::Global, registry, ctx)
+        live_in(chord, scope, registry, ctx) || (global_fallback ? live_in(chord, Scope::Global, registry, ctx) : nil)
+      end
+
+      # A context that owns its own keys (the sub-tab strip) may still allow truly Global
+      # shortcuts through without exposing the tab's body bindings. This keeps `?` available
+      # on the strip while preventing an unhandled strip key from type-through to the pane.
+      def resolve_global(chord : Chord, registry : Registry, ctx : ExecContext) : String?
+        live_in(chord, Scope::Global, registry, ctx)
       end
 
       private def live_in(chord : Chord, scope : Scope, registry : Registry, ctx : ExecContext) : String?

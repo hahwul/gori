@@ -49,11 +49,10 @@ end
 # it is invisible on themes the app itself offers.
 describe "state signals carry a word or a glyph" do
   it "says whether capture is running, in words" do
-    # Both states used to render the byte-identical `● 127.0.0.1:8070`, differing only by
-    # green-vs-muted. The project picker already wrote `off`; the top bar now does too.
+    # The paused state spells OFF before the address and uses a distinct warning hue.
     src = File.read(File.join(__DIR__, "..", "..", "src", "gori", "tui", "chrome.cr"))
     body = src[/def self\.listen_chip.*?\n    end/m]?.should_not be_nil
-    src[/def self\.listen_chip.*?\n    end/m].not_nil!.should contain("off")
+    src[/def self\.listen_chip.*?\n    end/m].not_nil!.should contain("OFF")
   end
 
   it "marks a hotkey rebind's outcome with a glyph, not just a hue" do

@@ -42,6 +42,7 @@ describe Gori::Tui::TrafficEmptyState do
       variant: :history, listen: {"127.0.0.1", 8070}, capturing: false)
     backend.contains?("capture is OFF").should be_true
     backend.contains?("press c").should be_true
+    backend.contains?("tab bar").should be_true
   end
 
   it "degrades history to compact stream lines on a narrow pane" do
@@ -86,7 +87,48 @@ describe Gori::Tui::TrafficEmptyState do
     backend.contains?("no held messages").should be_true
     backend.contains?("INTERCEPT").should be_true
     backend.contains?("press i").should be_true
-    backend.contains?("i:CATCH").should be_true
+    backend.contains?("c:ALL").should be_true
+    (0...12).count { |y| backend.row(y).includes?("Catch is OFF") }.should eq(1)
+  end
+
+  it "names intercept actions without bare keys while body focus is elsewhere" do
+    backend = MemoryBackend.new(60, 12)
+    TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, 60, 12),
+      variant: :intercept, capturing: false, catch_on: false, body_focused: false,
+      catch_direction: "REQ")
+    backend.contains?("focus body").should be_true
+    backend.contains?("DIR:REQ").should be_true
+    backend.contains?("c:REQ").should be_false
+    backend.contains?("f forward").should be_false
+    backend.contains?("d drop").should be_false
+    backend.contains?("/ condition").should be_false
+    backend.contains?("tab bar").should be_true
+  end
+
+  it "does not advertise Intercept action keys in the medium unfocused card" do
+    backend = MemoryBackend.new(50, 5)
+    TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, 50, 5),
+      variant: :intercept, catch_on: true, body_focused: false)
+    backend.contains?("focus body to forward, drop or filter").should be_true
+    backend.contains?("f forward").should be_false
+    backend.contains?("/ condition").should be_false
+  end
+
+  it "does not advertise Intercept action keys in the minimal unfocused card" do
+    backend = MemoryBackend.new(50, 4)
+    TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, 50, 4),
+      variant: :intercept, catch_on: true, body_focused: false)
+    backend.contains?("focus body to catch or filter").should be_true
+    backend.contains?("i catch").should be_false
+    backend.contains?("/ filter").should be_false
+  end
+
+  it "does not advertise a send chord on an empty Miner session" do
+    [{60, 12}, {60, 6}, {34, 4}].each do |(w, h)|
+      backend = MemoryBackend.new(w, h)
+      TrafficEmptyState.render(Screen.new(backend), Rect.new(0, 0, w, h), variant: :miner)
+      backend.contains?("^R").should be_false
+    end
   end
 
   it "renders the repeater resend card" do
@@ -312,7 +354,7 @@ describe Gori::Tui::TrafficEmptyState do
     backend.contains?("no mining session").should be_true
     backend.contains?("MINER").should be_true
     backend.contains?("Mine parameters").should be_true
-    backend.contains?("^R").should be_true
+    backend.contains?("^R").should be_false
   end
 
   it "renders the sequencer token card" do

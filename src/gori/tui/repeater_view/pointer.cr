@@ -9,7 +9,7 @@ class Gori::Tui::RepeaterView
   # second one did not list it: the badge was a dead cell, while HTTP's `^L:CL`/`^U:PRETTY`
   # next to it have always been clickable.
   private def ws_badges : Array({Symbol, String, String})
-    [{:send, "^R", "SEND"}, {:ws_key, menu_chip("repeater.toggle-ws-key"), "KEY"}] of {Symbol, String, String}
+    [{:send, key_label("repeater.send", "^R"), "SEND"}, {:ws_key, menu_chip("repeater.toggle-ws-key"), "KEY"}] of {Symbol, String, String}
   end
 
   # Border-chrome hit-test for REQUEST/RESPONSE toggle chips. Shares geometry with
@@ -33,7 +33,7 @@ class Gori::Tui::RepeaterView
       end
       if transport_switchable?
         if hit = Frame.right_badge_hit(mx, my, rect.y, tr_edge, target_chip_min(rect),
-             [{:transport, "^V", transport_label}] of {Symbol, String, String})
+             [{:transport, key_label("repeater.toggle-http2", "^V"), transport_label}] of {Symbol, String, String})
           return hit
         end
       end
@@ -71,11 +71,11 @@ class Gori::Tui::RepeaterView
       min_x = req_card.x + label.size + 4
       right_edge = req_card.right - 1
       badges = if @grpc_mode
-                 b = [{:send, "^R", "SEND"}] of {Symbol, String, String}
+                 b = [{:send, key_label("repeater.send", "^R"), "SEND"}] of {Symbol, String, String}
                  if @req_hex_edit
-                   b << {:req_hex, "^X", "HEX"} # editing the payload
+                   b << {:req_hex, key_label("repeater.toggle-hex", "^X"), "HEX"} # editing the payload
                  elsif @grpc_reframable
-                   b << {:req_hex, "^X", "MSG"} # click to hex-edit the unary payload
+                   b << {:req_hex, key_label("repeater.toggle-hex", "^X"), "MSG"} # click to hex-edit the unary payload
                  end
                  # Chains left of whichever hex chip is drawn — in BOTH states, matching
                  # render_request. Recompute the 5-byte length prefix over the payload, or send
@@ -88,9 +88,9 @@ class Gori::Tui::RepeaterView
                elsif ws_mode?
                  ws_badges # ^R:SEND + the WS key chip — the list render_request draws from
                elsif @req_hex_edit
-                 [{:send, "^R", "SEND"}, {:req_hex, "^X", "HEX"}] of {Symbol, String, String}
+                 [{:send, key_label("repeater.send", "^R"), "SEND"}, {:req_hex, key_label("repeater.toggle-hex", "^X"), "HEX"}] of {Symbol, String, String}
                else
-                 [{:send, "^R", "SEND"}, {:cl, "^L", "CL"}, {:pretty_req, "^U", "PRETTY"}] of {Symbol, String, String}
+                 [{:send, key_label("repeater.send", "^R"), "SEND"}, {:cl, key_label("repeater.toggle-auto-content-length", "^L"), "CL"}, {:pretty_req, key_label("repeater.pretty-request", "^U"), "PRETTY"}] of {Symbol, String, String}
                end
       if hit = Frame.right_badge_hit(mx, my, req_card.y, right_edge, min_x, badges)
         return hit
@@ -115,7 +115,7 @@ class Gori::Tui::RepeaterView
         if !@grpc_mode && !ws_mode? && !decode_mode? && literal_markers?
           mark_edge = Frame.mode_badge_edge(mode_edge, min_x, request_insert?)
           if Frame.right_badge_hit(mx, my, req_card.y, mark_edge, min_x,
-               [{:mark, "^T", "MARK"}] of {Symbol, String, String})
+               [{:mark, key_label("repeater.toggle-decoded", "^T"), "MARK"}] of {Symbol, String, String})
             return :mark
           end
         end

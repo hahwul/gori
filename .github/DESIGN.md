@@ -4050,10 +4050,10 @@ capitals, which never reach Global.
   Editor link, the tab's scope where the chord is live in every view of the row, then Global),
   checking each member letter as it checks a level-1 row. A family with a working bare key is
   not swept, because its letters are only ever read inside the card.
-- **The strip is the exception it reports.** A focused strip swallows any key it does not
-  answer, `>` and `Z` included, so there the next letter meets the strip's raw keys: `> f` opens
-  the sub-tab picker and the Comparer's `Z t` marks the chip. Both stay strip-local and `esc`
-  undoes them, so they are allowlisted by name rather than routed through the strip's handler.
+- **The strip answers its raw keys, then Global.** A focused strip keeps its own navigation,
+  mark and picker keys (`> f` opens the sub-tab picker and the Comparer's `Z t` marks the chip),
+  then resolves an unhandled chord in `Scope::Global` only. It never dispatches into the active
+  tab or Editor scope, so `?` works there without typing through into the pane.
 
 ### 2026-09-27: MCP permission groups are a third reason a tool is absent
 
@@ -4608,3 +4608,19 @@ Match & Replace for a direct send (`Repeater::RequestRules`, formerly MCP's
 `maybe_apply_request_rules`). Renaming the flags whose meaning differs across commands (`--target`,
 `--header`, `-n`, `--unsafe`, `--owner/--id`) is left to additive aliases; a rename would break the
 scripts this entry is about.
+
+### 2026-09-30: TUI key routes stop at the owning scope, and hints follow live bindings (#1374, #1375)
+
+Refines: the 2026-09-25 R1 entry above.
+
+- A focused sub-tab strip answers its raw navigation and mark keys, then resolves an unhandled
+  chord in `Scope::Global` only. The active tab and Editor scopes never receive a strip key.
+- A non-text body does not send an unclaimed `c`, `i` or `s` to Global: capture and the scope
+  lens stay available from the tab bar, and Intercept keeps its own `i` control. Local tab
+  bindings still resolve first.
+- Key chips and help text that name a rebindable action derive the key from the registry. When a
+  pane is unfocused, its state chips name the state instead of implying its key is active there.
+- Intercept's empty-state card only shows forward, drop, filter and direction keys while its body
+  is focused; otherwise it tells the operator to focus the body first.
+- `↑` at the first line in Repeater INS is editor motion; only READ mode can hand that edge to
+  the focus ring. Capture-off is a yellow `OFF` signal in the top-bar listener chip.

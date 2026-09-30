@@ -355,6 +355,16 @@ describe "Gori::Tui::RepeaterView response read motion" do
   end
 end
 
+describe "Gori::Tui::RepeaterView request insert focus" do
+  it "keeps ↑ at the first line inside INS mode" do
+    view = Gori::Tui::RepeaterView.new
+    view.load_blank
+    view.focus_pane(:request)
+    view.enter_request_insert!
+    view.at_top?.should be_false
+  end
+end
+
 # The diff pane's decorated line ("+ "/"- "/"  " + text) is memoised on the last line asked
 # for, since every drawn row of a wrapped line asks for it. The memo is keyed by the line's
 # own String and kind, so it must never hand one line's decoration to another: each line of a

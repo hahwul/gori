@@ -273,6 +273,26 @@ describe Gori::Tui::SitemapView do
     end
   end
 
+  it "uses live keys in the scope and grouping chips" do
+    previous = Gori::Settings.keymap_overrides
+    begin
+      Gori::Settings.keymap_overrides = {"scope.toggle-lens"       => ["shift-s"],
+                                         "sitemap.toggle-grouping" => ["shift-g"]}
+      with_store do |store|
+        view = SitemapView.new
+        view.set_registry(Gori::Verbs.registry)
+        view.reload(store)
+        backend = MemoryBackend.new(90, 12)
+        view.render(Screen.new(backend), Rect.new(0, 0, 90, 12))
+        backend.contains?("⇧S scope:off").should be_true
+        backend.contains?("⇧G:fold").should be_true
+        backend.contains?("g:fold").should be_false
+      end
+    ensure
+      Gori::Settings.keymap_overrides = previous
+    end
+  end
+
   it "completes a field name with Tab" do
     view = SitemapView.new
     view.start_query

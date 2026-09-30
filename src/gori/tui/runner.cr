@@ -1853,13 +1853,19 @@ module Gori::Tui
         return
       end
       # Resolve through the keymap, honouring available? so a scoped binding that is
-      # gated off (e.g. Repeater copy only in READ) does not swallow the chord — and so
-      # Global breath keys (c/i/s) still fire when a scoped verb is unavailable.
-      return if dispatch_chord(ev, chord)
+      # gated off (e.g. Repeater copy only in READ) does not swallow the chord. Global
+      # c/i/s toggles are the exception while reading a non-text body: their actions remain
+      # reachable from the tab bar, and i stays available in the Intercept tab itself.
+      suppress_global_toggle = body_suppresses_global_toggle?(chord)
+      return if dispatch_chord(ev, chord, global_fallback: !suppress_global_toggle)
+      if suppress_global_toggle
+        @toast = "global toggles are on the tab bar while reading"
+        return
+      end
       # A bare printable nothing binds HERE. Say so: typed text that missed its field used to
-      # vanish letter by letter — except the letters that were Global breath keys, which
-      # fired (`s` flipped the scope lens, `c` stopped capture) with nothing on screen tying
-      # the flip to the typing. The named keys (arrows, ↵, esc, ↹) and every modified chord
+      # vanish letter by letter — except the Global scope key `s`, which flipped the scope
+      # lens with nothing on screen tying the change to the typing. The named keys (arrows,
+      # ↵, esc, ↹) and every modified chord
       # stay silent: those are navigation, legitimately unbound in some scopes (`space` is a
       # named key too, so the leader below is never named here).
       # A bare printable the TAB BAR does not bind but the tab's body does: name the `↵` that
@@ -1891,12 +1897,36 @@ module Gori::Tui
     # Resolve `ev` through the keymap and run what it finds; true when a verb fired. Shared
     # by the tail of `handle_key` and the digit family it hoists above the per-focus handlers,
     # so the two cannot resolve or report differently.
-    private def dispatch_chord(ev : Termisu::Event::Key, chord : Verb::Chord? = nil) : Bool
+    private def dispatch_chord(ev : Termisu::Event::Key, chord : Verb::Chord? = nil,
+                               *, global_fallback : Bool = true) : Bool
       chord ||= Keybind.from_event(ev)
       return false unless chord
-      return false unless id = resolve_verb_id(chord, current_scope)
+      return false unless id = resolve_verb_id(chord, current_scope, global_fallback: global_fallback)
       @toast = @session.registry[id].call(self) || @toast
       true
+    end
+
+    # The sub-tab strip owns its raw navigation keys. Its unhandled keys may reach Global
+    # shortcuts, but never the active tab or Editor scope — that would type through the strip.
+    private def dispatch_global_chord(ev : Termisu::Event::Key) : Bool
+      return false unless chord = Keybind.from_event(ev)
+      return false unless id = @keymap.resolve_global(chord, @session.registry, self)
+      @toast = @session.registry[id].call(self) || @toast
+      true
+    end
+
+    # A bare c/i/s typed into a non-text body can be the first letters of something the operator
+    # is reading or composing mentally. Do not let those Global actions stop capture, hold all
+    # traffic, or flip the scope lens. Intercept's own i control remains available. A live
+    # Editor/tab binding wins first; the tab bar, sub-tab strip and text fields keep their
+    # ordinary behavior.
+    private def body_suppresses_global_toggle?(chord : Verb::Chord) : Bool
+      return false unless @overlay.none? && @focus == :body && !text_input_active?
+      case @keymap.lookup_in(chord, Verb::Scope::Global)
+      when "capture.toggle", "scope.toggle-lens" then true
+      when "intercept.toggle"                    then @active_tab != :intercept
+      else                                            false
+      end
     end
 
     # `0`-`9`, bare or with shift and nothing else — the tab / sub-tab navigation family.
@@ -1939,8 +1969,9 @@ module Gori::Tui
     # A link also stands down when its verb's chord is not live in the focused section
     # (`Definition#chord_sections`) — the Repeater's bare `p` in the request pane. The walk
     # itself is `Keymap#resolve`, pure, so the pane gate is spec'd without a terminal.
-    private def resolve_verb_id(chord : Verb::Chord, scope : Verb::Scope) : String?
-      @keymap.resolve(chord, scope, @session.registry, self)
+    private def resolve_verb_id(chord : Verb::Chord, scope : Verb::Scope,
+                                *, global_fallback : Bool = true) : String?
+      @keymap.resolve(chord, scope, @session.registry, self, global_fallback: global_fallback)
     end
 
     # --- Overlay seam (see overlay.cr) — generic dispatch for the ONE @active_overlay,

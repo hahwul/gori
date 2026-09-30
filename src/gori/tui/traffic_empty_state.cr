@@ -50,6 +50,8 @@ module Gori::Tui
                running : Bool = false,
                scan_on : Bool = true,
                has_provider : Bool = true,
+               body_focused : Bool = true,
+               catch_direction : String = "ALL",
                title : String? = nil) : Nil
       return if suppressed?
       return if rect.empty?
@@ -62,8 +64,7 @@ module Gori::Tui
       # of its pane — through the outer frame's bottom border and, at some heights, below the
       # status bar onto the last terminal row. Degrading to medium/minimal is what this module
       # already promises for short panes.
-      full_h = full_rows(variant, capturing: capturing, catch_on: catch_on,
-        running: running, scan_on: scan_on)
+      full_h = full_rows(variant, capturing: capturing, running: running, scan_on: scan_on)
 
       # This card is the onboarding surface — the address on it is the one the user is
       # meant to TYPE into a client, so a wildcard bind must not render as "0.0.0.0:8070".
@@ -72,25 +73,28 @@ module Gori::Tui
       # either way, so a resize can never appear to move the proxy.
       if rect.h >= full_h && rect.w >= FULL_MIN_W
         addr = BindAddress.display(host, port)
-        render_full(screen, rect, variant, headline, addr, capturing, catch_on, running, scan_on, has_provider)
+        render_full(screen, rect, variant, headline, addr, capturing, catch_on, running, scan_on,
+          has_provider, body_focused, catch_direction)
       elsif rect.h >= MED_MIN_H && rect.w >= MED_MIN_W
         addr = BindAddress.display(host, port, terse: true)
-        render_medium(screen, rect, variant, headline, addr, capturing, catch_on, running, scan_on, has_provider)
+        render_medium(screen, rect, variant, headline, addr, capturing, catch_on, running, scan_on,
+          has_provider, body_focused)
       else
         addr = BindAddress.display(host, port, terse: true)
-        render_minimal(screen, rect, variant, headline, addr, capturing, catch_on, running, scan_on, has_provider)
+        render_minimal(screen, rect, variant, headline, addr, capturing, catch_on, running, scan_on,
+          has_provider, body_focused)
       end
     end
 
     # Interior row count of each FULL card — ONE source of truth, read by the gate in `render`
     # and by the renderers below, so the two can never drift apart. Defaults let a variant whose
     # height ignores a flag omit it at the call site.
-    private def full_inner_h(variant : Symbol, *, capturing : Bool = true, catch_on : Bool = false,
+    private def full_inner_h(variant : Symbol, *, capturing : Bool = true,
                              running : Bool = false, scan_on : Bool = true) : Int32
       case variant
       when :history   then 5 + (capturing ? 0 : 1) + 3
       when :sitemap   then 5 + (capturing ? 0 : 1) + 3
-      when :intercept then 5 + (catch_on ? 0 : 1) + 3 + (capturing ? 0 : 1)
+      when :intercept then 5 + 3 + (capturing ? 0 : 1)
       when :repeater  then 5 + 2
       when :fuzzer    then 5 + 2
         # The three results-pane variants share one budget: the rows they draw, plus one blank so
@@ -125,10 +129,9 @@ module Gori::Tui
 
     # Rows the full card needs inside `rect`: its interior plus two borders, plus the headline
     # row that rides above it for every variant except the CENTERED ones.
-    private def full_rows(variant : Symbol, *, capturing : Bool, catch_on : Bool,
+    private def full_rows(variant : Symbol, *, capturing : Bool,
                           running : Bool, scan_on : Bool) : Int32
-      full_inner_h(variant, capturing: capturing, catch_on: catch_on,
-        running: running, scan_on: scan_on) + 2 + (CENTERED.includes?(variant) ? 0 : 1)
+      full_inner_h(variant, capturing: capturing, running: running, scan_on: scan_on) + 2 + (CENTERED.includes?(variant) ? 0 : 1)
     end
 
     # `:discover` says "no runs", the phrase that pane has used for this state all along, so a
@@ -163,11 +166,12 @@ module Gori::Tui
 
     private def render_full(screen : Screen, rect : Rect, variant : Symbol, headline : String,
                             addr : String, capturing : Bool, catch_on : Bool, running : Bool,
-                            scan_on : Bool, has_provider : Bool) : Nil
+                            scan_on : Bool, has_provider : Bool, body_focused : Bool,
+                            catch_direction : String) : Nil
       case variant
       when :history           then render_history_full(screen, rect, headline, addr, capturing)
       when :sitemap           then render_sitemap_full(screen, rect, headline, addr, capturing)
-      when :intercept         then render_intercept_full(screen, rect, headline, addr, capturing, catch_on)
+      when :intercept         then render_intercept_full(screen, rect, headline, addr, capturing, catch_on, body_focused, catch_direction)
       when :repeater          then render_repeater_full(screen, rect, headline)
       when :fuzzer            then render_fuzzer_full(screen, rect, headline)
       when :fuzzer_results    then render_fuzzer_results_full(screen, rect, headline, running)
@@ -192,14 +196,14 @@ module Gori::Tui
 
     private def render_medium(screen : Screen, rect : Rect, variant : Symbol, headline : String,
                               addr : String, capturing : Bool, catch_on : Bool, running : Bool,
-                              scan_on : Bool, has_provider : Bool) : Nil
+                              scan_on : Bool, has_provider : Bool, body_focused : Bool) : Nil
       lines = case variant
               when :history
                 medium_history(headline, addr, capturing)
               when :sitemap
                 medium_sitemap(headline, addr, capturing)
               when :intercept
-                medium_intercept(headline, catch_on)
+                medium_intercept(headline, catch_on, body_focused)
               when :repeater
                 medium_repeater(headline)
               when :fuzzer
@@ -246,14 +250,14 @@ module Gori::Tui
 
     private def render_minimal(screen : Screen, rect : Rect, variant : Symbol, headline : String,
                                addr : String, capturing : Bool, catch_on : Bool, running : Bool,
-                               scan_on : Bool, has_provider : Bool) : Nil
+                               scan_on : Bool, has_provider : Bool, body_focused : Bool) : Nil
       hint = case variant
              when :history
-               "──► #{addr} ──► ^P Open browser#{capturing ? "" : " · press #{key("c", "capture.toggle")}"}"
+               "──► #{addr} ──► ^P Open browser#{capturing ? "" : " · tabs: #{key("c", "capture.toggle")}"}"
              when :sitemap
-               "◆ proxy #{addr} · ^P Open browser#{capturing ? "" : " · press #{key("c", "capture.toggle")}"}"
+               "◆ proxy #{addr} · ^P Open browser#{capturing ? "" : " · tabs: #{key("c", "capture.toggle")}"}"
              when :intercept
-               catch_on ? "⏸ queue empty · #{key("i", "intercept.toggle")} catch · #{key("/", "intercept.filter")} filter" : "press #{key("i", "intercept.toggle")} to enable catch"
+               minimal_intercept_hint(catch_on, body_focused)
              when :repeater
                "^N new · History #{key("^R", "history.repeater")} repeater"
              when :fuzzer
@@ -271,7 +275,7 @@ module Gori::Tui
              when :authorize
                "Send to Authorize (#{menu("history.authorize")}) · #{key("i", "authorize.identities")} identities"
              when :miner
-               "Mine parameters (#{menu("history.mine")}) · #{key("^R", "mine.run")} run"
+               "Mine from History/Repeater"
              when :miner_results
                running ? "mining…" : "#{key("^R", "mine.run")} mine this request"
              when :sequencer
@@ -373,7 +377,7 @@ module Gori::Tui
         y += 1
       else
         y += 2
-        screen.text(ix, y, "capture is OFF — press #{key("c", "capture.toggle")} to start", Theme.yellow, Theme.bg, width: iw)
+        screen.text(ix, y, capture_off_hint, Theme.yellow, Theme.bg, width: iw)
         y += 1
       end
       Frame.inner_divider(screen, inner, y, bg: Theme.bg, border: Theme.border)
@@ -408,7 +412,7 @@ module Gori::Tui
       screen.text(px, y, addr, Theme.accent, Theme.bg, Attribute::Bold, width: {ix + iw - px, 0}.max)
       y += 1
       unless capturing
-        screen.text(ix, y, "capture is OFF — press #{key("c", "capture.toggle")} to start", Theme.yellow, Theme.bg, width: iw)
+        screen.text(ix, y, capture_off_hint, Theme.yellow, Theme.bg, width: iw)
         y += 1
       end
       y = draw_palette_hint(screen, ix, y, iw, bullet: "◆ ")
@@ -416,27 +420,27 @@ module Gori::Tui
     end
 
     private def render_intercept_full(screen : Screen, rect : Rect, headline : String,
-                                      addr : String, capturing : Bool, catch_on : Bool) : Nil
-      inner_h = full_inner_h(:intercept, capturing: capturing, catch_on: catch_on)
-      msg = catch_on ? "Matching traffic pauses here for review before it continues." : "Catch is OFF — press i to hold matching requests/responses."
+                                      addr : String, capturing : Bool, catch_on : Bool,
+                                      body_focused : Bool, catch_direction : String) : Nil
+      inner_h = full_inner_h(:intercept, capturing: capturing)
+      catch_key = key("i", "intercept.toggle")
+      msg = catch_on ? "Matching traffic pauses here for review before it continues." : "Catch is OFF — #{body_focused ? "press" : "focus body, then press"} #{catch_key} to hold matching requests/responses."
       inner, ix, iw = begin_card(screen, rect, :intercept, headline, "INTERCEPT", inner_h, Screen.display_width(msg))
       y = inner.y
 
       draw_wrapped_message(screen, ix, y, iw, msg)
       y += 2
-      screen.text(ix, y, "traffic ──► ⏸ hold ──► #{key("f", "intercept.forward")} forward · #{key("d", "intercept.drop")} drop", Theme.muted, Theme.bg, width: iw)
+      screen.text(ix, y, "traffic ──► ⏸ hold ──► #{intercept_action_hint(body_focused)}", Theme.muted, Theme.bg, width: iw)
       y += 2
-      unless catch_on
-        screen.text(ix, y, "catch is OFF — press #{key("i", "intercept.toggle")} to enable", Theme.yellow, Theme.bg, width: iw)
-        y += 1
-      end
       unless capturing
-        screen.text(ix, y, "capture is OFF — press #{key("c", "capture.toggle")} to start", Theme.yellow, Theme.bg, width: iw)
+        screen.text(ix, y, capture_off_hint, Theme.yellow, Theme.bg, width: iw)
         y += 1
       end
-      y = draw_chord_hint(screen, ix, y, iw, " i:CATCH ", "toggle catch", bullet: "⏸ ", verb: "intercept.toggle")
-      y = draw_chord_hint(screen, ix, y, iw, " c:ALL ", "cycle REQ/RES/ALL", bullet: "▸ ", verb: "intercept.direction")
-      screen.text(ix, y, "▸ #{key("/", "intercept.filter")} condition — filter what gets held", Theme.muted, Theme.bg, width: iw)
+      direction_chip = body_focused ? " #{key("c", "intercept.direction")}:#{catch_direction} " : " DIR:#{catch_direction} "
+      direction_hint = body_focused ? "cycle direction (#{catch_direction})" : "focus body to change direction (#{catch_direction})"
+      y = draw_chord_hint(screen, ix, y, iw, direction_chip, direction_hint, bullet: "▸ ",
+        verb: body_focused ? "intercept.direction" : nil)
+      screen.text(ix, y, intercept_filter_hint(body_focused), Theme.muted, Theme.bg, width: iw)
       y += 1
       draw_palette_hint(screen, ix, y, iw, bullet: "▸ ")
     end
@@ -510,7 +514,7 @@ module Gori::Tui
         screen.text(ix + 2, y, addr, Theme.accent, Theme.bg, Attribute::Bold, width: iw)
         y += 2
         unless capturing
-          screen.text(ix, y, "capture is OFF — press #{key("c", "capture.toggle")} to start", Theme.yellow, Theme.bg, width: iw)
+          screen.text(ix, y, capture_off_hint, Theme.yellow, Theme.bg, width: iw)
           y += 1
         end
         y = draw_chord_hint(screen, ix, y, iw, " m:MODE ", "cycle scan mode", bullet: "◇ ", verb: "probe.mode")
@@ -608,7 +612,7 @@ module Gori::Tui
       Frame.inner_divider(screen, inner, y, bg: Theme.bg, border: Theme.border)
       y += 1
       y = draw_chord_hint(screen, ix, y, iw, " space ", "\"Mine parameters\" on a flow", bullet: "▸ ")
-      draw_chord_hint(screen, ix, y, iw, " ^R ", "start mining", bullet: "▸ ", verb: "mine.run")
+      screen.text(ix + 2, y, "start from History or Repeater", Theme.muted, Theme.bg, width: iw)
     end
 
     private def render_sequencer_full(screen : Screen, rect : Rect, headline : String) : Nil
@@ -820,7 +824,7 @@ module Gori::Tui
         lines << "HTTP/3 / QUIC bypasses proxy — use ^P"
         lines << "^P → Open browser · or set HTTP+HTTPS proxy"
       else
-        lines << "capture is OFF — press #{key("c", "capture.toggle")} to start"
+        lines << capture_off_hint
         lines << "^P → Open browser · or set HTTP+HTTPS proxy"
       end
       lines
@@ -828,16 +832,40 @@ module Gori::Tui
 
     private def medium_sitemap(headline, addr, capturing) : Array(String)
       lines = [headline, "◆ proxy #{addr} → host tree"]
-      lines << "capture is OFF — press #{key("c", "capture.toggle")} to start" unless capturing
+      lines << capture_off_hint unless capturing
       lines << "^P → Open browser · or set HTTP+HTTPS proxy"
       lines
     end
 
-    private def medium_intercept(headline, catch_on) : Array(String)
+    private def medium_intercept(headline, catch_on, body_focused) : Array(String)
       lines = [headline]
-      lines << (catch_on ? "⏸ queue empty · matching traffic pauses here" : "press i to enable catch")
-      lines << "#{key("f", "intercept.forward")} forward · #{key("d", "intercept.drop")} drop · #{key("/", "intercept.filter")} condition"
+      lines << (catch_on ? "⏸ queue empty · matching traffic pauses here" : "#{body_focused ? "press" : "focus body, then press"} #{key("i", "intercept.toggle")} to enable catch")
+      lines << medium_intercept_action_hint(body_focused)
       lines
+    end
+
+    private def intercept_action_hint(body_focused : Bool) : String
+      return "focus body for actions" unless body_focused
+      "#{key("f", "intercept.forward")} forward · #{key("d", "intercept.drop")} drop"
+    end
+
+    private def intercept_filter_hint(body_focused : Bool) : String
+      body_focused ? "▸ #{key("/", "intercept.filter")} condition — filter what gets held" : "▸ focus body to filter what gets held"
+    end
+
+    private def medium_intercept_action_hint(body_focused : Bool) : String
+      return "focus body to forward, drop or filter held traffic" unless body_focused
+      "#{key("f", "intercept.forward")} forward · #{key("d", "intercept.drop")} drop · #{key("/", "intercept.filter")} condition"
+    end
+
+    private def minimal_intercept_hint(catch_on : Bool, body_focused : Bool) : String
+      if body_focused
+        catch_on ? "⏸ queue empty · #{key("i", "intercept.toggle")} catch · #{key("/", "intercept.filter")} filter" : "press #{key("i", "intercept.toggle")} to enable catch"
+      elsif catch_on
+        "⏸ queue empty · focus body to catch or filter"
+      else
+        "focus body, then press #{key("i", "intercept.toggle")} to enable catch"
+      end
     end
 
     private def medium_repeater(headline) : Array(String)
@@ -877,7 +905,7 @@ module Gori::Tui
     end
 
     private def medium_miner(headline) : Array(String)
-      [headline, "wordlist ──► probe ──► params", "Mine parameters (#{menu("history.mine")}) · #{key("^R", "mine.run")} run"]
+      [headline, "wordlist ──► probe ──► params", "From History/Repeater: #{menu("history.mine")} Mine parameters"]
     end
 
     private def medium_sequencer(headline) : Array(String)
@@ -948,6 +976,10 @@ module Gori::Tui
     private def key(literal : String, verb : String) : String
       return literal unless reg = registry
       Hotkeys.binding_label(reg, verb, literal)
+    end
+
+    private def capture_off_hint : String
+      "capture is OFF — tab bar: press #{key("c", "capture.toggle")} to start"
     end
 
     # The space-menu path to a menu-only verb (`space → > D`), or "the space menu" without a

@@ -28,6 +28,7 @@ module Gori::Tui
     def initialize(host : Host)
       super(host)
       @probe = ProbeView.new
+      @probe.set_registry(@host.session.registry)
       @probe.set_scope(@host.session.scope) # honour the lens + show its chip on the bar
       @rules = ProbeRulesView.new
       @sub_idx = 0 # 0 = Findings · 1 = Rules

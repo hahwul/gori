@@ -524,7 +524,7 @@ module Gori::Tui
     private def self.listen_chip(listen : String, capturing : Bool, write_failures : Int32) : {String, Color}
       return {"● #{listen} (#{write_failures})", Theme.red} if write_failures > 0
       return {"● #{listen}", Theme.green} if capturing
-      {"● #{listen} · off", Theme.muted}
+      {"● OFF · #{listen}", Theme.yellow}
     end
 
     # The drawn rect of a tagged top-bar chip (or nil if absent) — rebuilds the SAME
