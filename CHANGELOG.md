@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- QL: `id:N`, `flow:N` and `flow_id:N` are refused with a hint to use the surface's id selector instead of matching zero rows, and queries with uncompilable terms report which term failed and why (#1369, Refs #1379)
+
 - Sequencer: an all-digit token set is classified as 'digits' rather than 'lower-hex' (#1390)
 
 - CLI: `gori run send` takes curl's `-d` as the body (a `POST` with a form `Content-Type` unless `-X` or `-H` say otherwise) and `-b` as a cookie — `-b` used to be the body, so a `-b` value with no `=` is now refused and pointed at `-d`. `repeater <flow-id>` gains `-X`, `-d`, `-b`, `--verbatim` and `--record-history`, `repeater send` takes per-send `-H`/`-b`, all three take `--apply-rules`, and their `--format json` adds MCP's `error_kind`, `error_code`, `retryable`, `delivered` and the parsed response `headers` (#1383, #1384)

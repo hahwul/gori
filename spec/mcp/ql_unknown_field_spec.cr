@@ -98,4 +98,17 @@ describe "MCP query tools: an unknown QL field" do
       end
     end
   end
+
+  it "refuses id:N, flow:N, and flow_id:N with a hint to use the ids argument" do
+    with_store do |store|
+      ["id:1", "flow:42", "flow_id:100"].each do |query|
+        r = call_tools(store, "list_history", q(query))
+        r.is_error.should be_true
+        r.error_code.should eq("QUERY_SYNTAX")
+        r.text.should contain("use the 'ids' argument")
+      end
+      # Also refused under strict: true
+      call_tools(store, "list_history", q("id:1", strict: true)).is_error.should be_true
+    end
+  end
 end

@@ -172,6 +172,12 @@ describe Gori::FilterAst do
       Gori::FilterAst.field_shaped?("localhost", "x", false) { near.call("localhost") }.should be_true
     end
 
+    it "treats id:N / flow:N / flow_id:N as field-shaped even with numeric values" do
+      Gori::FilterAst.field_shaped?("id", "1", false) { nil }.should be_true
+      Gori::FilterAst.field_shaped?("flow", "42", false) { nil }.should be_true
+      Gori::FilterAst.field_shaped?("flow_id", "100", false) { nil }.should be_true
+    end
+
     it "calls a KNOWN field a field use whatever its value holds" do
       Gori::FilterAst.field_shaped?("host", "//x", true) { nil }.should be_true
     end
@@ -223,6 +229,13 @@ describe Gori::FilterAst do
       u = Gori::FilterAst.unknown_field("xyzzy:abc", ":~", known, Gori::FilterAst::EMPTY_NAMESPACES, pool).not_nil!
       u.suggestion.should be_nil
       Gori::FilterAst.unknown_field_note(u).should contain("searched as text")
+    end
+
+    it "gives a hint to select by row or id for id:1" do
+      u = Gori::FilterAst.unknown_field("id:1", ":~", known, Gori::FilterAst::EMPTY_NAMESPACES, pool).not_nil!
+      u.name.should eq("id")
+      u.suggestion.should be_nil
+      Gori::FilterAst.unknown_field_note(u).should contain("QL has no `id:` field; select flows by row or id")
     end
 
     it "reports nothing for a query that names no field" do

@@ -242,6 +242,113 @@ module Gori
       !query.strip.empty? && filter == EMPTY
     end
 
+    # When `reject_empty?` is true (a non-blank query compiled to EMPTY), explains which
+    # term is invalid and why, rather than reporting a generic "no valid terms".
+    def self.reject_empty_reason(query : String, scope : ScopeLens? = nil) : String?
+      bad_regex = invalid_regex_terms(query)
+      return "invalid regex in #{bad_regex.first}" unless bad_regex.empty?
+
+      terms = FilterAst.terms(FilterAst.parse(query))
+      terms.each do |term|
+        next if term_to_sql(term, scope: scope)
+        if reason = dropped_term_reason(term.text, scope)
+          return "invalid filter in `#{term.source}` — #{reason}"
+        else
+          return "invalid filter in `#{term.source}`"
+        end
+      end
+
+      if u = FilterAst.unknown_field(query, FilterAst::SEPS_FIELD_REGEX,
+           ->(name : String, op : Char) { known_field?(name, op == '~') },
+           SIDE_PREFIXES, CANDIDATE_FIELDS)
+        return FilterAst.unknown_field_note(u)
+      end
+
+      nil
+    end
+
+    # Explains why a field term was dropped during compilation (returned nil from term_to_sql),
+    # or nil if the term is valid / compiles normally.
+    def self.dropped_term_reason(text : String, scope : ScopeLens? = nil) : String?
+      return nil if text.empty?
+      split = split_field(text)
+      return nil unless split
+      raw_field, value, op = split
+      field = canonical(raw_field)
+
+      return regex_term_reason(field, raw_field, value) if op == :regex
+      return "`#{raw_field}:` requires a value" if value.empty?
+
+      if field == "status"
+        status_term_reason(value)
+      elsif reason = numeric_field_reason(field, value)
+        reason
+      elsif reason = enum_field_reason(field, value, scope)
+        reason
+      else
+        content_or_prefix_reason(raw_field, field, value)
+      end
+    end
+
+    private def self.regex_term_reason(field : String, raw_field : String, value : String) : String?
+      return "empty regex pattern" if value.empty?
+      return "regex matching (`~`) not supported for `#{raw_field}`" if advertised_name?(field) && !field.in?(REGEX_FIELDS)
+      return "invalid regex pattern" unless valid_regex?(value)
+      nil
+    end
+
+    private def self.status_term_reason(value : String) : String?
+      _, rest = split_op(value)
+      rest = rest.downcase
+      is_class = rest.size == 3 && rest[1] == 'x' && rest[2] == 'x' && rest[0].ascii_number?
+      return nil if is_class || rest.to_i?
+      "status expects a number or class (e.g. 200, 5xx)"
+    end
+
+    private def self.numeric_field_reason(field : String, value : String) : String?
+      case field
+      when "size", "reqsize", "respsize"
+        return nil if numeric_cond("size", value)
+        "size expects a number (e.g. >1000, 50k)"
+      when "dur"
+        return nil if duration_cond(value)
+        "duration expects a number or unit (e.g. >500ms, 1.5s)"
+      end
+    end
+
+    private def self.enum_field_reason(field : String, value : String, scope : ScopeLens?) : String?
+      case field
+      when "proto"
+        return nil if proto_cond(value)
+        "proto expects http, https, ws, wss, grpc, grpcs, sse, or sses"
+      when "src"
+        return nil if src_cond(value)
+        "src expects proxy, repeater, fuzzer, import, or gori"
+      when "cache"
+        return nil if cache_cond(value)
+        "cache expects hit, miss, dynamic, or none"
+      when "stub", "static"
+        return nil if flag_cond("col", value)
+        "#{field} expects true or false"
+      when "scope"
+        return nil if scope_cond(value, scope || SCOPE_SHAPE_ONLY)
+        "scope expects in or out"
+      end
+    end
+
+    private def self.content_or_prefix_reason(raw_field : String, field : String, value : String) : String?
+      case field
+      when "body", "header", "req.body", "resp.body", "req.header", "resp.header"
+        return "value contains only control characters" if strip_controls(value).empty?
+      else
+        if side_prefixed?(raw_field)
+          base = raw_field.sub(/^res(p)?\./, "")
+          return "side prefix not supported on #{base}"
+        end
+      end
+      nil
+    end
+
     # Combines two filters with AND (used to layer the Scope lens over a query).
     def self.and(a : Filter, b : Filter) : Filter
       return b if a.sql == "1"

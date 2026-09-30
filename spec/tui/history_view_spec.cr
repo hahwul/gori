@@ -2588,6 +2588,24 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  it "reports which term is wrong and why in empty-state note for invalid QL" do
+    with_store do |store|
+      add_flow(store, "GET", "/a", 200)
+      view = HistoryView.new
+      view.reload(store)
+      view.start_query
+      "status:>=abc AND (".each_char { |c| view.query_insert(c) }
+      view.reload(store)
+      view.rows.empty?.should be_true
+
+      backend = MemoryBackend.new(100, 12)
+      view.render_list(Screen.new(backend), Rect.new(0, 0, 100, 12))
+      rows = (0...12).map { |y| backend.row(y) }.join("\n")
+      rows.should contain("status:>=abc")
+      rows.should contain("status expects a number or class")
+    end
+  end
+
   it "flags an invalid regex filter term in the empty-state (not a bare no-match)" do
     with_store do |store|
       add_flow(store, "GET", "/a", 200)
