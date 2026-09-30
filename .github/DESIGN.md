@@ -4608,3 +4608,22 @@ Match & Replace for a direct send (`Repeater::RequestRules`, formerly MCP's
 `maybe_apply_request_rules`). Renaming the flags whose meaning differs across commands (`--target`,
 `--header`, `-n`, `--unsafe`, `--owner/--id`) is left to additive aliases; a rename would break the
 scripts this entry is about.
+
+### 2026-09-30: cancelling a one-shot MCP send closes its socket (#1391)
+
+Refines: [P4](#p4), [P1](#p1). MCP `notifications/cancelled` (#1391).
+
+The 2026-09-20 cancellation decision treated `send_request` and `send_websocket` as indivisible
+one-shot work. That left a silent origin holding the only MCP worker until its timeout, blocking
+every later tool call even though the reader had already handled the cancellation. The request's
+own cancellation remains cooperative: while an HTTP or WebSocket engine owns its one-shot socket,
+a bounded watcher polls the same non-consuming predicate and closes that socket when the client
+cancels. The watcher is joined before the engine returns, so cancellation releases both the
+connection and its fiber; no default timeout changes. The server still emits no response for a
+cancelled JSON-RPC id, as required by MCP.
+
+**The worker stays serial.** `Store` reads have a WAL pool and writes still funnel through its
+single writer, but the shared `Tools` instance also carries per-call cancellation state, current
+project bindings, and operator-note claims. Running nominally read-only calls beside a send would
+need a broader per-call state and project-switching design; closing the canceled send already lets
+the queued call proceed promptly without adding that concurrency surface.

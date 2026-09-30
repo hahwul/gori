@@ -501,7 +501,8 @@ module Gori
           #     answer it has nowhere to put; and
           #   - the work STOPS, for the tools that can be stopped. A fiber cannot be
           #     interrupted, so this is cooperative: `cancel_probe` hands the tools layer a
-          #     predicate, and a long tool polls it between sends. `probe_scan{active:true}`
+          #     predicate. Long tools poll between sends; the one-shot send engines watch it
+          #     while they own a socket and close that socket when it fires. `probe_scan`
           #     was the case that made this a defect rather than a nicety — a cancelled scan
           #     went on putting real attack traffic on a third party's server for up to
           #     `PROBE_ACTIVE_MAX_FLOWS` flows, and the resource we were failing to free was

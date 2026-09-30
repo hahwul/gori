@@ -350,7 +350,7 @@ Every tool in `tools/list` carries `annotations.readOnlyHint`, so a client can t
 
 ## One Call at a Time
 
-Tools run one at a time, in the order they arrive; a fuzz or a slow `send_request` does not overlap with the next call, and responses come back in order. Two messages are answered immediately regardless: `ping`, so a client's liveness probe never stalls behind a long call and declares the server dead, and `notifications/cancelled`, which suppresses the response to a request you stopped waiting for. Cancelling does not abort work already in flight: an in-progress request finishes, its answer is simply not sent.
+Tools run one at a time, in the order they arrive; a fuzz or a slow `send_request` does not overlap with the next call, and responses come back in order. Two messages are handled immediately regardless: `ping`, so a client's liveness probe never stalls behind a long call, and `notifications/cancelled`, which suppresses the response to a request you stopped waiting for. Cancelling `send_request` or `send_websocket` closes its active socket so a silent origin cannot hold the worker until the timeout; tools with cooperative cancellation stop at their next check. Other in-progress calls finish before the worker takes the next queued call.
 
 ## Why an MCP Seam
 

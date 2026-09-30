@@ -328,7 +328,8 @@ module Gori
                     overrides : Gori::HostOverrides? = nil,
                     preserve_field_case : Bool = false,
                     reframe_grpc : Bool = false,
-                    tls_preset : String? = nil) : Result
+                    tls_preset : String? = nil,
+                    cancel : Proc(Bool)? = nil) : Result
         started = Time.instant
         upstream, dial_failure = open(scheme, host, port, verify_upstream, sni, timeout, overrides, tls_preset)
         unless upstream
@@ -336,7 +337,9 @@ module Gori
         end
         begin
           headers, body = parse_request(request, scheme, host, port, preserve_field_case, reframe_grpc)
-          exchange(Conn.new(upstream), headers, body, host, port, started, timeout)
+          Engine.with_cancel(upstream, cancel) do
+            exchange(Conn.new(upstream), headers, body, host, port, started, timeout)
+          end
         rescue ex
           failure(ex.message || "h2 repeater error", started)
         ensure
@@ -363,14 +366,17 @@ module Gori
       def self.send_fields(fields : Array({String, String}), body : Bytes?, *, scheme : String,
                            host : String, port : Int32, verify_upstream : Bool, sni : String? = nil,
                            timeout : Time::Span? = nil, overrides : Gori::HostOverrides? = nil,
-                           tls_preset : String? = nil) : Result
+                           tls_preset : String? = nil,
+                           cancel : Proc(Bool)? = nil) : Result
         started = Time.instant
         upstream, dial_failure = open(scheme, host, port, verify_upstream, sni, timeout, overrides, tls_preset)
         unless upstream
           return failure(connect_error(scheme, host, port, verify_upstream, dial_failure), started)
         end
         begin
-          exchange(Conn.new(upstream), fields, body, host, port, started, timeout)
+          Engine.with_cancel(upstream, cancel) do
+            exchange(Conn.new(upstream), fields, body, host, port, started, timeout)
+          end
         rescue ex
           failure(ex.message || "h2 repeater error", started)
         ensure
