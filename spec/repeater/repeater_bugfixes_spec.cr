@@ -99,6 +99,46 @@ describe "Gori::Repeater::Engine (malformed response — fix #8)" do
     result.error.not_nil!.should contain("response head exceeded 256 KiB")
   end
 
+  # An embedded device / legacy CGI that ends its head lines on a bare LF. RFC 9112 §2.2 lets a
+  # recipient accept it and the proxy does, so every active tool reading through this engine
+  # has to as well — on a close-delimited origin and on one that holds the socket open.
+  it "reads a bare-LF response head's status, headers and body" do
+    reply = "HTTP/1.1 200 OK\nContent-Type: text/plain\nX-Device: cam\n\nhello"
+    port = start_reply_origin(reply)
+    result = Gori::Repeater::Engine.send("GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice,
+      scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false)
+
+    result.error.should be_nil
+    result.ok?.should be_true
+    resp = result.response.not_nil!
+    resp.status.should eq(200)
+    resp.headers.get?("X-Device").should eq("cam")
+    String.new(result.head).should eq("HTTP/1.1 200 OK\nContent-Type: text/plain\nX-Device: cam\n\n")
+    String.new(result.body.not_nil!).should eq("hello")
+  end
+
+  it "ends a bare-LF head without waiting on an origin that keeps the socket open" do
+    origin = TCPServer.new("127.0.0.1", 0)
+    port = origin.local_address.port
+    held = Channel(TCPSocket).new(1)
+    spawn do
+      if conn = origin.accept?
+        Gori::Proxy::Codec::Http1.read_head(conn)
+        conn << "HTTP/1.1 204 No Content\r\nX-A: 1\r\n\n"
+        conn.flush
+        held.send(conn) # never closed until the spec is done
+      end
+    end
+    result = Gori::Repeater::Engine.send("GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice,
+      scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false, timeout: 2.seconds)
+    result.error.should be_nil
+    result.response.not_nil!.status.should eq(204)
+    result.response.not_nil!.headers.get?("X-A").should eq("1")
+  ensure
+    held.try(&.receive?).try(&.close) rescue nil
+    origin.try(&.close) rescue nil
+  end
+
   it "keeps an EOF-truncated response head as a failure with its received bytes" do
     partial = "HTTP/1.1 200 OK\r\nContent-Length: 6\r\n"
     port = start_reply_origin(partial)

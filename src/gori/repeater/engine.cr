@@ -517,8 +517,11 @@ module Gori
       # freeze every other tool. HEAD_DEADLINE caps the whole head. underlying_socket returns
       # nil for an IO with no settable socket, in which case read_head simply skips the
       # deadline (unchanged behaviour), so this is safe on every transport.
+      #
+      # `read_response_head_result` also ends a head on a bare-LF blank line, as the proxy does;
+      # a pool never reuses the socket behind one (`ConnPool.reusable_response?`).
       private def self.read_response_head(upstream : IO) : Proxy::Codec::Http1::HeadReadResult
-        Proxy::Codec::Http1.read_head_result(upstream,
+        Proxy::Codec::Http1.read_response_head_result(upstream,
           deadline: Proxy::SocketTuning::HEAD_DEADLINE,
           timeout_sock: Proxy::SocketTuning.underlying_socket(upstream))
       end

@@ -588,6 +588,10 @@ module Gori::Repeater
       return false unless resp
       return false if resp.malformed?
       return false if resp.status == 101 # Switching Protocols — the socket is no longer HTTP/1
+      # A head ended on a bare-LF blank line was framed off the LENIENT reading, so its
+      # connection serves this one response only: a misframe then dies with the socket instead
+      # of becoming the next send's response. Same rule as the proxy's `origin_keep_alive?`.
+      return false if Proxy::Codec::Http1.lf_terminated_head?(resp.raw_head)
       return false if connection_close?(resp.headers)
       case resp.version
       when "HTTP/1.1" then true
