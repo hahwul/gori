@@ -159,6 +159,63 @@ describe Gori::Import::Oas do
     end
   end
 
+  # A form requestBody imported with no body at all (and a multipart one with no boundary), a
+  # JSON schema's properties came out as `{}`, and a media-type `example` was ignored.
+  it "builds OpenAPI 3 form, multipart, JSON-property and example bodies" do
+    body = <<-JSON
+      {"openapi":"3.0.3","info":{"title":"t","version":"1"},
+       "servers":[{"url":"https://api.test"}],
+       "components":{"schemas":{"User":{"type":"object","properties":{
+         "name":{"type":"string"},"age":{"type":"integer"},"admin":{"type":"boolean","default":false},
+         "role":{"type":"string","enum":["user","admin"]},"tags":{"type":"array"},
+         "address":{"type":"object","properties":{"city":{"type":"string","example":"Seoul"}}},
+         "self":{"$ref":"#/components/schemas/User"}}}}},
+       "paths":{
+         "/form":{"post":{"requestBody":{"content":{"application/x-www-form-urlencoded":{"schema":{
+           "type":"object","properties":{"user":{"type":"string"},"n":{"type":"integer","example":7}}}}}},
+           "responses":{"200":{"description":"OK"}}}},
+         "/upload":{"post":{"requestBody":{"content":{"multipart/form-data":{"schema":{
+           "type":"object","properties":{"note":{"type":"string"},"file":{"type":"string","format":"binary"}}}}}},
+           "responses":{"200":{"description":"OK"}}}},
+         "/json":{"post":{"requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/User"}}}},
+           "responses":{"200":{"description":"OK"}}}},
+         "/example":{"post":{"requestBody":{"content":{"application/json":{
+           "schema":{"$ref":"#/components/schemas/User"},"example":{"name":"alice"}}}},
+           "responses":{"200":{"description":"OK"}}}},
+         "/examples":{"post":{"requestBody":{"content":{"application/x-www-form-urlencoded":{
+           "examples":{"first":{"value":{"q":"a b","page":2}}}}}},
+           "responses":{"200":{"description":"OK"}}}}}}
+      JSON
+    with_spec(body, ".json") do |path|
+      result = Gori::Import::Oas.parse_file(path)
+      result.skipped.should eq(0)
+      by_path = result.flows.to_h { |f| {f.request.target, f.request} }
+
+      form = by_path["/form"]
+      String.new(form.head).should contain("Content-Type: application/x-www-form-urlencoded\r\n")
+      String.new(form.body.not_nil!).should eq("user=user&n=7")
+
+      upload = by_path["/upload"]
+      String.new(upload.head).should contain("Content-Type: multipart/form-data; boundary=gori-openapi-boundary\r\n")
+      multipart = String.new(upload.body.not_nil!)
+      multipart.should contain(%(Content-Disposition: form-data; name="note"\r\n\r\nnote\r\n))
+      multipart.should contain(%(name="file"; filename="file"\r\nContent-Type: application/octet-stream\r\n))
+      multipart.should end_with("--gori-openapi-boundary--\r\n")
+
+      user = JSON.parse(String.new(by_path["/json"].body.not_nil!))
+      user["name"].should eq("name")
+      user["age"].should eq(0)
+      user["admin"].as_bool.should be_false
+      user["role"].should eq("user")
+      user["tags"].should eq(JSON.parse("[]"))
+      user["address"].should eq(JSON.parse(%({"city":"Seoul"})))
+      user["self"]["name"].should eq("name") # recursive: bounded, not endless
+
+      String.new(by_path["/example"].body.not_nil!).should eq(%({"name":"alice"}))
+      String.new(by_path["/examples"].body.not_nil!).should eq("q=a+b&page=2")
+    end
+  end
+
   it "reports remote refs without fetching them" do
     body = <<-JSON
       {"openapi":"3.0.3","info":{"title":"t","version":"1"},
@@ -194,7 +251,7 @@ describe Gori::Import::Oas do
       {"openapi":"3.0.3","info":{"title":"t","version":"1"},
        "servers":[{"url":"https://a.test"}],
        "paths":{"/rel":{"servers":[{"url":"/v2"}],"get":{"responses":{"200":{"description":"OK"}}}},
-                "/tpl":{"get":{"servers":[{"url":"https://{region}.b.test","variables":{"region":{"enum":["eu"]}}}],
+                "/tpl":{"get":{"servers":[{"url":"https://{region}.b.test","variables":{"region":{"description":"x"}}}],
                                "responses":{"200":{"description":"OK"}}}}}}
       JSON
     with_spec(body, ".json") do |path|
@@ -227,10 +284,36 @@ describe Gori::Import::Oas do
     end
   end
 
+  it "takes an enum's first member for a server variable that has no default" do
+    body = <<-JSON
+      {"openapi":"3.0.3","info":{"title":"t","version":"1"},
+       "servers":[{"url":"https://api.test/{base}","variables":{"base":{"enum":["v1","v2"]}}}],
+       "paths":{"/a":{"get":{"responses":{"200":{"description":"OK"}}}}}}
+      JSON
+    with_spec(body, ".json") do |path|
+      result = Gori::Import::Oas.parse_file(path)
+      result.flows.first.request.target.should eq("/v1/a")
+    end
+  end
+
+  it "imports a form operation whose body schema is a remote $ref, without a body" do
+    body = <<-JSON
+      {"openapi":"3.0.3","info":{"title":"t","version":"1"},
+       "servers":[{"url":"https://api.test"}],
+       "paths":{"/login":{"post":{"requestBody":{"content":{"application/x-www-form-urlencoded":
+         {"schema":{"$ref":"schemas.yaml#/Login"}}}},"responses":{"200":{"description":"OK"}}}},
+                "/a":{"get":{"responses":{"200":{"description":"OK"}}}}}}
+      JSON
+    with_spec(body, ".json") do |path|
+      result = Gori::Import::Oas.parse_file(path)
+      result.flows.map(&.request.target).sort!.should eq(["/a", "/login"])
+    end
+  end
+
   it "names a root server variable that has no default instead of skipping every operation" do
     body = <<-JSON
       {"openapi":"3.0.3","info":{"title":"t","version":"1"},
-       "servers":[{"url":"https://api.test/{base}","variables":{"base":{"enum":["v1"]}}}],
+       "servers":[{"url":"https://api.test/{base}","variables":{"base":{"description":"x"}}}],
        "paths":{"/a":{"get":{"responses":{"200":{"description":"OK"}}}}}}
       JSON
     with_spec(body, ".json") do |path|
