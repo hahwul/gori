@@ -88,6 +88,11 @@ describe Gori::Export::Httpie do
     # whose own first token is --raw.
     cmd.lines.any? { |l| l.lstrip.starts_with?("--raw ") }.should be_false
     cmd.should contain("# body omitted")
+    # The way back in is stdin. The hint used to read `--raw < FILE` "with --format raw", but
+    # `--raw` takes the body as its argument and `--format raw` prints the head as well.
+    cmd.should contain("add `< FILE` after the last item above these notes")
+    cmd.should_not contain("--raw <")
+    cmd.should_not contain("--format raw")
     # LAST line: the note is a comment, so it swallows the ` \` that would continue the command.
     cmd.lines.last.lstrip.should start_with("#")
   end

@@ -66,8 +66,13 @@ module Gori
             # --raw sends the body verbatim, so httpie does not try to parse it as request items.
             out << "--raw #{Curl.shell_quote(s.body)}"
           else
+            # Stdin is the one way in for such a body: httpie reads a redirected stdin as the
+            # raw body, as bytes. Not `--raw`, which takes the body as its ARGUMENT, and not
+            # `--format raw`, which prints the whole message, head included.
             notes << "# body omitted: #{s.body.bytesize} bytes holding #{uncarriable(s.body)} — " \
-                     "pipe it in instead: `... --raw < FILE` with --format raw"
+                     "save the body to a FILE and add `< FILE` after the last item above these " \
+                     "notes (not after them: a note is a comment, and the redirect would be part of " \
+                     "it) — httpie sends a redirected stdin as the body, byte for byte"
           end
         end
         # LAST, like curl's notes: a `#` comment swallows the ` \` that continues its line, so a
