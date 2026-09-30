@@ -25,7 +25,11 @@ gori run <subcommand> [verb] [options]
 |--------|------|
 | `--db=PATH` | 특정 데이터베이스 파일 |
 | `--project=NAME` | 짧은 id, 디렉터리 슬러그, 표시 이름, 고유 id 접두사로 매칭(대소문자 무시). 한 프로젝트의 슬러그이면서 다른 프로젝트의 표시 이름인 이름, 또는 두 프로젝트가 함께 쓰는 표시 이름은 후보별 슬러그와 짧은 id를 보여 주며 거부합니다 |
-| *(둘 다 없음)* | 가장 최근에 사용한 프로젝트 |
+| `GORI_PROJECT=NAME` | 환경 변수로 설정하면 스크립트의 모든 명령이 읽는 프로젝트(`--project`와 같은 매칭) |
+| `gori run project switch NAME` | `project switch --clear` 전까지 유지되는 고정 |
+| *(모두 없음)* | 가장 최근에 사용한 프로젝트 |
+
+스크립트에서 피해야 할 것은 마지막 행입니다. 다른 프로젝트에 쓰기를 한 번만 해도(`notes create --project demo`) 그 프로젝트가 가장 최근에 사용한 프로젝트가 되고, 이후 `--project` 없는 명령은 모두 그쪽을 따라갑니다. 대신 스크립트 맨 위에서 `GORI_PROJECT`를 설정하세요. 존재하지 않는 프로젝트를 가리키는 `GORI_PROJECT`나 고정은 건너뛰지 않고 거부하며, 어느 규칙이 프로젝트를 골랐는지 stderr 안내가 알려 줍니다(`gori run: using project demo (from GORI_PROJECT)`).
 
 두 선택자는 우선순위가 아니라 택일입니다. **둘 다** 주면 `--db`가 조용히 이기는 게 아니라
 사용법 오류로 거절합니다. 같은 플래그 짝이 파괴적 동사(`history delete`, `history clear`,
@@ -49,23 +53,24 @@ gori run issues --db /path/to/project.db --format json
 
 **STDOUT은 데이터, STDERR은 진단.** 경고, 개수, 안내, 내보내기 확인 메시지는 모두 STDERR로 갑니다. 그래서 `gori run … | jq`는 입력에서 잡담을 걸러낼 필요가 없습니다.
 
-**`--format`이 형태를 정합니다.** 대부분의 서브커맨드는 `text`(기본)와 `json`을 받고, 일부는 `jsonl`, `raw`, `har`, `paths`, `markdown`을 더합니다. 실행이 길게 이어지는 곳에서는 두 JSON 형태가 다르고, 그 차이를 알아둘 만합니다.
+**`--format`이 형태를 정합니다.** 대부분의 서브커맨드는 `text`(기본)와 `json`을 받고, 일부는 `jsonl`, `raw`, `har`, `paths`, `markdown`을 더합니다. `json`을 제공하는 모든 곳에서 `--json`은 `--format=json`과 같습니다. `json`은 언제나 **JSON 문서 하나**이고, `jsonl`은 언제나 한 줄에 객체 하나입니다.
 
 | 서브커맨드 | `--format json` | `--format jsonl` |
 |-----------|-----------------|------------------|
-| `capture`, `history` | 한 줄에 JSON 객체 하나 | `json`의 별칭, 출력 동일 |
-| `fuzz`, `mine`, `discover`, `authorize`, `cache-deception` | 버퍼링 후 마지막에 JSON 배열 하나 | 결과가 나올 때마다 한 줄씩 |
+| `history` | 배열 하나, 스트리밍 | 한 줄에 객체 하나 |
+| `capture` | 배열 하나, 캡처가 멈출 때(`--for`, `--max`, Ctrl-C) 닫힘 | 플로우가 완료될 때마다 객체 하나 |
+| `fuzz`, `mine`, `discover`, `authorize`, `cache-deception` | JSON 배열 하나(`fuzz`는 인덱스 순서) | 결과가 나올 때마다 한 줄씩 |
 | `sequence` | 보고서 하나 | 샘플이 나올 때마다 한 줄씩, 마지막에 보고서 |
 
-긴 스윕을 진행 중에 소비하려면 `jsonl`을, 끝에 문서 하나를 받으려면 `json`을 씁니다.
+긴 스윕을 진행 중에 소비하려면 `jsonl`을, 끝에 문서 하나를 받으려면 `json`을 씁니다(`… --format json | jq length`로 행 수를 셉니다).
 
 **종료 코드에 의미가 있습니다.**
 
 | 코드 | 의미 |
 |------|------|
 | `0` | 성공 |
-| `1` | 오류: 전송 실패, 열 수 없는 프로젝트, 적용되지 못한 변경 |
-| `3` | `gori run fuzz --fail-if-no-matches`가 정상 완료했지만 매칭이 하나도 없음(`--stop-on` / `--stop-after-matches`가 발동했다면 `0`) |
+| `1` | 오류: 전송 실패, 열 수 없는 프로젝트, 적용되지 못한 변경, 또는 어떤 요청도 응답을 받지 못한 스윕(`fuzz`, `mine`, `discover`, `sequence`, `authorize`, `cache-deception`) |
+| `3` | 판정 게이트: `gori run fuzz --fail-if-no-matches`가 정상 완료했지만 매칭이 하나도 없음(`--stop-on` / `--stop-after-matches`가 발동했다면 `0`), 또는 `gori run probe --fail-on=LEVEL`이 LEVEL 이상의 이슈를 보고함 |
 | `130` | SIGINT/SIGTERM으로 중단. `fuzz`, `mine`, `discover`, `sequence`, `authorize`, `repeater minimize`는 모아 둔 것을 먼저 내보내므로, `&& next-step`이 잘린 실행을 끝난 실행으로 오해하지 않습니다 |
 
 매칭이 없으면서 *동시에* 모든 전송이 실패한 fuzz 실행(대상 다운, TLS 실패, 스코프 차단)은 `1`로 끝나므로, `--fail-if-no-matches` 없이도 스크립트가 "결과 없음"과 "대상에 닿지도 못함"을 구분할 수 있습니다(플래그를 주면 `3`이 우선합니다).
@@ -74,7 +79,7 @@ gori run issues --db /path/to/project.db --format json
 
 ```bash
 # 프로젝트의 모든 5xx를 JSON Lines로 뽑아 jq로
-gori run history -q 'status:5xx' --limit 500 --format json | jq -r '.url'
+gori run history -q 'status:5xx' --limit 500 --format jsonl | jq -r '.url'
 
 # 5분간 캡처해 이름 붙인 프로젝트에 쌓고, 파일로 스트리밍
 gori run capture --project ci-run --for 5m --format jsonl > flows.jsonl
@@ -88,6 +93,12 @@ rule=$(gori run project scope add --pattern=api.example.com --format json | jq .
 
 # 경로마다 요청 하나, 경로마다 세션은 만들지 않음, 상태와 헤더만
 for p in /api/v1/items/{1..38}; do gori run send "https://api.example.com$p" --headers-only; done
+
+# curl의 플래그는 curl에서와 같은 뜻: -d는 본문, -b는 쿠키
+gori run send https://api.example.com/login -d 'user=a&pass=b' -b 'lang=en' --format json | jq '{status, error_kind, retryable}'
+
+# medium 이상의 결과가 하나라도 있으면 CI 잡을 실패시키기(종료 코드 3)
+gori run probe --fail-on medium
 ```
 
 ## 스코프 지키기 {#staying-in-scope}
