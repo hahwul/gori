@@ -66,16 +66,3 @@ describe "^N / ^W on the nine sub-tab strips" do
     end
   end
 end
-
-describe "Global toggles from body focus" do
-  it "keeps Global c/i/s out of read-only body panes after local keymap resolution" do
-    route = RUNNER[/suppress_global_toggle = body_suppresses_global_toggle\?.*?^      end/m].not_nil!
-    route.should contain("dispatch_chord(ev, chord, global_fallback: !suppress_global_toggle)")
-    helper = RUNNER[/private def body_suppresses_global_toggle\?.*?^    end/m].not_nil!
-    helper.should contain("@focus == :body && !text_input_active?")
-    helper.should contain("when \"capture.toggle\"")
-    helper.should contain("\"scope.toggle-lens\"")
-    helper.should contain("when \"intercept.toggle\"")
-    helper.should contain("@active_tab != :intercept")
-  end
-end

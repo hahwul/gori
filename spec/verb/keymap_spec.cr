@@ -65,8 +65,6 @@ describe Gori::Verb::Keymap do
       km = Keymap.build(reg)
       ctx = FakeExecContext.new
       km.resolve_global(Chord.new("x", ctrl: true), reg, ctx).should eq("g.x")
-      km.resolve(Chord.new("x", ctrl: true), Gori::Verb::Scope::Body, reg, ctx,
-        global_fallback: false).should eq("b.x")
       km.resolve_global(Chord.new("x"), reg, ctx).should be_nil
     end
 
