@@ -110,6 +110,27 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  # #1371: two services on one host must not read identical in the HOST column.
+  it "shows a non-default port in the HOST cell, and elides the default one" do
+    with_store do |store|
+      [{"http", 19011}, {"http", 19999}, {"https", 443}].each do |(scheme, port)|
+        store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: scheme, host: "127.0.0.1", port: port,
+          method: "GET", target: "/p#{port}", http_version: "HTTP/1.1",
+          head: "GET /p#{port} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice,
+          body: nil, source: Gori::FlowSource::Kind::Proxy))
+      end
+      view = HistoryView.new
+      view.reload(store)
+      backend = MemoryBackend.new(140, 12)
+      view.render_list(Screen.new(backend), Rect.new(0, 0, 140, 12))
+      row_of = ->(path : String) { (0...12).map { |y| backend.row(y) }.find!(&.includes?(path)) }
+      row_of.call("/p19011").should contain("127.0.0.1:19011")
+      row_of.call("/p19999").should contain("127.0.0.1:19999")
+      row_of.call("/p443").should_not contain("127.0.0.1:443")
+    end
+  end
+
   # A `field:` QL does not implement free-texts the WHOLE token, so `hostt:api` runs a literal
   # substring search, matches nothing, and is indistinguishable on this list from "this project
   # has no such traffic". `gori run history` refuses it outright and MCP errors on it; a live bar
