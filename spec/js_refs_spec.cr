@@ -497,9 +497,14 @@ describe Gori::JsRefs do
   end
 end
 
+# One origin-keyed endpoint, the shape `Store#sitemap_origin_entries` hands `Sitemap.build`.
+private def oe(host : String, target : String, scheme = "https", port = 443, method = "GET") : Gori::Store::SitemapOriginEntry
+  Gori::Store::SitemapOriginEntry.new(scheme, host, port, method, target)
+end
+
 describe "Gori::Sitemap.attach_js_refs!" do
   it "adds a count to a captured node and grows unrequested nodes, leaving endpoint counts traffic-only" do
-    hosts = Gori::Sitemap.build([{"Shop.test", "GET", "/api/users"}])
+    hosts = Gori::Sitemap.build([oe("Shop.test", "/api/users")])
     before = Gori::Sitemap.endpoint_count(hosts[0])
     refs = [
       Gori::Store::JsRefNode.new("https", "shop.test", 443, "/api/users", 2),
@@ -507,7 +512,7 @@ describe "Gori::Sitemap.attach_js_refs!" do
       Gori::Store::JsRefNode.new("https", "other.test", 443, "/x", 1),
     ]
     Gori::Sitemap.attach_js_refs!(hosts, refs) { |r| r.host == "allowed.test" }
-    hosts.map(&.label).should eq(["Shop.test"]) # other.test refused by the block
+    hosts.map(&.label).should eq(["https://Shop.test"]) # other.test refused by the block
     api = hosts[0].children.find!(&.label.==("api"))
     users = api.children.find!(&.label.==("users"))
     users.js_refs.should eq(2)
@@ -523,7 +528,7 @@ describe "Gori::Sitemap.attach_js_refs!" do
   end
 
   it "lands a query-less reference on the captured query variant instead of growing an unrequested sibling" do
-    hosts = Gori::Sitemap.build([{"shop.test", "GET", "/api/search?q=shoes"}])
+    hosts = Gori::Sitemap.build([oe("shop.test", "/api/search?q=shoes")])
     before = Gori::Sitemap.endpoint_count(hosts[0])
     Gori::Sitemap.attach_js_refs!(hosts, [Gori::Store::JsRefNode.new("https", "shop.test", 443, "/api/search", 1)]) { false }
     api = hosts[0].children.find!(&.label.==("api"))
@@ -534,16 +539,16 @@ describe "Gori::Sitemap.attach_js_refs!" do
   end
 
   it "does not bring back a host a lens hid when the host has captured traffic" do
-    hosts = Gori::Sitemap.build([{"shop.test", "GET", "/"}])
+    hosts = Gori::Sitemap.build([oe("shop.test", "/")])
     ref = Gori::Store::JsRefNode.new("https", "cdn.shop.test", 443, "/api/x", 1, host_captured: true)
     path = File.tempname("gori-jsattach", ".db")
     store = Gori::Store.open(path)
     begin
       store.add_scope_rule("include", "host", "*.shop.test")
       JR.attach!(hosts, [ref], Gori::Scope.load(store), lens: false)
-      hosts.map(&.label).should eq(["shop.test"])
+      hosts.map(&.label).should eq(["https://shop.test"])
       JR.attach!(hosts, [ref.copy_with(host_captured: false)], Gori::Scope.load(store), lens: false)
-      hosts.map(&.label).should eq(["shop.test", "cdn.shop.test"])
+      hosts.map(&.label).should eq(["https://shop.test", "https://cdn.shop.test"])
     ensure
       store.close
       File.delete?(path)
@@ -553,14 +558,14 @@ describe "Gori::Sitemap.attach_js_refs!" do
   # The host rule reads each reference's URL, so a scope include on `api.x.test/v1` admits
   # `/v1/users` alone whichever reference sorted first, as `JsRefs.list` does.
   it "judges every reference under a host it grew, not only the first" do
-    hosts = Gori::Sitemap.build([{"shop.test", "GET", "/"}])
+    hosts = Gori::Sitemap.build([oe("shop.test", "/")])
     refs = {"/admin", "/v1/users", "/zzz"}.map { |p| Gori::Store::JsRefNode.new("https", "api.x.test", 443, p, 1) }.to_a
     path = File.tempname("gori-jsattach", ".db")
     store = Gori::Store.open(path)
     begin
       store.add_scope_rule("include", "string", "api.x.test/v1")
       JR.attach!(hosts, refs, Gori::Scope.load(store), lens: false)
-      api = hosts.find!(&.label.==("api.x.test"))
+      api = hosts.find!(&.host.==("api.x.test"))
       api.children.map(&.label).should eq(["v1"])
       api.children[0].children.map(&.path).should eq(["/v1/users"])
     ensure
@@ -570,10 +575,41 @@ describe "Gori::Sitemap.attach_js_refs!" do
   end
 
   it "adds a host the block allows, flagged unrequested" do
-    hosts = Gori::Sitemap.build([{"shop.test", "GET", "/"}])
+    hosts = Gori::Sitemap.build([oe("shop.test", "/")])
     Gori::Sitemap.attach_js_refs!(hosts, [Gori::Store::JsRefNode.new("https", "api.shop.test", 443, "/v1/me", 1)]) { true }
-    api = hosts.find!(&.label.==("api.shop.test"))
+    api = hosts.find!(&.label.==("https://api.shop.test"))
     api.unrequested?.should be_true
     api.children.first.children.first.path.should eq("/v1/me")
+  end
+
+  # #1371: a reference names an ORIGIN, and the tree's roots are origins.
+  it "lands a reference on its own origin, not on another port of the same host" do
+    hosts = Gori::Sitemap.build([oe("h.test", "/a", "http", 19021), oe("h.test", "/b", "http", 19022)])
+    Gori::Sitemap.attach_js_refs!(hosts, [Gori::Store::JsRefNode.new("http", "h.test", 19022, "/b/deep", 1)]) { false }
+    hosts.map(&.label).should eq(["http://h.test:19021", "http://h.test:19022"])
+    hosts[0].children.map(&.label).should eq(["a"])
+    hosts[1].children[0].children.map(&.path).should eq(["/b/deep"])
+  end
+
+  # The host is known (it has a root), so its other service shows — `visible_host?`'s rule —
+  # beside the host's own roots rather than at the end of the tree, and the block is not asked.
+  it "grows an unrequested root for an origin of a known host, next to that host's roots" do
+    hosts = Gori::Sitemap.build([oe("a.test", "/"), oe("h.test", "/x", "http", 8080), oe("z.test", "/")])
+    refs = [Gori::Store::JsRefNode.new("http", "h.test", 9090, "/api", 1),
+            Gori::Store::JsRefNode.new("http", "h.test", 9090, "/api/v2", 1)]
+    Gori::Sitemap.attach_js_refs!(hosts, refs) { false }
+    hosts.map(&.label).should eq(["https://a.test", "http://h.test:8080", "http://h.test:9090", "https://z.test"])
+    grown = hosts[2]
+    grown.unrequested?.should be_true
+    grown.origin.should eq(Gori::Sitemap::Origin.new("http", "h.test", 9090))
+    grown.children[0].js_refs.should eq(1)
+    grown.children[0].children.map(&.path).should eq(["/api/v2"])
+  end
+
+  it "matches an origin's host case-insensitively" do
+    hosts = Gori::Sitemap.build([oe("Shop.test", "/")])
+    Gori::Sitemap.attach_js_refs!(hosts, [Gori::Store::JsRefNode.new("https", "shop.test", 443, "/api", 1)]) { false }
+    hosts.size.should eq(1)
+    hosts[0].children.map(&.label).should contain("api")
   end
 end

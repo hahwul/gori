@@ -346,9 +346,18 @@ module Gori
     # ABSOLUTE-form rows (the only ones that can normalize to something else) and compare
     # through the very function that built the tree — one definition of "same endpoint",
     # used by both sides.
-    def representative_flow_id(host : String, method : String, target : String) : Int64?
-      @db.query("SELECT id FROM flows WHERE host = ? AND method = ? AND target = ? ORDER BY (status IS NOT NULL) DESC, id DESC LIMIT 1",
-        host, method, target) do |rs|
+    #
+    # `scheme`/`port` pin the lookup to one ORIGIN — a Sitemap root is one (#1371), and without
+    # them `/x` under `http://h:19022` resolved to whichever of `:19021`/`:19022`/`https:8443`
+    # answered it last. Both default to nil (any), for a caller holding only a host. They are
+    # equality predicates on `idx_flows_sitemap`'s own columns (host, target, method, scheme,
+    # port, …), so the fast path stays one index seek.
+    def representative_flow_id(host : String, method : String, target : String,
+                               scheme : String? = nil, port : Int32? = nil) : Int64?
+      origin_sql, origin_args = origin_predicate(scheme, port)
+      @db.query("SELECT id FROM flows WHERE host = ? AND method = ? AND target = ?#{origin_sql} " \
+                "ORDER BY (status IS NOT NULL) DESC, id DESC LIMIT 1",
+        args: [host, method, target] of DB::Any + origin_args) do |rs|
         return rs.read(Int64) if rs.move_next
       end
       # Capped like its sibling `flow_id_for_url` (URL_LOOKUP_SCAN_CAP), which was capped and
@@ -357,14 +366,30 @@ module Gori
       # row that host ever produced, on the TUI fiber, for a keypress. The ORDER BY puts
       # answered flows and the newest first, so the representative is in the first handful if
       # it is anywhere; scanning past that was finding nothing, slowly.
-      @db.query("SELECT id, target FROM flows WHERE host = ? AND method = ? AND instr(target, '://') > 0 ORDER BY (status IS NOT NULL) DESC, id DESC LIMIT #{URL_LOOKUP_SCAN_CAP}",
-        host, method) do |rs|
+      @db.query("SELECT id, target FROM flows WHERE host = ? AND method = ? AND instr(target, '://') > 0#{origin_sql} " \
+                "ORDER BY (status IS NOT NULL) DESC, id DESC LIMIT #{URL_LOOKUP_SCAN_CAP}",
+        args: [host, method] of DB::Any + origin_args) do |rs|
         rs.each do
           id = rs.read(Int64)
           return id if Sitemap.normalize_path(rs.read(String)) == target
         end
       end
       nil
+    end
+
+    # ` AND scheme = ? AND port = ?` (either half only when given) and its arguments.
+    private def origin_predicate(scheme : String?, port : Int32?) : {String, Array(DB::Any)}
+      sql = ""
+      args = [] of DB::Any
+      if scheme
+        sql += " AND scheme = ?"
+        args << scheme
+      end
+      if port
+        sql += " AND port = ?"
+        args << port
+      end
+      {sql, args}
     end
 
     # How many same-(host, target) rows the URL lookup below RETURNS. A URL polled every few
@@ -904,6 +929,47 @@ module Gori
       raise ex if raise_on_error
       ::Log.warn { "sitemap query failed: #{ex.message}" } # gori.log, not STDERR (see #search, #411)
       [] of {String, String, String}
+    end
+
+    # One distinct endpoint of the ORIGIN-keyed Sitemap tree (#1371): the (host, method,
+    # target) `sitemap_entries` returns plus the scheme and port it was sent over, so
+    # `http://h:19021/x` and `https://h:8443/x` stay two endpoints under two roots.
+    record SitemapOriginEntry, scheme : String, host : String, port : Int32,
+      method : String, target : String
+
+    # Distinct (scheme, host, port, method, target) endpoints — what the Sitemap tab and
+    # `gori run sitemap` build their tree from (`Sitemap.build`). Same contract as
+    # `sitemap_entries` just above (the filter, the cap, `offset`, `control`, the degrade),
+    # with the origin kept. `sitemap_entries` stays for the readers that ask about a HOST on
+    # purpose (MCP `collapse_transport`, the JS-reference "requested" check).
+    #
+    # The ORDER BY names every selected column in `idx_flows_sitemap`'s order (V38), so the
+    # LIMIT cut is deterministic and the planner reads the distinct set straight off the
+    # covering index (`spec/store/sitemap_index_spec.cr` pins the plan). The cap counts origin
+    # keys, which are at least as many as the host-level rows for the same history.
+    def sitemap_origin_entries(filter : QL::Filter = QL::EMPTY, limit : Int32 = SITEMAP_MAX, *,
+                               offset : Int32 = 0, raise_on_error : Bool = false,
+                               control : QueryControl? = nil) : Array(SitemapOriginEntry)
+      rows = [] of SitemapOriginEntry
+      args = filter.args.dup
+      args << limit
+      args << offset
+      controlled_query("SELECT DISTINCT host, target, method, scheme, port FROM flows WHERE #{filter.sql} " \
+                       "ORDER BY host, target, method, scheme, port LIMIT ? OFFSET ?", args, control) do |rs|
+        rs.each do
+          host, target, method = rs.read(String), rs.read(String), rs.read(String)
+          rows << SitemapOriginEntry.new(rs.read(String), host, rs.read(Int32), method, target)
+        end
+      end
+      rows
+    rescue ex : QueryCancelled
+      raise ex
+    rescue ex
+      # Same degrade as `sitemap_entries`: the live TUI never crashes over a bad `/` query, and
+      # the one-shot CLI passes raise_on_error so a failed read is not an empty tree.
+      raise ex if raise_on_error
+      ::Log.warn { "sitemap query failed: #{ex.message}" } # gori.log, not STDERR (see #search, #411)
+      [] of SitemapOriginEntry
     end
 
     # One (endpoint, status, content-type) group — the unit the retest diff

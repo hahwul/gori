@@ -13,9 +13,9 @@ private def rf_store(&)
   end
 end
 
-private def rf_insert(store, target : String, status : Int32? = 200) : Int64
+private def rf_insert(store, target : String, status : Int32? = 200, *, scheme = "http", port = 19501) : Int64
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
-    created_at: 1_i64, scheme: "http", host: "127.0.0.1", port: 19501,
+    created_at: 1_i64, scheme: scheme, host: "127.0.0.1", port: port,
     method: "POST", target: target, http_version: "HTTP/1.1",
     head: "POST #{target} HTTP/1.1\r\nHost: 127.0.0.1:19501\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
   if status
@@ -45,6 +45,24 @@ describe "Store#representative_flow_id" do
     rf_store do |store|
       id = rf_insert(store, "/held")
       store.representative_flow_id("127.0.0.1", "POST", "/held").should eq(id)
+    end
+  end
+
+  # #1371: a Sitemap root is one origin, so the lookup behind it must stay on that scheme and
+  # port — on both statements, origin-form and absolute-form.
+  it "narrows to one origin when given a scheme and port" do
+    rf_store do |store|
+      a = rf_insert(store, "/x", port: 19021)
+      b = rf_insert(store, "/x", port: 19022)
+      c = rf_insert(store, "/x", scheme: "https", port: 8443)
+      d = rf_insert(store, "http://127.0.0.1:19021/abs", port: 19021)
+      rf_insert(store, "http://127.0.0.1:19022/abs", port: 19022)
+      store.representative_flow_id("127.0.0.1", "POST", "/x", "http", 19021).should eq(a)
+      store.representative_flow_id("127.0.0.1", "POST", "/x", "http", 19022).should eq(b)
+      store.representative_flow_id("127.0.0.1", "POST", "/x", "https", 8443).should eq(c)
+      store.representative_flow_id("127.0.0.1", "POST", "/x", "https", 19021).should be_nil
+      store.representative_flow_id("127.0.0.1", "POST", "/abs", "http", 19021).should eq(d)
+      store.representative_flow_id("127.0.0.1", "POST", "/x").should eq(c) # no origin: any, newest
     end
   end
 
