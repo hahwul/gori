@@ -62,7 +62,7 @@ jq -rn --argjson exp "$(gori run jwt "$(cat "${GORI_HOME:-$HOME/.gori}/token.jwt
 
 {% preset(title="Whether the target has started answering 5xx", src="/images/tui/statusline-errors.svg", alt="A statusline row in red: 1 × 5xx", note="A History query on a timer. It asks the whole project, not the rows History happens to be filtered to, and it prints nothing while the target is healthy — so the row appears the moment you break something.") %}
 ```sh
-p=$(jq -r .project); gori run history --project "$p" -q 'status:>=500' -n 100000 --format json 2>/dev/null | jq -rs 'length | if . == 0 then "" else "\u001b[31m\(.) × 5xx\u001b[0m" end'
+p=$(jq -r .project); gori run history --project "$p" -q 'status:>=500' -n 100000 --format json 2>/dev/null | jq -r 'length | if . == 0 then "" else "\u001b[31m\(.) × 5xx\u001b[0m" end'
 ```
 {% end %}
 
@@ -107,7 +107,7 @@ project=$(printf '%s' "$ctx" | jq -r .project)
 token=$(jq -rn --argjson exp "$(gori run jwt "$(cat "${GORI_HOME:-$HOME/.gori}/token.jwt")" --format json | jq .payload.exp)" \
   '(($exp - now) / 60 | floor) as $m | if $m < 5 then "\u001b[31m⚠ token \($m)m left\u001b[0m" else "\u001b[32m●\u001b[0m token \($m)m left" end')
 errors=$(gori run history --project "$project" -q 'status:>=500' -n 100000 --format json 2>/dev/null |
-  jq -rs 'length | if . == 0 then "" else "\u001b[31m\(.) × 5xx\u001b[0m" end')
+  jq -r 'length | if . == 0 then "" else "\u001b[31m\(.) × 5xx\u001b[0m" end')
 todo=$(gori run notes --all --project "$project" |
   awk '/^- \[ \]/ { n++; if (n == 1) first = substr($0, 7) } END { if (n) printf "todo %d · %s", n, first }')
 
