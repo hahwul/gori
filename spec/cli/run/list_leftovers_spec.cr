@@ -153,6 +153,7 @@ describe Gori::CLI::Run do
         next unless window.includes?("#{sink}.first?")     # takes a list, not one positional
         next if window.includes?("#{sink}.size > 1")       # hand-rolled guard, predates the helper
         next if window.includes?("extra_positional_error") # guarded, branching per verb
+        next if window.includes?("#{sink}[1..]")           # the rest is READ, as data (`notes update <n> TEXT…`)
         offenders << "#{File.basename(path)}: #{sink}"
       end
     end

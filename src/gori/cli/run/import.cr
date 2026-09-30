@@ -102,13 +102,13 @@ module Gori
       # a terminal (`stdin_terminal_error`, the guard every `-` reader shares). The name keeps
       # the one extension an importer reads: OpenAPI picks its YAML reader by `.yaml`, so a spec
       # whose first non-blank byte is not `{` is spooled under that name.
-      private def self.spool_import_stdin(kind : Symbol) : String
+      private def self.spool_import_stdin(kind : Symbol, io : IO = STDIN) : String
         noun = "#{Import.label(kind)} input"
-        if err = stdin_terminal_error(STDIN, what: "gori run import", noun: noun,
+        if err = stdin_terminal_error(io, what: "gori run import", noun: noun,
              hint: stdin_pipe_hint("gori run import", flag: "--#{kind} -"))
           abort err
         end
-        path = File.tempfile("gori-stdin-import-") { |f| IO.copy(STDIN, f) }.path
+        path = File.tempfile("gori-stdin-import-") { |f| IO.copy(io, f) }.path
         if File.size(path).zero?
           File.delete?(path)
           abort "gori run import: stdin gave no bytes for --#{kind} -"
