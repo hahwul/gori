@@ -394,7 +394,10 @@ module Gori
         elsif doc.empty?
           STDERR.puts "no notes"
         else
-          doc.texts.each_with_index { |text, i| puts CLI::Output.note_row_text(i, text, current: doc.cur == i) }
+          doc.notes.each_with_index do |entry, i|
+            text = Issues::Export.scrub_controls(entry.text)
+            puts CLI::Output.note_row_text(i, entry.id, text, current: doc.cur == i)
+          end
         end
       end
     end

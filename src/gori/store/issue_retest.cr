@@ -3,11 +3,16 @@ require "db"
 module Gori
   class Store
     # --- issue retest steps and runs (V27, #1036) ----------------------------
-    #
+
     # Retest semantics are kept OUT of `entity_links` on purpose (the issue's data-model
     # note): an evidence link answers what material is related, a retest step additionally
     # carries order, role, an assertion and execution state. Unlinking a piece of evidence
     # must not delete a test step, and linking one must not add one.
+
+    # An assertion literal can contain any JSON string byte, including NUL. SQLite keeps it
+    # in TEXT, but crystal-sqlite3's String reader stops at NUL, so read both the editable step
+    # and its immutable run copy through a length-aware BLOB cast.
+    private RETEST_ASSERTION_COL = "CAST(assertion AS BLOB) AS assertion"
 
     # Why a step write did not happen. `Ok` is the only status that changed anything.
     enum RetestStatus
@@ -145,7 +150,7 @@ module Gori
     def retest_steps(issue_id : Int64) : Array(RetestStep)
       list = [] of RetestStep
       @db.query(
-        "SELECT id, issue_id, position, role, ref_kind, ref_id, assertion, created_at, updated_at " \
+        "SELECT id, issue_id, position, role, ref_kind, ref_id, #{RETEST_ASSERTION_COL}, created_at, updated_at " \
         "FROM issue_retest_steps WHERE issue_id = ? ORDER BY position, id", issue_id) do |rs|
         rs.each { try_read_retest_step(rs).try { |s| list << s } }
       end
@@ -154,7 +159,7 @@ module Gori
 
     def get_retest_step(id : Int64) : RetestStep?
       @db.query(
-        "SELECT id, issue_id, position, role, ref_kind, ref_id, assertion, created_at, updated_at " \
+        "SELECT id, issue_id, position, role, ref_kind, ref_id, #{RETEST_ASSERTION_COL}, created_at, updated_at " \
         "FROM issue_retest_steps WHERE id = ?", id) do |rs|
         return try_read_retest_step(rs) if rs.move_next
       end
@@ -227,7 +232,7 @@ module Gori
     def retest_run_steps(run_id : Int64) : Array(RetestRunStep)
       list = [] of RetestRunStep
       @db.query(
-        "SELECT id, run_id, position, role, ref_kind, ref_id, label, method, url, assertion, " \
+        "SELECT id, run_id, position, role, ref_kind, ref_id, label, method, url, #{RETEST_ASSERTION_COL}, " \
         "outcome, detail, status, duration_us, bytes, flow_id FROM issue_retest_run_steps " \
         "WHERE run_id = ? ORDER BY position, id", run_id) do |rs|
         rs.each { try_read_retest_run_step(rs).try { |s| list << s } }
@@ -311,7 +316,7 @@ module Gori
       role = RetestRole.parse?(rs.read(String))
       kind = LinkRefKind.parse(rs.read(String))
       ref_id = rs.read(Int64)
-      assertion = rs.read(String)
+      assertion = String.new(rs.read(Bytes))
       created_at = rs.read(Int64)
       updated_at = rs.read(Int64)
       return nil unless role && kind
@@ -348,7 +353,7 @@ module Gori
       label = rs.read(String)
       method = rs.read(String)
       url = rs.read(String)
-      assertion = rs.read(String)
+      assertion = String.new(rs.read(Bytes))
       outcome = RetestOutcome.parse?(rs.read(String))
       detail = rs.read(String)
       status = rs.read(Int64?).try(&.to_i)
