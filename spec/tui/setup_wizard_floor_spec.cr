@@ -10,6 +10,14 @@ private alias SW = Gori::Tui::SetupWizard
 # the tallest step; these examples pin that derivation from BOTH sides, so a step that grows a
 # row can't quietly push the real floor past the advertised one again.
 describe Gori::Tui::SetupWizard do
+  # #1379: `-l`/`-p` bind this run only; the fields edit the saved default, so the step says so.
+  it "notes the address a -l/-p flag binds this run to, and nothing without one" do
+    SW.run_bind_note(nil, nil).should be_nil
+    SW.run_bind_note(nil, 18911).should eq("this run: :18911 (-p) · these set the default")
+    SW.run_bind_note("0.0.0.0", 18911).should eq("this run: 0.0.0.0:18911 (-l -p) · these set the default")
+    SW.run_bind_note("0.0.0.0", nil).should eq("this run: 0.0.0.0 (-l) · these set the default")
+  end
+
   it "keeps local and other-device guidance readable at the minimum width" do
     inner = SW.card_w(SW::MIN_W, 64) - 6
     hints = SW.bind_guidance(inner)
