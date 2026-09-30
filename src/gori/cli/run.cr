@@ -1690,6 +1690,20 @@ module Gori
         n
       end
 
+      # `--origin URL` (`sitemap params` / `sitemap export`, #1371) → {host, scheme, port}: one
+      # Sitemap root, as `gori run sitemap --format json`'s `origin` prints it. Parsed by
+      # `Settings.parse_origin` — http/https and a host required, the scheme's default port
+      # filled in — so `https://h` and `https://h:443` name one origin. Refuses a `--host` beside
+      # it rather than choosing between two answers. With neither, the host (or nothing) alone.
+      private def self.resolve_origin_flag(sub : String, host : String?, origin : String?) : {String?, String?, Int32?}
+        return {host, nil, nil} unless raw = origin
+        abort "gori run #{sub}: pass --host or --origin, not both (--origin names the host too)" if host
+        parts = Settings.parse_origin(raw)
+        abort "gori run #{sub}: invalid --origin #{raw.inspect} (expected http(s)://host[:port])" unless parts
+        scheme, h, port = parts
+        {h, scheme, port}
+      end
+
       private def self.parse_count(v : String, flag : String? = nil) : Int32
         n = v.to_i?
         abort "gori run: invalid #{flag || "count"} '#{v}' (expected a positive integer)" unless n && n > 0

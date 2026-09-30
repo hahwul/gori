@@ -912,7 +912,7 @@ gori run sitemap params 'method:POST' --location json,form --format json
 gori run mine 42 --wordlist <(gori run sitemap params --host api.example.com --format names)
 ```
 
-`-q`/`--query=QL`(위치 인자로도 가능), `--in-scope`, `--hide-static`은 읽을 플로우를 좁힙니다. `history`처럼 플로우 단위로 적용됩니다. `--host`는 정확한 호스트, `--path=PREFIX`는 경로 접두사, `--location=LIST`는 위치를 고릅니다(기본값 전체). 표준 브라우저 헤더는 `--all-headers`를 주지 않으면 빠집니다. `--max-flows=N`은 조건에 맞는 최신 플로우 N개를 읽고(기본값 2000), 더 오래된 플로우를 건너뛰었으면 stderr에 알립니다. 쿠키, 자격 증명 헤더, `password`나 `token`처럼 자격 증명 이름을 가진 필드의 값은 `--include-sensitive`를 주지 않으면 `[REDACTED]`로 출력됩니다. 가리는 기준은 이름과 JWT / 개인 키 형태뿐이라, 다른 이름의 비밀 값(presigned `X-Amz-Signature`, 임의의 `sig=` 등)이나 URL 경로 안의 자격 증명은 그대로 출력됩니다. 텍스트는 행을 오리진(`https://api.example.com`) 아래에 묶고, `json` 행에는 `scheme`, `host`, `port`가 들어갑니다. `--format`은 `text`, `json`, `names` 중에서 고릅니다. `names`는 한 줄에 이름 하나(JSON은 마지막 키 이름, `--location`에 지정하지 않으면 헤더 제외)로, Miner나 Fuzzer 워드리스트로 바로 쓸 수 있습니다.
+`-q`/`--query=QL`(위치 인자로도 가능), `--in-scope`, `--hide-static`은 읽을 플로우를 좁힙니다. `history`처럼 플로우 단위로 적용됩니다. `--host`는 정확한 호스트, `--origin=URL`은 그 호스트의 오리진 하나(`http://127.0.0.1:19021`, `--host`와 함께 쓸 수 없음), `--path=PREFIX`는 경로 접두사, `--location=LIST`는 위치를 고릅니다(기본값 전체). 표준 브라우저 헤더는 `--all-headers`를 주지 않으면 빠집니다. `--max-flows=N`은 조건에 맞는 최신 플로우 N개를 읽고(기본값 2000), 더 오래된 플로우를 건너뛰었으면 stderr에 알립니다. 쿠키, 자격 증명 헤더, `password`나 `token`처럼 자격 증명 이름을 가진 필드의 값은 `--include-sensitive`를 주지 않으면 `[REDACTED]`로 출력됩니다. 가리는 기준은 이름과 JWT / 개인 키 형태뿐이라, 다른 이름의 비밀 값(presigned `X-Amz-Signature`, 임의의 `sig=` 등)이나 URL 경로 안의 자격 증명은 그대로 출력됩니다. 텍스트는 행을 오리진(`https://api.example.com`) 아래에 묶고, `json` 행에는 `scheme`, `host`, `port`가 들어갑니다. `--format`은 `text`, `json`, `names` 중에서 고릅니다. `names`는 한 줄에 이름 하나(JSON은 마지막 키 이름, `--location`에 지정하지 않으면 헤더 제외)로, Miner나 Fuzzer 워드리스트로 바로 쓸 수 있습니다.
 
 **`sitemap js`**: 캡처된 JavaScript가 참조하는 엔드포인트입니다. TUI [Sitemap](/ko/guide/proxy/#js-refs)이 `js` 행으로 그리는 것과 같습니다. 기본값은 캡처된 요청이 닿지 않은 것만 호스트별로 보여주며, 각 줄에 읽어 온 플로우와 줄 번호, 문자열, 표시(`comment`, `templated`, `base: referer|guessed`)가 붙습니다.
 
@@ -929,6 +929,7 @@ gori run sitemap js --format urls | httpx -silent
 ```bash
 gori run sitemap export --host api.example.com > api.json
 gori run sitemap export --host api.example.com --format openapi-yaml > api.yaml
+gori run sitemap export --origin http://127.0.0.1:19021 > one-service.json
 gori run sitemap export --in-scope --examples > api.json
 ```
 

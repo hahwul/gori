@@ -920,7 +920,7 @@ gori run sitemap params 'method:POST' --location json,form --format json
 gori run mine 42 --wordlist <(gori run sitemap params --host api.example.com --format names)
 ```
 
-`-q`/`--query=QL` (also positional), `--in-scope` and `--hide-static` narrow the flows read, per flow as in `history`. `--host` is an exact host, `--path=PREFIX` a path prefix, and `--location=LIST` picks locations (default all). Standard browser headers are left out unless `--all-headers`. `--max-flows=N` reads the newest N matching flows (default 2000); a note on stderr says when older ones were skipped. Values of cookies, credential headers and credential-named fields such as `password` or `token` print as `[REDACTED]` unless `--include-sensitive`. Redaction goes by name and by JWT / private-key shape only, so a secret under any other name (a presigned `X-Amz-Signature`, a custom `sig=`) prints in the clear, as does one inside a URL path. Text groups rows under their origin (`https://api.example.com`), and `json` rows carry `scheme`, `host` and `port`. `--format` is `text`, `json`, or `names` (one name per line, JSON leaf names, no headers unless `--location` names them), which is a Miner or Fuzzer wordlist.
+`-q`/`--query=QL` (also positional), `--in-scope` and `--hide-static` narrow the flows read, per flow as in `history`. `--host` is an exact host and `--origin=URL` one of its origins (`http://127.0.0.1:19021`; not with `--host`), `--path=PREFIX` a path prefix, and `--location=LIST` picks locations (default all). Standard browser headers are left out unless `--all-headers`. `--max-flows=N` reads the newest N matching flows (default 2000); a note on stderr says when older ones were skipped. Values of cookies, credential headers and credential-named fields such as `password` or `token` print as `[REDACTED]` unless `--include-sensitive`. Redaction goes by name and by JWT / private-key shape only, so a secret under any other name (a presigned `X-Amz-Signature`, a custom `sig=`) prints in the clear, as does one inside a URL path. Text groups rows under their origin (`https://api.example.com`), and `json` rows carry `scheme`, `host` and `port`. `--format` is `text`, `json`, or `names` (one name per line, JSON leaf names, no headers unless `--location` names them), which is a Miner or Fuzzer wordlist.
 
 **`sitemap js`**: the endpoints captured JavaScript references, the same ones the TUI's [Sitemap](/guide/proxy/#js-refs) draws as `js` rows. By default it lists only the ones no captured request reached, grouped by host, each with the flow and line it was read from, the literal, and flags (`comment`, `templated`, `base: referer|guessed`).
 
@@ -937,6 +937,7 @@ gori run sitemap js --format urls | httpx -silent
 ```bash
 gori run sitemap export --host api.example.com > api.json
 gori run sitemap export --host api.example.com --format openapi-yaml > api.yaml
+gori run sitemap export --origin http://127.0.0.1:19021 > one-service.json
 gori run sitemap export --in-scope --examples > api.json
 ```
 

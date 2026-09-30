@@ -69,7 +69,8 @@ module Gori
                     "response codes reflect the samples that were captured, not a contract."
 
       # `filter` is the flow set (a QL filter; scope and the static-asset lens are joined in by
-      # the caller). `host` is exact and case-insensitive. `path_prefix` is a plain prefix of the
+      # the caller). `host` is exact and case-insensitive, and `scheme`/`port` narrow it to one
+      # origin (#1371; each ignored without `host`). `path_prefix` is a plain prefix of the
       # endpoint path, as `sitemap params --path` reads it. `targets` narrows to a set the TUI
       # picked: origin (a Sitemap root, #1371) → the endpoint paths wanted under it, or nil for
       # the whole origin.
@@ -91,6 +92,8 @@ module Gori
       record Options,
         filter : QL::Filter = QL::EMPTY,
         host : String? = nil,
+        scheme : String? = nil,
+        port : Int32? = nil,
         path_prefix : String? = nil,
         targets : Hash(Sitemap::Origin, Set(String)?)? = nil,
         max_flows : Int32 = 5000,
@@ -357,6 +360,12 @@ module Gori
         f = opts.filter
         if h = opts.host.try(&.strip).presence
           f = QL.and(f, QL::Filter.new("host = ? COLLATE NOCASE", [h] of DB::Any))
+          if scheme = opts.scheme
+            f = QL.and(f, QL::Filter.new("scheme = ?", [scheme] of DB::Any))
+          end
+          if port = opts.port
+            f = QL.and(f, QL::Filter.new("port = ?", [port] of DB::Any))
+          end
         end
         if (t = opts.targets) && !t.empty?
           # Hosts in SQL, the origin's scheme and port on the row (`admit`): the index leads

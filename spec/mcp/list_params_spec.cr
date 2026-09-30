@@ -8,10 +8,10 @@ require "json"
 private CLOCK = [1_700_000_000_000_000_i64]
 
 private def lp_flow(store : Gori::Store, target : String, *, host = "shop.test", req_headers = "",
-                    resp_body = "") : Int64
+                    resp_body = "", scheme = "https", port = 443) : Int64
   CLOCK[0] += 1000
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
-    created_at: CLOCK[0], scheme: "https", host: host, port: 443,
+    created_at: CLOCK[0], scheme: scheme, host: host, port: port,
     method: "GET", target: target, http_version: "HTTP/1.1",
     head: "GET #{target} HTTP/1.1\r\nHost: #{host}\r\n#{req_headers}\r\n".to_slice,
     source: Gori::FlowSource::Kind::Proxy))
@@ -27,6 +27,15 @@ private def lp(tools : Gori::MCP::Tools, args : String) : JSON::Any
 end
 
 describe "MCP list_params" do
+  it "narrows to one origin with `origin`" do
+    with_store do |store|
+      lp_flow(store, "/a?mine=1", host: "h.test", scheme: "http", port: 19021)
+      lp_flow(store, "/a?other=1", host: "h.test", scheme: "http", port: 19022)
+      out = lp(tools_for(store), %({"origin":"http://h.test:19021"}))
+      out["params"].as_a.map { |r| {r["name"], r["port"]} }.should eq([{"mine", 19021}])
+    end
+  end
+
   it "lists the inventory with reflected + flow ids" do
     with_store do |store|
       id = lp_flow(store, "/search?q=needle", resp_body: "found needle")

@@ -7,6 +7,21 @@ require "json"
 
 private alias SPI = Gori::ParamInventory
 
+module Gori::CLI::Run
+  def self.resolve_origin_flag_for_spec(host : String?, origin : String?) : {String?, String?, Int32?}
+    resolve_origin_flag("sitemap params", host, origin)
+  end
+end
+
+# `--origin` (#1371): one Sitemap root, host + scheme + port, the default port filled in.
+describe "gori run sitemap params --origin" do
+  it "resolves an origin to its host, scheme and port, and passes a bare --host through" do
+    Gori::CLI::Run.resolve_origin_flag_for_spec(nil, "http://127.0.0.1:19021").should eq({"127.0.0.1", "http", 19021})
+    Gori::CLI::Run.resolve_origin_flag_for_spec(nil, "https://acme.test").should eq({"acme.test", "https", 443})
+    Gori::CLI::Run.resolve_origin_flag_for_spec("acme.test", nil).should eq({"acme.test", nil, nil})
+  end
+end
+
 private def spi_row(name : String, *, location = Gori::Miner::Location::Query, samples = ["v"],
                     sensitive = false, reflected = false, truncated = false, host = "h.test",
                     path = "/a", count = 1, scheme = "https", port = 443) : SPI::Row

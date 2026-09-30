@@ -493,6 +493,16 @@ describe Gori::Export::OpenApi do
 
   # #1371: a Sitemap root is one scheme + port, so exporting it must not pull in another
   # service on the same host.
+  it "narrows a --host export to one origin with scheme and port" do
+    with_store do |store|
+      oa_flow(store, "/mine", host: "h.test", scheme: "http", port: 19021)
+      oa_flow(store, "/other-port", host: "h.test", scheme: "http", port: 19022)
+      oa_flow(store, "/tls", host: "h.test", scheme: "https", port: 19021)
+      doc = OA.build(store, OA::Options.new(host: "h.test", scheme: "http", port: 19021)).doc
+      doc["paths"].as_h.keys.should eq(["/mine"])
+    end
+  end
+
   it "keeps a target origin's other ports and schemes out" do
     with_store do |store|
       oa_flow(store, "/mine", host: "h.test", scheme: "http", port: 19021)

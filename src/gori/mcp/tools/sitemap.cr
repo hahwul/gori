@@ -374,10 +374,13 @@ module Gori
         # The TUI Params sub-tab follows the hide-static lens; this is it, asked for explicitly.
         filter = QL.and(filter, QL.hide_static) if bool_arg(h, "hide_static", false)
         include_sensitive = bool_arg(h, "include_sensitive", false)
+        narrow = origin_arg(h)
+        return narrow if narrow.is_a?(Result)
+        host, scheme, port = narrow
         report = if scope_unconfigured
                    ParamInventory::Report.new([] of ParamInventory::Row, 0, false)
                  else
-                   opts = ParamInventory::Options.new(filter: filter, host: str(h, "host"),
+                   opts = ParamInventory::Options.new(filter: filter, host: host, scheme: scheme, port: port,
                      path_prefix: str(h, "path_prefix"), locations: locations,
                      all_headers: bool_arg(h, "all_headers", false),
                      max_flows: clamp(optional_int_arg(h, "max_flows"), 2000, 20_000),
@@ -433,7 +436,10 @@ module Gori
         examples = bool_arg(h, "examples", false)
         choice = openapi_redactor(h, examples)
         return choice if choice.is_a?(Result)
-        opts = Export::OpenApi::Options.new(filter: filter, host: str(h, "host"),
+        narrow = origin_arg(h)
+        return narrow if narrow.is_a?(Result)
+        host, scheme, port = narrow
+        opts = Export::OpenApi::Options.new(filter: filter, host: host, scheme: scheme, port: port,
           path_prefix: str(h, "path_prefix"),
           max_flows: clamp(optional_int_arg(h, "max_flows"), 5000, 20_000),
           max_samples: clamp(optional_int_arg(h, "max_samples"), 10, 50),
@@ -521,6 +527,22 @@ module Gori
         end
       end
 
+      # `origin` (list_params, export_openapi, #1371) → {host, scheme, port}: one Sitemap root, as
+      # `list_sitemap` entries name it. The CLI's `--origin` twin, parsed by the same
+      # `Settings.parse_origin`, and refused beside a `host` rather than choosing between them.
+      private def origin_arg(h) : {String?, String?, Int32?} | Result
+        host = str(h, "host")
+        return {host, nil, nil} unless raw = str(h, "origin").try(&.strip).presence
+        if host.try(&.strip).presence
+          return err("pass host or origin, not both — origin names the host too", "INVALID_ARGUMENT", field: "origin")
+        end
+        unless parts = Settings.parse_origin(raw)
+          return err("invalid origin #{raw.inspect} — expected http(s)://host[:port]", "INVALID_ARGUMENT", field: "origin")
+        end
+        scheme, origin_host, port = parts
+        {origin_host.as(String?), scheme.as(String?), port.as(Int32?)}
+      end
+
       private def param_row(j : JSON::Builder, r : ParamInventory::Row, include_sensitive : Bool) : Nil
         j.object do
           # The origin, not only the host (#1371): `list_sitemap` entries carry scheme/port,
@@ -604,6 +626,7 @@ module Gori
           s.field "in_scope", boolprop("only flows in the project's configured scope (default false; empty with a note when no scope is configured)")
           s.field "hide_static", boolprop("leave out static assets — images, fonts, audio/video; the TUI's hide-static lens, same as `-static:true` in `query` (default false)")
           s.field "host", strprop("only this host (exact, case-insensitive)")
+          s.field "origin", strprop("only this origin — scheme, host and port, e.g. http://127.0.0.1:19021 (instead of host)")
           s.field "path_prefix", strprop("only endpoints whose path starts with this, e.g. /api/v1")
           s.field "location", arr_or_str_prop("only these locations: query, form, multipart, json, headers, cookies (array or comma list; default all)")
           s.field "all_headers", boolprop("include standard browser headers (User-Agent, Accept*, Sec-*, …) (default false)")
@@ -631,6 +654,7 @@ module Gori
           s.field "in_scope", boolprop("only flows in the project's configured scope (default false; refused when no scope is configured)")
           s.field "hide_static", boolprop("leave out static assets — images, fonts, audio/video (default false)")
           s.field "host", strprop("only this host (exact, case-insensitive) — one API per document")
+          s.field "origin", strprop("only this origin — scheme, host and port, e.g. http://127.0.0.1:19021 (instead of host)")
           s.field "path_prefix", strprop("only endpoints whose path starts with this, e.g. /api/v1")
           s.field "format", strprop("json (default) or yaml")
           s.field "include_gori", boolprop("keep the requests gori itself sent — Repeater, Fuzzer, Miner, Discover… (default false: a brute force or a fuzz run would describe gori's probing, not the API)")
