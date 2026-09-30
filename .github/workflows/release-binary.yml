@@ -23,6 +23,10 @@ jobs:
             platform: macos
     runs-on: ${{ matrix.os }}
     steps:
+      - name: Refresh apt index
+        # See the same step in ci.yml: install-crystal skips apt-get update.
+        if: runner.os == 'Linux'
+        run: sudo apt-get update
       - name: Install Crystal
         uses: crystal-lang/install-crystal@v1
       - name: Checkout source code
