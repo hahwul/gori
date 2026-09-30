@@ -4,19 +4,21 @@ include Gori::Tui
 
 # Miss Ring's stand on the TUTORIAL (Tutorial.companion_place / .companion_band / .step_card).
 #
-# Unlike the picker — which centres a 50-column card and drops her when she doesn't fit
-# beside it — the tour NARROWS its card to make room, because copying the picker's rule to
-# a 78-column card would not have seated her until ~102 columns. These sweep the pair of
-# rules together: the card's width and her stand are two halves of one decision, and the
-# way this breaks is that they stop agreeing.
+# She stands only beside a FULL-WIDTH card (#1381): narrowing the card to seat her at 80
+# columns cost the lesson its own content there. These sweep the pair of rules together — the
+# card's width and her stand are two halves of one decision, and the way this breaks is that
+# they stop agreeing.
 describe Gori::Tui::Tutorial do
-  # The whole reason the band exists. 80x24 is the conventional terminal, and the tour's
-  # own "too small" message names 80 as its floor — a guide mascot absent on exactly the
-  # terminals new users run would have missed the point.
-  it "seats her from 80 columns" do
-    Tutorial.companion_place(80, 24).should_not be_nil
-    Tutorial.companion_place(80, 16).should_not be_nil
+  it "stands down wherever she would narrow the card" do
+    Tutorial.companion_place(80, 24).should be_nil
+    Tutorial.companion_place(80, 16).should be_nil
     Tutorial.companion_place(120, 40).should_not be_nil
+    (16..60).each do |h|
+      (40..200).each do |w|
+        next unless Tutorial.companion_place(w, h)
+        Tutorial.step_card(w, h, Tutorial.companion_band(w, h)).w.should eq(Tutorial::CARD_W)
+      end
+    end
   end
 
   # Below ~52 columns step_card's 40-column floor wins and the card grows back over her
@@ -27,14 +29,10 @@ describe Gori::Tui::Tutorial do
   end
 
   # The sprite may never touch the card: she stands there for the whole tour, and the mock
-  # shell is what the user is being taught to read. (Her bubble is another matter — it
-  # floats over the card for the few seconds she is talking, exactly as it does over the
-  # picker's card and a tab body in the session.)
+  # shell is what the user is being taught to read.
   #
-  # Measured against the rect COMPANION.DRAW would paint, NOT against companion_place's return value.
-  # Those are the same rect when she is seated, but sourcing it from the draw path is what
-  # keeps this from being a restatement of companion_place's own guard — see the render-path
-  # test below, which is the one that fails if render_companion stops consulting the gate.
+  # Measured against the rect COMPANION.DRAW would paint, NOT against companion_place's return
+  # value, so this is not a restatement of companion_place's own guard.
   it "never overlaps the card at any size she appears at" do
     (16..60).each do |h|
       (40..200).each do |w|
@@ -50,53 +48,55 @@ describe Gori::Tui::Tutorial do
     end
   end
 
-  # THE RENDER-PATH DRIFT GUARD, and the reason the tour needs one the picker does not.
-  #
-  # Tutorial.companion_place is deliberately stricter than Companion.place: it stands her down at sizes
-  # Companion.place will happily seat her at. Companion.draw only knows Companion.place, so render_companion has to
-  # apply the stricter rule itself — and when it did not, she painted over the mock tab bar
-  # across the whole 40..51-column band while every other example here still passed.
-  #
-  # This asserts the two rules disagree EXACTLY where the card would be hit: seated sizes
-  # clear the narrowed card, stood-down sizes are precisely the ones that would not have.
-  # That makes the gate load-bearing rather than decorative.
-  it "stands down precisely at the sizes Companion.draw would paint over the card" do
+  # THE RENDER-PATH DRIFT GUARD. Tutorial.companion_place is deliberately stricter than
+  # Companion.place, and Companion.draw only knows Companion.place, so render_companion has to
+  # apply the stricter rule itself. Seated sizes clear a full-width card; every stood-down
+  # size is one where she would have narrowed it or painted over it.
+  it "stands down precisely where she would cost the card its width or its cells" do
     stood_down = 0
     (16..60).each do |h|
       (40..200).each do |w|
         next unless drawn = Companion.place(Tutorial.companion_stage(w, h)) # else Companion.draw paints nothing
+        card = Tutorial.step_card(w, h, Tutorial::COMPANION_BAND)
         if Tutorial.companion_place(w, h)
-          # Seated: the card was narrowed for her, so what Companion.draw paints clears it.
-          Tutorial.step_card(w, h, Tutorial::COMPANION_BAND).right.should be <= drawn.x - 1
+          card.right.should be <= drawn.x - 1
         else
-          # Stood down: had render_companion not gated, Companion.draw would have hit the card.
           stood_down += 1
-          Tutorial.step_card(w, h, 0).right.should be > drawn.x - 1
+          (card.w < Tutorial::CARD_W || card.right > drawn.x - 1).should be_true
         end
       end
     end
-    # The band is real, not a rule that never fires — 40..51 columns at every height.
     stood_down.should be > 0
   end
 
-  # …and the render path itself. render_companion hands Companion.draw whatever companion_draw_stage returns,
-  # so asserting on that rect IS asserting on what gets painted: nil means Companion.draw is
-  # never reached, and non-nil means the sprite Companion.draw derives from it clears the card.
-  # This is the example that fails if the gate is dropped from render_companion.
-  it "hands Companion.draw a stage only when the sprite it derives will clear the card" do
+  # …and the render path itself. render_companion hands Companion.draw whatever
+  # companion_draw_stage returns, so asserting on that rect IS asserting on what gets painted.
+  # Her BUBBLE may not reach the card either (#1381): it covered the palette lesson's hint.
+  it "hands Companion.draw a stage whose sprite and bubble both clear the card" do
+    msg = "that's it — tab bar up top, body below, and a much longer line besides"
+    spoke = 0
     (16..60).each do |h|
       (40..200).each do |w|
-        stage = Tutorial.companion_draw_stage(w, h)
-        if stage.nil?
+        seat = Tutorial.companion_draw_stage(w, h)
+        if seat.nil?
           Tutorial.companion_place(w, h).should be_nil # nothing is drawn at all
           next
         end
+        stage, speaks = seat
         rect = Companion.place(stage).should_not be_nil # exactly what Companion.draw will paint
+        rect.should eq(Tutorial.companion_place(w, h))  # the confined stage seats her the same
         box = Tutorial.step_card(w, h, Tutorial.companion_band(w, h))
         (rect.x - 1).should be >= box.right
         (rect.right + 1).should be <= w
+        next unless speaks
+        spoke += 1
+        stage.x.should be >= box.right
+        if bubble = Companion.bubble_box(stage, rect, msg) # the arguments Companion.draw passes
+          bubble.x.should be >= box.right
+        end
       end
     end
+    spoke.should be > 0
   end
 
   it "stays inside the terminal" do
@@ -121,9 +121,8 @@ describe Gori::Tui::Tutorial do
     end
   end
 
-  # A default install has her OFF, and must render the tour exactly as it did before she
-  # existed. band: 0 is the code path that takes — assert it against the original formula
-  # rather than against a snapshot, so a change to either side has to be deliberate.
+  # With her off (or stood down) the card is the original formula — assert it against that
+  # formula rather than a snapshot, so a change to either side has to be deliberate.
   it "leaves the card untouched while she is off" do
     (16..60).each do |h|
       (40..200).each do |w|
@@ -135,18 +134,14 @@ describe Gori::Tui::Tutorial do
     end
   end
 
-  # …and with her on, the card gives up only her band — never more, and never so much that
-  # it stops being able to hold a mock (step_card's own 40-column floor).
-  it "narrows the card by her band and no further" do
+  # …and with her on, the card gives up nothing: she stands only where her band leaves it
+  # full width.
+  it "keeps the card at full width beside her" do
     (16..60).each do |h|
       (40..200).each do |w|
         band = Tutorial.companion_band(w, h)
         next if band.zero?
-        box = Tutorial.step_card(w, h, band)
-        plain = Tutorial.step_card(w, h, 0)
-        box.w.should be <= plain.w
-        box.w.should be >= 40
-        box.w.should be >= plain.w - Tutorial::COMPANION_BAND
+        Tutorial.step_card(w, h, band).w.should eq(Tutorial.step_card(w, h, 0).w)
       end
     end
   end
@@ -407,6 +402,24 @@ describe "Gori::Tui::Tutorial" do
     bar_w = Gori::Tui::Tutorial.bar_width(box.w - 4)
     labels = Gori::Tui::Tutorial.tab_labels
     Gori::Tui::Tutorial.tab_chip_rects(labels, 0, 0, bar_w).size.should eq(labels.size)
+  end
+
+  # The demo stands only on chips the SMALLEST card still draws, so it never presses a digit
+  # at a strip that did not pack that chip (the clamp it used to need for that is gone).
+  it "keeps the navigate demo on chips the smallest card draws" do
+    drawn = Gori::Tui::Tutorial.chips_drawn(Gori::Tui::Tutorial.step_card(40, 16).w - 4)
+    Gori::Tui::Tutorial::NAV_DEMO.each { |(tab, _, _, _)| tab.should be < drawn }
+    # …and it walks the strip the lesson's try line passes through.
+    Gori::Tui::Tutorial::NAV_DEMO.map { |(_, level, _, _)| level }.should contain(:strip)
+  end
+
+  it "draws every mock chip at 80 columns, so the footer's 1-N is 1-5 there" do
+    box = Gori::Tui::Tutorial.step_card(80, 24)
+    Gori::Tui::Tutorial.chips_drawn(box.w - 4).should eq(Gori::Tui::Tutorial::TABS.size)
+  end
+
+  it "fits the labelled step rail at 80 columns" do
+    (Gori::Tui::Tutorial.rail_width + 4).should be <= 80
   end
 
   it "presses a digit in the navigate demo, on a chip the bar has" do
