@@ -1,4 +1,4 @@
-# `gori run send` — one request, without a Repeater session (#1116).
+# `gori run send` — one request, without a Repeater session by default (#1116).
 #
 # Before this, a one-off request from a script was `repeater create` + `repeater send` + a temp
 # file per URL, and every probe left a session behind in the TUI's sub-tab strip — a sweep of
@@ -10,7 +10,7 @@ module Gori
   module CLI
     module Run
       @[Subcommand("send", help: [
-        {"send", "Send one request from a URL (curl-shaped) or a raw request — no Repeater session is created"},
+        {"send", "Send one request from a URL (curl-shaped) or a raw request"},
       ])]
       private def self.cmd_send(args : Array(String)) : Nil
         db_path : String? = nil
@@ -34,6 +34,7 @@ module Gori
         verbatim = false
         slot : String? = nil
         record_history = false
+        save_as_repeater = false
         apply_rules = false
         headers_only = false
         max_body : Int32? = nil
@@ -43,7 +44,7 @@ module Gori
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run send --url URL [options]\n" \
                      "       gori run send URL [options]\n\n" \
-                     "Send ONE request and print the response, without creating a Repeater session. The\n" \
+                     "Send ONE request and print the response. The\n" \
                      "request is built from the URL and -X/-H/-d/-b, which mean what they mean to curl (-d is\n" \
                      "the body, -b a cookie), or read whole from --request-file/-raw/-stdin (the URL then only\n" \
                      "names where to dial). It goes out through this project's upstream proxy, host overrides,\n" \
@@ -72,6 +73,7 @@ module Gori
           p.on("--verbatim", "Send what you typed EXACTLY: no token expansion ($ENV.KEY, $BIND.NAME, $GEN.*) in -H/-d/-b or a raw request, no bare-LF→CRLF promotion of a raw request's head, and on HTTP/2 no field-name lowercasing. The URL is still expanded: it names where to dial") { verbatim = true }
           p.on("--slot=NAME", "Send as this SESSION SLOT — its header overlay, and its binding table for $BIND.NAME tokens") { |v| slot = v.strip }
           p.on("--record-history", "Also write the request + response to History as a flow, and print its id (default: off)") { record_history = true }
+          p.on("--save-as-repeater", "Also save this request + response as a Repeater session, and print its id") { save_as_repeater = true }
           p.on("--apply-rules", APPLY_RULES_HELP) { apply_rules = true }
           p.on("--headers-only", HEADERS_ONLY_HELP) { headers_only = true }
           p.on("--max-body=BYTES", MAX_BODY_HELP) { |v| max_body = parse_count(v, "--max-body") }
@@ -139,7 +141,8 @@ module Gori
         abort_if_out_of_scope!(outbound, plan, "gori run send")
         abort_if_blocked!(plan, "gori run send")
         send_and_report(plan, outbound, project, raw: !raw_content.nil?,
-          record_history: record_history, format: format, cap: cap, applied_rules: applied_rules)
+          record_history: record_history, save_as_repeater: save_as_repeater,
+          format: format, cap: cap, applied_rules: applied_rules)
       end
 
       # The argv-only checks, in one place so every one of them runs before anything reads
@@ -244,7 +247,8 @@ module Gori
       # Send `plan` and print what came back — the tail every repeater send shares: the History
       # record (opt-in) BEFORE the one emit, so its outcome rides inside the JSON object.
       private def self.send_and_report(plan : Repeater::Plan, outbound : Gori::Outbound, project : Project, *,
-                                       raw : Bool, record_history : Bool, format : Symbol, cap : BodyCap,
+                                       raw : Bool, record_history : Bool, save_as_repeater : Bool,
+                                       format : Symbol, cap : BodyCap,
                                        applied_rules : Bool = false) : Nil
         # A handshake authored here goes out as an ORDINARY request: there is no session to hold
         # the frames a real exchange would send, so its 101 (or its refusal) is the answer. Said,
@@ -266,9 +270,20 @@ module Gori
         recorded = record_history ? record_repeater_send_to_history(plan, wire, result, sent_at, nil, project) : nil
         recorded_flow_id = recorded.as?(Int64)
         history_write = recorded.nil? ? nil : WriteOutcome.new(recorded.as?(String))
+        repeater_write = nil.as(WriteOutcome?)
+        repeater_response_write = nil.as(WriteOutcome?)
+        saved_repeater_id = nil.as(Int64?)
+        if save_as_repeater
+          saved = save_send_as_repeater(plan, plan.bytes, result, recorded_flow_id, project, "gori run send")
+          saved_repeater_id = saved.id
+          repeater_write = saved.save_write
+          repeater_response_write = saved.response_write
+        end
         emit_repeater_result(result, new_body, nil, format, recorded_flow_id: recorded_flow_id,
           tls_preset: sent_tls_preset(plan), history_write: history_write, cap: cap,
-          prefix: "gori run send", applied_rules: applied_rules)
+          prefix: "gori run send", applied_rules: applied_rules,
+          saved_repeater_id: saved_repeater_id, repeater_write: repeater_write,
+          repeater_response_write: repeater_response_write)
         if why = history_write.try(&.error)
           STDERR.puts "gori run send: #{why}#{project_write_warning_tail}"
         end

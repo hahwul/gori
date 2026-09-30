@@ -1258,6 +1258,7 @@ module Gori::Sequencer
     private def self.classify(present : Array(UInt8)) : String
       return "—" if present.empty?
       chars = present.map(&.chr)
+      return "digits" if chars.all?(&.ascii_number?)
       return "lower-hex" if chars.all? { |c| c.ascii_number? || ('a'..'f').includes?(c) }
       return "upper-hex" if chars.all? { |c| c.ascii_number? || ('A'..'F').includes?(c) }
       return "hex" if chars.all? { |c| c.ascii_number? || ('a'..'f').includes?(c) || ('A'..'F').includes?(c) }

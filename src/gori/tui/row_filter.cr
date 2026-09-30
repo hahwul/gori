@@ -1,4 +1,5 @@
 require "./text_field"
+require "./line_edit"
 require "./screen"
 require "./theme"
 require "./geometry"
@@ -61,6 +62,13 @@ module Gori::Tui
         @editing = false
       elsif key.escape?
         clear
+      elsif act = LineEdit.shell_action(ev) # ^A/^E/^U/^W, as on the `/` bars (#1379)
+        case act
+        when :home            then @field.home
+        when :end             then @field.end_of_line
+        when :delete_to_start then @field.delete_to_start
+        when :delete_word     then @field.delete_word_left
+        end
       else
         @field.handle_edit_key(ev)
       end

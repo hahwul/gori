@@ -1540,7 +1540,7 @@ module Gori::Tui
         # arm is where it actually earns its place.
         head = view.sent_head_unterminated? ? " · #{CLI::Run.unterminated_head_chip}" : ""
         if result.ok?
-          @host.status("sent → #{result.response.try(&.status)} in #{result.duration_us // 1000}ms#{result.incomplete? ? " (incomplete)" : ""}#{evidence_literal_note(view)}#{head}#{note}", :done)
+          @host.status("sent → #{result.response.try(&.status)} in #{Fmt.dur(result.duration_us)}#{result.incomplete? ? " (incomplete)" : ""}#{evidence_literal_note(view)}#{head}#{note}", :done)
         else
           @host.status("repeater error: #{result.error}#{head}#{note}", :error)
         end

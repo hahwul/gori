@@ -125,8 +125,10 @@ module Gori::Tui
       "↑/↓ field · ←/→ adjust · ␣ toggle · ↵ start/edit · esc cancel"
     end
 
-    # Formerly Runner#handle_discover_config_key: ↑/↓ move, ←/→ adjust the cyclers, ␣/↵
-    # commits on Start, opens the headers sub-editor on the headers row, else toggles.
+    # Formerly Runner#handle_discover_config_key: ↑/↓ move, ←/→ adjust the cyclers. ↵ starts
+    # from any row — the hint's promise; it used to flip whatever row had focus (#1373) — except
+    # the headers row, where it opens the sub-editor. ␣ toggles the focused row (and on Start
+    # starts, on the headers row edits).
     def handle_key(ev : Termisu::Event::Key) : Symbol
       k = ev.key
       return :cancel if k.escape?
@@ -138,14 +140,17 @@ module Gori::Tui
         adjust(-1)
       elsif k.right?
         adjust(1)
-      elsif k.enter? || k.space?
+      elsif k.enter?
+        return :commit unless on_headers_row?
+        activate_row
+      elsif k.space?
         return :commit if on_start_row?
         activate_row
       end
       :stay
     end
 
-    # Click a row to select it, then act on it exactly as ↵ would; outside the card cancels.
+    # Click a row to select it, then act on it exactly as ␣ would; outside the card cancels.
     # Mirrors the prior Runner#click_discover_config.
     def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
       box = overlay_box(area)
@@ -240,10 +245,11 @@ module Gori::Tui
       when ROW_TARGET
         # The one row whose options come from the seed rather than a constant — and the one
         # that may not be cyclable at all (a single candidate). `focused: false` then drops
-        # the ‹/› cue, which is honest: the keys do nothing here.
+        # the ‹/› cue, which is honest: the keys do nothing here. The options are the display
+        # PATHS: a choice is a `{path, url}` pair, and stringifying the pair drew the tuple
+        # while comparing it to a path never matched, so the row stuck on the first (#1373).
         Frame.option_cycle(screen, x, py, box.right - 2, bg, "start at:",
-          @seed.choices.map(&.to_s), @seed.choices.index(selected_path) || 0,
-          sel && @seed.choices.size > 1)
+          @seed.choices.map(&.[0]), @target_idx, sel && @seed.choices.size > 1)
       when ROW_SPIDER  then check(screen, x, py, bg, sel, @spider, "spider (follow links)")
       when ROW_BRUTE   then check(screen, x, py, bg, sel, @bruteforce, "bruteforce (probe paths)")
       when ROW_EXT     then check(screen, x, py, bg, sel, @ext, "probe common extensions")

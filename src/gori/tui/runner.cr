@@ -3027,7 +3027,11 @@ module Gori::Tui
         tabs: vis_tabs, intercept_count: @session.interceptor.pending_count,
         more_focused: @focus == :menu && @menu_more,
         numbered: Settings.tab_numbers?, slots: slots)
+      # Text the companion will cover is ellipsized at her edge, not left as a stump that reads
+      # like a real value (see Screen#occlusion). Body only: nothing else shares her rows.
+      screen.occlusion = companion_occlusion(layout.body)
       render_body(screen, layout.body)
+      screen.occlusion = nil
       render_companion(screen, layout.body)
       # One retag for the whole status row: key_hints already funnels the Runner's own
       # hint literals, every overlay/prompt hint AND every controller body_hint, and the
@@ -3374,6 +3378,15 @@ module Gori::Tui
       return unless frame = @companion.frame
       return unless companion_visible?
       Companion.draw(screen, body, frame)
+    end
+
+    # Where she will be painted over the body this frame — the same gates as
+    # #render_companion — or nil when she will not be.
+    private def companion_occlusion(body : Rect) : Rect?
+      return nil if Settings.companion_in_bar?
+      return nil unless @companion.frame
+      return nil unless companion_visible?
+      Companion.hit_rect(body)
     end
 
     # The status-bar placement. Nil unless she is both enabled and set to `bar`, which is

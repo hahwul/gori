@@ -428,7 +428,9 @@ module Gori::Tui
     private def query_note_for(residual : String, filter : QL::Filter,
                                lens : QL::ScopeLens?) : String?
       return nil if residual.blank?
-      return "invalid filter — no valid terms" if residual_has_terms?(residual) && QL.reject_empty?(residual, filter)
+      if residual_has_terms?(residual) && QL.reject_empty?(residual, filter)
+        return QL.reject_empty_reason(residual, scope: lens) || "invalid filter — no valid terms"
+      end
       bad = QL.invalid_regex_terms(residual)
       return "invalid regex in #{bad.first}" unless bad.empty?
       # Same note History carries, and for the same reason it carries the unknown-field one:

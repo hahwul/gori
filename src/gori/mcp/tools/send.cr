@@ -9,6 +9,7 @@ require "../../repeater/flow_request"
 require "../../repeater/plan"
 require "../../repeater/send_error"
 require "../../repeater/request_rules"
+require "../../repeater/send_persistence"
 require "../../repeater/timing"
 require "../../repeater/ws_engine"
 require "../../repeater/draft_markers"
@@ -27,6 +28,7 @@ module Gori
 
       @[Tool("send_request", gated: true, agent_action: true, env_refresh: true, permission: "send")]
       private def send_request(h) : Result
+        return err("request cancelled", "CANCELLED") if cancelled?
         # FIRST, ahead of every other read: the one refusal whose entire value is its
         # position in this method. See `send_source_conflict`.
         conflict = send_source_conflict(h)
@@ -115,7 +117,9 @@ module Gori
                       "an unaudited send is intentional.") if id <= 0
           recorded_flow_id = id
         end
-        result = plan.send_wire(h1_wire)
+        return err("request cancelled", "CANCELLED") if cancelled?
+        result = plan.send_wire(h1_wire, cancel_signal)
+        return err("request cancelled", "CANCELLED") if cancelled?
         # The active session slot's `$NAME` that `plan.wire_bytes` shipped LITERALLY, drained
         # here because this tool IS the run summary for a synchronous send. Without it the only
         # trace was a `Log.warn` line on the server's STDERR, which no agent reads — so a call
@@ -565,8 +569,9 @@ module Gori
       # The FAITHFUL field list a field-native send put on the wire, in order, pseudo-headers
       # and duplicates included — the report `H2Engine.field_dump` used to carry by being the
       # stored head. It moved here because History and the Repeater have to hold a REPLAYABLE
-      # projection (see `replayable_field_head`), and that projection cannot show a duplicate
-      # `:method` or a `:scheme` disagreeing with the connection. `history_head_projected`
+      # projection (see `Repeater::SendPersistence.replayable_request`), and that projection
+      # cannot show a duplicate `:method` or a `:scheme` disagreeing with the connection.
+      # `history_head_projected`
       # says so out loud, so an agent reading the recorded flow back never mistakes the
       # projection for the wire.
       private def emit_sent_h2_fields(j : JSON::Builder, h2_fields : Array({String, String})?) : Nil
@@ -753,77 +758,22 @@ module Gori
                                         *, sni : String? = nil, auto_cl : Bool = false,
                                         tls_preset : String? = nil) : {Int64?, Bool}
         return {nil, false} unless save
-        port_suffix = ((built.scheme == "https" && built.port == 443) ||
-                       (built.scheme == "http" && built.port == 80)) ? "" : ":#{built.port}"
-        target_url = "#{built.scheme}://#{built.host}#{port_suffix}"
         # Preserve the original source flow for a flow repeater; otherwise link
         # the Repeater tab to the newly recorded History evidence.
         flow_id = int(h, "flow_id") || recorded_flow_id
-        # Masked for the PROBE SCAN only, exactly like `masked_req` below — never for the row.
-        # `target` is a WIRE field: it is the dial tuple, and it supplies the TLS ClientHello
-        # ServerName whenever `sni` is absent. See `stored_request` for the seam; the two extra
-        # facts that make masking
-        # it destructive rather than merely cosmetic:
-        #
-        #   * The two ends do not share a vocabulary. `mask_secrets` resolves against
-        #     `Env.masking_vars` — env vars PLUS every session-binding value currently held —
-        #     while the send path resolves with `Env.effective_vars` (env vars only) and
-        #     `Repeater::Plan` additionally runs `refuse_unresolved(Env.unresolved(s,
-        #     deferred: nil))`, which refuses a DECLARED binding name outright. So a binding
-        #     value masked in here mints a `$NAME` that can never resolve on any send path,
-        #     from any surface.
-        #   * The author's string is then unrecoverable. An author who sent
-        #     `http://prod-edge-07.internal.example.com:19752/vhost` while an extract rule had
-        #     bound `$edge` to `prod-edge-07` got `http://$edge.internal.example.com:19752` in
-        #     the row, every re-send refused with "unresolved env $edge", and a prescription
-        #     ("set the env var") that would put a GUESSED hostname in the ClientHello of a
-        #     vhost test. A one-way door, and this projection existed for the store alone —
-        #     the reply below never carried a target field at all.
-        #
-        # `name` keeps its mask (further down): a session name is a TUI tab caption and never
-        # becomes bytes an origin sees. The rule is "does this field reach the wire", not "did
-        # the operator type it". Same resolution as the sibling seam in `Tools#create_repeater`.
-        masked_target = Env.mask_secrets(target_url)
-        # Same reason as `record_outbound_request`: a saved session is a REPLAY source before
-        # it is a display, and no surface can send `H2Engine.field_dump` back. Saving the dump
-        # produced a session (`#5 [H2] fieldnative`) that could never be sent again from any
-        # surface — the CLI refused it with the pseudo-header message and MCP read its method
-        # back as `":method:"`. See `replayable_field_head`.
-        saved_bytes = replayable_field_head(h2_fields, built, built.bytes)
-        # Masked for the PROBE scan and the reply, NOT for the row. The saved session is a
-        # REPLAY SOURCE (the sentence just above), and storing the masked projection made it
-        # a replay of different bytes: `flow_id` is set here, the TUI reads that as evidence,
-        # and `RepeaterView#evidence?` sends `$NAME` literally — so this row went out one way
-        # from the TUI and another from MCP. Same seam as `Tools#stored_request`.
-        masked_req = Env.mask_secrets(String.new(saved_bytes))
-        # Prefer the Plan's expanded SNI (what the send actually used); fall back through
-        # send_sni so an explicit arg still wins. Bare `send_sni(h)` dropped the stored SNI
-        # because it passed no `stored` argument.
-        effective_sni = sni.presence || send_sni(h)
-        repeater_id = store.insert_repeater(
-          target: target_url,
-          request: saved_bytes,
-          http2: http2,
-          auto_cl: auto_cl,
-          flow_id: flow_id,
-          position: store.next_repeater_position,
-          # The SNI the send actually used, so re-sending the saved row reproduces the same
-          # ClientHello. Through the effective value above, not a hard-coded nil / arg-only
-          # read that silently dropped the source's SNI.
-          sni: effective_sni,
-          # Same rule for the fingerprint (#844), and the same reason: a tab saved from a send
-          # that presented Chrome's shape has to present it again when it is replayed, or the
-          # saved row is a different request from the one that produced the response beside it.
-          #
-          # UNGUARDED by scheme, deliberately, where the reply below is guarded. The two answer
-          # different questions: the reply says what THIS SEND did (and a plaintext send made no
-          # ClientHello, so naming one would be a lie), while the row says what this TAB is set
-          # to — which the operator chose, survives a retarget to https://, and is exactly what
-          # the TUI's muted `␣Pt:` chip reports as "set, and currently doing nothing" (P4).
-          tls_preset: tls_preset
-        )
-        return {nil, false} unless repeater_id > 0
+        # These projections are shared with the CLI save path so both create a replayable row
+        # and keep the original dial target and request bytes intact.
+        # Prefer the Plan's expanded SNI (what this send actually used); the fallback retains
+        # an explicit argument. Calling bare `send_sni(h)` as the only source dropped a
+        # stored SNI because it passed no stored value.
+        persisted = Repeater::SendPersistence.persist(store, built.scheme, built.host, built.port,
+          built.bytes, http2, auto_cl, flow_id, result, h2_fields,
+          sni: sni.presence || send_sni(h), tls_preset: tls_preset)
+        repeater_id = persisted.id
+        return {nil, false} unless repeater_id
 
+        # Issue links come from MCP-only arguments, so keep that relation in this adapter;
+        # the shared seam persists the Repeater row and its response evidence.
         store.add_link(Store::LinkOwnerKind::Issue, issue_id,
           Store::LinkRefKind::Repeater, repeater_id) if issue_id
         if (name = str(h, "name")) && !name.empty?
@@ -834,53 +784,11 @@ module Gori
           store.set_repeater_name(repeater_id, Env.mask_secrets(name))
         end
 
-        # Persist whatever was received even when framing failed after the
-        # response head. This keeps partial evidence and enables paged reads.
-        # `saved_bytes` IS this row's request — the insert above wrote exactly them a few
-        # lines ago and nothing has edited them since — so the digest (Schema V28) records a
-        # pair that genuinely happened. A later `update_repeater` from any surface then reads
-        # as the drift it is.
-        # Its commit answer rides back beside the id: a saved row whose response did not land is
-        # still the saved session, but it is no place to page this response's body from.
-        response_saved = store.update_repeater_response(repeater_id, result.head, result.body,
-          result.error, result.duration_us,
-          request_sha256: Evidence.request_digest(saved_bytes))
         if result.response
-          probe_scan_saved_repeater(repeater_id, masked_target, masked_req, http2, flow_id,
+          probe_scan_saved_repeater(repeater_id, persisted.masked_target, persisted.masked_request, http2, flow_id,
             result.head, result.body, result.duration_us)
         end
-        {repeater_id, response_saved}
-      end
-
-      # The bytes to PERSIST for a field-native h2 send: `HeadCodec.synth_request`'s h1
-      # projection plus the body, not `H2Engine.field_dump`.
-      #
-      # The dump is the faithful REPORT of the fields and it stays that, in `sent_h2_fields`
-      # on this call's own result. It must not be the stored head, because History and the
-      # Repeater are not only a display — they are a REPLAY SOURCE, and the dump's first line
-      # is `:method: POST`, not a request line. Replaying such a row over h2 was refused with
-      # gori blaming the operator for bytes gori itself wrote; over `--http1` it put a request
-      # with NO REQUEST LINE on the wire (every header shifted by one) and reported `200`; and
-      # MCP's own echo read the row back as `method: ":method:", target: "POST"`.
-      #
-      # The projection is lossy — a duplicate pseudo and `:scheme` do not survive it, which is
-      # exactly what `field_dump` exists to show — but it is lossy in the one direction that
-      # keeps the evidence usable, and it is the same projection the h2 CAPTURE path stores
-      # for every intercepted h2 request. Evidence gori writes must be replayable by gori.
-      # Nil `fields` means this was never a field-native send, so the bytes are already the
-      # operator's own text and pass through — that way no caller needs a branch of its own.
-      private def replayable_field_head(fields : Array({String, String})?,
-                                        built : RequestBuilder::Built, wire : Bytes) : Bytes
-        return wire unless fields
-        authority = Proxy::H2::HeadCodec.pseudo(fields, ":authority") ||
-                    "#{built.host}:#{built.port}"
-        head = Proxy::H2::HeadCodec.synth_request(fields, authority)
-        _, body = split_wire_request(wire)
-        return head if body.nil? || body.empty?
-        joined = Bytes.new(head.size + body.size)
-        head.copy_to(joined)
-        body.copy_to(joined + head.size)
-        joined
+        {repeater_id, persisted.response_saved?}
       end
 
       # `wire` — not `built.bytes` — is the evidence: History is what `run show --format raw`
@@ -900,10 +808,12 @@ module Gori
       private def record_outbound_request(built : RequestBuilder::Built, wire : Bytes, http2 : Bool,
                                           h2_fields : Array({String, String})? = nil,
                                           source_ref : String? = nil) : Int64
-        head, body = split_wire_request(replayable_field_head(h2_fields, built, wire))
+        head, body = split_wire_request(Repeater::SendPersistence.replayable_request(
+          h2_fields, built.host, built.port, wire))
         # Field-native: `head` is the h1 PROJECTION, not the pseudo-explicit dump, so the
         # method/target COLUMNS (list_history / QL / sitemap read them) come off the FIELDS a
-        # receiver routes on and agree with the head text. See `replayable_field_head`.
+        # receiver routes on and agree with the head text. See
+        # `Repeater::SendPersistence.replayable_request`.
         if fields = h2_fields
           method = Repeater::H2Engine.pseudo_field(fields, ":method") || ""
           target = Repeater::H2Engine.pseudo_field(fields, ":path") || "/"
@@ -1127,6 +1037,7 @@ module Gori
       # or the 2xx of an RFC 8441 extended CONNECT (#733).
       @[Tool("send_websocket", gated: true, agent_action: true, env_refresh: true, permission: "send")]
       private def send_websocket(h) : Result
+        return err("request cancelled", "CANCELLED") if cancelled?
         repeater_id = int(h, "repeater_id")
         return Result.new(id_error(h, "repeater_id"), is_error: true) unless repeater_id
         repeater = store.get_repeater(repeater_id)
@@ -1235,12 +1146,14 @@ module Gori
         if reason = plan.refusal
           return sandbox_blocked(reason, host, "repeater_id")
         end
+        return err("request cancelled", "CANCELLED") if cancelled?
         # Scope passed — now it's safe to persist the issue link.
         if issue_id
           store.add_link(Store::LinkOwnerKind::Issue, issue_id,
             Store::LinkRefKind::Repeater, repeater_id)
         end
-        result = plan.send_ws(out_messages, idle, keep_key)
+        result = plan.send_ws(out_messages, idle, keep_key, cancel_signal)
+        return err("request cancelled", "CANCELLED") if cancelled?
 
         # ONLY when the origin ANSWERED (see `WsEngine::Result#answered?`). This surface wrote
         # unconditionally, so one `send_websocket` at a session whose target had moved (or an
@@ -1730,47 +1643,42 @@ module Gori
 
         tool j, "send_request",
           "Send/resend an HTTP request to its origin and return the response. " \
-          "ACTIVE: makes a real outbound request from this host. Either pass " \
-          "`flow_id` to resend a captured flow byte-exact, `repeater_id` to execute " \
-          "a saved HTTP repeater (use send_websocket for WS repeaters), OR give an " \
-          "absolute `url` with optional method/headers/body, or a verbatim `raw` request. " \
-          "A stored source is EXCLUSIVE: `flow_id`/`repeater_id` passed together with " \
-          "url/method/headers/body/body_base64/raw/raw_base64/h2_fields (or with each other) is " \
-          "REFUSED as INVALID_ARGUMENT — `details.conflicting_fields` names them — and NOTHING is " \
-          "sent, because those arguments describe a second, different request. To edit a stored " \
-          "request, read it with get_flow/get_repeater_context and send it back through url/raw. " \
-          "Per-send modifiers (http2, sni, tls_preset, verbatim, timeout_ms, insecure, " \
-          "reframe_grpc) DO combine with a source, and keep_request_line with flow_id. The result " \
-          "always includes `effective_request` (the scheme/host/port/method/target/" \
-          "http_version actually sent). " \
-          "Host + Content-Length are auto-added when omitted on the url path. " \
-          "Match & Replace rules are NOT applied unless apply_rules:true. " \
-          "On a failed send, branch on `retryable`: PROTOCOL_ERROR (gori proved the message " \
-          "malformed) and REQUEST_TRUNCATED (the origin answered — status/head/body are all " \
-          "here — before the request body finished, which RFC 9113 §8.1 permits) are both " \
-          "final; re-sending a truncated body puts the whole body back on the wire." do |s|
+          "ACTIVE: makes a real outbound request from this host. Pass `flow_id` to resend a " \
+          "captured flow byte-exact, `repeater_id` to execute a saved HTTP repeater (send_websocket " \
+          "for WS), OR an absolute `url` with optional method/headers/body, or a verbatim `raw`. " \
+          "A stored source is EXCLUSIVE: combined with url/method/headers/body/body_base64/raw/" \
+          "raw_base64/h2_fields (or each other) it is REFUSED as INVALID_ARGUMENT " \
+          "(`details.conflicting_fields`) and nothing is sent; to edit one, read it with " \
+          "get_flow/get_repeater_context and send it back through url/raw. Per-send modifiers " \
+          "(http2, sni, tls_preset, verbatim, timeout_ms, insecure, reframe_grpc) combine with a " \
+          "source, keep_request_line with flow_id. The result includes `effective_request` (what " \
+          "was actually sent). The url path adds Host + Content-Length when omitted. Match & " \
+          "Replace rules apply only with apply_rules:true. On a failed send, branch on " \
+          "`retryable`: PROTOCOL_ERROR (gori proved the message malformed) and REQUEST_TRUNCATED " \
+          "(the origin answered before the body finished, RFC 9113 §8.1; the response is here) " \
+          "are final." do |s|
           s.field "flow_id", intprop("resend a captured flow by id (no url needed; like the TUI Repeater)")
-          s.field "keep_request_line", boolprop("flow_id only: send the STORED request line as captured instead of rewriting an absolute-form line (GET http://h/p) to origin-form (GET /p). Default false, because a proxy capture's absolute form is a proxy artifact — but on a flow recorded from a direct send it is the routing / cache-poisoning / SSRF payload. `request_line_rewritten:true` comes back whenever the rewrite fired")
-          s.field "repeater_id", intprop("execute a saved HTTP repeater by id (no url needed; respects its target/http2/sni/auto-Content-Length). A session that never came from a flow and still holds §…§ markers is REFUSED — the Repeater tab renders them and this path cannot")
+          s.field "keep_request_line", boolprop("flow_id only: send the STORED request line instead of rewriting an absolute-form line (GET http://h/p) to origin-form (GET /p). Default false: a proxy capture's absolute form is a proxy artifact, but on a flow from a direct send it is the routing / cache-poisoning / SSRF payload. `request_line_rewritten:true` reports a rewrite")
+          s.field "repeater_id", intprop("execute a saved HTTP repeater by id (no url needed; respects its target/http2/sni/auto-Content-Length). A session not from a flow that still holds §…§ markers is REFUSED: only the Repeater tab renders them")
           s.field "url", strprop("absolute URL incl. scheme+host, e.g. https://api.example.com/v1/x (required unless flow_id/repeater_id is given)")
           s.field "method", strprop("HTTP method (default GET)")
           s.field "headers", header_map_prop("request headers: a name->value map, or the [{\"name\":\"Cookie\",\"value\":\"a=1\"}] list the session-slot and authorize tools take")
           s.field "body", strprop("request body, sent as-is")
-          s.field "body_base64", strprop("request body as base64 — the byte-exact form, and it works on BOTH the url/HTTP1.1 path and the h2_fields path. Use it whenever the body is not UTF-8 (binary, protobuf/gRPC, gzip, a multipart upload, an overlong-UTF-8 traversal payload) or carries an octet a JSON string cannot (0x00, 0x80-0xFF, invalid UTF-8) — 'body' is sent as its UTF-8 encoding. Wins over 'body' and gets no project env expansion. A declared session binding or $GEN token still resolves at the send seam, in the body as well as the head (and Content-Length follows it) — pass verbatim:true if the bytes must reach the origin exactly as given")
+          s.field "body_base64", strprop("request body as base64, the byte-exact form, on the url path and the h2_fields path alike. Use it for a non-UTF-8 body (binary, protobuf/gRPC, gzip, multipart, overlong UTF-8) or an octet a JSON string cannot carry (0x00, 0x80-0xFF); 'body' is sent as UTF-8. Wins over 'body'; no project env expansion, but a session binding or $GEN token still resolves (Content-Length follows) unless verbatim:true")
           s.field "raw", strprop("verbatim raw HTTP/1.1 request; overrides method/headers/body (scheme/host/port still come from url)")
-          s.field "raw_base64", strprop("the whole raw HTTP/1.1 request as base64 — the byte-exact form, and the only way to send a latin-1/invalid-UTF-8 header value or a binary body (a JSON string is sent as its UTF-8 encoding, so 'é' goes out as 2 bytes). Implies verbatim: no token expansion, no bare-LF promotion")
-          s.field "verbatim", boolprop("send the bytes EXACTLY as stored/given: no token expansion — project env vars, session bindings, or generators, so an $ENV.KEY, $BIND.NAME, or $GEN.UUID token (bare syntax: $KEY / $NAME) stays literal on the wire — no bare-LF→CRLF promotion in the head, no Content-Length resync, and on HTTP/2 no field-name lowercasing (default false). Nothing interprets the token grammar at all, so an escape (`$$ENV.KEY`, or `$$name` in bare syntax) is NOT consumed either — write the literal token. The active session slot's header overlay still applies: it answers a different question (send this AS WHOM). Applies to 'raw' AND to a repeater_id replay, matching `gori run repeater send --verbatim` (a flow_id replay is byte-exact with or without it; the flag adds h2 field-name case there). Use for desync/smuggling tests where a bare LF header terminator IS the payload, or when a literal token in the stored request is the payload — an app's own $where, $filter or $IFS, which under the namespaced syntax is never a reference anyway and needs no flag. It also waives the §…§ refusal on a repeater_id replay: a stored § stays literal instead of being refused as an unrendered marker")
-          s.field "reframe_grpc", boolprop("HTTP/2 only: recompute the gRPC 5-byte length prefix over the body actually being sent (default FALSE). With the default, a body you edited to a different length keeps the prefix it was captured/authored with — which is what you want when a deliberately-wrong length prefix IS the test, and what a byte-exact replay means. Set TRUE when you edited a unary gRPC message and want the origin to accept the call. Applies to a single message; a client-streaming body and grpc-web-text are left alone. Reflected in effective_request. Mirrors CLI `gori run repeater send --reframe-grpc`.")
+          s.field "raw_base64", strprop("the whole raw HTTP/1.1 request as base64: the byte-exact form, and the only way to send a latin-1/invalid-UTF-8 header or a binary body ('é' in a JSON string goes out as 2 bytes). Implies verbatim")
+          s.field "verbatim", boolprop("send the bytes EXACTLY as stored/given (default false): no token expansion ($ENV.KEY, $BIND.NAME, $GEN.UUID, bare $KEY/$NAME stay literal, and a $$ escape is not consumed either), no bare-LF→CRLF promotion, no Content-Length resync, no h2 field-name lowercasing. The active session slot's header overlay still applies. Applies to 'raw' and to a repeater_id replay (like `gori run repeater send --verbatim`), where it also sends a stored § literally instead of refusing it; a flow_id replay is byte-exact anyway. For desync/smuggling tests where a bare LF IS the payload, or a literal token in the stored request is")
+          s.field "reframe_grpc", boolprop("HTTP/2 only: recompute the gRPC 5-byte length prefix over the body being sent (default FALSE). By default an edited body keeps its captured/authored prefix: a byte-exact replay, and the test when a wrong prefix is the point. Set TRUE after editing a unary message the origin should accept. Single messages only; client-streaming and grpc-web-text bodies are left alone. Reflected in effective_request")
           s.field "h2_fields", h2fieldsprop
           s.field "http2", boolprop("use real HTTP/2; defaults to the flow's version when flow_id is set)")
           s.field "timeout_ms", intprop("per-operation connect + idle (read/write) timeout in milliseconds; a timeout surfaces as a network-error result with error_kind (1-600000)")
-          s.field "sni", strprop("TLS SNI override, independent of the Host header — the vhost-confusion / domain-fronting test (mirrors CLI --sni). OVERRIDES the SNI a flow_id/repeater_id source carries, the way `gori run repeater <flow-id> --sni` does; omit to keep the stored one.")
-          s.field "tls_preset", strprop("TLS fingerprint for THIS send: shape the ClientHello like #{Settings::TLS_PRESET_NAMES.join(" | ")} instead of gori's own, for one send, without touching the settings.json outbound_tls table. Use it to ask whether an origin answers differently by handshake — two sends to one host differing only here dial two separate SSL contexts. The destination's client certificate, protocol range and permissive flag still apply. OVERRIDES the preset a repeater_id source carries (pass \"\" to drop it for this send). An APPROXIMATION of that client's hello, NOT a byte-exact JA3 match — extension order and GREASE placement are OpenSSL's; `gori settings tls-fingerprint HOST --preset NAME` prints the JA3/JA4 that actually goes out. https targets only")
+          s.field "sni", strprop("TLS SNI override, independent of the Host header (vhost confusion / domain fronting). OVERRIDES a flow_id/repeater_id source's SNI; omit to keep it.")
+          s.field "tls_preset", strprop("TLS fingerprint for THIS send: shape the ClientHello like #{Settings::TLS_PRESET_NAMES.join(" | ")} instead of gori's own (settings.json untouched) — to ask whether an origin answers differently by handshake. The destination's client certificate, protocol range and permissive flag still apply. OVERRIDES a repeater_id source's preset (\"\" drops it). An approximation, NOT a byte-exact JA3; `gori settings tls-fingerprint HOST --preset NAME` prints what goes out. https only")
           s.field "insecure", boolprop("skip upstream TLS verification (default false)")
           s.field "apply_rules", boolprop("apply the project's enabled Match & Replace rules (REQUEST side only) to the outgoing request before sending, matching the live proxy; default false — direct sends are byte-exact")
           s.field "record_history", boolprop("record the outbound request and response in History for audit/evidence (default true)")
           s.field "save_as_repeater", boolprop("save this request and its response to the Repeater workbench (default false)")
-          s.field "include_sensitive_headers", boolprop("return Cookie/Set-Cookie/Authorization/API-key response values instead of [REDACTED] (default false). `include_sensitive` — the name the other redacting tools use — is accepted as an alias")
+          s.field "include_sensitive_headers", boolprop("return Cookie/Set-Cookie/Authorization/API-key response values instead of [REDACTED] (default false); `include_sensitive` is an alias")
           s.field "include_sensitive", boolprop("alias for include_sensitive_headers, spelled the way get_flow/compare_flows/get_repeater_context spell it")
           s.field "body_mode", enumprop("how much response body to inline. Default: up to #{AUTO_BODY_BYTES} bytes when the response is recorded (record_history) or saved, a longer body cut with a `more` pointer to get_response_body_chunk; full (the default when neither) inlines up to #{Serialize::MAX_TEXT}", BODY_MODES)
           s.field "max_body_bytes", intprop("cap inlined response-body bytes (clamped to 65536)")

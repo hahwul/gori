@@ -24,7 +24,7 @@ module Gori
   # - `gori run <sub>`              → non-interactive CLI (see Gori::CLI::Run)
   # - `gori mcp`                    → MCP (Model Context Protocol) server over stdio
   # - `gori wizard`                 → interactive first-run setup wizard (bind/theme)
-  # - `gori tutorial`               → guided TUI tour (navigation, menu, palette, edit)
+  # - `gori tutorial`               → guided TUI tour (navigation, menu, palette, edit, traffic)
   # - `gori update`                 → channel-aware self-update (binary / brew / snap / AUR)
   module CLI
     def self.run(argv : Array(String) = ARGV) : Nil
@@ -175,7 +175,7 @@ module Gori
       puts "  ca        Print the root CA path, or regenerate it (see gori ca --help)"
       puts "  run       Non-interactive CLI: capture, history, show, repeater, issues, project"
       puts "  wizard    Interactive setup wizard (bind, theme, companion) — also runs on first launch"
-      puts "  tutorial  Guided TUI tour with try-it steps (nav, menu, palette, edit)"
+      puts "  tutorial  Guided TUI tour with try-it steps (nav, menu, palette, edit, proxy, intercept)"
       puts "  mcp       Start an MCP server over stdio (AI/tool integration)"
       puts "  update    Update gori (channel-aware: binary download or package manager)"
       puts ""
@@ -448,9 +448,10 @@ module Gori
       parser = OptionParser.new do |p| # same reasoning as run_wizard's: no silent no-ops
         p.banner = "Usage: gori tutorial\n" \
                    "  Interactive tour of gori's TUI on a mock UI: tab/pane navigation,\n" \
-                   "  the command palette (^P), the action menu (space), and edit mode\n" \
-                   "  (READ/INS). Each lesson asks you to try the key; a final practice\n" \
-                   "  step covers all four moves, then a first-session checklist.\n" \
+                   "  the command palette (^P), the action menu (space), edit mode\n" \
+                   "  (READ/INS), the proxy and CA, capture and intercept. Each lesson asks\n" \
+                   "  you to try the key; a practice step covers the moves, then help,\n" \
+                   "  quitting and a first-session checklist.\n" \
                    "  Also offered at the end of `gori wizard`; safe to re-run anytime."
         p.on("-h", "--help", "Show this help") { puts p; exit 0 }
         p.invalid_option { |flag| abort CLI.unknown_option_message("gori tutorial", flag, p) }
@@ -464,11 +465,16 @@ module Gori
       Tui::Theme.load_custom           # honour user themes so the mock matches the real UI
       Tui::Theme.apply(Settings.theme) # render the tour in the persisted theme
       term = Tui.open_terminal("run the tutorial directly, not under CI or a detached/background job")
-      with_tui_terminal(term) do
+      finished = with_tui_terminal(term) do
         term.enable_enhanced_keyboard # Kitty disambiguation (mirrors the wizard)
         term.enable_mouse             # always on for the tour: Prev/Next buttons + mock clicks
-        Tui::Tutorial.new(term).run
+        tour = Tui::Tutorial.new(term)
+        tour.run
+        tour.finished?
       end
+      # Finish drops back to the shell, and a silent prompt reads like a crash (#1382). Only on
+      # Finish: esc/^C is someone leaving, not someone asking what comes next.
+      puts "next: run `gori` to open a project" if finished
     end
 
     private def self.run_update(args : Array(String)) : Nil

@@ -35,6 +35,53 @@ module Gori::Proxy
     CONNECT_TIMEOUT = 30.seconds
     IO_TIMEOUT      = 30.seconds
 
+    # Run an operation while polling a cooperative stop predicate and closing only the IO it
+    # owns when that predicate becomes true. The watcher is joined before returning so a
+    # cancelled send cannot leave a fiber behind. TLS dials use this on the underlying socket
+    # while OpenSSL performs its handshake; send engines use it on the completed SSL socket.
+    class CancelWatch
+      def initialize(@io : IO, @cancel : Proc(Bool))
+        @stop = Channel(Nil).new(1)
+        @joined = Channel(Nil).new(1)
+        spawn do
+          loop do
+            if @cancel.call
+              @io.close rescue nil
+              break
+            end
+            select
+            when @stop.receive
+              break
+            when timeout(10.milliseconds)
+            end
+          end
+        rescue
+          # A broken predicate cannot safely leave an outbound operation running.
+          @io.close rescue nil
+        ensure
+          @joined.send(nil)
+        end
+      end
+
+      def stop : Nil
+        @stop.send(nil)
+        @joined.receive
+      end
+    end
+
+    def self.watch_cancel(io : IO, cancel : Proc(Bool)?) : CancelWatch?
+      cancel.try { |predicate| CancelWatch.new(io, predicate) }
+    end
+
+    def self.with_cancel(io : IO, cancel : Proc(Bool)?, & : -> T) : T forall T
+      watcher = watch_cancel(io, cancel)
+      begin
+        yield
+      ensure
+        watcher.try(&.stop)
+      end
+    end
+
     # Dial the origin (directly, or via the configured upstream proxy's CONNECT
     # tunnel). The returned socket is positioned at the start of the origin stream
     # either way, so callers (dial_tls / the request forwarder) are unaffected.
@@ -1185,9 +1232,10 @@ module Gori::Proxy
                       connect_timeout : Time::Span = Settings.connect_timeout,
                       io_timeout : Time::Span = Settings.io_timeout,
                       *, overrides : Gori::HostOverrides? = nil,
-                      pin : String? = nil, tls_preset : String? = nil) : OpenSSL::SSL::Socket::Client?
+                      pin : String? = nil, tls_preset : String? = nil,
+                      cancel : Proc(Bool)? = nil) : OpenSSL::SSL::Socket::Client?
       dial_tls_result(host, port, verify, alpn, sni, connect_timeout, io_timeout,
-        overrides: overrides, pin: pin, tls_preset: tls_preset)[0]
+        overrides: overrides, pin: pin, tls_preset: tls_preset, cancel: cancel)[0]
     end
 
     # Like `dial_tls` but also reports WHY the dial failed (see DialError) as the second
@@ -1198,7 +1246,8 @@ module Gori::Proxy
                              io_timeout : Time::Span = Settings.io_timeout,
                              *, overrides : Gori::HostOverrides? = nil,
                              pin : String? = nil,
-                             tls_preset : String? = nil) : {OpenSSL::SSL::Socket::Client?, DialError?}
+                             tls_preset : String? = nil,
+                             cancel : Proc(Bool)? = nil) : {OpenSSL::SSL::Socket::Client?, DialError?}
       tcp, dial_err = dial_result(host, port, connect_timeout, io_timeout, overrides: overrides, pin: pin,
         origin_scheme: "https")
       return {nil, dial_err || DialError::ORIGIN_UNREACHABLE} unless tcp
@@ -1217,8 +1266,15 @@ module Gori::Proxy
       # construction — which is the whole safety property, because two sends with different
       # fingerprints sharing one SSL_CTX would answer the A/B with one handshake.
       tls_policy = Settings.outbound_tls_for(host, tls_preset)
-      ssl = OpenSSL::SSL::Socket::Client.new(tcp, context: client_context(verify, alpn, tls_policy),
-        sync_close: true, hostname: sni || host)
+      # TCP establishment stays outside the watcher: it has its own connect timeout and dial
+      # result. During the handshake, close the transport socket beneath any proxy TLS wrapper
+      # rather than calling SSL.close while OpenSSL is in SSL_connect. Once the SSL socket has
+      # been constructed, callers install their normal watcher on that socket for subsequent IO.
+      handshake_io = SocketTuning.underlying_socket(tcp) || tcp
+      ssl = with_cancel(handshake_io, cancel) do
+        OpenSSL::SSL::Socket::Client.new(tcp, context: client_context(verify, alpn, tls_policy),
+          sync_close: true, hostname: sni || host)
+      end
       ssl.sync = true
       {ssl, nil}
     rescue ex

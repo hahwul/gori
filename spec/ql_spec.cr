@@ -868,6 +868,16 @@ describe "Gori::Store#search (QL)" do
       Gori::QL.field_shaped?("dur", "5").should be_true
     end
 
+    it "treats id:N / flow:N / flow_id:N as field-shaped, keeping api:3000 as host:port" do
+      Gori::QL.field_shaped?("id", "1").should be_true
+      Gori::QL.field_shaped?("flow", "1").should be_true
+      Gori::QL.field_shaped?("flow_id", "1").should be_true
+      Gori::QL.field_shaped?("api", "3000").should be_false
+      Gori::QL.fields_used("id:1").map(&.name).should eq(["id"])
+      Gori::QL.fields_used("flow:42").map(&.name).should eq(["flow"])
+      Gori::QL.fields_used("flow_id:100").map(&.name).should eq(["flow_id"])
+    end
+
     # The SHAPE question is asked without the operator, and that division is load-bearing:
     # `status~404` names a field QL has under `:` and not under `~`, so the term is DROPPED and
     # the bar owes it the muted colour. Asking the shape question with the operator made the
@@ -1090,6 +1100,40 @@ describe "Gori::Store#search (QL)" do
     it "allows a query with at least one valid term" do
       f = Gori::QL.parse("host:beta status:>=foo")
       Gori::QL.reject_empty?("host:beta status:>=foo", f).should be_false
+    end
+  end
+
+  describe ".reject_empty_reason" do
+    it "reports which term is wrong and why for an invalid status query with unclosed paren" do
+      reason = Gori::QL.reject_empty_reason("status:>=abc AND (")
+      reason.should_not be_nil
+      reason.not_nil!.should contain("`status:>=abc`")
+      reason.not_nil!.should contain("status expects a number or class (e.g. 200, 5xx)")
+    end
+
+    it "reports which term is wrong and why for other dropped field terms" do
+      Gori::QL.reject_empty_reason("dur:>abc AND (").not_nil!.should contain("`dur:>abc`")
+      Gori::QL.reject_empty_reason("dur:>abc AND (").not_nil!.should contain("duration expects a number or unit")
+      Gori::QL.reject_empty_reason("size:>abc AND (").not_nil!.should contain("`size:>abc`")
+      Gori::QL.reject_empty_reason("size:>abc AND (").not_nil!.should contain("size expects a number")
+      Gori::QL.reject_empty_reason("proto:xyz").not_nil!.should contain("proto expects #{Gori::QL::PROTO_VALUES.join(", ")}")
+      Gori::QL.reject_empty_reason("cache:xyz").not_nil!.should contain("cache expects #{Gori::QL::CACHE_VALUES.join(", ")}")
+      Gori::QL.reject_empty_reason("status~5..").not_nil!.should contain("regex matching (`~`) not supported for `status`")
+      Gori::QL.reject_empty_reason("resp.status:200").not_nil!.should contain("side prefix not supported on status")
+      Gori::QL.reject_empty_reason("req.status:200").not_nil!.should contain("side prefix not supported on status")
+      Gori::QL.reject_empty_reason("id:1").not_nil!.should contain("QL has no `id:` field")
+    end
+
+    it "asserts the src message names every FlowSource token" do
+      reason = Gori::QL.dropped_term_reason("src:bad").not_nil!
+      Gori::FlowSource::Kind.tokens.each do |token|
+        reason.should contain(token)
+      end
+      reason.should contain("gori")
+    end
+
+    it "returns nil when there are no terms to diagnose" do
+      Gori::QL.reject_empty_reason("AND (").should be_nil
     end
   end
 

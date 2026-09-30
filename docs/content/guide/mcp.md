@@ -89,9 +89,9 @@ By default `gori mcp` advertises every tool, so an agent can reach the whole wor
 
 | Start with | Tools | `tools/list` | Tokens | For |
 | --- | ---: | ---: | ---: | --- |
-| `gori mcp` | 195 | ~243 KB | ~62k | Everything (the default) |
+| `gori mcp` | 195 | ~237 KB | ~61k | Everything (the default) |
 | `--read-only` | 64 | ~75 KB | ~19k | Read tools and pure compute; no live requests |
-| `--tools=@recon` | 39 | ~59 KB | ~15k | Read and map the capture, scan it passively, replay a request, record issues and notes |
+| `--tools=@recon` | 39 | ~58 KB | ~15k | Read and map the capture, scan it passively, replay a request, record issues and notes |
 | `--tools=@recon --read-only` | 29 | ~42 KB | ~11k | `@recon` minus what `--read-only` disables |
 | `--tools=@minimal` | 18 | ~28 KB | ~7k | Read History, flows and the current TUI context; talk to the operator |
 
@@ -350,7 +350,7 @@ Every tool in `tools/list` carries `annotations.readOnlyHint`, so a client can t
 
 ## One Call at a Time
 
-Tools run one at a time, in the order they arrive; a fuzz or a slow `send_request` does not overlap with the next call, and responses come back in order. Two messages are answered immediately regardless: `ping`, so a client's liveness probe never stalls behind a long call and declares the server dead, and `notifications/cancelled`, which suppresses the response to a request you stopped waiting for. Cancelling does not abort work already in flight: an in-progress request finishes, its answer is simply not sent.
+Tools run one at a time, in the order they arrive; a fuzz or a slow `send_request` does not overlap with the next call, and responses come back in order. Two messages are handled immediately regardless: `ping`, so a client's liveness probe never stalls behind a long call, and `notifications/cancelled`, which suppresses the response to a request you stopped waiting for. Cancelling `send_request` or `send_websocket` closes its active socket so a silent origin cannot hold the worker until the timeout; tools with cooperative cancellation stop at their next check. Other in-progress calls finish before the worker takes the next queued call.
 
 ## Why an MCP Seam
 

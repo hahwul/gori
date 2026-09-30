@@ -11,9 +11,14 @@ module Gori::CLI::Run
   def self.repeater_json_for_spec(result : Repeater::Result,
                                   response_write : WriteOutcome? = nil,
                                   history_write : WriteOutcome? = nil,
-                                  recorded_flow_id : Int64? = nil) : String
+                                  recorded_flow_id : Int64? = nil,
+                                  saved_repeater_id : Int64? = nil,
+                                  repeater_write : WriteOutcome? = nil,
+                                  repeater_response_write : WriteOutcome? = nil) : String
     repeater_json(result, nil, false, recorded_flow_id, nil,
-      response_write: response_write, history_write: history_write)
+      response_write: response_write, history_write: history_write,
+      saved_repeater_id: saved_repeater_id, repeater_write: repeater_write,
+      repeater_response_write: repeater_response_write)
   end
 
   def self.ws_result_json_for_spec(id : Int64, result : Repeater::WsEngine::Result,
@@ -177,6 +182,31 @@ describe "gori run repeater send --format json — did the post-send writes land
     ws_body = src[/private def self\.cmd_repeater_send_ws\(.*?\n      end\n/m].not_nil!
     ws_body.index("persist_repeater_response(id, result.handshake_head").not_nil!
       .should be < ws_body.index("emit_ws_result(id, result, format").not_nil!
+  end
+end
+
+describe "gori run send/repeater --save-as-repeater --format json" do
+  ok = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n".to_slice
+
+  it "returns the new session id and both write outcomes in the single result object" do
+    j = JSON.parse(Gori::CLI::Run.repeater_json_for_spec(result_of(ok, "ok".to_slice),
+      saved_repeater_id: 17_i64,
+      repeater_write: Gori::CLI::Run::WriteOutcome.new(nil),
+      repeater_response_write: Gori::CLI::Run::WriteOutcome.new(nil)))
+
+    j["saved_repeater_id"].as_i64.should eq(17)
+    j["repeater_saved"].as_bool.should be_true
+    j["repeater_response_saved"].as_bool.should be_true
+  end
+
+  it "reports a session write failure without changing the completed send result" do
+    j = JSON.parse(Gori::CLI::Run.repeater_json_for_spec(result_of(ok, "ok".to_slice),
+      repeater_write: Gori::CLI::Run::WriteOutcome.new("Repeater session was NOT saved")))
+
+    j["ok"].as_bool.should be_true
+    j["repeater_saved"].as_bool.should be_false
+    j["repeater_save_error"].as_s.should contain("NOT saved")
+    j["saved_repeater_id"]?.should be_nil
   end
 end
 

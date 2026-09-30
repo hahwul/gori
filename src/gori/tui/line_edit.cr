@@ -11,7 +11,15 @@ module Gori::Tui
   module LineEdit
     # The edit `ev` asks for, or nil when it is not one of these. Checked BEFORE a bar's
     # plain ←/→ arm, since the modified arrows are a different request from the bare ones.
+    #
+    # ^A/^E/^U/^W are the shell's line keys (#1379). A bar that is editing takes every key ahead
+    # of the keymap (Runner#handle_key), so they shadow nothing there: the tab chords on the
+    # same letters (Repeater/Fuzzer ^A auto-mark, ^U pretty, ^W close, ^E $EDITOR) answer
+    # once the bar is left, as they always did.
     def self.action(ev : Termisu::Event::Key) : Symbol?
+      if shell = shell_action(ev)
+        return shell
+      end
       key = ev.key
       mod = ev.ctrl? || ev.alt? # ⌥ is the macOS spelling of the word modifier, ⌃ everywhere else
       case
@@ -24,10 +32,23 @@ module Gori::Tui
       end
     end
 
+    # ^A line start, ^E line end, ^U delete to line start, ^W delete the word before the caret.
+    # Ctrl only: ⌥A/⌥E are not these keys anywhere.
+    def self.shell_action(ev : Termisu::Event::Key) : Symbol?
+      return nil unless ev.ctrl? && !ev.alt?
+      key = ev.key
+      case
+      when key.lower_a? then :home
+      when key.lower_e? then :end
+      when key.lower_u? then :delete_to_start
+      when key.lower_w? then :delete_word
+      end
+    end
+
     # Whether `action` changes the text (as opposed to only moving the caret) — the bars
     # re-run their filter after an edit and not after a motion.
     def self.mutating?(action : Symbol) : Bool
-      action == :delete || action == :delete_word
+      action == :delete || action == :delete_word || action == :delete_to_start
     end
 
     # `action` applied to `{text, caret}`; the caret is clamped on the way in.
@@ -43,6 +64,8 @@ module Gori::Tui
       when :delete_word
         at = word_left(text, caret)
         {"#{text[0, at]}#{text[caret..]}", at}
+      when :delete_to_start
+        {text[caret..], 0}
       else
         {text, caret}
       end

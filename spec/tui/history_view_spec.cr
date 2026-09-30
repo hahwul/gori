@@ -2607,6 +2607,24 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  it "reports which term is wrong and why in empty-state note for invalid QL" do
+    with_store do |store|
+      add_flow(store, "GET", "/a", 200)
+      view = HistoryView.new
+      view.reload(store)
+      view.start_query
+      "status:>=abc AND (".each_char { |c| view.query_insert(c) }
+      view.reload(store)
+      view.rows.empty?.should be_true
+
+      backend = MemoryBackend.new(100, 12)
+      view.render_list(Screen.new(backend), Rect.new(0, 0, 100, 12))
+      rows = (0...12).map { |y| backend.row(y) }.join("\n")
+      rows.should contain("status:>=abc")
+      rows.should contain("status expects a number or class")
+    end
+  end
+
   it "flags an invalid regex filter term in the empty-state (not a bare no-match)" do
     with_store do |store|
       add_flow(store, "GET", "/a", 200)
@@ -3376,6 +3394,153 @@ describe "HistoryView time column out of range" do
     ensure
       Gori::Settings.history_preview = prev_pv
       Gori::Settings.history_time_format = prev_tf
+    end
+  end
+end
+
+# #1376: layout at the common narrow widths.
+describe "HistoryView at 80–110 columns" do
+  # At 80 columns the full `MM-DD HH:MM:SS` and METHOD kept their width while PATH got about
+  # ten cells. TIME drops the date first, and HOST+PATH are held before the right cluster.
+  it "drops TIME's date before it starves PATH" do
+    prev = Gori::Settings.history_time_format
+    Gori::Settings.history_time_format = "absolute"
+    begin
+      with_store do |store|
+        add_flow(store, "GET", "/assets/logo-2x.svg", 200, "image/svg+xml")
+        view = HistoryView.new
+        view.reload(store)
+        dated = /\d\d-\d\d \d\d:\d\d:\d\d/
+
+        narrow = MemoryBackend.new(80, 12)
+        view.render_list(Screen.new(narrow), Rect.new(2, 0, 76, 12)) # an 80-column body
+        row = (0...12).map { |y| narrow.row(y) }.find!(&.includes?("/assets"))
+        row.should contain("/assets/logo-2x.svg")
+        row.should match(/\d\d:\d\d:\d\d/)
+        row.should_not match(dated)
+
+        wide = MemoryBackend.new(140, 12)
+        view.render_list(Screen.new(wide), Rect.new(0, 0, 140, 12))
+        (0...12).map { |y| wide.row(y) }.find!(&.includes?("/assets")).should match(dated)
+      end
+    ensure
+      Gori::Settings.history_time_format = prev
+    end
+  end
+
+  # The detail header row (pane chips, mode chips, nav hint) is wider than a sub-110-column
+  # pane, and the hint was drawn without a width, straight over the right `│`.
+  it "keeps the detail header row inside the pane's right border" do
+    with_store do |store|
+      add_flow(store, "GET", "/x", 200, "text/plain")
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      [50, 80, 100].each do |w|
+        b = MemoryBackend.new(w + 20, 16)
+        inner = Rect.new(1, 1, w - 2, 14)
+        view.render_detail(Screen.new(b), inner)
+        b.row(inner.y)[inner.right..].strip.should eq("") # (w=#{w})
+      end
+      wide = MemoryBackend.new(160, 16)
+      view.render_detail(Screen.new(wide), Rect.new(1, 1, 158, 14))
+      wide.row(1).should contain("space · esc")
+    end
+  end
+end
+
+# #1378: an Intercept edit leaves a trail in History, and a drop reads as the operator's own
+# outcome rather than an upstream failure.
+describe "HistoryView — Intercept edits and drops" do
+  original = "GET /?id=1 HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice
+
+  it "marks an edited flow EDIT and shows the client's request in the ORIGINAL pane" do
+    with_store do |store|
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+        method: "GET", target: "/?id=2", http_version: "HTTP/1.1",
+        head: "GET /?id=2 HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil,
+        source: Gori::FlowSource::Kind::Proxy, intercept_original: original))
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice))
+      view = Gori::Tui::HistoryView.new
+      view.reload(store)
+
+      list = MemoryBackend.new(120, 8)
+      view.render_list(Gori::Tui::Screen.new(list), Gori::Tui::Rect.new(0, 0, 120, 8))
+      list.contains?("EDIT").should be_true
+
+      view.open_detail(store).should be_true
+      detail = MemoryBackend.new(100, 16)
+      view.render_detail(Gori::Tui::Screen.new(detail), Gori::Tui::Rect.new(0, 0, 100, 16))
+      detail.contains?("edited at Intercept").should be_true
+      detail.contains?("id=2").should be_true # REQUEST is what went upstream
+
+      view.set_detail_pane_public(:original)
+      view.detail_pane.should eq(:original)
+      detail = MemoryBackend.new(100, 16)
+      view.render_detail(Gori::Tui::Screen.new(detail), Gori::Tui::Rect.new(0, 0, 100, 16))
+      detail.contains?("ORIGINAL").should be_true
+      detail.contains?("GET /?id=1 HTTP/1.1").should be_true
+    end
+  end
+
+  # #1376 × #1378: the EDIT cell survives the 80-column column flex (SRC is granted right after
+  # STA), and the extra ORIGINAL chip still leaves the detail header row inside the border.
+  it "keeps EDIT and the ORIGINAL chip at 80 columns" do
+    with_store do |store|
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+        method: "GET", target: "/account/settings?id=2", http_version: "HTTP/1.1",
+        head: "GET /account/settings?id=2 HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil,
+        source: Gori::FlowSource::Kind::Proxy, intercept_original: original))
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice))
+      view = Gori::Tui::HistoryView.new
+      view.reload(store)
+
+      list = MemoryBackend.new(80, 8)
+      view.render_list(Gori::Tui::Screen.new(list), Gori::Tui::Rect.new(2, 0, 76, 8)) # an 80-column body
+      row = (0...8).map { |y| list.row(y) }.find!(&.includes?("/account"))
+      row.should contain("/account/settings")
+      row.should contain(" EDIT ")
+
+      view.open_detail(store).should be_true
+      view.set_detail_pane_public(:original)
+      [60, 80].each do |w|
+        b = MemoryBackend.new(w + 20, 16)
+        inner = Gori::Tui::Rect.new(1, 1, w - 2, 14)
+        view.render_detail(Gori::Tui::Screen.new(b), inner)
+        b.row(inner.y).should contain(" ORIGINAL ")
+        b.row(inner.y)[inner.right..].strip.should eq("") # (w=#{w})
+        b.contains?("GET /?id=1 HTTP/1.1").should be_true
+      end
+    end
+  end
+
+  it "offers no ORIGINAL pane on a flow nobody edited" do
+    with_store do |store|
+      add_flow(store, "GET", "/plain", 200)
+      view = Gori::Tui::HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      view.set_detail_pane_public(:original)
+      view.detail_pane.should eq(:request)
+    end
+  end
+
+  it "says a dropped request was dropped at Intercept, not that the upstream failed" do
+    with_store do |store|
+      id = add_flow(store, "GET", "/nope")
+      store.update_response(Gori::FlowMapper.aborted_response(id, Gori::Interceptor::DROP_REQUEST_REASON))
+      view = Gori::Tui::HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      view.set_detail_pane_public(:response)
+      detail = MemoryBackend.new(100, 16)
+      view.render_detail(Gori::Tui::Screen.new(detail), Gori::Tui::Rect.new(0, 0, 100, 16))
+      detail.contains?("dropped at Intercept: the request was never sent upstream").should be_true
+      detail.contains?("upstream error").should be_false
     end
   end
 end

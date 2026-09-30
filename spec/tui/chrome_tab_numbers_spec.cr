@@ -72,3 +72,25 @@ describe "Chrome tab-bar numbers" do
     backend.fg_at(x + 2, 0).should eq(Theme.muted)        # the name
   end
 end
+
+# #1376: at 80 columns tabs 6-9 fell off the bar and left a blank run before `0:Tabs`, with
+# nothing to say more were there. `›` after the last drawn tab mirrors the `‹` before the first.
+describe "Chrome.render_menu overflow" do
+  it "marks tabs hidden past the right end of a narrow bar" do
+    backend = MemoryBackend.new(80, 1)
+    Chrome.render_menu(Screen.new(backend), Rect.new(2, 0, 76, 1), active_tab: :history,
+      focused: false, numbered: true)
+    row = backend.row(0)
+    row.should contain(Chrome::MORE_LABEL)
+    marker = row.index('›').not_nil!
+    marker.should be < row.index(Chrome::MORE_LABEL).not_nil!
+    row[marker - 1].should eq(' ')
+  end
+
+  it "draws no marker when every tab fits" do
+    backend = MemoryBackend.new(260, 1)
+    Chrome.render_menu(Screen.new(backend), Rect.new(0, 0, 260, 1), active_tab: :history,
+      focused: false, numbered: true)
+    backend.row(0).should_not contain('›')
+  end
+end

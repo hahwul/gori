@@ -60,6 +60,15 @@ module Gori::Tui
     # cell plus a one-column gap. See render_list_body.
     STRIP_W    =   2
     TRIM_SLACK = 512
+    # The list's TIME span (value plus its one-column gap): `MM-DD HH:MM:SS`, or the bare
+    # `HH:MM:SS` a narrow pane falls back to. See `compact_time?`.
+    TIME_W       = 15
+    TIME_SHORT_W =  9
+    # HOST+PATH are held this many cells before the right cluster is granted any, and the
+    # built-in cluster (STA SRC TYPE SIZE DUR, each with its gap) needs BUILTIN_CLUSTER_W.
+    # 30 is a readable host plus a path that shows more than its first segment (#1376).
+    HOST_PATH_MIN     = 30
+    BUILTIN_CLUSTER_W = 30
     # Cap on remembered user-column values (#819), and the answer for a list with no columns —
     # one shared empty array rather than a fresh allocation per row per frame.
     COL_CACHE_MAX       = 4096
@@ -231,6 +240,7 @@ module Gori::Tui
       # value) reads the new answer. Cleared on size like `@color_memo`; `@mime_memo` is
       # bounded by the number of distinct Content-Types and capped for a hostile origin.
       @time_memo = {} of Int64 => String
+      @short_time_memo = {} of Int64 => String # the date-less TIME a narrow pane draws
       @mime_memo = {} of String => String
       @path_memo = {} of Int64 => String
       # SIZE and DUR join them on the same argument, and they are the two that cost the most:
@@ -250,6 +260,9 @@ module Gori::Tui
       @detail_frames = nil.as(Array(Store::H2Frame)?)
       @detail_ws_total = 0 # full message count (≥ loaded; drives the "older not loaded" note)
       @detail_frames_total = 0
+      # The request as the client sent it, when the operator edited it at Intercept (#1378) —
+      # the ORIGINAL pane. nil for every flow nobody edited, so the pane is not offered.
+      @detail_original = nil.as(Bytes?)
       @detail_sse = false # response is a text/event-stream → offer the EVENTS pane
       # Decoded protocol projections, parsed once per opened flow (no DB table) — each
       # drives an optional detail pane like EVENTS. nil/empty ⇒ the pane isn't offered.
@@ -905,7 +918,9 @@ module Gori::Tui
         return nil unless active_view && (vf = view_filter)
         return fts_backlog_note(vf, store)
       end
-      return "invalid filter — no valid terms" if QL.reject_empty?(@query, filter)
+      if QL.reject_empty?(@query, filter)
+        return QL.reject_empty_reason(@query, scope: lens) || "invalid filter — no valid terms"
+      end
       bad = QL.invalid_regex_terms(@query)
       return "invalid regex in #{bad.first}" unless bad.empty?
       # A `field:` QL does not implement free-texts the WHOLE token, so `hostt:api` runs a
@@ -1769,6 +1784,7 @@ module Gori::Tui
       @detail_ws = nil
       @detail_frames_total = 0
       @detail_ws_total = 0
+      @detail_original = nil
       @detail_sse = false
       @detail_saml = nil
       @detail_jwts = [] of Jwt::Found
@@ -1808,6 +1824,8 @@ module Gori::Tui
         @detail_frames = nil
         @detail_frames_total = 0
       end
+      # One primary-key read, and only for a row the list already flags as edited.
+      @detail_original = detail.try { |d| store.intercept_original(d.row.id) if d.row.intercept_edited? }
       # SSE events are a derived view (parsed from the stored response body at
       # render time — no table), so here we only flag whether to offer the pane.
       @detail_sse = !!(detail && sse_response?(detail))
@@ -2679,9 +2697,17 @@ module Gori::Tui
       head, body = case @detail_pane
                    when :response then {detail.response_head, detail.response_body}
                    when :request  then {detail.request_head, detail.request_body}
+                   when :original then {@detail_original, nil}
                    else                {nil, nil} # messages/frames/events: no raw-bytes hex
                    end
       @detail_hex_bytes = combine_bytes(head, body)
+    end
+
+    # The stored original message (head + body in one BLOB) back into its two halves, split
+    # where the Intercept editor splits one (`Interceptor.split_edit`).
+    private def split_original(raw : Bytes) : {Bytes, Bytes?}
+      head, has_body = Gori::Interceptor.split_edit(raw)
+      {head, has_body ? raw[head.size..] : nil}
     end
 
     private def combine_bytes(head : Bytes?, body : Bytes?) : Bytes?
@@ -2700,6 +2726,9 @@ module Gori::Tui
     # conditional, so a plain HTTP flow still has exactly two. ←/→ walk this chain; Tab cycles it.
     private def detail_panes : Array(Symbol)
       panes = [:request, :response]
+      # ORIGINAL: the client's request before the operator's Intercept edit (#1378). REQUEST
+      # stays what went upstream; this is what it replaced.
+      panes << :original if @detail_original
       # MESSAGES: the socket transcript, right after the handshake it belongs to, and a pane
       # of its OWN rather than a relabelling of :response. The handshake response head is
       # where the server says which subprotocol and which extensions (permessage-deflate) it
@@ -2722,16 +2751,15 @@ module Gori::Tui
     # transcript; frames only exist for an intercepted h2 connection).
     private def detail_pane_label(pane : Symbol) : String
       case pane
-      when :frames  then "FRAMES (h2)"
-      when :events  then "EVENTS (sse)"
-      when :saml    then "SAML"
-      when :jwt     then @detail_jwts.size > 1 ? "JWT (#{@detail_jwts.size})" : "JWT"
-      when :graphql then "GRAPHQL"
+      when :frames then "FRAMES (h2)"
+      when :events then "EVENTS (sse)"
+      when :jwt    then @detail_jwts.size > 1 ? "JWT (#{@detail_jwts.size})" : "JWT"
+        # The panes whose chip is simply their name.
+      when :saml, :graphql, :params, :original then pane.to_s.upcase
         # Named after the FRAMING, not after gori's module — an operator working a Socket.IO
         # app is looking for a chip that says Socket.IO. Fixed for the life of the opened flow
         # (see decode_protocols); "WS PROTO" only until the first rebuild names one.
       when :ws_proto then @ws_proto_label || "WS PROTO"
-      when :params   then "PARAMS"
         # No `(N)` here, unlike JWT: a JWT set is fixed once the bytes are captured, while a live
         # socket's total moves on every poll (`refresh_detail` does not early-return for one) —
         # and the label's WIDTH places every chip to its right, so a count crossing 9→10 would
@@ -2864,8 +2892,12 @@ module Gori::Tui
       sw = @colormarker.try(&.strip_active?) ? STRIP_W : 0
       strip_x = rect.x + 1
       time_x = rect.x + 1 + sw
-      method_x = rect.x + 16 + sw # time column widened to fit MM-DD HH:MM:SS
-      # +25, not +24: METHOD keeps its full 8 cells (16..23) and this buys the BLANK COLUMN
+      # TIME gives up its date before PATH gives up cells (#1376): at 80 columns the full
+      # `MM-DD HH:MM:SS` left PATH about ten cells, which is the column an operator reads a
+      # row BY. The date matters across days; the path matters on every row.
+      short_time = compact_time?(rect, sw)
+      method_x = time_x + (short_time ? TIME_SHORT_W : TIME_W)
+      # +9, not +8: METHOD keeps its full 8 cells and this buys the BLANK COLUMN
       # between them. The clamp below is what stops a long token bleeding, but a method that
       # exactly FILLS the cell — `PROPFIND`, `CHECKOUT`, both WebDAV/DeltaV verbs this tool is
       # pointed at — then sat flush against the label and the two columns read as one token:
@@ -2875,11 +2907,11 @@ module Gori::Tui
       # The gap is paid for out of PROTO's own span rather than by widening the fixed left
       # block, so `host_x` does not move and no terminal loses a column of HOST/PATH for it:
       # `Proto::Kind#label` is a closed set whose longest member is 5 (`HTTPS`/`GRPCS`), as is
-      # the `STUB` that displaces it, so 25..30 still leaves PROTO the same one-column gap
+      # the `STUB` that displaces it, so its 6-cell span still leaves PROTO the same one-column gap
       # before HOST that METHOD now has. A label longer than 6 would be the thing to re-check
       # here — there is no `width:` on the PROTO draw, by the same closed-set argument.
-      proto_x = rect.x + 25 + sw
-      host_x = rect.x + 31 + sw
+      proto_x = method_x + 9
+      host_x = proto_x + 6
       # Right cluster STA · SRC · TYPE · SIZE · DUR (status code, provenance, response MIME,
       # size, latency — frequently-scanned), anchored to the right edge and sized to FIT:
       # STA outlives the rest, which drop when the pane is too narrow to also keep HOST+PATH
@@ -2896,8 +2928,8 @@ module Gori::Tui
       # falls off a narrow terminal is a marker that lets someone screenshot a Repeater send as
       # if it were captured traffic. That is the same argument that keeps `STUB` inside the
       # fixed-width PROTO column; this one lives in the cluster, so priority is the lever it has.
-      cluster_w = 4                                # STA (3-digit code + gap)
-      spare = rect.right - host_x - 18 - cluster_w # reserve 18 for HOST+PATH first
+      cluster_w = 4                                           # STA (3-digit code + gap)
+      spare = rect.right - host_x - HOST_PATH_MIN - cluster_w # HOST+PATH are reserved first
       if show_src = spare >= 6
         cluster_w += 6
         spare -= 6
@@ -3102,7 +3134,7 @@ module Gori::Tui
         if sw > 0 && (m = mark) && m.style.strip?
           screen.cell(strip_x, y, '█', Theme.mark_color(m.color), bg)
         end
-        screen.text(time_x, y, fmt_time_memo(row.created_at), Theme.muted, bg)
+        screen.text(time_x, y, fmt_time_memo(row.created_at, short_time), Theme.muted, bg)
         # METHOD is a FIXED 8-column cell (method_x .. proto_x), so it needs its own clamp —
         # without a `width:` the limit is the whole SCREEN. RFC 9110 permits any token here and
         # the parser caps nothing, so a long method (`VERSION-CONTROL`, a smuggled
@@ -3149,10 +3181,17 @@ module Gori::Tui
         # Accented for everything except PROXY, which is the norm and stays muted. NOT yellow —
         # `STUB` owns that, and it means "you are not seeing what you think". A Repeater flow
         # IS a real response from the origin; only its request came from gori.
+        #
+        # An Intercept edit (#1378) takes the cell as `EDIT`, in `STUB`'s yellow and for the same
+        # reason: the request on this row is the operator's, not the one the client sent.
         if show_src
           src = row.source
-          screen.text(src_x, y, src.try(&.label) || "—",
-            src.nil? || src.proxy? ? Theme.muted : Theme.accent, bg, width: 5)
+          if row.intercept_edited?
+            screen.text(src_x, y, "EDIT", Theme.yellow, bg, width: 5)
+          else
+            screen.text(src_x, y, src.try(&.label) || "—",
+              src.nil? || src.proxy? ? Theme.muted : Theme.accent, bg, width: 5)
+          end
         end
         screen.text(type_x, y, fmt_mime_memo(row.content_type), Theme.muted, bg, width: 6) if show_type
         screen.text(size_x, y, fmt_size(row.response_size), Theme.muted, bg, width: 6) if show_size
@@ -3371,18 +3410,28 @@ module Gori::Tui
     # live session. created_at is unix microseconds.
     # `LocalTime.at`, not `Time.unix`: a `created_at` past year 9999 (an imported or foreign
     # row) raised on every frame the row was drawn, and the tab never drew again.
-    private def fmt_time(created_at : Int64) : String
+    private def fmt_time(created_at : Int64, short : Bool = false) : String
       t = LocalTime.at(created_at)
       return "—" unless t
       return fmt_time_relative(t) if Settings.history_time_format == "relative"
-      t.to_s("%m-%d %H:%M:%S")
+      t.to_s(short ? "%H:%M:%S" : "%m-%d %H:%M:%S")
     end
 
     # `fmt_time` through the memo — for the ABSOLUTE format only. A relative age is a
     # function of now and has to be recomputed each frame (it is `Fmt.ago`, cheap).
-    private def fmt_time_memo(created_at : Int64) : String
+    private def fmt_time_memo(created_at : Int64, short : Bool = false) : String
       return fmt_time(created_at) if Settings.history_time_format == "relative"
+      if short
+        return @short_time_memo.fetch(created_at) { @short_time_memo[created_at] = fmt_time(created_at, true) }
+      end
       @time_memo.fetch(created_at) { @time_memo[created_at] = fmt_time(created_at) }
+    end
+
+    # Does the full-width TIME leave the row too little for HOST+PATH plus the built-in
+    # cluster? Then TIME drops its date. A relative age is short either way.
+    private def compact_time?(rect : Rect, sw : Int32) : Bool
+      full_host_x = rect.x + 1 + sw + TIME_W + 15 # METHOD (9) + PROTO (6)
+      rect.right - full_host_x < HOST_PATH_MIN + BUILTIN_CLUSTER_W
     end
 
     MIME_MEMO_CAP = 256
@@ -3584,12 +3633,16 @@ module Gori::Tui
       dv = detail_view
       ws = reveal_active?(hex, dv)
       nav = detail_navigable? ? "↑/↓←/→ · ⇧sel · y" : "↑/↓ scroll"
-      # Status word + mode toggle chips (mouse + same chords as keys), then muted nav.
-      x = screen.text(x + 1, rect.y, detail_mode_status(hex, ws, dv), Theme.muted) + 1
+      # Status word + mode toggle chips (mouse + same chords as keys), then muted nav. Every
+      # piece is bounded by the pane's right border (`rect.right`): the row is wider than a
+      # sub-110-column pane, and a draw with no `width:` ran over the `│` (#1376). A chip is
+      # drawn whole or not at all — a clipped `^X:h…` is not a button anyone can read.
+      x = draw_detail_hint(screen, x + 1, rect, detail_mode_status(hex, ws, dv)) + 1
       detail_mode_chips(hex, ws, dv).each do |(_, label, lit)|
+        break if x + Screen.draw_width(label) > rect.right
         x = Frame.chip(screen, x, rect.y, label, lit) + 1
       end
-      screen.text(x + 1, rect.y, "· #{nav} · space · esc", Theme.muted)
+      draw_detail_hint(screen, x + 1, rect, "· #{nav} · space · esc")
       Frame.inner_divider(screen, rect, rect.y + 1, border: Frame.pane_border(focused))
 
       # The text rect and the footer strip under it come from ONE derivation
@@ -3668,6 +3721,11 @@ module Gori::Tui
       if note = source_note(detail.row)
         lines << [Highlight::Span.new(note, Theme.muted)]
       end
+      # An Intercept edit (#1378): REQUEST is what went upstream, and the client's own request
+      # is one pane over. Yellow, like the row's `EDIT` cell.
+      if detail.row.intercept_edited?
+        lines << [Highlight::Span.new("! edited at Intercept — the client's original request is in ORIGINAL", Theme.yellow)]
+      end
       # What gori has to say about this exchange that its bytes cannot (`FlowRow#advisory`).
       detail.row.advisories.each do |a|
         lines << [Highlight::Span.new("! #{a}", Theme.yellow)]
@@ -3740,6 +3798,14 @@ module Gori::Tui
     # active chip is a gold pill when the strip holds focus (same "gold = focus is here"
     # cue as the sub-tab strips one level up), else the accent pill; body-focused keeps
     # today's look.
+    # One muted run of the detail header row, clipped (ellipsized) at the pane's right border.
+    # Returns the x past what was drawn, or `x` when no cell was free.
+    private def draw_detail_hint(screen : Screen, x : Int32, rect : Rect, text : String) : Int32
+      room = rect.right - x
+      return x if room <= 0
+      screen.text(x, rect.y, text, Theme.muted, width: room)
+    end
+
     private def render_detail_chips(screen : Screen, rect : Rect, strip_focused : Bool) : Int32
       x = rect.x + 1
       detail_panes.each do |pane|
@@ -4237,6 +4303,7 @@ module Gori::Tui
       # id: it refills from a screenful of rows on the next frame.
       @color_memo.clear if @color_memo.size > @max_rows
       @time_memo.clear if @time_memo.size > @max_rows
+      @short_time_memo.clear if @short_time_memo.size > @max_rows
       @path_memo.clear if @path_memo.size > @max_rows
     end
 
@@ -4316,11 +4383,17 @@ module Gori::Tui
       if dv = decoded_pane_view
         return dv
       end
-      request = @detail_pane == :request
+      # ORIGINAL is a request too, and renders through the same path as REQUEST.
+      original = @detail_pane == :original ? @detail_original : nil
+      request = @detail_pane == :request || !original.nil?
       # A failed/pending flow has no response bytes — surface WHY (like Repeater does)
       # instead of a blank pane.
       if !request && ((rh = detail.response_head).nil? || rh.empty?)
-        span = if (err = detail.error) && !err.empty?
+        span = if (err = detail.error) && Gori::Interceptor.dropped?(err)
+                 # The operator's own decision, not a failure (#1378): say which leg never went on.
+                 leg = err == Gori::Interceptor::DROP_REQUEST_REASON ? "the request was never sent upstream" : "the response was not delivered to the client"
+                 Highlight::Span.new("— dropped at Intercept: #{leg} —", Theme.yellow)
+               elsif (err = detail.error) && !err.empty?
                  Highlight::Span.new("upstream error: #{err}", Theme.red)
                elsif detail.row.state.aborted?
                  Highlight::Span.new("— connection aborted (no response captured) —", Theme.yellow)
@@ -4331,9 +4404,21 @@ module Gori::Tui
                end
         return DetailView.new([[span]], EMPTY_BODY, :text, EMPTY_LINES)
       end
-      head, body = request ? {detail.request_head, detail.request_body} : {detail.response_head, detail.response_body}
+      head, body = if original
+                     split_original(original)
+                   elsif request
+                     {detail.request_head, detail.request_body}
+                   else
+                     {detail.response_head, detail.response_body}
+                   end
       stored_bytes = body.try(&.size.to_i64) || 0_i64
-      wire_bytes = request ? detail.request_wire_body_size : detail.response_wire_body_size
+      wire_bytes = if original
+                     stored_bytes # kept whole: nothing was capped
+                   elsif request
+                     detail.request_wire_body_size
+                   else
+                     detail.response_wire_body_size
+                   end
       truncated = stored_bytes < wire_bytes
 
       trailer = [] of Highlight::Line

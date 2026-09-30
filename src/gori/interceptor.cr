@@ -57,6 +57,16 @@ module Gori
     # The decision the TUI hands back over an Item's reply channel.
     record Decision, action : Action, bytes : Bytes
 
+    # The `flows.error` a DROP records, on h1 and h2 alike. Spelled once so a surface can tell
+    # the operator's own decision from an upstream failure (`dropped?`, #1378): both are an
+    # Aborted flow with an error string, and only the string says whose outcome it was.
+    DROP_REQUEST_REASON  = "dropped by intercept (request)"
+    DROP_RESPONSE_REASON = "dropped by intercept"
+
+    def self.dropped?(error : String?) : Bool
+      error == DROP_REQUEST_REASON || error == DROP_RESPONSE_REASON
+    end
+
     # One held message awaiting a human decision. `raw` is the full head(+body)
     # that would otherwise go on the wire (truth, P7). `reply` is buffered(1) so
     # a release never blocks even if the held fiber already died (client gone).

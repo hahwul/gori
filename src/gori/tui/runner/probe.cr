@@ -159,7 +159,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   end
 
   # Promote a machine-found Probe issue to a human-confirmed Issue (the bridge to the
-  # Issues report). Reuses Store#insert_issue; the issue's severity/host/sample flow carry over.
+  # Issues report). Probe::Triage.promote carries its severity/host, notes and affected flows over.
   def probe_promote : Nil
     # The row as it is NOW: promotion copies its sample flow into the new Issue and keys
     # "already promoted" off its status.

@@ -712,12 +712,14 @@ module Gori::Proxy
       # already M&R'd into `sent_head`. A body rule re-frames to Content-Length, so re-parse
       # the (possibly rewritten) head for the hold metadata + capture.
       advisory = nil.as(String?)
+      client_body = buffered
       if (rw = @rewriter) && rw.rewrites_request_body_for_host?(host)
         sent_head, buffered, advisory = apply_body_rewrite(sent_head, buffered, req_framing,
           host: host, response: false, live: true) { |e| rw.rewrite_request_body(e, host) }
         sent_req = Codec::Http1.parse_request_head(sent_head)
       end
-      decision = ic.hold_request(build_message(sent_head, buffered),
+      held = build_message(sent_head, buffered)
+      decision = ic.hold_request(held,
         method: sent_req.method, target: sent_req.target,
         host: host, port: port, scheme: scheme)
       if decision.action.drop?
@@ -731,6 +733,10 @@ module Gori::Proxy
       # the human chose to send (e.g. a deliberately CL-mismatched smuggling probe).
       sent_head, edited_body = split_message(decision.bytes)
       sent_req = Codec::Http1.parse_request_head(sent_head)
+      # An edit replaces what the client sent, so History keeps the CLIENT'S OWN bytes beside
+      # the flow (#1378, V44) — `req.raw_head` and the body before any Match&Replace — and
+      # marks it edited. A forward that changed nothing keeps nothing: the flow is the original.
+      original = decision.bytes == held ? nil : build_message(req.raw_head, client_body)
       # Key repeater-safety on the EDITED request: if the human changed the method (e.g.
       # GET→POST), retryability must follow the method actually being sent, not the
       # original — else a now-non-idempotent request could be replayed on a stale-conn retry.
@@ -738,14 +744,16 @@ module Gori::Proxy
       upstream, reused, sent = acquire_and_send(host, port, retryable) { |up| write_request(up, sent_head, edited_body) }
       unless upstream && sent
         release_upstream
-        record_error(sent_req, scheme, host, port, created_at, upstream_error_message(host, port, upstream))
+        record_error(sent_req, scheme, host, port, created_at, upstream_error_message(host, port, upstream),
+          intercept_original: original)
         write_gateway_error
         return false
       end
       stored, trunc, size = capped(edited_body)
       flow_id = @sink.on_request(FlowMapper.request(sent_req,
         scheme: scheme, host: host, port: port, created_at: created_at,
-        body: stored, body_truncated: trunc, body_size: size, advisory: advisory, source: FlowSource::Kind::Proxy))
+        body: stored, body_truncated: trunc, body_size: size, advisory: advisory, source: FlowSource::Kind::Proxy,
+        intercept_original: original))
       handle_response(upstream, req, flow_id, started, host, port, scheme,
         reused: reused, sent_head: sent_head, can_retry: retryable, sent_req: sent_req)
     end
@@ -1754,7 +1762,7 @@ module Gori::Proxy
         host: host, port: port, scheme: scheme)
       duration = (Time.instant - started).total_microseconds.to_i64
       if decision.action.drop?
-        @sink.on_response(FlowMapper.aborted_response(flow_id, "dropped by intercept",
+        @sink.on_response(FlowMapper.aborted_response(flow_id, Gori::Interceptor::DROP_RESPONSE_REASON,
           ttfb_us: ttfb, duration_us: duration))
         write_intercept_drop
         release_upstream
@@ -2749,9 +2757,11 @@ module Gori::Proxy
       {capture.to_slice, trunc, trunc ? capture.total : nil, complete}
     end
 
-    private def record_error(req, scheme, host, port, created_at, message) : Nil
+    private def record_error(req, scheme, host, port, created_at, message, *,
+                             intercept_original : Bytes? = nil) : Nil
       flow_id = @sink.on_request(FlowMapper.request(req,
-        scheme: scheme, host: host, port: port, created_at: created_at, body: nil, source: FlowSource::Kind::Proxy))
+        scheme: scheme, host: host, port: port, created_at: created_at, body: nil, source: FlowSource::Kind::Proxy,
+        intercept_original: intercept_original))
       @sink.on_response(FlowMapper.error_response(flow_id, message))
     end
 
@@ -2933,7 +2943,7 @@ module Gori::Proxy
       flow_id = @sink.on_request(FlowMapper.request(req,
         scheme: scheme, host: host, port: port, created_at: created_at,
         body: stored, body_truncated: trunc, body_size: size, source: FlowSource::Kind::Proxy))
-      @sink.on_response(FlowMapper.aborted_response(flow_id, "dropped by intercept (request)"))
+      @sink.on_response(FlowMapper.aborted_response(flow_id, Gori::Interceptor::DROP_REQUEST_REASON))
     end
 
     private def write_intercept_drop : Nil

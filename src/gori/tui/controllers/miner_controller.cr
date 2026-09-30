@@ -858,11 +858,15 @@ module Gori::Tui
              else
                ""
              end
-      msg = "Miner: #{n} param#{n == 1 ? "" : "s"} found on #{v.summary}#{tail}#{macro_failure_note(ev.progress)}"
+      found = n > 0 ? "#{n} param#{n == 1 ? "" : "s"} found" : "done — nothing found"
+      msg = "Miner: #{found} on #{v.summary}#{tail}#{macro_failure_note(ev.progress)}"
       level = n > 0 ? :success : :info
       log_event(v, level, msg)
       push_mine_notification(v, level, msg, found: n)
-      @host.status(msg) if v.config.notify.posts_notification?(n)
+      # The status line answers the start toast's "watch the bottom bar", so an empty run under
+      # the default "when found" still ends with a line there (#1379). NotifyMode gates the
+      # notification CENTER; only Off silences the bar too.
+      @host.status(msg) unless v.config.notify.off?
     end
 
     # A macro that FAILED is the reason some probes are errors rather than answers, and the

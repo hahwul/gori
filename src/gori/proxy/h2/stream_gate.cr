@@ -174,10 +174,9 @@ module Gori::Proxy::H2
     # to keep waiting to show whole.
     HOLD_WAIT_DEADLINE = 5.seconds
 
-    # h1 records exactly these strings (`client_conn.cr:1234`, `:840`, `:1249`), so History
-    # reads the same on both protocols.
-    DROP_REQUEST_REASON  = "dropped by intercept (request)"
-    DROP_RESPONSE_REASON = "dropped by intercept"
+    # h1 records exactly these strings, so History reads the same on both protocols.
+    DROP_REQUEST_REASON  = Gori::Interceptor::DROP_REQUEST_REASON
+    DROP_RESPONSE_REASON = Gori::Interceptor::DROP_RESPONSE_REASON
     SANDBOX_REASON       = Gori::Outbound::SANDBOX_ERROR
 
     # One stream whose delivery is deferred. Created only when something is actually held or
@@ -802,7 +801,14 @@ module Gori::Proxy::H2
         # `item.raw` rather than `block.head`: what the operator was SHOWN is the whole hold,
         # and on a head+body hold that is head + entity. The two are the same bytes on a
         # head-only hold, so this is one test for both shapes rather than a second one.
-        slot.decided = decision.bytes == item.raw ? block : edited(slot, block, decision)
+        slot.decided = decided = decision.bytes == item.raw ? block : edited(slot, block, decision)
+        # An edit that actually changed what goes out (a refused one forwards the peer's own
+        # `block`) keeps the request as it was held beside the flow, as h1 does (#1378). The
+        # held message is the h1-shaped projection the operator edited: h2 has no client bytes
+        # in that form, and its held frames were never logged because they never went out.
+        if @ordered && (decided != block || slot.rebuilt)
+          @assembler.note_intercept_original(block.stream_id, item.raw)
+        end
       end
       slot.ready = true
       drain_locked

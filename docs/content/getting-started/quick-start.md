@@ -229,7 +229,7 @@ The final **Review** step recaps what you picked and carries one editable row: *
 
 ## Guided UI tour
 
-A mock-UI walkthrough of tab/pane navigation, the space menu (including its second cards), the command palette's search, and READ/INS edit mode. It is safe to run without a live proxy session. Each lesson shows a short demo and asks you to try the real key; the final step is a hands-on sandbox for all four moves, then a first-session checklist. The mock menus use the same letters and keys as your install, rebinds included.
+A mock-UI walkthrough of tab/pane navigation, the space menu (including its second cards), the command palette's search, READ/INS edit mode, then the traffic itself: where to point a client and how to trust the CA, the capture switch, and intercept. It is safe to run without a live proxy session. Each lesson shows a short demo and asks you to try the real key; a hands-on sandbox covers the first four moves, and the tour ends with Help and quitting, then a first-session checklist. The mock menus use the same letters and keys as your install, rebinds included.
 
 ```bash
 gori tutorial

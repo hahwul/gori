@@ -4615,12 +4615,32 @@ Refines: the 2026-09-25 R1 entry above.
 
 - A focused sub-tab strip answers its raw navigation and mark keys, then resolves an unhandled
   chord in `Scope::Global` only. The active tab and Editor scopes never receive a strip key.
-- A non-text body does not send an unclaimed `c`, `i` or `s` to Global: capture and the scope
-  lens stay available from the tab bar, and Intercept keeps its own `i` control. Local tab
-  bindings still resolve first.
 - Key chips and help text that name a rebindable action derive the key from the registry. When a
   pane is unfocused, its state chips name the state instead of implying its key is active there.
 - Intercept's empty-state card only shows forward, drop, filter and direction keys while its body
   is focused; otherwise it tells the operator to focus the body first.
 - `↑` at the first line in Repeater INS is editor motion; only READ mode can hand that edge to
   the focus ring. Capture-off is a yellow `OFF` signal in the top-bar listener chip.
+
+### 2026-09-30: cancelling a one-shot MCP send closes its socket (#1391)
+
+Refines: [P4](#p4), [P1](#p1). MCP `notifications/cancelled` (#1391).
+
+The 2026-09-20 cancellation decision treated `send_request` and `send_websocket` as indivisible
+one-shot work. That left a silent origin holding the only MCP worker until its timeout, blocking
+every later tool call even though the reader had already handled the cancellation. The request's
+own cancellation remains cooperative: while an HTTP or WebSocket engine owns its one-shot socket,
+a bounded watcher polls the same non-consuming predicate and closes that socket when the client
+cancels. HTTPS has two ownership phases: the shared dial watches the underlying transport socket
+while OpenSSL performs the TLS handshake, then the sender watches the completed SSL socket during
+the exchange. TCP connect itself keeps its existing timeout. The watcher is joined before the
+engine returns, so cancellation releases both the connection and its fiber; no default timeout
+changes. Loopback TLS specs cover a silent post-handshake read and an origin that stalls after
+ClientHello, including the SSL close-from-watcher path. The server still emits no response for a
+cancelled JSON-RPC id, as required by MCP.
+
+**The worker stays serial.** `Store` reads have a WAL pool and writes still funnel through its
+single writer, but the shared `Tools` instance also carries per-call cancellation state, current
+project bindings, and operator-note claims. Running nominally read-only calls beside a send would
+need a broader per-call state and project-switching design; closing the canceled send already lets
+the queued call proceed promptly without adding that concurrency surface.
