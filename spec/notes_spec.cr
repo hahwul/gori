@@ -179,4 +179,24 @@ describe Gori::Notes do
       end
     end
   end
+
+  # `gori run notes update --append` (#1388): the join happens against the text the write
+  # transaction read, on a line of its own.
+  describe ".update(append:)" do
+    it "appends on a new line, and replaces without the flag" do
+      with_store do |store|
+        id = Gori::Notes.create(store, "first").not_nil!
+        Gori::Notes.update(store, id, "second", append: true).committed?.should be_true
+        Gori::Notes.load(store).notes.first.text.should eq("first\nsecond")
+        Gori::Notes.update(store, id, "only").committed?.should be_true
+        Gori::Notes.load(store).notes.first.text.should eq("only")
+        Gori::Notes.update(store, 999_i64, "x", append: true).missing?.should be_true
+      end
+    end
+
+    it "does not double a newline the note already ends with, nor lead an empty note with one" do
+      Gori::Notes.appended("a\n", "b").should eq("a\nb")
+      Gori::Notes.appended("", "b").should eq("b")
+    end
+  end
 end

@@ -713,6 +713,9 @@ describe Gori::Miner::Engine do
       baseline.try(&.stable).should be_false
       done.should_not be_nil
       done.not_nil!.stopped.should be_false
+      # …and the Done's summary counts those five failures: it used to read `5 sent · 0 errors`
+      # on every surface (#1385).
+      done.not_nil!.progress.errors.should eq(5)
       # The reason a consumer re-reports is the RAW send failure, not the wrapped sentence.
       engine.first_error.should eq("connection refused")
     end

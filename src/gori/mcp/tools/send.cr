@@ -7,6 +7,8 @@ require "../../repeater/engine"
 require "../../repeater/h2_engine"
 require "../../repeater/flow_request"
 require "../../repeater/plan"
+require "../../repeater/send_error"
+require "../../repeater/request_rules"
 require "../../repeater/timing"
 require "../../repeater/ws_engine"
 require "../../repeater/draft_markers"
@@ -675,111 +677,17 @@ module Gori
         optional_int_arg(h, "timeout_ms").try(&.clamp(1_i64, 600_000_i64).milliseconds)
       end
 
-      # Substrings that identify a DETERMINISTIC protocol refusal in gori's own error text —
-      # a message gori (or the origin) will produce identically on every retry.
-      #
-      # The list used to stop at malformed/framing/interim/chunk, which left the sharpest
-      # finding a tester can get filed as an "other" transient error: two conflicting
-      # `Content-Length` headers — a response-splitting/desync condition — came back as
-      # `error_kind:"other", error_code:"NETWORK_ERROR", retryable:true`, so an agent LOOPS on
-      # it instead of reporting it. Every phrase here is raised by gori's own framing guards
-      # (`Codec::Body`, `Codec::Http1`, the h2 assembler/engine), never by a socket.
-      PROTOCOL_ERROR_PHRASES = {
-        "malformed", "framing", "interim", "chunk",
-        "conflicting content-length", "ambiguous framing", "obfuscated",
-        "transfer-encoding", "content-length", "invalid header", "invalid status",
-        "http/2", "h2 ", "hpack", "response head", "status line",
-      }
+      # The classifier moved to `Repeater::SendError` when `gori run send --format json` grew the
+      # same three fields (#1384); these names stay so MCP's own call sites and the specs that
+      # pin the contract keep reading as they did.
+      EXCHANGE_BUDGET_PHRASE = Repeater::SendError::EXCHANGE_BUDGET_PHRASE
 
-      # h2/RFC 9113 §7 conditions that are TRANSIENT even though the sentence naming them
-      # trips PROTOCOL_ERROR_PHRASES (every one of them says "h2 "). Keyed on the SPEC
-      # ERROR-CODE NAMES, not on gori's sentence: the names are fixed by the RFC and the
-      # engine renders them straight out of `H2Engine::GOAWAY_ERRORS`, so matching
-      # `refused_stream` survives any rewording of the sentence carrying it — which is the
-      # failure mode a whole-sentence literal would have.
-      #
-      # §8.7 makes REFUSED_STREAM an explicit RETRY instruction ("the request was not
-      # processed") and ENHANCE_YOUR_CALM is a rate signal, not a malformed message. Coding
-      # either as a non-retryable PROTOCOL_ERROR tells an agent to stop and file a finding
-      # where the correct action is to send the request again on a fresh connection.
-      RETRYABLE_H2_PHRASES = {"refused_stream", "enhance_your_calm"}
-
-      # "gori got no response frame at all" — the category `no_response` exists for. These
-      # also say "h2 ", so PROTOCOL_ERROR_PHRASES used to claim them and report an origin
-      # that simply closed the connection as a non-retryable framing refusal. A protocol
-      # verdict means gori can PROVE the message malformed; silence is not that.
-      NO_RESPONSE_PHRASES = {"no h2 response", "no response"}
-
-      # RFC 9113 §8.1 lets an origin answer while the request body is still going out — a 413
-      # after N bytes is exactly what an upload / body-size probe is looking for. The send has
-      # a REAL response (status, head, body); what it does not have is the whole request. That
-      # is neither a network fault nor gori proving the message malformed:
-      #   * retrying re-sends the entire body to a server that already rejected it, which for a
-      #     body-size probe is the wrong move and, at scale, is the probe becoming the attack;
-      #   * `PROTOCOL_ERROR` would blame someone for behaviour the RFC explicitly permits.
-      # So it gets its own kind and its own non-retryable code.
-      #
-      # Keyed on "truncated at" and NOT on "NOT fully sent", deliberately: the flow-control
-      # stall sentence (`H2Engine.flow_stalled`) ALREADY ends with "The request was NOT fully
-      # sent." and is a genuine stall that must stay `protocol`. The two conditions differ in
-      # whether a response arrived, and only the truncation sentence counts bytes with
-      # "truncated at".
-      TRUNCATED_REQUEST_PHRASE = "truncated at"
-
-      # The one `flow_stalled` variant that is a DEADLINE, not origin misbehaviour: gori's own
-      # budget for the whole exchange expired while the origin was still granting window in
-      # increments too small to finish the body. Its siblings — "the origin closed the
-      # connection before granting window", "the origin never granted flow-control window" —
-      # are the origin refusing to make progress, and `protocol` / non-retryable is right for
-      # those: retrying reproduces them and the refusal IS the finding.
-      #
-      # This one is different in the one way that matters to an agent: nothing about the
-      # target changed, only the clock ran out, and the correct next move is to raise
-      # `timeout_ms` — which `retryable: false` tells a caller not to attempt. It is the same
-      # shape as gori's ordinary idle timeout, which is already `timeout` / NETWORK_ERROR, so
-      # it is folded into that kind rather than given a fourth code: a deadline is a deadline.
-      #
-      # Keyed on this PHRASE and not on the whole sentence, and not on "NOT fully sent" —
-      # which every flow_stalled variant ends with, so matching that would sweep the siblings
-      # in with it. The phrase must stay in step with `H2Engine.flow_stalled`; the spec pins
-      # both it and a sibling sentence as DATA so a reword there cannot silently flip a
-      # verdict here.
-      EXCHANGE_BUDGET_PHRASE = "budget for the whole exchange"
-
-      # Coarse category for a send's network error, from the engine's error text
-      # (gori's own controlled strings). "connect" (the TCP layer: refused, unreachable,
-      # a connect timeout, or a name that did not resolve — the dialer now separates a
-      # certificate rejection, a refused handshake and an origin that accepts and then goes
-      # silent into their own sentences, which land on "other"/"timeout" as they should),
-      # "timeout" (idle read/write, and a TLS handshake that never got an answer), "protocol" (a deterministic
-      # framing/protocol refusal — see PROTOCOL_ERROR_PHRASES), "no_response", else "other".
-      #
-      # A pure function of the engine's sentence, so it is `self.` and directly testable: the
-      # retry policy an agent applies hangs off it, and the sentences it reads are written in
-      # another module. Pinning them in a spec is what keeps a reword there from silently
-      # flipping a retryable condition into "stop and report a finding".
       private def network_error_kind(message : String?) : String?
-        Tools.network_error_kind(message)
+        Repeater::SendError.kind(message)
       end
 
       def self.network_error_kind(message : String?) : String?
-        return nil unless message
-        m = message.downcase
-        return "connect" if m.starts_with?("connect failed")
-        return "timeout" if m.includes?("timed out") || m.includes?("timeout")
-        # Ahead of PROTOCOL_ERROR_PHRASES (the sentence says "h2 ") — see the constant.
-        return "timeout" if m.includes?(EXCHANGE_BUDGET_PHRASE)
-        # Both ahead of PROTOCOL_ERROR_PHRASES on purpose — see their own comments.
-        return "other" if RETRYABLE_H2_PHRASES.any? { |p| m.includes?(p) }
-        return "no_response" if NO_RESPONSE_PHRASES.any? { |p| m.includes?(p) }
-        return "protocol" if PROTOCOL_ERROR_PHRASES.any? { |p| m.includes?(p) }
-        # AFTER the three lists above, on purpose. A GOAWAY/RST_STREAM reason APPENDS the
-        # truncation clause rather than replacing it, so those sentences must keep the verdict
-        # their error code already earns them (REFUSED_STREAM stays retryable, CANCEL stays
-        # protocol) — every one of them says "h2 " and is matched strictly earlier.
-        return "truncated_request" if m.includes?(TRUNCATED_REQUEST_PHRASE)
-        return "no_response" if m.includes?("closed")
-        "other"
+        Repeater::SendError.kind(message)
       end
 
       # The structured-error pair for a failed send.
@@ -810,21 +718,12 @@ module Gori
         j.field "delivered", delivered
       end
 
-      # Split out and `self.` for the same reason `network_error_kind` is: the retry policy an
-      # agent applies hangs off this mapping, and pinning it in a spec is what stops a new kind
-      # from silently landing in the retryable bucket by falling through the `else`.
       def self.send_error_code(kind : String?) : String
-        case kind
-        when "protocol"          then "PROTOCOL_ERROR"
-        when "truncated_request" then "REQUEST_TRUNCATED"
-        else                          "NETWORK_ERROR"
-        end
+        Repeater::SendError.code(kind)
       end
 
-      # `self.` and separate from `send_error_code` for the same reason: this is the field an
-      # agent branches on, so a spec pins the PAIR rather than the code mapping alone.
       def self.send_retryable?(code : String, delivered : Bool) : Bool
-        code == "NETWORK_ERROR" && !delivered
+        Repeater::SendError.retryable?(code, delivered)
       end
 
       # The auto-Content-Length flag to persist on a save_as_repeater row. Hard-coded true
@@ -1074,33 +973,11 @@ module Gori
         Log.error(exception: ex) { "send_request: failed to finalize History flow #{flow_id}" }
       end
 
-      # OPT-IN Match&Replace parity for a direct send: direct sends are byte-exact (P7) by
-      # default — a repeater/fuzz caller wants exactly what it typed. apply_rules:true asks for
-      # live-proxy parity, so run the project's enabled REQUEST-side rules over the built bytes
-      # and re-sync Content-Length. Response-side rules are intentionally NOT applied. Returns
-      # the (possibly rewritten) request and whether a rule actually changed the bytes.
+      # OPT-IN Match&Replace parity (`Repeater::RequestRules`, shared with `gori run send
+      # --apply-rules`). Returns the (possibly rewritten) plan and whether a rule changed it.
       private def maybe_apply_request_rules(h, plan : Repeater::Plan) : {Repeater::Plan, Bool}
-        # Match&Replace parity operates on h1 head TEXT; a field-native plan has none (its
-        # `bytes` is only the synthetic scope line), so applying rules would rewrite that line
-        # and never the fields on the wire. A field list is byte-exact by construction — the
-        # reason apply_rules is opt-in at all — so it is simply not offered here.
-        return {plan, false} if plan.h2_fields
         return {plan, false} unless bool_arg(h, "apply_rules", false)
-        rules = Gori::Rules.load(store)
-        return {plan, false} unless rules.active?
-        # `add_if_missing: false` — this runs AFTER `Plan.build`, so it is past the point where
-        # `auto_content_length` was honoured, and the two plan shapes that reach here with that
-        # flag deliberately OFF (a `flow_id` capture and a `raw`/verbatim request, both built
-        # below with `auto_content_length: false`) are the ones this must not re-frame. A
-        # capture that carried no Content-Length is evidence — an h2/gRPC streamed POST is
-        # stored exactly that way — and inventing framing for it here would undo the very
-        # thing those call sites turned the flag off for. Rules may still CHANGE the body, so
-        # an EXISTING Content-Length is still re-synced; only the ADD is withheld.
-        rewritten = Repeater::FlowRequest.resync_content_length(
-          rules.transform_message(String.new(plan.bytes), Store::RuleTarget::Request, plan.host).to_slice,
-          add_if_missing: false)
-        return {plan, false} if rewritten == plan.bytes
-        {plan.with_requests([rewritten]), true}
+        Repeater::RequestRules.apply(plan, Gori::Rules.load(store))
       end
 
       # The agent-action feed line for one send: the origin dialled and what came back. The

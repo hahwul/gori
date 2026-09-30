@@ -222,7 +222,7 @@ module Gori
           # slot's header) — the plan says so when it cannot carry one.
           request_macro_flags(p, macro_flags, "candidate")
           p.on("--ac", "Auto-calibrate: sample the target's noise and drop matching responses") { auto_cal = true }
-          p.on("--format=FMT", "Output: text (default) | json | jsonl") { |v| format = parse_format(v, [:text, :json, :jsonl]) }
+          format_flag(p, [:text, :json, :jsonl], "Output: text (default) | json | jsonl") { |f| format = f }
           p.on("--force", "Run even when the request count is huge or unknown") { force = true }
           p.on("--bind-from=FLOW-ID", "Replay this captured flow FIRST so its response fills session bindings ($BIND.NAME; bare syntax: $NAME)") { |v| bind_from = parse_flow_id(v, "gori run fuzz") }
           p.on("--slot=NAME", "Send as this SESSION SLOT — its header overlay, and its binding table for $BIND.NAME tokens (bare syntax: $NAME)") { |v| slot = v.strip }
@@ -231,7 +231,7 @@ module Gori
           p.on("--record-history=POLICY", "Also record sent request+response as History flows: none (default) | matched | all. Matched rows carry the flow_id; 'all' is capped at #{Fuzz::HistoryRecord::MAX} flows") { |v| record_policy = parse_record_history(v) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run fuzz: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run fuzz", f, p) }
           p.missing_option { |f| abort "gori run fuzz: missing value for #{f}" }
         end
         parser.parse(args)
@@ -492,7 +492,10 @@ module Gori
           # every row of it. See CLI::Run.seed_bindings. An unseeded `$NAME` is not refused —
           # it ships literally (see `Env.unbound`).
           (fid = bind_from) && seed_bindings(fid, project_name, db_path, outbound, insecure, "gori run fuzz")
-          plan.engine.calibrate_baseline if auto_cal
+          if auto_cal
+            say_request_line_rewrite # calibration already sends the rewritten request
+            plan.engine.calibrate_baseline
+          end
           if save_results && (s = write_store)
             saved_mode = fuzz_saved_mode(mode, race, plan.engine.race_count)
             saved = Fuzz::Persistence.new(s, Fuzz::SavedRunMeta.new(nil,
@@ -893,6 +896,7 @@ module Gori
         # a valid partial array on stdout.
         json_stream = format == :json ? CLI::Output::FuzzArrayStream.new(STDOUT) : nil
         begin
+          say_request_line_rewrite # the run is about to send it — see `warn_request_line_rewrite`
           engine.run do |ev|
             case ev
             when Fuzz::ProgressEvent
@@ -1186,7 +1190,12 @@ module Gori
         # response was truncated — a real finding that must not read as a clean short body) and
         # `resent?` (a `--retries` config re-send) join for the same argument: each is a fact the
         # run OBSERVED that vanishes if a matched-only gate drops the unmatched row carrying it.
-        return false unless r.interesting?
+        unless r.interesting?
+          # Settles the index, so the rows after it are not held waiting for it (see
+          # `FuzzArrayStream`'s index order).
+          json_stream.try(&.skip(r.index))
+          return false
+        end
         case format
         when :jsonl then puts CLI::Output.fuzz_row_json(r)
         when :json  then json_stream.try(&.append(r))

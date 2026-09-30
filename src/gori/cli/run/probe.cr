@@ -42,6 +42,7 @@ module Gori
         project_name : String? = nil
         query : String? = nil
         min_sev : Store::Severity? = nil
+        fail_on : Store::Severity? = nil
         category : String? = nil
         format = :text
         active = false
@@ -73,6 +74,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("-qQL", "--query=QL", "Only scan flows matching this QL query (host: status:>=500 size: …)") { |v| query = v }
           p.on("--severity=LEVEL", "Only show issues at/above LEVEL (info|low|medium|high|critical)") { |v| min_sev = parse_severity(v) }
+          p.on("--fail-on=LEVEL", "Exit 3 when a REPORTED issue is at/above LEVEL — a CI gate (the --severity/--category/--in-scope filters apply first)") { |v| fail_on = parse_severity(v, "--fail-on") }
           p.on("--category=CAT", "Only show issues in CAT (#{PROBE_CATEGORIES.join("|")})") { |v| category = parse_probe_category(v) }
           p.on("--in-scope", "Only show issues on hosts in the project's configured scope (the TUI's `s` lens; ALL flows are still scanned)") { in_scope = true }
           p.on("-a", "--active", "Include light-touch active checks (sends probe requests)") { active = true }
@@ -86,10 +88,10 @@ module Gori
           p.on("-k", "--insecure-upstream", "With --active, do not verify upstream TLS certificates") { insecure = true }
           p.on("--lenient", "Don't refuse a query naming an unknown field — search that token as text (old behaviour)") { lenient = true }
           p.on("--persist", "Also write the findings into the project's persisted list (what `probe issues` and the TUI Probe tab show), merged as the live scanner merges them") { persist = true }
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run probe: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run probe", f, p) }
           p.missing_option { |f| abort "gori run probe: missing value for #{f}" }
         end
         args = normalize_query_flag(args)
@@ -215,6 +217,24 @@ module Gori
         # After the report, which is complete either way, and non-zero: a script that asked for
         # the write must not read exit 0 as "the findings are in the project".
         exit 1 if persist_failed
+        exit_on_probe_findings(groups, fail_on)
+      end
+
+      # `--fail-on=LEVEL` (#1388): a scan used to exit 0 whatever it found, so it could not gate
+      # a CI job. Exit 3 — fuzz's `--fail-if-no-matches` verdict code — AFTER the report is
+      # written, so the job log still shows what failed it; 1 stays "the scan itself failed".
+      # Judged over the issues the command REPORTED, so `--category`/`--in-scope` narrow the
+      # gate exactly as they narrow the listing.
+      def self.probe_fail_count(groups : Array(Probe::Group), level : Store::Severity) : Int32
+        groups.count { |g| g.severity.value >= level.value }
+      end
+
+      private def self.exit_on_probe_findings(groups : Array(Probe::Group), level : Store::Severity?) : Nil
+        return unless level
+        n = probe_fail_count(groups, level)
+        return if n.zero?
+        STDERR.puts "gori run probe: #{n} issue#{n == 1 ? "" : "s"} at or above #{level.to_s.downcase} (--fail-on)"
+        exit 3
       end
 
       # The sentence an active scan owes an operator whose ENABLED out-of-band rules cannot run,
@@ -282,10 +302,10 @@ module Gori
           p.on("--severity=LEVEL", "Only show findings at/above LEVEL (info|low|medium|high|critical)") { |v| min_sev = parse_severity(v) }
           p.on("--category=CAT", "Only show findings in CAT (#{PROBE_CATEGORIES.join("|")})") { |v| category = parse_probe_category(v) }
           p.on("--host=HOST", "Only show findings for this exact host") { |v| host = v }
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort "gori run probe issues: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run probe issues", f, p) }
           p.missing_option { |f| abort "gori run probe issues: missing value for #{f}" }
         end
         parser.parse(args)
@@ -327,7 +347,7 @@ module Gori
           p.on("--host=HOST", "Bulk-dismiss every open finding on this host") { |v| host = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run probe dismiss: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run probe dismiss", f, p) }
           p.missing_option { |f| abort "gori run probe dismiss: missing value for #{f}" }
         end
         parser.parse(args)
@@ -374,7 +394,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to write") { |v| db_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run probe promote: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run probe promote", f, p) }
           p.missing_option { |f| abort "gori run probe promote: missing value for #{f}" }
         end
         parser.parse(args)
@@ -421,7 +441,7 @@ module Gori
           p.on("--yes", "Required with --all (there is no interactive prompt here)") { yes = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run probe delete: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run probe delete", f, p) }
           p.missing_option { |f| abort "gori run probe delete: missing value for #{f}" }
         end
         parser.parse(args)
@@ -485,10 +505,10 @@ module Gori
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--kind=KIND", "Only list rules of this kind (passive|active|custom)") { |v| kind = parse_rule_kind(v) }
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort "gori run probe rules: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run probe rules", f, p) }
           p.missing_option { |f| abort "gori run probe rules: missing value for #{f}" }
         end
         parser.parse(args)
@@ -526,7 +546,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to write") { |v| db_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = one_positional_list(before, after, "gori run probe rules #{verb}", "<rule-id>") }
-          p.invalid_option { |f| abort "gori run probe rules #{verb}: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run probe rules #{verb}", f, p) }
           p.missing_option { |f| abort "gori run probe rules #{verb}: missing value for #{f}" }
         end
         parser.parse(args)
@@ -587,9 +607,9 @@ module Gori
           p.on("--exec", "Treat --pattern as a COMMAND: the region goes to it on stdin, exit 0 = " \
                          "match, stdout = evidence. Run with no shell and with your own privileges") { match_kind = "exec" }
           p.on("-sSEVERITY", "--severity=SEVERITY", "info|low|medium|high|critical (default info)") { |v| sev_s = v }
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort "gori run probe rules add: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run probe rules add", f, p) }
           p.missing_option { |f| abort "gori run probe rules add: missing value for #{f}" }
         end
         parse_no_positionals(parser, args, "gori run probe rules add",
@@ -647,7 +667,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to write") { |v| db_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = one_positional_list(before, after, "gori run probe rules delete", "<custom-rule-id>") }
-          p.invalid_option { |f| abort "gori run probe rules delete: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run probe rules delete", f, p) }
           p.missing_option { |f| abort "gori run probe rules delete: missing value for #{f}" }
         end
         parser.parse(args)
@@ -686,7 +706,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file") { |v| db_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = one_positional_list(before, after, "gori run probe mode", "<mode>") }
-          p.invalid_option { |f| abort "gori run probe mode: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run probe mode", f, p) }
           p.missing_option { |f| abort "gori run probe mode: missing value for #{f}" }
         end
         parser.parse(args)
@@ -752,8 +772,8 @@ module Gori
         "#{q[0, QUERY_ECHO_LIMIT]}…"
       end
 
-      private def self.parse_severity(v : String) : Store::Severity
-        Store::Severity.parse?(v) || abort "gori run probe: invalid --severity '#{v}' (info|low|medium|high|critical)"
+      private def self.parse_severity(v : String, flag : String = "--severity") : Store::Severity
+        Store::Severity.parse?(v) || abort "gori run probe: invalid #{flag} '#{v}' (info|low|medium|high|critical)"
       end
 
       private def self.parse_probe_category(v : String) : String

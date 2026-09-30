@@ -4571,3 +4571,40 @@ and the CLI and MCP narrow the same two reads with `--origin` / `origin`.
   hide-static on it reads the wide index rather than `idx_flows_sitemap_nonstatic`, which lacks
   scheme and port; widening that index is a migration of its own and was not needed to stay
   covering and sort-free.
+
+### 2026-09-30: `gori run` defaults are for scripts: a pinned default project, one JSON shape, curl's letters (#1383, #1386, #1387)
+
+Refines: [P1](#p1), [P7](#p7). Issues #1383–#1389, from dogfooding 0.7.1.
+
+A script reads what the CLI prints and nothing else, so a default a human would notice and correct
+is a default a script silently obeys. Three were wrong in that way.
+
+- **The default project is pinned, not guessed.** "Most recently active" is a fact about the last
+  WRITE, so `notes create --project demo` re-aimed every later `--project`-less command. The CLI now
+  reads, in order, `GORI_PROJECT` and a persisted `gori run project switch` pin before that fallback
+  (`CLI::Run.default_project`), and a pin that names nothing is REFUSED, never skipped — falling
+  through to the recent project is exactly the re-aim the pin exists to stop. This is `gori run`
+  resolution only: `ProjectRegistry.default_of` is unchanged, the TUI opens what the operator picks,
+  and MCP keeps its own binding (`GORI_MCP_PROJECT`, the workspace). Not done: making an explicit
+  `--project` write leave the recent-project order alone; that order is the db's mtime, shared with
+  the TUI picker, and the pin makes it irrelevant to a script.
+- **`json` is one document, `jsonl` is lines, on every command.** `history` and `capture` answered
+  `json` with JSON Lines while every other command answered with an array, so `| jq length` meant
+  two things. Streaming stays streaming: `history` writes its array row by row, and `capture` opens
+  its array at once and closes it from the printer's `ensure` on `--for`, `--max` or a signal, so
+  what a consumer collects is always one document. `fuzz`'s array is written in index order through
+  a reorder buffer that holds only the concurrency window. `--json` is registered by the same
+  helper as `--format` (`CLI::Run.format_flag`) so it cannot be missing from a new command.
+- **A curl-shaped command takes curl's letters.** `gori run send` borrowed curl's shape and gave
+  `-b` the body; a curl user's `-b 'admin=1'` became a body on a GET. `-d` is the body now (POST and
+  a form Content-Type unless `-X`/`-H` say otherwise), `-b` the cookie, joined with curl's `;`. A
+  `-b` value with no `=` — a cookie-jar file to curl, and the shape of an old `-b '{"a":1}'` body —
+  is refused rather than sent. The defaults live in the CLI's option handling, not in
+  `Repeater::UrlRequest.structured`, which MCP shares and whose `body` never meant curl's `-d`.
+
+Two shared seams moved down to make the parity real rather than copied: the send-error classifier
+(`Repeater::SendError`, formerly MCP's `network_error_kind`/`send_error_code`/`send_retryable?`) and
+Match & Replace for a direct send (`Repeater::RequestRules`, formerly MCP's
+`maybe_apply_request_rules`). Renaming the flags whose meaning differs across commands (`--target`,
+`--header`, `-n`, `--unsafe`, `--owner/--id`) is left to additive aliases; a rename would break the
+scripts this entry is about.

@@ -76,10 +76,10 @@ module Gori
           p.on("--bind-from=FLOW-ID", "Replay this captured flow FIRST so its response fills session bindings ($BIND.NAME; bare syntax: $NAME)") { |v| bind_from = parse_flow_id(v, "gori run mine") }
           p.on("--slot=NAME", "Send as this SESSION SLOT — its header overlay, and its binding table for $BIND.NAME tokens (bare syntax: $NAME)") { |v| slot = v.strip }
           p.on("--allow-unscoped", "Send even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
-          p.on("--format=FMT", "Output: text (default) | json | jsonl") { |v| format = parse_format(v, [:text, :json, :jsonl]) }
+          format_flag(p, [:text, :json, :jsonl], "Output: text (default) | json | jsonl") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run mine: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run mine", f, p) }
           p.missing_option { |f| abort "gori run mine: missing value for #{f}" }
         end
         parser.parse(args)
@@ -288,6 +288,7 @@ module Gori
         # normally and the emit below covers the interrupted path too.
         interrupted = Run.install_interrupt_trap("mine-interrupt",
           "interrupted — stopping and emitting what was found…") { engine.stop }
+        say_request_line_rewrite # the run is about to send it — see `warn_request_line_rewrite`
         engine.run do |ev|
           case ev
           when Miner::BaselineEvent then mine_baseline(ev)

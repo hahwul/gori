@@ -62,7 +62,7 @@ jq -rn --argjson exp "$(gori run jwt "$(cat "${GORI_HOME:-$HOME/.gori}/token.jwt
 
 {% preset(title="타깃이 5xx를 뱉기 시작했는지", src="/images/tui/statusline-errors.svg", alt="빨간색 statusline 한 줄: 1 × 5xx", note="타이머로 도는 History 쿼리입니다. History가 지금 걸어 둔 필터가 아니라 프로젝트 전체에 묻고, 타깃이 멀쩡한 동안은 아무것도 출력하지 않습니다 — 그래서 무언가 무너지는 순간에만 행이 나타납니다.") %}
 ```sh
-p=$(jq -r .project); gori run history --project "$p" -q 'status:>=500' -n 100000 --format json 2>/dev/null | jq -rs 'length | if . == 0 then "" else "\u001b[31m\(.) × 5xx\u001b[0m" end'
+p=$(jq -r .project); gori run history --project "$p" -q 'status:>=500' -n 100000 --format json 2>/dev/null | jq -r 'length | if . == 0 then "" else "\u001b[31m\(.) × 5xx\u001b[0m" end'
 ```
 {% end %}
 
@@ -107,7 +107,7 @@ project=$(printf '%s' "$ctx" | jq -r .project)
 token=$(jq -rn --argjson exp "$(gori run jwt "$(cat "${GORI_HOME:-$HOME/.gori}/token.jwt")" --format json | jq .payload.exp)" \
   '(($exp - now) / 60 | floor) as $m | if $m < 5 then "\u001b[31m⚠ token \($m)m left\u001b[0m" else "\u001b[32m●\u001b[0m token \($m)m left" end')
 errors=$(gori run history --project "$project" -q 'status:>=500' -n 100000 --format json 2>/dev/null |
-  jq -rs 'length | if . == 0 then "" else "\u001b[31m\(.) × 5xx\u001b[0m" end')
+  jq -r 'length | if . == 0 then "" else "\u001b[31m\(.) × 5xx\u001b[0m" end')
 todo=$(gori run notes --all --project "$project" |
   awk '/^- \[ \]/ { n++; if (n == 1) first = substr($0, 7) } END { if (n) printf "todo %d · %s", n, first }')
 

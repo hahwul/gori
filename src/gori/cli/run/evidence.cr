@@ -60,10 +60,10 @@ module Gori
           p.on("--ref-id=M", "Source id (required)") { |v| ref_id = parse_evidence_id(v, "--ref-id") }
           p.on("--no-link", "Only copy — do not also file the live link `links add` would") { link = false }
           p.on("--allow-drift", "Freeze a Repeater tab whose request was edited after its stored response") { allow_drift = true }
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort "gori run evidence freeze: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run evidence freeze", f, p) }
           p.missing_option { |f| abort "gori run evidence freeze: missing value for #{f}" }
         end
         parser.parse(args)
@@ -140,10 +140,10 @@ module Gori
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--issue=N", "Issue id (omit for the whole project archive)") { |v| issue_id = parse_evidence_id(v, "--issue") }
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort "gori run evidence: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run evidence", f, p) }
           p.missing_option { |f| abort "gori run evidence: missing value for #{f}" }
         end
         parser.parse(args)
@@ -188,10 +188,10 @@ module Gori
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--include-sensitive", "Emit credential header values verbatim instead of [REDACTED]") { include_sensitive = true }
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run evidence show: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run evidence show", f, p) }
           p.missing_option { |f| abort "gori run evidence show: missing value for #{f}" }
         end
         parser.parse(args)
@@ -232,7 +232,7 @@ module Gori
           p.on("--issue=N", "Issue id (required)") { |v| issue_id = parse_evidence_id(v, "--issue") }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run evidence #{verb}: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run evidence #{verb}", f, p) }
           p.missing_option { |f| abort "gori run evidence #{verb}: missing value for #{f}" }
         end
         parser.parse(args)
@@ -292,7 +292,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run evidence delete: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run evidence delete", f, p) }
           p.missing_option { |f| abort "gori run evidence delete: missing value for #{f}" }
         end
         parser.parse(args)

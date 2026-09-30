@@ -378,16 +378,39 @@ module Gori
       # here: a session send expands the whole draft afterwards (`Plan`), and a flow replay
       # expands the operator's overrides at its own merge seam.
       def self.replace_request_target(wire : Bytes, target : String) : Bytes?
+        at, line = first_request_line(wire) || return nil
+        splice_request_target(wire, at, line, target)
+      end
+
+      # {byte offset, text} of the request line: the first line that is not blank by
+      # `String#strip`, as the scope gate finds it (see `replace_request_target`). One home, so
+      # the method and the target splice can never disagree about which line they edit.
+      private def self.first_request_line(wire : Bytes) : {Int32, String}?
         pos = 0
         while pos < wire.size
           nl = wire.index(0x0A_u8, pos)
           stop = nl || wire.size
           line = String.new(wire[pos, stop - pos])
-          return splice_request_target(wire, pos, line, target) unless line.strip.empty?
+          return {pos, line} unless line.strip.empty?
           return nil unless nl
           pos = nl + 1
         end
         nil
+      end
+
+      # `wire` with its METHOD (the request line's first token) replaced by `method` — `gori run
+      # repeater <flow-id> -X` (#1384) — or nil when there is no request line. Found exactly as
+      # `replace_request_target` finds the line and its tokens, for the reason given there; the
+      # target, the version, every byte of whitespace between them, the headers and the body
+      # stay byte-exact. `method` goes in verbatim (P7).
+      def self.replace_method(wire : Bytes, method : String) : Bytes?
+        at, line = first_request_line(wire) || return nil
+        span = token_spans(line).first? || return nil
+        io = IO::Memory.new(wire.size + method.bytesize)
+        io.write(wire[0, at + span[0]])
+        io << method
+        io.write(wire[(at + span[1])..])
+        io.to_slice
       end
 
       private def self.splice_request_target(wire : Bytes, at : Int32, line : String, target : String) : Bytes?

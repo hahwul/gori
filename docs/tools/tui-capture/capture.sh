@@ -106,7 +106,7 @@ commands = {
     ),
     "errors": (
         r"""p=$(jq -r .project); gori run history --project "$p" -q 'status:>=500' --format json"""
-        r""" 2>/dev/null | jq -rs 'length | if . == 0 then "" else"""
+        r""" 2>/dev/null | jq -r 'length | if . == 0 then "" else"""
         r""" "\u001b[31m\(.) \u00d7 5xx\u001b[0m" end'"""
     ),
     "todo": (
@@ -143,7 +143,7 @@ project=$(printf '%s' "$ctx" | jq -r .project)
 token=$(jq -rn --argjson exp "$(gori run jwt "$(cat "${GORI_HOME:-$HOME/.gori}/token.jwt")" --format json | jq .payload.exp)" \
   '(($exp - now) / 60 | floor) as $m | if $m < 5 then "\u001b[31m⚠ token \($m)m left\u001b[0m" else "\u001b[32m●\u001b[0m token \($m)m left" end')
 errors=$(gori run history --project "$project" -q 'status:>=500' --format json 2>/dev/null |
-  jq -rs 'length | if . == 0 then "" else "\u001b[31m\(.) × 5xx\u001b[0m" end')
+  jq -r 'length | if . == 0 then "" else "\u001b[31m\(.) × 5xx\u001b[0m" end')
 todo=$(gori run notes --all --project "$project" |
   awk '/^- \[ \]/ { n++; if (n == 1) first = substr($0, 7) } END { if (n) printf "todo %d · %s", n, first }')
 

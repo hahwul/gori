@@ -8,7 +8,7 @@ module Gori
       # <id>` is the top-level `gori run show <id>`, spelled the way the History tab reads.
       @[Subcommand("history", "ls", help: [
         {"history (ls)", "List / QL-query captured flows"},
-        {"history delete", "Hard-delete one captured flow by id, or every match of -q QL (needs --yes)"},
+        {"history delete", "Hard-delete captured flows by id (one or more), or every match of -q QL (needs --yes)"},
         {"history clear", "Delete ALL captured flows in the project (needs --yes)"},
       ])]
       private def self.cmd_history(args : Array(String)) : Nil
@@ -38,9 +38,10 @@ module Gori
         positional = [] of String
 
         parser = OptionParser.new do |p|
-          p.banner = "Usage: gori run history delete <id>\n" \
+          p.banner = "Usage: gori run history delete <id>…\n" \
                      "       gori run history delete -q QL --yes\n\n" \
-                     "Hard-delete one captured flow, or every flow a QL query matches. " \
+                     "Hard-delete the captured flows named by id (every id must exist, or nothing is " \
+                     "deleted), or every flow a QL query matches. " \
                      "This can't be undone."
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
@@ -48,7 +49,7 @@ module Gori
           p.on("--yes", "Actually delete the query's matches (required — there is no interactive prompt here)") { yes = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run history delete: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run history delete", f, p) }
           p.missing_option { |f| abort "gori run history delete: missing value for #{f}" }
         end
         # Same two pre-passes the listing runs, for the same reason: `-q` with a separate
@@ -90,25 +91,30 @@ module Gori
         end
       end
 
-      # `history delete <id>` — the single, explicit form.
+      # `history delete <id>…` — the explicit form, one id or several (#1388).
+      #
+      # It took exactly one, and refused `1 2 3` so as not to delete only #1 and exit 0 — right
+      # at the time, and still the half that matters: every id is checked BEFORE anything is
+      # deleted, and one that names no flow refuses the whole command, so a typo in a list
+      # never becomes "two of three gone, success". The rest go in ONE transaction
+      # (`Store#delete_flows`), so a busy project deletes all of them or none.
       private def self.delete_by_id(positional : Array(String), project_name : String?,
                                     db_path : String?) : Nil
-        # `take_flow_id`, not a hand-rolled `first?`: it supplies the too-many-arguments abort
-        # this one path was missing, so `history delete 1 2 3` no longer deletes ONLY flow #1
-        # and exits 0 with nothing said about #2 and #3. The TUI has multi-select delete and the
-        # store exposes `delete_flows`, so trying the list form is natural — and an operator who
-        # believes three captures are gone when two are still on disk has been told a lie by a
-        # destructive command. Every sibling id-taking delete (project, scope, env,
-        # host-override, `history show`) already goes through this helper.
-        id = take_flow_id(positional, "history delete")
+        ids = positional.map { |v| parse_flow_id(v, "gori run history delete") }.uniq!
 
         store = open_store(resolve_read_project(project_name, db_path))
         begin
           # flow_row is the row-only read; get_flow would materialize both BLOBs to answer
           # "does this exist?" — a 40 MB response would be read and discarded.
-          abort "gori run history delete: no flow with id #{id}" unless store.flow_row(id)
-          abort "gori run history delete: flow ##{id} NOT deleted (project busy) — try again" unless store.delete_flow(id)
-          puts "Flow ##{id} deleted."
+          missing = ids.reject { |id| store.flow_row(id) }
+          unless missing.empty?
+            abort "gori run history delete: no flow with id #{missing.join(", ")}" \
+                  "#{ids.size > 1 ? " — nothing was deleted" : ""}"
+          end
+          unless store.delete_flows(ids)
+            abort "gori run history delete: #{ids.size == 1 ? "flow ##{ids[0]}" : "flows"} NOT deleted (project busy) — try again"
+          end
+          puts ids.size == 1 ? "Flow ##{ids[0]} deleted." : "#{ids.size} flows deleted (#{ids.map { |id| "##{id}" }.join(", ")})."
         ensure
           store.close
         end
@@ -328,7 +334,7 @@ module Gori
           p.on("--yes", "Actually do it (required — there is no interactive prompt here)") { yes = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort "gori run history clear: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run history clear", f, p) }
           p.missing_option { |f| abort "gori run history clear: missing value for #{f}" }
         end
         parser.parse(args)
@@ -381,15 +387,12 @@ module Gori
           p.on("--lenient", "Don't refuse a query naming an unknown field — search that token as text (old behaviour)") { lenient = true }
           p.on("--column=SPEC", "Show an extracted value per row: [LABEL=][req|res:]kind:selector — e.g. header:x-request-id, RID=jsonpath:data.id, position:0:32 (repeatable; replaces this project's configured History columns)") { |v| column_specs << v }
           p.on("--no-columns", "Don't draw this project's configured History columns (see the TUI's Columns… on the History tab)") { no_columns = true }
-          p.on("--format=FMT", "Output: text (default) | json | jsonl (both emit JSON-Lines) | har (one HAR 1.2 log)") do |v|
-            format = parse_format(v, [:text, :json, :jsonl, :har])
-            format = :json if format == :jsonl # this listing's json IS JSON-Lines; accept the standard name too
-          end
+          format_flag(p, [:text, :json, :jsonl, :har], "Output: text (default) | json (one array) | jsonl (one object per line) | har (one HAR 1.2 log)") { |f| format = f }
           p.on("--include-sensitive", "Emit Authorization/Cookie/Set-Cookie/API-key values in --format json's per-row headers instead of [REDACTED]") { include_sensitive = true }
           redact_options(p, redaction)
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run history: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run history", f, p) }
           p.missing_option { |f| abort "gori run history: missing value for #{f}" }
         end
         args = normalize_query_flag(args)
@@ -431,8 +434,8 @@ module Gori
         # value on the text row too, and the configured set is drawn by default. `--format har`
         # is untouched on purpose (an interchange document has to carry the message in full to
         # be replayable), but that is a paragraph for the docs, not a claim to make here.
-        if include_sensitive && format != :json
-          STDERR.puts "gori run history: --include-sensitive only changes --format json"
+        if include_sensitive && !format.in?(:json, :jsonl)
+          STDERR.puts "gori run history: --include-sensitive only changes --format json/jsonl"
         end
         # Refused rather than ignored. A profile redacts BODIES, and `--format har` is the only
         # listing format that carries one — so `--redact` on the text/json listing would hand
@@ -601,7 +604,7 @@ module Gori
             # script rather than a warning about anything they did.
             STDERR.puts "gori run history: --column is not carried by --format har (the values are in each entry's headers/content)" unless column_specs.empty?
             emit_har(store, rows, query, view_label, limit, truncated, redaction, hide_static)
-          elsif format == :json
+          elsif format.in?(:json, :jsonl)
             # Said on STDERR in the streaming formats too, for the reason the empty note below
             # gives: STDOUT is a pipe, and the consumer reading it cannot see the flags the
             # command was invoked with.
@@ -613,12 +616,32 @@ module Gori
             # pure stream either way (this is STDERR), so a pipe is unaffected.
             STDERR.puts empty_listing_note(query, view_label, in_scope, hide_static) if rows.empty?
             # One extra read per row for the head the projection does not carry — that is what
-            # buys `url` and `headers` on the JSON-Lines row (`Output.flow_row_fields`). Heads
-            # are small and this streams row by row, so a large `-n` costs queries, not memory.
-            rows.each do |r|
-              cols, cols_redacted = row_columns(store, r, prepared, include_sensitive) || {nil, false}
-              puts CLI::Output.flow_row_json(r, store.request_head(r.id), cols,
-                include_sensitive: include_sensitive, columns_redacted: cols_redacted)
+            # buys `url` and `headers` on the row (`Output.flow_row_fields`). Heads are small and
+            # this streams row by row, so a large `-n` costs queries, not memory.
+            #
+            # `json` is ONE array and `jsonl` one object per line (#1386). `json` used to be
+            # JSON-Lines here and an array everywhere else, so `history --format json | jq
+            # length` measured each row instead of counting them. The array is still streamed,
+            # element by element, rather than built whole. Each row is encoded before its
+            # separator and the array closes in `ensure`, so a read that raises mid-stream still
+            # leaves the rows before it as one valid document, as the fuzz stream does.
+            array = format == :json
+            print '[' if array
+            begin
+              rows.each_with_index do |r, i|
+                cols, cols_redacted = row_columns(store, r, prepared, include_sensitive) || {nil, false}
+                line = CLI::Output.flow_row_json(r, store.request_head(r.id), cols,
+                  include_sensitive: include_sensitive, columns_redacted: cols_redacted)
+                print ',' if array && i > 0
+                array ? print(line) : puts(line)
+              end
+            ensure
+              if array
+                begin
+                  puts ']'
+                rescue IO::Error # a closed pipe: nothing is reading the close either
+                end
+              end
             end
           elsif rows.empty?
             STDERR.puts empty_listing_note(query, view_label, in_scope, hide_static)
@@ -842,7 +865,7 @@ module Gori
           p.banner = "Usage: gori run show <flow-id> [options]"
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
-          p.on("--format=FMT", "Output: text (default) | json | raw (exact bytes) | har (a one-entry HAR 1.2 log) | curl | python | fetch | go | httpie (the request as runnable client code) | csrf (a self-submitting HTML CSRF PoC)") { |v| format = parse_format(v, [:text, :json, :raw, :har, :curl, :python, :fetch, :go, :httpie, :csrf]) }
+          format_flag(p, [:text, :json, :raw, :har, :curl, :python, :fetch, :go, :httpie, :csrf], "Output: text (default) | json | raw (exact bytes) | har (a one-entry HAR 1.2 log) | curl | python | fetch | go | httpie (the request as runnable client code) | csrf (a self-submitting HTML CSRF PoC)") { |f| format = f }
           p.on("--request-only", "Only the request side") { req_only = true }
           p.on("--response-only", "Only the response side") { resp_only = true }
           p.on("--headers-only", "text/json: print the request line/status line and headers only — each body is replaced by a line naming its size, and the sections derived from bodies (decoded views, gRPC messages, WebSocket frames, SSE events) are left out, named with their counts where they have one") { headers_only = true }
@@ -850,7 +873,7 @@ module Gori
           redact_options(p, redaction)
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run show: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run show", f, p) }
           p.missing_option { |f| abort "gori run show: missing value for #{f}" }
         end
         parser.parse(args)

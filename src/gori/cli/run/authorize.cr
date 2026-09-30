@@ -41,16 +41,18 @@ module Gori
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--unsafe-methods", "Also replay POST/PUT/PATCH/DELETE — each identity re-runs the side effect") { unsafe_methods = true }
+          # `probe --active`'s spelling of the same permission (#1389).
+          p.on("--unsafe", "Alias for --unsafe-methods") { unsafe_methods = true }
           p.on("--allow-unscoped", "Send even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
           p.on("-k", "--insecure-upstream", "Do not verify upstream TLS certificates") { insecure = true }
           p.on("--timeout=SEC", "Per-request connect + idle timeout (seconds)") { |v| timeout = parse_count(v, "--timeout").seconds }
-          p.on("--format=FMT", "Output: text (default) | json (one array at the end) | jsonl (streamed)") { |v| format = parse_format(v, [:text, :json, :jsonl]) }
+          format_flag(p, [:text, :json, :jsonl], "Output: text (default) | json (one array at the end) | jsonl (streamed)") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           # BOTH halves: the second is everything after a `--`, which a handler binding only the
           # first silently discards (see spec/cli_spec.cr's source guard). Here that would drop
           # flow ids — `gori run authorize -- 42` would refuse with "no request selected".
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run authorize: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run authorize", f, p) }
           p.missing_option { |f| abort "gori run authorize: missing value for #{f}" }
         end
         # `-q '-path:/x'` reads as another flag unless it is rewritten to `--query=…` first —
@@ -351,9 +353,12 @@ module Gori
             "[{\"name\":\"anonymous\",\"remove\":[\"Cookie\"]}]. An entry with no \"name\" is " \
             "skipped and a malformed file reads as empty, so check the JSON parsed"
           else
-            "this project has no identities saved besides the baseline — add them in the TUI " \
-            "Authorize tab, or pass --identities FILE with at least one, e.g. " \
-            "[{\"name\":\"anonymous\",\"remove\":[\"Cookie\"]}]"
+            # Identities ARE session slots (`Authorize::Identity`), so the headless way to save
+            # one is `session add` — named first, because a CLI user reading this has no TUI open.
+            "this project has no identities saved besides the baseline — add them with " \
+            "`gori run session add --name NAME --set 'Cookie: …'` or `--remove Cookie` (every session slot is an identity; " \
+            "`gori run session list` shows them) or in the TUI Authorize tab, or pass " \
+            "--identities FILE with at least one, e.g. [{\"name\":\"anonymous\",\"remove\":[\"Cookie\"]}]"
           end
         in Authorize::PlanError::Reason::DuplicateIdentity
           "two identities are called #{(ex.detail || "?").inspect} — in --identities, or in the " \

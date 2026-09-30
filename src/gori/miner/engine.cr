@@ -269,6 +269,13 @@ module Gori::Miner
         # `mine_all_refused?` prints, and "every request failed — baseline unreachable —
         # blocked by sandbox" says the same thing three times.
         @first_error ||= report.error
+        # …and COUNTED. Calibration sends never reach `@errors` (a failed stability round only
+        # thins the baseline), so a run refused here ended on `10 sent · 0 errors` — on every
+        # surface, since `snapshot` is what `gori run mine`, MCP `mine_status` and the TUI all
+        # print (#1385). Nothing but calibration has gone out yet, and no stability round
+        # answered, so every attempt so far is a failure (a control that answered while every
+        # round did not would be the one over-count, and is not a shape a live target has).
+        @errors += @backend.sent
         @events.send(ErrorEvent.new(report.warning || "baseline unreachable"))
         @events.send(DoneEvent.new(snapshot, @state.stopped?))
         return

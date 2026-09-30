@@ -31,10 +31,10 @@ module Gori
                      "Run 'gori run decoder list' for every converter name."
           p.on("--input=STR", "Value to convert (else 2nd positional arg, else STDIN)") { |v| input_flag = v }
           p.on("-oMODE", "--output=MODE", "Render final bytes: auto (default) | text | base64 | hex") { |v| output_mode = parse_render_mode(v) }
-          p.on("--format=FMT", "Output: text (default) | json (per-step detail)") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json (per-step detail)") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run decoder: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run decoder", f, p) }
           p.missing_option { |f| abort "gori run decoder: missing value for #{f}" }
         end
         parser.parse(args)
@@ -155,9 +155,9 @@ module Gori
         format = :text
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run decoder list [options]\n\nList every converter (name, category, direction)."
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort "gori run decoder list: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run decoder list", f, p) }
           p.missing_option { |f| abort "gori run decoder list: missing value for #{f}" }
         end
         parse_no_positionals(parser, args, "gori run decoder list",

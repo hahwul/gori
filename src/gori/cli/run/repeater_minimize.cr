@@ -33,10 +33,10 @@ module Gori
           p.on("--insecure", "Alias for --insecure-upstream") { insecure = true }
           p.on("--allow-unscoped", "Minimize even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
           p.on("--slot=NAME", "Send as this SESSION SLOT — its header overlay, and its binding table for $BIND.NAME tokens (bare syntax: $NAME)") { |v| slot = v.strip }
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run repeater minimize: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run repeater minimize", f, p) }
           p.missing_option { |f| abort "gori run repeater minimize: missing value for #{f}" }
         end
         parser.parse(args)

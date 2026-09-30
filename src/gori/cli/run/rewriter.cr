@@ -59,9 +59,9 @@ module Gori
           p.banner = "Usage: gori run rewriter preset list\n\n" \
                      "Lists the response-modification presets. Install one with\n" \
                      "  gori run rewriter preset add <name>"
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort "gori run rewriter preset list: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run rewriter preset list", f, p) }
           p.missing_option { |f| abort "gori run rewriter preset list: missing value for #{f}" }
         end
         parse_no_positionals(parser, args, "gori run rewriter preset list",
@@ -107,7 +107,7 @@ module Gori
           p.on("--disabled", "Install the rules disabled, to review before they touch traffic") { disabled = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = one_positional_list(before, after, "gori run rewriter preset add", "<preset-name>") }
-          p.invalid_option { |f| abort "gori run rewriter preset add: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run rewriter preset add", f, p) }
           p.missing_option { |f| abort "gori run rewriter preset add: missing value for #{f}" }
         end
         parser.parse(args)
@@ -184,10 +184,10 @@ module Gori
           p.banner = "Usage: gori run rewriter extract [list] [options]"
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort "gori run rewriter extract: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run rewriter extract", f, p) }
           p.missing_option { |f| abort "gori run rewriter extract: missing value for #{f}" }
         end
         parser.parse(args)
@@ -249,9 +249,9 @@ module Gori
           p.on("--selector=SEL", "Cookie/header name, regex, or JSON path") { |v| selector = v }
           p.on("--range=A:B", "position only: a half-open byte range of the decoded body") { |v| range_s = v }
           p.on("--disabled", "Create the rule disabled") { disabled = true }
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort "gori run rewriter extract add: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run rewriter extract add", f, p) }
           p.missing_option { |f| abort "gori run rewriter extract add: missing value for #{f}" }
         end
         parse_no_positionals(parser, args, "gori run rewriter extract add",
@@ -342,7 +342,7 @@ module Gori
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort "gori run rewriter extract #{verb}: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run rewriter extract #{verb}", f, p) }
           p.missing_option { |f| abort "gori run rewriter extract #{verb}: missing value for #{f}" }
         end
         rest = [] of String
@@ -369,9 +369,9 @@ module Gori
                      "read them — open the Rewriter tab's `bindings` sub-tab for the live table."
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort "gori run rewriter bindings: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run rewriter bindings", f, p) }
           p.missing_option { |f| abort "gori run rewriter bindings: missing value for #{f}" }
         end
         parse_no_positionals(parser, args, "gori run rewriter bindings",
@@ -469,10 +469,10 @@ module Gori
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--scope=SCOPE", "Show only project|global rules (default: both)") { |v| scope = parse_rule_scope(v) }
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort "gori run rewriter: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run rewriter", f, p) }
           p.missing_option { |f| abort "gori run rewriter: missing value for #{f}" }
         end
         parser.parse(args)
@@ -691,7 +691,10 @@ module Gori
                      "waits first, and --from-flow copies a captured response into the rule."
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
-          p.on("--target=SIDE", "request|response (default request)") { |v| target_s = v }
+          p.on("--side=SIDE", "request|response (default request)") { |v| target_s = v }
+          # `--side` is the name that does not collide (#1389): `--target` is a URL on every
+          # other command. Kept, so no script breaks.
+          p.on("--target=SIDE", "Alias for --side") { |v| target_s = v }
           p.on("--op=OP", "replace|add_header|set_header|remove_header|short_circuit|pipe (default replace)") { |v| op_s = v }
           p.on("--match=KIND", "literal|regex (default literal; replace/pipe/short_circuit only)") { |v| match_s = v }
           p.on("--part=PART", "head|body|ws (default head; replace/pipe only; ws = a WebSocket message)") { |v| part_s = v }
@@ -710,9 +713,9 @@ module Gori
           p.on("--hang=MS", "--fault=hang: how long to hold before closing (default #{Store::RespondArgs::DEFAULT_HANG_MS})") { |v| mock.hang_ms = parse_wait_ms(v, "--hang") }
           p.on("--from-flow=ID", "short_circuit: copy flow ID's captured response into the rule (--find/--host/--value override)") { |v| mock.from_flow = parse_flow_id(v, "gori run rewriter add") }
           p.on("--disabled", "Create the rule disabled") { disabled = true }
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort "gori run rewriter add: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run rewriter add", f, p) }
           p.missing_option { |f| abort "gori run rewriter add: missing value for #{f}" }
         end
         parse_no_positionals(parser, args, "gori run rewriter add",
@@ -843,7 +846,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("--scope=SCOPE", "Which <id>: project (default) | global") { |v| scope = parse_rule_scope(v) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort "gori run rewriter rm: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run rewriter rm", f, p) }
           p.missing_option { |f| abort "gori run rewriter rm: missing value for #{f}" }
         end
         positional = [] of String
@@ -899,7 +902,7 @@ module Gori
           p.on("--scope=SCOPE", "Which <id>: project (default) | global") { |v| scope = parse_rule_scope(v) }
           p.on("--everywhere", "global rules only: change the default for every project") { everywhere = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort "gori run rewriter #{action}: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run rewriter #{action}", f, p) }
           p.missing_option { |f| abort "gori run rewriter #{action}: missing value for #{f}" }
         end
         positional = [] of String
@@ -971,16 +974,19 @@ module Gori
                      "Estimate how many recent flows a rule WOULD affect, without creating it."
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
-          p.on("--target=SIDE", "request|response (default request)") { |v| target_s = v }
+          p.on("--side=SIDE", "request|response (default request)") { |v| target_s = v }
+          # `--side` is the name that does not collide (#1389): `--target` is a URL on every
+          # other command. Kept, so no script breaks.
+          p.on("--target=SIDE", "Alias for --side") { |v| target_s = v }
           p.on("--op=OP", "replace|add_header|set_header|remove_header|short_circuit|pipe (default replace)") { |v| op_s = v }
           p.on("--match=KIND", "literal|regex (default literal)") { |v| match_s = v }
           p.on("--part=PART", "head|body|ws (default head)") { |v| part_s = v }
           p.on("--host=GLOB", "Scope to a host glob") { |v| host = v }
           p.on("-fFIND", "--find=FIND", "Match substring/regex, or header name (required)") { |v| find = v }
           p.on("-vVALUE", "--value=VALUE", "Replacement, or header value") { |v| value = v }
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort "gori run rewriter preview: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run rewriter preview", f, p) }
           p.missing_option { |f| abort "gori run rewriter preview: missing value for #{f}" }
         end
         parse_no_positionals(parser, args, "gori run rewriter preview",

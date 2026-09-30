@@ -38,24 +38,26 @@ module Gori
                      "  --insomnia  request templates from an Insomnia v4 export (JSON)\n" \
                      "  --burp      saved Burp items (XML) — request AND response, byte-exact\n" \
                      "  --wsdl      SOAP request templates from a WSDL 1.1 service description (XML)\n" \
-                     "  --curl      curl commands (`-` reads stdin: `pbpaste | gori run import --curl -`) — one flow per request"
-          p.on("--har=PATH", "Import a HAR (HTTP Archive) export") { |v| sources[:har] = v }
-          p.on("--urls=PATH", "Import a URL list (one URL per line)") { |v| sources[:urls] = v }
-          p.on("--oas=PATH", "Import OpenAPI 3.x or Swagger 2.0 (JSON or YAML; local refs only)") { |v| sources[:oas] = v }
-          p.on("--postman=PATH", "Import a Postman Collection v2 export") { |v| sources[:postman] = v }
-          p.on("--insomnia=PATH", "Import an Insomnia v4 JSON export") { |v| sources[:insomnia] = v }
-          p.on("--burp=PATH", "Import a Burp Suite item export (XML)") { |v| sources[:burp] = v }
-          p.on("--wsdl=PATH", "Import a WSDL 1.1 service description (SOAP 1.1/1.2)") { |v| sources[:wsdl] = v }
+                     "  --curl      curl commands — one flow per request\n\n" \
+                     "Every source reads stdin when its PATH is `-` (`pbpaste | gori run import --curl -`,\n" \
+                     "`generator | gori run import --urls -`); stdin must be a pipe or a redirect."
+          p.on("--har=PATH", "Import a HAR (HTTP Archive) export (- reads stdin)") { |v| sources[:har] = v }
+          p.on("--urls=PATH", "Import a URL list (one URL per line) (- reads stdin)") { |v| sources[:urls] = v }
+          p.on("--oas=PATH", "Import OpenAPI 3.x or Swagger 2.0 (JSON or YAML; local refs only) (- reads stdin)") { |v| sources[:oas] = v }
+          p.on("--postman=PATH", "Import a Postman Collection v2 export (- reads stdin)") { |v| sources[:postman] = v }
+          p.on("--insomnia=PATH", "Import an Insomnia v4 JSON export (- reads stdin)") { |v| sources[:insomnia] = v }
+          p.on("--burp=PATH", "Import a Burp Suite item export (XML) (- reads stdin)") { |v| sources[:burp] = v }
+          p.on("--wsdl=PATH", "Import a WSDL 1.1 service description (SOAP 1.1/1.2) (- reads stdin)") { |v| sources[:wsdl] = v }
           p.on("--curl=PATH", "Import curl commands from PATH, or from stdin when PATH is -") { |v| sources[:curl] = v }
           p.on("--project=NAME", "Project to import into (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to import into (created if absent)") { |v| db_path = v }
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args do |before, after|
             rest = before + after
             abort "gori run import: unexpected argument#{rest.size == 1 ? "" : "s"} #{rest.join(" ").inspect} — pass the file via a source flag, e.g. --har PATH" unless rest.empty?
           end
-          p.invalid_option { |f| abort "gori run import: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run import", f, p) }
           p.missing_option { |f| abort "gori run import: missing value for #{f}" }
         end
         parser.parse(args)
@@ -66,6 +68,15 @@ module Gori
         curl_text = if kind == :curl
                       read_input_file(path, "gori run import", stdin: true, noun: "curl command", flag: "--curl -")
                     end
+        # `-` for every OTHER source too (#1386): it was `--curl` alone, so `generator | gori run
+        # import --urls -` looked for a file called `-`. Those importers read a PATH (a HAR is
+        # streamed off disk rather than held whole), so stdin is spooled to a temp file first —
+        # still before `open_store`, for the reason above.
+        spool = kind != :curl && path == "-" ? spool_import_stdin(kind) : nil
+        # `abort` exits WITHOUT unwinding, so the `ensure` below never runs on a refused import —
+        # and the spool is the operator's whole stdin (a HAR carries cookies and tokens). The
+        # exit handler is what removes it on every road out.
+        spool.try { |spooled| at_exit { File.delete?(spooled) } }
 
         # `long_running`: a HAR stream is written chunk by chunk through this one handle for as
         # long as the file takes, so it keeps the Store's standard wait budget.
@@ -74,6 +85,8 @@ module Gori
           if text = curl_text
             Import.import_curl_text(store, text, Gori::FlowSource::Surface::Cli,
               path == "-" ? "curl (stdin)" : File.basename(path))
+          elsif tmp = spool
+            import_spooled(store, kind, tmp)
           else
             Import.import_file(store, kind, path, Gori::FlowSource::Surface::Cli)
           end
@@ -81,10 +94,64 @@ module Gori
           abort "gori run import: #{ex.message}"
         ensure
           store.close
+          spool.try { |spooled| File.delete?(spooled) }
         end
 
         emit_import_result(kind, path, result, format)
         exit 1 if result.short?
+      end
+
+      # A spooled stdin, imported under `ref: "stdin"` — the way `Import.import_text` names its
+      # own temp file — so the flows' provenance says where they came from, and a refusal says
+      # `stdin` rather than the spool's path.
+      private def self.import_spooled(store : Store, kind : Symbol, spooled : String) : Import::Result
+        Import.import_file(store, kind, spooled, Gori::FlowSource::Surface::Cli, ref: "stdin")
+      rescue ex : Gori::Error
+        raise Gori::Error.new((ex.message || "import failed").gsub(spooled, "stdin"))
+      end
+
+      # stdin copied into a temp file for an importer that reads a path, refused first when it is
+      # a terminal (`stdin_terminal_error`, the guard every `-` reader shares). The name keeps
+      # the one extension an importer reads: OpenAPI picks its YAML reader by `.yaml`, so a spec
+      # whose first non-blank byte is not `{` is spooled under that name.
+      private def self.spool_import_stdin(kind : Symbol, io : IO = STDIN) : String
+        noun = "#{Import.label(kind)} input"
+        if err = stdin_terminal_error(io, what: "gori run import", noun: noun,
+             hint: stdin_pipe_hint("gori run import", flag: "--#{kind} -"))
+          abort err
+        end
+        # Created before the copy, so a copy that fails part-way (ENOSPC, EIO on stdin) is
+        # removed by the rescue below: the block form closes but does not delete it, and the
+        # partial copy is the operator's cookies and tokens.
+        spool = File.tempfile(prefix: "gori-stdin-import-", suffix: nil)
+        path = spool.path
+        begin
+          IO.copy(io, spool)
+        ensure
+          spool.close
+        end
+        if File.size(path).zero?
+          File.delete?(path)
+          abort "gori run import: stdin gave no bytes for --#{kind} -"
+        end
+        return path unless kind == :oas && !json_document?(path)
+        yaml = "#{path}.yaml"
+        File.rename(path, yaml)
+        yaml
+      rescue ex : IO::Error
+        path.try { |p| File.delete?(p) }
+        abort "gori run import: cannot read stdin: #{ex.message}"
+      end
+
+      # Whether the file's first non-whitespace byte opens a JSON object or array.
+      private def self.json_document?(path : String) : Bool
+        File.open(path) do |f|
+          while b = f.read_byte
+            next if b.unsafe_chr.ascii_whitespace?
+            return b === '{' || b === '['
+          end
+        end
+        false
       end
 
       # Exactly one source flag. Zero or two+ is a clean usage error.
@@ -131,7 +198,7 @@ module Gori
       # Mirrors the TUI Import toast wording (runner.cr#apply_import) so the CLI and TUI
       # describe the same import the same way. Both read `Import.label`.
       private def self.import_result_text(kind : Symbol, path : String, result : Import::Result) : String
-        s = "imported #{result.count} flow#{result.count == 1 ? "" : "s"} from #{Import.label(kind)} · #{path}"
+        s = "imported #{result.count} flow#{result.count == 1 ? "" : "s"} from #{Import.label(kind)} · #{path == "-" ? "stdin" : path}"
         s += " (#{result.skipped} #{result.skipped == 1 ? "entry" : "entries"} skipped)" if result.skipped > 0
         result.shortfall_note.try { |note| s += " — #{note}" }
         s

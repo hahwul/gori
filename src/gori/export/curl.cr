@@ -30,6 +30,13 @@ module Gori
         Proxy::H2::HeadCodec::PROTOCOL_MARKER.downcase,
       ]
 
+      # Headers a browser sends to its PROXY and never to an origin (#1389). `Proxy-Connection`
+      # is the one every proxy capture carries: the browser addresses it to gori, gori's codec
+      # keeps it (the capture is byte-exact), and a copied command that replays it straight at
+      # the origin sends a hop-by-hop header meant for a proxy that is not in the path. Only the
+      # EXPORTS drop it — a Repeater or Fuzzer replay of the capture still sends what was captured.
+      PROXY_ONLY_HEADERS = {"proxy-connection"}
+
       # The curl line for one request. `wire` is the request as it'd be sent (CRLF-framed,
       # env-expanded — the bytes repeater uses), `target` the "scheme://host[:port]" base that
       # resolves an origin-form request line ("GET /p HTTP/1.1") into a full URL. nil when there
@@ -110,7 +117,7 @@ module Gori
           down = name.downcase
           content_type = true if down == "content-type"
           next if down == "content-length"
-          next if MARKER_HEADERS.includes?(down)
+          next if MARKER_HEADERS.includes?(down) || PROXY_ONLY_HEADERS.includes?(down)
           # curl derives Host FROM THE URL — which is the captured header only when the capture's
           # Host IS the URL's authority. When it is not, that disagreement is the request (a Host
           # header injection test is nothing else), so it has to ride on the command.

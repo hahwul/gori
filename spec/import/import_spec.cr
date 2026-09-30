@@ -1640,6 +1640,21 @@ describe "Gori::Import curl" do
     end
   end
 
+  # `gori run import --urls -` (#1386) spools stdin to a temp file and imports it under
+  # `ref: "stdin"`, so the flows' provenance never names the spool.
+  it "names a ref'd import by its ref, not by the file it was read from" do
+    with_store do |store|
+      path = File.tempname("gori-stdin-import", ".txt")
+      File.write(path, "http://a.test/one\n")
+      begin
+        Gori::Import.import_file(store, :urls, path, Gori::FlowSource::Surface::Cli, ref: "stdin").count.should eq(1)
+        store.recent_flows(1).first.source_ref.should eq("stdin")
+      ensure
+        File.delete?(path)
+      end
+    end
+  end
+
   it "raises the refusal itself when no request came out, and counts a refused one as skipped" do
     with_store do |store|
       expect_raises(Gori::Error, /local file/) do

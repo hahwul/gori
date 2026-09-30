@@ -498,9 +498,27 @@ module Gori
       # Result array merely to produce an array on stdout. Owners close it from ensure: an
       # interrupted or exceptional run is therefore still a valid JSON prefix array (`[]` when
       # no row completed), rather than a missing document or a dangling `[...,` fragment.
+      #
+      # Rows go out in INDEX order (#1386), not in the order concurrent workers finished them —
+      # a script diffing two runs, or reading row N as payload N, needs the array to be stable.
+      # A row that finishes ahead of a lower index is HELD until that index is settled, and
+      # `skip` settles an index whose row is not printed (a plain non-match), so the buffer is
+      # only ever the out-of-order window the concurrency allows, never the run. The job
+      # indices are the generator's own 0-based counter; one that never arrives (a stopped run,
+      # a job the engine's worker rescue dropped without a ResultEvent) would hold everything
+      # after it, so the buffer is BOUNDED: past `MAX_HELD` rows the lowest are written and the
+      # cursor skips the gap, keeping memory at the window whatever the run size. A row for a
+      # skipped index that turns up later is written where it lands.
       class FuzzArrayStream
         @first = true
         @closed = false
+        @next = 0_i64
+        # Settled indices at or past `@next`, with their encoded rows (empty = settled, not shown).
+        @held = {} of Int64 => Array(String)
+
+        # Far wider than any concurrency window (a run's workers hold at most a few hundred
+        # indices open at once), so it only ever engages when an index will never settle.
+        MAX_HELD = 4096
 
         def initialize(@io : IO,
                        @encoder : Proc(Fuzz::Result, String) = ->(result : Fuzz::Result) { Output.fuzz_row_json(result) })
@@ -513,17 +531,51 @@ module Gori
           # Build a complete JSON value before emitting its separator. If encoding raises, close
           # can still terminate the previous valid prefix rather than producing `[...,]`.
           encoded = @encoder.call(result)
-          @io << ',' unless @first
-          @io << encoded
-          @io.flush
-          @first = false
+          settle(result.index, encoded)
+        end
+
+        # `result.index` finished without a row to print.
+        def skip(index : Int64) : Nil
+          return if @closed
+          settle(index, nil)
         end
 
         def close : Nil
           return if @closed
+          @held.keys.sort!.each { |i| @held[i].each { |row| write(row) } }
+          @held.clear
           @io << "]\n"
           @io.flush
           @closed = true
+        end
+
+        private def settle(index : Int64, encoded : String?) : Nil
+          # An index already past the cursor (a duplicate) has nothing to wait for.
+          if index < @next
+            write(encoded) if encoded
+            return
+          end
+          rows = (@held[index] ||= [] of String)
+          rows << encoded if encoded
+          drain
+          if @held.size > MAX_HELD
+            @next = @held.keys.min
+            drain
+          end
+        end
+
+        private def drain : Nil
+          while ready = @held.delete(@next)
+            ready.each { |row| write(row) }
+            @next += 1
+          end
+        end
+
+        private def write(encoded : String) : Nil
+          @io << ',' unless @first
+          @io << encoded
+          @io.flush
+          @first = false
         end
       end
 

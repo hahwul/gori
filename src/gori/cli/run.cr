@@ -1,4 +1,5 @@
 require "option_parser"
+require "levenshtein"
 require "json"
 require "base64"
 require "../config"
@@ -26,6 +27,8 @@ require "../repeater/diff"
 require "../repeater/minimize"
 require "../repeater/draft_markers"
 require "../repeater/message_lines"
+require "../repeater/send_error"
+require "../repeater/request_rules"
 require "../fuzz"
 require "../decoder"
 require "../miner"
@@ -99,6 +102,7 @@ require "./run/colormarker"
 require "./run/views"
 require "./run/project"
 require "./run/project_network"
+require "./run/project_default"
 
 module Gori
   module CLI
@@ -180,11 +184,21 @@ module Gori
             when {{ m.annotation(Subcommand).args.splat }} then {{ m.name }}(args[1..])
           {% end %}
           else
-            STDERR.puts "gori run: unknown subcommand '#{sub}'"
-            print_help
-            exit 1
+            # A short refusal on STDERR (#1389), not the ~80-line help on STDOUT: a typo'd
+            # `gori run histroy` exited 1 having written the whole help into the pipe a script
+            # was reading, with no word about which subcommand was meant.
+            abort unknown_verb_message("gori run", sub, SUBCOMMAND_NAMES)
           end
         end
+
+        # Every name and alias `dispatch_subcommand` answers, for the did-you-mean.
+        SUBCOMMAND_NAMES = [
+          {% for m in cmds %}
+            {% for name in m.annotation(Subcommand).args %}
+              {{ name }},
+            {% end %}
+          {% end %}
+        ] of String
 
         # `gori run -h` rows: {name column, description}, one or more per subcommand.
         SUBCOMMANDS = [
@@ -194,6 +208,24 @@ module Gori
             {% end %}
           {% end %}
         ]
+      end
+
+      # The refusal for a subcommand or verb nobody registered (#1389): one line naming the typo,
+      # the nearest real name when there is one, and where the list is. Said on STDERR by the
+      # caller's `abort`, so nothing reaches a pipe reading STDOUT.
+      def self.unknown_verb_message(prefix : String, word : String, candidates : Enumerable(String)) : String
+        msg = "#{prefix}: unknown subcommand '#{CLI::Output.term_safe(word)}'"
+        if near = nearest_name(word, candidates)
+          msg += " — did you mean '#{near}'?"
+        end
+        "#{msg}\nRun '#{prefix} --help' for the list."
+      end
+
+      # The one name within edit distance of `word` — 1 for a short word, where 2 would make
+      # almost anything "near", else 2 — or nil. A leading `-` is never a name.
+      def self.nearest_name(word : String, candidates : Enumerable(String)) : String?
+        return nil if word.empty? || word.starts_with?('-')
+        Levenshtein.find(word, candidates.to_a, word.size < 4 ? 1 : 2)
       end
 
       # Left column width for `gori run -h` subcommand names (longest: "project host-override").
@@ -424,10 +456,13 @@ module Gori
           have = projects.empty? ? "" : " (have: #{projects.map { |project| CLI::Output.term_safe(project.name) }.join(", ")})"
           abort "gori run: no project matching '#{CLI::Output.term_safe(name)}'#{have}"
         end
-        default = ProjectRegistry.default_of(registry.list)
-        abort "gori run: no projects yet — capture some traffic first, or pass --db PATH" unless default
-        announce_default_project(default)
-        default
+        case chosen = default_project(registry, ENV[DEFAULT_PROJECT_ENV]?, read_default_pin)
+        in String then abort "gori run: #{chosen}"
+        in Nil    then abort "gori run: no projects yet — capture some traffic first, or pass --db PATH"
+        in Tuple
+          announce_default_project(*chosen)
+          chosen[0]
+        end
       end
 
       # Whether this process has already said which project it defaulted to.
@@ -452,12 +487,12 @@ module Gori
       # terminal. Once per process because one command resolves its project up to three
       # times (the read itself, the host-override snapshot, the outbound scope load), and
       # three identical lines would read like three different projects.
-      private def self.announce_default_project(project : Project) : Nil
+      private def self.announce_default_project(project : Project, source : DefaultSource = DefaultSource::Recent) : Nil
         return if @@said_default_project
         @@said_default_project = true
         io = @@default_project_io
         return unless io
-        io.puts "gori run: using project #{CLI::Output.term_safe(project.name)} (most recently active) — " \
+        io.puts "gori run: using project #{CLI::Output.term_safe(project.name)} (#{source.phrase}) — " \
                 "name another with --project NAME or --db PATH"
       end
 
@@ -479,13 +514,39 @@ module Gori
         # `gori run capture:` message, like every other resolve_* path, instead of a raw
         # backtrace. (Non-ASCII names like "日本語" now get a hashed fallback slug in
         # ProjectRegistry#slugify, so they no longer land here.)
-        name = project_name || "default"
+        registry = ProjectRegistry.new(Paths.projects_dir)
+        unless name = project_name
+          pinned = capture_default(registry)
+          return pinned if pinned.is_a?(Project)
+          name = pinned || "default"
+        end
         begin
-          ProjectRegistry.new(Paths.projects_dir).create(name)
+          registry.create(name)
         rescue ex : Gori::Error
           abort "gori run capture: #{ex.message} (#{CLI::Output.term_safe(name).inspect})"
         rescue ex : File::Error
           abort "gori run capture: could not create project #{CLI::Output.term_safe(name).inspect}: #{ex.message}"
+        end
+      end
+
+      # A pin stands in for `--project` on capture too (#1387): the existing project a pin names
+      # (by name, slug or id), or — for a GORI_PROJECT naming none — the NAME to create, the way
+      # `--project` creates a capture target. A `project switch` pin naming none is refused, like
+      # on every other command. nil: no pin, so the `default` project, as before.
+      private def self.capture_default(registry : ProjectRegistry) : Project | String?
+        if env = ENV[DEFAULT_PROJECT_ENV]?.try(&.strip)
+          abort "gori run capture: #{DEFAULT_PROJECT_ENV} is set but empty — unset it, or name a project" if env.empty?
+          begin
+            return registry.find(env) || env
+          rescue ex : ProjectRegistry::Ambiguous
+            abort "gori run capture: #{DEFAULT_PROJECT_ENV}: #{ex.message}"
+          end
+        end
+        return nil unless pin = read_default_pin
+        case chosen = default_project(registry, nil, pin)
+        in Tuple  then chosen[0]
+        in String then abort "gori run capture: #{chosen}"
+        in Nil    then nil
         end
       end
 
@@ -1738,6 +1799,17 @@ module Gori
         end
       end
 
+      # `--format=FMT` and, when `json` is one of `allowed`, its `--json` alias (#1386), on one
+      # parser. The alias existed on `notify` alone, so `project list --json` was an unknown
+      # option; registering both here is what keeps it on every command that takes `--format`.
+      # `spec/cli/run/format_flag_spec.cr` fails on a bare `p.on("--format=…")` that bypasses
+      # it. A command whose `--format` does not offer `json` gets no `--json` (it would only
+      # ever refuse).
+      private def self.format_flag(p : OptionParser, allowed : Array(Symbol), help : String, &set : Symbol ->) : Nil
+        p.on("--format=FMT", help) { |v| set.call(parse_format(v, allowed)) }
+        p.on("--json", "Same as --format=json") { set.call(:json) } if allowed.includes?(:json)
+      end
+
       private def self.parse_format(v : String, allowed : Array(Symbol)) : Symbol
         sym = case v.downcase
               when "text"           then :text
@@ -1800,6 +1872,20 @@ module Gori
         end
       end
 
+      # `-d` and `-b` mean what they mean to curl (#1383): `-b` was the BODY here, so a curl
+      # user's `-b 'sid=1'` went out as a body on a GET and nothing said so.
+      SEND_DATA_HELP = "Request body, as curl's -d: repeat to join with '&'; POST unless -X names a method, and " \
+                       "Content-Type: application/x-www-form-urlencoded unless a -H names one. $ENV.KEY tokens " \
+                       "expand (see --verbatim)"
+      SEND_COOKIE_HELP = "Cookie 'name=value', as curl's -b: repeat to join them into ONE Cookie header. A value " \
+                         "with no '=' (a cookie-jar file to curl) is refused"
+      # A flow or session replay keeps its captured method, so its `-d` only replaces the body.
+      REPLAY_DATA_HELP = "Request body override (curl's -d); the Content-Length is re-framed over it. $ENV.KEY " \
+                         "tokens expand (see --verbatim)"
+      REPLAY_COOKIE_HELP = "Cookie 'name=value' (curl's -b), replacing the stored Cookie header; repeat to join " \
+                           "them into one. A value with no '=' (a cookie-jar file to curl) is refused"
+      APPLY_RULES_HELP = "Run the project's enabled Match & Replace rules (REQUEST side) over the request before " \
+                         "sending, as the live proxy would (default: off — a direct send is byte-exact)"
       HEADERS_ONLY_HELP = "Print the status line and headers only: the body is replaced by one line naming its " \
                           "size (--format json keeps the body's encoding and size, adds omitted:true)"
       MAX_BODY_HELP = "Print at most BYTES of the decoded body, then a marker naming the full size " \

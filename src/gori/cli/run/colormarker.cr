@@ -58,10 +58,10 @@ module Gori
           p.banner = "Usage: gori run colormarker color list [--format=text|json]\n\n" \
                      "The GLOBAL custom colours, offered in every project's picker alongside the\n" \
                      "six built-ins. A built-in tracks the active theme; a custom is an absolute hex."
-          p.on("--format=FMT", "text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort "gori run colormarker color list: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run colormarker color list", f, p) }
           p.missing_option { |f| abort "gori run colormarker color list: missing value for #{f}" }
         end
         parser.parse(args)
@@ -88,7 +88,7 @@ module Gori
           p.on("--name=NAME", "The colour's name (the picker label + a rule's --color)") { |v| name = v }
           p.on("--hex=HEX", "The colour, as #rrggbb (or #rgb)") { |v| hex = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort "gori run colormarker color add: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run colormarker color add", f, p) }
           p.missing_option { |f| abort "gori run colormarker color add: missing value for #{f}" }
         end
         parse_no_positionals(parser, args, "gori run colormarker color add",
@@ -124,7 +124,7 @@ module Gori
           p.on("--name=NAME", "Rename the colour (default: unchanged)") { |v| new_name = v }
           p.on("--hex=HEX", "Recolour it, as #rrggbb (or #rgb) (default: unchanged)") { |v| hex = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort "gori run colormarker color update: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run colormarker color update", f, p) }
           p.missing_option { |f| abort "gori run colormarker color update: missing value for #{f}" }
         end
         parser.unknown_args { |before, after| positional = before + after }
@@ -157,7 +157,7 @@ module Gori
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run colormarker color rm <name>"
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort "gori run colormarker color rm: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run colormarker color rm", f, p) }
         end
         parser.unknown_args { |before, after| positional = before + after }
         parser.parse(args)
@@ -273,9 +273,9 @@ module Gori
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--scope=SCOPE", "Show only project | global rules") { |v| scope = parse_color_scope(v) }
-          p.on("--format=FMT", "text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort "gori run colormarker: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run colormarker", f, p) }
           p.missing_option { |f| abort "gori run colormarker: missing value for #{f}" }
         end
         # BOTH halves of unknown_args: a bare word after `--` would otherwise be dropped
@@ -333,9 +333,9 @@ module Gori
           p.on("--scope=SCOPE", "project (default) | global — a global rule applies in EVERY project") { |v| scope = parse_color_scope(v) }
           p.on("--name=NAME", "Optional rule label") { |v| name = v }
           p.on("--disabled", "Create the rule disabled") { disabled = true }
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort "gori run colormarker add: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run colormarker add", f, p) }
           p.missing_option { |f| abort "gori run colormarker add: missing value for #{f}" }
         end
         parse_no_positionals(parser, args, "gori run colormarker add",
@@ -425,7 +425,7 @@ module Gori
           p.on("--name=NAME", "New rule label — pass an empty string to clear it (default: unchanged)") { |v| name = v }
           p.on("--scope=SCOPE", "Which <id>: project (default) | global") { |v| scope = parse_color_scope(v) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort "gori run colormarker update: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run colormarker update", f, p) }
           p.missing_option { |f| abort "gori run colormarker update: missing value for #{f}" }
         end
         parser.unknown_args { |before, after| positional = before + after }
@@ -507,7 +507,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("--scope=SCOPE", "Which <id>: project (default) | global") { |v| scope = parse_color_scope(v) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort "gori run colormarker rm: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run colormarker rm", f, p) }
           p.missing_option { |f| abort "gori run colormarker rm: missing value for #{f}" }
         end
         positional = [] of String
@@ -567,7 +567,7 @@ module Gori
           p.on("--scope=SCOPE", "Which <id>: project (default) | global") { |v| scope = parse_color_scope(v) }
           p.on("--everywhere", "global rules only: change the default for every project") { everywhere = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort "gori run colormarker #{action}: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run colormarker #{action}", f, p) }
           p.missing_option { |f| abort "gori run colormarker #{action}: missing value for #{f}" }
         end
         positional = [] of String
@@ -643,7 +643,7 @@ module Gori
           p.on("--up", "Give the rule higher precedence") { dir = -1 }
           p.on("--down", "Give the rule lower precedence") { dir = 1 }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort "gori run colormarker move: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run colormarker move", f, p) }
           p.missing_option { |f| abort "gori run colormarker move: missing value for #{f}" }
         end
         positional = [] of String
@@ -726,9 +726,9 @@ module Gori
           # previewed as though every project rule outranked it.
           p.on("--scope=SCOPE", "Preview as a project (default) | global rule — global resolves first") { |v| scope = parse_color_scope(v) }
           p.on("--limit=N", "Recent flows to scan (default #{Colormarker::PREVIEW_SCAN})") { |v| limit = parse_count(v, "--limit") }
-          p.on("--format=FMT", "text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort "gori run colormarker preview: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run colormarker preview", f, p) }
           p.missing_option { |f| abort "gori run colormarker preview: missing value for #{f}" }
         end
         parse_no_positionals(parser, args, "gori run colormarker preview",

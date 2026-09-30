@@ -196,10 +196,10 @@ module Gori
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--show-values", "Print set-header values instead of [REDACTED]") { show_values = true }
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort "gori run session: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run session", f, p) }
           p.missing_option { |f| abort "gori run session: missing value for #{f}" }
         end
         parser.parse(args)
@@ -238,10 +238,10 @@ module Gori
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--show-values", "Print set-header values instead of [REDACTED]") { show_values = true }
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run session show: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run session show", f, p) }
           p.missing_option { |f| abort "gori run session show: missing value for #{f}" }
         end
         parser.parse(args)
@@ -287,7 +287,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to write") { |v| db_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = one_positional_list(before, after, "gori run session add", "<name>") }
-          p.invalid_option { |f| abort "gori run session add: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run session add", f, p) }
           p.missing_option { |f| abort "gori run session add: missing value for #{f}" }
         end
         parser.parse(args)
@@ -357,7 +357,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to read and write") { |v| db_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run session from-flow: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run session from-flow", f, p) }
           p.missing_option { |f| abort "gori run session from-flow: missing value for #{f}" }
         end
         parser.parse(args)
@@ -449,7 +449,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to read and write") { |v| db_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run session from-request: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run session from-request", f, p) }
           p.missing_option { |f| abort "gori run session from-request: missing value for #{f}" }
         end
         parser.parse(args)
@@ -513,7 +513,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to write") { |v| db_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = one_positional_list(before, after, "gori run session edit", "<name>") }
-          p.invalid_option { |f| abort "gori run session edit: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run session edit", f, p) }
           p.missing_option { |f| abort "gori run session edit: missing value for #{f}" }
         end
         parser.parse(args)
@@ -567,7 +567,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to write") { |v| db_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run session rm: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run session rm", f, p) }
           p.missing_option { |f| abort "gori run session rm: missing value for #{f}" }
         end
         parser.parse(args)
@@ -598,7 +598,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to write") { |v| db_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run session baseline: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run session baseline", f, p) }
           p.missing_option { |f| abort "gori run session baseline: missing value for #{f}" }
         end
         parser.parse(args)
@@ -642,12 +642,12 @@ module Gori
                      "  gori run session refresh admin"
           p.on("--allow-unscoped", "Send the steps even when their host is outside a configured project scope") { allow_unscoped = true }
           p.on("-k", "--insecure-upstream", "Do not verify upstream TLS certificates") { insecure = true }
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run session refresh: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run session refresh", f, p) }
           p.missing_option { |f| abort "gori run session refresh: missing value for #{f}" }
         end
         parser.parse(args)

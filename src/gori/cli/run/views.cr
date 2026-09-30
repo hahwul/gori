@@ -72,9 +72,9 @@ module Gori
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--scope=SCOPE", "Show only builtin | project | global views") { |v| scope = parse_view_list_scope(v) }
-          p.on("--format=FMT", "text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort "gori run views: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run views", f, p) }
           p.missing_option { |f| abort "gori run views: missing value for #{f}" }
         end
         parser.unknown_args { |before, after| leftover = before + after }
@@ -148,7 +148,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("-qQL", "--query=QL", "The view's query (required)") { |v| query = v }
           p.on("--scope=SCOPE", "project (default) | global — a global view appears in EVERY project") { |v| scope = parse_view_scope(v) }
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.missing_option { |f| abort "gori run views add: missing value for #{f}" }
         end
@@ -333,7 +333,7 @@ module Gori
                                             sub : String, what : String) : String
         positional = [] of String
         parser.unknown_args { |before, after| positional = before + after }
-        parser.invalid_option { |f| abort "gori run views #{sub}: unknown option: #{f}" }
+        parser.invalid_option { |f| abort CLI.unknown_option_message("gori run views #{sub}", f, parser) }
         parser.parse(args)
         abort "gori run views #{sub}: missing #{what}" if positional.empty?
         abort "gori run views #{sub}: too many arguments (expected one #{what})" if positional.size > 1

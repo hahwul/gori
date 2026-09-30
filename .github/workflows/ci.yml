@@ -62,6 +62,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - name: Refresh apt index
+        # install-crystal apt-installs its build deps without an update, so a stale
+        # runner-image index 404s once the mirror drops a superseded .deb.
+        run: sudo apt-get update
       - uses: crystal-lang/install-crystal@v1
         with:
           crystal: 1.21.0
@@ -111,6 +115,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - name: Refresh apt index
+        # install-crystal apt-installs its build deps without an update, so a stale
+        # runner-image index 404s once the mirror drops a superseded .deb.
+        run: sudo apt-get update
       - uses: crystal-lang/install-crystal@v1
         with:
           # Deliberately NOT the build matrix. `crystal tool format` is the formatter
@@ -141,6 +149,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - name: Refresh apt index
+        # install-crystal apt-installs its build deps without an update, so a stale
+        # runner-image index 404s once the mirror drops a superseded .deb.
+        run: sudo apt-get update
       - uses: crystal-lang/install-crystal@v1
         with:
           # One version, for the same reason `format` pins one: the harnesses
@@ -192,6 +204,10 @@ jobs:
           # The whole history: the script diffs against the merge base with the target
           # branch, and a shallow clone has no such commit.
           fetch-depth: 0
+      - name: Refresh apt index
+        # install-crystal apt-installs its build deps without an update, so a stale
+        # runner-image index 404s once the mirror drops a superseded .deb.
+        run: sudo apt-get update
       - uses: crystal-lang/install-crystal@v1
         with:
           crystal: 1.21.0
@@ -237,6 +253,10 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+      - name: Refresh apt index
+        # install-crystal apt-installs its build deps without an update, so a stale
+        # runner-image index 404s once the mirror drops a superseded .deb.
+        run: sudo apt-get update
       - uses: crystal-lang/install-crystal@v1
         with:
           crystal: 1.21.0
@@ -286,6 +306,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - name: Refresh apt index
+        # install-crystal apt-installs its build deps without an update, so a stale
+        # runner-image index 404s once the mirror drops a superseded .deb.
+        run: sudo apt-get update
       - uses: crystal-lang/install-crystal@v1
         with:
           crystal: 1.21.0

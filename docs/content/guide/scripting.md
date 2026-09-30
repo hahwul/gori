@@ -25,7 +25,11 @@ Each project is its own SQLite database. Read subcommands resolve one in this or
 |----------|---------|
 | `--db=PATH` | A specific database file |
 | `--project=NAME` | Match by short id, directory slug, display name, or unique id prefix (case-insensitive). A name that is one project's slug and another's display name, or two projects' shared display name, is refused with each candidate's slug and short id |
-| *(neither)* | The most-recently-active project |
+| `GORI_PROJECT=NAME` | Set in the environment, the project a script's every command reads (same matching as `--project`) |
+| `gori run project switch NAME` | A standing pin, until `project switch --clear` |
+| *(none of these)* | The most-recently-active project |
+
+The last row is the one to avoid in a script: a single write to any other project (`notes create --project demo`) makes that project the most recently active, and every later `--project`-less command follows it. Set `GORI_PROJECT` at the top of the script instead. A `GORI_PROJECT` or pin that names no project is refused, never skipped, and the stderr notice says which rule chose the project (`gori run: using project demo (from GORI_PROJECT)`).
 
 The two selectors are alternatives, not a precedence: passing **both** is a usage error, not a
 silent win for `--db`. The same pair reaches destructive verbs (`history delete`, `history
@@ -59,23 +63,24 @@ The JSON that `gori run` emits is a stable, documented shape meant to be parsed,
 
 **STDOUT is data, STDERR is diagnostics.** Warnings, counts, notes, and export confirmations go to STDERR, so `gori run … | jq` never has to filter chatter out of its input.
 
-**`--format` picks the shape.** Most subcommands take `text` (default) or `json`; some add `jsonl`, `raw`, `har`, `paths`, or `markdown`. Where a run streams, the two JSON shapes differ and the difference is worth knowing:
+**`--format` picks the shape.** Most subcommands take `text` (default) or `json`; some add `jsonl`, `raw`, `har`, `paths`, or `markdown`. `--json` is the same as `--format=json` everywhere `json` is offered. `json` is always **one JSON document** and `jsonl` always one object per line:
 
 | Subcommand | `--format json` | `--format jsonl` |
 |------------|-----------------|------------------|
-| `capture`, `history` | One JSON object per line | Alias for `json`, same output |
-| `fuzz`, `mine`, `discover`, `authorize`, `cache-deception` | Buffered; one JSON array at the end | One object per line, as each result lands |
+| `history` | One array, streamed | One object per line |
+| `capture` | One array, closed when the capture stops (`--for`, `--max`, Ctrl-C) | One object per flow, as it completes |
+| `fuzz`, `mine`, `discover`, `authorize`, `cache-deception` | One JSON array (`fuzz`'s in index order) | One object per line, as each result lands |
 | `sequence` | The single report | Each sample as it lands, then the report |
 
-Reach for `jsonl` when you want to consume a long sweep while it runs, and `json` when you want one document at the end.
+Reach for `jsonl` when you want to consume a long sweep while it runs, and `json` when you want one document at the end (`… --format json | jq length` counts the rows).
 
 **Exit codes are meaningful.**
 
 | Code | Meaning |
 |------|---------|
 | `0` | Success |
-| `1` | Error: a failed send, an unreadable project, a mutation that could not be applied |
-| `3` | `gori run fuzz --fail-if-no-matches` completed cleanly but nothing matched (a `--stop-on` / `--stop-after-matches` that fired exits `0`) |
+| `1` | Error: a failed send, an unreadable project, a mutation that could not be applied, or a sweep (`fuzz`, `mine`, `discover`, `sequence`, `authorize`, `cache-deception`) in which no request got an answer |
+| `3` | A verdict gate: `gori run fuzz --fail-if-no-matches` completed cleanly but nothing matched (a `--stop-on` / `--stop-after-matches` that fired exits `0`), or `gori run probe --fail-on=LEVEL` reported an issue at or above LEVEL |
 | `130` | Interrupted by SIGINT/SIGTERM. `fuzz`, `mine`, `discover`, `sequence`, `authorize` and `repeater minimize` flush what they collected first, so `&& next-step` does not treat a truncated run as a finished one |
 
 A fuzz run where nothing matched *and* every send errored (target down, TLS failure, scope-blocked) exits `1`, so a script can tell "no findings" apart from "never reached the target" even without `--fail-if-no-matches` (with the flag, `3` wins).
@@ -84,7 +89,7 @@ A fuzz run where nothing matched *and* every send errored (target down, TLS fail
 
 ```bash
 # Every 5xx in the project, as JSON Lines, into jq
-gori run history -q 'status:5xx' --limit 500 --format json | jq -r '.url'
+gori run history -q 'status:5xx' --limit 500 --format jsonl | jq -r '.url'
 
 # Capture for five minutes into a named project, streaming to a file
 gori run capture --project ci-run --for 5m --format jsonl > flows.jsonl
@@ -98,6 +103,12 @@ rule=$(gori run project scope add --pattern=api.example.com --format json | jq .
 
 # One request per path, no session per path, status and headers only
 for p in /api/v1/items/{1..38}; do gori run send "https://api.example.com$p" --headers-only; done
+
+# curl's flags mean what they mean to curl: -d is the body, -b a cookie
+gori run send https://api.example.com/login -d 'user=a&pass=b' -b 'lang=en' --format json | jq '{status, error_kind, retryable}'
+
+# Fail a CI job on any finding of medium or worse (exit 3)
+gori run probe --fail-on medium
 ```
 
 ## Staying In Scope

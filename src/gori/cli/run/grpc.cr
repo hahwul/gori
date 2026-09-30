@@ -56,10 +56,10 @@ module Gori
           p.on("--timeout=SECONDS", "Per-operation timeout (default: the project's io timeout)") do |v|
             timeout = grpc_timeout(v) || abort("gori run grpc reflect: invalid --timeout '#{v}'")
           end
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| url = one_positional(before, after, "gori run grpc reflect", "URL") }
-          p.invalid_option { |f| abort "gori run grpc reflect: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run grpc reflect", f, p) }
           p.missing_option { |f| abort "gori run grpc reflect: missing value for #{f}" }
         end
         parser.parse(args)
@@ -164,10 +164,10 @@ module Gori
                      "  gori run grpc forget TARGET drop a cached reflection result (`rm` is accepted)"
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort "gori run grpc schema: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run grpc schema", f, p) }
           p.missing_option { |f| abort "gori run grpc schema: missing value for #{f}" }
         end
         parser.parse(args)
@@ -253,7 +253,7 @@ module Gori
           p.on("--all", "Forget every cached reflection target") { all = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| target = one_positional(before, after, "gori run grpc forget", "TARGET") }
-          p.invalid_option { |f| abort "gori run grpc forget: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run grpc forget", f, p) }
           p.missing_option { |f| abort "gori run grpc forget: missing value for #{f}" }
         end
         parser.parse(args)

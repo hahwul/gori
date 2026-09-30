@@ -1073,8 +1073,8 @@ module Gori::Discover
 
     # The reason this run produced nothing, or nil when it produced something.
     #
-    # "Produced nothing" is `@found == 0 && @pages == 0` AND nothing got through
-    # (`@successful_sends == 0`) — the second clause is `Miner::Engine`'s predicate, added
+    # "Produced nothing" is `@found == 0` AND nothing got through (`@successful_sends == 0`)
+    # — no `@pages` clause, see below — the second clause is `Miner::Engine`'s predicate, added
     # here for its reason and against the same failure: a target that accepts TCP and then
     # answers nothing, under a budget small enough that only CALIBRATION probes ever ran,
     # reported `done · 0 found · 9 sent · 0 errors` and exit 0. Nine requests went out, nine
@@ -1082,8 +1082,14 @@ module Gori::Discover
     # `send_with_retries`), which is what makes that run nameable at all; `successful_sends`
     # is what stops the wider check from turning a target that answered fine but held nothing
     # into a spurious terminal error.
+    #
+    # NOT `@pages == 0` as well, which it was: `handle_crawl` counts a page for every crawl
+    # task that COMPLETED, failed or not, so a spidering run against a dead port — every crawl
+    # a refused connect — had `@pages > 0` and took the Done branch. `gori run discover` then
+    # printed `0 found · 656 sent · 325 errors` and exited 0 where fuzz, mine and sequence all
+    # exit 1 (#1385). `@successful_sends == 0` already says no page was read.
     private def wholly_refused_reason : String?
-      return nil unless @found == 0 && @pages == 0 && @successful_sends == 0
+      return nil unless @found == 0 && @successful_sends == 0
       @first_error.presence
     end
 

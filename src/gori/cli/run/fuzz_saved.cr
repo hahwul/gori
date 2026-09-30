@@ -19,10 +19,10 @@ module Gori
           p.on("--session=ID", "Only runs saved from this Fuzzer session") { |v| session_id = parse_flow_id(v, "gori run fuzz list") }
           p.on("-nN", "--limit=N", "Runs to return (default 50, max 1000)") { |v| limit = parse_count(v, "--limit").clamp(1, 1000) }
           p.on("--offset=N", "Runs to skip") { |v| offset = parse_nonneg(v, "--offset") }
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run fuzz list: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run fuzz list", f, p) }
           p.missing_option { |f| abort "gori run fuzz list: missing value for #{f}" }
         end
         parser.parse(args)
@@ -85,10 +85,10 @@ module Gori
           p.on("--order=ORDER", "Cluster order: rare (default, smallest first) | common | first") do |v|
             order = Fuzz::Clusters::Order.parse?(v) || abort "gori run fuzz show: invalid --order #{v.inspect} (#{Fuzz::Clusters::Order.names.join("|")})"
           end
-          p.on("--format=FMT", "Output: text (default) | json | jsonl") { |v| format = parse_format(v, [:text, :json, :jsonl]) }
+          format_flag(p, [:text, :json, :jsonl], "Output: text (default) | json | jsonl") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run fuzz show: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run fuzz show", f, p) }
           p.missing_option { |f| abort "gori run fuzz show: missing value for #{f}" }
         end
         parser.parse(args)
@@ -134,7 +134,7 @@ module Gori
           p.on("--force-stale", "Also delete a running/saving row left by a crashed writer") { force_stale = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run fuzz delete: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run fuzz delete", f, p) }
           p.missing_option { |f| abort "gori run fuzz delete: missing value for #{f}" }
         end
         parser.parse(args)

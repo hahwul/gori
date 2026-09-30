@@ -51,7 +51,7 @@ module Gori
           p.on("--lenient", "Don't refuse a query naming an unknown field — search that token as text") { lenient = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run sitemap export: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run sitemap export", f, p) }
           p.missing_option { |f| abort "gori run sitemap export: missing value for #{f}" }
         end
         args = normalize_query_flag(args)

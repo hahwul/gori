@@ -49,8 +49,12 @@ module Gori
           p.on("--http2", "Force HTTP/2") { force_h2 = true }
           p.on("--sni=HOST", "TLS SNI override") { |v| sni = v }
           p.on("-k", "--insecure-upstream", "Do not verify upstream TLS certificates") { insecure = true }
-          p.on("--cookie=NAME", "Extract the token from a Set-Cookie value by name") { |v| set_loc.call(Sequencer::ExtractKind::Cookie, v) }
-          p.on("--header=NAME", "Extract the token from a response header") { |v| set_loc.call(Sequencer::ExtractKind::Header, v) }
+          # `--token-cookie`/`--token-header` (#1389): `--cookie`/`--header` SEND one on `send` and
+          # `repeater`; here they name where the token is READ from. The short forms stay.
+          p.on("--token-cookie=NAME", "Extract the token from a Set-Cookie value by name (alias: --cookie)") { |v| set_loc.call(Sequencer::ExtractKind::Cookie, v) }
+          p.on("--token-header=NAME", "Extract the token from a response header (alias: --header)") { |v| set_loc.call(Sequencer::ExtractKind::Header, v) }
+          p.on("--cookie=NAME", "Alias for --token-cookie") { |v| set_loc.call(Sequencer::ExtractKind::Cookie, v) }
+          p.on("--header=NAME", "Alias for --token-header") { |v| set_loc.call(Sequencer::ExtractKind::Header, v) }
           p.on("--regex=RE", "Extract the token via regex capture group 1 over the body") { |v| set_loc.call(Sequencer::ExtractKind::Regex, v) }
           p.on("--position=A:B", "Extract a fixed byte range of the body") { |v| set_loc.call(Sequencer::ExtractKind::Position, v) }
           p.on("--jsonpath=EXPR", "Extract the token from a JSON body path ($.a.b[0])") { |v| set_loc.call(Sequencer::ExtractKind::JsonPath, v) }
@@ -65,10 +69,10 @@ module Gori
           p.on("--bind-from=FLOW-ID", "Replay this captured flow FIRST so its response fills session bindings ($BIND.NAME; bare syntax: $NAME)") { |v| bind_from = parse_flow_id(v, "gori run sequence") }
           p.on("--slot=NAME", "Send as this SESSION SLOT — its header overlay, and its binding table for $BIND.NAME tokens (bare syntax: $NAME)") { |v| slot = v.strip }
           p.on("--allow-unscoped", "Send even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
-          p.on("--format=FMT", "Output: text (default) | json | jsonl | markdown") { |v| format = parse_format(v, [:text, :json, :jsonl, :markdown]) }
+          format_flag(p, [:text, :json, :jsonl, :markdown], "Output: text (default) | json | jsonl | markdown") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run sequence: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run sequence", f, p) }
           p.missing_option { |f| abort "gori run sequence: missing value for #{f}" }
         end
         parser.parse(args)
@@ -297,6 +301,7 @@ module Gori
         # `engine.run` return normally and the report below covers the interrupted path too.
         interrupted = Run.install_interrupt_trap("sequence-interrupt",
           "interrupted — stopping and reporting on what was collected…") { engine.stop }
+        say_request_line_rewrite # the run is about to send it — see `warn_request_line_rewrite`
         engine.run do |ev|
           case ev
           when Sequencer::SampleEvent

@@ -267,6 +267,21 @@ describe Gori::Repeater::FlowRequest do
     end
   end
 
+  # `gori run repeater <flow-id> -X` (#1384): the method, and nothing else, is replaced.
+  describe ".replace_method" do
+    it "swaps the method and keeps the target, spacing, headers and body byte-exact" do
+      wire = "GET  /a b\tHTTP/1.1\nHost: h\n\n".to_slice + Bytes[0xff]
+      sent = Gori::Repeater::FlowRequest.replace_method(wire, "PURGE").not_nil!
+      sent.should eq("PURGE  /a b\tHTTP/1.1\nHost: h\n\n".to_slice + Bytes[0xff])
+    end
+
+    it "edits the first non-blank line, and answers nil when there is none" do
+      String.new(Gori::Repeater::FlowRequest.replace_method("\r\nGET / HTTP/1.1\r\n\r\n".to_slice, "POST").not_nil!)
+        .should eq("\r\nPOST / HTTP/1.1\r\n\r\n")
+      Gori::Repeater::FlowRequest.replace_method("\r\n\r\n".to_slice, "POST").should be_nil
+    end
+  end
+
   # `--path` (#1116): a per-send request-target override. Everything around the target is the
   # operator's (or the capture's) bytes and must come through untouched.
   describe ".replace_request_target" do
