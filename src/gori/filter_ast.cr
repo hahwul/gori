@@ -547,6 +547,11 @@ module Gori
     # `namespaces` is an ARRAY and not an Enumerable on purpose: `Hash#each_key` hands back a
     # single-use Iterator, and one passed down a loop over several terms answers the first and
     # is exhausted for the rest — a dotted name in the second term would read as an authority.
+    # Pseudo-field names operators reach for to pin a flow by id: `id:1`, `flow:1`, `flow_id:1`.
+    # They have numeric values that `port_like?` would otherwise read as `host:port` authorities
+    # (like `localhost:8080`, `api:3000`), hiding the fact that QL has no id: field.
+    ID_FIELDS = %w[id flow flow_id]
+
     def self.field_shaped?(name : String, value : String, known : Bool,
                            namespaces : Array(String) = EMPTY_NAMESPACES, &) : Bool
       return true if known
@@ -554,6 +559,7 @@ module Gori
       return false unless name[0]?.try(&.ascii_letter?)
       return false unless name.each_char.all? { |c| c.ascii_alphanumeric? || c == '_' || c == '.' }
       return namespaces.any? { |prefix| name.starts_with?(prefix) } if name.includes?('.')
+      return true if ID_FIELDS.includes?(name.downcase)
       !(port_like?(value) && yield.nil?)
     end
 
@@ -646,6 +652,8 @@ module Gori
       bad = "#{u.name}#{u.sep}"
       if near = u.suggestion
         "unknown field `#{bad}` — did you mean `#{near}#{u.sep}`?"
+      elsif ID_FIELDS.includes?(u.name.downcase)
+        "unknown field `#{bad}` — QL has no `#{u.name}:` field; select flows by row or id"
       else
         "unknown field `#{bad}` — it is searched as text, and matched nothing"
       end

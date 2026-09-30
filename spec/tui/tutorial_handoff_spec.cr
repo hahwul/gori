@@ -11,16 +11,43 @@ describe "Gori::Tui::Tutorial.first_session_steps" do
     Tour.first_session_steps(Tour::Handoff::Session, 71)[0].should contain("Back in your session")
   end
 
-  it "sends the user through the palette and warns them to check CA trust" do
+  it "sends the user through the palette and names the CA verb" do
     Tour::Handoff.values.each do |handoff|
       steps = Tour.first_session_steps(handoff, 71)
-      steps.size.should eq(5)
+      steps.size.should eq(6)
       steps[1].should contain("Open browser")
-      steps[1].should contain("check CA")
       steps[1].should_not contain("Project → Open browser")
-      steps[3].should contain("Repeater")
-      steps[2].should contain("capture is off")
-      steps[2].should_not contain("History (3)")
+      # "check CA" named no verb; the line now names the one the palette finds (#1380).
+      steps[2].should contain(Gori::Verbs.registry["ca.export"].title)
+      steps[3].should contain("capture is off")
+      steps[3].should_not contain("History (3)")
+      steps[4].should contain("Repeater")
+    end
+  end
+
+  # Every key on the checklist is read from the registry, so a rebind is taught the way the
+  # app now answers it — the literals it replaced were only ⌥-retagged (#1380).
+  it "spells each key the way the registry reaches it" do
+    registry = Gori::Verbs.registry
+    [71, 33].each do |width|
+      text = Tour.first_session_steps(Tour::Handoff::Shell, width, registry).join('\n')
+      %w[browser.open ca.export capture.toggle history.repeater repeater.send tab.help help.tour].each do |id|
+        text.should contain(Tour.reach(registry, id))
+      end
+    end
+  end
+
+  it "reaches a keyless verb through the palette, by its title" do
+    registry = Gori::Verbs.registry
+    Gori::Hotkeys.binding_for(registry, "browser.open").should be_nil
+    pal = Gori::Hotkeys.binding_label(registry, "app.palette", "^P")
+    Tour.reach(registry, "browser.open").should eq("#{pal} → #{registry["browser.open"].title}")
+    Tour.reach(registry, "capture.toggle").should eq(Gori::Hotkeys.binding_label(registry, "capture.toggle", "?"))
+  end
+
+  it "keeps `i` off the Done cheat-sheet, where it would read as INS everywhere" do
+    [36, 60, 71].each do |w|
+      Tour.done_extra_lines(w)[0].should_not match(/\bi\b/)
     end
   end
 
@@ -46,6 +73,15 @@ describe "Gori::Tui::Tutorial minimum-width footer" do
     rerun.should contain("gori tutorial")
     Gori::Tui::Screen.draw_width(rerun).should be <= 36
     Gori::Tui::Screen.draw_width(Tour.done_extra_lines(71)[0]).should be <= 71
+  end
+
+  it "shortens the too-small message so its exit key survives the cut" do
+    (10..120).each do |w|
+      msg = Tour.too_small_message(w)
+      Gori::Tui::Screen.draw_width(msg).should be <= {w, 3}.max
+      msg.should contain("esc")
+    end
+    Tour.too_small_message(80).should contain("resize")
   end
 
   it "fits each lesson's compact hint, including overlay and insert states" do

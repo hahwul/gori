@@ -18,7 +18,7 @@ gori [command] [options]
 | `ca` | Print the root CA path / PEM, or regenerate / import the CA |
 | `settings` | Show or edit `settings.json` |
 | `wizard` | Interactive first-run setup |
-| `tutorial` | Guided TUI tour (navigation, space menu, palette, edit mode) |
+| `tutorial` | Guided TUI tour (navigation, space menu, palette, edit mode, proxy & CA, capture, intercept) |
 | `update` | Channel-aware self-update (binary / Homebrew / Snap / AUR / Nix) |
 
 Global flags: `-v` / `-V` / `--version`, `-h` / `--help`, and `--config PATH` (a settings file for one run; see [`--config PATH`](#config-path) below).
@@ -2055,7 +2055,7 @@ Runs the interactive setup (global proxy bind default, then theme, then the Miss
 gori tutorial
 ```
 
-Interactive tour of the TUI on a mock UI: tab/pane navigation, the space menu (`Space`) and its second cards, the command palette's search (`Ctrl-P`), and READ/INS edit mode. The mock menus read their letters and keys from your install. Each lesson demos the move and prompts you to try the key; practice has six optional checks across those four moves. The last card guides you from the screen you return to: picker, a `--db` project (with picker fallback), shell, or current session. Offered at the end of `gori wizard`, and available inside a session as the palette command **Guided tour** (`Ctrl-P`); safe to re-run anytime without a live proxy session. See the [Quick Start](/getting-started/quick-start/) and [Space Menu & Palette](/guide/space-menu-and-palette/).
+Interactive tour of the TUI on a mock UI: tab/pane navigation (including a sub-tab strip), the space menu (`Space`) and its second cards, the command palette's search (`Ctrl-P`), READ/INS edit mode, where to point a client and how to trust the CA, the capture switch, intercept (`i` outside an editor), and Help and quitting. The mock menus and every key the tour names read from your install. Each lesson demos the move and prompts you to try it, and its step on the rail turns ✓ only once the whole move is done (◐ marks a step you only visited); practice has six optional checks across the first four moves. The last card guides you from the screen you return to: picker, a `--db` project (with picker fallback), shell, or current session; finishing a standalone `gori tutorial` prints the next command to run. Offered at the end of `gori wizard`, and available inside a session as the palette command **Guided tour** (`Ctrl-P`); safe to re-run anytime without a live proxy session. See the [Quick Start](/getting-started/quick-start/) and [Space Menu & Palette](/guide/space-menu-and-palette/).
 
 ## gori update
 

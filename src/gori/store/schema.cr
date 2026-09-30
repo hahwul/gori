@@ -2095,6 +2095,21 @@ module Gori
         "CREATE INDEX idx_js_refs_flow ON js_refs (flow_id)",
       ]
 
+      # V44 — the request a client sent before the operator EDITED it at Intercept (#1378). Only
+      # the post-edit bytes reach `flows` (they are what went upstream), so without this the
+      # audit trail lost what the client actually sent. A side table keyed by flow id, not a
+      # `flows` column: a handful of rows ever hold a value, a BLOB column would sit after the
+      # body BLOBs, and a row's existence IS the "edited at Intercept" flag `SELECT_ROW` reads
+      # with a primary-key probe. `request` is the whole message (head + body) as held.
+      V44 = [
+        <<-SQL,
+          CREATE TABLE IF NOT EXISTS intercept_originals (
+            flow_id INTEGER PRIMARY KEY,
+            request BLOB    NOT NULL
+          )
+          SQL
+      ]
+
       # Data statements that call gori's OWN SQL functions, run by `migrate!` right after the
       # version they complete. Kept out of MIGRATIONS because that list is plain schema that a
       # bare connection can replay (specs build every historical shape that way), and a bare
@@ -2117,7 +2132,7 @@ module Gori
 
       MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17,
                     V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29, V30, V31, V32, V33,
-                    V34, V35, V36, V37, V38, V39, V40, V41, V42, V43]
+                    V34, V35, V36, V37, V38, V39, V40, V41, V42, V43, V44]
 
       def self.migrate!(db : DB::Database, read_only : Bool = false) : Nil
         db.using_connection do |conn|

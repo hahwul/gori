@@ -63,6 +63,9 @@ module Gori
         msg =
           if near
             "unknown query field `#{use.name}#{op}` — did you mean `#{near}#{op}`? (#{tail})"
+          elsif FilterAst::ID_FIELDS.includes?(use.name.downcase)
+            "unknown query field `#{use.name}#{op}` — QL has no `#{use.name}:` field; " \
+            "use the 'ids' argument to select flows by id (#{tail})"
           else
             "unknown query field `#{use.name}#{op}` — QL has no such field. " \
             "Fields: #{QL::FIELDS.join(' ')} (call ql_reference; #{tail})"
@@ -166,7 +169,15 @@ module Gori
                            "empty query to get the most recent rows"
                 end
                 unless unknown.empty?
-                  named = unknown.map { |n| (near = QL.suggest_field(n)) ? "`#{n}:` (did you mean `#{near}:`?)" : "`#{n}:`" }
+                  named = unknown.map do |n|
+                    if near = QL.suggest_field(n)
+                      "`#{n}:` (did you mean `#{near}:`?)"
+                    elsif FilterAst::ID_FIELDS.includes?(n.downcase)
+                      "`#{n}:` (use the 'ids' argument to select flows by id)"
+                    else
+                      "`#{n}:`"
+                    end
+                  end
                   j.string "QL has no such field: #{named.join(", ")} — the whole token is " \
                            "searched as literal TEXT, which is why it matches nothing; " \
                            "list_history / list_sitemap / probe_scan REFUSE it (QUERY_SYNTAX) " \
@@ -200,10 +211,14 @@ module Gori
       end
 
       private def ql_error(query : String) : Result
-        err(
-          "invalid query #{query.inspect}: did not match any field " \
-          "(call ql_reference; e.g. host:example.com status:>=500 method:POST)",
-          "QUERY_SYNTAX", field: "query")
+        msg =
+          if reason = QL.reject_empty_reason(query)
+            "invalid query #{query.inspect}: #{reason} (call ql_reference)"
+          else
+            "invalid query #{query.inspect}: did not match any field " \
+            "(call ql_reference; e.g. host:example.com status:>=500 method:POST)"
+          end
+        err(msg, "QUERY_SYNTAX", field: "query")
       end
 
       # The tools/list schemas for the QL reference tools, kept beside the handlers that

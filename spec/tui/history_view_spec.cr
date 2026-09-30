@@ -2588,6 +2588,24 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  it "reports which term is wrong and why in empty-state note for invalid QL" do
+    with_store do |store|
+      add_flow(store, "GET", "/a", 200)
+      view = HistoryView.new
+      view.reload(store)
+      view.start_query
+      "status:>=abc AND (".each_char { |c| view.query_insert(c) }
+      view.reload(store)
+      view.rows.empty?.should be_true
+
+      backend = MemoryBackend.new(100, 12)
+      view.render_list(Screen.new(backend), Rect.new(0, 0, 100, 12))
+      rows = (0...12).map { |y| backend.row(y) }.join("\n")
+      rows.should contain("status:>=abc")
+      rows.should contain("status expects a number or class")
+    end
+  end
+
   it "flags an invalid regex filter term in the empty-state (not a bare no-match)" do
     with_store do |store|
       add_flow(store, "GET", "/a", 200)
@@ -3357,6 +3375,69 @@ describe "HistoryView time column out of range" do
     ensure
       Gori::Settings.history_preview = prev_pv
       Gori::Settings.history_time_format = prev_tf
+    end
+  end
+end
+
+# #1378: an Intercept edit leaves a trail in History, and a drop reads as the operator's own
+# outcome rather than an upstream failure.
+describe "HistoryView — Intercept edits and drops" do
+  original = "GET /?id=1 HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice
+
+  it "marks an edited flow EDIT and shows the client's request in the ORIGINAL pane" do
+    with_store do |store|
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+        method: "GET", target: "/?id=2", http_version: "HTTP/1.1",
+        head: "GET /?id=2 HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil,
+        source: Gori::FlowSource::Kind::Proxy, intercept_original: original))
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice))
+      view = Gori::Tui::HistoryView.new
+      view.reload(store)
+
+      list = MemoryBackend.new(120, 8)
+      view.render_list(Gori::Tui::Screen.new(list), Gori::Tui::Rect.new(0, 0, 120, 8))
+      list.contains?("EDIT").should be_true
+
+      view.open_detail(store).should be_true
+      detail = MemoryBackend.new(100, 16)
+      view.render_detail(Gori::Tui::Screen.new(detail), Gori::Tui::Rect.new(0, 0, 100, 16))
+      detail.contains?("edited at Intercept").should be_true
+      detail.contains?("id=2").should be_true # REQUEST is what went upstream
+
+      view.set_detail_pane_public(:original)
+      view.detail_pane.should eq(:original)
+      detail = MemoryBackend.new(100, 16)
+      view.render_detail(Gori::Tui::Screen.new(detail), Gori::Tui::Rect.new(0, 0, 100, 16))
+      detail.contains?("ORIGINAL").should be_true
+      detail.contains?("GET /?id=1 HTTP/1.1").should be_true
+    end
+  end
+
+  it "offers no ORIGINAL pane on a flow nobody edited" do
+    with_store do |store|
+      add_flow(store, "GET", "/plain", 200)
+      view = Gori::Tui::HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      view.set_detail_pane_public(:original)
+      view.detail_pane.should eq(:request)
+    end
+  end
+
+  it "says a dropped request was dropped at Intercept, not that the upstream failed" do
+    with_store do |store|
+      id = add_flow(store, "GET", "/nope")
+      store.update_response(Gori::FlowMapper.aborted_response(id, Gori::Interceptor::DROP_REQUEST_REASON))
+      view = Gori::Tui::HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      view.set_detail_pane_public(:response)
+      detail = MemoryBackend.new(100, 16)
+      view.render_detail(Gori::Tui::Screen.new(detail), Gori::Tui::Rect.new(0, 0, 100, 16))
+      detail.contains?("dropped at Intercept: the request was never sent upstream").should be_true
+      detail.contains?("upstream error").should be_false
     end
   end
 end

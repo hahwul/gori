@@ -248,6 +248,9 @@ module Gori::Tui
       @detail_frames = nil.as(Array(Store::H2Frame)?)
       @detail_ws_total = 0 # full message count (≥ loaded; drives the "older not loaded" note)
       @detail_frames_total = 0
+      # The request as the client sent it, when the operator edited it at Intercept (#1378) —
+      # the ORIGINAL pane. nil for every flow nobody edited, so the pane is not offered.
+      @detail_original = nil.as(Bytes?)
       @detail_sse = false # response is a text/event-stream → offer the EVENTS pane
       # Decoded protocol projections, parsed once per opened flow (no DB table) — each
       # drives an optional detail pane like EVENTS. nil/empty ⇒ the pane isn't offered.
@@ -899,7 +902,9 @@ module Gori::Tui
         return nil unless active_view && (vf = view_filter)
         return fts_backlog_note(vf, store)
       end
-      return "invalid filter — no valid terms" if QL.reject_empty?(@query, filter)
+      if QL.reject_empty?(@query, filter)
+        return QL.reject_empty_reason(@query, scope: lens) || "invalid filter — no valid terms"
+      end
       bad = QL.invalid_regex_terms(@query)
       return "invalid regex in #{bad.first}" unless bad.empty?
       # A `field:` QL does not implement free-texts the WHOLE token, so `hostt:api` runs a
@@ -1763,6 +1768,7 @@ module Gori::Tui
       @detail_ws = nil
       @detail_frames_total = 0
       @detail_ws_total = 0
+      @detail_original = nil
       @detail_sse = false
       @detail_saml = nil
       @detail_jwts = [] of Jwt::Found
@@ -1802,6 +1808,8 @@ module Gori::Tui
         @detail_frames = nil
         @detail_frames_total = 0
       end
+      # One primary-key read, and only for a row the list already flags as edited.
+      @detail_original = detail.try { |d| store.intercept_original(d.row.id) if d.row.intercept_edited? }
       # SSE events are a derived view (parsed from the stored response body at
       # render time — no table), so here we only flag whether to offer the pane.
       @detail_sse = !!(detail && sse_response?(detail))
@@ -2673,9 +2681,17 @@ module Gori::Tui
       head, body = case @detail_pane
                    when :response then {detail.response_head, detail.response_body}
                    when :request  then {detail.request_head, detail.request_body}
+                   when :original then {@detail_original, nil}
                    else                {nil, nil} # messages/frames/events: no raw-bytes hex
                    end
       @detail_hex_bytes = combine_bytes(head, body)
+    end
+
+    # The stored original message (head + body in one BLOB) back into its two halves, split
+    # where the Intercept editor splits one (`Interceptor.split_edit`).
+    private def split_original(raw : Bytes) : {Bytes, Bytes?}
+      head, has_body = Gori::Interceptor.split_edit(raw)
+      {head, has_body ? raw[head.size..] : nil}
     end
 
     private def combine_bytes(head : Bytes?, body : Bytes?) : Bytes?
@@ -2694,6 +2710,9 @@ module Gori::Tui
     # conditional, so a plain HTTP flow still has exactly two. ←/→ walk this chain; Tab cycles it.
     private def detail_panes : Array(Symbol)
       panes = [:request, :response]
+      # ORIGINAL: the client's request before the operator's Intercept edit (#1378). REQUEST
+      # stays what went upstream; this is what it replaced.
+      panes << :original if @detail_original
       # MESSAGES: the socket transcript, right after the handshake it belongs to, and a pane
       # of its OWN rather than a relabelling of :response. The handshake response head is
       # where the server says which subprotocol and which extensions (permessage-deflate) it
@@ -2716,16 +2735,15 @@ module Gori::Tui
     # transcript; frames only exist for an intercepted h2 connection).
     private def detail_pane_label(pane : Symbol) : String
       case pane
-      when :frames  then "FRAMES (h2)"
-      when :events  then "EVENTS (sse)"
-      when :saml    then "SAML"
-      when :jwt     then @detail_jwts.size > 1 ? "JWT (#{@detail_jwts.size})" : "JWT"
-      when :graphql then "GRAPHQL"
+      when :frames then "FRAMES (h2)"
+      when :events then "EVENTS (sse)"
+      when :jwt    then @detail_jwts.size > 1 ? "JWT (#{@detail_jwts.size})" : "JWT"
+        # The panes whose chip is simply their name.
+      when :saml, :graphql, :params, :original then pane.to_s.upcase
         # Named after the FRAMING, not after gori's module — an operator working a Socket.IO
         # app is looking for a chip that says Socket.IO. Fixed for the life of the opened flow
         # (see decode_protocols); "WS PROTO" only until the first rebuild names one.
       when :ws_proto then @ws_proto_label || "WS PROTO"
-      when :params   then "PARAMS"
         # No `(N)` here, unlike JWT: a JWT set is fixed once the bytes are captured, while a live
         # socket's total moves on every poll (`refresh_detail` does not early-return for one) —
         # and the label's WIDTH places every chip to its right, so a count crossing 9→10 would
@@ -3143,10 +3161,17 @@ module Gori::Tui
         # Accented for everything except PROXY, which is the norm and stays muted. NOT yellow —
         # `STUB` owns that, and it means "you are not seeing what you think". A Repeater flow
         # IS a real response from the origin; only its request came from gori.
+        #
+        # An Intercept edit (#1378) takes the cell as `EDIT`, in `STUB`'s yellow and for the same
+        # reason: the request on this row is the operator's, not the one the client sent.
         if show_src
           src = row.source
-          screen.text(src_x, y, src.try(&.label) || "—",
-            src.nil? || src.proxy? ? Theme.muted : Theme.accent, bg, width: 5)
+          if row.intercept_edited?
+            screen.text(src_x, y, "EDIT", Theme.yellow, bg, width: 5)
+          else
+            screen.text(src_x, y, src.try(&.label) || "—",
+              src.nil? || src.proxy? ? Theme.muted : Theme.accent, bg, width: 5)
+          end
         end
         screen.text(type_x, y, fmt_mime_memo(row.content_type), Theme.muted, bg, width: 6) if show_type
         screen.text(size_x, y, fmt_size(row.response_size), Theme.muted, bg, width: 6) if show_size
@@ -3660,6 +3685,11 @@ module Gori::Tui
       # whole answer). Muted, not yellow: this is a fact about the flow, not a warning.
       if note = source_note(detail.row)
         lines << [Highlight::Span.new(note, Theme.muted)]
+      end
+      # An Intercept edit (#1378): REQUEST is what went upstream, and the client's own request
+      # is one pane over. Yellow, like the row's `EDIT` cell.
+      if detail.row.intercept_edited?
+        lines << [Highlight::Span.new("! edited at Intercept — the client's original request is in ORIGINAL", Theme.yellow)]
       end
       # What gori has to say about this exchange that its bytes cannot (`FlowRow#advisory`).
       detail.row.advisories.each do |a|
@@ -4299,11 +4329,17 @@ module Gori::Tui
       if dv = decoded_pane_view
         return dv
       end
-      request = @detail_pane == :request
+      # ORIGINAL is a request too, and renders through the same path as REQUEST.
+      original = @detail_pane == :original ? @detail_original : nil
+      request = @detail_pane == :request || !original.nil?
       # A failed/pending flow has no response bytes — surface WHY (like Repeater does)
       # instead of a blank pane.
       if !request && ((rh = detail.response_head).nil? || rh.empty?)
-        span = if (err = detail.error) && !err.empty?
+        span = if (err = detail.error) && Gori::Interceptor.dropped?(err)
+                 # The operator's own decision, not a failure (#1378): say which leg never went on.
+                 leg = err == Gori::Interceptor::DROP_REQUEST_REASON ? "the request was never sent upstream" : "the response was not delivered to the client"
+                 Highlight::Span.new("— dropped at Intercept: #{leg} —", Theme.yellow)
+               elsif (err = detail.error) && !err.empty?
                  Highlight::Span.new("upstream error: #{err}", Theme.red)
                elsif detail.row.state.aborted?
                  Highlight::Span.new("— connection aborted (no response captured) —", Theme.yellow)
@@ -4314,9 +4350,21 @@ module Gori::Tui
                end
         return DetailView.new([[span]], EMPTY_BODY, :text, EMPTY_LINES)
       end
-      head, body = request ? {detail.request_head, detail.request_body} : {detail.response_head, detail.response_body}
+      head, body = if original
+                     split_original(original)
+                   elsif request
+                     {detail.request_head, detail.request_body}
+                   else
+                     {detail.response_head, detail.response_body}
+                   end
       stored_bytes = body.try(&.size.to_i64) || 0_i64
-      wire_bytes = request ? detail.request_wire_body_size : detail.response_wire_body_size
+      wire_bytes = if original
+                     stored_bytes # kept whole: nothing was capped
+                   elsif request
+                     detail.request_wire_body_size
+                   else
+                     detail.response_wire_body_size
+                   end
       truncated = stored_bytes < wire_bytes
 
       trailer = [] of Highlight::Line

@@ -301,6 +301,8 @@ describe Gori::Proxy::H2::StreamGate do
       ic.forward(ic.pending.first.id)
       settle
       HPACK::Decoder.new.decode(rig.to_origin.first.payload).should eq(request("/held"))
+      # Forwarded as held: nothing was edited, so History keeps no original (#1378).
+      rig.sink.requests.first.intercept_original.should be_nil
       # A block arriving AFTER the latch is re-encoded too, never passed through.
       rig.c2s.accept(headers(3_u32, rig.enc_out.encode(request("/later")), Frame::END_HEADERS))
       HPACK::Decoder.new.decode(rig.to_origin.last.payload).should eq(request("/later"))
@@ -360,6 +362,9 @@ describe Gori::Proxy::H2::StreamGate do
       head = head_of(rig.to_origin, 1_u32).not_nil!
       head.find { |(n, _)| n == ":path" }.not_nil![1].should eq("/after")
       head.find { |(n, _)| n == "x-probe" }.not_nil![1].should eq("1")
+      # History records the edit, and keeps the request as it was held beside it (#1378).
+      rig.sink.requests.first.target.should eq("/after")
+      rig.sink.requests.first.intercept_original.should eq(item.raw)
     end
   end
 
@@ -505,6 +510,8 @@ describe Gori::Proxy::H2::StreamGate do
       ic.forward(ic.pending.first.id, "GET /p HTTP/2\r\nHost api.example.com\r\n\r\n".to_slice)
       settle
       head_of(rig.to_origin, 1_u32).not_nil!.should eq(request("/p"))
+      # A refused edit sent the peer's own head, so the flow is not an edited one.
+      rig.sink.requests.first.intercept_original.should be_nil
     end
   end
 
@@ -600,6 +607,7 @@ describe Gori::Proxy::H2::StreamGate do
 
       head_of(rig.to_origin, 1_u32).not_nil!.find { |(n, _)| n == "x-probe" }.not_nil![1].should eq("1")
       data_payloads(rig.to_origin, 1_u32).should eq(["he", "llo"]) # not re-framed
+      rig.sink.requests.first.intercept_original.should eq(item.raw)
     end
   end
 

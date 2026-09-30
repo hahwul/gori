@@ -41,6 +41,14 @@ describe Gori::CLI::Run do
       Gori::QL::FIELDS.each { |f| msg.should contain(f) }
     end
 
+    it "refuses id:N, flow:N, and flow_id:N with a hint to use the flow id argument" do
+      ["id:1", "flow:42", "flow_id:100"].each do |query|
+        msg = Gori::CLI::Run.unknown_query_field_error("history", query).not_nil!
+        msg.should contain("QL has no")
+        msg.should contain("select flows by id")
+      end
+    end
+
     # Echoed with the operator it was WRITTEN with: a `~` typo must not come back spelled `:`,
     # or the suggested fix is a term the operator did not ask for.
     it "keeps the regex operator in both the bad field and the suggestion" do
