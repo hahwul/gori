@@ -29,8 +29,9 @@ private class KeepAliveOrigin
   getter connections : Int32 = 0
   getter requests : Int32 = 0
 
+  # `eol` is the line ending of every response head: "\n" makes a bare-LF origin.
   def initialize(@close_after : Int32? = nil, @announce_close : Bool = false,
-                 @drop_every : Int32? = nil)
+                 @drop_every : Int32? = nil, @eol : String = "\r\n")
     @server = TCPServer.new("127.0.0.1", 0)
     @port = @server.local_address.port
     spawn { accept_loop }
@@ -67,9 +68,9 @@ private class KeepAliveOrigin
       end
       body = "pong"
       last = @close_after == served
-      conn << "HTTP/1.1 200 OK\r\nContent-Length: #{body.bytesize}"
-      conn << "\r\nConnection: close" if last && @announce_close
-      conn << "\r\n\r\n" << body
+      conn << "HTTP/1.1 200 OK" << @eol << "Content-Length: #{body.bytesize}"
+      conn << @eol << "Connection: close" if last && @announce_close
+      conn << @eol << @eol << body
       conn.flush
       break if last
     end
@@ -325,6 +326,42 @@ describe F::ConnPool do
         result_from("HTTP/1.1 101 Switching Protocols\r\nContent-Length: 0\r\n\r\n")).should be_false
     end
 
+    it "refuses a response whose head ended on a bare-LF blank line" do
+      # Framed off the lenient LF reading, so its socket serves this one response only.
+      F::ConnPool.reusable_response?(result_from("HTTP/1.1 200 OK\nContent-Length: 4\n\n", "pong")).should be_false
+      F::ConnPool.reusable_response?(
+        result_from("HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\n", "pong")).should be_false
+    end
+
+    it "refuses a socket whose INTERIM 1xx head ended on a bare LF, even under a CRLF final head" do
+      server = TCPServer.new("127.0.0.1", 0)
+      port = server.local_address.port
+      spawn do
+        if conn = server.accept?
+          Gori::Proxy::Codec::Http1.read_head(conn)
+          conn << "HTTP/1.1 103 Early Hints\nLink: </a.css>\n\n"
+          conn.flush
+          sleep 50.milliseconds # the final head is not buffered when the 103 is read
+          conn << "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"
+          conn.flush
+          sleep 1.second
+          conn.close
+        end
+      end
+      sock = TCPSocket.new("127.0.0.1", port)
+      begin
+        result = Gori::Repeater::Engine.exchange(sock, req("GET / HTTP/1.1\r\nHost: h\r\n\r\n"),
+          "127.0.0.1", port, Time.instant)
+        result.error.should be_nil
+        result.response.not_nil!.status.should eq(200)
+        result.lf_framed?.should be_true
+        F::ConnPool.reusable_response?(result).should be_false
+      ensure
+        sock.close
+        server.close
+      end
+    end
+
     it "accepts HTTP/1.0 only with an explicit keep-alive" do
       F::ConnPool.reusable_response?(
         result_from("HTTP/1.0 200 OK\r\nContent-Length: 4\r\n\r\n", "pong")).should be_false
@@ -386,6 +423,30 @@ describe F::ConnPool do
       pool.dialed.should eq(1)
       pool.reused.should eq(19)
       origin.connections.should eq(1)
+      origin.close
+    end
+
+    it "reads a bare-LF origin's responses and never reuses the socket behind one" do
+      origin = KeepAliveOrigin.new(eol: "\n")
+      tmpl = F::Template.parse("GET /?q=§a§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+      set = F::PayloadSet.new(F::InlineList.new((1..4).map(&.to_s)))
+      cfg = F::Config.new(mode: F::Mode::Sniper, concurrency: 1)
+      sender = F::Sender.new(F::Origin.new("http", "127.0.0.1", origin.port), ungated_outbound,
+        http2: false, verify: false, keep_alive: true, idle_conns: 1)
+      engine = F::Engine.new(F::Generator.new(tmpl, [set], cfg), F::Matcher.new, sender, cfg)
+      results = [] of F::Result
+      engine.run { |ev| results << ev.result if ev.is_a?(F::ResultEvent) }
+
+      results.size.should eq(4)
+      results.each do |r|
+        r.error.should be_nil
+        r.status.should eq(200)
+        String.new(r.body.not_nil!).should eq("pong")
+      end
+      pool = sender.pool.should_not be_nil
+      pool.dialed.should eq(4)
+      pool.reused.should eq(0)
+      origin.connections.should eq(4)
       origin.close
     end
 

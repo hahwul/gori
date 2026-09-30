@@ -150,22 +150,26 @@ module Gori::Proxy::Codec::Http1
   end
 
   # As read_head, but preserves received octets and the reason a usable head was not returned.
+  #
+  # `lf_terminator` also ends the head at a BARE-LF blank line (see `read_response_head_result`,
+  # the one caller that sets it). Off by default: a REQUEST head stays CRLFCRLF-only.
   def self.read_head_result(io : IO, max_bytes : Int32 = MAX_HEAD_BYTES, *,
                             deadline : Time::Span? = nil, timeout_sock : ::Socket? = nil,
-                            detect_non_http : Bool = false) : HeadReadResult
+                            detect_non_http : Bool = false,
+                            lf_terminator : Bool = false) : HeadReadResult
     # Deadline path only when BOTH are provided (proxy client-request and upstream-response
     # readers); every other caller takes the byte-for-byte original fast path.
     if (sock = timeout_sock) && (dl = deadline)
-      return read_head_deadlined(io, sock, dl, max_bytes, detect_non_http)
+      return read_head_deadlined(io, sock, dl, max_bytes, detect_non_http, lf_terminator)
     end
     buf = IO::Memory.new(512) # presized: covers a typical head without regrowing
     begin
       while buf.bytesize < max_bytes
         if chunk = io.peek
           break if chunk.empty? # EOF
-          break if consume_peeked(io, buf, chunk, max_bytes)[0]
+          break if consume_peeked(io, buf, chunk, max_bytes, lf_terminator: lf_terminator)[0]
         else
-          taken = consume_byte(io, buf)
+          taken = consume_byte(io, buf, lf_terminator: lf_terminator)
           break if taken.nil? # EOF
           break if taken[0]
         end
@@ -183,7 +187,30 @@ module Gori::Proxy::Codec::Http1
     rescue ex
       return HeadReadResult.new(HeadReadResult::State::Failed, captured_head(buf), ex)
     end
-    finalize_head(buf, max_bytes)
+    finalize_head(buf, max_bytes, lf_terminator)
+  end
+
+  # THE reader for a RESPONSE head off an upstream socket — the proxy's, the Repeater engine's
+  # (which every active tool sends through) and the WebSocket handshake's. One home so the
+  # three cannot drift on what ends a head.
+  #
+  # It differs from a request read in one way: a head ending in a BARE-LF blank line (`\n\n`,
+  # or the mixed `\r\n\n` / `\n\r\n`) is complete. RFC 9112 §2.2 lets a recipient accept a
+  # lone LF as a line terminator and every browser does, so an embedded device or a legacy CGI
+  # that writes `HTTP/1.1 200 OK\nContent-Type: text/plain\n\nbody` renders fine direct — and
+  # through gori used to render NOTHING: the CRLFCRLF-only scan never saw an end, so a
+  # close-delimited origin's reply came back "ended before CRLFCRLF" and a keep-alive one hung
+  # to the head deadline. The bytes are returned exactly as they arrived (P7); nothing here
+  # rewrites an LF. What such a head costs its connection is the caller's to apply
+  # (`lf_terminated_head?`): it is framed off the lenient view, so it is never reused.
+  #
+  # The REQUEST side stays CRLFCRLF-only on purpose. A request's peer is the operator's own
+  # client, which never emits a bare-LF head; widening it is the "symmetrize" AGENTS.md warns
+  # off (see `framing_ambiguous?`).
+  def self.read_response_head_result(io : IO, max_bytes : Int32 = MAX_HEAD_BYTES, *,
+                                     deadline : Time::Span? = nil,
+                                     timeout_sock : ::Socket? = nil) : HeadReadResult
+    read_head_result(io, max_bytes, deadline: deadline, timeout_sock: timeout_sock, lf_terminator: true)
   end
 
   # As read_head, but bounds the total time to assemble a head AFTER its first byte — the
@@ -191,7 +218,8 @@ module Gori::Proxy::Codec::Http1
   # resetting a per-read timer). `sock`'s read_timeout is shrunk toward `deadline` before each
   # read and RESTORED on exit, so the body read that follows sees the caller's baseline.
   private def self.read_head_deadlined(io : IO, sock : ::Socket, deadline : Time::Span, max_bytes : Int32,
-                                       detect_non_http : Bool = false) : HeadReadResult
+                                       detect_non_http : Bool = false,
+                                       lf_terminator : Bool = false) : HeadReadResult
     buf = IO::Memory.new(512)
     saved_timeout = sock.read_timeout
     head_started = nil.as(Time::Instant?)
@@ -209,9 +237,9 @@ module Gori::Proxy::Codec::Http1
         end
         if chunk = io.peek
           break if chunk.empty? # EOF
-          taken = consume_peeked(io, buf, chunk, max_bytes, settled)
+          taken = consume_peeked(io, buf, chunk, max_bytes, settled, lf_terminator)
         else
-          taken = consume_byte(io, buf, settled)
+          taken = consume_byte(io, buf, settled, lf_terminator)
           break if taken.nil? # EOF
         end
         head_started ||= Time.instant # start the head clock at the first received byte
@@ -234,7 +262,7 @@ module Gori::Proxy::Codec::Http1
     ensure
       sock.read_timeout = saved_timeout # restore the baseline for the following body read
     end
-    finalize_head(buf, max_bytes)
+    finalize_head(buf, max_bytes, lf_terminator)
   end
 
   # Move the bytes of `chunk` (a VIEW into `io`'s own read buffer) that belong to this head
@@ -265,7 +293,7 @@ module Gori::Proxy::Codec::Http1
   # old loop did not. Nothing in gori turns it off, and leftovers stay readable through the
   # same wrapper either way, but the contract above now leans on that.
   private def self.consume_peeked(io : IO, buf : IO::Memory, chunk : Bytes, max_bytes : Int32,
-                                  settled : Bool = true) : {Bool, Bool}
+                                  settled : Bool = true, lf_terminator : Bool = false) : {Bool, Bool}
     avail = Math.min(chunk.size, max_bytes - buf.bytesize)
     chunk = chunk[0, avail]
     stop = false
@@ -287,7 +315,8 @@ module Gori::Proxy::Codec::Http1
     # terminator won whenever it came first: a head of nothing but blank lines ("\r\n\r\n")
     # COMPLETES on its fourth byte, so the octet after it — the one the verdict scan above
     # reaches — was never read, let alone judged. `head_end <= take` keeps that order.
-    if (head_end = scan_head_end(buf, chunk)) && head_end <= take
+    if (head_end = scan_head_end(buf.to_slice, chunk, lf_terminator)) && head_end <= take
+      head_end = strict_reading_end(buf.to_slice, chunk, head_end) if lf_terminator
       take = head_end
       stop = true
     end
@@ -299,7 +328,8 @@ module Gori::Proxy::Codec::Http1
   # The no-`peek` fallback, one byte at a time: the same two questions `consume_peeked` asks of
   # a whole buffer, so the two paths answer identically. nil is EOF. `PrefixIO` and the spec
   # doubles are the IOs that land here.
-  private def self.consume_byte(io : IO, buf : IO::Memory, settled : Bool = true) : {Bool, Bool}?
+  private def self.consume_byte(io : IO, buf : IO::Memory, settled : Bool = true,
+                                lf_terminator : Bool = false) : {Bool, Bool}?
     byte = io.read_byte
     return nil if byte.nil?
     buf.write_byte(byte)
@@ -311,7 +341,7 @@ module Gori::Proxy::Codec::Http1
         return {true, settled} unless looks_like_http_request?(buf.to_slice)
       end
     end
-    {head_complete?(buf, byte), settled}
+    {head_complete?(buf, byte, lf_terminator), settled}
   end
 
   # Index in `chunk` of the first byte that is neither CR nor LF — the octet
@@ -330,16 +360,83 @@ module Gori::Proxy::Codec::Http1
   # not finish inside it. `buf` holds what has already been taken, so the terminator is found
   # even when it STRADDLES the boundary between a previous read and this one. Only a LF can
   # complete it, so the scan is a memchr per candidate rather than a walk.
-  private def self.scan_head_end(buf : IO::Memory, chunk : Bytes) : Int32?
-    taken = buf.to_slice
+  #
+  # `lf_terminator` (responses only) also takes a blank line made with a bare LF: an LF whose
+  # line is empty, i.e. preceded by LF or by CR-after-LF — `\n\n`, `\r\n\n` or `\n\r\n`.
+  # The EARLIEST blank line of any of the four shapes wins, as it does for a lenient recipient.
+  # Such a blank line ends a head only once a start-line has arrived (`has_content?`): a stray
+  # `\n\n` in front of the next response on a reused socket is not a head, and reading on is
+  # what the CRLF-only reader did there. CRLFCRLF keeps its old meaning in both modes.
+  private def self.scan_head_end(taken : Bytes, chunk : Bytes, lf_terminator : Bool = false) : Int32?
     pos = 0
     while rel = chunk.index(0x0a_u8, pos)
-      return rel + 1 if head_byte(taken, chunk, rel - 1) == 0x0d_u8 &&
-                        head_byte(taken, chunk, rel - 2) == 0x0a_u8 &&
-                        head_byte(taken, chunk, rel - 3) == 0x0d_u8
+      prev = head_byte(taken, chunk, rel - 1)
+      if prev == 0x0d_u8 && head_byte(taken, chunk, rel - 2) == 0x0a_u8 &&
+         head_byte(taken, chunk, rel - 3) == 0x0d_u8
+        return rel + 1
+      elsif lf_terminator && (prev == 0x0a_u8 || (prev == 0x0d_u8 && head_byte(taken, chunk, rel - 2) == 0x0a_u8)) &&
+            has_content?(taken, chunk, rel)
+        return rel + 1
+      end
       pos = rel + 1
     end
     nil
+  end
+
+  # Whether anything but CR/LF precedes `chunk` index `rel` — i.e. a start-line has begun. The
+  # first byte of a head is almost always it, so this answers on its first test.
+  private def self.has_content?(taken : Bytes, chunk : Bytes, rel : Int32) : Bool
+    taken.each { |b| return true unless b == 0x0a_u8 || b == 0x0d_u8 }
+    i = 0
+    while i < rel
+      b = chunk.unsafe_fetch(i)
+      return true unless b == 0x0a_u8 || b == 0x0d_u8
+      i += 1
+    end
+    false
+  end
+
+  # Where a RESPONSE head ends when its earliest blank line is a bare-LF one (`head_end`) but a
+  # CRLF-only reader, which does not stop there, would read on to a CRLFCRLF that is ALREADY
+  # BUFFERED in `chunk`. Two recipients then disagree about where the head ends, and the one
+  # question is whether that moves the body boundary: the strict reading of the longer head is
+  # compared against the lenient one by `framing_ambiguous?`, which also counts a body that
+  # both declare alike but would start at different bytes (see there). When they
+  # disagree the strict head is returned, so the caller reads exactly the head a CRLF-only
+  # reader did and `Body.response_framing` refuses it exactly as it always has. Otherwise
+  # `head_end` stands. A strict reading that is not buffered yet cannot be seen from here; the
+  # connection that head arrived on is never reused, which bounds what that can cost.
+  private def self.strict_reading_end(taken : Bytes, chunk : Bytes, head_end : Int32) : Int32
+    return head_end if head_byte(taken, chunk, head_end - 2) == 0x0d_u8 &&
+                       head_byte(taken, chunk, head_end - 3) == 0x0a_u8 &&
+                       head_byte(taken, chunk, head_end - 4) == 0x0d_u8 # already CRLFCRLF
+    return head_end unless strict = crlf_crlf_end(taken, chunk, head_end)
+    candidate = IO::Memory.new(taken.size + strict)
+    candidate.write(taken)
+    candidate.write(chunk[0, strict])
+    raw = candidate.to_slice
+    framing_ambiguous?(raw, parse_headers(raw, index_crlf(raw, 0))) ? strict : head_end
+  end
+
+  # `chunk` index one past the first CRLFCRLF that ENDS at or after `from` — it may begin inside
+  # the bare-LF terminator before it (`\n\r\n\r\n`) — or nil.
+  private def self.crlf_crlf_end(taken : Bytes, chunk : Bytes, from : Int32) : Int32?
+    pos = from
+    while nl = chunk.index(0x0a_u8, pos)
+      return nl + 1 if head_byte(taken, chunk, nl - 1) == 0x0d_u8 &&
+                       head_byte(taken, chunk, nl - 2) == 0x0a_u8 &&
+                       head_byte(taken, chunk, nl - 3) == 0x0d_u8
+      pos = nl + 1
+    end
+    nil
+  end
+
+  # Where the head of a complete RESPONSE message ends (one past its blank line), by the same
+  # rule `read_response_head_result` reads with: the earliest blank line, bare-LF or CRLF. For a
+  # message gori already holds whole — a held response the operator forwards — so that the
+  # head it records is the head the client reads. nil when there is none.
+  def self.response_head_end(raw : Bytes) : Int32?
+    scan_head_end(Bytes.empty, raw, true)
   end
 
   # The head byte at `chunk` index `i`, reaching back into the already-taken `buf` for a
@@ -362,10 +459,11 @@ module Gori::Proxy::Codec::Http1
   # terminator is an oversized/hostile head — returning it would misframe the body (the real
   # CRLFCRLF is still on the wire), so drop it. Otherwise the view (length = bytesize) is the
   # head's sole owner: it becomes an immutable `raw_head` (P7), so no defensive copy is made.
-  private def self.finalize_head(buf : IO::Memory, max_bytes : Int32) : HeadReadResult
+  private def self.finalize_head(buf : IO::Memory, max_bytes : Int32,
+                                 lf_terminator : Bool = false) : HeadReadResult
     return HeadReadResult.new(HeadReadResult::State::Empty, Bytes.new(0)) if buf.bytesize == 0
     bytes = captured_head(buf)
-    unless ends_with_crlf_crlf?(buf)
+    unless ends_with_crlf_crlf?(buf) || (lf_terminator && lf_terminated_head?(bytes))
       if buf.bytesize >= max_bytes
         return HeadReadResult.new(HeadReadResult::State::TooLarge, bytes)
       end
@@ -381,15 +479,58 @@ module Gori::Proxy::Codec::Http1
   # Did the byte just written to `buf` complete the head? CRLFCRLF ends in LF, so only a
   # just-written LF can complete the terminator — which is what makes the 4-byte tail compare
   # skippable on every other byte. One home for the test both read loops run per byte.
-  private def self.head_complete?(buf : IO::Memory, byte : UInt8) : Bool
-    byte == 0x0a_u8 && buf.bytesize >= 4 && ends_with_crlf_crlf?(buf)
+  private def self.head_complete?(buf : IO::Memory, byte : UInt8, lf_terminator : Bool = false) : Bool
+    return false unless byte == 0x0a_u8
+    return lf_terminated_head?(buf.to_slice) || ends_with_crlf_crlf?(buf) if lf_terminator
+    buf.bytesize >= 4 && ends_with_crlf_crlf?(buf)
   end
 
   private def self.ends_with_crlf_crlf?(buf : IO::Memory) : Bool
-    s = buf.to_slice
+    ends_with_crlf_crlf?(buf.to_slice)
+  end
+
+  private def self.ends_with_crlf_crlf?(s : Bytes) : Bool
     n = s.size
     return false if n < 4
     s[n - 4] == 0x0d_u8 && s[n - 3] == 0x0a_u8 && s[n - 2] == 0x0d_u8 && s[n - 1] == 0x0a_u8
+  end
+
+  # True when `raw` is a head ended by a blank line a CRLF-only reader does not recognise —
+  # `\n\n`, `\r\n\n` or `\n\r\n` — and false for CRLFCRLF (and for anything that does not
+  # end in a blank line at all). Only `read_response_head_result` produces such a head.
+  #
+  # This is the one question every consequence of accepting one asks: `parse_response_head`
+  # reads its lines on LF, the proxy and the keep-alive pools never reuse the connection that
+  # produced it (`ConnPool.reusable_response?`, `ClientConn#origin_keep_alive?`) — gori framed
+  # it off the lenient view, so a misframe stays bounded to this one response instead of
+  # becoming the NEXT request's — and Probe's `bare_lf_response` rule flags the flow.
+  def self.lf_terminated_head?(raw : Bytes) : Bool
+    n = raw.size
+    return false if n < 2 || raw.unsafe_fetch(n - 1) != 0x0a_u8
+    # Nothing but blank lines is not a head (see `scan_head_end`).
+    i = 0
+    while i < n - 2 && (raw.unsafe_fetch(i) == 0x0a_u8 || raw.unsafe_fetch(i) == 0x0d_u8)
+      i += 1
+    end
+    return false if i >= n - 2
+    prev = raw.unsafe_fetch(n - 2)
+    return true if prev == 0x0a_u8 # "\n\n", and the "\r\n\n" that ends in it
+    # "\n\r\n" — but not "\r\n\r\n", which is the ordinary CRLF terminator.
+    prev == 0x0d_u8 && n >= 3 && raw.unsafe_fetch(n - 3) == 0x0a_u8 &&
+      !(n >= 4 && raw.unsafe_fetch(n - 4) == 0x0d_u8)
+  end
+
+  # Whether a RESPONSE head ends any of its lines on a bare LF (an LF with no CR before it),
+  # terminator included. The Probe marker's test: a CRLFCRLF-terminated head carrying one
+  # inside is accepted too, and read the same way by a CRLF-only parse (the line after it
+  # folds into the field above), so both shapes are the same parser-differential precondition.
+  def self.bare_lf?(raw : Bytes) : Bool
+    pos = 0
+    while nl = raw.index(0x0a_u8, pos)
+      return true if nl == 0 || raw.unsafe_fetch(nl - 1) != 0x0d_u8
+      pos = nl + 1
+    end
+    false
   end
 
   # The RFC 7540 §3.4 HTTP/2 client connection preface's request-line. When ALPN doesn't
@@ -579,9 +720,40 @@ module Gori::Proxy::Codec::Http1
     request_target_line(text.to_slice)
   end
 
+  # A head `read_response_head_result` ended on a bare-LF blank line (`lf_terminated_head?`) is
+  # read on LF: RFC 9112 §2.2's lenient recipient, a CR before the LF dropped with it. Every
+  # other head keeps the strict CRLF-only scan, byte-for-byte as before — including a CRLFCRLF
+  # head with a bare LF INSIDE it, whose strict reading `framing_ambiguous?` is built to
+  # compare (see `authored_start_line` for what making this parser lenient across the board
+  # broke). So the switch is the terminator, not a byte anywhere in the head. A CRLF-only
+  # reader does not stop at that blank line; it reads on to a later CRLFCRLF if the message
+  # has one. Where that longer reading would frame the body differently and it was already
+  # buffered, the reader returned the longer head instead (`strict_reading_end`), which is
+  # CRLF-terminated, reads strictly here and is refused by the framing check; so a head that
+  # reaches this branch is one whose LF reading gori frames by. It is also what a stored
+  # head's status and headers come back as for every caller (Probe, export, evidence,
+  # bindings, MCP) — nothing is rewritten, the raw bytes stay the record (P7).
   def self.parse_response_head(raw : Bytes) : RawResponse
+    if lf_terminated_head?(raw)
+      # Blank lines in front of the status line are skipped, as the reader skipped them before
+      # it would let a bare-LF blank line end the head (`has_content?`) — so both agree on which
+      # line is the status line.
+      first = 0
+      while first < raw.size && (raw.unsafe_fetch(first) == 0x0a_u8 || raw.unsafe_fetch(first) == 0x0d_u8)
+        first += 1
+      end
+      nl = raw.index(0x0a_u8, first) || raw.size - 1 # an LF-terminated head always has one
+      start_end = nl > first && raw.unsafe_fetch(nl - 1) == 0x0d_u8 ? nl - 1 : nl
+      return build_response(raw, start_end, parse_lf_headers(raw, nl + 1), from: first)
+    end
     first_crlf = index_crlf(raw, 0)
-    start = String.new(raw[0, first_crlf || raw.size])
+    build_response(raw, first_crlf || raw.size, parse_headers(raw, first_crlf))
+  end
+
+  # The status-line projection over `raw[from, start_end - from]`, shared by both line readings.
+  private def self.build_response(raw : Bytes, start_end : Int32, headers : HeaderList,
+                                  *, from : Int32 = 0) : RawResponse
+    start = String.new(raw[from, start_end - from])
     # status-line: HTTP-version SP status-code SP [reason]
     first_sp = start.index(' ')
     version = first_sp ? start[0...first_sp] : ""
@@ -606,7 +778,7 @@ module Gori::Proxy::Codec::Http1
       version: version,
       status: status,
       reason: reason,
-      headers: parse_headers(raw, first_crlf),
+      headers: headers,
       malformed: malformed,
     )
   end
@@ -644,6 +816,11 @@ module Gori::Proxy::Codec::Http1
   # 200 into a framing refusal, but only while the switch that gated it was on. A head with no
   # CRLF at all has no header block by this view and is returned untouched.
   #
+  # The one exception is the parser's own: a head ENDED on a bare-LF blank line
+  # (`lf_terminated_head?`) is what `parse_response_head` reads on LF, so this walks it on LF
+  # too (a CR before the LF belongs to the terminator) — the same view, still, just the other
+  # one. Each line keeps its own terminator either way.
+  #
   # An obs-fold continuation (RFC 7230 §3.2.4 — a line beginning with SP/HTAB) is part of the
   # field above it, so it is dropped WITH that field: leaving it behind orphans a continuation
   # onto the line before it, which is gori manufacturing a malformed head out of a well-formed
@@ -657,16 +834,17 @@ module Gori::Proxy::Codec::Http1
   # caller's own gate recognises the field either — the whole path agrees, and a conforming
   # recipient rejects the field too (RFC 9112 §5.1).
   def self.strip_header_lines(head : Bytes, lower_name : String, & : Bytes -> Bool) : Bytes
-    start_crlf = index_crlf(head, 0)
-    return head if start_crlf.nil? # no CRLF → no header block, exactly as `parse_headers` reads it
+    lf = lf_terminated_head?(head)
+    start_eol = index_eol(head, 0, lf)
+    return head if start_eol.nil? # no CRLF → no header block, exactly as `parse_headers` reads it
     io = nil.as(IO::Memory?)
-    pos = start_crlf + 2
+    pos = after_eol(head, start_eol)
     while pos < head.size
-      crlf = index_crlf(head, pos)
-      line_end = crlf || head.size
+      eol = index_eol(head, pos, lf)
+      line_end = eol || head.size
       break if line_end == pos # the blank line ends the header block
       value = header_line_value(head[pos, line_end - pos], lower_name)
-      field_end, folded = fold_field(head, crlf ? crlf + 2 : head.size, value)
+      field_end, folded = fold_field(head, eol ? after_eol(head, eol) : head.size, value, lf)
       drop = value ? yield(folded || value) : false
       if drop
         # The buffer is allocated HERE, on the first field that goes, and seeded with
@@ -688,20 +866,34 @@ module Gori::Proxy::Codec::Http1
   # under a field that starts at `after`, and return where the whole field ends plus its JOINED
   # value. The join is built only when the caller has a `value` to join onto, so a field nobody
   # asked about costs the walk and nothing else.
-  private def self.fold_field(head : Bytes, after : Int32, value : Bytes?) : {Int32, Bytes?}
+  private def self.fold_field(head : Bytes, after : Int32, value : Bytes?,
+                              lf : Bool = false) : {Int32, Bytes?}
     folded = nil.as(IO::Memory?)
     while after < head.size &&
           (head.unsafe_fetch(after) == 0x20_u8 || head.unsafe_fetch(after) == 0x09_u8)
-      cont_crlf = index_crlf(head, after)
-      cont_end = cont_crlf || head.size
+      cont_eol = index_eol(head, after, lf)
+      cont_end = cont_eol || head.size
       if value
         f = (folded ||= IO::Memory.new.tap(&.write(value)))
         f << ' ' # §3.2.4: a fold unfolds to SP
         f.write(trim_ows(head[after, cont_end - after]))
       end
-      after = cont_crlf ? cont_crlf + 2 : head.size
+      after = cont_eol ? after_eol(head, cont_eol) : head.size
     end
     {after, folded.try(&.to_slice)}
+  end
+
+  # Where the line starting at `from` ends: its CRLF (`lf` false, `parse_headers`' view), or
+  # for a head read on LF its LF — or the CR right before that LF. nil when the line runs on.
+  private def self.index_eol(head : Bytes, from : Int32, lf : Bool) : Int32?
+    return index_crlf(head, from) unless lf
+    return nil unless nl = head.index(0x0a_u8, from)
+    nl > from && head.unsafe_fetch(nl - 1) == 0x0d_u8 ? nl - 1 : nl
+  end
+
+  # The first byte after the terminator that starts at `eol` (CRLF or a lone LF).
+  private def self.after_eol(head : Bytes, eol : Int32) : Int32
+    head.unsafe_fetch(eol) == 0x0d_u8 ? eol + 2 : eol + 1
   end
 
   # The field-VALUE bytes of `line` when its field-name is exactly `lower_name` (ASCII
@@ -918,6 +1110,15 @@ module Gori::Proxy::Codec::Http1
   # True when a LENIENT recipient would read DIFFERENT body-framing headers out of `raw`
   # than gori's strict CRLF-only parse did (`headers`, i.e. what parse_headers produced).
   #
+  # For a bare-LF-TERMINATED response head the "strict" side is `parse_response_head`'s LF
+  # reading instead (RFC 9112 §2.2), and the comparison is between two LF-lenient readers:
+  # they still split on a lone CR, an obs-fold or `Content-Length : 5`, and any of those on a
+  # framing header is refused here exactly as it is in a CRLF head. A CRLF-only reader is a
+  # third party, and it is NOT absent: it reads on past that blank line to the next CRLFCRLF.
+  # The response reader answers for it when that CRLFCRLF is buffered (`strict_reading_end`
+  # hands back the longer head, which this then judges the old way); when it is not, the
+  # connection is retired and leftover bytes are flagged on the flow.
+  #
   # This is the RESPONSE-side counterpart to obfuscated_header?, and it is deliberately
   # narrower. request_framing rejects on ANY obfuscation because a request's peer is the
   # operator's own browser, which never emits one — so a blunt rule costs nothing. A
@@ -930,9 +1131,38 @@ module Gori::Proxy::Codec::Http1
   # obfuscated_header? is the cheap gate — a clean CRLF head can hide nothing, so the common
   # path is one byte scan and no allocation at all; only a head that already looks odd pays
   # for the two views.
+  #
+  # The views can agree and the message still be read two ways: `Content-Length: 5\n\r\nX: y\r\n
+  # \r\nhello` gives both `content-length:5`, but a lenient recipient ENDS THE HEAD at the
+  # `\n\r\n` and takes `X: y\r` as the body, where this parse takes `hello`. So a head a lenient
+  # recipient ends early (`lenient_head_end`) is ambiguous too once it declares a body — a
+  # Content-Length other than 0 or any Transfer-Encoding. Without one, only the head/body split
+  # inside this one message differs, never where the next message starts: a close-delimited
+  # body ends at the close for every reader, and a length-0 one ends at gori's head, with the
+  # rest left on a connection gori retires and flags (the bare-LF rules in `ClientConn`).
   def self.framing_ambiguous?(raw : Bytes, headers : HeaderList) : Bool
     return false unless obfuscated_header?(raw)
-    strict_framing_view(headers) != lenient_framing_view(raw)
+    lenient = lenient_framing_view(raw)
+    return true if strict_framing_view(headers) != lenient
+    lenient_head_end(raw) < raw.size && declares_body?(lenient)
+  end
+
+  # Whether a framing view declares a body: a Content-Length other than 0, or any
+  # Transfer-Encoding (whose framing, chunked or close-delimited, is the coding's to decide).
+  private def self.declares_body?(view : Array(String)) : Bool
+    view.any? { |entry| entry.starts_with?("transfer-encoding:") || entry != "content-length:0" }
+  end
+
+  # Where a LENIENT recipient ends the head — past the first empty line by `lenient_framing_view`'s
+  # own line model (a line ends at CR, LF or CRLF) — or raw.size when it runs to the end.
+  private def self.lenient_head_end(raw : Bytes) : Int32
+    pos = lenient_after_start_line(raw)
+    while pos < raw.size
+      stop = lenient_line_end(raw, pos)
+      return lenient_next_line(raw, stop) if stop == pos # the empty line ends the head
+      pos = lenient_next_line(raw, stop)
+    end
+    raw.size
   end
 
   # The framing headers as gori's STRICT parse sees them, "name:value" in wire order.
@@ -954,8 +1184,8 @@ module Gori::Proxy::Codec::Http1
   # previous field-value; and the field-name is stripped before it is matched.
   private def self.lenient_framing_view(raw : Bytes) : Array(String)
     view = [] of String
-    pos = lenient_next_line(raw, lenient_line_end(raw, 0)) # skip the start-line
-    folds_into = -1                                        # index in `view` an obs-fold continuation would extend, or -1
+    pos = lenient_after_start_line(raw)
+    folds_into = -1 # index in `view` an obs-fold continuation would extend, or -1
     while pos < raw.size
       stop = lenient_line_end(raw, pos)
       break if stop == pos # empty line → end of headers
@@ -972,6 +1202,16 @@ module Gori::Proxy::Codec::Http1
       pos = lenient_next_line(raw, stop)
     end
     view
+  end
+
+  # Where the header lines start for a lenient recipient: past any blank lines in front of the
+  # start-line (the response reader skips the same ones, see `has_content?`) and the start-line.
+  private def self.lenient_after_start_line(raw : Bytes) : Int32
+    first = 0
+    while first < raw.size && (raw.unsafe_fetch(first) == 0x0a_u8 || raw.unsafe_fetch(first) == 0x0d_u8)
+      first += 1
+    end
+    lenient_next_line(raw, lenient_line_end(raw, first))
   end
 
   # Index of the first CR or LF at/after `pos` (i.e. where a lenient recipient ends the
@@ -1011,23 +1251,44 @@ module Gori::Proxy::Codec::Http1
       crlf = index_crlf(raw, pos)
       line_end = crlf || raw.size
       break if line_end == pos # empty line → end of headers
-      line = raw[pos, line_end - pos]
-      if colon = line.index(0x3a_u8) # ':'
-        name = String.new(line[0, colon])
-        # Trim the BYTES, then `strip` the String that survives. `String#strip` returns `self`
-        # when there is nothing left to take off, so the common header — every one of them
-        # carries the SP after its colon — now costs ONE String instead of a full-width one
-        # plus its stripped copy. `strip` still runs, because it
-        # also removes the Unicode whitespace a byte scan cannot see, and this projection feeds
-        # the framing lookups: answering differently from `strip` there is a desync, not a
-        # rounding error. `trim_ascii_ws` takes exactly the octets `strip` treats as ASCII
-        # whitespace, so what reaches `strip` is what it would have produced anyway.
-        value = String.new(trim_ascii_ws(line[colon + 1, line.size - colon - 1])).strip
-        list << Header.new(name, value)
-      end
+      add_header(list, raw[pos, line_end - pos])
       break if crlf.nil? # last line, no trailing CRLF
       pos = crlf + 2
     end
     list
+  end
+
+  # `parse_headers` for a head read on LF (`parse_response_head` on an `lf_terminated_head?`):
+  # a line ends at LF, and a CR right before that LF is part of the terminator. A lone CR
+  # anywhere else stays a byte of its line, exactly as a lone LF does in the CRLF reading —
+  # which is what lets `framing_ambiguous?` still catch a CR-hidden Content-Length here.
+  private def self.parse_lf_headers(raw : Bytes, pos : Int32) : HeaderList
+    list = HeaderList.new
+    while pos < raw.size
+      nl = raw.index(0x0a_u8, pos)
+      stop = nl || raw.size
+      line_end = stop > pos && raw.unsafe_fetch(stop - 1) == 0x0d_u8 && nl ? stop - 1 : stop
+      break if line_end == pos # empty line → end of headers
+      add_header(list, raw[pos, line_end - pos])
+      break if nl.nil?
+      pos = nl + 1
+    end
+    list
+  end
+
+  # One header line (terminator already cut off) into `list`; a colon-less line is skipped.
+  private def self.add_header(list : HeaderList, line : Bytes) : Nil
+    return unless colon = line.index(0x3a_u8) # ':'
+    name = String.new(line[0, colon])
+    # Trim the BYTES, then `strip` the String that survives. `String#strip` returns `self`
+    # when there is nothing left to take off, so the common header — every one of them
+    # carries the SP after its colon — now costs ONE String instead of a full-width one
+    # plus its stripped copy. `strip` still runs, because it
+    # also removes the Unicode whitespace a byte scan cannot see, and this projection feeds
+    # the framing lookups: answering differently from `strip` there is a desync, not a
+    # rounding error. `trim_ascii_ws` takes exactly the octets `strip` treats as ASCII
+    # whitespace, so what reaches `strip` is what it would have produced anyway.
+    value = String.new(trim_ascii_ws(line[colon + 1, line.size - colon - 1])).strip
+    list << Header.new(name, value)
   end
 end

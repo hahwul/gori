@@ -288,6 +288,23 @@ describe Gori::Probe::Active::RequestSmuggling do
       dets[0].severity.should eq(S::Severity::High)
     end
 
+    it "never escalates on a differential leg gori framed off a bare-LF head" do
+      # The smuggle's head ended on `\n\n`, so gori framed it by the lenient reading: an odd
+      # benign response behind it may be gori's own misframe, not a poisoned back-end.
+      lf_smuggle = Gori::Repeater::Result.new("HTTP/1.1 200 OK\nContent-Length: 2\n\n".to_slice,
+        "ok".to_slice, nil, 100_000_i64, lf_framed: true)
+      res = results_for(clte: {r_hung, r_hung}, tecl: {r_fast, r_fast}, tete: {r_fast, r_fast},
+        diff: {lf_smuggle, r_incomplete})
+      dets = rule.detections_all(plan, res, detail)
+      dets.size.should eq(1)
+      dets[0].severity.should eq(S::Severity::High)
+      lf_benign = Gori::Repeater::Result.new("HTTP/1.1 200 OK\n\n".to_slice, nil, nil, 100_000_i64,
+        nil, true, lf_framed: true)
+      res = results_for(clte: {r_fast, r_fast}, tecl: {r_fast, r_fast}, tete: {r_fast, r_fast},
+        diff: {r_ok_complete, lf_benign})
+      rule.detections_all(plan, res, detail).should be_empty
+    end
+
     it "emits a clte finding when the differential confirms but no timing variant pinned" do
       res = results_for(clte: {r_fast, r_fast}, tecl: {r_fast, r_fast}, tete: {r_fast, r_fast},
         diff: {r_ok_complete, r_reflects_canary})

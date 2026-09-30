@@ -251,7 +251,7 @@ module Gori
           # a time pins this fiber for as long as it cares to trickle. `underlying_socket`
           # returns nil for an IO with no settable socket, in which case the deadline is skipped
           # and the behaviour is unchanged.
-          head_result = Proxy::Codec::Http1.read_head_result(upstream,
+          head_result = Proxy::Codec::Http1.read_response_head_result(upstream,
             deadline: Proxy::SocketTuning::HEAD_DEADLINE,
             timeout_sock: Proxy::SocketTuning.underlying_socket(upstream))
           # `Engine.no_response_error`, not a local copy of the sentence: a plain `ws://` target

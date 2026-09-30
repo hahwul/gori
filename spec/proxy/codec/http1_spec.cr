@@ -200,6 +200,76 @@ describe Gori::Proxy::Codec::Http1 do
       Http1.parse_response_head(bytes("ICY 200 OK\r\n\r\n")).malformed?.should be_true
       Http1.parse_response_head(bytes("+OK POP3 ready\r\n\r\n")).malformed?.should be_true
     end
+
+    # A STORED head that `read_response_head_result` ended on a bare-LF blank line. Every
+    # reader of stored bytes (Probe, export, evidence, bindings, MCP) goes through this parse,
+    # so it has to yield the status and headers here or those features see an empty head.
+    it "reads a bare-LF-terminated head on LF, keeping the bytes as they are" do
+      raw = bytes("HTTP/1.1 200 OK\nContent-Type: text/plain\nX-Two: b\n\n")
+      resp = Http1.parse_response_head(raw)
+      resp.malformed?.should be_false
+      resp.version.should eq("HTTP/1.1")
+      resp.status.should eq(200)
+      resp.reason.should eq("OK")
+      resp.headers.get?("Content-Type").should eq("text/plain")
+      resp.headers.get?("X-Two").should eq("b")
+      resp.headers.size.should eq(2)
+      resp.raw_head.should eq(raw) # P7: nothing rewritten to CRLF
+    end
+
+    it "drops the CR of a CRLF line inside a head that a bare LF ends" do
+      ["HTTP/1.1 404 Not Found\r\nContent-Length: 3\r\n\n",
+       "HTTP/1.1 404 Not Found\nContent-Length: 3\n\r\n"].each do |head|
+        resp = Http1.parse_response_head(bytes(head))
+        resp.status.should eq(404)
+        resp.reason.should eq("Not Found")
+        resp.headers.get?("Content-Length").should eq("3")
+        resp.headers.size.should eq(1)
+      end
+    end
+
+    it "keeps the strict CRLF reading for a CRLFCRLF head with a bare LF inside it" do
+      # `framing_ambiguous?` compares exactly this reading against a lenient one; a CRLF head
+      # must still fold the line after a bare LF into the field above it.
+      resp = Http1.parse_response_head(bytes("HTTP/1.1 200 OK\r\nX-Foo: a\nX-Bar: b\r\n\r\n"))
+      resp.headers.get?("X-Bar").should be_nil
+      resp.headers.get?("X-Foo").should eq("a\nX-Bar: b")
+    end
+  end
+
+  describe ".lf_terminated_head?" do
+    it "is true only for a blank line a CRLF-only reader does not recognise" do
+      Http1.lf_terminated_head?(bytes("HTTP/1.1 200 OK\n\n")).should be_true
+      Http1.lf_terminated_head?(bytes("HTTP/1.1 200 OK\r\n\n")).should be_true
+      Http1.lf_terminated_head?(bytes("HTTP/1.1 200 OK\n\r\n")).should be_true
+      Http1.lf_terminated_head?(bytes("HTTP/1.1 200 OK\r\n\r\n")).should be_false
+      Http1.lf_terminated_head?(bytes("HTTP/1.1 200 OK\r\nX: a\nY: b\r\n\r\n")).should be_false
+      Http1.lf_terminated_head?(bytes("HTTP/1.1 200 OK\nContent-Length: 6\n\nsecond")).should be_false
+      Http1.lf_terminated_head?(bytes("HTTP/1.1 200 OK\r\r\n")).should be_false
+      Http1.lf_terminated_head?(bytes("\n")).should be_false
+      # Blank lines alone are not a head: a stray `\n\n` before the next response is not one.
+      Http1.lf_terminated_head?(bytes("\n\n")).should be_false
+      Http1.lf_terminated_head?(bytes("\r\n\n")).should be_false
+      Http1.lf_terminated_head?(bytes("\n\r\n")).should be_false
+    end
+  end
+
+  describe ".response_head_end" do
+    it "finds the earliest blank line of any shape, as the response reader does" do
+      ["HTTP/1.1 200 OK\nA: 1\n\nbody\r\n\r\n", "HTTP/1.1 200 OK\r\nA: 1\r\n\r\nbody",
+       "HTTP/1.1 200 OK\r\nA: 1\r\n\nbody"].each do |msg|
+        Http1.response_head_end(bytes(msg)).should eq(msg.index("body"))
+      end
+      Http1.response_head_end(bytes("HTTP/1.1 200 OK\nA: 1")).should be_nil
+    end
+  end
+
+  describe ".bare_lf?" do
+    it "finds an LF with no CR before it, terminator or not" do
+      Http1.bare_lf?(bytes("HTTP/1.1 200 OK\n\n")).should be_true
+      Http1.bare_lf?(bytes("HTTP/1.1 200 OK\r\nX: a\nY: b\r\n\r\n")).should be_true
+      Http1.bare_lf?(bytes("HTTP/1.1 200 OK\r\nX: a\r\n\r\n")).should be_false
+    end
   end
 
   describe ".read_head" do
@@ -356,6 +426,144 @@ describe Gori::Proxy::Codec::Http1 do
   # The non-HTTP detector (#729). ONE signal: a binary first byte. Everything a tchar can start
   # is HTTP as far as this predicate goes — the malformed-request-line payloads below are the
   # reason (P7), and getting any of them wrong closes the connection on the operator's own test.
+  describe ".read_response_head_result" do
+    lf_heads = {"HTTP/1.1 200 OK\nContent-Type: text/plain\n\n",
+                "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\n",
+                "HTTP/1.1 200 OK\nContent-Type: text/plain\n\r\n",
+                "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n"}
+
+    it "ends a head on a bare-LF blank line at every peek window, leaving the body unread" do
+      lf_heads.each do |head|
+        [1, 2, 3, 4, 5, 7, head.bytesize].each do |window|
+          io = WindowedIO.new("#{head}body\n\nmore".to_slice, window)
+          result = Http1.read_response_head_result(io)
+          result.state.should eq(Http1::HeadReadResult::State::Complete)
+          String.new(result.head?.not_nil!).should eq(head)
+          io.pos.should eq(head.bytesize) # nothing over-read
+        end
+        io = NoPeekIO.new("#{head}body".to_slice)
+        String.new(Http1.read_response_head_result(io).head?.not_nil!).should eq(head)
+        io.pos.should eq(head.bytesize)
+      end
+    end
+
+    it "ends it on the deadline path too, without waiting out the deadline" do
+      lf_heads.each do |head|
+        a, b = UNIXSocket.pair
+        begin
+          a.write("#{head}body".to_slice)
+          a.flush
+          result = Http1.read_response_head_result(b, deadline: 5.seconds, timeout_sock: b)
+          String.new(result.head?.not_nil!).should eq(head)
+          b.read_timeout = 1.second
+          b.read_string(4).should eq("body")
+        ensure
+          a.close
+          b.close
+        end
+      end
+    end
+
+    it "does not end a head on a lone blank CR, nor on an LF that closes a non-empty line" do
+      raw = "HTTP/1.1 200 OK\r\rX: a\n"
+      result = Http1.read_response_head_result(WindowedIO.new(raw.to_slice, 4))
+      result.state.should eq(Http1::HeadReadResult::State::Incomplete)
+      String.new(result.bytes).should eq(raw)
+    end
+
+    # A CRLF-only reader does not stop at a bare-LF blank line; when the CRLFCRLF it WOULD stop
+    # at is already buffered and its reading frames the body differently, the head is the
+    # strict one, so the framing check refuses it exactly as it did before bare-LF heads were
+    # accepted (the two shapes from the PR review).
+    it "takes the strict head when a buffered CRLFCRLF reading disagrees on framing" do
+      tail50 = "x" * 50
+      {"HTTP/1.1 200 OK\r\nX: a\n\r\nContent-Length: 5\r\n\r\n"               => "helloEXTRA",
+       "HTTP/1.1 200 OK\r\nContent-Length: 0\n\r\nContent-Length: 50\r\n\r\n" => tail50}.each do |strict_head, body|
+        [strict_head.bytesize + body.bytesize, 4096].each do |window|
+          io = WindowedIO.new("#{strict_head}#{body}".to_slice, window)
+          head = Http1.read_response_head_result(io).head?.not_nil!
+          String.new(head).should eq(strict_head)
+          resp = Http1.parse_response_head(head)
+          expect_raises(Gori::Error, /ambiguous framing/) { Body.response_framing(resp, "GET") }
+        end
+        a, b = UNIXSocket.pair
+        begin
+          a.write("#{strict_head}#{body}".to_slice)
+          a.flush
+          head = Http1.read_response_head_result(b, deadline: 5.seconds, timeout_sock: b).head?.not_nil!
+          String.new(head).should eq(strict_head)
+        ensure
+          a.close
+          b.close
+        end
+      end
+    end
+
+    # Same Content-Length on both readings, but not the same BODY: the lenient head ends at the
+    # `\n\r\n` and takes `X: y\r` as the five bytes, a strict one takes `hello`. A head that a
+    # lenient reader ends early and that declares a body is refused.
+    it "refuses a body a strict reading would start elsewhere, even when the framing values agree" do
+      {"HTTP/1.1 200 OK\r\nContent-Length: 5\n\r\nX: y\r\n\r\n"          => "hello",
+       "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\n\r\nX: y\r\n\r\n" => "5\r\nhello\r\n0\r\n\r\n"}.each do |strict_head, body|
+        head = Http1.read_response_head_result(WindowedIO.new("#{strict_head}#{body}".to_slice, 4096)).head?.not_nil!
+        String.new(head).should eq(strict_head)
+        resp = Http1.parse_response_head(head)
+        expect_raises(Gori::Error, /ambiguous framing/) { Body.response_framing(resp, "GET") }
+      end
+    end
+
+    # No body declared: only the head/body split inside this one message differs, never where
+    # the next one starts — close-delimited ends at the close for every reader, and a length-0
+    # body ends at gori's head, the rest left on a connection that is retired and flagged.
+    it "keeps the bare-LF head when no body is declared, whatever a strict reading adds" do
+      {"HTTP/1.1 200 OK\r\nContent-Length: 0\n\r\n"        => {"X: y\r\n\r\n", BodyFraming::Length},
+       "HTTP/1.1 200 OK\r\nContent-Type: text/plain\n\r\n" => {"X: y\r\n\r\nhello", BodyFraming::CloseDelimited}}.each do |lf_head, (rest, framing)|
+        head = Http1.read_response_head_result(WindowedIO.new("#{lf_head}#{rest}".to_slice, 4096)).head?.not_nil!
+        String.new(head).should eq(lf_head)
+        Body.response_framing(Http1.parse_response_head(head), "GET")[0].should eq(framing)
+      end
+    end
+
+    it "reads and parses a bare-LF head behind leading blank lines alike" do
+      raw = "\n\nHTTP/1.1 200 OK\nContent-Length: 2\n\nok"
+      head = Http1.read_response_head_result(WindowedIO.new(raw.to_slice, 4096)).head?.not_nil!
+      String.new(head).should eq("\n\nHTTP/1.1 200 OK\nContent-Length: 2\n\n")
+      resp = Http1.parse_response_head(head)
+      resp.malformed?.should be_false
+      resp.status.should eq(200)
+      resp.headers.get?("Content-Length").should eq("2")
+      resp.raw_head.should eq(head) # the blank lines stay in the record (P7)
+      Body.response_framing(resp, "GET").should eq({BodyFraming::Length, 2_i64})
+    end
+
+    it "keeps the bare-LF head when a later CRLFCRLF reading frames the body the same way" do
+      # A CGI with LF headers and no framing header, whose body carries a CRLF blank line: a
+      # strict reader's longer head holds no framing header either, so nothing can desync.
+      raw = "HTTP/1.1 200 OK\nContent-Type: text/html\n\n<p>a</p>\r\n\r\n<p>b</p>"
+      head = Http1.read_response_head_result(WindowedIO.new(raw.to_slice, 4096)).head?.not_nil!
+      String.new(head).should eq("HTTP/1.1 200 OK\nContent-Type: text/html\n\n")
+    end
+
+    it "reads past a stray blank line in front of a head instead of ending an empty one" do
+      raw = "\n\nHTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"
+      [1, 2, 3, raw.bytesize].each do |window|
+        result = Http1.read_response_head_result(WindowedIO.new(raw.to_slice, window))
+        String.new(result.head?.not_nil!).should eq(raw)
+      end
+      String.new(Http1.read_response_head_result(NoPeekIO.new(raw.to_slice)).head?.not_nil!).should eq(raw)
+    end
+
+    it "leaves a REQUEST head read CRLFCRLF-only, exactly as before" do
+      raw = "GET / HTTP/1.1\nHost: a\n\nBODY"
+      result = Http1.read_head_result(WindowedIO.new(raw.to_slice, 4))
+      result.state.should eq(Http1::HeadReadResult::State::Incomplete)
+      String.new(result.bytes).should eq(raw)
+      req = Http1.parse_request_head(bytes("GET / HTTP/1.1\nHost: a\n\n"))
+      req.headers.size.should eq(0)
+      Http1.obfuscated_header?(req.raw_head).should be_true
+    end
+  end
+
   describe ".looks_like_http_request?" do
     it "accepts complete HTTP requests and the h2 preface" do
       ["GET / HTTP/1.1\r\nHost: a\r\n\r\n", "POST /x HTTP/1.0\r\n\r\n",

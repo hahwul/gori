@@ -61,6 +61,7 @@ gori run probe rules disable sri            # 시끄러운 패시브 체크 하�
 | `api_docs_exposed` | API documentation exposed | `infoleak` | 프로덕션에서 닿는 Swagger UI, OpenAPI/Swagger 스펙, 대화형 GraphQL IDE(GraphiQL, Playground, ReDoc)를 탐지합니다. |
 | `session_id_in_url` | Session identifier in URL | `infoleak` | 요청 URL에 실린 알려진 프레임워크 세션 식별자(PHPSESSID, JSESSIONID, ASP.NET_SessionId 등)를 표시합니다. 로그, 방문 기록, Referer로 새어 나갑니다. |
 | `open_cross_domain_policy` | Permissive cross-domain policy | `cors` | 모든 origin에 접근을 허용하는(`domain="*"`) Flash/Silverlight 크로스 도메인 정책을 표시합니다. |
+| `bare_lf_response` | Bare-LF response head | `headers` | 응답 헤드의 줄 끝이 CRLF가 아닌 단독 LF인 경우를 표시합니다. 파서마다 메시지 프레이밍을 다르게 읽을 수 있습니다(응답 desync / splitting의 전제 조건). |
 
 ## 액티브 룰 {#active}
 
