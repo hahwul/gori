@@ -183,13 +183,24 @@ module Gori
     # Stored references with their source flow's URL, newest source first within one
     # (host, path). `host` is exact (hosts are stored lowercased), `path` narrows to one node.
     # Raises on a read error when asked to, so a headless surface can tell "none" from "failed".
-    def js_ref_sightings(*, host : String? = nil, path : String? = nil, limit : Int32 = JS_REF_READ_MAX,
+    #
+    # `scheme`/`port` narrow to one origin of `host` (a Sitemap root, #1371).
+    def js_ref_sightings(*, host : String? = nil, path : String? = nil, scheme : String? = nil,
+                         port : Int32? = nil, limit : Int32 = JS_REF_READ_MAX,
                          raise_on_error : Bool = false) : Array(JsRefSighting)
       where = [] of String
       args = [] of DB::Any
       if h = host
         where << "r.host = ?"
         args << h.downcase
+      end
+      if sc = scheme
+        where << "r.scheme = ?"
+        args << sc
+      end
+      if pt = port
+        where << "r.port = ?"
+        args << pt.to_i64
       end
       if p = path
         where << "r.path = ?"

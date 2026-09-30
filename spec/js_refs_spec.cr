@@ -395,6 +395,20 @@ describe Gori::JsRefs do
       end
     end
 
+    # #1371: a Sitemap root is one origin, so the sighting a JavaScript-only row opens or sends
+    # is read on that origin — the host alone would hand back another port's reference.
+    it "narrows sightings to one origin of the host" do
+      with_store do |store|
+        jr_flow(store, "/a.js", %(fetch("http://api.test:8080/p")))
+        jr_flow(store, "/b.js", %(fetch("https://api.test/p")))
+        JR.scan(store)
+        store.js_ref_sightings(host: "api.test", path: "/p").size.should eq(2)
+        only = store.js_ref_sightings(host: "api.test", path: "/p", scheme: "http", port: 8080)
+        only.map { |r| {r.scheme, r.port} }.should eq([{"http", 8080}])
+        store.js_ref_sightings(host: "api.test", path: "/p", scheme: "https", port: 8080).should be_empty
+      end
+    end
+
     it "says whether the host has traffic, and follows new scans and deletes through its memo" do
       with_store do |store|
         a = jr_flow(store, "/a.js", %(fetch("/api/one");fetch("https://other.test/x")))

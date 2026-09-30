@@ -14,7 +14,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     # resolves to a descendant), but the scan target is the CONTAINER — on a `{uuid}` row
     # the user means "discover under /users", not "brute-force under this one uuid".
     # Both are identity on a normal node, so nothing changes off a fold.
-    id = @session.store.representative_flow_id(ep[:host], ep[:method], ep[:target])
+    id = sitemap_flow_id(ep)
     base = id.try { |i| @session.store.flow_row(i).try(&.url) }
     origin = base.try { |u| Discover::Url.parse(u).try { |p| Discover::Url.origin(p) } } || "https://#{ep[:host]}"
     target = view.selected_endpoint(:container).try(&.[](:target)) || ep[:target]

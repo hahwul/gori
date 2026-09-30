@@ -16,7 +16,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   def authorize_seed_sitemap : Nil
     ep = sitemap_controller.view.selected_endpoint
     return (@toast = "select an endpoint to send") unless ep
-    id = @session.store.representative_flow_id(ep[:host], ep[:method], ep[:target])
+    id = sitemap_flow_id(ep)
     return (@toast = "no captured request for this path — capture it, or use Discover") unless id
     added, skipped = authorize_controller.seed_flows([id])
     goto_tab(:authorize) if added > 0

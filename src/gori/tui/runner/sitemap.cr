@@ -40,7 +40,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     end
     targets, label = picked
     base = if targets.size == 1
-             "openapi-#{targets.keys.first.scrub.gsub(/[^A-Za-z0-9._-]/, "_")}.json"
+             "openapi-#{export_file_label(targets.keys.first)}.json"
            else
              "openapi.json"
            end
@@ -48,6 +48,21 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       sitemap_controller.export_openapi(path, filter, targets, label)
       true
     end
+  end
+
+  # A root's origin as a file-name stem: its authority, so a non-default port is in the name —
+  # `openapi-acme.test.json`, `openapi-127.0.0.1_19021.json` — and two ports of one host do not
+  # propose the same file.
+  private def export_file_label(o : Sitemap::Origin) : String
+    Gori::Url.authority(o.scheme, o.host, o.port).scrub.gsub(/[^A-Za-z0-9._-]/, "_")
+  end
+
+  # The captured flow behind a Sitemap endpoint, looked up on the row's OWN origin (#1371): a
+  # root is one scheme and port, so `/x` under `http://h:19022` must not open the `:19021` flow
+  # for the same path. Every Sitemap send/open resolves through here.
+  private def sitemap_flow_id(ep : SitemapView::Endpoint) : Int64?
+    o = ep[:origin]
+    @session.store.representative_flow_id(ep[:host], ep[:method], ep[:target], o.try(&.scheme), o.try(&.port))
   end
 
   def sitemap_toggle_grouping : Nil
@@ -100,14 +115,14 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   def sitemap_repeater : Nil
     return sitemap_repeater_marked if sitemap_controller.marked_node_count > 0
     if ref = sitemap_controller.view.selected_js_ref
-      return sitemap_repeater_js(ref[:host], ref[:path])
+      return sitemap_repeater_js(ref[:host], ref[:path], ref[:origin])
     end
     ep = sitemap_controller.view.selected_endpoint
     unless ep
       @toast = "select an endpoint to send"
       return
     end
-    if id = @session.store.representative_flow_id(ep[:host], ep[:method], ep[:target])
+    if id = sitemap_flow_id(ep)
       repeater_flow(id)
     else
       @toast = "no captured request for this path — capture it, or use Discover"
@@ -144,14 +159,14 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # the cursor — including a `{uuid}` fold, which both resolve to a real descendant.
   def sitemap_open_flow : Nil
     if ref = sitemap_controller.view.selected_js_ref
-      return sitemap_open_js_source(ref[:host], ref[:path])
+      return sitemap_open_js_source(ref[:host], ref[:path], ref[:origin])
     end
     ep = sitemap_controller.view.selected_endpoint
     unless ep
       @toast = "select an endpoint to open"
       return
     end
-    unless id = @session.store.representative_flow_id(ep[:host], ep[:method], ep[:target])
+    unless id = sitemap_flow_id(ep)
       @toast = "no captured request for this path — capture it, or use Discover"
       return
     end
@@ -168,16 +183,19 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   end
 
   # The sighting a JavaScript-only row stands for: the newest one read in CODE, else the newest
-  # at all (a route only ever seen commented out is still where it was seen).
-  private def sitemap_js_sighting(host : String, path : String) : Store::JsRefSighting?
-    seen = @session.store.js_ref_sightings(host: host, path: path, limit: 50)
+  # at all (a route only ever seen commented out is still where it was seen). On the row's own
+  # origin (#1371): the sightings are read by host, and `http://h:9090/api` is not the reference
+  # under `http://h:8080`.
+  private def sitemap_js_sighting(host : String, path : String, origin : Sitemap::Origin?) : Store::JsRefSighting?
+    seen = @session.store.js_ref_sightings(host: host, path: path, scheme: origin.try(&.scheme),
+      port: origin.try(&.port), limit: 50)
     seen.find { |s| s.flags & JsRefs::FLAG_COMMENT == 0 } || seen.first?
   end
 
   # `o` on a path only JavaScript names: there is no request to open, so open where the
   # reference was READ — the script's (or page's) flow in History — and say where in it.
-  private def sitemap_open_js_source(host : String, path : String) : Nil
-    unless s = sitemap_js_sighting(host, path)
+  private def sitemap_open_js_source(host : String, path : String, origin : Sitemap::Origin?) : Nil
+    unless s = sitemap_js_sighting(host, path, origin)
       @toast = "that reference is gone since the tree was built (its flow was deleted)"
       return
     end
@@ -199,8 +217,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # `r` on a path only JavaScript names: a BARE GET for it in a new Repeater tab — nothing is
   # sent until ^R. Bare on purpose: copying the page's Cookie/Authorization would carry
   # credentials to a URL nobody visited, and that is the operator's call to make in the editor.
-  private def sitemap_repeater_js(host : String, path : String) : Nil
-    unless s = sitemap_js_sighting(host, path)
+  private def sitemap_repeater_js(host : String, path : String, origin : Sitemap::Origin?) : Nil
+    unless s = sitemap_js_sighting(host, path, origin)
       @toast = "that reference is gone since the tree was built (its flow was deleted)"
       return
     end
@@ -228,7 +246,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     view = sitemap_controller.view
     wanted = view.target_keys.size
     ids = view.target_endpoints.compact_map do |ep|
-      @session.store.representative_flow_id(ep[:host], ep[:method], ep[:target])
+      sitemap_flow_id(ep)
     end.uniq!
     if ids.empty?
       @toast = "no captured requests for the #{plural(wanted, "marked path")} — capture them, or use Discover"

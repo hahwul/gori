@@ -71,7 +71,8 @@ module Gori
       # `filter` is the flow set (a QL filter; scope and the static-asset lens are joined in by
       # the caller). `host` is exact and case-insensitive. `path_prefix` is a plain prefix of the
       # endpoint path, as `sitemap params --path` reads it. `targets` narrows to a set the TUI
-      # picked: host → the endpoint paths wanted under it, or nil for the whole host.
+      # picked: origin (a Sitemap root, #1371) → the endpoint paths wanted under it, or nil for
+      # the whole origin.
       #
       # `max_flows` bounds the flows READ (a row that is skipped or whose operation is already
       # full costs a row read, not a flow read); `max_samples` is the per-operation sample cap;
@@ -91,7 +92,7 @@ module Gori
         filter : QL::Filter = QL::EMPTY,
         host : String? = nil,
         path_prefix : String? = nil,
-        targets : Hash(String, Set(String)?)? = nil,
+        targets : Hash(Sitemap::Origin, Set(String)?)? = nil,
         max_flows : Int32 = 5000,
         max_endpoints : Int32 = 1000,
         max_samples : Int32 = 20,
@@ -358,8 +359,11 @@ module Gori
           f = QL.and(f, QL::Filter.new("host = ? COLLATE NOCASE", [h] of DB::Any))
         end
         if (t = opts.targets) && !t.empty?
-          marks = Array.new(t.size, "?").join(", ")
-          f = QL.and(f, QL::Filter.new("host IN (#{marks})", t.keys.map { |k| k.as(DB::Any) }))
+          # Hosts in SQL, the origin's scheme and port on the row (`admit`): the index leads
+          # with host, and a handful of origins is not worth an OR-of-triples here.
+          hosts = t.keys.map(&.host).uniq!
+          marks = Array.new(hosts.size, "?").join(", ")
+          f = QL.and(f, QL::Filter.new("host IN (#{marks})", hosts.map { |k| k.as(DB::Any) }))
         end
         f
       end
@@ -370,8 +374,9 @@ module Gori
         opts = b.opts
         path = endpoint_path(row.target)
         if t = opts.targets
-          return nil unless t.has_key?(row.host)
-          if (wanted = t[row.host]) && !wanted.includes?(path)
+          origin = Sitemap::Origin.new(row.scheme, row.host, row.port)
+          return nil unless t.has_key?(origin)
+          if (wanted = t[origin]) && !wanted.includes?(path)
             return nil
           end
         end

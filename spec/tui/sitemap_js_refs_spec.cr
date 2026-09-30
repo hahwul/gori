@@ -81,7 +81,7 @@ describe "SitemapView — JavaScript references" do
       view = SitemapView.new
       view.reload(store)
       select_label(view, "admin")
-      view.selected_js_ref.should eq({host: "shop.test", path: "/api/admin"})
+      view.selected_js_ref.should eq({host: "shop.test", path: "/api/admin", origin: Gori::Sitemap::Origin.new("https", "shop.test", 443)})
       select_label(view, "users")
       view.selected_js_ref.should be_nil
     end

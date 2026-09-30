@@ -56,6 +56,20 @@ describe ParamsView do
     v.rows.size.should eq(4)
   end
 
+  # #1371: a Sitemap root is one origin, so a Target naming one keeps the host's other
+  # services' rows out, while a Target without one still reads the whole host.
+  it "narrows to the Target's origin when it names one" do
+    v = ParamsView.new
+    v.report = pv_report([pv_row("a", "/x", scheme: "http", port: 19021),
+                          pv_row("b", "/x", scheme: "http", port: 19022),
+                          pv_row("c", "/x", scheme: "https", port: 19021)])
+    v.target = ParamsView::Target.new("acme.test", nil, "http://acme.test:19021",
+      origin: Gori::Sitemap::Origin.new("http", "acme.test", 19021))
+    v.rows.map(&.name).should eq(["a"])
+    v.target = ParamsView::Target.new("acme.test", nil, "acme.test")
+    v.rows.map(&.name).should eq(["a", "b", "c"])
+  end
+
   # Miner's neighbour names come from the host's OTHER endpoints, which the node filter hides.
   it "still hands the whole host's rows to the Miner seed while narrowed" do
     v = ParamsView.new
@@ -196,6 +210,20 @@ describe ParamsController do
       ctl.set_target(t)
       drain_until_landed(ctl)
       ctl.view.rows.map(&.name).sort!.should eq(["x", "y"])
+    end
+  end
+
+  it "scans only the origin of the Sitemap root it came from" do
+    with_params_controller do |ctl, sitemap, session|
+      seed_params_flow(session.store, "http://acme.test:8080/a?mine=1")
+      seed_params_flow(session.store, "http://acme.test:9090/a?other=1")
+      sitemap.reload
+      t = sitemap.view.selected_params_target.not_nil! # the first root: http://acme.test:8080
+      t.origin.should eq(Gori::Sitemap::Origin.new("http", "acme.test", 8080))
+      ctl.set_target(t)
+      drain_until_landed(ctl)
+      ctl.view.rows.map(&.name).should eq(["mine"])
+      ctl.view.@report.not_nil!.rows.map(&.name).should eq(["mine"]) # narrowed in the read, too
     end
   end
 
