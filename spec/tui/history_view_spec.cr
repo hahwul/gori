@@ -131,6 +131,28 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  # The port is what tells two services apart, so a HOST cell too narrow for the authority
+  # shortens the host and keeps the port.
+  it "keeps the port when the HOST cell has to shorten a long host" do
+    with_store do |store|
+      host = "a-very-long-internal-service-hostname.corp.example.test"
+      [19011, 19999].each do |port|
+        store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: host, port: port,
+          method: "GET", target: "/p#{port}", http_version: "HTTP/1.1",
+          head: "GET /p#{port} HTTP/1.1\r\nHost: #{host}\r\n\r\n".to_slice,
+          body: nil, source: Gori::FlowSource::Kind::Proxy))
+      end
+      view = HistoryView.new
+      view.reload(store)
+      backend = MemoryBackend.new(120, 12)
+      view.render_list(Screen.new(backend), Rect.new(0, 0, 120, 12))
+      rows = (0...12).map { |y| backend.row(y) }
+      rows.find!(&.includes?("/p19011")).should contain("…:19011")
+      rows.find!(&.includes?("/p19999")).should contain("…:19999")
+    end
+  end
+
   # A `field:` QL does not implement free-texts the WHOLE token, so `hostt:api` runs a literal
   # substring search, matches nothing, and is indistinguishable on this list from "this project
   # has no such traffic". `gori run history` refuses it outright and MCP errors on it; a live bar

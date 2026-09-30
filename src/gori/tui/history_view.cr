@@ -3125,7 +3125,7 @@ module Gori::Tui
         proto_label = stub ? "STUB" : kind.label(row.scheme)
         proto_color = stub ? Theme.yellow : (kind.http? ? Theme.muted : Theme.accent)
         screen.text(proto_x, y, proto_label, proto_color, bg)
-        screen.text(host_x, y, host_cell(row), fg, bg, width: host_w) if host_w > 0
+        screen.text(host_x, y, host_cell(row, host_w), fg, bg, width: host_w) if host_w > 0
         screen.text(path_x, y, origin_path_memo(row), fg, bg, width: path_w) if path_w > 0
         # Failed flows store status 0 — FlowStatus shows the STATE (ERR/ABT) instead of
         # a cryptic "0" indistinguishable from a still-pending "···".
@@ -3393,8 +3393,18 @@ module Gori::Tui
     # `127.0.0.1:19999` are two services, and a bare `127.0.0.1` made them read identical
     # (#1371). The default port stays elided (`Gori::Url.authority`), so an ordinary row reads
     # as it always did; PROTO already says the scheme.
-    private def host_cell(row : Store::FlowRow) : String
-      Gori::Url.authority(row.scheme, row.host, row.port)
+    #
+    # With `width`, fitted by shortening the HOST, never the port: `Screen#text` ellipsizes from
+    # the right, which on a long host cut off exactly the `:19011`/`:19999` that tells the two
+    # rows apart. (`ProjectPicker.fit_label` is the same rule for the same reason.)
+    private def host_cell(row : Store::FlowRow, width : Int32? = nil) : String
+      full = Gori::Url.authority(row.scheme, row.host, row.port)
+      return full if width.nil? || Screen.display_width(full) <= width
+      bare = Gori::Url.authority(row.scheme, row.host, row.scheme == "https" ? 443 : 80)
+      port = full[bare.size..] # ":19011", or "" on the default port
+      return full if port.empty?
+      room = width - port.size
+      room < 2 ? port : "#{Screen.fit(bare, room)}#{port}"
     end
 
     private def origin_path_memo(row : Store::FlowRow) : String
