@@ -379,7 +379,7 @@ module Gori
 
       @[Tool("fuzz_status", gated: true, read_only: true, permission: "send")]
       private def fuzz_status(h) : Result
-        fjob = lookup_fuzz_job(h)
+        fjob = lookup_fuzz_job(h, "status")
         return fjob if fjob.is_a?(Result)
         Result.new(JSON.build do |j|
           j.object do
@@ -467,9 +467,11 @@ module Gori
         end)
       end
 
+      FUZZ_RESULTS_LIMIT = PageLimit.new(100, 1000)
+
       @[Tool("fuzz_results", gated: true, read_only: true, requires: ["get_flow"], permission: "send")]
       private def fuzz_results(h) : Result
-        fjob = lookup_fuzz_job(h)
+        fjob = lookup_fuzz_job(h, "results")
         return fjob if fjob.is_a?(Result)
         cluster_args = fuzz_cluster_args(h)
         return cluster_args if cluster_args.is_a?(Result)
@@ -491,7 +493,7 @@ module Gori
         req_off = optional_int_arg(h, "offset")
         req_lim = optional_int_arg(h, "limit")
         offset = clamp_nonneg(req_off)
-        limit = clamp(req_lim, 100, 1000)
+        limit = clamp(req_lim, FUZZ_RESULTS_LIMIT)
         last = offset < picked.size ? Math.min(offset + limit, picked.size) : offset
         returned = last - offset
         page = picked[offset...last]? || [] of Int32
@@ -522,6 +524,16 @@ module Gori
             j.field "results_truncated", fjob.truncated?
             j.field "history_truncated", fjob.history_truncated?
             emit_fuzz_save_state(j, fjob)
+            # A match with no way to its body. The default `record_history: "none"` records no
+            # History flow and `save_results` keeps no run, so every row on this page lacks the
+            # `flow_id` a follow-up `get_flow` would take — said here, where the missing field
+            # is noticed, rather than only in the start echo read before any hit existed.
+            if fjob.record_history == :none && fjob.persistence.nil? && page.any? { |pos| rows[pos].matched? }
+              j.field "evidence_note", "this run recorded no History (record_history: \"none\", the default) " \
+                                       "and saved no results, so matched rows carry no flow_id and their " \
+                                       "response bodies are not retrievable. Re-run with record_history: " \
+                                       "\"matched\" (a get_flow pointer per match) or save_results: true."
+            end
           end
         end)
       end
@@ -552,18 +564,17 @@ module Gori
 
       @[Tool("fuzz_stop", gated: true, agent_action: true, permission: "send")]
       private def fuzz_stop(h) : Result
-        fjob = lookup_fuzz_job(h)
+        fjob = lookup_fuzz_job(h, "stop")
         return fjob if fjob.is_a?(Result)
-        fjob.stop
         stop_and_report(fjob)
       end
 
       # The job for `job_id`, or an error Result the caller returns as-is.
-      private def lookup_fuzz_job(h) : FuzzJob | Result
+      private def lookup_fuzz_job(h, verb : String) : FuzzJob | Result
         id = str(h, "job_id")
         return Result.new("missing required 'job_id'", is_error: true) if id.nil? || id.empty?
         job = @jobs[id]?
-        return not_found("no fuzz job #{id}") unless job
+        return job_not_found(id, "fuzz", verb) unless job
         job_project_mismatch(job) || job
       end
 
@@ -1577,7 +1588,10 @@ module Gori
           "then cluster:<id> for the members of the ones worth reading." do |s|
           s.field "job_id", strprop("id from fuzz_start"), required: true
           s.field "offset", intprop("start row (default 0)")
-          s.field "limit", intprop("max rows (default 100, max 1000)")
+          # Prose, not `limitprop`: the numbers depend on the mode, and one `default`/`maximum`
+          # pair would be wrong for the cluster listing (Copilot on #1398).
+          s.field "limit", intprop("max rows (default #{FUZZ_RESULTS_LIMIT.default}, max #{FUZZ_RESULTS_LIMIT.max}; " \
+                                   "a cluster listing: default #{FUZZ_CLUSTER_LIMIT.default}, max #{FUZZ_CLUSTER_LIMIT.max})")
           s.field "clusters", boolprop("return one entry per RESPONSE SHAPE instead of rows (default false): responses that are the same answer — payload echoes, numbers, ids, timestamps and volatile headers normalized away — group together, counted over EVERY result of the job (not only the stored rows). Each cluster has an id, count, matched/errored/incomplete counts, status/grpc_status/ws_close_code or error_class, metric ranges, the lowest member indices (sample_indices) and a representative row. Paged by offset/limit (default 50, max 500 clusters). Start here on a large run: the rare clusters are usually the interesting ones.")
           s.field "cluster", strprop("a cluster id from clusters:true — return that cluster's member ROWS (same row shape as the default page) plus its summary. The live cache keeps only interesting rows, so members_retained can be below count; a save_results run pages every member through get_fuzz_run{cluster}.")
           s.field "cluster_order", enumprop("order of clusters:true (default rare = smallest cluster first; common = largest first; first = by first appearance)", Fuzz::Clusters::Order.names)

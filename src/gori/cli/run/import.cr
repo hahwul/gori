@@ -86,8 +86,7 @@ module Gori
             Import.import_curl_text(store, text, Gori::FlowSource::Surface::Cli,
               path == "-" ? "curl (stdin)" : File.basename(path))
           elsif tmp = spool
-            # Labelled `stdin`, so neither the flows' provenance nor a refusal names the spool.
-            Import.import_file(store, kind, tmp, Gori::FlowSource::Surface::Cli, label: "stdin")
+            import_spooled(store, kind, tmp)
           else
             Import.import_file(store, kind, path, Gori::FlowSource::Surface::Cli)
           end
@@ -100,6 +99,15 @@ module Gori
 
         emit_import_result(kind, path, result, format)
         exit 1 if result.short?
+      end
+
+      # A spooled stdin, imported under `ref: "stdin"` — the way `Import.import_text` names its
+      # own temp file — so the flows' provenance says where they came from, and a refusal says
+      # `stdin` rather than the spool's path.
+      private def self.import_spooled(store : Store, kind : Symbol, spooled : String) : Import::Result
+        Import.import_file(store, kind, spooled, Gori::FlowSource::Surface::Cli, ref: "stdin")
+      rescue ex : Gori::Error
+        raise Gori::Error.new((ex.message || "import failed").gsub(spooled, "stdin"))
       end
 
       # stdin copied into a temp file for an importer that reads a path, refused first when it is

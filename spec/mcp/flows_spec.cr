@@ -916,15 +916,21 @@ describe Gori::MCP::Server do
       end
     end
 
-    it "takes 'text' for kind curl only, and not beside 'path'" do
+    it "takes 'text' for any kind, and not beside 'path'" do
       with_store do |store|
         tools = tools_for(store)
+        # #1395: a HAR handed in as text is parsed (here: refused as malformed JSON), and no
+        # message names the temp file it was staged in.
         r = tools.call("import_flows", JSON.parse({kind: "har", text: "x"}.to_json))
         r.is_error.should be_true
-        r.text.should contain("\"curl\" only")
+        r.text.should contain("not valid JSON")
+        r.text.should_not contain("gori-import")
         r = tools.call("import_flows", JSON.parse({kind: "curl", text: "curl https://a.test/", path: "/tmp/x"}.to_json))
         r.is_error.should be_true
         r.text.should contain("not both")
+        # A blank `text` beside a path is absent, not a second source.
+        blank = tools.call("import_flows", JSON.parse({kind: "urls", path: "/nonexistent/x.txt", text: ""}.to_json))
+        blank.text.should_not contain("not both")
         r = tools.call("import_flows", JSON.parse({kind: "curl"}.to_json))
         r.is_error.should be_true
         r.text.should contain("'path' or 'text'")
@@ -961,7 +967,7 @@ describe "MCP sitemap tags" do
       res = mcp_ok_json(tools, "set_sitemap_tag", %({"host":"acme.test","path":"/login?a=1","tag":"auth entry"}))
       res["tag"].as_s.should eq("auth entry")
 
-      tags = mcp_ok_json(tools, "list_sitemap_tags", "{}").as_a
+      tags = mcp_ok_json(tools, "list_sitemap_tags", "{}")["items"].as_a
       tags.size.should eq(1)
       tags.first["path"].as_s.should eq("/login?a=1")
 
@@ -979,7 +985,7 @@ describe "MCP sitemap tags" do
       unfolded["tag"].as_s.should eq("auth entry")
 
       mcp_ok_json(tools, "set_sitemap_tag", %({"host":"acme.test","path":"/login?a=1"}))["cleared"].as_bool.should be_true
-      mcp_ok_json(tools, "list_sitemap_tags", "{}").as_a.empty?.should be_true
+      mcp_ok_json(tools, "list_sitemap_tags", "{}")["items"].as_a.empty?.should be_true
     end
   end
 

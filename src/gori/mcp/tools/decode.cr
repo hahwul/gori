@@ -268,7 +268,7 @@ module Gori
           return Result.new("not a decodable JWT — no payloads generated (an encrypted JWE has no " \
                             "claims to tamper with and no signature to strip)", is_error: true)
         end
-        Result.new(Jwt.attacks_json(attacks))
+        items_result(Jwt.attacks_json(attacks))
       end
 
       # Verify is its own tool rather than a flag on jwt_decode: decoding is pure and needs
@@ -278,13 +278,20 @@ module Gori
       private def jwt_verify_tool(h) : Result
         token = str(h, "token")
         return Result.new("missing required 'token'", is_error: true) if token.nil? || token.strip.empty?
-        secret = str(h, "secret") || ""
+        secret = str(h, "secret")
         pem = str(h, "key").try(&.presence)
-        if pem && !secret.empty?
+        # An explicit `secret: ""` names the empty secret, so beside a `key` it conflicts too.
+        if pem && secret
           return Result.new("'secret' and 'key' are two names for the same key — pass one", is_error: true)
         end
+        # Naming no key used to check the EMPTY secret and answer a bare `verified: false`, which
+        # an agent reads as "wrong key". An explicit `secret: ""` still means the empty secret.
+        if secret.nil? && pem.nil?
+          return Result.new("jwt_verify needs 'secret' (HMAC) or 'key' (PEM) — pass secret:\"\" to check " \
+                            "the empty secret", is_error: true)
+        end
         begin
-          Result.new(Jwt.verify_json(Jwt.verify(token.strip, Jwt.key_material(secret, pem))))
+          Result.new(Jwt.verify_json(Jwt.verify(token.strip, Jwt.key_material(secret || "", pem))))
         rescue ex : Jwt::ForgeError
           Result.new(ex.message || "invalid key", is_error: true)
         end
@@ -336,11 +343,17 @@ module Gori
           "Check whether a JWT's OWN signature verifies under a key you supply — the question " \
           "\"would a server holding this key accept this token\". Verification always uses the alg " \
           "the TOKEN declares, never one you pick, because that is what a vulnerable server does " \
-          "too. Pure compute: no network. Returns {alg, verified, reason}; `reason` is set only " \
-          "when the \"no\" needs explaining (alg=none, an alg gori cannot check). A false " \
-          "`verified` is an ANSWER, not an error." do |s|
+          "too. Pure compute: no network. Returns {alg, verified, code, reason}. A false " \
+          "`verified` is an ANSWER, not an error, and always carries a `code` to branch on plus " \
+          "a prose `reason`. Another key may succeed only after signature_mismatch (a " \
+          "well-formed signature this key did not make) or key_mismatch (a key of the wrong type " \
+          "or size for the token's alg, which a server holding it rejects). No key helps after " \
+          "signature_malformed (not base64, or a width no key produces), unsigned (alg=none or " \
+          "no signature), alg_unsupported, no_alg, jwe (encrypted, nothing to verify), " \
+          "extra_segments or malformed. Both are null when `verified` is true. Pass 'secret' or " \
+          "'key' — a call with neither is refused rather than checked against an empty secret." do |s|
           s.field "token", strprop("the JWT to check"), required: true
-          s.field "secret", strprop("HMAC secret, for an HS256/384/512 token")
+          s.field "secret", strprop("HMAC secret, for an HS256/384/512 token. \"\" checks the empty secret")
           s.field "key", strprop("PEM key for an RS/PS/ES/EdDSA token — inline PEM text, or a path to a .pem file. A PUBLIC KEY, a CERTIFICATE, or the private key all work. Mutually exclusive with 'secret'")
         end
 
@@ -365,7 +378,7 @@ module Gori
           "HS256 re-signs, and header-parameter injection (kid path-traversal/SQLi, jku/x5u/jwk). " \
           "With `public_key`, also the algorithm-confusion family for an RS/PS/ES token — HS256 " \
           "re-signs keyed with the public key's own bytes, in each spelling a server might hold. " \
-          "Pure transform: no network. Returns an array of {name, category, note, token, verified}. " \
+          "Pure transform: no network. Returns {items:[{name, category, note, token, verified}]}. " \
           "An encrypted JWE yields nothing: it has no claims segment to tamper with." do |s|
           s.field "token", strprop("the JWT to derive testing payloads from"), required: true
           s.field "public_key", strprop("the server's PUBLIC verification key for the algorithm-confusion family — inline PEM text (a PUBLIC KEY or a CERTIFICATE), or a path to a .pem file. Only meaningful for a token whose alg is RS*/PS*/ES*")

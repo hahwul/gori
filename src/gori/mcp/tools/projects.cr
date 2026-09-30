@@ -50,7 +50,7 @@ module Gori
         req_off = optional_int_arg(h, "offset")
         req_lim = optional_int_arg(h, "limit")
         offset = clamp_nonneg(req_off)
-        limit = clamp(req_lim, MCP_PROJECTS_DEFAULT, MCP_PROJECTS_MAX)
+        limit = clamp(req_lim, PageLimit.new(MCP_PROJECTS_DEFAULT, MCP_PROJECTS_MAX))
         query = str(h, "query").try(&.strip).presence
         needle = ProjectRegistry.needle(query)
 
@@ -416,7 +416,7 @@ module Gori
           "#{project_recovery}." do |s|
           s.field "query", strprop("keep only projects whose display name, directory slug, short id, " \
                                    "or bound workspace path CONTAINS this text (case-insensitive)")
-          s.field "limit", intprop("max projects returned (default #{MCP_PROJECTS_DEFAULT}, max #{MCP_PROJECTS_MAX})")
+          s.field "limit", limitprop("max projects returned", PageLimit.new(MCP_PROJECTS_DEFAULT, MCP_PROJECTS_MAX))
           s.field "offset", intprop("skip this many matching projects — the page cursor (default 0)")
         end
 

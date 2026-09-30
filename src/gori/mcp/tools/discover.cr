@@ -304,7 +304,7 @@ module Gori
 
       @[Tool("discover_status", gated: true, read_only: true, permission: "send")]
       private def discover_status(h) : Result
-        djob = lookup_discover_job(h)
+        djob = lookup_discover_job(h, "status")
         return djob if djob.is_a?(Result)
         s = djob.stats
         Result.new(JSON.build do |j|
@@ -344,14 +344,16 @@ module Gori
         end)
       end
 
+      DISCOVER_RESULTS_LIMIT = PageLimit.new(100, 1000)
+
       @[Tool("discover_results", gated: true, read_only: true, requires: ["get_flow"], permission: "send")]
       private def discover_results(h) : Result
-        djob = lookup_discover_job(h)
+        djob = lookup_discover_job(h, "results")
         return djob if djob.is_a?(Result)
         req_off = optional_int_arg(h, "offset")
         req_lim = optional_int_arg(h, "limit")
         offset = clamp_nonneg(req_off)
-        limit = clamp(req_lim, 100, 1000)
+        limit = clamp(req_lim, DISCOVER_RESULTS_LIMIT)
         page = djob.results[offset, limit]? || [] of Discover::Finding
         Result.new(JSON.build do |j|
           j.object do
@@ -388,17 +390,16 @@ module Gori
 
       @[Tool("discover_stop", gated: true, agent_action: true, permission: "send")]
       private def discover_stop(h) : Result
-        djob = lookup_discover_job(h)
+        djob = lookup_discover_job(h, "stop")
         return djob if djob.is_a?(Result)
-        djob.stop
         stop_and_report(djob)
       end
 
-      private def lookup_discover_job(h) : DiscoverJob | Result
+      private def lookup_discover_job(h, verb : String) : DiscoverJob | Result
         id = str(h, "job_id")
         return Result.new("missing required 'job_id'", is_error: true) if id.nil? || id.empty?
         job = @discover_jobs[id]?
-        return not_found("no discover job #{id}") unless job
+        return job_not_found(id, "discover", verb) unless job
         job_project_mismatch(job) || job
       end
 
@@ -453,7 +454,7 @@ module Gori
           "has_more is about THIS page; incomplete_reason says whether the RUN covered everything it queued." do |s|
           s.field "job_id", strprop("id from discover_start"), required: true
           s.field "offset", intprop("start row (default 0)")
-          s.field "limit", intprop("max rows (default 100, max 1000)")
+          s.field "limit", limitprop("max rows", DISCOVER_RESULTS_LIMIT)
         end
 
         tool j, "discover_stop", "Stop a running discover job (in-flight requests finish)." do |s|

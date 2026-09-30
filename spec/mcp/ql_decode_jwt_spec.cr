@@ -262,7 +262,7 @@ describe Gori::MCP::Server do
     it "jwt_attacks lists none/weak-secret/header-inject payloads" do
       with_store do |store|
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"jwt_attacks","arguments":{"token":"#{jwt}"}}})
-        cats = mcp_tool_payload(mcp_drive(store, call, allow_actions: false)[0]).as_a.map(&.["category"].as_s).uniq!
+        cats = mcp_tool_payload(mcp_drive(store, call, allow_actions: false)[0])["items"].as_a.map(&.["category"].as_s).uniq!
         cats.should contain("none")
         cats.should contain("weak-secret")
         cats.should contain("header-inject")
@@ -311,6 +311,55 @@ describe Gori::MCP::Server do
       end
     end
 
+    it "jwt_verify says why a no is a no, with a code to branch on (#1370)" do
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"jwt_verify","arguments":{"token":"#{jwt}","secret":"nope"}}})
+        payload = mcp_tool_payload(mcp_drive(store, call, allow_actions: false)[0])
+        payload["verified"].as_bool.should be_false
+        payload["code"].as_s.should eq("signature_mismatch")
+        payload["reason"].as_s.should_not be_empty
+      end
+    end
+
+    it "jwt_verify refuses a call naming no key, but checks an explicit empty secret" do
+      with_store do |store|
+        empty_signed = Gori::Jwt.encode("{}", %({"sub":"1"}), "HS256", "")
+        none = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"jwt_verify","arguments":{"token":"#{empty_signed}"}}})
+        nulls = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"jwt_verify","arguments":{"token":"#{empty_signed}","secret":null,"key":""}}})
+        empty = %({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"jwt_verify","arguments":{"token":"#{empty_signed}","secret":""}}})
+        resps = mcp_drive(store, none, nulls, empty, allow_actions: false)
+        # Naming no key used to check the empty secret — and so VERIFY this token — silently.
+        resps[0]["result"]["isError"].as_bool.should be_true
+        resps[0]["result"]["content"][0]["text"].as_s.should contain("needs 'secret' (HMAC) or 'key' (PEM)")
+        resps[1]["result"]["isError"].as_bool.should be_true
+        resps[2]["result"]["isError"]?.try(&.as_bool).should_not be_true
+        mcp_tool_payload(resps[2])["verified"].as_bool.should be_true
+      end
+    end
+
+    it "jwt_verify refuses an explicit empty secret beside a key, and answers a key mismatch" do
+      with_store do |store|
+        es = Gori::Jwt.encode("{}", %({"sub":"1"}), "ES256", JoseKeys::EC256)
+        rsa = JoseKeys::RSA_PUB.gsub('\n', "\\n")
+        both = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"jwt_verify","arguments":{"token":"#{es}","secret":"","key":"#{rsa}"}}})
+        wrong_kind = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"jwt_verify","arguments":{"token":"#{es}","key":"#{rsa}"}}})
+        resps = mcp_drive(store, both, wrong_kind, allow_actions: false)
+        resps[0]["result"]["isError"].as_bool.should be_true
+        # The token's alg is captured text: an RSA key under its ES256 is an answer, not a bad call.
+        resps[1]["result"]["isError"]?.try(&.as_bool).should_not be_true
+        mcp_tool_payload(resps[1])["code"].as_s.should eq("key_mismatch")
+      end
+    end
+
+    it "jwt_verify's description names every code the engine can answer" do
+      with_store do |store|
+        tools = mcp_drive(store, %({"jsonrpc":"2.0","id":1,"method":"tools/list"}), allow_actions: false)[0]["result"]["tools"].as_a
+        desc = tools.find! { |t| t["name"].as_s == "jwt_verify" }["description"].as_s
+        # Whole words: `malformed` is also a substring of `signature_malformed`.
+        Gori::Jwt::VerifyCode.values.each { |c| desc.should match(/(?<![a-z_])#{c.label}(?![a-z_])/) }
+      end
+    end
+
     it "jwt_verify checks an ES256 token against a PEM public key" do
       with_store do |store|
         token = Gori::Jwt.encode("{}", %({"sub":"1"}), "ES256", JoseKeys::EC256)
@@ -329,8 +378,8 @@ describe Gori::MCP::Server do
         plain = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"jwt_attacks","arguments":{"token":"#{token}"}}})
         keyed = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"jwt_attacks","arguments":{"token":"#{token}","public_key":"#{pem}"}}})
         resps = mcp_drive(store, plain, keyed, allow_actions: false)
-        mcp_tool_payload(resps[0]).as_a.map(&.["category"].as_s).should_not contain("alg-confusion")
-        mcp_tool_payload(resps[1]).as_a.map(&.["category"].as_s).should contain("alg-confusion")
+        mcp_tool_payload(resps[0])["items"].as_a.map(&.["category"].as_s).should_not contain("alg-confusion")
+        mcp_tool_payload(resps[1])["items"].as_a.map(&.["category"].as_s).should contain("alg-confusion")
       end
     end
 

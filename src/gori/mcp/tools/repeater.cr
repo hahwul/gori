@@ -312,8 +312,21 @@ module Gori
           notice_rows_dropped = seed.notice_rows_dropped
         end
         http2 = curl_req.http2? if curl_req && http2_val.nil?
-        return Result.new("missing required 'target'", is_error: true) if target.nil? || target.empty?
-        return Result.new("missing required 'request'", is_error: true) if request.nil? || request.empty?
+        # Neither is required ON ITS OWN — four sources answer them (a flow, an issue's flow, a
+        # curl command, or the pair spelled out) — so the refusal names all four rather than
+        # sending an agent that called with nothing to add a `target` and fail on `request`.
+        if (target.nil? || target.empty?) && (request.nil? || request.empty?)
+          return err("nothing to seed the repeater from: pass flow_id, issue_id, curl, or target + request",
+            "INVALID_ARGUMENT", field: "flow_id")
+        end
+        if target.nil? || target.empty?
+          return err("missing 'target' (the origin to send to, e.g. https://host) beside 'request' — " \
+                     "or seed from flow_id, issue_id or curl instead", "INVALID_ARGUMENT", field: "target")
+        end
+        if request.nil? || request.empty?
+          return err("missing 'request' (the raw HTTP request) beside 'target' — " \
+                     "or seed from flow_id, issue_id or curl instead", "INVALID_ARGUMENT", field: "request")
+        end
 
         sni = str(h, "sni")
 
@@ -1243,7 +1256,7 @@ module Gori
           "Update an existing repeater tab's properties by database id — including the request " \
           "bytes, target and transport flags. To re-label several tabs at once (tags and name " \
           "affixes only) use update_repeaters." do |s|
-          s.field "id", intprop("repeater DATABASE id — not the number on the TUI sub-tab chip. get_repeater_context returns both, as 'db_id' and 'tui_index'"), required: true
+          s.field "id", intprop("repeater DATABASE id — not the number on the TUI sub-tab chip. get_repeater_context returns both, as 'id' and 'tui_index'"), required: true
           s.field "target", strprop("absolute target URL")
           s.field "request", strprop(%(verbatim raw HTTP request bytes/text — stored byte-for-byte and never repaired or refused, because a malformed request is a legitimate thing to send. A head with no blank-line terminator is therefore kept (and is what shell $(...) leaves behind, since it strips trailing newlines); the reply, get_repeater_context and send_request all carry head_unterminated:true for such a session))
           s.field "request_base64", strprop("the raw HTTP request as base64 — the byte-exact form (see create_repeater). Overrides 'request'")
@@ -1295,7 +1308,7 @@ module Gori
           "never a filter: narrow the listing with get_repeater_context{filter} first and pass " \
           "the ids it returned, so the set you read and the set destroyed are the same set. If " \
           "any id is unknown the whole call is refused and nothing is deleted. Cannot be undone." do |s|
-          s.field "ids", id_list_prop("repeater DATABASE ids to delete (get_repeater_context returns them as 'db_id'). An array of integers, a single integer, or a comma list. At most #{MCP_REPEATER_BULK_MAX} per call"), required: true
+          s.field "ids", id_list_prop("repeater DATABASE ids to delete (get_repeater_context returns them as 'id'). An array of integers, a single integer, or a comma list. At most #{MCP_REPEATER_BULK_MAX} per call"), required: true
           s.field "confirm", boolprop("must be true to actually delete; anything else refuses and reports the count"), required: true
         end
 

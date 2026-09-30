@@ -1640,19 +1640,15 @@ describe "Gori::Import curl" do
     end
   end
 
-  # `gori run import --urls -` (#1386) spools stdin to a temp file; `label` keeps that file's
-  # name out of the flows' provenance and out of a refusal.
-  it "names a labelled import by its label, not by the file it was read from" do
+  # `gori run import --urls -` (#1386) spools stdin to a temp file and imports it under
+  # `ref: "stdin"`, so the flows' provenance never names the spool.
+  it "names a ref'd import by its ref, not by the file it was read from" do
     with_store do |store|
       path = File.tempname("gori-stdin-import", ".txt")
       File.write(path, "http://a.test/one\n")
       begin
-        Gori::Import.import_file(store, :urls, path, Gori::FlowSource::Surface::Cli, label: "stdin").count.should eq(1)
+        Gori::Import.import_file(store, :urls, path, Gori::FlowSource::Surface::Cli, ref: "stdin").count.should eq(1)
         store.recent_flows(1).first.source_ref.should eq("stdin")
-        File.write(path, "# nothing\n")
-        expect_raises(Gori::Error, "no flows found in stdin") do
-          Gori::Import.import_file(store, :urls, path, label: "stdin")
-        end
       ensure
         File.delete?(path)
       end

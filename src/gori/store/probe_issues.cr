@@ -30,6 +30,7 @@ module Gori
     # No-op when (code, host) is in probe_suppressions (hard-deleted this project).
     def upsert_probe_issue(d : Probe::Detection) : Nil
       upsert_probe_issues(StaticArray[d])
+      nil
     end
 
     # The same upsert for a whole scan's worth of detections, in ONE writer round-trip.
@@ -49,13 +50,17 @@ module Gori
     #
     # `probe_generation` bumps once per batch instead of once per detection, which is also what
     # the Probe tab wants — see the repaint-rate note at tui/runner.cr.
-    def upsert_probe_issues(ds : Indexable(Probe::Detection)) : Nil
-      return if ds.empty?
+    #
+    # Answers whether the batch COMMITTED (true for an empty one): the live Analyzer ignores it,
+    # but a headless `probe_scan{persist}` reports it, since "persisted" over a rolled-back
+    # batch would send an agent to triage rows that are not there.
+    def upsert_probe_issues(ds : Indexable(Probe::Detection)) : Bool
+      return true if ds.empty?
       # One timestamp for the batch: these detections are one observation of one flow, and
       # spreading now_us across them would only add microseconds of skew to first/last_seen.
       ts = now_us
       wrote = false
-      exec_task ->(c : DB::Connection) {
+      ok = exec_task_ok ->(c : DB::Connection) {
         ds.each do |d|
           if c.query_one?("SELECT 1 FROM probe_suppressions WHERE code = ? AND host = ?",
                d.code, d.host, as: Int64)
@@ -104,7 +109,8 @@ module Gori
         end
         nil
       }
-      bump_probe_generation if wrote # after commit (exec_task blocks until writer replies)
+      bump_probe_generation if wrote && ok # after commit (exec_task_ok blocks until the writer replies)
+      ok
     end
 
     # Codes whose evidence is a TYPE LABEL drawn from a small vocabulary (a secret kind, an

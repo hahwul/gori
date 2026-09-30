@@ -274,6 +274,8 @@ module Gori
         Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "scope", scope.label; j.field "moved", dir_s } })
       end
 
+      COLOR_PREVIEW_LIMIT = PageLimit.new(Gori::Colormarker::PREVIEW_SCAN, 5000)
+
       # How many recent flows a candidate condition would MATCH, and how many it would actually
       # PAINT once the rules that already resolve ahead of it are counted. The second number is
       # the one that answers "will I see this": an earlier enabled rule may already claim the row.
@@ -297,7 +299,7 @@ module Gori
         # `bounded_int_arg`: this argument has always been forgiving at both ends, and `0` is
         # the other spelling of "no limit" an agent reaches for — turning that into a hard
         # INVALID_ARGUMENT would be a second, opposite way to fail the same call.
-        limit = (optional_int_arg(h, "limit") || Gori::Colormarker::PREVIEW_SCAN.to_i64).clamp(1_i64, 5000_i64).to_i
+        limit = clamp(optional_int_arg(h, "limit"), COLOR_PREVIEW_LIMIT)
         ahead = Gori::Colormarker.rules_ahead(Gori::Colormarker.merged(store), 0_i64, scope)
         pv = Gori::Colormarker.preview(store, filter, ahead, limit)
         Result.new(JSON.build do |j|
@@ -433,7 +435,7 @@ module Gori
           s.field "scope", enumprop("preview as a rule in this store (default project). It changes " \
                                     "`would_paint`: every global rule resolves before every project one, " \
                                     "so no project rule can claim a row from a global candidate", RULE_SCOPES)
-          s.field "limit", intprop("recent flows to scan (default 500)")
+          s.field "limit", limitprop("recent flows to scan", COLOR_PREVIEW_LIMIT)
         end
 
         tool j, "list_custom_colors",

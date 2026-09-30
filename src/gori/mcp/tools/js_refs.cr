@@ -8,12 +8,14 @@ module Gori
       # Endpoints referenced in captured JavaScript (#1243) — one read instead of `get_flow` on
       # every bundle plus a regex of the agent's own. Only what a scan stored; reading sends
       # nothing and writes nothing.
+      JS_ENDPOINTS_LIMIT = PageLimit.new(200, 2000)
+
       @[Tool("list_js_endpoints")]
       private def list_js_endpoints(h) : Result
         req_off = optional_int_arg(h, "offset")
         req_lim = optional_int_arg(h, "limit")
         offset = clamp_nonneg(req_off)
-        limit = clamp(req_lim, 200, 2000)
+        limit = clamp(req_lim, JS_ENDPOINTS_LIMIT)
         scope = Scope.load(store)
         in_scope = bool_arg(h, "in_scope", false)
         scope_unconfigured = in_scope && !scope.configured?
@@ -163,7 +165,7 @@ module Gori
           s.field "all_hosts", boolprop("also list never-captured, unscoped hosts (default false)")
           s.field "include_comments", boolprop("list references seen only in comments (default true)")
           s.field "in_scope", boolprop("only in-scope references (default false)")
-          s.field "limit", intprop("rows per page (default 200, max 2000)")
+          s.field "limit", limitprop("rows per page", JS_ENDPOINTS_LIMIT)
           s.field "offset", intprop("rows to skip (default 0)")
         end
 

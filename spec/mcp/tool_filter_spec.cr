@@ -136,6 +136,30 @@ describe Gori::MCP::ToolFilter do
     end
   end
 
+  # #1392: `@recon` serves `probe_scan` without its active arguments (`Profile#withheld`); the
+  # operator naming the tool any other way serves it whole.
+  describe "profile-withheld arguments" do
+    withheld = ->(spec : String) {
+      Gori::MCP::ToolFilter.parse(spec, Gori::MCP::Tools::TOOL_NAMES,
+        Gori::MCP::Tools::TOOL_DEPENDENCIES).as(Gori::MCP::ToolFilter).withheld_args("probe_scan")
+    }
+
+    it "withholds probe_scan's active arguments under @recon" do
+      withheld.call("@recon").should eq(Gori::MCP::ToolFilter::PROBE_SCAN_ACTIVE_ARGS.to_set)
+    end
+
+    it "serves it whole when a name, a glob or the everything a leading subtraction starts from selects it" do
+      ["@recon,probe_scan", "probe_scan,@recon", "@recon,probe_*", "-fuzz_*,@recon"].each do |spec|
+        withheld.call(spec).should be_nil, spec
+      end
+    end
+
+    it "forgets the restriction when the tool is subtracted, and keeps it for a later profile term" do
+      withheld.call("@recon,-probe_scan").should be_nil
+      withheld.call("probe_scan,-probe_scan,@recon").should eq(Gori::MCP::ToolFilter::PROBE_SCAN_ACTIVE_ARGS.to_set)
+    end
+  end
+
   describe "required companion tools" do
     it "adds async job controls and documented result readers transitively" do
       companions = {

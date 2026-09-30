@@ -41,7 +41,7 @@ gori run jwt eyJhbGci... --encode --payload '{"sub":"1","admin":true}' --secret 
 
 ```bash
 gori run jwt eyJhbGci... --encode --alg ES256 --key ./private.pem --set role=admin
-gori run jwt eyJhbGci... --verify --key ./public.pem                # verified: yes | no
+gori run jwt eyJhbGci... --verify --key ./public.pem                # verified: yes | no (exit 0 | 1)
 ```
 
 **체크포인트.** OUTPUT에 편집한 클레임을 담고, 고른 알고리즘과 비밀키로 다시 서명된 토큰이 있습니다.

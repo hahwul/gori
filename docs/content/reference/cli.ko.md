@@ -786,7 +786,7 @@ gori run probe -a
 
 `--active`와 함께: `--unsafe`는 안전하지 않은 메서드(`POST`/`PUT`/`PATCH`/`DELETE`)도 프로브하며, 이 재전송은 서버 데이터를 변경할 수 있습니다. `--aggressive`는 룰별 상한을 높이고 forbidden-bypass 헤더 집합을 넓힙니다(그리고 `--unsafe`를 함의합니다). 둘 다 `--allow-unscoped`를 함께 주지 않는 한 스코프 게이트를 따릅니다. 인가된 대상에만 사용하세요.
 
-`probe`만 쓰면 스캔하고 출력합니다. TUI Probe 탭 뒤에 저장되는 발견 항목은 별개의 표면입니다.
+`probe`만 쓰면 스캔하고 출력합니다. `--persist`를 주면 찾은 결과를 라이브 스캐너와 같은 방식으로 합쳐 저장된 발견 항목에도 기록하므로, TUI로 연 적 없는 프로젝트에도 판정 목록이 생깁니다. 기록이 실패하면 보고서를 출력한 뒤 그렇다고 알리고 1로 종료합니다. TUI Probe 탭 뒤에 저장되는 발견 항목은 별개의 표면입니다.
 
 ```bash
 gori run probe issues --severity high            # 아래 동사들이 받는 id가 함께 나오는 트리아지 목록
@@ -1053,7 +1053,7 @@ gori run jwt eyJhbGci... --attacks --key ./public.pem
 |--------|-------------|
 | `--decode` | header / payload / signature 디코드(기본) |
 | `--encode` | `--alg`와 `--secret` / `--key`로 토큰 클레임 재서명 |
-| `--verify` | 토큰 자신의 서명을 `--secret` / `--key`로 검증; `verified: yes\|no`를 출력합니다(`no`도 실패가 아니라 답이므로 종료 코드는 0) |
+| `--verify` | 토큰 자신의 서명을 `--secret` / `--key`로 검증(둘 중 하나 필수, `--secret ''`은 빈 secret 확인); `verified: yes\|no`와 `reason`을 출력하고 검증되지 않으면 1로 종료합니다. `--format json`은 `code`(`signature_mismatch`, `unsigned`, `alg_unsupported`, …)를 더합니다 |
 | `--attacks` | 테스트 페이로드 생성(alg:none, weak-secret, header injection) |
 | `--alg=ALG` | `--encode`용 서명 alg: `HS256`(기본) \| `HS384` \| `HS512` \| `RS256/384/512` \| `PS256/384/512` \| `ES256/384/512` \| `EdDSA` \| `none` |
 | `--secret=SECRET` | HS 알고리즘용 HMAC 시크릿 |

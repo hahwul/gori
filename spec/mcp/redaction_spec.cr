@@ -66,6 +66,19 @@ describe "MCP get_flow body redaction" do
     end
   end
 
+  # #1394's smaller default body points at get_response_body_chunk, which pages the EXACT
+  # stored bytes — so under a profile get_flow keeps the full default rather than sending the
+  # agent past a sanitized 8 KB to the unredacted rest.
+  it "does not cut a redacted body at the default cap or point at the unredacted chunk tool" do
+    with_redacting_project do |store|
+      long = %({"token":"t","pad":"#{"p" * 20_000}"})
+      id = json_flow(store, %({"a":1}), long)
+      body = get_flow(store, id)["response_body"]
+      body["text"].as_s.size.should be > Gori::MCP::Tools::AUTO_BODY_BYTES
+      body.as_h.has_key?("more").should be_false
+    end
+  end
+
   it "turns body redaction off with include_sensitive, along with the header redaction" do
     with_redacting_project do |store|
       id = json_flow(store, %({"password":"pw"}), %({"token":"t"}))
