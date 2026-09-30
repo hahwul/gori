@@ -60,6 +60,15 @@ describe Gori::Tui::MineConfigOverlay do
     ov.build_config.locations.should eq([Gori::Miner::Location::Query, Gori::Miner::Location::Headers])
   end
 
+  it "↵ starts from a location row without unchecking it; ␣ still toggles (#1373)" do
+    q = [Gori::Miner::Location::Query]
+    ov = MineConfigOverlay.new(seed(q, q))
+    ov.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::Enter)).should eq(:commit)
+    ov.build_config.locations.should eq(q)
+    ov.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::Space)).should eq(:stay)
+    ov.any_checked?.should be_false
+  end
+
   it "cycles max-requests, concurrency and notification on their rows and reports the Start row" do
     ov = MineConfigOverlay.new(seed([Gori::Miner::Location::Query], [Gori::Miner::Location::Query]))
     # rows: [0]=query, [1]=max requests, [2]=concurrency, [3]=notification, [4]=keep-alive,

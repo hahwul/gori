@@ -198,7 +198,11 @@ module Gori::Tui
         adjust(-1)
       elsif key.right?
         adjust(1)
-      elsif key.enter? || key.space?
+      elsif key.enter?
+        # ↵ starts from any row, as the hint says; it used to share ␣'s arm, so ↵ on a location
+        # unchecked it instead of starting (#1373).
+        return :commit
+      elsif key.space?
         return :commit if on_start_row?
         toggle
       end
@@ -240,7 +244,7 @@ module Gori::Tui
       end
     end
 
-    # Space/Enter on a location row flips its checkbox; cyclers advance on space.
+    # Space on a location row flips its checkbox; cyclers advance on space.
     def toggle : Nil
       if @selected < @seed.applicable.size
         loc = @seed.applicable[@selected]
