@@ -121,17 +121,18 @@ module Gori
         # ordinary 401/200 with nothing saying the session was absent from the bytes. One
         # sentence with the three `gori run` surfaces (`CLI::Run.unbound_overlay_note`).
         unbound_overlay = CLI::Run.unbound_overlay_note(Env.take_unbound_overlay)
-        record_outbound_response(recorded_flow_id, result) if recorded_flow_id
+        flow_response_saved = recorded_flow_id ? record_outbound_response(recorded_flow_id, result) : false
         # Audit trail on STDERR — never STDOUT (reserved for JSON-RPC).
         Log.info { "send_request #{built.scheme}://#{built.host}:#{built.port} http2=#{http2} scope=#{sc.decision} flow_id=#{recorded_flow_id || "none"} -> #{result.ok? ? "ok" : result.error}" }
 
-        repeater_id = persist_send_repeater(h, save, built, http2, result,
+        repeater_id, repeater_response_saved = persist_send_repeater(h, save, built, http2, result,
           issue_id, recorded_flow_id, plan.h2_fields,
           sni: plan.sni, auto_cl: send_persist_auto_cl(h), tls_preset: plan.tls_preset)
 
         # Chosen before the send, confirmed after it: when neither the History record nor the
         # saved repeater landed there is nowhere to page a cut body from, so it goes out whole.
-        body_more = body_auto ? send_body_more(recorded_flow_id, repeater_id) : nil
+        body_more = body_auto ? send_body_more(flow_response_saved ? recorded_flow_id : nil,
+          repeater_response_saved ? repeater_id : nil) : nil
         body_cap = Serialize::MAX_TEXT if body_auto && body_more.nil?
         Result.new(send_result_json(result, recorded_flow_id, repeater_id,
           include_sensitive_headers, sc, built, wire, http2, body_cap, body_omit, applied_rules, plan.h2_fields,
@@ -851,8 +852,8 @@ module Gori
                                         issue_id : Int64?, recorded_flow_id : Int64?,
                                         h2_fields : Array({String, String})? = nil,
                                         *, sni : String? = nil, auto_cl : Bool = false,
-                                        tls_preset : String? = nil) : Int64?
-        return nil unless save
+                                        tls_preset : String? = nil) : {Int64?, Bool}
+        return {nil, false} unless save
         port_suffix = ((built.scheme == "https" && built.port == 443) ||
                        (built.scheme == "http" && built.port == 80)) ? "" : ":#{built.port}"
         target_url = "#{built.scheme}://#{built.host}#{port_suffix}"
@@ -922,7 +923,7 @@ module Gori
           # the TUI's muted `␣Pt:` chip reports as "set, and currently doing nothing" (P4).
           tls_preset: tls_preset
         )
-        return nil unless repeater_id > 0
+        return {nil, false} unless repeater_id > 0
 
         store.add_link(Store::LinkOwnerKind::Issue, issue_id,
           Store::LinkRefKind::Repeater, repeater_id) if issue_id
@@ -940,14 +941,16 @@ module Gori
         # lines ago and nothing has edited them since — so the digest (Schema V28) records a
         # pair that genuinely happened. A later `update_repeater` from any surface then reads
         # as the drift it is.
-        store.update_repeater_response(repeater_id, result.head, result.body,
+        # Its commit answer rides back beside the id: a saved row whose response did not land is
+        # still the saved session, but it is no place to page this response's body from.
+        response_saved = store.update_repeater_response(repeater_id, result.head, result.body,
           result.error, result.duration_us,
           request_sha256: Evidence.request_digest(saved_bytes))
         if result.response
           probe_scan_saved_repeater(repeater_id, masked_target, masked_req, http2, flow_id,
             result.head, result.body, result.duration_us)
         end
-        repeater_id
+        {repeater_id, response_saved}
       end
 
       # The bytes to PERSIST for a field-native h2 send: `HeadCodec.synth_request`'s h1
@@ -1037,7 +1040,19 @@ module Gori
         store.insert_flow(captured)
       end
 
-      private def record_outbound_response(flow_id : Int64, result : Repeater::Result) : Nil
+      # Finalize the History flow a send recorded, and answer whether the response LANDED on it.
+      # `Store#update_response` returns nothing and degrades quietly on a closed or failed
+      # writer, so the row is read back: a flow still `Pending` holds no response, and the
+      # default body cap must not point an agent at it (`send_body_more`).
+      private def record_outbound_response(flow_id : Int64, result : Repeater::Result) : Bool
+        write_outbound_response(flow_id, result)
+        store.flow_row(flow_id).try { |row| !row.state.pending? } || false
+      rescue ex
+        Log.error(exception: ex) { "send_request: failed to read back History flow #{flow_id}" }
+        false
+      end
+
+      private def write_outbound_response(flow_id : Int64, result : Repeater::Result) : Nil
         if response = result.response
           error = result.error
           error ||= "upstream response body was incomplete" if result.incomplete?

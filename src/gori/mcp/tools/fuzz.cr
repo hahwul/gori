@@ -1588,7 +1588,10 @@ module Gori
           "then cluster:<id> for the members of the ones worth reading." do |s|
           s.field "job_id", strprop("id from fuzz_start"), required: true
           s.field "offset", intprop("start row (default 0)")
-          s.field "limit", limitprop("max rows (a cluster listing defaults to 50, max 500)", FUZZ_RESULTS_LIMIT)
+          # Prose, not `limitprop`: the numbers depend on the mode, and one `default`/`maximum`
+          # pair would be wrong for the cluster listing (Copilot on #1398).
+          s.field "limit", intprop("max rows (default #{FUZZ_RESULTS_LIMIT.default}, max #{FUZZ_RESULTS_LIMIT.max}; " \
+                                   "a cluster listing: default #{FUZZ_CLUSTER_LIMIT.default}, max #{FUZZ_CLUSTER_LIMIT.max})")
           s.field "clusters", boolprop("return one entry per RESPONSE SHAPE instead of rows (default false): responses that are the same answer — payload echoes, numbers, ids, timestamps and volatile headers normalized away — group together, counted over EVERY result of the job (not only the stored rows). Each cluster has an id, count, matched/errored/incomplete counts, status/grpc_status/ws_close_code or error_class, metric ranges, the lowest member indices (sample_indices) and a representative row. Paged by offset/limit (default 50, max 500 clusters). Start here on a large run: the rare clusters are usually the interesting ones.")
           s.field "cluster", strprop("a cluster id from clusters:true — return that cluster's member ROWS (same row shape as the default page) plus its summary. The live cache keeps only interesting rows, so members_retained can be below count; a save_results run pages every member through get_fuzz_run{cluster}.")
           s.field "cluster_order", enumprop("order of clusters:true (default rare = smallest cluster first; common = largest first; first = by first appearance)", Fuzz::Clusters::Order.names)

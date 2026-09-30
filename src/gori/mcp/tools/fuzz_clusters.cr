@@ -44,11 +44,14 @@ module Gori
       private record FuzzClusterPage, page : Array(Fuzz::Clusters::Cluster), total : Int32,
         offset : Int32, limit : Int32
 
+      # A cluster listing's page: fewer and larger rows than a result page, so its own numbers.
+      FUZZ_CLUSTER_LIMIT = PageLimit.new(50, 500)
+
       # `matched_only` keeps the clusters holding at least one matcher hit.
       private def fuzz_cluster_page(clusters : Fuzz::Clusters, args : FuzzClusterArgs,
                                     matched_only : Bool, req_off : Int64?, req_lim : Int64?) : FuzzClusterPage
         offset = clamp_nonneg(req_off)
-        limit = clamp(req_lim, 50, 500)
+        limit = clamp(req_lim, FUZZ_CLUSTER_LIMIT)
         list = clusters.sorted(args.order, matched_only)
         FuzzClusterPage.new(list[offset, limit]? || [] of Fuzz::Clusters::Cluster, list.size, offset, limit)
       end
@@ -199,7 +202,7 @@ module Gori
         req_off = optional_int_arg(h, "offset")
         req_lim = optional_int_arg(h, "limit")
         offset = clamp_nonneg(req_off)
-        limit = clamp(req_lim, caps.include_content ? 25 : 100, caps.include_content ? 25 : 1000)
+        limit = clamp(req_lim, caps.include_content ? FUZZ_RUN_CONTENT_ROWS_LIMIT : FUZZ_RUN_ROWS_LIMIT)
         clusters, page, seen = Fuzz::Persistence.cluster_members(store, run.id, id, matched_only, offset, limit)
         cluster = clusters[id]?
         return not_found("no cluster #{Fuzz::Shape.hex(id)} in saved fuzz run #{run.id}") unless cluster

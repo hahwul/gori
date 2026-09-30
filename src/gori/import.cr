@@ -327,8 +327,10 @@ module Gori
       "file named #{basename.inspect} — imports are not deduplicated, so re-importing it adds its flows again"
     end
 
+    # FIRST, ahead of any parser note: the TUI toast shows one note and counts the rest, and a
+    # curl file's ignored flags must not push the duplicate warning down to "(+1 more)".
     private def self.with_note(result : Result, note : String?) : Result
-      note ? result.copy_with(notes: result.notes + [note]) : result
+      note ? result.copy_with(notes: [note] + result.notes) : result
     end
 
     # A source handed in as TEXT rather than a path — MCP's `import_flows{text}`, where an

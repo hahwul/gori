@@ -11,5 +11,7 @@
 *.key.pem
 .DS_Store
 
-# Per-worktree Crystal build cache (agents set CRYSTAL_CACHE_DIR here).
+# Per-worktree Crystal build cache (agents set CRYSTAL_CACHE_DIR here), and its
+# siblings (a second cache for a parallel build, e.g. `.crystal-cache-bench/`).
 .crystal-cache/
+.crystal-cache-*/

@@ -36,6 +36,23 @@ describe "Gori::Import duplicate note" do
     end
   end
 
+  it "puts the warning ahead of a parser note, where the TUI toast shows it in full" do
+    with_store do |store|
+      dir = File.tempname("gori-dup")
+      Dir.mkdir(dir)
+      path = File.join(dir, "cmds.sh")
+      File.write(path, "curl -k https://shop.test/a\n")
+      begin
+        Gori::Import.import_file(store, :curl, path)
+        notes = Gori::Import.import_file(store, :curl, path).notes
+        notes.size.should be > 1 # the ignored -k is noted too
+        notes.first.should contain("already in this project")
+      ensure
+        FileUtils.rm_rf(dir)
+      end
+    end
+  end
+
   it "does not trip on a different file name, or on text imports" do
     with_store do |store|
       with_url_list("one.txt") { |p| Gori::Import.import_file(store, :urls, p) }

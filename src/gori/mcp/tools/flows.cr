@@ -735,7 +735,7 @@ module Gori
           "include_sensitive=true turns body redaction off along with the header redaction." do |s|
           s.field "id", intprop("flow id from list_history"), required: true
           s.field "include_sensitive", boolprop("return Authorization/Cookie/Set-Cookie/API-key header values instead of [REDACTED], and the captured bodies instead of the redaction profile's sanitized copy (default false)")
-          s.field "body_mode", enumprop("how much of each body to inline. Default: up to #{AUTO_BODY_BYTES} bytes, a longer body cut with a `more` pointer to get_response_body_chunk; full inlines up to #{Serialize::MAX_TEXT}; preview a small head; none the shape only (encoding/size, omitted:true)", BODY_MODES)
+          s.field "body_mode", enumprop("how much of each body to inline. Default: up to #{AUTO_BODY_BYTES} bytes, a longer body cut with a `more` pointer to get_response_body_chunk — except under a redaction profile (see body_redaction), where the default stays full, because the chunk tool pages the unredacted stored bytes; full inlines up to #{Serialize::MAX_TEXT}; preview a small head; none the shape only (encoding/size, omitted:true)", BODY_MODES)
           s.field "max_body_bytes", intprop("cap inlined body bytes (clamped to 65536; page the rest with get_response_body_chunk)")
         end
 

@@ -177,7 +177,10 @@ module Gori
           s.field "run_id", intprop("permanent run id"), required: true
           s.field "result_index", intprop("optional exact result index (zero-based)")
           s.field "offset", intprop("result rows to skip (default 0)")
-          s.field "limit", limitprop("rows to return (with include_content: default and max #{FUZZ_RUN_CONTENT_ROWS_LIMIT.max})", FUZZ_RUN_ROWS_LIMIT)
+          # Prose, not `limitprop`: three modes, three sets of numbers (see fuzz_results).
+          s.field "limit", intprop("rows to return (default #{FUZZ_RUN_ROWS_LIMIT.default}, max #{FUZZ_RUN_ROWS_LIMIT.max}; " \
+                                   "with include_content: default and max #{FUZZ_RUN_CONTENT_ROWS_LIMIT.max}; " \
+                                   "a cluster listing: default #{FUZZ_CLUSTER_LIMIT.default}, max #{FUZZ_CLUSTER_LIMIT.max})")
           s.field "matched_only", boolprop("only matcher hits (default false; with clusters:true, only clusters holding a match)")
           s.field "clusters", boolprop("return one entry per RESPONSE SHAPE instead of rows (default false), aggregated over every stored row with the same fields fuzz_results{clusters} emits; paged by offset/limit (default 50, max 500). A run saved before shapes were recorded clusters by status/error/words/lines and marks those clusters approximate:true; a keep:interesting run clusters only the rows it kept (run.filtered).")
           s.field "cluster", strprop("a cluster id from clusters:true — page that cluster's member rows (the default row shape; include_content applies)")

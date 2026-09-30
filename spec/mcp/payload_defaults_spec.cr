@@ -53,12 +53,23 @@ describe "MCP default body size" do
   end
 end
 
+# `limit` whose numbers depend on the call's mode: result rows, cluster listings, and (for a
+# saved run) rows carrying their content each clamp differently.
+private MODE_DEPENDENT_LIMITS = %w[fuzz_results get_fuzz_run]
+
 describe "MCP limit schemas" do
   it "gives every `limit` a machine-readable default and range" do
     with_store do |store|
       JSON.parse(JSON.build { |j| tools_for(store).list(j) }).as_a.each do |tool|
         next unless limit = tool.dig?("inputSchema", "properties", "limit")
         name = tool["name"].as_s
+        if MODE_DEPENDENT_LIMITS.includes?(name)
+          # One default/maximum pair would be wrong for some mode, so these say it in prose.
+          limit.as_h.has_key?("default").should be_false, name
+          limit.as_h.has_key?("maximum").should be_false, name
+          limit["description"].as_s.should contain("cluster listing"), name
+          next
+        end
         limit["type"].as_s.should eq("integer"), name
         limit["minimum"].as_i.should eq(1), name
         (limit["default"].as_i <= limit["maximum"].as_i).should be_true, name
