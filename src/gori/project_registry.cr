@@ -349,12 +349,20 @@ module Gori
       # Persist the verbatim display name so a later `list` shows "My Project", not
       # the lossy slug "my-project".
       #
-      # Durably, because this REPLACES an existing name on a reopen and `File.write`
-      # truncates first: a crash or a full disk between the two leaves the picker showing a
-      # half-written name, or none. Same helper the settings/CA/marker writes use — the
-      # sidecars were the last user-visible state still on a truncating write.
-      DurableFile.write(File.join(dir, NAME_FILE), display,
-        perm: File::Permissions.new(0o600)) rescue nil
+      # A reopen keeps the name it already has: the match is case-insensitive, so
+      # `create foo` reopening `Foo` used to report "reopened" while quietly renaming it —
+      # that is `rename`'s job. Only a reopened legacy project with no name sidecar gets one.
+      #
+      # Durably, because `File.write` truncates first: a crash or a full disk between the two
+      # leaves the picker showing a half-written name, or none. Same helper the
+      # settings/CA/marker writes use.
+      stored = reopened ? display_name(dir, "") : ""
+      if stored.empty?
+        DurableFile.write(File.join(dir, NAME_FILE), display,
+          perm: File::Permissions.new(0o600)) rescue nil
+      else
+        display = stored
+      end
       write_id_if_absent(dir) # a fresh project gets a stable short id; a reopen keeps its own
       proj = Project.new(display, db_path)
       # Open once even with no description: this creates the DB + runs migrations, and #list
@@ -606,7 +614,7 @@ module Gori
     # File.join(@root, slug) would resolve to @root or its parent (traversal).
     private def slugify(name : String) : String
       slug = name.downcase.gsub(/[^a-z0-9._-]+/, "-").strip("-.")
-      return slug unless slug.empty?
+      return cap_slug(slug) unless slug.empty?
       # An all-non-ASCII display name (e.g. "日本語") has no [a-z0-9] to slugify and would
       # otherwise collapse to "" and be rejected as "invalid project name" — leaving such
       # projects completely unusable via --project. When the name carries real (non-ASCII)
@@ -617,6 +625,24 @@ module Gori
       # dot-run must never become a path (traversal).
       return slug unless name.each_char.any? { |c| c.ord > 127 }
       "project-#{Digest::SHA256.hexdigest(name)[0, 10]}"
+    end
+
+    # The longest slug a project directory gets. A file name is at most 255 bytes, and a
+    # 300-character name failed on every surface with the OS's raw "File name too long"; the
+    # headroom below that is for `unique_slug`'s `-2` and the `<slug>.gori` an export defaults
+    # to. The slug is ASCII, so characters are bytes.
+    MAX_SLUG = 128
+
+    # A slug past MAX_SLUG keeps its head and ends in a hash of the whole slug, so two long
+    # names that share the head still get different directories, and the same name (in any
+    # letter case, since the slug is lowercase) still reopens its own. Shorter slugs are
+    # untouched, and so is a longer one whose directory already exists — a name of 129–255 bytes
+    # was a valid directory before the cap, and capping it would open a second, empty project
+    # under the same name.
+    private def cap_slug(slug : String) : String
+      return slug if slug.bytesize <= MAX_SLUG
+      return slug if slug.bytesize <= 255 && Dir.exists?(File.join(@root, slug))
+      "#{slug[0, MAX_SLUG - 9].rstrip("-.")}-#{Digest::SHA256.hexdigest(slug)[0, 8]}"
     end
   end
 end

@@ -90,6 +90,13 @@ module Gori
       # nothing else.
       SCHEME_NO_AUTHORITY = /\A[a-z][a-z0-9+.-]*:(?!\/\/)(?!\d*(?:[\/?#]|\z))/i
 
+      # An `http:`/`https:` scheme whose `//` is short or missing (`http:/h.test/x`,
+      # `https:h.test`). SCHEME_NO_AUTHORITY reads `http:/` as a `host:` with an empty port — the
+      # shape `example.com:/p` legitimately has — so the line became `https://http:/h.test/x`, a
+      # request to a host named `http`. No one names a host after the scheme, so it is a typo'd
+      # URL: skip it, never guess the missing slash.
+      HTTP_SCHEME_MANGLED = /\Ahttps?:(?!\/\/)/i
+
       # A raw control byte (CR, LF, other C0 or DEL) in the PATH or QUERY of an imported
       # URL is NOT rejected: it is the operator's own payload. Importing a HAR of a deliberately
       # CRLF-bearing request — a smuggling case — is exactly what a security-testing proxy is
@@ -143,6 +150,7 @@ module Gori
       def self.normalize_url(url : String) : String
         u = url.strip
         return u if u.starts_with?(HTTP_SCHEME)
+        raise Gori::Error.new("invalid URL (malformed scheme): #{url}") if u.matches?(HTTP_SCHEME_MANGLED)
         if u.matches?(LEADING_SCHEME) || u.matches?(SCHEME_NO_AUTHORITY)
           raise Gori::Error.new("invalid URL (missing scheme): #{url}")
         end
@@ -159,6 +167,9 @@ module Gori
         # matches that canonical bracket-free form and Scope host rules see ONE target, not two.
         host = host[1..-2] if host.starts_with?('[') && host.ends_with?(']')
         port = uri.port || (scheme == "https" ? 443 : 80)
+        # `URI.parse` bounds a port only by Int32, so `:65536` or `:99999` parsed and was stored as
+        # a target nothing can dial. Out of the TCP range is a parse failure, like the overflow.
+        raise Gori::Error.new("invalid URL (port out of range): #{url.inspect}") unless (1..65_535).includes?(port)
         path = uri.path.presence || "/"
         target = uri.query ? "#{path}?#{uri.query}" : path
         {scheme, host, port, target}

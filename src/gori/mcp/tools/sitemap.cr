@@ -19,7 +19,8 @@ module Gori
         limit = clamp(optional_int_arg(h, "limit"), SITEMAP_LIMIT)
         offset = (optional_int_arg(h, "offset") || 0_i64).clamp(0_i64, Int32::MAX.to_i64).to_i
         query = str(h, "query")
-        filter = ql_filter_or_error(h, query)
+        dropped = [] of String
+        filter = ql_filter_or_error(h, query, dropped)
         return filter if filter.is_a?(Result)
         # Per-flow, like the TUI tree's lens: a host keeps its non-static endpoints.
         filter = QL.and(filter, QL.hide_static) if bool_arg(h, "hide_static", false)
@@ -33,7 +34,7 @@ module Gori
           # Refused rather than dropped: an answer without the block reads as "no references".
           return err("include_unrequested is not available with collapse_transport — call without it, or use list_js_endpoints",
             "INVALID_ARGUMENT", field: "include_unrequested") if unrequested
-          return collapsed_sitemap(filter, limit, offset)
+          return collapsed_sitemap(filter, limit, offset, dropped)
         end
         # One row OVER the page, then dropped: `has_more` costs a row instead of a second
         # COUNT(*) over the same GROUP BY. Without it a full page and an exactly-full set are
@@ -54,6 +55,7 @@ module Gori
             j.field "offset", offset
             j.field "limit", limit
             j.field "has_more", has_more
+            emit_ignored_terms(j, dropped)
             # Endpoints captured JavaScript references and no request reached (#1243). NOT
             # entries: an entry is a captured transport key with counts, and these have none —
             # mixing them in would also make `has_more`/`offset` page two different things.
@@ -321,7 +323,8 @@ module Gori
 
       # The legacy collapsed sitemap (distinct host/method/target only), for
       # collapse_transport:true.
-      private def collapsed_sitemap(filter : QL::Filter, limit : Int32, offset : Int32) : Result
+      private def collapsed_sitemap(filter : QL::Filter, limit : Int32, offset : Int32,
+                                    dropped : Array(String)) : Result
         entries = store.sitemap_entries(filter, limit + 1, offset: offset)
         has_more = entries.size > limit
         entries = entries.first(limit) if has_more
@@ -331,6 +334,7 @@ module Gori
             j.field "offset", offset
             j.field "limit", limit
             j.field "has_more", has_more
+            emit_ignored_terms(j, dropped)
             j.field "entries" do
               j.array do
                 entries.each do |(host, method, target)|
@@ -359,7 +363,8 @@ module Gori
         offset = clamp_nonneg(req_off)
         limit = clamp(req_lim, PARAMS_LIMIT)
         query = str(h, "query")
-        filter = ql_filter_or_error(h, query)
+        dropped = [] of String
+        filter = ql_filter_or_error(h, query, dropped)
         return filter if filter.is_a?(Result)
         if fts_error = drain_fts_or_error(filter.uses_fts?)
           return fts_error
@@ -407,6 +412,7 @@ module Gori
             emit_clamp(j, req_off, offset, req_lim, limit)
             j.field "total", rows.size
             j.field "has_more", offset + page.size < rows.size
+            emit_ignored_terms(j, dropped)
             j.field "flows_scanned", report.flows_scanned
             # The flow cap, not the page: parameters on OLDER flows are absent from `total`.
             j.field "truncated", report.truncated
@@ -444,7 +450,8 @@ module Gori
       # (`call_denied_permission`, `agent_action?`) — hence `read_only: false`.
       @[Tool("export_openapi", read_only: false)]
       private def export_openapi(h) : Result
-        filter = openapi_filter(h)
+        ignored = [] of String
+        filter = openapi_filter(h, ignored)
         return filter if filter.is_a?(Result)
         destination = openapi_destination(h)
         return destination if destination.is_a?(Result)
@@ -466,14 +473,14 @@ module Gori
         max_bytes = clamp(optional_int_arg(h, "max_bytes"), destination ? OPENAPI_MAX_BYTES : OPENAPI_INLINE_BYTES, OPENAPI_MAX_BYTES)
         doc, dropped = Export::OpenApi.fit(result.doc, max_bytes)
         result.report.paths_dropped = dropped
-        return Result.new(openapi_json(doc, result.report, yaml, choice)) unless destination
+        return Result.new(openapi_json(doc, result.report, yaml, choice, ignored)) unless destination
         text = yaml ? Export::OpenApi.to_yaml(doc) : Export::OpenApi.to_json(doc)
         begin
           DurableFile.write(destination, text, perm: File::Permissions.new(0o644))
         rescue ex : File::Error | IO::Error
           return err("could not write the OpenAPI document: #{ex.message}", "INVALID_ARGUMENT", field: "output_path")
         end
-        Result.new(openapi_json(doc, result.report, yaml, choice, written: {destination, text.bytesize}))
+        Result.new(openapi_json(doc, result.report, yaml, choice, ignored, written: {destination, text.bytesize}))
       end
 
       # The inline document's default size cap, and the ceiling either way.
@@ -528,8 +535,8 @@ module Gori
 
       # The flow set: the QL query, then the per-flow scope and hide-static lenses. Unconfigured
       # scope is refused rather than answered with an empty document.
-      private def openapi_filter(h) : QL::Filter | Result
-        filter = ql_filter_or_error(h, str(h, "query"))
+      private def openapi_filter(h, ignored : Array(String)) : QL::Filter | Result
+        filter = ql_filter_or_error(h, str(h, "query"), ignored)
         return filter if filter.is_a?(Result)
         if fts_error = drain_fts_or_error(filter.uses_fts?)
           return fts_error
@@ -587,7 +594,8 @@ module Gori
 
       # `written` is {path, bytes} when the document went to a file instead of into the reply.
       private def openapi_json(doc : JSON::Any, report : Export::OpenApi::Report, yaml : Bool,
-                               choice : Redact::Policy::Choice?, written : {String, Int32}? = nil) : String
+                               choice : Redact::Policy::Choice?, ignored : Array(String),
+                               written : {String, Int32}? = nil) : String
         paths = doc["paths"]?.try(&.as_h?) || {} of String => JSON::Any
         JSON.build do |j|
           j.object do
@@ -608,6 +616,7 @@ module Gori
             j.field("skipped") { j.object { report.skipped.each { |k, v| j.field k.key, v } } }
             j.field "notes", openapi_notes(report, choice)
             j.field "examples_redacted", report.redacted if choice
+            emit_ignored_terms(j, ignored)
           end
         end
       end
@@ -694,7 +703,7 @@ module Gori
           s.field "collapse_transport", boolprop("collapse to distinct host/method/target only (legacy shape), dropping scheme/port/version + counts (default false)")
           s.field "hide_static", boolprop("leave out static assets — images, fonts, audio/video (not svg/css/js, never a status >= 400); the TUI's hide-static lens, same as `-static:true` in `query`. Default false")
           s.field "include_unrequested", boolprop("add `unrequested`: endpoints captured JavaScript references that no request reached (up to #{UNREQUESTED_MAX}; `unrequested_total` says how many), from what scan_js_endpoints stored. Not filtered by `query` — a reference is not a flow. Default false")
-          s.field "strict", boolprop("reject the query if any term is unrecognized/invalid instead of silently dropping it (default false)")
+          s.field "strict", boolprop("reject the query if any term is unrecognized/invalid (default false: the term is dropped, which BROADENS the result, and named in the reply's `ignored_terms`)")
           s.field "lenient", boolprop("search a `field:` QL does not implement as literal TEXT instead of refusing the query (default false). A typo like `methd:GET` free-texts its whole token and therefore matches nothing, which is indistinguishable from an empty project — so it is refused by default, the way `gori run history --lenient` spells the same escape hatch. `strict` is the other half and covers dropped terms, not unknown fields")
         end
 
@@ -720,7 +729,7 @@ module Gori
           s.field "include_sensitive", boolprop("return cookie / credential / token sample values instead of [REDACTED] (default false)")
           s.field "limit", limitprop("max rows per page", PARAMS_LIMIT)
           s.field "offset", intprop("skip this many rows (default 0)")
-          s.field "strict", boolprop("reject a query with an unrecognized/invalid term (default false)")
+          s.field "strict", boolprop("reject a query with an unrecognized/invalid term (default false: it is dropped and named in `ignored_terms`)")
           s.field "lenient", boolprop("free-text an unknown `field:` instead of refusing the query (default false)")
         end
 
@@ -752,7 +761,7 @@ module Gori
           s.field "max_samples", intprop("flows read per operation (default 10, max 50)")
           s.field "max_flows", intprop("newest flows read in all (default 5000, max 20000)")
           s.field "max_bytes", intprop("largest document, measured as compact JSON; whole paths past it are dropped (default #{OPENAPI_INLINE_BYTES} inline, #{OPENAPI_MAX_BYTES} with output_path; max #{OPENAPI_MAX_BYTES})")
-          s.field "strict", boolprop("reject a query with an unrecognized/invalid term (default false)")
+          s.field "strict", boolprop("reject a query with an unrecognized/invalid term (default false: it is dropped and named in `ignored_terms`)")
           s.field "lenient", boolprop("free-text an unknown `field:` instead of refusing the query (default false)")
         end
 

@@ -289,6 +289,17 @@ describe Gori::Authorize::Plan do
       end
     end
 
+    # A dropped term widens the selection, and each extra row is a replay per identity. History
+    # warns and runs broader; this refuses.
+    it "BadQuery — a query with a term QL would drop" do
+      with_store do |store|
+        seed(store)
+        ex = expect_raises(PlanError) { Plan.build(options(store, query: "host:api.test status:abc"), ungated_outbound) }
+        ex.reason.should eq(Reason::BadQuery)
+        ex.message.to_s.should contain("status:abc")
+      end
+    end
+
     it "NoIdentities — a set that cannot produce a comparison, naming its source" do
       with_store do |store|
         id = seed(store)

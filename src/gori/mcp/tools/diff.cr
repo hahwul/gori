@@ -57,7 +57,8 @@ module Gori
             filter: opts.filter, limit: opts.limit, in_scope: opts.in_scope,
             issue_limit: opts.issues ? Gori::Diff::ISSUE_RETEST_MAX : 0,
             raise_on_error: true)
-          Result.new(Gori::Diff::Render.json(report, verdicts: opts.verdicts, issues: opts.issues))
+          Result.new(with_ignored_terms(Gori::Diff::Render.json(report, verdicts: opts.verdicts, issues: opts.issues),
+            opts.dropped))
         ensure
           base_store.close
         end
@@ -69,16 +70,18 @@ module Gori
         verdicts : Array(Gori::Diff::Verdict),
         limit : Int32,
         issues : Bool,
-        in_scope : Bool
+        in_scope : Bool,
+        dropped : Array(String)
 
       private def diff_options(h) : DiffOptions | Result
-        filter = diff_filter(h, str(h, "query"))
+        dropped = [] of String
+        filter = diff_filter(h, str(h, "query"), dropped)
         return filter if filter.is_a?(Result)
         verdicts = diff_verdicts(h)
         return verdicts if verdicts.is_a?(Result)
         DiffOptions.new(filter, verdicts,
           clamp(optional_int_arg(h, "limit"), DIFF_LIMIT),
-          bool_arg(h, "issues", true), bool_arg(h, "in_scope", false))
+          bool_arg(h, "issues", true), bool_arg(h, "in_scope", false), dropped)
       end
 
       # NOT `ql_filter_or_error`, for two reasons that are really one: that helper reads the
@@ -93,7 +96,7 @@ module Gori
       #     as an unconfigured project on both sides instead — deterministic, and the same
       #     lens `gori run diff` compiles with. Scoping a retest is `in_scope`, which asks
       #     each side its OWN rules.
-      private def diff_filter(h, query : String?) : QL::Filter | Result
+      private def diff_filter(h, query : String?, dropped : Array(String)) : QL::Filter | Result
         q = query.try(&.strip)
         return QL::EMPTY if q.nil? || q.empty?
         # The one check this helper can share with `ql_filter_or_error` verbatim: naming a field
@@ -105,7 +108,23 @@ module Gori
         return ql_error(q) if QL.reject_empty?(q, filter)
         bad = QL.invalid_regex_terms(q)
         return ql_invalid_regex_error(q, bad) unless bad.empty?
+        # Named on the reply like every other query tool's (`emit_ignored_terms`): a dropped term
+        # diffs more endpoints than asked.
+        dropped.concat(QL.analyze(q, scope: QL::SCOPE_SHAPE_ONLY).ignored)
         filter
+      end
+
+      # The rendered report with `ignored_terms` added when the query dropped any. The report is
+      # built by the shared renderer, so the fields go on after it rather than into it.
+      private def with_ignored_terms(json : String, dropped : Array(String)) : String
+        return json if dropped.empty?
+        report = JSON.parse(json).as_h
+        JSON.build do |j|
+          j.object do
+            report.each { |k, v| j.field(k) { v.to_json(j) } }
+            emit_ignored_terms(j, dropped)
+          end
+        end
       end
 
       # The NEWER side: a named project (opened read-only here, ours to close) or — when

@@ -156,12 +156,11 @@ module Gori
       end
 
       # A path-item or operation `servers[0].url` to send to instead of the root one, or nil to
-      # keep the root: a relative (`/v2`) or templated (`https://{region}.api.test`) entry is valid
-      # OpenAPI but names no host by itself, and used to import against the root server — so it
-      # still does, rather than skipping the operation.
+      # keep the root: a relative (`/v2`) entry, or a templated one naming a variable it gives no
+      # `default` for, is valid OpenAPI but names no host by itself, and used to import against
+      # the root server — so it still does, rather than skipping the operation.
       private def self.local_server_url(servers : JSON::Any?) : String?
-        url = server_url(servers) rescue nil
-        url unless url.nil? || url.includes?('{')
+        server_url(servers) rescue nil
       end
 
       # `servers[0].url` of a root, path-item or operation `servers` list, or nil when the
@@ -177,6 +176,7 @@ module Gori
             %(OpenAPI servers[0] is not an object — write `- url: "https://api.example.com"`))
           url = first_h["url"]?.to_s
           raise Gori::Error.new("OpenAPI spec has no servers[0].url") if url.empty?
+          url = substitute_server_variables(url, first_h["variables"]?)
           # A relative server URL ("/v3", "./v3", "../v3", "v3") has no host authority:
           # every generated request would prepend "https://" onto it, either yielding an
           # empty host ("https:///v3/...") or a bogus one ("https://./v3/..." → host
@@ -200,6 +200,28 @@ module Gori
           return url
         end
         nil
+      end
+
+      SERVER_VARIABLE = /\{([^{}]*)\}/
+
+      # Fill each `{name}` in a server url with its `variables.<name>.default` — OpenAPI 3
+      # requires every variable to carry one, and it is the value the spec's author means when
+      # nothing else is chosen. Left templated, `http://{host}:8080/{base}` failed to parse and
+      # skipped every operation, and `https://api.test/{base}` imported a literal `/{base}/`
+      # path. A spec that leaves `default` out (it is required, but common in the wild) and lists
+      # an `enum` gets its first member — the one value it names. A variable with neither names
+      # no URL, so it is refused rather than guessed.
+      private def self.substitute_server_variables(url : String, variables : JSON::Any?) : String
+        return url unless url.includes?('{')
+        vars = variables.try(&.as_h?)
+        url.gsub(SERVER_VARIABLE) do |_, match|
+          name = match[1]
+          var = vars.try(&.[name]?).try(&.as_h?)
+          chosen = var.try(&.["default"]?) || var.try(&.["enum"]?).try(&.as_a?).try(&.first?)
+          value = chosen.try { |d| d.as_s? || (d.raw.is_a?(Int64 | Float64) ? d.to_json : nil) }
+          value || raise Gori::Error.new(
+            %(OpenAPI servers[0].url variable {#{name}} has no default — add servers[0].variables.#{name}.default))
+        end
       end
 
       # Swagger 2.0 puts the authority and base path in separate root fields. Its `schemes`
@@ -261,7 +283,11 @@ module Gori
           return {nil, nil} if form_params.empty?
           return form_data_payload(spec, op, form_params)
         end
+        request_body_payload(spec, op)
+      end
 
+      # An OpenAPI 3 operation's `requestBody`, as the media type it prefers and a body for it.
+      private def self.request_body_payload(spec : JSON::Any, op : JSON::Any) : {String?, Bytes?}
         request_body = op["requestBody"]?
         return {nil, nil} unless request_body
         request_body = resolve_ref(spec, request_body)
@@ -271,8 +297,58 @@ module Gori
                   raise Gori::Error.new("OpenAPI requestBody content is not an object")
         media_type = content.has_key?("application/json") ? "application/json" : content.keys.first?
         return {nil, nil} unless media_type
-        schema = content[media_type]["schema"]?
-        {media_type, body_stub(spec, schema, media_type)}
+        media = resolve_ref(spec, content[media_type]).as_h? ||
+                raise Gori::Error.new("OpenAPI requestBody content #{media_type} is not an object")
+        schema = media["schema"]?
+        # The author's own example beats anything synthesized from the schema.
+        if (example = media_example(spec, media)) && (bytes = example_body(example, media_type))
+          return {media_type, bytes}
+        end
+        case form_kind(media_type)
+        when :urlencoded
+          {media_type, urlencoded_body(schema_form_fields(spec, schema))}
+        when :multipart
+          {"#{media_type}; boundary=#{MULTIPART_BOUNDARY}",
+           multipart_body(schema_form_fields(spec, schema), "OpenAPI form property")}
+        else
+          {media_type, body_stub(spec, schema, media_type)}
+        end
+      end
+
+      # A media type's `example`, else the `value` of the first usable entry of its `examples`
+      # map (an Example Object, possibly a local `$ref`; an `externalValue` is not fetched).
+      private def self.media_example(spec : JSON::Any, media : Hash(String, JSON::Any)) : JSON::Any?
+        if (example = media["example"]?) && !example.raw.nil?
+          return example
+        end
+        media["examples"]?.try(&.as_h?).try &.each_value do |entry|
+          object = (resolve_ref(spec, entry).as_h? rescue nil)
+          value = object.try(&.["value"]?)
+          return value if value && !value.raw.nil?
+        end
+        nil
+      end
+
+      # The bytes an example stands for in `media_type`, or nil when it cannot be one — a
+      # multipart example is a string whose boundary gori cannot know, so it is rebuilt from the
+      # schema instead.
+      private def self.example_body(example : JSON::Any, media_type : String) : Bytes?
+        return example.to_json.to_slice if json_media_type?(media_type)
+        kind = form_kind(media_type)
+        return nil if kind == :multipart
+        if kind == :urlencoded && (object = example.as_h?)
+          return urlencoded_body(object.map { |k, v| FormField.new(k, v.as_s? || v.to_json, false) })
+        end
+        example.as_s?.try(&.to_slice)
+      end
+
+      private def self.form_kind(content_type : String) : Symbol?
+        media_type = content_type.split(';', 2)[0].strip
+        if media_type.compare("application/x-www-form-urlencoded", case_insensitive: true) == 0
+          :urlencoded
+        elsif media_type.compare("multipart/form-data", case_insensitive: true) == 0
+          :multipart
+        end
       end
 
       # Merge path-item + operation parameters, operation winning on a name+location clash.
@@ -336,28 +412,84 @@ module Gori
         schema_node = p["schema"]?
         schema = schema_node ? resolve_ref(spec, schema_node).as_h? : nil
         type = schema.try { |h| h["type"]?.try(&.as_s?) } || p["type"]?.try(&.as_s?)
+        scalar_sample(type, p["name"]?.to_s)
+      end
+
+      private def self.scalar_sample(type : String?, name : String) : String
         case type
         when "integer", "number" then "1"
         when "boolean"           then "true"
-        else                          p["name"]?.to_s.presence || "value"
+        else                          name.presence || "value"
         end
+      end
+
+      # How deep and how wide a synthesized JSON body may grow. A schema's properties are
+      # followed so a body carries its fields, and recursive schemas (a tree node whose children
+      # are nodes) are ordinary — both bounds are what stop one from expanding without end.
+      MAX_SAMPLE_DEPTH =   8
+      MAX_SAMPLE_NODES = 512
+
+      private class SampleBudget
+        property left : Int32 = MAX_SAMPLE_NODES
       end
 
       private def self.body_stub(spec : JSON::Any, schema_node : JSON::Any?, content_type : String) : Bytes?
         return nil unless json_media_type?(content_type)
         return %({}).to_slice unless schema_node
         schema = resolve_ref(spec, schema_node)
-        object = schema.as_h? || raise Gori::Error.new("OpenAPI body schema is not an object")
-        return object["example"].to_json.to_slice if object["example"]?
-        return object["default"].to_json.to_slice if object["default"]?
-        type = object["type"]?.try(&.as_s?)
-        case type
-        when "array"             then "[]".to_slice
-        when "string"            then JSON::Any.new("").to_json.to_slice
-        when "integer", "number" then "0".to_slice
-        when "boolean"           then "true".to_slice
-        else                          %({}).to_slice
+        schema.as_h? || raise Gori::Error.new("OpenAPI body schema is not an object")
+        (json_sample(spec, schema, nil, 0, SampleBudget.new) || JSON::Any.new({} of String => JSON::Any)).to_json.to_slice
+      end
+
+      # A placeholder JSON value for `schema`: its `example`, `default` or first `enum` value, else
+      # one by `type` — an object gets each of its `properties` in turn (a string property holds
+      # its own name, as a generated parameter does). A property whose schema cannot be read is
+      # left out rather than failing the whole operation, since the body is only a template.
+      private def self.json_sample(spec : JSON::Any, schema : JSON::Any, name : String?,
+                                   depth : Int32, budget : SampleBudget) : JSON::Any?
+        budget.left -= 1
+        object = schema.as_h?
+        return nil unless object
+        if given = given_sample(object)
+          return given
         end
+        case schema_type(object)
+        when "array"             then JSON::Any.new([] of JSON::Any)
+        when "string"            then JSON::Any.new(name || "")
+        when "integer", "number" then JSON::Any.new(0_i64)
+        when "boolean"           then JSON::Any.new(true)
+        else                          object_sample(spec, object, depth, budget)
+        end
+      end
+
+      # The value a schema names for itself: its `example`, `default` or first `enum` entry.
+      private def self.given_sample(object : Hash(String, JSON::Any)) : JSON::Any?
+        {"example", "default"}.each do |key|
+          value = object[key]?
+          return value if value && !value.raw.nil?
+        end
+        object["enum"]?.try(&.as_a?).try(&.first?)
+      end
+
+      private def self.object_sample(spec : JSON::Any, object : Hash(String, JSON::Any),
+                                     depth : Int32, budget : SampleBudget) : JSON::Any
+        fields = {} of String => JSON::Any
+        properties = object["properties"]?.try(&.as_h?)
+        if properties && depth < MAX_SAMPLE_DEPTH
+          properties.each do |key, node|
+            break if budget.left <= 0
+            value = (json_sample(spec, resolve_ref(spec, node), key, depth + 1, budget) rescue nil)
+            fields[key] = value if value
+          end
+        end
+        JSON::Any.new(fields)
+      end
+
+      # A schema's `type`, taking the first non-null one of an OpenAPI 3.1 type list.
+      private def self.schema_type(object : Hash(String, JSON::Any)) : String?
+        node = object["type"]?
+        return nil unless node
+        node.as_s? || node.as_a?.try(&.compact_map(&.as_s?).find { |t| t != "null" })
       end
 
       private def self.json_media_type?(content_type : String) : Bool
@@ -373,39 +505,80 @@ module Gori
       private def self.form_data_payload(spec : JSON::Any, op : JSON::Any,
                                          params : Array(JSON::Any)) : {String?, Bytes?}
         content_type = consumes(spec, op).first? || "application/x-www-form-urlencoded"
-        media_type = content_type.split(';', 2)[0].strip
-        if media_type.compare("application/x-www-form-urlencoded", case_insensitive: true) == 0
-          if params.any? { |p| p["type"]?.try(&.as_s?) == "file" }
+        fields = params.map do |p|
+          FormField.new(p["name"]?.to_s, sample_value(spec, p), p["type"]?.try(&.as_s?) == "file")
+        end
+        case form_kind(content_type)
+        when :urlencoded
+          if fields.any?(&.file)
             raise Gori::Error.new("Swagger 2.0 file formData requires multipart/form-data consumes")
           end
-          body = params.map do |p|
-            name = p["name"]?.to_s
-            "#{URI.encode_www_form(name)}=#{URI.encode_www_form(sample_value(spec, p))}"
-          end.join('&')
-          return {content_type, body.to_slice}
-        end
-        unless media_type.compare("multipart/form-data", case_insensitive: true) == 0
+          {content_type, urlencoded_body(fields)}
+        when :multipart
+          {"multipart/form-data; boundary=#{MULTIPART_BOUNDARY}",
+           multipart_body(fields, "Swagger 2.0 formData parameter")}
+        else
           raise Gori::Error.new("Swagger 2.0 formData requires multipart/form-data or application/x-www-form-urlencoded consumes")
         end
+      end
 
-        boundary = "gori-openapi-boundary"
-        body = String.build do |io|
-          params.each do |p|
-            name = p["name"]?.to_s
-            raise Gori::Error.new("Swagger 2.0 formData parameter has an invalid name") if Builder.inject_bytes?(name)
-            quoted_name = name.gsub("\\", "\\\\").gsub("\"", "\\\"")
-            io << "--" << boundary << "\r\n"
-            if p["type"]?.try(&.as_s?) == "file"
+      # One field of a generated form body: a Swagger 2 `formData` parameter or an OpenAPI 3
+      # form schema property.
+      private record FormField, name : String, value : String, file : Bool
+
+      MULTIPART_BOUNDARY = "gori-openapi-boundary"
+
+      # The fields of an OpenAPI 3 form body: each of the schema's `properties`, valued from the
+      # schema-level `example` object, the property's own `example` or `default`, or a
+      # placeholder by type. A `format: binary` (or `base64`) string is a file part.
+      private def self.schema_form_fields(spec : JSON::Any, schema_node : JSON::Any?) : Array(FormField)
+        return [] of FormField unless schema_node
+        # A schema this cannot read — a remote or dangling `$ref`, or not an object — leaves the
+        # form empty, as the operation imported before form bodies were built at all. Raising
+        # here skipped the operation, and a remote ref aborted the whole import.
+        schema = (resolve_ref(spec, schema_node).as_h? rescue nil)
+        return [] of FormField unless schema
+        properties = schema["properties"]?.try(&.as_h?)
+        return [] of FormField unless properties
+        example = schema["example"]?.try(&.as_h?)
+        properties.map { |name, node| form_field(spec, name, node, example.try(&.[name]?)) }
+      end
+
+      # One form property: the schema-level example's value for it, else its own `example` or
+      # `default`, else a placeholder by type.
+      private def self.form_field(spec : JSON::Any, name : String, node : JSON::Any,
+                                  example : JSON::Any?) : FormField
+        property = (resolve_ref(spec, node).as_h? rescue nil)
+        type = property.try { |h| schema_type(h) }
+        format = property.try(&.["format"]?).try(&.as_s?)
+        value = example || property.try(&.["example"]?) || property.try(&.["default"]?)
+        value = nil if value.try(&.raw.nil?)
+        text = value ? (value.as_s? || value.to_json) : scalar_sample(type, name)
+        FormField.new(name, text, type == "string" && (format == "binary" || format == "base64"))
+      end
+
+      private def self.urlencoded_body(fields : Array(FormField)) : Bytes
+        fields.join('&') do |f|
+          "#{URI.encode_www_form(f.name)}=#{URI.encode_www_form(f.value)}"
+        end.to_slice
+      end
+
+      private def self.multipart_body(fields : Array(FormField), label : String) : Bytes
+        String.build do |io|
+          fields.each do |f|
+            raise Gori::Error.new("#{label} has an invalid name") if Builder.inject_bytes?(f.name)
+            quoted_name = f.name.gsub("\\", "\\\\").gsub("\"", "\\\"")
+            io << "--" << MULTIPART_BOUNDARY << "\r\n"
+            if f.file
               io << "Content-Disposition: form-data; name=\"" << quoted_name << "\"; filename=\"file\"\r\n"
               io << "Content-Type: application/octet-stream\r\n"
             else
               io << "Content-Disposition: form-data; name=\"" << quoted_name << "\"\r\n"
             end
-            io << "\r\n" << sample_value(spec, p) << "\r\n"
+            io << "\r\n" << f.value << "\r\n"
           end
-          io << "--" << boundary << "--\r\n"
-        end
-        {"multipart/form-data; boundary=#{boundary}", body.to_slice}
+          io << "--" << MULTIPART_BOUNDARY << "--\r\n"
+        end.to_slice
       end
 
       # Dereference only the value the current operation needs. Recursive schemas are common,

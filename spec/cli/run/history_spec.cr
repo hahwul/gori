@@ -1320,6 +1320,27 @@ describe "gori run show --format raw" do
     notes.first.should contain("stored prefix")
   end
 
+  # The note used to point at `--format json` for "the true size", and that document's body
+  # `size` is the STORED prefix. `source_size` is the wire size the cap cut, as on MCP.
+  it "points at a JSON field that holds the whole body's size" do
+    req_head = "POST /big HTTP/1.1\r\nContent-Length: 9000\r\n\r\n"
+    resp_head = "HTTP/1.1 200 OK\r\nContent-Length: 7000\r\n\r\n"
+    row = Gori::Store::FlowRow.new(
+      id: 15_i64, created_at: 0_i64, scheme: "http", method: "POST", host: "example.test",
+      port: 80, target: "/big", status: 200, state: Gori::Store::FlowState::Complete,
+      size: (req_head.bytesize + 9000 + resp_head.bytesize + 7000).to_i64,
+      response_size: (resp_head.bytesize + 7000).to_i64)
+    detail = Gori::Store::FlowDetail.new(row, "HTTP/1.1", req_head.to_slice, "short".to_slice,
+      resp_head.to_slice, "short".to_slice, request_body_truncated: true, response_body_truncated: true)
+    Gori::CLI::Run.raw_truncation_notes_for_spec(detail, true, true).first.should contain("as source_size")
+    doc = JSON.parse(Gori::CLI::Run.show_json_for_spec(detail, true, true))
+    doc["request"]["body"]["size"].should eq(5)
+    doc["request"]["body"]["source_size"].should eq(9000)
+    doc["response"]["body"]["source_size"].should eq(7000)
+    whole = capped_detail(request_capped: false, response_capped: false)
+    JSON.parse(Gori::CLI::Run.show_json_for_spec(whole, true, true))["request"]["body"]["source_size"]?.should be_nil
+  end
+
   it "stays silent for a flow whose bodies are whole" do
     detail = capped_detail(request_capped: false, response_capped: false)
     Gori::CLI::Run.raw_truncation_notes_for_spec(detail, true, true).should be_empty

@@ -51,6 +51,14 @@ describe Gori::Url do
       Gori::Url.origin_path("HTTP://example.com/x").should eq("/x")
       Gori::Url.origin_path("HTTPS://example.com/x").should eq("/x")
     end
+
+    # The authority ends at the FIRST '/', '?' or '#'. Taking the first '/' read the query's
+    # own slash as the start of the path.
+    it "keeps a pathless query whose value holds a slash" do
+      Gori::Url.origin_path("http://example.com?next=/x").should eq("/?next=/x")
+      Gori::Url.origin_path("http://example.com#/route").should eq("/#/route")
+      Gori::Url.origin_path("http://example.com?a=1").should eq("/?a=1")
+    end
   end
 
   describe ".location" do

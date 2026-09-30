@@ -14,7 +14,8 @@ private FLASK_COMPRESSED  = ".eJyrVkpJLElUslJyHAWDCijpKBXl56QCY6a0OLVIqRYAhzxtRA
 private DJANGO            = "eyJ1c2VyX2lkIjo0MiwiYWRtaW4iOnRydWUsIm5hbWUiOiJhbGljZSJ9:1wqQs6:ofPm07XfGfVUimPfVs9Bdy5M7H0cxBS_265YiN3lQsY"
 private DJANGO_SALTED     = "eyJ1c2VyX2lkIjo0MiwiYWRtaW4iOnRydWUsIm5hbWUiOiJhbGljZSJ9:1wqQs6:9xbI_dkuxU80EIQKjrNucKXsYJ2IMbwYIy8_Y6FkKyw" # salt "my.custom.salt"
 private DJANGO_COMPRESSED = ".eJyrVkpJLElUslJyHAWDCijpKBXl56QCY6a0OLVIqRYAhzxtRA:1wqR8J:8cg4YrNnvAr1qe7zFsz_Lu83Y4LH95Sq0A7AW1M3RqE"
-private DJANGO_SHA1       = "eyJhIjoxfQ:1wqR8T:8BooTFI1B28NGHSf42JyGt1Or-0" # algorithm sha1, payload {"a":1}
+private DJANGO_SESSION    = "eyJfYXV0aF91c2VyX2lkIjoiMSJ9:1wqQs6:UBVpRFYEZlbUro450HHxNtbw_5mIw2NleDtSo4KHYKw" # signed_cookies SessionStore, Django 6.1.1
+private DJANGO_SHA1       = "eyJhIjoxfQ:1wqR8T:8BooTFI1B28NGHSf42JyGt1Or-0"                                   # algorithm sha1, payload {"a":1}
 private RACK              = "BAh7BkkiCXVzZXIGOgZFVEkiCmFsaWNlBjsAVA==--9156ef2ac6989f37064259efa196770c3ee052ca"
 
 describe Gori::Cookie do
@@ -187,6 +188,16 @@ describe Gori::Cookie do
       # Same payload+ts, different salt → different signature; each verifies under its own.
       Gori::Cookie::Django.verify(DJANGO_SALTED, SECRET, salt: "my.custom.salt").should be_true
       Gori::Cookie::Django.verify(DJANGO_SALTED, SECRET).should be_false # default salt must fail
+    end
+
+    # The cookie-session backend signs with plain `signing.dumps(salt=SESSION_SALT)`. gori used
+    # to wrap the secret in Django 6.0's `django.http.cookies` prefix for this salt, which only
+    # `get_cookie_signer()` applies, so a real session cookie never verified.
+    it "verifies a real signed_cookies session cookie under the session salt" do
+      Gori::Cookie::Django.verify(DJANGO_SESSION, SECRET, salt: Gori::Cookie::Django::SESSION_SALT).should be_true
+      Gori::Cookie::Django.resign(DJANGO_SESSION, SECRET, salt: Gori::Cookie::Django::SESSION_SALT).should eq(DJANGO_SESSION)
+      Gori::Cookie::Django.forge(%({"_auth_user_id":"1"}), SECRET, 1785656674_i64,
+        salt: Gori::Cookie::Django::SESSION_SALT).should eq(DJANGO_SESSION)
     end
 
     it "honors the sha1 algorithm variant" do

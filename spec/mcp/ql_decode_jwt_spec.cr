@@ -30,8 +30,56 @@ describe Gori::MCP::Server do
         mcp_seed_flow(store, "ex.test", "GET", "/", 200)
         mcp_seed_flow(store, "other.test", "GET", "/", 200)
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_history","arguments":{"query":"host:ex.test status:>=foo"}}})
-        rows = mcp_tool_payload(mcp_drive(store, call)[0])["flows"].as_a
-        rows.size.should eq(1) # host:ex.test applied, bad status term dropped
+        payload = mcp_tool_payload(mcp_drive(store, call)[0])
+        payload["flows"].as_a.size.should eq(1) # host:ex.test applied, bad status term dropped
+        # …and SAYS it dropped it: the result is broader than asked, and the caller of this
+        # transport has no stderr for the warning `gori run history` prints.
+        payload["ignored_terms"].as_a.map(&.as_s).should eq(["status:>=foo"])
+        payload["ignored_terms_note"].as_s.should contain("BROADER")
+      end
+    end
+
+    # Every read tool that runs its query through `ql_filter_or_error` names what it dropped —
+    # the tester's `status:abc method:POST` returned every POST from list_history, list_sitemap
+    # and probe_scan with nothing on the reply to say `status:abc` had gone.
+    it "names the dropped terms on every lenient query tool, and says nothing on a clean query" do
+      with_store do |store|
+        mcp_seed_flow(store, "ex.test", "POST", "/a", 200)
+        tools = tools_for(store)
+        {
+          "list_history"      => {} of String => JSON::Any,
+          "list_sitemap"      => {} of String => JSON::Any,
+          "list_params"       => {} of String => JSON::Any,
+          "export_openapi"    => {} of String => JSON::Any,
+          "scan_js_endpoints" => {} of String => JSON::Any,
+          "probe_scan"        => {} of String => JSON::Any,
+        }.merge({
+          "list_sitemap collapse" => {"collapse_transport" => JSON::Any.new(true)},
+          "list_history ids"      => {"ids" => JSON.parse(%([#{store.recent_flows(1).first.id}]))},
+        }).each do |label, extra|
+          name = label.split(' ').first
+          run = ->(query : String) do
+            r = tools.call(name, JSON::Any.new(extra.merge({"query" => JSON::Any.new(query)})))
+            r.is_error.should be_false, "#{label}: #{r.text}"
+            JSON.parse(r.text)
+          end
+          dirty = run.call("status:abc method:POST")
+          dirty["ignored_terms"]?.try(&.as_a.map(&.as_s)).should eq(["status:abc"]), "#{label} did not name the dropped term"
+          clean = run.call("method:POST")
+          clean["ignored_terms"]?.should be_nil, "#{label} warned about a clean query"
+          clean["ignored_terms_note"]?.should be_nil
+        end
+      end
+    end
+
+    # An ACTIVE scan sends probes for every selected flow, so the widening is refused up front
+    # instead of named on a reply that comes after the traffic.
+    it "refuses an active probe_scan whose query drops a term" do
+      with_store do |store|
+        mcp_seed_flow(store, "ex.test", "POST", "/a", 200)
+        r = tools_for(store).call("probe_scan", JSON.parse(%({"active":true,"allow_unscoped":true,"query":"status:abc method:POST"})))
+        r.is_error.should be_true
+        r.text.should contain("status:abc")
       end
     end
 

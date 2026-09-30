@@ -1934,7 +1934,8 @@ module Gori
       # `--headers-only`) shortens it. A capped body keeps `size` as the WHOLE decoded size and
       # adds `shown_size` for the prefix; `truncated` is then true, as it is on MCP for any cut.
       private def self.emit_body_json(j : JSON::Builder, field_name : String, head : Bytes?, body : Bytes?,
-                                      wire_truncated : Bool, cap : BodyCap = BodyCap.new) : Nil
+                                      wire_truncated : Bool, cap : BodyCap = BodyCap.new,
+                                      source_size : Int64? = nil) : Nil
         if body.nil? || body.empty?
           j.field field_name, nil
           return
@@ -1953,6 +1954,9 @@ module Gori
               j.field "binary", true
             end
             j.field "size", bytes.size
+            # The whole body's wire size when the capture cap cut it — `size` is only what was
+            # stored. Same field, same rule as MCP `get_flow`'s body object.
+            j.field "source_size", source_size if source_size
             emit_body_payload_json(j, s, shown, cut, wire_truncated, cap.omit)
             j.field "wire_truncated", true if wire_truncated
             j.field "note", note if note

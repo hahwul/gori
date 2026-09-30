@@ -83,9 +83,10 @@ parity with it, and every parity gap found so far has been in a surface, not an 
   (`src/gori/outbound.cr`). It is a required constructor argument on `Fuzz::Sender` and
   `Repeater::Sender`, so an ungated sender is a compile error. Layer 1 (`check`) is the only
   per-surface variance: `Outbound.agent` (MCP, strict), `Outbound.cli` (permissive when
-  unconfigured), `Outbound.interactive` (TUI, no up-front gate). Layer 2 (`sweep_block` /
-  `send_block`: sandbox + explicit excludes) is identical everywhere and applies even when
-  Layer 1 was waived. Judge the host actually dialled via `Outbound.scope_url`, never the
+  unconfigured), `Outbound.interactive` (TUI, no up-front gate). Layer 2 (`sweep_block`:
+  sandbox + explicit excludes, for an automated sweep; `send_block`: sandbox only, since a
+  hand-authored send passes an exclude as the proxy does) is identical everywhere and applies
+  even when Layer 1 was waived. Judge the host actually dialled via `Outbound.scope_url`, never the
   request line.
 
 ### 3. Never stall the data path (P6), and don't crash

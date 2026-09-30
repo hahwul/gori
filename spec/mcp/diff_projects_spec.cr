@@ -105,6 +105,22 @@ describe "MCP diff_projects" do
     end
   end
 
+  it "names a query term it dropped, as the other query tools do" do
+    with_diff_home do |registry|
+      seed_diff_project(registry, "q1") { |s| diff_seed_flow(s, "/a", 200, 100) }
+      newer = seed_diff_project(registry, "q3") { |s| diff_seed_flow(s, "/a", 200, 100) }
+      store = Gori::Store.open(newer.db_path, background_index: false)
+      begin
+        dirty = drive_diff(newer, store, %({"from":"q1","query":"status:abc path:/a"}))
+        dirty["ignored_terms"].as_a.map(&.as_s).should eq(["status:abc"])
+        dirty["counts"]?.should_not be_nil
+        drive_diff(newer, store, %({"from":"q1","query":"path:/a"}))["ignored_terms"]?.should be_nil
+      ensure
+        store.close
+      end
+    end
+  end
+
   it "carries the coverage caveat beside the counts, so 'removed' cannot be read as 'deleted'" do
     with_diff_home do |registry|
       seed_diff_project(registry, "q1") { |s| diff_seed_flow(s, "/unvisited", 200, 100) }

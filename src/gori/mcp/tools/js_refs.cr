@@ -65,7 +65,8 @@ module Gori
       # its permission group is "Edit project data", not "Send traffic".
       @[Tool("scan_js_endpoints", gated: true, agent_action: true, permission: "write")]
       private def scan_js_endpoints(h) : Result
-        filter = ql_filter_or_error(h, str(h, "query"))
+        dropped = [] of String
+        filter = ql_filter_or_error(h, str(h, "query"), dropped)
         return filter if filter.is_a?(Result)
         if fts_error = drain_fts_or_error(filter.uses_fts?)
           return fts_error
@@ -91,6 +92,7 @@ module Gori
             j.field "write_failures", r.write_failures
             j.field "truncated", r.truncated
             j.field "note", js_scan_note(r) if js_scan_note(r)
+            emit_ignored_terms(j, dropped)
           end
         end)
       end
@@ -179,7 +181,7 @@ module Gori
           s.field "in_scope", boolprop("only in-scope flows (default false)")
           s.field "max_flows", intprop("responses to read (default #{JsRefs::DEFAULT_MAX_FLOWS}, max 5000)")
           s.field "rescan", boolprop("re-read scanned responses (default false)")
-          s.field "strict", boolprop("reject an unrecognized query term (default false)")
+          s.field "strict", boolprop("reject an unrecognized query term (default false: it is dropped and named in `ignored_terms`)")
           s.field "lenient", boolprop("free-text an unknown `field:` (default false)")
         end
       end

@@ -254,7 +254,7 @@ Every `body:` term, on every surface, reads the bytes **as they went over the wi
 A few shapes let a query look clean while it did not look:
 
 - **A pending flow** has no status, duration or response size, so it drops out of both `status:` and `-status:` (and the same for `dur` and `respsize`).
-- **A dropped term widens the query.** A value gori cannot read (`status:>=foo`) is ignored, not refused. Check what survived with `ql_explain`.
+- **A dropped term widens the query.** A value gori cannot read (`status:>=foo`) is ignored, not refused, but it is named: `gori run` prints a warning, and the MCP query tools list it in the reply's `ignored_terms` (pass `strict:true` to have them refuse the query instead). Check what survived with `ql_explain`.
 - **A bad regex is an error**, never silently dropped: `body~[` fails the whole query.
 - **`-body:` on a big body** keeps a hit past the 8 KiB index bound, because the index never saw it.
 
