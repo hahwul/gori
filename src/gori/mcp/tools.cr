@@ -1446,7 +1446,8 @@ module Gori
       #
       # `cancelled` is the ONE seam for `notifications/cancelled` (#1103): a predicate the
       # transport builds over the JSON-RPC id, held here for the life of this call and read
-      # by the long tools through `cancel_signal` / `cancelled?`. It is an argument to THIS
+      # by the long tools through `cancel_signal` / `cancelled?`, or by the one-shot send
+      # engines while they own a socket. It is an argument to THIS
       # method and to nothing else — a cancel token threaded through 179 handlers would be a
       # parameter 176 of them ignore. A caller with no cancellation channel (`gori run`, a
       # spec) passes nothing and every tool behaves exactly as before.
@@ -1466,8 +1467,8 @@ module Gori
       #                     point, so the reader fiber never runs during it and the
       #                     notification is not even PARSED until it finishes — a check there
       #                     would be code that cannot fire. The cost is local.
-      #   send_request /    NO. One request, or one socket bounded by `idle_ms`; a cancel
-      #   send_websocket    cannot beat a single send, and there is no loop to leave.
+      #   send_request /    yes — the one-shot send engines close their owned socket when the
+      #   send_websocket    predicate fires, so a silent origin cannot pin the serial worker.
       #   fuzz/mine/        NO, by design. They return a `job_id` immediately and are stopped
       #   discover/         with `stop_job` — cancelling the *call* that started one would
       #   sequence/         suppress the id and leave the job running, which is the opposite

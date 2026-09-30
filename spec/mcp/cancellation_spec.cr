@@ -1,6 +1,7 @@
 require "../spec_helper"
 require "../support/mcp_harness"
 require "socket"
+require "openssl"
 
 # `notifications/cancelled` STOPS THE WORK (#1103).
 #
@@ -69,6 +70,105 @@ private class CountingOrigin
   end
 end
 
+# Accepts one outbound connection, reads the request head, and never sends a response. The
+# callback writes a real MCP cancellation only after the target has received the request; EOF
+# on the accepted connection proves the send engine closed its socket.
+private class SilentCancelOrigin
+  getter port : Int32
+  getter peer_closed = Channel(Nil).new(1)
+
+  def initialize(&@on_request : -> Nil)
+    @server = TCPServer.new("127.0.0.1", 0)
+    @port = @server.local_address.port
+    @closed = false
+    @connection = nil.as(TCPSocket?)
+    spawn do
+      if conn = @server.accept?
+        @connection = conn
+        begin
+          while line = conn.gets("\r\n", chomp: true)
+            break if line.empty?
+          end
+          @on_request.call
+          slice = Bytes.new(1024)
+          loop do
+            break if conn.read(slice) == 0
+          end
+          @peer_closed.send(nil)
+        rescue
+        ensure
+          conn.close rescue nil
+        end
+      end
+    rescue
+      # The listener is closed by the example's ensure.
+    end
+  end
+
+  def close : Nil
+    return if @closed
+    @closed = true
+    @connection.try(&.close) rescue nil
+    @server.close rescue nil
+  end
+end
+
+# A TLS listener for cancellation while an HTTPS send is blocked. In the normal mode it
+# completes TLS, consumes the request and stays silent; in handshake-stall mode it reads the
+# first ClientHello byte and never answers it. Both modes drain until the client closes so the
+# example observes the socket release rather than merely a cancellation flag.
+private class TlsCancelOrigin
+  getter port : Int32
+  getter peer_closed = Channel(Nil).new(1)
+
+  def initialize(@stall_handshake : Bool = false, &@on_ready : -> Nil)
+    cert, key = Gori::Proxy::Tls::CertBuilder.build_root("origin.test")
+    context = Gori::Proxy::Tls::ContextFactory.server_context(cert, key, advertise_h2: false)
+    @server = TCPServer.new("127.0.0.1", 0)
+    @port = @server.local_address.port
+    @closed = false
+    @connection = nil.as(IO?)
+    spawn do
+      if raw = @server.accept?
+        @connection = raw
+        if @stall_handshake
+          hello = Bytes.new(1)
+          raw.read_fully(hello)
+          @on_ready.call
+          drain(raw)
+        else
+          ssl = OpenSSL::SSL::Socket::Server.new(raw, context, sync_close: true)
+          @connection = ssl
+          while (line = ssl.gets("\r\n", chomp: true)) && !line.empty?
+          end
+          @on_ready.call
+          drain(ssl)
+        end
+      end
+    rescue
+      # Closing the client connection interrupts either the TLS read or the stalled TCP read.
+    ensure
+      @peer_closed.send(nil) rescue nil
+      @connection.try(&.close) rescue nil
+    end
+  end
+
+  def close : Nil
+    return if @closed
+    @closed = true
+    @connection.try(&.close) rescue nil
+    @server.close rescue nil
+  end
+
+  private def drain(io : IO) : Nil
+    bytes = Bytes.new(1024)
+    while io.read(bytes) > 0
+    end
+  rescue
+    # TLS may report an abrupt TCP close as an SSL error; either way the owned socket is gone.
+  end
+end
+
 private def cancel_flow(store : Gori::Store, port : Int32, target : String, cookie = false) : Int64
   head = String.build do |s|
     s << "GET #{target} HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\n"
@@ -109,6 +209,232 @@ private def drive_closed(store, *lines) : Array(JSON::Any)
 end
 
 describe "MCP cancellation stops the work" do
+  it "closes a silent send_request socket and serves the next queued tool call" do
+    reader, writer = IO.pipe
+    sink = IO::Memory.new
+    done = Channel(Nil).new(1)
+    cancel = %({"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":7,"reason":"client stopped waiting"}})
+    later = %({"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"list_jobs","arguments":{}}})
+    origin = SilentCancelOrigin.new do
+      writer.puts(cancel)
+      writer.puts(later)
+      writer.flush
+      writer.close
+    end
+
+    begin
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:#{origin.port}/hang","allow_unscoped":true,"timeout_ms":30000}}})
+        server = Gori::MCP::Server.new(store, allow_actions: true, verify_upstream: false,
+          input: reader, output: sink)
+        spawn do
+          server.run
+        ensure
+          done.send(nil)
+        end
+        writer.puts(call)
+        writer.flush
+
+        finished = select
+        when done.receive then true
+        when timeout(2.seconds) then false
+        end
+        unless finished
+          origin.close
+          select
+          when done.receive
+          when timeout(2.seconds)
+            fail "MCP server did not drain after the silent send was cancelled"
+          end
+          fail "cancelled send_request held the MCP worker past 2 seconds"
+        end
+      end
+
+      select
+      when origin.peer_closed.receive
+      when timeout(1.second)
+        fail "send_request did not close the origin socket after cancellation"
+      end
+      responses = sink.to_s.each_line.reject(&.strip.empty?).map { |line| JSON.parse(line) }.to_a
+      responses.map(&.["id"].as_i).should eq([8])
+    ensure
+      origin.close
+      reader.close rescue nil
+      writer.close rescue nil
+    end
+  end
+
+  it "closes a silent send_websocket handshake and serves the next queued tool call" do
+    reader, writer = IO.pipe
+    sink = IO::Memory.new
+    done = Channel(Nil).new(1)
+    cancel = %({"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":7,"reason":"client stopped waiting"}})
+    later = %({"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"list_jobs","arguments":{}}})
+    origin = SilentCancelOrigin.new do
+      writer.puts(cancel)
+      writer.puts(later)
+      writer.flush
+      writer.close
+    end
+
+    begin
+      with_store do |store|
+        request = "GET /ws HTTP/1.1\r\nHost: 127.0.0.1:#{origin.port}\r\n" \
+                  "Upgrade: websocket\r\nConnection: Upgrade\r\n" \
+                  "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" \
+                  "Sec-WebSocket-Version: 13\r\n\r\n"
+        repeater_id = store.insert_repeater("ws://127.0.0.1:#{origin.port}/ws",
+          request.to_slice, false, true, nil, 0)
+        call = %({"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"send_websocket","arguments":{"repeater_id":#{repeater_id},"messages":["ping"],"idle_ms":60000,"allow_unscoped":true}}})
+        server = Gori::MCP::Server.new(store, allow_actions: true, verify_upstream: false,
+          input: reader, output: sink)
+        spawn do
+          server.run
+        ensure
+          done.send(nil)
+        end
+        writer.puts(call)
+        writer.flush
+
+        finished = select
+        when done.receive then true
+        when timeout(2.seconds) then false
+        end
+        unless finished
+          origin.close
+          select
+          when done.receive
+          when timeout(2.seconds)
+            fail "MCP server did not drain after the silent WebSocket send was cancelled"
+          end
+          fail "cancelled send_websocket held the MCP worker past 2 seconds"
+        end
+      end
+
+      select
+      when origin.peer_closed.receive
+      when timeout(1.second)
+        fail "send_websocket did not close the origin socket after cancellation"
+      end
+      responses = sink.to_s.each_line.reject(&.strip.empty?).map { |line| JSON.parse(line) }.to_a
+      responses.map(&.["id"].as_i).should eq([8])
+    ensure
+      origin.close
+      reader.close rescue nil
+      writer.close rescue nil
+    end
+  end
+
+  it "closes the SSL socket when an HTTPS send is cancelled mid-read" do
+    reader, writer = IO.pipe
+    sink = IO::Memory.new
+    done = Channel(Nil).new(1)
+    cancel = %({"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":7,"reason":"client stopped waiting"}})
+    later = %({"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"list_jobs","arguments":{}}})
+    origin = TlsCancelOrigin.new do
+      writer.puts(cancel)
+      writer.puts(later)
+      writer.flush
+      writer.close
+    end
+
+    begin
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"https://127.0.0.1:#{origin.port}/hang","allow_unscoped":true,"timeout_ms":30000}}})
+        server = Gori::MCP::Server.new(store, allow_actions: true, verify_upstream: false,
+          input: reader, output: sink)
+        spawn do
+          server.run
+        ensure
+          done.send(nil)
+        end
+        writer.puts(call)
+        writer.flush
+
+        finished = select
+        when done.receive then true
+        when timeout(2.seconds) then false
+        end
+        unless finished
+          origin.close
+          select
+          when done.receive
+          when timeout(2.seconds)
+            fail "MCP server did not drain after the HTTPS send was cancelled"
+          end
+          fail "cancelled HTTPS send held the MCP worker past 2 seconds"
+        end
+      end
+
+      select
+      when origin.peer_closed.receive
+      when timeout(1.second)
+        fail "send_request did not close its SSL socket after cancellation"
+      end
+      responses = sink.to_s.each_line.reject(&.strip.empty?).map { |line| JSON.parse(line) }.to_a
+      responses.map(&.["id"].as_i).should eq([8])
+    ensure
+      origin.close
+      reader.close rescue nil
+      writer.close rescue nil
+    end
+  end
+
+  it "closes the transport socket when an HTTPS origin stalls its TLS handshake" do
+    reader, writer = IO.pipe
+    sink = IO::Memory.new
+    done = Channel(Nil).new(1)
+    cancel = %({"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":7,"reason":"client stopped waiting"}})
+    later = %({"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"list_jobs","arguments":{}}})
+    origin = TlsCancelOrigin.new(true) do
+      writer.puts(cancel)
+      writer.puts(later)
+      writer.flush
+      writer.close
+    end
+
+    begin
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"https://127.0.0.1:#{origin.port}/hang","allow_unscoped":true,"timeout_ms":30000}}})
+        server = Gori::MCP::Server.new(store, allow_actions: true, verify_upstream: false,
+          input: reader, output: sink)
+        spawn do
+          server.run
+        ensure
+          done.send(nil)
+        end
+        writer.puts(call)
+        writer.flush
+
+        finished = select
+        when done.receive then true
+        when timeout(2.seconds) then false
+        end
+        unless finished
+          origin.close
+          select
+          when done.receive
+          when timeout(2.seconds)
+            fail "MCP server did not drain after the stalled TLS handshake was cancelled"
+          end
+          fail "cancelled TLS handshake held the MCP worker past 2 seconds"
+        end
+      end
+
+      select
+      when origin.peer_closed.receive
+      when timeout(1.second)
+        fail "TLS handshake socket stayed open after cancellation"
+      end
+      responses = sink.to_s.each_line.reject(&.strip.empty?).map { |line| JSON.parse(line) }.to_a
+      responses.map(&.["id"].as_i).should eq([8])
+    ensure
+      origin.close
+      reader.close rescue nil
+      writer.close rescue nil
+    end
+  end
+
   # THE defect. A real `notifications/cancelled` arrives on stdin while the scan is in flight —
   # written by the origin the moment the first probe lands, so nothing here is timed — and the
   # sends have to stop.

@@ -367,11 +367,11 @@ module Gori::Repeater
 
     # Send bytes already taken from `wire_bytes`. Field-native ignores them, for the reason
     # `wire_bytes` states.
-    def send_wire(wire : Bytes) : Result
+    def send_wire(wire : Bytes, cancel : Proc(Bool)? = nil) : Result
       if fields = @h2_fields
-        @sender.send_fields(fields, @h2_body)
+        @sender.send_fields(fields, @h2_body, cancel)
       else
-        @sender.send_wire(wire)
+        @sender.send_wire(wire, cancel)
       end
     end
 
@@ -393,8 +393,9 @@ module Gori::Repeater
     # survives — so it has no business in the builder the scope gate reads.
     def send_ws(messages : Array(WsEngine::OutMsg),
                 idle : Time::Span = WsEngine::DEFAULT_IDLE,
-                keep_key : Bool = false) : WsEngine::Result
-      @sender.send_ws(bytes, messages, idle, keep_key)
+                keep_key : Bool = false,
+                cancel : Proc(Bool)? = nil) : WsEngine::Result
+      @sender.send_ws(bytes, messages, idle, keep_key, cancel)
     end
 
     # The same target and gated dialer carrying different wire bytes — for a surface that
