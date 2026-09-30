@@ -498,6 +498,23 @@ module Gori
       false
     end
 
+    # How many flows an earlier import stamped `source_ref = ref` — the basename of the file it
+    # read (`Import::Provenance`). `Import` asks before writing, so re-importing the same HAR
+    # can say it duplicated rows instead of doubling History silently.
+    #
+    # Neither column is indexed on its own, but both sit in `idx_flows_list` (V37), so this is
+    # a scan of that covering index — about 121 bytes a flow — and never a walk of the `flows`
+    # rows, whose late columns hide behind their bodies' overflow chains
+    # (spec/store/list_index_spec.cr pins the plan). 0 on a read error: the answer only ever
+    # adds a warning, so failing to ask must not fail the import.
+    IMPORT_REF_COUNT_SQL = "SELECT COUNT(*) FROM flows WHERE source = ? AND source_ref = ?"
+
+    def import_ref_count(ref : String) : Int64
+      @db.query_one(IMPORT_REF_COUNT_SQL, FlowSource::Kind::Import.token, ref, as: Int64)
+    rescue DB::Error | SQLite3::Exception
+      0_i64
+    end
+
     def count : Int64
       # Degrade like `data_version` rather than raise: this is a POLL reader (the Project
       # tab's periodic refresh, MCP `get_context`/`list_projects`), so a transient

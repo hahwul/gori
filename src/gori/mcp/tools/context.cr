@@ -214,6 +214,8 @@ module Gori
           "QUERY_SYNTAX", field: "filter")
       end
 
+      REPEATER_CONTEXT_LIMIT = PageLimit.new(50, 500)
+
       @[Tool("get_repeater_context", requires: ["get_response_body_chunk"])]
       private def get_repeater_context(h) : Result
         ui = parse_ui_state
@@ -223,7 +225,7 @@ module Gori
         include_sensitive = bool_arg(h, "include_sensitive", false)
         req_lim = optional_int_arg(h, "limit")
         req_off = optional_int_arg(h, "offset")
-        limit = clamp(req_lim, 50, 500)
+        limit = clamp(req_lim, REPEATER_CONTEXT_LIMIT)
         offset = clamp_nonneg(req_off)
         query_str = str(h, "query").try(&.strip)
         query_rx = query_str.try { |q| q.empty? ? nil : Regex.new(Regex.escape(q), Regex::Options::IGNORE_CASE) }
@@ -350,6 +352,10 @@ module Gori
                                         tui_index : Int32? = nil,
                                         response_body_cap : Int32? = nil) : Nil
         j.object do
+          # `id` is the name every repeater tool takes it under (`update_repeater{id}`, and what
+          # `create_repeater` returns); `db_id` is the older spelling, kept beside it so a caller
+          # that learned it keeps working (#1393).
+          j.field "id", r.id
           j.field "db_id", r.id
           # The number the operator reads off the sub-tab chip ("6:POST /api"), beside the id
           # every tool here takes. Both, always, because holding one and needing the other is
@@ -748,12 +754,12 @@ module Gori
           "The Repeater workbench state. Defaults to metadata only so request headers, WebSocket " \
           "payloads, response headers, and the live TUI editor snapshot are not copied into the " \
           "model context. Set include_content=true only when those bytes are necessary. Supports " \
-          "single-id lookup, pagination, and filtering. Every session reports BOTH ids: 'db_id', " \
-          "which every repeater tool takes, and 'tui_index', the 1-based number the TUI paints on " \
-          "its sub-tab chip — the number the operator says out loud. tui_index shifts whenever a " \
-          "session is created, deleted or moved, so read it fresh; db_id is the durable address." do |s|
+          "single-id lookup, pagination, and filtering. Every session reports BOTH ids: 'id' (also " \
+          "as 'db_id'), which every repeater tool takes, and 'tui_index', the 1-based number the TUI " \
+          "paints on its sub-tab chip — the number the operator says out loud. tui_index shifts " \
+          "whenever a session is created, deleted or moved, so read it fresh; id is the durable address." do |s|
           s.field "id", intprop("return one repeater DATABASE id (not a tui_index)")
-          s.field "limit", intprop("max rows to return (default 50, max 500)")
+          s.field "limit", limitprop("max rows to return", REPEATER_CONTEXT_LIMIT)
           s.field "offset", intprop("start row (default 0)")
           s.field "query", strprop("case-insensitive SUBSTRING match over a session's name, target URL and stored request bytes. For a field query (tags, host, method, last status) use 'filter' — both may be passed and both must match")
           s.field "filter", strprop("the same sub-tab filter language the TUI's `/` takes, matched in memory: #{Repeater::SubtabFilter::FIELDS.map { |f| "#{f}:" }.join(" ")}, `-` before a term negates it, and a bare word searches name/summary/target/tags. `status:` is the LAST send's outcome as one token — a code (`status:404`, and `status:4` matches every 4xx by prefix), `status:error`, or `status:unsent`. ANDed with 'query' when both are given")

@@ -778,7 +778,7 @@ gori run probe -a
 
 With `--active`: `--unsafe` also probes unsafe methods (`POST`/`PUT`/`PATCH`/`DELETE`), whose re-sends may mutate server data; `--aggressive` raises the per-rule caps and widens the forbidden-bypass header set (and implies `--unsafe`). Both stay scope-gated unless you also pass `--allow-unscoped`. Use them only against authorized targets.
 
-A bare `probe` scans and prints. The persisted findings behind the TUI's Probe tab are a separate surface:
+A bare `probe` scans and prints. `--persist` also writes what it found into the persisted findings, merged the way the live scanner merges them, so a project nobody opened in the TUI has a triage list; a write that does not land is reported and exits 1 after the report. The persisted findings behind the TUI's Probe tab are a separate surface:
 
 ```bash
 gori run probe issues --severity high            # the triage list, with the ids below take

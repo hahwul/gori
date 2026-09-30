@@ -151,7 +151,7 @@ module Gori
 
       @[Tool("sequence_status", gated: true, read_only: true, permission: "send")]
       private def sequence_status(h) : Result
-        sjob = lookup_sequence_job(h)
+        sjob = lookup_sequence_job(h, "status")
         return sjob if sjob.is_a?(Result)
         Result.new(JSON.build do |j|
           j.object do
@@ -176,7 +176,7 @@ module Gori
       # themselves (they are secrets).
       @[Tool("sequence_results", gated: true, read_only: true, permission: "send")]
       private def sequence_results(h) : Result
-        sjob = lookup_sequence_job(h)
+        sjob = lookup_sequence_job(h, "results")
         return sjob if sjob.is_a?(Result)
         Result.new(JSON.build do |j|
           j.object do
@@ -197,17 +197,16 @@ module Gori
 
       @[Tool("sequence_stop", gated: true, agent_action: true, permission: "send")]
       private def sequence_stop(h) : Result
-        sjob = lookup_sequence_job(h)
+        sjob = lookup_sequence_job(h, "stop")
         return sjob if sjob.is_a?(Result)
-        sjob.stop
         stop_and_report(sjob)
       end
 
-      private def lookup_sequence_job(h) : SequenceJob | Result
+      private def lookup_sequence_job(h, verb : String) : SequenceJob | Result
         id = str(h, "job_id")
         return Result.new("missing required 'job_id'", is_error: true) if id.nil? || id.empty?
         job = @sequence_jobs[id]?
-        return not_found("no sequence job #{id}") unless job
+        return job_not_found(id, "sequence", verb) unless job
         job_project_mismatch(job) || job
       end
 

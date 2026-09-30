@@ -6,12 +6,14 @@ require "../../env"
 module Gori
   module MCP
     class Tools
+      ISSUES_LIMIT = PageLimit.new(100, 500)
+
       @[Tool("list_issues")]
       private def list_issues(h) : Result
         req_off = optional_int_arg(h, "offset")
         req_lim = optional_int_arg(h, "limit")
         offset = clamp_nonneg(req_off)
-        limit = clamp(req_lim, 100, 500)
+        limit = clamp(req_lim, ISSUES_LIMIT)
         all = store.issues
         page = all[offset, limit]? || [] of Store::Issue
         Result.new(JSON.build do |j|
@@ -176,7 +178,7 @@ module Gori
           "Returns an object {issues, returned, offset, total} — not a bare array. " \
           "Each issue's `links` lists everything backing it, the flow it was filed from first; " \
           "`flow_id` is that first linked flow." do |s|
-          s.field "limit", intprop("max rows (default 100, max 500)")
+          s.field "limit", limitprop("max rows", ISSUES_LIMIT)
           s.field "offset", intprop("start row (default 0)")
         end
 

@@ -321,7 +321,7 @@ module Gori
           "runs are kept): verdict, when, from which surface, and the per-outcome counts. " \
           "Use it to answer \"did this regress\" without re-sending anything." do |s|
           s.field "issue_id", intprop("the issue"), required: true
-          s.field "limit", intprop("how many runs (default and maximum #{Retest::RUN_HISTORY})")
+          s.field "limit", limitprop("how many runs", PageLimit.new(Retest::RUN_HISTORY, Retest::RUN_HISTORY))
         end
 
         tool j, "get_retest_run",

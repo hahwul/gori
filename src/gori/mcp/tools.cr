@@ -90,9 +90,16 @@ module Gori
       # `error_code` (+ optional `field`, `retryable`, `details`) so a caller can
       # apply policy / auto-recovery without parsing the human `text`. The `Server`
       # surfaces these in `structuredContent`; see `err` and `classify`.
+      #
+      # `event_flow_id` / `event_note` are for the #124 agent-action feed only (`log_agent_action`)
+      # and never reach the client: a handler that knows WHAT it did — the History flow a send
+      # recorded, the origin it dialled — says so here, so the operator's feed can link to the
+      # flow instead of reading "send_request ok" with no pointer. Carried on the Result rather
+      # than re-parsed out of `text`, which can be megabytes.
       record Result, text : String, is_error : Bool = false,
         error_code : String? = nil, field : String? = nil,
-        retryable : Bool = false, details : JSON::Any? = nil
+        retryable : Bool = false, details : JSON::Any? = nil,
+        event_flow_id : Int64? = nil, event_note : String? = nil
       # `part` is "response" (the default, and everything this tool ever served) or "request".
       # The request cursor exists because `get_repeater_context` is the ONLY read-back of a
       # repeater's request and it caps at MCP_REPEATER_REQUEST_MAX — so bytes past the cap
@@ -323,6 +330,24 @@ module Gori
       # Default inlined-body cap for body_mode:preview (full uses Serialize::MAX_TEXT).
       BODY_PREVIEW_BYTES = 2048
 
+      # The inlined-body cap when a call names neither `body_mode` nor `max_body_bytes` and the
+      # body can be paged afterwards (#1394). `full` used to be that default: up to 64 KB —
+      # ~16k tokens — per get_flow, on the call an agent makes most, to read a flow whose body
+      # it usually only needs the start of. Most API bodies still fit whole; a larger one is cut
+      # here with a `more` pointer naming the chunk tool (`Serialize.emit_body`).
+      AUTO_BODY_BYTES = 8 * 1024
+
+      # The `more` pointer on a body the default cap cut, naming where the rest is.
+      private def body_more_hint(source : String, what : String = "body") : String
+        "cut at #{AUTO_BODY_BYTES} bytes by the default body_mode — get_response_body_chunk{#{source}} " \
+        "pages the whole #{what}; body_mode:\"full\" inlines up to #{Serialize::MAX_TEXT} bytes"
+      end
+
+      # Whether this call left the body size to the default — neither argument given.
+      private def body_auto?(h) : Bool
+        !present?(h, "body_mode") && !present?(h, "max_body_bytes")
+      end
+
       # Ceiling on the `decoder` tool's returned output string. A Decoder step can
       # produce up to 32 MiB (Decoder::MAX_OUT); returning that inline would swamp
       # the JSON-RPC channel, so truncate the display string and flag it.
@@ -459,6 +484,10 @@ module Gori
         return nil if @denied_permissions.empty?
         if key = denied_permission(name)
           return key
+        end
+        # A read tool whose one argument WRITES a file sits behind `write` for that call.
+        if name == "export_openapi" && @denied_permissions.includes?("write") && describes?(h, "output_path")
+          return "write"
         end
         return nil unless @denied_permissions.includes?("send")
         sends = case name
@@ -1232,6 +1261,87 @@ module Gori
         end
       end
 
+      # Second spellings of one argument, per tool: alias → the name the handler reads (#1393).
+      #
+      # The same object is `flow_id` on nine tools and `id` on get_flow/delete_flow; a repeater
+      # is `repeater_id` on send_request/fuzz_start and `id` on the repeater tools; toggles say
+      # `enabled` everywhere but intercept_toggle. An agent generalising from the tool it used
+      # last spent a turn on INVALID_ARGUMENT every time. Renaming would break every caller that
+      # learned the current names, so both are accepted — from ONE table, which `tool` reads to
+      # advertise the alias (every schema is `additionalProperties:false`, so an alias the
+      # schema did not name would be refused client-side) and `call` reads to fold it into the
+      # real name before dispatch, so no handler knows aliases exist.
+      #
+      # An aliased argument is not `required` in the schema: JSON Schema cannot say "one of
+      # these two" at the top level in the subset MCP clients accept, and a `required: ["id"]`
+      # would make a validating client reject `{flow_id: 7}`. `call` refuses the call with
+      # neither spelling instead (`missing_aliased`), naming both.
+      ARG_ALIASES = {
+        "get_flow"             => {"flow_id" => "id"},
+        "delete_flow"          => {"flow_id" => "id"},
+        "get_repeater_context" => {"repeater_id" => "id"},
+        "update_repeater"      => {"repeater_id" => "id"},
+        "delete_repeater"      => {"repeater_id" => "id"},
+        "move_repeater"        => {"repeater_id" => "id"},
+        "minimize_repeater"    => {"id" => "repeater_id"},
+        "intercept_toggle"     => {"enabled" => "enable"},
+      }
+
+      # Fold each alias the call used into its real name, or the refusal for a call that spelled
+      # both with different values. A JSON null is absent, as everywhere else here; equal values
+      # under both names are one argument said twice, not a conflict.
+      private def resolve_aliases(name : String, h : Hash(String, JSON::Any)) : Hash(String, JSON::Any) | Result
+        return h unless aliases = ARG_ALIASES[name]?
+        folded = h
+        aliases.each do |alias_name, canonical|
+          next unless h.has_key?(alias_name)
+          folded = folded.dup if folded.same?(h)
+          value = folded.delete(alias_name)
+          # Absent, too, when it names nothing ("", [], {}): a client that fills every property
+          # it was shown sends those beside the spelling it means (see `describes?`).
+          next unless value && describes_value?(value)
+          if present?(folded, canonical)
+            next if folded[canonical] == value
+            return err("'#{alias_name}' is another name for '#{canonical}' and the call gave them different " \
+                       "values (#{value.to_json} vs #{folded[canonical].to_json}) — pass one",
+              "INVALID_ARGUMENT", field: alias_name)
+          end
+          folded[canonical] = value
+        end
+        folded
+      end
+
+      # The refusal for a call that gave an aliased REQUIRED argument under neither name, or nil.
+      # `tool` drops such an argument from the schema's `required` (see `ARG_ALIASES`), so this
+      # is where "required" is still enforced — and it names both spellings.
+      private def missing_aliased(name : String, h : Hash(String, JSON::Any)) : Result?
+        (@aliased_required[name]? || return nil).each do |canonical|
+          next if present?(h, canonical)
+          alts = ARG_ALIASES[name].select { |_, c| c == canonical }.keys
+          return err("missing required '#{canonical}' (or #{alts.map { |a| "'#{a}'" }.join(" / ")})",
+            "INVALID_ARGUMENT", field: canonical)
+        end
+        nil
+      end
+
+      # The call's arguments minus the ones a `--tools` profile serves this tool without
+      # (`ToolFilter::Profile#withheld`), or the refusal for a call that SET one. Ahead of `unknown_args`, which would
+      # otherwise answer "unknown argument 'active'" about an argument the full catalogue has —
+      # the agent needs to hear that the operator narrowed it, and how to lift that. A `false`
+      # or null is let through and dropped: it asks for the mode the profile serves anyway,
+      # and a client that fills every property it once saw should not be refused for it.
+      private def strip_withheld(name : String, h : Hash(String, JSON::Any)) : Hash(String, JSON::Any) | Result
+        return h unless (f = @tool_filter) && (withheld = f.withheld_args(name))
+        return h unless h.keys.any? { |k| withheld.includes?(k) }
+        set = h.keys.find { |k| withheld.includes?(k) && !h[k].raw.nil? && bool_value(h[k]) != false }
+        if set
+          return err("'#{set}' is not served here: this server was started with --tools=#{f.spec.inspect}, " \
+                     "whose profile serves #{name} without #{withheld.to_a.sort.join(", ")}. Restart with " \
+                     "#{name} named in --tools to serve it whole.", "TOOL_DISABLED", field: set)
+        end
+        h.reject { |k, _| withheld.includes?(k) }
+      end
+
       # Argument names a call passed that the tool does not declare.
       #
       # Silently ignoring these was not neutral: a mistyped `verbatm:true` left `verbatim`
@@ -1277,6 +1387,9 @@ module Gori
       end
 
       @declared_args : Hash(String, Set(String))? = nil
+      # tool → the aliased arguments its handler requires, recorded by `tool` as it drops them
+      # from the advertised `required` list (see `ARG_ALIASES`).
+      @aliased_required = {} of String => Array(String)
 
       # Emits the tools/list array. Every schema lives in its own domain file next to the
       # handler it describes (`tools/*.cr`, one `list_*_tools` each) — this method is only
@@ -1395,10 +1508,21 @@ module Gori
         # INTERNAL result rather than crashing the loop.
         refresh_project_env if ENV_REFRESH_TOOLS.includes?(name)
         refresh_global_libraries
+        stripped = strip_withheld(name, h)
+        return stripped if stripped.is_a?(Result)
+        h = stripped
         if (bad = unknown_args(name, h)) && !bad.empty?
           return err("unknown argument#{bad.size > 1 ? "s" : ""} for '#{name}': #{bad.join(", ")}. " \
                      "Accepted: #{declared_args[name].to_a.sort.join(", ")}",
             "INVALID_ARGUMENT", field: bad.first)
+        end
+        # After the unknown-argument check, which is what built `@aliased_required` (it lists
+        # the catalogue once, through `declared_args`).
+        resolved = resolve_aliases(name, h)
+        return resolved if resolved.is_a?(Result)
+        h = resolved
+        if missing = missing_aliased(name, h)
+          return missing
         end
         result = dispatch_tool(name, h) || err("unknown tool: #{name}", "UNKNOWN_TOOL")
         result = classify(result)
@@ -1438,12 +1562,17 @@ module Gori
       end
 
       # Whether this CALL (not just this tool) is an agent action worth recording. Most are a
-      # flat name lookup, but `probe_scan` is a READ tool whose active:true mode SENDS real
-      # requests — the argument, not the name, decides. Logging every passive rescan would
-      # bury the outbound ones it exists to surface.
+      # flat name lookup, but two READ tools have a mode that is not: `probe_scan`'s active:true
+      # SENDS real requests and persist:true WRITES findings, and `export_openapi`'s output_path
+      # writes a file — the arguments, not the name, decide. Logging every report-only call
+      # would bury the ones this exists to surface.
       private def agent_action?(name : String, h) : Bool
         return true if AGENT_ACTION_TOOLS.includes?(name)
-        name == "probe_scan" && bool_arg(h, "active", false)
+        case name
+        when "probe_scan"     then bool_arg(h, "active", false) || bool_arg(h, "persist", false)
+        when "export_openapi" then describes?(h, "output_path")
+        else                       false
+        end
       end
 
       # #124 — record a completed agent mutation/send into the store event feed so the AI's
@@ -1456,8 +1585,9 @@ module Gori
         return unless s = @store
         level = result.is_error ? "warn" : "info"
         outcome = result.is_error ? "failed (#{result.error_code || "error"})" : "ok"
-        s.insert_event("agent", "agent_action", level, "#{name} #{outcome}", payload: name,
-          actor: Gori::FlowSource.surface.try(&.token))
+        message = (note = result.event_note) ? "#{name} #{outcome}: #{note}" : "#{name} #{outcome}"
+        s.insert_event("agent", "agent_action", level, message, payload: name,
+          flow_id: result.event_flow_id, actor: Gori::FlowSource.surface.try(&.token))
       rescue ex
         Log.warn(exception: ex) { "event feed: failed to log agent action #{name}" }
       end
@@ -1479,7 +1609,7 @@ module Gori
       @[Tool("oast_presets", unbound: true)]
       private def oast_presets_tool : Result
         presets = Oast::Presets.all.map { |p| {type: p.kind.label, name: p.name, host: p.host} }
-        Result.new(presets.to_json)
+        items_result(presets.to_json)
       end
 
       # The saved provider `provider_id` names, nil when the caller did not name one, or the
@@ -1695,10 +1825,13 @@ module Gori
       end
 
       # Resolve body_mode (none|preview|full) + max_body_bytes into an inlined-body
-      # {cap_bytes, omit} pair. none → metadata only; preview → small cap; full
-      # (default) → the full MAX_TEXT cap. max_body_bytes tunes the cap (clamped to
-      # MAX_TEXT — larger bodies are paged with get_response_body_chunk).
-      private def body_return_opts(h) : {Int32, Bool} | Result
+      # {cap_bytes, omit} pair. none → metadata only; preview → small cap; full → the full
+      # MAX_TEXT cap. max_body_bytes tunes the cap (clamped to MAX_TEXT — larger bodies are
+      # paged with get_response_body_chunk).
+      #
+      # With NEITHER argument given the default is full, unless `auto` — a caller that has a
+      # chunk source for this body — asks for AUTO_BODY_BYTES instead (`body_auto?`).
+      private def body_return_opts(h, auto : Bool = false) : {Int32, Bool} | Result
         # Only a POSITIVE max_body_bytes overrides the cap; 0/negative falls back to
         # the mode default (Crystal treats 0 as truthy, so `max || default` alone
         # wouldn't). Use body_mode:none for a zero-byte, shape-only body.
@@ -1706,9 +1839,10 @@ module Gori
         max = (raw && raw > 0) ? raw : nil
         mode = str(h, "body_mode").try(&.strip.downcase).presence
         case mode
-        when nil, "full" then {max || Serialize::MAX_TEXT, false}
-        when "none"      then {0, true}
-        when "preview"   then {max || BODY_PREVIEW_BYTES, false}
+        when nil       then {max || (auto ? AUTO_BODY_BYTES : Serialize::MAX_TEXT), false}
+        when "full"    then {max || Serialize::MAX_TEXT, false}
+        when "none"    then {0, true}
+        when "preview" then {max || BODY_PREVIEW_BYTES, false}
         else
           # Refused by name, not defaulted. The `else` used to fold every unrecognised value
           # into `full`, which is the WORST of the three to land on by accident: a caller that
@@ -1941,6 +2075,15 @@ module Gori
                       retryable : Bool = false, details : JSON::Any? = nil) : Result
         Result.new(message, is_error: true, error_code: code, field: field,
           retryable: retryable, details: details)
+      end
+
+      # A listing as `{items: […]}`, for the tools whose natural answer is a bare array. Every
+      # other tool answers an object, and a caller handling results generically should not
+      # have to special-case four of them. Keyed `items` because that is exactly how
+      # `Server#emit_structured` already wrapped their bare array for `structuredContent`, so
+      # a client reading the structured half sees the same object it always did.
+      private def items_result(array_json : String) : Result
+        Result.new(JSON.build { |j| j.object { j.field("items") { j.raw(array_json) } } })
       end
 
       # A resource-not-found error (bad flow/repeater/issue/note/rule/job id).
@@ -2180,6 +2323,10 @@ module Gori
       # `present?` and a builder on `.presence` would disagree about one call.
       private def describes?(h, key : String) : Bool
         return false unless v = h[key]?
+        describes_value?(v)
+      end
+
+      private def describes_value?(v : JSON::Any) : Bool
         case raw = v.raw
         when Nil                 then false
         when String, Array, Hash then !raw.empty?
@@ -2394,6 +2541,15 @@ module Gori
         n.clamp(1_i64, max.to_i64).to_i
       end
 
+      # One tool's `limit`: its default and ceiling, read by BOTH the handler's clamp and the
+      # schema (`limitprop`) so the two cannot drift (#1394). Before, the numbers lived only in
+      # description prose beside a clamp spelling them again, on 23 tools.
+      record PageLimit, default : Int32, max : Int32
+
+      private def clamp(n : Int64?, limit : PageLimit) : Int32
+        clamp(n, limit.default, limit.max)
+      end
+
       private def severity_from(s : String?) : Store::Severity?
         return nil unless s
         Store::Severity.parse?(s.strip)
@@ -2424,6 +2580,30 @@ module Gori
         return if denied_permission(name)
         sb = SchemaBuilder.new
         yield sb
+        if withheld = @tool_filter.try(&.withheld_args(name))
+          # A profile serving this tool in one mode (`ToolFilter::Profile#withheld`). Dropped
+          # from the schema, so `declared_args` — harvested from this output — refuses them too.
+          withheld.each do |arg|
+            raise "internal: #{name}: withheld argument '#{arg}' is not in its schema" unless sb.properties.any? { |(pname, _)| pname == arg }
+          end
+          sb.properties.reject! { |(pname, _)| withheld.includes?(pname) }
+          sb.required.reject! { |r| withheld.includes?(r) }
+        end
+        required = sb.required
+        if aliases = ARG_ALIASES[name]?
+          # Each alias is advertised as its real argument's own schema under a one-line
+          # description, and the real argument stops being `required` (see `ARG_ALIASES`).
+          aliases.each do |alias_name, canonical|
+            schema = sb.properties.find { |(pname, _)| pname == canonical }.try(&.[1])
+            raise "internal: #{name}: alias '#{alias_name}' names no argument '#{canonical}'" unless schema
+            aliased = schema.as_h.dup
+            aliased["description"] = JSON::Any.new("alias of '#{canonical}'")
+            sb.field alias_name, JSON::Any.new(aliased)
+          end
+          targets = aliases.values.to_set
+          @aliased_required[name] = required.select { |r| targets.includes?(r) }
+          required = required.reject { |r| targets.includes?(r) }
+        end
         read_only = READ_ONLY_TOOLS.includes?(name)
         j.object do
           j.field "name", name
@@ -2469,7 +2649,7 @@ module Gori
               # that followed the schema can never be surprised by it.
               j.field "additionalProperties", false
               j.field "required" do
-                j.array { sb.required.each { |r| j.string r } }
+                j.array { required.each { |r| j.string r } }
               end
             end
           end
@@ -2500,6 +2680,16 @@ module Gori
 
       private def intprop(desc : String) : JSON::Any
         prop("integer", desc)
+      end
+
+      # An integer argument whose default and range are machine-readable (`default`, `minimum`,
+      # `maximum`) as well as prose. Every one of these keywords is in the JSON Schema subset
+      # the MCP clients' provider conversions accept (unlike `patternProperties`, see `tool`).
+      # `minimum: 1` is the documentation of what the clamp does to a 0 or a negative — and
+      # the tools that echo a clamped value (`emit_clamp`) still say so per call.
+      private def limitprop(desc : String, limit : PageLimit) : JSON::Any
+        JSON.parse(%({"type":"integer","description":#{desc.to_json},) +
+                   %("default":#{limit.default},"minimum":1,"maximum":#{limit.max}}))
       end
 
       private def boolprop(desc : String) : JSON::Any

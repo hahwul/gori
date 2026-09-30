@@ -67,7 +67,6 @@ private INCIDENTAL = {
   "list_sitemap -> set_sitemap_tag"         => "says where an operator's tag comes from",
   "intercept_list -> intercept_forward"     => "one optional disposition; the queue is still useful to inspect without forwarding",
   "intercept_get -> intercept_forward_edit" => "editing is an optional branch; redacted detail is useful on its own",
-  "probe_issues -> probe_scan"              => "a contrast (\"unlike probe_scan's stateless rescan\")",
   "probe_issues -> probe_delete"            => "the third triage verb, left out of @recon on purpose: it erases the record",
   "list_env -> send_websocket"              => "names where env tokens are substituted",
   "send_request -> send_websocket"          => "only for a WebSocket repeater id; @recon replays HTTP",

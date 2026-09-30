@@ -59,6 +59,7 @@ gori run probe --active --aggressive # wider caps + unsafe methods (authorized t
 gori run probe --severity high       # high and critical (a floor)
 gori run probe --category cors       # a single category
 gori run probe -q 'host:example.com' # filter History with QL (Repeater still scanned)
+gori run probe --persist             # also write the findings into the triage list
 ```
 
 ### Web cache deception

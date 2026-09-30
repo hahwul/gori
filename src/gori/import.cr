@@ -266,14 +266,29 @@ module Gori
     # `surface` is which of gori's three faces asked for this import. Every imported flow is
     # stamped `source: import` and `source_ref: <basename>`, so a History row can say WHICH file
     # it came out of — the provenance question an operator actually asks of an imported row.
+    #
+    # That same stamp is how a RE-import is noticed: nothing deduplicates (see `insert_all`),
+    # so importing one HAR twice doubles its flows, and the result carries a note saying so
+    # (`duplicate_note`). A warning, never a refusal — re-importing on purpose is legitimate.
+    # `ref` overrides the basename for a source with no file name of its own (`import_text`),
+    # and such a source skips the check: every paste would share the one label.
     def self.import_file(store : Store, kind : Symbol, path : String,
                          surface : FlowSource::Surface? = nil, *,
-                         cancelled : (-> Bool)? = nil, progress : (Int32, Int32? ->)? = nil) : Result
+                         cancelled : (-> Bool)? = nil, progress : (Int32, Int32? ->)? = nil,
+                         ref : String? = nil) : Result
       expanded = Path[path].expand(home: true).to_s
       raise Gori::Error.new("file not found: #{expanded}") unless File.exists?(expanded)
       raise Gori::Error.new("not a file: #{expanded}") unless File.file?(expanded)
-      prov = Provenance.new(surface, File.basename(expanded))
+      prov = Provenance.new(surface, ref || File.basename(expanded))
+      dup = ref ? nil : duplicate_note(store, File.basename(expanded))
+      with_note(import_parsed(store, kind, expanded, surface, prov, cancelled, progress), dup)
+    end
 
+    # The body of `import_file` once the source is resolved: stream a HAR, hand curl to the
+    # text path, parse-then-insert everything else.
+    private def self.import_parsed(store : Store, kind : Symbol, expanded : String,
+                                   surface : FlowSource::Surface?, prov : Provenance,
+                                   cancelled : (-> Bool)?, progress : (Int32, Int32? ->)?) : Result
       if kind == :har
         begin
           return import_har_stream(store, expanded, prov, cancelled, progress)
@@ -299,6 +314,59 @@ module Gori
       raise_nothing_landed(expanded, parsed.skipped) if parsed.flows.empty?
       committed, attempted = insert_all(store, parsed.flows, cancelled: cancelled, progress: progress)
       Result.new(committed, parsed.skipped, attempted)
+    end
+
+    # The warning for a file this project already imported under the same name, or nil. Asked
+    # BEFORE the write, so the count is the earlier import's rows and not these. By NAME: the
+    # stamp keeps no content hash, so two different exports that share a basename also trip it
+    # — which is why the sentence says "a file named", and why it only warns.
+    def self.duplicate_note(store : Store, basename : String) : String?
+      earlier = store.import_ref_count(basename)
+      return nil if earlier <= 0
+      "#{earlier} flow#{earlier == 1 ? " is" : "s are"} already in this project from an earlier import of a " \
+      "file named #{basename.inspect} — imports are not deduplicated, so re-importing it adds its flows again"
+    end
+
+    # FIRST, ahead of any parser note: the TUI toast shows one note and counts the rest, and a
+    # curl file's ignored flags must not push the duplicate warning down to "(+1 more)".
+    private def self.with_note(result : Result, note : String?) : Result
+      note ? result.copy_with(notes: [note] + result.notes) : result
+    end
+
+    # A source handed in as TEXT rather than a path — MCP's `import_flows{text}`, where an
+    # agent holds a HAR or a URL list as a string and writing it to a file first only to name
+    # that file would be a detour. curl keeps its own text path (`import_curl_text`); every
+    # other format's parser reads a path, so the text goes to a private temp file named for the
+    # format (the OpenAPI and Insomnia readers pick YAML by extension) and is imported from
+    # there with `ref` standing in for the file name, then removed.
+    def self.import_text(store : Store, kind : Symbol, text : String,
+                         surface : FlowSource::Surface? = nil) : Result
+      return import_curl_text(store, text, surface) if kind == :curl
+      raise Gori::Error.new("unknown import kind: #{kind}") unless LABELS.has_key?(kind)
+      raise Gori::Error.new("the #{label(kind)} text is empty") if text.strip.empty?
+      file = File.tempfile("gori-import", text_suffix(kind, text)) { |f| f.print(text) }
+      begin
+        import_file(store, kind, file.path, surface, ref: "#{kind} text")
+      rescue ex : Gori::Error
+        # The parsers name the file they read, which here is a temp path the caller never saw.
+        raise Gori::Error.new((ex.message || "import failed").gsub(file.path, "the #{label(kind)} text"))
+      ensure
+        file.delete
+      end
+    end
+
+    # The temp file's extension for `import_text`. JSON-or-YAML formats sniff the first byte:
+    # a JSON document starts with `{` or `[`, and anything else is handed to the YAML reader.
+    private def self.text_suffix(kind : Symbol, text : String) : String
+      case kind
+      when :har  then ".har"
+      when :urls then ".txt"
+      when :burp then ".xml"
+      when :wsdl then ".wsdl"
+      when :oas, :insomnia
+        text.lstrip.starts_with?('{') || text.lstrip.starts_with?('[') ? ".json" : ".yaml"
+      else ".json"
+      end
     end
   end
 end

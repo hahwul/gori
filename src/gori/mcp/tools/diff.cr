@@ -13,6 +13,8 @@ module Gori
       # Reads only: two grouped queries and one shared fold tree, no bodies and no
       # network. Confirming that a finding still reproduces takes a request, and that stays
       # a deliberate `send_request` — see `Gori::Diff`, which owns the whole comparison.
+      DIFF_LIMIT = PageLimit.new(20_000, Store::ENDPOINT_OBSERVATION_MAX)
+
       @[Tool("diff_projects", unbound: true)]
       private def diff_projects(h) : Result
         from = str(h, "from").try(&.strip).presence
@@ -75,7 +77,7 @@ module Gori
         verdicts = diff_verdicts(h)
         return verdicts if verdicts.is_a?(Result)
         DiffOptions.new(filter, verdicts,
-          clamp(optional_int_arg(h, "limit"), 20_000, Store::ENDPOINT_OBSERVATION_MAX),
+          clamp(optional_int_arg(h, "limit"), DIFF_LIMIT),
           bool_arg(h, "issues", true), bool_arg(h, "in_scope", false))
       end
 
@@ -194,7 +196,7 @@ module Gori
           s.field "in_scope", boolprop("only hosts inside each project's own scope rules (default false)")
           s.field "verdicts", strarrprop("only return endpoints with these verdicts: added, gone, changed, unchanged, removed (default: all)")
           s.field "issues", boolprop("include the issue retest — which endpoint each of the baseline's open issues sits on, and whether it still answers the same way (default true)")
-          s.field "limit", intprop("max endpoint groups to read per side (default 20000, max #{Store::ENDPOINT_OBSERVATION_MAX})")
+          s.field "limit", limitprop("max endpoint groups to read per side", DIFF_LIMIT)
           s.field "lenient", boolprop("search a `field:` QL does not implement as literal TEXT instead of refusing the query (default false) — a typo free-texts its whole token and matches nothing on both sides")
         end
       end

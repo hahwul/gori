@@ -20,6 +20,8 @@ module Gori
       # of them: it dials a FRESH connection per identity on purpose (`Engine.live`), so a
       # ten-flow selection under three identities is thirty handshakes.
 
+      AUTHORIZE_QUERY_LIMIT = PageLimit.new(Authorize::Plan::DEFAULT_LIMIT, AUTHORIZE_MAX_FLOWS)
+
       @[Tool("authorize_start", gated: true, agent_action: true, env_refresh: true,
         requires: ["authorize_status", "authorize_results", "authorize_stop", "ql_reference"], permission: "send")]
       private def authorize_start(h) : Result
@@ -165,7 +167,7 @@ module Gori
 
       @[Tool("authorize_status", gated: true, read_only: true, permission: "send")]
       private def authorize_status(h) : Result
-        ajob = lookup_authorize_job(h)
+        ajob = lookup_authorize_job(h, "status")
         return ajob if ajob.is_a?(Result)
         Result.new(JSON.build do |j|
           j.object do
@@ -197,17 +199,19 @@ module Gori
         end)
       end
 
+      AUTHORIZE_RESULTS_LIMIT = PageLimit.new(50, 500)
+
       # The verdicts, per replayed request. The headline fields come FIRST and are computed
       # over the whole job, never over the page: a bypass on request 40 must not be invisible
       # to a caller who read page 1 and stopped.
       @[Tool("authorize_results", gated: true, read_only: true, permission: "send")]
       private def authorize_results(h) : Result
-        ajob = lookup_authorize_job(h)
+        ajob = lookup_authorize_job(h, "results")
         return ajob if ajob.is_a?(Result)
         req_off = optional_int_arg(h, "offset")
         req_lim = optional_int_arg(h, "limit")
         offset = clamp_nonneg(req_off)
-        limit = clamp(req_lim, 50, 500)
+        limit = clamp(req_lim, AUTHORIZE_RESULTS_LIMIT)
         page = ajob.results[offset, limit]? || [] of Authorize::Target
         Result.new(JSON.build do |j|
           j.object do
@@ -239,17 +243,16 @@ module Gori
 
       @[Tool("authorize_stop", gated: true, agent_action: true, permission: "send")]
       private def authorize_stop(h) : Result
-        ajob = lookup_authorize_job(h)
+        ajob = lookup_authorize_job(h, "stop")
         return ajob if ajob.is_a?(Result)
-        ajob.stop
         stop_and_report(ajob)
       end
 
-      private def lookup_authorize_job(h) : AuthorizeJob | Result
+      private def lookup_authorize_job(h, verb : String) : AuthorizeJob | Result
         id = str(h, "job_id")
         return err("missing required 'job_id'", "INVALID_ARGUMENT", field: "job_id") if id.nil? || id.empty?
         job = @authorize_jobs[id]?
-        return not_found("no authorize job #{id}") unless job
+        return job_not_found(id, "authorize", verb) unless job
         job_project_mismatch(job) || job
       end
 
@@ -466,8 +469,8 @@ module Gori
         options = Authorize::PlanOptions.new(store,
           flow_ids: authorize_flow_ids(h),
           query: str(h, "query"),
-          limit: bounded_int_arg(h, "limit", Authorize::Plan::DEFAULT_LIMIT.to_i64,
-            min: 1_i64, max: AUTHORIZE_MAX_FLOWS.to_i64).to_i,
+          limit: bounded_int_arg(h, "limit", AUTHORIZE_QUERY_LIMIT.default.to_i64,
+            min: 1_i64, max: AUTHORIZE_QUERY_LIMIT.max.to_i64).to_i,
           identities_json: authorize_identities_json(h),
           unsafe_methods: bool_arg(h, "unsafe_methods", false),
           # Same rule as the sibling sweeps: the tool argument can only make verification
@@ -667,8 +670,7 @@ module Gori
           s.field "query", strprop("QL query over history whose rows are replayed too (same grammar as " \
                                    "list_history — call ql_reference). Appended after flow_ids")
           s.field "lenient", boolprop("search a `field:` QL does not implement as literal TEXT instead of refusing the query (default false) — a typo free-texts its whole token, selects no rows, and reads as \"nothing matched, widen it\"")
-          s.field "limit", intprop("max rows the query may contribute (default #{Authorize::Plan::DEFAULT_LIMIT}, " \
-                                   "max #{AUTHORIZE_MAX_FLOWS}) — every row becomes one request PER identity")
+          s.field "limit", limitprop("max rows the query may contribute — every row becomes one request PER identity", AUTHORIZE_QUERY_LIMIT)
           s.field "identities", authorize_identities_prop
           s.field "unsafe_methods", boolprop("also replay flows whose method is not GET/HEAD/OPTIONS " \
                                              "(default false). A replayed POST/PUT/PATCH/DELETE runs the " \
@@ -708,7 +710,7 @@ module Gori
           "`review` — usually one stale baseline credential, not N quiet endpoints." do |s|
           s.field "job_id", strprop("id from authorize_start"), required: true
           s.field "offset", intprop("start row (default 0)")
-          s.field "limit", intprop("max requests per page (default 50, max 500)")
+          s.field "limit", limitprop("max requests per page", AUTHORIZE_RESULTS_LIMIT)
         end
 
         tool j, "authorize_stop",

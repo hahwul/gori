@@ -13,6 +13,9 @@ private UNSWITCHED_WRITERS = {
   "operator_messages" => "operator channel",
   "reply_to_operator" => "operator channel",
   "ask_operator"      => "operator channel",
+  # A READ tool whose one argument writes a file: `output_path` is refused per call under
+  # `write` (`Tools#call_denied_permission`), and the inline document is never switched off.
+  "export_openapi" => "per-call write (output_path)",
 }
 
 private def denied_tools(store, *keys : String) : Gori::MCP::Tools

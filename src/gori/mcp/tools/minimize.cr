@@ -18,25 +18,12 @@ module Gori
       # ACTIVE: sends many real outbound requests, so it is write-gated AND scope-gated
       # (the Gori::Outbound decision its Fuzz::Sender carries hard-blocks a Sandbox/exclude
       # at the socket seam).
-      # Which spelling of the repeater id this CALL used. `delete_repeater` and
-      # `update_repeater` name the same thing `id`, so an agent generalising from its siblings
-      # reaches for `id` here; both are accepted, and the one the caller actually reached for
-      # is what every message below names.
-      #
-      # When NEITHER is there it answers the schema's REQUIRED name. It used to fall back to
-      # the alias, so a call with no id at all was told "missing required 'id'" for an argument
-      # `tools/list` does not mark required — sending the agent to add a field the schema
-      # never asked for.
-      private def minimize_id_key(h) : String
-        return "id" if present?(h, "id") && !present?(h, "repeater_id")
-        "repeater_id"
-      end
-
       @[Tool("minimize_repeater", gated: true, agent_action: true, env_refresh: true, permission: "send")]
       private def minimize_repeater(h) : Result
-        key = minimize_id_key(h)
-        id = int(h, key)
-        return Result.new(id_error(h, key), is_error: true) unless id
+        # `id` — the spelling `delete_repeater` / `update_repeater` use — arrives here folded
+        # into `repeater_id` by `ARG_ALIASES`.
+        id = int(h, "repeater_id")
+        return Result.new(id_error(h, "repeater_id"), is_error: true) unless id
         rec = store.get_repeater(id)
         return not_found("no repeater with id #{id}") unless rec
 
@@ -257,8 +244,7 @@ module Gori
           "calibrated baseline (Caido-\"squash\"-style). ACTIVE: sends MANY real outbound " \
           "requests (capped at 250) and is scope-gated. Returns the trimmed request plus " \
           "what was removed; pass apply:true to also save it back to the session." do |s|
-          s.field "repeater_id", intprop("repeater database id (`id` is accepted as an alias — the sibling repeater tools spell it that way)"), required: true
-          s.field "id", intprop("alias for repeater_id")
+          s.field "repeater_id", intprop("repeater database id"), required: true
           s.field "apply", boolprop("write the minimized request back into the session (default false)")
           s.field "verbatim", boolprop("search with the stored bytes EXACTLY, as send_request/--verbatim would send them: no token expansion, no bare-LF→CRLF promotion, no Content-Length resync (so body params stop being removal candidates). Use it for a session seeded from a capture, where a stored $filter/$top/$where is evidence rather than a typo — under the legacy bare syntax those ARE references and such a session is otherwise refused by name or minimized against substituted bytes; under the namespaced syntax only $ENV.KEY / $BIND.NAME / $GEN.UUID forms are references, so they never were. Default false")
           s.field "allow_unscoped", boolprop("minimize even when the target host is outside — or without — a configured scope (default false)")

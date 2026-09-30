@@ -304,7 +304,7 @@ module Gori
       # list tools rather than behind the action gate. `create_rule_from_preset` installs one.
       @[Tool("list_rule_presets")]
       private def list_rule_presets : Result
-        Result.new(JSON.build do |j|
+        items_result(JSON.build do |j|
           j.array do
             Gori::RulePresets.all.each do |ps|
               j.object do
@@ -476,6 +476,7 @@ module Gori
         candidate = Store::MatchRule.new(0_i64, true, target, part, pattern, replacement, op, match_kind, "", host)
         # Reuse the engine's preview over a throwaway Rules bound only to the store.
         pv = Gori::Rules.new(store, [] of Store::MatchRule).preview(candidate)
+        part_defaulted = preview_part_defaulted?(h, part, op)
         Result.new(JSON.build do |j|
           j.object do
             j.field "target", target.label
@@ -488,8 +489,22 @@ module Gori
             j.field "total_flows", pv.total
             j.field "scan_capped", pv.total > pv.scanned
             j.field "note", "Replays the rule transform over recent flows (bounded to #{Gori::Rules::RULE_PREVIEW_SCAN}); response bodies are matched as stored wire bytes."
+            if part_defaulted
+              j.field "part_defaulted", true
+              j.field "part_note", "'part' was not given, so it defaulted to head: only the start line and headers " \
+                                   "were matched, never a body. Pass part:\"body\" to preview a body match."
+            end
           end
         end)
+      end
+
+      # The default `part` is `head`, the same default `create_rule` stores — so it stays, or the
+      # preview would describe a different rule than the one it previews. But a caller who left
+      # `part` out and is looking for a BODY string reads `would_match: 0` as "not in the
+      # traffic" when the body was never scanned; `preview_rule` says so, only when it was the
+      # default. Header ops and short_circuit are head-only whatever `part` says: no note.
+      private def preview_part_defaulted?(h, part : Store::RulePart, op : Store::RuleOp) : Bool
+        str(h, "part").try(&.strip).presence.nil? && part.head? && (op.replace? || op.pipe?)
       end
 
       # Parse target/part from args, defaulting to the given fallbacks. Returns the
