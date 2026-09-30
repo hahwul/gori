@@ -119,6 +119,46 @@ describe "MCP export_openapi output_path" do
     end
   end
 
+  it "reads a blank output_path as absent, the way a property-filling client means it" do
+    with_store do |store|
+      eo_flow(store, "/users/1")
+      denied = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false,
+        denied_permissions: Set{"write"})
+      out = mcp_ok_json(denied, "export_openapi", %({"output_path":""}))
+      out["document"]["openapi"].as_s.should eq("3.0.3")
+      store.events_after(0_i64, 50).none? { |e| e.kind == "agent_action" }.should be_true
+    end
+  end
+
+  it "refuses a dangling symlink and a database a gori has open" do
+    with_store do |store|
+      eo_flow(store, "/users/1")
+      tools = tools_for(store)
+      dir = File.tempname("gori-oas")
+      Dir.mkdir(dir)
+      begin
+        link = File.join(dir, "out.json")
+        File.symlink(File.join(Gori::Paths.home_dir, "nowhere.json"), link)
+        r = tools.call("export_openapi", JSON.parse({output_path: link, overwrite: true}.to_json))
+        r.is_error.should be_true
+        r.text.should contain("symlink to nothing")
+
+        db = File.join(dir, "loose.db")
+        other = Gori::Store.open(db)
+        begin
+          r = tools.call("export_openapi", JSON.parse({output_path: db, overwrite: true}.to_json))
+          r.is_error.should be_true
+          r.text.should contain("open in a running gori")
+          File.exists?(db).should be_true
+        ensure
+          other.close
+        end
+      ensure
+        FileUtils.rm_rf(dir)
+      end
+    end
+  end
+
   it "refuses a path inside gori's home, and any output_path under --read-only" do
     with_store do |store|
       eo_flow(store, "/users/1")

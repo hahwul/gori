@@ -141,7 +141,10 @@ describe Gori::MCP::Server do
     # and rebuilt. These pin the two things the copy has to keep doing: the MCP object shape
     # (an array payload is wrapped under `items`), and the refusal to emit anything that is
     # not exactly one JSON document — a raw copy of a half-JSON text would break the frame.
-    it "wraps an array tool payload under items in structuredContent" do
+    # oast_presets answered a bare array until #1395; it now answers `{items}` itself, which is
+    # the shape the wrapper gave it, so its structuredContent is unchanged. The wrapper itself is
+    # pinned on `spec_structured` in the next example.
+    it "keeps an {items} tool payload's structuredContent the shape the array wrapper gave it" do
       with_store do |store|
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"oast_presets","arguments":{}}})
         sc = mcp_drive(store, call)[0]["result"]["structuredContent"]

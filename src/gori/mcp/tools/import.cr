@@ -70,7 +70,8 @@ module Gori
       # back as the error `Result`.
       private def import_source(h, kind : Symbol, kind_s : String) : Import::Result | Result
         path = str(h, "path").try(&.strip).presence
-        text = str(h, "text")
+        # Blank is absent, as `path` above: a client filling every property sends `text: ""`.
+        text = str(h, "text").presence
         return err("pass 'path' or 'text', not both", "INVALID_ARGUMENT", field: "text") if text && path
         return Import.import_text(store, kind, text, Gori::FlowSource::Surface::Mcp) if text
         return Import.import_file(store, kind, path, Gori::FlowSource::Surface::Mcp) if path

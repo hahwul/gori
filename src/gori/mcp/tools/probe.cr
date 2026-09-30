@@ -564,6 +564,11 @@ module Gori
       # shape what this call shows, and triage is a separate read (`probe_issues`).
       private def emit_probe_persisted(j : JSON::Builder, persist : Probe::Scan::Persist) : Nil
         j.field "persisted", persist.committed?
+        unless persist.attempted?
+          # The scan was stopped before its findings would have been written — not a busy store.
+          j.field "persist_skipped", "the scan was stopped before its findings were written"
+          return
+        end
         j.field "persisted_detections", persist.detections if persist.committed?
         unless persist.committed?
           j.field "persist_error", "the findings were NOT written (store busy or unwritable); the report " \

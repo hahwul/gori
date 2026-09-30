@@ -338,9 +338,9 @@ module Gori
       AUTO_BODY_BYTES = 8 * 1024
 
       # The `more` pointer on a body the default cap cut, naming where the rest is.
-      private def body_more_hint(source : String) : String
+      private def body_more_hint(source : String, what : String = "body") : String
         "cut at #{AUTO_BODY_BYTES} bytes by the default body_mode — get_response_body_chunk{#{source}} " \
-        "pages the whole body; body_mode:\"full\" inlines up to #{Serialize::MAX_TEXT} bytes"
+        "pages the whole #{what}; body_mode:\"full\" inlines up to #{Serialize::MAX_TEXT} bytes"
       end
 
       # Whether this call left the body size to the default — neither argument given.
@@ -486,7 +486,7 @@ module Gori
           return key
         end
         # A read tool whose one argument WRITES a file sits behind `write` for that call.
-        if name == "export_openapi" && @denied_permissions.includes?("write") && present?(h, "output_path")
+        if name == "export_openapi" && @denied_permissions.includes?("write") && describes?(h, "output_path")
           return "write"
         end
         return nil unless @denied_permissions.includes?("send")
@@ -1297,7 +1297,9 @@ module Gori
           next unless h.has_key?(alias_name)
           folded = folded.dup if folded.same?(h)
           value = folded.delete(alias_name)
-          next unless value && !value.raw.nil?
+          # Absent, too, when it names nothing ("", [], {}): a client that fills every property
+          # it was shown sends those beside the spelling it means (see `describes?`).
+          next unless value && describes_value?(value)
           if present?(folded, canonical)
             next if folded[canonical] == value
             return err("'#{alias_name}' is another name for '#{canonical}' and the call gave them different " \
@@ -1568,7 +1570,7 @@ module Gori
         return true if AGENT_ACTION_TOOLS.includes?(name)
         case name
         when "probe_scan"     then bool_arg(h, "active", false) || bool_arg(h, "persist", false)
-        when "export_openapi" then present?(h, "output_path")
+        when "export_openapi" then describes?(h, "output_path")
         else                       false
         end
       end
@@ -1607,7 +1609,7 @@ module Gori
       @[Tool("oast_presets", unbound: true)]
       private def oast_presets_tool : Result
         presets = Oast::Presets.all.map { |p| {type: p.kind.label, name: p.name, host: p.host} }
-        Result.new(presets.to_json)
+        items_result(presets.to_json)
       end
 
       # The saved provider `provider_id` names, nil when the caller did not name one, or the
@@ -2321,6 +2323,10 @@ module Gori
       # `present?` and a builder on `.presence` would disagree about one call.
       private def describes?(h, key : String) : Bool
         return false unless v = h[key]?
+        describes_value?(v)
+      end
+
+      private def describes_value?(v : JSON::Any) : Bool
         case raw = v.raw
         when Nil                 then false
         when String, Array, Hash then !raw.empty?

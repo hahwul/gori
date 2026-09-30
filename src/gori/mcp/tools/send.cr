@@ -129,6 +129,10 @@ module Gori
           issue_id, recorded_flow_id, plan.h2_fields,
           sni: plan.sni, auto_cl: send_persist_auto_cl(h), tls_preset: plan.tls_preset)
 
+        # Chosen before the send, confirmed after it: when neither the History record nor the
+        # saved repeater landed there is nowhere to page a cut body from, so it goes out whole.
+        body_more = body_auto ? send_body_more(recorded_flow_id, repeater_id) : nil
+        body_cap = Serialize::MAX_TEXT if body_auto && body_more.nil?
         Result.new(send_result_json(result, recorded_flow_id, repeater_id,
           include_sensitive_headers, sc, built, wire, http2, body_cap, body_omit, applied_rules, plan.h2_fields,
           request_line_rewritten, plan.websocket?, unbound_overlay,
@@ -143,7 +147,7 @@ module Gori
           # https only: a plaintext leg sends no ClientHello, so naming a preset there would
           # report a handshake that did not happen.
           tls_preset: plan.scheme == "https" ? plan.tls_preset : nil,
-          body_more: body_auto ? send_body_more(recorded_flow_id, repeater_id) : nil),
+          body_more: body_more),
           is_error: !result.ok?, event_flow_id: recorded_flow_id, event_note: send_event_note(built, result))
       rescue ex : Gori::Error
         # Bad input (missing/invalid url, illegal header, …) — return a clean
@@ -1089,8 +1093,7 @@ module Gori
       # carry anything (a query-string token, a crafted method), and the recorded flow the
       # event links to already holds them verbatim.
       private def send_event_note(built : RequestBuilder::Built, result : Repeater::Result) : String
-        default_port = built.scheme == "https" ? 443 : 80
-        origin = "#{built.scheme}://#{built.host}#{built.port == default_port ? "" : ":#{built.port}"}"
+        origin = "#{built.scheme}://#{Gori::Url.authority(built.scheme, built.host, built.port)}"
         outcome = result.response.try(&.status.to_s) || (result.error ? "error" : "no response")
         "#{origin} → #{outcome}"
       end

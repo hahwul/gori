@@ -37,7 +37,7 @@ describe "MCP result polish (#1395)" do
   it "answers the formerly bare-array tools as {items}" do
     with_store do |store|
       tools = tools_for(store)
-      %w[list_host_overrides list_rule_presets list_sitemap_tags].each do |name|
+      %w[list_host_overrides list_rule_presets list_sitemap_tags oast_presets].each do |name|
         mcp_ok_json(tools, name, "{}")["items"].as_a
       end
       jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJlc2lnbmF0dXJlc2lnbmF0dXJl"

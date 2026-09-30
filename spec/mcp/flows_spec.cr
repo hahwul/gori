@@ -928,6 +928,9 @@ describe Gori::MCP::Server do
         r = tools.call("import_flows", JSON.parse({kind: "curl", text: "curl https://a.test/", path: "/tmp/x"}.to_json))
         r.is_error.should be_true
         r.text.should contain("not both")
+        # A blank `text` beside a path is absent, not a second source.
+        blank = tools.call("import_flows", JSON.parse({kind: "urls", path: "/nonexistent/x.txt", text: ""}.to_json))
+        blank.text.should_not contain("not both")
         r = tools.call("import_flows", JSON.parse({kind: "curl"}.to_json))
         r.is_error.should be_true
         r.text.should contain("'path' or 'text'")

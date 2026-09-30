@@ -481,7 +481,9 @@ module Gori
       # written THROUGH (`DurableFile`), and gori's home — every project's database and the
       # settings — is off limits.
       private def openapi_destination(h) : (String | Result)?
-        return nil unless present?(h, "output_path")
+        # Blank is absent: a client that fills every property sends `output_path: ""` with the
+        # inline document in mind (`describes?`).
+        return nil unless describes?(h, "output_path")
         raw = str(h, "output_path").try(&.strip).presence
         return err("'output_path' is blank", "INVALID_ARGUMENT", field: "output_path") unless raw
         unless @allow_actions
@@ -490,6 +492,12 @@ module Gori
         end
         overwrite = bool_arg(h, "overwrite", false)
         target = Path[raw].expand(home: true).to_s
+        # A symlink is judged — and written — at what it points to (`DurableFile` writes
+        # through it), so resolve it first; one that points nowhere cannot be judged at all.
+        if File.symlink?(target)
+          return err("output_path is a symlink to nothing: #{target}", "INVALID_ARGUMENT", field: "output_path") unless File.exists?(target)
+          target = File.realpath(target)
+        end
         return err("output_path is a directory: #{target}", "INVALID_ARGUMENT", field: "output_path") if File.directory?(target)
         parent = File.dirname(target)
         return err("no such directory: #{parent}", "INVALID_ARGUMENT", field: "output_path") unless Dir.exists?(parent)
@@ -497,9 +505,17 @@ module Gori
           return err("refusing to write inside gori's home (#{Paths.home_dir}): it holds every project's database " \
                      "and gori's settings — choose an output_path outside it", "INVALID_ARGUMENT", field: "output_path")
         end
-        if !overwrite && (File.exists?(target) || File.symlink?(target))
-          return err("output_path already exists: #{target} — pass overwrite:true to replace it, or choose another path",
-            "INVALID_ARGUMENT", field: "output_path")
+        if File.exists?(target)
+          unless overwrite
+            return err("output_path already exists: #{target} — pass overwrite:true to replace it, or choose another path",
+              "INVALID_ARGUMENT", field: "output_path")
+          end
+          # A loose `--db` project lives anywhere; replacing one a gori has open would unlink a
+          # live database. `export_project` refuses the same target.
+          if OpenLock.in_use?(target)
+            return err("output_path is a database open in a running gori instance: #{target}",
+              "INVALID_ARGUMENT", field: "output_path")
+          end
         end
         target
       end

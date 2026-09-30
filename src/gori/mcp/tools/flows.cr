@@ -337,12 +337,15 @@ module Gori
         # feature on h2 ones.
         ws_msgs = store.ws_messages(id)
         include_sensitive = bool_arg(h, "include_sensitive", false)
-        auto = body_auto?(h)
+        detail, ws_msgs, redaction = redact_flow(detail, ws_msgs, include_sensitive)
+        # Not under a redaction profile: the chunk tool pages the EXACT stored bytes, which it
+        # cannot redact, so pointing past a sanitized 8 KB would hand over what get_flow
+        # withheld. Those flows keep the full default, as before the smaller one existed.
+        auto = body_auto?(h) && redaction.nil?
         opts = body_return_opts(h, auto: auto)
         return opts if opts.is_a?(Result)
         cap, omit = opts
-        detail, ws_msgs, redaction = redact_flow(detail, ws_msgs, include_sensitive)
-        more = auto ? {body_more_hint("flow_id: #{id}, part: \"request\""), body_more_hint("flow_id: #{id}")} : nil
+        more = auto ? {body_more_hint("flow_id: #{id}, part: \"request\"", "request, head included"), body_more_hint("flow_id: #{id}")} : nil
         Result.new(Serialize.flow_detail_json(detail, ws_msgs, include_sensitive, cap, omit, redaction, more))
       end
 

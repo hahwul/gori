@@ -82,8 +82,13 @@ describe "MCP probe_scan persist" do
   it "writes nothing from a scan the caller cancelled" do
     with_store do |store|
       seed_findings(store)
-      tools_for(store).call("probe_scan", JSON.parse(%({"persist":true})), cancelled: -> { true })
+      r = tools_for(store).call("probe_scan", JSON.parse(%({"persist":true})), cancelled: -> { true })
       store.count_probe_issues.should eq(0)
+      # Said as a skip, not as a busy store an agent would retry against.
+      res = JSON.parse(r.text)
+      res["persisted"].as_bool.should be_false
+      res["persist_skipped"].as_s.should contain("stopped")
+      res.as_h.has_key?("persist_error").should be_false
     end
   end
 
