@@ -111,54 +111,6 @@ module Gori
     module Engine
       MAX_INTERIM = 64 # cap a run of interim 1xx responses (hostile-origin guard)
 
-      # Run a one-shot exchange while watching an optional cooperative stop predicate. The
-      # watcher owns no Store state and only closes the socket this exchange owns; joining it
-      # before returning keeps cancellation from leaving a fiber behind. The bounded poll is
-      # needed because the MCP reader sets its predicate on a different fiber and Crystal does
-      # not interrupt a blocked socket read by itself.
-      class CancelWatch
-        def initialize(@io : IO, @cancel : Proc(Bool))
-          @stop = Channel(Nil).new(1)
-          @joined = Channel(Nil).new(1)
-          spawn do
-            loop do
-              if @cancel.call
-                @io.close rescue nil
-                break
-              end
-              select
-              when @stop.receive
-                break
-              when timeout(10.milliseconds)
-              end
-            end
-          rescue
-            # A broken predicate cannot safely leave an outbound operation running.
-            @io.close rescue nil
-          ensure
-            @joined.send(nil)
-          end
-        end
-
-        def stop : Nil
-          @stop.send(nil)
-          @joined.receive
-        end
-      end
-
-      def self.watch_cancel(io : IO, cancel : Proc(Bool)?) : CancelWatch?
-        cancel.try { |predicate| CancelWatch.new(io, predicate) }
-      end
-
-      def self.with_cancel(io : IO, cancel : Proc(Bool)?, & : -> T) : T forall T
-        watcher = watch_cancel(io, cancel)
-        begin
-          yield
-        ensure
-          watcher.try(&.stop)
-        end
-      end
-
       def self.send(request : Bytes, *, scheme : String, host : String, port : Int32,
                     verify_upstream : Bool, sni : String? = nil,
                     timeout : Time::Span? = nil,
@@ -169,11 +121,12 @@ module Gori
         # `timeout` is a PER-OPERATION bound (connect, and idle between reads/writes),
         # not a total request deadline — same model as the proxy's IO_TIMEOUT. A true
         # whole-request deadline would need a timer fiber racing a socket close.
-        upstream, dial_error = dial_result(scheme, host, port, verify_upstream, sni, timeout, overrides, tls_preset)
+        upstream, dial_error = dial_result(scheme, host, port, verify_upstream, sni, timeout,
+          overrides, tls_preset, cancel)
         return error(connect_error(scheme, host, port, verify_upstream, dial_error), started) unless upstream
 
         begin
-          with_cancel(upstream, cancel) do
+          Proxy::Upstream.with_cancel(upstream, cancel) do
             exchange(upstream, request, host, port, started, origin_scheme: scheme)
           end
         ensure
@@ -205,12 +158,14 @@ module Gori
       def self.dial_result(scheme : String, host : String, port : Int32, verify_upstream : Bool,
                            sni : String?, timeout : Time::Span?,
                            overrides : Gori::HostOverrides?,
-                           tls_preset : String? = nil) : {IO?, Proxy::Upstream::DialError?}
+                           tls_preset : String? = nil,
+                           cancel : Proc(Bool)? = nil) : {IO?, Proxy::Upstream::DialError?}
         ct = timeout || Settings.connect_timeout
         it = timeout || Settings.io_timeout
         if scheme == "https"
           Proxy::Upstream.dial_tls_result(host, port, verify: verify_upstream, sni: sni,
-            connect_timeout: ct, io_timeout: it, overrides: overrides, tls_preset: tls_preset)
+            connect_timeout: ct, io_timeout: it, overrides: overrides, tls_preset: tls_preset,
+            cancel: cancel)
         else
           Proxy::Upstream.dial_result(host, port, connect_timeout: ct, io_timeout: it, overrides: overrides)
         end

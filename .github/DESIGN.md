@@ -4618,8 +4618,12 @@ one-shot work. That left a silent origin holding the only MCP worker until its t
 every later tool call even though the reader had already handled the cancellation. The request's
 own cancellation remains cooperative: while an HTTP or WebSocket engine owns its one-shot socket,
 a bounded watcher polls the same non-consuming predicate and closes that socket when the client
-cancels. The watcher is joined before the engine returns, so cancellation releases both the
-connection and its fiber; no default timeout changes. The server still emits no response for a
+cancels. HTTPS has two ownership phases: the shared dial watches the underlying transport socket
+while OpenSSL performs the TLS handshake, then the sender watches the completed SSL socket during
+the exchange. TCP connect itself keeps its existing timeout. The watcher is joined before the
+engine returns, so cancellation releases both the connection and its fiber; no default timeout
+changes. Loopback TLS specs cover a silent post-handshake read and an origin that stalls after
+ClientHello, including the SSL close-from-watcher path. The server still emits no response for a
 cancelled JSON-RPC id, as required by MCP.
 
 **The worker stays serial.** `Store` reads have a WAL pool and writes still funnel through its

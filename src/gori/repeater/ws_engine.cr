@@ -232,13 +232,15 @@ module Gori
         # "connect failed: host:port" for an untrusted certificate, a plaintext port and an
         # origin that accepts the connection and then goes silent.
         upstream, dial_error = if tls
-                                 Proxy::Upstream.dial_tls_result(host, port, verify: verify_upstream, sni: sni, io_timeout: ht, overrides: overrides, tls_preset: tls_preset)
+                                 Proxy::Upstream.dial_tls_result(host, port, verify: verify_upstream,
+                                   sni: sni, io_timeout: ht, overrides: overrides,
+                                   tls_preset: tls_preset, cancel: cancel)
                                else
                                  Proxy::Upstream.dial_result(host, port, io_timeout: ht, overrides: overrides)
                                end
         return err(Engine.connect_error(scheme, host, port, verify_upstream, dial_error), started) unless upstream
 
-        watcher = Engine.watch_cancel(upstream, cancel)
+        watcher = Proxy::Upstream.watch_cancel(upstream, cancel)
         begin
           handshake, keys = build_handshake(upgrade_request, keep_key)
           upstream.write(handshake)
@@ -386,9 +388,9 @@ module Gori
         # for http — so an origin that has no h2, an untrusted certificate and a plaintext port
         # addressed as https all report in the words every other h2 send reports them in.
         conn, dial_error = H2Engine.dial(dial_scheme, host, port, verify_upstream, sni,
-          HANDSHAKE_TIMEOUT, overrides, tls_preset)
+          HANDSHAKE_TIMEOUT, overrides, tls_preset, cancel)
         return err(dial_error || "h2 connect failed", started) unless conn
-        watcher = Engine.watch_cancel(conn.io, cancel)
+        watcher = Proxy::Upstream.watch_cancel(conn.io, cancel)
         begin
           opened = H2WsStream.open(conn, request, scheme: dial_scheme, host: host, port: port,
             stall: idle)
