@@ -9,6 +9,7 @@ require "../../repeater/flow_request"
 require "../../repeater/plan"
 require "../../repeater/send_error"
 require "../../repeater/request_rules"
+require "../../repeater/send_persistence"
 require "../../repeater/timing"
 require "../../repeater/ws_engine"
 require "../../repeater/draft_markers"
@@ -568,8 +569,9 @@ module Gori
       # The FAITHFUL field list a field-native send put on the wire, in order, pseudo-headers
       # and duplicates included — the report `H2Engine.field_dump` used to carry by being the
       # stored head. It moved here because History and the Repeater have to hold a REPLAYABLE
-      # projection (see `replayable_field_head`), and that projection cannot show a duplicate
-      # `:method` or a `:scheme` disagreeing with the connection. `history_head_projected`
+      # projection (see `Repeater::SendPersistence.replayable_request`), and that projection
+      # cannot show a duplicate `:method` or a `:scheme` disagreeing with the connection.
+      # `history_head_projected`
       # says so out loud, so an agent reading the recorded flow back never mistakes the
       # projection for the wire.
       private def emit_sent_h2_fields(j : JSON::Builder, h2_fields : Array({String, String})?) : Nil
@@ -756,77 +758,22 @@ module Gori
                                         *, sni : String? = nil, auto_cl : Bool = false,
                                         tls_preset : String? = nil) : {Int64?, Bool}
         return {nil, false} unless save
-        port_suffix = ((built.scheme == "https" && built.port == 443) ||
-                       (built.scheme == "http" && built.port == 80)) ? "" : ":#{built.port}"
-        target_url = "#{built.scheme}://#{built.host}#{port_suffix}"
         # Preserve the original source flow for a flow repeater; otherwise link
         # the Repeater tab to the newly recorded History evidence.
         flow_id = int(h, "flow_id") || recorded_flow_id
-        # Masked for the PROBE SCAN only, exactly like `masked_req` below — never for the row.
-        # `target` is a WIRE field: it is the dial tuple, and it supplies the TLS ClientHello
-        # ServerName whenever `sni` is absent. See `stored_request` for the seam; the two extra
-        # facts that make masking
-        # it destructive rather than merely cosmetic:
-        #
-        #   * The two ends do not share a vocabulary. `mask_secrets` resolves against
-        #     `Env.masking_vars` — env vars PLUS every session-binding value currently held —
-        #     while the send path resolves with `Env.effective_vars` (env vars only) and
-        #     `Repeater::Plan` additionally runs `refuse_unresolved(Env.unresolved(s,
-        #     deferred: nil))`, which refuses a DECLARED binding name outright. So a binding
-        #     value masked in here mints a `$NAME` that can never resolve on any send path,
-        #     from any surface.
-        #   * The author's string is then unrecoverable. An author who sent
-        #     `http://prod-edge-07.internal.example.com:19752/vhost` while an extract rule had
-        #     bound `$edge` to `prod-edge-07` got `http://$edge.internal.example.com:19752` in
-        #     the row, every re-send refused with "unresolved env $edge", and a prescription
-        #     ("set the env var") that would put a GUESSED hostname in the ClientHello of a
-        #     vhost test. A one-way door, and this projection existed for the store alone —
-        #     the reply below never carried a target field at all.
-        #
-        # `name` keeps its mask (further down): a session name is a TUI tab caption and never
-        # becomes bytes an origin sees. The rule is "does this field reach the wire", not "did
-        # the operator type it". Same resolution as the sibling seam in `Tools#create_repeater`.
-        masked_target = Env.mask_secrets(target_url)
-        # Same reason as `record_outbound_request`: a saved session is a REPLAY source before
-        # it is a display, and no surface can send `H2Engine.field_dump` back. Saving the dump
-        # produced a session (`#5 [H2] fieldnative`) that could never be sent again from any
-        # surface — the CLI refused it with the pseudo-header message and MCP read its method
-        # back as `":method:"`. See `replayable_field_head`.
-        saved_bytes = replayable_field_head(h2_fields, built, built.bytes)
-        # Masked for the PROBE scan and the reply, NOT for the row. The saved session is a
-        # REPLAY SOURCE (the sentence just above), and storing the masked projection made it
-        # a replay of different bytes: `flow_id` is set here, the TUI reads that as evidence,
-        # and `RepeaterView#evidence?` sends `$NAME` literally — so this row went out one way
-        # from the TUI and another from MCP. Same seam as `Tools#stored_request`.
-        masked_req = Env.mask_secrets(String.new(saved_bytes))
-        # Prefer the Plan's expanded SNI (what the send actually used); fall back through
-        # send_sni so an explicit arg still wins. Bare `send_sni(h)` dropped the stored SNI
-        # because it passed no `stored` argument.
-        effective_sni = sni.presence || send_sni(h)
-        repeater_id = store.insert_repeater(
-          target: target_url,
-          request: saved_bytes,
-          http2: http2,
-          auto_cl: auto_cl,
-          flow_id: flow_id,
-          position: store.next_repeater_position,
-          # The SNI the send actually used, so re-sending the saved row reproduces the same
-          # ClientHello. Through the effective value above, not a hard-coded nil / arg-only
-          # read that silently dropped the source's SNI.
-          sni: effective_sni,
-          # Same rule for the fingerprint (#844), and the same reason: a tab saved from a send
-          # that presented Chrome's shape has to present it again when it is replayed, or the
-          # saved row is a different request from the one that produced the response beside it.
-          #
-          # UNGUARDED by scheme, deliberately, where the reply below is guarded. The two answer
-          # different questions: the reply says what THIS SEND did (and a plaintext send made no
-          # ClientHello, so naming one would be a lie), while the row says what this TAB is set
-          # to — which the operator chose, survives a retarget to https://, and is exactly what
-          # the TUI's muted `␣Pt:` chip reports as "set, and currently doing nothing" (P4).
-          tls_preset: tls_preset
-        )
-        return {nil, false} unless repeater_id > 0
+        # These projections are shared with the CLI save path so both create a replayable row
+        # and keep the original dial target and request bytes intact.
+        # Prefer the Plan's expanded SNI (what this send actually used); the fallback retains
+        # an explicit argument. Calling bare `send_sni(h)` as the only source dropped a
+        # stored SNI because it passed no stored value.
+        persisted = Repeater::SendPersistence.persist(store, built.scheme, built.host, built.port,
+          built.bytes, http2, auto_cl, flow_id, result, h2_fields,
+          sni: sni.presence || send_sni(h), tls_preset: tls_preset)
+        repeater_id = persisted.id
+        return {nil, false} unless repeater_id
 
+        # Issue links come from MCP-only arguments, so keep that relation in this adapter;
+        # the shared seam persists the Repeater row and its response evidence.
         store.add_link(Store::LinkOwnerKind::Issue, issue_id,
           Store::LinkRefKind::Repeater, repeater_id) if issue_id
         if (name = str(h, "name")) && !name.empty?
@@ -837,53 +784,11 @@ module Gori
           store.set_repeater_name(repeater_id, Env.mask_secrets(name))
         end
 
-        # Persist whatever was received even when framing failed after the
-        # response head. This keeps partial evidence and enables paged reads.
-        # `saved_bytes` IS this row's request — the insert above wrote exactly them a few
-        # lines ago and nothing has edited them since — so the digest (Schema V28) records a
-        # pair that genuinely happened. A later `update_repeater` from any surface then reads
-        # as the drift it is.
-        # Its commit answer rides back beside the id: a saved row whose response did not land is
-        # still the saved session, but it is no place to page this response's body from.
-        response_saved = store.update_repeater_response(repeater_id, result.head, result.body,
-          result.error, result.duration_us,
-          request_sha256: Evidence.request_digest(saved_bytes))
         if result.response
-          probe_scan_saved_repeater(repeater_id, masked_target, masked_req, http2, flow_id,
+          probe_scan_saved_repeater(repeater_id, persisted.masked_target, persisted.masked_request, http2, flow_id,
             result.head, result.body, result.duration_us)
         end
-        {repeater_id, response_saved}
-      end
-
-      # The bytes to PERSIST for a field-native h2 send: `HeadCodec.synth_request`'s h1
-      # projection plus the body, not `H2Engine.field_dump`.
-      #
-      # The dump is the faithful REPORT of the fields and it stays that, in `sent_h2_fields`
-      # on this call's own result. It must not be the stored head, because History and the
-      # Repeater are not only a display — they are a REPLAY SOURCE, and the dump's first line
-      # is `:method: POST`, not a request line. Replaying such a row over h2 was refused with
-      # gori blaming the operator for bytes gori itself wrote; over `--http1` it put a request
-      # with NO REQUEST LINE on the wire (every header shifted by one) and reported `200`; and
-      # MCP's own echo read the row back as `method: ":method:", target: "POST"`.
-      #
-      # The projection is lossy — a duplicate pseudo and `:scheme` do not survive it, which is
-      # exactly what `field_dump` exists to show — but it is lossy in the one direction that
-      # keeps the evidence usable, and it is the same projection the h2 CAPTURE path stores
-      # for every intercepted h2 request. Evidence gori writes must be replayable by gori.
-      # Nil `fields` means this was never a field-native send, so the bytes are already the
-      # operator's own text and pass through — that way no caller needs a branch of its own.
-      private def replayable_field_head(fields : Array({String, String})?,
-                                        built : RequestBuilder::Built, wire : Bytes) : Bytes
-        return wire unless fields
-        authority = Proxy::H2::HeadCodec.pseudo(fields, ":authority") ||
-                    "#{built.host}:#{built.port}"
-        head = Proxy::H2::HeadCodec.synth_request(fields, authority)
-        _, body = split_wire_request(wire)
-        return head if body.nil? || body.empty?
-        joined = Bytes.new(head.size + body.size)
-        head.copy_to(joined)
-        body.copy_to(joined + head.size)
-        joined
+        {repeater_id, persisted.response_saved?}
       end
 
       # `wire` — not `built.bytes` — is the evidence: History is what `run show --format raw`
@@ -903,10 +808,12 @@ module Gori
       private def record_outbound_request(built : RequestBuilder::Built, wire : Bytes, http2 : Bool,
                                           h2_fields : Array({String, String})? = nil,
                                           source_ref : String? = nil) : Int64
-        head, body = split_wire_request(replayable_field_head(h2_fields, built, wire))
+        head, body = split_wire_request(Repeater::SendPersistence.replayable_request(
+          h2_fields, built.host, built.port, wire))
         # Field-native: `head` is the h1 PROJECTION, not the pseudo-explicit dump, so the
         # method/target COLUMNS (list_history / QL / sitemap read them) come off the FIELDS a
-        # receiver routes on and agree with the head text. See `replayable_field_head`.
+        # receiver routes on and agree with the head text. See
+        # `Repeater::SendPersistence.replayable_request`.
         if fields = h2_fields
           method = Repeater::H2Engine.pseudo_field(fields, ":method") || ""
           target = Repeater::H2Engine.pseudo_field(fields, ":path") || "/"

@@ -395,6 +395,7 @@ gori run repeater <flow-id> --target https://staging.example.com --http2 --diff
 | `-b`, `--cookie=NAME=VALUE` | curl의 `-b`처럼 캡처된 `Cookie` 헤더를 교체. 반복하면 하나로 합칩니다. `=`가 없는 값(curl에서는 쿠키 jar 파일)은 거부되며, `-H 'Cookie: …'`와 함께 쓴 `-b`도 거부됩니다 |
 | `--verbatim` | 오버라이드를 정확히 그대로 전송: `-H`/`-d`/`-b`/`--path`/`-X`에서 토큰을 확장하지 않고, HTTP/2에서 필드 이름을 소문자화하지 않습니다. 캡처된 바이트는 어느 쪽이든 확장되지 않습니다 |
 | `--record-history` | 재전송을 History에 새 플로우로도 기록하고 그 id를 출력 |
+| `--save-as-repeater` | 요청과 응답을 새 Repeater 세션으로 저장하고 id를 출력 (`--format json`에서는 `saved_repeater_id`) |
 | `--apply-rules` | 라이브 프록시처럼 프로젝트의 활성 Match & Replace 규칙(요청 쪽)을 먼저 요청에 적용. 기본값은 꺼짐: 직접 전송은 바이트 그대로입니다 |
 | `--keep-request-line` | 저장된 요청 라인을 그대로 전송. 절대 형식(`GET http://h/p`)을 origin 형식으로 고치지 않습니다 |
 | `--diff` | 원본 응답과 비교 |
@@ -531,7 +532,7 @@ gori run repeater h2 --target https://api.example.com --fields fields.json
 
 ### run send {#run-send}
 
-Repeater 세션을 만들지 않고 요청 하나를 보내고 응답을 출력합니다. 같은 코드로 만들어진 MCP `send_request{url}`의 헤드리스 형태입니다. 다른 모든 gori 전송과 마찬가지로 프로젝트의 업스트림 프록시, 호스트 오버라이드, 스코프, 샌드박스를 거쳐 나가며, `--record-history`를 주지 않는 한 아무것도 남기지 않습니다.
+요청 하나를 보내고 응답을 출력합니다. 같은 코드로 만들어진 MCP `send_request{url}`의 헤드리스 형태입니다. 다른 모든 gori 전송과 마찬가지로 프로젝트의 업스트림 프록시, 호스트 오버라이드, 스코프, 샌드박스를 거쳐 나가며, `--record-history`나 `--save-as-repeater`를 주지 않으면 아무것도 남기지 않습니다.
 
 ```bash
 gori run send https://api.example.com/v1/items/42 -H 'Accept: application/json' -b 'sid=abc'
@@ -554,6 +555,7 @@ gori run send --url https://api.example.com --request-file req.http --headers-on
 | `--apply-rules` | MCP `send_request{apply_rules}`처럼 전송 전에 프로젝트의 활성 Match & Replace 규칙(요청 쪽)을 요청에 적용 |
 | `--http2`, `--sni=HOST`, `--tls-preset=NAME`, `-k`, `--timeout=SEC`, `--slot=NAME`, `--allow-unscoped` | `repeater send`와 같음 |
 | `--record-history` | 요청과 응답을 History에 플로우로도 기록(`source: repeater`, `source_surface: cli`)하고 id를 출력. `repeater send`와 마찬가지로 기본값은 꺼짐 |
+| `--save-as-repeater` | 요청과 응답을 새 Repeater 세션으로 저장하고 id 출력 (`--format json`에서는 `saved_repeater_id`) |
 | `--headers-only`, `--max-body=BYTES`, `--format=FMT` | `repeater send`와 같음 |
 
 WebSocket 핸드셰이크인 요청은 평범한 요청으로 나가고 그 `101`이 응답이 되며, 명령은 이를 STDERR에 알립니다. 프레임을 주고받는 교환에는 세션이 필요합니다: `repeater create` 다음 `repeater send`를 쓰세요.

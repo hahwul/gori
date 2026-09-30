@@ -402,6 +402,7 @@ gori run repeater <flow-id> --target https://staging.example.com --http2 --diff
 | `-b`, `--cookie=NAME=VALUE` | Replace the captured `Cookie` header, as curl's `-b`; repeat to join into one. A value with no `=` (a cookie-jar file to curl) is refused, and so is `-b` beside a `-H 'Cookie: …'` |
 | `--verbatim` | Send your overrides exactly: no token expansion in `-H`/`-d`/`-b`/`--path`/`-X`, and on HTTP/2 no field-name lowercasing. The captured bytes are never expanded either way |
 | `--record-history` | Also write the replay to History as a new flow and print its id |
+| `--save-as-repeater` | Also save the request and response as a new Repeater session and print its id (`saved_repeater_id` in JSON) |
 | `--apply-rules` | Run the project's enabled Match & Replace rules (request side) over the request first, as the live proxy would. Off by default: a direct send is byte-exact |
 | `--keep-request-line` | Send the stored request line as-is; do not rewrite an absolute-form line (`GET http://h/p`) to origin-form |
 | `--diff` | Diff against the original response |
@@ -539,7 +540,7 @@ gori run repeater h2 --target https://api.example.com --fields fields.json
 
 ### run send
 
-Send one request and print the response, without creating a Repeater session: the headless form of MCP `send_request{url}`, built by the same code. It goes out through the project's upstream proxy, host overrides, scope and Sandbox like every other gori send, and leaves nothing behind unless you pass `--record-history`.
+Send one request and print the response: the headless form of MCP `send_request{url}`, built by the same code. It goes out through the project's upstream proxy, host overrides, scope and Sandbox like every other gori send, and leaves nothing behind unless you pass `--record-history` or `--save-as-repeater`.
 
 ```bash
 gori run send https://api.example.com/v1/items/42 -H 'Accept: application/json' -b 'sid=abc'
@@ -562,6 +563,7 @@ gori run send --url https://api.example.com --request-file req.http --headers-on
 | `--apply-rules` | Run the project's enabled Match & Replace rules (request side) over the request before sending, as MCP `send_request{apply_rules}` does |
 | `--http2`, `--sni=HOST`, `--tls-preset=NAME`, `-k`, `--timeout=SEC`, `--slot=NAME`, `--allow-unscoped` | As on `repeater send` |
 | `--record-history` | Also write the request and response to History as a flow (`source: repeater`, `source_surface: cli`) and print its id. Off by default, as on `repeater send` |
+| `--save-as-repeater` | Also save the request and response as a new Repeater session and print its id (`saved_repeater_id` in JSON) |
 | `--headers-only`, `--max-body=BYTES`, `--format=FMT` | As on `repeater send` |
 
 A request that is a WebSocket handshake goes out as an ordinary request and its `101` is the answer, which the command says on STDERR. A framed exchange needs a session: `repeater create`, then `repeater send`.

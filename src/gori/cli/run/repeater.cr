@@ -559,6 +559,50 @@ module Gori
         end
       end
 
+      # The post-send writes for `--save-as-repeater`. The id is present once the session row
+      # committed, even if the response write that follows it did not.
+      struct SendRepeaterOutcome
+        getter id : Int64?
+        getter save_write : WriteOutcome
+        getter response_write : WriteOutcome?
+
+        def initialize(@id, @save_write, @response_write)
+        end
+      end
+
+      # Persist a completed one-shot send without turning a project write failure into a retry
+      # of a request that already reached its origin.
+      private def self.save_send_as_repeater(plan : Repeater::Plan, request : Bytes,
+                                             result : Repeater::Result, flow_id : Int64?,
+                                             project : Project, prefix : String) : SendRepeaterOutcome
+        store = begin
+          open_store(project, abort_on_failure: false)
+        rescue ex : Gori::Error | DB::Error | SQLite3::Exception
+          message = "#{prefix}: Repeater session was NOT saved: #{open_failure_message(ex, project)}"
+          return SendRepeaterOutcome.new(nil, WriteOutcome.new(message), nil)
+        end
+
+        begin
+          saved = Repeater::SendPersistence.persist(store, plan.scheme, plan.host, plan.port,
+            request, plan.http2?, false, flow_id, result, plan.h2_fields,
+            sni: plan.sni, tls_preset: plan.tls_preset)
+          id = saved.id
+          unless id
+            message = project_write_failure("#{prefix}: Repeater session was NOT saved", project)
+            return SendRepeaterOutcome.new(nil, WriteOutcome.new(message), nil)
+          end
+
+          response_error = saved.response_saved? ? nil : project_write_failure(
+            "#{prefix}: Repeater response was NOT saved", project)
+          SendRepeaterOutcome.new(id, WriteOutcome.new(nil), WriteOutcome.new(response_error))
+        rescue Gori::Error | DB::Error | SQLite3::Exception
+          message = project_write_failure("#{prefix}: Repeater session was NOT saved", project)
+          SendRepeaterOutcome.new(nil, WriteOutcome.new(message), nil)
+        ensure
+          store.close
+        end
+      end
+
       # `request_sources` / `request_source_error` / `request_content` are PUBLIC for the same
       # reason `two_targets_error` is: they are split from the `abort` so a spec can pin both
       # the condition and the wording, and `cmd_repeater_create` ends in `abort`, which a spec
@@ -2013,6 +2057,21 @@ module Gori
         j.field error_field, o.error unless o.ok?
       end
 
+      # Save reporting stays on STDERR in text mode so the response alone remains pipeable.
+      private def self.emit_send_repeater_status(saved_repeater_id : Int64?,
+                                                 repeater_write : WriteOutcome?,
+                                                 response_write : WriteOutcome?,
+                                                 format : Symbol) : Nil
+        return if format == :json
+        STDERR.puts "saved as Repeater session ##{saved_repeater_id}" if saved_repeater_id
+        if write = repeater_write
+          STDERR.puts "#{write.error}#{project_write_warning_tail}" unless write.ok?
+        end
+        if write = response_write
+          STDERR.puts "#{write.error}#{project_write_warning_tail}" unless write.ok?
+        end
+      end
+
       private def self.ws_result_json(id : Int64, result : Repeater::WsEngine::Result,
                                       response_write : WriteOutcome? = nil) : String
         JSON.build do |j|
@@ -2094,17 +2153,23 @@ module Gori
                                             cap : BodyCap = BodyCap.new,
                                             request_target : String? = nil,
                                             prefix : String = "gori run repeater",
-                                            applied_rules : Bool = false) : Nil
+                                            applied_rules : Bool = false,
+                                            saved_repeater_id : Int64? = nil,
+                                            repeater_write : WriteOutcome? = nil,
+                                            repeater_response_write : WriteOutcome? = nil) : Nil
         # Text mode: the id goes to STDERR beside the other status lines, so a `> resp.txt`
         # redirect still captures exactly the response and nothing else.
         STDERR.puts "recorded to History as flow ##{recorded_flow_id}" if recorded_flow_id && format != :json
+        emit_send_repeater_status(saved_repeater_id, repeater_write, repeater_response_write, format)
         # A `--path` send names its target on the status line: a loop over forty paths reads
         # forty `→ 200` lines otherwise, with nothing tying each to the request it answered.
         at = request_target.try { |t| " · #{CLI::Output.term_safe(t)}" } || ""
         if format == :json
           puts repeater_json(result, diff, diff_capped, recorded_flow_id, tls_preset,
             response_write: response_write, history_write: history_write, cap: cap,
-            request_target: request_target, applied_rules: applied_rules)
+            request_target: request_target, applied_rules: applied_rules,
+            saved_repeater_id: saved_repeater_id, repeater_write: repeater_write,
+            repeater_response_write: repeater_response_write)
         elsif result.ok?
           STDERR.puts "→ #{result.response.try(&.status) || "?"} in #{CLI::Output.human_us(result.duration_us)}#{at}#{result.incomplete? ? " (#{incomplete_reason(result, result.timed_out?)})" : ""}"
           if d = diff
@@ -2501,6 +2566,7 @@ module Gori
         method_override : String? = nil
         verbatim = false
         record_history = false
+        save_as_repeater = false
         apply_rules = false
         allow_unscoped = false
         keep_request_line = false
@@ -2541,6 +2607,7 @@ module Gori
           p.on("-bCOOKIE", "--cookie=COOKIE", REPLAY_COOKIE_HELP) { |v| cookies << v }
           p.on("--verbatim", "Send your overrides EXACTLY: no token expansion ($ENV.KEY, $BIND.NAME, $GEN.*) in -H/-d/-b/--path, and on HTTP/2 no field-name lowercasing. The captured bytes are never expanded either way; --target is still expanded (it names where to dial)") { verbatim = true }
           p.on("--record-history", "Also write the request + response to History as a new flow, and print its id (default: off)") { record_history = true }
+          p.on("--save-as-repeater", "Also save this request + response as a new Repeater session, and print its id") { save_as_repeater = true }
           p.on("--apply-rules", APPLY_RULES_HELP) { apply_rules = true }
           p.on("--keep-request-line", "Send the stored request line as-is — do not rewrite an absolute-form line (\"GET http://h/p\") to origin-form") { keep_request_line = true }
           p.on("--slot=NAME", "Send as this SESSION SLOT — its header overlay, and its binding table for $BIND.NAME tokens (bare syntax: $NAME)") { |v| slot = v.strip }
@@ -2759,12 +2826,22 @@ module Gori
         # exchange, and the captured flow it came from stays the evidence it was.
         recorded = record_history ? record_repeater_send_to_history(plan, wire_sent, result, sent_at, nil, project) : nil
         history_write = recorded.nil? ? nil : WriteOutcome.new(recorded.as?(String))
+        repeater_write = nil.as(WriteOutcome?)
+        repeater_response_write = nil.as(WriteOutcome?)
+        saved_repeater_id = nil.as(Int64?)
+        if save_as_repeater
+          saved = save_send_as_repeater(plan, plan.bytes, result, id, project, "gori run repeater")
+          saved_repeater_id = saved.id
+          repeater_write = saved.save_write
+          repeater_response_write = saved.response_write
+        end
         # The target as it went out (after `Env.expand`), read the way the scope gate read it —
         # not the `--path` argument, whose `$ENV.ID` the wire no longer carries.
         emit_repeater_result(result, new_body, diff, format, diff_capped, recorded.as?(Int64),
           tls_preset: sent_tls_preset(plan), history_write: history_write,
           cap: cap, request_target: path_override && Gori::Outbound.request_target(plan.bytes),
-          applied_rules: applied_rules)
+          applied_rules: applied_rules, saved_repeater_id: saved_repeater_id,
+          repeater_write: repeater_write, repeater_response_write: repeater_response_write)
         if why = history_write.try(&.error)
           STDERR.puts "gori run repeater: #{why}#{project_write_warning_tail}"
         end
@@ -2817,7 +2894,10 @@ module Gori
                                      history_write : WriteOutcome? = nil,
                                      cap : BodyCap = BodyCap.new,
                                      request_target : String? = nil,
-                                     applied_rules : Bool = false) : String
+                                     applied_rules : Bool = false,
+                                     saved_repeater_id : Int64? = nil,
+                                     repeater_write : WriteOutcome? = nil,
+                                     repeater_response_write : WriteOutcome? = nil) : String
         JSON.build do |j|
           j.object do
             j.field "ok", result.ok?
@@ -2837,6 +2917,9 @@ module Gori
             # …and WHY it is absent when `--record-history` WAS passed: `history_saved: false`
             # plus the sentence. Without it a null id read the same as the flag not given.
             emit_write_outcome_json(j, "history_saved", "history_error", history_write)
+            j.field("saved_repeater_id", saved_repeater_id) if saved_repeater_id
+            emit_write_outcome_json(j, "repeater_saved", "repeater_save_error", repeater_write)
+            emit_write_outcome_json(j, "repeater_response_saved", "repeater_response_error", repeater_response_write)
             # Whether the SESSION ROW now holds this response (present only when a write was
             # attempted, i.e. `ok`). `false` means the next `send --diff` would diff against
             # the PREVIOUS response — see `WriteOutcome`.
