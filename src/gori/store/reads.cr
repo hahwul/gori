@@ -461,6 +461,21 @@ module Gori
       @db.query_one?("SELECT request FROM intercept_originals WHERE flow_id = ?", flow_id, as: Bytes)
     end
 
+    # The interim 1xx responses the origin sent before this flow's final one (V45), in wire
+    # order, or nil when it sent none. A primary-key range read, asked only by the surfaces
+    # that show a flow's detail — `get_flow` itself stays one row.
+    def interims(flow_id : Int64) : Interims?
+      heads = [] of Interims::Head
+      omitted = 0
+      @db.query("SELECT status, head, relayed, omitted FROM flow_interims WHERE flow_id = ? ORDER BY seq", flow_id) do |rs|
+        rs.each do
+          heads << Interims::Head.new(rs.read(Int64).to_i32, rs.read(Bytes), rs.read(Int64) != 0)
+          omitted = rs.read(Int64).to_i32
+        end
+      end
+      heads.empty? ? nil : Interims.new(heads, omitted)
+    end
+
     # Full detail incl. raw BLOBs (the truth) for the detail view.
     # `body_max`, when set, caps request/response body BLOBs via SQLite `substr`
     # (byte-oriented on BLOBs) so list-preview paths never pull multi-MiB bodies
@@ -633,6 +648,7 @@ module Gori
         c.exec("DELETE FROM js_refs")
         c.exec("DELETE FROM js_ref_scans")
         c.exec("DELETE FROM intercept_originals")
+        c.exec("DELETE FROM flow_interims")
         c.exec("DELETE FROM flows")
         c.exec("DELETE FROM h2_frames")
         # The `h2_connections` rows stay, as they do on an explicit delete (`delete_flow_set`):
@@ -660,6 +676,7 @@ module Gori
       conn.exec("DELETE FROM js_refs WHERE flow_id IN (#{marks})", args: args)
       conn.exec("DELETE FROM js_ref_scans WHERE flow_id IN (#{marks})", args: args)
       conn.exec("DELETE FROM intercept_originals WHERE flow_id IN (#{marks})", args: args)
+      conn.exec("DELETE FROM flow_interims WHERE flow_id IN (#{marks})", args: args)
       # The h2 frame log (often the flow's bulk bytes) — capture the conns BEFORE deleting
       # the flow rows so we can reclaim each one this set was the last user of.
       h2_conns = [] of Int64

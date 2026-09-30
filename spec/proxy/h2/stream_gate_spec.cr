@@ -531,6 +531,32 @@ describe Gori::Proxy::H2::StreamGate do
     end
   end
 
+  # An h2 origin's 103 is an extra HEADERS frame ahead of the final one (Node's
+  # `res.writeEarlyHints`). The relay always passed it through; the capture replaced it with the
+  # final head and kept nothing, so the record now carries it — and the relay is untouched.
+  it "records an interim 103 HEADERS with the flow and forwards its block unchanged" do
+    with_ic(intercept: false) do |ic|
+      rig = Rig.new(ic)
+      rig.c2s.accept(headers(1_u32, rig.enc_out.encode(request("/page"))))
+      hint = rig.enc_in.encode([{":status", "103"}, {"link", "</style.css>; rel=preload"}])
+      rig.s2c.accept(headers(1_u32, hint, Frame::END_HEADERS))
+      rig.s2c.accept(headers(1_u32, rig.enc_in.encode(response("200")), Frame::END_HEADERS))
+      rig.s2c.accept(data(1_u32, "ok", Frame::END_STREAM))
+      settle
+
+      sent = rig.to_client.select { |f| f.frame_type == Frame::Type::Headers }
+      sent.size.should eq(2)
+      sent.first.payload.should eq(hint) # the origin's own block, relayed as it arrived
+
+      resp = rig.sink.responses.first
+      resp.status.should eq(200)
+      String.new(resp.head).should start_with("HTTP/2 200")
+      interims = resp.interims.not_nil!
+      interims.heads.map(&.status).should eq([103])
+      String.new(interims.heads.first.head).should eq("HTTP/2 103\r\nlink: </style.css>; rel=preload\r\n\r\n")
+    end
+  end
+
   # ---- PR #6: a hold that covers the BODY ------------------------------------
   #
   # The frames behind a deferred head are parked regardless (rule 1 lets nothing overtake it),

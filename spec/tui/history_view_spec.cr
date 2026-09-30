@@ -3449,6 +3449,51 @@ describe "HistoryView at 80–110 columns" do
   end
 end
 
+# The interim 1xx heads an origin sent before the final response get a pane of their own,
+# beside RESPONSE, and a footer line that says they exist.
+describe "HistoryView — interim 1xx responses" do
+  it "shows each interim head in the INTERIM pane and names them in the footer" do
+    with_store do |store|
+      id = add_flow(store, "GET", "/page")
+      interims = Gori::Store::Interims.new
+      interims.add(103, "HTTP/1.1 103 Early Hints\r\nLink: </style.css>; rel=preload\r\n\r\n".to_slice)
+      interims.add(103, "HTTP/1.1 103 Early Hints\r\nLink: </late.js>; rel=preload\r\n\r\n".to_slice, relayed: false)
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice, interims: interims))
+      view = Gori::Tui::HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      detail = MemoryBackend.new(100, 20)
+      view.render_detail(Gori::Tui::Screen.new(detail), Gori::Tui::Rect.new(0, 0, 100, 20))
+      detail.contains?("2 interim 1xx responses before this one").should be_true
+      # The heads are the pane's content, not the REQUEST pane's (nor the footer's).
+      detail.contains?("103 Early Hints").should be_false
+      detail.contains?("</style.css>").should be_false
+
+      view.set_detail_pane_public(:interim)
+      view.detail_pane.should eq(:interim)
+      detail = MemoryBackend.new(100, 20)
+      view.render_detail(Gori::Tui::Screen.new(detail), Gori::Tui::Rect.new(0, 0, 100, 20))
+      detail.contains?("HTTP/1.1 103 Early Hints").should be_true
+      detail.contains?("Link: </style.css>; rel=preload").should be_true
+      detail.contains?("Link: </late.js>; rel=preload").should be_true
+      detail.contains?("not relayed to the client").should be_true # only the second head's marker
+      (0...20).count { |y| detail.row(y).includes?("not relayed to the client") }.should eq(1)
+    end
+  end
+
+  it "offers no INTERIM pane on a flow without one" do
+    with_store do |store|
+      add_flow(store, "GET", "/plain", 200)
+      view = Gori::Tui::HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      view.set_detail_pane_public(:interim)
+      view.detail_pane.should eq(:request)
+    end
+  end
+end
+
 # #1378: an Intercept edit leaves a trail in History, and a drop reads as the operator's own
 # outcome rather than an upstream failure.
 describe "HistoryView — Intercept edits and drops" do

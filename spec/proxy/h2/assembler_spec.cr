@@ -141,6 +141,56 @@ describe Gori::Proxy::H2::Assembler do
     String.new(sink.responses.first.head).should contain("HTTP/2 200")
   end
 
+  it "keeps each replaced interim head on the response, in order, and caps a flood of them" do
+    sink = RecSink.new
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "example.com", 443, 1_i64)
+    enc = Gori::Proxy::H2::HPACK::Encoder.new
+    assembler.feed("out", headers_frame(1_u32, Frame::END_HEADERS | Frame::END_STREAM,
+      hexb("828684418cf1e3c2e5f23a6ba0ab90f4ff")))
+    assembler.feed("in", headers_frame(1_u32, Frame::END_HEADERS, enc.encode([{":status", "100"}])))
+    extra = Gori::Store::Interims::MAX_KEPT + 3
+    extra.times do |i|
+      assembler.feed("in", headers_frame(1_u32, Frame::END_HEADERS,
+        enc.encode([{":status", "103"}, {"link", "</#{i}.css>; rel=preload"}])))
+    end
+    assembler.feed("in", headers_frame(1_u32, Frame::END_HEADERS, enc.encode([{":status", "200"}])))
+    # A :status block AFTER the final head is a late interim — a trailer finding, not one of these.
+    assembler.feed("in", headers_frame(1_u32, Frame::END_HEADERS | Frame::END_STREAM,
+      enc.encode([{":status", "103"}])))
+
+    resp = sink.responses.first
+    resp.status.should eq(200)
+    interims = resp.interims.not_nil!
+    interims.heads.size.should eq(Gori::Store::Interims::MAX_KEPT)
+    interims.heads.first.status.should eq(100)
+    String.new(interims.heads.first.head).should eq("HTTP/2 100\r\n\r\n")
+    String.new(interims.heads[1].head).should contain("link: </0.css>")
+    interims.omitted.should eq(extra + 1 - Gori::Store::Interims::MAX_KEPT)
+    interims.omitted_note.not_nil!.should contain("sent #{extra + 1} interim 1xx responses")
+  end
+
+  # h1 refuses a run past `MAX_INTERIM`; h2 cannot stop the relay, so the projection stops
+  # COUNTING there and says so once, rather than tallying a flood without end.
+  it "stops counting interims at h1's MAX_INTERIM and names the flood in an advisory" do
+    sink = RecSink.new
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "example.com", 443, 1_i64)
+    enc = Gori::Proxy::H2::HPACK::Encoder.new
+    assembler.feed("out", headers_frame(1_u32, Frame::END_HEADERS | Frame::END_STREAM,
+      hexb("828684418cf1e3c2e5f23a6ba0ab90f4ff")))
+    cap = Gori::Proxy::ClientConn::MAX_INTERIM
+    (cap + 50).times do
+      assembler.feed("in", headers_frame(1_u32, Frame::END_HEADERS, enc.encode([{":status", "103"}])))
+    end
+    assembler.feed("in", headers_frame(1_u32, Frame::END_HEADERS | Frame::END_STREAM, enc.encode([{":status", "204"}])))
+
+    resp = sink.responses.first
+    resp.status.should eq(204)
+    interims = resp.interims.not_nil!
+    interims.heads.size.should eq(Gori::Store::Interims::MAX_KEPT)
+    (interims.heads.size + interims.omitted).should eq(cap)
+    resp.advisory.not_nil!.should contain("more than #{cap} interim 1xx header blocks")
+  end
+
   # RFC 9113 8.1 forbids pseudo-headers in trailers, so a `:status` arriving AFTER a final
   # response head is a broken or hostile origin — not the interim-1xx handover the replace
   # branch exists for. It used to take that branch anyway: the trailer REPLACED the real

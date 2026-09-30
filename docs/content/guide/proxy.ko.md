@@ -180,6 +180,8 @@ Sitemap 행에서 `⇧E`(또는 `Space` → `E`)를 누르면 OpenAPI 3.0.3 문�
 
 **핸드셰이크와 트랜스크립트는 별개의 패널입니다.** 캡처된 소켓을 열면 상세 뷰의 `REQUEST`·`RESPONSE` 옆에 `MESSAGES` 칩이 붙습니다(플로우가 더 갖고 있으면 그것도 함께. RFC 8441 소켓이면 `FRAMES (h2)`, 서브스크립션이면 `GRAPHQL`). `RESPONSE`는 서버가 답한 업그레이드(`101`(또는 RFC 8441의 `200`), 서버가 고른 서브프로토콜, 수락한 확장, 그 자리에서 내려준 `Set-Cookie`)이고, `MESSAGES`는 프레임 로그입니다. 둘은 서로 다른 질문에 답하며 어느 쪽도 다른 쪽을 대신하지 못하므로 분리되어 있습니다. 위 규칙으로 `Sec-WebSocket-Extensions`를 되돌려 놓았다면, 원 서버가 실제로 그것을 받아들였는지는 `RESPONSE`에서 읽습니다. `^X`(hex)와 `b`(공백 표시)는 캡처된 다른 헤드와 마찬가지로 `RESPONSE`에서 동작하고, `MESSAGES`에서는 꺼집니다. 그 바이트는 `response_body`가 아니라 메시지 로그에 있기 때문입니다.
 
+**중간 응답도 플로우와 함께 남습니다.** 원 서버는 실제 응답 앞에 `1xx` 헤드를 하나 이상 보낼 수 있습니다. `103 Early Hints`나, `Expect: 100-continue` 업로드에 답하는 `100 Continue`가 그렇습니다. gori는 각 헤드를 바꾸지 않고 클라이언트에 전달하고(읽을 수 없는 HTTP/1.0 클라이언트는 제외), HTTP/1.1과 HTTP/2 모두에서 플로우와 함께 기록합니다. 상세 뷰의 `RESPONSE` 옆에 `INTERIM` 칩이 붙고, `gori run show --format raw`는 클라이언트가 받은 것들을 최종 응답 앞에 와이어 순서대로 출력하며, `--format json`과 MCP `get_flow`는 모두를 `interim`(`{status, relayed, head}`)으로 나열합니다. 클라이언트가 받지 못한 헤드는 `relayed: false`로 표시되고, raw는 그것을 출력하는 대신 stderr에 알립니다. `RESPONSE`는 최종 응답만 담습니다. 몇 개를 보낼지는 원 서버가 정하므로, gori는 처음 16개(64 KiB 이내)를 남기고 기록하지 않은 나머지 개수를 알려 줍니다(`interim_omitted`).
+
 ### HTTP/2 위의 WebSocket {#websocket-http2}
 
 오리진이 `SETTINGS_ENABLE_CONNECT_PROTOCOL`을 광고하면 요즘 브라우저는 HTTP/1.1 `Upgrade:` 핸드셰이크 대신 RFC 8441의 확장 `CONNECT`로 WebSocket을 엽니다. gori는 그 광고를 그대로 중계하므로 클라이언트는 이 경로를 쓸 자격이 있고, 실제로 쓰면 gori가 그 소켓을 읽습니다. RFC 8441은 핸드셰이크만 대체하고 나머지는 그대로이므로 프레임은 동일한 RFC 6455 프레임이며 동일한 코덱이 읽습니다. 어떤 핸드셰이크로 열린 소켓인지에 따라 분석 결과가 달라지지 않습니다.

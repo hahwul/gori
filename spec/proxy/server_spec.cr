@@ -806,6 +806,167 @@ describe Gori::Proxy::Server do
     sink.responses.map { |r| String.new(r.body.not_nil!) }.sort.should eq(["RESP-1", "RESP-2"])
   end
 
+  # The relay above was always right; the RECORD kept only the final head, so no surface could
+  # tell a 103 had been sent. The interims now ride the response DTO, octet for octet, while
+  # the client still receives exactly what the origin wrote.
+  it "records each interim 1xx head with the flow, byte-exact, and forwards them unchanged" do
+    done = Channel(Nil).new(1)
+    hint = "HTTP/1.1 103 Early Hints\r\nLink: </style.css>; rel=preload\r\n\r\n"
+    hint2 = "HTTP/1.1 103 Early Hints\r\nLink: </app.js>; rel=preload\r\n\r\n"
+    final = "HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nDONE"
+    origin = TCPServer.new("127.0.0.1", 0)
+    origin_port = origin.local_address.port
+    spawn do
+      if conn = origin.accept?
+        if Gori::Proxy::Codec::Http1.read_head(conn)
+          conn << hint << hint2 << final
+          conn.flush
+        end
+        conn.close
+      end
+    rescue
+    end
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+    proxy.start
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client.read_timeout = 3.seconds
+    client << "GET http://127.0.0.1:#{origin_port}/page HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n\r\n"
+    client.flush
+    got = read_until(client, "DONE")
+    client.close
+    done.receive
+    proxy.stop
+
+    got.should eq(hint + hint2 + final) # forwarding untouched (P7)
+    resp = sink.responses.first
+    resp.status.should eq(200)
+    String.new(resp.head).should start_with("HTTP/1.1 200 OK") # the final head stays ONE response
+    interims = resp.interims.not_nil!
+    interims.heads.map(&.status).should eq([103, 103])
+    interims.heads.map { |h| String.new(h.head) }.should eq([hint, hint2])
+    interims.omitted.should eq(0)
+  end
+
+  # RFC 9110 §15.2: a 1.0 client is never sent a 1xx. The record still keeps what the origin
+  # said, but must not claim the client received it.
+  it "records an interim a 1.0 client was not sent as not relayed" do
+    done = Channel(Nil).new(1)
+    hint = "HTTP/1.1 103 Early Hints\r\nLink: </style.css>; rel=preload\r\n\r\n"
+    final = "HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nDONE"
+    origin = TCPServer.new("127.0.0.1", 0)
+    origin_port = origin.local_address.port
+    spawn do
+      if conn = origin.accept?
+        if Gori::Proxy::Codec::Http1.read_head(conn)
+          conn << hint << final
+          conn.flush
+        end
+        conn.close
+      end
+    rescue
+    end
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+    proxy.start
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client.read_timeout = 3.seconds
+    client << "GET http://127.0.0.1:#{origin_port}/page HTTP/1.0\r\nHost: 127.0.0.1:#{origin_port}\r\n\r\n"
+    client.flush
+    got = read_until(client, "DONE")
+    client.close
+    done.receive
+    proxy.stop
+
+    got.should eq(final) # no 1xx for a 1.0 client (unchanged)
+    interims = sink.responses.first.interims.not_nil!
+    interims.heads.map { |h| {String.new(h.head), h.relayed?} }.should eq([{hint, false}])
+    interims.relayed_wire.should be_empty
+  end
+
+  # A 101 is the upgrade itself, not an interim (`interim_response?`): a 103 before it is kept
+  # as the interim and the 101 stays the flow's response, with the tunnel behind it untouched.
+  it "keeps a 103 before a 101 upgrade as the interim, and the 101 as the response" do
+    done = Channel(Nil).new(1)
+    hint = "HTTP/1.1 103 Early Hints\r\nLink: </style.css>; rel=preload\r\n\r\n"
+    upgrade = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: tcp\r\nConnection: Upgrade\r\n\r\n"
+    origin = TCPServer.new("127.0.0.1", 0)
+    origin_port = origin.local_address.port
+    spawn do
+      if conn = origin.accept?
+        if Gori::Proxy::Codec::Http1.read_head(conn)
+          conn << hint << upgrade << "TUNNEL-DATA"
+          conn.flush
+        end
+        conn.close
+      end
+    rescue
+    end
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+    proxy.start
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client.read_timeout = 3.seconds
+    client << "GET http://127.0.0.1:#{origin_port}/attach HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n" \
+              "Upgrade: tcp\r\nConnection: Upgrade\r\n\r\n"
+    client.flush
+    got = read_until(client, "TUNNEL-DATA")
+    client.close
+    done.receive
+    proxy.stop
+
+    got.should eq(hint + upgrade + "TUNNEL-DATA")
+    resp = sink.responses.first
+    resp.status.should eq(101)
+    String.new(resp.head).should eq(upgrade)
+    resp.interims.not_nil!.heads.map(&.status).should eq([103])
+  end
+
+  # The Expect settlement's client-gone exit records the flow without a response of its own;
+  # the 1xx the origin had already answered with belong on it all the same, the last one
+  # marked as never having reached the client.
+  it "keeps the interims when the client vanishes during the Expect settlement" do
+    done = Channel(Nil).new(1)
+    origin = TCPServer.new("127.0.0.1", 0)
+    origin_port = origin.local_address.port
+    spawn do
+      if conn = origin.accept?
+        if Gori::Proxy::Codec::Http1.read_head(conn)
+          # The client is already gone: the first write lands in the kernel and draws the RST,
+          # the later ones fail — that failure is the client-gone exit.
+          5.times do
+            conn << "HTTP/1.1 103 Early Hints\r\n\r\n"
+            conn.flush
+            sleep 100.milliseconds
+          end
+        end
+        conn.close
+      end
+    rescue
+    end
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+    proxy.start
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client << "POST http://127.0.0.1:#{origin_port}/up HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n" \
+              "Content-Length: 9\r\nExpect: 100-continue\r\n\r\n"
+    client.flush
+    sleep 50.milliseconds
+    client.close
+    receive_within(done)
+    proxy.stop
+
+    resp = sink.responses.first
+    resp.error.should eq("connection closed while answering Expect: 100-continue")
+    interims = resp.interims.not_nil!
+    interims.heads.all?(&.status.==(103)).should be_true
+    interims.heads.last.relayed?.should be_false
+  end
+
   # #728. The spec above proves the interim is relayed when the origin VOLUNTEERS one on a
   # bodyless GET — which never made the proxy wait for anything. The three below drive the
   # case that deadlocked: the CLIENT sends `Expect: 100-continue` with a Content-Length and
@@ -863,6 +1024,9 @@ describe Gori::Proxy::Server do
     rest.should contain("200 OK")
     sink.responses.first.status.should eq(200)
     String.new(sink.requests.first.body.not_nil!).should eq(payload)
+    # The origin's 100 is on the record too, as it arrived.
+    sink.responses.first.interims.not_nil!.heads.map { |h| String.new(h.head) }
+      .should eq(["HTTP/1.1 100 Continue\r\nX-Origin-Interim: yes\r\n\r\n"])
   end
 
   it "relays a 103 Early Hints and keeps waiting for the real 100 Continue (#728)" do
@@ -925,6 +1089,14 @@ describe Gori::Proxy::Server do
     seen_body.receive.should eq(payload) # the withheld body did flow, after the 100
     rest.should contain("200 OK")
     sink.responses.first.status.should eq(200)
+    # Both interims the settlement relayed are on the record, in wire order and byte-exact,
+    # and the client got them unchanged ahead of the final response.
+    hint = "HTTP/1.1 103 Early Hints\r\nLink: </style.css>; rel=preload\r\n\r\n"
+    cont = "HTTP/1.1 100 Continue\r\nX-Origin-Interim: yes\r\n\r\n"
+    (interim + rest).should eq(hint + cont + "HTTP/1.1 200 OK\r\nContent-Length: 6\r\nConnection: close\r\n\r\nSTORED")
+    interims = sink.responses.first.interims.not_nil!
+    interims.heads.map(&.status).should eq([103, 100])
+    interims.heads.map { |h| String.new(h.head) }.should eq([hint, cont])
   end
 
   it "bounds the whole expectation, not each 1xx, against a 103 drip (#728)" do
@@ -1230,6 +1402,7 @@ describe Gori::Proxy::Server do
 
     seen_body.receive.should eq(payload)
     rest.should contain("200 OK")
+    sink.responses.first.interims.should be_nil # gori's own 100 is not something the origin sent
   end
 
   it "answers 100 Continue itself on the buffering request-body rewrite path (#728)" do
