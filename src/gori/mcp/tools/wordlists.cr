@@ -15,6 +15,8 @@ module Gori
       WORDLIST_PREVIEW_DEFAULT =  20
       WORDLIST_PREVIEW_MAX     = 200
 
+      WORDLISTS_LIMIT = PageLimit.new(200, WordlistCatalog::LIST_MAX)
+
       # The global wordlist catalog (#1353): named lists under `$GORI_HOME/wordlists`. They
       # are GLOBAL, not project data, so every tool here is `unbound` (a server with no
       # project bound can still list and save) and the writes sit in the `write` group with the
@@ -26,7 +28,7 @@ module Gori
       # them in an agent's context.
       @[Tool("list_wordlists", unbound: true)]
       private def list_wordlists(h) : Result
-        limit = clamp(optional_int_arg(h, "limit"), 200, WordlistCatalog::LIST_MAX)
+        limit = clamp(optional_int_arg(h, "limit"), WORDLISTS_LIMIT)
         listing = WordlistCatalog.list(limit)
         Result.new(JSON.build do |j|
           j.object do
@@ -245,7 +247,7 @@ module Gori
           "List the global wordlist catalog (named lists under GORI_HOME/wordlists): name, size, modified time. " \
           "Never returns values. Use a name as `wordlist` in fuzz_start, mine_start or discover_start; " \
           "a name is looked up in the server's working directory first, then here." do |s|
-          s.field "limit", intprop("max lists to return (default 200)")
+          s.field "limit", limitprop("max lists to return", WORDLISTS_LIMIT)
         end
 
         tool j, "get_wordlist",

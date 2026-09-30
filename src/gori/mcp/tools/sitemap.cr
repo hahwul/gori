@@ -3,14 +3,20 @@ require "../../ql"
 require "../../sitemap"
 require "../../param_inventory"
 require "../../export/openapi"
+require "../../durable_file"
 require "../serialize"
 
 module Gori
   module MCP
     class Tools
+      # 50, not the 200 it was (#1394): a list_sitemap row carries its observations, and 200 of
+      # them was ~90 KB of an agent's context on a call it makes to get its bearings. `has_more`
+      # and `offset` page the rest.
+      SITEMAP_LIMIT = PageLimit.new(50, 5000)
+
       @[Tool("list_sitemap")]
       private def list_sitemap(h) : Result
-        limit = clamp(optional_int_arg(h, "limit"), 200, 5000)
+        limit = clamp(optional_int_arg(h, "limit"), SITEMAP_LIMIT)
         offset = (optional_int_arg(h, "offset") || 0_i64).clamp(0_i64, Int32::MAX.to_i64).to_i
         query = str(h, "query")
         filter = ql_filter_or_error(h, query)
@@ -140,7 +146,7 @@ module Gori
       private def list_sitemap_tags(h) : Result
         host = str(h, "host").try(&.strip).presence
         tags = store.sitemap_tags
-        Result.new(JSON.build do |j|
+        items_result(JSON.build do |j|
           j.array do
             tags.each do |(hst, path), tag|
               next if host && hst != host
@@ -340,6 +346,9 @@ module Gori
         end)
       end
 
+      # 50 for the reason `SITEMAP_LIMIT` is: each row carries its sample values.
+      PARAMS_LIMIT = PageLimit.new(50, 2000)
+
       # The parameter inventory (#1231) — one call instead of paging list_history + get_flow
       # to learn what inputs a target takes. Read-only and recomputed per call (P6); see
       # `ParamInventory` for what "reflected" does and does not claim.
@@ -348,7 +357,7 @@ module Gori
         req_off = optional_int_arg(h, "offset")
         req_lim = optional_int_arg(h, "limit")
         offset = clamp_nonneg(req_off)
-        limit = clamp(req_lim, 200, 2000)
+        limit = clamp(req_lim, PARAMS_LIMIT)
         query = str(h, "query")
         filter = ql_filter_or_error(h, query)
         return filter if filter.is_a?(Result)
@@ -427,11 +436,19 @@ module Gori
       # (P6). Bounded twice, because it lands in the agent's context: `max_endpoints` caps the
       # operations the engine keeps, `max_bytes` the serialized document (whole paths are
       # dropped from the end, `Export::OpenApi.fit`), and `truncated` says either happened.
-      @[Tool("export_openapi")]
+      #
+      # …unless `output_path` writes it to a file instead (#1394), and then it does NOT land in
+      # the agent's context: the reply carries the path and the report, and `max_bytes` defaults
+      # to its ceiling. That makes this read tool a writer for that call — refused under
+      # --read-only, behind the `write` permission, and logged as an agent action
+      # (`call_denied_permission`, `agent_action?`) — hence `read_only: false`.
+      @[Tool("export_openapi", read_only: false)]
       private def export_openapi(h) : Result
         filter = openapi_filter(h)
         return filter if filter.is_a?(Result)
-        yaml = openapi_yaml?(h)
+        destination = openapi_destination(h)
+        return destination if destination.is_a?(Result)
+        yaml = openapi_yaml?(h, destination)
         return yaml if yaml.is_a?(Result)
         examples = bool_arg(h, "examples", false)
         choice = openapi_redactor(h, examples)
@@ -446,9 +463,67 @@ module Gori
           max_endpoints: clamp(optional_int_arg(h, "max_endpoints"), 200, 2000),
           examples: examples, redactor: choice.try(&.matcher), include_gori: bool_arg(h, "include_gori", false))
         result = Export::OpenApi.build(store, opts)
-        doc, dropped = Export::OpenApi.fit(result.doc, clamp(optional_int_arg(h, "max_bytes"), 256 * 1024, 2 * 1024 * 1024))
+        max_bytes = clamp(optional_int_arg(h, "max_bytes"), destination ? OPENAPI_MAX_BYTES : OPENAPI_INLINE_BYTES, OPENAPI_MAX_BYTES)
+        doc, dropped = Export::OpenApi.fit(result.doc, max_bytes)
         result.report.paths_dropped = dropped
-        Result.new(openapi_json(doc, result.report, yaml, choice))
+        return Result.new(openapi_json(doc, result.report, yaml, choice)) unless destination
+        text = yaml ? Export::OpenApi.to_yaml(doc) : Export::OpenApi.to_json(doc)
+        begin
+          DurableFile.write(destination, text, perm: File::Permissions.new(0o644))
+        rescue ex : File::Error | IO::Error
+          return err("could not write the OpenAPI document: #{ex.message}", "INVALID_ARGUMENT", field: "output_path")
+        end
+        Result.new(openapi_json(doc, result.report, yaml, choice, written: {destination, text.bytesize}))
+      end
+
+      # The inline document's default size cap, and the ceiling either way.
+      OPENAPI_INLINE_BYTES = 256 * 1024
+      OPENAPI_MAX_BYTES    = 2 * 1024 * 1024
+
+      # Where `output_path` asks the document to go, resolved; nil when the call wants it
+      # inline; or the refusal. The rules are `export_project`'s, the one other MCP tool that
+      # writes a file an agent names: the parent directory must exist, a directory or an
+      # existing file is refused unless `overwrite:true` (and a directory always), a symlink is
+      # written THROUGH (`DurableFile`), and gori's home — every project's database and the
+      # settings — is off limits.
+      private def openapi_destination(h) : (String | Result)?
+        # Blank is absent: a client that fills every property sends `output_path: ""` with the
+        # inline document in mind (`describes?`).
+        return nil unless describes?(h, "output_path")
+        raw = str(h, "output_path").try(&.strip).presence
+        return err("'output_path' is blank", "INVALID_ARGUMENT", field: "output_path") unless raw
+        unless @allow_actions
+          return err("output_path writes a file (disabled by gori mcp --read-only); drop it to get the document inline",
+            "TOOL_DISABLED", field: "output_path")
+        end
+        overwrite = bool_arg(h, "overwrite", false)
+        target = Path[raw].expand(home: true).to_s
+        # A symlink is judged — and written — at what it points to (`DurableFile` writes
+        # through it), so resolve it first; one that points nowhere cannot be judged at all.
+        if File.symlink?(target)
+          return err("output_path is a symlink to nothing: #{target}", "INVALID_ARGUMENT", field: "output_path") unless File.exists?(target)
+          target = File.realpath(target)
+        end
+        return err("output_path is a directory: #{target}", "INVALID_ARGUMENT", field: "output_path") if File.directory?(target)
+        parent = File.dirname(target)
+        return err("no such directory: #{parent}", "INVALID_ARGUMENT", field: "output_path") unless Dir.exists?(parent)
+        if Paths.within?(Paths.canonical_file(target), Paths.canonical_file(Paths.home_dir))
+          return err("refusing to write inside gori's home (#{Paths.home_dir}): it holds every project's database " \
+                     "and gori's settings — choose an output_path outside it", "INVALID_ARGUMENT", field: "output_path")
+        end
+        if File.exists?(target)
+          unless overwrite
+            return err("output_path already exists: #{target} — pass overwrite:true to replace it, or choose another path",
+              "INVALID_ARGUMENT", field: "output_path")
+          end
+          # A loose `--db` project lives anywhere; replacing one a gori has open would unlink a
+          # live database. `export_project` refuses the same target.
+          if OpenLock.in_use?(target)
+            return err("output_path is a database open in a running gori instance: #{target}",
+              "INVALID_ARGUMENT", field: "output_path")
+          end
+        end
+        target
       end
 
       # The flow set: the QL query, then the per-flow scope and hide-static lenses. Unconfigured
@@ -470,11 +545,15 @@ module Gori
         bool_arg(h, "hide_static", false) ? QL.and(filter, QL.hide_static) : filter
       end
 
-      private def openapi_yaml?(h) : Bool | Result
+      # `format`, or — when it is not given and the document goes to a file — the file's
+      # extension, the way the TUI's export picks it (`.yaml`/`.yml` → YAML).
+      private def openapi_yaml?(h, destination : String? = nil) : Bool | Result
         case f = str(h, "format").try(&.strip.downcase)
-        when nil, "", "json" then false
-        when "yaml"          then true
-        else                      err("unknown format #{f.inspect} (json|yaml)", "INVALID_ARGUMENT", field: "format")
+        when nil, ""
+          !!destination.try { |d| {".yaml", ".yml"}.includes?(File.extname(d).downcase) }
+        when "json" then false
+        when "yaml" then true
+        else             err("unknown format #{f.inspect} (json|yaml)", "INVALID_ARGUMENT", field: "format")
         end
       end
 
@@ -506,14 +585,20 @@ module Gori
         notes
       end
 
+      # `written` is {path, bytes} when the document went to a file instead of into the reply.
       private def openapi_json(doc : JSON::Any, report : Export::OpenApi::Report, yaml : Bool,
-                               choice : Redact::Policy::Choice?) : String
+                               choice : Redact::Policy::Choice?, written : {String, Int32}? = nil) : String
         paths = doc["paths"]?.try(&.as_h?) || {} of String => JSON::Any
         JSON.build do |j|
           j.object do
             j.field "format", yaml ? "yaml" : "json"
-            j.field "document" do
-              yaml ? j.string(Export::OpenApi.to_yaml(doc)) : doc.to_json(j)
+            if w = written
+              j.field "output_path", w[0]
+              j.field "bytes_written", w[1]
+            else
+              j.field "document" do
+                yaml ? j.string(Export::OpenApi.to_yaml(doc)) : doc.to_json(j)
+              end
             end
             j.field "paths", paths.size
             j.field "operations", paths.sum { |_, item| item.as_h.keys.count { |k| k != "servers" } }
@@ -603,7 +688,7 @@ module Gori
           "query-folding — `scanned` is how many that was — so one folded entry can continue " \
           "onto the next page." do |s|
           s.field "query", strprop("gori QL filter")
-          s.field "limit", intprop("max endpoint rows scanned per page, before query-folding (default 200, max 5000)")
+          s.field "limit", limitprop("max endpoint rows scanned per page, before query-folding", SITEMAP_LIMIT)
           s.field "offset", intprop("skip this many endpoint rows — the page cursor (default 0). The ordering is total, so paging with it is deterministic and reaches every endpoint")
           s.field "fold_query", boolprop("fold the query-string variants of one path into a single entry (default true); false lists one entry per query string")
           s.field "collapse_transport", boolprop("collapse to distinct host/method/target only (legacy shape), dropping scheme/port/version + counts (default false)")
@@ -633,7 +718,7 @@ module Gori
           s.field "max_flows", intprop("newest matching flows to read (default 2000, max 20000)")
           s.field "samples", intprop("distinct sample values kept per parameter (default 5, max 50)")
           s.field "include_sensitive", boolprop("return cookie / credential / token sample values instead of [REDACTED] (default false)")
-          s.field "limit", intprop("max rows per page (default 200, max 2000)")
+          s.field "limit", limitprop("max rows per page", PARAMS_LIMIT)
           s.field "offset", intprop("skip this many rows (default 0)")
           s.field "strict", boolprop("reject a query with an unrecognized/invalid term (default false)")
           s.field "lenient", boolprop("free-text an unknown `field:` instead of refusing the query (default false)")
@@ -641,7 +726,8 @@ module Gori
 
         tool j, "export_openapi",
           "The captured API as an OpenAPI 3.0.3 document, returned inline (`document`: an object, " \
-          "or a YAML string with format:yaml). Paths are templated (/users/123 -> " \
+          "or a YAML string with format:yaml) — or written to `output_path` on the MCP server's " \
+          "filesystem, keeping it out of the reply. Paths are templated (/users/123 -> " \
           "/users/{userId}); query/header/cookie parameters are `required` only when every sample " \
           "carried them; request bodies and responses per status carry JSON schemas inferred from " \
           "the samples; credentials become securitySchemes and their values are never included. " \
@@ -656,21 +742,23 @@ module Gori
           s.field "host", strprop("only this host (exact, case-insensitive) — one API per document")
           s.field "origin", strprop("only this origin — scheme, host and port, e.g. http://127.0.0.1:19021 (instead of host)")
           s.field "path_prefix", strprop("only endpoints whose path starts with this, e.g. /api/v1")
-          s.field "format", strprop("json (default) or yaml")
+          s.field "format", strprop("json (default) or yaml; with output_path, a .yaml/.yml extension picks yaml")
+          s.field "output_path", strprop("write the document to this file instead of returning it (refused under --read-only; the parent directory must exist; not inside gori's home). max_bytes then defaults to its maximum")
+          s.field "overwrite", boolprop("with output_path, replace an existing file (default false: refused)")
           s.field "include_gori", boolprop("keep the requests gori itself sent — Repeater, Fuzzer, Miner, Discover… (default false: a brute force or a fuzz run would describe gori's probing, not the API)")
           s.field "examples", boolprop("add example values from one sample each, redacted through the profile (default false)")
           s.field "redact", strprop("redaction profile the examples pass through (default: the project's, else the global one, else `default`); needs examples:true")
           s.field "max_endpoints", intprop("operations kept (default 200, max 2000)")
           s.field "max_samples", intprop("flows read per operation (default 10, max 50)")
           s.field "max_flows", intprop("newest flows read in all (default 5000, max 20000)")
-          s.field "max_bytes", intprop("largest document, measured as compact JSON; whole paths past it are dropped (default 262144, max 2097152)")
+          s.field "max_bytes", intprop("largest document, measured as compact JSON; whole paths past it are dropped (default #{OPENAPI_INLINE_BYTES} inline, #{OPENAPI_MAX_BYTES} with output_path; max #{OPENAPI_MAX_BYTES})")
           s.field "strict", boolprop("reject a query with an unrecognized/invalid term (default false)")
           s.field "lenient", boolprop("free-text an unknown `field:` instead of refusing the query (default false)")
         end
 
         tool j, "list_sitemap_tags",
           "List the free-text memos the operator pinned onto sitemap paths, as " \
-          "[{host, path, tag}]. These are the same tags list_sitemap stamps onto its entries." do |s|
+          "{items:[{host, path, tag}]}. These are the same tags list_sitemap stamps onto its entries." do |s|
           s.field "host", strprop("only list tags on this host")
         end
 

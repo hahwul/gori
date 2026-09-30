@@ -39,9 +39,9 @@ module Gori
     #   cache), `grpc_forget` mutates the same row. `move_repeater` is here for the same
     #   reason `move_color_rule` is: order is what the operator navigates by, so an agent
     #   that rearranges the strip has changed something the human will notice and should be
-    #   able to trace. `probe_scan` is the one call-shaped case — a READ tool whose
-    #   `active: true` mode sends real requests — and is decided per call in
-    #   `Tools#agent_action?`, not here.
+    #   able to trace. `probe_scan` and `export_openapi` are the call-shaped cases — READ tools
+    #   whose `active: true` / `persist: true` (probe_scan) or `output_path` (export_openapi)
+    #   sends or writes — and are decided per call in `Tools#agent_action?`, not here.
     #
     # - `env_refresh` — R2-3: a tool that READS or WRITES the per-project `$KEY` env vars.
     #   Env vars live in a process-global (Settings.project_env_vars) loaded once at bind
@@ -74,7 +74,8 @@ module Gori
     #     report on is, not because they change anything.
     #   - `read_only: false` on an UNGATED writer — the handful that gate themselves instead
     #     of being gated: `switch_project` and `create_project` (so install-and-use works on
-    #     a fresh machine), `probe_scan` (whose `active: true` mode SENDS), and
+    #     a fresh machine), `probe_scan` (whose `active: true` mode SENDS and `persist: true`
+    #     writes), `export_openapi` (whose `output_path` writes a file), and
     #     `operator_messages`, which can write delivery rows when actions are allowed.
     #
     #   `read_only: true` with `agent_action: true` is a contradiction the macro refuses: an
@@ -104,7 +105,8 @@ module Gori
     #   the ones that are deliberately unswitched: the operator channel (`operator_messages`,
     #   `reply_to_operator`, `ask_operator`). A tool whose one mode sends sits in its own group AND is refused
     #   per call under `send` (`Tools#call_denied_permission`): `probe_scan`'s `active: true`,
-    #   and `set_probe_mode` raising the mode to one that probes actively.
+    #   and `set_probe_mode` raising the mode to one that probes actively. Likewise under
+    #   `write`: `export_openapi`'s `output_path`, the one argument that makes a read tool write.
     annotation Tool
     end
   end

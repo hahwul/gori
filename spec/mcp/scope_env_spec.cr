@@ -155,7 +155,7 @@ describe Gori::MCP::Server do
         id = mcp_tool_payload(mcp_drive(store, add)[0])["id"].as_i64
         id.should be > 0
 
-        listed = mcp_tool_payload(mcp_drive(store, %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_host_overrides"}}))[0]).as_a
+        listed = mcp_tool_payload(mcp_drive(store, %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_host_overrides"}}))[0])["items"].as_a
         listed.size.should eq(1)
         listed[0]["ip"].as_s.should eq("10.0.0.1")
 

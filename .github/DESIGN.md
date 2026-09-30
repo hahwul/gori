@@ -4502,6 +4502,38 @@ Fuzzer or Miner run replays BEFORE a candidate. It adds no extraction and no inj
   printed, the `macro`-sourced History rows, and the `macro:`-prefixed rows of any candidate it
   failed.
 
+### 2026-09-30: a profile may serve a tool in one mode, and one table spells every argument alias (#1392–#1395)
+
+Refines: [P1](#p1), [P4](#p4). `gori mcp` — `ToolFilter`, `Tools#tool`, `Tools#call`.
+
+- **A profile can withhold arguments, and naming the tool lifts it.** `@recon` needed the passive
+  `probe_scan` that fills the triage list it already carried, and not the active half that sends.
+  Splitting the tool in two would have grown every catalogue to serve one profile, so a `Profile`
+  carries `withheld` (tool → arguments): they leave that tool's emitted schema, so the argument
+  validator — harvested from the same output — refuses them with no second list, and `Tools#call`
+  answers a SET one with `TOOL_DISABLED` naming the spec (a `false` is dropped, since it asks for
+  the mode that is served). The description has to follow the schema, or it advertises a refused
+  mode. Any other term that selects the tool (a name, a glob, the "everything" a leading
+  subtraction starts from) serves it whole: the profile is a default, the operator's term a decision.
+- **Aliases are one table, advertised and folded, never `required`.** `Tools::ARG_ALIASES` names
+  alias → canonical per tool. `tool` emits the alias as a copy of the canonical's schema (every
+  schema is `additionalProperties:false`, so an unadvertised alias is refused client-side) and
+  drops the canonical from `required`, because "one of these two" is not expressible at the top
+  level in the schema subset clients accept and `required: ["id"]` rejects `{flow_id}`; `call`
+  enforces the requirement instead, naming both. `call` folds the alias before dispatch, so no
+  handler knows aliases exist; two spellings with different values are refused.
+- **A read tool may write per call, and is then treated as a writer for that call.** `probe_scan`
+  (`active`, now `persist`) was the one case; `export_openapi{output_path}` joins it. Such a tool
+  is `read_only: false`, refused per call under `--read-only` and under the permission group the
+  mode belongs to (`call_denied_permission`), and logged as an agent action per call
+  (`agent_action?`) — while its report-only mode stays served everywhere.
+- **The default body is small only when the rest is reachable.** `get_flow` and a recorded or saved
+  `send_request` inline `AUTO_BODY_BYTES` of a body when the call names no size, with a `more`
+  pointer to `get_response_body_chunk`. An unrecorded send keeps the full default: cutting a body
+  there would leave its tail nowhere to be paged from. `outputSchema` and a shorter text form were
+  declined: MCP says structured output SHOULD be mirrored in text, and gori declares no schema
+  the `{items}` wrapper could contradict (see `Server#emit_structured`).
+
 ### 2026-09-30: a Sitemap root is an origin, and a tag still belongs to the host (#1371)
 
 Refines: [P3](#p3), [P7](#p7). #1371, #1372.

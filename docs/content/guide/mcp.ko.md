@@ -75,7 +75,7 @@ gori mcp --read-only
 |------|------------------|
 | **Send traffic** | 대상이나 OAST 서버로 요청을 보내는 모든 도구와, 그 도구가 시작한 작업의 폴러: `send_request`, `send_websocket`, `race_requests`, `timing_requests`, `fuzz_*`, `mine_*`, `discover_*`, `authorize_*`, `sequence_*`(`sequence_analyze` 제외), `run_retest`, `minimize_repeater`, `cache_deception_check`, `grpc_reflect`, `refresh_session_slot`, `oast_*`(`oast_presets` 제외), `list_jobs` / `get_job` / `stop_job`, `active:true`인 `probe_scan`, `active`나 `aggressive`로 올리는 `set_probe_mode` |
 | **Intercept control** | `intercept_forward`, `intercept_forward_edit`, `intercept_drop`, `intercept_toggle`, `intercept_set_filter`, `intercept_set_direction` |
-| **Edit project data** | 그 밖의 프로젝트 쓰기 전부: 이슈, 노트, repeater, 규칙, env, host override, 세션 슬롯, evidence, 링크, 뷰, 저장된 wordlist(`save_wordlist`, `rename_wordlist`, `delete_wordlist`: 프로젝트가 아니라 전역 카탈로그), probe 스캔과 판정(수동 `probe_scan`도 찾은 결과를 기록합니다), JavaScript 엔드포인트 스캔(`scan_js_endpoints`는 읽은 것을 저장할 뿐 요청은 보내지 않습니다), flow·히스토리 삭제 |
+| **Edit project data** | 그 밖의 프로젝트 쓰기 전부: 이슈, 노트, repeater, 규칙, env, host override, 세션 슬롯, evidence, 링크, 뷰, 저장된 wordlist(`save_wordlist`, `rename_wordlist`, `delete_wordlist`: 프로젝트가 아니라 전역 카탈로그), probe 스캔과 판정(수동 `probe_scan`도 찾은 결과를 기록합니다), OpenAPI 문서의 파일 쓰기(`export_openapi`의 `output_path`. 인라인 문서는 꺼지지 않습니다), JavaScript 엔드포인트 스캔(`scan_js_endpoints`는 읽은 것을 저장할 뿐 요청은 보내지 않습니다), flow·히스토리 삭제 |
 | **Change scope & sandbox** | `add_scope_rule`, `update_scope_rule`, `delete_scope_rule`, `set_scope_enabled`, `set_sandbox`(`list_scope`는 계속 제공) |
 | **Manage projects** | `create_project`, `switch_project`, `delete_project`, `import_project`, `export_project` |
 
@@ -89,10 +89,10 @@ gori mcp --read-only
 
 | 시작 방법 | 도구 | `tools/list` | 토큰 | 용도 |
 | --- | ---: | ---: | ---: | --- |
-| `gori mcp` | 195 | ~232 KB | ~59k | 전부 (기본값) |
-| `--read-only` | 64 | ~73 KB | ~19k | 읽기 도구와 순수 연산; 실제 요청 전송 없음 |
-| `--tools=@recon` | 38 | ~56 KB | ~14k | 캡처를 읽고 파악, 요청 재전송, 이슈·노트 기록 |
-| `--tools=@recon --read-only` | 28 | ~39 KB | ~10k | `--read-only`가 끄는 도구를 뺀 `@recon` |
+| `gori mcp` | 195 | ~243 KB | ~62k | 전부 (기본값) |
+| `--read-only` | 64 | ~75 KB | ~19k | 읽기 도구와 순수 연산; 실제 요청 전송 없음 |
+| `--tools=@recon` | 39 | ~59 KB | ~15k | 캡처를 읽고 파악, 패시브 스캔, 요청 재전송, 이슈·노트 기록 |
+| `--tools=@recon --read-only` | 29 | ~42 KB | ~11k | `--read-only`가 끄는 도구를 뺀 `@recon` |
 | `--tools=@minimal` | 18 | ~28 KB | ~7k | History와 flow, 현재 TUI 컨텍스트를 읽고 오퍼레이터와 대화 |
 
 토큰은 바이트 ÷ 4로 잡은 JSON 어림값이며, 실제 값은 클라이언트의 토크나이저가 정합니다.
@@ -100,9 +100,11 @@ gori mcp --read-only
 | 프로필 | 도구 |
 | --- | --- |
 | `@minimal` | `project_info`, `list_projects`, `switch_project`, `create_project`, `ql_reference`, `ql_explain`, `list_history`, `get_flow`, `get_response_body_chunk`, `get_current_context`, `get_repeater_context`, `get_issue`, `list_sitemap`, `intercept_get`, `intercept_list`, `operator_messages`, `reply_to_operator`, `ask_operator` |
-| `@recon` | `@minimal`에 더해 `list_scope`, `list_params`, `list_js_endpoints`, `scan_js_endpoints`, `compare_flows`, `list_env`, `decode`, `jwt_decode`, `jwt_verify`, `probe_issues`, `probe_promote`, `probe_dismiss`, `list_issues`, `list_notes`, `get_note`, `send_request`, `create_issue`, `update_issue`, `create_note`, `update_note` |
+| `@recon` | `@minimal`에 더해 `list_scope`, `list_params`, `list_js_endpoints`, `scan_js_endpoints`, `compare_flows`, `list_env`, `decode`, `jwt_decode`, `jwt_verify`, `probe_scan`(패시브만), `probe_issues`, `probe_promote`, `probe_dismiss`, `list_issues`, `list_notes`, `get_note`, `send_request`, `create_issue`, `update_issue`, `create_note`, `update_note` |
 
 프로필은 글롭이 아니라 고정된 이름 목록이므로, 이후 버전이 `list_*` 도구를 추가해도 `@recon`이 조용히 커지지 않습니다. 둘 다 `switch_project`와 `create_project`를 포함하므로, 프로젝트가 하나도 없는 머신에서 바인딩 없이 시작해도 동작합니다.
+
+`@recon`은 `probe_scan`을 패시브로만 제공합니다. `active`, `allow_unscoped`, `unsafe`, `aggressive`, `insecure` 인자는 스키마에서 빠지고, 그중 하나를 켠 호출은 `TOOL_DISABLED`로 거절됩니다. 도구 전체를 쓰려면 스펙에 이름을 적으세요(`--tools='@recon,probe_scan'`).
 
 `--tools`는 도구 이름, `*` 글롭, `@프로필`을 쉼표로 나열한 것이고 왼쪽부터 적용됩니다. `-`를 앞에 붙인 항목은 빼냅니다:
 
@@ -164,6 +166,8 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 
 **읽기 도구**(`--read-only`에서도 사용 가능. 단, 다음 다섯 가지 `scan_js_endpoints`, `oast_payload`, `oast_poll`, `reply_to_operator`, `ask_operator`는 제외):
 
+두 도구가 같은 대상을 다르게 부르는 곳에서는 두 이름을 모두 받습니다. `get_flow` / `delete_flow`의 `id` 대신 `flow_id`, repeater 도구의 `id` 대신 `repeater_id`(그리고 `minimize_repeater`의 `repeater_id` 대신 `id`), `intercept_toggle`의 `enable` 대신 `enabled`. 모든 `limit`은 기본값과 최댓값을 스키마(`default`, `minimum`, `maximum`)에 싣습니다.
+
 | 도구 | 용도 |
 |------|---------|
 | `list_history` | 최신순으로 플로우 나열, 선택적 QL과 페이지네이션 포함. 각 행에 `source`가 실립니다(클라이언트가 보낸 트래픽은 `proxy`, `send_request`(기본으로 기록됩니다)는 `repeater`, 그 밖에 `discover`·`import` …). 그래서 gori가 만든 플로우가 대상에 대한 증거로 잘못 읽히지 않습니다. `src:`로 필터링합니다. `columns`에 `gori run ls --column`과 같은 `[LABEL=][req\|res:]kind:selector` 스펙을 주면 행마다 추출한 값(헤더, JSON 필드, 정규식 캡처)을 `columns` 객체로 함께 싣습니다. QL로 *거를* 수는 있어도 볼 수는 없던 값을 [보여 주는](/ko/guide/proxy/#columns) 쪽입니다. 행마다 읽기가 한 번 늘어나므로 명시할 때만 동작합니다. `hide_static:true`는 TUI의 정적 파일 숨기기 렌즈(`-static:true`)와 같아서 정적 자산(이미지, 폰트, 오디오/비디오)을 뺍니다. `list_sitemap`과 `list_params`도 같은 인자를 받습니다. `ids`를 주면 정확히 그 집합을 한 번에 가져옵니다 — `get_current_context`가 `selection.ids`로 돌려주는, 사용자가 마크한 행들입니다. 요청한 순서 그대로 오고, `limit`과 두 커서는 적용되지 않으며, 행이 없는 id는 `missing_ids`로, `query`가 뺀 것은 `filtered_out_ids`로 이름을 부릅니다. 답이 짧으면 어느 쪽 때문에 짧은지 항상 말해 줍니다 |
@@ -172,14 +176,14 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `reply_to_operator` | gori의 오퍼레이터에게 답합니다. `summary`는 알림 링과 Miss Ring 말풍선에 보이는 한 줄, `detail`은 링에서 ↵로 여는 긴 본문, `level`은 색, `in_reply_to`는 답하는 오퍼레이터 메시지 id입니다. 여러분의 터미널이 아니라 gori에 있는 사람에게 답이 닿는 방법입니다 — 알림이므로 그 프로젝트에 gori TUI가 열려 있으면 바로 뜨고, 닫혀 있었다면 다음에 열 때 노트 하나로 요약됩니다 |
 | `ask_operator` | gori의 오퍼레이터에게 결정을 선택 카드로 묻습니다. `question`은 한 줄, `choices`는 2~4개의 라벨, `detail`은 선택적인 설명, `default`는 카드가 처음 가리키는 선택지, `expires_in_minutes`는 기다리는 시간(기본 30분)입니다. 질문 `id`를 담아 바로 반환하고, 답은 나중에 `in_reply_to`가 그 id이고 `outcome`이 `answered`, `dismissed`, `expired` 중 하나인 오퍼레이터 메시지로, `operator_messages`가 다루는 모든 경로를 타고 돌아옵니다. 결과에는 `reply_to_operator`처럼 `tui`가 실립니다 |
 | `list_views` | 프로젝트의 History [뷰](/ko/guide/proxy/#views). `list_history{view}`가 렌즈로 적용하는 이름 붙은 QL 쿼리로, `query`를 대체하지 않고 그 위에 AND로 얹힙니다. 기본 뷰 7종(`All`, `History`, `History + Repeater`(기본값), `WebSocket`, `gRPC`, `SSE`, `Errors`) → 글로벌 라이브러리 → 프로젝트 순이며, `active`는 TUI가 보고 있는 뷰를 표시할 뿐 `list_history`에 적용되지 **않습니다**. 그쪽은 넘긴 `view`로만 거릅니다 |
-| `get_flow` | 한 플로우의 전체 요청 + 응답. [리댁션 프로파일](/ko/reference/cli/#run-redact)이 기본 적용된 곳에서는 본문이 정제되어 `body_redaction` 객체와 함께 돌아옵니다. `include_sensitive:true`는 헤더 리댁션과 함께 그것도 끕니다 |
+| `get_flow` | 한 플로우의 전체 요청 + 응답. 본문은 기본적으로 8 KB까지 인라인되고, 더 길면 잘린 자리에 나머지를 읽을 `get_response_body_chunk` 호출을 알려 주는 `more` 필드가 붙습니다(`body_mode:"full"`은 64 KB까지). [리댁션 프로파일](/ko/reference/cli/#run-redact)이 기본 적용된 곳에서는 본문이 정제되어 `body_redaction` 객체와 함께 돌아옵니다. `include_sensitive:true`는 헤더 리댁션과 함께 그것도 끕니다 |
 | `get_response_body_chunk` | 인라인 64 KiB 상한을 넘는 디코드(또는 원시) 플로우/Repeater 응답을 페이지 단위로 조회 |
-| `list_sitemap` / `list_sitemap_tags` | 고유 엔드포인트(host, method, path)와 거기에 달린 태그 |
+| `list_sitemap` / `list_sitemap_tags` | 고유 엔드포인트(host, method, path, 기본 한 페이지 50개)와 거기에 달린 태그 |
 | `list_js_endpoints` / `scan_js_endpoints` | 캡처된 JavaScript가 참조하지만 요청이 닿지 않은 엔드포인트와, 각각을 읽어 온 플로우, 줄, 문자열. 스캔은 새 JS/HTML 응답을 읽을 뿐 요청은 보내지 않습니다. `list_sitemap`에 `include_unrequested:true`를 주면 `unrequested`로 함께 나옵니다 |
 | `list_params` | 엔드포인트별 파라미터 목록: 위치별 입력 이름, 등장 횟수, 샘플 값(자격 증명은 가림), 응답에 값이 반사되는지 여부. 행마다 `scheme`, `host`, `port`가 실리고, `origin`(`http://127.0.0.1:19021`)으로 한 호스트의 서비스 하나만 고를 수 있어요 |
-| `export_openapi` | 캡처된 API를 OpenAPI 3.0.3 문서로 바로 돌려줘요(JSON 객체, `format:"yaml"`이면 YAML). 템플릿 경로, 파라미터, 추론한 요청·응답 스키마, servers, 보안 스킴이 들어가요. `host`로 호스트를 좁히듯 `origin`으로 스킴·호스트·포트 하나로 좁힐 수 있어요. 자격 증명 값은 넣지 않고, 예시 값은 `examples:true`일 때만 가려서 넣어요. `max_endpoints`와 `max_bytes`로 크기를 제한하고, 잘리면 `truncated`로 알려줘요. `@recon` 크기 예산을 넘겨서 전체 카탈로그에만 있어요 |
+| `export_openapi` | 캡처된 API를 OpenAPI 3.0.3 문서로 바로 돌려줘요(JSON 객체, `format:"yaml"`이면 YAML). 템플릿 경로, 파라미터, 추론한 요청·응답 스키마, servers, 보안 스킴이 들어가요. `host`로 호스트를 좁히듯 `origin`으로 스킴·호스트·포트 하나로 좁힐 수 있어요. 자격 증명 값은 넣지 않고, 예시 값은 `examples:true`일 때만 가려서 넣어요. `max_endpoints`와 `max_bytes`로 크기를 제한하고, 잘리면 `truncated`로 알려줘요. `output_path`를 주면 응답 대신 파일로 써요(`--read-only`에서는 거절, gori 홈 안은 불가, 기존 파일은 `overwrite:true`일 때만 덮어써요). `@recon` 크기 예산을 넘겨서 전체 카탈로그에만 있어요 |
 | `list_issues` / `get_issue` | 트리아지된 이슈 읽기 |
-| `probe_scan` | 캡처된 플로우와 Repeater 탭 재스캔. `active:true`가 아니면 패시브(요청 0건)이고, 액티브는 쓰기 권한이 필요하며 스코프 게이트를 거침 |
+| `probe_scan` | 캡처된 플로우와 Repeater 탭 재스캔. `active:true`가 아니면 패시브(요청 0건)이고, 액티브는 쓰기 권한이 필요하며 스코프 게이트를 거침. `persist:true`면 찾은 결과를 라이브 스캐너와 같은 방식으로 합쳐 `probe_issues`가 읽는 판정 목록에도 기록(`--read-only`에서는 거절) |
 | `probe_issues` | Probe 탭에 저장된 발견 항목을 트리아지 상태로 조회(기본은 open만) |
 | `list_probe_rules` | 모든 스캔 규칙(패시브, 액티브, 커스텀)과 활성화 여부, 프로젝트의 스캔 모드 |
 | `list_scope` | 현재 스코프 include/exclude 규칙 |
@@ -211,7 +215,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `oast_presets` / `oast_payload` / `oast_poll` | OAST 프로바이더 나열, 세션(`session_id`)의 새 페이로드 URL 발급, 실행 중인 리스너의 콜백 폴링 |
 | `project_info` | 플로우 / 이슈 개수, 캡처 구간, 프로젝트 `description`, 데이터베이스, 워크스페이스 바인딩, 선택 출처 |
 | `get_current_context` | 사용자가 지금 TUI에서 보고 있는 것, **그리고 무엇을 선택했는지**. `selection.ids`는 History / Issues / Sitemap / Intercept에서 마크한 행이고, 마크가 없으면 커서 행, 디테일이 열려 있으면 거기 고정된 플로우입니다. `target_source`가 셋 중 무엇인지 말해 주므로 에이전트가 규칙을 다시 유도할 필요가 없습니다. Sitemap은 플로우 id가 아니라 `{host, path}` 쌍을 고르며 `kind`가 그걸 알려 줍니다. 배열이 잘렸다는 신호는 `truncated` 하나뿐입니다 — `marked_count`는 마크 집합을 말하는 값이라 드릴인이 그걸 덮어쓴 경우에도 그대로 실립니다. `marks_elsewhere`는 이 selection이 싣지 못한 마크가 어느 탭에 있는지를(`tab`과 개수, 그리고 그 마크에 kind가 있을 때만 `kind`), `tui.live`는 gori TUI 창이 붙어 있는지를 말합니다 — 증거이지 증명은 아닙니다. History 선택은 `list_history{ids}`에 그대로 넘기면 됩니다. 그 선택이 걸러진 History 렌즈(`query`, `view`, `scope_lens`, `hide_static`)도 함께 오므로, 에이전트가 사용자가 보는 목록을 그대로 나열할 수 있습니다 |
-| `get_repeater_context` | Repeater 워크벤치 상태와 저장된 세션. 세션마다 id를 **둘 다** 싣습니다(모든 repeater 툴이 받는 `db_id`, 그리고 TUI가 서브탭 칩에 그리는 1-based 번호 `tui_index`(`6:POST /api`)). 그래서 에이전트와 사용자가 같은 탭을 같은 이름으로 부릅니다. `filter`는 TUI의 `/`와 같은 서브탭 문법(`tag:` `name:` `host:` `method:` `status:`, `-`는 부정, 맨 단어는 검색)이고 `query`와 AND로 묶입니다. `include_content`는 요청 헤드와 함께, 자격증명 헤더마다 비밀값 없이 배선만 밝히는 `env_headers` 모양(`Authorization: Bearer $ENV.AUTH`)을 줍니다. `include_response_body`는 저장된 마지막 응답 본문을 인라인합니다 |
+| `get_repeater_context` | Repeater 워크벤치 상태와 저장된 세션. 세션마다 id를 **둘 다** 싣습니다(모든 repeater 툴이 받는 `id`(`db_id`로도 실림), 그리고 TUI가 서브탭 칩에 그리는 1-based 번호 `tui_index`(`6:POST /api`)). 그래서 에이전트와 사용자가 같은 탭을 같은 이름으로 부릅니다. `filter`는 TUI의 `/`와 같은 서브탭 문법(`tag:` `name:` `host:` `method:` `status:`, `-`는 부정, 맨 단어는 검색)이고 `query`와 AND로 묶입니다. `include_content`는 요청 헤드와 함께, 자격증명 헤더마다 비밀값 없이 배선만 밝히는 `env_headers` 모양(`Authorization: Bearer $ENV.AUTH`)을 줍니다. `include_response_body`는 저장된 마지막 응답 본문을 인라인합니다 |
 | `list_fuzz_runs` / `get_fuzz_run` | 영구 Fuzzer 결과 집합을 나열하고 들여다봅니다. 지표는 `result_index`를 포함해 스칼라 전용 투영을 쓰므로 보관된 BLOB을 읽지 않습니다. `include_content:true`는 SQLite에서 상한이 걸린 접두 바이트로 최대 25행을 돌려줍니다. `max_head_bytes`(기본 16 KiB, 최대 64 KiB)가 헤드를, `max_body_bytes`(기본 2 KiB, 최대 64 KiB)가 디코딩된 본문/원시 표본을 제한합니다. 원본 전체 크기와 헤드/원본/디코딩 절단 플래그가 무엇이 빠졌는지 말해 주며, `include_sensitive:true`는 상한이 걸린 정확한 접두 바이트를 선택하는 것이지 무제한 바이트가 아닙니다. 현재 형식 이전 스냅숏은 실행 메타데이터에 `legacy:true`로 표시되고, `condition_met` 실행은 `stop_on`이 걸린 결과를 `stop_index`로 밝힙니다 — 그대로 `result_index`로 넘기면 됩니다(기록되지 않았으면 null이며, `fuzz_status`도 같은 필드를 실시간으로 보고합니다). `clusters:true`는 실행을 응답 모양으로 묶어 페이지 단위로, `cluster:"<id>"`는 그 묶음의 행을 돌려주며 `fuzz_results`와 똑같이 동작합니다 |
 | `ql_reference` | 쿼리 언어 레퍼런스 |
 | `ql_explain` | 쿼리를 실행하지 않고 진단. 요청을 쓰기 전에 필터를 점검할 때 사용 |
@@ -245,7 +249,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `grpc_reflect` / `grpc_forget` | 대상의 `grpc.reflection.v1`(없으면 `v1alpha`)에 디스크립터를 요청해 프로젝트에 캐시하거나, 캐시된 대상을 버립니다. `grpc_reflect`는 아웃바운드 전송이므로 다른 것들과 똑같이 스코프 게이트를 지납니다. `persisted: false`는 쓰기가 커밋되지 않았다는 뜻입니다(다른 gori가 라이터를 쥐고 있음). 리플렉션으로 가져온 스키마는 이 서버가 끝날 때까지 적용되고, `grpc_schema`에 나오며 `grpc_forget`으로 버릴 수 있습니다. 커밋되지 않은 forget은 이 서버가 그 대상으로 렌더하는 것만 멈추고 저장된 행은 남으므로, `grpc_schema`에는 계속 나옵니다 |
 | `create_view` / `update_view` / `delete_view` | 저장된 History [뷰](/ko/guide/proxy/#views) 생성, 편집, 스코프 이동, 삭제. 각각 `scope`를 받습니다: `project`(기본값) 또는 `global`. 쿼리는 들어올 때 검사합니다. 모든 항이 버려질 쿼리는 거절하는데, 아무것도 좁히지 못하면서 모든 표면의 칩은 좁히고 있다고 주장하게 되기 때문입니다 |
 | `preview_rule` | 규칙을 만들기 전에, 저장된 플로우 중 몇 개가 바뀌었을지 추정 |
-| `import_flows` | HAR / URL 목록 / OpenAPI / Postman / Insomnia / Burp / WSDL 파일, 또는 curl 명령(`kind: "curl"`, 파일이나 `text`로)을 History로 일괄 임포트 |
+| `import_flows` | HAR / URL 목록 / OpenAPI / Postman / Insomnia / Burp / WSDL 문서나 curl 명령을 파일(`path`) 또는 `text`로 받아 History로 일괄 임포트. 임포트는 중복을 제거하지 않으며, 같은 이름의 파일에서 온 플로우가 이미 있으면 `notes`가 알려 줍니다 |
 | `delete_flow` / `clear_history` | 플로우 하나 삭제, 또는 캡처된 History 전체 삭제 |
 | `set_sitemap_tag` | Sitemap 경로에 자유 형식 메모 고정 |
 | `create_project` / `switch_project` / `delete_project` | 프로젝트 생성 또는 다시 열기, 이 서버를 다른 프로젝트로 전환, 프로젝트 삭제. 삭제는 2단계로, `dry_run` 후 확인 토큰 필요 |
@@ -270,7 +274,7 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `discover_start` / `discover_status` / `discover_results` / `discover_stop` | 엔드포인트 스파이더링 & 브루트포스, 진행 상황 폴링, 결과 조회. 네 개 모두 액션 도구이므로 읽기 전용 서버에는 Discover 표면이 없습니다 |
 | `oast_start` / `oast_stop` | OAST 페이로드 등록 후 콜백 폴링: 기본은 공개 interactsh 서버, `provider_id`로 저장된 프로바이더, `persist:true`로 재개 가능한 세션(`oast_poll`로 히트 조회). 재개한 세션에 `oast_stop`을 쓰면 폴링만 멈추고 세션은 다시 재개할 수 있게 남습니다 |
 | `oast_resume` / `oast_release` | 저장된 세션을 다시 살려 이전에 심어둔 페이로드가 계속 resolve되게 하고(폴링 결과는 프로젝트에 저장됩니다), 끝난 engagement는 등록 해제합니다. 콜백은 남습니다 |
-| `list_jobs` / `get_job` / `stop_job` | 작업 종류를 가로질러 처리: 이번 세션이 시작한 모든 fuzz, mine, discover, sequence, authorize 작업 나열, 또는 id로 하나를 조회하고 중지 |
+| `list_jobs` / `get_job` / `stop_job` | 작업 종류를 가로질러 처리: 이번 세션이 시작한 모든 fuzz, mine, discover, sequence, authorize 작업 나열, 또는 id로 하나를 조회하고 중지. 이미 끝난 작업을 중지하면 아무것도 바꾸지 않고 `already_finished:true`로 답하며, 종류별 도구에 다른 종류의 id를 주면(`fuzz_results{job_id:"mn_2"}`) 그 id를 읽는 도구를 알려 줍니다 |
 | `intercept_forward` / `intercept_forward_edit` / `intercept_drop` | 홀드된 메시지를 바이트 그대로 내보내거나, 수정한 와이어 바이트로 내보내거나, 드롭 |
 | `intercept_toggle` / `intercept_set_filter` / `intercept_set_direction` | 캐치 활성화 및 해제, 조건 쿼리 설정, 홀드할 방향 선택 |
 
@@ -342,7 +346,7 @@ stateless 리비전에서 따라오는 두 가지는 클라이언트를 만들�
 
 ## 도구 힌트 {#tool-hints}
 
-`tools/list`의 모든 도구는 `annotations.readOnlyHint`를 함께 싣습니다. 이 프로젝트의 캡처를 읽기만 하는 도구와, 캡처에 쓰거나 대상에 트래픽을 보내는 도구를 클라이언트가 구분할 수 있도록 — 즉 사람 확인 없이 돌려도 되는 호출과 물어봐야 하는 호출을 가르기 위해서입니다. 이 힌트는 [`--read-only`](#read-only-mode)가 강제하는 것과 같은 선언에서 유도되므로 힌트와 게이트가 서로 어긋날 수 없고, 둘이 다른 곳은 그 선언이 그렇게 정한 곳뿐입니다. 워크벤치 폴링 도구(`*_status`, `*_results`, `list_jobs`, `get_job`)와 `preview_rule`은 보고만 하므로 `--read-only`에서는 숨겨지지만 읽기 전용으로 표시됩니다. 반대로 `switch_project`, `create_project`, `probe_scan`(`active:true`면 전송함), `operator_messages`(전달 기록을 씀)는 `--read-only`에서도 남지만 읽기 전용으로 표시되지 않습니다. 읽기 전용 도구는 `openWorldHint: false`도 함께 답합니다. 프로젝트 스토어에서 답할 뿐 바깥으로 다이얼하지 않기 때문입니다.
+`tools/list`의 모든 도구는 `annotations.readOnlyHint`를 함께 싣습니다. 이 프로젝트의 캡처를 읽기만 하는 도구와, 캡처에 쓰거나 대상에 트래픽을 보내는 도구를 클라이언트가 구분할 수 있도록 — 즉 사람 확인 없이 돌려도 되는 호출과 물어봐야 하는 호출을 가르기 위해서입니다. 이 힌트는 [`--read-only`](#read-only-mode)가 강제하는 것과 같은 선언에서 유도되므로 힌트와 게이트가 서로 어긋날 수 없고, 둘이 다른 곳은 그 선언이 그렇게 정한 곳뿐입니다. 워크벤치 폴링 도구(`*_status`, `*_results`, `list_jobs`, `get_job`)와 `preview_rule`은 보고만 하므로 `--read-only`에서는 숨겨지지만 읽기 전용으로 표시됩니다. 반대로 `switch_project`, `create_project`, `probe_scan`(`active:true`면 전송, `persist:true`면 기록), `export_openapi`(`output_path`면 파일을 씀), `operator_messages`(전달 기록을 씀)는 `--read-only`에서도 남지만 읽기 전용으로 표시되지 않습니다. 읽기 전용 도구는 `openWorldHint: false`도 함께 답합니다. 프로젝트 스토어에서 답할 뿐 바깥으로 다이얼하지 않기 때문입니다.
 
 ## 한 번에 한 호출 {#one-call-at-a-time}
 

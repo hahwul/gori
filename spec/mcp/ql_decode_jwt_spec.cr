@@ -262,7 +262,7 @@ describe Gori::MCP::Server do
     it "jwt_attacks lists none/weak-secret/header-inject payloads" do
       with_store do |store|
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"jwt_attacks","arguments":{"token":"#{jwt}"}}})
-        cats = mcp_tool_payload(mcp_drive(store, call, allow_actions: false)[0]).as_a.map(&.["category"].as_s).uniq!
+        cats = mcp_tool_payload(mcp_drive(store, call, allow_actions: false)[0])["items"].as_a.map(&.["category"].as_s).uniq!
         cats.should contain("none")
         cats.should contain("weak-secret")
         cats.should contain("header-inject")
@@ -378,8 +378,8 @@ describe Gori::MCP::Server do
         plain = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"jwt_attacks","arguments":{"token":"#{token}"}}})
         keyed = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"jwt_attacks","arguments":{"token":"#{token}","public_key":"#{pem}"}}})
         resps = mcp_drive(store, plain, keyed, allow_actions: false)
-        mcp_tool_payload(resps[0]).as_a.map(&.["category"].as_s).should_not contain("alg-confusion")
-        mcp_tool_payload(resps[1]).as_a.map(&.["category"].as_s).should contain("alg-confusion")
+        mcp_tool_payload(resps[0])["items"].as_a.map(&.["category"].as_s).should_not contain("alg-confusion")
+        mcp_tool_payload(resps[1])["items"].as_a.map(&.["category"].as_s).should contain("alg-confusion")
       end
     end
 

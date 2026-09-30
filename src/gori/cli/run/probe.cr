@@ -51,6 +51,8 @@ module Gori
         insecure = false
         lenient = false
         in_scope = false
+        persist = false
+        persist_failed = false
         positional = [] of String
 
         parser = OptionParser.new do |p|
@@ -83,6 +85,7 @@ module Gori
           # way to say otherwise.
           p.on("-k", "--insecure-upstream", "With --active, do not verify upstream TLS certificates") { insecure = true }
           p.on("--lenient", "Don't refuse a query naming an unknown field — search that token as text (old behaviour)") { lenient = true }
+          p.on("--persist", "Also write the findings into the project's persisted list (what `probe issues` and the TUI Probe tab show), merged as the live scanner merges them") { persist = true }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
@@ -168,11 +171,23 @@ module Gori
           # skips have to be reported — otherwise a partial scan prints the same summary as a
           # complete one and reads as "clean".
           scan_errors = [] of String
+          writer = persist ? Probe::Scan::Persist.new : nil
           dets, rn = Probe::Scan.scan_all(store, ids, active: active, scope: scope,
             verify_upstream: !insecure,
             allow_unscoped: allow_unscoped, opts: opts, rules: cfg, progress: probe_progress_meter(meter),
-            on_error: ->(where : String, ex : Exception) { scan_errors << "#{where}: #{ex.message}"; nil })
+            on_error: ->(where : String, ex : Exception) { scan_errors << "#{where}: #{ex.message}"; nil },
+            persist: writer)
           STDERR.print "\r\e[K" if meter # clear the in-place meter before the summary line
+          if w = writer
+            # Every finding is written, before --severity/--category/--in-scope narrow the
+            # report below — the same rule MCP `probe_scan{persist}` keeps.
+            if w.committed?
+              STDERR.puts "gori run probe: persisted #{w.detections} detection#{w.detections == 1 ? "" : "s"} (see `gori run probe issues`)"
+            else
+              persist_failed = true
+              STDERR.puts "gori run probe: the findings were NOT persisted (store busy or unwritable) — the report below is complete; re-run with --persist to write them"
+            end
+          end
           unless scan_errors.empty?
             n = scan_errors.size
             STDERR.puts "gori run probe: #{n} item#{n == 1 ? "" : "s"} skipped after an error " \
@@ -197,6 +212,9 @@ module Gori
           groups = groups.select { |g| scope.host_in_scope?(g.host) }
         end
         report_probe(groups, flow_n, repeater_n, format, query, min_sev, category, in_scope)
+        # After the report, which is complete either way, and non-zero: a script that asked for
+        # the write must not read exit 0 as "the findings are in the project".
+        exit 1 if persist_failed
       end
 
       # The sentence an active scan owes an operator whose ENABLED out-of-band rules cannot run,

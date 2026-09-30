@@ -771,15 +771,17 @@ module Gori
                                 ws_msgs : Array(Store::WsMessage) = [] of Store::WsMessage,
                                 include_sensitive : Bool = false,
                                 body_cap : Int32 = MAX_TEXT, body_omit : Bool = false,
-                                redaction : RedactionNote? = nil) : String
-        JSON.build { |j| flow_detail(j, detail, ws_msgs, include_sensitive, body_cap, body_omit, redaction) }
+                                redaction : RedactionNote? = nil, body_more : {String, String}? = nil) : String
+        JSON.build { |j| flow_detail(j, detail, ws_msgs, include_sensitive, body_cap, body_omit, redaction, body_more) }
       end
 
+      # `body_more` is the {request, response} pointer a display-capped body carries
+      # (`emit_body`'s `more`).
       def self.flow_detail(j : JSON::Builder, detail : Store::FlowDetail,
                            ws_msgs : Array(Store::WsMessage) = [] of Store::WsMessage,
                            include_sensitive : Bool = false,
                            body_cap : Int32 = MAX_TEXT, body_omit : Bool = false,
-                           redaction : RedactionNote? = nil) : Nil
+                           redaction : RedactionNote? = nil, body_more : {String, String}? = nil) : Nil
         row = detail.row
         j.object do
           j.field "id", row.id
@@ -833,14 +835,16 @@ module Gori
           # recovers the wire size by subtracting the head from the row total.
           emit_body(j, "request_body", detail.request_head, detail.request_body,
             detail.request_body_truncated?, body_cap, body_omit, include_sensitive,
-            source_size: detail.request_body_truncated? ? detail.request_wire_body_size : nil)
+            source_size: detail.request_body_truncated? ? detail.request_wire_body_size : nil,
+            more: body_more.try(&.[0]))
           j.field "response_head", redact_head_opt(head_text(detail.response_head), include_sensitive)
           emit_head_base64(j, "response_head", detail.response_head, include_sensitive)
           j.field "sensitive_headers_redacted", true unless include_sensitive
           emit_redaction_note(j, redaction)
           emit_body(j, "response_body", detail.response_head, detail.response_body,
             detail.response_body_truncated?, body_cap, body_omit, include_sensitive,
-            source_size: detail.response_body_truncated? ? detail.response_wire_body_size : nil)
+            source_size: detail.response_body_truncated? ? detail.response_wire_body_size : nil,
+            more: body_more.try(&.[1]))
           emit_sse_events(j, detail)
           emit_ws_messages(j, ws_msgs)
           emit_grpc_messages(j, "request_grpc_messages", detail.request_head, detail.request_body,
@@ -1349,7 +1353,8 @@ module Gori
       def self.emit_body(j : JSON::Builder, field_name : String, head : Bytes?, body : Bytes?,
                          wire_truncated : Bool, cap : Int32 = MAX_TEXT, omit : Bool = false,
                          include_sensitive : Bool = false, source_size : Int64? = nil,
-                         source_truncated : Bool = false, preserve_empty : Bool = false) : Nil
+                         source_truncated : Bool = false, preserve_empty : Bool = false,
+                         more : String? = nil) : Nil
         if body.nil? || (body.empty? && !preserve_empty)
           j.field field_name, nil
           return
@@ -1389,6 +1394,9 @@ module Gori
             # distinguish a capture-time cut from a decode/de-chunk prefix cap.
             j.field "wire_truncated", true if wire_truncated
             j.field "decode_truncated", true if decode_truncated
+            # Where the rest is, when the DISPLAY cap (not the capture) cut this body and the
+            # caller has a place to page it from — the default `body_mode` (#1394).
+            j.field "more", more if more && cut && !omit
             j.field "note", note if note
             # Finding trailers requires walking to the 0-chunk. Once the preview cap stopped
             # the chunk walk, doing that second full-body pass defeats the bound.

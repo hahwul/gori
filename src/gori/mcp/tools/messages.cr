@@ -149,6 +149,8 @@ module Gori
         "#{@client_name || "agent"} pid #{Process.pid}"
       end
 
+      OPERATOR_MESSAGES_LIMIT = PageLimit.new(50, 200)
+
       # #1090, layer three: what the operator said, read by the agent itself. Returns the
       # messages addressed to this session (or to all) after `since` that no live route has
       # already carried, and marks them delivered (`via: "poll"`) so the operator's ring can
@@ -159,7 +161,7 @@ module Gori
         pid = Process.pid.to_i64
         # Nothing before this session bound the project is replayed (the courier keeps the same rule).
         since = {optional_int_arg(h, "since") || 0_i64, @messages_floor}.max
-        limit = clamp(optional_int_arg(h, "limit"), 50, 200)
+        limit = clamp(optional_int_arg(h, "limit"), OPERATOR_MESSAGES_LIMIT)
         include_delivered = bool_arg(h, "include_delivered", false)
         page = store.agent_messages_after(since, pid, limit)
         # Marking is only ever for rows no confirmed route has carried yet, or every repeat

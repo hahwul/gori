@@ -268,7 +268,7 @@ module Gori
           return Result.new("not a decodable JWT — no payloads generated (an encrypted JWE has no " \
                             "claims to tamper with and no signature to strip)", is_error: true)
         end
-        Result.new(Jwt.attacks_json(attacks))
+        items_result(Jwt.attacks_json(attacks))
       end
 
       # Verify is its own tool rather than a flag on jwt_decode: decoding is pure and needs
@@ -378,7 +378,7 @@ module Gori
           "HS256 re-signs, and header-parameter injection (kid path-traversal/SQLi, jku/x5u/jwk). " \
           "With `public_key`, also the algorithm-confusion family for an RS/PS/ES token — HS256 " \
           "re-signs keyed with the public key's own bytes, in each spelling a server might hold. " \
-          "Pure transform: no network. Returns an array of {name, category, note, token, verified}. " \
+          "Pure transform: no network. Returns {items:[{name, category, note, token, verified}]}. " \
           "An encrypted JWE yields nothing: it has no claims segment to tamper with." do |s|
           s.field "token", strprop("the JWT to derive testing payloads from"), required: true
           s.field "public_key", strprop("the server's PUBLIC verification key for the algorithm-confusion family — inline PEM text (a PUBLIC KEY or a CERTIFICATE), or a path to a .pem file. Only meaningful for a token whose alg is RS*/PS*/ES*")

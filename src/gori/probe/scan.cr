@@ -61,6 +61,32 @@ module Gori
         @exhausted = false
       end
 
+      # Opt-in write-back of a scan's findings into `probe_issues` (#1392) — the table the live
+      # Analyzer fills and triage (`probe_issues` / dismiss / promote) reads. A headless scan
+      # only REPORTS by default, so a project nobody opened in the TUI had findings in every
+      # scan and none to triage. Passed in by the caller and read back afterwards, the way
+      # `Budget` is, so `scan_all` keeps its return shape.
+      #
+      # The rows merge exactly as the Analyzer's do (`Store#upsert_probe_issues`): keyed by
+      # (code, host), `affected` deduplicated, severity raised to the max, a hard-deleted pair's
+      # suppression honoured, and a dismissed row left dismissed. `hit_count` counts
+      # OBSERVATIONS, so rescanning flows that were already persisted adds to it — the same
+      # thing a TUI restart's catch-up sweep does.
+      class Persist
+        # Detections handed to the store, and whether that write committed.
+        getter detections = 0
+        getter? committed = false
+        # False until `write` ran — a stopped scan never writes, and says so by this.
+        getter? attempted = false
+
+        def write(store : Store, dets : Array(Detection)) : Nil
+          @attempted = true
+          @detections = dets.size
+          # `with_source` normalises a synthetic flow id 0 to nil, as `Analyzer#persist` does.
+          @committed = store.upsert_probe_issues(dets.map { |d| Probe.with_source(d) })
+        end
+      end
+
       # The operator's Rules sub-tab config: built-ins turned off (by RuleInfo#id) + the merged
       # global+project custom match rules. A headless scan MUST honour both or it diverges from
       # what the same project shows in the TUI — a disabled built-in would come back, and a
@@ -153,7 +179,8 @@ module Gori
                    active_budget : Budget? = nil,
                    overrides : Gori::HostOverrides? = nil,
                    stop : Proc(Bool)? = nil,
-                   on_error : Proc(String, Exception, Nil)? = nil) : {Array(Detection), Int32}
+                   on_error : Proc(String, Exception, Nil)? = nil,
+                   persist : Persist? = nil) : {Array(Detection), Int32}
         # Read the Rules config ONCE per scan (not per flow) — same as the Analyzer, which
         # loads it at construction and only re-reads on an explicit rules reload.
         cfg = rules || RuleConfig.load(store)
@@ -177,6 +204,10 @@ module Gori
           scope: scope, allow_unscoped: allow_unscoped, opts: opts, rules: cfg,
           active_budget: budget, overrides: ov, stop: stop, on_error: on_error)
         detections.concat(repeater_dets)
+        # BEFORE the out-of-band sweep below joins the list: the sweep writes its promotions
+        # itself, so persisting them here again would count every one twice. A stopped scan
+        # writes nothing, for the reason the sweep is skipped — its caller has walked away.
+        persist.try(&.write(store, detections)) unless stopped?(stop)
         # Promote any OUT-OF-BAND probe whose callback has landed since it was planted. This is
         # a headless surface, so it cannot wait for one: the probes this run plants are picked
         # up by whatever sweeps next (the TUI's timer, or the NEXT `gori run probe`), and what

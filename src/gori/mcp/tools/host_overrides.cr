@@ -7,7 +7,7 @@ module Gori
     class Tools
       @[Tool("list_host_overrides")]
       private def list_host_overrides : Result
-        Result.new(JSON.build do |j|
+        items_result(JSON.build do |j|
           j.array do
             HostOverrides.load(store).entries.each do |e|
               j.object do
