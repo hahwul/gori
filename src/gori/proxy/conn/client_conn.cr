@@ -8,6 +8,7 @@ require "../head_rewriter"
 require "../extractor"
 require "../../interceptor"
 require "../../host_overrides"
+require "../socket_residue"
 require "../../outbound"
 require "../prefix_io"
 require "../socket_tuning"
@@ -226,6 +227,16 @@ module Gori::Proxy
       # folded into the record by `response_advisory`, exactly like `@alt_svc_note` above —
       # and reset the same way, by being assigned unconditionally at that seam.
       @status_line_note = nil.as(String?)
+      # Did a head on the CURRENT upstream connection end on a bare-LF blank line — the final
+      # head or an interim one? Set by `safe_read_head`, which every response head passes
+      # through, and cleared only with the connection (`release_upstream`): such a connection
+      # is never parked (`origin_keep_alive?`), so while it is set the slot never survives.
+      @upstream_lf_framed = false
+      # Why Match&Replace left THIS response alone because its head is bare-LF-terminated
+      # (`lf_rules_skipped`), and whether bytes were waiting past its framed body when gori
+      # retired that connection (`lf_residue_note`). Per response, reset with the notes above.
+      @lf_rules_note = nil.as(String?)
+      @lf_residue_note = nil.as(String?)
       # Hosts whose h3 `Alt-Svc` strip this connection has already written to `gori.log`. The
       # advisory is the record an operator reads; the log line is for the one debugging a
       # client that stopped using QUIC, and an origin that sends `Alt-Svc` on every response
@@ -333,6 +344,7 @@ module Gori::Proxy
     end
 
     private def release_upstream : Nil
+      @upstream_lf_framed = false
       @upstream.try(&.close) rescue nil
       @upstream = nil
       @up_host = nil
@@ -1131,6 +1143,8 @@ module Gori::Proxy
       # Judged HERE — on the peer's final head, before Match&Replace or the Alt-Svc seam get
       # to it — because it is a fact about what the ORIGIN sent, not about what a rule made.
       @status_line_note = status_line_note(resp)
+      @lf_rules_note = nil
+      @lf_residue_note = nil
       ttfb = (Time.instant - started).total_microseconds.to_i64
 
       # The h3 `Alt-Svc` strip (settings `network.strip_alt_svc`), before the rules so a rule
@@ -1572,6 +1586,7 @@ module Gori::Proxy
         # so a body-scoped rule is told it had nothing to read rather than silently missing.
         observe_delivered(extract_ref, sent_resp_head, nil)
         resp_complete = stream_response_body(upstream, resp_framing, resp_len, resp_capture, relaxed)
+        @lf_residue_note = lf_residue_note(upstream) if resp_complete
       rescue
         record_streamed_response(sent_resp, resp_framing, resp_capture, flow_id, ttfb, started,
           state: Store::FlowState::Aborted, error: "connection closed mid-response")
@@ -1665,6 +1680,7 @@ module Gori::Proxy
                                                 extract_ref : ExtractRef? = nil) : Bool
       buf = Codec::Body.presized_capture(resp_framing, resp_len)
       resp_complete = stream_body(upstream, buf, resp_framing, resp_len, Codec::DiscardIO.new)
+      @lf_residue_note = lf_residue_note(upstream) if resp_complete
       rw = @rewriter
       # `live` is false when only a body-scoped EXTRACT rule brought this response here, or
       # when a rewrite rule exists only for another host: no applicable rewrite lost its
@@ -1728,8 +1744,12 @@ module Gori::Proxy
     # A bare-LF-terminated head is accepted here (`read_response_head_result`); the upstream
     # that sent one is never parked for reuse (`origin_keep_alive?`).
     private def safe_read_head(io : IO) : Codec::Http1::HeadReadResult
-      Codec::Http1.read_response_head_result(io,
+      result = Codec::Http1.read_response_head_result(io,
         deadline: SocketTuning::HEAD_DEADLINE, timeout_sock: SocketTuning.underlying_socket(io))
+      if (head = result.head?) && Codec::Http1.lf_terminated_head?(head)
+        @upstream_lf_framed = true
+      end
+      result
     end
 
     # Apply response-head Match&Replace; returns the (possibly rewritten) head +
@@ -1739,7 +1759,38 @@ module Gori::Proxy
       return {resp_head, resp} unless rw
       rewritten = rw.rewrite_response(resp_head, host)
       return {resp_head, resp} if rewritten == resp_head
+      return lf_rules_skipped({resp_head, resp}) if Codec::Http1.lf_terminated_head?(resp_head)
       {rewritten, Codec::Http1.parse_response_head(rewritten)}
+    end
+
+    # A response head ended on a bare-LF blank line is forwarded byte-exact, untouched by
+    # Match&Replace, and the flow says so. Every rewrite helper here models a head as CRLF lines
+    # up to a CRLFCRLF (`reframe_to_length`, `restore_framing_headers`, the rule engine's own
+    # split), so a rule applied to one hands the client a MIXED head: `…\n\n\r\nContent-Length:
+    # 7\r\n\r\n` ends, for the client, at the first `\n\n`, and the re-framed tail becomes the
+    # next response on a connection gori keeps alive. Skipping is the smallest change that
+    # cannot do that; teaching every helper a second line model is not, and the bytes the
+    # operator is testing stay canonical (P7). Returns `unchanged`, for the caller's shape.
+    private def lf_rules_skipped(unchanged : T) : T forall T
+      @lf_rules_note = "Match&Replace was NOT applied to this response: its head ends lines on a " \
+                       "bare LF, and gori's rewrites frame a head as CRLF lines, so a rewritten head " \
+                       "could end somewhere else for the client than for gori (a response desync). " \
+                       "The response was forwarded byte-exact."
+      unchanged
+    end
+
+    # Bytes already waiting on an upstream that gori framed off a bare-LF head, checked without
+    # blocking once the body is read. That connection is retired rather than reused, so the
+    # leftover can no longer be recorded as the NEXT request's response — which is what used to
+    # surface it (`status_line_note`). Say so on THIS flow instead: those bytes are either more
+    # of this response (a strict reader's body) or another response gori never framed.
+    private def lf_residue_note(upstream : IO) : String?
+      return nil unless @upstream_lf_framed
+      return nil unless SocketResidue.state(upstream).residue?
+      "bytes were waiting on the upstream connection past this response's framed body. Its head " \
+      "ends on a bare-LF blank line, so gori framed it off the lenient reading and closed the " \
+      "connection instead of reusing it; a parser that frames this response differently reads " \
+      "those bytes as body, or as the next response (a response desync)"
     end
 
     # The intercept-hold response path: buffer the (non-streaming) body, let the
@@ -1758,6 +1809,7 @@ module Gori::Proxy
       # tee into a discard sink, not a second IO::Memory — the body is already buffered in
       # `buf`; a throwaway IO::Memory would hold the whole response a second time.
       resp_complete = stream_body(upstream, buf, resp_framing, resp_len, Codec::DiscardIO.new)
+      @lf_residue_note = lf_residue_note(upstream) if resp_complete
       # `buf` is filled once and never written again, and build_message copies head+body into
       # a fresh buffer, so `buf.to_slice` is a stable view — no defensive dup (which would hold
       # the whole body a second time). Mirrors the non-hold M&R path above.
@@ -1785,7 +1837,7 @@ module Gori::Proxy
       # Content-Length for an edited body (InterceptView#forward_bytes). Keeping the
       # proxy byte-exact also preserves the head verbatim for a HEAD/304/204 response
       # forwarded unedited (whose Content-Length describes the entity, not the bytes).
-      out_head, out_body = split_message(decision.bytes)
+      out_head, out_body = split_message(decision.bytes, response: true)
       sent_resp = Codec::Http1.parse_response_head(out_head)
       delivered = true
       begin
@@ -2131,8 +2183,9 @@ module Gori::Proxy
     # Newline-separated, which is the shape `Store::FlowRow#advisories` splits back apart.
     private def response_advisory(body : String?) : String?
       # Almost every response has nothing to say: skip the two Arrays that answer nil.
-      return nil if body.nil? && @alt_svc_note.nil? && @status_line_note.nil?
-      [body, @alt_svc_note, @status_line_note].compact.join("\n")
+      return nil if body.nil? && @alt_svc_note.nil? && @status_line_note.nil? &&
+                    @lf_rules_note.nil? && @lf_residue_note.nil?
+      [body, @alt_svc_note, @status_line_note, @lf_rules_note, @lf_residue_note].compact.join("\n")
     end
 
     # The sentence for a response whose start-line is not a status line, or nil for one that
@@ -3081,11 +3134,14 @@ module Gori::Proxy
       io.to_slice
     end
 
-    # Split a forwarded message back into head (through CRLFCRLF) + body remainder.
-    private def split_message(raw : Bytes) : {Bytes, Bytes?}
-      idx = index_crlf_crlf(raw)
-      return {raw, nil} unless idx
-      head_end = idx + 4
+    # Split a forwarded message back into head (through CRLFCRLF) + body remainder. A RESPONSE
+    # head ends where `read_response_head_result` would end it — the earliest blank line, a
+    # bare-LF one included (`Http1.response_head_end`) — so a held bare-LF response is recorded
+    # with the head the client reads, not the whole message (or a head cut at a CRLFCRLF that
+    # sits in its body).
+    private def split_message(raw : Bytes, *, response : Bool = false) : {Bytes, Bytes?}
+      head_end = response ? Codec::Http1.response_head_end(raw) : index_crlf_crlf(raw).try(&.+(4))
+      return {raw, nil} unless head_end
       body = head_end < raw.size ? raw[head_end..].dup : nil
       {raw[0, head_end].dup, body}
     end
@@ -3255,6 +3311,10 @@ module Gori::Proxy
                                    host : String, response : Bool, live : Bool,
                                    & : Bytes -> Bytes) : {Bytes, Bytes?, String?}
       return {head, wire_body, nil} if wire_body.nil? || wire_body.empty?
+      if response && live && Codec::Http1.lf_terminated_head?(head)
+        # See `lf_rules_skipped`: the re-frame below would mix line endings into this head.
+        return lf_rules_skipped({head, wire_body, nil})
+      end
       if Codec::ContentDecode.content_encoded?(head)
         return {head, wire_body, compressed_skip_advisory(head, host, response: response, live: live)}
       end
@@ -3471,8 +3531,8 @@ module Gori::Proxy
       # A head ended on a bare-LF blank line was framed off the LENIENT reading. Never park
       # the socket behind it: if that framing was wrong, the leftover goes with the closed
       # connection instead of being read as the NEXT request's response (the same rule as
-      # `ConnPool.reusable_response?`).
-      return false if Codec::Http1.lf_terminated_head?(resp.raw_head)
+      # `ConnPool.reusable_response?`). Any head of the exchange counts, an interim 1xx too.
+      return false if @upstream_lf_framed
       return false if resp_framing.close_delimited?
       return false if sent_req.headers.lists?("Connection", "close")
       return false if resp.headers.lists?("Connection", "close")
