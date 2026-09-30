@@ -37,11 +37,52 @@ describe Gori::Tui::LineEdit do
     LineEdit.apply(:delete_word, "abc", 0).should eq({"abc", 0})
   end
 
-  it "only reports the two edits as mutating" do
+  it "only reports the three edits as mutating" do
     LineEdit.mutating?(:delete).should be_true
     LineEdit.mutating?(:delete_word).should be_true
+    LineEdit.mutating?(:delete_to_start).should be_true
     LineEdit.mutating?(:word_left).should be_false
     LineEdit.mutating?(:home).should be_false
+  end
+end
+
+# #1379: the shell's line keys. A bar that is editing takes every key ahead of the keymap, so
+# these shadow no tab chord while it has the caret.
+describe "LineEdit shell keys" do
+  ctrl = Termisu::Input::Modifier::Ctrl
+
+  it "reads ^A ^E ^U ^W as line start, line end, delete to start and delete word" do
+    LineEdit.action(key(Termisu::Input::Key::LowerA, ctrl)).should eq(:home)
+    LineEdit.action(key(Termisu::Input::Key::LowerE, ctrl)).should eq(:end)
+    LineEdit.action(key(Termisu::Input::Key::LowerU, ctrl)).should eq(:delete_to_start)
+    LineEdit.action(key(Termisu::Input::Key::LowerW, ctrl)).should eq(:delete_word)
+    LineEdit.action(key(Termisu::Input::Key::LowerU, Termisu::Input::Modifier::Alt)).should be_nil
+    LineEdit.action(key(Termisu::Input::Key::LowerU, Termisu::Input::Modifier::None, 'u')).should be_nil
+  end
+
+  it "deletes from the caret back to the start of the line" do
+    LineEdit.apply(:delete_to_start, "status:200 host:a", 11).should eq({"host:a", 0})
+    LineEdit.apply(:delete_to_start, "abc", 0).should eq({"abc", 0})
+  end
+
+  it "edits the History bar, and keeps ^W off the sub-tab close while it does" do
+    TuiContract.with_session("line-edit-shell") do |session|
+      TuiContract.each_controller(session) do |controller, _host|
+        next unless controller.is_a?(HistoryController)
+        view = controller.view
+        view.start_query
+        "status:200 host:a".each_char { |c| view.query_insert(c) }
+        controller.handle_query_key(key(Termisu::Input::Key::LowerW, ctrl)).should be_true
+        view.query.should eq("status:200 host:")
+        controller.handle_query_key(key(Termisu::Input::Key::LowerA, ctrl))
+        controller.handle_query_key(key(Termisu::Input::Key::Delete))
+        view.query.should eq("tatus:200 host:")
+        controller.handle_query_key(key(Termisu::Input::Key::LowerE, ctrl))
+        controller.handle_query_key(key(Termisu::Input::Key::LowerU, ctrl))
+        view.query.should eq("")
+        view.querying?.should be_true
+      end
+    end
   end
 end
 

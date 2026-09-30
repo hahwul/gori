@@ -491,7 +491,7 @@ TUI 맨 아래에 선택적으로 추가되는 행입니다 (Preferences → **G
 | 키 | 타입 | 기본값 | 설명 |
 |-----|------|---------|-------------|
 | `detail_pane` | string | `"request"` | History 플로우를 열었을 때 먼저 보여줄 페인: `"request"` 또는 `"response"` |
-| `history_time_format` | string | `"absolute"` | History 목록의 시간 열: `"absolute"`(MM-DD HH:MM:SS) 또는 `"relative"`(3s/5m/2h) |
+| `history_time_format` | string | `"absolute"` | History 목록의 시간 열: `"absolute"`(MM-DD HH:MM:SS, 좁은 터미널에서는 HH:MM:SS) 또는 `"relative"`(3s/5m/2h) |
 | `show_gutter` | bool | `true` | 메시지 본문 뷰의 줄번호 거터 |
 | `wrap_lines` | bool | `true` | 메시지 페인보다 긴 줄을 다음 행으로 접어서 표시(줄번호는 첫 행에만). `false`면 한 줄을 한 행으로 그리고 커서를 따라 가로로 스크롤합니다 |
 | `preview_body_kib` | integer | `64` | History 목록 미리보기가 읽는 본문 바이트 수 (표시 전용이며 캡처 상한과는 별개) |

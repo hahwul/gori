@@ -261,10 +261,12 @@ describe "gori run sitemap --format paths" do
   it "lists a query fold ONCE, at its path" do
     # Unlike an id fold, whose children are distinct endpoints, the variants here are one
     # endpoint — and this listing is what a tester pipes into the next tool.
+    # In target order, as `Store#sitemap_origin_entries` hands them over: a fold keeps its
+    # place among its siblings (#1379).
     hosts = Gori::Sitemap.build([
-      {"h", "GET", "/search?q=widgets"},
-      {"h", "POST", "/search?q=other"},
       {"h", "GET", "/login"},
+      {"h", "GET", "/search?q=other"},
+      {"h", "POST", "/search?q=widgets"},
     ])
     hosts.each { |h| Gori::Sitemap.fold_queries!(h) }
     Gori::CLI::Output.sitemap_paths(hosts).should eq(

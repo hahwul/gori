@@ -329,7 +329,7 @@ module Gori
       # `refusal_wired` and not `refusal`: the argument is already through `wire`, and
       # `refusal` would run the binding pass over it a SECOND time. That is not the no-op this
       # comment used to claim — see `refusal_wired`.
-      def send_wire(wire : Bytes) : Result
+      def send_wire(wire : Bytes, cancel : Proc(Bool)? = nil) : Result
         if reason = refusal_wired(wire)
           return Result.new(Bytes.new(0), nil, nil, 0_i64, reason)
         end
@@ -338,11 +338,11 @@ module Gori
             H2Engine.send(wire, scheme: @scheme, host: @host, port: @port,
               verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides,
               preserve_field_case: @preserve_field_case, reframe_grpc: @reframe_grpc,
-              tls_preset: @tls_preset)
+              tls_preset: @tls_preset, cancel: cancel)
           else
             Engine.send(wire, scheme: @scheme, host: @host, port: @port,
               verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides,
-              tls_preset: @tls_preset)
+              tls_preset: @tls_preset, cancel: cancel)
           end
         extract(wire, result)
         result
@@ -358,7 +358,8 @@ module Gori
       # can hold a `$NAME` like any other path — so `Plan.build_field_native` constructs this
       # Sender with `expand_bindings: false`, or the gate would have decided about
       # `/api?SECRETTOKEN123=1` while `/api?$TOKEN=1` went on the wire.
-      def send_fields(fields : Array({String, String}), body : Bytes?) : Result
+      def send_fields(fields : Array({String, String}), body : Bytes?,
+                      cancel : Proc(Bool)? = nil) : Result
         scope = H2Engine.field_scope_line(fields)
         if reason = refusal(scope)
           return Result.new(Bytes.new(0), nil, nil, 0_i64, reason)
@@ -371,7 +372,7 @@ module Gori
         # about. An operator who wants an identity on these bytes writes the field.
         result = H2Engine.send_fields(fields, body, scheme: @scheme, host: @host, port: @port,
           verify_upstream: @verify, sni: @sni, timeout: @timeout, overrides: @overrides,
-          tls_preset: @tls_preset)
+          tls_preset: @tls_preset, cancel: cancel)
         extract(scope, result)
         result
       end
@@ -435,7 +436,8 @@ module Gori
 
       def send_ws(upgrade : Bytes, messages : Array(WsEngine::OutMsg),
                   idle : Time::Span = WsEngine::DEFAULT_IDLE,
-                  keep_key : Bool = false) : WsEngine::Result
+                  keep_key : Bool = false,
+                  cancel : Proc(Bool)? = nil) : WsEngine::Result
         # Wired once, then gated on that slice — the HTTP path's discipline (see `send_group`).
         # This used to gate the draft and wire separately, so the handshake was passed through
         # the seam twice and the verdict could be taken on a URL the socket never got.
@@ -461,7 +463,8 @@ module Gori
         # refusal above reads the same slice, so the gate's URL and the socket's stay equal.
         WsEngine.send(wired, expand_messages(messages),
           scheme: @scheme, host: @host, port: @port, verify_upstream: @verify, sni: @sni,
-          idle: idle, overrides: @overrides, keep_key: keep_key, tls_preset: @tls_preset)
+          idle: idle, overrides: @overrides, keep_key: keep_key, tls_preset: @tls_preset,
+          cancel: cancel)
       end
 
       # Whole payload, not `expand_bindings`' head/body split: a WS frame has no head to take,

@@ -195,15 +195,17 @@ module Gori
                     overrides : Gori::HostOverrides? = nil,
                     keep_key : Bool = false,
                     deadline : Time::Span = DRAIN_DEADLINE,
-                    tls_preset : String? = nil) : Result
+                    tls_preset : String? = nil,
+                    cancel : Proc(Bool)? = nil) : Result
         if Proxy::WS.extended_connect_request?(String.new(upgrade_request))
           return send_over_h2(upgrade_request, out_messages, scheme: scheme, host: host,
             port: port, verify_upstream: verify_upstream, sni: sni, idle: idle,
-            overrides: overrides, keep_key: keep_key, deadline: deadline, tls_preset: tls_preset)
+            overrides: overrides, keep_key: keep_key, deadline: deadline, tls_preset: tls_preset,
+            cancel: cancel)
         end
         send_over_h1(upgrade_request, out_messages, scheme: scheme, host: host, port: port,
           verify_upstream: verify_upstream, sni: sni, idle: idle, overrides: overrides,
-          keep_key: keep_key, deadline: deadline, tls_preset: tls_preset)
+          keep_key: keep_key, deadline: deadline, tls_preset: tls_preset, cancel: cancel)
       end
 
       # The HTTP/1.1 Upgrade transport — what `send` has always been, unchanged below the
@@ -215,7 +217,8 @@ module Gori
                                     overrides : Gori::HostOverrides? = nil,
                                     keep_key : Bool = false,
                                     deadline : Time::Span = DRAIN_DEADLINE,
-                                    tls_preset : String? = nil) : Result
+                                    tls_preset : String? = nil,
+                                    cancel : Proc(Bool)? = nil) : Result
         started = Time.instant
         # The connect + handshake reads get a generous io_timeout so a slow-but-valid
         # upgrade (cold start / auth / slow proxy) isn't mistaken for a dead origin;
@@ -229,12 +232,15 @@ module Gori
         # "connect failed: host:port" for an untrusted certificate, a plaintext port and an
         # origin that accepts the connection and then goes silent.
         upstream, dial_error = if tls
-                                 Proxy::Upstream.dial_tls_result(host, port, verify: verify_upstream, sni: sni, io_timeout: ht, overrides: overrides, tls_preset: tls_preset)
+                                 Proxy::Upstream.dial_tls_result(host, port, verify: verify_upstream,
+                                   sni: sni, io_timeout: ht, overrides: overrides,
+                                   tls_preset: tls_preset, cancel: cancel)
                                else
                                  Proxy::Upstream.dial_result(host, port, io_timeout: ht, overrides: overrides)
                                end
         return err(Engine.connect_error(scheme, host, port, verify_upstream, dial_error), started) unless upstream
 
+        watcher = Proxy::Upstream.watch_cancel(upstream, cancel)
         begin
           handshake, keys = build_handshake(upgrade_request, keep_key)
           upstream.write(handshake)
@@ -280,6 +286,7 @@ module Gori
           # mid-exchange IO errors itself, so reaching here means the handshake failed.
           err(ex.message || "ws repeater error", started)
         ensure
+          watcher.try(&.stop)
           upstream.close rescue nil
         end
       end
@@ -366,7 +373,8 @@ module Gori
                                     overrides : Gori::HostOverrides? = nil,
                                     keep_key : Bool = false,
                                     deadline : Time::Span = DRAIN_DEADLINE,
-                                    tls_preset : String? = nil) : Result
+                                    tls_preset : String? = nil,
+                                    cancel : Proc(Bool)? = nil) : Result
         started = Time.instant
         # `ws`/`wss` fold to the scheme the dial and the `:scheme` pseudo-header both need.
         # `Fuzz::Origin` folds at construction and `Repeater::Plan` on its tuple path; a WS
@@ -380,8 +388,9 @@ module Gori
         # for http — so an origin that has no h2, an untrusted certificate and a plaintext port
         # addressed as https all report in the words every other h2 send reports them in.
         conn, dial_error = H2Engine.dial(dial_scheme, host, port, verify_upstream, sni,
-          HANDSHAKE_TIMEOUT, overrides, tls_preset)
+          HANDSHAKE_TIMEOUT, overrides, tls_preset, cancel)
         return err(dial_error || "h2 connect failed", started) unless conn
+        watcher = Proxy::Upstream.watch_cancel(conn.io, cancel)
         begin
           opened = H2WsStream.open(conn, request, scheme: dial_scheme, host: host, port: port,
             stall: idle)
@@ -415,6 +424,7 @@ module Gori
           # `run_session`'s drain swallows mid-exchange IO errors and reports them as notes.
           err(ex.message || "ws-over-h2 repeater error", started)
         ensure
+          watcher.try(&.stop)
           conn.close rescue nil
         end
       end

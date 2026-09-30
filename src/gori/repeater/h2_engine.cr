@@ -291,13 +291,14 @@ module Gori
       # failure, so nothing is lost but the earlier report.
       def self.dial(scheme : String, host : String, port : Int32, verify : Bool,
                     sni : String?, timeout : Time::Span?, overrides : Gori::HostOverrides?,
-                    tls_preset : String?) : {Conn?, String?}
-        upstream, dial_failure = open(scheme, host, port, verify, sni, timeout, overrides, tls_preset)
+                    tls_preset : String?, cancel : Proc(Bool)? = nil) : {Conn?, String?}
+        upstream, dial_failure = open(scheme, host, port, verify, sni, timeout, overrides,
+          tls_preset, cancel)
         unless upstream
           return {nil, connect_error(scheme, host, port, verify, dial_failure)}
         end
         begin
-          {Conn.new(upstream), nil}
+          {Proxy::Upstream.with_cancel(upstream, cancel) { Conn.new(upstream) }, nil}
         rescue ex
           upstream.close rescue nil
           {nil, ex.message || "h2 connect failed"}
@@ -328,15 +329,19 @@ module Gori
                     overrides : Gori::HostOverrides? = nil,
                     preserve_field_case : Bool = false,
                     reframe_grpc : Bool = false,
-                    tls_preset : String? = nil) : Result
+                    tls_preset : String? = nil,
+                    cancel : Proc(Bool)? = nil) : Result
         started = Time.instant
-        upstream, dial_failure = open(scheme, host, port, verify_upstream, sni, timeout, overrides, tls_preset)
+        upstream, dial_failure = open(scheme, host, port, verify_upstream, sni, timeout,
+          overrides, tls_preset, cancel)
         unless upstream
           return failure(connect_error(scheme, host, port, verify_upstream, dial_failure), started)
         end
         begin
           headers, body = parse_request(request, scheme, host, port, preserve_field_case, reframe_grpc)
-          exchange(Conn.new(upstream), headers, body, host, port, started, timeout)
+          Proxy::Upstream.with_cancel(upstream, cancel) do
+            exchange(Conn.new(upstream), headers, body, host, port, started, timeout)
+          end
         rescue ex
           failure(ex.message || "h2 repeater error", started)
         ensure
@@ -363,14 +368,18 @@ module Gori
       def self.send_fields(fields : Array({String, String}), body : Bytes?, *, scheme : String,
                            host : String, port : Int32, verify_upstream : Bool, sni : String? = nil,
                            timeout : Time::Span? = nil, overrides : Gori::HostOverrides? = nil,
-                           tls_preset : String? = nil) : Result
+                           tls_preset : String? = nil,
+                           cancel : Proc(Bool)? = nil) : Result
         started = Time.instant
-        upstream, dial_failure = open(scheme, host, port, verify_upstream, sni, timeout, overrides, tls_preset)
+        upstream, dial_failure = open(scheme, host, port, verify_upstream, sni, timeout,
+          overrides, tls_preset, cancel)
         unless upstream
           return failure(connect_error(scheme, host, port, verify_upstream, dial_failure), started)
         end
         begin
-          exchange(Conn.new(upstream), fields, body, host, port, started, timeout)
+          Proxy::Upstream.with_cancel(upstream, cancel) do
+            exchange(Conn.new(upstream), fields, body, host, port, started, timeout)
+          end
         rescue ex
           failure(ex.message || "h2 repeater error", started)
         ensure
@@ -592,13 +601,14 @@ module Gori
       private def self.open(scheme : String, host : String, port : Int32, verify : Bool,
                             sni : String? = nil, timeout : Time::Span? = nil,
                             overrides : Gori::HostOverrides? = nil,
-                            tls_preset : String? = nil) : {IO?, DialFailure?}
+                            tls_preset : String? = nil,
+                            cancel : Proc(Bool)? = nil) : {IO?, DialFailure?}
         ct = timeout || Settings.connect_timeout
         it = timeout || Settings.io_timeout
         if scheme == "https"
           ssl, err = Proxy::Upstream.dial_tls_result(host, port, verify: verify, alpn: "h2",
             sni: sni, connect_timeout: ct, io_timeout: it, overrides: overrides,
-            tls_preset: tls_preset)
+            tls_preset: tls_preset, cancel: cancel)
           unless ssl
             return {nil, DialFailure.new(dial_error: err || Proxy::Upstream::DialError::ORIGIN_UNREACHABLE)}
           end

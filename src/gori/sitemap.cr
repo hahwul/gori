@@ -706,37 +706,52 @@ module Gori
         (groups[query_group_key(c.label)] ||= [] of Node) << c
       end
       return if groups.empty?
-      folded = Set(UInt64).new
+      # Which fold each absorbed child belongs to, by identity.
+      folded = {} of UInt64 => String
       groups.each do |key, kids|
-        kids.each { |k| folded << k.object_id }
+        kids.each { |k| folded[k.object_id] = key }
         # The query-LESS sibling joins its own variants, so /search and /search?q=1 are ONE
         # row. Only when it is a LEAF: a path that is also a directory (/api/users, with
         # /api/users/5 under it) would take its whole subtree into the collapsed fold with
         # it — the fold would then HIDE endpoints instead of deduplicating one.
         if bare = node.children.find { |c| !c.grouped && c.leaf? && c.label == key }
           kids.unshift(bare)
-          folded << bare.object_id
+          folded[bare.object_id] = key
         end
       end
-      rest = node.children.reject { |c| folded.includes?(c.object_id) }
-      node.children.clear
-      node.children.concat(rest)
-      # Sorted so the tree shape is stable regardless of capture order (as in fold_templates!).
-      groups.keys.sort!.each do |key|
-        kids = groups[key]
-        group = Node.new(key)
-        group.grouped = true
-        group.query_fold = true
-        group.expanded = false
-        group.fold_parent = node.path
-        # A query fold's label IS a real path segment, so it also has a real path — the
-        # path-only endpoint every variant under it shares. `grouped` still bars a tag from
-        # stamping on it (stamp_tags!), because the tag key is the path WITH the query.
-        group.path = key == "/" ? "/" : "#{node.path}/#{key}"
-        group.fold_methods = fold_method_union(kids)
-        kids.each { |c| group.children << c }
-        node.children << group
+      # Each fold takes the place of its FIRST member, so it sits in the order its siblings
+      # already have. Appending the folds after everything else put `export (1 query)` below
+      # `rebuild` and a `search` fold after every plain leaf (#1379).
+      folds = {} of String => Node
+      groups.each { |key, kids| folds[key] = query_fold_node(node, key, kids) }
+      kept = [] of Node
+      node.children.each do |c|
+        if key = folded[c.object_id]?
+          fold = folds.delete(key)
+          kept << fold if fold
+        else
+          kept << c
+        end
       end
+      node.children.clear
+      node.children.concat(kept)
+    end
+
+    # One query fold (see fold_queries!): a synthetic `grouped` node labelled with the path the
+    # variants share, holding them.
+    private def self.query_fold_node(node : Node, key : String, kids : Array(Node)) : Node
+      group = Node.new(key)
+      group.grouped = true
+      group.query_fold = true
+      group.expanded = false
+      group.fold_parent = node.path
+      # A query fold's label IS a real path segment, so it also has a real path — the
+      # path-only endpoint every variant under it shares. `grouped` still bars a tag from
+      # stamping on it (stamp_tags!), because the tag key is the path WITH the query.
+      group.path = key == "/" ? "/" : "#{node.path}/#{key}"
+      group.fold_methods = fold_method_union(kids)
+      kids.each { |c| group.children << c }
+      group
     end
 
     # The path a query-bearing leaf label folds onto. A query on the bare root arrives as the

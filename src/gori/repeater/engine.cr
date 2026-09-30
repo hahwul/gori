@@ -115,16 +115,20 @@ module Gori
                     verify_upstream : Bool, sni : String? = nil,
                     timeout : Time::Span? = nil,
                     overrides : Gori::HostOverrides? = nil,
-                    tls_preset : String? = nil) : Result
+                    tls_preset : String? = nil,
+                    cancel : Proc(Bool)? = nil) : Result
         started = Time.instant
         # `timeout` is a PER-OPERATION bound (connect, and idle between reads/writes),
         # not a total request deadline — same model as the proxy's IO_TIMEOUT. A true
         # whole-request deadline would need a timer fiber racing a socket close.
-        upstream, dial_error = dial_result(scheme, host, port, verify_upstream, sni, timeout, overrides, tls_preset)
+        upstream, dial_error = dial_result(scheme, host, port, verify_upstream, sni, timeout,
+          overrides, tls_preset, cancel)
         return error(connect_error(scheme, host, port, verify_upstream, dial_error), started) unless upstream
 
         begin
-          exchange(upstream, request, host, port, started, origin_scheme: scheme)
+          Proxy::Upstream.with_cancel(upstream, cancel) do
+            exchange(upstream, request, host, port, started, origin_scheme: scheme)
+          end
         ensure
           upstream.close rescue nil
         end
@@ -154,12 +158,14 @@ module Gori
       def self.dial_result(scheme : String, host : String, port : Int32, verify_upstream : Bool,
                            sni : String?, timeout : Time::Span?,
                            overrides : Gori::HostOverrides?,
-                           tls_preset : String? = nil) : {IO?, Proxy::Upstream::DialError?}
+                           tls_preset : String? = nil,
+                           cancel : Proc(Bool)? = nil) : {IO?, Proxy::Upstream::DialError?}
         ct = timeout || Settings.connect_timeout
         it = timeout || Settings.io_timeout
         if scheme == "https"
           Proxy::Upstream.dial_tls_result(host, port, verify: verify_upstream, sni: sni,
-            connect_timeout: ct, io_timeout: it, overrides: overrides, tls_preset: tls_preset)
+            connect_timeout: ct, io_timeout: it, overrides: overrides, tls_preset: tls_preset,
+            cancel: cancel)
         else
           Proxy::Upstream.dial_result(host, port, connect_timeout: ct, io_timeout: it, overrides: overrides)
         end

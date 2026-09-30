@@ -28,6 +28,7 @@ module Gori
 
       @[Tool("send_request", gated: true, agent_action: true, env_refresh: true, permission: "send")]
       private def send_request(h) : Result
+        return err("request cancelled", "CANCELLED") if cancelled?
         # FIRST, ahead of every other read: the one refusal whose entire value is its
         # position in this method. See `send_source_conflict`.
         conflict = send_source_conflict(h)
@@ -116,7 +117,9 @@ module Gori
                       "an unaudited send is intentional.") if id <= 0
           recorded_flow_id = id
         end
-        result = plan.send_wire(h1_wire)
+        return err("request cancelled", "CANCELLED") if cancelled?
+        result = plan.send_wire(h1_wire, cancel_signal)
+        return err("request cancelled", "CANCELLED") if cancelled?
         # The active session slot's `$NAME` that `plan.wire_bytes` shipped LITERALLY, drained
         # here because this tool IS the run summary for a synchronous send. Without it the only
         # trace was a `Log.warn` line on the server's STDERR, which no agent reads — so a call
@@ -1034,6 +1037,7 @@ module Gori
       # or the 2xx of an RFC 8441 extended CONNECT (#733).
       @[Tool("send_websocket", gated: true, agent_action: true, env_refresh: true, permission: "send")]
       private def send_websocket(h) : Result
+        return err("request cancelled", "CANCELLED") if cancelled?
         repeater_id = int(h, "repeater_id")
         return Result.new(id_error(h, "repeater_id"), is_error: true) unless repeater_id
         repeater = store.get_repeater(repeater_id)
@@ -1142,12 +1146,14 @@ module Gori
         if reason = plan.refusal
           return sandbox_blocked(reason, host, "repeater_id")
         end
+        return err("request cancelled", "CANCELLED") if cancelled?
         # Scope passed — now it's safe to persist the issue link.
         if issue_id
           store.add_link(Store::LinkOwnerKind::Issue, issue_id,
             Store::LinkRefKind::Repeater, repeater_id)
         end
-        result = plan.send_ws(out_messages, idle, keep_key)
+        result = plan.send_ws(out_messages, idle, keep_key, cancel_signal)
+        return err("request cancelled", "CANCELLED") if cancelled?
 
         # ONLY when the origin ANSWERED (see `WsEngine::Result#answered?`). This surface wrote
         # unconditionally, so one `send_websocket` at a session whose target had moved (or an
