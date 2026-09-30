@@ -44,10 +44,8 @@ module Gori
           p.on("--verdict=LIST", "Only list these verdicts: #{DIFF_VERDICTS.map(&.label).join(",")}") { |v| verdicts = parse_diff_verdicts(v) }
           p.on("--unchanged", "Also list the unchanged endpoints (they are always COUNTED)") { unchanged = true }
           p.on("--no-issues", "Skip the issue retest (which endpoints the baseline's open issues sit on)") { issues = false }
-          p.on("--format=FMT", "Output: text (default) | json | md (a retest report section)") do |v|
-            # `parse_format` folds "md" onto :markdown, so :md is not a symbol this can hold.
-            format = parse_format(v, [:text, :json, :markdown])
-          end
+          # `parse_format` folds "md" onto :markdown, so :md is not a symbol this can hold.
+          format_flag(p, [:text, :json, :markdown], "Output: text (default) | json | md (a retest report section)") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| abort_diff_positional(before + after, p) }
           p.invalid_option { |f| abort "gori run diff: unknown option: #{f}\n#{p}" }

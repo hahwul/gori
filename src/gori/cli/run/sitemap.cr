@@ -179,7 +179,7 @@ module Gori
           # to mean both would make "show me every literal id" also dump every fuzz payload.
           p.on("--no-fold-query", "Don't fold query-string variants (/search?q=1, /search?q=2) onto their path") { fold_query = false }
           p.on("--js-refs", "Also draw the endpoints captured JavaScript references and nobody requested (see `sitemap js --scan`)") { js_refs = true }
-          p.on("--format=FMT", "Output: text (default tree) | json | paths") { |v| format = parse_format(v, [:text, :json, :paths]) }
+          format_flag(p, [:text, :json, :paths], "Output: text (default tree) | json | paths") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
           p.invalid_option { |f| abort "gori run sitemap: unknown option: #{f}\n#{p}" }

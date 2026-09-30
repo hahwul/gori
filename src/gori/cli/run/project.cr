@@ -168,7 +168,7 @@ module Gori
           p.on("--all", "Include projects with nothing captured in them (hidden by default)") { all = true }
           p.on("--query=TEXT", "Keep only projects whose name, dir slug, short id or bound " \
                                "workspace path contains TEXT (case-insensitive)") { |v| query = v }
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
           p.invalid_option { |f| abort "gori run project: unknown option: #{f}\n#{p}" }
@@ -307,7 +307,7 @@ module Gori
           p.banner = "Usage: gori run project create <name> [options]\n\n" \
                      "Create a project, or reopen the existing one with that name."
           p.on("--description=TEXT", "Description stored in the project's settings") { |v| description = v }
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
           p.invalid_option { |f| abort "gori run project create: unknown option: #{f}\n#{p}" }
@@ -470,7 +470,7 @@ module Gori
                      "notes, scope, everything. Without --yes it only previews the target.\n" \
                      "<name> matches a short id, id prefix, directory slug, or display name."
           p.on("--yes", "Actually delete (without it, nothing is removed)") { yes = true }
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
           p.invalid_option { |f| abort "gori run project delete: unknown option: #{f}\n#{p}" }
@@ -692,7 +692,7 @@ module Gori
                      "  gori run project scope disable"
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
           p.invalid_option { |f| abort "gori run project scope: unknown option: #{f}\n#{p}" }
@@ -831,7 +831,7 @@ module Gori
           p.on("-kKIND", "--kind=KIND", "Rule kind: include|exclude (default: include)") { |v| kind = v }
           p.on("-tTYPE", "--type=TYPE", "Match type: host|string|regex (default: host)") { |v| match_type = v }
           p.on("-pPATTERN", "--pattern=PATTERN", "Pattern to match (required)") { |v| pattern = v }
-          p.on("--format=FMT", "Output: text (default) | json — the new rule, as `scope --format json` lists it") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json — the new rule, as `scope --format json` lists it") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run project scope add: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run project scope add: missing value for #{f}" }
@@ -1013,7 +1013,7 @@ module Gori
                      "  gori run project sandbox off|disable"
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
           p.invalid_option { |f| abort "gori run project sandbox: unknown option: #{f}\n#{p}" }
@@ -1123,7 +1123,7 @@ module Gori
                      "  gori run project env delete|rm KEY"
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
           p.invalid_option { |f| abort "gori run project env: unknown option: #{f}\n#{p}" }
@@ -1300,7 +1300,7 @@ module Gori
                      "  gori run project host-override delete|rm <id>"
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
           p.invalid_option { |f| abort "gori run project host-override: unknown option: #{f}\n#{p}" }
@@ -1353,7 +1353,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("--host=HOST", "Hostname to override (case-insensitive)") { |v| host = v }
           p.on("--ip=IP", "IPv4/IPv6 literal to dial, optionally IP:PORT") { |v| ip = v }
-          p.on("--format=FMT", "Output: text (default) | json — the new override, as `host-override --format json` lists it") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json — the new override, as `host-override --format json` lists it") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
           p.invalid_option { |f| abort "gori run project host-override add: unknown option: #{f}\n#{p}" }

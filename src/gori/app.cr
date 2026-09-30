@@ -289,7 +289,8 @@ module Gori
       end
       print_banner(session)
       IdleGc.start # hand the heap a capture burst grew back to the OS once the process is idle
-      spawn { capture_printer(session, format, max) }
+      printer_done = Channel(Nil).new(1)
+      spawn { capture_printer(session, format, max, printer_done) }
       reload_stop = spawn_reload_loop(session)
       signaled = false
       install_signal_traps { signaled = true }
@@ -306,6 +307,13 @@ module Gori
       # to make no further store calls — safe to close the store right after.
       reload_stop.send(nil) rescue nil
       session.close
+      # The printer owns the stream's last bytes (a `--format json` array's closing `]`), and
+      # closing the session is what ends it: wait for it, so the process cannot exit with the
+      # array still open. Bounded, so a printer stuck on a full pipe cannot hold the exit.
+      select
+      when printer_done.receive
+      when timeout(2.seconds)
+      end
       signaled
     end
 
@@ -390,9 +398,19 @@ module Gori
       end
     end
 
-    private def capture_printer(session : Session, format : Symbol, max : Int32?) : Nil
+    private def capture_printer(session : Session, format : Symbol, max : Int32?,
+                                done : Channel(Nil)) : Nil
       printed = 0
       completion = CaptureCompletion.new
+      # `json` is ONE array, as on every other command, and `jsonl` one object per line (#1386).
+      # It used to be JSON-Lines for both. The array is opened at once, each flow is written as
+      # it completes, and it is closed in the `ensure` below whichever way the stream ends —
+      # `--max`, `--for`, a signal — so what a consumer collects is always one JSON document.
+      array = format == :json
+      if array
+        print '['
+        STDOUT.flush
+      end
       loop do
         event = session.flow_events.receive
         next unless row = session.store.flow_row(event.id)
@@ -400,7 +418,7 @@ module Gori
         # An upgraded flow emits an :updated event for its handshake and another :updated event
         # for each captured message. Count it only on the one completion event after the tunnel
         # closes; ordinary flows still count on their response update.
-        puts(format == :json ? CLI::Output.flow_row_json(row) : CLI::Output.flow_row_text(row))
+        print_capture_row(row, format, first: printed.zero?)
         STDOUT.flush # stream each flow promptly even when piped (block-buffered)
         printed += 1
         if max && printed >= max
@@ -420,6 +438,29 @@ module Gori
       # so there's nothing left to stream — wind the session down gracefully
       # instead of letting the unhandled error take down the whole process.
       @shutdown.send(nil) rescue nil
+      array = false # nobody is left to read a closing bracket
+    ensure
+      close_capture_array if array
+      done.send(nil) # buffered and never closed, so this cannot block or raise
+    end
+
+    # One completed flow on the capture stream: an array element (comma-led after the first),
+    # a JSON line, or a text row.
+    private def print_capture_row(row : Store::FlowRow, format : Symbol, *, first : Bool) : Nil
+      case format
+      when :json
+        print ',' unless first
+        print CLI::Output.flow_row_json(row)
+      when :jsonl then puts CLI::Output.flow_row_json(row)
+      else             puts CLI::Output.flow_row_text(row)
+      end
+    end
+
+    private def close_capture_array : Nil
+      puts ']'
+      STDOUT.flush
+    rescue IO::Error
+      # the reader is gone; there is nobody to close the document for
     end
 
     # A peer's RULE edits, which the reload loop has already adopted into the objects this process

@@ -222,7 +222,7 @@ module Gori
           # slot's header) — the plan says so when it cannot carry one.
           request_macro_flags(p, macro_flags, "candidate")
           p.on("--ac", "Auto-calibrate: sample the target's noise and drop matching responses") { auto_cal = true }
-          p.on("--format=FMT", "Output: text (default) | json | jsonl") { |v| format = parse_format(v, [:text, :json, :jsonl]) }
+          format_flag(p, [:text, :json, :jsonl], "Output: text (default) | json | jsonl") { |f| format = f }
           p.on("--force", "Run even when the request count is huge or unknown") { force = true }
           p.on("--bind-from=FLOW-ID", "Replay this captured flow FIRST so its response fills session bindings ($BIND.NAME; bare syntax: $NAME)") { |v| bind_from = parse_flow_id(v, "gori run fuzz") }
           p.on("--slot=NAME", "Send as this SESSION SLOT — its header overlay, and its binding table for $BIND.NAME tokens (bare syntax: $NAME)") { |v| slot = v.strip }
@@ -1186,7 +1186,12 @@ module Gori
         # response was truncated — a real finding that must not read as a clean short body) and
         # `resent?` (a `--retries` config re-send) join for the same argument: each is a fact the
         # run OBSERVED that vanishes if a matched-only gate drops the unmatched row carrying it.
-        return false unless r.interesting?
+        unless r.interesting?
+          # Settles the index, so the rows after it are not held waiting for it (see
+          # `FuzzArrayStream`'s index order).
+          json_stream.try(&.skip(r.index))
+          return false
+        end
         case format
         when :jsonl then puts CLI::Output.fuzz_row_json(r)
         when :json  then json_stream.try(&.append(r))

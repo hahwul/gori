@@ -1726,6 +1726,17 @@ module Gori
         end
       end
 
+      # `--format=FMT` and, when `json` is one of `allowed`, its `--json` alias (#1386), on one
+      # parser. The alias existed on `notify` alone, so `project list --json` was an unknown
+      # option; registering both here is what keeps it on every command that takes `--format`.
+      # `spec/cli/run/format_flag_spec.cr` fails on a bare `p.on("--format=…")` that bypasses
+      # it. A command whose `--format` does not offer `json` gets no `--json` (it would only
+      # ever refuse).
+      private def self.format_flag(p : OptionParser, allowed : Array(Symbol), help : String, &set : Symbol ->) : Nil
+        p.on("--format=FMT", help) { |v| set.call(parse_format(v, allowed)) }
+        p.on("--json", "Same as --format=json") { set.call(:json) } if allowed.includes?(:json)
+      end
+
       private def self.parse_format(v : String, allowed : Array(Symbol)) : Symbol
         sym = case v.downcase
               when "text"           then :text

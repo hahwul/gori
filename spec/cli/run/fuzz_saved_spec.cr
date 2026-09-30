@@ -260,3 +260,31 @@ describe "gori run fuzz saved runs" do
     end
   end
 end
+
+# #1386: `--format json` wrote rows in completion order, so two runs of one sweep produced two
+# different arrays. Rows now go out by index, held only until the indices below them settle.
+describe "gori run fuzz --format json — index order (#1386)" do
+  row = ->(i : Int64) { Gori::Fuzz::Result.new(i, ["p#{i}"], 0, 200, 2_i64, 1, 1, 10_i64, nil, true, false, nil) }
+
+  it "writes out-of-order completions in index order, releasing each run as it closes" do
+    io = IO::Memory.new
+    stream = Gori::CLI::Output::FuzzArrayStream.new(io)
+    stream.append(row.call(2_i64))
+    stream.append(row.call(1_i64))
+    io.to_s.should eq("[") # 0 has not settled, so nothing can be written yet
+    stream.skip(0_i64)     # 0 finished as a plain non-match
+    io.to_s.should contain(%("index":2))
+    stream.append(row.call(3_i64))
+    stream.close
+    JSON.parse(io.to_s).as_a.map(&.["index"].as_i64).should eq([1, 2, 3])
+  end
+
+  it "flushes what a stopped run left held, still in index order" do
+    io = IO::Memory.new
+    stream = Gori::CLI::Output::FuzzArrayStream.new(io)
+    stream.append(row.call(5_i64))
+    stream.append(row.call(4_i64))
+    stream.close
+    JSON.parse(io.to_s).as_a.map(&.["index"].as_i64).should eq([4, 5])
+  end
+end

@@ -58,7 +58,7 @@ module Gori
           p.banner = "Usage: gori run colormarker color list [--format=text|json]\n\n" \
                      "The GLOBAL custom colours, offered in every project's picker alongside the\n" \
                      "six built-ins. A built-in tracks the active theme; a custom is an absolute hex."
-          p.on("--format=FMT", "text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
           p.invalid_option { |f| abort "gori run colormarker color list: unknown option: #{f}\n#{p}" }
@@ -273,7 +273,7 @@ module Gori
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--scope=SCOPE", "Show only project | global rules") { |v| scope = parse_color_scope(v) }
-          p.on("--format=FMT", "text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run colormarker: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run colormarker: missing value for #{f}" }
@@ -333,7 +333,7 @@ module Gori
           p.on("--scope=SCOPE", "project (default) | global — a global rule applies in EVERY project") { |v| scope = parse_color_scope(v) }
           p.on("--name=NAME", "Optional rule label") { |v| name = v }
           p.on("--disabled", "Create the rule disabled") { disabled = true }
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run colormarker add: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run colormarker add: missing value for #{f}" }
@@ -726,7 +726,7 @@ module Gori
           # previewed as though every project rule outranked it.
           p.on("--scope=SCOPE", "Preview as a project (default) | global rule — global resolves first") { |v| scope = parse_color_scope(v) }
           p.on("--limit=N", "Recent flows to scan (default #{Colormarker::PREVIEW_SCAN})") { |v| limit = parse_count(v, "--limit") }
-          p.on("--format=FMT", "text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run colormarker preview: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run colormarker preview: missing value for #{f}" }

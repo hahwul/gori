@@ -50,7 +50,7 @@ module Gori
           rescue ex : ArgumentError
             abort "gori run cookie: #{ex.message}"
           end
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
           p.invalid_option { |f| abort "gori run cookie: unknown option: #{f}\n#{p}" }

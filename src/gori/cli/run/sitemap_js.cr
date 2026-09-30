@@ -76,9 +76,7 @@ module Gori
           p.on("--no-comments", "Leave out references that only ever appeared inside a comment") { o.comments = false }
           p.on("--in-scope", "Only references the project scope includes (and, with --scan, only in-scope flows read)") { o.in_scope = true }
           p.on("--lenient", "Don't refuse a query naming an unknown field — search that token as text") { o.lenient = true }
-          p.on("--format=FMT", "Output: text (default) | json | urls (one URL per line, to pipe into other tools)") do |v|
-            o.format = parse_format(v, [:text, :json, :urls])
-          end
+          format_flag(p, [:text, :json, :urls], "Output: text (default) | json | urls (one URL per line, to pipe into other tools)") { |f| o.format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| o.positional = before + after }
           p.invalid_option { |f| abort "gori run sitemap js: unknown option: #{f}\n#{p}" }

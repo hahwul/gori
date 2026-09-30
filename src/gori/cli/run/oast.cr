@@ -197,7 +197,7 @@ module Gori
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--show-tokens", "Print provider auth tokens instead of [REDACTED]") { show_tokens = true }
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
           p.invalid_option { |f| abort "gori run oast providers: unknown option: #{f}\n#{p}" }
@@ -273,7 +273,7 @@ module Gori
           # `add` only (#1117): it is the verb that mints an id a script needs back. Not
           # registered on `update`, whose answer is the id the caller already typed — a flag
           # it parsed and ignored would be the silently-dropped argument this parser refuses.
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) } unless update
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f } unless update
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
           p.invalid_option { |f| abort "gori run oast providers #{verb}: unknown option: #{f}\n#{p}" }
@@ -464,7 +464,7 @@ module Gori
                      "LISTENER picker shows. Resume one with `gori run oast resume <id>`."
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
           p.invalid_option { |f| abort "gori run oast list: unknown option: #{f}\n#{p}" }
@@ -720,7 +720,7 @@ module Gori
                      "pinned upstream proxy and timeouts) — which is the only way the answer\n" \
                      "describes the run it is diagnosing."
           p.on("--check", "Probe each preset over the network and report reachability") { check = true }
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run oast presets: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run oast presets: missing value for #{f}" }

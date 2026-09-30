@@ -27,8 +27,7 @@ module Gori
           p.on("--level=LEVEL", "info (default) | success | warn | error") { |v| level = v }
           p.on("--project=NAME", "Project to notify (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to notify") { |v| db_path = v }
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
-          p.on("--json", "Same as --format=json") { format = :json }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
           p.invalid_option { |f| abort "gori run notify: unknown option: #{f}\n#{p}" }

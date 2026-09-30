@@ -266,13 +266,18 @@ module Gori
     # `surface` is which of gori's three faces asked for this import. Every imported flow is
     # stamped `source: import` and `source_ref: <basename>`, so a History row can say WHICH file
     # it came out of — the provenance question an operator actually asks of an imported row.
+    #
+    # `label` names the source in the flows' provenance and in a "nothing landed" refusal when the
+    # path is not the operator's own — `gori run import --urls -` spools stdin to a temp file,
+    # whose name means nothing to anyone.
     def self.import_file(store : Store, kind : Symbol, path : String,
                          surface : FlowSource::Surface? = nil, *,
-                         cancelled : (-> Bool)? = nil, progress : (Int32, Int32? ->)? = nil) : Result
+                         cancelled : (-> Bool)? = nil, progress : (Int32, Int32? ->)? = nil,
+                         label : String? = nil) : Result
       expanded = Path[path].expand(home: true).to_s
       raise Gori::Error.new("file not found: #{expanded}") unless File.exists?(expanded)
       raise Gori::Error.new("not a file: #{expanded}") unless File.file?(expanded)
-      prov = Provenance.new(surface, File.basename(expanded))
+      prov = Provenance.new(surface, label || File.basename(expanded))
 
       if kind == :har
         begin
@@ -296,7 +301,7 @@ module Gori
       rescue ex : File::Error
         raise Gori::Error.new("cannot read #{expanded}: #{ex.message}")
       end
-      raise_nothing_landed(expanded, parsed.skipped) if parsed.flows.empty?
+      raise_nothing_landed(label || expanded, parsed.skipped) if parsed.flows.empty?
       committed, attempted = insert_all(store, parsed.flows, cancelled: cancelled, progress: progress)
       Result.new(committed, parsed.skipped, attempted)
     end

@@ -381,10 +381,7 @@ module Gori
           p.on("--lenient", "Don't refuse a query naming an unknown field — search that token as text (old behaviour)") { lenient = true }
           p.on("--column=SPEC", "Show an extracted value per row: [LABEL=][req|res:]kind:selector — e.g. header:x-request-id, RID=jsonpath:data.id, position:0:32 (repeatable; replaces this project's configured History columns)") { |v| column_specs << v }
           p.on("--no-columns", "Don't draw this project's configured History columns (see the TUI's Columns… on the History tab)") { no_columns = true }
-          p.on("--format=FMT", "Output: text (default) | json | jsonl (both emit JSON-Lines) | har (one HAR 1.2 log)") do |v|
-            format = parse_format(v, [:text, :json, :jsonl, :har])
-            format = :json if format == :jsonl # this listing's json IS JSON-Lines; accept the standard name too
-          end
+          format_flag(p, [:text, :json, :jsonl, :har], "Output: text (default) | json (one array) | jsonl (one object per line) | har (one HAR 1.2 log)") { |f| format = f }
           p.on("--include-sensitive", "Emit Authorization/Cookie/Set-Cookie/API-key values in --format json's per-row headers instead of [REDACTED]") { include_sensitive = true }
           redact_options(p, redaction)
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
@@ -431,8 +428,8 @@ module Gori
         # value on the text row too, and the configured set is drawn by default. `--format har`
         # is untouched on purpose (an interchange document has to carry the message in full to
         # be replayable), but that is a paragraph for the docs, not a claim to make here.
-        if include_sensitive && format != :json
-          STDERR.puts "gori run history: --include-sensitive only changes --format json"
+        if include_sensitive && !format.in?(:json, :jsonl)
+          STDERR.puts "gori run history: --include-sensitive only changes --format json/jsonl"
         end
         # Refused rather than ignored. A profile redacts BODIES, and `--format har` is the only
         # listing format that carries one — so `--redact` on the text/json listing would hand
@@ -601,7 +598,7 @@ module Gori
             # script rather than a warning about anything they did.
             STDERR.puts "gori run history: --column is not carried by --format har (the values are in each entry's headers/content)" unless column_specs.empty?
             emit_har(store, rows, query, view_label, limit, truncated, redaction, hide_static)
-          elsif format == :json
+          elsif format.in?(:json, :jsonl)
             # Said on STDERR in the streaming formats too, for the reason the empty note below
             # gives: STDOUT is a pipe, and the consumer reading it cannot see the flags the
             # command was invoked with.
@@ -613,13 +610,23 @@ module Gori
             # pure stream either way (this is STDERR), so a pipe is unaffected.
             STDERR.puts empty_listing_note(query, view_label, in_scope, hide_static) if rows.empty?
             # One extra read per row for the head the projection does not carry — that is what
-            # buys `url` and `headers` on the JSON-Lines row (`Output.flow_row_fields`). Heads
-            # are small and this streams row by row, so a large `-n` costs queries, not memory.
-            rows.each do |r|
+            # buys `url` and `headers` on the row (`Output.flow_row_fields`). Heads are small and
+            # this streams row by row, so a large `-n` costs queries, not memory.
+            #
+            # `json` is ONE array and `jsonl` one object per line (#1386). `json` used to be
+            # JSON-Lines here and an array everywhere else, so `history --format json | jq
+            # length` measured each row instead of counting them. The array is still streamed,
+            # element by element, rather than built whole.
+            array = format == :json
+            print '[' if array
+            rows.each_with_index do |r, i|
               cols, cols_redacted = row_columns(store, r, prepared, include_sensitive) || {nil, false}
-              puts CLI::Output.flow_row_json(r, store.request_head(r.id), cols,
+              print ',' if array && i > 0
+              line = CLI::Output.flow_row_json(r, store.request_head(r.id), cols,
                 include_sensitive: include_sensitive, columns_redacted: cols_redacted)
+              array ? print(line) : puts(line)
             end
+            puts ']' if array
           elsif rows.empty?
             STDERR.puts empty_listing_note(query, view_label, in_scope, hide_static)
           else
@@ -842,7 +849,7 @@ module Gori
           p.banner = "Usage: gori run show <flow-id> [options]"
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
-          p.on("--format=FMT", "Output: text (default) | json | raw (exact bytes) | har (a one-entry HAR 1.2 log) | curl | python | fetch | go | httpie (the request as runnable client code) | csrf (a self-submitting HTML CSRF PoC)") { |v| format = parse_format(v, [:text, :json, :raw, :har, :curl, :python, :fetch, :go, :httpie, :csrf]) }
+          format_flag(p, [:text, :json, :raw, :har, :curl, :python, :fetch, :go, :httpie, :csrf], "Output: text (default) | json | raw (exact bytes) | har (a one-entry HAR 1.2 log) | curl | python | fetch | go | httpie (the request as runnable client code) | csrf (a self-submitting HTML CSRF PoC)") { |f| format = f }
           p.on("--request-only", "Only the request side") { req_only = true }
           p.on("--response-only", "Only the response side") { resp_only = true }
           p.on("--headers-only", "text/json: print the request line/status line and headers only — each body is replaced by a line naming its size, and the sections derived from bodies (decoded views, gRPC messages, WebSocket frames, SSE events) are left out, named with their counts where they have one") { headers_only = true }

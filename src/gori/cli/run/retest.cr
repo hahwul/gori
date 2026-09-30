@@ -76,7 +76,7 @@ module Gori
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--issue=N", "Issue id (required)") { |v| issue_id = parse_retest_id(v, "--issue") }
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
           p.invalid_option { |f| abort "gori run retest: unknown option: #{f}\n#{p}" }
@@ -149,7 +149,7 @@ module Gori
           p.on("--repeater=M", "Repeater session id to send (required; ids from `gori run repeater list`)") { |v| repeater_id = parse_retest_id(v, "--repeater") }
           p.on("--role=ROLE", "setup | baseline | variant (default) | control | cleanup") { |v| role_s = v }
           p.on("--assert=EXPR", "The one expected result (see the list above)") { |v| assertion = v }
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
           p.invalid_option { |f| abort "gori run retest add: unknown option: #{f}\n#{p}" }
@@ -404,7 +404,7 @@ module Gori
           p.on("-k", "--insecure-upstream", "Do not verify the upstream TLS certificate") { insecure = true }
           p.on("--slot=NAME", "Send every step as this SESSION SLOT — its header overlay, and its binding table for $BIND.NAME tokens (bare syntax: $NAME)") { |v| slot = v.strip }
           p.on("--timeout=SEC", "Per-step connect + idle timeout (seconds, default #{Retest::LiveBackend::DEFAULT_TIMEOUT.total_seconds.to_i})") { |v| timeout = parse_count(v, "--timeout").seconds }
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
           p.invalid_option { |f| abort "gori run retest run: unknown option: #{f}\n#{p}" }
@@ -485,7 +485,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--issue=N", "Issue id (required)") { |v| issue_id = parse_retest_id(v, "--issue") }
           p.on("--limit=N", "How many runs to print (default #{Retest::RUN_HISTORY}, which is all that is kept)") { |v| limit = parse_count(v, "--limit").to_i }
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
           p.invalid_option { |f| abort "gori run retest runs: unknown option: #{f}\n#{p}" }
@@ -525,7 +525,7 @@ module Gori
                      "own send, so an old row still opens the exact response it reported."
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
           p.invalid_option { |f| abort "gori run retest show: unknown option: #{f}\n#{p}" }
