@@ -352,10 +352,19 @@ module Gori::Proxy
     # It is answered HERE rather than there because only this call site knows the read was the
     # CLIENT head — `run`'s rescue also covers every response-head and body read on the way
     # through — and because `HeadTimeout#received` is only meaningful for this one.
+    #
+    # An OVERSIZED head is answered too: it used to come back as the same nil as a clean close,
+    # so a client with a 300 KB cookie saw a reset and History showed nothing at all, while the
+    # response side already recorded "response head exceeded 256 KiB".
     private def read_client_head : Bytes?
-      Codec::Http1.read_head(@io,
+      result = Codec::Http1.read_head_result(@io,
         deadline: SocketTuning::HEAD_DEADLINE, timeout_sock: SocketTuning.underlying_socket(@io),
         detect_non_http: true)
+      if result.state.too_large?
+        refuse_oversized_head(result)
+        return nil
+      end
+      result.to_legacy_head
     rescue ex : Codec::Http1::HeadTimeout
       record_silent_client if ex.received.zero? && !@saw_request
       nil
@@ -2789,6 +2798,47 @@ module Gori::Proxy
         scheme: scheme, host: host, port: port, created_at: created_at, body: nil, source: FlowSource::Kind::Proxy,
         intercept_original: intercept_original))
       @sink.on_response(FlowMapper.error_response(flow_id, message))
+    end
+
+    # The client's head outgrew `MAX_HEAD_BYTES` before its CRLFCRLF: record what arrived, answer
+    # 431 and close, since the rest of the head is still on the socket and cannot be framed.
+    #
+    # The flow names where the request was going the way a forwarded one would
+    # (`resolve_forward`: an absolute-form target's own scheme and authority), so a scope or a
+    # `host:` lens finds it. Closing with the rest of the head unread would make the kernel send
+    # an RST that can reach the client before the 431 does — the reset this answer replaces — so
+    # the tail is drained first, bounded in bytes and time (RFC 9112 §9.6, lingering close).
+    private def refuse_oversized_head(result : Codec::Http1::HeadReadResult) : Nil
+      req = Codec::Http1.parse_request_head(result.bytes)
+      host, port, scheme = begin
+        h, p, sch, _ = resolve_forward(req)
+        {h, p, sch}
+      rescue
+        {@fixed_host || req.host? || "", @fixed_port, @scheme}
+      end
+      record_error(req, scheme, host, port, now_us, result.failure_message("request head"))
+      @io.write("HTTP/1.1 431 Request Header Fields Too Large\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_slice)
+      @io.flush
+      linger_drain
+    rescue
+    end
+
+    LINGER_MAX_BYTES = 1 << 20
+    LINGER_DEADLINE  = 2.seconds
+
+    # Reads and discards what the client is still sending, until it stops or a bound is hit, so
+    # the close that follows does not reset a reply the client has not read yet.
+    private def linger_drain : Nil
+      SocketTuning.underlying_socket(@io).try(&.read_timeout = 500.milliseconds)
+      deadline = Time.instant + LINGER_DEADLINE
+      buf = Bytes.new(16 * 1024)
+      total = 0
+      while total < LINGER_MAX_BYTES && Time.instant < deadline
+        n = @io.read(buf)
+        break if n.zero?
+        total += n
+      end
+    rescue
     end
 
     # A connection whose bytes are not HTTP (MQTT, AMQP, a raw TLS ClientHello, a binary RPC),
