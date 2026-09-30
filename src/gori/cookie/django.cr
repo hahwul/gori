@@ -12,9 +12,9 @@ module Gori
     #               key, NOT an HMAC-derived one (that's Flask's scheme).
     #
     # salt defaults to "django.core.signing"; the cookie-session backend uses
-    # "django.contrib.sessions.backends.signed_cookies" (SESSION_SALT below) — which, as of
-    # Django 6.0, also wraps the secret with a fixed prefix before deriving the key (see
-    # `derive_key`). algorithm defaults to SHA-256 (Django ≥ 3.1); older apps used SHA-1.
+    # "django.contrib.sessions.backends.signed_cookies" (SESSION_SALT below) through the same
+    # plain `signing.dumps`/`loads` (see `derive_key`). algorithm defaults to SHA-256
+    # (Django ≥ 3.1); older apps used SHA-1.
     # Both salt and algorithm are pinned to golden vectors from real Django in the spec.
     module Django
       extend self
@@ -130,19 +130,15 @@ module Gori
 
       # --- internals ----------------------------------------------------------
 
-      # Django 6.0 added a purpose-specific wrap around the secret, but only for
-      # `django.core.signing.get_cookie_signer()` — the factory `signed_cookies`
-      # (SESSION_SALT) calls internally to build its Signer: `key = b"django.http.cookies"
-      # + secret_key`, and THAT wrapped key is what feeds the normal salt+"signer"
-      # derivation below. The generic `signing.dumps()`/`Signer` API (any other salt,
-      # including DEFAULT_SALT) never goes through `get_cookie_signer` and is unaffected.
-      # Confirmed byte-for-byte against real Django 6.0.8 — see
-      # `django.core.signing._cookie_signer_key`.
-      COOKIE_SIGNER_PREFIX = "django.http.cookies"
-
+      # The session backend (`contrib/sessions/backends/signed_cookies.py`) signs with plain
+      # `signing.dumps(salt=SESSION_SALT)`, so its key is the ordinary salt+"signer"+secret.
+      # Django 6.0's `b"django.http.cookies" + secret` wrap (`_cookie_signer_key`) belongs to
+      # `get_cookie_signer()` alone — `set_signed_cookie`, under a `django.http.cookies.v2:`
+      # salt — which the session backend never calls. Wrapping SESSION_SALT here made every
+      # real session cookie read as "bad key" (checked against Django 6.0.8 and 6.1.1; the
+      # golden vector is in spec/cookie_spec.cr).
       private def derive_key(salt : String, secret : String, algorithm : String) : Bytes
-        key = salt == SESSION_SALT ? "#{COOKIE_SIGNER_PREFIX}#{secret}" : secret
-        material = "#{salt}signer#{key}"
+        material = "#{salt}signer#{secret}"
         case algorithm
         when "sha1"   then Digest::SHA1.digest(material)
         when "sha256" then Digest::SHA256.digest(material)
