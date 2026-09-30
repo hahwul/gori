@@ -10,11 +10,12 @@ private CLOCK = [1_700_000_000_000_000_i64]
 # into the response head.
 private def pi_flow(store : Gori::Store, target : String, *, host = "shop.test", method = "GET",
                     req_headers = "", body : (String | Bytes)? = nil,
-                    resp_body : String | Bytes = "", resp_headers = "") : Int64
+                    resp_body : String | Bytes = "", resp_headers = "",
+                    scheme = "https", port = 443) : Int64
   CLOCK[0] += 1000
   b = body.is_a?(String) ? body.to_slice : body
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
-    created_at: CLOCK[0], scheme: "https", host: host, port: 443,
+    created_at: CLOCK[0], scheme: scheme, host: host, port: port,
     method: method, target: target, http_version: "HTTP/1.1",
     head: "#{method} #{target} HTTP/1.1\r\nHost: #{host}\r\n#{req_headers}\r\n".to_slice,
     body: b, source: Gori::FlowSource::Kind::Proxy))
@@ -224,6 +225,32 @@ describe Gori::ParamInventory do
       PI.carries?(r, store.flow_row(other).not_nil!).should be_false
       post = pi_flow(store, "/Search?q=1", host: "shop.test", method: "POST")
       PI.carries?(r, store.flow_row(post).not_nil!).should be_false
+    end
+  end
+
+  # #1371: two services on one host are two endpoint sets, as they are two Sitemap roots.
+  it "keeps the same endpoint on two origins of one host as separate rows" do
+    with_store do |store|
+      a = pi_flow(store, "/s?q=1", host: "h.test", scheme: "http", port: 19021)
+      pi_flow(store, "/s?q=2", host: "h.test", scheme: "http", port: 19022)
+      pi_flow(store, "/s?q=3", host: "h.test", scheme: "https", port: 8443)
+      rows = PI.build(store).rows
+      rows.map { |r| {r.scheme, r.port, r.samples} }.should eq([
+        {"http", 19021, ["1"]}, {"http", 19022, ["2"]}, {"https", 8443, ["3"]},
+      ])
+      rows[0].origin_label.should eq("http://h.test:19021")
+      PI.carries?(rows[0], store.flow_row(a).not_nil!).should be_true
+      PI.carries?(rows[1], store.flow_row(a).not_nil!).should be_false # same path, another port
+    end
+  end
+
+  it "narrows to one origin of the host with scheme and port" do
+    with_store do |store|
+      pi_flow(store, "/s?q=1", host: "h.test", scheme: "http", port: 19021)
+      pi_flow(store, "/s?q=2", host: "h.test", scheme: "http", port: 19022)
+      pi_flow(store, "/s?q=3", host: "h.test", scheme: "https", port: 19021)
+      rows = PI.build(store, PI::Options.new(host: "h.test", scheme: "http", port: 19021)).rows
+      rows.map(&.samples).should eq([["1"]])
     end
   end
 

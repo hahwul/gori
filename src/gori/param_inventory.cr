@@ -9,7 +9,8 @@ require "./store"
 
 module Gori
   # The per-endpoint PARAMETER INVENTORY (#1231): every input name captured traffic shows,
-  # grouped by (host, method, path, location, name), with how often it appeared, a capped
+  # grouped by (origin, method, path, location, name) — the origin being scheme + host + port,
+  # so two services on one host are two endpoint sets, as they are two Sitemap roots (#1371) — with how often it appeared, a capped
   # sample of its values, the first/last flow that carried it, and whether a value came back
   # in the response. Burp's "Analyze target", as a read over the store.
   #
@@ -57,9 +58,13 @@ module Gori
     # millions of accumulators. Rows already open keep counting; new ones are refused.
     ROW_CAP = 10_000
 
+    # `scheme`/`port` narrow to one origin of `host` (the TUI's Params sub-tab on a Sitemap
+    # root); each is ignored without `host`.
     record Options,
       filter : QL::Filter = QL::EMPTY,
       host : String? = nil,
+      scheme : String? = nil,
+      port : Int32? = nil,
       path_prefix : String? = nil,
       locations : Array(Miner::Location) = ALL_LOCATIONS,
       all_headers : Bool = false,
@@ -72,12 +77,15 @@ module Gori
       # a JSON body cut short does not parse — so it is for callers that accept that loss.
       body_max : Int32? = nil
 
-    # One inventory row. `path` is the Sitemap's durable node key with the query cut off
+    # One inventory row. `scheme`/`host`/`port` are the origin the endpoint was sent to (host
+    # lowercased), and `path` is the Sitemap's durable node key with the query cut off
     # (`Sitemap.node_path`), so a row names exactly the endpoint the Sitemap tab draws.
     # `sensitive` says the samples carry credential/session material; a surface masks them
     # unless the caller opted in (`masked`).
     record Row,
+      scheme : String,
       host : String,
+      port : Int32,
       method : String,
       path : String,
       location : Miner::Location,
@@ -94,6 +102,11 @@ module Gori
       # Json location injects), everything else its name. nil for an array-element leaf.
       def word : String?
         ParamInventory.word(location, name)
+      end
+
+      # `scheme://host[:port]`, the way the Sitemap labels this row's root.
+      def origin_label : String
+        Sitemap::Origin.new(scheme, host, port).label
       end
     end
 
@@ -194,7 +207,7 @@ module Gori
     def build(store : Store, opts : Options = Options.new, stop : -> Bool = -> { false }) : Report
       wanted = opts.locations.to_set
       sens = Sensitivity.new(store)
-      accs = {} of {String, String, String, Miner::Location, String} => Acc
+      accs = {} of Key => Acc
       prefix = opts.path_prefix.presence
       # The path prefix is judged on the ROW, before its bodies are read and before it counts
       # against `max_flows` — so a narrow prefix is not starved by newer flows elsewhere.
@@ -202,7 +215,8 @@ module Gori
       scanned, flow_truncated = each_flow(store, host_filter(opts), opts.max_flows, keep,
         -> { stop.call || accs.size >= opts.max_rows }) do |row|
         next unless detail = store.get_flow(row.id, body_max: opts.body_max)
-        add_flow(accs, detail, row.host.downcase, row.method.upcase, endpoint_path(row.target), wanted, opts, sens)
+        add_flow(accs, detail, {row.scheme, row.host.downcase, row.port, row.method.upcase, endpoint_path(row.target)},
+          wanted, opts, sens)
       end
       capped = accs.size >= opts.max_rows
       Report.new(rows(accs), scanned, flow_truncated || capped, capped)
@@ -213,13 +227,13 @@ module Gori
       Sitemap.path_part(Sitemap.node_path(target))
     end
 
-    # Does the stored flow `flow` still stand where `row` said its flow did — same host,
+    # Does the stored flow `flow` still stand where `row` said its flow did — same origin,
     # method and endpoint, keyed exactly as `build` keyed the row? A report holds flow ids,
     # and a History clear restarts them (`Store#clear_flows`), so an id read back after the
     # scan can name an unrelated request; a caller that acts on the id checks this first.
     def carries?(row : Row, flow : Store::FlowRow) : Bool
-      flow.host.downcase == row.host && flow.method.upcase == row.method &&
-        endpoint_path(flow.target) == row.path
+      flow.host.downcase == row.host && flow.scheme == row.scheme && flow.port == row.port &&
+        flow.method.upcase == row.method && endpoint_path(flow.target) == row.path
     end
 
     # The caller's filter, AND an exact host when one was named. Exact on purpose: QL's
@@ -227,10 +241,19 @@ module Gori
     # Case-insensitive, but hosts are stored as captured: a bare `host = ? COLLATE NOCASE`
     # cannot use idx_flows_sitemap and scans the table, so the stored spellings are
     # resolved off the index first and the outer match is an indexed equality.
+    #
+    # With `scheme`/`port` as well, narrowed to that one origin of the host.
     private def host_filter(opts : Options) : QL::Filter
       return opts.filter unless h = opts.host.try(&.strip).presence
-      QL.and(opts.filter, QL::Filter.new(
+      f = QL.and(opts.filter, QL::Filter.new(
         "host IN (SELECT DISTINCT host FROM flows WHERE host = ? COLLATE NOCASE)", [h] of DB::Any))
+      if scheme = opts.scheme
+        f = QL.and(f, QL::Filter.new("scheme = ?", [scheme] of DB::Any))
+      end
+      if port = opts.port
+        f = QL.and(f, QL::Filter.new("port = ?", [port] of DB::Any))
+      end
+      f
     end
 
     # Newest-first, id-cursor-paged walk over the filter's flows, yielding at most `max` rows
@@ -268,14 +291,20 @@ module Gori
       end
     end
 
-    private def add_flow(accs, detail : Store::FlowDetail, host : String, method : String, path : String,
+    # (scheme, host, port, method, path) — where one flow's parameters land.
+    alias Endpoint = {String, String, Int32, String, String}
+    # One accumulator's identity: the endpoint, then the parameter's location and name.
+    alias Key = {String, String, Int32, String, String, Miner::Location, String}
+
+    private def add_flow(accs, detail : Store::FlowDetail, ep : Endpoint,
                          wanted : Set(Miner::Location), opts : Options, sens : Sensitivity) : Nil
+      scheme, host, port, method, path = ep
       id = detail.row.id
       response : String? = nil
       searched = {} of String => Bool # one search per distinct value per flow
       Params.each(detail.request_head, detail.request_body, opts.all_headers) do |p|
         next unless wanted.includes?(p.loc)
-        key = {host, method, path, p.loc, p.name}
+        key = {scheme, host, port, method, path, p.loc, p.name}
         acc = accs[key]?
         if acc.nil?
           next if accs.size >= opts.max_rows
@@ -329,11 +358,13 @@ module Gori
     end
 
     private def rows(accs) : Array(Row)
-      out = accs.map do |(host, method, path, loc, name), a|
-        Row.new(host, method, path, loc, name, a.count, a.samples, a.samples_truncated?,
+      out = accs.map do |(scheme, host, port, method, path, loc, name), a|
+        Row.new(scheme, host, port, method, path, loc, name, a.count, a.samples, a.samples_truncated?,
           a.first_flow_id, a.last_flow_id, !a.reflected_flow_id.nil?, a.reflected_flow_id, a.sensitive?)
       end
-      out.sort_by! { |r| {r.host, r.path, r.method, r.location.value, r.name} }
+      # Host first, then its origins in the Sitemap's root order, so one host's services stay
+      # together however their paths sort.
+      out.sort_by! { |r| {r.host, r.scheme, r.port, r.path, r.method, r.location.value, r.name} }
     end
 
     # The samples a surface may print: the real ones, or one placeholder when the row is

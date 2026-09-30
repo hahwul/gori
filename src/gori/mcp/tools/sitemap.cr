@@ -523,7 +523,11 @@ module Gori
 
       private def param_row(j : JSON::Builder, r : ParamInventory::Row, include_sensitive : Bool) : Nil
         j.object do
+          # The origin, not only the host (#1371): `list_sitemap` entries carry scheme/port,
+          # and two services on one host keep separate parameter rows.
+          j.field "scheme", Serialize.text(r.scheme)
           j.field "host", Serialize.text(r.host)
+          j.field "port", r.port
           j.field "method", Serialize.text(r.method)
           j.field "path", Serialize.text(r.path)
           j.field "location", r.location.label
@@ -588,8 +592,8 @@ module Gori
         end
 
         tool j, "list_params",
-          "Per-endpoint PARAMETER INVENTORY from captured requests: one row per (host, method, " \
-          "path, location, name), location = query|form|multipart|json|headers|cookies, with " \
+          "Per-endpoint PARAMETER INVENTORY from captured requests: one row per (scheme, host, " \
+          "port, method, path, location, name), location = query|form|multipart|json|headers|cookies, with " \
           "`count` (flows), sample values, first/last flow id and `reflected` (a 4+ byte value " \
           "seen verbatim in the decoded response; a triage hint, not a finding). JSON names are " \
           "paths (items[].id; [] is not JsonPath). Standard browser headers are omitted unless " \

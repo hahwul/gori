@@ -36,6 +36,7 @@ describe "MCP list_params" do
       out["truncated"].should be_false
       row = out["params"][0]
       {row["host"], row["path"], row["location"], row["name"]}.should eq({"shop.test", "/search", "query", "q"})
+      {row["scheme"], row["port"]}.should eq({"https", 443}) # the origin, as list_sitemap has it (#1371)
       row["reflected"].should be_true
       row["reflected_flow_id"].should eq(id)
       row["samples"].should eq(["needle"])

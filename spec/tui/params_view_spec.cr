@@ -8,8 +8,8 @@ include Gori::Tui
 private alias PVRow = Gori::ParamInventory::Row
 
 private def pv_row(name : String, path = "/a", *, host = "acme.test", reflected = false,
-                   samples = ["v"], sensitive = false) : PVRow
-  PVRow.new(host, "GET", path, Gori::Miner::Location::Query, name, 1, samples, false,
+                   samples = ["v"], sensitive = false, scheme = "https", port = 443) : PVRow
+  PVRow.new(scheme, host, port, "GET", path, Gori::Miner::Location::Query, name, 1, samples, false,
     1_i64, 7_i64, reflected, reflected ? 7_i64 : nil, sensitive)
 end
 

@@ -147,20 +147,22 @@ module Gori
         ParamInventory.build(store, opts)
       end
 
-      # Grouped by host, then endpoint; one line per parameter. Every captured string goes
-      # through `term_safe` — a name or value is bytes off the wire and may carry an escape.
+      # Grouped by origin (`https://h:8443`, as the Sitemap labels its roots — two services on
+      # one host are two groups, #1371), then endpoint; one line per parameter. Every captured
+      # string goes through `term_safe` — a name or value is bytes off the wire and may carry
+      # an escape.
       def self.params_text(rows : Array(ParamInventory::Row), include_sensitive : Bool) : String
         name_w = rows.max_of? { |r| CLI::Output.cell_width(CLI::Output.term_safe(r.name)) }.try(&.clamp(4, 40)) || 4
         count_w = rows.max_of?(&.count.to_s.size) || 1
         String.build do |io|
-          host = nil
+          origin = nil
           endpoint = nil
           rows.each do |r|
-            if r.host != host
-              io << '\n' if host
-              host = r.host
+            if (label = r.origin_label) != origin
+              io << '\n' if origin
+              origin = label
               endpoint = nil
-              io << CLI::Output.term_safe(r.host) << '\n'
+              io << CLI::Output.term_safe(label) << '\n'
             end
             if {r.method, r.path} != endpoint
               endpoint = {r.method, r.path}
@@ -189,7 +191,9 @@ module Gori
       def self.param_row_json(j : JSON::Builder, r : ParamInventory::Row, include_sensitive : Bool) : Nil
         redacted = r.sensitive && !include_sensitive
         j.object do
+          CLI::Output.json_captured(j, "scheme", r.scheme)
           CLI::Output.json_captured(j, "host", r.host)
+          j.field "port", r.port
           CLI::Output.json_captured(j, "method", r.method)
           CLI::Output.json_captured(j, "path", r.path)
           j.field "location", r.location.label
