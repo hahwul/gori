@@ -57,6 +57,17 @@ describe Gori::Verb::Keymap do
       km.lookup(Chord.new("y"), Gori::Verb::Scope::Body).should eq("b.x")
     end
 
+    it "can resolve only Global chords for the sub-tab strip" do
+      reg = reg_with(
+        verb("g.x", Gori::Verb::Scope::Global, Chord.new("x", ctrl: true)),
+        verb("b.x", Gori::Verb::Scope::Body, Chord.new("x", ctrl: true)),
+      )
+      km = Keymap.build(reg)
+      ctx = FakeExecContext.new
+      km.resolve_global(Chord.new("x", ctrl: true), reg, ctx).should eq("g.x")
+      km.resolve_global(Chord.new("x"), reg, ctx).should be_nil
+    end
+
     # `>` was free before #1295 bound it to Send flow to… on eleven tabs, so an operator could
     # have put a Global verb there. That explicit choice beats the hidden per-tab openers,
     # which the lookup would otherwise answer first on exactly those tabs.

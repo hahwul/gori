@@ -42,6 +42,25 @@ describe Gori::Tui::DecoderView do
     b.contains?("plain text").should be_true
   end
 
+  it "paints the rebound output-mode chord on the OUTPUT card" do
+    previous = Gori::Settings.keymap_overrides
+    begin
+      Gori::Settings.keymap_overrides = {"decoder.mode" => ["alt-x"]}
+      view = DecoderView.new
+      view.set_registry(Gori::Verbs.registry)
+      input = TextArea.new("plain text")
+      result = Gori::Decoder.run(REG, input.text.to_slice, "")
+      backend = MemoryBackend.new(80, 30)
+      view.render(Screen.new(backend), Rect.new(0, 0, 80, 30),
+        input: input, chain: "", chain_cx: 0, chain_pre: "",
+        result: result, pane: :output, focused: true, popup: ChainComplete.new)
+      backend.contains?("⌥X:AUTO").should be_true
+      backend.contains?("^X:AUTO").should be_false
+    ensure
+      Gori::Settings.keymap_overrides = previous
+    end
+  end
+
   it "renders a failed step in the pipeline without crashing" do
     b = render_decoder(input: "!!notbase64!!", chain: "base64-decode > sha256")
     b.contains?("✗").should be_true

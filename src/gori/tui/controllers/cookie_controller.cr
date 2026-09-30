@@ -125,6 +125,7 @@ module Gori::Tui
 
     private def make_session(input_text : String, name : String?) : CookieSession
       s = CookieSession.new(input_text, name)
+      s.view.set_registry(@host.session.registry)
       recompute_decode(s)
       recompute_forge(s)
       s

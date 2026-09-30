@@ -1853,13 +1853,12 @@ module Gori::Tui
         return
       end
       # Resolve through the keymap, honouring available? so a scoped binding that is
-      # gated off (e.g. Repeater copy only in READ) does not swallow the chord — and so
-      # Global breath keys (c/i/s) still fire when a scoped verb is unavailable.
+      # gated off (e.g. Repeater copy only in READ) does not swallow the chord.
       return if dispatch_chord(ev, chord)
       # A bare printable nothing binds HERE. Say so: typed text that missed its field used to
-      # vanish letter by letter — except the letters that were Global breath keys, which
-      # fired (`s` flipped the scope lens, `c` stopped capture) with nothing on screen tying
-      # the flip to the typing. The named keys (arrows, ↵, esc, ↹) and every modified chord
+      # vanish letter by letter — except the Global breath keys, which fired (`s` flipped the
+      # scope lens, `c` stopped capture and `i` held all traffic) with nothing on screen tying
+      # the action to the typing. The named keys (arrows, ↵, esc, ↹) and every modified chord
       # stay silent: those are navigation, legitimately unbound in some scopes (`space` is a
       # named key too, so the leader below is never named here).
       # A bare printable the TAB BAR does not bind but the tab's body does: name the `↵` that
@@ -1895,6 +1894,15 @@ module Gori::Tui
       chord ||= Keybind.from_event(ev)
       return false unless chord
       return false unless id = resolve_verb_id(chord, current_scope)
+      @toast = @session.registry[id].call(self) || @toast
+      true
+    end
+
+    # The sub-tab strip owns its raw navigation keys. Its unhandled keys may reach Global
+    # shortcuts, but never the active tab or Editor scope — that would type through the strip.
+    private def dispatch_global_chord(ev : Termisu::Event::Key) : Bool
+      return false unless chord = Keybind.from_event(ev)
+      return false unless id = @keymap.resolve_global(chord, @session.registry, self)
       @toast = @session.registry[id].call(self) || @toast
       true
     end

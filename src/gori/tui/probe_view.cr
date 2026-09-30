@@ -7,6 +7,7 @@ require "./traffic_empty_state"
 require "../settings"
 require "../store"
 require "../scope"
+require "../hotkeys"
 require "../probe"
 require "../probe_query"
 require "./preview_split"
@@ -23,6 +24,7 @@ module Gori::Tui
   # IssuesView structurally; the issues ARE the groups (the DB upserts one row per
   # (code, host)), so there's no in-view folding.
   class ProbeView
+    @registry : Verb::Registry? = nil
     include QueryBarEdit # ⌃/⌥←→ word motion, Home/End, Delete, ⌥⌫ on the `/` bar
     # The list-over-preview layout and the severity/status vocabulary, both shared with
     # the sibling tab that lists the same records through the other lens.
@@ -116,6 +118,10 @@ module Gori::Tui
       # that reads it, since the fingerprint check is not repeated on every tick.
       @peer_moved = false
       @loaded_at = nil.as(Time::Instant?)
+    end
+
+    def set_registry(registry : Verb::Registry) : Nil
+      @registry = registry
     end
 
     # When the last `reload` ran — the controller spaces live reloads off it.
@@ -1137,7 +1143,7 @@ module Gori::Tui
       tallies_x = render_tallies(screen, rect, x + 1) # right-aligned, but never left of the mode chip
       # The CLOSED lens toggle chains left of the tallies; lit when showing closed/dismissed
       # issues, muted (its default open-only) otherwise — so the `a` chord stays in view.
-      cx = Frame.toggle_badge(screen, tallies_x, rect.y, x + 1, "a", "CLOSED", @show_closed)
+      cx = Frame.toggle_badge(screen, tallies_x, rect.y, x + 1, key_label("probe.toggle-closed", "a"), "CLOSED", @show_closed)
       unless @tech.empty?
         screen.text(x, rect.y, @tech.join(" "), Theme.green, width: {cx - x - 1, 0}.max)
       end
@@ -1195,13 +1201,13 @@ module Gori::Tui
       # `render_tallies` and the same `min_x` it hands the badge.
       floor = cx + chip_w + 2
       Frame.right_badge_hit(mx, my, rect.y, tallies_left(rect, floor), floor,
-        [{:closed, "a", "CLOSED"}] of {Symbol, String, String})
+        [{:closed, key_label("probe.toggle-closed", "a"), "CLOSED"}] of {Symbol, String, String})
     end
 
     # The MODE chip's text, in one place: the draw positions everything after it from this
     # width, and so does `mode_band_hit`.
     private def mode_chip_label : String
-      " m:#{@mode.title} "
+      " #{key_label("probe.mode", "m")}:#{@mode.title} "
     end
 
     private def render_filter_bar(screen : Screen, rect : Rect, y : Int32) : Nil
@@ -1219,7 +1225,8 @@ module Gori::Tui
       chips = [] of {String, Color}
       chips << {@issues.size.to_s, Theme.muted} if filtering?
       scope_on = scope_active?
-      chips << (scope_on ? {"s scope:#{@scope.try(&.size) || 0}", Theme.accent} : {"s scope:off", Theme.muted})
+      scope_chip = Hotkeys.menu_chip(@registry, "probe.scope-toggle")
+      chips << (scope_on ? {"#{scope_chip} scope:#{@scope.try(&.size) || 0}", Theme.accent} : {"#{scope_chip} scope:off", Theme.muted})
       scope_x = Frame.right_text_chain(screen, rect.right - 1, y, rect.x + 2, chips)
       left_w = {scope_x - (rect.x + 1) - 1, 0}.max
       if filtering?
@@ -1227,6 +1234,14 @@ module Gori::Tui
         screen.text(rect.x + 1, y, label, Theme.text, width: left_w)
       else
         screen.text(rect.x + 1, y, FILTER_HINT, Theme.muted, width: left_w)
+      end
+    end
+
+    private def key_label(id : String, fallback : String) : String
+      if registry = @registry
+        Hotkeys.binding_label(registry, id, fallback)
+      else
+        fallback
       end
     end
 

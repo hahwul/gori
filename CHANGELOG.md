@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- TUI: key chips and empty-state hints follow rebound keys, the Repeater keeps ↑ in INS at the first line, Global shortcuts work from sub-tab strips without typing through, and capture-off is marked in yellow (#1374, #1375)
 - QL: `id:N`, `flow:N` and `flow_id:N` are refused with a hint to use the surface's id selector instead of matching zero rows, and queries with uncompilable terms report which term failed and why (#1369, Refs #1379)
 
 - Sequencer: an all-digit token set is classified as 'digits' rather than 'lower-hex' (#1390)

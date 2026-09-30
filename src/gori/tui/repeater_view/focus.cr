@@ -124,7 +124,11 @@ class Gori::Tui::RepeaterView
     case @focus
     when :target then true
     when :request
-      if h = @req_hex_edit
+      if request_text_editing?
+        # ↑ at line 1 is still editor motion in INS. Leave the editor only with Esc;
+        # otherwise the following typed letters can reach the tab bar's Global actions.
+        false
+      elsif h = @req_hex_edit
         h.at_top?
       elsif @grpc_fields
         # The FIELDS form's own caret, not the head editor's. Reading `@editor.at_top?` here

@@ -86,7 +86,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     when key.space?
       open_space_menu # the active tab's command menu, reachable from the strip
     else
-      # swallow everything else — no type-through on the strip
+      # Strip-local keys stay claimed; only an actual Global chord may pass through.
+      dispatch_global_chord(ev)
     end
   end
 

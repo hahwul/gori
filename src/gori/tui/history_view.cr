@@ -18,6 +18,7 @@ require "./wrap"
 require "./viewport"
 require "./copy_menu"
 require "../redact/policy"
+require "../hotkeys"
 require "./preview_split"
 require "./line_edit"
 require "../store"
@@ -36,6 +37,7 @@ module Gori::Tui
   # (no queue/ranking, P8). A QL bar (`/`) filters the list; analysis is by query
   # (pull), with field/value suggestions while typing. Also owns the detail view.
   class HistoryView
+    @registry : Verb::Registry? = nil
     include QueryBarEdit  # ⌃/⌥←→ word motion, Home/End, Delete, ⌥⌫ on the `/` bar
     include DrillIn::Host # the rail/detail split, its render, and the step-key labels
 
@@ -560,6 +562,10 @@ module Gori::Tui
 
     def set_scope(scope : Scope) : Nil
       @scope = scope
+    end
+
+    def set_registry(registry : Verb::Registry) : Nil
+      @registry = registry
     end
 
     # The active view, or nil for "no view" (equivalent to the All builtin). Set by
@@ -3572,9 +3578,9 @@ module Gori::Tui
     # Mode toggle chips for the detail strip: {id, label, lit}.
     private def detail_mode_chips(hex : Bool, ws : Bool, dv : DetailView) : Array({Symbol, String, Bool})
       if hex
-        [{:hex, " ^X:text ", true}] of {Symbol, String, Bool}
+        [{:hex, " #{key_label("detail.toggle-hex", "^X")}:text ", true}] of {Symbol, String, Bool}
       elsif ws
-        [{:ws, " b:raw ", true}] of {Symbol, String, Bool}
+        [{:ws, " #{key_label("detail.toggle-ws", "b")}:raw ", true}] of {Symbol, String, Bool}
       elsif log_pane?
         # A synthetic log (MESSAGES / FRAMES / EVENTS) and the decoded panes are gori's own text
         # over rows or a projection — there are no raw bytes to dump and no body of the wire's to
@@ -3588,19 +3594,20 @@ module Gori::Tui
         # names what the key WILL do (the `p:raw` / `p:pretty` convention below), `lit` the
         # state it is in.
         [
-          {:hex, " ^X:hex ", false},
-          {:pretty, dv.pretty ? " p:bytes " : " p:tree ", dv.pretty},
+          {:hex, " #{key_label("detail.toggle-hex", "^X")}:hex ", false},
+          {:pretty, " #{key_label("detail.toggle-pretty", "p")}:#{dv.pretty ? "bytes" : "tree"} ", dv.pretty},
         ] of {Symbol, String, Bool}
       elsif dv.binary
-        [{:hex, " ^X:hex ", false}] of {Symbol, String, Bool}
+        [{:hex, " #{key_label("detail.toggle-hex", "^X")}:hex ", false}] of {Symbol, String, Bool}
       else
         chips = [
-          {:hex, " ^X:hex ", false},
-          {:ws, " b:ws ", false},
-          {:pretty, dv.pretty ? " p:raw " : " p:pretty ", dv.pretty},
+          {:hex, " #{key_label("detail.toggle-hex", "^X")}:hex ", false},
+          {:ws, " #{key_label("detail.toggle-ws", "b")}:ws ", false},
+          {:pretty, " #{key_label("detail.toggle-pretty", "p")}:#{dv.pretty ? "raw" : "pretty"} ", dv.pretty},
         ] of {Symbol, String, Bool}
         if dv.unicode_escape_count > 0
-          chips << {:unicode, dv.unicode_decoded ? " u:wire " : " u:decode ", dv.unicode_decoded}
+          label = dv.unicode_decoded ? "wire" : "decode"
+          chips << {:unicode, " #{key_label("detail.toggle-unicode", "u")}:#{label} ", dv.unicode_decoded}
         end
         chips
       end
@@ -4048,7 +4055,8 @@ module Gori::Tui
         chips << {:count, @rows.size >= PAGE ? "#{PAGE}+" : @rows.size.to_s, Theme.muted}
       end
       scope_on = @scope.try(&.active?) == true
-      chips << (scope_on ? {:scope, "s scope:#{@scope.try(&.size) || 0}", Theme.accent} : {:scope, "s scope:off", Theme.muted})
+      scope_key = key_label("scope.toggle-lens", "s")
+      chips << (scope_on ? {:scope, "#{scope_key} scope:#{@scope.try(&.size) || 0}", Theme.accent} : {:scope, "#{scope_key} scope:off", Theme.muted})
       # `⌁follow`, and NOT `f:follow`: the key audit's F3 took the bare `f` back for the two
       # tiers it settles into (freeze in evidence contexts, find on the sub-tab strip), so
       # follow is `space → f` now. A chip that still printed `f:` would name a key nothing
@@ -4116,10 +4124,19 @@ module Gori::Tui
     # `Screen.fit`, not `screen.fit`: this is measured by the hit-test as well as drawn, and
     # the hit-test has no Screen. The truncation is stateless either way.
     private def view_chip : {Symbol, String, Color}
+      view_key = key_label("history.view", "v")
       if v = active_view
-        {:view, "v:#{Screen.fit(v.chip_label, VIEW_CHIP_NAME_MAX)}", @view_broken ? Theme.red : Theme.accent}
+        {:view, "#{view_key}:#{Screen.fit(v.chip_label, VIEW_CHIP_NAME_MAX)}", @view_broken ? Theme.red : Theme.accent}
       else
-        {:view, "v:#{SavedViews.all_view.chip_label}", Theme.muted}
+        {:view, "#{view_key}:#{SavedViews.all_view.chip_label}", Theme.muted}
+      end
+    end
+
+    private def key_label(id : String, fallback : String) : String
+      if registry = @registry
+        Hotkeys.binding_label(registry, id, fallback)
+      else
+        fallback
       end
     end
 

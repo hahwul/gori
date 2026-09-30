@@ -7,6 +7,7 @@ require "./text_read_state"
 require "./gutter"
 require "./viewport"
 require "../jwt"
+require "../hotkeys"
 require "./subtab_marks"
 
 module Gori::Tui
@@ -20,8 +21,13 @@ module Gori::Tui
   # (recomputed on edit, never on the render hot path).
   class JwtView
     include SubtabRef # a sub-tab strip may hold a mark on this view (#683)
+    @registry : Verb::Registry? = nil
     # Custom sub-tab chip label (nil = derive from the token's alg); set by rename.
     property name : String? = nil
+
+    def set_registry(registry : Verb::Registry) : Nil
+      @registry = registry
+    end
 
     SECRET_H = 3 # the SECRET card is a fixed single-line field, framed top + bottom.
 
@@ -202,7 +208,8 @@ module Gori::Tui
       pem = Gori::Jwt::Asym.alg?(alg)
       Frame.card(screen, card, pem ? "KEY" : "SECRET", bg: Theme.bg, border: Frame.pane_border(active))
       # ` ^A:ALG ` badge (cycled by jwt.cycle-alg) — lit when a real key matters.
-      Frame.toggle_badge(screen, card.right - 1, card.y, card.x + 9, "^A", alg, alg != "none")
+      Frame.toggle_badge(screen, card.right - 1, card.y, card.x + 9,
+        key_label("jwt.cycle-alg", "^A"), alg, alg != "none")
       c = card.inset(1, 1)
       return if c.h <= 0
       screen.text(c.x, c.y, "› ", Theme.accent, Theme.bg)
@@ -352,7 +359,15 @@ module Gori::Tui
     # click; this one, on the sibling tool tab, did not.
     def secret_alg_hit(card : Rect, mx : Int32, my : Int32, alg : String) : Bool
       !Frame.right_badge_hit(mx, my, card.y, card.right - 1, card.x + 9,
-        [{:alg, "^A", alg}] of {Symbol, String, String}).nil?
+        [{:alg, key_label("jwt.cycle-alg", "^A"), alg}] of {Symbol, String, String}).nil?
+    end
+
+    private def key_label(id : String, fallback : String) : String
+      if registry = @registry
+        Hotkeys.binding_label(registry, id, fallback)
+      else
+        fallback
+      end
     end
 
     def decoded_at_top? : Bool

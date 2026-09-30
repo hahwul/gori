@@ -1631,11 +1631,20 @@ module Gori::Tui
       chips = [] of {Symbol, String, Color}
       chips << {:count, "#{@hosts.size}h", Theme.muted} if filtering?
       scope_on = @scope.try(&.active?) == true
-      chips << (scope_on ? {:scope, "s scope:#{@scope.try(&.size) || 0}", Theme.accent} : {:scope, "s scope:off", Theme.muted})
-      chips << {:fold, "g:fold", @grouping ? Theme.accent : Theme.muted}
+      scope_key = key_label("scope.toggle-lens", "s")
+      chips << (scope_on ? {:scope, "#{scope_key} scope:#{@scope.try(&.size) || 0}", Theme.accent} : {:scope, "#{scope_key} scope:off", Theme.muted})
+      chips << {:fold, "#{key_label("sitemap.toggle-grouping", "g")}:fold", @grouping ? Theme.accent : Theme.muted}
       chips << {:static, "static:hidden", Theme.accent} if @hide_static # see HistoryView's
       chips << {:mark, mark_chip_text.not_nil!, Theme.accent} if mark_chip_text
       chips
+    end
+
+    private def key_label(id : String, fallback : String) : String
+      if registry = @registry
+        Hotkeys.binding_label(registry, id, fallback)
+      else
+        fallback
+      end
     end
 
     # Which filter-bar chip is under (mx, my) — :count | :scope | :fold | :static | :mark, or nil for a

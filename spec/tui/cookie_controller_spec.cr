@@ -292,6 +292,20 @@ describe "Gori::Tui::CookieController" do
   end
 
   describe "forge lens" do
+    it "paints the rebound format chord on the OPTIONS card" do
+      previous = Gori::Settings.keymap_overrides
+      begin
+        Gori::Settings.keymap_overrides = {"cookie.cycle-format" => ["alt-a"]}
+        with_cookie_controller do |ctl|
+          ctl.cookie_from_text(FLASK)
+          screen_has?(render(ctl), "⌥A:auto").should be_true
+          screen_has?(render(ctl), "^A:auto").should be_false
+        end
+      ensure
+        Gori::Settings.keymap_overrides = previous
+      end
+    end
+
     it "shows a concrete format in FORGE but keeps auto for a later DECODE paste" do
       with_cookie_controller do |ctl|
         ctl.cookie_from_text(FLASK)

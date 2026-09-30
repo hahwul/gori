@@ -70,7 +70,7 @@ module Gori::Tui
       @release_pending = Set(FuzzerView).new
       @closing = false
       @host.session.store.fuzz_sessions.each do |rec|
-        view = FuzzerView.new
+        view = new_fuzzer_view
         view.restore(rec)
         @fuzzers << FuzzerTab.new(view, rec.flow_id, rec.id)
       end
@@ -1841,8 +1841,14 @@ module Gori::Tui
     end
 
     # --- new / close / cross-tab seeds ---
-    def fuzz_new : Nil
+    private def new_fuzzer_view : FuzzerView
       view = FuzzerView.new
+      view.set_registry(@host.session.registry)
+      view
+    end
+
+    def fuzz_new : Nil
+      view = new_fuzzer_view
       view.load_blank
       open_session(view, nil)
       # `i/↵`, not "type": `load_blank` opens the TARGET field in READ, so bare typing edits
@@ -1874,7 +1880,7 @@ module Gori::Tui
     # single and batch arms above can each own their sentence.
     private def duplicate_at(idx : Int32) : Nil
       return unless src = view_at(idx)
-      view = FuzzerView.new
+      view = new_fuzzer_view
       view.duplicate_from(src)
       open_session(view, nil)
     end
@@ -1969,7 +1975,7 @@ module Gori::Tui
     # ⇧I from History (or Issues evidence): open a captured flow as a fuzz session.
     def fuzz_flow(id : Int64) : Nil
       return unless detail = @host.session.store.get_flow(id)
-      view = FuzzerView.new
+      view = new_fuzzer_view
       view.load(detail)
       open_session(view, id)
       @host.status("fuzzer: #{view.summary} — ^A auto-mark · ^K word · ^O config · ^R run")
@@ -1977,7 +1983,7 @@ module Gori::Tui
 
     # Turn a Repeater request (or any reconstructed request) into a fuzz session.
     def fuzz_from_request(target : String, request_text : String, http2 : Bool, sni : String?) : Nil
-      view = FuzzerView.new
+      view = new_fuzzer_view
       view.load_request(target, request_text, http2, sni || "")
       open_session(view, nil)
       @host.status("fuzzer ← request — ^A auto-mark · ^O config · ^R run")
@@ -2158,7 +2164,7 @@ module Gori::Tui
       local_ids = @fuzzers.compact_map(&.db_id).to_set
       rows.each do |row|
         next if local_ids.includes?(row.id)
-        view = FuzzerView.new
+        view = new_fuzzer_view
         view.restore(row)
         @fuzzers << FuzzerTab.new(view, row.flow_id, row.id)
       end

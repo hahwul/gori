@@ -30,14 +30,27 @@ class Gori::Tui::RepeaterView
   private def response_chips : Array({Symbol, String, Bool})
     resp_plain = !@resp_hex && @resp_mode == :response
     chips = [
-      {:diff, " d:diff ", !@resp_hex && @resp_mode == :diff},
-      {:hex, " ^X:hex ", @resp_hex},
-      {:pretty, " p:pretty ", resp_plain && !@reveal && resp_pretty_applied?},
+      {:diff, " #{key_label("repeater.toggle-diff", "⇧D")}:diff", !@resp_hex && @resp_mode == :diff},
+      {:hex, " #{key_label("repeater.toggle-resp-hex", "^X")}:hex", @resp_hex},
+      {:pretty, " #{key_label("repeater.toggle-pretty", "p")}:pretty", resp_plain && !@reveal && resp_pretty_applied?},
     ] of {Symbol, String, Bool}
     if resp_plain && !@reveal && resp_unicode_escape_count > 0
-      chips << {:unicode, resp_unicode_decoded? ? " u:wire " : " u:decode ", resp_unicode_decoded?}
+      label = resp_unicode_decoded? ? "wire" : "decode"
+      chips << {:unicode, " #{key_label("repeater.toggle-unicode", "u")}:#{label}", resp_unicode_decoded?}
     end
     chips
+  end
+
+  private def key_label(id : String, fallback : String) : String
+    if registry = @menu_registry
+      Hotkeys.binding_label(registry, id, fallback)
+    else
+      fallback
+    end
+  end
+
+  private def not_sent_hint : String
+    "— not sent yet — press #{key_label("repeater.send", "^R")} to send —"
   end
 
   # The latency·size read-out and the ⚠ beside it; answers where the next read-out to the
@@ -105,7 +118,7 @@ class Gori::Tui::RepeaterView
   # state it is in. A method rather than a literal in each place for the reason `grpc_chip_x`
   # is one: the draw and the hit-test must not be able to disagree about its width.
   private def grpc_chip_label : String
-    @pretty ? " p:bytes " : " p:tree "
+    @pretty ? " #{key_label("repeater.toggle-pretty", "p")}:bytes " : " #{key_label("repeater.toggle-pretty", "p")}:tree "
   end
 
   # …and where that chip must STOP. `Frame.chip` does not clip itself and this card is a
@@ -220,7 +233,7 @@ class Gori::Tui::RepeaterView
     render_response_chrome(screen, rect)
     body = rect.inset(1, 1)
     if @resp_hex
-      (b = resp_hex_bytes) ? HexView.render(screen, body, b, @scroll) : screen.text(body.x, body.y, "— not sent — press ^R to resend —", Theme.muted)
+      (b = resp_hex_bytes) ? HexView.render(screen, body, b, @scroll) : screen.text(body.x, body.y, not_sent_hint, Theme.muted)
     elsif @resp_mode == :diff
       render_diff(screen, body, focused)
     elsif @reveal && (rl = reveal_lines)
@@ -255,7 +268,7 @@ class Gori::Tui::RepeaterView
     body = rect.inset(1, 1)
     return if body.h <= 0
     if lines.empty?
-      screen.text(body.x, body.y, "— not sent — press ^R to resend —", Theme.muted)
+      screen.text(body.x, body.y, not_sent_hint, Theme.muted)
       return
     end
     gw = Settings.show_gutter ? {Gutter.width(lines.size), body.w}.min : 0

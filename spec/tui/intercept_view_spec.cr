@@ -676,6 +676,34 @@ describe "Intercept filter bar" do
     end
   end
 
+  it "shows rebound catch keys only while the body owns focus" do
+    previous = Gori::Settings.keymap_overrides
+    begin
+      Gori::Settings.keymap_overrides = {"intercept.direction" => ["shift-c"],
+                                         "intercept.toggle"    => ["shift-i"]}
+      tmp_interceptor do |ic|
+        ic.cycle_direction # Both → RequestOnly
+        view = InterceptView.new
+        view.menu_registry = Gori::Verbs.registry
+        view.reload(ic)
+
+        focused = MemoryBackend.new(100, 8)
+        view.render(Screen.new(focused), Rect.new(0, 0, 100, 8), focused: true)
+        focused.row(0).should contain("⇧C:REQ")
+        focused.row(0).should contain("⇧I:CATCH")
+
+        unfocused = MemoryBackend.new(100, 8)
+        view.render(Screen.new(unfocused), Rect.new(0, 0, 100, 8), focused: false)
+        unfocused.row(0).should contain("DIR:REQ")
+        unfocused.row(0).should contain("CATCH:ON")
+        unfocused.row(0).should_not contain("⇧C")
+        unfocused.row(0).should_not contain("⇧I")
+      end
+    ensure
+      Gori::Settings.keymap_overrides = previous
+    end
+  end
+
   # The bar reads `@enabled`/`@direction` back from the Interceptor every reload; the condition
   # was a write-only local buffer. An MCP `intercept_set_filter` / `gori run intercept filter`
   # reaches the SAME Interceptor through the #123 drain, so the gate narrowed while this bar

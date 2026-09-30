@@ -32,6 +32,7 @@ require "./read_cursor"
 require "./text_read_state"
 require "./line_field_read"
 require "./subtab_clone"
+require "../hotkeys"
 # The class body continues in `repeater_view/` — one class-reopen file per slice, the same
 # shape `runner.cr` uses. This file keeps the state (ivars + initialize) every slice reads.
 require "./repeater_view/content"

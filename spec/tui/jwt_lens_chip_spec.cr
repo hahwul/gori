@@ -387,6 +387,22 @@ describe "JWT lens chip" do
     end
   end
 
+  it "paints the rebound signing algorithm chord on the SECRET card" do
+    previous = Gori::Settings.keymap_overrides
+    begin
+      Gori::Settings.keymap_overrides = {"jwt.cycle-alg" => ["alt-a"]}
+      with_jwt_controller do |ctl, draw|
+        ctl.toggle_mode
+        b = MemoryBackend.new(W, 40)
+        draw.call(b)
+        b.contains?("⌥A:HS256").should be_true
+        b.contains?("^A:HS256").should be_false
+      end
+    ensure
+      Gori::Settings.keymap_overrides = previous
+    end
+  end
+
   it "drops the chip rather than draw it over the title on a narrow card" do
     # `Frame.toggle_badge` refuses below `min_x`; the hit-test refuses with it, so a narrow
     # pane keeps a plain border instead of a live target on nothing.

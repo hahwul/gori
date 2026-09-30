@@ -18,6 +18,7 @@ require "../interceptor"
 require "../store"
 require "../fuzz/content_length"
 require "../env"
+require "../hotkeys"
 require "./viewport"
 
 module Gori::Tui
@@ -68,6 +69,7 @@ module Gori::Tui
     getter? editing : Bool
     getter? querying : Bool
     getter query : String
+    property menu_registry : Verb::Registry? = nil
 
     def initialize
       @items = [] of Interceptor::Item
@@ -87,6 +89,7 @@ module Gori::Tui
       # to the Interceptor on every keystroke (live, like History's filter).
       @enabled = false
       @direction = Interceptor::Direction::Both
+      @body_focused = true
       @querying = false
       @query = ""
       @qcx = 0
@@ -969,7 +972,7 @@ module Gori::Tui
     def bar_zone_at(rect : Rect, mx : Int32, my : Int32) : Symbol?
       return nil if @querying || my != rect.y
       return nil if mx < rect.x || mx >= rect.right
-      catch_label = " i:CATCH "
+      catch_label = catch_chip_label
       x = rect.x + 1
       return :catch if mx >= x && mx < x + catch_label.size
       x += catch_label.size + 1 # render: Frame.chip(...) + 1
@@ -1045,6 +1048,7 @@ module Gori::Tui
                listen : {String, Int32}? = nil, capturing : Bool = true,
                holding : Bool = true) : Nil
       return if rect.empty?
+      @body_focused = focused
       render_panes(screen, rect, focused, listen: listen, capturing: capturing, holding: holding)
       render_query_popup(screen, rect)
     end
@@ -1071,7 +1075,8 @@ module Gori::Tui
 
       if @items.empty?
         TrafficEmptyState.render(screen, body, variant: :intercept, listen: listen,
-          capturing: capturing, catch_on: @enabled)
+          capturing: capturing, catch_on: @enabled, body_focused: focused,
+          catch_direction: direction_label)
         return
       end
 
@@ -1098,7 +1103,7 @@ module Gori::Tui
       # Left cluster: the master CATCH toggle (lit while holding) then the direction
       # sub-mode — each carries its chord (i toggles, c cycles) so both are discoverable
       # in the chrome, not just the empty-state prose.
-      x = Frame.chip(screen, rect.x + 1, rect.y, " i:CATCH ", @enabled) + 1
+      x = Frame.chip(screen, rect.x + 1, rect.y, catch_chip_label, @enabled) + 1
       label, color = direction_chip
       x = screen.text(x, rect.y, label, color, Theme.bg, Attribute::Bold) + 2
 
@@ -1189,12 +1194,32 @@ module Gori::Tui
     # Dim when intercept is OFF (nothing is held yet, so the chip advertises what WILL be
     # caught once toggled on).
     private def direction_chip : {String, Color}
-      label = case @direction
-              when .request_only?  then "c:REQ"
-              when .response_only? then "c:RES"
-              else                      "c:ALL"
-              end
+      label = @body_focused ? "#{key_label("intercept.direction", "c")}:#{direction_label}" : "DIR:#{direction_label}"
       {label, @enabled ? Theme.accent : Theme.muted}
+    end
+
+    private def catch_chip_label : String
+      if @body_focused
+        " #{key_label("intercept.toggle", "i")}:CATCH "
+      else
+        " CATCH:#{@enabled ? "ON" : "OFF"} "
+      end
+    end
+
+    private def key_label(id : String, fallback : String) : String
+      if registry = @menu_registry
+        Hotkeys.binding_label(registry, id, fallback)
+      else
+        fallback
+      end
+    end
+
+    def direction_label : String
+      case @direction
+      when .request_only?  then "REQ"
+      when .response_only? then "RES"
+      else                      "ALL"
+      end
     end
 
     # --- what a queue row IS ---------------------------------------------------

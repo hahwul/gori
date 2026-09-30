@@ -125,6 +125,37 @@ private def body_start(s : String) : Int32
 end
 
 describe Gori::Tui::FuzzerView do
+  it "paints live bindings on the template and results chips" do
+    previous = Gori::Settings.keymap_overrides
+    begin
+      Gori::Settings.keymap_overrides = {
+        "fuzz.run"             => ["alt-r"],
+        "fuzz.pretty-template" => ["alt-p"],
+        "fuzz.dist"            => ["alt-v"],
+        "fuzz.matched"         => ["alt-m"],
+        "fuzz.sort"            => ["alt-o"],
+      }
+      view = loaded_fuzzer
+      view.set_registry(Gori::Verbs.registry)
+      rect = Rect.new(0, 0, 120, 34)
+      backend = MemoryBackend.new(rect.w, rect.h)
+      view.render(Screen.new(backend), rect)
+      backend.contains?("⌥R:RUN").should be_true
+      backend.contains?("⌥P:PRETTY").should be_true
+      backend.contains?("^R:RUN").should be_false
+
+      view.append_result(fuzz_result(0, 200, 10))
+      view.focus_pane(:results)
+      backend = MemoryBackend.new(rect.w, rect.h)
+      view.render(Screen.new(backend), rect)
+      backend.contains?("⌥V:DIST").should be_true
+      backend.contains?("⌥M:MATCH").should be_true
+      backend.contains?("⌥O:").should be_true
+    ensure
+      Gori::Settings.keymap_overrides = previous
+    end
+  end
+
   describe "decoded response detail" do
     it "shows a gzip response as its decoded entity without changing retained evidence" do
       plain = %({"decoded_response":true})

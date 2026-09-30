@@ -14,6 +14,7 @@ module Gori::Tui
     def initialize(host : Host)
       super(host)
       @intercept = InterceptView.new
+      @intercept.menu_registry = @host.session.registry
     end
 
     def view : InterceptView

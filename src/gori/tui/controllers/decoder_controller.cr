@@ -108,6 +108,7 @@ module Gori::Tui
       input.follow_x = true # long input lines scroll horizontally to keep the cursor visible
       result = Decoder.run(registry, input.text.to_slice, chain, run_hooks: false)
       view = DecoderView.new
+      view.set_registry(@host.session.registry)
       view.name = name
       DecoderSession.new(view, input, chain, chain.size, :input, result)
     end

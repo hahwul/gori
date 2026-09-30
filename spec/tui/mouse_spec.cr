@@ -271,7 +271,7 @@ describe "Frame.left_chip_hit / right_badge_hit" do
 end
 
 describe "RepeaterView#chrome_hit" do
-  it "hits response d/x/p chips and request SEND/CL/PRETTY badges on the border row" do
+  it "hits response ⇧D/^X/p chips and request SEND/CL/PRETTY badges on the border row" do
     view = RepeaterView.new
     view.load_blank
     rect = Rect.new(0, 0, 100, 24)
@@ -283,10 +283,12 @@ describe "RepeaterView#chrome_hit" do
     resp = Rect.new(content.x + half + 1, content.y, {content.w - half - 1, 0}.max, content.h)
     req = Rect.new(content.x, content.y, half, content.h)
 
-    # RESPONSE chips start at resp.x + 12
+    # RESPONSE chips start at resp.x + 12; the live diff chord is two display cells.
+    diff_label = " #{Gori::Hotkeys.binding_label(Gori::Verbs.registry, "repeater.toggle-diff", "⇧D")}:diff "
+    hex_label = " #{Gori::Hotkeys.binding_label(Gori::Verbs.registry, "repeater.toggle-resp-hex", "^X")}:hex "
     view.chrome_hit(rect, resp.x + 12, resp.y).should eq(:diff)
-    view.chrome_hit(rect, resp.x + 12 + 9, resp.y).should eq(:hex) # past " d:diff " + gap
-    view.chrome_hit(rect, resp.x + 12 + 9 + 9, resp.y).should eq(:pretty)
+    view.chrome_hit(rect, resp.x + 12 + Screen.draw_width(diff_label) + 1, resp.y).should eq(:hex)
+    view.chrome_hit(rect, resp.x + 12 + Screen.draw_width(diff_label) + 1 + Screen.draw_width(hex_label) + 1, resp.y).should eq(:pretty)
 
     # REQUEST right-chain: rightmost is SEND, then CL, PRETTY, then READ/INS
     send_label = " ^R:SEND "

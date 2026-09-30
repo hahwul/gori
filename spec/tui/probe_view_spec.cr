@@ -382,6 +382,25 @@ describe Gori::Tui::ProbeView do
     end
   end
 
+  it "uses live keys for the mode and closed-issues chips" do
+    previous = Gori::Settings.keymap_overrides
+    begin
+      Gori::Settings.keymap_overrides = {"probe.mode" => ["shift-m"], "probe.toggle-closed" => ["shift-a"]}
+      view_store do |store|
+        view = Gori::Tui::ProbeView.new
+        view.set_registry(Gori::Verbs.registry)
+        view.reload(store)
+        backend = MemoryBackend.new(100, 16)
+        view.render(Gori::Tui::Screen.new(backend), Gori::Tui::Rect.new(0, 0, 100, 16))
+        backend.row(0).should contain("⇧M:PASSIVE")
+        backend.row(0).should contain("⇧A:CLOSED")
+        backend.contains?("␣s scope:off").should be_true
+      end
+    ensure
+      Gori::Settings.keymap_overrides = previous
+    end
+  end
+
   # The live-refresh paths ask `issues_moved?` before paying for a reload. It must answer true
   # for every write a reload would show — this process's, via `probe_generation`, and a PEER's,
   # via the store fingerprint — and false otherwise, or the tab reloads for nothing.

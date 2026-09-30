@@ -16,6 +16,13 @@ private RUNNER  = File.read(File.join(__DIR__, "..", "..", "src", "gori", "tui",
 private SUBTABS = File.read(File.join(__DIR__, "..", "..", "src", "gori", "tui", "runner", "subtabs.cr"))
 
 describe "^N / ^W on the nine sub-tab strips" do
+  it "lets Global chords through the strip without dispatching into the body" do
+    strip = SUBTABS[/private def handle_subtabs_key.*?^  end/m].not_nil!
+    strip.should contain("dispatch_global_chord(ev)")
+    strip.should_not contain("dispatch_chord(ev")
+    RUNNER.should contain("@keymap.resolve_global(chord, @session.registry, self)")
+  end
+
   it "routes both through the strip's own contract, in ONE guard each" do
     guard = RUNNER[/\^N \/ \^W create and close a sub-tab.*?^      end\n\n      if.*?^      end/m]
     guard.should_not be_nil

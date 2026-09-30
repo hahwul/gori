@@ -103,7 +103,7 @@ class Gori::Tui::RepeaterView
       result = @result
       @resp_pretty_applied = false
       if !result
-        RespView.new([[Highlight::Span.new("— not sent — press ^R to resend —", Theme.muted)]], Highlight::BodyLines.empty, :text)
+        RespView.new([[Highlight::Span.new(not_sent_hint, Theme.muted)]], Highlight::BodyLines.empty, :text)
       elsif !result.ok?
         RespView.new([[Highlight::Span.new("repeater error: #{result.error}", Theme.red)]], Highlight::BodyLines.empty, :text)
       else
@@ -146,9 +146,9 @@ class Gori::Tui::RepeaterView
     @diff_lines_cache ||= begin
       result = @result
       if !(result && result.ok?)
-        [Repeater::DiffLine.new(Repeater::DiffKind::Same, "send the request (^R) to see a diff")]
+        [Repeater::DiffLine.new(Repeater::DiffKind::Same, "send the request (#{key_label("repeater.send", "^R")}) to see a diff")]
       elsif !(baseline = diff_baseline_lines)
-        [Repeater::DiffLine.new(Repeater::DiffKind::Same, "— first send: resend (^R) to diff against the previous response —")]
+        [Repeater::DiffLine.new(Repeater::DiffKind::Same, "— first send: resend (#{key_label("repeater.send", "^R")}) to diff against the previous response —")]
       else
         fresh = message_lines(result.head, display_body(result.head, result.body))
         rows = Repeater::Diff.lines(baseline, fresh)

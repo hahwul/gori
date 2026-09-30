@@ -196,6 +196,13 @@ module Gori
         live_in(chord, scope, registry, ctx) || live_in(chord, Scope::Global, registry, ctx)
       end
 
+      # A context that owns its own keys (the sub-tab strip) may still allow truly Global
+      # shortcuts through without exposing the tab's body bindings. This keeps `?` available
+      # on the strip while preventing an unhandled strip key from type-through to the pane.
+      def resolve_global(chord : Chord, registry : Registry, ctx : ExecContext) : String?
+        live_in(chord, Scope::Global, registry, ctx)
+      end
+
       private def live_in(chord : Chord, scope : Scope, registry : Registry, ctx : ExecContext) : String?
         return nil unless id = lookup_in(chord, scope)
         verb = registry[id]
