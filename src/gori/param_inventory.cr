@@ -397,16 +397,23 @@ module Gori
       !w.strip.empty? && !w.includes?('\n') && !w.includes?('\r') && !w.lstrip.starts_with?('#')
     end
 
-    # Names seen on the host's OTHER endpoints and not on this one — the Miner seed. Miner
-    # already skips a name the base request carries (`already-in-request`), so seeding an
+    # Names seen on the OTHER endpoints of `row`'s origin and not on its own — the Miner seed.
+    # Miner already skips a name the base request carries (`already-in-request`), so seeding an
     # endpoint's own names would test nothing; its neighbours' names are the guesses worth a
     # request ("the API takes `tenant` on /orders, does /invoices too?").
-    def neighbor_names(rows : Enumerable(Row), host : String, path : String) : Array(String)
-      h = host.downcase
+    #
+    # Per ORIGIN, as the rows are (#1371): the same path on another port of the host is another
+    # service, so its names are neither this endpoint's own (which would drop them from the
+    # seed) nor this service's neighbours.
+    def neighbor_names(rows : Enumerable(Row), row : Row) : Array(String)
+      same = rows.select { |r| same_origin?(r, row) }
       own = Set(String).new
-      rows.each { |r| (w = r.word) && own << w if r.host.downcase == h && r.path == path }
-      neighbors = rows.select { |r| r.host.downcase == h && r.path != path }
-      wordlist(neighbors).reject { |w| own.includes?(w) }
+      same.each { |r| (w = r.word) && own << w if r.path == row.path }
+      wordlist(same.reject(&.path.==(row.path))).reject { |w| own.includes?(w) }
+    end
+
+    private def same_origin?(a : Row, b : Row) : Bool
+      a.host.downcase == b.host.downcase && a.scheme == b.scheme && a.port == b.port
     end
 
     # A parameter's name as a wordlist entry: a JSON parameter contributes its LEAF member

@@ -88,7 +88,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       @toast = PARAMS_GONE
       return
     end
-    names = ParamInventory.neighbor_names(view.host_rows(row.host), row.host, row.path)
+    names = ParamInventory.neighbor_names(view.host_rows(row.host), row)
     open_mine_config(seed.copy_with(names: names))
   end
 end

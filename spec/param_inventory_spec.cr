@@ -324,7 +324,20 @@ describe Gori::ParamInventory do
         pi_flow(store, "/invoices?page=1")
         pi_flow(store, "/x?elsewhere=1", host: "other.test")
         rows = PI.build(store).rows
-        PI.neighbor_names(rows, "shop.test", "/invoices").should eq(["tenant"])
+        PI.neighbor_names(rows, rows.find!(&.path.==("/invoices"))).should eq(["tenant"])
+      end
+    end
+
+    # #1371: another port of the host is another service — its /invoices is not this one's.
+    it "reads neighbours and own names on the row's origin only" do
+      with_store do |store|
+        pi_flow(store, "/invoices?page=1", host: "h.test", scheme: "http", port: 19021)
+        pi_flow(store, "/orders?tenant=1", host: "h.test", scheme: "http", port: 19021)
+        pi_flow(store, "/invoices?debug=1", host: "h.test", scheme: "http", port: 19022)
+        pi_flow(store, "/orders?other=1", host: "h.test", scheme: "http", port: 19022)
+        rows = PI.build(store).rows
+        mine = rows.find! { |r| r.path == "/invoices" && r.port == 19021 }
+        PI.neighbor_names(rows, mine).should eq(["tenant"])
       end
     end
   end
