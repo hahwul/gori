@@ -811,10 +811,18 @@ module Gori::Tui
     # landed, and stamping a refused one paints a memo that is on nobody's disk and that the
     # next reload silently takes back. Nil means "all of them", for a caller with nothing to
     # report.
+    #
+    # A tag is keyed on the BARE host (#1371), so the memo is stamped on the same path under
+    # EVERY origin of that host, exactly as the next reload's `Sitemap.stamp_tags!` would —
+    # stamping only the row that was edited left its sibling origins showing the old memo
+    # until something else rebuilt the tree.
     def apply_tag(text : String, committed : Array({String, String})? = nil) : Nil
       value = text.blank? ? nil : text
-      index = node_index
-      (committed || @tag_targets).each { |key| index[key]?.try(&.tag=(value)) }
+      wanted = Set({String, String}).new
+      (committed || @tag_targets).each do |(key, path)|
+        tag_host(key).try { |host| wanted << {host, path} }
+      end
+      each_node { |node, root| node.tag = value if wanted.includes?({root.host, node.path}) }
       cancel_tag
     end
 
@@ -1221,7 +1229,9 @@ module Gori::Tui
     private def remember_origins : Nil
       fresh = {} of String => Sitemap::Origin
       @hosts.each { |h| h.origin.try { |o| fresh[h.label] ||= o } }
-      @marks.each do |(label, _)|
+      # The marks, and the pinned targets of an open tag editor: a reload mid-edit that drops
+      # the cursor row's root must not leave its commit without a host to write under.
+      (@marks.to_a + @tag_targets).each do |(label, _)|
         next if fresh.has_key?(label)
         @origins[label]?.try { |o| fresh[label] = o }
       end

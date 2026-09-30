@@ -1145,6 +1145,44 @@ describe Gori::Tui::SitemapView do
       end
     end
 
+    # A tag is keyed on the bare host, so committing one stamps the path under every origin of
+    # that host at once — as the next reload's stamp would — not only the row that was edited.
+    it "stamps a committed tag on the same path under every origin of the host" do
+      with_store do |store|
+        capture_at(store, "http", "h.test", 19021, "/admin")
+        capture_at(store, "https", "h.test", 8443, "/admin")
+        capture_at(store, "http", "other.test", 80, "/admin")
+        view = SitemapView.new
+        view.reload(store)
+        view.select_index(1) # /admin under http://h.test:19021
+        view.start_tag.should be_true
+        "memo".each_char { |c| view.tag_insert(c) }
+        view.apply_tag(view.tag_buffer)
+        b = MemoryBackend.new(80, 12)
+        view.render(Screen.new(b), Rect.new(0, 0, 80, 12))
+        (0...12).count { |y| b.row(y).includes?("memo") }.should eq(2) # both h.test origins, not other.test
+      end
+    end
+
+    # The cursor row is pinned at start_tag; a reload that drops its root mid-edit must not leave
+    # the commit without a host to write under.
+    it "keeps a tag target's origin across a reload that hides its root" do
+      with_store do |store|
+        capture_at(store, "http", "h.test", 19021, "/a")
+        capture_at(store, "http", "other.test", 80, "/b")
+        view = SitemapView.new
+        view.reload(store)
+        view.select_index(1)
+        view.start_tag.should be_true
+        key = view.tag_targets.first[0]
+        view.start_query
+        "host:other".each_char { |c| view.query_insert(c) }
+        view.stop_query
+        view.reload(store)
+        view.tag_host(key).should eq("h.test")
+      end
+    end
+
     # The mark key's origin must still name its bare host after a reload drops the root —
     # otherwise the tag commit would have nothing to write the memo under.
     it "remembers a marked origin across a reload that hides its root" do
