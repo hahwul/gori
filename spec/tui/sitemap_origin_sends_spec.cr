@@ -27,4 +27,10 @@ describe "Sitemap sends resolve on the row's origin" do
     helper = slices["sitemap.cr"][/def sitemap_flow_id.*?\n  end/m]?.should_not be_nil
     helper.should contain("representative_flow_id(ep[:host], ep[:method], ep[:target], o.try(&.scheme), o.try(&.port))")
   end
+
+  it "starts a host row's Discover at the row's origin and never guesses https" do
+    code = runner_slices["discover.cr"]
+    code.should contain("ep[:origin]")
+    code.should_not contain(%("https://\#{ep[:host]}"))
+  end
 end
