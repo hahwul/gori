@@ -455,13 +455,16 @@ describe Gori::Discover::Engine do
   it "survives a backend that raises without hanging (worker rescue keeps @pending balanced)" do
     cfg = D::Config.new(spider: true, bruteforce: true, concurrency: 2, retries: 0, calibrate_probes: 1)
     engine = D::Engine.new("http://t/", ["admin"], RaisingBackend.new, cfg)
-    done = false
+    terminal = [] of Symbol
     findings = [] of D::Finding
     engine.run do |ev|
       findings << ev.finding if ev.is_a?(D::FindingEvent)
-      done = true if ev.is_a?(D::DoneEvent)
+      terminal << :done if ev.is_a?(D::DoneEvent)
+      terminal << :error if ev.is_a?(D::ErrorEvent)
     end
-    done.should be_true # terminated cleanly instead of blocking forever
+    # Terminated cleanly instead of blocking forever — and, since #1385, as the terminal
+    # ERROR a run in which no send ever succeeded is, naming the raise.
+    terminal.should eq([:error])
     findings.should be_empty
   end
 
@@ -1036,6 +1039,18 @@ describe Gori::Discover::Engine do
       kinds.should eq([:error]) # terminal, so a consumer cannot settle a "0 found" success over it
       messages.first.should contain("not bound yet")
       engine.first_error.should_not be_nil
+    end
+
+    # #1385: a SPIDERING run against a dead port. Every crawl task completes — as a refused
+    # connect — so the page counter the predicate used to require at zero was not, and the run
+    # ended Done ("0 found · 656 sent · 325 errors", exit 0).
+    it "ends in a terminal ErrorEvent when a spidering run reached nothing" do
+      cfg = D::Config.new(spider: true, bruteforce: true, calibrate_probes: 1, concurrency: 2, retries: 0)
+      dead = R.new(Bytes.new(0), nil, nil, 0_i64, "connect failed: t:80 — host unreachable (DNS/refused/timeout)")
+      engine = D::Engine.new("http://t/", ["admin", "login"], RouteBackend.new(->(_t : String) { dead }), cfg)
+      kinds, messages = terminal_of(engine)
+      kinds.should eq([:error])
+      messages.first.should contain("connect failed")
     end
 
     # …but a run that DID get an answer keeps its results, however many later sends were
