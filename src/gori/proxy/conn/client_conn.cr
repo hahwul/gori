@@ -2724,13 +2724,23 @@ module Gori::Proxy
       host.includes?(':') && !host.starts_with?('[') ? "[#{host}]" : host
     end
 
+    # Splices `origin_target` over the request-target's own bytes and copies everything else
+    # verbatim (P7): the method, the version, and whatever the client put after them. Rebuilding
+    # the line as `method SP target SP version CRLF` kept only the first three space-separated
+    # tokens, so `GET http://h/p?a b HTTP/1.1` went upstream as `GET /p?a b` — the space-in-URL
+    # payload lost its version — and `… HTTP/1.1 INJECTED` lost the trailing token, while History
+    # kept the client's bytes and no longer matched what was sent.
     private def rewrite_request_line(req : Codec::RawRequest, origin_target : String) : Bytes
       raw = req.raw_head
-      nl = raw.index(0x0a_u8) || return raw # no LF at all? leave as-is
-      header_block = raw[(nl + 1)..]        # everything after the first CRLF
-      io = IO::Memory.new(raw.size)         # origin-form is usually shorter: one allocation
-      io << req.method << ' ' << origin_target << ' ' << req.version << "\r\n"
-      io.write(header_block)
+      start = req.method.bytesize + 1
+      target = req.target.to_slice
+      # `parse_request_head` split the line on single spaces, so the target sits right after
+      # the method and its separator. Anything else is a head this was not parsed from.
+      return raw unless raw.size >= start + target.size && raw[start, target.size] == target
+      io = IO::Memory.new(raw.size) # origin-form is usually shorter: one allocation
+      io.write(raw[0, start])
+      io << origin_target
+      io.write(raw[(start + target.size)..])
       io.to_slice
     end
 

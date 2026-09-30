@@ -130,4 +130,30 @@ describe "Gori::Proxy request-line capture fidelity (Fix #12)" do
     req.target.should eq("http://127.0.0.1:#{origin_port}/hi")
     String.new(req.head).should start_with("GET http://127.0.0.1:#{origin_port}/hi HTTP/1.1\r\n")
   end
+  # Only the request-target is rewritten to origin-form; every other byte of the line is the
+  # client's (P7). Rebuilding it from the first three space-separated tokens dropped the rest.
+  it "keeps the bytes after the target when it normalises an absolute-form line" do
+    {
+      {"/echo?a b HTTP/1.1", "GET /echo?a b HTTP/1.1"},
+      {"/echo HTTP/1.1 INJECTED", "GET /echo HTTP/1.1 INJECTED"},
+    }.each do |(rest, wire)|
+      seen = Channel(String).new(1)
+      done = Channel(Nil).new(1)
+      origin_port = start_capture_origin(seen)
+      sink = CaptureSink.new(done)
+      proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+      proxy.start
+
+      client = TCPSocket.new("127.0.0.1", proxy.port)
+      client.read_timeout = 5.seconds
+      client << "GET http://127.0.0.1:#{origin_port}#{rest}\r\nHost: 127.0.0.1:#{origin_port}\r\n\r\n"
+      client.flush
+      client.gets_to_end
+      client.close
+
+      done.receive
+      proxy.stop
+      seen.receive.should eq(wire)
+    end
+  end
 end
