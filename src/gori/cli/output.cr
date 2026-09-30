@@ -111,6 +111,8 @@ module Gori
           # the two key sets against each other): a consumer of either feed has no other way
           # to tell a gori-authored stub response from one the origin actually sent (#511).
           j.field "short_circuited", row.short_circuited?
+          # Edited at Intercept (#1378) — the stored request is the operator's, not the client's.
+          j.field "intercept_edited", row.intercept_edited?
           # Where this flow came from (`Gori::FlowSource`). Emitted on EVERY row, `null`
           # included, for `short_circuited`'s reason: a consumer has no other way to tell a
           # request gori sent from traffic the target's client produced, and an absent field
@@ -468,6 +470,7 @@ module Gori
             row.source_ref.try { |r| io << " · " << term_safe(r) unless r.empty? }
             io << ']'
           end
+          io << "  [edited]" if row.intercept_edited?
           # Same reasoning again, one axis over: a row gori itself put on the wire must not
           # scan as traffic the target's client produced. Only when it IS one — a proxy
           # capture is the norm, and a chip on every row teaches nothing. The lowercase token

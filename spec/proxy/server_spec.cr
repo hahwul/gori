@@ -2207,6 +2207,47 @@ describe Gori::Proxy::Server do
 
     seen.receive.should eq("GET /held HTTP/1.1") # upstream saw the edited request
     sink.requests.first.target.should eq("/held")
+    # …and History keeps what the CLIENT sent, byte for byte (#1378).
+    sink.requests.first.intercept_original.should eq(
+      "GET /hello HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n\r\n".to_slice)
+  end
+
+  it "keeps no original when a held request is forwarded unchanged" do
+    seen = Channel(String).new(1)
+    done = Channel(Nil).new(1)
+    origin_port = start_origin("ok", seen)
+
+    store_path = File.tempname("gori-icu", ".db")
+    store = Gori::Store.open(store_path)
+    interceptor = Gori::Interceptor.new(Gori::Scope.load(store))
+    interceptor.toggle
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink, interceptor: interceptor)
+    proxy.start
+
+    spawn do
+      loop do
+        interceptor.pending.each { |it| interceptor.forward(it.id) }
+        sleep 0.01.seconds
+      end
+    end
+
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client << "GET /same HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n\r\n"
+    client.flush
+    client.gets_to_end
+    client.close
+
+    done.receive
+    proxy.stop
+    store.close
+    File.delete?(store_path)
+    File.delete?("#{store_path}-wal")
+    File.delete?("#{store_path}-shm")
+
+    seen.receive.should eq("GET /same HTTP/1.1")
+    sink.requests.first.intercept_original.should be_nil
   end
 
   it "forwards held bytes byte-exact, preserving a deliberately mismatched Content-Length (P7)" do
@@ -2600,5 +2641,7 @@ describe Gori::Proxy::Server do
     response.should contain("502")
     response.should contain("X-Gori-Intercept: dropped")
     sink.responses.first.state.should eq(Gori::Store::FlowState::Aborted)
+    # The operator's own outcome, which the surfaces tell apart from an upstream error (#1378).
+    Gori::Interceptor.dropped?(sink.responses.first.error).should be_true
   end
 end

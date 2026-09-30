@@ -64,6 +64,10 @@ module Gori
       # client's own program). NOT "unknown".
       getter source_surface : FlowSource::Surface?
       getter source_ref : String?
+      # The request as the client sent it, when the operator EDITED it at Intercept before
+      # forwarding (#1378): `head`/`body` above are the edited bytes that went upstream, this is
+      # what they replaced. nil for every flow nobody edited. See the V44 migration.
+      getter intercept_original : Bytes?
 
       def initialize(@created_at, @scheme, @host, @port, @method, @target,
                      @http_version, @head, @body = nil,
@@ -72,7 +76,8 @@ module Gori
                      @h2_conn_id = nil, @h2_stream_id = nil, @short_circuited = false,
                      @advisory = nil, @connect_protocol = nil,
                      *, @source : FlowSource::Kind,
-                     @source_surface : FlowSource::Surface? = nil, @source_ref : String? = nil)
+                     @source_surface : FlowSource::Surface? = nil, @source_ref : String? = nil,
+                     @intercept_original : Bytes? = nil)
       end
     end
 
@@ -168,12 +173,16 @@ module Gori
       getter source_surface : FlowSource::Surface?
       # The originating tool's own session/job id, opaque and meaningful only beside `source`.
       getter source_ref : String?
+      # The operator edited this request at Intercept, and the client's original is kept
+      # (`Store#intercept_original`, V44). Read off the side table, not a `flows` column.
+      getter? intercept_edited : Bool
 
       def initialize(@id, @created_at, @scheme, @method, @host, @port, @target,
                      @status, @size, @state, @response_size = nil, @duration_us = nil,
                      @content_type = nil, @short_circuited = false, @advisory = nil,
                      @request_content_type = nil, @connect_protocol = nil,
-                     @source = nil, @source_surface = nil, @source_ref = nil)
+                     @source = nil, @source_surface = nil, @source_ref = nil,
+                     @intercept_edited = false)
       end
 
       # Did gori itself put this request on the wire? nil (`source` not recorded) answers false:
