@@ -84,6 +84,12 @@ module Gori
       def url : String
         Url.request_url(scheme, host, target)
       end
+
+      # `path:`'s haystack, the way `QL::PATH_EXPR` reads it in SQL: an absolute-form target
+      # loses its scheme+authority, so the two backends agree on a plaintext proxy flow.
+      def path : String
+        Url.origin_path(target)
+      end
     end
 
     # One parsed predicate. `field` is :host/:path/:url/:method/:scheme/:status/:proto/:header/
@@ -113,7 +119,7 @@ module Gori
         if rx = pattern
           return case field
           when :host   then InterceptFilter.regex_hit?(rx, s.host)
-          when :path   then InterceptFilter.regex_hit?(rx, s.target)
+          when :path   then InterceptFilter.regex_hit?(rx, s.path)
           when :url    then InterceptFilter.regex_hit?(rx, s.url)
           when :method then InterceptFilter.regex_hit?(rx, s.method)
           when :scheme then InterceptFilter.regex_hit?(rx, s.scheme)
@@ -124,7 +130,7 @@ module Gori
         end
         case field
         when :host   then s.host.downcase.includes?(value)
-        when :path   then s.target.downcase.includes?(value)
+        when :path   then s.path.downcase.includes?(value)
         when :url    then s.url.downcase.includes?(value)
         when :method then s.method.compare(value, case_insensitive: true) == 0
         when :scheme then s.scheme.compare(value, case_insensitive: true) == 0

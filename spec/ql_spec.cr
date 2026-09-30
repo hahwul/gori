@@ -281,6 +281,30 @@ describe Gori::QL do
     end
   end
 
+  # `path:` reads the PATH, not the raw target. A plaintext forward-proxy flow keeps its
+  # absolute-form target (P7), so `path~^/admin` missed it while `path:http` and `path:<port>`
+  # matched every such flow.
+  it "path: reads the origin-form path on BOTH wire shapes" do
+    with_store do |store|
+      abs = capture_on_port(store, "http", "127.0.0.1", 19316, "http://127.0.0.1:19316/admin/panel")
+      org = capture_on_port(store, "https", "127.0.0.1", 19316, "/admin/x")
+      qry = capture_on_port(store, "http", "acme.test", 80, "http://acme.test?next=/admin")
+      bare = capture_on_port(store, "http", "acme.test", 80, "HTTP://acme.test")
+
+      store.search(Gori::QL.parse("path~^/admin"), 50).map(&.id).sort!.should eq([abs, org])
+      store.search(Gori::QL.parse("path:19316"), 50).should be_empty
+      store.search(Gori::QL.parse("path:http"), 50).should be_empty
+      store.search(Gori::QL.parse("path~^/\\?next="), 50).map(&.id).should eq([qry])
+      store.search(Gori::QL.parse("path~^/$"), 50).map(&.id).should eq([bare])
+    end
+
+    # The in-memory twin (intercept / Rewriter filters) reads the same projection.
+    subject = Gori::InterceptFilter::Subject.new(
+      method: "GET", host: "127.0.0.1", target: "http://127.0.0.1:19316/admin/panel", scheme: "http")
+    Gori::InterceptFilter.new("path~^/admin").matches?(subject).should be_true
+    Gori::InterceptFilter.new("path:19316").matches?(subject).should be_false
+  end
+
   # The other half of the same rule: a default port is NOT part of the canonical URL
   # (RFC 3986 §3.2.3), so building the authority must not hand every ordinary flow a `:443`
   # for `url:443` to match.
@@ -342,7 +366,7 @@ describe Gori::QL do
   it "compiles the ~ operator to a REGEXP over text fields" do
     Gori::QL.parse("host~^api\\.").sql.should eq("(host REGEXP ?)")
     Gori::QL.parse("host~^api\\.").args.should eq(["^api\\."])
-    Gori::QL.parse("path~\\.json$").sql.should eq("(target REGEXP ?)")
+    Gori::QL.parse("path~\\.json$").sql.should eq("(#{Gori::QL::PATH_EXPR} REGEXP ?)")
     Gori::QL.parse("url~^https").sql.should eq(
       "((CASE WHEN lower(substr(target, 1, 7)) = 'http://' OR lower(substr(target, 1, 8)) = 'https://' " \
       "THEN target ELSE (scheme || '://' " \
@@ -1334,7 +1358,7 @@ describe "Gori::Store#search (QL)" do
       # Regression guard: `path:/a(b)` parsed as one token before the grammar grew
       # parens, and must keep doing so.
       f = Gori::QL.parse("path:/a(b)")
-      f.sql.should eq("((target) LIKE ? ESCAPE '\\')")
+      f.sql.should eq("((#{Gori::QL::PATH_EXPR}) LIKE ? ESCAPE '\\')")
       f.args.should eq(["%/a(b)%"])
     end
   end

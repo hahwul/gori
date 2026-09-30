@@ -119,6 +119,18 @@ module Gori
     URL_EXPR_NO_PORT = "(CASE WHEN lower(substr(target, 1, 7)) = 'http://' OR lower(substr(target, 1, 8)) = 'https://' " \
                        "THEN target ELSE (scheme || '://' || host || target) END)"
 
+    # `Gori::Url.origin_path` spelled in SQL: what `path:` reads. A plaintext forward-proxy
+    # flow keeps its ABSOLUTE-form target (P7), so matching `target` raw made `path~^/admin`
+    # miss it while `path:http` and `path:<port>` matched every such flow. The authority ends
+    # at the first '/', '?' or '#' — each `instr` gets a sentinel so a missing one sorts last —
+    # and whatever follows gets a leading '/' when it has none (a pathless query, or nothing).
+    private PATH_REST = "substr(target, instr(target, '://') + 3)"
+    private PATH_CUT  = "min(instr(#{PATH_REST} || '/', '/'), instr(#{PATH_REST} || '?', '?'), " \
+                        "instr(#{PATH_REST} || '#', '#'))"
+    PATH_EXPR = "(CASE WHEN lower(substr(target, 1, 7)) = 'http://' OR lower(substr(target, 1, 8)) = 'https://' " \
+                "THEN (CASE WHEN substr(#{PATH_REST}, #{PATH_CUT}, 1) = '/' THEN substr(#{PATH_REST}, #{PATH_CUT}) " \
+                "ELSE '/' || substr(#{PATH_REST}, #{PATH_CUT}) END) ELSE target END)"
+
     # What one term compiles to: a SQL fragment plus the values bound into its `?`s.
     alias SqlTerm = {String, Array(DB::Any)}
 
@@ -802,7 +814,7 @@ module Gori
       case field
       when "host"                                then contains_cond("host", value)
       when "url"                                 then contains_cond(URL_EXPR, value)
-      when "path"                                then contains_cond("target", value)
+      when "path"                                then contains_cond(PATH_EXPR, value)
       when "method"                              then {"upper(method) = ?", [value.upcase] of DB::Any}
       when "scheme"                              then {"scheme = ?", [value.downcase] of DB::Any}
       when "proto"                               then proto_cond(value)
@@ -1325,7 +1337,7 @@ module Gori
       return {"0", [] of DB::Any} unless valid_regex?(value)
       case field
       when "host"                                then {"host REGEXP ?", [value] of DB::Any}
-      when "path"                                then {"target REGEXP ?", [value] of DB::Any}
+      when "path"                                then {"#{PATH_EXPR} REGEXP ?", [value] of DB::Any}
       when "url"                                 then {"#{URL_EXPR} REGEXP ?", [value] of DB::Any}
       when "method"                              then {"method REGEXP ?", [value] of DB::Any}
       when "scheme"                              then {"scheme REGEXP ?", [value] of DB::Any}

@@ -38,15 +38,22 @@ module Gori
       scheme_end = target.index("://")
       return target unless scheme_end
       auth = scheme_end + 3
-      slash = target.index('/', auth)
-      return target[slash..] if slash
+      # The authority ends at the FIRST of '/', '?' or '#' (RFC 3986 §3.2). Taking the first
+      # '/' alone read `http://acme.test?next=/x` as the path `/x`: the query's own slash.
+      cut = target.index('/', auth)
+      if (q = target.index('?', auth)) && (cut.nil? || q < cut)
+        cut = q
+      end
+      if (f = target.index('#', auth)) && (cut.nil? || f < cut)
+        cut = f
+      end
+      return "/" unless cut
       # No path, but a query or fragment can still follow the authority
       # (`http://acme.test?admin=1`). Returning a bare "/" there DROPPED them — and this
       # feeds `Outbound.scope_url`, so a scope EXCLUDE keyed on the query silently stopped
       # matching the url it was tested against. RFC 3986 §3.3: an empty path with a query
       # is `/` + the rest, so splice rather than discard.
-      mark = target.index('?', auth) || target.index('#', auth)
-      mark ? "/#{target[mark..]}" : "/"
+      target[cut] == '/' ? target[cut..] : "/#{target[cut..]}"
     end
 
     # "where this message went", as one string: the absolute-form target verbatim, else the
