@@ -333,6 +333,35 @@ describe F::ConnPool do
         result_from("HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\n", "pong")).should be_false
     end
 
+    it "refuses a socket whose INTERIM 1xx head ended on a bare LF, even under a CRLF final head" do
+      server = TCPServer.new("127.0.0.1", 0)
+      port = server.local_address.port
+      spawn do
+        if conn = server.accept?
+          Gori::Proxy::Codec::Http1.read_head(conn)
+          conn << "HTTP/1.1 103 Early Hints\nLink: </a.css>\n\n"
+          conn.flush
+          sleep 50.milliseconds # the final head is not buffered when the 103 is read
+          conn << "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"
+          conn.flush
+          sleep 1.second
+          conn.close
+        end
+      end
+      sock = TCPSocket.new("127.0.0.1", port)
+      begin
+        result = Gori::Repeater::Engine.exchange(sock, req("GET / HTTP/1.1\r\nHost: h\r\n\r\n"),
+          "127.0.0.1", port, Time.instant)
+        result.error.should be_nil
+        result.response.not_nil!.status.should eq(200)
+        result.lf_framed?.should be_true
+        F::ConnPool.reusable_response?(result).should be_false
+      ensure
+        sock.close
+        server.close
+      end
+    end
+
     it "accepts HTTP/1.0 only with an explicit keep-alive" do
       F::ConnPool.reusable_response?(
         result_from("HTTP/1.0 200 OK\r\nContent-Length: 4\r\n\r\n", "pong")).should be_false

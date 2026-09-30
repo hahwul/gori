@@ -260,9 +260,21 @@ module Gori
           smuggle = results[DIFF_SMUGGLE_IDX]?
           benign = results[DIFF_BENIGN_IDX]?
           return false unless smuggle && benign
+          # A leg whose head ended on a bare-LF blank line was framed off gori's LENIENT reading,
+          # so an odd benign response behind it may be gori's own misframe rather than the
+          # back-end's — inconclusive, never a Critical.
+          return false if smuggle.lf_framed? || benign.lf_framed?
           # Socket must have survived the smuggle — otherwise `benign` is a "skipped" Result and its
           # error says nothing about a poison.
           return false unless smuggle.ok? && !smuggle.incomplete?
+          benign_anomalous?(benign)
+        rescue
+          false
+        end
+
+        # The benign follow-up's half of `differential_confirmed?`: it came back errored or
+        # incomplete, with a malformed or ambiguous head, or reflecting the smuggled canary.
+        private def benign_anomalous?(benign : Repeater::Result) : Bool
           return true if benign.error || benign.incomplete?
           head = benign.head
           return false if head.empty?
@@ -274,8 +286,6 @@ module Gori
           if body = benign.body
             return String.new(body).includes?("gori-smuggle-")
           end
-          false
-        rescue
           false
         end
 

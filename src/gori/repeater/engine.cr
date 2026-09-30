@@ -69,8 +69,15 @@ module Gori
       # leaves the sweep to the compiler.
       def initialize(@head, @body, @response, @duration_us, @error = nil, @incomplete = false, *,
                      @delivered = false, @timed_out = false, @retried = false,
-                     @wire : Bytes? = nil, @retryable_stale = false, @cut_short = false)
+                     @wire : Bytes? = nil, @retryable_stale = false, @cut_short = false,
+                     @lf_framed = false)
       end
+
+      # A head of this exchange — the final one or an interim 1xx before it — ended on a
+      # bare-LF blank line, so gori framed it off the lenient reading and the socket must not
+      # serve another exchange (`ConnPool.reusable_response?`). The final head alone cannot say
+      # so for an interim.
+      getter? lf_framed : Bool
 
       # An h2 single-packet race member whose stream was still open when the read ended (the
       # deadline, a GOAWAY, the socket dropping): its response is kept, incomplete, but its
@@ -84,7 +91,7 @@ module Gori
       def with_wire(wire : Bytes) : Result
         Result.new(@head, @body, @response, @duration_us, @error, @incomplete,
           delivered: @delivered, timed_out: @timed_out, retried: @retried, wire: wire,
-          retryable_stale: @retryable_stale, cut_short: @cut_short)
+          retryable_stale: @retryable_stale, cut_short: @cut_short, lf_framed: @lf_framed)
       end
 
       def ok? : Bool
@@ -102,7 +109,7 @@ module Gori
         # so this shape is the only one that compiles.
         Result.new(@head, @body, @response, @duration_us, @error, @incomplete,
           delivered: @delivered, timed_out: @timed_out, retried: true, wire: @wire,
-          retryable_stale: @retryable_stale)
+          retryable_stale: @retryable_stale, lf_framed: @lf_framed)
       end
     end
 
@@ -388,6 +395,7 @@ module Gori
         return response_head_error(head_result, host, port, started, origin_scheme) unless head
 
         resp = Proxy::Codec::Http1.parse_response_head(head)
+        lf_framed = Proxy::Codec::Http1.lf_terminated_head?(head)
         # Skip interim 1xx informational responses (RFC 9110 §15.2): a captured request
         # carrying `Expect: 100-continue`, or an origin/CDN that emits 103 Early Hints,
         # would otherwise return the 100/103 as the repeater result. Read on until the final
@@ -413,6 +421,7 @@ module Gori
           return response_head_error(head_result, host, port, started, origin_scheme,
             interim: interim_status) unless head
           resp = Proxy::Codec::Http1.parse_response_head(head)
+          lf_framed ||= Proxy::Codec::Http1.lf_terminated_head?(head)
         end
         # A reply whose status-line can't be parsed (no HTTP-version, or a non-numeric status —
         # garbage/non-HTTP, or an h2 stack answering this h1 request) is flagged `malformed?` by
@@ -432,7 +441,7 @@ module Gori
           # without it a streaming origin (SSE/heartbeat) or a multi-GB body hangs or OOMs
           # this single-threaded send. A capped body comes back complete:false → incomplete.
           body, complete = Proxy::Codec::Body.read_complete(upstream, framing, len, Proxy::Codec::Body::CAPTURE_READ_MAX)
-          Result.new(head, body, resp, elapsed(started), incomplete: !complete)
+          Result.new(head, body, resp, elapsed(started), incomplete: !complete, lf_framed: lf_framed)
         rescue ex
           # The head was already read + parsed. A framing rejection (CL+TE — precisely the
           # ambiguous response a smuggling/desync probe is hunting) or a mid-body read error
@@ -445,7 +454,7 @@ module Gori
           # origin never closed. It is also the shape a time-based payload produces against an
           # origin that streams its head first, which `Fuzz::Matcher#eligible?` has to see.
           Result.new(head, nil, resp, elapsed(started), error: ex.message || "response read failed",
-            incomplete: true, timed_out: ex.is_a?(IO::TimeoutError))
+            incomplete: true, timed_out: ex.is_a?(IO::TimeoutError), lf_framed: lf_framed)
         end
       rescue ex
         # The head reader turns ordinary EOF, reset, timeout, and unfinished-head outcomes into
