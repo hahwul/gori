@@ -18,9 +18,11 @@ module Gori
       private def list_sitemap(h) : Result
         limit = clamp(optional_int_arg(h, "limit"), SITEMAP_LIMIT)
         offset = (optional_int_arg(h, "offset") || 0_i64).clamp(0_i64, Int32::MAX.to_i64).to_i
-        query = str(h, "query")
+        # `tag:` is the sitemap's own field, not QL's (`Sitemap.split_tag_terms`, the cut the TUI
+        # bar and `gori run sitemap` make): only the QL half is compiled, refused or reported.
+        terms = Sitemap.split_tag_terms(str(h, "query") || "")
         dropped = [] of String
-        filter = ql_filter_or_error(h, query, dropped)
+        filter = ql_filter_or_error(h, terms.ql, dropped)
         return filter if filter.is_a?(Result)
         # Per-flow, like the TUI tree's lens: a host keeps its non-static endpoints.
         filter = QL.and(filter, QL.hide_static) if bool_arg(h, "hide_static", false)
@@ -34,20 +36,14 @@ module Gori
           # Refused rather than dropped: an answer without the block reads as "no references".
           return err("include_unrequested is not available with collapse_transport — call without it, or use list_js_endpoints",
             "INVALID_ARGUMENT", field: "include_unrequested") if unrequested
-          return collapsed_sitemap(filter, limit, offset, dropped)
+          return collapsed_sitemap(filter, limit, offset, dropped, terms)
         end
-        # One row OVER the page, then dropped: `has_more` costs a row instead of a second
-        # COUNT(*) over the same GROUP BY. Without it a full page and an exactly-full set are
-        # the same answer, and this tool — unlike list_history — has no id cursor an agent
-        # could probe with, so "200 endpoints" silently stood for a surface of any size.
-        rows = store.sitemap_entries_detailed(filter, limit + 1, offset: offset)
-        has_more = rows.size > limit
-        rows = rows.first(limit) if has_more
+        tags = store.sitemap_tags
+        rows, has_more, tag_capped = sitemap_page(filter, limit, offset, terms, tags)
         # Folded by DEFAULT, matching `gori run sitemap` and the TUI tree: an agent mapping a
         # surface should not read one entry per fuzz payload. `fold_query:false` is the twin
         # of the CLI's --no-fold-query.
         entries = fold_query_entries(rows, bool_arg(h, "fold_query", true))
-        tags = store.sitemap_tags
         Result.new(JSON.build do |j|
           j.object do
             j.field "returned", entries.size
@@ -56,6 +52,7 @@ module Gori
             j.field "limit", limit
             j.field "has_more", has_more
             emit_ignored_terms(j, dropped)
+            emit_tag_capped(j, tag_capped)
             # Endpoints captured JavaScript references and no request reached (#1243). NOT
             # entries: an entry is a captured transport key with counts, and these have none —
             # mixing them in would also make `has_more`/`offset` page two different things.
@@ -321,13 +318,62 @@ module Gori
         rows
       end
 
+      # One page of endpoint rows, whether it ran into `has_more`, and whether a tag filter's
+      # read hit its cap (`tag_filtered_page`).
+      private def sitemap_page(filter : QL::Filter, limit : Int32, offset : Int32, terms : Sitemap::TagTerms,
+                               tags : Hash({String, String}, String)) : {Array(Store::SitemapEntry), Bool, Bool}
+        if terms.filtering?
+          # Before the query fold, as the tree prunes before it folds.
+          all = store.sitemap_entries_detailed(filter, Store::SITEMAP_MAX)
+          kept = Sitemap.select_by_tags(all, tags, terms) { |e| Store::SitemapOriginEntry.new(e.scheme, e.host, e.port, e.method, e.target) }
+          return tag_filtered_page(all, kept, limit, offset)
+        end
+        # One row OVER the page, then dropped: `has_more` costs a row instead of a second
+        # COUNT(*) over the same GROUP BY. Without it a full page and an exactly-full set are
+        # the same answer, and this tool — unlike list_history — has no id cursor an agent
+        # could probe with, so "200 endpoints" silently stood for a surface of any size.
+        rows = store.sitemap_entries_detailed(filter, limit + 1, offset: offset)
+        has_more = rows.size > limit
+        {has_more ? rows.first(limit) : rows, has_more, false}
+      end
+
+      # A `tag:` query's page. The tag filter cannot run on a page: whether an endpoint survives
+      # depends on the rows around it (a tagged `/api` keeps `/api/users`, a tagged
+      # `/api/users` keeps an `/api` endpoint above it), and pruning a page would also leave
+      # `has_more` counting rows the filter then threw away. So the rows are read whole, up to
+      # `Store::SITEMAP_MAX`, filtered, and paged here; the third value says the read hit that
+      # cap.
+      private def tag_filtered_page(all : Array(T), kept : Array(T), limit : Int32,
+                                    offset : Int32) : {Array(T), Bool, Bool} forall T
+        page = kept[offset, limit + 1]? || [] of T
+        has_more = page.size > limit
+        {has_more ? page.first(limit) : page, has_more, all.size >= Store::SITEMAP_MAX}
+      end
+
+      # Written only when the read hit the cap, as `emit_ignored_terms` is only when a term dropped.
+      private def emit_tag_capped(j : JSON::Builder, capped : Bool) : Nil
+        return unless capped
+        j.field "tag_filter_capped", true
+        j.field "tag_filter_note",
+          "the tag: filter read only the first #{Store::SITEMAP_MAX} endpoint keys, so tagged " \
+          "endpoints past them are missing — narrow the rest of the query (host:, path:) to reach them"
+      end
+
       # The legacy collapsed sitemap (distinct host/method/target only), for
-      # collapse_transport:true.
+      # collapse_transport:true. Its `tag:` terms prune the HOST-level tree, the one these
+      # host-keyed rows make.
       private def collapsed_sitemap(filter : QL::Filter, limit : Int32, offset : Int32,
-                                    dropped : Array(String)) : Result
-        entries = store.sitemap_entries(filter, limit + 1, offset: offset)
-        has_more = entries.size > limit
-        entries = entries.first(limit) if has_more
+                                    dropped : Array(String), terms : Sitemap::TagTerms) : Result
+        tag_capped = false
+        if terms.filtering?
+          all = store.sitemap_entries(filter, Store::SITEMAP_MAX)
+          kept = Sitemap.select_by_tags(all, store.sitemap_tags, terms) { |e| e }
+          entries, has_more, tag_capped = tag_filtered_page(all, kept, limit, offset)
+        else
+          entries = store.sitemap_entries(filter, limit + 1, offset: offset)
+          has_more = entries.size > limit
+          entries = entries.first(limit) if has_more
+        end
         Result.new(JSON.build do |j|
           j.object do
             j.field "returned", entries.size
@@ -335,6 +381,7 @@ module Gori
             j.field "limit", limit
             j.field "has_more", has_more
             emit_ignored_terms(j, dropped)
+            emit_tag_capped(j, tag_capped)
             j.field "entries" do
               j.array do
                 entries.each do |(host, method, target)|
@@ -689,14 +736,17 @@ module Gori
           "replay. Counts and the seen window are summed over the variants, and any memo " \
           "pinned on a variant is reported under `variant_tags`. Pass " \
           "fold_query:false for one entry per query string. Pass collapse_transport:true " \
-          "for the legacy host/method/target-only view. Optional QL `query` filter. " \
+          "for the legacy host/method/target-only view. Optional QL `query` filter, which also takes " \
+          "the sitemap's own `tag:x`, keeping what the TUI Sitemap's tag filter keeps: endpoints at or " \
+          "under a path whose memo (set_sitemap_tag) contains x, case-insensitive, and those above " \
+          "one; `-tag:x` drops a matching path's subtree. " \
           "Returns an object {entries, returned, scanned, offset, limit, has_more} — not a " \
           "bare array. `has_more:true` means the surface is LARGER than this page: advance " \
           "`offset` (or narrow `query`) until it is false, or you are mapping a fraction of " \
           "the capture and cannot tell. `limit`/`offset` page the raw endpoint rows BEFORE " \
           "query-folding — `scanned` is how many that was — so one folded entry can continue " \
           "onto the next page." do |s|
-          s.field "query", strprop("gori QL filter")
+          s.field "query", strprop("gori QL filter, plus the sitemap-only `tag:x` / `-tag:x` (memo substring, case-insensitive)")
           s.field "limit", limitprop("max endpoint rows scanned per page, before query-folding", SITEMAP_LIMIT)
           s.field "offset", intprop("skip this many endpoint rows — the page cursor (default 0). The ordering is total, so paging with it is deterministic and reaches every endpoint")
           s.field "fold_query", boolprop("fold the query-string variants of one path into a single entry (default true); false lists one entry per query string")

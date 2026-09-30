@@ -910,7 +910,7 @@ gori run import --postman api.postman_collection.json --db ./assessment.db --for
 gori run sitemap --in-scope --format paths
 ```
 
-`-q`/`--query=QL`는 history와 같은 QL로 엔드포인트를 거릅니다(위치 인자로도 넘길 수 있습니다). `-n`/`--limit=N`은 스캔할 엔드포인트 수를 제한합니다(기본값 10000). `--in-scope`는 스코프 내 호스트로 한정하고, `--hide-static`은 이미지·폰트·오디오·비디오를 뺍니다(TUI 트리처럼 플로우 단위). `--no-group`은 id 접기를, `--no-fold-query`는 쿼리 문자열 접기를 끕니다(서로 다른 축입니다). `--js-refs`는 캡처한 JavaScript가 참조하지만 아무도 요청하지 않은 경로도 함께 그립니다(`sitemap js` 참고. JSON에서는 `js_refs`와 `unrequested`로 나오며, `paths`에는 나오지 않습니다). `--format`은 `text`(트리), `json`, `paths` 중에서 고릅니다. `--lenient`는 없는 필드 이름을 쓴 쿼리를 거절하지 않고 받아들입니다.
+`-q`/`--query=QL`는 history와 같은 QL로 엔드포인트를 거릅니다(위치 인자로도 넘길 수 있습니다). Sitemap 전용 경로 메모 필드 `tag:`도 받습니다([적용 범위](/ko/reference/query-language/#where-it-applies)). `-n`/`--limit=N`은 스캔할 엔드포인트 수를 제한합니다(기본값 10000). `--in-scope`는 스코프 내 호스트로 한정하고, `--hide-static`은 이미지·폰트·오디오·비디오를 뺍니다(TUI 트리처럼 플로우 단위). `--no-group`은 id 접기를, `--no-fold-query`는 쿼리 문자열 접기를 끕니다(서로 다른 축입니다). `--js-refs`는 캡처한 JavaScript가 참조하지만 아무도 요청하지 않은 경로도 함께 그립니다(`sitemap js` 참고. JSON에서는 `js_refs`와 `unrequested`로 나오며, `paths`에는 나오지 않습니다). `--format`은 `text`(트리), `json`, `paths` 중에서 고릅니다. `--lenient`는 없는 필드 이름을 쓴 쿼리를 거절하지 않고 받아들입니다.
 
 트리의 루트는 오리진(스킴, 호스트, 포트)마다 하나라서, `http://127.0.0.1:19021`, `http://127.0.0.1:19022`, `https://127.0.0.1:8443`은 루트 세 개가 됩니다. `paths`는 엔드포인트마다 기본 포트를 뺀 전체 URL을 출력합니다(`GET  https://127.0.0.1:8443/only-tls`). `json`의 호스트 객체는 `host`에 포트 없는 호스트를 그대로 두고 `scheme`, `port`, `origin`(`paths`가 앞에 붙이는 값)을 더합니다. 태그는 호스트에 붙으므로 그 호스트의 모든 오리진 아래에 보입니다.
 
