@@ -380,7 +380,7 @@ module Gori
     private def resolve_all(lits : Array(Literal), base : Discover::Url::Parts,
                             base_kind : Base) : {Array(Store::JsRef), Int32}
       refs = [] of Store::JsRef
-      index = {} of {String, String} => Int32
+      index = {} of {String, String, String, Int32} => Int32
       unsafe = 0
       lits.each_with_index do |lit, n|
         Fiber.yield if n > 0 && n % YIELD_EVERY == 0
@@ -389,7 +389,9 @@ module Gori
           unsafe += 1 if ref.unsafe?
           next
         end
-        key = {ref.host, ref.path}
+        # The ORIGIN is part of the key (#1371, schema V43): `http://h:8080/p` and `https://h/p`
+        # in one bundle are two references.
+        key = {ref.host, ref.path, ref.scheme, ref.port}
         if i = index[key]?
           refs[i] = ref if refs[i].flags & FLAG_COMMENT != 0 && ref.flags & FLAG_COMMENT == 0
         else

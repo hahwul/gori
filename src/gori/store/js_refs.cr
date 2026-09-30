@@ -179,10 +179,10 @@ module Gori
                  "WHERE flow_id IN (SELECT id FROM flows WHERE #{filter.sql})", args: filter.args).as(Int64).to_i32
     end
 
-    # Distinct referenced (host, path) pairs — what a scan reports as "new" by comparing the
+    # Distinct referenced (origin, path) pairs — what a scan reports as "new" by comparing the
     # count before and after.
     def js_ref_endpoint_count : Int32
-      @db.scalar("SELECT COUNT(*) FROM (SELECT 1 FROM js_refs GROUP BY host, path)").as(Int64).to_i32
+      @db.scalar("SELECT COUNT(*) FROM (SELECT 1 FROM js_refs GROUP BY host, path, scheme, port)").as(Int64).to_i32
     rescue
       0
     end
@@ -195,7 +195,8 @@ module Gori
     end
 
     # Stored references with their source flow's URL, newest source first within one
-    # (host, path, scheme, port) — so each origin's sightings of a path are contiguous (#1371). `host` is exact (hosts are stored lowercased), `path` narrows to one node.
+    # (origin, path), ordered origin before path — so each origin's endpoints are contiguous and
+    # a listing grouped by origin draws each origin's heading once (#1371). `host` is exact (hosts are stored lowercased), `path` narrows to one node.
     # Raises on a read error when asked to, so a headless surface can tell "none" from "failed".
     #
     # `scheme`/`port` narrow to one origin of `host` (a Sitemap root, #1371).
@@ -225,7 +226,7 @@ module Gori
             "r.line, r.flags, r.base, r.created_at, f.scheme, f.host, f.port, f.target " \
             "FROM js_refs r LEFT JOIN flows f ON f.id = r.flow_id " \
             "#{where.empty? ? "" : "WHERE #{where.join(" AND ")} "}" \
-            "ORDER BY r.host, r.path, r.scheme, r.port, r.flow_id DESC LIMIT ?"
+            "ORDER BY r.host, r.scheme, r.port, r.path, r.flow_id DESC LIMIT ?"
       out = [] of JsRefSighting
       @db.query(sql, args: args) do |rs|
         rs.each do

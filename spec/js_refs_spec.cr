@@ -483,6 +483,32 @@ describe Gori::JsRefs do
       end
     end
 
+    # #1371 / V43: one bundle naming the same path on two origins stores and lists both —
+    # `UNIQUE(host, path, flow_id)` kept whichever resolved first.
+    it "keeps two origins of one path from the same bundle" do
+      with_store do |store|
+        jr_flow(store, "/app.js", %(fetch("http://shop.test:8080/p");fetch("https://shop.test/p")))
+        JR.scan(store)
+        JR.list(store, JR::ListOptions.new(include_requested: true)).endpoints.map(&.url).sort!
+          .should eq(["http://shop.test:8080/p", "https://shop.test/p"])
+        store.js_ref_endpoint_count.should eq(2)
+      end
+    end
+
+    # Grouped by origin in the listing, so the text form draws each origin heading once.
+    it "orders the listing by origin before path" do
+      with_store do |store|
+        jr_flow(store, "/a.js", %(fetch("http://shop.test:8080/a");fetch("https://shop.test/b")))
+        jr_flow(store, "/b.js", %(fetch("https://shop.test/a");fetch("http://shop.test:8080/b")))
+        JR.scan(store)
+        eps = JR.list(store, JR::ListOptions.new(include_requested: true)).endpoints
+        eps.map(&.url).should eq(["http://shop.test:8080/a", "http://shop.test:8080/b",
+                                  "https://shop.test/a", "https://shop.test/b"])
+        Gori::CLI::Run.sitemap_js_text(eps).lines.reject(&.starts_with?(' ')).reject(&.empty?)
+          .should eq(["http://shop.test:8080", "https://shop.test"])
+      end
+    end
+
     # #1371: a Sitemap root is an origin, so "requested" is asked on the reference's own origin.
     # `/api/users` captured on https://shop.test does not make http://shop.test:9090/api/users
     # requested — the tree draws that one as a never-requested root, and the list must agree.
