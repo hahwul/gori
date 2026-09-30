@@ -26,6 +26,8 @@ require "../repeater/diff"
 require "../repeater/minimize"
 require "../repeater/draft_markers"
 require "../repeater/message_lines"
+require "../repeater/send_error"
+require "../repeater/request_rules"
 require "../fuzz"
 require "../decoder"
 require "../miner"
@@ -1786,6 +1788,20 @@ module Gori
         end
       end
 
+      # `-d` and `-b` mean what they mean to curl (#1383): `-b` was the BODY here, so a curl
+      # user's `-b 'sid=1'` went out as a body on a GET and nothing said so.
+      SEND_DATA_HELP = "Request body, as curl's -d: repeat to join with '&'; POST unless -X names a method, and " \
+                       "Content-Type: application/x-www-form-urlencoded unless a -H names one. $ENV.KEY tokens " \
+                       "expand (see --verbatim)"
+      SEND_COOKIE_HELP = "Cookie 'name=value', as curl's -b: repeat to join them into ONE Cookie header. A value " \
+                         "with no '=' (a cookie-jar file to curl) is refused"
+      # A flow or session replay keeps its captured method, so its `-d` only replaces the body.
+      REPLAY_DATA_HELP = "Request body override (curl's -d); the Content-Length is re-framed over it. $ENV.KEY " \
+                         "tokens expand (see --verbatim)"
+      REPLAY_COOKIE_HELP = "Cookie 'name=value' (curl's -b), replacing the stored Cookie header; repeat to join " \
+                           "them into one. A value with no '=' (a cookie-jar file to curl) is refused"
+      APPLY_RULES_HELP = "Run the project's enabled Match & Replace rules (REQUEST side) over the request before " \
+                         "sending, as the live proxy would (default: off — a direct send is byte-exact)"
       HEADERS_ONLY_HELP = "Print the status line and headers only: the body is replaced by one line naming its " \
                           "size (--format json keeps the body's encoding and size, adds omitted:true)"
       MAX_BODY_HELP = "Print at most BYTES of the decoded body, then a marker naming the full size " \

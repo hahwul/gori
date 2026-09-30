@@ -179,3 +179,57 @@ describe "gori run repeater send --format json — did the post-send writes land
       .should be < ws_body.index("emit_ws_result(id, result, format").not_nil!
   end
 end
+
+# #1384: a script branching on a failed `gori run send`/`repeater` had only the `error` sentence
+# to match. MCP's result has carried `error_kind` / `error_code` / `retryable` / `delivered` and
+# the parsed headers all along; the CLI object now carries the same fields, from the same
+# classifier (`Repeater::SendError`), additively — `head` is still there.
+describe "gori run repeater --format json — the MCP error and header fields (#1384)" do
+  it "classifies a refused connection as a retryable connect error" do
+    j = JSON.parse(Gori::CLI::Run.repeater_json_for_spec(
+      result_of(Bytes.empty, nil, "connect failed: 127.0.0.1:19999 — host unreachable (DNS/refused/timeout)")))
+    j["error_kind"].as_s.should eq("connect")
+    j["error_code"].as_s.should eq("NETWORK_ERROR")
+    j["retryable"].as_bool.should be_true
+    j["delivered"].as_bool.should be_false
+  end
+
+  it "tells a timeout from a refused connection, and a framing refusal from both" do
+    timeout = JSON.parse(Gori::CLI::Run.repeater_json_for_spec(result_of(Bytes.empty, nil, "read timed out after 10s")))
+    timeout["error_kind"].as_s.should eq("timeout")
+    framing = JSON.parse(Gori::CLI::Run.repeater_json_for_spec(
+      result_of(Bytes.empty, nil, "conflicting Content-Length values")))
+    framing["error_kind"].as_s.should eq("protocol")
+    framing["retryable"].as_bool.should be_false
+  end
+
+  it "does not offer a retry of a request the origin already answered" do
+    r = Gori::Repeater::Result.new(Bytes.empty, nil, nil, 1_i64, "connection closed mid-body", delivered: true)
+    j = JSON.parse(Gori::CLI::Run.repeater_json_for_spec(r))
+    j["delivered"].as_bool.should be_true
+    j["retryable"].as_bool.should be_false
+  end
+
+  it "omits the error fields on a success, and lists the response headers in wire order" do
+    head = "HTTP/1.1 201 Created\r\nX-B: 2\r\nSet-Cookie: a=1\r\nX-B: 3\r\n\r\n".to_slice
+    raw = Gori::Proxy::Codec::Http1.parse_response_head(head)
+    j = JSON.parse(Gori::CLI::Run.repeater_json_for_spec(Gori::Repeater::Result.new(head, Bytes.empty, raw, 1_i64)))
+    j["error_kind"]?.should be_nil
+    j["retryable"]?.should be_nil
+    j["reason"].as_s.should eq("Created")
+    j["http_version"].as_s.should eq("HTTP/1.1")
+    j["headers"].as_a.map { |h| {h["name"].as_s, h["value"].as_s} }.should eq(
+      [{"X-B", "2"}, {"Set-Cookie", "a=1"}, {"X-B", "3"}])
+    # Unredacted, like `head`: the operator's own send is not an inventory listing.
+    j["head"].as_s.should contain("Set-Cookie: a=1")
+  end
+
+  it "gives an 8-bit header value the lossy + base64 pair head carries" do
+    head = "HTTP/1.1 200 OK\r\nX-Bad: A".to_slice + Bytes[0xFF] + "\r\n\r\n".to_slice
+    raw = Gori::Proxy::Codec::Http1.parse_response_head(head)
+    j = JSON.parse(Gori::CLI::Run.repeater_json_for_spec(Gori::Repeater::Result.new(head, Bytes.empty, raw, 1_i64)))
+    bad = j["headers"].as_a.find! { |h| h["name"].as_s == "X-Bad" }
+    bad["value_lossy"].as_bool.should be_true
+    Base64.decode(bad["value_base64"].as_s).to_a.should eq("A".to_slice.to_a + [0xFF_u8])
+  end
+end

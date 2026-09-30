@@ -53,4 +53,44 @@ describe "gori run send (#1116)" do
       Gori::CLI::Run.send_header_pairs([": no name"]).should be_a(Gori::CLI::Run::SendArgError)
     end
   end
+
+  # #1383: `-b` is curl's cookie and `-d` curl's body. A value with no `=` is a cookie-jar FILE
+  # to curl — and what an old `-b '{"a":1}'` body looks like — so it is refused, not sent.
+  describe ".cookie_header_value" do
+    it "joins every -b into one Cookie value with curl's own `;`" do
+      Gori::CLI::Run.cookie_header_value(["a=1", "b=2"], [] of String).should eq("a=1;b=2")
+      Gori::CLI::Run.cookie_header_value([] of String, ["Cookie: x=1"]).should be_nil
+    end
+
+    it "refuses a cookie-jar file name, pointing a body at -d" do
+      err = Gori::CLI::Run.cookie_header_value(["{\"a\":1}"], [] of String)
+      err.should be_a(Gori::CLI::Run::SendArgError)
+      err.as(Gori::CLI::Run::SendArgError).message.should contain("-d/--data")
+    end
+
+    it "refuses -b beside an explicit -H Cookie, in any case" do
+      err = Gori::CLI::Run.cookie_header_value(["a=1"], ["cookie : z=1"])
+      err.as(Gori::CLI::Run::SendArgError).message.should contain("both set the Cookie header")
+    end
+  end
+
+  describe ".send_curl_defaults" do
+    it "makes a body a form POST unless -X or -H said otherwise, as curl does" do
+      m, h = Gori::CLI::Run.send_curl_defaults(nil, [{"A", "b"}], true)
+      m.should eq("POST")
+      h.should eq([{"A", "b"}, {"Content-Type", "application/x-www-form-urlencoded"}])
+      m, h = Gori::CLI::Run.send_curl_defaults("PUT", [{"content-type", "application/json"}], true)
+      m.should eq("PUT")
+      h.should eq([{"content-type", "application/json"}])
+    end
+
+    it "leaves a bodyless request alone" do
+      Gori::CLI::Run.send_curl_defaults(nil, [] of {String, String}, false).should eq({nil, [] of {String, String}})
+    end
+  end
+
+  it "names -b among the flags a raw request source would ignore" do
+    Gori::CLI::Run.send_source_error(["--request-raw"], method: nil, headers: [] of String, body: nil,
+      body_file: nil, cookies: ["a=1"]).not_nil!.should contain("-b/--cookie")
+  end
 end

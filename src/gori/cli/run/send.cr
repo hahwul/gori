@@ -18,7 +18,9 @@ module Gori
         url : String? = nil
         method : String? = nil
         headers = [] of String
-        body : String? = nil
+        # `-d` pieces, joined with `&` the way curl joins repeated `-d`s.
+        data = [] of String
+        cookies = [] of String
         body_file : String? = nil
         request_file : String? = nil
         request_raw : String? = nil
@@ -32,6 +34,7 @@ module Gori
         verbatim = false
         slot : String? = nil
         record_history = false
+        apply_rules = false
         headers_only = false
         max_body : Int32? = nil
         format = :text
@@ -41,19 +44,22 @@ module Gori
           p.banner = "Usage: gori run send --url URL [options]\n" \
                      "       gori run send URL [options]\n\n" \
                      "Send ONE request and print the response, without creating a Repeater session. The\n" \
-                     "request is built from the URL (-X/-H/-b), or read whole from --request-file/-raw/-stdin\n" \
-                     "(the URL then only names where to dial). It goes out through this project's upstream\n" \
-                     "proxy, host overrides, scope and Sandbox, like every other gori send.\n\n" \
-                     "  gori run send https://api.example.com/v1/items/42 -H 'Accept: application/json'\n" \
-                     "  gori run send --url https://api.example.com/v1/items -X POST -b '{\"a\":1}' --record-history\n" \
+                     "request is built from the URL and -X/-H/-d/-b, which mean what they mean to curl (-d is\n" \
+                     "the body, -b a cookie), or read whole from --request-file/-raw/-stdin (the URL then only\n" \
+                     "names where to dial). It goes out through this project's upstream proxy, host overrides,\n" \
+                     "scope and Sandbox, like every other gori send.\n\n" \
+                     "  gori run send https://api.example.com/v1/items/42 -H 'Accept: application/json' -b 'sid=abc'\n" \
+                     "  gori run send --url https://api.example.com/v1/items -d '{\"a\":1}' -H 'Content-Type: application/json' --record-history\n" \
                      "  gori run send --url https://api.example.com --request-file req.http --headers-only\n"
           p.on("--project=NAME", "Project whose network settings, scope and History to use (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file") { |v| db_path = v }
           p.on("--url=URL", "Absolute URL: scheme://host[:port]/path?query. With --request-*, only the origin is used") { |v| url = v }
-          p.on("-XMETHOD", "--method=METHOD", "HTTP method (default GET)") { |v| method = v }
+          p.on("-XMETHOD", "--method=METHOD", "HTTP method (default GET, or POST when there is a body — as curl)") { |v| method = v }
           p.on("-HHEADER", "--header=HEADER", "Request header 'Name: value' (repeatable, sent in order). Host and Content-Length are added when you leave them out") { |v| headers << v }
-          p.on("-bBODY", "--body=BODY", "Request body; $ENV.KEY tokens expand (see --verbatim)") { |v| body = v }
-          p.on("--body-file=FILE", "Request body read byte-for-byte from FILE, never expanded") { |v| body_file = v }
+          p.on("-dDATA", "--data=DATA", SEND_DATA_HELP) { |v| data << v }
+          p.on("--body=BODY", "Alias for -d/--data") { |v| data << v }
+          p.on("--body-file=FILE", "Request body read byte-for-byte from FILE, never expanded (curl's --data-binary @FILE: POST and the form Content-Type by default, like -d)") { |v| body_file = v }
+          p.on("-bCOOKIE", "--cookie=COOKIE", SEND_COOKIE_HELP) { |v| cookies << v }
           p.on("-fFILE", "--request-file=FILE", "Send the raw HTTP request in FILE instead of building one (the URL names only where to dial)") { |v| request_file = v }
           p.on("-rRAW", "--request-raw=RAW", "Send this raw HTTP request string instead of building one") { |v| request_raw = v }
           p.on("--request-stdin", "Read the raw HTTP request from stdin (a pipe or a redirect, never a terminal)") { request_stdin = true }
@@ -63,9 +69,10 @@ module Gori
           p.on("-k", "--insecure-upstream", "Do not verify the upstream TLS certificate") { insecure = true }
           p.on("--timeout=SEC", "Per-operation connect + idle timeout (seconds)") { |v| timeout = parse_count(v, "--timeout").seconds }
           p.on("--allow-unscoped", "Send even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
-          p.on("--verbatim", "Send what you typed EXACTLY: no token expansion ($ENV.KEY, $BIND.NAME, $GEN.*) in -H/-b or a raw request, no bare-LF→CRLF promotion of a raw request's head, and on HTTP/2 no field-name lowercasing. The URL is still expanded: it names where to dial") { verbatim = true }
+          p.on("--verbatim", "Send what you typed EXACTLY: no token expansion ($ENV.KEY, $BIND.NAME, $GEN.*) in -H/-d/-b or a raw request, no bare-LF→CRLF promotion of a raw request's head, and on HTTP/2 no field-name lowercasing. The URL is still expanded: it names where to dial") { verbatim = true }
           p.on("--slot=NAME", "Send as this SESSION SLOT — its header overlay, and its binding table for $BIND.NAME tokens") { |v| slot = v.strip }
           p.on("--record-history", "Also write the request + response to History as a flow, and print its id (default: off)") { record_history = true }
+          p.on("--apply-rules", APPLY_RULES_HELP) { apply_rules = true }
           p.on("--headers-only", HEADERS_ONLY_HELP) { headers_only = true }
           p.on("--max-body=BYTES", MAX_BODY_HELP) { |v| max_body = parse_count(v, "--max-body") }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
@@ -77,11 +84,14 @@ module Gori
         parser.parse(args)
         refresh_verify_upstream(!insecure)
 
+        body = data.empty? ? nil : data.join('&')
+
         # Every refusal knowable from argv alone goes ABOVE the reads: `--request-stdin` blocks
         # until EOF, and a mistake in the flags must not first drain a pipe (or hang on one).
         sources = request_sources(file: request_file, raw: request_raw, stdin: request_stdin)
         dial_url, header_pairs = send_checked_argv(url, positional, sources, method, headers,
-          body, body_file, tls_preset)
+          body, body_file, cookies, tls_preset)
+        method, header_pairs = send_curl_defaults(method, header_pairs, !body.nil? || !body_file.nil?)
         cap = body_cap(headers_only, max_body, "gori run send")
         raw_content = sources.empty? ? nil : send_raw_content(sources, request_file, request_raw, request_stdin)
         body_file_bytes = body_file.try { |f| read_input_file(f, "gori run send", noun: "body").to_slice }
@@ -98,7 +108,7 @@ module Gori
         end
         activate_slot(slot, "gori run send")
 
-        # `-b` expands HERE, after `open_store` installed the project's env layer — before it, a
+        # `-d` expands HERE, after `open_store` installed the project's env layer — before it, a
         # `$ENV.KEY` the project defines would have gone out literally. `--body-file` never
         # expands: those bytes are the body, the way MCP's `body_base64` is.
         body_bytes = body_file_bytes || body.try { |b| (verbatim ? b : Env.expand(b)).to_slice }
@@ -119,10 +129,14 @@ module Gori
         rescue ex : Repeater::PlanError
           repeater_plan_abort("gori run send", ex)
         end
+        # Before the scope gate and the History write, as MCP's `apply_rules` does, so the
+        # request judged and recorded is the one the rules produced.
+        applied_rules = false
+        plan, applied_rules = apply_request_rules(plan, project) if apply_rules
         abort_if_out_of_scope!(outbound, plan, "gori run send")
         abort_if_blocked!(plan, "gori run send")
         send_and_report(plan, outbound, project, raw: !raw_content.nil?,
-          record_history: record_history, format: format, cap: cap)
+          record_history: record_history, format: format, cap: cap, applied_rules: applied_rules)
       end
 
       # The argv-only checks, in one place so every one of them runs before anything reads
@@ -130,10 +144,12 @@ module Gori
       # name and the `-H` lines. Returns the URL and the parsed headers, or aborts.
       private def self.send_checked_argv(url : String?, positional : Array(String), sources : Array(String),
                                          method : String?, headers : Array(String), body : String?,
-                                         body_file : String?, tls_preset : String?) : {String, Array({String, String})}
+                                         body_file : String?, cookies : Array(String),
+                                         tls_preset : String?) : {String, Array({String, String})}
         dial_url = send_url_arg(url, positional)
         abort "gori run send: #{dial_url.message}" if dial_url.is_a?(SendArgError)
-        if err = send_source_error(sources, method: method, headers: headers, body: body, body_file: body_file)
+        if err = send_source_error(sources, method: method, headers: headers, body: body, body_file: body_file,
+             cookies: cookies)
           abort "gori run send: #{err}"
         end
         if err = Settings.tls_preset_error(tls_preset)
@@ -141,7 +157,47 @@ module Gori
         end
         pairs = send_header_pairs(headers)
         abort "gori run send: #{pairs.message}" if pairs.is_a?(SendArgError)
+        cookie = cookie_header_value(cookies, headers)
+        abort "gori run send: #{cookie.message}" if cookie.is_a?(SendArgError)
+        pairs << {"Cookie", cookie} if cookie
         {dial_url, pairs}
+      end
+
+      # curl's two defaults for a request with a body, which `-d` promises by taking curl's
+      # letter (#1383): the method is POST unless `-X` named one, and the body is declared
+      # `application/x-www-form-urlencoded` unless a `-H` names a Content-Type. Without the
+      # first, `-d` rebuilt the very trap it replaced — a body on a GET, with nothing said.
+      # Here, in the surface, and not in `Repeater::UrlRequest.structured`, which MCP shares:
+      # MCP's `body` never borrowed curl's meaning.
+      def self.send_curl_defaults(method : String?, headers : Array({String, String}),
+                                  has_body : Bool) : {String?, Array({String, String})}
+        return {method, headers} unless has_body
+        unless headers.any? { |(k, _)| k.compare("Content-Type", case_insensitive: true) == 0 }
+          headers = headers + [{"Content-Type", "application/x-www-form-urlencoded"}]
+        end
+        {method || "POST", headers}
+      end
+
+      # `-b/--cookie` values → the ONE Cookie header value curl sends for them (joined with
+      # `;`, curl's own join and `Import::Curl`'s), nil when there are none, or the refusal.
+      #
+      # Two refusals, both about what curl would have done instead. A value with no `=` is a
+      # cookie-jar FILE to curl, so sending `Cookie: jar.txt` would be neither curl's request
+      # nor the operator's — and it is also what an old `-b '{"a":1}'` (when `-b` was the
+      # body, before #1383) looks like, so this is the line that catches a script still
+      # written that way. And a `-H 'Cookie: …'` beside `-b` is two answers to one header,
+      # refused rather than resolved by a precedence nobody reads.
+      def self.cookie_header_value(cookies : Array(String), headers : Array(String)) : String? | SendArgError
+        return nil if cookies.empty?
+        if jar = cookies.find { |c| !c.includes?('=') }
+          return SendArgError.new("-b/--cookie #{jar.inspect} is not name=value — curl reads a cookie-jar " \
+                                  "FILE there, which gori does not. Pass the cookie as name=value; for a " \
+                                  "request body use -d/--data (-b was the body before #1383)")
+        end
+        if headers.any? { |h| h.partition(':')[0].strip.compare("Cookie", case_insensitive: true) == 0 }
+          return SendArgError.new("-b/--cookie and -H 'Cookie: …' both set the Cookie header — pass one")
+        end
+        cookies.join(';')
       end
 
       # The one raw request source the argv checks let through, refused when it gave no bytes —
@@ -171,7 +227,8 @@ module Gori
       # Send `plan` and print what came back — the tail every repeater send shares: the History
       # record (opt-in) BEFORE the one emit, so its outcome rides inside the JSON object.
       private def self.send_and_report(plan : Repeater::Plan, outbound : Gori::Outbound, project : Project, *,
-                                       raw : Bool, record_history : Bool, format : Symbol, cap : BodyCap) : Nil
+                                       raw : Bool, record_history : Bool, format : Symbol, cap : BodyCap,
+                                       applied_rules : Bool = false) : Nil
         # A handshake authored here goes out as an ORDINARY request: there is no session to hold
         # the frames a real exchange would send, so its 101 (or its refusal) is the answer. Said,
         # because a 101 with nothing after it reads like an exchange that happened.
@@ -193,7 +250,8 @@ module Gori
         recorded_flow_id = recorded.as?(Int64)
         history_write = recorded.nil? ? nil : WriteOutcome.new(recorded.as?(String))
         emit_repeater_result(result, new_body, nil, format, recorded_flow_id: recorded_flow_id,
-          tls_preset: sent_tls_preset(plan), history_write: history_write, cap: cap)
+          tls_preset: sent_tls_preset(plan), history_write: history_write, cap: cap,
+          prefix: "gori run send", applied_rules: applied_rules)
         if why = history_write.try(&.error)
           STDERR.puts "gori run send: #{why}#{project_write_warning_tail}"
         end
@@ -221,22 +279,24 @@ module Gori
       end
 
       # nil when the request sources make sense together; the refusal otherwise. A raw request
-      # IS the method, headers and body, so a `-X`/`-H`/`-b` beside one would have to be either
+      # IS the method, headers and body, so a `-X`/`-H`/`-d`/`-b` beside one would have to be either
       # silently dropped or spliced into bytes the operator said to send as written.
       def self.send_source_error(sources : Array(String), *, method : String?, headers : Array(String),
-                                 body : String?, body_file : String?) : String?
+                                 body : String?, body_file : String?,
+                                 cookies : Array(String) = [] of String) : String?
         if sources.size > 1
           return "#{sources.join(", ")} cannot be combined — pick one request source"
         end
         if body && body_file
-          return "-b/--body and --body-file cannot be combined — pick one body"
+          return "-d/--data and --body-file cannot be combined — pick one body"
         end
         unless sources.empty?
           built = [] of String
           built << "-X/--method" if method
           built << "-H/--header" unless headers.empty?
-          built << "-b/--body" if body
+          built << "-d/--data" if body
           built << "--body-file" if body_file
+          built << "-b/--cookie" unless cookies.empty?
           unless built.empty?
             return "#{sources.first} sends the request as written, so #{built.join(", ")} would be ignored — " \
                    "put them in the request, or drop #{sources.first} to have gori build it"

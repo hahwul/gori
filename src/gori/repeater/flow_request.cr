@@ -390,6 +390,31 @@ module Gori
         nil
       end
 
+      # `wire` with its METHOD (the request line's first token) replaced by `method` — `gori run
+      # repeater <flow-id> -X` (#1384) — or nil when there is no request line. Found exactly as
+      # `replace_request_target` finds the line and its tokens, for the reason given there; the
+      # target, the version, every byte of whitespace between them, the headers and the body
+      # stay byte-exact. `method` goes in verbatim (P7).
+      def self.replace_method(wire : Bytes, method : String) : Bytes?
+        pos = 0
+        while pos < wire.size
+          nl = wire.index(0x0A_u8, pos)
+          stop = nl || wire.size
+          line = String.new(wire[pos, stop - pos])
+          unless line.strip.empty?
+            span = token_spans(line).first? || return nil
+            io = IO::Memory.new(wire.size + method.bytesize)
+            io.write(wire[0, pos + span[0]])
+            io << method
+            io.write(wire[(pos + span[1])..])
+            return io.to_slice
+          end
+          return nil unless nl
+          pos = nl + 1
+        end
+        nil
+      end
+
       private def self.splice_request_target(wire : Bytes, at : Int32, line : String, target : String) : Bytes?
         spans = token_spans(line)
         return nil if spans.empty?
