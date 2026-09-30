@@ -98,7 +98,12 @@ module Gori
       # A structurally impossible signature (wrong ES* width, unparseable) is `false`, not a
       # raise: "this token does not verify" is the answer, and the only honest one.
       def verify(signing_input : String, alg : String, signature : Bytes, key_spec : String) : Bool
-        key = verification_key(key_spec)
+        verify(signing_input, alg, signature, verification_key(key_spec))
+      end
+
+      # The same over a key already loaded, for a caller that must load it before judging the
+      # signature (`Jwt.verify`: a bad PEM is the caller's error, whatever the token carries).
+      def verify(signing_input : String, alg : String, signature : Bytes, key : PKey) : Bool
         check_key!(alg, key)
         der = if alg.starts_with?("ES")
                 n = ec_component(alg)

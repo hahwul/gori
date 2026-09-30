@@ -263,6 +263,10 @@ describe "Gori::Jwt.verify codes" do
   it "names every kind of no with a code and a reason" do
     rows = [
       {"eyJhbGciOiJIUzI1NiJ9", Gori::Jwt::VerifyCode::Malformed},
+      # A header that does not read is malformed, not "declares no alg" — `token_alg` is nil
+      # for both, and only the second is true of this token.
+      {"!!!.e30.AAAA", Gori::Jwt::VerifyCode::Malformed},
+      {"#{b64("[1]")}.#{p}.#{sig}", Gori::Jwt::VerifyCode::Malformed},
       {"#{hs}.SMUGGLED", Gori::Jwt::VerifyCode::ExtraSegments},
       {"#{b64("{}")}.#{p}.#{sig}", Gori::Jwt::VerifyCode::NoAlg},
       {Gori::Jwt.encode("{}", %({"s":1}), "none", ""), Gori::Jwt::VerifyCode::Unsigned},
@@ -302,6 +306,16 @@ describe "Gori::Jwt.verify codes" do
     v.reason.not_nil!.should contain("needs an EC key")
     # A P-384 key under ES256 is the size half of the same check.
     Gori::Jwt.verify(es, JoseKeys::EC384_PUB).code.should eq(Gori::Jwt::VerifyCode::KeyMismatch)
+  end
+
+  it "judges the signature's shape before the key's kind" do
+    # `key_mismatch` tells an agent another key may help; no key helps a mangled signature,
+    # so an ES256 token with one stays malformed even under an RSA key.
+    es = Gori::Jwt.encode("{}", %({"s":1}), "ES256", JoseKeys::EC256)
+    eh, ep, _ = es.split('.')
+    {"#{eh}.#{ep}.#{Gori::Jwt.b64url(Bytes.new(63))}", "#{eh}.#{ep}.!!!"}.each do |bad|
+      Gori::Jwt.verify(bad, JoseKeys::RSA_PUB).code.should eq(Gori::Jwt::VerifyCode::SignatureMalformed)
+    end
   end
 
   it "calls a signature of a width no key produces malformed" do

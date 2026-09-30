@@ -161,6 +161,11 @@ module Gori
         return refused(alg, :extra_segments,
           "#{parts.size} dot-separated segments — a JWS has 3 and a JWE 5, so nothing verifies this")
       end
+      # `token_alg` is nil for an unreadable header too; "declares no alg" is only true of one
+      # that reads.
+      unless header_object?(parts[0])
+        return refused(alg, :malformed, "the header does not decode to a JSON object — not a JWS")
+      end
       return refused(alg, :no_alg, "the header declares no alg") if alg.empty?
       sig_seg = parts[2]?
       if alg == "none" || sig_seg.nil? || sig_seg.empty?
@@ -170,30 +175,48 @@ module Gori
       nil
     end
 
+    # Judged in the order that keeps each answer honest: an alg gori cannot check; a key that
+    # does not load (raised — the caller's mistake, whatever the token carries); a signature no
+    # key could produce; a key of the wrong kind for the alg; and only then the signature
+    # itself. Shape before key kind, because `key_mismatch` tells an agent another key may
+    # help, which is false of a mangled signature.
     private def check_signature(signing_input : String, alg : String, sig_seg : String, key : String) : Verification
+      hmac = HMAC_DIGEST[alg]?
+      return refused(alg, :alg_unsupported, unsupported_reason(alg)) unless hmac || Asym.alg?(alg)
+      pkey = Asym.verification_key(key) unless hmac
       sig = decode_sig(sig_seg)
+      return refused(alg, :signature_malformed, "the signature segment is not base64 — it is not a signature at all") if sig.nil?
+      if refusal = sig_shape_refusal(alg, sig)
+        return refusal
+      end
       ok = begin
-        if digest = HMAC_DIGEST[alg]?
-          Crypto::Subtle.constant_time_compare(OpenSSL::HMAC.digest(digest, key, signing_input), sig || Bytes.empty)
-        elsif Asym.alg?(alg)
-          # Run even over an undecodable signature, so a key that does not load still raises
-          # rather than hiding behind `signature_malformed`.
-          Asym.verify(signing_input, alg, sig || Bytes.empty, key)
-        else
-          return refused(alg, :alg_unsupported, unsupported_reason(alg))
+        if hmac
+          Crypto::Subtle.constant_time_compare(OpenSSL::HMAC.digest(hmac, key, signing_input), sig)
+        elsif pkey
+          Asym.verify(signing_input, alg, sig, pkey)
         end
       rescue ex : KeyMismatch
         return refused(alg, :key_mismatch, "#{ex.message} — a server holding this key rejects this token")
       end
       return Verification.new(alg: alg, verified: true) if ok
-      return refused(alg, :signature_malformed, "the signature segment is not base64 — it is not a signature at all") if sig.nil?
-      if (want = sig_width(alg)) && sig.size != want
-        return refused(alg, :signature_malformed,
-          "the signature is #{sig.size} bytes and every #{alg} signature is #{want} — no key produces it")
-      end
-      under = key.empty? && HMAC_DIGEST.has_key?(alg) ? "the EMPTY secret" : "this key"
+      under = key.empty? && hmac ? "the EMPTY secret" : "this key"
       refused(alg, :signature_mismatch,
         "the signature does not verify under #{under} — a different key signed it, or the token was altered")
+    end
+
+    # A decoded signature of a width no key produces under `alg`, or nil.
+    private def sig_shape_refusal(alg : String, sig : Bytes) : Verification?
+      want = sig_width(alg)
+      return nil if want.nil? || sig.size == want
+      refused(alg, :signature_malformed,
+        "the signature is #{sig.size} bytes and every #{alg} signature is #{want} — no key produces it")
+    end
+
+    # A header segment that base64-decodes to a JSON object.
+    private def header_object?(seg : String) : Bool
+      !RawJson.members(String.new(Base64.decode(seg))).nil?
+    rescue
+      false
     end
 
     # The width an alg fixes whatever the key: an HMAC digest, ES r‖s, Ed25519's 64 bytes. nil
