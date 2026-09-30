@@ -168,7 +168,7 @@ module Gori
                      "(/search?q=1 + /search?q=2 → /search); --no-fold-query lists them separately."
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
-          p.on("-qQL", "--query=QL", "Filter endpoints with a QL query (host: method: path: status: scheme: …)") { |v| query = v }
+          p.on("-qQL", "--query=QL", "Filter endpoints with a QL query (host: method: path: status: scheme: …), plus the tree's own tag: (a path memo; -tag: excludes)") { |v| query = v }
           p.on("-nN", "--limit=N", "Max distinct endpoints to scan (default #{Store::SITEMAP_MAX})") { |v| limit = parse_count(v, "--limit") }
           p.on("--in-scope", "Only hosts in the project's configured scope") { in_scope = true }
           p.on("--hide-static", "Leave out static assets — images, fonts, media (the TUI's hide-static lens; same as -q -static:true)") { hide_static = true }
@@ -199,7 +199,7 @@ module Gori
         if err = Run.reserved_query_verb_error(positional, "sitemap", ["tag", "params", "js", "export"], "tag, params, js, export")
           abort err
         end
-        Run.refuse_unknown_query_fields("sitemap", query, lenient)
+        query, tags = sitemap_tree_query(query, lenient)
 
         # Parse/validate the QL BEFORE opening the store: abort skips ensure blocks, so a
         # bad query must not leave a store handle open.
@@ -237,7 +237,7 @@ module Gori
         filter = QL.and(filter, QL.hide_static) if hide_static
         hosts, truncated = begin
           collect_sitemap(store, filter, limit, in_scope, group, fold_query,
-            js_refs: js_refs, narrowed: !query.to_s.strip.empty?)
+            js_refs: js_refs, narrowed: !query.to_s.strip.empty?, tags: tags)
         rescue ex
           abort "gori run sitemap: query #{query.inspect} failed: #{ex.message}"
         ensure
@@ -245,6 +245,16 @@ module Gori
         end
 
         emit_sitemap(hosts, format, truncated, limit)
+      end
+
+      # A tree query's QL half and its `tag:` terms. `tag:` is the tree's own field, not QL's
+      # (`Sitemap.split_tag_terms`, the same cut the TUI bar and MCP `list_sitemap` make): it is
+      # cut out first, so the unknown-field refusal and the compile only ever see the QL half,
+      # which is nil when nothing but tag terms was typed.
+      private def self.sitemap_tree_query(query : String?, lenient : Bool) : {String?, Sitemap::TagTerms}
+        tags = Sitemap.split_tag_terms(query.to_s)
+        Run.refuse_unknown_query_fields("sitemap", tags.ql, lenient)
+        {tags.ql, tags}
       end
 
       # QL.parse + the same un-compilable-query rejection as history (a non-blank query
@@ -266,14 +276,15 @@ module Gori
       end
 
       # Build + post-process the tree from the open store in the SAME ORDER as
-      # SitemapView#reload (build → tags → scope → id folds → query fold → counts). The scope step
+      # SitemapView#reload (build → tags → tag filter → scope → id folds → query fold → counts). The scope step
       # differs by design: --in-scope filters whole hosts via Scope#host_in_scope?,
       # which evaluates the rules regardless of the TUI's persisted `s` enabled flag
       # (an explicit --in-scope is the opt-in). That host-level gate is coarser than
       # the TUI lens's per-flow SQL filter and conservative on url-level includes.
       private def self.collect_sitemap(store : Store, filter : QL::Filter, limit : Int32,
                                        in_scope : Bool, group : Bool, fold_query : Bool, *,
-                                       js_refs : Bool = false, narrowed : Bool = false) : {Array(Sitemap::Node), Bool}
+                                       js_refs : Bool = false, narrowed : Bool = false,
+                                       tags : Sitemap::TagTerms? = nil) : {Array(Sitemap::Node), Bool}
         # A `--query body:…` filter arrives here already drained and CHECKED — see
         # `cmd_sitemap_tree`, which refuses outright when the off-commit trigram index (Store V4)
         # is still behind.
@@ -291,6 +302,7 @@ module Gori
         scope = Scope.load(store) if js_refs || in_scope
         attach_sitemap_js_refs(store, hosts, scope, narrowed) if js_refs
         Sitemap.stamp_tags!(hosts, store.sitemap_tags)
+        Sitemap.filter_by_tags!(hosts, tags.positives, tags.negatives) if tags
         if in_scope && scope
           STDERR.puts "gori run sitemap: --in-scope, but no scope rules are configured — nothing is in scope" unless scope.configured?
           # The BARE host: a root's label is its origin (`https://h:8443`), and a host rule

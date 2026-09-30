@@ -26,7 +26,9 @@ describe "layering contract" do
     # written. It is a core engine layer with all three surfaces hanging off it — exactly
     # the shape this contract governs — and it is clean today, so this is the one moment
     # adding it costs nothing.
-    subsystems = %w[store proxy probe fuzz miner discover sequencer oast authorize]
+    # `sitemap` likewise: the tree model and its `tag:` filter (`sitemap/tag_filter.cr`), which
+    # the TUI Sitemap bar, `gori run sitemap` and MCP `list_sitemap` all call.
+    subsystems = %w[store proxy probe fuzz miner discover sequencer oast authorize sitemap]
 
     paths = [] of String
     subsystems.each do |name|
