@@ -1190,7 +1190,7 @@ module Gori
           next unless capped
           notes << "flow ##{detail.row.id}'s #{side} body was truncated at the capture cap — " \
                    "these bytes are the stored prefix, not the whole body " \
-                   "(--format json reports the true size)"
+                   "(--format json reports the whole body's size as source_size)"
         end
         notes
       end
@@ -1480,7 +1480,8 @@ module Gori
               j.field "request" do
                 j.object do
                   j.field "head", scrub(detail.request_head)
-                  emit_body_json(j, "body", detail.request_head, detail.request_body, detail.request_body_truncated?, cap)
+                  emit_body_json(j, "body", detail.request_head, detail.request_body, detail.request_body_truncated?, cap,
+                    source_size: detail.request_body_truncated? ? detail.request_wire_body_size : nil)
                   if cap.whole?
                     emit_grpc_messages_json(j, detail.request_head, detail.request_body,
                       detail.row.target, request: true)
@@ -1492,7 +1493,8 @@ module Gori
               j.field "response" do
                 j.object do
                   j.field "head", scrub(detail.response_head)
-                  emit_body_json(j, "body", detail.response_head, detail.response_body, detail.response_body_truncated?, cap)
+                  emit_body_json(j, "body", detail.response_head, detail.response_body, detail.response_body_truncated?, cap,
+                    source_size: detail.response_body_truncated? ? detail.response_wire_body_size : nil)
                   if cap.whole?
                     emit_grpc_messages_json(j, detail.response_head, detail.response_body,
                       detail.row.target, request: false)
