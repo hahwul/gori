@@ -2566,9 +2566,6 @@ module Gori
         cookie = cookie_header_value(cookies, headers)
         abort "gori run repeater: #{cookie.message}" if cookie.is_a?(SendArgError)
         headers += ["Cookie: #{cookie}"] if cookie
-        if note = cookie_as_body_note(cookies, method_override, !body_override.nil?)
-          STDERR.puts "gori run repeater: #{note.sub("with no body", "(the captured body is unchanged)")}"
-        end
         if (m = method_override) && (err = replay_method_error(m))
           abort "gori run repeater: #{err}"
         end
@@ -2587,6 +2584,11 @@ module Gori
           store.close
         end
         abort "gori run repeater: no flow ##{id}" unless detail
+        # Judged by the method that will go out: a replay rarely passes `-X`, and an old
+        # `-b BODY` script replaying a captured POST would otherwise swap its Cookie unsaid.
+        if note = cookie_as_body_note(cookies, method_override || detail.row.method, !body_override.nil?)
+          STDERR.puts "gori run repeater: #{note.sub("with no body", "(the captured body is unchanged)")}"
+        end
         # After `open_store` (which installs `Env.layer`) and before the plan: `Repeater::Sender`
         # reads the active slot at the seam, so this has to be set before anything builds bytes.
         activate_slot(slot, "gori run repeater")

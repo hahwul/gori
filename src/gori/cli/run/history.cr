@@ -622,17 +622,27 @@ module Gori
             # `json` is ONE array and `jsonl` one object per line (#1386). `json` used to be
             # JSON-Lines here and an array everywhere else, so `history --format json | jq
             # length` measured each row instead of counting them. The array is still streamed,
-            # element by element, rather than built whole.
+            # element by element, rather than built whole. Each row is encoded before its
+            # separator and the array closes in `ensure`, so a read that raises mid-stream still
+            # leaves the rows before it as one valid document, as the fuzz stream does.
             array = format == :json
             print '[' if array
-            rows.each_with_index do |r, i|
-              cols, cols_redacted = row_columns(store, r, prepared, include_sensitive) || {nil, false}
-              print ',' if array && i > 0
-              line = CLI::Output.flow_row_json(r, store.request_head(r.id), cols,
-                include_sensitive: include_sensitive, columns_redacted: cols_redacted)
-              array ? print(line) : puts(line)
+            begin
+              rows.each_with_index do |r, i|
+                cols, cols_redacted = row_columns(store, r, prepared, include_sensitive) || {nil, false}
+                line = CLI::Output.flow_row_json(r, store.request_head(r.id), cols,
+                  include_sensitive: include_sensitive, columns_redacted: cols_redacted)
+                print ',' if array && i > 0
+                array ? print(line) : puts(line)
+              end
+            ensure
+              if array
+                begin
+                  puts ']'
+                rescue IO::Error # a closed pipe: nothing is reading the close either
+                end
+              end
             end
-            puts ']' if array
           elsif rows.empty?
             STDERR.puts empty_listing_note(query, view_label, in_scope, hide_static)
           else

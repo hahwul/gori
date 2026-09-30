@@ -120,7 +120,16 @@ module Gori
              hint: stdin_pipe_hint("gori run import", flag: "--#{kind} -"))
           abort err
         end
-        path = File.tempfile("gori-stdin-import-") { |f| IO.copy(io, f) }.path
+        # Created before the copy, so a copy that fails part-way (ENOSPC, EIO on stdin) is
+        # removed by the rescue below: the block form closes but does not delete it, and the
+        # partial copy is the operator's cookies and tokens.
+        spool = File.tempfile(prefix: "gori-stdin-import-", suffix: nil)
+        path = spool.path
+        begin
+          IO.copy(io, spool)
+        ensure
+          spool.close
+        end
         if File.size(path).zero?
           File.delete?(path)
           abort "gori run import: stdin gave no bytes for --#{kind} -"
