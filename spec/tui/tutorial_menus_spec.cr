@@ -23,6 +23,18 @@ describe "Gori::Tui::Tutorial mock menus" do
     fam.title.should eq(Gori::Verbs::SEND_FLOW.title)
   end
 
+  # The real card drops a chord hint equal to the row's own letter (`SpaceMenu#chord_hint`);
+  # the mock printed `y Copy flow y` (#1382).
+  it "never repeats a row's letter as its chord hint, as the real card does" do
+    (Tour.space_rows(registry) + Tour.send_rows(registry)).each do |row|
+      next if row.opens
+      row.hint.should_not eq(row.key.to_s)
+      row.hint.should_not eq(row.key.to_s.upcase)
+    end
+    copy = Tour.space_rows(registry).find! { |r| r.title == registry["history.copy"].title }
+    copy.hint.should eq("")
+  end
+
   it "letters the second card from the family table" do
     rows = Tour.send_rows(registry)
     rows.size.should eq(Tour::SEND_VERBS.size)
@@ -86,5 +98,26 @@ describe "Gori::Tui::Tutorial step order" do
   it "teaches the menu before the palette, whose hints spell menu paths" do
     Tour::Step::SpaceMenu.value.should be < Tour::Step::Palette.value
     Tour::STEP_RAIL.map { |(_, step)| step }.should eq(Tour::Step.values)
+  end
+end
+
+describe "Gori::Tui::Tutorial mock sub-tab strips" do
+  # The strip the Navigate lesson walks through is the app's, not a lookalike: Project and
+  # Target have one, History (where the menu and palette lessons stand) does not.
+  it "reads Project's and Target's chips from their real sets" do
+    Tour.strip_labels(0).should eq(Gori::Tui::ProjectView::PANE_LABELS)
+    Tour.strip_labels(1).should eq(Gori::Tui::TargetController::SUBS)
+    Tour.strip_labels(Tour::HISTORY_TAB).should be_nil
+  end
+
+  it "names each focus level the way the app's badge does" do
+    Tour.focus_badge(:menu).should eq("TABS")
+    Tour.focus_badge(:strip).should eq("SUBTABS")
+    Tour.focus_badge(:body).should eq("BODY")
+    Tour.focus_badge(:body, insert: true).should eq("EDITOR")
+    # The badge's reservation fits its widest word, so the chips never shift under it.
+    [:menu, :strip, :body].each do |lvl|
+      (Tour.focus_badge(lvl, true).size + 2).should be <= Tour::BADGE_W
+    end
   end
 end
