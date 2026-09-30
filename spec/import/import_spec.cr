@@ -630,6 +630,25 @@ describe Gori::Import do
     end
   end
 
+  # `http:/h.test/x` matched neither scheme pattern and fell to the `host:port` shape with an
+  # empty port, importing as `https://http:/h.test/x` (host `http`); `:65536` parsed because
+  # `URI.parse` bounds a port only by Int32. Both are URLs nothing can dial, so both skip.
+  it "skips a URL-list line with a mangled http scheme or an out-of-range port" do
+    urls = File.tempname("gori", ".txt")
+    begin
+      File.write(urls, "https://a.test/1\nhttp:/one-slash.test/x\nhttps:two.test/y\n" \
+                       "http://a.test:65536/\nhttps://a.test:99999/\nhttp://b.test:65535/\n")
+      with_store do |store|
+        result = Gori::Import.import_file(store, :urls, urls)
+        result.skipped.should eq(4)
+        rows = store.search(Gori::QL::EMPTY, 10).map { |r| {r.host, r.port} }.to_set
+        rows.should eq({ {"a.test", 443}, {"b.test", 65535} }.to_set)
+      end
+    ensure
+      File.delete?(urls)
+    end
+  end
+
   it "skips a non-http(s) URL line instead of discarding the whole list" do
     urls = File.tempname("gori", ".txt")
     begin
@@ -1052,6 +1071,19 @@ describe Gori::Import::Builder do
   it "turns an overflowing URL port into a clean import error" do
     expect_raises(Gori::Error, /unparseable/) do
       Gori::Import::Builder.endpoint("https://api.example.test:99999999999/")
+    end
+  end
+
+  it "rejects a port outside the TCP range instead of storing an undiallable target" do
+    ["https://h.test:65536/", "http://h.test:70000/x", "https://h.test:0/"].each do |url|
+      expect_raises(Gori::Error, /port out of range/) { Gori::Import::Builder.endpoint(url) }
+    end
+    Gori::Import::Builder.endpoint("http://h.test:65535/").should eq({"http", "h.test", 65535, "/"})
+  end
+
+  it "rejects an http(s) scheme missing its slashes instead of reading the scheme as a host" do
+    ["http:/one-slash.test/x", "HTTPS:h.test/y"].each do |url|
+      expect_raises(Gori::Error, /malformed scheme/) { Gori::Import::Builder.endpoint(url) }
     end
   end
 
