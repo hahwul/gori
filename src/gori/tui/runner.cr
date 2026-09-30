@@ -4660,6 +4660,8 @@ module Gori::Tui
       # The import is chunked, so a partial write is possible — say so rather than letting a
       # short count read as a successful import of a smaller file (see Import::Result).
       result.shortfall_note.try { |note| msg += " — #{note}" } unless @import_cancel
+      # What the import could not carry, or that it duplicated an earlier one (`Import::Result`).
+      msg += curl_notes_tail(result.notes)
       @jobs.finish(ev.job, @import_cancel ? :stopped : :done, "#{count} flows")
       status(msg, :done)
     end

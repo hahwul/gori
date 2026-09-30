@@ -7,12 +7,14 @@ module Gori
     class Tools
       # Permanent saved-run readers remain available in --read-only mode. Only deletion is an
       # action; live fuzz_start/status/results keep their existing action gate.
+      FUZZ_RUNS_LIMIT = PageLimit.new(50, 200)
+
       @[Tool("list_fuzz_runs")]
       private def list_fuzz_runs(h) : Result
         req_off = optional_int_arg(h, "offset")
         req_lim = optional_int_arg(h, "limit")
         offset = clamp_nonneg(req_off)
-        limit = clamp(req_lim, 50, 200)
+        limit = clamp(req_lim, FUZZ_RUNS_LIMIT)
         session_id = optional_int_arg(h, "session_id")
         return err("session_id must be positive", "INVALID_ARGUMENT", field: "session_id") if session_id && session_id <= 0
 
@@ -37,6 +39,10 @@ module Gori
           end
         end)
       end
+
+      # Metrics rows, and the smaller page a row carrying its request/response BLOBs gets.
+      FUZZ_RUN_ROWS_LIMIT         = PageLimit.new(100, 1000)
+      FUZZ_RUN_CONTENT_ROWS_LIMIT = PageLimit.new(25, 25)
 
       @[Tool("get_fuzz_run")]
       private def get_fuzz_run(h) : Result
@@ -73,8 +79,7 @@ module Gori
         offset = clamp_nonneg(req_off)
         # Content rows retain multiple request/response BLOBs and are deliberately capped at
         # 25 per response. Metrics can page farther, but still use the scalar Store projection.
-        limit = clamp(req_lim, include_content ? 25 : 100,
-          include_content ? 25 : 1000)
+        limit = clamp(req_lim, include_content ? FUZZ_RUN_CONTENT_ROWS_LIMIT : FUZZ_RUN_ROWS_LIMIT)
         matched_only = bool_arg(h, "matched_only", false)
         total = store.fuzz_result_count(run_id, matched_only)
         returned = 0
@@ -164,7 +169,7 @@ module Gori
           "List permanent fuzz runs in the current project, newest first. These survive MCP jobs and process restarts." do |s|
           s.field "session_id", intprop("optional TUI fuzz-session id filter")
           s.field "offset", intprop("runs to skip (default 0)")
-          s.field "limit", intprop("runs to return (default 50, max 200)")
+          s.field "limit", limitprop("runs to return", FUZZ_RUNS_LIMIT)
         end
 
         tool j, "get_fuzz_run",
@@ -172,7 +177,7 @@ module Gori
           s.field "run_id", intprop("permanent run id"), required: true
           s.field "result_index", intprop("optional exact result index (zero-based)")
           s.field "offset", intprop("result rows to skip (default 0)")
-          s.field "limit", intprop("rows to return (default 100 metrics / 25 with content; max 1000 / 25)")
+          s.field "limit", limitprop("rows to return (with include_content: default and max #{FUZZ_RUN_CONTENT_ROWS_LIMIT.max})", FUZZ_RUN_ROWS_LIMIT)
           s.field "matched_only", boolprop("only matcher hits (default false; with clusters:true, only clusters holding a match)")
           s.field "clusters", boolprop("return one entry per RESPONSE SHAPE instead of rows (default false), aggregated over every stored row with the same fields fuzz_results{clusters} emits; paged by offset/limit (default 50, max 500). A run saved before shapes were recorded clusters by status/error/words/lines and marks those clusters approximate:true; a keep:interesting run clusters only the rows it kept (run.filtered).")
           s.field "cluster", strprop("a cluster id from clusters:true — page that cluster's member rows (the default row shape; include_content applies)")

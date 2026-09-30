@@ -770,7 +770,7 @@ gori run probe -a
 
 `--active`와 함께: `--unsafe`는 안전하지 않은 메서드(`POST`/`PUT`/`PATCH`/`DELETE`)도 프로브하며, 이 재전송은 서버 데이터를 변경할 수 있습니다. `--aggressive`는 룰별 상한을 높이고 forbidden-bypass 헤더 집합을 넓힙니다(그리고 `--unsafe`를 함의합니다). 둘 다 `--allow-unscoped`를 함께 주지 않는 한 스코프 게이트를 따릅니다. 인가된 대상에만 사용하세요.
 
-`probe`만 쓰면 스캔하고 출력합니다. TUI Probe 탭 뒤에 저장되는 발견 항목은 별개의 표면입니다.
+`probe`만 쓰면 스캔하고 출력합니다. `--persist`를 주면 찾은 결과를 라이브 스캐너와 같은 방식으로 합쳐 저장된 발견 항목에도 기록하므로, TUI로 연 적 없는 프로젝트에도 판정 목록이 생깁니다. 기록이 실패하면 보고서를 출력한 뒤 그렇다고 알리고 1로 종료합니다. TUI Probe 탭 뒤에 저장되는 발견 항목은 별개의 표면입니다.
 
 ```bash
 gori run probe issues --severity high            # 아래 동사들이 받는 id가 함께 나오는 트리아지 목록

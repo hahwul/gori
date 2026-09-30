@@ -74,6 +74,15 @@ describe "History list covering index (schema V37)" do
     end
   end
 
+  # `Import.duplicate_note` asks this before every file import; neither column has an index of
+  # its own, so without the covering index it would walk every row's overflow chain.
+  it "counts an import's earlier flows from the index" do
+    with_store do |store|
+      plan = query_plan(store, Gori::Store::IMPORT_REF_COUNT_SQL, ["import", "x.har"] of DB::Any)
+      plan.should contain("COVERING INDEX idx_flows_list")
+    end
+  end
+
   it "keeps an exact status on its own index" do
     with_store do |store|
       search_plan(store, "status:500").should contain("INDEX idx_flows_status (status=?)")

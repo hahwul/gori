@@ -15,6 +15,8 @@ module Gori
       # entry — so the list lives here, read by the reader's refusal AND by the schema.
       PROBE_RULE_KINDS = %w[passive active custom]
 
+      PROBE_SCAN_LIMIT = PageLimit.new(200, 2000)
+
       # probe_scan — the MCP surface for the Prism scanner (parity with `gori run probe`).
       # PASSIVE by default (zero outbound requests): scans captured History flows (optional
       # QL filter) + Repeater tabs and returns grouped issues. active:true also runs the
@@ -38,7 +40,7 @@ module Gori
         # point `probe_scan{active:true, limit:"all"}` sent the whole active scan at the target
         # and then threw every detection away with an argument error. Same rule as
         # `send_request`'s `max_body_bytes` and `minimize_repeater`'s `apply`.
-        limit = clamp(optional_int_arg(h, "limit"), 200, 2000)
+        limit = clamp(optional_int_arg(h, "limit"), PROBE_SCAN_LIMIT)
         allow_unscoped = bool_arg(h, "allow_unscoped", false)
         # --aggressive implies unsafe (it also raises caps + widens bypass sets).
         aggressive = bool_arg(h, "aggressive", false)
@@ -46,6 +48,11 @@ module Gori
         gate = probe_active_gate(active, allow_unscoped)
         return gate if gate.is_a?(Result)
         scope, scope_configured = gate
+        # Refused up here, before a single flow is read, for the reason `limit` is read up
+        # here: a scan that ran and was then refused its write would have spent the work (and,
+        # under active:true, the sends) for nothing.
+        persist = probe_persist_arg(h)
+        return persist if persist.is_a?(Result)
 
         opts = Probe::Active::Options.new(allow_unsafe: unsafe, aggressive: aggressive)
         ids = Probe::Scan.flow_ids(store, filter)
@@ -76,7 +83,7 @@ module Gori
         # shape either.
         dets, repeater_n = Probe::Scan.scan_all(store, ids, active: active, verify_upstream: verify_upstream,
           scope: scope, allow_unscoped: allow_unscoped, opts: opts, active_budget: budget, rules: rules,
-          stop: cancel_signal,
+          stop: cancel_signal, persist: persist,
           on_error: ->(_where : String, _ex : Exception) { scan_errors += 1; nil })
         capped = budget.exhausted?
 
@@ -91,7 +98,15 @@ module Gori
         end
         Result.new(probe_scan_json(groups, ids.size, repeater_n, active, allow_unscoped,
           scope_configured, capped, unsafe, aggressive, limit, scan_errors,
-          oob_inert: oob_inert_rules(store, rules, active)))
+          oob_inert: oob_inert_rules(store, rules, active), persist: persist))
+      end
+
+      # `persist:true`'s writer, nil for a report-only scan, or the --read-only refusal.
+      private def probe_persist_arg(h) : Probe::Scan::Persist? | Result
+        return nil unless bool_arg(h, "persist", false)
+        return Probe::Scan::Persist.new if @allow_actions
+        err("persist:true writes the findings into the project (disabled by gori mcp --read-only); " \
+            "drop persist for a report-only scan", "TOOL_DISABLED", field: "persist")
       end
 
       # The enabled out-of-band rule ids this scan could NOT plant a payload for, or an empty
@@ -124,6 +139,8 @@ module Gori
       # live Analyzer fills — the same rows a human triages in the TUI. Without them an agent
       # could produce findings (probe_scan, send_request) but never dismiss or promote one.
 
+      PROBE_ISSUES_LIMIT = PageLimit.new(100, 500)
+
       # probe_issues — list persisted findings. Defaults to OPEN only, mirroring the TUI's
       # default open-only lens; include_closed:true is the `a` toggle.
       @[Tool("probe_issues")]
@@ -138,7 +155,7 @@ module Gori
         req_off = optional_int_arg(h, "offset")
         req_lim = optional_int_arg(h, "limit")
         offset = clamp_nonneg(req_off)
-        limit = clamp(req_lim, 100, 500)
+        limit = clamp(req_lim, PROBE_ISSUES_LIMIT)
         # Page and total in SQL. This used to read EVERY matching row, filter `status.open?`
         # in Crystal (parsing each row's `affected` JSON on the way), and then slice a hundred
         # out of it — so answering a default `probe_issues` call on a wide crawl materialised
@@ -496,7 +513,8 @@ module Gori
                                   active : Bool, allow_unscoped : Bool, scope_configured : Bool,
                                   capped : Bool, unsafe : Bool, aggressive : Bool, limit : Int32,
                                   scan_errors : Int32 = 0,
-                                  oob_inert : Array(String) = [] of String) : String
+                                  oob_inert : Array(String) = [] of String,
+                                  persist : Probe::Scan::Persist? = nil) : String
         JSON.build do |j|
           j.object do
             j.field "flows_scanned", flows_scanned
@@ -532,9 +550,24 @@ module Gori
               end
             end
             j.field "issue_count", groups.size
+            emit_probe_persisted(j, persist) if persist
             j.field("issues") { j.array { groups.first(limit).each { |g| Probe.group_json(j, g) } } }
             j.field "truncated", true if groups.size > limit
           end
+        end
+      end
+
+      # What `persist:true` wrote. The report is returned whether or not the write landed — the
+      # scan is the expensive half, and refusing it over a busy writer would throw it away — so
+      # a failed write is a field, carrying the retry, rather than an error. Every detection is
+      # written, before the severity/category/in_scope/limit lenses narrow the REPORT: those
+      # shape what this call shows, and triage is a separate read (`probe_issues`).
+      private def emit_probe_persisted(j : JSON::Builder, persist : Probe::Scan::Persist) : Nil
+        j.field "persisted", persist.committed?
+        j.field "persisted_detections", persist.detections if persist.committed?
+        unless persist.committed?
+          j.field "persist_error", "the findings were NOT written (store busy or unwritable); the report " \
+                                   "below is complete — call again with persist:true to write them"
         end
       end
 
@@ -543,19 +576,29 @@ module Gori
       # here rather than around one long block, so a new write tool cannot be added on the
       # wrong side of it by landing in the wrong place in a 1,300-line method.
       private def list_probe_tools(j : JSON::Builder) : Nil
+        # Under a profile that serves the scan passive-only (`ToolFilter::RECON_WITHHELD`) the
+        # description drops the active half with the arguments, or it would advertise a mode
+        # the schema then refuses.
+        passive_only = !@tool_filter.try(&.withheld_args("probe_scan")).nil?
+        active_text =
+          if passive_only
+            "Served PASSIVE-only here (zero outbound requests). "
+          else
+            "PASSIVE by default (zero outbound requests). active:true also runs light-touch active " \
+            "checks that SEND requests (reflected params, CORS/host-header reflection, open redirect, " \
+            "CRLF injection, 403/path/header access-control bypass, nginx & parameter traversal, " \
+            "GraphQL introspection, SSTI) — requires write access and is scope-gated (per-flow scope " \
+            "include + a Sandbox/exclude hard-block). "
+          end
         tool j, "probe_scan",
           "Scan captured History flows (optional QL filter) + Repeater tabs for issues — the " \
-          "MCP equivalent of `gori run probe`. PASSIVE by default (zero outbound requests). " \
-          "active:true also runs light-touch active checks that SEND requests (reflected " \
-          "params, CORS/host-header reflection, open redirect, CRLF injection, 403/path/header " \
-          "access-control bypass, nginx & parameter traversal, GraphQL introspection, SSTI) — " \
-          "requires write access and is scope-gated (per-flow scope include + a Sandbox/exclude " \
-          "hard-block). Returns " \
+          "MCP equivalent of `gori run probe`. #{active_text}Returns " \
           "{flows_scanned, repeaters_scanned, issue_count, issues:[{code, category, host, " \
           "title, severity, hit_count, affected, affected_count, evidence, sample_flow_id, " \
           "sample_repeater_id, remediation, cwe, cwe_name}]}, highest-severity first. " \
           "`cwe`/`cwe_name` are OMITTED for a code with no meaningful CWE — a technology " \
-          "fingerprint, an informational jwt_in_* note, or a custom rule. Writes nothing." do |s|
+          "fingerprint, an informational jwt_in_* note, or a custom rule. Reports only, unless " \
+          "persist:true writes the findings into the project's triage list (probe_issues)." do |s|
           s.field "query", strprop("gori QL filter applied to History flows only; empty scans all (Repeater tabs are always scanned)")
           s.field "strict", boolprop("reject the query if any term is unrecognized/invalid instead of silently dropping it (default false; use ql_explain to see which terms would drop)")
           s.field "lenient", boolprop("search a `field:` QL does not implement as literal TEXT instead of refusing the query (default false) — the same escape hatch `gori run probe --lenient` spells")
@@ -567,7 +610,8 @@ module Gori
           s.field "unsafe", boolprop("with active:true, ALSO probe unsafe methods (POST/PUT/PATCH/DELETE) — re-sends may mutate server data (default false)")
           s.field "aggressive", boolprop("with active:true, raise per-rule caps + use wider bypass sets (implies unsafe) — authorized targets only (default false)")
           s.field "insecure", boolprop("with active:true, skip upstream TLS verification (default false) — mirrors `gori run probe -k`, for a lab/staging origin with a self-signed certificate")
-          s.field "limit", intprop("max issue groups to return (default 200, max 2000)")
+          s.field "limit", limitprop("max issue groups to return", PROBE_SCAN_LIMIT)
+          s.field "persist", boolprop("also WRITE every finding into the project's persisted findings — the list probe_issues reads and probe_promote/probe_dismiss act on — merging by (code, host) as the live scanner does (default false = report only; refused under --read-only). A dismissed finding stays dismissed; hit_count counts observations, so rescanning the same flows raises it")
         end
 
         tool j, "probe_issues",
@@ -580,7 +624,7 @@ module Gori
           s.field "severity", enumprop("only return findings at/above this level", SEVERITIES)
           s.field "category", enumprop("only return findings in this category", Probe::FILTER_CATEGORIES)
           s.field "host", strprop("only return findings for this exact host")
-          s.field "limit", intprop("max rows (default 100, max 500)")
+          s.field "limit", limitprop("max rows", PROBE_ISSUES_LIMIT)
           s.field "offset", intprop("start row (default 0)")
         end
 

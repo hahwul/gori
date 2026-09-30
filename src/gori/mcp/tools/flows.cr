@@ -16,9 +16,11 @@ module Gori
 
       # --- read tools ---------------------------------------------------------
 
+      HISTORY_LIMIT = PageLimit.new(50, 500)
+
       @[Tool("list_history", requires: ["get_flow", "ql_reference"])]
       private def list_history(h) : Result
-        limit = clamp(optional_int_arg(h, "limit"), 50, 500)
+        limit = clamp(optional_int_arg(h, "limit"), HISTORY_LIMIT)
         before_id = optional_int_arg(h, "before_id")
         since_id = optional_int_arg(h, "since")
         # `ids` names an EXACT set — the rows the operator marked in the TUI, handed over by
@@ -276,6 +278,8 @@ module Gori
         prepared.columns.map_with_index { |c, i| {c.label, values[i]? || ""} }
       end
 
+      EVENTS_LIMIT = PageLimit.new(100, 500)
+
       # #124 AI event feed. Forward-cursored (id > since, oldest-first). next_cursor is the
       # max id SCANNED this page (NOT the max matched id), so source/kind filters never make
       # the agent re-scan or skip; on an empty page it echoes the input `since` (never 0,
@@ -283,7 +287,7 @@ module Gori
       @[Tool("list_events")]
       private def list_events(h) : Result
         since = optional_int_arg(h, "since") || 0_i64
-        limit = clamp(optional_int_arg(h, "limit"), 100, 500)
+        limit = clamp(optional_int_arg(h, "limit"), EVENTS_LIMIT)
         # Refused, not filtered. `source` and `actor` are the two CLOSED filters on this tool,
         # and a value nothing writes narrows the feed to nothing — which comes back
         # `events: []`, `isError:false`, and reads as "the project has no such activity" rather
@@ -333,11 +337,13 @@ module Gori
         # feature on h2 ones.
         ws_msgs = store.ws_messages(id)
         include_sensitive = bool_arg(h, "include_sensitive", false)
-        opts = body_return_opts(h)
+        auto = body_auto?(h)
+        opts = body_return_opts(h, auto: auto)
         return opts if opts.is_a?(Result)
         cap, omit = opts
         detail, ws_msgs, redaction = redact_flow(detail, ws_msgs, include_sensitive)
-        Result.new(Serialize.flow_detail_json(detail, ws_msgs, include_sensitive, cap, omit, redaction))
+        more = auto ? {body_more_hint("flow_id: #{id}, part: \"request\""), body_more_hint("flow_id: #{id}")} : nil
+        Result.new(Serialize.flow_detail_json(detail, ws_msgs, include_sensitive, cap, omit, redaction, more))
       end
 
       # Safe evidence export applied to the projection an AGENT reads (#1035).
@@ -368,6 +374,8 @@ module Gori
       # the proxy stops storing at 2 MiB — and this tool never read it, so a body cut at 2 KB
       # of a 2.5 GB transfer paged to its end and reported `complete:true`.
       alias ChunkSource = {Bytes?, Bytes?, Bool}
+
+      BODY_CHUNK_LIMIT = PageLimit.new(65_536, 262_144)
 
       @[Tool("get_response_body_chunk")]
       private def get_response_body_chunk(h) : Result
@@ -465,7 +473,7 @@ module Gori
           raise Gori::Error.new("invalid 'part' #{part.inspect} (expected #{MESSAGE_SIDES.join(" or ")})")
         end
         offset = bounded_int_arg(h, "offset", 0_i64, min: 0_i64)
-        limit = bounded_int_arg(h, "limit", 65_536_i64, min: 1_i64, max: 262_144_i64).to_i
+        limit = bounded_int_arg(h, "limit", BODY_CHUNK_LIMIT.default.to_i64, min: 1_i64, max: BODY_CHUNK_LIMIT.max.to_i64).to_i
         BodyChunkOptions.new(flow_id, repeater_id, offset, limit, bool_arg(h, "raw", false), part,
           bool_arg(h, "include_sensitive", false))
       end
@@ -629,7 +637,7 @@ module Gori
             "still narrow WITHIN the set, and what they removed comes back as `filtered_out_ids` — " \
             "so a short answer always says which kind of short it is. " \
             "At most #{MCP_HISTORY_IDS_MAX} ids per call")
-          s.field "limit", intprop("max rows (default 50, max 500)")
+          s.field "limit", limitprop("max rows", HISTORY_LIMIT)
           s.field "before_id", intprop("cursor: page OLDER — only flows with id < this (newest-first; works with query too)")
           s.field "since", intprop("forward cursor: tail NEWER — only flows with id > this, oldest-first (mutually exclusive with before_id)")
           s.field "view", strprop("apply a saved History view by name (list_views) — its query is ANDed OVER `query`, never replacing it, the same way the TUI's `v` picker layers over the filter bar. Built-ins: All, History (src:proxy), 'History + Repeater'. An unknown name is refused rather than ignored")
@@ -652,7 +660,7 @@ module Gori
           "your own writes from the operator's; the human reads this same feed on the Project tab's " \
           "Activity pane." do |s|
           s.field "since", intprop("forward cursor: only events with id > this (default 0 = from oldest). Pass back the response's next_cursor to tail.")
-          s.field "limit", intprop("max events scanned (default 100, max 500)")
+          s.field "limit", limitprop("max events scanned", EVENTS_LIMIT)
           s.field "source", enumprop("filter to one producer of feed rows", EVENT_SOURCES)
           s.field "actor", enumprop("filter to the surface that acted; rows written by a background engine name none", EVENT_ACTORS)
           s.field "kind", strprop("filter to one kind (e.g. job_done, agent_action, scope_add)")
@@ -670,7 +678,7 @@ module Gori
           "back as `since`. Each message names the tab the operator was on and any flow ids " \
           "they had marked — the same set get_current_context reports." do |s|
           s.field "since", intprop("feed cursor from the previous call (0 = from the start)")
-          s.field "limit", intprop("max messages to return (default 50, max 200)")
+          s.field "limit", limitprop("max messages to return", OPERATOR_MESSAGES_LIMIT)
           s.field "include_delivered", boolprop("also return messages a live route already carried (default false)")
         end
 
@@ -724,7 +732,7 @@ module Gori
           "include_sensitive=true turns body redaction off along with the header redaction." do |s|
           s.field "id", intprop("flow id from list_history"), required: true
           s.field "include_sensitive", boolprop("return Authorization/Cookie/Set-Cookie/API-key header values instead of [REDACTED], and the captured bodies instead of the redaction profile's sanitized copy (default false)")
-          s.field "body_mode", enumprop("how much response body to inline (default full). none returns body shape only (encoding/size, omitted:true); preview inlines a small head; page more with get_response_body_chunk", BODY_MODES)
+          s.field "body_mode", enumprop("how much of each body to inline. Default: up to #{AUTO_BODY_BYTES} bytes, a longer body cut with a `more` pointer to get_response_body_chunk; full inlines up to #{Serialize::MAX_TEXT}; preview a small head; none the shape only (encoding/size, omitted:true)", BODY_MODES)
           s.field "max_body_bytes", intprop("cap inlined body bytes (clamped to 65536; page the rest with get_response_body_chunk)")
         end
 
@@ -744,7 +752,7 @@ module Gori
           s.field "repeater_id", intprop("Repeater workbench database id")
           s.field "part", enumprop("which stored blob to page (default response). \"request\" pages the stored REQUEST bytes: for a repeater that is the exact head+body blob send_request(repeater_id) replays, which is the only way to read past get_repeater_context's inline cap", MESSAGE_SIDES)
           s.field "offset", intprop("zero-based byte offset (default 0)")
-          s.field "limit", intprop("bytes to return (default 65536, max 262144)")
+          s.field "limit", limitprop("bytes to return", BODY_CHUNK_LIMIT)
           s.field "raw", boolprop("page stored response bytes without content decoding (default false)")
           s.field "include_sensitive", boolprop("part=\"request\": also page the message HEAD when it carries an Authorization/Cookie/Set-Cookie/API-key value. These are exact stored bytes, so the head is withheld rather than redacted (default false); the reply says so with head_omitted")
         end

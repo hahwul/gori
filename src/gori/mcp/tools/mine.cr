@@ -99,7 +99,7 @@ module Gori
 
       @[Tool("mine_status", gated: true, read_only: true, permission: "send")]
       private def mine_status(h) : Result
-        mjob = lookup_mine_job(h)
+        mjob = lookup_mine_job(h, "status")
         return mjob if mjob.is_a?(Result)
         Result.new(JSON.build do |j|
           j.object do
@@ -170,14 +170,16 @@ module Gori
         end
       end
 
+      MINE_RESULTS_LIMIT = PageLimit.new(100, 1000)
+
       @[Tool("mine_results", gated: true, read_only: true, permission: "send")]
       private def mine_results(h) : Result
-        mjob = lookup_mine_job(h)
+        mjob = lookup_mine_job(h, "results")
         return mjob if mjob.is_a?(Result)
         req_off = optional_int_arg(h, "offset")
         req_lim = optional_int_arg(h, "limit")
         offset = clamp_nonneg(req_off)
-        limit = clamp(req_lim, 100, 1000)
+        limit = clamp(req_lim, MINE_RESULTS_LIMIT)
         page = mjob.results[offset, limit]? || [] of Miner::Finding
         Result.new(JSON.build do |j|
           j.object do
@@ -198,17 +200,16 @@ module Gori
 
       @[Tool("mine_stop", gated: true, agent_action: true, permission: "send")]
       private def mine_stop(h) : Result
-        mjob = lookup_mine_job(h)
+        mjob = lookup_mine_job(h, "stop")
         return mjob if mjob.is_a?(Result)
-        mjob.stop
         stop_and_report(mjob)
       end
 
-      private def lookup_mine_job(h) : MineJob | Result
+      private def lookup_mine_job(h, verb : String) : MineJob | Result
         id = str(h, "job_id")
         return Result.new("missing required 'job_id'", is_error: true) if id.nil? || id.empty?
         job = @mine_jobs[id]?
-        return not_found("no mine job #{id}") unless job
+        return job_not_found(id, "mine", verb) unless job
         job_project_mismatch(job) || job
       end
 
@@ -429,7 +430,7 @@ module Gori
           "Paged discovered parameters for a mine job (name, location, evidence, confidence, canary, status, delta)." do |s|
           s.field "job_id", strprop("id from mine_start"), required: true
           s.field "offset", intprop("start row (default 0)")
-          s.field "limit", intprop("max rows (default 100, max 1000)")
+          s.field "limit", limitprop("max rows", MINE_RESULTS_LIMIT)
         end
 
         tool j, "mine_stop", "Stop a running mine job (in-flight requests finish)." do |s|

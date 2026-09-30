@@ -53,7 +53,11 @@ module Gori
         # as "nothing was sent", so it fixes the argument and sends a second real request with
         # a second repeater row behind it. Same rule `minimize_repeater` states for `apply`:
         # every argument is validated before the sends are spent.
-        body_opts = body_return_opts(h)
+        # The smaller default cap only when the rest of the body will be pageable afterwards —
+        # from the History flow this send records, or the repeater it saves. With neither, a cut
+        # would leave the tail unreachable, so an unrecorded send keeps the full default.
+        body_auto = body_auto?(h) && (record_history || save)
+        body_opts = body_return_opts(h, auto: body_auto)
         return body_opts if body_opts.is_a?(Result)
         body_cap, body_omit = body_opts
         issue_id = send_issue_id(h, save)
@@ -138,8 +142,9 @@ module Gori
           head_unterminated: plan.h2_fields.nil? && !plan.http2? && !Env.head_terminated?(h1_wire),
           # https only: a plaintext leg sends no ClientHello, so naming a preset there would
           # report a handshake that did not happen.
-          tls_preset: plan.scheme == "https" ? plan.tls_preset : nil),
-          is_error: !result.ok?)
+          tls_preset: plan.scheme == "https" ? plan.tls_preset : nil,
+          body_more: body_auto ? send_body_more(recorded_flow_id, repeater_id) : nil),
+          is_error: !result.ok?, event_flow_id: recorded_flow_id, event_note: send_event_note(built, result))
       rescue ex : Gori::Error
         # Bad input (missing/invalid url, illegal header, …) — return a clean
         # actionable message instead of letting call()'s generic "tool error:"
@@ -1079,6 +1084,17 @@ module Gori
         {plan.with_requests([rewritten]), true}
       end
 
+      # The agent-action feed line for one send: the origin dialled and what came back. The
+      # origin and not the request line — the method and target are operator bytes that may
+      # carry anything (a query-string token, a crafted method), and the recorded flow the
+      # event links to already holds them verbatim.
+      private def send_event_note(built : RequestBuilder::Built, result : Repeater::Result) : String
+        default_port = built.scheme == "https" ? 443 : 80
+        origin = "#{built.scheme}://#{built.host}#{built.port == default_port ? "" : ":#{built.port}"}"
+        outcome = result.response.try(&.status.to_s) || (result.error ? "error" : "no response")
+        "#{origin} → #{outcome}"
+      end
+
       private def send_result_json(result : Repeater::Result, recorded_flow_id : Int64?,
                                    repeater_id : Int64?, include_sensitive_headers : Bool,
                                    sc : ScopeCheck, built : RequestBuilder::Built, wire : Bytes,
@@ -1089,7 +1105,7 @@ module Gori
                                    websocket_handshake : Bool = false,
                                    unbound_overlay : String? = nil,
                                    head_unterminated : Bool = false,
-                                   tls_preset : String? = nil) : String
+                                   tls_preset : String? = nil, body_more : String? = nil) : String
         JSON.build do |j|
           j.object do
             emit_scope(j, sc)
@@ -1183,9 +1199,18 @@ module Gori
               # named them since round 3; this is the same classifier, not a second one.
               j.field "incomplete_reason", CLI::Run.incomplete_reason(result, result.timed_out?)
             end
-            Serialize.emit_body(j, "body", result.head, result.body, false, body_cap, body_omit)
+            Serialize.emit_body(j, "body", result.head, result.body, false, body_cap, body_omit, more: body_more)
           end
         end
+      end
+
+      # The chunk source for a send's response under the default cap: the History flow it
+      # recorded, else the repeater it saved. nil when neither landed — then there is nothing to
+      # point at, and `body_auto` only ever chose the small cap when one was going to.
+      private def send_body_more(recorded_flow_id : Int64?, repeater_id : Int64?) : String?
+        return body_more_hint("flow_id: #{recorded_flow_id}") if recorded_flow_id
+        return body_more_hint("repeater_id: #{repeater_id}") if repeater_id && repeater_id > 0
+        nil
       end
 
       # A CLOSE frame's status code (RFC 6455 §5.5.1), or nil for any other frame. Not
@@ -1852,7 +1877,7 @@ module Gori
           s.field "save_as_repeater", boolprop("save this request and its response to the Repeater workbench (default false)")
           s.field "include_sensitive_headers", boolprop("return Cookie/Set-Cookie/Authorization/API-key response values instead of [REDACTED] (default false). `include_sensitive` — the name the other redacting tools use — is accepted as an alias")
           s.field "include_sensitive", boolprop("alias for include_sensitive_headers, spelled the way get_flow/compare_flows/get_repeater_context spell it")
-          s.field "body_mode", enumprop("how much response body to inline (default full)", BODY_MODES)
+          s.field "body_mode", enumprop("how much response body to inline. Default: up to #{AUTO_BODY_BYTES} bytes when the response is recorded (record_history) or saved, a longer body cut with a `more` pointer to get_response_body_chunk; full (the default when neither) inlines up to #{Serialize::MAX_TEXT}", BODY_MODES)
           s.field "max_body_bytes", intprop("cap inlined response-body bytes (clamped to 65536)")
           s.field "allow_unscoped", boolprop("send even when the target host is outside the project's configured scope — REQUIRED to run against an out-of-scope target, or when no scope is configured at all (active requests are refused by default without a matching scope)")
           s.field "name", strprop("optional custom name for the saved repeater tab (only when save_as_repeater=true)")

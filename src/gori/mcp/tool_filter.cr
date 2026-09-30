@@ -46,7 +46,15 @@ module Gori
     struct ToolFilter
       # A named, curated catalogue: `--tools=@name` selects `tools`, and `-@name` takes them
       # away, so a profile composes with globs and names like any other term.
-      record Profile, name : String, summary : String, tools : Array(String)
+      #
+      # `withheld` narrows a member to one MODE: tool → arguments the profile serves it
+      # without. The arguments leave that tool's advertised schema (`Tools#tool`), so the
+      # argument validator refuses them too, and `Tools#call` answers a set one with a sentence
+      # naming the lift. Naming the tool itself anywhere in the spec — by name or by a glob,
+      # before or after the profile — serves it whole: the profile is the default, the
+      # operator's explicit term is the decision.
+      record Profile, name : String, summary : String, tools : Array(String),
+        withheld : Hash(String, Array(String)) = {} of String => Array(String)
 
       # What an agent attached to a capture reads with, and the channel back to the operator.
       #
@@ -72,10 +80,17 @@ module Gori
       #
       # Finding triage is recording, so `probe_promote` / `probe_dismiss` ride with the issue
       # writes; `probe_delete` does not — it erases the scanner's record rather than judging it.
+      # `probe_scan` is what FILLS that triage list on a project no TUI ever scanned (#1392),
+      # served PASSIVE-only (`RECON_WITHHELD`): mapping reads, it does not attack.
       RECON = MINIMAL + %w[list_scope list_params list_js_endpoints scan_js_endpoints compare_flows list_env
         decode jwt_decode jwt_verify
-        probe_issues probe_promote probe_dismiss list_issues list_notes get_note
+        probe_scan probe_issues probe_promote probe_dismiss list_issues list_notes get_note
         send_request create_issue update_issue create_note update_note]
+
+      # The arguments that make `probe_scan` send: every one of them is meaningful only with
+      # `active: true`. spec/mcp/tool_filter_spec.cr holds the list to probe_scan's schema.
+      PROBE_SCAN_ACTIVE_ARGS = %w[active allow_unscoped unsafe aggressive insecure]
+      RECON_WITHHELD         = {"probe_scan" => PROBE_SCAN_ACTIVE_ARGS}
 
       # Explicit NAMES, never globs, and that is the design: a profile is a promise about
       # SIZE, and `list_*` would grow it with every lister the registry gains — the same
@@ -85,14 +100,21 @@ module Gori
       # and weight (spec/mcp/catalogue_size_spec.cr).
       PROFILES = [
         Profile.new("minimal", "read History, flows and current TUI context; talk to the operator", MINIMAL),
-        Profile.new("recon", "@minimal + scope, findings, decoders, send_request, " \
-                             "issue and note writes", RECON),
+        Profile.new("recon", "@minimal + scope, findings, passive probe_scan, decoders, " \
+                             "send_request, issue and note writes", RECON, RECON_WITHHELD),
       ]
 
       getter spec : String
       @allowed : Set(String)
+      @withheld : Hash(String, Set(String))
 
-      private def initialize(@spec, @allowed)
+      private def initialize(@spec, @allowed, @withheld = {} of String => Set(String))
+      end
+
+      # The arguments `name` is served without (a profile's `withheld`), or nil when it is
+      # served whole.
+      def withheld_args(name : String) : Set(String)?
+        @withheld[name]?
       end
 
       # `@minimal, @recon` — for `--help` and every refusal that has to list them.
@@ -112,6 +134,10 @@ module Gori
         # keeps working when a later gori adds a tool the operator never listed.
         selected = terms.first.starts_with?('-') ? all.to_set : Set(String).new
         explicitly_excluded = Set(String).new
+        # Profile-withheld arguments, and the tools the spec selects some OTHER way (a name, a
+        # glob, or the "everything" a leading subtraction starts from) — see `Profile`.
+        restricted = {} of String => Set(String)
+        named = selected.dup
         terms.each do |term|
           subtract = term.starts_with?('-')
           pattern = subtract ? term[1..] : term
@@ -132,6 +158,7 @@ module Gori
             selected.concat(hits)
             explicitly_excluded.subtract(hits)
           end
+          track_withheld(pattern, hits, subtract, named, restricted)
         end
         if dependency_error = include_dependencies(selected, all, dependencies, explicitly_excluded)
           return dependency_error
@@ -139,7 +166,24 @@ module Gori
         if selected.empty?
           return "--tools: #{spec.inspect} selects no tools; the server would advertise nothing"
         end
-        new(spec, selected)
+        withheld = restricted.reject { |tool, _| named.includes?(tool) || !selected.includes?(tool) }
+        new(spec, selected, withheld)
+      end
+
+      # One term's effect on the profile-withheld arguments (`Profile#withheld`): a subtraction
+      # forgets the tool, a profile term restricts its members, any other term names them.
+      private def self.track_withheld(pattern : String, hits : Array(String), subtract : Bool,
+                                      named : Set(String), restricted : Hash(String, Set(String))) : Nil
+        if subtract
+          named.subtract(hits)
+          hits.each { |t| restricted.delete(t) }
+        elsif pattern.starts_with?('@')
+          if prof = PROFILES.find { |pr| pr.name == pattern[1..] }
+            prof.withheld.each { |tool, args| restricted[tool] = args.to_set }
+          end
+        else
+          named.concat(hits)
+        end
       end
 
       # A profile's tools, or the refusal. An unknown name is refused like an unmatched glob

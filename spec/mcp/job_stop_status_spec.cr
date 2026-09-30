@@ -68,7 +68,11 @@ describe "MCP per-kind job stop" do
       stop["status"].as_s.should eq(terminal)
       stop["status"].as_s.should_not eq("stopping")
       stop["stopped"].as_bool.should be_true
-      stop["stop_requested"].as_bool.should be_true
+      # #1395: the run ended on its own, so this call asked nothing of it — no request stamp
+      # (which used to land AFTER `stopped_at`), and `already_finished` says why.
+      stop["stop_requested"].as_bool.should be_false
+      stop["already_finished"].as_bool.should be_true
+      stop.as_h.has_key?("stop_requested_at").should be_false
       stop["job_id"].as_s.should eq(job_id)
     end
   end
@@ -84,7 +88,7 @@ describe "MCP per-kind job stop" do
 
       per_kind = call_json(tools, "fuzz_stop", {job_id: a}.to_json)
       unified = call_json(tools, "stop_job", {job_id: b}.to_json)
-      %w(status stopped stop_requested).each do |field|
+      %w(status stopped stop_requested already_finished).each do |field|
         per_kind[field].should eq(unified[field])
       end
     end
@@ -106,6 +110,56 @@ describe "MCP per-kind job stop" do
       stop = call_json(tools, "sequence_stop", {job_id: job_id}.to_json)
       stop["status"].as_s.should eq(terminal)
       stop["status"].as_s.should_not eq("stopping")
+    end
+  end
+end
+
+describe "MCP job ids of the wrong kind (#1395)" do
+  it "names the tool that reads a job another kind's tool was handed" do
+    with_store do |store|
+      port = start_origin
+      tools = tools_for(store)
+      job_id = start_fuzz(tools, port)
+      wait_terminal(tools, "fuzz", job_id)
+      {"mine_results" => "fuzz_results", "discover_status" => "fuzz_status", "sequence_stop" => "fuzz_stop"}.each do |tool, want|
+        r = tools.call(tool, JSON.parse({job_id: job_id}.to_json))
+        r.error_code.should eq("NOT_FOUND")
+        r.text.should contain("#{job_id} is a fuzz job: use #{want}")
+        r.details.not_nil!["job_kind"].as_s.should eq("fuzz")
+      end
+    end
+  end
+
+  it "reads the kind off an id's prefix when no job map holds it, and stays plain for its own kind" do
+    with_store do |store|
+      tools = tools_for(store)
+      tools.call("fuzz_results", JSON.parse(%({"job_id":"mn_99"}))).text.should contain("use mine_results")
+      plain = tools.call("fuzz_results", JSON.parse(%({"job_id":"fz_99"})))
+      plain.error_code.should eq("NOT_FOUND")
+      plain.text.should eq("no fuzz job fz_99")
+    end
+  end
+end
+
+describe "MCP fuzz_results evidence note (#1395)" do
+  it "says how to reach a hit's body when the run recorded none, and not when it saved results" do
+    with_store do |store|
+      port = start_origin
+      tools = tools_for(store)
+      bare = call_json(tools, "fuzz_start", {
+        template:       "GET /f?q=§FUZZ§ HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\n\r\n",
+        url:            "http://127.0.0.1:#{port}",
+        payloads:       [{list: ["a", "b"]}],
+        match:          {status: "200"},
+        allow_unscoped: true,
+      }.to_json)["job_id"].as_s
+      wait_terminal(tools, "fuzz", bare)
+      note = call_json(tools, "fuzz_results", {job_id: bare}.to_json)["evidence_note"].as_s
+      note.should contain("record_history")
+
+      saved = start_fuzz(tools, port)
+      wait_terminal(tools, "fuzz", saved)
+      call_json(tools, "fuzz_results", {job_id: saved}.to_json).as_h.has_key?("evidence_note").should be_false
     end
   end
 end
