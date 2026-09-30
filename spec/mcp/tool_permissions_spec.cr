@@ -100,6 +100,37 @@ describe "MCP tool permissions" do
     end
   end
 
+  it "records one compact Activity event per denied tool/group pair" do
+    with_store do |store|
+      tools = denied_tools(store, "write")
+      2.times do |i|
+        result = tools.call("create_note", JSON.parse({"title" => "private-#{i}", "body" => "private-body-#{i}"}.to_json))
+        result.error_code.should eq("TOOL_DISABLED")
+      end
+      tools.call("delete_note", JSON.parse("{}")).error_code.should eq("TOOL_DISABLED")
+
+      events = store.events_after(0_i64, 50).select { |e| e.kind == Gori::MCP::Tools::PERMISSION_DENIAL_EVENT_KIND }
+      events.size.should eq(2)
+      events.map(&.payload).should contain("create_note")
+      events.map(&.payload).should contain("delete_note")
+      events.each do |event|
+        event.source.should eq("agent")
+        event.level.should eq("warn")
+        event.message.should_not contain("private-")
+        event.message.should_not contain("private-body")
+      end
+    end
+  end
+
+  it "does not write permission-denial events in globally read-only mode" do
+    with_store do |store|
+      tools = Gori::MCP::Tools.new(store, allow_actions: false, verify_upstream: false,
+        denied_permissions: Set{"write"})
+      tools.call("create_note", JSON.parse(%({"title":"private"}))).error_code.should eq("TOOL_DISABLED")
+      store.events_after(0_i64, 50).none? { |e| e.kind == Gori::MCP::Tools::PERMISSION_DENIAL_EVENT_KIND }.should be_true
+    end
+  end
+
   it "switches off the projects group, including the unbound binders" do
     with_store do |store|
       tools = denied_tools(store, "projects")

@@ -60,7 +60,8 @@ module Gori
     # Append one row to the #124 event feed (the AI firehose). Goes through the writer
     # fiber like every other insert; returns last_insert_rowid (0 on a dropped/closed-store
     # write — the caller decides whether a lost event matters). NEVER used for flow rows
-    # (flows are the firehose via list_history); this is job-lifecycle + agent-action events.
+    # (flows are the firehose via list_history); this is job-lifecycle, agent-action, and
+    # permission-denial events.
     # `actor` defaults to nil — NOT to the ambient surface — and the difference is the whole
     # point of the column. Most producers here are background engines: a binding that missed, a
     # hook that failed, an `Alt-Svc` notice the capture proxy wrote about a client's own

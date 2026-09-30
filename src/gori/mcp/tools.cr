@@ -277,6 +277,12 @@ module Gori
       # job at `:running`. The count itself is never capped — only the writes.
       DRAIN_LOG_CAP = 20
 
+      # Permission denials are useful audit facts, but an agent may retry the same unavailable
+      # tool in a loop. Keep one Activity marker per tool/group in this MCP process and current
+      # project binding; the event feed itself keeps its existing 50k-row project cap. No call
+      # arguments are copied into the event.
+      PERMISSION_DENIAL_EVENT_KIND = "agent_permission_denied"
+
       # Param-miner safety rails (same intent as the fuzz caps).
       MINE_MAX_REQUESTS    = 100_000_i64
       MINE_MAX_CONCURRENCY =         100
@@ -366,6 +372,8 @@ module Gori
                      denied_permissions : Set(String)? = nil)
         # A copy, never the caller's set: a later mutation there must not reach this server.
         @denied_permissions = denied_permissions.try(&.dup) || Set(String).new
+        @permission_denial_log_db_path = @db_path
+        @permission_denials_logged = Set({String, String}).new
         # The binding table (#501) is built ONCE per bound project and kept, not rebuilt per
         # call: an MCP server is long-lived and IS an extraction source — `send_request` goes
         # through `Repeater::Sender`, so a `$SESSION` bound by a login here has to still be
@@ -1579,7 +1587,9 @@ module Gori
       # #124 — record a completed agent mutation/send into the store event feed so the AI's
       # activity is visible to the human (and tailable via list_events). A failure is logged
       # too (warn) — a scope-blocked or errored send is exactly what an operator wants to see.
-      # A read-only-disabled attempt (TOOL_DISABLED) executed nothing, so it is not logged.
+      # TOOL_DISABLED attempts are handled separately: an operator-denied MCP permission gets
+      # one compact `agent_permission_denied` event, while a read-only server cannot write its
+      # store and a denied attempt there stays only in the tool reply.
       # Best-effort: feed logging never breaks the tool call it describes.
       private def log_agent_action(name : String, result : Result) : Nil
         return if result.error_code == "TOOL_DISABLED"
@@ -2052,14 +2062,41 @@ module Gori
       # --- helpers ------------------------------------------------------------
 
       # TOOL_DISABLED, not UNKNOWN_TOOL: the tool exists and the operator can turn it back on,
-      # which is the one thing the agent can usefully tell them. Not logged as an agent action
-      # (`log_agent_action` skips TOOL_DISABLED): nothing ran.
+      # which is the one thing the agent can usefully tell them. The attempted call is recorded
+      # separately from executed agent actions, with no argument values, and repeated attempts
+      # for the same tool/group are coalesced for this project's current server binding.
       private def permission_denied(name : String, key : String) : Result
+        log_permission_denial(name, key)
         title = Settings.mcp_permission(key).try(&.title) || key
         what = TOOL_PERMISSIONS[name]? == key ? "tool '#{name}'" : "this '#{name}' call (it sends traffic)"
         err("#{what} is disabled by the operator: \"#{title}\" is switched off in gori " \
             "Preferences › AI › MCP permissions. Ask the operator to allow it; the change applies " \
             "when this MCP server is started again.", "TOOL_DISABLED")
+      end
+
+      # A distinct event kind keeps a refused call out of `recent_agent_actions`, which credits
+      # executed actions only. One event per (tool, permission group) and project per Tools
+      # lifetime bounds retry loops without adding a time-based query or a schema/index. The
+      # project event retention is the outer storage cap; raw arguments are deliberately absent.
+      private def log_permission_denial(name : String, key : String) : Nil
+        return unless @allow_actions
+        return unless s = @store
+
+        if @permission_denial_log_db_path != @db_path
+          @permission_denial_log_db_path = @db_path
+          @permission_denials_logged.clear
+        end
+
+        logged = {name, key}
+        return if @permission_denials_logged.includes?(logged)
+
+        event_id = s.insert_event("agent", PERMISSION_DENIAL_EVENT_KIND, "warn",
+          "#{name} denied (TOOL_DISABLED; permission=#{key})",
+          payload: name, actor: Gori::FlowSource.surface.try(&.token))
+        # `insert_event` returns 0 when its write is dropped; leave the pair retryable then.
+        @permission_denials_logged << logged if event_id > 0
+      rescue ex
+        Log.warn(exception: ex) { "event feed: failed to log denied MCP permission for #{name}" }
       end
 
       private def gated(& : -> Result) : Result

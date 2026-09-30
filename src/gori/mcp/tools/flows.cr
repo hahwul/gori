@@ -653,7 +653,9 @@ module Gori
 
         tool j, "list_events",
           "Tail the AI event feed: an append-only log of job lifecycle (miner/fuzzer/probe) and " \
-          "agent actions, forward-cursored so you never see the same event twice. This is the " \
+          "agent actions and denied MCP permissions, forward-cursored so you never see the same " \
+          "event twice. Repeated permission denials for the same tool/group are coalesced per " \
+          "server/project binding. This is the " \
           "AI-facing firehose complement to list_history (which tails captured flows). Pass " \
           "`since` = the last cursor you saw (0 or omitted starts from the oldest); the response " \
           "carries `next_cursor` — pass it as the next `since`. `next_cursor` never moves backward " \

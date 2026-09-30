@@ -4644,3 +4644,14 @@ single writer, but the shared `Tools` instance also carries per-call cancellatio
 project bindings, and operator-note claims. Running nominally read-only calls beside a send would
 need a broader per-call state and project-switching design; closing the canceled send already lets
 the queued call proceed promptly without adding that concurrency surface.
+
+### 2026-09-30: denied MCP permissions leave a bounded Activity marker
+
+An attempted call to a switched-off Preferences permission is evidence that the operator's gate
+refused an action, even though no handler ran. Record it as `agent_permission_denied`, separate
+from `agent_action` so readers do not treat a refusal as executed work. Keep only the tool and
+permission group; never persist the call arguments. Coalesce repeated denials for the same
+tool/group for the lifetime of that MCP server's binding to a project, so a retry loop writes one
+row rather than one per call. The existing project event retention remains the outer disk bound.
+The globally read-only MCP mode has a read-only store and therefore cannot write this marker;
+neither can an unbound server with no project event feed.
