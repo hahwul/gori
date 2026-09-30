@@ -448,6 +448,30 @@ describe Gori::Proxy::Codec::Body do
       Body.response_framing(folded, "GET").should eq({BodyFraming::Length, 5_i64})
     end
 
+    # A head that ENDS on a bare-LF blank line is framed off its LF reading (RFC 9112 §2.2): a
+    # CRLF-only recipient never ends it, so the parties that can disagree are LF-lenient ones.
+    it "frames a clean bare-LF-terminated response by the headers its LF reading finds" do
+      lf = Http1.parse_response_head("HTTP/1.1 200 OK\nContent-Length: 5\nContent-Type: text/plain\n\n".to_slice)
+      Http1.framing_ambiguous?(lf.raw_head, lf.headers).should be_false
+      Body.response_framing(lf, "GET").should eq({BodyFraming::Length, 5_i64})
+      chunked = Http1.parse_response_head("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\n".to_slice)
+      Body.response_framing(chunked, "GET").should eq({BodyFraming::Chunked, 0_i64})
+      bare = Http1.parse_response_head("HTTP/1.1 200 OK\nContent-Type: text/plain\n\n".to_slice)
+      Body.response_framing(bare, "GET").should eq({BodyFraming::CloseDelimited, 0_i64})
+    end
+
+    it "still refuses a bare-LF-terminated response whose framing two lenient readers split on" do
+      # A lone CR hiding Transfer-Encoding, whitespace before the colon, and an obs-folded
+      # Content-Length: the LF reading and a CR/fold/whitespace-lenient one disagree on CL/TE.
+      ["HTTP/1.1 200 OK\nContent-Length: 0\nX-Foo: bar\rTransfer-Encoding: chunked\n\n",
+       "HTTP/1.1 200 OK\nContent-Length: 0\nTransfer-Encoding : chunked\n\n",
+       "HTTP/1.1 200 OK\nContent-Length:\n 5\n\n"].each do |head|
+        resp = Http1.parse_response_head(head.to_slice)
+        Http1.framing_ambiguous?(resp.raw_head, resp.headers).should be_true
+        expect_raises(Gori::Error) { Body.response_framing(resp, "GET") }
+      end
+    end
+
     it "leaves an ordinary clean response untouched by the ambiguity check" do
       resp = Http1.parse_response_head(
         "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nTransfer-Encoding: chunked\r\n\r\n".to_slice)

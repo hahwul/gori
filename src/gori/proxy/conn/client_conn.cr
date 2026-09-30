@@ -1725,8 +1725,10 @@ module Gori::Proxy
     # deadline prevents a slowloris origin from pinning a fiber, client fd, upstream fd or
     # Server connection permit (P6); the codec restores the socket's baseline timeout before
     # the body read. A non-socket IO skips the deadline as before.
+    # A bare-LF-terminated head is accepted here (`read_response_head_result`); the upstream
+    # that sent one is never parked for reuse (`origin_keep_alive?`).
     private def safe_read_head(io : IO) : Codec::Http1::HeadReadResult
-      Codec::Http1.read_head_result(io,
+      Codec::Http1.read_response_head_result(io,
         deadline: SocketTuning::HEAD_DEADLINE, timeout_sock: SocketTuning.underlying_socket(io))
     end
 
@@ -3466,6 +3468,11 @@ module Gori::Proxy
     private def origin_keep_alive?(sent_req : Codec::RawRequest, resp : Codec::RawResponse,
                                    resp_framing : Codec::BodyFraming) : Bool
       return false if resp.malformed?
+      # A head ended on a bare-LF blank line was framed off the LENIENT reading. Never park
+      # the socket behind it: if that framing was wrong, the leftover goes with the closed
+      # connection instead of being read as the NEXT request's response (the same rule as
+      # `ConnPool.reusable_response?`).
+      return false if Codec::Http1.lf_terminated_head?(resp.raw_head)
       return false if resp_framing.close_delimited?
       return false if sent_req.headers.lists?("Connection", "close")
       return false if resp.headers.lists?("Connection", "close")

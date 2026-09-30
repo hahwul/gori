@@ -119,12 +119,22 @@ def deadlined(head : Bytes, detect : Bool = false)
   Http1.read_head(IO::Memory.new(head), deadline: DEADLINE, timeout_sock: SOCK_A, detect_non_http: detect)
 end
 
+# The upstream RESPONSE reader, which also ends a head on a bare-LF blank line. Its CRLF path
+# is the one every proxied response takes, so it is timed against `deadlined(RESP_HEAD)`.
+def response_deadlined(head : Bytes)
+  Http1.read_response_head_result(IO::Memory.new(head), deadline: DEADLINE, timeout_sock: SOCK_A).head?
+end
+
+LF_RESP_HEAD = String.new(RESP_HEAD).gsub("\r\n", "\n").to_slice
+
 # Sanity: every path returns the whole head and nothing more.
 {REQ_HEAD, RESP_HEAD, BIG_HEAD}.each do |h|
   raise "plain path mismatch" unless Http1.read_head(IO::Memory.new(h)) == h
   raise "deadlined path mismatch" unless deadlined(h) == h
   raise "detect path mismatch" unless deadlined(h, true) == h
+  raise "response path mismatch" unless response_deadlined(h) == h
 end
+raise "bare-LF response mismatch" unless response_deadlined(LF_RESP_HEAD) == LF_RESP_HEAD
 # The straddle, at every split that cuts the terminator, on BOTH paths. The head is followed
 # by a BODY here and the check is on the CONSUMED count, not only the bytes returned: with
 # nothing after the head a reader that misses the terminator still ends up with the right
@@ -155,6 +165,8 @@ Benchmark.ips do |x|
   x.report("deadline read_head (req 471B)") { deadlined(REQ_HEAD) }
   x.report("deadline read_head +detect   ") { deadlined(REQ_HEAD, true) }
   x.report("deadline read_head (resp 298B)") { deadlined(RESP_HEAD) }
+  x.report("deadline read_response_head (resp 298B)") { response_deadlined(RESP_HEAD) }
+  x.report("deadline read_response_head (LF resp)") { response_deadlined(LF_RESP_HEAD) }
   x.report("deadline read_head (big 1.9KB)") { deadlined(BIG_HEAD) }
   x.report("two-chunk read_head (req 471B)") { Http1.read_head(TwoChunkIO.new(REQ_HEAD, SPLIT_AT)) }
   x.report("no-peek  read_head (req 471B)") { Http1.read_head(NoPeekIO.new(REQ_HEAD)) }
