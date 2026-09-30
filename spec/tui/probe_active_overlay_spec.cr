@@ -153,6 +153,18 @@ describe Gori::Tui::ProbeActiveOverlay do
     end
   end
 
+  it "↵ runs from a non-Run row without flipping it, as the hint says (#1373)" do
+    with_store do |store|
+      ov = ProbeActiveOverlay.new(flow(store, "POST", "/submit?q=1"),
+        [] of Gori::Probe::Analyzer::ActiveEstimate, [est("reflected_param")])
+      h = OverlayHarness.new(ov)
+      h.press(Termisu::Input::Key::Up).should eq(:open) # Run → unsafe opt-in
+      h.press(Termisu::Input::Key::Enter).should eq(:closed)
+      h.commits.should eq(1)
+      ov.allow_unsafe?.should be_false
+    end
+  end
+
   it "a click on Run commits, a click on another row toggles, a click outside dismisses" do
     with_store do |store|
       ov = ProbeActiveOverlay.new(flow(store, "POST", "/submit?q=1"),
