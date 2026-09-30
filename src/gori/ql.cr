@@ -320,13 +320,13 @@ module Gori
       case field
       when "proto"
         return nil if proto_cond(value)
-        "proto expects http, https, ws, wss, grpc, grpcs, sse, or sses"
+        "proto expects #{PROTO_VALUES.join(", ")}"
       when "src"
         return nil if src_cond(value)
-        "src expects proxy, repeater, fuzzer, import, or gori"
+        "src expects #{SOURCE_VALUES.join(", ")}"
       when "cache"
         return nil if cache_cond(value)
-        "cache expects hit, miss, dynamic, or none"
+        "cache expects #{CACHE_VALUES.join(", ")}"
       when "stub", "static"
         return nil if flag_cond("col", value)
         "#{field} expects true or false"
@@ -341,8 +341,8 @@ module Gori
       when "body", "header", "req.body", "resp.body", "req.header", "resp.header"
         return "value contains only control characters" if strip_controls(value).empty?
       else
-        if side_prefixed?(raw_field)
-          base = raw_field.sub(/^res(p)?\./, "")
+        if prefix = SIDE_PREFIXES.find { |p| raw_field.starts_with?(p) }
+          base = raw_field[prefix.size..]
           return "side prefix not supported on #{base}"
         end
       end

@@ -1116,10 +1116,20 @@ describe "Gori::Store#search (QL)" do
       Gori::QL.reject_empty_reason("dur:>abc AND (").not_nil!.should contain("duration expects a number or unit")
       Gori::QL.reject_empty_reason("size:>abc AND (").not_nil!.should contain("`size:>abc`")
       Gori::QL.reject_empty_reason("size:>abc AND (").not_nil!.should contain("size expects a number")
-      Gori::QL.reject_empty_reason("proto:xyz").not_nil!.should contain("proto expects http, https")
+      Gori::QL.reject_empty_reason("proto:xyz").not_nil!.should contain("proto expects #{Gori::QL::PROTO_VALUES.join(", ")}")
+      Gori::QL.reject_empty_reason("cache:xyz").not_nil!.should contain("cache expects #{Gori::QL::CACHE_VALUES.join(", ")}")
       Gori::QL.reject_empty_reason("status~5..").not_nil!.should contain("regex matching (`~`) not supported for `status`")
       Gori::QL.reject_empty_reason("resp.status:200").not_nil!.should contain("side prefix not supported on status")
+      Gori::QL.reject_empty_reason("req.status:200").not_nil!.should contain("side prefix not supported on status")
       Gori::QL.reject_empty_reason("id:1").not_nil!.should contain("QL has no `id:` field")
+    end
+
+    it "asserts the src message names every FlowSource token" do
+      reason = Gori::QL.dropped_term_reason("src:bad").not_nil!
+      Gori::FlowSource::Kind.tokens.each do |token|
+        reason.should contain(token)
+      end
+      reason.should contain("gori")
     end
 
     it "returns nil when there are no terms to diagnose" do
