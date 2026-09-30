@@ -655,7 +655,8 @@ module Gori
 
         tool j, "probe_promote",
           "Promote a probe finding (id from probe_issues) to a human-confirmed Issue in the " \
-          "Issues report, carrying its severity/host/sample evidence over. Marks the source " \
+          "Issues report: severity/host carry over, every affected URL's flow is linked as evidence, " \
+          "and the notes hold its CWE, detail, rule text and affected URLs. Marks the source " \
           "finding Confirmed so a repeat call cannot mint a duplicate — a second call returns " \
           "{promoted: false} rather than erroring." do |s|
           s.field "id", intprop("probe finding id"), required: true
