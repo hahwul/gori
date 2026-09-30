@@ -2329,7 +2329,7 @@ module Gori
     private def read_issue(rs : DB::ResultSet) : Issue
       Issue.new(
         rs.read(Int64), rs.read(Int64), rs.read(Int64), rs.read(String),
-        Severity.new(rs.read(Int32)), rs.read(String?), rs.read(Int64?), rs.read(String),
+        Severity.new(rs.read(Int32)), rs.read(String?), rs.read(Int64?), String.new(rs.read(Bytes)),
         Status.new(rs.read(Int32)), rs.read(String?))
     end
 

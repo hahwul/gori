@@ -23,6 +23,16 @@ private def issue_links(store, id : Int64) : Array(Gori::Store::EntityLink)
 end
 
 describe "Store#insert_issue" do
+  it "round-trips embedded NUL bytes in an issue notes body" do
+    with_store do |store|
+      body = String.new(Bytes[0x62, 0x65, 0x66, 0x6f, 0x72, 0x65, 0x00, 0x61, 0x66, 0x74, 0x65, 0x72])
+      id = store.insert_issue("NUL notes", Gori::Store::Severity::Low, nil, nil, notes: body)
+
+      store.get_issue(id).not_nil!.notes.to_slice.should eq(body.to_slice)
+      store.issues.find! { |row| row.id == id }.notes.to_slice.should eq(body.to_slice)
+    end
+  end
+
   it "links the primary flow in the same write" do
     with_store do |store|
       fid = flow(store)
