@@ -65,22 +65,64 @@ describe "gori run jwt" do
     j["extra_segments"]?.should be_nil
   end
 
-  it "verify_json is {alg, verified, reason} with reason null on the plain answers" do
+  it "verify_json is {alg, verified, code, reason}, with both explanations on every no" do
     # `--verify --format json` and MCP jwt_verify emit this same object. A script selects on
-    # `verified`; `reason` exists so a "no" that is not "the signature is wrong" can say so.
+    # `verified` and branches on `code`. A wrong key used to come back `reason: null`, which
+    # read the same as "nothing to explain" (#1370).
     ok = JSON.parse(Gori::Jwt.verify_json(Gori::Jwt.verify(jwt, "k")))
+    ok.as_h.keys.should eq(%w[alg verified code reason])
     ok["alg"].as_s.should eq("HS256")
     ok["verified"].as_bool.should be_true
+    ok["code"].raw.should be_nil
     ok["reason"].raw.should be_nil
 
     no = JSON.parse(Gori::Jwt.verify_json(Gori::Jwt.verify(jwt, "wrong")))
     no["verified"].as_bool.should be_false
-    no["reason"].raw.should be_nil # a wrong key needs no prose
+    no["code"].as_s.should eq("signature_mismatch")
+    no["reason"].as_s.should contain("does not verify under this key")
 
     unsigned = Gori::Jwt.encode("{}", %({"s":1}), "none", "")
     j = JSON.parse(Gori::Jwt.verify_json(Gori::Jwt.verify(unsigned, "k")))
     j["verified"].as_bool.should be_false
+    j["code"].as_s.should eq("unsigned")
     j["reason"].as_s.should contain("UNSIGNED")
+  end
+
+  it "refuses --verify with no key, but takes an explicit empty secret" do
+    # No flag used to verify against the empty secret and print a bare `verified: no`.
+    Gori::CLI::Run.jwt_key_refusal(:verify, nil, "").not_nil!.should contain("--secret '' to check the empty secret")
+    Gori::CLI::Run.jwt_key_refusal(:verify, nil, "  ").should_not be_nil # a blank --key names nothing
+    Gori::CLI::Run.jwt_key_refusal(:verify, "", "").should be_nil        # the empty secret, asked for
+    Gori::CLI::Run.jwt_key_refusal(:verify, "s", "").should be_nil
+    Gori::CLI::Run.jwt_key_refusal(:verify, nil, "./pub.pem").should be_nil
+    # --encode has always signed with the empty secret when given none.
+    Gori::CLI::Run.jwt_key_refusal(:encode, nil, "").should be_nil
+  end
+
+  it "refuses --secret beside --key, an explicit empty secret included" do
+    # `--secret ''` asks for the empty secret by name; beside a --key, the key silently won.
+    {:verify, :encode}.each do |action|
+      Gori::CLI::Run.jwt_key_refusal(action, "", "./pub.pem").not_nil!.should contain("two names for the same key")
+      Gori::CLI::Run.jwt_key_refusal(action, "s", "./pub.pem").should_not be_nil
+    end
+  end
+
+  it "exits 1 unless the token verifies, as cookie --verify does" do
+    Gori::CLI::Run.jwt_verify_status(Gori::Jwt.verify(jwt, "k")).should eq(0)
+    Gori::CLI::Run.jwt_verify_status(Gori::Jwt.verify(jwt, "wrong")).should eq(1)
+    Gori::CLI::Run.jwt_verify_status(Gori::Jwt.verify("#{jwt}.x", "k")).should eq(1)
+  end
+
+  it "says so when an HMAC token was checked against the empty secret" do
+    # `--secret "$UNSET"` must not read like a real secret that failed.
+    v = Gori::Jwt.verify(jwt, "")
+    Gori::CLI::Run.jwt_verify_lines(v, empty_secret: true).first.should eq("verified: no (alg HS256, empty secret)")
+    Gori::CLI::Run.jwt_verify_lines(v).first.should eq("verified: no (alg HS256)")
+    Gori::CLI::Run.jwt_verify_lines(v).last.should start_with("reason: the signature does not verify")
+    # An asymmetric token never reads the key as a secret, so the marker would be noise there.
+    rs = Gori::Jwt.encode("{}", %({"s":1}), "RS256", JoseKeys::RSA)
+    Gori::CLI::Run.jwt_verify_lines(Gori::Jwt.verify(rs, JoseKeys::RSA_PUB), empty_secret: true).first
+      .should eq("verified: yes (alg RS256)")
   end
 
   it "neutralizes the token's alg on BOTH verify lines, not just the reason" do
