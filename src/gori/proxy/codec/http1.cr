@@ -734,17 +734,25 @@ module Gori::Proxy::Codec::Http1
   # bindings, MCP) — nothing is rewritten, the raw bytes stay the record (P7).
   def self.parse_response_head(raw : Bytes) : RawResponse
     if lf_terminated_head?(raw)
-      nl = raw.index(0x0a_u8) || raw.size - 1 # an LF-terminated head always has one
-      start_end = nl > 0 && raw.unsafe_fetch(nl - 1) == 0x0d_u8 ? nl - 1 : nl
-      return build_response(raw, start_end, parse_lf_headers(raw, nl + 1))
+      # Blank lines in front of the status line are skipped, as the reader skipped them before
+      # it would let a bare-LF blank line end the head (`has_content?`) — so both agree on which
+      # line is the status line.
+      first = 0
+      while first < raw.size && (raw.unsafe_fetch(first) == 0x0a_u8 || raw.unsafe_fetch(first) == 0x0d_u8)
+        first += 1
+      end
+      nl = raw.index(0x0a_u8, first) || raw.size - 1 # an LF-terminated head always has one
+      start_end = nl > first && raw.unsafe_fetch(nl - 1) == 0x0d_u8 ? nl - 1 : nl
+      return build_response(raw, start_end, parse_lf_headers(raw, nl + 1), from: first)
     end
     first_crlf = index_crlf(raw, 0)
     build_response(raw, first_crlf || raw.size, parse_headers(raw, first_crlf))
   end
 
-  # The status-line projection over `raw[0, start_end]`, shared by both line readings.
-  private def self.build_response(raw : Bytes, start_end : Int32, headers : HeaderList) : RawResponse
-    start = String.new(raw[0, start_end])
+  # The status-line projection over `raw[from, start_end - from]`, shared by both line readings.
+  private def self.build_response(raw : Bytes, start_end : Int32, headers : HeaderList,
+                                  *, from : Int32 = 0) : RawResponse
+    start = String.new(raw[from, start_end - from])
     # status-line: HTTP-version SP status-code SP [reason]
     first_sp = start.index(' ')
     version = first_sp ? start[0...first_sp] : ""
@@ -1146,8 +1154,8 @@ module Gori::Proxy::Codec::Http1
   # previous field-value; and the field-name is stripped before it is matched.
   private def self.lenient_framing_view(raw : Bytes) : Array(String)
     view = [] of String
-    pos = lenient_next_line(raw, lenient_line_end(raw, 0)) # skip the start-line
-    folds_into = -1                                        # index in `view` an obs-fold continuation would extend, or -1
+    pos = lenient_after_start_line(raw)
+    folds_into = -1 # index in `view` an obs-fold continuation would extend, or -1
     while pos < raw.size
       stop = lenient_line_end(raw, pos)
       break if stop == pos # empty line → end of headers
@@ -1164,6 +1172,16 @@ module Gori::Proxy::Codec::Http1
       pos = lenient_next_line(raw, stop)
     end
     view
+  end
+
+  # Where the header lines start for a lenient recipient: past any blank lines in front of the
+  # start-line (the response reader skips the same ones, see `has_content?`) and the start-line.
+  private def self.lenient_after_start_line(raw : Bytes) : Int32
+    first = 0
+    while first < raw.size && (raw.unsafe_fetch(first) == 0x0a_u8 || raw.unsafe_fetch(first) == 0x0d_u8)
+      first += 1
+    end
+    lenient_next_line(raw, lenient_line_end(raw, first))
   end
 
   # Index of the first CR or LF at/after `pos` (i.e. where a lenient recipient ends the

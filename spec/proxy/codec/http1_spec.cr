@@ -499,6 +499,18 @@ describe Gori::Proxy::Codec::Http1 do
       end
     end
 
+    it "reads and parses a bare-LF head behind leading blank lines alike" do
+      raw = "\n\nHTTP/1.1 200 OK\nContent-Length: 2\n\nok"
+      head = Http1.read_response_head_result(WindowedIO.new(raw.to_slice, 4096)).head?.not_nil!
+      String.new(head).should eq("\n\nHTTP/1.1 200 OK\nContent-Length: 2\n\n")
+      resp = Http1.parse_response_head(head)
+      resp.malformed?.should be_false
+      resp.status.should eq(200)
+      resp.headers.get?("Content-Length").should eq("2")
+      resp.raw_head.should eq(head) # the blank lines stay in the record (P7)
+      Body.response_framing(resp, "GET").should eq({BodyFraming::Length, 2_i64})
+    end
+
     it "keeps the bare-LF head when a later CRLFCRLF reading frames the body the same way" do
       # A CGI with LF headers and no framing header, whose body carries a CRLF blank line: a
       # strict reader's longer head holds no framing header either, so nothing can desync.
