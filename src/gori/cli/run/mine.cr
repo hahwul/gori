@@ -79,7 +79,7 @@ module Gori
           format_flag(p, [:text, :json, :jsonl], "Output: text (default) | json | jsonl") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run mine: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run mine", f, p) }
           p.missing_option { |f| abort "gori run mine: missing value for #{f}" }
         end
         parser.parse(args)
@@ -288,6 +288,7 @@ module Gori
         # normally and the emit below covers the interrupted path too.
         interrupted = Run.install_interrupt_trap("mine-interrupt",
           "interrupted — stopping and emitting what was found…") { engine.stop }
+        say_request_line_rewrite # the run is about to send it — see `warn_request_line_rewrite`
         engine.run do |ev|
           case ev
           when Miner::BaselineEvent then mine_baseline(ev)

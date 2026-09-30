@@ -68,7 +68,7 @@ module Gori
           format_flag(p, [:text, :json, :jsonl], "Output: text (default) | json | jsonl") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort "gori run discover: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run discover", f, p) }
           p.missing_option { |f| abort "gori run discover: missing value for #{f}" }
         end
         parser.parse(args)

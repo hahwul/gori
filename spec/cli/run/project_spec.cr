@@ -238,3 +238,14 @@ describe "gori run project scope — the active-send gate line" do
     end
   end
 end
+
+# #1389: an import that clashes with an existing name said "choose another name" and never
+# which flag does that.
+describe "gori run project import — the name clash hint" do
+  it "names --name when it was not passed, and only for the clash" do
+    msg = %(project "demo" already exists — choose another name)
+    Gori::CLI::Run.import_error_message(msg, nil).should end_with("(pass --name NEW to import it under another)")
+    Gori::CLI::Run.import_error_message(msg, "demo").should eq(msg)
+    Gori::CLI::Run.import_error_message("archive is corrupt", nil).should eq("archive is corrupt")
+  end
+end

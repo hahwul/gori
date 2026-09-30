@@ -39,9 +39,8 @@ module Gori
           if (s = sub) && s.starts_with?('-')
             cmd_intercept_list(args)
           else
-            STDERR.puts "gori run intercept: unknown subcommand '#{sub}'"
-            print_intercept_help
-            exit 1
+            abort unknown_verb_message("gori run intercept", s || "",
+              %w[list get forward drop edit enable disable filter direction])
           end
         end
       end
@@ -125,7 +124,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort "gori run intercept: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run intercept", f, p) }
           p.missing_option { |f| abort "gori run intercept: missing value for #{f}" }
         end
         parser.parse(args)
@@ -307,7 +306,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run intercept get: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run intercept get", f, p) }
           p.missing_option { |f| abort "gori run intercept get: missing value for #{f}" }
         end
         parser.parse(args)
@@ -423,7 +422,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run intercept #{verb}: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run intercept #{verb}", f, p) }
           p.missing_option { |f| abort "gori run intercept #{verb}: missing value for #{f}" }
         end
         parser.parse(args)
@@ -462,7 +461,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run intercept edit: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run intercept edit", f, p) }
           p.missing_option { |f| abort "gori run intercept edit: missing value for #{f}" }
         end
         parser.parse(args)
@@ -594,7 +593,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort "gori run intercept #{action}: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run intercept #{action}", f, p) }
           p.missing_option { |f| abort "gori run intercept #{action}: missing value for #{f}" }
         end
         parse_no_positionals(parser, args, "gori run intercept #{action}",
@@ -619,7 +618,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run intercept filter: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run intercept filter", f, p) }
           p.missing_option { |f| abort "gori run intercept filter: missing value for #{f}" }
         end
         parser.parse(args)
@@ -649,7 +648,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run intercept direction: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run intercept direction", f, p) }
           p.missing_option { |f| abort "gori run intercept direction: missing value for #{f}" }
         end
         parser.parse(args)

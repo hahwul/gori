@@ -355,3 +355,21 @@ describe Gori::Export::Curl do
     end
   end
 end
+
+# #1389: a proxy capture carries the browser's `Proxy-Connection`, addressed to gori. A copied
+# command sends it straight to the origin, so the exports leave it out — the replay does not.
+describe "exports drop the headers a browser addressed to its proxy" do
+  wire = "GET /p HTTP/1.1\r\nHost: a.test\r\nProxy-Connection: keep-alive\r\nX-Keep: 1\r\n\r\n"
+
+  it "leaves Proxy-Connection out of the curl line" do
+    line = Gori::Export::Curl.text(wire, "http://a.test").not_nil!
+    line.downcase.should_not contain("proxy-connection")
+    line.should contain("X-Keep: 1")
+  end
+
+  it "leaves it out of the generated clients too" do
+    code = Gori::Export::PythonRequests.text(wire, "http://a.test").not_nil!
+    code.downcase.should_not contain("proxy-connection")
+    code.should contain("X-Keep")
+  end
+end

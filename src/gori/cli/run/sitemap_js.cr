@@ -79,7 +79,7 @@ module Gori
           format_flag(p, [:text, :json, :urls], "Output: text (default) | json | urls (one URL per line, to pipe into other tools)") { |f| o.format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| o.positional = before + after }
-          p.invalid_option { |f| abort "gori run sitemap js: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run sitemap js", f, p) }
           p.missing_option { |f| abort "gori run sitemap js: missing value for #{f}" }
         end
       end

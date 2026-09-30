@@ -200,7 +200,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort "gori run redact profiles: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run redact profiles", f, p) }
           p.missing_option { |f| abort "gori run redact profiles: missing value for #{f}" }
         end
         parse_no_positionals(parser, args, "gori run redact profiles",
@@ -296,7 +296,7 @@ module Gori
           p.on("--none", "Clear the choice at this scope (fall back to the wider one)") { none = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = one_positional_list(before, after, "gori run redact use", "profile name") }
-          p.invalid_option { |f| abort "gori run redact use: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run redact use", f, p) }
           p.missing_option { |f| abort "gori run redact use: missing value for #{f}" }
         end
         parser.parse(args)
@@ -351,7 +351,7 @@ module Gori
           p.on("--none", "Clear this project's answer and inherit the global one") { clear = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = one_positional_list(before, after, "gori run redact default", "`on` or `off`") }
-          p.invalid_option { |f| abort "gori run redact default: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run redact default", f, p) }
           p.missing_option { |f| abort "gori run redact default: missing value for #{f}" }
         end
         parser.parse(args)
@@ -413,7 +413,7 @@ module Gori
           p.on("--pattern=REGEX", "A regex over body text; group 1 is replaced if present (repeatable)") { |v| patterns << v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = one_positional_list(before, after, "gori run redact set", "profile name") }
-          p.invalid_option { |f| abort "gori run redact set: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run redact set", f, p) }
           p.missing_option { |f| abort "gori run redact set: missing value for #{f}" }
         end
         parser.parse(args)
@@ -456,7 +456,7 @@ module Gori
           p.on("--global", "Write settings.json instead of this project") { global = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = one_positional_list(before, after, "gori run redact rm", "profile name") }
-          p.invalid_option { |f| abort "gori run redact rm: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run redact rm", f, p) }
           p.missing_option { |f| abort "gori run redact rm: missing value for #{f}" }
         end
         parser.parse(args)

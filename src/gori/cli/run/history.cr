@@ -49,7 +49,7 @@ module Gori
           p.on("--yes", "Actually delete the query's matches (required — there is no interactive prompt here)") { yes = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run history delete: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run history delete", f, p) }
           p.missing_option { |f| abort "gori run history delete: missing value for #{f}" }
         end
         # Same two pre-passes the listing runs, for the same reason: `-q` with a separate
@@ -334,7 +334,7 @@ module Gori
           p.on("--yes", "Actually do it (required — there is no interactive prompt here)") { yes = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort "gori run history clear: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run history clear", f, p) }
           p.missing_option { |f| abort "gori run history clear: missing value for #{f}" }
         end
         parser.parse(args)
@@ -392,7 +392,7 @@ module Gori
           redact_options(p, redaction)
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run history: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run history", f, p) }
           p.missing_option { |f| abort "gori run history: missing value for #{f}" }
         end
         args = normalize_query_flag(args)
@@ -863,7 +863,7 @@ module Gori
           redact_options(p, redaction)
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run show: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run show", f, p) }
           p.missing_option { |f| abort "gori run show: missing value for #{f}" }
         end
         parser.parse(args)

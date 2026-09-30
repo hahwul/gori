@@ -41,6 +41,8 @@ module Gori
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--unsafe-methods", "Also replay POST/PUT/PATCH/DELETE — each identity re-runs the side effect") { unsafe_methods = true }
+          # `probe --active`'s spelling of the same permission (#1389).
+          p.on("--unsafe", "Alias for --unsafe-methods") { unsafe_methods = true }
           p.on("--allow-unscoped", "Send even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
           p.on("-k", "--insecure-upstream", "Do not verify upstream TLS certificates") { insecure = true }
           p.on("--timeout=SEC", "Per-request connect + idle timeout (seconds)") { |v| timeout = parse_count(v, "--timeout").seconds }
@@ -50,7 +52,7 @@ module Gori
           # first silently discards (see spec/cli_spec.cr's source guard). Here that would drop
           # flow ids — `gori run authorize -- 42` would refuse with "no request selected".
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run authorize: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run authorize", f, p) }
           p.missing_option { |f| abort "gori run authorize: missing value for #{f}" }
         end
         # `-q '-path:/x'` reads as another flag unless it is rewritten to `--query=…` first —

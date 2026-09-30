@@ -33,9 +33,7 @@ module Gori
         when "listen"            then oast_listen(filtered[1..], project_name, db_path)
         when nil, "-h", "--help" then oast_help
         else
-          STDERR.puts "gori run oast: unknown subcommand '#{sub}'"
-          oast_help
-          exit 1
+          abort unknown_verb_message("gori run oast", sub, %w[listen presets providers list resume release])
         end
       end
 
@@ -200,7 +198,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort "gori run oast providers: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run oast providers", f, p) }
           p.missing_option { |f| abort "gori run oast providers: missing value for #{f}" }
         end
         parser.parse(args)
@@ -276,7 +274,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f } unless update
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run oast providers #{verb}: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run oast providers #{verb}", f, p) }
           p.missing_option { |f| abort "gori run oast providers #{verb}: missing value for #{f}" }
         end
         parser.parse(args)
@@ -377,7 +375,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort "gori run oast providers #{verb}: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run oast providers #{verb}", f, p) }
           p.missing_option { |f| abort "gori run oast providers #{verb}: missing value for #{f}" }
         end
         parser.parse(args)
@@ -405,7 +403,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort "gori run oast providers delete: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run oast providers delete", f, p) }
           p.missing_option { |f| abort "gori run oast providers delete: missing value for #{f}" }
         end
         parser.parse(args)
@@ -467,7 +465,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort "gori run oast list: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run oast list", f, p) }
           p.missing_option { |f| abort "gori run oast list: missing value for #{f}" }
         end
         parser.parse(args)
@@ -539,7 +537,7 @@ module Gori
           p.on("--json", "Emit the payload and each callback as a JSON line (same shape as MCP)") { json = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| id_arg = one_positional(before, after, "gori run oast resume", "<id>") }
-          p.invalid_option { |f| abort "gori run oast resume: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run oast resume", f, p) }
           p.missing_option { |f| abort "gori run oast resume: missing value for #{f}" }
         end
         parser.parse(args)
@@ -657,7 +655,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort "gori run oast release: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run oast release", f, p) }
           p.missing_option { |f| abort "gori run oast release: missing value for #{f}" }
         end
         parser.parse(args)
@@ -722,7 +720,7 @@ module Gori
           p.on("--check", "Probe each preset over the network and report reachability") { check = true }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort "gori run oast presets: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run oast presets", f, p) }
           p.missing_option { |f| abort "gori run oast presets: missing value for #{f}" }
         end
         parse_no_positionals(parser, args, "gori run oast presets",
@@ -896,7 +894,7 @@ module Gori
           # only one; a later sweep found eleven more parsers taking a `=VALUE` flag with no
           # `missing_option`, so the invariant is now pinned by a source grep over every parser
           # under src/gori/cli/ (spec/cli/run/option_parser_missing_option_spec.cr).
-          p.invalid_option { |f| abort "gori run oast listen: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run oast listen", f, p) }
           p.missing_option { |f| abort "gori run oast listen: missing value for #{f}" }
         end
         parse_no_positionals(parser, args, "gori run oast listen",

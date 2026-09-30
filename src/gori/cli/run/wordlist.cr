@@ -53,7 +53,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run wordlist: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run wordlist", f, p) }
           p.missing_option { |f| abort "gori run wordlist: missing value for #{f}" }
         end
         parser.parse(args)
@@ -116,7 +116,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run wordlist show: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run wordlist show", f, p) }
           p.missing_option { |f| abort "gori run wordlist show: missing value for #{f}" }
         end
         parser.parse(args)
@@ -212,7 +212,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run wordlist save: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run wordlist save", f, p) }
           p.missing_option { |f| abort "gori run wordlist save: missing value for #{f}" }
         end
         parser.parse(args)
@@ -320,7 +320,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run wordlist rename: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run wordlist rename", f, p) }
           p.missing_option { |f| abort "gori run wordlist rename: missing value for #{f}" }
         end
         parser.parse(args)
@@ -349,7 +349,7 @@ module Gori
           p.on("--yes", "Actually delete it (required — there is no interactive prompt here)") { yes = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run wordlist delete: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run wordlist delete", f, p) }
           p.missing_option { |f| abort "gori run wordlist delete: missing value for #{f}" }
         end
         parser.parse(args)

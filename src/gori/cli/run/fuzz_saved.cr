@@ -22,7 +22,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run fuzz list: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run fuzz list", f, p) }
           p.missing_option { |f| abort "gori run fuzz list: missing value for #{f}" }
         end
         parser.parse(args)
@@ -88,7 +88,7 @@ module Gori
           format_flag(p, [:text, :json, :jsonl], "Output: text (default) | json | jsonl") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run fuzz show: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run fuzz show", f, p) }
           p.missing_option { |f| abort "gori run fuzz show: missing value for #{f}" }
         end
         parser.parse(args)
@@ -134,7 +134,7 @@ module Gori
           p.on("--force-stale", "Also delete a running/saving row left by a crashed writer") { force_stale = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run fuzz delete: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run fuzz delete", f, p) }
           p.missing_option { |f| abort "gori run fuzz delete: missing value for #{f}" }
         end
         parser.parse(args)

@@ -48,7 +48,7 @@ module Gori
           format_flag(p, [:text, :json, :markdown], "Output: text (default) | json | md (a retest report section)") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| abort_diff_positional(before + after, p) }
-          p.invalid_option { |f| abort "gori run diff: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run diff", f, p) }
           p.missing_option { |f| abort "gori run diff: missing value for #{f}" }
         end
         parser.parse(normalize_query_flag(args))

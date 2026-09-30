@@ -38,7 +38,7 @@ module Gori
           p.on("--shell=SYNTAX", "Syntax for --print: sh (default; bash, zsh) | fish") { |v| syntax_name = v }
           p.on("--keep-no-proxy", "Keep the inherited NO_PROXY instead of unsetting it") { keep_no_proxy = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort "gori run shell: unknown option: #{f} (put the command after --: gori run shell -- CMD)\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run shell", f, p, "(put the command after --: gori run shell -- CMD)") }
           p.missing_option { |f| abort "gori run shell: missing value for #{f}" }
           p.unknown_args do |b, a|
             before = b

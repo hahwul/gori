@@ -1,4 +1,5 @@
 require "option_parser"
+require "levenshtein"
 require "log"
 require "./config"
 require "./paths"
@@ -213,7 +214,7 @@ module Gori
         p.on("-h", "--help", "Show this help") { puts p; exit 0 }
         p.on("-v", "--version", "Show version") { puts "gori #{VERSION}"; exit 0 }
         p.on("-V", "Show version") { puts "gori #{VERSION}"; exit 0 }
-        p.invalid_option { |flag| abort "unknown option: #{flag}\n#{p}" }
+        p.invalid_option { |flag| abort CLI.unknown_option_message("gori tui", flag, p) }
         p.missing_option { |flag| abort "missing value for #{flag}" }
       end
       parser.parse(args)
@@ -337,8 +338,35 @@ module Gori
     private def self.reject_extra_args(cmd : String, rest : Array(String), after : Array(String),
                                        parser : OptionParser) : Nil
       return if (first = (rest + after).first?).nil?
-      abort "unknown option: #{first}\n#{parser}" if first.starts_with?('-')
-      abort "gori #{cmd} takes no arguments (got #{first.inspect})\n#{parser}"
+      abort unknown_option_message("gori #{cmd}", first, parser) if first.starts_with?('-')
+      abort "gori #{cmd} takes no arguments (got #{first.inspect})\nRun 'gori #{cmd} --help' for its options."
+    end
+
+    # Every `invalid_option` handler's message (#1389): the flag, the nearest one this parser
+    # knows when there is one, and where the rest are. It used to be the flag followed by the
+    # command's whole usage — dozens of lines to hunt a one-letter typo in, and the same wall on
+    # every command. `note` is an extra hint a command owes this refusal (`run shell`'s `--`).
+    #
+    # The names come from the parser's own handler table (`@handlers`), so the suggestion can
+    # only ever be a flag that command really takes. `spec/cli/unknown_option_spec.cr` holds
+    # every handler to this helper.
+    def self.unknown_option_message(prefix : String, flag : String, parser : OptionParser,
+                                    note : String? = nil) : String
+      msg = "#{prefix}: unknown option: #{Output.term_safe(flag)}"
+      msg += " #{note}" if note
+      if near = nearest_flag(flag, parser.@handlers.keys)
+        msg += " — did you mean #{near}?"
+      end
+      "#{msg}\nRun '#{prefix} --help' for its options."
+    end
+
+    # The registered flag nearest to `flag` (its `=value` dropped), long flags only: a short one
+    # is a single letter, where every other letter is "one edit away".
+    def self.nearest_flag(flag : String, names : Array(String)) : String?
+      name = flag.partition('=')[0]
+      return nil unless name.starts_with?("--") && name.size > 2
+      longs = names.select(&.starts_with?("--"))
+      Levenshtein.find(name, longs, name.size < 6 ? 1 : 2)
     end
 
     # Run `body` against a terminal `Tui.open_terminal` has just switched into raw mode + the
@@ -380,7 +408,7 @@ module Gori
                    "  Bind is the shared default — pin a different address per project in the Project tab;\n" \
                    "  `gori tui --listen/--port` override settings for one run only (not written to disk)."
         p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-        p.invalid_option { |flag| abort "unknown option: #{flag}\n#{p}" }
+        p.invalid_option { |flag| abort CLI.unknown_option_message("gori wizard", flag, p) }
         p.missing_option { |flag| abort "missing value for #{flag}" }
         p.unknown_args { |rest, after| reject_extra_args("wizard", rest, after, p) }
       end
@@ -425,7 +453,7 @@ module Gori
                    "  step covers all four moves, then a first-session checklist.\n" \
                    "  Also offered at the end of `gori wizard`; safe to re-run anytime."
         p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-        p.invalid_option { |flag| abort "unknown option: #{flag}\n#{p}" }
+        p.invalid_option { |flag| abort CLI.unknown_option_message("gori tutorial", flag, p) }
         p.missing_option { |flag| abort "missing value for #{flag}" }
         p.unknown_args { |rest, after| reject_extra_args("tutorial", rest, after, p) }
       end
@@ -463,7 +491,7 @@ module Gori
           puts "(pacman -Qo / dpkg-query -S / rpm -qf) and /etc/os-release."
           exit 0
         end
-        p.invalid_option { |flag| abort "unknown option: #{flag}\n#{p}" }
+        p.invalid_option { |flag| abort CLI.unknown_option_message("gori update", flag, p) }
         # `gori update` takes no positional arguments, and `--exec` is its only
         # flag — so a `--` separator has nothing legitimate to protect. Without
         # this, `gori update -- --exec` parsed clean and silently dropped the

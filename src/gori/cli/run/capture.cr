@@ -33,7 +33,7 @@ module Gori
           p.on("--for=DURATION", "Stop after DURATION (e.g. 30s, 5m, 1h)") { |v| every = parse_duration(v) }
           p.on("--max=N", "Stop after N completed flows") { |v| max = parse_count(v, "--max") }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort "gori run capture: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run capture", f, p) }
           p.missing_option { |f| abort "gori run capture: missing value for #{f}" }
         end
         parse_no_positionals(parser, args, "gori run capture",

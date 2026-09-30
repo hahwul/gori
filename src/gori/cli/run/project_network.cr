@@ -64,7 +64,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort "gori run project network: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project network", f, p) }
           p.missing_option { |f| abort "gori run project network: missing value for #{f}" }
         end
         parser.parse(args)
@@ -112,7 +112,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = one_positional_list(before, after, "gori run project network get", "KEY") }
-          p.invalid_option { |f| abort "gori run project network get: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project network get", f, p) }
           p.missing_option { |f| abort "gori run project network get: missing value for #{f}" }
         end
         parser.parse(args)
@@ -164,7 +164,7 @@ module Gori
           p.on("--password-stdin", "upstream_auth only: read the proxy password from stdin (a pipe or a redirect, never a terminal) instead of the argument vector, where it would sit in the process listing and the shell history. One trailing newline is dropped") { password_stdin = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run project network set: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project network set", f, p) }
           p.missing_option { |f| abort "gori run project network set: missing value for #{f}" }
         end
         parser.parse(args)
@@ -219,7 +219,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = one_positional_list(before, after, "gori run project network unset", "KEY") }
-          p.invalid_option { |f| abort "gori run project network unset: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project network unset", f, p) }
           p.missing_option { |f| abort "gori run project network unset: missing value for #{f}" }
         end
         parser.parse(args)

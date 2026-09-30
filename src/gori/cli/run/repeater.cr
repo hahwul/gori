@@ -155,7 +155,7 @@ module Gori
           p.on("--max-body=BYTES", MAX_BODY_HELP) { |v| max_body = parse_count(v, "--max-body") }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort "gori run repeater h2: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run repeater h2", f, p) }
           p.missing_option { |f| abort "gori run repeater h2: missing value for #{f}" }
         end
         # A stray word here is refused, not dropped — see `Run.parse_no_positionals`.
@@ -248,7 +248,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort "gori run repeater list: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run repeater list", f, p) }
           p.missing_option { |f| abort "gori run repeater list: missing value for #{f}" }
         end
         parse_no_positionals(parser, args, "gori run repeater list",
@@ -354,7 +354,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file") { |v| db_path = v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort "gori run repeater move: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run repeater move", f, p) }
           p.missing_option { |f| abort "gori run repeater move: missing value for #{f}" }
           # Through the helper IN the sink, not twenty lines below it: a bare
           # `positional = before + after` here reads fine and drops every token after the
@@ -433,7 +433,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file") { |v| db_path = v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort "gori run repeater delete: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run repeater delete", f, p) }
           p.missing_option { |f| abort "gori run repeater delete: missing value for #{f}" }
           p.unknown_args { |before, after| positional = before + after }
         end
@@ -693,7 +693,7 @@ module Gori
           p.on("--ws-http-only", "WebSocket: treat this session as plain HTTP — the handshake is sent as an ordinary request and its own answer (a 101, or the 2xx of an RFC 8441 extended CONNECT) read as the response, instead of the framed exchange. Stored on the session (the TUI's ^V); `repeater send --http` is the per-send form") { ws_http_only = true }
           format_flag(p, [:text, :json], "Output: text (default) | json — the new session as `repeater list --format json` prints it, plus websocket / ws_messages / request_line_rewritten") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort "gori run repeater create: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run repeater create", f, p) }
           p.missing_option { |f| abort "gori run repeater create: missing value for #{f}" }
         end
         # A bare word here is almost always the request or the target the operator meant to
@@ -757,7 +757,7 @@ module Gori
             # `--keep-request-line` for the direct replay; this is the same flag on the
             # workbench door, and the rewrite is reported either way (see `Built`).
             built = Repeater::FlowRequest.build(detail, rewrite_absolute_form: !keep_request_line)
-            warn_request_line_rewrite(built, "gori run repeater create")
+            warn_request_line_rewrite(built, "gori run repeater create", now: true)
             rewrote_request_line = built.rewrote_request_line
             # Only seed the request from the flow when the user didn't hand one in: --flow
             # doubles as provenance (the flow_id column) for a custom --request-raw/-file/-stdin,
@@ -1118,7 +1118,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run repeater race: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run repeater race", f, p) }
           p.missing_option { |f| abort "gori run repeater race: missing value for #{f}" }
         end
         parser.parse(args)
@@ -1211,7 +1211,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run repeater timing: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run repeater timing", f, p) }
           p.missing_option { |f| abort "gori run repeater timing: missing value for #{f}" }
         end
         parser.parse(args)
@@ -1488,7 +1488,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run repeater send: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run repeater send", f, p) }
           p.missing_option { |f| abort "gori run repeater send: missing value for #{f}" }
         end
         parser.parse(args)
@@ -2419,12 +2419,32 @@ module Gori
       # exists on the two doors where the stored line is the whole message (`gori run repeater
       # <flow-id>` and `repeater create`, which persists the rewrite into the session row so
       # no later flag can recover it).
+      #
+      # DEFERRED, since #1389: this only STASHES the line, and `say_request_line_rewrite` prints
+      # it at the moment the run first puts the rewritten request on the wire. Printed as soon
+      # as the flow was read, it sat in front of every refusal the command then made (a scope
+      # gate, a fuzz template with no positions, a dead target) — about bytes that never went
+      # out, on every run of every script replaying a proxy capture. A run that aborts first now
+      # never says it; one that sends always does, once. `repeater create` says it at once
+      # (`now: true`): it WRITES the rewrite into the session row, so the fact is final there.
       protected def self.warn_request_line_rewrite(built : Repeater::FlowRequest::Built,
                                                    prefix : String,
-                                                   remedy : String = "--keep-request-line keeps it") : Nil
+                                                   remedy : String = "--keep-request-line keeps it",
+                                                   *, now : Bool = false) : Nil
         return unless built.rewrote_request_line
-        STDERR.puts "#{prefix}: request line rewritten to origin-form " \
-                    "(absolute-form is a proxy artifact; #{remedy})"
+        @@request_line_note = "#{prefix}: note: request line rewritten to origin-form " \
+                              "(absolute-form is a proxy artifact; #{remedy})"
+        say_request_line_rewrite if now
+      end
+
+      @@request_line_note : String? = nil
+
+      # Print the stashed rewrite note, once per process. Called where each command starts
+      # sending; a no-op when nothing was rewritten.
+      protected def self.say_request_line_rewrite : Nil
+        return unless note = @@request_line_note
+        @@request_line_note = nil
+        STDERR.puts note
       end
 
       # `repeater send -H/-b` (#1384): the stored request with this send's header edits merged in,
@@ -2527,7 +2547,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run repeater: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run repeater", f, p) }
           p.missing_option { |f| abort "gori run repeater: missing value for #{f}" }
         end
         parser.parse(args)
@@ -2699,6 +2719,7 @@ module Gori
         # Layer 1 (include list) BEFORE Layer 2 — mirrors fuzz/mine/sequence and MCP send_gate.
         abort_if_out_of_scope!(outbound, plan, "gori run repeater")
         abort_if_blocked!(plan, "gori run repeater")
+        say_request_line_rewrite
         sent_at = Time.utc.to_unix_ms * 1000_i64
         # Taken ONCE and sent as-is, so a `--record-history` flow holds the bytes that went out.
         wire_sent = plan.wire_bytes

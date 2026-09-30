@@ -56,10 +56,13 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--owner=KIND", "Owner kind: issue (default) | note") { |v| owner_s = v.strip.downcase }
           p.on("--id=N", "Owner issue/note id (required)") { |v| owner_id = parse_link_id(v, "--id") }
+          # `evidence`/`retest` name the owner as `--issue N` (#1389); the same spelling here.
+          p.on("--issue=N", "Same as --owner=issue --id=N") { |v| owner_s = "issue"; owner_id = parse_link_id(v, "--issue") }
+          p.on("--note=N", "Same as --owner=note --id=N") { |v| owner_s = "note"; owner_id = parse_link_id(v, "--note") }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort "gori run links: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run links", f, p) }
           p.missing_option { |f| abort "gori run links: missing value for #{f}" }
         end
         parser.parse(args)
@@ -142,6 +145,9 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("--owner=KIND", "Owner kind: issue (default) | note") { |v| owner_s = v.strip.downcase }
           p.on("--id=N", "Owner issue/note id (required)") { |v| owner_id = parse_link_id(v, "--id") }
+          # `evidence`/`retest` name the owner as `--issue N` (#1389); the same spelling here.
+          p.on("--issue=N", "Same as --owner=issue --id=N") { |v| owner_s = "issue"; owner_id = parse_link_id(v, "--issue") }
+          p.on("--note=N", "Same as --owner=note --id=N") { |v| owner_s = "note"; owner_id = parse_link_id(v, "--note") }
           p.on("--ref=KIND", "Target kind: flow|repeater|fuzz|miner (required)") { |v| ref_s = v.strip.downcase }
           p.on("--ref-id=M", "Target id (required)") { |v| ref_id = parse_link_id(v, "--ref-id") }
           # `add` only (#1117): it creates the row whose id a script needs back. `delete` has no
@@ -149,7 +155,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f } if add
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort "gori run links #{verb}: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run links #{verb}", f, p) }
           p.missing_option { |f| abort "gori run links #{verb}: missing value for #{f}" }
         end
         parser.parse(args)

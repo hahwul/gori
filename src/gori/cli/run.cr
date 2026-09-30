@@ -1,4 +1,5 @@
 require "option_parser"
+require "levenshtein"
 require "json"
 require "base64"
 require "../config"
@@ -183,11 +184,21 @@ module Gori
             when {{ m.annotation(Subcommand).args.splat }} then {{ m.name }}(args[1..])
           {% end %}
           else
-            STDERR.puts "gori run: unknown subcommand '#{sub}'"
-            print_help
-            exit 1
+            # A short refusal on STDERR (#1389), not the ~80-line help on STDOUT: a typo'd
+            # `gori run histroy` exited 1 having written the whole help into the pipe a script
+            # was reading, with no word about which subcommand was meant.
+            abort unknown_verb_message("gori run", sub, SUBCOMMAND_NAMES)
           end
         end
+
+        # Every name and alias `dispatch_subcommand` answers, for the did-you-mean.
+        SUBCOMMAND_NAMES = [
+          {% for m in cmds %}
+            {% for name in m.annotation(Subcommand).args %}
+              {{ name }},
+            {% end %}
+          {% end %}
+        ] of String
 
         # `gori run -h` rows: {name column, description}, one or more per subcommand.
         SUBCOMMANDS = [
@@ -197,6 +208,24 @@ module Gori
             {% end %}
           {% end %}
         ]
+      end
+
+      # The refusal for a subcommand or verb nobody registered (#1389): one line naming the typo,
+      # the nearest real name when there is one, and where the list is. Said on STDERR by the
+      # caller's `abort`, so nothing reaches a pipe reading STDOUT.
+      def self.unknown_verb_message(prefix : String, word : String, candidates : Enumerable(String)) : String
+        msg = "#{prefix}: unknown subcommand '#{CLI::Output.term_safe(word)}'"
+        if near = nearest_name(word, candidates)
+          msg += " — did you mean '#{near}'?"
+        end
+        "#{msg}\nRun '#{prefix} --help' for the list."
+      end
+
+      # The one name within edit distance of `word` — 1 for a short word, where 2 would make
+      # almost anything "near", else 2 — or nil. A leading `-` is never a name.
+      def self.nearest_name(word : String, candidates : Enumerable(String)) : String?
+        return nil if word.empty? || word.starts_with?('-')
+        Levenshtein.find(word, candidates.to_a, word.size < 4 ? 1 : 2)
       end
 
       # Left column width for `gori run -h` subcommand names (longest: "project host-override").

@@ -57,7 +57,7 @@ module Gori
             rest = before + after
             abort "gori run import: unexpected argument#{rest.size == 1 ? "" : "s"} #{rest.join(" ").inspect} — pass the file via a source flag, e.g. --har PATH" unless rest.empty?
           end
-          p.invalid_option { |f| abort "gori run import: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run import", f, p) }
           p.missing_option { |f| abort "gori run import: missing value for #{f}" }
         end
         parser.parse(args)

@@ -44,7 +44,7 @@ module Gori::CLI
       p.on("--install-hermes", "Install gori as an MCP server in Hermes ($HERMES_HOME, default ~/.hermes/config.yaml)") { install_targets << "hermes" }
       p.on("--install-pi", "Install gori as an MCP server in Pi ($PI_CODING_AGENT_DIR, default ~/.pi/agent/mcp.json; requires an MCP adapter)") { install_targets << "pi" }
       p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-      p.invalid_option { |flag| abort "unknown option: #{flag}\n#{p}" }
+      p.invalid_option { |flag| abort CLI.unknown_option_message("gori mcp", flag, p) }
       p.missing_option { |flag| abort "missing value for #{flag}" }
     end
     parser.parse(args)

@@ -79,7 +79,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort "gori run retest: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run retest", f, p) }
           p.missing_option { |f| abort "gori run retest: missing value for #{f}" }
         end
         parser.parse(args)
@@ -152,7 +152,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort "gori run retest add: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run retest add", f, p) }
           p.missing_option { |f| abort "gori run retest add: missing value for #{f}" }
         end
         parser.parse(args)
@@ -213,7 +213,7 @@ module Gori
           p.on("--assert=EXPR", "The one expected result (empty clears it)") { |v| assertion = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run retest update: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run retest update", f, p) }
           p.missing_option { |f| abort "gori run retest update: missing value for #{f}" }
         end
         parser.parse(args)
@@ -257,7 +257,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run retest remove: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run retest remove", f, p) }
           p.missing_option { |f| abort "gori run retest remove: missing value for #{f}" }
         end
         parser.parse(args)
@@ -298,7 +298,7 @@ module Gori
           end
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run retest move: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run retest move", f, p) }
           p.missing_option { |f| abort "gori run retest move: missing value for #{f}" }
         end
         parser.parse(args)
@@ -344,7 +344,7 @@ module Gori
           p.on("-y", "--yes", "Actually delete the steps (required — there is no interactive prompt here)") { yes = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort "gori run retest clear: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run retest clear", f, p) }
           p.missing_option { |f| abort "gori run retest clear: missing value for #{f}" }
         end
         parser.parse(args)
@@ -407,7 +407,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort "gori run retest run: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run retest run", f, p) }
           p.missing_option { |f| abort "gori run retest run: missing value for #{f}" }
         end
         parser.parse(args)
@@ -488,7 +488,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort "gori run retest runs: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run retest runs", f, p) }
           p.missing_option { |f| abort "gori run retest runs: missing value for #{f}" }
         end
         parser.parse(args)
@@ -528,7 +528,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run retest show: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run retest show", f, p) }
           p.missing_option { |f| abort "gori run retest show: missing value for #{f}" }
         end
         parser.parse(args)
@@ -572,7 +572,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run retest forget: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run retest forget", f, p) }
           p.missing_option { |f| abort "gori run retest forget: missing value for #{f}" }
         end
         parser.parse(args)

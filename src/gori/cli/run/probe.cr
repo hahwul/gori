@@ -88,7 +88,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run probe: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run probe", f, p) }
           p.missing_option { |f| abort "gori run probe: missing value for #{f}" }
         end
         args = normalize_query_flag(args)
@@ -287,7 +287,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort "gori run probe issues: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run probe issues", f, p) }
           p.missing_option { |f| abort "gori run probe issues: missing value for #{f}" }
         end
         parser.parse(args)
@@ -329,7 +329,7 @@ module Gori
           p.on("--host=HOST", "Bulk-dismiss every open finding on this host") { |v| host = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run probe dismiss: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run probe dismiss", f, p) }
           p.missing_option { |f| abort "gori run probe dismiss: missing value for #{f}" }
         end
         parser.parse(args)
@@ -376,7 +376,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to write") { |v| db_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run probe promote: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run probe promote", f, p) }
           p.missing_option { |f| abort "gori run probe promote: missing value for #{f}" }
         end
         parser.parse(args)
@@ -423,7 +423,7 @@ module Gori
           p.on("--yes", "Required with --all (there is no interactive prompt here)") { yes = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run probe delete: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run probe delete", f, p) }
           p.missing_option { |f| abort "gori run probe delete: missing value for #{f}" }
         end
         parser.parse(args)
@@ -490,7 +490,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort "gori run probe rules: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run probe rules", f, p) }
           p.missing_option { |f| abort "gori run probe rules: missing value for #{f}" }
         end
         parser.parse(args)
@@ -528,7 +528,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to write") { |v| db_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = one_positional_list(before, after, "gori run probe rules #{verb}", "<rule-id>") }
-          p.invalid_option { |f| abort "gori run probe rules #{verb}: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run probe rules #{verb}", f, p) }
           p.missing_option { |f| abort "gori run probe rules #{verb}: missing value for #{f}" }
         end
         parser.parse(args)
@@ -591,7 +591,7 @@ module Gori
           p.on("-sSEVERITY", "--severity=SEVERITY", "info|low|medium|high|critical (default info)") { |v| sev_s = v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort "gori run probe rules add: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run probe rules add", f, p) }
           p.missing_option { |f| abort "gori run probe rules add: missing value for #{f}" }
         end
         parse_no_positionals(parser, args, "gori run probe rules add",
@@ -649,7 +649,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to write") { |v| db_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = one_positional_list(before, after, "gori run probe rules delete", "<custom-rule-id>") }
-          p.invalid_option { |f| abort "gori run probe rules delete: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run probe rules delete", f, p) }
           p.missing_option { |f| abort "gori run probe rules delete: missing value for #{f}" }
         end
         parser.parse(args)
@@ -688,7 +688,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file") { |v| db_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = one_positional_list(before, after, "gori run probe mode", "<mode>") }
-          p.invalid_option { |f| abort "gori run probe mode: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run probe mode", f, p) }
           p.missing_option { |f| abort "gori run probe mode: missing value for #{f}" }
         end
         parser.parse(args)

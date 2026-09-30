@@ -65,9 +65,8 @@ module Gori
         if sub.starts_with?('-')
           cmd_project_list(args)
         else
-          STDERR.puts "gori run project: unknown subcommand '#{sub}'"
-          print_project_help
-          exit 1
+          abort unknown_verb_message("gori run project", sub,
+            %w[list create switch use export import delete rm scope sandbox env host-override network net])
         end
       end
 
@@ -179,7 +178,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort "gori run project: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project", f, p) }
           p.missing_option { |f| abort "gori run project: missing value for #{f}" }
         end
         parser.parse(args)
@@ -326,7 +325,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run project create: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project create", f, p) }
           p.missing_option { |f| abort "gori run project create: missing value for #{f}" }
         end
         parser.parse(args)
@@ -384,7 +383,7 @@ module Gori
           p.on("--force", "Replace an existing destination file") { force = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run project export: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project export", f, p) }
           p.missing_option { |f| abort "gori run project export: missing value for #{f}" }
         end
         parser.parse(args)
@@ -439,7 +438,7 @@ module Gori
           p.on("--name=NAME", "Display name for the imported project (default: archive name)") { |v| name = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run project import: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project import", f, p) }
           p.missing_option { |f| abort "gori run project import: missing value for #{f}" }
         end
         parser.parse(args)
@@ -460,7 +459,7 @@ module Gori
             prepared.import_into(ProjectRegistry.new(Paths.projects_dir), name)
           rescue ex : Gori::Error
             prepared.close
-            abort "gori run project import: #{ex.message}"
+            abort "gori run project import: #{import_error_message(ex.message || "", name)}"
           rescue ex : File::Error | IO::Error
             prepared.close
             abort "gori run project import: could not register project: #{ex.message}"
@@ -469,6 +468,15 @@ module Gori
         ensure
           prepared.close
         end
+      end
+
+      # The registry's refusal, with the flag that resolves a name clash named (#1389). The
+      # sentence ("… choose another name") is shared with the TUI and MCP, which have their own
+      # ways to pick one, so the CLI's spelling of "another name" is added here, not there —
+      # and only when the operator has not already passed `--name`.
+      def self.import_error_message(message : String, name : String?) : String
+        return message unless name.nil? && message.includes?("choose another name")
+        "#{message} (pass --name NEW to import it under another)"
       end
 
       # `gori run project delete` — remove a project directory and everything in it. Until
@@ -489,7 +497,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run project delete: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project delete", f, p) }
           p.missing_option { |f| abort "gori run project delete: missing value for #{f}" }
         end
         parser.parse(args)
@@ -718,7 +726,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort "gori run project scope: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project scope", f, p) }
           p.missing_option { |f| abort "gori run project scope: missing value for #{f}" }
         end
         parser.parse(args)
@@ -804,7 +812,7 @@ module Gori
           p.on("-pPATTERN", "--pattern=PATTERN", "Pattern to match") { |v| pattern = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = one_positional_list(before, after, "gori run project scope update", "<id>") }
-          p.invalid_option { |f| abort "gori run project scope update: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project scope update", f, p) }
           p.missing_option { |f| abort "gori run project scope update: missing value for #{f}" }
         end
         parser.parse(args)
@@ -873,7 +881,7 @@ module Gori
           p.on("-pPATTERN", "--pattern=PATTERN", "Pattern to match (required)") { |v| pattern = v }
           format_flag(p, [:text, :json], "Output: text (default) | json — the new rule, as `scope --format json` lists it") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort "gori run project scope add: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project scope add", f, p) }
           p.missing_option { |f| abort "gori run project scope add: missing value for #{f}" }
         end
         parse_no_positionals(parser, args, "gori run project scope add",
@@ -938,7 +946,7 @@ module Gori
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort "gori run project scope delete: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project scope delete", f, p) }
           p.missing_option { |f| abort "gori run project scope delete: missing value for #{f}" }
         end
 
@@ -985,7 +993,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort "gori run project scope #{action}: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project scope #{action}", f, p) }
           p.missing_option { |f| abort "gori run project scope #{action}: missing value for #{f}" }
         end
         parser.parse(args)
@@ -1056,7 +1064,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort "gori run project sandbox: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project sandbox", f, p) }
           p.missing_option { |f| abort "gori run project sandbox: missing value for #{f}" }
         end
         parser.parse(args)
@@ -1094,7 +1102,7 @@ module Gori
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort "gori run project sandbox #{action}: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project sandbox #{action}", f, p) }
           p.missing_option { |f| abort "gori run project sandbox #{action}: missing value for #{f}" }
         end
         parse_no_positionals(parser, args, "gori run project sandbox #{action}",
@@ -1166,7 +1174,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort "gori run project env: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project env", f, p) }
           p.missing_option { |f| abort "gori run project env: missing value for #{f}" }
         end
         parser.parse(args)
@@ -1209,7 +1217,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run project env set: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project env set", f, p) }
           p.missing_option { |f| abort "gori run project env set: missing value for #{f}" }
         end
         parser.parse(args)
@@ -1268,7 +1276,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run project env delete: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project env delete", f, p) }
           p.missing_option { |f| abort "gori run project env delete: missing value for #{f}" }
         end
         parser.parse(args)
@@ -1343,7 +1351,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort "gori run project host-override: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project host-override", f, p) }
           p.missing_option { |f| abort "gori run project host-override: missing value for #{f}" }
         end
         parser.parse(args)
@@ -1396,7 +1404,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json — the new override, as `host-override --format json` lists it") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run project host-override add: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project host-override add", f, p) }
           p.missing_option { |f| abort "gori run project host-override add: missing value for #{f}" }
         end
         parser.parse(args)
@@ -1464,7 +1472,7 @@ module Gori
           p.on("--ip=IP", "New IPv4/IPv6 literal to dial, optionally IP:PORT") { |v| ip = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run project host-override update: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project host-override update", f, p) }
           p.missing_option { |f| abort "gori run project host-override update: missing value for #{f}" }
         end
         parser.parse(args)
@@ -1506,7 +1514,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run project host-override delete: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project host-override delete", f, p) }
           p.missing_option { |f| abort "gori run project host-override delete: missing value for #{f}" }
         end
         parser.parse(args)

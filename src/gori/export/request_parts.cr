@@ -49,7 +49,8 @@ module Gori
       #     `Export::Curl.unchunk` does — sending the chunk-framed bytes under the library's own
       #     framing would frame them twice), and its Transfer-Encoding token drops with it;
       #   * Content-Length is dropped (every library recomputes it from the body it is given);
-      #   * gori's synthesized h2 `MARKER_HEADERS` never reach generated code;
+      #   * gori's synthesized h2 `MARKER_HEADERS` never reach generated code, and neither does a
+      #     header the browser addressed to its proxy (`PROXY_ONLY_HEADERS`);
       #   * Host is dropped only when it is the URL's own authority — a Host that disagrees with
       #     the URL is the request (a Host-header test), so it rides.
       record Sendable, headers : Array({String, String}), body : String
@@ -60,7 +61,7 @@ module Gori
         te_written = false
         parts.headers.each do |(name, value)|
           down = name.downcase
-          next if Curl::MARKER_HEADERS.includes?(down)
+          next if Curl::MARKER_HEADERS.includes?(down) || Curl::PROXY_ONLY_HEADERS.includes?(down)
           next if down == "content-length"
           next if down == "host" && Curl.host_is_url_authority?(value, parts.url)
           if down == "transfer-encoding"

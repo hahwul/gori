@@ -36,7 +36,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run repeater minimize: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run repeater minimize", f, p) }
           p.missing_option { |f| abort "gori run repeater minimize: missing value for #{f}" }
         end
         parser.parse(args)

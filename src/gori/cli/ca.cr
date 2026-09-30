@@ -102,7 +102,7 @@ module Gori::CLI
       p.on("--ca-dir=DIR", "Directory for the root CA") { |v| ca_dir = v }
       p.on("--pem", "Print the certificate PEM to stdout instead of the path") { pem = true }
       p.on("-h", "--help", "Show this help") { print_ca_usage(STDOUT); exit 0 }
-      p.invalid_option { |flag| abort "unknown option: #{flag}\n#{p}" }
+      p.invalid_option { |flag| abort CLI.unknown_option_message("gori ca", flag, p) }
       p.missing_option { |flag| abort "missing value for #{flag}" }
       reject_ca_leftovers("ca", p)
     end
@@ -155,7 +155,7 @@ module Gori::CLI
       p.on("--ca-dir=DIR", "Directory for the root CA") { |v| ca_dir = v }
       p.on("-y", "--yes", "Skip the interactive confirm") { yes = true }
       p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-      p.invalid_option { |flag| abort "unknown option: #{flag}\n#{p}" }
+      p.invalid_option { |flag| abort CLI.unknown_option_message("gori ca regenerate", flag, p) }
       p.missing_option { |flag| abort "missing value for #{flag}" }
       reject_ca_leftovers("ca regenerate", p)
     end
@@ -208,7 +208,7 @@ module Gori::CLI
       p.on("--ca-dir=DIR", "Directory for the root CA") { |v| ca_dir = v }
       p.on("-y", "--yes", "Skip the interactive confirm") { yes = true }
       p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-      p.invalid_option { |flag| abort "unknown option: #{flag}\n#{p}" }
+      p.invalid_option { |flag| abort CLI.unknown_option_message("gori ca import", flag, p) }
       p.missing_option { |flag| abort "missing value for #{flag}" }
       reject_ca_leftovers("ca import", p)
     end

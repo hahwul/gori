@@ -45,7 +45,7 @@ module Gori
           format_flag(p, [:text, :json, :names], "Output: text (default) | json | names (one name per line — a Miner wordlist)") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run sitemap params: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run sitemap params", f, p) }
           p.missing_option { |f| abort "gori run sitemap params: missing value for #{f}" }
         end
         args = normalize_query_flag(args)

@@ -44,7 +44,7 @@ module Gori
           format_flag(p, [:text, :json, :jsonl], "Output: text (default) | json (one array at the end) | jsonl (streamed)") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run cache-deception: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run cache-deception", f, p) }
           p.missing_option { |f| abort "gori run cache-deception: missing value for #{f}" }
         end
         parser.parse(args)

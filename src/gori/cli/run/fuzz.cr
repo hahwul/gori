@@ -231,7 +231,7 @@ module Gori
           p.on("--record-history=POLICY", "Also record sent request+response as History flows: none (default) | matched | all. Matched rows carry the flow_id; 'all' is capped at #{Fuzz::HistoryRecord::MAX} flows") { |v| record_policy = parse_record_history(v) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort "gori run fuzz: unknown option: #{f}\n#{p}" }
+          p.invalid_option { |f| abort CLI.unknown_option_message("gori run fuzz", f, p) }
           p.missing_option { |f| abort "gori run fuzz: missing value for #{f}" }
         end
         parser.parse(args)
@@ -893,6 +893,7 @@ module Gori
         # a valid partial array on stdout.
         json_stream = format == :json ? CLI::Output::FuzzArrayStream.new(STDOUT) : nil
         begin
+          say_request_line_rewrite # the run is about to send it — see `warn_request_line_rewrite`
           engine.run do |ev|
             case ev
             when Fuzz::ProgressEvent
