@@ -1730,47 +1730,42 @@ module Gori
 
         tool j, "send_request",
           "Send/resend an HTTP request to its origin and return the response. " \
-          "ACTIVE: makes a real outbound request from this host. Either pass " \
-          "`flow_id` to resend a captured flow byte-exact, `repeater_id` to execute " \
-          "a saved HTTP repeater (use send_websocket for WS repeaters), OR give an " \
-          "absolute `url` with optional method/headers/body, or a verbatim `raw` request. " \
-          "A stored source is EXCLUSIVE: `flow_id`/`repeater_id` passed together with " \
-          "url/method/headers/body/body_base64/raw/raw_base64/h2_fields (or with each other) is " \
-          "REFUSED as INVALID_ARGUMENT — `details.conflicting_fields` names them — and NOTHING is " \
-          "sent, because those arguments describe a second, different request. To edit a stored " \
-          "request, read it with get_flow/get_repeater_context and send it back through url/raw. " \
-          "Per-send modifiers (http2, sni, tls_preset, verbatim, timeout_ms, insecure, " \
-          "reframe_grpc) DO combine with a source, and keep_request_line with flow_id. The result " \
-          "always includes `effective_request` (the scheme/host/port/method/target/" \
-          "http_version actually sent). " \
-          "Host + Content-Length are auto-added when omitted on the url path. " \
-          "Match & Replace rules are NOT applied unless apply_rules:true. " \
-          "On a failed send, branch on `retryable`: PROTOCOL_ERROR (gori proved the message " \
-          "malformed) and REQUEST_TRUNCATED (the origin answered — status/head/body are all " \
-          "here — before the request body finished, which RFC 9113 §8.1 permits) are both " \
-          "final; re-sending a truncated body puts the whole body back on the wire." do |s|
+          "ACTIVE: makes a real outbound request from this host. Pass `flow_id` to resend a " \
+          "captured flow byte-exact, `repeater_id` to execute a saved HTTP repeater (send_websocket " \
+          "for WS), OR an absolute `url` with optional method/headers/body, or a verbatim `raw`. " \
+          "A stored source is EXCLUSIVE: combined with url/method/headers/body/body_base64/raw/" \
+          "raw_base64/h2_fields (or each other) it is REFUSED as INVALID_ARGUMENT " \
+          "(`details.conflicting_fields`) and nothing is sent; to edit one, read it with " \
+          "get_flow/get_repeater_context and send it back through url/raw. Per-send modifiers " \
+          "(http2, sni, tls_preset, verbatim, timeout_ms, insecure, reframe_grpc) combine with a " \
+          "source, keep_request_line with flow_id. The result includes `effective_request` (what " \
+          "was actually sent). The url path adds Host + Content-Length when omitted. Match & " \
+          "Replace rules apply only with apply_rules:true. On a failed send, branch on " \
+          "`retryable`: PROTOCOL_ERROR (gori proved the message malformed) and REQUEST_TRUNCATED " \
+          "(the origin answered before the body finished, RFC 9113 §8.1; the response is here) " \
+          "are final." do |s|
           s.field "flow_id", intprop("resend a captured flow by id (no url needed; like the TUI Repeater)")
-          s.field "keep_request_line", boolprop("flow_id only: send the STORED request line as captured instead of rewriting an absolute-form line (GET http://h/p) to origin-form (GET /p). Default false, because a proxy capture's absolute form is a proxy artifact — but on a flow recorded from a direct send it is the routing / cache-poisoning / SSRF payload. `request_line_rewritten:true` comes back whenever the rewrite fired")
-          s.field "repeater_id", intprop("execute a saved HTTP repeater by id (no url needed; respects its target/http2/sni/auto-Content-Length). A session that never came from a flow and still holds §…§ markers is REFUSED — the Repeater tab renders them and this path cannot")
+          s.field "keep_request_line", boolprop("flow_id only: send the STORED request line instead of rewriting an absolute-form line (GET http://h/p) to origin-form (GET /p). Default false: a proxy capture's absolute form is a proxy artifact, but on a flow from a direct send it is the routing / cache-poisoning / SSRF payload. `request_line_rewritten:true` reports a rewrite")
+          s.field "repeater_id", intprop("execute a saved HTTP repeater by id (no url needed; respects its target/http2/sni/auto-Content-Length). A session not from a flow that still holds §…§ markers is REFUSED: only the Repeater tab renders them")
           s.field "url", strprop("absolute URL incl. scheme+host, e.g. https://api.example.com/v1/x (required unless flow_id/repeater_id is given)")
           s.field "method", strprop("HTTP method (default GET)")
           s.field "headers", header_map_prop("request headers: a name->value map, or the [{\"name\":\"Cookie\",\"value\":\"a=1\"}] list the session-slot and authorize tools take")
           s.field "body", strprop("request body, sent as-is")
-          s.field "body_base64", strprop("request body as base64 — the byte-exact form, and it works on BOTH the url/HTTP1.1 path and the h2_fields path. Use it whenever the body is not UTF-8 (binary, protobuf/gRPC, gzip, a multipart upload, an overlong-UTF-8 traversal payload) or carries an octet a JSON string cannot (0x00, 0x80-0xFF, invalid UTF-8) — 'body' is sent as its UTF-8 encoding. Wins over 'body' and gets no project env expansion. A declared session binding or $GEN token still resolves at the send seam, in the body as well as the head (and Content-Length follows it) — pass verbatim:true if the bytes must reach the origin exactly as given")
+          s.field "body_base64", strprop("request body as base64, the byte-exact form, on the url path and the h2_fields path alike. Use it for a non-UTF-8 body (binary, protobuf/gRPC, gzip, multipart, overlong UTF-8) or an octet a JSON string cannot carry (0x00, 0x80-0xFF); 'body' is sent as UTF-8. Wins over 'body'; no project env expansion, but a session binding or $GEN token still resolves (Content-Length follows) unless verbatim:true")
           s.field "raw", strprop("verbatim raw HTTP/1.1 request; overrides method/headers/body (scheme/host/port still come from url)")
-          s.field "raw_base64", strprop("the whole raw HTTP/1.1 request as base64 — the byte-exact form, and the only way to send a latin-1/invalid-UTF-8 header value or a binary body (a JSON string is sent as its UTF-8 encoding, so 'é' goes out as 2 bytes). Implies verbatim: no token expansion, no bare-LF promotion")
-          s.field "verbatim", boolprop("send the bytes EXACTLY as stored/given: no token expansion — project env vars, session bindings, or generators, so an $ENV.KEY, $BIND.NAME, or $GEN.UUID token (bare syntax: $KEY / $NAME) stays literal on the wire — no bare-LF→CRLF promotion in the head, no Content-Length resync, and on HTTP/2 no field-name lowercasing (default false). Nothing interprets the token grammar at all, so an escape (`$$ENV.KEY`, or `$$name` in bare syntax) is NOT consumed either — write the literal token. The active session slot's header overlay still applies: it answers a different question (send this AS WHOM). Applies to 'raw' AND to a repeater_id replay, matching `gori run repeater send --verbatim` (a flow_id replay is byte-exact with or without it; the flag adds h2 field-name case there). Use for desync/smuggling tests where a bare LF header terminator IS the payload, or when a literal token in the stored request is the payload — an app's own $where, $filter or $IFS, which under the namespaced syntax is never a reference anyway and needs no flag. It also waives the §…§ refusal on a repeater_id replay: a stored § stays literal instead of being refused as an unrendered marker")
-          s.field "reframe_grpc", boolprop("HTTP/2 only: recompute the gRPC 5-byte length prefix over the body actually being sent (default FALSE). With the default, a body you edited to a different length keeps the prefix it was captured/authored with — which is what you want when a deliberately-wrong length prefix IS the test, and what a byte-exact replay means. Set TRUE when you edited a unary gRPC message and want the origin to accept the call. Applies to a single message; a client-streaming body and grpc-web-text are left alone. Reflected in effective_request. Mirrors CLI `gori run repeater send --reframe-grpc`.")
+          s.field "raw_base64", strprop("the whole raw HTTP/1.1 request as base64: the byte-exact form, and the only way to send a latin-1/invalid-UTF-8 header or a binary body ('é' in a JSON string goes out as 2 bytes). Implies verbatim")
+          s.field "verbatim", boolprop("send the bytes EXACTLY as stored/given (default false): no token expansion ($ENV.KEY, $BIND.NAME, $GEN.UUID, bare $KEY/$NAME stay literal, and a $$ escape is not consumed either), no bare-LF→CRLF promotion, no Content-Length resync, no h2 field-name lowercasing. The active session slot's header overlay still applies. Applies to 'raw' and to a repeater_id replay (like `gori run repeater send --verbatim`), where it also sends a stored § literally instead of refusing it; a flow_id replay is byte-exact anyway. For desync/smuggling tests where a bare LF IS the payload, or a literal token in the stored request is")
+          s.field "reframe_grpc", boolprop("HTTP/2 only: recompute the gRPC 5-byte length prefix over the body being sent (default FALSE). By default an edited body keeps its captured/authored prefix: a byte-exact replay, and the test when a wrong prefix is the point. Set TRUE after editing a unary message the origin should accept. Single messages only; client-streaming and grpc-web-text bodies are left alone. Reflected in effective_request")
           s.field "h2_fields", h2fieldsprop
           s.field "http2", boolprop("use real HTTP/2; defaults to the flow's version when flow_id is set)")
           s.field "timeout_ms", intprop("per-operation connect + idle (read/write) timeout in milliseconds; a timeout surfaces as a network-error result with error_kind (1-600000)")
-          s.field "sni", strprop("TLS SNI override, independent of the Host header — the vhost-confusion / domain-fronting test (mirrors CLI --sni). OVERRIDES the SNI a flow_id/repeater_id source carries, the way `gori run repeater <flow-id> --sni` does; omit to keep the stored one.")
-          s.field "tls_preset", strprop("TLS fingerprint for THIS send: shape the ClientHello like #{Settings::TLS_PRESET_NAMES.join(" | ")} instead of gori's own, for one send, without touching the settings.json outbound_tls table. Use it to ask whether an origin answers differently by handshake — two sends to one host differing only here dial two separate SSL contexts. The destination's client certificate, protocol range and permissive flag still apply. OVERRIDES the preset a repeater_id source carries (pass \"\" to drop it for this send). An APPROXIMATION of that client's hello, NOT a byte-exact JA3 match — extension order and GREASE placement are OpenSSL's; `gori settings tls-fingerprint HOST --preset NAME` prints the JA3/JA4 that actually goes out. https targets only")
+          s.field "sni", strprop("TLS SNI override, independent of the Host header (vhost confusion / domain fronting). OVERRIDES a flow_id/repeater_id source's SNI; omit to keep it.")
+          s.field "tls_preset", strprop("TLS fingerprint for THIS send: shape the ClientHello like #{Settings::TLS_PRESET_NAMES.join(" | ")} instead of gori's own (settings.json untouched) — to ask whether an origin answers differently by handshake. The destination's client certificate, protocol range and permissive flag still apply. OVERRIDES a repeater_id source's preset (\"\" drops it). An approximation, NOT a byte-exact JA3; `gori settings tls-fingerprint HOST --preset NAME` prints what goes out. https only")
           s.field "insecure", boolprop("skip upstream TLS verification (default false)")
           s.field "apply_rules", boolprop("apply the project's enabled Match & Replace rules (REQUEST side only) to the outgoing request before sending, matching the live proxy; default false — direct sends are byte-exact")
           s.field "record_history", boolprop("record the outbound request and response in History for audit/evidence (default true)")
           s.field "save_as_repeater", boolprop("save this request and its response to the Repeater workbench (default false)")
-          s.field "include_sensitive_headers", boolprop("return Cookie/Set-Cookie/Authorization/API-key response values instead of [REDACTED] (default false). `include_sensitive` — the name the other redacting tools use — is accepted as an alias")
+          s.field "include_sensitive_headers", boolprop("return Cookie/Set-Cookie/Authorization/API-key response values instead of [REDACTED] (default false); `include_sensitive` is an alias")
           s.field "include_sensitive", boolprop("alias for include_sensitive_headers, spelled the way get_flow/compare_flows/get_repeater_context spell it")
           s.field "body_mode", enumprop("how much response body to inline. Default: up to #{AUTO_BODY_BYTES} bytes when the response is recorded (record_history) or saved, a longer body cut with a `more` pointer to get_response_body_chunk; full (the default when neither) inlines up to #{Serialize::MAX_TEXT}", BODY_MODES)
           s.field "max_body_bytes", intprop("cap inlined response-body bytes (clamped to 65536)")
