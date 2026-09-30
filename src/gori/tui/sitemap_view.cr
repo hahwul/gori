@@ -299,13 +299,16 @@ module Gori::Tui
       prev_scroll = @scroll
       prev_expand = collect_expand_state
       @hosts = Sitemap.build(entries)
-      remember_origins
       # Right after the build, before tags and every fold — the order `collect_sitemap` (the
       # CLI) keeps too. With the scope lens on a reference is filtered by it here: the SQL lens
       # the entries came through never saw it, because a reference is not a flow.
       unless js.empty? # `fetch_reload` reads none with the toggle off
         JsRefs.attach!(@hosts, js, @scope, lens: @scope.try(&.active?) == true)
       end
+      # After the attach, which can grow an unrequested ORIGIN root: remembered before it, such a
+      # root drew and could be marked but named no host, so its tag commit was refused and the
+      # export dropped it.
+      remember_origins
       Sitemap.stamp_tags!(@hosts, tags)
       filter_by_tags(plan.positives, plan.negatives)
       if @grouping

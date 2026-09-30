@@ -44,6 +44,20 @@ private def select_label(view : SitemapView, label : String) : Nil
 end
 
 describe "SitemapView — JavaScript references" do
+  # #1371: a reference can grow a root for another origin of a captured host; that root must
+  # name its origin like any built one, or a mark on it cannot be tagged or exported.
+  it "remembers the origin of a root a reference grew" do
+    with_store do |store|
+      sj_flow(store, "/app.js", %(fetch("http://shop.test:9090/api/admin")), ctype: "application/javascript")
+      Gori::JsRefs.scan(store)
+      view = SitemapView.new
+      view.reload(store)
+      draw(view).contains?("http://shop.test:9090").should be_true
+      view.origin_for("http://shop.test:9090").should eq(Gori::Sitemap::Origin.new("http", "shop.test", 9090))
+      view.tag_host("http://shop.test:9090").should eq("shop.test")
+    end
+  end
+
   it "draws an unrequested path with a js aside, and nothing until a scan ran" do
     with_store do |store|
       sj_flow(store, "/api/users", "[]")
