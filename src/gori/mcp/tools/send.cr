@@ -760,12 +760,17 @@ module Gori
         flow_id = int(h, "flow_id") || recorded_flow_id
         # These projections are shared with the CLI save path so both create a replayable row
         # and keep the original dial target and request bytes intact.
+        # Prefer the Plan's expanded SNI (what this send actually used); the fallback retains
+        # an explicit argument. Calling bare `send_sni(h)` as the only source dropped a
+        # stored SNI because it passed no stored value.
         persisted = Repeater::SendPersistence.persist(store, built.scheme, built.host, built.port,
           built.bytes, http2, auto_cl, flow_id, result, h2_fields,
           sni: sni.presence || send_sni(h), tls_preset: tls_preset)
         repeater_id = persisted.id
         return {nil, false} unless repeater_id
 
+        # Issue links come from MCP-only arguments, so keep that relation in this adapter;
+        # the shared seam persists the Repeater row and its response evidence.
         store.add_link(Store::LinkOwnerKind::Issue, issue_id,
           Store::LinkRefKind::Repeater, repeater_id) if issue_id
         if (name = str(h, "name")) && !name.empty?
