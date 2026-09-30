@@ -259,6 +259,9 @@ module Gori
           # feed has no other way to tell a fabricated response from a real one, and an absent
           # field reads as "not applicable" rather than "false".
           j.field "short_circuited", row.short_circuited?
+          # The operator edited this request at Intercept (#1378): the stored request is what
+          # went upstream, not what the client sent. Every row, for `short_circuited`'s reason.
+          j.field "intercept_edited", row.intercept_edited?
           # Where this flow came from (`Gori::FlowSource`), and on EVERY row for
           # `short_circuited`'s reason: an agent reading this feed has no other way to tell a
           # request gori sent — including one IT sent through `send_request` — from traffic the
@@ -810,6 +813,7 @@ module Gori
           # "`stub:false` is what you want before treating History as evidence"; the list
           # projection said so and the detail one dropped it.
           j.field "short_circuited", row.short_circuited?
+          j.field "intercept_edited", row.intercept_edited?
           # `flow_row`'s provenance, on the DETAIL projection for the same sharpened reason: an
           # agent about to quote these bytes in an issue has to know whether the request was
           # the target's client's or gori's own — including one this very server sent through

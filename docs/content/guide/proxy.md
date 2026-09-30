@@ -40,6 +40,8 @@ Reading a held message needs no marks and no editor. The preview soft-wraps, so 
 
 Each row carries how long its message has been waiting, so a burst of holds reads as a queue and not just a list — a hold is a real client blocked on your decision. The catch bar above it shows the condition that is actually armed, including one an agent set through MCP or `gori run intercept filter`. And when a gate cannot hold something it was armed for — a body over the buffer ceiling, which is forwarded rather than truncated — it says so in the notification centre instead of leaving you waiting on a row that will never appear.
 
+History keeps what you decided. A request you **edited** before forwarding reads `EDIT` in the SRC column, and its detail adds an **ORIGINAL** pane holding the request exactly as the client sent it, next to REQUEST, which is what went upstream (`intercept_edited` in `gori run history --format json` and MCP). A **dropped** message says it was dropped at Intercept, not that the upstream failed.
+
 ### What gets held
 
 Requests are held on HTTP/1.1 and HTTP/2, gRPC included. So are responses, except the ones that have no last byte to wait for: a WebSocket upgrade (`101`), a Server-Sent Events stream, and a close-delimited response are forwarded as they arrive rather than held. **WebSocket messages are held too, but only if you ask for them**; see [Intercept on WebSocket](#intercept-websocket) below. The request that opened the socket is held like any other request.

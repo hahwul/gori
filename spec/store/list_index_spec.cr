@@ -38,7 +38,10 @@ describe "History list covering index (schema V37)" do
     with_store do |store|
       cols = index_columns(store, "idx_flows_list")
       cols.first.should eq("id")
-      projected = Gori::Store::SELECT_ROW.split("FROM").first.sub("SELECT", "").split(',').map(&.strip)
+      # `INTERCEPT_EDITED` is a primary-key probe into `intercept_originals` (V44), not a
+      # `flows` column, so it is the one projected term the index does not carry.
+      projected = Gori::Store::SELECT_ROW.sub(Gori::Store::INTERCEPT_EDITED, "")
+        .split("FROM").first.sub("SELECT", "").split(',').map(&.strip).reject(&.empty?)
       (projected - cols).should be_empty
     end
   end

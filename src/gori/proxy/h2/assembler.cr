@@ -152,6 +152,9 @@ module Gori::Proxy::H2
       #
       # nil until the first one: almost every exchange has none.
       @advisories : Array(String)? = nil
+      # The request as held at Intercept, when the operator edited it before release (#1378).
+      # nil on every stream nobody edited. See `Store::CapturedRequest#intercept_original`.
+      property intercept_original : Bytes? = nil
       # The WebSocket transcript of an RFC 8441 extended CONNECT stream (#733), or nil for
       # every other stream — which is all of them on an ordinary connection.
       property ws : WsCapture? = nil
@@ -280,6 +283,21 @@ module Gori::Proxy::H2
         if stream = @streams.delete(stream_id)
           finalize_stream(stream_id, stream, reason)
         end
+      end
+    end
+
+    # The operator edited `stream_id`'s request at Intercept; `original` is the message as it was
+    # held. Recorded on the flow `emit_request` projects (V44). Opens the entry the way
+    # `note_advisory` does, since the edited head is released — and fed — right after this.
+    def note_intercept_original(stream_id : UInt32, original : Bytes) : Nil
+      return if stream_id == 0
+      @mutex.synchronize do
+        stream = @streams[stream_id]?
+        if stream.nil?
+          next if @streams.size >= MAX_LIVE_STREAMS
+          stream = @streams[stream_id] = Stream.new
+        end
+        stream.intercept_original = original
       end
     end
 
@@ -626,7 +644,7 @@ module Gori::Proxy::H2
         body_truncated: cap.truncated?, body_size: cap.total,
         h2_conn_id: @conn_id, h2_stream_id: stream_id.to_i64,
         advisory: advisory_of(stream), connect_protocol: protocol,
-        source: FlowSource::Kind::Proxy)
+        source: FlowSource::Kind::Proxy, intercept_original: stream.intercept_original)
       stream.flow_id = @sink.on_request(captured)
     end
 

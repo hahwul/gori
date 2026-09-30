@@ -4,11 +4,15 @@ module Gori
   class Store
     # --- read API (go straight through the pool; WAL allows concurrent reads) -
 
+    # Whether the operator edited this request at Intercept (V44): a primary-key probe into the
+    # side table, so the list still reads every other column from `idx_flows_list`.
+    INTERCEPT_EDITED = "EXISTS (SELECT 1 FROM intercept_originals o WHERE o.flow_id = flows.id)"
+
     SELECT_ROW = <<-SQL
       SELECT id, created_at, scheme, method, host, port, target, status,
              request_size, response_size, state, duration_us, content_type,
              short_circuited, advisory, request_content_type, connect_protocol,
-             source, source_surface, source_ref
+             source, source_surface, source_ref, #{INTERCEPT_EDITED}
       FROM flows
       SQL
 
@@ -450,6 +454,13 @@ module Gori
       nil
     end
 
+    # The request as the client sent it before the operator edited it at Intercept (#1378), or
+    # nil when this flow was not edited there (`FlowRow#intercept_edited?`). The flow's own
+    # `request_head`/`request_body` are what went upstream.
+    def intercept_original(flow_id : Int64) : Bytes?
+      @db.query_one?("SELECT request FROM intercept_originals WHERE flow_id = ?", flow_id, as: Bytes)
+    end
+
     # Full detail incl. raw BLOBs (the truth) for the detail view.
     # `body_max`, when set, caps request/response body BLOBs via SQLite `substr`
     # (byte-oriented on BLOBs) so list-preview paths never pull multi-MiB bodies
@@ -461,7 +472,7 @@ module Gori
           SELECT id, created_at, scheme, method, host, port, target, status,
                  request_size, response_size, state, duration_us, content_type,
                  short_circuited, advisory, request_content_type, connect_protocol,
-                 source, source_surface, source_ref,
+                 source, source_surface, source_ref, #{INTERCEPT_EDITED},
                  http_version, request_head,
                  CASE WHEN request_body IS NULL THEN NULL ELSE substr(request_body, 1, ?) END,
                  response_head,
@@ -477,7 +488,7 @@ module Gori
           SELECT id, created_at, scheme, method, host, port, target, status,
                  request_size, response_size, state, duration_us, content_type,
                  short_circuited, advisory, request_content_type, connect_protocol,
-                 source, source_surface, source_ref,
+                 source, source_surface, source_ref, #{INTERCEPT_EDITED},
                  http_version, request_head, request_body, response_head, response_body,
                  h2_conn_id, h2_stream_id, request_body_truncated, response_body_truncated, error,
                  sni
@@ -621,6 +632,7 @@ module Gori
         detach_flow_refs(c, nil)
         c.exec("DELETE FROM js_refs")
         c.exec("DELETE FROM js_ref_scans")
+        c.exec("DELETE FROM intercept_originals")
         c.exec("DELETE FROM flows")
         c.exec("DELETE FROM h2_frames")
         # The `h2_connections` rows stay, as they do on an explicit delete (`delete_flow_set`):
@@ -647,6 +659,7 @@ module Gori
       detach_flow_refs(conn, ids)
       conn.exec("DELETE FROM js_refs WHERE flow_id IN (#{marks})", args: args)
       conn.exec("DELETE FROM js_ref_scans WHERE flow_id IN (#{marks})", args: args)
+      conn.exec("DELETE FROM intercept_originals WHERE flow_id IN (#{marks})", args: args)
       # The h2 frame log (often the flow's bulk bytes) — capture the conns BEFORE deleting
       # the flow rows so we can reclaim each one this set was the last user of.
       h2_conns = [] of Int64
