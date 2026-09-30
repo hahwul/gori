@@ -330,7 +330,9 @@ module Gori::Tui
             on ? Attribute::Bold : Attribute::None)
         end
       elsif value = options[selected]?
-        tx = screen.text(tx, y, value, lit_col, bg, Attribute::Bold)
+        # Clipped to the room left of the cue: a value wider than the row (a long Discover
+        # start path) otherwise ran over the card border (#1373).
+        tx = screen.text(tx, y, value, lit_col, bg, Attribute::Bold, width: right - tx - cue_w)
       end
       focused ? screen.text(tx, y, cue, Theme.muted, bg) : tx
     end

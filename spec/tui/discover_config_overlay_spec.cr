@@ -65,6 +65,41 @@ describe Gori::Tui::DiscoverConfigOverlay do
     h.commits.should eq(1) # it DID run — it just refused to close
   end
 
+  it "↵ starts from any row without flipping it; ␣ on Start starts too (#1373)" do
+    ov = DiscoverConfigOverlay.new(dseed)
+    h = OverlayHarness.new(ov)
+    ov.set_selected(DiscoverConfigOverlay::ROW_SPIDER)
+    before = ov.build_config.spider?
+    h.press(Termisu::Input::Key::Enter).should eq(:closed)
+    h.commits.should eq(1)
+    ov.build_config.spider?.should eq(before)
+
+    sp = DiscoverConfigOverlay.new(dseed)
+    hs = OverlayHarness.new(sp)
+    sp.set_selected(DiscoverConfigOverlay::ROW_START)
+    hs.press(Termisu::Input::Key::Space).should eq(:closed)
+    hs.commits.should eq(1)
+  end
+
+  it "draws the start-at row as the selected path, clipped to the card (#1373)" do
+    long = "/#{"x" * 60}/"
+    ov = DiscoverConfigOverlay.new(DiscoverSeed.new(
+      [{long, "http://127.0.0.1:19011#{long}"}, {"/login/", "http://127.0.0.1:19011/login/"}], "127.0.0.1:19011"))
+    h = OverlayHarness.new(ov)
+    box = h.box.not_nil!
+    y = box.y + 3 + DiscoverConfigOverlay::ROW_TARGET
+    row = h.render.row(y)
+    row.should_not contain(%({"))
+    row.should contain("xxxx")
+    # The border cell survives: the value is clipped, not drawn over the card edge.
+    row[box.right - 1].should eq('│')
+    h.press(Termisu::Input::Key::Right).should eq(:open)
+    ov.selected_path.should eq("/login/")
+    row = h.render.row(y)
+    row.should contain("/login/")
+    row.should_not contain("xxxx")
+  end
+
   it "↵ on the headers row raises the sub-editor instead of committing or closing" do
     ov = DiscoverConfigOverlay.new(dseed)
     opened = 0
@@ -107,7 +142,7 @@ describe Gori::Tui::DiscoverConfigOverlay do
     ov.build_config.max_depth.should_not eq(depth)
   end
 
-  it "a click routes rows exactly like ↵; a click outside dismisses" do
+  it "a click routes rows exactly like ␣; a click outside dismisses" do
     ov = DiscoverConfigOverlay.new(dseed)
     opened = 0
     ov.on_edit_headers = -> { opened += 1; nil }
