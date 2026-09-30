@@ -10,11 +10,12 @@ private CLOCK = [1_700_000_000_000_000_i64]
 # into the response head.
 private def pi_flow(store : Gori::Store, target : String, *, host = "shop.test", method = "GET",
                     req_headers = "", body : (String | Bytes)? = nil,
-                    resp_body : String | Bytes = "", resp_headers = "") : Int64
+                    resp_body : String | Bytes = "", resp_headers = "",
+                    scheme = "https", port = 443) : Int64
   CLOCK[0] += 1000
   b = body.is_a?(String) ? body.to_slice : body
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
-    created_at: CLOCK[0], scheme: "https", host: host, port: 443,
+    created_at: CLOCK[0], scheme: scheme, host: host, port: port,
     method: method, target: target, http_version: "HTTP/1.1",
     head: "#{method} #{target} HTTP/1.1\r\nHost: #{host}\r\n#{req_headers}\r\n".to_slice,
     body: b, source: Gori::FlowSource::Kind::Proxy))
@@ -227,6 +228,32 @@ describe Gori::ParamInventory do
     end
   end
 
+  # #1371: two services on one host are two endpoint sets, as they are two Sitemap roots.
+  it "keeps the same endpoint on two origins of one host as separate rows" do
+    with_store do |store|
+      a = pi_flow(store, "/s?q=1", host: "h.test", scheme: "http", port: 19021)
+      pi_flow(store, "/s?q=2", host: "h.test", scheme: "http", port: 19022)
+      pi_flow(store, "/s?q=3", host: "h.test", scheme: "https", port: 8443)
+      rows = PI.build(store).rows
+      rows.map { |r| {r.scheme, r.port, r.samples} }.should eq([
+        {"http", 19021, ["1"]}, {"http", 19022, ["2"]}, {"https", 8443, ["3"]},
+      ])
+      rows[0].origin_label.should eq("http://h.test:19021")
+      PI.carries?(rows[0], store.flow_row(a).not_nil!).should be_true
+      PI.carries?(rows[1], store.flow_row(a).not_nil!).should be_false # same path, another port
+    end
+  end
+
+  it "narrows to one origin of the host with scheme and port" do
+    with_store do |store|
+      pi_flow(store, "/s?q=1", host: "h.test", scheme: "http", port: 19021)
+      pi_flow(store, "/s?q=2", host: "h.test", scheme: "http", port: 19022)
+      pi_flow(store, "/s?q=3", host: "h.test", scheme: "https", port: 19021)
+      rows = PI.build(store, PI::Options.new(host: "h.test", scheme: "http", port: 19021)).rows
+      rows.map(&.samples).should eq([["1"]])
+    end
+  end
+
   # The stored body is read whole: a cap on the WIRE bytes would cut a JSON body before it
   # could parse.
   it "reads a JSON body larger than the old 256 KiB cut" do
@@ -297,7 +324,20 @@ describe Gori::ParamInventory do
         pi_flow(store, "/invoices?page=1")
         pi_flow(store, "/x?elsewhere=1", host: "other.test")
         rows = PI.build(store).rows
-        PI.neighbor_names(rows, "shop.test", "/invoices").should eq(["tenant"])
+        PI.neighbor_names(rows, rows.find!(&.path.==("/invoices"))).should eq(["tenant"])
+      end
+    end
+
+    # #1371: another port of the host is another service — its /invoices is not this one's.
+    it "reads neighbours and own names on the row's origin only" do
+      with_store do |store|
+        pi_flow(store, "/invoices?page=1", host: "h.test", scheme: "http", port: 19021)
+        pi_flow(store, "/orders?tenant=1", host: "h.test", scheme: "http", port: 19021)
+        pi_flow(store, "/invoices?debug=1", host: "h.test", scheme: "http", port: 19022)
+        pi_flow(store, "/orders?other=1", host: "h.test", scheme: "http", port: 19022)
+        rows = PI.build(store).rows
+        mine = rows.find! { |r| r.path == "/invoices" && r.port == 19021 }
+        PI.neighbor_names(rows, mine).should eq(["tenant"])
       end
     end
   end

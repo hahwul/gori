@@ -19,7 +19,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   def sequence_from_sitemap : Nil
     ep = sitemap_controller.view.selected_endpoint
     return (@toast = "select an endpoint to send") unless ep
-    if id = @session.store.representative_flow_id(ep[:host], ep[:method], ep[:target])
+    if id = sitemap_flow_id(ep)
       open_sequence_config(sequencer_controller.build_seed_from_flow(id))
     else
       @toast = "no captured request for this path — capture it, or use Discover"

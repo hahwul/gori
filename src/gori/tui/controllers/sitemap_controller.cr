@@ -41,7 +41,7 @@ module Gori::Tui
     # with their bodies, and on the one cooperative scheduler a synchronous walk would freeze
     # the terminal for its length. The engine yields between flows; the finished toast lands
     # through `drain_export`. `.yaml`/`.yml` writes YAML, anything else JSON.
-    def export_openapi(path : String, filter : QL::Filter, targets : Hash(String, Set(String)?),
+    def export_openapi(path : String, filter : QL::Filter, targets : Hash(Sitemap::Origin, Set(String)?),
                        label : String) : Nil
       store = @host.session.store
       results = @export_results
@@ -227,15 +227,15 @@ module Gori::Tui
       handle_double_click_content(rect.inset(1, 1), mx, my)
     end
 
-    # `y`: every marked row as `host/path`, one per line — or the cursor row's seed, which is
-    # the host for a host row and `host/path` below it (the string `a` would scope). The tree
-    # carries no scheme, so this is the URL minus its scheme, the way the rows read.
+    # `y`: every marked row as a URL, one per line — or the cursor row's: the origin for a host
+    # row (`https://h:8443`), origin + path below it. A root is an origin (#1371), so this is
+    # the URL the row stands for, scheme and port included, the way the rows read.
     def copy_row : Nil
       keys = @sitemap.marked_keys
       text = if keys.empty?
-               @sitemap.selected_scope_seed.try(&.[:pattern]) || ""
+               @sitemap.selected_url || ""
              else
-               keys.map { |(host, path)| "#{host}#{path}" }.join("\n")
+               keys.map { |(origin, path)| "#{origin}#{path}" }.join("\n")
              end
       copy_text(text, keys.size > 1 ? "#{keys.size} paths" : nil)
     end
@@ -563,7 +563,13 @@ module Gori::Tui
       # "tagged", stamped the memo onto the tree, and let the next reload take it back with no
       # word — the memo was on nobody's disk. Stamp what landed, name what did not; MCP's
       # `set_sitemap_tag` already refuses in the same terms.
-      committed = targets.select { |(host, path)| store.set_sitemap_tag(host, path, text) }
+      # A tag is keyed on the BARE host (V17), so the origin key is resolved to it first — the
+      # memo then shows under every origin of that host (`Sitemap.stamp_tags!`). A key whose
+      # origin the view cannot name is not written (and so reported refused), never written
+      # under the `scheme://host:port` label, where nothing would ever stamp it.
+      committed = targets.select do |(origin, path)|
+        (host = @sitemap.tag_host(origin)) && store.set_sitemap_tag(host, path, text)
+      end
       @sitemap.apply_tag(text, committed) # stamp in place — keeps the selection, no re-derive
       # A `tag:` filter must re-evaluate against the changed tags (the in-place stamp
       # doesn't re-filter), else the just-tagged node stays hidden / a cleared tag shown.
@@ -644,9 +650,17 @@ module Gori::Tui
       shown = keys.first(TabController::SELECTION_ID_CAP)
       j.field "nodes" do
         j.array do
-          shown.each do |(host, path)|
+          shown.each do |(key, path)|
             j.object do
-              j.field "host", host
+              # The bare host, as every other surface names one, plus the origin the row is
+              # (#1371) — the key itself is the root's `scheme://host:port` label.
+              if o = @sitemap.origin_for(key)
+                j.field "host", o.host
+                j.field "scheme", o.scheme
+                j.field "port", o.port
+              else
+                j.field "host", key
+              end
               j.field "path", path
             end
           end

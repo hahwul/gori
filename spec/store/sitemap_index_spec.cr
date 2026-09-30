@@ -103,6 +103,23 @@ describe "Sitemap covering index (schema V38)" do
     end
   end
 
+  # #1371: the origin-keyed tree read (`sitemap_origin_entries`) is the one the Sitemap tab runs
+  # on every poll, so it must stay a covering read with no sort, lens on or off, and the
+  # origin-narrowed endpoint lookup must stay one index seek.
+  it "keeps the origin-keyed tree read and the origin-narrowed lookup on the index" do
+    with_store do |store|
+      ["1", "(1) AND (#{Gori::QL.hide_static.sql})"].each do |where|
+        plan = query_plan(store, "SELECT DISTINCT host, target, method, scheme, port FROM flows WHERE #{where} " \
+                                 "ORDER BY host, target, method, scheme, port LIMIT 10 OFFSET 0")
+        plan.should contain("COVERING INDEX idx_flows_sitemap")
+        plan.should_not contain("TEMP B-TREE")
+      end
+      query_plan(store, "SELECT id FROM flows WHERE host = 'a' AND method = 'GET' AND target = '/' " \
+                        "AND scheme = 'http' AND port = 8080 ORDER BY (status IS NOT NULL) DESC, id DESC LIMIT 1")
+        .should contain("COVERING INDEX idx_flows_sitemap (host=? AND target=? AND method=? AND scheme=? AND port=?)")
+    end
+  end
+
   it "returns exactly the groups the old GROUP BY order did" do
     with_store do |store|
       120.times { |i| seed_flow(store, i) }

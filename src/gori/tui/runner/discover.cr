@@ -10,13 +10,21 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       @toast = "select a host or path to discover"
       return
     end
-    # The origin comes from a REAL captured flow (an id fold has none of its own, so that
-    # resolves to a descendant), but the scan target is the CONTAINER — on a `{uuid}` row
-    # the user means "discover under /users", not "brute-force under this one uuid".
-    # Both are identity on a normal node, so nothing changes off a fold.
-    id = @session.store.representative_flow_id(ep[:host], ep[:method], ep[:target])
-    base = id.try { |i| @session.store.flow_row(i).try(&.url) }
-    origin = base.try { |u| Discover::Url.parse(u).try { |p| Discover::Url.origin(p) } } || "https://#{ep[:host]}"
+    # The origin is the ROW's — a Sitemap root is one scheme + host + port (#1371) — so a host
+    # row, which has no flow of its own, starts where its traffic went (#1372: the fallback
+    # here was `https://<host>`, so a host captured on `http://h:19011` was crawled on port
+    # 443). A row without one (never, for a tree built from origins) falls back to a real
+    # captured flow's origin, and with neither the run is refused rather than aimed at a
+    # guessed port. The scan target is the CONTAINER — on a `{uuid}` row the user means
+    # "discover under /users", not "brute-force under this one uuid". Both are identity on a
+    # normal node, so nothing changes off a fold.
+    origin = ep[:origin].try(&.label) ||
+             sitemap_flow_id(ep).try { |i| @session.store.flow_row(i).try(&.url) }
+               .try { |u| Discover::Url.parse(u).try { |p| Discover::Url.origin(p) } }
+    unless origin
+      @toast = "no captured origin for #{ep[:host]} — capture a request to it first"
+      return
+    end
     target = view.selected_endpoint(:container).try(&.[](:target)) || ep[:target]
     open_discover_config(build_discover_seed(origin, ep[:host], target))
   end

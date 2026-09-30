@@ -1254,7 +1254,7 @@ module Gori::Tui
       start = rail_start
       @rows[start, n].map do |r|
         status, scolor = FlowStatus.cell(r)
-        DrillIn::RailRow.new(status, "#{r.method} #{r.host}#{origin_path_memo(r)}",
+        DrillIn::RailRow.new(status, "#{r.method} #{host_cell(r)}#{origin_path_memo(r)}",
           fmt_time_memo(r.created_at), scolor)
       end
     end
@@ -1278,7 +1278,7 @@ module Gori::Tui
       d = @detail || return nil
       row = d.row
       pos = detail_row_index.try { |i| "#{i + 1}/#{@rows.size}" }
-      Frame::Crumb.new("HISTORY", "#{row.method} #{row.host}#{origin_path_memo(row)}", pos)
+      Frame::Crumb.new("HISTORY", "#{row.method} #{host_cell(row)}#{origin_path_memo(row)}", pos)
     end
 
     def selected_id : Int64?
@@ -3125,7 +3125,7 @@ module Gori::Tui
         proto_label = stub ? "STUB" : kind.label(row.scheme)
         proto_color = stub ? Theme.yellow : (kind.http? ? Theme.muted : Theme.accent)
         screen.text(proto_x, y, proto_label, proto_color, bg)
-        screen.text(host_x, y, row.host, fg, bg, width: host_w) if host_w > 0
+        screen.text(host_x, y, host_cell(row, host_w), fg, bg, width: host_w) if host_w > 0
         screen.text(path_x, y, origin_path_memo(row), fg, bg, width: path_w) if path_w > 0
         # Failed flows store status 0 — FlowStatus shows the STATE (ERR/ABT) instead of
         # a cryptic "0" indistinguishable from a still-pending "···".
@@ -3387,6 +3387,24 @@ module Gori::Tui
         @mime_memo.clear if @mime_memo.size >= MIME_MEMO_CAP
         @mime_memo[ct] = fmt_mime(ct)
       end
+    end
+
+    # The HOST cell: the authority, so a non-default port is on the row — `127.0.0.1:19011` and
+    # `127.0.0.1:19999` are two services, and a bare `127.0.0.1` made them read identical
+    # (#1371). The default port stays elided (`Gori::Url.authority`), so an ordinary row reads
+    # as it always did; PROTO already says the scheme.
+    #
+    # With `width`, fitted by shortening the HOST, never the port: `Screen#text` ellipsizes from
+    # the right, which on a long host cut off exactly the `:19011`/`:19999` that tells the two
+    # rows apart. (`ProjectPicker.fit_label` is the same rule for the same reason.)
+    private def host_cell(row : Store::FlowRow, width : Int32? = nil) : String
+      full = Gori::Url.authority(row.scheme, row.host, row.port)
+      return full if width.nil? || Screen.display_width(full) <= width
+      bare = Gori::Url.authority(row.scheme, row.host, row.scheme == "https" ? 443 : 80)
+      port = full[bare.size..] # ":19011", or "" on the default port
+      return full if port.empty?
+      room = width - port.size
+      room < 2 ? port : "#{Screen.fit(bare, room)}#{port}"
     end
 
     private def origin_path_memo(row : Store::FlowRow) : String

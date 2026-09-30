@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Sitemap: one root per origin (`http://127.0.0.1:19021`, `https://127.0.0.1:8443`) instead of one per host, and what you do from a row stays on that origin, so Discover from a host row no longer crawls `https://<host>`. `gori run sitemap` paths and JSON, parameter inventories and History's HOST column now show the scheme and port, and `--origin` (MCP `origin`) narrows `sitemap params` and `sitemap export` to one (#1371, #1372)
 - Probe: `probe_scan{persist: true}` and `gori run probe --persist` write the scan's findings into the triage list, so `probe_issues`, promote and dismiss work on a project no TUI ever scanned; MCP `--tools=@recon` now serves `probe_scan`, passive only (#1392)
 - MCP: an object's id is accepted under the name the neighbouring tools use — `flow_id` on `get_flow`/`delete_flow`, `repeater_id` on the repeater tools, `enabled` on `intercept_toggle` — and `get_repeater_context` rows carry `id` beside `db_id` (#1393)
 - MCP: smaller answers by default — `get_flow` and a recorded `send_request` inline 8 KB of a body with a pointer to the rest, `list_sitemap` and `list_params` page 50 rows, every `limit` states its default and maximum in the schema, and `export_openapi{output_path}` writes the document to a file instead of the reply (#1394)

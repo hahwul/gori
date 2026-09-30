@@ -7,6 +7,7 @@ module Gori
         project_name : String? = nil
         query : String? = nil
         host : String? = nil
+        origin : String? = nil
         path_prefix : String? = nil
         locations : Array(Miner::Location)? = nil
         all_headers = false
@@ -31,6 +32,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("-qQL", "--query=QL", "Only flows matching this QL query") { |v| query = v }
           p.on("--host=HOST", "Only this host (exact, case-insensitive)") { |v| host = v }
+          p.on("--origin=URL", "Only this origin — scheme, host and port, e.g. http://127.0.0.1:19021") { |v| origin = v }
           p.on("--path=PREFIX", "Only endpoints whose path starts with PREFIX") { |v| path_prefix = v }
           p.on("--location=LIST", "Only these locations: query,form,multipart,json,headers,cookies (default: all)") do |v|
             locations = parse_mine_locations(v, "gori run sitemap params")
@@ -56,6 +58,7 @@ module Gori
         query, dropped = Run.compose_history_query(query, positional, neg_terms)
         Run.warn_dropped_query_terms("sitemap params", dropped)
         Run.refuse_unknown_query_fields("sitemap params", query, lenient)
+        host, scheme, port = resolve_origin_flag("sitemap params", host, origin)
         if (loc = locations) && loc.empty?
           abort "gori run sitemap params: --location was empty — name at least one of query|form|multipart|json|headers|cookies"
         end
@@ -72,7 +75,7 @@ module Gori
         # The TUI's Params sub-tab reads the tree's flow set, hide-static lens included; this is
         # that lens asked for explicitly (never read from the TUI's persisted toggle).
         filter = QL.and(filter, QL.hide_static) if hide_static
-        opts = ParamInventory::Options.new(filter: filter, host: host, path_prefix: path_prefix,
+        opts = ParamInventory::Options.new(filter: filter, host: host, scheme: scheme, port: port, path_prefix: path_prefix,
           locations: wanted, all_headers: all_headers, max_flows: max_flows, samples: samples)
         report = begin
           sitemap_params_report(store, opts, in_scope)
@@ -147,20 +150,22 @@ module Gori
         ParamInventory.build(store, opts)
       end
 
-      # Grouped by host, then endpoint; one line per parameter. Every captured string goes
-      # through `term_safe` — a name or value is bytes off the wire and may carry an escape.
+      # Grouped by origin (`https://h:8443`, as the Sitemap labels its roots — two services on
+      # one host are two groups, #1371), then endpoint; one line per parameter. Every captured
+      # string goes through `term_safe` — a name or value is bytes off the wire and may carry
+      # an escape.
       def self.params_text(rows : Array(ParamInventory::Row), include_sensitive : Bool) : String
         name_w = rows.max_of? { |r| CLI::Output.cell_width(CLI::Output.term_safe(r.name)) }.try(&.clamp(4, 40)) || 4
         count_w = rows.max_of?(&.count.to_s.size) || 1
         String.build do |io|
-          host = nil
+          origin = nil
           endpoint = nil
           rows.each do |r|
-            if r.host != host
-              io << '\n' if host
-              host = r.host
+            if (label = r.origin_label) != origin
+              io << '\n' if origin
+              origin = label
               endpoint = nil
-              io << CLI::Output.term_safe(r.host) << '\n'
+              io << CLI::Output.term_safe(label) << '\n'
             end
             if {r.method, r.path} != endpoint
               endpoint = {r.method, r.path}
@@ -189,7 +194,9 @@ module Gori
       def self.param_row_json(j : JSON::Builder, r : ParamInventory::Row, include_sensitive : Bool) : Nil
         redacted = r.sensitive && !include_sensitive
         j.object do
+          CLI::Output.json_captured(j, "scheme", r.scheme)
           CLI::Output.json_captured(j, "host", r.host)
+          j.field "port", r.port
           CLI::Output.json_captured(j, "method", r.method)
           CLI::Output.json_captured(j, "path", r.path)
           j.field "location", r.location.label

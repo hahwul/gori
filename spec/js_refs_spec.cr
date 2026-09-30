@@ -395,6 +395,72 @@ describe Gori::JsRefs do
       end
     end
 
+    # #1371: a Sitemap root is one origin, so the sighting a JavaScript-only row opens or sends
+    # is read on that origin — the host alone would hand back another port's reference.
+    it "narrows sightings to one origin of the host" do
+      with_store do |store|
+        jr_flow(store, "/a.js", %(fetch("http://api.test:8080/p")))
+        jr_flow(store, "/b.js", %(fetch("https://api.test/p")))
+        JR.scan(store)
+        store.js_ref_sightings(host: "api.test", path: "/p").size.should eq(2)
+        only = store.js_ref_sightings(host: "api.test", path: "/p", scheme: "http", port: 8080)
+        only.map { |r| {r.scheme, r.port} }.should eq([{"http", 8080}])
+        store.js_ref_sightings(host: "api.test", path: "/p", scheme: "https", port: 8080).should be_empty
+      end
+    end
+
+    it "says whether the reference's own origin has traffic, and follows new traffic to it" do
+      with_store do |store|
+        jr_flow(store, "/a.js", %(fetch("/api/one");fetch("http://shop.test:8080/x")))
+        JR.scan(store)
+        nodes, _ = store.js_ref_nodes
+        nodes.find!(&.path.==("/api/one")).origin_captured.should be_true
+        other = nodes.find!(&.port.==(8080))
+        {other.host_captured, other.origin_captured}.should eq({true, false})
+        store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "shop.test", port: 8080, method: "GET", target: "/img.png",
+          http_version: "HTTP/1.1", head: "GET /img.png HTTP/1.1\r\nHost: shop.test\r\n\r\n".to_slice,
+          source: Gori::FlowSource::Kind::Proxy))
+        store.flush
+        store.js_ref_nodes[0].find!(&.port.==(8080)).origin_captured.should be_true
+      end
+    end
+
+    # A delete can take a captured flag back: the last flow on an origin gone (not the newest
+    # flow, and carrying no references itself, so neither the reference fingerprint nor the
+    # newest id moves).
+    it "clears origin_captured when the only flow on that origin is deleted" do
+      with_store do |store|
+        jr_flow(store, "/a.js", %(fetch("http://shop.test:8080/x")))
+        img = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "shop.test", port: 8080, method: "GET", target: "/img.png",
+          http_version: "HTTP/1.1", head: "GET /img.png HTTP/1.1\r\nHost: shop.test\r\n\r\n".to_slice,
+          source: Gori::FlowSource::Kind::Proxy))
+        jr_flow(store, "/later", "[]", ctype: "application/json") # the newest flow stays put
+        JR.scan(store)
+        store.js_ref_nodes[0].find!(&.port.==(8080)).origin_captured.should be_true
+        store.delete_flow(img).should be_true
+        store.js_ref_nodes[0].find!(&.port.==(8080)).origin_captured.should be_false
+      end
+    end
+
+    # The newest flow deleted moves the id and the count down together, so the "count grew less
+    # than the id" test alone does not see it.
+    it "clears origin_captured when the deleted flow on that origin was the newest one" do
+      with_store do |store|
+        jr_flow(store, "/a.js", %(fetch("http://shop.test:8080/x")))
+        JR.scan(store)
+        img = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "shop.test", port: 8080, method: "GET", target: "/img.png",
+          http_version: "HTTP/1.1", head: "GET /img.png HTTP/1.1\r\nHost: shop.test\r\n\r\n".to_slice,
+          source: Gori::FlowSource::Kind::Proxy))
+        store.flush
+        store.js_ref_nodes[0].find!(&.port.==(8080)).origin_captured.should be_true
+        store.delete_flow(img).should be_true # the newest flow, carrying no references
+        store.js_ref_nodes[0].find!(&.port.==(8080)).origin_captured.should be_false
+      end
+    end
+
     it "says whether the host has traffic, and follows new scans and deletes through its memo" do
       with_store do |store|
         a = jr_flow(store, "/a.js", %(fetch("/api/one");fetch("https://other.test/x")))
@@ -452,6 +518,50 @@ describe Gori::JsRefs do
       end
     end
 
+    # #1371 / V43: one bundle naming the same path on two origins stores and lists both —
+    # `UNIQUE(host, path, flow_id)` kept whichever resolved first.
+    it "keeps two origins of one path from the same bundle" do
+      with_store do |store|
+        jr_flow(store, "/app.js", %(fetch("http://shop.test:8080/p");fetch("https://shop.test/p")))
+        JR.scan(store)
+        JR.list(store, JR::ListOptions.new(include_requested: true)).endpoints.map(&.url).sort!
+          .should eq(["http://shop.test:8080/p", "https://shop.test/p"])
+        store.js_ref_endpoint_count.should eq(2)
+      end
+    end
+
+    # Grouped by origin in the listing, so the text form draws each origin heading once.
+    it "orders the listing by origin before path" do
+      with_store do |store|
+        jr_flow(store, "/a.js", %(fetch("http://shop.test:8080/a");fetch("https://shop.test/b")))
+        jr_flow(store, "/b.js", %(fetch("https://shop.test/a");fetch("http://shop.test:8080/b")))
+        JR.scan(store)
+        eps = JR.list(store, JR::ListOptions.new(include_requested: true)).endpoints
+        eps.map(&.url).should eq(["http://shop.test:8080/a", "http://shop.test:8080/b",
+                                  "https://shop.test/a", "https://shop.test/b"])
+        Gori::CLI::Run.sitemap_js_text(eps).lines.reject(&.starts_with?(' ')).reject(&.empty?)
+          .should eq(["http://shop.test:8080", "https://shop.test"])
+      end
+    end
+
+    # #1371: a Sitemap root is an origin, so "requested" is asked on the reference's own origin.
+    # `/api/users` captured on https://shop.test does not make http://shop.test:9090/api/users
+    # requested — the tree draws that one as a never-requested root, and the list must agree.
+    it "lists one row per origin and judges requested on that origin" do
+      with_store do |store|
+        jr_flow(store, "/api/users", "[]", ctype: "application/json")
+        # One reference per (host, path) per flow, so the two origins come from two bundles.
+        jr_flow(store, "/a.js", %(fetch("/api/users")))
+        jr_flow(store, "/b.js", %(fetch("http://shop.test:9090/api/users")))
+        JR.scan(store)
+        all = JR.list(store, JR::ListOptions.new(include_requested: true))
+        all.endpoints.map { |e| {e.url, e.requested} }.sort_by!(&.[0]).should eq([
+          {"http://shop.test:9090/api/users", false}, {"https://shop.test/api/users", true},
+        ])
+        JR.list(store).endpoints.map(&.url).should eq(["http://shop.test:9090/api/users"])
+      end
+    end
+
     it "hides a host the project never captured unless a scope include names it" do
       with_store do |store|
         jr_flow(store, "/app.js", %(var ns="http://www.w3.org/2000/svg";fetch("https://api.shop.test/v1/me")))
@@ -497,9 +607,14 @@ describe Gori::JsRefs do
   end
 end
 
+# One origin-keyed endpoint, the shape `Store#sitemap_origin_entries` hands `Sitemap.build`.
+private def oe(host : String, target : String, scheme = "https", port = 443, method = "GET") : Gori::Store::SitemapOriginEntry
+  Gori::Store::SitemapOriginEntry.new(scheme, host, port, method, target)
+end
+
 describe "Gori::Sitemap.attach_js_refs!" do
   it "adds a count to a captured node and grows unrequested nodes, leaving endpoint counts traffic-only" do
-    hosts = Gori::Sitemap.build([{"Shop.test", "GET", "/api/users"}])
+    hosts = Gori::Sitemap.build([oe("Shop.test", "/api/users")])
     before = Gori::Sitemap.endpoint_count(hosts[0])
     refs = [
       Gori::Store::JsRefNode.new("https", "shop.test", 443, "/api/users", 2),
@@ -507,7 +622,7 @@ describe "Gori::Sitemap.attach_js_refs!" do
       Gori::Store::JsRefNode.new("https", "other.test", 443, "/x", 1),
     ]
     Gori::Sitemap.attach_js_refs!(hosts, refs) { |r| r.host == "allowed.test" }
-    hosts.map(&.label).should eq(["Shop.test"]) # other.test refused by the block
+    hosts.map(&.label).should eq(["https://Shop.test"]) # other.test refused by the block
     api = hosts[0].children.find!(&.label.==("api"))
     users = api.children.find!(&.label.==("users"))
     users.js_refs.should eq(2)
@@ -523,7 +638,7 @@ describe "Gori::Sitemap.attach_js_refs!" do
   end
 
   it "lands a query-less reference on the captured query variant instead of growing an unrequested sibling" do
-    hosts = Gori::Sitemap.build([{"shop.test", "GET", "/api/search?q=shoes"}])
+    hosts = Gori::Sitemap.build([oe("shop.test", "/api/search?q=shoes")])
     before = Gori::Sitemap.endpoint_count(hosts[0])
     Gori::Sitemap.attach_js_refs!(hosts, [Gori::Store::JsRefNode.new("https", "shop.test", 443, "/api/search", 1)]) { false }
     api = hosts[0].children.find!(&.label.==("api"))
@@ -534,16 +649,16 @@ describe "Gori::Sitemap.attach_js_refs!" do
   end
 
   it "does not bring back a host a lens hid when the host has captured traffic" do
-    hosts = Gori::Sitemap.build([{"shop.test", "GET", "/"}])
+    hosts = Gori::Sitemap.build([oe("shop.test", "/")])
     ref = Gori::Store::JsRefNode.new("https", "cdn.shop.test", 443, "/api/x", 1, host_captured: true)
     path = File.tempname("gori-jsattach", ".db")
     store = Gori::Store.open(path)
     begin
       store.add_scope_rule("include", "host", "*.shop.test")
       JR.attach!(hosts, [ref], Gori::Scope.load(store), lens: false)
-      hosts.map(&.label).should eq(["shop.test"])
+      hosts.map(&.label).should eq(["https://shop.test"])
       JR.attach!(hosts, [ref.copy_with(host_captured: false)], Gori::Scope.load(store), lens: false)
-      hosts.map(&.label).should eq(["shop.test", "cdn.shop.test"])
+      hosts.map(&.label).should eq(["https://shop.test", "https://cdn.shop.test"])
     ensure
       store.close
       File.delete?(path)
@@ -553,14 +668,14 @@ describe "Gori::Sitemap.attach_js_refs!" do
   # The host rule reads each reference's URL, so a scope include on `api.x.test/v1` admits
   # `/v1/users` alone whichever reference sorted first, as `JsRefs.list` does.
   it "judges every reference under a host it grew, not only the first" do
-    hosts = Gori::Sitemap.build([{"shop.test", "GET", "/"}])
+    hosts = Gori::Sitemap.build([oe("shop.test", "/")])
     refs = {"/admin", "/v1/users", "/zzz"}.map { |p| Gori::Store::JsRefNode.new("https", "api.x.test", 443, p, 1) }.to_a
     path = File.tempname("gori-jsattach", ".db")
     store = Gori::Store.open(path)
     begin
       store.add_scope_rule("include", "string", "api.x.test/v1")
       JR.attach!(hosts, refs, Gori::Scope.load(store), lens: false)
-      api = hosts.find!(&.label.==("api.x.test"))
+      api = hosts.find!(&.host.==("api.x.test"))
       api.children.map(&.label).should eq(["v1"])
       api.children[0].children.map(&.path).should eq(["/v1/users"])
     ensure
@@ -570,10 +685,52 @@ describe "Gori::Sitemap.attach_js_refs!" do
   end
 
   it "adds a host the block allows, flagged unrequested" do
-    hosts = Gori::Sitemap.build([{"shop.test", "GET", "/"}])
+    hosts = Gori::Sitemap.build([oe("shop.test", "/")])
     Gori::Sitemap.attach_js_refs!(hosts, [Gori::Store::JsRefNode.new("https", "api.shop.test", 443, "/v1/me", 1)]) { true }
-    api = hosts.find!(&.label.==("api.shop.test"))
+    api = hosts.find!(&.label.==("https://api.shop.test"))
     api.unrequested?.should be_true
     api.children.first.children.first.path.should eq("/v1/me")
+  end
+
+  # #1371: a reference names an ORIGIN, and the tree's roots are origins.
+  it "lands a reference on its own origin, not on another port of the same host" do
+    hosts = Gori::Sitemap.build([oe("h.test", "/a", "http", 19021), oe("h.test", "/b", "http", 19022)])
+    Gori::Sitemap.attach_js_refs!(hosts, [Gori::Store::JsRefNode.new("http", "h.test", 19022, "/b/deep", 1)]) { false }
+    hosts.map(&.label).should eq(["http://h.test:19021", "http://h.test:19022"])
+    hosts[0].children.map(&.label).should eq(["a"])
+    hosts[1].children[0].children.map(&.path).should eq(["/b/deep"])
+  end
+
+  # The host is known (it has a root), so its other service shows — `visible_host?`'s rule —
+  # beside the host's own roots rather than at the end of the tree, and the block is not asked.
+  # A captured origin the tree lacks was hidden by a lens (hide-static hid a service that only
+  # served images); bringing it back as "never requested" would be false.
+  it "does not grow a root for an origin that has captured traffic" do
+    hosts = Gori::Sitemap.build([oe("h.test", "/", "https", 443)])
+    ref = Gori::Store::JsRefNode.new("http", "h.test", 8080, "/img/x", 1, host_captured: true, origin_captured: true)
+    Gori::Sitemap.attach_js_refs!(hosts, [ref]) { true }
+    hosts.map(&.label).should eq(["https://h.test"])
+    Gori::Sitemap.attach_js_refs!(hosts, [ref.copy_with(origin_captured: false)]) { false }
+    hosts.map(&.label).should eq(["https://h.test", "http://h.test:8080"])
+  end
+
+  it "grows an unrequested root for an origin of a known host, next to that host's roots" do
+    hosts = Gori::Sitemap.build([oe("a.test", "/"), oe("h.test", "/x", "http", 8080), oe("z.test", "/")])
+    refs = [Gori::Store::JsRefNode.new("http", "h.test", 9090, "/api", 1),
+            Gori::Store::JsRefNode.new("http", "h.test", 9090, "/api/v2", 1)]
+    Gori::Sitemap.attach_js_refs!(hosts, refs) { false }
+    hosts.map(&.label).should eq(["https://a.test", "http://h.test:8080", "http://h.test:9090", "https://z.test"])
+    grown = hosts[2]
+    grown.unrequested?.should be_true
+    grown.origin.should eq(Gori::Sitemap::Origin.new("http", "h.test", 9090))
+    grown.children[0].js_refs.should eq(1)
+    grown.children[0].children.map(&.path).should eq(["/api/v2"])
+  end
+
+  it "matches an origin's host case-insensitively" do
+    hosts = Gori::Sitemap.build([oe("Shop.test", "/")])
+    Gori::Sitemap.attach_js_refs!(hosts, [Gori::Store::JsRefNode.new("https", "shop.test", 443, "/api", 1)]) { false }
+    hosts.size.should eq(1)
+    hosts[0].children.map(&.label).should contain("api")
   end
 end

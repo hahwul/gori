@@ -2059,6 +2059,42 @@ module Gori
         "ALTER TABLE fuzz_results ADD COLUMN shape INTEGER",
       ]
 
+      # V43 — a JavaScript reference is keyed by its ORIGIN (#1371): `UNIQUE(host, path, flow_id)`
+      # kept one row per (host, path) per scanned flow, so a bundle naming both
+      # `http://h:8080/p` and `https://h/p` stored whichever resolved first and the other origin
+      # was never drawn, listed or counted. Rebuilt with scheme and port in the key; the rows
+      # are copied as they are (each old row is still unique under the wider key), so nothing
+      # has to be rescanned — a flow scanned before this upgrade just keeps the one origin it
+      # stored until a rescan (`sitemap js --scan --rescan`) reads it again. No triggers or
+      # views name the table, and the rebuild starts from whatever `js_refs` is there, so a
+      # replay (the index specs wind `user_version` back) converges on the same shape.
+      V43 = [
+        <<-SQL,
+          CREATE TABLE js_refs_v43 (
+            id          INTEGER PRIMARY KEY,
+            flow_id     INTEGER NOT NULL,
+            scheme      TEXT    NOT NULL,
+            host        TEXT    NOT NULL,
+            port        INTEGER NOT NULL,
+            path        TEXT    NOT NULL,
+            target      TEXT    NOT NULL,
+            literal     TEXT    NOT NULL,
+            body_offset INTEGER NOT NULL,
+            line        INTEGER NOT NULL,
+            flags       INTEGER NOT NULL DEFAULT 0,
+            base        TEXT    NOT NULL,
+            created_at  INTEGER NOT NULL,
+            UNIQUE(host, path, scheme, port, flow_id)
+          )
+          SQL
+        "INSERT OR IGNORE INTO js_refs_v43 (id, flow_id, scheme, host, port, path, target, literal, " \
+        "body_offset, line, flags, base, created_at) SELECT id, flow_id, scheme, host, port, path, target, " \
+        "literal, body_offset, line, flags, base, created_at FROM js_refs",
+        "DROP TABLE js_refs",
+        "ALTER TABLE js_refs_v43 RENAME TO js_refs",
+        "CREATE INDEX idx_js_refs_flow ON js_refs (flow_id)",
+      ]
+
       # Data statements that call gori's OWN SQL functions, run by `migrate!` right after the
       # version they complete. Kept out of MIGRATIONS because that list is plain schema that a
       # bare connection can replay (specs build every historical shape that way), and a bare
@@ -2081,7 +2117,7 @@ module Gori
 
       MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17,
                     V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29, V30, V31, V32, V33,
-                    V34, V35, V36, V37, V38, V39, V40, V41, V42]
+                    V34, V35, V36, V37, V38, V39, V40, V41, V42, V43]
 
       def self.migrate!(db : DB::Database, read_only : Bool = false) : Nil
         db.using_connection do |conn|

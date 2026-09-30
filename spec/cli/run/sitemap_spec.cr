@@ -11,8 +11,8 @@ module Gori::CLI::Run
     sitemap_tag_path(target)
   end
 
-  def self.collect_sitemap_for_spec(store : Gori::Store, limit : Int32) : {Array(Gori::Sitemap::Node), Bool}
-    collect_sitemap(store, Gori::QL::EMPTY, limit, false, true, true)
+  def self.collect_sitemap_for_spec(store : Gori::Store, limit : Int32, in_scope : Bool = false) : {Array(Gori::Sitemap::Node), Bool}
+    collect_sitemap(store, Gori::QL::EMPTY, limit, in_scope, true, true)
   end
 
   def self.sitemap_truncation_notice_for_spec(truncated : Bool, limit : Int32) : String?
@@ -39,12 +39,62 @@ private def sitemap_store(&)
   end
 end
 
-private def sitemap_captured(host : String, target : String) : Gori::Store::CapturedRequest
+private def sitemap_captured(host : String, target : String, scheme = "https", port = 443) : Gori::Store::CapturedRequest
   Gori::Store::CapturedRequest.new(
-    created_at: 1_000_i64, scheme: "https", host: host, port: 443,
+    created_at: 1_000_i64, scheme: scheme, host: host, port: port,
     method: "GET", target: target, http_version: "HTTP/1.1",
     head: "GET #{target} HTTP/1.1\r\nHost: #{host}\r\n\r\n".to_slice, body: nil,
     source: Gori::FlowSource::Kind::Proxy)
+end
+
+# #1371, the issue's own repro: three services on 127.0.0.1 collapsed into one `127.0.0.1` root,
+# `--format paths` printed `GET  127.0.0.1/only-tls` (no way back to a URL) and the json host
+# objects carried no scheme or port.
+describe "gori run sitemap — one root per origin" do
+  it "keeps two ports and a TLS port of one host apart in text, paths and json" do
+    sitemap_store do |store|
+      store.insert_flow(sitemap_captured("127.0.0.1", "/a", "http", 19021))
+      store.insert_flow(sitemap_captured("127.0.0.1", "http://127.0.0.1:19022/b", "http", 19022))
+      store.insert_flow(sitemap_captured("127.0.0.1", "/only-tls", "https", 8443))
+      store.insert_flow(sitemap_captured("acme.test", "/"))
+      store.flush
+
+      hosts, _ = Gori::CLI::Run.collect_sitemap_for_spec(store, 100)
+      text = Gori::CLI::Output.sitemap_text(hosts)
+      text.lines.reject(&.starts_with?(/[ └├│]/)).reject(&.empty?).should eq([
+        "http://127.0.0.1:19021  (1 path)", "http://127.0.0.1:19022  (1 path)",
+        "https://127.0.0.1:8443  (1 path)", "https://acme.test  (1 path)",
+      ])
+      Gori::CLI::Output.sitemap_paths(hosts).should eq(
+        "GET  http://127.0.0.1:19021/a\n" \
+        "GET  http://127.0.0.1:19022/b\n" \
+        "GET  https://127.0.0.1:8443/only-tls\n" \
+        "GET  https://acme.test/\n")
+
+      json = JSON.parse(Gori::CLI::Output.sitemap_json(hosts)).as_a
+      json.map { |h| {h["host"].as_s, h["scheme"].as_s, h["port"].as_i, h["origin"].as_s} }.should eq([
+        {"127.0.0.1", "http", 19021, "http://127.0.0.1:19021"},
+        {"127.0.0.1", "http", 19022, "http://127.0.0.1:19022"},
+        {"127.0.0.1", "https", 8443, "https://127.0.0.1:8443"},
+        {"acme.test", "https", 443, "https://acme.test"},
+      ])
+    end
+  end
+
+  # A host rule carries no scheme or port: it must be asked about the root's bare host, not
+  # its `scheme://host:port` label, or every origin reads out of scope.
+  it "keeps every origin of an in-scope host under --in-scope" do
+    sitemap_store do |store|
+      store.add_scope_rule("include", "host", "127.0.0.1")
+      store.insert_flow(sitemap_captured("127.0.0.1", "/a", "http", 19021))
+      store.insert_flow(sitemap_captured("127.0.0.1", "/b", "https", 8443))
+      store.insert_flow(sitemap_captured("other.test", "/"))
+      store.flush
+
+      hosts, _ = Gori::CLI::Run.collect_sitemap_for_spec(store, 100, in_scope: true)
+      hosts.map(&.label).should eq(["http://127.0.0.1:19021", "https://127.0.0.1:8443"])
+    end
+  end
 end
 
 describe "gori run sitemap — a capped scan" do

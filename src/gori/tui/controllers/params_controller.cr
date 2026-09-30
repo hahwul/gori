@@ -165,8 +165,10 @@ module Gori::Tui
         return
       end
       @scanned_under = {filter.sql, filter.args}
-      opts = ParamInventory::Options.new(filter: filter, host: @params.target.try(&.host),
-        path_prefix: @params.target.try(&.prefix),
+      target = @params.target
+      origin = target.try(&.origin)
+      opts = ParamInventory::Options.new(filter: filter, host: target.try(&.host),
+        scheme: origin.try(&.scheme), port: origin.try(&.port), path_prefix: target.try(&.prefix),
         all_headers: @params.all_headers?, max_flows: MAX_FLOWS)
       store = @host.session.store
       results = @results

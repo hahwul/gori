@@ -180,8 +180,8 @@ Codex와 Grok은 `[mcp_servers.gori]` 테이블이 있는 TOML을, Hermes는 `mc
 | `get_response_body_chunk` | 인라인 64 KiB 상한을 넘는 디코드(또는 원시) 플로우/Repeater 응답을 페이지 단위로 조회 |
 | `list_sitemap` / `list_sitemap_tags` | 고유 엔드포인트(host, method, path, 기본 한 페이지 50개)와 거기에 달린 태그 |
 | `list_js_endpoints` / `scan_js_endpoints` | 캡처된 JavaScript가 참조하지만 요청이 닿지 않은 엔드포인트와, 각각을 읽어 온 플로우, 줄, 문자열. 스캔은 새 JS/HTML 응답을 읽을 뿐 요청은 보내지 않습니다. `list_sitemap`에 `include_unrequested:true`를 주면 `unrequested`로 함께 나옵니다 |
-| `list_params` | 엔드포인트별 파라미터 목록: 위치별 입력 이름, 등장 횟수, 샘플 값(자격 증명은 가림), 응답에 값이 반사되는지 여부 |
-| `export_openapi` | 캡처된 API를 OpenAPI 3.0.3 문서로 바로 돌려줘요(JSON 객체, `format:"yaml"`이면 YAML). 템플릿 경로, 파라미터, 추론한 요청·응답 스키마, servers, 보안 스킴이 들어가요. 자격 증명 값은 넣지 않고, 예시 값은 `examples:true`일 때만 가려서 넣어요. `max_endpoints`와 `max_bytes`로 크기를 제한하고, 잘리면 `truncated`로 알려줘요. `output_path`를 주면 응답 대신 파일로 써요(`--read-only`에서는 거절, gori 홈 안은 불가, 기존 파일은 `overwrite:true`일 때만 덮어써요). `@recon` 크기 예산을 넘겨서 전체 카탈로그에만 있어요 |
+| `list_params` | 엔드포인트별 파라미터 목록: 위치별 입력 이름, 등장 횟수, 샘플 값(자격 증명은 가림), 응답에 값이 반사되는지 여부. 행마다 `scheme`, `host`, `port`가 실리고, `origin`(`http://127.0.0.1:19021`)으로 한 호스트의 서비스 하나만 고를 수 있어요 |
+| `export_openapi` | 캡처된 API를 OpenAPI 3.0.3 문서로 바로 돌려줘요(JSON 객체, `format:"yaml"`이면 YAML). 템플릿 경로, 파라미터, 추론한 요청·응답 스키마, servers, 보안 스킴이 들어가요. `host`로 호스트를 좁히듯 `origin`으로 스킴·호스트·포트 하나로 좁힐 수 있어요. 자격 증명 값은 넣지 않고, 예시 값은 `examples:true`일 때만 가려서 넣어요. `max_endpoints`와 `max_bytes`로 크기를 제한하고, 잘리면 `truncated`로 알려줘요. `output_path`를 주면 응답 대신 파일로 써요(`--read-only`에서는 거절, gori 홈 안은 불가, 기존 파일은 `overwrite:true`일 때만 덮어써요). `@recon` 크기 예산을 넘겨서 전체 카탈로그에만 있어요 |
 | `list_issues` / `get_issue` | 트리아지된 이슈 읽기 |
 | `probe_scan` | 캡처된 플로우와 Repeater 탭 재스캔. `active:true`가 아니면 패시브(요청 0건)이고, 액티브는 쓰기 권한이 필요하며 스코프 게이트를 거침. `persist:true`면 찾은 결과를 라이브 스캐너와 같은 방식으로 합쳐 `probe_issues`가 읽는 판정 목록에도 기록(`--read-only`에서는 거절) |
 | `probe_issues` | Probe 탭에 저장된 발견 항목을 트리아지 상태로 조회(기본은 open만) |

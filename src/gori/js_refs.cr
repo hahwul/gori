@@ -380,7 +380,7 @@ module Gori
     private def resolve_all(lits : Array(Literal), base : Discover::Url::Parts,
                             base_kind : Base) : {Array(Store::JsRef), Int32}
       refs = [] of Store::JsRef
-      index = {} of {String, String} => Int32
+      index = {} of {String, String, String, Int32} => Int32
       unsafe = 0
       lits.each_with_index do |lit, n|
         Fiber.yield if n > 0 && n % YIELD_EVERY == 0
@@ -389,7 +389,9 @@ module Gori
           unsafe += 1 if ref.unsafe?
           next
         end
-        key = {ref.host, ref.path}
+        # The ORIGIN is part of the key (#1371, schema V43): `http://h:8080/p` and `https://h/p`
+        # in one bundle are two references.
+        key = {ref.host, ref.path, ref.scheme, ref.port}
         if i = index[key]?
           refs[i] = ref if refs[i].flags & FLAG_COMMENT != 0 && ref.flags & FLAG_COMMENT == 0
         else
@@ -488,8 +490,9 @@ module Gori
       include_requested : Bool = false, all_hosts : Bool = false, in_scope : Bool = false,
       include_comments : Bool = true
 
-    # One referenced endpoint: every sighting of one (host, path), with the newest source as its
-    # provenance. `requested` — captured traffic reaches this node (nil when the traffic read was
+    # One referenced endpoint: every sighting of one (origin, path) — a Sitemap root is an origin
+    # (#1371), so `http://h:9090/api` and `https://h/api` are two rows — with the newest source as
+    # its provenance. `requested` — captured traffic reaches this node (nil when the traffic read was
     # capped and could not say). `in_comment` — EVERY sighting was commented out.
     record Endpoint, scheme : String, host : String, port : Int32, path : String, target : String,
       flows : Int32, requested : Bool?, in_comment : Bool, templated : Bool, base : Base,
@@ -505,16 +508,16 @@ module Gori
     record ListReport, endpoints : Array(Endpoint), hidden_hosts : Int32, requested_unknown : Bool,
       scanned_flows : Int32, capped : Bool
 
-    # The stored references, one row per (host, path), filtered by `opts`. Reads the traffic's
+    # The stored references, one row per (origin, path), filtered by `opts`. Reads the traffic's
     # endpoint set once to answer `requested` the way the Sitemap tree does: a reference is
-    # requested when captured traffic lands on its query-less node path.
+    # requested when captured traffic on ITS origin lands on its query-less node path.
     def list(store : Store, opts : ListOptions = ListOptions.new, scope : Scope? = nil) : ListReport
       sightings = store.js_ref_sightings(host: opts.host.try(&.strip.presence), raise_on_error: true)
       capped = sightings.size >= Store::JS_REF_READ_MAX
       captured, hosts, unknown = captured_paths(store)
       shown = [] of Endpoint
       hidden = 0
-      sightings.chunk_while { |a, b| a.host == b.host && a.path == b.path }.each do |group|
+      sightings.chunk_while { |a, b| {a.host, a.path, a.scheme, a.port} == {b.host, b.path, b.scheme, b.port} }.each do |group|
         ep = endpoint(group, captured, unknown)
         next unless wanted?(ep, opts, scope)
         unless opts.all_hosts || visible_host?(ep.host, ep.url, hosts, scope)
@@ -575,8 +578,11 @@ module Gori
     def unrequested_node?(store : Store, host : String, path : String) : Bool
       return false if path.includes?('?')
       return false if store.js_ref_sightings(host: host, path: path, limit: 1).empty?
+      # Host-level on purpose: a tag is keyed on (host, path), and this is asked only once no
+      # captured endpoint exists at that (host, path) on any origin.
       captured, _, _ = captured_paths(store)
-      !captured.includes?({host.downcase, path})
+      h = host.downcase
+      captured.none? { |(_, ch, _, cp)| ch == h && cp == path }
     end
 
     # A tree reference's URL, for a scope question.
@@ -584,10 +590,10 @@ module Gori
       Store::FlowRow.url_of(r.scheme, r.host, r.port, r.path)
     end
 
-    private def endpoint(group : Array(Store::JsRefSighting), captured : Set({String, String}),
+    private def endpoint(group : Array(Store::JsRefSighting), captured : Set(OriginPath),
                          unknown : Bool) : Endpoint
       first = group.find { |s| s.flags & FLAG_COMMENT == 0 } || group.first
-      requested = captured.includes?({first.host, first.path}) ? true : (unknown ? nil : false)
+      requested = captured.includes?({first.scheme, first.host, first.port, first.path}) ? true : (unknown ? nil : false)
       flows = group.map(&.flow_id).uniq!.size
       Endpoint.new(first.scheme, first.host, first.port, first.path, first.target, flows, requested,
         group.all? { |s| s.flags & FLAG_COMMENT != 0 }, group.any? { |s| s.flags & FLAG_TEMPLATED != 0 },
@@ -595,17 +601,21 @@ module Gori
         first.literal, first.source_url)
     end
 
-    # {(host, query-less node path) of every captured endpoint, every captured host, whether the
-    # read was capped}, hosts lowercased — `Url.parse` lowercases a reference's host and a flow
-    # keeps its host as captured.
-    def captured_paths(store : Store) : {Set({String, String}), Set(String), Bool}
-      entries = store.sitemap_entries(QL::EMPTY, Store::SITEMAP_MAX, raise_on_error: true)
-      paths = Set({String, String}).new
+    # (scheme, host, port, query-less node path) — one captured endpoint on its origin.
+    alias OriginPath = {String, String, Int32, String}
+
+    # {every captured endpoint on its origin, every captured host, whether the read was capped},
+    # hosts lowercased — `Url.parse` lowercases a reference's host and a flow keeps its host as
+    # captured. Per ORIGIN (#1371), as the tree roots are: `/api` captured on `https://h` does not
+    # make a reference to `http://h:9090/api` requested.
+    def captured_paths(store : Store) : {Set(OriginPath), Set(String), Bool}
+      entries = store.sitemap_origin_entries(QL::EMPTY, Store::SITEMAP_MAX, raise_on_error: true)
+      paths = Set(OriginPath).new
       hosts = Set(String).new
-      entries.each do |(host, _, target)|
-        h = host.downcase
+      entries.each do |e|
+        h = e.host.downcase
         hosts << h
-        paths << {h, Sitemap.path_part(Sitemap.node_path(target))}
+        paths << {e.scheme, h, e.port, Sitemap.path_part(Sitemap.node_path(e.target))}
       end
       {paths, hosts, entries.size >= Store::SITEMAP_MAX}
     end
