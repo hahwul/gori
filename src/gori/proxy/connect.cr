@@ -39,6 +39,13 @@ module Gori::Proxy
                            tls_upstream : Bool = true, dial_addr : String? = nil,
                            rewrite_host : Bool = false) : Nil
 
+    # Whether an origin gori dials over TLS must present a trusted certificate: false under
+    # `--insecure-upstream`. The tunnel answers for itself; a plaintext forward listener reads it
+    # too, for the absolute-form `https://` request it dials over TLS without a CONNECT.
+    def verify_upstream? : Bool
+      true
+    end
+
     # Serve the self-page over TLS after a CONNECT to a RESERVED host (SelfPage.magic_host?)
     # — a proxy-configured client that browsed to `https://gori.proxy/`. No origin is dialed
     # and nothing is captured. The client sees gori's own leaf, which it does NOT trust yet

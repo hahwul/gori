@@ -206,6 +206,7 @@ module Gori::Proxy
       @upstream = nil.as(IO?)
       @up_host = nil.as(String?)
       @up_port = 0
+      @up_tls = false
       # Why the most recent upstream dial failed, set by `open_upstream` and read only when a
       # dial returned nil — lets a failed flow distinguish unreachable from a TLS/verify
       # rejection (the #323 case, whose fix is --insecure-upstream) and from an upstream proxy
@@ -316,16 +317,17 @@ module Gori::Proxy
     # EOF on the response head and transparently retried for body-less requests.
     # Returns {connection, reused?} — `reused` tells the caller a stale EOF is
     # worth one redial+resend.
-    private def acquire_upstream(host : String, port : Int32) : {IO?, Bool}
-      if (up = @upstream) && @up_host == host && @up_port == port
+    private def acquire_upstream(host : String, port : Int32, tls : Bool) : {IO?, Bool}
+      if (up = @upstream) && @up_host == host && @up_port == port && @up_tls == tls
         return {up, true}
       end
       release_upstream # different origin (forward-proxy) or none yet — dial fresh
-      up = open_upstream(host, port)
+      up = open_upstream(host, port, tls)
       if up
         @upstream = up
         @up_host = host
         @up_port = port
+        @up_tls = tls
       end
       {up, false}
     end
@@ -602,7 +604,7 @@ module Gori::Proxy
       early_head_failure = nil.as(Codec::Http1::HeadReadResult?)
       send_body = true
       client_gone = false
-      upstream, reused, sent = acquire_and_send(host, port, retryable) do |up|
+      upstream, reused, sent = acquire_and_send(host, port, dial_tls?(scheme), retryable) do |up|
         up.write(sent_head)
         if expects_continue
           up.flush # the head must be ON THE WIRE before there is anything to wait for
@@ -741,7 +743,7 @@ module Gori::Proxy
       # GET→POST), retryability must follow the method actually being sent, not the
       # original — else a now-non-idempotent request could be replayed on a stale-conn retry.
       retryable = retryable_request?(sent_req, edited_body.nil? || edited_body.empty?)
-      upstream, reused, sent = acquire_and_send(host, port, retryable) { |up| write_request(up, sent_head, edited_body) }
+      upstream, reused, sent = acquire_and_send(host, port, dial_tls?(scheme), retryable) { |up| write_request(up, sent_head, edited_body) }
       unless upstream && sent
         release_upstream
         record_error(sent_req, scheme, host, port, created_at, upstream_error_message(host, port, upstream),
@@ -1024,7 +1026,7 @@ module Gori::Proxy
       sent_head, fwd_body, advisory = apply_body_rewrite(sent_head, buffered, req_framing,
         host: host, response: false, live: true) { |e| rw.rewrite_request_body(e, host) }
       sent_req = Codec::Http1.parse_request_head(sent_head) # head may have been re-framed
-      upstream, reused, sent = acquire_and_send(host, port, false) { |up| write_request(up, sent_head, fwd_body) }
+      upstream, reused, sent = acquire_and_send(host, port, dial_tls?(scheme), false) { |up| write_request(up, sent_head, fwd_body) }
       unless upstream && sent
         release_upstream
         record_error(sent_req, scheme, host, port, created_at, upstream_error_message(host, port, upstream))
@@ -1046,8 +1048,8 @@ module Gori::Proxy
     # reuse safe against a server that closed an idle connection. A non-replayable
     # request (any body, or a mutating method) is never auto-resent — the caller
     # fails it so the client decides. Returns {upstream, reused?, ok}.
-    private def acquire_and_send(host : String, port : Int32, retryable : Bool, & : IO -> Bool) : {IO?, Bool, Bool}
-      upstream, reused = acquire_upstream(host, port)
+    private def acquire_and_send(host : String, port : Int32, tls : Bool, retryable : Bool, & : IO -> Bool) : {IO?, Bool, Bool}
+      upstream, reused = acquire_upstream(host, port, tls)
       return {nil, false, false} unless upstream
       # Re-arm the per-request upstream timeout: a REUSED socket may carry a relaxed (untimed)
       # state from a prior streamed (SSE/chunked) response. A freshly dialed one already has it
@@ -1056,7 +1058,7 @@ module Gori::Proxy
       ok = send_guard { yield upstream }
       if !ok && reused && retryable
         release_upstream
-        upstream, reused = acquire_upstream(host, port)
+        upstream, reused = acquire_upstream(host, port, tls)
         SocketTuning.arm(upstream, Settings.io_timeout) if upstream
         ok = upstream ? send_guard { yield upstream } : false
       end
@@ -1105,7 +1107,7 @@ module Gori::Proxy
       elsif pre_read_head
         resp_head = pre_read_head
       else
-        read_result, upstream = read_response_head(upstream, host, port, reused, sent_head, can_retry)
+        read_result, upstream = read_response_head(upstream, host, port, dial_tls?(scheme), reused, sent_head, can_retry)
         unless resp_head = read_result.head?
           record_response_head_failure(flow_id, read_result)
           release_upstream
@@ -1696,12 +1698,12 @@ module Gori::Proxy
     # REUSED idle keep-alive turned out stale (zero-byte EOF/reset) and the request
     # is replayable (body-less). A timeout or a rejected head is origin activity,
     # not a stale socket. Returns {outcome, upstream}.
-    private def read_response_head(upstream : IO, host : String, port : Int32,
+    private def read_response_head(upstream : IO, host : String, port : Int32, tls : Bool,
                                    reused : Bool, sent_head : Bytes, can_retry : Bool) : {Codec::Http1::HeadReadResult, IO}
       result = safe_read_head(upstream)
       if result.retryable_empty_read? && reused && can_retry
         release_upstream
-        fresh, _ = acquire_upstream(host, port)
+        fresh, _ = acquire_upstream(host, port, tls)
         if fresh
           upstream = fresh
           result = safe_read_head(fresh) if write_request(fresh, sent_head, nil)
@@ -2522,9 +2524,23 @@ module Gori::Proxy
     # Resolves {host, port, scheme, forward_head}. Absolute-form request targets
     # (forward-proxy plain HTTP, e.g. `GET http://h/p`) are rewritten to
     # origin-form for the upstream; the captured truth keeps the original bytes.
-    private def open_upstream(host : String, port : Int32) : IO?
-      if @tls_upstream
-        sock, err = Upstream.dial_tls_result(host, port, verify: @verify_upstream,
+    # Whether a request with this `scheme` reaches its origin over TLS: always on a listener
+    # that dials TLS (a CONNECT tunnel, a TLS reverse/transparent listener), and for an
+    # absolute-form `https://` target on a plaintext listener. The recorded scheme comes from
+    # the request, so a dial that ignored it sent an `https://` request's path, cookies and body
+    # in cleartext while History read https. Derived per call, not stored: a keep-alive
+    # connection can carry an http:// and an https:// request back to back.
+    private def dial_tls?(scheme : String) : Bool
+      @tls_upstream || (@fixed_host.nil? && scheme == "https")
+    end
+
+    private def open_upstream(host : String, port : Int32, tls : Bool) : IO?
+      if tls
+        # A listener that dials TLS for every request was handed its verify policy; a plaintext
+        # listener dialling one `https://` request takes the tunnel's — the same `-k` — or, with
+        # no tunnel (the transparent and h2c listeners), the process-wide setting `-k` moves.
+        verify = @tls_upstream ? @verify_upstream : (@tls.try(&.verify_upstream?) || (@tls.nil? && Settings.verify_upstream?))
+        sock, err = Upstream.dial_tls_result(host, port, verify: verify,
           overrides: @host_overrides, pin: dial_pin)
         @last_dial_error = err
         sock
