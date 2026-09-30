@@ -41,7 +41,7 @@ private def seed_flow(store : Gori::Store) : Int64
 end
 
 # Private CLI glue — reopen the module for bare-call wrappers. (The `abort` branches of
-# resolve_link_ends / parse_link_id call `exit`, so only their success paths run here.)
+# resolve_link_ref / parse_link_id call `exit`, so only their success paths run here.)
 module Gori::CLI::Run
   def self.link_owner_exists_for_spec(store : Gori::Store, kind : Gori::Store::LinkOwnerKind, id : Int64) : Bool
     link_owner_exists?(store, kind, id)
@@ -51,13 +51,22 @@ module Gori::CLI::Run
     link_ref_exists?(store, kind, id)
   end
 
-  def self.resolve_link_ends_for_spec(verb : String, owner_id : Int64?, ref_s : String?,
-                                      ref_id : Int64?) : {Int64, Gori::Store::LinkRefKind, Int64}
-    resolve_link_ends(verb, owner_id, ref_s, ref_id)
+  def self.resolve_link_ref_for_spec(verb : String, ref_s : String?,
+                                     ref_id : Int64?) : {Gori::Store::LinkRefKind, Int64}
+    resolve_link_ref(verb, ref_s, ref_id)
   end
 
   def self.parse_link_id_for_spec(v : String, flag : String) : Int64
     parse_link_id(v, flag)
+  end
+
+  def self.parse_link_note_position_for_spec(v : String) : Int32
+    parse_link_note_position(v)
+  end
+
+  def self.resolve_link_owner_id_for_spec(store : Gori::Store, kind : Gori::Store::LinkOwnerKind,
+                                          owner_id : Int64?, note_position : Int32?) : Int64
+    resolve_link_owner_id(store, kind, owner_id, note_position, "links")
   end
 
   def self.link_add_for_spec(store : Gori::Store, owner_kind : Gori::Store::LinkOwnerKind, oid : Int64,
@@ -83,14 +92,18 @@ describe "gori run links — flag parsing" do
     Gori::Store::LinkRefKind.parse("issue").should be_nil # an issue is an OWNER, never a ref
   end
 
-  it "returns the {owner id, ref kind, ref id} triple when all three are given" do
-    Gori::CLI::Run.resolve_link_ends_for_spec("add", 4_i64, "repeater", 9_i64)
-      .should eq({4_i64, Gori::Store::LinkRefKind::Repeater, 9_i64})
+  it "returns the ref kind and ref id when both are given" do
+    Gori::CLI::Run.resolve_link_ref_for_spec("add", "repeater", 9_i64)
+      .should eq({Gori::Store::LinkRefKind::Repeater, 9_i64})
   end
 
   it "parses a plain integer id, including a large one" do
     Gori::CLI::Run.parse_link_id_for_spec("42", "--id").should eq(42_i64)
     Gori::CLI::Run.parse_link_id_for_spec("9007199254740993", "--ref-id").should eq(9_007_199_254_740_993_i64)
+  end
+
+  it "parses a positive 1-based note position" do
+    Gori::CLI::Run.parse_link_note_position_for_spec("2").should eq(2)
   end
 end
 
@@ -113,6 +126,16 @@ describe "gori run links — end validation" do
       nid.should eq(7_i64)
       Gori::CLI::Run.link_owner_exists_for_spec(store, Gori::Store::LinkOwnerKind::Note, nid).should be_true
       Gori::CLI::Run.link_owner_exists_for_spec(store, Gori::Store::LinkOwnerKind::Note, nid + 1000).should be_false
+    end
+  end
+
+  it "resolves a displayed note position to its stable id and still accepts the id" do
+    with_store do |store|
+      store.set_setting("notes.docs",
+        Gori::Notes.serialize(0, [Gori::Notes::NoteEntry.new(2_i64, "B")], 3_i64))
+      kind = Gori::Store::LinkOwnerKind::Note
+      Gori::CLI::Run.resolve_link_owner_id_for_spec(store, kind, nil, 1).should eq(2_i64)
+      Gori::CLI::Run.resolve_link_owner_id_for_spec(store, kind, 2_i64, nil).should eq(2_i64)
     end
   end
 

@@ -40,14 +40,17 @@ module Gori
         project_name : String? = nil
         owner_s = "issue"
         owner_id : Int64? = nil
+        note_position : Int32? = nil
         format = :text
         leftover = [] of String
 
         parser = OptionParser.new do |p|
-          p.banner = "Usage: gori run links [list] --owner=issue|note --id=N\n\n" \
+          p.banner = "Usage: gori run links [list] --owner=issue|note --id=N|--note-position=N\n\n" \
                      "List the evidence an issue or note points at. A pointer whose target was\n" \
                      "pruned is shown as (stale) rather than hidden, so \"no evidence\" and\n" \
                      "\"evidence that is gone\" stay distinguishable.\n\n" \
+                     "For a note, --note=N uses its stable id; --note-position=N uses the 1-based\n" \
+                     "position shown by `gori run notes`.\n\n" \
                      "Or run with a subcommand:\n" \
                      "  gori run links add    --owner=issue|note --id=N --ref=KIND --ref-id=M\n" \
                      "  gori run links delete --owner=issue|note --id=N --ref=KIND --ref-id=M\n" \
@@ -55,10 +58,11 @@ module Gori
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--owner=KIND", "Owner kind: issue (default) | note") { |v| owner_s = v.strip.downcase }
-          p.on("--id=N", "Owner issue/note id (required)") { |v| owner_id = parse_link_id(v, "--id") }
+          p.on("--id=N", "Owner issue/note id (required unless --note-position is used)") { |v| owner_id = parse_link_id(v, "--id"); note_position = nil }
           # `evidence`/`retest` name the owner as `--issue N` (#1389); the same spelling here.
-          p.on("--issue=N", "Same as --owner=issue --id=N") { |v| owner_s = "issue"; owner_id = parse_link_id(v, "--issue") }
-          p.on("--note=N", "Same as --owner=note --id=N") { |v| owner_s = "note"; owner_id = parse_link_id(v, "--note") }
+          p.on("--issue=N", "Same as --owner=issue --id=N") { |v| owner_s = "issue"; owner_id = parse_link_id(v, "--issue"); note_position = nil }
+          p.on("--note=N", "Stable note id (same as --owner=note --id=N)") { |v| owner_s = "note"; owner_id = parse_link_id(v, "--note"); note_position = nil }
+          p.on("--note-position=N", "Note's 1-based list position shown by `gori run notes`") { |v| owner_s = "note"; owner_id = nil; note_position = parse_link_note_position(v) }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| leftover = before + after }
@@ -75,20 +79,18 @@ module Gori
                      abort("gori run links: invalid --owner '#{owner_s}' (issue|note)")
         # Copy out of the closure first: `owner_id` is assigned inside an OptionParser block,
         # so Crystal keeps it nilable and `x || abort` does not narrow it in place.
-        oid_opt = owner_id
-        abort "gori run links: --id is required" if oid_opt.nil?
-        oid = oid_opt
+        oid_opt, pos_opt = link_owner_selection("links", owner_id, note_position)
 
         store = open_store(resolve_read_project(project_name, db_path), read_only: true)
-        resolved = begin
+        oid, resolved = begin
+          resolved_id = resolve_link_owner_id(store, owner_kind, oid_opt, pos_opt, "links")
           # Validate the owner exists, like the mutate path and the MCP list_links tool do —
           # otherwise a typo'd id prints "no links on issue #99999", which reads as "this
           # issue has no evidence" rather than "there is no such issue".
-          unless link_owner_exists?(store, owner_kind, oid)
-            store.close
-            abort "gori run links: no #{owner_kind.label} with id #{oid}"
+          unless link_owner_exists?(store, owner_kind, resolved_id)
+            abort "gori run links: no #{owner_kind.label} with id #{resolved_id}"
           end
-          Links.resolve_all(store, store.list_links(owner_kind, oid))
+          {resolved_id, Links.resolve_all(store, store.list_links(owner_kind, resolved_id))}
         ensure
           store.close
         end
@@ -133,21 +135,23 @@ module Gori
         project_name : String? = nil
         owner_s = "issue"
         owner_id : Int64? = nil
+        note_position : Int32? = nil
         ref_s : String? = nil
         ref_id : Int64? = nil
         format = :text
         leftover = [] of String
 
         parser = OptionParser.new do |p|
-          p.banner = "Usage: gori run links #{verb} --owner=issue|note --id=N --ref=KIND --ref-id=M\n\n" \
-                     "#{action} an evidence pointer. --ref is flow|repeater|fuzz|miner.#{tail}"
+          p.banner = "Usage: gori run links #{verb} --owner=issue|note --id=N|--note-position=N --ref=KIND --ref-id=M\n\n" \
+                     "#{action} an evidence pointer. Note --note=N uses the stable id; --note-position=N uses the 1-based position shown by `gori run notes`. --ref is flow|repeater|fuzz|miner.#{tail}"
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("--owner=KIND", "Owner kind: issue (default) | note") { |v| owner_s = v.strip.downcase }
-          p.on("--id=N", "Owner issue/note id (required)") { |v| owner_id = parse_link_id(v, "--id") }
+          p.on("--id=N", "Owner issue/note id (required unless --note-position is used)") { |v| owner_id = parse_link_id(v, "--id"); note_position = nil }
           # `evidence`/`retest` name the owner as `--issue N` (#1389); the same spelling here.
-          p.on("--issue=N", "Same as --owner=issue --id=N") { |v| owner_s = "issue"; owner_id = parse_link_id(v, "--issue") }
-          p.on("--note=N", "Same as --owner=note --id=N") { |v| owner_s = "note"; owner_id = parse_link_id(v, "--note") }
+          p.on("--issue=N", "Same as --owner=issue --id=N") { |v| owner_s = "issue"; owner_id = parse_link_id(v, "--issue"); note_position = nil }
+          p.on("--note=N", "Stable note id (same as --owner=note --id=N)") { |v| owner_s = "note"; owner_id = parse_link_id(v, "--note"); note_position = nil }
+          p.on("--note-position=N", "Note's 1-based list position shown by `gori run notes`") { |v| owner_s = "note"; owner_id = nil; note_position = parse_link_note_position(v) }
           p.on("--ref=KIND", "Target kind: flow|repeater|fuzz|miner (required)") { |v| ref_s = v.strip.downcase }
           p.on("--ref-id=M", "Target id (required)") { |v| ref_id = parse_link_id(v, "--ref-id") }
           # `add` only (#1117): it creates the row whose id a script needs back. `delete` has no
@@ -174,15 +178,17 @@ module Gori
         unless leftover.empty?
           abort "gori run links #{verb}: unexpected argument#{leftover.size == 1 ? "" : "s"} " \
                 "#{leftover.join(" ").inspect} — every end is named by a flag " \
-                "(--owner, --id, --ref, --ref-id)"
+                "(--owner, --id, --note-position, --ref, --ref-id)"
         end
 
         owner_kind = Store::LinkOwnerKind.parse(owner_s) ||
                      abort("gori run links #{verb}: invalid --owner '#{owner_s}' (issue|note)")
-        oid, ref_kind, rid = resolve_link_ends(verb, owner_id, ref_s, ref_id)
+        oid_opt, pos_opt = link_owner_selection(verb, owner_id, note_position)
+        ref_kind, rid = resolve_link_ref(verb, ref_s, ref_id)
 
         store = open_store(resolve_read_project(project_name, db_path))
         begin
+          oid = resolve_link_owner_id(store, owner_kind, oid_opt, pos_opt, verb)
           # Both ends must exist, or `add` would file an orphan row pointing at nothing and
           # still report success (the MCP add_link tool validates the same way).
           unless link_owner_exists?(store, owner_kind, oid)
@@ -251,22 +257,42 @@ module Gori
         nil
       end
 
-      # The required {owner id, ref kind, ref id} triple. Split out of cmd_links_mutate to keep
-      # it under the cyclomatic-complexity bar. Takes the parsed values as ARGUMENTS rather than
-      # reading them from the enclosing scope: they are assigned inside OptionParser blocks, so
-      # in place Crystal keeps them nilable and `x || abort` does not narrow them.
-      private def self.resolve_link_ends(verb : String, owner_id : Int64?, ref_s : String?,
-                                         ref_id : Int64?) : {Int64, Store::LinkRefKind, Int64}
-        abort "gori run links #{verb}: --id is required" if owner_id.nil?
+      private def self.resolve_link_ref(verb : String, ref_s : String?,
+                                        ref_id : Int64?) : {Store::LinkRefKind, Int64}
         abort "gori run links #{verb}: --ref is required (flow|repeater|fuzz|miner)" if ref_s.nil?
         abort "gori run links #{verb}: --ref-id is required" if ref_id.nil?
         ref_kind = Store::LinkRefKind.parse(ref_s) ||
                    abort("gori run links #{verb}: invalid --ref '#{ref_s}' (flow|repeater|fuzz|miner)")
-        {owner_id, ref_kind, ref_id}
+        {ref_kind, ref_id}
       end
 
       private def self.parse_link_id(v : String, flag : String) : Int64
         v.to_i64? || abort("gori run links: invalid #{flag} #{v.inspect} (expected an integer)")
+      end
+
+      private def self.parse_link_note_position(v : String) : Int32
+        position = v.to_i?
+        abort "gori run links: invalid --note-position #{v.inspect} (expected a positive integer)" unless position && position > 0
+        position
+      end
+
+      private def self.link_owner_selection(verb : String, owner_id : Int64?,
+                                            note_position : Int32?) : {Int64?, Int32?}
+        abort "gori run links #{verb}: --id is required (or use --note-position for a note)" if owner_id.nil? && note_position.nil?
+        {owner_id, note_position}
+      end
+
+      private def self.resolve_link_owner_id(store : Store, kind : Store::LinkOwnerKind,
+                                             owner_id : Int64?, note_position : Int32?, verb : String) : Int64
+        if position = note_position
+          abort "gori run links #{verb}: --note-position requires --owner=note" unless kind.note?
+          doc = Notes.load(store)
+          entry = doc.notes[position - 1]?
+          abort "gori run links #{verb}: no note at position #{position} (this project has #{doc.size} notes)" unless entry
+          entry.id
+        else
+          owner_id || abort("gori run links #{verb}: --id is required")
+        end
       end
 
       private def self.link_owner_exists?(store : Store, kind : Store::LinkOwnerKind, id : Int64) : Bool
