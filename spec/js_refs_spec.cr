@@ -409,6 +409,23 @@ describe Gori::JsRefs do
       end
     end
 
+    it "says whether the reference's own origin has traffic, and follows new traffic to it" do
+      with_store do |store|
+        jr_flow(store, "/a.js", %(fetch("/api/one");fetch("http://shop.test:8080/x")))
+        JR.scan(store)
+        nodes, _ = store.js_ref_nodes
+        nodes.find!(&.path.==("/api/one")).origin_captured.should be_true
+        other = nodes.find!(&.port.==(8080))
+        {other.host_captured, other.origin_captured}.should eq({true, false})
+        store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "shop.test", port: 8080, method: "GET", target: "/img.png",
+          http_version: "HTTP/1.1", head: "GET /img.png HTTP/1.1\r\nHost: shop.test\r\n\r\n".to_slice,
+          source: Gori::FlowSource::Kind::Proxy))
+        store.flush
+        store.js_ref_nodes[0].find!(&.port.==(8080)).origin_captured.should be_true
+      end
+    end
+
     it "says whether the host has traffic, and follows new scans and deletes through its memo" do
       with_store do |store|
         a = jr_flow(store, "/a.js", %(fetch("/api/one");fetch("https://other.test/x")))
@@ -463,6 +480,24 @@ describe Gori::JsRefs do
         all = JR.list(store, JR::ListOptions.new(include_requested: true))
         all.endpoints.map { |e| {e.path, e.requested} }.should eq([{"/api/admin", false}, {"/api/users", true}])
         report.scanned_flows.should eq(1)
+      end
+    end
+
+    # #1371: a Sitemap root is an origin, so "requested" is asked on the reference's own origin.
+    # `/api/users` captured on https://shop.test does not make http://shop.test:9090/api/users
+    # requested — the tree draws that one as a never-requested root, and the list must agree.
+    it "lists one row per origin and judges requested on that origin" do
+      with_store do |store|
+        jr_flow(store, "/api/users", "[]", ctype: "application/json")
+        # One reference per (host, path) per flow, so the two origins come from two bundles.
+        jr_flow(store, "/a.js", %(fetch("/api/users")))
+        jr_flow(store, "/b.js", %(fetch("http://shop.test:9090/api/users")))
+        JR.scan(store)
+        all = JR.list(store, JR::ListOptions.new(include_requested: true))
+        all.endpoints.map { |e| {e.url, e.requested} }.sort_by!(&.[0]).should eq([
+          {"http://shop.test:9090/api/users", false}, {"https://shop.test/api/users", true},
+        ])
+        JR.list(store).endpoints.map(&.url).should eq(["http://shop.test:9090/api/users"])
       end
     end
 
@@ -607,6 +642,17 @@ describe "Gori::Sitemap.attach_js_refs!" do
 
   # The host is known (it has a root), so its other service shows — `visible_host?`'s rule —
   # beside the host's own roots rather than at the end of the tree, and the block is not asked.
+  # A captured origin the tree lacks was hidden by a lens (hide-static hid a service that only
+  # served images); bringing it back as "never requested" would be false.
+  it "does not grow a root for an origin that has captured traffic" do
+    hosts = Gori::Sitemap.build([oe("h.test", "/", "https", 443)])
+    ref = Gori::Store::JsRefNode.new("http", "h.test", 8080, "/img/x", 1, host_captured: true, origin_captured: true)
+    Gori::Sitemap.attach_js_refs!(hosts, [ref]) { true }
+    hosts.map(&.label).should eq(["https://h.test"])
+    Gori::Sitemap.attach_js_refs!(hosts, [ref.copy_with(origin_captured: false)]) { false }
+    hosts.map(&.label).should eq(["https://h.test", "http://h.test:8080"])
+  end
+
   it "grows an unrequested root for an origin of a known host, next to that host's roots" do
     hosts = Gori::Sitemap.build([oe("a.test", "/"), oe("h.test", "/x", "http", 8080), oe("z.test", "/")])
     refs = [Gori::Store::JsRefNode.new("http", "h.test", 9090, "/api", 1),

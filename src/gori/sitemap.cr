@@ -308,6 +308,8 @@ module Gori
     # no origin, it lands on its host. An origin the tree does not hold is grown as an
     # `unrequested` root:
     #
+    #   · never for an origin that HAS captured traffic (`JsRefNode#origin_captured`): the tree
+    #     lacking it means a lens hid it, and its references stay hidden with it.
     #   · when the tree already holds that HOST under another origin — the host is known, which
     #     is `JsRefs.visible_host?`'s rule, and a bundle on `http://h:8080` naming
     #     `http://h:9090/api` says a second service exists there that nobody requested. Placed
@@ -341,6 +343,10 @@ module Gori
         # of a host's references show must not depend on which sorted first. `JsRefs.list`
         # judges every endpoint the same way.
         if host_node.nil? || grown.includes?(key)
+          # A captured origin missing from the tree was hidden by a lens (hide-static, the scope
+          # lens), so its references stay hidden with it rather than bringing it back as a
+          # "never requested" root — the rule `JsRefs.attach!` keeps for a whole host.
+          next if r.origin_captured
           next unless known.includes?(key[1]) || yield r
         end
         unless host_node

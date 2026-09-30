@@ -15,9 +15,11 @@ module Gori
     # path), with how many flows referenced it. Keyed by the whole origin so the URL a scope
     # question is asked about is one a reference really named (a MIN per column could pair one
     # reference's scheme with another's port). `host_captured` — the project holds traffic for
-    # this host, so a tree missing it has it hidden by a lens, not unknown.
+    # this host, so a tree missing it has it hidden by a lens, not unknown. `origin_captured` —
+    # the same, for this reference's scheme + port (#1371): an origin of a captured host that
+    # the tree lacks was hidden too, not never requested.
     record JsRefNode, scheme : String, host : String, port : Int32, path : String, flows : Int32,
-      host_captured : Bool = false
+      host_captured : Bool = false, origin_captured : Bool = false
 
     # One stored reference WITH its source flow's URL (nil when the flow row is gone, which a
     # cascade makes a race, not a state).
@@ -94,7 +96,17 @@ module Gori
       nodes, capped = result
       hosts = nodes.reject(&.host_captured).map(&.host).uniq!
       now = hosts.select { |h| @db.query_one?("SELECT 1 FROM flows WHERE host = ? LIMIT 1", h, as: Int64) }.to_set
-      nodes = nodes.map { |n| now.includes?(n.host) ? n.copy_with(host_captured: true) : n } unless now.empty?
+      origins = nodes.reject(&.origin_captured).map { |n| {n.scheme, n.host, n.port} }.uniq!
+      now_origins = origins.select do |(sc, h, pt)|
+        @db.query_one?("SELECT 1 FROM flows WHERE host = ? AND scheme = ? AND port = ? LIMIT 1", h, sc, pt, as: Int64)
+      end.to_set
+      unless now.empty? && now_origins.empty?
+        nodes = nodes.map do |n|
+          n = n.copy_with(host_captured: true) if now.includes?(n.host)
+          n = n.copy_with(origin_captured: true) if now_origins.includes?({n.scheme, n.host, n.port})
+          n
+        end
+      end
       result = {nodes, capped}
       @js_ref_nodes_memo = {key, result, top_flow}
       result
@@ -106,11 +118,13 @@ module Gori
     private def js_ref_aggregate(limit : Int32) : {Array(JsRefNode), Bool}
       out = [] of JsRefNode
       @db.query("SELECT scheme, host, port, path, COUNT(DISTINCT flow_id), " \
-                "EXISTS (SELECT 1 FROM flows f WHERE f.host = js_refs.host) FROM js_refs " \
+                "EXISTS (SELECT 1 FROM flows f WHERE f.host = js_refs.host), " \
+                "EXISTS (SELECT 1 FROM flows f WHERE f.host = js_refs.host AND f.scheme = js_refs.scheme " \
+                "AND f.port = js_refs.port) FROM js_refs " \
                 "GROUP BY host, path, scheme, port ORDER BY host, path, scheme, port LIMIT ?", limit + 1) do |rs|
         rs.each do
           out << JsRefNode.new(rs.read(String), rs.read(String), rs.read(Int64).to_i32, rs.read(String),
-            rs.read(Int64).to_i32, rs.read(Int64) != 0)
+            rs.read(Int64).to_i32, rs.read(Int64) != 0, rs.read(Int64) != 0)
         end
       end
       capped = out.size > limit
@@ -181,7 +195,7 @@ module Gori
     end
 
     # Stored references with their source flow's URL, newest source first within one
-    # (host, path). `host` is exact (hosts are stored lowercased), `path` narrows to one node.
+    # (host, path, scheme, port) — so each origin's sightings of a path are contiguous (#1371). `host` is exact (hosts are stored lowercased), `path` narrows to one node.
     # Raises on a read error when asked to, so a headless surface can tell "none" from "failed".
     #
     # `scheme`/`port` narrow to one origin of `host` (a Sitemap root, #1371).
@@ -211,7 +225,7 @@ module Gori
             "r.line, r.flags, r.base, r.created_at, f.scheme, f.host, f.port, f.target " \
             "FROM js_refs r LEFT JOIN flows f ON f.id = r.flow_id " \
             "#{where.empty? ? "" : "WHERE #{where.join(" AND ")} "}" \
-            "ORDER BY r.host, r.path, r.flow_id DESC LIMIT ?"
+            "ORDER BY r.host, r.path, r.scheme, r.port, r.flow_id DESC LIMIT ?"
       out = [] of JsRefSighting
       @db.query(sql, args: args) do |rs|
         rs.each do

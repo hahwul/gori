@@ -15,17 +15,17 @@ private def sj_ep(path : String, *, host = "shop.test", requested : Bool? = fals
 end
 
 describe "gori run sitemap js — text" do
-  it "groups by host with where each reference was read" do
+  it "groups by origin with where each reference was read" do
     out = Gori::CLI::Run.sitemap_js_text([
       sj_ep("/api/admin", flows: 2),
       sj_ep("/api/users/{expr}", templated: true, base: SJ::Base::Guessed, literal: "/api/users/{expr}"),
       sj_ep("/v1/me", host: "api.shop.test", requested: true, comment: true),
     ])
     lines = out.lines
-    lines[0].should eq("shop.test")
+    lines[0].should eq("https://shop.test")
     lines[1].should match(/^  \/api\/admin\s+2 flows  #7:3  "\/api\/admin"$/)
     lines[2].should match(/\[templated, base: guessed\]$/)
-    lines[4].should eq("api.shop.test")
+    lines[4].should eq("https://api.shop.test")
     lines[5].should match(/requested .* \[comment\]$/)
   end
 
