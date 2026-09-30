@@ -205,7 +205,8 @@ describe "proxy: a bare-LF response head" do
   # bare-LF heads were accepted — never framed by the shorter head and kept alive.
   it "refuses a head whose buffered CRLFCRLF reading frames the body differently" do
     {"HTTP/1.1 200 OK\r\nX: a\n\r\nContent-Length: 5\r\n\r\n"               => "helloEXTRA",
-     "HTTP/1.1 200 OK\r\nContent-Length: 0\n\r\nContent-Length: 50\r\n\r\n" => "x" * 50}.each do |head, body|
+     "HTTP/1.1 200 OK\r\nContent-Length: 0\n\r\nContent-Length: 50\r\n\r\n" => "x" * 50,
+     "HTTP/1.1 200 OK\r\nContent-Length: 5\n\r\nX: y\r\n\r\n"               => "hello"}.each do |head, body|
       connections = [0]
       origin = bare_lf_origin(head + body, connections, close_after: false)
       port = origin.local_address.port

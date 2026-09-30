@@ -4674,9 +4674,15 @@ devices and legacy CGI are exactly what an operator points gori at.
   is the blunt one.
 - **A CRLF-only reader is still a party.** It does not stop at a bare-LF blank line; it reads on
   to the next CRLFCRLF (`…\r\nX: a\n\r\nContent-Length: 5\r\n\r\n`). When that CRLFCRLF is
-  already buffered and the longer head's strict reading frames the body differently from the
-  lenient one, the reader returns the LONGER head, which then parses strictly and is refused by
-  `framing_ambiguous?` exactly as before bare-LF heads were accepted. The cost, accepted: an
+  already buffered and the two readings frame the body differently, the reader returns the
+  LONGER head, which then parses strictly and is refused by `framing_ambiguous?`. "Differently"
+  is the framing values disagreeing, or, with the same values, a body being declared at all
+  (a Content-Length other than 0, any Transfer-Encoding): the body then starts at a different
+  byte for each reader. With no body declared only the head/body split inside the one message
+  differs — a close-delimited body ends at the close for every reader, a length-0 one ends at
+  gori's head and the rest stays on a connection gori retires and flags — so that head is
+  kept. The same rule now covers a CRLFCRLF head that a lenient reader ends early, which main
+  forwarded framed by the longer head. The cost, accepted: an
   LF-only head that declares a length, followed in the same segment by a body holding a CRLF
   blank line, is refused too, because a strict reader genuinely frames that message otherwise.
   A CRLFCRLF not yet buffered cannot be seen; the next two points bound that.

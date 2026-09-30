@@ -499,6 +499,31 @@ describe Gori::Proxy::Codec::Http1 do
       end
     end
 
+    # Same Content-Length on both readings, but not the same BODY: the lenient head ends at the
+    # `\n\r\n` and takes `X: y\r` as the five bytes, a strict one takes `hello`. A head that a
+    # lenient reader ends early and that declares a body is refused.
+    it "refuses a body a strict reading would start elsewhere, even when the framing values agree" do
+      {"HTTP/1.1 200 OK\r\nContent-Length: 5\n\r\nX: y\r\n\r\n"          => "hello",
+       "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\n\r\nX: y\r\n\r\n" => "5\r\nhello\r\n0\r\n\r\n"}.each do |strict_head, body|
+        head = Http1.read_response_head_result(WindowedIO.new("#{strict_head}#{body}".to_slice, 4096)).head?.not_nil!
+        String.new(head).should eq(strict_head)
+        resp = Http1.parse_response_head(head)
+        expect_raises(Gori::Error, /ambiguous framing/) { Body.response_framing(resp, "GET") }
+      end
+    end
+
+    # No body declared: only the head/body split inside this one message differs, never where
+    # the next one starts — close-delimited ends at the close for every reader, and a length-0
+    # body ends at gori's head, the rest left on a connection that is retired and flagged.
+    it "keeps the bare-LF head when no body is declared, whatever a strict reading adds" do
+      {"HTTP/1.1 200 OK\r\nContent-Length: 0\n\r\n"        => {"X: y\r\n\r\n", BodyFraming::Length},
+       "HTTP/1.1 200 OK\r\nContent-Type: text/plain\n\r\n" => {"X: y\r\n\r\nhello", BodyFraming::CloseDelimited}}.each do |lf_head, (rest, framing)|
+        head = Http1.read_response_head_result(WindowedIO.new("#{lf_head}#{rest}".to_slice, 4096)).head?.not_nil!
+        String.new(head).should eq(lf_head)
+        Body.response_framing(Http1.parse_response_head(head), "GET")[0].should eq(framing)
+      end
+    end
+
     it "reads and parses a bare-LF head behind leading blank lines alike" do
       raw = "\n\nHTTP/1.1 200 OK\nContent-Length: 2\n\nok"
       head = Http1.read_response_head_result(WindowedIO.new(raw.to_slice, 4096)).head?.not_nil!

@@ -472,6 +472,16 @@ describe Gori::Proxy::Codec::Body do
       end
     end
 
+    it "rejects a CRLFCRLF head a lenient recipient ends early, once it declares a body" do
+      # Both views read Content-Length: 5, but a lenient client ends the head at `\n\r\n` and
+      # frames five different bytes as the body.
+      resp = Http1.parse_response_head("HTTP/1.1 200 OK\r\nContent-Length: 5\n\r\nX: y\r\n\r\n".to_slice)
+      Http1.framing_ambiguous?(resp.raw_head, resp.headers).should be_true
+      expect_raises(Gori::Error) { Body.response_framing(resp, "GET") }
+      zero = Http1.parse_response_head("HTTP/1.1 200 OK\r\nContent-Length: 0\n\r\nX: y\r\n\r\n".to_slice)
+      Http1.framing_ambiguous?(zero.raw_head, zero.headers).should be_false
+    end
+
     it "leaves an ordinary clean response untouched by the ambiguity check" do
       resp = Http1.parse_response_head(
         "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nTransfer-Encoding: chunked\r\n\r\n".to_slice)

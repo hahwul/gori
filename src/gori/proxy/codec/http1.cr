@@ -400,7 +400,8 @@ module Gori::Proxy::Codec::Http1
   # CRLF-only reader, which does not stop there, would read on to a CRLFCRLF that is ALREADY
   # BUFFERED in `chunk`. Two recipients then disagree about where the head ends, and the one
   # question is whether that moves the body boundary: the strict reading of the longer head is
-  # compared against the lenient one (`framing_ambiguous?`, the same test as before). When they
+  # compared against the lenient one by `framing_ambiguous?`, which also counts a body that
+  # both declare alike but would start at different bytes (see there). When they
   # disagree the strict head is returned, so the caller reads exactly the head a CRLF-only
   # reader did and `Body.response_framing` refuses it exactly as it always has. Otherwise
   # `head_end` stands. A strict reading that is not buffered yet cannot be seen from here; the
@@ -1130,9 +1131,38 @@ module Gori::Proxy::Codec::Http1
   # obfuscated_header? is the cheap gate — a clean CRLF head can hide nothing, so the common
   # path is one byte scan and no allocation at all; only a head that already looks odd pays
   # for the two views.
+  #
+  # The views can agree and the message still be read two ways: `Content-Length: 5\n\r\nX: y\r\n
+  # \r\nhello` gives both `content-length:5`, but a lenient recipient ENDS THE HEAD at the
+  # `\n\r\n` and takes `X: y\r` as the body, where this parse takes `hello`. So a head a lenient
+  # recipient ends early (`lenient_head_end`) is ambiguous too once it declares a body — a
+  # Content-Length other than 0 or any Transfer-Encoding. Without one, only the head/body split
+  # inside this one message differs, never where the next message starts: a close-delimited
+  # body ends at the close for every reader, and a length-0 one ends at gori's head, with the
+  # rest left on a connection gori retires and flags (the bare-LF rules in `ClientConn`).
   def self.framing_ambiguous?(raw : Bytes, headers : HeaderList) : Bool
     return false unless obfuscated_header?(raw)
-    strict_framing_view(headers) != lenient_framing_view(raw)
+    lenient = lenient_framing_view(raw)
+    return true if strict_framing_view(headers) != lenient
+    lenient_head_end(raw) < raw.size && declares_body?(lenient)
+  end
+
+  # Whether a framing view declares a body: a Content-Length other than 0, or any
+  # Transfer-Encoding (whose framing, chunked or close-delimited, is the coding's to decide).
+  private def self.declares_body?(view : Array(String)) : Bool
+    view.any? { |entry| entry.starts_with?("transfer-encoding:") || entry != "content-length:0" }
+  end
+
+  # Where a LENIENT recipient ends the head — past the first empty line by `lenient_framing_view`'s
+  # own line model (a line ends at CR, LF or CRLF) — or raw.size when it runs to the end.
+  private def self.lenient_head_end(raw : Bytes) : Int32
+    pos = lenient_after_start_line(raw)
+    while pos < raw.size
+      stop = lenient_line_end(raw, pos)
+      return lenient_next_line(raw, stop) if stop == pos # the empty line ends the head
+      pos = lenient_next_line(raw, stop)
+    end
+    raw.size
   end
 
   # The framing headers as gori's STRICT parse sees them, "name:value" in wire order.
