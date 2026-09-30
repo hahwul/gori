@@ -189,18 +189,52 @@ describe Gori::Import::Oas do
     end
   end
 
-  it "keeps the root server for a relative or templated path-level server" do
+  it "keeps the root server for a relative or default-less templated path-level server" do
     body = <<-JSON
       {"openapi":"3.0.3","info":{"title":"t","version":"1"},
        "servers":[{"url":"https://a.test"}],
        "paths":{"/rel":{"servers":[{"url":"/v2"}],"get":{"responses":{"200":{"description":"OK"}}}},
-                "/tpl":{"get":{"servers":[{"url":"https://{region}.b.test","variables":{"region":{"default":"eu"}}}],
+                "/tpl":{"get":{"servers":[{"url":"https://{region}.b.test","variables":{"region":{"enum":["eu"]}}}],
                                "responses":{"200":{"description":"OK"}}}}}}
       JSON
     with_spec(body, ".json") do |path|
       result = Gori::Import::Oas.parse_file(path)
       result.skipped.should eq(0)
       result.flows.map(&.request.host).should eq(["a.test", "a.test"])
+    end
+  end
+
+  # OpenAPI 3 requires every server variable to carry a `default`. Left templated, a root
+  # `http://{host}:18371/{base}` skipped every operation as malformed with no reason, and a
+  # `{base}` alone imported a literal `/{base}/items/1`.
+  it "fills server url variables with their defaults" do
+    body = <<-JSON
+      {"openapi":"3.0.3","info":{"title":"t","version":"1"},
+       "servers":[{"url":"http://{host}:{port}/{base}",
+                   "variables":{"host":{"default":"api.test"},"port":{"default":18371},
+                                "base":{"default":"v2","enum":["v1","v2"]}}}],
+       "paths":{"/items/{id}":{"get":{"parameters":[{"name":"id","in":"path","required":true,
+                                                      "schema":{"type":"integer"}}],
+                                       "responses":{"200":{"description":"OK"}}}},
+                "/eu":{"get":{"servers":[{"url":"https://{region}.b.test","variables":{"region":{"default":"eu"}}}],
+                              "responses":{"200":{"description":"OK"}}}}}}
+      JSON
+    with_spec(body, ".json") do |path|
+      result = Gori::Import::Oas.parse_file(path)
+      result.skipped.should eq(0)
+      result.flows.map { |f| {f.request.host, f.request.port, f.request.target} }.should eq(
+        [{"api.test", 18371, "/v2/items/1"}, {"eu.b.test", 443, "/eu"}])
+    end
+  end
+
+  it "names a root server variable that has no default instead of skipping every operation" do
+    body = <<-JSON
+      {"openapi":"3.0.3","info":{"title":"t","version":"1"},
+       "servers":[{"url":"https://api.test/{base}","variables":{"base":{"enum":["v1"]}}}],
+       "paths":{"/a":{"get":{"responses":{"200":{"description":"OK"}}}}}}
+      JSON
+    with_spec(body, ".json") do |path|
+      expect_raises(Gori::Error, /\{base\} has no default/) { Gori::Import::Oas.parse_file(path) }
     end
   end
 

@@ -156,12 +156,11 @@ module Gori
       end
 
       # A path-item or operation `servers[0].url` to send to instead of the root one, or nil to
-      # keep the root: a relative (`/v2`) or templated (`https://{region}.api.test`) entry is valid
-      # OpenAPI but names no host by itself, and used to import against the root server — so it
-      # still does, rather than skipping the operation.
+      # keep the root: a relative (`/v2`) entry, or a templated one naming a variable it gives no
+      # `default` for, is valid OpenAPI but names no host by itself, and used to import against
+      # the root server — so it still does, rather than skipping the operation.
       private def self.local_server_url(servers : JSON::Any?) : String?
-        url = server_url(servers) rescue nil
-        url unless url.nil? || url.includes?('{')
+        server_url(servers) rescue nil
       end
 
       # `servers[0].url` of a root, path-item or operation `servers` list, or nil when the
@@ -177,6 +176,7 @@ module Gori
             %(OpenAPI servers[0] is not an object — write `- url: "https://api.example.com"`))
           url = first_h["url"]?.to_s
           raise Gori::Error.new("OpenAPI spec has no servers[0].url") if url.empty?
+          url = substitute_server_variables(url, first_h["variables"]?)
           # A relative server URL ("/v3", "./v3", "../v3", "v3") has no host authority:
           # every generated request would prepend "https://" onto it, either yielding an
           # empty host ("https:///v3/...") or a bogus one ("https://./v3/..." → host
@@ -200,6 +200,25 @@ module Gori
           return url
         end
         nil
+      end
+
+      SERVER_VARIABLE = /\{([^{}]*)\}/
+
+      # Fill each `{name}` in a server url with its `variables.<name>.default` — OpenAPI 3
+      # requires every variable to carry one, and it is the value the spec's author means when
+      # nothing else is chosen. Left templated, `http://{host}:8080/{base}` failed to parse and
+      # skipped every operation, and `https://api.test/{base}` imported a literal `/{base}/`
+      # path. A variable with no default names no URL, so it is refused rather than guessed.
+      private def self.substitute_server_variables(url : String, variables : JSON::Any?) : String
+        return url unless url.includes?('{')
+        vars = variables.try(&.as_h?)
+        url.gsub(SERVER_VARIABLE) do |_, match|
+          name = match[1]
+          default = vars.try(&.[name]?).try(&.as_h?).try(&.["default"]?)
+          value = default.try { |d| d.as_s? || (d.raw.is_a?(Int64 | Float64) ? d.to_json : nil) }
+          value || raise Gori::Error.new(
+            %(OpenAPI servers[0].url variable {#{name}} has no default — add servers[0].variables.#{name}.default))
+        end
       end
 
       # Swagger 2.0 puts the authority and base path in separate root fields. Its `schemes`
