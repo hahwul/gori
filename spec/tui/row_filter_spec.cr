@@ -52,3 +52,21 @@ describe Gori::Tui::RowFilter do
     b.row(0).should contain(": ab")
   end
 end
+
+describe "RowFilter shell keys (#1379)" do
+  it "answers ^A ^E ^U ^W like the `/` bars" do
+    ctrl = Termisu::Input::Modifier::Ctrl
+    f = RowFilter.new
+    f.start
+    "get admin".each_char { |c| f.handle_key(key(Termisu::Input::Key::Unknown, c)) }
+    f.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerW, ctrl, nil)).should be_true
+    f.text.should eq("get ")
+    f.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerA, ctrl, nil))
+    f.handle_key(key(Termisu::Input::Key::Unknown, 'x'))
+    f.text.should eq("xget ")
+    f.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerE, ctrl, nil))
+    f.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerU, ctrl, nil))
+    f.text.should eq("")
+    f.editing?.should be_true
+  end
+end
