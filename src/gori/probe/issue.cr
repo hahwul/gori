@@ -198,6 +198,7 @@ module Gori
       "api_docs_exposed"               => "API documentation, a schema spec, or an interactive query IDE is reachable here (the evidence names which). If it is not meant to be public, require authentication or restrict it to internal networks; if it is, ensure it lists only intended endpoints and never ships a live query console (GraphiQL/GraphQL Playground) in production.",
       "session_id_in_url"              => "A session identifier is carried in the URL, where it leaks via server logs, browser history, and the Referer header — and a link that sets it can fix a victim's session. Keep session tokens in cookies (HttpOnly, Secure, SameSite), never in the query string.",
       "open_cross_domain_policy"       => "A Flash/Silverlight cross-domain policy grants access to all origins (domain=\"*\"), letting any site's plugin content read this origin's authenticated responses. Remove the wildcard and list only the specific origins that need access, or delete the policy file if these plugins are no longer used.",
+      "bare_lf_response"               => "The origin ends response-head lines with a bare LF instead of CRLF. Browsers and gori accept it (RFC 9112 §2.2), but a CRLF-only parser does not, so a cache, load balancer or WAF in front of this origin can disagree with the client about where the head, and therefore the body, ends — the precondition for a response desync or response splitting. Fix the server to emit CRLF line endings; until then, check how each hop in front of it frames this response.",
       "ratelimit_bypass"               => "The rate limit was bypassed by forging a client-IP header (X-Forwarded-For / X-Real-IP). Derive the client identity from the real connection — the trusted proxy's rightmost forwarded address, or the socket peer — not from a client-controllable header.",
       "forbidden_method_bypass"        => "The access control was bypassed by changing the HTTP method or sending a method-override header. Enforce authorization on the resource for every method (including HEAD/OPTIONS and overrides), not only the verb the client first used, and ignore X-HTTP-Method-Override unless you deliberately support it.",
       "trace_enabled"                  => "HTTP TRACE is enabled and echoes the request back (Cross-Site Tracing), so script that can force a TRACE reads headers and cookies the browser would otherwise withhold. Disable TRACE at the web server / reverse proxy.",
@@ -332,6 +333,7 @@ module Gori
       "api_docs_exposed"         => {200, "Exposure of Sensitive Information to an Unauthorized Actor"},
       "session_id_in_url"        => {598, "Use of GET Request Method With Sensitive Query Strings"},
       "open_cross_domain_policy" => {942, "Permissive Cross-domain Policy with Untrusted Domains"},
+      "bare_lf_response"         => {444, "Inconsistent Interpretation of HTTP Requests ('HTTP Request/Response Smuggling')"},
     }
 
     # {id, name} for a finding code, or nil when the code is deliberately unmapped (see CWE).

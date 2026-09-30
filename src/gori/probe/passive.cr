@@ -32,6 +32,7 @@ require "./passive/post_message"
 require "./passive/api_docs_exposed"
 require "./passive/session_id_in_url"
 require "./passive/open_cross_domain_policy"
+require "./passive/bare_lf_response"
 require "./custom_rule"
 
 module Gori
@@ -74,6 +75,7 @@ module Gori
         ApiDocsExposed.new,
         SessionIdInUrl.new,
         OpenCrossDomainPolicy.new,
+        BareLfResponse.new,
       ] of Rule
 
       # WS-only subset used when a flow was already fully analyzed and new WebSocket frames arrive.

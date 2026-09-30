@@ -1,4 +1,5 @@
 require "../spec_helper"
+require "../support/probe_harness"
 require "socket"
 
 # An origin whose RESPONSE head ends its lines on a bare LF — an embedded device or a legacy
@@ -90,6 +91,13 @@ describe "proxy: a bare-LF response head" do
       captured.content_type.should eq("text/plain")
       String.new(captured.head).should eq("HTTP/1.1 200 OK\nContent-Type: text/plain\nX-Device: cam\n\n")
       String.new(captured.body.not_nil!).should eq("hello from the device")
+
+      # The capture carries the Probe marker for the anomaly.
+      with_store do |store|
+        dets = probe_analyze(store, resp_head: String.new(captured.head), content_type: "text/plain",
+          body: "hello from the device", scheme: "http")
+        probe_codes_of(dets).should contain("bare_lf_response")
+      end
     end
   ensure
     origin.try(&.close) rescue nil

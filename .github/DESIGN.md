@@ -4655,3 +4655,37 @@ tool/group for the lifetime of that MCP server's binding to a project, so a retr
 row rather than one per call. The existing project event retention remains the outer disk bound.
 The globally read-only MCP mode has a read-only store and therefore cannot write this marker;
 neither can an unbound server with no project event feed.
+
+### 2026-09-30: a bare-LF response head is accepted, framed off its LF reading, and never reused
+
+Refines: [P7](#p7), and the response half of the framing rule (`Http1.framing_ambiguous?`).
+
+An origin that ends its response-head lines on a bare LF (`HTTP/1.1 200 OK\n…\n\nbody`) was
+never framed: every head reader stopped only on CRLFCRLF, so a close-delimited origin's reply
+reached the client as nothing and a keep-alive one stalled to the head deadline, while the same
+page rendered direct. RFC 9112 §2.2 lets a recipient accept a lone LF and browsers do; embedded
+devices and legacy CGI are exactly what an operator points gori at.
+
+- **Responses only.** `Http1.read_response_head_result` is the one upstream response reader (the
+  proxy, `Repeater::Engine` and so every active tool, the WebSocket handshake) and also ends a
+  head on `\n\n`, `\r\n\n` or `\n\r\n`. A request head stays CRLFCRLF-only: its peer is the
+  operator's own client, which is why the request rule is the blunt one.
+- **The terminator picks the reading.** `parse_response_head` reads a head ENDED on a bare-LF
+  blank line on LF (a CR before the LF goes with it); every other head keeps the strict CRLF
+  scan, including a CRLFCRLF head with a bare LF inside, which `framing_ambiguous?` must keep
+  comparing as before. For an LF-terminated head the "strict" side of that comparison is the LF
+  reading — a CRLF-only recipient never ends the head at all, so the parties that can disagree
+  are LF-lenient ones — and a lone CR, an obs-fold or whitespace before the colon on a framing
+  header is still refused. Stored heads take the same parse, so Probe, export, evidence and MCP
+  see the status and headers.
+- **Bytes stay as they came.** Nothing rewrites an LF to CRLF, on the wire or in the capture.
+- **One response per connection.** `lf_terminated_head?` makes `ClientConn#origin_keep_alive?`
+  and `ConnPool.reusable_response?` retire the socket, so if the lenient framing was wrong the
+  leftover dies with the connection instead of being recorded as the next request's response.
+  `send_pipeline` is left alone: a group send on one socket is the operator's own desync test.
+- **Visible.** Probe's passive `bare_lf_response` flags any bare LF in a response head.
+
+Not changed: the header-strip scans (`strip_header_lines`: Alt-Svc, WebSocket extensions) keep
+their CRLF view, so they do not remove a field from an LF-terminated head (the scan still never
+sees a field the head does not carry, which is the property that entry protects). h2 has no line
+endings and is unaffected.
