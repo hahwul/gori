@@ -132,6 +132,19 @@ describe Gori::Tui::SequenceConfigOverlay do
     end
   end
 
+  it "↵ starts from any row instead of advancing the cycler under it (#1373)" do
+    ov = SequenceConfigOverlay.new(seed(Q::TokenLoc.new(Gori::ExtractKind::Cookie, "SID")))
+    ov.set_selected(SequenceConfigOverlay::GOAL_ROW)
+    samples = ov.build_config.goal
+    ov.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::Enter)).should eq(:commit)
+    ov.build_config.goal.should eq(samples)
+    ov.set_selected(SequenceConfigOverlay::SELECTOR_ROW)
+    ov.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::Enter)).should eq(:commit)
+    ov.set_selected(SequenceConfigOverlay::GOAL_ROW)
+    ov.handle_key(Termisu::Event::Key.new(Termisu::Input::Key::Space)).should eq(:stay)
+    ov.build_config.goal.should_not eq(samples)
+  end
+
   it "still refuses a blank selector for the selector-taking kinds" do
     ov = SequenceConfigOverlay.new(seed(Q::TokenLoc.new(Gori::ExtractKind::Regex, "")))
     ov.valid?.should be_false

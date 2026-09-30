@@ -54,28 +54,24 @@ module Gori
                                           %("items":{"oneOf":[{"type":"string"},{"type":"integer"}]}}))
         s.field "macro_every", JSON.parse(%({"description":#{request_macro_every_doc(noun, race).to_json},) +
                                           %("oneOf":[{"type":"string"},{"type":"integer"}]}))
-        s.field "macro_expect", strarrprop("Binding names the macro MUST rebind on every run (e.g. [\"CSRF\"]). Default: any binding the send context can see — name the one that matters and an extract rule that missed cannot pass as a fresh value. Refused when no enabled extract rule of that name applies to the active session slot.")
-        s.field "macro_on_failure", enumprop("What a #{noun} does when the macro fails: skip (default — the #{noun} is NOT sent, its row is an error row prefixed \"macro:\", and the run ends after #{RequestMacro::Lane::FAILURE_LIMIT} failures in a row) | stop (the run ends on the first failure). There is no \"send it anyway with the last value\": that #{noun}'s verdict would be about a stale token.", %w[skip stop])
+        s.field "macro_expect", strarrprop("binding names the macro MUST rebind on every run (e.g. [\"CSRF\"]); default: any binding the send context can see. Naming the one that matters stops an extract rule that missed from passing as fresh. Refused when no enabled extract rule of that name applies to the active session slot.")
+        s.field "macro_on_failure", enumprop("what a #{noun} does when the macro fails: skip (default: the #{noun} is NOT sent, its row is an error prefixed \"macro:\", and #{RequestMacro::Lane::FAILURE_LIMIT} failures in a row end the run) or stop (the first failure ends the run). A #{noun} is never sent with a stale value.", %w[skip stop])
       end
 
       private def request_macro_steps_doc(noun : String) : String
-        "Request-time macro (#1350) for a rotating CSRF token or nonce: saved Repeater sessions (ids from get_repeater_context, or a " \
-        "tab's name; integers accepted) replayed IN ORDER before each #{noun}, so the value their extract rules leave in the " \
-        "session bindings is fresh when the #{noun} resolves its $BIND.NAME (bare syntax: $NAME). The request must name the " \
-        "binding — in a `template` (a captured `flow_id` template is sent exactly as captured and substitutes nothing) or in a " \
-        "header of the active session slot — or the run is refused. The steps are sent as the active session slot, are recorded " \
-        "in History with source `macro`, go through the same scope and Sandbox gates as everything else, and are charged to " \
-        "max_requests and held to rate. The reply's request_macro says what it does to the run: a per-request macro runs the " \
-        "sweep one #{noun} at a time, because a one-time value cannot be shared."
+        "Request-time macro for a rotating CSRF token or nonce: saved Repeater sessions (ids from get_repeater_context, or tab " \
+        "names) replayed IN ORDER before each #{noun}, so the bindings their extract rules set are fresh when the #{noun} " \
+        "resolves $BIND.NAME (bare: $NAME). The binding must appear in a `template` (a `flow_id` template substitutes nothing) " \
+        "or an active-slot header, or the run is refused. Steps go out as the active session slot, through the same scope and " \
+        "Sandbox gates, are recorded in History (source `macro`) and count toward max_requests and rate. A per-request macro " \
+        "runs the sweep one #{noun} at a time; the reply's request_macro says so."
       end
 
       private def request_macro_every_doc(noun : String, race : Bool) : String
-        doc = "How often the macro runs, counted in #{noun}s: \"request\" (default — before every #{noun}, never shared), a number N " \
-              "(one value shared by N #{noun}s, up to N running at once; the next value is fetched after all N finish), or \"off\" " \
-              "(keep the steps configured but run nothing)."
+        doc = "how often the macro runs, in #{noun}s: \"request\" (default, before every #{noun}), a number N (one value shared " \
+              "by N #{noun}s, fetched again after all N finish), or \"off\" (steps kept, nothing run)."
         return doc unless race
-        doc + " With a race_count run, the number must be at least the group size: the " \
-              "steps then run once before the group and every member carries that one value."
+        doc + " With race_count, N must be at least the group size: the steps run once before the group."
       end
 
       # The plan-time description of the stage, for the start reply — present only for a run

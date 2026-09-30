@@ -89,9 +89,9 @@ gori mcp --read-only
 
 | 시작 방법 | 도구 | `tools/list` | 토큰 | 용도 |
 | --- | ---: | ---: | ---: | --- |
-| `gori mcp` | 195 | ~243 KB | ~62k | 전부 (기본값) |
+| `gori mcp` | 195 | ~237 KB | ~61k | 전부 (기본값) |
 | `--read-only` | 64 | ~75 KB | ~19k | 읽기 도구와 순수 연산; 실제 요청 전송 없음 |
-| `--tools=@recon` | 39 | ~59 KB | ~15k | 캡처를 읽고 파악, 패시브 스캔, 요청 재전송, 이슈·노트 기록 |
+| `--tools=@recon` | 39 | ~58 KB | ~15k | 캡처를 읽고 파악, 패시브 스캔, 요청 재전송, 이슈·노트 기록 |
 | `--tools=@recon --read-only` | 29 | ~42 KB | ~11k | `--read-only`가 끄는 도구를 뺀 `@recon` |
 | `--tools=@minimal` | 18 | ~28 KB | ~7k | History와 flow, 현재 TUI 컨텍스트를 읽고 오퍼레이터와 대화 |
 

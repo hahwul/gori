@@ -152,7 +152,8 @@ module Gori::Tui
 
     # Own key handling (formerly Runner#handle_sequence_config_key). ↑/↓ move fields; the
     # selector row eats printable/caret/backspace (incl. ←/→ as caret motion) before the
-    # cyclers see them; ↵ on Start commits, elsewhere advances the cycler; esc cancels.
+    # cyclers see them; ↵ starts from any row, as the hint says (it used to advance the
+    # focused cycler — `samples` 500 → 1000 — #1373); ␣ advances a cycler; esc cancels.
     def handle_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
       return :cancel if key.escape?
@@ -164,11 +165,7 @@ module Gori::Tui
         move(1)
         return :stay
       end
-      if key.enter?
-        return :commit if on_start_row?
-        toggle_or_advance
-        return :stay
-      end
+      return :commit if key.enter?
       return :stay if editing_selector? && handle_text_key(ev)
       if key.left?
         adjust(-1)
@@ -213,7 +210,7 @@ module Gori::Tui
       end
     end
 
-    # Space/Enter on a cycler advances it; on the kind row it also re-prefills.
+    # Space on a cycler advances it; on the kind row it also re-prefills.
     def toggle_or_advance : Nil
       adjust(1) if @selected == KIND_ROW || @selected == GOAL_ROW || @selected == MAXREQ_ROW ||
                    @selected == CONC_ROW || @selected == NOTIFY_ROW

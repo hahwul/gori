@@ -132,12 +132,13 @@ module Gori::Tui
     end
 
     def hint : String
-      "↑/↓ field · ←/→ adjust · ↵ run · esc cancel"
+      "↑/↓ field · ←/→ adjust · ␣ toggle · ↵ run · esc cancel"
     end
 
-    # Formerly Runner#handle_probe_active_key: ↑/↓ move, ←/→ adjust the cyclers, ␣/↵ toggles a
-    # row or commits on Run (the open-site's closure fires the scan and reports whether the
-    # options actually send anything — a no-op selection keeps the popup up).
+    # Formerly Runner#handle_probe_active_key: ↑/↓ move, ←/→ adjust the cyclers, ␣ toggles a
+    # row or commits on Run, ↵ runs from any row as the hint says (#1373). The open-site's
+    # closure fires the scan and reports whether the options actually send anything — a no-op
+    # selection keeps the popup up.
     def handle_key(ev : Termisu::Event::Key) : Symbol
       k = ev.key
       return :cancel if k.escape?
@@ -149,7 +150,9 @@ module Gori::Tui
         adjust(-1)
       elsif k.right?
         adjust(1)
-      elsif k.enter? || k.space?
+      elsif k.enter?
+        return :commit
+      elsif k.space?
         return :commit if on_run_row?
         toggle
       end
@@ -185,7 +188,7 @@ module Gori::Tui
       end
     end
 
-    # ␣/↵ on the notify row cycles it; on the unsafe row flips the opt-in; the Run row is handled
+    # ␣ on the notify row cycles it; on the unsafe row flips the opt-in; the Run row is handled
     # by the Runner.
     def toggle : Nil
       if @selected == notify_row
