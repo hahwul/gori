@@ -614,7 +614,7 @@ module Gori
     # File.join(@root, slug) would resolve to @root or its parent (traversal).
     private def slugify(name : String) : String
       slug = name.downcase.gsub(/[^a-z0-9._-]+/, "-").strip("-.")
-      return slug unless slug.empty?
+      return cap_slug(slug) unless slug.empty?
       # An all-non-ASCII display name (e.g. "日本語") has no [a-z0-9] to slugify and would
       # otherwise collapse to "" and be rejected as "invalid project name" — leaving such
       # projects completely unusable via --project. When the name carries real (non-ASCII)
@@ -625,6 +625,24 @@ module Gori
       # dot-run must never become a path (traversal).
       return slug unless name.each_char.any? { |c| c.ord > 127 }
       "project-#{Digest::SHA256.hexdigest(name)[0, 10]}"
+    end
+
+    # The longest slug a project directory gets. A file name is at most 255 bytes, and a
+    # 300-character name failed on every surface with the OS's raw "File name too long"; the
+    # headroom below that is for `unique_slug`'s `-2` and the `<slug>.gori` an export defaults
+    # to. The slug is ASCII, so characters are bytes.
+    MAX_SLUG = 128
+
+    # A slug past MAX_SLUG keeps its head and ends in a hash of the whole slug, so two long
+    # names that share the head still get different directories, and the same name (in any
+    # letter case, since the slug is lowercase) still reopens its own. Shorter slugs are
+    # untouched, and so is a longer one whose directory already exists — a name of 129–255 bytes
+    # was a valid directory before the cap, and capping it would open a second, empty project
+    # under the same name.
+    private def cap_slug(slug : String) : String
+      return slug if slug.bytesize <= MAX_SLUG
+      return slug if slug.bytesize <= 255 && Dir.exists?(File.join(@root, slug))
+      "#{slug[0, MAX_SLUG - 9].rstrip("-.")}-#{Digest::SHA256.hexdigest(slug)[0, 8]}"
     end
   end
 end

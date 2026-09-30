@@ -370,6 +370,41 @@ describe Gori::ProjectRegistry do
     end
   end
 
+  # A 300-character name made a 300-byte directory name, which every filesystem refuses:
+  # create failed on every surface with the OS's raw "File name too long".
+  it "caps a long name's slug and keeps two long names that share a head apart" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      long = "a" * 290 + "-one"
+      project, created = reg.create_or_reopen(long)
+      created.should be_true
+      slug = reg.slug_of(project)
+      slug.bytesize.should be <= Gori::ProjectRegistry::MAX_SLUG
+      slug.should start_with("aaaa")
+      project.name.should eq(long) # the display name is kept whole
+      reg.find(long).try(&.dir).should eq(project.dir)
+      reg.find(slug).try(&.dir).should eq(project.dir)
+
+      reg.create_or_reopen(long.upcase).should eq({reg.find(long).not_nil!, false}) # same name reopens
+      other = reg.create("a" * 290 + "-two")
+      other.dir.should_not eq(project.dir)
+      reg.slug_of(other).bytesize.should be <= Gori::ProjectRegistry::MAX_SLUG
+      # A name short enough keeps its slug exactly, so no existing project's directory moves.
+      reg.slug_of(reg.create("b" * Gori::ProjectRegistry::MAX_SLUG)).should eq("b" * Gori::ProjectRegistry::MAX_SLUG)
+    end
+  end
+
+  it "reopens a project whose uncapped slug directory predates the cap" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      name = "c" * 200
+      Dir.mkdir_p(File.join(root, name)) # a project created before slugs were capped
+      legacy = reg.create_or_reopen(name).first
+      legacy.dir.should eq(File.join(root, name))
+      reg.create_or_reopen(name).should eq({legacy, false})
+    end
+  end
+
   it "rejects a blank rename" do
     with_root do |root|
       reg = Gori::ProjectRegistry.new(root)
