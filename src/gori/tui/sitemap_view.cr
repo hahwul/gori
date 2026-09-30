@@ -28,12 +28,26 @@ module Gori::Tui
     # rendering on top. The alias keeps the rest of this file reading as `Node`.
     alias Node = Gori::Sitemap::Node
 
+    # What a cross-surface action resolves a row to: the endpoint by its BARE host, plus the
+    # origin the row stands for, so the flow lookup behind it stays on that scheme and port
+    # (`Store#representative_flow_id`) instead of opening the same path on another one.
+    alias Endpoint = NamedTuple(host: String, method: String, target: String, origin: Sitemap::Origin?)
+
     # A flattened tree row. `guides` is a bitmask: bit L set ⇒ a vertical `│` tree-guide
     # is drawn at ancestor level L (its branch continues below this row). Built once per
-    # tree/expand change in `collect`, not re-walked per frame. `host` is the label of the
-    # depth-0 node this row hangs under — stamped during the flatten so nothing has to walk
-    # back up the row list to find it (the mark predicate needs it on every drawn row).
-    private record VisibleRow, node : Node, depth : Int32, guides : UInt64, host : String
+    # tree/expand change in `collect`, not re-walked per frame. `root` is the depth-0 node this
+    # row hangs under — stamped during the flatten so nothing has to walk back up the row list
+    # to find it (the mark predicate needs it on every drawn row).
+    #
+    # A root is an ORIGIN (#1371), so the row's two host readings are kept apart: `key` (the
+    # root's `scheme://host:port` label) is its IDENTITY — marks, the selection anchor and the
+    # expand state, where `:19021/x` and `:19022/x` are two rows — and `root.host` (the bare
+    # host) is what a host-keyed question takes: a tag, a scope rule, a flow lookup.
+    private record VisibleRow, node : Node, depth : Int32, guides : UInt64, root : Node do
+      def key : String
+        root.label
+      end
+    end
 
     # The QL fields meaningful for the endpoint tree. The same `/` query language History
     # takes, plus `tag:` — a Sitemap-local field (handled here, not in the shared QL) that
@@ -137,11 +151,11 @@ module Gori::Tui
       @tag_buffer = ""
       @tag_cx = 0
       @tag_preedit = ""
-      # The (host, path) pairs the open editor targets, PINNED at start_tag — the marks if
+      # The (origin key, path) pairs the open editor targets, PINNED at start_tag — the marks if
       # any were set, else the cursor row. Pinned rather than re-derived so a mid-edit
       # rebuild (a data_version poll under live capture) can't retarget the commit.
       @tag_targets = [] of {String, String}
-      # Multi-select marks, keyed by the durable (host, path) address rather than a row
+      # Multi-select marks, keyed by the durable (origin key, path) address rather than a row
       # index: the tree is rebuilt from the store ~1.3x/sec under capture, so an index-keyed
       # mark would silently retarget on the next poll. A mark whose node is currently
       # collapsed or filtered out stays marked (marked_hidden_count reports it); a mark whose
@@ -152,6 +166,8 @@ module Gori::Tui
       # these, so `t` marks outside the range are never disturbed. Cleared by every
       # non-extend mark action.
       @mark_extent = Set({String, String}).new
+      # Root label → origin, for the mark keys (see `origin_for`).
+      @origins = {} of String => Sitemap::Origin
     end
 
     # Inject the Scope lens so the tree honours it AND the bar can show its state
@@ -182,17 +198,20 @@ module Gori::Tui
     # capture does not jump the cursor to the top host every ~750ms.
     #
     # A FULL rebuild, deliberately, and measured before leaving it that way: the whole path —
-    # `sitemap_entries` (DISTINCT, capped at `Store::SITEMAP_MAX`), `Sitemap.build`, the two
-    # fold passes, tag stamping, expand-depth, the endpoint counts and the flatten — runs in
+    # `sitemap_origin_entries` (DISTINCT, capped at `Store::SITEMAP_MAX`), `Sitemap.build`, the
+    # two fold passes, tag stamping, expand-depth, the endpoint counts and the flatten — ran in
     # ~6.4 ms at 100k flows with the tree at its 10k-endpoint cap. Against the 750 ms
     # data_version cadence, and only while this tab is ACTIVE (`@tabs[@active_tab]` in
     # Runner#apply_external_change), that is under 1% of a core. An incremental rebuild would
     # trade that for cache-invalidation state across build, folding, tagging and expansion —
     # the four things whose interaction the anchoring above already has to get right.
     #
-    # Roughly two thirds of the 6.4 ms is the DISTINCT query, which scales with the FLOW table
-    # rather than the capped tree, so the number to watch is retention: at the 100k default it
-    # is what is quoted here. Re-measure before assuming it still holds if that default moves.
+    # Most of that is the DISTINCT query, which scales with the FLOW table rather than the
+    # capped tree, so the number to watch is retention. Keying the roots on the origin (#1371)
+    # widened it from (host, method, target) to five columns of the same covering index:
+    # `bench/store_bench.cr` at 100k flows reads 4.5 ms for the old query and 6.6 ms for this
+    # one — about 2 ms more per reload, which keeps it near 1% of a core. Re-measure before
+    # assuming it still holds if the retention default moves.
     def reload(store : Store) : Nil
       plan = prepare_reload || return
       entries, tags, no_flows, js = fetch_reload(store, plan)
@@ -259,7 +278,7 @@ module Gori::Tui
 
     # What `fetch_reload` hands `apply_reload`: the endpoints, the tags, whether the project
     # holds no flows at all, and the JavaScript references (empty with the toggle off).
-    alias Fetched = {Array({String, String, String}), Hash({String, String}, String), Bool, Array(Store::JsRefNode)}
+    alias Fetched = {Array(Store::SitemapOriginEntry), Hash({String, String}, String), Bool, Array(Store::JsRefNode)}
 
     # Reads only — safe off the main fiber. `control` lets the caller cancel a superseded read.
     #
@@ -268,12 +287,12 @@ module Gori::Tui
     # "there is nothing", and only the second may show the traffic empty state (#1239).
     def fetch_reload(store : Store, plan : ReloadPlan,
                      control : Store::QueryControl? = nil) : Fetched
-      entries = store.sitemap_entries(plan.combined, control: control)
+      entries = store.sitemap_origin_entries(plan.combined, control: control)
       js = plan.js_refs ? store.js_ref_nodes[0] : [] of Store::JsRefNode
       {entries, store.sitemap_tags, entries.empty? && store.recent_flows(1).empty?, js}
     end
 
-    def apply_reload(entries : Array({String, String, String}), tags : Hash({String, String}, String), plan : ReloadPlan,
+    def apply_reload(entries : Array(Store::SitemapOriginEntry), tags : Hash({String, String}, String), plan : ReloadPlan,
                      no_flows : Bool = false, js : Array(Store::JsRefNode) = [] of Store::JsRefNode) : Nil
       @no_flows = no_flows
       prev_sel = selection_anchor
@@ -286,6 +305,10 @@ module Gori::Tui
       unless js.empty? # `fetch_reload` reads none with the toggle off
         JsRefs.attach!(@hosts, js, @scope, lens: @scope.try(&.active?) == true)
       end
+      # After the attach, which can grow an unrequested ORIGIN root: remembered before it, such a
+      # root drew and could be marked but named no host, so its tag commit was refused and the
+      # export dropped it.
+      remember_origins
       Sitemap.stamp_tags!(@hosts, tags)
       filter_by_tags(plan.positives, plan.negatives)
       if @grouping
@@ -306,7 +329,8 @@ module Gori::Tui
       # with the lens off (all traffic shown).
       @scope_configured = @scope.try(&.configured?) == true
       @hosts.each do |h|
-        h.in_scope = @scope_configured && (@scope.try(&.host_in_scope?(h.label)) == true)
+        # The BARE host: a host rule carries no scheme or port, and the label is the origin.
+        h.in_scope = @scope_configured && (@scope.try(&.host_in_scope?(h.host)) == true)
         h.endpoints = Sitemap.endpoint_count(h)
       end
       @visible_cache = nil
@@ -365,7 +389,7 @@ module Gori::Tui
       want_host, want_key = target
       rows.each_with_index do |row, i|
         next unless (k = expand_key(row.node)) && k == want_key
-        return i if row.host == want_host
+        return i if row.key == want_host
       end
       nil
     end
@@ -383,7 +407,7 @@ module Gori::Tui
         # `fold_templates!` appends before `group_sequences!` does — so matching on the
         # parent alone landed the cursor on the {hex} fold when a numeric run collapsed.
         next unless row.node.grouped && row.node.children.any? { |c| encloses?(c.path, want_path) }
-        return i if row.host == want_host
+        return i if row.key == want_host
       end
       nil
     end
@@ -582,11 +606,11 @@ module Gori::Tui
     # The JavaScript reference under the cursor when the row is ONLY that — a path no request
     # reached — for `o` (open where it was read) and `r` (a bare GET in Repeater). nil on a row
     # with captured traffic, which those keys already serve from the flow.
-    def selected_js_ref : {host: String, path: String}?
+    def selected_js_ref : {host: String, path: String, origin: Sitemap::Origin?}?
       return nil unless row = visible_rows[@selected]?
       node = row.node
       return nil if row.depth == 0 || node.grouped || !node.js_only?
-      {host: row.host, path: node.path}
+      {host: row.root.host, path: node.path, origin: row.root.origin}
     end
 
     def fold_query? : Bool
@@ -790,10 +814,18 @@ module Gori::Tui
     # landed, and stamping a refused one paints a memo that is on nobody's disk and that the
     # next reload silently takes back. Nil means "all of them", for a caller with nothing to
     # report.
+    #
+    # A tag is keyed on the BARE host (#1371), so the memo is stamped on the same path under
+    # EVERY origin of that host, exactly as the next reload's `Sitemap.stamp_tags!` would —
+    # stamping only the row that was edited left its sibling origins showing the old memo
+    # until something else rebuilt the tree.
     def apply_tag(text : String, committed : Array({String, String})? = nil) : Nil
       value = text.blank? ? nil : text
-      index = node_index
-      (committed || @tag_targets).each { |key| index[key]?.try(&.tag=(value)) }
+      wanted = Set({String, String}).new
+      (committed || @tag_targets).each do |(key, path)|
+        tag_host(key).try { |host| wanted << {host, path} }
+      end
+      each_node { |node, root| node.tag = value if wanted.includes?({root.host, node.path}) }
       cancel_tag
     end
 
@@ -841,7 +873,7 @@ module Gori::Tui
     private def selection_anchor : {String, String}?
       return nil unless row = visible_rows[@selected]?
       return nil unless k = expand_key(row.node)
-      {row.host, k}
+      {row.key, k}
     end
 
     # The selected endpoint's {host, method, target} for cross-surface actions (Send to
@@ -853,9 +885,9 @@ module Gori::Tui
     #   :container  — the fold's parent path. Discover scans a SUBTREE, and on a `{uuid}`
     #                 row the user means "under /users", not "under this one uuid".
     # Both are identity on a normal node.
-    def selected_endpoint(prefer : Symbol = :descendant) : {host: String, method: String, target: String}?
+    def selected_endpoint(prefer : Symbol = :descendant) : Endpoint?
       return nil unless row = visible_rows[@selected]?
-      host = row.host
+      root = row.root
       node = row.node
       if node.grouped
         if prefer == :container
@@ -864,11 +896,11 @@ module Gori::Tui
           # fold resolves to its parent.
           parent = node.query_fold ? node.path : node.fold_parent
           return nil unless parent
-          return {host: host, method: "GET", target: parent.empty? ? "/" : parent}
+          return {host: root.host, method: "GET", target: parent.empty? ? "/" : parent, origin: root.origin}
         end
         return nil unless node = first_endpoint(node)
       end
-      endpoint_of(node, host)
+      endpoint_of(node, root)
     end
 
     # The flow filter this tree is built from — the scope lens AND the `/` query's QL half —
@@ -889,7 +921,8 @@ module Gori::Tui
     # still gets a covering prefix, so its flow cap counts this subtree, not the whole host.
     def selected_params_target : ParamsView::Target?
       return nil unless row = visible_rows[@selected]?
-      return ParamsView::Target.new(row.host, nil, row.host) if row.depth == 0
+      root = row.root
+      return ParamsView::Target.new(root.host, nil, row.key, origin: root.origin) if row.depth == 0
       node = row.node
       paths = Set(String).new
       collect_endpoint_paths(node, paths)
@@ -903,33 +936,37 @@ module Gori::Tui
                else
                  Sitemap.path_part(node.path)
                end
-      ParamsView::Target.new(row.host, paths, "#{row.host}#{shown}", path_prefix: prefix)
+      ParamsView::Target.new(root.host, paths, "#{row.key}#{shown}", path_prefix: prefix, origin: root.origin)
     end
 
     # What `sitemap.export` (the OpenAPI export, #1241) covers: the marks if any are set, else
     # the cursor row read the way the Params sub-tab reads it (`selected_params_target`). As
-    # host → the endpoint paths wanted under it, nil for a whole host (a host row), plus the
-    # label a toast names it by. nil when the cursor sits on nothing.
+    # origin → the endpoint paths wanted under it, nil for a whole origin (a host row), plus the
+    # label a toast names it by. nil when the cursor sits on nothing. Keyed by ORIGIN (#1371):
+    # a host row is one scheme and port, and exporting it must not pull in the others'.
     #
     # A marked row is its SUBTREE, as the cursor row is: marking `/api` and exporting means the
     # API under it. A mark the tree no longer holds drops out.
-    def export_targets : {Hash(String, Set(String)?), String}?
+    def export_targets : {Hash(Sitemap::Origin, Set(String)?), String}?
       if @marks.empty?
         t = selected_params_target || return nil
-        return { {t.host => t.paths}, t.label }
+        return nil unless o = t.origin
+        return { {o => t.paths}, t.label }
       end
       index = node_index
-      out = {} of String => Set(String)?
+      out = {} of Sitemap::Origin => Set(String)?
       marked = 0
-      marked_keys.each do |(host, path)|
-        next unless node = index[{host, path}]?
+      marked_keys.each do |key|
+        _, path = key
+        next unless node = index[key]?
+        next unless o = origin_for(key[0])
         marked += 1
-        if path.empty? # a host row: the whole host, whatever else under it was marked
-          out[host] = nil
-        elsif !out.has_key?(host) || (paths = out[host])
+        if path.empty? # a host row: the whole origin, whatever else under it was marked
+          out[o] = nil
+        elsif !out.has_key?(o) || (paths = out[o])
           set = paths || Set(String).new
           collect_endpoint_paths(node, set)
-          out[host] = set
+          out[o] = set
         end
       end
       return nil if out.empty?
@@ -953,15 +990,29 @@ module Gori::Tui
     def selected_scope_seed : {match_type: String, pattern: String}?
       return nil unless row = visible_rows[@selected]?
       node = row.node
-      return {match_type: "host", pattern: row.host} if row.depth == 0
+      # The BARE host throughout: a `host` rule has no scheme or port, and a `string` rule
+      # matches the port-free url (see above) — the origin label would seed a dead rule.
+      return {match_type: "host", pattern: row.root.host} if row.depth == 0
       # A QUERY fold seeds from its OWN path ("host/search"): it is a real path, unlike a
       # `{uuid}` row, so scoping it means scoping that endpoint rather than its whole parent.
       path = node.grouped && !node.query_fold ? node.fold_parent : node.path
       return nil unless path
       # A fold sitting directly under the host root has no container path to prefix with —
       # scoping it is scoping the host.
-      return {match_type: "host", pattern: row.host} if path.empty?
-      {match_type: "string", pattern: "#{row.host}#{path}"}
+      return {match_type: "host", pattern: row.root.host} if path.empty?
+      {match_type: "string", pattern: "#{row.root.host}#{path}"}
+    end
+
+    # The URL the cursor row stands for — its root's origin, plus the node's path below depth 0
+    # (a fold: its container, as `selected_scope_seed` reads it) — for `y`. nil on an empty
+    # tree, and on a fold with no container path.
+    def selected_url : String?
+      return nil unless row = visible_rows[@selected]?
+      return row.key if row.depth == 0
+      node = row.node
+      path = node.grouped && !node.query_fold ? node.fold_parent : node.path
+      return nil unless path
+      "#{row.key}#{path}"
     end
 
     # One node's {host, method, target}, GET-preferred. A node with no captured method of
@@ -969,10 +1020,10 @@ module Gori::Tui
     # to no flow at the store, which is the same "no captured request for this path" the
     # cursor already reports. Shared by the cursor path and the marked-set batch, so a mark
     # can never resolve differently from pressing the same key on that row.
-    private def endpoint_of(node : Node, host : String) : {host: String, method: String, target: String}
+    private def endpoint_of(node : Node, root : Node) : Endpoint
       methods = node.methods
       method = methods.includes?("GET") ? "GET" : (methods.first? || "GET")
-      {host: host, method: method, target: node.path}
+      {host: root.host, method: method, target: node.path, origin: root.origin}
     end
 
     # DFS for the first descendant carrying a method — a fold's stand-in for the actions
@@ -993,7 +1044,7 @@ module Gori::Tui
     # refused for the same reason it can't be tagged (it is not a real path) AND because it
     # keeps `path` empty — exactly like its host node, so keying one would light the other up.
     private def mark_key(row : VisibleRow) : {String, String}?
-      row.node.grouped ? nil : {row.host, row.node.path}
+      row.node.grouped ? nil : {row.key, row.node.path}
     end
 
     def mark_count : Int32
@@ -1017,8 +1068,8 @@ module Gori::Tui
     def marked_keys : Array({String, String})
       ordered = [] of {String, String}
       seen = Set({String, String}).new
-      each_node do |node, host|
-        k = {host, node.path}
+      each_node do |node, root|
+        k = {root.label, node.path}
         next unless @marks.includes?(k)
         next if seen.includes?(k) # a path is unique per host, so this is belt-and-braces
         ordered << k
@@ -1039,15 +1090,21 @@ module Gori::Tui
     # The endpoints behind `target_keys`, resolved through the CURRENT tree (so a collapsed
     # node still resolves). A key the tree no longer holds drops out — the caller compares
     # the size against target_keys to report the shortfall.
-    def target_endpoints : Array({host: String, method: String, target: String})
+    def target_endpoints : Array(Endpoint)
       keys = target_keys
-      return [] of {host: String, method: String, target: String} if keys.empty?
+      return [] of Endpoint if keys.empty?
+      roots = {} of String => Node
+      @hosts.each { |h| roots[h.label] ||= h }
       index = node_index
-      keys.compact_map { |key| index[key]?.try { |node| endpoint_of(node, key[0]) } }
+      keys.compact_map do |key|
+        next unless (node = index[key]?) && (root = roots[key[0]]?)
+        endpoint_of(node, root)
+      end
     end
 
-    def marked?(host : String, path : String) : Bool
-      @marks.includes?({host, path})
+    # `origin_key` is a root's label (`VisibleRow#key`), not the bare host.
+    def marked?(origin_key : String, path : String) : Bool
+      @marks.includes?({origin_key, path})
     end
 
     # `t` — flip the mark on the cursor row, then step DOWN one row so a run of `t` marks
@@ -1143,23 +1200,51 @@ module Gori::Tui
       rows.index { |r| mark_key(r) == key }
     end
 
-    # (host, path) → Node over the whole CURRENT tree, folds excluded. Built on demand by
-    # the batch verbs and the tag commit only — never per frame.
+    # (origin key, path) → Node over the whole CURRENT tree, folds excluded. Built on demand
+    # by the batch verbs and the tag commit only — never per frame.
     private def node_index : Hash({String, String}, Node)
       index = {} of {String, String} => Node
-      each_node { |node, host| index[{host, node.path}] ||= node }
+      each_node { |node, root| index[{root.label, node.path}] ||= node }
       index
     end
 
-    # Every real (non-fold) node with the host it hangs under, in tree order.
-    private def each_node(& : Node, String ->) : Nil
-      stack = [] of {Node, String}
-      @hosts.reverse_each { |h| stack << {h, h.label} }
+    # Every real (non-fold) node with the root it hangs under, in tree order.
+    private def each_node(& : Node, Node ->) : Nil
+      stack = [] of {Node, Node}
+      @hosts.reverse_each { |h| stack << {h, h} }
       while entry = stack.pop?
-        node, host = entry
-        yield node, host unless node.grouped
-        node.children.reverse_each { |c| stack << {c, host} }
+        node, root = entry
+        yield node, root unless node.grouped
+        node.children.reverse_each { |c| stack << {c, root} }
       end
+    end
+
+    # The origin a mark key's first half names — a root's label. Remembered across reloads for
+    # as long as a mark holds it (`remember_origins`), so a tag commit or an export can still
+    # name the bare host of a mark whose root a lens has hidden meanwhile. nil only for a label
+    # this view never built.
+    def origin_for(origin_key : String) : Sitemap::Origin?
+      @origins[origin_key]?
+    end
+
+    # Re-seed `@origins` from the freshly built roots, keeping the entries the current marks
+    # still point at — so the map is bounded by the tree plus the marks, never by the session.
+    private def remember_origins : Nil
+      fresh = {} of String => Sitemap::Origin
+      @hosts.each { |h| h.origin.try { |o| fresh[h.label] ||= o } }
+      # The marks, and the pinned targets of an open tag editor: a reload mid-edit that drops
+      # the cursor row's root must not leave its commit without a host to write under.
+      (@marks.to_a + @tag_targets).each do |(label, _)|
+        next if fresh.has_key?(label)
+        @origins[label]?.try { |o| fresh[label] = o }
+      end
+      @origins = fresh
+    end
+
+    # The bare host a mark key's origin stands for — what a tag (keyed on (host, path)) is
+    # written under. nil for a label `origin_for` cannot name.
+    def tag_host(origin_key : String) : String?
+      origin_for(origin_key).try(&.host)
     end
 
     # The tree, then the `↓` dropdown OVER it. Split so the popup is drawn last unconditionally:
@@ -1688,15 +1773,15 @@ module Gori::Tui
     private def visible_rows : Array(VisibleRow)
       @visible_cache ||= begin
         rows = [] of VisibleRow
-        @hosts.each_with_index { |host, i| collect(host, 0, 0_u64, i < @hosts.size - 1, rows, host.label) }
+        @hosts.each_with_index { |host, i| collect(host, 0, 0_u64, i < @hosts.size - 1, rows, host) }
         rows
       end
     end
 
     # Flatten the expanded tree, threading the tree-guide bitmask down. `has_next` is
     # whether `node` has a following sibling: when it does, descendants draw a `│` at
-    # `node`'s level (bit `depth`) so the branch reads as continuing. `host` is the depth-0
-    # ancestor's label, carried down so every row knows its host without a back-walk.
+    # `node`'s level (bit `depth`) so the branch reads as continuing. `root` is the depth-0
+    # ancestor, carried down so every row knows its origin without a back-walk.
     # Explicit stack rather than native recursion (see `Sitemap.post_order`): this walk is
     # PRE-order and threads depth + the guide bitmask DOWN, so children are pushed in
     # REVERSE and popped left-to-right, which reproduces the recursion's row order exactly.
@@ -1704,11 +1789,11 @@ module Gori::Tui
     # expanded" (`Sitemap.apply_expand_depth!`, depth < 0), so on a default install this
     # walks the whole tree and was a live stack-overflow path like the other seven.
     private def collect(node : Node, depth : Int32, guides : UInt64, has_next : Bool,
-                        rows : Array(VisibleRow), host : String) : Nil
+                        rows : Array(VisibleRow), root : Node) : Nil
       stack = [{node, depth, guides, has_next}]
       while entry = stack.pop?
         n, d, g, hn = entry
-        rows << VisibleRow.new(n, d, g, host)
+        rows << VisibleRow.new(n, d, g, root)
         next unless n.expanded
         child_guides = hn ? (g | (1_u64 << d)) : g
         last = n.children.size - 1

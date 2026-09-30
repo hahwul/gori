@@ -171,6 +171,11 @@ describe "Sitemap selection" do
         n.as_h.has_key?("host").should be_true
         n.as_h.has_key?("path").should be_true
       end
+      # The row's origin rides beside the bare host (#1371), never the `scheme://host` label.
+      node = sel["nodes"].as_a.first
+      node["host"].as_s.should eq("a.test")
+      node.as_h.has_key?("scheme").should be_true
+      node.as_h.has_key?("port").should be_true
     end
   end
 end

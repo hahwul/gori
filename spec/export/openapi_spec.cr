@@ -479,14 +479,38 @@ describe Gori::Export::OpenApi do
     end
   end
 
-  it "narrows to a TUI target set: whole hosts, or endpoint paths under one" do
+  it "narrows to a TUI target set: whole origins, or endpoint paths under one" do
     with_store do |store|
       oa_flow(store, "/a", host: "one.test")
       oa_flow(store, "/b", host: "one.test")
       oa_flow(store, "/c", host: "two.test")
-      targets = {"one.test" => Set{"/b"}.as(Set(String)?), "two.test" => nil.as(Set(String)?)}
+      targets = {Gori::Sitemap::Origin.new("https", "one.test", 443) => Set{"/b"}.as(Set(String)?),
+                 Gori::Sitemap::Origin.new("https", "two.test", 443) => nil.as(Set(String)?)}
       doc = OA.build(store, OA::Options.new(targets: targets)).doc
       doc["paths"].as_h.keys.should eq(["/b", "/c"])
+    end
+  end
+
+  # #1371: a Sitemap root is one scheme + port, so exporting it must not pull in another
+  # service on the same host.
+  it "narrows a --host export to one origin with scheme and port" do
+    with_store do |store|
+      oa_flow(store, "/mine", host: "h.test", scheme: "http", port: 19021)
+      oa_flow(store, "/other-port", host: "h.test", scheme: "http", port: 19022)
+      oa_flow(store, "/tls", host: "h.test", scheme: "https", port: 19021)
+      doc = OA.build(store, OA::Options.new(host: "h.test", scheme: "http", port: 19021)).doc
+      doc["paths"].as_h.keys.should eq(["/mine"])
+    end
+  end
+
+  it "keeps a target origin's other ports and schemes out" do
+    with_store do |store|
+      oa_flow(store, "/mine", host: "h.test", scheme: "http", port: 19021)
+      oa_flow(store, "/other-port", host: "h.test", scheme: "http", port: 19022)
+      oa_flow(store, "/tls", host: "h.test", scheme: "https", port: 8443)
+      targets = {Gori::Sitemap::Origin.new("http", "h.test", 19021) => nil.as(Set(String)?)}
+      doc = OA.build(store, OA::Options.new(targets: targets)).doc
+      doc["paths"].as_h.keys.should eq(["/mine"])
     end
   end
 

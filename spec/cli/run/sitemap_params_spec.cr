@@ -7,25 +7,51 @@ require "json"
 
 private alias SPI = Gori::ParamInventory
 
+module Gori::CLI::Run
+  def self.resolve_origin_flag_for_spec(host : String?, origin : String?) : {String?, String?, Int32?}
+    resolve_origin_flag("sitemap params", host, origin)
+  end
+end
+
+# `--origin` (#1371): one Sitemap root, host + scheme + port, the default port filled in.
+describe "gori run sitemap params --origin" do
+  it "resolves an origin to its host, scheme and port, and passes a bare --host through" do
+    Gori::CLI::Run.resolve_origin_flag_for_spec(nil, "http://127.0.0.1:19021").should eq({"127.0.0.1", "http", 19021})
+    Gori::CLI::Run.resolve_origin_flag_for_spec(nil, "https://acme.test").should eq({"acme.test", "https", 443})
+    Gori::CLI::Run.resolve_origin_flag_for_spec("acme.test", nil).should eq({"acme.test", nil, nil})
+  end
+end
+
 private def spi_row(name : String, *, location = Gori::Miner::Location::Query, samples = ["v"],
                     sensitive = false, reflected = false, truncated = false, host = "h.test",
-                    path = "/a", count = 1) : SPI::Row
-  SPI::Row.new(host, "GET", path, location, name, count, samples, truncated, 1_i64, 2_i64,
+                    path = "/a", count = 1, scheme = "https", port = 443) : SPI::Row
+  SPI::Row.new(scheme, host, port, "GET", path, location, name, count, samples, truncated, 1_i64, 2_i64,
     reflected, reflected ? 2_i64 : nil, sensitive)
 end
 
 describe "gori run sitemap params — text" do
-  it "groups rows under host and endpoint, marking reflected values" do
+  it "groups rows under origin and endpoint, marking reflected values" do
     out = Gori::CLI::Run.params_text([
       spi_row("q", samples: ["shoes", "hats"], reflected: true, count: 2),
       spi_row("id", path: "/b"),
     ], include_sensitive: false)
     lines = out.lines
-    lines[0].should eq("h.test")
+    lines[0].should eq("https://h.test")
     lines[1].should eq("  GET /a")
     lines[2].should match(/^    query\s+q\s+2  reflected  shoes, hats$/)
     lines[3].should eq("  GET /b")
     lines[4].should match(/^    query\s+id\s+1\s+v$/)
+  end
+
+  # #1371: two services on one host are two groups, each headed by its origin.
+  it "starts a new group for another port or scheme of the same host" do
+    out = Gori::CLI::Run.params_text([
+      spi_row("a", scheme: "http", port: 19021),
+      spi_row("b", scheme: "http", port: 19022),
+      spi_row("c", scheme: "https", port: 8443),
+    ], include_sensitive: false)
+    out.lines.reject(&.starts_with?(' ')).reject(&.empty?)
+      .should eq(["http://h.test:19021", "http://h.test:19022", "https://h.test:8443"])
   end
 
   it "masks a sensitive row unless --include-sensitive" do
@@ -52,6 +78,8 @@ describe "gori run sitemap params — json" do
     arr = JSON.parse(Gori::CLI::Run.params_json(report, include_sensitive: false)).as_a
     arr.size.should eq(2)
     arr[0]["location"].should eq("query")
+    # The origin, not only the host (#1371).
+    {arr[0]["scheme"], arr[0]["host"], arr[0]["port"]}.should eq({"https", "h.test", 443})
     arr[0]["reflected"].should be_true
     arr[0]["reflected_flow_id"].should eq(2)
     arr[1]["samples"].should eq(["[REDACTED]"])

@@ -4534,6 +4534,44 @@ Refines: [P1](#p1), [P4](#p4). `gori mcp` — `ToolFilter`, `Tools#tool`, `Tools
   declined: MCP says structured output SHOULD be mirrored in text, and gori declares no schema
   the `{items}` wrapper could contradict (see `Server#emit_structured`).
 
+### 2026-09-30: a Sitemap root is an origin, and a tag still belongs to the host (#1371)
+
+Refines: [P3](#p3), [P7](#p7). #1371, #1372.
+
+The tree was rooted on the bare host, so `http://h:19021`, `http://h:19022` and `https://h:8443`
+were one root: `paths` output could not be turned back into a URL, and every row action resolved
+"the path on this host" to whichever service answered it last (Discover from a host row guessed
+`https://<host>`). A root is now one ORIGIN — scheme, host and port (`Sitemap::Origin`, labelled
+by `Url.authority`) — built from `Store#sitemap_origin_entries`, and everything read off a row
+keeps to it: `representative_flow_id` and `js_ref_sightings` take the scheme and port, the
+parameter inventory keys its rows by origin, the OpenAPI target set is keyed by `Sitemap::Origin`,
+and the CLI and MCP narrow the same two reads with `--origin` / `origin`.
+
+- **Identity and host questions are kept apart.** A row's identity (marks, anchors, expand
+  state) is its root's label; a question a host answers — a `host` scope rule, a scope marker, a
+  `string` scope seed (port-free by `QL::URL_EXPR_NO_PORT`) — is asked about `Node#host`. The
+  label is display, never a key into host-keyed data.
+- **A tag stays keyed on (host, path).** V17's key is the host, and `sitemap tag --host` and
+  `set_sitemap_tag` name one. A memo therefore shows under every origin of its host, and a commit
+  stamps all of them in place. Per-origin tags would be a key change on three surfaces and a
+  schema version; nothing asked for one.
+- **The host-level tree stays for the retest diff.** `Sitemap.build` over (host, method, target)
+  triples is what `Diff::Templates` folds: it compares hosts across two engagements, where the
+  ports a service ran on need not match. MCP `list_sitemap` keeps `collapse_transport` as its
+  documented host-level merge.
+- **A JavaScript reference is keyed by origin too (V43).** `js_refs` was `UNIQUE(host, path,
+  flow_id)`, so a bundle naming `http://h:8080/p` and `https://h/p` kept one; the rebuild adds
+  scheme and port and copies the rows as they are, so nothing is rescanned. A reference to an
+  origin the tree lacks grows a root when its host is known, and not when that origin has captured
+  traffic a lens hid (`JsRefNode#origin_captured`), which is re-derived after any delete: flow ids
+  are never reused (V39), so rows were deleted exactly when the count grew by less than the
+  newest id did.
+- **Cost.** The origin read selects five columns of the same covering index; at 100k flows it is
+  6.6 ms against the host read's 4.5 ms, on a reload that runs only while the tab is active. With
+  hide-static on it reads the wide index rather than `idx_flows_sitemap_nonstatic`, which lacks
+  scheme and port; widening that index is a migration of its own and was not needed to stay
+  covering and sort-free.
+
 ### 2026-09-30: `gori run` defaults are for scripts: a pinned default project, one JSON shape, curl's letters (#1383, #1386, #1387)
 
 Refines: [P1](#p1), [P7](#p7). Issues #1383–#1389, from dogfooding 0.7.1.

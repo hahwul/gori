@@ -145,6 +145,7 @@ scales.each do |target|
     "total_size (SUM scan)  "  => -> { store.total_size; nil },
     "count                  "  => -> { store.count; nil },
     "sitemap_entries        "  => -> { store.sitemap_entries; nil },
+    "sitemap_origin_entries "  => -> { store.sitemap_origin_entries; nil },
     "get_flow(random)       "  => -> { store.get_flow((n // 3)); nil },
   }
   qs.each do |label, blk|

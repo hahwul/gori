@@ -7,6 +7,7 @@ module Gori
         project_name : String? = nil
         query : String? = nil
         host : String? = nil
+        origin : String? = nil
         path_prefix : String? = nil
         in_scope = false
         hide_static = false
@@ -34,6 +35,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("-qQL", "--query=QL", "Only flows matching this QL query") { |v| query = v }
           p.on("--host=HOST", "Only this host (exact, case-insensitive) — one API per document") { |v| host = v }
+          p.on("--origin=URL", "Only this origin — scheme, host and port, e.g. http://127.0.0.1:19021") { |v| origin = v }
           p.on("--path=PREFIX", "Only endpoints whose path starts with PREFIX") { |v| path_prefix = v }
           p.on("--in-scope", "Only flows in the project's configured scope") { in_scope = true }
           p.on("--hide-static", "Leave out static assets — images, fonts, media (the TUI's hide-static lens)") { hide_static = true }
@@ -58,6 +60,7 @@ module Gori
         query, dropped = Run.compose_history_query(query, positional, neg_terms)
         Run.warn_dropped_query_terms("sitemap export", dropped)
         Run.refuse_unknown_query_fields("sitemap export", query, lenient)
+        host, scheme, port = resolve_origin_flag("sitemap export", host, origin)
         # A profile only decides what an EXAMPLE shows; without examples there is nothing for it
         # to act on, and accepting it silently would read as "the document was sanitized".
         if redact_profile && !examples
@@ -73,7 +76,7 @@ module Gori
           store.close
           abort "gori run sitemap export: #{err}"
         end
-        opts = Export::OpenApi::Options.new(filter: filter, host: host, path_prefix: path_prefix,
+        opts = Export::OpenApi::Options.new(filter: filter, host: host, scheme: scheme, port: port, path_prefix: path_prefix,
           max_flows: max_flows, max_samples: max_samples, max_endpoints: max_endpoints,
           examples: examples, redactor: choice.try(&.matcher), include_gori: include_gori)
         result = begin

@@ -154,7 +154,7 @@ module Gori
       private def list_js_refs_tools(j : JSON::Builder) : Nil
         tool j, "list_js_endpoints",
           "Endpoints REFERENCED in captured JavaScript (literals like fetch(\"/api/users\") in JS " \
-          "responses and inline scripts), one row per host+path; by default only those no captured " \
+          "responses and inline scripts), one row per origin+path; by default only those no captured " \
           "request reached. Rows carry flow_id, byte offset, line and the literal; `templated` = " \
           "`{expr}` stands for a `${…}` (not sendable as-is); `base` = what a relative literal " \
           "resolved against (guessed: no Referer). Hosts never captured are hidden unless scoped " \

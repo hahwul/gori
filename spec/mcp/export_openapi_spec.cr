@@ -8,10 +8,11 @@ require "yaml"
 
 private CLOCK = [1_700_000_000_000_000_i64]
 
-private def eo_flow(store : Gori::Store, target : String, *, host = "api.test", req_headers = "") : Int64
+private def eo_flow(store : Gori::Store, target : String, *, host = "api.test", req_headers = "",
+                    scheme = "https", port = 443) : Int64
   CLOCK[0] += 1000
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
-    created_at: CLOCK[0], scheme: "https", host: host, port: 443,
+    created_at: CLOCK[0], scheme: scheme, host: host, port: port,
     method: "GET", target: target, http_version: "HTTP/1.1",
     head: "GET #{target} HTTP/1.1\r\nHost: #{host}\r\n#{req_headers}\r\n".to_slice,
     source: Gori::FlowSource::Kind::Proxy))
@@ -28,6 +29,22 @@ private def eo(tools : Gori::MCP::Tools, args : String) : JSON::Any
 end
 
 describe "MCP export_openapi" do
+  # #1371: `origin` is one Sitemap root — `host` alone merges every service on that host.
+  it "narrows to one origin, and refuses one beside host or unparsable" do
+    with_store do |store|
+      eo_flow(store, "/mine", host: "h.test", scheme: "http", port: 19021)
+      eo_flow(store, "/other", host: "h.test", scheme: "http", port: 19022)
+      tools = tools_for(store)
+      eo(tools, %({"host":"h.test"}))["document"]["paths"].as_h.keys.sort!.should eq(["/mine", "/other"])
+      eo(tools, %({"origin":"http://h.test:19021"}))["document"]["paths"].as_h.keys.should eq(["/mine"])
+      [%({"origin":"http://h.test:19021","host":"h.test"}), %({"origin":"h.test:19021"})].each do |args|
+        bad = tools.call("export_openapi", JSON.parse(args))
+        bad.is_error.should be_true
+        bad.error_code.should eq("INVALID_ARGUMENT")
+      end
+    end
+  end
+
   it "returns the document inline, as an object or as YAML" do
     with_store do |store|
       eo_flow(store, "/users/1?fields=name")

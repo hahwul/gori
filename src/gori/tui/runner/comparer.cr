@@ -147,7 +147,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   def comparer_add_sitemap : Nil
     ep = sitemap_controller.view.selected_endpoint
     return (@toast = "select an endpoint to send") unless ep
-    id = @session.store.representative_flow_id(ep[:host], ep[:method], ep[:target])
+    id = sitemap_flow_id(ep)
     return (@toast = "no captured request for this path — capture it, or use Discover") unless id
     detail = @session.store.get_flow(id)
     return (@toast = "that request was pruned since the tree was built") unless detail

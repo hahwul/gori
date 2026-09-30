@@ -2,6 +2,10 @@ require "./spec_helper"
 
 # The pure host → path tree builder shared by the Sitemap TUI tab and
 # `gori run sitemap`. (The TUI-render side is covered in tui/sitemap_view_spec.cr.)
+private def sme(scheme : String, host : String, port : Int32, target : String, method = "GET") : Gori::Store::SitemapOriginEntry
+  Gori::Store::SitemapOriginEntry.new(scheme, host, port, method, target)
+end
+
 describe Gori::Sitemap do
   describe ".normalize_path" do
     it "reduces an absolute-form target to its path (+query), default '/' for the root" do
@@ -12,6 +16,39 @@ describe Gori::Sitemap do
 
     it "leaves an origin-form target unchanged" do
       Gori::Sitemap.normalize_path("/already/a/path").should eq("/already/a/path")
+    end
+  end
+
+  # #1371: the surfaces build from ORIGIN entries, one root per scheme + host + port.
+  describe ".build (origin entries)" do
+    it "keeps two ports and two schemes of one host as separate roots, sorted" do
+      hosts = Gori::Sitemap.build([
+        sme("https", "127.0.0.1", 8443, "/only-tls"),
+        sme("http", "127.0.0.1", 19022, "/b"),
+        sme("http", "127.0.0.1", 19021, "/a"),
+        sme("http", "127.0.0.1", 19021, "/b"),
+        sme("https", "acme.test", 443, "/"),
+      ])
+      hosts.map(&.label).should eq(["http://127.0.0.1:19021", "http://127.0.0.1:19022",
+                                    "https://127.0.0.1:8443", "https://acme.test"])
+      hosts.map(&.host).uniq!.should eq(["127.0.0.1", "acme.test"])
+      hosts[0].origin.should eq(Gori::Sitemap::Origin.new("http", "127.0.0.1", 19021))
+      hosts[0].children.map(&.path).should eq(["/a", "/b"])
+      hosts[2].children.map(&.path).should eq(["/only-tls"])
+    end
+
+    it "labels an origin with its default port elided and an IPv6 literal bracketed" do
+      Gori::Sitemap::Origin.new("https", "acme.test", 443).label.should eq("https://acme.test")
+      Gori::Sitemap::Origin.new("http", "acme.test", 80).label.should eq("http://acme.test")
+      Gori::Sitemap::Origin.new("http", "acme.test", 443).label.should eq("http://acme.test:443")
+      Gori::Sitemap::Origin.new("https", "::1", 8443).label.should eq("https://[::1]:8443")
+    end
+
+    # A tag is keyed on (host, path) (V17), not on the origin.
+    it "stamps a host's tag under every origin of that host" do
+      hosts = Gori::Sitemap.build([sme("http", "h.test", 8080, "/admin"), sme("https", "h.test", 443, "/admin")])
+      Gori::Sitemap.stamp_tags!(hosts, { {"h.test", "/admin"} => "memo" })
+      hosts.map(&.children.first.tag).should eq(["memo", "memo"])
     end
   end
 

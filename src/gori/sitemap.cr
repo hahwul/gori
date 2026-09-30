@@ -1,4 +1,5 @@
 require "uri"
+require "./url"
 require "./discover/url"
 
 module Gori
@@ -12,6 +13,23 @@ module Gori
   # own node; folding is an explicit, reversible view choice (P3), never a
   # parse-time assumption.
   module Sitemap
+    # Where a host row's endpoints were sent: scheme + host + port, the one identity a host row
+    # has in a tree built from `Store#sitemap_origin_entries` (#1371). Keyed on the host alone,
+    # `http://h:19021`, `http://h:19022` and `https://h:8443` collapsed into one `h` row whose
+    # paths no longer said which service answered them — and `gori run sitemap --format paths`
+    # printed `h/only-tls`, which cannot be turned back into a URL.
+    #
+    # `host` is as captured (flows keep it that way), so `Example.test` and `example.test` stay
+    # two origins exactly as they were two hosts.
+    record Origin, scheme : String, host : String, port : Int32 do
+      # `scheme://authority` — an IPv6 literal bracketed and the scheme's default port elided,
+      # by `Url.authority`, so an ordinary `https` host reads `https://acme.test` and only a
+      # non-default port is spelled out. What a host row draws and what `paths` prefixes.
+      def label : String
+        "#{scheme}://#{Url.authority(scheme, host, port)}"
+      end
+    end
+
     # Pure-numeric siblings beyond this count under one parent fold into a single
     # `[1, 2, 3 … +N]` group node (path-param explosion like /users/1,2,3…).
     SEQUENCE_GROUP_THRESHOLD = 10
@@ -104,6 +122,11 @@ module Gori
       # captured request reaches it or anything below it. Never carries a method, so
       # `endpoint_count` and every "N endpoints" figure stay traffic-only (P3).
       property? unrequested : Bool
+      # On a host (depth-0) node built from origin entries, the origin its endpoints were sent
+      # to; the `label` is then `Origin#label`. nil on a path node, and on a host node of a
+      # HOST-level tree (`build` over bare (host, method, target) triples — the retest diff's
+      # keys), where the label is the bare host.
+      property origin : Origin?
 
       # Build-time label→child index so `child` is O(1) instead of a linear sibling scan —
       # a path-param explosion (thousands of `/users/<id>` siblings under one parent) made
@@ -126,6 +149,15 @@ module Gori
         @truncated = false
         @js_refs = 0
         @unrequested = false
+        @origin = nil
+      end
+
+      # The bare host a host (depth-0) node stands for: its origin's host, or the label of a
+      # host-level node. What every host-keyed question asks with — a path tag
+      # (`sitemap_tags` is keyed on (host, path)), a `host` scope rule, a flow lookup — none
+      # of which may be handed the `scheme://host:port` label. Meaningless below depth 0.
+      def host : String
+        @origin.try(&.host) || @label
       end
 
       # The durable key for a fold node (nil on a real node). FOLD_SEP can't occur in a
@@ -164,14 +196,40 @@ module Gori
       end
     end
 
-    # Build the host-rooted tree from distinct (host, method, target) endpoints
-    # (e.g. Store#sitemap_entries). Every distinct path segment is its own node; the
-    # tree `build` returns is always literal. Folding is separate and opt-in, in three
-    # passes run in this order: `fold_templates!` (opaque ids), `group_sequences!` (numeric
-    # runs), then `fold_queries!` (query-string variants). All three WRAP their children
-    # rather than rewriting any node's `path`. The first two are ONE axis (`g` /
-    # `--no-group`); the query fold is its own (`--no-fold-query`), so turning off id
-    # folding does not spill the query variants back into the tree.
+    # Build the ORIGIN-rooted tree from distinct (scheme, host, port, method, target) endpoints
+    # (`Store#sitemap_origin_entries`) — what the Sitemap tab and `gori run sitemap` draw. One
+    # host node per `Origin`, labelled `Origin#label`, so two ports or two schemes of one host
+    # are two roots (#1371). Every distinct path segment is its own node; the tree `build`
+    # returns is always literal. Folding is separate and opt-in, in three passes run in this
+    # order: `fold_templates!` (opaque ids), `group_sequences!` (numeric runs), then
+    # `fold_queries!` (query-string variants). All three WRAP their children rather than
+    # rewriting any node's `path`. The first two are ONE axis (`g` / `--no-group`); the query
+    # fold is its own (`--no-fold-query`), so turning off id folding does not spill the query
+    # variants back into the tree.
+    #
+    # The roots are sorted by (host, scheme, port). The read is ordered host-first, so hosts
+    # already arrive in order, but the origins of one host would otherwise interleave by
+    # whichever of them held the smaller target.
+    def self.build(entries : Enumerable(Store::SitemapOriginEntry)) : Array(Node)
+      hosts = [] of Node
+      index = {} of Origin => Node # O(1) origin lookup (a scan can surface thousands of hosts)
+      entries.each do |e|
+        origin = Origin.new(e.scheme, e.host, e.port)
+        host_node = index[origin] ||= begin
+          node = Node.new(origin.label)
+          node.origin = origin
+          hosts << node
+          node
+        end
+        insert(host_node, normalize_path(e.target), e.method)
+      end
+      hosts.sort_by! { |h| {h.host, h.origin.try(&.scheme) || "", h.origin.try(&.port) || 0} }
+    end
+
+    # The HOST-level tree from distinct (host, method, target) triples: one root per bare host,
+    # whatever scheme or port its flows used. What the retest diff keys its templates on
+    # (`Diff::Templates`, which compares hosts across two engagements); every surface that
+    # draws a tree for the operator builds from origins instead (see above).
     def self.build(entries : Enumerable({String, String, String})) : Array(Node)
       hosts = [] of Node
       host_index = {} of String => Node # O(1) host lookup (a scan can surface thousands of hosts)
@@ -179,9 +237,9 @@ module Gori
       hosts
     end
 
-    # Insert one endpoint into `hosts`, creating host/segment nodes as needed. The
-    # accumulated absolute path is stamped on each node (the durable tag key). `host_index`
-    # (optional) accelerates the host lookup to O(1); without it the host is found by scan.
+    # Insert one endpoint into a host-level `hosts`, creating host/segment nodes as needed.
+    # `host_index` (optional) accelerates the host lookup to O(1); without it the host is
+    # found by scan.
     def self.add(hosts : Array(Node), host : String, path : String, method : String,
                  host_index : Hash(String, Node)? = nil) : Nil
       host_node =
@@ -198,6 +256,12 @@ module Gori
             node
           end
         end
+      insert(host_node, path, method)
+    end
+
+    # Insert one endpoint under `host_node`, creating segment nodes as needed. The accumulated
+    # absolute path is stamped on each node (the durable tag key).
+    private def self.insert(host_node : Node, path : String, method : String) : Nil
       segments, truncated = segments_of(path)
       if segments.empty?
         leaf = root_leaf(path)
@@ -238,56 +302,100 @@ module Gori
     # ones — at both call sites (`SitemapView#apply_reload`, the CLI's `collect_sitemap`), so
     # the two keep the same order.
     #
-    # Hosts match case-insensitively (a reference's host is `Url.parse`'s lowercased one, a
-    # flow keeps its host as captured). A host the tree does not hold is added only when
-    # `new_host` says so for that reference — `JsRefs.visible_host?` is the rule — so a bundle
-    # full of `www.w3.org` namespaces does not grow a host per namespace.
+    # A reference lands on the host node of its own ORIGIN (a `JsRefNode` carries scheme and
+    # port, #1371), hosts compared case-insensitively (a reference's host is `Url.parse`'s
+    # lowercased one, a flow keeps its host as captured). On a host-level tree, whose roots have
+    # no origin, it lands on its host. An origin the tree does not hold is grown as an
+    # `unrequested` root:
+    #
+    #   · never for an origin that HAS captured traffic (`JsRefNode#origin_captured`): the tree
+    #     lacking it means a lens hid it, and its references stay hidden with it.
+    #   · when the tree already holds that HOST under another origin — the host is known, which
+    #     is `JsRefs.visible_host?`'s rule, and a bundle on `http://h:8080` naming
+    #     `http://h:9090/api` says a second service exists there that nobody requested. Placed
+    #     after that host's last root, so a host's origins stay together.
+    #   · otherwise only when `new_host` says so for that reference — `JsRefs.visible_host?` is
+    #     the rule — so a bundle full of `www.w3.org` namespaces does not grow a host per
+    #     namespace.
     #
     # Reuses `segments_of`, so a reference lands on exactly the node path a request for it
     # would, depth cut included. Nothing here adds a METHOD.
     def self.attach_js_refs!(hosts : Array(Node), refs : Enumerable(Store::JsRefNode),
                              & : Store::JsRefNode -> Bool) : Nil
-      index = {} of String => Node
-      hosts.each { |h| index[h.label.downcase] ||= h }
+      by_origin = {} of {String, String, Int32} => Node
+      by_host = {} of String => Node # a host-level tree's roots, which carry no origin
+      known = Set(String).new        # hosts the tree held BEFORE any growth here
+      hosts.each do |h|
+        known << h.host.downcase
+        if o = h.origin
+          by_origin[{o.scheme, o.host.downcase, o.port}] ||= h
+        else
+          by_host[h.label.downcase] ||= h
+        end
+      end
       variants = {} of UInt64 => Hash(String, Node) # per parent, built on first miss
-      grown = Set(String).new                       # hosts added here, not captured
+      grown = Set({String, String, Int32}).new      # origins added here, not captured
       refs.each do |r|
-        key = r.host.downcase
-        host_node = index[key]?
-        # Every reference under a host the tree lacked is judged, not only the one that grew
+        key = {r.scheme, r.host.downcase, r.port}
+        host_node = by_origin[key]? || by_host[key[1]]?
+        # Every reference under an origin the tree lacked is judged, not only the one that grew
         # it: the rule reads the reference's URL (a scope include can name `host/v1`), so which
         # of a host's references show must not depend on which sorted first. `JsRefs.list`
         # judges every endpoint the same way.
         if host_node.nil? || grown.includes?(key)
-          next unless yield r
+          # A captured origin missing from the tree was hidden by a lens (hide-static, the scope
+          # lens), so its references stay hidden with it rather than bringing it back as a
+          # "never requested" root — the rule `JsRefs.attach!` keeps for a whole host.
+          next if r.origin_captured
+          next unless known.includes?(key[1]) || yield r
         end
         unless host_node
-          host_node = index[key] = Node.new(r.host)
-          host_node.unrequested = true
-          hosts << host_node
+          host_node = by_origin[key] = grow_origin(hosts, r)
           grown << key
         end
-        segments, truncated = segments_of(r.path)
-        next if segments.empty? # the bare root is never stored (`JsRefs.resolve`)
-        node = host_node
-        acc = ""
-        last = segments.size - 1
-        segments.each_with_index do |seg, i|
-          # A reference is query-less and a capture rides its query on the last segment, so
-          # `/api/search` must land on the captured `search?q=shoes` rather than grow a sibling
-          # that claims the path was never requested (the list answers "requested" for it).
-          if existing = node.child?(seg) || (i == last ? captured_variant(node, seg, variants) : nil)
-            node = existing
-          else
-            node = node.child(seg)
-            node.unrequested = true
-          end
-          acc = node.path.empty? ? "#{acc}/#{seg}" : node.path
-          node.path = acc
-        end
-        node.truncated = true if truncated
-        node.js_refs += r.flows
+        attach_ref(host_node, r, variants)
       end
+    end
+
+    # A new `unrequested` root for the reference's origin, placed after the last root of the
+    # same host when there is one (else at the end).
+    private def self.grow_origin(hosts : Array(Node), r : Store::JsRefNode) : Node
+      origin = Origin.new(r.scheme, r.host, r.port)
+      node = Node.new(origin.label)
+      node.origin = origin
+      node.unrequested = true
+      down = r.host.downcase
+      if at = hosts.rindex { |h| h.host.downcase == down }
+        hosts.insert(at + 1, node)
+      else
+        hosts << node
+      end
+      node
+    end
+
+    # Walk (and grow) one reference's path under its host node and count it there.
+    private def self.attach_ref(host_node : Node, r : Store::JsRefNode,
+                                variants : Hash(UInt64, Hash(String, Node))) : Nil
+      segments, truncated = segments_of(r.path)
+      return if segments.empty? # the bare root is never stored (`JsRefs.resolve`)
+      node = host_node
+      acc = ""
+      last = segments.size - 1
+      segments.each_with_index do |seg, i|
+        # A reference is query-less and a capture rides its query on the last segment, so
+        # `/api/search` must land on the captured `search?q=shoes` rather than grow a sibling
+        # that claims the path was never requested (the list answers "requested" for it).
+        if existing = node.child?(seg) || (i == last ? captured_variant(node, seg, variants) : nil)
+          node = existing
+        else
+          node = node.child(seg)
+          node.unrequested = true
+        end
+        acc = node.path.empty? ? "#{acc}/#{seg}" : node.path
+        node.path = acc
+      end
+      node.truncated = true if truncated
+      node.js_refs += r.flows
     end
 
     # A captured child of `node` whose label is `seg` plus a query string, or nil. Indexed per
@@ -372,11 +480,13 @@ module Gori
     end
 
     # Pin each node's memo from the (host, path) ⇒ tag map (e.g. Store#sitemap_tags).
-    # Hosts are matched by their label; deeper nodes by their stamped `path`.
+    # Hosts are matched by their BARE host (`Node#host`), never the origin label: a tag is keyed
+    # on (host, path) (V17), so a memo on `/admin` shows under every origin of that host — the
+    # scheme and port are not part of its key. Deeper nodes match by their stamped `path`.
     def self.stamp_tags!(hosts : Array(Node), tags : Hash({String, String}, String)) : Nil
       return if tags.empty?
       hosts.each do |h|
-        host = h.label
+        host = h.host
         # Iterative (see post_order): the old `stamp_node_tags` recursed one frame per tree
         # level and overflowed the native stack on a pathologically deep path. Each node's
         # tag depends only on its OWN (host, path), so visit order is irrelevant here.

@@ -278,7 +278,7 @@ module Gori
         # `cmd_sitemap_tree`, which refuses outright when the off-commit trigram index (Store V4)
         # is still behind.
         # The drain used to sit on this line, where a leftover backlog had no way to be reported.
-        entries = store.sitemap_entries(filter, limit, raise_on_error: true)
+        entries = store.sitemap_origin_entries(filter, limit, raise_on_error: true)
         # Measured HERE, on the raw read, and not after the folds: every step below collapses
         # rows, so by the time the tree exists the cut is invisible. Same test as
         # `Diff::Snapshot` (`rows.size >= limit`) — the read is capped, not cursored, so a
@@ -293,7 +293,9 @@ module Gori
         Sitemap.stamp_tags!(hosts, store.sitemap_tags)
         if in_scope && scope
           STDERR.puts "gori run sitemap: --in-scope, but no scope rules are configured — nothing is in scope" unless scope.configured?
-          hosts.select! { |h| scope.host_in_scope?(h.label) }
+          # The BARE host: a root's label is its origin (`https://h:8443`), and a host rule
+          # carries no scheme or port (#1371).
+          hosts.select! { |h| scope.host_in_scope?(h.host) }
         end
         if group
           # Opaque ids first, then numeric runs — mirrors SitemapView#reload.

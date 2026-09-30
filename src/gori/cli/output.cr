@@ -1293,8 +1293,11 @@ module Gori
         n == 1 ? "1 query" : "#{n} queries"
       end
 
-      # Flat endpoint listing — one line per (host, path) with its comma-joined method
-      # set, e.g. "GET,POST  acme.test/api/users". Pipe/grep-friendly; ID folding is
+      # Flat endpoint listing — one line per (origin, path) with its comma-joined method
+      # set, e.g. "GET,POST  https://acme.test/api/users": a URL, so the line feeds the next
+      # tool as it is (#1371 — keyed on the bare host it printed `127.0.0.1/only-tls`, which
+      # named no scheme or port). A host-level tree (no origins) prefixes the bare host.
+      # Pipe/grep-friendly; ID folding is
       # irrelevant here (every endpoint is listed, even folded ones, because /users/<a> and
       # /users/<b> are distinct endpoints). A QUERY fold is the one exception: it emits ONE
       # line for the path it stands for and its variants are not descended into, because
@@ -1349,8 +1352,8 @@ module Gori
         end
       end
 
-      # The endpoint tree as JSON: an array of host objects, each `{host, endpoints,
-      # tag?, children}`. A child node is `{label, path, methods?, tag?, children?}`,
+      # The endpoint tree as JSON: an array of host objects, each `{host, scheme, port, origin,
+      # endpoints, tag?, children}` — one per ORIGIN, `host` the bare host. A child node is `{label, path, methods?, tag?, children?}`,
       # or for a synthetic fold `{label, grouped:true, template?, methods?, children}` — an
       # id fold has no path, `template` ("{uuid}"/"{hex}"/"{date}") marks an ID fold as
       # opposed to a numeric run, and its `methods` are the UNION of its children's verbs. A
@@ -1387,8 +1390,20 @@ module Gori
         # Sitemap.template_class) — `scrub` keeps this valid UTF-8 JSON. Not `term_safe`:
         # `to_json` escapes control bytes, and its badges would rewrite the value a script
         # reads (see `json_captured`).
+        # `host` stays the BARE host — the documented key, and what `sitemap tag --host` takes
+        # — and a root built from origins adds where its endpoints were sent (#1371): two
+        # ports of one host are two objects, told apart by `scheme`/`port`. `origin` is the
+        # prefix `--format paths` prints, so a consumer need not rebuild the default-port and
+        # IPv6-bracket rules itself.
         io << %("host":)
-        host.label.scrub.to_json(io)
+        host.host.scrub.to_json(io)
+        if o = host.origin
+          io << %(,"scheme":)
+          o.scheme.scrub.to_json(io)
+          io << %(,"port":) << o.port
+          io << %(,"origin":)
+          o.label.scrub.to_json(io)
+        end
         io << %(,"endpoints":)
         host.endpoints.to_json(io)
         if t = host.tag

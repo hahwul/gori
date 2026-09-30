@@ -170,16 +170,17 @@ module Gori
         notes
       end
 
-      # Grouped by host; one line per referenced endpoint with where it was read.
+      # Grouped by origin (`http://h:9090`, as the Sitemap labels its roots, #1371); one line per
+      # referenced endpoint with where it was read.
       def self.sitemap_js_text(endpoints : Array(JsRefs::Endpoint)) : String
         path_w = endpoints.max_of? { |e| CLI::Output.cell_width(CLI::Output.term_safe(e.path)) }.try(&.clamp(8, 48)) || 8
         String.build do |io|
-          host = nil
+          origin = nil
           endpoints.each do |e|
-            if e.host != host
-              io << '\n' if host
-              host = e.host
-              io << CLI::Output.term_safe(e.host) << '\n'
+            if (label = Sitemap::Origin.new(e.scheme, e.host, e.port).label) != origin
+              io << '\n' if origin
+              origin = label
+              io << CLI::Output.term_safe(label) << '\n'
             end
             io << "  " << CLI::Output.pad_cell(CLI::Output.term_safe(e.path), path_w + 1)
             io << (e.requested == true ? "requested  " : "           ")

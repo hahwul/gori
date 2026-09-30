@@ -19,7 +19,17 @@ module Gori::Tui
 
     # What the Sitemap row the operator came from stands for: a host (paths nil = every
     # endpoint on it) or a subtree's endpoint paths, with the label the header shows.
-    record Target, host : String, paths : Set(String)?, label : String, path_prefix : String? = nil do
+    # `origin` narrows to the one scheme + port of `host` a Sitemap root stands for (#1371); nil
+    # reads every origin of the host.
+    record Target, host : String, paths : Set(String)?, label : String, path_prefix : String? = nil,
+      origin : Sitemap::Origin? = nil do
+      # Whether `r` is under this target's host (and origin, when it names one).
+      def covers?(r : ParamInventory::Row) : Bool
+        return false unless r.host.downcase == host.downcase
+        o = origin
+        o.nil? || (r.scheme == o.scheme && r.port == o.port)
+      end
+
       def prefix : String?
         path_prefix || (paths.try { |p| p.first if p.size == 1 })
       end
@@ -111,7 +121,7 @@ module Gori::Tui
       all = @report.try(&.rows) || [] of Row
       @rows = if t = @target
                 paths = t.paths
-                all.select { |r| r.host.downcase == t.host.downcase && (paths.nil? || paths.includes?(r.path)) }
+                all.select { |r| t.covers?(r) && (paths.nil? || paths.includes?(r.path)) }
               else
                 all
               end
@@ -120,8 +130,8 @@ module Gori::Tui
       @scroll = 0 if anchor.nil?
     end
 
-    private def key_of(r : Row) : {String, String, String, Miner::Location, String}
-      {r.host, r.method, r.path, r.location, r.name}
+    private def key_of(r : Row) : ParamInventory::Key
+      {r.scheme, r.host, r.port, r.method, r.path, r.location, r.name}
     end
 
     # The whole inventory's rows for the target HOST, ignoring the path filter — Miner's

@@ -15,9 +15,11 @@ module Gori
     # path), with how many flows referenced it. Keyed by the whole origin so the URL a scope
     # question is asked about is one a reference really named (a MIN per column could pair one
     # reference's scheme with another's port). `host_captured` — the project holds traffic for
-    # this host, so a tree missing it has it hidden by a lens, not unknown.
+    # this host, so a tree missing it has it hidden by a lens, not unknown. `origin_captured` —
+    # the same, for this reference's scheme + port (#1371): an origin of a captured host that
+    # the tree lacks was hidden too, not never requested.
     record JsRefNode, scheme : String, host : String, port : Int32, path : String, flows : Int32,
-      host_captured : Bool = false
+      host_captured : Bool = false, origin_captured : Bool = false
 
     # One stored reference WITH its source flow's URL (nil when the flow row is gone, which a
     # cascade makes a race, not a state).
@@ -77,40 +79,63 @@ module Gori
     # over the per-flow marker table (one row per scanned flow, not per reference) plus two
     # index-end reads, instead of a GROUP BY over every reference per tick (P6).
     #
-    # `host_captured` also reads `flows`, which that fingerprint does not see: traffic reaching a
-    # referenced host after the scan has to clear its "never requested" flag. So when the newest
-    # flow id has moved, only the hosts still flagged uncaptured are asked again — one indexed
-    # probe each (`idx_flows_sitemap` leads with host), not the aggregate.
+    # `host_captured` / `origin_captured` also read `flows`, which that fingerprint does not see.
+    # Traffic reaching a referenced host or origin after the scan has to clear its "never
+    # requested" flag, so when flows were only ADDED, just the hosts and origins still flagged
+    # uncaptured are asked again — one indexed probe each (`idx_flows_sitemap` leads with host),
+    # not the aggregate. A DELETE can take a flag the other way (the last flow on an origin
+    # gone), and the only honest answer to that is the aggregate again: flow ids are never
+    # reused (V39), so rows were deleted exactly when the count grew by less than the newest id
+    # did, or the newest id itself went DOWN (the newest flow deleted: both fall by one) —
+    # which holds for a peer's delete too, where no in-process counter would.
     def js_ref_nodes(limit : Int32 = SITEMAP_MAX) : {Array(JsRefNode), Bool}
       print = js_ref_fingerprint
-      top_flow = @db.query_one("SELECT COALESCE(MAX(id), 0) FROM flows", as: Int64)
+      flows_now = @db.query_one("SELECT COALESCE(MAX(id), 0), COUNT(*) FROM flows", as: {Int64, Int64})
       memo = @js_ref_nodes_memo
+      memo = nil if memo && flows_deleted?(memo[2], flows_now)
       unless memo && memo[0] == {print, limit}
-        memo = { {print, limit}, js_ref_aggregate(limit), top_flow }
+        memo = { {print, limit}, js_ref_aggregate(limit), flows_now }
         @js_ref_nodes_memo = memo
       end
-      key, result, seen_top = memo
-      return result if seen_top == top_flow
+      key, result, seen = memo
+      return result if seen == flows_now
       nodes, capped = result
       hosts = nodes.reject(&.host_captured).map(&.host).uniq!
       now = hosts.select { |h| @db.query_one?("SELECT 1 FROM flows WHERE host = ? LIMIT 1", h, as: Int64) }.to_set
-      nodes = nodes.map { |n| now.includes?(n.host) ? n.copy_with(host_captured: true) : n } unless now.empty?
+      origins = nodes.reject(&.origin_captured).map { |n| {n.scheme, n.host, n.port} }.uniq!
+      now_origins = origins.select do |(sc, h, pt)|
+        @db.query_one?("SELECT 1 FROM flows WHERE host = ? AND scheme = ? AND port = ? LIMIT 1", h, sc, pt, as: Int64)
+      end.to_set
+      unless now.empty? && now_origins.empty?
+        nodes = nodes.map do |n|
+          n = n.copy_with(host_captured: true) if now.includes?(n.host)
+          n = n.copy_with(origin_captured: true) if now_origins.includes?({n.scheme, n.host, n.port})
+          n
+        end
+      end
       result = {nodes, capped}
-      @js_ref_nodes_memo = {key, result, top_flow}
+      @js_ref_nodes_memo = {key, result, flows_now}
       result
     rescue
       # Never crash a Sitemap poll over a read (mirrors sitemap_tags / sitemap_entries).
       {[] of JsRefNode, false}
     end
 
+    # Whether any flow was deleted between two {newest id, row count} readings of `flows`.
+    private def flows_deleted?(before : {Int64, Int64}, now : {Int64, Int64}) : Bool
+      now[0] < before[0] || (now[1] - before[1]) < (now[0] - before[0])
+    end
+
     private def js_ref_aggregate(limit : Int32) : {Array(JsRefNode), Bool}
       out = [] of JsRefNode
       @db.query("SELECT scheme, host, port, path, COUNT(DISTINCT flow_id), " \
-                "EXISTS (SELECT 1 FROM flows f WHERE f.host = js_refs.host) FROM js_refs " \
+                "EXISTS (SELECT 1 FROM flows f WHERE f.host = js_refs.host), " \
+                "EXISTS (SELECT 1 FROM flows f WHERE f.host = js_refs.host AND f.scheme = js_refs.scheme " \
+                "AND f.port = js_refs.port) FROM js_refs " \
                 "GROUP BY host, path, scheme, port ORDER BY host, path, scheme, port LIMIT ?", limit + 1) do |rs|
         rs.each do
           out << JsRefNode.new(rs.read(String), rs.read(String), rs.read(Int64).to_i32, rs.read(String),
-            rs.read(Int64).to_i32, rs.read(Int64) != 0)
+            rs.read(Int64).to_i32, rs.read(Int64) != 0, rs.read(Int64) != 0)
         end
       end
       capped = out.size > limit
@@ -118,7 +143,7 @@ module Gori
       {out, capped}
     end
 
-    @js_ref_nodes_memo : { { {Int64, Int64, Int64}, Int32 }, {Array(JsRefNode), Bool}, Int64 }? = nil
+    @js_ref_nodes_memo : { { {Int64, Int64, Int64}, Int32 }, {Array(JsRefNode), Bool}, {Int64, Int64} }? = nil
 
     private def js_ref_fingerprint : {Int64, Int64, Int64}
       scans = @db.scalar("SELECT COUNT(*) FROM js_ref_scans").as(Int64)
@@ -165,10 +190,10 @@ module Gori
                  "WHERE flow_id IN (SELECT id FROM flows WHERE #{filter.sql})", args: filter.args).as(Int64).to_i32
     end
 
-    # Distinct referenced (host, path) pairs — what a scan reports as "new" by comparing the
+    # Distinct referenced (origin, path) pairs — what a scan reports as "new" by comparing the
     # count before and after.
     def js_ref_endpoint_count : Int32
-      @db.scalar("SELECT COUNT(*) FROM (SELECT 1 FROM js_refs GROUP BY host, path)").as(Int64).to_i32
+      @db.scalar("SELECT COUNT(*) FROM (SELECT 1 FROM js_refs GROUP BY host, path, scheme, port)").as(Int64).to_i32
     rescue
       0
     end
@@ -181,15 +206,27 @@ module Gori
     end
 
     # Stored references with their source flow's URL, newest source first within one
-    # (host, path). `host` is exact (hosts are stored lowercased), `path` narrows to one node.
+    # (origin, path), ordered origin before path — so each origin's endpoints are contiguous and
+    # a listing grouped by origin draws each origin's heading once (#1371). `host` is exact (hosts are stored lowercased), `path` narrows to one node.
     # Raises on a read error when asked to, so a headless surface can tell "none" from "failed".
-    def js_ref_sightings(*, host : String? = nil, path : String? = nil, limit : Int32 = JS_REF_READ_MAX,
+    #
+    # `scheme`/`port` narrow to one origin of `host` (a Sitemap root, #1371).
+    def js_ref_sightings(*, host : String? = nil, path : String? = nil, scheme : String? = nil,
+                         port : Int32? = nil, limit : Int32 = JS_REF_READ_MAX,
                          raise_on_error : Bool = false) : Array(JsRefSighting)
       where = [] of String
       args = [] of DB::Any
       if h = host
         where << "r.host = ?"
         args << h.downcase
+      end
+      if sc = scheme
+        where << "r.scheme = ?"
+        args << sc
+      end
+      if pt = port
+        where << "r.port = ?"
+        args << pt.to_i64
       end
       if p = path
         where << "r.path = ?"
@@ -200,7 +237,7 @@ module Gori
             "r.line, r.flags, r.base, r.created_at, f.scheme, f.host, f.port, f.target " \
             "FROM js_refs r LEFT JOIN flows f ON f.id = r.flow_id " \
             "#{where.empty? ? "" : "WHERE #{where.join(" AND ")} "}" \
-            "ORDER BY r.host, r.path, r.flow_id DESC LIMIT ?"
+            "ORDER BY r.host, r.scheme, r.port, r.path, r.flow_id DESC LIMIT ?"
       out = [] of JsRefSighting
       @db.query(sql, args: args) do |rs|
         rs.each do

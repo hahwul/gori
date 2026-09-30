@@ -49,7 +49,7 @@ describe SitemapController do
       seed(session.store, "https://acme.test/users/2")
       seed(session.store, "https://other.test/x")
       path = File.join(root, "api.json")
-      ctl.export_openapi(path, Gori::QL::EMPTY, {"acme.test" => nil.as(Set(String)?)}, "acme.test")
+      ctl.export_openapi(path, Gori::QL::EMPTY, {Gori::Sitemap::Origin.new("https", "acme.test", 443) => nil.as(Set(String)?)}, "https://acme.test")
       host.statuses.last.should contain("exporting")
       # Nothing has run yet: the build is a spawned fiber, not a call the event loop waits on.
       File.exists?(path).should be_false
@@ -65,7 +65,7 @@ describe SitemapController do
     with_sitemap_controller do |ctl, _, session, root|
       seed(session.store, "https://acme.test/a")
       path = File.join(root, "api.yaml")
-      ctl.export_openapi(path, Gori::QL::EMPTY, {"acme.test" => nil.as(Set(String)?)}, "acme.test")
+      ctl.export_openapi(path, Gori::QL::EMPTY, {Gori::Sitemap::Origin.new("https", "acme.test", 443) => nil.as(Set(String)?)}, "https://acme.test")
       drain_export(ctl)
       YAML.parse(File.read(path))["openapi"].should eq("3.0.3")
     end
@@ -75,7 +75,7 @@ describe SitemapController do
     with_sitemap_controller do |ctl, host, session, root|
       seed(session.store, "https://acme.test/a")
       ctl.export_openapi(File.join(root, "missing-dir", "api.json"), Gori::QL::EMPTY,
-        {"acme.test" => nil.as(Set(String)?)}, "acme.test")
+        {Gori::Sitemap::Origin.new("https", "acme.test", 443) => nil.as(Set(String)?)}, "acme.test")
       drain_export(ctl)
       host.statuses.last.should start_with("OpenAPI export failed")
     end
@@ -108,7 +108,7 @@ describe SitemapController do
     with_sitemap_controller do |ctl, host, session, root|
       seed(session.store, "https://acme.test/a")
       path = File.join(root, "api.json")
-      ctl.export_openapi(path, Gori::QL::EMPTY, {"other.test" => nil.as(Set(String)?)}, "other.test")
+      ctl.export_openapi(path, Gori::QL::EMPTY, {Gori::Sitemap::Origin.new("https", "other.test", 443) => nil.as(Set(String)?)}, "other.test")
       drain_export(ctl)
       host.statuses.last.should start_with("OpenAPI: nothing to export")
       File.exists?(path).should be_false
