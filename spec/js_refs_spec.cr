@@ -426,6 +426,24 @@ describe Gori::JsRefs do
       end
     end
 
+    # A delete can take a captured flag back: the last flow on an origin gone (not the newest
+    # flow, and carrying no references itself, so neither the reference fingerprint nor the
+    # newest id moves).
+    it "clears origin_captured when the only flow on that origin is deleted" do
+      with_store do |store|
+        jr_flow(store, "/a.js", %(fetch("http://shop.test:8080/x")))
+        img = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "shop.test", port: 8080, method: "GET", target: "/img.png",
+          http_version: "HTTP/1.1", head: "GET /img.png HTTP/1.1\r\nHost: shop.test\r\n\r\n".to_slice,
+          source: Gori::FlowSource::Kind::Proxy))
+        jr_flow(store, "/later", "[]", ctype: "application/json") # the newest flow stays put
+        JR.scan(store)
+        store.js_ref_nodes[0].find!(&.port.==(8080)).origin_captured.should be_true
+        store.delete_flow(img).should be_true
+        store.js_ref_nodes[0].find!(&.port.==(8080)).origin_captured.should be_false
+      end
+    end
+
     it "says whether the host has traffic, and follows new scans and deletes through its memo" do
       with_store do |store|
         a = jr_flow(store, "/a.js", %(fetch("/api/one");fetch("https://other.test/x")))
