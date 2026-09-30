@@ -4668,24 +4668,38 @@ devices and legacy CGI are exactly what an operator points gori at.
 
 - **Responses only.** `Http1.read_response_head_result` is the one upstream response reader (the
   proxy, `Repeater::Engine` and so every active tool, the WebSocket handshake) and also ends a
-  head on `\n\n`, `\r\n\n` or `\n\r\n`. A request head stays CRLFCRLF-only: its peer is the
-  operator's own client, which is why the request rule is the blunt one.
+  head on its EARLIEST blank line, `\n\n`, `\r\n\n` and `\n\r\n` included — once a start-line
+  has arrived, so a stray `\n\n` in front of the next response is read past as before. A request
+  head stays CRLFCRLF-only: its peer is the operator's own client, which is why the request rule
+  is the blunt one.
+- **A CRLF-only reader is still a party.** It does not stop at a bare-LF blank line; it reads on
+  to the next CRLFCRLF (`…\r\nX: a\n\r\nContent-Length: 5\r\n\r\n`). When that CRLFCRLF is
+  already buffered and the longer head's strict reading frames the body differently from the
+  lenient one, the reader returns the LONGER head, which then parses strictly and is refused by
+  `framing_ambiguous?` exactly as before bare-LF heads were accepted. The cost, accepted: an
+  LF-only head that declares a length, followed in the same segment by a body holding a CRLF
+  blank line, is refused too, because a strict reader genuinely frames that message otherwise.
+  A CRLFCRLF not yet buffered cannot be seen; the next two points bound that.
 - **The terminator picks the reading.** `parse_response_head` reads a head ENDED on a bare-LF
   blank line on LF (a CR before the LF goes with it); every other head keeps the strict CRLF
-  scan, including a CRLFCRLF head with a bare LF inside, which `framing_ambiguous?` must keep
-  comparing as before. For an LF-terminated head the "strict" side of that comparison is the LF
-  reading — a CRLF-only recipient never ends the head at all, so the parties that can disagree
-  are LF-lenient ones — and a lone CR, an obs-fold or whitespace before the colon on a framing
-  header is still refused. Stored heads take the same parse, so Probe, export, evidence and MCP
-  see the status and headers.
+  scan, including a CRLFCRLF head with a bare LF inside, which `framing_ambiguous?` keeps
+  comparing as before. For an LF-terminated head the comparison is between two LF-lenient
+  readers, and a lone CR, an obs-fold or whitespace before the colon on a framing header is
+  still refused. Stored heads take the same parse, so Probe, export, evidence and MCP see the
+  status and headers, and `strip_header_lines` (Alt-Svc, WebSocket extensions) walks the same
+  lines, so it still never sees a field the parse does not.
 - **Bytes stay as they came.** Nothing rewrites an LF to CRLF, on the wire or in the capture.
-- **One response per connection.** `lf_terminated_head?` makes `ClientConn#origin_keep_alive?`
-  and `ConnPool.reusable_response?` retire the socket, so if the lenient framing was wrong the
-  leftover dies with the connection instead of being recorded as the next request's response.
-  `send_pipeline` is left alone: a group send on one socket is the operator's own desync test.
+  Response Match&Replace is not applied to such a head (the flow says so): every rewrite helper
+  frames a head as CRLF lines, and a rewritten bare-LF head ends somewhere else for the client.
+  A held one is split at the same blank line the reader used (`Http1.response_head_end`).
+- **One response per connection.** A connection on which any head of the exchange (an interim
+  1xx included) ended on a bare-LF blank line is never reused (`ClientConn#origin_keep_alive?`,
+  `ConnPool.reusable_response?` via `Result#lf_framed?`), and the proxy checks the retired
+  socket for bytes waiting past the framed body without blocking (`Proxy::SocketResidue`, the
+  pool's checkout probe, moved under the proxy for this) and says so on the flow — the leftover
+  can no longer surface as the next request's response. `send_pipeline` is left alone (a group
+  send on one socket is the operator's own desync test); Probe's request_smuggling treats a
+  bare-LF leg of its differential as inconclusive rather than a Critical.
 - **Visible.** Probe's passive `bare_lf_response` flags any bare LF in a response head.
 
-Not changed: the header-strip scans (`strip_header_lines`: Alt-Svc, WebSocket extensions) keep
-their CRLF view, so they do not remove a field from an LF-terminated head (the scan still never
-sees a field the head does not carry, which is the property that entry protects). h2 has no line
-endings and is unaffected.
+h2 has no line endings and is unaffected.
