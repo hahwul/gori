@@ -428,6 +428,14 @@ module Gori::Authorize
         raise PlanError.new(PlanError::Reason::BadQuery,
           "query #{query.inspect} did not match any field", query)
       end
+      # A term QL cannot use is DROPPED, which widens the selection — and every extra row is
+      # `identities.size` real requests. History only warns about that; a replay refuses it.
+      dropped = QL.analyze(query, scope: lens).ignored
+      unless dropped.empty?
+        raise PlanError.new(PlanError::Reason::BadQuery,
+          "query #{query.inspect} has terms QL cannot use (#{dropped.join(", ")}); dropping them " \
+          "would select MORE flows than asked", query)
+      end
       if filter.uses_fts?
         # `drain_fts!`, not `index_pending!`: that one reports a batch that lost SQLite's single
         # writer slot to a capturing peer as "0 indexed" and returns there, rows still dirty, so

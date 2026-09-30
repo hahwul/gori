@@ -10,7 +10,14 @@ module Gori
       # strict:true additionally rejects any query with dropped/invalid terms
       # (default lenient — matching the historical bare-array behavior). A blank
       # query yields EMPTY (match all).
-      private def ql_filter_or_error(h, query : String?) : QL::Filter | Result
+      #
+      # Lenient is not SILENT: the terms it dropped are appended to `dropped`, and the caller
+      # writes them into its reply with `emit_ignored_terms`. `status:abc method:POST` ran as
+      # `method:POST` and came back as every POST with nothing on it, while `gori run history`
+      # printed "ignored … result is BROADER" for the same query — and this transport's caller
+      # is the one with no stderr to read. A required argument, not an optional one, so a new
+      # read tool cannot call this and forget to pass the warning on.
+      private def ql_filter_or_error(h, query : String?, dropped : Array(String)) : QL::Filter | Result
         return QL::EMPTY if query.nil? || query.strip.empty?
         # The project's scope, so a `scope:in`/`scope:out` term compiles instead of being
         # dropped. Read per call rather than cached: an agent (or a peer process) can add a
@@ -28,11 +35,24 @@ module Gori
         return ql_error(query) if QL.reject_empty?(query, filter)
         bad = QL.invalid_regex_terms(query)
         return ql_invalid_regex_error(query, bad) unless bad.empty?
-        if bool_arg(h, "strict", false)
-          analysis = QL.analyze(query, scope: lens)
-          return ql_strict_error(analysis) unless analysis.clean?
-        end
+        # The same lens the query compiled with, or the diagnosis disagrees with it about a
+        # `scope:` term (see `QL.analyze`).
+        analysis = QL.analyze(query, scope: lens)
+        return ql_strict_error(analysis) if bool_arg(h, "strict", false) && !analysis.clean?
+        dropped.concat(analysis.ignored)
         filter
+      end
+
+      # The terms `ql_filter_or_error` dropped, as two fields on a read tool's reply — the list,
+      # and the sentence that says what it means. Written only when there is something to say,
+      # so a clean query's reply is byte-for-byte what it was.
+      private def emit_ignored_terms(j : JSON::Builder, dropped : Array(String)) : Nil
+        return if dropped.empty?
+        j.field("ignored_terms") { j.array { dropped.each { |t| j.string t } } }
+        j.field "ignored_terms_note",
+          "these query terms were unrecognized or invalid and were DROPPED, so the result is " \
+          "BROADER than the query asks for — fix them (ql_explain shows why), or pass strict:true " \
+          "to refuse such a query instead"
       end
 
       # Refuse a query naming a `field:`/`field~` QL does not implement, instead of running the
@@ -232,7 +252,7 @@ module Gori
 
         tool j, "ql_explain",
           "Diagnose a gori QL query WITHOUT running it: which terms were applied, which " \
-          "were silently dropped (broadening results), which regex terms are invalid " \
+          "would be dropped (broadening results), which regex terms are invalid " \
           "(match nothing), the compiled SQL, and warnings. Use to debug a query that " \
           "returns too many or zero rows. `matches_everything` means every term was dropped " \
           "and the query narrows nothing; `unknown_fields` names a `field:` QL does not " \

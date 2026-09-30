@@ -25,7 +25,8 @@ module Gori
       # + a per-send Sandbox/exclude hard block inside the sender).
       @[Tool("probe_scan", read_only: false, env_refresh: true, permission: "write")]
       private def probe_scan(h) : Result
-        filter = probe_scan_filter(h)
+        dropped = [] of String
+        filter = probe_scan_filter(h, dropped)
         return filter if filter.is_a?(Result)
 
         if e = bad_severity(str(h, "severity"))
@@ -35,6 +36,9 @@ module Gori
         return category if category.is_a?(Result)
 
         active = bool_arg(h, "active", false)
+        if refusal = probe_active_widening(active, dropped)
+          return refusal
+        end
         # Read up here, not in the result expression it feeds. `limit` only trims the REPORT,
         # so reading it last looked free — until an unreadable value became a refusal, at which
         # point `probe_scan{active:true, limit:"all"}` sent the whole active scan at the target
@@ -98,7 +102,7 @@ module Gori
         end
         Result.new(probe_scan_json(groups, ids.size, repeater_n, active, allow_unscoped,
           scope_configured, capped, unsafe, aggressive, limit, scan_errors,
-          oob_inert: oob_inert_rules(store, rules, active), persist: persist))
+          oob_inert: oob_inert_rules(store, rules, active), persist: persist, dropped: dropped))
       end
 
       # `persist:true`'s writer, nil for a report-only scan, or the --read-only refusal.
@@ -469,10 +473,20 @@ module Gori
       end
 
       # The QL filter (History only; blank/absent → nil = scan all), or a QUERY_SYNTAX Result.
-      private def probe_scan_filter(h) : QL::Filter? | Result
+      # An active scan SENDS probes for every selected flow, so a term that was dropped — and
+      # widened the selection — is refused before anything goes out. `ignored_terms` on the
+      # reply would name it only after the traffic had been sent.
+      private def probe_active_widening(active : Bool, dropped : Array(String)) : Result?
+        return nil unless active && !dropped.empty?
+        err("query term(s) #{dropped.join(", ")} cannot be used and would be dropped, widening " \
+            "an ACTIVE scan to more flows than asked — fix or remove them (ql_explain shows why)",
+          "QUERY_SYNTAX", field: "query")
+      end
+
+      private def probe_scan_filter(h, dropped : Array(String)) : QL::Filter? | Result
         query = str(h, "query").try(&.strip).presence
         return nil unless query
-        ql_filter_or_error(h, query)
+        ql_filter_or_error(h, query, dropped)
       end
 
       # The validated category slug (or nil), or an INVALID_ARGUMENT Result.
@@ -514,10 +528,12 @@ module Gori
                                   capped : Bool, unsafe : Bool, aggressive : Bool, limit : Int32,
                                   scan_errors : Int32 = 0,
                                   oob_inert : Array(String) = [] of String,
-                                  persist : Probe::Scan::Persist? = nil) : String
+                                  persist : Probe::Scan::Persist? = nil,
+                                  dropped : Array(String) = [] of String) : String
         JSON.build do |j|
           j.object do
             j.field "flows_scanned", flows_scanned
+            emit_ignored_terms(j, dropped)
             j.field "repeaters_scanned", repeater_n
             # Only present when something was skipped: coverage is INCOMPLETE, so a clean-looking
             # empty result must not be read as "nothing found".
@@ -605,7 +621,7 @@ module Gori
           "fingerprint, an informational jwt_in_* note, or a custom rule. Reports only, unless " \
           "persist:true writes the findings into the project's triage list (probe_issues)." do |s|
           s.field "query", strprop("gori QL filter applied to History flows only; empty scans all (Repeater tabs are always scanned)")
-          s.field "strict", boolprop("reject the query if any term is unrecognized/invalid instead of silently dropping it (default false; use ql_explain to see which terms would drop)")
+          s.field "strict", boolprop("reject the query if any term is unrecognized/invalid (default false: the term is dropped, which BROADENS the result, and named in the reply's `ignored_terms`; ql_explain previews which terms would drop)")
           s.field "lenient", boolprop("search a `field:` QL does not implement as literal TEXT instead of refusing the query (default false) — the same escape hatch `gori run probe --lenient` spells")
           s.field "active", boolprop("also run active checks that SEND probe requests (default false = passive, request-free); requires write access + a configured scope")
           s.field "severity", enumprop("only return issues at/above this level", SEVERITIES)

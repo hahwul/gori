@@ -125,6 +125,11 @@ module Gori
           # Both halves, not just invalid-regex: an UNRECOGNIZED field is dropped by QL and
           # broadens the scan, which is the direction that matters here — see Run.warn_query_terms.
           Run.warn_query_terms("probe", q)
+          # `--active` sends probes for every selected flow, so a dropped term that widened the
+          # selection is refused rather than warned about.
+          if active && !(unusable = QL.analyze(q, scope: QL::SCOPE_SHAPE_ONLY).ignored).empty?
+            abort "gori run probe: --active refuses a query with terms QL cannot use (#{unusable.join(", ")}) — they would be dropped and probe more flows than asked"
+          end
           # A query that compiles to NOTHING (e.g. `status:>=foo`) becomes the match-all EMPTY
           # filter — here that would scan every flow, the opposite of what was asked. Refuse it.
           if !q.strip.empty? && parsed == QL::EMPTY
