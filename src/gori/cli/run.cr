@@ -101,6 +101,7 @@ require "./run/colormarker"
 require "./run/views"
 require "./run/project"
 require "./run/project_network"
+require "./run/project_default"
 
 module Gori
   module CLI
@@ -426,10 +427,13 @@ module Gori
           have = projects.empty? ? "" : " (have: #{projects.map { |project| CLI::Output.term_safe(project.name) }.join(", ")})"
           abort "gori run: no project matching '#{CLI::Output.term_safe(name)}'#{have}"
         end
-        default = ProjectRegistry.default_of(registry.list)
-        abort "gori run: no projects yet — capture some traffic first, or pass --db PATH" unless default
-        announce_default_project(default)
-        default
+        case chosen = default_project(registry, ENV[DEFAULT_PROJECT_ENV]?, read_default_pin)
+        in String then abort "gori run: #{chosen}"
+        in Nil    then abort "gori run: no projects yet — capture some traffic first, or pass --db PATH"
+        in Tuple
+          announce_default_project(*chosen)
+          chosen[0]
+        end
       end
 
       # Whether this process has already said which project it defaulted to.
@@ -454,12 +458,12 @@ module Gori
       # terminal. Once per process because one command resolves its project up to three
       # times (the read itself, the host-override snapshot, the outbound scope load), and
       # three identical lines would read like three different projects.
-      private def self.announce_default_project(project : Project) : Nil
+      private def self.announce_default_project(project : Project, source : DefaultSource = DefaultSource::Recent) : Nil
         return if @@said_default_project
         @@said_default_project = true
         io = @@default_project_io
         return unless io
-        io.puts "gori run: using project #{CLI::Output.term_safe(project.name)} (most recently active) — " \
+        io.puts "gori run: using project #{CLI::Output.term_safe(project.name)} (#{source.phrase}) — " \
                 "name another with --project NAME or --db PATH"
       end
 
@@ -481,13 +485,39 @@ module Gori
         # `gori run capture:` message, like every other resolve_* path, instead of a raw
         # backtrace. (Non-ASCII names like "日本語" now get a hashed fallback slug in
         # ProjectRegistry#slugify, so they no longer land here.)
-        name = project_name || "default"
+        registry = ProjectRegistry.new(Paths.projects_dir)
+        unless name = project_name
+          pinned = capture_default(registry)
+          return pinned if pinned.is_a?(Project)
+          name = pinned || "default"
+        end
         begin
-          ProjectRegistry.new(Paths.projects_dir).create(name)
+          registry.create(name)
         rescue ex : Gori::Error
           abort "gori run capture: #{ex.message} (#{CLI::Output.term_safe(name).inspect})"
         rescue ex : File::Error
           abort "gori run capture: could not create project #{CLI::Output.term_safe(name).inspect}: #{ex.message}"
+        end
+      end
+
+      # A pin stands in for `--project` on capture too (#1387): the existing project a pin names
+      # (by name, slug or id), or — for a GORI_PROJECT naming none — the NAME to create, the way
+      # `--project` creates a capture target. A `project switch` pin naming none is refused, like
+      # on every other command. nil: no pin, so the `default` project, as before.
+      private def self.capture_default(registry : ProjectRegistry) : Project | String?
+        if env = ENV[DEFAULT_PROJECT_ENV]?.try(&.strip)
+          abort "gori run capture: #{DEFAULT_PROJECT_ENV} is set but empty — unset it, or name a project" if env.empty?
+          begin
+            return registry.find(env) || env
+          rescue ex : ProjectRegistry::Ambiguous
+            abort "gori run capture: #{DEFAULT_PROJECT_ENV}: #{ex.message}"
+          end
+        end
+        return nil unless pin = read_default_pin
+        case chosen = default_project(registry, nil, pin)
+        in Tuple  then chosen[0]
+        in String then abort "gori run capture: #{chosen}"
+        in Nil    then nil
         end
       end
 

@@ -7,6 +7,7 @@ module Gori
       @[Subcommand("project", help: [
         {"project [list]", "List projects holding captured traffic (--all for every one)"},
         {"project create", "Create (or reopen) a project by name"},
+        {"project switch", "Pin the default project for every --project-less command (--clear to unpin)"},
         {"project export", "Export a project to a portable archive"},
         {"project import", "Import a project archive as a new project"},
         {"project delete", "Delete a project and everything captured in it"},
@@ -27,22 +28,27 @@ module Gori
           cmd_project_list(args[1..])
         when "create"
           cmd_project_create(args[1..])
+        when "switch", "use"
+          cmd_project_switch(args[1..])
         when "export", "import"
           cmd_project_archive(args)
         when "delete", "rm"
           cmd_project_delete(args[1..])
-        when "scope"
-          cmd_project_scope(args[1..])
-        when "sandbox"
-          cmd_project_sandbox(args[1..])
-        when "env"
-          cmd_project_env(args[1..])
-        when "host-override", "host-overrides"
-          cmd_project_host_override(args[1..])
-        when "network", "net"
-          cmd_project_network(args[1..])
+        when "scope", "sandbox", "env", "host-override", "host-overrides", "network", "net"
+          cmd_project_config(sub, args[1..])
         else
           cmd_project_other(sub, args)
+        end
+      end
+
+      # The project-scoped configuration verbs, one dispatch of their own.
+      private def self.cmd_project_config(sub : String, args : Array(String)) : Nil
+        case sub
+        when "scope"          then cmd_project_scope(args)
+        when "sandbox"        then cmd_project_sandbox(args)
+        when "env"            then cmd_project_env(args)
+        when "network", "net" then cmd_project_network(args)
+        else                       cmd_project_host_override(args)
         end
       end
 
@@ -76,6 +82,8 @@ module Gori
                                --query=TEXT narrows to the ones whose name, slug, short id
                                or bound workspace path contains TEXT
             create <name>      Create (or reopen) a project by name
+            switch <name>      Pin the project every --project-less command reads (--clear unpins;
+                               no name prints the default). GORI_PROJECT=<name> wins over the pin
             export <name>      Write a portable project archive (-o PATH)
             import <archive>   Import a project archive as a new project
             delete|rm <name>   Delete a project and everything captured in it
@@ -176,7 +184,7 @@ module Gori
         end
         parser.parse(args)
         refuse_list_leftovers(leftover, "project",
-          "list, create, delete/rm, scope, sandbox, env, host-override")
+          "list, create, switch, delete/rm, scope, sandbox, env, host-override")
 
         registry = ProjectRegistry.new(Paths.projects_dir)
         entries = registry.entries
@@ -190,9 +198,17 @@ module Gori
         # `Store.project_census`: the description used to need a second open, which is why
         # nothing headless ever reported it.
         counted = matched.map { |entry| {entry, Store.project_census(entry.project.db_path)} }
-        # The default is the head of the WHOLE registry, read before `--query` narrowed
-        # anything — see `project_list_rows`.
-        default_db = ProjectRegistry.default_of(entries.map(&.project)).try(&.db_path)
+        # The default is resolved over the WHOLE registry, before `--query` narrowed anything —
+        # see `project_list_rows` — and by the same rule every command uses (`default_project`),
+        # so a `GORI_PROJECT` or `project switch` pin moves the `◆` with it. A pin that names
+        # nothing marks no row and says so, rather than marking the project it would NOT read.
+        default_db = case chosen = default_project(registry, ENV[DEFAULT_PROJECT_ENV]?, read_default_pin)
+                     in Tuple then chosen[0].db_path
+                     in String
+                       STDERR.puts "gori run project: #{chosen}"
+                       nil
+                     in Nil then nil
+                     end
         rows = project_list_rows(counted, default_db, Paths.read_active_project, all)
         hidden = matched.size - rows.size
         if format == :json
@@ -497,6 +513,7 @@ module Gori
         # Read the sidecars while they still exist — rm_rf takes them with the directory.
         id = registry.id_of(project)
         slug = registry.slug_of(project)
+        was_default = default_pinned?(registry, project)
         begin
           registry.delete(project) # refuses while another live instance holds the capture lock
         rescue ex : Gori::Error
@@ -504,6 +521,9 @@ module Gori
         rescue ex : File::Error | IO::Error
           abort "gori run project delete: could not remove #{project.dir}: #{ex.message}"
         end
+        # The pin named the project that is now gone (#1387): clear it rather than leave every
+        # later command refusing a pin that can never resolve again.
+        File.delete?(default_pin_path) rescue nil if was_default
 
         if format == :json
           puts(JSON.build do |j|
@@ -514,10 +534,13 @@ module Gori
               j.field "slug", slug
               j.field "dir", project.dir
               j.field "db_path", project.db_path
+              j.field "unpinned_default", true if was_default
             end
           end)
         else
           puts "Project #{terminal_project_name(project.name, quoted: true)} deleted (#{project.dir})."
+          STDERR.puts "gori run project delete: it was the pinned default project — the pin is cleared " \
+                      "(the default is the most recently active project again)" if was_default
         end
       end
 
