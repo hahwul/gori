@@ -288,3 +288,19 @@ describe "gori run fuzz --format json — index order (#1386)" do
     JSON.parse(io.to_s).as_a.map(&.["index"].as_i64).should eq([4, 5])
   end
 end
+
+describe "gori run fuzz --format json — a dropped index" do
+  # The engine's worker rescue can drop a job without a ResultEvent; the rows after it must
+  # not all wait in memory for an index that never comes.
+  it "stops holding rows once the window passes MAX_HELD, and still writes every row once" do
+    io = IO::Memory.new
+    stream = Gori::CLI::Output::FuzzArrayStream.new(io)
+    n = Gori::CLI::Output::FuzzArrayStream::MAX_HELD + 10
+    (1..n).each do |i|
+      stream.append(Gori::Fuzz::Result.new(i.to_i64, ["p"], 0, 200, 2_i64, 1, 1, 10_i64, nil, true, false, nil))
+    end
+    stream.@held.size.should be <= Gori::CLI::Output::FuzzArrayStream::MAX_HELD
+    stream.close
+    JSON.parse(io.to_s).as_a.map(&.["index"].as_i64).should eq((1_i64..n.to_i64).to_a)
+  end
+end

@@ -1561,6 +1561,9 @@ module Gori
         # handshake is rewritten too: it is the one request the session sends.
         applied_rules = false
         plan, applied_rules = apply_request_rules(plan, project) if apply_rules
+        # A request the rules rewrote is not the stored one, so its answer is not written back
+        # over the row either — the same rule as `--path` / `-H` / `-b`.
+        per_send_edits << "--apply-rules" if applied_rules
 
         # Layer 1 (include list) BEFORE Layer 2 — mirrors fuzz/mine/sequence and MCP send_gate.
         abort_if_out_of_scope!(outbound, plan, "gori run repeater send")
@@ -2563,6 +2566,9 @@ module Gori
         cookie = cookie_header_value(cookies, headers)
         abort "gori run repeater: #{cookie.message}" if cookie.is_a?(SendArgError)
         headers += ["Cookie: #{cookie}"] if cookie
+        if note = cookie_as_body_note(cookies, method_override, !body_override.nil?)
+          STDERR.puts "gori run repeater: #{note.sub("with no body", "(the captured body is unchanged)")}"
+        end
         if (m = method_override) && (err = replay_method_error(m))
           abort "gori run repeater: #{err}"
         end
@@ -2688,7 +2694,13 @@ module Gori
                        "(#{request_line_preview(wire)})")
         end
         if m = method_override
-          wire = Repeater::FlowRequest.replace_method(wire, verbatim ? m : Env.expand(m)) ||
+          # Checked again AFTER expansion: `-X '$ENV.M'` passes the argv check above, and it is
+          # the expanded value that is spliced into the request line.
+          m = Env.expand(m) unless verbatim
+          if err = replay_method_error(m)
+            abort "gori run repeater: #{err}"
+          end
+          wire = Repeater::FlowRequest.replace_method(wire, m) ||
                  abort("gori run repeater: flow ##{id}'s request has no request line method to replace " \
                        "(#{request_line_preview(wire)})")
         end

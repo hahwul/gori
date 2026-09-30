@@ -73,6 +73,10 @@ module Gori
         # streamed off disk rather than held whole), so stdin is spooled to a temp file first —
         # still before `open_store`, for the reason above.
         spool = kind != :curl && path == "-" ? spool_import_stdin(kind) : nil
+        # `abort` exits WITHOUT unwinding, so the `ensure` below never runs on a refused import —
+        # and the spool is the operator's whole stdin (a HAR carries cookies and tokens). The
+        # exit handler is what removes it on every road out.
+        spool.try { |spooled| at_exit { File.delete?(spooled) } }
 
         # `long_running`: a HAR stream is written chunk by chunk through this one handle for as
         # long as the file takes, so it keeps the Store's standard wait budget.

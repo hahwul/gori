@@ -193,8 +193,11 @@ module Gori
         end
         after = Notes.load(store)
         idx = after.notes.index { |e| e.id == id }
-        if format == :json && idx
-          puts CLI::Output.note_object_json(idx, after.notes[idx], current: after.cur == idx, with_text: true)
+        if format == :json
+          # A peer deleted it between the commit and this read: JSON refuses rather than print a
+          # sentence where a script expects an object (`note_created_output`'s rule).
+          i = idx || abort_closing(store, "gori run notes update: note ##{n} was updated, but it was gone before it could be read back")
+          puts CLI::Output.note_object_json(i, after.notes[i], current: after.cur == i, with_text: true)
         else
           puts "Note ##{(idx || n - 1) + 1} #{append ? "appended to" : "updated"}."
         end

@@ -261,8 +261,9 @@ module Gori
     end
 
     # Non-interactive capture into `project`. Binds the proxy (fatal on failure, as
-    # capture is the whole point here), streams one line per completed/errored flow
-    # (`:text` = the legacy format, `:json` = JSON-Lines), and runs until INT/TERM,
+    # capture is the whole point here), streams each completed/errored flow (`:text` = the
+    # legacy line, `:jsonl` = one object per line, `:json` = one array, closed when the stream
+    # ends — see `capture_printer`), and runs until INT/TERM,
     # an optional wall-clock `every` duration, or an optional completed-flow `max`.
     # Returns true when shutdown came from INT/TERM (caller should exit 130), false
     # when `--for` / `--max` ended the run on purpose.

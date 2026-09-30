@@ -492,7 +492,10 @@ module Gori
           # every row of it. See CLI::Run.seed_bindings. An unseeded `$NAME` is not refused —
           # it ships literally (see `Env.unbound`).
           (fid = bind_from) && seed_bindings(fid, project_name, db_path, outbound, insecure, "gori run fuzz")
-          plan.engine.calibrate_baseline if auto_cal
+          if auto_cal
+            say_request_line_rewrite # calibration already sends the rewritten request
+            plan.engine.calibrate_baseline
+          end
           if save_results && (s = write_store)
             saved_mode = fuzz_saved_mode(mode, race, plan.engine.race_count)
             saved = Fuzz::Persistence.new(s, Fuzz::SavedRunMeta.new(nil,

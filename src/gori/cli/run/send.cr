@@ -91,6 +91,9 @@ module Gori
         sources = request_sources(file: request_file, raw: request_raw, stdin: request_stdin)
         dial_url, header_pairs = send_checked_argv(url, positional, sources, method, headers,
           body, body_file, cookies, tls_preset)
+        if note = cookie_as_body_note(cookies, method, !body.nil? || !body_file.nil?)
+          STDERR.puts "gori run send: #{note}"
+        end
         method, header_pairs = send_curl_defaults(method, header_pairs, !body.nil? || !body_file.nil?)
         cap = body_cap(headers_only, max_body, "gori run send")
         raw_content = sources.empty? ? nil : send_raw_content(sources, request_file, request_raw, request_stdin)
@@ -176,6 +179,20 @@ module Gori
           headers = headers + [{"Content-Type", "application/x-www-form-urlencoded"}]
         end
         {method || "POST", headers}
+      end
+
+      # The second net for a script still written for `-b` as the BODY (#1383). The refusal in
+      # `cookie_header_value` catches a value with no `=`, but a form body (`a=1&b=2`) has one
+      # and would go out as a Cookie without a word. Not refused — `a=1&b=2` is a legal cookie
+      # value — but said, when the value has a form body's `&`, or rides a body method with no
+      # body beside it.
+      def self.cookie_as_body_note(cookies : Array(String), method : String?, has_body : Bool) : String?
+        return nil if cookies.empty? || has_body
+        form_shaped = cookies.any?(&.includes?('&'))
+        body_method = method.try(&.upcase.in?("POST", "PUT", "PATCH")) || false
+        return nil unless form_shaped || body_method
+        "note: -b is curl's --cookie (it was the request body before #1383), so this went out as a " \
+        "Cookie header with no body — pass a body with -d/--data"
       end
 
       # `-b/--cookie` values → the ONE Cookie header value curl sends for them (joined with

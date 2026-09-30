@@ -93,4 +93,19 @@ describe "gori run send (#1116)" do
     Gori::CLI::Run.send_source_error(["--request-raw"], method: nil, headers: [] of String, body: nil,
       body_file: nil, cookies: ["a=1"]).not_nil!.should contain("-b/--cookie")
   end
+
+  # The review's case: an old `-b 'user=admin&pw=x'` body has an `=`, so the jar refusal lets it
+  # through as a Cookie — it is said instead.
+  describe ".cookie_as_body_note" do
+    it "speaks up for a form-shaped value, or a body method with no body" do
+      Gori::CLI::Run.cookie_as_body_note(["user=admin&pw=x"], nil, false).not_nil!.should contain("-d/--data")
+      Gori::CLI::Run.cookie_as_body_note(["sid=1"], "post", false).should_not be_nil
+    end
+
+    it "stays quiet for an ordinary cookie, or when a body is given" do
+      Gori::CLI::Run.cookie_as_body_note(["sid=1"], nil, false).should be_nil
+      Gori::CLI::Run.cookie_as_body_note(["sid=1"], "POST", true).should be_nil
+      Gori::CLI::Run.cookie_as_body_note([] of String, "POST", false).should be_nil
+    end
+  end
 end
