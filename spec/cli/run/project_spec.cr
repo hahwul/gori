@@ -224,3 +224,17 @@ describe "gori run project scope add --format json" do
     end
   end
 end
+
+# #1388: `scope list` said "Scope filtering: DISABLED" while `gori run send` refused an
+# out-of-scope target — the gate is armed by the rules existing, enabled or not.
+describe "gori run project scope — the active-send gate line" do
+  it "says ON whenever a rule exists, whatever the enabled flag" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      Gori::CLI::Run.scope_gate_line(scope).should contain("no rules")
+      scope.add("include", "host", "example.com")
+      scope.enabled?.should be_false
+      Gori::CLI::Run.scope_gate_line(scope).should start_with("Active-send gate: ON (1 rule)")
+    end
+  end
+end

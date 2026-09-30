@@ -42,6 +42,7 @@ module Gori
         project_name : String? = nil
         query : String? = nil
         min_sev : Store::Severity? = nil
+        fail_on : Store::Severity? = nil
         category : String? = nil
         format = :text
         active = false
@@ -71,6 +72,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("-qQL", "--query=QL", "Only scan flows matching this QL query (host: status:>=500 size: …)") { |v| query = v }
           p.on("--severity=LEVEL", "Only show issues at/above LEVEL (info|low|medium|high|critical)") { |v| min_sev = parse_severity(v) }
+          p.on("--fail-on=LEVEL", "Exit 3 when a REPORTED issue is at/above LEVEL — a CI gate (the --severity/--category/--in-scope filters apply first)") { |v| fail_on = parse_severity(v, "--fail-on") }
           p.on("--category=CAT", "Only show issues in CAT (#{PROBE_CATEGORIES.join("|")})") { |v| category = parse_probe_category(v) }
           p.on("--in-scope", "Only show issues on hosts in the project's configured scope (the TUI's `s` lens; ALL flows are still scanned)") { in_scope = true }
           p.on("-a", "--active", "Include light-touch active checks (sends probe requests)") { active = true }
@@ -197,6 +199,24 @@ module Gori
           groups = groups.select { |g| scope.host_in_scope?(g.host) }
         end
         report_probe(groups, flow_n, repeater_n, format, query, min_sev, category, in_scope)
+        exit_on_probe_findings(groups, fail_on)
+      end
+
+      # `--fail-on=LEVEL` (#1388): a scan used to exit 0 whatever it found, so it could not gate
+      # a CI job. Exit 3 — fuzz's `--fail-if-no-matches` verdict code — AFTER the report is
+      # written, so the job log still shows what failed it; 1 stays "the scan itself failed".
+      # Judged over the issues the command REPORTED, so `--category`/`--in-scope` narrow the
+      # gate exactly as they narrow the listing.
+      def self.probe_fail_count(groups : Array(Probe::Group), level : Store::Severity) : Int32
+        groups.count { |g| g.severity.value >= level.value }
+      end
+
+      private def self.exit_on_probe_findings(groups : Array(Probe::Group), level : Store::Severity?) : Nil
+        return unless level
+        n = probe_fail_count(groups, level)
+        return if n.zero?
+        STDERR.puts "gori run probe: #{n} issue#{n == 1 ? "" : "s"} at or above #{level.to_s.downcase} (--fail-on)"
+        exit 3
       end
 
       # The sentence an active scan owes an operator whose ENABLED out-of-band rules cannot run,
@@ -734,8 +754,8 @@ module Gori
         "#{q[0, QUERY_ECHO_LIMIT]}…"
       end
 
-      private def self.parse_severity(v : String) : Store::Severity
-        Store::Severity.parse?(v) || abort "gori run probe: invalid --severity '#{v}' (info|low|medium|high|critical)"
+      private def self.parse_severity(v : String, flag : String = "--severity") : Store::Severity
+        Store::Severity.parse?(v) || abort "gori run probe: invalid #{flag} '#{v}' (info|low|medium|high|critical)"
       end
 
       private def self.parse_probe_category(v : String) : String

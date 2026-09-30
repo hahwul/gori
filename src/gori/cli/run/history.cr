@@ -8,7 +8,7 @@ module Gori
       # <id>` is the top-level `gori run show <id>`, spelled the way the History tab reads.
       @[Subcommand("history", "ls", help: [
         {"history (ls)", "List / QL-query captured flows"},
-        {"history delete", "Hard-delete one captured flow by id, or every match of -q QL (needs --yes)"},
+        {"history delete", "Hard-delete captured flows by id (one or more), or every match of -q QL (needs --yes)"},
         {"history clear", "Delete ALL captured flows in the project (needs --yes)"},
       ])]
       private def self.cmd_history(args : Array(String)) : Nil
@@ -38,9 +38,10 @@ module Gori
         positional = [] of String
 
         parser = OptionParser.new do |p|
-          p.banner = "Usage: gori run history delete <id>\n" \
+          p.banner = "Usage: gori run history delete <id>…\n" \
                      "       gori run history delete -q QL --yes\n\n" \
-                     "Hard-delete one captured flow, or every flow a QL query matches. " \
+                     "Hard-delete the captured flows named by id (every id must exist, or nothing is " \
+                     "deleted), or every flow a QL query matches. " \
                      "This can't be undone."
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
@@ -90,25 +91,30 @@ module Gori
         end
       end
 
-      # `history delete <id>` — the single, explicit form.
+      # `history delete <id>…` — the explicit form, one id or several (#1388).
+      #
+      # It took exactly one, and refused `1 2 3` so as not to delete only #1 and exit 0 — right
+      # at the time, and still the half that matters: every id is checked BEFORE anything is
+      # deleted, and one that names no flow refuses the whole command, so a typo in a list
+      # never becomes "two of three gone, success". The rest go in ONE transaction
+      # (`Store#delete_flows`), so a busy project deletes all of them or none.
       private def self.delete_by_id(positional : Array(String), project_name : String?,
                                     db_path : String?) : Nil
-        # `take_flow_id`, not a hand-rolled `first?`: it supplies the too-many-arguments abort
-        # this one path was missing, so `history delete 1 2 3` no longer deletes ONLY flow #1
-        # and exits 0 with nothing said about #2 and #3. The TUI has multi-select delete and the
-        # store exposes `delete_flows`, so trying the list form is natural — and an operator who
-        # believes three captures are gone when two are still on disk has been told a lie by a
-        # destructive command. Every sibling id-taking delete (project, scope, env,
-        # host-override, `history show`) already goes through this helper.
-        id = take_flow_id(positional, "history delete")
+        ids = positional.map { |v| parse_flow_id(v, "gori run history delete") }.uniq!
 
         store = open_store(resolve_read_project(project_name, db_path))
         begin
           # flow_row is the row-only read; get_flow would materialize both BLOBs to answer
           # "does this exist?" — a 40 MB response would be read and discarded.
-          abort "gori run history delete: no flow with id #{id}" unless store.flow_row(id)
-          abort "gori run history delete: flow ##{id} NOT deleted (project busy) — try again" unless store.delete_flow(id)
-          puts "Flow ##{id} deleted."
+          missing = ids.reject { |id| store.flow_row(id) }
+          unless missing.empty?
+            abort "gori run history delete: no flow with id #{missing.join(", ")}" \
+                  "#{ids.size > 1 ? " — nothing was deleted" : ""}"
+          end
+          unless store.delete_flows(ids)
+            abort "gori run history delete: #{ids.size == 1 ? "flow ##{ids[0]}" : "flows"} NOT deleted (project busy) — try again"
+          end
+          puts ids.size == 1 ? "Flow ##{ids[0]} deleted." : "#{ids.size} flows deleted (#{ids.map { |id| "##{id}" }.join(", ")})."
         ensure
           store.close
         end

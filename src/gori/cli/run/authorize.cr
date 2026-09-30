@@ -351,9 +351,12 @@ module Gori
             "[{\"name\":\"anonymous\",\"remove\":[\"Cookie\"]}]. An entry with no \"name\" is " \
             "skipped and a malformed file reads as empty, so check the JSON parsed"
           else
-            "this project has no identities saved besides the baseline — add them in the TUI " \
-            "Authorize tab, or pass --identities FILE with at least one, e.g. " \
-            "[{\"name\":\"anonymous\",\"remove\":[\"Cookie\"]}]"
+            # Identities ARE session slots (`Authorize::Identity`), so the headless way to save
+            # one is `session add` — named first, because a CLI user reading this has no TUI open.
+            "this project has no identities saved besides the baseline — add them with " \
+            "`gori run session add --name NAME --set 'Cookie: …'` or `--remove Cookie` (every session slot is an identity; " \
+            "`gori run session list` shows them) or in the TUI Authorize tab, or pass " \
+            "--identities FILE with at least one, e.g. [{\"name\":\"anonymous\",\"remove\":[\"Cookie\"]}]"
           end
         in Authorize::PlanError::Reason::DuplicateIdentity
           "two identities are called #{(ex.detail || "?").inspect} — in --identities, or in the " \

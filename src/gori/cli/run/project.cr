@@ -733,6 +733,7 @@ module Gori
             puts(JSON.build do |j|
               j.object do
                 j.field "enabled", scope.enabled?
+                j.field "active_send_gate", scope.configured?
                 j.field "rules" do
                   j.array { scope.rules.each { |r| scope_rule_json(j, r) } }
                 end
@@ -740,6 +741,7 @@ module Gori
             end)
           else
             puts "Scope filtering: #{scope.enabled? ? "ENABLED" : "DISABLED"}"
+            puts scope_gate_line(scope)
             if scope.rules.empty?
               puts "No scope rules configured."
             else
@@ -750,6 +752,21 @@ module Gori
           end
         ensure
           store.close
+        end
+      end
+
+      # The OTHER thing scope rules do (#1388). "Scope filtering" is the enabled flag — the TUI's
+      # `s` lens — but the gate every active send passes (`Outbound.cli` / `.agent`) is armed by
+      # the rules existing at all (`Scope#configured?`), enabled or not. A listing that said only
+      # "DISABLED" read as "nothing is enforced" while `gori run send` refused out-of-scope
+      # targets. By design; now said.
+      def self.scope_gate_line(scope : Scope) : String
+        n = scope.rules.size
+        if scope.configured?
+          "Active-send gate: ON (#{n} rule#{n == 1 ? "" : "s"}) — send/repeater/fuzz/mine/discover and MCP " \
+          "refuse a target these rules leave out of scope unless --allow-unscoped / allow_unscoped:true"
+        else
+          "Active-send gate: no rules — `gori run` sends are not restricted (MCP refuses every send until a rule exists)"
         end
       end
 

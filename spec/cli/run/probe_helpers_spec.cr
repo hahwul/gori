@@ -148,3 +148,16 @@ describe "gori run probe dismiss write failure" do
     body.should contain(%q(NOT applied (project busy) — finding ##{iid} is unchanged" if landed == issue.status))
   end
 end
+
+# `probe --fail-on=LEVEL` (#1388): the count that decides exit 3, over the REPORTED groups.
+describe "gori run probe --fail-on" do
+  it "counts the groups at or above the level" do
+    g = ->(sev : Gori::Store::Severity) do
+      Gori::Probe::Group.new("c", "headers", "h", "t", sev, 1, ["u"], nil, nil)
+    end
+    groups = [g.call(Gori::Store::Severity::Info), g.call(Gori::Store::Severity::High)]
+    Gori::CLI::Run.probe_fail_count(groups, Gori::Store::Severity::Info).should eq(2)
+    Gori::CLI::Run.probe_fail_count(groups, Gori::Store::Severity::Medium).should eq(1)
+    Gori::CLI::Run.probe_fail_count(groups, Gori::Store::Severity::Critical).should eq(0)
+  end
+end

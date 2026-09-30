@@ -7,11 +7,14 @@ module Gori
     module Run
       @[Subcommand("notes", help: [
         {"notes [<n>]", "Read or write the project's notes (list, <n>, --all, create)"},
+        {"notes update <n>", "Replace (or --append to) the text of the note at list position <n>"},
         {"notes delete <n>", "Delete the note at 1-based list position <n> (needs --yes)"},
       ])]
       private def self.cmd_notes(args : Array(String)) : Nil
         case sub = args.first?
-        when "create"       then cmd_notes_create(args[1..])
+        when "create" then cmd_notes_create(args[1..])
+        when "update", "edit", "append"
+          cmd_notes_update(args[1..], append: args.first == "append")
         when "delete", "rm" then cmd_notes_delete(args[1..])
         when "list"         then cmd_notes_read(args[1..])
         else
@@ -21,7 +24,7 @@ module Gori
           # note number)" — non-zero, so never the silent no-op class, but it never told the
           # operator that notes has verbs and `remove` is not one, unlike its issues/links siblings.
           if (s = sub) && verb_token?(s) && s.to_i?.nil?
-            abort "gori run notes: unknown subcommand '#{s}' (create, delete/rm, list) — " \
+            abort "gori run notes: unknown subcommand '#{s}' (create, update/append, delete/rm, list) — " \
                   "or pass a note number"
           end
           cmd_notes_read(args)
@@ -125,6 +128,78 @@ module Gori
         ensure
           store.close
         end
+      end
+
+      # `gori run notes update <n>` (#1388) — MCP's `update_note`, addressed by the list position
+      # every other `notes` verb takes. `--append` (or the `append` verb) adds to the note
+      # instead of replacing it. The text comes from where `notes create` takes it: --text, the
+      # positional words after <n>, or a pipe.
+      private def self.cmd_notes_update(args : Array(String), *, append : Bool = false) : Nil
+        db_path : String? = nil
+        project_name : String? = nil
+        text : String? = nil
+        format = :text
+        positional = [] of String
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run notes update <n> [--append] [--text TEXT | TEXT… ] [options]\n" \
+                     "       gori run notes append <n> [--text TEXT | TEXT…] [options]\n\n" \
+                     "Replace the text of the note at 1-based list position <n>, or add to it with\n" \
+                     "--append. The text comes from --text, else the words after <n>, else STDIN."
+          p.on("--append", "Add the text on a new line after the note's current text instead of replacing it") { append = true }
+          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          p.on("--text=TEXT", "The text (else the words after <n>, else STDIN)") { |v| text = v }
+          format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |before, after| positional = before + after }
+          p.invalid_option { |f| abort "gori run notes update: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run notes update: missing value for #{f}" }
+        end
+        parser.parse(args)
+
+        n = parse_note_index(positional.first?) || abort "gori run notes update: missing <n>"
+        body = note_update_text(text, positional[1..])
+        store = open_store(resolve_read_project(project_name, db_path))
+        apply_note_update(store, n, body, append, format)
+      end
+
+      # The text for `notes update`: --text, else the words after <n>, else a pipe. An empty
+      # replacement would blank the note and an empty append would do nothing — neither is what
+      # a script that lost its input meant, so both are refused.
+      private def self.note_update_text(text : String?, words : Array(String)) : String
+        abort "gori run notes update: pass the text as --text or as words after <n>, not both" if text && !words.empty?
+        body = text || (words.empty? ? nil : words.join(' '))
+        body ||= read_stdin_fallback(STDIN, "gori run notes", "note text") unless STDIN.tty?
+        abort "gori run notes update: no note text (use --text, words after <n>, or pipe via STDIN)" if body.nil? || body.empty?
+        body
+      end
+
+      private def self.apply_note_update(store : Store, n : Int32, body : String, append : Bool, format : Symbol) : Nil
+        doc = Notes.load(store)
+        unless n <= doc.size
+          store.close
+          abort "gori run notes update: no note ##{n} (this project has #{doc.size} note#{doc.size == 1 ? "" : "s"})"
+        end
+        # By the note's STABLE id, inside the write transaction — see `Notes.update`.
+        id = doc.notes[n - 1].id
+        case Notes.update(store, id, body, append: append)
+        when .busy?
+          store.close
+          abort "gori run notes update: project is busy (write did not commit) — try again"
+        when .missing?
+          store.close
+          abort "gori run notes update: note ##{n} was deleted before it could be updated"
+        end
+        after = Notes.load(store)
+        idx = after.notes.index { |e| e.id == id }
+        if format == :json && idx
+          puts CLI::Output.note_object_json(idx, after.notes[idx], current: after.cur == idx, with_text: true)
+        else
+          puts "Note ##{(idx || n - 1) + 1} #{append ? "appended to" : "updated"}."
+        end
+      ensure
+        store.close
       end
 
       # What `notes create` prints, from the set read back after the commit. `--format json`

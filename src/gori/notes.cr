@@ -123,7 +123,11 @@ module Gori
     # Replace one note's text. `Missing` when the id is not in the set the transaction read —
     # which is the authoritative one, so a note a peer deleted a moment ago reports Missing
     # rather than being silently resurrected by our stale copy.
-    def self.update(store : Store, id : Int64, text : String) : Write
+    #
+    # `append:` adds `text` after the note's current text, on a line of its own (`gori run notes
+    # update --append`, #1388). It is joined HERE, against the text the transaction read, so an
+    # edit a peer made a moment ago is appended to rather than overwritten by our older copy.
+    def self.update(store : Store, id : Int64, text : String, *, append : Bool = false) : Write
       legacy = store.setting(LEGACY_KEY)
       found = false
       committed = store.mutate_setting(DOCS_KEY) do |raw|
@@ -132,12 +136,18 @@ module Gori
         if idx
           found = true
           notes = doc.notes.dup
-          notes[idx] = NoteEntry.new(id, text)
+          notes[idx] = NoteEntry.new(id, append ? appended(notes[idx].text, text) : text)
           serialize(doc.cur, notes, doc.next_id)
         end
       end
       return Write::Busy unless committed
       found ? Write::Committed : Write::Missing
+    end
+
+    # `text` after `existing`, starting a new line unless `existing` is empty or already ends one.
+    def self.appended(existing : String, text : String) : String
+      return text if existing.empty?
+      existing.ends_with?('\n') ? existing + text : "#{existing}\n#{text}"
     end
 
     # Drop one note. `cur` is re-clamped against the set the transaction read, not ours.
