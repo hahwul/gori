@@ -58,6 +58,15 @@ module Gori::Tui
     # cell plus a one-column gap. See render_list_body.
     STRIP_W    =   2
     TRIM_SLACK = 512
+    # The list's TIME span (value plus its one-column gap): `MM-DD HH:MM:SS`, or the bare
+    # `HH:MM:SS` a narrow pane falls back to. See `compact_time?`.
+    TIME_W       = 15
+    TIME_SHORT_W =  9
+    # HOST+PATH are held this many cells before the right cluster is granted any, and the
+    # built-in cluster (STA SRC TYPE SIZE DUR, each with its gap) needs BUILTIN_CLUSTER_W.
+    # 30 is a readable host plus a path that shows more than its first segment (#1376).
+    HOST_PATH_MIN     = 30
+    BUILTIN_CLUSTER_W = 30
     # Cap on remembered user-column values (#819), and the answer for a list with no columns —
     # one shared empty array rather than a fresh allocation per row per frame.
     COL_CACHE_MAX       = 4096
@@ -229,6 +238,7 @@ module Gori::Tui
       # value) reads the new answer. Cleared on size like `@color_memo`; `@mime_memo` is
       # bounded by the number of distinct Content-Types and capped for a hostile origin.
       @time_memo = {} of Int64 => String
+      @short_time_memo = {} of Int64 => String # the date-less TIME a narrow pane draws
       @mime_memo = {} of String => String
       @path_memo = {} of Int64 => String
       # SIZE and DUR join them on the same argument, and they are the two that cost the most:
@@ -2858,8 +2868,12 @@ module Gori::Tui
       sw = @colormarker.try(&.strip_active?) ? STRIP_W : 0
       strip_x = rect.x + 1
       time_x = rect.x + 1 + sw
-      method_x = rect.x + 16 + sw # time column widened to fit MM-DD HH:MM:SS
-      # +25, not +24: METHOD keeps its full 8 cells (16..23) and this buys the BLANK COLUMN
+      # TIME gives up its date before PATH gives up cells (#1376): at 80 columns the full
+      # `MM-DD HH:MM:SS` left PATH about ten cells, which is the column an operator reads a
+      # row BY. The date matters across days; the path matters on every row.
+      short_time = compact_time?(rect, sw)
+      method_x = time_x + (short_time ? TIME_SHORT_W : TIME_W)
+      # +9, not +8: METHOD keeps its full 8 cells and this buys the BLANK COLUMN
       # between them. The clamp below is what stops a long token bleeding, but a method that
       # exactly FILLS the cell — `PROPFIND`, `CHECKOUT`, both WebDAV/DeltaV verbs this tool is
       # pointed at — then sat flush against the label and the two columns read as one token:
@@ -2869,11 +2883,11 @@ module Gori::Tui
       # The gap is paid for out of PROTO's own span rather than by widening the fixed left
       # block, so `host_x` does not move and no terminal loses a column of HOST/PATH for it:
       # `Proto::Kind#label` is a closed set whose longest member is 5 (`HTTPS`/`GRPCS`), as is
-      # the `STUB` that displaces it, so 25..30 still leaves PROTO the same one-column gap
+      # the `STUB` that displaces it, so its 6-cell span still leaves PROTO the same one-column gap
       # before HOST that METHOD now has. A label longer than 6 would be the thing to re-check
       # here — there is no `width:` on the PROTO draw, by the same closed-set argument.
-      proto_x = rect.x + 25 + sw
-      host_x = rect.x + 31 + sw
+      proto_x = method_x + 9
+      host_x = proto_x + 6
       # Right cluster STA · SRC · TYPE · SIZE · DUR (status code, provenance, response MIME,
       # size, latency — frequently-scanned), anchored to the right edge and sized to FIT:
       # STA outlives the rest, which drop when the pane is too narrow to also keep HOST+PATH
@@ -2890,8 +2904,8 @@ module Gori::Tui
       # falls off a narrow terminal is a marker that lets someone screenshot a Repeater send as
       # if it were captured traffic. That is the same argument that keeps `STUB` inside the
       # fixed-width PROTO column; this one lives in the cluster, so priority is the lever it has.
-      cluster_w = 4                                # STA (3-digit code + gap)
-      spare = rect.right - host_x - 18 - cluster_w # reserve 18 for HOST+PATH first
+      cluster_w = 4                                           # STA (3-digit code + gap)
+      spare = rect.right - host_x - HOST_PATH_MIN - cluster_w # HOST+PATH are reserved first
       if show_src = spare >= 6
         cluster_w += 6
         spare -= 6
@@ -3096,7 +3110,7 @@ module Gori::Tui
         if sw > 0 && (m = mark) && m.style.strip?
           screen.cell(strip_x, y, '█', Theme.mark_color(m.color), bg)
         end
-        screen.text(time_x, y, fmt_time_memo(row.created_at), Theme.muted, bg)
+        screen.text(time_x, y, fmt_time_memo(row.created_at, short_time), Theme.muted, bg)
         # METHOD is a FIXED 8-column cell (method_x .. proto_x), so it needs its own clamp —
         # without a `width:` the limit is the whole SCREEN. RFC 9110 permits any token here and
         # the parser caps nothing, so a long method (`VERSION-CONTROL`, a smuggled
@@ -3365,18 +3379,28 @@ module Gori::Tui
     # live session. created_at is unix microseconds.
     # `LocalTime.at`, not `Time.unix`: a `created_at` past year 9999 (an imported or foreign
     # row) raised on every frame the row was drawn, and the tab never drew again.
-    private def fmt_time(created_at : Int64) : String
+    private def fmt_time(created_at : Int64, short : Bool = false) : String
       t = LocalTime.at(created_at)
       return "—" unless t
       return fmt_time_relative(t) if Settings.history_time_format == "relative"
-      t.to_s("%m-%d %H:%M:%S")
+      t.to_s(short ? "%H:%M:%S" : "%m-%d %H:%M:%S")
     end
 
     # `fmt_time` through the memo — for the ABSOLUTE format only. A relative age is a
     # function of now and has to be recomputed each frame (it is `Fmt.ago`, cheap).
-    private def fmt_time_memo(created_at : Int64) : String
+    private def fmt_time_memo(created_at : Int64, short : Bool = false) : String
       return fmt_time(created_at) if Settings.history_time_format == "relative"
+      if short
+        return @short_time_memo.fetch(created_at) { @short_time_memo[created_at] = fmt_time(created_at, true) }
+      end
       @time_memo.fetch(created_at) { @time_memo[created_at] = fmt_time(created_at) }
+    end
+
+    # Does the full-width TIME leave the row too little for HOST+PATH plus the built-in
+    # cluster? Then TIME drops its date. A relative age is short either way.
+    private def compact_time?(rect : Rect, sw : Int32) : Bool
+      full_host_x = rect.x + 1 + sw + TIME_W + 15 # METHOD (9) + PROTO (6)
+      rect.right - full_host_x < HOST_PATH_MIN + BUILTIN_CLUSTER_W
     end
 
     MIME_MEMO_CAP = 256
@@ -3577,12 +3601,16 @@ module Gori::Tui
       dv = detail_view
       ws = reveal_active?(hex, dv)
       nav = detail_navigable? ? "↑/↓←/→ · ⇧sel · y" : "↑/↓ scroll"
-      # Status word + mode toggle chips (mouse + same chords as keys), then muted nav.
-      x = screen.text(x + 1, rect.y, detail_mode_status(hex, ws, dv), Theme.muted) + 1
+      # Status word + mode toggle chips (mouse + same chords as keys), then muted nav. Every
+      # piece is bounded by the pane's right border (`rect.right`): the row is wider than a
+      # sub-110-column pane, and a draw with no `width:` ran over the `│` (#1376). A chip is
+      # drawn whole or not at all — a clipped `^X:h…` is not a button anyone can read.
+      x = draw_detail_hint(screen, x + 1, rect, detail_mode_status(hex, ws, dv)) + 1
       detail_mode_chips(hex, ws, dv).each do |(_, label, lit)|
+        break if x + Screen.draw_width(label) > rect.right
         x = Frame.chip(screen, x, rect.y, label, lit) + 1
       end
-      screen.text(x + 1, rect.y, "· #{nav} · space · esc", Theme.muted)
+      draw_detail_hint(screen, x + 1, rect, "· #{nav} · space · esc")
       Frame.inner_divider(screen, rect, rect.y + 1, border: Frame.pane_border(focused))
 
       # The text rect and the footer strip under it come from ONE derivation
@@ -3733,6 +3761,14 @@ module Gori::Tui
     # active chip is a gold pill when the strip holds focus (same "gold = focus is here"
     # cue as the sub-tab strips one level up), else the accent pill; body-focused keeps
     # today's look.
+    # One muted run of the detail header row, clipped (ellipsized) at the pane's right border.
+    # Returns the x past what was drawn, or `x` when no cell was free.
+    private def draw_detail_hint(screen : Screen, x : Int32, rect : Rect, text : String) : Int32
+      room = rect.right - x
+      return x if room <= 0
+      screen.text(x, rect.y, text, Theme.muted, width: room)
+    end
+
     private def render_detail_chips(screen : Screen, rect : Rect, strip_focused : Bool) : Int32
       x = rect.x + 1
       detail_panes.each do |pane|
@@ -4220,6 +4256,7 @@ module Gori::Tui
       # id: it refills from a screenful of rows on the next frame.
       @color_memo.clear if @color_memo.size > @max_rows
       @time_memo.clear if @time_memo.size > @max_rows
+      @short_time_memo.clear if @short_time_memo.size > @max_rows
       @path_memo.clear if @path_memo.size > @max_rows
     end
 

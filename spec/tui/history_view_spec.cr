@@ -3360,3 +3360,54 @@ describe "HistoryView time column out of range" do
     end
   end
 end
+
+# #1376: layout at the common narrow widths.
+describe "HistoryView at 80–110 columns" do
+  # At 80 columns the full `MM-DD HH:MM:SS` and METHOD kept their width while PATH got about
+  # ten cells. TIME drops the date first, and HOST+PATH are held before the right cluster.
+  it "drops TIME's date before it starves PATH" do
+    prev = Gori::Settings.history_time_format
+    Gori::Settings.history_time_format = "absolute"
+    begin
+      with_store do |store|
+        add_flow(store, "GET", "/assets/logo-2x.svg", 200, "image/svg+xml")
+        view = HistoryView.new
+        view.reload(store)
+        dated = /\d\d-\d\d \d\d:\d\d:\d\d/
+
+        narrow = MemoryBackend.new(80, 12)
+        view.render_list(Screen.new(narrow), Rect.new(2, 0, 76, 12)) # an 80-column body
+        row = (0...12).map { |y| narrow.row(y) }.find!(&.includes?("/assets"))
+        row.should contain("/assets/logo-2x.svg")
+        row.should match(/\d\d:\d\d:\d\d/)
+        row.should_not match(dated)
+
+        wide = MemoryBackend.new(140, 12)
+        view.render_list(Screen.new(wide), Rect.new(0, 0, 140, 12))
+        (0...12).map { |y| wide.row(y) }.find!(&.includes?("/assets")).should match(dated)
+      end
+    ensure
+      Gori::Settings.history_time_format = prev
+    end
+  end
+
+  # The detail header row (pane chips, mode chips, nav hint) is wider than a sub-110-column
+  # pane, and the hint was drawn without a width, straight over the right `│`.
+  it "keeps the detail header row inside the pane's right border" do
+    with_store do |store|
+      add_flow(store, "GET", "/x", 200, "text/plain")
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      [50, 80, 100].each do |w|
+        b = MemoryBackend.new(w + 20, 16)
+        inner = Rect.new(1, 1, w - 2, 14)
+        view.render_detail(Screen.new(b), inner)
+        b.row(inner.y)[inner.right..].strip.should eq("") # (w=#{w})
+      end
+      wide = MemoryBackend.new(160, 16)
+      view.render_detail(Screen.new(wide), Rect.new(1, 1, 158, 14))
+      wide.row(1).should contain("space · esc")
+    end
+  end
+end

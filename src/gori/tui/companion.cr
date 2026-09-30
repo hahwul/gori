@@ -143,7 +143,8 @@ module Gori::Tui
     # The vertical side needs no such term because the plate strips are left/right only.
     GUTTER = 3
     # …and TWO rows at the bottom, for the same reason. She occludes body content by
-    # design, but a chewed BORDER reads as a rendering bug rather than as a mascot, and
+    # design (a text run she cuts is ellipsized at her plate — Screen#occlusion — so a
+    # covered `160B` never reads as `16`), but a chewed BORDER reads as a rendering bug rather than as a mascot, and
     # tab bodies stack up to two rules there: the pane's own at body.bottom - 1, plus a
     # nested Frame.card's at body.bottom - 2 on the sub-tabbed tabs (Discover, Sitemap,
     # Repeater…). Clearing both is the difference between "───  ▝▄▄▄▄▄▘  ╯" and a mascot
