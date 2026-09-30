@@ -394,6 +394,22 @@ describe Gori::Sitemap do
       Gori::Sitemap.endpoint_count(hosts.first).should eq(3) # /api/users, /api/users/5, the fold
     end
 
+    # #1379: the folds were appended after every other child, so `export (1 query)` sat under
+    # `rebuild` and a `search` fold after every plain leaf. A fold takes its first member's place.
+    it "keeps each fold where its first member was among its siblings" do
+      hosts = Gori::Sitemap.build([
+        {"h", "GET", "/api/users"},
+        {"h", "GET", "/export?fmt=csv"},
+        {"h", "GET", "/login"},
+        {"h", "GET", "/search"},
+        {"h", "GET", "/search?q=1"},
+        {"h", "GET", "/zebra"},
+      ])
+      Gori::Sitemap.fold_queries!(hosts.first)
+      hosts.first.children.map(&.label).should eq(["api", "export", "login", "search", "zebra"])
+      hosts.first.children.select(&.query_fold).map(&.label).should eq(["export", "search"])
+    end
+
     it "folds a query on the bare root onto the '/' node" do
       hosts = Gori::Sitemap.build([{"h", "GET", "/"}, {"h", "GET", "/?utm=x"}])
       Gori::Sitemap.fold_queries!(hosts.first)

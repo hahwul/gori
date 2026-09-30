@@ -853,7 +853,19 @@ module Gori::Tui
       screen.text(ix, fy + 4, guidance[1], Theme.muted, Theme.panel, width: iw)
       if st = @status
         screen.text(ix, fy + 5, "• #{st}", Theme.yellow, Theme.panel, width: iw)
+      elsif note = SetupWizard.run_bind_note(Settings.cli_bind_host, Settings.cli_bind_port)
+        screen.text(ix, fy + 5, note, Theme.muted, Theme.panel, width: iw)
       end
+    end
+
+    # A `-l`/`-p` flag binds THIS run and never reaches the fields above, which edit the saved
+    # default (see App#run_tui) — so `gori tui -p 18911` offered 8070 with nothing to say the
+    # session is on :18911 (#1379). One line, on the status row, which a validation message
+    # displaces. Nil with no flag.
+    def self.run_bind_note(host : String?, port : Int32?) : String?
+      return nil unless host || port
+      flags = [host ? "-l" : nil, port ? "-p" : nil].compact.join(" ")
+      "this run: #{host}#{port ? ":#{port}" : ""} (#{flags}) · these set the default"
     end
 
     # The two network hints have fixed rows. At 40 columns, show the meaning of each

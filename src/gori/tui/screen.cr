@@ -225,6 +225,12 @@ module Gori::Tui
   class Screen
     getter width : Int32
     getter height : Int32
+    # A box something opaque will be painted over after the body is drawn — Miss Ring's plate
+    # (#1376). A `text` run that starts left of it and would continue underneath is ellipsized
+    # at its left edge, so a value she covers reads as cut (`1…`) rather than as a shorter real
+    # one (`160B` showing as `16`). Only runs that START left of the box are touched; anything
+    # drawn inside it is covered anyway. The Runner sets it around the body render only.
+    property occlusion : Rect? = nil
 
     # Interned single-cell Strings for the 128 ASCII codepoints, so drawing a Char never
     # allocates a fresh 1-char String — `cell` is the universal draw primitive (a full-screen
@@ -547,6 +553,9 @@ module Gori::Tui
     def text(x : Int32, y : Int32, str : String, fg : Color, bg : Color = Theme.bg,
              attr : Attribute = Attribute::None, width : Int32? = nil) : Int32
       limit = width || (@width - x)
+      if (occ = @occlusion) && x < occ.x && y >= occ.y && y < occ.bottom
+        limit = {limit, occ.x - x}.min
+      end
       return x if limit <= 0
       # ASCII fast path — the common case (line numbers, method/host/path, headers):
       # display width == char count, so skip fit()'s full-width pre-scan, the second

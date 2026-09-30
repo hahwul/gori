@@ -612,7 +612,24 @@ module Gori::Tui
         end
       end
 
+      render_right_overflow(screen, rect, segs, start, tabs.size, more, active_tab)
       render_more_button(screen, more, more_focused) if more
+    end
+
+    # Later tabs hidden: `›` in the gap column right after the last drawn tab, the mirror of
+    # the `‹` before the first. Without it a narrow bar ended in a blank run before `0:Tabs`
+    # that read as "that is all of them" (#1376). A tab packed flush against the `0` pill (or
+    # the row's edge) leaves no gap column, so the marker takes that tab's own trailing pad —
+    # unless it is the active pill, whose fill it would punch a hole in.
+    private def self.render_right_overflow(screen : Screen, rect : Rect,
+                                           segs : Array({Symbol, String, Rect}), start : Int32,
+                                           total : Int32, more : Rect?, active_tab : Symbol) : Nil
+      return unless (last = segs.last?) && start + segs.size < total
+      sym, _, seg = last
+      limit = more.try(&.x) || rect.right
+      mx = seg.right
+      mx -= 1 if mx >= limit && sym != active_tab
+      screen.cell(mx, rect.y, '›', Theme.muted, Theme.bg) if mx < limit
     end
 
     # The far-right "more" pill — a gold pill when it holds focus (mirroring the active

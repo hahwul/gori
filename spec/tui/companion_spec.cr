@@ -1438,3 +1438,29 @@ describe Gori::Tui::Companion do
     end
   end
 end
+
+# #1376: she covers the SIZE/DUR end of a full list row, so a value she cut read as a shorter
+# real one (`160B` as `16`). With her plate as the Screen's occlusion, a run that continues
+# under her is ellipsized at her edge; a run that ends before her is untouched.
+describe "Screen#occlusion under Miss Ring" do
+  it "ellipsizes a run she cuts, and leaves the rest of the row alone" do
+    body = Rect.new(0, 0, 60, 20)
+    plate = Companion.hit_rect(body).not_nil!
+    b = MemoryBackend.new(60, 20)
+    screen = Screen.new(b)
+    screen.occlusion = plate
+    y = plate.y + 1
+    screen.text(plate.x - 2, y, "160B", Theme.text)
+    screen.text(plate.x - 10, y, "GET", Theme.text)
+    screen.text(plate.x - 2, plate.y - 1, "160B", Theme.text) # the row above her: no cut
+    b.row(y)[plate.x - 2, 2].should eq("1…")
+    b.row(y)[plate.x - 10, 3].should eq("GET")
+    b.row(plate.y - 1)[plate.x - 2, 4].should eq("160B")
+  end
+
+  it "changes nothing without an occlusion" do
+    b = MemoryBackend.new(20, 1)
+    Screen.new(b).text(0, 0, "160B", Theme.text)
+    b.row(0)[0, 4].should eq("160B")
+  end
+end

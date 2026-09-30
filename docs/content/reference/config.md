@@ -493,7 +493,7 @@ Message-body and chrome prefs (command palette → **Settings: Display**). Omitt
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `detail_pane` | string | `"request"` | Which pane a freshly-opened History flow shows first: `"request"` or `"response"` |
-| `history_time_format` | string | `"absolute"` | History list time column: `"absolute"` (MM-DD HH:MM:SS) or `"relative"` (3s/5m/2h) |
+| `history_time_format` | string | `"absolute"` | History list time column: `"absolute"` (MM-DD HH:MM:SS, just HH:MM:SS on a narrow terminal) or `"relative"` (3s/5m/2h) |
 | `show_gutter` | bool | `true` | Line-number gutter on the message body views |
 | `wrap_lines` | bool | `true` | Soft-wrap a line too wide for a message pane onto continuation rows (the gutter numbers the first). `false` draws one row per line and scrolls sideways instead, following the caret |
 | `preview_body_kib` | integer | `64` | How many body bytes the History list preview reads (display only, not the capture limit) |

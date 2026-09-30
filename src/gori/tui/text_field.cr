@@ -210,6 +210,16 @@ module Gori::Tui
       true
     end
 
+    # ^U — delete from the caret back to the start of the line as one undo step.
+    def delete_to_start : Bool
+      return false if @caret == 0
+      push_undo
+      @sel.clear_selection
+      @value = @value[@caret..]
+      @caret = 0
+      true
+    end
+
     # See `TextArea#word_char?` — the two must agree, or ⌥←/→ and a double-click would
     # disagree about where a word ends in the same value.
     private def word_char?(c : Char) : Bool

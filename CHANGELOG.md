@@ -159,6 +159,8 @@
 - Sequencer: random UUIDv4 tokens rate Secure instead of Weak or Critical, since a column confined to a few values (the variant nibble) is now treated as structure and credited its own entropy (#1198)
 - Fuzzer: auto-mark wraps a whole JSON number, exponent included, so `1e5` no longer sends every payload with a trailing `e5` (#1205)
 - Fuzzer: `--max-requests` / `max_requests` now bounds a race too, refusing a larger group (warm-ups included) before any dial instead of sending it whole, and the huge-run gate counts the requests a capped run can send rather than its candidates (#1204, #1209)
+- TUI: at 80–110 columns the History detail header stays inside its border, History drops TIME's date before it narrows PATH, a tab bar with tabs hidden past its right end shows `›`, and a value the companion covers ends in `…` instead of reading as a shorter number (#1376)
+- TUI: filter bars take `Ctrl-A`/`Ctrl-E`/`Ctrl-U`/`Ctrl-W`, a Miner run that finds nothing says "done — nothing found", the Repeater send toast shows the same `519µs` as its pane, the setup wizard names the address a `-l`/`-p` flag binds this run to, and the Sitemap keeps a query-folded path in order among its siblings (#1379)
 
 ## v0.7.1
 

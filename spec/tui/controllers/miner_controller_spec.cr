@@ -108,4 +108,33 @@ describe MinerController do
       end
     end
   end
+
+  # #1379: the start toast says "watch the bottom bar", and under the default "when found" an
+  # empty run then said nothing there at all.
+  describe "a finished run with nothing found" do
+    it "says so on the bottom bar under the default notify mode" do
+      root = File.tempname("gori-miner-done")
+      Dir.mkdir_p(root)
+      project = Gori::ProjectRegistry.new(root).temp("miner-done")
+      session = Gori::Session.open(Gori::Config.new(listen: "127.0.0.1", port: 0),
+        Gori::Proxy::Tls::CertAuthority.load_or_create(MINER_CA), Gori::Verbs.registry, project)
+      begin
+        session.store.insert_miner_session("https://shop.test",
+          "GET /login HTTP/1.1\r\nHost: shop.test\r\n\r\n".to_slice, false, nil, "{}", nil, 0).should be > 0
+        host = FakeHost.new(session)
+        ctl = MinerController.new(host)
+        view = ctl.current_view.not_nil!
+        view.config.notify.when_found?.should be_true
+        progress = Gori::Miner::Progress.new(names_total: 10_i64, names_done: 10_i64, sent: 12_i64,
+          found: 0, errors: 0_i64)
+        ctl.@mine_events.send({view, Gori::Miner::DoneEvent.new(progress, false).as(Gori::Miner::Event)})
+        ctl.drain_events.should be_true
+        host.statuses.last.should start_with("Miner: done — nothing found on ")
+        host.notifications.all.should be_empty # the notification centre stays gated
+      ensure
+        session.close
+        FileUtils.rm_rf(root) if Dir.exists?(root)
+      end
+    end
+  end
 end
