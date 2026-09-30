@@ -86,7 +86,8 @@ module Gori
     # not the aggregate. A DELETE can take a flag the other way (the last flow on an origin
     # gone), and the only honest answer to that is the aggregate again: flow ids are never
     # reused (V39), so rows were deleted exactly when the count grew by less than the newest id
-    # did — which holds for a peer's delete too, where no in-process counter would.
+    # did, or the newest id itself went DOWN (the newest flow deleted: both fall by one) —
+    # which holds for a peer's delete too, where no in-process counter would.
     def js_ref_nodes(limit : Int32 = SITEMAP_MAX) : {Array(JsRefNode), Bool}
       print = js_ref_fingerprint
       flows_now = @db.query_one("SELECT COALESCE(MAX(id), 0), COUNT(*) FROM flows", as: {Int64, Int64})
@@ -122,7 +123,7 @@ module Gori
 
     # Whether any flow was deleted between two {newest id, row count} readings of `flows`.
     private def flows_deleted?(before : {Int64, Int64}, now : {Int64, Int64}) : Bool
-      (now[1] - before[1]) < (now[0] - before[0])
+      now[0] < before[0] || (now[1] - before[1]) < (now[0] - before[0])
     end
 
     private def js_ref_aggregate(limit : Int32) : {Array(JsRefNode), Bool}

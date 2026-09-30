@@ -444,6 +444,23 @@ describe Gori::JsRefs do
       end
     end
 
+    # The newest flow deleted moves the id and the count down together, so the "count grew less
+    # than the id" test alone does not see it.
+    it "clears origin_captured when the deleted flow on that origin was the newest one" do
+      with_store do |store|
+        jr_flow(store, "/a.js", %(fetch("http://shop.test:8080/x")))
+        JR.scan(store)
+        img = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "shop.test", port: 8080, method: "GET", target: "/img.png",
+          http_version: "HTTP/1.1", head: "GET /img.png HTTP/1.1\r\nHost: shop.test\r\n\r\n".to_slice,
+          source: Gori::FlowSource::Kind::Proxy))
+        store.flush
+        store.js_ref_nodes[0].find!(&.port.==(8080)).origin_captured.should be_true
+        store.delete_flow(img).should be_true # the newest flow, carrying no references
+        store.js_ref_nodes[0].find!(&.port.==(8080)).origin_captured.should be_false
+      end
+    end
+
     it "says whether the host has traffic, and follows new scans and deletes through its memo" do
       with_store do |store|
         a = jr_flow(store, "/a.js", %(fetch("/api/one");fetch("https://other.test/x")))
