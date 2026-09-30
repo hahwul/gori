@@ -138,6 +138,15 @@ describe "gori run issues — the text listing" do
 end
 
 describe "gori run issues --format json" do
+  it "JSON-escapes embedded NUL bytes in issue notes" do
+    body = String.new(Bytes[0x62, 0x65, 0x66, 0x6f, 0x72, 0x65, 0x00, 0x61, 0x66, 0x74, 0x65, 0x72])
+    output = Gori::Issues::Export.issue_json(
+      issue(1_i64, "NUL notes", Gori::Store::Severity::Low, nil, nil, body))
+
+    output.should contain("\\u0000")
+    JSON.parse(output)["notes"].as_s.to_slice.should eq(body.to_slice)
+  end
+
   it "serialises issues with the documented fields" do
     issues = [
       issue(1_i64, "XSS", Gori::Store::Severity::High, "shop.test", 13_i64, "reflected",

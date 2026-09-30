@@ -103,12 +103,119 @@ module Gori
       # — a response-side advisory has to be able to leave the request side's alone, so
       # `Store#update_one` only writes the column when this is non-nil.
       getter advisory : String?
+      # The interim 1xx responses the origin sent before `head`, or nil when it sent none —
+      # which is nearly every exchange. See `Interims`.
+      getter interims : Interims?
 
       def initialize(@flow_id, @status, @head, @body = nil, @reason = nil,
                      @content_type = nil, @ttfb_us = nil, @duration_us = nil,
                      @state = FlowState::Complete, @error = nil,
                      @body_truncated = false, @body_size = nil, @content_encoding = nil,
-                     @advisory = nil)
+                     @advisory = nil, @interims = nil)
+      end
+    end
+
+    # The interim (1xx) responses an origin sent before a flow's final one (RFC 9110 §15.2):
+    # a `100 Continue`, a `103 Early Hints`. The proxy relays each to the client byte-exact and
+    # reads on for the final response, and until this was kept the capture held only that final
+    # head — no surface could tell an interim had been sent at all.
+    #
+    # Stored beside the flow (`flow_interims`, V45), in wire order, and NOT prepended to
+    # `response_head`: every reader of that column parses it as ONE response (status, framing,
+    # content type, HAR, the Repeater seed, the cache classifier), and a 103 in front of a 200
+    # would make every one of them read the 103.
+    #
+    # Bounded, because the origin decides how many to send: the kept heads are a PREFIX of the
+    # ones that arrived — the first `MAX_KEPT` that fit in `MAX_BYTES`, the first one always,
+    # which is no larger than the head cap a final response already has. From the first head
+    # that does not fit, every later one is only counted in `omitted`; `accepting?` lets a
+    # caller that has to BUILD a head (h2 synthesizes one) skip the build once that point is
+    # reached.
+    class Interims
+      MAX_KEPT  = 16
+      MAX_BYTES = 64 * 1024
+      # The longest run of interims anyone counts. h1 refuses a longer run outright
+      # (`Proxy::ClientConn::MAX_INTERIM` is this); h2 relays frames it cannot refuse, so its
+      # capture stops counting here and says so instead (`saturated?`).
+      MAX_RUN = 64
+
+      # One interim response head: its status, its octets exactly as they arrived (an h2
+      # interim is the synthesized head `HeadCodec` gives any h2 response), and whether gori
+      # passed it on to the client. It does not always: RFC 9110 §15.2 forbids forwarding a
+      # 1xx to an HTTP/1.0 client, and a client can be gone before the write lands.
+      record Head, status : Int32, head : Bytes, relayed : Bool = true do
+        def relayed? : Bool
+          relayed
+        end
+      end
+
+      getter heads : Array(Head)
+      # How many interims arrived past the caps and were not kept.
+      getter omitted : Int32
+
+      @bytes : Int32
+
+      def initialize(@heads = [] of Head, @omitted = 0)
+        @bytes = @heads.sum(&.head.size)
+      end
+
+      # Would the next head still be considered for keeping? False once one has been omitted.
+      def accepting? : Bool
+        @omitted == 0 && @heads.size < MAX_KEPT && @bytes < MAX_BYTES
+      end
+
+      def add(status : Int32, head : Bytes, relayed : Bool = true) : Nil
+        if accepting? && (@heads.empty? || @bytes + head.size <= MAX_BYTES)
+          @heads << Head.new(status, head, relayed)
+          @bytes += head.size
+        else
+          omit
+        end
+      end
+
+      # Has this log counted `MAX_RUN` interims? A caller that cannot refuse the run stops there.
+      def saturated? : Bool
+        @heads.size + @omitted >= MAX_RUN
+      end
+
+      # Count one interim that is not kept, without its bytes.
+      def omit : Nil
+        @omitted += 1
+      end
+
+      def empty? : Bool
+        @heads.empty? && @omitted == 0
+      end
+
+      # Every kept head back to back, in arrival order — relayed or not.
+      def wire : Bytes
+        io = IO::Memory.new(@bytes)
+        @heads.each { |h| io.write(h.head) }
+        io.to_slice
+      end
+
+      # The kept heads the client actually received, back to back: what went out ahead of the
+      # final head.
+      def relayed_wire : Bytes
+        io = IO::Memory.new(@bytes)
+        @heads.each { |h| io.write(h.head) if h.relayed? }
+        io.to_slice
+      end
+
+      # The sentence a surface prints when the caps cut the list, or nil when nothing was cut.
+      def omitted_note : String?
+        return nil if @omitted == 0
+        "the origin sent #{@heads.size + @omitted} interim 1xx responses; gori kept the first " \
+        "#{@heads.size} (at most #{MAX_KEPT}, #{MAX_BYTES // 1024} KiB) and did not record the other #{@omitted}"
+      end
+
+      # The sentence a surface prints when a kept head never reached the client, or nil.
+      def unrelayed_note : String?
+        n = @heads.count { |h| !h.relayed? }
+        return nil if n == 0
+        "#{n} of the recorded interim 1xx response#{@heads.size == 1 ? "" : "s"} " \
+        "#{n == 1 ? "was" : "were"} not relayed to the client (an HTTP/1.0 client is never sent one, " \
+        "and a client can close before it arrives)"
       end
     end
 

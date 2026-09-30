@@ -7,16 +7,17 @@ require "json"
 
 describe "gori run notes — listing rows" do
   it "formats a row: 1-based index, title, '*' for the active note" do
-    row = Gori::CLI::Output.note_row_text(1, "scope\nmore", current: true)
-    row.should contain("* 2")                                                           # 0-based 1 → shown as #2
-    row.should contain("scope")                                                         # title = first non-blank line
-    row.should contain("(2 lines, ")                                                    # plural
-    Gori::CLI::Output.note_row_text(0, "x", current: false).should contain(" 1")        # no '*'
-    Gori::CLI::Output.note_row_text(0, "x", current: false).should contain("(1 line, ") # singular
+    row = Gori::CLI::Output.note_row_text(1, 42_i64, "scope\nmore", current: true)
+    row.should contain("* 2")   # 0-based 1 → shown as #2
+    row.should contain("scope") # title = first non-blank line
+    row.should contain("id 42")
+    row.should contain("(id 42, 2 lines, ")                                                          # plural
+    Gori::CLI::Output.note_row_text(0, 7_i64, "x", current: false).should contain(" 1")              # no '*'
+    Gori::CLI::Output.note_row_text(0, 7_i64, "x", current: false).should contain("(id 7, 1 line, ") # stable id and singular
   end
 
   it "falls back to 'note N' for a blank note" do
-    Gori::CLI::Output.note_row_text(2, "   \n\t", current: false).should contain("note 3")
+    Gori::CLI::Output.note_row_text(2, 9_i64, "   \n\t", current: false).should contain("note 3")
     Gori::CLI::Output.note_label(2, "   \n\t").should eq("note 3")
     Gori::CLI::Output.note_label(0, "Title\nbody").should eq("Title")
   end
@@ -25,7 +26,7 @@ describe "gori run notes — listing rows" do
     # The size is a storage figure; a multi-byte note reported in characters would
     # under-report by 2-3× on any non-ASCII corpus.
     text = "데이터" # 3 chars, 9 bytes
-    Gori::CLI::Output.note_row_text(0, text, current: false).should contain("9B")
+    Gori::CLI::Output.note_row_text(0, 3_i64, text, current: false).should contain("9B")
   end
 end
 

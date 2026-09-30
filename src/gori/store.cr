@@ -1662,6 +1662,7 @@ module Gori
         c.exec("DELETE FROM js_refs WHERE flow_id <= ?", cutoff)
         c.exec("DELETE FROM js_ref_scans WHERE flow_id <= ?", cutoff)
         c.exec("DELETE FROM intercept_originals WHERE flow_id <= ?", cutoff)
+        c.exec("DELETE FROM flow_interims WHERE flow_id <= ?", cutoff)
         c.exec("DELETE FROM flows WHERE id <= ?", cutoff)
         # Read changes() IMMEDIATELY after the flows delete — it reports the most recent
         # statement, so any query in between (including the h2 reaping below) would replace it.
@@ -2077,11 +2078,27 @@ module Gori
         resp.state.value, resp.ttfb_us, resp.duration_us, resp.error,
         resp.body_truncated? ? 1 : 0, resp.advisory,
         resp.state == FlowState::Complete ? 1 : 0, resp.content_type, resp.status, resp.flow_id)
+      write_interims(conn, resp.flow_id, resp.interims)
       # `fts_dirty = 1` again: the response side just appeared (or changed), so whatever the
       # indexer wrote for this row is stale. Re-dirtying an already-dirty row is a no-op, so
       # the common case — response landing before the indexer ever reached the row — is
       # indexed exactly ONCE, with both sides, instead of the old empty-insert + delete +
       # re-insert. That also makes a double update_response idempotent (last write wins).
+    end
+
+    # The interim 1xx heads that preceded this response (V45), in the response's own
+    # transaction. Nothing at all for the common flow that had none; a response that carries
+    # some replaces whatever an earlier write of the same flow left, as the row itself does.
+    # An empty head is skipped rather than bound: an empty `Bytes` can bind as NULL, and one
+    # NOT NULL failure would fail the writer's whole batch.
+    private def write_interims(conn : DB::Connection, flow_id : Int64, interims : Interims?) : Nil
+      return unless interims && !interims.heads.empty?
+      conn.exec("DELETE FROM flow_interims WHERE flow_id = ?", flow_id)
+      interims.heads.each_with_index do |h, seq|
+        next if h.head.empty?
+        conn.exec("INSERT INTO flow_interims (flow_id, seq, status, head, relayed, omitted) VALUES (?, ?, ?, ?, ?, ?)",
+          flow_id, seq, h.status, h.head, h.relayed? ? 1 : 0, interims.omitted)
+      end
     end
 
     # Skip body FTS for clearly-binary content types (images/media/archives/
@@ -2329,7 +2346,7 @@ module Gori
     private def read_issue(rs : DB::ResultSet) : Issue
       Issue.new(
         rs.read(Int64), rs.read(Int64), rs.read(Int64), rs.read(String),
-        Severity.new(rs.read(Int32)), rs.read(String?), rs.read(Int64?), rs.read(String),
+        Severity.new(rs.read(Int32)), rs.read(String?), rs.read(Int64?), String.new(rs.read(Bytes)),
         Status.new(rs.read(Int32)), rs.read(String?))
     end
 

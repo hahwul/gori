@@ -96,6 +96,12 @@ module Gori::Proxy::H2
       # event the way `Repeater::H2Engine`'s `late_interim` clause does: one wire fact, one
       # sentence, whichever surface the operator is reading.
       property trailer_interim : Int32? = nil
+      # The interim (1xx) heads a later final status block REPLACED, in arrival order — the
+      # h1 path's `skip_interim_responses` record, for the extra HEADERS an h2 origin sends a
+      # 103 in. Response side only; nil on almost every stream. See `Store::Interims`.
+      property interims : Store::Interims? = nil
+      # More interims arrived than `record_interim` counts (`Interims::MAX_RUN`); the flow says so.
+      property? interim_overflow = false
 
       # File a regular field name from a trailing block, once per name.
       def add_trailer_name(name : String) : Nil
@@ -487,6 +493,8 @@ module Gori::Proxy::H2
         # REPLACES the interim rather than concatenating (which would leave the 1xx
         # :status first and mis-report the flow's status). This also bounds a stream's
         # header list against a flood of repeated interim HEADERS blocks.
+        # The interim being replaced is kept for the record first — see `record_interim`.
+        record_interim(side, existing) if existing
         side.headers = decoded
         side.header_bytes = added
         # A final status block REPLACES an interim one, so anything recorded as a trailer
@@ -499,6 +507,23 @@ module Gori::Proxy::H2
       # keeps processing the connection) — otherwise the next HEADERS/CONTINUATION
       # fragment would append to a stale block and decode garbage.
       side.header_buf.clear
+    end
+
+    # Keep an interim head that a later status block is replacing, as the synthesized head every
+    # h2 response is stored as. The build is paid only while `Interims` is still keeping heads;
+    # past that the block is just counted. The count stops at `Interims::MAX_RUN` — h1's
+    # `MAX_INTERIM`, the run h1 refuses outright — and a flood beyond it is named once
+    # (`Side#interim_overflow`) instead of counted for as long as the origin cares to send them. Relayed: the gate forwards an
+    # interim as it arrives (it never holds one, see `StreamGate`).
+    private def record_interim(side : Side, head : Array({String, String})) : Nil
+      interims = side.interims ||= Store::Interims.new
+      if interims.saturated?
+        side.interim_overflow = true
+      elsif interims.accepting?
+        interims.add(pseudo(head, ":status").try(&.to_i?) || 0, synth_response_head(head))
+      else
+        interims.omit
+      end
     end
 
     # File a trailing block's field names, BEFORE the merge dissolves them into the head —
@@ -660,6 +685,10 @@ module Gori::Proxy::H2
       content_type = header_value(headers, "content-type")
       content_encoding = header_value(headers, "content-encoding")
       head = synth_response_head(headers, stream.resp.trailer_names)
+      if stream.resp.interim_overflow?
+        stream.advise("the origin sent more than #{Store::Interims::MAX_RUN} interim 1xx header blocks " \
+                      "before this response; gori stopped counting them there")
+      end
       now = Time.instant
       duration_us = (now - stream.started_at).total_microseconds.to_i64
       ttfb_us = stream.resp_first_at.try { |t| (t - stream.started_at).total_microseconds.to_i64 }
@@ -667,7 +696,8 @@ module Gori::Proxy::H2
         flow_id: flow_id, status: status, head: head, body: body,
         body_truncated: cap.truncated?, body_size: cap.total,
         content_type: content_type, content_encoding: content_encoding, state: state, error: error,
-        ttfb_us: ttfb_us, duration_us: duration_us, advisory: advisory_of(stream)))
+        ttfb_us: ttfb_us, duration_us: duration_us, advisory: advisory_of(stream),
+        interims: stream.resp.interims))
     end
 
     # A trailing header block carried a pseudo-header, which RFC 9113 §8.1 forbids in a

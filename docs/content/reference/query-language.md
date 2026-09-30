@@ -209,7 +209,7 @@ Every filter bar shares the grammar above (fields, comparisons, `~` regex, `AND`
 | Surface | Fields |
 |---------|--------|
 | History, `gori run history`, MCP | The full table above |
-| Sitemap | The same, plus `tag:` for per-node path memos |
+| Sitemap, `gori run sitemap`, MCP `list_sitemap` | The same, plus `tag:` for per-node path memos: a case-insensitive substring of the memo, matching the tagged path, everything under it and the paths leading to it; `-tag:` drops that subtree, and every `tag:` term is ANDed with the rest of the query |
 | Colour rules (Colormarker) | The same. A colour rule takes the query the History bar takes |
 | Intercept catch condition, extract-rule condition | `host`, `path`, `url`, `method`, `scheme`, `status`, `proto`, `header`, `body`. **Every other field is refused** (see below) |
 | Probe | `severity` (`sev`), `status` (`st`), `category` (`cat`), `host`, `code` |

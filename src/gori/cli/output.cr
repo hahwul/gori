@@ -1141,13 +1141,14 @@ module Gori
         Notes.title(text) || "note #{idx + 1}"
       end
 
-      # "* 1  title  (12 lines, 340B)" — 1-based index, '*' marks the active note.
-      def self.note_row_text(idx : Int32, text : String, current : Bool) : String
+      # "* 1  title  (id 7, 12 lines, 340B)" — 1-based index, '*' marks the active note,
+      # and the stable id is shown for commands such as `links --note`.
+      def self.note_row_text(idx : Int32, id : Int64, text : String, current : Bool) : String
         lines = Notes.line_count(text)
         String.build do |io|
           io << (current ? '*' : ' ') << ' '
           io << (idx + 1) << "  " << note_label(idx, text)
-          io << "  (" << lines << (lines == 1 ? " line, " : " lines, ") << human_size(text.bytesize.to_i64) << ')'
+          io << "  (id " << id << ", " << lines << (lines == 1 ? " line, " : " lines, ") << human_size(text.bytesize.to_i64) << ')'
         end
       end
 

@@ -58,7 +58,8 @@ module Gori
                       state : Store::FlowState = Store::FlowState::Complete,
                       error : String? = nil,
                       body_truncated : Bool = false, body_size : Int64? = nil,
-                      advisory : String? = nil) : Store::CapturedResponse
+                      advisory : String? = nil,
+                      interims : Store::Interims? = nil) : Store::CapturedResponse
       Store::CapturedResponse.new(
         flow_id: flow_id,
         status: resp.status,
@@ -74,13 +75,15 @@ module Gori
         body_truncated: body_truncated,
         body_size: body_size,
         advisory: advisory,
+        interims: interims,
       )
     end
 
     # A flow the human deliberately dropped via Intercept (P4). Recorded as
     # Aborted so it's visible in History distinct from upstream errors.
     def self.aborted_response(flow_id : Int64, message : String, *,
-                              ttfb_us : Int64? = nil, duration_us : Int64? = nil) : Store::CapturedResponse
+                              ttfb_us : Int64? = nil, duration_us : Int64? = nil,
+                              interims : Store::Interims? = nil) : Store::CapturedResponse
       Store::CapturedResponse.new(
         flow_id: flow_id,
         status: 0,
@@ -90,6 +93,7 @@ module Gori
         duration_us: duration_us,
         state: Store::FlowState::Aborted,
         error: message,
+        interims: interims,
       )
     end
 
@@ -110,7 +114,8 @@ module Gori
     # difference between a NULL head (Pending) and an EMPTY one (Error/Aborted) — the R4-F3
     # case in `spec/export/har_spec.cr`.
     def self.error_response(flow_id : Int64, message : String, duration_us : Int64? = nil,
-                            head : Bytes = Bytes.new(0)) : Store::CapturedResponse
+                            head : Bytes = Bytes.new(0),
+                            interims : Store::Interims? = nil) : Store::CapturedResponse
       Store::CapturedResponse.new(
         flow_id: flow_id,
         status: 0,
@@ -119,6 +124,7 @@ module Gori
         duration_us: duration_us,
         state: Store::FlowState::Error,
         error: message,
+        interims: interims,
       )
     end
   end

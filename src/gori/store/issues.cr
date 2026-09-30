@@ -4,6 +4,11 @@ module Gori
   class Store
     # --- issues ------------------------------------------------------------
 
+    # Issue notes can arrive as arbitrary bytes through `--notes-file` or `--notes-stdin`.
+    # SQLite stores the whole TEXT value, but crystal-sqlite3's String reader stops at NUL;
+    # CAST keeps the read length-aware without changing existing rows or their storage class.
+    private ISSUE_NOTES_COL = "CAST(notes AS BLOB) AS notes"
+
     # 0 == not persisted. Three callers guard on that, so the id must come from the
     # COMMITTED signal, not from the local the closure captured: the closure runs inside
     # the transaction, but the batch can still roll back afterwards (a COMMIT-time
@@ -181,7 +186,7 @@ module Gori
     def issues : Array(Issue)
       list = [] of Issue
       @db.query(<<-SQL) do |rs|
-        SELECT id, created_at, updated_at, title, severity, host, flow_id, notes, status, cvss
+        SELECT id, created_at, updated_at, title, severity, host, flow_id, #{ISSUE_NOTES_COL}, status, cvss
         FROM issues ORDER BY severity DESC, created_at DESC
         SQL
         rs.each { list << read_issue(rs) }
@@ -190,7 +195,7 @@ module Gori
     end
 
     def get_issue(id : Int64) : Issue?
-      @db.query("SELECT id, created_at, updated_at, title, severity, host, flow_id, notes, status, cvss FROM issues WHERE id = ?", id) do |rs|
+      @db.query("SELECT id, created_at, updated_at, title, severity, host, flow_id, #{ISSUE_NOTES_COL}, status, cvss FROM issues WHERE id = ?", id) do |rs|
         return read_issue(rs) if rs.move_next
       end
       nil

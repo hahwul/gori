@@ -50,7 +50,7 @@ module Gori::Tui
     end
 
     # The QL fields meaningful for the endpoint tree. The same `/` query language History
-    # takes, plus `tag:` — a Sitemap-local field (handled here, not in the shared QL) that
+    # takes, plus `tag:` — a Sitemap field (`Sitemap.split_tag_terms`, not the shared QL) that
     # filters the tree by a node's path memo.
     #
     # Written out rather than read from `QL::FIELDS` (which History's own list now IS), and
@@ -236,9 +236,10 @@ module Gori::Tui
     property? searching : Bool = false
 
     def prepare_reload : ReloadPlan?
-      # `tag:`/`-tag:` are Sitemap-local (the shared QL has no tag column): split them
+      # `tag:`/`-tag:` are the Sitemap's own (the shared QL has no tag column): split them
       # out, hand the residual to QL.parse, and apply the tag filter to the built tree.
-      positives, negatives, residual = split_tag_terms(@query)
+      terms = Sitemap.split_tag_terms(@query)
+      residual = terms.residual
       # `scope:` compiles here exactly as it does in History — this is the same QL over the same
       # flows, and the tree is built from what it returns. NOT the same question `--in-scope`
       # asks on this surface, which selects whole HOSTS via `host_in_scope?` (see
@@ -262,7 +263,7 @@ module Gori::Tui
         @loaded = true
         return
       end
-      ReloadPlan.new(positives, negatives, combined, @js_refs && !residual_has_terms?(residual))
+      ReloadPlan.new(terms.positives, terms.negatives, combined, @js_refs && !residual_has_terms?(residual))
     end
 
     # The flow filter a query's QL half compiles to — the scope lens, the hide-static lens AND the
@@ -310,7 +311,7 @@ module Gori::Tui
       # export dropped it.
       remember_origins
       Sitemap.stamp_tags!(@hosts, tags)
-      filter_by_tags(plan.positives, plan.negatives)
+      Sitemap.filter_by_tags!(@hosts, plan.positives, plan.negatives)
       if @grouping
         # Opaque ids first, then numeric runs — the two passes partition the children.
         @hosts.each { |h| Sitemap.fold_templates!(h) }
@@ -419,7 +420,7 @@ module Gori::Tui
       want.starts_with?(path) && want[path.size]? == '/'
     end
 
-    # --- tags: filter (stamping lives in Gori::Sitemap.stamp_tags!) ----------
+    # --- tags: filter (stamping and pruning live in Gori::Sitemap) -----------
 
     # A short note explaining a filter that matches nothing because its QL residual is
     # INVALID (vs a valid filter that genuinely has no matches) — surfaced in the
@@ -456,109 +457,11 @@ module Gori::Tui
       Hotkeys.menu_chip(@registry, "sitemap.toggle-static")
     end
 
-    # Split `tag:` terms out of the query. Cut with the SHARED lexer, not `String#split`:
-    # hand-tokenising saw no quotes (`tag:"my tag"` became `tag:"my` + `tag"`) and no
-    # `NOT` (`NOT tag:done` filed `done` as a POSITIVE and then blanked the tree on the
-    # leftover `NOT`), while the bar above it was already highlighting all of that as
-    # real grammar. Negation now rides the same `Term#negate?` every other filter uses,
-    # so `-tag:x` and `NOT tag:x` are finally the same thing here too.
-    private def split_tag_terms(query : String) : {Array(String), Array(String), String}
-      positives = [] of String
-      negatives = [] of String
-      # A half-typed `tag:` (no value yet) stays in the residual, exactly as before, so
-      # the tree doesn't blank out mid-keystroke.
-      taken, residual = FilterAst.partition(query) { |t| !tag_token_value(t.text).nil? }
-      taken.each { |t| (t.negate? ? negatives : positives) << tag_token_value(t.text).not_nil! }
-      {positives, negatives, residual}
-    end
-
-    # `reject_empty?` reads a non-blank query that compiled to nothing as "every term was
-    # invalid". That is right for what the USER typed, but the residual here is what is
-    # LEFT after the tag terms were cut out, so `tag:a OR tag:b` handed it the bare word
-    # `OR` — no terms at all — and the whole sitemap blanked behind an "invalid filter"
-    # note. Only a residual that still carries a term can be invalid.
+    # `tag:` terms are cut and matched by the engine (`Sitemap.split_tag_terms`,
+    # `Sitemap.filter_by_tags!`) that `gori run sitemap` and MCP `list_sitemap` read the same
+    # query through; this view only keeps the residual's own questions.
     private def residual_has_terms?(residual : String) : Bool
-      !FilterAst.terms(FilterAst.parse(residual)).empty?
-    end
-
-    # The keyword of a `tag:x` term, or nil if this isn't one (or has no value yet).
-    private def tag_token_value(text : String) : String?
-      return nil unless text.downcase.starts_with?("tag:")
-      v = text[4..].downcase
-      v.empty? ? nil : v
-    end
-
-    # Prune the tree to tag matches: a node survives a positive term if it (or an
-    # ancestor) carries a matching tag, or any descendant does (so a tagged folder
-    # shows its subtree + the path to it). A negative term drops the matched subtree.
-    private def filter_by_tags(positives : Array(String), negatives : Array(String)) : Nil
-      @hosts.select! { |h| keep_for_tags?(h, positives, false) } unless positives.empty?
-      @hosts.select! { |h| !exclude_for_tags?(h, negatives) } unless negatives.empty?
-    end
-
-    # Returns true if `node` survives; prunes non-surviving children in place. `inside`
-    # = an ancestor already matched all positives ⇒ keep the whole subtree.
-    #
-    # Two explicit passes rather than native recursion (see `Sitemap.post_order` for the
-    # SIGSEGV this class of walk caused): this one threads `within` DOWN and combines
-    # `kept_child` UP, which no single-direction work-list expresses. Pass 1 collects nodes
-    # parent-before-child with their `within`; pass 2 walks that list in REVERSE, so every
-    # node is pruned only after its whole subtree — exactly the order the recursion had.
-    # `verdict` is keyed by Node identity (`Sitemap::Node` overrides neither `==` nor
-    # `hash`, so Hash falls back to reference equality).
-    private def keep_for_tags?(root : Node, positives : Array(String), inside : Bool) : Bool
-      order = [{root, inside || tag_has_all?(root, positives)}]
-      i = 0
-      while i < order.size
-        node, within = order[i]
-        node.children.each { |c| order << {c, within || tag_has_all?(c, positives)} }
-        i += 1
-      end
-
-      verdict = {} of Node => Bool
-      i = order.size - 1
-      while i >= 0
-        node, within = order[i]
-        kept_child = false
-        node.children.select! do |c|
-          keep = verdict[c]
-          kept_child ||= keep
-          keep
-        end
-        verdict[node] = within || kept_child
-        i -= 1
-      end
-      verdict[root]
-    end
-
-    # Returns true if `node`'s subtree should be dropped (it carries a negative tag);
-    # otherwise prunes any dropped descendants in place.
-    #
-    # Iterative for the same reason as `keep_for_tags?`. A node that matches is dropped
-    # whole and never descended into, so this is just "reject matching children, then
-    # descend into the survivors" — no verdict has to travel back up.
-    private def exclude_for_tags?(root : Node, negatives : Array(String)) : Bool
-      return true if tag_has_any?(root, negatives)
-      stack = [root]
-      while node = stack.pop?
-        node.children.reject! { |c| tag_has_any?(c, negatives) }
-        node.children.each { |c| stack << c }
-      end
-      false
-    end
-
-    private def tag_has_all?(node : Node, keywords : Array(String)) : Bool
-      t = node.tag
-      return false unless t
-      down = t.downcase
-      keywords.all? { |kw| down.includes?(kw) }
-    end
-
-    private def tag_has_any?(node : Node, keywords : Array(String)) : Bool
-      t = node.tag
-      return false unless t
-      down = t.downcase
-      keywords.any? { |kw| down.includes?(kw) }
+      Sitemap.residual_terms?(residual)
     end
 
     def move(delta : Int32) : Nil
@@ -912,7 +815,7 @@ module Gori::Tui
     # empty for that reason, and a param scan of EVERY flow behind it would be the match-all
     # this view refuses in `prepare_reload`.
     def params_filter : QL::Filter?
-      _, _, residual = split_tag_terms(@query)
+      residual = Sitemap.split_tag_terms(@query).residual
       flow_filter_of(residual, QL.parse(residual, scope: @scope.try(&.ql_lens)))
     end
 

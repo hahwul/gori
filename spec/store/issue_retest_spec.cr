@@ -29,6 +29,26 @@ private def result(step : Gori::Store::RetestStep, outcome : Gori::Store::Retest
 end
 
 describe "Store retest steps (V27)" do
+  it "round-trips embedded NUL bytes in stored and copied assertions" do
+    with_store do |store|
+      iid = issue(store)
+      assertion = String.new(Bytes[0x6a, 0x73, 0x6f, 0x6e, 0x3a, 0x64, 0x61, 0x74, 0x61,
+        0x2e, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x3d, 0x00, 0x74, 0x61, 0x69, 0x6c])
+      Gori::Retest::Assertion.parse(assertion).is_a?(String).should be_false
+      id, status = store.add_retest_step(iid, :variant, Gori::Store::LinkRefKind::Repeater,
+        repeater(store, "r"), assertion)
+      status.ok?.should be_true
+      step = store.get_retest_step(id).not_nil!
+      step.assertion.to_slice.should eq(assertion.to_slice)
+
+      run_id, run_status = store.record_retest_run(iid, 1_i64, 2_i64,
+        Gori::Store::RetestVerdict::Pass, Gori::Retest::Tally.new(1, 1, 0, 0, 0, 0, 0),
+        [result(step, Gori::Store::RetestOutcome::Pass)])
+      run_status.ok?.should be_true
+      store.retest_run_steps(run_id).first.not_nil!.assertion.to_slice.should eq(assertion.to_slice)
+    end
+  end
+
   it "appends steps at 1..N and reads them back in position order" do
     with_store do |store|
       iid = issue(store)
