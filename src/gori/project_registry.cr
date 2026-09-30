@@ -349,12 +349,20 @@ module Gori
       # Persist the verbatim display name so a later `list` shows "My Project", not
       # the lossy slug "my-project".
       #
-      # Durably, because this REPLACES an existing name on a reopen and `File.write`
-      # truncates first: a crash or a full disk between the two leaves the picker showing a
-      # half-written name, or none. Same helper the settings/CA/marker writes use — the
-      # sidecars were the last user-visible state still on a truncating write.
-      DurableFile.write(File.join(dir, NAME_FILE), display,
-        perm: File::Permissions.new(0o600)) rescue nil
+      # A reopen keeps the name it already has: the match is case-insensitive, so
+      # `create foo` reopening `Foo` used to report "reopened" while quietly renaming it —
+      # that is `rename`'s job. Only a reopened legacy project with no name sidecar gets one.
+      #
+      # Durably, because `File.write` truncates first: a crash or a full disk between the two
+      # leaves the picker showing a half-written name, or none. Same helper the
+      # settings/CA/marker writes use.
+      stored = reopened ? display_name(dir, "") : ""
+      if stored.empty?
+        DurableFile.write(File.join(dir, NAME_FILE), display,
+          perm: File::Permissions.new(0o600)) rescue nil
+      else
+        display = stored
+      end
       write_id_if_absent(dir) # a fresh project gets a stable short id; a reopen keeps its own
       proj = Project.new(display, db_path)
       # Open once even with no description: this creates the DB + runs migrations, and #list

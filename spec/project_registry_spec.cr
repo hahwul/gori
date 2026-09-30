@@ -356,6 +356,20 @@ describe Gori::ProjectRegistry do
     end
   end
 
+  # The slug match is case-insensitive, so `create foo` reopens `Foo` — and used to rewrite its
+  # `.name` to `foo` while reporting "already exists — reopened".
+  it "reopens a project under another letter case without renaming it" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      first = reg.create("Foo")
+      again, created = reg.create_or_reopen("foo")
+      created.should be_false
+      again.dir.should eq(first.dir)
+      again.name.should eq("Foo")
+      reg.list.map(&.name).should eq(["Foo"])
+    end
+  end
+
   it "rejects a blank rename" do
     with_root do |root|
       reg = Gori::ProjectRegistry.new(root)
