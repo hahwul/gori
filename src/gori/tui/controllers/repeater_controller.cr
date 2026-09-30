@@ -459,6 +459,15 @@ module Gori::Tui
       :repeater_response if v.focus == :response
     end
 
+    # "" for the sub-tab on screen, else " · #N label" to end its status line. A batch send over marked sub-tabs drains
+    # one result per tab into the one status line, so a result that is not the focused tab's
+    # used to read as the focused tab's own (a 500 over a pane showing 200).
+    def result_origin(view : RepeaterView) : String
+      return "" if current_repeater_tab.try(&.view.same?(view))
+      idx = @repeaters.index(&.view.same?(view))
+      idx ? " · ##{idx + 1} #{view.label}" : ""
+    end
+
     def view_at(idx : Int32) : RepeaterView?
       (0 <= idx < @repeaters.size) ? @repeaters[idx].view : nil
     end
@@ -1539,10 +1548,11 @@ module Gori::Tui
         # comes back through `ok?` — that is the whole shape #1075 describes — so the success
         # arm is where it actually earns its place.
         head = view.sent_head_unterminated? ? " · #{CLI::Run.unterminated_head_chip}" : ""
+        where = result_origin(view)
         if result.ok?
-          @host.status("sent → #{result.response.try(&.status)} in #{Fmt.dur(result.duration_us)}#{result.incomplete? ? " (incomplete)" : ""}#{evidence_literal_note(view)}#{head}#{note}", :done)
+          @host.status("sent → #{result.response.try(&.status)} in #{Fmt.dur(result.duration_us)}#{result.incomplete? ? " (incomplete)" : ""}#{evidence_literal_note(view)}#{head}#{note}#{where}", :done)
         else
-          @host.status("repeater error: #{result.error}#{head}#{note}", :error)
+          @host.status("repeater error: #{result.error}#{head}#{note}#{where}", :error)
         end
         applied = true
       end
@@ -1561,11 +1571,11 @@ module Gori::Tui
         end
         if result.ok?
           recv = result.messages.count(&.direction.==("in"))
-          @host.status("ws sent: #{recv} received#{result.close_code ? " · closed #{result.close_code}" : ""}#{ws_evidence_literal_note(view)}", :done)
+          @host.status("ws sent: #{recv} received#{result.close_code ? " · closed #{result.close_code}" : ""}#{ws_evidence_literal_note(view)}#{result_origin(view)}", :done)
           # Feed the handshake + captured frames into Probe (WS payload secrets, tech).
           probe_scan_ws_repeater(id, result, tab.flow_id, view) if id
         else
-          @host.status("ws repeater error: #{result.error}", :error)
+          @host.status("ws repeater error: #{result.error}#{result_origin(view)}", :error)
         end
         applied = true
       end

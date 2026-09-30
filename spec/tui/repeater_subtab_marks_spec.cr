@@ -68,6 +68,16 @@ end
 # has its own spec; this one pins what the CONTROLLER does with it: the one target rule, the
 # batch close, and the two things the identity key exists for.
 describe "RepeaterController sub-tab marks" do
+  # A batch send drains every marked tab's result into the one status line; one that is not the
+  # focused tab's names its tab, or a 500 reads as the answer to the request on screen.
+  it "names the sub-tab a drained result belongs to unless it is the focused one" do
+    with_repeaters(%w[a b]) do |c, _, _|
+      c.jump_subtab(0)
+      c.result_origin(c.view_at(0).not_nil!).should eq("")
+      c.result_origin(c.view_at(1).not_nil!).should start_with(" · #2 ")
+    end
+  end
+
   it "targets the active chip until something is marked, then exactly the marks" do
     with_repeaters(%w[a b c d]) do |c, _, _|
       c.jump_subtab(1)
