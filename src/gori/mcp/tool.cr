@@ -41,7 +41,10 @@ module Gori
     #   that rearranges the strip has changed something the human will notice and should be
     #   able to trace. `probe_scan` and `export_openapi` are the call-shaped cases — READ tools
     #   whose `active: true` / `persist: true` (probe_scan) or `output_path` (export_openapi)
-    #   sends or writes — and are decided per call in `Tools#agent_action?`, not here.
+    #   sends or writes — and are decided per call in `Tools#agent_action?`, not here, as is
+    #   `delete_project`, whose default dry run changes nothing and whose confirmed delete is
+    #   the most destructive call on the surface (it never moves the binding, so the post-call
+    #   append lands in the right feed).
     #
     # - `env_refresh` — R2-3: a tool that READS or WRITES the per-project `$KEY` env vars.
     #   Env vars live in a process-global (Settings.project_env_vars) loaded once at bind

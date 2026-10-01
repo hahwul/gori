@@ -893,6 +893,7 @@ module Gori
         return if @courier
         courier = Courier.new(pid: Process.pid.to_i64,
           store: -> { @tools.current_store },
+          feed: -> { @tools.feed_generation.as(Int64?) },
           client: -> { @tools.client_name },
           channels: -> { @channel_declared },
           emit: ->(frame : String) { send(frame) },

@@ -60,14 +60,43 @@ describe "MCP operator_messages (#1090)" do
     with_store do |store|
       t = tools_for(store)
       t.call("operator_messages", JSON.parse("{}"))
+      floor = store.last_event_id
       60.times { store.post_agent_message("noise", "pid:123456789", nil) }
       mine = store.post_agent_message("mine", "pid:#{Process.pid}", nil)
-      j = JSON.parse(t.call("operator_messages", JSON.parse(%({"limit":50}))).text)
+      # With an explicit `since` the page is the page: empty, but it says more is waiting.
+      j = JSON.parse(t.call("operator_messages", JSON.parse(%({"since":#{floor},"limit":50}))).text)
       j["messages"].as_a.should be_empty
+      j["has_more"].as_bool.should be_true
       cur = j["next_cursor"].as_i64
       cur.should be < mine
       j2 = JSON.parse(t.call("operator_messages", JSON.parse(%({"since":#{cur},"limit":50}))).text)
       j2["messages"].as_a.map(&.["text"]).should eq(["mine"])
+      j2["has_more"].as_bool.should be_false
+    end
+  end
+
+  it "reads a bare call on past full pages that hold nothing new" do
+    with_store do |store|
+      t = tools_for(store)
+      t.call("operator_messages", JSON.parse("{}"))
+      60.times { store.post_agent_message("noise", "pid:123456789", nil) }
+      store.post_agent_message("mine", "pid:#{Process.pid}", nil)
+      # The "call it at the start of a turn" shape: no cursor. It used to return [] for good.
+      j = JSON.parse(t.call("operator_messages", JSON.parse(%({"limit":50}))).text)
+      j["messages"].as_a.map(&.["text"]).should eq(["mine"])
+      j2 = JSON.parse(t.call("operator_messages", JSON.parse(%({"limit":1}))).text)
+      j2["messages"].as_a.should be_empty
+    end
+  end
+
+  it "restarts a cursor handed out past this feed's end" do
+    with_store do |store|
+      t = tools_for(store)
+      t.call("operator_messages", JSON.parse("{}"))
+      store.post_agent_message("here", "all", nil)
+      j = JSON.parse(t.call("operator_messages", JSON.parse(%({"since":#{store.last_event_id + 1000}}))).text)
+      j["messages"].as_a.map(&.["text"]).should eq(["here"])
+      j["cursor_reset"].as_bool.should be_true
     end
   end
 

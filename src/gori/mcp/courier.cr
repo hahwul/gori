@@ -59,8 +59,10 @@ module Gori::MCP
                    @claim : Proc(Int64, Bool) = ->(_id : Int64) { true },
                    @release : Proc(Int64, Nil) = ->(_id : Int64) { nil },
                    @expire : Proc(Nil) = -> { nil },
-                   @answered : Proc(Int64, Nil) = ->(_id : Int64) { nil })
+                   @answered : Proc(Int64, Nil) = ->(_id : Int64) { nil },
+                   @feed : Proc(Int64?) = -> { nil.as(Int64?) })
       @cursor = 0_i64
+      @cursor_feed = nil.as(Int64?)
       # The store the cursor was taken against — a REFERENCE, never its object_id: a bare id
       # can be reused by the next store the GC hands out at the same address, and a cursor
       # from one feed applied to another either replays or skips (the bare-id cache trap).
@@ -312,11 +314,18 @@ module Gori::MCP
       end
     end
 
-    # A different store object than the cursor was taken against → start from its end.
+    # A different store object than the cursor was taken against → start from its end — unless
+    # the server's feed generation did not move (`switch_project` to the project already bound:
+    # a new Store over the same feed), where the cursor is still a position. Restarting there
+    # skipped every message posted before the rebind and not yet carried, and the operator's
+    # ring read "left to pick up" for good.
     private def rebase(store : Store) : Nil
       return if @cursor_store.same?(store)
+      feed = @feed.call
+      same_feed = !@cursor_store.nil? && !feed.nil? && feed == @cursor_feed
       @cursor_store = store
-      @cursor = store.last_event_id
+      @cursor_feed = feed
+      @cursor = store.last_event_id unless same_feed
     end
   end
 end

@@ -146,8 +146,11 @@ module Gori
       private def self.from_project(project : Project, registry : ProjectRegistry,
                                     source : String, workspace_root : String? = nil,
                                     auto_created : Bool = false) : Selection
+        # The project's registration when no workspace selected it (`--project`, the env var, the
+        # MRU): `switch_project` reports `reg.workspace_of`, and `project_info` answered
+        # `workspace_bound: false` for the same project bound the other way.
         Selection.new(project.db_path, project.name, registry.slug_of(project), source,
-          workspace_root, auto_created, project_id: registry.id_of(project))
+          workspace_root || registry.workspace_of(project), auto_created, project_id: registry.id_of(project))
       end
 
       private def self.canonical(path : String) : String

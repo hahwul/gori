@@ -46,14 +46,23 @@ describe "Gori::MCP::Tools project lifecycle" do
       # the real delete with the issued token succeeds
       done = JSON.parse(tools.call("delete_project", JSON.parse(%({"project":#{doomed_slug.to_json},"dry_run":false,"confirmation_token":#{token.to_json}}))).text)
       done["deleted"].as_bool.should be_true
+      # Every dry_run:false attempt is on the bound project's activity feed — the two refused
+      # ones as failures, the delete as ok — and the dry run is not.
+      deletes = tools.current_store.not_nil!.events_after(0_i64, 500)
+        .select { |e| e.kind == "agent_action" && e.message.starts_with?("delete_project") }
+      deletes.map(&.message).count(&.starts_with?("delete_project ok")).should eq(1)
+      deletes.size.should eq(3)
 
       # Doomed is gone, Alt remains
       after = JSON.parse(tools.call("list_projects", JSON.parse("{}")).text)["projects"].as_a.map(&.["slug"].as_s)
       after.should_not contain(doomed_slug)
       after.should contain(alt)
 
-      # deleting the currently-served project (Alt) is refused
-      tools.call("delete_project", JSON.parse(%({"project":#{alt.to_json}}))).is_error.should be_true
+      # deleting the currently-served project (Alt) is refused, and not as something a retry fixes
+      served = tools.call("delete_project", JSON.parse(%({"project":#{alt.to_json}})))
+      served.is_error.should be_true
+      served.error_code.should eq("INVALID_ARGUMENT")
+      served.retryable.should be_false
     ensure
       store.close rescue nil
       prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
@@ -384,6 +393,29 @@ describe "Gori::MCP::Tools unbound mode" do
         tools.pending_operator_note("list_history").should be_nil
         # …and a line said in Beta, whose id is far below Alpha's cursor, is still carried.
         id = beta.post_agent_message("said in beta", "all", nil)
+        tools.pending_operator_note("list_history").not_nil!.ids.should eq([id])
+      ensure
+        Gori::Env.layer = prev_layer
+        prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+        FileUtils.rm_rf(root)
+      end
+    end
+
+    # A switch to the project ALREADY bound is the same feed: re-anchoring there dropped every
+    # operator message posted before it and not yet read, on every route at once.
+    it "keeps the operator-message cursors on a switch to the project already bound" do
+      root = File.tempname("gori-msg-self-switch")
+      Dir.mkdir_p(root)
+      prev = ENV["GORI_HOME"]?
+      ENV["GORI_HOME"] = root
+      prev_layer = Gori::Env.layer
+      tools = Gori::MCP::Tools.new(nil, allow_actions: true, verify_upstream: false,
+        selection_source: "unbound")
+      begin
+        tools.call("create_project", JSON.parse(%({"name":"Alpha"})))
+        alpha = tools.current_store.not_nil!
+        id = alpha.post_agent_message("before the rebind", "all", nil)
+        JSON.parse(tools.call("switch_project", JSON.parse(%({"project":"Alpha"}))).text)["switched"].as_bool.should be_true
         tools.pending_operator_note("list_history").not_nil!.ids.should eq([id])
       ensure
         Gori::Env.layer = prev_layer
