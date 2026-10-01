@@ -620,7 +620,7 @@ module Gori::Tui
     # drops is the one thing ⇧F carries — an open editor's in-progress changes — and that is
     # the difference the operator has to be able to see between the two keys.
     private def toggle_status(result : Interceptor::ToggleResult) : String
-      return "intercept ON — held traffic waits (HTTPS→h1 for in-scope; gRPC may fail)" if result.enabled?
+      return "intercept ON — held traffic waits" if result.enabled?
       return "intercept off" if result.released == 0
       n = result.released
       "intercept off — auto-forwarded #{n} held message#{n == 1 ? "" : "s"} " \

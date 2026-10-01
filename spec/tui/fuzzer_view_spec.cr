@@ -71,6 +71,65 @@ describe "FuzzerView sorted-view throttle" do
   end
 end
 
+describe "FuzzerView live index order" do
+  # A concurrent run reports results as they COMPLETE; `o:index` listed them that way while
+  # the same run reopened from Run history read #0..#7 (#1432).
+  it "lists a concurrent run's results in index order under o:index" do
+    view = loaded_fuzzer
+    view.begin_run(nil)
+    [1, 2, 0, 4, 3, 6, 5, 7].each { |i| view.append_result(fuzz_result(i, 200, 10)) }
+    seen = (0...8).map do |i|
+      view.select_result_row(i)
+      view.selected_result.try(&.index)
+    end
+    seen.should eq((0_i64..7_i64).to_a)
+  end
+
+  it "keeps the selected row selected when an earlier index lands above it" do
+    view = loaded_fuzzer
+    view.begin_run(nil)
+    [1, 3, 4].each { |i| view.append_result(fuzz_result(i, 200, 10)) }
+    view.results_move(1) # on #3
+    view.append_result(fuzz_result(0, 200, 10))
+    view.append_result(fuzz_result(2, 200, 10))
+    view.selected_result.try(&.index).should eq(3_i64)
+    view.append_result(fuzz_result(5, 200, 10)) # lands below: no move
+    view.selected_result.try(&.index).should eq(3_i64)
+  end
+
+  it "does not move the selection for a late row a full window evicts at once" do
+    view = FuzzerView.new(FuzzerResultWindow.new(2, 10_000_i64))
+    view.load_request("https://h", "GET /?x=1 HTTP/1.1\r\nHost: h\r\n\r\n", false, "")
+    view.begin_run(nil)
+    [1, 2].each { |i| view.append_result(fuzz_result(i, 200, 10)) }
+    view.results_move(1) # on #2
+    view.append_result(fuzz_result(0, 200, 10))
+    view.selected_result.try(&.index).should eq(2_i64)
+  end
+
+  it "keeps the selected hit selected under matched-only when an earlier hit lands above it" do
+    view = loaded_fuzzer
+    view.begin_run(nil)
+    view.toggle_matched_only
+    [1, 3, 4].each { |i| view.append_result(fuzz_result(i, 200, 10, matched: true)) }
+    view.finish_run # no throttle, so every read below rebuilds
+    view.results_move(1)
+    view.selected_result.try(&.index).should eq(3_i64)
+    view.append_result(fuzz_result(0, 200, 10, matched: true))
+    view.append_result(fuzz_result(2, 200, 10)) # not a hit: hidden by the lens
+    view.selected_result.try(&.index).should eq(3_i64)
+    view.append_result(fuzz_result(2, 200, 10, matched: true))
+    view.selected_result.try(&.index).should eq(3_i64)
+  end
+
+  it "selects the first row of an empty pane rather than skipping it" do
+    view = loaded_fuzzer
+    view.begin_run(nil)
+    view.append_result(fuzz_result(1, 200, 10))
+    view.selected_result.try(&.index).should eq(1_i64)
+  end
+end
+
 # A view with its RESULT detail open on a three-line response body — two marker words on
 # separate lines, so a hit-test that lands a row off is visible in what gets copied.
 private def detail_open_fuzzer : FuzzerView
@@ -171,6 +230,22 @@ describe Gori::Tui::FuzzerView do
       lines.should contain("Content-Encoding: gzip")
       lines.should contain(plain)
       view.selected_result.not_nil!.body.should eq(wire)
+    end
+
+    # One blank row between the head and the body, as History draws it — the head's own
+    # terminator used to stack two more on top of the separator this pane adds (#1433).
+    it "separates the head from the body with exactly one blank line" do
+      ["HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n", "HTTP/1.1 200 OK\nContent-Type: text/plain\n\n"].each do |raw_head|
+        view = loaded_fuzzer
+        view.append_result(Gori::Fuzz::Result.new(
+          0_i64, ["p0"], nil, 200, 4_i64, 1, 0, 1000_i64,
+          nil, true, false, nil, raw_head.to_slice, "BODY".to_slice))
+        view.open_detail
+
+        lines = view.detail_plain_lines
+        ct = lines.index("Content-Type: text/plain").not_nil!
+        lines[ct + 1..ct + 2].should eq(["", "BODY"])
+      end
     end
 
     it "falls back to captured bytes when the declared encoding cannot be decoded" do

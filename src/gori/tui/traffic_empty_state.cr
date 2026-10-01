@@ -784,7 +784,11 @@ module Gori::Tui
       screen.text(ix, y, hint, Theme.muted, Theme.bg, width: iw)
       y += 2
       y = draw_chord_hint(screen, ix, y, iw, " a ", "add a variable", bullet: "▸ ", verb: "env.add-var")
-      draw_chord_hint(screen, ix, y, iw, " space ", "vars & prefix", bullet: "▸ ")
+      # The prefix is a once-a-session setting, so its row is palette-only (#1282): the space
+      # menu offers only Add here, and this bullet names the palette search that finds it,
+      # the way `Hotkeys.route` spells any palette-only verb (#1433).
+      title = registry.try(&.[]?("env.edit-prefix")).try(&.title) || "Change prefix"
+      draw_chord_hint(screen, ix, y, iw, " ^P ", title, bullet: "▸ ", verb: "app.palette")
     end
 
     # Unlike its four neighbours this card asks for nothing: the pane REPORTS. So the bullets

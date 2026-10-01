@@ -233,6 +233,9 @@ describe Gori::Tui::TrafficEmptyState do
     # not resolve under the namespaced grammar. This bullet names no token at all.
     backend.contains?("add a variable").should be_true
     backend.contains?("in a request expands when you send").should be_true
+    # The space menu offers only Add here; Change prefix is palette-only (#1282, #1433).
+    backend.contains?("Change prefix").should be_true
+    backend.contains?("space").should be_false
   end
 
   # The four engine tabs whose "nothing open yet" state used to be one muted line, while their

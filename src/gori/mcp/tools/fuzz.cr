@@ -490,6 +490,10 @@ module Gori
         matched_only = bool_arg(h, "matched_only", false)
         picked = (0...rows.size).to_a
         picked.select! { |i| rows[i].matched? } if matched_only
+        # `results` holds a concurrent run's rows as they COMPLETED; page them in index order,
+        # as the TUI lists them and a saved run is read back (`ORDER BY idx, id`), so an offset
+        # names the same rows every surface does (#1432). Arrival breaks a resend's tie.
+        picked.sort_by! { |i| {rows[i].index, i} }
         req_off = optional_int_arg(h, "offset")
         req_lim = optional_int_arg(h, "limit")
         offset = clamp_nonneg(req_off)

@@ -251,6 +251,18 @@ describe "Gori::Interceptor direction + condition gates" do
     end
   end
 
+  # Every reader publishes `to_s.downcase` (`requestonly`), every writer documents `request`;
+  # both must read back to the same member, and nothing else may fall back to Both (#1433).
+  it "reads a set_direction argument in either spelling, and refuses anything else" do
+    Gori::Interceptor::Direction.each do |d|
+      Gori::Interceptor::Direction.from_arg?(d.to_s.downcase).should eq(d)
+      Gori::Interceptor::Direction.from_arg?(d.arg).should eq(d)
+    end
+    Gori::Interceptor::Direction.from_arg?(" RequestOnly ").should eq(Gori::Interceptor::Direction::RequestOnly)
+    %w[requests out either].each { |s| Gori::Interceptor::Direction.from_arg?(s).should be_nil }
+    Gori::Interceptor::Direction.from_arg?("").should be_nil
+  end
+
   it "set_direction sets an explicit value idempotently, bumping revision only on change (#123)" do
     with_store do |store|
       ic = Gori::Interceptor.new(Gori::Scope.load(store))
