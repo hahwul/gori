@@ -124,8 +124,10 @@ describe "Runner#save_tabs" do
     body.should_not contain("ov.to_prefs")
 
     helper = runner_body("private def tab_prefs_of(ov : TabsOverlay) : Array({String, Bool})")
-    helper.should contain("Chrome.reconcile")
-    helper.should contain("[] of {String, Bool}")
+    helper.should contain("Chrome.prefs_to_save(ov.to_prefs, @evidence_available")
+    ov = Gori::Tui::TabsOverlay.new
+    ov.reset_to_defaults
+    Gori::Tui::Chrome.prefs_to_save(ov.to_prefs, true, [{"history", true}]).should be_empty
   end
 
   # …and the comparison it makes is against the real catalog default, so this is the shape
@@ -151,8 +153,44 @@ describe "Runner#save_tabs" do
       .reject { |(sym, _, _)| sym == :evidence }
       .map { |(sym, _, vis)| {sym.to_s, vis} }
     ov.to_prefs.should eq(defaults)
+    Gori::Tui::Chrome.prefs_to_save(ov.to_prefs, false, [] of {String, Bool}).should be_empty
+  end
 
-    helper = runner_body("private def tab_prefs_of(ov : TabsOverlay) : Array({String, Bool})")
-    helper.should contain("@evidence_available")
+  # The prefs are GLOBAL, so a save from a project with no snapshots must not drop the Evidence
+  # entry the editor never showed: it took Evidence off every project's bar, and reconcile put
+  # it back hidden at its catalog position.
+  it "puts the hidden Evidence entry back where the stored layout had it" do
+    stored = Gori::Tui::Chrome.reconcile([] of {String, Bool}).map { |(sym, _, _)| {sym.to_s, true} }
+    at = stored.index { |(n, _)| n == "evidence" }.not_nil!
+    edited = stored.reject { |(n, _)| n == "evidence" }.reverse! # a real edit, Evidence row absent
+    saved = Gori::Tui::Chrome.prefs_to_save(edited, false, stored, capped: false)
+    saved.size.should eq(stored.size)
+    saved[at].should eq({"evidence", true})
+  end
+
+  # …including when the rest of the layout is untouched: the default comparison has to see the
+  # Evidence entry too, or the save collapses to "defaults" and drops it.
+  it "keeps a customised Evidence entry through an otherwise-default save" do
+    ov = Gori::Tui::TabsOverlay.new(false)
+    ov.reset_to_defaults
+    full = Gori::Tui::Chrome.bar_partition(Gori::Tui::Chrome.reconcile([] of {String, Bool}))
+      .map { |(sym, _, vis)| {sym.to_s, vis} }
+    stored = full.map { |(n, vis)| n == "evidence" ? {n, !vis} : {n, vis} }
+    saved = Gori::Tui::Chrome.prefs_to_save(ov.to_prefs, false, stored, capped: false)
+    saved.should_not be_empty
+    saved.find { |(n, _)| n == "evidence" }.should eq(stored.find { |(n, _)| n == "evidence" })
+  end
+
+  # On a capped bar the editor let the operator fill nine slots without Evidence; putting it
+  # back visible would push their newest tab off the bar.
+  it "puts a visible Evidence back hidden when the nine slots are already taken" do
+    names = Gori::Tui::Chrome.reconcile([] of {String, Bool}).map { |(sym, _, _)| sym.to_s }
+    others = names.reject("evidence")
+    edited = others.map_with_index { |n, i| {n, i < Gori::Tui::Chrome::MAX_SLOTS} }
+    stored = [{"evidence", true}] + others.map { |n| {n, false} }
+    saved = Gori::Tui::Chrome.prefs_to_save(edited, false, stored, capped: true)
+    saved.count { |(_, vis)| vis }.should eq(Gori::Tui::Chrome::MAX_SLOTS)
+    saved.should contain({"evidence", false})
+    saved.index({"evidence", false}).should eq(Gori::Tui::Chrome::MAX_SLOTS)
   end
 end

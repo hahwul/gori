@@ -217,6 +217,44 @@ module Gori::Tui
       on + off
     end
 
+    # What to persist for a tab-editor working copy `prefs` (`TabsOverlay#to_prefs`), against
+    # the `stored` prefs it is replacing. The default arrangement is spelled as an EMPTY list,
+    # never as a written-out copy of today's defaults (see `Runner#tab_prefs_of`).
+    #
+    # `evidence_available` false means the editor dropped the Evidence row (an empty archive),
+    # so its working copy is one row short of the catalog: the default it is compared with drops
+    # the row too. And the row the editor never showed is put BACK where `stored` had it — these
+    # prefs are GLOBAL, so leaving it out took Evidence off every project's bar the first time
+    # the layout was saved from a project without snapshots, and reconcile re-added it at its
+    # catalog position with the default (hidden) visibility.
+    #
+    # Put back BEFORE the default comparison, so an otherwise-untouched layout still records the
+    # operator's Evidence choice instead of collapsing to "defaults" without it. And put back
+    # hidden when it would be a tenth tab on a capped bar: the editor let the operator fill the
+    # nine slots without it, and a visible Evidence ahead of their newest tab would push that tab
+    # off while `effective_bar` hides Evidence anyway.
+    def self.prefs_to_save(prefs : Array({String, Bool}), evidence_available : Bool,
+                           stored : Array({String, Bool}),
+                           capped : Bool = Settings.tab_slots?) : Array({String, Bool})
+      prefs = with_stored_evidence(prefs, stored, capped) unless evidence_available
+      has_evidence = prefs.any? { |(n, _)| n == "evidence" }
+      defaults = bar_partition(reconcile([] of {String, Bool}))
+        .reject { |(sym, _, _)| sym == :evidence && !has_evidence }
+        .map { |(sym, _, vis)| {sym.to_s, vis} }
+      prefs == defaults ? [] of {String, Bool} : prefs
+    end
+
+    private def self.with_stored_evidence(prefs : Array({String, Bool}), stored : Array({String, Bool}),
+                                          capped : Bool) : Array({String, Bool})
+      return prefs if prefs.any? { |(n, _)| n == "evidence" }
+      return prefs unless i = stored.index { |(n, _)| n == "evidence" }
+      on_bar = prefs.count { |(_, vis)| vis }
+      if stored[i][1] && capped && on_bar >= MAX_SLOTS
+        return prefs.dup.insert(on_bar, {"evidence", false}) # the head of the off-bar rows
+      end
+      prefs.dup.insert({i, prefs.size}.min, stored[i])
+    end
+
     # The factory layout as a prefs list — what an empty `tab_prefs` reconciles to. Written
     # out explicitly only where a config has to be REPLACED by the defaults rather than
     # reconciled against them.
