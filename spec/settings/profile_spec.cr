@@ -400,6 +400,28 @@ describe "settings profiles" do
       end
     end
 
+    # A malformed upstream declaration is fail-closed on load, but the refusal lives in memory:
+    # an import wrote the table without the bad entry, and the next start routed its hosts
+    # DIRECT. Refused before anything is written instead.
+    it "refuses a profile whose upstream rules would lose a malformed declaration" do
+      with_config_home do
+        Gori::Settings.save
+        before = File.read(Gori::Settings.path)
+        expect_raises(Gori::Error, /upstream_rules\[0\]/) do
+          Gori::Settings.import_document(<<-JSON)
+            {"upstream_rules":[
+              {"host":"*.corp.test","kind":"sock5","addr":"jump:1080"},
+              {"host":"api.test","kind":"direct"}]}
+            JSON
+        end
+        File.read(Gori::Settings.path).should eq(before)
+        expect_raises(Gori::Error, /upstream_proxy/) do
+          Gori::Settings.import_document(%({"network":{"upstream_proxy":8080}}))
+        end
+        File.read(Gori::Settings.path).should eq(before)
+      end
+    end
+
     # A self-hosted interactsh token is a credential (MCP `list_oast_providers` redacts it); a
     # default export wrote it out at 0644 with no notice.
     it "keeps OAST providers out of a default export, and counts their token as a secret" do
