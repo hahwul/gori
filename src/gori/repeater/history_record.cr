@@ -105,9 +105,10 @@ module Gori
           {head, plan.h2_body, method, target, "HTTP/2"}
         else
           head, body = split_head_body(wire)
-          # `authored_start_line`, not the strict parser: the bytes are the operator's and under
-          # `--verbatim` a bare-LF terminator is the payload — the same call MCP's recorder makes.
-          method, target, version = Proxy::Codec::Http1.authored_start_line(head)
+          # Not the strict parser: the bytes are the operator's and under `--verbatim` a bare-LF
+          # terminator is the payload, and a line it cannot frame is filed the way the proxy
+          # files it (#1423) — the same call MCP's recorder makes.
+          method, target, version = FlowMapper.authored_request(head, http2: plan.http2?)
           {head, body, method, target, version}
         end
       end

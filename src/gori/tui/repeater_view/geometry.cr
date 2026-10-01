@@ -80,14 +80,28 @@ class Gori::Tui::RepeaterView
     rect.x + 2 + prefix.size + 1
   end
 
+  # Rows the request | response columns need before they are drawn at all: a card's two
+  # borders and one line inside them. A shorter strip is a card with nothing in it, which is
+  # what 17 rows used to draw (#1421).
+  COLUMNS_MIN_H = 3
+
+  # The rect under the TARGET card that the request | response columns split, or nil when it
+  # cannot hold them (`COLUMNS_MIN_H`). The ONE derivation: render, every hit-test and the
+  # focus fallback read it, so a click, a wheel or a keystroke can never act on a column the
+  # frame did not draw. It was spelled five times, each with its own `<= 0` floor.
+  private def columns_rect(rect : Rect) : Rect?
+    target_h = {rect.h, target_card_h}.min
+    content = Rect.new(rect.x, rect.y + target_h, rect.w, {rect.h - target_h, 0}.max)
+    content.h >= COLUMNS_MIN_H ? content : nil
+  end
+
   # Inverts render's layout: a 3-row target band on top, then a half-width
   # request|response split (the column at content.x + half is the divider).
   def pane_at(rect : Rect, mx : Int32, my : Int32) : Symbol?
     return nil unless @loaded && rect.contains?(mx, my)
     target_h = {rect.h, target_card_h}.min
     return :target if my < rect.y + target_h
-    content = Rect.new(rect.x, rect.y + target_h, rect.w, {rect.h - target_h, 0}.max)
-    return nil if content.h <= 0
+    content = columns_rect(rect) || return nil
     half = {(content.w - 1) // 2, 1}.max
     return :request if mx < content.x + half
     mx >= content.x + half + 1 ? :response : nil
@@ -124,9 +138,7 @@ class Gori::Tui::RepeaterView
   # The request half-pane (the whole left column, borders included) — render's own
   # derivation: the target band on top, then a half-width request|response split.
   private def request_col_rect(rect : Rect) : Rect?
-    target_h = {rect.h, target_card_h}.min
-    content = Rect.new(rect.x, rect.y + target_h, rect.w, {rect.h - target_h, 0}.max)
-    return nil if content.h <= 0
+    content = columns_rect(rect) || return nil
     half = {(content.w - 1) // 2, 1}.max
     Rect.new(content.x, content.y, half, content.h)
   end
@@ -208,9 +220,7 @@ class Gori::Tui::RepeaterView
   # The response half-pane (the whole right column, borders included) — render's own
   # derivation, factored out so the click, the drag and the wheel share it.
   private def response_col_rect(rect : Rect) : Rect?
-    target_h = {rect.h, target_card_h}.min
-    content = Rect.new(rect.x, rect.y + target_h, rect.w, {rect.h - target_h, 0}.max)
-    return nil if content.h <= 0
+    content = columns_rect(rect) || return nil
     half = {(content.w - 1) // 2, 1}.max
     Rect.new(content.x + half + 1, content.y, {content.w - half - 1, 1}.max, content.h)
   end

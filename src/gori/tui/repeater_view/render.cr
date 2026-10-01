@@ -5,7 +5,10 @@ class Gori::Tui::RepeaterView
   # --- rendering -----------------------------------------------------------
 
   def render(screen : Screen, rect : Rect, focused : Bool = true) : Nil
-    return if rect.empty?
+    if rect.empty?
+      @target_drawn = @columns_drawn = false
+      return
+    end
     unless @loaded
       TrafficEmptyState.render(screen, rect, variant: :repeater, title: "no flow loaded")
       return
@@ -14,10 +17,14 @@ class Gori::Tui::RepeaterView
     # target pane: a 3-row card on top (4 when an SNI override is set/edited);
     # request | response cards fill the rest.
     target_h = {rect.h, target_card_h}.min
+    @target_drawn = target_h >= TARGET_MIN_H
+    content = columns_rect(rect)
+    @columns_drawn = !content.nil?
+    # Before the target draws, so its card is lit as the pane that now has the keys.
+    settle_focus_on_drawn_pane
     render_target(screen, Rect.new(rect.x, rect.y, rect.w, target_h), focused && @focus == :target)
 
-    content = Rect.new(rect.x, rect.y + target_h, rect.w, {rect.h - target_h, 0}.max)
-    return if content.h <= 0
+    return render_columns_note(screen, rect, target_h) unless content
     half = {(content.w - 1) // 2, 1}.max
     left = Rect.new(content.x, content.y, half, content.h)
     right = Rect.new(content.x + half + 1, content.y, {content.w - half - 1, 0}.max, content.h)
@@ -33,6 +40,14 @@ class Gori::Tui::RepeaterView
     render_chain_overlay(screen, rect) if @chain_focused # centered modal ON TOP (replaces the old split)
   end
 
+  # Too short for the columns (#1421). Say so on the rows that are left, rather than leaving
+  # a blank band under TARGET that reads as an empty request.
+  private def render_columns_note(screen : Screen, rect : Rect, target_h : Int32) : Nil
+    return unless rect.h > target_h
+    screen.text(rect.x + 2, rect.y + target_h, "REQUEST · RESPONSE need a taller window",
+      Theme.muted, width: {rect.w - 4, 0}.max)
+  end
+
   # The ^Q chain editor: a centered modal over the whole tab, bound to the marker the
   # cursor sat in when ^Q was pressed. Shows the marker's value, the editable chain, and
   # a live transform preview. Keys route here via the controller (chain_pane_active?).
@@ -41,8 +56,11 @@ class Gori::Tui::RepeaterView
     ChainOverlay.render(screen, area, "CHAIN · #{marker_label}", value, @chain_pane)
   end
 
+  # The TARGET card's floor: a border and the URL row. `@target_drawn` records it.
+  TARGET_MIN_H = 2
+
   private def render_target(screen : Screen, rect : Rect, focused : Bool) : Nil
-    return if rect.h < 2
+    return if rect.h < TARGET_MIN_H
     Frame.card(screen, rect, "TARGET", bg: Theme.bg, border: Frame.pane_border(focused))
     Frame.mode_badge(screen, rect.right - 1, rect.y, rect.x + 8, target_insert?) # the REAL mode, not focused&&mode — see Frame.mode_badge
     sni_x, tls_x, tr_edge = target_chrome_chain(rect)

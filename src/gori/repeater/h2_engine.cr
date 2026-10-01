@@ -1396,11 +1396,7 @@ module Gori
         head_bytes, body = split_head_body(request)
         lines = String.new(head_bytes).split('\n').map(&.rstrip('\r'))
         line = lines[0]? || "GET / HTTP/2"
-        parsed_method, parsed_path = HeadCodec.request_line(line)
-        # No space at all is not a request line; keep the whole token as the method rather
-        # than inventing one, which is what a `:method` probe (`GET\r\n…`) would want to see.
-        method = parsed_method || line
-        path = parsed_path || "/"
+        method, path = HeadCodec.request_pseudo(line)
 
         # An explicit `Host:` header maps to `:authority` (RFC 9113 §8.3.1 — h2 has no
         # Host field). Honor its value so editing the request's host (a vhost /

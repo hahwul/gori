@@ -20,7 +20,7 @@ class Gori::Tui::RepeaterView
     target_h = {rect.h, target_card_h}.min
     # TARGET NOR/INS chip (top band) — click toggles insert like ↵/esc. The `^V` transport
     # chip chains left of it (past the SNI marker) and cycles the transport on click.
-    if my == rect.y && target_h >= 2
+    if my == rect.y && target_h >= TARGET_MIN_H
       if Frame.mode_badge_hit(mx, my, rect.y, rect.right - 1, rect.x + 8, target_insert?)
         return :target_mode
       end
@@ -38,8 +38,7 @@ class Gori::Tui::RepeaterView
         end
       end
     end
-    content = Rect.new(rect.x, rect.y + target_h, rect.w, {rect.h - target_h, 0}.max)
-    return nil if content.h <= 0
+    content = columns_rect(rect) || return nil
     half = {(content.w - 1) // 2, 1}.max
     left = Rect.new(content.x, content.y, half, content.h)
     right = Rect.new(content.x + half + 1, content.y, {content.w - half - 1, 0}.max, content.h)

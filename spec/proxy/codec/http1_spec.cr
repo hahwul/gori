@@ -143,6 +143,45 @@ describe Gori::Proxy::Codec::Http1 do
     end
   end
 
+  # The recorders' projection (#1423): the same bytes must make the same row whether the proxy
+  # captured them or a gori surface sent them.
+  describe ".authored_projection" do
+    it "reads a well-formed line, CRLF or bare-LF, as its three tokens" do
+      Http1.authored_projection(bytes("GET /a?x=1 HTTP/1.1\r\nHost: h\r\n\r\n"))
+        .should eq({"GET", "/a?x=1", "HTTP/1.1"})
+      # A bare LF is the operator's `verbatim` payload, not an unframable line: the strict
+      # CRLF scan would read `HTTP/1.1\nHost:` as a fourth token and call it malformed.
+      Http1.authored_projection(bytes("GET /lf HTTP/1.1\nHost: h\n\n"))
+        .should eq({"GET", "/lf", "HTTP/1.1"})
+    end
+
+    it "files a line split(' ') cannot frame as the verbatim line with no version" do
+      Http1.authored_projection(bytes("GET  /echo?x=1   HTTP/1.1\r\nHost: h\r\n\r\n"))
+        .should eq({"GET", "GET  /echo?x=1   HTTP/1.1", ""})
+      Http1.authored_projection(bytes("POST /a b HTTP/1.1\nHost: h\n\n"))
+        .should eq({"POST", "POST /a b HTTP/1.1", ""})
+      Http1.authored_projection(bytes("GET /p\r\n\r\n")).should eq({"GET", "GET /p", ""})
+      Http1.authored_projection(bytes("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"))
+        .should eq({"PRI", "PRI * HTTP/2.0", ""})
+      Http1.authored_projection(bytes("")).should eq({"", "", ""})
+    end
+
+    it "agrees with the proxy's stored projection on every CRLF head" do
+      [
+        "GET /a HTTP/1.1", "GET  /echo?x=1   HTTP/1.1", "POST /a b HTTP/1.1", "GET /p",
+        "PRI * HTTP/2.0", " GET / HTTP/1.1", "GET\t/a HTTP/1.1", "GET /a\tb HTTP/1.1",
+        "GET http://h/x HTTP/1.0", "GET", "",
+      ].each do |line|
+        raw = bytes("#{line}\r\nHost: h\r\n\r\n")
+        stored = Gori::FlowMapper.request(Http1.parse_request_head(raw),
+          scheme: "http", host: "h", port: 80, created_at: 0_i64,
+          source: Gori::FlowSource::Kind::Proxy)
+        Http1.authored_projection(raw)
+          .should eq({stored.method, stored.target, stored.http_version}), line.inspect
+      end
+    end
+  end
+
   describe ".parse_response_head" do
     it "parses status-line and headers" do
       raw = bytes("HTTP/1.1 404 Not Found\r\nContent-Length: 9\r\n\r\n")

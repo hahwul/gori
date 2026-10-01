@@ -43,6 +43,23 @@ describe Gori::Evidence do
       snap.response_sha256.should eq(Digest::SHA256.hexdigest("HTTP/1.1 201 Created\r\nX: y\r\n\r\n{}"))
     end
 
+    # #1423: a frozen copy is a stored projection too, so an unframable line keeps the verbatim
+    # line rather than a plausible `/a` URL and a protocol of `b`.
+    it "keeps an unframable start line verbatim, with no protocol" do
+      snap = Gori::Evidence.from_repeater(repeater("POST /a b HTTP/1.1\r\nHost: acme.test\r\n\r\n",
+        head: "HTTP/1.1 400 Bad Request\r\n\r\n")).not_nil!
+      snap.method.should eq("POST")
+      snap.url.should eq("https://acme.test POST /a b HTTP/1.1")
+      snap.protocol.should be_nil
+    end
+
+    it "reads an h2 session's target as the :path it went out with" do
+      snap = Gori::Evidence.from_repeater(repeater("POST /a b HTTP/1.1\r\nHost: acme.test\r\n\r\n",
+        http2: true, head: "HTTP/2 400\r\n\r\n")).not_nil!
+      snap.url.should eq("https://acme.test/a b")
+      snap.protocol.should eq("HTTP/2")
+    end
+
     it "reports DRIFT when the saved request no longer hashes to what produced the response" do
       # The failure this exists for: send, edit the request, freeze. The row then holds an
       # edited request beside the earlier send's response and nothing in the bytes says so.

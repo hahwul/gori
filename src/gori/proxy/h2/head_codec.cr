@@ -623,7 +623,7 @@ module Gori::Proxy::H2
     # LAST one only when the trailing token is a version token — so a `:path` holding a raw
     # space (malformed, but a peer can send one and P7 says we carry it) survives the round
     # trip. Deliberately NOT `Codec::Http1.parse_request_head`, whose `parts.size != 3` rule
-    # (`http1.cr:107-120`) would call that line malformed and truncate the path.
+    # (`Http1.start_line_malformed?`) would call that line malformed and truncate the path.
     #
     # Public for the same reason as `header_lines`: `Repeater::H2Engine` had a copy that cut
     # at the LAST space unconditionally, so a version-less `GET /noversion` — what a parser-
@@ -638,6 +638,15 @@ module Gori::Proxy::H2
       end
       return {nil, nil} if rest.empty?
       {start[0, sp], rest}
+    end
+
+    # The {`:method`, `:path`} a TEXT h2 send puts on the wire for its start line. No space at
+    # all is not a request line; keep the whole token as the method rather than inventing one,
+    # which is what a `:method` probe (`GET\r\n…`) would want to see, and a missing path is
+    # `/`. One home, because `FlowMapper.authored_request` files the pair `H2Engine` sent.
+    def request_pseudo(start : String) : {String, String}
+      method, path = request_line(start)
+      {method || start, path || "/"}
     end
 
     # The status code out of a rewritten `HTTP/2 404` line. h2 has no reason phrase, so a

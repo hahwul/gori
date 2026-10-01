@@ -70,6 +70,38 @@ describe Gori::Repeater::HistoryRecord do
     end
   end
 
+  # #1423: a line `split(' ')` cannot frame is filed the way the proxy files it — the verbatim
+  # line as the target, no version — not as a plausible `/a` and a version of `b`.
+  it "files an unframable request line as the verbatim line with no version" do
+    with_store do |store|
+      plan = plan_for("POST /a b HTTP/1.1\r\nHost: t.test\r\n\r\n")
+      result = result_for("HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n", nil)
+      id = Gori::Repeater::HistoryRecord.record(store, plan, result, created_at: 1_i64,
+        wire: plan.wire_bytes, surface: Gori::FlowSource::Surface::Cli)
+      detail = store.get_flow(id).not_nil!
+      detail.row.method.should eq("POST")
+      detail.row.target.should eq("POST /a b HTTP/1.1")
+      detail.http_version.should eq("")
+      String.new(detail.request_head).should start_with("POST /a b HTTP/1.1\r\n")
+    end
+  end
+
+  # Over h2 the wire carried `:path: /a b`, not an h1 line, so that is what the row files.
+  it "files an h2 send's target as the :path it went out with" do
+    with_store do |store|
+      opts = Gori::Repeater::PlanOptions.new(["POST /a b HTTP/1.1\r\nHost: t.test\r\n\r\n".to_slice],
+        default_target: "https://t.test")
+      opts.http2 = true
+      plan = Gori::Repeater::Plan.build(opts, ungated_outbound)
+      result = result_for("HTTP/2 400\r\n\r\n", nil)
+      id = Gori::Repeater::HistoryRecord.record(store, plan, result, created_at: 1_i64,
+        wire: plan.wire_bytes, surface: Gori::FlowSource::Surface::Cli)
+      detail = store.get_flow(id).not_nil!
+      detail.row.target.should eq("/a b")
+      detail.http_version.should eq("HTTP/2")
+    end
+  end
+
   it "records an errored send as an Error flow" do
     with_store do |store|
       plan = plan_for("GET /x HTTP/1.1\r\nHost: t.test\r\n\r\n")
