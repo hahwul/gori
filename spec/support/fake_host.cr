@@ -38,7 +38,10 @@ class FakeHost
   def request_overlay(kind : Symbol) : Nil
   end
 
+  getter focus_requests = [] of Symbol
+
   def request_focus(pane : Symbol) : Nil
+    @focus_requests << pane
   end
 
   getter focus_body_calls = 0

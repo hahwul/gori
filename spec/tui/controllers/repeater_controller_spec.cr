@@ -1,6 +1,7 @@
 require "../../spec_helper"
 require "../../support/fake_host"
 require "../../support/fake_context"
+require "../../support/memory_backend"
 
 include Gori::Tui
 
@@ -73,6 +74,35 @@ describe "RepeaterController ^X (#1295)" do
       ctl.repeater_toggle_resp_hex
       v.resp_hex?.should be_false
       host.statuses.last(2).each(&.should(contain("no hex dump for a WebSocket transcript")))
+    end
+  end
+end
+
+# #1421: a pane the last frame did not draw takes no keystrokes. On a body too short for even
+# the TARGET card there is no pane to move focus to, so the controller swallows the keys.
+describe "RepeaterController on a body too short for its panes (#1421)" do
+  it "does not type into a request editor the frame did not draw" do
+    with_repeater_controller do |ctl, _|
+      ctl.repeater_from_request("https://h.test", HTTP_REQ, false, nil)
+      v = ctl.current_view.not_nil!
+      v.focus.should eq(:request)
+      v.enter_request_insert!
+      v.render(Screen.new(MemoryBackend.new(100, 1)), Rect.new(0, 0, 100, 1))
+      before = v.request_text
+      "ZZZ".each_char { |c| ctl.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::UpperZ, char: c)) }
+      v.request_text.should eq(before)
+      ctl.accepts_bulk_paste?.should be_false # a paste replays key by key, into the gate
+    end
+  end
+
+  it "still lets READ keys out of a pane the frame did not draw" do
+    with_repeater_controller do |ctl, host|
+      ctl.repeater_from_request("https://h.test", HTTP_REQ, false, nil)
+      v = ctl.current_view.not_nil!
+      v.focus_pane(:target)
+      v.render(Screen.new(MemoryBackend.new(100, 1)), Rect.new(0, 0, 100, 1))
+      ctl.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::Up))
+      host.focus_requests.should_not be_empty # ↑ left for the strip, not swallowed
     end
   end
 end
