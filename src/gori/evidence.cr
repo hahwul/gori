@@ -189,7 +189,7 @@ module Gori
     # split at the blank line the way MCP's `split_wire_request` splits it, tolerating a
     # bare-LF head, and the head KEEPS its terminator — the shape `flows.request_head`
     # has, so the viewer and the hash treat both sources alike. The start line is read
-    # leniently for the same reason.
+    # leniently for the same reason, and filed as the Repeater's History row files it (#1423).
     def self.from_repeater(rec : Store::RepeaterRecord) : Snapshot?
       resp_head = rec.response_head
       return nil if resp_head.nil? && rec.response_error.nil?
@@ -197,7 +197,7 @@ module Gori
       req_head = rec.request[0, boundary]
       body_size = rec.request.size - boundary
       req_body = body_size > 0 ? rec.request[boundary, body_size] : nil
-      method, target, version = Proxy::Codec::Http1.authored_start_line(req_head)
+      method, target, version = FlowMapper.authored_request(req_head, http2: rec.http2?)
       # MCP's save-as-repeater path persists an errored send as an EMPTY head, and an empty
       # head is "no response", not a response of zero bytes.
       resp_head = nil if resp_head && resp_head.empty?
