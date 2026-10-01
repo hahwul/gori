@@ -120,4 +120,6 @@ module Gori::Proxy::Tls
 
   CA_VALIDITY_SECS   = 60_i64 * 60 * 24 * 3650 # ~10 years
   LEAF_VALIDITY_SECS = 60_i64 * 60 * 24 * 397  # ~13 months (browser leaf cap)
+  # How far a minted cert's notBefore sits in the past. See CertBuilder.build.
+  CLOCK_SKEW_SECS = 60_i64 * 60 * 24 # 1 day
 end
