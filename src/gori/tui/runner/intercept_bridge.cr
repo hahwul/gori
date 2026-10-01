@@ -118,11 +118,11 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
           store.ack_intercept_command(cmd.id, "error", "already decided by another surface: #{desc}")
           return false
         end
-        # `size: bytes.size`, NOT `desc`'s default (the item's ORIGINAL held size): an edit
-        # that changes a WS message's length must say so in its own ack, the caller's only
-        # record of what actually went out. Has no effect on a request/response label (that
-        # branch of `Item#label` doesn't render a byte count), so this is safe for every kind.
-        edited_desc = item.label(size: bytes.size)
+        # Labelled from the EDITED bytes, NOT `desc` (the item's ORIGINAL held metadata): the
+        # ack is the caller's only record of what actually went out, so an edit that turns
+        # `GET /bf2` into `DELETE /changed?x=1` must say DELETE (#1430), and one that changes
+        # a WS message's length must say the new size. `Item#edited_label` reads both.
+        edited_desc = item.edited_label(bytes)
         store.ack_intercept_command(cmd.id, "edited", edited_desc)
         push_agent_note(:success, "forwarded (edited) #{edited_desc}", item)
       end
