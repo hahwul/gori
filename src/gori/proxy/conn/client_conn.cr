@@ -533,7 +533,7 @@ module Gori::Proxy
       # a distinct 403 so a sandbox block never reads like an upstream failure. The scope
       # URL is built lazily inside the interceptor, only while the sandbox is on.
       if (ic = @interceptor) && ic.sandbox_blocks?(scheme, host, gate_target, port)
-        record_blocked_request(sent_req, scheme, host, port, created_at)
+        record_blocked_request(record_req, scheme, host, port, created_at)
         write_sandbox_block
         return false
       end
@@ -555,7 +555,7 @@ module Gori::Proxy
         req_framing, req_len = Codec::Body.request_framing(req)
       rescue ex : Gori::Error
         reason = ex.message || "ambiguous request framing"
-        record_error(sent_req, scheme, host, port, created_at, "request framing rejected: #{reason}")
+        record_error(record_req, scheme, host, port, created_at, "request framing rejected: #{reason}")
         write_framing_reject(reason)
         return false
       end
@@ -572,10 +572,10 @@ module Gori::Proxy
       # body first (see serve_short_circuit).
       if (rw = @rewriter) && (stub = rw.short_circuit(sent_head, host))
         if stub.fault
-          return serve_fault(stub, req, sent_req, record_req, host, port, scheme, created_at,
+          return serve_fault(stub, req, record_req, host, port, scheme, created_at,
             req_framing, req_len)
         end
-        return serve_short_circuit(stub, req, sent_req, record_req, host, port, scheme,
+        return serve_short_circuit(stub, req, record_req, host, port, scheme,
           created_at, req_framing, req_len)
       end
 
@@ -591,7 +591,7 @@ module Gori::Proxy
       if (ic = @interceptor) && ic.intercepts_request?(
            method: sent_req.method, host: host, target: gate_target, scheme: scheme,
            port: port, head: sent_head) && holdable_body_size?(req_framing, req_len, "request")
-        return handle_held_request(ic, req, sent_req, sent_head, host, port, scheme,
+        return handle_held_request(ic, req, sent_req, sent_head, record_req, host, port, scheme,
           created_at, started, req_framing, req_len)
       end
 
@@ -602,7 +602,7 @@ module Gori::Proxy
       # whose declared length exceeds MAX_REWRITE_BODY is left byte-exact (see the constant)
       # so a huge upload can't grow the proxy heap while a rule is on.
       if (rw = @rewriter) && rewrite_request_body?(rw, req_framing, req_len, host)
-        return forward_request_rewriting_body(rw, req, sent_req, sent_head, host, port,
+        return forward_request_rewriting_body(rw, req, sent_head, record_req, host, port,
           scheme, created_at, started, req_framing, req_len)
       end
 
@@ -648,7 +648,7 @@ module Gori::Proxy
       end
       unless upstream && sent
         release_upstream
-        record_error(req, scheme, host, port, created_at, upstream_error_message(host, port, upstream))
+        record_error(record_req, scheme, host, port, created_at, upstream_error_message(host, port, upstream))
         write_gateway_error
         return false
       end
@@ -721,8 +721,15 @@ module Gori::Proxy
 
     # The intercept-hold request path: buffer the body, let the human edit/drop
     # it, then forward via the reused upstream (with the same stale-reuse retry).
+    #
+    # `sent_req`/`sent_head` are the origin-form wire head the human is shown and edits;
+    # `record_req` is the same request in the CLIENT's request-line form, which History keeps
+    # for every outcome that sends the client's own request (drop, an unedited forward, the
+    # error exits) — the rule the streaming path follows (#1424). Only an edit records the
+    # wire form, because then the edited bytes ARE the request and nobody sent another one.
     private def handle_held_request(ic : Gori::Interceptor, req : Codec::RawRequest,
                                     sent_req : Codec::RawRequest, sent_head : Bytes,
+                                    record_req : Codec::RawRequest,
                                     host : String, port : Int32, scheme : String,
                                     created_at : Int64, started : Time::Instant,
                                     req_framing : Codec::BodyFraming, req_len : Int64) : Bool
@@ -730,7 +737,7 @@ module Gori::Proxy
       # client's `Expect: 100-continue` itself rather than blocking on a body being withheld.
       # See `elicit_request_body` for why this path cannot ask the origin instead.
       unless elicit_request_body(req, req_framing)
-        record_error(sent_req, scheme, host, port, created_at,
+        record_error(record_req, scheme, host, port, created_at,
           "connection closed while answering Expect: 100-continue")
         return false
       end
@@ -739,7 +746,7 @@ module Gori::Proxy
         # The client cut its request body short — there's nothing whole to hold/forward, and
         # forwarding a short body under the original Content-Length would desync the upstream
         # (mirrors the non-hold path's req_complete guard). Record + close instead of holding.
-        record_error(sent_req, scheme, host, port, created_at, "client truncated request body")
+        record_error(record_req, scheme, host, port, created_at, "client truncated request body")
         return false
       end
       # Match&Replace (request body) BEFORE the human sees it — mirroring the head, which is
@@ -748,8 +755,10 @@ module Gori::Proxy
       advisory = nil.as(String?)
       client_body = buffered
       if (rw = @rewriter) && rw.rewrites_request_body_for_host?(host)
-        sent_head, buffered, advisory = apply_body_rewrite(sent_head, buffered, req_framing,
+        rewritten_head, buffered, advisory = apply_body_rewrite(sent_head, buffered, req_framing,
           host: host, response: false, live: true) { |e| rw.rewrite_request_body(e, host) }
+        record_req = reframed_record(record_req, sent_head, rewritten_head, buffered)
+        sent_head = rewritten_head
         sent_req = Codec::Http1.parse_request_head(sent_head)
       end
       held = build_message(sent_head, buffered)
@@ -757,7 +766,7 @@ module Gori::Proxy
         method: sent_req.method, target: sent_req.target,
         host: host, port: port, scheme: scheme)
       if decision.action.drop?
-        record_dropped_request(sent_req, scheme, host, port, created_at, buffered)
+        record_dropped_request(record_req, scheme, host, port, created_at, buffered)
         write_intercept_drop
         return false
       end
@@ -771,6 +780,7 @@ module Gori::Proxy
       # the flow (#1378, V44) — `req.raw_head` and the body before any Match&Replace — and
       # marks it edited. A forward that changed nothing keeps nothing: the flow is the original.
       original = decision.bytes == held ? nil : build_message(req.raw_head, client_body)
+      recorded = original ? sent_req : record_req
       # Key repeater-safety on the EDITED request: if the human changed the method (e.g.
       # GET→POST), retryability must follow the method actually being sent, not the
       # original — else a now-non-idempotent request could be replayed on a stale-conn retry.
@@ -778,13 +788,13 @@ module Gori::Proxy
       upstream, reused, sent = acquire_and_send(host, port, dial_tls?(scheme), retryable) { |up| write_request(up, sent_head, edited_body) }
       unless upstream && sent
         release_upstream
-        record_error(sent_req, scheme, host, port, created_at, upstream_error_message(host, port, upstream),
+        record_error(recorded, scheme, host, port, created_at, upstream_error_message(host, port, upstream),
           intercept_original: original)
         write_gateway_error
         return false
       end
       stored, trunc, size = capped(edited_body)
-      flow_id = @sink.on_request(FlowMapper.request(sent_req,
+      flow_id = @sink.on_request(FlowMapper.request(recorded,
         scheme: scheme, host: host, port: port, created_at: created_at,
         body: stored, body_truncated: trunc, body_size: size, advisory: advisory, source: FlowSource::Kind::Proxy,
         intercept_original: original))
@@ -801,7 +811,7 @@ module Gori::Proxy
     # stands in for. Paying for that means draining the request body first — it is still on
     # the socket, and an undrained body is read as the next request line.
     private def serve_short_circuit(stub : HeadRewriter::Stub, req : Codec::RawRequest,
-                                    sent_req : Codec::RawRequest, record_req : Codec::RawRequest,
+                                    record_req : Codec::RawRequest,
                                     host : String, port : Int32, scheme : String,
                                     created_at : Int64,
                                     req_framing : Codec::BodyFraming, req_len : Int64) : Bool
@@ -809,7 +819,7 @@ module Gori::Proxy
       # its body back for a `100 Continue` never drains. Answer it here too — the stub's own
       # status still follows, and a 1xx before it is exactly what the client is waiting for.
       unless elicit_request_body(req, req_framing)
-        record_error(sent_req, scheme, host, port, created_at,
+        record_error(record_req, scheme, host, port, created_at,
           "connection closed while answering Expect: 100-continue")
         return false
       end
@@ -817,7 +827,7 @@ module Gori::Proxy
       unless body_complete
         # Nothing was answered, so this is not a short-circuited flow — record it as the
         # truncation it is (mirrors the hold / body-rewrite paths).
-        record_error(sent_req, scheme, host, port, created_at, "client truncated request body")
+        record_error(record_req, scheme, host, port, created_at, "client truncated request body")
         return false
       end
 
@@ -898,14 +908,14 @@ module Gori::Proxy
     # a fiber, and nothing else reads `@io` here — which is what makes the raw-socket close in
     # `reset_client` safe under TLS (read the `sync_close` comment in `tls/tunnel.cr`).
     private def serve_fault(stub : HeadRewriter::Stub, req : Codec::RawRequest,
-                            sent_req : Codec::RawRequest, record_req : Codec::RawRequest,
+                            record_req : Codec::RawRequest,
                             host : String, port : Int32, scheme : String, created_at : Int64,
                             req_framing : Codec::BodyFraming, req_len : Int64) : Bool
       # A withheld body is not read at all: `None` records it as absent, as before.
       framing = expect_continue?(req) ? Codec::BodyFraming::None : req_framing
       stored, trunc, size, body_complete = drain_request_body(framing, req_len)
       unless body_complete
-        record_error(sent_req, scheme, host, port, created_at, "client truncated request body")
+        record_error(record_req, scheme, host, port, created_at, "client truncated request body")
         return false
       end
       flow_id = @sink.on_request(FlowMapper.request(record_req,
@@ -1035,16 +1045,17 @@ module Gori::Proxy
     # The Match&Replace request-body path (no intercept): buffer the whole body,
     # rewrite the entity, re-frame the head (Content-Length), and forward. A body was
     # sent, so the request is never auto-retryable. Structurally this is the hold path
-    # minus the human — same buffer + capped-capture + reused-upstream forwarding.
+    # minus the human — same buffer + capped-capture + reused-upstream forwarding. History
+    # records `record_req` (the client's request-line form), re-framed alongside the wire head.
     private def forward_request_rewriting_body(rw : HeadRewriter, req : Codec::RawRequest,
-                                               sent_req : Codec::RawRequest, sent_head : Bytes,
+                                               sent_head : Bytes, record_req : Codec::RawRequest,
                                                host : String, port : Int32, scheme : String,
                                                created_at : Int64, started : Time::Instant,
                                                req_framing : Codec::BodyFraming, req_len : Int64) : Bool
       # #728: a body rule needs the whole entity before the head can be re-framed and sent, so
       # (as on the hold path) gori answers the client's `Expect: 100-continue` itself.
       unless elicit_request_body(req, req_framing)
-        record_error(sent_req, scheme, host, port, created_at,
+        record_error(record_req, scheme, host, port, created_at,
           "connection closed while answering Expect: 100-continue")
         return false
       end
@@ -1052,21 +1063,23 @@ module Gori::Proxy
       unless body_complete
         # Client cut the body short — forwarding it under the original length would desync
         # the upstream (mirrors the streaming path's req_complete guard). Record + close.
-        record_error(sent_req, scheme, host, port, created_at, "client truncated request body")
+        record_error(record_req, scheme, host, port, created_at, "client truncated request body")
         return false
       end
-      sent_head, fwd_body, advisory = apply_body_rewrite(sent_head, buffered, req_framing,
+      rewritten_head, fwd_body, advisory = apply_body_rewrite(sent_head, buffered, req_framing,
         host: host, response: false, live: true) { |e| rw.rewrite_request_body(e, host) }
+      record_req = reframed_record(record_req, sent_head, rewritten_head, fwd_body)
+      sent_head = rewritten_head
       sent_req = Codec::Http1.parse_request_head(sent_head) # head may have been re-framed
       upstream, reused, sent = acquire_and_send(host, port, dial_tls?(scheme), false) { |up| write_request(up, sent_head, fwd_body) }
       unless upstream && sent
         release_upstream
-        record_error(sent_req, scheme, host, port, created_at, upstream_error_message(host, port, upstream))
+        record_error(record_req, scheme, host, port, created_at, upstream_error_message(host, port, upstream))
         write_gateway_error
         return false
       end
       stored, trunc, size = capped(fwd_body)
-      flow_id = @sink.on_request(FlowMapper.request(sent_req,
+      flow_id = @sink.on_request(FlowMapper.request(record_req,
         scheme: scheme, host: host, port: port, created_at: created_at,
         body: stored, body_truncated: trunc, body_size: size, advisory: advisory, source: FlowSource::Kind::Proxy))
       handle_response(upstream, req, flow_id, started, host, port, scheme,
@@ -3418,6 +3431,16 @@ module Gori::Proxy
         "went through byte-exact. Said once per {direction, host, coding} on this connection; " \
         "every affected flow carries the same statement in History."
       end
+    end
+
+    # The recorded counterpart of a request-body rewrite: when `apply_body_rewrite` re-framed the
+    # wire head (`before` → `after`), re-frame the client-form `record_req` to the same body, so
+    # History keeps the client's request line with the length that went on the wire (#1424). A
+    # rewrite that matched nothing returns the head untouched, and so does this (P7).
+    private def reframed_record(record_req : Codec::RawRequest, before : Bytes, after : Bytes,
+                                body : Bytes?) : Codec::RawRequest
+      return record_req if after == before
+      Codec::Http1.parse_request_head(reframe_to_length(record_req.raw_head, body.try(&.size) || 0))
     end
 
     # Rebuild a message head framed as `Content-Length: len`: drop any Transfer-Encoding

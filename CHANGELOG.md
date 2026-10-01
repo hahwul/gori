@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- History: a forward-proxy request held at Intercept and forwarded unedited or dropped, rewritten by a body rule, or refused or failed after a Match&Replace rule fired keeps the client's own request line (`GET http://host/p`) instead of the origin-form line gori sends upstream (#1424)
 - Authorize: each row keeps its verdict on the card in a narrow terminal, and a wide one shows the whole Δ vs baseline (#1433)
 - TUI: the Fuzzer's response detail has one blank line between head and body, a shrunk Repeater no longer leaves its caret on the borders, and the Env empty state names the palette for Change prefix (#1433)
 - Intercept: a held response names the method of the request as you edited it, turning catch on no longer warns about an HTTPS→HTTP/1.1 downgrade gori stopped doing, and `gori run intercept direction` and MCP `intercept_set_direction` accept the `requestonly`/`responseonly` that `intercept list` reports (#1433)
