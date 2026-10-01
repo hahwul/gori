@@ -80,6 +80,13 @@ module Gori::Tui
       # OTHER note's links wait for `Notes.save`'s post-commit cleanup, which is what keeps a
       # refused save from destroying the evidence of a note that is still there.
       @unpersisted = Set(Int64).new
+      # Each note's text as this session last knew it to be PERSISTED (LF-normalized, as the
+      # buffer is): set by a merge from the store and by a committed save, per note. A save
+      # sends only the notes whose buffer differs from this, or that have none (new here).
+      # Sending every loaded note let an untouched one count as "an edit that wins" in
+      # `Notes.merge`, and since `reload` is skipped while dirty, that copy is stale exactly
+      # when a peer wrote during an edit: the save reverted the peer's note (#1415).
+      @baseline = {} of Int64 => String
       @mode = InputMode::Read
       @read = TextReadState.new
       # The two stored rows (DOCS_KEY, LEGACY_KEY) the note list was last merged FROM — see
@@ -188,6 +195,10 @@ module Gori::Tui
         end
       @next_id = {@next_id, doc.next_id}.max
       doc.notes.each { |e| @unpersisted.delete(e.id) }
+      # A merge only runs on a clean list, so every buffer the document carried now holds its
+      # persisted text. The placeholder minted above for an empty set carries none.
+      @baseline = {} of Int64 => String
+      @notes.each { |n| @baseline[n.id] = n.area.text unless @unpersisted.includes?(n.id) }
       @dirty = false
       # Leave @mode alone — soft merge must not force READ. `@read` is left alone too, and
       # that is right for BOTH branches above only because of `TextReadState#bind`: the skip
@@ -567,9 +578,17 @@ module Gori::Tui
     # write was attempted and rolled back. `NotesController#save_notes` says so on the status
     # line; the buffers and `@dirty` are left exactly as they were, so the text is still on
     # screen and the next save path (esc, a sub-tab switch, quit) is a real retry.
+    #
+    # Only the notes this session changed go into the merge — see `@baseline`. A note whose
+    # buffer still matches its baseline is not ours to write: the persisted copy (a peer's
+    # edit, or a peer's delete) stands.
     def save(store : Store) : Bool
       return true unless @dirty
-      mine = @notes.map { |n| Notes::NoteEntry.new(n.id, n.area.text) }
+      mine = [] of Notes::NoteEntry
+      @notes.each do |n|
+        text = n.area.text
+        mine << Notes::NoteEntry.new(n.id, text) unless @baseline[n.id]? == text
+      end
       # `Notes.save` runs that merge INSIDE the write transaction. Merging against a set read
       # by a separate statement kept the promise only until a peer wrote between the two: the
       # document we then committed was built before their row landed, so their note was gone
@@ -583,6 +602,11 @@ module Gori::Tui
       # newly-minted note persisted, so its id leaves `@unpersisted` here and nowhere else.
       @next_id = merged.next_id
       merged.notes.each { |n| @unpersisted.delete(n.id) }
+      # What we sent is what is on disk now. An unsent note keeps its old baseline even when
+      # the merged document carries a peer's newer text for it: the buffer still holds the old
+      # one until the next `reload`, and the two must agree or a later save would send it.
+      mine.each { |n| @baseline[n.id] = n.text }
+      @deleted_ids.each { |id| @baseline.delete(id) }
       # The list is our edits now, not a merge of any stored row — see `reload`.
       @merged_raw = nil
       # …and `@dirty` only comes down on a write that COMMITTED. Clearing it regardless meant
