@@ -83,11 +83,10 @@ module Gori
 
     # A settings file is THERE and `load_raw` could not read a byte of it — EACCES on a file a
     # `sudo gori` left root-owned, a `--config` naming a directory, a transient I/O error. The
-    # separate flag exists because that rescue is silent: it sets no `load_warning` (nothing was
-    # parsed, so nothing complained) and leaves no `.corrupt` copy (`load_root` writes one where
-    # a PARSE fails, and this never got that far), so the only record that the operator's file
-    # was never seen is this bool. `load_degraded?` folds it in with two other cases; the one
-    # caller that has to tell them apart is `reset_to_factory`.
+    # separate flag exists because that rescue leaves no `.corrupt` copy (`load_root` writes one
+    # where a PARSE fails, and this never got that far), so nothing of the operator's file is
+    # kept anywhere. `save` and `reset_to_factory` both refuse on it; `load_degraded?` folds it
+    # in with two other cases.
     @@load_unreadable = false
 
     # An explicit settings file for THIS process (`gori --config PATH`), overriding both
@@ -152,6 +151,12 @@ module Gori
         # could not be READ (`@@load_unreadable`: everything below is at a factory default over
         # a file whose contents nobody has seen).
         @@load_unreadable = File.exists?(path)
+        # Said, because `save` now refuses on it and a refusal nobody can explain is a mystery
+        # "could not save settings" on every toggle.
+        if @@load_unreadable
+          note_load_warning("settings: #{path} exists but could not be read — using defaults " \
+                            "for this run, and this run will not overwrite that file")
+        end
         # "No file at the default path" and "no file at the path you named" are different facts —
         # see `explicit_path?`. Only the first one is a date gori may act on.
         adopt_env_syntax_for_absent_key(absent_explicit: !@@load_unreadable && explicit_path?)
@@ -742,7 +747,13 @@ module Gori
       # #594 loss with a different door: the merge cannot recover a section it never read
       # (see `@@load_partial`), so refuse instead — reported like any other failed write,
       # which the callers already handle.
-      return false if @@load_partial
+      #
+      # A file that is there and could not be READ is the same refusal for a stronger reason:
+      # NONE of it reached memory, and nothing was kept aside (the `.corrupt` copy is written
+      # where a parse fails, not where a read does). In a directory the operator still owns —
+      # a settings.json a `sudo gori` left root-owned — the rename below lands on top of a file
+      # gori never opened. `reset_to_factory` asks the same question for the same reason.
+      return false if @@load_partial || @@load_unreadable
       Paths.ensure_dirs
       # With --config / $GORI_CONFIG the file can live outside GORI_HOME, whose directory
       # ensure_dirs above does not create. The temp+rename below would fail on a missing

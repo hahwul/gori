@@ -1196,6 +1196,53 @@ describe Gori::Settings do
     end
   end
 
+  # The same refusal for a file that is there and could not be READ at all — EACCES on a
+  # settings.json a `sudo gori` left root-owned. Nothing of it reached memory, the merge has no
+  # base, and the directory is still the operator's, so `DurableFile`'s rename landed a factory
+  # document on top of a file gori never opened — on the very first save of the session, which
+  # the project picker's update check makes on every launch. `reset_to_factory` already refused
+  # here; the ordinary save did not. A 0000 file stages the read failure under one uid.
+  it "refuses to write over a settings file it could not read" do
+    dir = File.tempname("gori-settings-unreadable")
+    Dir.mkdir_p(dir)
+    prev = ENV["GORI_HOME"]?
+    prev_theme = Gori::Settings.theme
+    sink = IO::Memory.new
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.warning_io = sink
+      Gori::Settings.reset_load_warning_guard
+      original = %({"theme":"dracula","network":{"bind_port":9999}})
+      File.write(Gori::Settings.path, original)
+      File.chmod(Gori::Settings.path, 0o000)
+      # Root reads through a 0000 mode, so there is no read failure to stage.
+      next if File::Info.readable?(Gori::Settings.path)
+
+      Gori::Settings.load
+      Gori::Settings.load_degraded?.should be_true
+      Gori::Settings.load_warning.not_nil!.should contain(Gori::Settings.path)
+      sink.to_s.should contain("will not overwrite")
+
+      Gori::Settings.theme = "goriday"
+      Gori::Settings.save.should be_false
+      File.chmod(Gori::Settings.path, 0o600)
+      File.read(Gori::Settings.path).should eq(original) # still the operator's file
+
+      # A load that can read it again clears the refusal.
+      Gori::Settings.load
+      Gori::Settings.load_degraded?.should be_false
+      Gori::Settings.load_warning.should be_nil
+      Gori::Settings.save.should be_true
+    ensure
+      File.chmod(Gori::Settings.path, 0o600) rescue nil
+      Gori::Settings.warning_io = nil
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.theme = prev_theme
+      Gori::Settings.bind_port = 8070
+    end
+  end
+
   # Preserving the file was only half of it: the fallback to defaults was SILENT, so a
   # hand-edited comma reset the bind address, the upstream connection rules and the TLS
   # pass-through list with the only trace a `.corrupt` sibling nobody was told to look for.
