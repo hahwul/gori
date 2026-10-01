@@ -623,7 +623,7 @@ module Gori::Proxy::H2
     # LAST one only when the trailing token is a version token — so a `:path` holding a raw
     # space (malformed, but a peer can send one and P7 says we carry it) survives the round
     # trip. Deliberately NOT `Codec::Http1.parse_request_head`, whose `parts.size != 3` rule
-    # (`http1.cr:107-120`) would call that line malformed and truncate the path.
+    # (`Http1.start_line_malformed?`) would call that line malformed and truncate the path.
     #
     # Public for the same reason as `header_lines`: `Repeater::H2Engine` had a copy that cut
     # at the LAST space unconditionally, so a version-less `GET /noversion` — what a parser-

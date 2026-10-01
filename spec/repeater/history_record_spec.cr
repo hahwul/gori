@@ -86,6 +86,22 @@ describe Gori::Repeater::HistoryRecord do
     end
   end
 
+  # Over h2 the wire carried `:path: /a b`, not an h1 line, so that is what the row files.
+  it "files an h2 send's target as the :path it went out with" do
+    with_store do |store|
+      opts = Gori::Repeater::PlanOptions.new(["POST /a b HTTP/1.1\r\nHost: t.test\r\n\r\n".to_slice],
+        default_target: "https://t.test")
+      opts.http2 = true
+      plan = Gori::Repeater::Plan.build(opts, ungated_outbound)
+      result = result_for("HTTP/2 400\r\n\r\n", nil)
+      id = Gori::Repeater::HistoryRecord.record(store, plan, result, created_at: 1_i64,
+        wire: plan.wire_bytes, surface: Gori::FlowSource::Surface::Cli)
+      detail = store.get_flow(id).not_nil!
+      detail.row.target.should eq("/a b")
+      detail.http_version.should eq("HTTP/2")
+    end
+  end
+
   it "records an errored send as an Error flow" do
     with_store do |store|
       plan = plan_for("GET /x HTTP/1.1\r\nHost: t.test\r\n\r\n")
