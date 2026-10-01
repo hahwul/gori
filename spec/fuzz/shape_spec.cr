@@ -11,7 +11,7 @@ private def row(body : String, payload : String = "p", *,
   raw = Gori::Repeater::Result.new(head.to_slice, body.to_slice, response, 1000_i64, error,
     incomplete, timed_out: timed_out)
   request = "GET /?q=#{payload} HTTP/1.1\r\nHost: t\r\n\r\n"
-  spans = [{"GET /?q=".bytesize, payload.bytesize}]
+  spans = [{"GET /?q=".bytesize, "GET /?q=".bytesize + payload.bytesize}]
   job = F::Job.new(index, [payload], 0, request.to_slice, spans)
   F::Matcher.new(keep_bodies: :none).build(job, raw)
 end
@@ -115,6 +115,44 @@ describe Gori::Fuzz::Shape do
     refused = "#{Gori::RequestMacro::ERROR_PREFIX}failed at step 1 (login → connection refused) — the candidate was not sent"
     F::Shape.error_class(refused).should eq(F::Shape::ErrorClass::Other)
     F::Shape.error_class("#{Gori::RequestMacro::ERROR_PREFIX}failed at step 1 (login → timed out)").should eq(F::Shape::ErrorClass::Other)
+  end
+
+  # Spans are `{start, end}` (`Template#render_spans`). Each example puts on the wire bytes the
+  # generated payload is not, the way a `¦chain` does, so the span is the only needle that
+  # masks them (#1422).
+  it "masks exactly the spliced bytes of a position in the front half of the request" do
+    raw, spans = F::Template.parse("GET /?q=§x§&tail=1 HTTP/1.1\r\nHost: t\r\n\r\n").render_spans(["WIRE"])
+    needles = F::Shape.needles(F::Job.new(0_i64, ["generated"], 0, raw, spans))
+    needles.should contain("WIRE".to_slice)
+    needles.none? { |n| String.new(n).includes?("&tail") }.should be_true
+  end
+
+  it "masks the spliced bytes of a position in the back half of the request" do
+    raw, spans = F::Template.parse("POST / HTTP/1.1\r\nHost: t\r\n\r\nq=§x§").render_spans(["WIRE"])
+    F::Shape.needles(F::Job.new(0_i64, ["generated"], 0, raw, spans)).should contain("WIRE".to_slice)
+  end
+
+  it "masks the spliced bytes of a WebSocket frame position" do
+    template = F::Template.parse("hello §x§ world")
+    payload, spans = template.render_spans(["WIRE"])
+    frame = F::WsFrame.new(1, payload, Gori::Proxy::WS::Shape::DEFAULT, payload_spans: spans)
+    job = F::Job.new(0_i64, ["generated"], 0, "GET / HTTP/1.1\r\nHost: t\r\n\r\n".to_slice, ws_frames: [frame])
+    needles = F::Shape.needles(job)
+    needles.should contain("WIRE".to_slice)
+    needles.none? { |n| String.new(n).includes?("world") }.should be_true
+  end
+
+  it "keeps echoes of a late, transformed payload in one shape" do
+    head = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n"
+    template = F::Template.parse("POST / HTTP/1.1\r\nHost: t\r\n\r\nq=§x§")
+    shapes = {"B" => "QQ==", "9" => "OQ==", "long" => "bG9uZ3Bhc3N3b3Jk"}.map do |payload, wire|
+      raw, spans = template.render_spans([wire])
+      job = F::Job.new(0_i64, [payload], 0, raw, spans)
+      result = Gori::Repeater::Result.new(head.to_slice, "<p>You sent #{wire}</p>".to_slice,
+        Gori::Proxy::Codec::Http1.parse_response_head(head.to_slice), 1000_i64, nil, false)
+      F::Matcher.new(keep_bodies: :none).build(job, result).shape
+    end
+    shapes.uniq.size.should eq(1)
   end
 
   it "ignores empty needles without crashing or changing the shape" do
