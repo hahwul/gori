@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- History: a forward-proxy request held at Intercept and forwarded unedited or dropped, rewritten by a body rule, or refused or failed after a Match&Replace rule fired keeps the client's own request line (`GET http://host/p`) instead of the origin-form line gori sends upstream (#1424)
 - Rewriter: the rule form scrolls on a short terminal, so its Save row is drawn at 80×24, and a click on the form's preview line or border no longer saves the rule (#1420)
 - Authorize: each row keeps its verdict on the card in a narrow terminal, and a wide one shows the whole Δ vs baseline (#1433)
 - TUI: the Fuzzer's response detail has one blank line between head and body, a shrunk Repeater no longer leaves its caret on the borders, and the Env empty state names the palette for Change prefix (#1433)
