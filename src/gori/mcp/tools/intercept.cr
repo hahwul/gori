@@ -248,11 +248,10 @@ module Gori
         unless raw
           return err("missing required 'direction' (#{INTERCEPT_DIRECTIONS.join(" | ")})", "INVALID_ARGUMENT", field: "direction")
         end
-        dir = raw.downcase
-        unless INTERCEPT_DIRECTIONS.includes?(dir)
+        unless dir = Interceptor::Direction.from_arg?(raw)
           return err("invalid 'direction' #{raw.inspect} (expected #{INTERCEPT_DIRECTIONS.join(" | ")})", "INVALID_ARGUMENT", field: "direction")
         end
-        enqueue_intercept("set_direction", arg: dir)
+        enqueue_intercept("set_direction", arg: dir.arg)
       end
 
       # Enqueue one command for the live capturing instance, then bounded-poll its ack so the
@@ -401,9 +400,10 @@ module Gori
         end
 
         tool j, "intercept_set_direction",
-          "Set which leg(s) intercept holds: both | request | response. Applied by the " \
+          "Set which leg(s) intercept holds: both | request | response (the requestonly / " \
+          "responseonly spellings intercept_list reports are accepted too). Applied by the " \
           "capturing instance." do |s|
-          s.field "direction", enumprop("which side of a flow the proxy holds", INTERCEPT_DIRECTIONS), required: true
+          s.field "direction", enumprop("which side of a flow the proxy holds", INTERCEPT_DIRECTION_ARGS), required: true
         end
       end
     end

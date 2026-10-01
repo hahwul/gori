@@ -42,13 +42,34 @@ module Gori
 
     # Which leg of a flow to hold: both, requests only, or responses only. Lets a
     # user who only cares about outgoing requests (the common case) skip the
-    # response round-trip without disabling intercept. Does NOT relax the h2→h1
-    # downgrade gate — a response can only be held on the interceptable h1 path, so
-    # the connection must stay h1 for either direction.
+    # response round-trip without disabling intercept.
     enum Direction
       Both
       RequestOnly
       ResponseOnly
+
+      # The one reader of a `set_direction` argument, shared by `gori run intercept direction`,
+      # MCP `intercept_set_direction` and the bridge that applies them. `request` / `response`
+      # are the documented spellings; `requestonly` / `responseonly` are what every READER
+      # publishes (the bridge blob, `intercept list`, the statusline row — a documented machine
+      # contract, so it stays), and refusing them meant a value could not be read back in
+      # (#1433). Nil for anything else: the bridge refuses it rather than falling back to Both.
+      def self.from_arg?(s : String) : Direction?
+        case s.strip.downcase
+        when "both"                     then Both
+        when "request", "requestonly"   then RequestOnly
+        when "response", "responseonly" then ResponseOnly
+        end
+      end
+
+      # The documented spelling `from_arg?` reads, for a surface to enqueue.
+      def arg : String
+        case self
+        in .both?          then "both"
+        in .request_only?  then "request"
+        in .response_only? then "response"
+        end
+      end
     end
 
     # The Subject struct the conditional-intercept filter matches against.
