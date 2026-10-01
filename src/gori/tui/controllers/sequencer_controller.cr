@@ -767,10 +767,17 @@ module Gori::Tui
         # `apply_event`'s Done/Error arms — so a dead fiber left the bottom-bar job spinning
         # and the exit prompt counting a collection that had already stopped.
         ::Log.error(exception: ex) { "sequencer run fiber died" }
-        view.finish_run # before the blocking send — see the Miner's sibling for why
-        events.send({view, Sequencer::ErrorEvent.new("#{ex.class}: #{ex.message}")}) unless terminal_sent
+        unless terminal_sent
+          view.finish_run # before the blocking send — see the Miner's sibling for why
+          events.send({view, Sequencer::ErrorEvent.new("#{ex.class}: #{ex.message}")})
+        end
       ensure
-        view.finish_run
+        # If no terminal event was placed on the channel (e.g. an unhandled failure
+        # before any verdict was sent), clear running so the pane is not permanently wedged.
+        # When terminal_sent is true, DoneEvent/ErrorEvent is already queued ahead of
+        # the drain, which must call view.finish_run AFTER applying all buffered SampleEvents;
+        # clearing it here prematurely stops the follow cursor ~100 samples short of the tail (#1429).
+        view.finish_run unless terminal_sent
       end
       @host.status("collecting tokens in the background — watch the bottom bar / notifications")
     end
