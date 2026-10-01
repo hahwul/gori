@@ -1,3 +1,4 @@
+require "base64"
 require "./ffi"
 
 module Gori::Proxy::Tls
@@ -120,6 +121,17 @@ module Gori::Proxy::Tls
       ptr = der.to_unsafe
       LibCrypto.i2d_x509(@handle, pointerof(ptr))
       der
+    end
+
+    # PEM encoding, byte-identical to what write_pem puts in a file (RFC 7468: base64 in
+    # 64-column lines between the CERTIFICATE labels), built from to_der so it needs no
+    # memory BIO.
+    def to_pem : String
+      String.build do |io|
+        io << "-----BEGIN CERTIFICATE-----\n"
+        Base64.strict_encode(to_der).each_char.each_slice(64) { |line| io << line.join << '\n' }
+        io << "-----END CERTIFICATE-----\n"
+      end
     end
 
     def finalize

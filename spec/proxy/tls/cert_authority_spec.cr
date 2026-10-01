@@ -182,6 +182,47 @@ describe Gori::Proxy::Tls::CertAuthority do
     end
   end
 
+  # The PEM used to be File.read off disk while the DER, the SPKI pin and every signature came
+  # from the in-memory root. `gori ca regenerate` from another shell (which tells the operator
+  # running instances keep the old CA) then made the self-serve page hand out a PEM of a root
+  # this process never signs with; deleting the file made the page raise.
+  describe "the root PEM it hands out" do
+    it "is byte-identical to the file it wrote" do
+      with_ca_dir do |dir|
+        ca = Gori::Proxy::Tls::CertAuthority.load_or_create(dir)
+        ca.ca_cert_pem.should eq(File.read(ca.ca_cert_path))
+      end
+    end
+
+    it "stays the root this process signs with after another process rewrites the dir" do
+      with_ca_dir do |dir|
+        ca = Gori::Proxy::Tls::CertAuthority.load_or_create(dir)
+        live = ca.ca_cert_pem
+        Gori::Proxy::Tls::CertAuthority.regenerate_at(dir) # `gori ca regenerate` elsewhere
+        File.read(ca.ca_cert_path).should_not eq(live)
+        ca.ca_cert_pem.should eq(live)
+        Base64.decode(ca.ca_cert_pem.lines.reject(&.starts_with?("-----")).join).should eq(ca.ca_cert_der)
+      end
+    end
+
+    it "survives the file being deleted underneath it" do
+      with_ca_dir do |dir|
+        ca = Gori::Proxy::Tls::CertAuthority.load_or_create(dir)
+        live = ca.ca_cert_pem
+        File.delete(ca.ca_cert_path)
+        ca.ca_cert_pem.should eq(live)
+      end
+    end
+
+    it "tracks an in-process regenerate!" do
+      with_ca_dir do |dir|
+        ca = Gori::Proxy::Tls::CertAuthority.load_or_create(dir)
+        ca.regenerate!
+        ca.ca_cert_pem.should eq(File.read(ca.ca_cert_path))
+      end
+    end
+  end
+
   it "exports the root CA as DER matching its PEM body" do
     with_ca_dir do |dir|
       ca = Gori::Proxy::Tls::CertAuthority.load_or_create(dir)

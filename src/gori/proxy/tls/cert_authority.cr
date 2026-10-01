@@ -105,14 +105,18 @@ module Gori::Proxy::Tls
       end
     end
 
-    # PEM bytes of the root certificate, for `gori ca --pem` / TUI CA copy / trust setup.
+    # PEM of the root certificate, for `gori ca --pem` and the self-serve CA download page.
+    # Encoded from the live in-memory cert, like ca_cert_der, never re-read from disk: the
+    # file can change under a running gori (`gori ca regenerate` in another shell, which
+    # says running instances keep the old CA) or vanish, and then the page offered a PEM of
+    # a root this process does not sign with, beside a DER and an SPKI pin of the one it
+    # does. A deleted file also raised here and took the whole page down with it.
     def ca_cert_pem : String
-      File.read(@ca_cert_path)
+      @cert.to_pem
     end
 
-    # DER bytes of the root certificate, for the self-serve CA download page's .der
-    # form. Encoded from the live in-memory cert (so it tracks regenerate!/import!),
-    # unlike ca_cert_pem which reads the on-disk file.
+    # DER bytes of the root certificate, for the self-serve CA download page's .der form.
+    # Encoded from the live in-memory cert, so it tracks regenerate!/import!.
     def ca_cert_der : Bytes
       @cert.to_der
     end
