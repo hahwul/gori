@@ -2084,8 +2084,8 @@ module Gori::Tui
     # keep your hands off @overlay". The missing-path branch returns false for the ordinary
     # reason: keep the form up so it can be corrected.
     private def submit_ca_import(ov : CAImportOverlay) : Bool
-      cert = ov.cert_path
-      key = ov.key_path
+      cert = ov.resolved_cert_path
+      key = ov.resolved_key_path
       if cert.empty? || key.empty?
         @toast = "CA import: both certificate and key paths are required"
         return false
