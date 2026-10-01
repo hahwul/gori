@@ -173,6 +173,22 @@ describe Gori::Tui::FuzzerView do
       view.selected_result.not_nil!.body.should eq(wire)
     end
 
+    # One blank row between the head and the body, as History draws it — the head's own
+    # terminator used to stack two more on top of the separator this pane adds (#1433).
+    it "separates the head from the body with exactly one blank line" do
+      ["HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n", "HTTP/1.1 200 OK\nContent-Type: text/plain\n\n"].each do |raw_head|
+        view = loaded_fuzzer
+        view.append_result(Gori::Fuzz::Result.new(
+          0_i64, ["p0"], nil, 200, 4_i64, 1, 0, 1000_i64,
+          nil, true, false, nil, raw_head.to_slice, "BODY".to_slice))
+        view.open_detail
+
+        lines = view.detail_plain_lines
+        ct = lines.index("Content-Type: text/plain").not_nil!
+        lines[ct + 1..ct + 2].should eq(["", "BODY"])
+      end
+    end
+
     it "falls back to captured bytes when the declared encoding cannot be decoded" do
       raw = "not a gzip stream"
       head = "HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\n\r\n".to_slice
