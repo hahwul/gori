@@ -808,6 +808,11 @@ module Gori
       # both/request/response — the intercept direction, and (minus `both`) the two sides a
       # probe rule and a diff pane name.
       INTERCEPT_DIRECTIONS = %w[both request response]
+      # What `intercept_set_direction`'s schema enum admits: the documented spellings plus the
+      # `requestonly` / `responseonly` that `intercept_list` reports, which
+      # `Interceptor::Direction.from_arg?` reads back (#1433). A schema-checking client would
+      # otherwise refuse the value it was just handed.
+      INTERCEPT_DIRECTION_ARGS = INTERCEPT_DIRECTIONS + %w[requestonly responseonly]
       # The out-of-band provider kinds, for `oast_start`'s `provider` and the saved-provider
       # tools' `kind` — one list, because they are one set and both readers run it through
       # `Oast::ProviderKind.parse?`.

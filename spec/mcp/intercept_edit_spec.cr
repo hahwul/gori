@@ -193,3 +193,28 @@ describe "MCP intercept_forward_edit — WebSocket byte provenance (R9/F1)" do
     end
   end
 end
+
+# `intercept_list` reports `requestonly`; feeding that back must set the same direction, and
+# the capturing instance is handed the documented spelling it has always read (#1433).
+describe "MCP intercept_set_direction" do
+  it "accepts the spelling intercept_list reports and enqueues the documented one" do
+    {"requestonly" => "request", "ResponseOnly" => "response", "request" => "request", "both" => "both"}.each do |given, queued|
+      with_store do |store|
+        with_live_intercept(store) do
+          resp = mcp_drive(store, %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"intercept_set_direction","arguments":{"direction":#{given.to_json}}}}))[0]["result"]
+          resp["isError"]?.try(&.as_bool).should_not be_true
+          store.intercept_commands_after(0_i64, 10).first.arg.should eq(queued)
+        end
+      end
+    end
+  end
+
+  it "still refuses a direction it cannot read" do
+    with_store do |store|
+      resp = mcp_drive(store, %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"intercept_set_direction","arguments":{"direction":"requests"}}}))[0]["result"]
+      resp["isError"].as_bool.should be_true
+      resp["structuredContent"]["field"].as_s.should eq("direction")
+      store.intercept_commands_after(0_i64, 10).should be_empty
+    end
+  end
+end

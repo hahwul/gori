@@ -4200,6 +4200,11 @@ module Gori::Tui
       # the evidence kept on the result.
       body = Entity.bytes(head, r.body, Proxy::Codec::Body::CAPTURE_READ_MAX)
       lines = String.new(head).scrub.split('\n').map(&.rstrip('\r'))
+      # The head carries its own terminator, so the split already ends in two blanks; the body
+      # gets ONE separator, as History's drill-in draws it (#1433).
+      while lines.last? == ""
+        lines.pop
+      end
       if body && !body.empty?
         lines << ""
         lines.concat(String.new(body).scrub.split('\n').map(&.rstrip('\r')))
