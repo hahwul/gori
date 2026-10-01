@@ -4709,3 +4709,31 @@ devices and legacy CGI are exactly what an operator points gori at.
 - **Visible.** Probe's passive `bare_lf_response` flags any bare LF in a response head.
 
 h2 has no line endings and is unaffected.
+
+### 2026-10-01: a held message is evidence; the intercept editor expands only the names the operator typed (#1416)
+
+Refines: [P7](#p7), and the parity invariant for the intercept edit (AGENTS.md "Three surfaces").
+
+The TUI intercept editor ran the `$ENV`/`$GEN` pass, with every escape consumed, over the whole
+buffer, and that buffer is seeded from the held message's own bytes. So appending one byte to a
+request line substituted a project secret into a captured `a=$ENV.FOO`, minted a value for a
+captured `$GEN.UUID`, turned `pa$$word` into `pa$word`, and resynced Content-Length to match —
+for a held response too. CLI `intercept edit` and MCP `intercept_forward_edit` forward verbatim,
+so the same edit put different bytes on the wire depending on the surface.
+
+- **Per name, the Repeater's evidence rule.** A name the held message arrived with stays literal
+  (`Env.literal_keys` of the seed, passed to `Env.expand_wire(literal:)`, which covers GEN as
+  well as ENV in the one pass); a name the operator types is still a reference, which keeps
+  #524's typed `Authorization: Bearer $ENV.TOKEN`. When a typed name collides with a captured
+  one, gori cannot tell the occurrences apart and evidence wins. The set is re-derived from the
+  seed bytes on `Env.highlight_rev`, and the editor is handed the same bytes to paint.
+- **No escape is consumed** (`unescape: Owns::None`): a `$$` in captured bytes is two bytes the
+  client sent. The accepted cost is the one every evidence path already pays — an operator's own
+  `$$ENV.X` is forwarded as typed.
+- **Not head-only.** Expanding the head and treating the body as bytes would still substitute
+  into a client header or query string that carries `$ENV.X`; the axis is provenance, not where
+  in the message the byte sits.
+- **The surfaces still differ, by design and only there.** CLI and MCP expand nothing; the TUI
+  additionally resolves names the operator typed into the held message. Neither expands or
+  unescapes a `$` the client sent (both still resync Content-Length and promote the head's bare
+  LFs, which are the edit's framing, not its tokens).

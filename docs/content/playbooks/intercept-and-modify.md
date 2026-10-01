@@ -41,7 +41,7 @@ gori run intercept                       # list held items + catch state
 gori run intercept edit 3 --raw-file edited.txt   # forward item 3 with edited bytes
 ```
 
-In the TUI editor, an edited request is forwarded with `Content-Length` resynced (on by default; `Ctrl-L` toggles it) and `$ENV.KEY` [environment variables](/guide/repeater-and-fuzzer/#environment-variables) and `$GEN.*` tokens expanded (`$$ENV.KEY` for the literal text); extract-rule `$BIND.NAME` bindings are not resolved on this path. `gori run intercept edit` expands nothing: the body goes out verbatim, and `--no-update-content-length` keeps the `Content-Length` you declared. Otherwise what you typed is what goes out.
+In the TUI editor, an edited request is forwarded with `Content-Length` resynced (on by default; `Ctrl-L` toggles it) and the `$ENV.KEY` [environment variables](/guide/repeater-and-fuzzer/#environment-variables) and `$GEN.*` tokens you typed expanded; extract-rule `$BIND.NAME` bindings are not resolved on this path. Tokens and `$$` escapes that were already in the held message are the client's bytes and go out as they arrived, as does a token you type whose name the held message already carried. An escape you type, such as `$$ENV.KEY`, is also forwarded as typed. `gori run intercept edit` expands nothing: the body goes out verbatim, and `--no-update-content-length` keeps the `Content-Length` you declared. Otherwise what you typed is what goes out.
 
 **Checkpoint.** The edited request reaches the origin: switch to **History** and read the flow to confirm the change and the origin's response.
 

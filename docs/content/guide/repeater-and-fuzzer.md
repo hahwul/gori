@@ -66,7 +66,7 @@ Outbound requests carry three kinds of token, told apart by their namespace:
 | `$BIND.NAME` | a [session binding](/guide/proxy/#session-bindings) an extract rule filled | at send time, out of the active identity's table |
 | `$GEN.NAME` | a built-in value generator | at send time, once per outbound request |
 
-Tokens stay as literal text in the editor and expand only on the way out: in Repeater, the Fuzzer, the Miner, Intercept forwards, `gori run`, and MCP `send_request`.
+Tokens stay as literal text in the editor and expand only on the way out: in Repeater, the Fuzzer, the Miner, Intercept forwards, `gori run`, and MCP `send_request`. In a Repeater request opened from a capture, or a message held at Intercept, a token the captured bytes already carried is sent as it was; only the ones you type expand.
 
 `GEN` provides the values commonly needed while probing a target, without a Decoder chain or a stored secret:
 

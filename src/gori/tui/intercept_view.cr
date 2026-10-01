@@ -129,6 +129,14 @@ module Gori::Tui
       # different item loads, so the next forward still mints its own values.
       # A dial-less placeholder until the first held item loads and replaces it (`load_text`).
       @edit_generation = Env::Generation.new
+      # The held message's own text, as the editor was seeded with it — the PROVENANCE baseline
+      # for `$` tokens (#1416). A name that arrived with the capture is the client's byte, a name
+      # the operator types afterwards is a reference. Kept as the BYTES rather than the derived
+      # name set, re-derived on `Env.highlight_rev`, because the set reads the token grammar and
+      # the operator can flip it mid-hold (see `RepeaterView#adopt_evidence_env_seed`).
+      @evidence_seed = ""
+      @evidence_literals = Set(String).new
+      @evidence_rev = Env.highlight_rev
       # Cached highlight of the selected held item's bytes (read-only detail pane).
       # Held bytes are immutable, so the item id + theme is the base cache key —
       # recomputed only when the selection/theme changes, not every render. The loaded
@@ -532,13 +540,65 @@ module Gori::Tui
     # mirroring detail_window_for's @detail_win_id guard.
     private def load_text(it : Interceptor::Item) : Nil
       if @loaded_id != it.id
-        @editor.set_text(String.new(it.raw))
+        seed = String.new(it.raw)
+        @editor.set_text(seed)
+        adopt_evidence_seed(seed)
         @editor_dirty = false # freshly loaded — not yet modified
         # Named by the held item's destination: the proxy's upstream dial applies the
         # destination's TLS rule, and a `$GEN.USER_AGENT` typed here should agree with it (#1153).
         @edit_generation = Env::Generation.for_dial(it.host, it.scheme)
       end
       @hex = nil # a text item never has one; clearing here is what keeps `text_editing?` honest
+    end
+
+    # Record the held message's text as the `$`-token baseline, and hand the editor the same
+    # bytes so it paints the capture's tokens as the literal bytes a forward sends them as —
+    # the pane must not promise a substitution the wire does not make.
+    private def adopt_evidence_seed(seed : String) : Nil
+      @evidence_seed = seed
+      @evidence_rev = Env.highlight_rev
+      @evidence_literals = Env.literal_keys(seed)
+      @editor.env_literal_source = seed
+    end
+
+    # The names the held message arrived with, re-derived from the seed when the grammar moved
+    # under it. Read through this and never off the ivar: it is on the forward path, where being
+    # one grammar behind substitutes a project value into the client's own bytes.
+    private def evidence_literals : Set(String)
+      rev = Env.highlight_rev
+      unless @evidence_rev == rev
+        @evidence_rev = rev
+        @evidence_literals = Env.literal_keys(@evidence_seed)
+      end
+      @evidence_literals
+    end
+
+    # The edited buffer as wire bytes, with the operator's `$ENV`/`$GEN` references resolved —
+    # and nothing else. The ONE expansion both the forward (`pending_edit`) and the visible
+    # Content-Length (`reflect_content_length_in_editor`) read, so the pane measures the bytes
+    # the socket gets.
+    #
+    # The buffer is EVIDENCE: it was seeded from bytes a client (or an origin) sent, and an edit
+    # to one header does not make the rest of it the operator's (P7, #1416). This used to expand
+    # the whole buffer, so appending a byte to the request line substituted a project secret into
+    # a captured `a=$ENV.FOO`, minted a value for a captured `$GEN.UUID`, consumed every `$$`, and
+    # resynced Content-Length to match — none of it typed, all of it forwarded. CLI `intercept
+    # edit` and MCP `intercept_forward_edit` forward verbatim; this surface keeps one thing more,
+    # a name the operator TYPED, which is the per-name rule the Repeater's evidence tabs use
+    # (`RepeaterView#operator_env_vars`):
+    #
+    #   * `literal: evidence_literals` — a name the held message carried stays literal, whoever
+    #     typed the occurrence. gori cannot tell a typed `$ENV.FOO` from the captured one beside
+    #     it, and evidence wins when it cannot.
+    #   * `unescape: Owns::None` — a `$$` in captured bytes is two bytes the client sent. The cost
+    #     is that an operator's own `$$ENV.X` is forwarded as typed, as on every evidence path.
+    #
+    # `Env.expand_wire` (byte-level, head-only CRLF) rather than `split('\n').join("\r\n")`: a
+    # `$KEY` value carrying a CRLF would otherwise double into `\r\r\n`. Nothing resolves BIND
+    # after this — a forward goes straight to the origin — so `$BIND.X` stays literal.
+    private def edited_wire : Bytes
+      Env.expand_wire(@editor.wire_text, resolve: Env::Owns::Env | Env::Owns::Gen,
+        unescape: Env::Owns::None, generation: @edit_generation, literal: evidence_literals)
     end
 
     def stop_edit : Nil
@@ -591,25 +651,17 @@ module Gori::Tui
       # so it has to come back exactly as it was loaded. (`to_bytes` would be worse still: it
       # joins with CRLF because it exists for wire HEADS.)
       return {id, @editor.wire_bytes} if @loaded_ws
-      # `wire_text` again, for the same reason the Repeater's send path reads it: `text` is the
-      # LF projection, so an edit to a HEADER used to rewrite the BODY — every CR deleted and
-      # Content-Length silently resynced down to match. That is the "I only changed one header"
-      # case, which is most intercept edits, and it shipped different bytes to a live target.
-      # `Env.expand_wire` (gsub `/\r?\n/`) not `split('\n').join("\r\n")`: a `$KEY` value
-      # carrying a CRLF would otherwise double into `\r\r\n` and corrupt the forwarded bytes.
-      #
-      # `unescape: Owns::All`: a forward goes STRAIGHT to the origin — there is no send-seam
-      # `expand_bindings` after this the way there is on every Repeater/Fuzzer path — so this
-      # pass is the last one and therefore the one that owes the operator the escape. ALL of
-      # them, spelled as `Owns` rather than as `Escape::Consume`, because under the namespaced
-      # grammar there are three escapes to consume here (`$$ENV.X`, `$$BIND.X`, `$$GEN.X`) and
-      # the enum can only name one anonymous escape.
-      raw = Env.expand_wire(@editor.wire_text, resolve: Env::Owns::Env | Env::Owns::Gen,
-        unescape: Env::Owns::All, generation: @edit_generation)
+      # `wire_text` again (inside `edited_wire`), for the same reason the Repeater's send path
+      # reads it: `text` is the LF projection, so an edit to a HEADER used to rewrite the BODY —
+      # every CR deleted and Content-Length silently resynced down to match. That is the "I only
+      # changed one header" case, which is most intercept edits, and it shipped different bytes
+      # to a live target. The same case is why only the operator's own `$` references resolve
+      # there (#1416) — see `edited_wire`.
+      raw = edited_wire
       # `@sync_content_length` (^L) — see its toggle. When it is OFF the operator's declared
       # value goes out as written. When it is on the rewrite has ALREADY been reflected into
       # the visible buffer by `reflect_content_length_in_editor`, so the call below is
-      # normally a no-op that only catches a `$KEY` whose expansion changed the body length.
+      # normally a no-op that only catches a typed `$KEY` whose expansion changed the body length.
       return {id, raw} unless @sync_content_length
       {id, Fuzz::ContentLength.sync(raw, add_when_missing: true)}
     end
@@ -710,8 +762,8 @@ module Gori::Tui
     private def reflect_content_length_in_editor : Nil
       return unless @editing && @editor_dirty && @sync_content_length
       return if @loaded_ws # no head to update — see pending_edit
-      raw = Env.expand_wire(@editor.wire_text, resolve: Env::Owns::Env | Env::Owns::Gen,
-        unescape: Env::Owns::All, generation: @edit_generation) # see pending_edit
+      # The forward's own bytes, so the pane measures what the socket gets — see `edited_wire`.
+      raw = edited_wire
       synced = Fuzz::ContentLength.sync(raw, add_when_missing: true)
       return if synced == raw # already agrees (or chunked / no boundary — sync no-ops)
       synced_head = String.new(synced).split("\r\n\r\n", limit: 2).first

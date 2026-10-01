@@ -109,9 +109,8 @@ describe "Gori::Env — the namespaced escape" do
     end
   end
 
-  # The surface where ONE pass is the last pass (the TUI intercept forward). Under this grammar
-  # there are two escapes to consume there and `Escape::Consume` can only name one, so the seam
-  # asks in `Owns`.
+  # A surface where ONE pass is the last pass. Under this grammar there are two escapes to
+  # consume there and `Escape::Consume` can only name one, so the seam asks in `Owns`.
   it "unescape: Owns::All consumes both escapes in a single pass" do
     with_esc(vars: [{"A", "V"}], declared: ["B"], bound: {"B" => "W"}) do
       String.new(Gori::Env.expand_wire("$$ENV.A $$BIND.B $ENV.A\n\n", unescape: Gori::Env::Owns::All))

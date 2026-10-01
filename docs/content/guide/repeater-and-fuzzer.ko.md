@@ -66,7 +66,7 @@ gori run repeater <flow-id> --target https://staging.example.com --diff
 | `$BIND.NAME` | extract 규칙이 채운 [세션 바인딩](/ko/guide/proxy/#session-bindings) | 전송 시점, 활성 신원의 테이블에서 |
 | `$GEN.NAME` | 내장 값 생성기 | 전송 시점, 아웃바운드 요청마다 한 번 |
 
-토큰은 에디터에서 리터럴 텍스트로 남아 있다가 나가는 길에서만 확장됩니다. Repeater, Fuzzer, Miner, Intercept 포워드, `gori run`, MCP `send_request`가 그 지점입니다.
+토큰은 에디터에서 리터럴 텍스트로 남아 있다가 나가는 길에서만 확장됩니다. Repeater, Fuzzer, Miner, Intercept 포워드, `gori run`, MCP `send_request`가 그 지점입니다. 캡처에서 연 Repeater 요청이나 Intercept에 잡힌 메시지에서는 캡처된 바이트에 원래 있던 토큰은 그대로 나가고, 직접 입력한 토큰만 확장됩니다.
 
 `GEN`은 Decoder 체인이나 저장된 시크릿 없이 보안 테스트에서 자주 쓰는 값을 만듭니다.
 
