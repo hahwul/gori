@@ -36,20 +36,16 @@ class Gori::Tui::RepeaterView
   # Input/cursor target the active sub-pane (envelope or decoded); a content edit
   # dirties the right buffer — the envelope (persist/sync) or the decoded payload
   # (→ re-encode on send). Pure navigation dirties neither.
-  # `reflect: false` marks the buffer edited WITHOUT re-deriving Content-Length. Exactly one
-  # caller passes it — `edit_undo` — and it has to: reflection is itself an edit, so running
-  # it on the state ⌃Z just restored re-applies the change being undone. An auto-CL rewrite
-  # was therefore unreachable by undo at ANY depth: each press restored the line and the
-  # reflection put it straight back (and pushed another undo state doing so). Nothing is lost
-  # by skipping it — an undo snapshot is a state the buffer really held, Content-Length line
-  # included, so what comes back is already self-consistent.
-  private def mark_req_edit(reflect : Bool = true) : Nil
+  # Undo reflects too: the reflection folds into the edit's own undo step (see
+  # `reflect_chunk_content_length`), so re-deriving Content-Length on the state ⌃Z restored
+  # pushes nothing and cannot re-apply the change being undone.
+  private def mark_req_edit : Nil
     if req_split? && @req_pane == :decoded
       @decoded_dirty = true
       @ws_out_edited = true
     else
       @dirty = true
-      reflect_content_length_in_editor if reflect
+      reflect_content_length_in_editor
     end
   end
 
@@ -66,7 +62,7 @@ class Gori::Tui::RepeaterView
     ed = req_editor
     before = ed.edits
     ed.undo
-    mark_req_edit(reflect: false) if ed.edits != before # see mark_req_edit
+    mark_req_edit if ed.edits != before
   end
 
   # Characters the last `edit_insert` replaced — see TextArea#last_replaced.

@@ -61,6 +61,7 @@ module Gori::Tui
       @focus = :config
       @sel = 0
       @scroll = 0
+      @samples_last_h = 0 # sample rows the last frame drew — the PgUp/PgDn step
       # "Following" the live tail means the cursor sits on the newest sample, exactly as
       # HistoryView's `@follow` means it sits on `follow_index`. It is what makes `append_sample`
       # drag the cursor down while a run streams — and moving the cursor off the last row
@@ -297,6 +298,11 @@ module Gori::Tui
       return if @samples.empty?
       @sel = (@sel + d).clamp(0, @samples.size - 1)
       @follow = (@sel == follow_index)
+    end
+
+    # The PgUp/PgDn step: the sample rows the last frame drew, minus two of overlap.
+    def samples_page_rows : Int32
+      {@samples_last_h - 2, 1}.max
     end
 
     # The row a following cursor sits on. Samples are appended oldest-first, so the live tail
@@ -773,6 +779,7 @@ module Gori::Tui
       screen.text(inner.x + 16, inner.y, "TOKEN", Theme.muted, Theme.bg)
       screen.text(inner.right - 5, inner.y, "LEN", Theme.muted, Theme.bg)
       cap = inner.h - 1
+      @samples_last_h = cap
       ensure_visible(cap)
       cap.times do |i|
         idx = @scroll + i

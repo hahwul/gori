@@ -694,14 +694,19 @@ module Gori::Tui
     #
     # The other half of the defect above: even with the rewrite left default-on, a pane that
     # keeps showing the operator's `5` while the wire carries gori's `16` is a display lie
-    # about a live request. So the rewrite is applied where the operator can see it and undo
-    # it, exactly as the Repeater's auto-CL does — after which `pending_edit`'s own sync has
-    # nothing left to change and display and wire agree by construction.
+    # about a live request. So the rewrite is applied where the operator can see it, exactly
+    # as the Repeater's auto-CL does — after which `pending_edit`'s own sync has nothing left
+    # to change and display and wire agree by construction.
     #
     # `replace_line` (not `set_text`) keeps the caret and the undo stack, so this can run on
-    # every keystroke. The CL line is located in the RAW editor head BY CONTENT rather than
-    # by transplanting the expanded-space index: a multi-line `$KEY` expansion earlier in the
-    # head shifts the line count, and the index would then overwrite an unrelated header.
+    # every keystroke. It FOLDS into the edit's own undo step: as a step of its own, ⌃Z on the
+    # restored state re-applied it and pushed another, so undo was dead after any edit that
+    # changed the body length (#1417). Folded, an undo pops a pre-keystroke state, this
+    # re-derives its Content-Length and pushes nothing, and the next ⌃Z goes further back.
+    #
+    # The CL line is located in the RAW editor head BY CONTENT rather than by transplanting
+    # the expanded-space index: a multi-line `$KEY` expansion earlier in the head shifts the
+    # line count, and the index would then overwrite an unrelated header.
     private def reflect_content_length_in_editor : Nil
       return unless @editing && @editor_dirty && @sync_content_length
       return if @loaded_ws # no head to update — see pending_edit
@@ -714,7 +719,7 @@ module Gori::Tui
       lines = @editor.lines_snapshot
       head_end = lines.index(&.empty?) || lines.size
       if idx = (0...head_end).find { |i| content_length_line?(lines[i]) }
-        @editor.replace_line(idx, new_line) unless lines[idx] == new_line
+        @editor.replace_line(idx, new_line, fold: true) unless lines[idx] == new_line
       end
       # A head with NO Content-Length line got one spliced in by `add_when_missing`. Leave
       # the buffer alone rather than inserting a line under the caret mid-keystroke; the
