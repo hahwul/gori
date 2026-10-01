@@ -372,7 +372,7 @@ module Gori
           missing: "repeater ##{step.target_id} no longer exists — remove the step and add one for a live session")
       end
       boundary = Env.head_body_boundary(rec.request)
-      method, target, _ = Proxy::Codec::Http1.authored_start_line(rec.request[0, boundary])
+      method, target, _ = Proxy::Codec::Http1.authored_projection(rec.request[0, boundary])
       url = Evidence.repeater_url(rec.target, target)
       label = (rec.name.presence || first_line(String.new(rec.request).scrub) || "repeater ##{rec.id}").scrub
       if method.empty?

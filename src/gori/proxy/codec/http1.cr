@@ -549,7 +549,7 @@ module Gori::Proxy::Codec::Http1
     first_crlf = index_crlf(raw, 0)
     start = String.new(raw[0, first_crlf || raw.size])
     parts = start.split(' ')
-    malformed = parts.size != 3 || start == H2_PREFACE_LINE
+    malformed = start_line_malformed?(start, parts)
     RawRequest.new(
       raw_head: raw,
       method: parts[0]? || "",
@@ -574,6 +574,33 @@ module Gori::Proxy::Codec::Http1
   # all, so History filed `http_version` as `"HTTP/1.1\nHost:"` for a request whose bytes it
   # was holding byte-exact. This is an evidence projection only — nothing framed off it.
   def self.authored_start_line(raw : Bytes) : {String, String, String}
+    parts = authored_line(raw).split(' ')
+    {parts[0]? || "", parts[1]? || "", parts[2]? || ""}
+  end
+
+  # The {method, target, version} a gori-originated RECORDER stores for a hand-authored head
+  # (Repeater, `gori run send`, the Fuzzer, MCP `send_request`, a frozen Repeater snapshot).
+  #
+  # `authored_start_line` hands back the raw tokens, and on a line `split(' ')` cannot frame
+  # those are garbage: `GET  /echo?x=1   HTTP/1.1` filed `target = ""` and
+  # `http_version = "/echo?x=1"`, `POST /a b HTTP/1.1` filed a plausible `/a` and a version of
+  # `b`. The proxy refuses to store exactly that (`FlowMapper.request`): the verbatim line
+  # becomes the target, honestly broken and greppable, and the version is blank. This applies
+  # the same rule, so the same bytes make the same row whichever surface sent them (#1423).
+  #
+  # The verdict is `start_line_malformed?`, judged on the LF-tolerant line: the strict CRLF
+  # scan would call a bare-LF `verbatim` head malformed, which is the misreading
+  # `authored_start_line` exists to avoid. The wire bytes are untouched either way (P7).
+  def self.authored_projection(raw : Bytes) : {String, String, String}
+    line = authored_line(raw)
+    parts = line.split(' ')
+    method = parts[0]? || ""
+    return {method, line, ""} if start_line_malformed?(line, parts)
+    {method, parts[1], parts[2]}
+  end
+
+  # The first line of a hand-authored head, ended by a bare LF or a CRLF (a lone CR is kept).
+  private def self.authored_line(raw : Bytes) : String
     i = 0
     n = raw.size
     eol = n
@@ -585,8 +612,16 @@ module Gori::Proxy::Codec::Http1
       end
       i += 1
     end
-    parts = String.new(raw[0, eol]).split(' ')
-    {parts[0]? || "", parts[1]? || "", parts[2]? || ""}
+    String.new(raw[0, eol])
+  end
+
+  # Whether a request start-line `split(' ')` cannot frame: anything but exactly three tokens
+  # (an unencoded space, a doubled one, a missing version), or the h2 client preface. The ONE
+  # home of the rule: the proxy's parse (`parse_request_head`, and through it
+  # `FlowMapper.request`), the probe dedup key (`parse_request_line`) and the recorders
+  # (`authored_projection`) all ask it, so a stored row cannot depend on the surface.
+  private def self.start_line_malformed?(line : String, parts : Array(String)) : Bool
+    parts.size != 3 || line == H2_PREFACE_LINE
   end
 
   # True when `req`'s start-line is EXACTLY the HTTP/2 client preface (H2_PREFACE_LINE) — the
@@ -650,7 +685,7 @@ module Gori::Proxy::Codec::Http1
     first_crlf = index_crlf(raw, 0)
     start = String.new(raw[0, first_crlf || raw.size])
     parts = start.split(' ')
-    {parts[0]? || "", parts[1]? || "", parts.size != 3 || start == H2_PREFACE_LINE}
+    {parts[0]? || "", parts[1]? || "", start_line_malformed?(start, parts)}
   end
 
   # The request-target the SCOPE GATE reads — NOT what goes on the wire.
