@@ -569,15 +569,16 @@ module Gori::Tui
     end
 
     # Runner#apply_external_change already refreshed the live Scope / HostOverrides objects
-    # this view renders straight out of; all that is left is to pull the two list selections
-    # back inside a list another process may have SHRUNK, so the highlight doesn't sit on a
-    # row that no longer exists.
+    # this view renders straight out of; all that is left is to put the two list selections
+    # back on the rows they were on, by id, in a list another process may have shifted or
+    # SHRUNK — so the highlight (and the `d`/`e`/`y` it drives) neither slides onto a
+    # neighbour nor sits on a row that no longer exists.
     #
     # ENV is the one pane that keeps its OWN copy of the data (and writes it back wholesale),
     # so it needs the copy re-seeded here rather than only on tab entry — see
     # `ProjectView#reload_env_vars` for what that copy going stale does to the store.
     def on_external_change : Nil
-      @project_view.clamp_selections
+      @project_view.reanchor_selections
       @project_view.reload_env_vars
       # `insert_event` is an ordinary insert, so a peer's write (an attached agent's tool call,
       # most of all) moves `PRAGMA data_version` and lands here. Refresh only while the pane is
@@ -945,13 +946,16 @@ module Gori::Tui
       label = "#{rule.include? ? "incl" : "excl"} #{rule.match_type} #{rule.pattern}"
       @host.confirm("DELETE SCOPE RULE", "Delete “#{label}”? This can't be undone.",
         confirm_label: "delete", danger: true) do
-        # The store's answer, not an assumption: a rolled-back batch leaves the rule gating
-        # traffic, and reporting "removed" over one that still gates is the failure this
-        # branch exists to prevent. Selection cannot have moved — the confirm is modal.
-        if pat = @project_view.scope_delete
-          @host.status("scope rule deleted: #{pat}#{scope_blackhole_note}")
-        else
-          @host.status("scope rule NOT removed (project busy) — it still gates traffic")
+        # By the id the question named: the modal stops the operator's keys, not the
+        # data_version tick, so a peer's write can move the selection while this is open.
+        # And the store's answer, not an assumption: a rolled-back batch leaves the rule
+        # gating traffic, and reporting "removed" over one that still gates is the failure
+        # this branch exists to prevent.
+        case @project_view.scope_delete(rule.id)
+        when :ok then @host.status("scope rule deleted: #{rule.pattern}#{scope_blackhole_note}")
+          # The peer's delete can black-hole the sandbox exactly as ours would have.
+        when :gone then @host.status("scope rule already removed elsewhere: #{rule.pattern}#{scope_blackhole_note}")
+        else            @host.status("scope rule NOT removed (project busy) — it still gates traffic")
         end
       end
     end
@@ -1112,13 +1116,15 @@ module Gori::Tui
     end
 
     def hostov_delete_entry : Nil
-      host = @project_view.selected_override_host || return @host.status("no host override selected")
+      entry = @project_view.selected_override || return @host.status("no host override selected")
+      host = entry.host
       @host.confirm("DELETE HOST OVERRIDE", "Delete the override for “#{host}”? This can't be undone.",
         confirm_label: "delete", danger: true) do
-        if removed = @project_view.ov_delete
-          @host.status("host override deleted: #{removed}")
-        else
-          @host.status("host override NOT deleted (project busy) — it is still in effect")
+        # By id, for the reason `scope_delete_rule` gives: the tick runs under the modal.
+        case @project_view.ov_delete(entry.id)
+        when :ok   then @host.status("host override deleted: #{host}")
+        when :gone then @host.status("host override already removed elsewhere: #{host}")
+        else            @host.status("host override NOT deleted (project busy) — it is still in effect")
         end
       end
     end
