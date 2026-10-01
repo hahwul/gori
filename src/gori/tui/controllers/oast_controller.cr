@@ -758,7 +758,8 @@ module Gori::Tui
     def toggle_provider : Nil
       return unless p = selected_provider
       on = !p.enabled
-      p.global? ? Settings.set_oast_provider_enabled(p.id, on) : @host.session.store.set_oast_provider_enabled(p.project_id.not_nil!, on)
+      ok = p.global? ? Settings.set_oast_provider_enabled(p.id, on) : @host.session.store.set_oast_provider_enabled(p.project_id.not_nil!, on)
+      @host.status("provider #{p.name} NOT #{on ? "enabled" : "disabled"} — #{not_saved(p.global?)}") unless ok
       reload
     end
 
@@ -766,10 +767,12 @@ module Gori::Tui
       return unless p = selected_provider
       @host.confirm("DELETE PROVIDER", "Delete OAST provider “#{p.name}”?\nIts callback history is kept.",
         confirm_label: "delete", danger: true) do
-        if l = @listeners.find { |ls| ls.provider_key == p.key }
+        ok = p.global? ? Settings.delete_oast_provider(p.id) : @host.session.store.delete_oast_provider(p.project_id.not_nil!)
+        # Only once the provider is really gone: a refused delete leaves it, listener and all.
+        if ok && (l = @listeners.find { |ls| ls.provider_key == p.key })
           stop_listener(l)
         end
-        p.global? ? Settings.delete_oast_provider(p.id) : @host.session.store.delete_oast_provider(p.project_id.not_nil!)
+        @host.status("provider #{p.name} NOT deleted — #{not_saved(p.global?)}") unless ok
         reload
       end
     end
@@ -780,42 +783,70 @@ module Gori::Tui
     # enabled state is carried over (not reset to on), and any listener still keyed to the
     # OLD scope/id is stopped first (mirrors delete_provider), since the move mints a fresh
     # key that nothing could ever reach it under again otherwise.
+    #
+    # A write that did not land keeps the form open with the reason, so what was typed is not
+    # lost under a success toast. A MOVE inserts into the new scope first and deletes from the
+    # old one only once that insert committed: the other order lost the provider outright when
+    # the second write was refused.
     def save_provider(ov : OastProviderOverlay) : Bool
       return false unless ov.valid?
       store = @host.session.store
       if id = ov.edit_id
-        old = @providers.find { |p| p.scope == ov.edit_scope && p.id == id }
-        prev_enabled = old.try(&.enabled)
-        prev_enabled = true if prev_enabled.nil?
-        if ov.scope == ov.edit_scope
-          if ov.scope == "global"
-            Settings.update_oast_provider(id, ov.provider_name, ov.kind.label, ov.host, ov.token)
-          else
-            store.update_oast_provider(id.to_i64, ov.provider_name, ov.kind.label, ov.host, ov.token, prev_enabled)
-          end
-        else
-          if old && (l = @listeners.find { |ls| ls.provider_key == old.key })
-            stop_listener(l)
-          end
-          ov.edit_scope == "global" ? Settings.delete_oast_provider(id) : store.delete_oast_provider(id.to_i64)
-          insert_provider(store, ov, prev_enabled)
-        end
-        @host.status("updated provider #{ov.provider_name}")
+        return false unless edit_provider(store, ov, id)
       else
-        insert_provider(store, ov, true)
+        return provider_not_saved(ov, "added", ov.scope == "global") unless insert_provider(store, ov, true)
         @host.status("added provider #{ov.provider_name}")
       end
       reload
       true
     end
 
-    private def insert_provider(store : Store, ov : OastProviderOverlay, enabled : Bool) : Nil
+    # The edit half of `save_provider`: false keeps the form open (the reason is already on the
+    # status line). A provider copied into its new scope whose old copy could not be removed is
+    # NOT a failure to retry — the form closes and the line says what is left behind.
+    private def edit_provider(store : Store, ov : OastProviderOverlay, id : String) : Bool
+      old = @providers.find { |p| p.scope == ov.edit_scope && p.id == id }
+      prev_enabled = old.try(&.enabled)
+      prev_enabled = true if prev_enabled.nil?
+      if ov.scope == ov.edit_scope
+        ok = if ov.scope == "global"
+               Settings.update_oast_provider(id, ov.provider_name, ov.kind.label, ov.host, ov.token)
+             else
+               store.update_oast_provider(id.to_i64, ov.provider_name, ov.kind.label, ov.host, ov.token, prev_enabled)
+             end
+        return provider_not_saved(ov, "updated", ov.scope == "global") unless ok
+      else
+        return provider_not_saved(ov, "moved", ov.scope == "global") unless insert_provider(store, ov, prev_enabled)
+        if old && (l = @listeners.find { |ls| ls.provider_key == old.key })
+          stop_listener(l)
+        end
+        removed = ov.edit_scope == "global" ? Settings.delete_oast_provider(id) : store.delete_oast_provider(id.to_i64)
+        unless removed
+          @host.status("provider #{ov.provider_name} copied to #{ov.scope}, but the #{ov.edit_scope} " \
+                       "copy could NOT be removed — #{not_saved(ov.edit_scope == "global")}")
+          return true
+        end
+      end
+      @host.status("updated provider #{ov.provider_name}")
+      true
+    end
+
+    private def insert_provider(store : Store, ov : OastProviderOverlay, enabled : Bool) : Bool
       if ov.scope == "global"
-        Settings.add_oast_provider(ov.provider_name, ov.kind.label, ov.host, ov.token, enabled)
+        !Settings.add_oast_provider(ov.provider_name, ov.kind.label, ov.host, ov.token, enabled).empty?
       else
         project_count = @providers.count { |p| !p.global? }
-        store.insert_oast_provider(ov.provider_name, ov.kind.label, ov.host, ov.token, enabled, project_count)
+        store.insert_oast_provider(ov.provider_name, ov.kind.label, ov.host, ov.token, enabled, project_count) != 0
       end
+    end
+
+    private def provider_not_saved(ov : OastProviderOverlay, verb : String, global : Bool) : Bool
+      @host.status("provider #{ov.provider_name} NOT #{verb} — #{not_saved(global)}")
+      false
+    end
+
+    private def not_saved(global : Bool) : String
+      global ? "could not write #{Settings.path}" : "the project store is busy; try again"
     end
 
     private def selected_provider : Oast::ProviderConfig?

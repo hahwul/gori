@@ -1721,6 +1721,29 @@ describe Gori::Settings do
   # they ask `save`, so a refused save left the new/edited/deleted rule live in memory while
   # every caller was told the write did not commit: the TUI lists a rule its own toast says
   # was not added, and the proxy rewrites traffic with it.
+  # Same shape for the global OAST provider library, whose mutators dropped `save`'s answer
+  # entirely: a refused write stayed live under an "added provider" toast and was gone at the
+  # next start.
+  describe "global OAST provider CRUD on a refused save" do
+    it "answers, and leaves the library as it was" do
+      prev = Gori::Settings.oast_providers
+      begin
+        with_refused_save do
+          seed = Gori::Settings::OastProvider.new("p1", "seed", "interactsh", "oast.test", nil, true)
+          Gori::Settings.oast_providers = [seed]
+
+          Gori::Settings.add_oast_provider("new", "interactsh", "x.test", nil).should eq("")
+          Gori::Settings.update_oast_provider("p1", "renamed", "interactsh", "y.test", nil).should be_false
+          Gori::Settings.set_oast_provider_enabled("p1", false).should be_false
+          Gori::Settings.delete_oast_provider("p1").should be_false
+          Gori::Settings.oast_providers.should eq([seed])
+        end
+      ensure
+        Gori::Settings.oast_providers = prev
+      end
+    end
+  end
+
   describe "global rewriter CRUD on a refused save" do
     it "does not leave the rule in the list when add reports 0" do
       with_refused_save do
