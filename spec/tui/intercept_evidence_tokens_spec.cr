@@ -14,29 +14,29 @@ include Gori::Tui
 # the fix.
 
 private def iet_interceptor(&)
-  path = File.tempname("gori-iet", ".db")
-  store = Gori::Store.open(path)
-  begin
+  with_store do |store|
     ic = Gori::Interceptor.new(Gori::Scope.load(store))
     ic.toggle # enable
     yield ic
-  ensure
-    store.close
-    File.delete?(path)
-    File.delete?("#{path}-wal")
-    File.delete?("#{path}-shm")
   end
 end
 
+# Project vars for one example, with the process-global env state it touches put back as it was.
 private def with_vars(vars : Array({String, String}), &)
+  prev_global = Gori::Settings.env_vars
+  prev_project = Gori::Settings.project_env_vars
+  prev_prefix = Gori::Settings.env_prefix
   Gori::Settings.env_prefix = "$"
   Gori::Settings.env_vars = [] of {String, String}
   Gori::Settings.project_env_vars = vars
-  yield
-ensure
-  Gori::Settings.env_vars = [] of {String, String}
-  Gori::Settings.project_env_vars = [] of {String, String}
-  Gori::Settings.env_prefix = "$"
+  begin
+    yield
+  ensure
+    Gori::Settings.env_vars = prev_global
+    Gori::Settings.project_env_vars = prev_project
+    Gori::Settings.env_prefix = prev_prefix
+    Gori::Env.bump_highlight_rev
+  end
 end
 
 # Hold `raw` as a request and open the editor on it.

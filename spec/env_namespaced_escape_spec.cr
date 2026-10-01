@@ -118,6 +118,21 @@ describe "Gori::Env — the namespaced escape" do
     end
   end
 
+  # `literal:` reaches `expand` through `expand_wire` — the TUI intercept editor's one ENV+GEN
+  # pass over a held message (#1416): the names the capture carried (here `ENV.A`, `GEN.UUID`)
+  # stay put in head AND body, a name it did not (`ENV.C`) resolves, and with `Owns::None` no
+  # escape is consumed.
+  it "keeps the literal set's names verbatim across head and body" do
+    with_esc(vars: [{"A", "V"}, {"C", "Z"}]) do
+      seed = "GET /?a=$ENV.A HTTP/1.1\nX: $ENV.C\n\n$ENV.A $GEN.UUID $$ENV.C"
+      literal = Gori::Env.literal_keys("GET /?a=$ENV.A HTTP/1.1\n\n$GEN.UUID")
+      String.new(Gori::Env.expand_wire(seed, resolve: Gori::Env::Owns::Env | Gori::Env::Owns::Gen,
+        unescape: Gori::Env::Owns::None, generation: Gori::Env::Generation.for_dial("h", "http"),
+        literal: literal))
+        .should eq("GET /?a=$ENV.A HTTP/1.1\r\nX: Z\r\n\r\n$ENV.A $GEN.UUID $$ENV.C")
+    end
+  end
+
   it "expand's default pass consumes only the ENV escape" do
     with_esc do
       Gori::Env.expand("$$ENV.A $$BIND.B").should eq("$ENV.A $$BIND.B")

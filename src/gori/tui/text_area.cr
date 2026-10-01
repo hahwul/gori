@@ -2436,7 +2436,11 @@ module Gori::Tui
     # The literal set, re-derived from the evidence bytes when the grammar moved under it. Every
     # reader (the painter, both completers, the peek) goes through here — the staleness was one
     # `Settings.env_syntax=` away from any of them.
-    private def env_literal_names : Set(String)
+    #
+    # Public for an owner whose SEND reads the same set (`InterceptView#edited_wire`): the tokens
+    # the pane greys out as literal are then the ones the wire gets literally, by construction
+    # rather than by two caches agreeing.
+    def env_literal_names : Set(String)
       src = @env_literal_source
       return @env_literal_names unless src
       rev = Env.highlight_rev

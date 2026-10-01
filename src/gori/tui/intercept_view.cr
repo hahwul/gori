@@ -129,14 +129,6 @@ module Gori::Tui
       # different item loads, so the next forward still mints its own values.
       # A dial-less placeholder until the first held item loads and replaces it (`load_text`).
       @edit_generation = Env::Generation.new
-      # The held message's own text, as the editor was seeded with it — the PROVENANCE baseline
-      # for `$` tokens (#1416). A name that arrived with the capture is the client's byte, a name
-      # the operator types afterwards is a reference. Kept as the BYTES rather than the derived
-      # name set, re-derived on `Env.highlight_rev`, because the set reads the token grammar and
-      # the operator can flip it mid-hold (see `RepeaterView#adopt_evidence_env_seed`).
-      @evidence_seed = ""
-      @evidence_literals = Set(String).new
-      @evidence_rev = Env.highlight_rev
       # Cached highlight of the selected held item's bytes (read-only detail pane).
       # Held bytes are immutable, so the item id + theme is the base cache key —
       # recomputed only when the selection/theme changes, not every render. The loaded
@@ -542,35 +534,17 @@ module Gori::Tui
       if @loaded_id != it.id
         seed = String.new(it.raw)
         @editor.set_text(seed)
-        adopt_evidence_seed(seed)
+        # The PROVENANCE baseline for `$` tokens (#1416): a name the held message arrived with is
+        # the client's byte, a name typed afterwards is a reference. The editor keeps the seed
+        # BYTES and re-derives the set when the grammar flips mid-hold, and `edited_wire` reads
+        # that same set — so the pane paints as literal exactly what a forward sends literally.
+        @editor.env_literal_source = seed
         @editor_dirty = false # freshly loaded — not yet modified
         # Named by the held item's destination: the proxy's upstream dial applies the
         # destination's TLS rule, and a `$GEN.USER_AGENT` typed here should agree with it (#1153).
         @edit_generation = Env::Generation.for_dial(it.host, it.scheme)
       end
       @hex = nil # a text item never has one; clearing here is what keeps `text_editing?` honest
-    end
-
-    # Record the held message's text as the `$`-token baseline, and hand the editor the same
-    # bytes so it paints the capture's tokens as the literal bytes a forward sends them as —
-    # the pane must not promise a substitution the wire does not make.
-    private def adopt_evidence_seed(seed : String) : Nil
-      @evidence_seed = seed
-      @evidence_rev = Env.highlight_rev
-      @evidence_literals = Env.literal_keys(seed)
-      @editor.env_literal_source = seed
-    end
-
-    # The names the held message arrived with, re-derived from the seed when the grammar moved
-    # under it. Read through this and never off the ivar: it is on the forward path, where being
-    # one grammar behind substitutes a project value into the client's own bytes.
-    private def evidence_literals : Set(String)
-      rev = Env.highlight_rev
-      unless @evidence_rev == rev
-        @evidence_rev = rev
-        @evidence_literals = Env.literal_keys(@evidence_seed)
-      end
-      @evidence_literals
     end
 
     # The edited buffer as wire bytes, with the operator's `$ENV`/`$GEN` references resolved —
@@ -587,9 +561,12 @@ module Gori::Tui
     # a name the operator TYPED, which is the per-name rule the Repeater's evidence tabs use
     # (`RepeaterView#operator_env_vars`):
     #
-    #   * `literal: evidence_literals` — a name the held message carried stays literal, whoever
-    #     typed the occurrence. gori cannot tell a typed `$ENV.FOO` from the captured one beside
-    #     it, and evidence wins when it cannot.
+    #   * `literal: @editor.env_literal_names` — a name the held message carried stays literal,
+    #     whoever typed the occurrence. gori cannot tell a typed `$ENV.FOO` from the captured one
+    #     beside it, and evidence wins when it cannot. Per name and not per edited span: two
+    #     separated edits leave captured bytes BETWEEN them, so a span derived from a prefix /
+    #     suffix diff would hand those back to the expansion, and a full diff per keystroke over
+    #     a held body is a P6 cost.
     #   * `unescape: Owns::None` — a `$$` in captured bytes is two bytes the client sent. The cost
     #     is that an operator's own `$$ENV.X` is forwarded as typed, as on every evidence path.
     #
@@ -598,7 +575,7 @@ module Gori::Tui
     # after this — a forward goes straight to the origin — so `$BIND.X` stays literal.
     private def edited_wire : Bytes
       Env.expand_wire(@editor.wire_text, resolve: Env::Owns::Env | Env::Owns::Gen,
-        unescape: Env::Owns::None, generation: @edit_generation, literal: evidence_literals)
+        unescape: Env::Owns::None, generation: @edit_generation, literal: @editor.env_literal_names)
     end
 
     def stop_edit : Nil
