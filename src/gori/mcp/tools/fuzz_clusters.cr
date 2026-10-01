@@ -94,6 +94,7 @@ module Gori
           return not_found("no cluster #{Fuzz::Shape.hex(id)} in fuzz job #{fjob.id}") unless cluster
           picked = (0...rows.size).select { |i| Fuzz::Clusters.key(rows[i])[0] == id }
           picked.select! { |i| rows[i].matched? } if matched_only
+          picked.sort_by! { |i| {rows[i].index, i} } # index order, as `fuzz_results` pages (#1432)
           offset = clamp_nonneg(req_off)
           limit = clamp(req_lim, 100, 1000)
           last = offset < picked.size ? Math.min(offset + limit, picked.size) : offset
