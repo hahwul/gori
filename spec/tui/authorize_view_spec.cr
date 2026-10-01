@@ -115,6 +115,42 @@ describe AuthorizeView do
     end
   end
 
+  # HOST / PATH and Δ VS BASELINE were fixed at 38 and 22 columns, drawn with no width, so a
+  # narrow card ran the row over its own border and never drew VERDICT, while a wide one still
+  # cut every delta to its status half (#1433). The elastic column gives way to VERDICT now.
+  describe "column widths" do
+    it "keeps the request row's verdict inside a narrow card" do
+      v = AuthorizeView.new
+      v.add(flow("GET", "/api/v2/organisations/acme/projects/42/members/settings", "tenant.example.test"))
+      be = render_to(v, 56, 30)
+      be.row(2).index("pending").should eq(verdict_col(be, 1))
+    end
+
+    it "keeps the trial table's verdict inside a narrow card" do
+      v = AuthorizeView.new
+      id = v.add(flow)
+      v.apply_result(id, target(false))
+      be = render_to(v, 56, 30)
+      hdr = (0...30).find { |y| be.row(y).includes?("IDENTITY") }.not_nil!
+      be.row(hdr + 2).index("different").should eq(verdict_col(be, hdr))
+    end
+
+    it "draws a whole delta when the card has the room" do
+      v = AuthorizeView.new
+      id = v.add(flow)
+      delta = "Δ status 200 → 403 · size +1.2 KB · time +35 ms"
+      meta = Gori::Repeater::ExchangeMeta.of(403, 40_i64, 1_000_i64, nil)
+      v.apply_result(id, Gori::Authorize::Target.new(1_i64, "GET", "https://h.test/admin", [
+        trial("as-captured", true, 200, Gori::Authorize::Verdict::Baseline),
+        Gori::Authorize::Trial.new("anonymous", false, meta, Gori::Authorize::Verdict::Different, delta,
+          Gori::Authorize::ResponseSummary.new(403, 40_i64, 0_u64), "req".to_slice,
+          "HTTP/1.1 403 Forbidden\r\n\r\n".to_slice, "body".to_slice),
+      ]))
+      be = render_to(v, 140, 30)
+      be.contains?(delta).should be_true
+    end
+  end
+
   it "starts empty with the two built-in identities and renders the empty state" do
     v = AuthorizeView.new
     v.any_requests?.should be_false
