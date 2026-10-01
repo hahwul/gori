@@ -186,12 +186,15 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   private def reap_stale_holds : Bool
     # Time on the tab is watching, and it has to be RECORDED, not only honoured while it lasts
     # (#1418): the skip below used to be the human's whole share, so a two-second glance at
-    # History released every hold the operator had sat watching past the window. Stamped on
-    # the reaper's own wall clock (`held_at_ms` and `viewed_ms` are both unix ms), ahead of
-    # every return, so the last tick on the tab is the one leaving it is measured from.
-    @intercept_operator_watched_ms = Time.utc.to_unix_ms if @active_tab == :intercept
+    # History released every hold the operator had sat watching past the window. Stamped ahead
+    # of every return, so the last tick on the tab is the one leaving it is measured from, and
+    # on the MONOTONIC clock: the stamp is in-process and covers every hold at once, so a wall
+    # clock stepped back would leave it in the future and freeze the reaper for the whole queue.
+    @intercept_operator_watched_at = Time.instant if @active_tab == :intercept
     return false if @intercept_max_hold_ms <= 0
-    return false if @active_tab == :intercept # human is watching the queue → never clobber
+    # Short-circuit only — `hold_reap_due?` already says "not due" for a stamp taken this tick —
+    # so the on-tab tick skips the `intercept_viewed_ms` read below.
+    return false if @active_tab == :intercept
     # The hold the operator has unsaved bytes typed into is the strongest form of "somebody is
     # watching this one", and the reaper forwards `it.raw` — so it threw the edit away with a
     # toast that said only "auto-forwarded". `edited` is published across the bridge precisely
@@ -209,11 +212,15 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     @intercept_agent_seen = true if viewed.each_value.any? { |v| v > 0 } # an agent polled the queue
     return false unless @intercept_agent_seen                            # no agent ever attached → P4: hold indefinitely
     now_ms = Time.utc.to_unix_ms
+    # The operator's last tick on the tab, carried onto the wall clock the per-item times use as
+    # "that long before now" — a monotonic age, so a clock step moves it with `now_ms`.
+    at = @intercept_operator_watched_at
+    operator_ms = at ? now_ms - (Time.instant - at).total_milliseconds.to_i64 : 0_i64
     reaped = false
     pending.each do |it|
       next if it.id == editing # the operator is mid-edit on this one
       next unless Runner.hold_reap_due?(now_ms, @intercept_max_hold_ms, it.held_at_ms,
-                    viewed[it.id]? || 0_i64, @intercept_operator_watched_ms)
+                    viewed[it.id]? || 0_i64, operator_ms)
       # original bytes (fail-open), same as toggle-off / release_all. A false answer means
       # the operator decided it in the same tick — say nothing rather than claim a reap.
       next unless ic.forward(it.id)
