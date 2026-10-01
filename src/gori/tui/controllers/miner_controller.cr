@@ -401,6 +401,21 @@ module Gori::Tui
       true
     end
 
+    # PgUp/PgDn/Home/End over FINDINGS: `handle_results` declines them, and `results_move`
+    # clamps the Runner's ±JUMP_ROWS over the filtered list. SUMMARY has no list, and DETAIL
+    # claims the keys in `handle_detail` (#1443).
+    def body_scroll(delta : Int32) : Bool
+      v = current_view
+      return false unless v && v.focus == :results
+      v.results_move(delta)
+      true
+    end
+
+    def page_rows : Int32?
+      v = current_view
+      v.results_page_rows if v && v.focus == :results
+    end
+
     private def wheel_pane(v : MinerView, pane : Symbol, step : Int32) : Nil
       case pane
       when :results then v.results_move(step)

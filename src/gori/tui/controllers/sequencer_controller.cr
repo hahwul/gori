@@ -157,10 +157,6 @@ module Gori::Tui
       true
     end
 
-    private def page_nav_key?(key : Termisu::Input::Key) : Bool
-      key.page_up? || key.page_down? || key.home? || key.end?
-    end
-
     private def navigable_pane?(pane : Symbol) : Bool
       pane == :config || pane == :samples || pane == :analysis
     end

@@ -1,5 +1,6 @@
 require "../../spec_helper"
 require "../../support/fake_host"
+require "../../support/memory_backend"
 require "file_utils"
 
 include Gori::Tui
@@ -40,10 +41,78 @@ private def drain_until_landed(ctl : MinerController) : Nil
   end
 end
 
+# One restored miner session holding 50 findings, on FINDINGS. The session row needs real
+# request bytes: `insert_miner_session` binds them to a `BLOB NOT NULL` column.
+private def with_findings(&)
+  root = File.tempname("gori-miner-page")
+  Dir.mkdir_p(root)
+  project = Gori::ProjectRegistry.new(root).temp("miner-page")
+  session = Gori::Session.open(Gori::Config.new(listen: "127.0.0.1", port: 0),
+    Gori::Proxy::Tls::CertAuthority.load_or_create(MINER_CA), Gori::Verbs.registry, project)
+  begin
+    session.store.insert_miner_session("https://shop.test",
+      "GET /login HTTP/1.1\r\nHost: shop.test\r\n\r\n".to_slice, false, nil, "{}", nil, 0).should be > 0
+    ctl = MinerController.new(FakeHost.new(session))
+    view = ctl.current_view.not_nil!
+    50.times do |i|
+      view.append_finding(Gori::Miner::Finding.new("p#{i}", Gori::Miner::Location::Query,
+        Gori::Miner::Evidence::Status, Gori::Miner::Confidence::Confirmed, nil, nil, 0_i64))
+    end
+    view.focus_pane(:results)
+    yield ctl, view
+  ensure
+    session.close
+    FileUtils.rm_rf(root) if Dir.exists?(root)
+  end
+end
+
 # The controller's half of a History mine's seed names: the scan runs off the event loop and
 # lands on the popup through `drain_seed_names`. The names themselves are pinned in
 # spec/param_inventory_spec.cr (`.seed_names`).
 describe MinerController do
+  describe "PgUp/PgDn/Home/End over FINDINGS (#1443)" do
+    it "moves the selection on the Runner's page route" do
+      with_findings do |ctl, view|
+        view.select_result_row(25)
+        {Termisu::Input::Key::Home, Termisu::Input::Key::End,
+         Termisu::Input::Key::PageUp, Termisu::Input::Key::PageDown}.each do |k|
+          ctl.handle_body_key(Termisu::Event::Key.new(k)).should be_false
+        end
+        view.results_selected_index.should eq(25)
+
+        # The Runner sends Home/End as ±JUMP_ROWS; `results_move` clamps them.
+        ctl.body_scroll(-Runner::JUMP_ROWS).should be_true
+        view.results_selected_index.should eq(0)
+        ctl.body_scroll(Runner::JUMP_ROWS).should be_true
+        view.results_selected_index.should eq(49)
+      end
+    end
+
+    it "pages by the rows FINDINGS drew last frame" do
+      with_findings do |ctl, view|
+        ctl.page_rows.should eq(1) # nothing drawn yet
+        view.render(Screen.new(MemoryBackend.new(100, 40)), Rect.new(0, 0, 100, 40), true)
+        step = ctl.page_rows.not_nil!
+        step.should be > 1
+        ctl.body_scroll(step).should be_true
+        view.results_selected_index.should eq(step)
+      end
+    end
+
+    it "leaves SUMMARY and DETAIL out of the route" do
+      with_findings do |ctl, view|
+        view.focus_pane(:summary)
+        ctl.body_scroll(Runner::JUMP_ROWS).should be_false
+        ctl.page_rows.should be_nil
+        view.focus_pane(:results)
+        view.open_detail
+        view.focus.should eq(:detail)
+        ctl.body_scroll(Runner::JUMP_ROWS).should be_false
+        ctl.page_rows.should be_nil
+      end
+    end
+  end
+
   describe "#scan_seed_names (#1231)" do
     it "seeds a History mine with the host's other endpoints' names" do
       with_miner_controller do |ctl, session|
