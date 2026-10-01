@@ -454,6 +454,18 @@ module Gori::Proxy::Codec
       trailers(body)
     end
 
+    # Where the trailer section of a chunked message starts in `body` — the byte after the
+    # terminating 0-chunk line — under the same `chunked` gate as `trailers`. nil for every
+    # other message, and for a body that never reached its 0-chunk. For a pager that pages the
+    # exact bytes and has to be able to stop short of the trailer fields.
+    def self.trailer_offset(head : Bytes?, body : Bytes?) : Int32?
+      return nil if head.nil? || body.nil? || body.empty?
+      return nil unless head_has_encoding?(head)
+      te_values, _ = encoding_headers(head)
+      return nil unless transfer_encoding_chunked?(te_values)
+      scan_chunks(body) { true }
+    end
+
     private def self.index_of(body : Bytes, byte : UInt8, from : Int32) : Int32?
       i = from
       while i < body.size

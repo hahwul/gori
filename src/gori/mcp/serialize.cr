@@ -858,7 +858,7 @@ module Gori
             detail.row.target, request: true)
           emit_grpc_messages(j, "response_grpc_messages", detail.response_head, detail.response_body,
             detail.row.target, request: false)
-          emit_decoded(j, detail, ws_msgs)
+          emit_decoded(j, detail, ws_msgs, include_sensitive)
         end
       end
 
@@ -1065,12 +1065,28 @@ module Gori
       # Decoded-protocol projections (SAML / JWT / GraphQL / form params), bounded for
       # LLM use. Shares one emitter with `gori run show --format json` (DecodedView) so
       # the two surfaces never diverge; here every side is scanned and clipped.
+      #
+      # The decoders read the heads the redacted `request_head`/`response_head` above were
+      # cut from, so they get the same redaction: a JWT decoded out of `Authorization:` or a
+      # `Cookie:` is that header's value, and decoding is not redaction any more than base64
+      # is (`emit_head_base64`). A token in the target or a body still decodes, as it is
+      # still shown.
       def self.emit_decoded(j : JSON::Builder, detail : Store::FlowDetail,
-                            ws_msgs : Array(Store::WsMessage) = [] of Store::WsMessage) : Nil
+                            ws_msgs : Array(Store::WsMessage) = [] of Store::WsMessage,
+                            include_sensitive : Bool = false) : Nil
         DecodedView.emit_json(j, target: detail.row.target,
-          req_head: detail.request_head, req_body: detail.request_body,
-          resp_head: detail.response_head, resp_body: detail.response_body,
+          req_head: redact_head_bytes(detail.request_head, include_sensitive),
+          req_body: detail.request_body,
+          resp_head: redact_head_bytes(detail.response_head, include_sensitive),
+          resp_body: detail.response_body,
           clip: DECODE_TEXT_MAX, ws_messages: ws_msgs)
+      end
+
+      # `redact_head` over a head's octets, octets back: every byte but a sensitive value's
+      # survives as captured, so a decoder reading the result sees the head it would have.
+      def self.redact_head_bytes(head : Bytes?, include_sensitive : Bool) : Bytes?
+        return head if include_sensitive || head.nil?
+        redact_head(String.new(head), false).to_slice
       end
 
       SSE_EVENTS_MAX =  500 # cap events serialised for an LLM client
@@ -1121,13 +1137,15 @@ module Gori
       # head cannot hash to them, and the field says so rather than leaving the reader to
       # discover it.
       def self.evidence_json(ev : Store::IssueEvidence, include_sensitive : Bool,
-                             body_cap : Int32 = MAX_TEXT, body_omit : Bool = false) : String
+                             body_cap : Int32 = MAX_TEXT, body_omit : Bool = false,
+                             redaction : RedactionNote? = nil) : String
         m = ev.meta
         JSON.build do |j|
           j.object do
             evidence_meta(j, m)
-            j.field "hashes_cover", "the stored bytes (head + body) — a flow's wire form, a Repeater tab's saved request; a redacted head does not reproduce them"
+            j.field "hashes_cover", "the stored bytes (head + body) — a flow's wire form, a Repeater tab's saved request; a redacted head or body does not reproduce them"
             j.field "sensitive_headers_redacted", true unless include_sensitive
+            emit_redaction_note(j, redaction)
             j.field "request_head", redact_head_opt(head_text(ev.request_head), include_sensitive)
             emit_head_base64(j, "request_head", ev.request_head, include_sensitive)
             emit_body(j, "request_body", ev.request_head, ev.request_body, m.request_truncated?,
