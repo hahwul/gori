@@ -3,6 +3,7 @@ require "./theme"
 require "./frame"
 require "./text_field"
 require "./overlay"
+require "./viewport"
 require "../rules/stub"
 require "../store"
 require "../store/safe_regexp"
@@ -90,6 +91,10 @@ module Gori::Tui
     # does not read.
     @options : Store::RespondArgs
     @sel : Int32
+    # First row the window draws (#1420). The form is ROW_COUNT rows plus the preview band —
+    # 18 tall — and an 80×24 terminal leaves `rule_form_box` 15, so without a window the
+    # options and Save rows were simply never drawn and ↵ on Save had nothing on screen.
+    @scroll : Int32 = 0
     @preview : String = ""
     # Last previewed field set; gates the rescan to real changes (see refresh_preview).
     @preview_sig : String = ""
@@ -502,10 +507,12 @@ module Gori::Tui
       title = editing? ? "EDIT REWRITER RULE" : "ADD REWRITER RULE"
       Frame.card(screen, box, title, border: Theme.border_focus)
       first = box.y + 2
-      ROW_COUNT.times do |i|
-        py = first + i
-        break if py >= box.bottom - 2
-        draw_row(screen, box, i, py)
+      visible = list_capacity(box)
+      @scroll = Viewport.scroll_to_show(@sel, @scroll, visible, ROW_COUNT)
+      (0...visible).each do |i|
+        ri = @scroll + i
+        break if ri >= ROW_COUNT
+        draw_row(screen, box, ri, first + i)
       end
       pv_y = box.bottom - 2
       if pv_y > first && !@preview.empty?
@@ -620,9 +627,23 @@ module Gori::Tui
       screen.text(x + label.size + 1, py, note || "n/a (header op)", Theme.muted, bg)
     end
 
+    # Rows the card can draw: everything between the blank under the title and the preview
+    # band on `box.bottom - 2`. That is ROW_COUNT at the form's natural height, and fewer on a
+    # card `rule_form_box` clamped to a short terminal — which is when the rows scroll.
+    private def list_capacity(box : Rect) : Int32
+      (box.h - 4).clamp(1, ROW_COUNT)
+    end
+
+    # Inverts the window `render` last drew — the stored `@scroll`, never a fresh one, so a
+    # click lands on the row that was on screen. Only the painted rows are hits: the old
+    # `my - first` with no band check read the preview line and the bottom border as rows,
+    # and on a clamped card those indices are `options:` and Save — a click on chrome SAVED
+    # (the CVSS form's `row_at` names the same trap).
     def row_at(box : Rect, mx : Int32, my : Int32) : Int32?
       return nil unless box.contains?(mx, my)
-      i = my - (box.y + 2)
+      first = box.y + 2
+      return nil unless first <= my < first + list_capacity(box)
+      i = @scroll + (my - first)
       (0 <= i < ROW_COUNT) ? i : nil
     end
   end
