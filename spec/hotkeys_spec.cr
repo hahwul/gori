@@ -338,10 +338,40 @@ describe Gori::Hotkeys do
       prev_os = Gori::Settings.keymap_os
       begin
         working = {"capture.toggle" => Gori::Verb::Chord.new("g"), "scope.edit" => nil}
-        Gori::Hotkeys.apply(working, "linux")
+        Gori::Hotkeys.apply(working, "linux", Gori::Verbs.registry)
         Gori::Settings.keymap_os.should eq("linux")
         Gori::Settings.keymap_overrides["capture.toggle"].should eq(["g"])
         Gori::Settings.keymap_overrides["scope.edit"].should eq([] of String)
+      ensure
+        Gori::Settings.keymap_overrides = prev_ov
+        Gori::Settings.keymap_os = prev_os
+      end
+    end
+
+    # The editor shows the rebindable rows only, one chord each. Replacing the whole map from
+    # that working copy erased what it never showed: a newer build's verb id, and the second
+    # chord of a row the operator did not touch.
+    it "rewrites only the rows the editor showed, and keeps the ones it did not" do
+      prev_ov = Gori::Settings.keymap_overrides
+      prev_os = Gori::Settings.keymap_os
+      begin
+        Gori::Settings.keymap_overrides = {
+          "future.verb"    => ["f5"],
+          "rules.edit"     => ["m", "n"],
+          "capture.toggle" => ["g"],
+        }
+        reg = Gori::Verbs.registry
+        working = {} of String => Gori::Verb::Chord?
+        Gori::Hotkeys.rebindable_overrides(reg).each { |id, chords| working[id] = chords.first? }
+        working.delete("capture.toggle")                   # reset to default in the editor
+        working["scope.edit"] = Gori::Verb::Chord.new("j") # a new rebind
+
+        Gori::Hotkeys.apply(working, "linux", reg)
+        ov = Gori::Settings.keymap_overrides
+        ov["future.verb"].should eq(["f5"])
+        ov["rules.edit"].should eq(["m", "n"])
+        ov.has_key?("capture.toggle").should be_false
+        ov["scope.edit"].should eq(["j"])
       ensure
         Gori::Settings.keymap_overrides = prev_ov
         Gori::Settings.keymap_os = prev_os

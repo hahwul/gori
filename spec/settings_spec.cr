@@ -1020,6 +1020,41 @@ describe Gori::Settings do
     end
   end
 
+  # No file at load time left the merge with no base, so the first save wrote this process's
+  # state WHOLE over a file a peer had created since — a `gori mcp` started on a fresh home erased
+  # the wizard's theme and bind the moment it saved anything.
+  it "merges with a file a peer created after a load that found none" do
+    dir = File.tempname("gori-settings-nofile")
+    Dir.mkdir_p(dir)
+    prev = ENV["GORI_HOME"]?
+    prev_theme = Gori::Settings.theme
+    prev_mouse = Gori::Settings.mouse
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.theme = "goriday"
+      Gori::Settings.bind_port = 8070
+      Gori::Settings.load
+      File.exists?(Gori::Settings.path).should be_false
+      Gori::Settings.load_degraded?.should be_false
+
+      File.write(Gori::Settings.path, %({"theme":"dracula","network":{"bind_port":9999}}))
+
+      Gori::Settings.mouse = !prev_mouse
+      Gori::Settings.save.should be_true
+
+      Gori::Settings.load
+      Gori::Settings.theme.should eq("dracula")
+      Gori::Settings.bind_port.should eq(9999)
+      Gori::Settings.mouse.should eq(!prev_mouse) # and this process's own change landed
+    ensure
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.theme = prev_theme
+      Gori::Settings.mouse = prev_mouse
+      Gori::Settings.bind_port = 8070
+    end
+  end
+
   it "does not clobber a concurrent writer's change on a SECOND save with no intervening load" do
     dir = File.tempname("gori-settings-merge2")
     Dir.mkdir_p(dir)
@@ -1189,6 +1224,53 @@ describe Gori::Settings do
       Gori::Settings.save.should be_true
     ensure
       Gori::Settings.warning_io = nil # spec_helper's default: never on the suite's STDERR
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.theme = prev_theme
+      Gori::Settings.bind_port = 8070
+    end
+  end
+
+  # The same refusal for a file that is there and could not be READ at all — EACCES on a
+  # settings.json a `sudo gori` left root-owned. Nothing of it reached memory, the merge has no
+  # base, and the directory is still the operator's, so `DurableFile`'s rename landed a factory
+  # document on top of a file gori never opened — on the very first save of the session, which
+  # the project picker's update check makes on every launch. `reset_to_factory` already refused
+  # here; the ordinary save did not. A 0000 file stages the read failure under one uid.
+  it "refuses to write over a settings file it could not read" do
+    dir = File.tempname("gori-settings-unreadable")
+    Dir.mkdir_p(dir)
+    prev = ENV["GORI_HOME"]?
+    prev_theme = Gori::Settings.theme
+    sink = IO::Memory.new
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.warning_io = sink
+      Gori::Settings.reset_load_warning_guard
+      original = %({"theme":"dracula","network":{"bind_port":9999}})
+      File.write(Gori::Settings.path, original)
+      File.chmod(Gori::Settings.path, 0o000)
+      # Root reads through a 0000 mode, so there is no read failure to stage.
+      next if File::Info.readable?(Gori::Settings.path)
+
+      Gori::Settings.load
+      Gori::Settings.load_degraded?.should be_true
+      Gori::Settings.load_warning.not_nil!.should contain(Gori::Settings.path)
+      sink.to_s.should contain("will not overwrite")
+
+      Gori::Settings.theme = "goriday"
+      Gori::Settings.save.should be_false
+      File.chmod(Gori::Settings.path, 0o600)
+      File.read(Gori::Settings.path).should eq(original) # still the operator's file
+
+      # A load that can read it again clears the refusal.
+      Gori::Settings.load
+      Gori::Settings.load_degraded?.should be_false
+      Gori::Settings.load_warning.should be_nil
+      Gori::Settings.save.should be_true
+    ensure
+      File.chmod(Gori::Settings.path, 0o600) rescue nil
+      Gori::Settings.warning_io = nil
       prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
       FileUtils.rm_rf(dir)
       Gori::Settings.theme = prev_theme
@@ -1639,6 +1721,29 @@ describe Gori::Settings do
   # they ask `save`, so a refused save left the new/edited/deleted rule live in memory while
   # every caller was told the write did not commit: the TUI lists a rule its own toast says
   # was not added, and the proxy rewrites traffic with it.
+  # Same shape for the global OAST provider library, whose mutators dropped `save`'s answer
+  # entirely: a refused write stayed live under an "added provider" toast and was gone at the
+  # next start.
+  describe "global OAST provider CRUD on a refused save" do
+    it "answers, and leaves the library as it was" do
+      prev = Gori::Settings.oast_providers
+      begin
+        with_refused_save do
+          seed = Gori::Settings::OastProvider.new("p1", "seed", "interactsh", "oast.test", nil, true)
+          Gori::Settings.oast_providers = [seed]
+
+          Gori::Settings.add_oast_provider("new", "interactsh", "x.test", nil).should eq("")
+          Gori::Settings.update_oast_provider("p1", "renamed", "interactsh", "y.test", nil).should be_false
+          Gori::Settings.set_oast_provider_enabled("p1", false).should be_false
+          Gori::Settings.delete_oast_provider("p1").should be_false
+          Gori::Settings.oast_providers.should eq([seed])
+        end
+      ensure
+        Gori::Settings.oast_providers = prev
+      end
+    end
+  end
+
   describe "global rewriter CRUD on a refused save" do
     it "does not leave the rule in the list when add reports 0" do
       with_refused_save do
@@ -2057,13 +2162,17 @@ describe Gori::Settings do
 
       # tolerant: non-array entry dropped, unparseable chord dropped, [] preserved
       File.write(Gori::Settings.path,
-        %({"hotkeys":{"os":"WINDOWS","bindings":{"a":"x","b":["ctrl-g","nope"],"c":[]}}}))
+        %({"hotkeys":{"os":"WINDOWS","bindings":{"a":"x","b":["ctrl-g","nope"],"c":[],"d":["ctl-y"]}}}))
       Gori::Settings.keymap_overrides = {} of String => Array(String)
       Gori::Settings.load
       Gori::Settings.keymap_os.should eq("windows")                 # normalized lowercase
       Gori::Settings.keymap_overrides.has_key?("a").should be_false # non-array dropped
       Gori::Settings.keymap_overrides["b"].should eq(["ctrl-g"])    # garbage label dropped
       Gori::Settings.keymap_overrides["c"].should eq([] of String)  # explicit unbind kept
+      # Every label garbage is NOT an unbind: kept raw, so the default stands (chord_overrides
+      # falls back) and the next save does not erase what the operator wrote.
+      Gori::Settings.keymap_overrides["d"].should eq(["ctl-y"])
+      Gori::Hotkeys.chord_overrides.has_key?("d").should be_false
 
       # a file with no "hotkeys" block keeps the in-memory defaults
       File.write(Gori::Settings.path, %({"theme":"goridark"}))
@@ -2320,6 +2429,46 @@ describe Gori::Settings do
   # #538 — the ONE loader every surface that opens a project store calls. Session.open passes
   # bind: true (it listens), CLI::Run.open_store and the MCP bind path pass bind: false.
   describe ".load_project_network" do
+    # Nothing validates a row on the way OUT of the store — an older gori or a hand edit wrote
+    # it — so the read applies the floors the global section's load does: a 0 timeout was a
+    # zero-second dial on every request, and a port past 65535 failed every rebind.
+    it "reads out-of-range rows under the same floors as the global section" do
+      with_net_store do |store|
+        reset_net
+        store.set_setting(Gori::Settings::PROJECT_BIND_PORT_KEY, "99999")
+        store.set_setting(Gori::Settings::PROJECT_CONNECT_TIMEOUT_KEY, "0")
+        store.set_setting(Gori::Settings::PROJECT_IO_TIMEOUT_KEY, "-5")
+        store.set_setting(Gori::Settings::PROJECT_CAPTURE_MAX_KEY, "999999")
+
+        Gori::Settings.load_project_network(store, bind: true)
+
+        Gori::Settings.project_bind_port.should be_nil
+        Gori::Settings.effective_bind_port.should eq(8070)
+        Gori::Settings.effective_connect_timeout_secs.should eq(1)
+        Gori::Settings.effective_io_timeout_secs.should eq(1)
+        Gori::Settings.effective_capture_max_mib.should eq(Gori::Settings::MAX_CAPTURE_MAX_MIB)
+      ensure
+        reset_net
+      end
+    end
+
+    it "keeps the global bind port when the file holds one past 65535" do
+      dir = File.tempname("gori-settings-port")
+      Dir.mkdir_p(dir)
+      prev = ENV["GORI_HOME"]?
+      begin
+        reset_net
+        ENV["GORI_HOME"] = dir
+        File.write(Gori::Settings.path, %({"network":{"bind_port":99999}}))
+        Gori::Settings.load
+        Gori::Settings.bind_port.should eq(8070)
+      ensure
+        prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+        FileUtils.rm_rf(dir)
+        reset_net
+      end
+    end
+
     it "installs every key with bind: true, including the destination and proxy credentials" do
       with_net_store do |store|
         reset_net
@@ -2562,6 +2711,41 @@ describe Gori::Settings do
         Gori::Settings.project_upstream_destination.should be_nil
         Gori::Settings.project_upstream_auth.should be_nil
       ensure
+        reset_net
+      end
+    end
+
+    # The pane re-submits every field it displayed, so a save of the connect timeout also hands
+    # back the upstream it showed. A `gori run project network set upstream_proxy=` pin (dial
+    # DIRECT) beside a blank global equals the global, and folding it to "inherit" sent the
+    # project through `upstream_rules` instead — a routing change nobody asked for.
+    it "keeps a pin the pane re-submits unchanged, even when it equals the global" do
+      with_net_store do |store|
+        reset_net
+        previous_rules = Gori::Settings.upstream_rules
+        Gori::Settings.upstream_rules = [Gori::Settings::UpstreamRule.new("*", "http", "corp.test:3128")]
+        store.set_setting(Gori::Settings::PROJECT_UPSTREAM_KEY, "").should be_true
+        store.set_setting(Gori::Settings::PROJECT_IO_TIMEOUT_KEY, Gori::Settings.io_timeout_secs.to_s).should be_true
+        Gori::Settings.load_project_network(store, bind: true)
+        Gori::Settings.upstream_route("target.test").direct?.should be_true
+
+        config = Gori::Settings::ProjectNetworkConfig.new(
+          "127.0.0.1", 8070, "", nil, 7, Gori::Settings.io_timeout_secs, Gori::Settings.capture_max_mib
+        )
+        Gori::Settings.save_project_network(store, config).should be_true
+        store.setting(Gori::Settings::PROJECT_UPSTREAM_KEY).should eq("")
+        store.setting(Gori::Settings::PROJECT_IO_TIMEOUT_KEY).should eq(Gori::Settings.io_timeout_secs.to_s)
+        store.setting(Gori::Settings::PROJECT_CONNECT_TIMEOUT_KEY).should eq("7")
+        Gori::Settings.upstream_route("target.test").direct?.should be_true
+        # The live layer reads the same rows the store got.
+        Gori::Settings.project_upstream_proxy.should eq("")
+        Gori::Settings.project_io_timeout_secs.should eq(Gori::Settings.io_timeout_secs)
+        # A value equal to the global on a row that held something else still folds to inherit.
+        Gori::Settings.save_project_network(store, config.copy_with(connect_secs: Gori::Settings.connect_timeout_secs)).should be_true
+        store.setting(Gori::Settings::PROJECT_CONNECT_TIMEOUT_KEY).should be_nil
+        Gori::Settings.project_connect_timeout_secs.should be_nil
+      ensure
+        Gori::Settings.upstream_rules = previous_rules if previous_rules
         reset_net
       end
     end

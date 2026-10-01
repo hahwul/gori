@@ -1440,7 +1440,9 @@ module Gori::Tui
       return nil unless @project_view.settings_dirty?
       host, port_s, _protocol, _proxy_host, _proxy_port, destination, auth_s, username, password, connect_s, idle_s, cap_s =
         @project_view.settings_values
-      return settings_invalid("bind IP is required", on_leave) if host.empty?
+      if err = bind_host_problem(host)
+        return settings_invalid(err, on_leave)
+      end
       port = port_s.to_i?
       unless port && 0 <= port <= 65535
         return settings_invalid("invalid bind port #{port_s.inspect}", on_leave)
@@ -1470,6 +1472,13 @@ module Gori::Tui
       line = @host.apply_project_network(config)
       @project_view.refresh_settings
       line
+    end
+
+    # Why `host` cannot be this project's bind address, or nil. Beyond "required", the same check
+    # the global editor, the wizard and `gori run project network set` run: a typo'd address
+    # stored here fails every rebind and every later open of this project.
+    private def bind_host_problem(host : String) : String?
+      host.empty? ? "bind IP is required" : Settings.bind_host_error(host)
     end
 
     # A whole number of at least 1, or nil. Shared by the three numeric project fields so they

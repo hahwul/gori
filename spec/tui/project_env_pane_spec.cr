@@ -487,6 +487,25 @@ describe Gori::Tui::ProjectController do
     end
   end
 
+  # The global editor, the wizard and `gori run project network set` all run
+  # `Settings.bind_host_error`; this pane only checked for an empty field, so a typo'd address
+  # reached the project DB and failed every later open of the project.
+  it "refuses a bind address the other doors already refuse" do
+    with_env_controller do |c, host, _session|
+      c.view.refresh_settings
+      c.view.focus_pane(:settings)
+      c.view.select_setting(Gori::Tui::ProjectView::SETTINGS_FIELD_BASE)
+      20.times { c.handle_body_key(key(Termisu::Input::Key::Backspace)) }
+      type_keys(c, "999.999.999.999")
+      c.handle_body_key(key(Termisu::Input::Key::Enter))
+
+      host.applied_config.should be_nil
+      host.statuses.last.should contain("invalid bind IP")
+    ensure
+      Gori::Settings.project_bind_host = nil
+    end
+  end
+
   it "says a rolled-back env write did NOT save, instead of reporting success" do
     with_env_controller do |c, host, session|
       c.env_add_var

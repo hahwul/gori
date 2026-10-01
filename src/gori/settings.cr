@@ -83,11 +83,10 @@ module Gori
 
     # A settings file is THERE and `load_raw` could not read a byte of it — EACCES on a file a
     # `sudo gori` left root-owned, a `--config` naming a directory, a transient I/O error. The
-    # separate flag exists because that rescue is silent: it sets no `load_warning` (nothing was
-    # parsed, so nothing complained) and leaves no `.corrupt` copy (`load_root` writes one where
-    # a PARSE fails, and this never got that far), so the only record that the operator's file
-    # was never seen is this bool. `load_degraded?` folds it in with two other cases; the one
-    # caller that has to tell them apart is `reset_to_factory`.
+    # separate flag exists because that rescue leaves no `.corrupt` copy (`load_root` writes one
+    # where a PARSE fails, and this never got that far), so nothing of the operator's file is
+    # kept anywhere. `save` and `reset_to_factory` both refuse on it; `load_degraded?` folds it
+    # in with two other cases.
     @@load_unreadable = false
 
     # An explicit settings file for THIS process (`gori --config PATH`), overriding both
@@ -152,6 +151,20 @@ module Gori
         # could not be READ (`@@load_unreadable`: everything below is at a factory default over
         # a file whose contents nobody has seen).
         @@load_unreadable = File.exists?(path)
+        # Said, because `save` now refuses on it and a refusal nobody can explain is a mystery
+        # "could not save settings" on every toggle.
+        if @@load_unreadable
+          note_load_warning("settings: #{path} exists but could not be read — using defaults " \
+                            "for this run, and this run will not overwrite that file")
+        else
+          # No file is a state with a perfectly good base: the defaults this process now holds.
+          # Left nil, `merge_with_disk` had nothing to merge against, so the first save wrote
+          # this process's defaults WHOLE over a file a peer created in the meantime — a
+          # `gori mcp` started on a fresh home erased the wizard's theme, bind and listeners
+          # the moment the agent saved a colour rule. Before the adoption below, for the reason
+          # `load` re-bases before it: a rewrite it makes is a genuine change.
+          @@loaded_raw = serialize
+        end
         # "No file at the default path" and "no file at the path you named" are different facts —
         # see `explicit_path?`. Only the first one is a date gori may act on.
         adopt_env_syntax_for_absent_key(absent_explicit: !@@load_unreadable && explicit_path?)
@@ -383,7 +396,7 @@ module Gori
       # All four of these dereference their node directly — see `object_section`.
       if net = object_section(root, "network")
         self.bind_host = net["bind_host"]?.try(&.as_s?) || bind_host
-        self.bind_port = int_field(net, "bind_port") || bind_port
+        self.bind_port = valid_port(int_field(net, "bind_port")) || bind_port
         apply_upstream_proxy(net["upstream_proxy"]?)
         self.verify_upstream = load_bool(net, "verify_upstream", verify_upstream?)
         # The PROXY leg's own trust policy, kept next to (never folded into) verify_upstream —
@@ -742,7 +755,13 @@ module Gori
       # #594 loss with a different door: the merge cannot recover a section it never read
       # (see `@@load_partial`), so refuse instead — reported like any other failed write,
       # which the callers already handle.
-      return false if @@load_partial
+      #
+      # A file that is there and could not be READ is the same refusal for a stronger reason:
+      # NONE of it reached memory, and nothing was kept aside (the `.corrupt` copy is written
+      # where a parse fails, not where a read does). In a directory the operator still owns —
+      # a settings.json a `sudo gori` left root-owned — the rename below lands on top of a file
+      # gori never opened. `reset_to_factory` asks the same question for the same reason.
+      return false if @@load_partial || @@load_unreadable
       Paths.ensure_dirs
       # With --config / $GORI_CONFIG the file can live outside GORI_HOME, whose directory
       # ensure_dirs above does not create. The temp+rename below would fail on a missing
@@ -1088,7 +1107,11 @@ module Gori
     # NOT here. The execution axis is `COMMAND_SECTIONS` below, and it is handled by REPORTING
     # rather than by exclusion — see `command_rules` for that argument in full. Adding an
     # exportable section means asking both questions, not this one.
-    SECRET_SECTIONS = ["env", "decoder"]
+    #
+    # `oast_providers` is here for its `token`: a self-hosted interactsh server's auth token, the
+    # credential `list_oast_providers` already redacts on the MCP door. A default export carried
+    # it out at 0644 with no notice.
+    SECRET_SECTIONS = ["env", "decoder", "oast_providers"]
 
     # Sections that can carry a COMMAND — the second axis. Every settings value gori hands to
     # `Process.new`/`Process.run` lives in one of these, and the list is what both ends of a
@@ -1163,7 +1186,11 @@ module Gori
       present = JSON.parse(serialize).as_h.keys
       SECRET_SECTIONS.select do |s|
         next false unless list.includes?(s) && present.includes?(s)
-        s == "env" ? !env_vars.empty? : true
+        case s
+        when "env"            then !env_vars.empty?
+        when "oast_providers" then oast_providers.any?(&.token.presence)
+        else                       true
+        end
       end
     end
 
@@ -1172,7 +1199,7 @@ module Gori
       keep = only || (doc.keys - SECRET_SECTIONS)
       JSON.build(indent: "  ") do |j|
         j.object do
-          # `strip_env_syntax` on the way OUT as well as on the way in: an exported profile carries
+          # `strip_install_local` on the way OUT as well as on the way in: an exported profile carries
           # no token grammar at all. `serialize` always writes the key now (absence means "predates
           # namespaces", so a grammar has to be stated), and a profile that named one would decide
           # how the IMPORTING install reads the tokens already stored in its own projects — the one
@@ -1185,8 +1212,8 @@ module Gori
           # sentence about the importer's own token values.
           doc.each do |k, v|
             next unless keep.includes?(k)
-            stripped = strip_env_syntax(k, v)
-            next if k == "env" && (h = stripped.as_h?) && h.empty?
+            stripped = strip_install_local(k, v)
+            next if INSTALL_LOCAL_KEYS.has_key?(k) && (h = stripped.as_h?) && h.empty?
             j.field k, stripped
           end
         end
@@ -1433,8 +1460,25 @@ module Gori
       selected = incoming.keys.select do |k|
         (only.nil? || only.includes?(k)) && SECTION_KEYS.includes?(k)
       end
-      filtered = JSON.build { |j| j.object { selected.each { |k| j.field k, strip_env_syntax(k, incoming[k]) } } }
+      filtered = JSON.build { |j| j.object { selected.each { |k| j.field k, strip_install_local(k, incoming[k]) } } }
+      counters = {rewriter_next_rule_id, colormarker_next_rule_id, saved_views_next_id}
+      locals = {rewriter_rules, colormarker_rules, saved_views}
+      # A malformed upstream declaration is FAIL-CLOSED on load: the parse drops the entry and
+      # keeps an error that refuses every route, because a proxy the operator declared must
+      # never quietly turn into DIRECT. That error lives in memory only, so an import that
+      # carried one wrote the table WITHOUT the bad entry and the next start routed its hosts
+      # direct. Refused here instead, before anything is written: the parse sets these only for
+      # a node the profile carries, so whatever is set afterwards came from the profile.
+      rules_err, proxy_err = @@upstream_rules_load_error, @@upstream_proxy_load_error
+      @@upstream_rules_load_error = @@upstream_proxy_load_error = nil
       apply_sections(JSON.parse(filtered))
+      if err = @@upstream_rules_load_error || @@upstream_proxy_load_error
+        raise Error.new("#{err.lchop("settings: ")} in the profile — nothing was imported; fix the " \
+                        "profile, or leave the section out with --sections")
+      end
+      @@upstream_rules_load_error = rules_err unless selected.includes?("upstream_rules")
+      @@upstream_proxy_load_error = proxy_err unless incoming["network"]?.try(&.as_h?).try(&.has_key?("upstream_proxy")) && selected.includes?("network")
+      renumber_imported_ids(incoming, selected, counters, locals)
       # `save` REPORTS failure rather than raising, because a failed write must not crash the
       # TUI. Discarding that here meant a full disk, a read-only filesystem or an unwritable
       # config directory printed "imported N section(s)" and exited 0 with nothing persisted —
@@ -1445,6 +1489,73 @@ module Gori
         raise Error.new("settings were applied in memory but could not be written to #{path}")
       end
       selected
+    end
+
+    # Give every global rule, colour rule and saved view a profile brought in a FRESH id from this
+    # install's own counter, and never let that counter go backwards.
+    #
+    # Those ids are the keys of per-project state in databases this process may never open again
+    # (`rewriter_overrides`, `colormarker_overrides`, `history_view`), which is why each counter is
+    # monotonic and an id is never reused (see `rewriter_next_rule_id`). A profile's ids are
+    # another install's numbering: adopted as written, an imported rule inherited whatever a
+    # project had once said about the LOCAL rule of that number — an imported `pipe` hook listed
+    # `[disabled]` came up live in a project that had enabled a deleted rule #1. And the parse
+    # recomputes each counter from the imported ids, so a profile could also pull it back over
+    # ids already handed out here (or push it to the Int64 ceiling, where ids collide).
+    #
+    # Only a list the profile actually CARRIES is renumbered: a section without one keeps the
+    # current list (the parse's tolerant default), and those ids are already this install's.
+    #
+    # And an entry IDENTICAL to one this install holds under the same id keeps it — that is this
+    # install's own rule coming back (a profile re-imported where it was exported), and
+    # renumbering it would orphan exactly the per-project state the counters exist to protect.
+    # Fresh ids start at the local counter, above every id ever handed out here, so a kept id and
+    # a fresh one cannot meet.
+    private def self.renumber_imported_ids(incoming : Hash(String, JSON::Any), selected : Array(String),
+                                           before : {Int64, Int64, Int64},
+                                           locals : {Array(RewriterRule), Array(ColormarkerRule), Array(SavedView)}) : Nil
+      rw_next, cm_next, sv_next = before
+      # The parse recomputed each counter from the ids now in the list; renumbering makes that
+      # number meaningless, and without a list it can only be below what this install handed out.
+      if imported_list?(incoming, selected, "rewriter", "rules", "presets")
+        rules, nxt = renumber(rewriter_rules, locals[0], rw_next)
+        self.rewriter_rules = rules
+        self.rewriter_next_rule_id = nxt
+      else
+        self.rewriter_next_rule_id = {rewriter_next_rule_id, rw_next}.max
+      end
+      if imported_list?(incoming, selected, "colormarker", "rules")
+        marks, nxt = renumber(colormarker_rules, locals[1], cm_next)
+        self.colormarker_rules = marks
+        self.colormarker_next_rule_id = nxt
+      else
+        self.colormarker_next_rule_id = {colormarker_next_rule_id, cm_next}.max
+      end
+      if imported_list?(incoming, selected, "saved_views", "views")
+        views, nxt = renumber(saved_views, locals[2], sv_next)
+        self.saved_views = views
+        self.saved_views_next_id = nxt
+      else
+        self.saved_views_next_id = {saved_views_next_id, sv_next}.max
+      end
+    end
+
+    # `imported` with every entry not found verbatim in `local` given the next id from `start`,
+    # plus the counter after the last one handed out.
+    private def self.renumber(imported : Array(T), local : Array(T), start : Int64) : {Array(T), Int64} forall T
+      n = start
+      out = imported.map do |e|
+        next e if local.includes?(e)
+        e.copy_with(id: n).tap { n = next_id_after(n) }
+      end
+      {out, n}
+    end
+
+    private def self.imported_list?(incoming : Hash(String, JSON::Any), selected : Array(String),
+                                    section : String, *keys : String) : Bool
+      return false unless selected.includes?(section)
+      node = incoming[section]?.try(&.as_h?)
+      !!node && keys.any? { |k| node[k]?.try(&.as_a?) }
     end
 
     # An imported profile NEVER changes this install's token grammar.
@@ -1462,11 +1573,32 @@ module Gori
     # re-styles every open editor) and `save` cannot persist it.
     #
     # `Settings.load` from disk still honours the key: that file IS this install's own state.
-    private def self.strip_env_syntax(key : String, node : JSON::Any) : JSON::Any
-      return node unless key == "env"
+    #
+    # Two more keys have the same shape, so the strip is a table rather than one key:
+    #
+    #   * `env.prefix` is the other half of how a stored token is SPELLED — `$ENV.KEY` read with a
+    #     `@@` prefix is plain text — so a profile carrying it stopped every token in every
+    #     project from expanding, and said nothing.
+    #   * `redaction.salt` keys every placeholder this install has already written into an
+    #     export. Adopting a teammate's broke the correlation between yesterday's artifacts and
+    #     today's, which is the one thing `reset_redaction` refuses to do — and the default
+    #     export was handing the salt (a secret, see settings/redaction.cr) to whoever got the
+    #     profile.
+    #   * the id counters of the three rule lists are this install's numbering, and only ever
+    #     move forward from what IT has handed out — see `renumber_imported_ids`.
+    INSTALL_LOCAL_KEYS = {
+      "env"         => ["syntax", "prefix"],
+      "redaction"   => ["salt"],
+      "rewriter"    => ["next_rule_id"],
+      "colormarker" => ["next_rule_id"],
+      "saved_views" => ["next_view_id"],
+    }
+
+    private def self.strip_install_local(key : String, node : JSON::Any) : JSON::Any
+      return node unless drop = INSTALL_LOCAL_KEYS[key]?
       h = node.as_h?
-      return node unless h && h.has_key?("syntax")
-      JSON::Any.new(h.reject("syntax"))
+      return node unless h && drop.any? { |d| h.has_key?(d) }
+      JSON::Any.new(h.reject(drop))
     end
 
     # Factory reset: every persisted setting back to the value a fresh install ships with,

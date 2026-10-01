@@ -40,28 +40,41 @@ module Gori::Settings
   # --- global provider library CRUD (settings:oast providers → global scope) ---------------
   # Each mutation rewrites the array and persists via save (atomic + 3-way merge). add returns
   # the new provider's generated id so the caller can select it.
+  #
+  # And each one ANSWERS, restoring the list when the write did not land — the shape
+  # `add_scan_rule` and the rewriter CRUD already have. Dropping `save`'s result left a refused
+  # write (a half-read or unreadable settings.json, a full disk) live for the rest of the session
+  # under an "added provider" toast and gone at the next start; and a provider MOVED from a
+  # project into the global library had its project row deleted first, so it vanished outright.
   def self.add_oast_provider(name : String, kind : String, host : String, token : String?, enabled : Bool = true) : String
+    prev = oast_providers
     id = Random::Secure.hex(4)
     self.oast_providers = oast_providers + [OastProvider.new(id, name, kind, host, token, enabled)]
-    save
-    id
+    return id if save
+    self.oast_providers = prev
+    ""
   end
 
-  def self.update_oast_provider(id : String, name : String, kind : String, host : String, token : String?) : Nil
-    self.oast_providers = oast_providers.map do |p|
+  def self.update_oast_provider(id : String, name : String, kind : String, host : String, token : String?) : Bool
+    commit_oast_providers(oast_providers.map do |p|
       p.id == id ? OastProvider.new(id, name, kind, host, token, p.enabled) : p
-    end
-    save
+    end)
   end
 
-  def self.set_oast_provider_enabled(id : String, enabled : Bool) : Nil
-    self.oast_providers = oast_providers.map { |p| p.id == id ? p.copy_with(enabled: enabled) : p }
-    save
+  def self.set_oast_provider_enabled(id : String, enabled : Bool) : Bool
+    commit_oast_providers(oast_providers.map { |p| p.id == id ? p.copy_with(enabled: enabled) : p })
   end
 
-  def self.delete_oast_provider(id : String) : Nil
-    self.oast_providers = oast_providers.reject { |p| p.id == id }
-    save
+  def self.delete_oast_provider(id : String) : Bool
+    commit_oast_providers(oast_providers.reject { |p| p.id == id })
+  end
+
+  private def self.commit_oast_providers(list : Array(OastProvider)) : Bool
+    prev = oast_providers
+    self.oast_providers = list
+    return true if save
+    self.oast_providers = prev
+    false
   end
 
   # Factory reset for this section (dispatched by Settings.reset_to_factory). Provider TOKENS

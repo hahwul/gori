@@ -346,6 +346,7 @@ module Gori::CLI
     applicable, changed, unknown = Settings.import_preview(raw, sections)
     STDERR.puts "warning: unrecognised section(s) ignored: #{unknown.join(", ")}" unless unknown.empty?
     report_env_syntax_change(root, applicable)
+    report_env_prefix_change(root, applicable)
 
     # Over the sections that would ACTUALLY be applied, not over the file: `--sections network`
     # against a profile whose `rewriter` block happens to carry a hook arms nothing, so it must
@@ -404,6 +405,17 @@ module Gori::CLI
                 "(#{env_syntax_example(Settings.env_syntax)}) — an import never reinterprets the " \
                 "tokens already stored in your projects. Switch with " \
                 "`gori settings env-syntax #{env_syntax_label(incoming)}`."
+  end
+
+  # The token PREFIX is stripped from an import for the grammar's reason (`INSTALL_LOCAL_KEYS`):
+  # it decides how every token already stored here is read. Said for the same reason too.
+  private def self.report_env_prefix_change(root : JSON::Any, applicable : Array(String)) : Nil
+    return unless applicable.includes?("env")
+    incoming = root.as_h?.try(&.["env"]?).try(&.as_h?).try(&.["prefix"]?).try(&.as_s?)
+    return if incoming.nil? || incoming == Settings.env_prefix
+    STDERR.puts "note: this profile uses the token prefix #{incoming.inspect}; this install keeps " \
+                "#{Settings.env_prefix.inspect} — an import never changes how the tokens already " \
+                "stored in your projects are read."
   end
 
   # `gori settings env-syntax [bare|namespaced]` — read or set the token grammar.

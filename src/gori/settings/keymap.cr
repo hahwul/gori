@@ -113,9 +113,14 @@ module Gori::Settings
       next if id != raw_id && obj.has_key?(id)
       arr = v.as_a?
       next unless arr # a non-array entry is dropped (tolerant)
-      # Keep only labels that parse to a real chord (round-trip safe); a list that
-      # ends up empty is a deliberate unbind and is preserved.
-      out[id] = arr.compact_map(&.as_s?).select { |s| !Verb::Chord.parse(s).nil? }
+      # Keep only labels that parse to a real chord (round-trip safe). Only a list that was
+      # ALREADY empty is a deliberate unbind: one whose every label failed (a typo, a key name
+      # a newer gori knows) is kept raw instead, so `Hotkeys.chord_overrides` falls back to the
+      # default as it says it does — filtered down to `[]` it read as an unbind, and the next
+      # save erased the operator's label.
+      labels = arr.compact_map(&.as_s?)
+      parsed = labels.select { |s| !Verb::Chord.parse(s).nil? }
+      out[id] = parsed.empty? ? labels : parsed
     end
     out
   end

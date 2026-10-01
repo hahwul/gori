@@ -489,10 +489,24 @@ module Gori
     # Persist the editor's working copy into the Settings model (the caller then runs
     # Settings.save). `working` is verb-id → Chord? (Chord = rebound; nil = unbound);
     # absent ids keep the profile default. Stored as label strings; an unbind is [].
-    def self.apply(working : Hash(String, Verb::Chord?), profile : String) : Nil
+    #
+    # Only the ids the editor SHOWED are rewritten (`rebindable_overrides`, which is what it
+    # loads), plus whatever it now binds. Every
+    # other stored entry is kept as it was: an id this build does not know (a newer gori sharing
+    # the file, a rename `RENAMED_VERB_IDS` does not list), a verb that is not rebindable, and a
+    # row whose binding the editor did not change, which keeps every chord it had rather than
+    # the one `load_overrides` displays. Replacing the whole map erased all of those on a save
+    # that rebound one unrelated key.
+    def self.apply(working : Hash(String, Verb::Chord?), profile : String,
+                   registry : Verb::Registry) : Nil
       Settings.keymap_os = PROFILES.includes?(profile) ? profile : "auto"
-      out = {} of String => Array(String)
-      working.each { |id, chord| out[id] = chord ? [chord.label] : [] of String }
+      shown = rebindable_overrides(registry)
+      out = Settings.keymap_overrides.dup
+      out.reject! { |id, _| shown.has_key?(id) && !working.has_key?(id) } # reset to default
+      working.each do |id, chord|
+        next if (had = shown[id]?) && had.first? == chord # untouched: keep every stored chord
+        out[id] = chord ? [chord.label] : [] of String
+      end
       Settings.keymap_overrides = out
     end
   end

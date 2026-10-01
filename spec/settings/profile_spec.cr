@@ -69,8 +69,8 @@ private MAXIMAL_PROFILE = <<-JSON
     "discover": { "containment": "strict", "max_depth": 3 },
     "decoder": { "chains": [ { "name": "c1", "spec": "base64-decode" } ] },
     "hooks": { "timeout_secs": 30 },
-    "rewriter": { "next_rule_id": 2, "rules": [] },
-    "colormarker": { "next_rule_id": 2, "rules": [] },
+    "rewriter": { "rules": [ { "id": 1, "enabled": false, "pattern": "x", "op": "set_header", "part": "head", "replacement": "v" } ] },
+    "colormarker": { "rules": [ { "id": 1, "when": "status:500", "color": "red" } ] },
     "saved_views": { "next_view_id": 2, "views": [ { "id": 1, "name": "v1", "query": "src:proxy" } ] },
     "redaction": { "active": "p1", "default": true, "profiles": [ { "name": "p1", "json_fields": ["password"] } ] },
     "mcp": { "channels": true },
@@ -296,6 +296,150 @@ describe "settings profiles" do
       with_config_home do
         doc = JSON.parse(Gori::Settings.export_document(["network", "theme"])).as_h
         doc.keys.sort.should eq(["network", "theme"])
+      end
+    end
+  end
+
+  # Values that belong to THIS install and decide how its existing data is read: the token
+  # prefix (every stored `$ENV.KEY`) and the redaction salt (every placeholder already written).
+  # A profile neither carries nor changes them — the grammar's rule, extended.
+  describe "install-local keys" do
+    it "neither exports nor imports the token prefix or the redaction salt" do
+      with_config_home do
+        prev_salt = Gori::Redact.salt
+        prev_prefix = Gori::Settings.env_prefix
+        begin
+          Gori::Redact.salt = "local-salt"
+          Gori::Settings.env_prefix = "%"
+          Gori::Settings.env_vars = [{"TOKEN", "v"}]
+          doc = Gori::Settings.export_document(["env", "redaction"])
+          doc.should_not contain("local-salt")
+          JSON.parse(doc).as_h["env"].as_h.has_key?("prefix").should be_false
+
+          Gori::Settings.import_document(%({"env":{"prefix":"@@","vars":[]},"redaction":{"salt":"teammates","default":true}}))
+          Gori::Redact.salt.should eq("local-salt")
+          Gori::Settings.env_prefix.should eq("%")
+          Gori::Settings.redaction_default?.should be_true # the rest of the section still applies
+        ensure
+          Gori::Redact.salt = prev_salt.not_nil!
+          Gori::Settings.env_prefix = prev_prefix.not_nil!
+          Gori::Settings.redaction_default = false
+        end
+      end
+    end
+
+    # Global rule and view ids key per-project state (`rewriter_overrides`, `colormarker_overrides`,
+    # `history_view`) and are never reused. A profile's ids are another install's numbering:
+    # adopted as written, an imported disabled rule picked up a project's leftover override of
+    # the local rule with that number and came up live, and the profile's counter could pull this
+    # install's backwards or push it to the Int64 ceiling.
+    it "gives imported rules and views fresh ids from this install's counters" do
+      with_config_home do
+        Gori::Settings.rewriter_rules = [] of Gori::Settings::RewriterRule
+        Gori::Settings.rewriter_next_rule_id = 5_i64
+        Gori::Settings.colormarker_rules = [] of Gori::Settings::ColormarkerRule
+        Gori::Settings.colormarker_next_rule_id = 9_i64
+        Gori::Settings.saved_views = [] of Gori::Settings::SavedView
+        Gori::Settings.saved_views_next_id = 3_i64
+
+        Gori::Settings.import_document(<<-JSON)
+          {"rewriter":{"next_rule_id":9223372036854775806,"rules":[
+            {"id":1,"enabled":false,"pattern":"x","op":"set_header","part":"head","replacement":"v"}]},
+          "colormarker":{"next_rule_id":2,"rules":[{"id":1,"when":"status:500","color":"red"}]},
+          "saved_views":{"next_view_id":2,"views":[{"id":1,"name":"errors","query":"status:500"}]}}
+          JSON
+
+        Gori::Settings.rewriter_rules.map(&.id).should eq([5_i64])
+        Gori::Settings.rewriter_next_rule_id.should eq(6_i64)
+        Gori::Settings.colormarker_rules.map(&.id).should eq([9_i64])
+        Gori::Settings.colormarker_next_rule_id.should eq(10_i64)
+        Gori::Settings.saved_views.map(&.id).should eq([3_i64])
+        Gori::Settings.saved_views_next_id.should eq(4_i64)
+
+        # …and an export carries no counter for the next importer to adopt.
+        out = JSON.parse(Gori::Settings.export_document(["rewriter"])).as_h["rewriter"].as_h
+        out.has_key?("next_rule_id").should be_false
+      ensure
+        Gori::Settings.rewriter_rules = [] of Gori::Settings::RewriterRule
+        Gori::Settings.rewriter_next_rule_id = 1_i64
+        Gori::Settings.colormarker_rules = [] of Gori::Settings::ColormarkerRule
+        Gori::Settings.colormarker_next_rule_id = 1_i64
+        Gori::Settings.saved_views = [] of Gori::Settings::SavedView
+        Gori::Settings.saved_views_next_id = 1_i64
+      end
+    end
+
+    # The other direction of the same hazard: re-importing this install's OWN export must not
+    # renumber its rules, or every project's override of them is orphaned.
+    it "keeps the id of a rule that comes back identical" do
+      with_config_home do
+        rule = Gori::Settings::RewriterRule.new(4_i64, false, "mine", "request", "head",
+          "X-Mine", "v", "set_header", "literal", "", "")
+        Gori::Settings.rewriter_rules = [rule]
+        Gori::Settings.rewriter_next_rule_id = 7_i64
+        profile = Gori::Settings.export_document(["rewriter"])
+        Gori::Settings.import_document(profile)
+        Gori::Settings.rewriter_rules.map(&.id).should eq([4_i64])
+        Gori::Settings.rewriter_next_rule_id.should eq(7_i64)
+      ensure
+        Gori::Settings.rewriter_rules = [] of Gori::Settings::RewriterRule
+        Gori::Settings.rewriter_next_rule_id = 1_i64
+      end
+    end
+
+    # A rewriter section without a `rules` list keeps the current rules — and must keep the
+    # counter where this install left it, not recompute it from the surviving ids.
+    it "never moves a counter backwards on an import without a list" do
+      with_config_home do
+        Gori::Settings.rewriter_rules = [] of Gori::Settings::RewriterRule
+        Gori::Settings.rewriter_next_rule_id = 50_i64
+        Gori::Settings.import_document(%({"rewriter":{}}))
+        Gori::Settings.rewriter_next_rule_id.should eq(50_i64)
+      ensure
+        Gori::Settings.rewriter_next_rule_id = 1_i64
+      end
+    end
+
+    # A malformed upstream declaration is fail-closed on load, but the refusal lives in memory:
+    # an import wrote the table without the bad entry, and the next start routed its hosts
+    # DIRECT. Refused before anything is written instead.
+    it "refuses a profile whose upstream rules would lose a malformed declaration" do
+      with_config_home do
+        Gori::Settings.save
+        before = File.read(Gori::Settings.path)
+        expect_raises(Gori::Error, /upstream_rules\[0\]/) do
+          Gori::Settings.import_document(<<-JSON)
+            {"upstream_rules":[
+              {"host":"*.corp.test","kind":"sock5","addr":"jump:1080"},
+              {"host":"api.test","kind":"direct"}]}
+            JSON
+        end
+        File.read(Gori::Settings.path).should eq(before)
+        expect_raises(Gori::Error, /upstream_proxy/) do
+          Gori::Settings.import_document(%({"network":{"upstream_proxy":8080}}))
+        end
+        File.read(Gori::Settings.path).should eq(before)
+      end
+    end
+
+    # A self-hosted interactsh token is a credential (MCP `list_oast_providers` redacts it); a
+    # default export wrote it out at 0644 with no notice.
+    it "keeps OAST providers out of a default export, and counts their token as a secret" do
+      with_config_home do
+        prev = Gori::Settings.oast_providers
+        begin
+          Gori::Settings.oast_providers = [
+            Gori::Settings::OastProvider.new("o1", "self", "interactsh", "oast.test", "SUPERSECRET", true),
+          ]
+          Gori::Settings.export_document.should_not contain("SUPERSECRET")
+          Gori::Settings.exported_secret_sections(["oast_providers"]).should eq(["oast_providers"])
+          Gori::Settings.oast_providers = [
+            Gori::Settings::OastProvider.new("o1", "public", "interactsh", "oast.fun", nil, true),
+          ]
+          Gori::Settings.exported_secret_sections(["oast_providers"]).should be_empty
+        ensure
+          Gori::Settings.oast_providers = prev
+        end
       end
     end
   end
