@@ -300,6 +300,56 @@ describe "settings profiles" do
     end
   end
 
+  # Values that belong to THIS install and decide how its existing data is read: the token
+  # prefix (every stored `$ENV.KEY`) and the redaction salt (every placeholder already written).
+  # A profile neither carries nor changes them — the grammar's rule, extended.
+  describe "install-local keys" do
+    it "neither exports nor imports the token prefix or the redaction salt" do
+      with_config_home do
+        prev_salt = Gori::Redact.salt
+        prev_prefix = Gori::Settings.env_prefix
+        begin
+          Gori::Redact.salt = "local-salt"
+          Gori::Settings.env_prefix = "%"
+          Gori::Settings.env_vars = [{"TOKEN", "v"}]
+          doc = Gori::Settings.export_document(["env", "redaction"])
+          doc.should_not contain("local-salt")
+          JSON.parse(doc).as_h["env"].as_h.has_key?("prefix").should be_false
+
+          Gori::Settings.import_document(%({"env":{"prefix":"@@","vars":[]},"redaction":{"salt":"teammates","default":true}}))
+          Gori::Redact.salt.should eq("local-salt")
+          Gori::Settings.env_prefix.should eq("%")
+          Gori::Settings.redaction_default?.should be_true # the rest of the section still applies
+        ensure
+          Gori::Redact.salt = prev_salt.not_nil!
+          Gori::Settings.env_prefix = prev_prefix.not_nil!
+          Gori::Settings.redaction_default = false
+        end
+      end
+    end
+
+    # A self-hosted interactsh token is a credential (MCP `list_oast_providers` redacts it); a
+    # default export wrote it out at 0644 with no notice.
+    it "keeps OAST providers out of a default export, and counts their token as a secret" do
+      with_config_home do
+        prev = Gori::Settings.oast_providers
+        begin
+          Gori::Settings.oast_providers = [
+            Gori::Settings::OastProvider.new("o1", "self", "interactsh", "oast.test", "SUPERSECRET", true),
+          ]
+          Gori::Settings.export_document.should_not contain("SUPERSECRET")
+          Gori::Settings.exported_secret_sections(["oast_providers"]).should eq(["oast_providers"])
+          Gori::Settings.oast_providers = [
+            Gori::Settings::OastProvider.new("o1", "public", "interactsh", "oast.fun", nil, true),
+          ]
+          Gori::Settings.exported_secret_sections(["oast_providers"]).should be_empty
+        ensure
+          Gori::Settings.oast_providers = prev
+        end
+      end
+    end
+  end
+
   # Drives the export file's 0600. Must track what the document ACTUALLY carries, not just
   # what was named: warning on an `env`-named export of an empty env block would train the
   # operator to ignore the notice on the one that matters.

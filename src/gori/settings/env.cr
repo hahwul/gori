@@ -390,7 +390,7 @@ module Gori::Settings
   # out on the next save this install makes for any other reason, because that save always emits
   # it. Re-deriving the same answer from the same absence until then is free.
   #
-  # An EXPORT still carries no grammar: `strip_env_syntax` drops the key from an exported
+  # An EXPORT still carries no grammar: `strip_install_local` drops the key from an exported
   # document (settings.cr), because a teammate's profile does not speak for how the tokens in
   # THIS install's projects are read.
   private def self.serialize_env(j : JSON::Builder) : Nil

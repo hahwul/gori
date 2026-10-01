@@ -1107,7 +1107,11 @@ module Gori
     # NOT here. The execution axis is `COMMAND_SECTIONS` below, and it is handled by REPORTING
     # rather than by exclusion — see `command_rules` for that argument in full. Adding an
     # exportable section means asking both questions, not this one.
-    SECRET_SECTIONS = ["env", "decoder"]
+    #
+    # `oast_providers` is here for its `token`: a self-hosted interactsh server's auth token, the
+    # credential `list_oast_providers` already redacts on the MCP door. A default export carried
+    # it out at 0644 with no notice.
+    SECRET_SECTIONS = ["env", "decoder", "oast_providers"]
 
     # Sections that can carry a COMMAND — the second axis. Every settings value gori hands to
     # `Process.new`/`Process.run` lives in one of these, and the list is what both ends of a
@@ -1182,7 +1186,11 @@ module Gori
       present = JSON.parse(serialize).as_h.keys
       SECRET_SECTIONS.select do |s|
         next false unless list.includes?(s) && present.includes?(s)
-        s == "env" ? !env_vars.empty? : true
+        case s
+        when "env"            then !env_vars.empty?
+        when "oast_providers" then oast_providers.any?(&.token.presence)
+        else                       true
+        end
       end
     end
 
@@ -1191,7 +1199,7 @@ module Gori
       keep = only || (doc.keys - SECRET_SECTIONS)
       JSON.build(indent: "  ") do |j|
         j.object do
-          # `strip_env_syntax` on the way OUT as well as on the way in: an exported profile carries
+          # `strip_install_local` on the way OUT as well as on the way in: an exported profile carries
           # no token grammar at all. `serialize` always writes the key now (absence means "predates
           # namespaces", so a grammar has to be stated), and a profile that named one would decide
           # how the IMPORTING install reads the tokens already stored in its own projects — the one
@@ -1204,8 +1212,8 @@ module Gori
           # sentence about the importer's own token values.
           doc.each do |k, v|
             next unless keep.includes?(k)
-            stripped = strip_env_syntax(k, v)
-            next if k == "env" && (h = stripped.as_h?) && h.empty?
+            stripped = strip_install_local(k, v)
+            next if INSTALL_LOCAL_KEYS.has_key?(k) && (h = stripped.as_h?) && h.empty?
             j.field k, stripped
           end
         end
@@ -1452,7 +1460,7 @@ module Gori
       selected = incoming.keys.select do |k|
         (only.nil? || only.includes?(k)) && SECTION_KEYS.includes?(k)
       end
-      filtered = JSON.build { |j| j.object { selected.each { |k| j.field k, strip_env_syntax(k, incoming[k]) } } }
+      filtered = JSON.build { |j| j.object { selected.each { |k| j.field k, strip_install_local(k, incoming[k]) } } }
       apply_sections(JSON.parse(filtered))
       # `save` REPORTS failure rather than raising, because a failed write must not crash the
       # TUI. Discarding that here meant a full disk, a read-only filesystem or an unwritable
@@ -1481,11 +1489,27 @@ module Gori
     # re-styles every open editor) and `save` cannot persist it.
     #
     # `Settings.load` from disk still honours the key: that file IS this install's own state.
-    private def self.strip_env_syntax(key : String, node : JSON::Any) : JSON::Any
-      return node unless key == "env"
+    #
+    # Two more keys have the same shape, so the strip is a table rather than one key:
+    #
+    #   * `env.prefix` is the other half of how a stored token is SPELLED — `$ENV.KEY` read with a
+    #     `@@` prefix is plain text — so a profile carrying it stopped every token in every
+    #     project from expanding, and said nothing.
+    #   * `redaction.salt` keys every placeholder this install has already written into an
+    #     export. Adopting a teammate's broke the correlation between yesterday's artifacts and
+    #     today's, which is the one thing `reset_redaction` refuses to do — and the default
+    #     export was handing the salt (a secret, see settings/redaction.cr) to whoever got the
+    #     profile.
+    INSTALL_LOCAL_KEYS = {
+      "env"       => ["syntax", "prefix"],
+      "redaction" => ["salt"],
+    }
+
+    private def self.strip_install_local(key : String, node : JSON::Any) : JSON::Any
+      return node unless drop = INSTALL_LOCAL_KEYS[key]?
       h = node.as_h?
-      return node unless h && h.has_key?("syntax")
-      JSON::Any.new(h.reject("syntax"))
+      return node unless h && drop.any? { |d| h.has_key?(d) }
+      JSON::Any.new(h.reject(drop))
     end
 
     # Factory reset: every persisted setting back to the value a fresh install ships with,
