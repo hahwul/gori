@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Settings: gori no longer writes over a `settings.json` it could not read (it warns instead), the first save after starting with no settings file keeps the sections another gori wrote meanwhile, and a Hotkeys save keeps bindings the editor does not show, including one whose key name this build does not recognise (#1458)
+- Settings profiles: `gori settings export` leaves OAST provider tokens out unless `--sections oast_providers` names them, an import no longer changes the token prefix or the redaction salt, imported rewriter and colormarker rules and saved views get fresh ids so a project's old override cannot switch one on, and a profile with a malformed upstream rule is refused instead of losing it (#1458)
+- Project: saving the network pane keeps a pin set by `gori run project network set` (an empty upstream means direct) and refuses a malformed bind address, and stored out-of-range ports and timeouts are read within the editors' limits (#1458)
+- Listeners: a reverse listener on a wildcard address can forward to a remote origin on the same port instead of being refused as a loop (#1458)
+- TUI: a new editor keyset applies without a restart, saving a settings section no longer resets the session's pretty-print toggle, ^R on the Tabs, Theme or Hotkeys row keeps unsaved edits in other sections, saving the tab layout from a project without snapshots keeps your Evidence tab, and the OAST tab says when a provider change could not be saved (#1458)
 - History: a forward-proxy request held at Intercept and forwarded unedited or dropped, rewritten by a body rule, or refused or failed after a Match&Replace rule fired keeps the client's own request line (`GET http://host/p`) instead of the origin-form line gori sends upstream (#1424)
 - Rewriter: the rule form scrolls on a short terminal, so its Save row is drawn at 80×24, and a click on the form's preview line or border no longer saves the rule (#1420)
 - Repeater: on a terminal too short for the REQUEST and RESPONSE panes, focus moves to TARGET and keys no longer edit a request that is off screen, and the space under TARGET says the panes need a taller window (#1421)
