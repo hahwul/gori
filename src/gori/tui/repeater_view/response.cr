@@ -180,6 +180,24 @@ class Gori::Tui::RepeaterView
     true
   end
 
+  # ⌃Home / ⌃End in the response pane: the caret to the very start or end of the card it is
+  # in, ⇧ extending — `TextArea#to_buffer_start`/`#to_buffer_end`, the request editor beside
+  # it — with the view following, so ⌃End puts the last line on the pane's bottom row.
+  #
+  # A direct jump, not `resp_move(±huge)`: under wrap that walks every visual row of the body
+  # laying out each line, and on a split column it crosses cards only from a boundary line,
+  # so the same key would land in either card depending on where the caret was. Staying in
+  # the card is the request column's rule too (each of its panes is its own TextArea).
+  def resp_buffer_edge(dir : Int32, selecting : Bool = false) : Bool
+    return false unless resp_navigable?
+    size, line_at = resp_line_source
+    return false if size <= 0
+    cy = dir < 0 ? 0 : size - 1
+    @resp_cursor.move_to(cy, dir < 0 ? 0 : line_at.call(cy).size, selecting: selecting)
+    ensure_resp_visible(@resp_last_h) if @resp_last_h > 0
+    true
+  end
+
   # One screenful of the response pane, for PgUp/PgDn. The same "minus a couple of rows of
   # overlap" step `ReadPane#motion_key` and `HistoryView#detail_page_rows` use, measured
   # from THIS pane's own last drawn height rather than the shell's `@body_h`: the response

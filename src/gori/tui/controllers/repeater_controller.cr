@@ -556,6 +556,8 @@ module Gori::Tui
         # the keymap by construction: a bindable chord is a LETTER/DIGIT/PUNCT (`Verb::Chord`
         # parses nothing else), and none of these are.
         return edit_repeater_request(ev, view)
+      elsif (view = current_view) && response_buffer_motion?(ev, view)
+        return response_buffer_motion(ev, view)
       elsif ev.ctrl? || ev.alt?
         # Any OTHER modified chord (^R send, ^X hex, ^S SNI, ^L auto-CL, …) defers to the
         # central keymap so it's rebindable. Editors never insert ctrl/alt chars, so the
@@ -1082,10 +1084,10 @@ module Gori::Tui
     end
 
     # PageUp/PageDown/Home/End that `handle_body_key` did NOT claim: the response pane's hex
-    # dump (no lines, so `resp_line_edge` declines) and every ⌃/⌥-modified form (deferred to
-    # the keymap before the focus dispatch ever runs). Both land here, and both mean "move the
-    # dump" — the twin of the `history_controller.scroll_detail(delta)` fallthrough the Runner
-    # does for the History detail overlay.
+    # dump (no lines, so `resp_line_edge` declines), bare or ⌃/⌥-modified. Both mean "move
+    # the dump" — the twin of the `history_controller.scroll_detail(delta)` fallthrough the
+    # Runner does for the History detail overlay. Navigable text never gets here: its bare
+    # keys are `handle_repeater_response`'s and its modified ones `response_buffer_motion`'s.
     #
     # The `:response` guard is the mechanism, not a comment: it is what keeps this from moving
     # a pane the operator is not in. The request and target panes do consume these keys
@@ -1096,6 +1098,35 @@ module Gori::Tui
       v = current_view
       return false unless v && v.focus == :response
       v.scroll(delta)
+      true
+    end
+
+    # ⌃/⌥ + Home/End/PgUp/PgDn over the response's navigable text: the caret to the card's
+    # first or last line (`resp_buffer_edge`, the request editor's `to_buffer_start`/`_end`)
+    # or a page, ⇧ extending — the request pane's `editing_motion?` claim, on this side.
+    #
+    # These used to defer with every other modified chord and reach `body_scroll`, which only
+    # moved the viewport: ⌃End drew the last line at the TOP with blanks below, and the next
+    # arrow — stepping from the caret still on line 1 — snapped the view back (#1425). Caret
+    # logic there cannot be right either: the shell hands it a signed delta, so ⇧ is gone and
+    # ⌃⇧End would DROP the selection it was pressed to extend.
+    #
+    # Safe against the keymap for the reason `editing_motion?` gives: `Verb::Chord` parses no
+    # named key, so none of these can be a binding. The hex dump is not claimed and keeps the
+    # shell's buffer jump.
+    private def response_buffer_motion?(ev : Termisu::Event::Key, view : RepeaterView) : Bool
+      return false unless (ev.ctrl? || ev.alt?) && view.resp_navigable?
+      key = ev.key
+      key.home? || key.end? || key.page_up? || key.page_down?
+    end
+
+    private def response_buffer_motion(ev : Termisu::Event::Key, view : RepeaterView) : Bool
+      key = ev.key
+      selecting = ev.shift?
+      return view.resp_buffer_edge(-1, selecting: selecting) if key.home?
+      return view.resp_buffer_edge(1, selecting: selecting) if key.end?
+      page = key.page_up? ? -view.resp_page_rows : view.resp_page_rows
+      view.resp_move(page, 0, selecting: selecting)
       true
     end
 
@@ -3548,8 +3579,8 @@ module Gori::Tui
       when key.page_down? then resp_nav_step(view, view.resp_page_rows, 0, selecting, nav)
         # Home/End return FALSE on a hex dump (no lines to have edges) so the shell's
         # ±JUMP_ROWS reaches `body_scroll` and jumps the dump to top/bottom — History's hex
-        # fallthrough. The MODIFIED form never arrives here at all (`handle_body_key` defers
-        # every ctrl/alt chord to the keymap), and lands on that same buffer jump.
+        # fallthrough. The MODIFIED form never arrives here at all: `handle_body_key` hands it
+        # to `response_buffer_motion` on text and defers it to the keymap on a hex dump.
       when key.home? then return view.resp_line_edge(-1, selecting: selecting)
       when key.end?  then return view.resp_line_edge(1, selecting: selecting)
       when transcript
