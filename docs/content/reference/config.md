@@ -522,7 +522,7 @@ Edit from Preferences → **Network & Tabs** → **Network** → **Hostname over
 
 ### env
 
-Tokens like `$ENV.TOKEN` expand at send time in Repeater, Fuzzer, Miner, Intercept, CLI, and MCP:
+Tokens like `$ENV.TOKEN` expand at send time in Repeater, Fuzzer, Miner, Intercept, CLI, and MCP (in captured or held bytes, only the tokens you typed):
 
 ```json
 {

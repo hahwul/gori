@@ -41,7 +41,7 @@ gori run intercept                       # 붙잡힌 항목 + catch 상태 나�
 gori run intercept edit 3 --raw-file edited.txt   # 편집된 바이트로 항목 3 전달
 ```
 
-TUI 에디터에서 편집된 요청은 `Content-Length`가 재동기화되고(기본 켜짐, `Ctrl-L`로 토글) `$ENV.KEY` [환경 변수](/ko/guide/repeater-and-fuzzer/#environment-variables)와 `$GEN.*` 토큰이 확장되어 전달됩니다(텍스트 그대로 보내려면 `$$ENV.KEY`). extract 규칙의 `$BIND.NAME` 바인딩은 이 경로에서 해석되지 않습니다. `gori run intercept edit`는 아무것도 확장하지 않습니다. 본문은 그대로 나가고, `--no-update-content-length`를 주면 선언한 `Content-Length`를 유지합니다. 그 외에는 입력한 그대로 나갑니다.
+TUI 에디터에서 편집된 요청은 `Content-Length`가 재동기화되고(기본 켜짐, `Ctrl-L`로 토글) 직접 입력한 `$ENV.KEY` [환경 변수](/ko/guide/repeater-and-fuzzer/#environment-variables)와 `$GEN.*` 토큰이 확장되어 전달됩니다. extract 규칙의 `$BIND.NAME` 바인딩은 이 경로에서 해석되지 않습니다. 잡힌 메시지에 원래 있던 토큰과 `$$` 이스케이프는 클라이언트의 바이트이므로 도착한 그대로 나가며, 잡힌 메시지에 이미 있던 이름을 직접 입력한 토큰도 마찬가지입니다. 직접 입력한 `$$ENV.KEY` 같은 이스케이프도 입력한 그대로 전달됩니다. `gori run intercept edit`는 아무것도 확장하지 않습니다. 본문은 그대로 나가고, `--no-update-content-length`를 주면 선언한 `Content-Length`를 유지합니다. 그 외에는 입력한 그대로 나갑니다.
 
 **체크포인트.** 편집된 요청이 origin에 닿습니다. **History**로 전환해 그 플로우를 읽어 변경과 origin의 응답을 확인하세요.
 

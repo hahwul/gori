@@ -31,9 +31,8 @@ module Gori
     # (`$ne`, `$where`), an OData option (`$filter`) and a JSON Schema keyword (`$ref`), and a
     # scan runs over the whole message INCLUDING the body. The provenance guards close that
     # for EVIDENCE bytes (a captured replay expands nothing), but they cannot close it for
-    # DRAFT bytes — a paste, a `^E` round trip, `gori run repeater -r`, MCP `raw`/`body`, an
-    # intercept edit-forward — because those have no provenance boundary at all. So the intent
-    # goes IN THE BYTES:
+    # DRAFT bytes — a paste, a `^E` round trip, `gori run repeater -r`, MCP `raw`/`body` —
+    # because those have no provenance boundary at all. So the intent goes IN THE BYTES:
     #
     #   * `Bare` — `$NAME`. What every install shipped with, and what an existing install
     #     keeps forever: the tokens are already written into project DBs, drafts, rule
@@ -396,10 +395,11 @@ module Gori
     #     (`Repeater::Sender`, `Fuzz::Sender`, `Discover::Engine`). `$$` → one literal `$`,
     #     the token behind it left alone.
     #
-    # A surface whose env pass IS the last pass (the TUI intercept editor forwards straight to
-    # the origin) asks for `Consume` explicitly. An EVIDENCE path expands nothing at all and
-    # so unescapes nothing: a `$$` in captured bytes is two bytes the origin sent, not an
-    # escape the operator typed.
+    # A surface whose env pass IS the last pass asks for `Consume` explicitly. An EVIDENCE path
+    # expands nothing the capture brought and so unescapes nothing: a `$$` in captured bytes is
+    # two bytes the origin sent, not an escape the operator typed. The TUI intercept editor is
+    # both — its pass is the last one before the origin, and its buffer is a held message — and
+    # evidence wins: it consumes no escape (#1416, `InterceptView#edited_wire`).
     #
     # One place deliberately keeps `$$` as two bytes: a DIAL TUPLE (a `--target`, a URL, an
     # SNI). Those run `Env.expand` once and are never re-scanned by a send seam, so nothing
@@ -1512,20 +1512,27 @@ module Gori
     #
     # `escape` defaults to `Preserve`: this is the plan-build pass and `expand_bindings` runs
     # over the same bytes at the send seam. A surface where THIS is the last pass before the
-    # socket (the TUI intercept editor) passes `Escape::Consume`.
+    # socket passes `Escape::Consume`.
     #
-    # `unescape` is the namespaced spelling of that decision — `Owns::All` for the surface where
+    # `unescape` is the namespaced spelling of that decision — `Owns::All` for a surface where
     # this IS the last pass, since under the namespaced grammar there are two escapes to consume
     # (`$$ENV.X` and `$$BIND.X`) and one flag cannot name them both.
+    #
+    # `literal` is `expand`'s per-NAME provenance set, passed through: the TUI intercept editor
+    # resolves ENV and GEN in this one pass over a buffer seeded from a held message, and the
+    # names that message arrived with are the client's bytes (#1416). `vars_without` cannot
+    # say that for GEN, which has no table to subtract from.
     def self.expand_wire(text : String, vars : Hash(String, String) = effective_vars,
                          prefix : String = Settings.env_prefix,
                          escape : Escape = Escape::Preserve, *,
                          syntax : Syntax = Settings.env_syntax,
                          resolve : Owns = Owns::Env,
                          unescape : Owns? = nil,
-                         generation : Generation? = nil) : Bytes
+                         generation : Generation? = nil,
+                         literal : Set(String)? = nil) : Bytes
       bytes = expand(text, vars, prefix, escape: escape,
-        syntax: syntax, resolve: resolve, unescape: unescape, generation: generation).to_slice
+        syntax: syntax, resolve: resolve, unescape: unescape, generation: generation,
+        literal: literal).to_slice
       boundary = head_body_boundary(bytes)
       head = normalize_crlf(bytes[0...boundary])
       return head if boundary >= bytes.size

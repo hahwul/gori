@@ -520,7 +520,7 @@ Preferences → **Network & Tabs** → **Network** → **Hostname overrides**에
 
 ### env {#env}
 
-`$ENV.TOKEN` 같은 토큰은 Repeater, Fuzzer, Miner, Intercept, CLI, MCP에서 전송 시점에 확장됩니다:
+`$ENV.TOKEN` 같은 토큰은 Repeater, Fuzzer, Miner, Intercept, CLI, MCP에서 전송 시점에 확장됩니다(캡처되거나 잡힌 바이트에서는 직접 입력한 토큰만):
 
 ```json
 {

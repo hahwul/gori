@@ -532,13 +532,50 @@ module Gori::Tui
     # mirroring detail_window_for's @detail_win_id guard.
     private def load_text(it : Interceptor::Item) : Nil
       if @loaded_id != it.id
-        @editor.set_text(String.new(it.raw))
+        seed = String.new(it.raw)
+        @editor.set_text(seed)
+        # The PROVENANCE baseline for `$` tokens (#1416): a name the held message arrived with is
+        # the client's byte, a name typed afterwards is a reference. The editor keeps the seed
+        # BYTES and re-derives the set when the grammar flips mid-hold, and `edited_wire` reads
+        # that same set — so the pane paints as literal exactly what a forward sends literally.
+        @editor.env_literal_source = seed
         @editor_dirty = false # freshly loaded — not yet modified
         # Named by the held item's destination: the proxy's upstream dial applies the
         # destination's TLS rule, and a `$GEN.USER_AGENT` typed here should agree with it (#1153).
         @edit_generation = Env::Generation.for_dial(it.host, it.scheme)
       end
       @hex = nil # a text item never has one; clearing here is what keeps `text_editing?` honest
+    end
+
+    # The edited buffer as wire bytes, with the operator's `$ENV`/`$GEN` references resolved —
+    # and nothing else. The ONE expansion both the forward (`pending_edit`) and the visible
+    # Content-Length (`reflect_content_length_in_editor`) read, so the pane measures the bytes
+    # the socket gets.
+    #
+    # The buffer is EVIDENCE: it was seeded from bytes a client (or an origin) sent, and an edit
+    # to one header does not make the rest of it the operator's (P7, #1416). This used to expand
+    # the whole buffer, so appending a byte to the request line substituted a project secret into
+    # a captured `a=$ENV.FOO`, minted a value for a captured `$GEN.UUID`, consumed every `$$`, and
+    # resynced Content-Length to match — none of it typed, all of it forwarded. CLI `intercept
+    # edit` and MCP `intercept_forward_edit` forward verbatim; this surface keeps one thing more,
+    # a name the operator TYPED, which is the per-name rule the Repeater's evidence tabs use
+    # (`RepeaterView#operator_env_vars`):
+    #
+    #   * `literal: @editor.env_literal_names` — a name the held message carried stays literal,
+    #     whoever typed the occurrence. gori cannot tell a typed `$ENV.FOO` from the captured one
+    #     beside it, and evidence wins when it cannot. Per name and not per edited span: two
+    #     separated edits leave captured bytes BETWEEN them, so a span derived from a prefix /
+    #     suffix diff would hand those back to the expansion, and a full diff per keystroke over
+    #     a held body is a P6 cost.
+    #   * `unescape: Owns::None` — a `$$` in captured bytes is two bytes the client sent. The cost
+    #     is that an operator's own `$$ENV.X` is forwarded as typed, as on every evidence path.
+    #
+    # `Env.expand_wire` (byte-level, head-only CRLF) rather than `split('\n').join("\r\n")`: a
+    # `$KEY` value carrying a CRLF would otherwise double into `\r\r\n`. Nothing resolves BIND
+    # after this — a forward goes straight to the origin — so `$BIND.X` stays literal.
+    private def edited_wire : Bytes
+      Env.expand_wire(@editor.wire_text, resolve: Env::Owns::Env | Env::Owns::Gen,
+        unescape: Env::Owns::None, generation: @edit_generation, literal: @editor.env_literal_names)
     end
 
     def stop_edit : Nil
@@ -591,25 +628,17 @@ module Gori::Tui
       # so it has to come back exactly as it was loaded. (`to_bytes` would be worse still: it
       # joins with CRLF because it exists for wire HEADS.)
       return {id, @editor.wire_bytes} if @loaded_ws
-      # `wire_text` again, for the same reason the Repeater's send path reads it: `text` is the
-      # LF projection, so an edit to a HEADER used to rewrite the BODY — every CR deleted and
-      # Content-Length silently resynced down to match. That is the "I only changed one header"
-      # case, which is most intercept edits, and it shipped different bytes to a live target.
-      # `Env.expand_wire` (gsub `/\r?\n/`) not `split('\n').join("\r\n")`: a `$KEY` value
-      # carrying a CRLF would otherwise double into `\r\r\n` and corrupt the forwarded bytes.
-      #
-      # `unescape: Owns::All`: a forward goes STRAIGHT to the origin — there is no send-seam
-      # `expand_bindings` after this the way there is on every Repeater/Fuzzer path — so this
-      # pass is the last one and therefore the one that owes the operator the escape. ALL of
-      # them, spelled as `Owns` rather than as `Escape::Consume`, because under the namespaced
-      # grammar there are three escapes to consume here (`$$ENV.X`, `$$BIND.X`, `$$GEN.X`) and
-      # the enum can only name one anonymous escape.
-      raw = Env.expand_wire(@editor.wire_text, resolve: Env::Owns::Env | Env::Owns::Gen,
-        unescape: Env::Owns::All, generation: @edit_generation)
+      # `wire_text` again (inside `edited_wire`), for the same reason the Repeater's send path
+      # reads it: `text` is the LF projection, so an edit to a HEADER used to rewrite the BODY —
+      # every CR deleted and Content-Length silently resynced down to match. That is the "I only
+      # changed one header" case, which is most intercept edits, and it shipped different bytes
+      # to a live target. The same case is why only the operator's own `$` references resolve
+      # there (#1416) — see `edited_wire`.
+      raw = edited_wire
       # `@sync_content_length` (^L) — see its toggle. When it is OFF the operator's declared
       # value goes out as written. When it is on the rewrite has ALREADY been reflected into
       # the visible buffer by `reflect_content_length_in_editor`, so the call below is
-      # normally a no-op that only catches a `$KEY` whose expansion changed the body length.
+      # normally a no-op that only catches a typed `$KEY` whose expansion changed the body length.
       return {id, raw} unless @sync_content_length
       {id, Fuzz::ContentLength.sync(raw, add_when_missing: true)}
     end
@@ -710,8 +739,8 @@ module Gori::Tui
     private def reflect_content_length_in_editor : Nil
       return unless @editing && @editor_dirty && @sync_content_length
       return if @loaded_ws # no head to update — see pending_edit
-      raw = Env.expand_wire(@editor.wire_text, resolve: Env::Owns::Env | Env::Owns::Gen,
-        unescape: Env::Owns::All, generation: @edit_generation) # see pending_edit
+      # The forward's own bytes, so the pane measures what the socket gets — see `edited_wire`.
+      raw = edited_wire
       synced = Fuzz::ContentLength.sync(raw, add_when_missing: true)
       return if synced == raw # already agrees (or chunked / no boundary — sync no-ops)
       synced_head = String.new(synced).split("\r\n\r\n", limit: 2).first

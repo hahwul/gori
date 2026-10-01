@@ -268,10 +268,11 @@ describe "Gori::Env — the $$ escape" do
     end
   end
 
-  # The TUI intercept editor FORWARDS straight to the origin — there is no send-seam
-  # `expand_bindings` after it — so its `expand_wire` is the last pass and asks for
-  # `Escape::Consume`. Pinned here because getting it wrong ships `$$` to a live target.
-  it "is consumed by a terminal expand_wire (the intercept editor's mode)" do
+  # A surface whose `expand_wire` is the LAST pass — no send-seam `expand_bindings` after it —
+  # asks for `Escape::Consume`. Pinned here because getting it wrong ships `$$` to a live target.
+  # (The TUI intercept editor forwards straight to the origin but holds EVIDENCE, so it consumes
+  # no escape at all: #1416.)
+  it "is consumed by a terminal expand_wire" do
     with_env(vars: [{"id", "ENVVAL"}]) do
       text = "GET /a?q=$$id&r=$id HTTP/1.1\nHost: h\n\n"
       String.new(Gori::Env.expand_wire(text, escape: Gori::Env::Escape::Consume))
