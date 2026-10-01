@@ -257,6 +257,9 @@ module Gori::Tui
       # Pretty-print bodies (JSON/XML/form/…) toggle — global view pref like reveal,
       # seeded from the persisted default, propagated to History/Repeater each frame.
       @pretty = Settings.pretty_bodies_default
+      # The persisted default `@pretty` was last seeded from, so a settings save re-applies it
+      # only when it changed (`apply_pretty_default`).
+      @pretty_default = @pretty
       # The "copy as X" format picker (Repeater/History detail → space Y). ORTHOGONAL to
       # @overlay (like @space_menu_open) so it floats over whatever's underneath — the
       # Repeater body (@overlay :none) OR the History detail drill-in (@overlay :detail) —
@@ -6686,11 +6689,14 @@ module Gori::Tui
     # save_hotkeys. So "reset from the modal" and "reset inside the editor" cannot drift into
     # meaning two different things.
     #
-    # `prefs` is the modal the confirm is raised from and restored into. Every arm re-pulls it
-    # afterwards: it built one working copy per form section when it OPENED, those copies are
-    # now older than settings.json, and a ↵ on any of them would write the pre-reset values
-    # back — and `apply_settings_saved` would push them at the live proxy. (`dirty?` compares
-    # the working copy to its own equally-stale baseline, so esc would not warn either.)
+    # `prefs` is the modal the confirm is raised from and restored into. Only the FACTORY reset
+    # re-pulls every form: it moves values the forms hold, so their working copies are now older
+    # than settings.json, and a ↵ on any of them would write the pre-reset values back — and
+    # `apply_settings_saved` would push them at the live proxy. (`dirty?` compares the working
+    # copy to its own equally-stale baseline, so esc would not warn either.) The three opener
+    # resets touch no value a form holds, so they use the polite `refresh`: an unsaved edit the
+    # operator typed into Network before pressing ^R on the Tabs row is theirs, not stale, and
+    # the unconditional reload threw it away without a word.
     private def confirm_preferences_reset(section : Symbol, prefs : PreferencesOverlay) : Nil
       case section
       when :reset_all then confirm_factory_reset(prefs)
@@ -6702,7 +6708,7 @@ module Gori::Tui
           ov = TabsOverlay.new(@evidence_available) # reconciled from the persisted prefs, then reverted
           ov.reset_to_defaults
           save_tabs(ov)
-          prefs.reload_from_settings
+          prefs.refresh(section)
         end
       when :theme
         confirm("RESET THEME",
@@ -6713,7 +6719,7 @@ module Gori::Tui
           v.reload(:theme)
           v.reset_to_defaults
           @toast = apply_settings_saved(:theme, v.save)
-          prefs.reload_from_settings
+          prefs.refresh(section)
         end
       when :hotkeys
         confirm("RESET HOTKEYS",
@@ -6724,7 +6730,7 @@ module Gori::Tui
           ov.reset_all     # the rebindings…
           ov.reset_profile # …and the OS pin, which reset_all deliberately leaves alone
           save_hotkeys(ov)
-          prefs.reload_from_settings
+          prefs.refresh(section)
         end
       end
     end
@@ -6778,7 +6784,7 @@ module Gori::Tui
       @keymap = Hotkeys.build_keymap(@session.registry)
       help_controller.reload_help(@session.registry) # Help rows name the chords that just moved
       reconcile_mouse
-      @pretty = Settings.pretty_bodies_default
+      @pretty = @pretty_default = Settings.pretty_bodies_default
       @session.set_verify_upstream(Settings.verify_upstream?)
       @session.set_serve_landing(Settings.serve_landing?)
       # The rewrite/colour snapshots, before anything renders against them. No settings re-read
@@ -6859,8 +6865,17 @@ module Gori::Tui
               end
       @theme_restore = Settings.theme if section == :theme # saved → don't revert this on esc
       reconcile_mouse                                      # the MOUSE section holds the on/off toggle — apply it live
-      @pretty = Settings.pretty_bodies_default             # …and the Pretty-print-bodies toggle — apply it live too
+      apply_pretty_default
       toast
+    end
+
+    # The Pretty-print-bodies DEFAULT, applied live only when it actually MOVED. `@pretty` is
+    # also the session's own `p` toggle, and re-reading the default after every section's save
+    # flipped that back on a retention or network edit.
+    private def apply_pretty_default : Nil
+      return if Settings.pretty_bodies_default == @pretty_default
+      @pretty_default = Settings.pretty_bodies_default
+      @pretty = @pretty_default
     end
 
     # The KEYS section carries the command modifier, which changes what every surface
@@ -6869,6 +6884,10 @@ module Gori::Tui
     # modifier. Also warn when the ⌥ alias has just shadowed a user's own alt binding: the
     # guard fires before the keymap, so that override silently reverts to its default.
     private def apply_keys(save_msg : String) : String
+      # The editor keyset is baked into the keymap when it is BUILT, so without a rebuild the
+      # hints (which re-expand off `keymap_revision`) advertised the new keyset's chords while
+      # dispatch kept answering the old one until a restart or a Hotkeys save.
+      @keymap = Hotkeys.build_keymap(@session.registry)
       help_controller.reload_help(@session.registry)
       @resized = true # chords are baked into rendered hint text — force a full repaint
       shadowed = Hotkeys.alias_conflicts(@session.registry)
