@@ -572,7 +572,8 @@ module Gori::Proxy::Codec::Http1
   # The record/replay side has the opposite need. A bare LF there is the OPERATOR'S payload
   # (`verbatim`), and the strict scan then finds either a CRLF inside the body or none at
   # all, so History filed `http_version` as `"HTTP/1.1\nHost:"` for a request whose bytes it
-  # was holding byte-exact. This is an evidence projection only — nothing framed off it.
+  # was holding byte-exact. This is an evidence projection only — nothing framed off it. The
+  # tokens are RAW: a recorder wants `authored_projection`, which refuses an unframable line.
   def self.authored_start_line(raw : Bytes) : {String, String, String}
     parts = authored_line(raw).split(' ')
     {parts[0]? || "", parts[1]? || "", parts[2]? || ""}
@@ -586,11 +587,14 @@ module Gori::Proxy::Codec::Http1
   # `http_version = "/echo?x=1"`, `POST /a b HTTP/1.1` filed a plausible `/a` and a version of
   # `b`. The proxy refuses to store exactly that (`FlowMapper.request`): the verbatim line
   # becomes the target, honestly broken and greppable, and the version is blank. This applies
-  # the same rule, so the same bytes make the same row whichever surface sent them (#1423).
+  # the same rule, so a CRLF-framed line makes the same row whichever surface sent it (#1423).
+  # Recorders reach it through `FlowMapper.authored_request`, which handles an h2 send.
   #
   # The verdict is `start_line_malformed?`, judged on the LF-tolerant line: the strict CRLF
   # scan would call a bare-LF `verbatim` head malformed, which is the misreading
-  # `authored_start_line` exists to avoid. The wire bytes are untouched either way (P7).
+  # `authored_start_line` exists to avoid. The flip side is deliberate: a bare LF INSIDE a
+  # CRLF line ends it here, where the proxy reads on to the CRLF. The wire bytes are
+  # untouched either way (P7).
   def self.authored_projection(raw : Bytes) : {String, String, String}
     line = authored_line(raw)
     parts = line.split(' ')
@@ -616,10 +620,11 @@ module Gori::Proxy::Codec::Http1
   end
 
   # Whether a request start-line `split(' ')` cannot frame: anything but exactly three tokens
-  # (an unencoded space, a doubled one, a missing version), or the h2 client preface. The ONE
-  # home of the rule: the proxy's parse (`parse_request_head`, and through it
-  # `FlowMapper.request`), the probe dedup key (`parse_request_line`) and the recorders
-  # (`authored_projection`) all ask it, so a stored row cannot depend on the surface.
+  # (an unencoded space, a doubled one, a missing version), or the h2 client preface. The
+  # proxy's parse (`parse_request_head`, and through it `FlowMapper.request`), the probe dedup
+  # key (`parse_request_line`) and the recorders (`authored_projection`) all ask it, so a
+  # stored row cannot depend on the surface. Export has its own, looser refusal
+  # (`Export::Curl.request_line_refusal`): a copy-as-curl of a two-token line is useful.
   private def self.start_line_malformed?(line : String, parts : Array(String)) : Bool
     parts.size != 3 || line == H2_PREFACE_LINE
   end

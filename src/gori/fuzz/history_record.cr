@@ -78,7 +78,7 @@ module Gori
         return nil unless request
         head, body = split_head_body(request)
         # A line `split(' ')` cannot frame is filed the way the proxy files it (#1423).
-        method, target, version = Proxy::Codec::Http1.authored_projection(head)
+        method, target, version = FlowMapper.authored_request(head, http2: http2)
         fid = store.insert_flow(Store::CapturedRequest.new(
           created_at: Time.utc.to_unix_ms * 1000_i64,
           scheme: scheme, host: host, port: port,

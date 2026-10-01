@@ -819,11 +819,10 @@ module Gori
           target = Repeater::H2Engine.pseudo_field(fields, ":path") || "/"
           version = "HTTP/2"
         else
-          # `authored_projection`, not `parse_request_head`: these bytes are the caller's, and
-          # under `verbatim` a bare-LF terminator is the payload. See `authored_start_line` for
-          # why the shared parser must stay strict, and `authored_projection` for an unframable
-          # line (#1423).
-          method, target, version = Proxy::Codec::Http1.authored_projection(head)
+          # Not `parse_request_head`: these bytes are the caller's, and under `verbatim` a bare-LF
+          # terminator is the payload. See `Http1.authored_start_line` for why the shared parser
+          # must stay strict, and `FlowMapper.authored_request` for an unframable line (#1423).
+          method, target, version = FlowMapper.authored_request(head, http2: http2)
         end
         captured = Store::CapturedRequest.new(
           created_at: Time.utc.to_unix_ms * 1000_i64,
