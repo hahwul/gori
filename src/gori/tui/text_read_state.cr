@@ -84,7 +84,10 @@ module Gori::Tui
       cw = {rect.w - gw, 0}.max
       spans = @cursor.highlight_spans(lines)
       cy, cx = editor.cy, editor.cx
-      rows.each_with_index do |vr, row|
+      # Never more rows than `rect` has: rows drawn into a taller rect must not paint below this
+      # one, and an empty rect (whose render drew no rows) paints none (#1433).
+      {rows.size, rect.h}.min.times do |row|
+        vr = rows[row]
         y = rect.y + row
         line = lines[vr.li]? || ""
         # Every span is clipped to its ROW, so a selection crossing a wrap break is tinted to
