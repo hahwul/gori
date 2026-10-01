@@ -139,6 +139,13 @@ class Gori::Tui::RepeaterView
     Repeater::FlowRequest.normalize_multipart_body(wire)
   end
 
+  # `expanded_text_to_bytes` MINUS the `$KEY` pass: the line-ending fixups the editor owes
+  # the wire, and nothing else. The `^X` hex snapshot seeds from this so a peek shows the
+  # bytes text mode sends (#1427).
+  private def text_wire_form(text : String) : Bytes
+    Repeater::FlowRequest.normalize_multipart_body(Env.normalize_wire(text))
+  end
+
   # The env vars an EVIDENCE tab may substitute: every registered name EXCEPT the ones the
   # CAPTURE itself brought in (`@evidence_env_names`).
   #
