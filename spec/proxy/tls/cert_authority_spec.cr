@@ -12,6 +12,14 @@ private def with_ca_dir(&)
   end
 end
 
+# A spawned fiber's result, or a failure instead of a hung suite if it never arrives.
+private def receive_within(ch : Channel(T), wait = 5.seconds) : T forall T
+  select
+  when v = ch.receive then v
+  when timeout(wait) then fail "no result within #{wait}"
+  end
+end
+
 private def mode_of(path : String) : Int32
   (File.info(path).permissions.value & 0o777).to_i
 end
@@ -219,6 +227,65 @@ describe Gori::Proxy::Tls::CertAuthority do
         ca = Gori::Proxy::Tls::CertAuthority.load_or_create(dir)
         ca.regenerate!
         ca.ca_cert_pem.should eq(File.read(ca.ca_cert_path))
+      end
+    end
+  end
+
+  # Every gori process shares the CA dir. Two first runs used to interleave their cert and key
+  # writes — leaving one's cert beside the other's key — and a load landing mid-write read a
+  # lone cert and refused to start. Both now wait on an flock of the directory.
+  describe "the CA directory lock" do
+    it "makes a first run wait for another process holding the dir" do
+      with_ca_dir do |dir|
+        Dir.mkdir_p(dir)
+        holder = File.open(dir, "r")
+        begin
+          holder.flock_exclusive
+          done = Channel(Gori::Proxy::Tls::CertAuthority | Exception).new(1)
+          spawn do
+            done.send(Gori::Proxy::Tls::CertAuthority.load_or_create(dir))
+          rescue ex
+            done.send(ex)
+          end
+          sleep 250.milliseconds # several of flock's 100 ms retries
+          File.exists?(File.join(dir, "root.crt.pem")).should be_false
+          holder.flock_unlock
+          case ca = receive_within(done)
+          when Exception then raise ca
+          else                ca.key_matches_cert?.should be_true
+          end
+        ensure
+          holder.close
+        end
+      end
+    end
+
+    it "makes a rotation wait too, and is not held after it returns" do
+      with_ca_dir do |dir|
+        ca = Gori::Proxy::Tls::CertAuthority.load_or_create(dir)
+        before = File.read(ca.ca_cert_path)
+        holder = File.open(dir, "r")
+        begin
+          holder.flock_exclusive
+          done = Channel(Exception?).new(1)
+          spawn do
+            ca.regenerate!
+            done.send(nil)
+          rescue ex
+            done.send(ex)
+          end
+          sleep 250.milliseconds
+          File.read(ca.ca_cert_path).should eq(before)
+          holder.flock_unlock
+          if ex = receive_within(done)
+            raise ex
+          end
+          File.read(ca.ca_cert_path).should_not eq(before)
+          # Released: a non-blocking take succeeds rather than raising "already locked".
+          holder.flock_exclusive(blocking: false)
+        ensure
+          holder.close
+        end
       end
     end
   end

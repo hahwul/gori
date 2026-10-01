@@ -47,6 +47,10 @@ module Gori::Proxy::Tls
     # the key file's own 0600 below: the cert beside it is public by design.
     def self.load_or_create(dir : String, common_name : String = DEFAULT_CN) : CertAuthority
       Gori::Paths.ensure_dir(dir, tighten: false) # race-tolerant (two instances may start at once)
+      with_dir_lock(dir) { load_or_create_locked(dir, common_name) }
+    end
+
+    private def self.load_or_create_locked(dir : String, common_name : String) : CertAuthority
       cert_path = File.join(dir, CA_CERT_FILE)
       key_path = File.join(dir, CA_KEY_FILE)
 
@@ -77,9 +81,46 @@ module Gori::Proxy::Tls
           "clients will need to re-trust it)")
       else
         cert, key = CertBuilder.build_root(common_name)
-        cert.write_pem(cert_path)
-        key.write_pem(key_path) # 0600 at CREATE time — see KeyPair#write_pem
+        write_pair_locked(dir, cert, key) # key at 0600 from its first byte — see KeyPair#write_pem
         new(cert, key, cert_path)
+      end
+    end
+
+    # Hold an exclusive flock on the CA directory itself for the duration of the block. The
+    # directory is shared by every gori process on the machine (the TUI, `gori mcp`, `gori
+    # run`, `gori ca`), and without it two of them could interleave:
+    #
+    #   - two first runs at once each minted a root and wrote cert, then key, straight to the
+    #     final paths; interleaved, the dir kept one process's cert and the other's key — a
+    #     mismatched pair that loads without complaint and that every client then rejects
+    #   - a load landing between a writer's two writes (or write_pair's two renames) read a
+    #     lone cert and refused to start ("CA pair broken"), or read a mismatched pair
+    #
+    # The directory, not a lock file inside it: an operator's --ca-dir gets no stray file,
+    # and a renamed-over PEM cannot carry the lock away. Best-effort: a dir that cannot be
+    # opened, or a filesystem that refuses flock on it (Linux NFS emulates flock as a POSIX
+    # lock, which wants a writable fd: EBADF; NFSv3 without lockd: ENOLCK), proceeds
+    # unlocked, as before — a lock gori cannot take must not stop it from starting. Only the
+    # lock call is rescued, so an error from the block itself still propagates. Not
+    # re-entrant — flock locks per open file description, so a nested call from the same
+    # process waits on itself; hence the `_locked` halves that the public entry points wrap.
+    private def self.with_dir_lock(dir : String, &)
+      handle = File.open(dir, "r") rescue nil
+      return yield unless handle
+      begin
+        locked = begin
+          handle.flock_exclusive # retries with a fiber sleep: the scheduler keeps running
+          true
+        rescue IO::Error
+          false
+        end
+        begin
+          yield
+        ensure
+          handle.flock_unlock if locked
+        end
+      ensure
+        handle.close
       end
     end
 
@@ -272,6 +313,10 @@ module Gori::Proxy::Tls
       # Full parity with load_or_create, `tighten:` included: the dir may have been removed
       # at runtime, and re-creating it must not re-mode an operator's --ca-dir either.
       Gori::Paths.ensure_dir(dir, tighten: false)
+      with_dir_lock(dir) { write_pair_locked(dir, cert, key) }
+    end
+
+    private def self.write_pair_locked(dir : String, cert : Cert, key : KeyPair) : String
       cert_path = File.join(dir, CA_CERT_FILE)
       key_path = File.join(dir, CA_KEY_FILE)
       # `stage` both, THEN commit both: that ordering is the guarantee described above, and
