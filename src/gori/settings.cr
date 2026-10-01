@@ -156,6 +156,14 @@ module Gori
         if @@load_unreadable
           note_load_warning("settings: #{path} exists but could not be read — using defaults " \
                             "for this run, and this run will not overwrite that file")
+        else
+          # No file is a state with a perfectly good base: the defaults this process now holds.
+          # Left nil, `merge_with_disk` had nothing to merge against, so the first save wrote
+          # this process's defaults WHOLE over a file a peer created in the meantime — a
+          # `gori mcp` started on a fresh home erased the wizard's theme, bind and listeners
+          # the moment the agent saved a colour rule. Before the adoption below, for the reason
+          # `load` re-bases before it: a rewrite it makes is a genuine change.
+          @@loaded_raw = serialize
         end
         # "No file at the default path" and "no file at the path you named" are different facts —
         # see `explicit_path?`. Only the first one is a date gori may act on.

@@ -1020,6 +1020,41 @@ describe Gori::Settings do
     end
   end
 
+  # No file at load time left the merge with no base, so the first save wrote this process's
+  # state WHOLE over a file a peer had created since — a `gori mcp` started on a fresh home erased
+  # the wizard's theme and bind the moment it saved anything.
+  it "merges with a file a peer created after a load that found none" do
+    dir = File.tempname("gori-settings-nofile")
+    Dir.mkdir_p(dir)
+    prev = ENV["GORI_HOME"]?
+    prev_theme = Gori::Settings.theme
+    prev_mouse = Gori::Settings.mouse
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.theme = "goriday"
+      Gori::Settings.bind_port = 8070
+      Gori::Settings.load
+      File.exists?(Gori::Settings.path).should be_false
+      Gori::Settings.load_degraded?.should be_false
+
+      File.write(Gori::Settings.path, %({"theme":"dracula","network":{"bind_port":9999}}))
+
+      Gori::Settings.mouse = !prev_mouse
+      Gori::Settings.save.should be_true
+
+      Gori::Settings.load
+      Gori::Settings.theme.should eq("dracula")
+      Gori::Settings.bind_port.should eq(9999)
+      Gori::Settings.mouse.should eq(!prev_mouse) # and this process's own change landed
+    ensure
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.theme = prev_theme
+      Gori::Settings.mouse = prev_mouse
+      Gori::Settings.bind_port = 8070
+    end
+  end
+
   it "does not clobber a concurrent writer's change on a SECOND save with no intervening load" do
     dir = File.tempname("gori-settings-merge2")
     Dir.mkdir_p(dir)
