@@ -106,3 +106,122 @@ describe "RepeaterController on a body too short for its panes (#1421)" do
     end
   end
 end
+
+# A response of numbered body lines, applied, focused and drawn once — the draw is what
+# publishes the pane height every caret-following path reads.
+private def jump_view(ctl : RepeaterController, body : String, rect : Rect) : RepeaterView
+  ctl.repeater_from_request("https://h.test", HTTP_REQ, false, nil)
+  v = ctl.current_view.not_nil!
+  v.focus_pane(:response)
+  hdr = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n"
+  v.apply(Gori::Repeater::Result.new(hdr.to_slice, body.to_slice, nil, 1000_i64))
+  v.render(Screen.new(MemoryBackend.new(rect.w, rect.h)), rect)
+  v
+end
+
+private def numbered_body(n : Int32) : String
+  (1..n).map { |i| "L%03d" % i }.join("\n")
+end
+
+private def mod_key(key : Termisu::Input::Key, *, shift : Bool = false, alt : Bool = false) : Termisu::Event::Key
+  mods = alt ? Termisu::Input::Modifier::Alt : Termisu::Input::Modifier::Ctrl
+  mods |= Termisu::Input::Modifier::Shift if shift
+  Termisu::Event::Key.new(key, mods, nil)
+end
+
+private def drawn(v : RepeaterView, rect : Rect) : MemoryBackend
+  b = MemoryBackend.new(rect.w, rect.h)
+  v.render(Screen.new(b), rect)
+  b
+end
+
+# ⌃Home/⌃End and ⌃PgUp/⌃PgDn on the response's text used to defer with every other modified
+# chord and reach `body_scroll`, which moved the viewport alone: ⌃End drew the last line at
+# the TOP with blanks below, and the next ↓ — stepping from the caret still on line 1 —
+# snapped back to line 2 (#1425). Driven through `handle_body_key`, the route the key takes.
+describe "RepeaterController ⌃Home/⌃End on the response (#1425)" do
+  it "takes the caret to the last line with that line on the pane's bottom row" do
+    with_repeater_controller do |ctl, _|
+      rect = Rect.new(0, 0, 80, 20)
+      v = jump_view(ctl, numbered_body(60), rect)
+      last = v.resp_plain_lines.size - 1
+
+      ctl.handle_body_key(mod_key(Termisu::Input::Key::End)).should be_true
+      v.resp_cursor.cy.should eq(last)
+      v.resp_cursor.cx.should eq(v.resp_plain_lines[last].size) # the buffer's end, as in the request editor
+
+      b = drawn(v, rect)
+      y = (0...rect.h).find { |r| b.row(r).includes?("L060") }.not_nil!
+      b.row(y + 1).should contain("╰") # the pane's bottom row, not the top with blanks below
+      b.row(y - 1).should contain("L059")
+
+      v.resp_move(1, 0) # the next arrow stays at the end instead of snapping to line 2
+      v.resp_cursor.cy.should eq(last)
+    end
+  end
+
+  it "takes the caret to the first line's start, and ⌥ is the same key" do
+    with_repeater_controller do |ctl, _|
+      rect = Rect.new(0, 0, 80, 20)
+      v = jump_view(ctl, numbered_body(60), rect)
+      v.resp_move(40, 0) # caret mid-body, the view scrolled after it
+      drawn(v, rect).contains?("HTTP/1.1 200 OK").should be_false
+      ctl.handle_body_key(mod_key(Termisu::Input::Key::Home, alt: true)).should be_true
+      v.resp_cursor.cy.should eq(0)
+      v.resp_cursor.cx.should eq(0)
+      drawn(v, rect).contains?("HTTP/1.1 200 OK").should be_true # and the view came back up
+    end
+  end
+
+  it "lands on the last visual row of a wrapped last line" do
+    with_repeater_controller do |ctl, _|
+      rect = Rect.new(0, 0, 80, 20)
+      v = jump_view(ctl, "#{numbered_body(40)}\nHEAD#{"." * 200}TAIL", rect)
+      ctl.handle_body_key(mod_key(Termisu::Input::Key::End)).should be_true
+      b = drawn(v, rect)
+      y = (0...rect.h).find { |r| b.row(r).includes?("TAIL") }.not_nil!
+      b.row(y + 1).should contain("╰")
+    end
+  end
+
+  # ⇧ extends, as ⇧Home/⇧End and ⇧PgDn do: the selection the operator built survives.
+  it "extends the selection under ⇧" do
+    with_repeater_controller do |ctl, _|
+      rect = Rect.new(0, 0, 80, 20)
+      v = jump_view(ctl, numbered_body(60), rect)
+      v.resp_move(5, 0)
+      v.resp_move(1, 0, selecting: true)
+      ctl.handle_body_key(mod_key(Termisu::Input::Key::End, shift: true)).should be_true
+      v.resp_cursor.selection?.should be_true
+      v.resp_copy_text.should end_with("L060")
+      ctl.handle_body_key(mod_key(Termisu::Input::Key::PageUp, shift: true)).should be_true
+      v.resp_cursor.selection?.should be_true
+
+      ctl.handle_body_key(mod_key(Termisu::Input::Key::Home)).should be_true
+      v.resp_cursor.selection?.should be_false # unshifted, a jump drops it
+    end
+  end
+
+  it "pages the caret by the pane's own page, as the bare key does" do
+    with_repeater_controller do |ctl, _|
+      rect = Rect.new(0, 0, 80, 20)
+      v = jump_view(ctl, numbered_body(60), rect)
+      ctl.handle_body_key(mod_key(Termisu::Input::Key::PageDown)).should be_true
+      v.resp_cursor.cy.should eq(v.resp_page_rows)
+    end
+  end
+
+  # The hex dump has no caret: the modified key is not claimed, and the shell's ±JUMP_ROWS
+  # reaches `body_scroll`, which jumps the dump.
+  it "leaves the hex dump to the shell's buffer jump" do
+    with_repeater_controller do |ctl, _|
+      rect = Rect.new(0, 0, 80, 20)
+      v = jump_view(ctl, numbered_body(60), rect)
+      v.toggle_resp_hex
+      ctl.handle_body_key(mod_key(Termisu::Input::Key::End)).should be_false
+      v.at_top?.should be_true
+      ctl.body_scroll(Runner::JUMP_ROWS).should be_true
+      v.at_top?.should be_false
+    end
+  end
+end
