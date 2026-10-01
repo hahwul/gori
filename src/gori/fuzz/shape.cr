@@ -165,13 +165,12 @@ module Gori
         # The bytes themselves first, so a many-position job that reaches `MAX_NEEDLES` drops an
         # escaped variant rather than what actually went on the wire.
         job.payloads.each { |payload| add_needle(list, payload.to_slice) }
-        job.payload_spans.each do |(start, len)|
-          add_needle(list, job.bytes[start, len]) if start >= 0 && len > 0 && start + len <= job.bytes.size
-        end
+        # A span is `{start, end}`, the shape `Template#render_spans` builds, not Crystal's
+        # `(start, count)` slice: reading it as a count masked the payload plus whatever followed
+        # it, and dropped any position in the back half of the request outright (#1422).
+        job.payload_spans.each { |span| add_span_needle(list, job.bytes, span) }
         job.ws_frames.try &.each do |frame|
-          frame.payload_spans.each do |(start, len)|
-            add_needle(list, frame.payload[start, len]) if start >= 0 && len > 0 && start + len <= frame.payload.size
-          end
+          frame.payload_spans.each { |span| add_span_needle(list, frame.payload, span) }
         end
         job.payloads.each do |payload|
           # Built only when they can differ: the common payload is plain text, and string
@@ -213,6 +212,11 @@ module Gori
         add_needle(list, std.to_slice) unless std == payload
         go = std.gsub('<', "\\u003c").gsub('>', "\\u003e").gsub('&', "\\u0026")
         add_needle(list, go.to_slice) unless go == std
+      end
+
+      private def self.add_span_needle(list : Array(Bytes), bytes : Bytes, span : {Int32, Int32}) : Nil
+        start, stop = span
+        add_needle(list, bytes[start, stop - start]) if 0 <= start < stop <= bytes.size
       end
 
       private def self.add_needle(list : Array(Bytes), bytes : Bytes) : Nil
