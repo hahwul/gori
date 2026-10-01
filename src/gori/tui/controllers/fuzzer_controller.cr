@@ -518,12 +518,15 @@ module Gori::Tui
       ev.char || ev.key.to_char
     end
 
+    # PgUp/PgDn/Home/End over RESULTS go to the Runner's page/jump route (`body_scroll`),
+    # declined by name because `handle_results` ends in `true`. TARGET, TEMPLATE and DETAIL
+    # keep them: there they are the field's, editor's and read pane's own motions (#1443).
     private def handle_pane_key(ev : Termisu::Event::Key, v : FuzzerView) : Bool
       case v.focus
       when :target   then edit_target(ev, v)
       when :template then edit_template(ev, v)
       when :config   then edit_config(ev, v)
-      when :results  then handle_results(ev, v)
+      when :results  then page_nav_key?(ev.key) ? false : handle_results(ev, v)
       when :detail   then handle_detail(ev, v)
       else                true
       end
@@ -778,9 +781,9 @@ module Gori::Tui
       key = ev.key
       selecting = ev.shift?
       # Home / End / PgUp / PgDn, ⇧ extending. Must come BEFORE the printable-char
-      # fall-through below, and cannot be left to the Runner: this tab has no `body_scroll`
-      # override, so `page_nav_delta` → `body_scroll` returns false and the trailing `true`
-      # here simply swallowed all four keys.
+      # fall-through below, and cannot be left to the Runner: this tab's `body_scroll`
+      # answers over RESULTS only, so for DETAIL `page_nav_delta` → `body_scroll` returns
+      # false, and the trailing `true` here used to swallow all four keys.
       return true if v.detail_motion_key(ev)
       case
       when key.up?, key.lower_k?
@@ -901,6 +904,22 @@ module Gori::Tui
       pane = v.pane_at(body_rect_below_filter(rect), mx, my)
       wheel_pane(v, pane || v.focus, step)
       true
+    end
+
+    # PgUp/PgDn/Home/End over RESULTS. `results_move` clamps the Runner's ±JUMP_ROWS over the
+    # list as drawn, so grouped by shape (#1351) End lands on the last visible line, never in a
+    # folded cluster. Any other pane is not this route's: DETAIL claims the keys in
+    # `handle_detail`, the editors in their own handlers.
+    def body_scroll(delta : Int32) : Bool
+      v = current_view
+      return false unless v && v.focus == :results
+      v.results_move(delta)
+      true
+    end
+
+    def page_rows : Int32?
+      v = current_view
+      v.results_page_rows if v && v.focus == :results
     end
 
     private def wheel_pane(v : FuzzerView, pane : Symbol, step : Int32) : Nil

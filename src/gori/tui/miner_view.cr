@@ -62,6 +62,7 @@ module Gori::Tui
       @focus = :summary
       @sel = 0
       @scroll = 0
+      @results_last_h = 0 # finding rows the last frame drew — the PgUp/PgDn step
       # The FINDING pane's row cursor, selection, scroll and draw-state. `line_select_only`: a row
       # is a label and a value in two columns, so selection is whole rows and the copy payload is
       # `"label  value"` (see `detail_plain`). The pane paints its own two columns, so
@@ -252,6 +253,11 @@ module Gori::Tui
       n = visible.size
       return if n == 0
       @sel = (@sel + d).clamp(0, n - 1)
+    end
+
+    # The PgUp/PgDn step: the finding rows the last frame drew, minus two of overlap.
+    def results_page_rows : Int32
+      {@results_last_h - 2, 1}.max
     end
 
     def open_detail : Nil
@@ -689,6 +695,7 @@ module Gori::Tui
       end
       header_row(screen, inner)
       cap = inner.h - 1
+      @results_last_h = cap
       ensure_visible(cap)
       cap.times do |i|
         idx = @scroll + i

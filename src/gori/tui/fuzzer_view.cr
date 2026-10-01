@@ -244,6 +244,7 @@ module Gori::Tui
       @macro_info = nil.as(Gori::RequestMacro::Info?)
       @sel = 0
       @scroll = 0
+      @results_last_h = 0 # result rows the last frame drew — the PgUp/PgDn step
       @sort = :index
       @matched_only = false
       # Group RESULTS by response shape (#1351): one representative row per cluster, folded
@@ -2048,6 +2049,11 @@ module Gori::Tui
       @sel
     end
 
+    # The PgUp/PgDn step: the result rows the last frame drew, minus two of overlap.
+    def results_page_rows : Int32
+      {@results_last_h - 2, 1}.max
+    end
+
     # Mouse: select a row without opening its detail (clamped to the live view).
     def select_result_row(idx : Int32) : Nil
       view = sorted_results
@@ -3559,6 +3565,7 @@ module Gori::Tui
       header = @grouped ? "  ×N    payload                 status  len      words   time" : "  #   payload                 status  len      words   time"
       screen.text(inner.x, inner.y, header, Theme.muted, Theme.bg, width: inner.w)
       rows_h = {inner.h - 1, 0}.max
+      @results_last_h = rows_h
       (0...rows_h).each do |i|
         ri = @scroll + i
         break if ri >= view.size

@@ -586,6 +586,12 @@ module Gori::Tui
       nil
     end
 
+    # The four keys the Runner's page route (`page_nav_delta` → `body_scroll`) answers. A tab
+    # whose pane handler ends in `true` declines them by name over its list pane.
+    private def page_nav_key?(key : Termisu::Input::Key) : Bool
+      key.page_up? || key.page_down? || key.home? || key.end?
+    end
+
     # Same notch, but with the pointer position + body rect — lets a multi-pane tab
     # (Project) scroll the pane UNDER the cursor instead of the focused one. Defaults
     # to the coordinate-free handle_wheel, so single-target tabs need no change.
