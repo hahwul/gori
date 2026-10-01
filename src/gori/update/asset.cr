@@ -73,6 +73,16 @@ module Gori::Update
     norm
   end
 
+  # Whether the startup check's day cache (stamped `checked_at`, unix seconds) still
+  # stands at `now`. A stamp from the FUTURE is stale, not fresh: it is what a clock
+  # that ran ahead and was then corrected leaves in settings.json, and a bare
+  # `now - checked_at < ttl` read that negative age as fresh, so the probe stayed
+  # off — and a newer release went unannounced — until the wall clock caught up.
+  def self.check_cache_fresh?(checked_at : Int64, now : Int64, ttl : Int) : Bool
+    age = now - checked_at
+    age >= 0 && age < ttl
+  end
+
   # Release asset basename for platform (matches PR #114 / hwaro parity).
   # Linux: plain binary `gori-v{ver}-linux-{x86_64|arm64}`
   # macOS: tarball `gori-v{ver}-osx-{arm64|x86_64}.tar.gz` (contains gori + lib/)
