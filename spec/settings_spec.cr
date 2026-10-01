@@ -2104,13 +2104,17 @@ describe Gori::Settings do
 
       # tolerant: non-array entry dropped, unparseable chord dropped, [] preserved
       File.write(Gori::Settings.path,
-        %({"hotkeys":{"os":"WINDOWS","bindings":{"a":"x","b":["ctrl-g","nope"],"c":[]}}}))
+        %({"hotkeys":{"os":"WINDOWS","bindings":{"a":"x","b":["ctrl-g","nope"],"c":[],"d":["ctl-y"]}}}))
       Gori::Settings.keymap_overrides = {} of String => Array(String)
       Gori::Settings.load
       Gori::Settings.keymap_os.should eq("windows")                 # normalized lowercase
       Gori::Settings.keymap_overrides.has_key?("a").should be_false # non-array dropped
       Gori::Settings.keymap_overrides["b"].should eq(["ctrl-g"])    # garbage label dropped
       Gori::Settings.keymap_overrides["c"].should eq([] of String)  # explicit unbind kept
+      # Every label garbage is NOT an unbind: kept raw, so the default stands (chord_overrides
+      # falls back) and the next save does not erase what the operator wrote.
+      Gori::Settings.keymap_overrides["d"].should eq(["ctl-y"])
+      Gori::Hotkeys.chord_overrides.has_key?("d").should be_false
 
       # a file with no "hotkeys" block keeps the in-memory defaults
       File.write(Gori::Settings.path, %({"theme":"goridark"}))

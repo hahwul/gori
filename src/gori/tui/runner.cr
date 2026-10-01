@@ -2533,7 +2533,7 @@ module Gori::Tui
     # keymap so dispatch reflects them immediately, close.
     private def save_hotkeys(ov : HotkeysOverlay) : Bool
       working, profile = ov.to_working
-      Hotkeys.apply(working, profile)
+      Hotkeys.apply(working, profile, @session.registry)
       ok = Settings.save
       @keymap = Hotkeys.build_keymap(@session.registry)
       # Help is built from the registry at open; reload so rebound labels stay honest.
@@ -6729,6 +6729,9 @@ module Gori::Tui
           ov = HotkeysOverlay.new(@session.registry)
           ov.reset_all     # the rebindings…
           ov.reset_profile # …and the OS pin, which reset_all deliberately leaves alone
+          # …and the entries the editor never shows (another build's ids, raw labels), which
+          # `Hotkeys.apply` keeps on an ordinary save: this prompt says EVERY rebinding.
+          Settings.keymap_overrides = {} of String => Array(String)
           save_hotkeys(ov)
           prefs.refresh(section)
         end

@@ -37,6 +37,12 @@ describe "settings save → live apply" do
     body.should_not contain("reload_from_settings")
     body.scan(/prefs\.refresh\(section\)/).size.should eq(3)
   end
+
+  # `Hotkeys.apply` keeps the overrides the editor never showed, which is right for an edit and
+  # wrong for "RESET HOTKEYS — drop every rebinding".
+  it "drops every stored override on the Preferences hotkeys reset" do
+    runner_method("confirm_preferences_reset").should contain("Settings.keymap_overrides = {} of String => Array(String)")
+  end
 end
 
 describe PreferencesView do
