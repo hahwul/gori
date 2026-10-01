@@ -151,7 +151,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   end
 
   # Desired-state (idempotent): flip only if current != requested, so a re-applied command
-  # can't oscillate. NOTE: enabling only affects NEW connections (h2→h1 downgrade gate).
+  # can't oscillate. Enabling reaches live connections too: h1 asks the hold gate per request
+  # and h2 per stream (`H2::StreamGate`), since #492 step 3 retired the h2→h1 downgrade.
   #
   # The ack names how many held messages the flip FORWARDED, for the reason
   # `Interceptor::ToggleResult` exists: disabling catch is a bulk irreversible forward, and

@@ -386,9 +386,9 @@ module Gori
         end
 
         tool j, "intercept_toggle",
-          "Enable or disable the live intercept catch (desired state — idempotent). NOTE: " \
-          "enabling only affects NEW connections; an already-established HTTP/2 connection " \
-          "stays un-held. Applied by the capturing instance. Returns toggled | busy." do |s|
+          "Enable or disable the live intercept catch (desired state — idempotent). Applies " \
+          "to live connections too, HTTP/2 streams included. Applied by the capturing " \
+          "instance. Returns toggled | busy." do |s|
           s.field "enable", boolprop("true = start holding matching traffic; false = stop (auto-forwards anything currently held)"), required: true
         end
 
