@@ -153,10 +153,10 @@ module Gori
       # per kind is what `Tui::InterceptView#row_label` and `InterceptController` render, so
       # they call THIS with the values they display and the composition lives once.
       #
-      # `m`/`t` default to the Item's own immutable metadata. A surface settling an EDIT
-      # passes the edited values instead (`#edited_method_target`, or `#edited_label` for the
-      # whole receipt), so a queue row and a forward ack name the message actually being sent
-      # — the one reason a surface ever needs different values here.
+      # `m`/`t` default to the Item's own immutable metadata. The TUI passes the EDITED
+      # method/target instead (`InterceptView#effective_method_target`), so a queue row and a
+      # forward toast name the message the operator is actually about to send — the one
+      # reason a surface ever needs different values here.
       #
       # `size` defaults to the HELD byte count, but a caller settling a `forward_edit` must
       # pass the size of the bytes it is ACTUALLY about to put on the wire: an edit that
@@ -175,51 +175,6 @@ module Gori
         in .ws_out?   then "#{host}#{Gori::Url.origin_path(t)} client->server #{size}B"
         in .ws_in?    then "#{host}#{Gori::Url.origin_path(t)} server->client #{size}B"
         end
-      end
-
-      # The method + target an EDIT of this message names on its start line, for the label of
-      # a forward that sends `bytes` instead of the held ones (#1430: the CLI/MCP receipt
-      # named the ORIGINAL `GET /bf2` while the origin received `DELETE /changed?x=1`). One
-      # parse for both settle paths: the TUI editor (`InterceptView#effective_method_target`)
-      # and the agent bridge (`Runner#apply_intercept_command`).
-      #
-      # For a response `target` is the "status reason" (see `#label`), so only the status
-      # line's tail is read. A WebSocket message re-reads NOTHING: its first line is a
-      # payload, not a start line, and its method/target are the handshake's, immutable.
-      #
-      # Tokens are split on whitespace RUNS: a malformed start line is a payload operators
-      # send on purpose (P7), and `GET  /changed` or a tab-separated line still names
-      # `/changed` to most origins — a single-space split read it as an empty target. A token
-      # the start line does not carry at all (an empty first line, a bare `POST`) keeps the
-      # held value: the label still has to name a method and a place, and the bytes that go
-      # out are the edit's either way — this is a projection, never a rewrite.
-      def edited_method_target(bytes : Bytes) : {String, String}
-        case kind
-        in .ws_out?, .ws_in? then {method, target}
-        in .request?
-          parts = start_line(bytes).split
-          {parts[0]? || method, parts[1]? || target}
-        in .response?
-          # "HTTP/1.1 201 CREATED" → "201 CREATED": everything after the version token.
-          line = start_line(bytes).lstrip
-          version = line.split.first? || return {method, target}
-          {method, line[version.size..].lstrip.presence || target}
-        end
-      end
-
-      # `#label` for a forward that sends `bytes`: the edited method/target AND their size,
-      # since the ack is the caller's only receipt for an irreversible action.
-      def edited_label(bytes : Bytes) : String
-        m, t = edited_method_target(bytes)
-        label(m, t, size: bytes.size)
-      end
-
-      # The first line of `bytes`, in either line-ending spelling (the intercept editor's
-      # text is LF-joined, a CLI `--raw-file` usually CRLF). Decodes only that line: a held
-      # head may run to 256 KiB and its body further.
-      private def start_line(bytes : Bytes) : String
-        nl = bytes.index('\n'.ord.to_u8) || bytes.size
-        String.new(bytes[0, nl]).rstrip('\r')
       end
     end
 

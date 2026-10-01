@@ -271,7 +271,7 @@ module Gori
       #
       # `HeldRow#target` carries TWO different things depending on `kind`: a request's target
       # (origin- or absolute-form), or a RESPONSE's status reason (the Item's dual meaning —
-      # see `Interceptor::Item#edited_method_target`). The row builder never branched on the
+      # see `intercept_view#effective_method_target`). The row builder never branched on the
       # kind, so a held response rendered as `http://127.0.0.1200 OK`: a string that looks
       # like a URL, is not one, drops the port, and leaves several held responses to different
       # paths indistinguishable. The flow id is the disambiguator the row has (the request's
@@ -390,9 +390,7 @@ module Gori
         if format == :json
           puts(JSON.build { |j| j.object { j.field "status", status; j.field "ok", ok; j.field "detail", detail } })
         else
-          # `term_safe`: an edit's receipt names its start line from the operator's own
-          # `--raw-file` (#1430), which can carry an ESC the codec never saw.
-          puts "#{status}#{detail ? ": #{CLI::Output.term_safe(detail)}" : ""}"
+          puts "#{status}#{detail ? ": #{detail}" : ""}"
         end
         exit 1 unless ok
       end

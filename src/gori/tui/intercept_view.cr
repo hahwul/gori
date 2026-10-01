@@ -728,11 +728,31 @@ module Gori::Tui
     # The method + target to DISPLAY for a held item — the EDITED values when this is
     # the item loaded in the editor and modified (so a GET→PUT method change or a
     # 200→201 status edit shows in the queue row + forward/drop toast, not the stale
-    # hold-time metadata), else the immutable Item's own fields. The parse is
-    # `Interceptor::Item#edited_method_target`'s, shared with the agent bridge's receipt.
+    # hold-time metadata), else the immutable Item's own fields. For a response,
+    # `target` is the "status reason" the response Item carries.
+    #
+    # A WebSocket message re-reads NOTHING from the editor: its first line is JSON or
+    # protobuf, not an HTTP start line, so parsing it would rewrite the row's own label from
+    # the first three space-separated tokens of a payload. Its method/target are the
+    # handshake's and are immutable, which is exactly why the row stays identifiable while
+    # its payload is being edited.
     def effective_method_target(it : Interceptor::Item) : {String, String}
       return {it.method, it.target} unless @loaded_id == it.id && @editor_dirty
-      it.edited_method_target(@editor.to_bytes)
+      case it.kind
+      in .ws_out?, .ws_in? then {it.method, it.target}
+      in .request?
+        first = editor_first_line
+        parts = first.split(' ', 3)
+        {parts[0]?.presence || it.method, parts[1]?.presence || it.target}
+      in .response?
+        first = editor_first_line
+        parts = first.split(' ', 2) # "HTTP/1.1 201 CREATED" → the "201 CREATED" target
+        {it.method, parts[1]?.presence || it.target}
+      end
+    end
+
+    private def editor_first_line : String
+      (String.new(@editor.to_bytes).split('\n', 2).first? || "").rstrip('\r')
     end
 
     # backspace/delete/undo are no-ops at buffer start / end-of-buffer / empty undo

@@ -78,11 +78,19 @@ module Gori::Tui
       @pane = :desc    # :desc | :scope | :overrides | :env | :settings | :activity (PANES order)
       @strip_start = 0 # first visible sub-tab chip (Chrome.render_tab_strip owns the window)
       @sel = 0         # selected rule row in the SCOPE list
+      # The id of the rule `@sel` points at, written with every move of `@sel` (`put_sel`).
+      # This view renders straight out of the live `Scope`, which `Runner#apply_external_change`
+      # reloads BEFORE anything here runs, so by the time a refresh reaches this view the list
+      # has already shifted and the old row can no longer be read off the index. A peer deleting
+      # a rule ABOVE the cursor then slid the next rule under it, and `d`/`e`/`y` acted on a row
+      # the operator never selected (#1431). Same for `@ov_sel_id` below.
+      @sel_id = nil.as(Int64?)
       # SCOPE add/edit is a centered popup (ScopeRuleOverlay), not an inline row.
 
       # HOST OVERRIDES pane: its own selection + inline add/edit row, fully independent
       # of the SCOPE pane above it (single-line "IP host" entry, /etc/hosts order).
       @ov_sel = 0
+      @ov_sel_id = nil.as(Int64?) # id of the override `@ov_sel` points at — see `@sel_id`
       @ov_adding = false
       @ov_edit_id = nil.as(Int64?) # non-nil ⇒ editing an existing override
       # The add/edit row is a real `TextField`, like `HostsOverlay`'s (its twin one modal
@@ -186,6 +194,10 @@ module Gori::Tui
         @desc_read.sync_from(@desc_area)
       end
       load_settings_values
+      # Tab entry is the other moment a peer's write reaches these lists: the external-change
+      # tick refreshes only the ACTIVE tab, so a rule deleted while the operator was on History
+      # shifted the list with nothing here to follow the selected row.
+      reanchor_selections
       # THE one re-seed, shared with the external-change path. Tab entry is the other moment
       # the list can move under an open EDIT row — `flush_active_tab_edits` persists the
       # description and the network fields on the way out but does not cancel this row (only a
@@ -747,14 +759,14 @@ module Gori::Tui
     def select_scope(idx : Int32) : Nil
       n = @scope.rules.size
       return if n == 0
-      @sel = idx.clamp(0, n - 1)
+      put_sel(idx)
     end
 
     # Mouse: select a host override by row index (clamped to the populated list).
     def select_override(idx : Int32) : Nil
       n = @host_overrides.entries.size
       return if n == 0
-      @ov_sel = idx.clamp(0, n - 1)
+      put_ov_sel(idx)
     end
 
     # DESCRIPTION card outer rect (for border chrome hit-tests). Nil unless it's showing.
@@ -987,7 +999,7 @@ module Gori::Tui
     def scope_select(d : Int32) : Nil
       n = @scope.rules.size
       return if n == 0
-      @sel = (@sel + d).clamp(0, n - 1)
+      put_sel(@sel + d)
     end
 
     # Selection on the first rule (or an empty list) → ↑ pops focus to the sub-tab strip,
@@ -1025,31 +1037,45 @@ module Gori::Tui
       # an ADD always appends: without this the selection stayed where it was and, on a list
       # taller than the card, the new rule was drawn off-screen — no sign the write landed.
       if edit_id.nil?
-        @sel = @scope.rules.index { |r| r.kind == kind && r.match_type == match_type && r.pattern == pattern } || @sel
+        put_sel(@scope.rules.index { |r| r.kind == kind && r.match_type == match_type && r.pattern == pattern } || @sel)
+      else
+        reanchor_sel
       end
-      clamp_sel
       :ok
     end
 
-    # Removes the selected rule, returning its pattern (for the Runner's toast) or nil.
-    def scope_delete : String?
-      rule = selected_rule
-      return nil unless rule
-      # `Scope#remove` now reports whether the DELETE committed. A rolled-back batch must not
-      # produce a "removed scope rule: <pattern>" toast over a rule that is still gating
-      # traffic; the caller turns this nil into a busy message instead.
-      return nil unless @scope.remove(rule.id)
-      clamp_sel
-      rule.pattern
+    # Removes the rule `id` names — the one the delete confirm was raised over, NOT whatever is
+    # selected when it is accepted: the data_version tick keeps running under the modal, so a
+    # peer's write can move the list between the question and the answer. Returns
+    # :ok | :gone | :failed for the controller's toast.
+    #
+    # :gone when a peer already removed it. Checked here, against a fresh read, because
+    # `Scope#remove` cannot say so: a DELETE that matches no row still commits, and "deleted"
+    # would then be reported for a rule this session never touched.
+    #
+    # :failed when the DELETE did not commit. A rolled-back batch must not produce a
+    # "removed scope rule: <pattern>" toast over a rule that is still gating traffic.
+    def scope_delete(id : Int64) : Symbol
+      # Re-read first: the live list only catches up on the next data_version tick, and a
+      # DELETE matching no row still commits, so a peer's delete since then would read :ok.
+      @scope.reload
+      unless @scope.rules.any? { |r| r.id == id }
+        reanchor_sel
+        return :gone
+      end
+      return :failed unless @scope.remove(id)
+      reanchor_sel
+      :ok
     end
 
-    # Pull BOTH list selections back inside their (possibly externally shrunk) lists. Called
-    # by the controller after Runner#apply_external_change reloaded the live Scope /
-    # HostOverrides — this view renders straight out of those objects, so a peer process
-    # deleting the last rule would otherwise leave the highlight past the end.
-    def clamp_selections : Nil
-      clamp_sel
-      clamp_ov_sel
+    # Put BOTH list selections back on the rows they were on, by id, after the live Scope /
+    # HostOverrides changed under them. Called by the controller after
+    # Runner#apply_external_change reloaded those objects, and by `reload` on tab entry — this
+    # view renders straight out of them, so a peer deleting a row above the cursor (or the last
+    # row) would otherwise leave the highlight on a neighbour, or past the end.
+    def reanchor_selections : Nil
+      reanchor_sel
+      reanchor_ov_sel
       clamp_act_sel
     end
 
@@ -1575,8 +1601,29 @@ module Gori::Tui
       gauge_row(act_list_inner(card.inset(1, 1)), mx, my, false, @act_rows.size)
     end
 
-    private def clamp_sel : Nil
-      @sel = @sel.clamp(0, {@scope.rules.size - 1, 0}.max)
+    # THE one write of `@sel`: clamps it into the list and records the id of the rule it lands
+    # on, so the next `reanchor_sel` restores the row the operator chose rather than one a
+    # reload slid into it. A write that bypassed this would be snapped back on the next tick.
+    private def put_sel(idx : Int32) : Nil
+      rules = @scope.rules
+      @sel = idx.clamp(0, {rules.size - 1, 0}.max)
+      @sel_id = rules[@sel]?.try(&.id)
+    end
+
+    # Follow the anchored rule to wherever the reloaded list put it. When it is gone — the very
+    # rule the cursor was on was deleted — take the first rule after it, which is what a local
+    # delete leaves selected. By id, not by the old index: `scope_rules` is ORDER BY id, and a
+    # peer that also deleted rows above the cursor would make the old index skip past that rule.
+    private def reanchor_sel : Nil
+      rules = @scope.rules
+      put_sel(next_by_id(rules.map(&.id), @sel_id) || @sel)
+    end
+
+    # Where an id-anchored cursor belongs in an ORDER BY id list: its own row, else the first row
+    # after it, else the last row. Nil when nothing was anchored yet (keep the index as it is).
+    private def next_by_id(ids : Array(Int64), id : Int64?) : Int32?
+      return nil unless id
+      ids.index(id) || ids.index { |i| i > id } || ids.size - 1
     end
 
     # --- HOST OVERRIDES pane editing (delegated from the controller) — a DISTINCT pane
@@ -1588,7 +1635,7 @@ module Gori::Tui
     def ov_select(d : Int32) : Nil
       n = @host_overrides.entries.size
       return if n == 0
-      @ov_sel = (@ov_sel + d).clamp(0, n - 1)
+      put_ov_sel(@ov_sel + d)
     end
 
     # On the first override (or an empty list) → ↑ pops focus to the sub-tab strip.
@@ -1604,7 +1651,7 @@ module Gori::Tui
 
     # Open the editor ON the selected override's row, pre-filled "IP host" (edit-in-place).
     def ov_edit_start : Nil
-      entry = current_override
+      entry = selected_override
       return unless entry
       @ov_adding = true
       @ov_edit_id = entry.id
@@ -1678,13 +1725,12 @@ module Gori::Tui
       if id = @ov_edit_id
         return :failed unless @host_overrides.update(id, host, ip)
         cancel_ov_add
-        clamp_ov_sel
+        reanchor_ov_sel
         :updated
       else
         return :failed unless @host_overrides.add(host, ip)
-        @ov_sel = @host_overrides.entries.size - 1 # select the new row, like ENV add
+        put_ov_sel(@host_overrides.entries.size - 1) # select the new row, like ENV add
         cancel_ov_add
-        clamp_ov_sel
         :ok
       end
     end
@@ -1693,33 +1739,45 @@ module Gori::Tui
     # Read-only and separate from `ov_delete` because the confirm has to say the name BEFORE
     # the row is gone, and `ov_delete` can only report it after.
     def selected_override_host : String?
-      current_override.try(&.host)
+      selected_override.try(&.host)
     end
 
     # The selected override as a hosts-file line (`ip host`) — what `y` copies.
     def selected_override_line : String?
-      current_override.try { |e| "#{e.ip} #{e.host}" }
+      selected_override.try { |e| "#{e.ip} #{e.host}" }
     end
 
-    # Removes the selected override, returning its host (for the toast) — or nil when there
-    # was nothing selected OR the delete did not COMMIT. `HostOverrides#remove` answers that
-    # (its doc: "false = store busy/locked/closing") and this discarded it, so a dropped
-    # write still reported "host override deleted" while the routing pin stayed live. The
-    # two writes right above in `ov_commit` already check theirs.
-    def ov_delete : String?
-      entry = current_override
-      return nil unless entry
-      return nil unless @host_overrides.remove(entry.id)
-      clamp_ov_sel
-      entry.host
-    end
-
-    private def current_override : HostOverrides::Entry?
+    # The selected override, so the delete confirm can name it AND remove that row by id — see
+    # `scope_delete` for why the selection at accept time is not that row.
+    def selected_override : HostOverrides::Entry?
       @host_overrides.entries[@ov_sel]?
     end
 
-    private def clamp_ov_sel : Nil
-      @ov_sel = @ov_sel.clamp(0, {@host_overrides.entries.size - 1, 0}.max)
+    # Removes the override `id` names. Returns :ok | :gone | :failed, the same split as
+    # `scope_delete` and for the same reasons: :gone because `HostOverrides#remove` commits a
+    # DELETE that matched nothing, and :failed because a dropped write must not report
+    # "host override deleted" while the routing pin stays live (its doc: "false = store
+    # busy/locked/closing"). The two writes right above in `ov_commit` already check theirs.
+    def ov_delete(id : Int64) : Symbol
+      @host_overrides.reload # see `scope_delete`
+      unless @host_overrides.entries.any? { |e| e.id == id }
+        reanchor_ov_sel
+        return :gone
+      end
+      return :failed unless @host_overrides.remove(id)
+      reanchor_ov_sel
+      :ok
+    end
+
+    # `put_sel` / `reanchor_sel` for the HOST OVERRIDES list (also ORDER BY id).
+    private def put_ov_sel(idx : Int32) : Nil
+      entries = @host_overrides.entries
+      @ov_sel = idx.clamp(0, {entries.size - 1, 0}.max)
+      @ov_sel_id = entries[@ov_sel]?.try(&.id)
+    end
+
+    private def reanchor_ov_sel : Nil
+      put_ov_sel(next_by_id(@host_overrides.entries.map(&.id), @ov_sel_id) || @ov_sel)
     end
 
     def env_adding? : Bool
