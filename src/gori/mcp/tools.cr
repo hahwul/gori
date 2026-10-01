@@ -1194,6 +1194,10 @@ module Gori
         property failed = 0
         getter failures = [] of {Int64, String, String}
         getter results = [] of Authorize::Target
+        # Every request with a bypass, past AUTHORIZE_MAX_STORED too: `bypasses` is promised
+        # complete, and the stored-rows cap silently dropped the ones after it. Bounded by the
+        # send cap like the job itself, and head-only like `results`.
+        getter bypassed = [] of Authorize::Target
         property? truncated = false
         property ended_at_ms : Int64? = nil
         property stop_requested_at_ms : Int64? = nil

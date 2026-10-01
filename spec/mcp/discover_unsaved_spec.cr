@@ -14,6 +14,11 @@ module Gori::MCP
       @discover_jobs[djob.id] = djob
       flush_discover_persist(djob)
     end
+
+    def store_discover_finding_for_spec(djob : DiscoverJob, f : Gori::Discover::Finding) : Nil
+      @discover_jobs[djob.id] = djob
+      store_discover_finding(djob, f, 0_i64)
+    end
   end
 end
 
@@ -56,6 +61,25 @@ private def with_contended_store(&)
     File.delete?("#{path}-wal")
     File.delete?("#{path}-shm")
     File.delete?("#{path}.open.lock")
+  end
+end
+
+describe "MCP discover — findings and their rows" do
+  it "hands each finding the flow_id its row was written under, as the TUI does" do
+    with_store do |store|
+      tools = tools_for(store)
+      djob = idle_job("d-ids")
+      2.times do |i|
+        tools.store_discover_finding_for_spec(djob, Gori::Discover::Finding.new("http://t/#{i}", "GET", 200, 2_i64,
+          "text/plain", Gori::Discover::Source::Bruteforced, 1, 0.9, nil))
+      end
+      tools.flush_discover_persist_for_spec(djob)
+      rs = JSON.parse(tools.call("discover_results", JSON.parse(%({"job_id":"d-ids"}))).text)
+      ids = rs["findings"].as_a.map(&.["flow_id"].as_i64)
+      ids.size.should eq(2)
+      ids.each { |id| store.flow_row(id).should_not be_nil }
+      store.flow_row(ids[1]).not_nil!.target.should eq("/1")
+    end
   end
 end
 

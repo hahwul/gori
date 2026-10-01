@@ -43,9 +43,11 @@ module Gori
         return scope_blocked(sc) if sc.blocked?
         @job_seq += 1
         id = "sq_#{@job_seq}"
+        # The cap `CappedBackend` enforces, read back off the plan: the raw arg disagreed with
+        # the run whenever it was above the ceiling or non-positive (ignored there).
         audit = JobAudit.new("#{origin.scheme}://#{origin.host}:#{origin.port}",
           optional_float_arg(h, "rate"), clamp(optional_int_arg(h, "concurrency"), 1, SEQUENCE_MAX_CONCURRENCY),
-          optional_int_arg(h, "max_requests"), Time.utc.to_unix_ms)
+          plan.config.wire_cap, Time.utc.to_unix_ms)
         sjob = SequenceJob.new(id, goal, plan.engine, audit, @db_path)
         evict_finished_jobs(@sequence_jobs)
         @sequence_jobs[id] = sjob

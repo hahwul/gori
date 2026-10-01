@@ -124,10 +124,12 @@ module Gori
         end
         ajob.bypasses += target.same_count
         ajob.reviews += target.trials.count { |t| !t.baseline? && t.verdict.review? }
+        # Stored for the life of the job, and no payload reads the request or body bytes: the
+        # counts above were taken from the full target, the stored one keeps only the head.
+        stored = target.without_bytes
+        ajob.bypassed << stored if target.same_count > 0
         if ajob.results.size < AUTHORIZE_MAX_STORED
-          # Stored for the life of the job, and no payload reads the request or body bytes: the
-          # counts above were taken from the full target, the stored one keeps only the head.
-          ajob.results << target.without_bytes
+          ajob.results << stored
         else
           ajob.truncated = true
         end
@@ -217,7 +219,7 @@ module Gori
           j.object do
             emit_authorize_headline(j, ajob)
             emit_authorize_identities(j, ajob)
-            j.field("bypasses") { j.array { ajob.results.each { |t| authorize_bypass_json(j, t) } } }
+            j.field("bypasses") { j.array { ajob.bypassed.each { |t| authorize_bypass_json(j, t) } } }
             j.field("results") { j.array { page.each { |t| authorize_target_json(j, t) } } }
             # The send-level failure total, here as well as in `authorize_status`: a caller
             # that jumps straight to the verdicts should not have to make a second call to
@@ -319,7 +321,7 @@ module Gori
           "evidence that access control works — check the host is reachable from here and re-run"
         when "BYPASS"
           "BROKEN ACCESS CONTROL: #{ajob.bypasses} identity result#{ajob.bypasses == 1 ? "" : "s"} across " \
-          "#{ajob.results.count { |t| t.same_count > 0 }} request#{ajob.results.count { |t| t.same_count > 0 } == 1 ? "" : "s"} " \
+          "#{ajob.bypassed.size} request#{ajob.bypassed.size == 1 ? "" : "s"} " \
           "matched the baseline response — a non-baseline identity was served the same resource. " \
           "Confirm the identity is genuinely lower-privilege, then raise it."
         when "review"

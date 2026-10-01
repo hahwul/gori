@@ -238,12 +238,17 @@ module Gori
         return not_found("no issue with id #{issue_id}") unless store.get_issue(issue_id)
         limit = bounded_int_arg(h, "limit", Retest::RUN_HISTORY.to_i64,
           min: 1_i64, max: Retest::RUN_HISTORY.to_i64).to_i
-        runs = store.retest_runs(issue_id, limit)
+        # One row over the page, so a short `limit` is not read as the whole history: `total`
+        # is the page's size and said nothing about the runs behind it.
+        runs = store.retest_runs(issue_id, limit + 1)
+        has_more = runs.size > limit
+        runs = runs.first(limit)
         Result.new(JSON.build do |j|
           j.object do
             j.field "issue_id", issue_id
             j.field("runs") { j.array { runs.each { |r| j.object { Serialize.retest_run(j, r) } } } }
             j.field "total", runs.size
+            j.field "has_more", has_more
             j.field "kept", Retest::RUN_HISTORY
           end
         end)

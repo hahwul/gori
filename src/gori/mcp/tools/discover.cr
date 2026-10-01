@@ -8,6 +8,17 @@ module Gori
     class Tools
       # --- discover (spider + directory brute-force) --------------------------
 
+      # The flow id each stored finding became, so `discover_results` can hand an agent the
+      # `flow_id` its `requires: get_flow` promises. Reopened here rather than in tools.cr: only
+      # the discover tools read it.
+      class DiscoverJob
+        # The `results` index each `persist_buf` entry belongs to, in buffer order — nil for a
+        # finding past DISCOVER_MAX_STORED, which is persisted but has no row to carry an id.
+        getter persist_owners = [] of Int32?
+        # `results` index → flow id, filled as each batch commits.
+        getter flow_ids = {} of Int32 => Int64
+      end
+
       @[Tool("discover_start", gated: true, agent_action: true, env_refresh: true,
         requires: ["discover_status", "discover_results", "discover_stop", "get_flow", "list_sitemap"], permission: "send")]
       private def discover_start(h) : Result
@@ -74,7 +85,9 @@ module Gori
       # able to ask for an unbounded crawl). `user_wordlist` lives on the Config like every
       # other knob — the builder reads it from there on all three surfaces.
       private def discover_config(h) : Discover::Config
-        cap = optional_int_arg(h, "max_requests")
+        # A non-positive cap is ignored, as `fuzz_config` does: `cap_reached?` reads 0 / -1 as
+        # "no cap", so `{cap, MAX}.min` turned `max_requests: 0` into an UNBOUNDED crawl.
+        cap = optional_int_arg(h, "max_requests").try { |m| m > 0 ? m : nil }
         Discover::Config.new(
           concurrency: clamp(optional_int_arg(h, "concurrency"), 20, DISCOVER_MAX_CONCURRENCY),
           rps: optional_float_arg(h, "rate"),
@@ -91,7 +104,9 @@ module Gori
           # after the caller asked for it off AND slipped past the "at least one technique"
           # guard that `spider: false` correctly trips.
           spider: bool_arg(h, "spider", true), bruteforce: bool_arg(h, "bruteforce", true),
-          max_depth: clamp(optional_int_arg(h, "max_depth"), 4, DISCOVER_MAX_DEPTH),
+          # Floor 0, not 1: `max_depth: 0` means "the seed only", as `gori run discover
+          # --max-depth 0` does. `clamp` floors at 1, which crawled links the caller ruled out.
+          max_depth: (optional_int_arg(h, "max_depth") || 4_i64).clamp(0_i64, DISCOVER_MAX_DEPTH.to_i64).to_i,
           user_wordlist: str(h, "wordlist").presence,
           extensions: discover_extensions(h), containment: discover_containment(h),
           headers: discover_headers(h))
@@ -236,14 +251,17 @@ module Gori
       # get_flow reflect it. A store write failure (lock/disk) must not kill the running scan.
       private def store_discover_finding(djob : DiscoverJob, f : Discover::Finding, base_ts : Int64,
                                          exchange : Discover::Exchange? = nil) : Nil
+        idx = nil
         if djob.results.size < DISCOVER_MAX_STORED
           djob.results << f
+          idx = djob.results.size - 1
         else
           djob.truncated = true
         end
         pair = Discover::Persist.flow_pair(f, base_ts + djob.results.size, exchange,
           surface: Gori::FlowSource::Surface::Mcp, source_ref: djob.id)
         djob.persist_buf << {pair.request, pair.response}
+        djob.persist_owners << idx
         if djob.persist_buf.size >= DISCOVER_PERSIST_BATCH ||
            Time.instant - djob.persist_at >= DISCOVER_PERSIST_INTERVAL
           flush_discover_persist(djob)
@@ -283,13 +301,19 @@ module Gori
         # holding the writer slot past the busy budget) or a closing store, and clearing the
         # buffer over it silently lost up to 64 findings' rows per collision. The CLI twin
         # (`flush_discover`) reports the same number on STDERR and exits 1 (#1118).
-        landed = store.insert_import_batch(djob.persist_buf)
-        lost = djob.persist_buf.size - landed
+        ids = store.insert_import_batch_ids(djob.persist_buf)
+        lost = djob.persist_buf.size - ids.size
         if lost > 0
           djob.unsaved += lost
           Log.warn { "discover job #{djob.id}: #{lost} finding(s) not saved as flows (store busy or closing) — their rows cannot be opened" }
         end
-        djob.persist_buf.clear
+        # Pair by POSITION, and only when the writer answered for the whole batch — the TUI
+        # twin's rule (`DiscoverController#flush_persist`): a short reply would slide every id
+        # onto the wrong finding. No id just means the row has no `flow_id` to offer.
+        if ids.size == djob.persist_owners.size
+          djob.persist_owners.each_with_index { |idx, i| djob.flow_ids[idx] = ids[i] if idx }
+        end
+        clear_persist(djob)
       rescue ex
         # A store failure must not wedge the crawl or grow the buffer forever — but it is a
         # loss, and it is counted as one.
@@ -299,7 +323,12 @@ module Gori
 
       private def drop_unsaved(djob : DiscoverJob) : Nil
         djob.unsaved += djob.persist_buf.size
+        clear_persist(djob)
+      end
+
+      private def clear_persist(djob : DiscoverJob) : Nil
         djob.persist_buf.clear
+        djob.persist_owners.clear
       end
 
       @[Tool("discover_status", gated: true, read_only: true, permission: "send")]
@@ -357,7 +386,9 @@ module Gori
         page = djob.results[offset, limit]? || [] of Discover::Finding
         Result.new(JSON.build do |j|
           j.object do
-            j.field("findings") { j.array { page.each { |f| discover_finding_json(j, f) } } }
+            j.field("findings") do
+              j.array { page.each_with_index { |f, i| discover_finding_json(j, f, djob.flow_ids[offset + i]?) } }
+            end
             j.field "returned", page.size
             j.field "offset", offset
             j.field "total_available", djob.results.size
@@ -375,8 +406,11 @@ module Gori
         end)
       end
 
-      private def discover_finding_json(j : JSON::Builder, f : Discover::Finding) : Nil
+      private def discover_finding_json(j : JSON::Builder, f : Discover::Finding, flow_id : Int64? = nil) : Nil
         j.object do
+          # The captured exchange's row, for `get_flow`. Absent until its batch is flushed (see
+          # DISCOVER_PERSIST_INTERVAL) and for a finding whose row was not saved (`unsaved_flows`).
+          j.field "flow_id", flow_id if flow_id
           j.field "url", Serialize.text(f.url)
           j.field "method", Serialize.text(f.method)
           j.field "status", f.status
