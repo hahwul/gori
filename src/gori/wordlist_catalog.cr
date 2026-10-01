@@ -409,7 +409,12 @@ module Gori
       check_name!(to, "new name")
       dest = File.join(Paths.wordlists_dir, to)
       return src if src.path == dest
-      if overwrite
+      # A case-only rename (`ids` → `IDS`) on a case-insensitive filesystem (macOS's default):
+      # `dest` already "exists" because it IS the source entry, so the exclusive link would
+      # refuse it as a clash. Renaming the one entry onto its new spelling is the whole job.
+      if src.path.downcase == dest.downcase && File.exists?(dest) && File.same?(src.path, dest)
+        File.rename(src.path, dest)
+      elsif overwrite
         refuse_unreplaceable!(to, dest)
         File.rename(src.path, dest)
       else

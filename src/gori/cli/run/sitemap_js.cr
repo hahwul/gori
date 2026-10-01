@@ -13,6 +13,7 @@ module Gori
         property? scan = false
         property? rescan = false
         property max_flows = JsRefs::DEFAULT_MAX_FLOWS
+        property? max_flows_given = false
         property? all = false
         property? all_hosts = false
         property? comments = true
@@ -37,6 +38,7 @@ module Gori
         if query && !query.strip.empty? && !scanning
           abort "gori run sitemap js: a query narrows the flows --scan reads; pass --scan (or --host/--path to narrow the list)"
         end
+        abort "gori run sitemap js: --max-flows bounds what --scan reads; pass --scan or --rescan" if o.max_flows_given? && !scanning
 
         # Parse before the open: abort skips ensure, so a bad query must not leave a store open.
         filter = scanning ? sitemap_filter(query) : QL::EMPTY
@@ -68,7 +70,10 @@ module Gori
           p.on("--scan", "First scan the JS/HTML responses not scanned yet (writes derived rows, sends nothing)") { o.scan = true }
           p.on("--rescan", "Like --scan, but read already-scanned responses again") { o.rescan = true }
           p.on("-qQL", "--query=QL", "With --scan: only scan flows matching this QL query") { |v| o.query = v }
-          p.on("--max-flows=N", "With --scan: newest responses to read (default #{JsRefs::DEFAULT_MAX_FLOWS})") { |v| o.max_flows = parse_count(v, "--max-flows") }
+          p.on("--max-flows=N", "With --scan: newest responses to read (default #{JsRefs::DEFAULT_MAX_FLOWS})") do |v|
+            o.max_flows = parse_count(v, "--max-flows")
+            o.max_flows_given = true
+          end
           p.on("--host=HOST", "Only references to this host (exact, case-insensitive)") { |v| o.host = v }
           p.on("--path=PREFIX", "Only references whose path starts with PREFIX") { |v| o.path_prefix = v }
           p.on("--all", "Also list references that captured traffic already reached") { o.all = true }

@@ -492,8 +492,8 @@ module Gori
 
       # --- fuzz result rows ---------------------------------------------------
 
-      def self.fuzz_row_json(r : Fuzz::Result) : String
-        JSON.build { |j| fuzz_row_fields(j, r) }
+      def self.fuzz_row_json(r : Fuzz::Result, flow_id : Int64? = nil) : String
+        JSON.build { |j| fuzz_row_fields(j, r, flow_id) }
       end
 
       # Incremental `--format json` writer. The opening bracket is emitted immediately and
@@ -529,11 +529,11 @@ module Gori
           @io.flush
         end
 
-        def append(result : Fuzz::Result) : Nil
+        def append(result : Fuzz::Result, flow_id : Int64? = nil) : Nil
           raise IO::Error.new("fuzz JSON array is already closed") if @closed
           # Build a complete JSON value before emitting its separator. If encoding raises, close
           # can still terminate the previous valid prefix rather than producing `[...,]`.
-          encoded = @encoder.call(result)
+          encoded = flow_id ? Output.fuzz_row_json(result, flow_id) : @encoder.call(result)
           settle(result.index, encoded)
         end
 
@@ -586,7 +586,9 @@ module Gori
         JSON.build { |j| j.array { results.each { |r| fuzz_row_fields(j, r) } } }
       end
 
-      def self.fuzz_row_fields(j : JSON::Builder, r : Fuzz::Result) : Nil
+      # `flow_id`: the History flow `--record-history` wrote this row to, the field MCP
+      # `fuzz_results` carries for the same follow-up `show`; absent when nothing was recorded.
+      def self.fuzz_row_fields(j : JSON::Builder, r : Fuzz::Result, flow_id : Int64? = nil) : Nil
         j.object do
           j.field "index", r.index
           # `.scrub`: a `Fuzz::Payload` is byte-faithful, so a wordlist entry may be invalid
@@ -603,6 +605,7 @@ module Gori
           j.field "lines", r.lines
           j.field "duration_us", r.duration_us
           j.field "matched", r.matched?
+          j.field "flow_id", flow_id if flow_id
           # A send failure's text can quote bytes the ORIGIN chose (a status line, a header a
           # codec refused), so it is captured data like `payloads` two fields up. MCP's
           # `Serialize.fuzz_result` has always wrapped this in `text()`.
@@ -899,8 +902,17 @@ module Gori
         end
       end
 
+      # Named, because not every row printed is a match: a re-sent, truncated or errored row
+      # is shown too, and `fuzz show` lists a saved run's every row. `flow_id` is the History
+      # flow `--record-history` wrote the row to.
+      private def self.fuzz_row_marks(io : IO, r : Fuzz::Result, flow_id : Int64?) : Nil
+        io << "  matched" if r.matched?
+        io << "  stop-hit" if r.stop_hit?
+        io << "  flow #" << flow_id if flow_id
+      end
+
       # "#0     admin                 200   1.2kB     142w    31ms"
-      def self.fuzz_row_text(r : Fuzz::Result) : String
+      def self.fuzz_row_text(r : Fuzz::Result, flow_id : Int64? = nil) : String
         String.build do |io|
           io << '#' << r.index.to_s.ljust(6)
           # ONE one-line terminal-safety seam for every dynamic fuzz-row string below. Payloads
@@ -923,7 +935,7 @@ module Gori
           if extracted = r.extracted
             io << "  ⟦" << term_safe(extracted) << '⟧'
           end
-          io << "  stop-hit" if r.stop_hit?
+          fuzz_row_marks(io, r, flow_id)
           # Before the error text, because it qualifies the SEND rather than the response: this
           # request went out twice (see `Fuzz::Result#retried?`).
           io << "  re-sent" if r.retried?

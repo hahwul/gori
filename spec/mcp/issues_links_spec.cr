@@ -393,6 +393,16 @@ describe "MCP entity links" do
     end
   end
 
+  it "removes a link whose flow is gone (retention leaves it dangling on purpose)" do
+    with_store do |store|
+      iid = store.insert_issue("x", Gori::Store::Severity::Info, nil, nil)
+      store.add_link(Gori::Store::LinkOwnerKind::Issue, iid, Gori::Store::LinkRefKind::Flow, 9_999_i64)
+      mcp_ok_json(tools_for(store), "remove_link",
+        %({"owner_kind":"issue","owner_id":#{iid},"ref_kind":"flow","ref_id":9999}))["removed"].as_bool.should be_true
+      store.list_links(Gori::Store::LinkOwnerKind::Issue, iid).should be_empty
+    end
+  end
+
   it "reports a re-link as already_linked rather than duplicating" do
     with_store do |store|
       fid = mcp_seed_flow(store)

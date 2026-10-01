@@ -183,7 +183,7 @@ module Gori
         end
         parser.parse(args)
         refuse_list_leftovers(leftover, "project",
-          "list, create, switch, delete/rm, scope, sandbox, env, host-override")
+          "list, create, switch, export, import, delete/rm, scope, sandbox, env, network, host-override")
 
         registry = ProjectRegistry.new(Paths.projects_dir)
         entries = registry.entries
@@ -1224,7 +1224,7 @@ module Gori
 
         abort "gori run project env set: missing KEY=value (or KEY value)" if positional.empty?
         parsed = env_set_pair(positional)
-        abort "gori run project env set: invalid KEY (use [A-Za-z_][A-Za-z0-9_]*)" unless parsed
+        abort "gori run project env set: #{env_set_refusal(positional)}" unless parsed
         key, val = parsed
 
         project = resolve_read_project(project_name, db_path)
@@ -1263,6 +1263,15 @@ module Gori
         end
         return nil unless Env.valid_key?(key) && value.valid_encoding?
         {key, value}
+      end
+
+      # Which of `env_set_pair`'s three refusals applies, so a valid key with no value (or a
+      # value that is not UTF-8) is not reported as a bad KEY.
+      def self.env_set_refusal(positional : Array(String)) : String
+        key = positional.size == 1 ? positional[0].partition('=')[0] : positional[0]
+        return "invalid KEY (use [A-Za-z_][A-Za-z0-9_]*)" unless Env.valid_key?(key)
+        return "missing value for #{key} (KEY=value, or KEY value; KEY= sets it empty)" if positional.size == 1 && !positional[0].includes?('=')
+        "the value for #{key} is not valid UTF-8"
       end
 
       private def self.cmd_env_delete(args : Array(String)) : Nil

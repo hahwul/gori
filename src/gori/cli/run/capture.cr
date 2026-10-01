@@ -23,7 +23,15 @@ module Gori
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run capture [options]\n\nRun the proxy and stream captured flows to STDOUT until Ctrl-C (or --for / --max)."
-          p.on("-lHOST", "--listen=HOST", "Listen address (default #{listen})") { |v| listen = listen_flag = v }
+          p.on("-lHOST", "--listen=HOST", "Listen address (default #{listen})") do |v|
+            # An empty `-l "$UNSET"` was taken as given: it bound whatever the resolver picks
+            # for the default (often ::1 only) while the banner said "all interfaces".
+            abort "gori run capture: --listen needs an address (e.g. 127.0.0.1)" if v.strip.empty?
+            if err = Settings.bind_host_error(v)
+              abort "gori run capture: --listen: #{err.lchop("settings: ")}"
+            end
+            listen = listen_flag = v.strip
+          end
           p.on("-pPORT", "--port=PORT", "Listen port (default #{port})") { |v| port = port_flag = parse_port(v) }
           p.on("--project=NAME", "Capture into project NAME (created if missing; default 'default')") { |v| project_name = v }
           p.on("--db=PATH", "Capture into an explicit SQLite db file") { |v| db_path = v }

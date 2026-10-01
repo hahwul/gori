@@ -96,6 +96,9 @@ module Gori
         if note = cookie_as_body_note(cookies, method, !body.nil? || !body_file.nil?)
           STDERR.puts "gori run send: #{note}"
         end
+        if note = data_at_file_note(data)
+          STDERR.puts "gori run send: #{note}"
+        end
         method, header_pairs = send_curl_defaults(method, header_pairs, !body.nil? || !body_file.nil?)
         cap = body_cap(headers_only, max_body, "gori run send")
         raw_content = sources.empty? ? nil : send_raw_content(sources, request_file, request_raw, request_stdin)
@@ -196,6 +199,16 @@ module Gori
         return nil unless form_shaped || body_method
         "note: -b is curl's --cookie (it was the request body before #1383), so this went out as a " \
         "Cookie header with no body — pass a body with -d/--data"
+      end
+
+      # curl reads `-d @FILE` from FILE; here `-d` is always the literal body (a leading `@` is a
+      # payload like any other), so a `-d @x` naming a file that exists is said out loud rather
+      # than sent as the six bytes `@x` the operator probably did not mean. Sent as typed.
+      def self.data_at_file_note(data : Array(String)) : String?
+        d = data.find { |v| v.size > 1 && v.starts_with?('@') && File.file?(v[1..]) }
+        return nil unless d
+        "-d #{d} sends the text #{d.inspect} as the body, not the file's contents " \
+        "(curl's -d @FILE) — pass --body-file #{d[1..]} to send the file"
       end
 
       # `-b/--cookie` values → the ONE Cookie header value curl sends for them (joined with

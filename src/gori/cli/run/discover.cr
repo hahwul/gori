@@ -45,7 +45,7 @@ module Gori
           p.on("--max-depth=N", "Spider depth from the seed (default 4)") { |v| max_depth = parse_nonneg(v, "--max-depth") }
           p.on("--no-spider", "Disable link crawling (brute-force only)") { spider = false }
           p.on("--no-bruteforce", "Disable directory brute-forcing (crawl only)") { bruteforce = false }
-          p.on("--wordlist=PATH", "Extra path wordlist: a file, or the NAME of a saved list (`gori run wordlist`); merged with the built-in list") { |v| wordlist = v }
+          p.on("--wordlist=PATH", "Extra path wordlist: a file, or the NAME of a saved list (`gori run wordlist`); merged with the built-in list (one list)") { |v| wordlist = one_wordlist(wordlist, v, "gori run discover") }
           p.on("--extensions=LIST", "Also probe these extensions (e.g. php,json,bak)") { |v| extensions = parse_extensions(v) }
           p.on("-HHEADER", "--header=HEADER", "Custom request header on every probe, e.g. \"Authorization: Bearer …\" (repeatable). Host and Connection are owned by the crawler and ignored; a value carrying CR/LF is refused, not dropped") { |v| headers << v }
           p.on("--containment=MODE", "same-origin | scope-aware (default) | host+subdomains") { |v| containment = parse_containment(v) }

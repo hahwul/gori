@@ -906,6 +906,21 @@ describe Gori::CLI::Output do
     txt.should contain("403")
   end
 
+  it "names a matched row, and carries the History flow --record-history wrote" do
+    hit = F::Result.new(3_i64, ["admin"], 0, 403, 21_i64, 3, 1, 1500_i64, nil, true, false, nil)
+    miss = F::Result.new(4_i64, ["guest"], 0, 200, 21_i64, 3, 1, 1500_i64, nil, false, false, nil)
+    Gori::CLI::Output.fuzz_row_text(hit).should contain("matched")
+    Gori::CLI::Output.fuzz_row_text(miss).should_not contain("matched")
+    Gori::CLI::Output.fuzz_row_text(hit, 9_i64).should contain("flow #9")
+    JSON.parse(Gori::CLI::Output.fuzz_row_json(hit, 9_i64))["flow_id"].should eq(9)
+    JSON.parse(Gori::CLI::Output.fuzz_row_json(hit)).as_h.has_key?("flow_id").should be_false
+    io = IO::Memory.new
+    stream = Gori::CLI::Output::FuzzArrayStream.new(io)
+    stream.append(F::Result.new(0_i64, ["a"], 0, 200, 1_i64, 1, 1, 1_i64, nil, true, false, nil), 7_i64)
+    stream.close
+    JSON.parse(io.to_s)[0]["flow_id"].should eq(7)
+  end
+
   # #567/H3 Finding 2: a byte-faithful payload (a wordlist may hold invalid UTF-8, e.g. a
   # raw \xff\xfe bad-strings entry) put raw bytes inside a JSON string, so one payload made
   # the WHOLE document unparseable (poisoning every row). The MCP twin already scrubs; the CLI

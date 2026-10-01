@@ -241,7 +241,9 @@ module Gori
         # PCRE2 regex split raise "Regex match error: UTF-8 error" and kill the run. Scrub
         # to valid UTF-8 first (bad bytes → U+FFFD) so a lone junk byte doesn't abort the
         # whole analysis; a normal UTF-8 file is unchanged.
-        raw.scrub.split(/\r?\n/).map(&.strip).reject(&.empty?)
+        # A leading BOM (a Windows editor's UTF-8 save) would otherwise ride on the first
+        # token and turn a fixed-length hex sample into a variable-length binary one.
+        raw.scrub.lchop('\uFEFF').split(/\r?\n/).map(&.strip).reject(&.empty?)
       end
 
       private def self.build_token_loc(kind : Sequencer::ExtractKind, selector : String) : Sequencer::TokenLoc
@@ -329,6 +331,13 @@ module Gori
         # still exits 0. Mirrors `gori run fuzz`'s #410 backstop and mine's above.
         if tokens.empty? && (reason = engine.first_error)
           STDERR.puts "sequence: every replay failed — #{reason}"
+          exit 1
+        end
+        # Replies came back but none carried a token where the locator looked: the CRITICAL
+        # "no usable tokens" report above rates the locator, not the generator, so it is not
+        # a result a script may read as one.
+        if tokens.empty?
+          STDERR.puts "sequence: no response carried a token at #{loc.label} — check the locator"
           exit 1
         end
       end

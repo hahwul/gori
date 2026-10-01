@@ -617,7 +617,9 @@ module Gori
         v = h["identities"]?
         return nil if v.nil? || v.raw.nil?
         if arr = v.as_a?
-          return arr.to_json
+          text = arr.to_json
+          Authorize.explicit_json_error(text).try { |why| raise Gori::Error.new("invalid 'identities': #{why}") }
+          return text
         end
         if s = v.as_s?
           text = s.strip
@@ -630,6 +632,7 @@ module Gori
             raise Gori::Error.new("invalid 'identities' (expected a JSON array of identity objects, " \
                                   "e.g. [{\"name\":\"anonymous\",\"remove\":[\"Cookie\"]}])")
           end
+          Authorize.explicit_json_error(text).try { |why| raise Gori::Error.new("invalid 'identities': #{why}") }
           return text
         end
         raise Gori::Error.new("invalid 'identities' (expected an array of identity objects, got " \

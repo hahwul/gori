@@ -286,7 +286,7 @@ module Gori
                 # say which tab is the odd one out. See `unterminated_head_note`.
                 bad_head = unterminated_head?(r.request, ws_http_only: r.ws_http_only?, http2: r.http2?)
                 head = bad_head ? "  !head-unterminated" : ""
-                puts "#{(i + 1).to_s.rjust(width)}  ##{r.id}  [#{h2}]  #{CLI::Output.pad(name, 20)}  → #{r.target}#{tls}#{head}"
+                puts "#{(i + 1).to_s.rjust(width)}  ##{r.id}  [#{h2}]  #{CLI::Output.pad(CLI::Output.term_safe(name), 20)}  → #{CLI::Output.term_safe(r.target)}#{tls}#{head}"
               end
             end
           end
@@ -348,8 +348,16 @@ module Gori
           p.on("--to=N", "Move to this 1-based tab number (the number `repeater list` prints)") do |v|
             to = v.to_i32? || abort("gori run repeater move: invalid --to '#{v}' (expected a 1-based tab number)")
           end
-          p.on("--up", "Move one place toward tab 1") { dir = -1 }
-          p.on("--down", "Move one place toward the end") { dir = 1 }
+          # `--up --down` is two answers like `--to` with either, refused rather than left to
+          # flag order.
+          p.on("--up", "Move one place toward tab 1") do
+            abort "gori run repeater move: pass one of --up or --down" if dir == 1
+            dir = -1
+          end
+          p.on("--down", "Move one place toward the end") do
+            abort "gori run repeater move: pass one of --up or --down" if dir == -1
+            dir = 1
+          end
           p.on("--project=NAME", "Project to act on (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file") { |v| db_path = v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
@@ -483,7 +491,7 @@ module Gori
               "remaining" => rows.size - deleted.size,
             }.to_json)
           else
-            deleted.each { |(i, n, was)| puts "Deleted repeater session ##{i} (tab #{was}, #{n})." }
+            deleted.each { |(i, n, was)| puts "Deleted repeater session ##{i} (tab #{was}, #{CLI::Output.term_safe(n)})." }
             STDERR.puts "NOT deleted (project busy or unwritable): #{failed.join(", ")}" unless failed.empty?
           end
           exit 1 unless failed.empty?
@@ -845,6 +853,10 @@ module Gori
           end
 
           abort "gori run repeater create: --target is required" if tgt_str.empty?
+          # A hand-authored handshake is a WebSocket session too: `repeater send` runs WsEngine
+          # on it exactly as on a cloned one, and MCP `create_repeater` asks the same question
+          # of every source. Only the flow path above seeds frames.
+          is_ws ||= Repeater::WsEngine.replayable?(req_content)
           # The preset was refused and normalized ABOVE, before the request read — it is an
           # argv value, and nothing between here and there can change it. Refused at all (and
           # not left for the first send) because an unknown preset applies nothing: a session
@@ -1030,7 +1042,8 @@ module Gori
                                             timeout : Time::Span? = nil,
                                             reframe_grpc : Bool = false,
                                             tls_preset : String? = nil,
-                                            request : Bytes = rec.request) : Repeater::PlanOptions
+                                            request : Bytes = rec.request,
+                                            pinned_cl : Bool = false) : Repeater::PlanOptions
         Repeater::PlanOptions.new([request],
           reframe_grpc: reframe_grpc,
           default_target: rec.target, http2: rec.http2?, sni: rec.sni,
@@ -1049,7 +1062,9 @@ module Gori
           # name. Field case is the one normalization left on that path, so this is what
           # `--verbatim` means for h2.
           preserve_field_case: verbatim,
-          auto_content_length: !verbatim && rec.auto_content_length?, verify: !insecure,
+          # `pinned_cl`: this send's own `-H 'Content-Length: N'`, honoured verbatim for
+          # CL-mismatch testing exactly as a flow replay's `-H` is.
+          auto_content_length: !verbatim && !pinned_cl && rec.auto_content_length?, verify: !insecure,
           overrides: overrides,
           tls_preset: tls_preset || rec.tls_preset)
       end
@@ -1574,10 +1589,13 @@ module Gori
         # carries — the `--path` copy when there is one (it edits a COPY for this send; the row
         # keeps its own, see `FlowRequest.replace_request_target`) — so a `§id§` in the stored
         # target that `--path` replaced does not refuse a send that no longer carries it.
+        pinned_cl = false
         rec, host_overrides, markers_live, request = begin
           r = store.get_repeater_full(id)
           req = r.try { |row| (p = path_override) ? Repeater::FlowRequest.replace_request_target(row.request, p) : row.request }
-          req = req.try { |bytes| session_header_overrides(bytes, headers) }
+          if bytes = req
+            req, pinned_cl = session_header_overrides(bytes, headers)
+          end
           {r, Gori::HostOverrides.load(store), r && req ? Repeater::DraftMarkers.live?(store, r, req) : false, req}
         ensure
           store.close
@@ -1597,7 +1615,7 @@ module Gori
 
         plan = begin
           Repeater::Plan.build(session_plan_options(rec, insecure, host_overrides, verbatim, timeout, reframe_grpc,
-            tls_preset, request: request), outbound)
+            tls_preset, request: request, pinned_cl: pinned_cl), outbound)
         rescue ex : Repeater::PlanError
           repeater_plan_abort("gori run repeater send", ex, "session ##{id}")
         end
@@ -1622,6 +1640,11 @@ module Gori
           abort "gori run repeater send: --message / --message-frame / --idle-ms apply to a WebSocket exchange — session ##{id} is being sent as HTTP"
         end
         # …and the other direction: a framed exchange prints a TRANSCRIPT, not a response body.
+        if use_ws && do_diff
+          outbound.close
+          abort "gori run repeater send: --diff applies to an HTTP response — session ##{id} is a " \
+                "WebSocket exchange (pass --http to send its handshake as an ordinary request)"
+        end
         if use_ws && !cap.whole?
           outbound.close
           abort "gori run repeater send: #{cap.flag} applies to an HTTP response — session ##{id} is a " \
@@ -1682,6 +1705,9 @@ module Gori
         new_body, _ = decode_body(result.head, result.body)
         diff = nil.as(Array(Repeater::DiffLine)?)
         diff_capped = false
+        if do_diff && rec.response_head.nil?
+          STDERR.puts "gori run repeater send: --diff: session ##{id} has no stored response to compare against yet"
+        end
         if do_diff && (base_head = rec.response_head)
           # `--headers-only --diff` compares the two HEADS: status and headers, no body lines.
           orig = message_lines(base_head, cap.omit ? nil : display_body(base_head, rec.response_body))
@@ -2042,7 +2068,8 @@ module Gori
           STDERR.puts "→ WebSocket upgraded=#{result.upgraded?} in #{CLI::Output.human_us(result.duration_us)}#{result.close_code ? " (close #{result.close_code})" : ""}"
           STDERR.puts "note: #{result.note}" if result.note
           STDERR.puts "truncated: #{result.truncated}" if result.truncated
-          result.messages.each { |m| puts ws_transcript_line(m) }
+          # A server frame's text is the remote's choice of bytes: named, never replayed raw.
+          result.messages.each { |m| puts CLI::Output.term_safe(ws_transcript_line(m)) }
         else
           STDERR.puts "gori run repeater send: send failed: #{result.error}"
         end
@@ -2520,10 +2547,11 @@ module Gori
       # later duplicates dropped, every other byte kept. NOT expanded here: a session is a draft
       # and `Plan` expands the whole request once (or not at all under `--verbatim`), so an
       # expansion here would run twice over a value that itself looks like a token.
-      private def self.session_header_overrides(request : Bytes, headers : Array(String)) : Bytes
-        return request if headers.empty?
+      # Answers whether one of the edits pinned Content-Length, which the plan then leaves alone.
+      private def self.session_header_overrides(request : Bytes, headers : Array(String)) : {Bytes, Bool}
+        return {request, false} if headers.empty?
         boundary = Env.head_body_boundary(request)
-        build_single_flow_request(request[0, boundary], request[boundary..], headers, nil, nil, expand: false)[0]
+        build_single_flow_request(request[0, boundary], request[boundary..], headers, nil, nil, expand: false)
       end
 
       # nil when `-X METHOD` is a method the request line can carry; the refusal otherwise. The

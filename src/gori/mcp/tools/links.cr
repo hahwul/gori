@@ -75,7 +75,9 @@ module Gori
         owner = link_owner(h)
         return owner if owner.is_a?(Result)
         owner_kind, owner_id = owner
-        ref = link_ref(h)
+        # The target need not still exist: retention leaves a pruned flow's link dangling on
+        # purpose, and removing that stale link is exactly what the caller is here to do.
+        ref = link_ref(h, must_exist: false)
         return ref if ref.is_a?(Result)
         ref_kind, ref_id = ref
 
@@ -103,14 +105,14 @@ module Gori
       end
 
       # {kind, id} of the link target. Validated the same way, for the same reason.
-      private def link_ref(h) : {Store::LinkRefKind, Int64} | Result
+      private def link_ref(h, must_exist : Bool = true) : {Store::LinkRefKind, Int64} | Result
         kind_s = str(h, "ref_kind").try(&.strip.downcase).presence
         return err("missing required 'ref_kind' (flow|repeater|fuzz|miner)", "INVALID_ARGUMENT", field: "ref_kind") unless kind_s
         kind = Store::LinkRefKind.parse(kind_s)
         return err("invalid ref_kind '#{kind_s}' (flow|repeater|fuzz|miner)", "INVALID_ARGUMENT", field: "ref_kind") unless kind
         id = int(h, "ref_id")
         return Result.new(id_error(h, "ref_id"), is_error: true) unless id
-        return not_found("no #{kind.label} with id #{id}") unless link_ref_exists?(kind, id)
+        return not_found("no #{kind.label} with id #{id}") if must_exist && !link_ref_exists?(kind, id)
         {kind, id}
       end
 

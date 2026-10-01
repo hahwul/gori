@@ -471,6 +471,9 @@ module Gori
         abort "gori run intercept edit: too many arguments (expected one <item-id>)" if positional.size > 1
         item_id = positional[0].to_i64? || abort("gori run intercept edit: invalid item id '#{positional[0]}'")
 
+        # Two replacement messages, one held item: refused like MCP's raw / raw_base64 pair,
+        # never settled by which flag happened to win.
+        abort "gori run intercept edit: pass --raw or --raw-file, not both" if raw && raw_file
         content = if f = raw_file
                     read_input_file(f, "gori run intercept edit: --raw-file")
                   elsif r = raw

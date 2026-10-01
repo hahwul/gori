@@ -186,9 +186,10 @@ module Gori
       # a single `hotpink` shifted the name and condition columns on EVERY row of the listing.
       def self.colormarker_rule_row(r : Store::ColorRule, color_w : Int32 = 6) : String
         mark = r.enabled? ? "x" : " "
-        name = r.name.empty? ? "" : " [#{r.name}]"
+        # Name and condition are operator text, possibly synced from a shared settings file.
+        name = r.name.empty? ? "" : " [#{CLI::Output.term_safe(r.name)}]"
         scope = "#{r.scope.badge}#{r.overridden? ? "*" : ""}"
-        cond = r.match_filter.empty? ? "(every flow)" : r.match_filter
+        cond = r.match_filter.empty? ? "(every flow)" : CLI::Output.term_safe(r.match_filter)
         "#{scope}##{r.id} [#{mark}] #{r.style.label.ljust(5)} #{CLI::Output.pad(r.color, color_w)}#{name}  #{cond}"
       end
 
@@ -349,9 +350,10 @@ module Gori
         color = parse_marker_color(color_s)
         style = parse_marker_style(style_s)
 
-        # A global rule needs no project at all — it lives in settings.json — but resolving one
-        # anyway keeps `--project` meaningful on every subcommand.
+        # A global rule needs no project at all — it lives in settings.json — but a named one is
+        # still resolved, so a misspelt `--project` fails here as it does on every subcommand.
         if scope.global?
+          colormarker_global_project_check(project_name, db_path)
           id = Settings.add_colormarker_rule(f, color, style.label, name, !disabled)
           abort "gori run colormarker add: failed to persist rule (settings not writable)" if id == 0
           puts format == :json ? colormarker_added_json(id, nil) : "Global colour rule ##{id} added — it applies in every project."
@@ -372,6 +374,12 @@ module Gori
         ensure
           store.close
         end
+      end
+
+      # A `--scope global` write touches settings.json only, but a `--project`/`--db` beside it
+      # is still checked: accepting a project that does not exist reads as having written to it.
+      private def self.colormarker_global_project_check(project_name : String?, db_path : String?) : Nil
+        resolve_read_project(project_name, db_path) if project_name || db_path
       end
 
       # `add --format json` (#1117): the new rule's `colormarker list --format json` object,
@@ -449,6 +457,7 @@ module Gori
         new_style = want_style ? parse_marker_style(want_style) : nil
 
         if scope.global?
+          colormarker_global_project_check(project_name, db_path)
           colormarker_update_global(id, want_filter, new_color, new_style, want_name)
         else
           colormarker_update_project(project_name, db_path, id, want_filter, new_color, new_style, want_name)
@@ -521,6 +530,7 @@ module Gori
         # surface cannot reach every project's DB to sweep it. It stays inert: global ids come
         # from a monotonic counter and are never reused, so nothing can inherit the override.
         if scope.global?
+          colormarker_global_project_check(project_name, db_path)
           # Against the list on DISK — see `colormarker_update_global`. `delete_colormarker_rule`
           # opens with its own `reload_colormarker_from_disk` and answers false for BOTH "no such
           # rule" and "not saved", so an existence check made against this process's start-up copy
@@ -584,6 +594,7 @@ module Gori
         # below compares against it to decide between an override and dropping one.
         default = nil.as(Bool?)
         if scope.global?
+          colormarker_global_project_check(project_name, db_path)
           Settings.reload_colormarker_from_disk # the list the mutator acts on — see `cmd_colormarker_rm`
           rule = Settings.colormarker_rules.find { |r| r.id == id }
           abort "gori run colormarker #{action}: no global rule with id #{id}" unless rule
@@ -655,6 +666,7 @@ module Gori
         abort "gori run colormarker move: pass --up or --down" if dir == 0
 
         if scope.global?
+          colormarker_global_project_check(project_name, db_path)
           # The edge is established HERE, before the write, exactly as the project branch below
           # does it and as MCP's `move_color_rule` does. `Settings.move_colormarker_rule` answers
           # false for an edge AND for a refused save, so reporting one message for both told an

@@ -1220,7 +1220,7 @@ gori run evidence show 12                                          # 사본 출�
 gori run evidence show 12 --include-sensitive --format=json
 gori run evidence link 12 --issue=9                                # 다른 Issue에도 연결
 gori run evidence unlink 12 --issue=7                              # 고아가 되어도 스냅숏 유지
-gori run evidence delete 12
+gori run evidence delete 12 --yes
 ```
 
 | Option | Description |

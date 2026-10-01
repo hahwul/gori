@@ -133,7 +133,9 @@ module Gori
           puts "schema: #{Gori::Protobuf::Schemas.status}"
           puts "  ! not saved (project busy); it reverts when you reopen this project" unless committed
         end
-        exit(outcome.ok? ? 0 : 1)
+        # The cached reflection is this one-shot process's only lasting effect, so a write that
+        # did not commit fails the command (as `probe --persist` does), whatever it fetched.
+        exit(outcome.ok? && committed ? 0 : 1)
       end
 
       # A positive timeout that Time::Span can represent, or nil for a clean usage refusal.
@@ -280,6 +282,7 @@ module Gori
         ensure
           store.close
         end
+        exit 1 unless committed
       end
     end
   end

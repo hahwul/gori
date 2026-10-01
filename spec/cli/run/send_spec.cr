@@ -109,3 +109,18 @@ describe "gori run send (#1116)" do
     end
   end
 end
+
+describe "gori run send -d @FILE" do
+  it "says a -d naming an existing file is sent as text, and says nothing otherwise" do
+    path = File.tempname("gori-send-body", ".txt")
+    File.write(path, "a=1")
+    begin
+      note = Gori::CLI::Run.data_at_file_note(["@#{path}"]).not_nil!
+      note.should contain("--body-file #{path}")
+      Gori::CLI::Run.data_at_file_note(["@no-such-file-here"]).should be_nil
+      Gori::CLI::Run.data_at_file_note(["a=1", "@"]).should be_nil
+    ensure
+      File.delete(path)
+    end
+  end
+end

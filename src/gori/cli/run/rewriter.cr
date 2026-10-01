@@ -664,6 +664,7 @@ module Gori
         part_s = "head"
         op_s = "replace"
         match_s = "literal"
+        match_given = false
         host : String? = nil
         name = ""
         find : String? = nil
@@ -696,7 +697,7 @@ module Gori
           # other command. Kept, so no script breaks.
           p.on("--target=SIDE", "Alias for --side") { |v| target_s = v }
           p.on("--op=OP", "replace|add_header|set_header|remove_header|short_circuit|pipe (default replace)") { |v| op_s = v }
-          p.on("--match=KIND", "literal|regex (default literal; replace/pipe/short_circuit only)") { |v| match_s = v }
+          p.on("--match=KIND", "literal|regex (default literal; replace/pipe/short_circuit only)") { |v| match_s = v; match_given = true }
           p.on("--part=PART", "head|body|ws (default head; replace/pipe only; ws = a WebSocket message)") { |v| part_s = v }
           p.on("--host=GLOB", "Scope to a host glob ('' = all; '*.example.com')") { |v| host = v }
           p.on("--scope=SCOPE", "project (default) | global — a global rule applies in EVERY project") { |v| scope = parse_rule_scope(v) }
@@ -726,6 +727,11 @@ module Gori
         target = Store::RuleTarget.parse?(target_s) || abort("gori run rewriter add: invalid --target '#{target_s}'")
         part = Store::RulePart.parse?(part_s) || abort("gori run rewriter add: invalid --part '#{part_s}'")
         match = Store::MatchKind.parse?(match_s) || abort("gori run rewriter add: invalid --match '#{match_s}' (literal|regex)")
+        # The `--from-flow` draft's pattern is a regex; an explicit `--match literal` over it
+        # was overridden unsaid. Refused by name, as MCP refuses `match` beside `from_flow_id`.
+        if mock.from_flow && find.nil? && match_given && match.literal?
+          abort "gori run rewriter add: the pattern drafted from --from-flow is a regex — omit --match, or pass --find"
+        end
         respond, respond_args = mock_respond(op, mock, body_file)
         body_file = mock.map_dir || body_file
         find_arg, match = add_find(op, respond, mock, find, match)

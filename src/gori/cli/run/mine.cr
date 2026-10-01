@@ -49,7 +49,7 @@ module Gori
           p.on("--sni=HOST", "TLS SNI override") { |v| sni = v }
           p.on("-k", "--insecure-upstream", "Do not verify upstream TLS certificates") { insecure = true }
           p.on("--locations=LIST", "Where to mine: query,form,multipart,json,headers,cookies (default: auto-detect)") { |v| locations = parse_mine_locations(v) }
-          p.on("--wordlist=PATH", "Extra param-name wordlist: a file, or the NAME of a saved list (`gori run wordlist`); merged with the built-in list") { |v| wordlist = v }
+          p.on("--wordlist=PATH", "Extra param-name wordlist: a file, or the NAME of a saved list (`gori run wordlist`); merged with the built-in list (one list)") { |v| wordlist = one_wordlist(wordlist, v, "gori run mine") }
           p.on("--name=NAME", "Test this name FIRST, ahead of the wordlists (repeatable or comma-separated; e.g. from `gori run sitemap params`)") do |v|
             v.split(',').each do |n|
               s = n.strip

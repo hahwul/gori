@@ -99,12 +99,16 @@ module Gori
           (@set ||= [] of {String, String}) << pair
         end
 
+        # A blank `--remove ''` / `--rule ''` still names the list (so `edit` replaces it) but
+        # adds no entry: the store drops blanks, and the row printed back must agree with it.
         def push_remove(header : String) : Nil
-          (@remove ||= [] of String) << header
+          list = (@remove ||= [] of String)
+          list << header unless header.empty?
         end
 
         def push_rule(rule : String) : Nil
-          (@rules ||= [] of String) << rule
+          list = (@rules ||= [] of String)
+          list << rule unless rule.empty?
         end
       end
 
@@ -293,8 +297,7 @@ module Gori
         parser.parse(args)
         # `session add admin` reads as naturally as `--name admin`; accept both, and refuse
         # the pair rather than picking a winner.
-        name = edit.name || positional.first?
-        abort "gori run session add: name the slot (--name NAME)" if name.nil? || name.empty?
+        name = session_add_name(edit.name, positional.first?)
 
         store, slots = session_slots(project_name, db_path)
         begin
@@ -313,10 +316,23 @@ module Gori
             refresh: edit.refresh || [] of Int64,
             refresh_before: edit.refresh_before || Gori::SessionSlot::RefreshBefore.off)
           abort "gori run session add: the project could not be written — #{name.inspect} was NOT saved" unless slots.add(slot)
-          puts session_slot_row(slot, false)
+          # The row as saved, not as built: `add` may auto-mark the first slot baseline and
+          # drops empty entries, and the printed row must not deny either.
+          puts session_slot_row(slots.find(name) || slot, false)
         ensure
           store.close
         end
+      end
+
+      # `session add admin` or `--name admin`, never both, stripped either way (as `--name` and
+      # MCP strip it, so `'  pad '` cannot save a slot `show pad` then fails to find).
+      private def self.session_add_name(flag : String?, positional : String?) : String
+        if flag && positional
+          abort "gori run session add: the slot is named twice (#{positional.inspect} and --name) — pass one"
+        end
+        name = flag || positional.try(&.strip)
+        abort "gori run session add: name the slot (--name NAME)" if name.nil? || name.empty?
+        name
       end
 
       # `gori run session from-flow <id> --name NAME` — one captured login exchange turned into
@@ -660,7 +676,10 @@ module Gori
         outcome = begin
           slot = session_refresh_slot(store, name)
           runner = session_refresher(store)
-          outbound = allow_unscoped ? Gori::Outbound.cli(Gori::Scope.load(store), true) : nil
+          # Built here either way, not left to the runner's own gate: this command takes
+          # --allow-unscoped, so its out-of-scope refusal names that flag as a remedy.
+          outbound = Gori::Outbound.cli(Gori::Scope.load(store), allow_unscoped)
+          outbound.waiver = "--allow-unscoped"
           if slot.refresh.empty?
             abort_closing(store, "gori run session refresh: #{name.inspect} has no refresh steps — add them with " \
                                  "`gori run session edit #{name} --refresh ID,ID` (`gori run repeater list` shows the ids)")
@@ -715,7 +734,7 @@ module Gori
         mark = slot.baseline? ? "◆" : " "
         body = show_values ? session_slot_verbose(slot) : slot.summary
         rules = slot.rules.empty? ? "" : " · rules #{Env.token_list(slot.rules, ns: Env::Namespace::Bind)}"
-        "#{mark} #{CLI::Output.pad(slot.name, 18)} #{body}#{rules}#{session_refresh_summary(slot)}"
+        "#{mark} #{CLI::Output.pad(CLI::Output.term_safe(slot.name), 18)} #{body}#{rules}#{session_refresh_summary(slot)}"
       end
 
       # ` · refresh 2 steps · before jwt-exp` — empty for a slot with no refresh steps.
@@ -735,20 +754,22 @@ module Gori
           parts << "sets #{slot.set_headers.map { |(n, v)| "#{n}: #{v}" }.join(", ")}"
         end
         parts << "drops #{slot.remove_headers.join(", ")}" unless slot.remove_headers.empty?
-        parts.join(" · ")
+        # The values come from wherever the slot was minted — `from-flow` lifts a remote
+        # Set-Cookie verbatim — so control bytes are revealed before a terminal sees them.
+        CLI::Output.term_safe(parts.join(" · "))
       end
 
       def self.session_slot_detail(slot : Gori::SessionSlot, show_values : Bool,
                                    store : Store? = nil) : String
         String.build do |io|
-          io << slot.name
+          io << CLI::Output.term_safe(slot.name)
           io << "  (baseline)" if slot.baseline?
           io << "  (as captured — no overlay)" if slot.passthrough?
           io << '\n'
           slot.set_headers.each do |(n, v)|
-            io << "  set     " << n << ": " << (show_values ? v : "[REDACTED]") << '\n'
+            io << "  set     " << CLI::Output.term_safe(n) << ": " << (show_values ? CLI::Output.term_safe(v) : "[REDACTED]") << '\n'
           end
-          slot.remove_headers.each { |n| io << "  remove  " << n << '\n' }
+          slot.remove_headers.each { |n| io << "  remove  " << CLI::Output.term_safe(n) << '\n' }
           slot.rules.each { |n| io << "  rule    " << Env.spell(n, Env::Namespace::Bind) << '\n' }
           unless (labels = refresh_labels(slot, store)).empty?
             io << "  refresh " << labels.join(" → ") << "  · before: " << slot.refresh_before << '\n'

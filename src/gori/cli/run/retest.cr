@@ -114,7 +114,7 @@ module Gori
         end
         planned.each { |pl| puts retest_step_line(pl) }
         if note = Retest.confirm_note(planned)
-          puts "note: #{note}"
+          puts "note: #{CLI::Output.term_safe(note)}"
         end
         if r = last
           puts "last run: #{retest_run_line(r)}"
@@ -431,7 +431,7 @@ module Gori
                   "`gori run retest add --issue=#{iid} --repeater=<id> --role=baseline`"
           end
           if (note = Retest.confirm_note(planned)) && !yes
-            STDERR.puts "gori run retest run: #{note}"
+            STDERR.puts "gori run retest run: #{CLI::Output.term_safe(note)}"
             abort "gori run retest run: refusing without --yes"
           end
           # After `open_store` (which installs `Env.layer`) and before anything builds bytes:
@@ -442,8 +442,7 @@ module Gori
           # `require_issue_id` helper exists for.
           t = timeout
           step_timeout = t.nil? ? Retest::LiveBackend::DEFAULT_TIMEOUT : t
-          outbound = project_outbound(project_name, db_path, allow_unscoped)
-          outbound.waiver = "--allow-unscoped"
+          outbound = project_outbound(project, allow_unscoped)
           backend = Retest::LiveBackend.new(store, outbound,
             issue_id: iid, surface: Gori::FlowSource::Surface::Cli,
             overrides: overrides, verify: !insecure,
@@ -623,7 +622,8 @@ module Gori
         line = "#{step.position}  [#{step.id}]  #{step.role.label.ljust(8)}  #{step.ref_label}  " \
                "#{pl.method} #{Issues::Export.one_line(pl.url)}  #{expect}"
         pl.missing.try { |reason| line += "  — #{reason}" }
-        line
+        # The method is read off the saved request's own bytes, which may hold anything.
+        CLI::Output.term_safe(line)
       end
 
       # `#7  2026-09-11T05:02:33Z  cli  FAIL  4 steps · 2 passed · 1 failed · 1 skipped`

@@ -29,6 +29,51 @@ module Gori
       SessionSlot.parse_json(raw)
     end
 
+    # Why an EXPLICIT identity set — a `--identities` file, an MCP `identities` array — cannot
+    # be read as written, or nil when it can. `parse_json` is tolerant on purpose (a project
+    # row must never fail a project open), so there a known field of the wrong type is simply
+    # dropped: `"set": {"Authorization": "Bearer low"}` lost its overlay, the identity went out
+    # AS CAPTURED with the baseline's own credentials, and the row read back as a BYPASS. An
+    # operator's own input is refused instead, naming the entry and the field.
+    def self.explicit_json_error(raw : String) : String?
+      arr = begin
+        JSON.parse(raw).as_a?
+      rescue JSON::ParseException
+        nil
+      end
+      return "expected a JSON array of identity objects, e.g. [{\"name\":\"anonymous\",\"remove\":[\"Cookie\"]}]" unless arr
+      arr.each_with_index do |e, i|
+        o = e.as_h?
+        return "entry #{i + 1} is not an object" unless o
+        if why = entry_field_error(o)
+          where = o["name"]?.try(&.as_s?).try { |n| "#{n.inspect} (entry #{i + 1})" } || "entry #{i + 1}"
+          return "#{where}: #{why}"
+        end
+      end
+      nil
+    end
+
+    # The first known field of one entry whose type `parse_json` would drop, or nil. A field
+    # given as JSON `null` is absent, as `parse_json` reads it.
+    private def self.entry_field_error(o : Hash(String, JSON::Any)) : String?
+      given = ->(key : String) { o[key]?.try { |v| v.raw.nil? ? nil : v } }
+      return %("name" must be a string) if given.call("name").try(&.as_s?.nil?)
+      return %("baseline" must be true or false) if given.call("baseline").try(&.raw.as?(Bool).nil?)
+      {"remove", "rules", "literal"}.each do |key|
+        next unless v = given.call(key)
+        return %("#{key}" must be a list of strings) unless v.as_a?.try(&.all?(&.as_s?))
+      end
+      if (v = given.call("set")) && !v.as_a?.try(&.all? { |p| set_pair?(p) })
+        return %("set" must be a list of {"name": …, "value": …} objects)
+      end
+      nil
+    end
+
+    private def self.set_pair?(p : JSON::Any) : Bool
+      h = p.as_h?
+      !h.nil? && !h["name"]?.try(&.as_s?).nil? && !h["value"]?.try(&.as_s?).nil?
+    end
+
     # `id` with every `$NAME` in its header VALUES resolved out of THAT identity's own binding
     # table — the step `Env.overlay_slot` performs for the active slot at every other send seam
     # (`SessionSlots#overlay`), which this one has to perform for itself.
