@@ -38,8 +38,13 @@ module Gori::Proxy::Tls
       begin
         LibCrypto.x509_set_version(x, 2) # v3
         LibCrypto.asn1_integer_set(LibCrypto.x509_get_serial(x), random_serial)
-        LibCrypto.x509_gmtime_adj(LibCrypto.x509_getm_not_before(x), 0)
-        LibCrypto.x509_gmtime_adj(LibCrypto.x509_getm_not_after(x), validity)
+        # notBefore is backdated: a cert valid only from the instant gori minted it is "not
+        # yet valid" to any client whose clock runs even a second behind this host's (a VM
+        # after resume, an emulator, a phone on a test network), and the handshake fails as
+        # an untrusted cert. notAfter moves back by the same amount so the span stays exactly
+        # `validity`, keeping a leaf inside the 398-day browser cap.
+        LibCrypto.x509_gmtime_adj(LibCrypto.x509_getm_not_before(x), -CLOCK_SKEW_SECS)
+        LibCrypto.x509_gmtime_adj(LibCrypto.x509_getm_not_after(x), validity - CLOCK_SKEW_SECS)
 
         subject = LibCrypto.x509_get_subject_name(x)
         # Only set CN when it fits OpenSSL's 64-byte cap AND the add succeeds; a

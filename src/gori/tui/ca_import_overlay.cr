@@ -36,6 +36,23 @@ module Gori::Tui
       @fields[:key].value.strip
     end
 
+    # The paths as the filesystem sees them — what the import reads. The completion dropdown
+    # lists `~/…` by expanding it and then inserts the `~/` prefix verbatim, so a picked file
+    # read as-is was "not found"; a shell expands the tilde for `gori ca import --cert`, here
+    # nothing did. Same idiom as ExportOverlay#resolved_path; a relative name resolves
+    # against the cwd.
+    def resolved_cert_path : String
+      resolve(cert_path)
+    end
+
+    def resolved_key_path : String
+      resolve(key_path)
+    end
+
+    private def resolve(p : String) : String
+      p.empty? ? p : Path[p].expand(home: true).to_s
+    end
+
     private def focused : Symbol
       ROWS[@sel]? || :cert
     end

@@ -208,4 +208,27 @@ describe "Gori::Proxy::Tls::CertAuthority under strict verification" do
       strict_handshake(ca, ca.ca_cert_path, "example.test").should start_with("client-error")
     end
   end
+
+  # notBefore was the instant of minting, so a client whose clock ran even a second behind the
+  # proxy host (a resumed VM, an emulator, a phone) saw "not yet valid" on every fresh leaf.
+  describe "validity window" do
+    it "backdates notBefore and keeps the span exactly the configured validity" do
+      ca_cert, ca_key = Gori::Proxy::Tls::CertBuilder.build_root("gori skew")
+      leaf, _ = Gori::Proxy::Tls::CertBuilder.build_leaf("example.test", ca_cert, ca_key)
+      skew = Gori::Proxy::Tls::CLOCK_SKEW_SECS
+      {ca_cert => Gori::Proxy::Tls::CA_VALIDITY_SECS, leaf => Gori::Proxy::Tls::LEAF_VALIDITY_SECS}.each do |cert, validity|
+        now = Time.utc.to_unix
+        nb = LibCrypto.x509_getm_not_before(cert.handle)
+        na = LibCrypto.x509_getm_not_after(cert.handle)
+        # A client an hour behind still sees the cert as valid…
+        t = LibC::TimeT.new(now - 3600)
+        LibCrypto.x509_cmp_time(nb, pointerof(t).as(Void*)).should be < 0
+        # …and the window is shifted back, not widened: notAfter = now + validity - skew.
+        lo = LibC::TimeT.new(now + validity - skew - 120)
+        hi = LibC::TimeT.new(now + validity - skew + 120)
+        LibCrypto.x509_cmp_time(na, pointerof(lo).as(Void*)).should be > 0
+        LibCrypto.x509_cmp_time(na, pointerof(hi).as(Void*)).should be < 0
+      end
+    end
+  end
 end

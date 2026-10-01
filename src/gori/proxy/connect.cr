@@ -76,8 +76,7 @@ module Gori::Proxy
     # SelfPage response is `Connection: close`, and the page has no subresources (its CSS is
     # inlined, the favicon 204s), so a browser following the `/ca.der` link simply opens a
     # fresh connection. The head read carries the same slowloris bound as the main request
-    # loop. Best-effort: a dead peer, a torn-down stream, or a CA file deleted underneath us
-    # (ca_cert_pem reads from disk and raises) just ends the connection.
+    # loop. Best-effort: a dead peer or a torn-down stream just ends the connection.
     def serve_self_page_once(stream : IO, listen : {String, Int32}) : Nil
       head = Codec::Http1.read_head(stream,
         deadline: SocketTuning::HEAD_DEADLINE, timeout_sock: SocketTuning.underlying_socket(stream))
