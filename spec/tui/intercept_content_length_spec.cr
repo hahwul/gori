@@ -127,6 +127,84 @@ describe "InterceptView Content-Length sync toggle" do
     end
   end
 
+  # The reflection is itself an edit. As an undo step of its own, ⌃Z on the restored state
+  # re-applied it and pushed another, so undo was dead after any edit that changed the body
+  # length (#1417). It now folds into the keystroke's step, and every state ⌃Z reaches must
+  # show the Content-Length a forward would send.
+  describe "⌃Z under the sync (#1417)" do
+    held = "POST /u HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\n\r\nabc"
+
+    open_held = ->(ic : Gori::Interceptor) do
+      spawn do
+        ic.hold_request(held.to_slice, method: "POST", target: "/u",
+          host: "127.0.0.1", port: 19501, scheme: "http")
+      end
+      Fiber.yield
+      view = InterceptView.new
+      view.reload(ic)
+      view.toggle_edit
+      view
+    end
+    shown_cl = ->(view : InterceptView) { view.editor_text[/Content-Length: *(\d*)/, 1] }
+    sent_cl = ->(view : InterceptView) { String.new(view.pending_edit.not_nil![1])[/Content-Length: *(\d*)/, 1] }
+
+    it "walks a body edit back one step at a time, the pane agreeing with the wire" do
+      icl_interceptor do |ic|
+        view = open_held.call(ic)
+        pristine = view.editor_text
+        4.times { view.edit_move(1, 0) } # the body line
+        view.edit_end
+        view.edit_insert('X')
+        view.edit_home # end the typing run, so `Y` is a step of its own
+        view.edit_end
+        view.edit_insert('Y')
+        shown_cl.call(view).should eq("5")
+
+        view.edit_undo
+        view.editor_text.should end_with("abcX")
+        shown_cl.call(view).should eq("4")
+        sent_cl.call(view).should eq("4")
+
+        view.edit_undo
+        view.editor_text.should eq(pristine)
+        String.new(view.pending_edit.not_nil![1]).should eq(held)
+      end
+    end
+
+    it "takes back a typing run in one step, as with the sync off" do
+      icl_interceptor do |ic|
+        view = open_held.call(ic)
+        pristine = view.editor_text
+        4.times { view.edit_move(1, 0) }
+        view.edit_end
+        "XYZ".each_char { |ch| view.edit_insert(ch) }
+        shown_cl.call(view).should eq("6")
+
+        view.edit_undo
+        view.editor_text.should eq(pristine)
+      end
+    end
+  end
+
+  # ^L's own reflection used to be an undo step too: ⌃Z after switching the sync back on put
+  # the operator's `5` back in the pane while the forward went on sending the body's length.
+  it "keeps the pane on the sent Content-Length when ⌃Z follows switching the sync on" do
+    icl_interceptor do |ic|
+      view = def_edited.call(ic)
+      view.toggle_content_length_sync.should be_false
+      3.times { view.edit_move(1, 0) }
+      view.edit_end
+      view.edit_backspace
+      view.edit_backspace
+      view.edit_insert('5')
+      view.toggle_content_length_sync.should be_true
+
+      view.edit_undo
+      shown = view.editor_text[/Content-Length: *(\d*)/, 1]
+      shown.should eq(String.new(view.pending_edit.not_nil![1])[/Content-Length: *(\d*)/, 1])
+    end
+  end
+
   it "puts the toggle on the detail card's border so it is discoverable" do
     icl_interceptor do |ic|
       view = def_edited.call(ic)

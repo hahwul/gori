@@ -109,7 +109,10 @@ class Gori::Tui::RepeaterView
     return if wl[idx][0] == new_line
     return unless plain_numeric_header?(wl[idx][0])
 
-    @editor.replace_line(idx, new_line)
+    # Folded into the edit's undo step (`TextArea#replace_line`): as a step of its own it left
+    # a snapshot between a keystroke and its reflection, so every other ⌃Z showed a length
+    # neither body would send (#1417).
+    @editor.replace_line(idx, new_line, fold: true)
   end
 
   # Whether a `Content-Length:` line carries a plain decimal value and nothing else — the
