@@ -103,6 +103,32 @@ module Gori
       raise Error.new("#{what}: #{ex.message.presence || ex.class}")
     end
 
+    # io_guard for an HTTP exchange, which fails in one more way than plain I/O: when
+    # what answered does not speak HTTP (a captive portal, a TLS-terminating middlebox,
+    # a port running something else), stdlib's response parser raises a BARE
+    # `Exception` ("Invalid HTTP response", "Unsupported HTTP version", "Invalid HTTP
+    # status code") and conflicting Content-Length headers raise an `ArgumentError`.
+    # Those are the server's bytes, not a bug of ours, yet they backtraced out of
+    # `gori update`. So is a body that claims gzip/deflate encoding and is not (the
+    # API fetch leaves stdlib's decompression on). Matched on the exact class, so a
+    # subclass still gets its trace.
+    private def self.http_guard(what : String, &)
+      io_guard(what) { yield }
+    rescue ex
+      unless ex.class.in?(Exception, ArgumentError, Compress::Gzip::Error, Compress::Deflate::Error)
+        raise ex
+      end
+      raise Error.new("#{what}: #{ex.message.presence || ex.class}")
+    end
+
+    # A redirect that would carry an https download onto plain http. Refused rather
+    # than followed: on the redirect fallback there may be no checksum at all, and
+    # then the transport is the only thing standing between the operator and a binary
+    # any on-path host could have swapped.
+    def self.https_downgrade?(from : String, to : String) : Bool
+      from.downcase.starts_with?("https://") && !to.downcase.starts_with?("https://")
+    end
+
     # `URI.parse` on a NETWORK-supplied string. Every URL this module parses past the first
     # one comes from the release JSON (`browser_download_url`) or a `Location` header, and
     # `URI.parse` raises on both a malformed authority (`URI::Error`) and an out-of-range
@@ -118,9 +144,19 @@ module Gori
     # A `Location` header resolved against the URL it came from. Absolute targets pass
     # through; a relative one is resolved, which PARSES the server-supplied value and so
     # carries the same raise surface `parse_url` guards — wrapped rather than left bare.
+    #
+    # Also where an https download is kept on https (see https_downgrade?): every
+    # redirect target passes through here, absolute or resolved.
     private def self.resolve_redirect(url : String, location : String) : String
-      return location if location.starts_with?("http://") || location.starts_with?("https://")
-      parse_url(url, "invalid download URL: #{url}").resolve(location).to_s
+      target = if location.starts_with?("http://") || location.starts_with?("https://")
+                 location
+               else
+                 parse_url(url, "invalid download URL: #{url}").resolve(location).to_s
+               end
+      if https_downgrade?(url, target)
+        raise Error.new("refusing to follow a redirect from #{url} to plain http: #{target}")
+      end
+      target
     rescue ex : URI::Error | OverflowError
       raise Error.new("invalid redirect target #{location.inspect} from #{url}: #{ex.message.presence || ex.class}")
     end
@@ -273,14 +309,17 @@ module Gori
 
     # fetch_latest_release_json, but when GitHub refuses (rate limit, outage) it
     # names the release through the redirect endpoint instead. Returns the JSON
-    # and whether it came from that fallback, so the caller can say so.
+    # and, when it came from that fallback, why the API was passed over (nil
+    # otherwise), so the caller can say so.
     #
     # Falls back on any fetch error rather than only 403: resolve_tag_via_redirect
     # validates its own answer, so a genuine "no releases" still surfaces the
-    # original error instead of being papered over.
+    # original error instead of being papered over. Which is also why the reason
+    # travels back: a rejected token or a TLS failure is worth knowing about even
+    # when the update went through anyway.
     def self.fetch_latest_release_json_with_fallback(api_url : String? = nil, *,
-                                                     timeout : Time::Span = HTTP_TIMEOUT) : {String, Bool}
-      {fetch_latest_release_json(api_url, timeout: timeout), false}
+                                                     timeout : Time::Span = HTTP_TIMEOUT) : {String, String?}
+      {fetch_latest_release_json(api_url, timeout: timeout), nil}
     rescue ex
       raise ex unless default_api?(api_url)
       tag = resolve_tag_via_redirect(timeout)
@@ -289,7 +328,7 @@ module Gori
       alias_name = (alias_asset_name(current_os, current_arch) rescue nil)
       {synthesize_release_json(tag,
         digest: sums[asset_name(tag, current_os, current_arch)]?,
-        alias_digest: alias_name.try { |n| sums[n]? }), true}
+        alias_digest: alias_name.try { |n| sums[n]? }), ex.message.presence || ex.class.to_s}
     end
 
     # Maps a non-200 releases-API status onto the error we surface. Split out of
@@ -329,7 +368,7 @@ module Gori
         HttpTransport.client(uri, connect_timeout: timeout, read_timeout: timeout)
       end
       begin
-        response = io_guard("could not reach #{host}") do
+        response = http_guard("could not reach #{host}") do
           client.get(uri.request_target, headers: headers)
         end
         raise api_error(response.status_code, response.body) unless response.status_code == 200
@@ -353,6 +392,13 @@ module Gori
       client = io_guard("could not download #{url}") do
         HttpTransport.client(uri, connect_timeout: HTTP_TIMEOUT, read_timeout: HTTP_TIMEOUT)
       end
+      # The file is wanted byte for byte, as published. Left on, stdlib asks for gzip
+      # and transparently inflates any response that carries Content-Encoding, dropping
+      # Content-Length as it does — so the completeness check below silently stopped
+      # running, and a server that labels a .tar.gz as gzip-encoded handed us the
+      # inner tar: a size/sha256 failure at best, and on the redirect fallback, where
+      # neither may be known, an unpacked tar installed as the release.
+      client.compress = false
       begin
         # Capture result outside the HTTP block (block return is not always the method return).
         result = 0_i64
@@ -360,7 +406,7 @@ module Gori
         # Guards the whole streamed exchange, not just the connect: a reset or a
         # read timeout part-way through tens of MB is the commonest way this
         # fails, and it surfaces from inside the block.
-        io_guard("could not download #{url}") do
+        http_guard("could not download #{url}") do
           client.get(uri.request_target, headers: headers) do |response|
             code = response.status_code
             if {301, 302, 303, 307, 308}.includes?(code)
@@ -485,12 +531,18 @@ module Gori
     end
 
     # Crystal has no Dir.mktmpdir; create a unique dir under Dir.tempdir and clean up.
+    #
+    # The binary is downloaded and verified in here, then installed — often under
+    # sudo — so the directory has to be ours alone between those two steps. Hence a
+    # CSPRNG name and an exclusive 0700 `mkdir`: `File.tempname` draws from the
+    # non-cryptographic PRNG, and `mkdir_p` happily adopts a directory someone else
+    # created first in a shared /tmp, who could then swap the verified file out.
     private def self.with_tempdir(prefix : String, &)
-      dir = File.tempname(prefix, "")
+      dir = File.join(Dir.tempdir, "#{prefix}#{Random::Secure.hex(8)}")
       # A TMPDIR that has been removed, or points somewhere unwritable, is an
       # operator condition and gets a message like every other one.
       io_guard("could not create a temporary directory under #{File.dirname(dir)}") do
-        Dir.mkdir_p(dir)
+        Dir.mkdir(dir, 0o700)
       end
       begin
         yield dir
@@ -740,11 +792,12 @@ module Gori
                            release_json : String? = nil,
                            api_url : String? = nil,
                            force_progress : Bool = false) : Nil
-      json, via_redirect = if provided = release_json
-                             {provided, false}
-                           else
-                             fetch_latest_release_json_with_fallback(api_url)
-                           end
+      json, fallback_reason = if provided = release_json
+                                {provided, nil.as(String?)}
+                              else
+                                fetch_latest_release_json_with_fallback(api_url)
+                              end
+      via_redirect = !fallback_reason.nil?
       release = parse_release(json)
       ver = release.version
       local = normalize_version(VERSION)
@@ -781,8 +834,11 @@ module Gori
         )
       end
 
-      if via_redirect
-        io.puts "Note: the GitHub release API was unavailable (rate limit or outage);"
+      if fallback_reason
+        # The reason, not a guess at it: this used to say "rate limit or outage" for
+        # every failure, which hid a rejected token or a TLS problem behind an update
+        # that went through anyway, and left the operator nothing to act on.
+        io.puts "Note: the GitHub release API was unavailable: #{fallback_reason}"
         io.puts "      resolved #{display_version(release.tag_name)} from #{RELEASES_LATEST_URL} instead."
       end
 

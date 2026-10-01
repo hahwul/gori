@@ -313,9 +313,8 @@ module Gori::Tui
       @update_started = true
       return unless Settings.update_check_enabled?
 
-      now = Time.utc.to_unix
       cached = Settings.update_latest_seen
-      if !cached.empty? && (now - Settings.update_checked_at) < UPDATE_CHECK_TTL
+      if !cached.empty? && Update.check_cache_fresh?(Settings.update_checked_at, Time.utc.to_unix, UPDATE_CHECK_TTL)
         @remote_latest = cached
         @remote_ready = true
         return

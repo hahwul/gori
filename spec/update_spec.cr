@@ -1,5 +1,6 @@
 require "./spec_helper"
 require "file_utils"
+require "compress/gzip"
 require "./support/mock_release_server"
 
 # Sets env vars for the block and restores them exactly afterwards — a nil value
@@ -45,6 +46,46 @@ private def dead_port : Int32
   port = server.local_address.port
   server.close
   port
+end
+
+# A listener that reads the request and answers it with a non-HTTP banner. It reads
+# first so the client's write never meets a closed socket (EPIPE is an IO::Error,
+# which is not the path under test).
+private def with_non_http_server(&)
+  server = TCPServer.new("127.0.0.1", 0)
+  spawn do
+    while client = server.accept?
+      while line = client.gets
+        break if line.strip.empty?
+      end
+      client.print "SSH-2.0-OpenSSH_9.9\r\n"
+      client.close
+    end
+  end
+  begin
+    yield server.local_address.port
+  ensure
+    server.close
+  end
+end
+
+# Serves `body` with `Content-Encoding: gzip` and the length of those encoded bytes,
+# the way a static server labels a .tar.gz (or a CDN that compressed the file).
+private def with_gzip_labelled_server(body : Bytes, &)
+  server = HTTP::Server.new do |context|
+    context.response.content_type = "application/octet-stream"
+    context.response.headers["Content-Encoding"] = "gzip"
+    context.response.content_length = body.size
+    context.response.write(body)
+  end
+  port = server.bind_unused_port("127.0.0.1").port
+  spawn { server.listen }
+  sleep 10.milliseconds
+  begin
+    yield "http://127.0.0.1:#{port}/download/gori-v99.0.0-osx-arm64.tar.gz"
+  ensure
+    server.close
+  end
 end
 
 private def mode_enforced?(dir : String) : Bool
@@ -216,6 +257,27 @@ describe Gori::Update do
       Gori::Update.version_cmp("0.1.0", "0.2.0").should eq(-1)
       Gori::Update.version_cmp("0.10.0", "0.9.0").should eq(1)
       Gori::Update.version_cmp("1.0.0", "0.9.9").should eq(1)
+    end
+  end
+
+  describe ".check_cache_fresh?" do
+    it "is fresh only inside the window, never for a stamp from the future" do
+      Gori::Update.check_cache_fresh?(1_000_i64, 1_000_i64, 86_400).should be_true
+      Gori::Update.check_cache_fresh?(1_000_i64, 87_399_i64, 86_400).should be_true
+      Gori::Update.check_cache_fresh?(1_000_i64, 87_400_i64, 86_400).should be_false
+      # A clock that ran ahead stamped this; trusting it would pin the cache.
+      Gori::Update.check_cache_fresh?(10_000_000_i64, 1_000_i64, 86_400).should be_false
+    end
+  end
+
+  describe ".https_downgrade?" do
+    it "flags only an https download redirected to something that is not https" do
+      Gori::Update.https_downgrade?("https://github.com/a", "http://cdn.example/b").should be_true
+      Gori::Update.https_downgrade?("HTTPS://github.com/a", "HTTP://cdn.example/b").should be_true
+      Gori::Update.https_downgrade?("https://github.com/a", "https://cdn.example/b").should be_false
+      Gori::Update.https_downgrade?("https://github.com/a", "HTTPS://cdn.example/b").should be_false
+      # A plain-http mirror (GORI_UPDATE_API_URL, the mock server) was never https.
+      Gori::Update.https_downgrade?("http://127.0.0.1/a", "http://127.0.0.1/b").should be_false
     end
   end
 
@@ -695,6 +757,26 @@ describe Gori::Update do
         end
       ensure
         FileUtils.rm_rf(root) if File.exists?(root)
+      end
+    end
+
+    # Implicit decompression inflated a gzip-labelled response and dropped its
+    # Content-Length, so the completeness check never ran and a .tar.gz came down
+    # as the inner tar — failing its published sha256, or with none to check,
+    # installed as is.
+    it "keeps a gzip-labelled asset byte for byte instead of inflating it" do
+      gz = IO::Memory.new
+      Compress::Gzip::Writer.open(gz, &.print("tar bytes " * 4096))
+      published = gz.to_slice.dup
+      with_gzip_labelled_server(published) do |url|
+        dest = File.tempname("gori-dl-")
+        begin
+          got = Gori::Update.download_to(url, dest)
+          got.should eq(published.size)
+          File.open(dest, &.getb_to_end).should eq(published)
+        ensure
+          File.delete?(dest)
+        end
       end
     end
 
@@ -1528,10 +1610,10 @@ describe Gori::Update do
       end
     end
 
-    it "passes an API success straight through, with no fallback flag" do
+    it "passes an API success straight through, with no fallback reason" do
       with_mock_release_server do |server|
-        json, via_redirect = Gori::Update.fetch_latest_release_json_with_fallback(server.api_url)
-        via_redirect.should be_false
+        json, fallback_reason = Gori::Update.fetch_latest_release_json_with_fallback(server.api_url)
+        fallback_reason.should be_nil
         Gori::Update.parse_release(json).tag_name.should eq("v99.0.0")
       end
     end
@@ -1589,6 +1671,32 @@ describe Gori::Update do
         end
       ensure
         File.delete?(dest)
+      end
+    end
+
+    # stdlib's response parser raises a BARE Exception for a status line it cannot
+    # read — what a captive portal, a middlebox or a non-HTTP port answers with.
+    it "wraps a peer that does not speak HTTP, on the API fetch and on a download" do
+      with_non_http_server do |port|
+        expect_raises(Gori::Error, /could not reach 127\.0\.0\.1: Invalid HTTP response/) do
+          Gori::Update.fetch_latest_release_json("http://127.0.0.1:#{port}/repos/hahwul/gori/releases/latest")
+        end
+        dest = File.tempname("gori-dl-")
+        begin
+          expect_raises(Gori::Error, /could not download .*Invalid HTTP response/) do
+            Gori::Update.download_to("http://127.0.0.1:#{port}/download/gori", dest)
+          end
+        ensure
+          File.delete?(dest)
+        end
+      end
+    end
+
+    it "wraps a release-API body that claims gzip and is not" do
+      with_gzip_labelled_server("{\"tag_name\":\"v99.0.0\"}".to_slice) do |url|
+        expect_raises(Gori::Error, /could not reach 127\.0\.0\.1/) do
+          Gori::Update.fetch_latest_release_json(url)
+        end
       end
     end
 
