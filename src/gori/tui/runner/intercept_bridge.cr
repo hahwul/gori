@@ -212,10 +212,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     @intercept_agent_seen = true if viewed.each_value.any? { |v| v > 0 } # an agent polled the queue
     return false unless @intercept_agent_seen                            # no agent ever attached → P4: hold indefinitely
     now_ms = Time.utc.to_unix_ms
-    # The operator's last tick on the tab, carried onto the wall clock the per-item times use as
-    # "that long before now" — a monotonic age, so a clock step moves it with `now_ms`.
-    at = @intercept_operator_watched_at
-    operator_ms = at ? now_ms - (Time.instant - at).total_milliseconds.to_i64 : 0_i64
+    operator_ms = intercept_operator_watched_ms(now_ms)
     reaped = false
     pending.each do |it|
       next if it.id == editing # the operator is mid-edit on this one
@@ -230,6 +227,14 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       reaped = true
     end
     reaped
+  end
+
+  # The operator's last tick on the Intercept tab, carried onto the wall clock the per-item
+  # times use as "that long before `now_ms`" — a monotonic age, so a clock step moves it with
+  # `now_ms` instead of leaving it in the future. 0 when they have not been on the tab.
+  private def intercept_operator_watched_ms(now_ms : Int64) : Int64
+    return 0_i64 unless at = @intercept_operator_watched_at
+    now_ms - (Time.instant - at).total_milliseconds.to_i64
   end
 
   # Whether a hold has gone a whole `max_hold_ms` with nobody watching it: the window runs from
