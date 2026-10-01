@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Rewriter: the rule form scrolls on a short terminal, so its Save row is drawn at 80×24, and a click on the form's preview line or border no longer saves the rule (#1420)
+- Repeater: on a terminal too short for the REQUEST and RESPONSE panes, focus moves to TARGET and keys no longer edit a request that is off screen, and the space under TARGET says the panes need a taller window (#1421)
 - Authorize: each row keeps its verdict on the card in a narrow terminal, and a wide one shows the whole Δ vs baseline (#1433)
 - TUI: the Fuzzer's response detail has one blank line between head and body, a shrunk Repeater no longer leaves its caret on the borders, and the Env empty state names the palette for Change prefix (#1433)
 - Intercept: a held response names the method of the request as you edited it, turning catch on no longer warns about an HTTPS→HTTP/1.1 downgrade gori stopped doing, and `gori run intercept direction` and MCP `intercept_set_direction` accept the `requestonly`/`responseonly` that `intercept list` reports (#1433)
