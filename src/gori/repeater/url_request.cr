@@ -89,7 +89,7 @@ module Gori::Repeater
     # `body` as FINAL bytes — expanding it, or not, is the caller's call, because a byte-exact
     # body (MCP's `body_base64`, `gori run send --body-file`) must not have its length changed
     # under it. `expand: false` is `gori run send --verbatim`: a `$ENV.KEY` the operator typed in
-    # a header value is the payload. MCP has always expanded here and still does.
+    # a header value is the payload, and MCP's `send_request{verbatim:true}` passes it the same way.
     def self.structured(target : Target, method : String?, headers : Array({String, String}),
                         body : Bytes?, *, expand : Bool = true) : Built
       m = (method || "GET").upcase

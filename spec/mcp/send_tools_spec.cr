@@ -860,10 +860,43 @@ describe Gori::MCP::Server do
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_websocket","arguments":{"repeater_id":#{rid},"messages":["ping"],"idle_ms":100,"allow_unscoped":true}}})
         resp = mcp_drive(store, call, verify_upstream: false)[0]
         resp["result"]["isError"].as_bool.should be_true
+        # The origin answered, so the handshake was delivered — not a retryable network fault.
+        payload = mcp_tool_payload(resp)
+        payload["delivered"].as_bool.should be_true
+        payload["retryable"].as_bool.should be_false
 
         row = store.get_repeater_full(rid).not_nil!
         String.new(row.response_head.not_nil!).should contain("403")
         row.response_error.not_nil!.should contain("did not upgrade")
+      end
+    end
+
+    it "sends an HTTP-only WebSocket session through send_request, not send_websocket" do
+      with_store do |store|
+        handshake = "GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
+        id = store.insert_repeater("http://127.0.0.1:1", handshake.to_slice, false, false, nil, 0, ws_http_only: true)
+        t = tools_for(store)
+        r = t.call("send_websocket", JSON.parse(%({"repeater_id":#{id},"allow_unscoped":true})))
+        r.is_error.should be_true
+        r.text.should contain("send_request")
+        # send_request no longer refuses it as "use send_websocket": it reaches the dial.
+        r = t.call("send_request", JSON.parse(%({"repeater_id":#{id},"allow_unscoped":true,"record_history":false})))
+        r.text.should_not contain("use send_websocket")
+      end
+    end
+
+    it "writes a repeater_id send's answer back onto the session, as the CLI and the TUI do" do
+      with_store do |store|
+        port = start_mcp_http_origin("fresh")
+        request = "GET /x HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
+        rid = store.insert_repeater("http://127.0.0.1:#{port}", request.to_slice, false, true, nil, 0)
+        store.update_repeater_response(rid, "HTTP/1.1 500 Old\r\n\r\n".to_slice, Bytes.empty, nil, 1_i64, request_sha256: nil)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"repeater_id":#{rid},"allow_unscoped":true}}})
+        mcp_drive(store, call)[0]["result"]["isError"].as_bool.should be_false
+        row = store.get_repeater_full(rid).not_nil!
+        String.new(row.response_head.not_nil!).should contain("200 OK")
+        String.new(row.response_body.not_nil!).should eq("fresh")
+        row.response_request_sha256.should eq(Gori::Evidence.request_digest(request.to_slice))
       end
     end
 

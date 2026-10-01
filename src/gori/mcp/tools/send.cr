@@ -71,6 +71,9 @@ module Gori
         # builder must never pick it, or MCP's strict "no scope ⇒ refuse" default would
         # silently become whichever policy got hard-coded there (DESIGN.md §7).
         ob = outbound(bool_arg(h, "allow_unscoped", false))
+        # The digest a written-back response is stamped with: the row's request as it is sent,
+        # read BEFORE the send — a TUI edit landing during it must not be credited with this answer.
+        sent_row_digest = sent_repeater_digest(h)
         built_plan = build_send_plan(h, ob)
         return built_plan if built_plan.is_a?(Result)
         plan, request_line_rewritten = built_plan
@@ -128,6 +131,7 @@ module Gori
         # sentence with the three `gori run` surfaces (`CLI::Run.unbound_overlay_note`).
         unbound_overlay = CLI::Run.unbound_overlay_note(Env.take_unbound_overlay)
         flow_response_saved = recorded_flow_id ? record_outbound_response(recorded_flow_id, result) : false
+        write_back_repeater_response(h, result, applied_rules, sent_row_digest)
         # Audit trail on STDERR — never STDOUT (reserved for JSON-RPC).
         Log.info { "send_request #{built.scheme}://#{built.host}:#{built.port} http2=#{http2} scope=#{sc.decision} flow_id=#{recorded_flow_id || "none"} -> #{result.ok? ? "ok" : result.error}" }
 
@@ -751,6 +755,30 @@ module Gori
         false
       end
 
+      # A `repeater_id` send's answer, written back onto the session it ran — what the TUI's
+      # send and `gori run repeater send` both do, and what the tab's response pane and the next
+      # `repeater send --diff` read as "the last response". Without it an MCP send left the
+      # session showing whatever answered before, beside a History flow that said otherwise.
+      #
+      # The CLI's rules, for its reasons: only on `ok?` (a failed resend must not wipe a good
+      # stored response), digested over the ROW's request as read before the send (the drift
+      # check compares the row, not the wire, so `$NAME` expansion and the slot overlay do not
+      # count), and not when this send's bytes differ from the row's by more than that —
+      # `apply_rules` rewrote them.
+      private def write_back_repeater_response(h, result : Repeater::Result, applied_rules : Bool,
+                                               digest : String?) : Nil
+        return unless result.ok? && !applied_rules && digest
+        return unless id = int(h, "repeater_id")
+        return if store.update_repeater_response(id, result.head, result.body, result.error,
+                    result.duration_us, request_sha256: digest)
+        Log.warn { "send_request: repeater #{id}'s response was not written back (store busy or unwritable)" }
+      end
+
+      private def sent_repeater_digest(h) : String?
+        return nil unless present?(h, "repeater_id")
+        (id = int(h, "repeater_id")) && store.get_repeater(id).try { |rec| Evidence.request_digest(rec.request) }
+      end
+
       private def persist_send_repeater(h, save : Bool, built : RequestBuilder::Built,
                                         http2 : Bool, result : Repeater::Result,
                                         issue_id : Int64?, recorded_flow_id : Int64?,
@@ -1050,6 +1078,11 @@ module Gori
                             "RFC 6455 `Upgrade:` request nor an RFC 8441 extended CONNECT)",
             is_error: true)
         end
+        if repeater.ws_http_only?
+          return err("repeater #{repeater_id} is stored as HTTP-only (ws_http_only): its handshake is sent " \
+                     "as an ordinary request — use send_request{repeater_id}, or update_repeater " \
+                     "{ws_http_only:false} for the framed exchange", "INVALID_ARGUMENT", field: "repeater_id")
+        end
 
         issue_id = int(h, "issue_id")
         return Result.new(id_error(h, "issue_id"), is_error: true) if issue_id.nil? && present?(h, "issue_id")
@@ -1193,11 +1226,11 @@ module Gori
               kind = network_error_kind(err)
               j.field "error", Env.mask_secrets(err)
               j.field "error_kind", kind
-              # A completed upgrade IS delivery on this surface: the origin answered the
-              # handshake, so it has that request and every frame gori wrote after it. The
-              # WS engine carries no `delivered?` of its own and `upgraded?` is the same
-              # fact — any response byte at all.
-              emit_send_error_code(j, kind, result.upgraded?)
+              # Any answer to the handshake IS delivery on this surface: the origin has the
+              # request. `answered?`, not `upgraded?` — a handshake refused with 200/403/426 was
+              # delivered too, and reporting it `delivered:false, retryable:true` told the agent
+              # to retry a stable refusal. It is the predicate the persist above already uses.
+              emit_send_error_code(j, kind, result.answered?)
             end
             unless result.handshake_head.empty?
               response = begin
@@ -1423,7 +1456,11 @@ module Gori
           raise Gori::Error.new(id_error(h, "repeater_id")) unless id
           rec = store.get_repeater(id)
           raise Gori::Error.new("no repeater with id #{id}") unless rec
-          if Repeater::WsEngine.replayable?(String.new(rec.request))
+          # A session stored `ws_http_only` (the TUI's ^V, `repeater create --ws-http-only`) is
+          # one whose handshake goes out as an ordinary request with its own answer read as the
+          # response — how the TUI and `gori run repeater send` both send it. Refusing it here
+          # left the setting this surface stores with no tool that honours it.
+          if !rec.ws_http_only? && Repeater::WsEngine.replayable?(String.new(rec.request))
             raise Gori::Error.new("repeater #{id} is a WebSocket handshake — use send_websocket")
           end
           # Respect the repeater's auto-Content-Length setting (the TUI Repeater does):
@@ -1667,7 +1704,7 @@ module Gori
           s.field "body_base64", strprop("request body as base64, the byte-exact form, on the url path and the h2_fields path alike. Use it for a non-UTF-8 body (binary, protobuf/gRPC, gzip, multipart, overlong UTF-8) or an octet a JSON string cannot carry (0x00, 0x80-0xFF); 'body' is sent as UTF-8. Wins over 'body'; no project env expansion, but a session binding or $GEN token still resolves (Content-Length follows) unless verbatim:true")
           s.field "raw", strprop("verbatim raw HTTP/1.1 request; overrides method/headers/body (scheme/host/port still come from url)")
           s.field "raw_base64", strprop("the whole raw HTTP/1.1 request as base64: the byte-exact form, and the only way to send a latin-1/invalid-UTF-8 header or a binary body ('é' in a JSON string goes out as 2 bytes). Implies verbatim")
-          s.field "verbatim", boolprop("send the bytes EXACTLY as stored/given (default false): no token expansion ($ENV.KEY, $BIND.NAME, $GEN.UUID, bare $KEY/$NAME stay literal, and a $$ escape is not consumed either), no bare-LF→CRLF promotion, no Content-Length resync, no h2 field-name lowercasing. The active session slot's header overlay still applies. Applies to 'raw' and to a repeater_id replay (like `gori run repeater send --verbatim`), where it also sends a stored § literally instead of refusing it; a flow_id replay is byte-exact anyway. For desync/smuggling tests where a bare LF IS the payload, or a literal token in the stored request is")
+          s.field "verbatim", boolprop("send the bytes EXACTLY as stored/given (default false): no token expansion ($ENV.KEY, $BIND.NAME, $GEN.UUID, bare $KEY/$NAME stay literal, and a $$ escape is not consumed either), no bare-LF→CRLF promotion, no Content-Length resync, no h2 field-name lowercasing. The active session slot's header overlay still applies. Applies to 'raw', to a structured url send's headers and body (the URL itself still expands), and to a repeater_id replay (like `gori run repeater send --verbatim`), where it also sends a stored § literally instead of refusing it; a flow_id replay is byte-exact anyway. For desync/smuggling tests where a bare LF IS the payload, or a literal token in the stored request is")
           s.field "reframe_grpc", boolprop("HTTP/2 only: recompute the gRPC 5-byte length prefix over the body being sent (default FALSE). By default an edited body keeps its captured/authored prefix: a byte-exact replay, and the test when a wrong prefix is the point. Set TRUE after editing a unary message the origin should accept. Single messages only; client-streaming and grpc-web-text bodies are left alone. Reflected in effective_request")
           s.field "h2_fields", h2fieldsprop
           s.field "http2", boolprop("use real HTTP/2; defaults to the flow's version when flow_id is set)")
