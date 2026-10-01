@@ -179,6 +179,47 @@ describe Gori::Tui::RewriterRuleOverlay do
     box = ov.overlay_box(area).not_nil!
     ov.row_at(box, box.x + 3, box.y + 2).should eq(0) # name row
   end
+
+  # #1420: the form is ROW_COUNT rows + the preview band, 18 tall, and the shell's body on an
+  # 80×24 terminal leaves `rule_form_box` 15 — the options and Save rows were never drawn, the
+  # `▎` marker walked off the card, and ↵ on Save had nothing on screen to explain it.
+  it "scrolls the rows so Save is drawn on an 80×24 terminal" do
+    area = Layout.compute(80, 24, true).body
+    ov = RewriterRuleOverlay.new(op: "short_circuit", pattern: "/x") # no stub yet: refused
+    h = OverlayHarness.new(ov, area: area)
+    box = ov.overlay_box(area).not_nil!
+    box.h.should be < RewriterRuleOverlay::ROW_COUNT + 5 # the card really is clamped
+
+    down(ov, RewriterRuleOverlay::ROW_COUNT)
+    ov.on_save_row?.should be_true
+    mb = h.render
+    save_y = (box.y...box.bottom).find { |y| mb.row(y).includes?("write a stub response") }
+    save_y.should_not be_nil
+    save_y = save_y.not_nil!
+    mb.row(save_y).includes?('▎').should be_true # the marker is on the row it names
+    ov.row_at(box, box.x + 3, save_y).should eq(RewriterRuleOverlay::ROW_SAVE)
+
+    # …and back at the top the name row is drawn again.
+    RewriterRuleOverlay::ROW_COUNT.times { ov.handle_key(skey(Termisu::Input::Key::Up)) }
+    mb = h.render
+    mb.row(box.y + 2).includes?("name:").should be_true
+    ov.row_at(box, box.x + 3, box.y + 2).should eq(RewriterRuleOverlay::ROW_NAME)
+  end
+
+  # The old `row_at` was `my - first` with no band check, so on a clamped card the preview
+  # line and the bottom border read as rows — `options:` and Save. A click on chrome saved.
+  it "does not commit from a click on the preview line or the border of a clamped card" do
+    area = Layout.compute(80, 24, true).body
+    ov = RewriterRuleOverlay.new(pattern: "a", replacement: "b") # valid: a commit would save
+    h = OverlayHarness.new(ov, area: area)
+    h.render
+    box = ov.overlay_box(area).not_nil!
+    ov.row_at(box, box.x + 3, box.bottom - 2).should be_nil # preview band
+    ov.row_at(box, box.x + 3, box.bottom - 1).should be_nil # bottom border
+    h.click(box.x + 3, box.bottom - 2).should eq(:open)
+    h.click(box.x + 3, box.bottom - 1).should eq(:open)
+    h.commits.should eq(0)
+  end
 end
 
 # Post-migration surface. This form carries TWO injected couplings, not one: on_commit
