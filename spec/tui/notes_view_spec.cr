@@ -277,6 +277,130 @@ describe Gori::Tui::NotesView do
     end
   end
 
+  # #1415: a save sent EVERY loaded note into the merge, so an untouched note counted as an
+  # edit that wins — and `reload` is skipped while dirty, so that copy is stale exactly when a
+  # peer writes during an edit. Only the notes this session changed may be written.
+  describe "a save writes only the notes this session changed (#1415)" do
+    it "keeps a peer's edit to a note this session never touched" do
+      with_store do |store|
+        ids = %w(first second third).map { |t| Gori::Notes.create(store, t).not_nil! }
+        view = NotesView.new
+        view.reload(store)
+        view.switch_note_by_id(ids[0]).should be_true
+        view.enter_insert!
+        type(view, "YY") # dirty and unsaved, so the next reload is skipped
+
+        Gori::Notes.update(store, ids[2], "third EDITED AGAIN").should eq(Gori::Notes::Write::Committed)
+        view.save(store).should be_true
+
+        saved = Gori::Notes.load(store).notes.to_h { |n| {n.id, n.text} }
+        saved[ids[0]].should eq("YYfirst")
+        saved[ids[1]].should eq("second")
+        saved[ids[2]].should eq("third EDITED AGAIN")
+      end
+    end
+
+    it "keeps it across a second save made before any reload" do
+      with_store do |store|
+        ids = %w(first second).map { |t| Gori::Notes.create(store, t).not_nil! }
+        view = NotesView.new
+        view.reload(store)
+        view.switch_note_by_id(ids[0])
+        view.enter_insert!
+        type(view, "a")
+        Gori::Notes.update(store, ids[1], "peer")
+        view.save(store).should be_true
+        # The buffer for ids[1] still holds "second"; it must not become "ours" now.
+        type(view, "b")
+        view.save(store).should be_true
+
+        saved = Gori::Notes.load(store).notes.to_h { |n| {n.id, n.text} }
+        saved[ids[0]].should eq("abfirst")
+        saved[ids[1]].should eq("peer")
+      end
+    end
+
+    it "does not resurrect a note a peer deleted while this session edited another" do
+      with_store do |store|
+        ids = %w(keep gone).map { |t| Gori::Notes.create(store, t).not_nil! }
+        view = NotesView.new
+        view.reload(store)
+        view.switch_note_by_id(ids[0])
+        view.enter_insert!
+        type(view, "x")
+        Gori::Notes.delete(store, ids[1]).should eq(Gori::Notes::Write::Committed)
+        view.save(store).should be_true
+
+        Gori::Notes.load(store).notes.map { |n| {n.id, n.text} }.should eq([{ids[0], "xkeep"}])
+      end
+    end
+
+    # The widest exposure: the Runner reloads notes only while the Notes tab is up, so the
+    # retest Diff's `n` (NotesController#create_note) saves over a list that is stale but CLEAN.
+    it "keeps a peer's edit when another tab adds a note over a stale, clean list" do
+      with_store do |store|
+        ids = %w(first second).map { |t| Gori::Notes.create(store, t).not_nil! }
+        view = NotesView.new
+        view.reload(store)
+        view.dirty?.should be_false
+        Gori::Notes.update(store, ids[1], "peer") # no reload follows: the tab is not up
+
+        view.new_note
+        view.set_current_text("record")
+        view.save(store).should be_true
+
+        saved = Gori::Notes.load(store).notes.to_h { |n| {n.id, n.text} }
+        saved[ids[0]].should eq("first")
+        saved[ids[1]].should eq("peer")
+        saved.values.should contain("record")
+      end
+    end
+
+    it "does not empty note 1 through the ctor's placeholder when no merge ever ran" do
+      with_store do |store|
+        id = Gori::Notes.create(store, "real").not_nil!
+        view = NotesView.new # the startup reload failed: still the ctor's own note 1
+        view.current_note_id.should eq(id)
+        view.new_note
+        view.set_current_text("record")
+        view.save(store).should be_true
+
+        Gori::Notes.load(store).notes.map { |n| {n.id, n.text} }.first.should eq({id, "real"})
+      end
+    end
+
+    it "still lets this session's edit win on the note it did change" do
+      with_store do |store|
+        id = Gori::Notes.create(store, "base").not_nil!
+        view = NotesView.new
+        view.reload(store)
+        view.enter_insert!
+        type(view, "mine ")
+        Gori::Notes.update(store, id, "peer")
+        view.save(store).should be_true
+
+        Gori::Notes.load(store).notes.map(&.text).should eq(["mine base"])
+      end
+    end
+
+    it "persists a CRLF-stored note it never touched byte-for-byte" do
+      with_store do |store|
+        crlf = Gori::Notes.create(store, "a\r\nb").not_nil!
+        other = Gori::Notes.create(store, "other").not_nil!
+        view = NotesView.new
+        view.reload(store)
+        view.switch_note_by_id(other)
+        view.enter_insert!
+        type(view, "z")
+        view.save(store).should be_true
+
+        saved = Gori::Notes.load(store).notes.to_h { |n| {n.id, n.text} }
+        saved[crlf].should eq("a\r\nb")
+        saved[other].should eq("zother")
+      end
+    end
+  end
+
   it "Notes.merge keeps peer notes, applies my edits, drops my deletions, appends new" do
     persisted = Gori::Notes::Doc.new(0, [
       Gori::Notes::NoteEntry.new(1_i64, "peer-only"),

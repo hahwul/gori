@@ -265,7 +265,9 @@ module Gori
 
     # Reconcile THIS session's notes with the currently-persisted set before a save,
     # so two TUI sessions open on the same project don't clobber each other's notes.
-    # `persisted` is re-read at save time; `mine` is this session's notes (id → text);
+    # `persisted` is re-read at save time; `mine` is the notes this session CHANGED (id → text),
+    # never its whole loaded set — every entry is an edit that wins, so passing an untouched,
+    # stale copy reverts a peer's edit to that note (#1415; see `Tui::NotesView#save`);
     # `deleted` is the ids this session closed. Merge rules (per-note last-writer-wins,
     # keyed by the stable id):
     #   - a persisted note THIS session also has  → this session's text (an edit)

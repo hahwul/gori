@@ -5,6 +5,7 @@
 - TUI: key chips and empty-state hints follow rebound keys, the Repeater keeps ↑ in INS at the first line, Global shortcuts work from sub-tab strips without typing through, and capture-off is marked in yellow (#1374, #1375)
 - QL: `id:N`, `flow:N` and `flow_id:N` are refused with a hint to use the surface's id selector instead of matching zero rows, and queries with uncompilable terms report which term failed and why. `path:` reads the path of a plaintext proxy flow too, so `path~^/admin` finds it and `path:http` no longer matches every such flow (#1369, #1410, Refs #1379)
 - Store: issue notes and retest assertions read byte-for-byte, including embedded NULs, and issue JSON escapes those bytes instead of truncating them (#1412)
+- Notes: a TUI save writes only the notes you changed, so another session's edit or delete of a different note is no longer reverted, whether you were typing in Notes or adding a note from another tab (#1415)
 - CLI: `notes` shows each note's stable id beside its list position, and `links` adds `--note-position` while retaining `--note` as an id for existing scripts (#1412)
 
 - Sequencer: an all-digit token set is classified as 'digits' rather than 'lower-hex' (#1390)
