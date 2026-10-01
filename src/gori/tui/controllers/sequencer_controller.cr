@@ -139,6 +139,10 @@ module Gori::Tui
       # made `c` inert there.
       return false if c == 'E'
       return false if c == 'c' && !ev.ctrl? && !ev.alt? && v.focus != :detail
+      # PgUp/PgDn/Home/End over SAMPLES go to the Runner's page/jump route (`body_scroll`
+      # below), declined by name for the same reason. ANALYSIS and DETAIL keep them: there
+      # they are the read pane's line-edge and page motions, ⇧ extending (#1419).
+      return false if v.focus == :samples && page_nav_key?(ev.key)
       ev.key.escape? ? handle_escape(v) : handle_pane_key(ev, v)
       true
     end
@@ -151,6 +155,10 @@ module Gori::Tui
       else               return false
       end
       true
+    end
+
+    private def page_nav_key?(key : Termisu::Input::Key) : Bool
+      key.page_up? || key.page_down? || key.home? || key.end?
     end
 
     private def navigable_pane?(pane : Symbol) : Bool
@@ -468,6 +476,22 @@ module Gori::Tui
       pane = v.pane_at(body_rect_below_filter(rect), mx, my)
       wheel_pane(v, pane || v.focus, step)
       true
+    end
+
+    # PgUp/PgDn/Home/End over SAMPLES. `samples_move` clamps the Runner's ±JUMP_ROWS and
+    # re-asks the tail-follow, so End during a collection re-arms it and Home disarms it.
+    # Any other pane is not this route's: CONFIG has no list, ANALYSIS/DETAIL take the keys
+    # in `handle_body_key`.
+    def body_scroll(delta : Int32) : Bool
+      v = current_view
+      return false unless v && v.focus == :samples
+      v.samples_move(delta)
+      true
+    end
+
+    def page_rows : Int32?
+      v = current_view
+      v.samples_page_rows if v && v.focus == :samples
     end
 
     private def wheel_pane(v : SequencerView, pane : Symbol, step : Int32) : Nil

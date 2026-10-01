@@ -8,7 +8,7 @@
 - Notes: a TUI save writes only the notes you changed, so another session's edit or delete of a different note is no longer reverted, whether you were typing in Notes or adding a note from another tab (#1415)
 - CLI: `notes` shows each note's stable id beside its list position, and `links` adds `--note-position` while retaining `--note` as an id for existing scripts (#1412)
 
-- Sequencer: an all-digit token set is classified as 'digits' rather than 'lower-hex', and the live collection cursor follows samples all the way to the end instead of stopping short (#1390, #1429)
+- Sequencer: an all-digit token set is classified as 'digits' rather than 'lower-hex', the live collection cursor follows samples all the way to the end instead of stopping short, and `Home`/`End`/`PgUp`/`PgDn` jump and page the SAMPLES list (#1390, #1429, #1419)
 
 - CLI: `gori run send` takes curl's `-d` as the body (a `POST` with a form `Content-Type` unless `-X` or `-H` say otherwise) and `-b` as a cookie — `-b` used to be the body, so a `-b` value with no `=` is now refused and pointed at `-d`. `repeater <flow-id>` gains `-X`, `-d`, `-b`, `--verbatim` and `--record-history`, both one-shot send forms can save a Repeater session with `--save-as-repeater`, `repeater send` takes per-send `-H`/`-b`, all three take `--apply-rules`, and their `--format json` adds MCP's `error_kind`, `error_code`, `retryable`, `delivered` and the parsed response `headers` (#1383, #1384)
 - CLI: `--format json` is one JSON document on every command (`history` and `capture` printed JSON Lines for it — use `--format jsonl` for that), `fuzz`'s array is in index order, `--json` works wherever `--format json` does, and `gori run import` reads `-` (stdin) for every source (#1386)
