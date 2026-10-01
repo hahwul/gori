@@ -3235,9 +3235,8 @@ module Gori::Tui
       # reconcile — orphaning @minimize_job (phantom spinner + minimize blocked until restart).
       # Lock it until the terminal Report lands and clears @minimize_job.
       return true if (mj = @minimize_job) && mj[0].same?(v)
-      # request_hex? too: a hex-edit session isn't necessarily dirty, and request_text
-      # reads CRLF in hex mode vs the LF-persisted row, so the reconcile compare would
-      # wrongly see a change and restore() — wiping the hex buffer. Lock it.
+      # request_hex? too: a hex-edit session isn't necessarily dirty, and the peer apply
+      # drops the open hex buffer (and with it the operator's place in it). Lock it.
       # `grpc_fields?` for the same reason as `request_hex?`: the FIELDS form is an editor
       # over the payload that the persisted request text cannot round-trip, so a reconcile
       # that restore()d under it would wipe an applied edit and put the caret nowhere.
