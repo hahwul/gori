@@ -1851,8 +1851,10 @@ module Gori::Proxy
         sent_resp_head, body, advisory = apply_body_rewrite(sent_resp_head, body, resp_framing,
           host: host, response: true, live: true) { |e| rw.rewrite_response_body(e, host) }
       end
+      # Labelled from `sent_req`, the request the hold gate matched: after an edit at the request
+      # hold, the client's `req` names a method that never went out (#1433).
       decision = ic.hold_response(build_message(sent_resp_head, body),
-        flow_id: flow_id, method: req.method, target: "#{resp.status} #{resp.reason}",
+        flow_id: flow_id, method: sent_req.method, target: "#{resp.status} #{resp.reason}",
         host: host, port: port, scheme: scheme)
       duration = (Time.instant - started).total_microseconds.to_i64
       if decision.action.drop?
