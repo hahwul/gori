@@ -86,7 +86,12 @@ module Gori::Tui
       # Sending every loaded note let an untouched one count as "an edit that wins" in
       # `Notes.merge`, and since `reload` is skipped while dirty, that copy is stale exactly
       # when a peer wrote during an edit: the save reverted the peer's note (#1415).
-      @baseline = {} of Int64 => String
+      #
+      # The ctor's placeholder note starts with an empty baseline. Its id is the literal 1, which
+      # a real note can hold (`Notes.create` mints it), so a save made before any merge — the
+      # startup reload failed, and another tab writes a note — must not send it as an edit that
+      # empties that note. Typed into, it differs from "" and is sent like any other.
+      @baseline = {1_i64 => ""}
       @mode = InputMode::Read
       @read = TextReadState.new
       # The two stored rows (DOCS_KEY, LEGACY_KEY) the note list was last merged FROM — see
@@ -160,6 +165,10 @@ module Gori::Tui
       @notes.each { |n| by_id[n.id] = n }
 
       merged = [] of Note
+      # A merge only runs on a clean list, so every buffer the document carried ends up holding
+      # its persisted text: that text is each note's new baseline. It is read off the buffer,
+      # not normalized from `e.text`, so it equals what `save` will compare it with.
+      baseline = {} of Int64 => String
       doc.notes.each do |e|
         if existing = by_id[e.id]?
           # Compare on a CRLF-normalized basis: the TextArea buffer is ALWAYS LF (set_text
@@ -169,15 +178,20 @@ module Gori::Tui
           # positional args / STDIN (piping a CRLF file, or `gori run flow N --raw`, stores
           # CRLF). Without normalizing, a CRLF note compares unequal on EVERY poll, so set_text
           # re-ran ~1.3×/s during capture and zeroed the caret + scroll and cleared undo.
-          if existing.area.text != TextArea.normalize_lf(e.text)
+          text = existing.area.text
+          if text != TextArea.normalize_lf(e.text)
             # Peer (or our own saved) content genuinely changed — replace body; caret resets
             # with set_text, which is correct here: the text under it is no longer the same.
             existing.area.set_text(e.text)
+            text = existing.area.text
           end
           # Same text → keep the TextArea object (caret/scroll/undo stack intact).
           merged << existing
+          baseline[e.id] = text
         else
-          merged << Note.new(e.id, e.text)
+          note = Note.new(e.id, e.text)
+          merged << note
+          baseline[e.id] = note.area.text
         end
       end
       if merged.empty?
@@ -195,10 +209,7 @@ module Gori::Tui
         end
       @next_id = {@next_id, doc.next_id}.max
       doc.notes.each { |e| @unpersisted.delete(e.id) }
-      # A merge only runs on a clean list, so every buffer the document carried now holds its
-      # persisted text. The placeholder minted above for an empty set carries none.
-      @baseline = {} of Int64 => String
-      @notes.each { |n| @baseline[n.id] = n.area.text unless @unpersisted.includes?(n.id) }
+      @baseline = baseline
       @dirty = false
       # Leave @mode alone — soft merge must not force READ. `@read` is left alone too, and
       # that is right for BOTH branches above only because of `TextReadState#bind`: the skip
@@ -606,7 +617,6 @@ module Gori::Tui
       # the merged document carries a peer's newer text for it: the buffer still holds the old
       # one until the next `reload`, and the two must agree or a later save would send it.
       mine.each { |n| @baseline[n.id] = n.text }
-      @deleted_ids.each { |id| @baseline.delete(id) }
       # The list is our edits now, not a merge of any stored row — see `reload`.
       @merged_raw = nil
       # …and `@dirty` only comes down on a write that COMMITTED. Clearing it regardless meant

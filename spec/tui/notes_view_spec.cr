@@ -335,6 +335,40 @@ describe Gori::Tui::NotesView do
       end
     end
 
+    # The widest exposure: the Runner reloads notes only while the Notes tab is up, so the
+    # retest Diff's `n` (NotesController#create_note) saves over a list that is stale but CLEAN.
+    it "keeps a peer's edit when another tab adds a note over a stale, clean list" do
+      with_store do |store|
+        ids = %w(first second).map { |t| Gori::Notes.create(store, t).not_nil! }
+        view = NotesView.new
+        view.reload(store)
+        view.dirty?.should be_false
+        Gori::Notes.update(store, ids[1], "peer") # no reload follows: the tab is not up
+
+        view.new_note
+        view.set_current_text("record")
+        view.save(store).should be_true
+
+        saved = Gori::Notes.load(store).notes.to_h { |n| {n.id, n.text} }
+        saved[ids[0]].should eq("first")
+        saved[ids[1]].should eq("peer")
+        saved.values.should contain("record")
+      end
+    end
+
+    it "does not empty note 1 through the ctor's placeholder when no merge ever ran" do
+      with_store do |store|
+        id = Gori::Notes.create(store, "real").not_nil!
+        view = NotesView.new # the startup reload failed: still the ctor's own note 1
+        view.current_note_id.should eq(id)
+        view.new_note
+        view.set_current_text("record")
+        view.save(store).should be_true
+
+        Gori::Notes.load(store).notes.map { |n| {n.id, n.text} }.first.should eq({id, "real"})
+      end
+    end
+
     it "still lets this session's edit win on the note it did change" do
       with_store do |store|
         id = Gori::Notes.create(store, "base").not_nil!
