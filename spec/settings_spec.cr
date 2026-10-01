@@ -2613,6 +2613,41 @@ describe Gori::Settings do
       end
     end
 
+    # The pane re-submits every field it displayed, so a save of the connect timeout also hands
+    # back the upstream it showed. A `gori run project network set upstream_proxy=` pin (dial
+    # DIRECT) beside a blank global equals the global, and folding it to "inherit" sent the
+    # project through `upstream_rules` instead — a routing change nobody asked for.
+    it "keeps a pin the pane re-submits unchanged, even when it equals the global" do
+      with_net_store do |store|
+        reset_net
+        previous_rules = Gori::Settings.upstream_rules
+        Gori::Settings.upstream_rules = [Gori::Settings::UpstreamRule.new("*", "http", "corp.test:3128")]
+        store.set_setting(Gori::Settings::PROJECT_UPSTREAM_KEY, "").should be_true
+        store.set_setting(Gori::Settings::PROJECT_IO_TIMEOUT_KEY, Gori::Settings.io_timeout_secs.to_s).should be_true
+        Gori::Settings.load_project_network(store, bind: true)
+        Gori::Settings.upstream_route("target.test").direct?.should be_true
+
+        config = Gori::Settings::ProjectNetworkConfig.new(
+          "127.0.0.1", 8070, "", nil, 7, Gori::Settings.io_timeout_secs, Gori::Settings.capture_max_mib
+        )
+        Gori::Settings.save_project_network(store, config).should be_true
+        store.setting(Gori::Settings::PROJECT_UPSTREAM_KEY).should eq("")
+        store.setting(Gori::Settings::PROJECT_IO_TIMEOUT_KEY).should eq(Gori::Settings.io_timeout_secs.to_s)
+        store.setting(Gori::Settings::PROJECT_CONNECT_TIMEOUT_KEY).should eq("7")
+        Gori::Settings.upstream_route("target.test").direct?.should be_true
+        # The live layer reads the same rows the store got.
+        Gori::Settings.project_upstream_proxy.should eq("")
+        Gori::Settings.project_io_timeout_secs.should eq(Gori::Settings.io_timeout_secs)
+        # A value equal to the global on a row that held something else still folds to inherit.
+        Gori::Settings.save_project_network(store, config.copy_with(connect_secs: Gori::Settings.connect_timeout_secs)).should be_true
+        store.setting(Gori::Settings::PROJECT_CONNECT_TIMEOUT_KEY).should be_nil
+        Gori::Settings.project_connect_timeout_secs.should be_nil
+      ensure
+        Gori::Settings.upstream_rules = previous_rules if previous_rules
+        reset_net
+      end
+    end
+
     # The pin, the credential and the destination gate are one decision about where this
     # project's traffic goes. Written as three tasks, a busy row could commit the credential
     # beside the address the project used to have — and the next open would send the secret

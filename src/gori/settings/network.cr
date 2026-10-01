@@ -517,36 +517,50 @@ module Gori::Settings
   def self.save_project_network(store : Store, config : ProjectNetworkConfig) : Bool
     auth = config.auth
     destination = config.destination_host.strip
+    # Every row is decided FIRST, and both the store and the live runtime layer below are set
+    # from the same answers, so the two cannot disagree about what this project pins.
+    #
+    # Auth pins the upstream unconditionally; without it the pin follows the
+    # equals-global-means-inherit rule the other rows use — except that a pin already on the
+    # row holding the very value the pane re-submits stays a pin (see `project_row`). The one
+    # exception to THAT is turning auth off: the auth pinned the upstream, so dropping the
+    # auth drops the pin it made.
+    had_auth = !store.setting(PROJECT_UPSTREAM_AUTH_KEY).nil?
+    upstream_row = auth ? config.upstream : project_row(store, PROJECT_UPSTREAM_KEY, config.upstream, upstream_proxy, keep: !had_auth)
+    destination_row = destination == DEFAULT_PROJECT_UPSTREAM_DESTINATION ? nil : destination
+    bind_host_row = project_row(store, PROJECT_BIND_HOST_KEY, config.bind_host, bind_host)
+    bind_port_row = project_row(store, PROJECT_BIND_PORT_KEY, config.bind_port.to_s, bind_port.to_s)
+    connect_row = project_row(store, PROJECT_CONNECT_TIMEOUT_KEY, config.connect_secs.to_s, connect_timeout_secs.to_s)
+    io_row = project_row(store, PROJECT_IO_TIMEOUT_KEY, config.io_secs.to_s, io_timeout_secs.to_s)
+    cap_row = project_row(store, PROJECT_CAPTURE_MAX_KEY, config.capture_mib.to_s, capture_max_mib.to_s)
     # The pin, its credentials and the destination gate are ONE decision about where this
     # project's traffic goes. Written as three tasks, a busy row could commit the credentials
     # beside the address the project used to have — and the next open would send the secret
-    # there. Auth pins the upstream unconditionally; without it the pin follows the
-    # equals-global-means-inherit rule the other rows use.
+    # there.
     routing_saved = store.set_settings([
-      {PROJECT_UPSTREAM_KEY, auth ? config.upstream : project_row(config.upstream, upstream_proxy)},
+      {PROJECT_UPSTREAM_KEY, upstream_row},
       {PROJECT_UPSTREAM_AUTH_KEY, auth.try(&.to_json)},
-      {PROJECT_UPSTREAM_DESTINATION_KEY,
-       destination == DEFAULT_PROJECT_UPSTREAM_DESTINATION ? nil : destination},
+      {PROJECT_UPSTREAM_DESTINATION_KEY, destination_row},
     ] of {String, String?})
     writes = [
-      set_or_clear_project(store, PROJECT_BIND_HOST_KEY, config.bind_host, bind_host),
-      set_or_clear_project(store, PROJECT_BIND_PORT_KEY, config.bind_port.to_s, bind_port.to_s),
+      write_project_row(store, PROJECT_BIND_HOST_KEY, bind_host_row),
+      write_project_row(store, PROJECT_BIND_PORT_KEY, bind_port_row),
       routing_saved,
-      set_or_clear_project(store, PROJECT_CONNECT_TIMEOUT_KEY, config.connect_secs.to_s, connect_timeout_secs.to_s),
-      set_or_clear_project(store, PROJECT_IO_TIMEOUT_KEY, config.io_secs.to_s, io_timeout_secs.to_s),
-      set_or_clear_project(store, PROJECT_CAPTURE_MAX_KEY, config.capture_mib.to_s, capture_max_mib.to_s),
+      write_project_row(store, PROJECT_CONNECT_TIMEOUT_KEY, connect_row),
+      write_project_row(store, PROJECT_IO_TIMEOUT_KEY, io_row),
+      write_project_row(store, PROJECT_CAPTURE_MAX_KEY, cap_row),
     ]
     persisted = writes.all?
 
-    self.project_bind_host = config.bind_host == bind_host ? nil : config.bind_host
-    self.project_bind_port = config.bind_port == bind_port ? nil : config.bind_port
-    self.project_upstream_proxy = auth || config.upstream != upstream_proxy ? config.upstream : nil
-    self.project_upstream_destination = destination == DEFAULT_PROJECT_UPSTREAM_DESTINATION ? nil : destination
+    self.project_bind_host = bind_host_row
+    self.project_bind_port = bind_port_row && config.bind_port
+    self.project_upstream_proxy = upstream_row
+    self.project_upstream_destination = destination_row
     self.project_upstream_auth = auth
     self.project_upstream_auth_error = nil
-    self.project_connect_timeout_secs = config.connect_secs == connect_timeout_secs ? nil : config.connect_secs
-    self.project_io_timeout_secs = config.io_secs == io_timeout_secs ? nil : config.io_secs
-    self.project_capture_max_mib = config.capture_mib == capture_max_mib ? nil : config.capture_mib
+    self.project_connect_timeout_secs = connect_row && config.connect_secs
+    self.project_io_timeout_secs = io_row && config.io_secs
+    self.project_capture_max_mib = cap_row && config.capture_mib
     # Where this project's traffic BINDS and where it EGRESSES is the most consequential thing
     # on the Project settings pane, and it was invisible to the feed. The line names the two
     # ends and NEVER the credential: `ProjectProxyAuth` carries a password an operator typed
@@ -555,15 +569,25 @@ module Gori::Settings
     persisted
   end
 
-  private def self.set_or_clear_project(store : Store, key : String,
-                                        value : String, global : String) : Bool
-    value == global ? store.delete_setting(key) : store.set_setting(key, value)
+  private def self.write_project_row(store : Store, key : String, row : String?) : Bool
+    row ? store.set_setting(key, row) : store.delete_setting(key)
   end
 
-  # `set_or_clear_project`'s decision as a VALUE, for rows batched into one write task:
-  # nil means "drop the key so the project inherits the global".
-  private def self.project_row(value : String, global : String) : String?
-    value == global ? nil : value
+  # The row the pane's `value` leaves behind: nil means "drop the key so the project inherits
+  # the global".
+  #
+  # The pane is always saved WHOLE from what it displayed, and it cannot tell "I typed the global
+  # value" from "I left the field alone", so a value equal to the global folds to inherit. But a
+  # row that ALREADY holds exactly that value is a pin someone made — `gori run project network
+  # set` (project_network.cr), or the global moving under an older pane edit — and re-submitting
+  # it unchanged is the "left it alone" case. Folding it dropped the pin on a save of some other
+  # field, and for the upstream that is a routing change: a `set upstream_proxy=` (dial DIRECT)
+  # beside a blank global became "inherit", which sends the project through `upstream_rules` and
+  # `HTTPS_PROXY`. `keep: false` restores the plain fold.
+  private def self.project_row(store : Store, key : String, value : String, global : String,
+                               keep : Bool = true) : String?
+    return value unless value == global
+    keep && store.setting(key) == value ? value : nil
   end
 
   private def self.load_project_upstream_auth(raw : String?) : Nil
