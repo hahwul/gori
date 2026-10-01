@@ -531,7 +531,7 @@ module Gori::Tui
       elsif ev.ctrl? && key.lower_w?
         request_close
       elsif ev.ctrl_z? && (view = current_view) && view.focus == :request
-        view.edit_undo
+        view.edit_undo if view.pane_drawn?(:request) # never undo an editor that is off screen (#1421)
       elsif key.escape?
         if (view = current_view) && view.chain_pane_active?
           view.discard_chain_pane # esc in the CHAIN pane → cancel + back to the request editor (^Q again saves)
@@ -550,7 +550,7 @@ module Gori::Tui
         else
           @host.request_focus(:subtabs)
         end
-      elsif editing_motion?(ev) && (view = current_view) && view.focus == :request
+      elsif editing_motion?(ev) && (view = current_view) && view.focus == :request && view.pane_drawn?(:request)
         # ⌥/⌃ + ←/→/Home/End/⌫ are EDITOR motion (word step, buffer jump, word delete), not
         # command chords, so they reach the request pane instead of deferring. Safe against
         # the keymap by construction: a bindable chord is a LETTER/DIGIT/PUNCT (`Verb::Chord`
@@ -569,6 +569,12 @@ module Gori::Tui
           end
           return true
         end
+        # A pane the last frame did not draw takes no TEXT (#1421): render moves focus off a
+        # hidden column, but a key can arrive before that frame (a paste burst), and on a body
+        # too short for even the TARGET card there is no pane to move it to. Only INS is
+        # gated — READ never edits, and its ↑ and `space` are the way out of a pane nobody can
+        # see. Swallowed rather than deferred: a deferred letter would reach Global (`c`).
+        return true if view.pane_insert?(view.focus) && !view.pane_drawn?(view.focus)
         return case view.focus
         when :request  then edit_repeater_request(ev, view)
         when :target   then edit_repeater_target(ev, view)
@@ -1322,7 +1328,7 @@ module Gori::Tui
     def accepts_bulk_paste? : Bool
       v = current_view
       return false unless v
-      v.request_text_editing? && !v.chain_pane_active?
+      v.request_text_editing? && !v.chain_pane_active? && v.pane_drawn?(:request) # the per-key replay is gated (#1421)
     end
 
     def paste_text(text : String) : Bool

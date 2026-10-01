@@ -59,12 +59,38 @@ class Gori::Tui::RepeaterView
   # end (the Runner then wraps focus back to the tab bar).
   PANE_ORDER = [:target, :request, :response]
 
+  # Whether the last frame drew `pane` (#1421). A short body drops the request | response
+  # columns (`columns_rect`), and a shorter one the TARGET card too; a pane that is not on
+  # screen must not hold the keys, or `i` + typing edits a request nobody can see while the
+  # badge still says `BODY · REQUEST`. Recorded by `render` — the frame that decided the
+  # layout — and read by the focus ring and the controller's key routing, never re-derived.
+  # True until the first frame, so a view nobody has drawn yet behaves as it always did.
+  @target_drawn = true
+  @columns_drawn = true
+
+  def pane_drawn?(pane : Symbol) : Bool
+    case pane
+    when :target             then @target_drawn
+    when :request, :response then @columns_drawn
+    else                          true
+    end
+  end
+
+  # Moves focus off a column the frame cannot draw onto the TARGET card. Run from `render`,
+  # because only the frame knows the rect. Not undone when the window grows back: focus
+  # stays where the operator can see it, and `↹` reaches the columns again. Leaving the
+  # request this way saves a pending ^Q chain edit, like any other focus change.
+  private def settle_focus_on_drawn_pane : Nil
+    return if pane_drawn?(@focus) || !@target_drawn
+    set_focus(:target)
+  end
+
   def focus_first : Nil
     set_focus(:target)
   end
 
   def focus_last : Nil
-    set_focus(:response)
+    set_focus(pane_drawn?(:response) ? :response : :target)
   end
 
   # Re-entry from the tab bar / strip: the pane stays, the ^S SNI sub-field does not — the
@@ -102,9 +128,17 @@ class Gori::Tui::RepeaterView
   #
   # Closing the ring costs nothing, because this tab has never used `↹` as its way out: every
   # pane strip says `esc tabs`, and esc still pops to the sub-tab strip and then the bar.
+  #
+  # A pane the last frame did not draw is stepped over (#1421); with only TARGET on screen,
+  # `↹` stays on it.
   def pane_advance(dir : Int32) : Bool
     i = PANE_ORDER.index(@focus) || 0
-    set_focus(PANE_ORDER[(i + dir) % PANE_ORDER.size])
+    (1..PANE_ORDER.size).each do |n|
+      pane = PANE_ORDER[(i + dir * n) % PANE_ORDER.size]
+      next unless pane_drawn?(pane)
+      set_focus(pane) unless pane == @focus
+      break
+    end
     true
   end
 
@@ -112,7 +146,7 @@ class Gori::Tui::RepeaterView
   # rather than stepping with pane_advance. Ignores anything not in PANE_ORDER.
   # (A click on the SNI row re-enters it: target_click_to_cursor runs after this.)
   def focus_pane(pane : Symbol) : Nil
-    set_focus(pane) if PANE_ORDER.includes?(pane)
+    set_focus(pane) if PANE_ORDER.includes?(pane) && pane_drawn?(pane)
   end
 
   # Top boundary of the focused pane — the Runner pops focus to the tab bar when

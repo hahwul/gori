@@ -122,4 +122,23 @@ describe "MCP send_request(record_history) records the wire" do
       end
     end
   end
+
+  # #1423: a `raw` line `split(' ')` cannot frame goes out byte-exact and is filed the way the
+  # proxy files it — the verbatim line as the target, no version.
+  it "files an unframable raw request line as the verbatim line with no version" do
+    with_store do |store|
+      with_recording_origin do |port, seen|
+        res = drive(store,
+          call("send_request",
+            %({"url":"http://127.0.0.1:#{port}/","raw":"POST /a b HTTP/1.1\\r\\nHost: h\\r\\n\\r\\n",) +
+            %("record_history":true,"allow_unscoped":true}), 1))
+        flow_id = tool_payload(res[0])["recorded_flow_id"].as_i64
+        detail = store.get_flow(flow_id).not_nil!
+        detail.row.method.should eq("POST")
+        detail.row.target.should eq("POST /a b HTTP/1.1")
+        detail.http_version.should eq("")
+        seen[0].should start_with("POST /a b HTTP/1.1\r\n")
+      end
+    end
+  end
 end

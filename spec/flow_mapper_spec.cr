@@ -70,4 +70,29 @@ describe Gori::FlowMapper do
     cap.status.should eq(0) # gori delivered nothing; the head is evidence, not a result
     String.new(cap.head).should eq(String.new(raw))
   end
+
+  # #1423: the recorders' projection. Over h1 it is the proxy's rule; over h2 there is no
+  # request line on the wire, so the target is the `:path` the engine actually sent.
+  describe ".authored_request" do
+    it "files an unframable h1 line as the verbatim line with no version" do
+      Gori::FlowMapper.authored_request("POST /a b HTTP/1.1\r\nHost: h\r\n\r\n".to_slice, http2: false)
+        .should eq({"POST", "POST /a b HTTP/1.1", ""})
+    end
+
+    it "files a text h2 send as the :method and :path H2Engine put on the wire" do
+      [
+        "POST /a b HTTP/1.1", "GET  /x HTTP/1.1", "GET /p", "GET", "GET /ok HTTP/2", "",
+      ].each do |line|
+        head = "#{line}\r\nHost: h\r\n\r\n".to_slice
+        fields, _ = Gori::Repeater::H2Engine.parse_request(head, "https", "h", 443)
+        Gori::FlowMapper.authored_request(head, http2: true).should eq({
+          fields.find! { |(n, _)| n == ":method" }[1],
+          fields.find! { |(n, _)| n == ":path" }[1],
+          "HTTP/2",
+        }), line.inspect
+      end
+      Gori::FlowMapper.authored_request("POST /a b HTTP/1.1\nHost: h\n\n".to_slice, http2: true)
+        .should eq({"POST", "/a b", "HTTP/2"})
+    end
+  end
 end

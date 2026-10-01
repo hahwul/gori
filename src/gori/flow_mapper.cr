@@ -1,4 +1,6 @@
 require "./proxy/codec/message"
+require "./proxy/codec/http1"
+require "./proxy/h2/head_codec"
 require "./store/models"
 
 module Gori
@@ -50,6 +52,18 @@ module Gori
         source_ref: source_ref,
         intercept_original: intercept_original,
       )
+    end
+
+    # The {method, target, version} a gori-originated recorder (Repeater, `gori run send`, the
+    # Fuzzer, MCP `send_request`, a frozen Repeater snapshot) files for a TEXT head it sent.
+    # Over h1 that is `Http1.authored_projection`, which keeps `request` above's rule for a line
+    # `split(' ')` cannot frame. Over h2 there is no request line on the wire: `H2Engine` sent
+    # the `:path` `HeadCodec.request_pseudo` cut, which keeps `/a b` whole, so that is the
+    # target — the h1 rule would file an h1 line no h2 stream ever carried (#1423).
+    def self.authored_request(head : Bytes, *, http2 : Bool) : {String, String, String}
+      return Proxy::Codec::Http1.authored_projection(head) unless http2
+      method, path = Proxy::H2::HeadCodec.request_pseudo(String.new(head).split('\n', 2).first.rstrip('\r'))
+      {method, path, "HTTP/2"}
     end
 
     def self.response(resp : Proxy::Codec::RawResponse, *, flow_id : Int64,
