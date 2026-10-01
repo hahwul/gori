@@ -403,7 +403,14 @@ module Gori
         replacement = present?(h, "replacement") ? (str(h, "replacement") || "") : (draft.try(&.replacement) || existing.replacement)
         name = present?(h, "name") ? (str(h, "name") || "") : existing.name
         host = present?(h, "host") ? (str(h, "host") || "") : existing.host
-        body_file = present?(h, "body_file") ? (str(h, "body_file") || "") : existing.body_file
+        # A stub's file/dir does not survive a switch to an op that never reads it, as the TUI
+        # form's `body_file` row empties for one — keeping it refused every such switch over a
+        # `body_file` the caller never passed.
+        body_file = if present?(h, "body_file")
+                      str(h, "body_file") || ""
+                    else
+                      op.short_circuit? ? existing.body_file : ""
+                    end
         mock = mock_rule_args(h, op, body_file, existing.op.short_circuit? ? existing : nil)
         return mock if mock.is_a?(Result)
         respond, respond_args, body_file = mock
@@ -416,13 +423,16 @@ module Gori
         if bad = pipe_shape_error(op, replacement)
           return bad
         end
+        # Read BEFORE the write, as `update_extract_rule` does: read after it, a refused
+        # `enabled` reported failure over an edit already live on the proxy.
+        en = enabled_arg(h, existing.enabled?)
+        return en if en.is_a?(Result)
         model = rules_model
         # Through the model — see `create_rule` for why the whole family had to move.
         updated = model.update(id, target, part, pattern, replacement, op, match_kind, name,
           host, body_file, scope: scope, respond: respond, respond_args: respond_args)
         return busy("rule not updated (store busy or unwritable); the rule is unchanged") unless updated
-        if present?(h, "enabled")
-          en = bool_arg(h, "enabled", existing.enabled?)
+        unless en.nil?
           # For a global rule this is THIS project's answer, exactly as `set_rule_enabled`
           # means it — changing the library's default is `set_rule_enabled` + everywhere.
           unless model.set_enabled(id, en, scope)
@@ -762,13 +772,28 @@ module Gori
       # condition. Merged into ONE helper rather than a second `if` at each caller: both callers
       # are already at the cyclomatic limit, and these are one question — "are the arguments
       # usable" — asked of two of them.
-      private def extract_shape_error(kind : Gori::ExtractKind, pos_start : Int32, pos_end : Int32,
-                                      match_filter : String) : Result?
+      # The selector's two refusals (missing, or a regex that does not compile) are the same
+      # case: through `Bindings#validate` they came back as `field: "name"` too.
+      private def extract_shape_error(kind : Gori::ExtractKind, selector : String, pos_start : Int32,
+                                      pos_end : Int32, match_filter : String) : Result?
         if bad = Gori::InterceptFilter.unsupported_field_reason(match_filter)
           return err(bad, "INVALID_ARGUMENT", field: "when")
         end
+        if bad = extract_selector_error(kind, selector)
+          return err(bad, "INVALID_ARGUMENT", field: "selector")
+        end
         return nil unless kind.position? && pos_end <= pos_start
         err("'pos_end' must be greater than 'pos_start' for kind=position", "INVALID_ARGUMENT", field: "pos_end")
+      end
+
+      private def extract_selector_error(kind : Gori::ExtractKind, selector : String) : String?
+        return nil if kind.position?
+        return "a #{kind.label} descriptor needs a selector" if selector.empty?
+        return nil unless kind.regex?
+        Regex.new(selector)
+        nil
+      rescue ex : ArgumentError | Regex::Error
+        "regex #{selector.inspect} does not compile: #{ex.message}"
       end
 
       @[Tool("create_extract_rule", gated: true, agent_action: true, permission: "write")]
@@ -782,7 +807,7 @@ module Gori
         pos_start = bounded_int_arg(h, "pos_start", 0_i64, min: Int32::MIN.to_i64, max: Int32::MAX.to_i64).to_i
         pos_end = bounded_int_arg(h, "pos_end", 0_i64, min: Int32::MIN.to_i64, max: Int32::MAX.to_i64).to_i
         when_s = str(h, "when") || ""
-        if bad = extract_shape_error(kind, pos_start, pos_end, when_s)
+        if bad = extract_shape_error(kind, selector, pos_start, pos_end, when_s)
           return bad
         end
         # Read BEFORE the insert, exactly as `create_rule` does: `bool_arg` RAISES on a
@@ -834,7 +859,7 @@ module Gori
         pos_start = keep_int(h, "pos_start", existing.pos_start)
         pos_end = keep_int(h, "pos_end", existing.pos_end)
         filter = keep(h, "when", existing.match_filter)
-        if bad = extract_shape_error(kind, pos_start, pos_end, filter)
+        if bad = extract_shape_error(kind, selector, pos_start, pos_end, filter)
           return bad
         end
         host = keep(h, "host", existing.host)

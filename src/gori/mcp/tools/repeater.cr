@@ -274,6 +274,13 @@ module Gori
           issue = store.get_issue(issue_id)
           return not_found("no issue with id #{issue_id}") unless issue
           if fid = issue.flow_id
+            # Two sources for one seed are refused, as `curl` beside `request` is above: taking
+            # the issue's flow over the caller's silently changed which capture the session holds
+            # and links as evidence.
+            if flow_id && flow_id != fid
+              return err("issue #{issue_id} is linked to flow #{fid}, not flow #{flow_id} — pass " \
+                         "'issue_id' or 'flow_id', not two different seeds", "INVALID_ARGUMENT", field: "flow_id")
+            end
             flow_id = fid
           elsif target.nil? || target.empty? || request.nil? || request.empty?
             return Result.new("issue #{issue_id} has no associated flow_id", is_error: true)
@@ -981,7 +988,7 @@ module Gori
         name_prefix = str(h, "name_prefix").try { |v| Env.mask_secrets(v) }
         tags = present?(h, "tags") ? repeater_tags_arg(h) : nil
 
-        created = [] of {Int64, Int64, String?, Bool, Int32}
+        created = [] of {Int64, Int64, String?, Bool, Int32, Array(String)}
         failed = [] of {Int64, String}
         pos = store.next_repeater_position
 
@@ -1010,14 +1017,22 @@ module Gori
           # Named off the bytes just stored, not off a re-read of the row: the round trip
           # would answer the same thing and cost a query, and it would have to assert the row
           # it just inserted is there.
+          #
+          # Each write answers whether it committed, and one that did not is NAMED on the row
+          # (`unsaved`) rather than reported as saved — `create_repeater` and the CLI check the
+          # same three. The session itself did commit, so it stays under `created`.
           name = name_prefix.try { |pre| "#{pre}#{Repeater::SubtabFilter::Subject.summary_of(seed.request)}" }
-          store.set_repeater_name(id, name) if name
-          store.set_repeater_tags(id, tags) if tags
-          if (msgs = seed.ws_messages) && !msgs.empty?
-            store.update_repeater_ws_messages(id, msgs)
+          unsaved = [] of String
+          if name && !store.set_repeater_name(id, name)
+            unsaved << "name"
+            name = nil
+          end
+          unsaved << "tags" if tags && !store.set_repeater_tags(id, tags)
+          if (msgs = seed.ws_messages) && !msgs.empty? && !store.update_repeater_ws_messages(id, msgs)
+            unsaved << "ws_messages"
           end
           created << {fid, id, name, seed.rewrote_request_line,
-                      seed.notice_rows_dropped}
+                      seed.notice_rows_dropped, unsaved}
         end
 
         rows = store.repeaters_mcp
@@ -1026,7 +1041,7 @@ module Gori
             j.field "created_count", created.size
             j.field("created") do
               j.array do
-                created.each do |(fid, id, name, rewrote, dropped)|
+                created.each do |(fid, id, name, rewrote, dropped, unsaved)|
                   j.object do
                     j.field "flow_id", fid
                     j.field "id", id
@@ -1034,6 +1049,11 @@ module Gori
                     repeater_tui_index(id, rows).try { |n| j.field "tui_index", n }
                     j.field "request_line_rewritten", true if rewrote
                     j.field "ws_notice_rows_dropped", dropped if dropped > 0
+                    unless unsaved.empty?
+                      j.field "unsaved", unsaved
+                      j.field "unsaved_note", "the session committed but these did not (store busy or unwritable) — " \
+                                              "set them with update_repeater"
+                    end
                   end
                 end
               end

@@ -223,7 +223,12 @@ module Gori
           Store.open(proj.db_path, retention_flows: Store::RETENTION_UNLIMITED,
             read_only: !@allow_actions, background_index: false)
         rescue ex
-          return err("could not open project database: #{ex.message}", "INTERNAL")
+          # Not INTERNAL, which tells an agent the server is broken: a project being compacted
+          # or deleted is momentary (PROJECT_BUSY, retryable), and one that cannot be opened is a
+          # fact about the project the caller named — the mapping `diff_projects` makes.
+          return busy(ex.message || "project is busy") if ex.message == OpenLock.guarded_message(proj.db_path)
+          return err("could not open project database: #{proj.open_failure_reason(ex)}",
+            "INVALID_ARGUMENT", field: "project")
         end
         # Closed regardless of who opened it. `@owns_store` was about not closing a handle the
         # CLI still needed — it does not: `cli.cr` only reads `store.count` before `server.run`,
@@ -231,10 +236,17 @@ module Gori
         # which was invisible; now it also leaks the project's `OpenLock`, so `delete_project` on
         # a project this server has SWITCHED AWAY FROM is refused as "open in another gori
         # instance" — by this server, which no longer serves it and offers no way to let go.
+        same_feed = !@store.nil? && current_db_path == File.expand_path(proj.db_path)
         @store.try(&.close)
         @store = new_store
-        @messages_floor = new_store.last_event_id # a new feed, a new "now" (#1090)
-        @messages_cursor = @messages_floor        # …and the piggyback reads from the same "now"
+        # A new feed, a new "now" (#1090), and the piggyback reads from the same "now" — but a
+        # rebind to the database already served is the same feed: re-anchoring there dropped
+        # every operator message and `ask_operator` answer posted before it and not yet read.
+        unless same_feed
+          @messages_floor = new_store.last_event_id
+          @messages_cursor = @messages_floor
+          @feed_generation += 1
+        end
         @owns_store = true
         # A RESUMED OAST handle is bound to the project it was resumed in: its row id means
         # nothing in the new DB, and oast_poll would file its callbacks under a stranger's
@@ -289,7 +301,11 @@ module Gori
         proj = find_project(reg, name, "project")
         return proj if proj.is_a?(Result)
         return not_found("no such project: #{name} (match short id, id prefix, dir slug, or display name)") unless proj
-        return busy("cannot delete the project this server is currently serving; switch away first") if proj.db_path == @db_path
+        # Not PROJECT_BUSY: that is retryable, and no retry succeeds while this server serves it.
+        if proj.db_path == @db_path
+          return err("cannot delete the project this server is currently serving; switch_project away first",
+            "INVALID_ARGUMENT", field: "project")
+        end
         return busy("cannot delete a project while a fuzz/mine job is running") if jobs_running?
 
         dry_run = bool_arg(h, "dry_run", true)

@@ -14,15 +14,20 @@ module Gori
         requires: ["mine_status", "mine_results", "mine_stop"], permission: "send")]
       private def mine_start(h) : Result
         ob = outbound(bool_arg(h, "allow_unscoped", false))
-        engine, origin, total, project_reports = build_mine_job(h, ob)
-        sc = ob.check("#{origin.scheme}://#{origin.host}/", origin.host,
-          Outbound.exclude_url(origin.scheme, origin.host, "/", origin.port))
+        plan = build_mine_job(h, ob)
+        engine, origin, total, project_reports = plan.engine, plan.origin, plan.total_names, plan.project_reports
+        # Gate on the template's real request-target, not a bare `/` — the check
+        # `sequence_start` and `gori run mine` make. A path-scoped include refused an in-scope
+        # run, and a path EXCLUDE passed Layer 1 because `/` never matched it.
+        sc = ob.check_request(origin.scheme, origin.host, plan.request_target, origin.port)
         return scope_blocked(sc) if sc.blocked?
         @job_seq += 1
         id = "mn_#{@job_seq}"
+        # The cap the engine runs with, read back off the plan: the raw arg disagreed with the
+        # run whenever it was above the ceiling or non-positive.
         audit = JobAudit.new("#{origin.scheme}://#{origin.host}:#{origin.port}",
-          optional_float_arg(h, "rate"), clamp(optional_int_arg(h, "concurrency"), 10, MINE_MAX_CONCURRENCY),
-          optional_int_arg(h, "max_requests"), Time.utc.to_unix_ms)
+          optional_float_arg(h, "rate"), plan.config.concurrency,
+          plan.config.max_requests, Time.utc.to_unix_ms)
         mjob = MineJob.new(id, total, engine, audit, @db_path)
         evict_finished_jobs(@mine_jobs)
         @mine_jobs[id] = mjob
@@ -236,14 +241,16 @@ module Gori
 
       # Build a ready-to-run mining engine + its origin + name count. Raises FuzzArgError
       # (clean message) on malformed input. Reuses the fuzz timeout helper.
-      private def build_mine_job(h, ob : Outbound) : {Miner::Engine, Fuzz::Origin, Int64, Array(PayloadFrom::Report)}
+      private def build_mine_job(h, ob : Outbound) : Miner::Plan
         text, default_target, src_h2, evidence = mine_template_source(h)
         config = Miner::Config.new
         config.concurrency = clamp(optional_int_arg(h, "concurrency"), 10, MINE_MAX_CONCURRENCY)
         config.rps = optional_float_arg(h, "rate")
         config.timeout = fuzz_timeout(h)
         config.retries = (optional_int_arg(h, "retries") || 1_i64).clamp(0_i64, 1000_i64).to_i # clamp before .to_i (Int32) so a huge value can't OverflowError past the clean-error handler
-        cap = optional_int_arg(h, "max_requests")
+        # A non-positive cap is ignored, as `fuzz_config` does: `CappedBackend` reads 0 / -1 as
+        # "no cap", so `{cap, MAX}.min` turned `max_requests: 0` into an UNBOUNDED run.
+        cap = optional_int_arg(h, "max_requests").try { |m| m > 0 ? m : nil }
         config.max_requests = cap ? {cap, MINE_MAX_REQUESTS}.min : MINE_MAX_REQUESTS
         config.user_wordlist = str(h, "wordlist").presence
         config.seed_names = begin
@@ -276,8 +283,7 @@ module Gori
           # Candidate names read from the project's own captured data (#1352), tested after
           # `names` and before the built-in list and `wordlist`. Resolved by the plan builder.
           project_names: mine_project_names(h), project: store)
-        plan = Miner::Plan.build(options, ob)
-        {plan.engine, plan.origin, plan.total_names, plan.project_reports}
+        Miner::Plan.build(options, ob)
       rescue ex : Miner::PlanError
         raise FuzzArgError.new(mine_plan_error(ex))
       rescue ex : Gori::Error

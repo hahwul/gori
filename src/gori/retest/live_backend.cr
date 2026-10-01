@@ -53,6 +53,17 @@ module Gori
                      @close_outbound : Bool = true)
       end
 
+      # Layer 2 as a SWEEP judges it — sandbox AND explicit excludes — when an agent or a script
+      # started the run (MCP, `gori run retest`): both promise "Sandbox and explicit excludes
+      # still apply" under `allow_unscoped`, and with Layer 1 waived `send_block` alone replayed a
+      # `/logout` step the project excludes. The TUI's run keeps the hand-authored rule
+      # (`plan.refusal`, sandbox only): the operator is replaying their own tabs, which send past
+      # an exclude by hand as the proxy does.
+      private def layer_two_refusal(plan : Repeater::Plan, target : String) : String?
+        sweep = @outbound.reason == Gori::Outbound::Reason::Interactive ? nil : @outbound.sweep_block(plan.scheme, plan.host, target, plan.port)
+        sweep || plan.refusal
+      end
+
       def send(p : Planned) : Observation
         rec = p.step.detached? ? nil : @store.get_repeater(p.step.ref_id)
         # Re-read, because `Retest.plan` ran before the confirm and a peer may have closed the
@@ -91,7 +102,7 @@ module Gori
           return Observation.new(blocked_reason: Retest.clip(
             "#{plan.host} is out of the project scope — #{@outbound.remedy(verdict)}"))
         end
-        if reason = plan.refusal
+        if reason = layer_two_refusal(plan, target)
           return Observation.new(blocked_reason: Retest.clip(reason))
         end
         # A WebSocket handshake step is sent as an ORDINARY HTTP request and its 101/4xx is

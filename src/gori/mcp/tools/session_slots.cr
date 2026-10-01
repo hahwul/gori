@@ -235,7 +235,7 @@ module Gori
       end
 
       private def update_slot_headers(h, current : Gori::SessionSlot) : {Array({String, String}), Array(String)} | Result
-        return {current.set_headers, current.literal_headers} unless h.has_key?("set_headers")
+        return {current.set_headers, current.literal_headers} unless slot_list_given?(h, "set_headers")
         set_headers = session_set_headers(h)
         return set_headers if set_headers.is_a?(Result)
         {set_headers, [] of String}
@@ -295,7 +295,7 @@ module Gori
       # first automatic refresh in the middle of a sweep. Deterministic, so INVALID_ARGUMENT.
       private def slot_refresh_args(h, ids : Array(Int64),
                                     policy : Gori::SessionSlot::RefreshBefore) : {Array(Int64), Gori::SessionSlot::RefreshBefore} | Result
-        if h.has_key?("refresh")
+        if slot_list_given?(h, "refresh")
           ids = begin
             id_list_arg(h, "refresh")
           rescue ex : Gori::Error
@@ -307,7 +307,7 @@ module Gori
                        "the slot, in order", "INVALID_ARGUMENT", field: "refresh")
           end
         end
-        if raw = str(h, "refresh_before")
+        if (raw = str(h, "refresh_before")) && !raw.strip.empty?
           policy = Gori::SessionSlot::RefreshBefore.parse?(raw) ||
                    return err("'refresh_before' #{raw.inspect} is not a policy — use \"off\", " \
                               "\"jwt-exp\" or \"ttl=<n>[s|m|h]\" (e.g. \"ttl=10m\")",
@@ -348,11 +348,21 @@ module Gori
         end
       end
 
+      # Whether a list argument was GIVEN. A JSON null or an empty string is not: a client that
+      # fills every declared property sends `rules: null` beside the one field it means, and
+      # reading that as "clear" turned an identity into as-captured — an authorize run or an
+      # active send then went out unauthenticated and reported nothing wrong. `null` is absent
+      # everywhere else on this surface (`present?`), and the CLI needs an explicit
+      # `--clear-*`; here the explicit clear is `[]`.
+      private def slot_list_given?(h, key : String) : Bool
+        present?(h, key) && h[key].as_s? != ""
+      end
+
       # A name-list argument that is ABSENT rather than empty keeps what the slot already has —
       # the difference an agent rotating one cookie depends on, since it never read the rule
       # list it would otherwise blank. An explicit `[]` is a clear.
       private def slot_names_arg(h, key : String, current : Array(String)) : Array(String)
-        return current unless h.has_key?(key)
+        return current unless slot_list_given?(h, key)
         str_list(h, key).map(&.strip).reject(&.empty?)
       end
 

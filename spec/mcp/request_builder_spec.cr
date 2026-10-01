@@ -79,6 +79,14 @@ describe Gori::MCP::RequestBuilder do
     String.new(Gori::MCP::RequestBuilder.build(args).bytes).should contain("$NOPE")
   end
 
+  it "leaves a structured send's headers and body unexpanded under verbatim, as the CLI does" do
+    args = JSON.parse({"url" => "http://h.test/", "method" => "POST", "verbatim" => true,
+                       "headers" => {"X-A" => "$ENV.NOPE"}, "body" => "b=$ENV.NOPE"}.to_json).as_h
+    wire = String.new(Gori::MCP::RequestBuilder.build(args).bytes)
+    wire.should contain("X-A: $ENV.NOPE")
+    wire.should end_with("b=$ENV.NOPE")
+  end
+
   it "builds exact request bytes with Host + Content-Length" do
     args = JSON.parse(%({"url":"https://h.test:8443/a?b=1","method":"post","headers":{"X-Test":"y"},"body":"hi"})).as_h
     built = Gori::MCP::RequestBuilder.build(args)

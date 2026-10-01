@@ -124,6 +124,7 @@ module Gori
           return err(parsed, "INVALID_ARGUMENT", field: "columns") if parsed.is_a?(String)
           prepared = Gori::DisplayColumns.prepare(parsed.map_with_index { |sp, i| sp.to_column(i) })
         end
+        include_sensitive = bool_arg(h, "include_sensitive", false)
         # An agent gets one shot at this answer and cannot tell "no match" from "not indexed
         # yet", so drain the off-commit FTS backlog (Store V4) before a query that reads it —
         # or refuse, when this server is read-only and therefore cannot drain (see the helper).
@@ -175,7 +176,7 @@ module Gori
             end
             emit_ignored_terms(j, dropped)
             j.field "flows" do
-              j.array { rows.each { |r| Serialize.flow_row(j, r, row_columns(r, prepared)) } }
+              j.array { rows.each { |r| Serialize.flow_row(j, r, row_columns(r, prepared, include_sensitive)) } }
             end
           end
         end)
@@ -202,6 +203,7 @@ module Gori
                                    prepared : Gori::DisplayColumns::Prepared, h,
                                    ignored : Array(String)) : Result
         narrowed = (query && !query.strip.empty?) || lensed || view_filter != QL::EMPTY
+        include_sensitive = bool_arg(h, "include_sensitive", false)
         found = store.flow_rows(ids)
         by_id = {} of Int64 => Store::FlowRow
         found.each { |r| by_id[r.id] = r }
@@ -246,7 +248,7 @@ module Gori
             end
             emit_ignored_terms(j, ignored)
             j.field "flows" do
-              j.array { rows.each { |r| Serialize.flow_row(j, r, row_columns(r, prepared)) } }
+              j.array { rows.each { |r| Serialize.flow_row(j, r, row_columns(r, prepared, include_sensitive)) } }
             end
           end
         end)
@@ -274,12 +276,22 @@ module Gori
       #
       # ONE capped read per RETURNED row, and none at all for a set that reads only heads — the
       # same P8 discipline the TUI row loop keeps, applied to a page already bounded by `limit`.
+      #
+      # A column extracting a sensitive header or a cookie (`DisplayColumns.sensitive?`) reads
+      # `[REDACTED]` unless `include_sensitive`, as `gori run history` masks the same column: the
+      # schema's own example is `req:header:authorization`, and `get_flow` withholds that value
+      # behind the same flag. An EMPTY value stays empty, so a miss still reads as a miss.
       private def row_columns(row : Store::FlowRow,
-                              prepared : Gori::DisplayColumns::Prepared) : Array({String, String})?
+                              prepared : Gori::DisplayColumns::Prepared,
+                              include_sensitive : Bool) : Array({String, String})?
         return nil if prepared.empty?
         detail = store.get_flow(row.id, body_max: prepared.body_scoped? ? Gori::DisplayColumns::BODY_CAP : 0)
         values = detail ? prepared.values(detail) : Array.new(prepared.size, "")
-        prepared.columns.map_with_index { |c, i| {c.label, values[i]? || ""} }
+        prepared.columns.map_with_index do |c, i|
+          v = values[i]? || ""
+          v = "[REDACTED]" if !include_sensitive && !v.empty? && Gori::DisplayColumns.sensitive?(c)
+          {c.label, v}
+        end
       end
 
       EVENTS_LIMIT = PageLimit.new(100, 500)
@@ -394,6 +406,10 @@ module Gori
         head, body, source_truncated = loaded
         stored = body || Bytes.new(0)
         head_omitted = false
+        trailers_omitted = false
+        unless options.include_sensitive
+          stored, trailers_omitted = drop_sensitive_trailers(head, stored, options.request?)
+        end
         if options.request? && !options.include_sensitive
           stored, head_omitted = drop_sensitive_head(stored)
         end
@@ -401,6 +417,8 @@ module Gori
         # nothing to decode and decoding would be a lie about what is on disk.
         decoded, decode_note = (options.raw || options.request?) ? {nil, nil} : decode_for_chunk(head, stored)
         bytes = decoded || stored
+        # A decoded view never carried the trailers, so it has nothing to say about them.
+        trailers_omitted &&= decoded.nil?
         total = bytes.size.to_i64
         # The decoded view is capped at ContentDecode::MAX_OUT (decompression-bomb ceiling).
         # At the cap, `complete:true` at the end would falsely imply the whole body — flag it
@@ -436,6 +454,13 @@ module Gori
                 "and this tool pages the EXACT stored bytes, which cannot be redacted and stay bytes — the range " \
                 "below is the body alone. Pass include_sensitive:true to page the head too, or read it redacted " \
                 "from get_flow / get_repeater_context"
+            end
+            if trailers_omitted
+              j.field "trailers_omitted", true
+              j.field "trailers_omitted_note",
+                "the chunked body ends in a trailer section carrying a sensitive field, and these are the EXACT " \
+                "stored bytes, so the range stops at the last-chunk line rather than redact them. Pass " \
+                "include_sensitive:true to page the trailers too, or read them redacted from get_flow's `trailers`"
             end
             j.field "representation", decoded ? "decoded" : "raw"
             j.field "decode_note", decode_note if decode_note
@@ -503,6 +528,31 @@ module Gori
         text = String.new(head).scrub
         return {bytes, false} if Serialize.redact_head(text, false) == text
         {body || Bytes.new(0), true}
+      end
+
+      # `drop_sensitive_head`'s rule for the other end of a chunked message: the trailer section
+      # is header fields too, and `get_flow`'s `trailers` redacts a sensitive one
+      # (`Serialize.emit_trailers`) — so the pager of the same exact bytes stops at the 0-chunk
+      # line instead of handing the value over. Only when such a field is there; the decoded
+      # view never carried trailers at all. `request` bytes are the whole wire message, whose
+      # head says whether the body is chunked.
+      private def drop_sensitive_trailers(head : Bytes?, bytes : Bytes, request : Bool) : {Bytes, Bool}
+        base = 0
+        if request
+          head, body = split_wire_request(bytes)
+          base = head.size
+        else
+          body = bytes
+        end
+        return {bytes, false} unless at = Proxy::Codec::ContentDecode.trailer_offset(head, body)
+        trailers = Proxy::Codec::ContentDecode.trailers(head, body)
+        # A section past the parser's field cap is withheld whole: a field it did not lift is one
+        # it cannot say is harmless.
+        unless trailers.size >= Proxy::Codec::ContentDecode::MAX_TRAILERS ||
+               trailers.any? { |(name, _)| Serialize.sensitive_header?(name) }
+          return {bytes, false}
+        end
+        {bytes[0, base + at], true}
       end
 
       # The last response body `get_response_body_chunk` decoded: {head, stored bytes, decoded,
@@ -653,7 +703,8 @@ module Gori
           s.field "hide_static", boolprop("leave out static assets — images, fonts, audio/video (not svg/css/js, never a status >= 400); the TUI's hide-static lens, same as the QL term `-static:true`. Default false, and independent of whether the operator has the lens on in the TUI")
           s.field "strict", boolprop("reject the query if any term is unrecognized/invalid (default false: the term is dropped, which BROADENS the result, and named in the reply's `ignored_terms`; ql_explain previews which terms would drop)")
           s.field "lenient", boolprop("search a `field:` QL does not implement as literal TEXT instead of refusing the query (default false). A typo like `methd:GET` free-texts its whole token and therefore matches nothing, which is indistinguishable from an empty project — so it is refused by default, the way `gori run history --lenient` spells the same escape hatch. `strict` is the other half and covers dropped terms, not unknown fields")
-          s.field "columns", strarrprop("extract a value out of each returned flow and carry it on the row under `columns` — what QL can FILTER on but never shows. Each spec is [LABEL=][req|res:]kind:selector, kind being cookie|header|regex|position|jsonpath: e.g. \"header:x-request-id\", \"req:header:authorization\", \"RID=jsonpath:data.id\", \"regex:token=(\\w+)\", \"position:0:32\". Side defaults to the RESPONSE; a label defaults to the selector. A descriptor that matches nothing yields \"\" — an empty string is a MISS, not an empty value. Costs one extra read per row (and, for the three body-scoped kinds, up to 512 KiB of body each), so ask only for what you will read")
+          s.field "columns", strarrprop("extract a value out of each returned flow and carry it on the row under `columns` — what QL can FILTER on but never shows. Each spec is [LABEL=][req|res:]kind:selector, kind being cookie|header|regex|position|jsonpath: e.g. \"header:x-request-id\", \"req:header:authorization\", \"RID=jsonpath:data.id\", \"regex:token=(\\w+)\", \"position:0:32\". Side defaults to the RESPONSE; a label defaults to the selector. A descriptor that matches nothing yields \"\" — an empty string is a MISS, not an empty value. A header:/cookie: column naming Authorization/Cookie/Set-Cookie/API-key material reads \"[REDACTED]\" unless include_sensitive. Costs one extra read per row (and, for the three body-scoped kinds, up to 512 KiB of body each), so ask only for what you will read")
+          s.field "include_sensitive", boolprop("`columns` only: return the value of a column that extracts a sensitive header or a cookie instead of [REDACTED] (default false)")
         end
 
         tool j, "list_events",
@@ -764,7 +815,7 @@ module Gori
           s.field "offset", intprop("zero-based byte offset (default 0)")
           s.field "limit", limitprop("bytes to return", BODY_CHUNK_LIMIT)
           s.field "raw", boolprop("page stored response bytes without content decoding (default false)")
-          s.field "include_sensitive", boolprop("part=\"request\": also page the message HEAD when it carries an Authorization/Cookie/Set-Cookie/API-key value. These are exact stored bytes, so the head is withheld rather than redacted (default false); the reply says so with head_omitted")
+          s.field "include_sensitive", boolprop("part=\"request\": also page the message HEAD when it carries an Authorization/Cookie/Set-Cookie/API-key value; either part: also page a chunked body's TRAILER section when one of its fields is such a value. These are exact stored bytes, so they are withheld rather than redacted (default false); the reply says so with head_omitted / trailers_omitted")
         end
 
         return unless @allow_actions

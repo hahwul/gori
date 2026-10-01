@@ -168,6 +168,23 @@ describe "MCP issue retest" do
     end
   end
 
+  # Both surfaces promise "Sandbox and explicit excludes still apply" under allow_unscoped. The
+  # step targets a closed port, so a step that got past the gate would read as an error, not
+  # a block.
+  it "still refuses an explicitly EXCLUDED step under allow_unscoped" do
+    with_store do |store|
+      iid = retest_issue(store)
+      rid = store.insert_repeater("http://127.0.0.1:1", "GET /logout HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice,
+        false, true, nil, store.next_repeater_position)
+      store.add_scope_rule("exclude", "string", "/logout")
+      tools = tools_for(store)
+      mcp_ok_json(tools, "add_retest_step", %({"issue_id":#{iid},"repeater_id":#{rid},"assertion":"status:200"}))
+      r = tools.call("run_retest", JSON.parse(%({"issue_id":#{iid},"allow_unscoped":true})))
+      r.text.should contain("exclude")
+      store.count?.should eq(0)
+    end
+  end
+
   it "reports an issue with no steps rather than recording an empty run that 'passed'" do
     with_store do |store|
       iid = retest_issue(store)
@@ -196,7 +213,14 @@ describe "MCP issue retest" do
 
       runs = mcp_ok_json(tools, "list_retest_runs", %({"issue_id":#{iid}}))
       runs["total"].as_i.should eq(1)
+      runs["has_more"].as_bool.should be_false
       runs["kept"].as_i.should eq(Gori::Retest::RUN_HISTORY)
+      # A short page says it is one.
+      store.record_retest_run(iid, 3_i64, 4_i64, Gori::Store::RetestVerdict::Fail,
+        Gori::Retest.tally([row]), [row], surface: "mcp")
+      paged = mcp_ok_json(tools, "list_retest_runs", %({"issue_id":#{iid},"limit":1}))
+      paged["total"].as_i.should eq(1)
+      paged["has_more"].as_bool.should be_true
       runs["runs"][0]["verdict"].as_s.should eq("fail")
       runs["runs"][0]["failed"].as_i.should eq(1)
 

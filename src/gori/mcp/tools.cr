@@ -449,6 +449,17 @@ module Gori
         @store
       end
 
+      # The database file `current_store` reads, normalized for comparison.
+      def current_db_path : String?
+        @db_path.try { |d| File.expand_path(d) }
+      end
+
+      # Bumped by every bind that re-anchors the operator-message cursors (`bind_project`), and
+      # only by those: the courier keys its own cursor on it, so a rebind to the database
+      # already served (a new Store object over the same feed) keeps its place, while A→B→A,
+      # or a project deleted and recreated at the same path, starts over as `Tools` does.
+      getter feed_generation = 0_i64
+
       # The client's self-declared name from the handshake (`claude-code`, …), nil before it.
       def client_name : String?
         @client_name
@@ -1194,6 +1205,10 @@ module Gori
         property failed = 0
         getter failures = [] of {Int64, String, String}
         getter results = [] of Authorize::Target
+        # Every request with a bypass, past AUTHORIZE_MAX_STORED too: `bypasses` is promised
+        # complete, and the stored-rows cap silently dropped the ones after it. Bounded by the
+        # send cap like the job itself, and head-only like `results`.
+        getter bypassed = [] of Authorize::Target
         property? truncated = false
         property ended_at_ms : Int64? = nil
         property stop_requested_at_ms : Int64? = nil
@@ -1585,6 +1600,10 @@ module Gori
         case name
         when "probe_scan"     then bool_arg(h, "active", false) || bool_arg(h, "persist", false)
         when "export_openapi" then describes?(h, "output_path")
+          # A confirmed delete never moves the binding (the served project is refused), so the
+          # post-call append lands in the right feed — and it is the most destructive call on
+          # this surface. The dry run (the default) changes nothing.
+        when "delete_project" then (!bool_arg(h, "dry_run", true) rescue false)
         else                       false
         end
       end
@@ -2311,7 +2330,7 @@ module Gori
           entry.split(',').each do |tok|
             t = tok.strip
             next if t.empty?
-            id = t.to_i64? || raise Gori::Error.new(
+            id = t.to_i64? || integral_id(t) || raise Gori::Error.new(
               "invalid #{key.inspect} entry #{t.inspect} (expected an integer id)")
             next if seen.includes?(id)
             seen << id
@@ -2319,6 +2338,15 @@ module Gori
           end
         end
         ids
+      end
+
+      # `3.0`, the shape `int` already accepts for a single id because many encoders emit every
+      # number as a float — a list entry arrives through `str_entry` as that text, and refusing
+      # it made `ids: [3.0]` fail where `id: 3.0` worked. `3.5` is still no id.
+      private def integral_id(t : String) : Int64?
+        f = t.to_f? || return nil
+        return nil unless f.finite? && f == f.trunc && f.abs <= 9_007_199_254_740_992.0
+        f.to_i64
       end
 
       # The schema for an `id_list_arg` property: the `oneOf` that advertises all three

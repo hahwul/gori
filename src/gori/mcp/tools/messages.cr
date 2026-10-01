@@ -150,6 +150,31 @@ module Gori
       end
 
       OPERATOR_MESSAGES_LIMIT = PageLimit.new(50, 200)
+      # Pages a bare `operator_messages` reads past when each holds nothing new. Bounded so a
+      # long feed of carried rows costs a few indexed reads, not a scan of the whole log.
+      OPERATOR_MESSAGES_MAX_SCANS = 20
+
+      # The page `operator_messages` hands over, and the rows on it no route has carried yet.
+      #
+      # A BARE call (the "call it at the start of a turn" the instructions ask for) reads on past
+      # a full page holding nothing new — rows already carried, or another session's. Without
+      # this, once `limit` such rows sat behind the floor every bare call returned [] for good
+      # while a message waited behind them. Never past a row another route is still handing
+      # over: the `held` rule in the caller would then have nothing to hold the cursor at.
+      private def operator_messages_page(since : Int64, pid : Int64, limit : Int32,
+                                         read_on : Bool) : {Store::MessagePage, Array(AgentMessage), Int64}
+        page = store.agent_messages_after(since, pid, limit)
+        fresh = unclaimed(store, page, pid)
+        scans = 1
+        while read_on && fresh.empty? && page.full && scans < OPERATOR_MESSAGES_MAX_SCANS &&
+              page.rows.none? { |m| @in_flight_messages.includes?(m.id) }
+          since = page.scanned_max
+          page = store.agent_messages_after(since, pid, limit)
+          fresh = unclaimed(store, page, pid)
+          scans += 1
+        end
+        {page, fresh, since}
+      end
 
       # #1090, layer three: what the operator said, read by the agent itself. Returns the
       # messages addressed to this session (or to all) after `since` that no live route has
@@ -160,16 +185,20 @@ module Gori
       private def operator_messages(h) : Result
         pid = Process.pid.to_i64
         # Nothing before this session bound the project is replayed (the courier keeps the same rule).
-        since = {optional_int_arg(h, "since") || 0_i64, @messages_floor}.max
+        # A cursor past this feed's end was handed out by ANOTHER project's feed (a switch since):
+        # honouring it skipped every message here until the feed caught up, so it restarts at
+        # the floor and the reply says so.
+        requested = optional_int_arg(h, "since")
+        stale_cursor = !requested.nil? && requested > store.last_event_id
+        since = {stale_cursor ? 0_i64 : (requested || 0_i64), @messages_floor}.max
         limit = clamp(optional_int_arg(h, "limit"), OPERATOR_MESSAGES_LIMIT)
         include_delivered = bool_arg(h, "include_delivered", false)
-        page = store.agent_messages_after(since, pid, limit)
         # Marking is only ever for rows no confirmed route has carried yet, or every repeat
         # call would stack a "picked it up" per row. `unclaimed` bounds that scan by the page
         # being handed over (and skips it entirely when the page is empty — the common "start
         # of turn, nothing new" case), and it is the same predicate the tool-result carry uses:
         # one answer to "has this session already had it", not two that can drift.
-        fresh = unclaimed(store, page, pid)
+        page, fresh, since = operator_messages_page(since, pid, limit, requested.nil? && !include_delivered)
         rows = include_delivered ? page.rows : fresh
         can_mark = !store.read_only?
         label = session_label
@@ -214,6 +243,13 @@ module Gori
               end
             end
             j.field "next_cursor", next_cursor
+            # A full page is not the end of the feed — pass `since: next_cursor` for the rest.
+            j.field "has_more", page.full
+            if stale_cursor
+              j.field "cursor_reset", true
+              j.field "cursor_reset_note", "'since' #{requested} is past this project's feed (a cursor from " \
+                                           "before a switch_project); read from this session's start instead"
+            end
             j.field "marked_delivered", can_mark
             j.field "note", "read-only server: messages are returned but not marked delivered" unless can_mark
           end

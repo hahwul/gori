@@ -8,9 +8,9 @@ module Gori
       # Add a scope rule (validates + dedupes, like `gori run project scope add`).
       @[Tool("add_scope_rule", gated: true, agent_action: true, permission: "scope")]
       private def add_scope_rule(h) : Result
-        kind = str(h, "kind").try(&.strip.downcase) || "include"
+        kind = str(h, "kind").try(&.strip.downcase).presence || "include"
         return err("invalid 'kind' (expected #{Scope::KINDS.join("|")})", "INVALID_ARGUMENT", field: "kind") unless kind.in?(Scope::KINDS)
-        match_type = str(h, "match_type").try(&.strip.downcase) || "host"
+        match_type = str(h, "match_type").try(&.strip.downcase).presence || "host"
         return err("invalid 'match_type' (expected #{Scope::TYPES.join("|")})", "INVALID_ARGUMENT", field: "match_type") unless match_type.in?(Scope::TYPES)
         pattern = str(h, "pattern").try(&.strip)
         return err("missing required 'pattern'", "INVALID_ARGUMENT", field: "pattern") if pattern.nil? || pattern.empty?
@@ -61,9 +61,9 @@ module Gori
 
         # Every field defaults to the rule's CURRENT value, so a caller can change just the
         # pattern without restating kind/match_type.
-        kind = str(h, "kind").try(&.strip.downcase) || existing.kind
+        kind = str(h, "kind").try(&.strip.downcase).presence || existing.kind
         return err("invalid 'kind' (expected #{Scope::KINDS.join("|")})", "INVALID_ARGUMENT", field: "kind") unless kind.in?(Scope::KINDS)
-        match_type = str(h, "match_type").try(&.strip.downcase) || existing.match_type
+        match_type = str(h, "match_type").try(&.strip.downcase).presence || existing.match_type
         return err("invalid 'match_type' (expected #{Scope::TYPES.join("|")})", "INVALID_ARGUMENT", field: "match_type") unless match_type.in?(Scope::TYPES)
         # An ABSENT pattern keeps the current one; a SUPPLIED blank one is a mistake, not a
         # no-op — silently keeping the old pattern would report success for an edit that

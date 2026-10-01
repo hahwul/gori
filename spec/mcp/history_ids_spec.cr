@@ -146,6 +146,15 @@ describe "list_history{ids}" do
     end
   end
 
+  # `id: 3.0` is accepted (many encoders emit every number as a float); a list entry is too.
+  it "accepts an integral float in the list, and still refuses a fraction" do
+    with_store do |store|
+      ids = seed(store, 1)
+      history(store, %({"ids":[#{ids[0]}.0]}))["flows"].as_a.map(&.["id"].as_i64).should eq(ids)
+      history_resp(store, %({"ids":[1.5]}))["result"]["isError"].as_bool.should be_true
+    end
+  end
+
   it "still carries user columns per row" do
     with_store do |store|
       ids = seed(store, 1)

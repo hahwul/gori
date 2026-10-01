@@ -19,12 +19,12 @@ module Gori
       private def fuzz_start(h) : Result
         ob = outbound(bool_arg(h, "allow_unscoped", false))
         save_results = bool_arg(h, "save_results", false)
-        engine, origin, total, http2, shadowed_marks, ws_frames, ws_ignored, grpc, tls_preset, mode_label, effective_sni, effective_max_requests, sets_warn, payload_reports =
+        engine, origin, total, http2, shadowed_marks, ws_frames, ws_ignored, grpc, tls_preset, mode_label, effective_sni, effective_max_requests, sets_warn, payload_reports, request_target =
           build_fuzz_job(h, ob, save_results)
-        # Scope gate before launching any real send (host-level: fuzz sweeps many
-        # paths against one origin, so evaluate the origin host).
-        sc = ob.check("#{origin.scheme}://#{origin.host}/", origin.host,
-          Outbound.exclude_url(origin.scheme, origin.host, "/", origin.port))
+        # Scope gate before launching any real send, on the template's real request-target —
+        # the check `sequence_start` and `gori run fuzz` make. Asking about a bare `/` refused
+        # an in-scope run under a path-scoped include and let a path EXCLUDE through Layer 1.
+        sc = ob.check_request(origin.scheme, origin.host, request_target, origin.port)
         return scope_blocked(sc) if sc.blocked?
         # Judged on what the run can SEND: a caller `max_requests` is a hard cap, so a capped
         # draw from a set larger than the ceiling is as bounded as a small set (#1209), and
@@ -586,7 +586,7 @@ module Gori
       # tokens that made no position of their own (`Fuzz::Plan#shadowed_marks`, reported by
       # `fuzz_start`) from the tool args. Raises FuzzArgError (clean message) on any malformed
       # input.
-      private def build_fuzz_job(h, ob : Outbound, save_results : Bool = false) : {Fuzz::Engine, Fuzz::Origin, Int64?, Bool, Array(String), Int32?, Array(Symbol), Fuzz::GrpcFieldTemplate?, String?, String, String?, Int64?, String?, Array(PayloadFrom::Report)}
+      private def build_fuzz_job(h, ob : Outbound, save_results : Bool = false) : {Fuzz::Engine, Fuzz::Origin, Int64?, Bool, Array(String), Int32?, Array(Symbol), Fuzz::GrpcFieldTemplate?, String?, String, String?, Int64?, String?, Array(PayloadFrom::Report), String}
         text, default_target, src_h2, evidence, src_sni, src_tls_preset = fuzz_template_source(h)
         use_h2 = bool_arg(h, "http2", false) || src_h2
         mode = fuzz_mode(h)
@@ -687,7 +687,8 @@ module Gori
          plan.ws_script.try(&.frames.size), plan.ws_ignored_knobs, plan.grpc_fields,
          plan.tls_preset,
          plan.engine.race_count.try { |n| "race ×#{n}" } || mode.label,
-         effective_sni, config.max_requests, unused_sets_warning(plan), plan.payload_reports}
+         effective_sni, config.max_requests, unused_sets_warning(plan), plan.payload_reports,
+         plan.request_target}
       rescue ex : Fuzz::PlanError
         raise FuzzArgError.new(fuzz_plan_error(ex, text))
       rescue ex : File::Error

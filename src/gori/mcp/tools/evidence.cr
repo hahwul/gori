@@ -102,7 +102,24 @@ module Gori
         opts = body_return_opts(h)
         return opts if opts.is_a?(Result)
         cap, omit = opts
-        Result.new(Serialize.evidence_json(ev, include_sensitive, cap, omit))
+        ev, redaction = redact_evidence(ev, include_sensitive)
+        Result.new(Serialize.evidence_json(ev, include_sensitive, cap, omit, redaction))
+      end
+
+      # The project's ambient body redaction (#1035), over the frozen copy as `get_flow` applies
+      # it to the live flow and the TUI's evidence copy (`sanitized_evidence`) to this same row:
+      # a field `get_flow` masks must not come back in clear because it was frozen first.
+      # `include_sensitive` turns it off, the one flag for both axes as on `get_flow`.
+      private def redact_evidence(ev : Store::IssueEvidence,
+                                  include_sensitive : Bool) : {Store::IssueEvidence, Serialize::RedactionNote?}
+        return {ev, nil} if include_sensitive
+        matcher = Redact::Policy.ambient(store) || return {ev, nil}
+        request = Redact::Wire.message(ev.request_head, ev.request_body, matcher)
+        response = Redact::Wire.message(ev.response_head, ev.response_body, matcher)
+        clean = Store::IssueEvidence.new(ev.meta, request.head, request.body,
+          ev.response_head.nil? ? nil : response.head, response.body)
+        {clean, Serialize::RedactionNote.new(matcher.profile.name, request.count + response.count, 0,
+          request.decoded? || response.decoded?)}
       end
 
       @[Tool("delete_evidence", gated: true, agent_action: true, permission: "write")]

@@ -116,13 +116,21 @@ module Gori
           # `body_base64` wins over `body`: it is the byte-exact form, and a caller that sent
           # both meant the precise one. It is NOT env-expanded — the caller already decided
           # every octet, and expanding would change the length it encoded.
+          #
+          # `verbatim` reaches `headers` and `body` too, as `gori run send --verbatim` reads it for
+          # `-H`/`-d`. Only the raw branch read it, so a structured send under `verbatim:true`
+          # expanded `$ENV.*` in its headers and body while the send seam (`expand_bindings`) left
+          # `$BIND`/`$GEN` literal: one flag, two answers in one request. The URL still expands —
+          # it names where to dial.
+          verbatim = verbatim?(args)
           body = base64_arg(args, "body_base64") ||
                  wire_str(args, "body", "; stringify JSON yourself, or use body_base64 for exact octets")
-                   .try { |b| Env.expand(b).to_slice }
+                   .try { |b| (verbatim ? b : Env.expand(b)).to_slice }
           # …and the request-target before the headers are read: method, body, target, headers is
           # the order this has always refused two mistakes in.
           Repeater::UrlRequest.request_target_of(target)
-          Repeater::UrlRequest.structured(target, method, RequestBuilder.header_pairs(args["headers"]?), body)
+          Repeater::UrlRequest.structured(target, method, RequestBuilder.header_pairs(args["headers"]?), body,
+            expand: !verbatim)
         end
       end
 

@@ -66,8 +66,15 @@ module Gori
 
         kind_s = str(h, "kind").try(&.strip).presence
         kind = kind_s ? Oast::ProviderKind.parse?(kind_s) : Oast::ProviderKind.parse?(existing.kind)
-        return err("unknown provider kind '#{kind_s}' (expected #{OAST_KINDS.join("|")})",
-          "INVALID_ARGUMENT", field: "kind") unless kind
+        unless kind
+          # Name the kind that failed: with no `kind` passed it is the STORED one (a row a
+          # newer gori wrote), and "unknown provider kind ''" blamed an argument never sent.
+          return err("unknown provider kind '#{kind_s}' (expected #{OAST_KINDS.join("|")})",
+            "INVALID_ARGUMENT", field: "kind") if kind_s
+          return err("this provider's stored kind '#{existing.kind}' is not one this gori supports " \
+                     "(#{OAST_KINDS.join("|")}) — pass 'kind' to change it, or delete the provider",
+            "INVALID_ARGUMENT", field: "kind")
+        end
 
         name = str(h, "name").try(&.strip).presence || existing.name
         host = str(h, "host").try(&.strip).presence || existing.host

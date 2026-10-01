@@ -315,7 +315,7 @@ module Gori
       # credential out of any byte of the message and the descriptor cannot say whether they
       # do, so the docs name them as uncovered rather than implying a guarantee.
       def self.sensitive_column?(c : Store::DisplayColumn) : Bool
-        c.kind.cookie? || (c.kind.header? && MCP::Serialize.sensitive_header?(c.selector))
+        Gori::DisplayColumns.sensitive?(c)
       end
 
       # Emit `name` carrying a CAPTURED string, scrubbed to U+FFFD. The JSON counterpart of
