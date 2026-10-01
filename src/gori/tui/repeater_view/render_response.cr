@@ -76,8 +76,9 @@ class Gori::Tui::RepeaterView
 
   # `1.0ms · 23B`, or the latency alone for a send that got no response.
   private def result_meta(result : Repeater::Result) : String
-    return Fmt.dur(result.duration_us) unless result.ok?
-    "#{Fmt.dur(result.duration_us)} · #{Fmt.size((result.head.size + (result.body.try(&.size) || 0)).to_i64)}"
+    total = (result.head.size + (result.body.try(&.size) || 0)).to_i64
+    return Fmt.dur(result.duration_us) if total == 0
+    "#{Fmt.dur(result.duration_us)} · #{Fmt.size(total)}"
   end
 
   # `frozen ×N` (#1038), in the hue the Issues detail badges a FROZEN row with, ending at
@@ -233,7 +234,7 @@ class Gori::Tui::RepeaterView
     render_response_chrome(screen, rect)
     body = rect.inset(1, 1)
     if @resp_hex
-      (b = resp_hex_bytes) ? HexView.render(screen, body, b, @scroll) : screen.text(body.x, body.y, not_sent_hint, Theme.muted)
+      render_resp_hex(screen, body)
     elsif @resp_mode == :diff
       render_diff(screen, body, focused)
     elsif @reveal && (rl = reveal_lines)
@@ -242,6 +243,18 @@ class Gori::Tui::RepeaterView
       render_response_body(screen, body, focused)
     end
     Frame.scroll_gauge(screen, body, resp_line_count, @scroll, focused)
+  end
+
+  private def render_resp_hex(screen : Screen, body : Rect) : Nil
+    if b = resp_hex_bytes
+      HexView.render(screen, body, b, @scroll)
+    elsif result = @result
+      msg = result.error ? "repeater error: #{result.error}" : "— no response —"
+      color = result.error ? Theme.red : Theme.muted
+      screen.text(body.x, body.y, msg, color)
+    else
+      screen.text(body.x, body.y, not_sent_hint, Theme.muted)
+    end
   end
 
   # Shared windowed renderer for the WS / gRPC / group transcript panes (a list of
