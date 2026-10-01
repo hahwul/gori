@@ -1083,8 +1083,19 @@ module Gori::Tui
       @run_matched_count += 1 if r.matched?
       @run_error_count += 1 if r.error
       @clusters.add(r)
+      # The window keeps index order, so a concurrent run's late result lands ABOVE rows
+      # already drawn (#1432). In the identity view that shifts every row below it by one;
+      # follow the selected row, and the viewport when the row lands above it. Eviction then
+      # shifts all of them back by what left the front — a late row older than a full
+      # window's first lands at 0 and is evicted at once, which nets to no move.
+      identity = @sort == :index && !@matched_only && !@grouped
+      if identity
+        at = @result_window.insertion_point(r.index)
+        @sel += 1 if at <= @sel && @sel < @results.size
+        @scroll += 1 if at < @scroll
+      end
       evicted = @result_window.append(r)
-      if evicted > 0 && @sort == :index && !@matched_only && !@grouped
+      if evicted > 0 && identity
         @sel = {@sel - evicted, 0}.max
         @scroll = {@scroll - evicted, 0}.max
       end
@@ -2427,6 +2438,7 @@ module Gori::Tui
       if cached = reusable_sorted_cache
         return cached
       end
+      held = held_index_row
       rows = @matched_only ? @results.select(&.matched?) : @results.to_a
       sorted =
         if @grouped
@@ -2440,6 +2452,9 @@ module Gori::Tui
           else              rows
           end
         end
+      if held && (at = sorted.bsearch_index { |r| r.index >= held.index })
+        @sel = at
+      end
       @sorted_cache = sorted
       @sorted_cache_rev = @results_rev
       @sorted_cache_sort = @sort
@@ -2447,6 +2462,16 @@ module Gori::Tui
       @sorted_cache_group = group_key
       @sorted_cache_at = Time.instant
       sorted
+    end
+
+    # Matched-only under `o:index` is index-ordered like the identity view, so a late hit lands
+    # above the cursor there too (#1432) — the copy `append_result` cannot shift. The row the
+    # cursor is on in the cache being replaced, when that cache has this same shape, for the
+    # rebuild to find again (the next row on, when the window has evicted it).
+    private def held_index_row : Fuzz::Result?
+      return nil unless @sort == :index && @matched_only && !@grouped
+      return nil unless @sorted_cache_sort == :index && @sorted_cache_matched && @sorted_cache_group.nil?
+      @sorted_cache.try(&.[@sel]?)
     end
 
     # Does the current view shape COPY @results, or hand it back as-is? `:index` with no
