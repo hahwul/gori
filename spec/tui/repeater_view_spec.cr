@@ -1668,6 +1668,50 @@ describe Gori::Tui::RepeaterView do
     String.new(view.request_bytes).should eq(req)
   end
 
+  # #1426: leaving hex was the one buffer mutation that did not reflect auto-CL, so a hex edit
+  # that grew the body left `Content-Length: 4` on screen while ^R's `finalize_wire` framed 5.
+  describe "leaving hex after a length-changing edit (#1426)" do
+    req = "POST /b HTTP/1.1\r\nHost: h\r\nContent-Length: 4\r\n\r\nABCD"
+    append_e = ->(view : RepeaterView) do
+      view.toggle_request_hex.should be_true
+      view.hex_move(1000, 0) # clamps to the append slot
+      view.hex_set_nibble('4')
+      view.hex_set_nibble('5') # 0x45 = 'E'
+      view.toggle_request_hex.should be_false
+    end
+
+    it "shows the Content-Length the send will frame (auto-CL on)" do
+      view = RepeaterView.new
+      view.restore("http://127.0.0.1", req, false, true)
+      append_e.call(view)
+      view.request_text.should contain("Content-Length: 5")
+      view.request_text.should_not contain("Content-Length: 4")
+      String.new(view.request_bytes).should eq("POST /b HTTP/1.1\r\nHost: h\r\nContent-Length: 5\r\n\r\nABCDE")
+      view.hex_exit_resync.should eq({"4", "5"}) # what the controller's toast names
+      view.dirty?.should be_true
+    end
+
+    it "keeps a hex-built mismatch as built when auto-CL is off" do
+      view = RepeaterView.new
+      view.restore("http://127.0.0.1", req, false, false)
+      append_e.call(view)
+      view.request_text.should contain("Content-Length: 4")
+      String.new(view.request_bytes).should eq("POST /b HTTP/1.1\r\nHost: h\r\nContent-Length: 4\r\n\r\nABCDE")
+      view.hex_exit_resync.should be_nil
+    end
+
+    it "says nothing for an exit that left the length alone" do
+      view = RepeaterView.new
+      view.restore("http://127.0.0.1", req, false, true)
+      view.toggle_request_hex.should be_true
+      view.hex_set_nibble('5') # overtype `P` → `_`: same length
+      view.hex_set_nibble('f')
+      view.toggle_request_hex.should be_false
+      view.request_text.should contain("Content-Length: 4")
+      view.hex_exit_resync.should be_nil
+    end
+  end
+
   it "pipeline_requests keeps a bodied request's separator (no double terminator)" do
     view = RepeaterView.new
     req = "POST /a HTTP/1.1\nHost: h\nContent-Length: 4\n\ndata\n%%%\nGET /b HTTP/1.1\nHost: h\n"

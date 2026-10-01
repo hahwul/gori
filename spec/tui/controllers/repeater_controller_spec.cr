@@ -76,3 +76,48 @@ describe "RepeaterController ^X (#1295)" do
     end
   end
 end
+
+# #1426: the auto-CL resync on the way out of hex is named in the toast, from `^X` and from
+# `esc` alike — the resync redraws one digit, and a mismatch built in hex is corrected by it.
+describe "RepeaterController leaving request hex (#1426)" do
+  bodied = "POST /b HTTP/1.1\r\nHost: h.test\r\nContent-Length: 4\r\n\r\nABCD"
+  grow = ->(v : RepeaterView) do
+    v.hex_move(1000, 0)
+    v.hex_set_nibble('4')
+    v.hex_set_nibble('5')
+  end
+
+  it "names the resynced Content-Length on ^X" do
+    with_repeater_controller do |ctl, host|
+      ctl.repeater_from_request("https://h.test", bodied, false, nil)
+      v = ctl.current_view.not_nil!
+      ctl.repeater_toggle_hex
+      grow.call(v)
+      ctl.repeater_toggle_hex
+      host.statuses.last.should contain("hex edit: off — Content-Length 4 → 5")
+    end
+  end
+
+  it "names it on esc, the exit that used to say nothing" do
+    with_repeater_controller do |ctl, host|
+      ctl.repeater_from_request("https://h.test", bodied, false, nil)
+      v = ctl.current_view.not_nil!
+      ctl.repeater_toggle_hex
+      grow.call(v)
+      n = host.statuses.size
+      ctl.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::Escape, Termisu::Input::Modifier::None))
+      v.request_hex?.should be_false
+      host.statuses.size.should eq(n + 1)
+      host.statuses.last.should contain("Content-Length 4 → 5")
+    end
+  end
+
+  it "keeps the plain toast for an exit that left the length alone" do
+    with_repeater_controller do |ctl, host|
+      ctl.repeater_from_request("https://h.test", bodied, false, nil)
+      ctl.repeater_toggle_hex
+      ctl.repeater_toggle_hex
+      host.statuses.last.should eq("hex edit: off")
+    end
+  end
+end
