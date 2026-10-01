@@ -411,6 +411,56 @@ describe Gori::Tui::RepeaterView do
     backend.fg_at(dx, ry).should eq(Theme.muted)
   end
 
+  it "renders received response head next to the error on an errored send (#1428)" do
+    view = RepeaterView.new
+    view.load_blank
+    view.focus_pane(:response)
+
+    head = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 3\r\nContent-Length: 5\r\n\r\n".to_slice
+    err = Gori::Repeater::Result.new(head, nil, nil, 1200_i64, "conflicting Content-Length values")
+    view.apply(err)
+
+    backend = MemoryBackend.new(120, 20)
+    view.render(Screen.new(backend), Rect.new(0, 0, 120, 20))
+    backend.contains?("repeater error: conflicting Content-Length values").should be_true
+    backend.contains?("HTTP/1.1 200 OK").should be_true
+    backend.contains?("Content-Length: 3").should be_true
+    backend.contains?("Content-Length: 5").should be_true
+    backend.contains?("1.2ms · 83B").should be_true
+
+    wire = view.response_wire.should_not be_nil
+    wire[0].should eq(head)
+
+    # Hex view renders the received wire bytes, not "not sent yet"
+    view.toggle_resp_hex
+    view.resp_hex?.should be_true
+    hexb = MemoryBackend.new(120, 20)
+    view.render(Screen.new(hexb), Rect.new(0, 0, 120, 20))
+    hexb.contains?("— not sent yet —").should be_false
+    hexb.contains?("00000000").should be_true
+    hexb.contains?("48 54 54 50").should be_true # "HTTP"
+  end
+
+  it "renders error on hex view when send errored with no response bytes received (#1428)" do
+    view = RepeaterView.new
+    view.load_blank
+    view.focus_pane(:response)
+
+    # Before send: hex view shows "not sent yet"
+    view.toggle_resp_hex
+    hex_pre = MemoryBackend.new(120, 20)
+    view.render(Screen.new(hex_pre), Rect.new(0, 0, 120, 20))
+    hex_pre.contains?("— not sent yet —").should be_true
+
+    # After errored send with 0 bytes: shows error, not "not sent yet"
+    err = Gori::Repeater::Result.new(Bytes.empty, nil, nil, 500_i64, "connection reset by peer")
+    view.apply(err)
+    hex_post = MemoryBackend.new(120, 20)
+    view.render(Screen.new(hex_post), Rect.new(0, 0, 120, 20))
+    hex_post.contains?("— not sent yet —").should be_false
+    hex_post.contains?("repeater error: connection reset by peer").should be_true
+  end
+
   it "auto-updates an existing Content-Length to match the edited body on send" do
     repeater_tmp_store do |store|
       id = store.insert_flow(Gori::Store::CapturedRequest.new(

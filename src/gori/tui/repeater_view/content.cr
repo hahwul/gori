@@ -104,7 +104,7 @@ class Gori::Tui::RepeaterView
       @resp_pretty_applied = false
       if !result
         RespView.new([[Highlight::Span.new(not_sent_hint, Theme.muted)]], Highlight::BodyLines.empty, :text)
-      elsif !result.ok?
+      elsif !result.ok? && result.head.empty?
         RespView.new([[Highlight::Span.new("repeater error: #{result.error}", Theme.red)]], Highlight::BodyLines.empty, :text)
       else
         build_resp_view(result)
@@ -124,7 +124,12 @@ class Gori::Tui::RepeaterView
       kind: pretty.try(&.kind), decoded_ranges: decoded_ranges,
       protected_linefeeds: protected_linefeeds)
     count = pretty.try(&.unicode_escape_count) || Pretty.unicode_escape_count(result.head, src)
-    RespView.new(win.head, win.body, win.kind, decoded_ranges, resp_unicode_trailer(pretty), count)
+    head_lines = win.head.dup
+    if err = result.error
+      head_lines.unshift(Highlight::Line.new)
+      head_lines.unshift([Highlight::Span.new("repeater error: #{err}", Theme.red)] of Highlight::Span)
+    end
+    RespView.new(head_lines, win.body, win.kind, decoded_ranges, resp_unicode_trailer(pretty), count)
   end
 
   private def formatted_resp_body(head : Bytes, src : Bytes?) : Pretty::Result?
