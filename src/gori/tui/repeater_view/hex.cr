@@ -57,22 +57,45 @@ class Gori::Tui::RepeaterView
     text_wire_form(wire)
   end
 
+  # The Content-Length line the last exit from hex rewrote, as its {from, to} values — nil when
+  # the exit left the header alone. The controller's toast reads it, so the resync below is said
+  # out loud rather than only redrawn.
+  getter hex_exit_resync : {String, String}? = nil
+
   private def exit_request_hex : Nil
-    if (h = @req_hex_edit) && h.mutated? # a pure peek (no edits) leaves state + @dirty untouched
-      if @grpc_mode
-        @grpc_payload = h.to_bytes # keep the edited payload byte-exact (reframed on send)
-        # …and tell the FIELDS form its rows are stale: it reads the same payload, and a hex
-        # edit can add, remove or retype a field under names it has already drawn (#828).
-        invalidate_grpc_fields
-      else
-        # Round-trips byte-exactly now: set_text keeps each line's terminator in @eols, and
-        # `String.new(Bytes)` does not scrub, so the hex buffer's bytes come back out of
-        # `wire_bytes` unchanged — hex ⇄ text is no longer a one-way door.
-        @editor.set_text(String.new(h.to_bytes))
-      end
-      @dirty = true # the edit is a content change
-    end
+    @hex_exit_resync = nil
+    h = @req_hex_edit
+    # Cleared FIRST: while the hex buffer is set it is authoritative, and the reflection below
+    # declines to touch the editor it would be overriding.
     @req_hex_edit = nil
+    return unless h && h.mutated? # a pure peek (no edits) leaves state + @dirty untouched
+    if @grpc_mode
+      @grpc_payload = h.to_bytes # keep the edited payload byte-exact (reframed on send)
+      # …and tell the FIELDS form its rows are stale: it reads the same payload, and a hex
+      # edit can add, remove or retype a field under names it has already drawn (#828).
+      invalidate_grpc_fields
+    else
+      # Round-trips byte-exactly now: set_text keeps each line's terminator in @eols, and
+      # `String.new(Bytes)` does not scrub, so the hex buffer's bytes come back out of
+      # `wire_bytes` unchanged — hex ⇄ text is no longer a one-way door.
+      @editor.set_text(String.new(h.to_bytes))
+      # …and back in text, auto-CL owns the length again: `finalize_wire` resyncs it on ^R, so
+      # the visible header has to say the same number. This exit was the one buffer mutation
+      # that did not reflect, and a hex edit that grew the body left `Content-Length: 4` on
+      # screen over the `5` the send framed (#1426). A mismatch built in hex is corrected by the
+      # same rule as one typed in text — sending from hex, or ^L off first, keeps it as built.
+      before = @editor.lines_snapshot
+      reflect_content_length_in_editor
+      @hex_exit_resync = content_length_change(before, @editor.lines_snapshot)
+    end
+    @dirty = true # the edit is a content change
+  end
+
+  # The first header line the reflection changed, as its {from, to} values. The reflection
+  # rewrites Content-Length lines only, so any differing line is one.
+  private def content_length_change(before : Array(String), after : Array(String)) : {String, String}?
+    i = (0...before.size).find { |k| before[k] != after[k]? } || return
+    {before[i].split(':', 2)[1]?.to_s.strip, after[i].split(':', 2)[1]?.to_s.strip}
   end
 
   # Mutators delegated from the Runner's hex key handler (each marks @dirty only on

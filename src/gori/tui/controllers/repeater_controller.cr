@@ -539,6 +539,7 @@ module Gori::Tui
           view.exit_sni_field # leave the SNI field, back to the URL (value kept)
         elsif (view = current_view) && view.focus == :request && view.request_hex?
           view.toggle_request_hex
+          @host.status("hex edit: off#{hex_exit_note(view)}") if view.hex_exit_resync
         elsif (view = current_view) && view.focus == :request && view.grpc_fields_editing?
           view.grpc_field_cancel # esc in the VALUE field → back to the list (^E again leaves the form)
         elsif (view = current_view) && view.focus == :request && view.grpc_fields?
@@ -777,10 +778,19 @@ module Gori::Tui
         @host.status("hex edit not available here — #{msg}")
       elsif view.focus == :request
         on = view.toggle_request_hex
-        @host.status(on ? "hex edit: on — sends exact bytes (^X/esc exit; not text-safe)" : "hex edit: off")
+        @host.status(on ? "hex edit: on — sends exact bytes (^X/esc exit; not text-safe)" : "hex edit: off#{hex_exit_note(view)}")
       else
         @host.status("hex edit (^X) applies to the REQUEST or RESPONSE pane — ↹ to one")
       end
+    end
+
+    # What leaving the REQUEST hex buffer adds to its toast: the Content-Length auto-CL resynced
+    # on the way back to text, if any. Shared by `^X` and `esc`, the exit most operators take —
+    # the resync redraws one number in the head, and a deliberate mismatch built in hex should
+    # not be corrected without a word (#1426).
+    private def hex_exit_note(view : RepeaterView) : String
+      return "" unless cl = view.hex_exit_resync
+      " — Content-Length #{cl[0]} → #{cl[1]} to match the body (#{chip("repeater.toggle-auto-content-length")} off before ^X keeps a mismatch)"
     end
 
     # The response pane's hex dump: `Z x` there, and `^X` (above). A transcript pane never
