@@ -779,7 +779,7 @@ describe "the auto-forward reaper and an in-progress edit" do
     # under spec/ (it owns a terminal), and the reaper only runs on the tick.
     src = File.read(File.join(__DIR__, "..", "..", "src", "gori", "tui", "runner", "intercept_bridge.cr"))
     body = src.lines.reject(&.lstrip.starts_with?('#')).join('\n')
-    reap = body[/^ *private def reap_stale_holds.*?\n *end\n/m]
+    reap = body[/^  private def reap_stale_holds.*?\n  end\n/m] # to the method's own `end`, at def indent
     reap.should_not be_nil
     reap.not_nil!.should contain("held_edit_id")
     # The skip is INSIDE the per-item loop and BEFORE the forward: reading the edit id and

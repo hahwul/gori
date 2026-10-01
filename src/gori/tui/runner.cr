@@ -298,6 +298,10 @@ module Gori::Tui
       # base P4 contract — a held item waits INDEFINITELY for the human decision, never
       # auto-forwarded just because the operator glanced at another tab.
       @intercept_agent_seen = false
+      # The reaper's last tick with the Intercept tab up (nil = never this session), monotonic.
+      # The operator watching the queue restarts every hold's window, so leaving the tab gives
+      # each one the full `@intercept_max_hold_ms` from there (#1418).
+      @intercept_operator_watched_at = nil.as(Time::Instant?)
       # Optional bottom statusline: runs a user script on an interval and shows its
       # ANSI-coloured stdout. Disabled by default (no fiber, no reserved row until on).
       @statusline = StatuslineController.new(@session, @jobs)
