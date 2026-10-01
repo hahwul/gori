@@ -7,8 +7,20 @@ class Gori::Tui::RepeaterView
   # What gets PERSISTED (and what reconcile compares against). Wire form, so a saved tab
   # restores to the bytes it was sending: persisting the LF projection would have re-lost
   # every body CR on the next restore, undoing the fix one session later.
+  #
+  # The hex buffer only once it has been EDITED (`hex_buffer_text`).
   def request_text : String
-    (h = @req_hex_edit) ? String.new(h.to_bytes) : @editor.wire_text
+    hex_buffer_text || @editor.wire_text
+  end
+
+  # The `^X` buffer as text, or nil while it is a pure peek. An unedited hex buffer is the
+  # editor's request in the form text mode sends (`hex_seed`), so for a typed draft it differs
+  # from `wire_text` by the head's CRs alone. Reading it there made a peek look like an edit
+  # to everything that compares this text to a saved copy: the drift digest called the next
+  # response stale against a row nobody changed, and a minimize finishing under the peek
+  # refused to install its result (#1427).
+  private def hex_buffer_text : String?
+    (h = @req_hex_edit) && h.mutated? ? String.new(h.to_bytes) : nil
   end
 
   # The same request handed to a tab that reads `§…§` as TEMPLATE SYNTAX — `space ▸ F`
@@ -56,7 +68,7 @@ class Gori::Tui::RepeaterView
   # being a payload. `set_text` (in `replace_edit_buffer`) is the exact inverse, so a file
   # the editor left alone round-trips byte for byte.
   def edit_buffer_text : String
-    (h = @req_hex_edit) ? String.new(h.to_bytes) : req_editor.wire_text
+    hex_buffer_text || req_editor.wire_text
   end
 
   def replace_edit_buffer(text : String) : Nil

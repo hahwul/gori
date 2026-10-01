@@ -82,6 +82,36 @@ describe Gori::Fuzz::HistoryRecord do
       end
     end
 
+    # #1423: the same row the proxy writes for these bytes, not `target = ""` and a version of
+    # `/echo?x=1`.
+    it "files an unframable request line as the verbatim line with no version" do
+      with_store do |store|
+        r = result_with("GET  /echo?x=1   HTTP/1.1\r\nHost: t.test\r\n\r\n",
+          "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n", matched: true)
+        id = Gori::Fuzz::HistoryRecord.record(store, r, scheme: "http", host: "t.test", port: 80,
+          http2: false, source: Gori::FlowSource::Kind::Fuzzer,
+          surface: Gori::FlowSource::Surface::Cli) { }.not_nil!
+        detail = store.get_flow(id).not_nil!
+        detail.row.method.should eq("GET")
+        detail.row.target.should eq("GET  /echo?x=1   HTTP/1.1")
+        detail.http_version.should eq("")
+      end
+    end
+
+    # Over h2 the wire carried `:path: /a b`, not an h1 line, so that is what the row files.
+    it "files an h2 send's target as the :path it went out with" do
+      with_store do |store|
+        r = result_with("POST /a b HTTP/1.1\r\nHost: t.test\r\n\r\n",
+          "HTTP/2 200\r\ncontent-length: 2\r\n\r\n", matched: true)
+        id = Gori::Fuzz::HistoryRecord.record(store, r, scheme: "https", host: "t.test", port: 443,
+          http2: true, source: Gori::FlowSource::Kind::Fuzzer,
+          surface: Gori::FlowSource::Surface::Cli) { }.not_nil!
+        detail = store.get_flow(id).not_nil!
+        detail.row.target.should eq("/a b")
+        detail.http_version.should eq("HTTP/2")
+      end
+    end
+
     it "returns nil when the result kept no request bytes (keep_bodies was :none)" do
       with_store do |store|
         r = result_with(nil, "HTTP/1.1 200 OK\r\n\r\n", matched: true)

@@ -67,9 +67,9 @@ describe "FuzzerView CONFIG pane on a short pane" do
 end
 
 # `handle_detail` matched no arm for Home/End/PgUp/PgDn and its trailing `true` swallowed
-# them, and FuzzerController defines no `body_scroll`, so the Runner's
-# `page_nav_delta` → `body_scroll` fallback could not cover for it either. This pane was the
-# only ReadPane consumer in the tree with neither path.
+# them, and FuzzerController had no `body_scroll` (it has one for RESULTS only since #1443),
+# so the Runner's `page_nav_delta` → `body_scroll` fallback could not cover for it either.
+# This pane was the only ReadPane consumer in the tree with neither path.
 private def detail_view : FuzzerView
   body = (0...40).map { |i| "line #{i} ................" }.join("\n")
   view = FuzzerView.new
