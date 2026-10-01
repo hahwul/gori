@@ -32,7 +32,16 @@ class Gori::Tui::RepeaterView
     # to read as the front of the next request — gori desyncing its own connection while
     # reporting `✓ sent`. Hex mode is the documented byte-exact escape hatch; it has to
     # start from the bytes.
-    @req_hex_edit = HexEdit.new(@grpc_mode ? @grpc_payload : @editor.wire_bytes)
+    #
+    # The bytes TEXT mode sends, though, not the line buffer verbatim (#1427). A typed or
+    # pasted line carries the editor's bare LF, which `expanded_text_to_bytes` promotes to
+    # CRLF in the head (and in a CRLF-less multipart body) on every ^R. Seeding the raw buffer
+    # made ^X a peek that changed the wire: the pane showed, and hex-mode ^R sent, a bare-LF
+    # head text mode never would — and a typed multipart body shipped LF under the
+    # Content-Length the reflection measured over its CRLF form. Both steps are no-ops on a
+    # capture (CRLF head, CRLF-carrying body), so the bytes above stay byte-exact. `$KEY`
+    # expansion is deliberately NOT applied: `request_text` persists this buffer.
+    @req_hex_edit = HexEdit.new(@grpc_mode ? @grpc_payload : text_wire_form(@editor.wire_text))
     @scroll_req = 0 # entering the same bytes isn't an edit — no @dirty
   end
 

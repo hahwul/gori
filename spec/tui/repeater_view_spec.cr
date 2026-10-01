@@ -1668,6 +1668,38 @@ describe Gori::Tui::RepeaterView do
     String.new(view.request_bytes).should eq(req)
   end
 
+  # #1427: a TYPED line carries the editor's bare LF, which text mode's ^R promotes to CRLF in
+  # the head. Seeding hex from the raw line buffer made a pure peek change the wire — hex-mode
+  # ^R sent `HTTP/1.1\nHost`, a bare-LF head text mode never sends.
+  it "snapshots a typed request's head as the CRLF text mode sends" do
+    view = RepeaterView.new
+    view.restore("http://127.0.0.1", "GET /peek HTTP/1.1\nHost: h\n\n", false, false)
+    text_mode = String.new(view.request_bytes)
+    text_mode.should eq("GET /peek HTTP/1.1\r\nHost: h\r\n\r\n")
+    view.toggle_request_hex.should be_true
+    String.new(view.request_bytes).should eq(text_mode)
+    view.toggle_request_hex.should be_false # a peek writes nothing back
+    view.dirty?.should be_false
+    view.request_text.should eq("GET /peek HTTP/1.1\nHost: h\n\n")
+  end
+
+  # The body half of the same peek: a typed multipart body's delimiters are promoted on ^R,
+  # and the reflected Content-Length measures that CRLF form — so an LF snapshot shipped a
+  # body shorter than the header it went out under.
+  it "snapshots a typed multipart body in the CRLF form its Content-Length measures" do
+    view = RepeaterView.new
+    view.restore("http://127.0.0.1",
+      "POST /up HTTP/1.1\nHost: h\nContent-Type: multipart/form-data; boundary=XX\nContent-Length: 0\n\n" \
+      "--XX\nContent-Disposition: form-data; name=\"a\"\n\n1\n--XX--\n", false, true)
+    text_mode = String.new(view.request_bytes)
+    text_mode.should contain("\r\n\r\n--XX\r\nContent-Disposition")
+    view.toggle_request_hex.should be_true
+    hex_mode = String.new(view.request_bytes)
+    hex_mode.should eq(text_mode)
+    head, body = hex_mode.split("\r\n\r\n", limit: 2)
+    head.should contain("Content-Length: #{body.bytesize}")
+  end
+
   it "pipeline_requests keeps a bodied request's separator (no double terminator)" do
     view = RepeaterView.new
     req = "POST /a HTTP/1.1\nHost: h\nContent-Length: 4\n\ndata\n%%%\nGET /b HTTP/1.1\nHost: h\n"
