@@ -395,6 +395,30 @@ describe Gori::Tui::TextArea do
     end
   end
 
+  describe "#replace_line" do
+    it "is an undo step of its own by default" do
+      ta = TextArea.new("CL: 1\nab")
+      ta.replace_line(0, "CL: 9")
+      ta.undo
+      ta.text.should eq("CL: 1\nab")
+    end
+
+    # A derived line (the auto Content-Length) joins the step of the edit that caused it, and
+    # does not end the typing run it rides along with (#1417).
+    it "folds into the current step with fold: true" do
+      ta = TextArea.new("CL: 2\nab")
+      ta.move(1, 0)
+      ta.end_of_line
+      ta.insert('c')
+      ta.replace_line(0, "CL: 3", fold: true)
+      ta.insert('d')
+      ta.replace_line(0, "CL: 4", fold: true)
+      ta.text.should eq("CL: 4\nabcd")
+      ta.undo # the whole run, reflection included
+      ta.text.should eq("CL: 2\nab")
+    end
+  end
+
   describe "#match_count / #replace_matches (^F find&replace)" do
     it "counts and replaces every occurrence, case-insensitively like the search" do
       ta = TextArea.new("Admin admin\nADMIN x")

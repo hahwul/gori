@@ -694,14 +694,19 @@ module Gori::Tui
     #
     # The other half of the defect above: even with the rewrite left default-on, a pane that
     # keeps showing the operator's `5` while the wire carries gori's `16` is a display lie
-    # about a live request. So the rewrite is applied where the operator can see it and undo
-    # it, exactly as the Repeater's auto-CL does — after which `pending_edit`'s own sync has
-    # nothing left to change and display and wire agree by construction.
+    # about a live request. So the rewrite is applied where the operator can see it, exactly
+    # as the Repeater's auto-CL does — after which `pending_edit`'s own sync has nothing left
+    # to change and display and wire agree by construction.
     #
     # `replace_line` (not `set_text`) keeps the caret and the undo stack, so this can run on
-    # every keystroke. The CL line is located in the RAW editor head BY CONTENT rather than
-    # by transplanting the expanded-space index: a multi-line `$KEY` expansion earlier in the
-    # head shifts the line count, and the index would then overwrite an unrelated header.
+    # every keystroke. It FOLDS into the edit's own undo step: as a step of its own, ⌃Z on the
+    # restored state re-applied it and pushed another, so undo was dead after any edit that
+    # changed the body length (#1417). Folded, an undo pops a pre-keystroke state, this
+    # re-derives its Content-Length and pushes nothing, and the next ⌃Z goes further back.
+    #
+    # The CL line is located in the RAW editor head BY CONTENT rather than by transplanting
+    # the expanded-space index: a multi-line `$KEY` expansion earlier in the head shifts the
+    # line count, and the index would then overwrite an unrelated header.
     private def reflect_content_length_in_editor : Nil
       return unless @editing && @editor_dirty && @sync_content_length
       return if @loaded_ws # no head to update — see pending_edit
@@ -714,7 +719,7 @@ module Gori::Tui
       lines = @editor.lines_snapshot
       head_end = lines.index(&.empty?) || lines.size
       if idx = (0...head_end).find { |i| content_length_line?(lines[i]) }
-        @editor.replace_line(idx, new_line) unless lines[idx] == new_line
+        @editor.replace_line(idx, new_line, fold: true) unless lines[idx] == new_line
       end
       # A head with NO Content-Length line got one spliced in by `add_when_missing`. Leave
       # the buffer alone rather than inserting a line under the caret mid-keystroke; the
@@ -744,7 +749,7 @@ module Gori::Tui
       return unless text_editing?
       before = @editor.edits
       @editor.undo
-      mark_editor_edit(reflect: false) if @editor.edits != before # see mark_editor_edit
+      mark_editor_edit if @editor.edits != before
     end
 
     def edit_insert(ch : Char) : Nil
@@ -775,15 +780,9 @@ module Gori::Tui
     # Content-Length is brought in line with what a forward would send (see
     # `reflect_content_length_in_editor`). Every edit path funnels through here so the pane
     # and the wire cannot drift.
-    #
-    # `reflect: false` is `edit_undo`'s alone, for the reason the Repeater's `mark_req_edit`
-    # gives: the reflection is itself an edit, so running it on the state ⌃Z just restored
-    # re-applied the change being undone and pushed a fresh undo state on top. ⌃Z was dead
-    # after any edit that changed the body length (#1417). An undo snapshot is a state the
-    # buffer really held, and a forward still syncs Content-Length in `pending_edit`.
-    private def mark_editor_edit(reflect : Bool = true) : Nil
+    private def mark_editor_edit : Nil
       @editor_dirty = true
-      reflect_content_length_in_editor if reflect
+      reflect_content_length_in_editor
     end
 
     # `selecting` is the ⇧ half, forwarded to `TextArea#move` exactly as `edit_motion_key` does —

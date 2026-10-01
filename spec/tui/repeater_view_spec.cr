@@ -698,22 +698,35 @@ describe Gori::Tui::RepeaterView do
     view.request_text.includes?("Content-Length: 0abc").should be_true
   end
 
-  # The reflection is itself an edit, so running it on the state ⌃Z just restored re-applies
-  # the change being undone: an auto-CL rewrite was unreachable by undo at any depth.
-  it "⌃Z restores a line the auto-Content-Length reflection rewrote" do
+  # The reflection is itself an edit. Run on the state ⌃Z just restored it re-applied the change
+  # being undone, so an auto-CL rewrite was unreachable by undo; skipping it instead left a
+  # snapshot between each keystroke and its reflection, where the pane showed a length the send
+  # would not use (#1417). It folds into the keystroke's step now: every ⌃Z lands on a state
+  # whose visible Content-Length is the one ^R sends.
+  it "⌃Z takes back a body edit with the Content-Length it reflected, one step per edit" do
     view = RepeaterView.new
     view.restore("https://h.test",
       "POST /x HTTP/1.1\nHost: h.test\nContent-Length: 99\n\nhi", false, true)
     view.pane_advance(1)
     view.goto_request_line(5)
     view.request_text.includes?("Content-Length: 2").should be_true # restore already reflected
+    view.edit_end
     view.edit_insert('!')
-    view.request_text.includes?("Content-Length: 3").should be_true # …and so did the keystroke
+    view.edit_home # end the typing run, so `?` is a step of its own
+    view.edit_end
+    view.edit_insert('?')
+    view.request_text.includes?("Content-Length: 4").should be_true
 
-    view.edit_undo # the reflection…
-    view.edit_undo # …then the keystroke
+    view.edit_undo
+    view.request_text.should end_with("hi!")
+    view.request_text.includes?("Content-Length: 3").should be_true
+
+    view.edit_undo
+    view.request_text.should end_with("\nhi")
     view.request_text.includes?("Content-Length: 2").should be_true
-    view.request_text.includes?("hi!").should be_false
+
+    view.edit_undo # restore's reflection was never a step: nothing brings back the stale 99
+    view.request_text.includes?("Content-Length: 99").should be_false
   end
 
   it "keeps the REQUEST editor's Content-Length in sync while editing the body" do

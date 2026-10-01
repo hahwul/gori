@@ -1297,14 +1297,22 @@ module Gori::Tui
 
     # Replace one line in-place (cursor clamped when on that row). Used by Repeater to
     # resync a lone Content-Length header without resetting the whole buffer.
-    def replace_line(idx : Int32, content : String) : Nil
+    #
+    # `fold: true` takes no undo snapshot: the rewrite joins the step of the edit that caused
+    # it. Only for a line DERIVED from the rest of the buffer (the auto Content-Length), which
+    # the owner re-derives after an undo too. As a step of its own it left a snapshot taken
+    # between a keystroke and its reflection, so ⌃Z landed on a Content-Length that matched
+    # neither body (#1417), and the forced push ended every typing run. A line the operator
+    # could want back on its own must not fold: nothing else would ever restore it.
+    def replace_line(idx : Int32, content : String, fold : Bool = false) : Nil
       return if idx < 0 || idx >= @lines.size
       return if @lines[idx] == content
-      push_undo
+      push_undo unless fold
       @lines[idx] = content
       if @cy == idx
         @cx = @cx.clamp(0, content.size)
         snap_cx_to_cluster(0) # the replacement line re-clusters under the old index
+        break_run             # the run's {cy, cx} named a line that is now different
       end
       @styled = nil
       @edits += 1
