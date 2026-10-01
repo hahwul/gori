@@ -995,6 +995,29 @@ describe Gori::Decoder do
       end
     end
 
+    it "names only the cycle, whichever chain reached it first" do
+      # Flattened in settings order: listed first, `caller` reaches the cycle from outside, and
+      # the reason for `selfref` must read the same as when it is listed second.
+      [[{"caller", "selfref"}, {"selfref", "selfref"}], [{"selfref", "selfref"}, {"caller", "selfref"}]].each do |entries|
+        with_library(entries) do |reg|
+          err = Gori::Decoder.run(reg, "x".to_slice, "selfref").steps[0].error.not_nil!
+          err.should contain "recursive definition (selfref > selfref)"
+          err.should_not contain "caller"
+        end
+      end
+    end
+
+    it "names a mutual cycle the same way whatever order the chains are saved in" do
+      [[{"a", "b"}, {"b", "a"}], [{"b", "a"}, {"a", "b"}], [{"c", "b"}, {"a", "b"}, {"b", "a"}]].each do |entries|
+        with_library(entries) do |reg|
+          %w[a b].each do |name|
+            Gori::Decoder.run(reg, "x".to_slice, name).steps[0].error.not_nil!
+              .should contain "recursive definition (a > b > a)"
+          end
+        end
+      end
+    end
+
     it "names the inner step that broke, not just the saved chain" do
       with_library([{"peel", "upper > gunzip"}]) do |reg|
         res = Gori::Decoder.run(reg, "not gzip".to_slice, "peel")

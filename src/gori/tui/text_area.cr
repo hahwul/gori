@@ -1431,7 +1431,12 @@ module Gori::Tui
     # the hairline); `gauge_focused` brightens the thumb when this pane holds focus.
     def render(screen : Screen, rect : Rect, cursor : Bool, highlight : Symbol? = nil, peek : Bool = false,
                gauge : Bool = false, gauge_focused : Bool = false) : Nil
-      return if rect.empty?
+      # Nothing drawn means no drawn rows: kept, the last frame's rows let READ chrome paint a
+      # caret from a taller layout onto the borders after the pane shrank to nothing (#1433).
+      if rect.empty?
+        @last_rows = [] of VRow
+        return
+      end
       @last_h = rect.h                                           # remembered for scroll_view (wheel) clamping
       gw = @gutter ? {Gutter.width(@lines.size), rect.w}.min : 0 # never exceed the pane
       cx0 = rect.x + gw                                          # content start x (after the optional gutter)

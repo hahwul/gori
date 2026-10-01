@@ -656,10 +656,10 @@ module Gori
         parser.parse(args)
         abort "gori run intercept direction: missing <both|request|response>" if positional.empty?
         abort "gori run intercept direction: too many arguments (expected one)" if positional.size > 1
-        dir = positional[0].strip.downcase
-        abort "gori run intercept direction: invalid direction '#{positional[0]}' (expected both|request|response)" unless dir.in?("both", "request", "response")
+        dir = Interceptor::Direction.from_arg?(positional[0])
+        abort "gori run intercept direction: invalid direction '#{positional[0]}' (expected both|request|response)" unless dir
 
-        status, detail = enqueue_intercept(project_name, db_path, "set_direction", arg: dir)
+        status, detail = enqueue_intercept(project_name, db_path, "set_direction", arg: dir.arg)
         emit_intercept_ack(status, detail, format)
       end
     end

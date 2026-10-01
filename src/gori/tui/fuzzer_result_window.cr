@@ -39,8 +39,9 @@ module Gori::Tui
           charge = self.class.result_bytes(result)
         end
       end
-      @rows << result
-      @charges << charge
+      at = insertion_point(result.index)
+      @rows.insert(at, result)
+      @charges.insert(at, charge)
       @projected_indices.add(result.index) if projected
       @bytes += charge
 
@@ -57,6 +58,23 @@ module Gori::Tui
         evicted += 1
       end
       evicted
+    end
+
+    # Where `append` puts a row with this index: after every row whose index is not greater, so
+    # `rows` stays in index order — the order `o:index` promises and a saved run is read back
+    # in (`ORDER BY idx, id`) — however a concurrent run's results arrive (#1432). A resend's
+    # repeated index lands after the earlier copy, as `id` breaks that tie in the Store.
+    #
+    # Scanned from the tail: a result is late by at most about the run's concurrency, so the
+    # walk is that short, and an in-order arrival (every serial run) is a plain push.
+    def insertion_point(index : Int64) : Int32
+      # Older than the whole window (a straggler a full window evicts at once): no walk.
+      return 0 if (first = @rows.first?) && index < first.index
+      at = @rows.size
+      while at > 0 && @rows[at - 1].index > index
+        at -= 1
+      end
+      at
     end
 
     def projected?(index : Int64) : Bool

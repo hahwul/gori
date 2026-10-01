@@ -60,8 +60,14 @@ module Gori::Tui
         @detail.row.method
       end
 
-      def host_path : String
+      # Built once: `detail` never changes, and the list measures every entry's width each
+      # frame to size its HOST / PATH column.
+      getter host_path : String do
         "#{@detail.row.host}#{Url.origin_path(@detail.row.target)}"
+      end
+
+      getter host_path_width : Int32 do
+        Screen.draw_width(host_path)
       end
 
       # The one-word verdict for the master row: the state while it is not done, else the
@@ -608,7 +614,8 @@ module Gori::Tui
     # which request was selected or that there were any more.
     private def render_list(screen : Screen, rect : Rect, y : Int32, bottom : Int32, focused : Bool) : Nil
       return if y >= bottom # a pane with no room even for the column header
-      hdr = sprintf("  %-3s %-6s %-38s %s", "#", "METHOD", "HOST / PATH", "VERDICT")
+      hw = list_host_width(rect.w, @entries.max_of?(&.host_path_width) || 0)
+      hdr = "  #{fit("#", 3)} #{fit("METHOD", 6)} #{fit("HOST / PATH", hw)} VERDICT"
       screen.text(rect.x, y, hdr, Theme.muted, Theme.bg, Attribute::Bold, width: rect.w)
       y += 1
       rows = {bottom - y, 0}.max
@@ -624,8 +631,8 @@ module Gori::Tui
         screen.fill(Rect.new(rect.x, y, rect.w, 1), bg) if selected && focused
         screen.text(rect.x, y, selected ? "▎" : " ", Theme.focus_gold, bg)
         # The `#` column is the SOURCE ordinal — stable under a filter, and what an operator quotes.
-        cols = " #{fit((src + 1).to_s, 3)} #{fit(e.method, 6)} #{fit(e.host_path, 38)} "
-        screen.text(rect.x + 1, y, cols, Theme.text, bg)
+        cols = " #{fit((src + 1).to_s, 3)} #{fit(e.method, 6)} #{fit(e.host_path, hw)} "
+        screen.text(rect.x + 1, y, cols, Theme.text, bg, width: rect.right - (rect.x + 1))
         vx = rect.x + 1 + Screen.draw_width(cols)
         v = e.verdict
         screen.text(vx, y, master_verdict_label(e), master_verdict_color(v), bg,
@@ -684,7 +691,8 @@ module Gori::Tui
     private def render_trials(screen : Screen, x : Int32, y : Int32, right : Int32, bottom : Int32,
                               t : Authorize::Target, focused : Bool) : Int32
       return y if y >= bottom
-      hdr = sprintf("  %-14s %-7s %-9s %-22s %s", "IDENTITY", "STATUS", "SIZE", "Δ VS BASELINE", "VERDICT")
+      dw = trial_delta_width(right - x, t.trials.max_of? { |tr| Screen.draw_width(tr.delta || "—") } || 0)
+      hdr = "  #{fit("IDENTITY", 14)} #{fit("STATUS", 7)} #{fit("SIZE", 9)} #{fit("Δ VS BASELINE", dw)} VERDICT"
       screen.text(x, y, hdr, Theme.muted, Theme.bg, Attribute::Bold, width: right - x)
       y += 1
       rows = {bottom - y, 0}.max
@@ -699,8 +707,8 @@ module Gori::Tui
         screen.text(x, y, sub ? "▎" : " ", Theme.focus_gold, bg)
         size = trial.meta.size.try { |s| Repeater::ExchangeMeta::Format.bytes(s) } || "—"
         cols = " #{fit(trial.identity, 14)} #{fit(trial.meta.status_text, 7)} " \
-               "#{fit(size, 9)} #{fit(trial.delta || "—", 22)} "
-        screen.text(x + 1, y, cols, Theme.text, bg)
+               "#{fit(size, 9)} #{fit(trial.delta || "—", dw)} "
+        screen.text(x + 1, y, cols, Theme.text, bg, width: right - (x + 1))
         vx = x + 1 + Screen.draw_width(cols)
         screen.text(vx, y, trial_verdict_label(trial.verdict), trial_verdict_color(trial.verdict), bg,
           Attribute::Bold, width: right - vx)
@@ -822,6 +830,29 @@ module Gori::Tui
       in .error?     then Theme.muted
       in .baseline?  then Theme.focus_gold
       end
+    end
+
+    # The columns a row keeps for its VERDICT: the widest label either table draws
+    # (`⚠ 12 same`, `different`) plus a cell of air. VERDICT is the answer this tab exists
+    # for, so the elastic column — HOST / PATH, Δ VS BASELINE — gives way first: a fixed
+    # 38/22 pushed the verdict off the card under ~62 columns, and cut every delta to its
+    # status half even on a 140-column terminal (#1433).
+    VERDICT_W = 11
+
+    # HOST / PATH is as wide as the widest one (over EVERY entry, so the column holds still
+    # while the list scrolls), within what the `▎ ### METHOD ` prefix (14 cells) and VERDICT
+    # leave, and floored so a narrow pane still names the host.
+    private def list_host_width(w : Int32, widest : Int32) : Int32
+      elastic_width(w - 14 - VERDICT_W, widest, "HOST / PATH")
+    end
+
+    # Δ VS BASELINE the same way, after the cursor, IDENTITY, STATUS and SIZE (36 cells).
+    private def trial_delta_width(w : Int32, widest : Int32) : Int32
+      elastic_width(w - 36 - VERDICT_W, widest, "Δ VS BASELINE")
+    end
+
+    private def elastic_width(room : Int32, widest : Int32, header : String) : Int32
+      { {widest, Screen.draw_width(header)}.max, {room, 8}.max }.min
     end
 
     # One column, cut and padded to `w` DISPLAY COLUMNS — never characters. The rows here are

@@ -1625,6 +1625,14 @@ module Gori::MCP
     def __drain_fuzz_event(fjob : FuzzJob, ev : Fuzz::Event) : Nil
       drain_fuzz_event(fjob, ev)
     end
+
+    def __register_fuzz_job(fjob : FuzzJob) : Nil
+      @jobs[fjob.id] = fjob
+    end
+
+    def __db_path : String?
+      @db_path
+    end
   end
 end
 
@@ -1685,6 +1693,38 @@ describe "MCP fuzz — the live stop_index follows the terminal status (#1270)" 
       tools.__drain_fuzz_event(errored, done)
       errored.status.should eq(:error)
       errored.stop_index.should be_nil
+    end
+  end
+end
+
+describe "MCP fuzz — a live job's results page in index order (#1432)" do
+  it "lists a concurrent run's rows by index, not as they completed" do
+    with_store do |store|
+      tools = tools_for(store)
+      cfg = Gori::Fuzz::Config.new
+      gen = Gori::Fuzz::Generator.new(Gori::Fuzz::Template.parse("GET / HTTP/1.1\r\nHost: h\r\n\r\n"), [] of Gori::Fuzz::PayloadSet, cfg)
+      engine = Gori::Fuzz::Engine.new(gen, Gori::Fuzz::Matcher.new, NullFuzzBackend.new, cfg)
+      audit = Gori::MCP::Tools::JobAudit.new("http://h:80", nil, 1, nil, 0_i64)
+      fjob = Gori::MCP::Tools::FuzzJob.new("fz_order", 8_i64, engine, :none,
+        Gori::Fuzz::Origin.new("http", "h", 80), false, audit, tools.__db_path)
+      tools.__register_fuzz_job(fjob)
+      [1, 2, 0, 4, 3, 6, 5, 7].each do |i|
+        # #4 is a failed send: kept for its fault, but not a match.
+        tools.__store_fuzz_result(fjob, Gori::Fuzz::Result.new(i.to_i64, ["p#{i}"], nil, 200, 1_i64,
+          1, 1, 1_i64, i == 4 ? "refused" : nil, i != 4, false, nil).tap { |r| fjob.clusters.add(r) })
+      end
+
+      page = ->(args : String) {
+        call_json(tools, "fuzz_results", args)["results"].as_a.map(&.["index"].as_i)
+      }
+      page.call(%({"job_id":"fz_order"})).should eq((0..7).to_a)
+      page.call(%({"job_id":"fz_order","offset":2,"limit":3})).should eq([2, 3, 4])
+      page.call(%({"job_id":"fz_order","matched_only":true})).should eq([0, 1, 2, 3, 5, 6, 7])
+
+      # One cluster's members page the same way.
+      shape = Gori::Fuzz::Shape.hex(Gori::Fuzz::Clusters.key(fjob.results.first)[0])
+      members = call_json(tools, "fuzz_results", %({"job_id":"fz_order","cluster":#{shape.to_json}}))
+      members["results"].as_a.map(&.["index"].as_i).should eq([0, 1, 2, 3, 5, 6, 7])
     end
   end
 end

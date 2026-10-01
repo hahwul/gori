@@ -1,4 +1,5 @@
 require "../spec_helper"
+require "../support/memory_backend"
 
 include Gori::Tui
 
@@ -76,5 +77,37 @@ describe Gori::Tui::TextReadState do
     state.sync_from(ed)
     state.selection?(ed).should be_true
     state.copy_text(ed).should eq("alpha beta!")
+  end
+end
+
+# A pane shrunk to nothing renders nothing, and its READ chrome must not paint the caret from
+# the last frame's rows onto whatever the rect now sits on — the borders (#1433).
+describe "Gori::Tui::TextReadState#paint_chrome after the pane shrinks" do
+  it "paints no caret into an empty rect" do
+    ed = area("one\ntwo\nthree\nfour\nfive")
+    state = TextReadState.new
+    ed.place_cursor(4, 0)
+    b = MemoryBackend.new(20, 8)
+    screen = Screen.new(b)
+    ed.render(screen, Rect.new(0, 1, 20, 5), cursor: false)
+    state.paint_chrome(screen, Rect.new(0, 1, 20, 5), ed)
+    b.bg_at(0, 5).should eq Theme.accent_bg # the caret, on its row, while the pane is tall
+
+    b2 = MemoryBackend.new(20, 8)
+    screen2 = Screen.new(b2)
+    shrunk = Rect.new(0, 1, 20, 0)
+    ed.render(screen2, shrunk, cursor: false)
+    state.paint_chrome(screen2, shrunk, ed)
+    8.times { |y| 20.times { |x| b2.bg_at(x, y).should_not eq Theme.accent_bg } }
+  end
+
+  it "never paints below a rect shorter than the rows it is handed" do
+    ed = area("one\ntwo\nthree\nfour\nfive")
+    state = TextReadState.new
+    ed.place_cursor(4, 0)
+    ed.render(Screen.new(MemoryBackend.new(20, 8)), Rect.new(0, 1, 20, 5), cursor: false)
+    b = MemoryBackend.new(20, 8)
+    state.paint_chrome(Screen.new(b), Rect.new(0, 1, 20, 2), ed)
+    (3...8).each { |y| 20.times { |x| b.bg_at(x, y).should_not eq Theme.accent_bg } }
   end
 end

@@ -104,8 +104,14 @@ module Gori::Decoder
                              flat : Hash(String, Array(String)?), why : Hash(String, String),
                              stack : Array(String)) : Array(String)?
       return flat[nk] if flat.has_key?(nk)
-      if stack.includes?(nk)
-        why[nk] = "recursive definition (#{(stack + [nk]).join(" > ")})"
+      if at = stack.index(nk)
+        # The CYCLE, not the whole stack, and read from its smallest name: the frames below `at`
+        # are whichever outer chain happened to reach it first, and where the cycle is entered
+        # is settings order too. Either one made the reason depend on that order, and naming
+        # the outer frames pinned a self-referencing chain's error on an unrelated chain (#1433).
+        cycle = stack[at..]
+        cycle = cycle.rotate(cycle.index!(cycle.min))
+        why[nk] = "recursive definition (#{(cycle + [cycle.first]).join(" > ")})"
         return nil # NOT memoized: this frame only failed because it is on the stack
       end
 

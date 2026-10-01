@@ -2,10 +2,15 @@
 
 ## Unreleased
 
+- Authorize: each row keeps its verdict on the card in a narrow terminal, and a wide one shows the whole Δ vs baseline (#1433)
+- TUI: the Fuzzer's response detail has one blank line between head and body, a shrunk Repeater no longer leaves its caret on the borders, and the Env empty state names the palette for Change prefix (#1433)
+- Intercept: a held response names the method of the request as you edited it, turning catch on no longer warns about an HTTPS→HTTP/1.1 downgrade gori stopped doing, and `gori run intercept direction` and MCP `intercept_set_direction` accept the `requestonly`/`responseonly` that `intercept list` reports (#1433)
+- Decoder: a saved chain that calls itself names only its own cycle in the error, not whichever chain reached it first (#1433)
 - TUI: key chips and empty-state hints follow rebound keys, the Repeater keeps ↑ in INS at the first line, Global shortcuts work from sub-tab strips without typing through, and capture-off is marked in yellow (#1374, #1375)
 - QL: `id:N`, `flow:N` and `flow_id:N` are refused with a hint to use the surface's id selector instead of matching zero rows, and queries with uncompilable terms report which term failed and why. `path:` reads the path of a plaintext proxy flow too, so `path~^/admin` finds it and `path:http` no longer matches every such flow (#1369, #1410, Refs #1379)
 - Store: issue notes and retest assertions read byte-for-byte, including embedded NULs, and issue JSON escapes those bytes instead of truncating them (#1412)
 - Notes: a TUI save writes only the notes you changed, so another session's edit or delete of a different note is no longer reverted, whether you were typing in Notes or adding a note from another tab (#1415)
+- Project: the Scope and Host overrides lists stay on the row you selected when another session deletes a row above it, and a confirmed delete removes the row the prompt named, or says it is already gone (#1431)
 - CLI: `notes` shows each note's stable id beside its list position, and `links` adds `--note-position` while retaining `--note` as an id for existing scripts (#1412)
 
 - Sequencer: an all-digit token set is classified as 'digits' rather than 'lower-hex', and the live collection cursor follows samples all the way to the end instead of stopping short (#1390, #1429)
@@ -50,6 +55,7 @@
 - Network: an absolute-form `https://` request sent to the plain proxy listener reaches its origin over TLS instead of in cleartext while History recorded https, a forwarded absolute-form target is rewritten without touching the rest of the request line (`GET http://h/p?a b HTTP/1.1` lost its version), and a request head over 256 KiB is answered `431` and recorded instead of resetting with nothing captured (#1410)
 - Network: an HTTP/2 or WebSocket frame that declares a large length and then stalls holds only the bytes that actually arrived, instead of the declared 16 MB per connection, so a client or origin can no longer run gori out of memory with a few bytes per connection
 - Fuzzer: a cluster bomb over tens of thousands of positions — `auto_mark` on a large captured form body reaches that — runs instead of overflowing the stack and ending gori
+- Fuzzer: RESULTS under `o:index` while a run streams, and MCP `fuzz_results`, list rows in index order like a reopened saved run instead of completion order, and the selection stays on its row as earlier results land (#1432)
 - OAST: malformed provider URLs now report a clean configuration error instead of crashing before the HTTP transport (#1359)
 - Repeater: **GraphQL: insert introspection query** (and its legacy variant for older servers) in the `Ctrl-P` palette rewrites the tab's request into a POST of the introspection query to the same endpoint, keeping its other headers and their captured line endings (#1355)
 - Probe: passive scans recover dropped or failed flows, active work is coalesced and retried instead of disappearing on queue bursts, differential probes reject timed-out evidence, and large JSON API specs get a bounded late-body check.
