@@ -1228,7 +1228,7 @@ gori run evidence show 12                                          # the copy, c
 gori run evidence show 12 --include-sensitive --format=json
 gori run evidence link 12 --issue=9                                # add another Issue membership
 gori run evidence unlink 12 --issue=7                              # snapshot remains if orphaned
-gori run evidence delete 12
+gori run evidence delete 12 --yes
 ```
 
 | Option | Description |

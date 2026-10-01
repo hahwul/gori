@@ -46,7 +46,7 @@ module Gori
         abort "gori run fuzz: --brute MIN (#{min}) is greater than MAX (#{max})" if min > max
         # `BruteForce` floors MIN at 1 silently; `abc:0-2` then sent 12 payloads under a banner
         # that counted them, minus the empty string the operator asked for. Refused by name.
-        abort "gori run fuzz: --brute MIN must be at least 1 (got #{min}); use --null-payloads for an empty payload" if min < 1
+        abort "gori run fuzz: --brute MIN must be at least 1 (got #{min}); use --null N for empty payloads" if min < 1
         Fuzz::BruteForce.new(charset, min, max)
       end
 

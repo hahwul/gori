@@ -282,12 +282,14 @@ module Gori
       private def self.cmd_evidence_delete(args : Array(String)) : Nil
         db_path : String? = nil
         project_name : String? = nil
+        yes = false
         positional = [] of String
 
         parser = OptionParser.new do |p|
-          p.banner = "Usage: gori run evidence delete ID\n\n" \
+          p.banner = "Usage: gori run evidence delete ID --yes\n\n" \
                      "Delete one frozen copy. Its bytes cannot be recovered from the source — that is\n" \
                      "why they were frozen — so prefer freezing a newer copy beside it."
+          p.on("-y", "--yes", "Confirm deletion") { yes = true }
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
@@ -303,6 +305,12 @@ module Gori
         store = open_store(resolve_read_project(project_name, db_path))
         begin
           meta = store.get_evidence_meta(id) || abort("gori run evidence delete: no frozen evidence with id #{id}")
+          # Gated like every other destructive verb here (`issues delete`, `notes delete`, …),
+          # and for the reason the help gives: a frozen copy is the one that cannot come back.
+          unless yes
+            abort "gori run evidence delete: refusing to delete frozen evidence ##{id} without --yes; " \
+                  "its bytes cannot be recovered"
+          end
           abort "gori run evidence delete: NOT deleted (project busy or unwritable) — the copy is unchanged" unless store.delete_evidence(id)
           linked = meta.issue_ids.empty? ? " (orphaned)" : " linked to #{meta.issue_ids.map { |iid| "issue ##{iid}" }.join(", ")}"
           puts "Frozen evidence ##{id}#{linked} deleted."

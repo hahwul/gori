@@ -549,6 +549,17 @@ describe Gori::WordlistCatalog do
       end
     end
 
+    it "renames to a spelling that differs only in case" do
+      # On a case-insensitive filesystem (macOS's default) the new spelling already "exists":
+      # it is the source entry itself, and the exclusive link used to refuse it as a clash.
+      with_wordlist_home do |dir|
+        Catalog.save_values("ids.txt", ["40"])
+        Catalog.rename("ids.txt", "IDS.txt").name.should eq("IDS.txt")
+        Dir.children(dir).should eq(["IDS.txt"])
+        File.read(File.join(dir, "IDS.txt")).should eq("40\n")
+      end
+    end
+
     it "validates both names and requires the source to exist" do
       with_wordlist_home do
         Catalog.save_values("a.txt", ["A"])

@@ -52,14 +52,21 @@ module Gori
         positional.each { |s| flow_ids << parse_flow_id(s, "gori run cache-deception") }
         abort "gori run cache-deception: name at least one flow id (or --flow ID)" if flow_ids.empty?
 
-        store = open_store(resolve_read_project(project_name, db_path))
-        outbound = project_outbound(project_name, db_path, allow_unscoped)
+        project = resolve_read_project(project_name, db_path)
+        store = open_store(project)
+        outbound = project_outbound(project, allow_unscoped)
         overrides = Gori::HostOverrides.load(store)
         engine = Authorize::Engine.live(outbound, !insecure, timeout, overrides: overrides)
+        # The same stop `authorize` takes: polled before every send, so a SIGINT ends the run
+        # with what was already checked — and the buffered `--format json` array — printed.
+        stopping = false
+        interrupted = Run.install_interrupt_trap("cache-deception-interrupt",
+          "interrupted — stopping and reporting the flows already checked…") { stopping = true }
 
         reports, checked, sent, failed =
           begin
-            check_cache_deception_flows(store, engine, outbound, flow_ids.uniq, unsafe_methods, format)
+            check_cache_deception_flows(store, engine, outbound, flow_ids.uniq, unsafe_methods, format,
+              -> { stopping })
           ensure
             store.close
             outbound.close
@@ -69,6 +76,7 @@ module Gori
         deceptions = reports.count(&.verdict.deception?)
         STDERR.puts "checked #{checked} flow#{checked == 1 ? "" : "s"} — " \
                     "#{deceptions} likely cache deception#{deceptions == 1 ? "" : "s"}"
+        Run.report_interrupted(checked, "flow", "checked") if interrupted.call
         exit_if_no_cache_deception_evidence(reports, sent, checked, failed)
       end
 
@@ -80,12 +88,14 @@ module Gori
       # `--format json` array with its summary.
       private def self.check_cache_deception_flows(store : Store, engine : Authorize::Engine,
                                                    outbound : Outbound, flow_ids : Array(Int64),
-                                                   unsafe_methods : Bool, format : Symbol)
+                                                   unsafe_methods : Bool, format : Symbol,
+                                                   stop : Proc(Bool)? = nil)
         reports = [] of CacheDeception::Report
         checked = 0
         sent = 0
         failed = 0
         flow_ids.each do |id|
+          break if stop.try(&.call)
           detail = store.get_flow(id)
           unless detail
             STDERR.puts "gori run cache-deception: no flow with id #{id}"
@@ -94,7 +104,7 @@ module Gori
           next if report_skip_reason?(id, detail, unsafe_methods)
           next if report_outbound_skip?(id, detail.row, outbound)
           report = begin
-            CacheDeception.check(engine, detail)
+            CacheDeception.check(engine, detail, stop: stop)
           rescue ex
             failed += 1
             STDERR.puts "  #{authorize_failure_text(detail, ex)}"
@@ -161,7 +171,10 @@ module Gori
           io << "  ·  cache-busted: " << (control ? cache_deception_trial_text(control) : "—")
           io << "  ·  anonymous cache: " << report.cache.token
         end
-        "[#{report.verdict.label}] #{report.method} #{report.url}\n#{detail}"
+        # Method and URL are the captured request's own bytes, and a trial error can quote the
+        # origin: neither reaches the terminal raw, as `authorize` and `show` print them.
+        "[#{report.verdict.label}] #{CLI::Output.term_safe(report.method)} #{CLI::Output.term_safe(report.url)}\n" \
+        "#{CLI::Output.term_safe(detail)}"
       end
 
       private def self.cache_deception_trial_text(trial : Authorize::Trial) : String
@@ -186,15 +199,17 @@ module Gori
       private def self.cache_deception_report_fields(j : JSON::Builder, report : CacheDeception::Report) : Nil
         j.object do
           j.field "flow_id", report.flow_id
-          j.field "method", report.method
-          j.field "url", report.url
+          # Captured bytes, scrubbed to valid UTF-8 the way `authorize --format json` and MCP
+          # `cache_deception_check` emit them; a raw 0xFF here made the whole document invalid.
+          CLI::Output.json_captured(j, "method", report.method)
+          CLI::Output.json_captured(j, "url", report.url)
           j.field "verdict", report.verdict.label
           j.field "deception", report.verdict.deception?
           j.field "cache", report.cache.token
           cache_deception_trial_fields(j, "authenticated", report.authenticated)
           cache_deception_trial_fields(j, "anonymous", report.anonymous)
           cache_deception_trial_fields(j, "cache_busted", report.control)
-          report.blocked_reason.try { |r| j.field "blocked_reason", r }
+          report.blocked_reason.try { |r| CLI::Output.json_captured(j, "blocked_reason", r) }
         end
       end
 
@@ -207,7 +222,7 @@ module Gori
             j.field "size", trial.summary.size
             j.field "verdict", trial.verdict.label
             j.field "cache", CacheStatus.classify(trial.response_head).token
-            trial.summary.error.try { |e| j.field "error", e }
+            trial.summary.error.try { |e| CLI::Output.json_captured(j, "error", e) }
           end
         end
       end

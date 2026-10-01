@@ -143,7 +143,12 @@ module Gori
       i = 0
       while i < argv.size
         arg = argv[i]
-        if arg == "--config"
+        # Everything past `--` belongs to someone else (`gori run shell -- CMD …`): a child's own
+        # `--config FILE` must reach it untouched, not be eaten as gori's settings path.
+        if arg == "--"
+          rest.concat(argv[i..])
+          break
+        elsif arg == "--config"
           value = argv[i + 1]?
           # A following flag is not a path — treat `--config --edit` as the missing value it is,
           # rather than writing settings to a file literally named "--edit".

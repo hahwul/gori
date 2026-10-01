@@ -489,6 +489,16 @@ describe "gori run show --format json" do
     sse["events"].as_a.size.should eq(n)
   end
 
+  it "carries a non-UTF-8 head byte-exact beside the scrubbed text, as get_flow does" do
+    head = String.new("HTTP/1.1 200 OK\r\nX-Hi: \xE9t\xE9\r\n\r\n".to_slice)
+    detail = flow_detail("http", "x", 80, "GET / HTTP/1.1\r\nHost: x\r\n\r\n", response_head: head)
+    json = JSON.parse(Gori::CLI::Run.show_json_for_spec(detail, true, true))
+    resp = json["response"]
+    resp["head_lossy"].as_bool.should be_true
+    Base64.decode(resp["head_base64"].as_s).should eq(head.to_slice)
+    json["request"].as_h.has_key?("head_lossy").should be_false
+  end
+
   it "emits ws_messages with base64 for a binary frame and text for a text frame" do
     detail = flow_detail("https", "ws.test", 443, "GET /ws HTTP/1.1\r\nHost: ws.test\r\n\r\n",
       response_head: "HTTP/1.1 101 Switching Protocols\r\n\r\n")

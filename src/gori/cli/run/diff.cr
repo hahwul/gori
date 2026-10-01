@@ -58,6 +58,8 @@ module Gori
         # Into a fresh local first: `verdicts` is assigned inside an OptionParser block, so
         # the compiler keeps it a union and `||` cannot narrow it.
         chosen = verdicts
+        # --verdict names the list outright, so an --unchanged beside it would be dropped unsaid.
+        abort "gori run diff: --unchanged has no effect with --verdict (name 'unchanged' in --verdict instead)" if chosen && unchanged
         verdict_list = chosen || (unchanged ? Gori::Diff::Render::ORDER : Gori::Diff::Render::LISTED)
 
         # Each side names its project ONE way. `resolve_read_project` refuses `--project` +
@@ -158,9 +160,11 @@ module Gori
       private def self.emit_diff(report : Gori::Diff::Report, format : Symbol,
                                  verdicts : Array(Gori::Diff::Verdict), issues : Bool) : Nil
         case format
-        when :json     then puts Gori::Diff::Render.json(report, verdicts: verdicts, issues: issues)
-        when :markdown then puts Gori::Diff::Render.markdown(report, verdicts: verdicts, issues: issues)
-        else                print Gori::Diff::Render.text(report, verdicts: verdicts, issues: issues)
+        when :json then puts Gori::Diff::Render.json(report, verdicts: verdicts, issues: issues)
+          # The two prose forms carry captured paths and titles verbatim, so their control bytes are
+          # named before a terminal sees them (`history` does the same); JSON stays escaped.
+        when :markdown then puts CLI::Output.term_safe_multiline(Gori::Diff::Render.markdown(report, verdicts: verdicts, issues: issues))
+        else                print CLI::Output.term_safe_multiline(Gori::Diff::Render.text(report, verdicts: verdicts, issues: issues))
         end
       end
     end

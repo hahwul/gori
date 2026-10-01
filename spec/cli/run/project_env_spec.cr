@@ -26,3 +26,13 @@ describe "gori run project env set argument split" do
     Gori::CLI::Run.env_set_pair_for_spec(["TOKEN", invalid]).should be_nil
   end
 end
+
+describe "gori run project env set refusal" do
+  it "blames the KEY only when the key is what is wrong" do
+    Gori::CLI::Run.env_set_refusal(["bad key=1"]).should contain("invalid KEY")
+    Gori::CLI::Run.env_set_refusal(["TOKEN"]).should contain("missing value for TOKEN")
+    invalid = String.new(Bytes[0xff])
+    Gori::CLI::Run.env_set_refusal(["TOKEN", invalid]).should contain("not valid UTF-8")
+    Gori::CLI::Run.env_set_refusal(["TOKEN=#{invalid}"]).should contain("not valid UTF-8")
+  end
+end

@@ -520,6 +520,14 @@ module Gori
           return pinned if pinned.is_a?(Project)
           name = pinned || "default"
         end
+        # A project's exact short id addresses it here as on every read command (and as the
+        # `GORI_PROJECT` branch above does), instead of being refused as a name that shadows
+        # it. Only the EXACT id: a prefix stays a new project's name, since a short hex word
+        # matching some id's start must not redirect a capture into another engagement.
+        q = name.strip.downcase
+        if by_id = registry.list.find { |pr| registry.id_of(pr).try(&.downcase) == q }
+          return by_id
+        end
         begin
           registry.create(name)
         rescue ex : Gori::Error
@@ -976,14 +984,24 @@ module Gori
       # short-circuiting on "no --project given" would drop Sandbox containment).
       private def self.project_outbound(project_name : String?, db_path : String?,
                                         allow_unscoped : Bool) : Gori::Outbound
-        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
+        project_outbound(resolve_read_project(project_name, db_path), allow_unscoped)
+      end
+
+      # The same gate over a project the caller already resolved, so a command that pins its
+      # project once checks scope against THAT project and not a re-resolved most-recent one.
+      private def self.project_outbound(project : Project, allow_unscoped : Bool) : Gori::Outbound
+        store = open_store(project, read_only: true)
         scope = begin
           Gori::Scope.load(store)
         rescue ex
           store.close
           abort "gori run: could not load project scope (refusing to send unscoped): #{ex.message}"
         end
-        Gori::Outbound.cli(scope, allow_unscoped, owns_store: store)
+        # Every caller takes --allow-unscoped, so a refusal worded by the Outbound itself (gRPC
+        # reflection, a retest step) names it as the remedy, as `guard_outbound` does.
+        outbound = Gori::Outbound.cli(scope, allow_unscoped, owns_store: store)
+        outbound.waiver = "--allow-unscoped"
+        outbound
       end
 
       # Up-front (Layer-1) scope gate for the CLI direct-dial tools, with the policy owned
@@ -1802,6 +1820,13 @@ module Gori
         end
       end
 
+      # `--wordlist` on mine/discover names ONE list (the plan takes one). A second used to
+      # replace the first unsaid; it is refused, pointing at the catalog that merges lists.
+      private def self.one_wordlist(prev : String?, v : String, cmd : String) : String
+        abort "#{cmd}: --wordlist takes one list — combine several with `gori run wordlist save`" if prev
+        v
+      end
+
       # `--format=FMT` and, when `json` is one of `allowed`, its `--json` alias (#1386), on one
       # parser. The alias existed on `notify` alone, so `project list --json` was an unknown
       # option; registering both here is what keeps it on every command that takes `--format`.
@@ -2087,8 +2112,10 @@ module Gori
         Repeater::MessageLines.of(head, body, decode: false)
       end
 
+      # Each line through `term_safe`, as `show` prints the same bytes: a diff line is a slice
+      # of a captured or remote response, and its ESC/OSC must not reach the terminal raw.
       private def self.print_diff(diff : Array(Repeater::DiffLine)) : Nil
-        diff.each { |dl| puts "#{diff_prefix(dl)}#{dl.text}" }
+        diff.each { |dl| puts "#{diff_prefix(dl)}#{CLI::Output.term_safe(dl.text)}" }
       end
 
       # A FOLDED diff (`--context`): the collapsed runs print as their own `@@ … @@` row, in
@@ -2097,7 +2124,7 @@ module Gori
       private def self.print_folded_diff(diff : Array(Repeater::Diff::Folded)) : Nil
         diff.each do |f|
           if line = f.line
-            puts "#{diff_prefix(line)}#{line.text}"
+            puts "#{diff_prefix(line)}#{CLI::Output.term_safe(line.text)}"
           else
             puts "@@ #{f.hidden} unchanged lines @@"
           end

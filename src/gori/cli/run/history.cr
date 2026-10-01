@@ -1519,6 +1519,7 @@ module Gori
               j.field "request" do
                 j.object do
                   j.field "head", scrub(detail.request_head)
+                  emit_lossy_head_json(j, detail.request_head)
                   emit_body_json(j, "body", detail.request_head, detail.request_body, detail.request_body_truncated?, cap,
                     source_size: detail.request_body_truncated? ? detail.request_wire_body_size : nil)
                   if cap.whole?
@@ -1533,6 +1534,7 @@ module Gori
                 j.object do
                   emit_interims_json(j, interims) if interims
                   j.field "head", scrub(detail.response_head)
+                  emit_lossy_head_json(j, detail.response_head)
                   emit_body_json(j, "body", detail.response_head, detail.response_body, detail.response_body_truncated?, cap,
                     source_size: detail.response_body_truncated? ? detail.response_wire_body_size : nil)
                   if cap.whole?
@@ -1602,6 +1604,15 @@ module Gori
             end
           end
         end
+      end
+
+      # A head that is not valid UTF-8 loses its 8-bit octets to `scrub` above, so the exact
+      # bytes ride beside it in the `<field>_lossy` + `<field>_base64` shape `get_flow` and
+      # `gori run repeater --format json` already use.
+      private def self.emit_lossy_head_json(j : JSON::Builder, head : Bytes?) : Nil
+        return if head.nil? || String.new(head).valid_encoding?
+        j.field "head_lossy", true
+        j.field "head_base64", Base64.strict_encode(head)
       end
 
       # An event-stream response's parsed events for `show --format json`; count-only under a

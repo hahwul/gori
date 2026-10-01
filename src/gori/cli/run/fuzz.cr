@@ -447,6 +447,7 @@ module Gori
         note_fuzz_auto_encode(plan)
         note_fuzz_grpc_fields(plan)
         note_fuzz_ws_ignored(plan)
+        note_fuzz_race_ignored(race, follow, retries)
         note_fuzz_unused_sets(plan)
         # Last-byte-sync needs ONE persistent socket per connection to hold back the final byte;
         # h2 frames its own connection per send, so `Backend#send_race` degrades to independent
@@ -687,6 +688,17 @@ module Gori
       # A note and not a refusal: none of the three is WRONG, each is simply inert here (see
       # `Plan#ws_ignored_knobs`). Refusing a run over an inert flag is hostile; saying nothing
       # is how an operator comes to believe a sweep followed redirects it never followed.
+      # The same kind of note for a race group: it is released once, whole, so there is no hop
+      # to follow and no per-request retry (`Engine#run_race` sends each copy exactly once).
+      private def self.note_fuzz_race_ignored(race : Int32?, follow : Bool, retries : Int32) : Nil
+        return unless race
+        named = [] of String
+        named << "--follow-redirects (each copy's 3xx is the result)" if follow
+        named << "--retries (a race group is released once; a failed copy is not re-sent)" if retries > 0
+        return if named.empty?
+        STDERR.puts "gori run fuzz: note: ignored on a --race group — #{named.join("; ")}"
+      end
+
       private def self.note_fuzz_ws_ignored(plan : Fuzz::Plan) : Nil
         return if plan.ws_ignored_knobs.empty?
         named = plan.ws_ignored_knobs.map do |k|
@@ -905,6 +917,7 @@ module Gori
             when Fuzz::ResultEvent
               r = ev.result
               saved.try(&.append(r))
+              fid = nil.as(Int64?)
               # Record BEFORE the emit gate: a recorded flow is evidence whether or not this row
               # is printed (a matched-only listing still records `all`). Bounded by MAX so an
               # `all` sweep of a huge set cannot grow the DB without end — the drop is announced.
@@ -927,7 +940,7 @@ module Gori
                   recorded += 1 if fid
                 end
               end
-              if emit_fuzz_result(r, format, json_stream)
+              if emit_fuzz_result(r, format, json_stream, fid)
                 shown += 1
                 matched += 1 if r.matched?
                 errored += 1 if r.error && !r.matched?
@@ -1181,7 +1194,8 @@ module Gori
       # (the row helpers render "ERR" + the message / `error` field), so a headless run has the
       # same visibility as the TUI — a scope-block or a dead target is no longer silently dropped.
       private def self.emit_fuzz_result(r : Fuzz::Result, format : Symbol,
-                                        json_stream : CLI::Output::FuzzArrayStream?) : Bool
+                                        json_stream : CLI::Output::FuzzArrayStream?,
+                                        flow_id : Int64? = nil) : Bool
         # A re-sent row is shown even when it neither matched nor errored: it is the one row of
         # the run whose request reached the origin twice, and dropping it here would put the
         # duplicate back where it was — invisible outside the connections summary. A row whose
@@ -1197,9 +1211,9 @@ module Gori
           return false
         end
         case format
-        when :jsonl then puts CLI::Output.fuzz_row_json(r)
-        when :json  then json_stream.try(&.append(r))
-        else             puts CLI::Output.fuzz_row_text(r)
+        when :jsonl then puts CLI::Output.fuzz_row_json(r, flow_id)
+        when :json  then json_stream.try(&.append(r, flow_id))
+        else             puts CLI::Output.fuzz_row_text(r, flow_id)
         end
         true
       end

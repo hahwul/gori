@@ -21,7 +21,7 @@ module Gori::Oast
       }
     end
 
-    def payload(url : String, session_id : Int64, provider : String)
+    def payload(url : String, session_id : Int64?, provider : String)
       {payload_url: url, session_id: session_id, provider: provider}
     end
   end

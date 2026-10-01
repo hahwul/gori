@@ -899,6 +899,11 @@ module Gori
         end
         parse_no_positionals(parser, args, "gori run oast listen",
           "pass the provider as --provider KIND and its base URL as --server URL")
+        # Only `--save` opens a project; without it a named one (even a misspelt one) would be
+        # accepted and ignored, the way `presets` refuses it off `--check`.
+        if !save && (project_name || db_path)
+          abort "gori run oast listen: --project/--db only apply with --save"
+        end
 
         kind = Oast::ProviderKind.parse?(provider)
         unless kind
@@ -949,7 +954,13 @@ module Gori
         end
         payload = prov.generate_payload(session)
         STDERR.puts "listening on #{host} (#{kind.label}) — payload:"
-        puts payload
+        # `--json` is a JSON-lines stream from its first line, the same opening record
+        # `resume --json` prints; session_id is null for a registration nothing saved.
+        if json
+          puts Oast::Present.payload(payload, store ? session_row : nil, kind.label).to_json
+        else
+          puts payload
+        end
         STDERR.puts "saved as session ##{session_row} — its registration is KEPT on exit " \
                     "(`gori run oast resume #{session_row}` to pick it up, `release` to drop it)" if store
         STDERR.puts "waiting for callbacks (Ctrl-C to stop)…" unless once

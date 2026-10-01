@@ -194,7 +194,9 @@ module Gori
           unless link_owner_exists?(store, owner_kind, oid)
             abort "gori run links #{verb}: no #{owner_kind.label} with id #{oid}"
           end
-          unless link_ref_exists?(store, ref_kind, rid)
+          # Only `add` needs a live target: retention leaves a pruned flow's link dangling on
+          # purpose (listed as stale), and `rm` is how that link goes away.
+          if add && !link_ref_exists?(store, ref_kind, rid)
             abort "gori run links #{verb}: no #{ref_kind.label} with id #{rid}"
           end
 

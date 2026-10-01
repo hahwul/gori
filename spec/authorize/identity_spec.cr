@@ -175,3 +175,23 @@ describe Gori::Authorize do
     end
   end
 end
+
+describe "Gori::Authorize.explicit_json_error" do
+  it "accepts the documented shape" do
+    Gori::Authorize.explicit_json_error(%([{"name":"anon","remove":["Cookie"]},) +
+                                        %({"name":"low","set":[{"name":"Authorization","value":"Bearer low"}],"baseline":false}])).should be_nil
+  end
+
+  it "refuses a known field of the wrong type instead of dropping it" do
+    # A dropped `set` sent `low` AS CAPTURED, with the baseline's own credentials: a false bypass.
+    Gori::Authorize.explicit_json_error(%([{"name":"low","set":{"Authorization":"Bearer low"}}]))
+      .not_nil!.should contain(%("low" (entry 1): "set"))
+    Gori::Authorize.explicit_json_error(%([{"name":"anon","remove":"Authorization"}]))
+      .not_nil!.should contain(%("remove" must be a list of strings))
+    Gori::Authorize.explicit_json_error(%([{"name":"a","baseline":"true"}]))
+      .not_nil!.should contain(%("baseline" must be true or false))
+    Gori::Authorize.explicit_json_error(%([{"name":1}])).not_nil!.should contain(%("name" must be a string))
+    Gori::Authorize.explicit_json_error(%(["anon"])).not_nil!.should contain("entry 1 is not an object")
+    Gori::Authorize.explicit_json_error(%({"name":"anon"})).not_nil!.should contain("expected a JSON array")
+  end
+end

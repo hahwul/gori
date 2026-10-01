@@ -81,13 +81,17 @@ module Gori
           read_input_file(f, "gori run authorize", stdin: true,
             noun: "identity set", flag: "--identities=-")
         end
+        if (raw = identities_json) && (why = Authorize.explicit_json_error(raw))
+          abort "gori run authorize: --identities: #{why}"
+        end
 
-        store = open_store(resolve_read_project(project_name, db_path))
+        project = resolve_read_project(project_name, db_path)
+        store = open_store(project)
         # Authorize ALWAYS has a project in play (the flows and the identities both come out of
         # one), so this is `project_outbound`, never the optional variant: an omitted --project
         # resolves the most-recently-active project, which is exactly the case where
         # short-circuiting on "no --project given" would drop Sandbox containment.
-        outbound = project_outbound(project_name, db_path, allow_unscoped)
+        outbound = project_outbound(project, allow_unscoped)
         plan = begin
           # `overrides` is a SNAPSHOT off the read connection already open here, not a second
           # `open_store` the way `cli_host_overrides` does it for fuzz/mine/sequence: those
@@ -135,7 +139,7 @@ module Gori
         total = plan.targets.size
         ids = plan.identities.size
         STDERR.puts "authorizing #{total} request#{total == 1 ? "" : "s"} × #{ids} identities " \
-                    "(#{plan.identities.map(&.name).join(", ")}) = #{plan.total_sends} requests"
+                    "(#{CLI::Output.term_safe(plan.identities.map(&.name).join(", "))}) = #{plan.total_sends} requests"
         report_authorize_skips(plan.skipped)
 
         buffered = [] of Authorize::Target

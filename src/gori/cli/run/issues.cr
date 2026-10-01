@@ -430,6 +430,10 @@ module Gori
           end
         end
 
+        # A blank title is refused as `create` and MCP `update_issue` refuse it (the row would
+        # list as a bare severity tag); argv-only, so above the read below.
+        abort "gori run issues update: --title must not be empty" if title.try(&.strip.empty?)
+
         # EVERY argv-only refusal above the read, and the read above `open_store`, because
         # `--notes-stdin` blocks until EOF — see the same ordering in `cmd_issues_create`. The
         # resolved body replaces `notes` from here on, so the "no fields to update" gate below

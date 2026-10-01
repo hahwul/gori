@@ -12,6 +12,7 @@ module Gori
       private def self.cmd_jwt(args : Array(String)) : Nil
         action = :decode
         alg = "HS256"
+        alg_given = false
         secret = nil.as(String?) # nil = not passed; "" = the empty HMAC secret, deliberately
         key = ""
         format = :text
@@ -28,7 +29,7 @@ module Gori
           p.on("--verify", "Check the token's own signature against --secret / --key; exits 1 unless it verifies") { action = :verify }
           p.on("--attacks", "Generate testing payloads (alg:none, weak-secret, header injection)") { action = :attacks }
           p.on("--alg=ALG", "Signing alg for --encode: HS256 (default) | HS384 | HS512 | " \
-                            "RS/PS/ES with 256/384/512 | EdDSA | none") { |v| alg = v }
+                            "RS/PS/ES with 256/384/512 | EdDSA | none") { |v| alg = v; alg_given = true }
           p.on("--secret=SECRET", "HMAC secret, for an HS algorithm") { |v| secret = v }
           p.on("--key=PEM", "PEM key for an RS/PS/ES/EdDSA algorithm — inline, or a path to a .pem file. " \
                             "--encode wants the private key; --verify takes a public key, a certificate, or the private one; " \
@@ -44,6 +45,13 @@ module Gori
         parser.parse(args)
 
         jwt_refuse_conflicts(action, payload_override, sets, secret, key)
+        # `--verify` checks the token's OWN alg, so a pinned `--alg RS256` read as an
+        # alg-confusion check while verifying HS256 regardless; decode and attacks sign nothing.
+        abort "gori run jwt: --alg applies to --encode only (--verify checks the token's own alg)" if alg_given && action != :encode
+        # A key beside a plain decode is a forgotten `--verify`, not a key to ignore.
+        if action == :decode && (secret || !key.empty?)
+          abort "gori run jwt: --decode uses no key — add --verify to check the signature with it"
+        end
         token = jwt_token_input(positional)
         abort "gori run jwt: no token — pass it as an argument or pipe it on STDIN" if token.empty?
         # `--key` names a PEM, so it is resolved to the PEM text before the engine sees it — an
@@ -114,6 +122,9 @@ module Gori
       private def self.emit_jwt_decode(token : String, format : Symbol) : Nil
         if format == :json
           puts Jwt.decode_json(token)
+          # The JSON keeps its `note` for the dotless blob, but the exit status says what the
+          # text decoder's refusal says: not a JWT, exit 1, whichever format asked.
+          exit 1 if token.strip.split('.').size < 2
         else
           # A JWT is routinely lifted from live (attacker-controlled) traffic; the decode
           # view prints the signature segment raw, so neutralize ANSI/OSC/control bytes

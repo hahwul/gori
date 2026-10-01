@@ -44,9 +44,9 @@ module Gori
                      "node is not currently in the tree."
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
-          p.on("--host=HOST", "Host the path belongs to") { |v| host = v }
-          p.on("--path=PATH", "URL path, e.g. /api/users") { |v| path = v }
-          p.on("--tag=TEXT", "The memo to pin") { |v| tag = v }
+          p.on("--host=HOST", "Host the path belongs to") { |v| host = v.strip.presence }
+          p.on("--path=PATH", "URL path, e.g. /api/users") { |v| path = v.strip.presence }
+          p.on("--tag=TEXT", "The memo to pin") { |v| tag = v.strip }
           p.on("--clear", "Remove the tag on --host/--path") { clear = true }
           p.on("--list", "List existing tags instead of setting one") { list = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
@@ -60,13 +60,17 @@ module Gori
           "pass the node as --host H --path P and the memo as --tag TEXT (quote a memo with " \
           "spaces); --list narrows with --host H")
 
+        if list && (path || tag || clear)
+          abort "gori run sitemap tag: --list only reads (narrow it with --host); --path, --tag and --clear write a tag"
+        end
+
         store = open_store(resolve_read_project(project_name, db_path), read_only: list)
         begin
           if list
             rows = store.sitemap_tags.to_a.sort_by { |(k, _)| k }
             rows = rows.select { |(k, _)| k[0] == host } if host
             STDERR.puts "no tags" if rows.empty?
-            rows.each { |(k, t)| puts "#{k[0]}#{k[1]}\t#{t}" }
+            rows.each { |(k, t)| puts sitemap_tag_row(k[0], k[1], t) }
             return
           end
           apply_sitemap_tag(store, host, path, tag, clear)
@@ -90,6 +94,8 @@ module Gori
       # and `x || abort` does not narrow them.
       private def self.apply_sitemap_tag(store : Store, host : String?, path : String?,
                                          tag : String?, clear : Bool) : Nil
+        # A blank --host/--path arrives here as nil (the parser strips it to `presence`), as MCP
+        # `set_sitemap_tag` reads it: an empty host stores a row no tree node can ever carry.
         abort "gori run sitemap tag: --host is required" if host.nil?
         abort "gori run sitemap tag: --path is required" if path.nil?
         abort "gori run sitemap tag: pass --tag=TEXT or --clear" if tag.nil? && !clear
@@ -100,7 +106,8 @@ module Gori
         matched = sitemap_node_exists?(store, host, key)
         js_node = matched == false && JsRefs.unrequested_node?(store, host, key)
         abort "gori run sitemap tag: NOT applied (project busy) — the node is unchanged" unless store.set_sitemap_tag(host, key, text)
-        puts text.empty? ? "Tag cleared on #{host}#{key}." : "Tagged #{host}#{key}: #{text}"
+        where = "#{CLI::Output.term_safe(host)}#{CLI::Output.term_safe(key)}"
+        puts text.empty? ? "Tag cleared on #{where}." : "Tagged #{where}: #{CLI::Output.term_safe(text)}"
         if warning = tag_match_warning(matched, host, key, text, js_node)
           STDERR.puts "gori run sitemap tag: warning: #{warning}"
         end
