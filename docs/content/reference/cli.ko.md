@@ -1921,7 +1921,7 @@ gori가 `settings.json`을 읽지 못하는 상태(파싱 실패, 권한 문제,
 
 `env`, `decoder`, `oast_providers`는 export에서 기본 제외됩니다. `env`는 토큰 값을, `decoder`는 저장된 체인 라이브러리를(열려 있는 하위 탭은 여기가 아니라 프로젝트 저장소에 있습니다), `oast_providers`는 자체 호스팅 interactsh 토큰을 담기 때문입니다. 명시적으로 이름을 적는 것(`--sections env`)이 포함에 대한 동의입니다. `upstream_rules`는 공유해도 안전합니다. 사용자명과 환경변수 *이름*만 저장하고 비밀번호는 담지 않습니다.
 
-이 설치의 기존 데이터를 읽는 방식을 정하는 값, 즉 토큰 문법(`env.syntax`), 토큰 접두사(`env.prefix`), 리댁션 솔트(`redaction.salt`)는 프로필에 담기지 않고 import로 바뀌지도 않습니다. import는 로컬 값을 유지하며, 프로필의 문법이나 접두사가 달랐으면 stderr로 알립니다.
+이 설치의 기존 데이터를 읽는 방식을 정하는 값, 즉 토큰 문법(`env.syntax`), 토큰 접두사(`env.prefix`), 리댁션 솔트(`redaction.salt`)는 프로필에 담기지 않고 import로 바뀌지도 않습니다. import는 로컬 값을 유지하며, 프로필의 문법이나 접두사가 달랐으면 stderr로 알립니다. import한 전역 rewriter 규칙, colormarker 규칙, 저장된 뷰는 이 설치의 카운터로 새 번호를 받으므로, 지워진 로컬 규칙에 대한 프로젝트의 오버라이드가 import한 규칙에 붙지 않습니다.
 
 `-o`가 실제 사용 중인 `settings.json`을 가리키면 거부됩니다. export는 스냅샷이 아니므로(기본값 상태인 섹션은 모두 빠지고, `env`, `decoder`, `oast_providers`는 이름을 지정하지 않는 한 빠집니다) 그것을 원본 파일에 되쓰면 해당 섹션이 갱신되는 게 아니라 삭제됩니다.
 

@@ -1929,7 +1929,7 @@ If gori cannot load your `settings.json` (unparseable, unreadable, or a `--confi
 
 `env`, `decoder` and `oast_providers` are excluded from an export by default: `env` holds token values, `decoder` holds your saved chain library (open sub-tabs live in the project store, not here), and `oast_providers` holds self-hosted interactsh tokens. Naming one explicitly (`--sections env`) is how you consent to include it. Note that `upstream_rules` is safe to share: it stores a username and an environment-variable *name*, never a password.
 
-A profile never carries, and an import never changes, the values that decide how this install's existing data is read: the token grammar (`env.syntax`), the token prefix (`env.prefix`) and the redaction salt (`redaction.salt`). An import keeps the local values, and says on stderr when the profile's grammar or prefix differed.
+A profile never carries, and an import never changes, the values that decide how this install's existing data is read: the token grammar (`env.syntax`), the token prefix (`env.prefix`) and the redaction salt (`redaction.salt`). An import keeps the local values, and says on stderr when the profile's grammar or prefix differed. Imported global rewriter rules, colormarker rules and saved views are numbered from this install's own counters, so a project's override of a deleted local rule never attaches to an imported one.
 
 `-o` pointing at your live `settings.json` is refused. An export is not a snapshot (it omits every section at its factory default, and omits `env`, `decoder` and `oast_providers` unless you name them), so writing one back over the real file would delete those sections rather than update it.
 

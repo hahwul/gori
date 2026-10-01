@@ -69,8 +69,8 @@ private MAXIMAL_PROFILE = <<-JSON
     "discover": { "containment": "strict", "max_depth": 3 },
     "decoder": { "chains": [ { "name": "c1", "spec": "base64-decode" } ] },
     "hooks": { "timeout_secs": 30 },
-    "rewriter": { "next_rule_id": 2, "rules": [] },
-    "colormarker": { "next_rule_id": 2, "rules": [] },
+    "rewriter": { "rules": [ { "id": 1, "enabled": false, "pattern": "x", "op": "set_header", "part": "head", "replacement": "v" } ] },
+    "colormarker": { "rules": [ { "id": 1, "when": "status:500", "color": "red" } ] },
     "saved_views": { "next_view_id": 2, "views": [ { "id": 1, "name": "v1", "query": "src:proxy" } ] },
     "redaction": { "active": "p1", "default": true, "profiles": [ { "name": "p1", "json_fields": ["password"] } ] },
     "mcp": { "channels": true },
@@ -325,6 +325,78 @@ describe "settings profiles" do
           Gori::Settings.env_prefix = prev_prefix.not_nil!
           Gori::Settings.redaction_default = false
         end
+      end
+    end
+
+    # Global rule and view ids key per-project state (`rewriter_overrides`, `colormarker_overrides`,
+    # `history_view`) and are never reused. A profile's ids are another install's numbering:
+    # adopted as written, an imported disabled rule picked up a project's leftover override of
+    # the local rule with that number and came up live, and the profile's counter could pull this
+    # install's backwards or push it to the Int64 ceiling.
+    it "gives imported rules and views fresh ids from this install's counters" do
+      with_config_home do
+        Gori::Settings.rewriter_rules = [] of Gori::Settings::RewriterRule
+        Gori::Settings.rewriter_next_rule_id = 5_i64
+        Gori::Settings.colormarker_rules = [] of Gori::Settings::ColormarkerRule
+        Gori::Settings.colormarker_next_rule_id = 9_i64
+        Gori::Settings.saved_views = [] of Gori::Settings::SavedView
+        Gori::Settings.saved_views_next_id = 3_i64
+
+        Gori::Settings.import_document(<<-JSON)
+          {"rewriter":{"next_rule_id":9223372036854775806,"rules":[
+            {"id":1,"enabled":false,"pattern":"x","op":"set_header","part":"head","replacement":"v"}]},
+          "colormarker":{"next_rule_id":2,"rules":[{"id":1,"when":"status:500","color":"red"}]},
+          "saved_views":{"next_view_id":2,"views":[{"id":1,"name":"errors","query":"status:500"}]}}
+          JSON
+
+        Gori::Settings.rewriter_rules.map(&.id).should eq([5_i64])
+        Gori::Settings.rewriter_next_rule_id.should eq(6_i64)
+        Gori::Settings.colormarker_rules.map(&.id).should eq([9_i64])
+        Gori::Settings.colormarker_next_rule_id.should eq(10_i64)
+        Gori::Settings.saved_views.map(&.id).should eq([3_i64])
+        Gori::Settings.saved_views_next_id.should eq(4_i64)
+
+        # …and an export carries no counter for the next importer to adopt.
+        out = JSON.parse(Gori::Settings.export_document(["rewriter"])).as_h["rewriter"].as_h
+        out.has_key?("next_rule_id").should be_false
+      ensure
+        Gori::Settings.rewriter_rules = [] of Gori::Settings::RewriterRule
+        Gori::Settings.rewriter_next_rule_id = 1_i64
+        Gori::Settings.colormarker_rules = [] of Gori::Settings::ColormarkerRule
+        Gori::Settings.colormarker_next_rule_id = 1_i64
+        Gori::Settings.saved_views = [] of Gori::Settings::SavedView
+        Gori::Settings.saved_views_next_id = 1_i64
+      end
+    end
+
+    # The other direction of the same hazard: re-importing this install's OWN export must not
+    # renumber its rules, or every project's override of them is orphaned.
+    it "keeps the id of a rule that comes back identical" do
+      with_config_home do
+        rule = Gori::Settings::RewriterRule.new(4_i64, false, "mine", "request", "head",
+          "X-Mine", "v", "set_header", "literal", "", "")
+        Gori::Settings.rewriter_rules = [rule]
+        Gori::Settings.rewriter_next_rule_id = 7_i64
+        profile = Gori::Settings.export_document(["rewriter"])
+        Gori::Settings.import_document(profile)
+        Gori::Settings.rewriter_rules.map(&.id).should eq([4_i64])
+        Gori::Settings.rewriter_next_rule_id.should eq(7_i64)
+      ensure
+        Gori::Settings.rewriter_rules = [] of Gori::Settings::RewriterRule
+        Gori::Settings.rewriter_next_rule_id = 1_i64
+      end
+    end
+
+    # A rewriter section without a `rules` list keeps the current rules — and must keep the
+    # counter where this install left it, not recompute it from the surviving ids.
+    it "never moves a counter backwards on an import without a list" do
+      with_config_home do
+        Gori::Settings.rewriter_rules = [] of Gori::Settings::RewriterRule
+        Gori::Settings.rewriter_next_rule_id = 50_i64
+        Gori::Settings.import_document(%({"rewriter":{}}))
+        Gori::Settings.rewriter_next_rule_id.should eq(50_i64)
+      ensure
+        Gori::Settings.rewriter_next_rule_id = 1_i64
       end
     end
 

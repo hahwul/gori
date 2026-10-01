@@ -1461,7 +1461,10 @@ module Gori
         (only.nil? || only.includes?(k)) && SECTION_KEYS.includes?(k)
       end
       filtered = JSON.build { |j| j.object { selected.each { |k| j.field k, strip_install_local(k, incoming[k]) } } }
+      counters = {rewriter_next_rule_id, colormarker_next_rule_id, saved_views_next_id}
+      locals = {rewriter_rules, colormarker_rules, saved_views}
       apply_sections(JSON.parse(filtered))
+      renumber_imported_ids(incoming, selected, counters, locals)
       # `save` REPORTS failure rather than raising, because a failed write must not crash the
       # TUI. Discarding that here meant a full disk, a read-only filesystem or an unwritable
       # config directory printed "imported N section(s)" and exited 0 with nothing persisted —
@@ -1472,6 +1475,73 @@ module Gori
         raise Error.new("settings were applied in memory but could not be written to #{path}")
       end
       selected
+    end
+
+    # Give every global rule, colour rule and saved view a profile brought in a FRESH id from this
+    # install's own counter, and never let that counter go backwards.
+    #
+    # Those ids are the keys of per-project state in databases this process may never open again
+    # (`rewriter_overrides`, `colormarker_overrides`, `history_view`), which is why each counter is
+    # monotonic and an id is never reused (see `rewriter_next_rule_id`). A profile's ids are
+    # another install's numbering: adopted as written, an imported rule inherited whatever a
+    # project had once said about the LOCAL rule of that number — an imported `pipe` hook listed
+    # `[disabled]` came up live in a project that had enabled a deleted rule #1. And the parse
+    # recomputes each counter from the imported ids, so a profile could also pull it back over
+    # ids already handed out here (or push it to the Int64 ceiling, where ids collide).
+    #
+    # Only a list the profile actually CARRIES is renumbered: a section without one keeps the
+    # current list (the parse's tolerant default), and those ids are already this install's.
+    #
+    # And an entry IDENTICAL to one this install holds under the same id keeps it — that is this
+    # install's own rule coming back (a profile re-imported where it was exported), and
+    # renumbering it would orphan exactly the per-project state the counters exist to protect.
+    # Fresh ids start at the local counter, above every id ever handed out here, so a kept id and
+    # a fresh one cannot meet.
+    private def self.renumber_imported_ids(incoming : Hash(String, JSON::Any), selected : Array(String),
+                                           before : {Int64, Int64, Int64},
+                                           locals : {Array(RewriterRule), Array(ColormarkerRule), Array(SavedView)}) : Nil
+      rw_next, cm_next, sv_next = before
+      # The parse recomputed each counter from the ids now in the list; renumbering makes that
+      # number meaningless, and without a list it can only be below what this install handed out.
+      if imported_list?(incoming, selected, "rewriter", "rules", "presets")
+        rules, nxt = renumber(rewriter_rules, locals[0], rw_next)
+        self.rewriter_rules = rules
+        self.rewriter_next_rule_id = nxt
+      else
+        self.rewriter_next_rule_id = {rewriter_next_rule_id, rw_next}.max
+      end
+      if imported_list?(incoming, selected, "colormarker", "rules")
+        marks, nxt = renumber(colormarker_rules, locals[1], cm_next)
+        self.colormarker_rules = marks
+        self.colormarker_next_rule_id = nxt
+      else
+        self.colormarker_next_rule_id = {colormarker_next_rule_id, cm_next}.max
+      end
+      if imported_list?(incoming, selected, "saved_views", "views")
+        views, nxt = renumber(saved_views, locals[2], sv_next)
+        self.saved_views = views
+        self.saved_views_next_id = nxt
+      else
+        self.saved_views_next_id = {saved_views_next_id, sv_next}.max
+      end
+    end
+
+    # `imported` with every entry not found verbatim in `local` given the next id from `start`,
+    # plus the counter after the last one handed out.
+    private def self.renumber(imported : Array(T), local : Array(T), start : Int64) : {Array(T), Int64} forall T
+      n = start
+      out = imported.map do |e|
+        next e if local.includes?(e)
+        e.copy_with(id: n).tap { n = next_id_after(n) }
+      end
+      {out, n}
+    end
+
+    private def self.imported_list?(incoming : Hash(String, JSON::Any), selected : Array(String),
+                                    section : String, *keys : String) : Bool
+      return false unless selected.includes?(section)
+      node = incoming[section]?.try(&.as_h?)
+      !!node && keys.any? { |k| node[k]?.try(&.as_a?) }
     end
 
     # An imported profile NEVER changes this install's token grammar.
@@ -1500,9 +1570,14 @@ module Gori
     #     today's, which is the one thing `reset_redaction` refuses to do — and the default
     #     export was handing the salt (a secret, see settings/redaction.cr) to whoever got the
     #     profile.
+    #   * the id counters of the three rule lists are this install's numbering, and only ever
+    #     move forward from what IT has handed out — see `renumber_imported_ids`.
     INSTALL_LOCAL_KEYS = {
-      "env"       => ["syntax", "prefix"],
-      "redaction" => ["salt"],
+      "env"         => ["syntax", "prefix"],
+      "redaction"   => ["salt"],
+      "rewriter"    => ["next_rule_id"],
+      "colormarker" => ["next_rule_id"],
+      "saved_views" => ["next_view_id"],
     }
 
     private def self.strip_install_local(key : String, node : JSON::Any) : JSON::Any
