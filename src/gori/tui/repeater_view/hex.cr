@@ -38,11 +38,23 @@ class Gori::Tui::RepeaterView
     # CRLF in the head (and in a CRLF-less multipart body) on every ^R. Seeding the raw buffer
     # made ^X a peek that changed the wire: the pane showed, and hex-mode ^R sent, a bare-LF
     # head text mode never would — and a typed multipart body shipped LF under the
-    # Content-Length the reflection measured over its CRLF form. Both steps are no-ops on a
-    # capture (CRLF head, CRLF-carrying body), so the bytes above stay byte-exact. `$KEY`
-    # expansion is deliberately NOT applied: `request_text` persists this buffer.
-    @req_hex_edit = HexEdit.new(@grpc_mode ? @grpc_payload : text_wire_form(@editor.wire_text))
+    # Content-Length the reflection measured over its CRLF form. `$KEY` expansion is
+    # deliberately NOT applied: an edited buffer is what `request_text` persists.
+    @req_hex_edit = HexEdit.new(@grpc_mode ? @grpc_payload : hex_seed)
     @scroll_req = 0 # entering the same bytes isn't an edit — no @dirty
+  end
+
+  # The one place those fixups are withheld is a CAPTURE they would rewrite (P7). The h1 codec
+  # keeps a bare-LF head byte-exact, HAR import keeps an LF-delimited multipart body, and text
+  # mode promotes both on every send — so for a malformed capture this buffer is the ONLY road
+  # to the bytes the client sent, which is the payload. Judged on the seed bytes gori was
+  # handed (`@evidence_env_seed`), not the live buffer: a header the operator typed into an
+  # ordinary capture still gets the CRLF text mode gives it.
+  private def hex_seed : Bytes
+    wire = @editor.wire_text
+    seed = @evidence_env_seed
+    return wire.to_slice if @evidence && text_wire_form(seed) != seed.to_slice
+    text_wire_form(wire)
   end
 
   private def exit_request_hex : Nil

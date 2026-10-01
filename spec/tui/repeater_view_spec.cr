@@ -1678,9 +1678,57 @@ describe Gori::Tui::RepeaterView do
     text_mode.should eq("GET /peek HTTP/1.1\r\nHost: h\r\n\r\n")
     view.toggle_request_hex.should be_true
     String.new(view.request_bytes).should eq(text_mode)
+    # A peek is not an edit to anything that compares the request to its saved row — the drift
+    # digest, the minimize snapshot, the cross-session reconcile.
+    view.request_text.should eq("GET /peek HTTP/1.1\nHost: h\n\n")
     view.toggle_request_hex.should be_false # a peek writes nothing back
     view.dirty?.should be_false
     view.request_text.should eq("GET /peek HTTP/1.1\nHost: h\n\n")
+  end
+
+  it "reads the hex buffer as the request once it has been edited" do
+    view = RepeaterView.new
+    view.restore("http://127.0.0.1", "GET /peek HTTP/1.1\nHost: h\n\n", false, false)
+    view.toggle_request_hex.should be_true
+    view.hex_set_nibble('4') # 'G' (0x47) → 0x47: the high nibble rewritten to itself…
+    view.hex_set_nibble('8') # …then the low one: 0x48 'H'
+    view.request_text.should eq("HET /peek HTTP/1.1\r\nHost: h\r\n\r\n")
+    view.dirty?.should be_true
+  end
+
+  # The other side of #1427 (P7): a capture whose OWN head ends lines in a bare LF is the
+  # payload, and text mode promotes it on every send — so hex is the only road to those bytes.
+  it "keeps a captured bare-LF head byte-exact in hex" do
+    repeater_tmp_store do |store|
+      head = "GET /m HTTP/1.1\nHost: h.test\nX-A: 1\n\n"
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+        method: "GET", target: "/m", http_version: "HTTP/1.1",
+        head: head.to_slice, body: Bytes.new(0), source: Gori::FlowSource::Kind::Proxy))
+      view = RepeaterView.new
+      view.load(store.get_flow(id).not_nil!)
+      view.request_text.should eq(head) # the editor holds the capture's own line endings
+      view.toggle_request_hex.should be_true
+      String.new(view.request_bytes).should eq(head)
+    end
+  end
+
+  it "gives a header typed into an ordinary capture the CRLF text mode sends" do
+    repeater_tmp_store do |store|
+      head = "GET /c HTTP/1.1\r\nHost: h.test\r\n\r\n"
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+        method: "GET", target: "/c", http_version: "HTTP/1.1",
+        head: head.to_slice, body: Bytes.new(0), source: Gori::FlowSource::Kind::Proxy))
+      view = RepeaterView.new
+      view.load(store.get_flow(id).not_nil!)
+      view.evidence?.should be_true
+      view.replace_request("GET /c HTTP/1.1\r\nHost: h.test\r\nX-Typed: 1\n\r\n")
+      text_mode = String.new(view.request_bytes)
+      text_mode.should eq("GET /c HTTP/1.1\r\nHost: h.test\r\nX-Typed: 1\r\n\r\n")
+      view.toggle_request_hex.should be_true
+      String.new(view.request_bytes).should eq(text_mode)
+    end
   end
 
   # The body half of the same peek: a typed multipart body's delimiters are promoted on ^R,
