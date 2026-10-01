@@ -791,3 +791,50 @@ describe "the auto-forward reaper and an in-progress edit" do
     fwd_at.should be > skip_at
   end
 end
+
+# #1418: the operator's time on the Intercept tab is watching, so it has to be RECORDED — the
+# reaper used to only skip while they were on it, and a two-second glance at History then
+# released every hold they had sat watching past the window.
+describe "the auto-forward reaper and the operator's time on the Intercept tab" do
+  max = 30_000_i64
+  now = 1_000_000_000_i64
+
+  it "gives a hold the operator watched a fresh window from when they left the tab" do
+    # The issue's repro: held 33 s ago, watched the whole time, left 2 s ago.
+    Gori::Tui::Runner.hold_reap_due?(now, max, now - 33_000, 0_i64, now - 2_000).should be_false
+    # …and released once they have been away for the whole window.
+    Gori::Tui::Runner.hold_reap_due?(now, max, now - 63_000, 0_i64, now - 30_000).should be_true
+  end
+
+  it "still releases a hold nobody watched for the window" do
+    Gori::Tui::Runner.hold_reap_due?(now, max, now - 31_000, 0_i64, 0_i64).should be_true
+    Gori::Tui::Runner.hold_reap_due?(now, max, now - 29_000, 0_i64, 0_i64).should be_false
+  end
+
+  it "judges a hold that arrived after the operator left by its own age" do
+    Gori::Tui::Runner.hold_reap_due?(now, max, now - 10_000, 0_i64, now - 40_000).should be_false
+    Gori::Tui::Runner.hold_reap_due?(now, max, now - 30_000, 0_i64, now - 40_000).should be_true
+  end
+
+  it "keeps an agent's recent look as watching" do
+    Gori::Tui::Runner.hold_reap_due?(now, max, now - 60_000, now - 5_000, now - 50_000).should be_false
+  end
+
+  it "never fires when the window is disabled" do
+    Gori::Tui::Runner.hold_reap_due?(now, 0_i64, 0_i64, 0_i64, 0_i64).should be_false
+  end
+
+  it "stamps the tab time before any return and judges every hold by it" do
+    # Source-pinned for the reason the edit gate above is: the reaper only runs on a Runner's
+    # tick. The stamp has to precede the on-tab early return — placed after it, the last tick
+    # on the tab is exactly the one that never records anything.
+    src = File.read(File.join(__DIR__, "..", "..", "src", "gori", "tui", "runner", "intercept_bridge.cr"))
+    body = src.lines.reject(&.lstrip.starts_with?('#')).join('\n')
+    reap = body[/^ *private def reap_stale_holds.*?\n *end\n/m].not_nil!
+    stamp_at = reap.index("@intercept_operator_watched_ms = Time.utc.to_unix_ms if @active_tab == :intercept").not_nil!
+    first_return = reap.index("return false").not_nil!
+    stamp_at.should be < first_return
+    reap.should contain("hold_reap_due?(")
+    reap.should contain("@intercept_operator_watched_ms)")
+  end
+end

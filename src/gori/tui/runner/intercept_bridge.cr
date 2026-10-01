@@ -177,13 +177,19 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   end
 
   # #123 safety net: auto-forward (original bytes, fail-open) any item held past max_hold that
-  # NOBODY is watching — neither the human (not on the intercept tab) nor an agent (no recent
-  # MCP intercept_list/get, tracked via viewed_ms). hold() has no timeout, so this stops a dead
-  # MCP client from wedging a proxy connection forever. CRITICAL: only fires in a session where
-  # an agent has actually attached (@intercept_agent_seen) — a pure-human session keeps the base
-  # P4 contract (indefinite hold). Disabled when @intercept_max_hold_ms <= 0. Returns true if
-  # anything was released.
+  # NOBODY is watching — neither the human (not on the intercept tab within the window) nor an
+  # agent (no recent MCP intercept_list/get, tracked via viewed_ms). hold() has no timeout, so
+  # this stops a dead MCP client from wedging a proxy connection forever. CRITICAL: only fires
+  # in a session where an agent has actually attached (@intercept_agent_seen) — a pure-human
+  # session keeps the base P4 contract (indefinite hold). Disabled when
+  # @intercept_max_hold_ms <= 0. Returns true if anything was released.
   private def reap_stale_holds : Bool
+    # Time on the tab is watching, and it has to be RECORDED, not only honoured while it lasts
+    # (#1418): the skip below used to be the human's whole share, so a two-second glance at
+    # History released every hold the operator had sat watching past the window. Stamped on
+    # the reaper's own wall clock (`held_at_ms` and `viewed_ms` are both unix ms), ahead of
+    # every return, so the last tick on the tab is the one leaving it is measured from.
+    @intercept_operator_watched_ms = Time.utc.to_unix_ms if @active_tab == :intercept
     return false if @intercept_max_hold_ms <= 0
     return false if @active_tab == :intercept # human is watching the queue → never clobber
     # The hold the operator has unsaved bytes typed into is the strongest form of "somebody is
@@ -206,17 +212,27 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     reaped = false
     pending.each do |it|
       next if it.id == editing # the operator is mid-edit on this one
-      watched = {it.held_at_ms, viewed[it.id]? || 0_i64}.max
-      next if now_ms - watched < @intercept_max_hold_ms
+      next unless Runner.hold_reap_due?(now_ms, @intercept_max_hold_ms, it.held_at_ms,
+                    viewed[it.id]? || 0_i64, @intercept_operator_watched_ms)
       # original bytes (fail-open), same as toggle-off / release_all. A false answer means
       # the operator decided it in the same tick — say nothing rather than claim a reap.
       next unless ic.forward(it.id)
       secs = @intercept_max_hold_ms // 1000
       goto = (fid = it.flow_id) ? Jobs::Goto.new(:history, fid) : nil
-      @notifications.push(:warn, "auto-forwarded held #{it.label} (no decision after #{secs}s)", goto, source: "app")
+      @notifications.push(:warn, "auto-forwarded held #{it.label} (unwatched for #{secs}s)", goto, source: "app")
       reaped = true
     end
     reaped
+  end
+
+  # Whether a hold has gone a whole `max_hold_ms` with nobody watching it: the window runs from
+  # the LATEST of the hold itself, the agent's last look at this item, and the operator's last
+  # tick on the Intercept tab (which watches every item in the queue at once). Pure, so the
+  # reaper's timing is specced without a Runner, which owns a terminal.
+  def self.hold_reap_due?(now_ms : Int64, max_hold_ms : Int64, held_at_ms : Int64,
+                          agent_viewed_ms : Int64, operator_watched_ms : Int64) : Bool
+    return false if max_hold_ms <= 0
+    now_ms - {held_at_ms, agent_viewed_ms, operator_watched_ms}.max >= max_hold_ms
   end
 
   # Surface an agent intercept action in the human notification center (source :agent, so it
