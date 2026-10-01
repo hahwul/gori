@@ -388,7 +388,7 @@ module Gori
       # All four of these dereference their node directly — see `object_section`.
       if net = object_section(root, "network")
         self.bind_host = net["bind_host"]?.try(&.as_s?) || bind_host
-        self.bind_port = int_field(net, "bind_port") || bind_port
+        self.bind_port = valid_port(int_field(net, "bind_port")) || bind_port
         apply_upstream_proxy(net["upstream_proxy"]?)
         self.verify_upstream = load_bool(net, "verify_upstream", verify_upstream?)
         # The PROXY leg's own trust policy, kept next to (never folded into) verify_upstream —

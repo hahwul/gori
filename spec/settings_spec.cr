@@ -2367,6 +2367,46 @@ describe Gori::Settings do
   # #538 — the ONE loader every surface that opens a project store calls. Session.open passes
   # bind: true (it listens), CLI::Run.open_store and the MCP bind path pass bind: false.
   describe ".load_project_network" do
+    # Nothing validates a row on the way OUT of the store — an older gori or a hand edit wrote
+    # it — so the read applies the floors the global section's load does: a 0 timeout was a
+    # zero-second dial on every request, and a port past 65535 failed every rebind.
+    it "reads out-of-range rows under the same floors as the global section" do
+      with_net_store do |store|
+        reset_net
+        store.set_setting(Gori::Settings::PROJECT_BIND_PORT_KEY, "99999")
+        store.set_setting(Gori::Settings::PROJECT_CONNECT_TIMEOUT_KEY, "0")
+        store.set_setting(Gori::Settings::PROJECT_IO_TIMEOUT_KEY, "-5")
+        store.set_setting(Gori::Settings::PROJECT_CAPTURE_MAX_KEY, "999999")
+
+        Gori::Settings.load_project_network(store, bind: true)
+
+        Gori::Settings.project_bind_port.should be_nil
+        Gori::Settings.effective_bind_port.should eq(8070)
+        Gori::Settings.effective_connect_timeout_secs.should eq(1)
+        Gori::Settings.effective_io_timeout_secs.should eq(1)
+        Gori::Settings.effective_capture_max_mib.should eq(Gori::Settings::MAX_CAPTURE_MAX_MIB)
+      ensure
+        reset_net
+      end
+    end
+
+    it "keeps the global bind port when the file holds one past 65535" do
+      dir = File.tempname("gori-settings-port")
+      Dir.mkdir_p(dir)
+      prev = ENV["GORI_HOME"]?
+      begin
+        reset_net
+        ENV["GORI_HOME"] = dir
+        File.write(Gori::Settings.path, %({"network":{"bind_port":99999}}))
+        Gori::Settings.load
+        Gori::Settings.bind_port.should eq(8070)
+      ensure
+        prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+        FileUtils.rm_rf(dir)
+        reset_net
+      end
+    end
+
     it "installs every key with bind: true, including the destination and proxy credentials" do
       with_net_store do |store|
         reset_net
