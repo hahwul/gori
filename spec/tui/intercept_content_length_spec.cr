@@ -127,6 +127,35 @@ describe "InterceptView Content-Length sync toggle" do
     end
   end
 
+  # The reflection is itself an edit, so running it on the state ⌃Z just restored re-applied
+  # the change being undone: every press restored the line and the reflection put it straight
+  # back, so ⌃Z was dead after any edit that changed the body length (#1417).
+  it "⌃Z walks a body edit back past the Content-Length it reflected" do
+    icl_interceptor do |ic|
+      held = "POST /u HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\n\r\nabc"
+      spawn do
+        ic.hold_request(held.to_slice, method: "POST", target: "/u",
+          host: "127.0.0.1", port: 19501, scheme: "http")
+      end
+      Fiber.yield
+      view = InterceptView.new
+      view.reload(ic)
+      view.toggle_edit
+      pristine = view.editor_text
+      4.times { view.edit_move(1, 0) } # the body line
+      view.edit_end
+      view.edit_insert('X')
+      view.edit_insert('Y')
+      view.editor_text.lines.should contain("Content-Length: 5")
+      view.editor_text.should end_with("abcXY")
+
+      # Each keystroke is two steps — the reflection, then the character.
+      4.times { view.edit_undo }
+      view.editor_text.should eq(pristine)
+      String.new(view.pending_edit.not_nil![1]).should eq(held)
+    end
+  end
+
   it "puts the toggle on the detail card's border so it is discoverable" do
     icl_interceptor do |ic|
       view = def_edited.call(ic)

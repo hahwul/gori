@@ -744,7 +744,7 @@ module Gori::Tui
       return unless text_editing?
       before = @editor.edits
       @editor.undo
-      mark_editor_edit if @editor.edits != before
+      mark_editor_edit(reflect: false) if @editor.edits != before # see mark_editor_edit
     end
 
     def edit_insert(ch : Char) : Nil
@@ -775,9 +775,15 @@ module Gori::Tui
     # Content-Length is brought in line with what a forward would send (see
     # `reflect_content_length_in_editor`). Every edit path funnels through here so the pane
     # and the wire cannot drift.
-    private def mark_editor_edit : Nil
+    #
+    # `reflect: false` is `edit_undo`'s alone, for the reason the Repeater's `mark_req_edit`
+    # gives: the reflection is itself an edit, so running it on the state ⌃Z just restored
+    # re-applied the change being undone and pushed a fresh undo state on top. ⌃Z was dead
+    # after any edit that changed the body length (#1417). An undo snapshot is a state the
+    # buffer really held, and a forward still syncs Content-Length in `pending_edit`.
+    private def mark_editor_edit(reflect : Bool = true) : Nil
       @editor_dirty = true
-      reflect_content_length_in_editor
+      reflect_content_length_in_editor if reflect
     end
 
     # `selecting` is the ⇧ half, forwarded to `TextArea#move` exactly as `edit_motion_key` does —
