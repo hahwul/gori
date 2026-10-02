@@ -63,17 +63,7 @@ module Gori
     # `move_color_rule` — the table is tiny and tie-free positions are worth more than the
     # saved writes. False also covers "nothing moved" (an edge of the block, or an unknown id).
     def move_display_column(id : Int64, dir : Int32) : Bool
-      ids = [] of Int64
-      @db.query("SELECT id FROM display_columns ORDER BY position, id") { |rs| rs.each { ids << rs.read(Int64) } }
-      i = ids.index(id)
-      return false unless i
-      j = i + (dir < 0 ? -1 : 1)
-      return false unless 0 <= j < ids.size
-      ids.swap(i, j)
-      exec_task_ok ->(c : DB::Connection) {
-        ids.each_with_index { |cid, pos| c.exec("UPDATE display_columns SET position = ? WHERE id = ?", pos, cid) }
-        nil
-      }
+      move_position("display_columns", id, dir)
     end
 
     # Returns whether the write committed (false = store busy/locked/closing → the caller must

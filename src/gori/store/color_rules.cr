@@ -75,17 +75,7 @@ module Gori
     # False also covers "nothing moved" (an edge of the block, or an unknown id), same
     # contract `Rules#move` states.
     def move_color_rule(id : Int64, dir : Int32) : Bool
-      ids = [] of Int64
-      @db.query("SELECT id FROM color_rules ORDER BY position, id") { |rs| rs.each { ids << rs.read(Int64) } }
-      i = ids.index(id)
-      return false unless i
-      j = i + (dir < 0 ? -1 : 1)
-      return false unless 0 <= j < ids.size
-      ids.swap(i, j)
-      exec_task_ok ->(c : DB::Connection) {
-        ids.each_with_index { |rid, pos| c.exec("UPDATE color_rules SET position = ? WHERE id = ?", pos, rid) }
-        nil
-      }
+      move_position("color_rules", id, dir)
     end
 
     # Returns whether the write committed (false = store busy/locked/closing).
@@ -109,38 +99,18 @@ module Gori
     # the value is a display choice, not a gate — and raising would take the Colormarker tab
     # and History's row loop down with it.
     def colormarker_overrides : Hash(Int64, Bool)
-      map = {} of Int64 => Bool
-      raw = setting(COLORMARKER_OVERRIDES_KEY)
-      return map if raw.nil? || raw.strip.empty?
-      JSON.parse(raw).as_h?.try &.each do |k, v|
-        id = k.to_i64?
-        b = v.as_bool?
-        map[id] = b if id && !b.nil?
-      end
-      map
-    rescue
-      {} of Int64 => Bool
+      global_overrides(COLORMARKER_OVERRIDES_KEY)
     end
 
     # Returns whether the write committed (false = store busy/locked/closing → the caller
     # must not report the toggle as applied; the row colour is unchanged).
     def set_colormarker_override(id : Int64, enabled : Bool) : Bool
-      write_colormarker_overrides(colormarker_overrides.merge({id => enabled}))
+      set_global_override(COLORMARKER_OVERRIDES_KEY, id, enabled)
     end
 
     # Drop this project's disagreement, so the rule follows the global default again.
     def clear_colormarker_override(id : Int64) : Bool
-      map = colormarker_overrides
-      return true unless map.has_key?(id)
-      map.delete(id)
-      write_colormarker_overrides(map)
-    end
-
-    # An EMPTY map deletes the key outright rather than storing "{}" — which is what makes
-    # "the override disappeared when the two agreed again" observable from outside.
-    private def write_colormarker_overrides(map : Hash(Int64, Bool)) : Bool
-      return delete_setting(COLORMARKER_OVERRIDES_KEY) if map.empty?
-      set_setting(COLORMARKER_OVERRIDES_KEY, map.to_h { |id, on| {id.to_s, on} }.to_json)
+      clear_global_override(COLORMARKER_OVERRIDES_KEY, id)
     end
   end
 end

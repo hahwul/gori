@@ -269,21 +269,7 @@ class Gori::Store
     # Everything strictly below the oldest survivor goes; `<=` below is against `cutoff - 1`.
     cutoff -= 1
     return if cutoff <= 0
-    conn.exec("DELETE FROM ws_messages WHERE flow_id <= ? AND repeater_id IS NULL", cutoff)
-    conn.exec("DELETE FROM flows_fts WHERE rowid <= ?", cutoff)
-    # Derived JS references (V35) go with their flow, as in `Store#prune`.
-    conn.exec("DELETE FROM js_refs WHERE flow_id <= ?", cutoff)
-    conn.exec("DELETE FROM js_ref_scans WHERE flow_id <= ?", cutoff)
-    conn.exec("DELETE FROM intercept_originals WHERE flow_id <= ?", cutoff)
-    conn.exec("DELETE FROM flow_interims WHERE flow_id <= ?", cutoff)
-    conn.exec("DELETE FROM flows WHERE id <= ?", cutoff)
-    # Reap a connection's raw log only once it is neither referenced by a surviving
-    # flow nor still logging recent frames (identical guard to Store#prune).
-    oldest = conn.query_one?("SELECT MIN(created_at) FROM flows", as: Int64?) || Int64::MAX
-    stale = "id NOT IN (SELECT h2_conn_id FROM flows WHERE h2_conn_id IS NOT NULL) " \
-            "AND id NOT IN (SELECT conn_id FROM h2_frames WHERE created_at >= ?)"
-    conn.exec("DELETE FROM h2_frames WHERE conn_id IN (SELECT id FROM h2_connections WHERE #{stale})", oldest)
-    conn.exec("DELETE FROM h2_connections WHERE #{stale}", oldest)
+    delete_flows_through(conn, cutoff)
     # Connection-less frames, which neither statement above can select (they go through
     # `h2_connections`, and that row is the thing these frames lack). Same reap as `Store#prune`
     # — the two sweeps keep one definition of what is reclaimable.
