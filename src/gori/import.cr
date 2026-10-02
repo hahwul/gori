@@ -73,34 +73,6 @@ module Gori
       end
     end
 
-    def self.from_har(path : String, prov : Provenance = Provenance.none) : ParseResult
-      Har.parse_file(path, prov)
-    end
-
-    def self.from_urls(path : String, prov : Provenance = Provenance.none) : ParseResult
-      Urls.parse_file(path, prov)
-    end
-
-    def self.from_oas(path : String, prov : Provenance = Provenance.none) : ParseResult
-      Oas.parse_file(path, prov)
-    end
-
-    def self.from_postman(path : String, prov : Provenance = Provenance.none) : ParseResult
-      Postman.parse_file(path, prov)
-    end
-
-    def self.from_insomnia(path : String, prov : Provenance = Provenance.none) : ParseResult
-      Insomnia.parse_file(path, prov)
-    end
-
-    def self.from_burp(path : String, prov : Provenance = Provenance.none) : ParseResult
-      Burp.parse_file(path, prov)
-    end
-
-    def self.from_wsdl(path : String, prov : Provenance = Provenance.none) : ParseResult
-      Wsdl.parse_file(path, prov)
-    end
-
     # Every curl command in `text`, one flow per request, each stored BYTE-EXACT through
     # `Raw.request_flow` — the head `Curl` built is the request, so it is neither re-serialized
     # nor re-split. A command `Curl` refused is a skipped entry, like a malformed HAR entry, and
@@ -299,13 +271,13 @@ module Gori
       return import_curl_file(store, expanded, surface, prov) if kind == :curl
       parsed = begin
         case kind
-        when :har      then from_har(expanded, prov)
-        when :urls     then from_urls(expanded, prov)
-        when :oas      then from_oas(expanded, prov)
-        when :postman  then from_postman(expanded, prov)
-        when :insomnia then from_insomnia(expanded, prov)
-        when :burp     then from_burp(expanded, prov)
-        when :wsdl     then from_wsdl(expanded, prov)
+        when :har      then Har.parse_file(expanded, prov)
+        when :urls     then Urls.parse_file(expanded, prov)
+        when :oas      then Oas.parse_file(expanded, prov)
+        when :postman  then Postman.parse_file(expanded, prov)
+        when :insomnia then Insomnia.parse_file(expanded, prov)
+        when :burp     then Burp.parse_file(expanded, prov)
+        when :wsdl     then Wsdl.parse_file(expanded, prov)
         else                raise Gori::Error.new("unknown import kind: #{kind}")
         end
       rescue ex : File::Error
