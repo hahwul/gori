@@ -170,7 +170,7 @@ module Gori
 
       @[Tool("authorize_status", gated: true, read_only: true, permission: "send")]
       private def authorize_status(h) : Result
-        ajob = lookup_authorize_job(h, "status")
+        ajob = lookup_job(h, @authorize_jobs, "authorize", "status", missing_field: "job_id")
         return ajob if ajob.is_a?(Result)
         Result.new(JSON.build do |j|
           j.object do
@@ -209,7 +209,7 @@ module Gori
       # to a caller who read page 1 and stopped.
       @[Tool("authorize_results", gated: true, read_only: true, permission: "send")]
       private def authorize_results(h) : Result
-        ajob = lookup_authorize_job(h, "results")
+        ajob = lookup_job(h, @authorize_jobs, "authorize", "results", missing_field: "job_id")
         return ajob if ajob.is_a?(Result)
         req_off = optional_int_arg(h, "offset")
         req_lim = optional_int_arg(h, "limit")
@@ -246,17 +246,9 @@ module Gori
 
       @[Tool("authorize_stop", gated: true, agent_action: true, permission: "send")]
       private def authorize_stop(h) : Result
-        ajob = lookup_authorize_job(h, "stop")
+        ajob = lookup_job(h, @authorize_jobs, "authorize", "stop", missing_field: "job_id")
         return ajob if ajob.is_a?(Result)
         stop_and_report(ajob)
-      end
-
-      private def lookup_authorize_job(h, verb : String) : AuthorizeJob | Result
-        id = str(h, "job_id")
-        return err("missing required 'job_id'", "INVALID_ARGUMENT", field: "job_id") if id.nil? || id.empty?
-        job = @authorize_jobs[id]?
-        return job_not_found(id, "authorize", verb) unless job
-        job_project_mismatch(job) || job
       end
 
       # --- the finding ---------------------------------------------------------

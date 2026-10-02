@@ -941,21 +941,46 @@ module Gori
         max_requests : Int64?,
         started_at_ms : Int64
 
+      # What every background job carries, whatever it runs: its id, where it stands, how it
+      # ended, the stop request, and the project it ran in. Each kind adds its own counters.
+      abstract class Job
+        getter id : String
+        # :running until the runner fiber lands it terminal; each kind names its own terminal
+        # states.
+        property status : Symbol = :running
+        property error_msg : String? = nil
+        property? truncated = false
+        property ended_at_ms : Int64? = nil
+        property stop_requested_at_ms : Int64? = nil
+        getter audit : JobAudit
+        getter db_path : String?
+
+        def initialize(@id : String, @audit : JobAudit, @db_path : String?)
+        end
+
+        def stop : Nil
+          @stop_requested_at_ms ||= Time.utc.to_unix_ms
+          halt
+        end
+
+        # Tell the run itself to wind down.
+        private abstract def halt : Nil
+      end
+
       # A background fuzz run, polled by fuzz_status / fuzz_results. The runner fiber
       # only mutates these fields (single-threaded scheduler → no lock needed); the stored
       # results are capped at FUZZ_MAX_STORED and are NOT matched-only — see
       # `store_fuzz_result` for the six things a row can be kept for. `fuzz_results
       # {matched_only:true}` is the filter for a caller that wants only the matches.
-      class FuzzJob
-        getter id : String
+      class FuzzJob < Job
         getter total : Int64?
-        # :running | :done | :budget_exhausted | :condition_met | :stopped | :error.
+        # `status`: :running | :done | :budget_exhausted | :condition_met | :stopped | :error.
         # :budget_exhausted is a DISTINCT terminal state from :done so a run that hit the
         # request budget before checking every candidate is not read as an exhaustive "0
         # matches"; :condition_met (issue #1240) is the run's own `stop_on` ending it — it
         # reached its goal, which is why it is neither :done (not exhaustive) nor :stopped
         # (nobody pressed stop).
-        property status : Symbol = :running
+
         # The sentence naming what the run's `stop_on` met, when `status == :condition_met`;
         # nil otherwise. Reported by `fuzz_status` so an agent reads WHY the run ended early.
         property stop_reason : String? = nil
@@ -1002,7 +1027,6 @@ module Gori
         # A terminal failure observed while the drain must stay logically running until Done
         # flushes the permanent tail; otherwise project switching can rebind the store mid-job.
         property? terminal_error = false
-        property error_msg : String? = nil
         # How many times the drain / history-record rescues have fired for this job. Those
         # rescues log, and they sit on the per-EVENT path: a persistent failure (a broken
         # store, a full disk) fires once per result, so an unbounded log would write one
@@ -1029,29 +1053,23 @@ module Gori
         # reused id; the per-result ref prevents the older result from binding to that row.
         getter result_flow_source_refs = [] of String?
         property history_ref_seq = 0
-        property? truncated = false
         property? history_truncated = false
         property recorded_flows = 0
-        property ended_at_ms : Int64? = nil
-        property stop_requested_at_ms : Int64? = nil
         getter record_history : Symbol
         getter origin : Fuzz::Origin
         getter? http2 : Bool
-        getter audit : JobAudit
-
-        getter db_path : String?
 
         # The run's engine, for the queries that are safe to ask while it is live (the macro's
         # tally, `fuzz_status`).
         getter engine : Fuzz::Engine
 
-        def initialize(@id : String, @total : Int64?, @engine : Fuzz::Engine,
+        def initialize(id : String, @total : Int64?, @engine : Fuzz::Engine,
                        @record_history : Symbol, @origin : Fuzz::Origin, @http2 : Bool,
-                       @audit : JobAudit, @db_path : String? = nil)
+                       audit : JobAudit, db_path : String? = nil)
+          super(id, audit, db_path)
         end
 
-        def stop : Nil
-          @stop_requested_at_ms ||= Time.utc.to_unix_ms
+        private def halt : Nil
           @engine.stop
         end
 
@@ -1070,11 +1088,10 @@ module Gori
       # A background param-mining run, polled by mine_status / mine_results. Like FuzzJob,
       # only the runner fiber mutates these (single-threaded → no lock). `total` is the
       # name count (the stable denominator); issues are capped at MINE_MAX_STORED.
-      class MineJob
-        getter id : String
+      class MineJob < Job
         getter total : Int64
-        # :running | :done | :budget_exhausted | :stopped | :error (see FuzzJob).
-        property status : Symbol = :running
+        # `status`: :running | :done | :budget_exhausted | :stopped | :error (see FuzzJob).
+
         property names_done = 0_i64
         property sent = 0_i64
         property found = 0
@@ -1086,26 +1103,19 @@ module Gori
         property baseline_warning : String? = nil
         # The calibration note — informational, never a downgrade (see `Miner::BaselineEvent`).
         property baseline_note : String? = nil
-        property error_msg : String? = nil
         getter results = [] of Miner::Finding
-        property? truncated = false
-        property ended_at_ms : Int64? = nil
-        property stop_requested_at_ms : Int64? = nil
-        getter audit : JobAudit
-
-        getter db_path : String?
         # The run's engine. Exposed for its PURE reporting queries (`skipped_names` /
         # `present_names` / `candidate_names`), which are derived from the loaded wordlist, the
         # base request and the config's locations — so they are safe to read from the status
         # fiber while the run is live.
         getter engine
 
-        def initialize(@id : String, @total : Int64, @engine : Miner::Engine, @audit : JobAudit,
-                       @db_path : String? = nil)
+        def initialize(id : String, @total : Int64, @engine : Miner::Engine, audit : JobAudit,
+                       db_path : String? = nil)
+          super(id, audit, db_path)
         end
 
-        def stop : Nil
-          @stop_requested_at_ms ||= Time.utc.to_unix_ms
+        private def halt : Nil
           @engine.stop
         end
       end
@@ -1113,14 +1123,13 @@ module Gori
       # An async token-collection run tracked for the sequence_* tools. Collected tokens
       # are kept in-memory ONLY to compute the randomness report — they are secrets and are
       # never returned over the wire (sequence_results exposes the report, not the tokens).
-      class SequenceJob
-        getter id : String
+      class SequenceJob < Job
         getter goal : Int32
-        # :running | :done | :budget_exhausted | :stopped | :error (see FuzzJob). Here
+        # `status`: :running | :done | :budget_exhausted | :stopped | :error (see FuzzJob). Here
         # :budget_exhausted means the collection ended UNDER `goal`, so the randomness report
         # rests on a shorter sample than the caller asked for — which is not a fact a verdict
         # of WEAK or CRITICAL carries on its own face.
-        property status : Symbol = :running
+
         property collected = 0
         property sent = 0
         # Requests actually put on the wire — `Sequencer::Engine#wire_requests`, the same
@@ -1133,25 +1142,18 @@ module Gori
         # on every event, and dropped at the drain.
         property requests = 0_i64
         property errors = 0
-        property error_msg : String? = nil
         getter tokens = [] of String
-        property? truncated = false
-        property ended_at_ms : Int64? = nil
-        property stop_requested_at_ms : Int64? = nil
-        getter audit : JobAudit
 
-        getter db_path : String?
-
-        def initialize(@id : String, @goal : Int32, @engine : Sequencer::Engine, @audit : JobAudit,
-                       @db_path : String? = nil)
+        def initialize(id : String, @goal : Int32, @engine : Sequencer::Engine, audit : JobAudit,
+                       db_path : String? = nil)
+          super(id, audit, db_path)
         end
 
         def report : Sequencer::Stats::Report
           Sequencer::Stats.analyze(@tokens)
         end
 
-        def stop : Nil
-          @stop_requested_at_ms ||= Time.utc.to_unix_ms
+        private def halt : Nil
           @engine.stop
         end
       end
@@ -1163,10 +1165,10 @@ module Gori
       # proc to the engine so it is polled between identities too), so the fiber has nothing to
       # drive but the accumulation below. `stop` is therefore a FLAG this job owns rather than
       # a call into an engine — the plan is a struct and the loop reads the proc.
-      class AuthorizeJob
-        getter id : String
+      class AuthorizeJob < Job
         getter plan : Authorize::Plan
-        property status : Symbol = :running # :running | :done | :stopped | :error
+        # `status`: :running | :done | :stopped | :error.
+
         # Requests whose FULL identity set was replayed. A request the stop cut short mid-set
         # yields no Target at all (see `Authorize::Engine#run`), so it is never counted here —
         # claiming "enforced" from identities that were never sent is worse than a false
@@ -1197,7 +1199,6 @@ module Gori
         # Non-baseline identities served the same response as the baseline: the finding.
         property bypasses = 0
         property reviews = 0
-        property error_msg : String? = nil
         # Flows that RAISED before any send — a stored h2 pseudo-header head is the reachable
         # one. Counted and named per flow rather than failing the job: one unreplayable
         # capture in a fifty-flow selection is not a reason to throw away the other
@@ -1209,16 +1210,11 @@ module Gori
         # complete, and the stored-rows cap silently dropped the ones after it. Bounded by the
         # send cap like the job itself, and head-only like `results`.
         getter bypassed = [] of Authorize::Target
-        property? truncated = false
-        property ended_at_ms : Int64? = nil
-        property stop_requested_at_ms : Int64? = nil
         property? stop_requested = false
-        getter audit : JobAudit
 
-        getter db_path : String?
-
-        def initialize(@id : String, @plan : Authorize::Plan, @audit : JobAudit,
-                       @db_path : String? = nil)
+        def initialize(id : String, @plan : Authorize::Plan, audit : JobAudit,
+                       db_path : String? = nil)
+          super(id, audit, db_path)
         end
 
         # The selection's size, snapshotted from the plan so a status read never walks it.
@@ -1242,22 +1238,20 @@ module Gori
           @plan.identities.find(&.baseline?).try(&.name)
         end
 
-        def stop : Nil
-          @stop_requested_at_ms ||= Time.utc.to_unix_ms
+        private def halt : Nil
           @stop_requested = true
         end
       end
 
       # An async discover (spider + directory brute-force) run tracked for the discover_* tools.
-      class DiscoverJob
-        getter id : String
-        property status : Symbol = :running # :running | :done | :stopped | :error
+      class DiscoverJob < Job
+        # `status`: :running | :done | :stopped | :error.
+
         property found = 0
         property sent = 0_i64
         property errors = 0_i64
         property queued = 0
         property stats : Discover::RunStats? = nil
-        property error_msg : String? = nil
         getter results = [] of Discover::Finding
         # Findings waiting to be written as flows. The TUI has always batched these
         # (`DiscoverController#queue_persist`); MCP wrote one transaction per finding, and
@@ -1272,19 +1266,20 @@ module Gori
         # reads a finding here and then `get_flow`s it has no other way to tell "not yet
         # flushed" from "never will be".
         property unsaved = 0
-        property? truncated = false
-        property ended_at_ms : Int64? = nil
-        property stop_requested_at_ms : Int64? = nil
-        getter audit : JobAudit
+        # The `results` index each `persist_buf` entry belongs to, in buffer order — nil for a
+        # finding past DISCOVER_MAX_STORED, which is persisted but has no row to carry an id.
+        # With `flow_ids`, what lets `discover_results` hand an agent the `flow_id` its
+        # `requires: get_flow` promises.
+        getter persist_owners = [] of Int32?
+        # `results` index → flow id, filled as each batch commits.
+        getter flow_ids = {} of Int32 => Int64
 
-        getter db_path : String?
-
-        def initialize(@id : String, @engine : Discover::Engine, @audit : JobAudit,
-                       @db_path : String? = nil)
+        def initialize(id : String, @engine : Discover::Engine, audit : JobAudit,
+                       db_path : String? = nil)
+          super(id, audit, db_path)
         end
 
-        def stop : Nil
-          @stop_requested_at_ms ||= Time.utc.to_unix_ms
+        private def halt : Nil
           @engine.stop
         end
       end
@@ -1952,7 +1947,7 @@ module Gori
       # resolve to unrelated rows in the NEW database. Refuse the read instead of handing
       # back evidence pointers that silently changed meaning; the results are kept, so
       # switching back makes them readable again.
-      private def job_project_mismatch(job : FuzzJob | MineJob | SequenceJob | DiscoverJob | AuthorizeJob) : Result?
+      private def job_project_mismatch(job : Job) : Result?
         return nil if job.db_path == @db_path
         err("job #{job.id} ran against a different project (#{job.db_path || "unknown"}); " \
             "switch back to that project to read its results",
@@ -1961,7 +1956,7 @@ module Gori
 
       # A background job's fiber must never exit with the job still :running — that
       # hangs every poller and permanently trips jobs_running?. Land it terminal.
-      private def finalize_job(job : FuzzJob | MineJob | SequenceJob | DiscoverJob | AuthorizeJob) : Nil
+      private def finalize_job(job : Job) : Nil
         if job.status == :running
           job.status = :error
           job.error_msg ||= "job ended without a terminal event"

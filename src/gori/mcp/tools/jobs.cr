@@ -109,9 +109,20 @@ module Gori
         not_found("no #{kind} job #{id}")
       end
 
+      # The `kind` job `job_id` names in `jobs`, or the error Result the caller returns as-is.
+      # `missing_field` is the field a missing `job_id` refusal names: only authorize names it.
+      private def lookup_job(h, jobs : Hash(String, T), kind : String, verb : String,
+                             missing_field : String? = nil) : T | Result forall T
+        id = str(h, "job_id")
+        return err("missing required 'job_id'", "INVALID_ARGUMENT", field: missing_field) if id.nil? || id.empty?
+        job = jobs[id]?
+        return job_not_found(id, kind, verb) unless job
+        job_project_mismatch(job) || job
+      end
+
       # A job started before a switch_project is still LISTED (so an agent can see why an id
       # it remembers now refuses), but flagged — its *_results/*_status read PROJECT_CHANGED.
-      private def emit_job_project(j : JSON::Builder, job : FuzzJob | MineJob | DiscoverJob | SequenceJob | AuthorizeJob) : Nil
+      private def emit_job_project(j : JSON::Builder, job : Job) : Nil
         return if job.db_path == @db_path
         j.field "project_changed", true
         j.field "job_db_path", job.db_path
@@ -160,7 +171,7 @@ module Gori
         waited_out = false
         if wait
           deadline = Time.utc.to_unix_ms + budget
-          while job_running?(job)
+          while job.status == :running
             if Time.utc.to_unix_ms >= deadline
               waited_out = true
               break
@@ -180,7 +191,7 @@ module Gori
       # aborted a run that was in flight" and reports a COMPLETE run as cancelled, or its
       # results as partial. `stop_job` has always re-read the status; this is the same read,
       # so all six stop surfaces now answer the same way.
-      private def stop_and_report(job : FuzzJob | MineJob | DiscoverJob | SequenceJob | AuthorizeJob) : Result
+      private def stop_and_report(job : Job) : Result
         emit_stop_result(job, already_finished: !request_stop(job))
       end
 
@@ -189,18 +200,18 @@ module Gori
       # stopping a finished run used to report `stop_requested: true` with a request time
       # LATER than `stopped_at` — a stop that "happened" after the run it claims to have
       # ended. The reply then says `already_finished` instead (`emit_stop_result`).
-      private def request_stop(job : FuzzJob | MineJob | DiscoverJob | SequenceJob | AuthorizeJob) : Bool
-        return false unless job_running?(job)
+      private def request_stop(job : Job) : Bool
+        return false unless job.status == :running
         job.stop
         true
       end
 
       # The stop reply itself, shared by `stop_job` (which may have waited first) and the
       # five per-kind tools. Read AFTER the stop and any wait, never assumed.
-      private def emit_stop_result(job : FuzzJob | MineJob | DiscoverJob | SequenceJob | AuthorizeJob,
-                                   waited_out : Bool = false, *, already_finished : Bool = false) : Result
-        status, stopped_at = job_status_and_end(job)
-        requested = job_stop_requested(job)
+      private def emit_stop_result(job : Job, waited_out : Bool = false, *, already_finished : Bool = false) : Result
+        status = job.status.to_s
+        stopped_at = job.ended_at_ms
+        requested = job.stop_requested_at_ms
         Result.new(JSON.build do |j|
           j.object do
             j.field "job_id", job.id
@@ -218,18 +229,6 @@ module Gori
             j.field "stopped_at", stopped_at
           end
         end)
-      end
-
-      private def job_running?(job : FuzzJob | MineJob | DiscoverJob | SequenceJob | AuthorizeJob) : Bool
-        job.status == :running
-      end
-
-      private def job_status_and_end(job : FuzzJob | MineJob | DiscoverJob | SequenceJob | AuthorizeJob) : {String, Int64?}
-        {job.status.to_s, job.ended_at_ms}
-      end
-
-      private def job_stop_requested(job : FuzzJob | MineJob | DiscoverJob | SequenceJob | AuthorizeJob) : Int64?
-        job.stop_requested_at_ms
       end
 
       # The tools/list schemas for the job-control tools, kept beside the handlers that
