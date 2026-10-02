@@ -114,6 +114,86 @@ describe Gori::Tui::PickerOverlay do
   end
 end
 
+private def provider_rows(n : Int32) : Array(OastProviderPicker::Row)
+  (0...n).map do |i|
+    OastProviderPicker::Row.new("k#{i}", "prov-#{i}", "interactsh", "srv#{i}.test", "project", false)
+  end
+end
+
+private def session_rows(n : Int32) : Array(OastSessionPicker::Row)
+  (0...n).map do |i|
+    OastSessionPicker::Row.new(i.to_i64 + 1, "prov-#{i}", "abc#{i}.test", Time.utc, i, false)
+  end
+end
+
+private def copy_options(n : Int32) : Array(CopyMenu::Option)
+  (0...n).map { |i| CopyMenu::Option.new("label #{i}", 'a' + i, "x") }
+end
+
+# The four plain pickers, each with `n` rows.
+private def plain_pickers(n : Int32) : Array(PlainPickerOverlay)
+  dests = (0...n).map { |i| SendMenu::Destination.new("dest #{i}", 'a' + i, :decoder, "hint") }
+  [
+    OastProviderPicker.new(provider_rows(n), "GET PAYLOAD FROM"),
+    OastSessionPicker.new(session_rows(n)),
+    CopyPicker.new("COPY AS", copy_options(n)),
+    SendPicker.new("Send selection to", "abc", dests),
+  ] of PlainPickerOverlay
+end
+
+describe Gori::Tui::PlainPickerOverlay do
+  it "draws no card for an empty list, so every click dismisses instead of raising" do
+    # card_w is a max_of over the rows; the shell's empty guard is what keeps a click from
+    # throwing Enumerable::EmptyError out of the event loop, for all four at once.
+    area = Gori::Tui::Rect.new(0, 0, 80, 24)
+    plain_pickers(0).each do |ov|
+      ov.empty?.should be_true
+      ov.overlay_box(area).should be_nil, "#{ov.class} sized a card from zero rows"
+      ov.handle_click(area, 40, 12).should eq(:cancel)
+    end
+  end
+
+  it "paints the selection bar on the selected row only" do
+    area = Gori::Tui::Rect.new(0, 0, 80, 24)
+    plain_pickers(3).each do |ov|
+      ov.move(1)
+      mb = MemoryBackend.new(80, 24)
+      ov.render(Screen.new(mb), area)
+      box = ov.overlay_box(area).not_nil!
+      (0...3).each do |i|
+        ry = box.y + 1 + i
+        active = i == 1
+        mb.grid[ry][box.x + 1].should eq(active ? '▎' : ' '), "#{ov.class} row #{i} bar"
+        mb.bg_at(box.right - 2, ry).should eq(active ? Theme.accent_bg : Theme.panel), "#{ov.class} row #{i} bg"
+      end
+    end
+  end
+
+  it "picks only rows that were drawn on a height-clamped card" do
+    # 25 rows in 12 lines: the card clamps to 10, so 8 rows show. The bottom border sits
+    # where a ninth row would be and must not resolve to it.
+    area = Gori::Tui::Rect.new(0, 0, 80, 12)
+    plain_pickers(25).each do |ov|
+      box = ov.overlay_box(area).not_nil!
+      box.h.should eq(10)
+      ov.render(Screen.new(MemoryBackend.new(80, 12)), area)
+      ov.handle_click(area, box.x + 3, box.bottom - 1).should eq(:stay), "#{ov.class} picked off the border"
+      ov.handle_click(area, box.x + 3, box.y + 8).should eq(:commit)
+      ov.selected.should eq(7)
+    end
+  end
+
+  it "keeps the OAST cards' wider floor as a hook, not the shell's" do
+    # 30 columns leave a 26-cell card: wide enough for copy-as / send-to (floor 18), below
+    # the OAST pickers' floor of 30.
+    area = Gori::Tui::Rect.new(0, 0, 30, 12)
+    plain_pickers(3).each do |ov|
+      oast = ov.is_a?(OastProviderPicker) || ov.is_a?(OastSessionPicker)
+      ov.overlay_box(area).nil?.should eq(oast), "#{ov.class} floor"
+    end
+  end
+end
+
 describe Gori::Tui::FilterPickerOverlay do
   it "reports :stay for a filter keystroke and :commit/:cancel only for ↵/esc" do
     # The raw vocabulary, not the harness's collapsed :open/:closed — a filter key that
