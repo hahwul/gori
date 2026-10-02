@@ -3,7 +3,7 @@ require "./register"
 require "./clipboard"
 require "./text_area"
 require "./text_read_state"
-require "./tab_controller"
+require "./editor_pane"
 
 module Gori::Tui
   # The READ-mode edits of an editor pane: delete the selection, delete or yank whole lines,
@@ -22,8 +22,9 @@ module Gori::Tui
   # bytes go in through the same path as the operator's own paste, with the same line-ending
   # rule).
   #
-  # Pure over a `TabController` and a key sink, so it is spec-able without a terminal: the
-  # Runner passes its own `handle_key`, a spec passes the controller's `handle_body_key`.
+  # Pure over an `EditorPane` and a key sink, so it is spec-able without a terminal: the
+  # Runner passes its own `handle_key`, a spec passes the controller's `handle_body_key`, and
+  # the setup wizard's practice pad (`KeysetPad`) passes its own INSERT ladder.
   # Each operation returns the status line to show, or nil when the pane already said why.
   module ReadEdit
     alias KeyIn = Proc(Termisu::Event::Key, Nil)
@@ -50,7 +51,7 @@ module Gori::Tui
     # Does the READ selection cover whole lines: from column 0 of its first line to the end of
     # its last? That is what `x` (select line) produces, and what makes a copy or a delete
     # LINEWISE, so that `p` puts it back as lines rather than inside one.
-    def self.line_selection?(tab : TabController) : Bool
+    def self.line_selection?(tab : EditorPane) : Bool
       return false unless buf = tab.editor_text_buffer
       area, read = buf
       return false unless span = read.selection_span(area)
@@ -66,7 +67,7 @@ module Gori::Tui
       x0 == 0 && x1 >= (lines[y1]?.try(&.size) || 0)
     end
 
-    def self.selection?(tab : TabController) : Bool
+    def self.selection?(tab : EditorPane) : Bool
       return false unless buf = tab.editor_text_buffer
       area, read = buf
       read.selection?(area)
@@ -75,7 +76,7 @@ module Gori::Tui
     # gori `d` after `x` (or after a ⇧arrow span), vim `d` in a line selection. The deleted
     # text goes to the register, linewise when the span was whole lines; the clipboard is not
     # touched (see `Register`).
-    def self.delete_selection(tab : TabController, key_in : KeyIn) : String?
+    def self.delete_selection(tab : EditorPane, key_in : KeyIn) : String?
       return NO_BUFFER unless buf = tab.editor_text_buffer
       area, read = buf
       lines = area.lines_snapshot
@@ -97,7 +98,7 @@ module Gori::Tui
     end
 
     # vim `dd`: the caret's line, or every line the selection touches.
-    def self.delete_line(tab : TabController, key_in : KeyIn) : String?
+    def self.delete_line(tab : EditorPane, key_in : KeyIn) : String?
       return NO_BUFFER unless buf = tab.editor_text_buffer
       area, read = buf
       if span = read.selection_span(area)
@@ -110,7 +111,7 @@ module Gori::Tui
 
     # vim `yy`: the caret's line, or every line the selection touches, to the clipboard and
     # the register, linewise. A copy, so it goes through `Clipboard.copy` like every other.
-    def self.yank_line(tab : TabController) : String
+    def self.yank_line(tab : EditorPane) : String
       return NO_BUFFER unless buf = tab.editor_text_buffer
       area, read = buf
       lines = area.lines_snapshot
@@ -129,7 +130,7 @@ module Gori::Tui
 
     # `p`: the register after the caret, or after the selection's end. A linewise register
     # goes in as its own line(s) below the caret's line; anything else lands in the line.
-    def self.paste(tab : TabController, key_in : KeyIn) : String?
+    def self.paste(tab : EditorPane, key_in : KeyIn) : String?
       return NO_BUFFER unless buf = tab.editor_text_buffer
       area, read = buf
       return EMPTY_REG unless held = Register.text
@@ -177,7 +178,7 @@ module Gori::Tui
 
     # The text into the pane exactly as a terminal paste would arrive: in bulk where the pane
     # takes one, else as keystrokes, which is `Runner#flush_bulk_paste`'s own fallback.
-    private def self.deliver(tab : TabController, key_in : KeyIn, payload : String) : Nil
+    private def self.deliver(tab : EditorPane, key_in : KeyIn, payload : String) : Nil
       return if tab.accepts_bulk_paste? && tab.paste_text(payload)
       payload.each_char { |c| key_in.call(key_event(c)) }
     end
@@ -185,7 +186,7 @@ module Gori::Tui
     # Lines y0..y1 out, line breaks included, as one ⌫. Which break goes with them depends on
     # where they sit: the one after the block, or (for a block at the end) the one before it,
     # so no blank line is left where the lines were. The whole buffer leaves one empty line.
-    private def self.delete_lines(tab : TabController, key_in : KeyIn, y0 : Int32, y1 : Int32) : String?
+    private def self.delete_lines(tab : EditorPane, key_in : KeyIn, y0 : Int32, y1 : Int32) : String?
       return NO_BUFFER unless buf = tab.editor_text_buffer
       area, _ = buf
       lines = area.lines_snapshot
@@ -208,7 +209,7 @@ module Gori::Tui
       cut(tab, key_in, span, text, linewise: true, what: plural(y1 - y0 + 1, "line"))
     end
 
-    private def self.cut(tab : TabController, key_in : KeyIn, span : {Int32, Int32, Int32, Int32},
+    private def self.cut(tab : EditorPane, key_in : KeyIn, span : {Int32, Int32, Int32, Int32},
                          text : String, linewise : Bool, what : String) : String?
       return NO_BUFFER unless buf = tab.editor_text_buffer
       area, read = buf
@@ -232,7 +233,7 @@ module Gori::Tui
     # notes save, the Decoder commits). False when the pane kept INSERT, as an Issue's notes do
     # when a peer rewrote them: the pane has put its reason on screen, and the caller returns
     # nil so a "deleted 1 line" does not paint over it.
-    private def self.leave(tab : TabController) : Bool
+    private def self.leave(tab : EditorPane) : Bool
       tab.editor_exit_insert
       tab.editor_read_mode?
     end
@@ -243,7 +244,7 @@ module Gori::Tui
     # - an entry that RELOADED the buffer (an Issue's notes re-seed from the store when they
     #   are not dirty) moved the text out from under a span measured before it, so cutting
     #   there would delete text the operator never selected.
-    private def self.enter(tab : TabController, area : TextArea) : String?
+    private def self.enter(tab : EditorPane, area : TextArea) : String?
       return READ_ONLY unless tab.editor_read_mode?
       rev = area.edits
       tab.editor_enter_insert
