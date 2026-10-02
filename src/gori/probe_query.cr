@@ -1,5 +1,4 @@
-require "./store"
-require "./filter_ast"
+require "./triage_filter"
 require "./probe/issue" # FILTER_CATEGORIES — the one list `category:` and `--category` share
 
 module Gori
@@ -28,50 +27,7 @@ module Gori
         "code"     => ["code"],
       }
 
-      # Canonical names, separator included, in completion order — what `ProbeView` splices
-      # over a half-typed token on ↹.
-      FIELDS = ALIASES.keys.map { |n| "#{n}:" }
-
-      KNOWN = ALIASES.values.flatten.to_set
-
-      # Does this backend implement `name`, with this separator? The predicate
-      # `FilterAst.spans` asks before painting a token as a FIELD (see its `known` argument).
-      # `regex` is always false here: only QL and the intercept gate implement `~`, so a
-      # `title~admin` is free-texted whole and must not be coloured as a match nobody performs.
-      def self.known_field?(name : String, regex : Bool = false) : Bool
-        !regex && KNOWN.includes?(name.downcase)
-      end
-
-      # The vocabulary a typo is measured against: every spelling `build_term` dispatches on,
-      # bare (no separator), because `FilterAst.suggest` compares NAMES. The completion list
-      # `FIELDS` carries its `:` and canonical names only, so suggesting out of it would both
-      # miss `sev` and hand back a name with punctuation glued on.
-      CANDIDATE_FIELDS = ALIASES.values.flatten
-
-      # The spelling a name this bar does not implement most likely meant — `FilterAst.suggest`
-      # over the pool above. Shared rule, OWN vocabulary: `QL.suggest_field` answers out of QL's
-      # fields, which hold nothing near `catgory`, so a bar that borrowed it would stay silent
-      # about its own `category:` — and would name QL fields this bar cannot filter on.
-      def self.suggest_field(name : String) : String?
-        return nil if name.empty? || known_field?(name)
-        FilterAst.suggest(name.downcase, CANDIDATE_FIELDS)
-      end
-
-      # The span highlighter's shape — see `QL::FIELD_SHAPED`, including why the operator is
-      # not part of the SHAPE question. No namespaces: this bar has no dotted field, so a
-      # dotted name is an authority (`acme.test:8443`) and never a namespace guess.
-      FIELD_SHAPED = ->(f : String, _op : Char, v : String) do
-        FilterAst.field_shaped?(f, v, known_field?(f)) { suggest_field(f) }
-      end
-
-      # Canonical name for a spelling — `cat` is `category`. Same reason as
-      # `Issues::Filter::CANONICAL`: the completion row asks for help by the name the operator
-      # typed, so a table keyed only by canonical names leaves every alias undescribed.
-      CANONICAL = begin
-        h = {} of String => String
-        ALIASES.each { |canon, spellings| spellings.each { |sp| h[sp] = canon } }
-        h
-      end
+      include TriageFilter
 
       # What each field means ON THIS BAR — not `QL::FIELD_HELP`, for the reason
       # `Issues::Filter::FIELD_HELP` spells out: `status:` here is a triage state, not an HTTP
@@ -83,22 +39,6 @@ module Gori
         "host"     => "the finding's host — substring",
         "code"     => "the rule's code — substring",
       }
-
-      # Built once — the bar draws it every frame while the filter is being edited.
-      FIELD_HELP_PROC = ->(f : String) do
-        canon = CANONICAL[f.downcase]?
-        canon ? FIELD_HELP[canon]? : nil
-      end
-
-      def self.field_help(name : String) : String?
-        FIELD_HELP_PROC.call(name)
-      end
-
-      # All five fit a one-row hint, so this is the whole vocabulary rather than a sample.
-      HINT_FIELDS = ALIASES.keys
-
-      # ALSO ACCEPTED on the `?` reference — the identity entries in `CANONICAL` dropped.
-      ALSO_ACCEPTED = CANONICAL.reject { |from, to| from == to }
 
       # This backend's own SYNTAX / WORTH KNOWING for the `?` reference, for the reason
       # `Issues::Filter::SYNTAX_HELP` gives: the boolean grammar is shared `FilterAst`, the
@@ -121,38 +61,13 @@ module Gori
         {"one row per code+host", "findings are grouped before this filter ever sees them"},
       ]
 
-      # Spelled the way `severity_value` / `match_status` below match them; only the canonical
-      # spelling of each is offered (`med`, `crit`, `conf`, `fp`, `done` still parse).
-      SEVERITY_VALUES = %w[info low medium high critical]
-      STATUS_VALUES   = %w[open confirmed false-positive resolved closed]
-
-      # Comparison samples, so the bar can show that `severity:` takes an operator at all —
-      # completion offers NAMES until a `:` is typed and can never teach this.
-      SEVERITY_SAMPLES = %w[>=medium >=high >=critical]
-
       # ↹ candidates for the token under `cx` — field names until a `:` is typed, then values.
       # Punctuation rides through on `FilterAst::Cursor`, so `-cat` → `-category:`, which the
       # old `[/\S*\z/]` tokenizer could not complete. `hosts` and `codes` are the caller's
       # pools, read off the in-memory issue list.
       def self.suggestions(query : String, cx : Int32, hosts : Array(String) = [] of String,
                            codes : Array(String) = [] of String) : Array(String)
-        cur = FilterAst.token_at(query, cx)
-        return [] of String if cur.core.empty?
-        if (colon = cur.core.index(':')) && colon > 0
-          field = cur.core[0...colon].downcase
-          prefix = FilterAst.unquote_prefix(cur.core[(colon + 1)..])
-          suggest_values(field, prefix, hosts, codes).map { |v| "#{cur.prefix}#{field}:#{FilterAst.quote(v)}" }
-        else
-          FIELDS.select(&.starts_with?(cur.core.downcase)).map { |f| "#{cur.prefix}#{f}" }
-        end
-      end
-
-      private def self.suggest_values(field : String, prefix : String, hosts : Array(String),
-                                      codes : Array(String)) : Array(String)
-        values = value_pool(field, hosts, codes)
-        return [] of String unless values
-        p = prefix.downcase
-        values.select(&.downcase.starts_with?(p))
+        complete(query, cx) { |field| value_pool(field, hosts, codes) }
       end
 
       # nil when the field has no closed vocabulary to offer — a name that completes over an
@@ -170,19 +85,6 @@ module Gori
         when "host"     then hosts
         when "code"     then codes
         end
-      end
-
-      private record Term, kind : Symbol, op : Symbol, text : String, negate : Bool
-
-      def self.parse(query : String) : Filter
-        new(FilterAst.build(FilterAst.parse(query)) { |t| build_term(t) })
-      end
-
-      def initialize(@tree : FilterAst::Tree(Term)?)
-      end
-
-      def empty? : Bool
-        @tree.nil?
       end
 
       # True when the query explicitly constrains status (status:/st:, possibly negated),
@@ -204,15 +106,6 @@ module Gori
         tree = @tree
         return true unless tree
         eval(tree, i)
-      end
-
-      private def eval(tree : FilterAst::Tree(Term), i : Store::AnyProbeIssue) : Bool
-        case tree.op
-        in .leaf? then match_term(tree.leaf, i)
-        in .not?  then !eval(tree.children.first, i)
-        in .and?  then tree.children.all? { |c| eval(c, i) }
-        in .or?   then tree.children.any? { |c| eval(c, i) }
-        end
       end
 
       # Never drops a term; an empty value is resolved in match_term, which here makes
@@ -237,15 +130,6 @@ module Gori
         Term.new(:text, :eq, tok.downcase, negate)
       end
 
-      private def self.split_op(value : String) : {Symbol, String}
-        return {:ge, value[2..]} if value.starts_with?(">=")
-        return {:le, value[2..]} if value.starts_with?("<=")
-        return {:gt, value[1..]} if value.starts_with?(">")
-        return {:lt, value[1..]} if value.starts_with?("<")
-        return {:eq, value[1..]} if value.starts_with?("=")
-        {:eq, value}
-      end
-
       private def match_term(t : Term, i : Store::AnyProbeIssue) : Bool
         # An incomplete term (e.g. mid-typing `host:` or `-host:`) filters nothing — match all.
         # (Previously a NEGATED empty term matched nothing and blanked the whole list.)
@@ -264,41 +148,6 @@ module Gori
       private def free_text(text : String, i : Store::AnyProbeIssue) : Bool
         return true if text.empty?
         i.title.downcase.includes?(text) || i.host.downcase.includes?(text) || i.code.downcase.includes?(text)
-      end
-
-      private def match_severity(t : Term, sev : Store::Severity) : Bool
-        target = severity_value(t.text)
-        return false unless target
-        cmp = sev.value <=> target
-        case t.op
-        when :ge then cmp >= 0
-        when :gt then cmp > 0
-        when :le then cmp <= 0
-        when :lt then cmp < 0
-        else          cmp == 0
-        end
-      end
-
-      private def severity_value(name : String) : Int32?
-        case name
-        when "info"             then 0
-        when "low"              then 1
-        when "medium", "med"    then 2
-        when "high"             then 3
-        when "critical", "crit" then 4
-        else                         nil
-        end
-      end
-
-      private def match_status(name : String, status : Store::Status) : Bool
-        case name
-        when "open"                 then status.open?
-        when "confirmed", "conf"    then status.confirmed?
-        when "false-positive", "fp" then status.false_positive?
-        when "resolved", "done"     then status.resolved?
-        when "closed"               then !status.open?
-        else                             false
-        end
       end
     end
   end

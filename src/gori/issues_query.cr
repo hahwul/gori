@@ -1,5 +1,4 @@
-require "./store"
-require "./filter_ast"
+require "./triage_filter"
 
 module Gori
   module Issues
@@ -27,50 +26,7 @@ module Gori
         "cvss"     => ["cvss"],
       }
 
-      # Canonical names, separator included, in completion order — what `IssuesView` splices
-      # over a half-typed token on ↹.
-      FIELDS = ALIASES.keys.map { |n| "#{n}:" }
-
-      KNOWN = ALIASES.values.flatten.to_set
-
-      # Does this backend implement `name`, with this separator? The predicate
-      # `FilterAst.spans` asks before painting a token as a FIELD (see its `known` argument).
-      # `regex` is always false here: only QL and the intercept gate implement `~`, so a
-      # `title~admin` is free-texted whole and must not be coloured as a match nobody performs.
-      def self.known_field?(name : String, regex : Bool = false) : Bool
-        !regex && KNOWN.includes?(name.downcase)
-      end
-
-      # The vocabulary a typo is measured against: every spelling `build_term` dispatches on,
-      # bare (no separator), because `FilterAst.suggest` compares NAMES. The completion list
-      # `FIELDS` carries its `:` and canonical names only, so suggesting out of it would both
-      # miss `sev` and hand back a name with punctuation glued on.
-      CANDIDATE_FIELDS = ALIASES.values.flatten
-
-      # The spelling a name this bar does not implement most likely meant — `FilterAst.suggest`
-      # over the pool above. Shared rule, OWN vocabulary: `QL.suggest_field` answers out of QL's
-      # fields, which hold nothing near `sevrity`, so a bar that borrowed it would stay silent
-      # about its own `severity:` — and would name QL fields this bar cannot filter on.
-      def self.suggest_field(name : String) : String?
-        return nil if name.empty? || known_field?(name)
-        FilterAst.suggest(name.downcase, CANDIDATE_FIELDS)
-      end
-
-      # The span highlighter's shape — see `QL::FIELD_SHAPED`, including why the operator is
-      # not part of the SHAPE question. No namespaces: this bar has no dotted field, so a
-      # dotted name is an authority (`acme.test:8443`) and never a namespace guess.
-      FIELD_SHAPED = ->(f : String, _op : Char, v : String) do
-        FilterAst.field_shaped?(f, v, known_field?(f)) { suggest_field(f) }
-      end
-
-      # Canonical name for a spelling — `sev` is `severity`. The completion row asks for help
-      # by the name the OPERATOR typed (`QuerySuggest.field_of`), so a table keyed only by
-      # canonical names would leave every alias in `ALIASES` undescribed.
-      CANONICAL = begin
-        h = {} of String => String
-        ALIASES.each { |canon, spellings| spellings.each { |sp| h[sp] = canon } }
-        h
-      end
+      include TriageFilter
 
       # What each field means ON THIS BAR — deliberately NOT `QL::FIELD_HELP`, even though
       # `FilterAst` and two of the names are shared, and this is the reason the help source is
@@ -78,7 +34,7 @@ module Gori
       # with 5xx classes and comparisons; here it is a TRIAGE state, so QL's table would state
       # this field's meaning backwards on the one surface where the bar is the only place the
       # vocabulary is ever learned. `host:` would be nearly right and still wrong: QL's line
-      # advertises `host~` for regex, which `known_field?` above refuses outright.
+      # advertises `host~` for regex, which `known_field?` refuses outright.
       FIELD_HELP = {
         "severity" => "info low medium high critical — takes >= <= > <",
         "status"   => "triage state — open confirmed fp resolved (closed = any non-open)",
@@ -86,26 +42,6 @@ module Gori
         "title"    => "the issue's title — substring",
         "cvss"     => "score, with >= <= > < — or a substring of the vector",
       }
-
-      # As a proc, built once: the bar draws this every frame while the filter is being
-      # edited, and an inline closure at the call site allocates one per frame.
-      FIELD_HELP_PROC = ->(f : String) do
-        canon = CANONICAL[f.downcase]?
-        canon ? FIELD_HELP[canon]? : nil
-      end
-
-      def self.field_help(name : String) : String?
-        FIELD_HELP_PROC.call(name)
-      end
-
-      # The subset a one-row cold hint samples — see `QL::HINT_FIELDS` for why a hint samples
-      # at all. All five fit, so this is the whole vocabulary rather than a sample.
-      HINT_FIELDS = ALIASES.keys
-
-      # The spellings the `?` reference lists under ALSO ACCEPTED. `CANONICAL` maps every
-      # spelling including the canonical one to itself, and a page saying `severity: =
-      # severity:` is noise, so the identity entries go.
-      ALSO_ACCEPTED = CANONICAL.reject { |from, to| from == to }
 
       # The `?` reference's SYNTAX section. `HelpView.query_rows` defaults to `QL::SYNTAX_HELP`
       # and more than half of it is untrue here: it teaches `body~secret\d+`, `dur:>1.5s` and
@@ -132,19 +68,10 @@ module Gori
         {"matching is in memory", "issues are a small severity-sorted list, so there is no index and no size limit"},
       ]
 
-      # The closed value vocabularies, spelled the way `severity_value` and `match_status`
-      # below actually match them. Only the CANONICAL spelling of each is offered: `med` and
-      # `crit` still parse, but a completion list carrying both spellings of five severities
-      # spends the whole row saying one thing twice.
-      SEVERITY_VALUES = %w[info low medium high critical]
-      STATUS_VALUES   = %w[open confirmed false-positive resolved closed]
-
-      # Comparison SAMPLES for the two ordinal fields. No list can be `cvss:`'s vocabulary —
-      # it is a float — so these exist to teach syntax, which completion otherwise cannot:
-      # ↹ offers NAMES until a `:` is typed, so without these nothing on the bar ever shows
-      # that these two fields take an operator at all.
-      SEVERITY_SAMPLES = %w[>=medium >=high >=critical]
-      CVSS_SAMPLES     = %w[>=4.0 >=7.0 >=9.0]
+      # Comparison samples for `cvss:`, as `SEVERITY_SAMPLES` are for `severity:`. No list can
+      # be `cvss:`'s vocabulary — it is a float — so these exist to teach syntax, which
+      # completion otherwise cannot: ↹ offers NAMES until a `:` is typed.
+      CVSS_SAMPLES = %w[>=4.0 >=7.0 >=9.0]
 
       # ↹ candidates for the token under `cx`: field names until a `:` is typed, then that
       # field's values. The grammar's punctuation is carried through by `FilterAst::Cursor`,
@@ -155,22 +82,7 @@ module Gori
       # list, so unlike History there is no store round-trip here and no async cache to
       # invalidate.
       def self.suggestions(query : String, cx : Int32, hosts : Array(String) = [] of String) : Array(String)
-        cur = FilterAst.token_at(query, cx)
-        return [] of String if cur.core.empty?
-        if (colon = cur.core.index(':')) && colon > 0
-          field = cur.core[0...colon].downcase
-          prefix = FilterAst.unquote_prefix(cur.core[(colon + 1)..])
-          suggest_values(field, prefix, hosts).map { |v| "#{cur.prefix}#{field}:#{FilterAst.quote(v)}" }
-        else
-          FIELDS.select(&.starts_with?(cur.core.downcase)).map { |f| "#{cur.prefix}#{f}" }
-        end
-      end
-
-      private def self.suggest_values(field : String, prefix : String, hosts : Array(String)) : Array(String)
-        values = value_pool(field, hosts)
-        return [] of String unless values
-        p = prefix.downcase
-        values.select(&.downcase.starts_with?(p))
+        complete(query, cx) { |field| value_pool(field, hosts) }
       end
 
       # The pool for one field, or nil when the field has no closed vocabulary to offer
@@ -186,20 +98,6 @@ module Gori
         end
       end
 
-      # One parsed clause. `op` only matters for ordinal (severity) comparisons.
-      private record Term, kind : Symbol, op : Symbol, text : String, negate : Bool
-
-      def self.parse(query : String) : Filter
-        new(FilterAst.build(FilterAst.parse(query)) { |t| build_term(t) })
-      end
-
-      def initialize(@tree : FilterAst::Tree(Term)?)
-      end
-
-      def empty? : Bool
-        @tree.nil?
-      end
-
       # Keep store order. An empty filter passes all.
       def apply(issues : Array(Store::Issue)) : Array(Store::Issue)
         return issues if @tree.nil?
@@ -210,15 +108,6 @@ module Gori
         tree = @tree
         return true unless tree
         eval(tree, f)
-      end
-
-      private def eval(tree : FilterAst::Tree(Term), f : Store::Issue) : Bool
-        case tree.op
-        in .leaf? then match_term(tree.leaf, f)
-        in .not?  then !eval(tree.children.first, f)
-        in .and?  then tree.children.all? { |c| eval(c, f) }
-        in .or?   then tree.children.any? { |c| eval(c, f) }
-        end
       end
 
       # --- parsing -------------------------------------------------------------
@@ -249,16 +138,6 @@ module Gori
         end
         # Unrecognised prefix or bare token → free text (matched over title + host).
         Term.new(:text, :eq, tok.downcase, negate)
-      end
-
-      # Peel a leading comparison operator (>= <= > < =) off a severity value.
-      private def self.split_op(value : String) : {Symbol, String}
-        return {:ge, value[2..]} if value.starts_with?(">=")
-        return {:le, value[2..]} if value.starts_with?("<=")
-        return {:gt, value[1..]} if value.starts_with?(">")
-        return {:lt, value[1..]} if value.starts_with?("<")
-        return {:eq, value[1..]} if value.starts_with?("=")
-        {:eq, value}
       end
 
       # --- matching ------------------------------------------------------------
@@ -316,41 +195,6 @@ module Gori
       private def free_text(text : String, f : Store::Issue) : Bool
         return true if text.empty?
         f.title.downcase.includes?(text) || (f.host || "").downcase.includes?(text)
-      end
-
-      private def match_severity(t : Term, sev : Store::Severity) : Bool
-        target = severity_value(t.text)
-        return false unless target
-        cmp = sev.value <=> target
-        case t.op
-        when :ge then cmp >= 0
-        when :gt then cmp > 0
-        when :le then cmp <= 0
-        when :lt then cmp < 0
-        else          cmp == 0
-        end
-      end
-
-      private def severity_value(name : String) : Int32?
-        case name
-        when "info"             then 0
-        when "low"              then 1
-        when "medium", "med"    then 2
-        when "high"             then 3
-        when "critical", "crit" then 4
-        else                         nil
-        end
-      end
-
-      private def match_status(name : String, status : Store::Status) : Bool
-        case name
-        when "open"                 then status.open?
-        when "confirmed", "conf"    then status.confirmed?
-        when "false-positive", "fp" then status.false_positive?
-        when "resolved", "done"     then status.resolved?
-        when "closed"               then !status.open? # any non-open triage state
-        else                             false
-        end
       end
     end
   end
