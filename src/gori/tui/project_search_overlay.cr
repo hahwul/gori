@@ -10,6 +10,7 @@ require "./text_field"
 require "./viewport"
 require "./url"
 require "./flow_status"
+require "../plural"
 
 module Gori::Tui
   # The project picker's ^F (#1229): type a needle, and every registered project's captured
@@ -339,7 +340,7 @@ module Gori::Tui
     # empty list to be read as "no project ever saw this".
     def status_line : String
       total = @projects.size
-      return ProjectPicker.plural_projects(total) unless @needle
+      return Gori.plural(total, "project") unless @needle
       head = @running ? "scanning #{@scanned}/#{total}" : "#{@scanned}/#{total} searched"
       parts = [head, "#{@hits} hit#{@hits == 1 ? "" : "s"}"]
       parts << "#{@skipped} skipped" if @skipped > 0
@@ -376,7 +377,7 @@ module Gori::Tui
         elsif pending? || @running
           {"searching…", nil}
         else
-          {"no flow matches in #{ProjectPicker.plural_projects(@projects.size)}", nil}
+          {"no flow matches in #{Gori.plural(@projects.size, "project")}", nil}
         end
       screen.text(box.x + 3, y, msg, Theme.muted, Theme.panel, width: {box.w - 5, 1}.max)
       screen.text(box.x + 3, y + 1, detail, Theme.muted, Theme.panel, width: {box.w - 5, 1}.max) if detail && h > 1

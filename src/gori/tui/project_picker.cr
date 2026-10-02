@@ -25,6 +25,7 @@ require "./export_overlay"
 require "./import_overlay"
 require "./name_prompt_overlay"
 require "./viewport"
+require "../plural"
 
 module Gori::Tui
   # The startup screen: choose a project to open. New + Temp are always shown at
@@ -112,12 +113,8 @@ module Gori::Tui
         SpaceEntry.new('E', "Export (cursor)", :archive_export),
         SpaceEntry.new('i', "Import archive", :archive_import),
         SpaceEntry.new('N', "Clear marks", :mark_clear),
-        SpaceEntry.new('d', "Delete #{plural_projects(marked)}", :delete),
+        SpaceEntry.new('d', "Delete #{Gori.plural(marked, "project")}", :delete),
       ]
-    end
-
-    def self.plural_projects(n : Int32) : String
-      "#{n} project#{n == 1 ? "" : "s"}"
     end
 
     # The mark count appended to the list divider, or "" with nothing marked (so an unmarked
@@ -962,7 +959,7 @@ module Gori::Tui
     # Pure + class-level so a spec can pin it without a Termisu.
     def self.delete_confirm_body(names : Array(String), hidden : Int32, blocked : Int32) : String
       one = names.size == 1
-      head = "Delete #{plural_projects(names.size)}?"
+      head = "Delete #{Gori.plural(names.size, "project")}?"
       if names.size <= NAMED_DELETE_MAX
         named = %(Delete #{names.map { |n| %("#{n}") }.join(", ")}?)
         # A single project is named whatever it costs: "Delete 1 project?" names nothing at
@@ -985,7 +982,7 @@ module Gori::Tui
     def self.delete_blocked_flash(names : Array(String)) : String
       return "nothing to delete" if names.empty?
       return %(can't delete "#{names.first}" — it's open in another gori instance) if names.size == 1
-      "can't delete #{plural_projects(names.size)} — they're open in another gori instance"
+      "can't delete #{Gori.plural(names.size, "project")} — they're open in another gori instance"
     end
 
     private def commit_delete : Nil
@@ -1040,7 +1037,7 @@ module Gori::Tui
     def self.delete_result_flash(deleted : Int32, refused : Array(String), first_error : String?) : String?
       return nil if refused.empty? && deleted <= 1
       if refused.empty?
-        return "deleted #{plural_projects(deleted)}"
+        return "deleted #{Gori.plural(deleted, "project")}"
       end
       if deleted == 0 && refused.size == 1
         return first_error || %(can't delete "#{refused.first}")
@@ -1049,7 +1046,7 @@ module Gori::Tui
       # failures, and one sentence cannot claim both. The single-target line above says which,
       # because there it can (it carries the raising error's own message).
       kept = refused.size == 1 ? %("#{refused.first}") : refused.size.to_s
-      deleted == 0 ? "deleted nothing — kept #{kept}" : "deleted #{plural_projects(deleted)} — kept #{kept}"
+      deleted == 0 ? "deleted nothing — kept #{kept}" : "deleted #{Gori.plural(deleted, "project")} — kept #{kept}"
     end
 
     private def cancel_confirm : Nil
