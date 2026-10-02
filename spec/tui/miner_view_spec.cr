@@ -176,6 +176,33 @@ describe Gori::Tui::MinerView do
       end
     end
   end
+
+  # The session accessors MinerView shares with SequencerView (#1463).
+  it "derives the chip, the filter's method and the origin from the request line" do
+    view = Gori::Tui::MinerView.new
+    path = "/#{"a" * 40}"
+    view.load("https://h.test", "PUT #{path} HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, true, " sni.test ",
+      Gori::Miner::Config.new)
+    view.request_line.should eq("PUT #{path} HTTP/1.1")
+    view.request_method.should eq("PUT")
+    view.summary.should eq("PUT #{path}"[0, 31] + "…")
+    view.summary(200).should eq("PUT #{path}")
+    view.label(10).should eq("PUT /aaaa…")
+    view.name = "  login  "
+    view.label(18).should eq("login")
+    view.sni_override.should eq("sni.test")
+    view.http2?.should be_true
+    view.target.should eq("https://h.test")
+    view.target_origin.should eq("https://h.test:443")
+    view.dirty?.should be_true
+    view.clear_dirty
+    view.dirty?.should be_false
+
+    blank = Gori::Tui::MinerView.new
+    blank.summary.should eq("request")
+    blank.request_method.should eq("")
+    blank.sni_override.should be_nil
+  end
 end
 
 # PROVENANCE, on the Miner → Repeater handoff (space ▸ Send to Repeater from a finding).

@@ -123,4 +123,51 @@ describe SequencerController do
       end
     end
   end
+
+  # The shell SequencerController shares with MinerController (#1463): the seed's request
+  # summary, the empty state, the key tail and the close path.
+  describe "the seeded-session shell" do
+    it "summarises a seed's request line unclipped, or `request` when there is none" do
+      with_sequencer_controller do |ctl, _session|
+        path = "/#{"a" * 60}"
+        ctl.build_seed_from_request("https://shop.test", "POST #{path} HTTP/1.1\nHost: shop.test\n\n", false, nil)
+          .summary.should eq("POST #{path}")
+        ctl.build_seed_from_request("https://shop.test", "\n", false, nil).summary.should eq("request")
+      end
+    end
+
+    it "draws the Sequencer's empty state with no session open" do
+      with_sequencer_controller do |ctl, _session|
+        backend = MemoryBackend.new(100, 30)
+        ctl.render_body(Screen.new(backend), Rect.new(0, 0, 100, 30), :body)
+        backend.contains?("no sequencer session").should be_true
+      end
+    end
+
+    it "swallows a bare key no pane takes" do
+      with_sequencer_controller do |ctl, _session|
+        view = collected_samples(ctl)
+        view.focus_pane(:config)
+        ctl.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerZ, char: 'z')).should be_true
+      end
+    end
+
+    it "closes the active session on ^W and lands on the one left" do
+      with_sequencer_controller do |_ctl, session|
+        req = "GET /token HTTP/1.1\r\nHost: shop.test\r\n\r\n".to_slice
+        session.store.insert_sequencer_session("https://shop.test", req, false, nil, "{}", nil, 0).should be > 0
+        session.store.insert_sequencer_session("https://shop.test", req, false, nil, "{}", nil, 1).should be > 0
+        host = FakeHost.new(session)
+        ctl = SequencerController.new(host)
+        ctl.jump_subtab(1)
+        ctrl_w = Termisu::Event::Key.new(Termisu::Input::Key::LowerW, Termisu::Input::Modifier::Ctrl)
+        ctl.handle_body_key(ctrl_w).should be_true
+        host.confirms.should eq([{"CLOSE SEQUENCER", "Close sequencing session “GET /token”?\nIts config and collected tokens are discarded."}])
+        ctl.subtab_index.should eq(0)
+        ctl.subtab_labels.size.should eq(1)
+        session.store.sequencer_sessions.size.should eq(1)
+        host.statuses.last.should eq("closed (1 open)")
+      end
+    end
+  end
 end

@@ -206,4 +206,45 @@ describe MinerController do
       end
     end
   end
+
+  # The shell MinerController shares with SequencerController (#1463): the seed's request
+  # summary, the empty state, the key tail and the close path.
+  describe "the seeded-session shell" do
+    it "summarises a seed's request line unclipped, or `request` when there is none" do
+      with_miner_controller do |ctl, _|
+        path = "/#{"a" * 60}"
+        ctl.build_seed_from_request("https://shop.test", "POST #{path} HTTP/1.1\nHost: shop.test\n\n", false, nil)
+          .summary.should eq("POST #{path}")
+        ctl.build_seed_from_request("https://shop.test", "\n", false, nil).summary.should eq("request")
+      end
+    end
+
+    it "draws the Miner's empty state with no session open" do
+      with_miner_controller do |ctl, _|
+        backend = MemoryBackend.new(100, 30)
+        ctl.render_body(Screen.new(backend), Rect.new(0, 0, 100, 30), :body)
+        backend.contains?("no mining session").should be_true
+      end
+    end
+
+    it "leaves a bare key no pane takes to the keymap" do
+      with_findings do |ctl, view|
+        view.focus_pane(:summary)
+        ctl.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerZ, char: 'z')).should be_false
+      end
+    end
+
+    it "closes the active session on ^W behind a confirm that names its request" do
+      with_findings do |ctl, _|
+        host = ctl.@host.as(FakeHost)
+        ctrl_w = Termisu::Event::Key.new(Termisu::Input::Key::LowerW, Termisu::Input::Modifier::Ctrl)
+        ctl.handle_body_key(ctrl_w).should be_true
+        host.confirms.should eq([{"CLOSE MINER", "Close mining session “GET /login”?\nIts config and results are discarded."}])
+        ctl.current_view.should be_nil
+        ctl.subtab_strip_shown?.should be_false
+        host.session.store.miner_sessions.should be_empty
+        host.statuses.last.should eq("closed — none open")
+      end
+    end
+  end
 end

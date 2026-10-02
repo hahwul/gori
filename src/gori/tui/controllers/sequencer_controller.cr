@@ -1,6 +1,7 @@
 require "../tab_controller"
 require "../sequencer_view"
 require "../sequence_config_overlay"
+require "./seeded_tool_tabs"
 require "../../store"
 require "../../sequencer"
 require "../../env"
@@ -18,6 +19,7 @@ module Gori::Tui
   # manual paste ("Send selection to Sequencer") does. Session config persists across
   # reopen; collected tokens are live secrets and stay in-memory (never on disk).
   class SequencerController < TabController
+    include SeededToolTabs
     DRAIN_CAP = 512
 
     def initialize(host : Host)
@@ -53,26 +55,8 @@ module Gori::Tui
       current_tab_obj.try(&.view)
     end
 
-    def subtab_labels : Array(String)
-      @sessions.map_with_index { |t, i| "#{i + 1}:#{t.view.label(18)}" }
-    end
-
-    def subtab_strip_shown? : Bool
-      !@sessions.empty?
-    end
-
-    def subtab_index : Int32
-      @current_idx
-    end
-
     def view_at(idx : Int32) : SequencerView?
       (0 <= idx < @sessions.size) ? @sessions[idx].view : nil
-    end
-
-    # The object that IS sub-tab `idx`, for the strip's mark set (#683). The view, not the
-    # index: a reconcile can reorder or drop chips under a standing mark.
-    def subtab_ref(idx : Int32) : SubtabRef?
-      view_at(idx)
     end
 
     def body_badge : Symbol
@@ -90,50 +74,22 @@ module Gori::Tui
       end
     end
 
-    # --- rendering ---
-    def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
-      body_focused = focus == :body
-      labels = subtab_strip_shown? ? subtab_labels : nil
-      shell = BodyChrome.shell_focused(focus, multi_pane: !current_view.nil?)
-      subtabs_focused = focus == :subtabs
-      @subtab_start = BodyChrome.framed_body(screen, rect, shell, subtabs_focused, labels, @current_idx, @subtab_start, subtab_hidden, strip_divider: subtab_strip_divider?, find: subtab_find_shown?, find_lit: @host.subtab_find_focused?, marked: marked_chip_set) do |content|
-        render_with_filter(screen, content, subtabs_focused) do |body|
-          if v = current_view
-            v.render(screen, body, body_focused)
-          else
-            TrafficEmptyState.render(screen, body, variant: :sequencer)
-          end
-        end
-      end
+    private def navigable_pane?(pane : Symbol) : Bool
+      pane == :config || pane == :samples || pane == :analysis
     end
 
-    # --- input ---
-    def handle_body_key(ev : Termisu::Event::Key) : Bool
-      v = current_view
-      if v.nil?
-        key = ev.key
-        if key.escape? || nav_up?(ev) # `k` only BARE — see TabController#nav_up?
-          @host.request_focus(:menu)
-          return true
-        end
-        return false
-      end
-      if navigable_pane?(v.focus) && ev.key.space? && !ev.ctrl? && !ev.alt?
-        @host.open_space_menu
-        return true
-      end
-      c = ev.char || ev.key.to_char
-      return true if dispatch_chord(chord_action(ev, c), v, c)
-      return false if (ev.ctrl? || ev.alt?) && !ev.key.escape? # ^R/^X → keymap verb
-      # ⇧E → sequence.export and bare `c` → sequence.configure, both dispatched by the
-      # keymap. The line below swallows every key this body does not itself use, so a key
-      # the keymap owns never reaches it unless it is declined here BY NAME.
-      #
-      # `c` used to be an arm that called `reconfigure_sequence` directly. The verb's own
-      # chord could therefore never fire: it showed in the Hotkeys editor, and a rebind of
-      # `sequence.configure` moved nothing. The `:detail` test comes along because that is
-      # the one focus where the arm did not run, and the swallow below is what has always
-      # made `c` inert there.
+    # A bare key past SeededToolTabs#handle_body_key.
+    #
+    # ⇧E → sequence.export and bare `c` → sequence.configure, both dispatched by the
+    # keymap. The line below swallows every key this body does not itself use, so a key
+    # the keymap owns never reaches it unless it is declined here BY NAME.
+    #
+    # `c` used to be an arm that called `reconfigure_sequence` directly. The verb's own
+    # chord could therefore never fire: it showed in the Hotkeys editor, and a rebind of
+    # `sequence.configure` moved nothing. The `:detail` test comes along because that is
+    # the one focus where the arm did not run, and the swallow below is what has always
+    # made `c` inert there.
+    private def session_key(ev : Termisu::Event::Key, v : SequencerView, c : Char?) : Bool
       return false if c == 'E'
       return false if c == 'c' && !ev.ctrl? && !ev.alt? && v.focus != :detail
       # PgUp/PgDn/Home/End over SAMPLES go to the Runner's page/jump route (`body_scroll`
@@ -142,44 +98,6 @@ module Gori::Tui
       return false if v.focus == :samples && page_nav_key?(ev.key)
       ev.key.escape? ? handle_escape(v) : handle_pane_key(ev, v)
       true
-    end
-
-    private def dispatch_chord(action : Symbol?, v : SequencerView, c : Char?) : Bool
-      case action
-      when :palette then @host.open_palette
-      when :close   then request_close
-      when :switch  then switch_subtab(c)
-      else               return false
-      end
-      true
-    end
-
-    private def navigable_pane?(pane : Symbol) : Bool
-      pane == :config || pane == :samples || pane == :analysis
-    end
-
-    private def chord_action(ev : Termisu::Event::Key, c : Char?) : Symbol?
-      return nil unless ev.ctrl?
-      key = ev.key
-      case
-      when key.lower_p?         then :palette
-      when key.lower_w?         then :close
-      when c && '1' <= c <= '9' then :switch
-      end
-    end
-
-    private def handle_escape(v : SequencerView) : Nil
-      if v.focus == :detail
-        v.close_detail
-      else
-        @host.request_focus(subtab_strip_shown? ? :subtabs : :menu)
-      end
-    end
-
-    private def switch_subtab(c : Char?) : Nil
-      return unless c
-      idx = c.to_i - 1
-      @current_idx = idx if idx < @sessions.size
     end
 
     private def handle_pane_key(ev : Termisu::Event::Key, v : SequencerView) : Nil
@@ -456,21 +374,6 @@ module Gori::Tui
       end
     end
 
-    def handle_wheel(step : Int32) : Bool
-      if v = current_view
-        wheel_pane(v, v.focus, step)
-      end
-      true
-    end
-
-    # Pointer-aware: the pane under the cursor scrolls, keyboard focus stays put.
-    def handle_wheel_at(step : Int32, mx : Int32, my : Int32, rect : Rect) : Bool
-      return true unless v = current_view
-      pane = v.pane_at(body_rect_below_filter(rect), mx, my)
-      wheel_pane(v, pane || v.focus, step)
-      true
-    end
-
     # PgUp/PgDn/Home/End over SAMPLES. `samples_move` clamps the Runner's ±JUMP_ROWS and
     # re-asks the tail-follow, so End during a collection re-arms it and Home disarms it.
     # Any other pane is not this route's: CONFIG has no list, ANALYSIS/DETAIL take the keys
@@ -493,69 +396,6 @@ module Gori::Tui
       when :analysis then v.analysis_wheel(step) # viewport only — ↑/↓ are the cursor
       when :detail   then v.detail_wheel(step)   # viewport only — ↑/↓ are the cursor
       end
-    end
-
-    def commit : Nil
-      save_current
-    end
-
-    # --- focus ring ---
-    def pane_advance(dir : Int32) : Bool
-      current_view.try(&.pane_advance(dir)) || false
-    end
-
-    def focus_first : Nil
-      current_view.try(&.focus_first)
-    end
-
-    def focus_last : Nil
-      current_view.try(&.focus_last)
-    end
-
-    # --- sub-tab filter ---
-    def subtab_filter_enabled? : Bool
-      true
-    end
-
-    def filter_fields : Array(String)
-      %w[name host method]
-    end
-
-    def filter_subjects : Array(Repeater::SubtabFilter::Subject)
-      @sessions.map do |t|
-        v = t.view
-        Repeater::SubtabFilter::Subject.new(v.name, v.summary(200), v.target, v.request_method, [] of String)
-      end
-    end
-
-    # The ⌕ picker searches the captured request itself (wire bytes, capped) — findable by
-    # a header or parameter the operator recalls, beyond the summary's request line.
-    def subtab_search_extras : Array(String)
-      @sessions.map { |t| search_extra(t.view.request_bytes) }
-    end
-
-    # --- sub-tab nav ---
-    def move_subtab(dir : Int32) : Nil
-      if t = step_visible(@current_idx, dir)
-        @current_idx = t
-      end
-    end
-
-    def jump_subtab(idx : Int32) : Nil
-      return unless 0 <= idx < @sessions.size
-      clear_subtab_filter if (h = subtab_hidden) && h.includes?(idx)
-      @current_idx = idx
-    end
-
-    def reveal_session(id : Int64) : Nil
-      if idx = index_for_db_id(id)
-        @current_idx = idx
-        @host.focus_body
-      end
-    end
-
-    def index_for_db_id(id : Int64) : Int32?
-      @sessions.index { |t| t.db_id == id }
     end
 
     # --- rename ---
@@ -585,7 +425,7 @@ module Gori::Tui
         headers = Sequencer::Extract.candidate_headers(raw)
       end
       SequenceSeed.new(built.target, built.bytes, built.http2, detail.sni, id,
-        request_summary(built.bytes), Sequencer::Mode::LiveReplay, loc, cookies, headers)
+        SeededSession.request_summary(built.bytes), Sequencer::Mode::LiveReplay, loc, cookies, headers)
     end
 
     # NO `Env.expand` here: `Sequencer::Plan.build` expands the request once, at run time.
@@ -595,7 +435,7 @@ module Gori::Tui
     # byte-wise for the reason given over `MinerController#build_seed_from_request`.
     def build_seed_from_request(target : String, request_text : String, http2 : Bool, sni : String?) : SequenceSeed
       bytes = Env.normalize_crlf(request_text.to_slice)
-      SequenceSeed.new(target, bytes, http2, sni, nil, request_summary(bytes),
+      SequenceSeed.new(target, bytes, http2, sni, nil, SeededSession.request_summary(bytes),
         Sequencer::Mode::LiveReplay, nil, [] of String, [] of String)
     end
 
@@ -618,13 +458,6 @@ module Gori::Tui
       return nil unless head
       resp = Proxy::Codec::Http1.parse_response_head(head) rescue nil
       Repeater::Result.new(head, detail.response_body, resp, 0_i64)
-    end
-
-    private def request_summary(bytes : Bytes) : String
-      line = String.new(bytes[0, {bytes.size, 256}.min]).each_line.first? || ""
-      parts = line.strip.split(' ')
-      s = "#{parts[0]?} #{parts[1]?}".strip
-      s.empty? ? "request" : s
     end
 
     # --- send-selection: selected text becomes manual sample(s) ---
@@ -881,46 +714,8 @@ module Gori::Tui
         confirm_label: "close", danger: true) { close_tab }
     end
 
-    private def close_marked_sessions(refs : Array(SubtabRef)) : Nil
-      @host.status(close_marked_subtabs(refs))
-      @host.resolve_subtab_focus
-    end
-
-    protected def close_subtab_at(idx : Int32) : Bool
-      close_at(idx)
-    end
-
-    def close_tab : Nil
-      return if @current_idx < 0 || @current_idx >= @sessions.size
-      orphaned = close_at(@current_idx)
-      @host.status(TabClose.message(@sessions.empty? ? "closed — none open" : "closed (#{@sessions.size} open)", orphaned))
-    end
-
-    # Close sub-tab `idx` and report whether the store rolled its DELETE back. Toast-free and
-    # index-taking, so the batch driver can loop it.
-    private def close_at(idx : Int32) : Bool
-      return false if idx < 0 || idx >= @sessions.size
-      tab = @sessions[idx]
-      tab.view.request_stop
-      @host.jobs.finish(tab.view.job_id, :stopped, "closed") if tab.view.running?
-      orphaned = (id = tab.db_id) ? !@host.session.store.delete_sequencer_session(id) : false
-      @sessions.delete_at(idx)
-      # Closing a tab to the LEFT slides the active one down; a bare clamp would read that as
-      # "stay put" and land the operator on its neighbour.
-      @current_idx -= 1 if idx < @current_idx
-      @current_idx = @sessions.empty? ? -1 : @current_idx.clamp(0, @sessions.size - 1)
-      orphaned
-    end
-
-    # Halt EVERY running collection on a project-level exit (leave project / quit) — the
-    # same `request_stop` + `jobs.finish` pair close_tab applies to the current tab,
-    # applied to all of them. See FuzzerController#stop_all.
-    def stop_all : Nil
-      @sessions.each do |tab|
-        next unless tab.view.running?
-        tab.view.request_stop
-        @host.jobs.finish(tab.view.job_id, :stopped, "project closed")
-      end
+    private def delete_session_row(id : Int64) : Bool
+      @host.session.store.delete_sequencer_session(id)
     end
 
     def save_current : Nil
@@ -977,16 +772,6 @@ module Gori::Tui
         else
           @current_idx.clamp(0, @sessions.size - 1)
         end
-    end
-
-    private def current_tab_obj : SequencerTab?
-      return nil if @current_idx < 0 || @current_idx >= @sessions.size
-      @sessions[@current_idx]
-    end
-
-    private def tab_locked?(tab : SequencerTab) : Bool
-      v = tab.view
-      v.running? || v.dirty?
     end
   end
 end
