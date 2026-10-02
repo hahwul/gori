@@ -30,7 +30,7 @@ module Gori::Miner
     # Delegated (not defaulted) like every other wrapper backend: this is what the Engine holds
     # through `CappedBackend`, so a `false`/`0`/nil stopping here would misreport every gated
     # or pooled run underneath it. See `Fuzz::Backend#evidence?`.
-    delegate blocked, blocked_reason, extra_requests, evidence?, http2?, pooled?, close, to: @inner
+    delegate blocked, blocked_reason, extra_requests, evidence?, http2?, pooled?, ws_notes, ws_note_reason, close, to: @inner
 
     def send(bytes : Bytes) : Repeater::Result
       send(bytes, nil)
