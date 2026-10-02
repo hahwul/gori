@@ -1577,8 +1577,7 @@ module Gori
       # MCP surface uses everywhere and the CLI used nowhere (`grep -rn '_iso' src/gori/cli/`
       # returned zero while MCP had fifteen). Byte-for-byte identical to
       # `MCP::Serialize.unix_micros_iso`, which `spec/cli/run/history_spec.cr` pins against
-      # this — the same lockstep-by-spec arrangement `emit_body_json` and
-      # `emit_trailers_json` already have with their MCP counterparts.
+      # this.
       #
       # Reimplemented rather than called, and it stays that way on CHURN grounds now rather
       # than on dependency grounds. This file DOES depend on `MCP::` as of #1002 — see the
