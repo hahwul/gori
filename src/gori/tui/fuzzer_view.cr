@@ -692,6 +692,11 @@ module Gori::Tui
       @target_mode = InputMode::Read
     end
 
+    # The template buffer READ-mode edits run against (`TabController#editor_text_buffer`).
+    def read_edit_buffer : {TextArea, TextReadState}?
+      @focus == :template ? {@editor, @template_read} : nil
+    end
+
     def enter_template_insert! : Nil
       @template_mode = InputMode::Insert
     end

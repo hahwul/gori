@@ -292,6 +292,21 @@ module Gori::Tui
       c.alphanumeric? || c == '_' || c == '-'
     end
 
+    # The selection as a DOCUMENT-ORDERED {y0, x0, y1, x1}, or nil when there is none (or it is
+    # empty, see `selection?`). Each end is clamped to the line it names, the way
+    # `selection_text` clamps as it reads, so a caller can hand the span to an editor as is.
+    def selection_span(lines : Array(String)) : {Int32, Int32, Int32, Int32}?
+      a = @anchor
+      return nil unless a && selection?
+      return nil if lines.empty?
+      ay = a[0].clamp(0, lines.size - 1)
+      cy = @cy.clamp(0, lines.size - 1)
+      ax = a[1].clamp(0, lines[ay].size)
+      cx = @cx.clamp(0, lines[cy].size)
+      return nil if ay == cy && ax == cx
+      (ay < cy || (ay == cy && ax < cx)) ? {ay, ax, cy, cx} : {cy, cx, ay, ax}
+    end
+
     # 0-based line indices spanned by a line-oriented selection (inclusive).
     def selected_line_range : {Int32, Int32}?
       a = @anchor

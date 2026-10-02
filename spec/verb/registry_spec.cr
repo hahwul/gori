@@ -1933,6 +1933,22 @@ private class FakeContext < ExecContext
     @calls << :editor_to_bottom
   end
 
+  def editor_delete_selection : Nil
+    @calls << :editor_delete_selection
+  end
+
+  def editor_paste : Nil
+    @calls << :editor_paste
+  end
+
+  def editor_delete_line : Nil
+    @calls << :editor_delete_line
+  end
+
+  def editor_yank_line : Nil
+    @calls << :editor_yank_line
+  end
+
   def editor_goto_line : Nil
     @calls << :editor_goto_line
   end

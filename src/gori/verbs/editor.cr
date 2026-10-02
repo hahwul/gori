@@ -24,10 +24,9 @@ module Gori
     #     because a controller arm shadowed them. Deleting the arms makes the existing verbs
     #     live; moving them into Editor as well would put two verbs on one letter with the
     #     Editor one always winning, which is the shadowing this file exists to end.
-    #   • Anything that EDITS. There is no delete-line / open-line / join here, because there
-    #     is no delete-line / open-line / join in gori's editors to bind — a READ-mode pane is
-    #     a `ReadPane` (a caret, a selection and a copy), not a modal text editor. A keyset
-    #     names keys for operations that exist; it does not grow new ones.
+    #   • Edits beyond delete and paste. `d` / `p` and vim's `dd` / `yy` are here (see below,
+    #     and `Tui::ReadEdit`); open-line, join, change and the rest of an operator grammar are
+    #     not. A keyset names keys for operations that exist; it does not grow new ones.
     def self.register_editor(r : Verb::Registry) : Nil
       # READ mode is the only place a BARE letter can reach the keymap at all: in INS every
       # editor ladder claims printables upstream of dispatch (that is what INS is). So the
@@ -102,6 +101,40 @@ module Gori
         "editor.find", "Find in pane", "Search this pane's text",
         Verb::Scope::Editor, [Verb::Chord.new("f", ctrl: true)],
         available: in_editor, mnemonic: 'f') { |ctx| ctx.editor_find; nil }
+
+      # READ-mode EDITS (`Tui::ReadEdit`): delete the selection, paste the register, and vim's
+      # two whole-line operators. Each one enters INSERT and replays ⌫ or a paste through the
+      # pane's own key path, so a READ-mode edit is exactly the typed edit it stands for.
+      #
+      # gori's grammar is select-then-act: `x` (or ⇧arrows) selects, then `d` deletes and `y`
+      # copies, and `p` puts the last copy or delete back after the caret. A whole-line
+      # selection deletes and pastes as LINES.
+      #
+      # Gated on READ like every bare-key verb here, and never on "is there a selection": an
+      # `available:` that read false would let the press fall through to the tab's own `d`,
+      # which deletes the selected flow, issue or rule in sixteen scopes. In an editor pane
+      # the letter is the editor's, and a `d` with nothing to delete says so.
+      r.register Verb::Definition.new(
+        "editor.delete", "Delete selection", "Delete the READ selection into the paste register (x selects the line)",
+        Verb::Scope::Editor, [Verb::Chord.new("d")],
+        available: in_read, mnemonic: 'd') { |ctx| ctx.editor_delete_selection; nil }
+      r.register Verb::Definition.new(
+        "editor.paste", "Paste", "Put the last copy or delete back after the caret (whole lines go below the line)",
+        Verb::Scope::Editor, [Verb::Chord.new("p")],
+        available: in_read, mnemonic: 'p') { |ctx| ctx.editor_paste; nil }
+      # vim's `dd` / `yy`. Keyless by default — the `vim` keyset puts them on `d` and `y`. A
+      # `Chord` is one keystroke, so the doubled letter is the RUNNER's: the first press arms
+      # the operator (`Runner#finish_editor_op`), the same key again runs it on the caret's
+      # line, and anything else cancels. Over a selection the first press acts at once, which
+      # is vim's `⇧V…d` / `⇧V…y`.
+      r.register Verb::Definition.new(
+        "editor.delete-line", "Delete line", "Delete the caret's line into the paste register (vim dd); over a selection, delete it",
+        Verb::Scope::Editor,
+        available: in_read, mnemonic: 'D') { |ctx| ctx.editor_delete_line; nil }
+      r.register Verb::Definition.new(
+        "editor.yank-line", "Yank line", "Copy the caret's line as a whole line (vim yy); over a selection, copy it",
+        Verb::Scope::Editor,
+        available: in_read, mnemonic: 'Y') { |ctx| ctx.editor_yank_line; nil }
 
       # `Scope::Repeater`, not Editor — but registered HERE because it is the other half of
       # the split above, and it only became expressible as a chord when the split landed.

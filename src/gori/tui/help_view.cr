@@ -261,6 +261,11 @@ module Gori::Tui
         Item.new("^G · ^F", "go to line · find (↵/↑↓ step)"),
         Item.new("  where", "Repeater · History detail · Intercept · Notes · Project · Decoder · Fuzzer"),
         Item.new("^F then tab", "find & replace — ↵ swaps every match (one undo step); editable panes only"),
+        # READ-mode edits (`Tui::ReadEdit`). Tokens, so the vim keyset's ⇧V reaches the row;
+        # `dd`/`yy` are spelled out because their verbs are keyless outside that keyset.
+        Item.new("{repeater.select-line} then {editor.delete} · {repeater.copy}", "READ: select the line, then delete or copy it", "editor.delete"),
+        Item.new("{editor.paste}", "READ: paste the last copy or delete after the caret (whole lines go below)", "editor.paste"),
+        Item.new("dd · yy", "vim keyset: delete · copy the caret's line"),
         Item.new("^E", "open the field in $EDITOR"),
         Item.new("^B", "reveal whitespace"),
       ]},

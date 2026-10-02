@@ -113,6 +113,7 @@ require "../browser"
 require "../shell_env"
 require "../external_editor"
 require "./clipboard"
+require "./read_edit"
 require "./keybind"
 require "../scope"
 require "../rules"
@@ -1453,6 +1454,9 @@ module Gori::Tui
       # The operator did something (see the run loop's `wake_on_input`). Set per event, so a
       # key drained behind a resize in the same burst still counts.
       @operator_input = true if ev.is_a?(Termisu::Event::Key) || ev.is_a?(Termisu::Event::Mouse)
+      # A click between the two presses of `dd` / `yy` may have moved the caret or the focus;
+      # the second press must not act on a line the first one never saw.
+      @editor_op = nil if ev.is_a?(Termisu::Event::Mouse)
       # A PasteStart arriving while a paste is ALREADY open means the previous one was abandoned
       # (its marker lost) and a new one is beginning. Close the old one first, or there is no
       # start transition for the new one and it silently inherits the abandoned paste's
@@ -1564,6 +1568,11 @@ module Gori::Tui
 
     private def handle_key(ev : Termisu::Event::Key) : Nil
       @detail_pin = nil # see history_target_flow_id — the pin lives for one event only
+      # An armed `d` / `y` is spent by THIS key, whatever takes it: the quit arm, `^G`/`^F`/`^B`
+      # or a prompt that returns before the check below must not leave it armed, or a later
+      # single `d` would delete a line.
+      pending_op = @editor_op
+      @editor_op = nil
       # Deliberate quit: ^D (or ^C) must be pressed twice in a row — the first press
       # arms and hints in the status bar; any other key disarms. (Q no longer quits;
       # `q` still returns to the project picker.) Handled before everything else so
@@ -1643,6 +1652,12 @@ module Gori::Tui
       if ov = active_overlay
         dispatch_overlay_key(ov, ev)
         return
+      end
+      # The second press of vim's `dd` / `yy` (see `editor_delete_line`). Ahead of the digit
+      # family and every pane's own keys: between the two presses the operator owns the next
+      # key, as vim's operator-pending state does, so a `d2` cannot jump to tab 2.
+      if op = pending_op
+        return if finish_editor_op(op, ev)
       end
       # esc cancels a differential-timing run in flight (#1246) — the run is bounded but can be
       # seconds at a large N. Only on the Repeater tab and outside text entry, and only once every
@@ -6238,6 +6253,16 @@ module Gori::Tui
     # reuses the existing copy delegators — no new copy logic. Wired to each tab's
     # `*.copy` verb (verbs/*.cr) — the *.copy-all verbs are gone.
     def read_copy : Nil
+      # A whole-line selection in an editor copies as LINES for `p` (see `Register`). Asked
+      # before the copy, which may drop the selection; applied only when the copy really
+      # stored something, so a refused copy cannot re-flag an older register.
+      line_copy = (tab = read_edit_tab) && ReadEdit.line_selection?(tab)
+      held = Register.text
+      read_copy_dispatch
+      Register.linewise! if line_copy && !Register.text.same?(held)
+    end
+
+    private def read_copy_dispatch : Nil
       case @active_tab
       when :notes    then read_selection_active? ? notes_copy : notes_copy_all
       when :repeater then read_selection_active? ? repeater_copy : repeater_copy_all
@@ -6313,6 +6338,81 @@ module Gori::Tui
 
     def editor_to_bottom : Nil
       @tabs[@active_tab]?.try(&.editor_to_bottom)
+    end
+
+    # --- READ-mode edits (verbs/editor.cr, the engine is `ReadEdit`) ---
+    # The verb armed by the first press of `dd` / `yy`, waiting for its second. Only ever set
+    # in an editor pane's READ mode, and spent by the very next key (`finish_editor_op`).
+    @editor_op : String? = nil
+
+    def editor_delete_selection : Nil
+      return unless tab = read_edit_tab
+      read_edit_status(ReadEdit.delete_selection(tab, read_edit_key_in))
+    end
+
+    def editor_paste : Nil
+      return unless tab = read_edit_tab
+      read_edit_status(ReadEdit.paste(tab, read_edit_key_in))
+    end
+
+    # vim `d`: over a selection it deletes at once (`⇧V` then `d`), otherwise it arms `dd`. A
+    # field with no line buffer (a single-line TARGET) says so on the first press, rather than
+    # arming an operator whose second press could only refuse.
+    def editor_delete_line : Nil
+      return unless tab = read_edit_tab
+      return read_edit_status(ReadEdit::NO_BUFFER) unless tab.editor_text_buffer
+      return read_edit_status(ReadEdit.delete_selection(tab, read_edit_key_in)) if ReadEdit.selection?(tab)
+      arm_editor_op("editor.delete-line", "deletes the line")
+    end
+
+    # vim `y`: over a selection it is the pane's ordinary copy (whole lines stay linewise for
+    # `p`), otherwise it arms `yy`. With no selection there is no copy-all on `y` here; `^Y`
+    # still copies the whole pane. A field with no line buffer has no line to yank, so `y`
+    # there stays the pane's own copy, which is what it was before the keyset took the letter.
+    def editor_yank_line : Nil
+      return unless tab = read_edit_tab
+      return read_copy if tab.editor_text_buffer.nil? || ReadEdit.selection?(tab)
+      arm_editor_op("editor.yank-line", "copies the line")
+    end
+
+    private def arm_editor_op(id : String, does : String) : Nil
+      @editor_op = id
+      read_edit_status("{#{id}}… — {#{id}} again #{does} · esc cancels")
+    end
+
+    # The key after an armed `d` / `y`. True when it was spent here: the same verb again runs
+    # the line operator, esc cancels quietly, and any other key cancels with a word, since
+    # `dw` or `dj` would be a motion this grammar does not have. False only when the focus
+    # left the editor's READ mode in between, so the key is not this operator's to take.
+    private def finish_editor_op(id : String, ev : Termisu::Event::Key) : Bool
+      return false unless tab = read_edit_tab
+      chord = Keybind.from_event(ev)
+      if chord && resolve_verb_id(chord, current_scope) == id
+        msg = id == "editor.delete-line" ? ReadEdit.delete_line(tab, read_edit_key_in) : ReadEdit.yank_line(tab)
+        read_edit_status(msg)
+        return true
+      end
+      read_edit_status("{#{id}} cancelled — only {#{id}}{#{id}} (the whole line) is supported") unless ev.key.escape?
+      true
+    end
+
+    # The editor tab a READ-mode edit runs in, or nil outside an editor's READ mode. The verbs
+    # are gated on that already; this is the same question asked again at run time, because
+    # `finish_editor_op` runs a key later, after the focus may have moved.
+    private def read_edit_tab : TabController?
+      return nil unless editor_read_mode?
+      @tabs[@active_tab]?
+    end
+
+    # The edit is replayed through the WHOLE key path, the way a refused bulk paste is
+    # (`replay_paste`), so every guard the shell applies ahead of a pane's own ladder applies.
+    private def read_edit_key_in : ReadEdit::KeyIn
+      ->(ev : Termisu::Event::Key) { handle_key(ev); nil }
+    end
+
+    # Nil is the engine saying the pane already put its own reason up (`ReadEdit.leave`).
+    private def read_edit_status(message : String?) : Nil
+      status(Hotkeys.expand(@session.registry, message)) if message
     end
 
     # The two bottom prompts, reached through the keymap instead of through the hardcoded

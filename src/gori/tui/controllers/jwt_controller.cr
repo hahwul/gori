@@ -635,6 +635,10 @@ module Gori::Tui
       cur.pane == :input
     end
 
+    def editor_text_buffer : {TextArea, TextReadState}?
+      editor_pane? ? {cur.input, cur.input_read} : nil
+    end
+
     def editor_enter_insert : Bool
       return false unless editor_pane?
       cur.input_mode = InputMode::Insert

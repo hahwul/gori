@@ -173,13 +173,15 @@ describe Gori::Verb::Keymap do
     # The shipped gates. In the pane whose menu spells the same letter for something else the
     # bare key is NOTHING — not the other pane's toggle, and not a Global breath key either.
     # Every OS profile × keyset: vim respells the editor family, and the request/template
-    # panes are editors, so the Editor link is walked first there.
+    # panes are editors, so the Editor link is walked first there. The last field is what the
+    # key answers in those editor panes instead: nothing, or the Editor verb on that letter
+    # (`p` pastes in the request pane, and pretty-prints only in the response).
     {
-      {Gori::Verb::Scope::Repeater, :repeater, Chord.new("p"), "repeater.toggle-pretty", :response, [:request, :target]},
-      {Gori::Verb::Scope::Repeater, :repeater, Chord.new("d", shift: true), "repeater.toggle-diff", :response, [:request, :target]},
-      {Gori::Verb::Scope::Fuzzer, :fuzzer, Chord.new("v"), "fuzz.dist", :results, [:template, :target, :config]},
-      {Gori::Verb::Scope::Fuzzer, :fuzzer, Chord.new("m"), "fuzz.matched", :results, [:template, :target, :config]},
-    }.each do |scope, tab, chord, id, home, elsewhere|
+      {Gori::Verb::Scope::Repeater, :repeater, Chord.new("p"), "repeater.toggle-pretty", :response, [:request, :target], "editor.paste"},
+      {Gori::Verb::Scope::Repeater, :repeater, Chord.new("d", shift: true), "repeater.toggle-diff", :response, [:request, :target], nil},
+      {Gori::Verb::Scope::Fuzzer, :fuzzer, Chord.new("v"), "fuzz.dist", :results, [:template, :target, :config], nil},
+      {Gori::Verb::Scope::Fuzzer, :fuzzer, Chord.new("m"), "fuzz.matched", :results, [:template, :target, :config], nil},
+    }.each do |scope, tab, chord, id, home, elsewhere, in_editor|
       it "answers #{chord.label} with #{id} only in #{home}" do
         reg = Gori::Verbs.registry
         OsProfile::Os.each do |os|
@@ -193,8 +195,9 @@ describe Gori::Verb::Keymap do
             km.resolve(chord, scope, reg, ctx).should eq(id), where
             elsewhere.each do |sec|
               ctx.focused_section = sec
-              ctx.editor_pane = ctx.editor_read_mode = sec != :config
-              km.resolve(chord, scope, reg, ctx).should be_nil, "#{where} #{sec}"
+              editor = sec != :config
+              ctx.editor_pane = ctx.editor_read_mode = editor
+              km.resolve(chord, scope, reg, ctx).should eq(editor ? in_editor : nil), "#{where} #{sec}"
             end
           end
         end

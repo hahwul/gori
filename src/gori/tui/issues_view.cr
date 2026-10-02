@@ -1072,6 +1072,11 @@ module Gori::Tui
       enter_notes_insert!
     end
 
+    # The notes buffer READ-mode edits run against (`TabController#editor_text_buffer`).
+    def read_edit_buffer : {TextArea, TextReadState}?
+      notes_focused? ? {@notes, @notes_read} : nil
+    end
+
     def enter_notes_insert! : Nil
       return unless issue = @detail
       @detail_focus = :notes

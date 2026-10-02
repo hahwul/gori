@@ -1057,6 +1057,10 @@ module Gori::Tui
       v.focus == :template || v.focus == :target
     end
 
+    def editor_text_buffer : {TextArea, TextReadState}?
+      current_view.try(&.read_edit_buffer)
+    end
+
     def editor_enter_insert : Bool
       return false unless v = current_view
       case v.focus

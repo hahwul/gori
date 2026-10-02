@@ -26,6 +26,11 @@ abstract class Gori::Verb::ExecContext
   abstract def editor_undo : Nil          # undo the last edit in the focused editor
   abstract def editor_to_top : Nil        # caret to the first line
   abstract def editor_to_bottom : Nil     # caret to the last line
+  # The READ-mode edits (`Tui::ReadEdit`). Each reports why when the pane cannot take it.
+  abstract def editor_delete_selection : Nil # gori `d`: the selection, into the paste register
+  abstract def editor_paste : Nil            # `p`: the paste register, after the caret
+  abstract def editor_delete_line : Nil      # vim `d`: arm `dd`, or delete the selection
+  abstract def editor_yank_line : Nil        # vim `y`: arm `yy`, or copy the selection
   # The two bottom prompts the shell owns (^G / ^F). Registered as verbs so a keyset can give
   # them a second, bare spelling — the hardcoded guards keep answering the Ctrl form either way.
   abstract def editor_goto_line : Nil

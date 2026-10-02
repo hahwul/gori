@@ -388,26 +388,37 @@ on the REQUEST pane has **Raw request**, the same text.
 
 ## Editor Keysets {#editor-keysets}
 
-gori's text panes are **modal**: `Esc` and `i` move between READ and INSERT, and in READ the bare letters are commands. The shipped grammar is helix-shaped — **`x` selects the line, then `y` copies it** — which is one gesture away from vim, where the same thing is `V` then `y`. That one difference is what a vim-trained hand fights all day.
+gori's text panes are **modal**: `Esc` and `i` move between READ and INSERT, and in READ the bare letters are commands. The shipped grammar is helix-shaped: **select first, then act**. `x` selects the line, then `y` copies it or `d` deletes it, and `p` pastes. vim spells the same edits `yy`, `dd` and `p`, or `V` then `y` / `d`, and that difference is what a vim-trained hand fights all day.
 
 **Preferences → Editor & Keys → Keys → Editor keyset** (`Ctrl-,`), or **`settings:keys`** in the palette, switches it:
 
-| Keyset | Select line | Undo | Find | Append | Top / bottom |
-|--------|-------------|------|------|--------|--------------|
-| **helix-ish** (default) | `x` | `Ctrl-Z` | `Ctrl-F` | — | — |
-| **vim-ish** | `⇧V` | `u` | `/` | `a` | `g` / `⇧G` |
+| Keyset | Select line | Delete line | Copy line | Paste | Undo | Find | Append | Top / bottom |
+|--------|-------------|-------------|-----------|-------|------|------|--------|--------------|
+| **helix-ish** (default) | `x` | `x` then `d` | `x` then `y` | `p` | `Ctrl-Z` | `Ctrl-F` | — | — |
+| **vim-ish** | `⇧V` | `dd` | `yy` | `p` | `u` | `/` | `a` | `g` / `⇧G` |
 
-Everything not in that table is the same under both keysets, because gori already spells it the way vim does: `i` enters INSERT, `Esc` leaves it, `y` copies, `Ctrl-G` goes to a line, and arrows plus `Shift` extend a selection.
+Everything not in that table is the same under both keysets, because gori already spells it the way vim does: `i` enters INSERT, `Esc` leaves it, `Ctrl-G` goes to a line, and arrows plus `Shift` extend a selection. The delete and copy keys act on any selection too, not only on a line: under `vim-ish`, `⇧V` then `d` or `y` works as it does in vim.
+
+### Delete and paste in READ {#read-edits}
+
+These work in every text editor pane: the Repeater request, the Fuzzer template, Notes, an issue's notes, the Project description, and the Decoder, JWT and Cookie inputs.
+
+- **Delete** (`d` after a selection, `dd` under `vim-ish`) removes the text and keeps it for `p`. A whole-line selection is removed with its line break, so no blank line is left behind.
+- **Paste** (`p`) puts back the last thing you copied or deleted, after the caret. Whole lines go in as new lines below the caret's line; anything else is inserted inside the line.
+- gori keeps what `p` pastes in its own **paste register**, filled by every gori copy (`y` and the copy pickers) and by every delete. It does not read the system clipboard: terminals refuse to hand it back, or ask first. To bring in text from another program, paste it with your terminal as before; that opens INSERT on its own. A delete does not overwrite the system clipboard.
+- An edit made in READ is an ordinary edit, and the pane treats it as if you had typed it: the Repeater keeps `Content-Length` in step, the Fuzzer still guards its `§` markers, and an issue's notes are saved as `Esc` saves them. `Ctrl-Z` (`u` under `vim-ish`) takes a delete back in one step, and a paste the way a terminal paste in that pane undoes: in one step, except in the Project description and an issue's notes, which take a paste key by key and undo it line by line.
+- With nothing selected, `d` under `helix-ish` says so instead of deleting. Under `vim-ish` the first `d` or `y` waits for the second; any other key cancels it, and `Esc` cancels it without a message. With nothing selected, `y` under `vim-ish` waits for `yy` rather than copying the whole pane, so use `Ctrl-Y` for that.
+- Read-only panes keep their own letters: `p` is still **Pretty bodies** in the Repeater response and the History detail.
 
 ### A keyset is a mapping, not an emulation
 
-It is a named bundle of key **overrides** for a small, fixed set of editor actions — exactly the mechanism the [OS default profiles](#os-default-profiles) are, one layer up. It does not add an operator-pending grammar, registers, counts, text objects, or any editing operation gori's panes do not already have. A READ-mode pane is a caret, a selection and a copy; naming keys for operations that do not exist is how "vim mode" becomes a promise the editor breaks.
+It is a named bundle of key **overrides** for a small, fixed set of editor actions — exactly the mechanism the [OS default profiles](#os-default-profiles) are, one layer up. It does not add motions after an operator, counts, text objects, named registers, or any editing operation gori's panes do not already have. A READ-mode pane is a caret, a selection, a copy, a delete and a paste; naming keys for operations that do not exist is how "vim mode" becomes a promise the editor breaks.
 
 So some vim spellings are deliberately **not** offered, each for a reason you can check:
 
-- **`gg`, `dd`, `yy` and every other two-key sequence.** A gori chord is one keystroke. `g` alone is the top of the pane, and `y` with nothing selected already copies the whole pane — which is the useful half of what `yy` means.
+- **`gg` and every other two-key sequence except `dd` and `yy`.** A gori chord is one keystroke. `dd` and `yy` are the exception: their first press waits for the second. `g` alone is the top of the pane. `d` and `y` take no motion, so `dw`, `dj` and `d2d` are cancelled rather than guessed at.
 - **`:` commands, including `:42`.** A bare `:` is [reserved](#reserved-keys) for gori's own command line, so go-to-line stays `Ctrl-G` under both keysets.
-- **Delete.** There is no delete-line in a READ-mode pane to put on `dd` or `D`. Editing happens in INSERT.
+- **`x`, `D`, `P`, `o`, `J` and the rest of vim's editing keys.** Delete and paste are the READ-mode edits gori has; everything else happens in INSERT.
 - **A rule list's enable/disable** (Colormarker, Probe rules, OAST providers, Rewriter), which is `t` on all four. It turns a rule on and off; it is not a selection, so no keyset moves it.
 - **The Intercept queue's select-line**, which ships keyless on purpose — that pane reaches it from the space menu, and a keyset respells keys rather than handing one to a pane whose author decided against it.
 
@@ -435,7 +446,7 @@ so the card teaches both halves rather than making you guess which one it means.
 
 That includes `/`, which is a `SUB-TABS` letter *and* `vim-ish`'s find key. They are different tiers — the menu letter acts on the strip while the card is up, the chord searches the text pane you are standing in. The one deliberate pane-key overlap is `u` in the Repeater's read-only response: it toggles display-only JSON Unicode decoding. The request editor is still in the Editor scope, where `u` means undo. `validate_chords!` checks same-scope collisions at boot; the cross-scope exception is pinned in `spec/verb/keyset_spec.cr`.
 
-A few menu letters are also a `vim-ish` motion in an editor pane: Auto-mark `a` (append), `g` on the Repeater, Cookie and issue detail (top), Send race `⇧G` (bottom), Set CVSS `V` (select line), and the Notes strip's `/` (find). If the `Space` before one of them is lost, the key does what vim would, which moves or selects and never sends, writes or deletes. That overlap is deliberate; a menu letter that lands on anything else in the pane is refused.
+A few menu letters are also a `vim-ish` motion in an editor pane: Auto-mark `a` (append), `g` on the Repeater, Cookie and issue detail (top), Send race `⇧G` (bottom), Set CVSS `V` (select line), and the Notes strip's `/` (find). If the `Space` before one of them is lost, the key does what vim would, which moves or selects and never sends, writes or deletes. The editing letters are the other deliberate overlap, under both keysets: inside a text editor `d`, `y` and `p` are the editor's, so a lost `Space` before the menu's `d` (Duplicate, or Delete issue in an issue's notes) or `y` (Copy) edits or copies the text in that pane, says so, and can be undone. A menu letter that lands on anything else in the pane is refused.
 
 ### What still works whatever you pick
 

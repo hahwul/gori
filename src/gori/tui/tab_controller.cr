@@ -10,6 +10,7 @@ require "./selection_ident"
 require "./controllers/tab_close"
 require "./screen"
 require "./line_edit"
+require "./text_read_state"
 require "./geometry"
 require "./frame"
 require "./chrome"
@@ -1573,6 +1574,19 @@ module Gori::Tui
 
     def editor_to_bottom : Bool
       false
+    end
+
+    # The focused editor's BUFFER and its READ state, for the READ-mode edits (`ReadEdit`:
+    # delete the selection, `dd`, `yy`, paste). Nil for a pane with no multi-line buffer to
+    # edit (a single-line TARGET row, a hex dump, a form), so the edit can say why it did not
+    # happen instead of falling through to the tab's own `d`.
+    #
+    # Only the buffer is handed out, never the edit itself: `ReadEdit` changes the text by
+    # entering INSERT and replaying ⌫ or a paste through the pane's own key path, so each
+    # pane's after-edit work (the Repeater's Content-Length, the Fuzzer's § guard, a note's
+    # save) runs exactly as it does for typing.
+    def editor_text_buffer : {TextArea, TextReadState}?
+      nil
     end
 
     # --- the BODY's own `/` filter bar (the rule lists) ---------------------------------

@@ -16,7 +16,8 @@ describe "Gori::Verbs.register_editor" do
   r = Gori::Verbs.registry
 
   ids = %w[editor.insert editor.insert-enter editor.append editor.exit-insert
-    editor.undo editor.top editor.bottom editor.goto-line editor.find]
+    editor.undo editor.top editor.bottom editor.goto-line editor.find
+    editor.delete editor.paste editor.delete-line editor.yank-line]
 
   it "registers the editor family in Scope::Editor and nowhere else" do
     ids.each { |id| r[id].scope.should eq(Gori::Verb::Scope::Editor) }
@@ -31,15 +32,20 @@ describe "Gori::Verbs.register_editor" do
     r["editor.undo"].chords.should eq([Gori::Verb::Chord.new("z", ctrl: true)])
     r["editor.find"].chords.should eq([Gori::Verb::Chord.new("f", ctrl: true)])
     r["editor.goto-line"].chords.should eq([Gori::Verb::Chord.new("g", ctrl: true)])
+    # gori's select-then-act edits: `x` then `d` deletes, `p` pastes.
+    r["editor.delete"].chords.should eq([Gori::Verb::Chord.new("d")])
+    r["editor.paste"].chords.should eq([Gori::Verb::Chord.new("p")])
     # Keyless on purpose: gori's READ panes have no append and no bare top/bottom key today,
     # and the default keyset is "today's keys". They exist for a keyset to spell (and for a
-    # user to bind — a keyless verb stays assignable in the hotkey editor).
-    %w[editor.append editor.top editor.bottom].each { |id| r[id].chords.should be_empty }
+    # user to bind — a keyless verb stays assignable in the hotkey editor). The two line
+    # operators are vim's `dd` / `yy`, which only the vim keyset spells.
+    %w[editor.append editor.top editor.bottom editor.delete-line editor.yank-line].each { |id| r[id].chords.should be_empty }
   end
 
   it "gates the bare-key verbs on READ mode, not merely on the pane" do
     ctx = FakeExecContext.new
-    bare = %w[editor.insert editor.insert-enter editor.append editor.undo editor.top editor.bottom]
+    bare = %w[editor.insert editor.insert-enter editor.append editor.undo editor.top editor.bottom
+      editor.delete editor.paste editor.delete-line editor.yank-line]
     bare.each { |id| r[id].available?(ctx).should be_false } # no editor pane at all
 
     ctx.editor_pane = true
@@ -79,6 +85,10 @@ describe "Gori::Verbs.register_editor" do
       "editor.bottom"       => :editor_to_bottom,
       "editor.goto-line"    => :editor_goto_line,
       "editor.find"         => :editor_find,
+      "editor.delete"       => :editor_delete_selection,
+      "editor.paste"        => :editor_paste,
+      "editor.delete-line"  => :editor_delete_line,
+      "editor.yank-line"    => :editor_yank_line,
     }.each do |id, intent|
       c = FakeExecContext.new
       c.editor_pane = true
@@ -100,19 +110,22 @@ describe "Gori::Verbs.register_editor" do
     end
     # The rest ARE rebindable — including the keyless ones, which is how a helix-shaped
     # operator gets an `a` without adopting a whole keyset.
-    %w[editor.insert editor.append editor.top editor.bottom].each do |id|
+    %w[editor.insert editor.append editor.top editor.bottom
+      editor.delete editor.paste editor.delete-line editor.yank-line].each do |id|
       Gori::Hotkeys.rebindable?(r[id]).should be_true
     end
   end
 
-  it "carries distinct space-menu mnemonics, and no bare-letter default outside `i`" do
+  it "carries distinct space-menu mnemonics, and no bare-letter default outside `i` `d` `p`" do
     keys = ids.compact_map { |id| r[id].menu_key }
     keys.uniq.size.should eq(keys.size)
     # The Editor scope is a KEYMAP scope, not a menu scope (the space menu renders exactly one
     # Scope, and an EDITOR bucket merged into eight tab menus has no collision-free set of
     # mnemonics — see .github/DESIGN.md). The mnemonics exist so that stays a choice, not a
-    # dead end; what must hold today is that the scope claims exactly one bare letter.
+    # dead end; what must hold today is that the scope claims exactly these bare letters:
+    # INSERT, and the select-then-act delete and paste. Each one displaces whatever the tab
+    # binds on that letter inside its editor pane, so a fourth is a decision, not a drive-by.
     bare = ids.flat_map { |id| r[id].chords }.select { |c| !c.ctrl && !c.alt && !c.shift && c.key.size == 1 }
-    bare.map(&.key).should eq(["i"])
+    bare.map(&.key).sort!.should eq(%w[d i p])
   end
 end

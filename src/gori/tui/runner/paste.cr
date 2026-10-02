@@ -238,13 +238,6 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # the same events the terminal would have produced, so every guard, confirm and escape
   # the editors apply while typing applies here too.
   private def replay_paste(text : String) : Nil
-    text.each_char do |c|
-      ev = case c
-           when '\n' then Termisu::Event::Key.new(Termisu::Input::Key::Enter, char: '\r')
-           when '\t' then Termisu::Event::Key.new(Termisu::Input::Key::Tab)
-           else           Termisu::Event::Key.new(Termisu::Input::Key::Unknown, char: c)
-           end
-      handle_key(ev)
-    end
+    text.each_char { |c| handle_key(ReadEdit.key_event(c)) }
   end
 end

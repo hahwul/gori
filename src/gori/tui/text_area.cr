@@ -1235,6 +1235,16 @@ module Gori::Tui
       env_complete_close
     end
 
+    # Select {y0, x0}…{y1, x1} as an INSERT-mode selection, caret at the far end. The way a
+    # READ-mode edit hands its span to the editor's own ⌫ (`ReadEdit.delete_selection`), so the
+    # cut runs through the same path a typed ⌫ over a ⇧arrow selection takes. Pure navigation:
+    # no undo, no `edits` bump.
+    def select_span(y0 : Int32, x0 : Int32, y1 : Int32, x1 : Int32) : Nil
+      place_cursor(y1, x1)
+      ay = y0.clamp(0, @lines.size - 1)
+      @sel_anchor = {ay, x0.clamp(0, @lines[ay].size)}
+    end
+
     def line_count : Int32
       @lines.size
     end
