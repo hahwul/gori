@@ -47,15 +47,7 @@ module Gori::Tui
     # answers whether the body consumed it.
     def handle_body_key(ev : Termisu::Event::Key) : Bool
       v = current_view
-      if v.nil?
-        key = ev.key
-        # Empty placeholder: esc / ↑ pop to the tab bar (mirrors other empty multi-session tabs).
-        if key.escape? || nav_up?(ev) # `k` only BARE — see TabController#nav_up?
-          @host.request_focus(:menu)
-          return true
-        end
-        return false
-      end
+      return empty_body_key(ev) if v.nil?
       if navigable_pane?(v.focus) && ev.key.space? && !ev.ctrl? && !ev.alt?
         @host.open_space_menu
         return true
@@ -64,6 +56,13 @@ module Gori::Tui
       return true if dispatch_chord(chord_action(ev, c), c)
       return false if (ev.ctrl? || ev.alt?) && !ev.key.escape? # ^R/^X etc. → keymap verb
       session_key(ev, v, c)
+    end
+
+    # Empty placeholder: esc / ↑ pop to the tab bar (mirrors other empty multi-session tabs).
+    private def empty_body_key(ev : Termisu::Event::Key) : Bool
+      return false unless ev.key.escape? || nav_up?(ev) # `k` only BARE — see TabController#nav_up?
+      @host.request_focus(:menu)
+      true
     end
 
     private def dispatch_chord(action : Symbol?, c : Char?) : Bool
