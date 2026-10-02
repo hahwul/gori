@@ -1741,6 +1741,13 @@ module Gori::Tui
         ctl.handle_subtab_filter_key(ev)
         return
       end
+      # Esc over a READ selection clears it and goes no further — vim's Esc out of `V`. Ahead
+      # of every pane's own Esc (an open issue's included), which would leave the pane with
+      # the selection still armed for the next `d`.
+      if ev.key.escape? && !ev.ctrl? && !ev.alt? && editor_read_mode? &&
+         @tabs[@active_tab]?.try(&.editor_drop_read_selection)
+        return
+      end
       if @active_tab == :issues && @overlay.none? && @focus == :body && issues_controller.view.detail_open?
         # esc on an issue just filed by hand goes back where the form was opened (#F19),
         # BEFORE the detail's own esc, which would close it into the Issues list. One shot:

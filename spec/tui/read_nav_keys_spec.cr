@@ -42,6 +42,14 @@ describe "READ caret keys in every editor pane" do
       press(tab, TuiContract.plain('k'))
       caret_of(tab)[0].should eq(0), "#{name}: k"
       tab.editor_read_mode?.should be_true, "#{name}: still in READ"
+      # Esc's first press drops a READ selection, and only a live one: with none it is the
+      # pane's own Esc again.
+      read.select_line(area)
+      tab.editor_drop_read_selection.should be_true, "#{name}: esc over a selection"
+      read.selection?(area).should be_false, name
+      tab.editor_drop_read_selection.should be_false, "#{name}: esc with nothing selected"
+      area.place_cursor(0, 0) # the line selection left the caret at its end
+      read.sync_from(area)
       # The vim keyset's `w` and `⇧A`, through the seam the Runner routes them by.
       tab.editor_word_move(1).should be_true, name
       caret_of(tab).should eq({0, 6}), "#{name}: w"
@@ -92,5 +100,17 @@ describe "READ caret keys in every editor pane" do
       iss.view.detail_open?.should be_true # `h` used to fall through to `issue.close`
     end
     seen.size.should eq(8), "exercised only #{seen.join(", ")}"
+  end
+
+  it "clears a selection on Esc ahead of every pane's own Esc" do
+    # `Runner.new` owns a terminal, so the wiring is read off the source, comments stripped:
+    # the drop runs before the open issue's detail keys, whose Esc leaves the notes.
+    src = File.read(File.join(__DIR__, "..", "..", "src", "gori", "tui", "runner.cr"))
+      .lines.reject(&.lstrip.starts_with?('#')).join('\n')
+    body = src[/private def handle_key\(ev : Termisu::Event::Key\) : Nil$.*?^    end$/m]? || fail "handle_key not found"
+    drop = body.index("editor_drop_read_selection") || fail "Esc never drops the selection"
+    {"issues_controller.handle_detail_key", "c.handle_body_key"}.each do |later|
+      (body.index(later) || fail "#{later} not found").should be > drop
+    end
   end
 end

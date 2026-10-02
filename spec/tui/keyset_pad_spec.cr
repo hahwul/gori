@@ -142,6 +142,17 @@ describe Gori::Tui::KeysetPad do
     p.handle_key(esc).should be_false # READ: the host's key
   end
 
+  it "clears a selection on esc, and hands the next esc back" do
+    p = pad(Kind::Vim)
+    press(p, "Vj")
+    p.handle_key(esc).should be_true
+    press(p, "d") # arms dd now: nothing is selected
+    p.armed?.should be_true
+    p.handle_key(esc).should be_true # …which esc cancels
+    p.handle_key(esc).should be_false
+    p.text.should eq(Gori::Tui::KeysetPad::SAMPLE)
+  end
+
   it "keeps an armed d's esc for itself" do
     p = pad(Kind::Vim)
     press(p, "d")

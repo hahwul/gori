@@ -1595,6 +1595,17 @@ module Gori::Tui
       true
     end
 
+    # Esc's first job in READ: drop a live selection, so it is the SECOND Esc that leaves the
+    # pane. Every pane's own Esc leaves (to the strip, the previous card, RELATED), and with
+    # the selection kept, the next `d` deleted lines the operator had meant to let go of.
+    def editor_drop_read_selection : Bool
+      return false unless buf = editor_text_buffer
+      area, read = buf
+      return false unless read.selection?(area)
+      read.clear_selection
+      true
+    end
+
     # `A` / `I`: the caret to the end / start of its line, then INSERT there.
     def editor_line_insert(dir : Int32) : Bool
       return false unless buf = editor_text_buffer

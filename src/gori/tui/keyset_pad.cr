@@ -112,8 +112,9 @@ module Gori::Tui
     end
 
     # One key. False only for the keys the pad hands back to its host: `esc` in READ with
-    # nothing armed, which is "I am done trying". `esc` in INSERT leaves INSERT, and `esc`
-    # after a `d` cancels the `d`, exactly as in a real pane.
+    # nothing armed or selected, which is "I am done trying". `esc` in INSERT leaves INSERT,
+    # `esc` over a selection clears it, and `esc` after a `d` cancels the `d`, exactly as in a
+    # real pane.
     def handle_key(ev : Termisu::Event::Key) : Bool
       if id = @armed
         # Spent by this key whatever it is — the #1461 review found an armed `d` surviving
@@ -177,7 +178,12 @@ module Gori::Tui
     # then everything else through the keymap.
     private def read_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
-      return false if key.escape?
+      if key.escape?
+        return false unless ReadEdit.selection?(self) # READ with nothing selected: the host's
+        @read.clear_selection
+        @status = "selection cleared"
+        return true
+      end
       if step = caret_step(ev)
         @read.move(@area, step[0], step[1], selecting: ev.shift?)
       elsif !line_edge(ev)
