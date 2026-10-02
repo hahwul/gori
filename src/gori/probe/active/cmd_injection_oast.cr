@@ -192,16 +192,6 @@ module Gori
           "cmd_injection_oast|#{detail.row.host}:#{detail.row.port}|#{method_upcase}|#{path}|#{name.bytesize}:#{name}"
         end
 
-        # A copy of the query pairs with pair `idx`'s value replaced (name kept verbatim).
-        private def with_replaced(pairs : Array(String), idx : Int32, value : String) : String
-          dup = pairs.dup
-          pair = dup[idx]
-          if eq = pair.index('=')
-            dup[idx] = "#{pair[0...eq]}=#{value}"
-          end
-          dup.join('&')
-        end
-
         # Percent-decoded AND scrubbed: a captured value can carry an invalid-UTF-8 byte (`%FF`),
         # and it flows into string concatenation + `gsub`, so scrub keeps this total. Mirrors
         # SsrfOast#decode (same reasoning, stated there in full).
@@ -215,25 +205,6 @@ module Gori
           qi = target.index('?')
           return {target, ""} unless qi
           {target[0...qi], target[(qi + 1)..]}
-        end
-
-        # Reassemble the request with a new query on the request line, preserving the body and
-        # re-syncing Content-Length (mirrors SsrfOast#rebuild_query / OpenRedirect).
-        private def rebuild_query(orig_head : Bytes, body : Bytes?, path : String, new_query : String) : Bytes
-          head, _, eol = Miner::Inject.split(orig_head)
-          lines = String.new(head).split(eol)
-          unless lines.empty?
-            parts = lines[0].split(' ')
-            if parts.size == 3
-              target = new_query.empty? ? path : "#{path}?#{new_query}"
-              lines[0] = "#{parts[0]} #{target} #{parts[2]}"
-            end
-          end
-          io = IO::Memory.new
-          io << lines.join(eol) << eol << eol
-          b = body || Bytes.empty
-          io.write(b) unless b.empty?
-          Fuzz::ContentLength.sync(io.to_slice, false)
         end
       end
     end

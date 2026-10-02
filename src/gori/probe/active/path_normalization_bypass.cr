@@ -128,33 +128,6 @@ module Gori
           base << {"semicolon", "#{path};"} if aggressive # /admin; -> /admin (empty path param)
           base
         end
-
-        private def path_only(origin_target : String) : String
-          qi = origin_target.index('?')
-          qi ? origin_target[0...qi] : origin_target
-        end
-
-        # Rebuild the request with a new request-line target; headers/body untouched (no CL change).
-        private def rebuild_target(head : Bytes, body : Bytes?, new_target : String) : Bytes
-          combined = if body && !body.empty?
-                       io = IO::Memory.new(head.size + body.size)
-                       io.write(head)
-                       io.write(body)
-                       io.to_slice
-                     else
-                       head
-                     end
-          hbytes, bbytes, eol = Miner::Inject.split(combined)
-          lines = String.new(hbytes).split(eol)
-          unless lines.empty?
-            parts = lines[0].split(' ')
-            lines[0] = "#{parts[0]} #{new_target} #{parts[2]}" if parts.size == 3
-          end
-          io = IO::Memory.new
-          io << lines.join(eol) << eol << eol
-          io.write(bbytes) unless bbytes.empty?
-          io.to_slice
-        end
       end
     end
   end

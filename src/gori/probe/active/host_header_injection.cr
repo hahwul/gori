@@ -143,11 +143,6 @@ module Gori
           false
         end
 
-        private def path_only(origin_target : String) : String
-          qi = origin_target.index('?')
-          qi ? origin_target[0...qi] : origin_target
-        end
-
         # Rebuild the request with a single authoritative `X-Forwarded-Host: <probe>` after the request
         # line: drop any the browser sent, normalize the request line to origin-form (probes go direct
         # to the origin). Body untouched — no Content-Length resync. Mirrors CorsReflection#rebuild.

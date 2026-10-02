@@ -4,6 +4,8 @@ require "../../store"
 require "../../repeater/engine"
 require "../../proxy/codec/http1"
 require "../../proxy/codec/content_decode"
+require "../../miner/inject"
+require "../../fuzz/content_length"
 
 module Gori
   module Probe
@@ -195,6 +197,63 @@ module Gori
         protected def diff_method_allowed?(method_upcase : String, opts : Options) : Bool
           return false if method_upcase == "HEAD"
           opts.allow_unsafe || method_upcase == "GET"
+        end
+
+        protected def path_only(origin_target : String) : String
+          qi = origin_target.index('?')
+          qi ? origin_target[0...qi] : origin_target
+        end
+
+        # A copy of the query pairs with pair `idx`'s value replaced (name kept verbatim).
+        protected def with_replaced(pairs : Array(String), idx : Int32, value : String) : String
+          dup = pairs.dup
+          pair = dup[idx]
+          if eq = pair.index('=')
+            dup[idx] = "#{pair[0...eq]}=#{value}"
+          end
+          dup.join('&')
+        end
+
+        # Rebuild the request with a new request-line target; headers and body are untouched (no
+        # Content-Length change), so no resync is needed.
+        protected def rebuild_target(head : Bytes, body : Bytes?, new_target : String) : Bytes
+          combined = if body && !body.empty?
+                       io = IO::Memory.new(head.size + body.size)
+                       io.write(head)
+                       io.write(body)
+                       io.to_slice
+                     else
+                       head
+                     end
+          hbytes, bbytes, eol = Miner::Inject.split(combined)
+          lines = String.new(hbytes).split(eol)
+          unless lines.empty?
+            parts = lines[0].split(' ')
+            lines[0] = "#{parts[0]} #{new_target} #{parts[2]}" if parts.size == 3
+          end
+          io = IO::Memory.new
+          io << lines.join(eol) << eol << eol
+          io.write(bbytes) unless bbytes.empty?
+          io.to_slice
+        end
+
+        # Reassemble the request with a new query on the request line, preserving the body and
+        # re-syncing Content-Length.
+        protected def rebuild_query(orig_head : Bytes, body : Bytes?, path : String, new_query : String) : Bytes
+          head, _, eol = Miner::Inject.split(orig_head)
+          lines = String.new(head).split(eol)
+          unless lines.empty?
+            parts = lines[0].split(' ')
+            if parts.size == 3
+              target = new_query.empty? ? path : "#{path}?#{new_query}"
+              lines[0] = "#{parts[0]} #{target} #{parts[2]}"
+            end
+          end
+          io = IO::Memory.new
+          io << lines.join(eol) << eol << eol
+          b = body || Bytes.empty
+          io.write(b) unless b.empty?
+          Fuzz::ContentLength.sync(io.to_slice, false)
         end
 
         # The probe response's status, 0 when its head does not parse.

@@ -216,11 +216,6 @@ module Gori
           name = line[0...c].strip.downcase
           name == "content-length" || name == "content-type" || name == "transfer-encoding"
         end
-
-        private def path_only(origin_target : String) : String
-          qi = origin_target.index('?')
-          qi ? origin_target[0...qi] : origin_target
-        end
       end
     end
   end

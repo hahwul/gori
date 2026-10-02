@@ -70,8 +70,8 @@ module Gori
           origin_target = Active.origin_form(target)
           targets = traversal_targets(origin_target)
           return nil if targets.empty?
-          primary = rebuild(detail.request_head, detail.request_body, targets[0])
-          followups = targets[1..].map { |t| rebuild(detail.request_head, detail.request_body, t) }
+          primary = rebuild_target(detail.request_head, detail.request_body, targets[0])
+          followups = targets[1..].map { |t| rebuild_target(detail.request_head, detail.request_body, t) }
           Plan.new(primary, [] of Param, key_string(detail, method_up, path_key), followups: followups)
         end
 
@@ -200,36 +200,6 @@ module Gori
           return nil if rest[(slash + 1)..].empty?
           return nil if seg == "." || seg == ".." || seg.includes?("..")
           "/#{first}/#{seg}"
-        end
-
-        private def path_only(origin_target : String) : String
-          qi = origin_target.index('?')
-          qi ? origin_target[0...qi] : origin_target
-        end
-
-        # Rebuild the request with the traversal target in the request line; headers and body are
-        # untouched (GET carries no Content-Length-affecting change), so no resync is needed. The
-        # target is already origin-form (built from `Active.origin_form`), so a forward-proxy
-        # absolute-form flow is sent DIRECT to the origin like the other active probes.
-        private def rebuild(head : Bytes, body : Bytes?, new_target : String) : Bytes
-          combined = if body && !body.empty?
-                       io = IO::Memory.new(head.size + body.size)
-                       io.write(head)
-                       io.write(body)
-                       io.to_slice
-                     else
-                       head
-                     end
-          hbytes, bbytes, eol = Miner::Inject.split(combined)
-          lines = String.new(hbytes).split(eol)
-          unless lines.empty?
-            parts = lines[0].split(' ')
-            lines[0] = "#{parts[0]} #{new_target} #{parts[2]}" if parts.size == 3
-          end
-          io = IO::Memory.new
-          io << lines.join(eol) << eol << eol
-          io.write(bbytes) unless bbytes.empty?
-          io.to_slice
         end
       end
     end
