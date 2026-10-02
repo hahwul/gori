@@ -8,17 +8,6 @@ module Gori
     class Tools
       # --- discover (spider + directory brute-force) --------------------------
 
-      # The flow id each stored finding became, so `discover_results` can hand an agent the
-      # `flow_id` its `requires: get_flow` promises. Reopened here rather than in tools.cr: only
-      # the discover tools read it.
-      class DiscoverJob
-        # The `results` index each `persist_buf` entry belongs to, in buffer order — nil for a
-        # finding past DISCOVER_MAX_STORED, which is persisted but has no row to carry an id.
-        getter persist_owners = [] of Int32?
-        # `results` index → flow id, filled as each batch commits.
-        getter flow_ids = {} of Int32 => Int64
-      end
-
       @[Tool("discover_start", gated: true, agent_action: true, env_refresh: true,
         requires: ["discover_status", "discover_results", "discover_stop", "get_flow", "list_sitemap"], permission: "send")]
       private def discover_start(h) : Result
@@ -333,7 +322,7 @@ module Gori
 
       @[Tool("discover_status", gated: true, read_only: true, permission: "send")]
       private def discover_status(h) : Result
-        djob = lookup_discover_job(h, "status")
+        djob = lookup_job(h, @discover_jobs, "discover", "status")
         return djob if djob.is_a?(Result)
         s = djob.stats
         Result.new(JSON.build do |j|
@@ -377,7 +366,7 @@ module Gori
 
       @[Tool("discover_results", gated: true, read_only: true, requires: ["get_flow"], permission: "send")]
       private def discover_results(h) : Result
-        djob = lookup_discover_job(h, "results")
+        djob = lookup_job(h, @discover_jobs, "discover", "results")
         return djob if djob.is_a?(Result)
         req_off = optional_int_arg(h, "offset")
         req_lim = optional_int_arg(h, "limit")
@@ -424,17 +413,9 @@ module Gori
 
       @[Tool("discover_stop", gated: true, agent_action: true, permission: "send")]
       private def discover_stop(h) : Result
-        djob = lookup_discover_job(h, "stop")
+        djob = lookup_job(h, @discover_jobs, "discover", "stop")
         return djob if djob.is_a?(Result)
         stop_and_report(djob)
-      end
-
-      private def lookup_discover_job(h, verb : String) : DiscoverJob | Result
-        id = str(h, "job_id")
-        return Result.new("missing required 'job_id'", is_error: true) if id.nil? || id.empty?
-        job = @discover_jobs[id]?
-        return job_not_found(id, "discover", verb) unless job
-        job_project_mismatch(job) || job
       end
 
       # The tools/list schemas for the Discover tools, kept beside the handlers that

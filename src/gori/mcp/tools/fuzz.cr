@@ -379,7 +379,7 @@ module Gori
 
       @[Tool("fuzz_status", gated: true, read_only: true, permission: "send")]
       private def fuzz_status(h) : Result
-        fjob = lookup_fuzz_job(h, "status")
+        fjob = lookup_job(h, @jobs, "fuzz", "status")
         return fjob if fjob.is_a?(Result)
         Result.new(JSON.build do |j|
           j.object do
@@ -471,7 +471,7 @@ module Gori
 
       @[Tool("fuzz_results", gated: true, read_only: true, requires: ["get_flow"], permission: "send")]
       private def fuzz_results(h) : Result
-        fjob = lookup_fuzz_job(h, "results")
+        fjob = lookup_job(h, @jobs, "fuzz", "results")
         return fjob if fjob.is_a?(Result)
         cluster_args = fuzz_cluster_args(h)
         return cluster_args if cluster_args.is_a?(Result)
@@ -568,18 +568,9 @@ module Gori
 
       @[Tool("fuzz_stop", gated: true, agent_action: true, permission: "send")]
       private def fuzz_stop(h) : Result
-        fjob = lookup_fuzz_job(h, "stop")
+        fjob = lookup_job(h, @jobs, "fuzz", "stop")
         return fjob if fjob.is_a?(Result)
         stop_and_report(fjob)
-      end
-
-      # The job for `job_id`, or an error Result the caller returns as-is.
-      private def lookup_fuzz_job(h, verb : String) : FuzzJob | Result
-        id = str(h, "job_id")
-        return Result.new("missing required 'job_id'", is_error: true) if id.nil? || id.empty?
-        job = @jobs[id]?
-        return job_not_found(id, "fuzz", verb) unless job
-        job_project_mismatch(job) || job
       end
 
       # Build a ready-to-run engine + its origin + total + effective http2 + the `marks`
