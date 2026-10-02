@@ -173,15 +173,6 @@ module Gori
           end
           best
         end
-
-        private def response_content_type(result : Repeater::Result) : String
-          if r = result.response
-            return (r.headers.get?("Content-Type") || "").downcase
-          end
-          (Proxy::Codec::Http1.parse_response_head(result.head).headers.get?("Content-Type") || "").downcase
-        rescue
-          ""
-        end
       end
     end
   end

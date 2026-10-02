@@ -2,6 +2,11 @@ require "../issue"
 require "../out_of_band"
 require "../../store"
 require "../../repeater/engine"
+require "../../proxy/codec/http1"
+require "../../proxy/codec/content_decode"
+require "../../miner/inject"
+require "../../fuzz/content_length"
+require "./insertion_points"
 
 module Gori
   module Probe
@@ -193,6 +198,149 @@ module Gori
         protected def diff_method_allowed?(method_upcase : String, opts : Options) : Bool
           return false if method_upcase == "HEAD"
           opts.allow_unsafe || method_upcase == "GET"
+        end
+
+        # Shared gate for plan + dedup_key so the two can't drift (equivalence-spec invariant).
+        # Returns {surface, the first ≤cap injectable slots} for an eligible flow, else nil. The cap
+        # spans ALL enumerated locations at once, so a wide param set can't blow up the request count.
+        protected def injectables(detail : Store::FlowDetail, opts : Options, max_params : Int32,
+                                  max_params_aggressive : Int32) : {InsertionPoints::Surface, Array(InsertionPoints::Slot)}?
+          s = InsertionPoints.enumerate(detail, opts, InsertionPoints::DEFAULT_LOCATIONS) || return nil
+          return nil unless diff_method_allowed?(s.method, opts)
+          cap = opts.aggressive ? max_params_aggressive : max_params
+          slots = s.slots.first(cap)
+          return nil if slots.empty?
+          {s, slots}
+        end
+
+        # How many probe legs each param carries: the followups minus the second baseline, divided
+        # over the params. Even (a whole number of pairs) and ≥ 2, else nil to decline — the layout
+        # is malformed (e.g. the single-response fallback with no followups).
+        protected def legs_per_param(plan : Plan) : Int32?
+          n = plan.params.size
+          return nil if n == 0
+          legs = plan.followups.size - 1 # drop the second baseline
+          return nil if legs <= 0 || legs % n != 0
+          per = legs // n
+          (per >= 2 && per.even?) ? per : nil
+        end
+
+        # Whether the captured request body is one an injected value can be spliced into: present,
+        # within BODY_CAP, unobfuscated and unencoded, with exactly one injectable Content-Type.
+        protected def body_eligible?(detail : Store::FlowDetail) : Bool
+          body = detail.request_body || return false
+          return false if body.empty? || body.size > BODY_CAP || detail.request_body_truncated?
+          return false if Proxy::Codec::Http1.obfuscated_header?(detail.request_head)
+          req = Proxy::Codec::Http1.parse_request_head(detail.request_head)
+          return false if req.malformed? || req.headers.get?("Transfer-Encoding")
+          return false unless req.headers.get_all("Content-Encoding").all? { |v| v.strip.downcase == "identity" }
+          types = req.headers.get_all("Content-Type")
+          return false unless types.size == 1
+          injectable_type?(types.first)
+        end
+
+        protected def injectable_type?(value : String) : Bool
+          media = value.split(';', 2).first.strip.downcase
+          media == "application/x-www-form-urlencoded" || media == "application/json" ||
+            (media.starts_with?("application/") && media.ends_with?("+json"))
+        end
+
+        protected def path_only(origin_target : String) : String
+          qi = origin_target.index('?')
+          qi ? origin_target[0...qi] : origin_target
+        end
+
+        # A copy of the query pairs with pair `idx`'s value replaced (name kept verbatim).
+        protected def with_replaced(pairs : Array(String), idx : Int32, value : String) : String
+          dup = pairs.dup
+          pair = dup[idx]
+          if eq = pair.index('=')
+            dup[idx] = "#{pair[0...eq]}=#{value}"
+          end
+          dup.join('&')
+        end
+
+        # Rebuild the request with a new request-line target; headers and body are untouched (no
+        # Content-Length change), so no resync is needed.
+        protected def rebuild_target(head : Bytes, body : Bytes?, new_target : String) : Bytes
+          combined = if body && !body.empty?
+                       io = IO::Memory.new(head.size + body.size)
+                       io.write(head)
+                       io.write(body)
+                       io.to_slice
+                     else
+                       head
+                     end
+          hbytes, bbytes, eol = Miner::Inject.split(combined)
+          lines = String.new(hbytes).split(eol)
+          unless lines.empty?
+            parts = lines[0].split(' ')
+            lines[0] = "#{parts[0]} #{new_target} #{parts[2]}" if parts.size == 3
+          end
+          io = IO::Memory.new
+          io << lines.join(eol) << eol << eol
+          io.write(bbytes) unless bbytes.empty?
+          io.to_slice
+        end
+
+        # Reassemble the request with a new query on the request line, preserving the body and
+        # re-syncing Content-Length.
+        protected def rebuild_query(orig_head : Bytes, body : Bytes?, path : String, new_query : String) : Bytes
+          head, _, eol = Miner::Inject.split(orig_head)
+          lines = String.new(head).split(eol)
+          unless lines.empty?
+            parts = lines[0].split(' ')
+            if parts.size == 3
+              target = new_query.empty? ? path : "#{path}?#{new_query}"
+              lines[0] = "#{parts[0]} #{target} #{parts[2]}"
+            end
+          end
+          io = IO::Memory.new
+          io << lines.join(eol) << eol << eol
+          b = body || Bytes.empty
+          io.write(b) unless b.empty?
+          Fuzz::ContentLength.sync(io.to_slice, false)
+        end
+
+        # The probe response's status, 0 when its head does not parse.
+        protected def probe_status(result : Repeater::Result) : Int32
+          if r = result.response
+            return r.status
+          end
+          Proxy::Codec::Http1.parse_response_head(result.head).status
+        rescue
+          0
+        end
+
+        # The probe response's Content-Type, downcased; "" when absent or unparseable.
+        protected def response_content_type(result : Repeater::Result) : String
+          if r = result.response
+            return (r.headers.get?("Content-Type") || "").downcase
+          end
+          (Proxy::Codec::Http1.parse_response_head(result.head).headers.get?("Content-Type") || "").downcase
+        rescue
+          ""
+        end
+
+        # Inflate (Content-Encoding) and cap at BODY_CAP for a byte-comparable buffer. Capping BOTH
+        # sides at the same bound sidesteps capture-truncation skew: only the first BODY_CAP bytes
+        # are ever compared. nil when there is no body.
+        protected def decoded_body(head : Bytes?, body : Bytes?) : Bytes?
+          return nil if body.nil? || body.empty?
+          decoded, _ = Proxy::Codec::ContentDecode.decode(head, body, BODY_CAP)
+          b = decoded || body
+          b[0, {b.size, BODY_CAP}.min]
+        end
+
+        # Decode + scrub the response body to text, capped at BODY_CAP. Scrubbing makes the
+        # substring and PCRE scans byte-safe on an invalid-UTF-8 origin.
+        protected def decoded_text(result : Repeater::Result) : String
+          decoded, _ = Proxy::Codec::ContentDecode.decode(result.head, result.body, BODY_CAP)
+          bytes = decoded || result.body
+          return "" if bytes.nil? || bytes.empty?
+          String.new(bytes[0, {bytes.size, BODY_CAP}.min]).scrub
+        rescue
+          ""
         end
 
         # Interpret ALL of a plan's probe responses at once: the primary (`plan.request`) first,

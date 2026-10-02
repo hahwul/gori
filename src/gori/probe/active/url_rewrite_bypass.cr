@@ -156,20 +156,6 @@ module Gori
           (c = line.index(':')) ? line[0...c].strip.downcase == name : false
         end
 
-        private def path_only(origin_target : String) : String
-          qi = origin_target.index('?')
-          qi ? origin_target[0...qi] : origin_target
-        end
-
-        private def probe_status(result : Repeater::Result) : Int32
-          if r = result.response
-            return r.status
-          end
-          Proxy::Codec::Http1.parse_response_head(result.head).status
-        rescue
-          0
-        end
-
         private def body_size(result : Repeater::Result) : Int32
           decoded, _ = Proxy::Codec::ContentDecode.decode(result.head, result.body, BODY_CAP)
           b = decoded || result.body

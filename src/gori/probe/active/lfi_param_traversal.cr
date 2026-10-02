@@ -147,24 +147,6 @@ module Gori
           return true if FILE_EXT.matches?(value)
           KNOWN_FILE_PARAMS.includes?(name.downcase) && !NUMERIC_VALUE.matches?(value)
         end
-
-        private def probe_status(result : Repeater::Result) : Int32
-          if r = result.response
-            return r.status
-          end
-          Proxy::Codec::Http1.parse_response_head(result.head).status
-        rescue
-          0
-        end
-
-        # Inflate + cap at BODY_CAP for a byte-comparable buffer (both sides capped identically, so a
-        # capture-truncated baseline compares against an equally-capped probe). nil when no body.
-        private def decoded_body(head : Bytes?, body : Bytes?) : Bytes?
-          return nil if body.nil? || body.empty?
-          decoded, _ = Proxy::Codec::ContentDecode.decode(head, body, BODY_CAP)
-          b = decoded || body
-          b[0, {b.size, BODY_CAP}.min]
-        end
       end
     end
   end

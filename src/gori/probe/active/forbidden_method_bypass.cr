@@ -133,20 +133,6 @@ module Gori
           "forbidden_method_bypass|#{detail.row.host}:#{detail.row.port}|#{method_upcase}|#{path}#{opts.allow_unsafe ? "|unsafe" : ""}"
         end
 
-        private def path_only(origin_target : String) : String
-          qi = origin_target.index('?')
-          qi ? origin_target[0...qi] : origin_target
-        end
-
-        private def probe_status(result : Repeater::Result) : Int32
-          if r = result.response
-            return r.status
-          end
-          Proxy::Codec::Http1.parse_response_head(result.head).status
-        rescue
-          0
-        end
-
         # Rebuild with a new request-line method (headers/body untouched), origin-form target.
         private def rebuild_method(head : Bytes, body : Bytes?, method_up : String) : Bytes
           rebuild(head, body) do |lines|

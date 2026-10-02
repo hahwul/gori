@@ -171,15 +171,6 @@ module Gori
           qi ? t[0...qi] : t
         end
 
-        private def probe_status(result : Repeater::Result) : Int32
-          if r = result.response
-            return r.status
-          end
-          Proxy::Codec::Http1.parse_response_head(result.head).status
-        rescue
-          0
-        end
-
         # Rebuild the request with the full IP-spoofing header set inserted right after the request
         # line: first drop any of those headers the browser already sent (so exactly one authoritative
         # copy of each remains), then insert ours. The body is untouched — none of the inserted names
