@@ -45,7 +45,7 @@ module Gori::CLI::Run
   end
 
   def self.extract_rule_json_for_spec(r : Store::ExtractRule) : String
-    JSON.build { |j| extract_rule_json(j, r) }
+    JSON.build { |j| Gori::MCP::Serialize.extract_rule(j, r) }
   end
 
   def self.parse_extract_range_for_spec(raw : String) : {Int32, Int32}

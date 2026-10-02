@@ -187,7 +187,7 @@ module Gori
         begin
           rules = store.extract_rules
           if format == :json
-            puts(JSON.build { |j| j.array { rules.each { |r| extract_rule_json(j, r) } } })
+            puts(JSON.build { |j| j.array { rules.each { |r| MCP::Serialize.extract_rule(j, r) } } })
           elsif rules.empty?
             puts "No extract rules configured."
           else
@@ -195,20 +195,6 @@ module Gori
           end
         ensure
           store.close
-        end
-      end
-
-      private def self.extract_rule_json(j : JSON::Builder, r : Store::ExtractRule) : Nil
-        j.object do
-          j.field "id", r.id
-          j.field "enabled", r.enabled?
-          j.field "name", r.name
-          j.field "when", r.match_filter
-          j.field "host", r.host
-          j.field "kind", r.kind.label
-          j.field "selector", r.selector
-          j.field "pos_start", r.pos_start
-          j.field "pos_end", r.pos_end
         end
       end
 
@@ -276,7 +262,7 @@ module Gori
 
       # What `extract add` prints once the insert (and any `--disabled`) committed.
       # `--format json` (#1117) is the rule's `rewriter extract list --format json` object,
-      # through the same `extract_rule_json`, read back AFTER the disable so `enabled` is the
+      # through the same `MCP::Serialize.extract_rule`, read back AFTER the disable so `enabled` is the
       # state that landed. A rule a peer removed in that instant has no row, and the command
       # refuses rather than print one the listing never shows.
       private def self.extract_added_output(store : Store, id : Int64, name : String,
@@ -286,7 +272,7 @@ module Gori
         end
         rule = store.extract_rules.find(&.id.==(id)) ||
                abort_closing(store, "gori run rewriter extract add: rule ##{id} was created, but it was gone before it could be read back")
-        JSON.build { |j| extract_rule_json(j, rule) }
+        JSON.build { |j| MCP::Serialize.extract_rule(j, rule) }
       end
 
       private def self.parse_extract_range(raw : String) : {Int32, Int32}
@@ -369,7 +355,7 @@ module Gori
               j.object do
                 j.field "values_readable", false
                 j.field "note", "binding values live in the running gori's memory and are never persisted"
-                j.field "bindings" { j.array { rules.each { |r| extract_rule_json(j, r) } } }
+                j.field "bindings" { j.array { rules.each { |r| MCP::Serialize.extract_rule(j, r) } } }
               end
             end)
           elsif rules.empty?
