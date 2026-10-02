@@ -163,8 +163,8 @@ module Gori::Decoder::Serialized
           if b == '\\'.ord
             hi = byte
             lo = byte
-            v = hi ? hex(hi) : nil
-            w = lo ? hex(lo) : nil
+            v = hi.try(&.unsafe_chr.to_i?(16))
+            w = lo.try(&.unsafe_chr.to_i?(16))
             if v.nil? || w.nil?
               halt(hi && lo ? "malformed" : "truncated")
               return nil
@@ -176,14 +176,6 @@ module Gori::Decoder::Serialized
           i += 1
         end
         out
-      end
-
-      private def hex(b : UInt8) : UInt8?
-        case b
-        when '0'.ord..'9'.ord then (b - '0'.ord).to_u8
-        when 'a'.ord..'f'.ord then (b - 'a'.ord + 10).to_u8
-        when 'A'.ord..'F'.ord then (b - 'A'.ord + 10).to_u8
-        end
       end
 
       # `a:<count>:{ key value … }`.

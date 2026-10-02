@@ -393,18 +393,6 @@ module Gori::Decoder
       end
     end
 
-    # Single hex digit's value (0..15), or -1 for a non-hex byte. Only 0-9a-fA-F
-    # count: a sign/space/underscore returns -1 so `\u+ABC`/`\u 1FF`/`\u-1FF` stay
-    # literal (the old `hex?` guard that kept `to_i?(16)` from accepting them).
-    private def hex_digit(b : UInt8) : Int32
-      case b
-      when 0x30_u8..0x39_u8 then (b - 0x30_u8).to_i      # '0'..'9'
-      when 0x61_u8..0x66_u8 then (b - 0x61_u8 + 10).to_i # 'a'..'f'
-      when 0x41_u8..0x46_u8 then (b - 0x41_u8 + 10).to_i # 'A'..'F'
-      else                       -1
-      end
-    end
-
     # Parse EXACTLY 4 hex digits at byte offset `at`, or nil. A short run near
     # end-of-string (e.g. `\uAB`) must NOT decode — it stays literal, matching the
     # mid-string case where `\uABX` is left alone because `X` is not a hex digit.
@@ -417,8 +405,9 @@ module Gori::Decoder
       return nil if at + width > bytes.size
       v = 0
       width.times do |k|
-        d = hex_digit(bytes[at + k])
-        return nil if d < 0
+        # Per CHAR, never `String#to_i?(16)` over the run: that would take `\u+ABC`'s sign.
+        d = bytes[at + k].unsafe_chr.to_i?(16)
+        return nil unless d
         v = (v << 4) | d
       end
       v
@@ -1566,7 +1555,7 @@ module Gori::Decoder
             io << esc
           elsif 0x20_u8 <= b <= 0x7e_u8
             io << b.unsafe_chr
-          elsif (nx = data[i + 1]?) && hex_digit(nx) >= 0
+          elsif (nx = data[i + 1]?) && nx.unsafe_chr.hex?
             # \xNN is GREEDY in C — it swallows every hex digit that follows, so "\x01" then
             # 'A' would compile as the single byte 0x1A. When the next byte would extend it,
             # emit the fixed-width 3-digit octal form instead, which cannot run on.
@@ -1620,7 +1609,7 @@ module Gori::Decoder
     private def c_hex_run(bytes : Bytes, at : Int32) : {Bytes, Int32}?
       j = at
       v = 0
-      while j < bytes.size && (d = hex_digit(bytes[j])) >= 0
+      while j < bytes.size && (d = bytes[j].unsafe_chr.to_i?(16))
         v = ((v << 4) | d) & 0xff
         j += 1
       end
