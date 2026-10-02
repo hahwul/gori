@@ -484,13 +484,39 @@ module Gori
       def rank(candidates : Array(Definition), query : String) : Array(Definition)
         return candidates if query.empty?
 
+        q = query.downcase
         scored = candidates.compact_map do |v|
-          if score = Gori::Fuzzy.score(query.downcase, "#{v.title} #{v.id}".downcase)
+          if score = Registry.score(v, q)
             {v, score}
           end
         end
         scored.sort_by! { |(_, score)| -score }.map { |(v, _)| v }
       end
+
+      # A verb's search score for a lowercased query: the fuzzy "title id" match, or a keyword
+      # the query is a PREFIX of, whichever is better. Each keyword is scored on its own rather
+      # than appended to the haystack: `Fuzzy.score` charges a match for how far into the text
+      # it lands, so "vim" found at the end of "Settings: Keys settings.keys … vim" would rank
+      # under an accidental v…i…m subsequence in some other verb's title. A prefix, not a
+      # subsequence, so "hi" does not find helix through a scattered match.
+      #
+      # A keyword hit always lands at index 0, the best score a query can earn, so it is held
+      # one point under a title that starts the same way (a title is what the row says), and a
+      # one-letter query never reaches keywords at all: `a` must not lift Settings: Keys over
+      # every title that merely contains an a.
+      def self.score(verb : Definition, query : String) : Int32?
+        best = Gori::Fuzzy.score(query, "#{verb.title} #{verb.id}".downcase)
+        return best if query.size < KEYWORD_MIN_QUERY
+        verb.keywords.each do |kw|
+          next unless kw.starts_with?(query)
+          next unless s = Gori::Fuzzy.score(query, kw)
+          s -= 1
+          best = s if best.nil? || s > best
+        end
+        best
+      end
+
+      KEYWORD_MIN_QUERY = 2
 
       # Ctrl-P empty-query order (stable within each group via registration index):
       #   1. Settings

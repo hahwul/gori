@@ -34,7 +34,10 @@ module Gori::Tui
       # have no "default" beyond empty, and silently emptying them from a row that only says
       # "↵ open" is not a reset anyone asked for. They are still cleared by the FULL factory
       # reset, which says so.
-      resettable : Bool = true
+      resettable : Bool = true,
+      # Extra words the palette's typed search finds this section by (`Definition#keywords`):
+      # the names an operator types that the title does not say, "vim" for Keys above all.
+      keywords : Array(String) = [] of String
 
     # The Settings tab's sub-tab strip, in display order. Each group gathers the
     # catalog sections tagged with its symbol (see `sections_in`).
@@ -77,7 +80,8 @@ module Gori::Tui
       # Hotkeys rebinds individual actions. Neither belongs in Editor — that section is
       # text-editing prefs.
       Section.new(:keys, "settings.keys", "Keys",
-        "Pick the modifier for gori's built-in shortcuts (^P ^N ^W ^1-9) and the editor keyset (helix-ish / vim-ish)", :editor, :form),
+        "Pick the modifier for gori's built-in shortcuts (^P ^N ^W ^1-9) and the editor keyset (helix-ish / vim-ish)", :editor, :form,
+        keywords: %w[vim helix keyset keybindings modifier option]),
       # Mouse sits beside Keys, not in Editor: both configure INPUT, and the Mouse toggle spent
       # its life as a lone row under "Editor" — the one heading an operator looking for pointer
       # behaviour would not open. It brings the drag-release mode with it.
@@ -90,7 +94,8 @@ module Gori::Tui
       Section.new(:user_agents, "settings.user-agents", "User-Agents",
         "Your own list for $GEN.USER_AGENT — replaces the built-in browser list", :editor, :opener, resettable: false),
       Section.new(:hotkeys, "settings.hotkeys", "Hotkeys",
-        "Rebind keyboard shortcuts (press a key) + pick an OS default profile", :editor, :opener),
+        "Rebind keyboard shortcuts (press a key) + pick an OS default profile", :editor, :opener,
+        keywords: %w[keybindings keymap shortcuts rebind]),
       # Network & Tabs
       Section.new(:network, "settings.network", "Network",
         "Edit the proxy bind address + upstream proxy", :network, :form),

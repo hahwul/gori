@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Command palette: typing `vim`, `helix` or `keyset` finds the editor keyset setting, and `keybindings` or `shortcuts` finds the Hotkeys editor (#1462)
 - Editors: READ mode can now delete and paste. Select a line with `x`, then `d` deletes it and `y` copies it, and `p` pastes after the caret (the vim keyset uses `dd`, `yy` and `p`); `p` pastes gori's last copy or delete, and stays Pretty bodies in read-only panes (#1461)
 - Settings: gori no longer writes over a `settings.json` it could not read (it warns instead), the first save after starting with no settings file keeps the sections another gori wrote meanwhile, and a Hotkeys save keeps bindings the editor does not show, including one whose key name this build does not recognise (#1458)
 - Settings profiles: `gori settings export` leaves OAST provider tokens out unless `--sections oast_providers` names them, an import no longer changes the token prefix or the redaction salt, imported rewriter and colormarker rules and saved views get fresh ids so a project's old override cannot switch one on, and a profile with a malformed upstream rule is refused instead of losing it (#1458)
