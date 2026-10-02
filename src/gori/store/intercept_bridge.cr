@@ -275,6 +275,8 @@ module Gori
     # Enqueue one command for the live capturing instance, then bounded-poll its ack, so the
     # sender gets a real outcome rather than assuming success on a write that may have been
     # dropped or never drained. `polls` exists for specs; every sender takes the default.
+    # It sleeps on the caller's fiber for up to the whole budget, so only a sender process
+    # may call it: the capturing instance drains this queue and would wait on its own ack.
     def send_intercept_command(verb : String, *, item_id : Int64? = nil, bytes : Bytes? = nil,
                                arg : String? = nil,
                                polls : Int32 = INTERCEPT_ACK_POLLS) : InterceptAck | InterceptSendFailure
