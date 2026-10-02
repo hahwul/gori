@@ -75,10 +75,6 @@ module Gori::Tui
       @selected = @selected.clamp(0, {@resolved.size - 1, 0}.max)
     end
 
-    def empty? : Bool
-      @resolved.empty?
-    end
-
     def count : Int32
       @resolved.size
     end

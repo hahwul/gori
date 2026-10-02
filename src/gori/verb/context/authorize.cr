@@ -21,7 +21,6 @@ abstract class Gori::Verb::ExecContext
 
   # Flip unattended replay: authenticated GETs are queued and replayed as they are captured.
   abstract def authorize_toggle_passive : Nil
-  abstract def authorize_passive? : Bool
 
   # A request is queued — the gate for run/remove/clear.
   abstract def authorize_has_target? : Bool

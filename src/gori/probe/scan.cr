@@ -105,11 +105,6 @@ module Gori
           new(disabled, load_custom(store), degraded: !ok)
         end
 
-        # The "no config" default, for callers (specs) that scan without a Rules config.
-        def self.none : RuleConfig
-          new(Passive::NO_DISABLED, Passive::NO_CUSTOM)
-        end
-
         # {the set, whether it was actually read}. The pair is the whole point — an empty set
         # from a broken store and an empty set from a project with nothing disabled are the
         # same value and must not mean the same thing.

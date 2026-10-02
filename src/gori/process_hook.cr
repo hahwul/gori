@@ -232,13 +232,6 @@ module Gori
       nil
     end
 
-    # The argv, or nil when the spec cannot be tokenized. For the run paths, which have already
-    # been validated at the write surface and only need the happy answer.
-    def self.argv?(spec : String) : Array(String)?
-      out = parse_argv(spec)
-      out.is_a?(Array) ? out : nil
-    end
-
     def self.valid_argv?(spec : String) : Bool
       parse_argv(spec).is_a?(Array)
     end

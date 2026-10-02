@@ -339,13 +339,6 @@ module Gori
         end)
       end
 
-      private def emit_repeater_sessions(j : JSON::Builder, include_content : Bool = false,
-                                         include_sensitive : Bool = false) : Nil
-        store.repeaters_mcp.each do |r|
-          emit_repeater_session(j, r, include_content, include_sensitive)
-        end
-      end
-
       private def emit_repeater_session(j : JSON::Builder, r : Store::RepeaterRecord,
                                         include_content : Bool = false,
                                         include_sensitive : Bool = false,

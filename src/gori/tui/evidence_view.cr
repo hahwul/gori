@@ -47,10 +47,6 @@ module Gori::Tui
       before != @all.size
     end
 
-    def empty? : Bool
-      @all.empty?
-    end
-
     def rows : Array(Store::IssueEvidenceMeta)
       @rows
     end

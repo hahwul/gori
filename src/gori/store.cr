@@ -714,13 +714,6 @@ module Gori
       @write_failures.get
     end
 
-    # Raw h2 frames dropped because the writer was saturated. Capture of the raw
-    # frame log is best-effort under load; the reconstructed flows stay complete
-    # (the assembler accumulates bodies in memory, independent of this log).
-    def h2_frames_dropped : Int32
-      @h2_frames_dropped.get
-    end
-
     def initialize(@db : DB::Database, @events : Channel(FlowEvent)? = nil,
                    @probe_events : Channel(FlowEvent)? = nil,
                    @retention_flows : Int32 = RETENTION_DEFAULT,

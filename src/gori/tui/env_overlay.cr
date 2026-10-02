@@ -291,10 +291,6 @@ module Gori::Tui
       @field.set("")
     end
 
-    def input(ch : Char) : Nil
-      @field.insert(ch)
-    end
-
     # Whether there was anything to delete — the callers read this to tell a ⌫ that edited
     # the text from one on an empty row, which cancels the row.
     def backspace : Bool

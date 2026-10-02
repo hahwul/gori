@@ -51,13 +51,6 @@ module Gori::Tui
     end
 
     # --- shell-facing accessors ---
-    def count : Int32
-      @miners.size
-    end
-
-    def empty? : Bool
-      @miners.empty?
-    end
 
     def current_view : MinerView?
       current_tab_obj.try(&.view)
@@ -425,11 +418,6 @@ module Gori::Tui
 
     def commit : Nil
       save_current
-    end
-
-    def locked? : Bool
-      return false unless v = current_view
-      v.running? || (@host.active_tab == :miner && @host.focus == :body)
     end
 
     # --- focus ring ---

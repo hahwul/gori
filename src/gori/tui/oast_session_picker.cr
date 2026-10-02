@@ -38,10 +38,6 @@ module Gori::Tui
     def initialize(@rows : Array(Row))
     end
 
-    def empty? : Bool
-      @rows.empty?
-    end
-
     def entry_count : Int32
       @rows.size
     end

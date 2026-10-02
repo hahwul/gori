@@ -1140,12 +1140,6 @@ module Gori::Tui
       @history.scroll_detail(delta)
     end
 
-    # The open detail is scrolled/caret'd to its very top — the boundary where a further
-    # ↑ escapes up to the tab bar (Runner#scroll_detail reads this).
-    def detail_at_top? : Bool
-      @history.detail_at_top?
-    end
-
     # `y` in the detail: the selection when one is held, else the WHOLE pane. The fallback used
     # to be the caret's own LINE, which on a request/response dump is the one thing nobody
     # reaches for `y` to get — and it made this pane the last holdout against the rule every

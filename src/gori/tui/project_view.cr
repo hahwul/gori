@@ -421,11 +421,6 @@ module Gori::Tui
       @desc_read.clear_selection
     end
 
-    def desc_hscroll(delta : Int32) : Nil
-      return if desc_insert_mode?
-      @desc_read.move(@desc_area, 0, delta * 4)
-    end
-
     # INSERT-mode motion: the shared editor keymap (⇧arrows select, Page keys, ⌥←/→ by word,
     # ⌥⌫ deletes one) — see `TextArea#handle_motion_key`. Dirties only on a real buffer
     # change, which in this set is ⌥⌫ alone.
@@ -801,9 +796,6 @@ module Gori::Tui
     end
 
     # --- PROJECT SETTINGS pane (delegated from ProjectController#handle_project_settings_key) ---
-    def set_sel : Int32
-      @set_sel
-    end
 
     def settings_scope_row? : Bool
       @set_sel == SETTINGS_SCOPE_ROW
@@ -2019,10 +2011,6 @@ module Gori::Tui
       before = @desc_area.edits
       yield @desc_area
       @desc_dirty = true if @desc_area.edits != before
-    end
-
-    def move(dr : Int32, dc : Int32) : Nil
-      @desc_area.move(dr, dc)
     end
 
     # Mouse wheel over the DESCRIPTION: scroll the viewport (cursor follows), so a long

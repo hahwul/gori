@@ -44,10 +44,6 @@ module Gori::Tui
       @@linewise
     end
 
-    def self.empty? : Bool
-      @@text.nil? || @@text.try(&.empty?) || false
-    end
-
     def self.clear : Nil
       @@text = nil
       @@linewise = false

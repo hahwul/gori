@@ -73,15 +73,6 @@ module Gori
       Crawling
       Bruteforcing
       Draining
-
-      def label : String
-        case self
-        in Seeding      then "seeding"
-        in Crawling     then "crawling"
-        in Bruteforcing then "bruteforcing"
-        in Draining     then "draining"
-        end
-      end
     end
 
     # One discovered resource. `confidence` (0..1) is the FP/FN dial: crawled/linked

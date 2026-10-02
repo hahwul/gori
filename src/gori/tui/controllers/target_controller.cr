@@ -268,10 +268,6 @@ module Gori::Tui
       active_child.commit
     end
 
-    def locked? : Bool
-      active_child.locked?
-    end
-
     # A finished Discover job's notification jumps here: select the Discover sub-tab and
     # reveal the run.
     def reveal_session(id : Int64) : Nil

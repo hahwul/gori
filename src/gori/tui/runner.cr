@@ -422,10 +422,6 @@ module Gori::Tui
       target_controller.discover
     end
 
-    private def diff_controller : DiffController
-      target_controller.diff
-    end
-
     private def intercept_controller : InterceptController
       @tabs[:intercept].as(InterceptController)
     end
@@ -5442,10 +5438,6 @@ module Gori::Tui
     # don't support filtering (start_subtab_filter guards on subtab_filter_enabled?).
     def subtab_filter_open : Nil
       @tabs[@active_tab]?.try(&.start_subtab_filter)
-    end
-
-    def close_repeater_tab : Nil
-      repeater_controller.close_repeater_tab
     end
 
     # --- Miner ExecContext / cross-tab mediators ---

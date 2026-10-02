@@ -302,10 +302,6 @@ module Gori::Tui
       @preedit = text
     end
 
-    def preedit : String
-      @preedit
-    end
-
     # Split `text` into the CR-free line projection + the exact terminator that followed each
     # line. `lines[i] + eols[i]` concatenated is `text`, byte for byte, always — including the
     # pathological `"a\r\r\n"` (line `"a"`, eol `"\r\r\n"`), which the old rstrip silently
@@ -1731,11 +1727,6 @@ module Gori::Tui
       @scroll = @scroll.clamp(0, @lines.size - 1)
       csub = layout_of(@cy, cw).row_of(caret_index(@cy))
       @scroll, @scroll_sub = Wrap.ensure_visible(@scroll, @scroll_sub, @cy, csub, h, layout_fn(cw))
-    end
-
-    # Place the anchor `back` visual rows above (li, sub).
-    private def anchor_back_from(li : Int32, sub : Int32, back : Int32, cw : Int32) : Nil
-      @scroll, @scroll_sub = Wrap.step_back(li, sub, back, layout_fn(cw))
     end
 
     # Move the anchor `step` visual rows (negative = up), stopping at the buffer's ends.

@@ -9,11 +9,6 @@ module Gori::Proxy::Codec
     # HTTP streams decode instead of erroring.
     WINDOW_LOG_MAX = 100
 
-    # Decode a zstd stream, tolerant of truncation. `max_out` caps output (bomb guard).
-    def self.decode(input : Bytes, max_out : Int32) : Bytes
-      decode_full(input, max_out)[0]
-    end
-
     # :ditto: — plus whether the stream ENDED cleanly: every frame in it completed and every
     # input byte was consumed.
     #

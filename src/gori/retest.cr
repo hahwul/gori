@@ -332,10 +332,6 @@ module Gori
       def step : Store::RetestStep
         @planned.step
       end
-
-      def pass? : Bool
-        @outcome.pass?
-      end
     end
 
     # Where a run's sends come from. The live one dials; a spec's answers from a table.

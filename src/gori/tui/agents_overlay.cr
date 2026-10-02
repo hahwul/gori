@@ -34,10 +34,6 @@ module Gori::Tui
       @selected = @selected.clamp(0, {@rows.size - 1, 0}.max)
     end
 
-    def rows : Array(Gori::AgentPresence::Entry)
-      @rows
-    end
-
     # The row the cursor is on, for the tell affordance.
     def selected_entry : Gori::AgentPresence::Entry?
       @rows[@selected]?

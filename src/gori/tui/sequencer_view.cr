@@ -164,10 +164,6 @@ module Gori::Tui
       object_id == other.object_id
     end
 
-    def same?(oid : UInt64) : Bool
-      object_id == oid
-    end
-
     def dirty? : Bool
       @dirty
     end
@@ -249,10 +245,6 @@ module Gori::Tui
       @focus = :analysis
     end
 
-    def at_top? : Bool
-      @focus == :config
-    end
-
     def samples_at_top? : Bool
       @sel == 0
     end
@@ -264,10 +256,6 @@ module Gori::Tui
 
     def analysis_at_top? : Bool
       @analysis.at_top?
-    end
-
-    def analysis : ReadPane
-      @analysis
     end
 
     # The ANALYSIS card's interior — the rect `render_analysis` draws into, so the row cursor's
@@ -310,13 +298,6 @@ module Gori::Tui
     private def follow_index : Int32
       return 0 if @samples.empty?
       @samples.size - 1
-    end
-
-    # ↑/↓ (⇧ to select) walk the report rows; the wheel scrolls the viewport and leaves the
-    # cursor put — the split every read pane in the tree makes.
-    def analysis_scroll(d : Int32) : Nil
-      sync_analysis
-      @analysis.move(d, 0)
     end
 
     def analysis_move(d : Int32, selecting : Bool) : Nil
@@ -385,10 +366,6 @@ module Gori::Tui
       return if @samples.empty?
       @token.reset
       @focus = :detail
-    end
-
-    def detail_scroll(d : Int32) : Nil
-      with_token { @token.move(d, 0) }
     end
 
     def detail_move(d : Int32, selecting : Bool) : Nil

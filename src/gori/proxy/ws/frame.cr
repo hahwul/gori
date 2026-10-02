@@ -259,10 +259,6 @@ module Gori::Proxy::WS
       @frames += 1
     end
 
-    def note(h : Header) : Nil
-      note(h.fin?, h.rsv, h.masked?, h.masked? ? h.mask_key.dup : nil)
-    end
-
     def note(f : Frame) : Nil
       note(f.fin?, f.rsv, f.masked?, f.mask_key)
     end

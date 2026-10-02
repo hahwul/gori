@@ -182,15 +182,6 @@ class Gori::Tui::RepeaterView
     @req_read.sync_to(ed, selecting: selecting) unless request_insert?
   end
 
-  # PageUp / PageDown in the request editor: `dir` is -1/+1, sized from the editor's OWN
-  # last rendered height so the step matches the pane the operator is looking at (a split
-  # decode tab pages by its half, not by the window).
-  def edit_page(dir : Int32, selecting : Bool = false) : Nil
-    return unless @focus == :request
-    ed = req_editor
-    ed.page(dir * ed.page_rows, selecting: selecting)
-  end
-
   # THE shared editor keymap over the request editor — see `TextArea#handle_motion_key`.
   # Dirties only on a real buffer change (⌥⌫ is the one mutation in the set).
   #
@@ -208,14 +199,6 @@ class Gori::Tui::RepeaterView
     return false unless ed.handle_motion_key(ev)
     mark_req_edit if ed.edits != before
     true
-  end
-
-  # ⌃/⌥ + ←/→ — one word instead of one character. Pure motion: nothing dirties, matching
-  # `edit_move`.
-  def edit_word_move(dir : Int32, selecting : Bool = false) : Nil
-    return unless @focus == :request
-    ed = req_editor
-    dir < 0 ? ed.word_left(selecting) : ed.word_right(selecting)
   end
 
   # ⌃/⌥ + Home/End — the buffer's start/end, not the line's.

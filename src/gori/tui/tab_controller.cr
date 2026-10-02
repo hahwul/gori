@@ -89,10 +89,6 @@ module Gori::Tui
     def issue_open_link : Nil
     end
 
-    # Evidence list row ↵ / double-click. The Runner opens the immutable byte viewer.
-    def evidence_open : Nil
-    end
-
     # The Probe MODE picker (`probe.set-mode`), which the MODE band's chip raises on a click.
     # A Runner verb body like the three above — but it was never DECLARED here: the call in
     # `ProbeController#handle_click` compiled only because the Runner is the one production
@@ -124,11 +120,6 @@ module Gori::Tui
     # as the view picker above: the Runner's own `toggle_static_assets` (runner/views.cr)
     # overrides it.
     def toggle_static_assets : Nil
-    end
-
-    # The History column editor (#819). Same seam, and same reason, as the view picker above:
-    # the Runner's own `open_history_columns` (runner/columns.cr) overrides it.
-    def open_history_columns : Nil
     end
 
     # Reconfigure the current Sequencer session's token descriptor/goal (the `c` chord).
@@ -913,13 +904,6 @@ module Gori::Tui
       nil
     end
 
-    # Close sub-tab `idx` and say NOTHING — the batch driver below owns the sentence, and a
-    # loop of per-tab toasts would leave only the last one on screen anyway. Returns true
-    # when the store rolled the DELETE back and the saved session will reappear.
-    protected def close_subtab_at(idx : Int32) : Bool
-      false
-    end
-
     # The batch half of a close gesture (#683). Three rules, each one a defect if dropped:
     #
     #   * HIGH index → low, so a `delete_at` can never shift a target not yet reached.
@@ -1624,10 +1608,6 @@ module Gori::Tui
     end
 
     def commit : Nil # flush any in-progress edit before leave/quit
-    end
-
-    def locked? : Bool # a destructive op is gated (e.g. last note can't close)
-      false
     end
 
     # Focus a specific session/sub-tab by its persisted id (notification "jump to

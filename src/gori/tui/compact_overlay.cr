@@ -115,10 +115,6 @@ module Gori::Tui
       end
     end
 
-    private def keep_label : String
-      KEEP_CHOICES[@keep_idx].try { |n| Fmt.count(n.to_i64) } || "all"
-    end
-
     def overlay_box(area : Rect) : Rect?
       w = {area.w - 4, 52}.min
       h = {area.h - 2, row_count + 5}.min # title + summary + gap + rows + border

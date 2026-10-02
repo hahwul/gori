@@ -565,15 +565,6 @@ module Gori
       end
     end
 
-    # As if `slot` were the ACTIVE session slot — see `expand_bindings_as`.
-    def self.vars_for(ns : Namespace, slot : String) : Hash(String, String)
-      case ns
-      in Namespace::Env  then effective_vars
-      in Namespace::Bind then binding_values_as(slot)
-      in Namespace::Gen  then EMPTY_VARS
-      end
-    end
-
     # What a MASKING surface must treat as secret in this namespace — wider than `vars_for` for
     # BIND, which keeps a disabled rule's value: it stopped RESOLVING, it did not stop being a
     # credential sitting in memory. See `masking_vars`.

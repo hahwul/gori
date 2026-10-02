@@ -96,10 +96,6 @@ module Gori
       def self.legacy?(version : String) : Bool
         LEGACY_VERSIONS.includes?(version)
       end
-
-      def self.supported?(version : String) : Bool
-        modern?(version) || legacy?(version)
-      end
     end
   end
 end

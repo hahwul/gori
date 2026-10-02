@@ -51,10 +51,6 @@ module Gori::Tui
     # syntax overlay maps by index instead of replaying SideBySide's advance rule. `src` is
     # the row's index in the un-folded rows, which is how the cursor survives a fold toggle.
     record DisplayRow, row : Repeater::SideBySide::Row?, a_index : Int32, src : Int32, hidden : Int32 do
-      def fold? : Bool
-        @row.nil?
-      end
-
       def changed? : Bool
         (r = @row) ? !r.kind.same? : false
       end
@@ -384,14 +380,6 @@ module Gori::Tui
     # The row cursor, for the controller + the verbs.
     def rowsel : ReadPane
       @rowsel
-    end
-
-    # ↑/↓ (and the wheel, and ⇧ for a selection) move the CURSOR, which drags the viewport with
-    # it — selection-follow, like every list in the tree. The pane used to scroll a viewport with
-    # no cursor in it at all.
-    def scroll(delta : Int32) : Nil
-      sync_rowsel
-      @rowsel.move(delta, 0)
     end
 
     def move_rows(delta : Int32, selecting : Bool) : Nil

@@ -67,10 +67,6 @@ module Gori::Tui
       @lines = wrap(width)
     end
 
-    def lines : Array(String)
-      @lines
-    end
-
     def scroll : Int32
       @scroll
     end

@@ -52,10 +52,6 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     cookie_controller.cookie_copy
   end
 
-  def cookie_copy_all : Nil
-    cookie_controller.cookie_copy_all
-  end
-
   def cookie_copy_output : Nil
     cookie_controller.cookie_copy_output
   end

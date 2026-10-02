@@ -32,45 +32,5 @@ module Gori::Proxy
   # downgrade to HTTP/1.1 only for hosts its glob can actually match. Downgrading a host no rule
   # matches is the regression #531 fixed.
   module ResponseExtract
-    # Is ANY enabled extract rule live? Read per response, so it must not lock.
-    def extracts? : Bool
-      false
-    end
-
-    # Is any enabled extract rule live whose descriptor needs the response ENTITY?
-    # Read per response (`ClientConn` deciding whether to buffer), so it must not lock.
-    def extracts_body? : Bool
-      false
-    end
-
-    # `extracts_body?` narrowed to one host. HTTP/1 forward-proxy connections can carry multiple
-    # hosts, so ClientConn asks this before buffering each response. The h2 downgrade gate asks
-    # it once for its CONNECT host.
-    def extracts_body_for_host?(host : String) : Bool
-      extracts_body?
-    end
-
-    # Offer one DELIVERED response to the extract rules.
-    #
-    # `head` and `body` are the bytes as FORWARDED, and they must be framed consistently with
-    # each other — the implementation runs them through `Codec::ContentDecode`, so a body
-    # already de-chunked alongside a head still declaring `Transfer-Encoding: chunked` would
-    # be de-chunked a second time into garbage. Handing over the pair the client received is
-    # what makes that automatic rather than a rule to remember.
-    #
-    # `body` is nil when this response was not buffered — a streaming (SSE / close-delimited /
-    # 101) or oversized body, or the h2 relay, where DATA is never held. A body-scoped rule
-    # that matches such a response records a miss naming THAT reason, rather than reporting
-    # that its selector found nothing.
-    #
-    # `method` / `target` come from the REQUEST that was actually sent, because that is what the
-    # rule's condition (`InterceptFilter`) scopes on — a response carries neither.
-    #
-    # Must never raise into the proxy path and must never block: an extract rule cannot be
-    # allowed to fail a response the client is waiting on.
-    def observe_response(head : Bytes, body : Bytes?, *,
-                         method : String, host : String, target : String,
-                         scheme : String, status : Int32, flow_id : Int64? = nil) : Nil
-    end
   end
 end

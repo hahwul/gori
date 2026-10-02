@@ -192,10 +192,6 @@ module Gori
         raw.split(',').map(&.strip).reject(&.empty?)
       end
 
-      def with_cadence(cadence : Cadence) : Spec
-        Spec.new(@steps, cadence, @on_failure, @expect)
-      end
-
       def to_json(j : JSON::Builder) : Nil
         j.object do
           j.field("steps") { j.array { @steps.each { |s| j.string s } } }

@@ -942,7 +942,6 @@ module Gori::Fuzz
 
     enum State : UInt8
       Running
-      Paused
       Stopped
     end
 
@@ -959,7 +958,6 @@ module Gori::Fuzz
     @backend : CappedBackend
     @concurrency : Int32
     @state : State
-    @wake : Channel(Nil)
     @jobs : Channel(Job)
     @finished : Channel(Nil)
     @sent : Int64
@@ -1005,7 +1003,6 @@ module Gori::Fuzz
       conc = @config.concurrency.clamp(1, MAX_CONCURRENCY)
       @concurrency = conc
       @state = State::Running
-      @wake = Channel(Nil).new(1)
       @jobs = Channel(Job).new(conc)
       @events = Channel(Event).new(EVENT_BUFFER)
       @finished = Channel(Nil).new(conc)
@@ -1135,7 +1132,7 @@ module Gori::Fuzz
       samples = [] of BaselineSample
       interval = pace_interval
       @generator.calibration_requests(wanted).each do |bytes, payload_len|
-        # `stop` only sets the flag and pokes @wake, which this loop never waits on, so the
+        # `stop` only sets the flag, which this loop never waits on, so the
         # remaining samples used to go out one by one AFTER the operator asked to stop — and
         # `pace` below widens that window to a full rate interval each (at rps 0.2, ~25s of
         # trailing sends under "stopping…"). `dispatch_loop` re-reads the flag every job for
@@ -1188,20 +1185,6 @@ module Gori::Fuzz
 
     def stop : Nil
       @state = State::Stopped
-      poke
-    end
-
-    def pause : Nil
-      @state = State::Paused
-    end
-
-    def resume : Nil
-      @state = State::Running
-      poke
-    end
-
-    def stopped? : Bool
-      @state == State::Stopped
     end
 
     # ── fibers ─────────────────────────────────────────────────────────────────
@@ -1209,8 +1192,6 @@ module Gori::Fuzz
     private def dispatch_loop : Nil
       interval = pace_interval
       @generator.each do |job|
-        raise Halt.new if @state == State::Stopped
-        park_if_paused
         raise Halt.new if @state == State::Stopped
         # Soft job-count check (cheap) plus the hard real-send ceiling: retries/redirects
         # can exhaust CappedBackend mid-run while @dispatched is still under cap.
@@ -1723,21 +1704,6 @@ module Gori::Fuzz
               root
             end
       (URI.parse(abs) rescue nil) || URI.parse(root)
-    end
-
-    # ── lifecycle (pause / wake) ─────────────────────────────────────────────────
-
-    private def park_if_paused : Nil
-      while @state == State::Paused
-        @wake.receive
-      end
-    end
-
-    private def poke : Nil
-      select
-      when @wake.send(nil)
-      else
-      end
     end
 
     private def emit_progress : Nil

@@ -48,10 +48,6 @@ module Gori::Tui
       @sessions.size
     end
 
-    def empty? : Bool
-      @sessions.empty?
-    end
-
     def current_view : SequencerView?
       current_tab_obj.try(&.view)
     end
@@ -502,11 +498,6 @@ module Gori::Tui
       save_current
     end
 
-    def locked? : Bool
-      return false unless v = current_view
-      v.running? || (@host.active_tab == :sequencer && @host.focus == :body)
-    end
-
     # --- focus ring ---
     def pane_advance(dir : Int32) : Bool
       current_view.try(&.pane_advance(dir)) || false
@@ -562,17 +553,8 @@ module Gori::Tui
       end
     end
 
-    def current_session_db_id : Int64?
-      return nil if @current_idx < 0 || @current_idx >= @sessions.size
-      @sessions[@current_idx].db_id
-    end
-
     def index_for_db_id(id : Int64) : Int32?
       @sessions.index { |t| t.db_id == id }
-    end
-
-    def db_id_at(idx : Int32) : Int64?
-      @sessions[idx]?.try(&.db_id)
     end
 
     # --- rename ---

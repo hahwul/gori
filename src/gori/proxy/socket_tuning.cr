@@ -1,19 +1,7 @@
 require "socket"
 require "openssl"
 require "./prefix_io"
-
-# Expose the transport socket an SSL wrapper drives, so proxy tunnels can set fd-level
-# socket options (read/write timeouts, keepalive) that OpenSSL::SSL::Socket does not forward
-# to the underlying socket. `#bio` is private on the class, but `OpenSSL::BIO#io` is public;
-# calling it from a method reopened onto the class is allowed. Guarded so a future stdlib
-# change degrades to "can't reach the socket" (the baseline timeout stays) instead of breaking.
-class OpenSSL::SSL::Socket
-  def gori_underlying_io : IO?
-    bio.io
-  rescue
-    nil
-  end
-end
+require "./socket_residue"
 
 module Gori::Proxy
   # Centralizes read/write timeouts and TCP keepalive for the proxy's client and upstream

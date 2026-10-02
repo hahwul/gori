@@ -4,8 +4,7 @@ module Gori
   module Graphql
     # The introspection request an operator puts in a Repeater tab to ask a GraphQL endpoint for
     # its schema. Burp's Repeater offers the same two queries; the operator sends one and reads
-    # the answer. `Schema.parse` and `Operations.generate` can read that answer into requests, but
-    # no surface calls them yet.
+    # the answer.
     #
     # This module builds the request and never sends it: the operator sends it from the tab, where
     # the scope gate and the session they are already testing with apply as for any other send.

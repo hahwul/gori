@@ -1177,10 +1177,6 @@ module Gori::Tui
       @notes.backspace if notes_insert_mode?
     end
 
-    def notes_move(dr : Int32, dc : Int32) : Nil
-      @notes.move(dr, dc) if notes_insert_mode?
-    end
-
     # INSERT-mode motion: the shared editor keymap (⇧arrows select, Page keys, ⌥←/→ by word,
     # ⌥⌫ deletes one) — see `TextArea#handle_motion_key`.
     def notes_motion_key(ev : Termisu::Event::Key) : Bool

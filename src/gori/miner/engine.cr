@@ -63,7 +63,6 @@ module Gori::Miner
 
     enum State : UInt8
       Running
-      Paused
       Stopped
     end
 
@@ -74,7 +73,6 @@ module Gori::Miner
 
     @concurrency : Int32
     @state : State
-    @wake : Channel(Nil)
     @backend : Fuzz::CappedBackend
     @report : Baseline::Report?
     @seen : Set({Location, String})
@@ -150,7 +148,6 @@ module Gori::Miner
       @backend = Fuzz::CappedBackend.new(backend, @config.max_requests)
       @concurrency = @config.concurrency.clamp(1, MAX_CONCURRENCY)
       @state = State::Running
-      @wake = Channel(Nil).new(1)
       @events = Channel(Event).new(256)
       @report = nil
       @seen = Set({Location, String}).new
@@ -197,26 +194,15 @@ module Gori::Miner
 
     def stop : Nil
       @state = State::Stopped
-      poke
-      # The dispatcher has TWO park points and `poke` only reaches one: `park_if_paused`
-      # waits on @wake, `wait_for_worker` waits on @idle. A stop arriving while it is parked
-      # on @idle was therefore invisible until a worker finished an in-flight bucket — which
-      # against a dead origin is `retries × retry_pause` long. Releasing @idle too is safe by
+      # The dispatcher parks in `wait_for_worker` on @idle. A stop arriving while it is parked
+      # there was therefore invisible until a worker finished an in-flight bucket — which
+      # against a dead origin is `retries × retry_pause` long. Releasing @idle is safe by
       # construction: `wait_for_worker`'s own comment says a wake means "look again", never
       # "one task finished", and the loop re-reads @state on the next iteration.
       select
       when @idle.send(nil)
       else
       end
-    end
-
-    def pause : Nil
-      @state = State::Paused
-    end
-
-    def resume : Nil
-      @state = State::Running
-      poke
     end
 
     def stopped? : Bool
@@ -373,8 +359,6 @@ module Gori::Miner
 
       until @state.stopped?
         if task = work.shift?
-          park_if_paused
-          break if @state.stopped?
           # Early-out once the hard cap is hit — the CappedBackend also refuses any
           # send that slips past this racy check, so the network count never exceeds it.
           break if @backend.cap_reached?
@@ -945,19 +929,6 @@ module Gori::Miner
       @macro_abort_sent = true
       stop
       @events.send(ErrorEvent.new(reason))
-    end
-
-    private def park_if_paused : Nil
-      while @state == State::Paused
-        @wake.receive
-      end
-    end
-
-    private def poke : Nil
-      select
-      when @wake.send(nil)
-      else
-      end
     end
   end
 end

@@ -209,10 +209,6 @@ module Gori
           parts.size == 3 ? parts[2] : "HTTP/1.1"
         end
 
-        private def header_named?(line : String, name : String) : Bool
-          (c = line.index(':')) ? line[0...c].strip.downcase == name : false
-        end
-
         # Content-Length / Content-Type / Transfer-Encoding — the framing headers this rule sets or
         # drops itself; keeping a captured one would misframe the fixed probe body.
         private def body_framing_header?(line : String) : Bool

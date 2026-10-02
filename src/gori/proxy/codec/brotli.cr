@@ -6,13 +6,6 @@ module Gori::Proxy::Codec
   module Brotli
     AVAILABLE = {{ !flag?(:without_native_codecs) }}
 
-    # Decode a brotli stream, tolerant of truncation (a capture-capped body EOFs
-    # mid-stream → returns what was produced). `max_out` caps output as a
-    # decompression-bomb guard.
-    def self.decode(input : Bytes, max_out : Int32) : Bytes
-      decode_full(input, max_out)[0]
-    end
-
     # :ditto: — plus whether the stream ENDED cleanly (the decoder reported SUCCESS rather
     # than running out of input or erroring).
     #

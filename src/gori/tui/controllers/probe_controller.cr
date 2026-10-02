@@ -610,10 +610,6 @@ module Gori::Tui
       @probe.focus_desc! if desc
     end
 
-    def probe_query : Nil
-      @probe.start_query
-    end
-
     def probe_delete : Nil
       return unless i = @probe.target_issue
       # Capture the id/code/host NOW: the confirm resolves on a later tick, and a background

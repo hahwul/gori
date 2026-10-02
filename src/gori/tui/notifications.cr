@@ -118,16 +118,8 @@ module Gori::Tui
       @notes.reverse
     end
 
-    def recent(limit : Int32) : Array(Note)
-      all.first({limit, 0}.max)
-    end
-
     def unread : Int32
       @notes.count { |n| !n.read }
-    end
-
-    def mark_read(id : Int32) : Nil
-      @notes.find { |n| n.id == id }.try(&.read=(true))
     end
 
     # The note that announced question `id`, while it is still in the ring.

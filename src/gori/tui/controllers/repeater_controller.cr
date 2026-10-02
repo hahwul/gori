@@ -3235,11 +3235,6 @@ module Gori::Tui
       v.clear_dirty
     end
 
-    # The tab the user is actively typing into (identity match on the RepeaterView).
-    private def repeater_tab_editing?(tab : RepeaterTab) : Bool
-      @host.active_tab == :repeater && @host.focus == :body && current_view.try(&.same?(tab.view)) == true
-    end
-
     # A tab a cross-session reload must NOT overwrite/remove: actively edited, mid
     # round-trip, or holding unsaved local edits.
     private def repeater_tab_locked?(tab : RepeaterTab) : Bool
@@ -3377,11 +3372,6 @@ module Gori::Tui
     # Every modified key the EDITOR owns rather than the keymap — see the `handle_body_key`
     # branch. Shared with the Fuzzer's controller in spirit, not in code: the two dispatchers
     # have different shapes, and one predicate each is cheaper than a mixin nobody else wants.
-
-    # A modified Home/End — the BUFFER's start/end rather than the line's.
-    private def buffer_jump?(ev : Termisu::Event::Key) : Bool
-      ev.ctrl? || ev.alt?
-    end
 
     # A backspace/forward-delete of a marker delimiter (§/¦) would unbalance the marker
     # and expose its concealed ¦chain. Confirm first; on accept, strip the WHOLE marker

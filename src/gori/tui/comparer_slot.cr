@@ -102,16 +102,6 @@ module Gori::Tui
         request_cut: m.request_truncated?, response_cut: m.response_truncated?)
     end
 
-    # Raw text with no HTTP shape at all — a paste, a decoder output. It has no request
-    # half and no response half, so the SAME lines answer for both: a text slot is a
-    # constant under the REQ ⇄ RES toggle rather than going blank on one of them.
-    def self.from_text(label : String, text : String) : ComparerSlot
-      lines = text.split('\n').map(&.rstrip('\r'))
-      new(label, "", "", "", label,
-        Repeater::ExchangeMeta.of(nil, nil, nil, nil),
-        source: "text", text: lines)
-    end
-
     # The display lines of the requested half. Memoized per half: a rebuild (rows +
     # syntax overlay) and a theme reshade must not re-decode/-scrub/-split the same body.
     def lines(pane : Symbol) : Array(String)

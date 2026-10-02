@@ -315,11 +315,6 @@ module Gori::Tui
       {Rect.new(inner.x, inner.y, inner.w, 1), Rect.new(inner.x, inner.y + 1, inner.w, inner.h - 1)}
     end
 
-    # ↑/↓ (⇧ to select) walk the FINDING's fields; the wheel scrolls the viewport.
-    def detail_scroll(d : Int32) : Nil
-      with_finding { @finding.move(d, 0) }
-    end
-
     def detail_move(d : Int32, selecting : Bool) : Nil
       with_finding { @finding.move(d, 0, selecting: selecting) }
     end

@@ -29,10 +29,6 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     decoder_controller.clear_all
   end
 
-  def decoder_copy : Nil
-    decoder_controller.copy_output
-  end
-
   def decoder_copy_selection : Nil
     decoder_controller.decoder_copy_selection
   end

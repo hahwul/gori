@@ -52,19 +52,11 @@ module Gori::Settings
       kind == "direct"
     end
 
-    def socks5? : Bool
-      kind == "socks5" || kind == "socks5h"
-    end
-
     # True when the hop to the PROXY itself is TLS. Named `tls?` on both the rule and the
     # route (below) so a caller never has to compare the kind string, and never has to ask
     # this question about the origin leg by accident.
     def tls? : Bool
       kind == UPSTREAM_TLS_KIND
-    end
-
-    def remote_dns? : Bool
-      kind == "socks5h"
     end
 
     # The password, read from the OS environment at DIAL time (not at load), so exporting a

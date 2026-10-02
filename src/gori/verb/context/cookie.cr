@@ -16,7 +16,6 @@ abstract class Gori::Verb::ExecContext
   abstract def cookie_crack : Nil            # brute-force the secret over the SECRET field's wordlist
   abstract def cookie_load_decoded : Nil     # seed the FORGE payload from the INPUT cookie's parts
   abstract def cookie_copy : Nil             # copy selection or the focused pane's content
-  abstract def cookie_copy_all : Nil         # copy the focused pane's content (space-menu fallback)
   abstract def cookie_copy_output : Nil      # copy the re-signed OUTPUT cookie
   abstract def cookie_read_mode? : Bool      # focused pane is READ (gates y/copy/crack verbs)
 end

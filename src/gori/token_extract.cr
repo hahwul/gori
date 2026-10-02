@@ -195,14 +195,6 @@ module Gori
       end
     end
 
-    # The value a client's jar holds for `name` once the response's Set-Cookie fields are
-    # applied — see `set_cookie_jar`. Case-sensitive cookie name per RFC 6265.
-    def self.cookie(raw : Repeater::Result, name : String) : String?
-      resp = raw.response
-      return nil unless resp
-      cookie(ExtractSubject.new(raw.head, raw.body, MessageSide::Response, resp.headers), name)
-    end
-
     # The same, over either half. On a REQUEST the cookie jar is the `Cookie` header's
     # `; `-separated pairs (RFC 6265 §5.4), not `Set-Cookie` — the two spellings are the same
     # question asked of the two directions, and reading a request for `Set-Cookie` would answer
@@ -309,16 +301,6 @@ module Gori
       subject.headers.get?(name)
     end
 
-    # Capture group 1 (else the whole match) of `pattern` over the decoded body —
-    # same semantics as Fuzz::Matcher#extract_value. `re`, when passed, is the pattern
-    # precompiled once by the engine; otherwise it is compiled here (fallback path for
-    # any direct caller). A malformed pattern raises ArgumentError (not only Regex::Error)
-    # on Crystal — catch both so one bad descriptor yields empty samples, never a crash,
-    # honouring this module's "returns nil on a miss rather than raising" contract.
-    def self.regex(raw : Repeater::Result, pattern : String, re : Regex? = nil) : String?
-      regex(ExtractSubject.response(raw.head, raw.body), pattern, re)
-    end
-
     def self.regex(subject : ExtractSubject, pattern : String, re : Regex? = nil) : String?
       return nil if pattern.empty?
       re ||= Regex.new(pattern)
@@ -331,39 +313,12 @@ module Gori
       nil
     end
 
-    # A fixed half-open byte range of the decoded body, clamped to its bounds.
-    #
-    # Over the decoded BYTES, not over `decoded_text`. `Position` has no text reading at all —
-    # `body[100...140]` over a gzip stream is forty bytes of DEFLATE, and `bindings.cr` says so
-    # verbatim — so running the range over a `#scrub`bed String made every offset past an
-    # invalid byte slide by two, U+FFFD being three bytes where the invalid one was one. One
-    # origin response then gave a cookie descriptor the origin's `41 42 FF 43 44` and this one
-    # five DIFFERENT bytes for the same value, which is exactly the disagreement
-    # `bindings.cr` rules out: "the same `TokenLoc` on the same response has to mean one
-    # thing whether a Repeater send or the proxy saw it".
-    #
-    # The slice is handed to `String.new` unscrubbed. A `String` holding invalid UTF-8 survives
-    # every consumer of a bound value, and each of them says so where it is written:
-    # `Env.mask_secrets`, `Rules#substitute` and `Bindings.boundary_forging?` are all
-    # byte-level, and the store never sees a value at all.
-    def self.position(raw : Repeater::Result, a : Int32, b : Int32) : String?
-      position(ExtractSubject.response(raw.head, raw.body), a, b)
-    end
-
     def self.position(subject : ExtractSubject, a : Int32, b : Int32) : String?
       body = decoded_bytes(subject)
       lo = a.clamp(0, body.size)
       hi = b.clamp(0, body.size)
       return nil if hi <= lo
       String.new(body[lo...hi])
-    end
-
-    # A leaf value at a dotted/bracketed path into a JSON body, in the grammar `JsonPath`
-    # shares with Retest's `json:` assertions (`$.a.b[0]`, `a.b.0`, `["k"]`). Non-JSON, a
-    # missing path or one `JsonPath` refuses yields nil; a leaf is stringified (raw string,
-    # else its JSON form).
-    def self.json_path(raw : Repeater::Result, path : String) : String?
-      json_path(ExtractSubject.response(raw.head, raw.body), path)
     end
 
     def self.json_path(subject : ExtractSubject, path : String) : String?

@@ -196,12 +196,6 @@ module Gori
         "in #{Paths.wordlists_dir}, never a path", name)
     end
 
-    # The file a valid `name` lives at. Never a caller's path: the name has been checked to
-    # carry no separator, so joining it cannot leave the directory.
-    def path_for(name : String) : String
-      File.join(Paths.wordlists_dir, check_name!(name))
-    end
-
     # ── reads ─────────────────────────────────────────────────────────────────
 
     # The catalog's lists, name-sorted (case-insensitively, then exactly, so the order is the

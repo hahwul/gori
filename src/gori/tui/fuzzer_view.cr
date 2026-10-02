@@ -559,10 +559,6 @@ module Gori::Tui
       end
     end
 
-    def mark_dirty : Nil
-      @dirty = true
-    end
-
     def clear_dirty : Nil
       @dirty = false
     end
@@ -1118,10 +1114,6 @@ module Gori::Tui
 
     def retained_result_count : Int32
       @results.size
-    end
-
-    def retained_result_bytes : Int64
-      @result_window.bytes
     end
 
     # Also true for a grouped header drawn from its cluster's own metrics-only representative
@@ -2753,15 +2745,6 @@ module Gori::Tui
     # PageUp / PageDown, sized from the editor's own last rendered height.
     def template_page(dir : Int32, selecting : Bool = false) : Nil
       @editor.page(dir * @editor.page_rows, selecting: selecting)
-    end
-
-    # THE shared editor keymap over the template — see `TextArea#handle_motion_key`. Dirties
-    # only on a real buffer change (⌥⌫ is the one mutation in the set).
-    def template_motion_key(ev : Termisu::Event::Key) : Bool
-      before = @editor.edits
-      return false unless @editor.handle_motion_key(ev)
-      @dirty = true if @editor.edits != before
-      true
     end
 
     # ⌃/⌥ + ←/→ — one word instead of one character. Pure motion.

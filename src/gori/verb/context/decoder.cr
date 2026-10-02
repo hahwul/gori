@@ -8,7 +8,6 @@ abstract class Gori::Verb::ExecContext
   abstract def decoder_rename_subtab : Nil    # open the rename prompt for the active sub-tab
   abstract def decoder_duplicate_subtab : Nil # clone the active conversion into a new sibling
   abstract def decoder_clear : Nil            # clear the current input + chain
-  abstract def decoder_copy : Nil             # copy the entire current output to the clipboard
   abstract def decoder_copy_selection : Nil   # copy selection from INPUT/OUTPUT (READ)
   abstract def decoder_copy_all : Nil         # copy the whole focused pane text (space menu / palette fallback)
   abstract def decoder_read_mode? : Bool      # INPUT READ or OUTPUT pane (gates y/copy)

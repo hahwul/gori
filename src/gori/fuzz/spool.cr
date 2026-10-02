@@ -145,10 +145,6 @@ module Gori
           true
         end
 
-        def flush : Bool
-          @persistence.flush
-        end
-
         def finish(sent : Int64, matched : Int64, errors : Int64, status : String,
                    finished_at : Int64 = Time.utc.to_unix_ms * 1000_i64) : Bool
           @persistence.finish(sent, matched, errors, status, finished_at)

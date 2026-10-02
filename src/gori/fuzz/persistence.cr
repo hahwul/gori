@@ -45,7 +45,6 @@ module Gori
       ROW_METADATA_BYTES = 128_i64
 
       private record Batch, rows : Array(Store::FuzzResultWrite), bytes : Int64
-      private record Barrier, reply : Channel(Bool)
       private record Terminal,
         sent : Int64,
         matched : Int64,
@@ -54,7 +53,7 @@ module Gori
         finished_at : Int64,
         stop_idx : Int64?,
         reply : Channel(Bool)
-      private alias Command = Batch | Barrier | Terminal
+      private alias Command = Batch | Terminal
 
       getter run_id : Int64
       getter error : String?
@@ -168,19 +167,6 @@ module Gori
       # Exact Store-record copy: no JSON parse/rebuild and no BLOB/text normalization.
       def append(record : Store::FuzzResultRecord) : Bool
         append(self.class.write_row(record))
-      end
-
-      # Explicitly drain every accepted row. Unlike live append, flush is a caller-requested
-      # barrier and may wait; a buffered reply keeps a cancelled waiter from stalling the worker.
-      def flush : Bool
-        return terminal_success if terminal?
-        return false unless @worker_started
-        queued = enqueue_pending_wait
-        drained = queued && barrier
-        drained && !failed?
-      rescue ex
-        fail_save(ex.message || "could not flush fuzz results")
-        false
       end
 
       # FIFO terminal barrier: pending rows are queued behind all accepted batches, then the
@@ -427,15 +413,6 @@ module Gori
         false
       end
 
-      private def barrier : Bool
-        reply = Channel(Bool).new(1)
-        return false unless send_command(Barrier.new(reply))
-        reply.receive
-      rescue Channel::ClosedError
-        fail_save("the fuzz persistence worker stopped before the flush barrier")
-        false
-      end
-
       private def finish_once(sent : Int64, matched : Int64, errors : Int64, status : String,
                               finished_at : Int64, stop_idx : Int64?) : Nil
         return if terminal?
@@ -471,7 +448,7 @@ module Gori
         end
       ensure
         @commands.close rescue nil
-        # A worker failure must answer every buffered barrier/finish. Batch commands have no
+        # A worker failure must answer every buffered finish. Batch commands have no
         # waiter; dropping them is already represented by @error/save_failed.
         while command = (@commands.receive? rescue nil)
           answer_failed(command)
@@ -489,9 +466,6 @@ module Gori
             fail_save("a fuzz result batch did not commit (project busy, full, or read-only)")
           end
           false
-        when Barrier
-          command.reply.send(!failed?)
-          false
         when Terminal
           terminal = failed? ? "save_failed" : command.status
           committed = @store.finish_fuzz_run(@run_id, command.sent, command.matched,
@@ -506,7 +480,6 @@ module Gori
 
       private def answer_failed(command : Command?) : Nil
         case command
-        when Barrier  then command.reply.send(false) rescue nil
         when Terminal then command.reply.send(false) rescue nil
         end
       end
