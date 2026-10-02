@@ -8,6 +8,7 @@ require "../repeater/subtab_filter"
 require "./subtab_marks"
 require "./selection_ident"
 require "./controllers/tab_close"
+require "./editor_pane"
 require "./screen"
 require "./line_edit"
 require "./text_read_state"
@@ -413,6 +414,8 @@ module Gori::Tui
   # (Help) overrides only `tab`/`render_body`/`command_scope`, while a rich tab
   # (Repeater) overrides the input/focus/lifecycle hooks too.
   abstract class TabController
+    include EditorPane
+
     property subtab_start : Int32 = 0
 
     # --- sub-tab filter (issue #121; shared across the multi-session workbench tabs) ---

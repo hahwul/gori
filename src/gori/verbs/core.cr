@@ -142,7 +142,7 @@ module Gori
       Tui::SettingsCatalog.all.each do |s|
         r.register Verb::Definition.new(
           s.id, "Settings: #{s.title}", s.desc,
-          Verb::Scope::Global, category: Verb::Category::Settings) { |ctx| ctx.open_settings(s.sym); nil }
+          Verb::Scope::Global, category: Verb::Category::Settings, keywords: s.keywords) { |ctx| ctx.open_settings(s.sym); nil }
       end
 
       # Palette-only (no chord — a mascot doesn't earn one of the scarce single-letter

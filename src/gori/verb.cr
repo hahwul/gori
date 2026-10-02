@@ -225,6 +225,10 @@ module Gori
       # the keymap and the R1 guard see only the other verb's chord. Boot checks the pair
       # (same scope, and a chord live in this verb's section).
       getter chord_of : String?
+      # Extra words the palette's typed search matches besides the title and id: the names an
+      # operator searches for that the title does not say. `settings.keys` is found by "vim" and
+      # "helix" though its title is "Settings: Keys". Search only — nothing draws them.
+      getter keywords : Array(String)
 
       def initialize(@id : String, @title : String, @description : String, @scope : Scope,
                      @chords : Array(Chord) = [] of Chord, @hidden : Bool = false,
@@ -234,6 +238,7 @@ module Gori
                      @group : Symbol = :none, @chord_sections : Array(Symbol)? = nil,
                      @intent : Symbol? = nil, @pinned : Bool = false,
                      @menu : Placement = Placement::Space, @chord_of : String? = nil,
+                     @keywords : Array(String) = [] of String,
                      &@handler : ExecContext -> String?)
       end
 

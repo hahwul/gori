@@ -446,6 +446,16 @@ describe "Gori::Hotkeys.expand memo" do
     end
   end
 
+  # A caller may name a keyset that is not the active one (the setup wizard's practice pad
+  # does). The memo used to be keyed without it, so whichever keyset expanded a template first
+  # answered for both.
+  it "keys the memo by the keyset a caller names" do
+    reg = Gori::Verbs.registry
+    tmpl = "{notes.select-line} memo-keyset-probe"
+    Gori::Hotkeys.expand(reg, tmpl, keyset: "helix").should eq("x memo-keyset-probe")
+    Gori::Hotkeys.expand(reg, tmpl, keyset: "vim").should eq("⇧V memo-keyset-probe")
+  end
+
   it "bumps the keymap revision on every keymap setter" do
     r0 = Gori::Settings.keymap_revision
     os, mod = Gori::Settings.keymap_os, Gori::Settings.command_modifier

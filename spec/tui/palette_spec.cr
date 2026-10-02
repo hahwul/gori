@@ -29,6 +29,39 @@ describe Gori::Tui::PaletteState do
     palette.selected_verb.try(&.id).should eq("scope.toggle-sandbox") # and it ranks first
   end
 
+  # The keyset lives under "Settings: Keys", a title no vim or helix user would type. The
+  # section's keywords are what the search finds; a keyword match outranks an accidental
+  # subsequence in another verb's title.
+  it "finds the key settings by vim and helix" do
+    ctx = FakeExecContext.new
+    palette = PaletteState.new(Gori::Verbs.registry)
+    {"vim", "helix", "Helix", "keyset"}.each do |q|
+      palette.reset(ctx)
+      q.each_char { |c| palette.append(c, ctx) }
+      palette.selected_verb.try(&.id).should eq("settings.keys")
+    end
+  end
+
+  it "finds a keyword only from its start, never as a scattered subsequence" do
+    ctx = FakeExecContext.new
+    palette = PaletteState.new(Gori::Verbs.registry)
+    palette.reset(ctx)
+    "hlx".each_char { |c| palette.append(c, ctx) }
+    palette.results.map(&.id).should_not contain("settings.keys")
+  end
+
+  # A keyword hit lands at index 0, the best score there is, so it must not outrank the titles
+  # that say the query: one letter never reaches the keywords, and a title that starts the
+  # same way wins the tie.
+  it "keeps short keyword hits under the titles that start with the query" do
+    registry = Gori::Verbs.registry
+    keys = registry["settings.keys"]
+    Gori::Verb::Registry.score(keys, "o").should eq(Gori::Fuzzy.score("o", "#{keys.title} #{keys.id}".downcase))
+    title_start = registry.find { |v| "#{v.title} #{v.id}".downcase.starts_with?("re") }.not_nil!
+    hotkeys = registry["settings.hotkeys"]
+    Gori::Verb::Registry.score(hotkeys, "re").not_nil!.should be < Gori::Verb::Registry.score(title_start, "re").not_nil!
+  end
+
   it "moves the selection within results" do
     ctx = FakeExecContext.new
     palette = PaletteState.new(Gori::Verbs.registry)

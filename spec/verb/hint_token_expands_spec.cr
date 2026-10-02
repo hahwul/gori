@@ -28,21 +28,37 @@ describe "hint templates — every verb token expands to a chord" do
     # Comment lines are skipped, the way `layering_spec` reads its hits: the mechanism is
     # DESCRIBED as `{verb.id}` in five places, and that placeholder is not a token to expand.
     ids = Set(String).new
+    # A file whose templates are expanded under a NAMED keyset rather than the active one: the
+    # setup wizard's practice pad spells vim's `dd` as `{editor.delete-line}` twice, and expands
+    # it only while vim-ish is the keyset on trial (`KeysetPad#expand`). Its tokens must still
+    # name a verb with a key, just under some keyset; `keyset_pad_spec` checks each template
+    # under the keyset it is drawn in.
+    keyset_scoped = {File.join(root, "gori", "tui", "keyset_pad.cr")}
+    scoped_ids = Set(String).new
     Dir.glob(File.join(root, "**", "*.cr")).each do |file|
+      bucket = keyset_scoped.includes?(file) ? scoped_ids : ids
       File.each_line(file) do |line|
         next if line.lstrip.starts_with?('#')
-        line.scan(token) { |m| ids << m[1] }
+        line.scan(token) { |m| bucket << m[1] }
       end
     end
     ids.size.should be > 100 # the scan found the templates at all
+    scoped_ids.should_not be_empty
 
-    unknown = ids.select { |id| registry[id]?.nil? }
+    unknown = (ids + scoped_ids).select { |id| registry[id]?.nil? }
     unknown.to_a.sort.should be_empty
 
     chordless = ids.select do |id|
       Gori::Hotkeys.default_for(registry, id, Gori::Settings.keymap_os).nil?
     end
     chordless.to_a.sort.should be_empty
+
+    keyless_everywhere = scoped_ids.select do |id|
+      Gori::Verb::Keyset::NAMES.all? do |ks|
+        Gori::Hotkeys.default_for(registry, id, Gori::Settings.keymap_os, ks).nil?
+      end
+    end
+    keyless_everywhere.to_a.sort.should be_empty
   end
 end
 

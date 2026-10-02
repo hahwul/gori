@@ -390,7 +390,7 @@ on the REQUEST pane has **Raw request**, the same text.
 
 gori's text panes are **modal**: `Esc` and `i` move between READ and INSERT, and in READ the bare letters are commands. The shipped grammar is helix-shaped: **select first, then act**. `x` selects the line, then `y` copies it or `d` deletes it, and `p` pastes. vim spells the same edits `yy`, `dd` and `p`, or `V` then `y` / `d`, and that difference is what a vim-trained hand fights all day.
 
-**Preferences → Editor & Keys → Keys → Editor keyset** (`Ctrl-,`), or **`settings:keys`** in the palette, switches it:
+**Preferences → Editor & Keys → Keys → Editor keyset** (`Ctrl-,`), or **`settings:keys`** in the palette, switches it. Typing `vim`, `helix` or `keyset` into the palette (`Ctrl-P`) finds that row too. The first-run wizard (`gori wizard`) asks on its **Keys** step, with a three-line practice pad that answers in whichever keyset is highlighted, so you can try `x` `d` against `dd` before choosing. The pad's copies stay in gori's paste register and never reach your clipboard.
 
 | Keyset | Select line | Delete line | Copy line | Paste | Undo | Find | Append | Top / bottom |
 |--------|-------------|-------------|-----------|-------|------|------|--------|--------------|
