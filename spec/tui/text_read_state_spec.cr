@@ -110,4 +110,49 @@ describe "Gori::Tui::TextReadState#paint_chrome after the pane shrinks" do
     state.paint_chrome(Screen.new(b), Rect.new(0, 1, 20, 2), ed)
     (3...8).each { |y| 20.times { |x| b.bg_at(x, y).should_not eq Theme.accent_bg } }
   end
+
+  # A line selection is a MODE, not a span shape. Grown with a column-keeping step it turned
+  # into a char rectangle, and a delete over it cut mid-line and joined the two lines.
+  describe "a line selection" do
+    it "grows by whole lines on ⇧↑, from a line shorter than the one above" do
+      ed = area("GET / HTTP/1.1\nHost: example.test\nAccept: */*")
+      state = TextReadState.new
+      ed.place_cursor(2, 0)
+      state.select_line(ed, line_mode: false)
+      state.move(ed, -1, 0, selecting: true)
+      state.linewise?(ed).should be_true
+      state.copy_text(ed).should eq("Host: example.test\nAccept: */*")
+    end
+
+    it "grows on a plain step only in line mode (vim's V), and collapses otherwise" do
+      ed = area("a\nbb\nccc")
+      state = TextReadState.new
+      state.select_line(ed, line_mode: true)
+      state.move(ed, 1, 0)
+      state.copy_text(ed).should eq("a\nbb")
+
+      state.select_line(ed, line_mode: false)
+      state.move(ed, 1, 0)
+      state.selection?(ed).should be_false
+    end
+
+    it "stops being linewise once a sideways step reshapes it" do
+      ed = area("abc\ndef")
+      state = TextReadState.new
+      state.select_line(ed, line_mode: false)
+      state.move(ed, 0, -1, selecting: true)
+      state.linewise?(ed).should be_false
+    end
+  end
+
+  it "steps a READ caret by words with the editor's own word motion" do
+    ed = area("X-Request-Id: a.b")
+    state = TextReadState.new
+    state.word_move(ed, 1)
+    state.cursor.cx.should eq(12) # past `X-Request-Id`, onto `:`
+    state.word_move(ed, 1, selecting: true)
+    state.copy_text(ed).should eq(": ")
+    state.word_move(ed, -1)
+    state.selection?(ed).should be_false
+  end
 end

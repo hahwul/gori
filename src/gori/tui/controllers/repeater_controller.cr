@@ -3350,13 +3350,6 @@ module Gori::Tui
       view.edit_delete_word
     end
 
-    # A modified ←/→ — one WORD, not one character. Either modifier: ⌥ is the macOS spelling,
-    # ⌃ the one every other platform uses, and which of the two a terminal actually forwards
-    # is not something the operator should have to know.
-    private def word_step?(ev : Termisu::Event::Key) : Bool
-      (ev.ctrl? || ev.alt?) && (ev.key.left? || ev.key.right?)
-    end
-
     # A modified ⌫ — delete a WORD. The `char` half is not defensive padding: a terminal sends
     # ⌥⌫ as ESC + 0x7F, and termisu's Alt-prefix branch maps the payload byte through
     # `Key.from_char`, which has no name for DEL — so the event arrives as `Key::Unknown` +
@@ -3477,7 +3470,7 @@ module Gori::Tui
       selecting = ev.shift?
       case
       when key.enter? then return false # editor.insert-enter
-      when word_step?(ev)           then view.request_read_move(0, key.left? ? -1 : 1, selecting: selecting)
+      when word_step?(ev)           then editor_word_move(key.left? ? -1 : 1, selecting)
       when key.up?, key.lower_k?    then view.at_top? ? view.focus_first : view.request_read_move(-1, 0, selecting: selecting)
       when key.down?, key.lower_j?  then view.request_read_move(1, 0, selecting: selecting)
       when key.left?, key.lower_h?  then view.request_read_move(0, -1, selecting: selecting)

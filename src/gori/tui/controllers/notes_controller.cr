@@ -128,8 +128,7 @@ module Gori::Tui
           @notes.read_move(-1, 0, selecting: selecting)
         end
       when nav_down?(ev)              then @notes.read_move(1, 0, selecting: selecting)
-      when key.left?                  then @notes.read_move(0, -1, selecting: selecting)
-      when key.right?                 then @notes.read_move(0, 1, selecting: selecting)
+      when editor_read_sideways(ev)   then nil # ←/→ h/l, ⌥ by word
       when @notes.read_motion_key(ev) then nil # Page keys + ⇧Home/⇧End — the shared editor set
       when c && !ev.ctrl? && !ev.alt? && !c.control?
         return false

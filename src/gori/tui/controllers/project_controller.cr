@@ -666,8 +666,7 @@ module Gori::Tui
         # ⇧↑ stays in the pane: leaving mid-extend abandons a selection being built.
         (@project_view.at_top? && !selecting) ? leave_to_strip : @project_view.desc_read_move(-1, 0, selecting: selecting)
       when nav_down?(ev)                          then @project_view.desc_read_move(1, 0, selecting: selecting)
-      when key.left?                              then @project_view.desc_read_move(0, -1, selecting: selecting)
-      when key.right?                             then @project_view.desc_read_move(0, 1, selecting: selecting)
+      when editor_read_sideways(ev)               then nil # ←/→ h/l, ⌥ by word
       when @project_view.desc_read_motion_key(ev) then nil # Home/End/Page — the shared editor set
       else
         return false # i INSERT, x select-line, y copy, Global breath keys …

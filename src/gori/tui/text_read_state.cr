@@ -1,6 +1,7 @@
 require "./read_cursor"
 require "./text_area"
 require "./gutter"
+require "../verb"
 
 module Gori::Tui
   # Read-mode navigation + selection for a TextArea (shared by Repeater, Fuzzer, Notes, …).
@@ -11,6 +12,7 @@ module Gori::Tui
     # `bind` compares against it on every call that takes an editor — see there.
     @doc : TextArea?
     @doc_rev : Int32
+    @line_mode = false
 
     def initialize
       @cursor = ReadCursor.new
@@ -128,10 +130,14 @@ module Gori::Tui
       @cursor.selection_span(editor.lines_snapshot)
     end
 
-    def select_line(editor : TextArea) : Nil
+    # `line_mode` is vim's `V`: an unshifted vertical step grows the selection rather than
+    # leaving it. The keyset is the caller's to name, because the wizard's practice pad answers
+    # in the keyset it has highlighted, not the saved one.
+    def select_line(editor : TextArea, line_mode : Bool = Verb::Keyset.active.vim?) : Nil
       lines = editor.lines_snapshot
       return if lines.empty?
       sync_from(editor)
+      @line_mode = line_mode
       @cursor.select_line(lines)
       apply(editor, lines)
     end
@@ -151,12 +157,33 @@ module Gori::Tui
       return if lines.empty?
       bind(editor)
       @cursor.sync(editor.cy, editor.cx)
-      if dr != 0 && (target = editor.visual_row_target(dr))
+      if dr != 0 && @cursor.linewise? && (selecting || @line_mode)
+        # A line selection grows by whole lines, ⇧↑ included. Under `vim` a plain ↑/↓ (`k`/`j`)
+        # does it too, which is `V` then `j`: that keyset's select-line is a mode, not a span.
+        @cursor.extend_lines(dr, lines.size, ->(i : Int32) { lines[i] })
+      elsif dr != 0 && (target = editor.visual_row_target(dr))
         @cursor.move_to(target[0], target[1], selecting: selecting)
       else
         @cursor.move(dr, dc, lines, selecting: selecting)
       end
       apply(editor, lines)
+    end
+
+    # ⌥/⌃←→ in READ (and `vim`'s `w` / `b`): the editor's own word motion, so READ and
+    # INSERT agree about where a word ends. The read caret is put on the editor first, the
+    # step runs there, and `sync_to` brings it back extending or collapsing the selection.
+    def word_move(editor : TextArea, dir : Int32, selecting : Bool = false) : Nil
+      lines = editor.lines_snapshot
+      return if lines.empty?
+      apply(editor, lines)
+      dir < 0 ? editor.word_left : editor.word_right
+      sync_to(editor, selecting)
+    end
+
+    # Is the READ selection in `editor` a line selection (`select_line`, grown by whole lines)?
+    def linewise?(editor : TextArea) : Bool
+      bind(editor)
+      @cursor.linewise? && @cursor.selection_span(editor.lines_snapshot) != nil
     end
 
     def sync_from(editor : TextArea) : Nil

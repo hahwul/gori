@@ -564,12 +564,12 @@ module Gori::Tui
       selecting = ev.shift?
       case
       when key.enter? then return false # editor.insert-enter
-      when key.up?    then @host.request_focus(subtab_strip_shown? ? :subtabs : :menu)
-      when key.down?  then v.pane_advance(1)
-      when key.left?  then v.target_read_move(-1, selecting: selecting)
-      when key.right? then v.target_read_move(1, selecting: selecting)
-      when key.home?  then v.target_home(selecting)
-      when key.end?   then v.target_end(selecting)
+      when nav_up?(ev)    then @host.request_focus(subtab_strip_shown? ? :subtabs : :menu)
+      when nav_down?(ev)  then v.pane_advance(1)
+      when nav_left?(ev)  then v.target_read_move(-1, selecting: selecting)
+      when nav_right?(ev) then v.target_read_move(1, selecting: selecting)
+      when key.home?      then v.target_home(selecting)
+      when key.end?       then v.target_end(selecting)
       when c && !ev.ctrl? && !ev.alt? && !c.control?
         return false # i INSERT, x select-line, y copy, Global breath → keymap
       end
@@ -645,11 +645,8 @@ module Gori::Tui
       v.template_delete_word
     end
 
-    # A modified ←/→ is a WORD step; a modified Home/End jumps the BUFFER. ⌥ is the macOS
-    # spelling and ⌃ the one everywhere else — accept both, as the Repeater does.
-    private def word_step?(ev : Termisu::Event::Key) : Bool
-      (ev.ctrl? || ev.alt?) && (ev.key.left? || ev.key.right?)
-    end
+    # A modified Home/End jumps the BUFFER (a modified ←/→ is `word_step?`'s WORD step). ⌥ is
+    # the macOS spelling and ⌃ the one everywhere else — accept both, as the Repeater does.
 
     private def buffer_jump?(ev : Termisu::Event::Key) : Bool
       ev.ctrl? || ev.alt?
@@ -688,14 +685,13 @@ module Gori::Tui
       selecting = ev.shift?
       case
       when key.enter? then return false # editor.insert-enter
-      when key.up?        then template_up(v, selecting)
-      when key.down?      then v.template_read_move(1, 0, selecting: selecting)
-      when key.left?      then v.template_read_move(0, -1, selecting: selecting)
-      when key.right?     then v.template_read_move(0, 1, selecting: selecting)
-      when key.page_up?   then v.template_read_page(-1, selecting: selecting)
-      when key.page_down? then v.template_read_page(1, selecting: selecting)
-      when key.home?      then v.template_home(selecting)
-      when key.end?       then v.template_end(selecting)
+      when nav_up?(ev)              then template_up(v, selecting)
+      when nav_down?(ev)            then v.template_read_move(1, 0, selecting: selecting)
+      when editor_read_sideways(ev) then nil # ←/→ h/l, ⌥ by word
+      when key.page_up?             then v.template_read_page(-1, selecting: selecting)
+      when key.page_down?           then v.template_read_page(1, selecting: selecting)
+      when key.home?                then v.template_home(selecting)
+      when key.end?                 then v.template_end(selecting)
       when c && !ev.ctrl? && !ev.alt? && !c.control?
         return false # i INSERT, x/y + Global breath → keymap
       end

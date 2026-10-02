@@ -697,8 +697,8 @@ module Gori::Tui
       when key.enter? then return false # editor.insert-enter
       when nav_up?(ev)                       then notes_read_up(ev, selecting)
       when nav_down?(ev)                     then @issues.notes_read_move(1, 0, selecting: selecting)
-      when key.left?                         then notes_read_left(ev, selecting)
-      when key.right?                        then @issues.notes_read_move(0, 1, selecting: selecting)
+      when nav_left?(ev)                     then notes_read_left(ev, selecting)
+      when nav_right?(ev)                    then notes_read_right(ev, selecting)
       when @issues.notes_read_motion_key(ev) then nil # Home/End/Page — the shared editor set
       # `x` is NOT claimed here: `issue.select-line` is a plain chord gated on
       # `issues_notes_read_mode?`, which is exactly this pane, so the `return false` below
@@ -784,8 +784,14 @@ module Gori::Tui
     end
 
     private def notes_read_left(ev : Termisu::Event::Key, selecting : Bool) : Nil
+      return (editor_word_move(-1, selecting); nil) if word_step?(ev)
       return @issues.focus_links! if notes_crossing?(ev) && @issues.notes_at_doc_start?
       @issues.notes_read_move(0, -1, selecting: selecting)
+    end
+
+    private def notes_read_right(ev : Termisu::Event::Key, selecting : Bool) : Nil
+      return (editor_word_move(1, selecting); nil) if word_step?(ev)
+      @issues.notes_read_move(0, 1, selecting: selecting)
     end
 
     # A crossing claims only a BARE press. ⇧ means a ⇧arrow selection is mid-build and leaving

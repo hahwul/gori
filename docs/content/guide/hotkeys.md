@@ -397,7 +397,9 @@ gori's text panes are **modal**: `Esc` and `i` move between READ and INSERT, and
 | **helix-ish** (default) | `x` | `x` then `d` | `x` then `y` | `p` | `Ctrl-Z` | `Ctrl-F` | — | — |
 | **vim-ish** | `⇧V` | `dd` | `yy` | `p` | `u` | `/` | `a` | `g` / `⇧G` |
 
-Everything not in that table is the same under both keysets, because gori already spells it the way vim does: `i` enters INSERT, `Esc` leaves it, `Ctrl-G` goes to a line, and arrows plus `Shift` extend a selection. The delete and copy keys act on any selection too, not only on a line: under `vim-ish`, `⇧V` then `d` or `y` works as it does in vim.
+Everything not in that table is the same under both keysets, because gori already spells it the way vim does: `i` enters INSERT, `Esc` leaves it, `Ctrl-G` goes to a line, and arrows plus `Shift` extend a selection. In READ, `h` `j` `k` `l` move the caret in every text pane as the arrows do, and `⌥←` / `⌥→` (`Ctrl` on Linux and Windows) step a word. The delete and copy keys act on any selection too, not only on a line: under `vim-ish`, `⇧V` then `d` or `y` works as it does in vim.
+
+A line selection stays whole lines while it grows: `⇧↑` / `⇧↓` add a line at a time under both keysets, and under `vim-ish` a plain `j` / `k` does too, so `⇧V` `j` `j` `d` deletes three lines. A sideways step turns it into an ordinary character selection.
 
 ### Delete and paste in READ {#read-edits}
 

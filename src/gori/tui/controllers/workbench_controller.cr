@@ -431,10 +431,9 @@ module Gori::Tui
         s.input.at_top? ? cross_pane(s, -1) : s.input_read.move(s.input, -1, 0, selecting: selecting)
       when nav_down?(ev)
         s.input.at_bottom? ? cross_pane(s, 1) : s.input_read.move(s.input, 1, 0, selecting: selecting)
-      when key.left?  then s.input_read.move(s.input, 0, -1, selecting: selecting)
-      when key.right? then s.input_read.move(s.input, 0, 1, selecting: selecting)
-      when key.home?  then s.input_home(selecting) # editor move + read-cursor adopt — see WorkbenchSession
-      when key.end?   then s.input_end(selecting)
+      when editor_read_sideways(ev) then nil                     # ←/→ h/l, ⌥ by word
+      when key.home?                then s.input_home(selecting) # editor move + read-cursor adopt — see WorkbenchSession
+      when key.end?                 then s.input_end(selecting)
       when plain_char?(ev, c)
         return false # i INSERT, x/y/c + Global breath → keymap
       end

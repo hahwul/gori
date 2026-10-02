@@ -178,18 +178,25 @@ module Gori::Tui
     private def read_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
       return false if key.escape?
-      bare = !ev.ctrl? && !ev.alt?
-      selecting = ev.shift?
-      case
-      when key.up? || (bare && key.lower_k?)   then @read.move(@area, -1, 0, selecting: selecting)
-      when key.down? || (bare && key.lower_j?) then @read.move(@area, 1, 0, selecting: selecting)
-      when key.left?                           then @read.move(@area, 0, -1, selecting: selecting)
-      when key.right?                          then @read.move(@area, 0, 1, selecting: selecting)
-      when line_edge(ev)                       then nil
-      else                                          run(ev)
+      if step = caret_step(ev)
+        @read.move(@area, step[0], step[1], selecting: ev.shift?)
+      elsif !line_edge(ev)
+        run(ev)
       end
       true
     end
+
+    # The arrows, and `h`/`j`/`k`/`l` when bare: the caret keys a Notes READ pane answers.
+    private def caret_step(ev : Termisu::Event::Key) : {Int32, Int32}?
+      key = ev.key
+      return {-1, 0} if key.up?
+      return {1, 0} if key.down?
+      return {0, -1} if key.left?
+      return {0, 1} if key.right?
+      ev.char.try { |c| CARET_LETTERS[c]? } unless ev.ctrl? || ev.alt?
+    end
+
+    private CARET_LETTERS = {'k' => {-1, 0}, 'j' => {1, 0}, 'h' => {0, -1}, 'l' => {0, 1}}
 
     # Home/End move the EDITOR's caret; the READ cursor follows, extending a ⇧ selection.
     private def line_edge(ev : Termisu::Event::Key) : Bool
@@ -274,7 +281,7 @@ module Gori::Tui
     private def dispatch_tab(id : String) : Bool
       case id
       when "notes.select-line"
-        @read.select_line(@area)
+        @read.select_line(@area, @keyset.vim?)
         @status = expand(@keyset.vim? ? "line selected · {editor.delete-line} deletes it · {editor.yank-line} copies it" : "line selected · {editor.delete} deletes it · {notes.copy} copies it")
       when "notes.clear-selection"
         @read.clear_selection

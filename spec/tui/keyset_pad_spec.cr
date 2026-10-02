@@ -76,6 +76,19 @@ describe Gori::Tui::KeysetPad do
       p.status.should contain("cancelled")
     end
 
+    it "grows a ⇧V selection a line per j, as V then j does, and deletes the lines" do
+      p = pad(Kind::Vim)
+      press(p, "Vjd")
+      p.text.should eq(LINES[2])
+    end
+
+    it "moves the caret with h and l" do
+      p = pad(Kind::Vim)
+      press(p, "llhaZ")
+      p.handle_key(esc)
+      p.text.should start_with("GEZT")
+    end
+
     it "undoes with u and selects the line with ⇧V, not x" do
       p = pad(Kind::Vim)
       press(p, "x")
@@ -85,6 +98,24 @@ describe Gori::Tui::KeysetPad do
       press(p, "u")
       p.text.should eq(Gori::Tui::KeysetPad::SAMPLE)
     end
+  end
+
+  it "deletes whole lines after growing a line selection upward, under both keysets" do
+    {Kind::Helix, Kind::Vim}.each do |kind|
+      Gori::Tui::Register.clear
+      p = pad(kind)
+      press(p, "jj")
+      press(p, kind.vim? ? "V" : "x")
+      p.handle_key(TuiContract.key(Termisu::Input::Key::Up, :shift))
+      press(p, "d")
+      p.text.should eq(LINES[0])
+    end
+  end
+
+  it "leaves helix-ish x then j a plain move: the selection collapses" do
+    p = pad
+    press(p, "xjd")
+    p.text.should eq(Gori::Tui::KeysetPad::SAMPLE)
   end
 
   it "types in INS and hands esc back only from a plain READ" do
