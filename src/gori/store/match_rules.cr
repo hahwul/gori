@@ -133,8 +133,25 @@ module Gori
     # DEFAULT is the operator's own global choice, not an escalation, and the alternative
     # (raising) would take down the Rewriter tab and the proxy's rule load with it.
     def rewriter_overrides : Hash(Int64, Bool)
+      global_overrides(REWRITER_OVERRIDES_KEY)
+    end
+
+    # Returns whether the write committed (false = store busy/locked/closing → the caller must
+    # not report the toggle as applied; the rule keeps rewriting whatever it was rewriting).
+    def set_rewriter_override(id : Int64, enabled : Bool) : Bool
+      set_global_override(REWRITER_OVERRIDES_KEY, id, enabled)
+    end
+
+    # Drop this project's disagreement, so the rule follows the global default again.
+    def clear_rewriter_override(id : Int64) : Bool
+      clear_global_override(REWRITER_OVERRIDES_KEY, id)
+    end
+
+    # The one implementation behind both override maps (this one and
+    # `COLORMARKER_OVERRIDES_KEY`), which differ only in the settings key they live under.
+    private def global_overrides(key : String) : Hash(Int64, Bool)
       map = {} of Int64 => Bool
-      raw = setting(REWRITER_OVERRIDES_KEY)
+      raw = setting(key)
       return map if raw.nil? || raw.strip.empty?
       JSON.parse(raw).as_h?.try &.each do |k, v|
         id = k.to_i64?
@@ -146,23 +163,22 @@ module Gori
       {} of Int64 => Bool
     end
 
-    # Returns whether the write committed (false = store busy/locked/closing → the caller must
-    # not report the toggle as applied; the rule keeps rewriting whatever it was rewriting).
-    def set_rewriter_override(id : Int64, enabled : Bool) : Bool
-      write_rewriter_overrides(rewriter_overrides.merge({id => enabled}))
+    private def set_global_override(key : String, id : Int64, enabled : Bool) : Bool
+      write_global_overrides(key, global_overrides(key).merge({id => enabled}))
     end
 
-    # Drop this project's disagreement, so the rule follows the global default again.
-    def clear_rewriter_override(id : Int64) : Bool
-      map = rewriter_overrides
+    private def clear_global_override(key : String, id : Int64) : Bool
+      map = global_overrides(key)
       return true unless map.has_key?(id)
       map.delete(id)
-      write_rewriter_overrides(map)
+      write_global_overrides(key, map)
     end
 
-    private def write_rewriter_overrides(map : Hash(Int64, Bool)) : Bool
-      return delete_setting(REWRITER_OVERRIDES_KEY) if map.empty?
-      set_setting(REWRITER_OVERRIDES_KEY, map.to_h { |id, on| {id.to_s, on} }.to_json)
+    # An EMPTY map deletes the key outright rather than storing "{}" — which is what makes
+    # "the override disappeared when the two agreed again" observable from outside.
+    private def write_global_overrides(key : String, map : Hash(Int64, Bool)) : Bool
+      return delete_setting(key) if map.empty?
+      set_setting(key, map.to_h { |id, on| {id.to_s, on} }.to_json)
     end
   end
 end
