@@ -47,8 +47,8 @@ module Gori
         # Named per side, because "which one was cut" is what decides whether the comparison is
         # salvageable by re-sending one of them.
         cut_sides = [] of String
-        cut_sides << "a" if body_cut?(detail_a, pane)
-        cut_sides << "b" if body_cut?(detail_b, pane)
+        cut_sides << "a" if detail_a.body_truncated?(pane)
+        cut_sides << "b" if detail_b.body_truncated?(pane)
         truncated = Repeater::Diff.truncated?(lines_a, lines_b) || !cut_sides.empty?
         raw_diff = Repeater::Diff.lines(lines_a, lines_b)
         change_count = Repeater::Diff.change_count(raw_diff)
@@ -175,12 +175,6 @@ module Gori
           kept << {dl.kind.to_s.downcase, text, 0}
         end
         {kept, trimmed}
-      end
-
-      # Whether the capture cap cut the side of this flow the diff is about. `compare_lines`
-      # builds head+body text from the stored blob and has no way to know the blob is a prefix.
-      private def body_cut?(detail : Store::FlowDetail, pane : Symbol) : Bool
-        pane == :request ? detail.request_body_truncated? : detail.response_body_truncated?
       end
 
       private def compare_lines(d : Store::FlowDetail, pane : Symbol, include_sensitive : Bool) : Array(String)
