@@ -95,3 +95,17 @@ describe Gori::MCP::Serialize do
     out.as_h.should be_empty
   end
 end
+
+# The one extract-rule object behind MCP `list_extract_rules` and `gori run rewriter extract
+# --format json` (#1463): the CLI's flag spellings, in one fixed order.
+describe "Gori::MCP::Serialize.extract_rule" do
+  it "names the fields after the flags, in a fixed order" do
+    rule = Gori::Store::ExtractRule.new(7_i64, true, "SESSION", "status:200", Gori::ExtractKind::Cookie,
+      "sid", 0, 0, "*.acme.test")
+    out = JSON.parse(JSON.build { |j| Gori::MCP::Serialize.extract_rule(j, rule) })
+    out.as_h.keys.should eq(%w[id enabled name when host kind selector pos_start pos_end])
+    out["when"].as_s.should eq("status:200")
+    out["kind"].as_s.should eq("cookie")
+    out["host"].as_s.should eq("*.acme.test")
+  end
+end

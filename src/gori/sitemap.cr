@@ -464,6 +464,14 @@ module Gori
       String.build { |io| segments.each { |seg| io << '/' << seg } }
     end
 
+    # The key a path tag is filed under: the exact node path the tree stamps (`node_path`,
+    # so trailing-slash removal, query retention and depth cuts all match), from a path an
+    # operator typed and may have padded. `gori run sitemap tag` and MCP `set_sitemap_tag`
+    # both write with it, and `Store#sitemap_node_exists?` reads with it.
+    def self.tag_path(target : String) : String
+      node_path(target.strip)
+    end
+
     # An absolute-form target ("https://host/p?q") → its path+query; an origin-form
     # target is returned unchanged. "/" for a bare root.
     def self.normalize_path(target : String) : String

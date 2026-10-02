@@ -89,6 +89,21 @@ module Gori
       false
     end
 
+    # Does the row a link would point at exist? Asked before a link is filed, so a pointer to
+    # nothing is refused rather than stored and later listed as stale. Each kind is checked
+    # against its own table: a flow id is not a repeater id.
+    #
+    # `flow_row` / `get_*_session` are the row-only reads; `get_flow` would materialize the
+    # request AND response BLOBs just to answer "does this exist?".
+    def link_ref_exists?(kind : LinkRefKind, id : Int64) : Bool
+      case kind
+      when .flow?     then !flow_row(id).nil?
+      when .repeater? then !get_repeater(id).nil?
+      when .fuzz?     then !get_fuzz_session(id).nil?
+      else                 !get_miner_session(id).nil?
+      end
+    end
+
     # `exec_task_ok`: the store answers whether the write COMMITTED, and dropping that made
     # every caller report the change for a rolled-back batch. Same conversion as `delete_flows`
     # (`reads.cr`), whose comment states the reasoning once.

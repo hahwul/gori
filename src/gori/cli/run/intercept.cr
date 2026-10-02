@@ -2,11 +2,11 @@
 # instance. Interceptor is TUI-only (a headless `gori run capture` never holds
 # requests), so this is a script's window into a HUMAN's paused queue: read what's
 # held, then forward/drop/edit it, or flip catch/filter/direction. Mirrors `gori
-# mcp`'s intercept_* tools (src/gori/mcp/tools/intercept.cr) byte-for-byte — same
-# bridge blob (Store#intercept_bridge, published by Runner#publish_intercept_bridge),
-# same command-queue round-trip (Store#enqueue_intercept_command +
-# Store#command_status), same liveness/ack-poll constants — so a script gets the
-# same outcome whether it drives gori through the CLI or MCP.
+# mcp`'s intercept_* tools (src/gori/mcp/tools/intercept.cr) byte-for-byte — both
+# drive the one bridge client in store/intercept_bridge.cr (the blob published by
+# Runner#publish_intercept_bridge, its liveness gate, and the command-queue round trip
+# Store#send_intercept_command) — so a script gets the same outcome whether it drives
+# gori through the CLI or MCP.
 module Gori
   module CLI
     module Run
@@ -79,19 +79,10 @@ module Gori
       end
 
       # --- bridge state (read side) -------------------------------------------
-
-      # Parse the bridge blob the capturing TUI publishes (nil when no capturing
-      # instance is live / has ever published). Mirrors MCP's intercept_bridge_state.
-      private def self.intercept_bridge_state(store : Store) : Hash(String, JSON::Any)?
-        raw = store.intercept_bridge
-        return nil unless raw
-        JSON.parse(raw).as_h?
-      rescue
-        nil
-      end
-
-      # A capturing instance is "live" only if its bridge says capturing AND the
-      # heartbeat is recent — otherwise a queued command would never be applied.
+      #
+      # The bridge itself — the parsed blob, liveness, the held-row lookup and the
+      # enqueue-then-poll round trip — is `Store`'s (store/intercept_bridge.cr); this file
+      # parses the command line and words the outcome.
       #
       # Every open below is `long_running: true`, and not because any one verb is slow: this
       # subcommand only has a job when a TUI is capturing into the same project, so that peer
@@ -99,15 +90,6 @@ module Gori
       # one-shot budget was measured against exactly that peer and refused; a refused `forward`
       # leaves the held request (and the client behind it) hanging, and `enqueue_intercept`
       # holds its handle across the acknowledgement poll besides.
-      INTERCEPT_LIVE_MS   = 10_000_i64
-      INTERCEPT_ACK_POLLS =         30
-      INTERCEPT_ACK_SLEEP = 100.milliseconds
-
-      private def self.intercept_live?(bridge : Hash(String, JSON::Any)) : Bool
-        return false unless bridge["capturing"]?.try(&.as_bool?)
-        hb = bridge["heartbeat_ms"]?.try(&.as_i64?) || 0_i64
-        hb > 0 && (Time.utc.to_unix_ms - hb) < INTERCEPT_LIVE_MS
-      end
 
       private def self.cmd_intercept_list(args : Array(String)) : Nil
         proj = ProjectFlags.new
@@ -129,7 +111,7 @@ module Gori
         project = resolve_read_project(proj.name, proj.db)
         store = open_store(project, long_running: true)
         begin
-          bridge = intercept_bridge_state(store)
+          bridge = store.intercept_bridge_state
           unless bridge
             unavailable = "no capturing gori instance is publishing intercept state (open the project's TUI to intercept)"
             if format == :json
@@ -140,24 +122,23 @@ module Gori
             return
           end
 
-          token = bridge["session_token"]?.try(&.as_s?) || ""
           now_ms = Time.utc.to_unix_ms
-          items = token.empty? ? [] of Store::HeldRow : store.intercept_held(token)
+          items = store.intercept_held_items(bridge)
           # Stamp viewed_ms so the capturing instance's auto-forward reaper sees this
           # script is watching (mirrors MCP intercept_list).
-          store.touch_intercept_held(token, items.map(&.item_id), now_ms) unless items.empty?
+          store.touch_intercept_held(bridge.token, items.map(&.item_id), now_ms) unless items.empty?
           emit_intercept_list(bridge, items, include_sensitive, now_ms, format)
         ensure
           store.close
         end
       end
 
-      private def self.emit_intercept_list(bridge : Hash(String, JSON::Any), items : Array(Store::HeldRow),
+      private def self.emit_intercept_list(bridge : Store::InterceptBridgeState, items : Array(Store::HeldRow),
                                            include_sensitive : Bool, now_ms : Int64, format : Symbol) : Nil
-        live = intercept_live?(bridge)
-        enabled = bridge["enabled"]?.try(&.as_bool?) || false
-        direction = bridge["direction"]?.try(&.as_s?) || "both"
-        filter = bridge["filter"]?.try(&.as_s?) || ""
+        live = bridge.live?
+        enabled = bridge.enabled?
+        direction = bridge.direction
+        filter = bridge.filter
         if format == :json
           puts(JSON.build do |j|
             j.object do
@@ -166,7 +147,7 @@ module Gori
               j.field "enabled", enabled
               j.field "direction", direction
               j.field "filter", filter
-              j.field "heartbeat_age_seconds", (bridge["heartbeat_ms"]?.try(&.as_i64?).try { |hb| hb > 0 ? (now_ms - hb) // 1000 : nil })
+              j.field "heartbeat_age_seconds", bridge.heartbeat_age_seconds(now_ms)
               j.field "pending_count", items.size
               j.field("items") { j.array { items.each { |r| MCP::Serialize.intercept_item_row(j, r, include_sensitive, now_ms) } } }
             end
@@ -301,13 +282,12 @@ module Gori
         project = resolve_read_project(proj.name, proj.db)
         store = open_store(project, long_running: true)
         begin
-          bridge = intercept_bridge_state(store)
+          bridge = store.intercept_bridge_state
           abort "gori run intercept get: no capturing gori instance is publishing intercept state" unless bridge
-          token = bridge["session_token"]?.try(&.as_s?) || ""
-          row = token.empty? ? nil : store.intercept_held(token).find { |r| r.item_id == item_id }
+          row = store.intercept_held_item(bridge, item_id)
           abort "gori run intercept get: held item #{item_id} is not currently held (already forwarded/dropped, or never held)" unless row
           now_ms = Time.utc.to_unix_ms
-          store.touch_intercept_held(token, [row.item_id], now_ms)
+          store.touch_intercept_held(bridge.token, [row.item_id], now_ms)
 
           if format == :json
             puts(JSON.build { |j| MCP::Serialize.intercept_item_detail(j, row, include_sensitive, now_ms) })
@@ -336,37 +316,34 @@ module Gori
         end
       end
 
-      # Enqueue one command against the project's live capturing instance, then
-      # bounded-poll its acknowledgement — mirrors MCP's enqueue_intercept/
-      # await_intercept_ack so a script gets a real outcome rather than assuming
-      # success on a write that may have been dropped or never drained.
+      # Send one command to the project's live capturing instance and wait for its
+      # acknowledgement (`Store#send_intercept_command`, the round trip MCP's intercept_* verbs
+      # make too), so a script gets a real outcome rather than assuming success on a write that
+      # may have been dropped or never drained.
       private def self.enqueue_intercept(project_name : String?, db_path : String?, verb : String, *,
                                          item_id : Int64? = nil, bytes : Bytes? = nil, arg : String? = nil) : {String, String?}
         project = resolve_read_project(project_name, db_path)
         store = open_store(project, long_running: true)
         begin
-          bridge = intercept_bridge_state(store)
-          unless bridge && intercept_live?(bridge)
-            abort "gori run intercept: no live capturing gori instance is draining intercept commands (open the project's TUI with intercept on)"
-          end
-          token = bridge["session_token"]?.try(&.as_s?)
-          id = store.enqueue_intercept_command(token, verb, item_id: item_id, bytes: bytes, arg: arg)
-          abort "gori run intercept: could not enqueue intercept command (store write dropped); retry" if id == 0
-          await_intercept_ack(store, id)
+          outcome = store.send_intercept_command(verb, item_id: item_id, bytes: bytes, arg: arg)
+          return {outcome.status, outcome.detail} if outcome.is_a?(Store::InterceptAck)
+          abort "gori run intercept: #{intercept_send_refusal(outcome)}"
         ensure
           store.close
         end
       end
 
-      private def self.await_intercept_ack(store : Store, id : Int64) : {String, String?}
-        INTERCEPT_ACK_POLLS.times do
-          if st = store.command_status(id)
-            return st unless st[0] == "pending"
-          end
-          sleep INTERCEPT_ACK_SLEEP
+      # This command's words for a command that got no ack. Public and pure so a spec can pin
+      # them without a live capturing instance.
+      def self.intercept_send_refusal(failure : Store::InterceptSendFailure) : String
+        case failure
+        in .not_live?
+          "no live capturing gori instance is draining intercept commands (open the project's TUI with intercept on)"
+        in .not_enqueued?
+          "could not enqueue intercept command (store write dropped); retry"
+        in .not_confirmed?
+          "command not confirmed within #{Store.intercept_ack_budget_ms}ms — the capturing instance may be busy; retry"
         end
-        ms = (INTERCEPT_ACK_POLLS * INTERCEPT_ACK_SLEEP.total_milliseconds).to_i
-        abort "gori run intercept: command not confirmed within #{ms}ms — the capturing instance may be busy; retry"
       end
 
       private def self.emit_intercept_ack(status : String, detail : String?, format : Symbol) : Nil
@@ -487,11 +464,7 @@ module Gori
         project = resolve_read_project(project_name, db_path)
         store = open_store(project, long_running: true)
         begin
-          bridge = intercept_bridge_state(store)
-          return nil unless bridge
-          token = bridge["session_token"]?.try(&.as_s?) || ""
-          return nil if token.empty?
-          store.intercept_held(token).find { |r| r.item_id == item_id }
+          store.intercept_bridge_state.try { |bridge| store.intercept_held_item(bridge, item_id) }
         ensure
           store.close
         end

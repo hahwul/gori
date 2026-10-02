@@ -784,46 +784,6 @@ describe "gori run repeater create — did the name/tags write commit? (#210)" d
   end
 end
 
-# `intercept_bridge_state` / `intercept_live?` are private CLI glue (mirror MCP's
-# identically-named helpers in src/gori/mcp/tools/intercept.cr) — reopen the module
-# for bare-call wrappers.
-module Gori::CLI::Run
-  def self.intercept_bridge_state_for_spec(store : Gori::Store) : Hash(String, JSON::Any)?
-    intercept_bridge_state(store)
-  end
-
-  def self.intercept_live_for_spec(bridge : Hash(String, JSON::Any)) : Bool
-    intercept_live?(bridge)
-  end
-end
-
-describe "gori run intercept (bridge state)" do
-  it "returns nil when no bridge has ever been published" do
-    with_store do |store|
-      Gori::CLI::Run.intercept_bridge_state_for_spec(store).should be_nil
-    end
-  end
-
-  it "parses a published bridge and reports live for a fresh heartbeat" do
-    with_store do |store|
-      now = Time.utc.to_unix_ms
-      store.set_intercept_bridge(%({"capturing":true,"enabled":true,"direction":"both","filter":"","session_token":"tok","heartbeat_ms":#{now}}))
-      bridge = Gori::CLI::Run.intercept_bridge_state_for_spec(store)
-      bridge.should_not be_nil
-      Gori::CLI::Run.intercept_live_for_spec(bridge.not_nil!).should be_true
-    end
-  end
-
-  it "treats a stale heartbeat as not live" do
-    with_store do |store|
-      stale = Time.utc.to_unix_ms - 60_000
-      store.set_intercept_bridge(%({"capturing":true,"session_token":"tok","heartbeat_ms":#{stale}}))
-      bridge = Gori::CLI::Run.intercept_bridge_state_for_spec(store).not_nil!
-      Gori::CLI::Run.intercept_live_for_spec(bridge).should be_false
-    end
-  end
-end
-
 # #538 — `CLI::Run.open_store` is the second caller of Settings.load_project_network. Every
 # `gori run` subcommand except `capture` reads its project through here, and none of them
 # LISTENS (capture opens its project through Session.open instead), so the loader is called

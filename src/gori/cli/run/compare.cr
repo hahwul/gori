@@ -62,8 +62,8 @@ module Gori
         # A body the capture cap already cut is a stored PREFIX, so matching prefixes are not
         # matching bodies — the same rule MCP `compare_flows` applies (`source_truncated`).
         cut_sides = [] of String
-        cut_sides << "a" if body_cut?(detail_a, pane)
-        cut_sides << "b" if body_cut?(detail_b, pane)
+        cut_sides << "a" if detail_a.body_truncated?(pane)
+        cut_sides << "b" if detail_b.body_truncated?(pane)
         line_capped = Repeater::Diff.truncated?(lines_a, lines_b)
         full_diff = Repeater::Diff.lines(lines_a, lines_b)
         change_count = Repeater::Diff.change_count(full_diff)
@@ -77,10 +77,6 @@ module Gori
 
         emit_compare_result(id_a, id_b, pane, folded, change_count, line_capped, cut_sides, format,
           Repeater::ExchangeMeta.of(detail_a.row), Repeater::ExchangeMeta.of(detail_b.row))
-      end
-
-      private def self.body_cut?(d : Store::FlowDetail, pane : Symbol) : Bool
-        pane == :request ? d.request_body_truncated? : d.response_body_truncated?
       end
 
       private def self.compare_lines(d : Store::FlowDetail, pane : Symbol) : Array(String)

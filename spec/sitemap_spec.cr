@@ -599,3 +599,34 @@ describe Gori::Sitemap do
     end
   end
 end
+
+# `gori run sitemap tag` and MCP `set_sitemap_tag` both file a tag under this key (#1463).
+describe "Gori::Sitemap.tag_path — the key a tag is filed under" do
+  # Every assertion here pins a LITERAL rather than re-deriving the expected value from
+  # Sitemap.normalize_path: comparing the function against itself would move both sides
+  # together, and a regression in normalize_path — the exact thing that would orphan every
+  # stored tag — would keep the spec green.
+
+  # The key KEEPS the query string, because "/login?a=1" is a distinct tree node from
+  # "/login". Stripping it would file the tag under a key no node ever has, and the tag
+  # would silently never appear in the tree.
+  it "keeps the query string, so a query-bearing endpoint keys on its own node" do
+    Gori::Sitemap.tag_path("/login?a=1").should eq("/login?a=1")
+    Gori::Sitemap.tag_path("/api/users").should eq("/api/users")
+    Gori::Sitemap.tag_path("/api/users/").should eq("/api/users")
+    Gori::Sitemap.tag_path("  /api/users  ").should eq("/api/users")
+  end
+
+  it "adds the leading slash a hand-typed path omits, and maps empty to /" do
+    Gori::Sitemap.tag_path("api/users").should eq("/api/users")
+    Gori::Sitemap.tag_path("").should eq("/")
+    Gori::Sitemap.tag_path("   ").should eq("/")
+  end
+
+  it "reduces an absolute-form target to its origin-form path" do
+    # A tag typed as a full URL still has to land on the node the tree built, and
+    # Sitemap.build normalizes before stamping — so the key is "/a", not the whole URL.
+    Gori::Sitemap.tag_path("http://h/a").should eq("/a")
+    Gori::Sitemap.tag_path("https://h/a?b=1").should eq("/a?b=1")
+  end
+end

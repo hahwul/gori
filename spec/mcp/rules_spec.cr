@@ -696,6 +696,30 @@ describe Gori::MCP::Server do
       end
     end
 
+    # The rule object `gori run rewriter extract --format json` prints too, key for key and in
+    # the same order — one listing, two surfaces.
+    it "lists an extract rule under the CLI's field names, in the CLI's order" do
+      with_store do |store|
+        id = store.insert_extract_rule("CSRF", "path:/login", Gori::ExtractKind::Position,
+          pos_start: 3, pos_end: 9, host: "acme.test", enabled: false)
+        r = tools_for(store).call("list_extract_rules", JSON.parse("{}"))
+        r.is_error.should be_false
+        payload = JSON.parse(r.text)
+        payload["count"].as_i.should eq(1)
+        rule = payload["rules"][0]
+        rule.as_h.keys.should eq(%w[id enabled name when host kind selector pos_start pos_end])
+        rule["id"].as_i64.should eq(id)
+        rule["enabled"].as_bool.should be_false
+        rule["name"].as_s.should eq("CSRF")
+        rule["when"].as_s.should eq("path:/login")
+        rule["host"].as_s.should eq("acme.test")
+        rule["kind"].as_s.should eq("position")
+        rule["selector"].as_s.should eq("")
+        rule["pos_start"].as_i.should eq(3)
+        rule["pos_end"].as_i.should eq(9)
+      end
+    end
+
     it "rejects an unrecognized match kind instead of silently coercing to literal" do
       with_store do |store|
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_rule","arguments":{"pattern":"x","match":"regex-ignorecase"}}})

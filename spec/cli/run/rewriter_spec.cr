@@ -45,7 +45,7 @@ module Gori::CLI::Run
   end
 
   def self.extract_rule_json_for_spec(r : Store::ExtractRule) : String
-    JSON.build { |j| extract_rule_json(j, r) }
+    JSON.build { |j| Gori::MCP::Serialize.extract_rule(j, r) }
   end
 
   def self.parse_extract_range_for_spec(raw : String) : {Int32, Int32}
@@ -366,6 +366,9 @@ describe "gori run rewriter extract" do
     j["selector"].as_s.should eq("")
     j["pos_start"].as_i.should eq(3)
     j["pos_end"].as_i.should eq(9)
+    # The ORDER too: a script diffing `--format json` output against MCP `list_extract_rules`
+    # sees the same object, field for field.
+    j.as_h.keys.should eq(%w[id enabled name when host kind selector pos_start pos_end])
   end
 end
 

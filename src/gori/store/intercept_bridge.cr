@@ -1,4 +1,5 @@
 require "db"
+require "json"
 
 module Gori
   class Store
@@ -168,6 +169,128 @@ module Gori
 
     def intercept_bridge : String?
       setting(INTERCEPT_BRIDGE_KEY)
+    end
+
+    # --- the bridge client (the processes that read the queue and send it commands) ----------
+    #
+    # A capturing instance is "live" only if its bridge says capturing AND the heartbeat is
+    # recent — otherwise a queued command would never be applied, leaving a hung hold, so a
+    # sender refuses up front instead of enqueuing into the void. A command that was queued is
+    # then bounded-polled for its ack: POLLS × SLEEP before it is reported unconfirmed.
+    INTERCEPT_LIVE_MS   = 10_000_i64
+    INTERCEPT_ACK_POLLS =         30
+    INTERCEPT_ACK_SLEEP = 100.milliseconds
+
+    # How long `send_intercept_command` waits for an ack, in the milliseconds a refusal names.
+    def self.intercept_ack_budget_ms : Int32
+      (INTERCEPT_ACK_POLLS * INTERCEPT_ACK_SLEEP.total_milliseconds).to_i
+    end
+
+    # The bridge blob, parsed. Every reader takes a field the same way: a missing or
+    # wrongly-typed value reads as its default, never as an error.
+    struct InterceptBridgeState
+      getter fields : Hash(String, JSON::Any)
+
+      def initialize(@fields : Hash(String, JSON::Any))
+      end
+
+      # The capturing session's token as published — nil when absent. A command is enqueued
+      # under exactly this value.
+      def session_token : String?
+        @fields["session_token"]?.try(&.as_s?)
+      end
+
+      # The token the held rows are keyed by; "" when none was published, which holds nothing.
+      def token : String
+        session_token || ""
+      end
+
+      def enabled? : Bool
+        @fields["enabled"]?.try(&.as_bool?) || false
+      end
+
+      def direction : String
+        @fields["direction"]?.try(&.as_s?) || "both"
+      end
+
+      def filter : String
+        @fields["filter"]?.try(&.as_s?) || ""
+      end
+
+      def heartbeat_ms : Int64
+        @fields["heartbeat_ms"]?.try(&.as_i64?) || 0_i64
+      end
+
+      # Whole seconds since the last heartbeat, or nil when none was ever published.
+      def heartbeat_age_seconds(now_ms : Int64) : Int64?
+        hb = heartbeat_ms
+        hb > 0 ? (now_ms - hb) // 1000 : nil
+      end
+
+      # Derived from LIVENESS, not the blob's static `capturing: true`: a crashed or closed
+      # instance leaves a stale blob behind (nothing writes capturing:false, and cleanup only
+      # runs at the NEXT session's startup), so the heartbeat is the authoritative signal.
+      def live?(now_ms : Int64 = Time.utc.to_unix_ms) : Bool
+        return false unless @fields["capturing"]?.try(&.as_bool?)
+        hb = heartbeat_ms
+        hb > 0 && (now_ms - hb) < INTERCEPT_LIVE_MS
+      end
+    end
+
+    # The bridge the capturing instance publishes, parsed; nil when no capturing instance has
+    # ever published one, or when what is there cannot be read as an object.
+    def intercept_bridge_state : InterceptBridgeState?
+      raw = intercept_bridge
+      return nil unless raw
+      JSON.parse(raw).as_h?.try { |h| InterceptBridgeState.new(h) }
+    rescue
+      nil
+    end
+
+    # Every item the bridge's session currently holds — none when it published no token.
+    def intercept_held_items(bridge : InterceptBridgeState) : Array(HeldRow)
+      token = bridge.token
+      token.empty? ? [] of HeldRow : intercept_held(token)
+    end
+
+    # One held item, or nil when the session published no token or no longer holds it
+    # (already forwarded or dropped elsewhere).
+    def intercept_held_item(bridge : InterceptBridgeState, item_id : Int64) : HeldRow?
+      token = bridge.token
+      return nil if token.empty?
+      intercept_held(token).find { |r| r.item_id == item_id }
+    end
+
+    # Why a command got no ack. Each sender words these itself.
+    enum InterceptSendFailure
+      NotLive      # no bridge, or its heartbeat is stale: nothing would drain the command
+      NotEnqueued  # the command write was dropped
+      NotConfirmed # queued, but no terminal ack within the poll budget
+    end
+
+    # The capturing instance's terminal answer to one command (forwarded, dropped, edited,
+    # toggled, filter_set, direction_set, no_such_item, stale, …) and its detail line.
+    record InterceptAck, status : String, detail : String?
+
+    # Enqueue one command for the live capturing instance, then bounded-poll its ack, so the
+    # sender gets a real outcome rather than assuming success on a write that may have been
+    # dropped or never drained. `polls` exists for specs; every sender takes the default.
+    # It sleeps on the caller's fiber for up to the whole budget, so only a sender process
+    # may call it: the capturing instance drains this queue and would wait on its own ack.
+    def send_intercept_command(verb : String, *, item_id : Int64? = nil, bytes : Bytes? = nil,
+                               arg : String? = nil,
+                               polls : Int32 = INTERCEPT_ACK_POLLS) : InterceptAck | InterceptSendFailure
+      bridge = intercept_bridge_state
+      return InterceptSendFailure::NotLive unless bridge && bridge.live?
+      id = enqueue_intercept_command(bridge.session_token, verb, item_id: item_id, bytes: bytes, arg: arg)
+      return InterceptSendFailure::NotEnqueued if id == 0
+      polls.times do
+        if st = command_status(id)
+          return InterceptAck.new(st[0], st[1]) unless st[0] == "pending"
+        end
+        sleep INTERCEPT_ACK_SLEEP
+      end
+      InterceptSendFailure::NotConfirmed
     end
   end
 end

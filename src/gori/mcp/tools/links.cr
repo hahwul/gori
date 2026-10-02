@@ -112,19 +112,8 @@ module Gori
         return err("invalid ref_kind '#{kind_s}' (flow|repeater|fuzz|miner)", "INVALID_ARGUMENT", field: "ref_kind") unless kind
         id = int(h, "ref_id")
         return Result.new(id_error(h, "ref_id"), is_error: true) unless id
-        return not_found("no #{kind.label} with id #{id}") if must_exist && !link_ref_exists?(kind, id)
+        return not_found("no #{kind.label} with id #{id}") if must_exist && !store.link_ref_exists?(kind, id)
         {kind, id}
-      end
-
-      private def link_ref_exists?(kind : Store::LinkRefKind, id : Int64) : Bool
-        case kind
-        # flow_row / get_*_session are the row-only reads; get_flow would materialize the
-        # request AND response BLOBs just to answer "does this exist?".
-        when .flow?     then !store.flow_row(id).nil?
-        when .repeater? then !store.get_repeater(id).nil?
-        when .fuzz?     then !store.get_fuzz_session(id).nil?
-        else                 !store.get_miner_session(id).nil?
-        end
       end
 
       # The tools/list schemas for the flow-link tools, kept beside the handlers that

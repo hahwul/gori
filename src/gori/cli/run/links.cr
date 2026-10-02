@@ -192,7 +192,7 @@ module Gori
           end
           # Only `add` needs a live target: retention leaves a pruned flow's link dangling on
           # purpose (listed as stale), and `rm` is how that link goes away.
-          if add && !link_ref_exists?(store, ref_kind, rid)
+          if add && !store.link_ref_exists?(ref_kind, rid)
             abort "gori run links #{verb}: no #{ref_kind.label} with id #{rid}"
           end
 
@@ -295,17 +295,6 @@ module Gori
 
       private def self.link_owner_exists?(store : Store, kind : Store::LinkOwnerKind, id : Int64) : Bool
         kind.issue? ? !store.get_issue(id).nil? : Notes.load(store).notes.any? { |n| n.id == id }
-      end
-
-      private def self.link_ref_exists?(store : Store, kind : Store::LinkRefKind, id : Int64) : Bool
-        case kind
-        # flow_row / get_*_session are the row-only reads; get_flow would materialize the
-        # request AND response BLOBs just to answer "does this exist?".
-        when .flow?     then !store.flow_row(id).nil?
-        when .repeater? then !store.get_repeater(id).nil?
-        when .fuzz?     then !store.get_fuzz_session(id).nil?
-        else                 !store.get_miner_session(id).nil?
-        end
       end
     end
   end

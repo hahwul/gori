@@ -1120,6 +1120,26 @@ module Gori
         end
       end
 
+      # --- extract rules (#501) ------------------------------------------------
+
+      # One extract rule, as MCP `list_extract_rules` and `gori run rewriter extract --format
+      # json` both print it. `when`, not `match_filter`: the field mirrors the CLI flag
+      # (`--when`) and the MCP argument of the same name, which is what a caller has in front
+      # of them.
+      def self.extract_rule(j : JSON::Builder, r : Store::ExtractRule) : Nil
+        j.object do
+          j.field "id", r.id
+          j.field "enabled", r.enabled?
+          j.field "name", r.name
+          j.field "when", r.match_filter
+          j.field "host", r.host
+          j.field "kind", r.kind.label
+          j.field "selector", r.selector
+          j.field "pos_start", r.pos_start
+          j.field "pos_end", r.pos_end
+        end
+      end
+
       # --- frozen evidence (#1038) --------------------------------------------
 
       # One frozen copy's provenance — `Issues::Export.evidence_fields`, the object every

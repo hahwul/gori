@@ -371,6 +371,14 @@ module Gori
                      @request_body_truncated = false, @response_body_truncated = false, @error = nil, @sni = nil)
       end
 
+      # Whether the capture cap cut the body on one side — `:request`, or anything else for
+      # the response — so the stored bytes are a PREFIX. A comparison over that side cannot
+      # call two matching prefixes matching bodies; `gori run compare` and MCP
+      # `compare_flows` both name such a side in `source_truncated`.
+      def body_truncated?(side : Symbol) : Bool
+        side == :request ? request_body_truncated? : response_body_truncated?
+      end
+
       # Did this flow OPEN a WebSocket? The one place that answers it, across both transports
       # gori captures a socket over (#742).
       #

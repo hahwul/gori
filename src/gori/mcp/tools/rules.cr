@@ -1,6 +1,7 @@
 require "json"
 require "../../store"
 require "../../rules"
+require "../serialize"
 
 module Gori
   module MCP
@@ -672,27 +673,13 @@ module Gori
       # `replacement: "$SESSION"`. Same CRUD shape as the rules above so an agent that learned
       # one has learned the other.
 
-      private def extract_rule_json(j : JSON::Builder, r : Store::ExtractRule) : Nil
-        j.object do
-          j.field "id", r.id
-          j.field "enabled", r.enabled?
-          j.field "name", r.name
-          j.field "when", r.match_filter
-          j.field "host", r.host
-          j.field "kind", r.kind.label
-          j.field "selector", r.selector
-          j.field "pos_start", r.pos_start
-          j.field "pos_end", r.pos_end
-        end
-      end
-
       @[Tool("list_extract_rules")]
       private def list_extract_rules : Result
         rules = store.extract_rules
         Result.new(JSON.build do |j|
           j.object do
             j.field "count", rules.size
-            j.field "rules" { j.array { rules.each { |r| extract_rule_json(j, r) } } }
+            j.field "rules" { j.array { rules.each { |r| Serialize.extract_rule(j, r) } } }
             # The whole point of the feature, stated where an agent reading this list will
             # see it — otherwise "no value field" reads as an omission rather than a design.
             # Spelled through `Env.spell`, not hardcoded: this note tells the caller what to
