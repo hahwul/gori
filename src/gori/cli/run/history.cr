@@ -324,20 +324,14 @@ module Gori
         db_path : String? = nil
         project_name : String? = nil
         yes = false
-        leftover = [] of String
 
-        parser = OptionParser.new do |p|
+        leftover = parse_args(args, "gori run history clear") do |p|
           p.banner = "Usage: gori run history clear --yes\n\n" \
                      "Delete ALL captured flows in the project. This can't be undone."
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("--yes", "Actually do it (required — there is no interactive prompt here)") { yes = true }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run history clear", f, p) }
-          p.missing_option { |f| abort "gori run history clear: missing value for #{f}" }
         end
-        parser.parse(args)
         unless leftover.empty?
           abort "gori run history clear: unexpected argument#{leftover.size == 1 ? "" : "s"} " \
                 "#{leftover.join(" ").inspect} — this deletes ALL flows, not those ids. " \
@@ -856,12 +850,11 @@ module Gori
         format = :text
         req_only = false
         resp_only = false
-        positional = [] of String
         redaction = RedactFlags.new
         headers_only = false
         max_body : Int32? = nil
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run show") do |p|
           p.banner = "Usage: gori run show <flow-id> [options]"
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
@@ -871,12 +864,7 @@ module Gori
           p.on("--headers-only", "text/json: print the request line/status line and headers only — each body is replaced by a line naming its size, and the sections derived from bodies (decoded views, gRPC messages, WebSocket frames, SSE events) are left out, named with their counts where they have one") { headers_only = true }
           p.on("--max-body=BYTES", "text/json: print at most BYTES of each decoded body, then a marker naming its full size; the sections derived from bodies are left out as with --headers-only") { |v| max_body = parse_count(v, "--max-body") }
           redact_options(p, redaction)
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run show", f, p) }
-          p.missing_option { |f| abort "gori run show: missing value for #{f}" }
         end
-        parser.parse(args)
         if err = show_side_error(format, req_only, resp_only)
           abort "gori run show: #{err}"
         end

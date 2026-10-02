@@ -141,8 +141,9 @@ describe Gori::CLI::Run do
     offenders = [] of String
     Dir.glob(File.join(dir, "**", "*.cr")).sort.each do |path|
       src = File.read(path)
-      src.scan(/unknown_args\s*(?:do|\{)\s*\|[^|]*\|\s*(\w+)\s*=\s*([^\n}]*)/) do |m|
-        sink, expr = m[1], m[2]
+      # A `parse_args` result is the same sink, assigned outside the block.
+      src.scan(/unknown_args\s*(?:do|\{)\s*\|[^|]*\|\s*(\w+)\s*=\s*([^\n}]*)|(\w+)\s*=\s*parse_args\(/) do |m|
+        sink, expr = (s = m[1]?) ? {s, m[2]} : {m[3], "parse_args("}
         next if expr.includes?("one_positional") # routed through the helper
         # Scoped to the enclosing method, not the whole file: `rewriter.cr` holds both a
         # `leftover` that `refuse_list_leftovers` guards and a different method's `leftover`

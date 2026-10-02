@@ -88,10 +88,9 @@ module Gori
         ws_idle_ms : Int64? = nil
         ws_keep_key = false
         ws_http_only = false
-        positional = [] of String
 
         command = save_results ? "gori run fuzz save" : "gori run fuzz"
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run fuzz") do |p|
           p.banner = "Usage: #{command} [<flow-id>] [options]   (mark positions with §…§)"
           p.on("--flow=ID", "Seed the template from a captured flow") { |v| flow_id = parse_flow_id(v, "gori run fuzz") }
           p.on("--repeater=ID", "Seed the template from a saved repeater session (ids from `gori run repeater list`). A WebSocket session seeds its handshake AND its outbound frames — mark positions in the frames and each variation runs one full RFC 6455 session") { |v| repeater_id = parse_flow_id(v, "gori run fuzz --repeater") }
@@ -229,12 +228,7 @@ module Gori
           p.on("--allow-unscoped", "Send even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
           p.on("--fail-if-no-matches", "Exit 3 when no result matched") { fail_if_no_matches = true }
           p.on("--record-history=POLICY", "Also record sent request+response as History flows: none (default) | matched | all. Matched rows carry the flow_id; 'all' is capped at #{Fuzz::HistoryRecord::MAX} flows") { |v| record_policy = parse_record_history(v) }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run fuzz", f, p) }
-          p.missing_option { |f| abort "gori run fuzz: missing value for #{f}" }
         end
-        parser.parse(args)
         refresh_verify_upstream(!insecure)
 
         # The run-wide `--payload-from-*` knobs, applied to every source now that argv is known,

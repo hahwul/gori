@@ -36,9 +36,8 @@ module Gori
         project_name : String? = nil
         format = :text
         all = false
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run notes") do |p|
           p.banner = "Usage: gori run notes [<n>] [options]\n\n" \
                      "List the project's notes; with <n> (1-based) print that note in full, " \
                      "or --all to print them all.\n\n" \
@@ -49,12 +48,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--all", "Print every note in full instead of the one-line list") { all = true }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run notes", f, p) }
-          p.missing_option { |f| abort "gori run notes: missing value for #{f}" }
         end
-        parser.parse(args)
 
         abort "gori run notes: too many arguments (expected at most one note number)" if positional.size > 1
         index = parse_note_index(positional.first?)
@@ -139,9 +133,8 @@ module Gori
         project_name : String? = nil
         text : String? = nil
         format = :text
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run notes update") do |p|
           p.banner = "Usage: gori run notes update <n> [--append] [--text TEXT | TEXT… ] [options]\n" \
                      "       gori run notes append <n> [--text TEXT | TEXT…] [options]\n\n" \
                      "Replace the text of the note at 1-based list position <n>, or add to it with\n" \
@@ -151,12 +144,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("--text=TEXT", "The text (else the words after <n>, else STDIN)") { |v| text = v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run notes update", f, p) }
-          p.missing_option { |f| abort "gori run notes update: missing value for #{f}" }
         end
-        parser.parse(args)
 
         n = parse_note_index(positional.first?) || abort "gori run notes update: missing <n>"
         body = note_update_text(text, positional[1..])
@@ -240,20 +228,14 @@ module Gori
         db_path : String? = nil
         project_name : String? = nil
         yes = false
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run notes delete") do |p|
           p.banner = "Usage: gori run notes delete <n> --yes [options]\n\n" \
                      "Delete the note at 1-based list position <n> (as shown by `notes`)."
           p.on("-y", "--yes", "Confirm the deletion (required — there is no interactive prompt here)") { yes = true }
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run notes delete", f, p) }
-          p.missing_option { |f| abort "gori run notes delete: missing value for #{f}" }
         end
-        parser.parse(args)
 
         abort "gori run notes delete: missing <n>" if positional.empty?
         abort "gori run notes delete: too many arguments (expected one note number)" if positional.size > 1

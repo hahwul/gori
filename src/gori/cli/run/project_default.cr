@@ -87,8 +87,7 @@ module Gori
       private def self.cmd_project_switch(args : Array(String)) : Nil
         clear = false
         format = :text
-        positional = [] of String
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run project switch") do |p|
           p.banner = "Usage: gori run project switch NAME\n" \
                      "       gori run project switch --clear\n" \
                      "       gori run project switch\n\n" \
@@ -99,12 +98,7 @@ module Gori
                      "--db win over both."
           p.on("--clear", "Remove the pin — the default goes back to the most recently active project") { clear = true }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project switch", f, p) }
-          p.missing_option { |f| abort "gori run project switch: missing value for #{f}" }
         end
-        parser.parse(args)
         abort "gori run project switch: too many arguments (expected one NAME)" if positional.size > 1
         abort "gori run project switch: pass NAME or --clear, not both" if clear && !positional.empty?
         registry = ProjectRegistry.new(Paths.projects_dir)

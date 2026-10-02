@@ -294,9 +294,8 @@ module Gori
         host : String? = nil
         include_closed = false
         format = :text
-        leftover = [] of String
 
-        parser = OptionParser.new do |p|
+        leftover = parse_args(args, "gori run probe issues") do |p|
           p.banner = "Usage: gori run probe issues [options]\n\n" \
                      "List the findings the scanner already persisted — the same rows the TUI Probe\n" \
                      "tab shows, each with the id the dismiss/promote/delete subcommands take.\n" \
@@ -308,12 +307,7 @@ module Gori
           p.on("--category=CAT", "Only show findings in CAT (#{PROBE_CATEGORIES.join("|")})") { |v| category = parse_probe_category(v) }
           p.on("--host=HOST", "Only show findings for this exact host") { |v| host = v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run probe issues", f, p) }
-          p.missing_option { |f| abort "gori run probe issues: missing value for #{f}" }
         end
-        parser.parse(args)
         refuse_list_leftovers(leftover, "probe issues", "dismiss, promote, delete/rm, list")
 
         store = open_store(resolve_read_project(project_name, db_path), read_only: true)
@@ -339,9 +333,8 @@ module Gori
         project_name : String? = nil
         code : String? = nil
         host : String? = nil
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run probe dismiss") do |p|
           p.banner = "Usage: gori run probe dismiss <id> | --code=CODE | --host=HOST\n\n" \
                      "Mute findings. With <id>, TOGGLES that one finding dismissed ⇄ open; with\n" \
                      "--code/--host, bulk-mutes every OPEN finding sharing it. Reversible —\n" \
@@ -350,12 +343,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to write") { |v| db_path = v }
           p.on("--code=CODE", "Bulk-dismiss every open finding with this check code") { |v| code = v }
           p.on("--host=HOST", "Bulk-dismiss every open finding on this host") { |v| host = v }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run probe dismiss", f, p) }
-          p.missing_option { |f| abort "gori run probe dismiss: missing value for #{f}" }
         end
-        parser.parse(args)
 
         abort "gori run probe dismiss: too many arguments (expected one <id>, got: #{positional.join(" ")})" if positional.size > 1
         id = parse_probe_issue_id(positional.first?, "gori run probe dismiss")
@@ -388,21 +376,15 @@ module Gori
       private def self.cmd_probe_promote(args : Array(String)) : Nil
         db_path : String? = nil
         project_name : String? = nil
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run probe promote") do |p|
           p.banner = "Usage: gori run probe promote <id>\n\n" \
                      "Promote a machine finding to a human-confirmed Issue (see `gori run issues`),\n" \
                      "carrying its severity/host/sample evidence over. Marks the source finding\n" \
                      "Confirmed so a repeat call cannot mint a duplicate."
           p.on("--project=NAME", "Project to write (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to write") { |v| db_path = v }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run probe promote", f, p) }
-          p.missing_option { |f| abort "gori run probe promote: missing value for #{f}" }
         end
-        parser.parse(args)
 
         abort "gori run probe promote: too many arguments (expected one <id>, got: #{positional.join(" ")})" if positional.size > 1
         id = parse_probe_issue_id(positional.first?, "gori run probe promote")
@@ -431,9 +413,8 @@ module Gori
         project_name : String? = nil
         all = false
         yes = false
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run probe delete") do |p|
           p.banner = "Usage: gori run probe delete <id> | --all --yes\n\n" \
                      "Delete <id>: also SUPPRESSES that (code, host) pair so the next scan does not\n" \
                      "immediately re-add it — prefer `probe dismiss` when you only want it out of\n" \
@@ -444,12 +425,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to write") { |v| db_path = v }
           p.on("--all", "Delete EVERY probe finding AND every suppression in the project") { all = true }
           p.on("--yes", "Required with --all (there is no interactive prompt here)") { yes = true }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run probe delete", f, p) }
-          p.missing_option { |f| abort "gori run probe delete: missing value for #{f}" }
         end
-        parser.parse(args)
 
         abort "gori run probe delete: too many arguments (expected one <id>, got: #{positional.join(" ")})" if positional.size > 1
         id = parse_probe_issue_id(positional.first?, "gori run probe delete")
@@ -500,9 +476,8 @@ module Gori
         project_name : String? = nil
         kind : String? = nil
         format = :text
-        leftover = [] of String
 
-        parser = OptionParser.new do |p|
+        leftover = parse_args(args, "gori run probe rules") do |p|
           p.banner = "Usage: gori run probe rules [list] [options]\n\n" \
                      "List every scan rule — built-in passive, built-in active, and custom match\n" \
                      "rules — with whether it is enabled. A scan on ANY surface (here, the TUI, or\n" \
@@ -511,12 +486,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--kind=KIND", "Only list rules of this kind (passive|active|custom)") { |v| kind = parse_rule_kind(v) }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run probe rules", f, p) }
-          p.missing_option { |f| abort "gori run probe rules: missing value for #{f}" }
         end
-        parser.parse(args)
         refuse_list_leftovers(leftover, "probe rules", "add, enable, disable, delete/rm")
 
         store = open_store(resolve_read_project(project_name, db_path), read_only: true)

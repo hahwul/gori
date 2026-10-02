@@ -155,9 +155,8 @@ module Gori
         db_path : String? = nil
         project_name : String? = nil
         format = :text
-        leftover = [] of String
 
-        parser = OptionParser.new do |p|
+        leftover = parse_args(args, "gori run grpc schema") do |p|
           p.banner = "Usage: gori run grpc [schema]\n\n" \
                      "What .proto schema this project has loaded, and where each piece came from —\n" \
                      "a descriptor-set file, or a reflection fetch against a target.\n\n" \
@@ -167,12 +166,7 @@ module Gori
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run grpc schema", f, p) }
-          p.missing_option { |f| abort "gori run grpc schema: missing value for #{f}" }
         end
-        parser.parse(args)
         # The flag-first route (`gori run grpc --project=X reflect …`) hands the READ command
         # the verb it discarded. Refusing it is what keeps a mutation from no-op'ing with a
         # success status — the twelfth-plus caller of the seam that exists for exactly that.

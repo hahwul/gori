@@ -169,19 +169,13 @@ module Gori
         format = :text
         all = false
         query = nil.as(String?)
-        leftover = [] of String
-        parser = OptionParser.new do |p|
+        leftover = parse_args(args, "gori run project") do |p|
           p.banner = "Usage: gori run project [list] [options]"
           p.on("--all", "Include projects with nothing captured in them (hidden by default)") { all = true }
           p.on("--query=TEXT", "Keep only projects whose name, dir slug, short id or bound " \
                                "workspace path contains TEXT (case-insensitive)") { |v| query = v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project", f, p) }
-          p.missing_option { |f| abort "gori run project: missing value for #{f}" }
         end
-        parser.parse(args)
         refuse_list_leftovers(leftover, "project",
           "list, create, switch, export, import, delete/rm, scope, sandbox, env, network, host-override")
 
@@ -316,19 +310,13 @@ module Gori
       private def self.cmd_project_create(args : Array(String)) : Nil
         description = ""
         format = :text
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run project create") do |p|
           p.banner = "Usage: gori run project create <name> [options]\n\n" \
                      "Create a project, or reopen the existing one with that name."
           p.on("--description=TEXT", "Description stored in the project's settings") { |v| description = v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project create", f, p) }
-          p.missing_option { |f| abort "gori run project create: missing value for #{f}" }
         end
-        parser.parse(args)
 
         abort "gori run project create: missing <name>" if positional.empty?
         abort "gori run project create: too many arguments (quote a name that contains spaces)" if positional.size > 1
@@ -375,18 +363,12 @@ module Gori
       private def self.cmd_project_export(args : Array(String)) : Nil
         output = nil.as(String?)
         force = false
-        positional = [] of String
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run project export") do |p|
           p.banner = "Usage: gori run project export <name> -o PATH [--force]\n\n" \
                      "Snapshot a project database into one portable .gori archive."
           p.on("-o PATH", "--output=PATH", "Write the archive to PATH") { |v| output = v }
           p.on("--force", "Replace an existing destination file") { force = true }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project export", f, p) }
-          p.missing_option { |f| abort "gori run project export: missing value for #{f}" }
         end
-        parser.parse(args)
         abort "gori run project export: missing <name>" if positional.empty?
         abort "gori run project export: too many arguments (expected one <name>)" if positional.size > 1
         output_path = output.try(&.strip.presence) || abort "gori run project export: missing -o PATH"
@@ -431,17 +413,11 @@ module Gori
       # copy a different display name when the archive came from this same registry.
       private def self.cmd_project_import(args : Array(String)) : Nil
         name = nil.as(String?)
-        positional = [] of String
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run project import") do |p|
           p.banner = "Usage: gori run project import <archive.gori> [--name NEW]\n\n" \
                      "Validate and register a portable project archive."
           p.on("--name=NAME", "Display name for the imported project (default: archive name)") { |v| name = v }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project import", f, p) }
-          p.missing_option { |f| abort "gori run project import: missing value for #{f}" }
         end
-        parser.parse(args)
         abort "gori run project import: missing <archive>" if positional.empty?
         abort "gori run project import: too many arguments (expected one <archive>)" if positional.size > 1
 
@@ -486,21 +462,15 @@ module Gori
       private def self.cmd_project_delete(args : Array(String)) : Nil
         yes = false
         format = :text
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run project delete") do |p|
           p.banner = "Usage: gori run project delete|rm <name> [options]\n\n" \
                      "Permanently removes the project directory: captured flows, issues,\n" \
                      "notes, scope, everything. Without --yes it only previews the target.\n" \
                      "<name> matches a short id, id prefix, directory slug, or display name."
           p.on("--yes", "Actually delete (without it, nothing is removed)") { yes = true }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project delete", f, p) }
-          p.missing_option { |f| abort "gori run project delete: missing value for #{f}" }
         end
-        parser.parse(args)
 
         abort "gori run project delete: missing <name>" if positional.empty?
         abort "gori run project delete: too many arguments (expected one <name>)" if positional.size > 1
@@ -711,9 +681,8 @@ module Gori
         db_path : String? = nil
         project_name : String? = nil
         format = :text
-        leftover = [] of String
 
-        parser = OptionParser.new do |p|
+        leftover = parse_args(args, "gori run project scope") do |p|
           p.banner = "Usage: gori run project scope [options]\n\n" \
                      "Or run with a subcommand:\n" \
                      "  gori run project scope add --kind=include/exclude --type=host/string/regex --pattern=...\n" \
@@ -724,12 +693,7 @@ module Gori
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project scope", f, p) }
-          p.missing_option { |f| abort "gori run project scope: missing value for #{f}" }
         end
-        parser.parse(args)
         refuse_list_leftovers(leftover, "project scope",
           "add, update/edit, delete/rm, enable, disable, list")
 
@@ -985,18 +949,12 @@ module Gori
         db_path : String? = nil
         project_name : String? = nil
         action = enable ? "enable" : "disable"
-        leftover = [] of String
 
-        parser = OptionParser.new do |p|
+        leftover = parse_args(args, "gori run project scope #{action}") do |p|
           p.banner = "Usage: gori run project scope #{action} [options]"
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project scope #{action}", f, p) }
-          p.missing_option { |f| abort "gori run project scope #{action}: missing value for #{f}" }
         end
-        parser.parse(args)
         unless leftover.empty?
           abort "gori run project scope #{action}: unexpected argument#{leftover.size == 1 ? "" : "s"} " \
                 "#{leftover.join(" ").inspect} — this #{action}s the whole filter, not a rule id. " \
@@ -1050,9 +1008,8 @@ module Gori
         db_path : String? = nil
         project_name : String? = nil
         format = :text
-        leftover = [] of String
 
-        parser = OptionParser.new do |p|
+        leftover = parse_args(args, "gori run project sandbox") do |p|
           p.banner = "Usage: gori run project sandbox [options]\n\n" \
                      "Show the hard-containment sandbox gate: when ON, the capture proxy forwards\n" \
                      "ONLY requests the scope allows and BLOCKS everything else (see\n" \
@@ -1062,12 +1019,7 @@ module Gori
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project sandbox", f, p) }
-          p.missing_option { |f| abort "gori run project sandbox: missing value for #{f}" }
         end
-        parser.parse(args)
         # The one in this family where the silent no-op is a CONTAINMENT failure: `project
         # sandbox --project=X on` printed the status, left the gate OFF and exited 0, so a CI
         # bootstrap believed its traffic was contained when it was not.
@@ -1159,9 +1111,8 @@ module Gori
         db_path : String? = nil
         project_name : String? = nil
         format = :text
-        leftover = [] of String
 
-        parser = OptionParser.new do |p|
+        leftover = parse_args(args, "gori run project env") do |p|
           p.banner = "Usage: gori run project env [options]\n\n" \
                      "List project env vars used for $ENV.KEY substitution in outbound requests\n" \
                      "($KEY under the legacy bare syntax — see `gori settings env-syntax`).\n" \
@@ -1172,12 +1123,7 @@ module Gori
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project env", f, p) }
-          p.missing_option { |f| abort "gori run project env: missing value for #{f}" }
         end
-        parser.parse(args)
         refuse_list_leftovers(leftover, "project env", "set, delete/rm, list")
 
         project = resolve_read_project(project_name, db_path)
@@ -1208,19 +1154,13 @@ module Gori
       private def self.cmd_env_set(args : Array(String)) : Nil
         db_path : String? = nil
         project_name : String? = nil
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run project env set") do |p|
           p.banner = "Usage: gori run project env set KEY=value [options]\n" \
                      "       gori run project env set KEY value [options]"
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project env set", f, p) }
-          p.missing_option { |f| abort "gori run project env set: missing value for #{f}" }
         end
-        parser.parse(args)
 
         abort "gori run project env set: missing KEY=value (or KEY value)" if positional.empty?
         parsed = env_set_pair(positional)
@@ -1277,18 +1217,12 @@ module Gori
       private def self.cmd_env_delete(args : Array(String)) : Nil
         db_path : String? = nil
         project_name : String? = nil
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run project env delete") do |p|
           p.banner = "Usage: gori run project env delete|rm KEY [options]"
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project env delete", f, p) }
-          p.missing_option { |f| abort "gori run project env delete: missing value for #{f}" }
         end
-        parser.parse(args)
 
         abort "gori run project env delete: missing KEY" if positional.empty?
         abort "gori run project env delete: too many arguments (expected one KEY)" if positional.size > 1
@@ -1344,9 +1278,8 @@ module Gori
         db_path : String? = nil
         project_name : String? = nil
         format = :text
-        leftover = [] of String
 
-        parser = OptionParser.new do |p|
+        leftover = parse_args(args, "gori run project host-override") do |p|
           p.banner = "Usage: gori run project host-override [options]\n\n" \
                      "List project host overrides (/etc/hosts-style: dial IP[:PORT] for hostname).\n" \
                      "Project overrides win over global Settings: Hostnames on collision.\n" \
@@ -1358,12 +1291,7 @@ module Gori
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project host-override", f, p) }
-          p.missing_option { |f| abort "gori run project host-override: missing value for #{f}" }
         end
-        parser.parse(args)
         refuse_list_leftovers(leftover, "project host-override", "add, update, delete/rm, list")
 
         project = resolve_read_project(project_name, db_path)
@@ -1400,9 +1328,8 @@ module Gori
         host : String? = nil
         ip : String? = nil
         format = :text
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run project host-override add") do |p|
           p.banner = "Usage: gori run project host-override add --host=HOST --ip=IP [options]\n" \
                      "       gori run project host-override add IP HOST [options]\n\n" \
                      "Add a project host override (dial IP — or IP:PORT — for HOST; SNI/Host header unchanged)."
@@ -1411,12 +1338,7 @@ module Gori
           p.on("--host=HOST", "Hostname to override (case-insensitive)") { |v| host = v }
           p.on("--ip=IP", "IPv4/IPv6 literal to dial, optionally IP:PORT") { |v| ip = v }
           format_flag(p, [:text, :json], "Output: text (default) | json — the new override, as `host-override --format json` lists it") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project host-override add", f, p) }
-          p.missing_option { |f| abort "gori run project host-override add: missing value for #{f}" }
         end
-        parser.parse(args)
 
         # Flags win when both are given; otherwise accept /etc/hosts-style "IP HOST".
         pair =
@@ -1471,20 +1393,14 @@ module Gori
         project_name : String? = nil
         host : String? = nil
         ip : String? = nil
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run project host-override update") do |p|
           p.banner = "Usage: gori run project host-override update <id> --host=HOST --ip=IP [options]"
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("--host=HOST", "New hostname (case-insensitive)") { |v| host = v }
           p.on("--ip=IP", "New IPv4/IPv6 literal to dial, optionally IP:PORT") { |v| ip = v }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project host-override update", f, p) }
-          p.missing_option { |f| abort "gori run project host-override update: missing value for #{f}" }
         end
-        parser.parse(args)
 
         abort "gori run project host-override update: missing <id>" if positional.empty?
         abort "gori run project host-override update: too many arguments (expected one <id>)" if positional.size > 1
@@ -1515,18 +1431,12 @@ module Gori
       private def self.cmd_host_override_delete(args : Array(String)) : Nil
         db_path : String? = nil
         project_name : String? = nil
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run project host-override delete") do |p|
           p.banner = "Usage: gori run project host-override delete|rm <id> [options]"
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project host-override delete", f, p) }
-          p.missing_option { |f| abort "gori run project host-override delete: missing value for #{f}" }
         end
-        parser.parse(args)
 
         abort "gori run project host-override delete: missing <id>" if positional.empty?
         abort "gori run project host-override delete: too many arguments (expected one <id>)" if positional.size > 1

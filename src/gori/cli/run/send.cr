@@ -39,9 +39,8 @@ module Gori
         headers_only = false
         max_body : Int32? = nil
         format = :text
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run send") do |p|
           p.banner = "Usage: gori run send --url URL [options]\n" \
                      "       gori run send URL [options]\n\n" \
                      "Send ONE request and print the response. The\n" \
@@ -78,12 +77,7 @@ module Gori
           p.on("--headers-only", HEADERS_ONLY_HELP) { headers_only = true }
           p.on("--max-body=BYTES", MAX_BODY_HELP) { |v| max_body = parse_count(v, "--max-body") }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run send", f, p) }
-          p.missing_option { |f| abort "gori run send: missing value for #{f}" }
         end
-        parser.parse(args)
         refresh_verify_upstream(!insecure)
 
         body = data.empty? ? nil : data.join('&')

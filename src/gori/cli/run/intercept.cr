@@ -114,20 +114,14 @@ module Gori
         project_name : String? = nil
         format = :text
         include_sensitive = false
-        leftover = [] of String
 
-        parser = OptionParser.new do |p|
+        leftover = parse_args(args, "gori run intercept") do |p|
           p.banner = "Usage: gori run intercept [list] [options]"
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--include-sensitive", "Show Authorization/Cookie/etc header values instead of [REDACTED]") { include_sensitive = true }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run intercept", f, p) }
-          p.missing_option { |f| abort "gori run intercept: missing value for #{f}" }
         end
-        parser.parse(args)
         # Both this and the mutating verbs report "no live capturing instance", so the swallowed
         # `intercept --project=X drop 3` was indistinguishable from a real drop that found no TUI
         # — the held request stayed held and the client stayed hung, under exit 0.
@@ -296,20 +290,14 @@ module Gori
         project_name : String? = nil
         format = :text
         include_sensitive = false
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run intercept get") do |p|
           p.banner = "Usage: gori run intercept get <item-id> [options]"
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--include-sensitive", "Also include the full raw message base64 (unredacted)") { include_sensitive = true }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run intercept get", f, p) }
-          p.missing_option { |f| abort "gori run intercept get: missing value for #{f}" }
         end
-        parser.parse(args)
         abort "gori run intercept get: missing <item-id>" if positional.empty?
         abort "gori run intercept get: too many arguments (expected one <item-id>)" if positional.size > 1
         item_id = positional[0].to_i64? || abort("gori run intercept get: invalid item id '#{positional[0]}'")
@@ -415,19 +403,13 @@ module Gori
         db_path : String? = nil
         project_name : String? = nil
         format = :text
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run intercept #{verb}") do |p|
           p.banner = "Usage: gori run intercept #{verb} <item-id> [options]"
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run intercept #{verb}", f, p) }
-          p.missing_option { |f| abort "gori run intercept #{verb}: missing value for #{f}" }
         end
-        parser.parse(args)
         abort "gori run intercept #{verb}: missing <item-id>" if positional.empty?
         abort "gori run intercept #{verb}: too many arguments (expected one <item-id>)" if positional.size > 1
         item_id = positional[0].to_i64? || abort("gori run intercept #{verb}: invalid item id '#{positional[0]}'")
@@ -441,9 +423,8 @@ module Gori
         raw : String? = nil
         raw_file : String? = nil
         update_cl = true
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run intercept edit") do |p|
           p.banner = "Usage: gori run intercept edit <item-id> (--raw=RAW | --raw-file=PATH) [options]\n\n" \
                      "Forward a held item with EDITED bytes: the full replacement wire message\n" \
                      "(whichever leg — request or response — is held). The BODY is forwarded\n" \
@@ -461,12 +442,7 @@ module Gori
           p.on("--raw-file=PATH", "Read the replacement wire message from FILE") { |v| raw_file = v }
           p.on("--no-update-content-length", "Forward the Content-Length you declared instead of resyncing it to the body (the CL-desync / CL+TE smuggling primitive; mirrors MCP intercept_forward_edit{update_content_length:false})") { update_cl = false }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run intercept edit", f, p) }
-          p.missing_option { |f| abort "gori run intercept edit: missing value for #{f}" }
         end
-        parser.parse(args)
         abort "gori run intercept edit: missing <item-id>" if positional.empty?
         abort "gori run intercept edit: too many arguments (expected one <item-id>)" if positional.size > 1
         item_id = positional[0].to_i64? || abort("gori run intercept edit: invalid item id '#{positional[0]}'")
@@ -612,21 +588,15 @@ module Gori
         db_path : String? = nil
         project_name : String? = nil
         format = :text
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run intercept filter") do |p|
           p.banner = "Usage: gori run intercept filter <query> [options]\n\n" \
                      "Set the conditional-intercept filter (a gori-QL-like query that narrows\n" \
                      "which requests/responses are held). Pass an empty string to clear it."
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run intercept filter", f, p) }
-          p.missing_option { |f| abort "gori run intercept filter: missing value for #{f}" }
         end
-        parser.parse(args)
         abort "gori run intercept filter: missing <query> (pass \"\" to clear)" if positional.empty?
         abort "gori run intercept filter: too many arguments (expected one <query>)" if positional.size > 1
         # Same refusal MCP's `intercept_set_filter` makes, in the same words: a field the gate
@@ -644,19 +614,13 @@ module Gori
         db_path : String? = nil
         project_name : String? = nil
         format = :text
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run intercept direction") do |p|
           p.banner = "Usage: gori run intercept direction <both|request|response> [options]"
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run intercept direction", f, p) }
-          p.missing_option { |f| abort "gori run intercept direction: missing value for #{f}" }
         end
-        parser.parse(args)
         abort "gori run intercept direction: missing <both|request|response>" if positional.empty?
         abort "gori run intercept direction: too many arguments (expected one)" if positional.size > 1
         dir = Interceptor::Direction.from_arg?(positional[0])

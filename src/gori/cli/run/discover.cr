@@ -35,9 +35,8 @@ module Gori
         no_store = false
         format = :text
         headers = [] of String
-        leftover = [] of String
 
-        parser = OptionParser.new do |p|
+        leftover = parse_args(args, "gori run discover") do |p|
           p.banner = "Usage: gori run discover --target URL [options]"
           p.on("--target=URL", "Seed origin or path subtree to explore (required)") { |v| target_override = v }
           p.on("--project=NAME", "Project for scope rules + storing findings") { |v| project_name = v }
@@ -66,12 +65,7 @@ module Gori
           p.on("--force", "Bypass the unbounded-run safety gate") { force = true }
           p.on("--no-store", "Do not write findings into the project (Sitemap)") { no_store = true }
           format_flag(p, [:text, :json, :jsonl], "Output: text (default) | json | jsonl") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run discover", f, p) }
-          p.missing_option { |f| abort "gori run discover: missing value for #{f}" }
         end
-        parser.parse(args)
         refresh_verify_upstream(!insecure)
         if leftover.size == 1 && target_override.nil?
           target_override = leftover[0]

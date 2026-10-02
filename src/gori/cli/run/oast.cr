@@ -186,9 +186,8 @@ module Gori
         project_name : String? = nil
         show_tokens = false
         format = :text
-        leftover = [] of String
 
-        parser = OptionParser.new do |p|
+        leftover = parse_args(args, "gori run oast providers") do |p|
           p.banner = "Usage: gori run oast providers [list] [options]\n\n" \
                      "List saved OAST providers. `id` is scope-qualified: p_<n> is this project's,\n" \
                      "g_<hex> is a global one from settings.json (read-only here)."
@@ -196,12 +195,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--show-tokens", "Print provider auth tokens instead of [REDACTED]") { show_tokens = true }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run oast providers", f, p) }
-          p.missing_option { |f| abort "gori run oast providers: missing value for #{f}" }
         end
-        parser.parse(args)
         refuse_list_leftovers(leftover, "oast providers",
           "add, update, enable, disable, delete/rm, list")
 
@@ -367,18 +361,12 @@ module Gori
         verb = enabled ? "enable" : "disable"
         db_path : String? = nil
         project_name : String? = nil
-        leftover = [] of String
 
-        parser = OptionParser.new do |p|
+        leftover = parse_args(args, "gori run oast providers #{verb}") do |p|
           p.banner = "Usage: gori run oast providers #{verb} <id>"
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run oast providers #{verb}", f, p) }
-          p.missing_option { |f| abort "gori run oast providers #{verb}: missing value for #{f}" }
         end
-        parser.parse(args)
         abort "gori run oast providers #{verb}: too many arguments (expected one <id>, got: #{leftover.join(" ")})" if leftover.size > 1
         id = leftover.first?
 
@@ -395,18 +383,12 @@ module Gori
       private def self.cmd_oast_provider_delete(args : Array(String)) : Nil
         db_path : String? = nil
         project_name : String? = nil
-        leftover = [] of String
 
-        parser = OptionParser.new do |p|
+        leftover = parse_args(args, "gori run oast providers delete") do |p|
           p.banner = "Usage: gori run oast providers delete <id>"
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run oast providers delete", f, p) }
-          p.missing_option { |f| abort "gori run oast providers delete: missing value for #{f}" }
         end
-        parser.parse(args)
         abort "gori run oast providers delete: too many arguments (expected one <id>, got: #{leftover.join(" ")})" if leftover.size > 1
         id = leftover.first?
 
@@ -454,21 +436,15 @@ module Gori
         db_path : String? = nil
         project_name : String? = nil
         format = :text
-        leftover = [] of String
 
-        parser = OptionParser.new do |p|
+        leftover = parse_args(args, "gori run oast list") do |p|
           p.banner = "Usage: gori run oast list [options]\n\n" \
                      "List this project's saved OAST sessions — the rows the TUI's RESUME\n" \
                      "LISTENER picker shows. Resume one with `gori run oast resume <id>`."
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run oast list", f, p) }
-          p.missing_option { |f| abort "gori run oast list: missing value for #{f}" }
         end
-        parser.parse(args)
         refuse_list_leftovers(leftover, "oast", "list, resume, release")
 
         store = open_store(resolve_read_project(project_name, db_path), read_only: true)
@@ -645,20 +621,14 @@ module Gori
       private def self.cmd_oast_session_release(args : Array(String)) : Nil
         db_path : String? = nil
         project_name : String? = nil
-        leftover = [] of String
 
-        parser = OptionParser.new do |p|
+        leftover = parse_args(args, "gori run oast release") do |p|
           p.banner = "Usage: gori run oast release <id>\n\n" \
                      "Deregister the session's server-side state. Its stored callbacks stay,\n" \
                      "but payloads minted from it stop resolving."
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run oast release", f, p) }
-          p.missing_option { |f| abort "gori run oast release: missing value for #{f}" }
         end
-        parser.parse(args)
         abort "gori run oast release: too many arguments (expected one <id>, got: #{leftover.join(" ")})" if leftover.size > 1
 
         id = oast_session_id(leftover.first?, "release")

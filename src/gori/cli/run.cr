@@ -1838,6 +1838,23 @@ module Gori
         p.on("--json", "Same as --format=json") { set.call(:json) } if allowed.includes?(:json)
       end
 
+      # Build a parser, let the command register its flags, then add the tail every command
+      # shares and parse `args`. Returns the positionals, BOTH halves of `unknown_args`: a word
+      # after `--` arrives in the second, and dropping it was a bug here once. `-h` is added
+      # after the command's own flags, so `--help` still lists it last.
+      private def self.parse_args(args : Array(String), prefix : String, & : OptionParser ->) : Array(String)
+        positional = [] of String
+        parser = OptionParser.new do |p|
+          yield p
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |before, after| positional = before + after }
+          p.invalid_option { |f| abort CLI.unknown_option_message(prefix, f, p) }
+          p.missing_option { |f| abort "#{prefix}: missing value for #{f}" }
+        end
+        parser.parse(args)
+        positional
+      end
+
       private def self.parse_format(v : String, allowed : Array(Symbol)) : Symbol
         sym = case v.downcase
               when "text"           then :text

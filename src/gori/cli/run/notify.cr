@@ -14,9 +14,8 @@ module Gori
         detail_file : String? = nil
         level = "info"
         format = :text
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run notify") do |p|
           p.banner = "Usage: gori run notify <summary> [options]\n\n" \
                      "Show the operator one line in the gori TUI open on the project: the\n" \
                      "notification ring and Miss Ring's bubble, with the detail behind ↵.\n" \
@@ -28,12 +27,7 @@ module Gori
           p.on("--project=NAME", "Project to notify (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to notify") { |v| db_path = v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run notify", f, p) }
-          p.missing_option { |f| abort "gori run notify: missing value for #{f}" }
         end
-        parser.parse(args)
 
         if msg = notify_args_error(positional, level, detail, detail_file)
           abort msg

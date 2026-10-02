@@ -36,9 +36,8 @@ module Gori
         allow_unscoped = false
         bind_from : Int64? = nil
         slot : String? = nil
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run mine") do |p|
           p.banner = "Usage: gori run mine [<flow-id>] [options]"
           p.on("--flow=ID", "Seed the request from a captured flow") { |v| flow_id = parse_flow_id(v, "gori run mine") }
           p.on("--request=FILE", "Read a raw HTTP request to mine") { |v| request_file = v }
@@ -77,12 +76,7 @@ module Gori
           p.on("--slot=NAME", "Send as this SESSION SLOT — its header overlay, and its binding table for $BIND.NAME tokens (bare syntax: $NAME)") { |v| slot = v.strip }
           p.on("--allow-unscoped", "Send even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
           format_flag(p, [:text, :json, :jsonl], "Output: text (default) | json | jsonl") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run mine", f, p) }
-          p.missing_option { |f| abort "gori run mine: missing value for #{f}" }
         end
-        parser.parse(args)
         refresh_verify_upstream(!insecure)
 
         refuse_orphan_payload_from_flags("gori run mine", payload_from, !name_specs.empty?)

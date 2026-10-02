@@ -188,8 +188,7 @@ module Gori
         project_name : String? = nil
         format = :text
         show_values = false
-        leftover = [] of String
-        parser = OptionParser.new do |p|
+        leftover = parse_args(args, "gori run session") do |p|
           p.banner = "Usage: gori run session [list] [options]\n\n" \
                      "The project's session slots: named identities, each a header overlay plus the\n" \
                      "extract rules whose bound values belong to it. The Authorize tab replays under\n" \
@@ -201,12 +200,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--show-values", "Print set-header values instead of [REDACTED]") { show_values = true }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run session", f, p) }
-          p.missing_option { |f| abort "gori run session: missing value for #{f}" }
         end
-        parser.parse(args)
         refuse_list_leftovers(leftover, "session", "add, from-flow, from-request, edit, rm/delete, baseline, show, list")
 
         store, slots = session_slots(project_name, db_path, read_only: true)
@@ -234,8 +228,7 @@ module Gori
         project_name : String? = nil
         format = :text
         show_values = false
-        positional = [] of String
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run session show") do |p|
           p.banner = "Usage: gori run session show <name> [options]\n\n" \
                      "One slot in full: the headers it upserts, the ones it strips, and the extract\n" \
                      "rules whose bound values land in its table instead of the global one."
@@ -243,12 +236,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--show-values", "Print set-header values instead of [REDACTED]") { show_values = true }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run session show", f, p) }
-          p.missing_option { |f| abort "gori run session show: missing value for #{f}" }
         end
-        parser.parse(args)
         abort "gori run session show: too many arguments (expected one name, got: #{positional.join(" ")})" if positional.size > 1
         name = positional.first?
         abort "gori run session show: name a slot (`gori run session list` shows them)" if name.nil?
@@ -438,8 +426,7 @@ module Gori
         baseline = false
         show_values = false
         copy_headers = [] of String
-        positional = [] of String
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run session from-request") do |p|
           p.banner = "Usage: gori run session from-request <flow-id> --name NAME " \
                      "--copy-header NAME [options]\n\n" \
                      "Build a session slot from selected headers on a captured REQUEST. Repeat " \
@@ -463,12 +450,7 @@ module Gori
           p.on("--show-values", "Print the captured header values instead of [REDACTED]") { show_values = true }
           p.on("--project=NAME", "Project to read and write (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read and write") { |v| db_path = v }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run session from-request", f, p) }
-          p.missing_option { |f| abort "gori run session from-request: missing value for #{f}" }
         end
-        parser.parse(args)
         abort "gori run session from-request: too many arguments (expected one flow id, got: " \
               "#{positional.join(" ")})" if positional.size > 1
         raw = positional.first?
@@ -574,19 +556,13 @@ module Gori
       private def self.cmd_session_rm(args : Array(String)) : Nil
         db_path : String? = nil
         project_name : String? = nil
-        positional = [] of String
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run session rm") do |p|
           p.banner = "Usage: gori run session rm <name> [options]\n\n" \
                      "Delete a session slot. Any extract rule it claimed goes back to writing the\n" \
                      "GLOBAL binding table, which is where an unclaimed rule has always written."
           p.on("--project=NAME", "Project to write (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to write") { |v| db_path = v }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run session rm", f, p) }
-          p.missing_option { |f| abort "gori run session rm: missing value for #{f}" }
         end
-        parser.parse(args)
         abort "gori run session rm: too many arguments (expected one name, got: #{positional.join(" ")})" if positional.size > 1
         name = positional.first?
         abort "gori run session rm: name the slot to delete (`gori run session list`)" if name.nil?
@@ -605,19 +581,13 @@ module Gori
       private def self.cmd_session_baseline(args : Array(String)) : Nil
         db_path : String? = nil
         project_name : String? = nil
-        positional = [] of String
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run session baseline") do |p|
           p.banner = "Usage: gori run session baseline <name> [options]\n\n" \
                      "Move the Authorize BASELINE — the one slot every other slot's response is\n" \
                      "judged against. Exactly one slot holds it."
           p.on("--project=NAME", "Project to write (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to write") { |v| db_path = v }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run session baseline", f, p) }
-          p.missing_option { |f| abort "gori run session baseline: missing value for #{f}" }
         end
-        parser.parse(args)
         abort "gori run session baseline: too many arguments (expected one name, got: #{positional.join(" ")})" if positional.size > 1
         name = positional.first?
         abort "gori run session baseline: name the slot (`gori run session list`)" if name.nil?
@@ -646,8 +616,7 @@ module Gori
         format = :text
         allow_unscoped = false
         insecure = false
-        positional = [] of String
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run session refresh") do |p|
           p.banner = "Usage: gori run session refresh <name> [options]\n\n" \
                      "Run a session slot's refresh steps — its Repeater sessions, in order — so the\n" \
                      "slot's extract rules rebind it. Each step is recorded in History (source\n" \
@@ -661,12 +630,7 @@ module Gori
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run session refresh", f, p) }
-          p.missing_option { |f| abort "gori run session refresh: missing value for #{f}" }
         end
-        parser.parse(args)
         refresh_verify_upstream(!insecure)
         abort "gori run session refresh: too many arguments (expected one name, got: #{positional.join(" ")})" if positional.size > 1
         name = positional.first?

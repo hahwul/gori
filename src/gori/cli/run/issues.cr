@@ -328,21 +328,15 @@ module Gori
         db_path : String? = nil
         project_name : String? = nil
         yes = false
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run issues delete") do |p|
           p.banner = "Usage: gori run issues delete <id> --yes\n\n" \
                      "Delete an issue and its links. To keep it in the report but mark it closed,\n" \
                      "use `gori run issues update <id> --status=resolved` instead."
           p.on("-y", "--yes", "Confirm deletion") { yes = true }
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run issues delete", f, p) }
-          p.missing_option { |f| abort "gori run issues delete: missing value for #{f}" }
         end
-        parser.parse(args)
 
         abort "gori run issues delete: too many arguments (expected one <id>, got: #{positional.join(" ")})" if positional.size > 1
         id_s = positional.first? || abort("gori run issues delete: <id> is required")

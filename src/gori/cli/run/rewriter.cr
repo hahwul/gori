@@ -179,18 +179,12 @@ module Gori
         db_path : String? = nil
         project_name : String? = nil
         format = :text
-        leftover = [] of String
-        parser = OptionParser.new do |p|
+        leftover = parse_args(args, "gori run rewriter extract") do |p|
           p.banner = "Usage: gori run rewriter extract [list] [options]"
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run rewriter extract", f, p) }
-          p.missing_option { |f| abort "gori run rewriter extract: missing value for #{f}" }
         end
-        parser.parse(args)
         refuse_list_leftovers(leftover, "rewriter extract", "add, rm/delete, enable, disable")
 
         store = open_store(resolve_read_project(project_name, db_path), read_only: true)
@@ -456,9 +450,8 @@ module Gori
         project_name : String? = nil
         format = :text
         scope : Store::RuleScope? = nil
-        leftover = [] of String
 
-        parser = OptionParser.new do |p|
+        leftover = parse_args(args, "gori run rewriter") do |p|
           p.banner = "Usage: gori run rewriter [options]\n\n" \
                      "Lists the rules that apply to this project: the global library first,\n" \
                      "then the project's own — the order the proxy applies them in.\n\n" \
@@ -470,12 +463,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--scope=SCOPE", "Show only project|global rules (default: both)") { |v| scope = parse_rule_scope(v) }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run rewriter", f, p) }
-          p.missing_option { |f| abort "gori run rewriter: missing value for #{f}" }
         end
-        parser.parse(args)
         refuse_list_leftovers(leftover, "rewriter", "add, rm/delete, enable, disable, preview, extract, bindings")
 
         project = resolve_read_project(project_name, db_path)

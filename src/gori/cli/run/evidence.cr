@@ -42,9 +42,8 @@ module Gori
         link = true
         allow_drift = false
         format = :text
-        leftover = [] of String
 
-        parser = OptionParser.new do |p|
+        leftover = parse_args(args, "gori run evidence freeze") do |p|
           p.banner = "Usage: gori run evidence freeze --issue=N --ref=flow|repeater --ref-id=M [--no-link]\n\n" \
                      "Copy a flow's or a Repeater tab's CURRENT exchange into immutable evidence on\n" \
                      "issue N: request, response, status, timing, protocol, error and truncation\n" \
@@ -61,12 +60,7 @@ module Gori
           p.on("--no-link", "Only copy — do not also file the live link `links add` would") { link = false }
           p.on("--allow-drift", "Freeze a Repeater tab whose request was edited after its stored response") { allow_drift = true }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run evidence freeze", f, p) }
-          p.missing_option { |f| abort "gori run evidence freeze: missing value for #{f}" }
         end
-        parser.parse(args)
         # Deferred past `parse` for the reason `cmd_links_mutate` gives: the unknown-args
         # callback runs before the flag sweep, so aborting inside it misdiagnoses a typo'd flag.
         unless leftover.empty?
@@ -121,9 +115,8 @@ module Gori
         project_name : String? = nil
         issue_id : Int64? = nil
         format = :text
-        leftover = [] of String
 
-        parser = OptionParser.new do |p|
+        leftover = parse_args(args, "gori run evidence") do |p|
           p.banner = "Usage: gori run evidence [list] [--issue=N]\n\n" \
                      "List frozen evidence: source, when the copy was taken, status, size, the\n" \
                      "Issues it is linked to and the SHA-256 of the stored request and response.\n" \
@@ -141,12 +134,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--issue=N", "Issue id (omit for the whole project archive)") { |v| issue_id = parse_evidence_id(v, "--issue") }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run evidence", f, p) }
-          p.missing_option { |f| abort "gori run evidence: missing value for #{f}" }
         end
-        parser.parse(args)
         refuse_list_leftovers(leftover, "evidence", "freeze, list, show, link, unlink, delete/rm")
         iid = issue_id
 
@@ -176,9 +164,8 @@ module Gori
         project_name : String? = nil
         format = :text
         include_sensitive = false
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run evidence show") do |p|
           p.banner = "Usage: gori run evidence show ID [--include-sensitive] [--format=text|json]\n\n" \
                      "Print one frozen copy: its provenance, then the request and the response as\n" \
                      "they were stored. Authorization / Cookie / Set-Cookie / API-key values read\n" \
@@ -189,12 +176,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--include-sensitive", "Emit credential header values verbatim instead of [REDACTED]") { include_sensitive = true }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run evidence show", f, p) }
-          p.missing_option { |f| abort "gori run evidence show: missing value for #{f}" }
         end
-        parser.parse(args)
         abort "gori run evidence show: too many arguments (expected one <id>, got: #{positional.join(" ")})" if positional.size > 1
         id_s = positional.first? || abort("gori run evidence show: <id> is required")
         id = parse_evidence_id(id_s, "<id>")
@@ -221,21 +203,15 @@ module Gori
         db_path : String? = nil
         project_name : String? = nil
         issue_id : Int64? = nil
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run evidence #{verb}") do |p|
           p.banner = "Usage: gori run evidence #{verb} ID --issue=N\n\n" \
                      "#{link ? "Attach" : "Detach"} an Issue without changing the frozen bytes, hashes, or provenance. " \
                      "Removing the last Issue leaves an orphan; it does not delete the snapshot."
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("--issue=N", "Issue id (required)") { |v| issue_id = parse_evidence_id(v, "--issue") }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run evidence #{verb}", f, p) }
-          p.missing_option { |f| abort "gori run evidence #{verb}: missing value for #{f}" }
         end
-        parser.parse(args)
         abort "gori run evidence #{verb}: too many arguments (expected one <id>, got: #{positional.join(" ")})" if positional.size > 1
         id_s = positional.first? || abort("gori run evidence #{verb}: <id> is required")
         id = parse_evidence_id(id_s, "<id>")
@@ -283,21 +259,15 @@ module Gori
         db_path : String? = nil
         project_name : String? = nil
         yes = false
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run evidence delete") do |p|
           p.banner = "Usage: gori run evidence delete ID --yes\n\n" \
                      "Delete one frozen copy. Its bytes cannot be recovered from the source — that is\n" \
                      "why they were frozen — so prefer freezing a newer copy beside it."
           p.on("-y", "--yes", "Confirm deletion") { yes = true }
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run evidence delete", f, p) }
-          p.missing_option { |f| abort "gori run evidence delete: missing value for #{f}" }
         end
-        parser.parse(args)
         abort "gori run evidence delete: too many arguments (expected one <id>, got: #{positional.join(" ")})" if positional.size > 1
         id_s = positional.first? || abort("gori run evidence delete: <id> is required")
         id = parse_evidence_id(id_s, "<id>")

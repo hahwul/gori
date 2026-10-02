@@ -43,20 +43,14 @@ module Gori
       # `list` prints the catalog's directory entries: stat metadata only, never a value.
       private def self.cmd_wordlist_list(args : Array(String)) : Nil
         format = :text
-        positional = [] of String
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run wordlist") do |p|
           p.banner = "Usage: gori run wordlist [list] [options]\n\n" \
                      "List the lists in #{Paths.wordlists_dir}. Each is a plain file: select one by\n" \
                      "name with `gori run fuzz -w NAME`, `gori run mine --wordlist NAME`, `gori run\n" \
                      "discover --wordlist NAME`. A bare name is looked up in the current directory\n" \
                      "first, then here; anything with a `/` is a path and is read as given."
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run wordlist", f, p) }
-          p.missing_option { |f| abort "gori run wordlist: missing value for #{f}" }
         end
-        parser.parse(args)
         if msg = no_positional_error(positional, "gori run wordlist", "to inspect one list, use `gori run wordlist show <name>`")
           abort msg
         end
@@ -105,8 +99,7 @@ module Gori
       private def self.cmd_wordlist_show(args : Array(String)) : Nil
         format = :text
         head = 0
-        positional = [] of String
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run wordlist show") do |p|
           p.banner = "Usage: gori run wordlist show <name> [--head N] [options]\n\n" \
                      "Print one list's path, size and line count (counted over at most " \
                      "#{WordlistCatalog::LINE_SCAN_MAX // (1024 * 1024)} MiB).\n" \
@@ -114,12 +107,7 @@ module Gori
                      "(at most #{WordlistCatalog::PREVIEW_LINES_MAX}) — a list can hold credentials."
           p.on("--head=N", "Also print the first N lines (values — may be sensitive)") { |v| head = parse_nonneg(v, "--head") }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run wordlist show", f, p) }
-          p.missing_option { |f| abort "gori run wordlist show: missing value for #{f}" }
         end
-        parser.parse(args)
         name = positional.first? || abort "gori run wordlist show: expected a wordlist name"
         if msg = extra_positional_error(positional, "gori run wordlist show", "wordlist name")
           abort msg
@@ -193,8 +181,7 @@ module Gori
         project_name : String? = nil
         payload_from = PayloadFromFlags.new
         pf_specs = [] of PayloadFrom::Spec
-        positional = [] of String
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run wordlist save") do |p|
           p.banner = "Usage: gori run wordlist save <name> [--from FILE|-] [--value V]... [options]\n\n" \
                      "Save a list under #{Paths.wordlists_dir}, atomically and owner-only. The bytes\n" \
                      "are kept exactly (a blank or `#` line stays a line), so a Fuzzer run sends what\n" \
@@ -210,12 +197,7 @@ module Gori
           p.on("--project=NAME", "Project --payload-from reads") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file --payload-from reads") { |v| db_path = v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run wordlist save", f, p) }
-          p.missing_option { |f| abort "gori run wordlist save: missing value for #{f}" }
         end
-        parser.parse(args)
         name = positional.first? || abort "gori run wordlist save: expected a wordlist name"
         if msg = extra_positional_error(positional, "gori run wordlist save", "wordlist name")
           abort msg
@@ -342,17 +324,11 @@ module Gori
       # command says what it would have removed and refuses (the `history clear` shape).
       private def self.cmd_wordlist_delete(args : Array(String)) : Nil
         yes = false
-        positional = [] of String
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run wordlist delete") do |p|
           p.banner = "Usage: gori run wordlist delete <name> --yes [options]\n\n" \
                      "Delete a list from the catalog. A symlink is removed, never the file it names."
           p.on("--yes", "Actually delete it (required — there is no interactive prompt here)") { yes = true }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run wordlist delete", f, p) }
-          p.missing_option { |f| abort "gori run wordlist delete: missing value for #{f}" }
         end
-        parser.parse(args)
         name = positional.first? || abort "gori run wordlist delete: expected a wordlist name"
         if msg = extra_positional_error(positional, "gori run wordlist delete", "wordlist name")
           abort msg

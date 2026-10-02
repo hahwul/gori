@@ -53,18 +53,12 @@ module Gori
 
       private def self.cmd_colormarker_color_list(args : Array(String)) : Nil
         format = :text
-        leftover = [] of String
-        parser = OptionParser.new do |p|
+        leftover = parse_args(args, "gori run colormarker color list") do |p|
           p.banner = "Usage: gori run colormarker color list [--format=text|json]\n\n" \
                      "The GLOBAL custom colours, offered in every project's picker alongside the\n" \
                      "six built-ins. A built-in tracks the active theme; a custom is an absolute hex."
           format_flag(p, [:text, :json], "text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run colormarker color list", f, p) }
-          p.missing_option { |f| abort "gori run colormarker color list: missing value for #{f}" }
         end
-        parser.parse(args)
         refuse_list_leftovers(leftover, "colormarker color", "add, update/edit, rm/delete, list")
         colors = Settings.colormarker_colors
         if format == :json

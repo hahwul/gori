@@ -14,9 +14,8 @@ module Gori
         format = :text
         allow_unscoped = false
         slot : String? = nil
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run repeater minimize") do |p|
           p.banner = "Usage: gori run repeater minimize <repeater-id> [options]\n\n" \
                      "Strip cosmetic headers, tracking-cookie crumbs, and unused query/body params\n" \
                      "from a saved repeater request, keeping the response within tolerance of a\n" \
@@ -34,12 +33,7 @@ module Gori
           p.on("--allow-unscoped", "Minimize even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
           p.on("--slot=NAME", "Send as this SESSION SLOT — its header overlay, and its binding table for $BIND.NAME tokens (bare syntax: $NAME)") { |v| slot = v.strip }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run repeater minimize", f, p) }
-          p.missing_option { |f| abort "gori run repeater minimize: missing value for #{f}" }
         end
-        parser.parse(args)
         refresh_verify_upstream(!insecure)
 
         abort "gori run repeater minimize: too many arguments (expected one <repeater-id>, got: #{positional.join(" ")})" if positional.size > 1

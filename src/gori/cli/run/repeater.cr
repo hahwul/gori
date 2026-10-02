@@ -2597,9 +2597,8 @@ module Gori
         path_override : String? = nil
         headers_only = false
         max_body : Int32? = nil
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run repeater") do |p|
           p.banner = "Usage: gori run repeater <flow-id> [options]\n\n" \
                      "Re-send a captured flow. Or manage repeater sessions:\n" \
                      "  gori run repeater list                List repeater sessions in the workbench\n" \
@@ -2636,12 +2635,7 @@ module Gori
           p.on("--headers-only", HEADERS_ONLY_HELP) { headers_only = true }
           p.on("--max-body=BYTES", MAX_BODY_HELP) { |v| max_body = parse_count(v, "--max-body") }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run repeater", f, p) }
-          p.missing_option { |f| abort "gori run repeater: missing value for #{f}" }
         end
-        parser.parse(args)
         refresh_verify_upstream(!insecure)
         id = take_flow_id(positional, "repeater")
         cap = body_cap(headers_only, max_body, "gori run repeater")
