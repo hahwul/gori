@@ -143,13 +143,6 @@ module Gori
           false
         end
 
-        private def decoded_body(head : Bytes?, body : Bytes?) : Bytes?
-          return nil if body.nil? || body.empty?
-          decoded, _ = Proxy::Codec::ContentDecode.decode(head, body, BODY_CAP)
-          b = decoded || body
-          b[0, {b.size, BODY_CAP}.min]
-        end
-
         private def path_only(origin_target : String) : String
           qi = origin_target.index('?')
           qi ? origin_target[0...qi] : origin_target

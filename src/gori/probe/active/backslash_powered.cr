@@ -180,16 +180,7 @@ module Gori
         # `with_size: false` substitutes a constant, so a jittery endpoint compares on the other two.
         private def attrs(result : Repeater::Result, with_size : Bool) : {Int32, String?, Int32}
           body = decoded_body(result)
-          {response_status(result), error_signature_of(body), with_size ? body.bytesize : -1}
-        end
-
-        private def response_status(result : Repeater::Result) : Int32
-          if r = result.response
-            return r.status
-          end
-          Proxy::Codec::Http1.parse_response_head(result.head).status
-        rescue
-          0
+          {probe_status(result), error_signature_of(body), with_size ? body.bytesize : -1}
         end
 
         # Known server-side interpreter/parser error fingerprints. Presence is a strong signal, but

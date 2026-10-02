@@ -198,22 +198,13 @@ module Gori
         # capped body; `Fingerprint.simhash` is byte-level and skips dynamic tokens, so no scrub is
         # needed and a jittering id/timestamp does not move it.
         private def fingerprint(result : Repeater::Result) : {Int32, UInt64}
-          {response_status(result), Discover::Fingerprint.simhash(decoded_body(result))}
+          {probe_status(result), Discover::Fingerprint.simhash(decoded_body(result))}
         end
 
         # Two responses are "the same page" iff their status matches and their SimHashes are within
         # SIMHASH_DISTANCE hamming.
         private def same?(a : {Int32, UInt64}, b : {Int32, UInt64}) : Bool
           a[0] == b[0] && Discover::Fingerprint.hamming(a[1], b[1]) <= SIMHASH_DISTANCE
-        end
-
-        private def response_status(result : Repeater::Result) : Int32
-          if r = result.response
-            return r.status
-          end
-          Proxy::Codec::Http1.parse_response_head(result.head).status
-        rescue
-          0
         end
 
         # Decode + cap the response body to the bytes the SimHash reads. Not scrubbed: SimHash is

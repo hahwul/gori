@@ -118,15 +118,6 @@ module Gori
         private def polyglot(canary : String, expr : String) : String
           canary + "{{" + expr + "}}" + "${" + expr + "}" + "\#{" + expr + "}" + "<%= " + expr + " %>" + canary
         end
-
-        private def decoded_text(result : Repeater::Result) : String
-          decoded, _ = Proxy::Codec::ContentDecode.decode(result.head, result.body, BODY_CAP)
-          bytes = decoded || result.body
-          return "" if bytes.nil? || bytes.empty?
-          String.new(bytes[0, {bytes.size, BODY_CAP}.min]).scrub
-        rescue
-          ""
-        end
       end
     end
   end

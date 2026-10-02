@@ -215,17 +215,6 @@ module Gori
           return nil if slots.empty?
           {s, slots}
         end
-
-        # Decode + scrub the response body to text, capped at BODY_CAP. Scrubbing makes the
-        # substring and PCRE scans byte-safe on an invalid-UTF-8 origin.
-        private def decoded_text(result : Repeater::Result) : String
-          decoded, _ = Proxy::Codec::ContentDecode.decode(result.head, result.body, BODY_CAP)
-          bytes = decoded || result.body
-          return "" if bytes.nil? || bytes.empty?
-          String.new(bytes[0, {bytes.size, BODY_CAP}.min]).scrub
-        rescue
-          ""
-        end
       end
     end
   end

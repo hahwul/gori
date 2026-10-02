@@ -100,15 +100,6 @@ module Gori
           qi ? t[0...qi] : t
         end
 
-        private def probe_status(result : Repeater::Result) : Int32
-          if r = result.response
-            return r.status
-          end
-          Proxy::Codec::Http1.parse_response_head(result.head).status
-        rescue
-          0
-        end
-
         # Drop any client-IP headers the browser sent, insert one authoritative copy of each (the
         # spoofed value), and normalize the request line to origin-form. `insert: false` builds the
         # CONTROL — the same rebuild without the forged values, so the two legs differ in exactly

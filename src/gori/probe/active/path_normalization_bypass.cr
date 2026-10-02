@@ -134,15 +134,6 @@ module Gori
           qi ? origin_target[0...qi] : origin_target
         end
 
-        private def probe_status(result : Repeater::Result) : Int32
-          if r = result.response
-            return r.status
-          end
-          Proxy::Codec::Http1.parse_response_head(result.head).status
-        rescue
-          0
-        end
-
         # Rebuild the request with a new request-line target; headers/body untouched (no CL change).
         private def rebuild_target(head : Bytes, body : Bytes?, new_target : String) : Bytes
           combined = if body && !body.empty?

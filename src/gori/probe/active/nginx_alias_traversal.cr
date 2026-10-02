@@ -207,25 +207,6 @@ module Gori
           qi ? origin_target[0...qi] : origin_target
         end
 
-        private def probe_status(result : Repeater::Result) : Int32
-          if r = result.response
-            return r.status
-          end
-          Proxy::Codec::Http1.parse_response_head(result.head).status
-        rescue
-          0
-        end
-
-        # Inflate (Content-Encoding) and cap at BODY_CAP for a byte-comparable buffer. Capping BOTH
-        # sides at the same bound sidesteps capture-truncation skew: only the first BODY_CAP bytes
-        # are ever compared. nil when there is no body.
-        private def decoded_body(head : Bytes?, body : Bytes?) : Bytes?
-          return nil if body.nil? || body.empty?
-          decoded, _ = Proxy::Codec::ContentDecode.decode(head, body, BODY_CAP)
-          b = decoded || body
-          b[0, {b.size, BODY_CAP}.min]
-        end
-
         # Rebuild the request with the traversal target in the request line; headers and body are
         # untouched (GET carries no Content-Length-affecting change), so no resync is needed. The
         # target is already origin-form (built from `Active.origin_form`), so a forward-proxy

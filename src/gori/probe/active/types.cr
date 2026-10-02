@@ -2,6 +2,8 @@ require "../issue"
 require "../out_of_band"
 require "../../store"
 require "../../repeater/engine"
+require "../../proxy/codec/http1"
+require "../../proxy/codec/content_decode"
 
 module Gori
   module Probe
@@ -193,6 +195,47 @@ module Gori
         protected def diff_method_allowed?(method_upcase : String, opts : Options) : Bool
           return false if method_upcase == "HEAD"
           opts.allow_unsafe || method_upcase == "GET"
+        end
+
+        # The probe response's status, 0 when its head does not parse.
+        protected def probe_status(result : Repeater::Result) : Int32
+          if r = result.response
+            return r.status
+          end
+          Proxy::Codec::Http1.parse_response_head(result.head).status
+        rescue
+          0
+        end
+
+        # The probe response's Content-Type, downcased; "" when absent or unparseable.
+        protected def response_content_type(result : Repeater::Result) : String
+          if r = result.response
+            return (r.headers.get?("Content-Type") || "").downcase
+          end
+          (Proxy::Codec::Http1.parse_response_head(result.head).headers.get?("Content-Type") || "").downcase
+        rescue
+          ""
+        end
+
+        # Inflate (Content-Encoding) and cap at BODY_CAP for a byte-comparable buffer. Capping BOTH
+        # sides at the same bound sidesteps capture-truncation skew: only the first BODY_CAP bytes
+        # are ever compared. nil when there is no body.
+        protected def decoded_body(head : Bytes?, body : Bytes?) : Bytes?
+          return nil if body.nil? || body.empty?
+          decoded, _ = Proxy::Codec::ContentDecode.decode(head, body, BODY_CAP)
+          b = decoded || body
+          b[0, {b.size, BODY_CAP}.min]
+        end
+
+        # Decode + scrub the response body to text, capped at BODY_CAP. Scrubbing makes the
+        # substring and PCRE scans byte-safe on an invalid-UTF-8 origin.
+        protected def decoded_text(result : Repeater::Result) : String
+          decoded, _ = Proxy::Codec::ContentDecode.decode(result.head, result.body, BODY_CAP)
+          bytes = decoded || result.body
+          return "" if bytes.nil? || bytes.empty?
+          String.new(bytes[0, {bytes.size, BODY_CAP}.min]).scrub
+        rescue
+          ""
         end
 
         # Interpret ALL of a plan's probe responses at once: the primary (`plan.request`) first,
