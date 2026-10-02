@@ -152,8 +152,7 @@ module Gori
       end
 
       private def self.cmd_grpc_schema(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         format = :text
 
         leftover = parse_args(args, "gori run grpc schema") do |p|
@@ -163,8 +162,7 @@ module Gori
                      "Or run with a subcommand:\n" \
                      "  gori run grpc reflect URL   fetch descriptors by server reflection (ACTIVE)\n" \
                      "  gori run grpc forget TARGET drop a cached reflection result (`rm` is accepted)"
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
         # The flag-first route (`gori run grpc --project=X reflect …`) hands the READ command
@@ -174,7 +172,7 @@ module Gori
 
         # `open_store` already published this project's schema (`Schemas.load_project`), so
         # what is printed here is exactly what every other surface renders through.
-        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
+        store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
         reflections = Gori::Protobuf::Schemas.reflections(store)
         store.close
 

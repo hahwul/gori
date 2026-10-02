@@ -188,16 +188,14 @@ module Gori
       end
 
       private def self.cmd_redact_profiles(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         format = :text
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run redact profiles [options]\n\n" \
                      "Lists every redaction profile available here — the project's own first,\n" \
                      "then settings.json's, then the built-ins — and says which one a safe\n" \
                      "export would use."
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort CLI.unknown_option_message("gori run redact profiles", f, p) }
@@ -206,7 +204,7 @@ module Gori
         parse_no_positionals(parser, args, "gori run redact profiles",
           "`profiles` takes no positional arguments; to pick one use `gori run redact use <name>`")
 
-        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
+        store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
         scope, profiles, choice = begin
           {Redact::Policy.project_scope(store), Redact::Policy.profiles(store),
            Redact::Policy.resolve(store, nil, true)}
@@ -281,8 +279,7 @@ module Gori
       end
 
       private def self.cmd_redact_use(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         global = false
         none = false
         positional = [] of String
@@ -290,8 +287,7 @@ module Gori
           p.banner = "Usage: gori run redact use <name> [options]\n\n" \
                      "Picks the profile a safe export uses. Writes the PROJECT by default, so\n" \
                      "the choice stays with this engagement; --global writes settings.json."
-          p.on("--project=NAME", "Project to write (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to write") { |v| db_path = v }
+          project_options(p, proj, "write")
           p.on("--global", "Write settings.json instead of this project") { global = true }
           p.on("--none", "Clear the choice at this scope (fall back to the wider one)") { none = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
@@ -307,7 +303,7 @@ module Gori
         if global
           redact_use_global(name, none)
         else
-          redact_use_project(project_name, db_path, name, none)
+          redact_use_project(proj.name, proj.db, name, none)
         end
       end
 
@@ -335,8 +331,7 @@ module Gori
       end
 
       private def self.cmd_redact_default(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         global = false
         clear = false
         positional = [] of String
@@ -345,8 +340,7 @@ module Gori
                      "Whether shareable output is sanitized WITHOUT --redact. Off at the factory;\n" \
                      "once on, --no-redact is the explicit path back to the captured bytes.\n" \
                      "Writes the PROJECT by default; --global writes settings.json."
-          p.on("--project=NAME", "Project to write (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to write") { |v| db_path = v }
+          project_options(p, proj, "write")
           p.on("--global", "Write settings.json instead of this project") { global = true }
           p.on("--none", "Clear this project's answer and inherit the global one") { clear = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
@@ -372,7 +366,7 @@ module Gori
           abort "gori run redact default: could not write #{Settings.path}" unless Settings.save
           puts "global: redaction #{value ? "applies by default" : "applies only with --redact"}"
         else
-          redact_default_project(project_name, db_path, value)
+          redact_default_project(proj.name, proj.db, value)
         end
       end
 
@@ -389,8 +383,7 @@ module Gori
       end
 
       private def self.cmd_redact_set(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         global = false
         description = ""
         fields = [] of String
@@ -403,8 +396,7 @@ module Gori
                      "Creates or REPLACES a profile. Every rule flag repeats. Writes the PROJECT\n" \
                      "by default (field names that describe one target belong to one engagement);\n" \
                      "--global writes settings.json."
-          p.on("--project=NAME", "Project to write (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to write") { |v| db_path = v }
+          project_options(p, proj, "write")
           p.on("--global", "Write settings.json instead of this project") { global = true }
           p.on("--description=TEXT", "What this profile is for") { |v| description = v }
           p.on("--json-field=NAME", "A JSON member name, matched at any depth (repeatable)") { |v| fields << v }
@@ -436,23 +428,21 @@ module Gori
           puts "global profile #{name.inspect}: #{redact_rule_counts(profile)}"
           return
         end
-        update_project_scope(project_name, db_path, "redact set") do |_, scope|
+        update_project_scope(proj.name, proj.db, "redact set") do |_, scope|
           scope.copy_with(profiles: scope.profiles.reject(&.name.==(name)) << profile)
         end
         puts "project profile #{name.inspect}: #{redact_rule_counts(profile)}"
       end
 
       private def self.cmd_redact_rm(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         global = false
         positional = [] of String
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run redact rm <name> [options]\n\n" \
                      "Deletes a profile from this project, or from settings.json with --global.\n" \
                      "A built-in profile cannot be deleted; define one of the same name to replace it."
-          p.on("--project=NAME", "Project to write (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to write") { |v| db_path = v }
+          project_options(p, proj, "write")
           p.on("--global", "Write settings.json instead of this project") { global = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = one_positional_list(before, after, "gori run redact rm", "profile name") }
@@ -471,7 +461,7 @@ module Gori
           puts "removed global profile #{name.inspect}"
           return
         end
-        update_project_scope(project_name, db_path, "redact rm") do |_, scope|
+        update_project_scope(proj.name, proj.db, "redact rm") do |_, scope|
           kept = scope.profiles.reject(&.name.==(name))
           if kept.size == scope.profiles.size
             "no profile named #{name.inspect} in this project"

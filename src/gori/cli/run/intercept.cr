@@ -110,15 +110,13 @@ module Gori
       end
 
       private def self.cmd_intercept_list(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         format = :text
         include_sensitive = false
 
         leftover = parse_args(args, "gori run intercept") do |p|
           p.banner = "Usage: gori run intercept [list] [options]"
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           p.on("--include-sensitive", "Show Authorization/Cookie/etc header values instead of [REDACTED]") { include_sensitive = true }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
@@ -128,7 +126,7 @@ module Gori
         refuse_list_leftovers(leftover, "intercept",
           "get, forward, drop, edit, enable, disable, filter, direction, list")
 
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project, long_running: true)
         begin
           bridge = intercept_bridge_state(store)
@@ -286,15 +284,13 @@ module Gori
       end
 
       private def self.cmd_intercept_get(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         format = :text
         include_sensitive = false
 
         positional = parse_args(args, "gori run intercept get") do |p|
           p.banner = "Usage: gori run intercept get <item-id> [options]"
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           p.on("--include-sensitive", "Also include the full raw message base64 (unredacted)") { include_sensitive = true }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
@@ -302,7 +298,7 @@ module Gori
         abort "gori run intercept get: too many arguments (expected one <item-id>)" if positional.size > 1
         item_id = positional[0].to_i64? || abort("gori run intercept get: invalid item id '#{positional[0]}'")
 
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project, long_running: true)
         begin
           bridge = intercept_bridge_state(store)
@@ -400,25 +396,22 @@ module Gori
       # Shared option/positional parsing for the single-<item-id> write subcommands
       # (forward/drop) so their bodies stay tiny and identical in shape.
       private def self.parse_intercept_item_args(args : Array(String), verb : String) : {Int64, String?, String?, Symbol}
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         format = :text
 
         positional = parse_args(args, "gori run intercept #{verb}") do |p|
           p.banner = "Usage: gori run intercept #{verb} <item-id> [options]"
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
         abort "gori run intercept #{verb}: missing <item-id>" if positional.empty?
         abort "gori run intercept #{verb}: too many arguments (expected one <item-id>)" if positional.size > 1
         item_id = positional[0].to_i64? || abort("gori run intercept #{verb}: invalid item id '#{positional[0]}'")
-        {item_id, project_name, db_path, format}
+        {item_id, proj.name, proj.db, format}
       end
 
       private def self.cmd_intercept_edit(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         format = :text
         raw : String? = nil
         raw_file : String? = nil
@@ -436,8 +429,7 @@ module Gori
                      "no CRLF rewrite, no Content-Length resync. A BINARY WS frame additionally\n" \
                      "requires --raw-file (the byte-exact channel): --raw is a shell argument\n" \
                      "and cannot carry a byte over 0x7F unchanged."
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           p.on("--raw=RAW", "Verbatim replacement wire message") { |v| raw = v }
           p.on("--raw-file=PATH", "Read the replacement wire message from FILE") { |v| raw_file = v }
           p.on("--no-update-content-length", "Forward the Content-Length you declared instead of resyncing it to the body (the CL-desync / CL+TE smuggling primitive; mirrors MCP intercept_forward_edit{update_content_length:false})") { update_cl = false }
@@ -466,7 +458,7 @@ module Gori
         # operator typed got promoted to CRLF. `row` is nil (falls through to the HTTP-shaped
         # path below, harmlessly — `enqueue_intercept` resolves `no_such_item` on its own) when
         # there is no live bridge, no session token, or the item is no longer held.
-        row = held_row_for_edit(project_name, db_path, item_id)
+        row = held_row_for_edit(proj.name, proj.db, item_id)
         bytes =
           if row.try(&.ws?)
             result = ws_edit_bytes(content, item_id, row.try(&.binary?) || false, used_raw_file: !raw_file.nil?)
@@ -484,7 +476,7 @@ module Gori
             # a spec can pin the exact bytes.)
             intercept_edit_bytes(content, update_cl)
           end
-        status, detail = enqueue_intercept(project_name, db_path, "forward_edit", item_id: item_id, bytes: bytes)
+        status, detail = enqueue_intercept(proj.name, proj.db, "forward_edit", item_id: item_id, bytes: bytes)
         emit_intercept_ack(status, detail, format)
       end
 
@@ -563,15 +555,13 @@ module Gori
       end
 
       private def self.cmd_intercept_toggle(enable : Bool, args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         format = :text
         action = enable ? "enable" : "disable"
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run intercept #{action} [options]"
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort CLI.unknown_option_message("gori run intercept #{action}", f, p) }
@@ -580,21 +570,19 @@ module Gori
         parse_no_positionals(parser, args, "gori run intercept #{action}",
           "`intercept #{action}` takes no positional arguments; the project is named with --project")
 
-        status, detail = enqueue_intercept(project_name, db_path, "toggle", arg: enable ? "true" : "false")
+        status, detail = enqueue_intercept(proj.name, proj.db, "toggle", arg: enable ? "true" : "false")
         emit_intercept_ack(status, detail, format)
       end
 
       private def self.cmd_intercept_set_filter(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         format = :text
 
         positional = parse_args(args, "gori run intercept filter") do |p|
           p.banner = "Usage: gori run intercept filter <query> [options]\n\n" \
                      "Set the conditional-intercept filter (a gori-QL-like query that narrows\n" \
                      "which requests/responses are held). Pass an empty string to clear it."
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
         abort "gori run intercept filter: missing <query> (pass \"\" to clear)" if positional.empty?
@@ -606,19 +594,17 @@ module Gori
           abort "gori run intercept filter: #{bad}"
         end
 
-        status, detail = enqueue_intercept(project_name, db_path, "set_filter", arg: positional[0])
+        status, detail = enqueue_intercept(proj.name, proj.db, "set_filter", arg: positional[0])
         emit_intercept_ack(status, detail, format)
       end
 
       private def self.cmd_intercept_set_direction(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         format = :text
 
         positional = parse_args(args, "gori run intercept direction") do |p|
           p.banner = "Usage: gori run intercept direction <both|request|response> [options]"
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
         abort "gori run intercept direction: missing <both|request|response>" if positional.empty?
@@ -626,7 +612,7 @@ module Gori
         dir = Interceptor::Direction.from_arg?(positional[0])
         abort "gori run intercept direction: invalid direction '#{positional[0]}' (expected both|request|response)" unless dir
 
-        status, detail = enqueue_intercept(project_name, db_path, "set_direction", arg: dir.arg)
+        status, detail = enqueue_intercept(proj.name, proj.db, "set_direction", arg: dir.arg)
         emit_intercept_ack(status, detail, format)
       end
     end

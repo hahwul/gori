@@ -38,8 +38,7 @@ module Gori
       end
 
       private def self.cmd_probe_scan(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         query : String? = nil
         min_sev : Store::Severity? = nil
         fail_on : Store::Severity? = nil
@@ -70,8 +69,7 @@ module Gori
                      "Manage which checks run with: probe rules · probe mode.\n" \
                      "Those words are reserved as the first argument — to scan with a QL query\n" \
                      "starting with one, pass it as --query."
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           p.on("-qQL", "--query=QL", "Only scan flows matching this QL query (host: status:>=500 size: …)") { |v| query = v }
           p.on("--severity=LEVEL", "Only show issues at/above LEVEL (info|low|medium|high|critical)") { |v| min_sev = parse_severity(v) }
           p.on("--fail-on=LEVEL", "Exit 3 when a REPORTED issue is at/above LEVEL — a CI gate (the --severity/--category/--in-scope filters apply first)") { |v| fail_on = parse_severity(v, "--fail-on") }
@@ -140,7 +138,7 @@ module Gori
 
         # `long_running`: a scan walks every selected flow (and `--active` sends probes) before
         # its findings are written through this same handle.
-        store = open_store(resolve_read_project(project_name, db_path), long_running: true)
+        store = open_store(resolve_read_project(proj.name, proj.db), long_running: true)
         scope = Scope.load(store)
         # The one term that could not be compiled before the store opened. Off `scope`, which is
         # loaded here anyway, so a `scope:` query costs no extra read — and only when the query
@@ -287,8 +285,7 @@ module Gori
       # --- triage over PERSISTED findings -------------------------------------------------
 
       private def self.cmd_probe_issues(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         min_sev : Store::Severity? = nil
         category : String? = nil
         host : String? = nil
@@ -300,8 +297,7 @@ module Gori
                      "List the findings the scanner already persisted — the same rows the TUI Probe\n" \
                      "tab shows, each with the id the dismiss/promote/delete subcommands take.\n" \
                      "Shows OPEN findings only by default (the TUI's default lens)."
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           p.on("-a", "--all", "Also show dismissed/confirmed/resolved findings") { include_closed = true }
           p.on("--severity=LEVEL", "Only show findings at/above LEVEL (info|low|medium|high|critical)") { |v| min_sev = parse_severity(v) }
           p.on("--category=CAT", "Only show findings in CAT (#{PROBE_CATEGORIES.join("|")})") { |v| category = parse_probe_category(v) }
@@ -310,7 +306,7 @@ module Gori
         end
         refuse_list_leftovers(leftover, "probe issues", "dismiss, promote, delete/rm, list")
 
-        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
+        store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
         issues = begin
           list = store.probe_issues(category, host.try(&.strip).presence, min_sev)
           include_closed ? list : list.select(&.status.open?)
@@ -329,8 +325,7 @@ module Gori
       end
 
       private def self.cmd_probe_dismiss(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         code : String? = nil
         host : String? = nil
 
@@ -339,8 +334,7 @@ module Gori
                      "Mute findings. With <id>, TOGGLES that one finding dismissed ⇄ open; with\n" \
                      "--code/--host, bulk-mutes every OPEN finding sharing it. Reversible —\n" \
                      "a dismissed finding still lists under `probe issues --all`."
-          p.on("--project=NAME", "Project to write (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to write") { |v| db_path = v }
+          project_options(p, proj, "write")
           p.on("--code=CODE", "Bulk-dismiss every open finding with this check code") { |v| code = v }
           p.on("--host=HOST", "Bulk-dismiss every open finding on this host") { |v| host = v }
         end
@@ -352,7 +346,7 @@ module Gori
           abort "gori run probe dismiss: pass exactly one of <id>, --code=CODE, or --host=HOST"
         end
 
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(proj.name, proj.db))
         begin
           if c = code
             n = store.open_probe_issue_count(code: c)
@@ -374,23 +368,21 @@ module Gori
       end
 
       private def self.cmd_probe_promote(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
 
         positional = parse_args(args, "gori run probe promote") do |p|
           p.banner = "Usage: gori run probe promote <id>\n\n" \
                      "Promote a machine finding to a human-confirmed Issue (see `gori run issues`),\n" \
                      "carrying its severity/host/sample evidence over. Marks the source finding\n" \
                      "Confirmed so a repeat call cannot mint a duplicate."
-          p.on("--project=NAME", "Project to write (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to write") { |v| db_path = v }
+          project_options(p, proj, "write")
         end
 
         abort "gori run probe promote: too many arguments (expected one <id>, got: #{positional.join(" ")})" if positional.size > 1
         id = parse_probe_issue_id(positional.first?, "gori run probe promote")
         abort "gori run probe promote: <id> is required (see `gori run probe issues`)" unless id
 
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(proj.name, proj.db))
         begin
           issue = store.get_probe_issue(id) || abort("gori run probe promote: no probe finding with id #{id}")
           res = Probe::Triage.promote(store, issue)
@@ -409,8 +401,7 @@ module Gori
       end
 
       private def self.cmd_probe_delete(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         all = false
         yes = false
 
@@ -421,8 +412,7 @@ module Gori
                      "the default lens.\n" \
                      "Delete --all: wipes every finding AND every suppression, so a rescan\n" \
                      "re-discovers everything. Needs --yes."
-          p.on("--project=NAME", "Project to write (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to write") { |v| db_path = v }
+          project_options(p, proj, "write")
           p.on("--all", "Delete EVERY probe finding AND every suppression in the project") { all = true }
           p.on("--yes", "Required with --all (there is no interactive prompt here)") { yes = true }
         end
@@ -432,7 +422,7 @@ module Gori
         abort "gori run probe delete: pass <id> or --all" if id.nil? && !all
         abort "gori run probe delete: <id> and --all are mutually exclusive" if id && all
 
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(proj.name, proj.db))
         begin
           if all
             n = store.count_probe_issues
@@ -472,8 +462,7 @@ module Gori
       end
 
       private def self.cmd_probe_rules_list(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         kind : String? = nil
         format = :text
 
@@ -482,14 +471,13 @@ module Gori
                      "List every scan rule — built-in passive, built-in active, and custom match\n" \
                      "rules — with whether it is enabled. A scan on ANY surface (here, the TUI, or\n" \
                      "MCP) honours this config."
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           p.on("--kind=KIND", "Only list rules of this kind (passive|active|custom)") { |v| kind = parse_rule_kind(v) }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
         refuse_list_leftovers(leftover, "probe rules", "add, enable, disable, delete/rm")
 
-        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
+        store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
         entries, mode = begin
           list = Probe::RuleCatalog.load(store)
           list = list.select { |e| e.kind == kind } if kind
@@ -509,16 +497,14 @@ module Gori
 
       private def self.cmd_probe_rule_enabled(args : Array(String), enabled : Bool) : Nil
         verb = enabled ? "enable" : "disable"
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         positional = [] of String
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run probe rules #{verb} <rule-id>\n\n" \
                      "Turn a scan rule on/off for this project (ids from `probe rules`).\n" \
                      "Disabling a built-in stops NEW detections; findings it already produced stay."
-          p.on("--project=NAME", "Project to write (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to write") { |v| db_path = v }
+          project_options(p, proj, "write")
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = one_positional_list(before, after, "gori run probe rules #{verb}", "<rule-id>") }
           p.invalid_option { |f| abort CLI.unknown_option_message("gori run probe rules #{verb}", f, p) }
@@ -527,7 +513,7 @@ module Gori
         parser.parse(args)
 
         id = positional.first? || abort("gori run probe rules #{verb}: <rule-id> is required (see `gori run probe rules`)")
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(proj.name, proj.db))
         begin
           entry = Probe::RuleCatalog.load(store).find { |e| e.id == id } ||
                   abort("gori run probe rules #{verb}: no scan rule with id '#{id}' (see `gori run probe rules`)")
@@ -556,8 +542,7 @@ module Gori
       end
 
       private def self.cmd_probe_rule_add(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         title : String? = nil
         pattern : String? = nil
         description = ""
@@ -571,8 +556,7 @@ module Gori
           p.banner = "Usage: gori run probe rules add --title=T --pattern=P [options]\n\n" \
                      "Add a PROJECT custom match rule: a string or regex tested against one region\n" \
                      "of every captured flow, emitting a finding on a hit."
-          p.on("--project=NAME", "Project to write (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to write") { |v| db_path = v }
+          project_options(p, proj, "write")
           p.on("-tTITLE", "--title=TITLE", "Rule name, shown as the finding title (required)") { |v| title = v }
           p.on("-pPATTERN", "--pattern=PATTERN", "String to look for, a regex with --regex, or a command with --exec (required)") { |v| pattern = v }
           p.on("--description=TEXT", "What the rule is for") { |v| description = v }
@@ -605,7 +589,7 @@ module Gori
         end
         severity = Store::Severity.parse?(sev_s.strip) || abort("gori run probe rules add: invalid --severity '#{sev_s}' (info|low|medium|high|critical)")
 
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(proj.name, proj.db))
         begin
           id = store.insert_probe_custom_rule(t, description, side, region, match_kind, pat, severity)
           abort "gori run probe rules add: failed to persist the rule (store busy or unwritable)" if id == 0
@@ -631,15 +615,13 @@ module Gori
       end
 
       private def self.cmd_probe_rule_delete(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         positional = [] of String
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run probe rules delete <custom-rule-id>\n\n" \
                      "Delete a project custom rule. A built-in can only be DISABLED, never deleted."
-          p.on("--project=NAME", "Project to write (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to write") { |v| db_path = v }
+          project_options(p, proj, "write")
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = one_positional_list(before, after, "gori run probe rules delete", "<custom-rule-id>") }
           p.invalid_option { |f| abort CLI.unknown_option_message("gori run probe rules delete", f, p) }
@@ -651,7 +633,7 @@ module Gori
         row_id = probe_custom_row_id(id) ||
                  abort("gori run probe rules delete: '#{id}' is not a project custom rule — a built-in can only be disabled (`probe rules disable #{id}`)")
 
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(proj.name, proj.db))
         begin
           abort "gori run probe rules delete: no custom rule with id '#{id}'" unless store.probe_custom_rules.any? { |r| r.id == row_id }
           abort "gori run probe rules delete: custom rule '#{id}' NOT deleted (project busy)" unless store.delete_probe_custom_rule(row_id)

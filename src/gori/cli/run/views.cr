@@ -59,8 +59,7 @@ module Gori
       end
 
       private def self.cmd_views_list(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         scope : String? = nil
         format = :text
         leftover = [] of String
@@ -69,8 +68,7 @@ module Gori
                      "History views: named QL queries the list narrows to, ANDed over the filter\n" \
                      "bar rather than replacing it. Built-ins come first, then the global library,\n" \
                      "then this project's own. `gori run history --view NAME` applies one."
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           p.on("--scope=SCOPE", "Show only builtin | project | global views") { |v| scope = parse_view_list_scope(v) }
           format_flag(p, [:text, :json], "text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
@@ -81,7 +79,7 @@ module Gori
         parser.parse(args)
         refuse_list_leftovers(leftover, "views", "add, rm/delete, rename, set, scope")
 
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project, read_only: true)
         begin
           views = SavedViews.merged(store)
@@ -133,8 +131,7 @@ module Gori
       end
 
       private def self.cmd_views_add(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         query : String? = nil
         scope = "project"
         format = :text
@@ -144,8 +141,7 @@ module Gori
                      "`gori run history -q` take. It is validated here rather than at apply time:\n" \
                      "a query whose every term drops would narrow NOTHING while a `v:` chip on the\n" \
                      "filter row claims it does."
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           p.on("-qQL", "--query=QL", "The view's query (required)") { |v| query = v }
           p.on("--scope=SCOPE", "project (default) | global — a global view appears in EVERY project") { |v| scope = parse_view_scope(v) }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
@@ -157,7 +153,7 @@ module Gori
         views_refuse_bad_name(name, "add")
         views_refuse_bad_query(q, "add")
 
-        with_views_store(project_name, db_path) do |store|
+        with_views_store(proj.name, proj.db) do |store|
           if SavedViews.name_taken?(store, name, scope)
             abort "gori run views add: a #{scope} view named '#{name}' already exists — use `set` to change its query"
           end
@@ -185,20 +181,18 @@ module Gori
       end
 
       private def self.cmd_views_rm(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         scope = "project"
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run views rm <name> [--scope=project|global]"
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           p.on("--scope=SCOPE", "Which <name>: project (default) | global") { |v| scope = parse_view_scope(v) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.missing_option { |f| abort "gori run views rm: missing value for #{f}" }
         end
         name = views_one_positional(parser, args, "rm", "<name>")
 
-        with_views_store(project_name, db_path) do |store|
+        with_views_store(proj.name, proj.db) do |store|
           view = views_find_or_abort(store, name, scope, "rm")
           # A project pointing at this view keeps a `history_view` key naming it. THIS project's
           # is kept off it (see `SavedViews.delete`). Only a GLOBAL view can be named from another
@@ -223,14 +217,12 @@ module Gori
       end
 
       private def self.cmd_views_rename(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         scope = "project"
         to : String? = nil
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run views rename <name> --to=NAME [--scope=project|global]"
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           p.on("--to=NAME", "The new name (required)") { |v| to = v }
           p.on("--scope=SCOPE", "Which <name>: project (default) | global") { |v| scope = parse_view_scope(v) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
@@ -240,7 +232,7 @@ module Gori
         abort "gori run views rename: --to is required" if (dest = to).nil?
         views_refuse_bad_name(dest, "rename")
 
-        with_views_store(project_name, db_path) do |store|
+        with_views_store(proj.name, proj.db) do |store|
           view = views_find_or_abort(store, name, scope, "rename")
           if SavedViews.name_taken?(store, dest, scope, except: view)
             abort "gori run views rename: a #{scope} view named '#{dest}' already exists"
@@ -253,15 +245,13 @@ module Gori
       end
 
       private def self.cmd_views_set(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         scope = "project"
         query : String? = nil
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run views set <name> --query=QL [--scope=project|global]\n\n" \
                      "Replace a view's query, keeping its name."
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           p.on("-qQL", "--query=QL", "The view's new query (required)") { |v| query = v }
           p.on("--scope=SCOPE", "Which <name>: project (default) | global") { |v| scope = parse_view_scope(v) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
@@ -271,7 +261,7 @@ module Gori
         abort "gori run views set: --query is required" if (q = query).nil?
         views_refuse_bad_query(q, "set")
 
-        with_views_store(project_name, db_path) do |store|
+        with_views_store(proj.name, proj.db) do |store|
           view = views_find_or_abort(store, name, scope, "set")
           unless SavedViews.update(store, view, view.name, q)
             abort "gori run views set: failed to update the view (#{views_write_hint(scope)})"
@@ -284,16 +274,14 @@ module Gori
       # existing name into the other scope; here it is its own verb because a CLI has no filter
       # bar to save FROM.
       private def self.cmd_views_scope(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         from = "project"
         to : String? = nil
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run views scope <name> --to=project|global [--scope=project|global]\n\n" \
                      "Move a view to the other store. A `src:` view belongs in every project; a\n" \
                      "`host:api.acme.test` one belongs in this engagement."
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           p.on("--to=SCOPE", "Destination: project | global (required)") { |v| to = parse_view_scope(v) }
           p.on("--scope=SCOPE", "Which <name>: project (default) | global") { |v| from = parse_view_scope(v) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
@@ -302,7 +290,7 @@ module Gori
         name = views_one_positional(parser, args, "scope", "<name>")
         abort "gori run views scope: --to is required (project|global)" if (dest = to).nil?
 
-        with_views_store(project_name, db_path) do |store|
+        with_views_store(proj.name, proj.db) do |store|
           view = views_find_or_abort(store, name, from, "scope")
           abort "gori run views scope: '#{view.name}' is already #{dest}" if view.scope == dest
           if SavedViews.name_taken?(store, view.name, dest)

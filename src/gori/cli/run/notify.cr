@@ -8,8 +8,7 @@ module Gori
         {"notify <summary>", "Show the operator a line in the gori TUI (ring + Miss Ring)"},
       ])]
       private def self.cmd_notify(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         detail : String? = nil
         detail_file : String? = nil
         level = "info"
@@ -24,8 +23,7 @@ module Gori
           p.on("--detail=TEXT", "The long form, opened from the ring with ↵") { |v| detail = v }
           p.on("--detail-file=PATH", "Read the detail from a file (- for STDIN)") { |v| detail_file = v }
           p.on("--level=LEVEL", "info (default) | success | warn | error") { |v| level = v }
-          p.on("--project=NAME", "Project to notify (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to notify") { |v| db_path = v }
+          project_options(p, proj, "notify")
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
 
@@ -37,7 +35,7 @@ module Gori
           detail = read_input_file(path, "gori run notify", stdin: true, noun: "detail", flag: "--detail-file=-")
         end
 
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         # Counted BEFORE the write, for the reason `AgentPresence.tui_windows?` gives.
         windows = AgentPresence.tui_windows?(project.db_path)
         store = open_store(project)

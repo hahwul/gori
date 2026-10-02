@@ -32,8 +32,7 @@ module Gori
       end
 
       private def self.cmd_notes_read(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         format = :text
         all = false
 
@@ -44,8 +43,7 @@ module Gori
                      "Or run with a subcommand:\n" \
                      "  gori run notes create [--text TEXT] [options]\n" \
                      "  gori run notes delete <n> --yes [options]"
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           p.on("--all", "Print every note in full instead of the one-line list") { all = true }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
@@ -54,7 +52,7 @@ module Gori
         index = parse_note_index(positional.first?)
         abort "gori run notes: <n> and --all are mutually exclusive" if index && all
 
-        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
+        store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
         doc = begin
           Notes.load(store)
         ensure
@@ -72,8 +70,7 @@ module Gori
       end
 
       private def self.cmd_notes_create(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         text : String? = nil
         format = :text
         positional = [] of String
@@ -82,8 +79,7 @@ module Gori
           p.banner = "Usage: gori run notes create [--text TEXT] [options]\n\n" \
                      "Create a note. Body comes from --text, else the positional args,\n" \
                      "else STDIN (e.g. `some-tool | gori run notes create`)."
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           p.on("--text=TEXT", "Note body (else positional args, else STDIN)") { |v| text = v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
@@ -97,7 +93,7 @@ module Gori
         body ||= read_stdin_fallback(STDIN, "gori run notes", "note text") unless STDIN.tty?
         abort "gori run notes create: no note text (use --text, positional args, or pipe via STDIN)" if body.nil? || body.empty?
 
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(proj.name, proj.db))
         begin
           # `Notes.create` — the READ, the merge and the write in one transaction. Reading the
           # set here and writing it back was two statements, and a peer (a TUI on the same
@@ -129,8 +125,7 @@ module Gori
       # instead of replacing it. The text comes from where `notes create` takes it: --text, the
       # positional words after <n>, or a pipe.
       private def self.cmd_notes_update(args : Array(String), *, append : Bool = false) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         text : String? = nil
         format = :text
 
@@ -140,15 +135,14 @@ module Gori
                      "Replace the text of the note at 1-based list position <n>, or add to it with\n" \
                      "--append. The text comes from --text, else the words after <n>, else STDIN."
           p.on("--append", "Add the text on a new line after the note's current text instead of replacing it") { append = true }
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           p.on("--text=TEXT", "The text (else the words after <n>, else STDIN)") { |v| text = v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
 
         n = parse_note_index(positional.first?) || abort "gori run notes update: missing <n>"
         body = note_update_text(text, positional[1..])
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(proj.name, proj.db))
         apply_note_update(store, n, body, append, format)
       end
 
@@ -225,23 +219,21 @@ module Gori
       # `delete_repeaters` each ask for `confirm:true` on top of it. `delete_note` asks for
       # nothing, and closing that is a change to the MCP contract rather than to this file.
       private def self.cmd_notes_delete(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         yes = false
 
         positional = parse_args(args, "gori run notes delete") do |p|
           p.banner = "Usage: gori run notes delete <n> --yes [options]\n\n" \
                      "Delete the note at 1-based list position <n> (as shown by `notes`)."
           p.on("-y", "--yes", "Confirm the deletion (required — there is no interactive prompt here)") { yes = true }
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
         end
 
         abort "gori run notes delete: missing <n>" if positional.empty?
         abort "gori run notes delete: too many arguments (expected one note number)" if positional.size > 1
         n = parse_note_index(positional.first).not_nil!
 
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(proj.name, proj.db))
         begin
           persisted = Notes.load(store)
           unless n <= persisted.size

@@ -182,8 +182,7 @@ module Gori
       end
 
       private def self.cmd_oast_providers_list(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         show_tokens = false
         format = :text
 
@@ -191,15 +190,14 @@ module Gori
           p.banner = "Usage: gori run oast providers [list] [options]\n\n" \
                      "List saved OAST providers. `id` is scope-qualified: p_<n> is this project's,\n" \
                      "g_<hex> is a global one from settings.json (read-only here)."
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           p.on("--show-tokens", "Print provider auth tokens instead of [REDACTED]") { show_tokens = true }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
         refuse_list_leftovers(leftover, "oast providers",
           "add, update, enable, disable, delete/rm, list")
 
-        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
+        store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
         configs = begin
           Oast.provider_configs(store)
         ensure
@@ -237,8 +235,7 @@ module Gori
 
       private def self.cmd_oast_provider_write(args : Array(String), *, update : Bool) : Nil
         verb = update ? "update" : "add"
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         id : String? = nil
         positional = [] of String
         name : String? = nil
@@ -254,8 +251,7 @@ module Gori
         parser = OptionParser.new do |p|
           p.banner = update ? "Usage: gori run oast providers update <id> [options]\n\nFields you do not pass keep their current value." \
                                : "Usage: gori run oast providers add --name=N [options]"
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           p.on("--name=NAME", "Display name#{update ? "" : " (required)"}") { |v| name = v }
           p.on("--kind=KIND", "interactsh (default) | custom-http | webhook.site | BOAST | postbin") { |v| kind_s = v }
           p.on("--host=URL", "Server/base URL (defaults to the kind's public preset)") { |v| host = v }
@@ -296,7 +292,7 @@ module Gori
           Oast::ProviderKind.parse?(k) || abort("gori run oast providers #{verb}: unknown --kind '#{k}'")
         end
 
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(proj.name, proj.db))
         begin
           if update
             oast_provider_apply_update(store, oast_provider_row_id(store, id, verb),
@@ -359,18 +355,16 @@ module Gori
 
       private def self.cmd_oast_provider_enabled(args : Array(String), enabled : Bool) : Nil
         verb = enabled ? "enable" : "disable"
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
 
         leftover = parse_args(args, "gori run oast providers #{verb}") do |p|
           p.banner = "Usage: gori run oast providers #{verb} <id>"
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
         end
         abort "gori run oast providers #{verb}: too many arguments (expected one <id>, got: #{leftover.join(" ")})" if leftover.size > 1
         id = leftover.first?
 
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(proj.name, proj.db))
         begin
           row = oast_provider_row_id(store, id, verb)
           abort "gori run oast providers: enable/disable NOT applied (project busy)" unless store.set_oast_provider_enabled(row, enabled)
@@ -381,18 +375,16 @@ module Gori
       end
 
       private def self.cmd_oast_provider_delete(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
 
         leftover = parse_args(args, "gori run oast providers delete") do |p|
           p.banner = "Usage: gori run oast providers delete <id>"
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
         end
         abort "gori run oast providers delete: too many arguments (expected one <id>, got: #{leftover.join(" ")})" if leftover.size > 1
         id = leftover.first?
 
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(proj.name, proj.db))
         begin
           row = oast_provider_row_id(store, id, "delete")
           abort "gori run oast providers: NOT deleted (project busy) — the provider is unchanged" unless store.delete_oast_provider(row)
@@ -433,21 +425,19 @@ module Gori
       end
 
       private def self.cmd_oast_sessions_list(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         format = :text
 
         leftover = parse_args(args, "gori run oast list") do |p|
           p.banner = "Usage: gori run oast list [options]\n\n" \
                      "List this project's saved OAST sessions — the rows the TUI's RESUME\n" \
                      "LISTENER picker shows. Resume one with `gori run oast resume <id>`."
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
         refuse_list_leftovers(leftover, "oast", "list, resume, release")
 
-        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
+        store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
         sessions = begin
           Oast::Sessions.list(store)
         ensure
@@ -495,8 +485,7 @@ module Gori
       # exactly as the TUI listener does — so a headless resume and the tab are collecting into
       # the same table, and either can pick the session up afterwards.
       private def self.cmd_oast_session_resume(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         id_arg : String? = nil
         interval = 5
         json = false
@@ -506,8 +495,7 @@ module Gori
           p.banner = "Usage: gori run oast resume <id> [options]\n\n" \
                      "Resume a saved session (see `gori run oast list`) and stream its\n" \
                      "callbacks. The registration is KEPT on exit — use `release` to drop it."
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           p.on("--interval=SEC", "Poll interval seconds (default 5)") { |v| interval = parse_count(v, "--interval") }
           p.on("--once", "Poll once and exit (no loop)") { once = true }
           p.on("--json", "Emit the payload and each callback as a JSON line (same shape as MCP)") { json = true }
@@ -521,7 +509,7 @@ module Gori
         id = oast_session_id(id_arg, "resume")
         # `long_running`: like `listen --save`, the handle is held through the whole poll loop,
         # which persists every new callback and stamps last_poll_at on each tick.
-        store = open_store(resolve_read_project(project_name, db_path), long_running: true)
+        store = open_store(resolve_read_project(proj.name, proj.db), long_running: true)
         failed =
           begin
             bound = oast_bind_session(store, id, "resume")
@@ -619,20 +607,18 @@ module Gori
       # Deregister a saved session's SERVER-side state. The row and every callback it collected
       # stay: this releases the listener, not the evidence.
       private def self.cmd_oast_session_release(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
 
         leftover = parse_args(args, "gori run oast release") do |p|
           p.banner = "Usage: gori run oast release <id>\n\n" \
                      "Deregister the session's server-side state. Its stored callbacks stay,\n" \
                      "but payloads minted from it stop resolving."
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
         end
         abort "gori run oast release: too many arguments (expected one <id>, got: #{leftover.join(" ")})" if leftover.size > 1
 
         id = oast_session_id(leftover.first?, "release")
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(proj.name, proj.db))
         begin
           bound = oast_bind_session(store, id, "release")
           # Four outcomes, not two. A provider with NO deregistration API (BOAST) and one whose

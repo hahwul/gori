@@ -127,8 +127,7 @@ module Gori
       # The file is JSON: either a bare array `[[":method","GET"],…]`, or an object
       # `{"fields": […], "body": "…"}` / `{"fields": […], "body_base64": "…"}`.
       private def self.cmd_repeater_h2fields(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         target : String? = nil
         fields_file : String? = nil
         insecure = false
@@ -143,8 +142,7 @@ module Gori
           p.banner = "Usage: gori run repeater h2 --target URL --fields FILE [options]\n\n" \
                      "Send a field-native HTTP/2 request (exact HPACK field list, no h1-text carrier).\n" \
                      "FILE is JSON: a [[name,value],…] array, or {\"fields\":[…],\"body\":\"…\"}."
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           p.on("-tURL", "--target=URL", "Dial origin (scheme://host[:port]); :authority/:scheme in the fields may differ") { |v| target = v }
           p.on("--fields=FILE", "JSON file with the ordered HPACK field list (and optional body)") { |v| fields_file = v }
           p.on("-k", "--insecure-upstream", "Do not verify the upstream TLS certificate") { insecure = true }
@@ -171,14 +169,14 @@ module Gori
         fields, body = parse_h2_fields_file(read_input_file(file, "gori run repeater h2"))
 
         overrides = begin
-          store = open_store(resolve_read_project(project_name, db_path), read_only: true)
+          store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
           begin
             Gori::HostOverrides.load(store)
           ensure
             store.close
           end
         end
-        outbound = project_outbound(project_name, db_path, allow_unscoped)
+        outbound = project_outbound(proj.name, proj.db, allow_unscoped)
         plan = begin
           Repeater::Plan.build(Repeater::PlanOptions.new(
             h2_fields: fields, h2_body: body, target: tgt,
@@ -238,14 +236,12 @@ module Gori
       end
 
       private def self.cmd_repeater_list(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         format = :text
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run repeater list [options]"
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort CLI.unknown_option_message("gori run repeater list", f, p) }
@@ -255,7 +251,7 @@ module Gori
           "`repeater list` takes no positional arguments; to act on one session use " \
           "`gori run repeater send <id>`")
 
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project, read_only: true)
         begin
           repeaters = store.repeaters_mcp
@@ -692,8 +688,7 @@ module Gori
       end
 
       private def self.cmd_repeater_create(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         target : String? = nil
         request_file : String? = nil
         request_raw : String? = nil
@@ -714,8 +709,7 @@ module Gori
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run repeater create [options]\n\n#{EVIDENCE_LINK_HELP}\n"
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           p.on("-tURL", "--target=URL", "Target URL (scheme://host[:port])") { |v| target = v }
           p.on("-fFILE", "--request-file=FILE", "Read raw HTTP request from FILE") { |v| request_file = v }
           p.on("-rRAW", "--request-raw=RAW", "Verbatim raw HTTP request string") { |v| request_raw = v }
@@ -784,7 +778,7 @@ module Gori
           abort err
         end
 
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project)
         begin
           tgt_val = target
@@ -1136,8 +1130,7 @@ module Gori
       # is one connection = one host and the h1 form is held to the same shape for a legible
       # transcript. Cross-host h1 is a deliberate follow-up.
       private def self.cmd_repeater_race(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         insecure = false
         timeout : Time::Span? = nil
         allow_unscoped = false
@@ -1155,8 +1148,7 @@ module Gori
                      "Fire several saved repeater SESSIONS (ids from `gori run repeater list`) as ONE\n" \
                      "synchronized race — N distinct requests on the wire together to hit a\n" \
                      "multi-endpoint TOCTOU window. All sessions must share one origin and transport."
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           p.on("-k", "--insecure-upstream", "Do not verify the upstream TLS certificate") { insecure = true }
           p.on("--timeout=SEC", "Per-operation connect + idle timeout (seconds)") { |v| timeout = parse_count(v, "--timeout").seconds }
           p.on("--http2", "Race over HTTP/2 (single-packet attack), overriding the sessions' stored setting") { force_http2 = true }
@@ -1177,7 +1169,7 @@ module Gori
         refresh_verify_upstream(!insecure)
         ids = race_member_ids(positional, max_requests, parser)
 
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project, read_only: true)
         # `abort` inside the block still runs the `ensure` (the store closes), and it narrows
         # each row to a non-nil record, so `loaded` needs no `not_nil!` below. The §…§ marker
@@ -1209,7 +1201,7 @@ module Gori
         end
 
         activate_slot(slot, "gori run repeater race")
-        outbound = project_outbound(project_name, db_path, allow_unscoped)
+        outbound = project_outbound(proj.name, proj.db, allow_unscoped)
         plan, labels = build_cli_race_plan(loaded, mode, outbound, insecure, host_overrides,
           verbatim, timeout, reframe_grpc, tls_preset)
 
@@ -1223,8 +1215,7 @@ module Gori
       end
 
       private def self.cmd_repeater_timing(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         insecure = false
         timeout : Time::Span? = nil
         allow_unscoped = false
@@ -1246,8 +1237,7 @@ module Gori
                      "ORDER and quartiles, not eyeballed latency. Both must share one origin and\n" \
                      "transport. Each pair is released together (h2 single-packet / h1 last-byte-sync)\n" \
                      "unless --interleaved sends them sequentially."
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           p.on("-k", "--insecure-upstream", "Do not verify the upstream TLS certificate") { insecure = true }
           p.on("--timeout=SEC", "Per-operation connect + idle timeout (seconds)") { |v| timeout = parse_count(v, "--timeout").seconds }
           p.on("--count=N", "How many A/B pairs to send after warm-up (1-#{Repeater::Timing::Stats::MAX_ITERATIONS}; default #{Repeater::Timing::Stats::DEFAULT_ITERATIONS})") { |v| count = parse_count(v, "--count") }
@@ -1272,11 +1262,11 @@ module Gori
         count = count.clamp(1, Repeater::Timing::Stats::MAX_ITERATIONS)
         warmup = warmup.clamp(0, count - 1)
 
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         loaded, host_overrides, mode = load_timing_members(project, ids, verbatim, force_http2)
 
         activate_slot(slot, "gori run repeater timing")
-        outbound = project_outbound(project_name, db_path, allow_unscoped)
+        outbound = project_outbound(proj.name, proj.db, allow_unscoped)
         # Reuse the race's origin/transport unification — a differential pair rides one connection
         # shape too, so a mismatch is refused before any send.
         plan, labels = build_cli_race_plan(loaded, mode, outbound, insecure, host_overrides,
@@ -1479,8 +1469,7 @@ module Gori
       end
 
       private def self.cmd_repeater_send(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         insecure = false
         do_diff = false
         format = :text
@@ -1513,8 +1502,7 @@ module Gori
           p.banner = "Usage: gori run repeater send <repeater-id> [options]\n\n" \
                      "Replay a saved repeater SESSION (ids from `gori run repeater list`).\n" \
                      "A WebSocket-upgrade session performs a real RFC 6455 framed exchange."
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           p.on("-k", "--insecure-upstream", "Do not verify the upstream TLS certificate") { insecure = true }
           p.on("--timeout=SEC", "Per-operation connect + idle timeout (seconds). Ignored on the WebSocket path, which paces itself with --idle-ms") { |v| timeout = parse_count(v, "--timeout").seconds }
           p.on("--diff", "Diff the new response against the session's last stored response") { do_diff = true }
@@ -1572,7 +1560,7 @@ module Gori
         # is up to `--timeout` seconds long. Re-resolving at persist time therefore steered
         # `update_repeater_response` (and a `--record-history` flow) into a DIFFERENT project's
         # `repeaters` row #id. `cmd_repeater_minimize` resolves once for exactly this reason.
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         # get_repeater_full loads the response BLOBs too (needed for --diff), so the
         # store can close before the send — same lifetime pattern as the flow path.
         store = open_store(project, read_only: true)
@@ -1604,7 +1592,7 @@ module Gori
         # The scope decision every active send passes through. `gori run repeater` dials
         # Repeater::Engine/H2Engine/WsEngine directly, bypassing the proxy's own gate, so
         # Sandbox mode's "blocks ALL out-of-scope traffic" promise lives here.
-        outbound = project_outbound(project_name, db_path, allow_unscoped)
+        outbound = project_outbound(proj.name, proj.db, allow_unscoped)
 
         plan = begin
           Repeater::Plan.build(session_plan_options(rec, insecure, host_overrides, verbatim, timeout, reframe_grpc,
@@ -2566,8 +2554,7 @@ module Gori
       end
 
       private def self.cmd_repeater_single(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         target_override : String? = nil
         sni_override : String? = nil
         # nil = follow the capture. `--http2` was the ONLY version flag, so an h2-captured
@@ -2607,8 +2594,7 @@ module Gori
                      "  gori run repeater h2 [options]        Send a field-native HTTP/2 request (--target/--fields)\n\n" \
                      "#{EVIDENCE_LINK_HELP}\n\n" \
                      "Options (single-flow replay):"
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           p.on("--target=URL", "Send to this origin (scheme://host[:port]) instead of the captured one; path/query kept (see --path)") { |v| target_override = v }
           p.on("--path=TARGET", PATH_OVERRIDE_HELP) { |v| path_override = v }
           p.on("--http2", "Force HTTP/2 (default follows how the flow was captured)") { http2_override = true }
@@ -2655,7 +2641,7 @@ module Gori
         # get_flow loads all the BLOBs, so the store can close before the send. Also
         # cheaply probe whether a repeater SESSION shares this id (get_repeater reads
         # no response BLOBs) — only when the flow exists — to warn about the ambiguity.
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project, read_only: true)
         # HostOverrides.load snapshots rows into memory (connect_address never re-touches the
         # store), so it's safe to load here and use after the store closes.
@@ -2788,7 +2774,7 @@ module Gori
                  abort("gori run repeater: flow ##{id}'s request has no request line method to replace " \
                        "(#{request_line_preview(wire)})")
         end
-        outbound = project_outbound(project_name, db_path, allow_unscoped)
+        outbound = project_outbound(proj.name, proj.db, allow_unscoped)
         # Copied out of the closure-captured var first — Crystal keeps that one `Bool?`.
         forced = http2_override
         use_http2 = forced.nil? ? built.http2 : forced

@@ -255,8 +255,7 @@ module Gori
       end
 
       private def self.cmd_colormarker_list(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         format = :text
         scope = nil.as(Store::RuleScope?)
         leftover = [] of String
@@ -265,8 +264,7 @@ module Gori
                      "Rules are listed in PRECEDENCE order: the global library first, then this\n" \
                      "project's own rows. The FIRST enabled match paints a History row and the\n" \
                      "rest are never consulted. Display only — a colour rule never modifies traffic."
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           p.on("--scope=SCOPE", "Show only project | global rules") { |v| scope = parse_color_scope(v) }
           format_flag(p, [:text, :json], "text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
@@ -279,7 +277,7 @@ module Gori
         parser.parse(args)
         refuse_list_leftovers(leftover, "colormarker", "add, update/edit, rm/delete, enable, disable, move, preview, color")
 
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project, read_only: true)
         begin
           rules = Gori::Colormarker.merged(store)
@@ -302,8 +300,7 @@ module Gori
       end
 
       private def self.cmd_colormarker_add(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         color_s = "yellow"
         style_s = "full"
         name = ""
@@ -320,8 +317,7 @@ module Gori
                      "bytes rather than the text index, so it also paints matches that same term\n" \
                      "in the filter bar misses. `host:` is a SUBSTRING, not a DNS-label glob.\n" \
                      "Display only: a colour rule never modifies traffic."
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           p.on("-wFILTER", "--when=FILTER", "Condition the flow must match (required)") { |v| filter = v }
           p.on("--color=NAME", "#{marker_color_choices} (default yellow)") { |v| color_s = v }
           p.on("--style=STYLE", "full (tint the whole row) | strip (one colour cell) — default full") { |v| style_s = v }
@@ -347,7 +343,7 @@ module Gori
         # A global rule needs no project at all — it lives in settings.json — but a named one is
         # still resolved, so a misspelt `--project` fails here as it does on every subcommand.
         if scope.global?
-          colormarker_global_project_check(project_name, db_path)
+          colormarker_global_project_check(proj.name, proj.db)
           id = Settings.add_colormarker_rule(f, color, style.label, name, !disabled)
           abort "gori run colormarker add: failed to persist rule (settings not writable)" if id == 0
           puts format == :json ? colormarker_added_json(id, nil) : "Global colour rule ##{id} added — it applies in every project."
@@ -355,7 +351,7 @@ module Gori
           return
         end
 
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project)
         begin
           id = store.insert_color_rule(f, color, style, name, !disabled)
@@ -404,8 +400,7 @@ module Gori
       # `disable`, which for a global rule is a statement about THIS project rather than the
       # library, and folding the two would make one flag mean two different scopes.
       private def self.cmd_colormarker_update(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         color_s : String? = nil
         style_s : String? = nil
         name : String? = nil
@@ -419,8 +414,7 @@ module Gori
                      "not: a re-added rule lands at the end of its scope block. Every field is\n" \
                      "optional and defaults to the rule's current value. Use enable/disable to\n" \
                      "change whether it is armed. Display only: a colour rule never modifies traffic."
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           p.on("-wFILTER", "--when=FILTER", "New condition (default: unchanged)") { |v| filter = v }
           p.on("--color=NAME", "#{marker_color_choices} (default: unchanged)") { |v| color_s = v }
           p.on("--style=STYLE", "full | strip (default: unchanged)") { |v| style_s = v }
@@ -451,10 +445,10 @@ module Gori
         new_style = want_style ? parse_marker_style(want_style) : nil
 
         if scope.global?
-          colormarker_global_project_check(project_name, db_path)
+          colormarker_global_project_check(proj.name, proj.db)
           colormarker_update_global(id, want_filter, new_color, new_style, want_name)
         else
-          colormarker_update_project(project_name, db_path, id, want_filter, new_color, new_style, want_name)
+          colormarker_update_project(proj.name, proj.db, id, want_filter, new_color, new_style, want_name)
         end
       end
 
@@ -501,13 +495,11 @@ module Gori
       end
 
       private def self.cmd_colormarker_rm(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         scope = Store::RuleScope::Project
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run colormarker rm <id> [options]"
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           p.on("--scope=SCOPE", "Which <id>: project (default) | global") { |v| scope = parse_color_scope(v) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort CLI.unknown_option_message("gori run colormarker rm", f, p) }
@@ -524,7 +516,7 @@ module Gori
         # surface cannot reach every project's DB to sweep it. It stays inert: global ids come
         # from a monotonic counter and are never reused, so nothing can inherit the override.
         if scope.global?
-          colormarker_global_project_check(project_name, db_path)
+          colormarker_global_project_check(proj.name, proj.db)
           # Against the list on DISK — see `colormarker_update_global`. `delete_colormarker_rule`
           # opens with its own `reload_colormarker_from_disk` and answers false for BOTH "no such
           # rule" and "not saved", so an existence check made against this process's start-up copy
@@ -538,7 +530,7 @@ module Gori
           return
         end
 
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project)
         begin
           unless store.color_rules.any? { |r| r.id == id }
@@ -556,8 +548,7 @@ module Gori
       end
 
       private def self.cmd_colormarker_set_enabled(enable : Bool, args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         scope = Store::RuleScope::Project
         everywhere = false
         action = enable ? "enable" : "disable"
@@ -566,8 +557,7 @@ module Gori
                      "With --scope=global this writes THIS project's override of the rule, the\n" \
                      "way `x` does in the Colormarker tab. --everywhere changes the rule's own\n" \
                      "default instead, which every project without an override follows."
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           p.on("--scope=SCOPE", "Which <id>: project (default) | global") { |v| scope = parse_color_scope(v) }
           p.on("--everywhere", "global rules only: change the default for every project") { everywhere = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
@@ -588,7 +578,7 @@ module Gori
         # below compares against it to decide between an override and dropping one.
         default = nil.as(Bool?)
         if scope.global?
-          colormarker_global_project_check(project_name, db_path)
+          colormarker_global_project_check(proj.name, proj.db)
           Settings.reload_colormarker_from_disk # the list the mutator acts on — see `cmd_colormarker_rm`
           rule = Settings.colormarker_rules.find { |r| r.id == id }
           abort "gori run colormarker #{action}: no global rule with id #{id}" unless rule
@@ -600,7 +590,7 @@ module Gori
           end
         end
 
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project)
         begin
           if scope.global?
@@ -633,8 +623,7 @@ module Gori
       # paints the row and the rest are skipped. Order IS the rule set's meaning, so every
       # surface that can create a rule has to be able to reorder one.
       private def self.cmd_colormarker_move(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         scope = Store::RuleScope::Project
         dir = 0
         parser = OptionParser.new do |p|
@@ -642,8 +631,7 @@ module Gori
                      "Moves the rule within its OWN scope. The scope boundary is not a position:\n" \
                      "every global rule resolves before every project one, so moving past the end\n" \
                      "of a block is a scope change, not a step."
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           p.on("--scope=SCOPE", "Which <id>: project (default) | global") { |v| scope = parse_color_scope(v) }
           p.on("--up", "Give the rule higher precedence") { dir = -1 }
           p.on("--down", "Give the rule lower precedence") { dir = 1 }
@@ -660,7 +648,7 @@ module Gori
         abort "gori run colormarker move: pass --up or --down" if dir == 0
 
         if scope.global?
-          colormarker_global_project_check(project_name, db_path)
+          colormarker_global_project_check(proj.name, proj.db)
           # The edge is established HERE, before the write, exactly as the project branch below
           # does it and as MCP's `move_color_rule` does. `Settings.move_colormarker_rule` answers
           # false for an edge AND for a refused save, so reporting one message for both told an
@@ -687,7 +675,7 @@ module Gori
           return
         end
 
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project)
         begin
           ids = store.color_rules.map(&.id)
@@ -712,8 +700,7 @@ module Gori
       end
 
       private def self.cmd_colormarker_preview(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         filter : String? = nil
         format = :text
         scope = Store::RuleScope::Project
@@ -723,8 +710,7 @@ module Gori
                      "Reports how many recent flows the condition MATCHES, and how many it would\n" \
                      "actually PAINT once the rules that already resolve ahead of it are counted.\n" \
                      "The two differ whenever an earlier enabled rule claims a row first."
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           p.on("-wFILTER", "--when=FILTER", "Condition to test (required)") { |v| filter = v }
           # Not decoration: every global rule resolves before every project one, so the scope
           # the rule would be CREATED at decides which existing rules can claim a row from it.
@@ -744,7 +730,7 @@ module Gori
           abort "gori run colormarker preview: #{reason}"
         end
 
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project)
         begin
           ahead = Gori::Colormarker.rules_ahead(Gori::Colormarker.merged(store), 0_i64, scope)

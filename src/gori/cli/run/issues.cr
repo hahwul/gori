@@ -34,8 +34,7 @@ module Gori
       end
 
       private def self.cmd_issues_list(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         format = :text
         export_path : String? = nil
         include_sensitive = false
@@ -48,8 +47,7 @@ module Gori
                      "  gori run issues update <issue-id> [options]\n" \
                      "  gori run issues delete <issue-id> --yes\n\n" \
                      "#{EVIDENCE_LINK_HELP}\n"
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           format_flag(p, [:text, :json, :markdown, :sarif], "Output: text (default) | json | markdown | sarif") { |f| format = f }
           p.on("--export=PATH", "Write to PATH instead of STDOUT") { |v| export_path = v }
           p.on("--include-sensitive", "Emit Authorization/Cookie/Set-Cookie/API-key values in --format sarif's webRequest/webResponse headers instead of [REDACTED]") { include_sensitive = true }
@@ -61,7 +59,7 @@ module Gori
         parser.parse(args)
         refuse_list_leftovers(leftover, "issues", "create, update, delete/rm, list")
 
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project, read_only: true)
         warn_inert_include_sensitive(format) if include_sensitive
         # Build the report while the store is open (markdown resolves linked-flow
@@ -193,8 +191,7 @@ module Gori
       end
 
       private def self.cmd_issues_create(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         title : String? = nil
         sev_s : String? = nil
         cvss : String? = nil
@@ -210,8 +207,7 @@ module Gori
                      "The notes body is optional and comes from one of --notes, --notes-file or\n" \
                      "--notes-stdin; it is written with the issue, in one transaction.\n\n" \
                      "#{EVIDENCE_LINK_HELP}\n"
-          p.on("--project=NAME", "Project to write (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to write") { |v| db_path = v }
+          project_options(p, proj, "write")
           p.on("-tTITLE", "--title=TITLE", "Issue title (required)") { |v| title = v }
           p.on("-sSEVERITY", "--severity=SEVERITY", "Severity: info|low|medium|high|critical (default: auto from cvss, else info)") { |v| sev_s = v }
           p.on("--cvss=CVSS", "CVSS vector string or numeric score (e.g. 9.8 or CVSS:3.1/...)") { |v| cvss = v }
@@ -261,7 +257,7 @@ module Gori
         body = resolve_notes(notes: notes, file: notes_file, stdin: notes_stdin,
           what: "gori run issues create")
 
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project)
         begin
           if err = issue_flow_error(store, flow_id)
@@ -325,8 +321,7 @@ module Gori
       # Remove an issue outright. Distinct from `update --status=resolved|false-positive`,
       # which KEEPS it in the report — this drops it and its entity links.
       private def self.cmd_issues_delete(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         yes = false
 
         positional = parse_args(args, "gori run issues delete") do |p|
@@ -334,15 +329,14 @@ module Gori
                      "Delete an issue and its links. To keep it in the report but mark it closed,\n" \
                      "use `gori run issues update <id> --status=resolved` instead."
           p.on("-y", "--yes", "Confirm deletion") { yes = true }
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
         end
 
         abort "gori run issues delete: too many arguments (expected one <id>, got: #{positional.join(" ")})" if positional.size > 1
         id_s = positional.first? || abort("gori run issues delete: <id> is required")
         id = id_s.to_i64? || abort("gori run issues delete: invalid issue id #{id_s.inspect}")
 
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(proj.name, proj.db))
         begin
           abort "gori run issues delete: no issue with id #{id}" unless store.get_issue(id)
           if err = issue_delete_confirmation_error(id, yes)
@@ -361,8 +355,7 @@ module Gori
       end
 
       private def self.cmd_issues_update(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         id : Int64? = nil
         title : String? = nil
         sev_s : String? = nil
@@ -378,8 +371,7 @@ module Gori
                      "The notes body comes from one of --notes, --notes-file or --notes-stdin.\n" \
                      "--notes '' clears the notes; a file or pipe that gives no bytes is refused.\n\n" \
                      "#{EVIDENCE_LINK_HELP}\n"
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           p.on("-tTITLE", "--title=TITLE", "New issue title") { |v| title = v }
           p.on("-sSEVERITY", "--severity=SEVERITY", "Severity: info|low|medium|high|critical") { |v| sev_s = v }
           p.on("--cvss=CVSS", "New CVSS vector or score (empty to clear)") do |v|
@@ -436,7 +428,7 @@ module Gori
         notes = resolve_notes(notes: notes, file: notes_file, stdin: notes_stdin,
           what: "gori run issues update")
 
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project)
         begin
           unless store.get_issue(id)

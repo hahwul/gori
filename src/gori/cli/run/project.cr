@@ -678,8 +678,7 @@ module Gori
       end
 
       private def self.cmd_scope_list(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         format = :text
 
         leftover = parse_args(args, "gori run project scope") do |p|
@@ -690,14 +689,13 @@ module Gori
                      "  gori run project scope delete|rm <rule-id>\n" \
                      "  gori run project scope enable\n" \
                      "  gori run project scope disable"
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
         refuse_list_leftovers(leftover, "project scope",
           "add, update/edit, delete/rm, enable, disable, list")
 
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project, read_only: true)
         begin
           scope = Scope.load(store)
@@ -758,8 +756,7 @@ module Gori
       # pattern was delete + re-add, which changes the rule's id and briefly drops it from the
       # gate that decides what traffic may be probed.
       private def self.cmd_scope_update(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         kind : String? = nil
         match_type : String? = nil
         pattern : String? = nil
@@ -769,8 +766,7 @@ module Gori
           p.banner = "Usage: gori run project scope update <id> [options]\n\n" \
                      "Change an existing scope rule. Every field keeps its current value unless\n" \
                      "you pass it, so you can edit just the pattern."
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           p.on("-kKIND", "--kind=KIND", "Rule kind: include|exclude") { |v| kind = v }
           p.on("-tTYPE", "--type=TYPE", "Match type: host|string|regex") { |v| match_type = v }
           p.on("-pPATTERN", "--pattern=PATTERN", "Pattern to match") { |v| pattern = v }
@@ -784,7 +780,7 @@ module Gori
         id_s = positional.first? || abort("gori run project scope update: <id> is required (see `gori run project scope list`)")
         id = id_s.to_i64? || abort("gori run project scope update: invalid rule id #{id_s.inspect}")
 
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project)
         begin
           scope = Scope.load(store)
@@ -829,8 +825,7 @@ module Gori
       end
 
       private def self.cmd_scope_add(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         kind = "include"
         match_type = "host"
         pattern : String? = nil
@@ -838,8 +833,7 @@ module Gori
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run project scope add [options]"
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           p.on("-kKIND", "--kind=KIND", "Rule kind: include|exclude (default: include)") { |v| kind = v }
           p.on("-tTYPE", "--type=TYPE", "Match type: host|string|regex (default: host)") { |v| match_type = v }
           p.on("-pPATTERN", "--pattern=PATTERN", "Pattern to match (required)") { |v| pattern = v }
@@ -858,7 +852,7 @@ module Gori
           abort "gori run project scope add: #{err}"
         end
 
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project)
         begin
           scope = Scope.load(store)
@@ -902,13 +896,11 @@ module Gori
       end
 
       private def self.cmd_scope_delete(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run project scope delete|rm <rule-id> [options]"
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort CLI.unknown_option_message("gori run project scope delete", f, p) }
           p.missing_option { |f| abort "gori run project scope delete: missing value for #{f}" }
@@ -922,7 +914,7 @@ module Gori
         abort "gori run project scope delete: too many arguments (expected one <rule-id>)" if positional.size > 1
         id = positional[0].to_i64? || abort("gori run project scope delete: invalid rule id '#{positional[0]}'")
 
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project)
         begin
           scope = Scope.load(store)
@@ -946,14 +938,12 @@ module Gori
       end
 
       private def self.cmd_scope_set_enabled(enable : Bool, args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         action = enable ? "enable" : "disable"
 
         leftover = parse_args(args, "gori run project scope #{action}") do |p|
           p.banner = "Usage: gori run project scope #{action} [options]"
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
         end
         unless leftover.empty?
           abort "gori run project scope #{action}: unexpected argument#{leftover.size == 1 ? "" : "s"} " \
@@ -961,7 +951,7 @@ module Gori
                 "Per-rule change: `gori run project scope update <id>`"
         end
 
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project)
         begin
           scope = Scope.load(store)
@@ -1005,8 +995,7 @@ module Gori
       end
 
       private def self.cmd_sandbox_status(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         format = :text
 
         leftover = parse_args(args, "gori run project sandbox") do |p|
@@ -1016,8 +1005,7 @@ module Gori
                      "'gori run project scope'). Or set it:\n" \
                      "  gori run project sandbox on|enable\n" \
                      "  gori run project sandbox off|disable"
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
         # The one in this family where the silent no-op is a CONTAINMENT failure: `project
@@ -1026,7 +1014,7 @@ module Gori
         refuse_list_leftovers(leftover, "project sandbox", "on/enable, off/disable, status",
           read_verb: "status")
 
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project)
         begin
           scope = Scope.load(store)
@@ -1045,14 +1033,12 @@ module Gori
       end
 
       private def self.cmd_sandbox_set(enable : Bool, args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         action = enable ? "on" : "off"
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run project sandbox #{action} [options]"
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort CLI.unknown_option_message("gori run project sandbox #{action}", f, p) }
           p.missing_option { |f| abort "gori run project sandbox #{action}: missing value for #{f}" }
@@ -1060,7 +1046,7 @@ module Gori
         parse_no_positionals(parser, args, "gori run project sandbox #{action}",
           "`sandbox #{action}` takes no positional arguments; the project is named with --project")
 
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project)
         begin
           scope = Scope.load(store)
@@ -1108,8 +1094,7 @@ module Gori
       end
 
       private def self.cmd_env_list(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         format = :text
 
         leftover = parse_args(args, "gori run project env") do |p|
@@ -1120,13 +1105,12 @@ module Gori
                      "  gori run project env set KEY=value\n" \
                      "  gori run project env set KEY value\n" \
                      "  gori run project env delete|rm KEY"
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
         refuse_list_leftovers(leftover, "project env", "set, delete/rm, list")
 
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project, read_only: true)
         begin
           vars = Settings.project_env_vars
@@ -1152,14 +1136,12 @@ module Gori
       end
 
       private def self.cmd_env_set(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
 
         positional = parse_args(args, "gori run project env set") do |p|
           p.banner = "Usage: gori run project env set KEY=value [options]\n" \
                      "       gori run project env set KEY value [options]"
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
         end
 
         abort "gori run project env set: missing KEY=value (or KEY value)" if positional.empty?
@@ -1167,7 +1149,7 @@ module Gori
         abort "gori run project env set: #{env_set_refusal(positional)}" unless parsed
         key, val = parsed
 
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project)
         begin
           # `Env.set_project_var`, not a load-edit-`save_project`: this command owns ONE key,
@@ -1215,13 +1197,11 @@ module Gori
       end
 
       private def self.cmd_env_delete(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
 
         positional = parse_args(args, "gori run project env delete") do |p|
           p.banner = "Usage: gori run project env delete|rm KEY [options]"
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
         end
 
         abort "gori run project env delete: missing KEY" if positional.empty?
@@ -1229,7 +1209,7 @@ module Gori
         key = positional[0]
         abort "gori run project env delete: invalid KEY '#{key}'" unless Env.valid_key?(key)
 
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project)
         begin
           # "no such key" is decided against the table this process just loaded (open_store
@@ -1275,8 +1255,7 @@ module Gori
       end
 
       private def self.cmd_host_override_list(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         format = :text
 
         leftover = parse_args(args, "gori run project host-override") do |p|
@@ -1288,13 +1267,12 @@ module Gori
                      "  gori run project host-override add 10.0.0.1 api.example.com\n" \
                      "  gori run project host-override update <id> --host=... --ip=...\n" \
                      "  gori run project host-override delete|rm <id>"
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
         refuse_list_leftovers(leftover, "project host-override", "add, update, delete/rm, list")
 
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project, read_only: true)
         begin
           ov = HostOverrides.load(store)
@@ -1323,8 +1301,7 @@ module Gori
       end
 
       private def self.cmd_host_override_add(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         host : String? = nil
         ip : String? = nil
         format = :text
@@ -1333,8 +1310,7 @@ module Gori
           p.banner = "Usage: gori run project host-override add --host=HOST --ip=IP [options]\n" \
                      "       gori run project host-override add IP HOST [options]\n\n" \
                      "Add a project host override (dial IP — or IP:PORT — for HOST; SNI/Host header unchanged)."
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           p.on("--host=HOST", "Hostname to override (case-insensitive)") { |v| host = v }
           p.on("--ip=IP", "IPv4/IPv6 literal to dial, optionally IP:PORT") { |v| ip = v }
           format_flag(p, [:text, :json], "Output: text (default) | json — the new override, as `host-override --format json` lists it") { |f| format = f }
@@ -1357,7 +1333,7 @@ module Gori
         h, i = pair
         abort "gori run project host-override add: invalid host/ip (host hostname-shaped; ip an IPv4/IPv6 literal, optionally IP:PORT or [v6]:PORT)" unless HostOverrides.valid?(h, i)
 
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project)
         begin
           ov = HostOverrides.load(store)
@@ -1389,15 +1365,13 @@ module Gori
       end
 
       private def self.cmd_host_override_update(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         host : String? = nil
         ip : String? = nil
 
         positional = parse_args(args, "gori run project host-override update") do |p|
           p.banner = "Usage: gori run project host-override update <id> --host=HOST --ip=IP [options]"
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           p.on("--host=HOST", "New hostname (case-insensitive)") { |v| host = v }
           p.on("--ip=IP", "New IPv4/IPv6 literal to dial, optionally IP:PORT") { |v| ip = v }
         end
@@ -1410,7 +1384,7 @@ module Gori
         abort "gori run project host-override update: --host and --ip are both required" unless h && i
         abort "gori run project host-override update: invalid host/ip (host hostname-shaped; ip an IPv4/IPv6 literal, optionally IP:PORT or [v6]:PORT)" unless HostOverrides.valid?(h, i)
 
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project)
         begin
           ov = HostOverrides.load(store)
@@ -1429,20 +1403,18 @@ module Gori
       end
 
       private def self.cmd_host_override_delete(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
 
         positional = parse_args(args, "gori run project host-override delete") do |p|
           p.banner = "Usage: gori run project host-override delete|rm <id> [options]"
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
         end
 
         abort "gori run project host-override delete: missing <id>" if positional.empty?
         abort "gori run project host-override delete: too many arguments (expected one <id>)" if positional.size > 1
         id = positional[0].to_i64? || abort("gori run project host-override delete: invalid id '#{positional[0]}'")
 
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project)
         begin
           ov = HostOverrides.load(store)

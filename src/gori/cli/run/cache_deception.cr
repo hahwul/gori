@@ -13,8 +13,7 @@ module Gori
         {"cache-deception [<id>…]", "Check flows for web cache deception (authenticated, anonymous, cache-busted control)"},
       ])]
       private def self.cmd_cache_deception(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         flow_ids = [] of Int64
         unsafe_methods = false
         allow_unscoped = false
@@ -35,8 +34,7 @@ module Gori
                      "are the Fuzzer's `cache-delimiters` payload set; check the promising hits here.\n\n" \
                      "Only safe methods (GET/HEAD/OPTIONS) are checked without --unsafe-methods."
           p.on("--flow=ID", "Check this captured flow (repeatable; same as a positional id)") { |v| flow_ids << parse_flow_id(v, "gori run cache-deception") }
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           p.on("--unsafe-methods", "Also check POST/PUT/PATCH/DELETE — side effects can run up to three times") { unsafe_methods = true }
           p.on("--allow-unscoped", "Send even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
           p.on("-k", "--insecure-upstream", "Do not verify upstream TLS certificates") { insecure = true }
@@ -52,7 +50,7 @@ module Gori
         positional.each { |s| flow_ids << parse_flow_id(s, "gori run cache-deception") }
         abort "gori run cache-deception: name at least one flow id (or --flow ID)" if flow_ids.empty?
 
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project)
         outbound = project_outbound(project, allow_unscoped)
         overrides = Gori::HostOverrides.load(store)

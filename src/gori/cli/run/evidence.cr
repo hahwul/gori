@@ -34,8 +34,7 @@ module Gori
       end
 
       private def self.cmd_evidence_freeze(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         issue_id : Int64? = nil
         ref_s : String? = nil
         ref_id : Int64? = nil
@@ -52,8 +51,7 @@ module Gori
                      "A Repeater tab that has never been sent is refused: there is no exchange,\n" \
                      "and so is one whose request was edited after its stored response arrived —\n" \
                      "that pair never happened. Send it again, or --allow-drift to keep it anyway."
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           p.on("--issue=N", "Issue id that owns the copy (required)") { |v| issue_id = parse_evidence_id(v, "--issue") }
           p.on("--ref=KIND", "Source kind: flow | repeater (required)") { |v| ref_s = v.strip.downcase }
           p.on("--ref-id=M", "Source id (required)") { |v| ref_id = parse_evidence_id(v, "--ref-id") }
@@ -69,7 +67,7 @@ module Gori
         end
         iid, kind, rid = resolve_freeze_ends(issue_id, ref_s, ref_id)
 
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(proj.name, proj.db))
         begin
           abort "gori run evidence freeze: no issue with id #{iid}" unless store.get_issue(iid)
           snap = freeze_snapshot(store, kind, rid, allow_drift)
@@ -111,8 +109,7 @@ module Gori
       end
 
       private def self.cmd_evidence_list(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         issue_id : Int64? = nil
         format = :text
 
@@ -130,15 +127,14 @@ module Gori
                      "  gori run evidence link ID --issue=N\n" \
                      "  gori run evidence unlink ID --issue=N\n" \
                      "  gori run evidence delete ID   (`rm` is accepted)"
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           p.on("--issue=N", "Issue id (omit for the whole project archive)") { |v| issue_id = parse_evidence_id(v, "--issue") }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
         refuse_list_leftovers(leftover, "evidence", "freeze, list, show, link, unlink, delete/rm")
         iid = issue_id
 
-        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
+        store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
         metas = begin
           if iid
             abort "gori run evidence: no issue with id #{iid}" unless store.get_issue(iid)
@@ -160,8 +156,7 @@ module Gori
       end
 
       private def self.cmd_evidence_show(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         format = :text
         include_sensitive = false
 
@@ -172,8 +167,7 @@ module Gori
                      "[REDACTED] unless --include-sensitive; the SHA-256s cover the stored wire\n" \
                      "bytes, so verifying them needs the raw head. Bodies are decoded and capped\n" \
                      "at #{Issues::Export::EVIDENCE_CAP} bytes on the text form."
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           p.on("--include-sensitive", "Emit credential header values verbatim instead of [REDACTED]") { include_sensitive = true }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
@@ -181,7 +175,7 @@ module Gori
         id_s = positional.first? || abort("gori run evidence show: <id> is required")
         id = parse_evidence_id(id_s, "<id>")
 
-        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
+        store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
         ev = begin
           store.get_evidence(id) || abort("gori run evidence show: no frozen evidence with id #{id}")
         ensure
@@ -200,16 +194,14 @@ module Gori
       # reusing the live entity-link command whose target is a source object.
       private def self.cmd_evidence_membership(args : Array(String), *, link : Bool) : Nil
         verb = link ? "link" : "unlink"
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         issue_id : Int64? = nil
 
         positional = parse_args(args, "gori run evidence #{verb}") do |p|
           p.banner = "Usage: gori run evidence #{verb} ID --issue=N\n\n" \
                      "#{link ? "Attach" : "Detach"} an Issue without changing the frozen bytes, hashes, or provenance. " \
                      "Removing the last Issue leaves an orphan; it does not delete the snapshot."
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           p.on("--issue=N", "Issue id (required)") { |v| issue_id = parse_evidence_id(v, "--issue") }
         end
         abort "gori run evidence #{verb}: too many arguments (expected one <id>, got: #{positional.join(" ")})" if positional.size > 1
@@ -219,7 +211,7 @@ module Gori
         abort "gori run evidence #{verb}: --issue is required" if iid_opt.nil?
         iid = iid_opt
 
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(proj.name, proj.db))
         begin
           meta = store.get_evidence_meta(id) || abort("gori run evidence #{verb}: no frozen evidence with id #{id}")
           abort "gori run evidence #{verb}: no issue with id #{iid}" unless store.get_issue(iid)
@@ -256,8 +248,7 @@ module Gori
       end
 
       private def self.cmd_evidence_delete(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         yes = false
 
         positional = parse_args(args, "gori run evidence delete") do |p|
@@ -265,14 +256,13 @@ module Gori
                      "Delete one frozen copy. Its bytes cannot be recovered from the source — that is\n" \
                      "why they were frozen — so prefer freezing a newer copy beside it."
           p.on("-y", "--yes", "Confirm deletion") { yes = true }
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
         end
         abort "gori run evidence delete: too many arguments (expected one <id>, got: #{positional.join(" ")})" if positional.size > 1
         id_s = positional.first? || abort("gori run evidence delete: <id> is required")
         id = parse_evidence_id(id_s, "<id>")
 
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(proj.name, proj.db))
         begin
           meta = store.get_evidence_meta(id) || abort("gori run evidence delete: no frozen evidence with id #{id}")
           # Gated like every other destructive verb here (`issues delete`, `notes delete`, …),

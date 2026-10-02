@@ -1838,6 +1838,19 @@ module Gori
         p.on("--json", "Same as --format=json") { set.call(:json) } if allowed.includes?(:json)
       end
 
+      # `--project=NAME` / `--db=PATH`, the two ways a command names its project. A class and
+      # not a record because OptionParser fills it in from callbacks.
+      class ProjectFlags
+        property name : String? = nil
+        property db : String? = nil
+      end
+
+      # Register the pair, worded for what the command does to the project (`read`, `update`).
+      private def self.project_options(p : OptionParser, proj : ProjectFlags, verb : String) : Nil
+        p.on("--project=NAME", "Project to #{verb} (default: most-recently-active)") { |v| proj.name = v }
+        p.on("--db=PATH", "Explicit SQLite db file to #{verb}") { |v| proj.db = v }
+      end
+
       # Build a parser, let the command register its flags, then add the tail every command
       # shares and parse `args`. Returns the positionals, BOTH halves of `unknown_args`: a word
       # after `--` arrives in the second, and dropping it was a bug here once. `-h` is added

@@ -6,8 +6,7 @@ module Gori
         {"mine [<id>]", "Discover hidden parameters (query/form/multipart/json/header/cookie)"},
       ])]
       private def self.cmd_mine(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         flow_id : Int64? = nil
         request_file : String? = nil
         target_override : String? = nil
@@ -41,8 +40,7 @@ module Gori
           p.banner = "Usage: gori run mine [<flow-id>] [options]"
           p.on("--flow=ID", "Seed the request from a captured flow") { |v| flow_id = parse_flow_id(v, "gori run mine") }
           p.on("--request=FILE", "Read a raw HTTP request to mine") { |v| request_file = v }
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           p.on("--target=URL", "Origin (scheme://host[:port]); required for --request/stdin") { |v| target_override = v }
           p.on("--http2", "Force HTTP/2") { force_h2 = true }
           p.on("--sni=HOST", "TLS SNI override") { |v| sni = v }
@@ -99,8 +97,8 @@ module Gori
         # same way it does for a flow (whose read already hydrates them via open_store).
         # Always, not only when `flow_id` is nil: `--request` + `--flow` used to skip
         # this and then skip `open_store`, so `--slot` lied about no project.
-        hydrate_project_env(project_name, db_path) if project_name || db_path
-        text, default_target, src_h2, evidence = mine_source(flow_id, request_file, project_name, db_path)
+        hydrate_project_env(proj.name, proj.db) if proj.name || proj.db
+        text, default_target, src_h2, evidence = mine_source(flow_id, request_file, proj.name, proj.db)
 
         config = Miner::Config.new
         config.concurrency = concurrency
@@ -120,11 +118,11 @@ module Gori
           abort "gori run mine: --locations was empty — name at least one of query|form|multipart|json|headers|cookies (or omit it to auto-detect)"
         end
         # The project any `--payload-from` reads, open only for the plan build below.
-        named_project = !!(flow_id || project_name || db_path)
-        payload_store = open_payload_from_store("gori run mine", name_specs, named_project, project_name, db_path)
+        named_project = !!(flow_id || proj.name || proj.db)
+        payload_store = open_payload_from_store("gori run mine", name_specs, named_project, proj.name, proj.db)
         # …and the project a `--macro` reads its sessions from, on the same terms and released at
         # the same moment: the plan freezes the steps, so nothing reads it during the run.
-        payload_store ||= open_request_macro_store("gori run mine", request_macro, named_project, project_name, db_path)
+        payload_store ||= open_request_macro_store("gori run mine", request_macro, named_project, proj.name, proj.db)
         options = Miner::PlanOptions.new(text,
           # A `--flow` request is CAPTURED; --request/stdin is a draft the operator authored.
           # See `Miner::PlanOptions#evidence?`.
@@ -135,7 +133,7 @@ module Gori
           # request; an explicit but unusable list is an error above, never a silent default.
           locations: locations,
           config: config, verify: !insecure, sni: sni,
-          overrides: cli_host_overrides(project_name, db_path, flow_id),
+          overrides: cli_host_overrides(proj.name, proj.db, flow_id),
           project_names: name_specs, project: payload_store)
         # Scope gate — see cmd_fuzz / optional_project_outbound: refuse an out-of-scope host unless
         # --allow-unscoped, and enforce Sandbox + exclude rules on every send.
@@ -146,7 +144,7 @@ module Gori
         # seed one identity and send as another.
         activate_slot(slot, "gori run mine")
         preflight_bind_from(bind_from, "gori run mine")
-        outbound = optional_project_outbound(project_name, db_path, flow_id, allow_unscoped)
+        outbound = optional_project_outbound(proj.name, proj.db, flow_id, allow_unscoped)
         plan = begin
           Miner::Plan.build(options, outbound)
         rescue ex : Miner::PlanError
@@ -173,13 +171,13 @@ module Gori
         guard_outbound(outbound, origin.scheme, origin.host, plan.request_target, origin.port, "gori run mine")
         # A writable handle for the run when it has a macro: the steps are recorded in History
         # (source `macro`) and their failures logged, and that is traffic nobody typed at the time.
-        write_store = plan.request_macro ? open_store(resolve_read_project(project_name, db_path), long_running: true) : nil
+        write_store = plan.request_macro ? open_store(resolve_read_project(proj.name, proj.db), long_running: true) : nil
         attach_request_macro_store(plan.request_macro, write_store)
         begin
           # See CLI::Run.seed_bindings — a headless process holds no binding from a previous
           # invocation, so `--bind-from` replays one here. An unseeded `$NAME` ships literally
           # rather than refusing the sweep (see `Env.unbound`).
-          (fid = bind_from) && seed_bindings(fid, project_name, db_path, outbound, insecure, "gori run mine")
+          (fid = bind_from) && seed_bindings(fid, proj.name, proj.db, outbound, insecure, "gori run mine")
           run_mine_stream(plan.engine, origin.scheme, origin.host, origin.port, plan.config, format, plan.pool)
         ensure
           outbound.close

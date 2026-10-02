@@ -22,8 +22,7 @@ module Gori
       # Pin (or clear) a free-text memo on one path — the TUI Sitemap tab's `t`. The tree
       # already READ tags (stamp_tags! below); this is the write side.
       private def self.cmd_sitemap_tag(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         host : String? = nil
         path : String? = nil
         tag : String? = nil
@@ -42,8 +41,7 @@ module Gori
                      "A tag is keyed by host+path, not by a flow, so it OUTLIVES 'history clear'\n" \
                      "and re-attaches if that path is captured again; --list finds one whose\n" \
                      "node is not currently in the tree."
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           p.on("--host=HOST", "Host the path belongs to") { |v| host = v.strip.presence }
           p.on("--path=PATH", "URL path, e.g. /api/users") { |v| path = v.strip.presence }
           p.on("--tag=TEXT", "The memo to pin") { |v| tag = v.strip }
@@ -64,7 +62,7 @@ module Gori
           abort "gori run sitemap tag: --list only reads (narrow it with --host); --path, --tag and --clear write a tag"
         end
 
-        store = open_store(resolve_read_project(project_name, db_path), read_only: list)
+        store = open_store(resolve_read_project(proj.name, proj.db), read_only: list)
         begin
           if list
             rows = store.sitemap_tags.to_a.sort_by { |(k, _)| k }
@@ -155,8 +153,7 @@ module Gori
       end
 
       private def self.cmd_sitemap_tree(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         query : String? = nil
         limit = Store::SITEMAP_MAX
         in_scope = false
@@ -173,8 +170,7 @@ module Gori
                      "Print the deduplicated host → path endpoint tree built from the captured flows.\n" \
                      "By default the query-string variants of one path fold into a single row\n" \
                      "(/search?q=1 + /search?q=2 → /search); --no-fold-query lists them separately."
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           p.on("-qQL", "--query=QL", "Filter endpoints with a QL query (host: method: path: status: scheme: …), plus the tree's own tag: (a path memo; -tag: excludes)") { |v| query = v }
           p.on("-nN", "--limit=N", "Max distinct endpoints to scan (default #{Store::SITEMAP_MAX})") { |v| limit = parse_count(v, "--limit") }
           p.on("--in-scope", "Only hosts in the project's configured scope") { in_scope = true }
@@ -212,7 +208,7 @@ module Gori
         # bad query must not leave a store handle open.
         filter = sitemap_filter(query)
 
-        store = open_store(resolve_read_project(project_name, db_path),
+        store = open_store(resolve_read_project(proj.name, proj.db),
           read_only: !filter.uses_fts?)
         # A `scope:` term needs the project's scope rules, which are in the store that just
         # opened — so the one term this command cannot compile before the open is recompiled

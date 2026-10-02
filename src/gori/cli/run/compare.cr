@@ -8,8 +8,7 @@ module Gori
         {"compare <a> <b>", "Diff two flows' request or response (unified diff)"},
       ])]
       private def self.cmd_compare(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         pane = :response
         changes_only = false
         context : Int32? = nil
@@ -19,8 +18,7 @@ module Gori
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run compare <id-a> <id-b> [options]\n\n" \
                      "Diff two flows' request or response (default: response)."
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           p.on("--pane=PANE", "What to diff: request | response (default: response)") do |v|
             pane = case v.strip.downcase
                    when "request"  then :request
@@ -47,7 +45,7 @@ module Gori
         id_a = positional[0].to_i64? || abort("gori run compare: invalid flow id '#{positional[0]}'")
         id_b = positional[1].to_i64? || abort("gori run compare: invalid flow id '#{positional[1]}'")
 
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project, read_only: true)
         detail_a, detail_b = begin
           {store.get_flow(id_a), store.get_flow(id_b)}

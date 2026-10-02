@@ -4,8 +4,7 @@ module Gori
   module CLI
     module Run
       private def self.cmd_fuzz_saved_list(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         session_id : Int64? = nil
         limit = 50
         offset = 0
@@ -13,8 +12,7 @@ module Gori
 
         positional = parse_args(args, "gori run fuzz list") do |p|
           p.banner = "Usage: gori run fuzz list [options]"
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           p.on("--session=ID", "Only runs saved from this Fuzzer session") { |v| session_id = parse_flow_id(v, "gori run fuzz list") }
           p.on("-nN", "--limit=N", "Runs to return (default 50, max 1000)") { |v| limit = parse_count(v, "--limit").clamp(1, 1000) }
           p.on("--offset=N", "Runs to skip") { |v| offset = parse_nonneg(v, "--offset") }
@@ -22,7 +20,7 @@ module Gori
         end
         abort "gori run fuzz list: unexpected argument #{positional.first.inspect}" unless positional.empty?
 
-        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
+        store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
         begin
           runs = store.fuzz_runs(session_id, limit, offset)
           counts = store.fuzz_result_counts(runs.map(&.id))
@@ -54,8 +52,7 @@ module Gori
       end
 
       private def self.cmd_fuzz_saved_show(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         limit = 200
         offset = 0
         matched_only = false
@@ -66,8 +63,7 @@ module Gori
 
         positional = parse_args(args, "gori run fuzz show") do |p|
           p.banner = "Usage: gori run fuzz show RUN_ID [RESULT_INDEX] [options]"
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           p.on("-nN", "--limit=N", "Result rows to return (default 200, max 5000)") { |v| limit = parse_count(v, "--limit").clamp(1, 5000) }
           p.on("--offset=N", "Result rows to skip") { |v| offset = parse_nonneg(v, "--offset") }
           p.on("--matched-only", "Only matcher hits (with --clusters: only clusters holding one)") { matched_only = true }
@@ -85,7 +81,7 @@ module Gori
         result_idx = positional[1]?.try { |v| parse_flow_id(v, "gori run fuzz show") }
         check_fuzz_show_modes(clusters, cluster, result_idx)
 
-        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
+        store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
         begin
           run = store.get_fuzz_run(run_id) || abort "gori run fuzz show: no saved run ##{run_id}"
           if clusters
@@ -108,22 +104,20 @@ module Gori
       end
 
       private def self.cmd_fuzz_saved_delete(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         yes = false
         force_stale = false
 
         positional = parse_args(args, "gori run fuzz delete") do |p|
           p.banner = "Usage: gori run fuzz delete RUN_ID --yes [options]"
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           p.on("--yes", "Actually delete the run and every stored result") { yes = true }
           p.on("--force-stale", "Also delete a running/saving row left by a crashed writer") { force_stale = true }
         end
         abort "gori run fuzz delete: expected one RUN_ID" unless positional.size == 1
         run_id = parse_flow_id(positional[0], "gori run fuzz delete")
 
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(proj.name, proj.db))
         begin
           run = store.get_fuzz_run(run_id) || abort "gori run fuzz delete: no saved run ##{run_id}"
           unless yes

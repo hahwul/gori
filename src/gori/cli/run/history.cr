@@ -31,8 +31,7 @@ module Gori
       # `history clear --yes`, and a delete that quietly widened to the whole project because
       # an argument went missing from a script is the one failure this file must not have.
       private def self.cmd_history_delete(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         query : String? = nil
         yes = false
         positional = [] of String
@@ -43,8 +42,7 @@ module Gori
                      "Hard-delete the captured flows named by id (every id must exist, or nothing is " \
                      "deleted), or every flow a QL query matches. " \
                      "This can't be undone."
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           p.on("-qQL", "--query=QL", "Delete every flow matching this QL query (host: status:>=500 method: …)") { |v| query = v }
           p.on("--yes", "Actually delete the query's matches (required — there is no interactive prompt here)") { yes = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
@@ -65,9 +63,9 @@ module Gori
           abort "gori run history delete: #{err}"
         end
         if q = query
-          delete_by_query(q, yes, project_name, db_path)
+          delete_by_query(q, yes, proj.name, proj.db)
         else
-          delete_by_id(positional, project_name, db_path)
+          delete_by_id(positional, proj.name, proj.db)
         end
       end
 
@@ -321,15 +319,13 @@ module Gori
       # this; headless, --yes is that confirm — without it we print the count and refuse, so
       # a mistyped command can't empty a capture session.
       private def self.cmd_history_clear(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         yes = false
 
         leftover = parse_args(args, "gori run history clear") do |p|
           p.banner = "Usage: gori run history clear --yes\n\n" \
                      "Delete ALL captured flows in the project. This can't be undone."
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           p.on("--yes", "Actually do it (required — there is no interactive prompt here)") { yes = true }
         end
         unless leftover.empty?
@@ -338,7 +334,7 @@ module Gori
                 "To delete one flow: `gori run history delete <id>`"
         end
 
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(proj.name, proj.db))
         begin
           n = store.count?
           abort "gori run history clear: could not count the flows (project busy) — nothing deleted" unless n
@@ -353,8 +349,7 @@ module Gori
       end
 
       private def self.cmd_history_list(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         query : String? = nil
         limit = 50
         format = :text
@@ -371,8 +366,7 @@ module Gori
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run history [QL query] [options]   (alias: ls)\n\n" \
                      "Subcommands: history show <id> · history delete <id> · history clear --yes"
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           p.on("-qQL", "--query=QL", "Filter with a QL query (host: status:>=500 size:>10000 dur:>500 header: body~rx …)") { |v| query = v }
           p.on("-nN", "--limit=N", "Max rows, newest first (default 50)") { |v| limit = parse_count(v, "--limit") }
           p.on("--view=NAME", "Apply a saved History view — ANDed with -q, like the TUI's `v` picker (see `gori run views`)") { |v| view_name = v }
@@ -447,7 +441,7 @@ module Gori
         # lives in this database). Opening read-only and discovering that afterwards would leave
         # the listing silently short of whatever the off-commit index had not caught up on —
         # exactly what `fts_backlog_error` refuses to let a one-shot answer do.
-        store = open_store(resolve_read_project(project_name, db_path),
+        store = open_store(resolve_read_project(proj.name, proj.db),
           read_only: !query_uses_fts?(query) && view_name.nil?)
         begin
           # The scope lens, opt-in and independent of the persisted `s` flag — the same per-flow
@@ -845,8 +839,7 @@ module Gori
         {"show <id>", "Print a flow's request/response (text, json, raw bytes, HAR, curl/python/fetch/go/httpie, or a CSRF PoC)"},
       ])]
       private def self.cmd_show(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         format = :text
         req_only = false
         resp_only = false
@@ -856,8 +849,7 @@ module Gori
 
         positional = parse_args(args, "gori run show") do |p|
           p.banner = "Usage: gori run show <flow-id> [options]"
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           format_flag(p, [:text, :json, :raw, :har, :curl, :python, :fetch, :go, :httpie, :csrf], "Output: text (default) | json | raw (exact bytes) | har (a one-entry HAR 1.2 log) | curl | python | fetch | go | httpie (the request as runnable client code) | csrf (a self-submitting HTML CSRF PoC)") { |f| format = f }
           p.on("--request-only", "Only the request side") { req_only = true }
           p.on("--response-only", "Only the response side") { resp_only = true }
@@ -881,7 +873,7 @@ module Gori
         # The redaction choice is resolved in here too, and for the same reason: it reads this
         # project's own profiles off the settings row, and its refusal ("no profile named …")
         # has to be reported AFTER the close.
-        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
+        store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
         detail, ws_msgs, choice, interims = begin
           d = store.get_flow(id)
           {d, show_ws_messages(store, d), redact_choice(store, redaction), d.try { store.interims(id) }}

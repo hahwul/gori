@@ -6,8 +6,7 @@ module Gori
   module CLI
     module Run
       private def self.cmd_repeater_minimize(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         insecure = false
         apply = false
         verbatim = false
@@ -21,8 +20,7 @@ module Gori
                      "from a saved repeater request, keeping the response within tolerance of a\n" \
                      "calibrated baseline. SENDS MANY REAL REQUESTS (capped at #{Repeater::Minimize::SEND_CAP}).\n" \
                      "Prints the trimmed request; pass --apply to also save it back to the session."
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           p.on("--apply", "Write the minimized request back into the repeater session") { apply = true }
           p.on("--verbatim", "Send the stored bytes as-is: no token expansion ($ENV.KEY / $BIND.NAME / $GEN.UUID — bare syntax $KEY / $NAME — stay literal), no Content-Length resync (same meaning as `repeater send --verbatim`; body params stop being candidates because their framing could not be kept honest)") { verbatim = true }
           p.on("-k", "--insecure-upstream", "Do not verify the upstream TLS certificate") { insecure = true }
@@ -48,7 +46,7 @@ module Gori
         # this command runs, and a minimize is minutes long (up to SEND_CAP real sends).
         # Re-resolving at apply time therefore let a peer's write steer the UPDATE into a
         # DIFFERENT project's `repeaters` row #id.
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project)
         # HostOverrides.load snapshots rows into memory, so it is safe to keep past the close.
         # Loaded from the SAME open that fetched `rec` rather than via cli_host_overrides,
@@ -61,7 +59,7 @@ module Gori
         end
         abort "gori run repeater minimize: no repeater session ##{id}" unless rec
         activate_slot(slot, "gori run repeater minimize")
-        outbound = project_outbound(project_name, db_path, allow_unscoped)
+        outbound = project_outbound(proj.name, proj.db, allow_unscoped)
 
         text = String.new(rec.request)
         scheme, host, port = minimize_target_or_abort(id, rec, text, outbound)
