@@ -62,6 +62,80 @@ module Gori::Tui
     end
   end
 
+  # The plain half of the family (copy-as, send-to, the OAST provider and session pickers):
+  # no filter, just a centered card of one-line rows sized to the widest of them. The card,
+  # its hit-test and the row chrome (background, selection bar) live here; a subclass draws
+  # what is ON a row and says how wide its card wants to be.
+  abstract class PlainPickerOverlay < PickerOverlay
+    def empty? : Bool
+      entry_count == 0
+    end
+
+    # The card's preferred width before the area clamp: the widest row plus its padding.
+    # Only called on a non-empty list, so a `max_of` over the rows is safe.
+    private abstract def card_w : Int32
+
+    # Draw row `idx` at `ry`, over the background and selection bar already painted.
+    private abstract def draw_row(screen : Screen, box : Rect, ry : Int32, idx : Int32,
+                                  active : Bool, bg : Color) : Nil
+
+    # The narrowest card worth drawing.
+    private def min_w : Int32
+      18
+    end
+
+    # The card heading. The focus badge by default; SendPicker heads its card with a sentence.
+    private def card_title : String
+      title
+    end
+
+    # Centered card geometry over `area`, the inverse of render's offset math. nil when
+    # render would draw nothing. The empty guard comes first because `card_w` is a max_of
+    # over the rows and PickerOverlay#handle_click calls this on EVERY click.
+    def overlay_box(area : Rect) : Rect?
+      return nil if empty?
+      w = {area.w - 4, card_w}.min
+      h = {entry_count + 2, area.h - 2}.min
+      return nil if w < min_w || area.h < 5
+      x = area.x + (area.w - w) // 2
+      y = area.y + (area.h - h) // 2
+      Rect.new(x, y, w, h)
+    end
+
+    # Row index under (mx,my), mirroring render's list loop; nil outside. Bound to the rows
+    # ACTUALLY drawn, so a click on a height-clamped card's bottom border can't pick one that
+    # was never there.
+    def row_at(box : Rect, mx : Int32, my : Int32) : Int32?
+      rows = {box.h - 2, entry_count}.min
+      i = my - (box.y + 1)
+      return nil if i < 0 || i >= rows
+      return nil if mx <= box.x || mx >= box.right - 1
+      ci = @scroll + i
+      ci < entry_count ? ci : nil
+    end
+
+    def render(screen : Screen, area : Rect) : Nil
+      box = overlay_box(area)
+      unless box
+        Overlay.too_small(screen, area, "picker needs a larger window")
+        return
+      end
+      Frame.card(screen, box, card_title, border: Theme.border_focus)
+      rows = {box.h - 2, entry_count}.min
+      ensure_visible(rows)
+      (0...rows).each do |i|
+        ci = @scroll + i
+        break if ci >= entry_count
+        ry = box.y + 1 + i
+        active = ci == @selected
+        bg = active ? Theme.accent_bg : Theme.panel
+        screen.fill(Rect.new(box.x + 1, ry, box.w - 2, 1), bg)
+        screen.cell(box.x + 1, ry, active ? '▎' : ' ', Theme.accent, bg)
+        draw_row(screen, box, ry, ci, active, bg)
+      end
+    end
+  end
+
   # The type-to-filter half of the family (flow / sub-tab / issue / note): a filter bar
   # above a `tee_divider`, an in-memory substring match over precomputed haystacks, and
   # live IME composition on the query. Every printable key that isn't a nav key filters.

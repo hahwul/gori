@@ -15,14 +15,10 @@ module Gori::Tui
   # PROMPT-TIER on the Overlay seam, exactly like CopyPicker: the send is the injected
   # `on_commit` (Runner#send_to_open), but the Runner keeps it out of @active_overlay so
   # it floats over @overlay instead of replacing it.
-  class SendPicker < PickerOverlay
+  class SendPicker < PlainPickerOverlay
     getter payload : String
 
     def initialize(@card_label : String, @payload : String, @destinations : Array(SendMenu::Destination))
-    end
-
-    def empty? : Bool
-      @destinations.empty?
     end
 
     def entry_count : Int32
@@ -74,69 +70,25 @@ module Gori::Tui
       :stay
     end
 
-    # Centered card geometry over `area` — inverse of render's offset math. nil when
-    # render would draw nothing (mirrors the w/h guard). Width fits the widest of the
-    # rows (label + hint) and the sized title.
-    def overlay_box(area : Rect) : Rect?
-      # content_w is a max_of over the rows, which raises on an empty list. Unreachable
-      # today (both open-sites refuse to open an empty picker), but PickerOverlay#handle_click
-      # calls this for EVERY click, so a nil here is the difference between the base's
-      # "a click outside dismisses" promise and an exception out of the event loop.
-      return nil if @destinations.empty?
-      w = {area.w - 4, content_w + 10}.min
-      h = {@destinations.size + 2, area.h - 2}.min
-      return nil if w < 18 || area.h < 5
-      x = area.x + (area.w - w) // 2
-      y = area.y + (area.h - h) // 2
-      Rect.new(x, y, w, h)
-    end
-
-    # Row index under (mx,my), mirroring render's list loop; nil outside. Bound to the
-    # ACTUALLY rendered rows so a click on a height-clamped card's bottom border can't
-    # pick a row that was never drawn.
-    def row_at(box : Rect, mx : Int32, my : Int32) : Int32?
-      rows = {box.h - 2, @destinations.size}.min
-      i = my - (box.y + 1)
-      return nil if i < 0 || i >= rows
-      return nil if mx <= box.x || mx >= box.right - 1
-      ci = @scroll + i
-      ci < @destinations.size ? ci : nil
-    end
-
-    def render(screen : Screen, area : Rect) : Nil
-      box = overlay_box(area)
-      unless box
-        Overlay.too_small(screen, area, "picker needs a larger window")
-        return
-      end
-      Frame.card(screen, box, card_title, border: Theme.border_focus)
-      rows = {box.h - 2, @destinations.size}.min
-      ensure_visible(rows)
-      (0...rows).each do |i|
-        ci = @scroll + i
-        break if ci >= @destinations.size
-        d = @destinations[ci]
-        ry = box.y + 1 + i
-        active = ci == @selected
-        bg = active ? Theme.accent_bg : Theme.panel
-        screen.fill(Rect.new(box.x + 1, ry, box.w - 2, 1), bg)
-        screen.cell(box.x + 1, ry, active ? '▎' : ' ', Theme.accent, bg)
-        screen.text(box.x + 3, ry, d.key.to_s, Theme.accent, bg, Attribute::Bold)
-        screen.text(box.x + 6, ry, d.label, active ? Theme.text_bright : Theme.text, bg, Attribute::Bold)
-        screen.text(box.right - Screen.draw_width(d.hint) - 2, ry, d.hint, Theme.muted, bg)
-      end
+    private def draw_row(screen : Screen, box : Rect, ry : Int32, idx : Int32, active : Bool, bg : Color) : Nil
+      d = @destinations[idx]
+      screen.text(box.x + 3, ry, d.key.to_s, Theme.accent, bg, Attribute::Bold)
+      screen.text(box.x + 6, ry, d.label, active ? Theme.text_bright : Theme.text, bg, Attribute::Bold)
+      screen.text(box.right - Screen.draw_width(d.hint) - 2, ry, d.hint, Theme.muted, bg)
     end
 
     # The card's own heading, with the shared payload's size appended once
-    # (e.g. "Send selection to · 128 B").
+    # (e.g. "Send selection to · 128 B"). Replaces the base's default (the focus badge,
+    # `title`), which here is a region name, not a sentence.
     private def card_title : String
       "#{@card_label} · #{Fmt.size(@payload.bytesize.to_i64)}"
     end
 
-    # Widest row (label + hint) and the sized title, driving the card width.
-    private def content_w : Int32
+    # Widest of the rows (label + hint) and the sized title, plus its padding, driving the
+    # card width.
+    private def card_w : Int32
       rows = @destinations.max_of { |d| Screen.draw_width(d.label) + Screen.draw_width(d.hint) + 4 }
-      {rows, Screen.draw_width(card_title)}.max
+      {rows, Screen.draw_width(card_title)}.max + 10
     end
   end
 end

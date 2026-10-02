@@ -18,7 +18,7 @@ module Gori::Tui
   # on every reload/soft-sync (a peer process toggling a provider is enough), so an index
   # captured when the card opened can point at a different provider by the time ↵ lands. The
   # key is the same identity `Listener#provider_key` and `listener_for` already run on.
-  class OastProviderPicker < PickerOverlay
+  class OastProviderPicker < PlainPickerOverlay
     # One enabled provider as the card shows it. `live` marks the ones already polling — a
     # provider gori is listening with mints its payload locally, with no round trip, and that
     # is worth seeing BEFORE the pick rather than after it.
@@ -33,10 +33,6 @@ module Gori::Tui
     # What the card is being asked FOR ("GET PAYLOAD FROM" / "START LISTENING WITH") — the two
     # open-sites differ only in this and in their injected on_commit.
     def initialize(@rows : Array(Row), @title : String)
-    end
-
-    def empty? : Bool
-      @rows.empty?
     end
 
     def entry_count : Int32
@@ -82,51 +78,14 @@ module Gori::Tui
       :stay
     end
 
-    # Centered card geometry over `area` — inverse of render's offset math. nil when render
-    # would draw nothing; the empty guard is why `content_w`'s max_of is safe (the base class
-    # calls this on every click).
-    def overlay_box(area : Rect) : Rect?
-      return nil if @rows.empty?
-      w = {area.w - 4, content_w + 8}.min
-      h = {@rows.size + 2, area.h - 2}.min
-      return nil if w < 30 || area.h < 5
-      x = area.x + (area.w - w) // 2
-      y = area.y + (area.h - h) // 2
-      Rect.new(x, y, w, h)
+    # Floors at 30 cells, not the base's 18: every row carries a right-aligned meta, and
+    # "interactsh · project · ● live" alone is 29 of them.
+    private def min_w : Int32
+      30
     end
 
-    # Row index under (mx,my), mirroring render's list loop; nil outside. Bound to the rows
-    # ACTUALLY drawn, so a click on a height-clamped card's bottom border can't pick one that
-    # was never there.
-    def row_at(box : Rect, mx : Int32, my : Int32) : Int32?
-      rows = {box.h - 2, @rows.size}.min
-      i = my - (box.y + 1)
-      return nil if i < 0 || i >= rows
-      return nil if mx <= box.x || mx >= box.right - 1
-      ci = @scroll + i
-      ci < @rows.size ? ci : nil
-    end
-
-    def render(screen : Screen, area : Rect) : Nil
-      box = overlay_box(area)
-      unless box
-        Overlay.too_small(screen, area, "picker needs a larger window")
-        return
-      end
-      Frame.card(screen, box, title, border: Theme.border_focus)
-      rows = {box.h - 2, @rows.size}.min
-      ensure_visible(rows)
-      (0...rows).each do |i|
-        ci = @scroll + i
-        break if ci >= @rows.size
-        draw_row(screen, box, box.y + 1 + i, @rows[ci], ci == @selected)
-      end
-    end
-
-    private def draw_row(screen : Screen, box : Rect, ry : Int32, row : Row, active : Bool) : Nil
-      bg = active ? Theme.accent_bg : Theme.panel
-      screen.fill(Rect.new(box.x + 1, ry, box.w - 2, 1), bg)
-      screen.cell(box.x + 1, ry, active ? '▎' : ' ', Theme.accent, bg)
+    private def draw_row(screen : Screen, box : Rect, ry : Int32, idx : Int32, active : Bool, bg : Color) : Nil
+      row = @rows[idx]
       # Meta first, so the NAME is the field that gets width-clamped — the same order (and the
       # same reason) as OastSessionPicker: a long provider name must not push the live marker
       # off the card, since that marker is what says this pick costs no round trip.
@@ -151,12 +110,14 @@ module Gori::Tui
       row.live ? "#{base} · ● live" : base
     end
 
-    # Widest row, driving the card width — measured in CELLS, like draw_row's `used`.
-    private def content_w : Int32
-      @rows.max_of do |r|
+    # Widest row plus its padding, driving the card width — measured in CELLS, like
+    # draw_row's `used`.
+    private def card_w : Int32
+      widest = @rows.max_of do |r|
         Screen.draw_width(r.name) + Screen.draw_width(r.host) +
           Screen.draw_width(meta_text(r)) + 6
       end
+      widest + 8
     end
   end
 end
