@@ -743,11 +743,7 @@ module Gori
       end
 
       def self.parse(s : String) : LinkOwnerKind?
-        case s
-        when "issue" then Issue
-        when "note"  then Note
-        else              nil
-        end
+        values.find { |v| v.label == s }
       end
     end
 
@@ -763,13 +759,7 @@ module Gori
       end
 
       def self.parse(s : String) : LinkRefKind?
-        case s
-        when "flow"     then Flow
-        when "repeater" then Repeater
-        when "fuzz"     then Fuzz
-        when "miner"    then Miner
-        else                 nil
-        end
+        values.find { |v| v.label == s }
       end
 
       # Short tag for the TUI list (e.g. "[hist]").
@@ -1152,10 +1142,7 @@ module Gori
       # `from_label` is only the total enum projection; `Store#match_rules` carries the raw
       # value into `MatchRule`, whose `inert?` guard prevents the projection from running.
       def self.from_label?(s : String) : RuleTarget?
-        case s
-        when "response" then Response
-        when "request"  then Request
-        end
+        values.find { |v| v.label == s }
       end
 
       def self.from_label(s : String) : RuleTarget
@@ -1188,11 +1175,7 @@ module Gori
       # way out of the store. `head` remains the legacy enum projection, and the raw database
       # label is preserved beside it so this fallback cannot make the row executable.
       def self.from_label?(s : String) : RulePart?
-        case s
-        when "body" then Body
-        when "ws"   then Ws
-        when "head" then Head
-        end
+        values.find { |v| v.label == s }
       end
 
       def self.from_label(s : String) : RulePart
@@ -1257,14 +1240,7 @@ module Gori
       end
 
       def self.from_label?(s : String) : RuleOp?
-        case s
-        when "add_header"    then AddHeader
-        when "set_header"    then SetHeader
-        when "remove_header" then RemoveHeader
-        when "short_circuit" then ShortCircuit
-        when "pipe"          then Pipe
-        when "replace"       then Replace
-        end
+        values.find { |v| v.label == s }
       end
 
       def self.from_label(s : String) : RuleOp
@@ -1321,10 +1297,7 @@ module Gori
       end
 
       def self.from_label?(s : String) : MatchKind?
-        case s
-        when "regex"   then Regex
-        when "literal" then Literal
-        end
+        values.find { |v| v.label == s }
       end
 
       def self.from_label(s : String) : MatchKind
@@ -1355,12 +1328,7 @@ module Gori
       end
 
       def self.from_label?(s : String) : RespondKind?
-        case s
-        when "inline" then Inline
-        when "file"   then File
-        when "dir"    then Dir
-        when "fault"  then Fault
-        end
+        values.find { |v| v.label == s }
       end
 
       # The sub-kind a row written before `respond` existed means: a `body_file` made it a file
@@ -1386,11 +1354,7 @@ module Gori
       end
 
       def self.from_label?(s : String) : FaultKind?
-        case s
-        when "close" then Close
-        when "reset" then Reset
-        when "hang"  then Hang
-        end
+        values.find { |v| v.label == s }
       end
     end
 
