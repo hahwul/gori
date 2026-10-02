@@ -13,7 +13,7 @@ require "../spec_helper"
 #      gone. That is the bug report `^Y` exists to answer, and the footer is where it lands.
 #
 #   B. A strip that starts with `type ` and still offers `space cmds`. JWT's HEADER, PAYLOAD
-#      and SECRET are always-typing panes (`JwtController#edit_json` / `#edit_secret` insert
+#      and SECRET are always-typing panes (`JwtController#edit_lens_editor` / `#edit_secret` insert
 #      the character; `#handle_body_key` only defers ctrl/alt chords), so that space typed a
 #      space. It cost the one token with room to say which key copies — on the three panes
 #      where `^Y` is not the convenient copy but the ONLY one.

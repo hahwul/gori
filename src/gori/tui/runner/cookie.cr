@@ -4,11 +4,11 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # --- cookie workbench (sub-tab + lens actions). The body's text editing + focus nav
   # stay inline in CookieController; these power the space menu + palette. ---
   def cookie_new : Nil
-    cookie_controller.cookie_new
+    cookie_controller.new_session
   end
 
   def cookie_close : Nil
-    cookie_controller.cookie_close
+    cookie_controller.close_session
     resolve_subtab_focus # don't strand on a now-hidden strip
   end
 
@@ -17,7 +17,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   end
 
   def cookie_duplicate_subtab : Nil
-    cookie_controller.cookie_duplicate
+    cookie_controller.duplicate_session
   end
 
   def cookie_clear : Nil
@@ -49,14 +49,14 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   end
 
   def cookie_copy : Nil
-    cookie_controller.cookie_copy
+    cookie_controller.copy_pane
   end
 
   def cookie_copy_output : Nil
-    cookie_controller.cookie_copy_output
+    cookie_controller.copy_output
   end
 
   def cookie_read_mode? : Bool
-    cookie_controller.cookie_read_mode?
+    cookie_controller.read_mode?
   end
 end

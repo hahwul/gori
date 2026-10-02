@@ -3,12 +3,12 @@ require "file_utils"
 
 include Gori::Tui
 
-# `JwtController#jwt_copy` is the whole of `^Y` on this tab: `Runner#read_copy` routes `:jwt`
+# `JwtController#copy_pane` is the whole of `^Y` on this tab: `Runner#read_copy` routes `:jwt`
 # straight here, with none of the `read_selection_active? ? copy : copy_all` branch its six
 # siblings get. So the selection-vs-whole-pane decision is this one method's — and it used to
 # make it for exactly one of the four editors.
 #
-#   * INPUT in INS copied `s.input.text`, the WHOLE token, while `jwt_selection_active?` was
+#   * INPUT in INS copied `s.input.text`, the WHOLE token, while `selection_active?` was
 #     reporting the ⇧arrow band as live. That is the split `RepeaterView#pane_selection?`
 #     documents in its own comment: claim a selection, copy something else.
 #   * HEADER and PAYLOAD are always-typing `TextArea`s that grow a band through the same
@@ -199,11 +199,11 @@ private TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhIn0.sig"
 # has to be more than the line the caret sits on, which a single-line token cannot show.
 private MULTILINE = "one\ntwo\nthree"
 
-describe "Gori::Tui::JwtController#jwt_copy_text" do
+describe "Gori::Tui::JwtController#pane_copy_text" do
   describe "INPUT in INSERT" do
     it "takes the ⇧arrow band, not the whole token" do
       with_jwt_copy_controller do |ctl|
-        ctl.jwt_from_text(TOKEN)
+        ctl.session_from_text(TOKEN)
         s = ctl.@sessions[ctl.@idx]
         # `i` is `editor.insert` in `Verb::Scope::Editor` now, not a controller arm — the
         # shell resolves the chord and calls this seam (see verbs/editor.cr).
@@ -212,8 +212,8 @@ describe "Gori::Tui::JwtController#jwt_copy_text" do
         5.times { ctl.handle_body_key(key(Termisu::Input::Key::Right, :shift)) }
 
         s.input.selection_text.should eq("eyJhb")
-        ctl.jwt_selection_active?.should be_true # what the space menu is told…
-        ctl.jwt_copy_text.should eq("eyJhb")     # …and what the copy now agrees with
+        ctl.selection_active?.should be_true  # what the space menu is told…
+        ctl.pane_copy_text.should eq("eyJhb") # …and what the copy now agrees with
       end
     end
 
@@ -221,10 +221,10 @@ describe "Gori::Tui::JwtController#jwt_copy_text" do
     # whole pane is the answer — `read_copy` has no `*_copy_all` branch to fall back to here.
     it "takes the whole token when no band is live" do
       with_jwt_copy_controller do |ctl|
-        ctl.jwt_from_text(TOKEN)
+        ctl.session_from_text(TOKEN)
         ctl.handle_body_key(key(Termisu::Input::Key::LowerI, :none, 'i'))
         ctl.@sessions[ctl.@idx].input.selection?.should be_false
-        ctl.jwt_copy_text.should eq(TOKEN)
+        ctl.pane_copy_text.should eq(TOKEN)
       end
     end
   end
@@ -238,23 +238,23 @@ describe "Gori::Tui::JwtController#jwt_copy_text" do
   describe "INPUT in READ" do
     it "takes the whole buffer when no band is live, not the caret's line" do
       with_jwt_copy_controller do |ctl|
-        ctl.jwt_from_text(MULTILINE)
+        ctl.session_from_text(MULTILINE)
         s = ctl.@sessions[ctl.@idx]
         s.input_mode.should eq(InputMode::Read) # the pane opens in READ
         s.input_read.selection?(s.input).should be_false
         s.input_read.copy_text(s.input).should eq("one") # the old payload: line 0 alone
-        ctl.jwt_copy_text.should eq(MULTILINE)
+        ctl.pane_copy_text.should eq(MULTILINE)
       end
     end
 
     it "takes the ⇧arrow band when one is live" do
       with_jwt_copy_controller do |ctl|
-        ctl.jwt_from_text(MULTILINE)
+        ctl.session_from_text(MULTILINE)
         s = ctl.@sessions[ctl.@idx]
         3.times { ctl.handle_body_key(key(Termisu::Input::Key::Right, :shift)) }
 
         s.input_read.selection?(s.input).should be_true
-        ctl.jwt_copy_text.should eq("one")
+        ctl.pane_copy_text.should eq("one")
       end
     end
   end
@@ -264,7 +264,7 @@ describe "Gori::Tui::JwtController#jwt_copy_text" do
   describe "HEADER / PAYLOAD (always typing)" do
     it "takes the band in HEADER" do
       with_jwt_copy_controller do |ctl|
-        ctl.jwt_from_text(TOKEN)
+        ctl.session_from_text(TOKEN)
         ctl.load_decoded # the operator's route onto this lens: seeds the editors + focuses HEADER
         s = ctl.@sessions[ctl.@idx]
         s.pane.should eq(:header)
@@ -273,29 +273,29 @@ describe "Gori::Tui::JwtController#jwt_copy_text" do
         ctl.handle_body_key(key(Termisu::Input::Key::End, :shift))
 
         s.header.selection_text.should eq(%(  "alg": "HS256"))
-        ctl.jwt_copy_text.should eq(%(  "alg": "HS256"))
+        ctl.pane_copy_text.should eq(%(  "alg": "HS256"))
         # …and SAYS so: `read_selection_active?` is what a drag's release consults before it
-        # copies, and this pane answered false for a band `jwt_copy_text` was about to take.
-        ctl.jwt_selection_active?.should be_true
+        # copies, and this pane answered false for a band `pane_copy_text` was about to take.
+        ctl.selection_active?.should be_true
       end
     end
 
     it "reports no band on HEADER / PAYLOAD until one is grown" do
       with_jwt_copy_controller do |ctl|
-        ctl.jwt_from_text(TOKEN)
+        ctl.session_from_text(TOKEN)
         ctl.load_decoded
         s = ctl.@sessions[ctl.@idx]
-        ctl.jwt_selection_active?.should be_false
+        ctl.selection_active?.should be_false
         s.pane = :payload
-        ctl.jwt_selection_active?.should be_false
+        ctl.selection_active?.should be_false
         3.times { ctl.handle_body_key(key(Termisu::Input::Key::Right, :shift)) }
-        ctl.jwt_selection_active?.should be_true
+        ctl.selection_active?.should be_true
       end
     end
 
     it "takes the band in PAYLOAD" do
       with_jwt_copy_controller do |ctl|
-        ctl.jwt_from_text(TOKEN)
+        ctl.session_from_text(TOKEN)
         ctl.load_decoded
         s = ctl.@sessions[ctl.@idx]
         s.pane = :payload
@@ -303,17 +303,17 @@ describe "Gori::Tui::JwtController#jwt_copy_text" do
 
         band = s.payload.selection_text
         band.should_not be_nil
-        ctl.jwt_copy_text.should eq(band)
+        ctl.pane_copy_text.should eq(band)
       end
     end
 
     it "falls back to the whole editor with no band" do
       with_jwt_copy_controller do |ctl|
-        ctl.jwt_from_text(TOKEN)
+        ctl.session_from_text(TOKEN)
         ctl.load_decoded
         s = ctl.@sessions[ctl.@idx]
         s.header.selection?.should be_false
-        ctl.jwt_copy_text.should eq(s.header.text)
+        ctl.pane_copy_text.should eq(s.header.text)
       end
     end
   end

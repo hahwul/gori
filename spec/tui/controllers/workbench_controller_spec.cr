@@ -57,11 +57,7 @@ private macro each_tool(&block)
   {% end %}
 end
 
-private def cur_of(ctl : JwtController) : JwtSession
-  ctl.@sessions[ctl.@idx]
-end
-
-private def cur_of(ctl : CookieController) : CookieSession
+private def cur_of(ctl)
   ctl.@sessions[ctl.@idx]
 end
 
@@ -71,111 +67,6 @@ end
 
 private def second_editor(ctl : CookieController) : TextArea
   cur_of(ctl).payload
-end
-
-# The tools spell the shared verbs with their own prefix.
-private def new_session(c : JwtController)
-  c.jwt_new
-end
-
-private def new_session(c : CookieController)
-  c.cookie_new
-end
-
-private def close_session(c : JwtController)
-  c.jwt_close
-end
-
-private def close_session(c : CookieController)
-  c.cookie_close
-end
-
-private def duplicate_session(c : JwtController)
-  c.jwt_duplicate
-end
-
-private def duplicate_session(c : CookieController)
-  c.cookie_duplicate
-end
-
-private def session_from_text(c : JwtController, t : String)
-  c.jwt_from_text(t)
-end
-
-private def session_from_text(c : CookieController, t : String)
-  c.cookie_from_text(t)
-end
-
-private def copy_pane(c : JwtController)
-  c.jwt_copy
-end
-
-private def copy_pane(c : CookieController)
-  c.cookie_copy
-end
-
-private def pane_copy_text(c : JwtController)
-  c.jwt_copy_text
-end
-
-private def pane_copy_text(c : CookieController)
-  c.cookie_copy_text
-end
-
-private def copy_output(c : JwtController)
-  c.jwt_copy_token
-end
-
-private def copy_output(c : CookieController)
-  c.cookie_copy_output
-end
-
-private def read_mode?(c : JwtController)
-  c.jwt_read_mode?
-end
-
-private def read_mode?(c : CookieController)
-  c.cookie_read_mode?
-end
-
-private def selection_active?(c : JwtController)
-  c.jwt_selection_active?
-end
-
-private def selection_active?(c : CookieController)
-  c.cookie_selection_active?
-end
-
-private def selection_text(c : JwtController)
-  c.jwt_selection_text
-end
-
-private def selection_text(c : CookieController)
-  c.cookie_selection_text
-end
-
-private def select_line(c : JwtController)
-  c.jwt_select_line
-end
-
-private def select_line(c : CookieController)
-  c.cookie_select_line
-end
-
-private def clear_selection(c : JwtController)
-  c.jwt_clear_selection
-end
-
-private def clear_selection(c : CookieController)
-  c.cookie_clear_selection
-end
-
-private def rename_at(c : JwtController, idx : Int32, name : String)
-  c.view_at(idx).try { |v| c.apply_rename(v, name) }
-end
-
-private def rename_at(c : CookieController, idx : Int32, name : String)
-  c.view_at(idx).try { |v| c.apply_rename(v, name) }
 end
 
 private def wkey(k : Termisu::Input::Key, mods : Termisu::Input::Modifier = :none,
@@ -217,18 +108,18 @@ describe "the JWT and Cookie workbench controllers" do
   describe "sub-tab lifecycle" do
     it "opens, duplicates and closes sessions with the tool's toasts, keeping at least one" do
       each_tool do |ctl, host, t|
-        new_session(ctl)
+        ctl.new_session
         host.statuses.last.should eq("new #{t.name} session (2 open)")
         host.focus_requests.last.should eq(:body)
         ctl.subtab_index.should eq(1)
-        duplicate_session(ctl)
+        ctl.duplicate_session
         host.statuses.last.should eq("duplicated #{t.name} session (3 open)")
         ctl.subtab_index.should eq(2)
-        close_session(ctl)
+        ctl.close_session
         host.statuses.last.should eq("session closed (2 open)")
-        close_session(ctl)
+        ctl.close_session
         host.statuses.last.should eq("session closed")
-        close_session(ctl) # the last one is replaced by a blank, never removed
+        ctl.close_session # the last one is replaced by a blank, never removed
         host.statuses.last.should eq("session closed")
         ctl.subtab_labels.should eq(["1:empty"])
       end
@@ -237,7 +128,7 @@ describe "the JWT and Cookie workbench controllers" do
     it "seeds a new session from sent text, stripped, and jumps to it" do
       each_tool do |ctl, host, t|
         sent = "  #{t.seed}\n"
-        session_from_text(ctl, sent)
+        ctl.session_from_text(sent)
         host.statuses.last.should eq("sent selection to #{t.name} (#{sent.bytesize}b)")
         ctl.subtab_index.should eq(1)
         cur_of(ctl).input.text.should eq(t.seed)
@@ -248,12 +139,12 @@ describe "the JWT and Cookie workbench controllers" do
 
     it "duplicates and closes the MARKED sub-tabs as a batch, the close behind a confirm" do
       each_tool do |ctl, host, t|
-        new_session(ctl)
+        ctl.new_session
         ctl.toggle_subtab_mark(0)
         ctl.toggle_subtab_mark(1)
-        duplicate_session(ctl)
+        ctl.duplicate_session
         host.statuses.last.should eq("duplicated 2 sessions (4 open)")
-        close_session(ctl)
+        ctl.close_session
         host.confirms.last.should eq({"CLOSE #{t.name.upcase} SESSIONS",
                                       "Close 2 sub-tabs?\nEach #{t.noun} and its edits are discarded."})
         host.statuses.last.should eq("closed 2 sub-tabs")
@@ -263,10 +154,10 @@ describe "the JWT and Cookie workbench controllers" do
 
     it "labels a chip by its custom name, capped at 18 columns, and a blank rename reverts it" do
       each_tool do |ctl, _host, _t|
-        rename_at(ctl, 0, "  a rather long session name  ")
+        ctl.apply_rename(ctl.view_at(0).not_nil!, "  a rather long session name  ")
         ctl.view_at(0).try(&.name).should eq("a rather long session name")
         ctl.subtab_labels.should eq(["1:a rather long ses…"])
-        rename_at(ctl, 0, "   ")
+        ctl.apply_rename(ctl.view_at(0).not_nil!, "   ")
         ctl.view_at(0).try(&.name).should be_nil
         ctl.subtab_labels.should eq(["1:empty"])
         ctl.view_at(1).should be_nil
@@ -306,7 +197,7 @@ describe "the JWT and Cookie workbench controllers" do
 
     it "types in INS and re-decodes per key; esc drops to READ in place" do
       each_tool do |ctl, host, t|
-        session_from_text(ctl, t.seed)
+        ctl.session_from_text(t.seed)
         before = cur_of(ctl).decoded
         ctl.editor_enter_insert.should be_true
         ctl.body_badge.should eq(:editor)
@@ -340,22 +231,22 @@ describe "the JWT and Cookie workbench controllers" do
 
     it "copies an INS band, then a READ selection, and clears whichever is live" do
       each_tool do |ctl, _host, t|
-        session_from_text(ctl, t.seed)
+        ctl.session_from_text(t.seed)
         ctl.editor_enter_insert
         ctl.handle_body_key(wkey(Termisu::Input::Key::End))
         2.times { ctl.handle_body_key(wkey(Termisu::Input::Key::Left, Termisu::Input::Modifier::Shift)) }
-        selection_active?(ctl).should be_true
-        selection_text(ctl).should eq(t.seed[-2..])
-        pane_copy_text(ctl).should eq(t.seed[-2..])
-        clear_selection(ctl)
-        selection_active?(ctl).should be_false
-        pane_copy_text(ctl).should eq(t.seed)
+        ctl.selection_active?.should be_true
+        ctl.selection_text.should eq(t.seed[-2..])
+        ctl.pane_copy_text.should eq(t.seed[-2..])
+        ctl.clear_selection
+        ctl.selection_active?.should be_false
+        ctl.pane_copy_text.should eq(t.seed)
         ctl.editor_exit_insert.should be_true
-        select_line(ctl)
-        selection_active?(ctl).should be_true
-        selection_text(ctl).should eq(t.seed)
-        clear_selection(ctl)
-        selection_active?(ctl).should be_false
+        ctl.select_line
+        ctl.selection_active?.should be_true
+        ctl.selection_text.should eq(t.seed)
+        ctl.clear_selection
+        ctl.selection_active?.should be_false
       end
     end
   end
@@ -363,14 +254,14 @@ describe "the JWT and Cookie workbench controllers" do
   describe "the read-only cards" do
     it "refuses INS, reads as READ mode, and hands letters and space to the keymap" do
       each_tool do |ctl, _host, t|
-        session_from_text(ctl, t.seed)
+        ctl.session_from_text(t.seed)
         {false, true}.each do |second|
           to_second_lens(ctl) if second
           panes = second ? t.second_panes : t.decode_panes
           (panes & t.readonly).each do |pane|
             focus_pane(ctl, pane)
             ctl.insert_key_refusal.should eq("this pane is read-only — i edits the INPUT (↹ up); intercept toggles from the tab bar")
-            read_mode?(ctl).should be_true
+            ctl.read_mode?.should be_true
             ctl.body_badge.should eq(:body)
             ctl.body_takes_text?.should be_false
             ctl.accepts_bulk_paste?.should be_false
@@ -396,14 +287,14 @@ describe "the JWT and Cookie workbench controllers" do
 
     it "says why the OUTPUT copy is refused, and copies the focused pane when there is one" do
       each_tool do |ctl, host, t|
-        copy_output(ctl)
+        ctl.copy_output
         host.statuses.last.should eq("no valid #{t.noun} to copy")
         focus_pane(ctl, :decoded)
-        copy_pane(ctl)
+        ctl.copy_pane
         host.statuses.last.should eq("nothing to copy")
-        session_from_text(ctl, t.seed)
+        ctl.session_from_text(t.seed)
         with_clipboard_off do
-          copy_pane(ctl)
+          ctl.copy_pane
           host.statuses.last.should eq("copied (0b) — clipboard is off (Settings → General)")
           Register.text.should eq(t.seed)
         end
@@ -436,7 +327,7 @@ describe "the JWT and Cookie workbench controllers" do
         ctl.accepts_bulk_paste?.should be_false
         ctl.body_badge.should eq(:editor)
         ctl.insert_key_refusal.should be_nil
-        read_mode?(ctl).should be_false
+        ctl.read_mode?.should be_false
         ctl.set_preedit("ㅋ").should be_true
         cur_of(ctl).secret_pre.should eq("ㅋ")
         wtype(ctl, "ab")
@@ -453,7 +344,7 @@ describe "the JWT and Cookie workbench controllers" do
         ctl.handle_body_key(wkey(Termisu::Input::Key::Backspace))
         cur_of(ctl).secret.should eq("aX")
         cur_of(ctl).output.should_not eq(signed)
-        pane_copy_text(ctl).should eq("aX")
+        ctl.pane_copy_text.should eq("aX")
       end
     end
 

@@ -204,9 +204,9 @@ end
 
 describe "Gori::Tui::CookieController" do
   describe "decode" do
-    it "parses a cookie seeded via cookie_from_text and labels the chip by format" do
+    it "parses a cookie seeded via session_from_text and labels the chip by format" do
       with_cookie_controller do |ctl|
-        ctl.cookie_from_text(FLASK)
+        ctl.session_from_text(FLASK)
         # The strip chip is derived from the detected format.
         ctl.subtab_labels.last.should contain("flask")
         # The DECODED pane shows the parsed parts.
@@ -219,7 +219,7 @@ describe "Gori::Tui::CookieController" do
   describe "verify" do
     it "reports the live verdict for the SECRET candidate against the cookie" do
       with_cookie_controller do |ctl|
-        ctl.cookie_from_text(FLASK)
+        ctl.session_from_text(FLASK)
         ctl.focus_last # DECODE panes end on :secret
         type(ctl, SECRET)
         screen_has?(render(ctl), "✓ verified").should be_true
@@ -228,7 +228,7 @@ describe "Gori::Tui::CookieController" do
 
     it "reports a bad key when the candidate does not sign the cookie" do
       with_cookie_controller do |ctl|
-        ctl.cookie_from_text(FLASK)
+        ctl.session_from_text(FLASK)
         ctl.focus_last
         type(ctl, "wrong-key")
         screen_has?(render(ctl), "✗ bad key").should be_true
@@ -239,7 +239,7 @@ describe "Gori::Tui::CookieController" do
   describe "crack" do
     it "finds the planted secret in a comma-separated candidate list and fills the field" do
       with_cookie_controller do |ctl|
-        ctl.cookie_from_text(FLASK)
+        ctl.session_from_text(FLASK)
         ctl.focus_last # :secret
         type(ctl, "foo,#{SECRET},bar")
         ctl.crack
@@ -252,7 +252,7 @@ describe "Gori::Tui::CookieController" do
 
     it "leaves a not-found status when no candidate verifies" do
       with_cookie_controller do |ctl, host|
-        ctl.cookie_from_text(FLASK)
+        ctl.session_from_text(FLASK)
         ctl.focus_last
         type(ctl, "nope1,nope2")
         ctl.crack
@@ -264,7 +264,7 @@ describe "Gori::Tui::CookieController" do
     # would silently crack the hidden DECODE input and swap out the OUTPUT's signing secret.
     it "refuses to crack from the FORGE lens" do
       with_cookie_controller do |ctl, host|
-        ctl.cookie_from_text(FLASK)
+        ctl.session_from_text(FLASK)
         ctl.toggle_mode # → FORGE
         ctl.crack
         (host.statuses.last? || "").should contain("DECODE lens")
@@ -275,7 +275,7 @@ describe "Gori::Tui::CookieController" do
     # crack and the Flask signature no longer verifies, so the card flips to ✗ bad key.
     it "drops the cracked verdict when a later salt change stops the key verifying" do
       with_cookie_controller do |ctl|
-        ctl.cookie_from_text(FLASK)
+        ctl.session_from_text(FLASK)
         ctl.focus_last # :secret
         type(ctl, "x,#{SECRET}")
         ctl.crack
@@ -297,7 +297,7 @@ describe "Gori::Tui::CookieController" do
       begin
         Gori::Settings.keymap_overrides = {"cookie.cycle-format" => ["alt-a"]}
         with_cookie_controller do |ctl|
-          ctl.cookie_from_text(FLASK)
+          ctl.session_from_text(FLASK)
           screen_has?(render(ctl), "⌥A:auto").should be_true
           screen_has?(render(ctl), "^A:auto").should be_false
         end
@@ -308,7 +308,7 @@ describe "Gori::Tui::CookieController" do
 
     it "shows a concrete format in FORGE but keeps auto for a later DECODE paste" do
       with_cookie_controller do |ctl|
-        ctl.cookie_from_text(FLASK)
+        ctl.session_from_text(FLASK)
         screen_has?(render(ctl), "^A:auto").should be_true
         ctl.toggle_mode
         ctl.command_section.should eq(:payload) # FORGE panes start on :payload
@@ -321,29 +321,29 @@ describe "Gori::Tui::CookieController" do
       end
     end
 
-    # The FORGE payload is an always-typing `TextArea` whose band `cookie_copy_text` takes,
+    # The FORGE payload is an always-typing `TextArea` whose band `pane_copy_text` takes,
     # and the predicate a drag's release consults answered false for it — so Drag release =
     # `select + copy` did nothing there, silently. Same defect and same fix as the JWT tab's
     # HEADER / PAYLOAD (jwt_copy_selection_spec).
     it "reports the FORGE payload's band, which is what its copy reads" do
       with_cookie_controller do |ctl|
-        ctl.cookie_from_text(FLASK)
+        ctl.session_from_text(FLASK)
         ctl.toggle_mode # → FORGE, pane :payload
         s = ctl.@sessions[ctl.@idx]
         s.pane.should eq(:payload)
         type(ctl, %({"admin":true}))
-        ctl.cookie_selection_active?.should be_false
+        ctl.selection_active?.should be_false
         3.times { ctl.handle_body_key(key(Termisu::Input::Key::Left, :shift)) }
         band = s.payload.selection_text
         band.should_not be_nil
-        ctl.cookie_selection_active?.should be_true
-        ctl.cookie_copy_text.should eq(band)
+        ctl.selection_active?.should be_true
+        ctl.pane_copy_text.should eq(band)
       end
     end
 
     it "re-signs an edited payload into a cookie that verifies under the same secret" do
       with_cookie_controller do |ctl|
-        ctl.cookie_from_text(FLASK)
+        ctl.session_from_text(FLASK)
         ctl.toggle_mode # → FORGE, format flask, pane :payload
         type(ctl, %({"admin":true}))
         ctl.focus_last       # FORGE panes end on :output; step back to :secret
@@ -361,7 +361,7 @@ describe "Gori::Tui::CookieController" do
   describe "format cycling" do
     it "steps auto → flask → rack → django in the DECODE lens" do
       with_cookie_controller do |ctl|
-        ctl.cookie_from_text(FLASK)
+        ctl.session_from_text(FLASK)
         screen_has?(render(ctl), "^A:auto").should be_true
         ctl.cycle_format
         screen_has?(render(ctl), "^A:flask").should be_true
@@ -383,7 +383,7 @@ describe "Gori::Tui::CookieController" do
       sess = Gori::Cookie::Django.forge(%({"_auth_user_id":"1"}), SECRET, 1785656674_i64,
         salt: Gori::Cookie::Django::SESSION_SALT)
       with_cookie_controller do |ctl|
-        ctl.cookie_from_text(sess)
+        ctl.session_from_text(sess)
         # The salt badge is visible even while the format pin stays `auto` (resolved = django).
         screen_has?(render(ctl), "salt:signing").should be_true
         ctl.focus_last # :secret
@@ -398,7 +398,7 @@ describe "Gori::Tui::CookieController" do
 
     it "threads the session salt through the forged cookie" do
       with_cookie_controller do |ctl|
-        ctl.cookie_from_text(Gori::Cookie::Django.forge(%({"x":1}), SECRET, 1_i64,
+        ctl.session_from_text(Gori::Cookie::Django.forge(%({"x":1}), SECRET, 1_i64,
           salt: Gori::Cookie::Django::SESSION_SALT))
         ctl.cycle_format; ctl.cycle_format; ctl.cycle_format # pin django
         ctl.cycle_salt_preset                                # session salt
@@ -407,7 +407,7 @@ describe "Gori::Tui::CookieController" do
         ctl.focus_first; ctl.pane_advance(1); ctl.pane_advance(1) # :secret
         type(ctl, SECRET)
         ctl.focus_last # :output
-        cookie = ctl.cookie_copy_text
+        cookie = ctl.pane_copy_text
         Gori::Cookie.verify(cookie, SECRET, "django",
           salt: Gori::Cookie::Django::SESSION_SALT).should be_true
         Gori::Cookie.verify(cookie, SECRET, "django").should be_false # not the generic salt
@@ -416,7 +416,7 @@ describe "Gori::Tui::CookieController" do
 
     it "is a no-op for non-Django formats" do
       with_cookie_controller do |ctl, host|
-        ctl.cookie_from_text(FLASK)
+        ctl.session_from_text(FLASK)
         ctl.cycle_salt_preset
         (host.statuses.last? || "").should contain("Django-only")
       end
@@ -432,7 +432,7 @@ describe "Gori::Tui::CookieController" do
       sess = Gori::Cookie::Django.forge(%({"_auth_user_id":"1"}), SECRET, 1785656674_i64,
         salt: Gori::Cookie::Django::SESSION_SALT, algorithm: "sha1")
       with_cookie_controller do |ctl|
-        ctl.cookie_from_text(sess)
+        ctl.session_from_text(sess)
         ctl.cycle_salt_preset # session salt (the salt half still needs its toggle)
         ctl.focus_last        # :secret
         type(ctl, SECRET)
@@ -446,7 +446,7 @@ describe "Gori::Tui::CookieController" do
       sess = Gori::Cookie::Django.forge(%({"_auth_user_id":"1"}), SECRET, 1785656674_i64,
         salt: Gori::Cookie::Django::SESSION_SALT, algorithm: "sha1")
       with_cookie_controller do |ctl|
-        ctl.cookie_from_text(sess)
+        ctl.session_from_text(sess)
         ctl.cycle_salt_preset
         ctl.focus_last # :secret
         type(ctl, SECRET)
@@ -461,7 +461,7 @@ describe "Gori::Tui::CookieController" do
       sess = Gori::Cookie::Django.forge(%({"a":1}), SECRET, 1_i64,
         salt: Gori::Cookie::Django::SESSION_SALT, algorithm: "sha1")
       with_cookie_controller do |ctl|
-        ctl.cookie_from_text(sess)
+        ctl.session_from_text(sess)
         ctl.cycle_salt_preset                                     # session salt
         ctl.load_decoded                                          # → FORGE, pins format django, INPUT retained for detection
         ctl.focus_first; ctl.pane_advance(1); ctl.pane_advance(1) # :secret
@@ -479,7 +479,7 @@ describe "Gori::Tui::CookieController" do
     it "seeds FORGE with the payload's digits, and re-forges them intact" do
       sess = Gori::Cookie::Flask.forge(%({"uid":18446744073709551615,"role":"user"}), SECRET, 1785656674_i64)
       with_cookie_controller do |ctl|
-        ctl.cookie_from_text(sess)
+        ctl.session_from_text(sess)
         ctl.load_decoded
         ctl.focus_first; ctl.pane_advance(1); ctl.pane_advance(1) # :secret
         type(ctl, SECRET)
@@ -494,11 +494,11 @@ describe "Gori::Tui::CookieController" do
     it "opens and closes sub-tab sessions, keeping at least one" do
       with_cookie_controller do |ctl|
         ctl.subtab_labels.size.should eq(1)
-        ctl.cookie_new
+        ctl.new_session
         ctl.subtab_labels.size.should eq(2)
-        ctl.cookie_close
+        ctl.close_session
         ctl.subtab_labels.size.should eq(1)
-        ctl.cookie_close # never drops below one
+        ctl.close_session # never drops below one
         ctl.subtab_labels.size.should eq(1)
       end
     end
@@ -509,5 +509,5 @@ end
 # to the OUTPUT pane and ask the unified copy for that pane's text.
 private def forge_output(ctl : CookieController) : String
   ctl.focus_last # FORGE → :output
-  ctl.cookie_copy_text
+  ctl.pane_copy_text
 end

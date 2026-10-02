@@ -2412,8 +2412,8 @@ module Gori::Tui
         if dest = sp.selected_destination
           case dest.tab
           when :decoder   then decoder_controller.decoder_from_text(sp.payload)
-          when :jwt       then jwt_controller.jwt_from_text(sp.payload)
-          when :cookie    then cookie_controller.cookie_from_text(sp.payload)
+          when :jwt       then jwt_controller.session_from_text(sp.payload)
+          when :cookie    then cookie_controller.session_from_text(sp.payload)
           when :sequencer then sequencer_controller.sequence_from_text(sp.payload)
           end
         end
@@ -6147,8 +6147,8 @@ module Gori::Tui
       when :repeater  then repeater_controller.repeater_selection_active?
       when :fuzzer    then fuzzer_controller.fuzzer_selection_active?
       when :decoder   then decoder_controller.decoder_selection_active?
-      when :jwt       then jwt_controller.jwt_selection_active?
-      when :cookie    then cookie_controller.cookie_selection_active?
+      when :jwt       then jwt_controller.selection_active?
+      when :cookie    then cookie_controller.selection_active?
       when :issues    then issues_controller.issues_notes_selection_active?
       when :project   then project_controller.project_desc_selection_active?
       when :rewriter  then rewriter_controller.rewriter_selection_active?
@@ -6175,8 +6175,8 @@ module Gori::Tui
       when :repeater  then repeater_controller.repeater_selection_text
       when :fuzzer    then fuzzer_controller.fuzzer_selection_text
       when :decoder   then decoder_controller.decoder_selection_text
-      when :jwt       then jwt_controller.jwt_selection_text
-      when :cookie    then cookie_controller.cookie_selection_text
+      when :jwt       then jwt_controller.selection_text
+      when :cookie    then cookie_controller.selection_text
       when :issues    then issues_controller.issues_notes_selection_text
       when :project   then project_controller.project_desc_selection_text
       when :rewriter  then rewriter_controller.rewriter_selection_text
@@ -6199,8 +6199,8 @@ module Gori::Tui
       when :repeater  then repeater_controller.repeater_select_line
       when :fuzzer    then fuzzer_controller.fuzzer_select_line
       when :decoder   then decoder_controller.decoder_select_line
-      when :jwt       then jwt_controller.jwt_select_line
-      when :cookie    then cookie_controller.cookie_select_line
+      when :jwt       then jwt_controller.select_line
+      when :cookie    then cookie_controller.select_line
       when :issues    then issues_controller.issues_notes_select_line
       when :project   then project_controller.project_desc_select_line
       when :rewriter  then rewriter_controller.rewriter_select_line
@@ -6221,8 +6221,8 @@ module Gori::Tui
       when :repeater  then repeater_controller.repeater_clear_selection
       when :fuzzer    then fuzzer_controller.fuzzer_clear_selection
       when :decoder   then decoder_controller.decoder_clear_selection
-      when :jwt       then jwt_controller.jwt_clear_selection
-      when :cookie    then cookie_controller.cookie_clear_selection
+      when :jwt       then jwt_controller.clear_selection
+      when :cookie    then cookie_controller.clear_selection
       when :issues    then issues_controller.issues_notes_clear_selection
       when :project   then project_controller.project_desc_clear_selection
       when :rewriter  then rewriter_controller.rewriter_clear_selection

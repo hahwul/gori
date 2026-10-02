@@ -291,7 +291,7 @@ describe "TabController#subtab_search_rows" do
       jc = JwtController.new(host)
       header = Base64.urlsafe_encode(%({"alg":"HS256","typ":"JWT"}), padding: false)
       payload = Base64.urlsafe_encode(%({"role":"admin","iss":"gori-test"}), padding: false)
-      jc.jwt_from_text("#{header}.#{payload}.sig")
+      jc.session_from_text("#{header}.#{payload}.sig")
       extra = jc.subtab_search_rows.last.extra
       extra.should contain("admin")     # a claim the operator remembers ...
       extra.should contain("gori-test") # ... found in the DECODED payload

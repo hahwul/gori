@@ -4,11 +4,11 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # --- jwt workbench (sub-tab + lens actions). The body's text editing + focus nav
   # stay inline in JwtController; these power the space menu + palette. ---
   def jwt_new : Nil
-    jwt_controller.jwt_new
+    jwt_controller.new_session
   end
 
   def jwt_close : Nil
-    jwt_controller.jwt_close
+    jwt_controller.close_session
     resolve_subtab_focus # don't strand on a now-hidden strip
   end
 
@@ -17,7 +17,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   end
 
   def jwt_duplicate_subtab : Nil
-    jwt_controller.jwt_duplicate
+    jwt_controller.duplicate_session
   end
 
   def jwt_clear : Nil
@@ -37,11 +37,11 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   end
 
   def jwt_copy : Nil
-    jwt_controller.jwt_copy
+    jwt_controller.copy_pane
   end
 
   def jwt_copy_token : Nil
-    jwt_controller.jwt_copy_token
+    jwt_controller.copy_output
   end
 
   def jwt_copy_attack : Nil
@@ -49,6 +49,6 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   end
 
   def jwt_read_mode? : Bool
-    jwt_controller.jwt_read_mode?
+    jwt_controller.read_mode?
   end
 end

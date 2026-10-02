@@ -1,29 +1,15 @@
 require "json"
-require "../tab_controller"
-require "../cookie_view"
-require "../text_area"
-require "../input_mode"
-require "../text_read_state"
-require "../clipboard"
+require "./workbench_controller"
 require "../subtab_clone"
+require "../cookie_view"
 require "../../cookie"
 require "../../fuzz/payload"
 
 module Gori::Tui
-  # One Cookie workbench session (a sub-tab). Carries the two lenses' buffers: the DECODE
-  # side (raw cookie INPUT + the cached decode/verify derived from it) and the FORGE side
-  # (PAYLOAD editor + SECRET + format/algorithm/salt → the cached OUTPUT cookie). `mode`
-  # picks the visible lens; `pane` is the focus ring position within it. Modelled on
-  # JwtSession — the same shape over a different signature scheme. Mutable class.
-  class CookieSession
-    property view : CookieView
-    property input : TextArea
-    property input_mode : InputMode = InputMode::Read
-    property input_read : TextReadState = TextReadState.new
-    property payload : TextArea
-    property secret : String = ""
-    property secret_cx : Int32 = 0
-    property secret_pre : String = ""
+  # One Cookie workbench session (a sub-tab). On top of the shared DECODE side and FORGE
+  # PAYLOAD + SECRET (`WorkbenchSession`), the FORGE lens adds format/algorithm/salt, and the
+  # decode caches the detected format and the live verify/crack verdict. Mutable class.
+  class CookieSession < WorkbenchSession(CookieView)
     property salt : String = ""
     property salt_cx : Int32 = 0
     property salt_pre : String = ""
@@ -34,49 +20,17 @@ module Gori::Tui
     # same "auto until you pin it" contract `format` has — so a real SHA-1 `sessionid` does
     # not read as ✗ bad key under the SHA-256 default. Cycling the algo pins the choice.
     property? algorithm_pinned : Bool = false
-    property mode : Symbol = :decode # :decode | :forge
-    property pane : Symbol = :input
     # Cached results (recomputed on edit, never on the render hot path).
-    property decoded : String = ""
     property detected : String? = nil      # the auto-detected format, for the FORGE promotion
     property verify_state : Symbol = :none # :none | :ok | :bad
     property crack_note : String? = nil    # "cracked: …" set by a successful crack, cleared on edit
-    property output : String = ""
-    property? output_ok : Bool = true
-
-    def initialize(input_text : String, name : String?)
-      @view = CookieView.new
-      @view.name = name
-      @input = TextArea.new(input_text)
-      @input.follow_x = true
-      @payload = TextArea.new("")
-    end
-
-    # Home/End on the INPUT pane — the editor move + READ cursor adoption travel together,
-    # exactly as in JwtSession (four sibling views pair them at their own seam).
-    def input_home(selecting : Bool = false) : Nil
-      @input.home(selecting)
-      adopt_input_caret(selecting)
-    end
-
-    def input_end(selecting : Bool = false) : Nil
-      @input.end_of_line(selecting)
-      adopt_input_caret(selecting)
-    end
-
-    private def adopt_input_caret(selecting : Bool) : Nil
-      return if @input_mode == InputMode::Insert
-      @input_read.sync_to(@input, selecting: selecting)
-    end
   end
 
   # The Cookie tab: a hidden workbench for decoding, verifying, cracking, and re-signing
-  # framework signed session cookies (Flask/itsdangerous, Rack, Django). Body consumes every
-  # printable key (like JWT/Decoder), so command_scope is the Cookie scope and handle_body_key
-  # always returns true; the Cookie verbs' mnemonics never collide with literal text — they
-  # reach from the space menu + palette. A runner-owned sub-tab strip appears from the first
-  # session (^N new · ^W close · ^T lens · ^A format).
-  class CookieController < TabController
+  # framework signed session cookies (Flask/itsdangerous, Rack, Django). The shell is
+  # `WorkbenchController`'s, shared with the JWT tab (^N new · ^W close · ^T lens); `^A`
+  # cycles the format.
+  class CookieController < WorkbenchController(CookieSession)
     DECODE_PANES = [:input, :decoded, :opts, :secret]
     FORGE_PANES  = [:payload, :opts, :secret, :output]
     # ^A cycles these. DECODE includes `auto` (it can detect from the punctuation); FORGE
@@ -84,14 +38,6 @@ module Gori::Tui
     DECODE_FORMATS = ["auto", "flask", "rack", "django"]
     FORGE_FORMATS  = ["flask", "rack", "django"]
     ALGORITHMS     = ["sha256", "sha1"]
-
-    @sessions : Array(CookieSession)
-
-    def initialize(host : Host)
-      super(host)
-      @sessions = [make_session("", nil)]
-      @idx = 0
-    end
 
     def tab : Symbol
       :cookie
@@ -101,61 +47,24 @@ module Gori::Tui
       Verb::Scope::Cookie
     end
 
-    # The focused pane, so section-tagged verbs (cookie.copy-cookie on :output) surface in the
-    # space menu's CONTEXT group (mirrors JwtController).
-    def command_section : Symbol
-      cur.pane
-    end
-
-    # INS editors (input-insert / payload / secret / salt) show the EDITOR badge; the rest is
-    # navigable body.
-    def body_badge : Symbol
-      s = cur
-      editing = case s.pane
-                when :input                   then s.input_mode == InputMode::Insert
-                when :payload, :opts, :secret then true
-                else                               false
-                end
-      editing ? :editor : :body
-    end
-
-    private def cur : CookieSession
-      @sessions[@idx]
-    end
-
     private def make_session(input_text : String, name : String?) : CookieSession
       s = CookieSession.new(input_text, name)
       s.view.set_registry(@host.session.registry)
       recompute_decode(s)
-      recompute_forge(s)
+      recompute_output(s)
       s
     end
 
-    # --- sub-tab strip (runner-owned chrome; shown from the first session) ---
-    def subtab_labels : Array(String)
-      @sessions.map_with_index { |s, i| "#{i + 1}:#{session_label(s)}" }
+    private def tool_label : String
+      "Cookie"
     end
 
-    def subtab_index : Int32
-      @idx
+    private def item_noun : String
+      "cookie"
     end
 
-    def subtab_strip_shown? : Bool
-      true
-    end
-
-    def subtab_filter_enabled? : Bool
-      true
-    end
-
-    def filter_fields : Array(String)
-      %w[name]
-    end
-
-    def filter_subjects : Array(Repeater::SubtabFilter::Subject)
-      @sessions.map do |s|
-        Repeater::SubtabFilter::Subject.new(s.view.name, s.input.text, "", "", [] of String)
-      end
+    private def lens_verb : String
+      "cookie.toggle-mode"
     end
 
     # The ⌕ picker searches the DECODED parts + the FORGE payload, not the opaque cookie the
@@ -165,69 +74,12 @@ module Gori::Tui
       @sessions.map { |s| search_extra("#{s.decoded} #{s.payload.text}") }
     end
 
-    # The chip label: the custom name, else the cookie's format (or "empty"), capped ~18 cols.
-    private def session_label(s : CookieSession) : String
-      raw = (n = s.view.name) ? n : cookie_summary(s)
-      raw.size > 18 ? raw[0, 17] + "…" : raw
-    end
-
-    private def cookie_summary(s : CookieSession) : String
+    # The chip label's fallback: the cookie's format (or "empty").
+    private def session_summary(s : CookieSession) : String
       return "empty" if s.input.text.strip.empty?
       (f = s.detected) ? "cookie #{f}" : "cookie"
     end
 
-    def move_subtab(dir : Int32) : Nil
-      if t = step_visible(@idx, dir)
-        switch_to(t)
-      end
-    end
-
-    def jump_subtab(idx : Int32) : Nil
-      return unless 0 <= idx < @sessions.size
-      clear_subtab_filter if (h = subtab_hidden) && h.includes?(idx)
-      switch_to(idx) if idx != @idx
-    end
-
-    private def switch_to(idx : Int32) : Nil
-      @idx = idx
-    end
-
-    # --- session lifecycle ---
-    def cookie_new : Nil
-      @sessions << make_session("", nil)
-      @idx = @sessions.size - 1
-      @host.request_focus(:body)
-      @host.status("new Cookie session (#{@sessions.size} open)")
-    end
-
-    # Seed a NEW session from an externally-supplied cookie (the "Send selection to → Cookie"
-    # flow) and jump into it. Mirrors JwtController#jwt_from_text.
-    def cookie_from_text(text : String, name : String? = nil) : Nil
-      s = make_session(text.strip, name)
-      @sessions << s
-      @idx = @sessions.size - 1
-      @host.goto_tab(:cookie)
-      @host.status("sent selection to Cookie (#{text.bytesize}b)")
-    end
-
-    # Duplicates the MARKED sub-tabs when the strip carries marks, the active one otherwise
-    # (`target_subtab_indices` — the one target rule).
-    def cookie_duplicate : Nil
-      msg = nil.as(String?)
-      if refs = batch_subtab_refs
-        msg = duplicate_marked_subtabs(refs, "session") { |i| duplicate_at(i) }
-        unless msg
-          @host.status("#{refs.size} sub-tabs marked — duplicate is capped at #{Runner::BATCH_SUBTAB_CAP}")
-          return
-        end
-      else
-        duplicate_at(@idx)
-      end
-      @host.request_focus(:body)
-      @host.status(msg ? "#{msg} (#{@sessions.size} open)" : "duplicated Cookie session (#{@sessions.size} open)")
-    end
-
-    # Clone sub-tab `idx` onto the end of the strip. Toast-free — the arm above says it.
     private def duplicate_at(idx : Int32) : Nil
       return unless src = @sessions[idx]?
       dup = make_session(src.input.text, SubtabClone.copy_name(src.view.name))
@@ -238,277 +90,57 @@ module Gori::Tui
       dup.algorithm = src.algorithm
       dup.algorithm_pinned = src.algorithm_pinned?
       recompute_decode(dup)
-      recompute_forge(dup)
+      recompute_output(dup)
       @sessions << dup
       @idx = @sessions.size - 1
     end
 
-    # ^W closes the MARKED sub-tabs when the strip carries marks, the active one otherwise
-    # (`target_subtab_indices` — the one target rule). The single close stays confirm-free as
-    # it has always been; a plural one asks, because it discards more than the operator can
-    # see at the moment they press the key.
-    def cookie_close : Nil
-      if refs = batch_subtab_refs
-        @host.confirm("CLOSE COOKIE SESSIONS", "Close #{marked_subtab_phrase(refs.size)}?\nEach cookie and its edits are discarded.",
-          confirm_label: "close", danger: true) { close_marked_sessions(refs) }
-        return
-      end
-      close_at(@idx)
-      @host.status(@sessions.size == 1 ? "session closed" : "session closed (#{@sessions.size} open)")
-    end
-
-    private def close_marked_sessions(refs : Array(SubtabRef)) : Nil
-      msg = close_marked_subtabs(refs)
-      @host.status(msg)
-      @host.resolve_subtab_focus
-    end
-
-    # Nothing here is persisted, so a close can never leave a saved session behind.
-    protected def close_subtab_at(idx : Int32) : Bool
-      close_at(idx)
-      false
-    end
-
-    # Close sub-tab `idx`, keeping at least one session: the last one is REPLACED by a blank
-    # rather than removed, so the tab always has something to type into. That replacement
-    # also retires the old view object, which is what drops its mark.
-    private def close_at(idx : Int32) : Nil
-      return if idx < 0 || idx >= @sessions.size
-      if @sessions.size <= 1
-        @sessions[0] = make_session("", nil)
-        @idx = 0
-      else
-        @sessions.delete_at(idx)
-        # Closing a session to the LEFT slides the active one down; a bare clamp would read
-        # that as "stay put" and land the operator on its neighbour.
-        @idx -= 1 if idx < @idx
-        @idx = @idx.clamp(0, @sessions.size - 1)
-      end
-    end
-
-    def view_at(idx : Int32) : CookieView?
-      (0 <= idx < @sessions.size) ? @sessions[idx].view : nil
-    end
-
-    # The object that IS sub-tab `idx`, for the strip's mark set (#683). The view, not the
-    # index: a reconcile can reorder or drop chips under a standing mark.
-    def subtab_ref(idx : Int32) : SubtabRef?
-      view_at(idx)
-    end
-
-    def apply_rename(view : CookieView, name : String) : Nil
-      clean = name.strip
-      view.name = clean.empty? ? nil : clean
-    end
-
     # --- render ---
+    # The shared shell (see `WorkbenchController#render_shell` for why it is not inherited).
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
-      body_focused = focus == :body
-      labels = subtab_labels
-      s = cur
-      shell = BodyChrome.shell_focused(focus, multi_pane: true)
-      subtabs_focused = focus == :subtabs
-      @subtab_start = BodyChrome.framed_body(screen, rect, shell, subtabs_focused, labels, @idx, @subtab_start, subtab_hidden, strip_divider: subtab_strip_divider?, find: subtab_find_shown?, find_lit: @host.subtab_find_focused?, marked: marked_chip_set) do |content|
-        render_with_filter(screen, content, subtabs_focused) do |body|
-          if s.mode == :decode
-            s.view.render_decode(screen, body,
-              input: s.input, input_mode: s.input_mode, input_read: s.input_read,
-              decoded: s.decoded, format: display_format(s), resolved_format: effective_format(s),
-              algorithm: effective_algorithm(s), salt: s.salt, salt_cx: s.salt_cx, salt_pre: s.salt_pre,
-              salt_preset: salt_preset_label(s),
-              verify_state: s.verify_state, crack_note: s.crack_note,
-              secret: s.secret, secret_cx: s.secret_cx, secret_pre: s.secret_pre,
-              pane: s.pane, focused: body_focused, lens_chord: lens_chord)
-          else
-            s.view.render_forge(screen, body,
-              payload: s.payload, format: display_format(s), resolved_format: effective_format(s),
-              algorithm: effective_algorithm(s), salt: s.salt, salt_cx: s.salt_cx, salt_pre: s.salt_pre,
-              salt_preset: salt_preset_label(s),
-              secret: s.secret, secret_cx: s.secret_cx, secret_pre: s.secret_pre,
-              output: s.output, output_ok: s.output_ok?,
-              pane: s.pane, focused: body_focused, lens_chord: lens_chord)
-          end
-        end
+      render_shell(screen, rect, focus)
+    end
+
+    private def render_lens(screen : Screen, body : Rect, s : CookieSession, focused : Bool) : Nil
+      if s.mode == :decode
+        s.view.render_decode(screen, body,
+          input: s.input, input_mode: s.input_mode, input_read: s.input_read,
+          decoded: s.decoded, format: display_format(s), resolved_format: effective_format(s),
+          algorithm: effective_algorithm(s), salt: s.salt, salt_cx: s.salt_cx, salt_pre: s.salt_pre,
+          salt_preset: salt_preset_label(s),
+          verify_state: s.verify_state, crack_note: s.crack_note,
+          secret: s.secret, secret_cx: s.secret_cx, secret_pre: s.secret_pre,
+          pane: s.pane, focused: focused, lens_chord: lens_chord)
+      else
+        s.view.render_forge(screen, body,
+          payload: s.payload, format: display_format(s), resolved_format: effective_format(s),
+          algorithm: effective_algorithm(s), salt: s.salt, salt_cx: s.salt_cx, salt_pre: s.salt_pre,
+          salt_preset: salt_preset_label(s),
+          secret: s.secret, secret_cx: s.secret_cx, secret_pre: s.secret_pre,
+          output: s.output, output_ok: s.output_ok?,
+          pane: s.pane, focused: focused, lens_chord: lens_chord)
       end
-    end
-
-    # The lens switch's CURRENT chord — read from the keymap (not hardcoded `^T`) so a rebind
-    # moves the top card's chip and the footer that names the same key together.
-    private def lens_chord : String
-      reg = @host.session.registry
-      lens_chord(reg, Hotkeys.rebindable_overrides(reg))
-    end
-
-    private def lens_chord(reg : Verb::Registry, overrides : Hash(String, Array(Verb::Chord))) : String
-      Hotkeys.binding_label(reg, "cookie.toggle-mode", "^T", overrides)
     end
 
     # --- key handling ---
-    # Every pane `route_pane` sends characters to — the INPUT editor in INS, plus the PAYLOAD,
-    # OPTS (salt) and SECRET fields. DECODED / OUTPUT are read-only.
-    def body_takes_text? : Bool
-      s = cur
-      case s.pane
-      when :input                   then s.input_mode == InputMode::Insert
-      when :payload, :opts, :secret then true
-      else                               false
-      end
+    # DECODED / OUTPUT are read-only; INPUT is INS/READ; PAYLOAD, OPTS (salt) and SECRET type.
+    private def readonly_pane?(pane : Symbol) : Bool
+      {:decoded, :output}.includes?(pane)
     end
 
-    # --- bracketed paste, in bulk (see TabController#accepts_bulk_paste?) ---
-    # The two multi-line editors: INPUT in INSERT (re-decodes per edit) and the always-insert
-    # PAYLOAD (re-forges per edit). Key by key a paste re-ran that over the whole buffer per
-    # character — quadratic, on the scheduler the proxy shares. A pasted ↹ now lands as a tab
-    # character instead of moving the focus ring mid-paste and typing the rest into the next
-    # pane. The single-line SECRET / SALT fields keep the key path.
-    def accepts_bulk_paste? : Bool
-      !bulk_paste_editor.nil?
-    end
-
-    def paste_text(text : String) : Bool
-      ed = bulk_paste_editor
-      return false unless ed
-      s = cur
-      ed.insert_text(text)
-      report_replaced(ed.last_replaced) # a paste over a selection REPLACES it
-      ed.set_preedit("")
-      ed.same?(s.input) ? recompute_decode(s) : recompute_forge(s)
-      true
-    end
-
-    private def bulk_paste_editor : TextArea?
-      s = cur
-      case s.pane
-      when :input   then s.input if s.input_mode == InputMode::Insert
-      when :payload then s.payload
-      end
-    end
-
-    def handle_body_key(ev : Termisu::Event::Key) : Bool
-      key = ev.key
-      c = ev.char || key.to_char
-      if ev.ctrl? && key.lower_p?
-        commit
-        @host.open_palette
-      elsif ev.ctrl? && c && '1' <= c <= '9'
-        jump_subtab(c.to_i - 1)
-      elsif ev.ctrl? && key.lower_n?
-        cookie_new
-      elsif ev.ctrl? && key.lower_w?
-        cookie_close
-      elsif ev.ctrl_z? || editing_motion?(ev)
-        return route_pane(ev, c)
-      elsif ev.ctrl? || ev.alt?
-        # Every other modified chord defers to the central keymap (rebindable) — the rule the
-        # Repeater/Fuzzer/JWT already follow; ^A/^T/^L are registered verb chords.
-        return false
-      elsif key.escape?
-        handle_escape
-      else
-        return route_pane(ev, c)
-      end
-      true
-    end
-
-    private def handle_escape : Nil
-      s = cur
-      if s.pane == :input && s.input_mode == InputMode::Insert
-        s.input_mode = InputMode::Read
-        s.input_read.adopt_editor_selection(s.input)
-      else
-        commit
-        @host.request_focus(:subtabs)
-      end
+    private def lens_editor(s : CookieSession, pane : Symbol) : TextArea?
+      s.payload if pane == :payload
     end
 
     private def route_pane(ev : Termisu::Event::Key, c : Char?) : Bool
       case cur.pane
       when :input   then edit_input(ev, c)
-      when :payload then edit_payload(ev, c); true
+      when :payload then edit_lens_editor(ev, c, cur.payload); true
       when :opts    then edit_salt(ev, c); true
       when :secret  then edit_secret(ev, c); true
       when :decoded then handle_readonly(ev, :decoded)
       when :output  then handle_readonly(ev, :output)
       else               true
-      end
-    end
-
-    # ---- INPUT editor (INS/READ, like the JWT input) ----
-    private def edit_input(ev : Termisu::Event::Key, c : Char?) : Bool
-      s = cur
-      return handle_input_read(ev, c) unless s.input_mode == InputMode::Insert
-      key = ev.key
-      case
-      when ev.ctrl_z?                   then s.input.undo; recompute_decode(s)
-      when key.enter?                   then s.input.insert_newline; recompute_decode(s)
-      when s.input.word_delete_key?(ev) then editor_motion(ev, s.input) { recompute_decode(s) }
-      when key.backspace?               then s.input.backspace; recompute_decode(s)
-      when key.up?
-        (s.input.at_top? && !ev.shift?) ? cross_pane(s, -1) : editor_motion(ev, s.input) { recompute_decode(s) }
-      when key.down?
-        (s.input.at_bottom? && !ev.shift?) ? cross_pane(s, 1) : editor_motion(ev, s.input) { recompute_decode(s) }
-      when editor_motion(ev, s.input) { recompute_decode(s) } then nil
-      when key.delete?                                        then s.input.delete; recompute_decode(s)
-      else
-        if c && !ev.ctrl? && !ev.alt?
-          s.input.insert(c)
-          report_replaced(s.input.last_replaced)
-          s.input.set_preedit("")
-          recompute_decode(s)
-        end
-      end
-      true
-    end
-
-    private def handle_input_read(ev : Termisu::Event::Key, c : Char?) : Bool
-      return true.tap { @host.open_space_menu } if ev.key.space? && !ev.ctrl? && !ev.alt?
-      s = cur
-      key = ev.key
-      selecting = ev.shift?
-      case
-      when key.enter? then return false # editor.insert-enter
-      when nav_up?(ev)
-        s.input.at_top? ? cross_pane(s, -1) : s.input_read.move(s.input, -1, 0, selecting: selecting)
-      when nav_down?(ev)
-        s.input.at_bottom? ? cross_pane(s, 1) : s.input_read.move(s.input, 1, 0, selecting: selecting)
-      when key.left?  then s.input_read.move(s.input, 0, -1, selecting: selecting)
-      when key.right? then s.input_read.move(s.input, 0, 1, selecting: selecting)
-      when key.home?  then s.input_home(selecting)
-      when key.end?   then s.input_end(selecting)
-      when c && !ev.ctrl? && !ev.alt? && !c.control?
-        return false # i INSERT, x/y/c + Global breath → keymap (crack is `c` in read mode)
-      end
-      true
-    end
-
-    private def editor_motion(ev : Termisu::Event::Key, ed : TextArea, & : -> _) : Bool
-      before = ed.edits
-      return false unless ed.handle_motion_key(ev)
-      yield if ed.edits != before
-      true
-    end
-
-    # ---- PAYLOAD editor (always-insert; edits re-forge live) ----
-    private def edit_payload(ev : Termisu::Event::Key, c : Char?) : Nil
-      s = cur
-      ed = s.payload
-      key = ev.key
-      case
-      when ev.ctrl_z?                                   then ed.undo; recompute_forge(s)
-      when key.enter?                                   then ed.insert_newline; recompute_forge(s)
-      when ed.word_delete_key?(ev)                      then editor_motion(ev, ed) { recompute_forge(s) }
-      when key.backspace?                               then ed.backspace; recompute_forge(s)
-      when key.up?                                      then (ed.at_top? && !ev.shift?) ? cross_pane(s, -1) : editor_motion(ev, ed) { recompute_forge(s) }
-      when key.down?                                    then (ed.at_bottom? && !ev.shift?) ? cross_pane(s, 1) : editor_motion(ev, ed) { recompute_forge(s) }
-      when key.delete?                                  then ed.delete; recompute_forge(s)
-      when editor_motion(ev, ed) { recompute_forge(s) } then nil
-      else
-        if c && !ev.ctrl? && !ev.alt?
-          ed.insert(c)
-          report_replaced(ed.last_replaced)
-          ed.set_preedit("")
-          recompute_forge(s)
-        end
       end
     end
 
@@ -529,73 +161,12 @@ module Gori::Tui
       end
     end
 
-    # ---- SECRET single-line field ----
-    private def edit_secret(ev : Termisu::Event::Key, c : Char?) : Nil
-      s = cur
-      case ev.key
-      when .up?   then cross_pane(s, -1)
-      when .down? then cross_pane(s, 1)
-      else
-        text, cx, changed = line_field_key(ev, c, s.secret, s.secret_cx)
-        s.secret = text
-        s.secret_cx = cx
-        if changed
-          s.secret_pre = ""
-          on_secret_edit(s)
-        end
-      end
-    end
-
-    # One printable-key step over a single-line field: `{new_text, new_caret, changed?}`. The
-    # SALT and SECRET fields differ only in the field triplet and their recompute callback, so
-    # the cursor arithmetic (left/right/home/end/backspace/insert) is stated once here; up/down
-    # cross panes and are handled by the caller before this. `changed?` gates the recompute.
-    private def line_field_key(ev : Termisu::Event::Key, c : Char?, text : String, cx : Int32) : {String, Int32, Bool}
-      key = ev.key
-      case
-      when key.left?  then {text, {cx - 1, 0}.max, false}
-      when key.right? then {text, {cx + 1, text.size}.min, false}
-      when key.home?  then {text, 0, false}
-      when key.end?   then {text, text.size, false}
-      when key.backspace?
-        cx > 0 ? {text[0, cx - 1] + text[cx..], cx - 1, true} : {text, cx, false}
-      else
-        if c && !ev.ctrl? && !ev.alt? && !c.control?
-          {text[0, cx] + c.to_s + text[cx..], cx + 1, true}
-        else
-          {text, cx, false}
-        end
-      end
-    end
-
     # Editing the SECRET clears a stale crack note (the field no longer holds what cracked) and
     # re-runs the live verify + re-forge under the new key.
     private def on_secret_edit(s : CookieSession) : Nil
       s.crack_note = nil
       recompute_verify(s)
-      recompute_forge(s)
-    end
-
-    # ---- read-only DECODED / OUTPUT panes ----
-    private def handle_readonly(ev : Termisu::Event::Key, which : Symbol) : Bool
-      return true.tap { @host.open_space_menu } if ev.key.space? && !ev.ctrl? && !ev.alt?
-      s = cur
-      key = ev.key
-      at_top = which == :decoded ? s.view.decoded_at_top? : s.view.output_at_top?
-      at_bottom = which == :decoded ? s.view.decoded_at_bottom? : s.view.output_at_bottom?
-      case
-      when key.up?, key.lower_k?
-        at_top ? cross_pane(s, -1) : scroll_pane(s, which, -1)
-      when key.down?, key.lower_j?
-        at_bottom ? cross_pane(s, 1) : scroll_pane(s, which, 1)
-      when (c = ev.char || key.to_char) && !ev.ctrl? && !ev.alt? && !c.control?
-        return false # y/c + Global breath → keymap
-      end
-      true
-    end
-
-    private def scroll_pane(s : CookieSession, which : Symbol, step : Int32) : Nil
-      which == :decoded ? s.view.scroll_decoded(step) : s.view.scroll_output(step)
+      recompute_output(s)
     end
 
     # --- focus ring ---
@@ -603,120 +174,7 @@ module Gori::Tui
       s.mode == :decode ? DECODE_PANES : FORGE_PANES
     end
 
-    private def cross_pane(s : CookieSession, dir : Int32) : Nil
-      order = panes(s)
-      i = order.index(s.pane) || 0
-      ni = i + dir
-      if ni < 0
-        commit
-        @host.request_focus(:subtabs)
-      elsif ni < order.size
-        enter_pane(s, order[ni])
-      end
-    end
-
-    private def enter_pane(s : CookieSession, p : Symbol) : Nil
-      s.pane = p
-      s.input_read.sync_from(s.input) if p == :input && s.input_mode == InputMode::Read
-    end
-
-    def pane_advance(dir : Int32) : Bool
-      s = cur
-      order = panes(s)
-      i = order.index(s.pane) || 0
-      ni = i + dir
-      return false if ni < 0 || ni >= order.size
-      enter_pane(s, order[ni])
-      true
-    end
-
-    # --- Verb::Scope::Editor — the INPUT pane only ---
-    # It is the one pane here with a READ mode to hold commands: the DECODED / OUTPUT panes are read-only and the PAYLOAD / OPTS / SECRET editors are always-typing
-    # (their `body_badge` is `:editor` from the moment they are focused, so a bare letter is
-    # always a character there and never a key the Editor scope could claim).
-    def editor_pane? : Bool
-      cur.pane == :input
-    end
-
-    def editor_text_buffer : {TextArea, TextReadState}?
-      editor_pane? ? {cur.input, cur.input_read} : nil
-    end
-
-    def editor_enter_insert : Bool
-      return false unless editor_pane?
-      cur.input_mode = InputMode::Insert
-      true
-    end
-
-    def editor_append_insert : Bool
-      return false unless editor_pane?
-      s = cur
-      s.input_read.move(s.input, 0, 1)
-      editor_enter_insert
-    end
-
-    def editor_exit_insert : Bool
-      return false unless editor_pane?
-      cur.input_mode = InputMode::Read
-      true
-    end
-
-    # READ-mode undo: the read cursor has to adopt the caret `undo` restored (READ paints
-    # from `input_read`), and the decode has to re-run over the buffer that came back.
-    def editor_undo : Bool
-      return false unless editor_read_mode?
-      s = cur
-      s.input.undo
-      s.input_read.sync_from(s.input)
-      recompute_decode(s)
-      true
-    end
-
-    def editor_to_top : Bool
-      editor_input_edge(-1)
-    end
-
-    def editor_to_bottom : Bool
-      editor_input_edge(1)
-    end
-
-    private def editor_input_edge(dir : Int32) : Bool
-      return false unless editor_read_mode?
-      s = cur
-      s.input_read.to_edge(s.input, dir)
-      true
-    end
-
-    def insert_key_refusal : String?
-      return nil unless {:decoded, :output}.includes?(cur.pane)
-      keys("this pane is read-only — {editor.insert} edits the INPUT (↹ up); intercept toggles from the tab bar")
-    end
-
-    def focus_first : Nil
-      enter_pane(cur, panes(cur).first)
-    end
-
-    def focus_last : Nil
-      enter_pane(cur, panes(cur).last)
-    end
-
-    # --- mouse drag + double-click (the editable TextArea only: INPUT in decode, PAYLOAD in forge) ---
-    def supports_drag? : Bool
-      true
-    end
-
-    def handle_drag(rect : Rect, mx : Int32, my : Int32) : Nil
-      ed, area, read = editor_at(rect, mx, my) || return
-      ed.click_to_cursor(area, mx, my, selecting: true)
-      read.try &.sync_to(ed, selecting: true)
-    end
-
-    def handle_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
-      ed, area, read = editor_at(rect, mx, my) || return false
-      return read.select_word(ed, area, mx, my) if read
-      ed.select_word_at(area, mx, my)
-    end
-
+    # --- mouse (the editable TextArea only: INPUT in decode, PAYLOAD in forge) ---
     private def editor_at(rect : Rect, mx : Int32, my : Int32) : {TextArea, Rect, TextReadState?}?
       body = body_rect_below_filter(rect)
       s = cur
@@ -738,18 +196,7 @@ module Gori::Tui
       if s.mode == :decode
         input_c, dec_c, opts_c, sec_c = s.view.decode_layout(body)
         if input_c.contains?(mx, my)
-          enter_pane(s, :input)
-          if Frame.mode_badge_hit(mx, my, input_c.y, input_c.right - 1, input_c.x + CookieView::INPUT_MIN_X,
-               s.input_mode == InputMode::Insert)
-            s.input_mode = s.input_mode == InputMode::Insert ? InputMode::Read : InputMode::Insert
-            s.input_read.sync_from(s.input) if s.input_mode == InputMode::Read
-          elsif s.view.lens_chip_hit(input_c, mx, my, :decode, lens_chord, s.input_mode == InputMode::Insert)
-            toggle_mode
-          elsif s.input_mode == InputMode::Insert
-            s.input.click_to_cursor(input_c.inset(1, 1), mx, my)
-          else
-            s.input_read.click(s.input, input_c.inset(1, 1), mx, my)
-          end
+          click_input_card(s, input_c, mx, my)
         elsif dec_c.contains?(mx, my)
           enter_pane(s, :decoded)
         elsif opts_c.contains?(mx, my)
@@ -786,12 +233,6 @@ module Gori::Tui
       when :algorithm then cycle_algorithm
       when :salt      then cycle_salt_preset
       end
-    end
-
-    def handle_wheel(step : Int32) : Bool
-      s = cur
-      wheel_pane(s, s.pane, step)
-      true
     end
 
     # Pointer-aware: the card under the cursor scrolls, keyboard focus stays put. The same
@@ -845,7 +286,7 @@ module Gori::Tui
       if s.mode == :decode
         s.mode = :forge
         s.pane = :payload
-        recompute_forge(s)
+        recompute_output(s)
       else
         s.mode = :decode
         s.pane = :input
@@ -937,7 +378,7 @@ module Gori::Tui
         s.secret_cx = found.size
         s.crack_note = "cracked: #{found.size > 24 ? found[0, 23] + "…" : found}"
         recompute_verify(s)
-        recompute_forge(s)
+        recompute_output(s)
         @host.status("cracked the signing secret")
       else
         # No `source.size` here: for a WordlistFile that re-reads the whole file just to print a
@@ -985,7 +426,7 @@ module Gori::Tui
       end
       s.mode = :forge
       s.pane = :payload
-      recompute_forge(s)
+      recompute_output(s)
       @host.status("loaded decoded payload into FORGE")
     end
 
@@ -1012,29 +453,15 @@ module Gori::Tui
       s.salt_cx = 0
       s.crack_note = nil
       recompute_decode(s)
-      recompute_forge(s)
+      recompute_output(s)
       @host.status("cleared")
     end
 
-    # Copy the OUTPUT (forged) cookie.
-    def cookie_copy_output : Nil
-      s = cur
-      if s.output_ok? && !s.output.empty?
-        do_copy(s.output, "cookie")
-      else
-        @host.status("no valid cookie to copy")
-      end
-    end
-
-    # The unified Copy verb: the selection if one is live, else the focused pane's content.
-    def cookie_copy : Nil
-      do_copy(cookie_copy_text)
-    end
-
-    def cookie_copy_text : String
+    # The unified Copy verb's text (see `WorkbenchController#copy_pane`).
+    def pane_copy_text : String
       s = cur
       case s.pane
-      when :input   then s.input_mode == InputMode::Read ? read_or_all(s.input_read, s.input) : band_or_all(s.input)
+      when :input   then input_copy_text(s)
       when :payload then band_or_all(s.payload)
       when :opts    then s.salt
       when :secret  then s.secret
@@ -1044,66 +471,14 @@ module Gori::Tui
       end
     end
 
-    private def band_or_all(ed : TextArea) : String
-      ed.selection_text || ed.text
-    end
-
-    private def read_or_all(read : TextReadState, ed : TextArea) : String
-      read.selection?(ed) ? read.copy_text(ed) : read.copy_all(ed)
-    end
-
-    private def do_copy(text : String, label : String? = nil) : Nil
-      if text.empty?
-        @host.status("nothing to copy")
-      else
-        written = Clipboard.copy(text)
-        prefix = label ? "copied \"#{label}\"" : "copied"
-        @host.status("#{prefix} (#{written}b)#{Clipboard.note(written, text)}")
-      end
-    end
-
-    # --- selection (for the "Send selection to" flow + copy verbs) ---
-    def cookie_read_mode? : Bool
-      s = cur
-      s.pane == :decoded || s.pane == :output ||
-        (s.pane == :input && s.input_mode == InputMode::Read)
-    end
-
-    # The FORGE payload pane too — see `JwtController#jwt_selection_active?` for why the
-    # always-typing panes must report the band their copy already reads.
-    def cookie_selection_active? : Bool
+    def selection_text : String
       s = cur
       case s.pane
-      when :input   then s.input_mode == InputMode::Insert ? s.input.selection? : s.input_read.selection?(s.input)
-      when :payload then s.payload.selection?
-      else               false
-      end
-    end
-
-    def cookie_selection_text : String
-      s = cur
-      case s.pane
-      when :input
-        if s.input_mode == InputMode::Insert
-          s.input.selection_text || s.input_read.copy_text(s.input)
-        else
-          s.input_read.copy_text(s.input)
-        end
+      when :input   then input_selection_text(s)
       when :decoded then s.decoded
       when :output  then s.output_ok? ? s.output : ""
       else               ""
       end
-    end
-
-    def cookie_select_line : Nil
-      s = cur
-      s.input_read.select_line(s.input) if s.pane == :input && s.input_mode == InputMode::Read
-    end
-
-    def cookie_clear_selection : Nil
-      s = cur
-      return unless s.pane == :input
-      s.input_mode == InputMode::Insert ? s.input.clear_selection : s.input_read.clear_selection
     end
 
     def body_hint(focus : Symbol) : String
@@ -1136,15 +511,6 @@ module Gori::Tui
       else
         ""
       end
-    end
-
-    def on_enter : Nil
-      # Nothing to recompute on enter — caches stay valid across tab switches.
-    end
-
-    # Ephemeral scratch tool: sessions live in memory only (no settings persistence), so commit
-    # is a no-op. Kept for the TabController contract + the runner's commit call sites.
-    def commit : Nil
     end
 
     # --- recompute ---
@@ -1185,7 +551,7 @@ module Gori::Tui
 
     private def recompute_all(s : CookieSession) : Nil
       recompute_decode(s)
-      recompute_forge(s)
+      recompute_output(s)
     end
 
     private def recompute_decode(s : CookieSession) : Nil
@@ -1218,7 +584,7 @@ module Gori::Tui
       s.crack_note = nil unless ok
     end
 
-    private def recompute_forge(s : CookieSession) : Nil
+    private def recompute_output(s : CookieSession) : Nil
       body = s.payload.text
       if body.strip.empty?
         s.output = ""

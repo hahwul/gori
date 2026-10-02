@@ -29,7 +29,7 @@ describe "workbench clears ask first" do
       ctl = JwtController.new(host)
       ctl.clear_all
       host.confirms.should be_empty
-      ctl.jwt_from_text("eyJhbGciOiJIUzI1NiJ9.e30.x")
+      ctl.session_from_text("eyJhbGciOiJIUzI1NiJ9.e30.x")
       ctl.clear_all
       host.confirms.map(&.[0]).should eq(["CLEAR SESSION"])
     end
@@ -40,7 +40,7 @@ describe "workbench clears ask first" do
       ctl = CookieController.new(host)
       ctl.clear_all
       host.confirms.should be_empty
-      ctl.cookie_from_text("eyJ1c2VyIjoxfQ.am71Yg.sig")
+      ctl.session_from_text("eyJ1c2VyIjoxfQ.am71Yg.sig")
       ctl.clear_all
       host.confirms.map(&.[0]).should eq(["CLEAR SESSION"])
     end
