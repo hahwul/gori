@@ -24,7 +24,6 @@ module Gori::Sequencer
 
     enum State : UInt8
       Running
-      Paused
       Stopped
     end
 
@@ -36,7 +35,6 @@ module Gori::Sequencer
     @backend : Fuzz::CappedBackend?
     @concurrency : Int32
     @state : State
-    @wake : Channel(Nil)
     @collected : Int32
     @sent : Int32
     @errors : Int32
@@ -70,7 +68,6 @@ module Gori::Sequencer
       @backend = backend.try { |b| Fuzz::CappedBackend.new(b, @config.wire_cap) }
       @concurrency = @config.concurrency.clamp(1, MAX_CONCURRENCY)
       @state = State::Running
-      @wake = Channel(Nil).new(1)
       @settled = Channel(Nil).new(1)
       @events = Channel(Event).new(256)
       @collected = 0
@@ -101,24 +98,10 @@ module Gori::Sequencer
 
     def stop : Nil
       @state = State::Stopped
-      poke(@wake)
-      # The dispatcher may be HOLDING for an in-flight sample to settle rather than parked on
-      # `@wake` (see `await_outstanding`); without this second nudge a stop taken during that
-      # hold waits out the sample before it is noticed.
+      # The dispatcher may be HOLDING for an in-flight sample to settle (see
+      # `await_outstanding`); without this nudge a stop taken during that hold waits out the
+      # sample before it is noticed.
       poke(@settled)
-    end
-
-    def pause : Nil
-      @state = State::Paused
-    end
-
-    def resume : Nil
-      @state = State::Running
-      poke(@wake)
-    end
-
-    def stopped? : Bool
-      @state == State::Stopped
     end
 
     # ── orchestration ───────────────────────────────────────────────────────────────
@@ -188,8 +171,6 @@ module Gori::Sequencer
 
       spawn(name: "sequencer-dispatch") do
         loop do
-          break if @state.stopped?
-          park_if_paused
           break if @state.stopped?
           # Hold — do not break — while enough samples are already IN FLIGHT to reach the
           # goal; see `await_outstanding` for what the old break cost.
@@ -352,12 +333,6 @@ module Gori::Sequencer
       select
       when @events.send(ev)
       else
-      end
-    end
-
-    private def park_if_paused : Nil
-      while @state == State::Paused
-        @wake.receive
       end
     end
 
