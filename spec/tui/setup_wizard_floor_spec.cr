@@ -27,7 +27,7 @@ describe Gori::Tui::SetupWizard do
   end
 
   it "gives every fixed-layout step a card that fits at MIN_H" do
-    {SW::BIND_ROWS, SW::COMPANION_ROWS, SW::REVIEW_ROWS}.each do |rows|
+    {SW::BIND_ROWS, SW::COMPANION_ROWS, SW::KEYS_ROWS, SW::REVIEW_ROWS}.each do |rows|
       # `rows + 3` = top border + pad row + content + bottom border, which is exactly the
       # invariant render_* rely on: they draw at fixed offsets down to `box.y + 2 + rows - 1`.
       SW.card_h(SW::MIN_H, rows).should be >= rows + 3
@@ -37,7 +37,7 @@ describe Gori::Tui::SetupWizard do
   it "sets MIN_H no higher than the tallest step actually needs" do
     # One row below the floor the tallest step must NOT fit — otherwise MIN_H is padded and the
     # wizard turns away terminals it could have served.
-    tallest = {SW::BIND_ROWS, SW::COMPANION_ROWS, SW::REVIEW_ROWS}.max
+    tallest = {SW::BIND_ROWS, SW::COMPANION_ROWS, SW::KEYS_ROWS, SW::REVIEW_ROWS}.max
     SW.card_h(SW::MIN_H - 1, tallest).should be < tallest + 3
   end
 
@@ -59,11 +59,20 @@ describe Gori::Tui::SetupWizard do
     {
       {SW::BIND_FIELD_ROW + 1, SW::BIND_ROWS},
       {SW::COMPANION_MOTION_ROW, SW::COMPANION_ROWS},
+      {SW::KEYS_STATUS_ROW, SW::KEYS_ROWS}, # the pad's rows sit above its status line
       {SW::REVIEW_OFFER_ROW + 1, SW::REVIEW_ROWS},
     }.each do |(last_row, rows)|
       last_row.should be >= 2
       last_row.should be <= rows + 1
     end
+  end
+
+  # The KEYS step trades nothing for its pad: at MIN_H it must still be 15, the floor every
+  # other step was held to, so the step that lets a new user try both keysets does not lock a
+  # terminal size out of the wizard.
+  it "fits the KEYS step's pad without raising the floor" do
+    SW::MIN_H.should eq(15)
+    (SW::KEYS_PAD_ROW + SW::KEYS_PAD_H).should eq(SW::KEYS_STATUS_ROW)
   end
 
   # Only "address in use" is a warning; a host this machine cannot bind, or a sandbox that

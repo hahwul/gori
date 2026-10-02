@@ -33,7 +33,9 @@ module Gori::Tui
     READ_ONLY   = "this pane is read-only here"
     NOTHING_SEL = "nothing selected — {repeater.select-line} selects the line, ⇧arrows a span"
     RELOADED    = "the pane reloaded its text — nothing changed, look again and retry"
-    EMPTY_REG   = "nothing to paste — {repeater.copy} copies, {editor.delete} deletes into the paste register"
+    # No delete key named: it is `d` after a selection under helix-ish and `dd` under vim-ish,
+    # and a token for either verb expands to nothing under the other keyset.
+    EMPTY_REG = "nothing to paste yet — {repeater.copy} copies, and a READ delete keeps what it removed"
 
     # The keystroke a pasted character arrives as. `Runner#replay_paste` delivers a refused
     # bulk paste through this, and so does `paste` below, so the two cannot disagree about
