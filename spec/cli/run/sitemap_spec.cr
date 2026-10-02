@@ -4,13 +4,9 @@ require "json"
 # `gori run sitemap` — the three output formats (text tree / json / paths) and the tag
 # key normalization the `sitemap tag` subcommand writes with.
 
-# `sitemap_tag_path` is private CLI glue; reopen the module for a bare-call wrapper (the
-# same whitebox trick the other CLI specs use).
+# Private CLI glue; reopen the module for bare-call wrappers (the same whitebox trick the
+# other CLI specs use).
 module Gori::CLI::Run
-  def self.sitemap_tag_path_for_spec(target : String) : String
-    sitemap_tag_path(target)
-  end
-
   def self.collect_sitemap_for_spec(store : Gori::Store, limit : Int32, in_scope : Bool = false) : {Array(Gori::Sitemap::Node), Bool}
     collect_sitemap(store, Gori::QL::EMPTY, limit, in_scope, true, true)
   end
@@ -413,36 +409,6 @@ describe "gori run sitemap --format json" do
     Gori::Sitemap.stamp_tags!(hosts, { {"h", ""} => "whole host" })
     u = hosts.first.children.find! { |c| c.label == "u" }
     u.children.find! { |c| c.label == "{uuid}" }.tag.should be_nil
-  end
-end
-
-describe "gori run sitemap tag — the key a tag is filed under" do
-  # Every assertion here pins a LITERAL rather than re-deriving the expected value from
-  # Sitemap.normalize_path: comparing the function against itself would move both sides
-  # together, and a regression in normalize_path — the exact thing that would orphan every
-  # stored tag — would keep the spec green.
-
-  # The key KEEPS the query string, because "/login?a=1" is a distinct tree node from
-  # "/login". Stripping it would file the tag under a key no node ever has, and the tag
-  # would silently never appear in the tree.
-  it "keeps the query string, so a query-bearing endpoint keys on its own node" do
-    Gori::CLI::Run.sitemap_tag_path_for_spec("/login?a=1").should eq("/login?a=1")
-    Gori::CLI::Run.sitemap_tag_path_for_spec("/api/users").should eq("/api/users")
-    Gori::CLI::Run.sitemap_tag_path_for_spec("/api/users/").should eq("/api/users")
-    Gori::CLI::Run.sitemap_tag_path_for_spec("  /api/users  ").should eq("/api/users")
-  end
-
-  it "adds the leading slash a hand-typed --path omits, and maps empty to /" do
-    Gori::CLI::Run.sitemap_tag_path_for_spec("api/users").should eq("/api/users")
-    Gori::CLI::Run.sitemap_tag_path_for_spec("").should eq("/")
-    Gori::CLI::Run.sitemap_tag_path_for_spec("   ").should eq("/")
-  end
-
-  it "reduces an absolute-form target to its origin-form path" do
-    # A tag typed as a full URL still has to land on the node the tree built, and
-    # Sitemap.build normalizes before stamping — so the key is "/a", not the whole URL.
-    Gori::CLI::Run.sitemap_tag_path_for_spec("http://h/a").should eq("/a")
-    Gori::CLI::Run.sitemap_tag_path_for_spec("https://h/a?b=1").should eq("/a?b=1")
   end
 end
 

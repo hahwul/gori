@@ -95,7 +95,7 @@ module Gori
                     # are keyed by the path WITH the query and ride `variant_tags` above, exactly
                     # as a `{uuid}` fold's children keep their own; list_sitemap_tags (or
                     # fold_query:false) is where the rest show.
-                    if e.query_variants == 0 && (tag = tags[{e.host, sitemap_tag_path(e.target)}]?)
+                    if e.query_variants == 0 && (tag = tags[{e.host, Sitemap.tag_path(e.target)}]?)
                       j.field "tag", Serialize.text(tag)
                     end
                   end
@@ -115,13 +115,13 @@ module Gori
         return err("missing required 'path' (the path as list_sitemap shows it, e.g. /api/users or /login?a=1)",
           "INVALID_ARGUMENT", field: "path") unless path
         # Normalize exactly as the Sitemap tree stamps node paths (query string INCLUDED).
-        path = sitemap_tag_path(path)
+        path = Sitemap.tag_path(path)
         tag = (str(h, "tag") || "").strip
         # A tag whose (host, path) names no captured endpoint is stored but unreachable — it
         # can never stamp onto a tree node or a list_sitemap entry. Report that rather than
         # answering a flat success: the common causes are a typo and a trailing slash
         # (Sitemap.add drops one, so /api/users/ is stamped as /api/users).
-        matched = sitemap_node_exists?(host, path)
+        matched = store.sitemap_node_exists?(host, path)
         return busy("tag NOT applied (store busy or unwritable); the node is unchanged") unless store.set_sitemap_tag(host, path, tag)
         Result.new(JSON.build do |j|
           j.object do
@@ -157,27 +157,6 @@ module Gori
             end
           end
         end)
-      end
-
-      # Whether any captured endpoint on `host` normalizes to `path` — the same derivation
-      # list_sitemap's tag stamping uses, so "matched" here means "will be visible there".
-      #
-      # `nil` means UNKNOWN, and the distinction is load-bearing: the scan is capped at
-      # SITEMAP_MAX, and that cap is on the 6-column transport key, which multiplies past
-      # 10k long before the collapsed host/method/target count suggests. Answering a flat
-      # `false` off a truncated read made a positive claim about the capture that the query
-      # could not support — and the warning built on it told the operator to go hunting for
-      # a typo in a tag that was stored and does show.
-      private def sitemap_node_exists?(host : String, path : String) : Bool?
-        entries = store.sitemap_entries_detailed(QL::EMPTY, Store::SITEMAP_MAX)
-        return true if entries.any? { |e| e.host == host && sitemap_tag_path(e.target) == path }
-        entries.size >= Store::SITEMAP_MAX ? nil : false
-      end
-
-      # A sitemap tag's key is the exact node path the tree stamps. `node_path` shares its
-      # segment reduction, including trailing-slash removal, query retention and depth cuts.
-      private def sitemap_tag_path(target : String) : String
-        Sitemap.node_path(target.strip)
       end
 
       # At most this many raw targets are carried on a folded row. A folded /search can stand
@@ -271,7 +250,7 @@ module Gori
         found = [] of {String, String}
         row.query_targets.each do |t|
           break if found.size >= QUERY_SAMPLE_MAX
-          path = sitemap_tag_path(t)
+          path = Sitemap.tag_path(t)
           if tag = tags[{row.host, path}]?
             found << {path, tag}
           end
@@ -301,7 +280,7 @@ module Gori
         return entries.map { |e| SitemapRow.new(e) } unless fold
         index = {} of String => SitemapRow
         entries.each do |e|
-          full = sitemap_tag_path(e.target)
+          full = Sitemap.tag_path(e.target)
           qi = full.index('?')
           path = qi ? full[0...qi] : full
           path = "/" if path.empty?

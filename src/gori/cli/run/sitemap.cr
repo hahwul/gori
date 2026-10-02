@@ -99,9 +99,9 @@ module Gori
         abort "gori run sitemap tag: pass --tag=TEXT or --clear" if tag.nil? && !clear
         abort "gori run sitemap tag: --tag and --clear are mutually exclusive" if tag && clear
 
-        key = sitemap_tag_path(path)
+        key = Sitemap.tag_path(path)
         text = clear ? "" : tag.to_s
-        matched = sitemap_node_exists?(store, host, key)
+        matched = store.sitemap_node_exists?(host, key)
         js_node = matched == false && JsRefs.unrequested_node?(store, host, key)
         abort "gori run sitemap tag: NOT applied (project busy) — the node is unchanged" unless store.set_sitemap_tag(host, key, text)
         where = "#{CLI::Output.term_safe(host)}#{CLI::Output.term_safe(key)}"
@@ -111,13 +111,9 @@ module Gori
         end
       end
 
-      # Whether any captured endpoint on `host` normalizes to `path`. A tag whose (host, path)
-      # names no endpoint is stored but unreachable — it can never stamp onto a tree node. The
-      # common causes are a typo and a trailing slash (Sitemap.add drops one, so /api/users/ is
-      # stamped as /api/users).
       # The sentence for a tag that could not be confirmed against a captured endpoint, or nil
       # when there is nothing to say. Pure and separate so the three-way answer from
-      # `sitemap_node_exists?` reads as three cases rather than as branches inside the
+      # `Store#sitemap_node_exists?` reads as three cases rather than as branches inside the
       # command body (which is also what kept its complexity in budget).
       private def self.tag_match_warning(matched : Bool?, host : String, key : String,
                                          text : String, js_node : Bool = false) : String?
@@ -132,24 +128,6 @@ module Gori
           "no captured endpoint at #{host}#{key} — this tag will not show in the tree until " \
           "one exists (check for a typo or a trailing slash)"
         end
-      end
-
-      # `nil` means UNKNOWN, matching the MCP twin: the scan is capped at SITEMAP_MAX, and
-      # that cap counts 6-column transport keys, which multiply past 10k long before the
-      # collapsed host/method/target count suggests. Answering a flat `false` off a truncated
-      # read made a positive claim about the capture that the query cannot support, and the
-      # warning built on it sent the operator hunting for a typo in a tag that was stored and
-      # does show.
-      private def self.sitemap_node_exists?(store : Store, host : String, path : String) : Bool?
-        entries = store.sitemap_entries_detailed(QL::EMPTY, Store::SITEMAP_MAX)
-        return true if entries.any? { |e| e.host == host && sitemap_tag_path(e.target) == path }
-        entries.size >= Store::SITEMAP_MAX ? nil : false
-      end
-
-      # A tag's key is the exact node path the tree stamps. `node_path` shares the tree's
-      # segment reduction, including trailing-slash removal, query retention and depth cuts.
-      private def self.sitemap_tag_path(target : String) : String
-        Sitemap.node_path(target.strip)
       end
 
       private def self.cmd_sitemap_tree(args : Array(String)) : Nil
@@ -346,7 +324,7 @@ module Gori
       # thing this tree must not be silent about, because the per-host `(N paths)` header is
       # counted off whatever survived the cut — so a truncated run makes a POSITIVE and wrong
       # claim about the project's endpoints. The cap counts 6-column transport keys (see
-      # `sitemap_node_exists?`), which multiply past the default long before the collapsed row
+      # `Store#sitemap_node_exists?`), which multiply past the default long before the collapsed row
       # count suggests, so this fires on real engagements rather than on a pathological one.
       private def self.sitemap_truncation_notice(truncated : Bool, limit : Int32) : String?
         return nil unless truncated
