@@ -1,13 +1,6 @@
-require "./screen"
-require "./theme"
-require "./frame"
-require "./text_area"
-require "./input_mode"
-require "./text_read_state"
+require "./workbench_view"
 require "./viewport"
 require "../cookie"
-require "../hotkeys"
-require "./subtab_marks"
 
 module Gori::Tui
   # The Cookie tab's renderer — the JWT tab's sibling for framework signed SESSION cookies
@@ -18,34 +11,18 @@ module Gori::Tui
   #            OUTPUT (the live re-signed cookie).
   # A pure renderer + layout math + read-only scroll state; the controller owns the editable
   # buffers and the cached decode / verify / forge results (recomputed on edit, never on the
-  # render hot path). Modelled column-for-column on JwtView.
-  class CookieView
-    include SubtabRef # a sub-tab strip may hold a mark on this view (#683)
-    @registry : Verb::Registry? = nil
-    # Custom sub-tab chip label (nil = derive from the detected format); set by rename.
-    property name : String? = nil
-
-    def set_registry(registry : Verb::Registry) : Nil
-      @registry = registry
-    end
-
+  # render hot path). The INPUT card, the lens chip and the DECODED / OUTPUT text cards are
+  # `WorkbenchView`'s, column-for-column the JWT tab's.
+  class CookieView < WorkbenchView
     OPTS_H   = 3 # OPTIONS: a fixed single-line salt field, framed top + bottom (badges on border).
     SECRET_H = 3 # SECRET: a fixed single-line key field (verify state on the border).
 
-    # Left stops for the top card's border chrome, mirroring JwtView's INPUT_MIN_X reasoning:
-    # `Frame.card` draws ` TITLE ` from card.x + 2, so ` INPUT ` ends at card.x + 8 and
-    # ` PAYLOAD ` at card.x + 9 — one past each is where a right-chained badge may start.
-    INPUT_MIN_X   =  9
+    # Left stops for the border chrome, mirroring `WorkbenchView::INPUT_MIN_X`: `Frame.card`
+    # draws ` TITLE ` from card.x + 2, so ` PAYLOAD ` ends at card.x + 9 — one past each is
+    # where a right-chained badge may start.
     PAYLOAD_MIN_X = 11
     OPTS_MIN_X    = 11 # past ` OPTIONS `
     SECRET_MIN_X  = 10 # past ` SECRET `
-
-    @dec_scroll : Int32 = 0
-    @dec_h : Int32 = 0
-    @dec_lines : Int32 = 0
-    @out_scroll : Int32 = 0
-    @out_h : Int32 = 0
-    @out_lines : Int32 = 0
 
     # ---- DECODE lens layout: INPUT + DECODED + OPTIONS (fixed) + SECRET (fixed) ----
     def decode_layout(rect : Rect) : {Rect, Rect, Rect, Rect}
@@ -121,21 +98,6 @@ module Gori::Tui
       end
     end
 
-    # ---- INPUT (editable cookie string, INS/READ like the JWT input) ----
-    private def render_input(screen : Screen, card : Rect, input : TextArea, active : Bool,
-                             mode : InputMode, read : TextReadState, lens_chord : String) : Nil
-      reading = active && mode == InputMode::Read
-      insert = active && mode == InputMode::Insert
-      Frame.card(screen, card, "INPUT", bg: Theme.bg, border: Frame.pane_border(active))
-      # `mode`, not `insert` — a live 8-cell badge must sit on the pane's own mode even when
-      # focus is elsewhere (see the note in JwtView#render_input).
-      Frame.mode_badge(screen, card.right - 1, card.y, card.x + INPUT_MIN_X, mode == InputMode::Insert)
-      draw_lens_chip(screen, card, :decode, lens_chord, mode == InputMode::Insert)
-      body = card.inset(1, 1)
-      input.render(screen, body, cursor: insert, gauge: true, gauge_focused: active)
-      paint_read_chrome(screen, body, input, read) if reading
-    end
-
     # ---- PAYLOAD (editable JSON / Rack base64 value; always-insert) ----
     private def render_payload(screen : Screen, card : Rect, ed : TextArea, format : String, active : Bool) : Nil
       # Flask/Django sign a JSON session; Rack signs an opaque base64 Marshal blob. The title
@@ -146,32 +108,17 @@ module Gori::Tui
       ed.render(screen, card.inset(1, 1), cursor: active, highlight: hl, gauge: true, gauge_focused: active)
     end
 
-    # ---- the lens chip (` ^T:→FORGE ` / ` ^T:→DECODE `), the tab's one traceless control ----
-    # See JwtView#draw_lens_chip for the reasoning; identical geometry, different target names.
+    # ---- the lens chip (` ^T:→FORGE ` / ` ^T:→DECODE `) — see WorkbenchView#draw_lens_chip ----
     private def lens_name(mode : Symbol) : String
       mode == :decode ? "→FORGE" : "→DECODE"
     end
 
-    private def lens_chip_geom(card : Rect, mode : Symbol, insert : Bool) : {Int32, Int32}
-      if mode == :decode
-        min_x = card.x + INPUT_MIN_X
-        {Frame.mode_badge_edge(card.right - 1, min_x, insert), min_x}
-      else
-        {card.right - 1, card.x + PAYLOAD_MIN_X}
-      end
+    private def encode_card_min_x : Int32
+      PAYLOAD_MIN_X
     end
 
-    private def draw_lens_chip(screen : Screen, card : Rect, mode : Symbol, chord : String,
-                               insert : Bool = false) : Nil
-      edge, min_x = lens_chip_geom(card, mode, insert)
-      Frame.toggle_badge(screen, edge, card.y, min_x, chord, lens_name(mode), false)
-    end
-
-    def lens_chip_hit(card : Rect, mx : Int32, my : Int32, mode : Symbol, chord : String,
-                      insert : Bool = false) : Bool
-      edge, min_x = lens_chip_geom(card, mode, insert)
-      !Frame.right_badge_hit(mx, my, card.y, edge, min_x,
-        [{:lens, chord, lens_name(mode)}] of {Symbol, String, String}).nil?
+    private def decoded_placeholder : String
+      "(paste or send a signed session cookie into INPUT to decode)"
     end
 
     # ---- OPTIONS card: format / algorithm badges on the border + a salt field ----
@@ -237,14 +184,6 @@ module Gori::Tui
       Frame.right_badge_hit(mx, my, card.y, card.right - 1, card.x + OPTS_MIN_X, badges)
     end
 
-    private def key_label(id : String, fallback : String) : String
-      if registry = @registry
-        Hotkeys.binding_label(registry, id, fallback)
-      else
-        fallback
-      end
-    end
-
     # ---- SECRET single-line field + verify state on the border ----
     private def render_secret(screen : Screen, card : Rect, secret : String, cx : Int32,
                               pre : String, verify_state : Symbol, crack_note : String?, active : Bool) : Nil
@@ -272,67 +211,6 @@ module Gori::Tui
       when :bad then {"✗ bad key", Theme.red}
       else           {"", Theme.muted}
       end
-    end
-
-    # ---- read-only scrollable text card (DECODED / OUTPUT) — copied from JwtView ----
-    private def draw_text_card(screen : Screen, card : Rect, title : String, lines : Array(String),
-                               scroll : Int32, focused : Bool, fg : Color = Theme.text) : {Int32, Int32}
-      Frame.card(screen, card, title, bg: Theme.bg, border: Frame.pane_border(focused))
-      body = card.inset(1, 1)
-      return {0, scroll} if body.h <= 0
-      top = scroll.clamp(0, {lines.size - body.h, 0}.max)
-      (0...body.h).each do |i|
-        line = lines[top + i]?
-        break unless line
-        # muted `// format:` comment markers from Cookie.decode, red WARNING lines.
-        lfg = line.starts_with?("//") ? (line.includes?("WARNING") ? Theme.red : Theme.muted) : fg
-        screen.text(body.x, body.y + i, line, lfg, Theme.bg, width: body.w)
-      end
-      Frame.scroll_gauge(screen, body, lines.size, top, focused)
-      {body.h, top}
-    end
-
-    private def decoded_lines(decoded : String) : Array(String)
-      decoded.empty? ? ["(paste or send a signed session cookie into INPUT to decode)"] : decoded.split('\n')
-    end
-
-    private def paint_read_chrome(screen : Screen, rect : Rect, ed : TextArea, read : TextReadState) : Nil
-      read.paint_chrome(screen, rect, ed)
-    end
-
-    # ---- scroll mutators (called by the controller) ----
-    def scroll_decoded(step : Int32) : Nil
-      @dec_scroll = {@dec_scroll + step, 0}.max
-    end
-
-    def scroll_output(step : Int32) : Nil
-      @out_scroll = {@out_scroll + step, 0}.max
-    end
-
-    def decoded_at_top? : Bool
-      @dec_scroll <= 0
-    end
-
-    def decoded_at_bottom? : Bool
-      return true if @dec_h <= 0
-      @dec_scroll >= {@dec_lines - @dec_h, 0}.max
-    end
-
-    def output_at_top? : Bool
-      @out_scroll <= 0
-    end
-
-    def output_at_bottom? : Bool
-      return true if @out_h <= 0
-      @out_scroll >= {@out_lines - @out_h, 0}.max
-    end
-
-    def reset_decoded_scroll : Nil
-      @dec_scroll = 0
-    end
-
-    def reset_output_scroll : Nil
-      @out_scroll = 0
     end
   end
 end
