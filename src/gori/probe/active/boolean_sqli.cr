@@ -103,12 +103,12 @@ module Gori
         end
 
         def dedup_key(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : String?
-          s, slots = injectables(detail, opts) || return nil
+          s, slots = injectables(detail, opts, MAX_PROBE_PARAMS, MAX_PROBE_PARAMS_AGGRESSIVE) || return nil
           key_string(detail, s.method, s.path, slots, opts)
         end
 
         def plan(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : Plan?
-          s, slots = injectables(detail, opts) || return nil
+          s, slots = injectables(detail, opts, MAX_PROBE_PARAMS, MAX_PROBE_PARAMS_AGGRESSIVE) || return nil
           breakouts = breakouts(opts)
           # results[0] = baseline; results[1] = a second identical baseline (the stability guard).
           baseline = InsertionPoints.build(detail, InsertionPoints::NO_CHANGES)
@@ -182,18 +182,6 @@ module Gori
           same?(fp1, fingerprint(base2)) ? fp1 : nil
         end
 
-        # How many probe legs each param carries: the followups minus the second baseline, divided
-        # over the params. Even (a whole number of true/false pairs) and ≥ 2, else nil to decline —
-        # the layout is malformed (e.g. the single-response fallback with no followups).
-        private def legs_per_param(plan : Plan) : Int32?
-          n = plan.params.size
-          return nil if n == 0
-          legs = plan.followups.size - 1 # drop the second baseline
-          return nil if legs <= 0 || legs % n != 0
-          per = legs // n
-          (per >= 2 && per.even?) ? per : nil
-        end
-
         # {HTTP status, 64-bit content SimHash} of a response. The SimHash is over the DECODED,
         # capped body; `Fingerprint.simhash` is byte-level and skips dynamic tokens, so no scrub is
         # needed and a jittering id/timestamp does not move it.
@@ -222,17 +210,6 @@ module Gori
         # under AGGRESSIVE (which the higher param cap and doubled leg count are already gated by).
         private def breakouts(opts : Options) : Array(Breakout)
           opts.aggressive ? [STRING_CTX, NUMERIC_CTX] : [STRING_CTX]
-        end
-
-        # Shared gate for plan + dedup_key so the two can't drift (equivalence-spec invariant).
-        # Returns {surface, the first ≤cap injectable slots} for an eligible flow, else nil.
-        private def injectables(detail : Store::FlowDetail, opts : Options) : {InsertionPoints::Surface, Array(InsertionPoints::Slot)}?
-          s = InsertionPoints.enumerate(detail, opts, InsertionPoints::DEFAULT_LOCATIONS) || return nil
-          return nil unless diff_method_allowed?(s.method, opts)
-          cap = opts.aggressive ? MAX_PROBE_PARAMS_AGGRESSIVE : MAX_PROBE_PARAMS
-          slots = s.slots.first(cap)
-          return nil if slots.empty?
-          {s, slots}
         end
 
         # Suffix with |aggr under aggressive opts: aggressive introduces numeric breakout

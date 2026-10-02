@@ -6,6 +6,7 @@ require "../../proxy/codec/http1"
 require "../../proxy/codec/content_decode"
 require "../../miner/inject"
 require "../../fuzz/content_length"
+require "./insertion_points"
 
 module Gori
   module Probe
@@ -197,6 +198,51 @@ module Gori
         protected def diff_method_allowed?(method_upcase : String, opts : Options) : Bool
           return false if method_upcase == "HEAD"
           opts.allow_unsafe || method_upcase == "GET"
+        end
+
+        # Shared gate for plan + dedup_key so the two can't drift (equivalence-spec invariant).
+        # Returns {surface, the first ≤cap injectable slots} for an eligible flow, else nil. The cap
+        # spans ALL enumerated locations at once, so a wide param set can't blow up the request count.
+        protected def injectables(detail : Store::FlowDetail, opts : Options, max_params : Int32,
+                                  max_params_aggressive : Int32) : {InsertionPoints::Surface, Array(InsertionPoints::Slot)}?
+          s = InsertionPoints.enumerate(detail, opts, InsertionPoints::DEFAULT_LOCATIONS) || return nil
+          return nil unless diff_method_allowed?(s.method, opts)
+          cap = opts.aggressive ? max_params_aggressive : max_params
+          slots = s.slots.first(cap)
+          return nil if slots.empty?
+          {s, slots}
+        end
+
+        # How many probe legs each param carries: the followups minus the second baseline, divided
+        # over the params. Even (a whole number of pairs) and ≥ 2, else nil to decline — the layout
+        # is malformed (e.g. the single-response fallback with no followups).
+        protected def legs_per_param(plan : Plan) : Int32?
+          n = plan.params.size
+          return nil if n == 0
+          legs = plan.followups.size - 1 # drop the second baseline
+          return nil if legs <= 0 || legs % n != 0
+          per = legs // n
+          (per >= 2 && per.even?) ? per : nil
+        end
+
+        # Whether the captured request body is one an injected value can be spliced into: present,
+        # within BODY_CAP, unobfuscated and unencoded, with exactly one injectable Content-Type.
+        protected def body_eligible?(detail : Store::FlowDetail) : Bool
+          body = detail.request_body || return false
+          return false if body.empty? || body.size > BODY_CAP || detail.request_body_truncated?
+          return false if Proxy::Codec::Http1.obfuscated_header?(detail.request_head)
+          req = Proxy::Codec::Http1.parse_request_head(detail.request_head)
+          return false if req.malformed? || req.headers.get?("Transfer-Encoding")
+          return false unless req.headers.get_all("Content-Encoding").all? { |v| v.strip.downcase == "identity" }
+          types = req.headers.get_all("Content-Type")
+          return false unless types.size == 1
+          injectable_type?(types.first)
+        end
+
+        protected def injectable_type?(value : String) : Bool
+          media = value.split(';', 2).first.strip.downcase
+          media == "application/x-www-form-urlencoded" || media == "application/json" ||
+            (media.starts_with?("application/") && media.ends_with?("+json"))
         end
 
         protected def path_only(origin_target : String) : String

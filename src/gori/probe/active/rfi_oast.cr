@@ -103,24 +103,6 @@ module Gori
           slot ? {surface, slot} : nil
         end
 
-        private def body_eligible?(detail : Store::FlowDetail) : Bool
-          body = detail.request_body || return false
-          return false if body.empty? || body.size > BODY_CAP || detail.request_body_truncated?
-          return false if Proxy::Codec::Http1.obfuscated_header?(detail.request_head)
-          req = Proxy::Codec::Http1.parse_request_head(detail.request_head)
-          return false if req.malformed? || req.headers.get?("Transfer-Encoding")
-          return false unless req.headers.get_all("Content-Encoding").all? { |v| v.strip.downcase == "identity" }
-          types = req.headers.get_all("Content-Type")
-          return false unless types.size == 1
-          injectable_type?(types.first)
-        end
-
-        private def injectable_type?(value : String) : Bool
-          media = value.split(';', 2).first.strip.downcase
-          media == "application/x-www-form-urlencoded" || media == "application/json" ||
-            (media.starts_with?("application/") && media.ends_with?("+json"))
-        end
-
         private def rfi_shaped?(name : String, value : String) : Bool
           return false if value.empty?
           known_name = RFI_PARAMS.includes?(name.downcase)

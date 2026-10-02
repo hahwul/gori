@@ -107,12 +107,12 @@ module Gori
         end
 
         def dedup_key(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : String?
-          s, slots = injectables(detail, opts) || return nil
+          s, slots = injectables(detail, opts, MAX_PROBE_PARAMS, MAX_PROBE_PARAMS_AGGRESSIVE) || return nil
           key_string(detail, s.method, s.path, slots, opts)
         end
 
         def plan(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : Plan?
-          s, slots = injectables(detail, opts) || return nil
+          s, slots = injectables(detail, opts, MAX_PROBE_PARAMS, MAX_PROBE_PARAMS_AGGRESSIVE) || return nil
           families = families(opts)
           # results[0] and results[1] are two identical baselines (no delay) — the stability guard.
           baseline = InsertionPoints.build(detail, InsertionPoints::NO_CHANGES)
@@ -201,18 +201,6 @@ module Gori
             long - short >= MIN_INCREMENT_US
         end
 
-        # How many probe legs each param carries: the followups minus the second baseline, divided
-        # over the params. Even (a whole number of short/long pairs) and ≥ 2, else nil to decline —
-        # a malformed layout (e.g. the single-response fallback with no followups).
-        private def legs_per_param(plan : Plan) : Int32?
-          n = plan.params.size
-          return nil if n == 0
-          legs = plan.followups.size - 1 # drop the second baseline
-          return nil if legs <= 0 || legs % n != 0
-          per = legs // n
-          (per >= 2 && per.even?) ? per : nil
-        end
-
         # The wire-ready suffix for one family at `seconds` delay.
         private def suffix(family : Family, seconds : Int32) : String
           family.template.gsub("{d}", seconds.to_s)
@@ -222,17 +210,6 @@ module Gori
         # set is FAMILIES' prefix so detections_all's index→label recovery holds for both.
         private def families(opts : Options) : Array(Family)
           opts.aggressive ? FAMILIES : FAMILIES.first(DEFAULT_FAMILIES)
-        end
-
-        # Shared gate for plan + dedup_key so the two can't drift (equivalence-spec invariant).
-        # Returns {surface, the first ≤cap injectable slots} for an eligible flow, else nil.
-        private def injectables(detail : Store::FlowDetail, opts : Options) : {InsertionPoints::Surface, Array(InsertionPoints::Slot)}?
-          s = InsertionPoints.enumerate(detail, opts, InsertionPoints::DEFAULT_LOCATIONS) || return nil
-          return nil unless diff_method_allowed?(s.method, opts)
-          cap = opts.aggressive ? MAX_PROBE_PARAMS_AGGRESSIVE : MAX_PROBE_PARAMS
-          slots = s.slots.first(cap)
-          return nil if slots.empty?
-          {s, slots}
         end
 
         # Suffix with |aggr under aggressive opts: aggressive introduces additional DB backend

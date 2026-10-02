@@ -65,12 +65,12 @@ module Gori
         end
 
         def dedup_key(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : String?
-          s, slots = injectables(detail, opts) || return nil
+          s, slots = injectables(detail, opts, MAX_PROBE_PARAMS, MAX_PROBE_PARAMS_AGGRESSIVE) || return nil
           InsertionPoints.dedup_key("backslash_powered", detail, s.method, s.path, slots)
         end
 
         def plan(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : Plan?
-          s, slots = injectables(detail, opts) || return nil
+          s, slots = injectables(detail, opts, MAX_PROBE_PARAMS, MAX_PROBE_PARAMS_AGGRESSIVE) || return nil
           baseline = InsertionPoints.build(detail, InsertionPoints::NO_CHANGES)
           # A SECOND, identical baseline, sent first among the follow-ups. The whole rule is a
           # difference test against the baseline fingerprint, which silently assumed the endpoint
@@ -129,22 +129,6 @@ module Gori
         # detections_all with the full set.
         def detections(plan : Plan, result : Repeater::Result, detail : Store::FlowDetail) : Array(Detection)
           detections_all(plan, [result], detail)
-        end
-
-        # Shared gate for plan + dedup_key so the two can't drift (equivalence-spec invariant).
-        # Returns {surface, the first ≤cap injectable slots} for an eligible flow, else nil. The cap
-        # spans ALL enumerated locations at once, so a wide param set can't blow up the request count.
-        private def injectables(detail : Store::FlowDetail, opts : Options) : {InsertionPoints::Surface, Array(InsertionPoints::Slot)}?
-          s = InsertionPoints.enumerate(detail, opts, InsertionPoints::DEFAULT_LOCATIONS) || return nil
-          # Body-differential gate: the comparison reads response BODIES (HEAD has none), so HEAD is
-          # always out. By default GET only — the automatic scan never auto-re-sends a state-changing
-          # method — but opts.allow_unsafe (manual per-flow scan / AGGRESSIVE mode) widens to
-          # POST/PUT/PATCH/DELETE, whose params can still be interpreted server-side.
-          return nil unless diff_method_allowed?(s.method, opts)
-          cap = opts.aggressive ? MAX_PROBE_PARAMS_AGGRESSIVE : MAX_PROBE_PARAMS
-          slots = s.slots.first(cap)
-          return nil if slots.empty?
-          {s, slots}
         end
 
         # {baseline fingerprint, whether body LENGTH is part of it} — but only when the endpoint
