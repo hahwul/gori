@@ -366,6 +366,9 @@ describe "gori run rewriter extract" do
     j["selector"].as_s.should eq("")
     j["pos_start"].as_i.should eq(3)
     j["pos_end"].as_i.should eq(9)
+    # The ORDER too: a script diffing `--format json` output against MCP `list_extract_rules`
+    # sees the same object, field for field.
+    j.as_h.keys.should eq(%w[id enabled name when host kind selector pos_start pos_end])
   end
 end
 
