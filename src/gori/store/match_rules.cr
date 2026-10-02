@@ -98,15 +98,27 @@ module Gori
     # dropped leaves the operator believing an order that reverts at next start.
     def move_rule(id : Int64, dir : Int32) : Bool
       rules = match_rules
-      i = rules.index { |r| r.id == id }
+      move_position("match_rules", id, dir, rules.map(&.id), frozen: rules.select(&.inert?).map(&.id))
+    end
+
+    # The swap-and-renumber behind `move_rule`, `move_color_rule` and `move_display_column`.
+    # `ids` is the table's rows in display order (read here when not given); a `frozen` row on
+    # either side of the swap refuses it. False = nothing moved, or the write did not commit.
+    private def move_position(table : String, id : Int64, dir : Int32, ids : Array(Int64)? = nil,
+                              *, frozen : Array(Int64) = [] of Int64) : Bool
+      order = ids || begin
+        list = [] of Int64
+        @db.query("SELECT id FROM #{table} ORDER BY position, id") { |rs| rs.each { list << rs.read(Int64) } }
+        list
+      end
+      i = order.index(id)
       return false unless i
       j = i + (dir < 0 ? -1 : 1)
-      return false unless 0 <= j < rules.size
-      return false if rules[i].inert? || rules[j].inert?
-      ids = rules.map(&.id)
-      ids.swap(i, j)
+      return false unless 0 <= j < order.size
+      return false if frozen.includes?(order[i]) || frozen.includes?(order[j])
+      order.swap(i, j)
       exec_task_ok ->(c : DB::Connection) {
-        ids.each_with_index { |rid, pos| c.exec("UPDATE match_rules SET position = ? WHERE id = ?", pos, rid) }
+        order.each_with_index { |rid, pos| c.exec("UPDATE #{table} SET position = ? WHERE id = ?", pos, rid) }
         nil
       }
     end

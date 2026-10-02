@@ -75,17 +75,7 @@ module Gori
     # False also covers "nothing moved" (an edge of the block, or an unknown id), same
     # contract `Rules#move` states.
     def move_color_rule(id : Int64, dir : Int32) : Bool
-      ids = [] of Int64
-      @db.query("SELECT id FROM color_rules ORDER BY position, id") { |rs| rs.each { ids << rs.read(Int64) } }
-      i = ids.index(id)
-      return false unless i
-      j = i + (dir < 0 ? -1 : 1)
-      return false unless 0 <= j < ids.size
-      ids.swap(i, j)
-      exec_task_ok ->(c : DB::Connection) {
-        ids.each_with_index { |rid, pos| c.exec("UPDATE color_rules SET position = ? WHERE id = ?", pos, rid) }
-        nil
-      }
+      move_position("color_rules", id, dir)
     end
 
     # Returns whether the write committed (false = store busy/locked/closing).

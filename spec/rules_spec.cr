@@ -1008,6 +1008,9 @@ describe Gori::Rules do
           engine.move(p_inert, 1, Gori::Store::RuleScope::Project).should be_false
           # Moving the known neighbour past the inert rule must also be refused
           engine.move(p_known, -1, Gori::Store::RuleScope::Project).should be_false
+          # The store refuses both on its own, for a caller holding a stale snapshot
+          store.move_rule(p_inert, 1).should be_false
+          store.move_rule(p_known, -1).should be_false
           store.match_rules.map(&.name).should eq(["inert proj", "known proj"])
 
           # Same for global scope
