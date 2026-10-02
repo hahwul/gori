@@ -58,13 +58,6 @@ module Gori::Proxy
       nil
     end
 
-    # Whether any short-circuit rule is live. Separate from `active?` so a caller can ask
-    # about THIS seam alone — the h2 relay cannot reach `short_circuit`, so a host with a
-    # live stub rule needs the HTTP/1.1 path the way a body rule does (`tls/tunnel.cr`).
-    def short_circuits? : Bool
-      false
-    end
-
     # The same questions, narrowed to one host. The h2 downgrade gate asks whether either
     # direction has a body rule for the CONNECT host. HTTP/1's forward-proxy path asks the
     # directional predicates below for each request because one client connection can carry

@@ -82,10 +82,6 @@ module Gori::Proxy
       @mutex.synchronize { @entries.size }
     end
 
-    def clear : Nil
-      @mutex.synchronize { @entries.clear }
-    end
-
     private def store(key : {String, Int32}, addresses : Array(::Socket::Addrinfo)) : Nil
       @mutex.synchronize do
         @entries.delete(key)

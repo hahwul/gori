@@ -146,10 +146,6 @@ module Gori::Tui
       end
     end
 
-    def js_scanning? : Bool
-      @js_scanning
-    end
-
     # `sitemap.toggle-js-refs` — show/hide the JavaScript-referenced nodes, then rebuild.
     def sitemap_toggle_js_refs : Nil
       @sitemap.toggle_js_refs

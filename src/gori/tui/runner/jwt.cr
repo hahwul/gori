@@ -40,10 +40,6 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     jwt_controller.jwt_copy
   end
 
-  def jwt_copy_all : Nil
-    jwt_controller.jwt_copy_all
-  end
-
   def jwt_copy_token : Nil
     jwt_controller.jwt_copy_token
   end

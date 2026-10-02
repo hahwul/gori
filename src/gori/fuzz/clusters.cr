@@ -184,28 +184,12 @@ module Gori
         @by_id.size
       end
 
-      def empty? : Bool
-        @by_id.empty?
-      end
-
       def truncated? : Bool
         @overflow_rows > 0
       end
 
       def []?(id : Int64) : Cluster?
         @by_id[id]?
-      end
-
-      # The cluster a row belongs to, or nil for an overflow row.
-      def cluster_of(r : Result) : Cluster?
-        @by_id[Clusters.key(r)[0]]?
-      end
-
-      def clear : Nil
-        @by_id.clear
-        @rows = 0_i64
-        @overflow_rows = 0_i64
-        @overflow_matched = 0_i64
       end
 
       # `matched_only` keeps the clusters holding at least one matcher hit — the one filter

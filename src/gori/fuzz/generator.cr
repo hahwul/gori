@@ -79,10 +79,6 @@ module Gori::Fuzz
       @marked.is_a?(WsScript)
     end
 
-    def mode : Mode
-      @config.mode
-    end
-
     # Total request count, or nil when unknown / Int64-overflowing (→ confirm + cap
     # in every frontend). Pitchfork's total is an UPPER bound (min of the KNOWN set
     # sizes; an unknown-length set could end the lockstep sooner).

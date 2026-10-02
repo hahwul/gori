@@ -467,16 +467,6 @@ module Gori::Tui
       rebuild_preview_highlight if @preview_styled_rev != Theme.revision
     end
 
-    # Tab cycles list → request → response → list (only when preview is on).
-    def cycle_preview_focus : Nil
-      return unless preview_enabled?
-      @preview_focus = case @preview_focus
-                       when :list then :req
-                       when :req  then :res
-                       else            :list
-                       end
-    end
-
     # One step along list → req → res (dir > 0) or back; false off either end, so the
     # Runner's focus ring can leave for the tab bar there.
     def step_preview_focus(dir : Int32) : Bool
@@ -2368,18 +2358,6 @@ module Gori::Tui
       return false unless detail
       return false if detail_hex?(detail) # req/resp hex dump — scroll rows, no caret
       true
-    end
-
-    # Plain text lines for the active detail pane. Prefer `detail_line_source` on hot
-    # paths (move/scroll/paint) so BodyLines stay lazy; this full array is for
-    # rare full-materialise callers (e.g. selection span rebuild when selecting).
-    private def detail_plain_lines : Array(String)
-      if rl = shown_reveal_lines
-        rl
-      else
-        dv = detail_view
-        (0...dv.total).map { |i| dv.line_text(i) }
-      end
     end
 
     # O(1) total + lazy line fetch for caret/scroll/copy on windowed req/resp bodies.

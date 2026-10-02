@@ -61,24 +61,12 @@ module Gori::Tui
       @filter.editing?
     end
 
-    def filter_shown? : Bool
-      @filter.shown?
-    end
-
     def filter_hint : String
       @filter.hint
     end
 
     def filter_active? : Bool
       @filter.active?
-    end
-
-    def no_match_line : String
-      @filter.no_match_line("rules")
-    end
-
-    def render_filter_bar(screen : Screen, rect : Rect) : Nil
-      @filter.render_bar(screen, rect)
     end
 
     # Re-anchored by the row's own key, since a narrowing shifts every index.

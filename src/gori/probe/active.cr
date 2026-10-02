@@ -57,12 +57,6 @@ module Gori
                RateLimitBypass.new, ForbiddenMethodBypass.new,
                InsecureHttpMethods.new] of Rule
 
-      # Convenience facade over the primary (reflected-param) rule. The analyzer drives the
-      # whole RULES list; these keep a stable single-rule entry point for callers/tests.
-      def self.dedup_key(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : String?
-        PRIMARY.dedup_key(detail, opts)
-      end
-
       def self.plan(detail : Store::FlowDetail, opts : Options = Options::DEFAULT) : Plan?
         PRIMARY.plan(detail, opts)
       end

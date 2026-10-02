@@ -128,11 +128,6 @@ module Gori::Protobuf
       def field?(number : UInt32) : FieldDef?
         @fields[number]?
       end
-
-      # Last segment — what a tree header shows.
-      def short_name : String
-        @full_name.rpartition('.')[2].presence || @full_name
-      end
     end
 
     # An enum declaration: value number → name. Numbers are int32 and MAY be negative

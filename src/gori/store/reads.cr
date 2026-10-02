@@ -1080,12 +1080,5 @@ module Gori
       ::Log.warn { "endpoint observation query failed: #{ex.message}" }
       [] of EndpointObservation
     end
-
-    # Passive-signal tags for a flow, fetched lazily per on-screen row (P8 pull,
-    # not push). No tag producer exists this milestone, so this is always empty;
-    # the call site is the seam.
-    def flags_for(id : Int64) : Array(String)
-      [] of String
-    end
   end
 end

@@ -421,10 +421,6 @@ module Gori::Tui
       0
     end
 
-    # Put the cursor on row `idx` (clamped). Default no-op; list cards override it.
-    def set_selected(idx : Int32) : Nil
-    end
-
     # PgUp/PgDn/Home/End over the list, one page being the rows the last frame drew. True
     # when `ev` was one of the four, so a key ladder can take it as one arm.
     def page_key(ev : Termisu::Event::Key) : Bool

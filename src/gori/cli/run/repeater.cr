@@ -532,13 +532,6 @@ module Gori
         "(a TUI, a capture, or an MCP server) may hold its writer slot; retry, or close it"
       end
 
-      # A response/history write happens after the send attempt. Once the network succeeds, its
-      # failure is a warning, not a failed send: a shell that retries every non-zero command would
-      # otherwise duplicate a request that already reached the origin.
-      private def self.project_write_warning(prefix : String, project : Project) : String
-        "#{project_write_failure(prefix, project)}#{project_write_warning_tail}"
-      end
-
       # The half of `project_write_warning` that is about the SEND, for a failure sentence that
       # already says what happened to the write (`persist_repeater_response`).
       private def self.project_write_warning_tail : String

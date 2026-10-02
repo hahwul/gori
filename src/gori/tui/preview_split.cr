@@ -46,13 +46,6 @@ module Gori::Tui
       @preview_focus = f if {:list, :preview}.includes?(f)
     end
 
-    # ⇥. A no-op while the preview is off — otherwise focus moves to a band that is not
-    # drawn and the tab looks frozen.
-    def cycle_preview_focus : Nil
-      return unless preview_enabled?
-      @preview_focus = @preview_focus == :list ? :preview : :list
-    end
-
     # One step list → preview (dir > 0) or back; false off either end, so the Runner's focus
     # ring can leave for the tab bar there.
     def step_preview_focus(dir : Int32) : Bool

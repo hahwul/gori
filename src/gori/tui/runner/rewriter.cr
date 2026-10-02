@@ -71,10 +71,6 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     rewriter_controller.rules_sub? && !rewriter_controller.selected_rule.nil?
   end
 
-  def rewriter_rules_sub? : Bool
-    rewriter_controller.rules_sub?
-  end
-
   # The list is on screen AND has focus — what a rule CHORD has to mean. See the comment on
   # `rewriter_rule_selected?` above for the `@sub` half of this; this is the `@focus` half.
   def rewriter_rule_list_focused? : Bool

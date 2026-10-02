@@ -778,17 +778,6 @@ module Gori::Tui
       @host.status("cleared")
     end
 
-    def copy_output : Nil
-      s = cur
-      text = s.view.output_copy(s.result)
-      if text.empty?
-        @host.status("nothing to copy")
-      else
-        written = Clipboard.copy(text)
-        @host.status("output copied to clipboard#{Clipboard.note(written, text)}")
-      end
-    end
-
     def decoder_copy_selection : Nil
       s = cur
       text = case s.pane

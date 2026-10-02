@@ -91,13 +91,6 @@ module Gori
       ok && claimed
     end
 
-    # Drop every probe record for this project (the Probe tab's "clear findings" reaches here
-    # too — an outstanding payload whose finding was cleared should not re-appear on the next
-    # callback).
-    def clear_probe_oast_probes : Bool
-      exec_task_ok ->(c : DB::Connection) { c.exec("DELETE FROM probe_oast_probes"); nil }
-    end
-
     private def read_probe_oast(rs : DB::ResultSet) : ProbeOastRecord
       ProbeOastRecord.new(
         rs.read(Int64), rs.read(Int64), rs.read(String), rs.read(String), rs.read(Int64),

@@ -75,11 +75,6 @@ module Gori
       port ? Target.new(host, port) : nil
     end
 
-    # The address without its port — what a display or a duplicate check wants.
-    def self.ip(value : String) : String?
-      parse(value).try(&.ip)
-    end
-
     def self.valid?(value : String) : Bool
       !parse(value).nil?
     end

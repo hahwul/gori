@@ -664,10 +664,6 @@ module Gori
         @opcode == 1
       end
 
-      def control? : Bool
-        @opcode >= 8
-      end
-
       # As `Store::WsMessage#notice?`, for the surfaces that hold an already-converted seed —
       # the TUI takes its `Array(WsOutMessage)` from a caller — so the guard is reachable on
       # whichever side of the conversion a reader sits.
@@ -852,11 +848,6 @@ module Gori
         v = s.strip.downcase
         values.find { |o| o.label == v }
       end
-
-      # Did this step put a request on the wire?
-      def sent? : Bool
-        pass? || fail? || inconclusive? || error?
-      end
     end
 
     # A run folded into one word — what a regression check exits on.
@@ -975,10 +966,6 @@ module Gori
       def initialize(@id, @run_id, @position, @role, @ref_kind, @ref_id, @label, @method,
                      @url, @assertion, @outcome, @detail, @status, @duration_us, @bytes,
                      @flow_id)
-      end
-
-      def ref_label : String
-        "#{@ref_kind.label} ##{@ref_id}"
       end
     end
 
@@ -1819,16 +1806,6 @@ module Gori
       def self.from_label(s : String) : MarkerStyle
         s.downcase == "full" ? Full : Strip
       end
-
-      # The one-letter column the Colormarker list and `gori run colormarker` print.
-      # Exhaustive `case` on purpose (like `RulePart#badge`): a third style must not silently
-      # render as an existing one.
-      def badge : Char
-        case self
-        in .full?  then 'F'
-        in .strip? then 'S'
-        end
-      end
     end
 
     # A Colormarker rule: paint the History rows whose flow matches `match_filter` in `color`,
@@ -2271,34 +2248,13 @@ module Gori
         prefix_truncated?(@row.request, @request_size)
       end
 
-      def response_head_truncated? : Bool
-        prefix_truncated?(@row.response_head, @response_head_size)
-      end
-
       def response_body_truncated? : Bool
         prefix_truncated?(@row.response_body, @response_body_size)
-      end
-
-      def wire_truncated? : Bool
-        prefix_truncated?(@row.wire, @wire_size)
       end
 
       private def prefix_truncated?(prefix : Bytes?, full_size : Int64?) : Bool
         return false unless full_size
         prefix.nil? || prefix.size.to_i64 < full_size
-      end
-    end
-
-    # An intercepted HTTP/2 connection (one per CONNECT→TLS h2 session). Its raw
-    # frames are the truth (P7); decoded streams project into `flows` separately.
-    struct H2Connection
-      getter id : Int64
-      getter created_at : Int64
-      getter host : String
-      getter port : Int32
-      getter alpn : String
-
-      def initialize(@id, @created_at, @host, @port, @alpn)
       end
     end
 

@@ -98,10 +98,6 @@ module Gori::Tui
       @engine.try(&.stop)
     end
 
-    def stop_requested? : Bool
-      @stop_requested
-    end
-
     def pause : Nil
       return unless @status == :running
       @engine.try(&.pause)

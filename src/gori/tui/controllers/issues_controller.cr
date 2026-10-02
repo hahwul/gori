@@ -844,10 +844,6 @@ module Gori::Tui
       end
     end
 
-    def querying? : Bool
-      @issues.querying?
-    end
-
     def handle_query_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
       c = ev.char || key.to_char

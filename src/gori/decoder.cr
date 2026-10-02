@@ -116,10 +116,6 @@ module Gori::Decoder
     out[0].valid_encoding? ? out : display(data, nil)
   end
 
-  def self.binary?(data : Bytes) : Bool
-    !String.new(data).valid_encoding?
-  end
-
   # A process-wide registry built once and reused. The catalog is pure, read-only
   # data after construction, so concurrent reads (fuzz worker fibers all splice
   # through it) are safe. Callers that would otherwise rebuild `default_registry`

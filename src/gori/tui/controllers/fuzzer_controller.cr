@@ -101,10 +101,6 @@ module Gori::Tui
       @fuzzers.empty?
     end
 
-    def current_idx : Int32
-      @current_idx
-    end
-
     def current_view : FuzzerView?
       current_tab_obj.try(&.view)
     end
@@ -988,12 +984,6 @@ module Gori::Tui
 
     def commit : Nil
       save_current
-    end
-
-    def locked? : Bool
-      return false unless v = current_view
-      v.running? || v.saving_results? || v.loading_results? || v.dirty? || v.pane_insert?(:template) || v.pane_insert?(:target) ||
-        (@host.active_tab == :fuzzer && @host.focus == :body)
     end
 
     # --- editor $ENV autocomplete + tab-as-text (template pane in insert mode) ---

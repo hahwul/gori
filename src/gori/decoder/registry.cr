@@ -34,10 +34,6 @@ module Gori::Decoder
       @order.each { |c| yield c }
     end
 
-    def size : Int32
-      @order.size
-    end
-
     # Canonical names in registration order (the autocomplete browse list when the
     # query is empty).
     def names : Array(String)

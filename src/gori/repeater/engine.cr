@@ -141,17 +141,6 @@ module Gori
         end
       end
 
-      # Opens ONE upstream connection to the origin, or nil when the dial (or, for https,
-      # the TLS handshake) failed. Public because a keep-alive pool has to own the socket's
-      # lifetime across many exchanges — `send` above is the same dial plus a single
-      # exchange plus a close. `timeout` is the per-operation bound (connect, and idle
-      # between reads/writes), exactly as in `send`.
-      def self.dial(scheme : String, host : String, port : Int32, verify_upstream : Bool,
-                    sni : String?, timeout : Time::Span?,
-                    overrides : Gori::HostOverrides?, tls_preset : String? = nil) : IO?
-        dial_result(scheme, host, port, verify_upstream, sni, timeout, overrides, tls_preset)[0]
-      end
-
       # The same dial, paired with WHY there is no socket. Every active send path in gori
       # (repeater, fuzz, mine, sequence, discover, probe, MCP) reaches the network through
       # this one function or through `ConnPool`, which also uses it — so carrying the reason

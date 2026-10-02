@@ -664,15 +664,6 @@ module Gori
       end
     end
 
-    # Badge + description + the host glob when the rule is scoped to one. The host is worth
-    # the width HERE and not in the tab's list (which has its own column for it): a rule scoped
-    # to `*.corp.internal` is a different rule from the same pattern unscoped, and a confirm
-    # prompt naming only the pattern would not say which of the two it is about.
-    def self.summary(rule : Store::MatchRule) : String
-      s = "#{op_tag(rule)}  #{describe(rule)}"
-      rule.host.empty? ? s : "#{s}  @#{rule.host}"
-    end
-
     # --- HeadRewriter (called from proxy fibers) -----------------------------
 
     def rewrite_request(head : Bytes, host : String) : Bytes

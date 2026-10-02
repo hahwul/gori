@@ -1044,10 +1044,6 @@ module Gori::Tui
       end
     end
 
-    def cookie_copy_all : Nil
-      cookie_copy
-    end
-
     private def band_or_all(ed : TextArea) : String
       ed.selection_text || ed.text
     end

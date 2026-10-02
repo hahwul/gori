@@ -714,10 +714,6 @@ module Gori::Tui
       false
     end
 
-    def detail_at_top? : Bool
-      pane.at_top?
-    end
-
     def detail_select_line : Nil
       with_panes { pane.select_line }
     end
@@ -898,16 +894,6 @@ module Gori::Tui
       targets.each { |i| store.update_probe_issue_status(i.id, Store::Status::FalsePositive) }
       reload(store)
       targets.size
-    end
-
-    # Mute every OPEN issue on the targeted issue's host. The host is a single visible row, so
-    # the scope lens (which filters by host) already admits it — no cross-scope leak here.
-    def dismiss_by_host(store : Store) : Int32
-      return 0 unless issue = target_issue
-      n = @all.count { |i| i.host == issue.host && i.status.open? }
-      store.dismiss_probe_by_host(issue.host)
-      reload(store)
-      n
     end
 
     # A row is admitted by the active scope lens (always true when the lens is off).

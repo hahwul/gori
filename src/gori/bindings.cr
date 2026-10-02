@@ -468,10 +468,6 @@ module Gori
       @mutex.synchronize { @rules.dup }
     end
 
-    def enabled_count : Int32
-      @mutex.synchronize { @rules.count(&.enabled?) }
-    end
-
     # Why this rule may not be saved, or nil to proceed. Refused at SAVE time and named,
     # the way `upstream_rule_error` refuses — a precedence rule would have been the wrong
     # answer, because "bind from the login response OR the refresh response" is ONE rule

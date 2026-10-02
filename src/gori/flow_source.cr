@@ -185,10 +185,6 @@ module Gori
         to_s.underscore
       end
 
-      def label : String
-        token.upcase
-      end
-
       def self.parse?(value : String) : Surface?
         v = value.downcase
         values.find { |s| s.token == v }

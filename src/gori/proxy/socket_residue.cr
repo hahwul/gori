@@ -1,8 +1,5 @@
 require "socket"
 require "openssl"
-# Loaded first so the `gori_underlying_io` reopened below is the one that wins, exactly as it
-# did when this block lived in `repeater/conn_pool.cr`, which is required after it.
-require "./socket_tuning"
 
 # Non-blocking "is there residue in the read buffer?" — the piece Crystal's public IO has no
 # way to ask. `ConnPool#checkout_state` needs it because `read_head` reads byte-by-byte through the

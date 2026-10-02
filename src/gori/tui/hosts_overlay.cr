@@ -240,10 +240,6 @@ module Gori::Tui
       @field.set("")
     end
 
-    def input(ch : Char) : Nil
-      @field.insert(ch)
-    end
-
     # Whether there was anything to delete — `handle_add_key` reads this to tell a ⌫ that
     # edited the text from one on an empty row, which cancels.
     def backspace : Bool

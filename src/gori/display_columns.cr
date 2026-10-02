@@ -61,12 +61,6 @@ module Gori
       [] of Store::DisplayColumn
     end
 
-    # Does this set need the message BODY? Answers whether a caller has to pay for the BLOBs at
-    # all — a head-only set is served by `Store#get_flow(body_max: 0)`-shaped reads.
-    def self.body_scoped?(columns : Array(Store::DisplayColumn)) : Bool
-      columns.any?(&.body_scoped?)
-    end
-
     # Does this column extract a SENSITIVE header value (#1002)? A `cookie:` column is, whatever
     # its selector: a named cookie's value is by construction a substring of the `Cookie` header
     # every surface redacts. The three content-scoped kinds (`regex:`, `jsonpath:`, `position:`)

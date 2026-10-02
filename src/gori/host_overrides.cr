@@ -31,11 +31,6 @@ module Gori
 
       def initialize(@id : Int64, @host : String, @ip : String)
       end
-
-      # The stored value as gori dials it.
-      def address : String
-        @ip
-      end
     end
 
     getter entries : Array(Entry)

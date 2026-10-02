@@ -1021,12 +1021,6 @@ module Gori::Tui
       end
     end
 
-    # `jwt_copy` already answers "selection, else the whole pane" for every pane, so the
-    # copy-all half of the unified Copy is the same call rather than a second decision.
-    def jwt_copy_all : Nil
-      jwt_copy
-    end
-
     # An editor's ⇧arrow band, or its whole buffer when no band is live — "smart copy" stated
     # once for the three panes that share it. `TextArea#selection_text` is nil rather than ""
     # when there is no band, so this cannot silently copy an empty string over a full buffer.

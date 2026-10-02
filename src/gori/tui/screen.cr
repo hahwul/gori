@@ -275,21 +275,6 @@ module Gori::Tui
       str.to_slice.all? { |b| b >= 0x20_u8 && b <= 0x7e_u8 }
     end
 
-    # As `display_width`, but stops as soon as the running width reaches `limit`
-    # (returning a value ≥ limit without walking the rest of the string). The h-scroll
-    # clamps only need to know whether a line reaches the current view's right edge +
-    # one screen, so a minified multi-MB single line isn't grapheme-walked in full on
-    # EVERY frame just to clamp the scroll offset. Exact for lines narrower than limit.
-    def self.display_width_upto(str : String, limit : Int32) : Int32
-      return 0 if str.empty? || limit <= 0
-      w = 0
-      str.each_grapheme do |g|
-        w += visible_grapheme_width(g.to_s)
-        return w if w >= limit
-      end
-      w
-    end
-
     private def self.visible_grapheme_width(grapheme : String) : Int32
       if visible = UnicodeReveal.visible(grapheme)
         width = 0
@@ -615,11 +600,6 @@ module Gori::Tui
     def hline(x : Int32, y : Int32, w : Int32, ch : Char = '─',
               fg : Color = Theme.border, bg : Color = Theme.bg) : Nil
       w.times { |i| cell(x + i, y, ch, fg, bg) }
-    end
-
-    def vline(x : Int32, y : Int32, h : Int32, ch : Char = '│',
-              fg : Color = Theme.border, bg : Color = Theme.bg) : Nil
-      h.times { |i| cell(x, y + i, ch, fg, bg) }
     end
 
     # Truncate `str` so its display width (columns) <= `w`, using a trailing

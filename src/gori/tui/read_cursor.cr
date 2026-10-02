@@ -66,13 +66,6 @@ module Gori::Tui
       @cx = cx
     end
 
-    def line_selection? : Bool
-      a = @anchor
-      return false unless a
-      ay = a[0]
-      ay != @cy
-    end
-
     # Select the entire current line (anchor at col 0, caret at EOL).
     def select_line(lines : Array(String)) : Nil
       select_line(lines.size, ->(i : Int32) { lines[i] })
@@ -209,12 +202,6 @@ module Gori::Tui
       @cx = cx
     end
 
-    def click_to_cursor(rect : Rect, mx : Int32, my : Int32, scroll : Int32,
-                        lines : Array(String), gutter_w : Int32 = 0, xscroll : Int32 = 0,
-                        selecting : Bool = false) : Nil
-      click_to_cursor(rect, mx, my, scroll, lines.size, ->(i : Int32) { lines[i] }, gutter_w, xscroll, selecting)
-    end
-
     # `selecting` is the DRAG half: keep (or plant) the anchor and move the caret, so the
     # selection follows the pointer — the mouse spelling of ⇧arrows.
     def click_to_cursor(rect : Rect, mx : Int32, my : Int32, scroll : Int32,
@@ -233,22 +220,6 @@ module Gori::Tui
       @cy = {scroll + row, size - 1}.min
       cx0 = rect.x + gutter_w
       @cx = Screen.column_for_click(line_at.call(@cy), mx - cx0 + xscroll)
-    end
-
-    # Select the WORD under the pointer (double-click). Same boundary rule as
-    # `TextArea#select_word_at` — a word is a run of key-ish chars (letters, digits, `_`,
-    # `-`) or a run of punctuation, so a URL breaks at every `/`, `?` and `=` while
-    # `Content-Type` stays whole. Whitespace (or past end-of-line) selects nothing.
-    def select_word_at(rect : Rect, mx : Int32, my : Int32, scroll : Int32,
-                       lines : Array(String), gutter_w : Int32 = 0, xscroll : Int32 = 0) : Bool
-      select_word_at(rect, mx, my, scroll, lines.size, ->(i : Int32) { lines[i] }, gutter_w, xscroll)
-    end
-
-    def select_word_at(rect : Rect, mx : Int32, my : Int32, scroll : Int32,
-                       size : Int32, line_at : Int32 -> String,
-                       gutter_w : Int32 = 0, xscroll : Int32 = 0) : Bool
-      click_to_cursor(rect, mx, my, scroll, size, line_at, gutter_w, xscroll)
-      select_word_at_cursor(size, line_at)
     end
 
     # The word half of `select_word_at`, without the hit test — for a caller that has already
@@ -361,10 +332,6 @@ module Gori::Tui
         end
       end
       parts.join("\n")
-    end
-
-    def current_line(lines : Array(String)) : String
-      lines[@cy]? || ""
     end
 
     def current_line(size : Int32, line_at : Int32 -> String) : String

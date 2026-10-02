@@ -12,7 +12,6 @@ abstract class Gori::Verb::ExecContext
   abstract def jwt_cycle_alg : Nil        # cycle the signing alg (HS256/384/512/none)
   abstract def jwt_load_decoded : Nil     # seed the ENCODE editors from the INPUT token's claims
   abstract def jwt_copy : Nil             # copy selection or the focused pane's content
-  abstract def jwt_copy_all : Nil         # copy the focused pane's content (space-menu fallback)
   abstract def jwt_copy_token : Nil       # copy the re-signed OUTPUT token
   abstract def jwt_copy_attack : Nil      # copy the selected ATTACK payload's token
   abstract def jwt_read_mode? : Bool      # focused pane is READ (gates y/copy/select verbs)

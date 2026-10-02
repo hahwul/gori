@@ -255,13 +255,6 @@ module Gori::Tui
       prefs.dup.insert({i, prefs.size}.min, stored[i])
     end
 
-    # The factory layout as a prefs list — what an empty `tab_prefs` reconciles to. Written
-    # out explicitly only where a config has to be REPLACED by the defaults rather than
-    # reconciled against them.
-    def self.default_prefs : Array({String, Bool})
-      TABS.map { |(sym, _)| {sym.to_s, !DEFAULT_HIDDEN.includes?(sym)} }
-    end
-
     # Is this reconciled layout exactly the pre-slots factory default — catalog order, only
     # LEGACY_DEFAULT_HIDDEN hidden? Such a config was saved by settings:tabs' ↵ without any
     # edit (or by an older build that always persisted), so its owner never chose those

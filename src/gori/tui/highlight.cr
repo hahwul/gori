@@ -110,10 +110,6 @@ module Gori::Tui
         end
       end
 
-      def empty? : Bool
-        size == 0
-      end
-
       # Materialise line `i` (0-based). Same scrub/rstrip rules as `to_lines`.
       def [](i : Int32) : String
         if lines = @lines

@@ -347,10 +347,6 @@ module Gori::Tui
       run
     end
 
-    def select_run(id : Int32) : Nil
-      @view.select_run_by_id(id)
-    end
-
     def reveal_session(id : Int64) : Nil
       @view.select_run_by_id(id.to_i)
       @host.focus_body

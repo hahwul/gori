@@ -36,12 +36,6 @@ module Gori::Proxy
       end
     end
 
-    # Buffers out on loan right now. For specs and benches (`IdleGc` reads bytes moving,
-    # `Codec::Body.streamed`, not this: an idle SSE body holds its loan for hours).
-    def self.lent : Int32
-      @@lent
-    end
-
     # Buffers waiting to be lent. For specs and benches.
     def self.idle_count : Int32
       @@idle.size

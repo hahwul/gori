@@ -1437,19 +1437,6 @@ module Gori::Tui
       yield
     end
 
-    # ↑/↓ and ⇧↑/↓ over the preview: the caret moves, ⇧ grows the selection. The pane had a
-    # scroll gauge and no caret at all — readable, and not selectable or copyable by any route.
-    def preview_move(dr : Int32, dc : Int32, selecting : Bool = false) : Nil
-      with_preview { @preview.move(dr, dc, selecting: selecting) }
-    end
-
-    def preview_motion_key(ev : Termisu::Event::Key) : Bool
-      return false if @editing
-      it = selected_item || return false
-      sync_preview(it)
-      @preview.motion_key(ev)
-    end
-
     def preview_select_line : Nil
       with_preview { @preview.select_line }
     end
@@ -1528,11 +1515,6 @@ module Gori::Tui
       # move that window, and reads as scrolling because the window follows.
       return hex_move(delta, 0) if hex_editing?
       @editing ? @editor.scroll_view(delta) : vscroll_detail(delta)
-    end
-
-    # At the top of the read-only preview — ↑ there pops focus back to the queue.
-    def preview_at_top? : Bool
-      @preview.at_top?
     end
 
     # Windowed view of the held item's raw bytes, cached by item id (held bytes

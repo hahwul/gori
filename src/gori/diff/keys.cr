@@ -12,11 +12,6 @@ module Gori::Diff
   # normalization. A key that disagreed with the Sitemap tab would make the diff and the
   # tab describe different endpoints (P3).
   record Key, host : String, method : String, path : String do
-    # "GET /users/{uuid}" — the row label, host omitted (rows group under their host).
-    def label : String
-      "#{method} #{path}"
-    end
-
     def to_s(io : IO) : Nil
       io << method << ' ' << host << path
     end

@@ -408,12 +408,6 @@ module Gori::Tui
       refresh_link_preview
     end
 
-    # The dirty part of the cross-session reload guard (the shell adds the
-    # active+focused part). A dirty note must not be clobbered by a peer's commit.
-    def locked? : Bool
-      @notes.dirty?
-    end
-
     # --- sub-tab lifecycle (also invoked by the shell's shared strip machinery) ---
     def reload : Nil
       @notes.reload(@host.session.store)

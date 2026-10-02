@@ -2767,10 +2767,6 @@ module Gori
         prop("boolean", desc)
       end
 
-      private def objprop(desc : String) : JSON::Any
-        JSON.parse(%({"type":"object","description":#{desc.to_json},"additionalProperties":{"type":"string"}}))
-      end
-
       # A `headers` argument, declared in both shapes `RequestBuilder.header_pairs` reads: the
       # name->value map these tools have always taken, and the `[{name, value}]` list
       # `create_session_slot{set_headers}` and `authorize_start{identities}` take — which is

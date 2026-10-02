@@ -227,14 +227,6 @@ module Gori::Tui
       @severity_from_cvss = false
     end
 
-    def insert(ch : Char) : Nil
-      insert_title(ch)
-    end
-
-    def backspace : Nil
-      backspace_title
-    end
-
     def move(d : Int32) : Nil
       move_title(d)
     end
@@ -267,10 +259,6 @@ module Gori::Tui
 
     def focus_cvss : Nil
       @sel = ROW_CVSS
-    end
-
-    def focus_severity : Nil
-      @sel = ROW_SEV
     end
 
     def overlay_box(area : Rect) : Rect?

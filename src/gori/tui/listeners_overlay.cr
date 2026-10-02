@@ -50,10 +50,6 @@ module Gori::Tui
       @selected = @selected.clamp(0, {@rows.size - 1, 0}.max)
     end
 
-    def rows : Array(Gori::Session::ListenerRow)
-      @rows
-    end
-
     # --- Overlay contract (see overlay.cr) ---
     def key : OverlayKind
       OverlayKind::Listeners

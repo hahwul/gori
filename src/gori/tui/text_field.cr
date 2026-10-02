@@ -113,18 +113,6 @@ module Gori::Tui
       @sel.selection_text(@value, @caret)
     end
 
-    def selection_span : {Int32, Int32}?
-      @sel.selection_span(@caret)
-    end
-
-    def clear_selection : Nil
-      @sel.clear_selection
-    end
-
-    def select_all : Nil
-      @caret = @sel.select_line(@value.size)
-    end
-
     # Cut the selected run out and park the caret where it was. Returns whether anything
     # went — callers gate on it exactly as `TextArea#delete_selection`'s callers do.
     def delete_selection : Bool

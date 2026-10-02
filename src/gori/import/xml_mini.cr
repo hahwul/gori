@@ -84,10 +84,6 @@ module Gori
           @text = nil
         end
 
-        def name : QName
-          {@uri, @local}
-        end
-
         def display_name : String
           @prefix.empty? ? @local : "#{@prefix}:#{@local}"
         end
@@ -109,14 +105,6 @@ module Gori
 
         def element?(uri : String, local : String) : Node?
           @children.find { |c| c.uri == uri && c.local == local }
-        end
-
-        def elements(name : QName) : Array(Node)
-          elements(name[0], name[1])
-        end
-
-        def element?(name : QName) : Node?
-          element?(name[0], name[1])
         end
 
         # Resolve a QName carried as an attribute VALUE (`type="tns:Foo"`, `binding="tns:B"`,
