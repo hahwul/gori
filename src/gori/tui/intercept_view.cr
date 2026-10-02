@@ -29,7 +29,7 @@ module Gori::Tui
   # Pure view: it reads the shared Interceptor snapshot; the Runner performs the
   # actual forward/drop. No diff (that's Repeater's job).
   class InterceptView
-    include QueryBarEdit # ⌃/⌥←→ word motion, Home/End, Delete, ⌥⌫ on the `/` bar
+    include QueryBarPopup # the `/` bar: edits, ⌃/⌥←→ word motion, Home/End, Delete, ⌥⌫, `↓` dropdown
     # Height of the top filter bar (catch direction + condition), reserved above the
     # queue|detail split — the Intercept tab's analogue of History's QL bar. While the
     # condition is being edited a second row carries Tab suggestions (see bar_h).
@@ -395,87 +395,24 @@ module Gori::Tui
     end
 
     # --- catch-condition filter bar (a text sub-mode; mirrors History's QL bar) ---
-    # `store` (optional) backs `host:` Tab-completion; without it every other field
-    # still completes from its static pool.
+    # `store` backs `host:` Tab-completion; without it every other field still completes from
+    # its static pool. A bare call (no store) drops the previous one: `super()` is
+    # `QueryBarEdit`'s, so the default cannot recurse into this method.
     def start_query(store : Store? = nil) : Nil
-      @querying = true
-      @qcx = @query.size
+      super()
       @suggest_store = store
       @host_suggest_prefix = nil # invalidate: peers may have captured new hosts since
     end
 
-    def stop_query : Nil # Enter: keep the condition, leave edit mode
-      @querying = false
-      @popup.close
-    end
-
-    def cancel_query : Nil # Esc: clear the condition, leave edit mode
-      @querying = false
-      @query = ""
-      @qcx = 0
-      @preedit = ""
-      @popup.close
-    end
-
-    def query_insert(ch : Char) : Nil
-      @query = "#{@query[0, @qcx]}#{ch}#{@query[@qcx..]}"
-      @qcx += 1
+    # `QueryBarEdit`'s hook. The condition itself is pushed to the interceptor by the
+    # controller, after the edit.
+    def query_edited : Nil
       sync_popup
     end
 
-    def query_backspace : Nil
-      return if @qcx == 0
-      @query = "#{@query[0, @qcx - 1]}#{@query[@qcx..]}"
-      @qcx -= 1
-      sync_popup
-    end
-
-    def query_move(d : Int32) : Nil
-      @qcx = (@qcx + d).clamp(0, @query.size)
-      sync_popup
-    end
-
-    # --- the opt-in completion dropdown (`\u2193`) ---------------------------------
-    # Same component and contract as History's and Sitemap's; see `SuggestPopup`.
-
-    def popup_open? : Bool
-      @popup.open?
-    end
-
-    # `↓`: open the dropdown, or move down inside it. Nil rather than Bool — the key is claimed
-    # either way, and an earlier Bool "so the key falls through" was a contract no controller
-    # honoured, which is worse than not offering one.
-    def popup_down : Nil
-      return @popup.move(1) if @popup.open?
-      @popup.set(query_suggestions)
-      @popup.open!
-    end
-
-    def popup_up : Nil
-      @popup.move(-1)
-    end
-
-    def popup_close : Nil
-      @popup.close
-    end
-
-    private def sync_popup : Nil
-      @popup.set(query_suggestions) if @popup.open?
-    end
-
-    # Splice the SELECTED candidate (dropdown open) or the first (closed) over the token under
-    # the caret. False when there is nothing to complete, so the caller can leave the query
-    # untouched. `close` is ↵'s — see HistoryView#query_complete for why ↵ must shut the popup or
-    # the bar cannot be left with Enter.
-    def query_complete(close : Bool = false) : Bool
-      sugg = query_suggestions
-      pick = @popup.choice(sugg)
-      return false unless pick
-      cur = FilterAst.token_at(@query, @qcx)
-      @query = "#{@query[0, cur.start]}#{pick}#{@query[cur.stop..]}"
-      @qcx = cur.start + pick.size
-      close ? @popup.close : (@popup.set(query_suggestions) if @popup.open?)
-      true
+    # `QueryBarEdit`'s hook. A `LineEdit` action leaves the dropdown as it was; only a typed
+    # character re-syncs it.
+    def query_line_edited(action : Symbol) : Nil
     end
 
     def query_suggestions : Array(String)

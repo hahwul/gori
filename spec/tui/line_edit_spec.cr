@@ -130,3 +130,42 @@ describe "the `/` bars take LineEdit" do
     end
   end
 end
+
+# `QueryBarEdit` owns the plumbing of all six bars; what an edit SETTLES stays each bar's own,
+# through the hooks. These pin the settle differences no other spec reaches.
+describe "QueryBarEdit's per-bar hooks" do
+  it "leaves Sitemap's and Intercept's open dropdown alone on a LineEdit action, unlike a caret move" do
+    [SitemapView.new, InterceptView.new].each do |v|
+      v.start_query
+      "zzz met".each_char { |c| v.query_insert(c) }
+      v.popup_down
+      v.popup_open?.should be_true # offering `method:`
+      v.query_edit(:home)          # caret now on `zzz`, which completes to nothing
+      v.popup_open?.should be_true
+      v.query_move(0) # a bare caret step re-syncs, and an empty candidate set shuts it
+      v.popup_open?.should be_false
+    end
+  end
+
+  it "completes Sitemap's bar over the space-delimited word, not the QL cursor" do
+    v = SitemapView.new
+    v.start_query
+    %(host:"a me).each_char { |c| v.query_insert(c) }
+    v.query_complete.should be_true
+    v.query.should eq(%(host:"a method:))
+  end
+
+  it "drops Evidence's IME composition on Enter" do
+    v = EvidenceView.new
+    v.start_query
+    v.set_preedit("zq")
+    shown = MemoryBackend.new(60, 6)
+    v.render(Screen.new(shown), Rect.new(0, 0, 60, 6), true)
+    shown.contains?("zq").should be_true
+    v.stop_query
+    v.start_query
+    back = MemoryBackend.new(60, 6)
+    v.render(Screen.new(back), Rect.new(0, 0, 60, 6), true)
+    back.contains?("zq").should be_false
+  end
+end

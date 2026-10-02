@@ -92,47 +92,26 @@ module Gori::Tui
 
     # --- live filter bar ----------------------------------------------------
 
-    def start_query : Nil
-      @querying = true
-      @qcx = @query.size
-    end
-
-    def stop_query : Nil
-      @querying = false
-      @preedit = ""
-    end
-
-    def cancel_query : Nil
-      @querying = false
-      @query = ""
-      @qcx = 0
-      @preedit = ""
-      apply_filter
-    end
-
-    def query_insert(ch : Char) : Nil
-      @query = "#{@query[0, @qcx]}#{ch}#{@query[@qcx..]}"
-      @qcx += 1
-      query_edited
-    end
-
-    def query_backspace : Nil
-      return if @qcx == 0
-      @query = "#{@query[0, @qcx - 1]}#{@query[@qcx..]}"
-      @qcx -= 1
-      query_edited
-    end
-
-    def query_move(delta : Int32) : Nil
-      @qcx = (@qcx + delta).clamp(0, @query.size)
-    end
-
     def set_preedit(text : String) : Nil
       @preedit = text
     end
 
+    # `QueryBarEdit`'s hooks. Every text change re-filters. This bar has no dropdown, so a caret
+    # move settles nothing, but a `LineEdit` action re-filters whether or not it changed the
+    # text. Enter drops an IME composition.
     def query_edited : Nil
       apply_filter
+    end
+
+    def query_caret_moved : Nil
+    end
+
+    def query_line_edited(action : Symbol) : Nil
+      query_edited
+    end
+
+    def query_left : Nil
+      @preedit = ""
     end
 
     private def apply_filter(keep : Int64? = selected.try(&.id)) : Nil
