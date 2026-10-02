@@ -1,3 +1,5 @@
+require "crypto/subtle"
+
 module Gori
   module Cookie
     # Django's `django.core.signing` signed cookie (the cookie-session backend + the generic
@@ -61,7 +63,7 @@ module Gori
       def verify(cookie : String, secret : String,
                  salt : String = DEFAULT_SALT, algorithm : String = DEFAULT_ALGO) : Bool
         p = parse(cookie)
-        Cookie.secure_compare(compute_sig(signing_input(p), secret, salt, algorithm), p.signature)
+        Crypto::Subtle.constant_time_compare(compute_sig(signing_input(p), secret, salt, algorithm), p.signature)
       end
 
       def crack(cookie : String, secrets,
@@ -69,7 +71,7 @@ module Gori
         p = parse(cookie)
         input = signing_input(p)
         secrets.each do |s|
-          return s if Cookie.secure_compare(compute_sig(input, s, salt, algorithm), p.signature)
+          return s if Crypto::Subtle.constant_time_compare(compute_sig(input, s, salt, algorithm), p.signature)
         end
         nil
       end

@@ -117,15 +117,6 @@ module Gori
       raise CookieError.new("invalid base64 segment")
     end
 
-    # Constant-time byte compare — signatures are secrets-adjacent; don't leak position
-    # of the first mismatch through timing even though this is a local, offline check.
-    def secure_compare(a : String, b : String) : Bool
-      return false if a.bytesize != b.bytesize
-      diff = 0_u8
-      a.to_slice.each_with_index { |byte, i| diff |= byte ^ b.to_slice[i] }
-      diff == 0
-    end
-
     # itsdangerous timestamp codec: a big-endian, minimal-length integer, base64url'd.
     # `int_to_bytes(0)` is the empty string (matches Python), so a zero timestamp round-
     # trips to "".
