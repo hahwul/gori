@@ -215,7 +215,7 @@ module Gori::Protobuf
             end
         {v, pos + 8, true}
       else
-        u, pos, ok = read_varint(data, pos)
+        u, pos, ok = Protobuf.read_varint(data, pos)
         return {nil, pos, false} unless ok
         v = case d.type
             when .int32?   then u.to_u32!.to_i32!.to_i64.as(Scalar)
@@ -229,26 +229,6 @@ module Gori::Protobuf
             end
         {v, pos, true}
       end
-    end
-
-    # A varint out of a packed run. `Protobuf`'s own reader is private to the decoder and
-    # returns a decoder-shaped tuple; this is the same 10-byte rule, kept local so the
-    # decoder's contract stays about MESSAGES.
-    private def read_varint(data : Bytes, pos : Int32) : {UInt64, Int32, Bool}
-      value = 0_u64
-      shift = 0
-      10.times do
-        return {0_u64, pos, false} if pos >= data.size
-        b = data[pos]
-        pos += 1
-        # The 10th byte holds bit 63 and nothing else: anything above 1 overflowed 64 bits,
-        # and dropping those bits would read a malformed varint as a well-formed one.
-        return {0_u64, pos, false} if shift == 63 && b > 1
-        value |= (b.to_u64 & 0x7f_u64) << shift
-        return {value, pos, true} if (b & 0x80) == 0
-        shift += 7
-      end
-      {0_u64, pos, false}
     end
 
     # --- JSON projection ----------------------------------------------------
