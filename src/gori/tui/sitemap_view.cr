@@ -22,7 +22,7 @@ module Gori::Tui
   # WRAPPING their children rather than rewriting any path. Helps answer "what does this
   # app do". Navigate with ↑/↓, expand/collapse with →/←/Enter.
   class SitemapView
-    include QueryBarEdit # ⌃/⌥←→ word motion, Home/End, Delete, ⌥⌫ on the `/` bar
+    include QueryBarPopup # the `/` bar: edits, ⌃/⌥←→ word motion, Home/End, Delete, ⌥⌫, `↓` dropdown
     # The tree node + pure builder live in `Gori::Sitemap` (shared with the headless
     # `gori run sitemap`); this view layers scope markers, path-tag editing, and
     # rendering on top. The alias keeps the rest of this file reading as `Node`.
@@ -559,85 +559,18 @@ module Gori::Tui
       !@query.blank? || (@scope.try(&.active?) == true) || @hide_static
     end
 
-    def start_query : Nil
-      @querying = true
-      @qcx = @query.size
-    end
-
-    def stop_query : Nil # Enter: keep the filter, leave edit mode
-      @querying = false
-      @popup.close
-    end
-
-    def cancel_query : Nil # Esc: clear the filter, leave edit mode
-      @querying = false
-      @query = ""
-      @qcx = 0
-      @preedit = ""
-      @popup.close
-    end
-
-    def query_insert(ch : Char) : Nil
-      @query = "#{@query[0, @qcx]}#{ch}#{@query[@qcx..]}"
-      @qcx += 1
+    # `QueryBarEdit`'s hook. The tree reloads on the controller's debounce, not here.
+    def query_edited : Nil
       sync_popup
     end
 
-    def query_backspace : Nil
-      return if @qcx == 0
-      @query = "#{@query[0, @qcx - 1]}#{@query[@qcx..]}"
-      @qcx -= 1
-      sync_popup
-    end
-
-    def query_move(d : Int32) : Nil
-      @qcx = (@qcx + d).clamp(0, @query.size)
-      sync_popup
-    end
-
-    # --- the opt-in completion dropdown (`\u2193`) ---------------------------------
-    # Same component and same contract as History's; see `SuggestPopup` for why it is opt-in.
-
-    def popup_open? : Bool
-      @popup.open?
-    end
-
-    # `↓`: open the dropdown, or move down inside it. Nil rather than Bool — the key is claimed
-    # either way, and an earlier Bool "so the key falls through" was a contract no controller
-    # honoured, which is worse than not offering one.
-    def popup_down : Nil
-      return @popup.move(1) if @popup.open?
-      @popup.set(query_suggestions)
-      @popup.open!
-    end
-
-    def popup_up : Nil
-      @popup.move(-1)
-    end
-
-    def popup_close : Nil
-      @popup.close
-    end
-
-    private def sync_popup : Nil
-      @popup.set(query_suggestions) if @popup.open?
+    # `QueryBarEdit`'s hook. A `LineEdit` action leaves the dropdown as it was; only a typed
+    # character re-syncs it.
+    def query_line_edited(action : Symbol) : Nil
     end
 
     def set_preedit(text : String) : Nil
       @preedit = text
-    end
-
-    # Complete the current token to the SELECTED candidate (dropdown open) or the first (closed).
-    # `close` is ↵'s — see HistoryView#query_complete for why ↵ must shut the popup.
-    def query_complete(close : Bool = false) : Bool
-      sugg = query_suggestions
-      pick = @popup.choice(sugg)
-      return false unless pick
-      s, e = current_token_bounds
-      @query = "#{@query[0, s]}#{pick}#{@query[e..]}"
-      @qcx = s + pick.size
-      close ? @popup.close : (@popup.set(query_suggestions) if @popup.open?)
-      true
     end
 
     # Field-name suggestions for the token under the cursor (values aren't suggested
@@ -648,17 +581,18 @@ module Gori::Tui
       fields = token.includes?(':') ? [] of String : QL_FIELDS.select(&.starts_with?(token.downcase)).map { |f| "#{f}:" }
       # `token_at` rather than the raw token: an operator candidate splices over the whole span,
       # so it has to carry any `(` the way the field candidates above would need to. (This bar's
-      # own tokenizer does not peel punctuation — see `current_token_bounds` — which is a separate
+      # own tokenizer does not peel punctuation — see `query_token_span` — which is a separate
       # gap; going through the shared cursor here at least keeps the operators honest.)
       QuerySuggest.with_operators(fields, FilterAst.token_at(@query, @qcx))
     end
 
     private def current_token : String
-      s, e = current_token_bounds
+      s, e = query_token_span
       @query[s...e]
     end
 
-    private def current_token_bounds : {Int32, Int32}
+    # `QueryBarEdit`'s hook: this bar completes over the space-delimited word, not the QL cursor.
+    private def query_token_span : {Int32, Int32}
       s = @qcx
       while s > 0 && @query[s - 1] != ' '
         s -= 1

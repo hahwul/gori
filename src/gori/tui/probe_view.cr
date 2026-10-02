@@ -25,7 +25,7 @@ module Gori::Tui
   # (code, host)), so there's no in-view folding.
   class ProbeView
     @registry : Verb::Registry? = nil
-    include QueryBarEdit # ⌃/⌥←→ word motion, Home/End, Delete, ⌥⌫ on the `/` bar
+    include QueryBarPopup # the `/` bar: edits, ⌃/⌥←→ word motion, Home/End, Delete, ⌥⌫, `↓` dropdown
     # The list-over-preview layout and the severity/status vocabulary, both shared with
     # the sibling tab that lists the same records through the other lens.
     include PreviewSplit
@@ -90,7 +90,7 @@ module Gori::Tui
       @detail_focus = :affected
       @query = ""
       @qcx = 0
-      @preedit_q = ""
+      @preedit = ""
       @querying = false
       # The `↓` completion dropdown. Closed until asked for — see `SuggestPopup`.
       @popup = SuggestPopup.new
@@ -449,83 +449,10 @@ module Gori::Tui
 
     # --- `/` filter bar (live, in memory — mirrors IssuesView) --------------
 
-    def start_query : Nil
-      @querying = true
-      @qcx = @query.size
-    end
-
-    def stop_query : Nil
-      @querying = false
-      popup_close
-    end
-
-    def cancel_query : Nil
-      @querying = false
-      popup_close
-      @query = ""
-      @qcx = 0
-      @preedit_q = ""
-      apply_filter
-    end
-
-    def query_insert(ch : Char) : Nil
-      @query = "#{@query[0, @qcx]}#{ch}#{@query[@qcx..]}"
-      @qcx += 1
-      query_edited
-    end
-
-    def query_backspace : Nil
-      return if @qcx == 0
-      @query = "#{@query[0, @qcx - 1]}#{@query[@qcx..]}"
-      @qcx -= 1
-      query_edited
-    end
-
-    def query_move(d : Int32) : Nil
-      @qcx = (@qcx + d).clamp(0, @query.size)
-      sync_popup
-    end
-
-    # `QueryBarEdit`'s hook, and the one place an edit to this bar settles — see
-    # `IssuesView#query_edited`, including the older gap it closes: `query_edit` (⌃/⌥←→,
-    # Home/End, Delete, ⌥⌫) reached the base no-op, so a word-delete changed the query and
-    # never re-derived the list.
+    # `QueryBarEdit`'s hook: every text change re-derives the list, in memory, and the dropdown.
     def query_edited : Nil
       apply_filter
       sync_popup
-    end
-
-    # A caret move must not re-run the predicate. `QueryBarEdit#query_edit` fires the hook for
-    # EVERY action, so Home, End, ⌥← and ⌥→ re-derived the whole list — and here that is
-    # `apply_filter`, which additionally re-selects `@all` by status, runs `recount` and
-    # applies the scope lens. Same split as `HistoryController`/`SitemapController`.
-    def query_edit(action : Symbol) : Nil
-      @query, @qcx = LineEdit.apply(action, @query, @qcx)
-      LineEdit.mutating?(action) ? query_edited : sync_popup
-    end
-
-    # --- the opt-in completion dropdown (`↓`) ---------------------------------
-
-    def popup_open? : Bool
-      @popup.open?
-    end
-
-    def popup_down : Nil
-      return @popup.move(1) if @popup.open?
-      @popup.set(query_suggestions)
-      @popup.open!
-    end
-
-    def popup_up : Nil
-      @popup.move(-1)
-    end
-
-    def popup_close : Nil
-      @popup.close
-    end
-
-    private def sync_popup : Nil
-      @popup.set(query_suggestions) if @popup.open?
     end
 
     def query_suggestions : Array(String)
@@ -562,22 +489,7 @@ module Gori::Tui
     end
 
     def query_set_preedit(text : String) : Nil
-      @preedit_q = text
-    end
-
-    # Complete to the SELECTED candidate (dropdown open) or the first (closed) — see
-    # `IssuesView#query_complete` for the three things the old `[/\S*\z/]` tokenizer could
-    # not do (negated fields, values, text right of the caret).
-    def query_complete(close : Bool = false) : Bool
-      sugg = query_suggestions
-      pick = @popup.choice(sugg)
-      return false unless pick
-      cur = FilterAst.token_at(@query, @qcx)
-      @query = "#{@query[0, cur.start]}#{pick}#{@query[cur.stop..]}"
-      @qcx = cur.start + pick.size
-      close ? popup_close : sync_popup
-      apply_filter
-      true
+      @preedit = text
     end
 
     # --- detail / mutations ---------------------------------------------------
@@ -1200,7 +1112,7 @@ module Gori::Tui
       if @querying
         screen.text(rect.x + 1, y, QUERY_PREFIX, Theme.accent)
         base = rect.x + 1 + QUERY_PREFIX.size
-        screen.input_line(base, y, @query, @qcx, @preedit_q, Theme.text_bright, width: {rect.w - QUERY_PREFIX.size - 2, 0}.max,
+        screen.input_line(base, y, @query, @qcx, @preedit, Theme.text_bright, width: {rect.w - QUERY_PREFIX.size - 2, 0}.max,
           colors: Highlight.filter_query(@query, Theme.text_bright, FilterAst::SEPS_FIELD,
             known: QUERY_KNOWN, shaped: Probe::Filter::FIELD_SHAPED))
         return

@@ -27,7 +27,7 @@ module Gori::Tui
   # severity-sorted list + a detail with inline-editable notes and a severity
   # control. Created from a flow (History `F`) or blank (`n`).
   class IssuesView
-    include QueryBarEdit # ⌃/⌥←→ word motion, Home/End, Delete, ⌥⌫ on the `/` bar
+    include QueryBarPopup # the `/` bar: edits, ⌃/⌥←→ word motion, Home/End, Delete, ⌥⌫, `↓` dropdown
     # The list-over-preview layout and the severity/status vocabulary, both shared with
     # the sibling tab that lists the same records through the other lens.
     include PreviewSplit
@@ -109,7 +109,7 @@ module Gori::Tui
       # The `/` filter bar (mirrors History's QL bar but matches in memory).
       @query = ""
       @qcx = 0
-      @preedit_q = ""
+      @preedit = ""
       @querying = false
       # The `↓` completion dropdown. Closed until asked for — see `SuggestPopup`.
       @popup = SuggestPopup.new
@@ -408,86 +408,10 @@ module Gori::Tui
     # The committed filter string (for tests / external inspection).
     getter query : String
 
-    def start_query : Nil
-      @querying = true
-      @qcx = @query.size
-    end
-
-    def stop_query : Nil # Enter: keep the filter, leave edit mode
-      @querying = false
-      popup_close
-    end
-
-    def cancel_query : Nil # Esc: clear the filter, leave edit mode
-      @querying = false
-      popup_close
-      @query = ""
-      @qcx = 0
-      @preedit_q = ""
-      apply_filter
-    end
-
-    def query_insert(ch : Char) : Nil
-      @query = "#{@query[0, @qcx]}#{ch}#{@query[@qcx..]}"
-      @qcx += 1
-      query_edited
-    end
-
-    def query_backspace : Nil
-      return if @qcx == 0
-      @query = "#{@query[0, @qcx - 1]}#{@query[@qcx..]}"
-      @qcx -= 1
-      query_edited
-    end
-
-    def query_move(d : Int32) : Nil
-      @qcx = (@qcx + d).clamp(0, @query.size)
-      sync_popup
-    end
-
-    # `QueryBarEdit`'s hook, and the ONE place an edit to this bar settles. It also closes a
-    # gap older than the dropdown: `query_edit` (⌃/⌥←→, Home/End, Delete, ⌥⌫) went through
-    # `LineEdit.apply` and then the base no-op, so a word-delete on this bar changed the query
-    # and never re-derived the list — the results stayed stale until the next plain keystroke.
+    # `QueryBarEdit`'s hook: every text change re-derives the list, in memory, and the dropdown.
     def query_edited : Nil
       apply_filter
       sync_popup
-    end
-
-    # …and the other half of that gap, in the other direction. `QueryBarEdit#query_edit` fires
-    # the hook for EVERY action, so Home, End, ⌥← and ⌥→ — four actions that change no text —
-    # re-parsed the query and re-ran the predicate over every issue. A caret move takes the
-    # caret-move path, exactly the split `HistoryController` and `SitemapController` write as
-    # `schedule_query_reload if LineEdit.mutating?(act)`.
-    def query_edit(action : Symbol) : Nil
-      @query, @qcx = LineEdit.apply(action, @query, @qcx)
-      LineEdit.mutating?(action) ? query_edited : sync_popup
-    end
-
-    # --- the opt-in completion dropdown (`↓`) ---------------------------------
-    # Same component and contract as History's and Sitemap's; see `SuggestPopup`.
-
-    def popup_open? : Bool
-      @popup.open?
-    end
-
-    # `↓`: open the dropdown, or move down inside it.
-    def popup_down : Nil
-      return @popup.move(1) if @popup.open?
-      @popup.set(query_suggestions)
-      @popup.open!
-    end
-
-    def popup_up : Nil
-      @popup.move(-1)
-    end
-
-    def popup_close : Nil
-      @popup.close
-    end
-
-    private def sync_popup : Nil
-      @popup.set(query_suggestions) if @popup.open?
     end
 
     # Field names until a `:` is typed, then that field's values, then the boolean operators
@@ -519,30 +443,7 @@ module Gori::Tui
 
     # IME composing text for the filter bar (underlined, doesn't touch @query).
     def query_set_preedit(text : String) : Nil
-      @preedit_q = text
-    end
-
-    # Complete the token under the cursor to the SELECTED candidate (dropdown open) or the
-    # first (closed). `close` is ↵'s — see `HistoryView#query_complete` for why ↵ must shut
-    # the popup.
-    #
-    # Splices over `FilterAst::Cursor`'s span rather than a `[/\S*\z/]` trailing run. Three
-    # things the old tokenizer could not do: complete a NEGATED or grouped field (`-sev` lexes
-    # as one word, so `"severity:".starts_with?("-sev")` was false and nothing was offered),
-    # complete a VALUE (it bailed on any `:`), and see the text to the RIGHT of the caret.
-    def query_complete(close : Bool = false) : Bool
-      sugg = query_suggestions
-      pick = @popup.choice(sugg)
-      return false unless pick
-      cur = FilterAst.token_at(@query, @qcx)
-      @query = "#{@query[0, cur.start]}#{pick}#{@query[cur.stop..]}"
-      @qcx = cur.start + pick.size
-      # Completing consumes the choice: the token is whole now, so the old candidate set is
-      # stale. Re-derive it (a field completion opens a value list) and let `set` close the
-      # popup if that leaves nothing.
-      close ? popup_close : sync_popup
-      apply_filter
-      true
+      @preedit = text
     end
 
     def open_detail(store : Store) : Bool
@@ -1508,7 +1409,7 @@ module Gori::Tui
       if @querying
         screen.text(rect.x + 1, rect.y, QUERY_PREFIX, Theme.accent)
         base = rect.x + 1 + QUERY_PREFIX.size
-        screen.input_line(base, rect.y, @query, @qcx, @preedit_q, Theme.text_bright, width: {rect.w - QUERY_PREFIX.size - 2, 0}.max,
+        screen.input_line(base, rect.y, @query, @qcx, @preedit, Theme.text_bright, width: {rect.w - QUERY_PREFIX.size - 2, 0}.max,
           colors: Highlight.filter_query(@query, Theme.text_bright, FilterAst::SEPS_FIELD,
             known: QUERY_KNOWN, shaped: Issues::Filter::FIELD_SHAPED))
         return

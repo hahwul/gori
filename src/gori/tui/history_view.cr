@@ -42,9 +42,18 @@ module Gori::Tui
     include QueryBarEdit  # ⌃/⌥←→ word motion, Home/End, Delete, ⌥⌫ on the `/` bar
     include DrillIn::Host # the rail/detail split, its render, and the step-key labels
 
-    # After a `LineEdit` edit: the dropdown follows the token now under the caret.
+    # `QueryBarEdit`'s hooks. Every edit and caret move re-syncs the dropdown to the token under
+    # the caret; the list reloads on the controller's debounce, not here.
     def query_edited : Nil
       sync_popup
+    end
+
+    def query_caret_moved : Nil
+      sync_popup
+    end
+
+    def query_left : Nil
+      popup_close
     end
 
     # `list_split` only — the focus half (PreviewPane) is two-way and this preview is not.
@@ -1570,11 +1579,6 @@ module Gori::Tui
 
     # --- QL bar editing ------------------------------------------------------
 
-    def start_query : Nil
-      @querying = true
-      @qcx = @query.size
-    end
-
     # Replace the bar's contents wholesale, caret at the end. The one caller is `^E` in the view
     # picker (runner/views.cr), which loads a saved view's query back into the bar to be edited —
     # the ONLY place a view writes to @query, since picking one is a lens and deliberately leaves
@@ -1585,37 +1589,6 @@ module Gori::Tui
       @preedit = ""
       popup_close
       @filter_dirty = true
-    end
-
-    def stop_query : Nil # Enter: keep the filter, leave edit mode
-      @querying = false
-      popup_close
-    end
-
-    def cancel_query : Nil # Esc: clear the filter, leave edit mode
-      @querying = false
-      @query = ""
-      @qcx = 0
-      @preedit = ""
-      popup_close
-    end
-
-    def query_insert(ch : Char) : Nil
-      @query = "#{@query[0, @qcx]}#{ch}#{@query[@qcx..]}"
-      @qcx += 1
-      sync_popup
-    end
-
-    def query_backspace : Nil
-      return if @qcx == 0
-      @query = "#{@query[0, @qcx - 1]}#{@query[@qcx..]}"
-      @qcx -= 1
-      sync_popup
-    end
-
-    def query_move(d : Int32) : Nil
-      @qcx = (@qcx + d).clamp(0, @query.size)
-      sync_popup
     end
 
     # --- the opt-in completion dropdown (`↓`) ---------------------------------
@@ -1661,29 +1634,6 @@ module Gori::Tui
     # committed query — same model as TextArea. Cleared when a char commits.
     def set_preedit(text : String) : Nil
       @preedit = text
-    end
-
-    # Tab-complete the current token: to the SELECTED candidate when the dropdown is open,
-    # otherwise to the first — so a bar whose popup was never opened behaves exactly as before.
-    #
-    # `close` is what ↵ passes and ↹ does not, and it is load-bearing rather than cosmetic. With
-    # the dropdown open, re-deriving candidates after the splice can hand back a list containing
-    # the token that was just completed (`method:GET` narrows the value pool to exactly
-    # `["method:GET"]`), so the popup never shuts, ↵ re-splices the identical string forever, and
-    # `stop_query` becomes unreachable — the bar could not be left with Enter at all. ↹ keeps it
-    # open on purpose, because chaining field → value is the whole point of Tab.
-    def query_complete(close : Bool = false) : Bool
-      sugg = query_suggestions
-      pick = @popup.choice(sugg)
-      return false unless pick
-      cur = FilterAst.token_at(@query, @qcx)
-      @query = "#{@query[0, cur.start]}#{pick}#{@query[cur.stop..]}"
-      @qcx = cur.start + pick.size
-      # Completing consumes the choice: the token is now whole, so the old candidate set is
-      # stale. Re-derive it (a field completion opens a value list) and let `set` close the
-      # popup if that leaves nothing.
-      close ? popup_close : sync_popup
-      true
     end
 
     # Suggestions for the token under the cursor: field names, then field values.
