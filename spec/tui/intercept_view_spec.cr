@@ -747,6 +747,25 @@ describe "Intercept filter bar" do
     end
   end
 
+  it "drops the host: pool's store when the bar is reopened without one" do
+    with_store do |store|
+      store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "acme.test", port: 443,
+        method: "GET", target: "/", http_version: "HTTP/1.1",
+        head: "GET / HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice,
+        body: Bytes.empty, source: Gori::FlowSource::Kind::Proxy))
+      view = InterceptView.new
+      view.start_query(store)
+      "host:ac".each_char { |c| view.query_insert(c) }
+      view.query_suggestions.should eq(["host:acme.test"])
+
+      view.cancel_query
+      view.start_query
+      "host:ac".each_char { |c| view.query_insert(c) }
+      view.query_suggestions.should be_empty
+    end
+  end
+
   it "edits the condition query inline" do
     tmp_interceptor do |ic|
       view = InterceptView.new

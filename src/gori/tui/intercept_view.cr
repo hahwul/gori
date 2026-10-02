@@ -396,9 +396,10 @@ module Gori::Tui
 
     # --- catch-condition filter bar (a text sub-mode; mirrors History's QL bar) ---
     # `store` backs `host:` Tab-completion; without it every other field still completes from
-    # its static pool.
-    def start_query(store : Store?) : Nil
-      start_query
+    # its static pool. A bare call (no store) drops the previous one: `super()` is
+    # `QueryBarEdit`'s, so the default cannot recurse into this method.
+    def start_query(store : Store? = nil) : Nil
+      super()
       @suggest_store = store
       @host_suggest_prefix = nil # invalidate: peers may have captured new hosts since
     end
