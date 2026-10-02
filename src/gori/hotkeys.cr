@@ -153,7 +153,7 @@ module Gori
     # `body_hint` that interpolates a count into its template and would otherwise grow it
     # one entry per distinct count.
     EXPAND_MEMO_CAP = 512
-    @@expand_memo = {} of Tuple(String, UInt64, UInt32, String) => String
+    @@expand_memo = {} of Tuple(String, UInt64, UInt32, String, String) => String
 
     # The persisted user overrides, parsed from Settings' label strings into Chords. A
     # reserved/unparseable chord is DROPPED here too (not just refused by the editor) so a
@@ -403,12 +403,14 @@ module Gori
       return template unless template.valid_encoding? && template.includes?('{')
       # Only the DEFAULT overrides are memoizable: a caller handing in its own working set
       # (the hotkey editor previewing an unsaved rebind) is asking about a keymap that has no
-      # revision yet. The keyset needs no key of its own — `Settings.editor_keyset=` bumps
-      # `keymap_revision`, which the key already carries.
+      # revision yet. The keyset is in the key although `Settings.editor_keyset=` bumps the
+      # revision: a caller may name a keyset that is NOT the active one (the setup wizard's
+      # practice pad expands vim templates while helix is configured), and without it the memo
+      # answered with whichever keyset's chords it cached first.
       if overrides
         return expand_uncached(registry, template, overrides, profile, keyset)
       end
-      key = {template, registry.object_id, Settings.keymap_revision, profile}
+      key = {template, registry.object_id, Settings.keymap_revision, profile, keyset}
       if hit = @@expand_memo[key]?
         return hit
       end
