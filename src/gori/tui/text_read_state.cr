@@ -205,8 +205,16 @@ module Gori::Tui
     # already exist (⌃Home/⌃End in INS — `TextArea#handle_motion_key`), they land on the
     # right column, and `sync_from` pulls the result back onto the read cursor. So this adds a
     # spelling for a motion the editors have, not a motion.
+    # A line selection grows to the edge instead (vim's `V` then `G`), as a step grows it.
     def to_edge(editor : TextArea, dir : Int32) : Nil
-      return if editor.lines_snapshot.empty?
+      lines = editor.lines_snapshot
+      return if lines.empty?
+      bind(editor)
+      if @cursor.linewise?
+        @cursor.extend_lines_to(dir < 0 ? 0 : lines.size - 1, lines.size, ->(i : Int32) { lines[i] })
+        apply(editor, lines)
+        return
+      end
       dir < 0 ? editor.to_buffer_start : editor.to_buffer_end
       @cursor.clear_selection
       sync_from(editor)

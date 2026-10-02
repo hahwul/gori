@@ -136,6 +136,17 @@ describe "Gori::Tui::TextReadState#paint_chrome after the pane shrinks" do
       state.selection?(ed).should be_false
     end
 
+    it "grows to the buffer's edge on top/bottom, as V then G does" do
+      ed = area("a\nbb\nccc\ndd")
+      state = TextReadState.new
+      ed.place_cursor(1, 0)
+      state.select_line(ed, line_mode: true)
+      state.to_edge(ed, 1)
+      state.copy_text(ed).should eq("bb\nccc\ndd")
+      state.to_edge(ed, -1)
+      state.copy_text(ed).should eq("a\nbb")
+    end
+
     it "stops being linewise once a sideways step reshapes it" do
       ed = area("abc\ndef")
       state = TextReadState.new

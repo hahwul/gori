@@ -1068,6 +1068,14 @@ module Gori::Tui
       editor_enter_insert
     end
 
+    # `⇧A` / `⇧I` on the one-line TARGET: its own End / Home, then INSERT. The multi-line
+    # buffer beside it takes the shared path through `editor_text_buffer`.
+    def editor_line_insert(dir : Int32) : Bool
+      return super unless (v = current_view) && v.focus == :target
+      dir < 0 ? v.target_home : v.target_end
+      editor_enter_insert
+    end
+
     def editor_exit_insert : Bool
       return false unless v = current_view
       case v.focus

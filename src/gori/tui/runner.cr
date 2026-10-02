@@ -6337,8 +6337,10 @@ module Gori::Tui
       @tabs[@active_tab]?.try(&.editor_to_bottom)
     end
 
+    # A one-line field (a TARGET) has no buffer to step words in; say so rather than eat it.
     def editor_word_move(dir : Int32) : Nil
-      @tabs[@active_tab]?.try(&.editor_word_move(dir))
+      return if @tabs[@active_tab]?.try(&.editor_word_move(dir))
+      status("no word steps in a one-line field — ←/→ and Home/End move here")
     end
 
     def editor_line_insert(dir : Int32) : Nil
@@ -6709,20 +6711,12 @@ module Gori::Tui
       ov
     end
 
-    # ↵ adopts the keyset tried: the same setter and save the Keys row runs, then the same
-    # live apply (`apply_keys` rebuilds the keymap), and the Keys form is re-read so it shows
-    # the keyset now in force. The pad's practice copies leave the paste register either way.
+    # Try-only: the keyset is set on the Keys row the card was opened from. The pad's practice
+    # copies leave the paste register on the way out.
     private def keyset_playground(back : PreferencesOverlay?) : KeysetPlaygroundOverlay
       ov = KeysetPlaygroundOverlay.new
       ov.on_close = -> { ov.restore_register; resume_preferences(back) }
       ov.on_palette = -> { ov.restore_register; jump_to_palette }
-      ov.on_commit = -> do
-        Settings.editor_keyset = Verb::Keyset.name_of(ov.keyset)
-        msg = Settings.save ? "editor keyset: #{Verb::Keyset.name_of(ov.keyset)}-ish" : "editor keyset applied — could not save to #{Settings.path}"
-        @toast = apply_settings_saved(:keys, msg)
-        back.try(&.refresh(:keys))
-        true
-      end
       ov
     end
 

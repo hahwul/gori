@@ -4806,7 +4806,11 @@ Where a fix is not vim-specific it is not keyset-gated: `h j k l` in every READ 
 selection that stays whole lines under ⇧↑/⇧↓, and `esc` over a READ selection clearing it
 (`Runner#handle_key`, ahead of every pane's own `esc`) apply under both keysets. The one
 vim-only behaviour is the plain `j`/`k` that grows a `⇧V` selection, which is what makes `V`
-usable at all; the keyset is named at select time (`TextReadState#select_line`), so the
-wizard's practice pad answers in the keyset it is showing. Discoverability goes to a
-playground in Preferences → Keys (the wizard's pad plus each keyset's full key list), not to
-more keys.
+usable at all, and with it `g`/`⇧G` grow the selection to an edge (`V` `G` `d`); the keyset
+is named at select time (`TextReadState#select_line`), so the wizard's practice pad answers in
+the keyset it is showing. A known edge remains: at the first or last line, the panes that hand
+`↑`/`↓` to the next pane do so before the selection can grow, as they always did for arrows.
+
+Discoverability goes to a playground in Preferences → Keys (the wizard's pad plus each
+keyset's full key list), not to more keys. It only tries: the keyset is set on the row above
+it, and a second setter in the card was one more way for the two to disagree.

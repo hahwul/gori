@@ -102,6 +102,20 @@ describe "READ caret keys in every editor pane" do
     seen.size.should eq(8), "exercised only #{seen.join(", ")}"
   end
 
+  it "types at a one-line TARGET's edges on ⇧A / ⇧I" do
+    TuiContract.with_session("read-nav-target") do |session|
+      host = TuiContract::Host.new(session)
+      rep = Gori::Tui::RepeaterController.new(host)
+      rep.repeater_new
+      v = rep.current_view.not_nil!
+      v.focus_pane(:target)
+      rep.editor_text_buffer.should be_nil # no buffer: the shared path cannot serve it
+      rep.editor_line_insert(1).should be_true
+      rep.editor_read_mode?.should be_false
+      rep.editor_word_move(1).should be_false # the Runner says why
+    end
+  end
+
   it "clears a selection on Esc ahead of every pane's own Esc" do
     # `Runner.new` owns a terminal, so the wiring is read off the source, comments stripped:
     # the drop runs before the open issue's detail keys, whose Esc leaves the notes.
