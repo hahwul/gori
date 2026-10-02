@@ -41,8 +41,7 @@ module Gori
       end
 
       private def self.cmd_fuzz_execute(args : Array(String), save_results : Bool = false) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         flow_id : Int64? = nil
         repeater_id : Int64? = nil
         request_file : String? = nil
@@ -88,16 +87,14 @@ module Gori
         ws_idle_ms : Int64? = nil
         ws_keep_key = false
         ws_http_only = false
-        positional = [] of String
 
         command = save_results ? "gori run fuzz save" : "gori run fuzz"
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run fuzz") do |p|
           p.banner = "Usage: #{command} [<flow-id>] [options]   (mark positions with §…§)"
           p.on("--flow=ID", "Seed the template from a captured flow") { |v| flow_id = parse_flow_id(v, "gori run fuzz") }
           p.on("--repeater=ID", "Seed the template from a saved repeater session (ids from `gori run repeater list`). A WebSocket session seeds its handshake AND its outbound frames — mark positions in the frames and each variation runs one full RFC 6455 session") { |v| repeater_id = parse_flow_id(v, "gori run fuzz --repeater") }
           p.on("--request=FILE", "Read a raw HTTP request (may contain §…§) as the template") { |v| request_file = v }
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           p.on("--target=URL", "Send to this origin (scheme://host[:port]); required for --request/stdin") { |v| target_override = v }
           p.on("--http2", "Force HTTP/2") { force_h2 = true }
           p.on("--sni=HOST", "TLS SNI override") { |v| sni = v }
@@ -229,12 +226,7 @@ module Gori
           p.on("--allow-unscoped", "Send even if the target is outside the project scope (Sandbox/exclude still apply)") { allow_unscoped = true }
           p.on("--fail-if-no-matches", "Exit 3 when no result matched") { fail_if_no_matches = true }
           p.on("--record-history=POLICY", "Also record sent request+response as History flows: none (default) | matched | all. Matched rows carry the flow_id; 'all' is capped at #{Fuzz::HistoryRecord::MAX} flows") { |v| record_policy = parse_record_history(v) }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run fuzz", f, p) }
-          p.missing_option { |f| abort "gori run fuzz: missing value for #{f}" }
         end
-        parser.parse(args)
         refresh_verify_upstream(!insecure)
 
         # The run-wide `--payload-from-*` knobs, applied to every source now that argv is known,
@@ -258,7 +250,7 @@ module Gori
         # project: `optional_project_outbound` says so on STDERR and skips the scope gate. Writing
         # its results into the ambient default project anyway would put a sweep the operator kept
         # out of a project straight into that project's History. Name the project to record.
-        if (record_policy != :none || save_results) && !(flow_id || repeater_id || project_name || db_path)
+        if (record_policy != :none || save_results) && !(flow_id || repeater_id || proj.name || proj.db)
           feature = save_results ? "fuzz save" : "--record-history"
           abort "gori run fuzz: #{feature} needs a project — this run has none (--request/stdin " \
                 "without --project/--db). Pass --project NAME or --db PATH to say where the results go."
@@ -267,8 +259,8 @@ module Gori
         # Named project / --db always hydrates, even when `--request` is the template:
         # `--flow` used to skip this and `--request` then skipped `open_store`, so
         # `--slot` / `--bind-from` lied with SLOT_NO_PROJECT despite `--project`.
-        hydrate_project_env(project_name, db_path) if project_name || db_path
-        seed = fuzz_source(flow_id, repeater_id, request_file, project_name, db_path)
+        hydrate_project_env(proj.name, proj.db) if proj.name || proj.db
+        seed = fuzz_source(flow_id, repeater_id, request_file, proj.name, proj.db)
         text = seed.text
         default_target = seed.target
         evidence = seed.evidence
@@ -379,12 +371,12 @@ module Gori
         # The project any `--payload-from` reads, open only for the plan build below. After every
         # refusal above, so a run that never builds holds no handle.
         payload_specs = sources.compact_map { |src| src.as?(Fuzz::ProjectSource).try(&.spec) }
-        named_project = !!(flow_id || repeater_id || project_name || db_path)
-        payload_store = open_payload_from_store(command, payload_specs, named_project, project_name, db_path)
+        named_project = !!(flow_id || repeater_id || proj.name || proj.db)
+        payload_store = open_payload_from_store(command, payload_specs, named_project, proj.name, proj.db)
         # …and the project a `--macro` reads its sessions from, on the same terms and released at
         # the same moment: the plan freezes the steps, so nothing reads it during the run. When a
         # `--payload-from` already opened the project, that handle serves both.
-        payload_store ||= open_request_macro_store(command, request_macro, named_project, project_name, db_path)
+        payload_store ||= open_request_macro_store(command, request_macro, named_project, proj.name, proj.db)
 
         options = Fuzz::PlanOptions.new(text,
           # A `--flow` template is a CAPTURED request; --request/stdin is a draft the operator
@@ -405,7 +397,7 @@ module Gori
             request_macro: request_macro),
           ws_messages: ws_messages,
           matcher: matcher, verify: !insecure, sni: sni,
-          overrides: cli_host_overrides(project_name, db_path, flow_id, repeater_id),
+          overrides: cli_host_overrides(proj.name, proj.db, flow_id, repeater_id),
           project: payload_store)
         # Gate outbound traffic through the ONE seam every surface shares (Gori::Outbound):
         # the up-front check refuses an out-of-scope host unless --allow-unscoped, and the
@@ -420,7 +412,7 @@ module Gori
         # seed one identity and send as another.
         activate_slot(slot, "gori run fuzz")
         preflight_bind_from(bind_from, "gori run fuzz")
-        outbound = optional_project_outbound(project_name, db_path, flow_id, allow_unscoped, repeater_id)
+        outbound = optional_project_outbound(proj.name, proj.db, flow_id, allow_unscoped, repeater_id)
         plan = begin
           Fuzz::Plan.build(options, outbound)
         rescue ex : Fuzz::PlanError
@@ -481,7 +473,7 @@ module Gori
         # `long_running`: held for the whole sweep, with a result or History batch per round trip.
         # …and for a `--macro`, whose steps are recorded in History (source `macro`) and whose
         # failures are logged as events — traffic nobody typed at that moment, so it is on the record.
-        write_store = (record_policy == :none && !save_results && plan.request_macro.nil?) ? nil : open_store(resolve_read_project(project_name, db_path), long_running: true)
+        write_store = (record_policy == :none && !save_results && plan.request_macro.nil?) ? nil : open_store(resolve_read_project(proj.name, proj.db), long_running: true)
         attach_request_macro_store(plan.request_macro, write_store)
         saved = nil.as(Fuzz::Persistence?)
         # Calibration SENDS, so it belongs inside the block that releases the read
@@ -492,7 +484,7 @@ module Gori
           # Session bindings: seed the in-memory table before the sweep rather than after
           # every row of it. See CLI::Run.seed_bindings. An unseeded `$NAME` is not refused —
           # it ships literally (see `Env.unbound`).
-          (fid = bind_from) && seed_bindings(fid, project_name, db_path, outbound, insecure, "gori run fuzz")
+          (fid = bind_from) && seed_bindings(fid, proj.name, proj.db, outbound, insecure, "gori run fuzz")
           if auto_cal
             say_request_line_rewrite # calibration already sends the rewritten request
             plan.engine.calibrate_baseline

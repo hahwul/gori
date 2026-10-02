@@ -8,8 +8,7 @@ module Gori
         {"authorize [<id>…]", "Replay requests under several identities to find broken access control"},
       ])]
       private def self.cmd_authorize(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         flow_ids = [] of Int64
         query : String? = nil
         limit = Authorize::Plan::DEFAULT_LIMIT
@@ -38,8 +37,7 @@ module Gori
           p.on("-qQL", "--query=QL", "Also replay every flow matching this QL query (host: path: status: …)") { |v| query = v }
           p.on("-nN", "--limit=N", "Max flows --query may contribute (default #{Authorize::Plan::DEFAULT_LIMIT})") { |v| limit = parse_count(v, "--limit") }
           p.on("--identities=FILE", "Identity set as JSON ('-' = stdin, which needs a pipe or a redirect — a terminal is refused); default: the project's saved set") { |v| identities_file = v }
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           p.on("--unsafe-methods", "Also replay POST/PUT/PATCH/DELETE — each identity re-runs the side effect") { unsafe_methods = true }
           # `probe --active`'s spelling of the same permission (#1389).
           p.on("--unsafe", "Alias for --unsafe-methods") { unsafe_methods = true }
@@ -85,7 +83,7 @@ module Gori
           abort "gori run authorize: --identities: #{why}"
         end
 
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project)
         # Authorize ALWAYS has a project in play (the flows and the identities both come out of
         # one), so this is `project_outbound`, never the optional variant: an omitted --project

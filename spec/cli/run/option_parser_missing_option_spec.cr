@@ -49,8 +49,10 @@ describe "gori run — missing_option on every value-taking parser" do
         # alternative alone still passed — which is exactly the kind of accident that lets an
         # unpaired `-nN` slip through later. Flag names in this tree are lowercase kebab-case,
         # so `[a-z][A-Z]` cannot fire on a bare switch. `-h`/`--help` do not match either.
+        # `project_options` registers `--project=NAME` and `--db=PATH` out of sight of that regex.
         takes_value = body.any? do |l|
-          l.includes?("p.on(") && l.matches?(/"-{1,2}[^"]*(?:[= ][A-Z]|[a-z][A-Z])/)
+          l.includes?("project_options(") ||
+            (l.includes?("p.on(") && l.matches?(/"-{1,2}[^"]*(?:[= ][A-Z]|[a-z][A-Z])/))
         end
         offenders << "#{File.basename(path)}:#{i + 1}" if takes_value && !body.any?(&.includes?("p.missing_option"))
         i = j

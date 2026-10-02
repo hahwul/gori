@@ -24,8 +24,7 @@ module Gori
         algorithm_pinned = false
         timestamp = nil.as(Int64?)
         format = :text
-        positional = [] of String
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run cookie") do |p|
           p.banner = "Usage: gori run cookie [<cookie>] [options]\n\n" \
                      "Decode, verify, brute-force, or forge a Flask/Rack/Django signed session\n" \
                      "cookie. The cookie is read from the <cookie> argument, or from STDIN when\n" \
@@ -51,12 +50,7 @@ module Gori
             abort "gori run cookie: #{ex.message}"
           end
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run cookie", f, p) }
-          p.missing_option { |f| abort "gori run cookie: missing value for #{f}" }
         end
-        parser.parse(args)
 
         if type && !Cookie::FORMATS.includes?(type)
           abort "gori run cookie: unknown --type #{type.inspect} (use flask/rack/django)"

@@ -36,8 +36,7 @@ module Gori
       end
 
       private def self.cmd_links_list(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         owner_s = "issue"
         owner_id : Int64? = nil
         note_position : Int32? = nil
@@ -55,8 +54,7 @@ module Gori
                      "  gori run links add    --owner=issue|note --id=N --ref=KIND --ref-id=M\n" \
                      "  gori run links delete --owner=issue|note --id=N --ref=KIND --ref-id=M\n" \
                      "  (--ref is flow|repeater|fuzz|miner; `rm` is accepted for delete)"
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           p.on("--owner=KIND", "Owner kind: issue (default) | note") { |v| owner_s = v.strip.downcase }
           p.on("--id=N", "Owner issue/note id (required unless --note-position is used)") { |v| owner_id = parse_link_id(v, "--id"); note_position = nil }
           # `evidence`/`retest` name the owner as `--issue N` (#1389); the same spelling here.
@@ -81,7 +79,7 @@ module Gori
         # so Crystal keeps it nilable and `x || abort` does not narrow it in place.
         oid_opt, pos_opt = link_owner_selection("links", owner_id, note_position)
 
-        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
+        store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
         oid, resolved = begin
           resolved_id = resolve_link_owner_id(store, owner_kind, oid_opt, pos_opt, "links")
           # Validate the owner exists, like the mutate path and the MCP list_links tool do —
@@ -131,8 +129,7 @@ module Gori
         # One branch for all three words this flag changes, rather than a ternary per use:
         # the parser body is already at the cyclomatic ceiling the lint gate holds.
         verb, action, tail = add ? {"add", "Attach", ADD_KEEPS_NO_BYTES} : {"delete", "Detach", ""}
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         owner_s = "issue"
         owner_id : Int64? = nil
         note_position : Int32? = nil
@@ -144,8 +141,7 @@ module Gori
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run links #{verb} --owner=issue|note --id=N|--note-position=N --ref=KIND --ref-id=M\n\n" \
                      "#{action} an evidence pointer. Note --note=N uses the stable id; --note-position=N uses the 1-based position shown by `gori run notes`. --ref is flow|repeater|fuzz|miner.#{tail}"
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           p.on("--owner=KIND", "Owner kind: issue (default) | note") { |v| owner_s = v.strip.downcase }
           p.on("--id=N", "Owner issue/note id (required unless --note-position is used)") { |v| owner_id = parse_link_id(v, "--id"); note_position = nil }
           # `evidence`/`retest` name the owner as `--issue N` (#1389); the same spelling here.
@@ -186,7 +182,7 @@ module Gori
         oid_opt, pos_opt = link_owner_selection(verb, owner_id, note_position)
         ref_kind, rid = resolve_link_ref(verb, ref_s, ref_id)
 
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(proj.name, proj.db))
         begin
           oid = resolve_link_owner_id(store, owner_kind, oid_opt, pos_opt, verb)
           # Both ends must exist, or `add` would file an orphan row pointing at nothing and

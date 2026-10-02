@@ -91,8 +91,7 @@ module Gori
       end
 
       private def self.cmd_rewriter_preset_add(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         disabled = false
         scope = Store::RuleScope::Project
         leftover = [] of String
@@ -101,8 +100,7 @@ module Gori
           p.banner = "Usage: gori run rewriter preset add <name> [options]\n\n" \
                      "Installs a preset's rules as ordinary Match & Replace rules — visible,\n" \
                      "editable and disable-able like any other. Run `preset list` for names."
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           p.on("--scope=SCOPE", "project (default) | global — a global rule applies in EVERY project") { |v| scope = parse_rule_scope(v) }
           p.on("--disabled", "Install the rules disabled, to review before they touch traffic") { disabled = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
@@ -120,7 +118,7 @@ module Gori
         # A global rule needs no project — it lives in settings.json — but one is resolved for
         # BOTH scopes, because `Gori::Rules` is where the write and its audit line live and it
         # is built over a store. See `cmd_rewriter_add` for the whole argument.
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project)
         begin
           committed = Gori::Rules.load(store).add_preset(preset, scope: scope, enabled: !disabled)
@@ -176,24 +174,16 @@ module Gori
       end
 
       private def self.cmd_extract_list(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         format = :text
-        leftover = [] of String
-        parser = OptionParser.new do |p|
+        leftover = parse_args(args, "gori run rewriter extract") do |p|
           p.banner = "Usage: gori run rewriter extract [list] [options]"
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run rewriter extract", f, p) }
-          p.missing_option { |f| abort "gori run rewriter extract: missing value for #{f}" }
         end
-        parser.parse(args)
         refuse_list_leftovers(leftover, "rewriter extract", "add, rm/delete, enable, disable")
 
-        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
+        store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
         begin
           rules = store.extract_rules
           if format == :json
@@ -223,8 +213,7 @@ module Gori
       end
 
       private def self.cmd_extract_add(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         name = ""
         when_s = ""
         host = ""
@@ -240,8 +229,7 @@ module Gori
                      "Replace rule then injects it with `--value='$BIND.SESSION'`\n" \
                      "(`--value='$SESSION'` under the legacy bare syntax). The value itself is\n" \
                      "never persisted — see `gori run rewriter bindings`."
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           p.on("--name=NAME", "Binding name, without the sigil or namespace (required)") { |v| name = v }
           p.on("--when=FILTER", "Which messages to read, in intercept-filter syntax ('' = any)") { |v| when_s = v }
           p.on("--host=GLOB", "Scope to a host glob ('' = all; '*.example.com')") { |v| host = v }
@@ -261,7 +249,7 @@ module Gori
                abort("gori run rewriter extract add: invalid --kind '#{kind_s}' (cookie|header|regex|position|jsonpath)")
         a, b = parse_extract_range(range_s)
 
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(proj.name, proj.db))
         begin
           # Through `Bindings`, not `store.insert_extract_rule`, so the CLI gets the SAME
           # refusals the TUI and MCP do — one name one writer, a valid key, a regex that
@@ -335,12 +323,10 @@ module Gori
 
       # The shared `<id> [--project|--db]` parse for rm/enable/disable.
       private def self.extract_target(args : Array(String), verb : String) : {Int64, Store}
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run rewriter extract #{verb} <id> [options]"
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort CLI.unknown_option_message("gori run rewriter extract #{verb}", f, p) }
           p.missing_option { |f| abort "gori run rewriter extract #{verb}: missing value for #{f}" }
@@ -350,7 +336,7 @@ module Gori
         parser.parse(args)
         abort "gori run rewriter extract #{verb}: too many arguments (expected one <id>, got: #{rest.join(" ")})" if rest.size > 1
         id = rest.first?.try(&.to_i64?) || abort("gori run rewriter extract #{verb}: expected a rule id")
-        {id, open_store(resolve_read_project(project_name, db_path))}
+        {id, open_store(resolve_read_project(proj.name, proj.db))}
       end
 
       # The `bindings` readout. A binding VALUE lives only in the memory of the gori instance
@@ -359,16 +345,14 @@ module Gori
       # only which names are DECLARED and by what, and it says so rather than printing an
       # empty "value" column that would read like "not bound".
       private def self.cmd_rewriter_bindings(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         format = :text
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run rewriter bindings [options]\n\n" \
                      "Lists the names extract rules declare. Values are held in memory by the\n" \
                      "running gori and are never written anywhere, so another process cannot\n" \
                      "read them — open the Rewriter tab's `bindings` sub-tab for the live table."
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort CLI.unknown_option_message("gori run rewriter bindings", f, p) }
@@ -377,7 +361,7 @@ module Gori
         parse_no_positionals(parser, args, "gori run rewriter bindings",
           "`rewriter bindings` takes no positional arguments; the project is named with --project")
 
-        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
+        store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
         begin
           rules = store.extract_rules
           if format == :json
@@ -452,13 +436,11 @@ module Gori
       end
 
       private def self.cmd_rewriter_list(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         format = :text
         scope : Store::RuleScope? = nil
-        leftover = [] of String
 
-        parser = OptionParser.new do |p|
+        leftover = parse_args(args, "gori run rewriter") do |p|
           p.banner = "Usage: gori run rewriter [options]\n\n" \
                      "Lists the rules that apply to this project: the global library first,\n" \
                      "then the project's own — the order the proxy applies them in.\n\n" \
@@ -466,19 +448,13 @@ module Gori
                      "  gori run rewriter add --op=replace --target=request --find=OLD --value=NEW\n" \
                      "  gori run rewriter add --op=add_header --find=X-Trace --value=on --scope=global\n" \
                      "  gori run rewriter rm|delete <id> | enable <id> | disable <id> | preview ..."
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           p.on("--scope=SCOPE", "Show only project|global rules (default: both)") { |v| scope = parse_rule_scope(v) }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run rewriter", f, p) }
-          p.missing_option { |f| abort "gori run rewriter: missing value for #{f}" }
         end
-        parser.parse(args)
         refuse_list_leftovers(leftover, "rewriter", "add, rm/delete, enable, disable, preview, extract, bindings")
 
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project, read_only: true)
         begin
           rules = Gori::Rules.merged(store)
@@ -658,8 +634,7 @@ module Gori
       end
 
       private def self.cmd_rewriter_add(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         target_s = "request"
         part_s = "head"
         op_s = "replace"
@@ -690,8 +665,7 @@ module Gori
                      "Mocking (short_circuit): --map-dir serves files from a directory by path,\n" \
                      "--fault answers with a close/reset/hang instead of a response, --delay\n" \
                      "waits first, and --from-flow copies a captured response into the rule."
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           p.on("--side=SIDE", "request|response (default request)") { |v| target_s = v }
           # `--side` is the name that does not collide (#1389): `--target` is a URL on every
           # other command. Kept, so no script breaks.
@@ -758,7 +732,7 @@ module Gori
         # `Authorization` header, or one that answers an endpoint without ever dialling it,
         # left the project's config feed with nothing to show for it. The model needs a store
         # to write that line into, so a global add resolves one too.
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project)
         begin
           f, match, rule_host, rule_value = add_fill(store, op, mock, respond, respond_args, body_file,
@@ -843,13 +817,11 @@ module Gori
       end
 
       private def self.cmd_rewriter_rm(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         scope = Store::RuleScope::Project
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run rewriter rm|delete <id> [options]"
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           p.on("--scope=SCOPE", "Which <id>: project (default) | global") { |v| scope = parse_rule_scope(v) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort CLI.unknown_option_message("gori run rewriter rm", f, p) }
@@ -868,7 +840,7 @@ module Gori
         # project that had overridden it keeps a row pointing at the id, which this surface
         # cannot reach. That one stays inert: global ids come from a monotonic counter and are
         # never reused, so nothing can inherit it.
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project)
         begin
           exists =
@@ -893,8 +865,7 @@ module Gori
       end
 
       private def self.cmd_rewriter_set_enabled(enable : Bool, args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         scope = Store::RuleScope::Project
         everywhere = false
         action = enable ? "enable" : "disable"
@@ -903,8 +874,7 @@ module Gori
                      "With --scope=global this writes THIS project's override of the rule,\n" \
                      "the way `x` does in the Rewriter tab. --everywhere changes the rule's\n" \
                      "own default instead, which every project without an override follows."
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           p.on("--scope=SCOPE", "Which <id>: project (default) | global") { |v| scope = parse_rule_scope(v) }
           p.on("--everywhere", "global rules only: change the default for every project") { everywhere = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
@@ -927,7 +897,7 @@ module Gori
 
         # Both scopes resolve a project, `--everywhere` included: `Gori::Rules` owns the write
         # and its audit line, and it is built over a store. See `cmd_rewriter_add`.
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project)
         begin
           rules = Gori::Rules.load(store)
@@ -964,8 +934,7 @@ module Gori
       end
 
       private def self.cmd_rewriter_preview(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         target_s = "request"
         part_s = "head"
         op_s = "replace"
@@ -978,8 +947,7 @@ module Gori
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run rewriter preview [options]\n\n" \
                      "Estimate how many recent flows a rule WOULD affect, without creating it."
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           p.on("--side=SIDE", "request|response (default request)") { |v| target_s = v }
           # `--side` is the name that does not collide (#1389): `--target` is a URL on every
           # other command. Kept, so no script breaks.
@@ -1014,7 +982,7 @@ module Gori
         check_ws_part(op, part, "preview")
         target, part = Gori::Rules.normalize_shape(op, target, part)
 
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project)
         begin
           candidate = Store::MatchRule.new(0_i64, true, target, part, f, value, op, match, "", host)

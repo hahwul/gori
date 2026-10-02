@@ -46,12 +46,10 @@ module Gori
       end
 
       private def self.cmd_network_list(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         format = :text
-        leftover = [] of String
 
-        parser = OptionParser.new do |p|
+        leftover = parse_args(args, "gori run project network") do |p|
           p.banner = "Usage: gori run project network [options]\n\n" \
                      "List this project's network settings: the value each key has here, and whether\n" \
                      "it is set on the project or inherited. Or run with a subcommand:\n" \
@@ -59,18 +57,12 @@ module Gori
                      "  gori run project network set KEY=VALUE   (or: set KEY VALUE)\n" \
                      "  gori run project network unset KEY\n\n" \
                      "#{project_network_help}\n"
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project network", f, p) }
-          p.missing_option { |f| abort "gori run project network: missing value for #{f}" }
         end
-        parser.parse(args)
         refuse_list_leftovers(leftover, "project network", "get, set, unset, list")
 
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project, read_only: true)
         rows = begin
           Settings.project_network_rows(store)
@@ -96,8 +88,7 @@ module Gori
       end
 
       private def self.cmd_network_get(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         format = :text
         positional = [] of String
 
@@ -107,8 +98,7 @@ module Gori
                      "inherits (said on stderr, so `$(…)` captures the value alone). Credentials print the\n" \
                      "method and username only — the password is never printed.\n\n" \
                      "#{project_network_help}\n"
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = one_positional_list(before, after, "gori run project network get", "KEY") }
@@ -118,7 +108,7 @@ module Gori
         parser.parse(args)
         k = network_key_arg(positional.first?, "get")
 
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project, read_only: true)
         stored = begin
           store.setting(k.key)
@@ -146,12 +136,10 @@ module Gori
       end
 
       private def self.cmd_network_set(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         password_stdin = false
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run project network set") do |p|
           p.banner = "Usage: gori run project network set KEY=VALUE [options]\n" \
                      "       gori run project network set KEY VALUE [options]\n" \
                      "       gori run project network set upstream_auth USERNAME --password-stdin\n\n" \
@@ -159,15 +147,9 @@ module Gori
                      "inherits instead). `set upstream_proxy=` (empty) pins a DIRECT route: no global\n" \
                      "proxy, upstream rule or HTTP(S)_PROXY applies to the project any more.\n\n" \
                      "#{project_network_help}\n"
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           p.on("--password-stdin", "upstream_auth only: read the proxy password from stdin (a pipe or a redirect, never a terminal) instead of the argument vector, where it would sit in the process listing and the shell history. One trailing newline is dropped") { password_stdin = true }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run project network set", f, p) }
-          p.missing_option { |f| abort "gori run project network set: missing value for #{f}" }
         end
-        parser.parse(args)
 
         split = network_set_split(positional)
         abort "gori run project network set: #{split}" if split.is_a?(String)
@@ -184,7 +166,7 @@ module Gori
         end
         password = password_stdin ? read_network_password(STDIN) : nil
 
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project)
         # `abort` skips `ensure`, so each refusal closes the store itself first.
         edit = begin
@@ -206,8 +188,7 @@ module Gori
       end
 
       private def self.cmd_network_unset(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         positional = [] of String
 
         parser = OptionParser.new do |p|
@@ -215,8 +196,7 @@ module Gori
                      "Drop this project's own value for KEY, so it inherits the global network.* value\n" \
                      "again. A key that is not set is already inherited, so that is not an error.\n\n" \
                      "#{project_network_help}\n"
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |before, after| positional = one_positional_list(before, after, "gori run project network unset", "KEY") }
           p.invalid_option { |f| abort CLI.unknown_option_message("gori run project network unset", f, p) }
@@ -225,7 +205,7 @@ module Gori
         parser.parse(args)
         k = network_key_arg(positional.first?, "unset")
 
-        project = resolve_read_project(project_name, db_path)
+        project = resolve_read_project(proj.name, proj.db)
         store = open_store(project)
         edit = begin
           plan, err = Settings.plan_project_network_unset(Settings.project_network_rows(store), k)

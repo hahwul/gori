@@ -24,7 +24,8 @@ require "../../spec_helper"
 
 # The three spellings that reach a guard. `one_positional` / `one_positional_list` /
 # `refuse_list_leftovers` are not listed because they are called from INSIDE an
-# `.unknown_args` block, which the first entry already sees.
+# `.unknown_args` block, which the first entry already sees. A command built with `parse_args`
+# opens no `OptionParser.new` window at all: the helper installs the guard itself.
 private GUARDS = {".unknown_args", "parse_no_positionals(", "views_one_positional("}
 
 private def run_cli_dir : String
@@ -163,7 +164,7 @@ describe "gori run — every OptionParser reaches an unknown_args guard" do
       .should contain("parse_no_positionals(")
     method_body(File.read(File.join(run_cli_dir, "views.cr")), "cmd_views_add")
       .should contain("views_one_positional(")
-    method_body(File.read(File.join(run_cli_dir, "notes.cr")), "cmd_notes_read")
+    method_body(File.read(File.join(run_cli_dir, "grpc.cr")), "cmd_grpc_reflect")
       .should contain(".unknown_args")
   end
 

@@ -7,8 +7,7 @@ module Gori
         {"sequence (seq)", "Analyze token randomness (collect via replay, or --tokens FILE)"},
       ])]
       private def self.cmd_sequence(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         flow_id : Int64? = nil
         request_file : String? = nil
         tokens_file : String? = nil
@@ -43,8 +42,7 @@ module Gori
           p.on("--flow=ID", "Seed the request from a captured flow (live replay)") { |v| flow_id = parse_flow_id(v, "gori run sequence") }
           p.on("--request=FILE", "Read a raw HTTP request to replay (live)") { |v| request_file = v }
           p.on("--tokens=FILE", "Analyze pasted tokens (one per line; '-' = stdin, which needs a pipe or a redirect — a terminal is refused) — no network") { |v| tokens_file = v }
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           p.on("--target=URL", "Origin (scheme://host[:port]); required for --request/stdin") { |v| target_override = v }
           p.on("--http2", "Force HTTP/2") { force_h2 = true }
           p.on("--sni=HOST", "TLS SNI override") { |v| sni = v }
@@ -120,8 +118,8 @@ module Gori
         # only GLOBAL vars would resolve — a `$TOKEN` defined in the project would go out
         # literally. Explicit and identical to cmd_fuzz, rather than relying on the store that
         # `cli_host_overrides` happens to open below (see run.cr's open_store).
-        hydrate_project_env(project_name, db_path) if project_name || db_path
-        bytes, default_target, src_h2, evidence = sequence_source(flow_id, request_file, project_name, db_path)
+        hydrate_project_env(proj.name, proj.db) if proj.name || proj.db
+        bytes, default_target, src_h2, evidence = sequence_source(flow_id, request_file, proj.name, proj.db)
         token_loc = build_token_loc(k, selector)
 
         config = Sequencer::Config.new(mode: Sequencer::Mode::LiveReplay, token_loc: token_loc, goal: count, concurrency: concurrency)
@@ -137,7 +135,7 @@ module Gori
           evidence: evidence, default_target: default_target,
           target: target_override, http2: force_h2 || src_h2, config: config,
           verify: !insecure, sni: sni,
-          overrides: cli_host_overrides(project_name, db_path, flow_id))
+          overrides: cli_host_overrides(proj.name, proj.db, flow_id))
         # Scope gate — see cmd_fuzz / optional_project_outbound: refuse an out-of-scope host unless
         # --allow-unscoped, and enforce Sandbox + exclude rules on every send. (The
         # --tokens path returned above without touching the network, so it needs none.)
@@ -148,7 +146,7 @@ module Gori
         # seed one identity and send as another.
         activate_slot(slot, "gori run sequence")
         preflight_bind_from(bind_from, "gori run sequence")
-        outbound = optional_project_outbound(project_name, db_path, flow_id, allow_unscoped)
+        outbound = optional_project_outbound(proj.name, proj.db, flow_id, allow_unscoped)
         plan = begin
           Sequencer::Plan.build(options, outbound)
         rescue ex : Sequencer::PlanError
@@ -165,7 +163,7 @@ module Gori
           # See CLI::Run.seed_bindings — a headless process holds no binding from a previous
           # invocation, so `--bind-from` replays one here. Without it a `$NAME` simply ships
           # literally (see `Env.unbound`); there is nothing left to refuse before the run.
-          (fid = bind_from) && seed_bindings(fid, project_name, db_path, outbound, insecure, "gori run sequence")
+          (fid = bind_from) && seed_bindings(fid, proj.name, proj.db, outbound, insecure, "gori run sequence")
           run_sequence_stream(plan.engine, origin.scheme, origin.host, origin.port, token_loc, plan.goal, format)
         ensure
           outbound.close

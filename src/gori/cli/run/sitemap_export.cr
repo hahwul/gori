@@ -3,8 +3,7 @@ module Gori
   module CLI
     module Run
       private def self.cmd_sitemap_export(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         query : String? = nil
         host : String? = nil
         origin : String? = nil
@@ -31,8 +30,7 @@ module Gori
                      "No example values unless --examples, and those pass the redaction profile;\n" \
                      "credential values (Authorization, API-key headers, session cookies) are never\n" \
                      "written. The same flow set always exports to the same bytes."
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           p.on("-qQL", "--query=QL", "Only flows matching this QL query") { |v| query = v }
           p.on("--host=HOST", "Only this host (exact, case-insensitive) — one API per document") { |v| host = v }
           p.on("--origin=URL", "Only this origin — scheme, host and port, e.g. http://127.0.0.1:19021") { |v| origin = v }
@@ -69,7 +67,7 @@ module Gori
 
         # Parse before the open: abort skips ensure, so a bad query must not leave a store open.
         filter = sitemap_filter(query)
-        store = open_store(resolve_read_project(project_name, db_path), read_only: !filter.uses_fts?)
+        store = open_store(resolve_read_project(proj.name, proj.db), read_only: !filter.uses_fts?)
         filter = sitemap_export_filter(store, query, filter, in_scope, hide_static)
         choice = examples ? Redact::Policy.resolve(store, redact_profile, on: true) : nil
         if err = choice.try(&.error)

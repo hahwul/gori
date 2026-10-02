@@ -52,13 +52,11 @@ module Gori
       end
 
       private def self.cmd_retest_steps(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         issue_id : Int64? = nil
         format = :text
-        leftover = [] of String
 
-        parser = OptionParser.new do |p|
+        leftover = parse_args(args, "gori run retest") do |p|
           p.banner = "Usage: gori run retest [steps] --issue=N\n\n" \
                      "List an Issue's retest: each step's position, role, the Repeater session it\n" \
                      "sends, and the one result it expects. A step whose session no longer exists\n" \
@@ -74,20 +72,14 @@ module Gori
                      "  gori run retest runs --issue=N\n" \
                      "  gori run retest show RUN\n" \
                      "  gori run retest forget RUN"
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           p.on("--issue=N", "Issue id (required)") { |v| issue_id = parse_retest_id(v, "--issue") }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run retest", f, p) }
-          p.missing_option { |f| abort "gori run retest: missing value for #{f}" }
         end
-        parser.parse(args)
         refuse_list_leftovers(leftover, "retest", RETEST_VERBS, "steps")
         iid = require_issue_id(issue_id, "gori run retest")
 
-        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
+        store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
         planned, last = begin
           abort "gori run retest: no issue with id #{iid}" unless store.get_issue(iid)
           {Retest.plan(store, iid), store.last_retest_run(iid)}
@@ -123,16 +115,14 @@ module Gori
       end
 
       private def self.cmd_retest_add(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         issue_id : Int64? = nil
         repeater_id : Int64? = nil
         role_s = "variant"
         assertion = ""
         format = :text
-        leftover = [] of String
 
-        parser = OptionParser.new do |p|
+        leftover = parse_args(args, "gori run retest add") do |p|
           p.banner = "Usage: gori run retest add --issue=N --repeater=M [--role=ROLE] [--assert=EXPR]\n\n" \
                      "Append a Repeater session to an Issue's retest. The session is NOT copied:\n" \
                      "the step sends whatever the tab holds when the retest runs, which is what\n" \
@@ -144,19 +134,13 @@ module Gori
                      "it with `retest move`.\n\n" \
                      "Assertions (at most one per step, omit for \"record the outcome, assert nothing\"):\n" \
                      "#{retest_assert_help}"
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           p.on("--issue=N", "Issue id (required)") { |v| issue_id = parse_retest_id(v, "--issue") }
           p.on("--repeater=M", "Repeater session id to send (required; ids from `gori run repeater list`)") { |v| repeater_id = parse_retest_id(v, "--repeater") }
           p.on("--role=ROLE", "setup | baseline | variant (default) | control | cleanup") { |v| role_s = v }
           p.on("--assert=EXPR", "The one expected result (see the list above)") { |v| assertion = v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run retest add", f, p) }
-          p.missing_option { |f| abort "gori run retest add: missing value for #{f}" }
         end
-        parser.parse(args)
         # Deferred past `parse` for the reason `cmd_evidence_freeze` gives: the unknown-args
         # callback runs before the flag sweep, so aborting inside it misdiagnoses a typo'd flag.
         unless leftover.empty?
@@ -172,7 +156,7 @@ module Gori
         parsed = Retest::Assertion.parse(assertion)
         abort "gori run retest add: --assert: #{parsed}" if parsed.is_a?(String)
 
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(proj.name, proj.db))
         begin
           abort "gori run retest add: no issue with id #{iid}" unless store.get_issue(iid)
           abort "gori run retest add: no repeater session ##{rid} (ids from `gori run repeater list`)" unless store.get_repeater(rid)
@@ -196,28 +180,20 @@ module Gori
       end
 
       private def self.cmd_retest_update(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         role_s : String? = nil
         assertion : String? = nil
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run retest update") do |p|
           p.banner = "Usage: gori run retest update STEP [--role=ROLE] [--assert=EXPR]\n\n" \
                      "Change one step's role and/or its expected result. STEP is the step id from\n" \
                      "`gori run retest steps --format=json`, not its position — a position moves.\n" \
                      "Pass --assert= (empty) to drop the assertion and only record the outcome.\n\n" \
                      "Assertions:\n#{retest_assert_help}"
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           p.on("--role=ROLE", "setup | baseline | variant | control | cleanup") { |v| role_s = v }
           p.on("--assert=EXPR", "The one expected result (empty clears it)") { |v| assertion = v }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run retest update", f, p) }
-          p.missing_option { |f| abort "gori run retest update: missing value for #{f}" }
         end
-        parser.parse(args)
         id = require_positional_id(positional, "gori run retest update", "step")
         abort "gori run retest update: nothing to change — pass --role and/or --assert" if role_s.nil? && assertion.nil?
         role = role_s.try do |s|
@@ -229,7 +205,7 @@ module Gori
           parsed.to_s
         end
 
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(proj.name, proj.db))
         begin
           abort "gori run retest update: no retest step with id #{id}" unless store.get_retest_step(id)
           case store.update_retest_step(id, role: role, assertion: stored_assertion)
@@ -246,25 +222,17 @@ module Gori
       end
 
       private def self.cmd_retest_remove(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
-        positional = [] of String
+        proj = ProjectFlags.new
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run retest remove") do |p|
           p.banner = "Usage: gori run retest remove STEP\n\n" \
                      "Remove one step and close the gap its position left. The Repeater session and\n" \
                      "any entity link to it are untouched: a retest step is a test plan, not a link."
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run retest remove", f, p) }
-          p.missing_option { |f| abort "gori run retest remove: missing value for #{f}" }
+          project_options(p, proj, "update")
         end
-        parser.parse(args)
         id = require_positional_id(positional, "gori run retest remove", "step")
 
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(proj.name, proj.db))
         begin
           step = store.get_retest_step(id) || abort("gori run retest remove: no retest step with id #{id}")
           case store.remove_retest_step(id)
@@ -279,17 +247,14 @@ module Gori
       end
 
       private def self.cmd_retest_move(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         to : Int32? = nil
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run retest move") do |p|
           p.banner = "Usage: gori run retest move STEP --to=POS\n\n" \
                      "Move one step to position POS (1-based), shifting the rest. Clamped to the\n" \
                      "list, so --to=1 always means \"first\"."
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           # Clamped BEFORE `to_i`, for the reason MCP's `move_retest_step` states: the store
           # clamps to the list anyway, and an unclamped `Int64#to_i` past `Int32::MAX` raises
           # `OverflowError` — an unhandled crash out of an OptionParser block, for an argument
@@ -297,18 +262,13 @@ module Gori
           p.on("--to=POS", "New 1-based position (required; clamped to the list)") do |v|
             to = parse_retest_id(v, "--to").clamp(1_i64, Int32::MAX.to_i64).to_i
           end
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run retest move", f, p) }
-          p.missing_option { |f| abort "gori run retest move: missing value for #{f}" }
         end
-        parser.parse(args)
         id = require_positional_id(positional, "gori run retest move", "step")
         pos_opt = to
         abort "gori run retest move: --to is required" if pos_opt.nil?
         pos = pos_opt
 
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(proj.name, proj.db))
         begin
           abort "gori run retest move: no retest step with id #{id}" unless store.get_retest_step(id)
           case store.move_retest_step(id, pos)
@@ -327,32 +287,24 @@ module Gori
       end
 
       private def self.cmd_retest_clear(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         issue_id : Int64? = nil
         yes = false
-        leftover = [] of String
 
-        parser = OptionParser.new do |p|
+        leftover = parse_args(args, "gori run retest clear") do |p|
           p.banner = "Usage: gori run retest clear --issue=N --yes\n\n" \
                      "Delete every step of one Issue's retest. The run history is KEPT: re-planning\n" \
                      "the check does not un-run it, and an old summary is the regression baseline."
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          project_options(p, proj, "update")
           p.on("--issue=N", "Issue id (required)") { |v| issue_id = parse_retest_id(v, "--issue") }
           # `-y` too, because the option table documents the pair for BOTH verbs and `run`
           # registers both — following the docs on this one aborted with "unknown option: -y".
           p.on("-y", "--yes", "Actually delete the steps (required — there is no interactive prompt here)") { yes = true }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run retest clear", f, p) }
-          p.missing_option { |f| abort "gori run retest clear: missing value for #{f}" }
         end
-        parser.parse(args)
         abort "gori run retest clear: unexpected argument#{leftover.size == 1 ? "" : "s"} #{leftover.join(" ").inspect}" unless leftover.empty?
         iid = require_issue_id(issue_id, "gori run retest clear")
 
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(proj.name, proj.db))
         begin
           abort "gori run retest clear: no issue with id #{iid}" unless store.get_issue(iid)
           n = store.count_retest_steps(iid)
@@ -381,9 +333,8 @@ module Gori
         slot : String? = nil
         timeout : Time::Span? = nil
         format = :text
-        leftover = [] of String
 
-        parser = OptionParser.new do |p|
+        leftover = parse_args(args, "gori run retest run") do |p|
           p.banner = "Usage: gori run retest run --issue=N [--yes]\n\n" \
                      "Run an Issue's retest: every step in order, through the project's scope and\n" \
                      "Sandbox gates, judged against its assertion. Each send is recorded in History\n" \
@@ -406,12 +357,7 @@ module Gori
           p.on("--slot=NAME", "Send every step as this SESSION SLOT — its header overlay, and its binding table for $BIND.NAME tokens (bare syntax: $NAME)") { |v| slot = v.strip }
           p.on("--timeout=SEC", "Per-step connect + idle timeout (seconds, default #{Retest::LiveBackend::DEFAULT_TIMEOUT.total_seconds.to_i})") { |v| timeout = parse_count(v, "--timeout").seconds }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run retest run", f, p) }
-          p.missing_option { |f| abort "gori run retest run: missing value for #{f}" }
         end
-        parser.parse(args)
         refresh_verify_upstream(!insecure)
         abort "gori run retest run: unexpected argument#{leftover.size == 1 ? "" : "s"} #{leftover.join(" ").inspect}" unless leftover.empty?
         iid = require_issue_id(issue_id, "gori run retest run")
@@ -469,33 +415,25 @@ module Gori
       end
 
       private def self.cmd_retest_runs(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         issue_id : Int64? = nil
         limit = Retest::RUN_HISTORY
         format = :text
-        leftover = [] of String
 
-        parser = OptionParser.new do |p|
+        leftover = parse_args(args, "gori run retest runs") do |p|
           p.banner = "Usage: gori run retest runs --issue=N\n\n" \
                      "The Issue's bounded run history, newest first: when it ran, from which\n" \
                      "surface, the verdict and the per-outcome counts. `gori run retest show RUN`\n" \
                      "prints one run's result table."
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           p.on("--issue=N", "Issue id (required)") { |v| issue_id = parse_retest_id(v, "--issue") }
           p.on("--limit=N", "How many runs to print (default #{Retest::RUN_HISTORY}, which is all that is kept)") { |v| limit = parse_count(v, "--limit").to_i }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| leftover = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run retest runs", f, p) }
-          p.missing_option { |f| abort "gori run retest runs: missing value for #{f}" }
         end
-        parser.parse(args)
         refuse_list_leftovers(leftover, "retest", RETEST_VERBS, "runs")
         iid = require_issue_id(issue_id, "gori run retest runs")
 
-        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
+        store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
         runs = begin
           abort "gori run retest runs: no issue with id #{iid}" unless store.get_issue(iid)
           store.retest_runs(iid, limit)
@@ -513,28 +451,20 @@ module Gori
       end
 
       private def self.cmd_retest_show(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         format = :text
-        positional = [] of String
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run retest show") do |p|
           p.banner = "Usage: gori run retest show RUN [--format=text|json]\n\n" \
                      "One run's result table: role, Repeater session, expected result, what actually\n" \
                      "happened, and pass/fail per step. Every row keeps the History flow id of its\n" \
                      "own send, so an old row still opens the exact response it reported."
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run retest show", f, p) }
-          p.missing_option { |f| abort "gori run retest show: missing value for #{f}" }
         end
-        parser.parse(args)
         id = require_positional_id(positional, "gori run retest show", "run")
 
-        store = open_store(resolve_read_project(project_name, db_path), read_only: true)
+        store = open_store(resolve_read_project(proj.name, proj.db), read_only: true)
         run, steps = begin
           r = store.get_retest_run(id) || abort("gori run retest show: no retest run with id #{id}")
           {r, store.retest_run_steps(id)}
@@ -560,25 +490,17 @@ module Gori
       # wrong target, or under a scope the operator has since fixed. The steps that produced
       # it are untouched.
       private def self.cmd_retest_forget(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
-        positional = [] of String
+        proj = ProjectFlags.new
 
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run retest forget") do |p|
           p.banner = "Usage: gori run retest forget RUN\n\n" \
                      "Delete one run summary and its result rows. The retest steps stay, and the\n" \
                      "History flows each send recorded stay — this drops the report, not the evidence."
-          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run retest forget", f, p) }
-          p.missing_option { |f| abort "gori run retest forget: missing value for #{f}" }
+          project_options(p, proj, "update")
         end
-        parser.parse(args)
         id = require_positional_id(positional, "gori run retest forget", "run")
 
-        store = open_store(resolve_read_project(project_name, db_path))
+        store = open_store(resolve_read_project(proj.name, proj.db))
         begin
           run = store.get_retest_run(id) || abort("gori run retest forget: no retest run with id #{id}")
           abort "gori run retest forget: NOT deleted (project busy or unwritable)" unless store.delete_retest_run(id)

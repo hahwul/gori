@@ -3,8 +3,7 @@ module Gori
   module CLI
     module Run
       private def self.cmd_sitemap_params(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
+        proj = ProjectFlags.new
         query : String? = nil
         host : String? = nil
         origin : String? = nil
@@ -28,8 +27,7 @@ module Gori
                      "an observation, not a finding). Values of credential-shaped inputs are masked\n" \
                      "unless --include-sensitive. JSON names are paths (user.email, items[].id); the\n" \
                      "`[]` is display-only, not JsonPath syntax."
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          project_options(p, proj, "read")
           p.on("-qQL", "--query=QL", "Only flows matching this QL query") { |v| query = v }
           p.on("--host=HOST", "Only this host (exact, case-insensitive)") { |v| host = v }
           p.on("--origin=URL", "Only this origin — scheme, host and port, e.g. http://127.0.0.1:19021") { |v| origin = v }
@@ -63,7 +61,7 @@ module Gori
 
         # Parse before the open: abort skips ensure, so a bad query must not leave a store open.
         filter = sitemap_filter(query)
-        store = open_store(resolve_read_project(project_name, db_path), read_only: !filter.uses_fts?)
+        store = open_store(resolve_read_project(proj.name, proj.db), read_only: !filter.uses_fts?)
         filter = sitemap_flow_filter(store, "sitemap params", query, filter, in_scope,
           "parameters out of the inventory")
         wanted = ParamInventory::ALL_LOCATIONS

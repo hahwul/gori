@@ -18,8 +18,7 @@ module Gori
         format = :text
         payload_override = nil.as(String?)
         sets = [] of String
-        positional = [] of String
-        parser = OptionParser.new do |p|
+        positional = parse_args(args, "gori run jwt") do |p|
           p.banner = "Usage: gori run jwt [<token>] [options]\n\n" \
                      "Decode, verify, re-sign, or generate testing payloads for a JWT (JWS) —\n" \
                      "or read the protected header of an encrypted one (JWE). The token is read\n" \
@@ -37,12 +36,7 @@ module Gori
           p.on("--payload=JSON", "--encode: replace the claims (payload) wholesale before re-signing") { |v| payload_override = v }
           p.on("--set=CLAIM", "--encode: patch one claim before re-signing, as key=value (repeatable). value is JSON if it parses (true/3), else a string") { |v| sets << v }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |before, after| positional = before + after }
-          p.invalid_option { |f| abort CLI.unknown_option_message("gori run jwt", f, p) }
-          p.missing_option { |f| abort "gori run jwt: missing value for #{f}" }
         end
-        parser.parse(args)
 
         jwt_refuse_conflicts(action, payload_override, sets, secret, key)
         # `--verify` checks the token's OWN alg, so a pinned `--alg RS256` read as an
