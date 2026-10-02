@@ -1,3 +1,4 @@
+require "./ascii_bytes"
 require "./filter_ast"
 require "./utf8"
 require "./proto"
@@ -128,6 +129,9 @@ module Gori
           else              false
           end
         end
+        # `header:`/`body:` search the RAW bytes, never `String.new(bytes).downcase`: a WebSocket
+        # payload is as likely to be protobuf as text, and decoding would allocate per message and
+        # turn non-UTF-8 bytes into U+FFFD. `value` is already downcased by `parse_term`.
         case field
         when :host   then s.host.downcase.includes?(value)
         when :path   then s.path.downcase.includes?(value)
@@ -136,8 +140,8 @@ module Gori
         when :scheme then s.scheme.compare(value, case_insensitive: true) == 0
         when :status then (st = s.status) ? InterceptFilter.status_match?(st, value) : false
         when :proto  then InterceptFilter.proto_name(s.proto) == value
-        when :header then (h = s.head) ? InterceptFilter.bytes_include?(h, value) : false
-        when :body   then (p = s.payload) ? InterceptFilter.bytes_include?(p, value) : false
+        when :header then (h = s.head) ? AsciiBytes.contains_ci?(h, value.to_slice) : false
+        when :body   then (p = s.payload) ? AsciiBytes.contains_ci?(p, value.to_slice) : false
         when :never  then false # an uncompilable `~`, or a refused field — see `parse_term`
         else                    # :text — free-text substring over method/host/target
           s.method.downcase.includes?(value) || s.host.downcase.includes?(value) ||
@@ -569,33 +573,6 @@ module Gori
       in .grpc? then "grpc"
       in .sse?  then "sse"
       end
-    end
-
-    # ASCII-case-insensitive substring search over RAW bytes — a payload for `body:`, a head for
-    # `header:`. Deliberately not `String.new(bytes).downcase.includes?` — a WebSocket payload is
-    # as likely to be protobuf/msgpack as text, and decoding it would both allocate a copy of
-    # every message on a chatty socket and mangle non-UTF-8 bytes into U+FFFD before the compare.
-    # `needle` arrives already downcased from `parse_term`; a non-ASCII needle therefore matches
-    # case-sensitively, which is the same deal `host:`/`path:` strike.
-    protected def self.bytes_include?(hay : Bytes, needle : String) : Bool
-      pat = needle.to_slice
-      return true if pat.empty?
-      return false if pat.size > hay.size
-      i = 0
-      limit = hay.size - pat.size
-      while i <= limit
-        j = 0
-        while j < pat.size && ascii_fold(hay[i + j]) == pat[j]
-          j += 1
-        end
-        return true if j == pat.size
-        i += 1
-      end
-      false
-    end
-
-    private def self.ascii_fold(b : UInt8) : UInt8
-      b >= 0x41_u8 && b <= 0x5A_u8 ? b + 0x20_u8 : b
     end
 
     # A `~` term's match, and the ONLY place this filter runs a regex. Two guards, and neither

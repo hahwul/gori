@@ -1,4 +1,5 @@
 require "json"
+require "./ascii_bytes"
 require "./raw_json"
 require "./json_unicode"
 require "uri"
@@ -567,14 +568,7 @@ module Gori
       last = src.size - sb.size
       i = from
       while i <= last
-        match = true
-        sb.each_with_index do |b, k|
-          if downcase_byte(src[i + k]) != b
-            match = false
-            break
-          end
-        end
-        return i if match
+        return i if AsciiBytes.range_eq_ci?(src, i, i + sb.size, sb)
         i += 1
       end
       -1
@@ -787,10 +781,6 @@ module Gori
       return false if at + needle.size > source.size
       needle.each_with_index { |byte, offset| return false if source[at + offset] != byte }
       true
-    end
-
-    private def downcase_byte(b : UInt8) : UInt8
-      (0x41_u8 <= b <= 0x5A_u8) ? b + 0x20_u8 : b
     end
 
     private def strip_bom(s : String) : String

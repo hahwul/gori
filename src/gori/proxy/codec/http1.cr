@@ -1,4 +1,5 @@
 require "socket"
+require "../../ascii_bytes"
 require "./message"
 
 # Pure, byte-exact HTTP/1.1 head codec (sans-IO).
@@ -946,13 +947,7 @@ module Gori::Proxy::Codec::Http1
   def self.header_line_value(line : Bytes, lower_name : String) : Bytes?
     colon = line.index(0x3a_u8) # ':'
     return nil unless colon
-    return nil unless colon == lower_name.bytesize
-    name = lower_name.to_slice
-    colon.times do |i|
-      b = line.unsafe_fetch(i)
-      b |= 0x20_u8 if b >= 0x41_u8 && b <= 0x5a_u8 # ASCII 'A'..'Z' -> lower
-      return nil unless b == name.unsafe_fetch(i)
-    end
+    return nil unless AsciiBytes.range_eq_ci?(line, 0, colon, lower_name.to_slice)
     trim_ows(line[colon + 1, line.size - colon - 1])
   end
 
