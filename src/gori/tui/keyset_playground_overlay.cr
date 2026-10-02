@@ -10,7 +10,9 @@ module Gori::Tui
   # Preferences → Keys → Keyset playground: the setup wizard's practice pad, reachable after
   # the wizard, with the whole READ grammar of the keyset being tried listed under it. The pad
   # is the wizard's (`KeysetPad`, the real keymap and the real `ReadEdit` engine); this card
-  # adds the key list and lets ↵ adopt the keyset tried.
+  # adds the key list. It only tries: the keyset is picked on the Editor keyset row right above
+  # the row that opens it, and a second setter here would be one more way for the two to
+  # disagree about what is saved.
   #
   #   ◉ helix-ish (default)  x line · y copy · d delete · p paste · ^Z undo
   #   ◯ vim-ish              ⇧V line · yy yank · dd delete · p paste · u undo
@@ -62,10 +64,10 @@ module Gori::Tui
 
     def hint : String
       return "⇥ back to the keysets · esc leaves the pad" if pad_focused?
-      "↑/↓ keyset · ⇥ or type to try · ↵ use this keyset · esc close"
+      "↑/↓ keyset · ⇥/↵ or type to try · esc close — pick yours on the Editor keyset row"
     end
 
-    # On the keyset rows: ↑/↓ pick, ⇥ (or any letter) moves into the pad, ↵ adopts the keyset.
+    # On the keyset rows: ↑/↓ pick, ⇥ / ↵ (or any letter) move into the pad.
     # In the pad every key is the pad's except ⇥ / ⇧⇥, which hand the keys back, and the esc
     # the pad hands back itself (READ, nothing selected or armed).
     def handle_key(ev : Termisu::Event::Key) : Symbol
@@ -82,8 +84,7 @@ module Gori::Tui
     private def choice_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
       return :cancel if key.escape?
-      return :commit if key.enter?
-      if key.tab?
+      if key.tab? || key.enter?
         @focus = :pad
       elsif key.up? || key.down?
         stage(@keyset.vim? ? Verb::Keyset::Kind::Helix : Verb::Keyset::Kind::Vim)
@@ -122,7 +123,7 @@ module Gori::Tui
       Frame.card(screen, box, title, border: Theme.border_focus)
       ix = box.x + 3
       iw = {box.w - 6, 1}.max
-      screen.text(ix, box.y + 1, "Try a keyset on the pad, then ↵ to use it. Your own rebindings apply here too.",
+      screen.text(ix, box.y + 1, "Try either keyset on the pad; pick yours on the Editor keyset row. Your rebindings apply here too.",
         Theme.muted, Theme.panel, width: iw)
       on_choice = !pad_focused?
       KINDS.each_with_index do |kind, i|

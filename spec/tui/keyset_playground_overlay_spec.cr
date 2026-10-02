@@ -29,13 +29,14 @@ end
 describe KeysetPlaygroundOverlay do
   before_each { Gori::Tui::Register.clear }
 
-  it "picks a keyset with ↑/↓, and ↵ asks to use it" do
+  it "switches the keyset tried with ↑/↓, and only tries: ↵ moves into the pad" do
     ov = playground
     ov.handle_key(key(Termisu::Input::Key::Down)).should eq(:stay)
     ov.keyset.should eq(Kind::Vim)
     ov.handle_key(key(Termisu::Input::Key::Up))
     ov.keyset.should eq(Kind::Helix)
-    ov.handle_key(key(Termisu::Input::Key::Enter)).should eq(:commit)
+    ov.handle_key(key(Termisu::Input::Key::Enter)).should eq(:stay)
+    ov.pad_focused?.should be_true
   end
 
   it "hands a typed letter to the pad, and ⇥ / an unclaimed esc back to the keyset rows" do

@@ -131,6 +131,17 @@ describe Gori::Tui::KeysetPad do
     p.text.should eq(Gori::Tui::KeysetPad::SAMPLE)
   end
 
+  # The key list is a third hand-written list beside REFERENCE and Help. It names verbs by
+  # token, so a rebind shows; this keeps a vim keyset row from being left out of it.
+  it "lists every vim keyset row in the playground's key list" do
+    listed = Gori::Tui::KeysetPad::CHEAT[Kind::Vim].map(&.[1]).join(" ")
+    Gori::Verb::Keyset::VIM.each do |id, chords|
+      next if chords.empty? || Gori::Verb::Keyset::SELECT_LINE_IDS.includes?(id)
+      listed.should contain("{#{id}}")
+    end
+    listed.should contain("{notes.select-line}") # the pad's stand-in for the fifteen select-lines
+  end
+
   it "types in INS and hands esc back only from a plain READ" do
     p = pad
     press(p, "i")

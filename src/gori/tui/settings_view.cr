@@ -125,7 +125,7 @@ module Gori::Tui
       Field.new("Editor keyset",
         "how the READ-mode keys of a text pane are spelled: helix-ish selects the line with x, then d deletes or y copies it · vim-ish uses dd / yy, ⇧V line select, u undo, / find, a / ⇧A / ⇧I insert, w / b words, g / ⇧G top-bottom. A mapping, not an emulation — counts, motions after an operator and :commands are not offered. Your own rebindings win over the keyset. ←/→ cycles",
         choices: Gori::Hotkeys::KEYSETS, choice_labels: Gori::Hotkeys::KEYSET_LABELS),
-      Field.new("Keyset playground", "↵ to try both keysets on a practice pad, with every READ-mode key of each listed — ↵ there uses the one you tried",
+      Field.new("Keyset playground", "↵ to try both keysets on a practice pad, with every READ-mode key of each listed — pick yours on the row above",
         opener: :keyset_playground),
     ]
     # The playground row's value column: an opener shows a summary, and this one has no state.
