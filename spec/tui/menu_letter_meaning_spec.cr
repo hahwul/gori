@@ -84,11 +84,14 @@ module MenuLetterMeaning
 
   # The `vim` keyset's motions (`Keyset::VIM`), exempt where they meet a menu letter under
   # that keyset only (#1295). A dropped space there moves the caret, opens find, selects a
-  # line or enters INSERT one column right: what a vim hand expects from the key, and nothing
-  # a second key cannot undo. The set names verbs, never letters, and only ones that neither
-  # write the buffer nor reach anything outside the pane: undo (`u`) is not here, and neither
-  # is helix's `i` insert, which moved Insert marker to `I` instead (#1274).
-  VIM_MOTIONS = Set{"editor.append", "editor.top", "editor.bottom", "editor.find"} +
+  # line or enters INSERT one column right or at a line edge: what a vim hand expects from
+  # the key, and nothing a second key cannot undo. The set names verbs, never letters, and
+  # only ones that neither write the buffer nor reach anything outside the pane: undo (`u`)
+  # is not here, and neither is helix's `i` insert, which moved Insert marker to `I` instead
+  # (#1274) — the vim keyset's `⇧I` meets that `I` again, as a motion into INSERT.
+  VIM_MOTIONS = Set{"editor.append", "editor.top", "editor.bottom", "editor.find",
+                    "editor.word-next", "editor.word-prev",
+                    "editor.append-line-end", "editor.insert-line-start"} +
                 Gori::Verb::Keyset::SELECT_LINE_IDS.to_set
 
   def vim_motion?(ks : Gori::Verb::Keyset::Kind, other : String) : Bool

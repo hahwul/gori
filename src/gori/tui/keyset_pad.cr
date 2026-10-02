@@ -239,7 +239,7 @@ module Gori::Tui
     end
 
     private def dispatch(id : String, chord : Verb::Chord) : Nil
-      return if dispatch_edit(id) || dispatch_tab(id)
+      return if dispatch_edit(id) || dispatch_motion(id) || dispatch_tab(id)
       case id
       when "editor.insert", "editor.insert-enter"
         editor_enter_insert
@@ -253,9 +253,6 @@ module Gori::Tui
         @area.undo
         @read.sync_from(@area)
         @status = @area.edits == before ? "nothing to undo" : "undone"
-      when "editor.top", "editor.bottom"
-        @read.to_edge(@area, id == "editor.top" ? -1 : 1)
-        @status = id == "editor.top" ? "top of the pane" : "bottom of the pane"
       else
         title = @registry[id]?.try(&.title) || id
         @status = "#{Hotkeys.display_label(chord)}: #{title} — opens in a real pane, not here"
@@ -271,6 +268,25 @@ module Gori::Tui
         ReadEdit.selection?(self) ? say(ReadEdit.delete_selection(self, key_in)) : arm(id, "deletes the line")
       when "editor.yank-line"
         ReadEdit.selection?(self) ? copy : arm(id, "copies the line")
+      else
+        return false
+      end
+      true
+    end
+
+    # The caret motions: the buffer's edges, a word, and INSERT at a line edge. False for any
+    # other id.
+    private def dispatch_motion(id : String) : Bool
+      case id
+      when "editor.top", "editor.bottom"
+        @read.to_edge(@area, id == "editor.top" ? -1 : 1)
+        @status = id == "editor.top" ? "top of the pane" : "bottom of the pane"
+      when "editor.word-next", "editor.word-prev"
+        @read.word_move(@area, id == "editor.word-next" ? 1 : -1)
+      when "editor.append-line-end", "editor.insert-line-start"
+        @read.line_edge(@area, id == "editor.append-line-end" ? 1 : -1)
+        editor_enter_insert
+        @status = "INS at the line's #{id == "editor.append-line-end" ? "end" : "start"} · esc goes back to READ"
       else
         return false
       end

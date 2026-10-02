@@ -180,6 +180,15 @@ module Gori::Tui
       sync_to(editor, selecting)
     end
 
+    # Home / End on the READ caret (`dir` -1 / 1), through the editor's own line edges.
+    def line_edge(editor : TextArea, dir : Int32) : Nil
+      lines = editor.lines_snapshot
+      return if lines.empty?
+      apply(editor, lines)
+      dir < 0 ? editor.home : editor.end_of_line
+      sync_to(editor)
+    end
+
     # Is the READ selection in `editor` a line selection (`select_line`, grown by whole lines)?
     def linewise?(editor : TextArea) : Bool
       bind(editor)

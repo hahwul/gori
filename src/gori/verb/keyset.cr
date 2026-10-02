@@ -67,6 +67,9 @@ module Gori
       #   • APPEND `a` and TOP/BOTTOM `g` / `⇧G` give a key to three verbs `helix` leaves
       #     unbound. Both halves of append (one column right, then INSERT) are motions the
       #     editors have; `gg` is not expressible, so `g` alone is the top.
+      #   • WORD `w` / `b` and LINE INSERT `⇧A` / `⇧I`, keyless under `helix` for the same
+      #     reason: the editor's ⌥←/→ word step, and Home/End then INSERT. No `$` / `0`: `$`
+      #     arrives as ⇧4, the Global sub-tab jump, and `0` is Go to tab.
       #
       #   • DELETE `d` → `editor.delete-line`, YANK `y` → `editor.yank-line`: vim's `dd` and
       #     `yy` (the first press arms, the second acts), and over a `⇧V` selection the first
@@ -85,6 +88,10 @@ module Gori
         t["editor.append"] = [Chord.new("a")]
         t["editor.top"] = [Chord.new("g")]
         t["editor.bottom"] = [Chord.new("g", shift: true)]
+        t["editor.word-next"] = [Chord.new("w")]
+        t["editor.word-prev"] = [Chord.new("b")]
+        t["editor.append-line-end"] = [Chord.new("a", shift: true)]
+        t["editor.insert-line-start"] = [Chord.new("i", shift: true)]
         t["editor.delete"] = [] of Chord
         t["editor.delete-line"] = [Chord.new("d")]
         t["editor.yank-line"] = [Chord.new("y")]

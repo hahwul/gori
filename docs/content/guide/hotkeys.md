@@ -401,6 +401,8 @@ Everything not in that table is the same under both keysets, because gori alread
 
 A line selection stays whole lines while it grows: `⇧↑` / `⇧↓` add a line at a time under both keysets, and under `vim-ish` a plain `j` / `k` does too, so `⇧V` `j` `j` `d` deletes three lines. A sideways step turns it into an ordinary character selection.
 
+`vim-ish` also steps a word with `w` / `b` in READ, and `⇧A` / `⇧I` start typing at the end / start of the caret's line.
+
 ### Delete and paste in READ {#read-edits}
 
 These work in every text editor pane: the Repeater request, the Fuzzer template, Notes, an issue's notes, the Project description, and the Decoder, JWT and Cookie inputs.
@@ -419,6 +421,7 @@ It is a named bundle of key **overrides** for a small, fixed set of editor actio
 So some vim spellings are deliberately **not** offered, each for a reason you can check:
 
 - **`gg` and every other two-key sequence except `dd` and `yy`.** A gori chord is one keystroke. `dd` and `yy` are the exception: their first press waits for the second. `g` alone is the top of the pane. `d` and `y` take no motion, so `dw`, `dj` and `d2d` are cancelled rather than guessed at.
+- **`$` and `0`.** `$` arrives as `⇧4`, which jumps to the fourth sub-tab, and `0` opens Go to tab; an editor binding either would take that key away inside text panes. `End` and `Home` reach the line edges under both keysets.
 - **`:` commands, including `:42`.** A bare `:` is [reserved](#reserved-keys) for gori's own command line, so go-to-line stays `Ctrl-G` under both keysets.
 - **`x`, `D`, `P`, `o`, `J` and the rest of vim's editing keys.** Delete and paste are the READ-mode edits gori has; everything else happens in INSERT.
 - **A rule list's enable/disable** (Colormarker, Probe rules, OAST providers, Rewriter), which is `t` on all four. It turns a rule on and off; it is not a selection, so no keyset moves it.
@@ -448,7 +451,7 @@ so the card teaches both halves rather than making you guess which one it means.
 
 That includes `/`, which is a `SUB-TABS` letter *and* `vim-ish`'s find key. They are different tiers — the menu letter acts on the strip while the card is up, the chord searches the text pane you are standing in. The one deliberate pane-key overlap is `u` in the Repeater's read-only response: it toggles display-only JSON Unicode decoding. The request editor is still in the Editor scope, where `u` means undo. `validate_chords!` checks same-scope collisions at boot; the cross-scope exception is pinned in `spec/verb/keyset_spec.cr`.
 
-A few menu letters are also a `vim-ish` motion in an editor pane: Auto-mark `a` (append), `g` on the Repeater, Cookie and issue detail (top), Send race `⇧G` (bottom), Set CVSS `V` (select line), and the Notes strip's `/` (find). If the `Space` before one of them is lost, the key does what vim would, which moves or selects and never sends, writes or deletes. The editing letters are the other deliberate overlap, under both keysets: inside a text editor `d`, `y` and `p` are the editor's, so a lost `Space` before the menu's `d` (Duplicate, or Delete issue in an issue's notes) or `y` (Copy) edits or copies the text in that pane, says so, and can be undone. A menu letter that lands on anything else in the pane is refused.
+A few menu letters are also a `vim-ish` motion in an editor pane: Auto-mark `a` (append), `g` on the Repeater, Cookie and issue detail (top), Send race `⇧G` (bottom), Set CVSS `V` (select line), the Notes strip's `/` (find), Close sub-tab `w` (next word), and Insert marker `⇧I` and Probe active `⇧A` (start typing at a line edge). If the `Space` before one of them is lost, the key does what vim would, which moves, selects or starts typing, and never sends, writes or deletes. The editing letters are the other deliberate overlap, under both keysets: inside a text editor `d`, `y` and `p` are the editor's, so a lost `Space` before the menu's `d` (Duplicate, or Delete issue in an issue's notes) or `y` (Copy) edits or copies the text in that pane, says so, and can be undone. A menu letter that lands on anything else in the pane is refused.
 
 ### What still works whatever you pick
 

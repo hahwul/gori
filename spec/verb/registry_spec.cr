@@ -1933,6 +1933,14 @@ private class FakeContext < ExecContext
     @calls << :editor_to_bottom
   end
 
+  def editor_word_move(dir : Int32) : Nil
+    @calls << :editor_word_move
+  end
+
+  def editor_line_insert(dir : Int32) : Nil
+    @calls << :editor_line_insert
+  end
+
   def editor_delete_selection : Nil
     @calls << :editor_delete_selection
   end

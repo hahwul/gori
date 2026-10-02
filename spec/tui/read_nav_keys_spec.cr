@@ -42,6 +42,12 @@ describe "READ caret keys in every editor pane" do
       press(tab, TuiContract.plain('k'))
       caret_of(tab)[0].should eq(0), "#{name}: k"
       tab.editor_read_mode?.should be_true, "#{name}: still in READ"
+      # The vim keyset's `w` and `⇧A`, through the seam the Runner routes them by.
+      tab.editor_word_move(1).should be_true, name
+      caret_of(tab).should eq({0, 6}), "#{name}: w"
+      tab.editor_line_insert(1).should be_true, name
+      tab.editor_read_mode?.should be_false, "#{name}: ⇧A enters INSERT"
+      caret_of(tab).should eq({0, 10}), "#{name}: ⇧A"
       seen << name
       nil
     end

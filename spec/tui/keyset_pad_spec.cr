@@ -89,6 +89,19 @@ describe Gori::Tui::KeysetPad do
       p.text.should start_with("GEZT")
     end
 
+    it "steps words with w / b and types at a line edge with ⇧A / ⇧I" do
+      p = pad(Kind::Vim)
+      press(p, "wwbiZ") # GET → / → api, back to /
+      p.handle_key(esc)
+      p.text.should start_with("GET Z/api")
+      press(p, "AQ")
+      p.handle_key(esc)
+      p.text.lines[0].should end_with("HTTP/1.1Q")
+      press(p, "jIY")
+      p.handle_key(esc)
+      p.text.lines[1].should eq("YHost: example.test")
+    end
+
     it "undoes with u and selects the line with ⇧V, not x" do
       p = pad(Kind::Vim)
       press(p, "x")

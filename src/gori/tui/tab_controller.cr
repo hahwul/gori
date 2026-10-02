@@ -1595,6 +1595,14 @@ module Gori::Tui
       true
     end
 
+    # `A` / `I`: the caret to the end / start of its line, then INSERT there.
+    def editor_line_insert(dir : Int32) : Bool
+      return false unless buf = editor_text_buffer
+      area, read = buf
+      read.line_edge(area, dir)
+      editor_enter_insert
+    end
+
     # ←/→ and `h`/`l` over the same READ caret, a word at a time with ⌥/⌃ — the one sideways
     # arm every READ ladder shares. False when `ev` is neither, or there is no buffer.
     def editor_read_sideways(ev : Termisu::Event::Key) : Bool

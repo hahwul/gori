@@ -429,6 +429,14 @@ class FakeExecContext < Gori::Verb::ExecContext
     rec(:editor_to_bottom)
   end
 
+  def editor_word_move(dir : Int32) : Nil
+    rec(:editor_word_move)
+  end
+
+  def editor_line_insert(dir : Int32) : Nil
+    rec(:editor_line_insert)
+  end
+
   def editor_delete_selection : Nil
     rec(:editor_delete_selection)
   end

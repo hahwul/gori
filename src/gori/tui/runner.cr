@@ -6329,6 +6329,14 @@ module Gori::Tui
       @tabs[@active_tab]?.try(&.editor_to_bottom)
     end
 
+    def editor_word_move(dir : Int32) : Nil
+      @tabs[@active_tab]?.try(&.editor_word_move(dir))
+    end
+
+    def editor_line_insert(dir : Int32) : Nil
+      @tabs[@active_tab]?.try(&.editor_line_insert(dir))
+    end
+
     # --- READ-mode edits (verbs/editor.cr, the engine is `ReadEdit`) ---
     # The verb armed by the first press of `dd` / `yy`, waiting for its second. Only ever set
     # in an editor pane's READ mode, and spent by the very next key (`finish_editor_op`).
