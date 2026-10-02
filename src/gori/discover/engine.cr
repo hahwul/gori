@@ -371,17 +371,7 @@ module Gori::Discover
       @inner.fetch(scheme, host, port, target)
     end
 
-    def request_head(scheme : String, host : String, port : Int32, target : String) : Bytes
-      @inner.request_head(scheme, host, port, target)
-    end
-
-    def sni : String?
-      @inner.sni
-    end
-
-    def close : Nil
-      @inner.close
-    end
+    delegate request_head, sni, close, to: @inner
   end
 
   # A unit of work owned by the orchestrator frontier.

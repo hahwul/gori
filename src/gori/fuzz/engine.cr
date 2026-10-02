@@ -744,36 +744,14 @@ module Gori::Fuzz
     end
 
     # Delegated, not defaulted: this wrapper is what the Engine holds, so a Backend#blocked
-    # that stopped at the outermost layer would report 0 for every gated run there is.
-    def blocked : Int64
-      @inner.blocked
-    end
-
-    def blocked_reason : String?
-      @inner.blocked_reason
-    end
-
-    # Delegated for the same reason as `blocked`: this wrapper is what the Engine holds, so a
-    # default 0 here would hide every re-send the pool underneath it made.
-    def extra_requests : Int64
-      @inner.extra_requests
-    end
-
-    # Delegated for that same reason once more. Nothing here CONSUMES it — the widening
-    # happens inside `Sender#send`, below this wrapper — but this is the object every
+    # that stopped at the outermost layer would report 0 for every gated run there is, and a
+    # default `extra_requests` would hide every re-send the pool underneath it made.
+    # `evidence?` for that same reason once more: nothing here CONSUMES it (the widening
+    # happens inside `Sender#send`, below this wrapper), but this is the object every
     # minimize surface and the Miner hold, so a `false` stopping at the cap would make the
     # run's provenance unreadable from the outside and let a spec assert the wrong thing.
-    def evidence? : Bool
-      @inner.evidence?
-    end
-
-    def http2? : Bool
-      @inner.http2?
-    end
-
-    def pooled? : Bool
-      @inner.pooled?
-    end
+    delegate blocked, blocked_reason, extra_requests, evidence?, http2?, pooled?,
+      ws_notes, ws_note_reason, close, to: @inner
 
     def send(bytes : Bytes) : Repeater::Result
       send(bytes, nil)
@@ -826,19 +804,6 @@ module Gori::Fuzz
       @sent += 1
       @inner.send_ws(handshake, frames, verbatim)
     end
-
-    # Delegated, as `blocked` is and for the same reason: this wrapper is what the Engine holds.
-    def ws_notes : Int64
-      @inner.ws_notes
-    end
-
-    def ws_note_reason : String?
-      @inner.ws_note_reason
-    end
-
-    def close : Nil
-      @inner.close
-    end
   end
 
   # Applies the `Gori::Outbound` gate to a backend the caller INJECTED (Probe Active lets
@@ -856,22 +821,8 @@ module Gori::Fuzz
       @inner.origin
     end
 
-    def extra_requests : Int64
-      @inner.extra_requests
-    end
-
     # Delegated, as on `CappedBackend` — see `Backend#evidence?`.
-    def evidence? : Bool
-      @inner.evidence?
-    end
-
-    def http2? : Bool
-      @inner.http2?
-    end
-
-    def pooled? : Bool
-      @inner.pooled?
-    end
+    delegate extra_requests, evidence?, http2?, pooled?, ws_notes, ws_note_reason, close, to: @inner
 
     def send(bytes : Bytes) : Repeater::Result
       send(bytes, nil)
@@ -899,18 +850,6 @@ module Gori::Fuzz
         return {Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, err), WsOutcome.failed}
       end
       @inner.send_ws(handshake, frames, verbatim)
-    end
-
-    def ws_notes : Int64
-      @inner.ws_notes
-    end
-
-    def ws_note_reason : String?
-      @inner.ws_note_reason
-    end
-
-    def close : Nil
-      @inner.close
     end
   end
 
