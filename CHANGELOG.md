@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Setup wizard: a new Keys step picks the editor keyset, helix-ish or vim-ish, after you try both on a practice pad (#1462)
+- Preferences: Keys has a Keyset playground that tries helix-ish and vim-ish on a practice pad and lists every READ-mode key of each; `↵` there switches to the keyset you tried
 - Command palette: typing `vim`, `helix` or `keyset` finds the editor keyset setting, and `keybindings` or `shortcuts` finds the Hotkeys editor (#1462)
 - Editors: READ mode can now delete and paste. Select a line with `x`, then `d` deletes it and `y` copies it, and `p` pastes after the caret (the vim keyset uses `dd`, `yy` and `p`); `p` pastes gori's last copy or delete, and stays Pretty bodies in read-only panes. A line selection grown with `⇧↑`/`⇧↓`, or `j`/`k` after the vim keyset's `⇧V`, stays whole lines (#1461)
 - Editors: `h` `j` `k` `l` move the READ caret in every text pane, where only the Repeater answered them (an issue's notes closed the issue on `h`), and `⌥←`/`⌥→` step a word in READ as they do in INSERT; the vim keyset adds `w`/`b` and `⇧A`/`⇧I` (start typing at the end or start of the line); `Esc` over a READ selection clears it before a second `Esc` leaves the pane

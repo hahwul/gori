@@ -50,6 +50,26 @@ module Gori::Tui
                                  "{editor.undo} undo",
     }
 
+    # The whole READ grammar of each keyset, one row per kind of gesture, for the Preferences
+    # playground's key list. Tokens again, so a rebind shows; `h j k l`, `esc` and ⇧arrows are
+    # structural keys no keymap moves.
+    CHEAT = {
+      Verb::Keyset::Kind::Helix => [
+        {"move", "←↓↑→ or h j k l · ⌥←/⌥→ word · PgUp/PgDn · Home/End"},
+        {"type", "{editor.insert} insert · esc back to READ"},
+        {"select", "{notes.select-line} line (⇧↑/⇧↓ grow it) · ⇧arrows span · esc clears"},
+        {"edit", "{notes.select-line} then {editor.delete} delete · {notes.select-line} then {notes.copy} copy · {editor.paste} paste"},
+        {"other", "{editor.undo} undo · {editor.find} find · {editor.goto-line} go to line"},
+      ],
+      Verb::Keyset::Kind::Vim => [
+        {"move", "h j k l · {editor.word-next}/{editor.word-prev} word · {editor.top}/{editor.bottom} top/bottom · Home/End"},
+        {"type", "{editor.insert} insert · {editor.append} append · {editor.insert-line-start}/{editor.append-line-end} line start/end · esc back to READ"},
+        {"select", "{notes.select-line} line (j/k grow it) · ⇧arrows span · esc clears"},
+        {"edit", "{editor.delete-line}{editor.delete-line} delete · {editor.yank-line}{editor.yank-line} yank · {editor.paste} paste · over a selection: {editor.delete-line} / {editor.yank-line}"},
+        {"other", "{editor.undo} undo · {editor.find} find · {editor.goto-line} go to line"},
+      ],
+    }
+
     # The first status line under each keyset: the one gesture that differs, spelled out.
     INTRO = {
       Verb::Keyset::Kind::Helix => "READ · {notes.select-line} selects the line, then {editor.delete} deletes it · " \
@@ -77,6 +97,7 @@ module Gori::Tui
       @read = TextReadState.new
       @keymaps = {} of Verb::Keyset::Kind => Verb::Keymap
       @references = {} of Verb::Keyset::Kind => String
+      @cheats = {} of Verb::Keyset::Kind => Array({String, String})
       @status = intro
     end
 
@@ -101,6 +122,11 @@ module Gori::Tui
     # Fixed for the pad's lifetime and drawn every frame, so it is expanded once per keyset.
     def reference(kind : Verb::Keyset::Kind) : String
       @references[kind] ||= expand(REFERENCE[kind], kind)
+    end
+
+    # `kind`'s `CHEAT` rows, expanded the same way and cached the same way.
+    def cheat_sheet(kind : Verb::Keyset::Kind) : Array({String, String})
+      @cheats[kind] ||= CHEAT[kind].map { |(label, keys)| {label, expand(keys, kind)} }
     end
 
     # Drop an armed `d` / `y`. The host calls it when the keys leave the pad: the Runner drops

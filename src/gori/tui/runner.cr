@@ -77,6 +77,7 @@ require "../notes"
 require "./settings_view"
 require "./tabs_overlay"
 require "./hosts_overlay"
+require "./keyset_playground_overlay"
 require "./env_overlay"
 require "./user_agents_overlay"
 require "./env_syntax_seam"
@@ -6630,13 +6631,14 @@ module Gori::Tui
     private def open_settings_section(section : Symbol, back : PreferencesOverlay?) : Nil
       case section
       when :network, :editor, :mouse, :keys, :layout, :statusline, :display, :companion, :notifications, :general, :mcp, :mcp_permissions
-        open_preferences(section)                           # the unified grouped modal, positioned at this section
-      when :theme       then open_overlay(theme_card(back)) # theme keeps its dedicated swatch-list card
-      when :tabs        then open_overlay(tabs_editor(back))
-      when :hosts       then open_overlay(hosts_editor(back))
-      when :env         then open_overlay(env_editor(back))
-      when :user_agents then open_overlay(user_agents_editor(back))
-      when :hotkeys     then open_overlay(hotkeys_editor(back))
+        open_preferences(section)                                 # the unified grouped modal, positioned at this section
+      when :theme             then open_overlay(theme_card(back)) # theme keeps its dedicated swatch-list card
+      when :tabs              then open_overlay(tabs_editor(back))
+      when :hosts             then open_overlay(hosts_editor(back))
+      when :env               then open_overlay(env_editor(back))
+      when :user_agents       then open_overlay(user_agents_editor(back))
+      when :hotkeys           then open_overlay(hotkeys_editor(back))
+      when :keyset_playground then open_overlay(keyset_playground(back))
       when :reset_all
         # The palette's "Settings: Reset" entry. Same verb the modal's Reset row runs, so it
         # goes through the same confirm rather than a second copy of the wording. `back` is
@@ -6704,6 +6706,23 @@ module Gori::Tui
       ov.on_toast = ->(msg : String) { @toast = msg; nil }
       ov.on_reset = -> { confirm_tabs_reset(ov) }
       ov.on_commit = -> { save_tabs(ov) }
+      ov
+    end
+
+    # ↵ adopts the keyset tried: the same setter and save the Keys row runs, then the same
+    # live apply (`apply_keys` rebuilds the keymap), and the Keys form is re-read so it shows
+    # the keyset now in force. The pad's practice copies leave the paste register either way.
+    private def keyset_playground(back : PreferencesOverlay?) : KeysetPlaygroundOverlay
+      ov = KeysetPlaygroundOverlay.new
+      ov.on_close = -> { ov.restore_register; resume_preferences(back) }
+      ov.on_palette = -> { ov.restore_register; jump_to_palette }
+      ov.on_commit = -> do
+        Settings.editor_keyset = Verb::Keyset.name_of(ov.keyset)
+        msg = Settings.save ? "editor keyset: #{Verb::Keyset.name_of(ov.keyset)}-ish" : "editor keyset applied — could not save to #{Settings.path}"
+        @toast = apply_settings_saved(:keys, msg)
+        back.try(&.refresh(:keys))
+        true
+      end
       ov
     end
 
