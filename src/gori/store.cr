@@ -1637,42 +1637,7 @@ module Gori
       return unless cutoff = oldest_excess_cutoff(conn, "flows", @retention_flows)
       dropped = 0_i64
       write_transaction(conn) do |c|
-        # NOTE (known limitation): a WebSocket flow still streaming frames after `retention_flows`
-        # newer flows push its id below the cutoff is reaped here mid-stream, which also stops
-        # Probe WS scanning on it. A liveness guard like the h2 one below is the fix, but it must
-        # compare ws_message.created_at against a WS-relative recency floor (flows.created_at and
-        # ws_messages.created_at are set from different sources), so it is left for a focused
-        # retention change rather than bundled here.
-        # Only CAPTURED ws messages (repeater_id IS NULL, real flow_id) cascade with their
-        # pruned flow. WebSocket-Repeater output rows (update_repeater_ws_messages) are stored
-        # with the sentinel flow_id = 0 and keyed by repeater_id, so a bare `flow_id <= cutoff`
-        # (cutoff is always > 0 here) matched EVERY repeater row and wiped saved repeater traffic
-        # on each sweep. Gate on repeater_id so repeater-owned rows are never reaped by flow retention.
-        c.exec("DELETE FROM ws_messages WHERE flow_id <= ? AND repeater_id IS NULL", cutoff)
-        c.exec("DELETE FROM flows_fts WHERE rowid <= ?", cutoff)
-        # JS references are derived from their flow's body (V35) and go with it.
-        c.exec("DELETE FROM js_refs WHERE flow_id <= ?", cutoff)
-        c.exec("DELETE FROM js_ref_scans WHERE flow_id <= ?", cutoff)
-        c.exec("DELETE FROM intercept_originals WHERE flow_id <= ?", cutoff)
-        c.exec("DELETE FROM flow_interims WHERE flow_id <= ?", cutoff)
-        c.exec("DELETE FROM flows WHERE id <= ?", cutoff)
-        # Read changes() IMMEDIATELY after the flows delete — it reports the most recent
-        # statement, so any query in between (including the h2 reaping below) would replace it.
-        dropped = c.scalar("SELECT changes()").as(Int64)
-        # h2 frames/connections key off conn_id, not flow id. Reap a connection's raw
-        # log only once it's (a) not referenced by any surviving flow AND (b) INACTIVE
-        # — its newest frame is older than the oldest kept flow. Keying (b) on frame
-        # recency, not the connection's OPEN time, is the fix: a long-lived in-flight
-        # stream (flow not projected yet, but still logging frames) has recent frames,
-        # so it's never wiped. The old `h2_connections.created_at < oldest` guard
-        # deleted exactly such a stream once retention churn advanced the window past
-        # its open time, leaving a dangling h2_conn_id + empty frame log. (b)'s absence
-        # of any recent frame still lets genuinely-orphaned connections be reaped.
-        oldest = c.query_one?("SELECT MIN(created_at) FROM flows", as: Int64?) || Int64::MAX
-        stale = "id NOT IN (SELECT h2_conn_id FROM flows WHERE h2_conn_id IS NOT NULL) " \
-                "AND id NOT IN (SELECT conn_id FROM h2_frames WHERE created_at >= ?)"
-        c.exec("DELETE FROM h2_frames WHERE conn_id IN (SELECT id FROM h2_connections WHERE #{stale})", oldest)
-        c.exec("DELETE FROM h2_connections WHERE #{stale}", oldest)
+        dropped = Store.delete_flows_through(c, cutoff)
       end
       # Say that history was dropped. A sweep is otherwise completely silent, so a flow the
       # operator looked at an hour ago simply vanishing is indistinguishable from a bug. At most
@@ -1683,6 +1648,49 @@ module Gori
       # The sweep's transaction may not have rolled back, so this connection can still be
       # holding the write lock (#752).
       mark_writer_conn_suspect
+    end
+
+    # Delete every flow with `id <= cutoff` (cutoff > 0) and what hangs off it, on `conn` and
+    # inside the caller's transaction: the one cascade the retention sweep (`prune`) and
+    # `Compact.prune_old_flows` share. Returns how many flow rows went.
+    protected def self.delete_flows_through(conn : DB::Connection, cutoff : Int64) : Int64
+      # NOTE (known limitation): a WebSocket flow still streaming frames after `retention_flows`
+      # newer flows push its id below the cutoff is reaped here mid-stream, which also stops
+      # Probe WS scanning on it. A liveness guard like the h2 one below is the fix, but it must
+      # compare ws_message.created_at against a WS-relative recency floor (flows.created_at and
+      # ws_messages.created_at are set from different sources), so it is left for a focused
+      # retention change rather than bundled here.
+      # Only CAPTURED ws messages (repeater_id IS NULL, real flow_id) cascade with their
+      # pruned flow. WebSocket-Repeater output rows (update_repeater_ws_messages) are stored
+      # with the sentinel flow_id = 0 and keyed by repeater_id, so a bare `flow_id <= cutoff`
+      # (cutoff is always > 0 here) matched EVERY repeater row and wiped saved repeater traffic
+      # on each sweep. Gate on repeater_id so repeater-owned rows are never reaped by flow retention.
+      conn.exec("DELETE FROM ws_messages WHERE flow_id <= ? AND repeater_id IS NULL", cutoff)
+      conn.exec("DELETE FROM flows_fts WHERE rowid <= ?", cutoff)
+      # JS references are derived from their flow's body (V35) and go with it.
+      conn.exec("DELETE FROM js_refs WHERE flow_id <= ?", cutoff)
+      conn.exec("DELETE FROM js_ref_scans WHERE flow_id <= ?", cutoff)
+      conn.exec("DELETE FROM intercept_originals WHERE flow_id <= ?", cutoff)
+      conn.exec("DELETE FROM flow_interims WHERE flow_id <= ?", cutoff)
+      conn.exec("DELETE FROM flows WHERE id <= ?", cutoff)
+      # Read changes() IMMEDIATELY after the flows delete — it reports the most recent
+      # statement, so any query in between (including the h2 reaping below) would replace it.
+      dropped = conn.scalar("SELECT changes()").as(Int64)
+      # h2 frames/connections key off conn_id, not flow id. Reap a connection's raw
+      # log only once it's (a) not referenced by any surviving flow AND (b) INACTIVE
+      # — its newest frame is older than the oldest kept flow. Keying (b) on frame
+      # recency, not the connection's OPEN time, is the fix: a long-lived in-flight
+      # stream (flow not projected yet, but still logging frames) has recent frames,
+      # so it's never wiped. The old `h2_connections.created_at < oldest` guard
+      # deleted exactly such a stream once retention churn advanced the window past
+      # its open time, leaving a dangling h2_conn_id + empty frame log. (b)'s absence
+      # of any recent frame still lets genuinely-orphaned connections be reaped.
+      oldest = conn.query_one?("SELECT MIN(created_at) FROM flows", as: Int64?) || Int64::MAX
+      stale = "id NOT IN (SELECT h2_conn_id FROM flows WHERE h2_conn_id IS NOT NULL) " \
+              "AND id NOT IN (SELECT conn_id FROM h2_frames WHERE created_at >= ?)"
+      conn.exec("DELETE FROM h2_frames WHERE conn_id IN (SELECT id FROM h2_connections WHERE #{stale})", oldest)
+      conn.exec("DELETE FROM h2_connections WHERE #{stale}", oldest)
+      dropped
     end
 
     # Frames whose connection row does not exist at all. The guard in `insert_h2_frame` stops new

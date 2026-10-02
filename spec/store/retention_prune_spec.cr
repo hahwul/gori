@@ -78,6 +78,20 @@ describe "Store#prune retention cutoff" do
     end
   end
 
+  it "logs how many flow rows one sweep dropped" do
+    # The count is `changes()` read right after the flows DELETE; read after the h2 reap that
+    # follows it, it would be that statement's count instead.
+    capturing_log do |logs|
+      prune_store(5, 12) do |store|
+        (1..12).each { |i| store.insert_flow(pruned_request("/#{i}")) }
+        store.flush
+      end
+      logs.entries.map(&.message).select(&.starts_with?("retention:")).should eq([
+        "retention: dropped 7 oldest flow(s), keeping the newest 5 (settings retention.max_flows)",
+      ])
+    end
+  end
+
   it "is a no-op for a store with fewer flows than the cap" do
     prune_store(100, 2) do |store|
       ids = (1..6).map { |i| store.insert_flow(pruned_request("/#{i}")) }
