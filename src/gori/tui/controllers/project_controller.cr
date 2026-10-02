@@ -679,6 +679,10 @@ module Gori::Tui
       @project_view.pane == :desc
     end
 
+    def editor_text_buffer : {TextArea, TextReadState}?
+      editor_pane? ? @project_view.read_edit_buffer : nil
+    end
+
     def editor_enter_insert : Bool
       return false unless editor_pane?
       @project_view.enter_desc_insert!

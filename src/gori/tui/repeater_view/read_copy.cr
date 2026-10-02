@@ -57,6 +57,15 @@ class Gori::Tui::RepeaterView
     @req_read.copy_all(req_editor)
   end
 
+  # The request buffer READ-mode edits run against (`TabController#editor_text_buffer`):
+  # whichever sub-pane `req_editor` names, envelope or decoded. Nil while the request is
+  # captured some other way: hex edit owns the bytes, the gRPC FIELDS form owns the message.
+  def read_edit_buffer : {TextArea, TextReadState}?
+    return nil unless @focus == :request
+    return nil if request_hex? || grpc_fields_editing?
+    {req_editor, @req_read}
+  end
+
   # The active transcript rows when the response pane is a transcript (WS / gRPC / group
   # send), else nil (a normal single response). The single source these read/copy/search
   # paths share so a new transcript mode wires into all of them at once.

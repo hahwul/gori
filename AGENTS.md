@@ -129,9 +129,11 @@ key grammar, the 2026-09-25 #1274 entries and the 2026-09-26 #1295 entries).
   dropped `space` reaches Global and stops capture or holds all traffic, and the guard fails.
   The tab bar is the exception by design: it is app-level focus, so Global wins there even over
   the tab's own `c`/`i` loop letter (Probe's `c` Dismiss), and those pairs are allowlisted by name.
-  Two exemptions are rule-based: the Global scope lens (`HARMLESS_GLOBALS`, a view filter the
-  next `s` undoes) and the `vim` keyset's motions (`VIM_MOTIONS`: append, top, bottom, find,
-  select line), which only move or select. Never widen either to a verb that writes or sends.
+  Three exemptions are rule-based: the Global scope lens (`HARMLESS_GLOBALS`, a view filter the
+  next `s` undoes), the `vim` keyset's motions (`VIM_MOTIONS`: append, top, bottom, find,
+  select line), which only move or select, and the editor's READ-mode edits (`EDITOR_EDITS`:
+  delete, paste, `dd`, `yy`), which touch only the focused buffer and can be undone. Never
+  widen the first two to a verb that writes or sends, or the third to one that leaves the pane.
 - **A recurring intent takes its letter from the lexicon.** Declare `intent:`
   (`src/gori/verb/lexicon.cr`), never a `mnemonic:` beside it (`validate_intents!` raises).
   The same intent has the same letter on every tab, and a verb whose id names an intent

@@ -1,4 +1,5 @@
 require "../spec_helper"
+require "../support/fake_context"
 
 # R1 of DESIGN.md §7 (2026-09-12, "one bare letter, one question"): a space-menu letter may
 # differ from its verb's own chord, but it must never be a key the same tab answers with a
@@ -14,7 +15,10 @@ require "../spec_helper"
 #     (`Definition#chord_sections`): there the press walks on to Global instead;
 #   • the Editor scope, consulted AHEAD of the tab while a text editor pane has focus
 #     (`Runner#resolve_verb_id`), so helix's `i` is "insert" in the Repeater request pane —
-#     except the `vim` keyset's motions (`VIM_MOTIONS`), a rule rather than allowlist lines;
+#     except the `vim` keyset's motions (`VIM_MOTIONS`) and the editor's READ-mode edits
+#     (`EDITOR_EDITS`), rules rather than allowlist lines. A row drawn only on the strip's
+#     card is never in an editor pane: the strip holds focus there, and the Editor scope is
+#     on the chain only while the body does;
 #   • the sub-tab strip's raw keys (`Runner#handle_subtabs_key`), which the keymap cannot
 #     see — with the strip focused the menu shows COMMON + SUB-TABS;
 #   • the Global fallback, for a letter the tab does not bind (or binds only pane-gated
@@ -91,6 +95,14 @@ module MenuLetterMeaning
     ks.vim? && VIM_MOTIONS.includes?(other)
   end
 
+  # The editor's READ-mode edits (`Tui::ReadEdit`, verbs/editor.cr), exempt where they meet a
+  # menu letter in an editor pane, under either keyset. Inside a text editor `d` / `y` / `p`
+  # are the editor's letters (gori's `x`→`d`, vim's `dd` / `yy`, and paste), which is what a
+  # hand typing in that pane means by them, and a dropped `space` there costs at most one
+  # buffer edit: the pane's own text and nothing else, undoable, with a toast that names it. Never a send, a triage, a wipe or anything outside the pane — the example below holds
+  # each member to that, and the set names verbs, never letters.
+  EDITOR_EDITS = Set{"editor.delete", "editor.paste", "editor.delete-line", "editor.yank-line"}
+
   # One level-1 row: a verb on its `menu_key`, or a family on its key. `sections` is where it
   # is drawn — nil for every view of the scope (a COMMON row, a pinned SUB-TABS row, or a
   # family with a member in COMMON), else the sections: the pane's own, the strip's two for
@@ -135,6 +147,12 @@ module MenuLetterMeaning
       Level2.new(fold.key, Row.new(v.id, k, v.scope, (panes + [:common]).uniq!))
     end
     members + folded
+  end
+
+  # Drawn only where the strip or the tab bar has focus, never in a pane view (`drawn_in`).
+  def strip_only?(v : Row) : Bool
+    return false unless shown = v.sections
+    shown.all? { |sec| strip_section?(sec) }
   end
 
   def strip_section?(section : Symbol) : Bool
@@ -194,6 +212,7 @@ module MenuLetterMeaning
 
   def editor_view?(v : Row) : Bool
     return false unless EDITOR_VIEWS.has_key?(v.scope)
+    return false if strip_only?(v)
     return true unless secs = EDITOR_VIEWS[v.scope]
     return true unless shown = v.sections
     shown.any? { |sec| secs.includes?(sec) }
@@ -203,6 +222,7 @@ module MenuLetterMeaning
   # and a letter it binds never falls through to Global.
   def editor_only?(v : Row) : Bool
     return false unless EDITOR_VIEWS.has_key?(v.scope)
+    return false if strip_only?(v)
     return true unless secs = EDITOR_VIEWS[v.scope]
     return false unless shown = v.sections
     shown.all? { |sec| secs.includes?(sec) }
@@ -281,7 +301,7 @@ module MenuLetterMeaning
   # Records `other` as a second meaning of this row's letter, unless it answers what the row
   # answers (`same_meaning?`) or is a vim motion under the vim keyset.
   private def note(found, v : Row, other : String?, where : String, ks : Gori::Verb::Keyset::Kind) : Nil
-    return if other.nil? || same_meaning?(other, v) || vim_motion?(ks, other)
+    return if other.nil? || same_meaning?(other, v) || vim_motion?(ks, other) || EDITOR_EDITS.includes?(other)
     found[{v.id, other}] << where
   end
 
@@ -385,6 +405,20 @@ describe "space-menu letters vs the keys the same tab answers (R1)" do
     end
     MenuLetterMeaning::VIM_MOTIONS.should_not contain("editor.undo")
     MenuLetterMeaning::VIM_MOTIONS.should_not contain("editor.insert")
+  end
+
+  it "exempts only editor edits that stay inside the pane's own buffer" do
+    MenuLetterMeaning::EDITOR_EDITS.each do |id|
+      v = Gori::Verbs.registry[id]? || fail "#{id} is gone — drop it from EDITOR_EDITS"
+      v.scope.should eq(Gori::Verb::Scope::Editor)
+      v.group.should eq(:none), "#{id} sits in the #{v.group} band"
+      # READ only: in INS the letter is text, and outside an editor pane the verb is not there.
+      ctx = FakeExecContext.new
+      ctx.editor_pane = true
+      v.available?(ctx).should be_false, "#{id} answers in INS"
+      ctx.editor_read_mode = true
+      v.available?(ctx).should be_true, "#{id} is dead in READ"
+    end
   end
 
   it "gives every allowlist entry a reason" do

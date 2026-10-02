@@ -274,6 +274,11 @@ module Gori::Tui
       @mode == InputMode::Insert
     end
 
+    # The note buffer READ-mode edits run against (`TabController#editor_text_buffer`).
+    def read_edit_buffer : {TextArea, TextReadState}
+      {current.area, @read}
+    end
+
     def enter_insert! : Nil
       @mode = InputMode::Insert
       @read.sync_from(current.area)

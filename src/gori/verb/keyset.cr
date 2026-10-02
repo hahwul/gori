@@ -5,17 +5,19 @@ module Gori
     # a table of verb-id → replacement chords, applied in `Keymap.effective_chords`.
     #
     # It is a MAPPING, not an emulation. gori's editors are modal (READ ↔ INS) and their
-    # READ grammar is helix-shaped — `x` selects the line, then `y` copies the selection —
-    # which is a real, coherent grammar that a vim-trained hand fights on exactly that one
-    # gesture. A keyset moves the keys. It does not add an operator-pending grammar, a
-    # register file, counts, text objects, or any editing operation gori's panes do not
-    # already have (`ReadPane` is a caret, a selection and a copy). Naming keys for
-    # operations that do not exist is how "vim mode" becomes a promise the editor breaks.
+    # READ grammar is helix-shaped — `x` selects the line, then `y` copies or `d` deletes the
+    # selection, and `p` pastes — which is a real, coherent grammar that a vim-trained hand
+    # fights on exactly those gestures. A keyset moves the keys. It does not add counts, text
+    # objects, motions after an operator, or any editing operation gori's panes do not have.
+    # Naming keys for operations that do not exist is how "vim mode" becomes a promise the
+    # editor breaks.
     #
-    # The two-key limits are the honest edge of that. `Chord` is ONE keystroke, so `gg`,
-    # `dd` and `yy` cannot be spelled at all; `:`-prefixed commands are out because
-    # `Verb::Reserved` keeps `:` for the command line. Each is named in
-    # docs/content/guide/hotkeys.md rather than silently approximated.
+    # `Chord` is ONE keystroke, so `gg` cannot be spelled at all. `dd` and `yy` are the one
+    # exception, and not a chord: `editor.delete-line` / `editor.yank-line` arm on the first
+    # press and the Runner takes the second (`Runner#finish_editor_op`), so the table below
+    # still only names single keys. `:`-prefixed commands are out because `Verb::Reserved`
+    # keeps `:` for the command line. Each limit is named in docs/content/guide/hotkeys.md
+    # rather than silently approximated.
     #
     # PRECEDENCE, which is the whole contract: **user rebind > keyset > OS profile >
     # the verb's declared chords** (`Keymap.effective_chords`). A keyset is a better
@@ -66,10 +68,15 @@ module Gori
       #     unbound. Both halves of append (one column right, then INSERT) are motions the
       #     editors have; `gg` is not expressible, so `g` alone is the top.
       #
-      # No DELETE row. There is no delete-line in a READ-mode pane to bind — `dd` would have
-      # to be implemented, not respelled, and this is not the change that adds editing
-      # operations. No GOTO-LINE row either: vim spells it `:N`, and `:` is reserved for the
-      # command line, so `^G` stands in both keysets.
+      #   • DELETE `d` → `editor.delete-line`, YANK `y` → `editor.yank-line`: vim's `dd` and
+      #     `yy` (the first press arms, the second acts), and over a `⇧V` selection the first
+      #     press acts at once. gori's select-then-delete `editor.delete` gives up its `d`
+      #     for that, since `editor.delete-line` deletes a selection too; `y` displaces the
+      #     tab's own copy in an editor pane, which `^Y` (pinned) still reaches.
+      #   • PASTE stays `p`, already vim's letter.
+      #
+      # No GOTO-LINE row: vim spells it `:N`, and `:` is reserved for the command line, so
+      # `^G` stands in both keysets.
       VIM = begin
         t = Hash(String, Array(Chord)).new
         SELECT_LINE_IDS.each { |id| t[id] = [Chord.new("v", shift: true)] }
@@ -78,6 +85,9 @@ module Gori
         t["editor.append"] = [Chord.new("a")]
         t["editor.top"] = [Chord.new("g")]
         t["editor.bottom"] = [Chord.new("g", shift: true)]
+        t["editor.delete"] = [] of Chord
+        t["editor.delete-line"] = [Chord.new("d")]
+        t["editor.yank-line"] = [Chord.new("y")]
         t
       end
 

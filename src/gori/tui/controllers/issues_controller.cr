@@ -706,9 +706,11 @@ module Gori::Tui
       # nothing — and it needed its own bare-only guard (`ev.char` falls back to
       # `key.to_char`, so `^X` reached it) that the keymap does not need.
       #
-      # `y` DOES stay claimed, and stays modifier-blind: its Ctrl form IS `issue.copy`'s
-      # pinned `^Y`, and taking the same action is what that chord is for in this pane.
-      when c == 'y' then issues_notes_copy
+      # `y` is not claimed either, for the same reason and one more: `issue.copy` carries both
+      # `y` and its pinned `^Y`, and under the vim keyset a bare `y` in this pane is
+      # `editor.yank-line` (`yy`), which an arm here would have shadowed. Through the keymap
+      # the copy also reaches `Runner#read_copy`, which marks a whole-line copy LINEWISE for
+      # `p`.
       else
         return false # i INSERT, x select-line, y copy, Global breath keys …
       end
@@ -724,6 +726,10 @@ module Gori::Tui
       @issues.detail_open? && @issues.notes_focused?
     end
 
+    def editor_text_buffer : {TextArea, TextReadState}?
+      editor_pane? ? @issues.read_edit_buffer : nil
+    end
+
     def editor_enter_insert : Bool
       return false unless editor_pane?
       @issues.enter_notes_insert!
@@ -736,10 +742,14 @@ module Gori::Tui
       editor_enter_insert
     end
 
+    # Leaves INSERT the way `esc` does in this pane: it SAVES, and a save refused over a peer's
+    # rewrite stays in INSERT with the reason on screen (`save_notes_or_report`). A READ-mode
+    # edit (`ReadEdit`) leaves through here, and leaving without the save would strand a `dd`
+    # as unsaved text that only the next INSERT-and-`esc` writes.
     def editor_exit_insert : Bool
       return false unless @issues.detail_open? && @issues.notes_insert_mode?
-      @issues.exit_notes_insert!
-      true
+      save_notes_or_report
+      !@issues.notes_insert_mode?
     end
 
     def editor_undo : Bool
@@ -1294,14 +1304,6 @@ module Gori::Tui
       end
       written = Clipboard.copy(text)
       @host.status("copied notes to clipboard (#{written}b)#{Clipboard.note(written, text)}")
-    end
-
-    # `y` in the notes pane: the selection when one is held, else the WHOLE notes. The keymap's
-    # `issue.copy` (-> Runner#read_copy) has always answered that way, but this pane raw-
-    # dispatches `y` ahead of the keymap and fell back to the caret's LINE — so the chord the
-    # verb registers and the key the operator actually presses gave different answers.
-    def issues_notes_copy : Nil
-      issues_notes_selection_active? ? issues_copy : issues_copy_all
     end
 
     # Write the issue report to `path` (the destination came from ExportOverlay — this used

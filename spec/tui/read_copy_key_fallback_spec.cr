@@ -122,9 +122,10 @@ describe "bare `y` in a read pane that used to raw-dispatch it" do
         ctl.view.notes_copy_text.should eq("alpha")
         ctl.view.notes_copy_all.should eq(TEXT)
 
-        # The notes pane keeps its `y` arm (see #1054 and spec/tui/editor_scope_spec.cr): it is
-        # modifier-blind so `^Y` takes the same action while typing.
-        ctl.handle_detail_key(Y.call).should be_true
+        # The notes pane defers `y` like the description above: `issue.copy` carries both `y`
+        # and `^Y`, and under the vim keyset a bare `y` here is `yy` (spec/tui/editor_scope_spec.cr).
+        ctl.handle_detail_key(Y.call).should be_false
+        ctl.issues_copy_all # the branch Runner#read_copy takes with nothing selected
         host.statuses.last.should start_with("copied notes to clipboard")
       end
     end
@@ -140,7 +141,8 @@ describe "bare `y` in a read pane that used to raw-dispatch it" do
         ctl.view.notes_select_line
         ctl.view.notes_selection?.should be_true
 
-        ctl.handle_detail_key(Y.call).should be_true
+        ctl.handle_detail_key(Y.call).should be_false
+        ctl.issues_copy # the branch Runner#read_copy takes with a live selection
         host.statuses.last.should start_with("copied 0b to clipboard")
       end
     end

@@ -357,6 +357,11 @@ module Gori::Tui
       @desc_mode == InputMode::Insert
     end
 
+    # The description buffer READ-mode edits run against (`TabController#editor_text_buffer`).
+    def read_edit_buffer : {TextArea, TextReadState}?
+      @pane == :desc ? {@desc_area, @desc_read} : nil
+    end
+
     def enter_desc_insert! : Nil
       @desc_mode = InputMode::Insert
       @desc_read.sync_from(@desc_area)

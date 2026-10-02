@@ -4737,3 +4737,42 @@ so the same edit put different bytes on the wire depending on the surface.
   additionally resolves names the operator typed into the held message. Neither expands or
   unescapes a `$` the client sent (both still resync Content-Length and promote the head's bare
   LFs, which are the edit's framing, not its tokens).
+
+### 2026-10-02: READ-mode editors delete and paste; `dd`/`yy` are a two-press operator, not a chord
+
+Refines: the 2026-09-12 keyset entry (a keyset is a mapping) and R1 of "one bare letter, one
+question". Both said there is no delete in a READ pane, so a keyset had nothing to put on `dd`.
+The operator asked for the edit itself: in gori's helix grammar, select and then act (`x` then
+`d` / `y`, and `p`); under the vim keyset, `dd`, `yy` and `p`.
+
+- **One engine, replayed through the pane's own key path** (`Tui::ReadEdit`). A READ-mode edit
+  enters INSERT, hands the span to the editor, and replays ⌫ or a paste through the same
+  `handle_key` a refused bulk paste uses (`Runner#replay_paste`). It never splices a buffer
+  itself, because eight panes each do their own work after an edit — Content-Length, the
+  Fuzzer's `§` guard, a note's save — and a direct splice would skip it. `p` is therefore the
+  operator's own paste in every respect P7 cares about. Leaving INSERT goes through the pane's
+  `editor_exit_insert`, which now does what `esc` does everywhere: an Issue's notes save there,
+  and a save refused over a peer's rewrite keeps INSERT and its own message.
+- **The paste register is gori's own** (`Tui::Register`), filled by every `Clipboard.copy` and
+  every READ-mode delete. It does not read the system clipboard: OSC 52's read half is refused
+  or prompted for by most terminals, and `pbpaste`/`wl-paste` exist on no SSH session. Outside
+  text still arrives by terminal paste, which opens INSERT (#1124). A delete fills the register
+  only, so it never overwrites the operator's system clipboard. Whole-line copies and deletes
+  are LINEWISE and paste as lines below the caret's line; the writer states it.
+- **`dd` / `yy` are held by the Runner, not the keymap.** `editor.delete-line` and
+  `editor.yank-line` are keyless verbs the vim keyset puts on `d` and `y`; the first press arms
+  (`Runner#finish_editor_op`), the same verb again runs it on the caret's line, `esc` cancels,
+  and any other key cancels with a word. The second press is taken ahead of the digit family,
+  so `d2` cannot jump to tab 2. There are no motions after an operator, no counts and no named
+  registers: `dw` is cancelled, not guessed at.
+- **R1 gains a rule-based exemption, `EDITOR_EDITS`** (`spec/tui/menu_letter_meaning_spec.cr`).
+  Inside a text editor `d`, `y` and `p` are the editor's letters. A dropped `space` before the
+  menu's `d` (Duplicate, Delete issue) or `y` (Copy) edits or copies the text in that pane: one
+  buffer, undoable (a delete in one `^Z`, a paste the way a terminal paste in that pane undoes),
+  and a toast that says what happened. The set names verbs, and the guard holds
+  each member to Scope::Editor, READ-only availability and the `:none` band; it is never a send,
+  a triage or a wipe. The same pass stopped treating a row drawn only on the sub-tab strip as an
+  editor view, since `Runner#editor_pane?` needs body focus.
+- **The verbs never gate on "is there a selection".** A false `available?` would let `d` fall to
+  the tab's own `d`, which deletes the selected flow, issue or rule in sixteen scopes. In an
+  editor pane the letter is the editor's; a `d` with nothing to delete says so.

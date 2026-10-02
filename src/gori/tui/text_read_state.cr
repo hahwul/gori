@@ -121,6 +121,13 @@ module Gori::Tui
       @cursor.selection?
     end
 
+    # The READ selection in `editor` as an ordered span, nil when there is none. Bound first,
+    # like `selection?`: an anchor made in another document is not a span in this one.
+    def selection_span(editor : TextArea) : {Int32, Int32, Int32, Int32}?
+      bind(editor)
+      @cursor.selection_span(editor.lines_snapshot)
+    end
+
     def select_line(editor : TextArea) : Nil
       lines = editor.lines_snapshot
       return if lines.empty?

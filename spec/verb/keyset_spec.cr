@@ -102,12 +102,17 @@ describe Gori::Verb::Keyset do
     Keyset::VIM["editor.append"].should eq([Chord.new("a")])
     Keyset::VIM["editor.top"].should eq([Chord.new("g")])
     Keyset::VIM["editor.bottom"].should eq([Chord.new("g", shift: true)])
+    # vim's `dd` / `yy`: the line operators take `d` and `y`, and gori's select-then-delete
+    # gives its `d` up for them (the line operator deletes a selection too).
+    Keyset::VIM["editor.delete-line"].should eq([Chord.new("d")])
+    Keyset::VIM["editor.yank-line"].should eq([Chord.new("y")])
+    Keyset::VIM["editor.delete"].should be_empty
     # Not moved, and each for a stated reason (see the table's comment + hotkeys.md):
-    #   copy — `y` is already vim's letter, and `yy` is a two-key sequence
+    #   copy — the tab's own verb keeps `y` (and `^Y`); in an editor pane `yy` answers first
+    #   paste — `p` is already vim's letter
     #   insert / back-to-READ — gori already spells them `i` and `esc`
     #   goto-line — vim spells it `:N`, and `:` is reserved for the command line
-    #   delete-line — there is no delete in a READ-mode pane to bind
-    %w[notes.copy editor.insert editor.exit-insert editor.goto-line].each do |id|
+    %w[notes.copy editor.paste editor.insert editor.exit-insert editor.goto-line].each do |id|
       Keyset::VIM.has_key?(id).should be_false
     end
   end
@@ -192,5 +197,41 @@ describe Gori::Verb::Keyset do
         end
       end
     end
+  end
+
+  it "lists what the READ-mode edit letters displace in an editor pane, under both keysets" do
+    # `d` / `y` / `p` are Editor-scope letters (verbs/editor.cr; `y` under vim only), so in an
+    # editor pane they answer AHEAD of whatever the tab binds on the same letter. Each tab hit
+    # below is a deliberate displacement, and a new one fails here until it is named:
+    #   • `y` — every tab's own Copy. Under vim `yy` answers first (over a selection it IS that
+    #     copy, and `^Y` still copies the whole pane); under gori no Editor verb is on `y`, so
+    #     the tab's Copy answers as before.
+    #   • `d` — Delete issue in an open Issue. With the notes focused, `d` deletes the notes'
+    #     selection instead, which is one `^Z` away; Delete issue stays in the space menu.
+    #   • `p` — the Repeater's Pretty bodies, gated to the read-only RESPONSE
+    #     (`chord_sections:`), which is no editor pane, so the two never meet.
+    editor_scopes = [
+      Gori::Verb::Scope::Repeater, Gori::Verb::Scope::Notes, Gori::Verb::Scope::Decoder,
+      Gori::Verb::Scope::Jwt, Gori::Verb::Scope::Cookie, Gori::Verb::Scope::Fuzzer,
+      Gori::Verb::Scope::IssuesDetail, Gori::Verb::Scope::ProjectDesc,
+    ]
+    expected = {
+      "d" => %w[issue.delete],
+      "y" => %w[repeater.copy notes.copy decoder.copy jwt.copy cookie.copy fuzzer.copy issue.copy project.copy],
+      "p" => %w[repeater.toggle-pretty],
+    }
+    editor = {
+      Keyset::Kind::Helix => {"d" => "editor.delete", "y" => nil, "p" => "editor.paste"},
+      Keyset::Kind::Vim   => {"d" => "editor.delete-line", "y" => "editor.yank-line", "p" => "editor.paste"},
+    }
+    Keyset::Kind.each do |ks|
+      km = Keymap.build(r, Gori::Verb::OsProfile::Os::Linux, Keymap::NO_OVERRIDES, ks)
+      expected.each do |k, ids|
+        km.lookup_in(Chord.new(k), Gori::Verb::Scope::Editor).should eq(editor[ks][k]), "#{ks} #{k}"
+        hits = editor_scopes.compact_map { |scope| km.lookup_in(Chord.new(k), scope) }
+        hits.sort.should eq(ids.sort), "#{ks} #{k}"
+      end
+    end
+    r["repeater.toggle-pretty"].chord_sections.should eq([:response])
   end
 end

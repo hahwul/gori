@@ -142,6 +142,10 @@ module Gori::Tui
       true
     end
 
+    def editor_text_buffer : {TextArea, TextReadState}?
+      @notes.read_edit_buffer
+    end
+
     def editor_enter_insert : Bool
       @notes.enter_insert!
       true

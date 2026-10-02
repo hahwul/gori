@@ -37,11 +37,10 @@ describe "Verb::Scope::Editor — the controller arms it replaced" do
     controller("issues").should_not contain("c == 'x' then @issues.notes_select_line")
     controller("project").should_not contain("c == 'x'")
     controller("project").should_not contain("c == 'y'")
-    # The Issue notes pane KEEPS its `y` arm, and that is #1054's call rather than an
-    # oversight: the arm is modifier-blind on purpose, so `^Y` — `issue.copy`'s pinned INS
-    # chord — takes the same action there. The `x` beside it went, because `issue.select-line`
-    # has a plain chord and a rebind of it has to move the live key.
-    controller("issues").should contain("when c == 'y' then issues_notes_copy")
+    # The Issue notes pane kept a modifier-blind `y` arm (#1054) so `^Y` took the same action
+    # there. `issue.copy` carries `^Y` as well, so the keymap already does that, and the arm
+    # shadowed vim's `yy` (`editor.yank-line`) and the linewise copy `Runner#read_copy` marks.
+    controller("issues").should_not contain("when c == 'y'")
   end
 
   it "leaves no bare `b` aliasing the global ^B reveal in one Repeater pane" do
