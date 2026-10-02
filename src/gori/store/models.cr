@@ -1930,11 +1930,12 @@ module Gori
       end
     end
 
-    # One persisted parameter-mining session (a sub-tab under the Miner tab). Stores the
-    # byte-exact `request` to re-run, plus opaque `config` JSON (locations, bucket sizes,
-    # concurrency) managed by the frontend. Results are NOT persisted (in-memory per
-    # session, like Repeater responses before V11).
-    struct MinerSessionRecord
+    # One persisted Miner or Sequencer session (a sub-tab under that tab). Stores the
+    # byte-exact `request` to re-run, plus opaque `config` JSON managed by the frontend (Miner:
+    # locations, bucket sizes, concurrency; Sequencer: mode, token location, goal, pacing).
+    # Results are NOT persisted: Miner's stay in memory per session, like Repeater responses
+    # before V11, and Sequencer's collected tokens are live secrets.
+    struct RequestSessionRecord
       getter id : Int64
       getter target : String
       getter request : Bytes
@@ -1948,6 +1949,9 @@ module Gori
       def initialize(@id, @target, @request, @http2, @sni, @config, @flow_id, @position, @name = nil)
       end
     end
+
+    alias MinerSessionRecord = RequestSessionRecord
+    alias SequencerSessionRecord = RequestSessionRecord
 
     # A configured OAST provider (the Providers sub-tab). `kind` is the ProviderKind label.
     struct OastProviderRecord
@@ -2003,25 +2007,6 @@ module Gori
 
       def initialize(@id, @session_id, @created_at, @provider_uid, @protocol, @method,
                      @source_ip, @full_id, @raw_request, @raw_response)
-      end
-    end
-
-    # One persisted token-randomness session (a sub-tab under the Sequencer tab). Stores
-    # the byte-exact `request` to re-collect, plus opaque `config` JSON (mode, token
-    # location, goal, pacing) managed by the frontend. Collected tokens are NEVER
-    # persisted (live secrets, in-memory per session).
-    struct SequencerSessionRecord
-      getter id : Int64
-      getter target : String
-      getter request : Bytes
-      getter? http2 : Bool
-      getter sni : String?
-      getter config : String # opaque JSON managed by the frontend
-      getter flow_id : Int64?
-      getter position : Int32
-      getter name : String? # custom sub-tab label (nil = derive from the request line)
-
-      def initialize(@id, @target, @request, @http2, @sni, @config, @flow_id, @position, @name = nil)
       end
     end
 
