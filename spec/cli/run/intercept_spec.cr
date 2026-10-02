@@ -426,3 +426,16 @@ describe "Gori::CLI::Run.held_age_label" do
     Gori::CLI::Run.held_age_label(-5_000_i64).should eq("0s")
   end
 end
+
+# The words `gori run intercept` aborts with when a command gets no ack — the bridge round
+# trip itself is `Store#send_intercept_command`'s (#1463).
+describe "Gori::CLI::Run.intercept_send_refusal" do
+  it "words each failure as this command always has" do
+    Gori::CLI::Run.intercept_send_refusal(Gori::Store::InterceptSendFailure::NotLive)
+      .should eq("no live capturing gori instance is draining intercept commands (open the project's TUI with intercept on)")
+    Gori::CLI::Run.intercept_send_refusal(Gori::Store::InterceptSendFailure::NotEnqueued)
+      .should eq("could not enqueue intercept command (store write dropped); retry")
+    Gori::CLI::Run.intercept_send_refusal(Gori::Store::InterceptSendFailure::NotConfirmed)
+      .should eq("command not confirmed within 3000ms — the capturing instance may be busy; retry")
+  end
+end

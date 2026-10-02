@@ -10,20 +10,12 @@ module Gori
     class Tools
       # --- #123 live intercept (read side) ------------------------------------
 
-      # Parse the bridge blob the capturing TUI publishes (nil when no capturing instance is
-      # live / has ever published). See Runner#publish_intercept_bridge.
-      private def intercept_bridge_state : Hash(String, JSON::Any)?
-        raw = store.intercept_bridge
-        return nil unless raw
-        JSON.parse(raw).as_h?
-      rescue
-        nil
-      end
-
       @[Tool("intercept_list")]
       private def intercept_list(h) : Result
         include_sensitive = bool_arg(h, "include_sensitive", false)
-        bridge = intercept_bridge_state
+        # The bridge blob the capturing TUI publishes (Runner#publish_intercept_bridge); nil
+        # when no capturing instance has ever published one.
+        bridge = store.intercept_bridge_state
         unless bridge
           return Result.new(JSON.build do |j|
             j.object do
@@ -32,25 +24,22 @@ module Gori
             end
           end)
         end
-        token = bridge["session_token"]?.try(&.as_s?) || ""
-        hb = bridge["heartbeat_ms"]?.try(&.as_i64?) || 0_i64
         now_ms = Time.utc.to_unix_ms
-        items = token.empty? ? [] of Store::HeldRow : store.intercept_held(token)
+        items = store.intercept_held_items(bridge)
         # Stamp viewed_ms so the capturing instance's auto-forward reaper sees the agent is
         # watching (only meaningful when we can actually act — see `touches_held?`).
-        store.touch_intercept_held(token, items.map(&.item_id), now_ms) if touches_held? && !items.empty?
+        store.touch_intercept_held(bridge.token, items.map(&.item_id), now_ms) if touches_held? && !items.empty?
         Result.new(JSON.build do |j|
           j.object do
             j.field "available", true
             # Derive `capturing` from LIVENESS, not the blob's static true: a crashed/closed
-            # instance leaves a stale blob behind (nothing writes capturing:false, and cleanup
-            # only runs at the NEXT session's startup), so echoing it would report a dead session
-            # as live. intercept_live? (heartbeat < 10s) is the authoritative freshness signal.
-            j.field "capturing", intercept_live?(bridge)
-            j.field "enabled", bridge["enabled"]?.try(&.as_bool?) || false
-            j.field "direction", bridge["direction"]?.try(&.as_s?) || "both"
-            j.field "filter", bridge["filter"]?.try(&.as_s?) || ""
-            j.field "heartbeat_age_seconds", (hb > 0 ? ((now_ms - hb) // 1000) : nil)
+            # instance leaves a stale blob behind, so echoing it would report a dead session
+            # as live (see `InterceptBridgeState#live?`).
+            j.field "capturing", bridge.live?
+            j.field "enabled", bridge.enabled?
+            j.field "direction", bridge.direction
+            j.field "filter", bridge.filter
+            j.field "heartbeat_age_seconds", bridge.heartbeat_age_seconds(now_ms)
             j.field "pending_count", items.size
             j.field("items") { j.array { items.each { |r| Serialize.intercept_item_row(j, r, include_sensitive, now_ms) } } }
           end
@@ -71,12 +60,11 @@ module Gori
         item_id = int(h, "item_id")
         return err(id_error(h, "item_id"), "INVALID_ARGUMENT", field: "item_id") unless item_id
         include_sensitive = bool_arg(h, "include_sensitive", false)
-        bridge = intercept_bridge_state
+        bridge = store.intercept_bridge_state
         return not_found("no capturing gori instance is publishing intercept state") unless bridge
-        token = bridge["session_token"]?.try(&.as_s?) || ""
-        row = token.empty? ? nil : store.intercept_held(token).find { |r| r.item_id == item_id }
+        row = store.intercept_held_item(bridge, item_id)
         return not_found("held item #{item_id} is not currently held (already forwarded/dropped, or never held)") unless row
-        store.touch_intercept_held(token, [row.item_id], Time.utc.to_unix_ms) if touches_held?
+        store.touch_intercept_held(bridge.token, [row.item_id], Time.utc.to_unix_ms) if touches_held?
         Result.new(JSON.build { |j| Serialize.intercept_item_detail(j, row, include_sensitive, Time.utc.to_unix_ms) })
       end
 
@@ -88,27 +76,10 @@ module Gori
       # HTTP-shaped rule, which is harmless — the enqueue below will resolve `no_such_item` on
       # its own if the row really is gone.
       private def held_row_for_edit(item_id : Int64) : Store::HeldRow?
-        bridge = intercept_bridge_state
-        return nil unless bridge
-        token = bridge["session_token"]?.try(&.as_s?) || ""
-        return nil if token.empty?
-        store.intercept_held(token).find { |r| r.item_id == item_id }
+        store.intercept_bridge_state.try { |bridge| store.intercept_held_item(bridge, item_id) }
       end
 
       # --- #123 live intercept (write side; gated behind allow_actions) -------
-
-      # A capturing instance is "live" only if its bridge says capturing AND the heartbeat is
-      # recent — otherwise a queued command would never be applied (leaving a hung hold), so a
-      # mutating verb refuses up front instead of enqueuing into the void.
-      INTERCEPT_LIVE_MS   = 10_000_i64
-      INTERCEPT_ACK_POLLS =         30
-      INTERCEPT_ACK_SLEEP = 100.milliseconds
-
-      private def intercept_live?(bridge : Hash(String, JSON::Any)) : Bool
-        return false unless bridge["capturing"]?.try(&.as_bool?)
-        hb = bridge["heartbeat_ms"]?.try(&.as_i64?) || 0_i64
-        hb > 0 && (Time.utc.to_unix_ms - hb) < INTERCEPT_LIVE_MS
-      end
 
       @[Tool("intercept_forward", gated: true, agent_action: true, permission: "intercept")]
       private def intercept_forward(h) : Result
@@ -254,9 +225,10 @@ module Gori
         enqueue_intercept("set_direction", arg: dir.arg)
       end
 
-      # Enqueue one command for the live capturing instance, then bounded-poll its ack so the
-      # agent gets a real outcome (forwarded/dropped/no_such_item/…) rather than assuming success
-      # on a write that may have been dropped or never drained.
+      # Send one command to the live capturing instance and wait for its ack
+      # (`Store#send_intercept_command`), so the agent gets a real outcome
+      # (forwarded/dropped/no_such_item/…) rather than assuming success on a write that may have
+      # been dropped or never drained.
       # `extra` rides onto the SUCCESS envelope so a verb can report what it did to the
       # caller's bytes — see `intercept_forward_edit`'s Content-Length switch. Reporting a
       # transformation is not optional: a surface that shows a value which did not go out is
@@ -264,25 +236,17 @@ module Gori
       private def enqueue_intercept(verb : String, *, item_id : Int64? = nil, bytes : Bytes? = nil,
                                     arg : String? = nil,
                                     extra : Hash(String, JSON::Any)? = nil) : Result
-        bridge = intercept_bridge_state
-        unless bridge && intercept_live?(bridge)
-          return busy("no live capturing gori instance is draining intercept commands (open the project's TUI with intercept on)")
+        outcome = store.send_intercept_command(verb, item_id: item_id, bytes: bytes, arg: arg)
+        return intercept_ack_result(outcome.status, outcome.detail, extra) if outcome.is_a?(Store::InterceptAck)
+        case outcome
+        in .not_live?
+          busy("no live capturing gori instance is draining intercept commands (open the project's TUI with intercept on)")
+        in .not_enqueued?
+          busy("could not enqueue intercept command (store write dropped); retry")
+        in .not_confirmed?
+          err("intercept command not confirmed within #{Store.intercept_ack_budget_ms}ms — the capturing instance may be busy; retry",
+            "NOT_CONFIRMED", retryable: true)
         end
-        token = bridge["session_token"]?.try(&.as_s?)
-        id = store.enqueue_intercept_command(token, verb, item_id: item_id, bytes: bytes, arg: arg)
-        return busy("could not enqueue intercept command (store write dropped); retry") if id == 0
-        await_intercept_ack(id, extra)
-      end
-
-      private def await_intercept_ack(id : Int64, extra : Hash(String, JSON::Any)? = nil) : Result
-        INTERCEPT_ACK_POLLS.times do
-          if st = store.command_status(id)
-            return intercept_ack_result(st[0], st[1], extra) unless st[0] == "pending"
-          end
-          sleep INTERCEPT_ACK_SLEEP
-        end
-        err("intercept command not confirmed within #{(INTERCEPT_ACK_POLLS * INTERCEPT_ACK_SLEEP.total_milliseconds).to_i}ms — the capturing instance may be busy; retry",
-          "NOT_CONFIRMED", retryable: true)
       end
 
       private def intercept_ack_result(status : String, detail : String?,
