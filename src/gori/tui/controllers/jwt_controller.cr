@@ -1,95 +1,34 @@
-require "../tab_controller"
-require "../jwt_view"
-require "../text_area"
-require "../input_mode"
-require "../text_read_state"
-require "../clipboard"
+require "./workbench_controller"
 require "../subtab_clone"
+require "../jwt_view"
 require "../../jwt"
 require "../../decoder/codecs"
 
 module Gori::Tui
-  # One JWT workbench session (a sub-tab). Carries the two lenses' buffers: the DECODE
-  # side (raw token INPUT + the cached decode/attacks derived from it) and the ENCODE
-  # side (HEADER/PAYLOAD JSON editors + SECRET + alg → the cached OUTPUT token). `mode`
-  # picks the visible lens; `pane` is the focus ring position within it. Mutable class.
-  class JwtSession
-    property view : JwtView
-    property input : TextArea
-    property input_mode : InputMode = InputMode::Read
-    property input_read : TextReadState = TextReadState.new
-    property header : TextArea
-    property payload : TextArea
+  # One JWT workbench session (a sub-tab). On top of the shared DECODE side and ENCODE
+  # PAYLOAD + SECRET (`WorkbenchSession`), the ENCODE lens adds a HEADER editor and the alg,
+  # and the decode caches the generated ATTACKS. Mutable class.
+  class JwtSession < WorkbenchSession(JwtView)
+    property header : TextArea = TextArea.new("")
     # Cached beside `attacks` (which is empty for a JWE) so the ATTACKS empty-state can say
     # WHY without the view parsing the token on every frame — the pane is empty for the whole
     # time an operator is typing one in, which is exactly when a per-frame parse costs most.
     property? input_jwe : Bool = false
-    property secret : String = ""
-    property secret_cx : Int32 = 0
-    property secret_pre : String = ""
     property alg : String = "HS256"
-    property mode : Symbol = :decode # :decode | :encode
-    property pane : Symbol = :input
-    # Cached results (recomputed on edit, never on the render hot path).
-    property decoded : String = ""
     property attacks : Array(Jwt::Attack) = [] of Jwt::Attack
-    property output : String = ""
-    property? output_ok : Bool = true
-
-    def initialize(input_text : String, name : String?)
-      @view = JwtView.new
-      @view.name = name
-      @input = TextArea.new(input_text)
-      @input.follow_x = true
-      @header = TextArea.new("")
-      @payload = TextArea.new("")
-    end
-
-    # Home/End on the INPUT pane. They move the EDITOR's caret, so READ mode has to adopt the
-    # result: `JwtView#paint_read_chrome` paints purely from `input_read`, which nothing here was
-    # updating — so both keys moved a caret nobody could see and left the painted block caret
-    # parked where it stood. `selecting` was not threaded either, so ⇧Home/⇧End behaved as plain
-    # Home/End and could not start a selection.
-    #
-    # The pair lives on the session rather than in the controller's `case` because both halves —
-    # the editor move and the read-cursor adoption — have to travel together; four sibling views
-    # (Notes, Issues, Project, the Decoder input) pair them at their own seam for the same reason.
-    def input_home(selecting : Bool = false) : Nil
-      @input.home(selecting)
-      adopt_input_caret(selecting)
-    end
-
-    def input_end(selecting : Bool = false) : Nil
-      @input.end_of_line(selecting)
-      adopt_input_caret(selecting)
-    end
-
-    private def adopt_input_caret(selecting : Bool) : Nil
-      return if @input_mode == InputMode::Insert # INS owns its own anchor, inside the TextArea
-      @input_read.sync_to(@input, selecting: selecting)
-    end
   end
 
   # The JWT tab: a hidden workbench for decoding, editing/re-signing, and generating
-  # testing payloads (alg:none, weak-secret re-sign, header injection) from a token.
-  # Body consumes every printable key (like Decoder/Notes), so command_scope is the JWT
-  # scope and handle_body_key always returns true; the JWT verbs' mnemonics never collide
-  # with literal text — they're reached from the space menu + palette. A runner-owned
-  # sub-tab strip appears from the first session (^N new · ^W close · ^T lens · ^A alg).
-  class JwtController < TabController
+  # testing payloads (alg:none, weak-secret re-sign, header injection) from a token. The
+  # shell is `WorkbenchController`'s, shared with the Cookie tab (^N new · ^W close · ^T
+  # lens); `^A` cycles the alg.
+  class JwtController < WorkbenchController(JwtSession)
     DECODE_PANES = [:input, :decoded, :attacks]
     ENCODE_PANES = [:header, :payload, :secret, :output]
 
-    @sessions : Array(JwtSession)
     # Whether the last `set_alg` dropped the key field, so the status line can say so — a
     # silent clear would be its own surprise.
     @alg_cleared_key = false
-
-    def initialize(host : Host)
-      super(host)
-      @sessions = [make_session("", nil)]
-      @idx = 0
-    end
 
     def tab : Symbol
       :jwt
@@ -99,62 +38,24 @@ module Gori::Tui
       Verb::Scope::Jwt
     end
 
-    # The focused pane, so section-tagged verbs (jwt.copy-token on :output, jwt.copy-attack
-    # on :attacks, jwt.select-line on :input) surface in the space menu's CONTEXT group.
-    # Without this the default :common hides every pane-scoped verb (mirrors DecoderController).
-    def command_section : Symbol
-      cur.pane
-    end
-
-    # INS editors (input-insert / header / payload / secret) show the EDITOR badge;
-    # everything else is navigable body.
-    def body_badge : Symbol
-      s = cur
-      editing = case s.pane
-                when :input                     then s.input_mode == InputMode::Insert
-                when :header, :payload, :secret then true
-                else                                 false
-                end
-      editing ? :editor : :body
-    end
-
-    private def cur : JwtSession
-      @sessions[@idx]
-    end
-
     private def make_session(input_text : String, name : String?) : JwtSession
       s = JwtSession.new(input_text, name)
       s.view.set_registry(@host.session.registry)
       recompute_decode(s)
-      recompute_encode(s)
+      recompute_output(s)
       s
     end
 
-    # --- sub-tab strip (runner-owned chrome; shown from the first session) ---
-    def subtab_labels : Array(String)
-      @sessions.map_with_index { |s, i| "#{i + 1}:#{session_label(s)}" }
+    private def tool_label : String
+      "JWT"
     end
 
-    def subtab_index : Int32
-      @idx
+    private def item_noun : String
+      "token"
     end
 
-    def subtab_strip_shown? : Bool
-      true
-    end
-
-    def subtab_filter_enabled? : Bool
-      true
-    end
-
-    def filter_fields : Array(String)
-      %w[name]
-    end
-
-    def filter_subjects : Array(Repeater::SubtabFilter::Subject)
-      @sessions.map do |s|
-        Repeater::SubtabFilter::Subject.new(s.view.name, s.input.text, "", "", [] of String)
-      end
+    private def lens_verb : String
+      "jwt.toggle-mode"
     end
 
     # The ⌕ picker searches the DECODED claims, not the opaque token the summary carries:
@@ -166,69 +67,12 @@ module Gori::Tui
       @sessions.map { |s| search_extra("#{s.decoded} #{s.header.text} #{s.payload.text}") }
     end
 
-    # The chip label: the custom name, else the token's alg (or "empty"), capped ~18 cols.
-    private def session_label(s : JwtSession) : String
-      raw = (n = s.view.name) ? n : token_summary(s)
-      raw.size > 18 ? raw[0, 17] + "…" : raw
-    end
-
-    private def token_summary(s : JwtSession) : String
+    # The chip label's fallback: the token's alg (or "empty").
+    private def session_summary(s : JwtSession) : String
       return "empty" if s.input.text.strip.empty?
       (a = Jwt.token_alg(s.input.text)) ? "jwt #{a}" : "jwt"
     end
 
-    def move_subtab(dir : Int32) : Nil
-      if t = step_visible(@idx, dir)
-        switch_to(t)
-      end
-    end
-
-    def jump_subtab(idx : Int32) : Nil
-      return unless 0 <= idx < @sessions.size
-      clear_subtab_filter if (h = subtab_hidden) && h.includes?(idx)
-      switch_to(idx) if idx != @idx
-    end
-
-    private def switch_to(idx : Int32) : Nil
-      @idx = idx
-    end
-
-    # --- session lifecycle ---
-    def jwt_new : Nil
-      @sessions << make_session("", nil)
-      @idx = @sessions.size - 1
-      @host.request_focus(:body)
-      @host.status("new JWT session (#{@sessions.size} open)")
-    end
-
-    # Seed a NEW session from an externally-supplied token (the "Send selection to → JWT"
-    # flow) and jump into it. Mirrors DecoderController#decoder_from_text.
-    def jwt_from_text(text : String, name : String? = nil) : Nil
-      s = make_session(text.strip, name)
-      @sessions << s
-      @idx = @sessions.size - 1
-      @host.goto_tab(:jwt)
-      @host.status("sent selection to JWT (#{text.bytesize}b)")
-    end
-
-    # Duplicates the MARKED sub-tabs when the strip carries marks, the active one otherwise
-    # (`target_subtab_indices` — the one target rule).
-    def jwt_duplicate : Nil
-      msg = nil.as(String?)
-      if refs = batch_subtab_refs
-        msg = duplicate_marked_subtabs(refs, "session") { |i| duplicate_at(i) }
-        unless msg
-          @host.status("#{refs.size} sub-tabs marked — duplicate is capped at #{Runner::BATCH_SUBTAB_CAP}")
-          return
-        end
-      else
-        duplicate_at(@idx)
-      end
-      @host.request_focus(:body)
-      @host.status(msg ? "#{msg} (#{@sessions.size} open)" : "duplicated JWT session (#{@sessions.size} open)")
-    end
-
-    # Clone sub-tab `idx` onto the end of the strip. Toast-free — the arm above says it.
     private def duplicate_at(idx : Int32) : Nil
       return unless src = @sessions[idx]?
       dup = make_session(src.input.text, SubtabClone.copy_name(src.view.name))
@@ -236,200 +80,50 @@ module Gori::Tui
       dup.payload.set_text(src.payload.text)
       dup.secret = src.secret
       dup.alg = src.alg
-      recompute_encode(dup)
+      recompute_output(dup)
       @sessions << dup
       @idx = @sessions.size - 1
     end
 
-    # ^W closes the MARKED sub-tabs when the strip carries marks, the active one otherwise
-    # (`target_subtab_indices` — the one target rule). The single close stays confirm-free as
-    # it has always been; a plural one asks, because it discards more than the operator can
-    # see at the moment they press the key.
-    def jwt_close : Nil
-      if refs = batch_subtab_refs
-        @host.confirm("CLOSE JWT SESSIONS", "Close #{marked_subtab_phrase(refs.size)}?\nEach token and its edits are discarded.",
-          confirm_label: "close", danger: true) { close_marked_sessions(refs) }
-        return
-      end
-      close_at(@idx)
-      @host.status(@sessions.size == 1 ? "session closed" : "session closed (#{@sessions.size} open)")
-    end
-
-    private def close_marked_sessions(refs : Array(SubtabRef)) : Nil
-      msg = close_marked_subtabs(refs)
-      @host.status(msg)
-      @host.resolve_subtab_focus
-    end
-
-    # Nothing here is persisted, so a close can never leave a saved session behind.
-    protected def close_subtab_at(idx : Int32) : Bool
-      close_at(idx)
-      false
-    end
-
-    # Close sub-tab `idx`, keeping at least one session: the last one is REPLACED by a blank
-    # rather than removed, so the tab always has something to type into. That replacement
-    # also retires the old view object, which is what drops its mark.
-    private def close_at(idx : Int32) : Nil
-      return if idx < 0 || idx >= @sessions.size
-      if @sessions.size <= 1
-        @sessions[0] = make_session("", nil)
-        @idx = 0
-      else
-        @sessions.delete_at(idx)
-        # Closing a session to the LEFT slides the active one down; a bare clamp would read
-        # that as "stay put" and land the operator on its neighbour.
-        @idx -= 1 if idx < @idx
-        @idx = @idx.clamp(0, @sessions.size - 1)
-      end
-    end
-
-    def view_at(idx : Int32) : JwtView?
-      (0 <= idx < @sessions.size) ? @sessions[idx].view : nil
-    end
-
-    # The object that IS sub-tab `idx`, for the strip's mark set (#683). The view, not the
-    # index: a reconcile can reorder or drop chips under a standing mark.
-    def subtab_ref(idx : Int32) : SubtabRef?
-      view_at(idx)
-    end
-
-    def apply_rename(view : JwtView, name : String) : Nil
-      clean = name.strip
-      view.name = clean.empty? ? nil : clean
-    end
-
     # --- render ---
+    # The shared shell (see `WorkbenchController#render_shell` for why it is not inherited).
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
-      body_focused = focus == :body
-      labels = subtab_labels
-      s = cur
-      shell = BodyChrome.shell_focused(focus, multi_pane: true)
-      subtabs_focused = focus == :subtabs
-      @subtab_start = BodyChrome.framed_body(screen, rect, shell, subtabs_focused, labels, @idx, @subtab_start, subtab_hidden, strip_divider: subtab_strip_divider?, find: subtab_find_shown?, find_lit: @host.subtab_find_focused?, marked: marked_chip_set) do |content|
-        render_with_filter(screen, content, subtabs_focused) do |body|
-          if s.mode == :decode
-            s.view.render_decode(screen, body,
-              input: s.input, input_mode: s.input_mode, input_read: s.input_read,
-              decoded: s.decoded, attacks: s.attacks, input_jwe: s.input_jwe?,
-              pane: s.pane, focused: body_focused, lens_chord: lens_chord)
-          else
-            s.view.render_encode(screen, body,
-              header: s.header, payload: s.payload, secret: s.secret, secret_cx: s.secret_cx,
-              secret_pre: s.secret_pre, alg: s.alg, output: s.output, output_ok: s.output_ok?,
-              pane: s.pane, focused: body_focused, lens_chord: lens_chord)
-          end
-        end
+      render_shell(screen, rect, focus)
+    end
+
+    private def render_lens(screen : Screen, body : Rect, s : JwtSession, focused : Bool) : Nil
+      if s.mode == :decode
+        s.view.render_decode(screen, body,
+          input: s.input, input_mode: s.input_mode, input_read: s.input_read,
+          decoded: s.decoded, attacks: s.attacks, input_jwe: s.input_jwe?,
+          pane: s.pane, focused: focused, lens_chord: lens_chord)
+      else
+        s.view.render_encode(screen, body,
+          header: s.header, payload: s.payload, secret: s.secret, secret_cx: s.secret_cx,
+          secret_pre: s.secret_pre, alg: s.alg, output: s.output, output_ok: s.output_ok?,
+          pane: s.pane, focused: focused, lens_chord: lens_chord)
       end
-    end
-
-    # The lens switch's CURRENT chord. Read from the keymap (not hardcoded `^T`) so a rebind
-    # moves the top card's chip and the footer that names the same key together — see the
-    # note in `body_hint`.
-    private def lens_chord : String
-      reg = @host.session.registry
-      lens_chord(reg, Hotkeys.rebindable_overrides(reg))
-    end
-
-    # …and the arity that takes the overrides map, for a caller resolving more than one chord
-    # in the same breath. `Hotkeys.binding_label` defaults that argument to
-    # `rebindable_overrides(registry)`, which re-parses every persisted override label and
-    # builds a fresh Hash per call — `body_hint` resolves two chords and would pay for it
-    # twice. One build per frame, which is what this file cost before the chip existed.
-    private def lens_chord(reg : Verb::Registry, overrides : Hash(String, Array(Verb::Chord))) : String
-      Hotkeys.binding_label(reg, "jwt.toggle-mode", "^T", overrides)
     end
 
     # --- key handling ---
-    # Every pane `route_pane` sends characters to: the INPUT editor in INS, the HEADER and
-    # PAYLOAD JSON editors, and the SECRET field. The read-only faces (DECODED / OUTPUT) and
-    # the ATTACKS list are not — a digit is navigation there.
-    def body_takes_text? : Bool
-      s = cur
-      case s.pane
-      when :input                     then s.input_mode == InputMode::Insert
-      when :header, :payload, :secret then true
-      else                                 false
-      end
+    # DECODED / OUTPUT and the ATTACKS list are read-only — a digit is navigation there; INPUT
+    # is INS/READ; HEADER, PAYLOAD and SECRET type.
+    private def readonly_pane?(pane : Symbol) : Bool
+      {:decoded, :attacks, :output}.includes?(pane)
     end
 
-    # --- bracketed paste, in bulk (see TabController#accepts_bulk_paste?) ---
-    # The three multi-line editors: INPUT in INSERT (re-decodes per edit) and the always-
-    # insert HEADER / PAYLOAD JSON (re-encode per edit). Key by key a paste re-ran that over
-    # the whole buffer per character — quadratic, on the scheduler the proxy shares. A pasted
-    # ↹ now lands as a tab character instead of moving the focus ring mid-paste and typing the
-    # rest into the next pane. The single-line SECRET keeps the key path, where a pasted line
-    # break has its own meaning.
-    def accepts_bulk_paste? : Bool
-      !bulk_paste_editor.nil?
-    end
-
-    def paste_text(text : String) : Bool
-      ed = bulk_paste_editor
-      return false unless ed
-      s = cur
-      ed.insert_text(text)
-      report_replaced(ed.last_replaced) # a paste over a selection REPLACES it
-      ed.set_preedit("")
-      ed.same?(s.input) ? recompute_decode(s) : recompute_encode(s)
-      true
-    end
-
-    private def bulk_paste_editor : TextArea?
-      s = cur
-      case s.pane
-      when :input   then s.input if s.input_mode == InputMode::Insert
+    private def lens_editor(s : JwtSession, pane : Symbol) : TextArea?
+      case pane
       when :header  then s.header
       when :payload then s.payload
-      end
-    end
-
-    def handle_body_key(ev : Termisu::Event::Key) : Bool
-      key = ev.key
-      c = ev.char || key.to_char
-      if ev.ctrl? && key.lower_p?
-        commit
-        @host.open_palette
-      elsif ev.ctrl? && c && '1' <= c <= '9'
-        jump_subtab(c.to_i - 1)
-      elsif ev.ctrl? && key.lower_n?
-        jwt_new
-      elsif ev.ctrl? && key.lower_w?
-        jwt_close
-      elsif ev.ctrl_z? || editing_motion?(ev)
-        # Undo and ⌥/⌃ word motion belong to the focused editor, not the keymap.
-        return route_pane(ev, c)
-      elsif ev.ctrl? || ev.alt?
-        # Every OTHER modified chord defers to the central keymap, so it is rebindable — the
-        # rule the Repeater and Fuzzer already follow. Without it the pane handlers below
-        # swallow it (`edit_json(...); true`), which is exactly why ^L/^A/^T had to be
-        # hardcoded above: a verb chord would have been silently eaten before the keymap.
-        return false
-      elsif key.escape?
-        handle_escape
-      else
-        return route_pane(ev, c)
-      end
-      true
-    end
-
-    private def handle_escape : Nil
-      s = cur
-      if s.pane == :input && s.input_mode == InputMode::Insert
-        s.input_mode = InputMode::Read
-        # Carry an INS ⇧arrow selection over to READ — see TextReadState#adopt_editor_selection.
-        s.input_read.adopt_editor_selection(s.input)
-      else
-        commit
-        @host.request_focus(:subtabs)
       end
     end
 
     private def route_pane(ev : Termisu::Event::Key, c : Char?) : Bool
       case cur.pane
       when :input   then edit_input(ev, c)
-      when :header  then edit_json(ev, c, cur.header); true
-      when :payload then edit_json(ev, c, cur.payload); true
+      when :header  then edit_lens_editor(ev, c, cur.header); true
+      when :payload then edit_lens_editor(ev, c, cur.payload); true
       when :secret  then edit_secret(ev, c); true
       when :decoded then handle_readonly(ev, :decoded)
       when :output  then handle_readonly(ev, :output)
@@ -438,150 +132,14 @@ module Gori::Tui
       end
     end
 
-    # ---- INPUT editor (INS/READ, like the Decoder input) ----
-    private def edit_input(ev : Termisu::Event::Key, c : Char?) : Bool
-      s = cur
-      return handle_input_read(ev, c) unless s.input_mode == InputMode::Insert
-      key = ev.key
-      case
-      when ev.ctrl_z? then s.input.undo; recompute_decode(s)
-      when key.enter? then s.input.insert_newline; recompute_decode(s)
-      # Before plain ⌫, which would swallow the modified form as a one-character delete.
-      when s.input.word_delete_key?(ev) then editor_motion(ev, s.input) { recompute_decode(s) }
-      when key.backspace?               then s.input.backspace; recompute_decode(s)
-      when key.up?
-        (s.input.at_top? && !ev.shift?) ? cross_pane(s, -1) : editor_motion(ev, s.input) { recompute_decode(s) }
-      when key.down?
-        (s.input.at_bottom? && !ev.shift?) ? cross_pane(s, 1) : editor_motion(ev, s.input) { recompute_decode(s) }
-        # ⇧arrows select, Page keys, ⇧Home/⇧End, ⌥←/→ by word — TextArea#handle_motion_key.
-      when editor_motion(ev, s.input) { recompute_decode(s) } then nil
-      when key.delete?                                        then s.input.delete; recompute_decode(s)
-      else
-        if c && !ev.ctrl? && !ev.alt?
-          s.input.insert(c)
-          report_replaced(s.input.last_replaced) # a printable over a selection REPLACES it
-          s.input.set_preedit("")
-          recompute_decode(s)
-        end
-      end
-      true
-    end
-
-    private def handle_input_read(ev : Termisu::Event::Key, c : Char?) : Bool
-      return true.tap { @host.open_space_menu } if ev.key.space? && !ev.ctrl? && !ev.alt?
-      s = cur
-      key = ev.key
-      selecting = ev.shift?
-      case
-      when key.enter? then return false # editor.insert-enter
-      when nav_up?(ev)
-        s.input.at_top? ? cross_pane(s, -1) : s.input_read.move(s.input, -1, 0, selecting: selecting)
-      when nav_down?(ev)
-        s.input.at_bottom? ? cross_pane(s, 1) : s.input_read.move(s.input, 1, 0, selecting: selecting)
-      when key.left?  then s.input_read.move(s.input, 0, -1, selecting: selecting)
-      when key.right? then s.input_read.move(s.input, 0, 1, selecting: selecting)
-      when key.home?  then s.input_home(selecting) # editor move + read-cursor adopt — see JwtSession
-      when key.end?   then s.input_end(selecting)
-      when c && !ev.ctrl? && !ev.alt? && !c.control?
-        return false # i INSERT, x/y + Global breath → keymap
-      end
-      true
-    end
-
-    # The shared editor keymap over `ed`, re-running the caller's recompute only when the key
-    # actually CHANGED the buffer (⌥⌫ is the one mutation in the set; every other member is
-    # pure motion and must not re-encode).
-    private def editor_motion(ev : Termisu::Event::Key, ed : TextArea, & : -> _) : Bool
-      before = ed.edits
-      return false unless ed.handle_motion_key(ev)
-      yield if ed.edits != before
-      true
-    end
-
-    # ---- HEADER / PAYLOAD JSON editors (always-insert; edits re-encode live) ----
-    private def edit_json(ev : Termisu::Event::Key, c : Char?, ed : TextArea) : Nil
-      s = cur
-      key = ev.key
-      case
-      when ev.ctrl_z?              then ed.undo; recompute_encode(s)
-      when key.enter?              then ed.insert_newline; recompute_encode(s)
-      when ed.word_delete_key?(ev) then editor_motion(ev, ed) { recompute_encode(s) }
-      when key.backspace?          then ed.backspace; recompute_encode(s)
-      when key.up?                 then (ed.at_top? && !ev.shift?) ? cross_pane(s, -1) : editor_motion(ev, ed) { recompute_encode(s) }
-      when key.down?               then (ed.at_bottom? && !ev.shift?) ? cross_pane(s, 1) : editor_motion(ev, ed) { recompute_encode(s) }
-      when key.delete? then ed.delete; recompute_encode(s)
-      # ⇧arrows select, Page keys, ⇧Home/⇧End, ⌥←/→ by word — TextArea#handle_motion_key.
-      when editor_motion(ev, ed) { recompute_encode(s) } then nil
-      else
-        if c && !ev.ctrl? && !ev.alt?
-          ed.insert(c)
-          # The ninth caller of `report_replaced` — the eight siblings have had it since #583
-          # and this arm alone skipped it, so a printable over a ⇧arrow band here cut the band
-          # with no toast and no pointer at ^Z. That is the exact keystroke `^Y` exists to
-          # spare you (`y` is a literal character on this pane), and the footer now teaches
-          # the band that makes it reachable — so the loss has to announce itself.
-          report_replaced(ed.last_replaced)
-          ed.set_preedit("")
-          recompute_encode(s)
-        end
-      end
-    end
-
-    # ---- SECRET single-line field ----
-    private def edit_secret(ev : Termisu::Event::Key, c : Char?) : Nil
-      s = cur
-      key = ev.key
-      case
-      when key.up?    then cross_pane(s, -1)
-      when key.down?  then cross_pane(s, 1)
-      when key.left?  then s.secret_cx = {s.secret_cx - 1, 0}.max
-      when key.right? then s.secret_cx = {s.secret_cx + 1, s.secret.size}.min
-      when key.home?  then s.secret_cx = 0
-      when key.end?   then s.secret_cx = s.secret.size
-      when key.backspace?
-        if s.secret_cx > 0
-          s.secret = s.secret[0, s.secret_cx - 1] + s.secret[s.secret_cx..]
-          s.secret_cx -= 1
-          s.secret_pre = ""
-          recompute_encode(s)
-        end
-      else
-        if c && !ev.ctrl? && !ev.alt? && !c.control?
-          s.secret = s.secret[0, s.secret_cx] + c.to_s + s.secret[s.secret_cx..]
-          s.secret_cx += 1
-          s.secret_pre = ""
-          recompute_encode(s)
-        end
-      end
-    end
-
-    # ---- read-only DECODED / OUTPUT panes ----
-    private def handle_readonly(ev : Termisu::Event::Key, which : Symbol) : Bool
-      return true.tap { @host.open_space_menu } if ev.key.space? && !ev.ctrl? && !ev.alt?
-      s = cur
-      key = ev.key
-      at_top = which == :decoded ? s.view.decoded_at_top? : s.view.output_at_top?
-      at_bottom = which == :decoded ? s.view.decoded_at_bottom? : s.view.output_at_bottom?
-      case
-      when key.up?, key.lower_k?
-        at_top ? cross_pane(s, -1) : scroll_pane(s, which, -1)
-      when key.down?, key.lower_j?
-        # At bottom (or content fits): leave DECODED → ATTACKS. OUTPUT is last in ENCODE
-        # so cross_pane is a no-op past the end — same as ↑/↓ on a fully-visible card.
-        at_bottom ? cross_pane(s, 1) : scroll_pane(s, which, 1)
-      when (c = ev.char || key.to_char) && !ev.ctrl? && !ev.alt? && !c.control?
-        return false # y + Global breath → keymap
-      end
-      true
-    end
-
-    private def scroll_pane(s : JwtSession, which : Symbol, step : Int32) : Nil
-      which == :decoded ? s.view.scroll_decoded(step) : s.view.scroll_output(step)
+    # SECRET is the HMAC key or the PEM path the ENCODE lens signs under: re-sign on every edit.
+    private def on_secret_edit(s : JwtSession) : Nil
+      recompute_output(s)
     end
 
     # ---- ATTACKS list ----
     private def handle_attacks(ev : Termisu::Event::Key) : Bool
-      return true.tap { @host.open_space_menu } if ev.key.space? && !ev.ctrl? && !ev.alt?
+      return true if space_menu?(ev)
       s = cur
       key = ev.key
       case
@@ -589,7 +147,7 @@ module Gori::Tui
         s.view.attacks_at_top? ? cross_pane(s, -1) : s.view.attacks_move(-1)
       when key.down?, key.lower_j? then s.view.attacks_move(1)
       when key.enter?              then jwt_copy_attack
-      when (c = ev.char || key.to_char) && !ev.ctrl? && !ev.alt? && !c.control?
+      when plain_char?(ev, ev.char || key.to_char)
         return false # y + Global breath → keymap
       end
       true
@@ -600,127 +158,7 @@ module Gori::Tui
       s.mode == :decode ? DECODE_PANES : ENCODE_PANES
     end
 
-    private def cross_pane(s : JwtSession, dir : Int32) : Nil
-      order = panes(s)
-      i = order.index(s.pane) || 0
-      ni = i + dir
-      if ni < 0
-        commit
-        @host.request_focus(:subtabs)
-      elsif ni < order.size
-        enter_pane(s, order[ni])
-      end
-    end
-
-    private def enter_pane(s : JwtSession, p : Symbol) : Nil
-      s.pane = p
-      s.input_read.sync_from(s.input) if p == :input && s.input_mode == InputMode::Read
-    end
-
-    def pane_advance(dir : Int32) : Bool
-      s = cur
-      order = panes(s)
-      i = order.index(s.pane) || 0
-      ni = i + dir
-      return false if ni < 0 || ni >= order.size
-      enter_pane(s, order[ni])
-      true
-    end
-
-    # --- Verb::Scope::Editor — the INPUT pane only ---
-    # It is the one pane here with a READ mode to hold commands: the DECODED / OUTPUT / ATTACKS panes are read-only and the HEADER / PAYLOAD / SECRET editors are always-typing
-    # (their `body_badge` is `:editor` from the moment they are focused, so a bare letter is
-    # always a character there and never a key the Editor scope could claim).
-    def editor_pane? : Bool
-      cur.pane == :input
-    end
-
-    def editor_text_buffer : {TextArea, TextReadState}?
-      editor_pane? ? {cur.input, cur.input_read} : nil
-    end
-
-    def editor_enter_insert : Bool
-      return false unless editor_pane?
-      cur.input_mode = InputMode::Insert
-      true
-    end
-
-    def editor_append_insert : Bool
-      return false unless editor_pane?
-      s = cur
-      s.input_read.move(s.input, 0, 1)
-      editor_enter_insert
-    end
-
-    def editor_exit_insert : Bool
-      return false unless editor_pane?
-      cur.input_mode = InputMode::Read
-      true
-    end
-
-    # READ-mode undo: the read cursor has to adopt the caret `undo` restored (READ paints
-    # from `input_read`), and the decode has to re-run over the buffer that came back.
-    def editor_undo : Bool
-      return false unless editor_read_mode?
-      s = cur
-      s.input.undo
-      s.input_read.sync_from(s.input)
-      recompute_decode(s)
-      true
-    end
-
-    def editor_to_top : Bool
-      editor_input_edge(-1)
-    end
-
-    def editor_to_bottom : Bool
-      editor_input_edge(1)
-    end
-
-    private def editor_input_edge(dir : Int32) : Bool
-      return false unless editor_read_mode?
-      s = cur
-      s.input_read.to_edge(s.input, dir)
-      true
-    end
-
-    def insert_key_refusal : String?
-      return nil unless {:decoded, :attacks, :output}.includes?(cur.pane)
-      keys("this pane is read-only — {editor.insert} edits the INPUT (↹ up); intercept toggles from the tab bar")
-    end
-
-    def focus_first : Nil
-      enter_pane(cur, panes(cur).first)
-    end
-
-    def focus_last : Nil
-      enter_pane(cur, panes(cur).last)
-    end
-
     # --- mouse ---
-    # --- mouse drag + double-click (see TabController#supports_drag?) ---
-    # Whichever text editor the pointer is over: INPUT in decode mode, HEADER / PAYLOAD in
-    # encode mode. The read-only panes (decoded, attacks, output) have no caret to drag.
-    def supports_drag? : Bool
-      true
-    end
-
-    def handle_drag(rect : Rect, mx : Int32, my : Int32) : Nil
-      ed, area, read = editor_at(rect, mx, my) || return
-      ed.click_to_cursor(area, mx, my, selecting: true)
-      # In READ mode the band on screen is the read cursor's, not the editor's, so the drag has
-      # to grow THAT one. `sync_to(selecting: true)` plants the anchor with `||=`, which is only
-      # safe because the press collapsed the old selection (see `handle_click`) — without that
-      # collapse a drag would extend from an anchor the operator never pressed on.
-      read.try &.sync_to(ed, selecting: true)
-    end
-
-    def handle_double_click(rect : Rect, mx : Int32, my : Int32) : Bool
-      ed, area, read = editor_at(rect, mx, my) || return false
-      return read.select_word(ed, area, mx, my) if read
-      ed.select_word_at(area, mx, my)
-    end
-
     # The editor under (mx, my), its content rect, and the `TextReadState` that owns the
     # SELECTION there — nil for a plain always-editing pane (HEADER / PAYLOAD, and INPUT while
     # in INS, where the TextArea carries its own anchor). One derivation for both gestures,
@@ -762,23 +200,7 @@ module Gori::Tui
       if s.mode == :decode
         input_c, dec_c, atk_c = s.view.decode_layout(body)
         if input_c.contains?(mx, my)
-          enter_pane(s, :input)
-          # NOR/INS border chip toggles insert (same as ↵ / esc); don't move caret.
-          if Frame.mode_badge_hit(mx, my, input_c.y, input_c.right - 1, input_c.x + JwtView::INPUT_MIN_X,
-               s.input_mode == InputMode::Insert)
-            s.input_mode = s.input_mode == InputMode::Insert ? InputMode::Read : InputMode::Insert
-            s.input_read.sync_from(s.input) if s.input_mode == InputMode::Read
-          elsif s.view.lens_chip_hit(input_c, mx, my, :decode, lens_chord,
-                  s.input_mode == InputMode::Insert)
-            # ` ^T:→ENCODE `, chained left of the mode chip. Same act as the chord.
-            toggle_mode
-          elsif s.input_mode == InputMode::Insert
-            s.input.click_to_cursor(input_c.inset(1, 1), mx, my)
-          else
-            # Through the read state so the click COLLAPSES a ⇧arrow selection — see the same
-            # call in `DecoderController#handle_click` for why `sync_from` could not.
-            s.input_read.click(s.input, input_c.inset(1, 1), mx, my)
-          end
+          click_input_card(s, input_c, mx, my)
         elsif dec_c.contains?(mx, my)
           enter_pane(s, :decoded)
         elsif atk_c.contains?(mx, my)
@@ -814,15 +236,6 @@ module Gori::Tui
           enter_pane(s, :output)
         end
       end
-      true
-    end
-
-    # The INPUT arm carries no `input_mode == Read` guard, for the reason spelled out on
-    # `DecoderController#handle_wheel`: a token pasted into this pane is long enough to need
-    # scrolling in both modes, and the wheel is a reading gesture in either.
-    def handle_wheel(step : Int32) : Bool
-      s = cur
-      wheel_pane(s, s.pane, step)
       true
     end
 
@@ -892,7 +305,7 @@ module Gori::Tui
       s = cur
       i = Jwt::ALGS.index(s.alg) || 0
       set_alg(s, Jwt::ALGS[(i + 1) % Jwt::ALGS.size])
-      recompute_encode(s)
+      recompute_output(s)
       @host.status("alg = #{s.alg}#{@alg_cleared_key ? " · key cleared" : ""}")
     end
 
@@ -936,7 +349,7 @@ module Gori::Tui
       end
       s.mode = :encode
       s.pane = :header
-      recompute_encode(s)
+      recompute_output(s)
       @host.status("loaded decoded claims into the editor")
     end
 
@@ -961,18 +374,8 @@ module Gori::Tui
       s.secret = ""
       s.secret_cx = 0
       recompute_decode(s)
-      recompute_encode(s)
+      recompute_output(s)
       @host.status("cleared")
-    end
-
-    # Copy the OUTPUT (re-signed) token.
-    def jwt_copy_token : Nil
-      s = cur
-      if s.output_ok? && !s.output.empty?
-        do_copy(s.output, "token")
-      else
-        @host.status("no valid token to copy")
-      end
     end
 
     # Copy the selected ATTACK's token.
@@ -985,32 +388,19 @@ module Gori::Tui
       end
     end
 
-    # The unified Copy verb: the selection if one is live, else the focused pane's content.
+    # The unified Copy verb's text (see `WorkbenchController#copy_pane`). EVERY editable pane
+    # consults its band: in INS on INPUT it used to copy `s.input.text`, the WHOLE token, while
+    # `selection_active?` was reporting the ⇧arrow band as live — the same "claims a selection,
+    # copies something else" split `RepeaterView#pane_selection?` documents — and HEADER and
+    # PAYLOAD were never asked at all.
     #
-    # EVERY editable pane consults its band, not just INPUT-in-READ. `Runner#read_copy` routes
-    # `:jwt` straight here (no `read_selection_active?` branch like the other tabs get), so the
-    # selection-vs-all decision is this method's alone — and it used to make it for exactly one
-    # of the four editors. In INS on INPUT it copied `s.input.text`, the WHOLE token, while
-    # `jwt_selection_active?` was reporting the ⇧arrow band as live: the same "claims a
-    # selection, copies something else" split `RepeaterView#pane_selection?` documents. HEADER
-    # and PAYLOAD are always-typing TextAreas that grow a band the same way and were never
-    # asked at all.
-    def jwt_copy : Nil
-      do_copy(jwt_copy_text)
-    end
-
-    # What the Copy verb would put on the clipboard, without writing it — split out from
-    # `jwt_copy` for the reason every sibling tab is already split this way (`RepeaterView`
-    # has `pane_copy_text`, the controller only copies + toasts): the decision above is worth
-    # asserting on its own, and `Clipboard.copy` writes OSC 52 straight to the tty.
-    #
-    # NOT the same as `jwt_selection_text`, which is the "Send selection to" payload and
+    # NOT the same as `selection_text`, which is the "Send selection to" payload and
     # deliberately answers "" on the ENCODE panes — that flow lives in the space menu, which
     # cannot be opened from a pane where space types a space.
-    def jwt_copy_text : String
+    def pane_copy_text : String
       s = cur
       case s.pane
-      when :input   then s.input_mode == InputMode::Read ? read_or_all(s.input_read, s.input) : band_or_all(s.input)
+      when :input   then input_copy_text(s)
       when :header  then band_or_all(s.header)
       when :payload then band_or_all(s.payload)
       when :secret  then s.secret
@@ -1021,87 +411,15 @@ module Gori::Tui
       end
     end
 
-    # An editor's ⇧arrow band, or its whole buffer when no band is live — "smart copy" stated
-    # once for the three panes that share it. `TextArea#selection_text` is nil rather than ""
-    # when there is no band, so this cannot silently copy an empty string over a full buffer.
-    private def band_or_all(ed : TextArea) : String
-      ed.selection_text || ed.text
-    end
-
-    # `band_or_all` for a pane in READ mode, where the band lives on the read cursor rather
-    # than on the editor. `TextReadState#copy_text` falls back to the caret's LINE, which is
-    # what INPUT-in-READ used to copy — the one pane of the four that did, and the one place
-    # the tab disagreed with the rest of the tree (`Runner#read_copy`: selection if active,
-    # else the whole pane). The selection test comes first because `copy_text`'s own fallback
-    # cannot be told apart from a one-line selection after the fact.
-    private def read_or_all(read : TextReadState, ed : TextArea) : String
-      read.selection?(ed) ? read.copy_text(ed) : read.copy_all(ed)
-    end
-
-    private def do_copy(text : String, label : String? = nil) : Nil
-      if text.empty?
-        @host.status("nothing to copy")
-      else
-        written = Clipboard.copy(text)
-        prefix = label ? "copied \"#{label}\"" : "copied"
-        @host.status("#{prefix} (#{written}b)#{Clipboard.note(written, text)}")
-      end
-    end
-
-    # --- selection (for the "Send selection to" flow + copy verbs) ---
-    def jwt_read_mode? : Bool
-      s = cur
-      s.pane == :decoded || s.pane == :output || s.pane == :attacks ||
-        (s.pane == :input && s.input_mode == InputMode::Read)
-    end
-
-    # The INPUT pane's two selection models, one per mode — see RepeaterView#pane_selection?.
-    # This pair changes together with `jwt_selection_text`'s :input arm.
-    #
-    # HEADER and PAYLOAD too: they are always-typing `TextArea`s whose band `jwt_copy_text`
-    # already copies, and a drag over them paints one (`editor_at` hands the drag to
-    # `s.header`/`s.payload`). Answering false for them made Drag release = `select + copy`
-    # silently do nothing on the two panes where `^Y` is the ONLY copy — no clipboard write,
-    # no toast — while the keyboard path copied the same band fine.
-    def jwt_selection_active? : Bool
+    def selection_text : String
       s = cur
       case s.pane
-      when :input   then s.input_mode == InputMode::Insert ? s.input.selection? : s.input_read.selection?(s.input)
-      when :header  then s.header.selection?
-      when :payload then s.payload.selection?
-      else               false
-      end
-    end
-
-    def jwt_selection_text : String
-      s = cur
-      case s.pane
-      when :input
-        if s.input_mode == InputMode::Insert
-          s.input.selection_text || s.input_read.copy_text(s.input)
-        else
-          s.input_read.copy_text(s.input)
-        end
+      when :input   then input_selection_text(s)
       when :decoded then s.decoded
       when :output  then s.output_ok? ? s.output : ""
       when :attacks then (a = s.attacks[s.view.attacks_selected]?) ? a.token : ""
       else               ""
       end
-    end
-
-    def jwt_select_line : Nil
-      s = cur
-      s.input_read.select_line(s.input) if s.pane == :input && s.input_mode == InputMode::Read
-    end
-
-    # Clears whichever of the pane's two selection models is the live one. It used to clear
-    # `input_read` unconditionally, so in INSERT — where the band lives on `s.input`, which is
-    # what `jwt_selection_active?` reads — the verb was a no-op on the one mode that now copies
-    # by band. Same INS/READ pair `jwt_copy_text` and `jwt_selection_active?` already split on.
-    def jwt_clear_selection : Nil
-      s = cur
-      return unless s.pane == :input
-      s.input_mode == InputMode::Insert ? s.input.clear_selection : s.input_read.clear_selection
     end
 
     def body_hint(focus : Symbol) : String
@@ -1135,13 +453,13 @@ module Gori::Tui
       when :header, :payload
         # The ENCODE lens has no READ mode at all — its three panes always capture keys — so
         # `^Y` is the ONLY copy here, and `space cmds` was a lie the moment it was written:
-        # `edit_json`/`edit_secret` insert a literal space (`handle_body_key` only defers
+        # `edit_lens_editor`/`edit_secret` insert a literal space (`handle_body_key` only defers
         # ctrl/alt chords). Naming a menu that types a space instead of opening cost these
         # strips the one token that had room to say which key copies.
         keys("type JSON · ⇧arrows select · ^Y copy · ↑/↓ move+cross · {jwt.cycle-alg} alg · #{lens} decode · esc sub-tabs")
       when :secret
         # Same trade as HEADER/PAYLOAD above, minus `⇧arrows select`: SECRET is a plain String
-        # + caret index (JwtSession#secret_cx), not a TextArea, so it has no band to grow.
+        # + caret index (WorkbenchSession#secret_cx), not a TextArea, so it has no band to grow.
         # `^Y` still copies the whole field.
         keys("type #{Jwt::Asym.alg?(s.alg) ? "PEM key path" : "secret"} · ^Y copy · {jwt.cycle-alg} alg (#{s.alg}) · ↑/↓ cross · #{lens} decode · esc sub-tabs")
       when :output
@@ -1149,16 +467,6 @@ module Gori::Tui
       else
         ""
       end
-    end
-
-    def on_enter : Nil
-      # Nothing to recompute on enter — caches stay valid across tab switches.
-    end
-
-    # Ephemeral scratch tool: sessions live in memory only (no settings persistence),
-    # so commit is a no-op. Kept for the TabController contract + the runner's commit
-    # call sites (focus-leave, quit) so a future persistence add has a single seam.
-    def commit : Nil
     end
 
     # --- recompute ---
@@ -1177,7 +485,7 @@ module Gori::Tui
       "// #{ex.message}"
     end
 
-    private def recompute_encode(s : JwtSession) : Nil
+    private def recompute_output(s : JwtSession) : Nil
       if s.header.text.strip.empty? && s.payload.text.strip.empty?
         s.output = ""
         s.output_ok = true

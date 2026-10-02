@@ -103,8 +103,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     when :repeater then repeater_controller.repeater_new
     when :fuzzer   then fuzzer_controller.fuzz_new
     when :decoder  then decoder_controller.decoder_new
-    when :jwt      then jwt_controller.jwt_new
-    when :cookie   then cookie_controller.cookie_new
+    when :jwt      then jwt_controller.new_session
+    when :cookie   then cookie_controller.new_session
     when :notes    then notes_controller.notes_new
     when :comparer then comparer_controller.comparer_new
     end
@@ -136,8 +136,8 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     when :miner     then miner_controller.request_close
     when :sequencer then sequencer_controller.request_close
     when :decoder   then decoder_controller.decoder_close
-    when :jwt       then jwt_controller.jwt_close
-    when :cookie    then cookie_controller.cookie_close
+    when :jwt       then jwt_controller.close_session
+    when :cookie    then cookie_controller.close_session
     when :notes     then notes_controller.notes_close
     when :comparer  then comparer_controller.comparer_close
     end

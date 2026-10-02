@@ -802,7 +802,7 @@ module Gori::Tui
     end
 
     # What `rewriter_copy` would put on the clipboard and whether it is a selection, without
-    # writing it — the JWT half of this sweep grew `jwt_copy_text` for the same reason: the
+    # writing it — the JWT half of this sweep grew `pane_copy_text` for the same reason: the
     # decision is worth asserting on its own, and `Clipboard.copy` writes OSC 52 to the tty.
     # `nil` text = a focus that has no copy (the rule list).
     #
