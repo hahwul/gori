@@ -13,6 +13,7 @@ require "./subtab_clone"
 require "./viewport"
 require "./row_filter"
 require "./subtab_marks"
+require "./seeded_session"
 
 module Gori::Tui
   # The view for ONE mining session (a sub-tab under the Miner tab). Read-only: the
@@ -22,6 +23,7 @@ module Gori::Tui
   # overlays a single finding. Mirrors FuzzerView's session shape, minus the editors.
   class MinerView
     include SubtabRef # a sub-tab strip may hold a mark on this view (#683)
+    include SeededSession
     PANE_ORDER = [:summary, :results]
 
     property name : String?
@@ -143,63 +145,13 @@ module Gori::Tui
       @job_id = 0
     end
 
-    # --- persistence accessors ---
-    def request_bytes : Bytes
-      @request
-    end
-
-    def http2? : Bool
-      @http2
-    end
-
-    def sni_override : String?
-      s = @sni.strip
-      s.empty? ? nil : s
-    end
-
-    def dirty? : Bool
-      @dirty
-    end
-
-    def clear_dirty : Nil
-      @dirty = false
-    end
-
-    def mark_config_synced(config : String) : Nil
-      @last_synced_config = config
-    end
-
-    def request_line : String
-      String.new(@request[0, {@request.size, 256}.min]).each_line.first? || ""
-    end
-
-    # HTTP method from the request line — feeds the sub-tab filter's `method:`.
-    def request_method : String
-      request_line.strip.split(' ').first? || ""
-    end
-
     def summary(max : Int32 = 32) : String
-      parts = request_line.strip.split(' ')
-      s = "#{parts[0]?} #{parts[1]?}".strip
-      s = "request" if s.empty?
-      s.size > max ? "#{s[0, max - 1]}…" : s
-    end
-
-    def label(max : Int32 = 18) : String
-      if (n = @name) && !(t = n.strip).empty?
-        return t.size > max ? "#{t[0, max - 1]}…" : t
-      end
-      summary(max)
+      SeededSession.clip(SeededSession.request_summary(@request), max)
     end
 
     def target_origin : String
       scheme, host, port = Repeater::FlowRequest.parse_target(@target)
       "#{scheme}://#{host}:#{port}"
-    end
-
-    # The session target as stored (scheme://host[:port]) — feeds Repeater seeds.
-    def target : String
-      @target
     end
 
     # Build a Repeater-ready request with the selected finding's parameter injected at

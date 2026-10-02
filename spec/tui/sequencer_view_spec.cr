@@ -184,4 +184,44 @@ describe Gori::Tui::SequencerView do
       view.target_host.should be_nil
     end
   end
+
+  # The session accessors SequencerView shares with MinerView (#1463), and the manual paste's
+  # two exceptions to them.
+  describe "session accessors" do
+    it "derives the chip, the filter's method and the origin from the request line" do
+      view = Gori::Tui::SequencerView.new
+      path = "/#{"a" * 40}"
+      view.load("https://h.test", "PUT #{path} HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, true, " sni.test ",
+        Q::Config.new)
+      view.request_line.should eq("PUT #{path} HTTP/1.1")
+      view.request_method.should eq("PUT")
+      view.summary.should eq("PUT #{path}"[0, 31] + "…")
+      view.summary(200).should eq("PUT #{path}")
+      view.label(10).should eq("PUT /aaaa…")
+      view.name = "  login  "
+      view.label(18).should eq("login")
+      view.sni_override.should eq("sni.test")
+      view.http2?.should be_true
+      view.target.should eq("https://h.test")
+      view.target_origin.should eq("https://h.test:443")
+      view.dirty?.should be_true
+      view.clear_dirty
+      view.dirty?.should be_false
+
+      blank = Gori::Tui::SequencerView.new
+      blank.summary.should eq("request")
+      blank.request_method.should eq("")
+      blank.sni_override.should be_nil
+    end
+
+    it "names a manual paste by its token count, clipped like any summary" do
+      view = Gori::Tui::SequencerView.new
+      view.load("http://example.com", Bytes.empty, false, nil,
+        Q::Config.new(mode: Q::Mode::Manual, manual_tokens: ["aa", "bb", "cc"]))
+      view.summary.should eq("manual (3 tokens)")
+      view.summary(8).should eq("manual …")
+      view.label(18).should eq("manual (3 tokens)")
+      view.target_origin.should eq("manual")
+    end
+  end
 end

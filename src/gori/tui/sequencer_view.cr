@@ -12,6 +12,7 @@ require "../fuzz"
 require "../repeater/flow_request"
 require "./viewport"
 require "./subtab_marks"
+require "./seeded_session"
 
 module Gori::Tui
   # The view for ONE token-randomness session (a sub-tab under the Sequencer tab). The
@@ -22,6 +23,7 @@ module Gori::Tui
   # Mirrors MinerView's session shape; collected tokens stay in-memory (never persisted).
   class SequencerView
     include SubtabRef # a sub-tab strip may hold a mark on this view (#683)
+    include SeededSession
     PANE_ORDER      = [:config, :samples, :analysis]
     REPORT_THROTTLE = 25 # recompute the report every N new samples while running
 
@@ -146,66 +148,15 @@ module Gori::Tui
         @last_synced_config == rec.config
     end
 
-    # --- persistence accessors ---
-    def request_bytes : Bytes
-      @request
-    end
-
-    def http2? : Bool
-      @http2
-    end
-
-    def sni_override : String?
-      s = @sni.strip
-      s.empty? ? nil : s
-    end
-
-    def dirty? : Bool
-      @dirty
-    end
-
-    def clear_dirty : Nil
-      @dirty = false
-    end
-
-    def mark_config_synced(config : String) : Nil
-      @last_synced_config = config
-    end
-
-    def request_line : String
-      String.new(@request[0, {@request.size, 256}.min]).each_line.first? || ""
-    end
-
-    def request_method : String
-      request_line.strip.split(' ').first? || ""
-    end
-
     def summary(max : Int32 = 32) : String
-      if @config.mode.manual?
-        s = "manual (#{@config.manual_tokens.size} tokens)"
-        return s.size > max ? "#{s[0, max - 1]}…" : s
-      end
-      parts = request_line.strip.split(' ')
-      s = "#{parts[0]?} #{parts[1]?}".strip
-      s = "request" if s.empty?
-      s.size > max ? "#{s[0, max - 1]}…" : s
-    end
-
-    def label(max : Int32 = 18) : String
-      if (n = @name) && !(t = n.strip).empty?
-        return t.size > max ? "#{t[0, max - 1]}…" : t
-      end
-      summary(max)
+      s = @config.mode.manual? ? "manual (#{@config.manual_tokens.size} tokens)" : SeededSession.request_summary(@request)
+      SeededSession.clip(s, max)
     end
 
     def target_origin : String
       return "manual" if @config.mode.manual?
       scheme, host, port = Repeater::FlowRequest.parse_target(@target)
       "#{scheme}://#{host}:#{port}"
-    end
-
-    def target : String
-      @target
     end
 
     # The host an Issue filed from this session belongs to. nil for a manual paste, which has
