@@ -171,7 +171,7 @@ module Gori
         waited_out = false
         if wait
           deadline = Time.utc.to_unix_ms + budget
-          while job_running?(job)
+          while job.status == :running
             if Time.utc.to_unix_ms >= deadline
               waited_out = true
               break
@@ -201,7 +201,7 @@ module Gori
       # LATER than `stopped_at` — a stop that "happened" after the run it claims to have
       # ended. The reply then says `already_finished` instead (`emit_stop_result`).
       private def request_stop(job : Job) : Bool
-        return false unless job_running?(job)
+        return false unless job.status == :running
         job.stop
         true
       end
@@ -209,8 +209,9 @@ module Gori
       # The stop reply itself, shared by `stop_job` (which may have waited first) and the
       # five per-kind tools. Read AFTER the stop and any wait, never assumed.
       private def emit_stop_result(job : Job, waited_out : Bool = false, *, already_finished : Bool = false) : Result
-        status, stopped_at = job_status_and_end(job)
-        requested = job_stop_requested(job)
+        status = job.status.to_s
+        stopped_at = job.ended_at_ms
+        requested = job.stop_requested_at_ms
         Result.new(JSON.build do |j|
           j.object do
             j.field "job_id", job.id
@@ -228,18 +229,6 @@ module Gori
             j.field "stopped_at", stopped_at
           end
         end)
-      end
-
-      private def job_running?(job : Job) : Bool
-        job.status == :running
-      end
-
-      private def job_status_and_end(job : Job) : {String, Int64?}
-        {job.status.to_s, job.ended_at_ms}
-      end
-
-      private def job_stop_requested(job : Job) : Int64?
-        job.stop_requested_at_ms
       end
 
       # The tools/list schemas for the job-control tools, kept beside the handlers that
