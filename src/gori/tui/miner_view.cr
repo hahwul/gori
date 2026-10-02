@@ -157,14 +157,6 @@ module Gori::Tui
       s.empty? ? nil : s
     end
 
-    def same?(other : MinerView) : Bool
-      same?(other.object_id)
-    end
-
-    def same?(oid : UInt64) : Bool
-      object_id == oid
-    end
-
     def dirty? : Bool
       @dirty
     end

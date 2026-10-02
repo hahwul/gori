@@ -160,10 +160,6 @@ module Gori::Tui
       s.empty? ? nil : s
     end
 
-    def same?(other : SequencerView) : Bool
-      object_id == other.object_id
-    end
-
     def dirty? : Bool
       @dirty
     end

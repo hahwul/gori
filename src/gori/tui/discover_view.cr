@@ -57,10 +57,6 @@ module Gori::Tui
       @status == :paused
     end
 
-    def same?(other : DiscoverRun) : Bool
-      object_id == other.object_id
-    end
-
     # Record a finding and the slot its flow id will land in. One method, so the two arrays
     # cannot drift: an unaligned `flow_ids` would open the request/response of the WRONG
     # endpoint, which is worse than opening none.
