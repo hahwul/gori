@@ -47,10 +47,6 @@ module Gori::CLI::Run
     link_owner_exists?(store, kind, id)
   end
 
-  def self.link_ref_exists_for_spec(store : Gori::Store, kind : Gori::Store::LinkRefKind, id : Int64) : Bool
-    link_ref_exists?(store, kind, id)
-  end
-
   def self.resolve_link_ref_for_spec(verb : String, ref_s : String?,
                                      ref_id : Int64?) : {Gori::Store::LinkRefKind, Int64}
     resolve_link_ref(verb, ref_s, ref_id)
@@ -136,20 +132,6 @@ describe "gori run links — end validation" do
       kind = Gori::Store::LinkOwnerKind::Note
       Gori::CLI::Run.resolve_link_owner_id_for_spec(store, kind, nil, 1).should eq(2_i64)
       Gori::CLI::Run.resolve_link_owner_id_for_spec(store, kind, 2_i64, nil).should eq(2_i64)
-    end
-  end
-
-  it "checks each ref kind against its own table" do
-    with_store do |store|
-      fid = seed_flow(store)
-      rid = store.insert_repeater("https://api.test", "GET / HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0)
-
-      Gori::CLI::Run.link_ref_exists_for_spec(store, Gori::Store::LinkRefKind::Flow, fid).should be_true
-      Gori::CLI::Run.link_ref_exists_for_spec(store, Gori::Store::LinkRefKind::Repeater, rid).should be_true
-      # A flow id is NOT a repeater id: the kinds must not fall through to a shared lookup.
-      Gori::CLI::Run.link_ref_exists_for_spec(store, Gori::Store::LinkRefKind::Fuzz, fid).should be_false
-      Gori::CLI::Run.link_ref_exists_for_spec(store, Gori::Store::LinkRefKind::Miner, rid).should be_false
-      Gori::CLI::Run.link_ref_exists_for_spec(store, Gori::Store::LinkRefKind::Flow, 99_999_i64).should be_false
     end
   end
 end

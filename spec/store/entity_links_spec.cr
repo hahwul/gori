@@ -180,3 +180,24 @@ describe "Notes stable ids" do
     ], 3_i64))
   end
 end
+
+# The existence check both `gori run links add` and MCP `add_link` make before filing a link
+# (#1463 moved it here from the two surfaces).
+describe "Gori::Store#link_ref_exists?" do
+  it "checks each ref kind against its own table" do
+    with_store do |store|
+      fid = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "api.test", port: 443, method: "GET",
+        target: "/x", http_version: "HTTP/1.1",
+        head: "GET /x HTTP/1.1\r\nHost: api.test\r\n\r\n".to_slice, body: nil, source: Gori::FlowSource::Kind::Proxy))
+      rid = store.insert_repeater("https://api.test", "GET / HTTP/1.1\r\n\r\n".to_slice, false, true, nil, 0)
+
+      store.link_ref_exists?(Gori::Store::LinkRefKind::Flow, fid).should be_true
+      store.link_ref_exists?(Gori::Store::LinkRefKind::Repeater, rid).should be_true
+      # A flow id is NOT a repeater id: the kinds must not fall through to a shared lookup.
+      store.link_ref_exists?(Gori::Store::LinkRefKind::Fuzz, fid).should be_false
+      store.link_ref_exists?(Gori::Store::LinkRefKind::Miner, rid).should be_false
+      store.link_ref_exists?(Gori::Store::LinkRefKind::Flow, 99_999_i64).should be_false
+    end
+  end
+end
