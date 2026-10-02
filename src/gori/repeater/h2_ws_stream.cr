@@ -3,6 +3,7 @@ require "../proxy/h2/hpack"
 require "../proxy/h2/head_codec"
 require "../proxy/ws/frame"
 require "./h2_engine"
+require "../plural"
 
 module Gori
   module Repeater
@@ -197,7 +198,7 @@ module Gori
         # for the whole session — and dropping them quietly would report a clean run of a
         # request the operator wrote more of. A capture never produces one (an extended CONNECT
         # head has no entity); a hand-edited pane can.
-        note = body && !body.empty? ? "#{body.size} byte#{body.size == 1 ? "" : "s"} below the " \
+        note = body && !body.empty? ? "#{Gori.plural(body.size, "byte")} below the " \
                                       "handshake's blank line were NOT sent: an RFC 8441 extended CONNECT carries no " \
                                       "request body, and this stream's DATA frames are the WebSocket's own frames" : nil
         read_answer(conn, flow, host, port, note)

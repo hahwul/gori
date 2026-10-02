@@ -2,6 +2,7 @@ require "json"
 require "./graphql"
 require "./ascii_bytes"
 require "./store/models"
+require "./plural"
 
 module Gori
   # GraphQL carried over a WebSocket — how every real GraphQL SUBSCRIPTION runs.
@@ -119,7 +120,7 @@ module Gori
     # A one-line summary for a pane header / CLI section title.
     def summary(frames : Array(Frame)) : String
       names = frames.compact_map(&.op.operation).uniq!
-      s = "#{frames.size} operation#{frames.size == 1 ? "" : "s"} over websocket"
+      s = "#{Gori.plural(frames.size, "operation")} over websocket"
       names.empty? ? s : "#{s} · #{names.first(4).join(", ")}#{names.size > 4 ? ", …" : ""}"
     end
   end

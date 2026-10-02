@@ -5,6 +5,7 @@ require "../../store"
 require "../../miner"
 require "../../env"
 require "../../param_inventory"
+require "../../plural"
 
 module Gori::Tui
   # One open mining session (a sub-tab under the Miner tab). `flow_id` is the source
@@ -828,7 +829,7 @@ module Gori::Tui
              else
                ""
              end
-      found = n > 0 ? "#{n} param#{n == 1 ? "" : "s"} found" : "done — nothing found"
+      found = n > 0 ? "#{Gori.plural(n, "param")} found" : "done — nothing found"
       msg = "Miner: #{found} on #{v.summary}#{tail}#{macro_failure_note(ev.progress)}"
       level = n > 0 ? :success : :info
       log_event(v, level, msg)

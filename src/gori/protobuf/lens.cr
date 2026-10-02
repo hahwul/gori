@@ -1,5 +1,6 @@
 require "base64"
 require "./schema"
+require "../plural"
 
 module Gori::Protobuf
   # Reads ONE wire field through ONE `.proto` declaration — the whole schema-aware half of
@@ -189,7 +190,7 @@ module Gori::Protobuf
           more += 1
         end
       end
-      note = left == 0 ? nil : "the packed run ends mid-element — #{left} byte#{left == 1 ? "" : "s"} left over"
+      note = left == 0 ? nil : "the packed run ends mid-element — #{Gori.plural(left, "byte")} left over"
       Reading.new(d, packed: values, packed_more: more, note: note)
     end
 

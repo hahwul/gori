@@ -150,7 +150,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   private def session_slot_refresh_detail(slot : Gori::SessionSlot) : String
     return "no refresh" unless slot.refreshable?
     n = slot.refresh.size
-    parts = ["refresh #{n} step#{n == 1 ? "" : "s"}"]
+    parts = ["refresh #{Gori.plural(n, "step")}"]
     parts << "before #{slot.refresh_before}" unless slot.refresh_before.off?
     newest = @session.bindings.rows.select { |r| r.slot == slot.name }.compact_map(&.bound_at).max?
     parts << "bound #{session_slot_age(newest)} ago" if newest

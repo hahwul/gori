@@ -9,6 +9,7 @@ require "../fuzz/engine"
 require "../fuzz/matcher"
 require "../miner/inject"
 require "../miner/fingerprint"
+require "../plural"
 
 module Gori::Repeater
   # Squash-style request minimizer: strips the noise out of a request (cosmetic headers,
@@ -748,7 +749,7 @@ module Gori::Repeater
     # spent exactly `SEND_CAP`) and is stated anyway, because the alternative — the CLI
     # appending the count itself — made the other two read `… (11 sends) · 11 sends`.
     private def self.cap_note(removed : Array(Removed), sends : Int32) : String
-      "send cap reached — kept #{removed.size} removal#{removed.size == 1 ? "" : "s"} " \
+      "send cap reached — kept #{Gori.plural(removed.size, "removal")} " \
       "so far (partial, #{sends} sends)"
     end
 
@@ -756,7 +757,7 @@ module Gori::Repeater
     # finished one ran to the end, but "how many requests did the origin actually get before
     # it stopped" is the whole question the operator pressed stop to ask.
     private def self.stop_note(removed : Array(Removed), sends : Int32) : String
-      "stopped — kept #{removed.size} removal#{removed.size == 1 ? "" : "s"} (#{sends} sends)"
+      "stopped — kept #{Gori.plural(removed.size, "removal")} (#{sends} sends)"
     end
   end
 end

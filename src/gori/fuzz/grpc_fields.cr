@@ -6,6 +6,7 @@ require "../proxy/h2/grpc"
 require "./matcher" # GrpcVerdict — the content-type / body split every fuzz surface shares
 require "./payload"
 require "./template"
+require "../plural"
 
 module Gori::Fuzz
   # A run named a gRPC field it cannot sweep.
@@ -403,7 +404,7 @@ module Gori::Fuzz
       chosen = matches[occ]?
       unless chosen
         raise GrpcFieldError.new(
-          "#{spec.inspect}: #{seg.key.inspect} occurs #{matches.size} time#{matches.size == 1 ? "" : "s"} " \
+          "#{spec.inspect}: #{seg.key.inspect} occurs #{Gori.plural(matches.size, "time")} " \
           "on this message, so [#{occ}] is out of range (0..#{matches.size - 1})")
       end
       i, f, r = chosen

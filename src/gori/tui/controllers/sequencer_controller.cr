@@ -5,6 +5,7 @@ require "../../store"
 require "../../sequencer"
 require "../../env"
 require "../../proxy/codec/http1"
+require "../../plural"
 
 module Gori::Tui
   # One open sequencing session (a sub-tab under the Sequencer tab). `flow_id` is the
@@ -641,7 +642,7 @@ module Gori::Tui
         save_current
         drain_events
         start_run(v)
-        @host.status("added #{tokens.size} token#{tokens.size == 1 ? "" : "s"} — analyzing")
+        @host.status("added #{Gori.plural(tokens.size, "token")} — analyzing")
       else
         config = Sequencer::Config.new(mode: Sequencer::Mode::Manual, manual_tokens: tokens)
         view = SequencerView.new
@@ -839,7 +840,7 @@ module Gori::Tui
              else
                ""
              end
-      msg = "Sequencer: #{n} token#{n == 1 ? "" : "s"} on #{v.summary} — #{rep.rating.label}#{tail}"
+      msg = "Sequencer: #{Gori.plural(n, "token")} on #{v.summary} — #{rep.rating.label}#{tail}"
       level = rep.rating.value <= Sequencer::Stats::Rating::Weak.value ? :warning : :success
       log_event(v, level, msg)
       push_notification(v, level, msg, collected: n)

@@ -1,6 +1,7 @@
 require "json"
 require "./record"
 require "./report"
+require "../plural"
 
 module Gori::Diff
   # The three shapes a diff report is read in: a terminal listing, a Markdown section an
@@ -77,7 +78,7 @@ module Gori::Diff
       cts = f.sorted_content_types
       parts << cts.join(", ") unless cts.empty?
       parts << Compare.size_label(f) if f.size_mid
-      parts << "#{f.flows} flow#{f.flows == 1 ? "" : "s"}"
+      parts << Gori.plural(f.flows, "flow")
       parts.join(" · ")
     end
 

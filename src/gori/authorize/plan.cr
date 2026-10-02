@@ -6,6 +6,7 @@ require "../store"
 require "./engine"
 require "./identity"
 require "./passive"
+require "../plural"
 
 module Gori::Authorize
   # Why one option set cannot become a runnable authorize run.
@@ -451,7 +452,7 @@ module Gori::Authorize
         # CLI's top-level `rescue ex : Error` (cli.cr) prints this verbatim; MCP's `call` returns
         # it verbatim too.
         if (pending = options.store.drain_fts!) > 0
-          raise Gori::Error.new("#{pending} flow#{pending == 1 ? "" : "s"} could not be indexed for " \
+          raise Gori::Error.new("#{Gori.plural(pending, "flow")} could not be indexed for " \
                                 "free-text search (this project's writer is busy — another gori is " \
                                 "capturing it), so #{query.inspect} cannot see all of them and this " \
                                 "run would replay fewer flows than asked while reporting a clean " \

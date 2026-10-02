@@ -1,5 +1,6 @@
 # `gori run repeater` — re-send a captured flow, or list/create repeater sessions.
 require "../../repeater/timing"
+require "../../plural"
 
 module Gori
   module CLI
@@ -462,7 +463,7 @@ module Gori
                 "(see `gori run repeater list`)" unless missing.empty?
 
           unless yes
-            abort "gori run repeater delete: refusing to delete #{ids.size} session#{ids.size == 1 ? "" : "s"} " \
+            abort "gori run repeater delete: refusing to delete #{Gori.plural(ids.size, "session")} " \
                   "without --yes; this cannot be undone"
           end
 

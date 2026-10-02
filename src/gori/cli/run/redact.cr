@@ -80,7 +80,7 @@ module Gori
                    " across #{touched} of #{reports.size} flows"
                  end
         io.puts "gori run #{command}: sanitized with profile #{profile.name.inspect}: " \
-                "#{total} value#{total == 1 ? "" : "s"} redacted from request/response " \
+                "#{Gori.plural(total, "value")} redacted from request/response " \
                 "bodies#{across} (heads, URLs and query strings are NOT redacted)"
         if reports.any? { |(_, r)| r.decoded? }
           io.puts "gori run #{command}: a body was content-decoded to be read, so the sanitized " \
@@ -244,10 +244,10 @@ module Gori
 
       private def self.redact_rule_counts(p : Redact::Profile) : String
         parts = [] of String
-        parts << "#{p.json_fields.size} field#{p.json_fields.size == 1 ? "" : "s"}" unless p.json_fields.empty?
-        parts << "#{p.json_pointers.size} pointer#{p.json_pointers.size == 1 ? "" : "s"}" unless p.json_pointers.empty?
+        parts << Gori.plural(p.json_fields.size, "field") unless p.json_fields.empty?
+        parts << Gori.plural(p.json_pointers.size, "pointer") unless p.json_pointers.empty?
         parts << "#{p.form_keys.size} form key#{p.form_keys.size == 1 ? "" : "s"}" unless p.form_keys.empty?
-        parts << "#{p.patterns.size} pattern#{p.patterns.size == 1 ? "" : "s"}" unless p.patterns.empty?
+        parts << Gori.plural(p.patterns.size, "pattern") unless p.patterns.empty?
         parts.empty? ? "no rules" : parts.join(", ")
       end
 

@@ -28,7 +28,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   private def authorize_seed_toast(added : Int32, skipped : Int32) : String
     return "authorize: already queued" if added == 0 && skipped > 0
     return "those flows are no longer available" if added == 0
-    base = "authorize: loaded #{added} request#{added == 1 ? "" : "s"}"
+    base = "authorize: loaded #{Gori.plural(added, "request")}"
     return "#{base}, #{skipped} already queued" if skipped > 0
     "#{base} — ^R to run"
   end

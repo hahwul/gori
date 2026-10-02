@@ -11,6 +11,7 @@ require "../authorize/engine"
 require "../authorize/passive"
 require "../repeater/message_lines"
 require "../store/models"
+require "../plural"
 
 module Gori::Tui
   # The Authorize tab body. A LIST of captured requests, each replayed under the same set of
@@ -597,7 +598,7 @@ module Gori::Tui
     private def render_header(screen : Screen, rect : Rect, y : Int32) : Int32
       ids = @identities.map(&.name).join(", ")
       pending = pending_count
-      count = "#{@entries.size} request#{@entries.size == 1 ? "" : "s"}"
+      count = Gori.plural(@entries.size, "request")
       count += " (#{pending} pending)" if pending > 0
       count += " · #{visible.size} match" if @filter.active?
       screen.text(rect.x, y, "#{count} · identities: #{ids}", Theme.muted, Theme.bg, width: rect.w)

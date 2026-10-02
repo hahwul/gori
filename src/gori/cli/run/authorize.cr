@@ -138,7 +138,7 @@ module Gori
       private def self.run_authorize(plan : Authorize::Plan, format : Symbol) : Nil
         total = plan.targets.size
         ids = plan.identities.size
-        STDERR.puts "authorizing #{total} request#{total == 1 ? "" : "s"} × #{ids} identities " \
+        STDERR.puts "authorizing #{Gori.plural(total, "request")} × #{ids} identities " \
                     "(#{CLI::Output.term_safe(plan.identities.map(&.name).join(", "))}) = #{plan.total_sends} requests"
         report_authorize_skips(plan.skipped)
 
@@ -254,7 +254,7 @@ module Gori
 
       private def self.report_authorize_skips(skipped : Array(Authorize::Skipped)) : Nil
         return if skipped.empty?
-        STDERR.puts "skipped #{skipped.size} flow#{skipped.size == 1 ? "" : "s"} · #{Authorize::Plan.skip_tally(skipped)}"
+        STDERR.puts "skipped #{Gori.plural(skipped.size, "flow")} · #{Authorize::Plan.skip_tally(skipped)}"
         skipped.each { |s| STDERR.puts "  #{authorize_skip_text(s)}" }
       end
 

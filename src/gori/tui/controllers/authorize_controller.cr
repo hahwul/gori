@@ -4,6 +4,7 @@ require "../../authorize/engine"
 require "../../outbound"
 require "../../settings"
 require "../../authorize/passive"
+require "../../plural"
 
 module Gori::Tui
   # The Authorize tab: replay one or more captured requests under several identities and read
@@ -546,7 +547,7 @@ module Gori::Tui
       @view.mark_running(@batch_ids)
       gen = (@gen += 1)
       @active_gen = gen
-      noun = "#{batch.size} request#{batch.size == 1 ? "" : "s"}"
+      noun = Gori.plural(batch.size, "request")
       @job_id = @host.jobs.start(:authorize, noun, Jobs::Goto.new(:authorize))
       @host.status("authorize: replaying #{noun} under #{idents.size} identities…")
       # Snapshot the details now — the background fiber must not touch the view.
@@ -688,7 +689,7 @@ module Gori::Tui
     # words every other surface prints for it.
     private def skip_phrase(count : Int32, reason : Symbol?) : String
       label = reason ? " (#{Authorize::Passive.reason_label(reason)})" : ""
-      "#{count} request#{count == 1 ? "" : "s"} skipped#{label}"
+      "#{Gori.plural(count, "request")} skipped#{label}"
     end
 
     # Ask the run to stop. Cooperative: the flag is polled between requests AND between
@@ -740,7 +741,7 @@ module Gori::Tui
       n = @view.size
       return @host.status("authorize: nothing to clear") if n <= 0
       @host.confirm("CLEAR AUTHORIZE",
-        "Empty the queue of #{n} request#{n == 1 ? "" : "s"}?\n\n" \
+        "Empty the queue of #{Gori.plural(n, "request")}?\n\n" \
         "Every identity's result goes with them.\n" \
         "This can't be undone.",
         confirm_label: "clear", danger: true) { clear_now }
@@ -884,7 +885,7 @@ module Gori::Tui
         why = @view.unanswered_reason_in(@batch_ids)
         parts << "#{unanswered} whose every send failed#{why ? " (#{why})" : ""}"
       end
-      "authorize: nothing was compared — #{done} request#{done == 1 ? "" : "s"} · " \
+      "authorize: nothing was compared — #{Gori.plural(done, "request")} · " \
       "#{parts.join(" · ")} · this is not a result"
     end
 

@@ -98,7 +98,7 @@ module Gori
           "no gori TUI is open on #{name}, so nobody was shown this yet: the next one to open " \
           "sums it up, and the Project tab's Activity pane keeps it"
         else
-          "shown in the gori TUI open on #{name} (#{windows} window#{windows == 1 ? "" : "s"})"
+          "shown in the gori TUI open on #{name} (#{Gori.plural(windows, "window")})"
         end
       end
     end

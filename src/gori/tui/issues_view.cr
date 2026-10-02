@@ -20,6 +20,7 @@ require "./line_edit"
 require "./query_suggest"
 require "./suggest_popup"
 require "./issue_presentation"
+require "../plural"
 
 module Gori::Tui
   # The Issues tab (DESIGN.md §6: the final output — human-confirmed vulns). A
@@ -715,7 +716,7 @@ module Gori::Tui
         @retest_summary = nil
         return
       end
-      line = "retest    #{n} step#{n == 1 ? "" : "s"}"
+      line = "retest    #{Gori.plural(n, "step")}"
       if r = store.last_retest_run(issue.id)
         t = Retest::Tally.new(r.total, r.passed, r.failed, r.inconclusive, r.errored, r.blocked, r.skipped)
         line += " · last #{r.verdict.label.upcase} (#{Retest.summary_line(t)}) #{fmt_ts(r.started_at)}"

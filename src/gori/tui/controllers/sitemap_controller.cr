@@ -3,6 +3,7 @@ require "../sitemap_view"
 require "../../export/openapi"
 require "../../js_refs"
 require "../../durable_file"
+require "../../plural"
 
 module Gori::Tui
   # The Sitemap tab: a host/path tree derived from captured flows. Near
@@ -123,7 +124,7 @@ module Gori::Tui
     # The finished scan as one line: what it found, then every cap and failure — a capped scan
     # looks complete, and a rolled-back write leaves a flow unscanned, so the toast says both.
     def self.js_scan_toast(r : JsRefs::ScanReport) : String
-      msg = "JS scan: #{r.flows_scanned} response#{r.flows_scanned == 1 ? "" : "s"}, " \
+      msg = "JS scan: #{Gori.plural(r.flows_scanned, "response")}, " \
             "#{r.new_endpoints} new endpoint#{r.new_endpoints == 1 ? "" : "s"}"
       msg += " · #{r.bodies_capped} read only to #{JsRefs::MAX_SCAN // 1024 // 1024} MiB" if r.bodies_capped > 0
       msg += " · #{r.refs_capped} stopped at #{JsRefs::MAX_REFS} literals" if r.refs_capped > 0
@@ -590,7 +591,7 @@ module Gori::Tui
     end
 
     private def paths(n : Int32) : String
-      "#{n} path#{n == 1 ? "" : "s"}"
+      Gori.plural(n, "path")
     end
 
     # `g` — fold/unfold path-param ids (uuid/hex/date + numeric runs), then rebuild.

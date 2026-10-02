@@ -18,6 +18,7 @@ require "../host_overrides"
 require "../settings"
 require "../env"
 require "./highlight"
+require "../plural"
 
 module Gori::Tui
   # The Project tab (new default home on entry after create/select). Shows static
@@ -2978,7 +2979,7 @@ module Gori::Tui
     private def activity_meta : String
       parts = [] of String
       n = @act_rows.size
-      parts << (activity_more? ? "#{n}+ events" : "#{n} event#{n == 1 ? "" : "s"}")
+      parts << (activity_more? ? "#{n}+ events" : Gori.plural(n, "event"))
       # Rows that arrived above a cursor the operator parked further down. Named FIRST after the
       # count, because it is the only part of this line that is about something off-screen.
       #

@@ -6,6 +6,7 @@ require "../url"
 require "../../hotkeys"
 require "../../protobuf/reflection"
 require "../../protobuf/schemas"
+require "../../plural"
 
 module Gori::Tui
   # The History tab: the live flow list + the in-frame detail drill-in. The detail
@@ -1023,7 +1024,7 @@ module Gori::Tui
       n = @history.mark_count
       return "no marks — verbs act on the cursor row" if n == 0
       hidden = @history.marked_hidden_count
-      msg = "#{n} flow#{n == 1 ? "" : "s"} marked"
+      msg = "#{Gori.plural(n, "flow")} marked"
       msg += " (#{hidden} not visible)" if hidden > 0
       msg
     end

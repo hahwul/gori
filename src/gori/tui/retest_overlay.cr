@@ -4,6 +4,7 @@ require "./frame"
 require "./picker_overlay"
 require "../store"
 require "../retest"
+require "../plural"
 
 module Gori::Tui
   # The RETEST card for one Issue (#1036): the ordered Repeater sends that reproduce the
@@ -312,7 +313,7 @@ module Gori::Tui
       t = Issues::Export.one_line(@issue_title)
       max = 48
       t = "#{t[0, max - 1]}…" if t.size > max
-      "#{t} · #{@steps.size} step#{@steps.size == 1 ? "" : "s"} · #{@mode == :results ? "RESULTS" : "STEPS"}"
+      "#{t} · #{Gori.plural(@steps.size, "step")} · #{@mode == :results ? "RESULTS" : "STEPS"}"
     end
 
     private def empty_line : String
@@ -331,7 +332,7 @@ module Gori::Tui
       end
       # STEPS: the confirm's own sentence, shown BEFORE `r` rather than only in the dialog,
       # so an operator can see what a run costs while they are still building it.
-      @plan_note || "#{@runnable} request#{@runnable == 1 ? "" : "s"} · all safe methods"
+      @plan_note || "#{Gori.plural(@runnable, "request")} · all safe methods"
     end
 
     private def footer_color : Color

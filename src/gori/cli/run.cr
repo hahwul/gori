@@ -104,6 +104,7 @@ require "./run/views"
 require "./run/project"
 require "./run/project_network"
 require "./run/project_default"
+require "../plural"
 
 module Gori
   module CLI

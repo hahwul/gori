@@ -16,6 +16,7 @@ require "../../repeater/minimize"
 require "../../repeater/plan"
 require "../../repeater/timing"
 require "../../fuzz/engine"
+require "../../plural"
 
 module Gori::Tui
   # One open repeater session (a "sub-tab" under the top-level Repeater tab). Each carries
@@ -1941,7 +1942,7 @@ module Gori::Tui
         # RSV1 frame and a FIN=0 fragment are all capturable since V7, and a line of text
         # cannot say which of those it is.
         unshown = view.ws_unshown_seed
-        note = unshown.empty? ? "" : " — #{unshown.size} frame#{unshown.size == 1 ? "" : "s"} not shown (#{unshown.join(", ")}); #{unshown.size == 1 ? "it replays" : "they replay"} unless you edit the list"
+        note = unshown.empty? ? "" : " — #{Gori.plural(unshown.size, "frame")} not shown (#{unshown.join(", ")}); #{unshown.size == 1 ? "it replays" : "they replay"} unless you edit the list"
         note += " · #{CLI::Run.ws_notice_dropped_note(notice_dropped)}" if notice_dropped > 0
         @host.status("ws repeater: #{view.summary} (#{transport_word(view)}) — edit messages " \
                      "(one per line)#{note} · ^R send · esc back")
@@ -2034,7 +2035,7 @@ module Gori::Tui
 
     private def duplicate_views(srcs : Array(RepeaterView)) : Nil
       lost = srcs.count { |v| duplicate_view(v) }
-      msg = "duplicated #{srcs.size} sub-tab#{srcs.size == 1 ? "" : "s"} (#{@repeaters.size} open)"
+      msg = "duplicated #{Gori.plural(srcs.size, "sub-tab")} (#{@repeaters.size} open)"
       msg += " — #{lost} without their ws frames (project busy); those tabs stay dirty so a later save retries" if lost > 0
       @host.status(msg)
     end
@@ -2582,7 +2583,7 @@ module Gori::Tui
       # WebSocket sends are not written to History, and the CLI draws the same line
       # (`--record-history is HTTP-only`): a socket's evidence is its frame transcript, which
       # the repeater session already keeps, and a flow row would hold a handshake and nothing else.
-      @host.status("ws sending → #{plan.host}:#{plan.port} (#{messages.size} msg#{messages.size == 1 ? "" : "s"})…#{unrecorded_note("WebSocket")}", :busy)
+      @host.status("ws sending → #{plan.host}:#{plan.port} (#{Gori.plural(messages.size, "msg")})…#{unrecorded_note("WebSocket")}", :busy)
       spawn(name: "gori-ws-repeater") do
         result = plan.send_ws(messages, Repeater::WsEngine::DEFAULT_IDLE, keep_key)
         select
@@ -2641,7 +2642,7 @@ module Gori::Tui
       # the seam, so there is no per-request slice a recorder could be handed — and writing the
       # drafts instead is exactly the defect `HistoryRecord`'s required `wire` argument exists
       # to prevent.
-      @host.status("send group → #{plan.host}:#{plan.port} · #{n} request#{n == 1 ? "" : "s"} on one connection…#{unrecorded_note("send group")}")
+      @host.status("send group → #{plan.host}:#{plan.port} · #{Gori.plural(n, "request")} on one connection…#{unrecorded_note("send group")}")
       spawn(name: "gori-repeater-group") do
         rs = plan.send_group
         labeled = labels.zip(rs)

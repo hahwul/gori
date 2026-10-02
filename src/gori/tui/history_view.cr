@@ -31,6 +31,7 @@ require "../proxy/h2/grpc"
 require "../proxy/codec/body"
 require "../entity"
 require "./protobuf_tree"
+require "../plural"
 
 module Gori::Tui
   # The History tab — gori's home. A plain, append-only log of captured flows
@@ -4855,7 +4856,7 @@ module Gori::Tui
     end
 
     private def form_detail_lines(fields : Array(FormData::Field)) : Array(Highlight::Line)
-      lines = [derived_header("#{fields.size} field#{fields.size == 1 ? "" : "s"}")]
+      lines = [derived_header(Gori.plural(fields.size, "field"))]
       lines << Highlight::Line.new
       fields.each do |f|
         break if lines.size >= DERIVED_LINE_CAP

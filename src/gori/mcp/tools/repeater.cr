@@ -1,6 +1,7 @@
 require "json"
 require "../../env"
 require "../../store"
+require "../../plural"
 
 module Gori
   module MCP
@@ -1130,7 +1131,7 @@ module Gori
             end
             unless failed.empty?
               j.field "failed" { j.array { failed.each { |id| j.number id } } }
-              j.field "note", "#{failed.size} session#{failed.size == 1 ? "" : "s"} could NOT be deleted " \
+              j.field "note", "#{Gori.plural(failed.size, "session")} could NOT be deleted " \
                               "(store busy or unwritable) and #{failed.size == 1 ? "is" : "are"} unchanged; " \
                               "the ones under deleted are gone — retry only the failed ids"
             end
@@ -1220,7 +1221,7 @@ module Gori
             end
             if (mats = updated.count { |(_, _, _, m)| m }) > 0
               j.field "name_materialised_note",
-                "#{mats} session#{mats == 1 ? "" : "s"} had no stored name, so the affix was applied to the " \
+                "#{Gori.plural(mats, "session")} had no stored name, so the affix was applied to the " \
                 "label gori derives from the request line and that label is now STORED — it no longer " \
                 "follows the request if you edit it"
             end

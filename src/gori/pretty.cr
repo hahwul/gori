@@ -12,6 +12,7 @@ require "./msgpack"
 require "./cbor"
 require "./decoder/serialized"
 require "./jwt/jwe"
+require "./plural"
 
 module Gori
   # Display-only body pretty-printer. Sits BETWEEN the transform layer
@@ -302,7 +303,7 @@ module Gori
       return nil if text == str # single bare token, nothing to reflow
       ob = text.to_slice
       return nil if ob.size > MAX_OUT_PRETTY
-      Result.new(ob, "pretty: form (#{pairs.size} field#{pairs.size == 1 ? "" : "s"})", :form)
+      Result.new(ob, "pretty: form (#{Gori.plural(pairs.size, "field")})", :form)
     rescue
       nil
     end
@@ -334,7 +335,7 @@ module Gori
       text = parts.join("\n\n")
       ob = text.to_slice
       return nil if ob.size > MAX_OUT_PRETTY
-      Result.new(ob, "pretty: multipart (#{count} part#{count == 1 ? "" : "s"})", :text)
+      Result.new(ob, "pretty: multipart (#{Gori.plural(count, "part")})", :text)
     rescue
       nil
     end

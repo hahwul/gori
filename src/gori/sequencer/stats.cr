@@ -1,5 +1,6 @@
 require "compress/deflate"
 require "./types"
+require "../plural"
 
 module Gori::Sequencer
   # The randomness math — pure, byte-level, stdlib-only, spec-testable in isolation
@@ -195,7 +196,7 @@ module Gori::Sequencer
           "sequential pattern · effective entropy #{effective_entropy.round(1)}b"
         else
           fails = tests.count(&.verdict.fail?)
-          "effective entropy #{effective_entropy.round(1)}b · #{fails == 0 ? "all tests passed" : "#{fails} test#{fails == 1 ? "" : "s"} failed"}"
+          "effective entropy #{effective_entropy.round(1)}b · #{fails == 0 ? "all tests passed" : "#{Gori.plural(fails, "test")} failed"}"
         end
       end
     end
@@ -506,7 +507,7 @@ module Gori::Sequencer
 
     private def self.uniqueness_test(unique : Int32, n : Int32, dups : Int32) : TestRow
       TestRow.new("Uniqueness", "#{unique}/#{n}",
-        dups > 0 ? "#{dups} duplicate#{dups == 1 ? "" : "s"}" : "all distinct",
+        dups > 0 ? Gori.plural(dups, "duplicate") : "all distinct",
         dups > 0 ? Verdict::Fail : Verdict::Pass)
     end
 

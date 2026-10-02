@@ -1,5 +1,6 @@
 # `gori run discover` — spider + directory brute-force a target; findings feed the Sitemap.
 require "../../discover/plan"
+require "../../plural"
 
 module Gori
   module CLI
@@ -367,7 +368,7 @@ module Gori
         # target it had barely touched. Read off the engine rather than the event for the
         # reason `pool_stats` is: the counter is final exactly when this event arrives.
         if (refused = engine.scope_refused) > 0
-          STDERR.puts "#{refused} candidate#{refused == 1 ? "" : "s"} refused by scope " \
+          STDERR.puts "#{Gori.plural(refused, "candidate")} refused by scope " \
                       "— the sweep stopped early; this is not a clean result over the whole target"
         end
         # Handshakes actually paid for — the one thing the request counts above cannot show.

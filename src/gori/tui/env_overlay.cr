@@ -6,6 +6,7 @@ require "./text_field"
 require "./overlay"
 require "../settings"
 require "../env"
+require "../plural"
 
 module Gori::Tui
   # Global environment-variable editor (settings:env). Edits a working copy of the
@@ -384,7 +385,7 @@ module Gori::Tui
       # an operator cannot infer from the rows: `HOST → api.test` reads the same whether the
       # editor two tabs over resolves `$HOST` or `$ENV.HOST`.
       meta = "global · #{Env.spell("KEY", Env::Namespace::Env, syntax, @prefix)} · " \
-             "#{@items.size} var#{@items.size == 1 ? "" : "s"}"
+             "#{Gori.plural(@items.size, "var")}"
       Frame.border_meta(screen, box, "ENVIRONMENT", meta, bg: Theme.panel)
       draw_prefix_row(screen, box, box.y + 1)
       screen.text(box.x + 3, box.y + 2, "KEY VALUE · e.g. HOST api.example.com", Theme.muted, Theme.panel, width: {box.w - 5, 1}.max)

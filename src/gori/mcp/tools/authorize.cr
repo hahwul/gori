@@ -1,6 +1,7 @@
 require "json"
 require "../../authorize/plan"
 require "../../scope"
+require "../../plural"
 
 module Gori
   module MCP
@@ -316,12 +317,12 @@ module Gori
         when "error"
           why = ajob.unanswered_reason
           "nothing came back — every send failed for #{ajob.unanswered} of " \
-          "#{ajob.replayed} request#{ajob.replayed == 1 ? "" : "s"} replayed" \
+          "#{Gori.plural(ajob.replayed, "request")} replayed" \
           "#{why ? " (#{Serialize.text(why)})" : ""}. Nothing was compared, so this is NOT " \
           "evidence that access control works — check the host is reachable from here and re-run"
         when "BYPASS"
           "BROKEN ACCESS CONTROL: #{ajob.bypasses} identity result#{ajob.bypasses == 1 ? "" : "s"} across " \
-          "#{ajob.bypassed.size} request#{ajob.bypassed.size == 1 ? "" : "s"} " \
+          "#{Gori.plural(ajob.bypassed.size, "request")} " \
           "matched the baseline response — a non-baseline identity was served the same resource. " \
           "Confirm the identity is genuinely lower-privilege, then raise it."
         when "review"
@@ -335,7 +336,7 @@ module Gori
             else
               ""
             end
-          "no identity matched the baseline outright, but #{ajob.reviews} result#{ajob.reviews == 1 ? "" : "s"} " \
+          "no identity matched the baseline outright, but #{Gori.plural(ajob.reviews, "result")} " \
           "need review (same status class, divergent body — a tailored denial and a per-user page " \
           "look alike)#{anchored}"
         else
@@ -345,7 +346,7 @@ module Gori
           n = ajob.unanswered
           unreached = n > 0 ? " · #{n} of them could not be reached at all and #{n == 1 ? "is" : "are"} " \
                               "evidence of nothing (see `unanswered_count`)" : ""
-          "#{ajob.replayed} request#{ajob.replayed == 1 ? "" : "s"} replayed · no identity matched the baseline " \
+          "#{Gori.plural(ajob.replayed, "request")} replayed · no identity matched the baseline " \
           "(access control appears enforced for the identities tested)#{unreached}"
         end
       end
@@ -357,7 +358,7 @@ module Gori
         tail = "; this is NOT evidence that access control works"
         if ajob.blocked > 0
           why = ajob.blocked_reason
-          return "nothing was sent — #{ajob.blocked} request#{ajob.blocked == 1 ? "" : "s"} were refused " \
+          return "nothing was sent — #{Gori.plural(ajob.blocked, "request")} were refused " \
                  "before the socket#{why ? " (#{Serialize.text(why)})" : ""}#{tail}"
         end
         if ajob.failed > 0

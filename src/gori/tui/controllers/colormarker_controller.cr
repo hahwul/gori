@@ -6,6 +6,7 @@ require "../../settings"
 require "../../colormarker"
 require "../viewport"
 require "../row_filter"
+require "../../plural"
 
 module Gori::Tui
   # The Colormarker tab: two stacked panes. The POLICY list on top manages this project's
@@ -608,7 +609,7 @@ module Gori::Tui
       # wording says "in this project" rather than implying a total, and the tail is
       # unconditional so a count of zero still does not read as "nothing references this".
       in_use = engine.rules.count { |r| r.color == c.name }
-      note = in_use > 0 ? " #{in_use} rule#{in_use == 1 ? "" : "s"} in this project still name it;" : " No rule in this project names it, but"
+      note = in_use > 0 ? " #{Gori.plural(in_use, "rule")} in this project still name it;" : " No rule in this project names it, but"
       note += " rules in other projects may too — those rows fall back to a default colour."
       @host.confirm("DELETE CUSTOM COLOUR", "Delete “#{c.name}”?#{note} This can't be undone.",
         confirm_label: "delete", danger: true) do

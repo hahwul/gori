@@ -4,6 +4,7 @@ require "./frame"
 require "./overlay"
 require "./text_area"
 require "../import/curl"
+require "../plural"
 
 module Gori::Tui
   # The paste box behind "Paste cURL" (Repeater) and "Import: cURL" (History), #1244.
@@ -158,7 +159,7 @@ module Gori::Tui
       return describe_many(parsed, mode) if parsed.requests.size > 1 || !parsed.skipped.empty?
       req = parsed.requests.first
       notes = (parsed.notes + req.notes).size
-      tail = notes > 0 ? " · #{notes} note#{notes == 1 ? "" : "s"}" : ""
+      tail = notes > 0 ? " · #{Gori.plural(notes, "note")}" : ""
       proto = req.http2? ? " (h2)" : ""
       {"#{req.method} #{req.url}#{proto}#{tail}", true}
     rescue ex : Gori::Error

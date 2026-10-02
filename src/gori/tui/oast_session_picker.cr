@@ -3,6 +3,7 @@ require "./theme"
 require "./fmt"
 require "./frame"
 require "./picker_overlay"
+require "../plural"
 
 module Gori::Tui
   # RESUME LISTENER: pick one of this project's persisted OAST sessions and start polling it
@@ -171,7 +172,7 @@ module Gori::Tui
     end
 
     private def meta_text(row : Row) : String
-      base = "#{row.hits} hit#{row.hits == 1 ? "" : "s"} · #{Fmt.ago(row.started_at)}"
+      base = "#{Gori.plural(row.hits, "hit")} · #{Fmt.ago(row.started_at)}"
       row.live ? "#{base} · ● live" : base
     end
 

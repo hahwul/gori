@@ -59,6 +59,7 @@ require "./repeater_view/session"
 require "./repeater_view/target_field"
 require "./repeater_view/ws"
 require "./subtab_marks"
+require "../plural"
 
 module Gori::Tui
   # The Repeater workbench (a tab). Layout: a target URL field on top, then a split

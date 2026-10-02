@@ -742,7 +742,7 @@ module Gori
         return "" unless slot.refreshable?
         n = slot.refresh.size
         before = slot.refresh_before.off? ? "" : " · before #{slot.refresh_before}"
-        " · refresh #{n} step#{n == 1 ? "" : "s"}#{before}"
+        " · refresh #{Gori.plural(n, "step")}#{before}"
       end
 
       # The same one-liner with the VALUES in it (`--show-values`), so the row a script greps

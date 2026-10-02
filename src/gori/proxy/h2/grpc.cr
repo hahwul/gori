@@ -1,5 +1,6 @@
 require "base64"
 require "../../media_type"
+require "../../plural"
 
 module Gori::Proxy::H2
   # gRPC framing over HTTP/2 (https://grpc.io). A gRPC call is an h2 stream whose
@@ -307,7 +308,7 @@ module Gori::Proxy::H2
     # "(no complete gRPC messages)" — which reads identically to "this is not gRPC".
     def self.framing_error(residual : Int32) : String?
       return nil unless residual > 0
-      "the last #{residual} byte#{residual == 1 ? "" : "s"} are not a complete gRPC frame — " \
+      "the last #{Gori.plural(residual, "byte")} are not a complete gRPC frame — " \
       "a length prefix claiming more than arrived, or a body cut short"
     end
   end

@@ -3,6 +3,7 @@ require "./theme"
 require "./frame"
 require "./overlay"
 require "../agent_presence"
+require "../plural"
 
 module Gori::Tui
   # The MCP clients bound to THIS project (#815), opened from the `mcp:` top-bar chip or the
@@ -178,7 +179,7 @@ module Gori::Tui
         return
       end
       Frame.card(screen, box, "AGENTS", border: Theme.border_focus)
-      meta = "#{@rows.size} client#{@rows.size == 1 ? "" : "s"}"
+      meta = Gori.plural(@rows.size, "client")
       Frame.border_meta(screen, box, "AGENTS", meta, bg: Theme.panel)
 
       cap = list_capacity(box)

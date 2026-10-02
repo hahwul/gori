@@ -1,6 +1,7 @@
 require "../../cache_deception"
 require "../../authorize/engine"
 require "../../host_overrides"
+require "../../plural"
 
 # `gori run cache-deception` — check captured flows for WEB CACHE DECEPTION, the headless
 # equivalent of the MCP `cache_deception_check` tool. Replays each flow as its captured
@@ -74,7 +75,7 @@ module Gori
 
         emit_cache_deception_json_array(reports) if format == :json
         deceptions = reports.count(&.verdict.deception?)
-        STDERR.puts "checked #{checked} flow#{checked == 1 ? "" : "s"} — " \
+        STDERR.puts "checked #{Gori.plural(checked, "flow")} — " \
                     "#{deceptions} likely cache deception#{deceptions == 1 ? "" : "s"}"
         Run.report_interrupted(checked, "flow", "checked") if interrupted.call
         exit_if_no_cache_deception_evidence(reports, sent, checked, failed)

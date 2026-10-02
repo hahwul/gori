@@ -2,6 +2,7 @@ require "../paths"
 require "../url"
 require "../store"
 require "./schema"
+require "../plural"
 
 module Gori::Protobuf
   # WHERE the open project's `.proto` schema comes from, and what a captured gRPC path
@@ -265,12 +266,12 @@ module Gori::Protobuf
       # https://api.test" reads as a partial failure, and a project that only ever reflected
       # has no file to have failed.
       where = [] of String
-      where << "#{files} file#{files == 1 ? "" : "s"}" if files > 0 || reflected.empty?
+      where << Gori.plural(files, "file") if files > 0 || reflected.empty?
       unless reflected.empty?
         where << (reflected.size == 1 ? "reflection #{reflected[0].path}" : "reflection ×#{reflected.size}")
       end
       line = where.join(" · ")
-      line += " · #{msgs} message#{msgs == 1 ? "" : "s"} · #{rpcs} rpc#{rpcs == 1 ? "" : "s"}"
+      line += " · #{Gori.plural(msgs, "message")} · #{Gori.plural(rpcs, "rpc")}"
       line += " · #{bad.size} failed" unless bad.empty?
       line += " · #{@@dropped} over the #{MAX_FILES}-file limit" if @@dropped > 0
       line += " · #{s.conflicts} redefined" if s && s.conflicts > 0

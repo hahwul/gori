@@ -6,6 +6,7 @@ require "../../store"
 require "../../fuzz"
 require "../../hotkeys"
 require "../../probe"
+require "../../plural"
 
 module Gori::Tui
   # One open Fuzzer session (a sub-tab under the Fuzzer tab). `flow_id` is the source
@@ -1336,7 +1337,7 @@ module Gori::Tui
         when "condition_met" then ev.stop_reason ? " (#{ev.stop_reason})" : " (condition met)"
         else                      ""
         end
-      msg = "Fuzzer: #{n} hit#{n == 1 ? "" : "s"} / #{v.result_count} sent#{wire} on #{v.summary}#{ending}#{macro_failure_note(p)}"
+      msg = "Fuzzer: #{Gori.plural(n, "hit")} / #{v.result_count} sent#{wire} on #{v.summary}#{ending}#{macro_failure_note(p)}"
       log_event(v, level, msg)
       @host.notifications.push(level, msg, goto_for(v), source: "fuzzer")
       @host.status(msg, :done) if Settings.notify_toast?
@@ -1663,7 +1664,7 @@ module Gori::Tui
       count = spool_run.written
       bytes = spool_run.accepted_bytes
       @host.confirm("SAVE FUZZ RESULTS",
-        "Permanently save #{count} result#{count == 1 ? "" : "s"} (#{Fmt.size(bytes)}) in this project?",
+        "Permanently save #{Gori.plural(count, "result")} (#{Fmt.size(bytes)}) in this project?",
         confirm_label: "save", danger: false) do
         start_results_save(view, session_id)
       end

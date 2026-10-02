@@ -2,6 +2,7 @@ require "json"
 require "../../ql"
 require "../../scope"
 require "../../probe"
+require "../../plural"
 
 module Gori
   module MCP
@@ -262,7 +263,7 @@ module Gori
         if all
           n = store.count_probe_issues
           unless bool_arg(h, "confirm", false)
-            return err("refusing to delete #{n} finding#{n == 1 ? "" : "s"} without confirm:true — this also clears every hard-delete suppression, so a rescan re-discovers them",
+            return err("refusing to delete #{Gori.plural(n, "finding")} without confirm:true — this also clears every hard-delete suppression, so a rescan re-discovers them",
               "CONFIRM_REQUIRED", field: "confirm", details: JSON.parse({"findings" => n}.to_json))
           end
           return busy("findings NOT cleared (store busy or unwritable); every one is still there") unless store.clear_probe_issues

@@ -342,7 +342,7 @@ module Gori::Tui
       total = @projects.size
       return Gori.plural(total, "project") unless @needle
       head = @running ? "scanning #{@scanned}/#{total}" : "#{@scanned}/#{total} searched"
-      parts = [head, "#{@hits} hit#{@hits == 1 ? "" : "s"}"]
+      parts = [head, Gori.plural(@hits, "hit")]
       parts << "#{@skipped} skipped" if @skipped > 0
       parts << "#{@unindexed} unindexed" if @unindexed > 0
       # A project with no body index was searched by host and path only, whatever the needle.

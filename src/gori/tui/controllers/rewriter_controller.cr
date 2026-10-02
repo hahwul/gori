@@ -7,6 +7,7 @@ require "../../rules"
 require "../../proxy/upstream"
 require "../viewport"
 require "../row_filter"
+require "../../plural"
 
 module Gori::Tui
   # The Rewriter tab: manage the project's Match & Replace rules (the shared Rules engine
@@ -890,7 +891,7 @@ module Gori::Tui
       end
       @sub = :rules
       @sel = last_index_of_scope(Store::RuleScope::Project)
-      @host.status("installed \"#{preset.name}\" — #{n} rule#{n == 1 ? "" : "s"} added (editable, deletable like any other)")
+      @host.status("installed \"#{preset.name}\" — #{Gori.plural(n, "rule")} added (editable, deletable like any other)")
     end
 
     def rewriter_edit : Nil

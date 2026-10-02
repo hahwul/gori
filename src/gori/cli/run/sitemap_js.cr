@@ -112,8 +112,8 @@ module Gori
 
       # One line: what was read and found, and every cap that cut the reading short.
       def self.sitemap_js_scan_summary(r : JsRefs::ScanReport) : String
-        parts = ["scanned #{r.flows_scanned} response#{r.flows_scanned == 1 ? "" : "s"}",
-                 "#{r.refs} reference#{r.refs == 1 ? "" : "s"}",
+        parts = ["scanned #{Gori.plural(r.flows_scanned, "response")}",
+                 Gori.plural(r.refs, "reference"),
                  "#{r.new_endpoints} new endpoint#{r.new_endpoints == 1 ? "" : "s"}"]
         parts << "#{r.bodies_capped} bod#{r.bodies_capped == 1 ? "y" : "ies"} read only to #{JsRefs::MAX_SCAN // 1024 // 1024} MiB" if r.bodies_capped > 0
         parts << "#{r.refs_capped} stopped at #{JsRefs::MAX_REFS} literals" if r.refs_capped > 0

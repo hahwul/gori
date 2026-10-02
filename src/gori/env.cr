@@ -5,6 +5,7 @@ require "./settings"
 require "./session_slot"
 require "./client_hints"
 require "./store"
+require "./plural"
 
 module Gori
   # Namespaced values for outbound requests (Repeater, Fuzzer, Miner, Intercept, CLI, MCP):
@@ -2342,7 +2343,7 @@ module Gori
       # than a delta the caller never computed.
       if committed
         names = vars.map(&.[0]).sort!
-        summary = names.empty? ? "cleared" : "#{names.size} var#{names.size == 1 ? "" : "s"} — #{names.join(", ")}"
+        summary = names.empty? ? "cleared" : "#{Gori.plural(names.size, "var")} — #{names.join(", ")}"
         ConfigLog.record(store, "env", "project env vars saved: #{summary}")
       end
       committed

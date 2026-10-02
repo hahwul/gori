@@ -3649,7 +3649,7 @@ module Gori::Tui
     end
 
     private def self.job_count(count : Int32) : String
-      "#{count} job#{count == 1 ? "" : "s"}"
+      Gori.plural(count, "job")
     end
 
     # What an operator-initiated quit request does right now.
@@ -4578,7 +4578,7 @@ module Gori::Tui
       end
       sitemap_controller.reload
       count = result.count
-      msg = "imported #{count} flow#{count == 1 ? "" : "s"} from cURL"
+      msg = "imported #{Gori.plural(count, "flow")} from cURL"
       msg += " (#{result.skipped} refused)" if result.skipped > 0
       result.shortfall_note.try { |note| msg += " — #{note}" }
       status("#{msg}#{curl_notes_tail(result.notes)}", :done)
@@ -4683,9 +4683,9 @@ module Gori::Tui
       sitemap_controller.reload
       count = result.count
       msg = if @import_cancel
-              "import cancelled — #{count} flow#{count == 1 ? "" : "s"} from #{ev.label} were written before the stop"
+              "import cancelled — #{Gori.plural(count, "flow")} from #{ev.label} were written before the stop"
             else
-              "imported #{count} flow#{count == 1 ? "" : "s"} from #{ev.label} · #{ev.path}"
+              "imported #{Gori.plural(count, "flow")} from #{ev.label} · #{ev.path}"
             end
       msg += " (#{result.skipped} entries skipped)" if result.skipped > 0
       # The import is chunked, so a partial write is possible — say so rather than letting a
@@ -7213,7 +7213,7 @@ module Gori::Tui
         return "shell exited at once (#{how}) — run `gori run shell` in a terminal to see why"
       end
       n = captured.clamp(0_i64, Int32::MAX.to_i64)
-      "shell exited · #{n} flow#{n == 1 ? "" : "s"} captured meanwhile"
+      "shell exited · #{Gori.plural(n, "flow")} captured meanwhile"
     end
 
     # The command copied to the clipboard for another pane to evaluate in its own env (#1250).

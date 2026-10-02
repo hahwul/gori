@@ -3,6 +3,7 @@ require "../protobuf"
 require "../protobuf/lens"
 require "../protobuf/schemas"
 require "../proxy/h2/grpc"
+require "../plural"
 
 module Gori::Tui
   # Plain-text rendering of a `Gori::Protobuf::Message` — the schema-less wire-format tree
@@ -149,7 +150,7 @@ module Gori::Tui
       inner = "#{indent}   "
       if m = f.message
         if depth + 1 >= MAX_RENDER_DEPTH
-          acc << "#{inner}message: … (#{m.fields.size} field#{m.fields.size == 1 ? "" : "s"} — deeper than this pane draws)"
+          acc << "#{inner}message: … (#{Gori.plural(m.fields.size, "field")} — deeper than this pane draws)"
         else
           acc << "#{inner}message:"
           emit_message(acc, m, "#{inner}  ", depth + 1)
@@ -358,7 +359,7 @@ module Gori::Tui
       return if bytes.empty?
       if m = f.message
         if depth + 1 >= MAX_RENDER_DEPTH
-          acc << "#{inner}message: … (#{m.fields.size} field#{m.fields.size == 1 ? "" : "s"} — deeper than this pane draws)"
+          acc << "#{inner}message: … (#{Gori.plural(m.fields.size, "field")} — deeper than this pane draws)"
         else
           acc << "#{inner}message:"
           emit_message(acc, m, "#{inner}  ", depth + 1)

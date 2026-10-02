@@ -12,6 +12,7 @@ require "./group"
 # For `Analyzer::WS_MSG_CAP`: the headless WS read pages in the SAME batch size as the live
 # analyzer, so the two readers cannot drift into different coverage (see `scan_ws_frames`).
 require "./analyzer"
+require "../plural"
 
 module Gori
   module Probe
@@ -141,7 +142,7 @@ module Gori
         # above was added to prevent.
         if filter.try(&.uses_fts?)
           if (pending = store.drain_fts!) > 0
-            raise Gori::Error.new("#{pending} flow#{pending == 1 ? "" : "s"} could not be indexed " \
+            raise Gori::Error.new("#{Gori.plural(pending, "flow")} could not be indexed " \
                                   "for free-text search (this project's writer is busy — another " \
                                   "gori is capturing it), so a body:/free-text scan would silently " \
                                   "skip them and under-report findings. Nothing was scanned; retry " \

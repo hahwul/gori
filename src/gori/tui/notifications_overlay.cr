@@ -4,6 +4,7 @@ require "./fmt"
 require "./frame"
 require "./overlay"
 require "./notifications"
+require "../plural"
 
 module Gori::Tui
   # The notification center: a centered overlay listing recent notifications (newest
@@ -231,7 +232,7 @@ module Gori::Tui
       # highlight uses or the two disagree the first time a drain prepends.
       list = notes
       Frame.card(screen, box, "NOTIFICATIONS", border: Theme.border_focus)
-      meta = "#{list.size} item#{list.size == 1 ? "" : "s"}"
+      meta = Gori.plural(list.size, "item")
       Frame.border_meta(screen, box, "NOTIFICATIONS", meta, bg: Theme.panel)
 
       cap = list_capacity(box)

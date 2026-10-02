@@ -6,6 +6,7 @@ require "../../store"
 require "../../probe"
 require "../../settings"
 require "../../hotkeys"
+require "../../plural"
 
 module Gori::Tui
   # The Probe tab: the grouped scan-issue list + a per-issue detail (affected URLs,
@@ -683,7 +684,7 @@ module Gori::Tui
       @host.confirm("DISMISS GROUP", "Dismiss all open issues on #{host}?", confirm_label: "dismiss", danger: false) do
         n = ProbeController.dismiss_open_by_host(@host.session.store, host)
         @probe.reload(@host.session.store)
-        @host.status("dismissed #{n} issue#{n == 1 ? "" : "s"} on #{host}")
+        @host.status("dismissed #{Gori.plural(n, "issue")} on #{host}")
       end
     end
 

@@ -771,7 +771,7 @@ module Gori
       def self.scope_gate_line(scope : Scope) : String
         n = scope.rules.size
         if scope.configured?
-          "Active-send gate: ON (#{n} rule#{n == 1 ? "" : "s"}) — send/repeater/fuzz/mine/discover and MCP " \
+          "Active-send gate: ON (#{Gori.plural(n, "rule")}) — send/repeater/fuzz/mine/discover and MCP " \
           "refuse a target these rules leave out of scope unless --allow-unscoped / allow_unscoped:true"
         else
           "Active-send gate: no rules — `gori run` sends are not restricted (MCP refuses every send until a rule exists)"

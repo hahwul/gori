@@ -1,5 +1,6 @@
 require "json"
 require "./stats"
+require "../plural"
 
 module Gori::Sequencer
   # The SINGLE JSON shape for a Sequencer report, emitted by both `gori run sequence
@@ -100,7 +101,7 @@ module Gori::Sequencer
         row(io, "charset", "#{rep.charset_size} (#{rep.charset_label})")
         row(io, "length", rep.variable_length ? "#{rep.min_len}-#{rep.max_len} (variable)" : "#{rep.min_len} (fixed)")
         row(io, "structure", structure_line(rep))
-        row(io, "unique", "#{(rep.uniqueness * 100).round(1)}% (#{rep.duplicate_count} duplicate#{rep.duplicate_count == 1 ? "" : "s"})")
+        row(io, "unique", "#{(rep.uniqueness * 100).round(1)}% (#{Gori.plural(rep.duplicate_count, "duplicate")})")
         io << "\n## Tests\n\n| test | result | detail | verdict |\n| --- | --- | --- | --- |\n"
         rep.tests.each do |t|
           io << "| " << cell(t.name) << " | " << cell(t.value) << " | " << cell(t.detail)
