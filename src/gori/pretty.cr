@@ -1,4 +1,5 @@
 require "json"
+require "./ascii_bytes"
 require "./raw_json"
 require "./json_unicode"
 require "uri"
@@ -11,6 +12,7 @@ require "./msgpack"
 require "./cbor"
 require "./decoder/serialized"
 require "./jwt/jwe"
+require "./plural"
 
 module Gori
   # Display-only body pretty-printer. Sits BETWEEN the transform layer
@@ -301,7 +303,7 @@ module Gori
       return nil if text == str # single bare token, nothing to reflow
       ob = text.to_slice
       return nil if ob.size > MAX_OUT_PRETTY
-      Result.new(ob, "pretty: form (#{pairs.size} field#{pairs.size == 1 ? "" : "s"})", :form)
+      Result.new(ob, "pretty: form (#{Gori.plural(pairs.size, "field")})", :form)
     rescue
       nil
     end
@@ -333,7 +335,7 @@ module Gori
       text = parts.join("\n\n")
       ob = text.to_slice
       return nil if ob.size > MAX_OUT_PRETTY
-      Result.new(ob, "pretty: multipart (#{count} part#{count == 1 ? "" : "s"})", :text)
+      Result.new(ob, "pretty: multipart (#{Gori.plural(count, "part")})", :text)
     rescue
       nil
     end
@@ -567,14 +569,7 @@ module Gori
       last = src.size - sb.size
       i = from
       while i <= last
-        match = true
-        sb.each_with_index do |b, k|
-          if downcase_byte(src[i + k]) != b
-            match = false
-            break
-          end
-        end
-        return i if match
+        return i if AsciiBytes.range_eq_ci?(src, i, i + sb.size, sb)
         i += 1
       end
       -1
@@ -787,10 +782,6 @@ module Gori
       return false if at + needle.size > source.size
       needle.each_with_index { |byte, offset| return false if source[at + offset] != byte }
       true
-    end
-
-    private def downcase_byte(b : UInt8) : UInt8
-      (0x41_u8 <= b <= 0x5A_u8) ? b + 0x20_u8 : b
     end
 
     private def strip_bom(s : String) : String

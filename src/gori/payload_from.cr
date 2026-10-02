@@ -8,6 +8,7 @@ require "./rules"
 require "./intercept_filter"
 require "./token_extract"
 require "./miner/types"
+require "./plural"
 
 module Gori
   # Payload values read from data the project ALREADY captured (#1352): a QL query picks a set
@@ -206,7 +207,7 @@ module Gori
 
       # One line for a terminal or a status bar. The surface adds the flag names.
       def summary : String
-        parts = ["#{source} → #{values} value#{values == 1 ? "" : "s"} from #{flows_scanned} flow#{flows_scanned == 1 ? "" : "s"}"]
+        parts = ["#{source} → #{Gori.plural(values, "value")} from #{Gori.plural(flows_scanned, "flow")}"]
         parts << "SENSITIVE INCLUDED" if include_sensitive
         parts << "#{skipped_sensitive} sensitive skipped" if skipped_sensitive > 0
         parts << "#{skipped_oversize} over #{VALUE_MAX_BYTES} bytes skipped" if skipped_oversize > 0
@@ -218,7 +219,7 @@ module Gori
           in .bytes?  then "stopped at the #{MAX_BYTES // (1024 * 1024)} MiB value budget"
           end
         end
-        parts << "the search index is #{fts_backlog} flow#{fts_backlog == 1 ? "" : "s"} behind, so a body:/free-text term may miss some" if fts_backlog > 0
+        parts << "the search index is #{Gori.plural(fts_backlog, "flow")} behind, so a body:/free-text term may miss some" if fts_backlog > 0
         if n = note
           parts << n
         end
@@ -297,7 +298,7 @@ module Gori
         if drain_fts
           pending = store.drain_fts!
           unless pending.zero?
-            raise Error.new("#{pending} flow#{pending == 1 ? "" : "s"} are not yet indexed for the free-text term in " \
+            raise Error.new("#{Gori.plural(pending, "flow")} are not yet indexed for the free-text term in " \
                             "#{spec.query.inspect}, so the selection would silently omit them — retry in a moment " \
                             "(a gori capturing this project holds the writer that indexes them), or select without body:/free text")
           end

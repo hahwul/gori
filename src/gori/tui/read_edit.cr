@@ -4,6 +4,7 @@ require "./clipboard"
 require "./text_area"
 require "./text_read_state"
 require "./editor_pane"
+require "../plural"
 
 module Gori::Tui
   # The READ-mode edits of an editor pane: delete the selection, delete or yank whole lines,
@@ -127,7 +128,7 @@ module Gori::Tui
       text = lines[y0..y1].join("\n")
       written = Clipboard.copy(text)
       Register.linewise!
-      "yanked #{plural(y1 - y0 + 1, "line")} (#{written}b to clipboard#{Clipboard.note(written, text)})"
+      "yanked #{Gori.plural(y1 - y0 + 1, "line")} (#{written}b to clipboard#{Clipboard.note(written, text)})"
     end
 
     # `p`: the register after the caret, or after the selection's end. A linewise register
@@ -160,7 +161,7 @@ module Gori::Tui
       read.sync_from(area)
       return "the pane refused the paste" unless changed
       return nil if held
-      linewise ? "pasted #{plural(text.count('\n') + 1, "line")}" : "pasted #{plural(text.size, "char")}"
+      linewise ? "pasted #{Gori.plural(text.count('\n') + 1, "line")}" : "pasted #{Gori.plural(text.size, "char")}"
     end
 
     # Where `p` inserts: the end of the caret's (or the selection's last) line for a linewise
@@ -208,7 +209,7 @@ module Gori::Tui
         Register.store(text, linewise: true)
         return "deleted 1 line"
       end
-      cut(tab, key_in, span, text, linewise: true, what: plural(y1 - y0 + 1, "line"))
+      cut(tab, key_in, span, text, linewise: true, what: Gori.plural(y1 - y0 + 1, "line"))
     end
 
     private def self.cut(tab : EditorPane, key_in : KeyIn, span : {Int32, Int32, Int32, Int32},
@@ -262,10 +263,6 @@ module Gori::Tui
       (y0 + 1...y1).each { |i| parts << lines[i] }
       parts << lines[y1][0...x1]
       parts.join("\n")
-    end
-
-    private def self.plural(n : Int32, word : String) : String
-      n == 1 ? "1 #{word}" : "#{n} #{word}s"
     end
   end
 end

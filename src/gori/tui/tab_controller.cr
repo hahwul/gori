@@ -18,6 +18,7 @@ require "./chrome"
 require "./theme"
 require "./jobs"
 require "./notifications"
+require "../plural"
 
 module Gori::Tui
   # The narrow facade a TabController is given to drive the shell's cross-cutting
@@ -879,7 +880,7 @@ module Gori::Tui
     # place, so "close 5 sub-tabs" can reach two chips that are not on screen. The project
     # picker's delete confirm spells the same split out for the same reason.
     protected def marked_subtab_phrase(n : Int32) : String
-      base = "#{n} sub-tab#{n == 1 ? "" : "s"}"
+      base = Gori.plural(n, "sub-tab")
       hidden = hidden_marked_count
       hidden > 0 ? "#{base} (#{hidden} not on screen — the filter is hiding them)" : base
     end
@@ -934,7 +935,7 @@ module Gori::Tui
         gone << ref if ref
       end
       unmark_subtab_refs(gone)
-      msg = "closed #{gone.size} sub-tab#{gone.size == 1 ? "" : "s"}"
+      msg = "closed #{Gori.plural(gone.size, "sub-tab")}"
       msg += " · #{refused} kept (#{refusal})" if refusal
       TabClose.message(msg, orphaned > 0)
     end

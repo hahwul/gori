@@ -2,6 +2,7 @@ require "../store"
 require "./compare"
 require "./keys"
 require "./snapshot"
+require "../plural"
 
 module Gori::Diff
   # What one side of the diff actually looked at. Printed BESIDE every count, because a
@@ -110,7 +111,7 @@ module Gori::Diff
     private def scope_line(c : Coverage) : String
       return "no scope rules" if c.scope_rules.empty?
       state = c.scope_enabled ? "on" : "off"
-      "#{c.scope_rules.size} rule#{c.scope_rules.size == 1 ? "" : "s"} (#{state})"
+      "#{Gori.plural(c.scope_rules.size, "rule")} (#{state})"
     end
   end
 

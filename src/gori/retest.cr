@@ -8,6 +8,7 @@ require "./raw_json"
 require "./json_path"
 require "./repeater/flow_request"
 require "./repeater/draft_markers"
+require "./plural"
 
 module Gori
   # Issue-linked retest (#1036): the smallest thing that turns a confirmed finding into a
@@ -427,7 +428,7 @@ module Gori
       return nil if unsafe.empty?
       runnable = planned.count(&.runnable?)
       methods = unsafe.map(&.method.upcase).uniq!.join(", ")
-      "#{runnable} request#{runnable == 1 ? "" : "s"} will be sent, #{unsafe.size} of them " \
+      "#{Gori.plural(runnable, "request")} will be sent, #{unsafe.size} of them " \
       "state-changing (#{methods}). Each one re-runs its side effect on the target."
     end
 

@@ -68,7 +68,7 @@ module Gori
         end
 
         if n = index
-          abort "gori run notes: no note ##{n} (this project has #{doc.size} note#{doc.size == 1 ? "" : "s"})" unless n <= doc.size
+          abort "gori run notes: no note ##{n} (this project has #{Gori.plural(doc.size, "note")})" unless n <= doc.size
           show_note(doc, n - 1, format)
         elsif all
           show_all_notes(doc, format)
@@ -179,7 +179,7 @@ module Gori
         doc = Notes.load(store)
         unless n <= doc.size
           store.close
-          abort "gori run notes update: no note ##{n} (this project has #{doc.size} note#{doc.size == 1 ? "" : "s"})"
+          abort "gori run notes update: no note ##{n} (this project has #{Gori.plural(doc.size, "note")})"
         end
         # By the note's STABLE id, inside the write transaction — see `Notes.update`.
         id = doc.notes[n - 1].id
@@ -264,7 +264,7 @@ module Gori
           persisted = Notes.load(store)
           unless n <= persisted.size
             store.close
-            abort "gori run notes delete: no note ##{n} (this project has #{persisted.size} note#{persisted.size == 1 ? "" : "s"})"
+            abort "gori run notes delete: no note ##{n} (this project has #{Gori.plural(persisted.size, "note")})"
           end
           target = persisted.notes[n - 1]
           # Gated AFTER the note is resolved, so the refusal can name the text that would go —

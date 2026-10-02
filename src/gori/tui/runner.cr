@@ -159,6 +159,7 @@ require "./runner/sitemap"
 require "./runner/subtabs"
 require "./runner/views"
 require "./runner/columns"
+require "../plural"
 
 lib LibC
   fun tcsetpgrp(fd : Int32, pgrp : PidT) : Int32
@@ -2251,7 +2252,7 @@ module Gori::Tui
         return
       end
       issues_controller.view.resync(store)
-      @toast = "#{plural(ids.size, "issue")} updated" if ids.size > 1
+      @toast = "#{Gori.plural(ids.size, "issue")} updated" if ids.size > 1
     end
 
     # Score the target issues, straight from the Space menu. The same calculator the create
@@ -2276,7 +2277,7 @@ module Gori::Tui
       # Only a BATCH needs saying — a single issue's chip and severity badge both change under
       # the operator's eyes, and echoing a 44-character vector into the status strip just
       # truncates it. Same rule apply_issue_choice follows.
-      @toast = "#{raw.empty? ? "cvss cleared" : "cvss set"} · #{plural(ids.size, "issue")}" if ids.size > 1
+      @toast = "#{raw.empty? ? "cvss cleared" : "cvss set"} · #{Gori.plural(ids.size, "issue")}" if ids.size > 1
       true
     end
 
@@ -3648,7 +3649,7 @@ module Gori::Tui
     end
 
     private def self.job_count(count : Int32) : String
-      "#{count} job#{count == 1 ? "" : "s"}"
+      Gori.plural(count, "job")
     end
 
     # What an operator-initiated quit request does right now.
@@ -4509,9 +4510,9 @@ module Gori::Tui
       tagged = @tag_views.count { |v| repeater_controller.apply_tags(v, raw) }
       return unless @tag_views.size > 1
       @toast = if tagged == @tag_views.size
-                 "tagged #{plural(tagged, "sub-tab")}"
+                 "tagged #{Gori.plural(tagged, "sub-tab")}"
                else
-                 "tagged #{tagged} of #{plural(@tag_views.size, "sub-tab")} (the rest were closed meanwhile)"
+                 "tagged #{tagged} of #{Gori.plural(@tag_views.size, "sub-tab")} (the rest were closed meanwhile)"
                end
     end
 
@@ -4577,7 +4578,7 @@ module Gori::Tui
       end
       sitemap_controller.reload
       count = result.count
-      msg = "imported #{count} flow#{count == 1 ? "" : "s"} from cURL"
+      msg = "imported #{Gori.plural(count, "flow")} from cURL"
       msg += " (#{result.skipped} refused)" if result.skipped > 0
       result.shortfall_note.try { |note| msg += " — #{note}" }
       status("#{msg}#{curl_notes_tail(result.notes)}", :done)
@@ -4682,9 +4683,9 @@ module Gori::Tui
       sitemap_controller.reload
       count = result.count
       msg = if @import_cancel
-              "import cancelled — #{count} flow#{count == 1 ? "" : "s"} from #{ev.label} were written before the stop"
+              "import cancelled — #{Gori.plural(count, "flow")} from #{ev.label} were written before the stop"
             else
-              "imported #{count} flow#{count == 1 ? "" : "s"} from #{ev.label} · #{ev.path}"
+              "imported #{Gori.plural(count, "flow")} from #{ev.label} · #{ev.path}"
             end
       msg += " (#{result.skipped} entries skipped)" if result.skipped > 0
       # The import is chunked, so a partial write is possible — say so rather than letting a
@@ -5126,7 +5127,7 @@ module Gori::Tui
     # Shared summary for a continue-and-report batch: "opened 5 · 1 gone" (#442 Q4 — a
     # partial failure reports, it never aborts the rest).
     private def batch_summary(verb : String, done : Int32, total : Int32) : String
-      msg = "#{verb} #{plural(done, "flow")}"
+      msg = "#{verb} #{Gori.plural(done, "flow")}"
       msg += " · #{total - done} no longer available" if done < total
       msg
     end
@@ -5984,10 +5985,10 @@ module Gori::Tui
       n = subtab_mark_menu_count
       return nil if n == 0
       if fmt = SUBTAB_BATCH_TITLES[verb_id]?
-        return fmt % plural(n, "sub-tab")
+        return fmt % Gori.plural(n, "sub-tab")
       end
       return "#{@session.registry[verb_id].title} (cursor)" if SUBTAB_CURSOR_ONLY.includes?(verb_id)
-      verb_id.ends_with?(".subtab-mark-clear") ? "Clear #{plural(n, "mark")}" : nil
+      verb_id.ends_with?(".subtab-mark-clear") ? "Clear #{Gori.plural(n, "mark")}" : nil
     end
 
     # How many marks the History LIST menu should speak for; 0 whenever mark titles don't
@@ -6033,12 +6034,12 @@ module Gori::Tui
       n = history_mark_menu_count
       return nil if n == 0
       if fmt = HISTORY_BATCH_TITLES[verb_id]?
-        return fmt % plural(n, "flow")
+        return fmt % Gori.plural(n, "flow")
       end
       return "#{@session.registry[verb_id].title} (cursor)" if HISTORY_CURSOR_ONLY.includes?(verb_id)
       case verb_id
-      when "history.copy"       then "Copy #{plural(n, "URL")}"
-      when "history.mark-clear" then "Clear #{plural(n, "mark")}"
+      when "history.copy"       then "Copy #{Gori.plural(n, "URL")}"
+      when "history.mark-clear" then "Clear #{Gori.plural(n, "mark")}"
         # Only meaningful at exactly 2 — otherwise leave the registered title, which IS what
         # comparer_add_selected falls back to (the next-slot ring on the cursor row).
       when "history.compare" then n == 2 ? "Compare the 2 marked flows" : nil
@@ -6065,9 +6066,9 @@ module Gori::Tui
       n = intercept_mark_menu_count
       return nil if n == 0
       if fmt = INTERCEPT_BATCH_TITLES[verb_id]?
-        return fmt % plural(n, "held message")
+        return fmt % Gori.plural(n, "held message")
       end
-      "Clear #{plural(n, "mark")}" if verb_id == "intercept.mark-clear"
+      "Clear #{Gori.plural(n, "mark")}" if verb_id == "intercept.mark-clear"
     end
 
     # How many marks the SITEMAP menu should speak for; 0 whenever mark titles don't apply
@@ -6101,10 +6102,10 @@ module Gori::Tui
       n = sitemap_mark_menu_count
       return nil if n == 0
       if fmt = SITEMAP_BATCH_TITLES[verb_id]?
-        return fmt % plural(n, "path")
+        return fmt % Gori.plural(n, "path")
       end
       return "#{@session.registry[verb_id].title} (cursor)" if SITEMAP_CURSOR_ONLY.includes?(verb_id)
-      verb_id == "sitemap.mark-clear" ? "Clear #{plural(n, "mark")}" : nil
+      verb_id == "sitemap.mark-clear" ? "Clear #{Gori.plural(n, "mark")}" : nil
     end
 
     # The Issues half of the same rule. Its own table and count, like every other surface's:
@@ -6132,16 +6133,12 @@ module Gori::Tui
       n = issues_mark_menu_count
       return nil if n == 0
       if fmt = ISSUES_BATCH_TITLES[verb_id]?
-        return fmt % plural(n, "issue")
+        return fmt % Gori.plural(n, "issue")
       end
       if note = ISSUES_CURSOR_ONLY[verb_id]?
         return "#{@session.registry[verb_id].title} #{note}"
       end
-      "Clear #{plural(n, "mark")}" if verb_id == "issues.mark-clear"
-    end
-
-    private def plural(n : Int32, noun : String) : String
-      "#{n} #{noun}#{n == 1 ? "" : "s"}"
+      "Clear #{Gori.plural(n, "mark")}" if verb_id == "issues.mark-clear"
     end
 
     def read_selection_active? : Bool
@@ -7216,7 +7213,7 @@ module Gori::Tui
         return "shell exited at once (#{how}) — run `gori run shell` in a terminal to see why"
       end
       n = captured.clamp(0_i64, Int32::MAX.to_i64)
-      "shell exited · #{n} flow#{n == 1 ? "" : "s"} captured meanwhile"
+      "shell exited · #{Gori.plural(n, "flow")} captured meanwhile"
     end
 
     # The command copied to the clipboard for another pane to evaluate in its own env (#1250).

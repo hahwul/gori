@@ -1,3 +1,4 @@
+require "uri"
 require "./request_parts"
 
 module Gori
@@ -181,9 +182,9 @@ module Gori
           next if pair.empty?
           eq = pair.index('=')
           if eq
-            pairs << {percent_decode(pair[0, eq]), percent_decode(pair[(eq + 1)..]), nil}
+            pairs << {URI.decode_www_form(pair[0, eq]), URI.decode_www_form(pair[(eq + 1)..]), nil}
           else
-            pairs << {percent_decode(pair), "", nil}
+            pairs << {URI.decode_www_form(pair), "", nil}
           end
         end
         pairs
@@ -300,36 +301,6 @@ module Gori
         return s[0, s.bytesize - 2] if s.ends_with?("\r\n")
         return s[0, s.bytesize - 1] if s.ends_with?("\n")
         s
-      end
-
-      # Percent-decode a urlencoded token: `+` → space, `%XX` → that byte, everything else
-      # verbatim. Byte-wise so a non-ASCII value survives; invalid `%XX` is left literal.
-      private def self.percent_decode(s : String) : String
-        bytes = s.to_slice
-        io = IO::Memory.new(bytes.size)
-        i = 0
-        while i < bytes.size
-          b = bytes[i]
-          if b == 0x2b_u8 # +
-            io.write_byte(0x20_u8)
-            i += 1
-          elsif b == 0x25_u8 && i + 2 < bytes.size && (hi = hex(bytes[i + 1])) && (lo = hex(bytes[i + 2]))
-            io.write_byte((hi << 4 | lo).to_u8)
-            i += 3
-          else
-            io.write_byte(b)
-            i += 1
-          end
-        end
-        String.new(io.to_slice)
-      end
-
-      private def self.hex(b : UInt8) : Int32?
-        case b
-        when 0x30_u8..0x39_u8 then (b - 0x30_u8).to_i
-        when 0x41_u8..0x46_u8 then (b - 0x41_u8 + 10).to_i
-        when 0x61_u8..0x66_u8 then (b - 0x61_u8 + 10).to_i
-        end
       end
 
       # HTML attribute-value escaping (inside "…"): the five that matter, so a value cannot

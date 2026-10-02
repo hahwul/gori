@@ -4,6 +4,7 @@ require "./frame"
 require "./overlay"
 require "../bind_address"
 require "../settings"
+require "../plural"
 
 module Gori::Tui
   # The ADDITIONAL-listener inventory: every socket this session serves besides the primary
@@ -156,7 +157,7 @@ module Gori::Tui
         return
       end
       Frame.card(screen, box, "LISTENERS", border: Theme.border_focus)
-      meta = "#{@rows.size} listener#{@rows.size == 1 ? "" : "s"}"
+      meta = Gori.plural(@rows.size, "listener")
       Frame.border_meta(screen, box, "LISTENERS", meta, bg: Theme.panel)
 
       cap = list_capacity(box)

@@ -9,6 +9,7 @@ require "../settings"
 require "../fuzz/presets"
 require "../wordlist_catalog"
 require "../payload_from"
+require "../plural"
 
 module Gori::Tui
   # One payload set: a source kind + a value string in the compact grammar the Fuzz
@@ -461,7 +462,7 @@ module Gori::Tui
         entry = Gori::WordlistCatalog.save_values(name, values, overwrite: @replace_name == name)
         @saving = nil
         @replace_name = nil
-        @notice = "saved #{values.size} value#{values.size == 1 ? "" : "s"} as #{entry.name} — " \
+        @notice = "saved #{Gori.plural(values.size, "value")} as #{entry.name} — " \
                   "pick it under Wordlist, or run with -w #{entry.name}"
       rescue ex : Gori::WordlistCatalog::Error
         if ex.reason.exists?
@@ -632,7 +633,7 @@ module Gori::Tui
     private def render_meta(screen : Screen, box : Rect, title : String) : Nil
       return unless @ptype == :list
       n = list_values.size
-      Frame.border_meta(screen, box, title, "#{n} value#{n == 1 ? "" : "s"}")
+      Frame.border_meta(screen, box, title, Gori.plural(n, "value"))
     end
 
     private def render_type_row(screen : Screen, box : Rect) : Nil

@@ -1,5 +1,6 @@
 require "compress/deflate"
 require "./types"
+require "../plural"
 
 module Gori::Sequencer
   # The randomness math — pure, byte-level, stdlib-only, spec-testable in isolation
@@ -195,7 +196,7 @@ module Gori::Sequencer
           "sequential pattern · effective entropy #{effective_entropy.round(1)}b"
         else
           fails = tests.count(&.verdict.fail?)
-          "effective entropy #{effective_entropy.round(1)}b · #{fails == 0 ? "all tests passed" : "#{fails} test#{fails == 1 ? "" : "s"} failed"}"
+          "effective entropy #{effective_entropy.round(1)}b · #{fails == 0 ? "all tests passed" : "#{Gori.plural(fails, "test")} failed"}"
         end
       end
     end
@@ -506,7 +507,7 @@ module Gori::Sequencer
 
     private def self.uniqueness_test(unique : Int32, n : Int32, dups : Int32) : TestRow
       TestRow.new("Uniqueness", "#{unique}/#{n}",
-        dups > 0 ? "#{dups} duplicate#{dups == 1 ? "" : "s"}" : "all distinct",
+        dups > 0 ? Gori.plural(dups, "duplicate") : "all distinct",
         dups > 0 ? Verdict::Fail : Verdict::Pass)
     end
 
@@ -912,17 +913,14 @@ module Gori::Sequencer
 
     # ── sequential detection ────────────────────────────────────────────────────────
 
-    # The two shape guards below, over BYTES rather than characters. `each_char` on a String
-    # allocates an iterator per token and decodes UTF-8 to answer a question about ASCII, and
-    # this runs once per token on a sample that reaches 50,000. The answers are the same: a
-    # multi-byte character has no byte in either ASCII range, so a token carrying one is
-    # rejected by the byte test exactly where the char test rejected it.
+    # The shape guards (`decimal_byte?` below, `Char#hex?` per byte for hex) run over BYTES
+    # rather than characters. `each_char` on a String allocates an iterator per token and
+    # decodes UTF-8 to answer a question about ASCII, and this runs once per token on a sample
+    # that reaches 50,000. The answers are the same: a multi-byte character has no byte in
+    # either ASCII range, so a token carrying one is rejected by the byte test exactly where
+    # the char test rejected it.
     private def self.decimal_byte?(b : UInt8) : Bool
       b >= 0x30_u8 && b <= 0x39_u8
-    end
-
-    private def self.hex_byte?(b : UInt8) : Bool
-      decimal_byte?(b) || (b >= 0x61_u8 && b <= 0x66_u8) || (b >= 0x41_u8 && b <= 0x46_u8)
     end
 
     private def self.detect_sequential(tokens : Array(String)) : {Bool, String}
@@ -963,7 +961,7 @@ module Gori::Sequencer
       # general path despite being a textbook sequential counter. Decoding nibbles first
       # keeps the magnitude linear in the counter's real value, matching the numeric fast
       # path's precision for decimal tokens above.
-      if tokens.all? { |t| !t.empty? && t.to_slice.all? { |b| hex_byte?(b) } }
+      if tokens.all? { |t| !t.empty? && t.to_slice.all?(&.unsafe_chr.hex?) }
         skip = common_prefix_len(tokens)
         xs = Array(Float64).new(n, &.to_f)
         ys = tokens.map { |t| hex_leading_value(t, skip) }

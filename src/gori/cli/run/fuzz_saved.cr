@@ -155,7 +155,7 @@ module Gori
           case deleted.status
           in Store::FuzzRunDeleteStatus::Deleted
             count = deleted.deleted_results
-            puts "Deleted fuzz run ##{run_id} and #{count} result#{count == 1 ? "" : "s"}."
+            puts "Deleted fuzz run ##{run_id} and #{Gori.plural(count, "result")}."
           in Store::FuzzRunDeleteStatus::NotFound
             abort "gori run fuzz delete: no saved run ##{run_id}"
           in Store::FuzzRunDeleteStatus::Active
@@ -237,7 +237,7 @@ module Gori
         else
           io.puts fuzz_saved_run_header(run)
           page.each { |c| io.puts CLI::Output.fuzz_cluster_text(c) }
-          note = "#{list.size} cluster#{list.size == 1 ? "" : "s"} over #{clusters.rows} result#{clusters.rows == 1 ? "" : "s"}"
+          note = "#{Gori.plural(list.size, "cluster")} over #{Gori.plural(clusters.rows, "result")}"
           note += " (showing #{offset + 1}-#{offset + page.size})" if page.size < list.size && !page.empty?
           note += " · #{clusters.overflow_rows} results past the #{clusters.max_clusters}-cluster cap not grouped" if clusters.truncated?
           note += " · ≈ approximate: saved before response shapes were recorded" if page.any?(&.approximate?)

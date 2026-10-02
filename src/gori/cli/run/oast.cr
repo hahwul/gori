@@ -585,7 +585,7 @@ module Gori
           io.puts Oast::Present.payload(payload, id, label).to_json
         else
           err.puts "resumed session ##{id} on #{bound.session.host} (#{bound.label}) — " \
-                   "#{hits} callback#{hits == 1 ? "" : "s"} on file; payload:"
+                   "#{Gori.plural(hits, "callback")} on file; payload:"
           io.puts payload
           err.puts "waiting for callbacks (Ctrl-C to stop)…" unless once
         end

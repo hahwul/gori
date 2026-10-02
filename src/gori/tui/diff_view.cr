@@ -5,6 +5,7 @@ require "./fmt"
 require "./viewport"
 require "../diff"
 require "../project"
+require "../plural"
 
 module Gori::Tui
   # The retest view: two PROJECTS in the slots instead of two flows, and endpoints for
@@ -239,7 +240,7 @@ module Gori::Tui
       base = "#{tag}  #{project.name}"
       return base unless cov
       "#{base}   #{Fmt.count(cov.flows)} flows · #{cov.endpoints} endpoints · " \
-      "#{cov.hosts} host#{cov.hosts == 1 ? "" : "s"}#{cov.truncated ? " · TRUNCATED" : ""}"
+      "#{Gori.plural(cov.hosts, "host")}#{cov.truncated ? " · TRUNCATED" : ""}"
     end
 
     private def summary(r : Gori::Diff::Report) : String

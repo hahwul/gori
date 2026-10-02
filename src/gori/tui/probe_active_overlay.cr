@@ -6,6 +6,7 @@ require "../probe/analyzer"
 require "../miner/types"
 require "../store"
 require "../settings"
+require "../plural"
 
 module Gori::Tui
   # The small popup shown before a manual "Run active scan" fires. A read-only header (the target
@@ -98,7 +99,7 @@ module Gori::Tui
       est = estimate
       min = est.sum(&.requests.begin)
       max = est.sum(&.requests.end)
-      min == max ? "#{min} request#{min == 1 ? "" : "s"}" : "#{min}–#{max} requests"
+      min == max ? Gori.plural(min, "request") : "#{min}–#{max} requests"
     end
 
     private def notify_row : Int32

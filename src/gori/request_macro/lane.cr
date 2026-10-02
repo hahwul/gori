@@ -1,4 +1,5 @@
 require "./spec"
+require "../plural"
 
 module Gori::RequestMacro
   # The error of a send the run's request budget refused. `Fuzz::CappedBackend::CAP_ERROR` IS
@@ -115,9 +116,9 @@ module Gori::RequestMacro
     # sentence every surface prints for what the macro did to a run. Counts and a message,
     # never a value.
     def summary : String
-      parts = ["#{runs} run#{runs == 1 ? "" : "s"}", "#{requests} request#{requests == 1 ? "" : "s"}"]
+      parts = [Gori.plural(runs, "run"), Gori.plural(requests, "request")]
       if failed > 0
-        parts << "#{failed} failed" << "#{skipped} candidate#{skipped == 1 ? "" : "s"} not sent"
+        parts << "#{failed} failed" << "#{Gori.plural(skipped, "candidate")} not sent"
       end
       line = parts.join(" · ")
       (fe = first_error) ? "#{line} — first failure: #{fe}" : line

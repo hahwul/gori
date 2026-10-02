@@ -4,6 +4,12 @@ module Gori
   # for ASCII header names/values (HTTP header field tokens are ASCII); a non-ASCII
   # byte is compared verbatim. Keeps the case-folding semantics in one reviewed place.
   module AsciiBytes
+    # `b` with A-Z folded to a-z, every other byte unchanged.
+    @[AlwaysInline]
+    def self.downcase(b : UInt8) : UInt8
+      b >= 0x41_u8 && b <= 0x5a_u8 ? b | 0x20_u8 : b
+    end
+
     # Does `hay` contain `needle` (ASCII case-insensitive)? `needle` MUST already be
     # lowercase. Non-allocating O(hay·needle) scan — hot-path callers pass a short head
     # and a short needle, so this stays cheaper than materializing a downcased String.
@@ -16,9 +22,7 @@ module Gori
       while i <= limit
         j = 0
         while j < n
-          b = hay.unsafe_fetch(i + j)
-          b |= 0x20_u8 if b >= 0x41_u8 && b <= 0x5a_u8 # A-Z → a-z
-          break unless b == needle.unsafe_fetch(j)
+          break unless downcase(hay.unsafe_fetch(i + j)) == needle.unsafe_fetch(j)
           j += 1
         end
         return true if j == n
@@ -38,9 +42,7 @@ module Gori
       return false if hay.size < n
       j = 0
       while j < n
-        b = hay.unsafe_fetch(j)
-        b |= 0x20_u8 if b >= 0x41_u8 && b <= 0x5a_u8 # A-Z → a-z
-        return false unless b == needle.unsafe_fetch(j)
+        return false unless downcase(hay.unsafe_fetch(j)) == needle.unsafe_fetch(j)
         j += 1
       end
       true
@@ -70,9 +72,7 @@ module Gori
       return false unless z - a == lower.size
       j = 0
       while j < lower.size
-        b = bytes.unsafe_fetch(a + j)
-        b |= 0x20_u8 if b >= 0x41_u8 && b <= 0x5a_u8 # A-Z → a-z
-        return false unless b == lower.unsafe_fetch(j)
+        return false unless downcase(bytes.unsafe_fetch(a + j)) == lower.unsafe_fetch(j)
         j += 1
       end
       true

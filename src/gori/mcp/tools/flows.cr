@@ -3,6 +3,7 @@ require "base64"
 require "../../store"
 require "../serialize"
 require "../../redact/policy"
+require "../../plural"
 
 module Gori
   module MCP
@@ -624,7 +625,7 @@ module Gori
         n = store.count?
         return busy("history NOT cleared (store busy); every flow is still there") unless n
         unless bool_arg(h, "confirm", false)
-          return err("refusing to delete #{n} flow#{n == 1 ? "" : "s"} without confirm:true — this cannot be undone",
+          return err("refusing to delete #{Gori.plural(n, "flow")} without confirm:true — this cannot be undone",
             "CONFIRM_REQUIRED", field: "confirm",
             details: JSON.parse({"flows" => n}.to_json))
         end

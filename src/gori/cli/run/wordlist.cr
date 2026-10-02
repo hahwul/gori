@@ -293,7 +293,7 @@ module Gori
         note_payload_from("gori run wordlist save", reports)
         lines, skipped = WordlistCatalog.one_per_line(values)
         if skipped > 0
-          STDERR.puts "gori run wordlist save: #{skipped} value#{skipped == 1 ? "" : "s"} left out — a wordlist file holds one value per line, " \
+          STDERR.puts "gori run wordlist save: #{Gori.plural(skipped, "value")} left out — a wordlist file holds one value per line, " \
                       "and #{skipped == 1 ? "it contains" : "they contain"} a line break"
         end
         WordlistCatalog.save_values(name, lines, overwrite: overwrite)

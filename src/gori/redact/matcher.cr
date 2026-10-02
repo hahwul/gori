@@ -2,6 +2,7 @@ require "json"
 require "uri"
 require "../media_type"
 require "../params"
+require "../plural"
 
 module Gori
   module Redact
@@ -220,7 +221,7 @@ module Gori
       end
 
       private def withheld(size : Int32, shape : Shape, why : String) : Result
-        note = "[REDACTED: #{size} byte#{size == 1 ? "" : "s"} withheld — #{why}]"
+        note = "[REDACTED: #{Gori.plural(size, "byte")} withheld — #{why}]"
         # One hit, because the count a surface reports is "how many values did not travel" and
         # a withheld body is the whole of them. `path` is the body itself; there is no finer
         # location to give, which is the point.

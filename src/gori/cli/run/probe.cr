@@ -189,7 +189,7 @@ module Gori
             # Every finding is written, before --severity/--category/--in-scope narrow the
             # report below — the same rule MCP `probe_scan{persist}` keeps.
             if w.committed?
-              STDERR.puts "gori run probe: persisted #{w.detections} detection#{w.detections == 1 ? "" : "s"} (see `gori run probe issues`)"
+              STDERR.puts "gori run probe: persisted #{Gori.plural(w.detections, "detection")} (see `gori run probe issues`)"
             else
               persist_failed = true
               STDERR.puts "gori run probe: the findings were NOT persisted (store busy or unwritable) — the report below is complete; re-run with --persist to write them"
@@ -197,7 +197,7 @@ module Gori
           end
           unless scan_errors.empty?
             n = scan_errors.size
-            STDERR.puts "gori run probe: #{n} item#{n == 1 ? "" : "s"} skipped after an error " \
+            STDERR.puts "gori run probe: #{Gori.plural(n, "item")} skipped after an error " \
                         "(results are INCOMPLETE) — first: #{scan_errors.first}"
           end
           {Probe.group(dets), ids.size, rn}
@@ -238,7 +238,7 @@ module Gori
         return unless level
         n = probe_fail_count(groups, level)
         return if n.zero?
-        STDERR.puts "gori run probe: #{n} issue#{n == 1 ? "" : "s"} at or above #{level.to_s.downcase} (--fail-on)"
+        STDERR.puts "gori run probe: #{Gori.plural(n, "issue")} at or above #{level.to_s.downcase} (--fail-on)"
         exit 3
       end
 
@@ -269,9 +269,9 @@ module Gori
                                     format : Symbol, query : String?, min_sev : Store::Severity?,
                                     category : String?, in_scope : Bool = false) : Nil
         parts = [] of String
-        parts << "#{flow_n} flow#{flow_n == 1 ? "" : "s"}"
-        parts << "#{repeater_n} repeater#{repeater_n == 1 ? "" : "s"}" if repeater_n > 0 || query.nil?
-        STDERR.puts "scanned #{parts.join(" + ")} · #{groups.size} issue#{groups.size == 1 ? "" : "s"}"
+        parts << Gori.plural(flow_n, "flow")
+        parts << Gori.plural(repeater_n, "repeater") if repeater_n > 0 || query.nil?
+        STDERR.puts "scanned #{parts.join(" + ")} · #{Gori.plural(groups.size, "issue")}"
         if format == :json
           puts CLI::Output.probe_array_json(groups)
         elsif groups.empty?
@@ -329,7 +329,7 @@ module Gori
         elsif issues.empty?
           STDERR.puts include_closed ? "no probe findings" : "no open probe findings (pass --all to include dismissed)"
         else
-          STDERR.puts "#{issues.size} finding#{issues.size == 1 ? "" : "s"}"
+          STDERR.puts Gori.plural(issues.size, "finding")
           issues.each { |i| puts CLI::Output.probe_issue_text(i) }
         end
       end
@@ -461,10 +461,10 @@ module Gori
           if all
             n = store.count_probe_issues
             unless yes
-              abort "gori run probe delete: refusing to delete #{n} finding#{n == 1 ? "" : "s"} (and every suppression) without --yes"
+              abort "gori run probe delete: refusing to delete #{Gori.plural(n, "finding")} (and every suppression) without --yes"
             end
             abort "gori run probe delete: NOT cleared (project busy) — every finding is still there" unless store.clear_probe_issues
-            puts "Deleted #{n} finding#{n == 1 ? "" : "s"} and cleared every suppression."
+            puts "Deleted #{Gori.plural(n, "finding")} and cleared every suppression."
           elsif iid = id
             issue = store.get_probe_issue(iid) || abort("gori run probe delete: no probe finding with id #{iid}")
             abort "gori run probe delete: finding ##{issue.id} NOT deleted (project busy)" unless store.delete_probe_issue(issue.id)
@@ -533,7 +533,7 @@ module Gori
           return
         end
         off = entries.count { |e| !e.enabled }
-        STDERR.puts "mode: #{mode.label} · #{entries.size} rule#{entries.size == 1 ? "" : "s"}#{off > 0 ? " (#{off} disabled)" : ""}"
+        STDERR.puts "mode: #{mode.label} · #{Gori.plural(entries.size, "rule")}#{off > 0 ? " (#{off} disabled)" : ""}"
         entries.each { |e| puts CLI::Output.probe_rule_text(e) }
       end
 

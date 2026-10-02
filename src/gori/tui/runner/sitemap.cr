@@ -249,7 +249,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       sitemap_flow_id(ep)
     end.uniq!
     if ids.empty?
-      @toast = "no captured requests for the #{plural(wanted, "marked path")} — capture them, or use Discover"
+      @toast = "no captured requests for the #{Gori.plural(wanted, "marked path")} — capture them, or use Discover"
       return
     end
     # One flow behind the whole set — a single mark, or N marks that share a representative
@@ -266,7 +266,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       end
       # `wanted`, not targets.size, is the denominator: a marked path with no captured request
       # never became an id, and a batch that silently drops it reads as "sent everything".
-      @toast = "opened #{opened} of #{plural(wanted, "marked path")}"
+      @toast = "opened #{opened} of #{Gori.plural(wanted, "marked path")}"
     end
   end
 end

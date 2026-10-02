@@ -5,6 +5,7 @@ require "../../store"
 require "../../miner"
 require "../../env"
 require "../../param_inventory"
+require "../../plural"
 
 module Gori::Tui
   # One open mining session (a sub-tab under the Miner tab). `flow_id` is the source
@@ -570,8 +571,13 @@ module Gori::Tui
       end
     end
 
+    # Editor text to CRLF line endings (h2 reframing and the injection boundary scan expect
+    # them); captured flows are already CRLF. `$VAR` tokens are left alone: Miner::Plan expands
+    # the request at build time. In BYTE space, never `gsub(/\r?\n/, "\r\n")`: the Repeater
+    # buffer is routinely raw captured bytes, PCRE2 raises on a non-UTF-8 subject, and these
+    # bytes go on the wire as they are (P7).
     def build_seed_from_request(target : String, request_text : String, http2 : Bool, sni : String?) : MineSeed
-      bytes = text_to_request(request_text)
+      bytes = Env.normalize_crlf(request_text.to_slice)
       appl = Miner::Plan.applicable_locations(bytes)
       MineSeed.new(target, bytes, http2, sni, nil, request_summary(bytes), appl.applicable, appl.default)
     end
@@ -581,44 +587,6 @@ module Gori::Tui
       parts = line.strip.split(' ')
       s = "#{parts[0]?} #{parts[1]?}".strip
       s.empty? ? "request" : s
-    end
-
-    # Normalize editor text to CRLF line endings (h2 reframing + injection boundary scan
-    # expect them); captured flows are already CRLF. `$VAR` tokens are deliberately left
-    # alone: Miner::Plan expands the request at build time, so expanding here too would be
-    # a second pass, and a var whose value contains a token would resolve one level deeper
-    # for a hand-authored request than for a flow-seeded one.
-    #
-    # Done in BYTE space, not as `gsub(/\r?\n/, "\r\n")`: this text is the Repeater editor's
-    # buffer, which is routinely RAW CAPTURED BYTES (a multipart JPEG upload, a protobuf/gzip
-    # body), and PCRE2 raises `ArgumentError` on a subject that is not valid UTF-8 — with no
-    # `rescue` between here and `Runner#run`, so `space ▸ m` silently did nothing and the third
-    # press inside TICK_ERROR_WINDOW took the session down. `.scrub`bing to appease the regex
-    # is not the fix: these bytes are about to go on the wire (P7). Same reasoning, same walk
-    # as `MCP::RequestBuilder.normalize_raw`, minus its head-only boundary — the regex promoted
-    # a bare LF anywhere, body included, and this keeps doing that.
-    #
-    # Byte-equivalent to the regex on every input, `"a\r\r\n"` included: a CRLF pair copies
-    # through, a lone LF is promoted, and any other byte — the FIRST CR of that pathological
-    # shape, which `TextArea#split_wire` exists to preserve — is copied untouched.
-    private def text_to_request(text : String) : Bytes
-      bytes = text.to_slice
-      io = IO::Memory.new(bytes.size + 16)
-      i = 0
-      while i < bytes.size
-        b = bytes[i]
-        if b == 0x0D_u8 && i + 1 < bytes.size && bytes[i + 1] == 0x0A_u8
-          io.write_byte(0x0D_u8); io.write_byte(0x0A_u8) # already CRLF
-          i += 2
-        elsif b == 0x0A_u8
-          io.write_byte(0x0D_u8); io.write_byte(0x0A_u8) # lone LF promoted
-          i += 1
-        else
-          io.write_byte(b)
-          i += 1
-        end
-      end
-      io.to_slice
     end
 
     # --- start a session (called by the Runner after the config overlay confirms) ---
@@ -861,7 +829,7 @@ module Gori::Tui
              else
                ""
              end
-      found = n > 0 ? "#{n} param#{n == 1 ? "" : "s"} found" : "done — nothing found"
+      found = n > 0 ? "#{Gori.plural(n, "param")} found" : "done — nothing found"
       msg = "Miner: #{found} on #{v.summary}#{tail}#{macro_failure_note(ev.progress)}"
       level = n > 0 ? :success : :info
       log_event(v, level, msg)

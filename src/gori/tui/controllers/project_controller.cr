@@ -3,6 +3,7 @@ require "../project_view"
 require "../clipboard"
 require "../../env"
 require "../env_syntax_seam"
+require "../../plural"
 
 module Gori::Tui
   # The Project tab: the project overview plus five SUB-TABS (DESCRIPTION · SCOPE · HOST
@@ -1002,7 +1003,7 @@ module Gori::Tui
         verb = edited ? "updated" : "added"
         # Confirm the write AND surface that the lens is still off (the common "I added
         # a rule but nothing filtered" confusion — the space menu's Toggle scope lens enables it).
-        msg = "scope rule #{verb} — #{n} rule#{n == 1 ? "" : "s"}"
+        msg = "scope rule #{verb} — #{Gori.plural(n, "rule")}"
         unless @host.session.scope.enabled? || edited
           msg += Hotkeys.expand_menu_paths(@host.session.registry, " · {space:scope.lens-toggle} to enable the lens")
         end
@@ -1029,7 +1030,7 @@ module Gori::Tui
           # pane itself, else point at the Project tab from History/Sitemap.
           @host.active_tab == :project ? "scope lens ON, but no rules yet — add one here (a)" : "scope lens ON, but no rules yet — add some in the Project tab"
         else
-          "scope lens ON — showing in-scope only (#{n} rule#{n == 1 ? "" : "s"})"
+          "scope lens ON — showing in-scope only (#{Gori.plural(n, "rule")})"
         end
       )
     end

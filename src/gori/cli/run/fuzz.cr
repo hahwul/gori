@@ -980,13 +980,13 @@ module Gori
             STDERR.puts "gori run fuzz save: NOT saved: #{persist.error}"
           else
             kept = persist.keep.interesting? && (p = last_progress) && p.sent > persist.written ? " (kept #{persist.written} of #{p.sent}, keep: interesting)" : ""
-            STDERR.puts "saved fuzz run ##{persist.run_id} · #{persist.written} result#{persist.written == 1 ? "" : "s"}#{kept}"
+            STDERR.puts "saved fuzz run ##{persist.run_id} · #{Gori.plural(persist.written, "result")}#{kept}"
           end
         end
         # STDERR so STDOUT stays the result rows/JSON alone. `get_flow <id>` (History) reads the
         # recorded flows; `record_history: matched` pairs the flow set with the shown rows.
         if record_store
-          note = "recorded #{recorded} flow#{recorded == 1 ? "" : "s"} to History (--record-history #{record_policy})"
+          note = "recorded #{Gori.plural(recorded, "flow")} to History (--record-history #{record_policy})"
           note += " — capped at #{Fuzz::HistoryRecord::MAX}, later sends not recorded" if record_truncated
           STDERR.puts note
         end

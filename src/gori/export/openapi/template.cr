@@ -147,7 +147,7 @@ module Gori
               b = bytes[i]
               if SAFE.includes?(b)
                 io << b.unsafe_chr
-              elsif b == 0x25_u8 && i + 2 < bytes.size && hex?(bytes[i + 1]) && hex?(bytes[i + 2])
+              elsif b == 0x25_u8 && i + 2 < bytes.size && bytes[i + 1].unsafe_chr.hex? && bytes[i + 2].unsafe_chr.hex?
                 io << '%' << bytes[i + 1].unsafe_chr << bytes[i + 2].unsafe_chr # an escape already
                 i += 2
               else
@@ -204,10 +204,6 @@ module Gori
           end
           used << candidate
           candidate
-        end
-
-        private def hex?(b : UInt8) : Bool
-          (0x30_u8 <= b <= 0x39_u8) || (0x41_u8 <= b <= 0x46_u8) || (0x61_u8 <= b <= 0x66_u8)
         end
       end
     end

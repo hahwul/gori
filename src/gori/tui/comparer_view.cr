@@ -125,11 +125,6 @@ module Gori::Tui
       [@slot_a, @slot_b].compact.flat_map(&.lines(:request)).join('\n')
     end
 
-    # Identity for rename/apply (view object, not content) — mirrors MinerView/RepeaterView.
-    def same?(other : ComparerView) : Bool
-      object_id == other.object_id
-    end
-
     # Content-only clone: same slots/pane/fill ring + " copy" name. Shared FlowDetail
     # refs (snapshots are treated as immutable after set).
     def duplicate : ComparerView

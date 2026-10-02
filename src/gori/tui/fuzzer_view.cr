@@ -34,6 +34,7 @@ require "./subtab_clone"
 require "./fuzzer_result_window"
 require "./subtab_marks"
 require "../hotkeys"
+require "../plural"
 
 module Gori::Tui
   # One Fuzzer/Intruder session (a sub-tab under the Fuzzer tab). Holds the editable
@@ -835,7 +836,7 @@ module Gori::Tui
       # as if this keystroke had placed them (mark_word already refuses honestly).
       if text == before
         n = Fuzz::Template.parse(before).position_count
-        return "already marked (#{n} position#{n == 1 ? "" : "s"}) — Clear markers first to re-derive" unless n.zero?
+        return "already marked (#{Gori.plural(n, "position")}) — Clear markers first to re-derive" unless n.zero?
         # A `§` with no POSITION around it — an escaped `§§`, which is what `#load` makes of
         # a capture's own `§`, or a half-open one the operator typed. `Template.auto_mark`
         # is a no-op on either, and the "nothing to mark" line below would be a plain untruth
@@ -846,7 +847,7 @@ module Gori::Tui
       @editor.set_text(restore_wire_eols(text))
       @dirty = true
       n = Fuzz::Template.parse(text).position_count
-      "auto-marked #{n} position#{n == 1 ? "" : "s"}"
+      "auto-marked #{Gori.plural(n, "position")}"
     end
 
     # Flip the run transport between HTTP/1.1 and HTTP/2 (`^V`), picking which engine the
@@ -922,7 +923,7 @@ module Gori::Tui
         "marker opened — move the cursor and ^T again to close the region"
       else
         n = Fuzz::Template.parse(@editor.text).position_count
-        "marked point — #{n} position#{n == 1 ? "" : "s"}"
+        "marked point — #{Gori.plural(n, "position")}"
       end
     end
 
@@ -2091,7 +2092,7 @@ module Gori::Tui
       n = @clusters.size
       # `{space:fuzz.sort}`, never a bare `o`: the sort is menu-only in the Fuzzer. The
       # controller expands the token through the registry.
-      "grouped by response shape · #{n} cluster#{n == 1 ? "" : "s"}#{overflow_chip} · ←/→ fold · {space:fuzz.sort} order"
+      "grouped by response shape · #{Gori.plural(n, "cluster")}#{overflow_chip} · ←/→ fold · {space:fuzz.sort} order"
     end
 
     # The grouped line under the cursor, nil when the list is not grouped.
@@ -3568,7 +3569,7 @@ module Gori::Tui
     private def shapes_chip : String
       return "" unless @grouped
       n = @clusters.size
-      " · #{n} shape#{n == 1 ? "" : "s"}#{overflow_chip}"
+      " · #{Gori.plural(n, "shape")}#{overflow_chip}"
     end
 
     # Rows past `Clusters::MAX_CLUSTERS` distinct shapes are in no cluster, so no grouped row
@@ -3576,7 +3577,7 @@ module Gori::Tui
     private def overflow_chip : String
       return "" unless @clusters.truncated?
       hits = @clusters.overflow_matched
-      " · #{@clusters.overflow_rows} ungrouped#{hits > 0 ? " (#{hits} hit#{hits == 1 ? "" : "s"})" : ""}"
+      " · #{@clusters.overflow_rows} ungrouped#{hits > 0 ? " (#{Gori.plural(hits, "hit")})" : ""}"
     end
 
     STOP_ROW_MARK = "stop row"
@@ -4248,7 +4249,7 @@ module Gori::Tui
 
     private def form_detail_lines : Array(String)
       fields = @d_form || return [] of String
-      lines = ["▸ #{fields.size} field#{fields.size == 1 ? "" : "s"}", ""]
+      lines = ["▸ #{Gori.plural(fields.size, "field")}", ""]
       fields.each do |f|
         tag = f.source == :query ? "?" : " "
         note = f.note

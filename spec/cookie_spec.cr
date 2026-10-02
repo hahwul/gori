@@ -104,12 +104,6 @@ describe Gori::Cookie do
       JSON.parse(Gori::Cookie.decode_json(cookie, "flask"))["timestamp"].raw.should be_nil
     end
 
-    it "secure_compare is length- and content-exact" do
-      Gori::Cookie.secure_compare("abc", "abc").should be_true
-      Gori::Cookie.secure_compare("abc", "abd").should be_false
-      Gori::Cookie.secure_compare("abc", "ab").should be_false
-    end
-
     it "detect_django_algo reads sha1/sha256 off the signature byte length" do
       # HMAC-SHA1 is 20 raw bytes, HMAC-SHA256 is 32 — an unambiguous tell with no secret,
       # so a surface can pick the right algorithm for a black-box Django cookie without a

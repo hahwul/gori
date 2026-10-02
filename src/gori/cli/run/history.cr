@@ -171,12 +171,12 @@ module Gori
           # counted, so a mid-run failure reports what actually went rather than all-or-nothing.
           ids.each_slice(DELETE_BATCH) do |chunk|
             unless store.delete_flows(chunk)
-              abort "gori run history delete: stopped after #{deleted} flow#{deleted == 1 ? "" : "s"} " \
+              abort "gori run history delete: stopped after #{Gori.plural(deleted, "flow")} " \
                     "(project busy) — the rest are still there; re-run to continue"
             end
             deleted += chunk.size
           end
-          puts "Deleted #{deleted} flow#{deleted == 1 ? "" : "s"} matching #{q.inspect}."
+          puts "Deleted #{Gori.plural(deleted, "flow")} matching #{q.inspect}."
         ensure
           store.close
         end
@@ -206,7 +206,7 @@ module Gori
       # which is the same decision one scope wider.
       private def self.delete_confirmation_error(q : String, count : Int32, yes : Bool) : String?
         return nil if yes
-        "refusing to delete #{count} flow#{count == 1 ? "" : "s"} matching #{q.inspect} without --yes"
+        "refusing to delete #{Gori.plural(count, "flow")} matching #{q.inspect} without --yes"
       end
 
       # Drain the off-commit trigram index for a `body:`/free-text query, and return the refusal
@@ -231,7 +231,7 @@ module Gori
         return nil unless filter.uses_fts?
         pending = store.drain_fts!
         return nil if pending.zero?
-        "#{pending} flow#{pending == 1 ? "" : "s"} could not be indexed for free-text search " \
+        "#{Gori.plural(pending, "flow")} could not be indexed for free-text search " \
         "(this project's writer is busy — another gori is capturing it), so #{consequence} " \
         "Retry in a moment."
       end
@@ -349,10 +349,10 @@ module Gori
           n = store.count?
           abort "gori run history clear: could not count the flows (project busy) — nothing deleted" unless n
           unless yes
-            abort "gori run history clear: refusing to delete #{n} flow#{n == 1 ? "" : "s"} without --yes"
+            abort "gori run history clear: refusing to delete #{Gori.plural(n, "flow")} without --yes"
           end
           abort "gori run history clear: NOT cleared (project busy) — every flow is still there" unless store.clear_flows
-          puts "Deleted #{n} flow#{n == 1 ? "" : "s"}."
+          puts "Deleted #{Gori.plural(n, "flow")}."
         ensure
           store.close
         end
@@ -841,7 +841,7 @@ module Gori
           # `--format har -n 123` against a project holding exactly 123 flows told its
           # operator to raise `-n` for flows that do not exist. The listing over-reads by one
           # row (`limit_probe`), which answers it outright.
-          STDERR.puts "gori run history: stopped at the --limit of #{limit} flow#{limit == 1 ? "" : "s"}; raise -n to export more"
+          STDERR.puts "gori run history: stopped at the --limit of #{Gori.plural(limit, "flow")}; raise -n to export more"
         end
       end
 

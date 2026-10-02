@@ -153,7 +153,7 @@ module Gori
       # The last line of the text form. A cut comparison with no change in what WAS compared
       # says exactly that, never a bare "no differences" (#1162).
       def self.compare_verdict(change_count : Int32, truncated : Bool) : String
-        return "#{change_count} line#{change_count == 1 ? "" : "s"} changed" if change_count > 0
+        return "#{Gori.plural(change_count, "line")} changed" if change_count > 0
         truncated ? "no differences in the compared part — the rest is unknown" : "no differences"
       end
 

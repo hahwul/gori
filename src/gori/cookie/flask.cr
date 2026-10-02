@@ -1,3 +1,5 @@
+require "crypto/subtle"
+
 module Gori
   module Cookie
     # Flask's `SecureCookieSessionInterface` cookie (itsdangerous ≥ 2.0):
@@ -63,14 +65,14 @@ module Gori
 
       def verify(cookie : String, secret : String, salt : String = SALT) : Bool
         p = parse(cookie)
-        Cookie.secure_compare(compute_sig(signing_input(p), secret, salt), p.signature)
+        Crypto::Subtle.constant_time_compare(compute_sig(signing_input(p), secret, salt), p.signature)
       end
 
       def crack(cookie : String, secrets, salt : String = SALT) : String?
         p = parse(cookie)
         input = signing_input(p)
         secrets.each do |s|
-          return s if Cookie.secure_compare(compute_sig(input, s, salt), p.signature)
+          return s if Crypto::Subtle.constant_time_compare(compute_sig(input, s, salt), p.signature)
         end
         nil
       end

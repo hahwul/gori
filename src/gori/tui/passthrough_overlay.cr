@@ -4,6 +4,7 @@ require "./fmt"
 require "./frame"
 require "./overlay"
 require "../settings"
+require "../plural"
 
 module Gori::Tui
   # The TLS-passthrough list: every host gori relayed WITHOUT decrypting it, opened from the
@@ -148,7 +149,7 @@ module Gori::Tui
         return
       end
       Frame.card(screen, box, "TLS PASSTHROUGH", border: Theme.border_focus)
-      meta = "#{@hosts.size} host#{@hosts.size == 1 ? "" : "s"}"
+      meta = Gori.plural(@hosts.size, "host")
       Frame.border_meta(screen, box, "TLS PASSTHROUGH", meta, bg: Theme.panel)
 
       cap = list_capacity(box)
@@ -208,7 +209,7 @@ module Gori::Tui
       # carry said nothing this row does not: the pattern column below is already yellow.
       screen.cell(box.x + 1, py, sel ? '▎' : ' ', Theme.accent, bg)
 
-      conns = "#{entry.connections} conn#{entry.connections == 1 ? "" : "s"}"
+      conns = Gori.plural(entry.connections, "conn")
       stamp = Fmt.ago(entry.first_seen)
       tail = "#{stamp}  #{conns}"
       tail_x = box.right - 1 - Screen.display_width(tail)

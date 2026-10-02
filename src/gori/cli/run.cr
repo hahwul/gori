@@ -56,6 +56,7 @@ require "../export/go_http"
 require "../export/httpie"
 require "../export/csrf_poc"
 require "./output"
+require "../mcp/serialize"
 require "./run/subcommand"
 require "./run/interrupt"
 require "./run/capture"
@@ -103,6 +104,7 @@ require "./run/views"
 require "./run/project"
 require "./run/project_network"
 require "./run/project_default"
+require "../plural"
 
 module Gori
   module CLI
@@ -1990,7 +1992,10 @@ module Gori
             # end of the encoded stream, so the text/base64 above is a prefix of what the
             # origin meant to send. Silence here read as "decoded: gzip, all of it".
             j.field "decode_truncated", true unless complete
-            emit_trailers_json(j, head, body)
+            # The chunked message's TRAILER fields, which neither the de-chunked body nor the
+            # rendered head carries. MCP's shape; `include_sensitive` keeps the CLI's values
+            # unredacted, as they always were here.
+            MCP::Serialize.emit_trailers(j, head, body, include_sensitive: true)
           end
         end
       end
@@ -2007,34 +2012,6 @@ module Gori
         j.field "shown_size", shown.size if cut
         j.field "truncated", wire_truncated || cut
         s.valid_encoding? ? j.field("text", s) : j.field("base64", Base64.strict_encode(shown))
-      end
-
-      # The chunked message's TRAILER fields (RFC 7230 §4.1.2), beside the de-chunked body.
-      # `ContentDecode.dechunk` stops at the terminating 0-chunk and the rendered `head`
-      # stops at the blank line before the body, so a trailer was captured by NEITHER half
-      # while the origin's `Trailer:` announcement was still echoed in the head — the one
-      # reading an operator can draw from that is "the origin sent none". `repeater send`
-      # persists no flow, so on that path there was no `show --format raw` to fall back to.
-      # Same field name and shape as MCP's `Serialize.emit_trailers`.
-      private def self.emit_trailers_json(j : JSON::Builder, head : Bytes?, body : Bytes?) : Nil
-        trailers = Proxy::Codec::ContentDecode.trailers(head, body)
-        return if trailers.empty?
-        j.field "trailers" do
-          j.array do
-            trailers.each do |(name, value)|
-              j.object do
-                j.field "name", name.scrub
-                j.field "value", value.scrub
-                # A trailer value is remote bytes; `scrub` above is lossy, so hand back the
-                # exact octets whenever it changed them (mirrors the binary-body fallback).
-                unless value.valid_encoding?
-                  j.field "value_base64", Base64.strict_encode(value.to_slice)
-                  j.field "value_lossy", true
-                end
-              end
-            end
-          end
-        end
       end
 
       # `body` is the DECODED body (de-chunked/inflated) that the operator reads; `wire_body`
@@ -2084,8 +2061,8 @@ module Gori
 
       # Trailers under their own heading, after the body. The decoded text view drops
       # everything past the terminating 0-chunk, so a trailer the origin really sent showed
-      # up in neither the head nor the body — see emit_trailers_json. Labelled, never merged
-      # into the head: whether the far side treats a trailer as a header is the test.
+      # up in neither the head nor the body. Labelled, never merged into the head: whether
+      # the far side treats a trailer as a header is the test.
       private def self.print_trailers_text(head : Bytes?, wire_body : Bytes?) : Nil
         trailers = Proxy::Codec::ContentDecode.trailers(head, wire_body)
         return if trailers.empty?

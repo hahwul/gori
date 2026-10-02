@@ -5,6 +5,7 @@ require "../../discover/adapters"
 require "../../discover/plan"
 require "../../outbound"
 require "../../store"
+require "../../plural"
 
 module Gori::Tui
   # The Discover sub-tab (under the Target parent tab). Spider + directory brute-force runs
@@ -527,7 +528,7 @@ module Gori::Tui
              else
                ""
              end
-      msg = "Discover: #{n} endpoint#{n == 1 ? "" : "s"} on #{run.target}#{tail}"
+      msg = "Discover: #{Gori.plural(n, "endpoint")} on #{run.target}#{tail}"
       level = n > 0 ? :success : :info
       log_event(run, level, msg)
       push_notification(run, level, msg)

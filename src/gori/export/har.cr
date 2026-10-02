@@ -3,6 +3,7 @@ require "base64"
 require "uri"
 require "../store/models"
 require "../proxy/codec/http1"
+require "../plural"
 
 module Gori
   # Write captured flows OUT in an interchange format — the inverse direction of
@@ -153,14 +154,14 @@ module Gori
         def notes : Array(String)
           msgs = [] of String
           if websocket > 0
-            msgs << "skipped #{plural(websocket, "WebSocket flow")} with no captured messages: " \
+            msgs << "skipped #{Gori.plural(websocket, "WebSocket flow")} with no captured messages: " \
                     "the entry would carry the handshake and no traffic"
           end
           if no_response > 0
-            msgs << "skipped #{plural(no_response, "flow")} with no captured response: a HAR entry requires a response object"
+            msgs << "skipped #{Gori.plural(no_response, "flow")} with no captured response: a HAR entry requires a response object"
           end
           if incomplete > 0
-            msgs << "skipped #{plural(incomplete, "flow")} whose exchange did not complete: HAR cannot record " \
+            msgs << "skipped #{Gori.plural(incomplete, "flow")} whose exchange did not complete: HAR cannot record " \
                     "a partial response, so the entry would import back as a successful one"
           end
           if truncated > 0
@@ -174,10 +175,6 @@ module Gori
                     "HAR has no base64 escape for a head (marked in the HAR by a comment); the store keeps the raw bytes"
           end
           msgs
-        end
-
-        private def plural(n : Int32, one : String) : String
-          "#{n} #{n == 1 ? one : "#{one}s"}"
         end
       end
 

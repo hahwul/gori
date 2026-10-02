@@ -10,6 +10,7 @@ require "../../retest/live_backend"
 require "../../host_overrides"
 require "../../outbound"
 require "../../settings"
+require "../../plural"
 
 module Gori::Tui
   # The Issues tab: the triage list + an issue's detail (with an inline notes
@@ -148,7 +149,7 @@ module Gori::Tui
       @retest_issue_id = issue_id
       gen = (@retest_gen += 1)
       @retest_active_gen = gen
-      noun = "#{planned.size} step#{planned.size == 1 ? "" : "s"}"
+      noun = Gori.plural(planned.size, "step")
       @retest_job_id = @host.jobs.start(:retest, "issue ##{issue_id} · #{noun}",
         Jobs::Goto.new(:issues))
       @host.status("retest: running #{noun} for issue ##{issue_id}…")
@@ -1159,7 +1160,7 @@ module Gori::Tui
       n = @issues.mark_count
       return "no marks — verbs act on the cursor row" if n == 0
       hidden = @issues.marked_hidden_count
-      msg = "#{n} issue#{n == 1 ? "" : "s"} marked"
+      msg = "#{Gori.plural(n, "issue")} marked"
       msg += " (#{hidden} not visible)" if hidden > 0
       msg
     end
@@ -1230,7 +1231,7 @@ module Gori::Tui
       frozen_note = frozen > 0 ? "\n#{frozen} frozen evidence link#{frozen == 1 ? " is" : "s are"} removed; " \
                                  "the archived cop#{frozen == 1 ? "y stays" : "ies stay"} in the Evidence tab." : ""
       @host.confirm("CLEAR ISSUES",
-        "Delete ALL #{n} issue#{n == 1 ? "" : "s"} for this project?\n" \
+        "Delete ALL #{Gori.plural(n, "issue")} for this project?\n" \
         "Their notes, CVSS scores and related links go too.#{frozen_note}\nThis can't be undone.",
         confirm_label: "clear", danger: true) do
         ok = @issues.clear(@host.session.store)
@@ -1324,7 +1325,7 @@ module Gori::Tui
                 else             Issues::Export.markdown(issues, store, @host.session.project.name)
                 end
       File.write(path, content.ends_with?('\n') ? content : "#{content}\n")
-      msg = "exported #{issues.size} issue#{issues.size == 1 ? "" : "s"} → #{path}"
+      msg = "exported #{Gori.plural(issues.size, "issue")} → #{path}"
       # Only warn when the report landed INSIDE the ephemeral project dir. The path used to
       # always be in there, so the warning was unconditional; now the operator picks it, and
       # a file written to their cwd survives the project just fine.

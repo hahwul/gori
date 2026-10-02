@@ -103,21 +103,7 @@ module Gori
                                  @byte_budget : Int64 = BYTE_BUDGET)
         end
 
-        def run_id : Int64
-          @persistence.run_id
-        end
-
-        def error : String?
-          @persistence.error
-        end
-
-        def written : Int64
-          @persistence.written
-        end
-
-        def failed? : Bool
-          @persistence.failed?
-        end
+        delegate run_id, error, written, failed?, to: @persistence
 
         def finished? : Bool
           @persistence.terminal?
@@ -158,9 +144,7 @@ module Gori
         end
 
         # False when the writer is still inside the Store — see `Persistence#close`.
-        def close : Bool
-          @persistence.close
-        end
+        delegate close, to: @persistence
 
         # Full-content keyset stream in stable idx/id order. Yield Store records rather than
         # rebuilding Fuzz::Result so a later permanent append copies every byte exactly.

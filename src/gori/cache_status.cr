@@ -1,3 +1,4 @@
+require "./ascii_bytes"
 require "./proxy/codec/http1"
 
 module Gori
@@ -74,6 +75,7 @@ module Gori
       X-Nextjs-Cache X-LiteSpeed-Cache
       Cache-Control Surrogate-Control CDN-Cache-Control
     ]
+    private CACHE_HEADER_KEYS = CACHE_HEADERS.map(&.downcase)
 
     private class Signals
       def initialize
@@ -302,7 +304,7 @@ module Gori
 
     private def self.observe_cache_header(signals : Signals, head : Bytes, from : Int32,
                                           to : Int32) : Nil
-      colon = byte_index(head, 0x3A_u8, from, to)
+      colon = head[from, to - from].index(0x3A_u8).try &.+(from)
       return unless colon && cache_header_name?(head, from, colon)
       name = String.new(head[from, colon - from])
       value = String.new(head[colon + 1, to - colon - 1]).strip
@@ -320,7 +322,7 @@ module Gori
     end
 
     private def self.cache_header_name?(bytes : Bytes, from : Int32, to : Int32) : Bool
-      CACHE_HEADERS.any? { |name| name_equals?(bytes, from, to, name) }
+      CACHE_HEADER_KEYS.any? { |name| AsciiBytes.range_eq_ci?(bytes, from, to, name.to_slice) }
     end
 
     # Once a positive signal or a Cache-Status verdict is found, only a later Cache-Status
@@ -332,42 +334,19 @@ module Gori
         line_end = crlf_at(bytes, pos)
         stop = line_end || bytes.size
         break if stop == pos
-        colon = byte_index(bytes, 0x3A_u8, pos, stop)
-        last = pos if colon && name_equals?(bytes, pos, colon, "Cache-Status")
+        colon = bytes[pos, stop - pos].index(0x3A_u8).try &.+(pos)
+        last = pos if colon && AsciiBytes.range_eq_ci?(bytes, pos, colon, "cache-status".to_slice)
         break unless line_end
         pos = line_end + 2
       end
       last
     end
 
-    private def self.name_equals?(bytes : Bytes, from : Int32, to : Int32, name : String) : Bool
-      return false unless to - from == name.bytesize
-      needle = name.to_slice
-      name.bytesize.times.all? do |i|
-        ascii_lower(bytes.unsafe_fetch(from + i)) == ascii_lower(needle.unsafe_fetch(i))
-      end
-    end
-
     private def self.crlf_at(bytes : Bytes, from : Int32) : Int32?
-      i = from
-      while i < bytes.size - 1
-        return i if bytes.unsafe_fetch(i) == 0x0D_u8 && bytes.unsafe_fetch(i + 1) == 0x0A_u8
-        i += 1
+      while cr = bytes.index(0x0D_u8, from)
+        return cr if bytes[cr + 1]? == 0x0A_u8
+        from = cr + 1
       end
-      nil
-    end
-
-    private def self.byte_index(bytes : Bytes, needle : UInt8, from : Int32, limit : Int32) : Int32?
-      i = from
-      while i < limit
-        return i if bytes.unsafe_fetch(i) == needle
-        i += 1
-      end
-      nil
-    end
-
-    private def self.ascii_lower(byte : UInt8) : UInt8
-      byte >= 0x41_u8 && byte <= 0x5A_u8 ? byte + 0x20_u8 : byte
     end
   end
 end

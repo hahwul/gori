@@ -1,4 +1,5 @@
 require "../store/models"
+require "../plural"
 
 module Gori
   # A static catalog of response-modification presets for the Rewriter (#821). Each preset is
@@ -61,7 +62,7 @@ module Gori
 
       # Rows this preset would install, joined for a one-line CLI/MCP summary.
       def summary : String
-        "#{rules.size} rule#{rules.size == 1 ? "" : "s"}"
+        Gori.plural(rules.size, "rule")
       end
     end
 

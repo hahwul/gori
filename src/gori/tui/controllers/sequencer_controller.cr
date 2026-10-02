@@ -5,6 +5,7 @@ require "../../store"
 require "../../sequencer"
 require "../../env"
 require "../../proxy/codec/http1"
+require "../../plural"
 
 module Gori::Tui
   # One open sequencing session (a sub-tab under the Sequencer tab). `flow_id` is the
@@ -587,8 +588,13 @@ module Gori::Tui
         request_summary(built.bytes), Sequencer::Mode::LiveReplay, loc, cookies, headers)
     end
 
+    # NO `Env.expand` here: `Sequencer::Plan.build` expands the request once, at run time.
+    # Expanding at seed time as well would resolve a var whose value itself contains a
+    # `$TOKEN` twice, and would freeze the resolved value into the persisted session — a
+    # sequenced request keeps its `$TOKEN`s like the Repeater editor does. CRLF promotion is
+    # byte-wise for the reason given over `MinerController#build_seed_from_request`.
     def build_seed_from_request(target : String, request_text : String, http2 : Bool, sni : String?) : SequenceSeed
-      bytes = text_to_request(request_text)
+      bytes = Env.normalize_crlf(request_text.to_slice)
       SequenceSeed.new(target, bytes, http2, sni, nil, request_summary(bytes),
         Sequencer::Mode::LiveReplay, nil, [] of String, [] of String)
     end
@@ -621,35 +627,6 @@ module Gori::Tui
       s.empty? ? "request" : s
     end
 
-    # NO `Env.expand` here: `Sequencer::Plan.build` expands the request once, at run time.
-    # Expanding at seed time as well would resolve a var whose value itself contains a
-    # `$TOKEN` twice, and would freeze the resolved value into the persisted session — a
-    # sequenced request keeps its `$TOKEN`s like the Repeater editor does.
-    #
-    # A BYTE walk rather than `gsub(/\r?\n/, "\r\n")` for the reason spelled out over
-    # `MinerController#text_to_request`: the Repeater buffer this arrives from is routinely raw
-    # captured bytes, and PCRE2 raises `ArgumentError` on a non-UTF-8 subject — the raise
-    # reached `Runner#run`. Byte-equivalent to the regex, `"a\r\r\n"` included.
-    private def text_to_request(text : String) : Bytes
-      bytes = text.to_slice
-      io = IO::Memory.new(bytes.size + 16)
-      i = 0
-      while i < bytes.size
-        b = bytes[i]
-        if b == 0x0D_u8 && i + 1 < bytes.size && bytes[i + 1] == 0x0A_u8
-          io.write_byte(0x0D_u8); io.write_byte(0x0A_u8) # already CRLF
-          i += 2
-        elsif b == 0x0A_u8
-          io.write_byte(0x0D_u8); io.write_byte(0x0A_u8) # lone LF promoted
-          i += 1
-        else
-          io.write_byte(b)
-          i += 1
-        end
-      end
-      io.to_slice
-    end
-
     # --- send-selection: selected text becomes manual sample(s) ---
     def sequence_from_text(payload : String) : Nil
       # `split('\n')` (a Char, byte-safe) and not `split(/\r?\n/)`: the payload is a band the
@@ -665,7 +642,7 @@ module Gori::Tui
         save_current
         drain_events
         start_run(v)
-        @host.status("added #{tokens.size} token#{tokens.size == 1 ? "" : "s"} — analyzing")
+        @host.status("added #{Gori.plural(tokens.size, "token")} — analyzing")
       else
         config = Sequencer::Config.new(mode: Sequencer::Mode::Manual, manual_tokens: tokens)
         view = SequencerView.new
@@ -863,7 +840,7 @@ module Gori::Tui
              else
                ""
              end
-      msg = "Sequencer: #{n} token#{n == 1 ? "" : "s"} on #{v.summary} — #{rep.rating.label}#{tail}"
+      msg = "Sequencer: #{Gori.plural(n, "token")} on #{v.summary} — #{rep.rating.label}#{tail}"
       level = rep.rating.value <= Sequencer::Stats::Rating::Weak.value ? :warning : :success
       log_event(v, level, msg)
       push_notification(v, level, msg, collected: n)

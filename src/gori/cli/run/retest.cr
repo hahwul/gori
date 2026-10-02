@@ -9,6 +9,7 @@
 require "../../retest"
 require "../../retest/live_backend"
 require "../../mcp/serialize"
+require "../../plural"
 
 module Gori
   module CLI
@@ -357,7 +358,7 @@ module Gori
           n = store.count_retest_steps(iid)
           abort "gori run retest clear: issue ##{iid} has no retest steps" if n == 0
           unless yes
-            abort "gori run retest clear: this would delete #{n} step#{n == 1 ? "" : "s"} from issue ##{iid} — pass --yes to do it"
+            abort "gori run retest clear: this would delete #{Gori.plural(n, "step")} from issue ##{iid} — pass --yes to do it"
           end
           abort "gori run retest clear: NOT cleared (project busy or unwritable)" unless store.clear_retest_steps(iid)
           puts "Cleared #{n} retest step#{n == 1 ? "" : "s"} from issue ##{iid}."
@@ -581,7 +582,7 @@ module Gori
         begin
           run = store.get_retest_run(id) || abort("gori run retest forget: no retest run with id #{id}")
           abort "gori run retest forget: NOT deleted (project busy or unwritable)" unless store.delete_retest_run(id)
-          puts "Forgot retest run ##{id} of issue ##{run.issue_id} (#{run.verdict.label}, #{run.total} step#{run.total == 1 ? "" : "s"})."
+          puts "Forgot retest run ##{id} of issue ##{run.issue_id} (#{run.verdict.label}, #{Gori.plural(run.total, "step")})."
         ensure
           store.close
         end
@@ -630,7 +631,7 @@ module Gori
       private def self.retest_run_line(r : Store::RetestRun) : String
         t = Retest::Tally.new(r.total, r.passed, r.failed, r.inconclusive, r.errored, r.blocked, r.skipped)
         "##{r.id}  #{MCP::Serialize.unix_micros_iso(r.started_at)}  #{r.surface || "—"}  " \
-        "#{r.verdict.label.upcase}  #{r.total} step#{r.total == 1 ? "" : "s"} · #{Retest.summary_line(t)}"
+        "#{r.verdict.label.upcase}  #{Gori.plural(r.total, "step")} · #{Retest.summary_line(t)}"
       end
 
       private def self.retest_result_line(position : Int32, role : Store::RetestRole, label : String,

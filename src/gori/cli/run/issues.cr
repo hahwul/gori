@@ -95,7 +95,7 @@ module Gori
           rescue ex : File::Error
             abort "gori run issues: cannot write to #{path}: #{ex.message}"
           end
-          STDERR.puts "exported #{count} issue#{count == 1 ? "" : "s"} → #{path}"
+          STDERR.puts "exported #{Gori.plural(count, "issue")} → #{path}"
         else
           # Neutralize terminal escape sequences before writing to STDOUT/a TTY: the markdown
           # report embeds attacker-controlled evidence bodies (proxied traffic) and free-text

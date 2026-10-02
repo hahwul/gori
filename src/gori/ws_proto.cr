@@ -5,6 +5,7 @@ require "./ws_proto/stomp"
 require "./ws_proto/sockjs"
 require "./ws_proto/action_cable"
 require "./store/models"
+require "./plural"
 
 module Gori
   module WsProto
@@ -263,7 +264,7 @@ module Gori
       shown = frames.count { |f| f.kind != TRUNCATION_KIND }
       labels = protocols(frames).map { |p| label(p) }
       names = frames.compact_map(&.name).uniq!
-      s = "#{shown} frame#{shown == 1 ? "" : "s"}#{shown == frames.size ? "" : " (cap reached)"} · #{labels.join(" + ")}"
+      s = "#{Gori.plural(shown, "frame")}#{shown == frames.size ? "" : " (cap reached)"} · #{labels.join(" + ")}"
       names.empty? ? s : "#{s} · #{names.first(4).join(", ")}#{names.size > 4 ? ", …" : ""}"
     end
   end

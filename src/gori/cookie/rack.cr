@@ -1,3 +1,5 @@
+require "crypto/subtle"
+
 module Gori
   module Cookie
     # Rack's `Rack::Session::Cookie` cookie (the default `Base64::Marshal` coder + HMAC):
@@ -58,13 +60,13 @@ module Gori
 
       def verify(cookie : String, secret : String) : Bool
         p = parse(cookie)
-        Cookie.secure_compare(compute_sig(p.data, secret), p.signature)
+        Crypto::Subtle.constant_time_compare(compute_sig(p.data, secret), p.signature)
       end
 
       def crack(cookie : String, secrets) : String?
         p = parse(cookie)
         secrets.each do |s|
-          return s if Cookie.secure_compare(compute_sig(p.data, s), p.signature)
+          return s if Crypto::Subtle.constant_time_compare(compute_sig(p.data, s), p.signature)
         end
         nil
       end

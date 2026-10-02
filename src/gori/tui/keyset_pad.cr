@@ -10,6 +10,7 @@ require "./screen"
 require "./text_area"
 require "./text_read_state"
 require "./theme"
+require "../plural"
 
 module Gori::Tui
   # The setup wizard's practice pad: a three-line editor on which a new operator tries an
@@ -341,7 +342,7 @@ module Gori::Tui
                          {@read.copy_all(@area), false}
                        end
       Register.store(text, linewise: linewise)
-      @status = expand("copied #{plural(text.size, "char")} · {editor.paste} pastes (your clipboard is untouched)")
+      @status = expand("copied #{Gori.plural(text.size, "char")} · {editor.paste} pastes (your clipboard is untouched)")
     end
 
     # vim `yy`: `ReadEdit.yank_line` minus its clipboard write (see the class comment).
@@ -370,10 +371,6 @@ module Gori::Tui
     # `overrides` is the pad's own snapshot, taken once at construction, so it is handed in.
     private def expand(template : String, kind : Verb::Keyset::Kind = @keyset) : String
       Hotkeys.expand(@registry, template, @overrides, @profile, Verb::Keyset.name_of(kind))
-    end
-
-    private def plural(n : Int32, word : String) : String
-      n == 1 ? "1 #{word}" : "#{n} #{word}s"
     end
   end
 end
