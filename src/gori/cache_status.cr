@@ -302,7 +302,7 @@ module Gori
 
     private def self.observe_cache_header(signals : Signals, head : Bytes, from : Int32,
                                           to : Int32) : Nil
-      colon = byte_index(head, 0x3A_u8, from, to)
+      colon = head[from, to - from].index(0x3A_u8).try &.+(from)
       return unless colon && cache_header_name?(head, from, colon)
       name = String.new(head[from, colon - from])
       value = String.new(head[colon + 1, to - colon - 1]).strip
@@ -332,7 +332,7 @@ module Gori
         line_end = crlf_at(bytes, pos)
         stop = line_end || bytes.size
         break if stop == pos
-        colon = byte_index(bytes, 0x3A_u8, pos, stop)
+        colon = bytes[pos, stop - pos].index(0x3A_u8).try &.+(pos)
         last = pos if colon && name_equals?(bytes, pos, colon, "Cache-Status")
         break unless line_end
         pos = line_end + 2
@@ -349,21 +349,10 @@ module Gori
     end
 
     private def self.crlf_at(bytes : Bytes, from : Int32) : Int32?
-      i = from
-      while i < bytes.size - 1
-        return i if bytes.unsafe_fetch(i) == 0x0D_u8 && bytes.unsafe_fetch(i + 1) == 0x0A_u8
-        i += 1
+      while cr = bytes.index(0x0D_u8, from)
+        return cr if bytes[cr + 1]? == 0x0A_u8
+        from = cr + 1
       end
-      nil
-    end
-
-    private def self.byte_index(bytes : Bytes, needle : UInt8, from : Int32, limit : Int32) : Int32?
-      i = from
-      while i < limit
-        return i if bytes.unsafe_fetch(i) == needle
-        i += 1
-      end
-      nil
     end
 
     private def self.ascii_lower(byte : UInt8) : UInt8
