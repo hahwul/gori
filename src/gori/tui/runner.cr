@@ -1336,15 +1336,14 @@ module Gori::Tui
       search_recompute # a ^F prompt open over the reloaded view keeps fresh hits
     end
 
+    # Never blocks: nil when no event is waiting, and (`receive?`) when the channel is closed.
     private def nonblocking_event : Store::FlowEvent?
       select
-      when e = @session.flow_events.receive
+      when e = @session.flow_events.receive?
         e
       else
         nil
       end
-    rescue Channel::ClosedError
-      nil
     end
 
     # Collapses a pasted CRLF into one newline — see `PasteNewline`. Filtered here, at the
