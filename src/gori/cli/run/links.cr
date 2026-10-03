@@ -55,10 +55,10 @@ module Gori
                      "  (--ref is flow|repeater|fuzz|miner; `rm` is accepted for delete)"
           project_options(p, proj, "read")
           p.on("--owner=KIND", "Owner kind: issue (default) | note") { |v| owner_s = v.strip.downcase }
-          p.on("--id=N", "Owner issue/note id (required unless --note-position is used)") { |v| owner_id = parse_link_id(v, "--id"); note_position = nil }
+          p.on("--id=N", "Owner issue/note id (required unless --note-position is used)") { |v| owner_id = parse_id(v, "gori run links", "--id"); note_position = nil }
           # `evidence`/`retest` name the owner as `--issue N` (#1389); the same spelling here.
-          p.on("--issue=N", "Same as --owner=issue --id=N") { |v| owner_s = "issue"; owner_id = parse_link_id(v, "--issue"); note_position = nil }
-          p.on("--note=N", "Stable note id (same as --owner=note --id=N)") { |v| owner_s = "note"; owner_id = parse_link_id(v, "--note"); note_position = nil }
+          p.on("--issue=N", "Same as --owner=issue --id=N") { |v| owner_s = "issue"; owner_id = parse_id(v, "gori run links", "--issue"); note_position = nil }
+          p.on("--note=N", "Stable note id (same as --owner=note --id=N)") { |v| owner_s = "note"; owner_id = parse_id(v, "gori run links", "--note"); note_position = nil }
           p.on("--note-position=N", "Note's 1-based list position shown by `gori run notes`") { |v| owner_s = "note"; owner_id = nil; note_position = parse_link_note_position(v) }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
@@ -133,13 +133,13 @@ module Gori
                      "#{action} an evidence pointer. Note --note=N uses the stable id; --note-position=N uses the 1-based position shown by `gori run notes`. --ref is flow|repeater|fuzz|miner.#{tail}"
           project_options(p, proj, "update")
           p.on("--owner=KIND", "Owner kind: issue (default) | note") { |v| owner_s = v.strip.downcase }
-          p.on("--id=N", "Owner issue/note id (required unless --note-position is used)") { |v| owner_id = parse_link_id(v, "--id"); note_position = nil }
+          p.on("--id=N", "Owner issue/note id (required unless --note-position is used)") { |v| owner_id = parse_id(v, "gori run links", "--id"); note_position = nil }
           # `evidence`/`retest` name the owner as `--issue N` (#1389); the same spelling here.
-          p.on("--issue=N", "Same as --owner=issue --id=N") { |v| owner_s = "issue"; owner_id = parse_link_id(v, "--issue"); note_position = nil }
-          p.on("--note=N", "Stable note id (same as --owner=note --id=N)") { |v| owner_s = "note"; owner_id = parse_link_id(v, "--note"); note_position = nil }
+          p.on("--issue=N", "Same as --owner=issue --id=N") { |v| owner_s = "issue"; owner_id = parse_id(v, "gori run links", "--issue"); note_position = nil }
+          p.on("--note=N", "Stable note id (same as --owner=note --id=N)") { |v| owner_s = "note"; owner_id = parse_id(v, "gori run links", "--note"); note_position = nil }
           p.on("--note-position=N", "Note's 1-based list position shown by `gori run notes`") { |v| owner_s = "note"; owner_id = nil; note_position = parse_link_note_position(v) }
           p.on("--ref=KIND", "Target kind: flow|repeater|fuzz|miner (required)") { |v| ref_s = v.strip.downcase }
-          p.on("--ref-id=M", "Target id (required)") { |v| ref_id = parse_link_id(v, "--ref-id") }
+          p.on("--ref-id=M", "Target id (required)") { |v| ref_id = parse_id(v, "gori run links", "--ref-id") }
           # `add` only (#1117): it creates the row whose id a script needs back. `delete` has no
           # row left to describe, and a flag it parsed and ignored would be a silent drop.
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f } if add
@@ -244,10 +244,6 @@ module Gori
         ref_kind = Store::LinkRefKind.parse(ref_s) ||
                    abort("gori run links #{verb}: invalid --ref '#{ref_s}' (flow|repeater|fuzz|miner)")
         {ref_kind, ref_id}
-      end
-
-      private def self.parse_link_id(v : String, flag : String) : Int64
-        v.to_i64? || abort("gori run links: invalid #{flag} #{v.inspect} (expected an integer)")
       end
 
       private def self.parse_link_note_position(v : String) : Int32

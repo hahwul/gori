@@ -41,7 +41,7 @@ private def seed_flow(store : Gori::Store) : Int64
 end
 
 # Private CLI glue — reopen the module for bare-call wrappers. (The `abort` branches of
-# resolve_link_ref / parse_link_id call `exit`, so only their success paths run here.)
+# resolve_link_ref / parse_id call `exit`, so only their success paths run here.)
 module Gori::CLI::Run
   def self.link_owner_exists_for_spec(store : Gori::Store, kind : Gori::Store::LinkOwnerKind, id : Int64) : Bool
     link_owner_exists?(store, kind, id)
@@ -52,8 +52,8 @@ module Gori::CLI::Run
     resolve_link_ref(verb, ref_s, ref_id)
   end
 
-  def self.parse_link_id_for_spec(v : String, flag : String) : Int64
-    parse_link_id(v, flag)
+  def self.parse_id_for_spec(v : String, flag : String) : Int64
+    parse_id(v, "gori run links", flag)
   end
 
   def self.parse_link_note_position_for_spec(v : String) : Int32
@@ -94,8 +94,8 @@ describe "gori run links — flag parsing" do
   end
 
   it "parses a plain integer id, including a large one" do
-    Gori::CLI::Run.parse_link_id_for_spec("42", "--id").should eq(42_i64)
-    Gori::CLI::Run.parse_link_id_for_spec("9007199254740993", "--ref-id").should eq(9_007_199_254_740_993_i64)
+    Gori::CLI::Run.parse_id_for_spec("42", "--id").should eq(42_i64)
+    Gori::CLI::Run.parse_id_for_spec("9007199254740993", "--ref-id").should eq(9_007_199_254_740_993_i64)
   end
 
   it "parses a positive 1-based note position" do

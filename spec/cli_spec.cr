@@ -5,7 +5,7 @@ require "file_utils"
 # here — CLI.run itself starts a TUI / server or calls `exit`, so it is not spec-callable.
 #
 # `global_version_flag?` is private; expose it the way the other CLI specs expose theirs
-# (spec/cli/run/links_spec.cr does the same for resolve_link_ends / parse_link_id).
+# (spec/cli/run/links_spec.cr does the same for resolve_link_ends / parse_id).
 module Gori::CLI
   # Mirrors what CLI.run does: split off the top-level subcommand, then ask about the tail. Kept
   # at full-argv granularity so these cases read as real command lines.

@@ -371,9 +371,7 @@ module Gori
           p.on("--status=STATUS", "Status: open|confirmed|false-positive|resolved") { |v| stat_s = v }
         end
 
-        abort "gori run issues update: missing <issue-id>" if positional.empty?
-        abort "gori run issues update: too many arguments (expected one <issue-id>)" if positional.size > 1
-        id = positional[0].to_i64? || abort("gori run issues update: invalid issue id '#{positional[0]}'")
+        id = take_id(positional, "gori run issues update", "<issue-id>", "issue id")
 
         cvss.try do |c|
           abort "gori run issues update: invalid --cvss '#{c}' (a vector like CVSS:3.1/AV:N/... or a score 0.0-10.0)" unless Gori::Cvss.valid?(c)

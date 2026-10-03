@@ -272,9 +272,7 @@ module Gori
           p.on("--include-sensitive", "Also include the full raw message base64 (unredacted)") { include_sensitive = true }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
-        abort "gori run intercept get: missing <item-id>" if positional.empty?
-        abort "gori run intercept get: too many arguments (expected one <item-id>)" if positional.size > 1
-        item_id = positional[0].to_i64? || abort("gori run intercept get: invalid item id '#{positional[0]}'")
+        item_id = take_id(positional, "gori run intercept get", "<item-id>", "item id")
 
         project = resolve_read_project(proj.name, proj.db)
         with_store(project, long_running: true) do |store|
@@ -372,9 +370,7 @@ module Gori
           project_options(p, proj, "update")
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
-        abort "gori run intercept #{verb}: missing <item-id>" if positional.empty?
-        abort "gori run intercept #{verb}: too many arguments (expected one <item-id>)" if positional.size > 1
-        item_id = positional[0].to_i64? || abort("gori run intercept #{verb}: invalid item id '#{positional[0]}'")
+        item_id = take_id(positional, "gori run intercept #{verb}", "<item-id>", "item id")
         {item_id, proj.name, proj.db, format}
       end
 
@@ -403,9 +399,7 @@ module Gori
           p.on("--no-update-content-length", "Forward the Content-Length you declared instead of resyncing it to the body (the CL-desync / CL+TE smuggling primitive; mirrors MCP intercept_forward_edit{update_content_length:false})") { update_cl = false }
           format_flag(p, [:text, :json], "Output: text (default) | json") { |f| format = f }
         end
-        abort "gori run intercept edit: missing <item-id>" if positional.empty?
-        abort "gori run intercept edit: too many arguments (expected one <item-id>)" if positional.size > 1
-        item_id = positional[0].to_i64? || abort("gori run intercept edit: invalid item id '#{positional[0]}'")
+        item_id = take_id(positional, "gori run intercept edit", "<item-id>", "item id")
 
         # Two replacement messages, one held item: refused like MCP's raw / raw_base64 pair,
         # never settled by which flag happened to win.

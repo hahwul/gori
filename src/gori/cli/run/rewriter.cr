@@ -764,9 +764,7 @@ module Gori
           project_options(p, proj, "update")
           p.on("--scope=SCOPE", "Which <id>: project (default) | global") { |v| scope = parse_rule_scope(v) }
         end
-        abort "gori run rewriter rm: missing <id>" if positional.empty?
-        abort "gori run rewriter rm: too many arguments (expected one <id>)" if positional.size > 1
-        id = positional[0].to_i64? || abort("gori run rewriter rm: invalid rule id '#{positional[0]}'")
+        id = take_id(positional, "gori run rewriter rm", "<id>", "rule id")
 
         # Both scopes go through `Gori::Rules` and therefore resolve a project — see
         # `cmd_rewriter_add` for why the model owns the write. For a GLOBAL rule the model also
@@ -803,9 +801,7 @@ module Gori
           p.on("--scope=SCOPE", "Which <id>: project (default) | global") { |v| scope = parse_rule_scope(v) }
           p.on("--everywhere", "global rules only: change the default for every project") { everywhere = true }
         end
-        abort "gori run rewriter #{action}: missing <id>" if positional.empty?
-        abort "gori run rewriter #{action}: too many arguments (expected one <id>)" if positional.size > 1
-        id = positional[0].to_i64? || abort("gori run rewriter #{action}: invalid rule id '#{positional[0]}'")
+        id = take_id(positional, "gori run rewriter #{action}", "<id>", "rule id")
         if everywhere && !scope.global?
           abort "gori run rewriter #{action}: --everywhere needs --scope=global — a project rule has no default"
         end

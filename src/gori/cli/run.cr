@@ -1765,6 +1765,28 @@ module Gori
         list_leftover_error(leftover, sub, verbs)
       end
 
+      # One `what` positional naming an id (`rewriter rm <id>`, `intercept get <item-id>`):
+      # missing, too many and not-a-number, each refused in the words these commands use.
+      private def self.take_id(rest : Array(String), prefix : String, what : String, noun : String) : Int64
+        abort "#{prefix}: missing #{what}" if rest.empty?
+        abort "#{prefix}: too many arguments (expected one #{what})" if rest.size > 1
+        rest[0].to_i64? || abort("#{prefix}: invalid #{noun} '#{rest[0]}'")
+      end
+
+      # The `<id>` positional of `retest`/`evidence` verbs: too many, absent, then `parse_id`.
+      private def self.require_positional_id(positional : Array(String), cmd : String,
+                                             noun : String, parse_cmd : String) : Int64
+        abort "#{cmd}: too many arguments (expected one <#{noun}>, got: #{positional.join(" ")})" if positional.size > 1
+        v = positional.first?
+        abort "#{cmd}: <#{noun}> is required" if v.nil?
+        parse_id(v, parse_cmd, "<#{noun}>")
+      end
+
+      # An integer id out of a flag value or positional (`--issue`, `<id>`).
+      private def self.parse_id(v : String, cmd : String, flag : String) : Int64
+        v.to_i64? || abort("#{cmd}: invalid #{flag} #{v.inspect} (expected an integer)")
+      end
+
       private def self.take_flow_id(rest : Array(String), sub : String) : Int64
         abort "gori run #{sub}: missing <flow-id>" if rest.empty?
         abort "gori run #{sub}: too many arguments (expected one <flow-id>, got: #{rest.join(" ")})" if rest.size > 1

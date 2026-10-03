@@ -879,9 +879,7 @@ module Gori
           project_options(p, proj, "update")
         end
 
-        abort "gori run project scope delete: missing <rule-id>" if positional.empty?
-        abort "gori run project scope delete: too many arguments (expected one <rule-id>)" if positional.size > 1
-        id = positional[0].to_i64? || abort("gori run project scope delete: invalid rule id '#{positional[0]}'")
+        id = take_id(positional, "gori run project scope delete", "<rule-id>", "rule id")
 
         project = resolve_read_project(proj.name, proj.db)
         with_store(project) do |store|
@@ -1292,9 +1290,7 @@ module Gori
           p.on("--ip=IP", "New IPv4/IPv6 literal to dial, optionally IP:PORT") { |v| ip = v }
         end
 
-        abort "gori run project host-override update: missing <id>" if positional.empty?
-        abort "gori run project host-override update: too many arguments (expected one <id>)" if positional.size > 1
-        id = positional[0].to_i64? || abort("gori run project host-override update: invalid id '#{positional[0]}'")
+        id = take_id(positional, "gori run project host-override update", "<id>", "id")
         h = host
         i = ip
         abort "gori run project host-override update: --host and --ip are both required" unless h && i
@@ -1317,9 +1313,7 @@ module Gori
           project_options(p, proj, "update")
         end
 
-        abort "gori run project host-override delete: missing <id>" if positional.empty?
-        abort "gori run project host-override delete: too many arguments (expected one <id>)" if positional.size > 1
-        id = positional[0].to_i64? || abort("gori run project host-override delete: invalid id '#{positional[0]}'")
+        id = take_id(positional, "gori run project host-override delete", "<id>", "id")
 
         project = resolve_read_project(proj.name, proj.db)
         with_store(project) do |store|

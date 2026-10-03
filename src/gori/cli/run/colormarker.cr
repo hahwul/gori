@@ -386,9 +386,7 @@ module Gori
           p.on("--name=NAME", "New rule label — pass an empty string to clear it (default: unchanged)") { |v| name = v }
           p.on("--scope=SCOPE", "Which <id>: project (default) | global") { |v| scope = parse_color_scope(v) }
         end
-        abort "gori run colormarker update: missing <id>" if positional.empty?
-        abort "gori run colormarker update: too many arguments (expected one <id>)" if positional.size > 1
-        id = positional[0].to_i64? || abort("gori run colormarker update: invalid rule id '#{positional[0]}'")
+        id = take_id(positional, "gori run colormarker update", "<id>", "rule id")
         # Copied out of the OptionParser closures before use, so Crystal narrows them below —
         # a block-assigned variable stays nilable at the call site (see `color update`).
         want_filter, want_color, want_style, want_name = filter, color_s, style_s, name
@@ -455,9 +453,7 @@ module Gori
           project_options(p, proj, "update")
           p.on("--scope=SCOPE", "Which <id>: project (default) | global") { |v| scope = parse_color_scope(v) }
         end
-        abort "gori run colormarker rm: missing <id>" if positional.empty?
-        abort "gori run colormarker rm: too many arguments (expected one <id>)" if positional.size > 1
-        id = positional[0].to_i64? || abort("gori run colormarker rm: invalid rule id '#{positional[0]}'")
+        id = take_id(positional, "gori run colormarker rm", "<id>", "rule id")
 
         # A project that had overridden this rule keeps a row pointing at the id, and this
         # surface cannot reach every project's DB to sweep it. It stays inert: global ids come
@@ -499,9 +495,7 @@ module Gori
           p.on("--scope=SCOPE", "Which <id>: project (default) | global") { |v| scope = parse_color_scope(v) }
           p.on("--everywhere", "global rules only: change the default for every project") { everywhere = true }
         end
-        abort "gori run colormarker #{action}: missing <id>" if positional.empty?
-        abort "gori run colormarker #{action}: too many arguments (expected one <id>)" if positional.size > 1
-        id = positional[0].to_i64? || abort("gori run colormarker #{action}: invalid rule id '#{positional[0]}'")
+        id = take_id(positional, "gori run colormarker #{action}", "<id>", "rule id")
         if everywhere && !scope.global?
           abort "gori run colormarker #{action}: --everywhere needs --scope=global — a project rule has no default"
         end
@@ -556,9 +550,7 @@ module Gori
           p.on("--up", "Give the rule higher precedence") { dir = -1 }
           p.on("--down", "Give the rule lower precedence") { dir = 1 }
         end
-        abort "gori run colormarker move: missing <id>" if positional.empty?
-        abort "gori run colormarker move: too many arguments (expected one <id>)" if positional.size > 1
-        id = positional[0].to_i64? || abort("gori run colormarker move: invalid rule id '#{positional[0]}'")
+        id = take_id(positional, "gori run colormarker move", "<id>", "rule id")
         abort "gori run colormarker move: pass --up or --down" if dir == 0
 
         if scope.global?
