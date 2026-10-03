@@ -653,9 +653,12 @@ module Gori::Tui
     end
 
     def backspace : Nil
-      return if bool_field? || choice_field? || opener_field? || readonly_field? || disabled_field? || @cursor == 0
+      return if bool_field? || choice_field? || opener_field? || readonly_field? || disabled_field?
       v = @values[@focused]
+      # Clamp before the zero test: a save can shorten the value under the caret
+      # (`editor` is stripped), and `v[0, -1]` raises.
       c = @cursor.clamp(0, v.size)
+      return if c == 0
       @values[@focused] = "#{v[0, c - 1]}#{v[c..]}"
       @cursor = c - 1
       @status = nil
