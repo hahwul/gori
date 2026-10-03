@@ -562,7 +562,7 @@ module Gori::Tui
         return "↑/↓ scroll preview · ↹ list · ↵ open full · #{clear} clear · space cmds · esc tabs" if @history.preview_focus != :list
         return "↑/↓ move · ↵ open · ↹ preview · #{repeater} repeater · #{filter} filter · #{clear} clear · space cmds · esc tabs"
       end
-      "↑/↓ move · ↵ open · #{repeater} repeater · #{issue} issue · #{clear} clear · #{filter} filter · #{intercept} hold-mode · space cmds · esc tabs"
+      "↑/↓ move · ↵ open · #{repeater} repeater · #{issue} issue · #{clear} clear · #{filter} filter · #{intercept} intercept · space cmds · esc tabs"
     end
 
     # Live IME composition only flows to the QL filter bar (the one text field).

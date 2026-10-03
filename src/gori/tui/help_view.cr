@@ -40,19 +40,20 @@ module Gori::Tui
         Item.new("c", "toggle capture", "capture.toggle"),
         Item.new("i", "toggle intercept", "intercept.toggle"),
         Item.new("s", "toggle scope lens (or click scope:N)", "scope.toggle-lens"),
-        Item.new("^P", "Match & Replace → Rewriter tab (palette)", "rules.edit"),
-        Item.new("badge / ^P", "notification center (palette; rebindable)", "app.notifications"),
+        Item.new("^P →", "Match & Replace — open the Rewriter tab", "rules.edit"),
+        Item.new("^P →", "Notifications — the notification center (or click the notify badge)", "app.notifications"),
         Item.new("^, / ⚙", "preferences — every setting (also ^P → Settings)", "settings.open"),
         Item.new("^B", "reveal whitespace (·→␍␊)", "view.reveal-ws"),
         Item.new("^D / ^C ×2", "quit gori"),
         Item.new("q", "back to projects (on the tab bar)"),
         Item.new("?", "open this Help tab", "tab.help"),
         # The same two pages as a popup over whatever you were doing, so looking a key up
-        # does not cost the pane you were in. Both are palette-only; `binding_label` prints
-        # the literal `^P` here for want of a chord, and follows one if either ever gains it.
-        Item.new("^P", "this page as a popup — 'Keyboard shortcuts'", "help.hotkeys"),
-        Item.new("^P", "the Query page as a popup — also `?` on an empty filter bar", "help.query"),
-        Item.new("^P", "the guided tour on a mock UI, then back here — also `gori tutorial`", "help.tour"),
+        # does not cost the pane you were in. Like the two `^P →` rows above, these have no
+        # chord, so the row spells `^P → <palette title>` across both columns (the titles do
+        # not fit KEY_W), and `binding_label` follows a chord if one is ever bound.
+        Item.new("^P →", "Keyboard shortcuts — this page as a popup", "help.hotkeys"),
+        Item.new("^P →", "Query language reference — the Query page as a popup (also `?` on an empty filter bar)", "help.query"),
+        Item.new("^P →", "Guided tour — a mock UI, then back here (also `gori tutorial`)", "help.tour"),
         Item.new("Settings: Hotkeys", "rebind any shortcut below (^P → Settings: Hotkeys)"),
         Item.new("gori wizard", "re-run the first-run setup (bind · theme · Miss Ring) from a shell"),
       ]},
@@ -103,7 +104,7 @@ module Gori::Tui
         Item.new("{space:history.copy-as}", "copy as… — urls · hosts · cURL · raw · req+res pair", "history.copy-as"),
         Item.new("d", "delete selected/marked flows (asks first)", "history.delete"),
         Item.new("⇧X", "clear all History flows (asks first)", "history.clear"),
-        Item.new("i", "toggle intercept hold-mode", "intercept.toggle"),
+        Item.new("i", "toggle intercept", "intercept.toggle"),
         # The drill-in STEP is named on all four tabs that have one (Issues and Probe below,
         # Comparer further down): this page is the surface whose whole job is "look a key up",
         # and it named the pair on none of them while ⇧N meant one thing here and the opposite

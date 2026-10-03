@@ -1252,7 +1252,7 @@ module Gori::Tui
       @m_intercept = !@m_intercept
       if @m_intercept
         @m_held_on = true
-        @m_held = 2
+        @m_held = MOCK_HELD
       elsif @m_held > 0
         nudge("intercept off — the #{@m_held} still held went out unedited")
         @m_held = 0
@@ -2264,9 +2264,8 @@ module Gori::Tui
         screen.text(pane.x + 2, yy, msg, Theme.muted, Theme.panel, width: pane.w - 4)
         return
       end
-      @m_held.times do |i|
+      Tutorial.held_rows(@m_held).each_with_index do |(method, path, _), i|
         break if yy >= pane.bottom - 1
-        method, path, _ = FLOW_ROWS[(i + 1) % FLOW_ROWS.size]
         bg = i == 0 ? Theme.accent_bg : Theme.panel
         screen.fill(Rect.new(pane.x + 1, yy, pane.w - 2, 1), bg)
         screen.cell(pane.x + 1, yy, i == 0 ? '▎' : ' ', Theme.accent, bg)
@@ -2275,6 +2274,15 @@ module Gori::Tui
           width: {pane.w - 10, 1}.max)
         yy += 1
       end
+    end
+
+    # The queue the mock's intercept holds: /api/users then /admin. Forward and drop decide the
+    # SELECTED (top) request as the app does, so the queue shrinks from the top — drawing it
+    # as a count from the first row made `f` look like it had sent /admin.
+    MOCK_HELD = 2
+
+    def self.held_rows(held : Int32) : Array({String, String, Int32})
+      FLOW_ROWS[1, MOCK_HELD][MOCK_HELD - held.clamp(0, MOCK_HELD)..]
     end
 
     # The address to point a client at: the global default bind, with a wildcard bind read as

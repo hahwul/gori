@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- TUI: a Ctrl chord the tab's list binds, such as History's `^R`, now answers on the tab bar with the `↵` that reaches it instead of doing nothing, and the setup wizard no longer lists `^1-9`, which many terminals never deliver (#1501)
 - Import: a HAR with an absurd `bodySize` or `content.size` no longer makes every History read in the project fail, and a HAR or OpenAPI file the parser chokes on is reported as a bad file instead of a backtrace (#1497)
 - Project archives: an archive with an impossible creation time or a database value gori never writes is refused at import, instead of becoming a project that crashes on open, and an out-of-range stored issue severity or status reads as the nearest valid one (#1497)
 - CLI: `issues --format markdown`/`sarif`, `issues create --cvss`, `notes` and `compare` no longer crash on an out-of-range timestamp, an invalid-UTF-8 CVSS, a huge notes cursor or a duration past ~25 days (#1497)
@@ -17,6 +18,7 @@
 - TUI: the mouse wheel over the History, Issues or Probe list moves the list even while the preview has focus, and a click below the drawn rows (a rule form's preview line, the Evidence border, a hidden History mode chip) no longer acts on a row or chip that is not on screen, and the keyset playground's too-small card closes on a click (#1496)
 - TUI: ^1-9, ^N, duplicate and send-to on every sub-tab strip drop a filter that would hide the chip they land on, an active chip wider than the strip is clipped instead of vanishing, and race and group sends name the Repeater tab their transcript landed on (#1496)
 - TUI: Fuzzer Advanced numbers past 2147483647 clamp instead of silently running the default, deep Sitemap rows and long rule-form errors stay inside their pane, and leaving a project stops a running Sitemap JavaScript scan (#1496)
+- TUI: the History footer and Help call `i` intercept, as the tab and the tour do, Help's palette-only rows name the `^P` entry to pick, and the tour's Intercept mock forwards or drops the selected request instead of the one below it (#1500)
 - Settings: two gori windows no longer drop each other's saved decoder chains, global Probe scan rules or OAST providers (a deleted one no longer comes back), a custom colour deleted in another window can be re-created, and a `settings.json` that broke while gori ran is kept as `.corrupt` before the next save replaces it (#1495)
 - Settings: values gori cannot read stay as written instead of failing open — a non-string `network.upstream_proxy` keeps refusing routes after any save, a non-string rewriter `host` or `replacement` makes the rule inert rather than global, a non-boolean MCP permission switch denies its group, and a `--config` naming a new file or an `env.syntax` typo is no longer saved as `bare` (#1495)
 - Settings profiles: `import --dry-run` refuses a malformed upstream rule as the real import does, and a profile no longer carries this install's update-check state or recent wordlist paths (#1495)

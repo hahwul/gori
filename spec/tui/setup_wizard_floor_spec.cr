@@ -18,6 +18,13 @@ describe Gori::Tui::SetupWizard do
     SW.run_bind_note("0.0.0.0", nil).should eq("this run: 0.0.0.0 (-l) · these set the default")
   end
 
+  # Ctrl+digit carries no control character, so tmux and many terminals never deliver it:
+  # the recap must not promise a ^1-9 jump that may not land.
+  it "promises no Ctrl+digit jump in the Shortcuts recap" do
+    SW.modifier_recap("ctrl").should_not contain("1-9")
+    SW.modifier_recap("alt").should contain("⌥1-9")
+  end
+
   it "keeps local and other-device guidance readable at the minimum width" do
     inner = SW.card_w(SW::MIN_W, 64) - 6
     hints = SW.bind_guidance(inner)
