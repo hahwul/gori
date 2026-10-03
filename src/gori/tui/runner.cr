@@ -1832,7 +1832,7 @@ module Gori::Tui
         status(Runner.enter_first_hint(chord, below.title, strip: subtabs_shown?, pane: Runner.gated_pane(below, lands)))
         return
       end
-      if hint = Runner.unbound_key_hint(chord)
+      if hint = Runner.unbound_key_hint(chord, read_mode: editor_read_mode?)
         status(Hotkeys.expand(@session.registry, hint))
         return
       end
@@ -1857,8 +1857,32 @@ module Gori::Tui
       chord ||= Keybind.from_event(ev)
       return false unless chord
       return false unless id = resolve_verb_id(chord, current_scope)
-      @toast = @session.registry[id].call(self) || @toast
+      verb = @session.registry[id]
+      from_read = Runner.read_mode_global?(verb, chord, editor_read_mode?)
+      before = @toast
+      @toast = verb.call(self) || @toast
+      tag_read_mode_toast(before) if from_read
       true
+    end
+
+    # A Global breath letter (`c` capture, `s` scope lens) that fired from a text editor in
+    # READ: the hand most likely thought it was typing. The key keeps its meaning (#1375); the
+    # toast says where it came from and how to type, or the flip goes unnoticed.
+    def self.read_mode_global?(verb : Verb::Definition, chord : Verb::Chord, read_mode : Bool) : Bool
+      read_mode && verb.scope.global? && !chord.ctrl && !chord.alt &&
+        chord.key.size == 1 && chord.key[0].letter?
+    end
+
+    def self.read_mode_note(toast : String) : String
+      "#{toast} · from READ mode — #{EditorPane::INSERT_KEYS} to type"
+    end
+
+    private def tag_read_mode_toast(before : String?) : Nil
+      return unless (toast = @toast) && toast != before
+      tagged = Hotkeys.expand(@session.registry, Runner.read_mode_note(toast))
+      kinded = @toast_kinded
+      @toast_kinded = {tagged, kinded[1]} if kinded && kinded[0] == toast
+      @toast = tagged
     end
 
     # The sub-tab strip owns its raw navigation keys. Its unhandled keys may reach Global
@@ -2831,9 +2855,13 @@ module Gori::Tui
     # Global) binds. Only for a BARE character: a modified chord is deliberate, and the named
     # keys are navigation that some scopes legitimately leave unbound. `{tab.help}` resolves
     # through `Hotkeys.expand` at the call site so a rebound `?` is what the line names.
-    def self.unbound_key_hint(chord : Verb::Chord) : String?
+    # `read_mode`: the focused pane is a text editor in READ, so the operator was most likely
+    # typing — the way to type is the answer, not "nothing bound".
+    def self.unbound_key_hint(chord : Verb::Chord, read_mode : Bool = false) : String?
       return nil if chord.ctrl || chord.alt || chord.key.size != 1
-      "‹#{Hotkeys.display_label(chord)}› — nothing bound here · space menu · {tab.help} help"
+      key = "‹#{Hotkeys.display_label(chord)}›"
+      return "#{key} — READ mode: #{EditorPane::INSERT_KEYS} to type · space menu" if read_mode
+      "#{key} — nothing bound here · space menu · {tab.help} help"
     end
 
     # …and the same line for a key that IS bound — one level down. On the tab bar `/` answered

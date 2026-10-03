@@ -83,6 +83,17 @@ describe "Verb::Scope::Editor — the controller arms it replaced" do
     end
   end
 
+  it "opens a new Repeater in READ and names the key into INSERT, not \"type\"" do
+    TuiContract.with_session("editor-arrival") do |session|
+      host = TuiContract::Host.new(session)
+      host.tab = :repeater
+      rep = Gori::Tui::RepeaterController.new(host)
+      rep.repeater_new
+      rep.editor_read_mode?.should be_true
+      host.statuses.last.should contain("i/↵ edit the request & target")
+    end
+  end
+
   it "says so when a pane has no undo rather than eating the key" do
     # `editor.undo` is new in READ (the nine ^Z guards are all INS-side), so a silent no-op
     # would read as a broken keyset instead of an empty stack / a pane without one.

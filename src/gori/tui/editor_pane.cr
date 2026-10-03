@@ -11,6 +11,11 @@ module Gori::Tui
   # controller on, and its pad has to run the same delete and paste engine the real panes do
   # rather than a lookalike that drifts from them.
   module EditorPane
+    # The keys that leave READ for INSERT, as `{verb.id}` tokens for `Hotkeys.expand`: what a
+    # hint names when the focused pane is a text editor in READ, where a bare letter is a
+    # command (or a Global breath key) rather than a typed character.
+    INSERT_KEYS = "{editor.insert}/{editor.insert-enter}"
+
     abstract def editor_text_buffer : {TextArea, TextReadState}?
     abstract def editor_read_mode? : Bool
     abstract def editor_enter_insert : Bool

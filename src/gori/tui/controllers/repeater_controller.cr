@@ -731,6 +731,12 @@ module Gori::Tui
       RepeaterView.new.tap(&.menu_registry = @host.session.registry)
     end
 
+    # An arrival toast is read while the editor is still in READ, where a typed letter is a
+    # command: it names the key into INSERT, not "type to edit".
+    private def edit_keys : String
+      keys(EditorPane::INSERT_KEYS)
+    end
+
     # A menu path in a status or hint strip, compact like the chips (`␣Pf`).
     private def chip(id : String) : String
       Hotkeys.menu_chip(@host.session.registry, id)
@@ -1810,7 +1816,7 @@ module Gori::Tui
         unshown = view.ws_unshown_seed
         note = unshown.empty? ? "" : " — #{Gori.plural(unshown.size, "frame")} not shown (#{unshown.join(", ")}); #{unshown.size == 1 ? "it replays" : "they replay"} unless you edit the list"
         note += " · #{CLI::Run.ws_notice_dropped_note(notice_dropped)}" if notice_dropped > 0
-        @host.status("ws repeater: #{view.summary} (#{transport_word(view)}) — edit messages " \
+        @host.status("ws repeater: #{view.summary} (#{transport_word(view)}) — #{edit_keys} edit messages " \
                      "(one per line)#{note} · ^R send · esc back")
       elsif grpc_flow?(detail)
         # gRPC: head editable as text; a unary call's message payload is hex-editable (^X)
@@ -1818,7 +1824,7 @@ module Gori::Tui
         # the text-keyed repeaters store.
         view.load_grpc(detail)
         @repeaters << RepeaterTab.new(view, id, nil)
-        tip = view.grpc_reframable? ? "edit head · ^X payload" : "edit head/metadata"
+        tip = view.grpc_reframable? ? "#{edit_keys} edit head · ^X payload" : "#{edit_keys} edit head/metadata"
         @host.status("grpc repeater: #{view.summary} — #{tip} · ^R send · esc back")
       elsif saml_doc = saml_request_doc(detail)
         # SAML: split — full request envelope + the decoded XML payload (re-encoded into
@@ -1840,7 +1846,7 @@ module Gori::Tui
         # jump never arrives at all — which is why docs/content/guide/hotkeys.md calls ⇧1-9 the
         # primary and the SUBTABS strip one keypress away says `⇧1-9 jump`. An arrival hint is
         # the first thing read on this tab; it must not teach the alias that might not land.
-        @host.status("repeater: #{view.summary} — #{graphql_raw_note(detail)}type to edit · ^R send · ^N new · ⇧1-9 switch · esc back")
+        @host.status("repeater: #{view.summary} — #{graphql_raw_note(detail)}#{edit_keys} edit · ^R send · ^N new · ⇧1-9 switch · esc back")
       end
       @current_repeater_idx = @repeaters.size - 1
       reveal_active_subtab
@@ -1855,7 +1861,7 @@ module Gori::Tui
       @current_repeater_idx = @repeaters.size - 1
       reveal_active_subtab
       @host.goto_tab(:repeater)
-      @host.status("new repeater — edit the request & target · ^R send · ⇧1-9 switch · esc back")
+      @host.status("new repeater — #{edit_keys} edit the request & target · ^R send · ⇧1-9 switch · esc back")
     end
 
     # Open a hand-authored repeater session from an arbitrary request (Miner finding, etc.).
