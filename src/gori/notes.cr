@@ -221,7 +221,7 @@ module Gori
       return nil unless doc
       arr = doc["notes"]?.try(&.as_a?)
       return nil unless arr
-      cur = doc["cur"]?.try(&.as_i?) || 0
+      cur = doc["cur"]?.try(&.as_i64?).try(&.clamp(0, Int32::MAX).to_i32) || 0
       next_id = doc["next_id"]?.try(&.as_i64?) || 0_i64
       entries = [] of NoteEntry
       legacy_id = 1_i64
@@ -230,7 +230,7 @@ module Gori
           id = obj["id"]?.try(&.as_i64?) || legacy_id
           text = obj["text"]?.try(&.as_s?) || ""
           entries << NoteEntry.new(id, text)
-          legacy_id = {legacy_id, id + 1}.max
+          legacy_id = {legacy_id, id &+ 1}.max
         else
           text = v.as_s? || ""
           entries << NoteEntry.new(legacy_id, text)

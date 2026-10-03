@@ -100,3 +100,12 @@ describe Gori::Cvss do
     Gori::Cvss.resolve("-Infinity").should be_nil
   end
 end
+
+# The vector grammar is PCRE, which raises on invalid UTF-8; a stored one broke every list.
+describe "Gori::Cvss on invalid UTF-8" do
+  it "reads it as no vector instead of raising" do
+    bad = String.new(Bytes[0x43, 0x56, 0x53, 0x53, 0x3a, 0x33, 0x2e, 0x31, 0x2f, 0xff])
+    Gori::Cvss.parse(bad).should be_nil
+    Gori::Cvss.read(bad).should be_nil
+  end
+end

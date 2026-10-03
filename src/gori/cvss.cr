@@ -59,7 +59,9 @@ module Gori
     # `upcase` retry is what lets an operator paste the lowercase form some scanners emit.
     def self.parse(input : String) : ::CVSS::Vector?
       trimmed = input.strip
-      return nil if trimmed.empty?
+      # `CVSS.parse?` matches with PCRE, which RAISES on invalid UTF-8 rather than missing,
+      # and a stored `cvss` column comes back through here on every Issues list.
+      return nil if trimmed.empty? || !trimmed.valid_encoding?
       ::CVSS.parse?(trimmed) || ::CVSS.parse?(trimmed.upcase)
     end
 

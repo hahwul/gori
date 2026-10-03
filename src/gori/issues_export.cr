@@ -191,7 +191,7 @@ module Gori
         io << "\n### Frozen evidence\n\n"
         metas.each do |m|
           io << "- **frozen** " << one_line(m.method) << " " << one_line(m.url)
-          io << " — " << m.source_label << " · " << Time.unix(m.created_at // 1_000_000).to_utc.to_s("%Y-%m-%d %H:%M:%S UTC")
+          io << " — " << m.source_label << " · " << Gori::LocalTime.utc(m.created_at, "%Y-%m-%d %H:%M:%S UTC")
           io << " · " << (m.status || (m.error ? "error" : "no response"))
           io << " · " << m.bytes << " bytes"
           io << " · sha256 req " << m.request_sha256

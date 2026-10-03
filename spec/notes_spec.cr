@@ -200,3 +200,10 @@ describe Gori::Notes do
     end
   end
 end
+
+describe "Gori::Notes.parse with out-of-range numbers" do
+  it "reads a cur or id past Int32/Int64 without raising" do
+    doc = Gori::Notes.parse(%({"cur":9223372036854775807,"notes":[{"id":9223372036854775807,"text":"a"},"b"]})).not_nil!
+    doc.notes.size.should eq(2)
+  end
+end

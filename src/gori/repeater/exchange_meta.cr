@@ -101,7 +101,7 @@ module Gori
         # One decimal below 10, none above — "9.4 KB" but "312 KB", so the readout keeps a
         # steady width instead of swinging between "1023.7 KB" and "8 KB".
         private def fmt(v : Float64) : String
-          v < 10 ? sprintf("%.1f", v) : v.round.to_i.to_s
+          v < 10 ? sprintf("%.1f", v) : v.round.to_i64.to_s
         end
       end
     end
