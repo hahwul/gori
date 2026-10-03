@@ -84,6 +84,19 @@ describe "status-strip wording" do
     end
     offenders.should be_empty
   end
+
+  it "tells a Repeater arrival which key starts typing — its editor opens in READ" do
+    # `type to edit` sent a first-timer into READ-mode commands: `xd` deleted the request
+    # line, `c` stopped capture and `s` flipped the scope lens.
+    offenders = [] of String
+    Dir.glob(File.join(root, "**", "*.cr")).sort.each do |path|
+      File.read(path).lines.each_with_index do |line, i|
+        next unless line.matches?(/status\(.*type to edit/)
+        offenders << "#{File.basename(path)}:#{i + 1} — #{line.strip}"
+      end
+    end
+    offenders.should be_empty
+  end
 end
 
 # The strip's spinner / ✓ / ✗ used to come from MATCHING THE MESSAGE TEXT against English

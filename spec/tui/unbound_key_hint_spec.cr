@@ -36,4 +36,38 @@ describe "Runner.unbound_key_hint" do
     line.should contain("? help")
     line.should_not contain("{tab.help}")
   end
+
+  it "tells a text editor in READ how to type, from the live keymap" do
+    # A first-timer in the Repeater's READ request typed `xd` and lost the request line; the
+    # unbound letters in between said "nothing bound here", which reads as "typing is broken".
+    line = Gori::Hotkeys.expand(Gori::Verbs.registry,
+      Runner.unbound_key_hint(Gori::Verb::Chord.new("e"), read_mode: true).not_nil!)
+    line.should eq("‹e› — READ mode: i/↵ to type · space menu")
+  end
+end
+
+# A Global breath letter that fires from an editor in READ keeps its meaning (#1375), but its
+# toast says where it came from: `c` stopping capture mid-"typing" otherwise reads as the
+# proxy breaking on its own.
+describe "Runner.read_mode_global?" do
+  registry = Gori::Verbs.registry
+  capture = registry["capture.toggle"]
+  lens = registry["scope.toggle-lens"]
+
+  it "tags a bare Global letter from a READ editor" do
+    Runner.read_mode_global?(capture, Gori::Verb::Chord.new("c"), true).should be_true
+    Runner.read_mode_global?(lens, Gori::Verb::Chord.new("s"), true).should be_true
+  end
+
+  it "leaves every other press alone" do
+    Runner.read_mode_global?(capture, Gori::Verb::Chord.new("c"), false).should be_false
+    Runner.read_mode_global?(registry["editor.insert"], Gori::Verb::Chord.new("i"), true).should be_false
+    Runner.read_mode_global?(registry["nav.pos1"], Gori::Verb::Chord.new("1"), true).should be_false
+    Runner.read_mode_global?(capture, Gori::Verb::Chord.new("c", ctrl: true), true).should be_false
+  end
+
+  it "appends the way to type, resolved against the live keymap" do
+    Gori::Hotkeys.expand(registry, Runner.read_mode_note("capture off"))
+      .should eq("capture off · from READ mode — i/↵ to type")
+  end
 end
