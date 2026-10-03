@@ -614,7 +614,7 @@ module Gori
         return not_found("no flow with id #{id}") unless store.flow_row(id)
         return busy("flow NOT deleted (store busy or unwritable); it is unchanged") unless store.delete_flow(id)
         @body_chunk_memo = nil # correct either way (content-keyed); this just frees the buffer
-        Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "deleted", true } })
+        Result.new({id: id, deleted: true}.to_json)
       end
 
       # Wipe EVERY captured flow. The TUI puts a danger confirm in front of this; here

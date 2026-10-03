@@ -25,7 +25,7 @@ module Gori
         secret = str(h, "secret")
         return Result.new("missing required 'secret'", is_error: true) if secret.nil?
         ok = cookie_verify(cookie.strip, secret, h)
-        Result.new(JSON.build { |j| j.object { j.field "valid", ok; j.field "format", cookie_resolved_format(cookie.strip, h) } })
+        Result.new({valid: ok, format: cookie_resolved_format(cookie.strip, h)}.to_json)
       rescue ex : Cookie::CookieError
         Result.new(ex.message || "not a decodable cookie", is_error: true)
       end
@@ -73,7 +73,7 @@ module Gori
         ts = optional_int_arg(h, "timestamp") || Time.utc.to_unix
         raise Gori::Error.new("invalid 'timestamp' (must not be negative)") if ts < 0
         cookie = cookie_forge_build(format, secret, ts, h)
-        Result.new(JSON.build { |j| j.object { j.field "cookie", cookie; j.field "format", format } })
+        Result.new({cookie: cookie, format: format}.to_json)
       rescue ex : Cookie::CookieError # invalid JSON, missing payload/value, unknown format
         Result.new(ex.message || "invalid input", is_error: true)
       end

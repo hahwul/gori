@@ -227,7 +227,7 @@ module Gori
 
       @[Tool("ql_reference", unbound: true)]
       private def ql_reference : Result
-        Result.new(JSON.build { |j| j.object { j.field "reference", QL::REFERENCE } })
+        Result.new({reference: QL::REFERENCE}.to_json)
       end
 
       private def ql_error(query : String) : Result

@@ -50,13 +50,7 @@ module Gori
           return busy("host override NOT added (store busy or unwritable); no override was created")
         end
         entry = ov.entries.find { |e| e.host == normalized }
-        Result.new(JSON.build do |j|
-          j.object do
-            j.field "id", entry.try(&.id)
-            j.field "host", normalized
-            j.field "ip", ip
-          end
-        end)
+        Result.new({id: entry.try(&.id), host: normalized, ip: ip}.to_json)
       end
 
       @[Tool("update_host_override", gated: true, agent_action: true, permission: "write")]
@@ -80,7 +74,7 @@ module Gori
         unless ov.update(id, host, ip)
           return busy("host override NOT updated (store busy or unwritable); it is unchanged")
         end
-        Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "host", normalized; j.field "ip", ip } })
+        Result.new({id: id, host: normalized, ip: ip}.to_json)
       end
 
       @[Tool("delete_host_override", gated: true, agent_action: true, permission: "write")]
@@ -90,7 +84,7 @@ module Gori
         ov = HostOverrides.load(store)
         return not_found("no host override with id #{id}") unless ov.entries.any? { |e| e.id == id }
         return busy("host override NOT deleted (store busy or unwritable); it is unchanged") unless ov.remove(id)
-        Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "deleted", true } })
+        Result.new({id: id, deleted: true}.to_json)
       end
 
       # The tools/list schemas for the host-override tools, kept beside the handlers that

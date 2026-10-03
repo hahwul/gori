@@ -225,7 +225,7 @@ module Gori
             store.delete_color_rule(id)
           end
         return busy("colour rule NOT deleted (store busy or unwritable); the row colour is unchanged") unless ok
-        Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "scope", scope.label; j.field "deleted", true } })
+        Result.new({id: id, scope: scope.label, deleted: true}.to_json)
       end
 
       # Reorder within a scope. The scope boundary is not a position: every global rule resolves
@@ -261,7 +261,7 @@ module Gori
         else
           return busy("colour rule NOT moved (project busy) — the precedence order is unchanged") unless store.move_color_rule(id, dir)
         end
-        Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "scope", scope.label; j.field "moved", dir_s } })
+        Result.new({id: id, scope: scope.label, moved: dir_s}.to_json)
       end
 
       COLOR_PREVIEW_LIMIT = PageLimit.new(Gori::Colormarker::PREVIEW_SCAN, 5000)
@@ -338,12 +338,7 @@ module Gori
           return err(msg, "INVALID_ARGUMENT", field: "name")
         end
         norm = Settings.colormarker_colors.find { |c| c.name == name.strip.downcase }
-        Result.new(JSON.build do |j|
-          j.object do
-            j.field "name", norm.try(&.name) || name.strip.downcase
-            j.field "hex", norm.try(&.hex) || hex
-          end
-        end)
+        Result.new({name: norm.try(&.name) || name.strip.downcase, hex: norm.try(&.hex) || hex}.to_json)
       end
 
       # Edit a custom colour in place. Present because `Settings.update_colormarker_color` had
@@ -386,7 +381,7 @@ module Gori
         key = name.strip.downcase
         return not_found("no custom colour named '#{key}'") unless Settings.colormarker_colors.any? { |c| c.name == key }
         return busy("custom colour NOT deleted (settings not writable)") unless Settings.delete_colormarker_color(key)
-        Result.new(JSON.build { |j| j.object { j.field "name", key; j.field "deleted", true } })
+        Result.new({name: key, deleted: true}.to_json)
       end
 
       # Whether a colour rule id exists IN THAT SCOPE. A full read (neither store has a

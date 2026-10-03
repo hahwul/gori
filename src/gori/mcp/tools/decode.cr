@@ -252,7 +252,7 @@ module Gori
         rescue ex : Jwt::ForgeError
           return Result.new(ex.message || "invalid input", is_error: true)
         end
-        Result.new(JSON.build { |j| j.object { j.field "token", signed; j.field "alg", alg } })
+        Result.new({token: signed, alg: alg}.to_json)
       end
 
       @[Tool("jwt_attacks", unbound: true)]

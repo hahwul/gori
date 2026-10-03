@@ -253,13 +253,7 @@ module Gori
         # Deleting the ACTIVE slot deactivates it (`SessionSlots#save`), which is a behaviour
         # change the caller has to see: the next send goes out as captured, not as the slot it
         # last selected.
-        Result.new(JSON.build do |j|
-          j.object do
-            j.field "name", name
-            j.field "deleted", true
-            j.field "active", registry.active_name
-          end
-        end)
+        Result.new({name: name, deleted: true, active: registry.active_name}.to_json)
       end
 
       # The send context for THIS server process. `name: null` (or omitted) deactivates, which

@@ -432,16 +432,14 @@ module Gori
             return busy("rule fields were updated but the enable/disable did not persist (store busy or unwritable); retry")
           end
         end
-        Result.new(JSON.build do |j|
-          j.object do
-            j.field "id", id
-            j.field "scope", scope.label
-            j.field "updated", true
-            j.field "target", target.label
-            j.field "part", part.label
-            j.field "op", op.label
-          end
-        end)
+        Result.new({
+          id:      id,
+          scope:   scope.label,
+          updated: true,
+          target:  target.label,
+          part:    part.label,
+          op:      op.label,
+        }.to_json)
       rescue ex : Gori::Error
         err(ex.message || "invalid rule arguments", "INVALID_ARGUMENT")
       end
@@ -617,7 +615,7 @@ module Gori
         unless rules_model.remove(id, scope)
           return busy("rule NOT deleted (store busy or unwritable); it is unchanged and may still be rewriting live traffic")
         end
-        Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "scope", scope.label; j.field "deleted", true } })
+        Result.new({id: id, scope: scope.label, deleted: true}.to_json)
       end
 
       # The Match & Replace MODEL over this project's store, built per call — the same shape
@@ -782,14 +780,7 @@ module Gori
         if bad = apply_created_extract_state(row.id, enabled)
           return bad
         end
-        Result.new(JSON.build do |j|
-          j.object do
-            j.field "id", row.id
-            j.field "name", name
-            j.field "kind", kind.label
-            j.field "enabled", enabled
-          end
-        end)
+        Result.new({id: row.id, name: name, kind: kind.label, enabled: enabled}.to_json)
       end
 
       # Atomic disabled creation, matching create_rule: flip before returning so there is no
@@ -828,14 +819,7 @@ module Gori
         unless en.nil?
           return busy("extract rule fields were updated but the enable/disable did not persist (store busy or unwritable); retry") unless store.set_extract_rule_enabled(id, en)
         end
-        Result.new(JSON.build do |j|
-          j.object do
-            j.field "id", id
-            j.field "updated", true
-            j.field "name", name
-            j.field "kind", kind.label
-          end
-        end)
+        Result.new({id: id, updated: true, name: name, kind: kind.label}.to_json)
       end
 
       @[Tool("set_extract_rule_enabled", gated: true, agent_action: true, permission: "write")]
@@ -846,7 +830,7 @@ module Gori
         return Result.new("missing required 'enabled' (true|false)", is_error: true) if enabled.nil?
         return not_found("no extract rule with id #{id}") unless store.extract_rules.any?(&.id.==(id))
         return busy("enable/disable NOT applied (store busy or unwritable); the extract rule is unchanged") unless store.set_extract_rule_enabled(id, enabled)
-        Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "enabled", enabled } })
+        Result.new({id: id, enabled: enabled}.to_json)
       end
 
       @[Tool("delete_extract_rule", gated: true, agent_action: true, permission: "write")]
@@ -855,7 +839,7 @@ module Gori
         return Result.new(id_error(h, "id"), is_error: true) unless id
         return not_found("no extract rule with id #{id}") unless store.extract_rules.any?(&.id.==(id))
         return busy("extract rule NOT deleted (store busy or unwritable); it is unchanged") unless store.delete_extract_rule(id)
-        Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "deleted", true } })
+        Result.new({id: id, deleted: true}.to_json)
       end
 
       # The tools/list schemas for the Match & Replace / extract rule tools, kept beside the handlers that

@@ -165,7 +165,7 @@ module Gori
         return Result.new(id_error(h, "id"), is_error: true) unless id
         return not_found("no issue with id #{id}") unless store.get_issue(id)
         return busy("issue NOT deleted (store busy or unwritable); it is unchanged") unless store.delete_issue(id)
-        Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "deleted", true } })
+        Result.new({id: id, deleted: true}.to_json)
       end
 
       # The tools/list schemas for the issue tools, kept beside the handlers that

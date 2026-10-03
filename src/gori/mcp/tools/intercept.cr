@@ -17,12 +17,10 @@ module Gori
         # when no capturing instance has ever published one.
         bridge = store.intercept_bridge_state
         unless bridge
-          return Result.new(JSON.build do |j|
-            j.object do
-              j.field "available", false
-              j.field "reason", "no capturing gori instance is publishing intercept state (open the project's TUI to intercept)"
-            end
-          end)
+          return Result.new({
+            available: false,
+            reason:    "no capturing gori instance is publishing intercept state (open the project's TUI to intercept)",
+          }.to_json)
         end
         now_ms = Time.utc.to_unix_ms
         items = store.intercept_held_items(bridge)
@@ -255,11 +253,11 @@ module Gori
         when "forwarded"
           Result.new(JSON.build { |j| j.object { j.field "status", "forwarded"; j.field "detail", detail; emit_extra(j, extra) } })
         when "dropped"
-          Result.new(JSON.build { |j| j.object { j.field "status", "dropped"; j.field "detail", detail } })
+          Result.new({status: "dropped", detail: detail}.to_json)
         when "edited"
           Result.new(JSON.build { |j| j.object { j.field "status", "forwarded"; j.field "edited", true; j.field "detail", detail; emit_extra(j, extra) } })
         when "toggled", "filter_set", "direction_set"
-          Result.new(JSON.build { |j| j.object { j.field "status", status; j.field "detail", detail } })
+          Result.new({status: status, detail: detail}.to_json)
         when "no_such_item"
           not_found(detail || "the held item is no longer held (already forwarded/dropped)")
         when "stale"

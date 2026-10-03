@@ -388,15 +388,7 @@ module Gori
         slug = reg.slug_of(proj)
         reg.delete(proj) # raises Gori::Error if another instance holds the capture lock
         @delete_tokens.delete(token)
-        Result.new(JSON.build do |j|
-          j.object do
-            j.field "deleted", true
-            j.field "name", proj.name
-            j.field "id", id
-            j.field "slug", slug
-            j.field "db_path", proj.db_path
-          end
-        end)
+        Result.new({deleted: true, name: proj.name, id: id, slug: slug, db_path: proj.db_path}.to_json)
       end
 
       # Flow + issue counts for a project other than the one we serve — opened in its own
