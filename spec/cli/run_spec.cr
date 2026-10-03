@@ -185,7 +185,7 @@ describe Gori::CLI::Output do
   it "serialises a probe group to JSON with the documented fields (incl. remediation)" do
     g = Gori::Probe::Group.new("secret_in_url", "infoleak", "api.test", "Secret in URL",
       Gori::Store::Severity::High, 3, ["https://api.test/a", "https://api.test/b"], "token", 7_i64)
-    parsed = JSON.parse(Gori::CLI::Output.probe_group_json(g))
+    parsed = JSON.parse(JSON.build { |j| Gori::Probe.group_json(j, g) })
     parsed["code"].as_s.should eq("secret_in_url")
     parsed["category"].as_s.should eq("infoleak")
     parsed["severity"].as_s.should eq("high")

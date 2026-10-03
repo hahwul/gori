@@ -237,7 +237,7 @@ module Gori
                       j.field "outcome", m.outcome
                     end
                     j.field "created_at", m.created_at
-                    j.field "created_at_iso", Serialize.unix_micros_iso(m.created_at)
+                    j.field "created_at_iso", Gori.iso_micros(m.created_at)
                   end
                 end
               end
@@ -366,7 +366,7 @@ module Gori
             j.field("choices") { j.array { choices.each { |c| j.string(c) } } }
             j.field "default", default if default
             j.field "expires_at", expires_at
-            j.field "expires_at_iso", Serialize.unix_micros_iso(expires_at)
+            j.field "expires_at_iso", Gori.iso_micros(expires_at)
             j.field("tui") { AgentPresence.tui_json(j, windows) }
             j.field "note", question_note(windows)
           end

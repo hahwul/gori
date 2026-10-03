@@ -524,17 +524,6 @@ describe Gori::Diff::Render do
       end
     end
   end
-
-  it "formats a timestamp exactly as the MCP and CLI surfaces do" do
-    # Three copies of this three-liner exist on purpose (see `Render.iso`); they must agree.
-    us = 1_777_636_800_123_456_i64
-    Gori::Diff::Render.iso(us).should eq(Gori::MCP::Serialize.unix_micros_iso(us))
-    Gori::Diff::Render.iso(us).should eq(Gori::CLI::Output.iso_time_utc(us))
-    # …including past year 9999, where the Span addition raises and `gori run diff` died.
-    far = 253_402_387_139_000_000_i64
-    Gori::Diff::Render.iso(far).should eq(Gori::MCP::Serialize.unix_micros_iso(far))
-    Gori::Diff::Render.iso(far).should eq(Gori::CLI::Output.iso_time_utc(far))
-  end
 end
 
 # `Diff::Record` — the EXIT. A retest's deliverable is a list of findings and the diff

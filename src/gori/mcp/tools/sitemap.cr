@@ -82,9 +82,9 @@ module Gori
                     j.field "success_count", e.ok
                     j.field "error_count", e.errors
                     j.field "first_seen", e.first_seen
-                    j.field "first_seen_iso", Serialize.unix_micros_iso(e.first_seen)
+                    j.field "first_seen_iso", Gori.iso_micros(e.first_seen)
                     j.field "last_seen", e.last_seen
-                    j.field "last_seen_iso", Serialize.unix_micros_iso(e.last_seen)
+                    j.field "last_seen_iso", Gori.iso_micros(e.last_seen)
                     # The operator's free-text memo for this endpoint, when one is pinned. The key
                     # is the tree's node path, which includes any query string.
                     # NOT on a folded row, which is synthetic: `Sitemap.stamp_tags!` bars a tag on

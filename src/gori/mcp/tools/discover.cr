@@ -373,7 +373,7 @@ module Gori
         Result.new(JSON.build do |j|
           j.object do
             j.field("findings") do
-              j.array { page.each_with_index { |f, i| discover_finding_json(j, f, djob.flow_ids[pg.offset + i]?) } }
+              j.array { page.each_with_index { |f, i| Serialize.discover_finding(j, f, djob.flow_ids[pg.offset + i]?) } }
             end
             emit_page(j, pg, page.size)
             j.field "total_available", djob.results.size
@@ -387,22 +387,6 @@ module Gori
             j.field "unsaved_flows", djob.unsaved
           end
         end)
-      end
-
-      private def discover_finding_json(j : JSON::Builder, f : Discover::Finding, flow_id : Int64? = nil) : Nil
-        j.object do
-          # The captured exchange's row, for `get_flow`. Absent until its batch is flushed (see
-          # DISCOVER_PERSIST_INTERVAL) and for a finding whose row was not saved (`unsaved_flows`).
-          j.field "flow_id", flow_id if flow_id
-          j.field "url", Serialize.text(f.url)
-          j.field "method", Serialize.text(f.method)
-          j.field "status", f.status
-          j.field "length", f.length
-          j.field "content_type", Serialize.text(f.content_type)
-          j.field "source", f.source.label
-          j.field "depth", f.depth
-          j.field "confidence", f.confidence.round(2)
-        end
       end
 
       @[Tool("discover_stop", gated: true, agent_action: true, permission: "send")]

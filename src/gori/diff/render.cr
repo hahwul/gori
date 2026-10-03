@@ -2,6 +2,7 @@ require "json"
 require "./record"
 require "./report"
 require "../plural"
+require "../local_time"
 
 module Gori::Diff
   # The three shapes a diff report is read in: a terminal listing, a Markdown section an
@@ -108,20 +109,9 @@ module Gori::Diff
       a == b ? a : "#{a} → #{b}"
     end
 
-    # A `created_at` past year 9999 raises in the Span addition; `—` like `iso` below.
+    # A `created_at` past year 9999 raises in the Span addition; `—` like `Gori.iso_micros`.
     private def self.utc_date(micros : Int64) : String
       (Time.utc(1970, 1, 1) + (micros // 1_000_000).seconds).to_s("%Y-%m-%d")
-    rescue ArgumentError
-      "—"
-    end
-
-    # RFC3339 UTC at millisecond precision from unix micros — the `*_iso` convention every
-    # gori surface emits. Reimplemented rather than called for the same reason
-    # `CLI::Output.iso_time_utc` is: the engine has no dependency on `MCP::` or `CLI::` and
-    # should not gain one for three lines. `spec/diff_spec.cr` pins it against them.
-    def self.iso(micros : Int64) : String
-      sec, micro = micros.divmod(1_000_000)
-      (Time.utc(1970, 1, 1) + sec.seconds + micro.microseconds).to_s("%Y-%m-%dT%H:%M:%S.%LZ")
     rescue ArgumentError
       "—"
     end
@@ -262,11 +252,11 @@ module Gori::Diff
         j.field "hosts", c.hosts
         if from = c.first_seen
           j.field "first_seen", from
-          j.field "first_seen_iso", iso(from)
+          j.field "first_seen_iso", Gori.iso_micros(from)
         end
         if to = c.last_seen
           j.field "last_seen", to
-          j.field "last_seen_iso", iso(to)
+          j.field "last_seen_iso", Gori.iso_micros(to)
         end
         j.field "scope_enabled", c.scope_enabled
         j.field "scope_rules" { j.array { c.scope_rules.each { |s| j.string s } } }
@@ -315,9 +305,9 @@ module Gori::Diff
         j.field "flows", f.flows
         j.field "auth_required", f.auth_required?
         j.field "first_seen", f.first_seen
-        j.field "first_seen_iso", iso(f.first_seen)
+        j.field "first_seen_iso", Gori.iso_micros(f.first_seen)
         j.field "last_seen", f.last_seen
-        j.field "last_seen_iso", iso(f.last_seen)
+        j.field "last_seen_iso", Gori.iso_micros(f.last_seen)
         # The concrete capture behind a folded template — what a flow-level diff takes.
         j.field "sample_flow_id", f.sample_flow_id
         j.field "sample_target", f.sample_target

@@ -80,11 +80,11 @@ module Gori
               # a long-running engagement is off by the whole length of it.
               j.field "earliest_created_at", s.earliest_created_at
               if ea = s.earliest_created_at
-                j.field "earliest_created_at_iso", Serialize.unix_micros_iso(ea)
+                j.field "earliest_created_at_iso", Gori.iso_micros(ea)
               end
               j.field "latest_created_at", s.latest_created_at
               if la = s.latest_created_at
-                j.field "latest_created_at_iso", Serialize.unix_micros_iso(la)
+                j.field "latest_created_at_iso", Gori.iso_micros(la)
               end
             elsif reason = @bind_error
               # Unbound because the configured project FAILED to open, not because none was

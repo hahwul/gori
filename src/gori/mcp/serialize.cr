@@ -1,16 +1,21 @@
 require "json"
 require "base64"
 require "../env"
+require "../local_time"
 require "../store"
 require "../display_columns"
 require "../issues_export"
 require "../repeater/engine"
 require "../fuzz"
+require "../discover"
+require "../miner"
 require "../proxy/codec/content_decode"
 require "../proxy/h2/grpc"
 require "../protobuf"
 require "../redact/wire"
 require "../redact/headers"
+require "../rules/stub"
+require "../settings"
 
 module Gori
   module MCP
@@ -242,7 +247,7 @@ module Gori
         j.object do
           j.field "id", row.id
           j.field "created_at", row.created_at
-          j.field "created_at_iso", unix_micros_iso(row.created_at)
+          j.field "created_at_iso", Gori.iso_micros(row.created_at)
           j.field "scheme", text(row.scheme)
           j.field "method", text(row.method)
           j.field "host", text(row.host)
@@ -307,7 +312,7 @@ module Gori
         j.object do
           j.field "id", row.id
           j.field "created_at", row.created_at
-          j.field "created_at_iso", unix_micros_iso(row.created_at)
+          j.field "created_at_iso", Gori.iso_micros(row.created_at)
           j.field "source", text(row.source)
           j.field "kind", text(row.kind)
           j.field "level", text(row.level)
@@ -432,7 +437,7 @@ module Gori
           j.field "target", text(row.target)
           j.field "flow_id", row.flow_id if row.flow_id
           j.field "held_at_ms", row.held_at_ms
-          j.field "held_at_iso", unix_micros_iso(row.held_at_ms * 1000)
+          j.field "held_at_iso", Gori.iso_micros(row.held_at_ms * 1000)
           j.field "age_seconds", ((now_ms - row.held_at_ms) // 1000)
           # TRUE while the HUMAN operator has unsaved edits typed into this hold (mirrored from
           # `InterceptView#held_edit_id`). Nothing ever set it, so it answered false for every
@@ -614,6 +619,50 @@ module Gori
         j.field "flow_id", flow_id if flow_id
       end
 
+      # --- discover / miner findings (MCP `*_results` and `gori run discover|mine --format json`)
+
+      def self.discover_finding(j : JSON::Builder, f : Discover::Finding, flow_id : Int64? = nil) : Nil
+        j.object do
+          # The captured exchange's row, for `get_flow`. Absent until its batch is flushed (see
+          # DISCOVER_PERSIST_INTERVAL), for a finding whose row was not saved (`unsaved_flows`),
+          # and on the CLI, which records no flow per finding.
+          j.field "flow_id", flow_id if flow_id
+          # A crawled URL is built from a page's own `<a href>` and `content_type` is a
+          # response header, so both are outside-origin. `Discover::Url.parse` percent-encodes
+          # the octets `<= 0x20` / `0x7F` (#394) but nothing above 0x7F, so a high byte reaches
+          # here intact.
+          j.field "url", text(f.url)
+          j.field "method", text(f.method)
+          j.field "status", f.status
+          j.field "length", f.length
+          j.field "content_type", text(f.content_type)
+          j.field "source", f.source.label
+          j.field "depth", f.depth
+          j.field "confidence", f.confidence.round(2)
+        end
+      end
+
+      def self.mine_finding(j : JSON::Builder, f : Miner::Finding) : Nil
+        j.object do
+          # name comes from a caller-supplied wordlist FILE (arbitrary bytes on disk).
+          j.field "name", text(f.name)
+          j.field "location", f.location.label
+          j.field "evidence", f.evidence.label
+          j.field "confidence", f.confidence.label
+          j.field "canary", text(f.canary)
+          j.field "status", f.status
+          j.field "delta", f.delta
+          # The gRPC CALL's outcome, from the confirming round's `grpc-status`/`grpc-message`
+          # trailers — `status` above is 200 for every gRPC response. Emitted only when the
+          # response actually carried it, so a non-gRPC run's rows are unchanged.
+          if gs = f.grpc_status
+            j.field "grpc_status", gs
+            j.field "grpc_status_name", Proxy::H2::Grpc.status_name(gs)
+          end
+          j.field "grpc_message", text(f.grpc_message) if f.grpc_message
+        end
+      end
+
       # Permanent fuzz-run metadata. `stored_results` is supplied by the caller so list/get
       # can use the same stable projection.
       def self.saved_fuzz_run(j : JSON::Builder, run : Store::FuzzRunRecord,
@@ -622,9 +671,9 @@ module Gori
           j.field "id", run.id
           j.field "session_id", run.session_id
           j.field "created_at", run.created_at
-          j.field "created_at_iso", unix_micros_iso(run.created_at)
+          j.field "created_at_iso", Gori.iso_micros(run.created_at)
           j.field "finished_at", run.finished_at
-          j.field "finished_at_iso", run.finished_at.try { |t| unix_micros_iso(t) }
+          j.field "finished_at_iso", run.finished_at.try { |t| Gori.iso_micros(t) }
           j.field "target", text(run.target)
           j.field "mode", text(run.mode)
           j.field "total", run.total
@@ -791,7 +840,7 @@ module Gori
         j.object do
           j.field "id", row.id
           j.field "created_at", row.created_at
-          j.field "created_at_iso", unix_micros_iso(row.created_at)
+          j.field "created_at_iso", Gori.iso_micros(row.created_at)
           j.field "scheme", text(row.scheme)
           j.field "method", text(row.method)
           j.field "host", text(row.host)
@@ -1015,7 +1064,7 @@ module Gori
                     j.field "opcode", m.opcode
                     j.field "type", ws_frame_type(m.opcode)
                     j.field "at", m.created_at
-                    j.field "at_iso", unix_micros_iso(m.created_at)
+                    j.field "at_iso", Gori.iso_micros(m.created_at)
                     # The V7 shape (FIN / RSV / masked / frame count) and a CLOSE's code and
                     # reason. `gori run show --format json` has emitted these since the shape
                     # existed; MCP did not, so the agent surface was the one place a captured
@@ -1120,6 +1169,60 @@ module Gori
         end
       end
 
+      # --- rewriter and colour rules --------------------------------------------
+
+      # One Match & Replace rule, as MCP `list_rules` and `gori run rewriter --format json` both
+      # print it. `enabled` is the EFFECTIVE state in this project; `default_enabled` and
+      # `overridden` only appear for a global rule, where the library's own default may differ
+      # (this project overrode it), so a caller can tell "off everywhere" from "off in this
+      # engagement". A project rule has one state, and printing two fields for it would invite
+      # the reader to look for a difference that cannot exist.
+      def self.match_rule(j : JSON::Builder, r : Store::MatchRule) : Nil
+        j.object do
+          j.field "id", r.id
+          j.field "scope", r.scope.label
+          j.field "enabled", r.enabled?
+          j.field "inert", r.inert?
+          if reason = r.inert_reason
+            j.field "inert_reason", reason
+          end
+          if r.global?
+            j.field "overridden", r.overridden?
+            j.field "default_enabled", Settings.rewriter_rules.find { |g| g.id == r.id }.try(&.enabled)
+          end
+          j.field "name", r.name
+          j.field "target", r.target_label
+          j.field "part", r.part_label
+          j.field "op", r.op_label
+          j.field "match", r.match_kind_label
+          j.field "host", r.host
+          j.field "pattern", r.pattern
+          j.field "replacement", r.replacement
+          j.field "body_file", r.body_file
+          RuleStub.respond_json_fields(j, r)
+        end
+      end
+
+      # One colour rule, as MCP `list_color_rules` and `gori run colormarker --format json` both
+      # print it; `enabled` / `overridden` / `default_enabled` as in `match_rule` above.
+      def self.color_rule(j : JSON::Builder, r : Store::ColorRule) : Nil
+        j.object do
+          j.field "id", r.id
+          j.field "scope", r.scope.label
+          j.field "enabled", r.enabled?
+          if r.global?
+            j.field "overridden", r.overridden?
+            j.field "default_enabled", Settings.colormarker_rules.find { |g| g.id == r.id }.try(&.enabled)
+          end
+          j.field "name", r.name
+          # "when", the same key settings.json writes and the MCP tools accept — one vocabulary
+          # across all three surfaces.
+          j.field "when", r.match_filter
+          j.field "color", r.color
+          j.field "style", r.style.label
+        end
+      end
+
       # --- extract rules (#501) ------------------------------------------------
 
       # One extract rule, as MCP `list_extract_rules` and `gori run rewriter extract --format
@@ -1146,7 +1249,7 @@ module Gori
       # surface emits, plus the ISO spelling of the freeze time that every MCP timestamp gets.
       def self.evidence_meta(j : JSON::Builder, m : Store::IssueEvidenceMeta) : Nil
         Issues::Export.evidence_fields(j, m)
-        j.field "frozen_at_iso", unix_micros_iso(m.created_at)
+        j.field "frozen_at_iso", Gori.iso_micros(m.created_at)
       end
 
       # The copy with its bytes, shaped like `flow_detail`: heads redacted unless
@@ -1210,7 +1313,7 @@ module Gori
         j.field "runnable", pl.runnable?
         pl.missing.try { |m| j.field "unrunnable_reason", Issues::Export.one_line(m) }
         j.field "created_at", s.created_at
-        j.field "created_at_iso", unix_micros_iso(s.created_at)
+        j.field "created_at_iso", Gori.iso_micros(s.created_at)
         j.field "updated_at", s.updated_at
       end
 
@@ -1230,7 +1333,7 @@ module Gori
         j.field "verdict", r.verdict.label
         j.field "surface", r.surface
         j.field "started_at", r.started_at
-        j.field "started_at_iso", unix_micros_iso(r.started_at)
+        j.field "started_at_iso", Gori.iso_micros(r.started_at)
         j.field "finished_at", r.finished_at
         j.field "duration_us", r.duration_us
         retest_tally(j, Retest::Tally.new(r.total, r.passed, r.failed, r.inconclusive,
@@ -1294,9 +1397,9 @@ module Gori
         j.object do
           j.field "id", f.id
           j.field "created_at", f.created_at
-          j.field "created_at_iso", unix_micros_iso(f.created_at)
+          j.field "created_at_iso", Gori.iso_micros(f.created_at)
           j.field "updated_at", f.updated_at
-          j.field "updated_at_iso", unix_micros_iso(f.updated_at)
+          j.field "updated_at_iso", Gori.iso_micros(f.updated_at)
           # title/host/notes: same captured-data-can-be-invalid-UTF-8 gap `Issues::Export.json`
           # has (this IS that same JSON shape, just wrapped in a JSON-RPC tool response) — an
           # unscrubbed raw byte here breaks the whole response line's UTF-8 validity, a real
@@ -1389,21 +1492,6 @@ module Gori
                                   "than sanitized."
           end
         end
-      end
-
-      # RFC3339 UTC for store timestamps (unix microseconds). Helps LLM clients
-      # that can't interpret raw microsecond integers.
-      # The Span addition RAISES `ArgumentError` on a `created_at` past year 9999 — a
-      # hand-edited or foreign column, or an import whose source dated an entry there. An agent
-      # asking for such a row got a `-32603` where the row's other fields were perfectly
-      # readable. Same dash and same guard as `CLI::Output.iso_time_utc`, which a spec pins
-      # this against byte-for-byte.
-      def self.unix_micros_iso(us : Int64) : String
-        sec, micro = us.divmod(1_000_000)
-        t = Time.utc(1970, 1, 1) + sec.seconds + micro.microseconds
-        t.to_s("%Y-%m-%dT%H:%M:%S.%LZ")
-      rescue ArgumentError
-        "—"
       end
 
       # Emits a `field_name` field carrying a decoded-body summary. nil/empty body

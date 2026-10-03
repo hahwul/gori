@@ -4,6 +4,7 @@ require "uri"
 require "../store/models"
 require "../proxy/codec/http1"
 require "../plural"
+require "../local_time"
 
 module Gori
   # Write captured flows OUT in an interchange format — the inverse direction of
@@ -682,17 +683,17 @@ module Gori
         row.size - (row.response_size || 0_i64)
       end
 
-      # Unix micros → RFC 3339 with milliseconds, the precision HAR generators conventionally
-      # emit. `Import::Har.parse_started` keeps those milliseconds, so export→import→export
-      # is stable (the sub-millisecond remainder does not survive a re-import).
+      # Unix micros → RFC 3339 with milliseconds (`Gori.iso_micros`), the precision HAR
+      # generators conventionally emit. `Import::Har.parse_started` keeps those milliseconds,
+      # so export→import→export is stable (the sub-millisecond remainder does not survive a
+      # re-import).
       #
       # A `created_at` outside the years 1–9999 (a foreign or hand-edited row) raised here and
-      # cut the HAR off mid-document, so it is clamped to the nearest instant `Time` can hold:
-      # `startedDateTime` is required, and the clamped end is the closest true statement.
+      # cut the HAR off mid-document, so it is clamped to the nearest instant `Time` can hold
+      # rather than read as the shared helper's dash: `startedDateTime` is required, and the
+      # clamped end is the closest true statement.
       private def self.iso_micros(micros : Int64) : String
-        micros = micros.clamp(MIN_MICROS, MAX_MICROS)
-        (Time.unix(micros // 1_000_000) + (micros % 1_000_000).microseconds)
-          .to_utc.to_rfc3339(fraction_digits: 3)
+        Gori.iso_micros(micros.clamp(MIN_MICROS, MAX_MICROS))
       end
 
       private MIN_MICROS = Time.utc(1, 1, 1).to_unix * 1_000_000

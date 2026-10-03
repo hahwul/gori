@@ -145,7 +145,7 @@ module Gori
           output = JSON.build do |j|
             j.object do
               j.field("run") { fuzz_saved_run_json(j, run, store.fuzz_result_count(run.id)) }
-              j.field("results") { j.array { rows.each { |row| CLI::Output.fuzz_row_fields(j, Fuzz::Persistence.result(row)) } } }
+              j.field("results") { j.array { rows.each { |row| MCP::Serialize.fuzz_result(j, Fuzz::Persistence.result(row)) } } }
               j.field "offset", offset
               j.field "returned", rows.size
               j.field "total_available", total
@@ -187,7 +187,7 @@ module Gori
             j.object do
               j.field("run") { fuzz_saved_run_json(j, run, store.fuzz_result_count(run.id)) }
               j.field("clusters") do
-                j.array { page.each { |c| Fuzz::Clusters.emit(j, c, scrub) { |rep| CLI::Output.fuzz_row_fields(j, rep) } } }
+                j.array { page.each { |c| Fuzz::Clusters.emit(j, c, scrub) { |rep| MCP::Serialize.fuzz_result(j, rep) } } }
               end
               j.field "cluster_order", order.label
               j.field "offset", offset
@@ -199,7 +199,7 @@ module Gori
           end)
         when :jsonl
           page.each do |c|
-            io.puts(JSON.build { |j| Fuzz::Clusters.emit(j, c, scrub) { |rep| CLI::Output.fuzz_row_fields(j, rep) } })
+            io.puts(JSON.build { |j| Fuzz::Clusters.emit(j, c, scrub) { |rep| MCP::Serialize.fuzz_result(j, rep) } })
           end
         else
           io.puts fuzz_saved_run_header(run)
@@ -227,8 +227,8 @@ module Gori
           io.puts(JSON.build do |j|
             j.object do
               j.field("run") { fuzz_saved_run_json(j, run, store.fuzz_result_count(run.id)) }
-              j.field("cluster") { Fuzz::Clusters.emit(j, cluster, ->(t : String) { t.scrub }) { |rep| CLI::Output.fuzz_row_fields(j, rep) } }
-              j.field("results") { j.array { rows.each { |r| CLI::Output.fuzz_row_fields(j, r) } } }
+              j.field("cluster") { Fuzz::Clusters.emit(j, cluster, ->(t : String) { t.scrub }) { |rep| MCP::Serialize.fuzz_result(j, rep) } }
+              j.field("results") { j.array { rows.each { |r| MCP::Serialize.fuzz_result(j, r) } } }
               j.field "offset", offset
               j.field "returned", rows.size
               j.field "total_available", seen
@@ -268,7 +268,7 @@ module Gori
               # The run's stop row (issue #1270), so a caller holding one result can tell
               # whether it is the one the run ended on without a second `fuzz show`.
               j.field "stop_index", run.stop_idx
-              j.field("result") { CLI::Output.fuzz_row_fields(j, Fuzz::Persistence.result(row)) }
+              j.field("result") { MCP::Serialize.fuzz_result(j, Fuzz::Persistence.result(row)) }
               fuzz_saved_bytes_json(j, "request", row.request)
               fuzz_saved_bytes_json(j, "wire", row.wire)
               fuzz_saved_bytes_json(j, "response_head", row.response_head)
@@ -312,9 +312,9 @@ module Gori
           # `gori run fuzz list --format json` against `list_fuzz_runs` cannot compare the two
           # feeds as strings — the same gap `CLI::Output.flow_row_fields` documents closing for
           # History, reintroduced here by a new emitter.
-          j.field "created_at_iso", CLI::Output.iso_time_utc(run.created_at)
+          j.field "created_at_iso", Gori.iso_micros(run.created_at)
           j.field "finished_at", run.finished_at
-          j.field "finished_at_iso", run.finished_at.try { |t| CLI::Output.iso_time_utc(t) }
+          j.field "finished_at_iso", run.finished_at.try { |t| Gori.iso_micros(t) }
           j.field "target", run.target.scrub
           j.field "mode", run.mode.scrub
           j.field "total", run.total

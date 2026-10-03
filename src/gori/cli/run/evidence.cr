@@ -295,7 +295,7 @@ module Gori
         notes << "response truncated" if m.response_truncated?
         tail = notes.empty? ? "" : "  (#{notes.join(", ")} at capture)"
         linked = m.issue_ids.empty? ? "orphaned" : m.issue_ids.map { |id| "##{id}" }.join(",")
-        "##{m.id}  #{m.source_label}  #{MCP::Serialize.unix_micros_iso(m.created_at)}  " \
+        "##{m.id}  #{m.source_label}  #{Gori.iso_micros(m.created_at)}  " \
         "#{Issues::Export.one_line(Evidence.label(m))} → #{outcome}  #{evidence_bytes_text(m.bytes)}  " \
         "sha256 req #{m.request_sha256[0, 12]}… res #{m.response_sha256.try { |h| "#{h[0, 12]}…" } || "—"}  " \
         "issues #{linked}#{tail}"
@@ -315,7 +315,7 @@ module Gori
             io << m.issue_ids.map { |id| "##{id}" }.join(", ") << "\n"
           end
           io << "source:   " << m.source_label << "\n"
-          io << "frozen:   " << MCP::Serialize.unix_micros_iso(m.created_at) << "\n"
+          io << "frozen:   " << Gori.iso_micros(m.created_at) << "\n"
           io << "exchange: " << Issues::Export.one_line(Evidence.label(m)) << " → "
           if st = m.status
             io << st

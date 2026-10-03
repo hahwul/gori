@@ -217,28 +217,6 @@ module Gori
         Colormarker.advise(filter).each { |n| STDERR.puts "note: #{n}" }
       end
 
-      # `enabled` is the EFFECTIVE state in this project; `default_enabled` and `overridden`
-      # only appear for a global rule, where the two can differ. A project rule has one state,
-      # and printing two fields for it would invite the reader to look for a difference that
-      # cannot exist. Public for the same reason as the row above.
-      def self.colormarker_rule_json(j : JSON::Builder, r : Store::ColorRule) : Nil
-        j.object do
-          j.field "id", r.id
-          j.field "scope", r.scope.label
-          j.field "enabled", r.enabled?
-          if r.global?
-            j.field "overridden", r.overridden?
-            j.field "default_enabled", Settings.colormarker_rules.find { |g| g.id == r.id }.try(&.enabled)
-          end
-          j.field "name", r.name
-          # "when", the same key settings.json writes and the MCP tools accept — one vocabulary
-          # across all three surfaces.
-          j.field "when", r.match_filter
-          j.field "color", r.color
-          j.field "style", r.style.label
-        end
-      end
-
       private def self.cmd_colormarker_list(args : Array(String)) : Nil
         proj = ProjectFlags.new
         format = :text
@@ -261,7 +239,7 @@ module Gori
           if format == :json
             puts(JSON.build do |j|
               j.array do
-                rules.each { |r| colormarker_rule_json(j, r) }
+                rules.each { |r| MCP::Serialize.color_rule(j, r) }
               end
             end)
           elsif rules.empty?
@@ -339,7 +317,7 @@ module Gori
       end
 
       # `add --format json` (#1117): the new rule's `colormarker list --format json` object,
-      # through the same `colormarker_rule_json`, read back from the store it was written to —
+      # through the same `MCP::Serialize.color_rule`, read back from the store it was written to —
       # settings.json for a global rule (`store` nil: that path opens no project), this
       # project's table otherwise. A global rule needs no project's override map: ids are
       # never reused (`Settings.add_colormarker_rule`), so no project can override one that
@@ -349,7 +327,7 @@ module Gori
       private def self.colormarker_added_json(id : Int64, store : Store?) : String
         found = store ? store.color_rules.find(&.id.==(id)) : Settings.colormarker_rules.find(&.id.==(id)).try(&.to_rule)
         rule = found || abort_closing(store, "gori run colormarker add: rule ##{id} was created, but it was gone before it could be read back")
-        JSON.build { |j| colormarker_rule_json(j, rule) }
+        JSON.build { |j| MCP::Serialize.color_rule(j, rule) }
       end
 
       # Edit an existing rule's fields in place. Present for the same reason `colormarker color

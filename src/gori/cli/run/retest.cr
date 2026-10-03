@@ -509,7 +509,7 @@ module Gori
       # `#7  2026-09-11T05:02:33Z  cli  FAIL  4 steps · 2 passed · 1 failed · 1 skipped`
       private def self.retest_run_line(r : Store::RetestRun) : String
         t = Retest::Tally.new(r.total, r.passed, r.failed, r.inconclusive, r.errored, r.blocked, r.skipped)
-        "##{r.id}  #{MCP::Serialize.unix_micros_iso(r.started_at)}  #{r.surface || "—"}  " \
+        "##{r.id}  #{Gori.iso_micros(r.started_at)}  #{r.surface || "—"}  " \
         "#{r.verdict.label.upcase}  #{Gori.plural(r.total, "step")} · #{Retest.summary_line(t)}"
       end
 
@@ -532,7 +532,7 @@ module Gori
               j.field "verdict", report.verdict.label
               MCP::Serialize.retest_tally(j, report.tally)
               j.field "started_at", report.started_at
-              j.field "started_at_iso", MCP::Serialize.unix_micros_iso(report.started_at)
+              j.field "started_at_iso", Gori.iso_micros(report.started_at)
               j.field "duration_us", {report.finished_at - report.started_at, 0_i64}.max
               j.field("steps") { j.array { report.results.each { |r| j.object { MCP::Serialize.retest_step_result(j, r) } } } }
               j.field "summary_persisted", report.stored.ok?

@@ -2023,10 +2023,10 @@ module Gori
             j.field "concurrency", a.concurrency
             j.field "max_requests", a.max_requests
             j.field "started_at", a.started_at_ms
-            j.field "started_at_iso", Serialize.unix_micros_iso(a.started_at_ms * 1000)
+            j.field "started_at_iso", Gori.iso_micros(a.started_at_ms * 1000)
             j.field "ended_at", ended_at_ms
             if e = ended_at_ms
-              j.field "ended_at_iso", Serialize.unix_micros_iso(e * 1000)
+              j.field "ended_at_iso", Gori.iso_micros(e * 1000)
               j.field "elapsed_ms", e - a.started_at_ms
             end
           end

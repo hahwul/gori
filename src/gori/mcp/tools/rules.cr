@@ -24,34 +24,7 @@ module Gori
             j.field "count", rules.size
             j.field "rules" do
               j.array do
-                rules.each do |r|
-                  j.object do
-                    j.field "id", r.id
-                    j.field "scope", r.scope.label
-                    # The EFFECTIVE state here. For a global rule the library's own default may
-                    # differ — this project overrode it — and both are reported so an agent can
-                    # tell "off everywhere" from "off in this engagement".
-                    j.field "enabled", r.enabled?
-                    j.field "inert", r.inert?
-                    if reason = r.inert_reason
-                      j.field "inert_reason", reason
-                    end
-                    if r.global?
-                      j.field "overridden", r.overridden?
-                      j.field "default_enabled", Settings.rewriter_rules.find { |g| g.id == r.id }.try(&.enabled)
-                    end
-                    j.field "name", r.name
-                    j.field "target", r.target_label
-                    j.field "part", r.part_label
-                    j.field "op", r.op_label
-                    j.field "match", r.match_kind_label
-                    j.field "host", r.host
-                    j.field "pattern", r.pattern
-                    j.field "replacement", r.replacement
-                    j.field "body_file", r.body_file
-                    Gori::RuleStub.respond_json_fields(j, r)
-                  end
-                end
+                rules.each { |r| Serialize.match_rule(j, r) }
               end
             end
           end

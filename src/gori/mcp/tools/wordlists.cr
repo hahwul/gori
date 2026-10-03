@@ -188,7 +188,7 @@ module Gori
       private def wordlist_entry_fields(j : JSON::Builder, e : WordlistCatalog::Entry) : Nil
         j.field "name", e.name
         j.field "bytes", e.bytes
-        j.field "modified_at", Serialize.unix_micros_iso(e.modified.to_unix_ms * 1000)
+        j.field "modified_at", Gori.iso_micros(e.modified.to_unix_ms * 1000)
         j.field "symlink", e.symlink
       end
 

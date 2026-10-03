@@ -94,7 +94,7 @@ module Gori
           # `gori run history --format json` against `list_history` could not compare the two
           # as strings, and the CLI carried no RFC3339 field anywhere in the tree. Additive:
           # `time` keeps its exact spelling and value, so nothing reading it breaks.
-          j.field "created_at_iso", iso_time_utc(row.created_at)
+          j.field "created_at_iso", Gori.iso_micros(row.created_at)
           # Wire-derived, every one of them — see `json_captured`.
           json_captured(j, "scheme", row.scheme)
           json_captured(j, "method", row.method)
@@ -327,10 +327,9 @@ module Gori
       # carrying a single control byte (`term_safe`'s doc names the hazard). One such byte
       # makes the WHOLE document invalid, not just its own field: `python3 json.loads` fails
       # outright with UnicodeDecodeError, and in a JSON-Lines stream every later line is lost
-      # with it. This was fixed field-by-field as each instance was found — fuzz `payloads`
-      # (`fuzz_row_fields`), every sitemap label, `grpc_message` in three emitters — while
-      # `flow_row_fields`, `discover_finding_fields`, `sequence_sample_json` and the `error`
-      # fields kept emitting raw. `MCP::Serialize.text` is the same decision on the agent
+      # with it. This was fixed field-by-field as each instance was found — fuzz `payloads`,
+      # every sitemap label, `grpc_message` in three emitters — while `flow_row_fields`, the
+      # discover rows, `sequence_sample_json` and the `error` fields kept emitting raw. `MCP::Serialize.text` is the same decision on the agent
       # surface; this is its name here.
       #
       # NOT `term_safe`: control bytes are legitimate content in a JSON string (they are
@@ -492,8 +491,10 @@ module Gori
 
       # --- fuzz result rows ---------------------------------------------------
 
+      # One spelling for both surfaces: the MCP `fuzz_results` row. `flow_id` is the History
+      # flow `--record-history` wrote this row to; absent when nothing was recorded.
       def self.fuzz_row_json(r : Fuzz::Result, flow_id : Int64? = nil) : String
-        JSON.build { |j| fuzz_row_fields(j, r, flow_id) }
+        JSON.build { |j| MCP::Serialize.fuzz_result(j, r, flow_id) }
       end
 
       # Incremental `--format json` writer. The opening bracket is emitted immediately and
@@ -582,128 +583,14 @@ module Gori
         end
       end
 
-      def self.fuzz_array_json(results : Array(Fuzz::Result)) : String
-        JSON.build { |j| j.array { results.each { |r| fuzz_row_fields(j, r) } } }
-      end
-
-      # `flow_id`: the History flow `--record-history` wrote this row to, the field MCP
-      # `fuzz_results` carries for the same follow-up `show`; absent when nothing was recorded.
-      def self.fuzz_row_fields(j : JSON::Builder, r : Fuzz::Result, flow_id : Int64? = nil) : Nil
-        j.object do
-          j.field "index", r.index
-          # `.scrub`: a `Fuzz::Payload` is byte-faithful, so a wordlist entry may be invalid
-          # UTF-8 (a raw `\xff\xfe` bad-strings payload). `JSON::Builder#string` escapes JSON
-          # metacharacters but passes raw bytes straight through, so one such payload used to
-          # produce a document no JSON parser would accept — poisoning EVERY row, not just its
-          # own. Scrubbing to U+FFFD matches the MCP emitter (`Serialize.text`) and keeps the
-          # report parseable; the exact bytes that went out are recoverable from `request`.
-          j.field("payloads") { j.array { r.payloads.each { |p| j.string(p.scrub) } } }
-          j.field "position", r.position
-          j.field "status", r.status
-          j.field "length", r.length
-          j.field "words", r.words
-          j.field "lines", r.lines
-          j.field "duration_us", r.duration_us
-          j.field "matched", r.matched?
-          j.field "flow_id", flow_id if flow_id
-          # A send failure's text can quote bytes the ORIGIN chose (a status line, a header a
-          # codec refused), so it is captured data like `payloads` two fields up. MCP's
-          # `Serialize.fuzz_result` has always wrapped this in `text()`.
-          json_captured(j, "error", r.error)
-          # A declared `¦chain` that could not run on this payload — the payload went out
-          # UNTRANSFORMED. Emitted (and only when set) so a script never reads `"error":null`
-          # for a request that sent a different test than the operator asked for. `.scrub` for
-          # the same reason `payloads` is scrubbed: a codec's refusal can quote a byte from the
-          # payload, and one invalid byte would poison the whole document.
-          if ce = r.chain_error
-            j.field "chain_error", ce.scrub
-          end
-          # The gRPC CALL's outcome. `status` is 200 for EVERY gRPC response, so without these
-          # a sweep against an origin denying every call was byte-identical to one against an
-          # origin allowing them all. Emitted only when the response actually carried them, so
-          # a non-gRPC run's JSON is unchanged. `.scrub`: `grpc-message` is origin-chosen text.
-          if gs = r.grpc_status
-            j.field "grpc_status", gs
-            j.field "grpc_status_name", Proxy::H2::Grpc.status_name(gs)
-          end
-          if gm = r.grpc_message
-            j.field "grpc_message", gm.scrub
-          end
-          # The WebSocket SESSION's outcome, for the same reason the two gRPC fields above
-          # exist: `status` is 101 for every successful handshake there is, so a sweep whose
-          # payloads all made the origin close with `1008 Policy Violation` was byte-identical
-          # in JSON to one it accepted. `ws_frames_in` counts the INBOUND frames gori kept
-          # (its own `[gori]` advisory rows excluded) — `length` is those payloads
-          # concatenated and cannot distinguish one long answer from many short ones. Emitted
-          # only when the row carried them, so an HTTP run's JSON is unchanged.
-          if fi = r.ws_frames_in
-            j.field "ws_frames_in", fi
-          end
-          if cc = r.ws_close_code
-            j.field "ws_close_code", cc
-          end
-          # `--extract` is a regex capture out of the RESPONSE BODY, so this is arbitrary
-          # origin bytes BY CONSTRUCTION — the sharpest instance of the class in this file,
-          # and the one the `payloads` fix above did not cover. MCP wraps it in `text()`.
-          json_captured(j, "extracted", r.extracted)
-          # Only when true. This is an exception rather than a per-row property, and a `false`
-          # on every row of every clean run would bury the one row that matters.
-          j.field "stop_hit", true if r.stop_hit?
-          j.field "retried", true if r.retried?
-          # `--retries` re-sent this variation after a network error — DISTINCT from `retried`
-          # (a keep-alive pool re-send). Only when it happened, with the count.
-          if r.resent?
-            j.field "resent", true
-            j.field "resent_count", r.resent_count
-          end
-          # The captured response is SHORT (origin closed early / read deadline / capture
-          # ceiling), so `length`/`words`/`lines` describe a fragment. Only when it happened, with
-          # the SAME three-way sentence `CLI::Run.incomplete_reason` gives the Repeater and MCP so
-          # a truncation is never worded two ways. The classifier keys off the raw body, kept only
-          # under keep_bodies — an unmatched body-dropped row still names closed/timeout, just not
-          # the ceiling cause. A synthetic Repeater::Result forwards the body + timing.
-          if r.incomplete?
-            j.field "incomplete", true
-            j.field "incomplete_reason",
-              CLI::Run.incomplete_reason(Repeater::Result.new(Bytes.new(0), r.body, nil, r.duration_us), r.timed_out?)
-          end
-        end
-      end
-
       # --- miner finding rows -------------------------------------------------
 
       def self.mine_row_json(f : Miner::Finding) : String
-        JSON.build { |j| mine_finding_fields(j, f) }
+        JSON.build { |j| MCP::Serialize.mine_finding(j, f) }
       end
 
       def self.mine_array_json(findings : Array(Miner::Finding)) : String
-        JSON.build { |j| j.array { findings.each { |f| mine_finding_fields(j, f) } } }
-      end
-
-      def self.mine_finding_fields(j : JSON::Builder, f : Miner::Finding) : Nil
-        j.object do
-          # A mined parameter name comes from a wordlist FILE the operator supplied, so it can
-          # be arbitrary bytes — the same argument `fuzz_row_fields` makes for `payloads`.
-          # (`canary` below is gori-generated and fixed-length, so it needs nothing.)
-          json_captured(j, "name", f.name)
-          j.field "location", f.location.label
-          j.field "evidence", f.evidence.label
-          j.field "confidence", f.confidence.label
-          j.field "canary", f.canary
-          j.field "status", f.status
-          j.field "delta", f.delta
-          # The gRPC CALL's outcome. `status` above is 200 for every gRPC response, so without
-          # these a mine against a target denying every candidate was byte-identical to one
-          # allowing them all. Emitted only when the confirming round carried them, so a
-          # non-gRPC run's JSON is unchanged. `.scrub`: `grpc-message` is origin-chosen text.
-          if gs = f.grpc_status
-            j.field "grpc_status", gs
-            j.field "grpc_status_name", Proxy::H2::Grpc.status_name(gs)
-          end
-          if gm = f.grpc_message
-            j.field "grpc_message", gm.scrub
-          end
-        end
+        JSON.build { |j| j.array { findings.each { |f| MCP::Serialize.mine_finding(j, f) } } }
       end
 
       # "[+] debug                 query    · length"
@@ -780,28 +667,11 @@ module Gori
       # --- discover findings --------------------------------------------------
 
       def self.discover_row_json(f : Discover::Finding) : String
-        JSON.build { |j| discover_finding_fields(j, f) }
+        JSON.build { |j| MCP::Serialize.discover_finding(j, f) }
       end
 
       def self.discover_array_json(findings : Array(Discover::Finding)) : String
-        JSON.build { |j| j.array { findings.each { |f| discover_finding_fields(j, f) } } }
-      end
-
-      def self.discover_finding_fields(j : JSON::Builder, f : Discover::Finding) : Nil
-        j.object do
-          # A crawled URL is built from a page's own `<a href>` and `content_type` is a
-          # response header, so both are outside-origin. `Discover::Url.parse` percent-encodes
-          # the octets `<= 0x20` / `0x7F` (#394) but nothing above 0x7F, so a high byte reaches
-          # here intact. MCP's `discover_finding_json` wraps all three in `Serialize.text`.
-          json_captured(j, "url", f.url)
-          json_captured(j, "method", f.method)
-          j.field "status", f.status
-          j.field "length", f.length
-          json_captured(j, "content_type", f.content_type)
-          j.field "source", f.source.label
-          j.field "depth", f.depth
-          j.field "confidence", f.confidence.round(2)
-        end
+        JSON.build { |j| j.array { findings.each { |f| MCP::Serialize.discover_finding(j, f) } } }
       end
 
       # "200  GET  http://h/admin  (bruteforced 0.92)"
@@ -817,10 +687,6 @@ module Gori
       # --- probe scan issues --------------------------------------------------
 
       # `Probe.group_json` is the shared field shape (also used by the MCP probe_scan tool).
-      def self.probe_group_json(g : Probe::Group) : String
-        JSON.build { |j| Probe.group_json(j, g) }
-      end
-
       def self.probe_array_json(groups : Array(Probe::Group)) : String
         JSON.build { |j| j.array { groups.each { |g| Probe.group_json(j, g) } } }
       end
@@ -1555,7 +1421,7 @@ module Gori
 
       # Local ISO-8601 from unix micros (the store's created_at unit). Lossy on purpose: this
       # is the field a human reads off a terminal, so it stays in the operator's timezone and
-      # drops the micros. `iso_time_utc` is the machine-readable one.
+      # drops the micros. `Gori.iso_micros` is the machine-readable one.
       #
       # Through `LocalTime` because `to_local` RAISES for some operators and not others: a
       # stored instant near `Time::MAX` plus a POSITIVE utc offset lands past it, so
@@ -1568,36 +1434,6 @@ module Gori
       # read `created_at` the same way; see `Gori::LocalTime`.
       def self.iso_time(micros : Int64) : String
         LocalTime.format(micros, "%Y-%m-%dT%H:%M:%S%:z")
-      end
-
-      # RFC3339 UTC at millisecond precision from unix micros — the `*_iso` convention the
-      # MCP surface uses everywhere and the CLI used nowhere (`grep -rn '_iso' src/gori/cli/`
-      # returned zero while MCP had fifteen). Byte-for-byte identical to
-      # `MCP::Serialize.unix_micros_iso`, which `spec/cli/run/history_spec.cr` pins against
-      # this.
-      #
-      # Reimplemented rather than called, and it stays that way on CHURN grounds now rather
-      # than on dependency grounds. This file DOES depend on `MCP::` as of #1002 — see the
-      # declared `require` at the top and `sensitive_header?` in `request_headers_json` — so
-      # the original reasoning ("keeps `CLI::Output` itself free of `MCP::`") no longer holds
-      # and is not worth re-establishing for four lines that are pinned against their
-      # counterpart by spec. The direction is what DESIGN.md §2.1 documents and tolerates
-      # (surface → surface, one-way); `cli/run/{intercept,history}.cr` have called
-      # `MCP::Serialize.*` all along, undeclared, linking because `src/gori.cr` pulls in both.
-      # The reverse edge — MCP reaching into `CLI::Output` for the WS shape — is gone, moved
-      # onto the model that owns the data (`Store::WsMessage#emit_shape_json`), and that is the
-      # part that must stay gone.
-      # Staying in UTC avoids the OFFSET half of the problem `iso_time` has, but not the range
-      # half: the Span addition raises `ArgumentError` on a `created_at` past year 9999 (a
-      # hand-edited or foreign column), and this field is emitted one line after `iso_time` in
-      # the same object — so hardening only the local one would still truncate the document.
-      # Same guard and same dash in `MCP::Serialize.unix_micros_iso`, which the spec below
-      # pins this against byte-for-byte.
-      def self.iso_time_utc(micros : Int64) : String
-        sec, micro = micros.divmod(1_000_000)
-        (Time.utc(1970, 1, 1) + sec.seconds + micro.microseconds).to_s("%Y-%m-%dT%H:%M:%S.%LZ")
-      rescue ArgumentError
-        "—"
       end
 
       private def self.round1(n : Float64) : String

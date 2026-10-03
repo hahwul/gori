@@ -13,7 +13,7 @@ private def rule(id : Int64 = 1_i64, enabled = true, filter = "status:>=500",
 end
 
 private def json_for(r : Gori::Store::ColorRule) : JSON::Any
-  JSON.parse(JSON.build { |j| Gori::CLI::Run.colormarker_rule_json(j, r) })
+  JSON.parse(JSON.build { |j| Gori::MCP::Serialize.color_rule(j, r) })
 end
 
 describe "gori run colormarker — text rows" do
