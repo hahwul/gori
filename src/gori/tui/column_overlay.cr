@@ -2,7 +2,7 @@ require "./screen"
 require "./theme"
 require "./frame"
 require "./text_field"
-require "./overlay"
+require "./extract_rule_overlay"
 require "../store"
 require "../display_columns"
 
@@ -23,7 +23,7 @@ module Gori::Tui
   # Store-free like its siblings. The live preview band is INJECTED at the open-site
   # (`on_preview`), because "what does this pull out of the flow under the cursor" is a question
   # only the History list can answer — the card holds no store and no selection.
-  class ColumnOverlay < FormOverlay
+  class ColumnOverlay < ExtractFormOverlay
     ROW_LABEL    = 0
     ROW_SIDE     = 1
     ROW_KIND     = 2
@@ -34,7 +34,6 @@ module Gori::Tui
     ROW_SAVE  = 6
     ROW_COUNT = 7
 
-    KINDS = Gori::ExtractKind.values
     SIDES = Gori::MessageSide.values
 
     getter edit_id : Int64?
@@ -43,7 +42,6 @@ module Gori::Tui
     # there is nothing to preview. Injected — see the class note.
     property on_preview : Proc(ColumnOverlay, String?)?
 
-    @kind_i : Int32
     @side_i : Int32
     @preview : String = ""
     # Last previewed descriptor; gates the re-extract to real changes so typing stays responsive.
@@ -80,28 +78,8 @@ module Gori::Tui
       @fields[:label].value.strip
     end
 
-    def selector : String
-      @fields[:selector].value.strip
-    end
-
-    def kind : Gori::ExtractKind
-      KINDS[@kind_i]
-    end
-
     def side : Gori::MessageSide
       SIDES[@side_i]
-    end
-
-    def position? : Bool
-      kind.position?
-    end
-
-    def pos_start : Int32
-      parse_range[0]
-    end
-
-    def pos_end : Int32
-      parse_range[1]
     end
 
     # 0 = auto. A width outside the renderer's bounds is CLAMPED rather than refused: it is a
@@ -115,16 +93,16 @@ module Gori::Tui
       n.clamp(Gori::DisplayColumns::MIN_WIDTH, Gori::DisplayColumns::MAX_WIDTH)
     end
 
-    private def parse_range : {Int32, Int32}
-      raw = @fields[:range].value.strip
-      a, _, b = raw.partition(':')
-      {a.to_i32? || 0, b.to_i32? || 0}
+    def selector_row : Int32
+      ROW_SELECTOR
     end
 
-    # A descriptor row the CURRENT kind has no meaning for is skipped by ↑/↓, so the caret never
-    # parks on a field that does nothing — the same rule `ExtractRuleOverlay` applies.
-    private def skip_row?(row : Int32) : Bool
-      position? ? row == ROW_SELECTOR : row == ROW_RANGE
+    private def selector_field : TextField
+      @fields[:selector]
+    end
+
+    private def range_field : TextField
+      @fields[:range]
     end
 
     def valid? : Bool
@@ -140,11 +118,7 @@ module Gori::Tui
     def adjust(d : Int32) : Nil
       case @sel
       when ROW_SIDE then @side_i = (@side_i + d) % SIDES.size
-      when ROW_KIND
-        @kind_i = (@kind_i + d) % KINDS.size
-        # The kind decides which of selector/range is live; if the caret is now on the dead one,
-        # walk it forward rather than leaving it parked there.
-        move(1) if skip_row?(@sel)
+      when ROW_KIND then cycle_kind(d)
       end
     end
 
@@ -267,16 +241,6 @@ module Gori::Tui
         reason = invalid_reason
         label = reason ? "[ #{reason} ]" : "[ Save column ]"
         screen.text(x, py, label, reason ? Theme.muted : Theme.accent, bg, Attribute::Bold)
-      end
-    end
-
-    private def selector_label : String
-      case kind
-      in Gori::ExtractKind::Cookie   then "cookie:"
-      in Gori::ExtractKind::Header   then "header:"
-      in Gori::ExtractKind::Regex    then "regex:"
-      in Gori::ExtractKind::JsonPath then "path:"
-      in Gori::ExtractKind::Position then "range:"
       end
     end
   end

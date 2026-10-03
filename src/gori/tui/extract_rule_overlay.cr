@@ -7,6 +7,72 @@ require "../store"
 require "../token_extract"
 
 module Gori::Tui
+  # The descriptor half two forms share: a `Gori::ExtractKind` cycler and the selector/range
+  # pair it switches between. An extract rule binds the value, a History column displays it —
+  # the same five kinds, so an operator who learned one form has learned the other.
+  abstract class ExtractFormOverlay < FormOverlay
+    KINDS = Gori::ExtractKind.values
+
+    @kind_i = 0
+
+    # The selector row; the range row (`position` only) is the one after it.
+    abstract def selector_row : Int32
+
+    private abstract def selector_field : TextField
+    private abstract def range_field : TextField
+
+    def kind : Gori::ExtractKind
+      KINDS[@kind_i]
+    end
+
+    def position? : Bool
+      kind.position?
+    end
+
+    def selector : String
+      selector_field.value.strip
+    end
+
+    def pos_start : Int32
+      parse_range[0]
+    end
+
+    def pos_end : Int32
+      parse_range[1]
+    end
+
+    # The half-open byte range over the decoded body, typed as `start:end`.
+    private def parse_range : {Int32, Int32}
+      raw = range_field.value.strip
+      a, _, b = raw.partition(':')
+      {a.to_i32? || 0, b.to_i32? || 0}
+    end
+
+    # A descriptor row the CURRENT kind has no meaning for is skipped by ↑/↓, so the caret
+    # never parks on a field that does nothing — same rule RewriterRuleOverlay applies to
+    # its two body-source rows.
+    def skip_row?(row : Int32) : Bool
+      position? ? row == selector_row : row == selector_row + 1
+    end
+
+    # Cycle the kind. It decides which of selector/range is live; if the caret is now on the
+    # dead one, walk it forward rather than leaving it parked there.
+    private def cycle_kind(d : Int32) : Nil
+      @kind_i = (@kind_i + d) % KINDS.size
+      move(1) if skip_row?(@sel)
+    end
+
+    private def selector_label : String
+      case kind
+      in Gori::ExtractKind::Cookie   then "cookie:"
+      in Gori::ExtractKind::Header   then "header:"
+      in Gori::ExtractKind::Regex    then "regex:"
+      in Gori::ExtractKind::JsonPath then "path:"
+      in Gori::ExtractKind::Position then "range:"
+      end
+    end
+  end
+
   # Popup form to add or edit ONE extract rule — the READ half of a session binding (#501).
   # Same interaction model as RewriterRuleOverlay, deliberately: the two live one sub-tab
   # apart on the Rewriter body, and an operator who learned one form should not have to
@@ -25,7 +91,7 @@ module Gori::Tui
   # Store-free like its sibling: the duplicate-name / bad-regex refusal is INJECTED at the
   # open-site (`on_validate`), because "is `$SESSION` already written by another rule" is a
   # question only the live binding table can answer.
-  class ExtractRuleOverlay < FormOverlay
+  class ExtractRuleOverlay < ExtractFormOverlay
     ROW_NAME     = 0
     ROW_WHEN     = 1
     ROW_HOST     = 2
@@ -36,15 +102,11 @@ module Gori::Tui
     ROW_SAVE  = 6
     ROW_COUNT = 7
 
-    KINDS = Gori::ExtractKind.values
-
     getter edit_id : Int64?
 
     # Returns the refusal for the rule as currently edited, or nil when it may be saved.
     # Injected because it needs the binding table (one name, one writer).
     property on_validate : Proc(ExtractRuleOverlay, String?)?
-
-    @kind_i : Int32
 
     def initialize(*, name : String = "", match_filter : String = "", host : String = "",
                    kind : Gori::ExtractKind = Gori::ExtractKind::Cookie, selector : String = "",
@@ -89,37 +151,16 @@ module Gori::Tui
       @fields[:host].value.strip
     end
 
-    def selector : String
-      @fields[:selector].value.strip
+    def selector_row : Int32
+      ROW_SELECTOR
     end
 
-    def kind : Gori::ExtractKind
-      KINDS[@kind_i]
+    private def selector_field : TextField
+      @fields[:selector]
     end
 
-    def position? : Bool
-      kind.position?
-    end
-
-    def pos_start : Int32
-      parse_range[0]
-    end
-
-    def pos_end : Int32
-      parse_range[1]
-    end
-
-    private def parse_range : {Int32, Int32}
-      raw = @fields[:range].value.strip
-      a, _, b = raw.partition(':')
-      {a.to_i32? || 0, b.to_i32? || 0}
-    end
-
-    # A descriptor row the CURRENT kind has no meaning for is skipped by ↑/↓, so the caret
-    # never parks on a field that does nothing — same rule RewriterRuleOverlay applies to
-    # its two body-source rows.
-    private def skip_row?(row : Int32) : Bool
-      position? ? row == ROW_SELECTOR : row == ROW_RANGE
+    private def range_field : TextField
+      @fields[:range]
     end
 
     def valid? : Bool
@@ -149,11 +190,7 @@ module Gori::Tui
     end
 
     def adjust(d : Int32) : Nil
-      return unless @sel == ROW_KIND
-      @kind_i = (@kind_i + d) % KINDS.size
-      # The kind decides which of selector/range is live; if the caret is now on the dead
-      # one, walk it forward rather than leaving it parked there.
-      move(1) if skip_row?(@sel)
+      cycle_kind(d) if @sel == ROW_KIND
     end
 
     private def text_field_for(row : Int32) : TextField?
@@ -245,16 +282,6 @@ module Gori::Tui
         reason = invalid_reason
         label = reason ? "[ #{reason} ]" : "[ Save rule ]"
         screen.text(x, py, label, reason ? Theme.muted : Theme.accent, bg, Attribute::Bold)
-      end
-    end
-
-    private def selector_label : String
-      case kind
-      in Gori::ExtractKind::Cookie   then "cookie:"
-      in Gori::ExtractKind::Header   then "header:"
-      in Gori::ExtractKind::Regex    then "regex:"
-      in Gori::ExtractKind::JsonPath then "path:"
-      in Gori::ExtractKind::Position then "range:"
       end
     end
   end
