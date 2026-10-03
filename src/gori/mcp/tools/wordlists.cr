@@ -17,6 +17,18 @@ module Gori
 
       WORDLISTS_LIMIT = PageLimit.new(200, WordlistCatalog::LIST_MAX)
 
+      # Why the file a wordlist spec resolves to may not be read here, or nil. This server's
+      # stdin IS its transport: `/dev/stdin` named as a wordlist read the JSON-RPC stream as
+      # payloads and nothing was answered until the client hung up, and `/dev/zero` or a FIFO
+      # never ends or never starts. A missing path or a directory passes, so the reader keeps
+      # its own wording for those. *spec* is passed as its reader resolves it (stripped or not).
+      private def wordlist_stream_refusal(spec : String) : String?
+        path = WordlistCatalog.resolve_path(spec)
+        info = File.info?(path) || return
+        return if info.type.file? || info.type.directory?
+        "wordlist is not a regular file: #{path} — name a file on this host's disk"
+      end
+
       # The global wordlist catalog (#1353): named lists under `$GORI_HOME/wordlists`. They
       # are GLOBAL, not project data, so every tool here is `unbound` (a server with no
       # project bound can still list and save) and the writes sit in the `write` group with the

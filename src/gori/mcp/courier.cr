@@ -147,9 +147,10 @@ module Gori::MCP
       # own look for the answer row cannot find one the operator has since cleared from the
       # feed, and "expired" after an answer the agent already acted on is a contradiction.
       page.rows.each { |m| m.in_reply_to.try { |qid| @answered.call(qid) } }
-      already = claimed(store, page)
+      already = claimed(store, page.rows)
       before = @cursor
       held = nil.as(Int64?)
+      handed_off = false
       page.rows.each do |m|
         next if already.includes?(m.id)
         # …and the delivery ROW only answers for a hand-off that has already finished. A
@@ -164,6 +165,11 @@ module Gori::MCP
           next
         end
         begin
+          # `already` was read before the first hand-off of this pass, and a hand-off parks
+          # this fiber: a tool call in that window can carry a LATER row of this page and
+          # release its claim before the loop gets here. Asked again for that row alone.
+          next if handed_off && claimed(store, [m]).includes?(m.id)
+          handed_off = true
           deliver(store, m)
           @delivered += 1
         ensure
@@ -184,9 +190,9 @@ module Gori::MCP
     # The ids on this page a confirmed route has already delivered to this session. Scanned
     # from just below the oldest row on the page: a delivery is written after the message it
     # reports, so nothing older can answer for one of these.
-    private def claimed(store : Store, page : Store::MessagePage) : Set(Int64)
-      return Set(Int64).new if page.rows.empty?
-      store.delivered_agent_message_ids(page.rows.min_of(&.id) - 1, @pid, page.rows.map(&.id).to_set)
+    private def claimed(store : Store, rows : Array(AgentMessage)) : Set(Int64)
+      return Set(Int64).new if rows.empty?
+      store.delivered_agent_message_ids(rows.min_of(&.id) - 1, @pid, rows.map(&.id).to_set)
     end
 
     # One message, down the chain until a route takes it. Two rules hold this together, and

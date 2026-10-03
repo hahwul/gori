@@ -192,6 +192,19 @@ describe Gori::MCP::Server do
       end
     end
 
+    it "never runs a request cancelled while it was still queued" do
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"create_note",) +
+               %("arguments":{"text":"cancelled-before-start"}}})
+        cancel = %({"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":7}})
+        list = %({"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"list_notes","arguments":{}}})
+        # Suppressing the reply alone left the note written with nothing telling the client so.
+        out = mcp_drive(store, call, cancel, list)
+        out.map(&.["id"].as_i).should eq([8])
+        out[0]["result"]["content"][0]["text"].as_s.should_not contain("cancelled-before-start")
+      end
+    end
+
     it "keeps a cancellation for an id it never held from accumulating" do
       with_store do |store|
         cancel = %({"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":"never-sent"}})
@@ -410,6 +423,26 @@ describe Gori::MCP::Server do
         out = mcp_drive(store, %({"jsonrpc":"2.0","id":"req-1"}))
         out[0]["error"]["code"].as_i.should eq(-32600)
         out[0]["id"].as_s.should eq("req-1")
+      end
+    end
+
+    # A wrong id is worse than none: it resolves some other request the client is waiting on.
+    it "recovers no id from a longer or fractional number than it can echo" do
+      with_store do |store|
+        [%({"jsonrpc":"2.0","id":12345678901234567890,"method":"ping"}),
+         %({"jsonrpc":"2.0","id":1.5,"method":"x","params":{bad),
+         %({"jsonrpc":"2.0","id":1.5,"x":{"id":3},"method":"x","params":{bad)].each do |line|
+          out = mcp_drive(store, line)
+          out.size.should eq(1)
+          out[0]["id"].raw.should be_nil
+        end
+      end
+    end
+
+    it "recovers a 19-digit id that still fits Int64" do
+      with_store do |store|
+        out = mcp_drive(store, %({"jsonrpc":"2.0","id":9007199254740993123,"method":"x","params":{bad))
+        out[0]["id"].as_i64.should eq(9007199254740993123_i64)
       end
     end
 

@@ -1091,13 +1091,16 @@ module Gori
           # byte buffers, so the decoded octets survive the whole render path unchanged.
           Fuzz::InlineList.new(b64.map { |x| fuzz_payload_bytes(x) })
         elsif wl = obj["wordlist"]?.try(&.as_s?)
+          wordlist_stream_refusal(wl).try { |why| raise FuzzArgError.new(why) }
           Fuzz::WordlistFile.new(wl)
         elsif preset = obj["preset"]?.try(&.as_s?)
           # A built-in preset set (see Fuzz::Presets), optionally merged with a user file
           # on the server's disk ("file": built-in first, de-duped). Reject a typo up front
           # with the list, rather than let it surface as an empty run.
           raise FuzzArgError.new("unknown preset #{preset.inspect} (available: #{Fuzz::Presets.names.join(", ")})") unless Fuzz::Presets.exists?(preset)
-          Fuzz::PresetSource.new(preset, demanded_jstr(obj, "file", "payload set").try(&.presence))
+          file = demanded_jstr(obj, "file", "payload set").try(&.presence)
+          file.try { |f| wordlist_stream_refusal(f.strip) }.try { |why| raise FuzzArgError.new(why) }
+          Fuzz::PresetSource.new(preset, file)
         elsif desc = obj["payload_from"]?
           # Values the project already captured (#1352): `"payload_from":"host:api.example
           # param-names"`, with `include_sensitive` / `locations` / `max_flows` / `max_values` beside

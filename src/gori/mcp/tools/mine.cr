@@ -218,6 +218,7 @@ module Gori
         cap = optional_int_arg(h, "max_requests").try { |m| m > 0 ? m : nil }
         config.max_requests = cap ? {cap, MINE_MAX_REQUESTS}.min : MINE_MAX_REQUESTS
         config.user_wordlist = str(h, "wordlist").presence
+        config.user_wordlist.try { |w| wordlist_stream_refusal(w.strip) }.try { |why| raise FuzzArgError.new(why) }
         config.seed_names = begin
           str_list(h, "names").flat_map(&.split(',')).map(&.strip).reject(&.empty?)
         rescue ex : Gori::Error

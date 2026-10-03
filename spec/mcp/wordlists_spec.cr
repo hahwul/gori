@@ -237,4 +237,29 @@ describe "MCP wordlist catalog" do
       end
     end
   end
+
+  # This server's stdin is its transport: `/dev/stdin` as a wordlist read the JSON-RPC stream
+  # as payloads and hung the server. `/dev/null` stands in for every non-regular file.
+  it "refuses a wordlist that is not a regular file, on every tool that reads one" do
+    with_store do |store|
+      tools = tools_for(store)
+      flask = "eyJhIjoxfQ.aGVsbG8.c2ln"
+      template = "GET /§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_json
+      [{"cookie_crack", %({"cookie":#{flask.to_json},"wordlist":"/dev/null"})},
+       {"fuzz_start", %({"template":#{template},"allow_unscoped":true,"payloads":[{"wordlist":"/dev/null"}]})},
+       {"fuzz_start", %({"template":#{template},"allow_unscoped":true,"payloads":[{"preset":"sqli","file":"/dev/null"}]})},
+       {"mine_start", %({"template":#{template},"allow_unscoped":true,"wordlist":"/dev/null"})},
+       {"discover_start", %({"url":"http://127.0.0.1:9/","allow_unscoped":true,"wordlist":"/dev/null"})},
+      ].each do |name, args|
+        r = call(tools, name, args)
+        r.is_error.should be_true
+        r.text.should contain("not a regular file")
+      end
+      File.tempfile("wl") do |f|
+        f.puts "nope"
+        f.flush
+        call(tools, "cookie_crack", %({"cookie":#{flask.to_json},"wordlist":#{f.path.to_json}})).is_error.should be_false
+      end
+    end
+  end
 end

@@ -167,6 +167,25 @@ describe Gori::MCP::Install do
     end
   end
 
+  describe ".install_yaml" do
+    # A Windows editor writes a BOM. Left on the first key, it hid `mcp_servers:`, a second one
+    # was appended, and last-key-wins dropped every other server with its `env:` secrets.
+    it "keeps sibling servers in a file that starts with a BOM, and keeps the BOM" do
+      path = File.tempname("gori-hermes", ".yaml")
+      File.write(path, "\uFEFFmcp_servers:\n  other:\n    command: \"o\"\n")
+      begin
+        Gori::MCP::Install.install_yaml(path, "/bin/gori", ["mcp"])
+        text = File.read(path)
+        text.should start_with("\uFEFFmcp_servers:")
+        doc = YAML.parse(text.lchop('\uFEFF'))
+        doc.dig("mcp_servers", "other", "command").as_s.should eq("o")
+        doc.dig("mcp_servers", "gori", "command").as_s.should eq("/bin/gori")
+      ensure
+        File.delete?(path)
+      end
+    end
+  end
+
   describe ".upsert_yaml_server" do
     body = ["command: \"/bin/gori\"", "args:", "  - \"mcp\""]
 

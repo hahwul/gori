@@ -109,3 +109,45 @@ describe "MCP get_flow body redaction" do
     end
   end
 end
+
+# The Repeater read tool applies the same profile: a request there is authored, but the
+# credential in it came from the traffic.
+describe "MCP get_repeater_context body redaction" do
+  it "sanitizes the stored request and last response body, and says so" do
+    with_redacting_project do |store|
+      req = "POST /login HTTP/1.1\r\nHost: h.test\r\nContent-Type: application/json\r\n\r\n{\"password\":\"pw\"}"
+      rid = store.insert_repeater("https://h.test", req.to_slice, false, true, nil, 0)
+      store.update_repeater_response(rid, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n".to_slice,
+        %({"token":"t"}).to_slice, nil, 1_i64, request_sha256: nil)
+      args = {id: rid, include_content: true, include_response_body: true}
+      resp = mcp_drive(store, %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_repeater_context","arguments":#{args.to_json}}}))
+      payload = mcp_tool_payload(resp.find! { |r| r["id"]? == 2 })
+      session = payload["sessions"][0]
+      session["request"].as_s.should contain %({"password":"#{Gori::Redact.placeholder("pw")}"})
+      session["last_response_body"].as_s.should eq %({"token":"#{Gori::Redact.placeholder("t")}"})
+      payload["body_redaction"]["bodies_redacted"].as_i.should eq 2
+
+      sensitive = {id: rid, include_content: true, include_response_body: true, include_sensitive: true}
+      resp = mcp_drive(store, %({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_repeater_context","arguments":#{sensitive.to_json}}}))
+      payload = mcp_tool_payload(resp.find! { |r| r["id"]? == 3 })
+      payload["sessions"][0]["last_response_body"].as_s.should eq %({"token":"t"})
+      payload["body_redaction"]?.should be_nil
+    end
+  end
+
+  # A typed request ends its lines in a bare LF; one the profile leaves alone is shown exactly
+  # as stored, since the sanitized copy's head is reframed and an agent writes this text back.
+  it "redacts a bare-LF request, and leaves a request with nothing to redact byte-exact" do
+    with_redacting_project do |store|
+      typed = store.insert_repeater("https://h.test",
+        "POST /a HTTP/1.1\nHost: h.test\nContent-Type: application/json\n\n{\"password\":\"pw\"}".to_slice, false, true, nil, 0)
+      probe = "POST /b HTTP/1.1\r\nHost: h.test\r\nContent-Length: 4\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n"
+      plain = store.insert_repeater("https://h.test", probe.to_slice, false, false, nil, 1)
+      [{typed, %("password":"#{Gori::Redact.placeholder("pw")}")}, {plain, probe}].each do |(rid, want)|
+        args = {id: rid, include_content: true}
+        resp = mcp_drive(store, %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_repeater_context","arguments":#{args.to_json}}}))
+        mcp_tool_payload(resp.find! { |r| r["id"]? == 2 })["sessions"][0]["request"].as_s.should contain(want)
+      end
+    end
+  end
+end
