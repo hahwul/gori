@@ -6,8 +6,7 @@ module Gori::Tui
   # without a live Host/Session, and tolerant on read for the same reason the settings.json
   # parser is: the value is a plain row in the project db that a person can hand-edit.
   #
-  # Shape: `[{"input": "...", "chain": "...", "name": "..."}]` — the same object the legacy
-  # global `decoder.sessions` block used, so the one-time migration is a straight copy.
+  # Shape: `[{"input": "...", "chain": "...", "name": "..."}]`.
   module DecoderSessions
     alias Tuple3 = {String, String, String}
 
@@ -47,12 +46,6 @@ module Gori::Tui
           end
         end
       end
-    end
-
-    # Whether there is nothing worth persisting — every open session blank and unnamed.
-    # (`all?` is vacuously true for an empty array.)
-    def self.blank?(sessions : Array(Tuple3)) : Bool
-      sessions.all? { |(i, c, n)| i.empty? && c.empty? && n.empty? }
     end
   end
 end
