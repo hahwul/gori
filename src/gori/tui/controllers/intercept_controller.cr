@@ -173,30 +173,9 @@ module Gori::Tui
       elsif ev.ctrl? || ev.alt?
         return false
       else
-        hex_edit_key(ev)
+        @intercept.hex_key(ev) # the same `HexEdit#handle_key` ladder the Repeater's `^X` walks
       end
       true
-    end
-
-    # The unmodified half: navigation, the three length edits, and a hex digit overtyping the
-    # nibble under the cursor. Split out of `handle_hex_key` only so each stays readable —
-    # this is the same ladder `RepeaterController#edit_repeater_request_hex` walks.
-    private def hex_edit_key(ev : Termisu::Event::Key) : Nil
-      key = ev.key
-      case
-      when key.up?        then @intercept.hex_move(-1, 0)
-      when key.down?      then @intercept.hex_move(1, 0)
-      when key.left?      then @intercept.hex_move(0, -1)
-      when key.right?     then @intercept.hex_move(0, 1)
-      when key.home?      then @intercept.hex_home
-      when key.end?       then @intercept.hex_end
-      when key.insert?    then @intercept.hex_insert
-      when key.delete?    then @intercept.hex_delete
-      when key.backspace? then @intercept.hex_backspace
-      else
-        c = ev.char || key.to_char
-        @intercept.hex_set_nibble(c) if c # only 0-9a-fA-F take effect
-      end
     end
 
     # Keys while navigating the held queue (the left list). Returns true when consumed;

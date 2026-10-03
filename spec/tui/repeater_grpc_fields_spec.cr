@@ -4,6 +4,11 @@ require "../support/demo_descriptor"
 require "base64"
 require "file_utils"
 
+# A typed key for the hex editor (`hex_key` → `HexEdit#handle_key`).
+private def hex_ev(k : Termisu::Input::Key) : Termisu::Event::Key
+  Termisu::Event::Key.new(k, Termisu::Input::Modifier::None, nil)
+end
+
 include Gori::Tui
 
 private alias PB = Gori::Protobuf
@@ -430,7 +435,7 @@ end
 # the one route by which the row a value was opened on can stop existing.
 private def empty_the_payload_under_the_form(view : RepeaterView) : Nil
   view.toggle_request_hex
-  32.times { view.hex_delete } # forward-delete: the cursor enters at byte 0
+  32.times { view.hex_key(hex_ev(Termisu::Input::Key::Delete)) } # forward-delete: the cursor enters at byte 0
   view.toggle_request_hex
 end
 

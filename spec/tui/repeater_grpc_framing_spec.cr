@@ -2,6 +2,11 @@ require "../spec_helper"
 require "../support/memory_backend"
 require "compress/gzip"
 
+# A typed key for the hex editor (`hex_key` → `HexEdit#handle_key`).
+private def hex_ev(c : Char) : Termisu::Event::Key
+  Termisu::Event::Key.new(Termisu::Input::Key.from_char(c), Termisu::Input::Modifier::None, c)
+end
+
 include Gori::Tui
 
 private def grpc_tmp_store(&)
@@ -180,7 +185,7 @@ describe "RepeaterView gRPC reframe toggle" do
   grown = ->(view : RepeaterView) do
     view.toggle_request_hex.should be_true
     2.times { view.hex_move(0, 1) } # nib 0 → 2, the append slot past the single byte
-    "4243".each_char { |c| view.hex_set_nibble(c) }
+    "4243".each_char { |c| view.hex_key(hex_ev(c)) }
     view
   end
 

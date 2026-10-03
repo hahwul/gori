@@ -53,6 +53,17 @@ module Gori::Tui
       @nib = (@nib + dr * COLS * 2).clamp(0, len * 2)
     end
 
+    # Rows when `dr` is non-zero, else one nibble left/right by `dc`'s sign.
+    def move(dr : Int32, dc : Int32) : Nil
+      if dr != 0
+        move_rows(dr)
+      elsif dc < 0
+        move_left
+      elsif dc > 0
+        move_right
+      end
+    end
+
     def home : Nil
       @nib = (@nib // 2 // COLS) * COLS * 2 # start of the current row
     end
@@ -134,6 +145,38 @@ module Gori::Tui
       @bytes.delete_at(b)
       @nib = {@nib, len * 2}.min
       mutate!
+    end
+
+    # The key ladder every pane hosting a hex editor walks (the Repeater's `^X`, the Intercept
+    # binary hold): arrows, Home/End, Ins/Del/⌫, and an unmodified hex digit overtyping the
+    # nibble under the cursor. Returns true iff the bytes changed, so the caller marks itself
+    # dirty; navigation never does.
+    def handle_key(ev : Termisu::Event::Key) : Bool
+      key = ev.key
+      return false if nav_key(key)
+      case
+      when key.insert?    then insert_byte
+      when key.delete?    then delete
+      when key.backspace? then backspace
+      else
+        c = ev.char || key.to_char
+        v = c.try(&.to_i?(16)) unless ev.ctrl? || ev.alt?
+        v ? set_nibble(v) : false # only 0-9a-fA-F take effect
+      end
+    end
+
+    # Arrows and Home/End; true when `key` was one of them.
+    private def nav_key(key : Termisu::Input::Key) : Bool
+      case
+      when key.up?    then move(-1, 0)
+      when key.down?  then move(1, 0)
+      when key.left?  then move(0, -1)
+      when key.right? then move(0, 1)
+      when key.home?  then home
+      when key.end?   then end_of_row
+      else                 return false
+      end
+      true
     end
 
     # Every mutator's tail: latch `mutated?` and advance `edits`, returning true so the caller

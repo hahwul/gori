@@ -3,6 +3,11 @@ require "../../support/fake_host"
 require "../../support/fake_context"
 require "../../support/memory_backend"
 
+# A typed key for the hex editor (`hex_key` → `HexEdit#handle_key`).
+private def hex_ev(c : Char) : Termisu::Event::Key
+  Termisu::Event::Key.new(Termisu::Input::Key.from_char(c), Termisu::Input::Modifier::None, c)
+end
+
 include Gori::Tui
 
 # RepeaterController — `^X` is the hex of the pane that has focus (#1295). The request pane
@@ -84,8 +89,8 @@ describe "RepeaterController leaving request hex (#1426)" do
   bodied = "POST /b HTTP/1.1\r\nHost: h.test\r\nContent-Length: 4\r\n\r\nABCD"
   grow = ->(v : RepeaterView) do
     v.hex_move(1000, 0)
-    v.hex_set_nibble('4')
-    v.hex_set_nibble('5')
+    v.hex_key(hex_ev('4'))
+    v.hex_key(hex_ev('5'))
   end
 
   it "names the resynced Content-Length on ^X" do

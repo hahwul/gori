@@ -8,6 +8,22 @@ private def hx(s : String)
 end
 
 describe Gori::Tui::HexEdit do
+  it "walks the shared key ladder, answering true only for an edit" do
+    k = ->(key : Termisu::Input::Key, c : Char?) { Termisu::Event::Key.new(key, Termisu::Input::Modifier::None, c) }
+    h = hx("AB")
+    h.handle_key(k.call(Termisu::Input::Key::Right, nil)).should be_false # navigation never dirties
+    h.nib.should eq(1)
+    h.handle_key(k.call(Termisu::Input::Key::Home, nil)).should be_false
+    h.handle_key(k.call(Termisu::Input::Key.from_char('4'), '4')).should be_true
+    h.handle_key(k.call(Termisu::Input::Key.from_char('8'), '8')).should be_true  # 0x41 → 0x48
+    h.handle_key(k.call(Termisu::Input::Key.from_char('z'), 'z')).should be_false # not a hex digit
+    h.handle_key(Termisu::Event::Key.new(Termisu::Input::Key.from_char('a'), Termisu::Input::Modifier::Ctrl, 'a')).should be_false
+    h.handle_key(k.call(Termisu::Input::Key::Delete, nil)).should be_true # drops 'B'
+    String.new(h.to_bytes).should eq("H")
+    h.move(1000, 0)
+    h.nib.should eq(2) # clamped to the append slot
+  end
+
   it "overtypes a nibble (hi then lo) and advances the cursor" do
     h = hx("GE")    # 0x47 0x45
     h.set_nibble(4) # byte0 hi := 4 → 0x47 (unchanged)

@@ -1,6 +1,11 @@
 require "../spec_helper"
 require "../support/memory_backend"
 
+# A typed key for the hex editor (`hex_key` → `HexEdit#handle_key`).
+private def hex_ev(c : Char) : Termisu::Event::Key
+  Termisu::Event::Key.new(Termisu::Input::Key.from_char(c), Termisu::Input::Modifier::None, c)
+end
+
 include Gori::Tui
 
 private def repeater_tmp_store(&)
@@ -1547,8 +1552,8 @@ describe Gori::Tui::RepeaterView do
 
       # hex-edit the payload: overtype 0xFF → 0xAB (length unchanged → prefix stays 3)
       view.toggle_request_hex.should be_true
-      view.hex_set_nibble('a')
-      view.hex_set_nibble('b')
+      view.hex_key(hex_ev('a'))
+      view.hex_key(hex_ev('b'))
       view.toggle_request_hex.should be_false # exit writes the edited payload back
       sent = view.request_bytes
       sent[(sent.size - 8)..].should eq(Bytes[0x00, 0x00, 0x00, 0x00, 0x03, 0xAB, 0x01, 0x02])
@@ -1675,8 +1680,8 @@ describe Gori::Tui::RepeaterView do
     append_e = ->(view : RepeaterView) do
       view.toggle_request_hex.should be_true
       view.hex_move(1000, 0) # clamps to the append slot
-      view.hex_set_nibble('4')
-      view.hex_set_nibble('5') # 0x45 = 'E'
+      view.hex_key(hex_ev('4'))
+      view.hex_key(hex_ev('5')) # 0x45 = 'E'
       view.toggle_request_hex.should be_false
     end
 
@@ -1704,8 +1709,8 @@ describe Gori::Tui::RepeaterView do
       view = RepeaterView.new
       view.restore("http://127.0.0.1", req, false, true)
       view.toggle_request_hex.should be_true
-      view.hex_set_nibble('5') # overtype `P` → `_`: same length
-      view.hex_set_nibble('f')
+      view.hex_key(hex_ev('5')) # overtype `P` → `_`: same length
+      view.hex_key(hex_ev('f'))
       view.toggle_request_hex.should be_false
       view.request_text.should contain("Content-Length: 4")
       view.hex_exit_resync.should be_nil
@@ -1734,8 +1739,8 @@ describe Gori::Tui::RepeaterView do
     view = RepeaterView.new
     view.restore("http://127.0.0.1", "GET /peek HTTP/1.1\nHost: h\n\n", false, false)
     view.toggle_request_hex.should be_true
-    view.hex_set_nibble('4') # 'G' (0x47) → 0x47: the high nibble rewritten to itself…
-    view.hex_set_nibble('8') # …then the low one: 0x48 'H'
+    view.hex_key(hex_ev('4')) # 'G' (0x47) → 0x47: the high nibble rewritten to itself…
+    view.hex_key(hex_ev('8')) # …then the low one: 0x48 'H'
     view.request_text.should eq("HET /peek HTTP/1.1\r\nHost: h\r\n\r\n")
     view.dirty?.should be_true
   end

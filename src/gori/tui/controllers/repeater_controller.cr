@@ -3320,21 +3320,8 @@ module Gori::Tui
 
     # Hex-edit keys for the REQUEST pane (overtype with 0-9a-f; Ins/Del/⌫ change length).
     private def edit_repeater_request_hex(ev : Termisu::Event::Key, view : RepeaterView) : Nil
-      key = ev.key
-      c = ev.char || key.to_char
-      case
-      when key.up?        then view.at_top? ? view.focus_first : view.hex_move(-1, 0) # ↑-at-top → target field above
-      when key.down?      then view.hex_move(1, 0)
-      when key.left?      then view.hex_move(0, -1)
-      when key.right?     then view.hex_move(0, 1)
-      when key.home?      then view.hex_home
-      when key.end?       then view.hex_end
-      when key.insert?    then view.hex_insert
-      when key.delete?    then view.hex_delete
-      when key.backspace? then view.hex_backspace
-      else
-        view.hex_set_nibble(c) if c && !ev.ctrl? && !ev.alt? # only 0-9a-fA-F take effect
-      end
+      return view.focus_first if ev.key.up? && view.at_top? # ↑-at-top → target field above
+      view.hex_key(ev)
     end
 
     private def edit_repeater_target(ev : Termisu::Event::Key, view : RepeaterView) : Bool
