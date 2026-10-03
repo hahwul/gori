@@ -60,7 +60,7 @@ module Gori
         when "claude"
           claude_desktop_path(home)
         when "claude-code"
-          File.join(home, ".claude.json")
+          File.join(claude_config_dir(home), ".claude.json")
         when "grok"
           # Grok Build TUI: GROK_HOME is not standard; config lives under ~/.grok.
           File.join(home, ".grok", "config.toml")
@@ -99,6 +99,12 @@ module Gori
         else
           raise ArgumentError.new("Unknown install target: #{target}")
         end
+      end
+
+      # CLAUDE_CONFIG_DIR moves `.claude.json` with the rest of Claude Code's config (checked
+      # against `claude mcp add -s user` with the variable set); without it, the home directory.
+      private def self.claude_config_dir(home : String) : String
+        File.expand_path(ENV["CLAUDE_CONFIG_DIR"]?.presence || home)
       end
 
       # Claude Desktop's config file, per platform. ELECTRON picks this directory, not
@@ -207,11 +213,24 @@ module Gori
         args
       end
 
-      # Resolve the absolute path of the running gori binary.
+      # Resolve the absolute path of the running gori binary, as it was invoked.
       def self.executable_path : String
         exe = Process.executable_path
         exe = File.realpath(PROGRAM_NAME) if exe.nil? || exe.empty?
-        exe
+        invoked_path(PROGRAM_NAME, exe) || exe
+      end
+
+      # The path gori was invoked by — found on PATH, or the path typed — when it is the same
+      # binary as *exe*. `Process.executable_path` resolves symlinks, so a brew or nix install
+      # recorded `…/Cellar/gori/<ver>/bin/gori` or a `/nix/store/<hash>-…` path, which the next
+      # upgrade's cleanup or garbage collection deletes, leaving every client's entry pointing
+      # at nothing.
+      def self.invoked_path(program : String, exe : String, path : String? = ENV["PATH"]?) : String?
+        found = Process.find_executable(program, path) || return
+        found = File.expand_path(found)
+        found if File.realpath(found) == File.realpath(exe)
+      rescue File::Error
+        nil
       end
 
       # Install gori into the target client's config. Returns the path written.
@@ -276,8 +295,8 @@ module Gori
         # JSON object, REFUSE rather than clobber it — for `claude-code` this is
         # ~/.claude.json (the user's entire CLI state: projects, auth, other MCP servers),
         # so a transient/hand-edit parse error must never wipe it.
+        raw, bom = read_config(config_path)
         config = if File.file?(config_path)
-                   raw = File.read(config_path)
                    if raw.strip.empty?
                      Hash(String, JSON::Any).new
                    else
@@ -302,13 +321,13 @@ module Gori
         mcp_servers[SERVER_NAME] = JSON::Any.new(gori_entry)
         config["mcpServers"] = JSON::Any.new(mcp_servers)
 
-        write_atomic(config_path, config.to_pretty_json)
+        write_atomic(config_path, config.to_pretty_json, bom: bom)
       end
 
       # --- TOML clients (Codex, Grok) ------------------------------------------
 
       def self.install_toml(config_path : String, exe_path : String, args : Array(String)) : Nil
-        existing = File.file?(config_path) ? File.read(config_path) : ""
+        existing, bom = read_config(config_path)
 
         # Refuse a file gori cannot read, for the reason install_json and install_yaml refuse
         # theirs: `~/.codex/config.toml` is Codex's whole configuration — model, provider,
@@ -348,7 +367,7 @@ module Gori
         # a real path, a real file, "installed" on STDOUT, and no gori server where the client
         # looks for it.
         verify_toml_entry!(config_path, updated, exe_path, args)
-        write_atomic(config_path, updated)
+        write_atomic(config_path, updated, bom: bom)
       end
 
       private def self.verify_toml_entry!(config_path : String, content : String,
@@ -395,12 +414,7 @@ module Gori
       # `mcp_servers: {<name>: {command:, args:}}` — the same two keys the JSON and TOML
       # clients take, in a third file format.
       def self.install_yaml(config_path : String, exe_path : String, args : Array(String)) : Nil
-        existing = File.file?(config_path) ? File.read(config_path) : ""
-        # A BOM is not part of the first key: left on, `\uFEFFmcp_servers:` was not found as the
-        # root, a second `mcp_servers:` was appended, and the parser's last-key-wins dropped
-        # every other server. Set aside here and put back on write.
-        bom = existing.starts_with?('\uFEFF')
-        existing = existing.lchop('\uFEFF')
+        existing, bom = read_config(config_path)
 
         # Refuse a file that is not a YAML mapping, for the reason install_json refuses a
         # non-JSON one: this is the user's whole agent config — model and provider choice,
@@ -424,7 +438,6 @@ module Gori
 
         updated = upsert_yaml_server(existing, "mcp_servers", SERVER_NAME,
           yaml_server_body(exe_path, args))
-        updated = "\uFEFF#{updated}" if bom
 
         # Read the splice back BEFORE it reaches disk. Everything above edits YAML as text,
         # and text editing goes wrong in ways a value comparison catches and an eyeball does
@@ -435,7 +448,7 @@ module Gori
         # because the path is real, the file is real, and nothing looks wrong until the
         # tools are silently absent.
         verify_yaml_entry!(config_path, updated, exe_path, args, kept)
-        write_atomic(config_path, updated)
+        write_atomic(config_path, updated, bom: bom)
       end
 
       # The lines that go UNDER the `gori:` key, indentation relative to it.
@@ -749,8 +762,17 @@ module Gori
       # temp+rename impls in the repo each dropped a different part of it. The default mode
       # is private because these hold auth and are nobody else's business; an existing
       # file's own mode wins (`inherit`).
-      private def self.write_atomic(path : String, content : String) : Nil
-        DurableFile.write(path, content, perm: File::Permissions.new(0o600))
+      private def self.write_atomic(path : String, content : String, *, bom : Bool = false) : Nil
+        DurableFile.write(path, bom ? "\uFEFF#{content}" : content, perm: File::Permissions.new(0o600))
+      end
+
+      # A config file's text without a leading BOM, and whether it had one, for `write_atomic`
+      # to put back. A Windows editor writes one, and it is not part of the first key: every
+      # splice here matches keys by text, so `\uFEFFmcp_servers:` was not found as the YAML
+      # root, a second one was appended, and last-key-wins dropped every other server.
+      private def self.read_config(path : String) : {String, Bool}
+        raw = File.file?(path) ? File.read(path) : ""
+        {raw.lchop('\uFEFF'), raw.starts_with?('\uFEFF')}
       end
 
       # Replace or append a TOML table named *header* (without brackets), including any
@@ -780,17 +802,34 @@ module Gori
         keep = [] of String
         i = 0
         while i < chomped.size
-          stripped = chomped[i].strip
+          stripped = toml_header_text(chomped[i].strip)
           if !in_string[i] && (stripped == "[#{header}]" || stripped.starts_with?("[#{header}."))
             # Drop this table header and its body (until the next unrelated table).
-            i += 1
+            start = i += 1
             while i < chomped.size
-              s = chomped[i].strip
+              s = toml_header_text(chomped[i].strip)
               if !in_string[i] && s.starts_with?('[') &&
                  !(s == "[#{header}]" || s.starts_with?("[#{header}."))
                 break
               end
               i += 1
+            end
+            # …but not a comment block sitting above the next table with a blank line between
+            # it and gori's body: that one describes the NEXT table, and went with gori's
+            # before. A comment glued to gori's last line is gori's own (a disabled key) and
+            # goes with it, as it always did.
+            if i < chomped.size
+              c = i
+              while c > start && !in_string[c - 1] && chomped[c - 1].strip.empty?
+                c -= 1
+              end
+              while c > start && !in_string[c - 1] && chomped[c - 1].strip.starts_with?('#')
+                c -= 1
+              end
+              while c < i && chomped[c].strip.empty?
+                c += 1
+              end
+              keep.concat(chomped[c...i]) if c > start && chomped[c - 1].strip.empty?
             end
             next
           end
@@ -820,9 +859,30 @@ module Gori
         result.ends_with?('\n') ? result : result + "\n"
       end
 
+      # A header line as its table name reads, without a trailing comment: `[mcp_servers.gori] # x`
+      # was not seen as gori's table, so every install appended a second one and was refused.
+      private def self.toml_header_text(stripped : String) : String
+        stripped.starts_with?('[') ? stripped.sub(/\]\s*#.*\z/, "]") : stripped
+      end
+
       def self.toml_string(value : String) : String
-        # Always quote: paths and flags may contain special TOML characters.
-        %("#{value.gsub("\\", "\\\\").gsub("\"", "\\\"")}")
+        # Always quote: paths and flags may contain special TOML characters. A control
+        # character other than tab may not appear raw in a basic string, and a client whose
+        # parser follows the spec refuses the WHOLE file over one, so it is `\uXXXX`. By byte,
+        # not by regex: a Linux path need not be UTF-8, and PCRE raises on one that is not.
+        String.build do |io|
+          io << '"'
+          value.to_slice.each do |b|
+            case b
+            when 0x5C             then io << "\\\\"
+            when 0x22             then io << "\\\""
+            when 0x09             then io.write_byte(b)
+            when 0x00..0x1F, 0x7F then io << "\\u%04X" % b
+            else                       io.write_byte(b)
+            end
+          end
+          io << '"'
+        end
       end
 
       def self.toml_string_array(values : Array(String)) : String

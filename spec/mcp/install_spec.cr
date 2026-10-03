@@ -66,8 +66,16 @@ describe Gori::MCP::Install do
       end
     end
 
-    it "maps claude-code to ~/.claude.json" do
-      Gori::MCP::Install.config_path("claude-code").should eq(File.join(ENV["HOME"], ".claude.json"))
+    it "maps claude-code to ~/.claude.json, or CLAUDE_CONFIG_DIR" do
+      old = ENV["CLAUDE_CONFIG_DIR"]?
+      begin
+        ENV.delete("CLAUDE_CONFIG_DIR")
+        Gori::MCP::Install.config_path("claude-code").should eq(File.join(ENV["HOME"], ".claude.json"))
+        ENV["CLAUDE_CONFIG_DIR"] = "/opt/claude-alt"
+        Gori::MCP::Install.config_path("claude-code").should eq("/opt/claude-alt/.claude.json")
+      ensure
+        old ? (ENV["CLAUDE_CONFIG_DIR"] = old) : ENV.delete("CLAUDE_CONFIG_DIR")
+      end
     end
 
     it "maps agy to the antigravity-cli mcp_config.json" do
@@ -164,6 +172,63 @@ describe Gori::MCP::Install do
       # it here would install into a directory named " " that nothing reads.
       Gori::MCP::Install.hermes_home(home, :linux, hermes_home_env: "").should eq("/home/u/.hermes")
       Gori::MCP::Install.hermes_home(home, :linux, hermes_home_env: "   ").should eq("/home/u/.hermes")
+    end
+  end
+
+  describe ".invoked_path" do
+    # A package manager links a stable name to a versioned file; the stable one survives an upgrade.
+    it "keeps the symlink gori was found by, and only when it is the running binary" do
+      dir = File.tempname("gori-exe")
+      Dir.mkdir_p(File.join(dir, "cellar"))
+      Dir.mkdir_p(File.join(dir, "bin"))
+      real = File.join(dir, "cellar", "gori")
+      File.write(real, "")
+      File.chmod(real, 0o755)
+      link = File.join(dir, "bin", "gori")
+      File.symlink(real, link)
+      other = File.join(dir, "other")
+      File.write(other, "")
+      begin
+        Gori::MCP::Install.invoked_path("gori", real, File.join(dir, "bin")).should eq(link)
+        Gori::MCP::Install.invoked_path(link, real, nil).should eq(link)
+        Gori::MCP::Install.invoked_path("gori", other, File.join(dir, "bin")).should be_nil
+        Gori::MCP::Install.invoked_path("gori", real, File.join(dir, "nowhere")).should be_nil
+      ensure
+        FileUtils.rm_rf(dir)
+      end
+    end
+  end
+
+  describe ".toml_string" do
+    # A spec-following TOML parser refuses the whole file over one raw control character.
+    it "keeps bytes that are not UTF-8 instead of raising" do
+      Gori::MCP::Install.toml_string("--db=/data/\xff.db").to_slice.should eq(%("--db=/data/\xff.db").to_slice)
+    end
+
+    it "escapes control characters other than tab" do
+      Gori::MCP::Install.toml_string("--project=a\u0001b\tc\u007F").should eq(%("--project=a\\u0001b\tc\\u007F"))
+    end
+  end
+
+  describe "BOM-led configs" do
+    it "installs into a JSON and a TOML file that start with a BOM, and keeps the BOM" do
+      dir = File.tempname("gori-bom")
+      Dir.mkdir_p(dir)
+      json = File.join(dir, "c.json")
+      toml = File.join(dir, "c.toml")
+      File.write(json, "\uFEFF{\"mcpServers\":{\"other\":{\"command\":\"o\"}}}")
+      File.write(toml, "\uFEFF[mcp_servers.gori]\ncommand = \"/old\"\nargs = []\n")
+      begin
+        Gori::MCP::Install.install_json(json, "/bin/gori", ["mcp"])
+        Gori::MCP::Install.install_toml(toml, "/bin/gori", ["mcp"])
+        File.read(json).should start_with('\uFEFF')
+        JSON.parse(File.read(json).lchop('\uFEFF'))["mcpServers"].as_h.keys.sort!.should eq(["gori", "other"])
+        File.read(toml).should start_with('\uFEFF')
+        File.read(toml).scan("[mcp_servers.gori]").size.should eq(1)
+        File.read(toml).should_not contain("/old")
+      ensure
+        FileUtils.rm_rf(dir)
+      end
     end
   end
 
@@ -444,6 +509,20 @@ describe Gori::MCP::Install do
   end
 
   describe ".upsert_toml_table" do
+    it "keeps the comment above the next table, and finds a header with a comment of its own" do
+      existing = "[mcp_servers.gori] # mine\ncommand = \"/old\"\n\n# browser automation\n[mcp_servers.playwright]\ncommand = \"npx\"\n"
+      out = Gori::MCP::Install.upsert_toml_table(existing, "mcp_servers.gori", "command = \"/bin/gori\"\n")
+      out.should contain("# browser automation\n[mcp_servers.playwright]")
+      out.should_not contain("/old")
+      out.scan("[mcp_servers.gori]").size.should eq(1)
+    end
+
+    it "takes a comment glued to gori's last line with gori, not onto the next table" do
+      existing = "[mcp_servers.gori]\ncommand = \"/old\"\n# args = [\"--read-only\"]\n[mcp_servers.playwright]\ncommand = \"npx\"\n"
+      out = Gori::MCP::Install.upsert_toml_table(existing, "mcp_servers.gori", "command = \"/bin/gori\"\n")
+      out.should_not contain("--read-only\"]\n[mcp_servers.playwright]")
+    end
+
     it "appends a table to empty content" do
       out = Gori::MCP::Install.upsert_toml_table("", "mcp_servers.gori",
         "command = \"/bin/gori\"\nargs = [\"mcp\"]\n")

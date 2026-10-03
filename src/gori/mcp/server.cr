@@ -902,6 +902,7 @@ module Gori
           emit: ->(frame : String) { send(frame) },
           claim: ->(mid : Int64) { @tools.claim_message(mid) },
           release: ->(mid : Int64) { @tools.release_message(mid) },
+          carried: -> { @tools.carried_here },
           expire: -> { @tools.expire_asked_questions; nil },
           answered: ->(qid : Int64) { @tools.forget_question(qid) })
         courier.start

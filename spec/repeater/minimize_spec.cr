@@ -107,6 +107,15 @@ private class DeadOrigin < F::Backend
   end
 end
 
+# Every send refused by the scope's sweep gate, as Fuzz::Sender answers an excluded target.
+private class RefusedOrigin < F::Backend
+  getter origin : F::Origin = F::Origin.new("http", "h", 80)
+
+  def send(bytes : Bytes) : Gori::Repeater::Result
+    Gori::Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, Gori::Outbound::EXCLUDE_SWEEP_ERROR)
+  end
+end
+
 # Answers 200 only when the raw request bytes still carry the FF FE pair — a byte-wise
 # scan, never `String#includes?`, so the check itself can't launder the invalid bytes.
 private class ByteSensitiveOrigin < F::Backend
@@ -419,6 +428,17 @@ describe Gori::Repeater::Minimize do
     report = minimize(FlappyOrigin.new, text)
     report.aborted.should be_true
     report.removed.should be_empty
+    report.minimized_text.should eq(text)
+  end
+
+  # Every surface's minimize sends through Fuzz::Sender, whose sweep gate refuses an excluded
+  # target: that is a refusal with nothing sent, not an origin that did not answer.
+  it "reports a scope refusal as refused, with no sends" do
+    text = ["GET / HTTP/1.1", "Host: h", "User-Agent: x"].join("\n")
+    report = minimize(RefusedOrigin.new, text)
+    report.aborted.should be_true
+    report.sends.should eq(0)
+    report.note.should start_with("refused: #{Gori::Outbound::EXCLUDE_SWEEP_ERROR}")
     report.minimized_text.should eq(text)
   end
 

@@ -135,6 +135,19 @@ describe "MCP get_repeater_context body redaction" do
     end
   end
 
+  it "says when a redacted request's transfer was undone to read it" do
+    with_redacting_project do |store|
+      req = "POST /a HTTP/1.1\r\nHost: h.test\r\nContent-Type: application/json\r\n" \
+            "Transfer-Encoding: chunked\r\n\r\n11\r\n{\"password\":\"pw\"}\r\n0\r\n\r\n"
+      rid = store.insert_repeater("https://h.test", req.to_slice, false, false, nil, 0)
+      args = {id: rid, include_content: true}
+      resp = mcp_drive(store, %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_repeater_context","arguments":#{args.to_json}}}))
+      payload = mcp_tool_payload(resp.find! { |r| r["id"]? == 2 })
+      payload["sessions"][0]["request"].as_s.should_not contain(%("pw"))
+      payload["body_redaction"]["transfer_decoded"].as_bool.should be_true
+    end
+  end
+
   # A typed request ends its lines in a bare LF; one the profile leaves alone is shown exactly
   # as stored, since the sanitized copy's head is reframed and an agent writes this text back.
   it "redacts a bare-LF request, and leaves a request with nothing to redact byte-exact" do

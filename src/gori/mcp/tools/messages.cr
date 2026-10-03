@@ -107,23 +107,33 @@ module Gori
 
       # The note went out: move the cursor past it and record the deliveries.
       #
-      # The cursor moves even when nothing can be recorded (a `--read-only` server has no
-      # writer fiber): without it the same line would ride on every tool result for the rest of
-      # the session. What that costs is a message `operator_messages` may hand over a second
-      # time, which is the direction this whole layer errs in.
+      # The cursor moves even when no row can be written (a `--read-only` server has no writer
+      # fiber, and `mark_carried` keeps its in-process ledger instead): without it the same line
+      # would ride on every tool result for the rest of the session.
       #
       # One rescue PER ROW: a store that fails partway must not retire the rows it did write
       # while the caller concludes nothing landed. The agent already has all of them.
       def commit_operator_note(note : PendingNote) : Nil
         @messages_cursor = {@messages_cursor, note.cursor}.max
         s = @store
-        return unless s && !s.read_only?
+        return unless s
         label = session_label
         pid = Process.pid.to_i64
         note.ids.each do |id|
-          s.record_agent_delivery(id, AgentDelivery::VIA_TOOL_RESULT, label, true, pid: pid)
+          mark_carried(s, id, AgentDelivery::VIA_TOOL_RESULT, label, pid)
         rescue ex
           Log.warn(exception: ex) { "mcp: could not record a tool-result delivery for message #{id}" }
+        end
+      end
+
+      # Say that a route carried message *id* to this session: its delivery row, or — on a
+      # `--read-only` store, which has no writer — the in-process ledger. Every reader marks
+      # through here, so none of the three can leave the others repeating it.
+      private def mark_carried(s : Store, id : Int64, via : String, label : String, pid : Int64) : Nil
+        if s.read_only?
+          @carried_here << id
+        else
+          s.record_agent_delivery(id, via, label, true, pid: pid)
         end
       end
 
@@ -141,7 +151,7 @@ module Gori
         # `@in_flight_messages` is the same question asked of the hand-off that has not
         # finished yet: the courier holds an id while its socket write or `codex queue` runs,
         # and the delivery row that would answer here is not written until that returns.
-        page.rows.reject { |m| already.includes?(m.id) || @in_flight_messages.includes?(m.id) }
+        page.rows.reject { |m| already.includes?(m.id) || @in_flight_messages.includes?(m.id) || @carried_here.includes?(m.id) }
       end
 
       # This session as the operator would recognise it on a delivery row.
@@ -216,7 +226,7 @@ module Gori
         # writes to the session's socket a line this very result is handing over.
         fresh.each { |m| claim_message(m.id) }
         begin
-          fresh.each { |m| store.record_agent_delivery(m.id, AgentDelivery::VIA_PICKED_UP, label, true, pid: pid) } if can_mark
+          fresh.each { |m| mark_carried(store, m.id, AgentDelivery::VIA_PICKED_UP, label, pid) }
         ensure
           fresh.each { |m| release_message(m.id) }
         end

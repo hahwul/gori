@@ -240,6 +240,7 @@ module Gori
           @messages_floor = new_store.last_event_id
           @messages_cursor = @messages_floor
           @feed_generation += 1
+          @carried_here.clear
         end
         @owns_store = true
         # A RESUMED OAST handle is bound to the project it was resumed in: its row id means

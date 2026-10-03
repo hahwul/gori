@@ -234,8 +234,7 @@ module Gori
         # The project's default body redaction (#1035), as `get_flow` applies it. A Repeater
         # request is authored, but the credential in it came from the traffic — the TUI's copy
         # menu sanitizes it for the same reason. `include_sensitive` turns it off.
-        matcher = include_sensitive ? nil : Redact::Policy.ambient(store)
-        bodies = ws_frames = 0
+        tally = include_sensitive ? nil : Redact::Policy.ambient(store).try { |m| BodyTally.new(m) }
 
         # The sub-tab filter the operator types into the TUI's `/`, over the SAME grammar
         # (`tag:` `name:` `host:`/`target:` `method:`/`verb:` `status:`, `-` to negate, bare
@@ -300,7 +299,7 @@ module Gori
                 end
               end
               if include_content && (repeater = ui["repeater"]?)
-                bodies += emit_tui_repeater(j, repeater, include_sensitive, matcher)
+                emit_tui_repeater(j, repeater, include_sensitive, tally)
               elsif ui["repeater"]?
                 j.field "tui_repeater_available", true
               end
@@ -330,17 +329,13 @@ module Gori
             j.field "sessions" do
               j.array do
                 paginated_repeaters.each do |r|
-                  b, w = emit_repeater_session(j, r, include_content, include_sensitive,
+                  emit_repeater_session(j, r, include_content, include_sensitive,
                     tui_index: tui_index[r.id]?,
-                    response_body_cap: body_ids.includes?(r.id) ? body_cap : nil, matcher: matcher)
-                  bodies += b
-                  ws_frames += w
+                    response_body_cap: body_ids.includes?(r.id) ? body_cap : nil, tally: tally)
                 end
               end
             end
-            if (m = matcher) && (include_content || include_response_body)
-              Serialize.emit_redaction_note(j, Serialize::RedactionNote.new(m.profile.name, bodies, ws_frames, false))
-            end
+            Serialize.emit_redaction_note(j, tally.try(&.note)) if include_content || include_response_body
             unless on_repeater
               j.field "note", "TUI is not on the Repeater tab — `tui_repeater` may be stale; use `sessions` for persisted tabs."
             end
@@ -353,8 +348,7 @@ module Gori
                                         include_sensitive : Bool = false,
                                         tui_index : Int32? = nil,
                                         response_body_cap : Int32? = nil,
-                                        matcher : Redact::Matcher? = nil) : {Int32, Int32}
-        bodies = ws_frames = 0
+                                        tally : BodyTally? = nil) : Nil
         j.object do
           # `id` is the name every repeater tool takes it under (`update_repeater{id}`, and what
           # `create_repeater` returns); `db_id` is the older spelling, kept beside it so a caller
@@ -392,9 +386,8 @@ module Gori
           if include_content
             request = String.new(r.request)
             more = %(get_response_body_chunk(repeater_id: #{r.id}, part: "request", offset: …))
-            if (redactor = matcher) && (clean = redacted_wire(request, redactor))
-              request, hits = clean
-              bodies += hits
+            if (t = tally) && (clean = redacted_wire(request, t))
+              request = clean
               more = nil # the chunk tool pages the stored, unredacted bytes
             end
             emit_capped_text(j, "request", Serialize.redact_head(request, include_sensitive),
@@ -417,8 +410,9 @@ module Gori
 
           if Repeater::WsEngine.replayable?(r_request_text)
             ws_msgs = store.ws_messages_for_repeater(r.id)
-            if include_content && (redactor = matcher)
-              ws_msgs, ws_frames = Redact::Wire.ws_messages(ws_msgs, redactor)
+            if include_content && (t = tally)
+              ws_msgs, frames = Redact::Wire.ws_messages(ws_msgs, t.matcher)
+              t.ws_frames += frames
             end
             j.field "ws_mode", true
             j.field "ws_message_count", ws_msgs.size
@@ -476,9 +470,8 @@ module Gori
               Serialize.emit_head_base64(j, "last_response_head", head, include_sensitive)
             end
           end
-          bodies += emit_repeater_response_body(j, r, head, response_body_cap, include_sensitive, matcher) if response_body_cap
+          emit_repeater_response_body(j, r, head, response_body_cap, include_sensitive, tally) if response_body_cap
         end
-        {bodies, ws_frames}
       end
 
       # The stored last response BODY, capped and decoded — so "why did tab 6 answer 500?" is
@@ -494,27 +487,22 @@ module Gori
       private def emit_repeater_response_body(j : JSON::Builder, r : Store::RepeaterRecord,
                                               head : Bytes?, cap : Int32,
                                               include_sensitive : Bool,
-                                              matcher : Redact::Matcher? = nil) : Int32
+                                              tally : BodyTally? = nil) : Nil
         full = store.get_repeater_full(r.id)
         body = full.try(&.response_body)
         # Distinguishes "never sent / no body" from "omitted": the caller ASKED for a body
         # here, so silence would be the only reading left and it is the wrong one.
         if body.nil? || body.empty?
           j.field "last_response_body_absent", true
-          return 0
+          return
         end
 
         decoded, note = Proxy::Codec::ContentDecode.decode(head, body)
         bytes = decoded || body
         more = %(get_response_body_chunk(repeater_id: #{r.id}, part: "response", offset: …))
-        hits = 0
-        if m = matcher
-          # As `get_flow` shows it: sanitized, a transfer that failed to decode withheld whole,
-          # and no pointer at the chunk tool, which pages the stored, unredacted bytes.
-          clean = Redact::Wire.message(head, body, m)
-          bytes = clean.body || Bytes.empty
-          hits = clean.count
-          more = nil
+        if t = tally
+          bytes = redacted_message(head, body, t)
+          more = nil # the chunk tool pages the stored, unredacted bytes
         end
         text = String.new(bytes)
         emit_capped_text(j, "last_response_body", text,
@@ -527,7 +515,6 @@ module Gori
         if more && !text.valid_encoding? && text.bytesize <= cap
           j.field "last_response_body_read_more", more
         end
-        hits
       end
 
       # A Repeater buffer through the body profile, or nil when the profile left it alone. The
@@ -535,9 +522,37 @@ module Gori
       # `Wire.wire` finds no body without a CRLF blank line — and the sanitized copy is used
       # only when it changed something, because its head is reframed (Content-Length rewritten,
       # a transfer coding undone) and this text is what an agent edits and writes back.
-      private def redacted_wire(text : String, matcher : Redact::Matcher) : {String, Int32}?
-        clean, result = Redact::Wire.wire(String.new(Env.normalize_wire(text)), matcher)
-        {clean, result.count} if result.redacted? || result.withheld?
+      private def redacted_wire(text : String, tally : BodyTally) : String?
+        clean, result, decoded = Redact::Wire.wire(String.new(Env.normalize_wire(text)), tally.matcher)
+        return unless result.redacted? || result.withheld?
+        tally.bodies += result.count
+        tally.decoded = true if decoded
+        clean
+      end
+
+      # A stored response body as `get_flow` shows it under the profile: sanitized, and a
+      # transfer that failed to decode withheld whole rather than a half-inflated prefix. Not a
+      # `transfer_decoded`: the head this tool shows beside it is the stored one, not reframed.
+      private def redacted_message(head : Bytes?, body : Bytes, tally : BodyTally) : Bytes
+        clean = Redact::Wire.message(head, body, tally.matcher)
+        tally.bodies += clean.count
+        clean.body || Bytes.empty
+      end
+
+      # What the body profile did across one `get_repeater_context` answer: the counts and the
+      # transfer flag its `body_redaction` reports, gathered from every emitter it passes.
+      private class BodyTally
+        getter matcher : Redact::Matcher
+        property bodies = 0
+        property ws_frames = 0
+        property? decoded = false
+
+        def initialize(@matcher)
+        end
+
+        def note : Serialize::RedactionNote
+          Serialize::RedactionNote.new(@matcher.profile.name, @bodies, @ws_frames, decoded?)
+        end
       end
 
       # A stored text blob, capped for LLM use — plus everything the caller needs to know that
@@ -584,14 +599,12 @@ module Gori
       # ws payloads-as-body, timings) passes through unchanged. With include_sensitive the blob
       # is emitted verbatim, matching the sessions policy and the sensitive_headers_redacted flag.
       private def emit_tui_repeater(j : JSON::Builder, repeater : JSON::Any, include_sensitive : Bool,
-                                    matcher : Redact::Matcher?) : Int32
+                                    tally : BodyTally?) : Nil
         if include_sensitive
           j.field "tui_repeater", repeater
-          return 0
+          return
         end
-        hits = 0
-        j.field("tui_repeater") { hits = redact_tui_repeater(j, repeater, nil, matcher) }
-        hits
+        j.field("tui_repeater") { redact_tui_repeater(j, repeater, nil, tally) }
       end
 
       # Re-emit the repeater snapshot with redaction. The raw-HTTP-text fields
@@ -601,25 +614,21 @@ module Gori
       # top-level-only pass would miss the nested request and leak its headers. Everything
       # else passes through verbatim.
       private def redact_tui_repeater(j : JSON::Builder, value : JSON::Any, key : String?,
-                                      matcher : Redact::Matcher?) : Int32
-        hits = 0
+                                      tally : BodyTally?) : Nil
         if (key == "request" || key == "upgrade_request") && (s = value.as_s?)
-          if (m = matcher) && (clean = redacted_wire(s, m))
-            s, hits = clean
-          end
+          s = tally.try { |t| redacted_wire(s, t) } || s
           j.string Serialize.redact_head(s, false)
-        elsif key == "messages" && (s = value.as_s?) && (m = matcher) && (result = m.body(s.to_slice)).redacted?
+        elsif key == "messages" && (s = value.as_s?) && (t = tally) && (result = t.matcher.body(s.to_slice)).redacted?
           # The WebSocket tab's outgoing-frame editor, sanitized as the stored frames are.
-          hits = result.count
+          t.ws_frames += result.count
           j.string result.text
         elsif obj = value.as_h?
-          j.object { obj.each { |k, v| j.field(k) { hits += redact_tui_repeater(j, v, k, matcher) } } }
+          j.object { obj.each { |k, v| j.field(k) { redact_tui_repeater(j, v, k, tally) } } }
         elsif arr = value.as_a?
-          j.array { arr.each { |v| hits += redact_tui_repeater(j, v, nil, matcher) } }
+          j.array { arr.each { |v| redact_tui_repeater(j, v, nil, tally) } }
         else
           value.to_json(j)
         end
-        hits
       end
 
       # How old a `ui_state` row has to be before a live window is worth explaining (see the

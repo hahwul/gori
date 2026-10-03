@@ -1204,7 +1204,7 @@ module Gori::Tui
                     end
       count = 0
       if m = redactor
-        wire, result = Redact::Wire.wire(wire, m)
+        wire, result, _ = Redact::Wire.wire(wire, m)
         count += result.count
         # A frame payload is an entity with no head of its own, so it goes through the body
         # engine directly (`Matcher#value`): a WebSocket login frame carries the same
