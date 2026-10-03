@@ -798,10 +798,6 @@ module Gori::Tui
 
     # --- PROJECT SETTINGS pane (delegated from ProjectController#handle_project_settings_key) ---
 
-    def settings_scope_row? : Bool
-      @set_sel == SETTINGS_SCOPE_ROW
-    end
-
     def settings_sandbox_row? : Bool
       @set_sel == SETTINGS_SANDBOX_ROW
     end
@@ -1661,11 +1657,6 @@ module Gori::Tui
       @ov_adding && !@ov_edit_id.nil?
     end
 
-    # The open row's text as typed so far — what ↵ would parse.
-    def ov_input_text : String
-      @ov_field.value
-    end
-
     def cancel_ov_add : Nil
       @ov_adding = false
       @ov_edit_id = nil
@@ -1829,11 +1820,6 @@ module Gori::Tui
       !env_edit_row.nil?
     end
 
-    # The open row's text as typed so far — what ↵ would parse.
-    def env_input_text : String
-      @env_field.value
-    end
-
     def cancel_env_add : Nil
       @env_adding = false
       @env_edit_idx = nil
@@ -1899,11 +1885,6 @@ module Gori::Tui
       return false if @env_field.value.empty?
       @env_field.backspace
       true
-    end
-
-    # Caret step, clamped by the field (the keyboard reaches it through `env_edit_key`).
-    def env_move_cursor(d : Int32) : Nil
-      @env_field.move(d)
     end
 
     def env_commit : Symbol

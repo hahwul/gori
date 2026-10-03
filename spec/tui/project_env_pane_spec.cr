@@ -144,7 +144,7 @@ describe "ProjectView ENV pane" do
         view = env_view(store, project)
         view.env_add_start
         type(view, "TOKEN abc123")
-        view.env_move_cursor(-99) # ← to the head of the line
+        view.@env_field.move(-99) # ← to the head of the line
 
         # True ⇒ "the row still has text", which is what stops the caller closing it. The old
         # answer was about the CARET, so this ⌫ threw the whole line away.

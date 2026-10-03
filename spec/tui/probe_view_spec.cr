@@ -244,11 +244,8 @@ describe Gori::Tui::ProbeView do
       scope = Gori::Scope.load(store)
       scope.add("include", "host", "a.test")
       scope.enable
-      view = Gori::Tui::ProbeView.new
-      view.set_scope(scope)
-      view.reload(store)
-      view.dismiss_by_code(store).should eq(1)                                        # only the in-scope host counted…
-      store.probe_issues.find! { |i| i.host == "b.test" }.status.open?.should be_true # …and muted
+      Gori::Tui::ProbeController.dismiss_open_by_code(store, scope, "missing_hsts").should eq(1) # only the in-scope host counted…
+      store.probe_issues.find! { |i| i.host == "b.test" }.status.open?.should be_true            # …and muted
       store.probe_issues.find! { |i| i.host == "a.test" }.status.false_positive?.should be_true
     end
   end
@@ -257,9 +254,7 @@ describe Gori::Tui::ProbeView do
     view_store do |store|
       seed(store, "missing_hsts", "a.test")
       seed(store, "missing_hsts", "b.test")
-      view = Gori::Tui::ProbeView.new
-      view.reload(store)
-      view.dismiss_by_code(store).should eq(2)
+      Gori::Tui::ProbeController.dismiss_open_by_code(store, nil, "missing_hsts").should eq(2)
       store.probe_issues.select(&.code.== "missing_hsts").all?(&.status.false_positive?).should be_true
     end
   end

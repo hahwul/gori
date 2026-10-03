@@ -99,7 +99,7 @@ describe Gori::Tui::ProbeRulesView do
       view.filter_start
       view.filter_editing?.should be_true
       "cors".each_char { |ch| view.handle_filter_key(TuiContract.plain(ch)) }
-      view.filter_active?.should be_true
+      view.@filter.active?.should be_true
 
       rows = all_rows(view)
       rows.size.should be > 0
@@ -118,7 +118,7 @@ describe Gori::Tui::ProbeRulesView do
 
       # esc clears it and the whole list is back.
       view.handle_filter_key(TuiContract.key(Termisu::Input::Key::Escape))
-      view.filter_active?.should be_false
+      view.@filter.active?.should be_false
       all_rows(view).size.should eq(before)
     end
   end
