@@ -21,7 +21,7 @@ module Gori::Tui
   # routes it to ProbeController#apply_custom_rule. An invalid form (missing title/
   # description, or a regex that won't compile) makes that closure return false, which
   # keeps the card up.
-  class CustomRuleOverlay < Overlay
+  class CustomRuleOverlay < FormOverlay
     ROW_TITLE   = 0
     ROW_DESC    = 1
     ROW_SCOPE   = 2
@@ -50,7 +50,6 @@ module Gori::Tui
     @region_i : Int32
     @kind_i : Int32
     @sev_i : Int32
-    @sel : Int32
 
     def initialize(*, title : String = "", description : String = "", scope : String = "project",
                    side : String = "response", region : String = "body", kind : String = "string",
@@ -66,7 +65,6 @@ module Gori::Tui
       @region_i = idx(REGIONS, region)
       @kind_i = idx(KINDS, kind)
       @sev_i = idx(SEVS, severity)
-      @sel = 0
     end
 
     def self.adding : CustomRuleOverlay
@@ -122,10 +120,6 @@ module Gori::Tui
       !@edit_id.nil?
     end
 
-    def on_save_row? : Bool
-      @sel == ROW_SAVE
-    end
-
     # Every required field is present and, for a regex rule, the pattern compiles (the shared
     # validator the CLI/MCP write paths use too).
     def valid? : Bool
@@ -153,28 +147,8 @@ module Gori::Tui
       "↑/↓ field · ←/→ options · type title/pattern · ↵ save · esc cancel"
     end
 
-    # Click a field row to select it; a click on Save commits; a click outside the card
-    # cancels. Mirrors the ↑/↓ + ↵ keyboard model.
-    def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
-      box = overlay_box(area)
-      return :cancel if box.nil? || !box.contains?(mx, my)
-      if idx = row_at(box, mx, my)
-        set_selected(idx)
-        return :commit if on_save_row?
-      end
-      # …then the caret, if the press landed inside a drawn field. The row pick above is
-      # what focuses; this is what puts the caret where the operator pointed instead of
-      # leaving it wherever the last keystroke did (Overlay#click_text_field).
-      click_text_field(mx, my)
-      :stay
-    end
-
     def move(d : Int32) : Nil
       @sel = (@sel + d).clamp(0, ROW_COUNT - 1)
-    end
-
-    def set_selected(idx : Int32) : Nil
-      @sel = idx.clamp(0, ROW_COUNT - 1)
     end
 
     private def cycler_row?(row : Int32) : Bool
@@ -203,13 +177,7 @@ module Gori::Tui
     def handle_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
       return :cancel if key.escape?
-      if key.up? || key.back_tab?
-        move(-1)
-        return :stay
-      elsif key.down? || key.tab?
-        move(1)
-        return :stay
-      end
+      return :stay if field_nav?(ev)
 
       if cycler_row?(@sel)
         case
@@ -236,35 +204,20 @@ module Gori::Tui
       text_field_for(@sel).try(&.set_preedit(text))
     end
 
-    def overlay_box(area : Rect) : Rect?
-      Overlay.rule_form_box(area, ROW_COUNT)
+    def row_count : Int32
+      ROW_COUNT
     end
 
-    def render(screen : Screen, area : Rect) : Nil
-      box = overlay_box(area)
-      unless box
-        Overlay.too_small(screen, area, "custom-rule form needs a larger window")
-        return
-      end
-      title = editing? ? "EDIT CUSTOM RULE" : "ADD CUSTOM RULE"
-      Frame.card(screen, box, title, border: Theme.border_focus)
-      first = box.y + 2
-      ROW_COUNT.times do |i|
-        py = first + i
-        break if py >= box.bottom - 1
-        draw_row(screen, box, i, py)
-      end
-      # No key hint on the bottom border — the shell draws `hint` in the status strip for the
-      # open modal (Runner#key_hints). See RewriterRuleOverlay#render for the whole argument.
+    def card_title : String
+      editing? ? "EDIT CUSTOM RULE" : "ADD CUSTOM RULE"
     end
 
-    private def draw_row(screen : Screen, box : Rect, i : Int32, py : Int32) : Nil
-      sel = i == @sel
-      bg = sel ? Theme.accent_bg : Theme.panel
-      screen.fill(Rect.new(box.x + 1, py, box.w - 2, 1), bg)
-      screen.cell(box.x + 1, py, sel ? '▎' : ' ', Theme.accent, bg)
-      x = box.x + 3
-      fg = sel ? Theme.text_bright : Theme.text
+    def too_small_what : String
+      "custom-rule form needs a larger window"
+    end
+
+    def draw_row_body(screen : Screen, box : Rect, i : Int32, py : Int32,
+                      x : Int32, bg : Color, fg : Color, sel : Bool) : Nil
       case i
       when ROW_TITLE then draw_field(screen, box, py, bg, fg, sel, "title:", @fields[:title])
       when ROW_DESC  then draw_field(screen, box, py, bg, fg, sel, "desc:", @fields[:desc])
@@ -281,12 +234,6 @@ module Gori::Tui
         label = ok ? "[ Save rule ]" : "[ complete title, description & #{kind == "exec" ? "command" : "pattern"} ]"
         screen.text(x, py, label, ok ? Theme.accent : Theme.muted, bg, Attribute::Bold)
       end
-    end
-
-    def row_at(box : Rect, mx : Int32, my : Int32) : Int32?
-      return nil unless box.contains?(mx, my)
-      i = my - (box.y + 2)
-      (0 <= i < ROW_COUNT) ? i : nil
     end
   end
 end

@@ -19,7 +19,7 @@ module Gori::Tui
   # injected as `on_commit` at the open-site (Runner#open_oast_provider_editor), which
   # routes it to OastController#save_provider. An invalid form (missing name/host) makes
   # that closure return false, which keeps the card up.
-  class OastProviderOverlay < Overlay
+  class OastProviderOverlay < FormOverlay
     ROW_NAME  = 0
     ROW_SCOPE = 1
     ROW_TYPE  = 2
@@ -123,36 +123,8 @@ module Gori::Tui
       "↑/↓ field · ←/→ options · type name/host/token · ↵ save · esc cancel"
     end
 
-    # Click a field row to select it; a click on Save commits; a click outside the card
-    # cancels. Mirrors the ↑/↓ + ↵ keyboard model.
-    def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
-      box = overlay_box(area)
-      return :cancel if box.nil? || !box.contains?(mx, my)
-      if idx = row_at(box, mx, my)
-        set_selected(idx)
-        return :commit if on_save_row?
-      end
-      # …then the caret, if the press landed inside a drawn field. The row pick above is
-      # what focuses; this is what puts the caret where the operator pointed instead of
-      # leaving it wherever the last keystroke did (Overlay#click_text_field).
-      click_text_field(mx, my)
-      :stay
-    end
-
-    private def row_count : Int32
-      ROW_COUNT
-    end
-
-    def on_save_row? : Bool
-      @sel == ROW_SAVE
-    end
-
     def move(d : Int32) : Nil
       @sel = (@sel + d).clamp(0, row_count - 1)
-    end
-
-    def set_selected(idx : Int32) : Nil
-      @sel = idx.clamp(0, row_count - 1)
     end
 
     private def cycler_row?(row : Int32) : Bool
@@ -174,13 +146,7 @@ module Gori::Tui
     def handle_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
       return :cancel if key.escape?
-      if key.tab? || key.down?
-        move(1)
-        return :stay
-      elsif key.back_tab? || key.up?
-        move(-1)
-        return :stay
-      end
+      return :stay if field_nav?(ev)
 
       if cycler_row?(@sel)
         case
@@ -216,37 +182,20 @@ module Gori::Tui
       end
     end
 
-    def overlay_box(area : Rect) : Rect?
-      Overlay.rule_form_box(area, ROW_COUNT)
+    def row_count : Int32
+      ROW_COUNT
     end
 
-    def render(screen : Screen, area : Rect) : Nil
-      box = overlay_box(area)
-      unless box
-        Overlay.too_small(screen, area, "provider form needs a larger window")
-        return
-      end
-      title = editing? ? "EDIT OAST PROVIDER" : "ADD OAST PROVIDER"
-      Frame.card(screen, box, title, border: Theme.border_focus)
-      first = box.y + 2
-      row_count.times do |i|
-        py = first + i
-        break if py >= box.bottom - 1
-        draw_row(screen, box, i, py)
-      end
-      # No key hint on the bottom border — the shell draws `hint` in the status strip for the
-      # open modal (Runner#key_hints). See RewriterRuleOverlay#render for the whole argument.
-      # This copy is also where a `←/›` typo had been sitting, unreachable from the method
-      # every other surface reads.
+    def card_title : String
+      editing? ? "EDIT OAST PROVIDER" : "ADD OAST PROVIDER"
     end
 
-    private def draw_row(screen : Screen, box : Rect, i : Int32, py : Int32) : Nil
-      sel = i == @sel
-      bg = sel ? Theme.accent_bg : Theme.panel
-      screen.fill(Rect.new(box.x + 1, py, box.w - 2, 1), bg)
-      screen.cell(box.x + 1, py, sel ? '▎' : ' ', Theme.accent, bg)
-      x = box.x + 3
-      fg = sel ? Theme.text_bright : Theme.text
+    def too_small_what : String
+      "provider form needs a larger window"
+    end
+
+    def draw_row_body(screen : Screen, box : Rect, i : Int32, py : Int32,
+                      x : Int32, bg : Color, fg : Color, sel : Bool) : Nil
       case i
       when ROW_NAME then draw_field(screen, box, py, bg, fg, sel, "name:", @name)
       when ROW_SCOPE
@@ -259,12 +208,6 @@ module Gori::Tui
         label = valid? ? "[ Save provider ]" : "[ name + host required ]"
         screen.text(x, py, label, valid? ? Theme.accent : Theme.muted, bg, Attribute::Bold)
       end
-    end
-
-    def row_at(box : Rect, mx : Int32, my : Int32) : Int32?
-      return nil unless box.contains?(mx, my)
-      i = my - (box.y + 2)
-      (0 <= i < row_count) ? i : nil
     end
   end
 end

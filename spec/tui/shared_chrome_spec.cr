@@ -96,14 +96,19 @@ describe "shared card chrome" do
       extract_rule_overlay scope_rule_overlay oast_provider_overlay
     ]
     offenders = [] of String
-    forms.each do |name|
-      src = File.read(File.join(root, "#{name}.cr"))
-      body = src[/def overlay_box.*?\n    end/m]? || ""
+    # A form with no `overlay_box` of its own takes `FormOverlay`'s, held to the same rule below.
+    base = File.read(File.join(root, "overlay.cr"))[/class FormOverlay\b.*?def overlay_box.*?\n    end/m]
+    sources = forms.map { |name| {name, File.read(File.join(root, "#{name}.cr"))} }
+    sources << {"FormOverlay", base}
+    sources.each do |name, src|
+      body = src[/def overlay_box.*?\n    end/m]?
+      next if body.nil? && src.matches?(/< (Extract)?FormOverlay\b/)
+      body ||= ""
       # Not "does it use the right constants" — the whole computation belongs to
       # `Overlay.rule_form_box`, so the form should state only its ROW COUNT and whether it
       # carries a preview band. A form that spells any of the arithmetic here has started its
       # own copy, which is where the six drifted apart the first time.
-      unless body.matches?(/Overlay\.rule_form_box\(area, (ROW_COUNT|row_count)(, preview: true)?\)/)
+      unless body.matches?(/Overlay\.rule_form_box\(area, (ROW_COUNT|row_count)(, preview: (true|preview\?))?\)/)
         offenders << "#{name}: overlay_box does not delegate to Overlay.rule_form_box"
       end
       offenders << "#{name}: re-derives card arithmetic" if body.includes?("area.w -") || body.includes?("area.h -")

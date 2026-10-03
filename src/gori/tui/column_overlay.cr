@@ -23,7 +23,7 @@ module Gori::Tui
   # Store-free like its siblings. The live preview band is INJECTED at the open-site
   # (`on_preview`), because "what does this pull out of the flow under the cursor" is a question
   # only the History list can answer — the card holds no store and no selection.
-  class ColumnOverlay < Overlay
+  class ColumnOverlay < FormOverlay
     ROW_LABEL    = 0
     ROW_SIDE     = 1
     ROW_KIND     = 2
@@ -45,7 +45,6 @@ module Gori::Tui
 
     @kind_i : Int32
     @side_i : Int32
-    @sel : Int32
     @preview : String = ""
     # Last previewed descriptor; gates the re-extract to real changes so typing stays responsive.
     @preview_sig : String = ""
@@ -62,7 +61,6 @@ module Gori::Tui
       }
       @kind_i = KINDS.index(kind) || 0
       @side_i = SIDES.index(side) || 0
-      @sel = 0
     end
 
     def self.adding : ColumnOverlay
@@ -129,10 +127,6 @@ module Gori::Tui
       position? ? row == ROW_SELECTOR : row == ROW_RANGE
     end
 
-    def on_save_row? : Bool
-      @sel == ROW_SAVE
-    end
-
     def valid? : Bool
       invalid_reason.nil?
     end
@@ -141,23 +135,6 @@ module Gori::Tui
     # three surfaces cannot word — or decide — the same refusal differently.
     def invalid_reason : String?
       Gori::DisplayColumns.invalid_reason(label, kind, selector, pos_start, pos_end)
-    end
-
-    def move(d : Int32) : Nil
-      step = d < 0 ? -1 : 1
-      nxt = @sel
-      loop do
-        probe = nxt + step
-        break if probe < 0 || probe > ROW_COUNT - 1
-        nxt = probe
-        break unless skip_row?(nxt)
-      end
-      @sel = nxt unless skip_row?(nxt)
-    end
-
-    def set_selected(idx : Int32) : Nil
-      idx = idx.clamp(0, ROW_COUNT - 1)
-      @sel = idx unless skip_row?(idx)
     end
 
     def adjust(d : Int32) : Nil
@@ -206,13 +183,7 @@ module Gori::Tui
     private def dispatch_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
       return :cancel if key.escape?
-      if key.up? || key.back_tab?
-        move(-1)
-        return :stay
-      elsif key.down? || key.tab?
-        move(1)
-        return :stay
-      end
+      return :stay if field_nav?(ev)
 
       if @sel == ROW_SIDE || @sel == ROW_KIND
         case
@@ -235,17 +206,6 @@ module Gori::Tui
       end
     end
 
-    def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
-      box = overlay_box(area)
-      return :cancel if box.nil? || !box.contains?(mx, my)
-      if idx = row_at(box, mx, my)
-        set_selected(idx)
-        return :commit if on_save_row?
-      end
-      click_text_field(mx, my)
-      :stay
-    end
-
     def set_preedit(text : String) : Nil
       text_field_for(@sel).try(&.set_preedit(text))
     end
@@ -262,23 +222,23 @@ module Gori::Tui
       @preview = valid? ? (@on_preview.try(&.call(self)) || "") : ""
     end
 
-    def overlay_box(area : Rect) : Rect?
-      Overlay.rule_form_box(area, ROW_COUNT, preview: true)
+    def row_count : Int32
+      ROW_COUNT
     end
 
-    def render(screen : Screen, area : Rect) : Nil
-      box = overlay_box(area)
-      unless box
-        Overlay.too_small(screen, area, "column form needs a larger window")
-        return
-      end
-      Frame.card(screen, box, editing? ? "EDIT COLUMN" : "ADD COLUMN", border: Theme.border_focus)
-      first = box.y + 2
-      ROW_COUNT.times do |i|
-        py = first + i
-        break if py >= box.bottom - 2
-        draw_row(screen, box, i, py)
-      end
+    def preview? : Bool
+      true
+    end
+
+    def card_title : String
+      editing? ? "EDIT COLUMN" : "ADD COLUMN"
+    end
+
+    def too_small_what : String
+      "column form needs a larger window"
+    end
+
+    private def draw_tail(screen : Screen, box : Rect, first : Int32) : Nil
       # The band answers the one question a descriptor form cannot answer on its own: what this
       # pulls out of the flow the operator is looking at. Empty — not "no match" — while the
       # descriptor is still incomplete, since a refusal is already on the Save row.
@@ -290,13 +250,8 @@ module Gori::Tui
       screen.text(box.x + 2, pv_y, band, Theme.muted, Theme.panel, width: box.w - 4)
     end
 
-    private def draw_row(screen : Screen, box : Rect, i : Int32, py : Int32) : Nil
-      sel = i == @sel
-      bg = sel ? Theme.accent_bg : Theme.panel
-      screen.fill(Rect.new(box.x + 1, py, box.w - 2, 1), bg)
-      screen.cell(box.x + 1, py, sel ? '▎' : ' ', Theme.accent, bg)
-      x = box.x + 3
-      fg = sel ? Theme.text_bright : Theme.text
+    def draw_row_body(screen : Screen, box : Rect, i : Int32, py : Int32,
+                      x : Int32, bg : Color, fg : Color, sel : Bool) : Nil
       case i
       # `label:` and not `header:`: the SELECTOR row two lines down is already spelled `header:`
       # when the kind is Header, and two rows under one word is a form that cannot be read.
@@ -323,12 +278,6 @@ module Gori::Tui
       in Gori::ExtractKind::JsonPath then "path:"
       in Gori::ExtractKind::Position then "range:"
       end
-    end
-
-    def row_at(box : Rect, mx : Int32, my : Int32) : Int32?
-      return nil unless box.contains?(mx, my)
-      i = my - (box.y + 2)
-      (0 <= i < ROW_COUNT) ? i : nil
     end
   end
 end

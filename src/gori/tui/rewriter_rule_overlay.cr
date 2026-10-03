@@ -21,7 +21,7 @@ module Gori::Tui
   # shared Rules engine (which the proxy reads live), and `on_preview` scans recent flows
   # for the live match PREVIEW. The form owns only WHEN to ask for that preview — see
   # refresh_preview.
-  class RewriterRuleOverlay < Overlay
+  class RewriterRuleOverlay < FormOverlay
     ROW_NAME = 0
     # Where the rule LIVES, which is who it applies to (`Store::RuleScope`). First of the
     # cyclers, and directly under the name, because it is the question the operator answers
@@ -90,7 +90,6 @@ module Gori::Tui
     # The source's options as last edited; `respond_args` drops the ones the current source
     # does not read.
     @options : Store::RespondArgs
-    @sel : Int32
     # First row the window draws (#1420). The form is ROW_COUNT rows plus the preview band —
     # 18 tall — and an 80×24 terminal leaves `rule_form_box` 15, so without a window the
     # options and Save rows were simply never drawn and ↵ on Save had nothing on screen.
@@ -125,7 +124,6 @@ module Gori::Tui
       @options = parsed.is_a?(String) ? Store::RespondArgs.new : parsed
       source = respond == "fault" ? (@options.fault.try(&.label) || "close") : respond
       @source_i = idx(SOURCES, source)
-      @sel = 0
     end
 
     def self.adding : RewriterRuleOverlay
@@ -281,10 +279,6 @@ module Gori::Tui
       row == ROW_RESPOND || row == ROW_OPTIONS
     end
 
-    def on_save_row? : Bool
-      @sel == ROW_SAVE
-    end
-
     # A pattern is required; a regex match must additionally compile; a short-circuit rule's
     # canned response must parse, because an unparseable one would answer every matching
     # request with gori's own 502 and still never reach the origin.
@@ -357,25 +351,6 @@ module Gori::Tui
         respond: short_circuit_op? ? respond : Store::RespondKind::Inline, respond_args: respond_args)
     end
 
-    def move(d : Int32) : Nil
-      step = d < 0 ? -1 : 1
-      nxt = @sel
-      # Walk PAST rows this op ignores instead of landing on them; stop at the ends rather
-      # than wrapping, matching the previous clamp behaviour.
-      loop do
-        probe = nxt + step
-        break if probe < 0 || probe > ROW_COUNT - 1
-        nxt = probe
-        break unless skip_row?(nxt)
-      end
-      @sel = nxt unless skip_row?(nxt)
-    end
-
-    def set_selected(idx : Int32) : Nil
-      idx = idx.clamp(0, ROW_COUNT - 1)
-      @sel = idx unless skip_row?(idx)
-    end
-
     private def cycler_row?(row : Int32) : Bool
       ROW_SCOPE <= row <= ROW_PART || row == ROW_RESPOND
     end
@@ -429,35 +404,10 @@ module Gori::Tui
       out
     end
 
-    # Click a field row to select it; a click on Save commits; a click outside the card
-    # cancels. Mirrors the ↑/↓ + ↵ keyboard model. No preview refresh: selecting a row
-    # can't change a match-relevant field.
-    def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
-      box = overlay_box(area)
-      return :cancel if box.nil? || !box.contains?(mx, my)
-      if idx = row_at(box, mx, my)
-        set_selected(idx)
-        return :commit if on_save_row?
-        @on_edit_stub.try(&.call) if idx == ROW_VALUE && short_circuit_op? && !respond.fault?
-        @on_edit_options.try(&.call) if idx == ROW_OPTIONS && short_circuit_op?
-      end
-      # …then the caret, if the press landed inside a drawn field. The row pick above is
-      # what focuses; this is what puts the caret where the operator pointed instead of
-      # leaving it wherever the last keystroke did (Overlay#click_text_field).
-      click_text_field(mx, my)
-      :stay
-    end
-
     private def edit_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
       return :cancel if key.escape?
-      if key.up? || key.back_tab?
-        move(-1)
-        return :stay
-      elsif key.down? || key.tab?
-        move(1)
-        return :stay
-      end
+      return :stay if field_nav?(ev)
 
       if cycler_row?(@sel)
         case
@@ -494,18 +444,37 @@ module Gori::Tui
       text_field_for(@sel).try(&.set_preedit(text))
     end
 
-    def overlay_box(area : Rect) : Rect?
-      Overlay.rule_form_box(area, ROW_COUNT, preview: true)
+    def row_count : Int32
+      ROW_COUNT
     end
 
+    def preview? : Bool
+      true
+    end
+
+    def card_title : String
+      editing? ? "EDIT REWRITER RULE" : "ADD REWRITER RULE"
+    end
+
+    def too_small_what : String
+      "rewriter-rule form needs a larger window"
+    end
+
+    # A press on the stub or options row opens its sub-editor, as ↵ does. No preview refresh:
+    # selecting a row can't change a match-relevant field.
+    private def row_clicked(idx : Int32) : Nil
+      @on_edit_stub.try(&.call) if idx == ROW_VALUE && short_circuit_op? && !respond.fault?
+      @on_edit_options.try(&.call) if idx == ROW_OPTIONS && short_circuit_op?
+    end
+
+    # The base loop, windowed: the form is taller than the card at 80×24 (see `@scroll`).
     def render(screen : Screen, area : Rect) : Nil
       box = overlay_box(area)
       unless box
-        Overlay.too_small(screen, area, "rewriter-rule form needs a larger window")
+        Overlay.too_small(screen, area, too_small_what)
         return
       end
-      title = editing? ? "EDIT REWRITER RULE" : "ADD REWRITER RULE"
-      Frame.card(screen, box, title, border: Theme.border_focus)
+      Frame.card(screen, box, card_title, border: Theme.border_focus)
       first = box.y + 2
       visible = list_capacity(box)
       @scroll = Viewport.scroll_to_show(@sel, @scroll, visible, ROW_COUNT)
@@ -519,20 +488,10 @@ module Gori::Tui
         screen.fill(Rect.new(box.x + 1, pv_y, box.w - 2, 1), Theme.panel)
         screen.text(box.x + 2, pv_y, "▶ #{@preview}", Theme.muted, Theme.panel, width: box.w - 4)
       end
-      # No key hint on the bottom border: the shell already draws `hint` in the status strip
-      # for whichever modal is open (Runner#key_hints), so a second copy here was the same
-      # advice twice — and the two had already drifted apart, this one having dropped the
-      # `type find/value` clause the method still carries. Per-row affordances stay where the
-      # key applies (the `‹/›` a cycler draws when it has focus).
     end
 
-    private def draw_row(screen : Screen, box : Rect, i : Int32, py : Int32) : Nil
-      sel = i == @sel
-      bg = sel ? Theme.accent_bg : Theme.panel
-      screen.fill(Rect.new(box.x + 1, py, box.w - 2, 1), bg)
-      screen.cell(box.x + 1, py, sel ? '▎' : ' ', Theme.accent, bg)
-      x = box.x + 3
-      fg = sel ? Theme.text_bright : Theme.text
+    def draw_row_body(screen : Screen, box : Rect, i : Int32, py : Int32,
+                      x : Int32, bg : Color, fg : Color, sel : Bool) : Nil
       hop = header_op?
       sc = short_circuit_op?
       case i

@@ -15,7 +15,7 @@ module Gori::Tui
   #   ↑/↓ or ↹   move between fields
   #   type        edit the focused text row (name / hex)
   #   ↵           advance a text row (↵ on Save commits) · esc cancels
-  class CustomColorOverlay < Overlay
+  class CustomColorOverlay < FormOverlay
     ROW_NAME  = 0
     ROW_HEX   = 1
     ROW_SAVE  = 2
@@ -25,14 +25,11 @@ module Gori::Tui
     # row when the name field itself has been renamed.
     getter original_name : String?
 
-    @sel : Int32
-
     def initialize(*, name : String = "", hex : String = "", @original_name : String? = nil)
       @fields = {
         name: TextField.new(name),
         hex:  TextField.new(hex),
       }
-      @sel = 0
     end
 
     def self.adding : CustomColorOverlay
@@ -67,12 +64,8 @@ module Gori::Tui
       "hex must be #rrggbb"
     end
 
-    def move(d : Int32) : Nil
-      @sel = (@sel + (d < 0 ? -1 : 1)).clamp(0, ROW_COUNT - 1)
-    end
-
-    def set_selected(idx : Int32) : Nil
-      @sel = idx.clamp(0, ROW_COUNT - 1)
+    def row_count : Int32
+      ROW_COUNT
     end
 
     private def text_field_for(row : Int32) : TextField?
@@ -102,14 +95,7 @@ module Gori::Tui
     def handle_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
       return :cancel if key.escape?
-
-      if key.up? || key.back_tab?
-        move(-1)
-        return :stay
-      elsif key.down? || key.tab?
-        move(1)
-        return :stay
-      end
+      return :stay if field_nav?(ev)
 
       if @sel == ROW_SAVE
         (key.enter? || key.space?) ? :commit : :stay
@@ -125,47 +111,20 @@ module Gori::Tui
       end
     end
 
-    def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
-      box = overlay_box(area)
-      return :cancel if box.nil? || !box.contains?(mx, my)
-      if idx = row_at(box, mx, my)
-        set_selected(idx)
-        return :commit if @sel == ROW_SAVE
-      end
-      click_text_field(mx, my)
-      :stay
-    end
-
     def set_preedit(text : String) : Nil
       text_field_for(@sel).try(&.set_preedit(text))
     end
 
-    def overlay_box(area : Rect) : Rect?
-      Overlay.rule_form_box(area, ROW_COUNT, preview: false)
+    def card_title : String
+      editing? ? "EDIT CUSTOM COLOUR" : "ADD CUSTOM COLOUR"
     end
 
-    def render(screen : Screen, area : Rect) : Nil
-      box = overlay_box(area)
-      unless box
-        Overlay.too_small(screen, area, "custom-colour form needs a larger window")
-        return
-      end
-      Frame.card(screen, box, editing? ? "EDIT CUSTOM COLOUR" : "ADD CUSTOM COLOUR", border: Theme.border_focus)
-      first = box.y + 2
-      ROW_COUNT.times do |i|
-        py = first + i
-        break if py >= box.bottom - 1
-        draw_row(screen, box, i, py)
-      end
+    def too_small_what : String
+      "custom-colour form needs a larger window"
     end
 
-    private def draw_row(screen : Screen, box : Rect, i : Int32, py : Int32) : Nil
-      sel = i == @sel
-      bg = sel ? Theme.accent_bg : Theme.panel
-      screen.fill(Rect.new(box.x + 1, py, box.w - 2, 1), bg)
-      screen.cell(box.x + 1, py, sel ? '▎' : ' ', Theme.accent, bg)
-      x = box.x + 3
-      fg = sel ? Theme.text_bright : Theme.text
+    def draw_row_body(screen : Screen, box : Rect, i : Int32, py : Int32,
+                      x : Int32, bg : Color, fg : Color, sel : Bool) : Nil
       case i
       when ROW_NAME then draw_field(screen, box, py, bg, fg, sel, "name:", @fields[:name])
       when ROW_HEX  then draw_hex_row(screen, box, py, bg, fg, sel)
@@ -191,12 +150,6 @@ module Gori::Tui
       else
         screen.text(sx, py, "no preview", Theme.muted, bg)
       end
-    end
-
-    def row_at(box : Rect, mx : Int32, my : Int32) : Int32?
-      return nil unless box.contains?(mx, my)
-      i = my - (box.y + 2)
-      (0 <= i < ROW_COUNT) ? i : nil
     end
   end
 end

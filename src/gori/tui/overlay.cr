@@ -3,6 +3,7 @@ require "./screen"
 require "./geometry"
 require "./text_field"
 require "./theme"
+require "./frame"
 
 module Gori::Tui
   # Every modal state the shell's `@overlay` can hold. This was a bare `Symbol` with 33
@@ -474,6 +475,153 @@ module Gori::Tui
     # overlay (default true when no closure was supplied).
     def commit : Bool
       (c = on_commit) ? c.call : true
+    end
+  end
+
+  # The row form: a card of `label: value` rows, one selected, each drawn as a band with a `▎`
+  # marker, the LAST row the button that commits (Save / Run / Start). Ten forms — Rewriter,
+  # Colormarker, Probe custom, extract, column, Scope, OAST provider, custom colour, Sequencer,
+  # active scan — had each hand-rolled the selection, the click, the render loop and the row
+  # prelude. A subclass answers `row_count`, `card_title`, `too_small_what` and
+  # `draw_row_body`, and keeps its own key cases.
+  abstract class FormOverlay < Overlay
+    @sel = 0
+
+    abstract def row_count : Int32
+
+    # The card's border title (`title` is the shell's focus badge).
+    abstract def card_title : String
+
+    # The "<what>" of the line drawn when the card does not fit (`Overlay.too_small`).
+    abstract def too_small_what : String
+
+    # One row's content, drawn over the band and the `▎` marker; `x` is the label column.
+    abstract def draw_row_body(screen : Screen, box : Rect, i : Int32, py : Int32,
+                               x : Int32, bg : Color, fg : Color, sel : Bool) : Nil
+
+    # Whether `row` is one ↑/↓ walks past: a row the form's current kind or op ignores.
+    def skip_row?(row : Int32) : Bool
+      false
+    end
+
+    # Whether the card draws a preview band under the rows (`Overlay.rule_form_box`).
+    def preview? : Bool
+      false
+    end
+
+    def on_save_row? : Bool
+      @sel == row_count - 1
+    end
+
+    # One row per step whatever `d`'s size, walking PAST rows `skip_row?` names instead of
+    # landing on them, and stopping at the ends rather than wrapping. A form whose wheel notch
+    # moves the full `d` overrides with a clamp.
+    def move(d : Int32) : Nil
+      step = d < 0 ? -1 : 1
+      nxt = @sel
+      loop do
+        probe = nxt + step
+        break if probe < 0 || probe > row_count - 1
+        nxt = probe
+        break unless skip_row?(nxt)
+      end
+      @sel = nxt unless skip_row?(nxt)
+    end
+
+    def set_selected(idx : Int32) : Nil
+      idx = idx.clamp(0, row_count - 1)
+      @sel = idx unless skip_row?(idx)
+    end
+
+    # ↑/⇤ and ↓/↹ step between rows. True when `ev` was one of the four, so a key ladder can
+    # take it as one arm.
+    private def field_nav?(ev : Termisu::Event::Key) : Bool
+      key = ev.key
+      if key.up? || key.back_tab?
+        move(-1)
+      elsif key.down? || key.tab?
+        move(1)
+      else
+        return false
+      end
+      true
+    end
+
+    # Click a row to select it; a click on the commit row commits; a click outside the card
+    # cancels. Mirrors the ↑/↓ + ↵ keyboard model.
+    def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      box = overlay_box(area)
+      return :cancel if box.nil? || !box.contains?(mx, my)
+      if idx = row_at(box, mx, my)
+        set_selected(idx)
+        return :commit if on_save_row?
+        row_clicked(idx)
+      end
+      # …then the caret, if the press landed inside a drawn field. The row pick above is
+      # what focuses; this is what puts the caret where the operator pointed instead of
+      # leaving it wherever the last keystroke did (Overlay#click_text_field).
+      click_text_field(mx, my)
+      :stay
+    end
+
+    # A press on a row that is not the commit row, after it was selected.
+    private def row_clicked(idx : Int32) : Nil
+    end
+
+    def overlay_box(area : Rect) : Rect?
+      Overlay.rule_form_box(area, row_count, preview: preview?)
+    end
+
+    private def first_row_y(box : Rect) : Int32
+      box.y + 2
+    end
+
+    # The first y a row may not be drawn on: the bottom border, or the preview band above it.
+    private def rows_bottom(box : Rect) : Int32
+      box.bottom - (preview? ? 2 : 1)
+    end
+
+    def render(screen : Screen, area : Rect) : Nil
+      box = overlay_box(area)
+      unless box
+        Overlay.too_small(screen, area, too_small_what)
+        return
+      end
+      Frame.card(screen, box, card_title, border: Theme.border_focus)
+      draw_head(screen, box)
+      first = first_row_y(box)
+      row_count.times do |i|
+        py = first + i
+        break if py >= rows_bottom(box)
+        draw_row(screen, box, i, py)
+      end
+      draw_tail(screen, box, first)
+      # No key hint on the bottom border: the shell already draws `hint` in the status strip
+      # for whichever modal is open (Runner#key_hints), so a second copy here was the same
+      # advice twice — and the copies had drifted apart. Per-row affordances stay where the
+      # key applies (the `‹/›` a cycler draws when it has focus).
+    end
+
+    # What a card draws between its title and its rows.
+    private def draw_head(screen : Screen, box : Rect) : Nil
+    end
+
+    # What a card draws under its rows (the preview band); `first` is the first row's y.
+    private def draw_tail(screen : Screen, box : Rect, first : Int32) : Nil
+    end
+
+    private def draw_row(screen : Screen, box : Rect, i : Int32, py : Int32) : Nil
+      sel = i == @sel
+      bg = sel ? Theme.accent_bg : Theme.panel
+      screen.fill(Rect.new(box.x + 1, py, box.w - 2, 1), bg)
+      screen.cell(box.x + 1, py, sel ? '▎' : ' ', Theme.accent, bg)
+      draw_row_body(screen, box, i, py, box.x + 3, bg, sel ? Theme.text_bright : Theme.text, sel)
+    end
+
+    def row_at(box : Rect, mx : Int32, my : Int32) : Int32?
+      return nil unless box.contains?(mx, my)
+      i = my - first_row_y(box)
+      (0 <= i < row_count) ? i : nil
     end
   end
 end
