@@ -328,6 +328,22 @@ describe Gori::ProjectArchive do
     end
   end
 
+  # Well-formed but impossible: these pass the format and raise from the `Time` constructor.
+  it "refuses a manifest creation time that names no real instant" do
+    with_archive_project do |_registry, project, _store, root|
+      archive_path = export_archive(project, File.join(root, "when.gori"))
+      original = read_archive(archive_path)
+      %w[2026-02-31T12:04:23Z 0000-01-01T00:00:00Z 2026-01-01T25:04:23Z 2026-01-01T12:04:23+99:00].each do |value|
+        entries = original.dup
+        manifest = JSON.parse(entries["manifest.json"]).as_h
+        manifest["created_at"] = JSON::Any.new(value)
+        entries["manifest.json"] = JSON::Any.new(manifest).to_json
+        write_archive(archive_path, entries.to_a)
+        expect_raises(Gori::Error, /invalid creation time/) { Gori::ProjectArchive.prepare_import(archive_path) }
+      end
+    end
+  end
+
   it "reports a destination that appeared before the link as the same refusal" do
     with_archive_project do |_registry, project, _store, root|
       prepared = Gori::ProjectArchive.prepare_export(project)
@@ -594,6 +610,30 @@ describe Gori::ProjectArchive do
         tamper_archive_database(archive_path, root) { |conn| conn.exec(statement) }
         error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }
         error.message.not_nil!.should contain("NUL byte")
+      end
+    end
+  end
+
+  # Each of these imported fine and then raised from every store read of the row: the project
+  # could not be opened, listed or captured into.
+  it "refuses an archive with a cell the store's typed reads would raise on" do
+    with_archive_project do |_registry, project, store, root|
+      store.insert_flow(archive_request("/a"))
+      store.flush
+      archive_path = export_archive(project, File.join(root, "cells.gori"))
+      original = File.read(archive_path)
+      Gori::ProjectArchive.prepare_import(archive_path).close # the untampered copy imports
+
+      {
+        "UPDATE flows SET created_at = 'zz'",
+        "UPDATE flows SET state = 1.5",
+        "UPDATE flows SET port = 9223372036854775807",
+        "UPDATE flows SET status = -2147483649",
+      }.each do |statement|
+        File.write(archive_path, original)
+        tamper_archive_database(archive_path, root) { |conn| conn.exec(statement) }
+        error = expect_raises(Gori::Error) { Gori::ProjectArchive.prepare_import(archive_path) }
+        error.message.not_nil!.should contain(%(never writes in "flows"))
       end
     end
   end

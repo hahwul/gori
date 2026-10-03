@@ -95,7 +95,7 @@ module Gori
       ProbeOastRecord.new(
         rs.read(Int64), rs.read(Int64), rs.read(String), rs.read(String), rs.read(Int64),
         rs.read(String), rs.read(String), rs.read(String), rs.read(String),
-        Severity.new(rs.read(Int32)), rs.read(String), rs.read(String), rs.read(String?),
+        Severity.stored(rs.read(Int32)), rs.read(String), rs.read(String), rs.read(String?),
         rs.read(Int64?), rs.read(Int64?))
     end
   end

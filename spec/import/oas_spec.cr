@@ -439,3 +439,14 @@ describe Gori::Import::Oas do
     end
   end
 end
+
+# `JSON.parse` passes raw bytes through unchecked, and the server-variable gsub is PCRE, which
+# raises on invalid UTF-8 — outside the per-operation rescue.
+describe "Gori::Import::Oas servers[0].url" do
+  it "refuses a server URL that is not valid UTF-8 with a clean error" do
+    body = %({"openapi":"3.0.0","servers":[{"url":"https://a\xc3{v}.test"}],"paths":{"/x":{"get":{}}}})
+    with_spec(body, ".json") do |path|
+      expect_raises(Gori::Error, /not valid UTF-8/) { Gori::Import::Oas.parse_file(path) }
+    end
+  end
+end

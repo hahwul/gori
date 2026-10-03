@@ -176,6 +176,9 @@ module Gori
             %(OpenAPI servers[0] is not an object — write `- url: "https://api.example.com"`))
           url = first_h["url"]?.to_s
           raise Gori::Error.new("OpenAPI spec has no servers[0].url") if url.empty?
+          # `JSON.parse` hands raw bytes through unchecked, and the variable gsub below is PCRE,
+          # which RAISES on invalid UTF-8 — outside the per-operation rescue.
+          raise Gori::Error.new("OpenAPI servers[0].url is not valid UTF-8") unless url.valid_encoding?
           url = substitute_server_variables(url, first_h["variables"]?)
           # A relative server URL ("/v3", "./v3", "../v3", "v3") has no host authority:
           # every generated request would prepend "https://" onto it, either yielding an

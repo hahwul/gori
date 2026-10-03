@@ -480,7 +480,10 @@ module Gori
           validate_core_schema!(conn, version, tables)
           quick_check = conn.scalar("PRAGMA quick_check").as(String)
           raise Gori::Error.new("project database integrity check failed: #{quick_check}") unless quick_check == "ok"
-          refuse_exhausted_ids!(conn, tables, version) if importing
+          if importing
+            refuse_exhausted_ids!(conn, tables, version)
+            refuse_mistyped_cells!(conn, tables)
+          end
           flows = conn.scalar("SELECT COUNT(*) FROM flows").as(Int64)
           {version, build_inventory(conn, tables, flows)}
         end
@@ -719,6 +722,38 @@ module Gori
       columns.uniq
     end
 
+    # Columns the store reads back as an Int32 (a port, a status, a flag, a position). Past
+    # Int32 the read raises `OverflowError`, which a foreign row turns into a project whose
+    # History, Repeater tab or capture start dies on every open. Not every narrow column is
+    # listed: one that is not just keeps today's behaviour.
+    INT32_COLUMNS = {
+      "flows"          => %w[port status state short_circuited],
+      "issues"         => %w[severity status],
+      "issue_evidence" => %w[status],
+      "match_rules"    => %w[enabled position],
+      "repeaters"      => %w[position http2 auto_content_length ws_keep_key ws_http_only],
+      "ws_messages"    => %w[opcode],
+    }
+
+    # gori binds only integers (or NULL) into an INTEGER column, and the store reads every one
+    # of them with a typed read that raises `DB::ColumnTypeMismatchError` on anything else. So
+    # a TEXT, REAL or BLOB cell there, or an out-of-range narrow one, is a crafted archive and
+    # is refused like the others above, not repaired. One scan per table.
+    private def self.refuse_mistyped_cells!(conn : DB::Connection, tables : Array(String)) : Nil
+      tables.each do |table|
+        narrow = INT32_COLUMNS[table]? || [] of String
+        checks = conn.query_all("SELECT name FROM pragma_table_info(?) WHERE upper(type) = 'INTEGER'",
+          table, as: String).map do |column|
+          col = quote_ident(column)
+          check = "typeof(#{col}) NOT IN ('integer', 'null')"
+          narrow.includes?(column) ? "#{check} OR #{col} NOT BETWEEN #{Int32::MIN} AND #{Int32::MAX}" : check
+        end
+        next if checks.empty?
+        next unless conn.query_one?("SELECT 1 FROM #{quote_ident(table)} WHERE #{checks.join(" OR ")} LIMIT 1", as: Int64)
+        raise Gori::Error.new("project archive database has a value gori never writes in #{table.inspect}; refusing to import it")
+      end
+    end
+
     private def self.quote_ident(name : String) : String
       %("#{name.gsub('"', %(""))}")
     end
@@ -767,7 +802,9 @@ module Gori
       manifest = Manifest.from_json(raw)
       validate_manifest!(manifest)
       manifest
-    rescue Time::Format::Error
+    rescue Time::Format::Error | ArgumentError | Time::Location::InvalidTimezoneOffsetError
+      # A well-formed but impossible instant (Feb 31, hour 25, year 0, `+99:00`) passes the
+      # format and raises from the `Time` constructor instead.
       raise Gori::Error.new("project archive has an invalid creation time")
     end
 

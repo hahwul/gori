@@ -101,6 +101,13 @@ module Gori
         # never met the byte here — the hole arrived with the streaming rewrite. Reported as a
         # bad FILE, which is what it is; nothing in the HAR can be trusted past that byte.
         raise Gori::Error.new("HAR file is not valid UTF-8: #{ex.message}")
+      rescue ex : Gori::Error
+        raise ex
+      rescue ex
+        # `JSON::Any.new(pull)` raises a bare `Exception` ("Unknown pull kind: EndObject") on
+        # some malformed input instead of a `JSON::ParseException`. A consumer's own raise is
+        # already out through `ConsumerRaise` above, so what lands here is the file's.
+        raise Gori::Error.new("HAR file is not valid JSON: #{ex.message}")
       end
 
       # The `log` object: its `entries` array is walked, everything else (version, creator,

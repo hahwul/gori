@@ -28,3 +28,15 @@ describe "Gori::Store::FlowDetail#body_truncated?" do
     whole.body_truncated?(:response).should be_false
   end
 end
+
+# A stored severity/status out of the enum's range (a foreign row) raised "enum value outside
+# of defined enum members" from every exhaustive `case` that labelled it.
+describe "Gori::Store::Severity.stored / Status.stored" do
+  it "keeps a stored value in range" do
+    Gori::Store::Severity.stored(-1).should eq(Gori::Store::Severity::Info)
+    Gori::Store::Severity.stored(99).should eq(Gori::Store::Severity::Critical)
+    Gori::Store::Severity.stored(3).should eq(Gori::Store::Severity::High)
+    Gori::Store::Status.stored(-1).should eq(Gori::Store::Status::Open)
+    Gori::Store::Status.stored(2).label.should eq("false-positive")
+  end
+end

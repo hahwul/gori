@@ -101,6 +101,30 @@ describe "Import::Har.each_flow" do
     end
   end
 
+  # The stdlib's `JSON::Any.new(pull)` raises a bare `Exception` ("Unknown pull kind") here,
+  # not a `JSON::ParseException`.
+  it "reports malformed JSON the pull parser meets as a bare Exception as a clean error" do
+    body = %({"log":{"entries":[{"request":{"url":"http://a/","headers":[{"name":"a", : "b"}]}}]}})
+    with_har(body) do |path|
+      expect_raises(Gori::Error, /not valid JSON/) { Gori::Import::Har.each_flow(path) { } }
+    end
+  end
+
+  # Each size fits Int64 on its own; their head + body and request + response sums did not,
+  # so the batch rolled back on insert or, below that, every later read of the row raised.
+  it "ignores a declared body size no wire could carry" do
+    huge = "4700000000000000000"
+    entry = har_entry(1).sub(%("headers":[]},), %("headers":[],"bodySize":#{huge},"postData":{"mimeType":"text/plain","text":"q"}},))
+      .sub(%("text":"ok"}), %("text":"ok","size":#{huge}},"bodySize":#{huge}))
+    with_har(%({"log":{"entries":[#{entry}]}})) do |path|
+      stream_store do |store|
+        Gori::Import.import_file(store, :har, path).count.should eq(1)
+        row = store.recent_flows(10).first
+        row.response_size.not_nil!.should be < 1_000
+      end
+    end
+  end
+
   it "stops where the caller cancels, without reading the rest of the file" do
     body = %({"log":{"entries":[#{har_entry(1)},#{har_entry(2)},#{har_entry(3)}]}})
     with_har(body) do |path|

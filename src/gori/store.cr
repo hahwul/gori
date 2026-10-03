@@ -2346,8 +2346,8 @@ module Gori
     private def read_issue(rs : DB::ResultSet) : Issue
       Issue.new(
         rs.read(Int64), rs.read(Int64), rs.read(Int64), rs.read(String),
-        Severity.new(rs.read(Int32)), rs.read(String?), rs.read(Int64?), String.new(rs.read(Bytes)),
-        Status.new(rs.read(Int32)), rs.read(String?))
+        Severity.stored(rs.read(Int32)), rs.read(String?), rs.read(Int64?), String.new(rs.read(Bytes)),
+        Status.stored(rs.read(Int32)), rs.read(String?))
     end
 
     private def try_read_entity_link(rs : DB::ResultSet) : EntityLink?
@@ -2387,9 +2387,15 @@ module Gori
       source_ref = rs.read(String?)
       intercept_edited = rs.read(Int64) != 0
       FlowRow.new(id, created_at, scheme, method, host, port, target,
-        status, req_size + (resp_size || 0_i64), state, resp_size, duration_us, content_type,
+        status, total_size(req_size, resp_size), state, resp_size, duration_us, content_type,
         short_circuited, advisory, request_content_type, connect_protocol,
         source, source_surface, source_ref, intercept_edited)
+    end
+
+    # A row's request + response size. Each column fits Int64 but a foreign or hand-edited row
+    # can make their sum overflow, which took down every read that listed the row.
+    private def total_size(req : Int64, resp : Int64?) : Int64
+      (req.to_i128 + (resp || 0)).clamp(Int64::MIN, Int64::MAX).to_i64
     end
 
     # Column order MUST match EVENT_COLS.
