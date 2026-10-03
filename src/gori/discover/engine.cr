@@ -1374,7 +1374,7 @@ module Gori::Discover
     # max_requests set the orchestrator fills the @jobs buffer before any worker increments
     # @capped.sent — so `--max-requests 5` at the default concurrency reported dozens of
     # "errors" that were the cap working exactly as designed.
-    private def benign_error?(err : String) : Bool
+    private def benign_error?(err : String?) : Bool
       err == CappedBackend::CAP_ERROR || err == SCOPE_REFUSED || err == STOPPED
     end
 
@@ -2085,14 +2085,12 @@ module Gori::Discover
         # pacing the dispatch loop: a RETRY was spaced only by `retry_pause` and so ran on
         # top of the operator's rate, and a Calibrate task used to pay one slot for the task
         # plus one per probe, undershooting the rate by a slot per directory.
-        # Stopped during the wait: the answer is the failure a retry was retrying, if any.
-        return failed || Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, STOPPED) unless pace(interval)
-        raw = @capped.fetch(p.scheme, p.host, p.port, target)
-        # A retry the budget refused sent nothing: book and answer the failure it was retrying
-        # (see `Sequencer::Engine#send_with_retries`), not "the budget ran out".
-        if (prior = failed) && raw.error == CappedBackend::CAP_ERROR
+        raw = paced_fetch(p, target, interval)
+        # A retry the budget or a stop refused sent nothing: book and answer the failure it was
+        # retrying (see `Sequencer::Engine#send_with_retries`), not "the budget ran out".
+        if (prior = failed) && benign_error?(raw.error)
           raw = prior
-        elsif raw.error && raw.error != CappedBackend::CAP_ERROR && attempts < @config.retries
+        elsif raw.error && !benign_error?(raw.error) && attempts < @config.retries
           failed = raw
           attempts += 1
           sleep @config.retry_pause
@@ -2111,6 +2109,12 @@ module Gori::Discover
         end
         return raw
       end
+    end
+
+    # One wire send after its rate slot, or a STOPPED answer when a stop ended the wait.
+    private def paced_fetch(p : Url::Parts, target : String, interval : Time::Span?) : Repeater::Result
+      return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, STOPPED) unless pace(interval)
+      @capped.fetch(p.scheme, p.host, p.port, target)
     end
 
     private def distill(raw : Repeater::Result, body : Bytes) : Calibrate::Fetched
