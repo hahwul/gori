@@ -155,13 +155,7 @@ module Gori
         # per-action, not per-argument), and the action id is included so distinct actions posted
         # to the same page route are distinct surfaces. host:PORT so another service is distinct.
         private def key_string(detail : Store::FlowDetail, method_upcase : String, target : String, aid : String) : String
-          "nextjs_action_no_auth|#{detail.row.host}:#{detail.row.port}|#{method_upcase}|#{path_key(target)}|#{aid}"
-        end
-
-        private def path_key(target : String) : String
-          t = Active.origin_form(target)
-          qi = t.index('?')
-          qi ? t[0...qi] : t
+          endpoint_key(detail, method_upcase, path_only(Active.origin_form(target)), tag: aid)
         end
 
         # Whether the response redirected the credential-less caller to a login/auth route — the

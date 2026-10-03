@@ -159,7 +159,7 @@ module Gori
         end
 
         private def key_string(detail : Store::FlowDetail, method_upcase : String, path : String, name : String) : String
-          "open_redirect|#{detail.row.host}:#{detail.row.port}|#{method_upcase}|#{path}|#{name.bytesize}:#{name}"
+          endpoint_key(detail, method_upcase, path, tag: "#{name.bytesize}:#{name}")
         end
 
         private def decode(s : String) : String

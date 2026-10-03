@@ -71,7 +71,7 @@ module Gori
         end
 
         private def key_string(detail : Store::FlowDetail, method_upcase : String, path : String) : String
-          "host_header_injection|#{detail.row.host}:#{detail.row.port}|#{method_upcase}|#{path}"
+          endpoint_key(detail, method_upcase, path)
         end
 
         # A redirect that already points at its own Host (the reset-link shape — any content type) OR

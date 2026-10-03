@@ -91,13 +91,7 @@ module Gori
         private def key_string(detail : Store::FlowDetail, method_upcase : String, target : String,
                                aggressive : Bool) : String
           tag = aggressive ? "aggr" : "base"
-          "ratelimit_bypass|#{detail.row.host}:#{detail.row.port}|#{method_upcase}|#{path_key(target)}|#{tag}"
-        end
-
-        private def path_key(target : String) : String
-          t = Active.origin_form(target)
-          qi = t.index('?')
-          qi ? t[0...qi] : t
+          endpoint_key(detail, method_upcase, path_only(Active.origin_form(target)), tag: tag)
         end
 
         # Drop any client-IP headers the browser sent, insert one authoritative copy of each (the

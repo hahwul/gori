@@ -189,7 +189,7 @@ module Gori
         end
 
         private def key_string(detail : Store::FlowDetail, method_upcase : String, path : String, name : String) : String
-          "cmd_injection_oast|#{detail.row.host}:#{detail.row.port}|#{method_upcase}|#{path}|#{name.bytesize}:#{name}"
+          endpoint_key(detail, method_upcase, path, tag: "#{name.bytesize}:#{name}")
         end
 
         # Percent-decoded AND scrubbed: a captured value can carry an invalid-UTF-8 byte (`%FF`),
