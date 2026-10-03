@@ -34,6 +34,29 @@ describe "MCP operator_messages (#1090)" do
     end
   end
 
+  # `--read-only` has no writer: what this call handed over is kept in the process instead, or
+  # the next tool result carried it a second time.
+  it "on a read-only store, is not handed over again by the next tool result" do
+    dir = File.tempname("gori-ro")
+    Dir.mkdir_p(dir)
+    db = File.join(dir, "p.db")
+    rw = Gori::Store.open(db)
+    ro = Gori::Store.open(db, read_only: true, background_index: false)
+    begin
+      t = tools_for(ro)
+      t.call("operator_messages", JSON.parse("{}"))
+      m = rw.post_agent_message("once", "all", nil)
+      j = JSON.parse(t.call("operator_messages", JSON.parse("{}")).text)
+      j["messages"].as_a.map(&.["id"].as_i64).should eq([m])
+      j["marked_delivered"].should be_false
+      t.pending_operator_note("list_history").should be_nil
+    ensure
+      ro.close
+      rw.close
+      FileUtils.rm_rf(dir)
+    end
+  end
+
   it "never replays what was said before this session bound the project" do
     with_store do |store|
       store.post_agent_message("yesterday", "all", nil)

@@ -58,6 +58,7 @@ module Gori::MCP
                    @codex : Proc(CodexQueue::Session?) = -> { CodexQueue.discover },
                    @claim : Proc(Int64, Bool) = ->(_id : Int64) { true },
                    @release : Proc(Int64, Nil) = ->(_id : Int64) { nil },
+                   @carried : Proc(Set(Int64)) = -> { Set(Int64).new },
                    @expire : Proc(Nil) = -> { nil },
                    @answered : Proc(Int64, Nil) = ->(_id : Int64) { nil },
                    @feed : Proc(Int64?) = -> { nil.as(Int64?) })
@@ -192,7 +193,10 @@ module Gori::MCP
     # reports, so nothing older can answer for one of these.
     private def claimed(store : Store, rows : Array(AgentMessage)) : Set(Int64)
       return Set(Int64).new if rows.empty?
-      store.delivered_agent_message_ids(rows.min_of(&.id) - 1, @pid, rows.map(&.id).to_set)
+      ids = store.delivered_agent_message_ids(rows.min_of(&.id) - 1, @pid, rows.map(&.id).to_set)
+      here = @carried.call
+      rows.each { |m| ids << m.id if here.includes?(m.id) } unless here.empty?
+      ids
     end
 
     # One message, down the chain until a route takes it. Two rules hold this together, and
@@ -287,6 +291,11 @@ module Gori::MCP
         unless @warned_read_only
           @warned_read_only = true
           Log.warn { "mcp: read-only server delivered an operator message but cannot record it; the ring will not show it" }
+        end
+        # …but this process must still know, or the tool-result carry hands it over again. Not
+        # when the server re-anchored on another feed during the hand-off: ids are per feed.
+        if ok && AgentDelivery::CARRIED.includes?(via) && @store.call.same?(store)
+          @carried.call << m.id
         end
         return
       end

@@ -432,6 +432,12 @@ module Gori
         @in_flight_messages = Set(Int64).new
       end
 
+      # Operator messages a route in this process carried while the store could not record it
+      # (`--read-only` has no writer). The delivery row is what keeps the courier and the
+      # tool-result carry from repeating each other, so without one each sent what the other
+      # had. Message ids belong to one feed: cleared when the server re-anchors on another.
+      getter carried_here = Set(Int64).new
+
       # Bound-only helpers call this after the unbound gate; raises only on internal misuse.
       private def store : Store
         s = @store

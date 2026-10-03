@@ -400,6 +400,37 @@ describe Gori::MCP::Courier do
     end
   end
 
+  # `--read-only` has no writer, so no delivery row can stop the courier and the tool-result
+  # carry from each sending what the other already had: an in-process ledger does.
+  it "on a read-only store, records what it carried and skips what another route carried" do
+    with_fake_inbox do |path, got|
+      dir = File.tempname("gori-ro")
+      Dir.mkdir_p(dir)
+      db = File.join(dir, "p.db")
+      rw = Gori::Store.open(db)
+      ro = Gori::Store.open(db, read_only: true, background_index: false)
+      ledger = Set(Int64).new
+      begin
+        c = Courier.new(pid: 5_i64, store: -> { ro.as(Gori::Store?) }, client: -> { "claude-code".as(String?) },
+          channels: -> { false }, emit: ->(_f : String) { nil }, inbox: -> { path.as(String?) },
+          codex: -> { nil.as(Gori::MCP::CodexQueue::Session?) }, carried: -> { ledger })
+        c.tick
+        one = rw.post_agent_message("one", "pid:5", nil)
+        two = rw.post_agent_message("two", "pid:5", nil)
+        ledger << two # the tool-result carry handed it over first
+        c.tick.should eq(2)
+        c.delivered.should eq(1)
+        ledger.should contain(one)
+        Fiber.yield
+        got.join.should_not contain("two")
+      ensure
+        ro.close
+        rw.close
+        FileUtils.rm_rf(dir)
+      end
+    end
+  end
+
   it "leaves a message alone while another route in this process is handing it over" do
     with_fake_inbox do |path, got|
       with_store do |store|
