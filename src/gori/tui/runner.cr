@@ -1874,7 +1874,8 @@ module Gori::Tui
     end
 
     def self.read_mode_note(toast : String) : String
-      "#{toast} · from READ mode — #{EditorPane::INSERT_KEYS} to type"
+      # Terse: the status row clips the hint, and the key is the half worth keeping.
+      "#{toast} · READ: #{EditorPane::INSERT_KEYS} to type"
     end
 
     private def tag_read_mode_toast(before : String?) : Nil
@@ -3099,7 +3100,15 @@ module Gori::Tui
     end
 
     private def scope_label : String
-      @scope.active? ? "scope:#{@scope.size}" : "scope:off"
+      Runner.scope_chip(@scope.active?, @scope.size)
+    end
+
+    # `scope:N` while the lens filters. Off, a bare `scope:off` read as "the rules did nothing"
+    # right after adding one, so rules waiting on the lens show as `scope:off(N)` — the
+    # `intercept:on(N)` shape, and still `:off`-muted (see `Chrome.top_bar_chips`).
+    def self.scope_chip(active : Bool, rules : Int32) : String
+      return "scope:#{rules}" if active
+      rules > 0 ? "scope:off(#{rules})" : "scope:off"
     end
 
     # The address on the top-bar listen chip. TERSE: the bar is a dense right-aligned chip

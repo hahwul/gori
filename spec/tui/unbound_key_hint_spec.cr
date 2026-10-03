@@ -68,6 +68,6 @@ describe "Runner.read_mode_global?" do
 
   it "appends the way to type, resolved against the live keymap" do
     Gori::Hotkeys.expand(registry, Runner.read_mode_note("capture off"))
-      .should eq("capture off · from READ mode — i/↵ to type")
+      .should eq("capture off · READ: i/↵ to type")
   end
 end

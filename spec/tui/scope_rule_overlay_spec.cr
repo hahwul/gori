@@ -47,6 +47,23 @@ describe Gori::Tui::ScopeRuleOverlay do
     ov.handle_key(skey(Termisu::Input::Key::Enter)).should eq(:commit)
   end
 
+  it "sends a printable typed on kind, type or Save to the pattern field" do
+    ov = ScopeRuleOverlay.adding # opens on kind
+    stype(ov, "127.0.0.1")
+    ov.pattern.should eq("127.0.0.1")
+    ov.kind.should eq("include")
+
+    ov2 = ScopeRuleOverlay.adding
+    ov2.handle_key(skey(Termisu::Input::Key::Down)) # type
+    stype(ov2, "a")
+    ov2.match_type.should eq("host")
+    ov2.handle_key(skey(Termisu::Input::Key::Down)) # Save
+    ov2.on_save_row?.should be_true
+    stype(ov2, "b")
+    ov2.on_save_row?.should be_false
+    ov2.pattern.should eq("ab")
+  end
+
   it "commits from the Save row and cancels on esc" do
     ov = ScopeRuleOverlay.adding
     ov.handle_key(skey(Termisu::Input::Key::Down))

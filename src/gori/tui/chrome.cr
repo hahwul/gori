@@ -432,7 +432,7 @@ module Gori::Tui
       chips = [] of Chip
       chips << Chip.new(:notify, "notify:#{unread}", Theme.accent, clickable: true) if unread > 0
       unless scope.empty?
-        chips << Chip.new(:scope, scope, scope.ends_with?(":off") ? Theme.muted : Theme.text,
+        chips << Chip.new(:scope, scope, scope.includes?(":off") ? Theme.muted : Theme.text,
           clickable: true)
       end
       # Sandbox rides right of scope (they're the same lens' policy) and in RED — a block gate

@@ -118,6 +118,13 @@ module Gori::Tui
       ]
     end
 
+    # The row the picker opens on: the most recently used project (the registry lists MRU
+    # first, below the three pinned rows), so a returning user's ↵ reopens their work rather
+    # than creating a project. `+ New project` only when there is nothing to reopen.
+    def self.initial_selection(project_count : Int32) : Int32
+      project_count > 0 ? 3 : 0
+    end
+
     # The mark count appended to the list divider, or "" with nothing marked (so an unmarked
     # picker's divider stays byte-identical to what it always drew).
     def self.mark_chip(marked : Int32, hidden : Int32) : String
@@ -144,7 +151,7 @@ module Gori::Tui
       @projects = @entries.map(&.project).as(Array(Project))
       @discriminators = ProjectPicker.row_discriminators(@entries).as(Hash(String, String))
       @query = "" # current search filter; only editable when Search row selected
-      @selected = 0
+      @selected = ProjectPicker.initial_selection(@projects.size)
       @results_scroll = 0
       @mode = :list # :list | :new | :confirm | :space | :rename | :settings | :theme | :compress | archive forms | + BUSY_LABELS
       @name = ""
