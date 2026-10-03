@@ -384,6 +384,17 @@ describe "the core-loop hints" do
         .should eq("‹d› — press ↵↵ to enter the body, then d diff")
     end
 
+    it "answers a body Ctrl chord too, which the bar leaves to the body (History ^R)" do
+      reg = Gori::Verbs.registry
+      keymap = Gori::Verb::Keymap.build(reg)
+      ctrl_r = Gori::Verb::Chord.new("r", ctrl: true)
+      below = Runner.body_scope_verb(ctrl_r, Gori::Verb::Scope::Body, keymap, reg).not_nil!
+      below.id.should eq("history.repeater")
+      Runner.enter_first_hint(ctrl_r, below.title).should eq("‹^R› — press ↵ to enter the list, then ^R repeater flow")
+      # Alt is a terminal's Meta prefix on the bar, not a body chord.
+      Runner.body_scope_verb(Gori::Verb::Chord.new("r", alt: true), Gori::Verb::Scope::Body, keymap, reg).should be_nil
+    end
+
     it "names the pane a pane-gated key is live in, since ↵ may land in another (#1295)" do
       Runner.enter_first_hint(Gori::Verb::Chord.new("p"), "Pretty bodies", strip: true, pane: :response)
         .should eq("‹p› — press ↵↵ to enter the body, then p pretty bodies in the RESPONSE pane")
@@ -396,10 +407,12 @@ describe "the core-loop hints" do
     it "is reached only for a key the tab bar itself does not bind" do
       # The answer is a REFUSAL with directions, not a fall-through: the letter still does
       # nothing here, which is the tab bar's own decision.
-      runner_src = File.read(File.join(__DIR__, "..", "..", "src", "gori", "tui", "runner.cr"))
-      body = runner_src[/private def body_scope_verb.*?\n    end/m].not_nil!
-      body.should contain("Verb::Scope::Global") # a Global binding already fired above
-      body.should contain("chord.ctrl || chord.alt")
+      reg = Gori::Verbs.registry
+      keymap = Gori::Verb::Keymap.build(reg)
+      body = Gori::Verb::Scope::Body
+      Runner.body_scope_verb(Gori::Verb::Chord.new("c"), body, keymap, reg).should be_nil # Global capture: already fired above
+      Runner.body_scope_verb(Gori::Verb::Chord.new("/"), Gori::Verb::Scope::Sidebar, keymap, reg).should be_nil
+      Runner.body_scope_verb(Gori::Verb::Chord.new("/"), body, keymap, reg).should_not be_nil
     end
   end
 

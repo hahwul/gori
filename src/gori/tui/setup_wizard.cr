@@ -1191,7 +1191,7 @@ module Gori::Tui
       # The only EDITABLE recap row (←/→, or a click). Spell out both the chords it moves
       # and the macOS caveat — a user who picks ⌥ without Option-as-Meta would see nothing
       # happen.
-      recap(screen, box, ix, vx, box.y + REVIEW_SHORTCUTS_ROW, "Shortcuts", modifier_recap)
+      recap(screen, box, ix, vx, box.y + REVIEW_SHORTCUTS_ROW, "Shortcuts", SetupWizard.modifier_recap(@modifier))
       y = box.y + REVIEW_OFFER_ROW
       # No prompt line above the offer: the two rows below say "Take the guided tour" /
       # "Skip — finish setup" in full, so "New to gori? Take a quick tour of the TUI:" was
@@ -1206,11 +1206,14 @@ module Gori::Tui
     end
 
     # The Shortcuts recap value: what's staged, plus how to change it / what it costs.
-    private def modifier_recap : String
-      if @modifier == "alt"
+    # No `^1-9` on the Ctrl line: Ctrl+digit carries no control character, so many terminals
+    # (tmux among them) never deliver the jump — `⇧1-9` is the primary, and `⌥1-9` is what
+    # the ⌥ alias adds (see the Repeater's arrival hint).
+    def self.modifier_recap(modifier : String) : String
+      if modifier == "alt"
         "⌥P ⌥N ⌥W ⌥1-9  (←/→ for Ctrl · needs Option-as-Meta)"
       else
-        "^P ^N ^W ^1-9  (←/→ to add ⌥ aliases)"
+        "^P ^N ^W  (←/→ to add ⌥ aliases)"
       end
     end
 

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- TUI: a Ctrl chord the tab's list binds, such as History's `^R`, now answers on the tab bar with the `↵` that reaches it instead of doing nothing, and the setup wizard no longer lists `^1-9`, which many terminals never deliver (#PR)
 - Import: a HAR with an absurd `bodySize` or `content.size` no longer makes every History read in the project fail, and a HAR or OpenAPI file the parser chokes on is reported as a bad file instead of a backtrace (#1497)
 - Project archives: an archive with an impossible creation time or a database value gori never writes is refused at import, instead of becoming a project that crashes on open, and an out-of-range stored issue severity or status reads as the nearest valid one (#1497)
 - CLI: `issues --format markdown`/`sarif`, `issues create --cvss`, `notes` and `compare` no longer crash on an out-of-range timestamp, an invalid-UTF-8 CVSS, a huge notes cursor or a duration past ~25 days (#1497)
