@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Settings written by gori before v0.3 (`decoder.sessions`, `rewriter.presets`, the `pet` section) are no longer migrated; upgrade through v0.7 first (#0)
+- Settings written by gori before v0.3 (`decoder.sessions`, `rewriter.presets`, the `pet` section) are no longer migrated; upgrade through v0.7 first (#1490)
 - Setup wizard: a new Keys step picks the editor keyset, helix-ish or vim-ish, after you try both on a practice pad (#1462)
 - Preferences: Keys has a Keyset playground that tries helix-ish and vim-ish on a practice pad and lists every READ-mode key of each (#1478)
 - Command palette: typing `vim`, `helix` or `keyset` finds the editor keyset setting, and `keybindings` or `shortcuts` finds the Hotkeys editor (#1462)
