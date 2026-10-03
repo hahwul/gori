@@ -54,7 +54,7 @@ module Gori::Miner
   # fork+exec+wait to every one of those RTTs, on the worker fiber that owns the send. That is
   # the arithmetic change #818 disclosed for Probe's `exec` running per flow on the analyzer
   # fiber, and it is the same trade here.
-  class HookBackend < Fuzz::Backend
+  class HookBackend < Fuzz::WrapperBackend
     # Prefix on a hook-failure error string so `Miner.permanent_refusal?` can keep a broken
     # command from being RE-forked on every retry — a spawn failure will not fix itself in a
     # `retry_pause`, and a timeout re-run only multiplies the cost. The rest of the string is
@@ -63,19 +63,6 @@ module Gori::Miner
 
     def initialize(@inner : Fuzz::Backend, @argv : Array(String), @timeout : Time::Span,
                    @env : Hash(String, String)? = nil)
-    end
-
-    def origin : Fuzz::Origin
-      @inner.origin
-    end
-
-    # Delegated (not defaulted) like every other wrapper backend: this is what the Engine holds
-    # through `CappedBackend`, so a `false`/`0`/nil stopping here would misreport every gated
-    # or pooled run underneath it. See `Fuzz::Backend#evidence?`.
-    delegate blocked, blocked_reason, extra_requests, evidence?, http2?, pooled?, ws_notes, ws_note_reason, close, to: @inner
-
-    def send(bytes : Bytes) : Repeater::Result
-      send(bytes, nil)
     end
 
     def send(bytes : Bytes, verbatim : Array({Int32, Int32})?) : Repeater::Result

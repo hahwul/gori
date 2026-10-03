@@ -691,12 +691,37 @@ module Gori::Fuzz
     end
   end
 
+  # A decorator over another Backend. `origin` and every reporting predicate are DELEGATED,
+  # not defaulted: a wrapper is what the Engine holds, so a `Backend#blocked` that stopped at
+  # the outermost layer would report 0 for every gated run there is, and a default
+  # `extra_requests` would hide every re-send the pool underneath it made. `evidence?` for that
+  # same reason once more (see `Backend#evidence?`): a `false` stopping at a wrapper would make
+  # the run's provenance unreadable from the outside and let a spec assert the wrong thing.
+  # A subclass overrides the two-argument `send`, which the one-argument form forwards to.
+  abstract class WrapperBackend < Backend
+    def initialize(@inner : Backend)
+    end
+
+    def origin : Origin
+      @inner.origin
+    end
+
+    delegate blocked, blocked_reason, extra_requests, evidence?, http2?, pooled?,
+      ws_notes, ws_note_reason, close, to: @inner
+
+    def send(bytes : Bytes) : Repeater::Result
+      send(bytes, nil)
+    end
+
+    abstract def send(bytes : Bytes, verbatim : Array({Int32, Int32})?) : Repeater::Result
+  end
+
   # Enforces a HARD ceiling on the total number of real network sends. Wraps any Backend
   # and, past the cap, returns a benign error Result WITHOUT touching the network — so
   # retries, redirect hops, and baseline calibration all count against `max_requests`,
   # unlike a dispatch-only check (which counts one-per-payload and overshoots). A nil or
   # non-positive cap is a pass-through no-op. (Shared by the fuzzer and the param-miner.)
-  class CappedBackend < Backend
+  class CappedBackend < WrapperBackend
     include Gori::RequestMacro::Budget
 
     # Stable error string so run_one can skip retries on a permanent budget stop. It IS the
@@ -734,27 +759,9 @@ module Gori::Fuzz
     def initialize(@inner : Backend, @cap : Int64?)
     end
 
-    def origin : Origin
-      @inner.origin
-    end
-
     def cap_reached? : Bool
       return true if @reserve_short
       (c = @cap) && c > 0 ? @sent >= c : false
-    end
-
-    # Delegated, not defaulted: this wrapper is what the Engine holds, so a Backend#blocked
-    # that stopped at the outermost layer would report 0 for every gated run there is, and a
-    # default `extra_requests` would hide every re-send the pool underneath it made.
-    # `evidence?` for that same reason once more: nothing here CONSUMES it (the widening
-    # happens inside `Sender#send`, below this wrapper), but this is the object every
-    # minimize surface and the Miner hold, so a `false` stopping at the cap would make the
-    # run's provenance unreadable from the outside and let a spec assert the wrong thing.
-    delegate blocked, blocked_reason, extra_requests, evidence?, http2?, pooled?,
-      ws_notes, ws_note_reason, close, to: @inner
-
-    def send(bytes : Bytes) : Repeater::Result
-      send(bytes, nil)
     end
 
     def send(bytes : Bytes, verbatim : Array({Int32, Int32})?) : Repeater::Result
@@ -810,22 +817,12 @@ module Gori::Fuzz
   # a scan drive the rules through a supplied Backend). `Sender` gates itself, so this is
   # only for the non-Sender case — it is never stacked on one, and both use the same
   # `Outbound#sweep_block` decision, so the gate can't drift between the two paths.
-  class GatedBackend < Backend
+  class GatedBackend < WrapperBackend
+    # This gate's own refusals, not the inner backend's.
     getter blocked : Int64 = 0_i64
     getter blocked_reason : String? = nil
 
     def initialize(@inner : Backend, @outbound : Gori::Outbound)
-    end
-
-    def origin : Origin
-      @inner.origin
-    end
-
-    # Delegated, as on `CappedBackend` — see `Backend#evidence?`.
-    delegate extra_requests, evidence?, http2?, pooled?, ws_notes, ws_note_reason, close, to: @inner
-
-    def send(bytes : Bytes) : Repeater::Result
-      send(bytes, nil)
     end
 
     def send(bytes : Bytes, verbatim : Array({Int32, Int32})?) : Repeater::Result
