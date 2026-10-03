@@ -128,6 +128,16 @@ module Gori::Settings
   # socket is opened. A hand-edited proxy declaration must never disappear into DIRECT.
   @@upstream_rules_load_error : String? = nil
   @@upstream_proxy_load_error : String? = nil
+  # The non-string `network.upstream_proxy` node behind that error, written back verbatim while
+  # the error stands: serializing the blank in-memory value instead would turn the refusal into
+  # DIRECT at the next start, after any unrelated network save.
+  @@upstream_proxy_unparsed : JSON::Any? = nil
+
+  # The malformed `network.upstream_proxy` node still refusing every route, or nil.
+  def self.upstream_proxy_unparsed : JSON::Any?
+    @@upstream_proxy_unparsed if @@upstream_proxy_load_error
+  end
+
   # Patterns compiled once per assignment, paired with their rule — the proxy resolves a route
   # per dial, so the glob/suffix decision must not be re-derived there.
   @@upstream_rules_compiled : Array({HostPattern::Compiled, UpstreamRule}) = [] of {HostPattern::Compiled, UpstreamRule}
@@ -911,6 +921,7 @@ module Gori::Settings
       self.upstream_proxy = value # the setter retires any error a previous load retained
     else
       @@upstream_proxy_load_error = "settings: network.upstream_proxy must be a string"
+      @@upstream_proxy_unparsed = node
     end
   end
 

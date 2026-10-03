@@ -115,6 +115,31 @@ describe SettingsView do
     end
   end
 
+  it "shows a non-string proxy declaration and refuses to save it away" do
+    dir = File.tempname("gori-settings-proxy-nonstring")
+    Dir.mkdir_p(dir)
+    prev_home = ENV["GORI_HOME"]?
+    begin
+      ENV["GORI_HOME"] = dir
+      File.write(Gori::Settings.path, %({"network":{"upstream_proxy":8080}}))
+      Gori::Settings.load
+      v = SettingsView.new
+      v.reload(:network)
+      b = MemoryBackend.new(120, 30)
+      v.render(Screen.new(b), Rect.new(0, 0, 120, 30))
+      b.contains?("Invalid · 8080").should be_true
+
+      v.move_field(1) # edit only Bind Port
+      set_text(v, "9090")
+      v.save.should contain("must be a string")
+      Gori::Settings.upstream_route("origin.test").invalid?.should be_true
+    ensure
+      prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
+      Gori::Settings.upstream_proxy = ""
+      FileUtils.rm_rf(dir)
+    end
+  end
+
   it "toggles Verify upstream TLS off, then resets it to the default on save" do
     dir = File.tempname("gori-settings-verify")
     Dir.mkdir_p(dir)

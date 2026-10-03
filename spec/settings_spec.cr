@@ -417,6 +417,34 @@ describe Gori::Settings do
     end
   end
 
+  # Memory holds a blank for a non-string declaration, and a save that wrote that blank turned
+  # the refusal into DIRECT at the next start — after any unrelated network edit.
+  it "writes a non-string upstream_proxy back verbatim until it is reassigned" do
+    dir = File.tempname("gori-settings-upstream-keep")
+    Dir.mkdir_p(dir)
+    prev_home = ENV["GORI_HOME"]?
+    prev_port = Gori::Settings.bind_port
+    begin
+      ENV["GORI_HOME"] = dir
+      File.write(Gori::Settings.path, %({"network":{"upstream_proxy":8080}}))
+      Gori::Settings.load
+      Gori::Settings.bind_port = 9191
+      Gori::Settings.save.should be_true
+      JSON.parse(File.read(Gori::Settings.path))["network"]["upstream_proxy"].should eq(JSON::Any.new(8080_i64))
+
+      Gori::Settings.load
+      Gori::Settings.upstream_route("origin.test").invalid?.should be_true
+      Gori::Settings.upstream_proxy = "http://proxy.test:8080"
+      Gori::Settings.save.should be_true
+      JSON.parse(File.read(Gori::Settings.path))["network"]["upstream_proxy"].should eq("http://proxy.test:8080")
+    ensure
+      prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.upstream_proxy = ""
+      Gori::Settings.bind_port = prev_port
+    end
+  end
+
   # The passthrough list is the one network value that is not a scalar, so its JSON round trip
   # (and the pattern RECOMPILE that load has to trigger) is worth pinning separately: a list
   # that reloads as strings but never recompiles would read back correctly and match nothing.
