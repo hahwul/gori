@@ -12,10 +12,7 @@ module Gori
 
       @[Tool("list_js_endpoints")]
       private def list_js_endpoints(h) : Result
-        req_off = optional_int_arg(h, "offset")
-        req_lim = optional_int_arg(h, "limit")
-        offset = clamp_nonneg(req_off)
-        limit = clamp(req_lim, JS_ENDPOINTS_LIMIT)
+        pg = page_args(h, JS_ENDPOINTS_LIMIT)
         scope = Scope.load(store)
         in_scope = bool_arg(h, "in_scope", false)
         scope_unconfigured = in_scope && !scope.configured?
@@ -29,16 +26,11 @@ module Gori
                    JsRefs.list(store, opts, scope)
                  end
         rows = report.endpoints
-        page = rows[offset, limit]? || [] of JsRefs::Endpoint
+        page = rows[pg.offset, pg.limit]? || [] of JsRefs::Endpoint
         Result.new(JSON.build do |j|
           j.object do
             j.field("endpoints") { j.array { page.each { |e| js_endpoint_row(j, e) } } }
-            j.field "returned", page.size
-            j.field "offset", offset
-            j.field "limit", limit
-            emit_clamp(j, req_off, offset, req_lim, limit)
-            j.field "total", rows.size
-            j.field "has_more", offset + page.size < rows.size
+            emit_page(j, pg, page.size, rows.size)
             j.field "scanned_flows", report.scanned_flows
             j.field "hidden_hosts", report.hidden_hosts
             j.field "requested_unknown", report.requested_unknown

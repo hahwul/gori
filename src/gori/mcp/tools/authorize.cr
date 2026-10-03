@@ -211,11 +211,8 @@ module Gori
       private def authorize_results(h) : Result
         ajob = lookup_job(h, @authorize_jobs, "authorize", "results", missing_field: "job_id")
         return ajob if ajob.is_a?(Result)
-        req_off = optional_int_arg(h, "offset")
-        req_lim = optional_int_arg(h, "limit")
-        offset = clamp_nonneg(req_off)
-        limit = clamp(req_lim, AUTHORIZE_RESULTS_LIMIT)
-        page = ajob.results[offset, limit]? || [] of Authorize::Target
+        pg = page_args(h, AUTHORIZE_RESULTS_LIMIT)
+        page = ajob.results[pg.offset, pg.limit]? || [] of Authorize::Target
         Result.new(JSON.build do |j|
           j.object do
             emit_authorize_headline(j, ajob)
@@ -227,13 +224,10 @@ module Gori
             # learn how many of the sends behind them never got an answer.
             j.field "errors", ajob.errors
             j.field "blocked", ajob.blocked
-            j.field "returned", page.size
-            j.field "offset", offset
+            emit_page(j, pg, page.size)
             j.field "total_available", ajob.results.size
-            j.field "limit", limit
-            emit_clamp(j, req_off, offset, req_lim, limit)
-            j.field "page_complete", offset + page.size >= ajob.results.size
-            j.field "has_more", offset + page.size < ajob.results.size
+            j.field "page_complete", pg.offset + page.size >= ajob.results.size
+            j.field "has_more", pg.offset + page.size < ajob.results.size
             j.field "job_complete", ajob.status != :running
             j.field "incomplete_reason", incomplete_reason(ajob.status)
             j.field "results_truncated", ajob.truncated?

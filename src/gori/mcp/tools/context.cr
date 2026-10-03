@@ -223,10 +223,7 @@ module Gori
         return Result.new(id_error(h, "id"), is_error: true) if repeater_id.nil? && present?(h, "id")
         include_content = bool_arg(h, "include_content", false)
         include_sensitive = bool_arg(h, "include_sensitive", false)
-        req_lim = optional_int_arg(h, "limit")
-        req_off = optional_int_arg(h, "offset")
-        limit = clamp(req_lim, REPEATER_CONTEXT_LIMIT)
-        offset = clamp_nonneg(req_off)
+        pg = page_args(h, REPEATER_CONTEXT_LIMIT)
         query_str = str(h, "query").try(&.strip)
         query_rx = query_str.try { |q| q.empty? ? nil : Regex.new(Regex.escape(q), Regex::Options::IGNORE_CASE) }
         include_response_body = bool_arg(h, "include_response_body", false)
@@ -259,10 +256,10 @@ module Gori
         filtered_repeaters = repeater_narrow(all_repeaters, query_rx, filter)
 
         total_count = filtered_repeaters.size
-        paginated_repeaters = if offset >= filtered_repeaters.size
+        paginated_repeaters = if pg.offset >= filtered_repeaters.size
                                 [] of Store::RepeaterRecord
                               else
-                                filtered_repeaters[offset, Math.min(limit, filtered_repeaters.size - offset)]
+                                filtered_repeaters[pg.offset, Math.min(pg.limit, filtered_repeaters.size - pg.offset)]
                               end
 
         # Response bodies are the one field on this tool that costs a BLOB read per row
@@ -304,9 +301,9 @@ module Gori
             j.field "content_included", include_content
             j.field "sensitive_headers_redacted", !include_sensitive if include_content
             j.field "total_count", total_count
-            j.field "offset", offset
-            j.field "limit", limit
-            emit_clamp(j, req_off, offset, req_lim, limit)
+            j.field "offset", pg.offset
+            j.field "limit", pg.limit
+            emit_clamp(j, pg.req_off, pg.offset, pg.req_lim, pg.limit)
             # A filter string whose every term was dropped narrows NOTHING, and a listing that
             # answered "here is everything" while the caller believed it had filtered is the
             # shape `ql_explain` was fixed for. Named, not silently applied.
@@ -322,7 +319,7 @@ module Gori
                 "last_response_body is hydrated for the first #{MCP_REPEATER_BODY_ROWS} rows of a page only " \
                 "(each is a separate BLOB read) — narrow with id/filter, or page, to read the rest"
             end
-            j.field "has_more", offset + paginated_repeaters.size < total_count
+            j.field "has_more", pg.offset + paginated_repeaters.size < total_count
             j.field "sessions" do
               j.array do
                 paginated_repeaters.each do |r|

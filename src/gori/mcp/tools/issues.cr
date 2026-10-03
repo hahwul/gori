@@ -10,21 +10,13 @@ module Gori
 
       @[Tool("list_issues")]
       private def list_issues(h) : Result
-        req_off = optional_int_arg(h, "offset")
-        req_lim = optional_int_arg(h, "limit")
-        offset = clamp_nonneg(req_off)
-        limit = clamp(req_lim, ISSUES_LIMIT)
+        pg = page_args(h, ISSUES_LIMIT)
         all = store.issues
-        page = all[offset, limit]? || [] of Store::Issue
+        page = all[pg.offset, pg.limit]? || [] of Store::Issue
         Result.new(JSON.build do |j|
           j.object do
             j.field("issues") { j.array { page.each { |f| Serialize.issue(j, f, store) } } }
-            j.field "returned", page.size
-            j.field "offset", offset
-            j.field "limit", limit
-            emit_clamp(j, req_off, offset, req_lim, limit)
-            j.field "total", all.size
-            j.field "has_more", offset + page.size < all.size
+            emit_page(j, pg, page.size, all.size)
           end
         end)
       end

@@ -2630,6 +2630,30 @@ module Gori
         clamp(n, limit.default, limit.max)
       end
 
+      # One call's page: what the caller asked for (nil when absent) beside the clamped values
+      # served, so `emit_page` can echo a request that was coerced rather than honoured.
+      record Page, req_off : Int64?, req_lim : Int64?, offset : Int32, limit : Int32
+
+      private def page_args(h, limit : PageLimit) : Page
+        req_off = optional_int_arg(h, "offset")
+        req_lim = optional_int_arg(h, "limit")
+        Page.new(req_off, req_lim, clamp_nonneg(req_off), clamp(req_lim, limit))
+      end
+
+      # The pagination fields of an object-returning list tool, in the order they all use:
+      # returned/offset/limit and the clamp echo, then — given a `total` — that total under
+      # `total_key` and `has_more`.
+      private def emit_page(j : JSON::Builder, pg : Page, returned : Int32,
+                            total : Int? = nil, total_key : String = "total") : Nil
+        j.field "returned", returned
+        j.field "offset", pg.offset
+        j.field "limit", pg.limit
+        emit_clamp(j, pg.req_off, pg.offset, pg.req_lim, pg.limit)
+        return unless total
+        j.field total_key, total
+        j.field "has_more", pg.offset.to_i64 + returned < total
+      end
+
       private def severity_from(s : String?) : Store::Severity?
         return nil unless s
         Store::Severity.parse?(s.strip)

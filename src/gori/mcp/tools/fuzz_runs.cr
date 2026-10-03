@@ -11,14 +11,11 @@ module Gori
 
       @[Tool("list_fuzz_runs")]
       private def list_fuzz_runs(h) : Result
-        req_off = optional_int_arg(h, "offset")
-        req_lim = optional_int_arg(h, "limit")
-        offset = clamp_nonneg(req_off)
-        limit = clamp(req_lim, FUZZ_RUNS_LIMIT)
+        pg = page_args(h, FUZZ_RUNS_LIMIT)
         session_id = optional_int_arg(h, "session_id")
         return err("session_id must be positive", "INVALID_ARGUMENT", field: "session_id") if session_id && session_id <= 0
 
-        runs = store.fuzz_runs(session_id, limit, offset)
+        runs = store.fuzz_runs(session_id, pg.limit, pg.offset)
         counts = store.fuzz_result_counts(runs.map(&.id))
         total = store.fuzz_run_count(session_id)
         Result.new(JSON.build do |j|
@@ -30,12 +27,7 @@ module Gori
                 end
               end
             end
-            j.field "returned", runs.size
-            j.field "offset", offset
-            j.field "limit", limit
-            emit_clamp(j, req_off, offset, req_lim, limit)
-            j.field "total_available", total
-            j.field "has_more", offset.to_i64 + runs.size < total
+            emit_page(j, pg, runs.size, total, "total_available")
           end
         end)
       end
@@ -74,12 +66,9 @@ module Gori
           return saved_fuzz_result_detail(run, row)
         end
 
-        req_off = optional_int_arg(h, "offset")
-        req_lim = optional_int_arg(h, "limit")
-        offset = clamp_nonneg(req_off)
         # Content rows retain multiple request/response BLOBs and are deliberately capped at
         # 25 per response. Metrics can page farther, but still use the scalar Store projection.
-        limit = clamp(req_lim, include_content ? FUZZ_RUN_CONTENT_ROWS_LIMIT : FUZZ_RUN_ROWS_LIMIT)
+        pg = page_args(h, include_content ? FUZZ_RUN_CONTENT_ROWS_LIMIT : FUZZ_RUN_ROWS_LIMIT)
         matched_only = bool_arg(h, "matched_only", false)
         total = store.fuzz_result_count(run_id, matched_only)
         returned = 0
@@ -89,27 +78,22 @@ module Gori
             j.field("results") do
               j.array do
                 if include_content
-                  store.each_fuzz_result_preview_page(run_id, limit, offset,
+                  store.each_fuzz_result_preview_page(run_id, pg.limit, pg.offset,
                     message_source_cap, head_cap + 1, Serialize::SAVED_SOURCE_BYTES,
                     message_source_cap, matched_only) do |preview|
                     Serialize.saved_fuzz_result(j, preview, include_sensitive, body_cap, head_cap)
                     returned += 1
                   end
                 else
-                  store.each_fuzz_result_summary_page(run_id, limit, offset, matched_only) do |row|
+                  store.each_fuzz_result_summary_page(run_id, pg.limit, pg.offset, matched_only) do |row|
                     Serialize.saved_fuzz_result(j, row)
                     returned += 1
                   end
                 end
               end
             end
-            j.field "returned", returned
-            j.field "offset", offset
-            j.field "total_available", total
+            emit_page(j, pg, returned, total, "total_available")
             j.field "matched_only", matched_only
-            j.field "limit", limit
-            emit_clamp(j, req_off, offset, req_lim, limit)
-            j.field "has_more", offset.to_i64 + returned < total
           end
         end)
       end

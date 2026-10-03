@@ -368,25 +368,19 @@ module Gori
       private def discover_results(h) : Result
         djob = lookup_job(h, @discover_jobs, "discover", "results")
         return djob if djob.is_a?(Result)
-        req_off = optional_int_arg(h, "offset")
-        req_lim = optional_int_arg(h, "limit")
-        offset = clamp_nonneg(req_off)
-        limit = clamp(req_lim, DISCOVER_RESULTS_LIMIT)
-        page = djob.results[offset, limit]? || [] of Discover::Finding
+        pg = page_args(h, DISCOVER_RESULTS_LIMIT)
+        page = djob.results[pg.offset, pg.limit]? || [] of Discover::Finding
         Result.new(JSON.build do |j|
           j.object do
             j.field("findings") do
-              j.array { page.each_with_index { |f, i| discover_finding_json(j, f, djob.flow_ids[offset + i]?) } }
+              j.array { page.each_with_index { |f, i| discover_finding_json(j, f, djob.flow_ids[pg.offset + i]?) } }
             end
-            j.field "returned", page.size
-            j.field "offset", offset
+            emit_page(j, pg, page.size)
             j.field "total_available", djob.results.size
-            j.field "limit", limit
-            emit_clamp(j, req_off, offset, req_lim, limit)
             j.field "job_complete", djob.status != :running
             # `has_more` is about this PAGE. A budget-capped run has no more stored findings
             # and still is not an exhaustive answer — that is what incomplete_reason says.
-            j.field "has_more", offset + page.size < djob.results.size
+            j.field "has_more", pg.offset + page.size < djob.results.size
             j.field "incomplete_reason", incomplete_reason(djob.status)
             j.field "queued", djob.queued
             j.field "results_truncated", djob.truncated?

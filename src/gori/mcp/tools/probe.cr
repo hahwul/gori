@@ -157,10 +157,7 @@ module Gori
         return category if category.is_a?(Result)
 
         include_closed = bool_arg(h, "include_closed", false)
-        req_off = optional_int_arg(h, "offset")
-        req_lim = optional_int_arg(h, "limit")
-        offset = clamp_nonneg(req_off)
-        limit = clamp(req_lim, PROBE_ISSUES_LIMIT)
+        pg = page_args(h, PROBE_ISSUES_LIMIT)
         # Page and total in SQL. This used to read EVERY matching row, filter `status.open?`
         # in Crystal (parsing each row's `affected` JSON on the way), and then slice a hundred
         # out of it — so answering a default `probe_issues` call on a wide crawl materialised
@@ -170,16 +167,11 @@ module Gori
         page, total = store.probe_issues_page(
           category.as(String?), str(h, "host").try(&.strip).presence,
           severity_from(str(h, "severity")),
-          open_only: !include_closed, limit: limit, offset: offset)
+          open_only: !include_closed, limit: pg.limit, offset: pg.offset)
         Result.new(JSON.build do |j|
           j.object do
             j.field("issues") { j.array { page.each { |i| Probe.issue_json(j, i) } } }
-            j.field "returned", page.size
-            j.field "offset", offset
-            j.field "limit", limit
-            emit_clamp(j, req_off, offset, req_lim, limit)
-            j.field "total", total
-            j.field "has_more", offset + page.size < total
+            emit_page(j, pg, page.size, total)
             j.field "include_closed", include_closed
           end
         end)
