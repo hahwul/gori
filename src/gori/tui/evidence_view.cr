@@ -155,7 +155,7 @@ module Gori::Tui
       return nil unless mx >= rect.x && mx < rect.right
       top = rect.y + 3
       offset = my - top
-      return nil unless offset >= 0
+      return nil unless 0 <= offset < rect.bottom - top # render draws rows above rect.bottom only
       idx = @scroll + offset
       idx < @rows.size ? idx : nil
     end

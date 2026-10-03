@@ -620,6 +620,7 @@ module Gori::Tui
 
     def row_at(box : Rect, mx : Int32, my : Int32) : Int32?
       return nil unless box.contains?(mx, my)
+      return nil if my >= rows_bottom(box) # render stops there: the preview band, not a row
       i = my - first_row_y(box)
       (0 <= i < row_count) ? i : nil
     end
