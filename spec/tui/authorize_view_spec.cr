@@ -63,7 +63,7 @@ describe AuthorizeView do
   # what is under it.
   it "keeps the cursor on its request while a run reshuffles a verdict-word filter" do
     v = AuthorizeView.new
-    ids = %w(/a /b /c /d).map { |p| v.add(flow(target: p)) }
+    ids = %w[/a /b /c /d].map { |p| v.add(flow(target: p)) }
     ids.each { |id| v.apply_result(id, target(false)) }
     v.filter_start
     "enforced".each_char { |c| v.handle_filter_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerA, char: c)) }

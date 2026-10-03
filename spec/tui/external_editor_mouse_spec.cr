@@ -180,7 +180,8 @@ end
 describe "Runner.shield_tty_signals" do
   it "swallows INT while the child runs and restores the previous handler" do
     hits = Channel(Nil).new(1)
-    Signal::INT.trap { hits.send(nil) }
+    int = Runner::TTY_SIGNALS.first # INT, trapped the way SignalGuard arms it
+    int.trap { hits.send(nil) }
     begin
       Runner.shield_tty_signals do
         Process.signal(Signal::INT, Process.pid)
@@ -196,7 +197,7 @@ describe "Runner.shield_tty_signals" do
       when timeout(2.seconds) then fail "the previous INT handler was not restored"
       end
     ensure
-      Signal::INT.reset
+      int.reset
     end
   end
 end
