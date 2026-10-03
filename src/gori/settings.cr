@@ -133,6 +133,7 @@ module Gori
       @@loaded_raw = nil
       @@load_partial = false
       @@load_unreadable = false
+      @@env_syntax_unread = nil
       reset_upstream_route_errors
       # A full load rewrites every section's class properties, including the two
       # `reload_section` folds and caches. Dropping the cache here keeps "we already folded
@@ -272,6 +273,7 @@ module Gori
       if absent_explicit
         self.env_syntax = UNREADABLE_ENV_SYNTAX
         self.env_syntax_origin = EnvSyntaxOrigin::Unreadable
+        @@env_syntax_unread = {nil.as(JSON::Any?)}
         note_load_warning("settings: #{path} does not exist and gori was pointed at it by name " \
                           "(--config / $GORI_CONFIG) — reading tokens as " \
                           "#{UNREADABLE_ENV_SYNTAX.to_s.downcase} for this run and re-spelling " \
@@ -683,6 +685,15 @@ module Gori
       nil
     end
 
+    private def self.keep_unmergeable(disk : String) : Nil
+      return unless disk.presence
+      write_private("#{path}.corrupt", disk)
+      # `Log`, not `warning_io`: this runs mid-session, where stderr is under the TUI's screen.
+      ::Log.warn { "settings: #{path} was not valid JSON when gori saved over it — kept at #{path}.corrupt" }
+    rescue
+      nil
+    end
+
     # Record the reason and put it on the warning io at most once — shared with `load`'s rescue
     # so a PARTIAL read is announced on exactly the channel an unparseable file already was,
     # rather than being the one degraded outcome that says nothing.
@@ -853,26 +864,34 @@ module Gori
       cur_h = (JSON.parse(current).as_h? rescue nil)
       base_h = (JSON.parse(base).as_h? rescue nil)
       disk_h = (JSON.parse(disk).as_h? rescue nil)
+      # A file a peer or a hand edit (`gori settings --edit` validates nothing) left unparseable is
+      # replaced by this write, so its bytes are set aside first, as `load_root` does at startup.
+      keep_unmergeable(disk) unless disk_h
       return current unless cur_h && base_h && disk_h
       keys = (cur_h.keys + disk_h.keys).uniq!
       JSON.build(indent: "  ") do |j|
         j.object do
           keys.each do |k|
-            cur_v = cur_h[k]?
-            chosen = if lists = RULE_SECTION_LISTS[k]?
-                       merge_rule_section(cur_v, base_h[k]?, disk_h[k]?, lists,
-                         RULE_SECTION_COUNTERS[k]? || RULE_SECTION_COUNTER)
-                     elsif factory_reset
-                       cur_v # what a fresh install would hold — nil drops the key entirely
-                     else
-                       pick_changed(cur_v, base_h[k]?, disk_h[k]?)
-                     end
+            chosen = merge_section(k, cur_h[k]?, base_h[k]?, disk_h[k]?, factory_reset)
             j.field k, chosen if chosen
           end
         end
       end
     rescue
       current # any merge hiccup falls back to the plain write (never worse than before)
+    end
+
+    private def self.merge_section(k : String, mine : JSON::Any?, base : JSON::Any?, disk : JSON::Any?,
+                                   factory_reset : Bool) : JSON::Any?
+      if lists = RULE_SECTION_LISTS[k]?
+        merge_rule_section(mine, base, disk, lists, RULE_SECTION_COUNTERS[k]? || RULE_SECTION_COUNTER)
+      elsif list = ENTRY_SECTIONS[k]?
+        merge_entry_list(mine, base, disk, list)
+      elsif factory_reset
+        mine # what a fresh install would hold — nil drops the key entirely
+      else
+        pick_changed(mine, base, disk)
+      end
     end
 
     # The section-level rule, and the default for every key that is not a rule list: I changed
@@ -926,6 +945,19 @@ module Gori
       "saved_views" => [
         {key: "views", identity: :id, optional: false},
       ],
+      # A chain library is many decisions too, and two windows each saving a chain had both
+      # "changed the section". There is no counter: a chain's NAME is its identity, because
+      # `save_chain` already replaces a same-named entry.
+      "decoder" => [
+        {key: "chains", identity: :name, optional: true},
+      ],
+    }
+
+    # Top-level ARRAY sections of independent rows, merged entry by entry for the reason above.
+    # Their ids are random strings, so there is no counter to merge and nothing is renumbered.
+    ENTRY_SECTIONS = {
+      "scan_rules"     => {key: "scan_rules", identity: :string_id, optional: true},
+      "oast_providers" => {key: "oast_providers", identity: :string_id, optional: true},
     }
 
     # The id counter each of those sections carries, merged by MAX rather than by who changed
@@ -944,9 +976,10 @@ module Gori
     # nothing serializes it, so the key-by-key rule below would read it as "I did not change
     # this" and copy disk's block forward for good.
     #
-    # One flat list rather than one per section: `presets` was only ever a `rewriter` key, and a
-    # name retired from one of these sections is not a name another may start using.
-    LEGACY_RULE_SECTION_KEYS = ["presets"]
+    # One flat list rather than one per section: `presets` was only ever a `rewriter` key and
+    # `sessions` a `decoder` one (pasted tokens, so it must not outlive a reset), and a name
+    # retired from one of these sections is not a name another may start using.
+    LEGACY_RULE_SECTION_KEYS = ["presets", "sessions"]
 
     # Merge one rule section key by key: its lists entry by entry, its counter by high-water
     # mark, anything else by the section-level rule.
@@ -955,6 +988,14 @@ module Gori
                                         counter_key : String = RULE_SECTION_COUNTER) : JSON::Any?
       mine_h = mine.try(&.as_h?)
       disk_h = disk.try(&.as_h?)
+      # A section made of nothing but optional lists (`decoder`) is itself omitted when they are
+      # all empty, so its absence is how "empty" is spelled. Read as unmergeable, deleting our
+      # last chain would drop the one a peer saved meanwhile.
+      all_optional = lists.all?(&.[:optional])
+      if all_optional
+        mine_h ||= {} of String => JSON::Any if mine.nil?
+        disk_h ||= {} of String => JSON::Any if disk.nil?
+      end
       # One side has no object here at all, so there is no second list to lose — and if disk's
       # is not an object, nothing about it can be trusted to be reconciled with.
       return pick_changed(mine, base, disk) unless mine_h && disk_h
@@ -971,6 +1012,7 @@ module Gori
             end
         merged[k] = v if v
       end
+      return nil if merged.empty? && all_optional
       JSON::Any.new(merged)
     end
 
@@ -1071,6 +1113,12 @@ module Gori
     # the parse would keep VERBATIM — which is the same question `index_entries` needs answered,
     # so both normalisations below are the parser's own (`usable_id?`, `normalize_color_name`,
     # `normalize_hex`) rather than a second spelling of them here.
+    # A decoder chain: `parse_decoder_chains` keeps a non-empty name with a string spec.
+    private def self.chain_identity(o : Hash(String, JSON::Any)) : String?
+      name = o["name"]?.try(&.as_s?)
+      name && !name.empty? && o["spec"]?.try(&.as_s?) ? name : nil
+    end
+
     private def self.entry_identity(entry : JSON::Any, identity : Symbol) : String?
       o = entry.as_h?
       return nil unless o
@@ -1086,6 +1134,8 @@ module Gori
         hex = o["hex"]?.try(&.as_s?)
         return nil unless name && hex
         normalize_color_name(name) == name && normalize_hex(hex) == hex ? name : nil
+      when :name      then chain_identity(o)
+      when :string_id then o["id"]?.try(&.as_s?).presence
       end
     end
 
@@ -1447,6 +1497,11 @@ module Gori
     # Narrowing this to "actually changed something" is not available cheaply: re-serializing
     # around the apply cannot tell a rejected section from one imported with the value already
     # in effect, and would report the second as skipped.
+    def self.upstream_import_refusal(err : String) : String
+      "#{err.lchop("settings: ")} in the profile — nothing was imported; fix the profile, or " \
+      "leave the section out with --sections"
+    end
+
     def self.import_document(raw : String, only : Array(String)? = nil) : Array(String)
       incoming = JSON.parse(raw).as_h
       selected = incoming.keys.select do |k|
@@ -1459,17 +1514,11 @@ module Gori
       # keeps an error that refuses every route, because a proxy the operator declared must
       # never quietly turn into DIRECT. That error lives in memory only, so an import that
       # carried one wrote the table WITHOUT the bad entry and the next start routed its hosts
-      # direct. Refused here instead, before anything is written: the parse sets these only for
-      # a node the profile carries, so whatever is set afterwards came from the profile.
-      rules_err, proxy_err = @@upstream_rules_load_error, @@upstream_proxy_load_error
-      @@upstream_rules_load_error = @@upstream_proxy_load_error = nil
-      apply_sections(JSON.parse(filtered))
-      if err = @@upstream_rules_load_error || @@upstream_proxy_load_error
-        raise Error.new("#{err.lchop("settings: ")} in the profile — nothing was imported; fix the " \
-                        "profile, or leave the section out with --sections")
+      # direct. Refused here instead, before anything is applied or written.
+      if err = upstream_import_error(JSON::Any.new(incoming), selected)
+        raise Error.new(upstream_import_refusal(err))
       end
-      @@upstream_rules_load_error = rules_err unless selected.includes?("upstream_rules")
-      @@upstream_proxy_load_error = proxy_err unless incoming["network"]?.try(&.as_h?).try(&.has_key?("upstream_proxy")) && selected.includes?("network")
+      apply_sections(JSON.parse(filtered))
       renumber_imported_ids(incoming, selected, counters, locals)
       # `save` REPORTS failure rather than raising, because a failed write must not crash the
       # TUI. Discarding that here meant a full disk, a read-only filesystem or an unwritable
@@ -1578,12 +1627,17 @@ module Gori
     #     profile.
     #   * the id counters of the three rule lists are this install's numbering, and only ever
     #     move forward from what IT has handed out — see `renumber_imported_ids`.
+    #   * `update`'s bookkeeping is this install's memory of what it checked and announced: an
+    #     exporter's `notified_version` silenced the importer's "update available" notice.
+    #   * `fuzzer.recent_wordlists` is this machine's history of absolute paths.
     INSTALL_LOCAL_KEYS = {
       "env"         => ["syntax", "prefix"],
       "redaction"   => ["salt"],
       "rewriter"    => ["next_rule_id"],
       "colormarker" => ["next_rule_id"],
       "saved_views" => ["next_view_id"],
+      "update"      => ["notified_version", "latest_seen", "checked_at"],
+      "fuzzer"      => ["recent_wordlists"],
     }
 
     private def self.strip_install_local(key : String, node : JSON::Any) : JSON::Any

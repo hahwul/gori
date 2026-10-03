@@ -465,6 +465,9 @@ module Gori::Tui
     end
 
     private def upstream_proxy_field_values(raw : String) : {String, String, String}
+      if bad = Settings.upstream_proxy_unparsed
+        return {"Invalid · #{bad.to_json}", "", ""}
+      end
       if fields = Settings.upstream_proxy_fields(raw)
         {PROXY_PROTOCOL_CHOICES.includes?(fields[0]) ? fields[0] : "none", fields[1], fields[2]}
       else
@@ -779,6 +782,9 @@ module Gori::Tui
     # Validate, apply, and persist. Returns a status message for the caller to
     # toast (nil decoded values are not possible here — port is the only check).
     def save : String
+      # Per attempt: a refused edit after a good save must not read as saved (or applied).
+      @saved = false
+      @applied = false
       if @section == :theme
         Settings.theme = @values[0] # always one of THEME_FIELDS' choices (set only via cycle)
         return persist
@@ -907,6 +913,12 @@ module Gori::Tui
       end
       proxy_fields_unchanged = @values[NETWORK_PROXY_PROTOCOL, 3] == @baseline[NETWORK_PROXY_PROTOCOL, 3]
       if proxy_fields_unchanged
+        # A non-string declaration reads as a blank `upstream_proxy`; saving that blank would
+        # retire the refusal, so it is refused until repaired, like an invalid string.
+        if Settings.upstream_proxy_unparsed
+          @status = "invalid upstream proxy"
+          return "settings: network.upstream_proxy must be a string"
+        end
         up = @network_upstream_raw
       else
         up, proxy_error = Settings.build_upstream_proxy(
@@ -975,7 +987,12 @@ module Gori::Tui
       persist
     end
 
+    # Whether the last `save` ran its setters — the change is live in this session whether or
+    # not it then reached disk, so the host still has to apply it.
+    getter? applied = false
+
     private def persist : String
+      @applied = true
       ok = Settings.save
       @saved = ok
       @baseline = @values.dup if ok # the working copy IS the persisted state now → no longer dirty

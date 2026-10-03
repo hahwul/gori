@@ -344,6 +344,10 @@ module Gori::CLI
     commands = Settings.command_entries(root, applicable)
 
     if dry
+      # The real run refuses this before writing; a plan that lists the section would be a lie.
+      if err = Settings.upstream_import_error(root, applicable)
+        abort "gori settings import: #{Settings.upstream_import_refusal(err)}"
+      end
       if applicable.empty?
         puts "nothing to apply — #{file} carries none of the selected sections"
       elsif changed.empty?
@@ -445,7 +449,7 @@ module Gori::CLI
     # settings.json, not in a project database, so no project open will ever reach them. Both
     # directions, and a copy of the file is written beside it first.
     global = was == syntax ? nil : Gori::EnvMigration.migrate_global_rules(from: was, to: syntax)
-    Settings.env_syntax = syntax
+    Settings.adopt_stated_env_syntax(syntax) # stated now, so `save` writes it over a typo
     unless Settings.save
       abort "gori settings env-syntax: applied for this process but could not be written to #{Settings.path}"
     end

@@ -93,26 +93,38 @@ module Gori::Settings
   # start. Same shape as `add_rewriter_rule`, minus the burned-counter restore it needs: ids
   # here are `Random::Secure.hex`, so a refused add has no counter to put back.
 
+  # Every one also opens by re-reading the section, as the rewriter CRUD does, so it edits what
+  # a peer gori left on disk rather than a snapshot that still holds the peer's deletions.
+  def self.reload_scan_rules_from_disk : Nil
+    reload_section("scan_rules", absent: JSON::Any.new([] of JSON::Any), object: false) do |node|
+      self.scan_rules = parse_scan_rules(node)
+    end
+  end
+
   # Returns the new rule's generated id so the caller can select it, or "" when the write did
   # not reach disk — the `0_i64` of `add_rewriter_rule` in this family's id type.
   def self.add_scan_rule(title : String, description : String, side : String, region : String,
                          kind : String, pattern : String, severity : String, enabled : Bool = true) : String
+    reload_scan_rules_from_disk
     id = Random::Secure.hex(4)
     commit(scan_rules, scan_rules + [ScanRule.new(id, title, description, side, region, kind, pattern, severity, enabled)]) ? id : ""
   end
 
   def self.update_scan_rule(id : String, title : String, description : String, side : String,
                             region : String, kind : String, pattern : String, severity : String) : Bool
+    reload_scan_rules_from_disk
     commit(scan_rules, replace_by_id(scan_rules, id) do |r|
       ScanRule.new(id, title, description, side, region, kind, pattern, severity, r.enabled)
     end)
   end
 
   def self.set_scan_rule_enabled(id : String, enabled : Bool) : Bool
+    reload_scan_rules_from_disk
     commit(scan_rules, replace_by_id(scan_rules, id, &.copy_with(enabled: enabled)))
   end
 
   def self.delete_scan_rule(id : String) : Bool
+    reload_scan_rules_from_disk
     # This one fails the OTHER way round: a dropped-then-unsaved rule has stopped matching
     # while the caller reports "not deleted — it is still scanning". An operator removing a
     # noisy rule has to be able to trust that sentence.

@@ -706,7 +706,11 @@ module Gori::Settings
       j.object do
         j.field "bind_host", bind_host
         j.field "bind_port", bind_port
-        j.field "upstream_proxy", upstream_proxy
+        if bad = upstream_proxy_unparsed
+          j.field "upstream_proxy", bad
+        else
+          j.field "upstream_proxy", upstream_proxy
+        end
         j.field "verify_upstream", verify_upstream?
         # Written even at their defaults, for the reason `tls_passthrough` is: the proxy leg's
         # trust policy is invisible until someone already knows the keys exist, and the two of

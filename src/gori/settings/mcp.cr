@@ -109,7 +109,11 @@ module Gori::Settings
 
   private def self.mcp_denials_from(node : JSON::Any?) : Set(String)?
     return nil unless h = node.try(&.as_h?)
-    denied = h.compact_map { |k, v| k if v.as_bool? == false }.to_set
+    # Only a real `true` allows a known group: `"send": "false"`, `0` or `null` is a switch
+    # somebody meant to turn off, and reading it as on would fail open.
+    denied = h.compact_map do |k, v|
+      k if v.as_bool? == false || (v.as_bool?.nil? && MCP_PERMISSION_KEYS.includes?(k))
+    end.to_set
     # `scope` was split out of `write` after both had shipped on main, and a `write: false`
     # written before the split meant "no scope edits" too. Reading it as "scope allowed" would
     # turn a security switch back on across an upgrade, so an ABSENT `scope` beside a denied

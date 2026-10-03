@@ -91,6 +91,18 @@ describe "Settings mcp section" do
       end
     end
 
+    it "denies a known group whose switch is not a real boolean" do
+      with_mcp_home do |dir|
+        File.write(File.join(dir, "settings.json"),
+          %({"mcp_permissions":{"send":"false","intercept":0,"write":true,"custom":"x"}}))
+        Gori::Settings.load
+        Gori::Settings.mcp_permitted?("send").should be_false
+        Gori::Settings.mcp_permitted?("intercept").should be_false
+        Gori::Settings.mcp_permitted?("write").should be_true
+        Gori::Settings.mcp_denied_permissions.should_not contain("custom")
+      end
+    end
+
     it "round-trips through save/load" do
       with_mcp_home do
         Gori::Settings.mcp_channels = true

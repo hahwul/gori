@@ -313,6 +313,78 @@ describe "Settings env.syntax" do
     end
   end
 
+  # The bare reading is a guess about a file gori never read, so the file this run creates must
+  # not state it: the next start reads the absence as a date like any other new home.
+  it "does not write its guess into the --config file it creates" do
+    with_syntax_home do |dir|
+      named = File.join(dir, "named.json")
+      Gori::Settings.reset_load_warning_guard
+      prev = Gori::Settings.warning_io
+      Gori::Settings.warning_io = IO::Memory.new
+      begin
+        Gori::Settings.path_override = named
+        Gori::Settings.load
+        Gori::Settings.save.should be_true
+        env_section(named).not_nil!.has_key?("syntax").should be_false
+      ensure
+        Gori::Settings.warning_io = prev
+        Gori::Settings.path_override = nil
+      end
+    end
+  end
+
+  # A typo stays a typo on disk until someone states a grammar; writing `bare` over it would turn
+  # the guess into the install's answer.
+  it "writes an unreadable env.syntax back as it was until a grammar is stated" do
+    with_syntax_home do |dir|
+      path = File.join(dir, "settings.json")
+      File.write(path, %({"env":{"syntax":"NAMESPACED!"}}))
+      Gori::Settings.reset_load_warning_guard
+      prev = Gori::Settings.warning_io
+      Gori::Settings.warning_io = IO::Memory.new
+      begin
+        Gori::Settings.load
+      ensure
+        Gori::Settings.warning_io = prev
+      end
+      Gori::Settings.save.should be_true
+      env_section(path).not_nil!["syntax"].as_s.should eq("NAMESPACED!")
+
+      Gori::Settings.adopt_stated_env_syntax(Gori::Env::Syntax::Bare) # `gori settings env-syntax bare`
+      Gori::Settings.save.should be_true
+      env_section(path).not_nil!["syntax"].as_s.should eq("bare")
+    end
+  end
+
+  # The repair can name the very grammar gori guessed. A long-lived process must still adopt it
+  # as stated, or its next env save writes the typo back over the repair.
+  it "adopts a repair that names the guessed grammar when it follows the disk" do
+    with_syntax_home do |dir|
+      path = File.join(dir, "settings.json")
+      File.write(path, %({"env":{"syntax":"NAMESPACED!"}}))
+      Gori::Settings.reset_load_warning_guard
+      prev = Gori::Settings.warning_io
+      Gori::Settings.warning_io = IO::Memory.new
+      begin
+        Gori::Settings.load
+      ensure
+        Gori::Settings.warning_io = prev
+      end
+      File.write(path, %({"env":{"syntax":"bare"}}))
+      followed = Gori::Settings.env_syntax_follow_disk?
+      Gori::Settings.env_syntax_follow_disk = true
+      begin
+        Gori::EnvMigration.follow_disk
+      ensure
+        Gori::Settings.env_syntax_follow_disk = followed
+      end
+      Gori::Settings.env_syntax_stated?.should be_true
+      Gori::Settings.env_vars = [{"API", "k"}]
+      Gori::Settings.save.should be_true
+      env_section(path).not_nil!["syntax"].as_s.should eq("bare")
+    end
+  end
+
   it "reads a nonexistent $GORI_CONFIG the same way, and an absent DEFAULT path as a date" do
     with_syntax_home do |dir|
       Gori::Settings.env_syntax_when_absent = Gori::Env::Syntax::Namespaced

@@ -1,5 +1,6 @@
 require "../spec_helper"
 require "../support/memory_backend"
+require "file_utils"
 
 include Gori::Tui
 
@@ -100,6 +101,36 @@ describe Gori::Tui::PreferencesView do
     8.times { v.handle_key(pkey(Termisu::Input::Key::Backspace)) }
     "abc".each_char { |ch| v.handle_key(pkey(Termisu::Input::Key::Space, ch)) }
     v.handle_key(pkey(Termisu::Input::Key::Enter)).kind.should eq(:none)
+  end
+
+  it "still has the host apply a section whose write failed after its setters ran" do
+    # The change is live in this session either way; without the apply the proxy keeps its
+    # old upstream TLS policy under a footer that says "applied".
+    dir = File.tempname("gori-prefs-refused")
+    Dir.mkdir_p(dir)
+    prev_home = ENV["GORI_HOME"]?
+    prev_theme = Gori::Settings.theme
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.warning_io = nil
+      Gori::Settings.reset_load_warning_guard
+      File.write(Gori::Settings.path, %([{"theme":"dracula"}])) # not an object: save refuses
+      Gori::Settings.load
+      v = PreferencesView.new
+      v.open(:network)
+      v.handle_key(pkey(DOWN)) # into Bind Port, unchanged
+      outcome = v.handle_key(pkey(Termisu::Input::Key::Enter))
+      outcome.kind.should eq(:saved)
+      outcome.message.to_s.should contain("could not save")
+    ensure
+      # Clear the refusal latch with a readable file, as `with_refused_save` does.
+      File.write(Gori::Settings.path, %({"theme":"#{prev_theme}"}))
+      Gori::Settings.load
+      prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.theme = prev_theme
+      Gori::Settings.bind_port = 8070
+    end
   end
 
   it "keeps the modal's focus and the section's focus together across ^R" do

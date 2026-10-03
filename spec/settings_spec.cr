@@ -417,6 +417,34 @@ describe Gori::Settings do
     end
   end
 
+  # Memory holds a blank for a non-string declaration, and a save that wrote that blank turned
+  # the refusal into DIRECT at the next start — after any unrelated network edit.
+  it "writes a non-string upstream_proxy back verbatim until it is reassigned" do
+    dir = File.tempname("gori-settings-upstream-keep")
+    Dir.mkdir_p(dir)
+    prev_home = ENV["GORI_HOME"]?
+    prev_port = Gori::Settings.bind_port
+    begin
+      ENV["GORI_HOME"] = dir
+      File.write(Gori::Settings.path, %({"network":{"upstream_proxy":8080}}))
+      Gori::Settings.load
+      Gori::Settings.bind_port = 9191
+      Gori::Settings.save.should be_true
+      JSON.parse(File.read(Gori::Settings.path))["network"]["upstream_proxy"].should eq(JSON::Any.new(8080_i64))
+
+      Gori::Settings.load
+      Gori::Settings.upstream_route("origin.test").invalid?.should be_true
+      Gori::Settings.upstream_proxy = "http://proxy.test:8080"
+      Gori::Settings.save.should be_true
+      JSON.parse(File.read(Gori::Settings.path))["network"]["upstream_proxy"].should eq("http://proxy.test:8080")
+    ensure
+      prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.upstream_proxy = ""
+      Gori::Settings.bind_port = prev_port
+    end
+  end
+
   # The passthrough list is the one network value that is not a scalar, so its JSON round trip
   # (and the pattern RECOMPILE that load has to trigger) is worth pinning separately: a list
   # that reloads as strings but never recompiles would read back correctly and match nothing.
@@ -1144,6 +1172,28 @@ describe Gori::Settings do
     end
   end
 
+  # The same promise when the file breaks AFTER a clean load: a hand edit left a trailing comma
+  # while a TUI was running, and that TUI's next save replaces the file.
+  it "keeps a .corrupt copy of a file that broke after load before saving over it" do
+    dir = File.tempname("gori-settings-corrupt-late")
+    Dir.mkdir_p(dir)
+    prev = ENV["GORI_HOME"]?
+    prev_theme = Gori::Settings.theme
+    begin
+      ENV["GORI_HOME"] = dir
+      File.write(Gori::Settings.path, %({"theme":"goriday"}))
+      Gori::Settings.load
+      broken = %({"theme":"dracula",})
+      File.write(Gori::Settings.path, broken)
+      Gori::Settings.save.should be_true
+      File.read("#{Gori::Settings.path}.corrupt").should eq(broken)
+    ensure
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.theme = prev_theme
+    end
+  end
+
   it "preserves a recoverable .corrupt copy when the settings file is unparseable" do
     dir = File.tempname("gori-settings-corrupt")
     Dir.mkdir_p(dir)
@@ -1658,6 +1708,26 @@ describe Gori::Settings do
   # Same shape for the global OAST provider library, whose mutators dropped `save`'s answer
   # entirely: a refused write stayed live under an "added provider" toast and was gone at the
   # next start.
+  # The form saves a blank token as "none"; a hand-edited `""` must read the same, or a
+  # resumed session polls with an empty token instead of its own.
+  it "reads a blank global OAST provider token as no token" do
+    dir = File.tempname("gori-settings-oast-token")
+    Dir.mkdir_p(dir)
+    prev_home = ENV["GORI_HOME"]?
+    prev = Gori::Settings.oast_providers
+    begin
+      ENV["GORI_HOME"] = dir
+      File.write(Gori::Settings.path,
+        %({"oast_providers":[{"id":"p1","name":"n","kind":"interactsh","host":"o.test","token":""}]}))
+      Gori::Settings.load
+      Gori::Settings.oast_providers.first.token.should be_nil
+    ensure
+      prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
+      Gori::Settings.oast_providers = prev
+      FileUtils.rm_rf(dir)
+    end
+  end
+
   describe "global OAST provider CRUD on a refused save" do
     it "answers, and leaves the library as it was" do
       prev = Gori::Settings.oast_providers

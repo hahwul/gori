@@ -185,6 +185,30 @@ describe "Gori::Settings rewriter rule shape" do
     end
   end
 
+  # Read as "", a non-string `host` would scope the rule to EVERY host and a non-string
+  # `replacement` would delete what it matches.
+  it "marks non-string text fields inert and preserves their raw JSON on round-trip" do
+    with_rewriter_home do
+      write_settings(<<-JSON)
+        {"rewriter": {"rules": [
+          {"id": 1, "enabled": true, "name": "list host", "pattern": "secret", "replacement": "X", "op": "replace", "host": ["a.test"]},
+          {"id": 2, "enabled": true, "name": "num repl", "pattern": "secret", "replacement": 7, "op": "replace"}
+        ]}}
+        JSON
+      Gori::Settings.load
+      Gori::Settings.rewriter_rules.map(&.inert?).should eq([true, true])
+      with_store do |store|
+        engine = Gori::Rules.load(store)
+        head = "GET /secret HTTP/1.1\r\nHost: a.test\r\n\r\n".to_slice
+        engine.rewrite_request(head, "a.test").should eq(head)
+      end
+      Gori::Settings.save.should be_true
+      saved = JSON.parse(File.read(Gori::Settings.path))["rewriter"]["rules"].as_a
+      saved[0]["host"].as_a.map(&.as_s).should eq(["a.test"])
+      saved[1]["replacement"].as_i.should eq(7)
+    end
+  end
+
   it "marks a rule with unknown extra keys inert and preserves them on round-trip" do
     with_rewriter_home do
       write_settings(<<-JSON)
