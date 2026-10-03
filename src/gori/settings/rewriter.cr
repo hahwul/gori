@@ -113,6 +113,18 @@ module Gori::Settings
   # A settings rule with any other key is kept inert.
   KNOWN_RULE_KEYS = %w[id enabled name target part pattern replacement op match_kind host body_file respond respond_args]
 
+  # Free-text fields whose non-string value has no safe reading: `host` "" is EVERY host and
+  # `replacement` "" deletes the match. Such a value is kept raw like an unknown key, so the row
+  # is inert and written back as it was.
+  RAW_TEXT_RULE_KEYS = %w[name replacement host body_file]
+
+  # The keys this binary cannot read: unknown ones, and a free-text field holding a non-string.
+  private def self.unread_rule_keys(o : Hash(String, JSON::Any)) : Hash(String, JSON::Any)
+    o.reject do |k, v|
+      KNOWN_RULE_KEYS.includes?(k) && !(RAW_TEXT_RULE_KEYS.includes?(k) && raw_label(v))
+    end
+  end
+
   class_property rewriter_rules : Array(RewriterRule) = [] of RewriterRule
 
   # The next global rule id, monotonic and NEVER reused. `max(id) + 1` would hand a deleted
@@ -176,7 +188,7 @@ module Gori::Settings
       part, raw_part = parse_rule_label(o["part"]?, RULE_PARTS, "head")
       match_kind, raw_match_kind = parse_rule_label(o["match_kind"]?, RULE_KINDS, "literal")
       next if known_rule_shape?(op, part) && impossible_shape?(op, part)
-      extra = o.reject { |k, _| KNOWN_RULE_KEYS.includes?(k) }
+      extra = unread_rule_keys(o)
       body_file = o["body_file"]?.try(&.as_s?) || ""
       list << RewriterRule.new(
         claim_id(o["id"]?.try(&.as_i64?), seen),
@@ -450,7 +462,7 @@ module Gori::Settings
               j.object do
                 j.field "id", r.id
                 j.field "enabled", r.enabled
-                j.field "name", r.name
+                j.field "name", r.name unless r.extra_keys.has_key?("name")
                 if raw = r.raw_target
                   j.field("target") { raw.to_json(j) }
                 else
@@ -462,7 +474,7 @@ module Gori::Settings
                   j.field "part", r.part
                 end
                 j.field "pattern", r.pattern
-                j.field "replacement", r.replacement
+                j.field "replacement", r.replacement unless r.extra_keys.has_key?("replacement")
                 if raw = r.raw_op
                   j.field("op") { raw.to_json(j) }
                 else
@@ -473,8 +485,8 @@ module Gori::Settings
                 else
                   j.field "match_kind", r.match_kind
                 end
-                j.field "host", r.host
-                j.field "body_file", r.body_file
+                j.field "host", r.host unless r.extra_keys.has_key?("host")
+                j.field "body_file", r.body_file unless r.extra_keys.has_key?("body_file")
                 serialize_respond(j, r)
                 r.extra_keys.each do |k, v|
                   j.field(k) { v.to_json(j) }
