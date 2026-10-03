@@ -296,6 +296,12 @@ module Gori::Tui
         scroll_preview(delta)
         return
       end
+      move_list(delta)
+    end
+
+    # The list cursor whatever has keyboard focus — the wheel over the list (`move` would
+    # scroll a focused preview instead).
+    def move_list(delta : Int32) : Nil
       return if @issues.empty?
       @selected = (@selected + delta).clamp(0, @issues.size - 1)
       @preview_scroll = 0

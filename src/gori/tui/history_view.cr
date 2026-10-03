@@ -1143,6 +1143,13 @@ module Gori::Tui
         scroll_preview(delta)
         return
       end
+      move_list(delta)
+    end
+
+    # The list cursor whatever has keyboard focus — the wheel over the list (`move` would
+    # scroll a focused preview instead).
+    def move_list(delta : Int32) : Nil
+      return if @rows.empty?
       @selected = (@selected + delta).clamp(0, @rows.size - 1)
       # "Following" the live tail means sitting on the newest row (top or bottom).
       @follow = (@selected == follow_index)

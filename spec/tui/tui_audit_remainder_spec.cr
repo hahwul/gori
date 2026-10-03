@@ -144,6 +144,29 @@ describe "TUI audit remainder — preview focus after a collapsing resize" do
   end
 end
 
+describe "IssuesView#move_list" do
+  # The wheel over the list steps the list even while the preview holds keyboard focus —
+  # `move` would scroll that preview instead.
+  it "moves the list cursor while the preview has focus" do
+    prev = Gori::Settings.issues_preview
+    begin
+      Gori::Settings.issues_preview = true
+      with_store do |store|
+        3.times { |i| store.insert_issue("issue #{i}", Gori::Store::Severity::Medium, "h.test", nil) }
+        view = IssuesView.new
+        view.reload(store)
+        view.set_preview_focus(:preview)
+        before = view.selected_index
+        view.move_list(1)
+        view.selected_index.should_not eq(before)
+        view.preview_focus.should eq(:preview)
+      end
+    ensure
+      Gori::Settings.issues_preview = prev
+    end
+  end
+end
+
 describe "TUI audit remainder — missing width clamps" do
   # METHOD sits in a fixed 8-column cell (method_x = rect.x + 16, proto_x = rect.x + 25) but
   # was drawn with no `width:` at all, so its limit was the whole screen. RFC 9110 permits

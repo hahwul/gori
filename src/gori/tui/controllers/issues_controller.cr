@@ -614,7 +614,7 @@ module Gori::Tui
       if @issues.preview_enabled? && @issues.preview_at?(rect.inset(1, 1), mx, my)
         @issues.wheel_preview(step)
       else
-        @issues.move(step)
+        @issues.move_list(step)
       end
       true
     end
