@@ -1,4 +1,5 @@
 require "json"
+require "./ascii_bytes"
 
 module Gori
   # A named SESSION SLOT: one identity's worth of auth state, as a static header overlay
@@ -427,8 +428,8 @@ module Gori
     # `Rules#split_message` states). The whole buffer when there is no blank line at all.
     # Public for `ClientHints.apply`, the other header-only writer on the send seam.
     def self.head_length(wire : Bytes) : Int32
-      crlf = index_of(wire, "\r\n\r\n".to_slice)
-      lf = index_of(wire, "\n\n".to_slice)
+      crlf = AsciiBytes.index(wire, "\r\n\r\n".to_slice)
+      lf = AsciiBytes.index(wire, "\n\n".to_slice)
       if crlf && (lf.nil? || crlf < lf)
         crlf + 4
       elsif lf
@@ -436,25 +437,6 @@ module Gori
       else
         wire.size
       end
-    end
-
-    # First index of `needle` in `hay`, or nil. Byte-level: a request body need not be valid
-    # UTF-8, so this cannot go through String. Public for `ClientHints.apply`.
-    def self.index_of(hay : Bytes, needle : Bytes) : Int32?
-      return nil if needle.empty? || hay.size < needle.size
-      limit = hay.size - needle.size
-      i = 0
-      while i <= limit
-        if hay[i] == needle[0]
-          j = 1
-          while j < needle.size && hay[i + j] == needle[j]
-            j += 1
-          end
-          return i if j == needle.size
-        end
-        i += 1
-      end
-      nil
     end
 
     # The head alone, with the overlay applied. Removes run before sets so a slot that both
@@ -492,7 +474,7 @@ module Gori
     # header into its predecessor, so the overlay reads the wrong name and silently applies to
     # nothing. Malformed framing is the payload here (DESIGN.md P7) — the operator's own
     # overlay instruction must still land on it. Byte-level, since a head need not be valid
-    # UTF-8 for the same reason `index_of` is.
+    # UTF-8 for the same reason `AsciiBytes.index` is.
     # Public for `ClientHints.apply`, for the same reason as `head_length`.
     def self.split_head_lines(head : String) : Array({String, String})
       out = [] of {String, String}

@@ -527,7 +527,8 @@ module Gori::Proxy::H2
     # bytes on the wire. So the default is the choice that cannot corrupt a
     # stream, and `indexing: true` is there for a caller that owns every head in
     # its direction (the repeater's one-shot connection does; #492 step 2 must
-    # establish it before turning this on).
+    # establish it before turning this on). Until then its only callers are specs,
+    # where it stands in for a peer that indexes — every browser and most origins.
     #
     # ## Never-indexed is honoured, not inferred
     #
@@ -542,28 +543,15 @@ module Gori::Proxy::H2
       # differently would evict at a different moment and shift every index.
       ENTRY_OVERHEAD = Decoder::ENTRY_OVERHEAD
 
-      # Ceiling on a size update we will emit, mirroring `Decoder#resize`'s bound
-      # so we can never emit an update our own decoder would reject.
-      MAX_TABLE_SIZE = 1 << 20
-
-      getter max_size : Int32
-      getter? indexing : Bool
-
-      # `max_size` is the table size this encoder starts with; it MUST NOT exceed
-      # the peer's SETTINGS_HEADER_TABLE_SIZE (a smaller one is always safe — we
-      # simply evict earlier than the peer's decoder, which leaves the surviving
-      # entries at the same indices). Mid-connection changes go through
-      # `max_size=`, which signals them on the wire.
-      def initialize(max_size : Int32 = 4096, @indexing : Bool = false)
-        @max_size = max_size.clamp(0, MAX_TABLE_SIZE)
+      # `max_size` is the table size this encoder starts with and keeps: it never resizes,
+      # so it never emits a §6.3 size update. It MUST NOT exceed the peer's
+      # SETTINGS_HEADER_TABLE_SIZE (a smaller one is always safe — we simply evict earlier
+      # than the peer's decoder, which leaves the surviving entries at the same indices).
+      # Only `indexing: true` reads it; no production caller sets that.
+      def initialize(@max_size : Int32 = 4096, @indexing : Bool = false)
         @table = Deque({String, String}).new # index 0 = most recently added
         @size = 0
       end
-
-      # Pending §6.3 size updates (RFC 7541 §4.2): a change is signalled at the
-      # start of the next block, never mid-block.
-      @pending_min : Int32? = nil
-      @pending_size : Int32? = nil
 
       # Encodes a header list into one HPACK block. Nothing here raises on
       # adversarial content (empty/duplicate names, huge values, non-UTF-8 bytes):
@@ -571,7 +559,6 @@ module Gori::Proxy::H2
       # them (P7 — a rewritten head still has to carry whatever the peer sent).
       def encode(headers : Array({String, String})) : Bytes
         io = IO::Memory.new
-        emit_size_updates(io)
         headers.each { |(name, value)| encode_field(io, name, value, false) }
         io.to_slice
       end
@@ -579,21 +566,8 @@ module Gori::Proxy::H2
       # :ditto:
       def encode(fields : Array(Field)) : Bytes
         io = IO::Memory.new
-        emit_size_updates(io)
         fields.each { |f| encode_field(io, f.name, f.value, f.never_indexed?) }
         io.to_slice
-      end
-
-      # Changes the table size, to be signalled on the next block (§4.2) — this is
-      # how a peer's SETTINGS_HEADER_TABLE_SIZE update reaches the wire.
-      def max_size=(new_max : Int32) : Nil
-        new_max = new_max.clamp(0, MAX_TABLE_SIZE)
-        return if new_max == @max_size
-        @max_size = new_max
-        low = @pending_min
-        @pending_min = low ? Math.min(low, new_max) : new_max
-        @pending_size = new_max
-        evict
       end
 
       # The current dynamic-table entries, newest first (for inspection/specs).
@@ -668,19 +642,6 @@ module Gori::Proxy::H2
           name, value = @table.pop # oldest
           @size -= name.bytesize + value.bytesize + ENTRY_OVERHEAD
         end
-      end
-
-      private def emit_size_updates(io : IO::Memory) : Nil
-        final = @pending_size
-        return if final.nil?
-        low = @pending_min
-        # §4.2: if the max moved more than once since the last block, the decoder
-        # has to see the low-water mark too, otherwise it never performs the
-        # eviction we already performed and every later index is off by that much.
-        encode_int(io, low, 5, 0x20_u8) if low && low != final
-        encode_int(io, final, 5, 0x20_u8)
-        @pending_min = nil
-        @pending_size = nil
       end
 
       # §5.2: Huffman only when it actually shrinks the string — the choice is the

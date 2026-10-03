@@ -217,7 +217,7 @@ describe "reverse listener" do
 
     # Every other example here reaches the listener in CLEARTEXT, and that was the whole gap:
     # `serve_reverse` passed `rewrite_fixed_host:` straight to ClientConn, while
-    # `serve_reverse_tls` went through `TlsMitm#intercept`, whose signature had no such
+    # `serve_reverse_tls` went through `Tls::Tunnel#intercept`, whose signature had no such
     # parameter — so one listener honoured the setting or ignored it depending on whether the
     # client happened to speak TLS, a distinction the operator never made.
     it "replaces the Host for a TLS client too, not only a cleartext one" do

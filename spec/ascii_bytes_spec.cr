@@ -13,6 +13,22 @@ private def starts?(hay : String, needle : String) : Bool
 end
 
 describe Gori::AsciiBytes do
+  describe ".index" do
+    it "finds the first exact occurrence at or after the offset" do
+      Gori::AsciiBytes.index(bytes("a\r\nb\r\n\r\nc\r\n\r\n"), bytes("\r\n\r\n")).should eq(4)
+      Gori::AsciiBytes.index(bytes("a\r\nb\r\n\r\nc\r\n\r\n"), bytes("\r\n\r\n"), 5).should eq(9)
+      Gori::AsciiBytes.index(bytes("xxab"), bytes("ab")).should eq(2) # match ending at the last byte
+      Gori::AsciiBytes.index(bytes("Ab"), bytes("ab")).should be_nil  # exact: no folding
+    end
+
+    it "returns nil for an empty needle, a short hay, or a first byte that never completes" do
+      Gori::AsciiBytes.index(bytes("abc"), Bytes.empty).should be_nil
+      Gori::AsciiBytes.index(bytes("ab"), bytes("abc")).should be_nil
+      Gori::AsciiBytes.index(bytes("aXaYa"), bytes("ab")).should be_nil
+      Gori::AsciiBytes.index(Bytes[0xff, 0x00, 0xc3], Bytes[0x00, 0xc3]).should eq(1) # not UTF-8
+    end
+  end
+
   describe ".contains_ci?" do
     describe "empty and size boundaries" do
       it "returns true for an empty needle regardless of hay" do
