@@ -91,8 +91,8 @@ module Gori
       # The operator's Rules sub-tab config: built-ins turned off (by RuleInfo#id) + the merged
       # global+project custom match rules. A headless scan MUST honour both or it diverges from
       # what the same project shows in the TUI — a disabled built-in would come back, and a
-      # custom rule would never fire at all. Mirrors Analyzer#load_disabled / #load_custom,
-      # including their "a broken/locked DB degrades to the built-in defaults" rescue.
+      # custom rule would never fire at all. The Analyzer reads its config through this too,
+      # so both share the "a broken/locked DB degrades to the built-in defaults" rescue.
       # `degraded` is true when the disabled-rule set could NOT be read. It matters because
       # that set is the only thing standing between an ACTIVE rule the operator switched off
       # and a real request going out: the rescue below returns an EMPTY set, which reads as
