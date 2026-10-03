@@ -10,6 +10,7 @@ require "../scope"
 require "../repeater/conn_pool"
 require "../repeater/h2_pool"
 require "../pacing"
+require "wait_group"
 
 module Gori::Fuzz
   # The keep-alive pool moved to `Repeater::ConnPool` when Discover became its second caller
@@ -890,7 +891,7 @@ module Gori::Fuzz
     @concurrency : Int32
     @stopped = false
     @jobs : Channel(Job)
-    @finished : Channel(Nil)
+    @finished : WaitGroup
     @sent : Int64
     @matched : Int64
     @errors : Int64
@@ -935,7 +936,7 @@ module Gori::Fuzz
       @concurrency = conc
       @jobs = Channel(Job).new(conc)
       @events = Channel(Event).new(EVENT_BUFFER)
-      @finished = Channel(Nil).new(conc)
+      @finished = WaitGroup.new(conc)
       @sent = 0_i64
       @matched = 0_i64
       @errors = 0_i64
@@ -1154,7 +1155,7 @@ module Gori::Fuzz
             # that never left the queue).
             run_one(job)
           rescue ex
-            # A raise here used to kill the worker outright. `@finished` still fires from the
+            # A raise here used to kill the worker outright. `@finished.done` still fires from the
             # ensure below, so `coordinate` completes and the sweep reports Done with a
             # plausible count — while that payload's row is gone and concurrency is silently
             # down one for the rest of the run. Worse, if EVERY worker dies this way,
@@ -1170,7 +1171,7 @@ module Gori::Fuzz
         record_result(result)
       end
     ensure
-      @finished.send(nil)
+      @finished.done
     end
 
     # One race group: N copies of the SAME baseline request (no §…§ substitution — a race
@@ -1263,7 +1264,7 @@ module Gori::Fuzz
     end
 
     private def coordinate : Nil
-      @concurrency.times { @finished.receive }
+      @finished.wait
       # Every worker has left run_one, so no fiber can be holding a checked-out socket:
       # release the keep-alive pool's parked ones instead of waiting for GC to finalize
       # them (a stopped 50-worker run would otherwise sit on 50 fds). `rescue nil` for the

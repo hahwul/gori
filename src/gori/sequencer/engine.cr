@@ -3,6 +3,7 @@ require "./extract"
 require "../fuzz/engine"
 require "../fuzz/matcher"
 require "../pacing"
+require "wait_group"
 
 module Gori::Sequencer
   # Collects tokens into an Event stream. LIVE REPLAY sends the ONE fixed @request
@@ -161,7 +162,7 @@ module Gori::Sequencer
       # from shutdown. Any Int32 (even 0) is truthy, so `while jobs.receive?` ends only
       # on close.
       jobs = Channel(Int32).new(@concurrency)
-      finished = Channel(Nil).new(@concurrency)
+      finished = WaitGroup.new(@concurrency)
 
       spawn(name: "sequencer-dispatch") do
         loop do
@@ -191,11 +192,11 @@ module Gori::Sequencer
             run_job(backend)
           end
         ensure
-          finished.send(nil)
+          finished.done
         end
       end
 
-      @concurrency.times { finished.receive }
+      finished.wait
     end
 
     # Hold the dispatch loop while enough samples are already IN FLIGHT to reach the goal.
@@ -213,7 +214,7 @@ module Gori::Sequencer
     # Holding re-decides when a sample settles instead, so the run tops up a late miss and
     # still lands EXACTLY on the goal — the no-overshoot property the break was there for.
     # `max_sends` (below) is what bounds a descriptor that never matches; this wait cannot
-    # outlive the `finished.receive` join that already waits on the same jobs, so it adds no
+    # outlive the `finished.wait` join that already waits on the same jobs, so it adds no
     # way to hang that the run did not already have.
     private def await_outstanding : Nil
       while !@stopped && @collected < @config.goal &&
@@ -224,7 +225,7 @@ module Gori::Sequencer
 
     # One sample, with the worker fiber's survival and its dispatch slot both guaranteed.
     #
-    # Without the rescue, a raise out of `process_one` kills the worker. `finished` still
+    # Without the rescue, a raise out of `process_one` kills the worker. `finished.done` still
     # fires from the loop's `ensure`, so the join completes and the run reports Done — but
     # the DISPATCHER is left parked on `jobs.send` (buffered to @concurrency) with no
     # receiver, never reaches its own `ensure jobs.close`, and leaks forever holding the

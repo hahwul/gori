@@ -34,7 +34,7 @@ module Gori::Discover
       return nil unless Proxy::Codec::Http1.request_token_safe?(host)
       scheme = (uri.scheme || "http").downcase
       return nil unless scheme == "http" || scheme == "https"
-      port = uri.port || (scheme == "https" ? 443 : 80)
+      port = uri.port || URI.default_port(scheme) || 80
       Parts.new(scheme, host.downcase, port, parse_path(uri.path), parse_query(uri.query))
     end
 

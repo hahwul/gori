@@ -7,6 +7,7 @@ require "../fuzz/engine"
 require "../fuzz/matcher"
 require "../request_macro/lane"
 require "../pacing"
+require "wait_group"
 
 module Gori::Miner
   # Refusals no retry can change: the request budget is spent, or Layer 2 says no. Both are
@@ -312,7 +313,7 @@ module Gori::Miner
       # UNBUFFERED on purpose: a send parks until a worker actually TAKES the task, which is
       # what keeps `@inflight` bounded by the pool size instead of by the queue's length.
       jobs = Channel(Task).new
-      finished = Channel(Nil).new(workers)
+      finished = WaitGroup.new(workers)
       interval = pace_interval
       @inflight = 0
 
@@ -341,7 +342,7 @@ module Gori::Miner
             end
           end
         ensure
-          finished.send(nil)
+          finished.done
         end
       end
 
@@ -360,7 +361,7 @@ module Gori::Miner
         end
       end
       jobs.close
-      workers.times { finished.receive }
+      finished.wait
     end
 
     # Park until a worker reports a finished bucket.

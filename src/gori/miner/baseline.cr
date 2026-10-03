@@ -3,6 +3,7 @@ require "./types"
 require "./inject"
 require "./fingerprint"
 require "../fuzz/engine"
+require "wait_group"
 
 module Gori::Miner
   # The strongest non-reflective signal a response carries vs the baseline.
@@ -455,7 +456,7 @@ module Gori::Miner
       end
 
       jobs = Channel(Int32).new
-      done = Channel(Nil).new(workers)
+      done = WaitGroup.new(workers)
       failure = nil.as(Exception?)
       workers.times do
         spawn(name: "miner-baseline") do
@@ -467,12 +468,12 @@ module Gori::Miner
             end
           end
         ensure
-          done.send(nil)
+          done.done
         end
       end
       count.times { |i| jobs.send(i) }
       jobs.close
-      workers.times { done.receive }
+      done.wait
       if ex = failure
         raise ex
       end

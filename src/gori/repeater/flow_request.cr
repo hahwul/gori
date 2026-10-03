@@ -284,8 +284,10 @@ module Gori
       # false for wss/443 and so would hang a redundant `:443` on every secure-WebSocket
       # authority. The crawler never speaks ws; the repeater does. Keep the two apart rather
       # than "unifying" them into that bug.
+      # `URI.default_port` already knows ws=80/wss=443; the `|| 80` keeps the pre-existing
+      # fallback for an unknown scheme (which the dialable-scheme checks reject upstream anyway).
       def self.default_port(scheme : String) : Int32
-        (scheme == "https" || scheme == "wss") ? 443 : 80
+        URI.default_port(scheme) || 80
       end
 
       def self.default_port?(scheme : String, port : Int32) : Bool

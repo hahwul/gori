@@ -12,6 +12,7 @@ require "../env"
 require "../session_refresh/hook"
 require "../proxy/codec/content_decode"
 require "../pacing"
+require "wait_group"
 
 module Gori::Discover
   # Injected scope policy — keeps the engine Store-free. `allowed?` is the excludes/sandbox
@@ -656,7 +657,7 @@ module Gori::Discover
     @wake : Channel(Nil)
     @jobs : Channel(Task)
     @discovered : Channel(Outcome)
-    @finished : Channel(Nil)
+    @finished : WaitGroup
     @frontier : Deque(Task)
     # Probes still inside a `Sweep` task, and the number of Sweep tasks in `@frontier` — what
     # turns `@frontier.size` back into the count of real tasks waiting (`frontier_count`).
@@ -749,7 +750,7 @@ module Gori::Discover
       @wake = Channel(Nil).new(1)
       @jobs = Channel(Task).new(conc)
       @discovered = Channel(Outcome).new(conc * 2)
-      @finished = Channel(Nil).new(conc)
+      @finished = WaitGroup.new(conc)
       @events = Channel(Event).new(EVENT_BUFFER)
       @frontier = Deque(Task).new
       @seen = Set(String).new
@@ -847,7 +848,7 @@ module Gori::Discover
       end
       drain_pending
       @jobs.close
-      @concurrency.times { @finished.receive }
+      @finished.wait
       # Every worker has exited, so nothing holds a checked-out socket: release the parked
       # ones now rather than leaving a run's worth of file descriptors to the GC. AFTER the
       # join, deliberately — closing while a worker is mid-exchange would only close the
@@ -886,7 +887,7 @@ module Gori::Discover
       # with a success Done — see the setup-error path above.
       # Close @jobs too (the happy path does this at line ~285): otherwise the worker
       # fibers stay parked on @jobs.receive? forever — a fiber + socket leak. Closing it
-      # makes each worker's receive? return nil, so they run their `ensure @finished.send`
+      # makes each worker's receive? return nil, so they run their `ensure @finished.done`
       # and exit (their one in-flight outcome fits in @discovered's conc*2 buffer).
       @jobs.close rescue nil
       # Same reason: the parked sockets are nobody's, and this path does not join the workers,
@@ -1748,7 +1749,7 @@ module Gori::Discover
         @discovered.send(oc)
       end
     ensure
-      @finished.send(nil)
+      @finished.done
     end
 
     private def process(task : Task) : Outcome
