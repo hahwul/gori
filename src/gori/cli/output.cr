@@ -491,14 +491,10 @@ module Gori
 
       # --- fuzz result rows ---------------------------------------------------
 
-      def self.fuzz_row_json(r : Fuzz::Result, flow_id : Int64? = nil) : String
-        JSON.build { |j| fuzz_row_fields(j, r, flow_id) }
-      end
-
       # One spelling for both surfaces: the MCP `fuzz_results` row. `flow_id` is the History
       # flow `--record-history` wrote this row to; absent when nothing was recorded.
-      def self.fuzz_row_fields(j : JSON::Builder, r : Fuzz::Result, flow_id : Int64? = nil) : Nil
-        MCP::Serialize.fuzz_result(j, r, flow_id)
+      def self.fuzz_row_json(r : Fuzz::Result, flow_id : Int64? = nil) : String
+        JSON.build { |j| MCP::Serialize.fuzz_result(j, r, flow_id) }
       end
 
       # Incremental `--format json` writer. The opening bracket is emitted immediately and
