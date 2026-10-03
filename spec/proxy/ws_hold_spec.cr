@@ -152,7 +152,8 @@ describe Gori::Proxy::WS::MessageGate do
   it "keeps the two directions' queues independent — a hold on one blocks only itself" do
     r = rig
     sink = HoldSink.new
-    with_interceptor("proto:ws") do |ic| # direction Both: each leg gets its own gate
+    with_interceptor("proto:ws") do |ic|
+      ic.set_direction(Gori::Interceptor::Direction::Both) # each leg gets its own gate
       spawn { WS::Relay.run(r.client, r.upstream, 33_i64, sink, nil, HOLD_CTX, ic) }
       r.cs_w.write(masked(WS::OP_TEXT, "to-server".to_slice))
       r.ss_w.write(WS.encode(WS::OP_TEXT, "to-client".to_slice, mask: false))

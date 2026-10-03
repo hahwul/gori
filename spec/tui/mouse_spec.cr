@@ -316,9 +316,9 @@ describe "InterceptView#bar_zone_at" do
   it "maps i:CATCH / direction / condition to separate zones" do
     view = InterceptView.new
     rect = Rect.new(0, 0, 80, 1)
-    # " i:CATCH " at x+1 (cols 1..9), then gap, then "c:ALL" (default)
+    # " i:CATCH " at x+1 (cols 1..9), then gap, then "c:REQ" (default)
     view.bar_zone_at(rect, 2, 0).should eq(:catch)
-    view.bar_zone_at(rect, 1 + " i:CATCH ".size + 1, 0).should eq(:direction) # start of c:ALL
+    view.bar_zone_at(rect, 1 + " i:CATCH ".size + 1, 0).should eq(:direction) # start of c:REQ
     view.bar_zone_at(rect, 40, 0).should eq(:condition)
     view.bar_zone_at(rect, 2, 1).should be_nil # off the bar row
   end

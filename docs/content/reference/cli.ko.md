@@ -366,7 +366,7 @@ gori run intercept direction request
 | `edit <item-id>` | 편집한 바이트로 통과: `--raw=RAW` 또는 `--raw-file=PATH`. 그대로 전달되며(`$ENV.KEY` / `$BIND.NAME` 확장 없음) `Content-Length`만 다시 맞춤. `--no-update-content-length`를 주면 선언한 값을 그대로 보냄(CL 디싱크 프리미티브) |
 | `enable` / `disable` | 라이브 캐치 켜기 / 끄기 |
 | `filter <query>` | 조건부 인터셉트 쿼리 설정. `""`를 넘기면 해제 |
-| `direction <both\|request\|response>` | 캐치가 붙잡을 구간 선택 |
+| `direction <both\|request\|response>` | 캐치가 붙잡을 구간 선택 (기본값 `request`) |
 
 `list`와 `get`은 `--include-sensitive`를 주지 않으면 민감한 헤더 값을 가립니다. 쓰기 서브커맨드는 프로젝트 데이터베이스를 거쳐 TUI의 ack를 폴링합니다.
 

@@ -64,7 +64,7 @@ module Gori
             enable                               Turn on live intercept catch
             disable                              Turn off live intercept catch
             filter <query>                       Set the conditional-intercept filter ("" clears)
-            direction <both|request|response>    Set which leg(s) intercept holds
+            direction <both|request|response>    Set which leg(s) intercept holds (default: request)
 
           Examples:
             gori run intercept

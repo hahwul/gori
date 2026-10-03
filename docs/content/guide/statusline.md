@@ -140,7 +140,7 @@ Each run receives a JSON context on stdin describing the live session, so script
   "upstream_rules": 0,
   "upstream_env": "",
   "scope": { "active": true, "rules": 2, "sandbox": false },
-  "intercept": { "enabled": false, "queued": 0, "direction": "both" },
+  "intercept": { "enabled": false, "queued": 0, "direction": "requestonly" },
   "probe": "passive",
   "issues": 7,
   "jobs": { "running": 1, "label": "fuzzing 1" }
@@ -161,7 +161,7 @@ Each run receives a JSON context on stdin describing the live session, so script
 | `scope.sandbox` | bool | Whether the [Sandbox](/guide/proxy/#sandbox) is blocking out-of-scope destinations outright, rather than merely not recording them |
 | `intercept.enabled` | bool | Whether catch is on. Real clients are held while it is |
 | `intercept.queued` | integer | Messages waiting for a decision right now |
-| `intercept.direction` | string | `both`, `requestonly` or `responseonly` — which leg is caught |
+| `intercept.direction` | string | `requestonly` (the default), `responseonly` or `both` — which leg is caught |
 | `probe` | string | The [scanner](/guide/scanning/#probe-the-scanner) mode: `off`, `passive`, `active` or `aggressive` |
 | `issues` | integer | Issues recorded in this project |
 | `jobs.running` | integer | Background jobs in flight (fuzz, mine, discover, …) — the same book the activity chip counts, so an in-flight Repeater send is not one |

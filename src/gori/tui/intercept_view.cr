@@ -94,7 +94,7 @@ module Gori::Tui
       # reload, rendered as chips); the condition query is a local edit buffer pushed
       # to the Interceptor on every keystroke (live, like History's filter).
       @enabled = false
-      @direction = Interceptor::Direction::Both
+      @direction = Interceptor::Direction::RequestOnly
       @body_focused = true
       @querying = false
       @query = ""
@@ -968,7 +968,7 @@ module Gori::Tui
 
     # Filter-bar click zones, matching render_filter_bar left-to-right:
     #   " i:CATCH " chip → :catch
-    #   direction label (c:ALL / c:REQ / c:RES) → :direction
+    #   direction label (c:REQ / c:RES / c:ALL) → :direction
     #   rest of the bar → :condition (start query edit)
     # Nil while the bar is an input line (@querying) or off the bar row.
     def bar_zone_at(rect : Rect, mx : Int32, my : Int32) : Symbol?

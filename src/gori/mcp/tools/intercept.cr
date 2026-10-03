@@ -357,7 +357,7 @@ module Gori
         end
 
         tool j, "intercept_set_direction",
-          "Set which leg(s) intercept holds: both | request | response (the requestonly / " \
+          "Set which leg(s) intercept holds: both | request | response (default request; the requestonly / " \
           "responseonly spellings intercept_list reports are accepted too). Applied by the " \
           "capturing instance." do |s|
           s.field "direction", enumprop("which side of a flow the proxy holds", INTERCEPT_DIRECTION_ARGS), required: true

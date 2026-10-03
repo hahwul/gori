@@ -683,7 +683,7 @@ describe "Intercept filter bar" do
       view.reload(ic)
       backend = MemoryBackend.new(100, 8)
       view.render(Screen.new(backend), Rect.new(0, 0, 100, 8))
-      backend.row(0).includes?("c:ALL").should be_true   # default direction chip (c cycles it)
+      backend.row(0).includes?("c:REQ").should be_true   # default direction chip (c cycles it)
       backend.row(0).includes?("i:CATCH").should be_true # master catch toggle badge
       backend.contains?("/ condition").should be_true    # field hint
     end
@@ -691,12 +691,12 @@ describe "Intercept filter bar" do
 
   it "reflects the interceptor's catch direction after a cycle" do
     tmp_interceptor do |ic|
-      ic.cycle_direction # Both → RequestOnly
+      ic.cycle_direction # RequestOnly → ResponseOnly
       view = InterceptView.new
       view.reload(ic)
       backend = MemoryBackend.new(100, 8)
       view.render(Screen.new(backend), Rect.new(0, 0, 100, 8))
-      backend.row(0).includes?("c:REQ").should be_true
+      backend.row(0).includes?("c:RES").should be_true
     end
   end
 
@@ -706,8 +706,7 @@ describe "Intercept filter bar" do
       Gori::Settings.keymap_overrides = {"intercept.direction" => ["shift-c"],
                                          "intercept.toggle"    => ["shift-i"]}
       tmp_interceptor do |ic|
-        ic.cycle_direction # Both → RequestOnly
-        view = InterceptView.new
+        view = InterceptView.new # the default direction, REQ
         view.menu_registry = Gori::Verbs.registry
         view.reload(ic)
 
@@ -910,7 +909,7 @@ describe "Intercept filter bar" do
       view.reload(ic)
       backend = MemoryBackend.new(100, 12)
       view.render(Screen.new(backend), Rect.new(0, 0, 100, 12))
-      backend.row(0).includes?("c:ALL").should be_true # bar on the top row
+      backend.row(0).includes?("c:REQ").should be_true # bar on the top row
       backend.contains?("QUEUE").should be_true        # queue card still drawn below
       backend.contains?("acme.test/login").should be_true
     end

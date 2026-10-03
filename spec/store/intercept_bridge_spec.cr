@@ -54,7 +54,7 @@ describe "Gori::Store#intercept_bridge_state" do
       store.set_intercept_bridge(%({"enabled":"yes","direction":7,"session_token":3}))
       bridge = store.intercept_bridge_state.not_nil!
       bridge.enabled?.should be_false
-      bridge.direction.should eq("both")
+      bridge.direction.should eq("requestonly")
       bridge.filter.should eq("")
       bridge.session_token.should be_nil
       bridge.token.should eq("")

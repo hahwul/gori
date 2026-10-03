@@ -4831,3 +4831,24 @@ same side-effect-free prediction Layer 2 already used, so a refused send fires n
 refresh first. `Repeater::Sender` repeats Layer 1 on the real wire, which a refresh can still
 move. Refusals never print the expanded target. `verbatim` still decides whether bindings
 resolve; when they do, the scope rule follows the bytes that leave gori.
+
+### 2026-10-04: the held Intercept editor opens in READ, and catch holds requests by default
+
+Refines: the 2026-09-12 entry "the editor keys are verbs, and the focus dimension is a scope at
+the head of the chain", which the Intercept's held-message editor had never joined.
+
+A first-time walkthrough found two Intercept defaults that disagreed with the rest of gori.
+`⇥` into the held message opened it in INS, so the `i` that the tour, the Repeater and the
+Fuzzer all teach as "enter INS" became a byte (`iGET /…`). The pane now opens in READ when the
+focus ring enters it, through the same `EditorPane` / `TextReadState` seam the Repeater and
+Fuzzer use: it joins `Scope::Editor`, `i`/`↵` enter INS, `esc` steps INS → READ → queue, and
+the border draws the real mode. `↵`/`e` on the queue still mean "edit" and go straight to INS.
+Holding is unchanged: READ moves a caret and a selection, never the buffer, so an unedited
+forward is still the held bytes verbatim (P7).
+
+Catch defaulted to both legs, so forwarding a request held its response too and the client hung
+until a second `f`, while the tour said "Intercept holds each request". The default is now
+requests only, and `c` cycles requests → responses → both. An explicitly chosen direction
+(TUI, `gori run intercept direction`, MCP `intercept_set_direction`) behaves exactly as before.
+The cost is that a `status:` condition, which only a response can match, now needs `c` set to
+responses or both before it holds anything; the guide says so.

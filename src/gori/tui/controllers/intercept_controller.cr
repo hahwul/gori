@@ -779,7 +779,7 @@ module Gori::Tui
       @host.status("catch condition: host: method: path: status: scheme: · ↹ complete · ↵ apply · esc clear")
     end
 
-    # Cycle which leg(s) to hold: all → requests → responses → all.
+    # Cycle which leg(s) to hold: requests (the default) → responses → all → requests.
     def intercept_cycle_direction : Nil
       return unless catch_control_allowed?
       dir = @host.session.interceptor.cycle_direction

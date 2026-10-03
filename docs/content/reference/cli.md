@@ -373,7 +373,7 @@ gori run intercept direction request
 | `edit <item-id>` | Release with edited bytes: `--raw=RAW` or `--raw-file=PATH`. Forwarded verbatim (no `$ENV.KEY` / `$BIND.NAME` expansion), with `Content-Length` resynced unless `--no-update-content-length` keeps the one you declared (the CL-desync primitive) |
 | `enable` / `disable` | Arm or disarm the live catch |
 | `filter <query>` | Set the conditional-intercept query. Pass `""` to clear it |
-| `direction <both\|request\|response>` | Which leg(s) the catch holds |
+| `direction <both\|request\|response>` | Which leg(s) the catch holds (default `request`) |
 
 `list` and `get` redact sensitive header values unless `--include-sensitive` is passed. Write subcommands round-trip through the project database and poll for the TUI's ack.
 

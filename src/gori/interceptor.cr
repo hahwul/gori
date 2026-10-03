@@ -41,9 +41,9 @@ module Gori
       Drop    # discard; the proxy answers the client with a canned 502
     end
 
-    # Which leg of a flow to hold: both, requests only, or responses only. Lets a
-    # user who only cares about outgoing requests (the common case) skip the
-    # response round-trip without disabling intercept.
+    # Which leg of a flow to hold: both, requests only, or responses only. RequestOnly is the
+    # default: outgoing requests are the common case, and holding both made every forwarded
+    # request's response wait for a second decision while the client hung.
     enum Direction
       Both
       RequestOnly
@@ -286,9 +286,9 @@ module Gori
       @next_id = 0_i64
       @shutting_down = false
       # Which leg(s) to hold + an optional in-memory condition that NARROWS holding
-      # (vs Scope, the global lens). Both default permissive (hold every in-scope
-      # message). Mutated by the TUI fiber, read on the proxy hot path → @mutex.
-      @direction = Direction::Both
+      # (vs Scope, the global lens). Requests only by default, and an empty condition (hold
+      # every in-scope request). Mutated by the TUI fiber, read on the proxy hot path → @mutex.
+      @direction = Direction::RequestOnly
       @filter = InterceptFilter::EMPTY
       # Monotonic counter bumped on every queue/enabled change (incl. async holds
       # from proxy fibers). The TUI compares it to know when to re-render, since
@@ -395,14 +395,14 @@ module Gori
       @mutex.synchronize { @filter.source }
     end
 
-    # Cycle the catch direction Both → RequestOnly → ResponseOnly → Both. Returns
-    # the new value; bumps revision so the TUI redraws the chip.
+    # Cycle the catch direction RequestOnly (the default) → ResponseOnly → Both → RequestOnly.
+    # Returns the new value; bumps revision so the TUI redraws the chip.
     def cycle_direction : Direction
       now = @mutex.synchronize do
         @direction = case @direction
-                     when .both?         then Direction::RequestOnly
-                     when .request_only? then Direction::ResponseOnly
-                     else                     Direction::Both
+                     when .request_only?  then Direction::ResponseOnly
+                     when .response_only? then Direction::Both
+                     else                      Direction::RequestOnly
                      end
       end
       @revision.add(1)
