@@ -723,25 +723,20 @@ module Gori
 
       source = formatted.to_slice
       prefix = marker_prefix.to_slice
-      prefix_byte = prefix[0]
       output = IO::Memory.new
       copied_until = 0
       pos = 0
-      while at = source.index(prefix_byte, pos)
-        if json_bytes_at?(source, at, prefix)
-          index_start = at + prefix.size
-          marker_index = 0
-          8.times do |offset|
-            digit = source[index_start + offset] - 0x30_u8
-            marker_index = marker_index * 10 + digit
-          end
-          output.write(source[copied_until, at - copied_until]) if at > copied_until
-          output.write(markers[marker_index].to_slice)
-          copied_until = index_start + 8
-          pos = copied_until
-        else
-          pos = at + 1
+      while at = AsciiBytes.index(source, prefix, pos)
+        index_start = at + prefix.size
+        marker_index = 0
+        8.times do |offset|
+          digit = source[index_start + offset] - 0x30_u8
+          marker_index = marker_index * 10 + digit
         end
+        output.write(source[copied_until, at - copied_until]) if at > copied_until
+        output.write(markers[marker_index].to_slice)
+        copied_until = index_start + 8
+        pos = copied_until
       end
       output.write(source[copied_until, source.size - copied_until]) if copied_until < source.size
       String.new(output.to_slice)
@@ -756,7 +751,7 @@ module Gori
       loop do
         suffix = attempt.to_s.rjust(8, '0')
         candidate = seed[0, seed.size - suffix.size] + suffix
-        return candidate unless json_bytes_include?(source, candidate.to_slice)
+        return candidate unless AsciiBytes.index(source, candidate.to_slice)
         attempt += 1
       end
     end
@@ -765,23 +760,8 @@ module Gori
       "#{prefix}#{index.to_s.rjust(8, '0')}"
     end
 
-    private def json_bytes_include?(source : Bytes, needle : Bytes) : Bool
-      pos = 0
-      while at = source.index(needle[0], pos)
-        return true if json_bytes_at?(source, at, needle)
-        pos = at + 1
-      end
-      false
-    end
-
     private def json_marker_at?(source : Bytes, at : Int32) : Bool
       at + 1 < source.size && source[at] == 0xc2_u8 && source[at + 1] == 0xa7_u8
-    end
-
-    private def json_bytes_at?(source : Bytes, at : Int32, needle : Bytes) : Bool
-      return false if at + needle.size > source.size
-      needle.each_with_index { |byte, offset| return false if source[at + offset] != byte }
-      true
     end
 
     private def strip_bom(s : String) : String

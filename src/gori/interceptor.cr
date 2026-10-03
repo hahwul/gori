@@ -3,6 +3,7 @@ require "./env"
 require "./scope"
 require "./intercept_filter"
 require "./url"
+require "./ascii_bytes"
 
 module Gori
   # The Intercept lens (P4 — the human decides): when enabled, an in-flight HTTP
@@ -263,8 +264,8 @@ module Gori
     # are not guaranteed to be valid UTF-8 either, which is why `Gori::AsciiBytes` stays
     # byte-level for the same kind of question.
     def self.split_edit(bytes : Bytes) : {Bytes, Bool}
-      crlf = byte_index(bytes, "\r\n\r\n".to_slice)
-      lf = byte_index(bytes, "\n\n".to_slice)
+      crlf = AsciiBytes.index(bytes, "\r\n\r\n".to_slice)
+      lf = AsciiBytes.index(bytes, "\n\n".to_slice)
       idx =
         if crlf && (lf.nil? || crlf < lf)
           crlf + 4
@@ -273,25 +274,6 @@ module Gori
         end
       return {bytes, false} unless idx
       {bytes[0, idx], idx < bytes.size}
-    end
-
-    # First byte offset of `needle` in `hay`, or nil. `"...".to_slice` on a literal points at
-    # static data, so this allocates nothing.
-    #
-    # Guarded on the first byte before comparing the rest: a head is read by
-    # `Codec::Http1.read_head`, which permits up to 256 KiB, and `split_edit` scans it twice —
-    # so a `Slice#==` (a memcmp call) at every offset would be a quarter-million calls per
-    # lookup on the interceptor's synchronous path. Both needles start with CR or LF, which
-    # almost no offset does.
-    private def self.byte_index(hay : Bytes, needle : Bytes) : Int32?
-      first = needle[0]
-      limit = hay.size - needle.size
-      i = 0
-      while i <= limit
-        return i if hay[i] == first && hay[i, needle.size] == needle
-        i += 1
-      end
-      nil
     end
 
     @direction : Direction

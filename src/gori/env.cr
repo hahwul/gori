@@ -6,6 +6,7 @@ require "./session_slot"
 require "./client_hints"
 require "./store"
 require "./plural"
+require "./ascii_bytes"
 
 module Gori
   # Namespaced values for outbound requests (Repeater, Fuzzer, Miner, Intercept, CLI, MCP):
@@ -1110,22 +1111,8 @@ module Gori
       if bytes.is_a?(String)
         !bytes.byte_index(needle).nil?
       else
-        contains_sequence?(bytes, needle)
+        !AsciiBytes.index(bytes, needle.to_slice).nil?
       end
-    end
-
-    private def self.contains_sequence?(bytes : Bytes, needle : String) : Bool
-      ns = needle.to_slice
-      return false if ns.empty? || ns.size > bytes.size
-      last = bytes.size - ns.size
-      at = 0
-      while at <= last
-        found = bytes.index(ns[0], at)
-        return false unless found && found <= last
-        return true if bytes[found, ns.size] == ns
-        at = found + 1
-      end
-      false
     end
 
     # Decide the no-op fast path and create a generator context only when no active binding table

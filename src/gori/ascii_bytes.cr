@@ -31,6 +31,27 @@ module Gori
       false
     end
 
+    # First byte offset of `needle` in `hay` at or after `offset` (exact, no folding), or nil;
+    # an empty needle never matches. Byte-level because a head or body need not be valid
+    # UTF-8, and `String#index` would count CHARACTERS where the caller wants an offset into
+    # the bytes. memchr finds each candidate first byte before the rest is compared: a head
+    # may be 256 KiB (`Codec::Http1.read_head`), and a compare at every offset would be a
+    # quarter-million calls per lookup. Allocates nothing — `"…".to_slice` on a literal
+    # points at static data.
+    def self.index(hay : Bytes, needle : Bytes, offset : Int32 = 0) : Int32?
+      return nil if needle.empty?
+      first = needle.unsafe_fetch(0)
+      last = hay.size - needle.size
+      at = offset
+      while at <= last
+        found = hay.index(first, at) || return nil
+        return nil if found > last
+        return found if hay[found, needle.size] == needle
+        at = found + 1
+      end
+      nil
+    end
+
     # Does `hay` START WITH `needle` (ASCII case-insensitive)? `needle` MUST already be
     # lowercase. Exists so a prefix test over bytes that MIGHT NOT BE VALID UTF-8 — a wire
     # request line, a captured target — never has to reach for a Regex: PCRE2 raises

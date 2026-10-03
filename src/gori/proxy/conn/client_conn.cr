@@ -3186,19 +3186,10 @@ module Gori::Proxy
     # with the head the client reads, not the whole message (or a head cut at a CRLFCRLF that
     # sits in its body).
     private def split_message(raw : Bytes, *, response : Bool = false) : {Bytes, Bytes?}
-      head_end = response ? Codec::Http1.response_head_end(raw) : index_crlf_crlf(raw).try(&.+(4))
+      head_end = response ? Codec::Http1.response_head_end(raw) : AsciiBytes.index(raw, "\r\n\r\n".to_slice).try(&.+(4))
       return {raw, nil} unless head_end
       body = head_end < raw.size ? raw[head_end..].dup : nil
       {raw[0, head_end].dup, body}
-    end
-
-    private def index_crlf_crlf(raw : Bytes) : Int32?
-      i = 0
-      while i + 3 < raw.size
-        return i if raw[i] == 0x0d_u8 && raw[i + 1] == 0x0a_u8 && raw[i + 2] == 0x0d_u8 && raw[i + 3] == 0x0a_u8
-        i += 1
-      end
-      nil
     end
 
     # Ceiling on a body Match&Replace will buffer to rewrite. A body rule can't stream —
