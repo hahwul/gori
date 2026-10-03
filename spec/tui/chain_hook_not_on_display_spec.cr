@@ -86,8 +86,9 @@ describe "an exec: chain on a display path" do
         "POST /x HTTP/1.1\r\nHost: h.test\r\nContent-Length: 99\r\n\r\n§abc¦exec:#{hook}§",
         false, true)
       view.focus_pane(:request)
-      view.edit_buffer_end
-      view.edit_insert('x') # a BODY edit that would normally re-derive the header
+      view.edit_motion_key(Termisu::Event::Key.new(Termisu::Input::Key::End, Termisu::Input::Modifier::Ctrl)) # ⌃End
+      # A BODY edit that would normally re-derive the header.
+      view.edit_insert('x')
       runs.call.should eq 0
       view.request_text.should contain("Content-Length: 99") # declined, not guessed
 

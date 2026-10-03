@@ -194,11 +194,12 @@ describe "RepeaterController ⌃Home/⌃End on the response (#1425)" do
     with_repeater_controller do |ctl, _|
       rect = Rect.new(0, 0, 80, 20)
       v = jump_view(ctl, numbered_body(60), rect)
-      last = v.resp_plain_lines.size - 1
+      size, line_at = v.resp_line_source
+      last = size - 1
 
       ctl.handle_body_key(mod_key(Termisu::Input::Key::End)).should be_true
       v.resp_cursor.cy.should eq(last)
-      v.resp_cursor.cx.should eq(v.resp_plain_lines[last].size) # the buffer's end, as in the request editor
+      v.resp_cursor.cx.should eq(line_at.call(last).size) # the buffer's end, as in the request editor
 
       b = drawn(v, rect)
       y = (0...rect.h).find { |r| b.row(r).includes?("L060") }.not_nil!

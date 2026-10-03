@@ -1,6 +1,13 @@
 require "../spec_helper"
 require "../support/memory_backend"
 
+# Every line the response pane is showing, materialised — through `resp_line_source`, the one
+# definition of what that pane holds.
+private def resp_lines(view : Gori::Tui::RepeaterView) : Array(String)
+  size, line_at = view.resp_line_source
+  (0...size).map { |i| line_at.call(i) }
+end
+
 # A typed key for the hex editor (`hex_key` → `HexEdit#handle_key`).
 private def hex_ev(c : Char) : Termisu::Event::Key
   Termisu::Event::Key.new(Termisu::Input::Key.from_char(c), Termisu::Input::Modifier::None, c)
@@ -1825,7 +1832,7 @@ describe Gori::Tui::RepeaterView do
     view.apply_group([{"GET /a HTTP/1.1", r1}, {"GET /b HTTP/1.1", r2}])
 
     view.group_mode?.should be_true
-    lines = view.resp_plain_lines
+    lines = resp_lines(view)
     lines.any?(&.includes?("req 1 · GET /a HTTP/1.1")).should be_true
     lines.any?(&.includes?("HTTP 200")).should be_true
     lines.any?(&.includes?("req 2 · GET /b HTTP/1.1")).should be_true
@@ -2321,7 +2328,7 @@ describe Gori::Tui::RepeaterView do
       "HTTP/1.1 200 OK\r\n\r\n".to_slice, "LINE1\nLINE2".to_slice, nil, 1000_i64)
     view.apply(ok)
     view.focus_pane(:response)
-    lines = view.resp_plain_lines
+    lines = resp_lines(view)
     lines.should_not be_empty
     view.resp_move(0, 0)
     view.resp_copy_text.should eq(lines[0])

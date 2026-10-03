@@ -78,11 +78,6 @@ class Gori::Tui::RepeaterView
     nil
   end
 
-  def resp_plain_lines : Array(String)
-    size, line_at = resp_line_source
-    (0...size).map { |i| line_at.call(i) }
-  end
-
   # O(1) count + lazy line fetch for the response pane the read cursor is on. THE one
   # definition of "what lines is this pane showing" — the caret, the selection, the copy, the
   # search, the wheel and the click inverse all read it, so a new pane wires into every one of

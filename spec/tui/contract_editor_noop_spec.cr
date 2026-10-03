@@ -117,8 +117,8 @@ private def each_editor_surface(& : EditorSurface ->)
     backspace: -> { rv.edit_backspace },
     forward_delete: -> { rv.edit_delete },
     word_delete: -> { rv.edit_delete_word },
-    to_buffer_start: -> { rv.edit_buffer_start },
-    to_buffer_end: -> { rv.edit_buffer_end },
+    to_buffer_start: -> { rv.edit_motion_key(Termisu::Event::Key.new(Termisu::Input::Key::Home, Termisu::Input::Modifier::Ctrl)); nil },
+    to_buffer_end: -> { rv.edit_motion_key(Termisu::Event::Key.new(Termisu::Input::Key::End, Termisu::Input::Modifier::Ctrl)); nil },
     real_edit: -> { rv.edit_insert('x') })
 end
 

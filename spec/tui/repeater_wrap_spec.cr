@@ -1,6 +1,13 @@
 require "../spec_helper"
 require "../support/memory_backend"
 
+# Every line the response pane is showing, materialised — through `resp_line_source`, the one
+# definition of what that pane holds.
+private def resp_lines(view : Gori::Tui::RepeaterView) : Array(String)
+  size, line_at = view.resp_line_source
+  (0...size).map { |i| line_at.call(i) }
+end
+
 include Gori::Tui
 
 # The response body rect the view derives internally, re-derived here so a click spec can
@@ -204,7 +211,7 @@ describe "Gori::Tui::RepeaterView soft wrap" do
     b = MemoryBackend.new(80, 20)
     view.render(Screen.new(b), rect)
     body = resp_body_rect(rect)
-    gw = Gori::Settings.show_gutter ? Gutter.width(view.resp_plain_lines.size) : 0
+    gw = Gori::Settings.show_gutter ? Gutter.width(resp_lines(view).size) : 0
     row = (0...20).find { |y| b.row(y).includes?("+ QQ") }.not_nil!
     # A click 4 columns into the row BELOW the "+ " one: that row carries no decoration, so
     # its first char is at (row 0's content width - 2) into the bare text.
@@ -256,11 +263,11 @@ describe "Gori::Tui::RepeaterView soft wrap" do
     view.render(Screen.new(b), rect)
     body = resp_body_rect(rect)
     row = (0...20).find { |y| b.row(y).includes?("WWWW") }.not_nil!
-    before = view.resp_plain_lines.size
+    before = resp_lines(view).size
     view.resp_click_to_cursor(rect, body.x + 6, row + 1) # a continuation row of the W line
-    view.resp_plain_lines.size.should eq(before)         # sanity: same transcript
+    resp_lines(view).size.should eq(before)              # sanity: same transcript
     # The caret must be on the W row, one wrapped row in — not on some other transcript row.
-    view.resp_plain_lines[view.resp_cursor.cy].should start_with("WWWW")
+    resp_lines(view)[view.resp_cursor.cy].should start_with("WWWW")
     view.resp_cursor.cx.should be > 0
   end
 end
@@ -304,7 +311,7 @@ describe "Gori::Tui::RepeaterView response read motion" do
     view = wrapped_head_view
     rect = Rect.new(0, 0, 80, 20)
     view.render(Screen.new(MemoryBackend.new(80, 20)), rect)
-    len = view.resp_plain_lines[0].size
+    len = resp_lines(view)[0].size
     len.should be > 300 # the status line really does wrap at this width
 
     view.resp_line_edge(1).should be_true
@@ -325,7 +332,7 @@ describe "Gori::Tui::RepeaterView response read motion" do
 
     view.resp_line_edge(1, selecting: true).should be_true
     view.resp_cursor.selection?.should be_true
-    view.resp_copy_text.should eq(view.resp_plain_lines[0])
+    view.resp_copy_text.should eq(resp_lines(view)[0])
   end
 
   # The page step is measured from THIS pane's drawn height, not the shell's body height:
