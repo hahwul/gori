@@ -47,10 +47,7 @@ module Gori
 
       @[Tool("list_projects", unbound: true)]
       private def list_projects(h) : Result
-        req_off = optional_int_arg(h, "offset")
-        req_lim = optional_int_arg(h, "limit")
-        offset = clamp_nonneg(req_off)
-        limit = clamp(req_lim, PageLimit.new(MCP_PROJECTS_DEFAULT, MCP_PROJECTS_MAX))
+        pg = page_args(h, PageLimit.new(MCP_PROJECTS_DEFAULT, MCP_PROJECTS_MAX))
         query = str(h, "query").try(&.strip).presence
         needle = ProjectRegistry.needle(query)
 
@@ -59,7 +56,7 @@ module Gori
         # --query` narrows with, so the two surfaces cannot disagree about what "acme" means.
         entries = registry.entries
         matched = needle ? entries.select(&.matches?(needle)) : entries
-        page = offset < matched.size ? matched[offset, Math.min(limit, matched.size - offset)] : matched[0, 0]
+        page = pg.offset < matched.size ? matched[pg.offset, Math.min(pg.limit, matched.size - pg.offset)] : matched[0, 0]
         current = @db_path
         Result.new(JSON.build do |j|
           j.object do
@@ -76,17 +73,14 @@ module Gori
             j.field "current_project_id", @project_id
             j.field "projects_root", Paths.projects_dir
             j.field "query", query if query
-            j.field "returned", page.size
-            j.field "offset", offset
-            j.field "limit", limit
-            emit_clamp(j, req_off, offset, req_lim, limit)
+            emit_page(j, pg, page.size)
             j.field "total", matched.size
             # The host's whole count beside the matched one, ALWAYS: an empty page under a
             # query otherwise reads as "this host has no projects", which is the answer that
             # sends an agent to create_project for a project that already exists.
             j.field "total_projects", entries.size
-            j.field "has_more", offset + page.size < matched.size
-            if note = projects_listing_note(query, matched.size, entries.size, offset, page.size)
+            j.field "has_more", pg.offset + page.size < matched.size
+            if note = projects_listing_note(query, matched.size, entries.size, pg.offset, page.size)
               j.field "note", note
             end
             j.field("projects") do
@@ -388,15 +382,7 @@ module Gori
         slug = reg.slug_of(proj)
         reg.delete(proj) # raises Gori::Error if another instance holds the capture lock
         @delete_tokens.delete(token)
-        Result.new(JSON.build do |j|
-          j.object do
-            j.field "deleted", true
-            j.field "name", proj.name
-            j.field "id", id
-            j.field "slug", slug
-            j.field "db_path", proj.db_path
-          end
-        end)
+        Result.new({deleted: true, name: proj.name, id: id, slug: slug, db_path: proj.db_path}.to_json)
       end
 
       # Flow + issue counts for a project other than the one we serve — opened in its own

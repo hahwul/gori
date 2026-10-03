@@ -141,8 +141,7 @@ module Gori
       # read THEN, so its own result carries the inventory of what was actually imported.
       @[Tool("import_project", gated: true, agent_action: true, unbound: true, permission: "projects")]
       private def import_project(h) : Result
-        path = str(h, "path").try(&.strip).presence
-        return err("missing required 'path' (the .gori archive to import)", "INVALID_ARGUMENT", field: "path") unless path
+        path = required_str(h, "path", "(the .gori archive to import)")
         name = str(h, "name").try(&.strip).presence
         confirm = bool_arg(h, "confirm", false)
         source = Path[path].expand(home: true).to_s

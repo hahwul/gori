@@ -96,8 +96,7 @@ module Gori
         return err("missing required 'owner_kind' (issue|note)", "INVALID_ARGUMENT", field: "owner_kind") unless kind_s
         kind = Store::LinkOwnerKind.parse(kind_s)
         return err("invalid owner_kind '#{kind_s}' (issue|note)", "INVALID_ARGUMENT", field: "owner_kind") unless kind
-        id = int(h, "owner_id")
-        return Result.new(id_error(h, "owner_id"), is_error: true) unless id
+        id = required_id(h, "owner_id")
 
         exists = kind.issue? ? !store.get_issue(id).nil? : Notes.load(store).notes.any? { |n| n.id == id }
         return not_found("no #{kind.label} with id #{id}") unless exists
@@ -110,8 +109,7 @@ module Gori
         return err("missing required 'ref_kind' (flow|repeater|fuzz|miner)", "INVALID_ARGUMENT", field: "ref_kind") unless kind_s
         kind = Store::LinkRefKind.parse(kind_s)
         return err("invalid ref_kind '#{kind_s}' (flow|repeater|fuzz|miner)", "INVALID_ARGUMENT", field: "ref_kind") unless kind
-        id = int(h, "ref_id")
-        return Result.new(id_error(h, "ref_id"), is_error: true) unless id
+        id = required_id(h, "ref_id")
         return not_found("no #{kind.label} with id #{id}") if must_exist && !store.link_ref_exists?(kind, id)
         {kind, id}
       end

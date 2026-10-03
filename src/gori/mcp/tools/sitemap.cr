@@ -109,8 +109,7 @@ module Gori
       # Pin (or clear) a free-text memo on one sitemap endpoint — the TUI Sitemap tab's `t`.
       @[Tool("set_sitemap_tag", gated: true, agent_action: true, permission: "write")]
       private def set_sitemap_tag(h) : Result
-        host = str(h, "host").try(&.strip).presence
-        return err("missing required 'host'", "INVALID_ARGUMENT", field: "host") unless host
+        host = required_str(h, "host")
         path = str(h, "path").try(&.strip).presence
         return err("missing required 'path' (the path as list_sitemap shows it, e.g. /api/users or /login?a=1)",
           "INVALID_ARGUMENT", field: "path") unless path
@@ -384,10 +383,7 @@ module Gori
       # `ParamInventory` for what "reflected" does and does not claim.
       @[Tool("list_params")]
       private def list_params(h) : Result
-        req_off = optional_int_arg(h, "offset")
-        req_lim = optional_int_arg(h, "limit")
-        offset = clamp_nonneg(req_off)
-        limit = clamp(req_lim, PARAMS_LIMIT)
+        pg = page_args(h, PARAMS_LIMIT)
         query = str(h, "query")
         dropped = [] of String
         filter = ql_filter_or_error(h, query, dropped)
@@ -428,16 +424,11 @@ module Gori
                    ParamInventory.build(store, opts)
                  end
         rows = report.rows
-        page = rows[offset, limit]? || [] of ParamInventory::Row
+        page = rows[pg.offset, pg.limit]? || [] of ParamInventory::Row
         Result.new(JSON.build do |j|
           j.object do
             j.field("params") { j.array { page.each { |r| param_row(j, r, include_sensitive) } } }
-            j.field "returned", page.size
-            j.field "offset", offset
-            j.field "limit", limit
-            emit_clamp(j, req_off, offset, req_lim, limit)
-            j.field "total", rows.size
-            j.field "has_more", offset + page.size < rows.size
+            emit_page(j, pg, page.size, rows.size)
             emit_ignored_terms(j, dropped)
             j.field "flows_scanned", report.flows_scanned
             # The flow cap, not the page: parameters on OLDER flows are absent from `total`.

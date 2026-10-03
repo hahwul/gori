@@ -58,19 +58,11 @@ module Gori
         end)
       end
 
-      # The `scope` argument, defaulting to this project — the safe direction: a caller that
-      # omits it edits the engagement in front of it, never every future one. An unrecognised
-      # value is REFUSED rather than clamped, because clamping "globl" to project would report
-      # success for an edit the caller meant to make everywhere.
+      # The `scope` argument of the Rewriter and Colormarker tools, defaulting to this project —
+      # the safe direction: a caller that omits it edits the engagement in front of it, never
+      # every future one. Not stripped, as it never was.
       private def rule_scope(h) : Store::RuleScope | Result
-        s = str(h, "scope")
-        return Store::RuleScope::Project if s.nil? || s.empty?
-        # One list — `RuleScope.values` — behind the match, the refusal sentence and the
-        # schema's `enum`, so they cannot come to disagree. Matched on `label` rather than
-        # through `parse?`, which folds separators and so accepts spellings the enum never
-        # advertises; case is folded, as it is in every sibling reader here.
-        Store::RuleScope.values.find { |v| v.label == s.downcase } ||
-          err("invalid 'scope' (expected #{RULE_SCOPES.join("|")})", "INVALID_ARGUMENT", field: "scope")
+        label_arg(h, "scope", Store::RuleScope, Store::RuleScope::Project, strip: false)
       end
 
       # Whether a rule's pattern is acceptable: only a Replace+Regex rule must compile; a
@@ -440,16 +432,14 @@ module Gori
             return busy("rule fields were updated but the enable/disable did not persist (store busy or unwritable); retry")
           end
         end
-        Result.new(JSON.build do |j|
-          j.object do
-            j.field "id", id
-            j.field "scope", scope.label
-            j.field "updated", true
-            j.field "target", target.label
-            j.field "part", part.label
-            j.field "op", op.label
-          end
-        end)
+        Result.new({
+          id:      id,
+          scope:   scope.label,
+          updated: true,
+          target:  target.label,
+          part:    part.label,
+          op:      op.label,
+        }.to_json)
       rescue ex : Gori::Error
         err(ex.message || "invalid rule arguments", "INVALID_ARGUMENT")
       end
@@ -521,17 +511,10 @@ module Gori
       # Parse target/part from args, defaulting to the given fallbacks. Returns the
       # pair or an error Result. Shared by create/update/preview_rule.
       private def rule_target_part(h, dft_target : Store::RuleTarget, dft_part : Store::RulePart) : {Store::RuleTarget, Store::RulePart} | Result
-        tgt_s = str(h, "target").try(&.strip)
-        # Matched against the LABEL rather than through `parse?`, so ONE list — the enum's own
-        # members — backs the match, the refusal sentence and the schema's `enum` alike; add a
-        # member and all three follow. (`parse?` is also looser than the advertised set: it
-        # folds separators, so it answers for `shortcircuit` where `RuleOp` offers only
-        # `short_circuit`.) Case is still folded, as every sibling reader here folds it.
-        target = tgt_s.nil? || tgt_s.empty? ? dft_target : Store::RuleTarget.values.find { |v| v.label == tgt_s.downcase }
-        return err("invalid 'target' (expected #{RULE_TARGETS.join("|")})", "INVALID_ARGUMENT", field: "target") unless target
-        part_s = str(h, "part").try(&.strip)
-        part = part_s.nil? || part_s.empty? ? dft_part : Store::RulePart.values.find { |v| v.label == part_s.downcase }
-        return err("invalid 'part' (expected #{RULE_PARTS.join("|")})", "INVALID_ARGUMENT", field: "part") unless part
+        target = label_arg(h, "target", Store::RuleTarget, dft_target)
+        return target if target.is_a?(Result)
+        part = label_arg(h, "part", Store::RulePart, dft_part)
+        return part if part.is_a?(Result)
         {target, part}
       end
 
@@ -562,24 +545,14 @@ module Gori
       # Parse op/match from args, defaulting to the given fallbacks. Returns the pair or
       # an error Result. Shared by create/update/preview_rule.
       private def rule_op_kind(h, dft_op : Store::RuleOp, dft_kind : Store::MatchKind) : {Store::RuleOp, Store::MatchKind} | Result
-        op_s = str(h, "op").try(&.strip)
-        op = if op_s.nil? || op_s.empty?
-               dft_op
-             else
-               Store::RuleOp.values.find { |v| v.label == op_s.downcase }
-             end
-        return err("invalid 'op' (expected #{RULE_OPS.join("|")})", "INVALID_ARGUMENT", field: "op") unless op
+        op = label_arg(h, "op", Store::RuleOp, dft_op)
+        return op if op.is_a?(Result)
         # Validate `match` explicitly instead of leaning on MatchKind.from_label
         # (which coerces any unknown label to Literal). A silent literal fallback
         # would mislead a caller into thinking a `regex` rule was applied while the
         # proxy actually did a literal match — so an unrecognized label is rejected.
-        kind_s = str(h, "match").try(&.strip)
-        kind = if kind_s.nil? || kind_s.empty?
-                 dft_kind
-               else
-                 Store::MatchKind.values.find { |v| v.label == kind_s.downcase }
-               end
-        return err("invalid 'match' (expected #{RULE_MATCHES.join("|")})", "INVALID_ARGUMENT", field: "match") unless kind
+        kind = label_arg(h, "match", Store::MatchKind, dft_kind)
+        return kind if kind.is_a?(Result)
         {op, kind}
       end
 
@@ -588,8 +561,7 @@ module Gori
       # which reaches every project that has not overridden it.
       @[Tool("set_rule_enabled", gated: true, agent_action: true, permission: "write")]
       private def set_rule_enabled(h) : Result
-        id = int(h, "id")
-        return Result.new(id_error(h, "id"), is_error: true) unless id
+        id = required_id(h, "id")
         scope = rule_scope(h)
         return scope if scope.is_a?(Result)
         enabled = optional_bool_arg(h, "enabled")
@@ -625,8 +597,7 @@ module Gori
 
       @[Tool("delete_rule", gated: true, agent_action: true, permission: "write")]
       private def delete_rule(h) : Result
-        id = int(h, "id")
-        return Result.new(id_error(h, "id"), is_error: true) unless id
+        id = required_id(h, "id")
         scope = rule_scope(h)
         return scope if scope.is_a?(Result)
         return not_found("no #{scope.label} rule with id #{id}") unless rule_exists?(id, scope)
@@ -642,7 +613,7 @@ module Gori
         unless rules_model.remove(id, scope)
           return busy("rule NOT deleted (store busy or unwritable); it is unchanged and may still be rewriting live traffic")
         end
-        Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "scope", scope.label; j.field "deleted", true } })
+        Result.new({id: id, scope: scope.label, deleted: true}.to_json)
       end
 
       # The Match & Replace MODEL over this project's store, built per call — the same shape
@@ -697,13 +668,6 @@ module Gori
       # process is not the process that observed them.
       private def extract_bindings : Gori::Bindings
         Gori::Bindings.new(store, store.extract_rules)
-      end
-
-      private def extract_kind_arg(h, dft : Gori::ExtractKind) : Gori::ExtractKind | Result
-        raw = str(h, "kind").try(&.strip)
-        return dft if raw.nil? || raw.empty?
-        Gori::ExtractKind.values.find { |v| v.label == raw.downcase } ||
-          err("invalid 'kind' (expected #{EXTRACT_KINDS.join("|")})", "INVALID_ARGUMENT", field: "kind")
       end
 
       # The spelling is stripped so an agent may pass the token the way an operator reads it —
@@ -787,7 +751,7 @@ module Gori
       private def create_extract_rule(h) : Result
         name = extract_name_arg(str(h, "name"))
         return err("missing required 'name'", "INVALID_ARGUMENT", field: "name") unless name
-        kind = extract_kind_arg(h, Gori::ExtractKind::Cookie)
+        kind = label_arg(h, "kind", Gori::ExtractKind, Gori::ExtractKind::Cookie)
         return kind if kind.is_a?(Result)
         selector = str(h, "selector") || ""
         # Bounded in Int64 before the narrowing, for the reason spelled out at `keep_int`.
@@ -814,14 +778,7 @@ module Gori
         if bad = apply_created_extract_state(row.id, enabled)
           return bad
         end
-        Result.new(JSON.build do |j|
-          j.object do
-            j.field "id", row.id
-            j.field "name", name
-            j.field "kind", kind.label
-            j.field "enabled", enabled
-          end
-        end)
+        Result.new({id: row.id, name: name, kind: kind.label, enabled: enabled}.to_json)
       end
 
       # Atomic disabled creation, matching create_rule: flip before returning so there is no
@@ -834,13 +791,12 @@ module Gori
 
       @[Tool("update_extract_rule", gated: true, agent_action: true, permission: "write")]
       private def update_extract_rule(h) : Result
-        id = int(h, "id")
-        return err(id_error(h, "id"), "INVALID_ARGUMENT", field: "id") unless id
+        id = required_id(h, "id")
         existing = store.extract_rules.find { |r| r.id == id }
         return not_found("no extract rule with id #{id}") unless existing
         name = extract_name_arg(present?(h, "name") ? str(h, "name") : existing.name)
         return err("name must not be empty", "INVALID_ARGUMENT", field: "name") unless name
-        kind = extract_kind_arg(h, existing.kind)
+        kind = label_arg(h, "kind", Gori::ExtractKind, existing.kind)
         return kind if kind.is_a?(Result)
         selector = keep(h, "selector", existing.selector)
         pos_start = keep_int(h, "pos_start", existing.pos_start)
@@ -860,34 +816,25 @@ module Gori
         unless en.nil?
           return busy("extract rule fields were updated but the enable/disable did not persist (store busy or unwritable); retry") unless store.set_extract_rule_enabled(id, en)
         end
-        Result.new(JSON.build do |j|
-          j.object do
-            j.field "id", id
-            j.field "updated", true
-            j.field "name", name
-            j.field "kind", kind.label
-          end
-        end)
+        Result.new({id: id, updated: true, name: name, kind: kind.label}.to_json)
       end
 
       @[Tool("set_extract_rule_enabled", gated: true, agent_action: true, permission: "write")]
       private def set_extract_rule_enabled(h) : Result
-        id = int(h, "id")
-        return Result.new(id_error(h, "id"), is_error: true) unless id
+        id = required_id(h, "id")
         enabled = optional_bool_arg(h, "enabled")
         return Result.new("missing required 'enabled' (true|false)", is_error: true) if enabled.nil?
         return not_found("no extract rule with id #{id}") unless store.extract_rules.any?(&.id.==(id))
         return busy("enable/disable NOT applied (store busy or unwritable); the extract rule is unchanged") unless store.set_extract_rule_enabled(id, enabled)
-        Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "enabled", enabled } })
+        Result.new({id: id, enabled: enabled}.to_json)
       end
 
       @[Tool("delete_extract_rule", gated: true, agent_action: true, permission: "write")]
       private def delete_extract_rule(h) : Result
-        id = int(h, "id")
-        return Result.new(id_error(h, "id"), is_error: true) unless id
+        id = required_id(h, "id")
         return not_found("no extract rule with id #{id}") unless store.extract_rules.any?(&.id.==(id))
         return busy("extract rule NOT deleted (store busy or unwritable); it is unchanged") unless store.delete_extract_rule(id)
-        Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "deleted", true } })
+        Result.new({id: id, deleted: true}.to_json)
       end
 
       # The tools/list schemas for the Match & Replace / extract rule tools, kept beside the handlers that

@@ -157,10 +157,7 @@ module Gori
         return category if category.is_a?(Result)
 
         include_closed = bool_arg(h, "include_closed", false)
-        req_off = optional_int_arg(h, "offset")
-        req_lim = optional_int_arg(h, "limit")
-        offset = clamp_nonneg(req_off)
-        limit = clamp(req_lim, PROBE_ISSUES_LIMIT)
+        pg = page_args(h, PROBE_ISSUES_LIMIT)
         # Page and total in SQL. This used to read EVERY matching row, filter `status.open?`
         # in Crystal (parsing each row's `affected` JSON on the way), and then slice a hundred
         # out of it — so answering a default `probe_issues` call on a wide crawl materialised
@@ -170,16 +167,11 @@ module Gori
         page, total = store.probe_issues_page(
           category.as(String?), str(h, "host").try(&.strip).presence,
           severity_from(str(h, "severity")),
-          open_only: !include_closed, limit: limit, offset: offset)
+          open_only: !include_closed, limit: pg.limit, offset: pg.offset)
         Result.new(JSON.build do |j|
           j.object do
             j.field("issues") { j.array { page.each { |i| Probe.issue_json(j, i) } } }
-            j.field "returned", page.size
-            j.field "offset", offset
-            j.field "limit", limit
-            emit_clamp(j, req_off, offset, req_lim, limit)
-            j.field "total", total
-            j.field "has_more", offset + page.size < total
+            emit_page(j, pg, page.size, total)
             j.field "include_closed", include_closed
           end
         end)
@@ -223,8 +215,7 @@ module Gori
       # probe_promote — turn a machine finding into a human-confirmed Issue (the Issues report).
       @[Tool("probe_promote", gated: true, agent_action: true, permission: "write")]
       private def probe_promote(h) : Result
-        id = int(h, "id")
-        return Result.new(id_error(h, "id"), is_error: true) unless id
+        id = required_id(h, "id")
         issue = store.get_probe_issue(id)
         return not_found("no probe issue with id #{id}") unless issue
         res = Probe::Triage.promote(store, issue)
@@ -303,8 +294,7 @@ module Gori
       # a GLOBAL custom rule lives in the user's settings.json, outside this project).
       @[Tool("set_probe_rule_enabled", gated: true, agent_action: true, permission: "write")]
       private def set_probe_rule_enabled(h) : Result
-        id = str(h, "id").try(&.strip).presence
-        return err("missing required 'id' (see list_probe_rules)", "INVALID_ARGUMENT", field: "id") unless id
+        id = required_str(h, "id", "(see list_probe_rules)")
         enabled = optional_bool_arg(h, "enabled")
         return err("missing required 'enabled'", "INVALID_ARGUMENT", field: "enabled") if enabled.nil?
 
@@ -353,8 +343,7 @@ module Gori
 
       @[Tool("update_probe_rule", gated: true, agent_action: true, permission: "write")]
       private def update_probe_rule(h) : Result
-        id = str(h, "id").try(&.strip).presence
-        return err("missing required 'id' (see list_probe_rules)", "INVALID_ARGUMENT", field: "id") unless id
+        id = required_str(h, "id", "(see list_probe_rules)")
         row_id = custom_rule_row_id(id)
         return err("'#{id}' is not a project custom rule (only project custom rules are editable)",
           "INVALID_ARGUMENT", field: "id") unless row_id
@@ -376,8 +365,7 @@ module Gori
 
       @[Tool("delete_probe_rule", gated: true, agent_action: true, permission: "write")]
       private def delete_probe_rule(h) : Result
-        id = str(h, "id").try(&.strip).presence
-        return err("missing required 'id' (see list_probe_rules)", "INVALID_ARGUMENT", field: "id") unless id
+        id = required_str(h, "id", "(see list_probe_rules)")
         row_id = custom_rule_row_id(id)
         return err("'#{id}' is not a project custom rule — a built-in can only be DISABLED (set_probe_rule_enabled), never deleted",
           "INVALID_ARGUMENT", field: "id") unless row_id
@@ -424,10 +412,8 @@ module Gori
 
       # Validate + normalize the shared create/update field set.
       private def custom_rule_fields(h) : {String, String, String, String, String, String, Store::Severity} | Result
-        title = str(h, "title").try(&.strip).presence
-        return err("missing required 'title'", "INVALID_ARGUMENT", field: "title") unless title
-        pattern = str(h, "pattern").try(&.strip).presence
-        return err("missing required 'pattern'", "INVALID_ARGUMENT", field: "pattern") unless pattern
+        title = required_str(h, "title")
+        pattern = required_str(h, "pattern")
 
         spec = custom_rule_match_spec(h, pattern)
         return spec if spec.is_a?(Result)

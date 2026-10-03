@@ -12,8 +12,7 @@ module Gori
         return err("invalid 'kind' (expected #{Scope::KINDS.join("|")})", "INVALID_ARGUMENT", field: "kind") unless kind.in?(Scope::KINDS)
         match_type = str(h, "match_type").try(&.strip.downcase).presence || "host"
         return err("invalid 'match_type' (expected #{Scope::TYPES.join("|")})", "INVALID_ARGUMENT", field: "match_type") unless match_type.in?(Scope::TYPES)
-        pattern = str(h, "pattern").try(&.strip)
-        return err("missing required 'pattern'", "INVALID_ARGUMENT", field: "pattern") if pattern.nil? || pattern.empty?
+        pattern = required_str(h, "pattern")
         if e = Scope.validation_error(match_type, pattern)
           return err(e, "INVALID_ARGUMENT", field: "pattern")
         end
@@ -38,14 +37,7 @@ module Gori
         # Scope#add reloads @rules from the store before returning, so this lookup
         # already sees the freshly assigned id.
         rule = scope.rules.find { |r| r.kind == kind && r.match_type == match_type && r.pattern == pattern }
-        Result.new(JSON.build do |j|
-          j.object do
-            j.field "id", rule.try(&.id)
-            j.field "kind", kind
-            j.field "match_type", match_type
-            j.field "pattern", pattern
-          end
-        end)
+        Result.new({id: rule.try(&.id), kind: kind, match_type: match_type, pattern: pattern}.to_json)
       end
 
       # Edit an existing rule in place (the TUI's `e` on the scope list). Without this, the only
@@ -53,8 +45,7 @@ module Gori
       # moment — leaves the scope gate without it.
       @[Tool("update_scope_rule", gated: true, agent_action: true, permission: "scope")]
       private def update_scope_rule(h) : Result
-        id = int(h, "id")
-        return err(id_error(h, "id"), "INVALID_ARGUMENT", field: "id") unless id
+        id = required_id(h, "id")
         scope = Scope.load(store)
         existing = scope.rules.find { |r| r.id == id }
         return not_found("no scope rule with id #{id}") unless existing
@@ -115,8 +106,7 @@ module Gori
 
       @[Tool("delete_scope_rule", gated: true, agent_action: true, permission: "scope")]
       private def delete_scope_rule(h) : Result
-        id = int(h, "id")
-        return err(id_error(h, "id"), "INVALID_ARGUMENT", field: "id") unless id
+        id = required_id(h, "id")
         scope = Scope.load(store)
         return not_found("no scope rule with id #{id}") unless scope.rules.any? { |r| r.id == id }
         # Through `Scope#remove`, not straight at the store, and confirm it committed — a
@@ -132,7 +122,7 @@ module Gori
         # it used to return a bare {id, deleted:true}, so an agent could black-hole the
         # proxy and read the write as ordinary success.
         blocks_all = scope.sandbox? && scope.include_count.zero?
-        Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "deleted", true; j.field "blocks_all", blocks_all } })
+        Result.new({id: id, deleted: true, blocks_all: blocks_all}.to_json)
       end
 
       @[Tool("set_scope_enabled", gated: true, agent_action: true, permission: "scope")]
@@ -142,7 +132,7 @@ module Gori
         scope = Scope.load(store)
         committed = enabled ? scope.enable : scope.disable
         return busy("scope enable/disable NOT persisted (store busy or unwritable); the gate is unchanged") unless committed
-        Result.new(JSON.build { |j| j.object { j.field "enabled", enabled } })
+        Result.new({enabled: enabled}.to_json)
       end
 
       # Turn the HARD-CONTAINMENT sandbox gate on or off (the headless equivalent of the
@@ -161,12 +151,7 @@ module Gori
         unless enabled ? scope.enable_sandbox : scope.disable_sandbox
           return busy("sandbox enable/disable NOT persisted (store busy or unwritable); the gate is unchanged")
         end
-        Result.new(JSON.build do |j|
-          j.object do
-            j.field "sandbox", enabled
-            j.field "blocks_all", enabled && scope.include_count == 0
-          end
-        end)
+        Result.new({sandbox: enabled, blocks_all: enabled && scope.include_count == 0}.to_json)
       end
 
       # The tools/list schemas for the scope & sandbox tools, kept beside the handlers that

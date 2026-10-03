@@ -17,12 +17,10 @@ module Gori
         # when no capturing instance has ever published one.
         bridge = store.intercept_bridge_state
         unless bridge
-          return Result.new(JSON.build do |j|
-            j.object do
-              j.field "available", false
-              j.field "reason", "no capturing gori instance is publishing intercept state (open the project's TUI to intercept)"
-            end
-          end)
+          return Result.new({
+            available: false,
+            reason:    "no capturing gori instance is publishing intercept state (open the project's TUI to intercept)",
+          }.to_json)
         end
         now_ms = Time.utc.to_unix_ms
         items = store.intercept_held_items(bridge)
@@ -57,8 +55,7 @@ module Gori
 
       @[Tool("intercept_get")]
       private def intercept_get(h) : Result
-        item_id = int(h, "item_id")
-        return err(id_error(h, "item_id"), "INVALID_ARGUMENT", field: "item_id") unless item_id
+        item_id = required_id(h, "item_id")
         include_sensitive = bool_arg(h, "include_sensitive", false)
         bridge = store.intercept_bridge_state
         return not_found("no capturing gori instance is publishing intercept state") unless bridge
@@ -83,22 +80,19 @@ module Gori
 
       @[Tool("intercept_forward", gated: true, agent_action: true, permission: "intercept")]
       private def intercept_forward(h) : Result
-        id = int(h, "item_id")
-        return err(id_error(h, "item_id"), "INVALID_ARGUMENT", field: "item_id") unless id
+        id = required_id(h, "item_id")
         enqueue_intercept("forward", item_id: id)
       end
 
       @[Tool("intercept_drop", gated: true, agent_action: true, permission: "intercept")]
       private def intercept_drop(h) : Result
-        id = int(h, "item_id")
-        return err(id_error(h, "item_id"), "INVALID_ARGUMENT", field: "item_id") unless id
+        id = required_id(h, "item_id")
         enqueue_intercept("drop", item_id: id)
       end
 
       @[Tool("intercept_forward_edit", gated: true, agent_action: true, permission: "intercept")]
       private def intercept_forward_edit(h) : Result
-        id = int(h, "item_id")
-        return err(id_error(h, "item_id"), "INVALID_ARGUMENT", field: "item_id") unless id
+        id = required_id(h, "item_id")
         row = held_row_for_edit(id)
         edited = intercept_edit_bytes(h, row)
         return edited if edited.is_a?(Result)
@@ -199,8 +193,7 @@ module Gori
 
       @[Tool("intercept_set_filter", gated: true, agent_action: true, permission: "intercept")]
       private def intercept_set_filter(h) : Result
-        q = str(h, "query")
-        return err("missing required 'query' (empty string to clear)", "INVALID_ARGUMENT", field: "query") if q.nil?
+        q = required_str(h, "query", "(empty string to clear)", blank: true)
         # A field the hold gate refuses (`InterceptFilter::UNSUPPORTED_FIELDS`) compiles to a
         # never-match, so `scope:in` here holds NOTHING and `-scope:in` holds EVERY in-flight
         # message until each is forwarded by hand — and an agent has no note row to read. Refused
@@ -255,11 +248,11 @@ module Gori
         when "forwarded"
           Result.new(JSON.build { |j| j.object { j.field "status", "forwarded"; j.field "detail", detail; emit_extra(j, extra) } })
         when "dropped"
-          Result.new(JSON.build { |j| j.object { j.field "status", "dropped"; j.field "detail", detail } })
+          Result.new({status: "dropped", detail: detail}.to_json)
         when "edited"
           Result.new(JSON.build { |j| j.object { j.field "status", "forwarded"; j.field "edited", true; j.field "detail", detail; emit_extra(j, extra) } })
         when "toggled", "filter_set", "direction_set"
-          Result.new(JSON.build { |j| j.object { j.field "status", status; j.field "detail", detail } })
+          Result.new({status: status, detail: detail}.to_json)
         when "no_such_item"
           not_found(detail || "the held item is no longer held (already forwarded/dropped)")
         when "stale"

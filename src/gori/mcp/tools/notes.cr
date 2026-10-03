@@ -37,8 +37,7 @@ module Gori
 
       @[Tool("get_note")]
       private def get_note(h) : Result
-        id = int(h, "id")
-        return Result.new(id_error(h, "id"), is_error: true) unless id
+        id = required_id(h, "id")
         doc = Notes.load(store)
         entry = doc.notes.find { |n| n.id == id }
         return not_found("no note with id #{id}") unless entry
@@ -74,18 +73,12 @@ module Gori
         new_id = Notes.create(store, text)
         return busy("note NOT saved (store busy or unwritable); nothing was persisted") unless new_id
 
-        Result.new(JSON.build do |j|
-          j.object do
-            j.field "id", new_id
-            j.field "message", "Note created successfully"
-          end
-        end)
+        Result.new({id: new_id, message: "Note created successfully"}.to_json)
       end
 
       @[Tool("update_note", gated: true, agent_action: true, permission: "write")]
       private def update_note(h) : Result
-        id = int(h, "id")
-        return Result.new(id_error(h, "id"), is_error: true) unless id
+        id = required_id(h, "id")
         text = str(h, "text")
         return Result.new("missing 'text' parameter", is_error: true) unless text
 
@@ -99,18 +92,12 @@ module Gori
           return busy("note NOT updated (store busy or unwritable); it is unchanged")
         end
 
-        Result.new(JSON.build do |j|
-          j.object do
-            j.field "id", id
-            j.field "message", "Note updated successfully"
-          end
-        end)
+        Result.new({id: id, message: "Note updated successfully"}.to_json)
       end
 
       @[Tool("delete_note", gated: true, agent_action: true, permission: "write")]
       private def delete_note(h) : Result
-        id = int(h, "id")
-        return Result.new(id_error(h, "id"), is_error: true) unless id
+        id = required_id(h, "id")
 
         case Notes.delete(store, id)
         when .missing?
@@ -119,12 +106,7 @@ module Gori
           return busy("note NOT deleted (store busy or unwritable); it is unchanged")
         end
 
-        Result.new(JSON.build do |j|
-          j.object do
-            j.field "id", id
-            j.field "message", "Note deleted successfully"
-          end
-        end)
+        Result.new({id: id, message: "Note deleted successfully"}.to_json)
       end
 
       # The note's display title, scrubbed for the JSON-RPC wire. `one_line` rather than

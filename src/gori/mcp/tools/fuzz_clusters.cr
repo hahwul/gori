@@ -200,11 +200,8 @@ module Gori
       private def saved_fuzz_cluster_members(run : Store::FuzzRunRecord, h, id : Int64,
                                              caps : SavedFuzzCaps) : Result
         matched_only = bool_arg(h, "matched_only", false)
-        req_off = optional_int_arg(h, "offset")
-        req_lim = optional_int_arg(h, "limit")
-        offset = clamp_nonneg(req_off)
-        limit = clamp(req_lim, caps.include_content ? FUZZ_RUN_CONTENT_ROWS_LIMIT : FUZZ_RUN_ROWS_LIMIT)
-        clusters, page, seen = Fuzz::Persistence.cluster_members(store, run.id, id, matched_only, offset, limit)
+        pg = page_args(h, caps.include_content ? FUZZ_RUN_CONTENT_ROWS_LIMIT : FUZZ_RUN_ROWS_LIMIT)
+        clusters, page, seen = Fuzz::Persistence.cluster_members(store, run.id, id, matched_only, pg.offset, pg.limit)
         cluster = clusters[id]?
         return not_found("no cluster #{Fuzz::Shape.hex(id)} in saved fuzz run #{run.id}") unless cluster
         Result.new(JSON.build do |j|
@@ -216,12 +213,7 @@ module Gori
               end
             end
             j.field("results") { j.array { page.each { |rec| emit_saved_fuzz_member(j, run, rec, caps) } } }
-            j.field "returned", page.size
-            j.field "offset", offset
-            j.field "limit", limit
-            emit_clamp(j, req_off, offset, req_lim, limit)
-            j.field "total_available", seen
-            j.field "has_more", offset.to_i64 + page.size < seen
+            emit_page(j, pg, page.size, seen, "total_available")
             j.field "matched_only", matched_only
           end
         end)

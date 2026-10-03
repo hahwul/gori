@@ -62,7 +62,7 @@ module Gori
         when "builtin"
           err("built-in views cannot be edited", "INVALID_ARGUMENT", field: "scope")
         else
-          # Refused rather than clamped, for the reason `color_rule_scope` states: reading
+          # Refused rather than clamped, for the reason `label_arg` states: reading
           # "globl" as "project" would report success for an edit meant for every project.
           err("invalid scope (project | global)", "INVALID_ARGUMENT", field: "scope")
         end
@@ -104,10 +104,8 @@ module Gori
 
       @[Tool("create_view", gated: true, agent_action: true, permission: "write")]
       private def create_view(h) : Result
-        name = str(h, "name")
-        return err("missing required 'name'", "INVALID_ARGUMENT", field: "name") if name.nil?
-        query = str(h, "query")
-        return err("missing required 'query'", "INVALID_ARGUMENT", field: "query") if query.nil?
+        name = required_str(h, "name", blank: true)
+        query = required_str(h, "query", blank: true)
         scope = view_write_scope(h)
         return scope if scope.is_a?(Result)
         # The engine owns what is legal, so the TUI, the CLI and this surface cannot disagree.
@@ -127,8 +125,7 @@ module Gori
       # `update_color_rule` has.
       @[Tool("update_view", gated: true, agent_action: true, permission: "write")]
       private def update_view(h) : Result
-        name = str(h, "name")
-        return err("missing required 'name'", "INVALID_ARGUMENT", field: "name") if name.nil?
+        name = required_str(h, "name", blank: true)
         scope = view_write_scope(h)
         return scope if scope.is_a?(Result)
         found = find_view(name, scope)
@@ -154,8 +151,7 @@ module Gori
 
       @[Tool("delete_view", gated: true, agent_action: true, permission: "write")]
       private def delete_view(h) : Result
-        name = str(h, "name")
-        return err("missing required 'name'", "INVALID_ARGUMENT", field: "name") if name.nil?
+        name = required_str(h, "name", blank: true)
         scope = view_write_scope(h)
         return scope if scope.is_a?(Result)
         found = find_view(name, scope)

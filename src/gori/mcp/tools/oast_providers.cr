@@ -116,8 +116,7 @@ module Gori
       # lives in the user's settings.json and is shared across every project, so this server —
       # which is bound to one project DB — must not rewrite it.
       private def oast_provider_row(h) : Int64 | Result
-        id = str(h, "id").try(&.strip).presence
-        return err("missing required 'id' (see list_oast_providers)", "INVALID_ARGUMENT", field: "id") unless id
+        id = required_str(h, "id", "(see list_oast_providers)")
         if id.starts_with?("g_")
           return err("'#{id}' is a GLOBAL provider (stored in settings.json, shared across projects) — it cannot be changed per project",
             "INVALID_ARGUMENT", field: "id")
@@ -130,8 +129,7 @@ module Gori
 
       # Validate + normalize the shared create/update field set.
       private def oast_provider_fields(h) : {String, String, String, String?, Bool} | Result
-        name = str(h, "name").try(&.strip).presence
-        return err("missing required 'name'", "INVALID_ARGUMENT", field: "name") unless name
+        name = required_str(h, "name")
         kind_s = str(h, "kind").try(&.strip).presence || "interactsh"
         # An unparseable kind would be stored verbatim and then never match a ProviderKind at
         # listen time — the provider would simply never fire. Refuse it here.

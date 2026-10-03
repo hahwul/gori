@@ -43,8 +43,7 @@ module Gori
         if bad = exec_step_refusal(spec)
           return bad
         end
-        raw = str(h, "input")
-        return Result.new("missing required 'input'", is_error: true) if raw.nil?
+        raw = required_str(h, "input", blank: true)
 
         input =
           if bool_arg(h, "input_base64", false)
@@ -252,7 +251,7 @@ module Gori
         rescue ex : Jwt::ForgeError
           return Result.new(ex.message || "invalid input", is_error: true)
         end
-        Result.new(JSON.build { |j| j.object { j.field "token", signed; j.field "alg", alg } })
+        Result.new({token: signed, alg: alg}.to_json)
       end
 
       @[Tool("jwt_attacks", unbound: true)]

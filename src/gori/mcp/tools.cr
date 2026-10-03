@@ -1548,7 +1548,13 @@ module Gori
         if missing = missing_aliased(name, h)
           return missing
         end
-        result = dispatch_tool(name, h) || err("unknown tool: #{name}", "UNKNOWN_TOOL")
+        result = begin
+          dispatch_tool(name, h) || err("unknown tool: #{name}", "UNKNOWN_TOOL")
+        rescue ex : ArgError
+          # Answered as the handler's own early return was, so it is classified and recorded
+          # as an agent action like one — unlike the blanket `Gori::Error` rescue below.
+          err(ex.message || "invalid arguments for '#{name}'", "INVALID_ARGUMENT", field: ex.field)
+        end
         result = classify(result)
         log_agent_action(name, result) if @allow_actions && agent_action?(name, h)
         result
@@ -2407,6 +2413,30 @@ module Gori
         present?(h, key) ? "invalid '#{key}' (expected an integer)" : "missing required '#{key}'"
       end
 
+      # A required argument absent or unreadable, raised by `required_id` / `required_str` and
+      # answered by `call` as INVALID_ARGUMENT naming `field`.
+      class ArgError < Gori::Error
+        getter field : String
+
+        def initialize(message : String, @field : String)
+          super(message)
+        end
+      end
+
+      # The required integer argument `key`, or an `ArgError` worded by `id_error`.
+      private def required_id(h, key : String) : Int64
+        int(h, key) || raise ArgError.new(id_error(h, key), key)
+      end
+
+      # The required string argument `key`, stripped, or an `ArgError` ("missing required 'key'",
+      # then `hint`) when it is absent or blank. `blank: true` returns the value as sent and
+      # refuses only its absence — for an argument where "" means something (clear, match all).
+      private def required_str(h, key : String, hint : String? = nil, *, blank : Bool = false) : String
+        v = str(h, key)
+        v = v.try(&.strip).presence unless blank
+        v || raise ArgError.new(hint ? "missing required '#{key}' #{hint}" : "missing required '#{key}'", key)
+      end
+
       # One sentence for every MCP tool whose builder refused an env token that resolves to
       # nothing (#519). Shared rather than written per tool because, unlike the other plan
       # reasons, this one names no argument of the tool's own — the token is the whole fact
@@ -2589,6 +2619,20 @@ module Gori
         value
       end
 
+      # An enum argument named by its `label`: `dft` when absent or blank, else the member, else
+      # the INVALID_ARGUMENT refusal — never a clamp, since clamping "globl" to project would
+      # report success for an edit the caller meant to make everywhere. Matched on `label`
+      # rather than through `parse?`, which folds separators and so accepts spellings the enum
+      # never advertises (`shortcircuit` for `short_circuit`); one list — `values` — backs the
+      # match, the refusal sentence and the schema's `enum` alike. Case is folded.
+      private def label_arg(h, key : String, enum_type : E.class, dft : E, *, strip : Bool = true) : E | Result forall E
+        raw = str(h, key)
+        raw = raw.strip if raw && strip
+        return dft if raw.nil? || raw.empty?
+        enum_type.values.find { |v| v.label == raw.downcase } ||
+          err("invalid '#{key}' (expected #{enum_type.values.join("|", &.label)})", "INVALID_ARGUMENT", field: key)
+      end
+
       # A filter argument whose column holds a CLOSED set of strings: the value, nil when the
       # caller did not narrow, or the refusal. Blank reads as absent, and the match is on the
       # normalised form — every sibling reader on this surface strips and downcases, and a
@@ -2614,6 +2658,30 @@ module Gori
 
       private def clamp(n : Int64?, limit : PageLimit) : Int32
         clamp(n, limit.default, limit.max)
+      end
+
+      # One call's page: what the caller asked for (nil when absent) beside the clamped values
+      # served, so `emit_page` can echo a request that was coerced rather than honoured.
+      record Page, req_off : Int64?, req_lim : Int64?, offset : Int32, limit : Int32
+
+      private def page_args(h, limit : PageLimit) : Page
+        req_off = optional_int_arg(h, "offset")
+        req_lim = optional_int_arg(h, "limit")
+        Page.new(req_off, req_lim, clamp_nonneg(req_off), clamp(req_lim, limit))
+      end
+
+      # The pagination fields of an object-returning list tool, in the order they all use:
+      # returned/offset/limit and the clamp echo, then — given a `total` — that total under
+      # `total_key` and `has_more`.
+      private def emit_page(j : JSON::Builder, pg : Page, returned : Int32,
+                            total : Int? = nil, total_key : String = "total") : Nil
+        j.field "returned", returned
+        j.field "offset", pg.offset
+        j.field "limit", pg.limit
+        emit_clamp(j, pg.req_off, pg.offset, pg.req_lim, pg.limit)
+        return unless total
+        j.field total_key, total
+        j.field "has_more", pg.offset.to_i64 + returned < total
       end
 
       private def severity_from(s : String?) : Store::Severity?

@@ -181,22 +181,16 @@ module Gori
       private def mine_results(h) : Result
         mjob = lookup_job(h, @mine_jobs, "mine", "results")
         return mjob if mjob.is_a?(Result)
-        req_off = optional_int_arg(h, "offset")
-        req_lim = optional_int_arg(h, "limit")
-        offset = clamp_nonneg(req_off)
-        limit = clamp(req_lim, MINE_RESULTS_LIMIT)
-        page = mjob.results[offset, limit]? || [] of Miner::Finding
+        pg = page_args(h, MINE_RESULTS_LIMIT)
+        page = mjob.results[pg.offset, pg.limit]? || [] of Miner::Finding
         Result.new(JSON.build do |j|
           j.object do
             j.field("findings") { j.array { page.each { |f| mine_finding_json(j, f) } } }
-            j.field "returned", page.size
-            j.field "offset", offset
+            emit_page(j, pg, page.size)
             j.field "total_available", mjob.results.size
-            j.field "limit", limit
-            emit_clamp(j, req_off, offset, req_lim, limit)
             j.field "job_complete", mjob.status != :running
-            j.field "page_complete", offset + page.size >= mjob.results.size
-            j.field "has_more", offset + page.size < mjob.results.size
+            j.field "page_complete", pg.offset + page.size >= mjob.results.size
+            j.field "has_more", pg.offset + page.size < mjob.results.size
             j.field "incomplete_reason", incomplete_reason(mjob.status)
             j.field "results_truncated", mjob.truncated?
           end

@@ -494,13 +494,10 @@ module Gori
         # as the TUI lists them and a saved run is read back (`ORDER BY idx, id`), so an offset
         # names the same rows every surface does (#1432). Arrival breaks a resend's tie.
         picked.sort_by! { |i| {rows[i].index, i} }
-        req_off = optional_int_arg(h, "offset")
-        req_lim = optional_int_arg(h, "limit")
-        offset = clamp_nonneg(req_off)
-        limit = clamp(req_lim, FUZZ_RESULTS_LIMIT)
-        last = offset < picked.size ? Math.min(offset + limit, picked.size) : offset
-        returned = last - offset
-        page = picked[offset...last]? || [] of Int32
+        pg = page_args(h, FUZZ_RESULTS_LIMIT)
+        last = pg.offset < picked.size ? Math.min(pg.offset + pg.limit, picked.size) : pg.offset
+        returned = last - pg.offset
+        page = picked[pg.offset...last]? || [] of Int32
         page_flow_ids = validated_fuzz_flow_ids(fjob, page)
         Result.new(JSON.build do |j|
           j.object do
@@ -509,11 +506,8 @@ module Gori
                 page.each_with_index { |pos, k| Serialize.fuzz_result(j, rows[pos], page_flow_ids[k]) }
               end
             end
-            j.field "returned", returned
-            j.field "offset", offset
+            emit_page(j, pg, returned)
             j.field "total_available", picked.size
-            j.field "limit", limit
-            emit_clamp(j, req_off, offset, req_lim, limit)
             j.field "matched_only", matched_only
             # What the filter is selecting FROM, so a caller that passed matched_only can see
             # how many non-matching rows the run kept rather than having to page twice to

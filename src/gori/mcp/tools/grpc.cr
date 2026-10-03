@@ -146,13 +146,11 @@ module Gori
           return not_found("no cached reflection for '#{t}'")
         end
         committed = Gori::Protobuf::Schemas.forget(store, all ? nil : target)
-        Result.new(JSON.build do |j|
-          j.object do
-            j.field "forgotten", all ? known.size : 1
-            j.field "persisted", committed
-            j.field "schema", Gori::Protobuf::Schemas.status
-          end
-        end)
+        Result.new({
+          forgotten: all ? known.size : 1,
+          persisted: committed,
+          schema:    Gori::Protobuf::Schemas.status,
+        }.to_json)
       end
 
       # Per-operation timeout in milliseconds, or nil for the project's io timeout. Clamped

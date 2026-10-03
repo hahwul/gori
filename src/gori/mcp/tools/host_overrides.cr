@@ -22,10 +22,8 @@ module Gori
 
       @[Tool("add_host_override", gated: true, agent_action: true, permission: "write")]
       private def add_host_override(h) : Result
-        host = str(h, "host").try(&.strip)
-        return err("missing required 'host'", "INVALID_ARGUMENT", field: "host") if host.nil? || host.empty?
-        ip = str(h, "ip").try(&.strip)
-        return err("missing required 'ip'", "INVALID_ARGUMENT", field: "ip") if ip.nil? || ip.empty?
+        host = required_str(h, "host")
+        ip = required_str(h, "ip")
         return err("invalid host/ip (host hostname-shaped; ip an IPv4/IPv6 literal, optionally IP:PORT or [v6]:PORT)", "INVALID_ARGUMENT") unless HostOverrides.valid?(host, ip)
         ov = HostOverrides.load(store)
         # `OverrideHost.key`, not `downcase` — it is the form `add` will STORE, so a lookup that
@@ -50,19 +48,12 @@ module Gori
           return busy("host override NOT added (store busy or unwritable); no override was created")
         end
         entry = ov.entries.find { |e| e.host == normalized }
-        Result.new(JSON.build do |j|
-          j.object do
-            j.field "id", entry.try(&.id)
-            j.field "host", normalized
-            j.field "ip", ip
-          end
-        end)
+        Result.new({id: entry.try(&.id), host: normalized, ip: ip}.to_json)
       end
 
       @[Tool("update_host_override", gated: true, agent_action: true, permission: "write")]
       private def update_host_override(h) : Result
-        id = int(h, "id")
-        return err(id_error(h, "id"), "INVALID_ARGUMENT", field: "id") unless id
+        id = required_id(h, "id")
         ov = HostOverrides.load(store)
         return not_found("no host override with id #{id}") unless ov.entries.any? { |e| e.id == id }
         host = str(h, "host").try(&.strip)
@@ -80,17 +71,16 @@ module Gori
         unless ov.update(id, host, ip)
           return busy("host override NOT updated (store busy or unwritable); it is unchanged")
         end
-        Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "host", normalized; j.field "ip", ip } })
+        Result.new({id: id, host: normalized, ip: ip}.to_json)
       end
 
       @[Tool("delete_host_override", gated: true, agent_action: true, permission: "write")]
       private def delete_host_override(h) : Result
-        id = int(h, "id")
-        return err(id_error(h, "id"), "INVALID_ARGUMENT", field: "id") unless id
+        id = required_id(h, "id")
         ov = HostOverrides.load(store)
         return not_found("no host override with id #{id}") unless ov.entries.any? { |e| e.id == id }
         return busy("host override NOT deleted (store busy or unwritable); it is unchanged") unless ov.remove(id)
-        Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "deleted", true } })
+        Result.new({id: id, deleted: true}.to_json)
       end
 
       # The tools/list schemas for the host-override tools, kept beside the handlers that

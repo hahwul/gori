@@ -10,29 +10,20 @@ module Gori
 
       @[Tool("list_issues")]
       private def list_issues(h) : Result
-        req_off = optional_int_arg(h, "offset")
-        req_lim = optional_int_arg(h, "limit")
-        offset = clamp_nonneg(req_off)
-        limit = clamp(req_lim, ISSUES_LIMIT)
+        pg = page_args(h, ISSUES_LIMIT)
         all = store.issues
-        page = all[offset, limit]? || [] of Store::Issue
+        page = all[pg.offset, pg.limit]? || [] of Store::Issue
         Result.new(JSON.build do |j|
           j.object do
             j.field("issues") { j.array { page.each { |f| Serialize.issue(j, f, store) } } }
-            j.field "returned", page.size
-            j.field "offset", offset
-            j.field "limit", limit
-            emit_clamp(j, req_off, offset, req_lim, limit)
-            j.field "total", all.size
-            j.field "has_more", offset + page.size < all.size
+            emit_page(j, pg, page.size, all.size)
           end
         end)
       end
 
       @[Tool("get_issue")]
       private def get_issue(h) : Result
-        id = int(h, "id")
-        return Result.new(id_error(h, "id"), is_error: true) unless id
+        id = required_id(h, "id")
         f = store.get_issue(id)
         return not_found("no issue with id #{id}") unless f
         Result.new(JSON.build { |j| Serialize.issue(j, f, store, retest: true) })
@@ -103,8 +94,7 @@ module Gori
 
       @[Tool("update_issue", gated: true, agent_action: true, permission: "write")]
       private def update_issue(h) : Result
-        id = int(h, "id")
-        return Result.new(id_error(h, "id"), is_error: true) unless id
+        id = required_id(h, "id")
         return not_found("no issue with id #{id}") unless store.get_issue(id)
         # A blank severity/status means "leave unchanged"; only a present,
         # non-blank, unrecognised value is an error.
@@ -161,11 +151,10 @@ module Gori
       # its entity links (Store#delete_issue clears those in the same transaction).
       @[Tool("delete_issue", gated: true, agent_action: true, permission: "write")]
       private def delete_issue(h) : Result
-        id = int(h, "id")
-        return Result.new(id_error(h, "id"), is_error: true) unless id
+        id = required_id(h, "id")
         return not_found("no issue with id #{id}") unless store.get_issue(id)
         return busy("issue NOT deleted (store busy or unwritable); it is unchanged") unless store.delete_issue(id)
-        Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "deleted", true } })
+        Result.new({id: id, deleted: true}.to_json)
       end
 
       # The tools/list schemas for the issue tools, kept beside the handlers that
