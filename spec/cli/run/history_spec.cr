@@ -288,11 +288,7 @@ describe "gori run history — CLI::Output rows" do
     cli.should contain("created_at_iso") # …alongside the machine-readable one MCP names
   end
 
-  # The half the key-set pin cannot see. `Output.iso_time_utc` is a reimplementation of
-  # `Serialize.unix_micros_iso` — kept on churn grounds, not dependency grounds: `CLI::Output`
-  # took a declared dependency on `MCP::Serialize` in #1002 for the sensitive-header predicate,
-  # so this assertion is now the ONLY thing stopping the two from drifting, and it is the whole
-  # reason the reimplementation is allowed to stand.
+  # The half the key-set pin cannot see: the two surfaces spell the same instant the same way.
   it "renders created_at_iso byte-for-byte the same as the MCP serializer" do
     row = Gori::Store::FlowRow.new(
       id: 1_i64, created_at: 1_700_000_000_123_456_i64, scheme: "https", method: "GET",
@@ -303,8 +299,6 @@ describe "gori run history — CLI::Output rows" do
     cli["created_at_iso"].as_s.should eq(mcp["created_at_iso"].as_s)
     # UTC, milliseconds, Z — and the sub-second micros `time` drops are kept here.
     cli["created_at_iso"].as_s.should eq("2023-11-14T22:13:20.123Z")
-    Gori::CLI::Output.iso_time_utc(1_700_000_000_123_456_i64)
-      .should eq(Gori::MCP::Serialize.unix_micros_iso(1_700_000_000_123_456_i64))
   end
 
   # Two renderings of ONE instant must not disagree about whether that instant exists. `time`
@@ -341,9 +335,6 @@ describe "gori run history — CLI::Output rows" do
     json = JSON.parse(Gori::CLI::Output.flow_row_json(row))
     json["time"].as_s.should eq("—")
     json["created_at_iso"].as_s.should eq("—")
-    # …and the MCP serializer this is pinned against byte-for-byte agrees.
-    Gori::CLI::Output.iso_time_utc(Int64::MAX)
-      .should eq(Gori::MCP::Serialize.unix_micros_iso(Int64::MAX))
   end
 
   # The class this round closed: `JSON::Builder#string` escapes JSON metacharacters but writes

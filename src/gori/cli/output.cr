@@ -1440,34 +1440,11 @@ module Gori
         LocalTime.format(micros, "%Y-%m-%dT%H:%M:%S%:z")
       end
 
-      # RFC3339 UTC at millisecond precision from unix micros — the `*_iso` convention the
-      # MCP surface uses everywhere and the CLI used nowhere (`grep -rn '_iso' src/gori/cli/`
-      # returned zero while MCP had fifteen). Byte-for-byte identical to
-      # `MCP::Serialize.unix_micros_iso`, which `spec/cli/run/history_spec.cr` pins against
-      # this.
-      #
-      # Reimplemented rather than called, and it stays that way on CHURN grounds now rather
-      # than on dependency grounds. This file DOES depend on `MCP::` as of #1002 — see the
-      # declared `require` at the top and `sensitive_header?` in `request_headers_json` — so
-      # the original reasoning ("keeps `CLI::Output` itself free of `MCP::`") no longer holds
-      # and is not worth re-establishing for four lines that are pinned against their
-      # counterpart by spec. The direction is what DESIGN.md §2.1 documents and tolerates
-      # (surface → surface, one-way); `cli/run/{intercept,history}.cr` have called
-      # `MCP::Serialize.*` all along, undeclared, linking because `src/gori.cr` pulls in both.
-      # The reverse edge — MCP reaching into `CLI::Output` for the WS shape — is gone, moved
-      # onto the model that owns the data (`Store::WsMessage#emit_shape_json`), and that is the
-      # part that must stay gone.
-      # Staying in UTC avoids the OFFSET half of the problem `iso_time` has, but not the range
-      # half: the Span addition raises `ArgumentError` on a `created_at` past year 9999 (a
-      # hand-edited or foreign column), and this field is emitted one line after `iso_time` in
-      # the same object — so hardening only the local one would still truncate the document.
-      # Same guard and same dash in `MCP::Serialize.unix_micros_iso`, which the spec below
-      # pins this against byte-for-byte.
+      # RFC3339 UTC at millisecond precision, the machine-readable twin of `iso_time` and the
+      # same `*_iso` spelling MCP emits. Emitted one line after `iso_time` in the same object,
+      # so it must not raise on a far-future row either (see `Gori.iso_micros`).
       def self.iso_time_utc(micros : Int64) : String
-        sec, micro = micros.divmod(1_000_000)
-        (Time.utc(1970, 1, 1) + sec.seconds + micro.microseconds).to_s("%Y-%m-%dT%H:%M:%S.%LZ")
-      rescue ArgumentError
-        "—"
+        Gori.iso_micros(micros)
       end
 
       private def self.round1(n : Float64) : String

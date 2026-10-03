@@ -56,3 +56,11 @@ describe Gori::LocalTime do
     end
   end
 end
+
+describe "Gori.iso_micros" do
+  it "spells an instant as RFC 3339 UTC milliseconds, and a far-future one as the dash" do
+    Gori.iso_micros(1_700_000_000_123_456_i64).should eq("2023-11-14T22:13:20.123Z")
+    Gori.iso_micros(253_402_387_139_000_000_i64).should eq("—") # past year 9999
+    Gori.iso_micros(Int64::MAX).should eq("—")
+  end
+end
