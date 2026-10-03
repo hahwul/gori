@@ -176,9 +176,14 @@ module Gori::Settings
   # `reload_rewriter_from_disk`, for the same reasons and with the same contract: see it and
   # `Settings.reload_section`. The caller owns `Colormarker#refresh` after it.
   def self.reload_colormarker_from_disk : Nil
-    reload_section("colormarker") do |node|
+    # `serialize_colormarker` omits `colors` when there are none, and the whole section when it
+    # is empty, so on this re-read an absence is a peer's deletion. The load's "absent keeps
+    # current" would keep a colour that is gone and refuse to re-create it as "already exists".
+    empty = JSON::Any.new([] of JSON::Any)
+    reload_section("colormarker", absent: JSON::Any.new({"rules" => empty})) do |node|
       held = colormarker_next_rule_id
       parse_colormarker(node)
+      self.colormarker_colors = [] of ColormarkerColor unless node["colors"]?
       # Only ever upward — see `reload_rewriter_from_disk` for what a lower number on disk costs.
       self.colormarker_next_rule_id = {colormarker_next_rule_id, held}.max
     end
