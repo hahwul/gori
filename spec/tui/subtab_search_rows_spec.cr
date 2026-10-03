@@ -297,4 +297,17 @@ describe "TabController#subtab_search_rows" do
       extra.should contain("gori-test") # ... found in the DECODED payload
     end
   end
+
+  # ^N lands on the new chip, so a filter that would hide it is dropped — as the Decoder does.
+  it "drops a JWT strip filter that would hide the session ^N just opened" do
+    with_session do |host|
+      jc = JwtController.new(host)
+      jc.apply_rename(jc.view_at(0).not_nil!, "alpha")
+      jc.start_subtab_filter
+      "alpha".each_char { |c| jc.handle_subtab_filter_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerA, char: c)) }
+      jc.new_session
+      jc.subtab_hidden.should be_nil
+      jc.subtab_index.should eq 1
+    end
+  end
 end

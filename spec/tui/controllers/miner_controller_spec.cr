@@ -247,6 +247,23 @@ describe MinerController do
       end
     end
 
+    # ^1-9 is an absolute chip number and escapes the strip filter: a chip it hides must not
+    # become the active one while no visible chip is lit.
+    it "drops the strip filter when ^2 lands on a chip it hides" do
+      with_miner_controller do |_, session|
+        store = session.store
+        store.insert_miner_session("https://a.test", "GET /a HTTP/1.1\r\nHost: a.test\r\n\r\n".to_slice, false, nil, "{}", nil, 0)
+        store.insert_miner_session("https://b.test", "GET /b HTTP/1.1\r\nHost: b.test\r\n\r\n".to_slice, false, nil, "{}", nil, 1)
+        ctl = MinerController.new(FakeHost.new(session))
+        ctl.start_subtab_filter
+        "a.test".each_char { |c| ctl.handle_subtab_filter_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerA, char: c)) }
+        ctl.subtab_hidden.not_nil!.should contain(1)
+        ctl.handle_body_key(Termisu::Event::Key.new(Termisu::Input::Key::Num2, Termisu::Input::Modifier::Ctrl, char: '2')).should be_true
+        ctl.subtab_index.should eq(1)
+        ctl.subtab_hidden.should be_nil
+      end
+    end
+
     # `reconcile` runs under the modal: a peer closing the named session slides the index onto
     # its neighbour, which the accepted confirm must not then close in its place.
     it "never closes a neighbour when a peer closed the named session under the confirm" do

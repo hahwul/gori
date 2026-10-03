@@ -12,9 +12,11 @@ module Gori::Tui
     #   `session_summary(s)` — the chip label when the session has no custom name;
     #   `duplicate_at(idx)` — clone sub-tab `idx` onto the end of the strip, toast-free.
 
-    # Hook: the session set changed (new, duplicate, close). The Decoder closes its chain popup
-    # and marks the set for persisting here.
+    # Hook: the session set changed (new, duplicate, close). The default drops a filter that
+    # hides the now-active chip; the Decoder also closes its chain popup and marks the set for
+    # persisting.
     private def after_change : Nil
+      clear_subtab_filter if (h = subtab_hidden) && h.includes?(@idx)
     end
 
     # --- sub-tab strip (runner-owned chrome; shown from the first session) ---

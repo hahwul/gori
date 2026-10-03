@@ -427,14 +427,6 @@ module Gori::Tui
       save_current
     end
 
-    private def switch_subtab(c : Char?) : Nil
-      return unless c
-      idx = c.to_i - 1
-      if idx < @sessions.size
-        select_subtab(idx)
-      end
-    end
-
     private def printable(ev : Termisu::Event::Key) : Char?
       return nil if ev.ctrl? || ev.alt?
       ev.char || ev.key.to_char

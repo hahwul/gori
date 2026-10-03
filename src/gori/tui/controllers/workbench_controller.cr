@@ -167,6 +167,7 @@ module Gori::Tui
     def new_session : Nil
       @sessions << make_session("", nil)
       @idx = @sessions.size - 1
+      after_change
       @host.request_focus(:body)
       @host.status("new #{tool_label} session (#{@sessions.size} open)")
     end
@@ -177,6 +178,7 @@ module Gori::Tui
       s = make_session(text.strip, name)
       @sessions << s
       @idx = @sessions.size - 1
+      after_change
       @host.goto_tab(tab)
       @host.status("sent selection to #{tool_label} (#{text.bytesize}b)")
     end
