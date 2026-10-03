@@ -53,6 +53,19 @@ describe Gori::Tui::SitemapView do
     end
   end
 
+  # A path deeper than the pane is wide (a crawler trap) must not draw past the pane.
+  it "keeps a very deep row inside the pane" do
+    with_store do |store|
+      capture(store, "acme.test", "GET", "/" + (1..40).map { |i| "s#{i}" }.join("/"))
+      view = SitemapView.new
+      view.reload(store)
+      backend = MemoryBackend.new(60, 50)
+      view.render(Screen.new(backend), Rect.new(0, 0, 40, 50))
+      # From the first tree row: the header divider's `┤` joins the parent frame's border.
+      (3...50).each { |y| backend.row(y)[40..].strip.should eq(""), "row #{y} ran past the pane" }
+    end
+  end
+
   it "collapses and expands nodes" do
     with_store do |store|
       capture(store, "acme.test", "GET", "/api/users")
