@@ -104,15 +104,7 @@ module Gori::Tui
     # Live cross-session request-side sync. Updates seed request/config WITHOUT
     # wiping focus, in-memory findings, scroll/selection, or a running job.
     def apply_peer_session(rec : Store::MinerSessionRecord) : Nil
-      @target = rec.target
-      @request = rec.request
-      @http2 = rec.http2?
-      @sni = rec.sni || ""
-      @evidence = !rec.flow_id.nil? # see restore
-      @name = rec.name
-      apply_config_json(rec.config)
-      @last_synced_config = rec.config
-      @dirty = false
+      restore(rec) # the request-side fields only — focus, results and a running job are untouched
     end
 
     def session_side_matches?(rec : Store::MinerSessionRecord) : Bool

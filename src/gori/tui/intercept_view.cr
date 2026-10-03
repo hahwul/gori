@@ -1158,11 +1158,7 @@ module Gori::Tui
     end
 
     private def key_label(id : String, fallback : String) : String
-      if registry = @menu_registry
-        Hotkeys.binding_label(registry, id, fallback)
-      else
-        fallback
-      end
+      @menu_registry.try { |r| Hotkeys.binding_label(r, id, fallback) } || fallback
     end
 
     def direction_label : String

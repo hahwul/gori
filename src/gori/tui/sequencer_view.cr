@@ -128,15 +128,7 @@ module Gori::Tui
     end
 
     def apply_peer_session(rec : Store::SequencerSessionRecord) : Nil
-      @target = rec.target
-      @request = rec.request
-      @http2 = rec.http2?
-      @sni = rec.sni || ""
-      @evidence = !rec.flow_id.nil? # see restore
-      @name = rec.name
-      apply_config_json(rec.config)
-      @last_synced_config = rec.config
-      @dirty = false
+      restore(rec) # the request-side fields only — focus, results and a running job are untouched
     end
 
     def session_side_matches?(rec : Store::SequencerSessionRecord) : Bool

@@ -989,8 +989,7 @@ module Gori::Tui
     # clears the custom label (the chip reverts to the template-derived summary).
     def apply_rename(view : FuzzerView, name : String) : Nil
       return unless tab = @sessions.find(&.view.same?(view))
-      clean = name.strip
-      view.name = clean.empty? ? nil : clean
+      view.name = name.strip.presence
       if id = tab.db_id
         # The store answers whether the UPDATE committed. The chip above already reads the new
         # name, so a rolled-back batch (another instance holding the project's writer) is

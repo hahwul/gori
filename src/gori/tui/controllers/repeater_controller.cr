@@ -1475,15 +1475,7 @@ module Gori::Tui
     # Move the active sub-tab by ±1 (strip ←/→) among the VISIBLE (filtered) chips, so
     # h/l walks exactly the chips shown; clamped, no wrap, saving the outgoing tab first.
     def move_subtab(dir : Int32) : Nil
-      vis = visible_indices
-      return if vis.size < 2
-      cur = vis.index(@current_repeater_idx)
-      target = if cur
-                 vis[(cur + dir).clamp(0, vis.size - 1)]
-               else
-                 dir < 0 ? vis.first : vis.last # current filtered out → step onto an edge
-               end
-      return if target == @current_repeater_idx
+      return unless target = step_visible(@current_repeater_idx, dir)
       save_current_repeater
       @current_repeater_idx = target
       refresh_evidence_marker
@@ -1515,8 +1507,7 @@ module Gori::Tui
     # reconcile may have reordered/removed it) — gone → no-op, never hits a neighbour.
     def apply_rename(view : RepeaterView, name : String) : Nil
       return unless tab = @repeaters.find(&.view.same?(view))
-      clean = name.strip
-      view.name = clean.empty? ? nil : clean
+      view.name = name.strip.presence
       if id = tab.db_id
         unless @host.session.store.set_repeater_name(id, view.name)
           @host.status("rename NOT saved (project busy) — the chip reads the new name until the tab reloads")

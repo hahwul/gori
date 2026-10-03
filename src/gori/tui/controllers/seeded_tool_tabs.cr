@@ -203,8 +203,7 @@ module Gori::Tui
     # --- rename (orthogonal rename prompt drives this by VIEW identity) ---
     def apply_rename(view, name : String) : Nil
       return unless tab = @sessions.find(&.view.same?(view))
-      clean = name.strip
-      view.name = clean.empty? ? nil : clean
+      view.name = name.strip.presence
       if id = tab.db_id
         # See FuzzerController#apply_rename: the view already carries the new label, so a
         # refused write is a silent no-op unless the store's answer is reported.
