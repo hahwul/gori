@@ -108,10 +108,12 @@ module Gori::Tui
     SAVE_FAILED_SHORT = "save failed · ↵ retry · esc discard"
 
     # The card height `step_card` settles on for a terminal of height `h` and a step wanting
-    # `rows` of content. Pulled out as a pure class method so the MIN_H invariant above is
-    # checkable without standing up a terminal.
+    # `rows` of content: top border, a pad row, the content, a pad row, bottom border — so the
+    # content sits centred. It was `rows + 6`, a leftover of a hint row the card no longer
+    # draws, which left three blank rows under every step and only one above. Pulled out as a
+    # pure class method so the MIN_H invariant above is checkable without standing up a terminal.
     def self.card_h(h : Int32, rows : Int32) : Int32
-      {rows + 6, {h - 3, 3}.max}.min
+      {rows + 4, {h - 3, 3}.max}.min
     end
 
     # The card WIDTH `step_card` settles on for a terminal `w` columns wide and a step
@@ -433,8 +435,7 @@ module Gori::Tui
 
     # The keys go back to the offer rows: out of INSERT, and any armed `d` dropped with it.
     private def leave_pad : Nil
-      pad.editor_exit_insert if pad.insert?
-      pad.disarm
+      pad.release
       @keys_focus = :choice
     end
 
@@ -667,6 +668,7 @@ module Gori::Tui
     private def handle_mouse(ev : Termisu::Event::Mouse) : Nil
       return unless ev.press? || ev.wheel?
       return unless fits?(*@backend.size) # same reason handle_key bails: nothing is on screen to hit
+      @esc_armed = false                  # a click or a scroll is intent to stay (see handle_escape)
       mx, my = ev.x - 1, ev.y - 1         # termisu mouse coords are 1-based
       if ev.wheel?
         if @step.appearance? && (ev.button.wheel_up? || ev.button.wheel_down?)
@@ -674,7 +676,6 @@ module Gori::Tui
         end
         return
       end
-      @esc_armed = false # a click is intent to stay (see handle_escape)
       w, h = @backend.size
       box = step_card(w, h)
       case @step
@@ -752,7 +753,7 @@ module Gori::Tui
       return unless box.x < mx <= box.x + theme_list_w(box)
       names = Theme.available
       return if names.empty?
-      vp = {box.h - 6, 1}.max
+      vp = theme_vp(box)
       row = my - (box.y + 2)
       return unless 0 <= row < vp
       i = @theme_scroll + row
@@ -766,9 +767,9 @@ module Gori::Tui
 
     # The centred step card for `w`×`h`. Only BIND uses the narrow settings-sized card —
     # Appearance needs room for the preview panel beside the list, and Review's Shortcuts
-    # row spells out a chord family plus how to change it. Height is content + 6 rows of
-    # chrome, clamped to the space between the header and the hint. The ONE source of this
-    # geometry — render and the mouse hit-tests share it.
+    # row spells out a chord family plus how to change it. Height is content + 4 rows of
+    # chrome (`card_h`), clamped to the space between the header and the hint. The ONE source
+    # of this geometry — render and the mouse hit-tests share it.
     private def step_card(w : Int32, h : Int32) : Rect
       # Only BIND uses the narrow card. Appearance needs room for the preview panel beside
       # the list, Review's Shortcuts row spells out a chord family, and Companion holds her
@@ -791,6 +792,12 @@ module Gori::Tui
       full >= LIST_MIN + PREVIEW_GAP + PREVIEW_W ? full - PREVIEW_GAP - PREVIEW_W : full
     end
 
+    # Rows of the theme list (and its preview panel beside it): the card's interior less the
+    # pad row above and below. Render and the click hit-test share it.
+    private def theme_vp(box : Rect) : Int32
+      {box.h - 4, 1}.max
+    end
+
     # Interior content rows a step draws (below the card's top border + 1 pad row).
     # Must be ACCURATE for the fixed-layout steps: MIN_H is derived from the largest of
     # them, and render_* draw at fixed offsets up to `box.y + 2 + this`.
@@ -800,15 +807,10 @@ module Gori::Tui
       when Step::Companion then COMPANION_ROWS
       when Step::Keys      then KEYS_ROWS
       when Step::Review    then REVIEW_ROWS
-        # ≥7 so the preview panel (header + 3 status rows) is unclipped whenever the card can
-        # actually have the rows it ASKS for, capped so a long theme list scrolls (the list
-        # viewport derives from the card height) instead of demanding the whole screen. The
-        # floor is a request, not a guarantee: `card_h` clamps to `h - 3`, so at MIN_H the card
-        # is 12 rows however many this returns, the list viewport is 6, and the preview's third
-        # status row falls to render_theme_preview's own `break`. One mock row, on the shortest
-        # terminal the wizard runs on at all — cheaper than the alternative, which is REVIEW
-        # (the tallest step, and the only one that can commit) losing terminal sizes to a
-        # higher MIN_H.
+        # ≥7 so the preview panel (header + 3 status rows) is unclipped, capped so a long theme
+        # list scrolls (the list viewport derives from the card height, `theme_vp`) instead of
+        # demanding the whole screen. At MIN_H `card_h` clamps the card to 12 rows, which still
+        # leaves the list and the preview 8.
       else { {Theme.available.size, 7}.max, THEME_VP_MAX }.min # appearance
       end
     end
@@ -1026,7 +1028,7 @@ module Gori::Tui
       names = Theme.available
       return if names.empty?
       sel = names.index(@theme_name) || 0
-      vp = {box.h - 6, 1}.max
+      vp = theme_vp(box)
       list_w = theme_list_w(box)
       two_col = list_w < box.w - 2 # theme_list_w gives the list everything when it can't fit both
 
@@ -1214,7 +1216,9 @@ module Gori::Tui
 
     private def recap(screen : Screen, box : Rect, ix : Int32, vx : Int32, y : Int32, key : String, value : String) : Nil
       screen.text(ix, y, key, Theme.muted, Theme.panel)
-      screen.text(vx, y, value, Theme.text_bright, Theme.panel, width: {box.right - vx - 1, 1}.max)
+      # The headline's right margin (`iw`), not the border: a clipped value's `…` sat flush
+      # against `│`.
+      screen.text(vx, y, value, Theme.text_bright, Theme.panel, width: {box.right - 3 - vx, 1}.max)
     end
 
     # A selectable offer row (radio-style), mirroring the theme list's accent band.

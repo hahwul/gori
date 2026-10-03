@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Setup wizard: each step's card sits centred on its content instead of over three blank rows, so a short terminal shows more themes, and a mouse-wheel scroll cancels a pending esc-to-skip (#1494)
 - CLI: a closed pipe (`| head`) ends `gori --help`, `gori settings` and `gori ca` quietly as it already ended `gori run`, and `ca regenerate` / `ca import` no longer report a failure after they replaced the CA (#1493)
 - CLI: `gori run help` prints the help instead of suggesting `shell` (#1493)
 - CLI: `show` and `history --format har` redact WebSocket frames under `--redact` or a default profile, and `evidence show` applies the project's profile as MCP and the TUI do (#1493)
