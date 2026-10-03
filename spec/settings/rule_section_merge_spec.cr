@@ -37,6 +37,8 @@ private def with_rule_home(&)
   prev_views = Gori::Settings.saved_views
   prev_views_next = Gori::Settings.saved_views_next_id
   prev_chains = Gori::Settings.decoder_chains
+  prev_scan = Gori::Settings.scan_rules
+  prev_oast = Gori::Settings.oast_providers
   # Every example here hands `Settings.load` a file holding nothing BUT its own section, so the
   # load resets the rest to factory defaults. Put back the ones a later spec file would notice.
   prev_theme = Gori::Settings.theme
@@ -67,6 +69,8 @@ private def with_rule_home(&)
     Gori::Settings.saved_views = prev_views
     Gori::Settings.saved_views_next_id = prev_views_next
     Gori::Settings.decoder_chains = prev_chains
+    Gori::Settings.scan_rules = prev_scan
+    Gori::Settings.oast_providers = prev_oast
     Gori::Settings.theme = prev_theme
     Gori::Settings.bind_port = prev_port
     Gori::Settings.env_vars = prev_env
@@ -194,6 +198,59 @@ describe "Settings — the decoder chain library against a concurrent writer" do
 
       Gori::Settings.delete_decoder_chain("a").should be_true
       JSON.parse(File.read(Gori::Settings.path))["decoder"]?.should be_nil
+    end
+  end
+end
+
+private def scan_entry(id : String) : String
+  %({"id":"#{id}","title":"#{id}","description":"","side":"response","region":"body",) +
+    %("kind":"string","pattern":"p-#{id}","severity":"info","enabled":true})
+end
+
+private def oast_entry(id : String) : String
+  %({"id":"#{id}","name":"#{id}","kind":"interactsh","host":"#{id}.test","enabled":true})
+end
+
+private def disk_ids(key : String) : Array(String)
+  (JSON.parse(File.read(Gori::Settings.path))[key]?.try(&.as_a) || [] of JSON::Any).map(&.["id"].as_s)
+end
+
+describe "Settings — global scan rules and OAST providers against a concurrent writer" do
+  it "keeps a peer's scan rule and does not bring back one it deleted" do
+    with_rule_home do
+      File.write(Gori::Settings.path, %({"scan_rules":[#{scan_entry("a")},#{scan_entry("d")}]}))
+      Gori::Settings.load
+      File.write(Gori::Settings.path, %({"scan_rules":[#{scan_entry("a")},#{scan_entry("b")}]}))
+
+      id = Gori::Settings.add_scan_rule("c", "", "response", "body", "string", "p-c", "info")
+      disk_ids("scan_rules").should eq(["a", "b", id])
+      Gori::Settings.scan_rules.map(&.id).should eq(["a", "b", id])
+    end
+  end
+
+  # Merged entry by entry even when the peer lands after this process re-read the section.
+  it "keeps a peer's provider added inside the save window" do
+    with_rule_home do
+      File.write(Gori::Settings.path, %({"oast_providers":[#{oast_entry("a")}]}))
+      Gori::Settings.load
+      File.write(Gori::Settings.path, %({"oast_providers":[#{oast_entry("a")},#{oast_entry("b")}]}))
+      Gori::Settings.oast_providers = Gori::Settings.oast_providers.map(&.copy_with(name: "renamed"))
+      Gori::Settings.save.should be_true
+      disk_ids("oast_providers").should eq(["a", "b"])
+      JSON.parse(File.read(Gori::Settings.path))["oast_providers"][0]["name"].as_s.should eq("renamed")
+    end
+  end
+
+  it "answers false rather than resurrecting a provider the peer deleted" do
+    with_rule_home do
+      File.write(Gori::Settings.path, %({"oast_providers":[#{oast_entry("a")},#{oast_entry("d")}]}))
+      Gori::Settings.load
+      File.write(Gori::Settings.path, %({"oast_providers":[#{oast_entry("a")}]}))
+
+      Gori::Settings.update_oast_provider("d", "d2", "interactsh", "d.test", nil).should be_false
+      Gori::Settings.set_oast_provider_enabled("d", false).should be_false
+      Gori::Settings.delete_oast_provider("d").should be_false
+      disk_ids("oast_providers").should eq(["a"])
     end
   end
 end
@@ -459,6 +516,19 @@ describe "Settings — the global colormarker section against a concurrent write
   # A custom colour's NAME is its identity, so the three refusals `add`/`update` make are only as
   # honest as the list they check against — and that list is the one on disk. Answering "added"
   # for a name a peer has already defined is how one of the two hexes silently wins.
+  # `colors` is omitted once empty, so the peer's deletion of the last one reaches us as an
+  # absent key — which the load reads as "keep what memory has".
+  it "lets the name of a colour the peer deleted be used again" do
+    with_rule_home do
+      write_colormarker(2, [cm_entry(1, "status:>=500", "red")], [cm_color("teal", "#008080")])
+      Gori::Settings.load
+      write_colormarker(2, [cm_entry(1, "status:>=500", "red")])
+
+      Gori::Settings.add_colormarker_color("teal", "#00aaaa").should be_nil
+      disk_colormarker_color_names.should eq(["teal"])
+    end
+  end
+
   it "refuses a colour name the peer has already taken" do
     with_rule_home do
       write_colormarker(2, [cm_entry(1, "status:>=500", "red")], [cm_color("coral", "#ff6b6b")])

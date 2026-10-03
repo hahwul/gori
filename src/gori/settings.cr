@@ -860,21 +860,26 @@ module Gori
       JSON.build(indent: "  ") do |j|
         j.object do
           keys.each do |k|
-            cur_v = cur_h[k]?
-            chosen = if lists = RULE_SECTION_LISTS[k]?
-                       merge_rule_section(cur_v, base_h[k]?, disk_h[k]?, lists,
-                         RULE_SECTION_COUNTERS[k]? || RULE_SECTION_COUNTER)
-                     elsif factory_reset
-                       cur_v # what a fresh install would hold — nil drops the key entirely
-                     else
-                       pick_changed(cur_v, base_h[k]?, disk_h[k]?)
-                     end
+            chosen = merge_section(k, cur_h[k]?, base_h[k]?, disk_h[k]?, factory_reset)
             j.field k, chosen if chosen
           end
         end
       end
     rescue
       current # any merge hiccup falls back to the plain write (never worse than before)
+    end
+
+    private def self.merge_section(k : String, mine : JSON::Any?, base : JSON::Any?, disk : JSON::Any?,
+                                   factory_reset : Bool) : JSON::Any?
+      if lists = RULE_SECTION_LISTS[k]?
+        merge_rule_section(mine, base, disk, lists, RULE_SECTION_COUNTERS[k]? || RULE_SECTION_COUNTER)
+      elsif list = ENTRY_SECTIONS[k]?
+        merge_entry_list(mine, base, disk, list)
+      elsif factory_reset
+        mine # what a fresh install would hold — nil drops the key entirely
+      else
+        pick_changed(mine, base, disk)
+      end
     end
 
     # The section-level rule, and the default for every key that is not a rule list: I changed
@@ -934,6 +939,13 @@ module Gori
       "decoder" => [
         {key: "chains", identity: :name, optional: true},
       ],
+    }
+
+    # Top-level ARRAY sections of independent rows, merged entry by entry for the reason above.
+    # Their ids are random strings, so there is no counter to merge and nothing is renumbered.
+    ENTRY_SECTIONS = {
+      "scan_rules"     => {key: "scan_rules", identity: :string_id, optional: true},
+      "oast_providers" => {key: "oast_providers", identity: :string_id, optional: true},
     }
 
     # The id counter each of those sections carries, merged by MAX rather than by who changed
@@ -1089,6 +1101,12 @@ module Gori
     # the parse would keep VERBATIM — which is the same question `index_entries` needs answered,
     # so both normalisations below are the parser's own (`usable_id?`, `normalize_color_name`,
     # `normalize_hex`) rather than a second spelling of them here.
+    # A decoder chain: `parse_decoder_chains` keeps a non-empty name with a string spec.
+    private def self.chain_identity(o : Hash(String, JSON::Any)) : String?
+      name = o["name"]?.try(&.as_s?)
+      name && !name.empty? && o["spec"]?.try(&.as_s?) ? name : nil
+    end
+
     private def self.entry_identity(entry : JSON::Any, identity : Symbol) : String?
       o = entry.as_h?
       return nil unless o
@@ -1104,10 +1122,8 @@ module Gori
         hex = o["hex"]?.try(&.as_s?)
         return nil unless name && hex
         normalize_color_name(name) == name && normalize_hex(hex) == hex ? name : nil
-      when :name
-        # A decoder chain: `parse_decoder_chains` keeps a non-empty name with a string spec.
-        name = o["name"]?.try(&.as_s?)
-        name && !name.empty? && o["spec"]?.try(&.as_s?) ? name : nil
+      when :name      then chain_identity(o)
+      when :string_id then o["id"]?.try(&.as_s?).presence
       end
     end
 

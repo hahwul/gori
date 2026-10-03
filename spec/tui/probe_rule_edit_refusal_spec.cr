@@ -211,6 +211,8 @@ private def with_global_scan_rule(*, refused : Bool, &)
     # alike.
     Gori::Settings.scan_rules = [Gori::Settings::ScanRule.new("s1", "leaky",
       "finds a debug header", "response", "header", "string", "X-Debug", "info", true)]
+    # On disk too, or every mutator's re-read of the section drops it as a peer's delete.
+    Gori::Settings.save.should eq(!refused)
     yield "s1"
   ensure
     # Clear the latch BEFORE restoring the properties: this load resets them.
