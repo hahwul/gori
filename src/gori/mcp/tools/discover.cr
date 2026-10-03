@@ -77,6 +77,8 @@ module Gori
         # A non-positive cap is ignored, as `fuzz_config` does: `cap_reached?` reads 0 / -1 as
         # "no cap", so `{cap, MAX}.min` turned `max_requests: 0` into an UNBOUNDED crawl.
         cap = optional_int_arg(h, "max_requests").try { |m| m > 0 ? m : nil }
+        wordlist = str(h, "wordlist").presence
+        wordlist.try { |w| wordlist_stream_refusal(w.strip) }.try { |why| raise FuzzArgError.new(why) }
         Discover::Config.new(
           concurrency: clamp(optional_int_arg(h, "concurrency"), 20, DISCOVER_MAX_CONCURRENCY),
           rps: optional_float_arg(h, "rate"),
@@ -96,7 +98,7 @@ module Gori
           # Floor 0, not 1: `max_depth: 0` means "the seed only", as `gori run discover
           # --max-depth 0` does. `clamp` floors at 1, which crawled links the caller ruled out.
           max_depth: (optional_int_arg(h, "max_depth") || 4_i64).clamp(0_i64, DISCOVER_MAX_DEPTH.to_i64).to_i,
-          user_wordlist: str(h, "wordlist").presence,
+          user_wordlist: wordlist,
           extensions: discover_extensions(h), containment: discover_containment(h),
           headers: discover_headers(h))
       end

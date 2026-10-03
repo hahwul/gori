@@ -39,6 +39,9 @@ module Gori
         if inline.empty? && wordlist.nil?
           return Result.new("provide 'secrets' (array) and/or 'wordlist' (file path)", is_error: true)
         end
+        if why = wordlist.try { |w| wordlist_stream_refusal(w) }
+          return Result.new(why, is_error: true)
+        end
         found = cookie_crack_search(c, inline, wordlist, h)
         Result.new(JSON.build do |j|
           j.object do
