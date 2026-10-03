@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- CLI: a closed pipe (`| head`) ends `gori --help`, `gori settings` and `gori ca` quietly as it already ended `gori run`, and `ca regenerate` / `ca import` no longer report a failure after they replaced the CA (#1493)
+- CLI: `gori run help` prints the help instead of suggesting `shell` (#1493)
+- CLI: `show` and `history --format har` redact WebSocket frames under `--redact` or a default profile, and `evidence show` applies the project's profile as MCP and the TUI do (#1493)
+- CLI: `project env` prints values as `[REDACTED]` unless `--show-values`, like `session list` and MCP `list_env` (#1493)
+- `--format json` stays valid UTF-8 for a JWT, cookie or Repeater request line that is not (`jwt`, `cookie`, `repeater race`/`timing`, MCP `jwt_decode`/`cookie_decode`) (#1493)
+- Fuzzer: a brute-force length is capped at 4096 on every surface, and `gori run fuzz --brute` refuses past it, where a long length allocated gigabytes before the first send (#1493)
+- Fuzzer, Discover, Miner and Sequencer report the connect failure a budget-refused retry was retrying, instead of a run that read as a clean budget stop (#1493)
 - Settings written by gori before v0.3 (`decoder.sessions`, `rewriter.presets`, the `pet` section) are no longer migrated; upgrade through v0.7 first (#1490)
 - Setup wizard: a new Keys step picks the editor keyset, helix-ish or vim-ish, after you try both on a practice pad (#1462)
 - Preferences: Keys has a Keyset playground that tries helix-ish and vim-ish on a practice pad and lists every READ-mode key of each (#1478)
