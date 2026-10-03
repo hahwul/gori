@@ -1627,12 +1627,17 @@ module Gori
     #     profile.
     #   * the id counters of the three rule lists are this install's numbering, and only ever
     #     move forward from what IT has handed out — see `renumber_imported_ids`.
+    #   * `update`'s bookkeeping is this install's memory of what it checked and announced: an
+    #     exporter's `notified_version` silenced the importer's "update available" notice.
+    #   * `fuzzer.recent_wordlists` is this machine's history of absolute paths.
     INSTALL_LOCAL_KEYS = {
       "env"         => ["syntax", "prefix"],
       "redaction"   => ["salt"],
       "rewriter"    => ["next_rule_id"],
       "colormarker" => ["next_rule_id"],
       "saved_views" => ["next_view_id"],
+      "update"      => ["notified_version", "latest_seen", "checked_at"],
+      "fuzzer"      => ["recent_wordlists"],
     }
 
     private def self.strip_install_local(key : String, node : JSON::Any) : JSON::Any

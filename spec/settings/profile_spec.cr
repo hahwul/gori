@@ -50,7 +50,7 @@ private MAXIMAL_PROFILE = <<-JSON
     "companion": { "enabled": true, "notices": false },
     "notifications": { "bell": true, "toast": false },
     "general": { "confirm_quit": false, "clipboard_osc52": false },
-    "update": { "notified_version": "9.9.9" },
+    "update": { "check_enabled": false },
     "network": { "bind_port": 9191 },
     "upstream_rules": [ { "host": "*.corp", "kind": "direct" } ],
     "outbound_tls": [ { "host": "a.test", "min_version": "tls1.2" } ],
@@ -64,7 +64,7 @@ private MAXIMAL_PROFILE = <<-JSON
     "oast_providers": [ { "id": "o1", "name": "p1", "kind": "interactsh", "host": "x.test" } ],
     "hotkeys": { "os": "linux" },
     "mine": { "locations": ["query"], "concurrency": 11 },
-    "fuzzer": { "recent_wordlists": ["/tmp/w.txt"] },
+    "fuzzer": { "favorite_wordlists": ["/tmp/w.txt"] },
     "probe": { "active_notify": "always" },
     "discover": { "containment": "strict", "max_depth": 3 },
     "decoder": { "chains": [ { "name": "c1", "spec": "base64-decode" } ] },
@@ -98,6 +98,8 @@ private def with_every_section_populated(&)
   osc52 = Gori::Settings.clipboard_osc52?
   confirm_quit = Gori::Settings.confirm_quit?
   notified = Gori::Settings.update_notified_version
+  check_enabled = Gori::Settings.update_check_enabled?
+  favorites = Gori::Settings.fuzz_favorite_wordlists
   outbound = Gori::Settings.outbound_tls
   retention = Gori::Settings.retention_max_flows
   listeners = Gori::Settings.listeners
@@ -147,6 +149,8 @@ private def with_every_section_populated(&)
     Gori::Settings.clipboard_osc52 = osc52
     Gori::Settings.confirm_quit = confirm_quit
     Gori::Settings.update_notified_version = notified
+    Gori::Settings.update_check_enabled = check_enabled
+    Gori::Settings.fuzz_favorite_wordlists = favorites
     Gori::Settings.outbound_tls = outbound
     Gori::Settings.retention_max_flows = retention
     Gori::Settings.listeners = listeners
@@ -324,6 +328,33 @@ describe "settings profiles" do
           Gori::Redact.salt = prev_salt.not_nil!
           Gori::Settings.env_prefix = prev_prefix.not_nil!
           Gori::Settings.redaction_default = false
+        end
+      end
+    end
+
+    it "neither exports nor imports update bookkeeping or recent wordlist paths" do
+      with_config_home do
+        prev = {Gori::Settings.update_notified_version, Gori::Settings.update_checked_at,
+                Gori::Settings.fuzz_recent_wordlists, Gori::Settings.update_check_enabled?}
+        begin
+          Gori::Settings.update_notified_version = "0.1.0"
+          Gori::Settings.update_checked_at = 5_i64
+          Gori::Settings.fuzz_recent_wordlists = ["/home/me/acme/words.txt"]
+          doc = Gori::Settings.export_document(["update", "fuzzer"])
+          doc.should_not contain("0.1.0")
+          doc.should_not contain("acme")
+
+          Gori::Settings.import_document(%({"update":{"notified_version":"9.9.9","checked_at":99,"check_enabled":false},) +
+                                         %("fuzzer":{"recent_wordlists":["/x"]}}))
+          Gori::Settings.update_notified_version.should eq("0.1.0")
+          Gori::Settings.update_checked_at.should eq(5_i64)
+          Gori::Settings.fuzz_recent_wordlists.should eq(["/home/me/acme/words.txt"])
+          Gori::Settings.update_check_enabled?.should be_false # the toggle still travels
+        ensure
+          Gori::Settings.update_notified_version = prev[0]
+          Gori::Settings.update_checked_at = prev[1]
+          Gori::Settings.fuzz_recent_wordlists = prev[2]
+          Gori::Settings.update_check_enabled = prev[3]
         end
       end
     end
