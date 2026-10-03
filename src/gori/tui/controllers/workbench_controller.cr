@@ -424,13 +424,11 @@ module Gori::Tui
       return true if space_menu?(ev)
       s = cur
       key = ev.key
-      selecting = ev.shift?
+      selecting = ev.shift? || editor_line_held?
       case
       when key.enter? then return false # editor.insert-enter
-      when nav_up?(ev)
-        s.input.at_top? ? cross_pane(s, -1) : s.input_read.move(s.input, -1, 0, selecting: selecting)
-      when nav_down?(ev)
-        s.input.at_bottom? ? cross_pane(s, 1) : s.input_read.move(s.input, 1, 0, selecting: selecting)
+      when nav_up?(ev)              then input_step(s, -1, selecting)
+      when nav_down?(ev)            then input_step(s, 1, selecting)
       when editor_read_sideways(ev) then nil                     # ←/→ h/l, ⌥ by word
       when key.home?                then s.input_home(selecting) # editor move + read-cursor adopt — see WorkbenchSession
       when key.end?                 then s.input_end(selecting)
@@ -548,6 +546,13 @@ module Gori::Tui
     end
 
     # ---- read-only DECODED / OUTPUT panes ----
+    # ↑/↓ in the READ input: at its edge, on to the next card, unless a selection is being grown
+    # (⇧, or a held `⇧V`), which stays to grow.
+    private def input_step(s : S, dr : Int32, selecting : Bool) : Nil
+      edge = dr < 0 ? s.input.at_top? : s.input.at_bottom?
+      edge && !selecting ? cross_pane(s, dr) : s.input_read.move(s.input, dr, 0, selecting: selecting)
+    end
+
     private def handle_readonly(ev : Termisu::Event::Key, which : Symbol) : Bool
       return true if space_menu?(ev)
       s = cur

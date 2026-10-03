@@ -1595,6 +1595,15 @@ module Gori::Tui
       true
     end
 
+    # Is the focused READ caret holding vim's `⇧V` selection? Each READ ladder ORs this into its
+    # `selecting`, so a plain `j`/`k` at the pane's edge grows the selection the way ⇧↓/⇧↑ do,
+    # instead of leaving the pane with the lines still armed for the next `d`.
+    def editor_line_held? : Bool
+      return false unless buf = editor_text_buffer
+      area, read = buf
+      read.line_mode_held?(area)
+    end
+
     # Esc's first job in READ: drop a live selection, so it is the SECOND Esc that leaves the
     # pane. Every pane's own Esc leaves (to the strip, the previous card, RELATED), and with
     # the selection kept, the next `d` deleted lines the operator had meant to let go of.

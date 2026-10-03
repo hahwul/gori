@@ -659,7 +659,7 @@ module Gori::Tui
     # `Scope::ProjectDesc`, whose chords this handler was what made dead (KEY_AUDIT §2e).
     private def handle_desc_read(ev : Termisu::Event::Key, key, c : Char?) : Bool
       return true.tap { @host.open_space_menu } if key.space? && !ev.ctrl? && !ev.alt?
-      selecting = ev.shift?
+      selecting = ev.shift? || editor_line_held?
       case
       when key.enter? then return false # editor.insert-enter
       when nav_up?(ev)

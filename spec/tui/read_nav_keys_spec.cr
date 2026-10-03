@@ -18,6 +18,50 @@ private def caret_of(tab : Gori::Tui::TabController) : {Int32, Int32}
   {area.cy, area.cx}
 end
 
+# The eight editor panes, each focused on its text buffer and in READ. Yields the pane's
+# controller, a name for failure messages, and the host its focus requests land on.
+private def each_editor_pane(session_name : String, & : Gori::Tui::TabController, String, TuiContract::Host ->) : Nil
+  TuiContract.with_session(session_name) do |session|
+    host = TuiContract::Host.new(session)
+
+    notes = Gori::Tui::NotesController.new(host)
+    TuiContract.render(notes)
+    yield notes, "notes", host
+
+    rep = Gori::Tui::RepeaterController.new(host)
+    rep.repeater_new
+    rep.current_view.not_nil!.focus_pane(:request)
+    yield rep, "repeater request", host
+
+    fz = Gori::Tui::FuzzerController.new(host)
+    fz.fuzz_new
+    fz.current_view.not_nil!.focus_pane(:template)
+    yield fz, "fuzzer template", host
+
+    pj = Gori::Tui::ProjectController.new(host)
+    pj.view.focus_pane(:desc)
+    yield pj, "project description", host
+
+    dc = Gori::Tui::DecoderController.new(host)
+    dc.@sessions[dc.@idx].pane = :input
+    yield dc, "decoder input", host
+
+    yield Gori::Tui::JwtController.new(host), "jwt input", host
+    yield Gori::Tui::CookieController.new(host), "cookie input", host
+
+    store = session.store
+    id = store.insert_issue("SQLi", Gori::Store::Severity::High, "a.test", nil)
+    store.update_issue(id, notes: "x").should be_true
+    iss = Gori::Tui::IssuesController.new(host)
+    iss.view.reload(store)
+    iss.view.open_detail(store).should be_true
+    TuiContract.render(iss)
+    iss.view.focus_notes!
+    yield iss, "issue notes", host
+    iss.view.detail_open?.should be_true # `h` used to fall through to `issue.close`
+  end
+end
+
 describe "READ caret keys in every editor pane" do
   it "moves with h/j/k/l and steps words with ⌥←/→" do
     seen = [] of String
@@ -60,46 +104,48 @@ describe "READ caret keys in every editor pane" do
       nil
     end
 
-    TuiContract.with_session("read-nav-roster") do |session|
-      host = TuiContract::Host.new(session)
+    each_editor_pane("read-nav-roster") { |tab, name, _host| check.call(tab, name) }
+    seen.size.should eq(8), "exercised only #{seen.join(", ")}"
+  end
 
-      notes = Gori::Tui::NotesController.new(host)
-      TuiContract.render(notes)
-      check.call(notes, "notes")
-
-      rep = Gori::Tui::RepeaterController.new(host)
-      rep.repeater_new
-      rep.current_view.not_nil!.focus_pane(:request)
-      check.call(rep, "repeater request")
-
-      fz = Gori::Tui::FuzzerController.new(host)
-      fz.fuzz_new
-      fz.current_view.not_nil!.focus_pane(:template)
-      check.call(fz, "fuzzer template")
-
-      pj = Gori::Tui::ProjectController.new(host)
-      pj.view.focus_pane(:desc)
-      check.call(pj, "project description")
-
-      dc = Gori::Tui::DecoderController.new(host)
-      dc.@sessions[dc.@idx].pane = :input
-      check.call(dc, "decoder input")
-
-      check.call(Gori::Tui::JwtController.new(host), "jwt input")
-      check.call(Gori::Tui::CookieController.new(host), "cookie input")
-
-      store = session.store
-      id = store.insert_issue("SQLi", Gori::Store::Severity::High, "a.test", nil)
-      store.update_issue(id, notes: "x").should be_true
-      iss = Gori::Tui::IssuesController.new(host)
-      iss.view.reload(store)
-      iss.view.open_detail(store).should be_true
-      TuiContract.render(iss)
-      iss.view.focus_notes!
-      check.call(iss, "issue notes")
-      iss.view.detail_open?.should be_true # `h` used to fall through to `issue.close`
+  # A held `⇧V` grows on a plain `k`/`j` at the pane's edge, where the arrow alone would hand
+  # focus to the next pane and leave the lines armed for the next `d`.
+  it "keeps a held ⇧V selection in the pane at its first and last line" do
+    seen = [] of String
+    each_editor_pane("read-nav-line-held") do |tab, name, host|
+      area, read = tab.editor_text_buffer.not_nil!
+      area.set_text("one\ntwo\nthree")
+      area.place_cursor(1, 0)
+      read.clear_selection
+      read.sync_from(area)
+      read.select_line(area, line_mode: true)
+      tab.editor_line_held?.should be_true, name
+      asked = host.focus_requests.size
+      2.times { press(tab, TuiContract.plain('k')) }
+      tab.editor_text_buffer.try(&.[0]).should be(area), "#{name}: k at the top left the pane"
+      read.copy_text(area).should eq("one\ntwo"), name
+      3.times { press(tab, TuiContract.plain('j')) }
+      tab.editor_text_buffer.try(&.[0]).should be(area), "#{name}: j at the bottom left the pane"
+      read.copy_text(area).should eq("two\nthree"), name
+      host.focus_requests.size.should eq(asked), "#{name}: asked the host to move focus"
+      seen << name
     end
     seen.size.should eq(8), "exercised only #{seen.join(", ")}"
+  end
+
+  it "clears a one-line TARGET's selection on Esc" do
+    TuiContract.with_session("read-nav-target-esc") do |session|
+      host = TuiContract::Host.new(session)
+      rep = Gori::Tui::RepeaterController.new(host)
+      rep.repeater_new
+      v = rep.current_view.not_nil!
+      v.focus_pane(:target)
+      v.pane_select_line
+      v.pane_selection?.should be_true
+      rep.editor_drop_read_selection.should be_true
+      v.pane_selection?.should be_false
+      rep.editor_drop_read_selection.should be_false
+    end
   end
 
   it "types at a one-line TARGET's edges on ⇧A / ⇧I" do

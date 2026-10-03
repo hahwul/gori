@@ -189,6 +189,12 @@ module Gori::Tui
       sync_to(editor)
     end
 
+    # vim's `⇧V` still held: a line selection made in line mode. A plain ↑/↓ then grows it, so a
+    # pane must not spend that key on leaving (see `TabController#editor_line_held?`).
+    def line_mode_held?(editor : TextArea) : Bool
+      @line_mode && linewise?(editor)
+    end
+
     # Is the READ selection in `editor` a line selection (`select_line`, grown by whole lines)?
     def linewise?(editor : TextArea) : Bool
       bind(editor)

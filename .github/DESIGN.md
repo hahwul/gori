@@ -4808,8 +4808,10 @@ selection that stays whole lines under ⇧↑/⇧↓, and `esc` over a READ sele
 vim-only behaviour is the plain `j`/`k` that grows a `⇧V` selection, which is what makes `V`
 usable at all, and with it `g`/`⇧G` grow the selection to an edge (`V` `G` `d`); the keyset
 is named at select time (`TextReadState#select_line`), so the wizard's practice pad answers in
-the keyset it is showing. A known edge remains: at the first or last line, the panes that hand
-`↑`/`↓` to the next pane do so before the selection can grow, as they always did for arrows.
+the keyset it is showing. At a pane's first or last line a held `⇧V` counts as a selection
+being grown (`TabController#editor_line_held?`, ORed into each READ ladder's `selecting`), so
+`k`/`j` there stay in the pane instead of handing focus on with the lines still armed; ⇧↑/⇧↓
+follow the same rule in every ladder now, as Project and Issues already documented.
 
 Discoverability goes to a playground in Preferences → Keys (the wizard's pad plus each
 keyset's full key list), not to more keys. It only tries: the keyset is set on the row above

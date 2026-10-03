@@ -908,7 +908,7 @@ module Gori::Tui
       return true.tap { @host.open_space_menu } if ev.key.space? && !ev.ctrl? && !ev.alt?
       s = cur
       key = ev.key
-      selecting = ev.shift?
+      selecting = ev.shift? || editor_line_held?
       case
       when key.enter? then return false # editor.insert-enter
       when nav_up?(ev)

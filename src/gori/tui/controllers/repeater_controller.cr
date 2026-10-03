@@ -1469,6 +1469,14 @@ module Gori::Tui
       editor_enter_insert
     end
 
+    # Esc over a READ selection: the TARGET's lives in the view's `LineFieldRead`, not in a
+    # `TextReadState`, so the view's own pane pair answers for every pane here.
+    def editor_drop_read_selection : Bool
+      return false unless (v = current_view) && v.pane_selection?
+      v.pane_clear_selection
+      true
+    end
+
     # `⇧A` / `⇧I` on the one-line TARGET: its own End / Home, then INSERT. The multi-line
     # buffer beside it takes the shared path through `editor_text_buffer`.
     def editor_line_insert(dir : Int32) : Bool
@@ -3475,11 +3483,11 @@ module Gori::Tui
       return true.tap { @host.open_space_menu } if ev.key.space? && !ev.ctrl? && !ev.alt?
       key = ev.key
       c = ev.char || key.to_char
-      selecting = ev.shift?
+      selecting = ev.shift? || editor_line_held?
       case
       when key.enter? then return false # editor.insert-enter
       when word_step?(ev)           then editor_word_move(key.left? ? -1 : 1, selecting)
-      when key.up?, key.lower_k?    then view.at_top? ? view.focus_first : view.request_read_move(-1, 0, selecting: selecting)
+      when key.up?, key.lower_k?    then view.at_top? && !selecting ? view.focus_first : view.request_read_move(-1, 0, selecting: selecting)
       when key.down?, key.lower_j?  then view.request_read_move(1, 0, selecting: selecting)
       when key.left?, key.lower_h?  then view.request_read_move(0, -1, selecting: selecting)
       when key.right?, key.lower_l? then view.request_read_move(0, 1, selecting: selecting)

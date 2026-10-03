@@ -682,7 +682,7 @@ module Gori::Tui
       return true.tap { @host.open_space_menu } if ev.key.space? && !ev.ctrl? && !ev.alt?
       key = ev.key
       c = ev.char || key.to_char
-      selecting = ev.shift?
+      selecting = ev.shift? || editor_line_held?
       case
       when key.enter? then return false # editor.insert-enter
       when nav_up?(ev)              then template_up(v, selecting)
@@ -699,7 +699,7 @@ module Gori::Tui
     end
 
     private def template_up(v : FuzzerView, selecting : Bool = false) : Nil
-      if v.template_at_top?
+      if v.template_at_top? && !selecting
         v.pane_advance(-1)
       elsif v.template_insert?
         v.template_move(-1, 0)
@@ -1066,6 +1066,14 @@ module Gori::Tui
       else                return false
       end
       editor_enter_insert
+    end
+
+    # Esc over a READ selection: the TARGET's lives in the view's `LineFieldRead`, not in a
+    # `TextReadState`, so the view's own pane pair answers for every pane here.
+    def editor_drop_read_selection : Bool
+      return false unless (v = current_view) && v.pane_selection?
+      v.pane_clear_selection
+      true
     end
 
     # `⇧A` / `⇧I` on the one-line TARGET: its own End / Home, then INSERT. The multi-line
