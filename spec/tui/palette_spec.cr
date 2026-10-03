@@ -104,23 +104,6 @@ describe Gori::Tui::PaletteState do
     bottom.contains?(last).should be_true
   end
 
-  it "marks coming-soon verbs with a 'soon' badge (exposed but not functional)" do
-    # No shipped verb is coming_soon anymore (settings:hotkeys went live), so exercise the
-    # badge mechanism with a synthetic registry.
-    ctx = FakeExecContext.new
-    reg = Gori::Verb::Registry.new
-    reg.register(Gori::Verb::Definition.new("demo.soon", "demo:soon", "A future thing",
-      Gori::Verb::Scope::Global, coming_soon: true) { |_| nil })
-    palette = PaletteState.new(reg)
-    palette.reset(ctx)
-    "demo:soon".each_char { |c| palette.append(c, ctx) }
-
-    backend = MemoryBackend.new(80, 24)
-    palette.render(Screen.new(backend), Rect.new(0, 0, 80, 24))
-    backend.contains?("demo:soon").should be_true
-    backend.contains?("soon").should be_true # the placeholder badge
-  end
-
   it "registers a Global 'Go to' jump for every catalog tab so each is palette-reachable" do
     r = Gori::Verbs.registry
     # The named tab jumps are the only by-command way to reach a tab hidden in

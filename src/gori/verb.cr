@@ -152,9 +152,6 @@ module Gori
       getter category : Category
       getter chords : Array(Chord)
       getter? hidden : Bool
-      # Exposed for discoverability but not yet functional — the palette shows it
-      # dimmed with a "soon" badge so users aren't surprised when it only toasts.
-      getter? coming_soon : Bool
       # The single key that fronts this verb in the bottom-right "space" action
       # menu (helix leader). Optional: a verb already carrying a plain single-char
       # chord (y / f / / …) gets its menu key from that for free (see #menu_key);
@@ -233,7 +230,7 @@ module Gori
       def initialize(@id : String, @title : String, @description : String, @scope : Scope,
                      @chords : Array(Chord) = [] of Chord, @hidden : Bool = false,
                      @available : ExecContext -> Bool = ->(_ctx : ExecContext) { true },
-                     @coming_soon : Bool = false, @category : Category = Category::Action,
+                     @category : Category = Category::Action,
                      @mnemonic : Char? = nil, @section : Symbol = :common,
                      @group : Symbol = :none, @chord_sections : Array(Symbol)? = nil,
                      @intent : Symbol? = nil, @pinned : Bool = false,
