@@ -81,8 +81,8 @@ module Gori::Settings
   # --- global view CRUD -------------------------------------------------------------------
   # Each mutation re-reads the section, rewrites the array and persists via `save` (atomic +
   # 3-way merge, reconciled by view id inside this section). Every answer is a COMMIT answer,
-  # so memory is snapshotted and rolled back when `save` refuses — see `add_colormarker_rule`
-  # for the full reasoning; the failure here is the same shape (a view left live in every
+  # so each goes through `commit` — see it and `add_colormarker_rule` for the full reasoning;
+  # the failure here is the same shape (a view left live in every
   # project after the operator was told it was not added).
   #
   # Order carries no meaning: a view is chosen by pick, not matched in sequence. There is
@@ -91,13 +91,10 @@ module Gori::Settings
   # Returns the new view's id, or 0 when the write did not reach disk.
   def self.add_saved_view(name : String, query : String) : Int64
     reload_saved_views_from_disk # before both the snapshot and the mint
-    prev_views = saved_views
     prev_next = saved_views_next_id
     id = saved_views_next_id
     self.saved_views_next_id = next_id_after(id) # saturating — see `next_id_after`
-    self.saved_views = saved_views + [SavedView.new(id, name.strip, query)]
-    return id if save
-    self.saved_views = prev_views
+    return id if commit(saved_views, saved_views + [SavedView.new(id, name.strip, query)])
     # The counter too: a burned id is not cosmetic here — a project's `history_view` pointer
     # outlives the view it names, which is the whole reason ids are never reused.
     self.saved_views_next_id = prev_next
@@ -106,27 +103,12 @@ module Gori::Settings
 
   def self.update_saved_view(id : Int64, name : String, query : String) : Bool
     reload_saved_views_from_disk # a view a peer deleted must not come back as an edit
-    prev_views = saved_views
-    found = false
-    self.saved_views = saved_views.map do |v|
-      next v unless v.id == id
-      found = true
-      SavedView.new(id, name.strip, query)
-    end
-    ok = found && save
-    self.saved_views = prev_views unless ok
-    ok
+    commit(saved_views, replace_by_id(saved_views, id) { SavedView.new(id, name.strip, query) })
   end
 
   def self.delete_saved_view(id : Int64) : Bool
     reload_saved_views_from_disk
-    prev_views = saved_views
-    kept = saved_views.reject { |v| v.id == id }
-    return false if kept.size == saved_views.size
-    self.saved_views = kept
-    return true if save
-    self.saved_views = prev_views
-    false
+    commit(saved_views, remove_by_id(saved_views, id))
   end
 
   # Factory reset for this section (dispatched by Settings.reset_to_factory). The views go;

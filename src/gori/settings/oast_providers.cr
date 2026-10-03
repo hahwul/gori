@@ -47,34 +47,22 @@ module Gori::Settings
   # under an "added provider" toast and gone at the next start; and a provider MOVED from a
   # project into the global library had its project row deleted first, so it vanished outright.
   def self.add_oast_provider(name : String, kind : String, host : String, token : String?, enabled : Bool = true) : String
-    prev = oast_providers
     id = Random::Secure.hex(4)
-    self.oast_providers = oast_providers + [OastProvider.new(id, name, kind, host, token, enabled)]
-    return id if save
-    self.oast_providers = prev
-    ""
+    commit(oast_providers, oast_providers + [OastProvider.new(id, name, kind, host, token, enabled)]) ? id : ""
   end
 
   def self.update_oast_provider(id : String, name : String, kind : String, host : String, token : String?) : Bool
-    commit_oast_providers(oast_providers.map do |p|
+    commit(oast_providers, oast_providers.map do |p|
       p.id == id ? OastProvider.new(id, name, kind, host, token, p.enabled) : p
     end)
   end
 
   def self.set_oast_provider_enabled(id : String, enabled : Bool) : Bool
-    commit_oast_providers(oast_providers.map { |p| p.id == id ? p.copy_with(enabled: enabled) : p })
+    commit(oast_providers, oast_providers.map { |p| p.id == id ? p.copy_with(enabled: enabled) : p })
   end
 
   def self.delete_oast_provider(id : String) : Bool
-    commit_oast_providers(oast_providers.reject { |p| p.id == id })
-  end
-
-  private def self.commit_oast_providers(list : Array(OastProvider)) : Bool
-    prev = oast_providers
-    self.oast_providers = list
-    return true if save
-    self.oast_providers = prev
-    false
+    commit(oast_providers, oast_providers.reject { |p| p.id == id })
   end
 
   # Factory reset for this section (dispatched by Settings.reset_to_factory). Provider TOKENS

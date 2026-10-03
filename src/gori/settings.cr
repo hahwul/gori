@@ -793,6 +793,55 @@ module Gori
       false
     end
 
+    # Assign `list` to the list-valued section property `section` and `save`, putting the old
+    # array back when the write did not commit. Every list mutator answers "did it commit", and
+    # `save` refuses outright after a half load (`@@load_partial`) or on any transient failure,
+    # so memory has to agree with that answer: a rule left live over a refused save keeps
+    # matching (or painting) in every project, and the next unrelated save that does succeed
+    # writes it to disk. These arrays are replaced wholesale, never mutated in place, so the old
+    # reference IS the snapshot. A nil `list` (no row had that id) answers false and writes
+    # nothing.
+    private macro commit(section, list)
+      if %list = {{ list }}
+        %prev = {{ section.id }}
+        self.{{ section.id }} = %list
+        save || begin
+          self.{{ section.id }} = %prev
+          false
+        end
+      else
+        false
+      end
+    end
+
+    # `list` with the row whose `id` matches replaced by the block's answer, or nil when no row
+    # does — a rule a peer deleted must not come back as an edit.
+    private def self.replace_by_id(list, id, &)
+      found = false
+      out = list.map do |r|
+        next r unless r.id == id
+        found = true
+        yield r
+      end
+      out if found
+    end
+
+    # `list` without the row whose `id` matches, or nil when no row does.
+    private def self.remove_by_id(list, id)
+      kept = list.reject { |r| r.id == id }
+      kept unless kept.size == list.size
+    end
+
+    # `list` with the row `id` swapped one slot earlier (dir < 0) / later (dir > 0), or nil when
+    # there is no such row, no slot that way, or the block refuses the pair.
+    private def self.swap_adjacent(list, id, dir, &)
+      i = list.index { |r| r.id == id }
+      return unless i
+      j = i + (dir < 0 ? -1 : 1)
+      return if j < 0 || j >= list.size || yield(list[i], list[j])
+      list.dup.swap(i, j)
+    end
+
     # Durably replace the settings file, owner-only. Inside GORI_HOME the 0700 tree already
     # covers it, but `--config` can put this file anywhere — a shared checkout, /tmp, a home
     # directory at 0755 — and it carries `env` token VALUES and saved decoder sessions

@@ -374,25 +374,19 @@ module Gori::Settings
     # whole point: `rewriter_next_rule_id` is read from this line, and reading it stale is how
     # two processes hand the same number to two different rules.
     reload_rewriter_from_disk
-    # The answer below is a COMMIT answer, so memory has to agree with it: `save` refuses the
-    # write outright when the last load only got half the file in (`@@load_partial`), and it
-    # returns false on any transient write failure too. Mutating first and answering 0 left
-    # the rule in `rewriter_rules` — folded into `Rules.merged` by the unconditional
-    # `refresh`, rewriting live traffic in every project — while the operator was told it was
-    # not added, and written to disk by the next unrelated save that did succeed. So snapshot
-    # both properties and put them back when the write did not commit. The array is replaced
-    # wholesale everywhere and never mutated in place, so the old reference IS the snapshot.
-    prev_rules = rewriter_rules
+    # The answer below is a COMMIT answer (`commit`): a rule left in `rewriter_rules` over a
+    # refused save is folded into `Rules.merged` by the unconditional `refresh`, rewriting live
+    # traffic in every project while the operator was told it was not added. So both properties
+    # go back when the write did not commit.
     prev_next = rewriter_next_rule_id
     id = rewriter_next_rule_id
     # Saturating, because the counter itself is parsed from the file (`next_rule_id`) and a
     # bare `+ 1` on an `Int64::MAX` one raises out of an operator's "add rule" — see
     # `next_id_after`.
     self.rewriter_next_rule_id = next_id_after(id)
-    self.rewriter_rules = rewriter_rules + [RewriterRule.new(id, enabled, name, target, part,
-      pattern, replacement, op, match_kind, host, body_file, respond, respond_args)]
-    return id if save
-    self.rewriter_rules = prev_rules
+    rule = RewriterRule.new(id, enabled, name, target, part, pattern, replacement, op, match_kind,
+      host, body_file, respond, respond_args)
+    return id if commit(rewriter_rules, rewriter_rules + [rule])
     # The counter too: a burned id is not cosmetic — a project's `rewriter_overrides` key
     # outlives the rule it names, which is the whole reason ids are never reused.
     self.rewriter_next_rule_id = prev_next
@@ -413,19 +407,12 @@ module Gori::Settings
     # its raw labels — an edit of a rule this binary cannot read — so ask the file, as
     # `move_rewriter_rule` does.
     return false if rewriter_rule_inert?(id)
-    prev_rules = rewriter_rules
-    found = false
-    self.rewriter_rules = rewriter_rules.map do |r|
-      next r unless r.id == id
-      found = true
-      RewriterRule.new(id, r.enabled, name, target, part, pattern, replacement,
-        op, match_kind, host, body_file, respond, respond_args)
-    end
     # See `add_rewriter_rule`: a false answer means the edit did not commit, so the edited
     # fields must not stay live either.
-    ok = found && save
-    self.rewriter_rules = prev_rules unless ok
-    ok
+    commit(rewriter_rules, replace_by_id(rewriter_rules, id) do |r|
+      RewriterRule.new(id, r.enabled, name, target, part, pattern, replacement,
+        op, match_kind, host, body_file, respond, respond_args)
+    end)
   end
 
   # The rule's DEFAULT state, which every project without an override follows.
@@ -434,16 +421,7 @@ module Gori::Settings
     # Enabling is refused against the re-read too; disabling an inert row is allowed, and
     # `copy_with` keeps its unknown keys (`Rules#set_default`).
     return false if enabled && rewriter_rule_inert?(id)
-    prev_rules = rewriter_rules
-    found = false
-    self.rewriter_rules = rewriter_rules.map do |r|
-      next r unless r.id == id
-      found = true
-      r.copy_with(enabled: enabled)
-    end
-    ok = found && save
-    self.rewriter_rules = prev_rules unless ok
-    ok
+    commit(rewriter_rules, replace_by_id(rewriter_rules, id, &.copy_with(enabled: enabled)))
   end
 
   # Whether the global rule `id` is one this binary must hold inert, as the list stands NOW —
@@ -455,16 +433,10 @@ module Gori::Settings
 
   def self.delete_rewriter_rule(id : Int64) : Bool
     reload_rewriter_from_disk # see `update_rewriter_rule`
-    prev_rules = rewriter_rules
-    kept = rewriter_rules.reject { |r| r.id == id }
-    return false if kept.size == rewriter_rules.size
-    self.rewriter_rules = kept
     # This one fails the OTHER way round: a dropped-then-unsaved rule has stopped rewriting
     # while the caller reports "not deleted — it is still rewriting traffic". An operator
     # deleting a containment rule has to be able to trust that sentence.
-    return true if save
-    self.rewriter_rules = prev_rules
-    false
+    commit(rewriter_rules, remove_by_id(rewriter_rules, id))
   end
 
   # Swap the rule one slot earlier (dir < 0) / later (dir > 0) among the GLOBAL rules. Never
@@ -476,18 +448,7 @@ module Gori::Settings
     # actually holds — swapping inside a stale copy would also silently re-persist that copy's
     # order over a peer's reordering, which the merge then honours as ours.
     reload_rewriter_from_disk
-    list = rewriter_rules.dup
-    i = list.index { |r| r.id == id }
-    return false unless i
-    j = i + (dir < 0 ? -1 : 1)
-    return false if j < 0 || j >= list.size
-    return false if list[i].inert? || list[j].inert?
-    list[i], list[j] = list[j], list[i]
-    prev_rules = rewriter_rules
-    self.rewriter_rules = list
-    return true if save
-    self.rewriter_rules = prev_rules
-    false
+    commit(rewriter_rules, swap_adjacent(rewriter_rules, id, dir) { |a, b| a.inert? || b.inert? })
   end
 
   # The #1237 keys, written only when they say something the rule's other fields do not: a raw
