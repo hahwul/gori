@@ -14,6 +14,7 @@ private class PaceHarness
   include Gori::Pacing
 
   getter stamps = [] of Time::Instant
+  property? stopped = false
 
   def initialize(@config : PaceConfig)
     @last_dispatch = Time.instant
@@ -70,5 +71,16 @@ describe Gori::Pacing do
 
     burst = h.stamps[1..]
     (burst.max - burst.min).should be >= 25.milliseconds
+  end
+
+  # A `--rate` of 1e-9 is a gap of MAX_INTERVAL_SECONDS; one unsliced sleep held a stopped
+  # run "running" for a day.
+  it "ends a long wait once the run is stopped" do
+    h = PaceHarness.new(PaceConfig.new(throttle_ms: 600_000))
+    h.send_one # claims the first slot; the next is ten minutes out
+    spawn { sleep 50.milliseconds; h.stopped = true }
+    started = Time.instant
+    h.send_one
+    (Time.instant - started).should be < 2.seconds
   end
 end

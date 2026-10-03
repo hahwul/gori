@@ -91,6 +91,10 @@ module Gori::Sequencer
       end
     end
 
+    def stopped? : Bool
+      @stopped
+    end
+
     def stop : Nil
       @stopped = true
       # The dispatcher may be HOLDING for an in-flight sample to settle (see

@@ -10,9 +10,10 @@ module Gori
   # the Miner's copy would have seen an unexplained line begging to be tidied back into the
   # branch. Sharing the code shares the reasoning with it.
   #
-  # The including class supplies two things, which is the whole contract:
+  # The including class supplies three things, which is the whole contract:
   #   `@config`         — responds to `rps`, `throttle_ms` and `jitter_ms`
   #   `@last_dispatch`  — a `Time::Instant` it also initialises
+  #   `stopped?`        — true once the run was asked to stop; ends a wait in progress
   #
   # `@last_dispatch` is deliberately the includer's own ivar rather than state owned here:
   # each engine keeps ONE clock for its whole run. It is shared across the orchestrator and
@@ -63,11 +64,26 @@ module Gori
         now = Time.instant
         target = {@last_dispatch, now}.max
         @last_dispatch = target + interval # claim it before sleeping — no yield in between
-        sleep(target - now) if now < target
+        nap(target - now) if now < target
       end
       # Jitter applies on its own — don't gate it behind a base rate, which silently
       # dropped jitter unless rps/throttle was also set.
-      sleep(rand(@config.jitter_ms).milliseconds) if @config.jitter_ms > 0
+      nap(rand(@config.jitter_ms).milliseconds) if @config.jitter_ms > 0
+    end
+
+    NAP_SLICE = 250.milliseconds
+
+    # `sleep`, in slices that re-check `stopped?`. A gap can be MAX_INTERVAL_SECONDS (a
+    # `--rate` of 1e-9) or a ten-minute throttle, and one unsliced sleep held the run
+    # "running" through a stop for that long — while MCP refused to switch or delete the
+    # project until it ended.
+    private def nap(span : Time::Span) : Nil
+      deadline = Time.instant + span
+      until stopped?
+        left = deadline - Time.instant
+        break unless left.positive?
+        sleep({left, NAP_SLICE}.min)
+      end
     end
 
     # A non-blocking channel send: deliver `value` if the buffer has room, drop it otherwise.

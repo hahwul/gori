@@ -1114,6 +1114,10 @@ module Gori::Fuzz
       end
     end
 
+    def stopped? : Bool
+      @stopped
+    end
+
     def stop : Nil
       @stopped = true
     end
