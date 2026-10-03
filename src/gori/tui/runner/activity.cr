@@ -45,29 +45,13 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     @toast = "copied event (#{written}b)#{Clipboard.note(written, text)}"
   end
 
-  def activity_filter_source : Nil
-    project_controller.activity_filter_source
-  end
-
-  def activity_filter_level : Nil
-    project_controller.activity_filter_level
-  end
-
-  def activity_filter_actor : Nil
-    project_controller.activity_filter_actor
-  end
-
-  def activity_clear_filters : Nil
-    project_controller.activity_clear_filters
-  end
-
-  def activity_find : Nil
-    project_controller.activity_find
-  end
-
-  def activity_refresh : Nil
-    project_controller.activity_refresh
-  end
+  forward activity_filter_source : Nil,
+    activity_filter_level : Nil,
+    activity_filter_actor : Nil,
+    activity_clear_filters : Nil,
+    activity_find : Nil,
+    activity_refresh : Nil,
+    to: project_controller
 
   # DESTRUCTIVE, and the prompt has to say which record is going. `c` in the notification
   # center empties a hundred in-memory notes; `c` here deletes the durable log of what every

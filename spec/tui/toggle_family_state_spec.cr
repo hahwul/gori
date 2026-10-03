@@ -78,7 +78,7 @@ describe "toggle-family row state (#1274 WP9)" do
       v.exit_target_insert! if v.target_insert?
       ctl.pane_captures_keys?.should be_false
       ctl.menu_state("repeater.toggle-sni").should eq("off")
-      ctl.repeater_toggle_sni
+      ctl.toggle_sni
       ctl.pane_captures_keys?.should be_true
     end
   end

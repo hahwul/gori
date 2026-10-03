@@ -10,9 +10,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
 
   # --- notes scratchpad (sub-tab actions). The body's text editing stays inline
   # in NotesController; these power the space menu reachable from the sub-tab strip. ---
-  def notes_new : Nil
-    notes_controller.notes_new
-  end
+  forward notes_new : Nil, to: notes_controller
 
   def notes_close : Nil
     notes_controller.notes_close
@@ -23,21 +21,11 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     notes_controller.notes_duplicate
   end
 
-  def notes_copy : Nil
-    notes_controller.notes_copy
-  end
-
-  def notes_copy_all : Nil
-    notes_controller.notes_copy_all
-  end
-
-  def notes_read_mode? : Bool
-    notes_controller.notes_read_mode?
-  end
-
-  def notes_clear : Nil
-    notes_controller.notes_clear
-  end
+  forward notes_copy : Nil,
+    notes_copy_all : Nil,
+    notes_read_mode? : Bool,
+    notes_clear : Nil,
+    to: notes_controller
 
   # Write the current note to a .md file (space menu → "Export note…").
   #

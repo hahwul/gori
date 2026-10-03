@@ -5,13 +5,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     probe_controller.probe_move(delta)
   end
 
-  def probe_open : Nil
-    probe_controller.probe_open
-  end
-
-  def probe_close : Nil
-    probe_controller.probe_close
-  end
+  forward probe_open : Nil,
+    probe_close : Nil,
+    to: probe_controller
 
   # `⇧N`/`⇧P` in the drill-in — the next/previous finding, in place.
   def probe_step_item(delta : Int32) : Nil
@@ -22,34 +18,20 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     probe_controller.view.start_query
   end
 
-  def probe_clear : Nil
-    probe_controller.probe_clear
-  end
-
-  def probe_delete : Nil
-    probe_controller.probe_delete
-  end
+  forward probe_clear : Nil,
+    probe_delete : Nil,
+    to: probe_controller
 
   # Open the MODE picker (a shell overlay); its injected commit applies it to the analyzer.
   def probe_set_mode : Nil
     open_choice_picker(ChoicePicker.for_probe_mode(@session.probe.mode.value)) { |p| apply_probe_mode(p) }
   end
 
-  def probe_dismiss : Nil
-    probe_controller.probe_dismiss
-  end
-
-  def probe_toggle_closed : Nil
-    probe_controller.probe_toggle_closed
-  end
-
-  def probe_dismiss_code : Nil
-    probe_controller.probe_dismiss_code
-  end
-
-  def probe_dismiss_host : Nil
-    probe_controller.probe_dismiss_host
-  end
+  forward probe_dismiss : Nil,
+    probe_toggle_closed : Nil,
+    probe_dismiss_code : Nil,
+    probe_dismiss_host : Nil,
+    to: probe_controller
 
   # Jump from an issue to its sample evidence: History flow when present, else the
   # Repeater tab that first produced the hit (Repeater-sourced passive issues).
@@ -215,9 +197,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   end
 
   # A Probe issue's detail is open — the gate for its read panes' verbs (either pane).
-  def probe_detail_readable? : Bool
-    probe_controller.probe_detail_readable?
-  end
+  forward probe_detail_readable? : Bool, to: probe_controller
 
   # An AFFECTED URL is under the caret — `probe_affected_url` already answers nil while
   # DESCRIPTION holds focus, so this reads the same fact `probe_open_affected` acts on rather
@@ -226,7 +206,5 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     !probe_controller.probe_affected_url.nil?
   end
 
-  def probe_issue_selected? : Bool
-    probe_controller.probe_issue_selected?
-  end
+  forward probe_issue_selected? : Bool, to: probe_controller
 end

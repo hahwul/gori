@@ -26,9 +26,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     end
   end
 
-  def sequence_run : Nil
-    sequencer_controller.sequence_run
-  end
+  forward sequence_run : Nil, to: sequencer_controller
 
   # The strip's raw `e` rename / ^W close, promoted to verbs — `Runner#renameable_subtabs?`
   # and `#subtab_close` have listed :sequencer all along, but there were no verbs, so this
@@ -41,9 +39,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     sequencer_controller.request_close
   end
 
-  def sequence_stop : Nil
-    sequencer_controller.sequence_stop
-  end
+  forward sequence_stop : Nil, to: sequencer_controller
 
   def sequence_configure : Nil
     reconfigure_sequence
@@ -71,11 +67,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   end
 
   # The ANALYSIS report holds focus — the gate for its read verbs.
-  def sequencer_analysis_readable? : Bool
-    sequencer_controller.sequencer_analysis_readable?
-  end
+  forward sequencer_analysis_readable? : Bool, to: sequencer_controller
 
-  def sequencer_samples_readable? : Bool
-    sequencer_controller.sequencer_samples_readable?
-  end
+  forward sequencer_samples_readable? : Bool, to: sequencer_controller
 end

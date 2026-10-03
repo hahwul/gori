@@ -371,7 +371,7 @@ module Gori::Tui
       # when there is not (`Runner#read_copy`) — and the token said "copy" for both, so the
       # first `y` on an unselected response put 256 bytes on the clipboard and announced
       # "copied all" after the fact. The strip says which one it is about to be.
-      read_common = "⇧arrows select · #{y} copy#{repeater_selection_active? ? "" : " all"} · space cmds"
+      read_common = "⇧arrows select · #{y} copy#{selection_active? ? "" : " all"} · space cmds"
       if v.ws_mode?
         # The response column has two cards on a WS tab, so name the card being read and the
         # key that swaps them — the same shape `ws_hint` uses for the request column's two.
@@ -822,15 +822,6 @@ module Gori::Tui
       @host.status("gRPC fields: on — ↑/↓ pick · ↵ edit · #{framing} (#{chip("repeater.toggle-grpc-fields")}/esc exit)")
     end
 
-    def repeater_toggle_sni : Nil
-      if (view = current_view) && view.focus == :target
-        view.toggle_sni_field
-        @host.status(view.editing_sni? ? "SNI override: type a domain · ^S/↵/esc back to URL" : "editing target URL")
-      else
-        @host.status("SNI override (^S) applies to the TARGET pane — ↹ to it")
-      end
-    end
-
     def repeater_toggle_auto_content_length : Nil
       return unless view = current_view
       if view.request_hex?
@@ -956,11 +947,6 @@ module Gori::Tui
     def repeater_insert_marker : Nil
       return unless view = current_view
       @host.status(view.insert_marker)
-    end
-
-    def repeater_clear_marks : Nil
-      return unless view = current_view
-      @host.status(view.clear_marks)
     end
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
@@ -1159,28 +1145,6 @@ module Gori::Tui
       true
     end
 
-    def repeater_copy : Nil
-      v = current_view
-      return unless v
-      text = v.pane_copy_text
-      return if text.empty?
-      copy_text(text)
-    end
-
-    # The focused pane's selection (or current line) text without copying — for the
-    # "Send selection to" flow.
-    def repeater_selection_text : String
-      (v = current_view) ? v.pane_copy_text : ""
-    end
-
-    def repeater_copy_all : Nil
-      v = current_view
-      return unless v
-      text = v.pane_copy_all_text
-      return if text.empty?
-      copy_text(text, "all")
-    end
-
     def repeater_read_mode? : Bool
       v = current_view
       return false unless v
@@ -1280,18 +1244,6 @@ module Gori::Tui
         end
         {text.empty? ? [] of CopyMenu::Option : [CopyMenu::Option.new("Raw response", 'r', text)], count}
       end
-    end
-
-    def repeater_selection_active? : Bool
-      current_view.try(&.pane_selection?) == true
-    end
-
-    def repeater_select_line : Nil
-      current_view.try(&.pane_select_line)
-    end
-
-    def repeater_clear_selection : Nil
-      current_view.try(&.pane_clear_selection)
     end
 
     def commit : Nil

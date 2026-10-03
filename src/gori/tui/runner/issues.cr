@@ -48,26 +48,18 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     issues_controller.issues_move(delta)
   end
 
-  def issues_open : Nil
-    issues_controller.issues_open
-  end
-
-  def issue_close : Nil
-    issues_controller.issue_close
-  end
+  forward issues_open : Nil,
+    issue_close : Nil,
+    to: issues_controller
 
   # `⇧N`/`⇧P` in the drill-in — the next/previous issue, in place.
   def issue_step_item(delta : Int32) : Nil
     issues_controller.issue_step_item(delta)
   end
 
-  def issues_delete : Nil
-    issues_controller.issues_delete
-  end
-
-  def issues_clear : Nil
-    issues_controller.issues_clear
-  end
+  forward issues_delete : Nil,
+    issues_clear : Nil,
+    to: issues_controller
 
   # The ONE resolver every batch-capable Issues verb calls: the marks if any are set, else
   # the cursor row — and just the open issue when the detail is up, which is pinned to one
@@ -90,21 +82,11 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     issues_controller.view.selected_id
   end
 
-  def marked_issue_count : Int32
-    issues_controller.marked_issue_count
-  end
-
-  def issues_mark_toggle : Nil
-    issues_controller.issues_mark_toggle
-  end
-
-  def issues_mark_all : Nil
-    issues_controller.issues_mark_all
-  end
-
-  def issues_mark_clear : Nil
-    issues_controller.issues_mark_clear
-  end
+  forward marked_issue_count : Int32,
+    issues_mark_toggle : Nil,
+    issues_mark_all : Nil,
+    issues_mark_clear : Nil,
+    to: issues_controller
 
   def issues_mark_extend(delta : Int32) : Nil
     issues_controller.issues_mark_extend(delta)
@@ -163,21 +145,11 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       ids.each.compact_map { |id| store.get_issue(id) }.first?
   end
 
-  def issue_edit_notes : Nil
-    issues_controller.issue_edit_notes
-  end
-
-  def issues_notes_read_mode? : Bool
-    issues_controller.issues_notes_read_mode?
-  end
-
-  def issues_copy : Nil
-    issues_controller.issues_copy
-  end
-
-  def issues_copy_all : Nil
-    issues_controller.issues_copy_all
-  end
+  forward issue_edit_notes : Nil,
+    issues_notes_read_mode? : Bool,
+    issues_copy : Nil,
+    issues_copy_all : Nil,
+    to: issues_controller
 
   # Re-open the create form seeded from the open issue (title + severity), in
   # edit mode — commit updates instead of inserting (create_issue_from_form).

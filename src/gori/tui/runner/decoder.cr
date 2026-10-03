@@ -5,9 +5,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # focus nav stay inline in DecoderController; these power the space menu (reachable
   # from the sub-tab strip) + the palette. decoder_new already drops to the body; the
   # save/load prompts are serviced by the body editor, so focus there first. ---
-  def decoder_new : Nil
-    decoder_controller.decoder_new
-  end
+  forward decoder_new : Nil, to: decoder_controller
 
   def decoder_close : Nil
     decoder_controller.decoder_close
@@ -29,17 +27,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     decoder_controller.clear_all
   end
 
-  def decoder_copy_selection : Nil
-    decoder_controller.decoder_copy_selection
-  end
-
-  def decoder_copy_all : Nil
-    decoder_controller.decoder_copy_all
-  end
-
-  def decoder_read_mode? : Bool
-    decoder_controller.decoder_read_mode?
-  end
+  forward decoder_copy_selection : Nil,
+    decoder_copy_all : Nil,
+    decoder_read_mode? : Bool,
+    to: decoder_controller
 
   def decoder_cycle_mode : Nil
     decoder_controller.cycle_output_mode

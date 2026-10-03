@@ -37,8 +37,10 @@ describe "the ask: chip" do
     mouse.join('\n').should contain("asks: answerable_questions.size")
   end
 
-  it "is fed from both render calls" do
-    src("tui", "runner.cr").count(&.includes?("asks: answerable_questions.size")).should eq(2)
+  it "is fed from the chrome both render paths draw" do
+    lines = src("tui", "runner.cr")
+    lines.count(&.includes?("asks: answerable_questions.size")).should eq(1)
+    lines.count(&.includes?("render_chrome(screen, layout)")).should eq(2) # render + render_safe_frame
   end
 end
 

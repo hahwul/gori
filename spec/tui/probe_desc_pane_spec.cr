@@ -271,10 +271,10 @@ describe "the Probe detail's DESCRIPTION pane" do
           draw(ctl.view)
           ctl.pane_advance(1)
           ctl.view.detail_selection?.should be_false
-          ctl.probe_detail_select_line
+          ctl.select_line
           ctl.view.detail_selection?.should be_true
           ctl.view.detail_copy_text.should eq(Gori::Probe.remediation("missing_hsts"))
-          ctl.probe_detail_clear_selection
+          ctl.clear_selection
           ctl.view.detail_selection?.should be_false
         end
       end

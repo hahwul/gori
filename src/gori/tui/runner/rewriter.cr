@@ -22,41 +22,21 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
       name: "mock flow ##{id}"))
   end
 
-  def rewriter_add : Nil
-    rewriter_controller.rewriter_add
-  end
-
-  def rewriter_preset : Nil
-    rewriter_controller.rewriter_preset
-  end
-
-  def rewriter_edit : Nil
-    rewriter_controller.rewriter_edit
-  end
-
-  def rewriter_toggle : Nil
-    rewriter_controller.rewriter_toggle
-  end
-
-  def rewriter_delete : Nil
-    rewriter_controller.rewriter_delete
-  end
-
-  def rewriter_filter : Nil
-    rewriter_controller.rewriter_filter
-  end
+  forward rewriter_add : Nil,
+    rewriter_preset : Nil,
+    rewriter_edit : Nil,
+    rewriter_toggle : Nil,
+    rewriter_delete : Nil,
+    rewriter_filter : Nil,
+    to: rewriter_controller
 
   def rewriter_move(dir : Int32) : Nil
     rewriter_controller.rewriter_move(dir)
   end
 
-  def rewriter_duplicate : Nil
-    rewriter_controller.rewriter_duplicate
-  end
-
-  def rewriter_reload : Nil
-    rewriter_controller.rewriter_reload
-  end
+  forward rewriter_duplicate : Nil,
+    rewriter_reload : Nil,
+    to: rewriter_controller
 
   # A rule the operator can actually SEE is selected. The sub-tab half is load-bearing: the
   # Rewriter tab is one workflow with three sub-tabs, `selected_rule` is the RULES list
@@ -83,13 +63,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     rewriter_controller.rules_sub? && !!rewriter_controller.selected_rule.try(&.global?)
   end
 
-  def rewriter_scope_toggle : Nil
-    rewriter_controller.rewriter_scope_toggle
-  end
-
-  def rewriter_toggle_default : Nil
-    rewriter_controller.rewriter_toggle_default
-  end
+  forward rewriter_scope_toggle : Nil,
+    rewriter_toggle_default : Nil,
+    to: rewriter_controller
 
   # The PREVIEW OUTPUT pane holds focus — the gate for its four read verbs (x / v / S / y).
   def rewriter_preview_out? : Bool

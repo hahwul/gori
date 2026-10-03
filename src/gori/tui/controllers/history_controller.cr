@@ -502,15 +502,15 @@ module Gori::Tui
       true
     end
 
-    def detail_selection_active? : Bool
+    def selection_active? : Bool
       @history.detail_selection?
     end
 
-    def detail_select_line : Nil
+    def select_line : Nil
       @history.detail_select_line
     end
 
-    def detail_clear_selection : Nil
+    def clear_selection : Nil
       @history.detail_clear_selection
     end
 
@@ -1085,7 +1085,7 @@ module Gori::Tui
     # to be the caret's own LINE, which on a request/response dump is the one thing nobody
     # reaches for `y` to get — and it made this pane the last holdout against the rule every
     # other read pane follows (`Runner#read_copy`: selection if active, else the whole pane).
-    # `detail_selection_text` keeps the line fallback: "Send selection to" is gated on a live
+    # `selection_text` keeps the line fallback: "Send selection to" is gated on a live
     # selection, so its payload is never the fallback anyway.
     def detail_copy : Nil
       sel = @history.detail_selection?
@@ -1094,7 +1094,7 @@ module Gori::Tui
     end
 
     # The detail pane's selection (or current line) text without copying — "Send selection to".
-    def detail_selection_text : String
+    def selection_text : String
       @history.detail_copy_text
     end
 

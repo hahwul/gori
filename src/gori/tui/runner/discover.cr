@@ -69,17 +69,10 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     end
   end
 
-  def discover_run : Nil
-    discover_controller.discover_run
-  end
-
-  def discover_stop : Nil
-    discover_controller.discover_stop
-  end
-
-  def discover_toggle_pause : Nil
-    discover_controller.discover_toggle_pause
-  end
+  forward discover_run : Nil,
+    discover_stop : Nil,
+    discover_toggle_pause : Nil,
+    to: discover_controller
 
   def discover_prev_run : Nil
     discover_controller.view.move_run(-1)
@@ -89,13 +82,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     discover_controller.view.move_run(1)
   end
 
-  def discover_dismiss : Nil
-    discover_controller.discover_dismiss
-  end
-
-  def discover_filter : Nil
-    discover_controller.discover_filter
-  end
+  forward discover_dismiss : Nil,
+    discover_filter : Nil,
+    to: discover_controller
 
   # Open the bytes behind the selected finding. CROSS-TAB mediator, and deliberately the SAME
   # hop `sitemap_open_flow` makes from the neighbouring sub-tab: the run recorded the request

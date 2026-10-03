@@ -682,7 +682,7 @@ module Gori::Tui
       text = case s.pane
              when :output then s.view.output_copy_text(s.result)
              when :input  then input_copy_text(s)
-             else              "" # CHAIN has no selection (`decoder_selection_active?`); see decoder_copy_all
+             else              "" # CHAIN has no selection (`selection_active?`); see decoder_copy_all
              end
       copy_text(text)
     end
@@ -707,7 +707,7 @@ module Gori::Tui
 
     # The focused pane's selection (or current line) text without copying — for the
     # "Send selection to" flow. Mirrors decoder_copy_selection's pane routing.
-    def decoder_selection_text : String
+    def selection_text : String
       s = cur
       case s.pane
       when :output then s.view.output_copy_text(s.result)
@@ -722,7 +722,7 @@ module Gori::Tui
     end
 
     # The INPUT pane's two selection models, one per mode — see RepeaterView#pane_selection?.
-    # `decoder_selection_active?` and `input_copy_text` change together: claiming a selection
+    # `selection_active?` and `input_copy_text` change together: claiming a selection
     # while copy still read `input_read` would offer "Copy selection" and copy the caret line.
     private def input_copy_text(s) : String
       if s.input_mode == InputMode::Insert
@@ -732,7 +732,7 @@ module Gori::Tui
       end
     end
 
-    def decoder_selection_active? : Bool
+    def selection_active? : Bool
       s = cur
       case s.pane
       when :input
@@ -742,7 +742,7 @@ module Gori::Tui
       end
     end
 
-    def decoder_select_line : Nil
+    def select_line : Nil
       s = cur
       case s.pane
       when :input  then s.input_read.select_line(s.input) unless s.input_mode == InputMode::Insert
@@ -750,7 +750,7 @@ module Gori::Tui
       end
     end
 
-    def decoder_clear_selection : Nil
+    def clear_selection : Nil
       s = cur
       case s.pane
       when :input  then s.input_read.clear_selection

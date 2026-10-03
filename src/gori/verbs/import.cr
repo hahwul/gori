@@ -5,25 +5,25 @@ module Gori
     def self.register_import(r : Verb::Registry) : Nil
       r.register Verb::Definition.new(
         "import.har", "Import: HAR", "Import HTTP flows from a HAR file into History",
-        Verb::Scope::Global, category: Verb::Category::Action) { |ctx| ctx.import_har; nil }
+        Verb::Scope::Global, category: Verb::Category::Action) { |ctx| ctx.open_import(:har); nil }
       r.register Verb::Definition.new(
         "import.urls", "Import: URLs", "Import URLs from a text file into History (one URL per line)",
-        Verb::Scope::Global, category: Verb::Category::Action) { |ctx| ctx.import_urls; nil }
+        Verb::Scope::Global, category: Verb::Category::Action) { |ctx| ctx.open_import(:urls); nil }
       r.register Verb::Definition.new(
         "import.oas", "Import: OpenAPI", "Import request templates from an OpenAPI spec into History",
-        Verb::Scope::Global, category: Verb::Category::Action) { |ctx| ctx.import_oas; nil }
+        Verb::Scope::Global, category: Verb::Category::Action) { |ctx| ctx.open_import(:oas); nil }
       r.register Verb::Definition.new(
         "import.postman", "Import: Postman", "Import request templates from a Postman Collection v2 export",
-        Verb::Scope::Global, category: Verb::Category::Action) { |ctx| ctx.import_postman; nil }
+        Verb::Scope::Global, category: Verb::Category::Action) { |ctx| ctx.open_import(:postman); nil }
       r.register Verb::Definition.new(
         "import.insomnia", "Import: Insomnia", "Import request templates from an Insomnia v4 JSON export",
-        Verb::Scope::Global, category: Verb::Category::Action) { |ctx| ctx.import_insomnia; nil }
+        Verb::Scope::Global, category: Verb::Category::Action) { |ctx| ctx.open_import(:insomnia); nil }
       r.register Verb::Definition.new(
         "import.burp", "Import: Burp", "Import saved Burp items (request + response) into History",
-        Verb::Scope::Global, category: Verb::Category::Action) { |ctx| ctx.import_burp; nil }
+        Verb::Scope::Global, category: Verb::Category::Action) { |ctx| ctx.open_import(:burp); nil }
       r.register Verb::Definition.new(
         "import.wsdl", "Import: WSDL", "Import SOAP request templates from a WSDL 1.1 service description",
-        Verb::Scope::Global, category: Verb::Category::Action) { |ctx| ctx.import_wsdl; nil }
+        Verb::Scope::Global, category: Verb::Category::Action) { |ctx| ctx.open_import(:wsdl); nil }
       # A paste box, not a path prompt: a curl command is copied, rarely saved (#1244).
       r.register Verb::Definition.new(
         "import.curl", "Import: cURL", "Paste curl command(s) and import each request into History",

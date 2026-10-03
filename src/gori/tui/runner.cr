@@ -119,6 +119,21 @@ require "./keybind"
 require "../scope"
 require "../rules"
 require "../import"
+
+# Declared ahead of the class-reopen slices below, which use it.
+class Gori::Tui::Runner < Gori::Verb::ExecContext
+  # `forward a : Nil, b? : Bool, to: x_controller` emits `def a : Nil; x_controller.a; end`
+  # per name: the ExecContext verbs that only hand off to a same-named controller method.
+  # Stdlib `delegate` emits untyped defs, which do not satisfy ExecContext's typed abstracts.
+  private macro forward(*defs, to)
+    {% for d in defs %}
+      def {{ d.var }} : {{ d.type }}
+        {{ to }}.{{ d.var }}
+      end
+    {% end %}
+  end
+end
+
 require "./runner/agent_message"
 require "./runner/agent_question"
 require "./runner/agent_presence"
@@ -406,13 +421,11 @@ module Gori::Tui
     # actions, the shell's ExecContext delegates) is downcast here, ONCE per tab, so
     # call sites stay cast-free. The key is always present after initialize, so `.as`
     # never raises in practice (a missing key would be a registry-wiring bug).
-    private def help_controller : HelpController
-      @tabs[:help].as(HelpController)
-    end
-
-    private def target_controller : TargetController
-      @tabs[:target].as(TargetController)
-    end
+    {% for tab in %w(help target intercept notes history issues evidence probe project repeater fuzzer miner oast sequencer comparer authorize decoder jwt cookie rewriter colormarker) %}
+      private def {{ tab.id }}_controller : {{ tab.camelcase.id }}Controller
+        @tabs[:{{ tab.id }}].as({{ tab.camelcase.id }}Controller)
+      end
+    {% end %}
 
     # Sitemap + Discover are sub-tabs composed under the Target parent, so their controllers
     # are reached through it (they aren't registered in @tabs directly).
@@ -422,82 +435,6 @@ module Gori::Tui
 
     private def discover_controller : DiscoverController
       target_controller.discover
-    end
-
-    private def intercept_controller : InterceptController
-      @tabs[:intercept].as(InterceptController)
-    end
-
-    private def notes_controller : NotesController
-      @tabs[:notes].as(NotesController)
-    end
-
-    private def history_controller : HistoryController
-      @tabs[:history].as(HistoryController)
-    end
-
-    private def issues_controller : IssuesController
-      @tabs[:issues].as(IssuesController)
-    end
-
-    private def evidence_controller : EvidenceController
-      @tabs[:evidence].as(EvidenceController)
-    end
-
-    private def probe_controller : ProbeController
-      @tabs[:probe].as(ProbeController)
-    end
-
-    private def project_controller : ProjectController
-      @tabs[:project].as(ProjectController)
-    end
-
-    private def repeater_controller : RepeaterController
-      @tabs[:repeater].as(RepeaterController)
-    end
-
-    private def fuzzer_controller : FuzzerController
-      @tabs[:fuzzer].as(FuzzerController)
-    end
-
-    private def miner_controller : MinerController
-      @tabs[:miner].as(MinerController)
-    end
-
-    private def oast_controller : OastController
-      @tabs[:oast].as(OastController)
-    end
-
-    private def sequencer_controller : SequencerController
-      @tabs[:sequencer].as(SequencerController)
-    end
-
-    private def comparer_controller : ComparerController
-      @tabs[:comparer].as(ComparerController)
-    end
-
-    private def authorize_controller : AuthorizeController
-      @tabs[:authorize].as(AuthorizeController)
-    end
-
-    private def decoder_controller : DecoderController
-      @tabs[:decoder].as(DecoderController)
-    end
-
-    private def jwt_controller : JwtController
-      @tabs[:jwt].as(JwtController)
-    end
-
-    private def cookie_controller : CookieController
-      @tabs[:cookie].as(CookieController)
-    end
-
-    private def rewriter_controller : RewriterController
-      @tabs[:rewriter].as(RewriterController)
-    end
-
-    private def colormarker_controller : ColormarkerController
-      @tabs[:colormarker].as(ColormarkerController)
     end
 
     # The flow to open this session on, set by the caller before `run`: the project picker's
@@ -1414,15 +1351,14 @@ module Gori::Tui
       search_recompute # a ^F prompt open over the reloaded view keeps fresh hits
     end
 
+    # Never blocks: nil when no event is waiting, and (`receive?`) when the channel is closed.
     private def nonblocking_event : Store::FlowEvent?
       select
-      when e = @session.flow_events.receive
+      when e = @session.flow_events.receive?
         e
       else
         nil
       end
-    rescue Channel::ClosedError
-      nil
     end
 
     # Collapses a pasted CRLF into one newline — see `PasteNewline`. Filtered here, at the
@@ -3004,24 +2940,7 @@ module Gori::Tui
         render_safe_frame(screen, layout, failed)
         return
       end
-      Chrome.render_top_bar(screen, layout.topbar, project: @session.project.name,
-        listen: listen_chip_label,
-        scope: scope_label, probe: probe_label, rules: rules_label, intercept: intercept_label,
-        sandbox: sandbox_label,
-        unread: @notifications.unread, capturing: @session.capturing?,
-        write_failures: @session.store.write_failures, bypass: Settings.passthrough_count,
-        listeners: listener_chip_count, listener_errors: @session.listener_errors.size,
-        authorize: authorize_chip_label, session: session_slot_chip, agents: agent_chip,
-        asks: answerable_questions.size)
-      Chrome.render_rule(screen, layout.rule)
-      # One reconcile per frame: the menu strip, the off-bar count AND the slot numbers all
-      # derive from the same tab reconcile — split_tabs computes them in a single pass.
-      vis_tabs, _, slots = effective_bar
-      Chrome.render_menu(screen, layout.menu, active_tab: @active_tab,
-        focused: @focus == :menu && !@menu_more,
-        tabs: vis_tabs, intercept_count: @session.interceptor.pending_count,
-        more_focused: @focus == :menu && @menu_more,
-        numbered: Settings.tab_numbers?, slots: slots)
+      render_chrome(screen, layout)
       # Text the companion will cover is ellipsized at her edge, not left as a stump that reads
       # like a real value (see Screen#occlusion). Body only: nothing else shares her rows.
       screen.occlusion = companion_occlusion(layout.body)
@@ -3060,13 +2979,8 @@ module Gori::Tui
       flush_screen
     end
 
-    # The frame drawn while a full render is failing (see `absorb_tick_error`): the top bar,
-    # the tab menu and the status row exactly as `render` draws them, and the error where the
-    # body would be. Nothing pane-owned is asked to draw — the body, the companion, overlays,
-    # the prompts and the controllers' hint strips are all suspects — so this frame can only
-    # fail if the chrome itself is broken. The tab menu is kept LIVE (focus, active tab) so
-    # 1-9 / ←→ still read as what they do: the way out of a tab that cannot draw.
-    private def render_safe_frame(screen : Screen, layout : Layout, ex : Exception) : Nil
+    # The top bar, rule and tab menu — shared by `render` and `render_safe_frame`.
+    private def render_chrome(screen : Screen, layout : Layout) : Nil
       Chrome.render_top_bar(screen, layout.topbar, project: @session.project.name,
         listen: listen_chip_label,
         scope: scope_label, probe: probe_label, rules: rules_label, intercept: intercept_label,
@@ -3077,12 +2991,24 @@ module Gori::Tui
         authorize: authorize_chip_label, session: session_slot_chip, agents: agent_chip,
         asks: answerable_questions.size)
       Chrome.render_rule(screen, layout.rule)
+      # One reconcile per frame: the menu strip, the off-bar count AND the slot numbers all
+      # derive from the same tab reconcile — split_tabs computes them in a single pass.
       vis_tabs, _, slots = effective_bar
       Chrome.render_menu(screen, layout.menu, active_tab: @active_tab,
         focused: @focus == :menu && !@menu_more,
         tabs: vis_tabs, intercept_count: @session.interceptor.pending_count,
         more_focused: @focus == :menu && @menu_more,
         numbered: Settings.tab_numbers?, slots: slots)
+    end
+
+    # The frame drawn while a full render is failing (see `absorb_tick_error`): the top bar,
+    # the tab menu and the status row exactly as `render` draws them, and the error where the
+    # body would be. Nothing pane-owned is asked to draw — the body, the companion, overlays,
+    # the prompts and the controllers' hint strips are all suspects — so this frame can only
+    # fail if the chrome itself is broken. The tab menu is kept LIVE (focus, active tab) so
+    # 1-9 / ←→ still read as what they do: the way out of a tab that cannot draw.
+    private def render_safe_frame(screen : Screen, layout : Layout, ex : Exception) : Nil
+      render_chrome(screen, layout)
       body = layout.body
       # A message may carry wire bytes or newlines (an IndexError's does not, a parser's may):
       # one line, valid UTF-8, or the frame meant to report the crash would be the next one.
@@ -4540,7 +4466,7 @@ module Gori::Tui
 
     # --- Import path popup (palette → import.har/urls/oas/postman/insomnia/burp/wsdl) ---
 
-    private def open_import(kind : Symbol) : Nil
+    def open_import(kind : Symbol) : Nil
       ov = ImportOverlay.new(kind)
       ov.on_commit = -> { submit_import(ov) }
       open_overlay(ov)
@@ -6149,100 +6075,31 @@ module Gori::Tui
       "Clear #{Gori.plural(n, "mark")}" if verb_id == "issues.mark-clear"
     end
 
+    # The tab whose READ-mode selection hooks (`TabController#selection_active?` and friends)
+    # the `read_*` verbs reach. History's selection lives in its detail overlay, so that tab
+    # only counts while the overlay is open.
+    private def read_tab : TabController?
+      return nil if @active_tab == :history && !@overlay.detail?
+      @tabs[@active_tab]?
+    end
+
     def read_selection_active? : Bool
-      case @active_tab
-      when :notes     then notes_controller.view.selection?
-      when :repeater  then repeater_controller.repeater_selection_active?
-      when :fuzzer    then fuzzer_controller.fuzzer_selection_active?
-      when :decoder   then decoder_controller.decoder_selection_active?
-      when :jwt       then jwt_controller.selection_active?
-      when :cookie    then cookie_controller.selection_active?
-      when :issues    then issues_controller.issues_notes_selection_active?
-      when :project   then project_controller.project_desc_selection_active?
-      when :rewriter  then rewriter_controller.rewriter_selection_active?
-      when :comparer  then comparer_controller.comparer_selection_active?
-      when :intercept then intercept_controller.intercept_preview_selection_active?
-      when :oast      then oast_controller.oast_detail_selection_active?
-      when :probe     then probe_controller.probe_detail_selection_active?
-      when :sequencer then sequencer_controller.sequencer_selection_active?
-      when :miner     then miner_controller.miner_selection_active?
-      when :history
-        @overlay.detail? && history_controller.detail_selection_active?
-      else
-        false
-      end
+      read_tab.try(&.selection_active?) || false
     end
 
     # The focused pane's current selection (or current line) as a string, without the
-    # clipboard write — the payload for "Send selection to". Mirrors
-    # read_selection_active?'s per-@active_tab dispatch, reusing each controller's
-    # *_selection_text getter. "" when the active tab has no selection surface.
+    # clipboard write — the payload for "Send selection to". "" when the active tab has no
+    # selection surface.
     def read_selection_text : String
-      case @active_tab
-      when :notes     then notes_controller.notes_selection_text
-      when :repeater  then repeater_controller.repeater_selection_text
-      when :fuzzer    then fuzzer_controller.fuzzer_selection_text
-      when :decoder   then decoder_controller.decoder_selection_text
-      when :jwt       then jwt_controller.selection_text
-      when :cookie    then cookie_controller.selection_text
-      when :issues    then issues_controller.issues_notes_selection_text
-      when :project   then project_controller.project_desc_selection_text
-      when :rewriter  then rewriter_controller.rewriter_selection_text
-      when :comparer  then comparer_controller.comparer_selection_text
-      when :intercept then intercept_controller.intercept_preview_selection_text
-      when :oast      then oast_controller.oast_detail_selection_text
-      when :probe     then probe_controller.probe_detail_selection_text
-      when :sequencer then sequencer_controller.sequencer_selection_text
-      when :miner     then miner_controller.miner_selection_text
-      when :history
-        @overlay.detail? ? history_controller.detail_selection_text : ""
-      else
-        ""
-      end
+      read_tab.try(&.selection_text) || ""
     end
 
     def read_select_line : Nil
-      case @active_tab
-      when :notes     then notes_controller.view.select_line
-      when :repeater  then repeater_controller.repeater_select_line
-      when :fuzzer    then fuzzer_controller.fuzzer_select_line
-      when :decoder   then decoder_controller.decoder_select_line
-      when :jwt       then jwt_controller.select_line
-      when :cookie    then cookie_controller.select_line
-      when :issues    then issues_controller.issues_notes_select_line
-      when :project   then project_controller.project_desc_select_line
-      when :rewriter  then rewriter_controller.rewriter_select_line
-      when :comparer  then comparer_controller.comparer_select_line
-      when :intercept then intercept_controller.intercept_preview_select_line
-      when :oast      then oast_controller.oast_detail_select_line
-      when :probe     then probe_controller.probe_detail_select_line
-      when :sequencer then sequencer_controller.sequencer_select_line
-      when :miner     then miner_controller.miner_select_line
-      when :history
-        history_controller.detail_select_line if @overlay.detail?
-      end
+      read_tab.try(&.select_line)
     end
 
     def read_clear_selection : Nil
-      case @active_tab
-      when :notes     then notes_controller.view.clear_selection
-      when :repeater  then repeater_controller.repeater_clear_selection
-      when :fuzzer    then fuzzer_controller.fuzzer_clear_selection
-      when :decoder   then decoder_controller.decoder_clear_selection
-      when :jwt       then jwt_controller.clear_selection
-      when :cookie    then cookie_controller.clear_selection
-      when :issues    then issues_controller.issues_notes_clear_selection
-      when :project   then project_controller.project_desc_clear_selection
-      when :rewriter  then rewriter_controller.rewriter_clear_selection
-      when :comparer  then comparer_controller.comparer_clear_selection
-      when :intercept then intercept_controller.intercept_preview_clear_selection
-      when :oast      then oast_controller.oast_detail_clear_selection
-      when :probe     then probe_controller.probe_detail_clear_selection
-      when :sequencer then sequencer_controller.sequencer_clear_selection
-      when :miner     then miner_controller.miner_clear_selection
-      when :history
-        history_controller.detail_clear_selection if @overlay.detail?
-      end
+      read_tab.try(&.clear_selection)
     end
 
     # The unified "Copy" fallback: selection if one is active, else the whole
@@ -6262,8 +6119,8 @@ module Gori::Tui
     private def read_copy_dispatch : Nil
       case @active_tab
       when :notes    then read_selection_active? ? notes_copy : notes_copy_all
-      when :repeater then read_selection_active? ? repeater_copy : repeater_copy_all
-      when :fuzzer   then read_selection_active? ? fuzzer_copy : fuzzer_copy_all
+      when :repeater then read_selection_active? ? repeater_controller.copy : repeater_controller.copy_all
+      when :fuzzer   then read_selection_active? ? fuzzer_controller.copy : fuzzer_controller.copy_all
       when :decoder  then read_selection_active? ? decoder_copy_selection : decoder_copy_all
       when :jwt      then jwt_copy
       when :cookie   then cookie_copy
@@ -6576,32 +6433,6 @@ module Gori::Tui
       persisted ? line : "#{line} — but NOT saved (project busy); it reverts when you reopen this project"
     end
 
-    # Open the settings editor for `section` (palette → settings:network/editor/theme/
-    # tabs/hotkeys). All sections are implemented; an unknown one toasts a TODO.
-    def import_har : Nil
-      open_import(:har)
-    end
-
-    def import_urls : Nil
-      open_import(:urls)
-    end
-
-    def import_oas : Nil
-      open_import(:oas)
-    end
-
-    def import_postman : Nil
-      open_import(:postman)
-    end
-
-    def import_insomnia : Nil
-      open_import(:insomnia)
-    end
-
-    def import_burp : Nil
-      open_import(:burp)
-    end
-
     def import_running? : Bool
       !@import_job.nil?
     end
@@ -6610,10 +6441,6 @@ module Gori::Tui
       return @toast = "no import is running" unless @import_job
       @import_cancel = true
       status("cancelling the import after its current chunk…", :busy)
-    end
-
-    def import_wsdl : Nil
-      open_import(:wsdl)
     end
 
     def import_curl : Nil

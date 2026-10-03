@@ -238,19 +238,19 @@ module Gori::Tui
       current_view.try { |v| v.focus == :results && !v.selected_finding.nil? } || false
     end
 
-    def miner_selection_active? : Bool
+    def selection_active? : Bool
       current_view.try(&.detail_selection?) || false
     end
 
-    def miner_selection_text : String
+    def selection_text : String
       current_view.try(&.detail_copy_text) || ""
     end
 
-    def miner_select_line : Nil
+    def select_line : Nil
       current_view.try(&.detail_select_line)
     end
 
-    def miner_clear_selection : Nil
+    def clear_selection : Nil
       current_view.try(&.detail_clear_selection)
     end
 

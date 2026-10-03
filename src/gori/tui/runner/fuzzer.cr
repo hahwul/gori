@@ -36,33 +36,14 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     fuzzer_controller.fuzz_from_request(v.target, v.fuzz_seed_text, v.http2?, v.sni_override)
   end
 
-  def fuzz_run : Nil
-    fuzzer_controller.fuzz_run
-  end
-
-  def fuzz_stop : Nil
-    fuzzer_controller.fuzz_stop
-  end
-
-  def fuzz_cycle_sort : Nil
-    fuzzer_controller.fuzz_cycle_sort
-  end
-
-  def fuzz_toggle_matched : Nil
-    fuzzer_controller.fuzz_toggle_matched
-  end
-
-  def fuzz_toggle_dist : Nil
-    fuzzer_controller.fuzz_toggle_dist
-  end
-
-  def fuzz_toggle_group : Nil
-    fuzzer_controller.fuzz_toggle_group
-  end
-
-  def fuzz_save_results : Nil
-    fuzzer_controller.fuzz_save_results
-  end
+  forward fuzz_run : Nil,
+    fuzz_stop : Nil,
+    fuzz_cycle_sort : Nil,
+    fuzz_toggle_matched : Nil,
+    fuzz_toggle_dist : Nil,
+    fuzz_toggle_group : Nil,
+    fuzz_save_results : Nil,
+    to: fuzzer_controller
 
   def fuzzer_results_saveable? : Bool
     fuzzer_controller.results_saveable?
@@ -90,9 +71,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     open_overlay(picker)
   end
 
-  def fuzz_new : Nil
-    fuzzer_controller.fuzz_new
-  end
+  forward fuzz_new : Nil, to: fuzzer_controller
 
   def fuzz_automark : Nil
     (v = fuzzer_controller.current_view) && (@toast = v.auto_mark)
@@ -115,24 +94,18 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   end
 
   # ^L: open the multi-line paste popup for the List payload's values (again = apply + close).
-  def fuzz_list_paste : Nil
-    fuzzer_controller.fuzz_list_paste
-  end
+  forward fuzz_list_paste : Nil, to: fuzzer_controller
 
-  def fuzz_pretty_template : Nil
-    fuzzer_controller.fuzz_pretty_template
-  end
-
-  def fuzz_toggle_http2 : Nil
-    fuzzer_controller.fuzz_toggle_http2
-  end
+  forward fuzz_pretty_template : Nil,
+    fuzz_toggle_http2 : Nil,
+    to: fuzzer_controller
 
   def fuzz_toggle_sni : Nil
-    fuzzer_controller.fuzz_toggle_sni
+    fuzzer_controller.toggle_sni
   end
 
   def fuzz_clear_marks : Nil
-    fuzzer_controller.fuzz_clear_marks
+    fuzzer_controller.clear_marks
   end
 
   # Space-menu (:subtab) counterparts of the strip's `e` rename chord / ^W close —
@@ -149,17 +122,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     fuzzer_controller.fuzz_duplicate
   end
 
-  def fuzzer_copy : Nil
-    fuzzer_controller.fuzzer_copy
-  end
-
-  def fuzzer_copy_all : Nil
-    fuzzer_controller.fuzzer_copy_all
-  end
-
-  def fuzzer_read_mode? : Bool
-    fuzzer_controller.fuzzer_read_mode?
-  end
+  forward fuzzer_read_mode? : Bool, to: fuzzer_controller
 
   def fuzzer_result_selected? : Bool
     fuzzer_controller.result_selected?

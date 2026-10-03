@@ -406,14 +406,6 @@ private class FakeContext < ExecContext
     @calls << :repeater_attach_chain
   end
 
-  def repeater_copy : Nil
-    @calls << :repeater_copy
-  end
-
-  def repeater_copy_all : Nil
-    @calls << :repeater_copy_all
-  end
-
   def repeater_open_response_external : Nil
     @calls << :repeater_open_response_external
   end
@@ -520,14 +512,6 @@ private class FakeContext < ExecContext
 
   def fuzzer_duplicate_subtab : Nil
     @calls << :fuzzer_duplicate_subtab
-  end
-
-  def fuzzer_copy : Nil
-    @calls << :fuzzer_copy
-  end
-
-  def fuzzer_copy_all : Nil
-    @calls << :fuzzer_copy_all
   end
 
   def fuzzer_read_mode? : Bool
@@ -1995,32 +1979,8 @@ private class FakeContext < ExecContext
     @calls << :open_preferences
   end
 
-  def import_har : Nil
-    @calls << :import_har
-  end
-
-  def import_urls : Nil
-    @calls << :import_urls
-  end
-
-  def import_oas : Nil
-    @calls << :import_oas
-  end
-
-  def import_postman : Nil
-    @calls << :import_postman
-  end
-
-  def import_insomnia : Nil
-    @calls << :import_insomnia
-  end
-
-  def import_burp : Nil
-    @calls << :import_burp
-  end
-
-  def import_wsdl : Nil
-    @calls << :import_wsdl
+  def open_import(kind : Symbol) : Nil
+    @calls << :open_import
   end
 
   def import_curl : Nil

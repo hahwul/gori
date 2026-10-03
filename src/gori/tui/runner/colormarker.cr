@@ -1,37 +1,20 @@
 # Colormarker (History row-colour rules) — ExecContext verb implementations, reopens
 # Gori::Tui::Runner (see tui/runner.cr for the event loop, Host facade, overlays, and rendering).
 class Gori::Tui::Runner < Gori::Verb::ExecContext
-  def colormarker_add : Nil
-    colormarker_controller.colormarker_add
-  end
-
-  def colormarker_edit : Nil
-    colormarker_controller.colormarker_edit
-  end
-
-  def colormarker_toggle : Nil
-    colormarker_controller.colormarker_toggle
-  end
-
-  def colormarker_delete : Nil
-    colormarker_controller.colormarker_delete
-  end
-
-  def colormarker_filter : Nil
-    colormarker_controller.colormarker_filter
-  end
+  forward colormarker_add : Nil,
+    colormarker_edit : Nil,
+    colormarker_toggle : Nil,
+    colormarker_delete : Nil,
+    colormarker_filter : Nil,
+    to: colormarker_controller
 
   def colormarker_move(dir : Int32) : Nil
     colormarker_controller.colormarker_move(dir)
   end
 
-  def colormarker_duplicate : Nil
-    colormarker_controller.colormarker_duplicate
-  end
-
-  def colormarker_reload : Nil
-    colormarker_controller.colormarker_reload
-  end
+  forward colormarker_duplicate : Nil,
+    colormarker_reload : Nil,
+    to: colormarker_controller
 
   def colormarker_rule_selected? : Bool
     colormarker_controller.rule_selected?
@@ -49,13 +32,9 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     colormarker_controller.global_rule_selected?
   end
 
-  def colormarker_scope_toggle : Nil
-    colormarker_controller.colormarker_scope_toggle
-  end
-
-  def colormarker_toggle_default : Nil
-    colormarker_controller.colormarker_toggle_default
-  end
+  forward colormarker_scope_toggle : Nil,
+    colormarker_toggle_default : Nil,
+    to: colormarker_controller
 
   # --- CUSTOM COLORS pane ---
   def colormarker_colors_focused? : Bool

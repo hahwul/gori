@@ -24,25 +24,16 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     end
   end
 
-  def repeater_new : Nil
-    repeater_controller.repeater_new
-  end
+  forward repeater_new : Nil, to: repeater_controller
 
   def repeater_paste_curl : Nil
     open_curl_paste(:repeater)
   end
 
-  def repeater_send : Nil
-    repeater_controller.repeater_send
-  end
-
-  def repeater_send_group : Nil
-    repeater_controller.repeater_send_group
-  end
-
-  def repeater_send_race : Nil
-    repeater_controller.repeater_send_race
-  end
+  forward repeater_send : Nil,
+    repeater_send_group : Nil,
+    repeater_send_race : Nil,
+    to: repeater_controller
 
   # Differential timing analysis over EXACTLY two marked sub-tabs (#1246): validate the pair,
   # prompt for how many A/B pairs to send, then run it off the UI fiber and open a verdict card.
@@ -96,41 +87,21 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     repeater_controller.repeater_duplicate
   end
 
-  def repeater_toggle_hex : Nil
-    repeater_controller.repeater_toggle_hex
-  end
-
-  def repeater_toggle_decoded : Nil
-    repeater_controller.repeater_toggle_decoded
-  end
+  forward repeater_toggle_hex : Nil,
+    repeater_toggle_decoded : Nil,
+    to: repeater_controller
 
   def repeater_toggle_sni : Nil
-    repeater_controller.repeater_toggle_sni
+    repeater_controller.toggle_sni
   end
 
-  def repeater_toggle_auto_content_length : Nil
-    repeater_controller.repeater_toggle_auto_content_length
-  end
-
-  def repeater_toggle_http2 : Nil
-    repeater_controller.repeater_toggle_http2
-  end
-
-  def repeater_toggle_ws_key : Nil
-    repeater_controller.repeater_toggle_ws_key
-  end
-
-  def repeater_toggle_grpc_fields : Nil
-    repeater_controller.repeater_toggle_grpc_fields
-  end
-
-  def repeater_cycle_tls_preset : Nil
-    repeater_controller.repeater_cycle_tls_preset
-  end
-
-  def repeater_toggle_grpc_reframe : Nil
-    repeater_controller.repeater_toggle_grpc_reframe
-  end
+  forward repeater_toggle_auto_content_length : Nil,
+    repeater_toggle_http2 : Nil,
+    repeater_toggle_ws_key : Nil,
+    repeater_toggle_grpc_fields : Nil,
+    repeater_cycle_tls_preset : Nil,
+    repeater_toggle_grpc_reframe : Nil,
+    to: repeater_controller
 
   # Space-menu (:response) counterparts of the response pane's raw `d`/`x` keys —
   # same RepeaterView toggles, just reachable without memorizing the key.
@@ -140,41 +111,27 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     v.toggle_resp_mode
   end
 
-  def repeater_toggle_resp_hex : Nil
-    repeater_controller.repeater_toggle_resp_hex
-  end
+  forward repeater_toggle_resp_hex : Nil, to: repeater_controller
 
   def repeater_toggle_unicode_escapes : Nil
     return unless (v = repeater_controller.current_view) && v.focus == :response
     v.toggle_unicode_decoding
   end
 
-  def repeater_pretty_request : Nil
-    repeater_controller.repeater_pretty_request
-  end
+  forward repeater_pretty_request : Nil, to: repeater_controller
 
   def repeater_graphql_introspection(legacy : Bool) : Nil
     repeater_controller.repeater_graphql_introspection(legacy)
   end
 
-  def repeater_minimize : Nil
-    repeater_controller.repeater_minimize
-  end
-
-  def repeater_auto_mark : Nil
-    repeater_controller.repeater_auto_mark
-  end
-
-  def repeater_mark_word : Nil
-    repeater_controller.repeater_mark_word
-  end
-
-  def repeater_insert_marker : Nil
-    repeater_controller.repeater_insert_marker
-  end
+  forward repeater_minimize : Nil,
+    repeater_auto_mark : Nil,
+    repeater_mark_word : Nil,
+    repeater_insert_marker : Nil,
+    to: repeater_controller
 
   def repeater_clear_marks : Nil
-    repeater_controller.repeater_clear_marks
+    repeater_controller.clear_marks
   end
 
   # ^Q: jump focus DOWN into the visible CHAIN pane (the marker under the cursor). The
@@ -183,17 +140,7 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
     repeater_controller.repeater_focus_chain_pane
   end
 
-  def repeater_copy : Nil
-    repeater_controller.repeater_copy
-  end
-
-  def repeater_copy_all : Nil
-    repeater_controller.repeater_copy_all
-  end
-
-  def repeater_read_mode? : Bool
-    repeater_controller.repeater_read_mode?
-  end
+  forward repeater_read_mode? : Bool, to: repeater_controller
 
   def repeater_split_request? : Bool
     return false unless current_tab == :repeater && (v = repeater_controller.current_view)
