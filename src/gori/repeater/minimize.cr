@@ -209,6 +209,12 @@ module Gori::Repeater
         # nothing further, and there is no partial result worth one more round-trip.
         break if stop.try(&.stopped?)
         r = backend.send(resolve.call(base_text))
+        # A scope sandbox or exclude refusal is permanent and put nothing on the wire: said as
+        # what it is, on every surface, not as an origin that never answered.
+        if (why = r.error) && Outbound.permanent_refusal?(why)
+          return Report.new(restore_eol(base_text, crlf), [] of Removed, sends, true,
+            "refused: #{why} — request left unchanged (#{sends} sends)")
+        end
         sends += 1
         if r.error.nil? && !r.incomplete?
           metrics << Miner::Fingerprint.probe(r).metrics
@@ -248,6 +254,9 @@ module Gori::Repeater
         # counted here either — counting it made `sends` report SEND_CAP + 1, in the note and
         # in every surface's `sends` field.
         return Report.new(restore_eol(working, crlf), removed, sends, false, cap_note(removed, sends)) if r.error == Fuzz::CappedBackend::CAP_ERROR
+        # A variant the scope refuses (a removal that moved the path under an exclude) was not
+        # sent either; it is kept, since it was never tested.
+        next if Outbound.permanent_refusal?(r.error)
         sends += 1
         if unchanged?(r, baseline)
           working = variant
