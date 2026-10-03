@@ -247,7 +247,7 @@ module Gori
         j.object do
           j.field "id", row.id
           j.field "created_at", row.created_at
-          j.field "created_at_iso", unix_micros_iso(row.created_at)
+          j.field "created_at_iso", Gori.iso_micros(row.created_at)
           j.field "scheme", text(row.scheme)
           j.field "method", text(row.method)
           j.field "host", text(row.host)
@@ -312,7 +312,7 @@ module Gori
         j.object do
           j.field "id", row.id
           j.field "created_at", row.created_at
-          j.field "created_at_iso", unix_micros_iso(row.created_at)
+          j.field "created_at_iso", Gori.iso_micros(row.created_at)
           j.field "source", text(row.source)
           j.field "kind", text(row.kind)
           j.field "level", text(row.level)
@@ -437,7 +437,7 @@ module Gori
           j.field "target", text(row.target)
           j.field "flow_id", row.flow_id if row.flow_id
           j.field "held_at_ms", row.held_at_ms
-          j.field "held_at_iso", unix_micros_iso(row.held_at_ms * 1000)
+          j.field "held_at_iso", Gori.iso_micros(row.held_at_ms * 1000)
           j.field "age_seconds", ((now_ms - row.held_at_ms) // 1000)
           # TRUE while the HUMAN operator has unsaved edits typed into this hold (mirrored from
           # `InterceptView#held_edit_id`). Nothing ever set it, so it answered false for every
@@ -671,9 +671,9 @@ module Gori
           j.field "id", run.id
           j.field "session_id", run.session_id
           j.field "created_at", run.created_at
-          j.field "created_at_iso", unix_micros_iso(run.created_at)
+          j.field "created_at_iso", Gori.iso_micros(run.created_at)
           j.field "finished_at", run.finished_at
-          j.field "finished_at_iso", run.finished_at.try { |t| unix_micros_iso(t) }
+          j.field "finished_at_iso", run.finished_at.try { |t| Gori.iso_micros(t) }
           j.field "target", text(run.target)
           j.field "mode", text(run.mode)
           j.field "total", run.total
@@ -840,7 +840,7 @@ module Gori
         j.object do
           j.field "id", row.id
           j.field "created_at", row.created_at
-          j.field "created_at_iso", unix_micros_iso(row.created_at)
+          j.field "created_at_iso", Gori.iso_micros(row.created_at)
           j.field "scheme", text(row.scheme)
           j.field "method", text(row.method)
           j.field "host", text(row.host)
@@ -1064,7 +1064,7 @@ module Gori
                     j.field "opcode", m.opcode
                     j.field "type", ws_frame_type(m.opcode)
                     j.field "at", m.created_at
-                    j.field "at_iso", unix_micros_iso(m.created_at)
+                    j.field "at_iso", Gori.iso_micros(m.created_at)
                     # The V7 shape (FIN / RSV / masked / frame count) and a CLOSE's code and
                     # reason. `gori run show --format json` has emitted these since the shape
                     # existed; MCP did not, so the agent surface was the one place a captured
@@ -1249,7 +1249,7 @@ module Gori
       # surface emits, plus the ISO spelling of the freeze time that every MCP timestamp gets.
       def self.evidence_meta(j : JSON::Builder, m : Store::IssueEvidenceMeta) : Nil
         Issues::Export.evidence_fields(j, m)
-        j.field "frozen_at_iso", unix_micros_iso(m.created_at)
+        j.field "frozen_at_iso", Gori.iso_micros(m.created_at)
       end
 
       # The copy with its bytes, shaped like `flow_detail`: heads redacted unless
@@ -1313,7 +1313,7 @@ module Gori
         j.field "runnable", pl.runnable?
         pl.missing.try { |m| j.field "unrunnable_reason", Issues::Export.one_line(m) }
         j.field "created_at", s.created_at
-        j.field "created_at_iso", unix_micros_iso(s.created_at)
+        j.field "created_at_iso", Gori.iso_micros(s.created_at)
         j.field "updated_at", s.updated_at
       end
 
@@ -1333,7 +1333,7 @@ module Gori
         j.field "verdict", r.verdict.label
         j.field "surface", r.surface
         j.field "started_at", r.started_at
-        j.field "started_at_iso", unix_micros_iso(r.started_at)
+        j.field "started_at_iso", Gori.iso_micros(r.started_at)
         j.field "finished_at", r.finished_at
         j.field "duration_us", r.duration_us
         retest_tally(j, Retest::Tally.new(r.total, r.passed, r.failed, r.inconclusive,
@@ -1397,9 +1397,9 @@ module Gori
         j.object do
           j.field "id", f.id
           j.field "created_at", f.created_at
-          j.field "created_at_iso", unix_micros_iso(f.created_at)
+          j.field "created_at_iso", Gori.iso_micros(f.created_at)
           j.field "updated_at", f.updated_at
-          j.field "updated_at_iso", unix_micros_iso(f.updated_at)
+          j.field "updated_at_iso", Gori.iso_micros(f.updated_at)
           # title/host/notes: same captured-data-can-be-invalid-UTF-8 gap `Issues::Export.json`
           # has (this IS that same JSON shape, just wrapped in a JSON-RPC tool response) — an
           # unscrubbed raw byte here breaks the whole response line's UTF-8 validity, a real
@@ -1492,13 +1492,6 @@ module Gori
                                   "than sanitized."
           end
         end
-      end
-
-      # RFC3339 UTC for store timestamps (unix microseconds), for LLM clients that can't
-      # interpret raw microsecond integers. A far-future row reads as `—` rather than a
-      # `-32603` for the whole call (see `Gori.iso_micros`).
-      def self.unix_micros_iso(us : Int64) : String
-        Gori.iso_micros(us)
       end
 
       # Emits a `field_name` field carrying a decoded-body summary. nil/empty body

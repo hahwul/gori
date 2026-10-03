@@ -3,7 +3,8 @@ module Gori
   # the `*_iso` spelling every gori surface emits, MCP, `gori run` and the diff report alike.
   # The Span addition RAISES `ArgumentError` on an instant past year 9999 (a hand-edited or
   # foreign column, or an import whose source dated an entry there), which used to cost the
-  # caller its whole document for one row; such an instant reads as the module-wide dash.
+  # caller its whole document for one row (a truncated `--format json`, an MCP `-32603`);
+  # such an instant reads as the module-wide dash.
   def self.iso_micros(micros : Int64) : String
     sec, micro = micros.divmod(1_000_000)
     (Time.utc(1970, 1, 1) + sec.seconds + micro.microseconds).to_s("%Y-%m-%dT%H:%M:%S.%LZ")

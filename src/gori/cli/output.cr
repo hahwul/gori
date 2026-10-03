@@ -94,7 +94,7 @@ module Gori
           # `gori run history --format json` against `list_history` could not compare the two
           # as strings, and the CLI carried no RFC3339 field anywhere in the tree. Additive:
           # `time` keeps its exact spelling and value, so nothing reading it breaks.
-          j.field "created_at_iso", iso_time_utc(row.created_at)
+          j.field "created_at_iso", Gori.iso_micros(row.created_at)
           # Wire-derived, every one of them — see `json_captured`.
           json_captured(j, "scheme", row.scheme)
           json_captured(j, "method", row.method)
@@ -1421,7 +1421,7 @@ module Gori
 
       # Local ISO-8601 from unix micros (the store's created_at unit). Lossy on purpose: this
       # is the field a human reads off a terminal, so it stays in the operator's timezone and
-      # drops the micros. `iso_time_utc` is the machine-readable one.
+      # drops the micros. `Gori.iso_micros` is the machine-readable one.
       #
       # Through `LocalTime` because `to_local` RAISES for some operators and not others: a
       # stored instant near `Time::MAX` plus a POSITIVE utc offset lands past it, so
@@ -1434,13 +1434,6 @@ module Gori
       # read `created_at` the same way; see `Gori::LocalTime`.
       def self.iso_time(micros : Int64) : String
         LocalTime.format(micros, "%Y-%m-%dT%H:%M:%S%:z")
-      end
-
-      # RFC3339 UTC at millisecond precision, the machine-readable twin of `iso_time` and the
-      # same `*_iso` spelling MCP emits. Emitted one line after `iso_time` in the same object,
-      # so it must not raise on a far-future row either (see `Gori.iso_micros`).
-      def self.iso_time_utc(micros : Int64) : String
-        Gori.iso_micros(micros)
       end
 
       private def self.round1(n : Float64) : String

@@ -78,7 +78,7 @@ module Gori
           entries.each do |e|
             name = CLI::Output.term_safe(e.name)
             io << name.ljust(width) << "  " << CLI::Output.human_size(e.bytes).rjust(9) << "  "
-            io << CLI::Output.iso_time_utc(e.modified.to_unix_ms * 1000)
+            io << Gori.iso_micros(e.modified.to_unix_ms * 1000)
             io << "  (symlink)" if e.symlink
             io << '\n'
           end
@@ -90,7 +90,7 @@ module Gori
           j.field "name", e.name
           j.field "path", e.path
           j.field "bytes", e.bytes
-          j.field "modified", CLI::Output.iso_time_utc(e.modified.to_unix_ms * 1000)
+          j.field "modified", Gori.iso_micros(e.modified.to_unix_ms * 1000)
           j.field "symlink", e.symlink
         end
       end
@@ -139,7 +139,7 @@ module Gori
           j.field "name", e.name
           j.field "path", e.path
           j.field "bytes", e.bytes
-          j.field "modified", CLI::Output.iso_time_utc(e.modified.to_unix_ms * 1000)
+          j.field "modified", Gori.iso_micros(e.modified.to_unix_ms * 1000)
           j.field "symlink", e.symlink
           j.field "lines", info.lines
           j.field "lines_complete", info.lines_complete
@@ -160,7 +160,7 @@ module Gori
           lines = info.lines_complete ? info.lines.to_s : "more than #{info.lines} (counted the first " \
                                                           "#{WordlistCatalog::LINE_SCAN_MAX // (1024 * 1024)} MiB)"
           io << "  lines     " << lines << '\n'
-          io << "  modified  " << CLI::Output.iso_time_utc(e.modified.to_unix_ms * 1000) << '\n'
+          io << "  modified  " << Gori.iso_micros(e.modified.to_unix_ms * 1000) << '\n'
           io << "  symlink   yes\n" if e.symlink
           if pv = preview
             io << '\n'

@@ -204,7 +204,7 @@ module Gori
             j.field "verdict", report.verdict.label
             Serialize.retest_tally(j, report.tally)
             j.field "started_at", report.started_at
-            j.field "started_at_iso", Serialize.unix_micros_iso(report.started_at)
+            j.field "started_at_iso", Gori.iso_micros(report.started_at)
             j.field "duration_us", {report.finished_at - report.started_at, 0_i64}.max
             j.field("steps") { j.array { report.results.each { |r| j.object { Serialize.retest_step_result(j, r) } } } }
             # SAID, never swallowed: a run whose summary did not land still ran, and the

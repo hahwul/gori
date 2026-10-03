@@ -312,9 +312,9 @@ module Gori
           # `gori run fuzz list --format json` against `list_fuzz_runs` cannot compare the two
           # feeds as strings — the same gap `CLI::Output.flow_row_fields` documents closing for
           # History, reintroduced here by a new emitter.
-          j.field "created_at_iso", CLI::Output.iso_time_utc(run.created_at)
+          j.field "created_at_iso", Gori.iso_micros(run.created_at)
           j.field "finished_at", run.finished_at
-          j.field "finished_at_iso", run.finished_at.try { |t| CLI::Output.iso_time_utc(t) }
+          j.field "finished_at_iso", run.finished_at.try { |t| Gori.iso_micros(t) }
           j.field "target", run.target.scrub
           j.field "mode", run.mode.scrub
           j.field "total", run.total
