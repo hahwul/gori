@@ -2,13 +2,13 @@
 
 ## Unreleased
 
-- Import: a HAR with an absurd `bodySize` or `content.size` no longer makes every History read in the project fail, and a HAR or OpenAPI file the parser chokes on is reported as a bad file instead of a backtrace
-- Project archives: an archive with an impossible creation time or a database value gori never writes is refused at import, instead of becoming a project that crashes on open, and an out-of-range stored issue severity or status reads as the nearest valid one
-- CLI: `issues --format markdown`/`sarif`, `issues create --cvss`, `notes` and `compare` no longer crash on an out-of-range timestamp, an invalid-UTF-8 CVSS, a huge notes cursor or a duration past ~25 days
-- Miner: a JSON body whose root value is followed by junk (`1[,]`) is no longer read as JSON, where `gori run mine` crashed on it, and an XML or HTML pretty view gives up at its size cap instead of allocating hundreds of MB first
-- Fuzzer, Miner, Discover and Sequencer: stop ends a run waiting out a very slow `--rate` or throttle at once, instead of up to a day later
-- CLI and MCP: `--payload-from` and `--macro` take invalid UTF-8 and long values without crashing or stalling, and a closed stderr no longer wedges `gori mcp` or keeps `gori run` alive through ^C
-- Discover: a `Link`, `Refresh` or `Set-Cookie` header carrying non-UTF-8 bytes no longer costs the whole page its links
+- Import: a HAR with an absurd `bodySize` or `content.size` no longer makes every History read in the project fail, and a HAR or OpenAPI file the parser chokes on is reported as a bad file instead of a backtrace (#1497)
+- Project archives: an archive with an impossible creation time or a database value gori never writes is refused at import, instead of becoming a project that crashes on open, and an out-of-range stored issue severity or status reads as the nearest valid one (#1497)
+- CLI: `issues --format markdown`/`sarif`, `issues create --cvss`, `notes` and `compare` no longer crash on an out-of-range timestamp, an invalid-UTF-8 CVSS, a huge notes cursor or a duration past ~25 days (#1497)
+- Miner: a JSON body whose root value is followed by junk (`1[,]`) is no longer read as JSON, where `gori run mine` crashed on it, and an XML or HTML pretty view gives up at its size cap instead of allocating hundreds of MB first (#1497)
+- Fuzzer, Miner, Discover and Sequencer: stop ends a run waiting out a very slow `--rate` or throttle at once, instead of up to a day later (#1497)
+- CLI and MCP: `--payload-from` and `--macro` take invalid UTF-8 and long values without crashing or stalling, and a closed stderr no longer wedges `gori mcp` or keeps `gori run` alive through ^C (#1497)
+- Discover: a `Link`, `Refresh` or `Set-Cookie` header carrying non-UTF-8 bytes no longer costs the whole page its links (#1497)
 - TUI: a confirm that names an env var or a Fuzzer, Miner, Sequencer or Notes sub-tab now acts on that one, where a peer's change under the dialog could shift it onto a neighbour, and the Authorize cursor stays on its request while a run re-labels a verdict-filtered list (#1496)
 - TUI: a Host header typed on a fresh Repeater tab is no longer overwritten by the first target edit, and Tab no longer types a literal tab into Preferences, the palette, the project picker's forms or the Sitemap tag editor (it moves between the new-project fields) (#1496)
 - TUI: ^C or ^\ typed at an external editor or the shell no longer kills gori, ⌫ after saving a shortened settings value no longer raises, and the Repeater and Fuzzer target row drops its READ selection on INSERT, so `y` no longer copies text you never selected or raises after a shorter reload (#1496)
