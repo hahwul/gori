@@ -1,6 +1,7 @@
 require "../agent_presence"
 require "../store"
 require "./agents_overlay"
+require "./fmt"
 
 module Gori::Tui
   # The two strings the operator→agent channel (#1090) puts on screen: a picker row naming one
@@ -22,7 +23,7 @@ module Gori::Tui
     # picker is a place a pathological name could push the row past the card's edge.
     def self.label(entry : Gori::AgentPresence::Entry, now : Time) : String
       pid = entry.pid ? "pid #{entry.pid}" : "pid ?"
-      attached = entry.attached_at.try { |t| "attached #{AgentsOverlay.relative_time(now - t)}" } || "attached ?"
+      attached = entry.attached_at.try { |t| "attached #{Fmt.ago_phrase(now - t)}" } || "attached ?"
       "#{name(entry)} · #{pid} · #{attached}"
     end
 
@@ -191,7 +192,7 @@ module Gori::Tui
       # Compared before subtracting: `expires_at` came off a feed row another process wrote,
       # and a hand-written one far in the past would overflow the difference.
       waited = now_us > q.created_at ? (now_us - q.created_at) // 1000 : 0_i64
-      asked = AgentsOverlay.relative_time(waited.milliseconds)
+      asked = Fmt.ago_phrase(waited.milliseconds)
       left = q.expires_at > now_us ? (q.expires_at - now_us) // 1_000_000 : 0_i64
       expires =
         if left <= 0

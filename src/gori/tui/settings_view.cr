@@ -999,9 +999,7 @@ module Gori::Tui
       # then falls through to !contains? and closes instead of focusing a field on an
       # undrawn card.
       return Rect.new(area.x, area.y, 0, 0) if w < 30 || area.h < h
-      x = area.x + (area.w - w) // 2
-      y = area.y + (area.h - h) // 2
-      Rect.new(x, y, w, h)
+      area.center(w, h)
     end
 
     # Interior content rows for `area`: one per field, or — in the THEME section — the
@@ -1143,7 +1141,7 @@ module Gori::Tui
       vp.times do |row|
         i = @theme_scroll + row
         break if i >= names.size
-        draw_theme_row(screen, box, names[i], i == sel, list_top + row)
+        Frame.theme_row(screen, box.x + 1, list_top + row, box.w - 2, names[i], i == sel)
       end
       # The shared gauge on the card's own hairline, replacing the ▲/▼/↕ glyphs this list used
       # to paint into its last interior column — an affordance that existed nowhere else in
@@ -1151,32 +1149,6 @@ module Gori::Tui
       # now gets back.
       Frame.scroll_gauge(screen, Rect.new(box.x + 1, list_top, box.w - 2, vp),
         names.size, @theme_scroll, true, Theme.panel)
-    end
-
-    private def draw_theme_row(screen : Screen, box : Rect, name : String, selected : Bool, ry : Int32) : Nil
-      bg = selected ? Theme.accent_bg : Theme.panel
-      screen.fill(Rect.new(box.x + 1, ry, box.w - 2, 1), bg)
-      screen.cell(box.x + 1, ry, selected ? '▎' : ' ', Theme.accent, bg)
-      screen.cell(box.x + 3, ry, selected ? '◉' : '◯', selected ? Theme.accent : Theme.muted, bg)
-      # The swatch now runs to the last interior column (box.right-2) — the scroll marker that
-      # used to sit there moved onto the card's hairline as a gauge.
-      swatch_w = 7
-      sx = box.right - 1 - swatch_w
-      name_w = {sx - (box.x + 5) - 1, 1}.max
-      screen.text(box.x + 5, ry, name, selected ? Theme.text_bright : Theme.text, bg, width: name_w)
-      draw_swatch(screen, sx, ry, name)
-    end
-
-    # A tiny preview strip in the theme's OWN palette (not the active one): its canvas
-    # colour framing a few accent ticks, so each row previews the theme without making
-    # it active. Width must match `swatch_w` in draw_theme_row (1 + 5 ticks + 1).
-    private def draw_swatch(screen : Screen, x : Int32, ry : Int32, name : String) : Nil
-      pal = Theme.palette(name)
-      return unless pal
-      ticks = {pal.accent, pal.green, pal.yellow, pal.red, pal.syn_header}
-      screen.cell(x, ry, ' ', pal.bg, pal.bg)
-      ticks.each_with_index { |c, i| screen.cell(x + 1 + i, ry, '█', c, pal.bg) }
-      screen.cell(x + 6, ry, ' ', pal.bg, pal.bg)
     end
 
     # The two-row footer block: the note (save status / focused field's hint) on its OWN

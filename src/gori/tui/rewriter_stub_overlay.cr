@@ -93,19 +93,7 @@ module Gori::Tui
     # Home/End and passed no `selecting:` anywhere, so a multi-line HTTP response was a buffer
     # with no way to select a header line and replace it.
     private def edit(ev : Termisu::Event::Key) : Nil
-      key = ev.key
-      case
-      when key.enter?               then @editor.insert_newline
-      when ev.ctrl? && key.lower_z? then @editor.undo # the undo chord every body editor binds
-      # Before plain ⌫, which would swallow the modified form as a one-character delete.
-      when @editor.word_delete_key?(ev)  then @editor.handle_motion_key(ev)
-      when key.backspace?                then @editor.backspace
-      when key.delete?                   then @editor.delete
-      when @editor.handle_motion_key(ev) then nil
-      else
-        ch = ev.char || key.to_char
-        @editor.insert(ch) if ch && !ev.ctrl? && !ev.alt?
-      end
+      @editor.handle_edit_key(ev)
     end
 
     def set_preedit(text : String) : Nil
@@ -116,7 +104,7 @@ module Gori::Tui
       w = {area.w - 4, 72}.min
       h = {area.h - 2, 20}.min
       return nil if w < 40 || h < 10
-      Rect.new(area.x + (area.w - w) // 2, area.y + (area.h - h) // 2, w, h)
+      area.center(w, h)
     end
 
     # The buffer's rect inside a drawn card. Shared by `render` and the three pointer

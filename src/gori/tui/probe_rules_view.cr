@@ -65,10 +65,6 @@ module Gori::Tui
       @filter.hint
     end
 
-    def filter_active? : Bool
-      @filter.active?
-    end
-
     # Re-anchored by the row's own key, since a narrowing shifts every index.
     def handle_filter_key(ev : Termisu::Event::Key) : Bool
       prev = selected_row.try(&.rule_id)

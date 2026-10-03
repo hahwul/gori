@@ -316,7 +316,7 @@ module Gori::Tui
       w = {area.w - 4, 60}.min
       h = {area.h - 2, ROWS.size + 4}.min
       return nil if w < 30 || h < 8
-      Rect.new(area.x + (area.w - w) // 2, area.y + (area.h - h) // 2, w, h)
+      area.center(w, h)
     end
 
     # Rows the card can actually draw. The last two interior lines are spoken for — the hint

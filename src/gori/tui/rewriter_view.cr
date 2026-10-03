@@ -1,4 +1,5 @@
 require "./screen"
+require "./fmt"
 require "./theme"
 require "./frame"
 require "./text_area"
@@ -218,18 +219,10 @@ module Gori::Tui
       x = screen.text(x, py, row.preview, row.bound? ? Theme.text : Theme.muted, bg,
         width: {rect.right - x, 0}.max) + 2
       if x < rect.right
-        age = (t = row.bound_at) ? relative_time(now - t) : (row.enabled ? "waiting" : "rule off")
+        age = (t = row.bound_at) ? Fmt.ago_phrase(now - t) : (row.enabled ? "waiting" : "rule off")
         x = screen.text(x, py, age, Theme.muted, bg, width: {rect.right - x, 0}.max) + 2
       end
       screen.text(x, py, row.descriptor, Theme.muted, bg, width: {rect.right - x, 0}.max) if x < rect.right
-    end
-
-    private def relative_time(span : Time::Span) : String
-      secs = span.total_seconds
-      return "just now" if secs < 60
-      return "#{(secs / 60).to_i}m ago" if secs < 3600
-      return "#{(secs / 3600).to_i}h ago" if secs < 86_400
-      "#{(secs / 86_400).to_i}d ago"
     end
 
     # Visible rows in the extract / bindings list card.

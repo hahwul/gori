@@ -539,7 +539,7 @@ describe "ProjectView PROJECT SETTINGS pane" do
       view.settings_dirty?.should be_false                             # fresh, inherited pane
 
       view.select_setting(3) # Bind Port (row 0 lens, 1 sandbox, 2 bind IP, 3 bind port)
-      view.settings_scope_row?.should be_false
+      view.@set_sel.should_not eq(Gori::Tui::ProjectView::SETTINGS_SCOPE_ROW)
       view.settings_sandbox_row?.should be_false
       view.settings_text_row?.should be_true
       view.set_input('9')

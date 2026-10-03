@@ -153,7 +153,7 @@ module Gori::Tui
       room = area.h - 2 - fixed
       return nil if room < 0 || (!detail.empty? && room < 1)
       h = fixed + {detail.size, DETAIL_ROWS, room}.min
-      Rect.new(area.x + (area.w - w) // 2, area.y + (area.h - h) // 2, w, h)
+      area.center(w, h)
     end
 
     def render(screen : Screen, area : Rect) : Nil

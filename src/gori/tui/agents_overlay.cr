@@ -1,4 +1,5 @@
 require "./screen"
+require "./fmt"
 require "./theme"
 require "./frame"
 require "./overlay"
@@ -17,14 +18,11 @@ module Gori::Tui
   # Rows come from an INJECTED probe rather than a live filesystem read per draw, so a spec can
   # verify the render with a fixed list and no `.agents` directory — and, like the listeners
   # overlay, so the rows cannot shift under a click hit-tested against the previous frame.
-  class AgentsOverlay < Overlay
-    # ^P leaves for the command palette, like every other list overlay.
-    property on_palette : Proc(Nil)?
+  class AgentsOverlay < ListCard
     # Bare `t` on the selected row: message that agent without leaving for the palette (#1090).
     property on_tell : Proc(Gori::AgentPresence::Entry, Nil)?
 
     def initialize(@probe : Proc(Array(Gori::AgentPresence::Entry)))
-      @selected = 0
       @rows = @probe.call
     end
 
@@ -67,17 +65,6 @@ module Gori::Tui
       Screen.fit(cleaned, CLIENT_MAX_CELLS)
     end
 
-    # Relative "attached N ago" wording — the picker's own vocabulary ("just now", "3m ago"),
-    # written here rather than reached into the picker so this overlay stays spec-testable on
-    # its own.
-    def self.relative_time(span : Time::Span) : String
-      secs = span.total_seconds
-      return "just now" if secs < 60
-      return "#{(secs / 60).to_i}m ago" if secs < 3600
-      return "#{(secs / 3600).to_i}h ago" if secs < 86_400
-      "#{(secs / 86_400).to_i}d ago"
-    end
-
     # --- Overlay contract (see overlay.cr) ---
     def key : OverlayKind
       OverlayKind::Agents
@@ -91,113 +78,42 @@ module Gori::Tui
       "↑/↓ scroll · t tell · r re-check · esc close"
     end
 
-    def handle_key(ev : Termisu::Event::Key) : Symbol
-      k = ev.key
-      if ev.ctrl? && k.lower_p?
-        on_palette.try(&.call)
-      elsif k.escape?
-        return :cancel
-      elsif tell?(ev)
-        # Same shape as on_palette: the callback drops this modal and raises the prompt, so
-        # this returns :stay rather than asking the shell to close on top of it.
-        (entry = selected_entry) && on_tell.try(&.call(entry))
-      else
-        handle_nav(ev)
-      end
-      :stay
+    # Bare `t` messages the selected agent. Same shape as on_palette: the callback drops this
+    # modal and raises the prompt, so the key returns :stay rather than asking the shell to
+    # close on top of it.
+    private def card_key(ev : Termisu::Event::Key) : Bool
+      return false unless tell?(ev)
+      (entry = selected_entry) && on_tell.try(&.call(entry))
+      true
     end
 
-    # ↑/↓ + j/k, and bare `r` to re-check. The ctrl/alt guard is the same one ListenersOverlay
-    # documents at length: `Event::Key#char` folds ^R back to 'r' and the termisu parser emits
-    # ^K as `Key::LowerK + Ctrl`, so a chord would otherwise trigger the letter arms. Claimed
-    # and dropped rather than fallen through, because this overlay returns :stay either way.
-    # Bare `t` — a mnemonic, so the ctrl/alt guard keeps `^T` off it, same as the `r` arm.
+    # Bare `t` — a mnemonic, so the ctrl/alt guard keeps `^T` off it, same as the `r` arm
+    # (`ListCard#handle_nav`).
     private def tell?(ev : Termisu::Event::Key) : Bool
       return false if ev.ctrl? || ev.alt?
       (ev.char || ev.key.to_char) == 't' && !on_tell.nil? && !selected_entry.nil?
-    end
-
-    private def handle_nav(ev : Termisu::Event::Key) : Nil
-      k = ev.key
-      if k.up?
-        move(-1)
-      elsif k.down?
-        move(1)
-      elsif page_key(ev)
-        # PgUp/PgDn/Home/End — the list contract, `Overlay#page_key`
-      elsif ev.ctrl? || ev.alt?
-        # a chord is not a mnemonic
-      elsif k.lower_k?
-        move(-1)
-      elsif k.lower_j?
-        move(1)
-      elsif (ev.char || k.to_char) == 'r'
-        reload
-      end
-    end
-
-    # A click inside selects a row (nothing to open); outside dismisses. Never :commit — a
-    # read-only list that closed itself on a row click would look like it had acted.
-    def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
-      box = overlay_box(area)
-      return :cancel if box.nil? || !box.contains?(mx, my)
-      if row = gauge_row_at(box, mx, my)
-        set_selected(row)
-      elsif idx = row_at(box, mx, my)
-        set_selected(idx)
-      end
-      :stay
     end
 
     def entry_count : Int32
       @rows.size
     end
 
-    def move(d : Int32) : Nil
-      @selected = (@selected + d).clamp(0, {@rows.size - 1, 0}.max)
+    # 76 columns for a row that carries a client, a pid, an attach time, a mode, and a selection
+    # source without any of them being the one squeezed out.
+    private def card_w : Int32
+      76
     end
 
-    def set_selected(idx : Int32) : Nil
-      @selected = idx.clamp(0, {@rows.size - 1, 0}.max)
+    private def meta : String
+      Gori.plural(@rows.size, "client")
     end
 
-    # Same geometry as ListenersOverlay — the sibling read-only list. 76 columns for a row that
-    # carries a client, a pid, an attach time, a mode, and a selection source without any of them
-    # being the one squeezed out.
-    def overlay_box(area : Rect) : Rect?
-      w = {area.w - 4, 76}.min
-      rows = {@rows.size, 6}.max
-      h = {area.h - 2, rows + 4}.min # title gap + list + footer + bottom border
-      return nil if w < 32 || h < 7
-      Rect.new(area.x + (area.w - w) // 2, area.y + (area.h - h) // 2, w, h)
+    private def empty_text : String
+      "(no MCP client is attached to this project)"
     end
 
-    def render(screen : Screen, area : Rect) : Nil
-      box = overlay_box(area)
-      unless box
-        Overlay.too_small(screen, area, "agent list needs a larger window")
-        return
-      end
-      Frame.card(screen, box, "AGENTS", border: Theme.border_focus)
-      meta = Gori.plural(@rows.size, "client")
-      Frame.border_meta(screen, box, "AGENTS", meta, bg: Theme.panel)
-
-      cap = list_capacity(box)
-      @list_last_h = cap
-      return if cap <= 0
-      start = list_window(cap)
-      if @rows.empty?
-        screen.text(box.x + 3, box.y + 2, "(no MCP client is attached to this project)", Theme.muted, Theme.panel)
-      else
-        cap.times do |row|
-          i = start + row
-          break if i >= @rows.size
-          draw_row(screen, box, i, box.y + 2 + row)
-        end
-      end
-      Frame.scroll_gauge(screen, Rect.new(box.x + 1, box.y + 2, box.w - 2, cap),
-        @rows.size, start, true, Theme.panel)
-      draw_footer(screen, box)
+    private def too_small_what : String
+      "agent list needs a larger window"
     end
 
     # What the list itself cannot say: these rows are processes, they vanish on their own when
@@ -229,7 +145,7 @@ module Gori::Tui
       label = row.client_version ? "#{name} (#{AgentsOverlay.safe_client(row.client_version) || "?"})" : name
       x = draw_seg(screen, x, py, label, sel ? Theme.text_bright : Theme.text, bg, right)
       x = draw_seg(screen, x + 2, py, row.pid ? "pid #{row.pid}" : "pid ?", Theme.muted, bg, right)
-      attached = row.attached_at.try { |t| "attached #{AgentsOverlay.relative_time(Time.utc - t)}" } || "attached ?"
+      attached = row.attached_at.try { |t| "attached #{Fmt.ago_phrase(Time.utc - t)}" } || "attached ?"
       x = draw_seg(screen, x + 2, py, attached, Theme.muted, bg, right)
       mode = row.read_only ? "read-only" : "actions"
       x = draw_seg(screen, x + 2, py, mode, row.read_only ? Theme.muted : Theme.accent, bg, right)
@@ -248,29 +164,6 @@ module Gori::Tui
       avail = right - x
       return x if avail <= 0
       screen.text(x, py, text, fg, bg, width: avail)
-    end
-
-    def gauge_row_at(box : Rect, mx : Int32, my : Int32) : Int32?
-      Frame.scroll_gauge_row(Rect.new(box.x + 1, box.y + 2, box.w - 2, list_capacity(box)),
-        @rows.size, mx, my)
-    end
-
-    def row_at(box : Rect, mx : Int32, my : Int32) : Int32?
-      return nil unless box.contains?(mx, my)
-      cap = list_capacity(box)
-      row = my - (box.y + 2)
-      return nil if row < 0 || row >= cap
-      i = list_window(cap) + row
-      i < @rows.size ? i : nil
-    end
-
-    private def list_capacity(box : Rect) : Int32
-      {box.bottom - 2 - (box.y + 2), 0}.max
-    end
-
-    private def list_window(cap : Int32) : Int32
-      return 0 if cap <= 0 || @rows.size <= cap
-      { {@selected - cap + 1, 0}.max, @rows.size - cap }.min
     end
   end
 end

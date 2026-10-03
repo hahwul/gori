@@ -385,19 +385,7 @@ module Gori::Tui
     # ⌥⌫). This buffer hand-rolled bare ←→ and Home/End and passed no `selecting:` anywhere,
     # so the pane an operator PASTES A WORDLIST INTO had no way to select a run of it back out.
     private def edit_values(ev : Termisu::Event::Key) : Nil
-      key = ev.key
-      case
-      when key.enter?               then @values.insert_newline
-      when ev.ctrl? && key.lower_z? then @values.undo # the undo chord every body editor binds
-      # Before plain ⌫, which would swallow the modified form as a one-character delete.
-      when @values.word_delete_key?(ev)  then @values.handle_motion_key(ev)
-      when key.backspace?                then @values.backspace
-      when key.delete?                   then @values.delete
-      when @values.handle_motion_key(ev) then nil
-      else
-        ch = ev.char || key.to_char
-        @values.insert(ch) if ch && !ev.ctrl? && !ev.alt?
-      end
+      @values.handle_edit_key(ev)
     end
 
     private def handle_field(ev : Termisu::Event::Key, f : Symbol) : Symbol
@@ -599,7 +587,7 @@ module Gori::Tui
       w = {area.w - 4, 76}.min
       h = {area.h - 2, 20}.min
       return nil if w < 34 || h < 8
-      Rect.new(area.x + (area.w - w) // 2, area.y + (area.h - h) // 2, w, h)
+      area.center(w, h)
     end
 
     def render(screen : Screen, area : Rect) : Nil

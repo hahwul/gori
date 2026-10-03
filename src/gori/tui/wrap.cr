@@ -99,45 +99,25 @@ module Gori::Tui
     # never fall inside one.
     def self.layout(line : String, width : Int32, conceal : Array({Int32, Int32})? = nil,
                     *, reveal : Bool = false) : Layout
-      return layout_revealed(line, width, conceal) if reveal
       len = line.size
       # A degenerate width can't be divided into; one row, clipped by the drawer as before.
       return Layout.new(len, 1, [0]) if width <= 0
-      if (conceal.nil? || conceal.empty?) && Screen.printable_ascii?(line)
+      ascii = Screen.printable_ascii?(line)
+      if ascii && (conceal.nil? || conceal.empty?)
         return Layout.new(len, width, nil) # uniform grid — see Layout
       end
+      # `reveal` is Reveal.styled's visible whitespace markers. Tabs and controls can be
+      # narrower there than their default named badges, so wrap at what is actually drawn —
+      # and printable ASCII has neither, so it wraps as it always does.
+      reveal &&= !ascii
       starts = [0]
       col = 0
       i = 0
       line.each_grapheme do |g|
         n = g.size
-        w = hidden?(conceal, i) ? 0 : Screen.grapheme_cols(g.to_s)
+        w = hidden?(conceal, i) ? 0 : (reveal ? Reveal.grapheme_cols(g.to_s) : Screen.grapheme_cols(g.to_s))
         # `col > 0`: a cluster too wide for the whole row keeps its own row rather than
         # being split — the one case where a row overflows `width` on purpose.
-        if col > 0 && col + w > width
-          starts << i
-          col = 0
-        end
-        col += w
-        i += n
-      end
-      Layout.new(len, width, starts)
-    end
-
-    # Layout for Reveal.styled's visible whitespace markers. Tabs and controls can be
-    # narrower there than their default named badges, so wrap at what is actually drawn.
-    def self.layout_revealed(line : String, width : Int32,
-                             conceal : Array({Int32, Int32})? = nil) : Layout
-      len = line.size
-      return Layout.new(len, 1, [0]) if width <= 0
-      return layout(line, width, conceal) if Screen.printable_ascii?(line)
-
-      starts = [0]
-      col = 0
-      i = 0
-      line.each_grapheme do |g|
-        n = g.size
-        w = hidden?(conceal, i) ? 0 : Reveal.grapheme_cols(g.to_s)
         if col > 0 && col + w > width
           starts << i
           col = 0

@@ -111,9 +111,9 @@ module Gori::Tui
     private def handle_char(c : Char) : Nil
       case c
       when ' '      then on_toast.try(&.call(toggle_refusal)) unless toggle_selected
-      when 'k'      then select_move(-1)
+      when 'k'      then move(-1)
       when 'K'      then move_selected(-1)
-      when 'j'      then select_move(1)
+      when 'j'      then move(1)
       when 'J'      then move_selected(1)
       when 'r', 'R' then on_reset.try(&.call)
       end
@@ -136,17 +136,13 @@ module Gori::Tui
     private def nav_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
       if key.up?
-        ev.shift? ? move_selected(-1) : select_move(-1)
+        ev.shift? ? move_selected(-1) : move(-1)
       elsif key.down?
-        ev.shift? ? move_selected(1) : select_move(1)
+        ev.shift? ? move_selected(1) : move(1)
       else
         return page_key(ev)
       end
       true
-    end
-
-    def move(step : Int32) : Nil
-      select_move(step)
     end
 
     # Rebuild the working copy from persisted config (called when the overlay opens),
@@ -175,7 +171,7 @@ module Gori::Tui
       end
     end
 
-    def select_move(d : Int32) : Nil
+    def move(d : Int32) : Nil
       @selected = (@selected + d).clamp(0, {@items.size - 1, 0}.max)
     end
 
@@ -256,7 +252,7 @@ module Gori::Tui
       w = {area.w - 4, 48}.min
       h = {area.h - 2, screen_rows + 3}.min # title + up to screen_rows rows + bottom border
       return nil if w < 24 || h < 6
-      Rect.new(area.x + (area.w - w) // 2, area.y + (area.h - h) // 2, w, h)
+      area.center(w, h)
     end
 
     # --- the seam -------------------------------------------------------------

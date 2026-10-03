@@ -4097,11 +4097,7 @@ module Gori::Tui
     end
 
     private def key_label(id : String, fallback : String) : String
-      if registry = @registry
-        Hotkeys.binding_label(registry, id, fallback)
-      else
-        fallback
-      end
+      @registry.try { |r| Hotkeys.binding_label(r, id, fallback) } || fallback
     end
 
     private def mark_chip_text : String?

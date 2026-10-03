@@ -22,7 +22,7 @@ module Gori::Tui
   # the open-site (Runner#open_colormarker_rule_editor) so the form stays store-free:
   # `on_commit` persists through the shared Colormarker engine, `on_preview` scans recent
   # flows for the live match count, and `on_hosts` supplies the `host:` completion pool.
-  class ColormarkerRuleOverlay < Overlay
+  class ColormarkerRuleOverlay < FormOverlay
     ROW_NAME = 0
     # The three cyclers sit CONTIGUOUSLY between the two text rows, so `cycler_row?` stays a
     # range check rather than a set membership test — ←/→ versus typing then dispatches on one
@@ -59,7 +59,6 @@ module Gori::Tui
     # registry stops doing so — see the note there.
     @opened_color : String
     @style_i : Int32
-    @sel : Int32
     @preview : String = ""
     # Last previewed field set; gates the rescan to real changes.
     @preview_sig : String = ""
@@ -81,7 +80,6 @@ module Gori::Tui
       @scope_i = idx(SCOPES, scope)
       @color_i = idx(color_options, color)
       @style_i = idx(STYLES, style)
-      @sel = 0
     end
 
     # The picker's colour vocabulary: the six built-in words FIRST, then every user-defined
@@ -172,16 +170,6 @@ module Gori::Tui
         scope: @edit_scope || scope)
     end
 
-    # No `skip_row?` — every row applies to every colour rule, so this is a plain clamp rather
-    # than the walk-past-ignored-rows loop RewriterRuleOverlay needs for its op-dependent form.
-    def move(d : Int32) : Nil
-      @sel = (@sel + (d < 0 ? -1 : 1)).clamp(0, ROW_COUNT - 1)
-    end
-
-    def set_selected(idx : Int32) : Nil
-      @sel = idx.clamp(0, ROW_COUNT - 1)
-    end
-
     private def cycler_row?(row : Int32) : Bool
       ROW_SCOPE <= row <= ROW_STYLE
     end
@@ -224,17 +212,6 @@ module Gori::Tui
       out
     end
 
-    def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
-      box = overlay_box(area)
-      return :cancel if box.nil? || !box.contains?(mx, my)
-      if idx = row_at(box, mx, my)
-        set_selected(idx)
-        return :commit if @sel == ROW_SAVE
-      end
-      click_text_field(mx, my)
-      :stay
-    end
-
     private def edit_key(ev : Termisu::Event::Key) : Symbol
       key = ev.key
       return :cancel if key.escape?
@@ -247,13 +224,7 @@ module Gori::Tui
       # ⇧↹ is never claimed here, so there is always a keyboard way back up.
       return :stay if @sel == ROW_WHEN && key.tab? && !ev.shift? && complete_condition
 
-      if key.up? || key.back_tab?
-        move(-1)
-        return :stay
-      elsif key.down? || key.tab?
-        move(1)
-        return :stay
-      end
+      return :stay if field_nav?(ev)
 
       if cycler_row?(@sel)
         case
@@ -358,25 +329,29 @@ module Gori::Tui
       @notes.size > 1 ? "⚠ #{@notes.size} caveats · #{first}" : "⚠ #{first}"
     end
 
-    def overlay_box(area : Rect) : Rect?
-      Overlay.rule_form_box(area, ROW_COUNT, preview: true)
+    def row_count : Int32
+      ROW_COUNT
+    end
+
+    def preview? : Bool
+      true
+    end
+
+    def card_title : String
+      editing? ? "EDIT COLOUR RULE" : "ADD COLOUR RULE"
+    end
+
+    def too_small_what : String
+      "colormarker-rule form needs a larger window"
     end
 
     def render(screen : Screen, area : Rect) : Nil
-      box = overlay_box(area)
-      unless box
-        Overlay.too_small(screen, area, "colormarker-rule form needs a larger window")
-        return
-      end
-      refresh_preview # see there: a form opened on an existing rule has never had a keystroke
-      Frame.card(screen, box, editing? ? "EDIT COLOUR RULE" : "ADD COLOUR RULE", border: Theme.border_focus)
-      first = box.y + 2
-      ROW_COUNT.times do |i|
-        py = first + i
-        break if py >= box.bottom - 2
-        draw_row(screen, box, i, py)
-      end
+      # see there: a form opened on an existing rule has never had a keystroke
+      refresh_preview if overlay_box(area)
+      super
+    end
 
+    private def draw_tail(screen : Screen, box : Rect, first : Int32) : Nil
       # The caveat, on the row the form leaves between the last field and the band. Whether that
       # row EXISTS is measured rather than assumed: on a terminal too short for the natural card
       # height the box shrinks and it is a field, which this must yield to rather than overwrite.
@@ -396,8 +371,6 @@ module Gori::Tui
           screen.text(box.x + 2, pv_y, band, Theme.muted, Theme.panel, width: box.w - 4)
         end
       end
-      # No key hint on the bottom border — the shell draws `hint` in the status strip for the
-      # open modal (Runner#key_hints). See RewriterRuleOverlay#render for the whole argument.
     end
 
     private def completion_band(width : Int32) : String
@@ -413,13 +386,8 @@ module Gori::Tui
       QuerySuggest.cold_hint(width: width)
     end
 
-    private def draw_row(screen : Screen, box : Rect, i : Int32, py : Int32) : Nil
-      sel = i == @sel
-      bg = sel ? Theme.accent_bg : Theme.panel
-      screen.fill(Rect.new(box.x + 1, py, box.w - 2, 1), bg)
-      screen.cell(box.x + 1, py, sel ? '▎' : ' ', Theme.accent, bg)
-      x = box.x + 3
-      fg = sel ? Theme.text_bright : Theme.text
+    def draw_row_body(screen : Screen, box : Rect, i : Int32, py : Int32,
+                      x : Int32, bg : Color, fg : Color, sel : Bool) : Nil
       case i
       when ROW_NAME  then draw_field(screen, box, py, bg, fg, sel, "name:", @fields[:name])
       when ROW_SCOPE then Frame.option_cycle(screen, x, py, box.right - 2, bg, "scope:", SCOPE_LABELS, @scope_i, sel)
@@ -471,12 +439,6 @@ module Gori::Tui
         screen.cell(sx, py, '█', hue, Theme.bg)
         screen.text(sx + 1, py, " sample row ", Theme.text, Theme.bg)
       end
-    end
-
-    def row_at(box : Rect, mx : Int32, my : Int32) : Int32?
-      return nil unless box.contains?(mx, my)
-      i = my - (box.y + 2)
-      (0 <= i < ROW_COUNT) ? i : nil
     end
   end
 end

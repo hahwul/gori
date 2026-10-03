@@ -88,7 +88,7 @@ describe "Project HOST OVERRIDES inline edit" do
       a_row = row_of(ctl, "a.test")
       b_row = row_of(ctl, "b.test")
       open_edit(ctl, 0)
-      ctl.view.ov_input_text.should eq("10.0.0.1 a.test")
+      ctl.view.@ov_field.value.should eq("10.0.0.1 a.test")
       # The field draws the line as one string where the IP / → / host columns were.
       row_of(ctl, "10.0.0.1 a.test").should eq(a_row)
       row_of(ctl, "b.test").should eq(b_row) # not pushed down a row
@@ -120,7 +120,7 @@ describe "Project HOST OVERRIDES inline edit" do
       open_edit(ctl, 0)
       backspace(ctl, "a.test".size)
       type(ctl, "c.test")
-      ctl.view.ov_input_text.should eq("10.0.0.1 c.test")
+      ctl.view.@ov_field.value.should eq("10.0.0.1 c.test")
       TuiContract.render(ctl)
       x, y = ov_cell(ctl, 1)
       ctl.handle_click(RECT, x, y).should be_true
@@ -142,7 +142,7 @@ describe "Project HOST OVERRIDES inline edit" do
       x, y = ov_cell(ctl, 1)
       ctl.handle_click(RECT, x, y).should be_true
       ctl.view.ov_editing?.should be_true
-      ctl.view.ov_input_text.should eq("10.0.0.1")
+      ctl.view.@ov_field.value.should eq("10.0.0.1")
       host.statuses.last.should contain("need")
       session.host_overrides.entries.map(&.host).should eq(["a.test", "b.test"])
     end
@@ -152,7 +152,7 @@ describe "Project HOST OVERRIDES inline edit" do
     with_overrides do |ctl, _host, session|
       open_edit(ctl, 0)
       backspace(ctl, "10.0.0.1 a.test".size)
-      ctl.view.ov_input_text.should eq("")
+      ctl.view.@ov_field.value.should eq("")
       TuiContract.render(ctl)
       x, y = ov_cell(ctl, 1)
       ctl.handle_click(RECT, x, y).should be_true
@@ -183,13 +183,13 @@ describe "Project HOST OVERRIDES inline edit" do
     with_overrides do |ctl, _host, _session|
       open_edit(ctl, 0)
       press(ctl, KEY::Tab)
-      ctl.view.ov_input_text.should eq("10.0.0.1 a.test ")
+      ctl.view.@ov_field.value.should eq("10.0.0.1 a.test ")
       press(ctl, KEY::Home)
       type(ctl, "x")
-      ctl.view.ov_input_text.should eq("x10.0.0.1 a.test ")
+      ctl.view.@ov_field.value.should eq("x10.0.0.1 a.test ")
       press(ctl, KEY::End)
       press(ctl, KEY::Backspace, :alt) # ⌥⌫ — one run back: the trailing separator
-      ctl.view.ov_input_text.should eq("x10.0.0.1 a.test")
+      ctl.view.@ov_field.value.should eq("x10.0.0.1 a.test")
       ctl.view.ov_editing?.should be_true # still the same row's editor
     end
   end
@@ -228,7 +228,7 @@ describe "Project ENV inline edit" do
         ctl.handle_click(RECT, x, y)
         ctl.handle_double_click(RECT, x, y).should be_true
         ctl.view.env_editing?.should be_true
-        ctl.view.env_input_text.should eq("BETA 2")
+        ctl.view.@env_field.value.should eq("BETA 2")
         TuiContract.render(ctl)
         row_of(ctl, "BETA 2").should eq(beta_row)
         row_of(ctl, "ALPHA").should eq(alpha_row)

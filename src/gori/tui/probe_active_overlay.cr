@@ -17,7 +17,7 @@ module Gori::Tui
   # The injected commit closure reads notify_mode + allow_unsafe? + detail/repeater_id on Run and
   # persists the notify choice. Pure state + render; migrated onto the polymorphic Overlay seam
   # (see overlay.cr).
-  class ProbeActiveOverlay < Overlay
+  class ProbeActiveOverlay < FormOverlay
     NOTIFY_CHOICES = Miner::NotifyMode.values
     # The unsafe opt-in reads as a choice between two named states rather than a checkbox: it
     # is not "one of many things to include" but "which of these two modes", which is what a
@@ -35,7 +35,6 @@ module Gori::Tui
       @details.first
     end
 
-    @selected : Int32
     @notify_idx : Int32
     @allow_unsafe : Bool
     @show_unsafe_row : Bool
@@ -71,7 +70,7 @@ module Gori::Tui
       # request counts. A size check would hide the opt-in row AND the "enable unsafe methods"
       # hint, silently never probing the POST with no control left to include it.
       @show_unsafe_row = @est_unsafe != @est_safe
-      @selected = run_row # start on Run so a reflexive ↵ fires with the saved defaults
+      @sel = run_row # start on Run so a reflexive ↵ fires with the saved defaults
       @info = build_info
     end
 
@@ -115,12 +114,12 @@ module Gori::Tui
       @show_unsafe_row ? 2 : 1
     end
 
-    private def row_count : Int32
+    def row_count : Int32
       @show_unsafe_row ? 3 : 2
     end
 
     def on_run_row? : Bool
-      @selected == run_row
+      on_save_row?
     end
 
     # --- Overlay contract (see overlay.cr) ---
@@ -160,31 +159,19 @@ module Gori::Tui
       :stay
     end
 
-    # Click a row to select it; Run commits, any other row toggles; outside the card cancels.
-    # Mirrors the prior Runner#click_probe_active exactly.
-    def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
-      box = overlay_box(area)
-      return :cancel if box.nil? || !box.contains?(mx, my)
-      if idx = row_at(box, mx, my)
-        set_selected(idx)
-        return :commit if on_run_row?
-        toggle
-      end
-      :stay
+    # A click on a row other than Run toggles it, as ␣ does.
+    private def row_clicked(idx : Int32) : Nil
+      toggle
     end
 
     def move(d : Int32) : Nil
-      @selected = (@selected + d).clamp(0, row_count - 1)
-    end
-
-    def set_selected(idx : Int32) : Nil
-      @selected = idx.clamp(0, row_count - 1)
+      @sel = (@sel + d).clamp(0, row_count - 1)
     end
 
     def adjust(d : Int32) : Nil
-      if @selected == notify_row
+      if @sel == notify_row
         @notify_idx = (@notify_idx + d) % NOTIFY_CHOICES.size
-      elsif @show_unsafe_row && @selected == unsafe_row
+      elsif @show_unsafe_row && @sel == unsafe_row
         toggle_unsafe
       end
     end
@@ -192,9 +179,9 @@ module Gori::Tui
     # ␣ on the notify row cycles it; on the unsafe row flips the opt-in; the Run row is handled
     # by the Runner.
     def toggle : Nil
-      if @selected == notify_row
+      if @sel == notify_row
         adjust(1)
-      elsif @show_unsafe_row && @selected == unsafe_row
+      elsif @show_unsafe_row && @sel == unsafe_row
         toggle_unsafe
       end
     end
@@ -252,7 +239,7 @@ module Gori::Tui
       w = {area.w - 4, {longest + 6, 54}.max.clamp(30, 64)}.min
       h = {area.h - 2, @info.size + row_count + 4}.min # title + info + gap + rows + border
       return nil if w < 30 || h < 6
-      Rect.new(area.x + (area.w - w) // 2, area.y + (area.h - h) // 2, w, h)
+      area.center(w, h)
     end
 
     # First interactive row's y: below the header block + a blank spacer line.
@@ -260,13 +247,19 @@ module Gori::Tui
       box.y + 1 + @info.size + 1
     end
 
-    def render(screen : Screen, area : Rect) : Nil
-      box = overlay_box(area)
-      unless box
-        Overlay.too_small(screen, area, "window too small")
-        return
-      end
-      Frame.card(screen, box, "RUN ACTIVE SCAN", border: Theme.border_focus)
+    private def rows_bottom(box : Rect) : Int32
+      box.bottom
+    end
+
+    def card_title : String
+      "RUN ACTIVE SCAN"
+    end
+
+    def too_small_what : String
+      "window too small"
+    end
+
+    private def draw_head(screen : Screen, box : Rect) : Nil
       @info.each_with_index do |line, i|
         py = box.y + 1 + i
         break if py >= box.bottom - 2
@@ -279,17 +272,10 @@ module Gori::Tui
              end
         screen.text(box.x + 2, py, line, fg, Theme.panel, width: box.w - 4)
       end
-      row_count.times { |i| draw_row(screen, box, i) }
     end
 
-    private def draw_row(screen : Screen, box : Rect, i : Int32) : Nil
-      py = first_row_y(box) + i
-      return if py >= box.bottom
-      sel = i == @selected
-      bg = sel ? Theme.accent_bg : Theme.panel
-      screen.fill(Rect.new(box.x + 1, py, box.w - 2, 1), bg)
-      screen.cell(box.x + 1, py, sel ? '▎' : ' ', Theme.accent, bg)
-      x = box.x + 3
+    def draw_row_body(screen : Screen, box : Rect, i : Int32, py : Int32,
+                      x : Int32, bg : Color, fg : Color, sel : Bool) : Nil
       if i == notify_row
         Frame.option_cycle(screen, x, py, box.right - 2, bg,
           "notification:", NOTIFY_CHOICES.map(&.label), @notify_idx, sel)
@@ -304,12 +290,6 @@ module Gori::Tui
       else
         screen.text(x, py, "[ Run active scan ]", Theme.accent, bg, Attribute::Bold)
       end
-    end
-
-    def row_at(box : Rect, mx : Int32, my : Int32) : Int32?
-      return nil unless box.contains?(mx, my)
-      i = my - first_row_y(box)
-      (0 <= i < row_count) ? i : nil
     end
   end
 end

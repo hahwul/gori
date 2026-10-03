@@ -138,10 +138,10 @@ describe "C5 · TabsOverlay on the Overlay seam" do
   #   * ^R → 'r' → the back-to-factory confirm. Observed through the injected `on_reset`.
   #   * ^Space → 0x00 → `Key::Space + Ctrl`, whose `to_char` is ' ' → toggle show/hide.
   #     Observed directly: `to_prefs` carries visibility.
-  #   * ^K → 'k' → `select_move(-1)`. `to_prefs` holds name+visible and NO selection, so this
+  #   * ^K → 'k' → `move(-1)`. `to_prefs` holds name+visible and NO selection, so this
   #     is observed INDIRECTLY, the way the neighbouring click example does it: move the
   #     selection with the chord, then reorder with a bare `K` and see which row moved. A
-  #     `to_prefs.should eq(before)` after a bare `select_move` would be vacuous.
+  #     `to_prefs.should eq(before)` after a bare `move` would be vacuous.
   #
   # ^J and ⇧^J are deliberately absent: 0x0A is mapped to `Key::Enter` by the parser
   # (parser.cr:273), so a `LowerJ + Ctrl` event never comes off a terminal and asserting it

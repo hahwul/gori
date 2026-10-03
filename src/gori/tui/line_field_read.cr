@@ -45,31 +45,10 @@ module Gori::Tui
     # gets nil leaves its caret exactly where the press put it, which is what makes a
     # double-click on whitespace fall back to the ordinary click.
     def select_word_at_cursor(line : String, cx : Int32) : Int32?
-      c = cx.clamp(0, line.size)
-      # A pointer rounds to the NEAREST cluster boundary (`Screen.column_for_click`), so a
-      # double-click on the right half of a WIDE glyph resolves past it — see the same guard
-      # in `ReadCursor#select_word_at_cursor`. Only a wide cluster can be rounded past, so
-      # ASCII behaviour, including "whitespace takes nothing", is unchanged.
-      c = Screen.step_back_over_wide(line, c)
-      return nil if c >= line.size || line[c].whitespace?
-      word = word_char?(line[c])
-      a = c
-      while a > 0 && !line[a - 1].whitespace? && word_char?(line[a - 1]) == word
-        a -= 1
-      end
-      b = c
-      while b < line.size && !line[b].whitespace? && word_char?(line[b]) == word
-        b += 1
-      end
-      return nil if a == b
+      return nil unless span = LineEdit.word_span(line, cx)
+      a, b = span
       @anchor = a
       b
-    end
-
-    # See `TextArea#word_char?` / `ReadCursor#word_char?` — all three must agree, or a
-    # double-click and ⌥←/→ would disagree about where a word ends in the same value.
-    private def word_char?(c : Char) : Bool
-      c.alphanumeric? || c == '_' || c == '-'
     end
 
     def selection_span(cx : Int32) : {Int32, Int32}?

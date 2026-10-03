@@ -1,6 +1,7 @@
 require "./screen"
 require "./line_edit"
 require "./theme"
+require "./issue_presentation"
 require "./frame"
 require "./overlay"
 require "../evidence"
@@ -27,6 +28,8 @@ module Gori::Tui
   # typing row and the builder were two editable copies of one value a row apart. One value,
   # one place to edit it, and `↵` keeps meaning "go on" rather than a chord you have to know.
   class IssueForm < Overlay
+    include IssuePresentation
+
     # Card geometry + the two labels the draw lays down, in one place because `render` and the
     # click hit-tests below both measure off them. A second copy of `"severity ‹ "` next to the
     # inverse is this repo's standing hazard: the moment the two drift, the click lands on a
@@ -264,7 +267,7 @@ module Gori::Tui
     def overlay_box(area : Rect) : Rect?
       w = {area.w - 4, CARD_W}.min
       return nil if w < 12 || area.h < CARD_H
-      Rect.new(area.x + (area.w - w) // 2, area.y + (area.h - CARD_H) // 2, w, CARD_H)
+      area.center(w, CARD_H)
     end
 
     def render(screen : Screen, area : Rect) : Nil
@@ -314,12 +317,12 @@ module Gori::Tui
       if @cvss.empty?
         screen.text(vx, cy, CVSS_EMPTY, Theme.muted, Theme.panel, width: vw)
       else
-        screen.text(vx, cy, @cvss, sev_color(@severity), Theme.panel, width: vw)
+        screen.text(vx, cy, @cvss, severity_color(@severity), Theme.panel, width: vw)
       end
 
       # Severity row
       sx = screen.text(box.x + 2, box.y + SEV_ROW, SEV_PREFIX, on_sev ? Theme.accent : Theme.muted, Theme.panel)
-      sx = screen.text(sx, box.y + SEV_ROW, @severity.label.upcase, sev_color(@severity), Theme.panel, Attribute::Bold)
+      sx = screen.text(sx, box.y + SEV_ROW, @severity.label.upcase, severity_color(@severity), Theme.panel, Attribute::Bold)
       # The severity row is where the qualitative reading lives, so the SCORE that produced it
       # is named here rather than crowding the vector off its own row one line up.
       suffix = if on_sev
@@ -348,16 +351,6 @@ module Gori::Tui
 
     private def sev_forward_end(box : Rect) : Int32
       box.x + 2 + Screen.draw_width(SEV_PREFIX) + Screen.draw_width(@severity.label.upcase) + 1
-    end
-
-    private def sev_color(s : Store::Severity) : Color
-      case s
-      when .critical? then Theme.red
-      when .high?     then Theme.orange
-      when .medium?   then Theme.yellow
-      when .low?      then Theme.accent
-      else                 Theme.muted
-      end
     end
   end
 end

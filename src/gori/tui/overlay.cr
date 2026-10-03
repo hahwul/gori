@@ -3,6 +3,7 @@ require "./screen"
 require "./geometry"
 require "./text_field"
 require "./theme"
+require "./frame"
 
 module Gori::Tui
   # Every modal state the shell's `@overlay` can hold. This was a bare `Symbol` with 33
@@ -204,7 +205,7 @@ module Gori::Tui
       w = {area.w - 4, RULE_FORM_W}.min
       h = {area.h - 2, natural}.min
       return nil if w < RULE_FORM_MIN_W || h < {RULE_FORM_MIN_H, natural}.min
-      Rect.new(area.x + (area.w - w) // 2, area.y + (area.h - h) // 2, w, h)
+      area.center(w, h)
     end
 
     # One `label: value` row of such a form: the label in muted, the field's text (or its
@@ -474,6 +475,321 @@ module Gori::Tui
     # overlay (default true when no closure was supplied).
     def commit : Bool
       (c = on_commit) ? c.call : true
+    end
+  end
+
+  # The row form: a card of `label: value` rows, one selected, each drawn as a band with a `▎`
+  # marker, the LAST row the button that commits (Save / Run / Start). Ten forms — Rewriter,
+  # Colormarker, Probe custom, extract, column, Scope, OAST provider, custom colour, Sequencer,
+  # active scan — had each hand-rolled the selection, the click, the render loop and the row
+  # prelude. A subclass answers `row_count`, `card_title`, `too_small_what` and
+  # `draw_row_body`, and keeps its own key cases.
+  abstract class FormOverlay < Overlay
+    @sel = 0
+
+    abstract def row_count : Int32
+
+    # The card's border title (`title` is the shell's focus badge).
+    abstract def card_title : String
+
+    # The "<what>" of the line drawn when the card does not fit (`Overlay.too_small`).
+    abstract def too_small_what : String
+
+    # One row's content, drawn over the band and the `▎` marker; `x` is the label column.
+    abstract def draw_row_body(screen : Screen, box : Rect, i : Int32, py : Int32,
+                               x : Int32, bg : Color, fg : Color, sel : Bool) : Nil
+
+    # Whether `row` is one ↑/↓ walks past: a row the form's current kind or op ignores.
+    def skip_row?(row : Int32) : Bool
+      false
+    end
+
+    # Whether the card draws a preview band under the rows (`Overlay.rule_form_box`).
+    def preview? : Bool
+      false
+    end
+
+    def on_save_row? : Bool
+      @sel == row_count - 1
+    end
+
+    # One row per step whatever `d`'s size, walking PAST rows `skip_row?` names instead of
+    # landing on them, and stopping at the ends rather than wrapping. A form whose wheel notch
+    # moves the full `d` overrides with a clamp.
+    def move(d : Int32) : Nil
+      step = d < 0 ? -1 : 1
+      nxt = @sel
+      loop do
+        probe = nxt + step
+        break if probe < 0 || probe > row_count - 1
+        nxt = probe
+        break unless skip_row?(nxt)
+      end
+      @sel = nxt unless skip_row?(nxt)
+    end
+
+    def set_selected(idx : Int32) : Nil
+      idx = idx.clamp(0, row_count - 1)
+      @sel = idx unless skip_row?(idx)
+    end
+
+    # ↑/⇤ and ↓/↹ step between rows. True when `ev` was one of the four, so a key ladder can
+    # take it as one arm.
+    private def field_nav?(ev : Termisu::Event::Key) : Bool
+      key = ev.key
+      if key.up? || key.back_tab?
+        move(-1)
+      elsif key.down? || key.tab?
+        move(1)
+      else
+        return false
+      end
+      true
+    end
+
+    # Click a row to select it; a click on the commit row commits; a click outside the card
+    # cancels. Mirrors the ↑/↓ + ↵ keyboard model.
+    def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      box = overlay_box(area)
+      return :cancel if box.nil? || !box.contains?(mx, my)
+      if idx = row_at(box, mx, my)
+        set_selected(idx)
+        return :commit if on_save_row?
+        row_clicked(idx)
+      end
+      # …then the caret, if the press landed inside a drawn field. The row pick above is
+      # what focuses; this is what puts the caret where the operator pointed instead of
+      # leaving it wherever the last keystroke did (Overlay#click_text_field).
+      click_text_field(mx, my)
+      :stay
+    end
+
+    # A press on a row that is not the commit row, after it was selected.
+    private def row_clicked(idx : Int32) : Nil
+    end
+
+    def overlay_box(area : Rect) : Rect?
+      Overlay.rule_form_box(area, row_count, preview: preview?)
+    end
+
+    private def first_row_y(box : Rect) : Int32
+      box.y + 2
+    end
+
+    # The first y a row may not be drawn on: the bottom border, or the preview band above it.
+    private def rows_bottom(box : Rect) : Int32
+      box.bottom - (preview? ? 2 : 1)
+    end
+
+    def render(screen : Screen, area : Rect) : Nil
+      box = overlay_box(area)
+      unless box
+        Overlay.too_small(screen, area, too_small_what)
+        return
+      end
+      Frame.card(screen, box, card_title, border: Theme.border_focus)
+      draw_head(screen, box)
+      first = first_row_y(box)
+      row_count.times do |i|
+        py = first + i
+        break if py >= rows_bottom(box)
+        draw_row(screen, box, i, py)
+      end
+      draw_tail(screen, box, first)
+      # No key hint on the bottom border: the shell already draws `hint` in the status strip
+      # for whichever modal is open (Runner#key_hints), so a second copy here was the same
+      # advice twice — and the copies had drifted apart. Per-row affordances stay where the
+      # key applies (the `‹/›` a cycler draws when it has focus).
+    end
+
+    # What a card draws between its title and its rows.
+    private def draw_head(screen : Screen, box : Rect) : Nil
+    end
+
+    # What a card draws under its rows (the preview band); `first` is the first row's y.
+    private def draw_tail(screen : Screen, box : Rect, first : Int32) : Nil
+    end
+
+    private def draw_row(screen : Screen, box : Rect, i : Int32, py : Int32) : Nil
+      sel = i == @sel
+      bg = sel ? Theme.accent_bg : Theme.panel
+      screen.fill(Rect.new(box.x + 1, py, box.w - 2, 1), bg)
+      screen.cell(box.x + 1, py, sel ? '▎' : ' ', Theme.accent, bg)
+      draw_row_body(screen, box, i, py, box.x + 3, bg, sel ? Theme.text_bright : Theme.text, sel)
+    end
+
+    def row_at(box : Rect, mx : Int32, my : Int32) : Int32?
+      return nil unless box.contains?(mx, my)
+      i = my - first_row_y(box)
+      (0 <= i < row_count) ? i : nil
+    end
+  end
+
+  # A read-only inventory card reached from a top-bar chip: the additional listeners, the TLS
+  # passthrough hosts, the attached MCP clients. Nothing on it is edited — ↑/↓ scroll, `r`
+  # re-snapshots, a click selects, esc closes — and the last row inside the card is a footer
+  # saying what the list itself cannot. A subclass holds its rows (a COPY, so they cannot shift
+  # under a click hit-tested against the previous frame) and draws them.
+  abstract class ListCard < Overlay
+    # ^P leaves for the command palette, like every other list overlay. Injected because
+    # raising another modal is the shell's job.
+    property on_palette : Proc(Nil)?
+
+    @selected = 0
+
+    # Re-snapshot the rows, keeping the selection in range.
+    abstract def reload : Nil
+
+    private abstract def card_w : Int32
+    private abstract def meta : String
+    private abstract def empty_text : String
+    private abstract def too_small_what : String
+    private abstract def draw_row(screen : Screen, box : Rect, i : Int32, py : Int32) : Nil
+    private abstract def draw_footer(screen : Screen, box : Rect) : Nil
+
+    # A card's own key, ahead of the list keys. True when it took `ev`.
+    private def card_key(ev : Termisu::Event::Key) : Bool
+      false
+    end
+
+    # What bare `r` does.
+    private def refresh : Nil
+      reload
+    end
+
+    # Read-only: no ↵ commit, nothing to apply.
+    def handle_key(ev : Termisu::Event::Key) : Symbol
+      k = ev.key
+      if ev.ctrl? && k.lower_p?
+        on_palette.try(&.call)
+      elsif k.escape?
+        return :cancel
+      elsif !card_key(ev)
+        handle_nav(ev)
+      end
+      :stay
+    end
+
+    # ↑/↓ and their bare-letter twins, plus the bare `r`. Split out of `handle_key` for the same
+    # reason `HotkeysOverlay#bare_char` is a method — to keep the dispatcher under the ameba
+    # complexity bar — and the guard in the middle is the whole point of the split.
+    #
+    # BOTH halves of every letter arm need it, which is why guarding the `ev.char` arm alone was
+    # not enough. `Event::Key#char` is `@char || key.to_char`, so ^R folds back to 'r'; and the
+    # termisu parser emits ^K as `Key::LowerK + Ctrl` (parser.cr maps 0x01..0x1A through
+    # `Key.from_char`), so `k.lower_k?` is TRUE on a chord too — no `ev.char` involved. The
+    # shell pre-filters only ^C/^D/^G/^F/^B (`Runner#handle_key`), so every other chord lands
+    # here. ARROWS stay outside the guard deliberately: ⌃↑/⌃↓ are a scroll gesture elsewhere in
+    # gori and nothing folds them into a letter, so there is no bug to fix on that arm.
+    private def handle_nav(ev : Termisu::Event::Key) : Nil
+      k = ev.key
+      if k.up?
+        move(-1)
+      elsif k.down?
+        move(1)
+      elsif page_key(ev)
+        # PgUp/PgDn/Home/End — the list contract, `Overlay#page_key`
+      elsif ev.ctrl? || ev.alt?
+        # A chord is not a mnemonic. Claimed and dropped rather than fallen through: this
+        # overlay returns :stay for everything, so the chord was consumed either way — the
+        # only question was whether it also DID something, and it should not.
+      elsif k.lower_k?
+        move(-1)
+      elsif k.lower_j?
+        move(1)
+      elsif (ev.char || k.to_char) == 'r'
+        refresh
+      end
+    end
+
+    # A click inside the card selects a row (there is nothing to open); outside dismisses.
+    # Never :commit — a read-only list that closed itself on a row click would look like it
+    # had done something.
+    def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
+      box = overlay_box(area)
+      return :cancel if box.nil? || !box.contains?(mx, my)
+      # The gauge on the card's right hairline, before `row_at` — which has no `mx` bound and
+      # would otherwise read a click there as a plain pick of whatever row shares its `my`.
+      if row = gauge_row_at(box, mx, my)
+        set_selected(row)
+      elsif idx = row_at(box, mx, my)
+        set_selected(idx)
+      end
+      :stay
+    end
+
+    def move(d : Int32) : Nil
+      @selected = (@selected + d).clamp(0, {entry_count - 1, 0}.max)
+    end
+
+    def set_selected(idx : Int32) : Nil
+      @selected = idx.clamp(0, {entry_count - 1, 0}.max)
+    end
+
+    # Centered box, sized to the content (min 6 rows), `card_w` wide at most.
+    def overlay_box(area : Rect) : Rect?
+      w = {area.w - 4, card_w}.min
+      rows = {entry_count, 6}.max
+      h = {area.h - 2, rows + 4}.min # title gap + list + footer + bottom border
+      return nil if w < 32 || h < 7
+      area.center(w, h)
+    end
+
+    def render(screen : Screen, area : Rect) : Nil
+      box = overlay_box(area)
+      unless box
+        Overlay.too_small(screen, area, too_small_what)
+        return
+      end
+      Frame.card(screen, box, title, border: Theme.border_focus)
+      Frame.border_meta(screen, box, title, meta, bg: Theme.panel)
+
+      cap = list_capacity(box)
+      @list_last_h = cap
+      return if cap <= 0
+      start = list_window(cap)
+      if entry_count == 0
+        screen.text(box.x + 3, box.y + 2, empty_text, Theme.muted, Theme.panel)
+      else
+        cap.times do |row|
+          i = start + row
+          break if i >= entry_count
+          draw_row(screen, box, i, box.y + 2 + row)
+        end
+      end
+      # A windowed list with no gauge gave an operator scrolling past row `cap` nothing that
+      # said there was more. `true` for focused: an open modal IS the focus.
+      Frame.scroll_gauge(screen, Rect.new(box.x + 1, box.y + 2, box.w - 2, cap),
+        entry_count, start, true, Theme.panel)
+      draw_footer(screen, box)
+    end
+
+    # The row a click on the list's scroll gauge asks for. The gauge rides the card's right
+    # hairline; the window is derived from the selection, so this answers with a selection.
+    def gauge_row_at(box : Rect, mx : Int32, my : Int32) : Int32?
+      Frame.scroll_gauge_row(Rect.new(box.x + 1, box.y + 2, box.w - 2, list_capacity(box)),
+        entry_count, mx, my)
+    end
+
+    # Row index under (mx,my) — inverts render's windowed layout so a click maps to the same
+    # row that was drawn.
+    def row_at(box : Rect, mx : Int32, my : Int32) : Int32?
+      return nil unless box.contains?(mx, my)
+      cap = list_capacity(box)
+      row = my - (box.y + 2)
+      return nil if row < 0 || row >= cap
+      i = list_window(cap) + row
+      i < entry_count ? i : nil
+    end
+
+    # One row above the border is reserved for the footer (see draw_footer).
+    private def list_capacity(box : Rect) : Int32
+      {box.bottom - 2 - (box.y + 2), 0}.max
+    end
+
+    private def list_window(cap : Int32) : Int32
+      return 0 if cap <= 0 || entry_count <= cap
+      { {@selected - cap + 1, 0}.max, entry_count - cap }.min
     end
   end
 end

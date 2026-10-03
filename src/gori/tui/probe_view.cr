@@ -796,24 +796,6 @@ module Gori::Tui
       next_status
     end
 
-    # Bulk-mute every OPEN issue sharing the targeted issue's code. Respects the `s` scope lens:
-    # dismissing "all with this code" from a scoped view must not silently mute issues on
-    # out-of-scope hosts the user can't see, and the returned count must equal what was muted.
-    # With the lens off this is every open issue carrying the code.
-    def dismiss_by_code(store : Store) : Int32
-      return 0 unless issue = target_issue
-      targets = @all.select { |i| i.code == issue.code && i.status.open? && lens_admits?(i) }
-      targets.each { |i| store.update_probe_issue_status(i.id, Store::Status::FalsePositive) }
-      reload(store)
-      targets.size
-    end
-
-    # A row is admitted by the active scope lens (always true when the lens is off).
-    private def lens_admits?(issue : Store::ProbeIssueRow) : Bool
-      return true unless scope_active?
-      @scope.try(&.host_in_scope?(issue.host)) == true
-    end
-
     # Delete a SPECIFIC issue by id. The controller captures the id when the confirm opens, so a
     # background reload that shifts the selection between prompt and confirm can't make the delete
     # (and its paired suppress) target a different issue than the one the user chose.

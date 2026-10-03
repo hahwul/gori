@@ -81,20 +81,10 @@ module Gori::Tui
       :stay
     end
 
-    # The one editor keymap (`TextArea#handle_motion_key`) plus ⌫/Del/undo and printables —
-    # what `RewriterStubOverlay#edit` binds, minus ↵, which the card owns above.
+    # The one editor keymap (`TextArea#handle_edit_key`); ↵ never reaches it, the card owns
+    # that above.
     private def edit(ev : Termisu::Event::Key) : Nil
-      key = ev.key
-      case
-      when ev.ctrl? && key.lower_z?      then @editor.undo
-      when @editor.word_delete_key?(ev)  then @editor.handle_motion_key(ev)
-      when key.backspace?                then @editor.backspace
-      when key.delete?                   then @editor.delete
-      when @editor.handle_motion_key(ev) then nil
-      else
-        ch = ev.char || key.to_char
-        @editor.insert(ch) if ch && !ev.ctrl? && !ev.alt?
-      end
+      @editor.handle_edit_key(ev)
     end
 
     def set_preedit(text : String) : Nil
@@ -127,7 +117,7 @@ module Gori::Tui
       w = {area.w - 4, 96}.min
       h = {area.h - 2, 22}.min
       return nil if w < 40 || h < 10
-      Rect.new(area.x + (area.w - w) // 2, area.y + (area.h - h) // 2, w, h)
+      area.center(w, h)
     end
 
     # The buffer's rect inside a drawn card — shared by `render` and the pointer entries so a

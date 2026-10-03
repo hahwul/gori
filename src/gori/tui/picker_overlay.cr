@@ -97,9 +97,7 @@ module Gori::Tui
       w = {area.w - 4, card_w}.min
       h = {entry_count + 2, area.h - 2}.min
       return nil if w < min_w || area.h < 5
-      x = area.x + (area.w - w) // 2
-      y = area.y + (area.h - h) // 2
-      Rect.new(x, y, w, h)
+      area.center(w, h)
     end
 
     # Row index under (mx,my), mirroring render's list loop; nil outside. Bound to the rows
@@ -213,6 +211,29 @@ module Gori::Tui
     # Rows visible in the list area of `box`.
     private def list_height(box : Rect) : Int32
       box.bottom - 1 - (box.y + LIST_OFFSET)
+    end
+
+    # The card's widest, before the area clamp.
+    private def card_max_w : Int32
+      96
+    end
+
+    # A centred card filling the body height, `card_max_w` wide at most — a stable height, so
+    # it does not resize as the filter narrows. nil when there isn't room to draw.
+    def overlay_box(area : Rect) : Rect?
+      w = {area.w - 4, card_max_w}.min
+      h = area.h - 2
+      return nil if w < 30 || h < 8
+      area.center(w, h)
+    end
+
+    # Row index under (mx,my), mirroring the list loop under `render_filter`; nil off it.
+    def row_at(box : Rect, mx : Int32, my : Int32) : Int32?
+      i = my - (box.y + LIST_OFFSET)
+      return nil if i < 0 || i >= list_height(box)
+      return nil if mx < box.x + 1 || mx >= box.right - 1
+      ri = @scroll + i
+      ri < entry_count ? ri : nil
     end
 
     # Recompute the visible rows for the current query and reset the cursor. Subclasses

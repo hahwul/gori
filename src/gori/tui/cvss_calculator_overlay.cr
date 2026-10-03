@@ -1,5 +1,6 @@
 require "./screen"
 require "./theme"
+require "./issue_presentation"
 require "./frame"
 require "./overlay"
 require "./text_field"
@@ -38,6 +39,8 @@ module Gori::Tui
   # clips to the SCREEN, not to the box — so the overflow landed ON the frame, and the
   # in-card hint overwrote the Cancel button even at full width.
   class CvssCalculatorOverlay < Overlay
+    include IssuePresentation
+
     # One base metric: the row label, the vector key it writes, and its choices as
     # {vector value, display}. Base metrics only — temporal/threat/environmental are not
     # something an issue's single `cvss` field carries, and the field takes any vector the
@@ -526,7 +529,7 @@ module Gori::Tui
       x = box.right - w - 1
       title_end = box.x + 2 + Screen.draw_width(" CVSS v#{spec.label} ")
       return if x <= title_end
-      color = resolved ? sev_color(current_severity) : Theme.red
+      color = resolved ? severity_color(current_severity) : Theme.red
       screen.text(x, box.y, " #{text} ", color, Theme.panel, Attribute::Bold, width: w)
     end
 
@@ -571,24 +574,14 @@ module Gori::Tui
       elsif r = resolved
         score, sev, _ = r
         lx = screen.text(x, py, "[ use ", Theme.accent, bg, Attribute::Bold, width: w)
-        lx = screen.text(lx, py, sprintf("%.1f", score), sev_color(sev), bg, Attribute::Bold,
+        lx = screen.text(lx, py, sprintf("%.1f", score), severity_color(sev), bg, Attribute::Bold,
           width: {box.right - 2 - lx, 0}.max)
         lx = screen.text(lx, py, " · ", Theme.muted, bg, width: {box.right - 2 - lx, 0}.max)
-        lx = screen.text(lx, py, sev.label, sev_color(sev), bg, Attribute::Bold,
+        lx = screen.text(lx, py, sev.label, severity_color(sev), bg, Attribute::Bold,
           width: {box.right - 2 - lx, 0}.max)
         screen.text(lx, py, " ]", Theme.accent, bg, Attribute::Bold, width: {box.right - 2 - lx, 0}.max)
       else
         screen.text(x, py, "[ not a cvss vector or score ]", Theme.red, bg, Attribute::Bold, width: w)
-      end
-    end
-
-    private def sev_color(s : Store::Severity) : Color
-      case s
-      when .critical? then Theme.red
-      when .high?     then Theme.orange
-      when .medium?   then Theme.yellow
-      when .low?      then Theme.accent
-      else                 Theme.muted
       end
     end
   end

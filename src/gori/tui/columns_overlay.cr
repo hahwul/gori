@@ -162,7 +162,7 @@ module Gori::Tui
       w = {area.w - 4, 72}.min
       h = {area.h - 2, {@columns.size + 6, 10}.max}.min
       return nil if w < 40 || h < 7
-      Rect.new(area.x + (area.w - w) // 2, area.y + (area.h - h) // 2, w, h)
+      area.center(w, h)
     end
 
     private def visible_rows(box : Rect) : Int32

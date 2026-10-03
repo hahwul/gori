@@ -368,9 +368,7 @@ module Gori::Tui
       # drops below the render guard (box.h < 10) and the modal simply doesn't draw, rather
       # than spilling the card over the tab bar / status rows.
       h = {tallest + 7, area.h - 2}.min
-      x = area.x + (area.w - w) // 2
-      y = area.y + (area.h - h) // 2
-      Rect.new(x, y, w, h)
+      area.center(w, h)
     end
 
     # Interior content rows (between the strip divider and the two footer rows).
@@ -447,26 +445,13 @@ module Gori::Tui
       if sec.sym == :theme
         name = Theme.canonical(Settings.theme)
         name_x = lx + Screen.draw_width(label) + 2
-        sx = cx - 1 - SWATCH_W
+        sx = cx - 1 - Frame::SWATCH_W
         if sx >= name_x
           screen.text(name_x, y, name, focused ? Theme.text_bright : Theme.muted, bg, width: {sx - name_x - 1, 1}.max)
-          draw_swatch(screen, sx, y, name)
+          Frame.theme_swatch(screen, sx, y, name)
         end
       end
       screen.text(cx, y, cue, focused ? Theme.accent : Theme.muted, bg, width: {content.right - cx, 1}.max)
-    end
-
-    # A tiny preview strip in the theme's OWN palette (its canvas colour framing 5 accent
-    # ticks) — the same swatch the theme card draws per row. Width == SWATCH_W.
-    SWATCH_W = 7
-
-    private def draw_swatch(screen : Screen, x : Int32, ry : Int32, name : String) : Nil
-      pal = Theme.palette(name)
-      return unless pal
-      ticks = {pal.accent, pal.green, pal.yellow, pal.red, pal.syn_header}
-      screen.cell(x, ry, ' ', pal.bg, pal.bg)
-      ticks.each_with_index { |c, i| screen.cell(x + 1 + i, ry, '█', c, pal.bg) }
-      screen.cell(x + 6, ry, ' ', pal.bg, pal.bg)
     end
 
     private def render_footer(screen : Screen, box : Rect) : Nil

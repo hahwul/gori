@@ -420,7 +420,7 @@ describe "Overlay seam — SequenceConfigOverlay (hard case: 2 open-sites, no fl
     # Drive each to Start (row 6) and commit through the generic shell dispatch.
     [new_h, reconf_h].each do |h|
       5.times { h.press(Termisu::Input::Key::Down) } # selector → … → Start
-      h.overlay.as(SequenceConfigOverlay).on_start_row?.should be_true
+      h.overlay.as(SequenceConfigOverlay).on_save_row?.should be_true
       h.press(Termisu::Input::Key::Enter).should eq(:closed)
     end
 

@@ -1,4 +1,5 @@
 require "./screen"
+require "./line_edit"
 require "./theme"
 require "./frame"
 require "./highlight"
@@ -1119,26 +1120,8 @@ module Gori::Tui
       return false if @lines.empty?
       @cy = @cy.clamp(0, @lines.size - 1)
       line = @lines[@cy]
-      cx = @cx.clamp(0, line.size)
-      # `Screen.column_for_click` rounds a POINTER to the NEAREST cluster boundary, so a
-      # double-click on the RIGHT half of a WIDE glyph — a Hangul syllable, a CJK ideograph:
-      # half of every pointer position over such text — resolves to the position AFTER it,
-      # where the word may have already ended and there is no token to take. Step back over
-      # that one glyph, and ONLY when it is wide: a 1-column cluster cannot be rounded past,
-      # so every ASCII gesture is bit-for-bit what it was (including "a double-click on a
-      # space takes nothing", which is this method's stated contract).
-      cx = Screen.step_back_over_wide(line, cx)
-      return false if cx >= line.size || line[cx].whitespace?
-      word = word_char?(line[cx])
-      a = cx
-      while a > 0 && !line[a - 1].whitespace? && word_char?(line[a - 1]) == word
-        a -= 1
-      end
-      b = cx
-      while b < line.size && !line[b].whitespace? && word_char?(line[b]) == word
-        b += 1
-      end
-      return false if a == b
+      return false unless span = LineEdit.word_span(line, @cx)
+      a, b = span
       @sel_anchor = {@cy, a}
       @cx = b
       snap_cx_to_cluster(1)
@@ -1283,14 +1266,32 @@ module Gori::Tui
       true
     end
 
-    # A modified ⌫. The `char` half is load-bearing: a terminal sends ⌥⌫ as ESC + 0x7F, and
-    # termisu's Alt-prefix branch maps the payload through `Key.from_char`, which has no name
-    # for DEL — so it arrives as `Key::Unknown` + Alt carrying that char, not as Backspace.
+    # A modified ⌫ — `LineEdit.word_delete_key?`, which says why the `char` half matters.
     def word_delete_key?(ev : Termisu::Event::Key) : Bool
-      return false unless ev.ctrl? || ev.alt?
-      return true if ev.key.backspace?
-      c = ev.char
-      !!c && (c == '\u{7F}' || c == '\b')
+      LineEdit.word_delete_key?(ev)
+    end
+
+    # The whole keymap of an editor that IS its card's surface (the Rewriter stub, the Discover
+    # headers, …): ↵ a newline (an owner that gives ↵ another meaning answers it first), ^Z
+    # undo, then `handle_motion_key`, ⌫/Del and a printable. ↑/↓ have no pane to cross into,
+    # so they are the motion keymap's too. `TextField#handle_edit_key`'s multi-line
+    # counterpart; true when consumed.
+    def handle_edit_key(ev : Termisu::Event::Key) : Bool
+      key = ev.key
+      case
+      when key.enter?               then insert_newline
+      when ev.ctrl? && key.lower_z? then undo # the undo chord every body editor binds
+      # Before plain ⌫, which would swallow the modified form as a one-character delete.
+      when word_delete_key?(ev)  then handle_motion_key(ev)
+      when key.backspace?        then backspace
+      when key.delete?           then delete
+      when handle_motion_key(ev) then nil
+      else
+        ch = ev.char || key.to_char
+        return false unless ch && !ev.ctrl? && !ev.alt?
+        insert(ch)
+      end
+      true
     end
 
     # One screenful for `page`, taken from the LAST RENDERED viewport height so the step
@@ -2664,7 +2665,7 @@ module Gori::Tui
       # typed token text rather than the partial, because a row's `insert` is a whole spelling
       # (`$BIND.SESSION`) and a partial is only the tail of one: comparing the two would keep
       # the popup up forever on a token that is finished, and in bare mode would never match.
-      if matches.empty? || (matches.size == 1 && matches[0].insert == line[tok.sigil...cx])
+      if matches.empty? || (matches.size == 1 && matches[0].label == line[tok.sigil...cx])
         ec.close
       else
         ec.set(matches, tok.sigil)
@@ -2687,7 +2688,7 @@ module Gori::Tui
         .first(40)
         .each do |k|
           spelled = Env.spell(k, Env::Namespace::Env, Env::Syntax::Bare, prefix)
-          rows_out << EnvComplete::Match.new(:token, spelled, spelled,
+          rows_out << EnvComplete::Match.new(:token, spelled,
             env_value_preview(vars[k], bind_only || declared.includes?(k)), tok.token_end)
         end
       rows_out
@@ -2759,7 +2760,7 @@ module Gori::Tui
         next if table.nil? || table.empty?
         next unless pl.empty? || ns.label.downcase.starts_with?(pl)
         spelled = Env.input_hint(ns, syntax, prefix)
-        rows_out << EnvComplete::Match.new(:ns, spelled, spelled,
+        rows_out << EnvComplete::Match.new(:ns, spelled,
           "#{ns.description} · #{table.size}", tok.run_end + (tok.dot_follows ? 1 : 0))
       end
       # The fixed generators would otherwise fill the eight-row viewport on a bare `$` and
@@ -2794,7 +2795,7 @@ module Gori::Tui
         name, ns = row
         spelled = Env.spell(name, ns, syntax, prefix)
         hint = ns.gen? ? tables[ns][name] : env_value_preview(tables[ns][name]? || "", ns.secret?)
-        rows_out << EnvComplete::Match.new(:token, spelled, spelled,
+        rows_out << EnvComplete::Match.new(:token, spelled,
           hint, replace_end)
       end
     end

@@ -164,22 +164,8 @@ module Gori::Tui
       "#{r.kind.label} #{r.label} #{r.detail}".downcase
     end
 
-    def overlay_box(area : Rect) : Rect?
-      w = {area.w - 4, 80}.min
-      h = area.h - 2
-      return nil if w < 30 || h < 8
-      x = area.x + (area.w - w) // 2
-      y = area.y + (area.h - h) // 2
-      Rect.new(x, y, w, h)
-    end
-
-    def row_at(box : Rect, mx : Int32, my : Int32) : Int32?
-      list_h = list_height(box)
-      i = my - (box.y + LIST_OFFSET)
-      return nil if i < 0 || i >= list_h
-      return nil if mx < box.x + 1 || mx >= box.right - 1
-      ri = @scroll + i
-      ri < entry_count ? ri : nil
+    private def card_max_w : Int32
+      80
     end
 
     def render(screen : Screen, area : Rect) : Nil

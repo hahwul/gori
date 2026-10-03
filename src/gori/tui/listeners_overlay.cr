@@ -28,11 +28,7 @@ module Gori::Tui
   # correctly since additional listeners existed and displayed nowhere, so a listener that
   # failed to bind — or was rejected as unusable before it ever got a socket — was invisible,
   # and the only symptom was traffic that never arrived.
-  class ListenersOverlay < Overlay
-    # ^P leaves for the command palette, like every other list overlay. Injected because
-    # raising another modal is the shell's job (see Runner#open_listeners).
-    property on_palette : Proc(Nil)?
-
+  class ListenersOverlay < ListCard
     # `r`: re-read the `listeners` section from settings.json and make the sockets match it
     # (#508). Injected rather than called on `@session` here because the reconcile is a
     # lifecycle change and reporting what it moved is the shell's job — the overlay only asks,
@@ -40,7 +36,6 @@ module Gori::Tui
     property on_reload : Proc(Nil)?
 
     def initialize(@session : Gori::Session)
-      @selected = 0
       @rows = @session.listener_rows
     end
 
@@ -65,119 +60,31 @@ module Gori::Tui
     end
 
     # No ↵ commit — there is nothing here to edit, so the only action is `r`, which re-reads the
-    # section and applies it. esc closes, ↑/↓ scroll.
-    def handle_key(ev : Termisu::Event::Key) : Symbol
-      k = ev.key
-      if ev.ctrl? && k.lower_p?
-        on_palette.try(&.call)
-      elsif k.escape?
-        return :cancel
-      else
-        handle_nav(ev)
-      end
-      :stay
-    end
-
-    # ↑/↓ and their bare-letter twins, plus the bare `r`. Split out of `handle_key` for the same
-    # reason `HotkeysOverlay#bare_char` is a method — to keep the dispatcher under the ameba
-    # complexity bar — and the guard in the middle is the whole point of the split.
-    #
-    # BOTH halves of every letter arm need it, which is why guarding the `ev.char` arm alone was
-    # not enough. `Event::Key#char` is `@char || key.to_char`, so ^R folds back to 'r'; and the
-    # termisu parser emits ^K as `Key::LowerK + Ctrl` (parser.cr maps 0x01..0x1A through
-    # `Key.from_char`), so `k.lower_k?` is TRUE on a chord too — no `ev.char` involved. The
-    # shell pre-filters only ^C/^D/^G/^F/^B (`Runner#handle_key`), so every other chord lands
-    # here. ARROWS stay outside the guard deliberately: ⌃↑/⌃↓ are a scroll gesture elsewhere in
-    # gori and nothing folds them into a letter, so there is no bug to fix on that arm.
-    private def handle_nav(ev : Termisu::Event::Key) : Nil
-      k = ev.key
-      if k.up?
-        move(-1)
-      elsif k.down?
-        move(1)
-      elsif page_key(ev)
-        # PgUp/PgDn/Home/End — the list contract, `Overlay#page_key`
-      elsif ev.ctrl? || ev.alt?
-        # A chord is not a mnemonic. Claimed and dropped rather than fallen through: this
-        # overlay returns :stay for everything, so the chord was consumed either way — the
-        # only question was whether it also DID something, and it should not.
-      elsif k.lower_k?
-        move(-1)
-      elsif k.lower_j?
-        move(1)
-      elsif (ev.char || k.to_char) == 'r'
-        (cb = on_reload) ? cb.call : reload
-      end
-    end
-
-    # A click inside the card selects a row (there is nothing to open); outside dismisses.
-    # Never :commit — a read-only list that closed itself on a row click would look like it
-    # had done something.
-    def handle_click(area : Rect, mx : Int32, my : Int32) : Symbol
-      box = overlay_box(area)
-      return :cancel if box.nil? || !box.contains?(mx, my)
-      # The gauge on the card's right hairline, before `row_at` — which has no `mx` bound and
-      # would otherwise read a click there as a plain pick of whatever row shares its `my`.
-      if row = gauge_row_at(box, mx, my)
-        set_selected(row)
-      elsif idx = row_at(box, mx, my)
-        set_selected(idx)
-      end
-      :stay
+    # section and applies it.
+    private def refresh : Nil
+      (cb = on_reload) ? cb.call : reload
     end
 
     def entry_count : Int32
       @rows.size
     end
 
-    def move(d : Int32) : Nil
-      @selected = (@selected + d).clamp(0, {@rows.size - 1, 0}.max)
-    end
-
-    def set_selected(idx : Int32) : Nil
-      @selected = idx.clamp(0, {@rows.size - 1, 0}.max)
-    end
-
-    # Centered box, sized to the content (min 6 rows) — mirrors PassthroughOverlay so the
-    # geometry math stays consistent across the read-only list overlays. Same 76-column width
-    # reasoning: a row carries mode AND bind AND origin, and the origin is the field that must
+    # 76 columns: a row carries mode AND bind AND origin, and the origin is the field that must
     # never be the one squeezed out, since it is the whole content of a reverse listener.
-    def overlay_box(area : Rect) : Rect?
-      w = {area.w - 4, 76}.min
-      rows = {@rows.size, 6}.max
-      h = {area.h - 2, rows + 4}.min # title gap + list + footer + bottom border
-      return nil if w < 32 || h < 7
-      Rect.new(area.x + (area.w - w) // 2, area.y + (area.h - h) // 2, w, h)
+    private def card_w : Int32
+      76
     end
 
-    def render(screen : Screen, area : Rect) : Nil
-      box = overlay_box(area)
-      unless box
-        Overlay.too_small(screen, area, "listener list needs a larger window")
-        return
-      end
-      Frame.card(screen, box, "LISTENERS", border: Theme.border_focus)
-      meta = Gori.plural(@rows.size, "listener")
-      Frame.border_meta(screen, box, "LISTENERS", meta, bg: Theme.panel)
+    private def meta : String
+      Gori.plural(@rows.size, "listener")
+    end
 
-      cap = list_capacity(box)
-      @list_last_h = cap
-      return if cap <= 0
-      start = list_window(cap)
-      if @rows.empty?
-        screen.text(box.x + 3, box.y + 2, "(no additional listeners configured)", Theme.muted, Theme.panel)
-      else
-        cap.times do |row|
-          i = start + row
-          break if i >= @rows.size
-          draw_row(screen, box, i, box.y + 2 + row)
-        end
-      end
-      # A windowed list with no gauge gave an operator scrolling past row `cap` nothing that
-      # said there was more. `true` for focused: an open modal IS the focus.
-      Frame.scroll_gauge(screen, Rect.new(box.x + 1, box.y + 2, box.w - 2, cap),
-        @rows.size, start, true, Theme.panel)
-      draw_footer(screen, box)
+    private def empty_text : String
+      "(no additional listeners configured)"
+    end
+
+    private def too_small_what : String
+      "listener list needs a larger window"
     end
 
     # The last row inside the card. Two facts the list itself cannot carry, both of which the
@@ -268,35 +175,6 @@ module Gori::Tui
     # at all but a rejected entry standing in for one.
     private def mode_color(row : Gori::Session::ListenerRow) : Color
       row.mode == "invalid" ? Theme.red : Theme.muted
-    end
-
-    # Row index under (mx,my) — inverts render's windowed layout so a click maps to the same
-    # row that was drawn.
-    # The row a click on the list's scroll gauge asks for. The gauge rides the card's right
-    # hairline; the window is derived from the selection, so this answers with a selection.
-    def gauge_row_at(box : Rect, mx : Int32, my : Int32) : Int32?
-      Frame.scroll_gauge_row(Rect.new(box.x + 1, box.y + 2, box.w - 2, list_capacity(box)),
-        @rows.size, mx, my)
-    end
-
-    def row_at(box : Rect, mx : Int32, my : Int32) : Int32?
-      return nil unless box.contains?(mx, my)
-      cap = list_capacity(box)
-      row = my - (box.y + 2)
-      return nil if row < 0 || row >= cap
-      i = list_window(cap) + row
-      i < @rows.size ? i : nil
-    end
-
-    # One row above the border is reserved for the footer (see draw_footer) — the same
-    # geometry PassthroughOverlay uses.
-    private def list_capacity(box : Rect) : Int32
-      {box.bottom - 2 - (box.y + 2), 0}.max
-    end
-
-    private def list_window(cap : Int32) : Int32
-      return 0 if cap <= 0 || @rows.size <= cap
-      { {@selected - cap + 1, 0}.max, @rows.size - cap }.min
     end
   end
 end
