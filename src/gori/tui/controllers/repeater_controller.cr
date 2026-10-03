@@ -1843,6 +1843,7 @@ module Gori::Tui
         @host.status("repeater: #{view.summary} — #{graphql_raw_note(detail)}type to edit · ^R send · ^N new · ⇧1-9 switch · esc back")
       end
       @current_repeater_idx = @repeaters.size - 1
+      reveal_active_subtab
       @host.goto_tab(:repeater)
     end
 
@@ -1852,6 +1853,7 @@ module Gori::Tui
       view.load_blank
       @repeaters << RepeaterTab.new(view, nil, persist_new_repeater(view, nil))
       @current_repeater_idx = @repeaters.size - 1
+      reveal_active_subtab
       @host.goto_tab(:repeater)
       @host.status("new repeater — edit the request & target · ^R send · ⇧1-9 switch · esc back")
     end
@@ -1877,6 +1879,7 @@ module Gori::Tui
       end
       @repeaters << RepeaterTab.new(view, nil, db_id)
       @current_repeater_idx = @repeaters.size - 1
+      reveal_active_subtab
       @host.goto_tab(:repeater)
     end
 
@@ -1939,6 +1942,7 @@ module Gori::Tui
       end
       @repeaters << RepeaterTab.new(view, nil, db_id)
       @current_repeater_idx = @repeaters.size - 1
+      reveal_active_subtab
       frames_lost
     end
 

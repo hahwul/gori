@@ -1155,6 +1155,12 @@ module Gori::Tui
       reanchor_current
     end
 
+    # A path that lands on a sub-tab it just made (^N, duplicate, send-to) drops a filter that
+    # hides it: the strip would otherwise draw no active chip and ←/→ would jump to an edge.
+    protected def reveal_active_subtab : Nil
+      clear_subtab_filter if (h = subtab_hidden) && h.includes?(subtab_index)
+    end
+
     # Esc: drop the filter entirely and leave edit mode (every chip returns).
     def clear_subtab_filter : Nil
       @subtab_filter = ""

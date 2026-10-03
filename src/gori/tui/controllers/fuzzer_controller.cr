@@ -1790,6 +1790,7 @@ module Gori::Tui
         @auto_load_considered.add(id)
       end
       @current_idx = @sessions.size - 1
+      reveal_active_subtab
       @host.goto_tab(:fuzzer)
     end
 

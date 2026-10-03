@@ -310,4 +310,15 @@ describe "TabController#subtab_search_rows" do
       jc.subtab_index.should eq 1
     end
   end
+
+  it "drops a Repeater strip filter that would hide the tab ^N just opened" do
+    with_session do |host|
+      rc = RepeaterController.new(host)
+      rc.start_subtab_filter
+      "shop".each_char { |c| rc.handle_subtab_filter_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerA, char: c)) }
+      rc.repeater_new # a blank example.com tab: the filter hides it
+      rc.subtab_index.should eq 1
+      (rc.subtab_hidden.try(&.includes?(1)) || false).should be_false
+    end
+  end
 end

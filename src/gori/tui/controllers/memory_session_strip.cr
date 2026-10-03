@@ -16,7 +16,7 @@ module Gori::Tui
     # hides the now-active chip; the Decoder also closes its chain popup and marks the set for
     # persisting.
     private def after_change : Nil
-      clear_subtab_filter if (h = subtab_hidden) && h.includes?(@idx)
+      reveal_active_subtab
     end
 
     # --- sub-tab strip (runner-owned chrome; shown from the first session) ---

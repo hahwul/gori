@@ -504,6 +504,7 @@ module Gori::Tui
     private def open_session(view : SequencerView, flow_id : Int64?) : Nil
       @sessions << SequencerTab.new(view, flow_id, persist_new(view, flow_id))
       @current_idx = @sessions.size - 1
+      reveal_active_subtab
     end
 
     private def persist_new(view : SequencerView, flow_id : Int64?) : Int64?
