@@ -146,7 +146,7 @@ module Gori::Repeater
     end
 
     private def self.default_port(scheme : String) : Int32
-      URI.default_port(scheme) || 80
+      scheme == "https" ? 443 : 80
     end
 
     # The structured shape frames the request itself, so a header name/value (or the
