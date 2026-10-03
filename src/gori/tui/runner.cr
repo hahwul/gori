@@ -1824,10 +1824,10 @@ module Gori::Tui
       # the action to the typing. The named keys (arrows, ↵, esc, ↹) and every modified chord
       # stay silent: those are navigation, legitimately unbound in some scopes (`space` is a
       # named key too, so the leader below is never named here).
-      # A bare printable the TAB BAR does not bind but the tab's body does: name the `↵` that
-      # gets there, rather than "nothing bound here" one row above a header advertising the
-      # very key that was pressed (F10).
-      if @focus == :menu && (below = body_scope_verb(chord))
+      # A bare printable or Ctrl chord the TAB BAR does not bind but the tab's body does: name
+      # the `↵` that gets there, rather than "nothing bound here" one row above a header
+      # advertising the very key that was pressed (F10), or silence for a `^R`.
+      if @focus == :menu && (below = Runner.body_scope_verb(chord, @tabs[@active_tab]?.try(&.command_scope) || Verb::Scope::Body, @keymap, @session.registry))
         lands = @tabs[@active_tab]?.try(&.command_section) || :common
         status(Runner.enter_first_hint(chord, below.title, strip: subtabs_shown?, pane: Runner.gated_pane(below, lands)))
         return
@@ -2759,14 +2759,18 @@ module Gori::Tui
     # The verb `chord` would fire if the body had focus, or nil. Deliberately NOT gated on
     # `available?`: this answers "is there something here one level down", and a verb that is
     # momentarily unavailable (an empty list, nothing selected) is still the reason the key is
-    # not the tab bar's. Bare printables only — a modified chord on the bar is deliberate.
-    private def body_scope_verb(chord : Verb::Chord) : Verb::Definition?
-      return nil if chord.ctrl || chord.alt || chord.key.size != 1
-      scope = @tabs[@active_tab]?.try(&.command_scope) || Verb::Scope::Body
+    # not the tab bar's. A single-character key, bare or Ctrl: the bar is app-level focus
+    # (DESIGN.md §7, 2026-09-26), so a body chord like History's `^R` does not run from it —
+    # but the row it is pressed beside looks selected and the tour names that very chord, so
+    # silence read as a broken key. Alt stays out: on the bar it is a terminal's Meta prefix.
+    # Class-level and pure so the rule is spec-able (`Runner.new` owns a terminal).
+    def self.body_scope_verb(chord : Verb::Chord, scope : Verb::Scope, keymap : Verb::Keymap,
+                             registry : Verb::Registry) : Verb::Definition?
+      return nil if chord.alt || chord.key.size != 1
       return nil if scope == Verb::Scope::Sidebar
-      id = @keymap.lookup(chord, scope)
+      id = keymap.lookup(chord, scope)
       return nil if id.nil?
-      verb = @session.registry[id]?
+      verb = registry[id]?
       # A Global binding is not "one level down" — it fires from the bar too, so it would
       # already have run above.
       return nil if verb.nil? || verb.scope == Verb::Scope::Global
