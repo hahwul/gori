@@ -199,6 +199,39 @@ describe Gori::MCP::Install do
     end
   end
 
+  describe ".toml_string" do
+    # A spec-following TOML parser refuses the whole file over one raw control character.
+    it "keeps bytes that are not UTF-8 instead of raising" do
+      Gori::MCP::Install.toml_string("--db=/data/\xff.db").to_slice.should eq(%("--db=/data/\xff.db").to_slice)
+    end
+
+    it "escapes control characters other than tab" do
+      Gori::MCP::Install.toml_string("--project=a\u0001b\tc\u007F").should eq(%("--project=a\\u0001b\tc\\u007F"))
+    end
+  end
+
+  describe "BOM-led configs" do
+    it "installs into a JSON and a TOML file that start with a BOM, and keeps the BOM" do
+      dir = File.tempname("gori-bom")
+      Dir.mkdir_p(dir)
+      json = File.join(dir, "c.json")
+      toml = File.join(dir, "c.toml")
+      File.write(json, "\uFEFF{\"mcpServers\":{\"other\":{\"command\":\"o\"}}}")
+      File.write(toml, "\uFEFF[mcp_servers.gori]\ncommand = \"/old\"\nargs = []\n")
+      begin
+        Gori::MCP::Install.install_json(json, "/bin/gori", ["mcp"])
+        Gori::MCP::Install.install_toml(toml, "/bin/gori", ["mcp"])
+        File.read(json).should start_with('\uFEFF')
+        JSON.parse(File.read(json).lchop('\uFEFF'))["mcpServers"].as_h.keys.sort!.should eq(["gori", "other"])
+        File.read(toml).should start_with('\uFEFF')
+        File.read(toml).scan("[mcp_servers.gori]").size.should eq(1)
+        File.read(toml).should_not contain("/old")
+      ensure
+        FileUtils.rm_rf(dir)
+      end
+    end
+  end
+
   describe ".install_yaml" do
     # A Windows editor writes a BOM. Left on the first key, it hid `mcp_servers:`, a second one
     # was appended, and last-key-wins dropped every other server with its `env:` secrets.
@@ -476,6 +509,20 @@ describe Gori::MCP::Install do
   end
 
   describe ".upsert_toml_table" do
+    it "keeps the comment above the next table, and finds a header with a comment of its own" do
+      existing = "[mcp_servers.gori] # mine\ncommand = \"/old\"\n\n# browser automation\n[mcp_servers.playwright]\ncommand = \"npx\"\n"
+      out = Gori::MCP::Install.upsert_toml_table(existing, "mcp_servers.gori", "command = \"/bin/gori\"\n")
+      out.should contain("# browser automation\n[mcp_servers.playwright]")
+      out.should_not contain("/old")
+      out.scan("[mcp_servers.gori]").size.should eq(1)
+    end
+
+    it "takes a comment glued to gori's last line with gori, not onto the next table" do
+      existing = "[mcp_servers.gori]\ncommand = \"/old\"\n# args = [\"--read-only\"]\n[mcp_servers.playwright]\ncommand = \"npx\"\n"
+      out = Gori::MCP::Install.upsert_toml_table(existing, "mcp_servers.gori", "command = \"/bin/gori\"\n")
+      out.should_not contain("--read-only\"]\n[mcp_servers.playwright]")
+    end
+
     it "appends a table to empty content" do
       out = Gori::MCP::Install.upsert_toml_table("", "mcp_servers.gori",
         "command = \"/bin/gori\"\nargs = [\"mcp\"]\n")
