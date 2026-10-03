@@ -58,19 +58,11 @@ module Gori
         end)
       end
 
-      # The `scope` argument, defaulting to this project — the safe direction: a caller that
-      # omits it edits the engagement in front of it, never every future one. An unrecognised
-      # value is REFUSED rather than clamped, because clamping "globl" to project would report
-      # success for an edit the caller meant to make everywhere.
+      # The `scope` argument of the Rewriter and Colormarker tools, defaulting to this project —
+      # the safe direction: a caller that omits it edits the engagement in front of it, never
+      # every future one. Not stripped, as it never was.
       private def rule_scope(h) : Store::RuleScope | Result
-        s = str(h, "scope")
-        return Store::RuleScope::Project if s.nil? || s.empty?
-        # One list — `RuleScope.values` — behind the match, the refusal sentence and the
-        # schema's `enum`, so they cannot come to disagree. Matched on `label` rather than
-        # through `parse?`, which folds separators and so accepts spellings the enum never
-        # advertises; case is folded, as it is in every sibling reader here.
-        Store::RuleScope.values.find { |v| v.label == s.downcase } ||
-          err("invalid 'scope' (expected #{RULE_SCOPES.join("|")})", "INVALID_ARGUMENT", field: "scope")
+        label_arg(h, "scope", Store::RuleScope, Store::RuleScope::Project, strip: false)
       end
 
       # Whether a rule's pattern is acceptable: only a Replace+Regex rule must compile; a
@@ -521,17 +513,10 @@ module Gori
       # Parse target/part from args, defaulting to the given fallbacks. Returns the
       # pair or an error Result. Shared by create/update/preview_rule.
       private def rule_target_part(h, dft_target : Store::RuleTarget, dft_part : Store::RulePart) : {Store::RuleTarget, Store::RulePart} | Result
-        tgt_s = str(h, "target").try(&.strip)
-        # Matched against the LABEL rather than through `parse?`, so ONE list — the enum's own
-        # members — backs the match, the refusal sentence and the schema's `enum` alike; add a
-        # member and all three follow. (`parse?` is also looser than the advertised set: it
-        # folds separators, so it answers for `shortcircuit` where `RuleOp` offers only
-        # `short_circuit`.) Case is still folded, as every sibling reader here folds it.
-        target = tgt_s.nil? || tgt_s.empty? ? dft_target : Store::RuleTarget.values.find { |v| v.label == tgt_s.downcase }
-        return err("invalid 'target' (expected #{RULE_TARGETS.join("|")})", "INVALID_ARGUMENT", field: "target") unless target
-        part_s = str(h, "part").try(&.strip)
-        part = part_s.nil? || part_s.empty? ? dft_part : Store::RulePart.values.find { |v| v.label == part_s.downcase }
-        return err("invalid 'part' (expected #{RULE_PARTS.join("|")})", "INVALID_ARGUMENT", field: "part") unless part
+        target = label_arg(h, "target", Store::RuleTarget, dft_target)
+        return target if target.is_a?(Result)
+        part = label_arg(h, "part", Store::RulePart, dft_part)
+        return part if part.is_a?(Result)
         {target, part}
       end
 
@@ -562,24 +547,14 @@ module Gori
       # Parse op/match from args, defaulting to the given fallbacks. Returns the pair or
       # an error Result. Shared by create/update/preview_rule.
       private def rule_op_kind(h, dft_op : Store::RuleOp, dft_kind : Store::MatchKind) : {Store::RuleOp, Store::MatchKind} | Result
-        op_s = str(h, "op").try(&.strip)
-        op = if op_s.nil? || op_s.empty?
-               dft_op
-             else
-               Store::RuleOp.values.find { |v| v.label == op_s.downcase }
-             end
-        return err("invalid 'op' (expected #{RULE_OPS.join("|")})", "INVALID_ARGUMENT", field: "op") unless op
+        op = label_arg(h, "op", Store::RuleOp, dft_op)
+        return op if op.is_a?(Result)
         # Validate `match` explicitly instead of leaning on MatchKind.from_label
         # (which coerces any unknown label to Literal). A silent literal fallback
         # would mislead a caller into thinking a `regex` rule was applied while the
         # proxy actually did a literal match — so an unrecognized label is rejected.
-        kind_s = str(h, "match").try(&.strip)
-        kind = if kind_s.nil? || kind_s.empty?
-                 dft_kind
-               else
-                 Store::MatchKind.values.find { |v| v.label == kind_s.downcase }
-               end
-        return err("invalid 'match' (expected #{RULE_MATCHES.join("|")})", "INVALID_ARGUMENT", field: "match") unless kind
+        kind = label_arg(h, "match", Store::MatchKind, dft_kind)
+        return kind if kind.is_a?(Result)
         {op, kind}
       end
 
@@ -699,13 +674,6 @@ module Gori
         Gori::Bindings.new(store, store.extract_rules)
       end
 
-      private def extract_kind_arg(h, dft : Gori::ExtractKind) : Gori::ExtractKind | Result
-        raw = str(h, "kind").try(&.strip)
-        return dft if raw.nil? || raw.empty?
-        Gori::ExtractKind.values.find { |v| v.label == raw.downcase } ||
-          err("invalid 'kind' (expected #{EXTRACT_KINDS.join("|")})", "INVALID_ARGUMENT", field: "kind")
-      end
-
       # The spelling is stripped so an agent may pass the token the way an operator reads it —
       # `$BIND.SESSION`, `BIND.SESSION`, `$SESSION` or `SESSION` all name the same extract rule,
       # whose stored `name` column is the bare one.
@@ -787,7 +755,7 @@ module Gori
       private def create_extract_rule(h) : Result
         name = extract_name_arg(str(h, "name"))
         return err("missing required 'name'", "INVALID_ARGUMENT", field: "name") unless name
-        kind = extract_kind_arg(h, Gori::ExtractKind::Cookie)
+        kind = label_arg(h, "kind", Gori::ExtractKind, Gori::ExtractKind::Cookie)
         return kind if kind.is_a?(Result)
         selector = str(h, "selector") || ""
         # Bounded in Int64 before the narrowing, for the reason spelled out at `keep_int`.
@@ -840,7 +808,7 @@ module Gori
         return not_found("no extract rule with id #{id}") unless existing
         name = extract_name_arg(present?(h, "name") ? str(h, "name") : existing.name)
         return err("name must not be empty", "INVALID_ARGUMENT", field: "name") unless name
-        kind = extract_kind_arg(h, existing.kind)
+        kind = label_arg(h, "kind", Gori::ExtractKind, existing.kind)
         return kind if kind.is_a?(Result)
         selector = keep(h, "selector", existing.selector)
         pos_start = keep_int(h, "pos_start", existing.pos_start)

@@ -62,7 +62,7 @@ module Gori
         when "builtin"
           err("built-in views cannot be edited", "INVALID_ARGUMENT", field: "scope")
         else
-          # Refused rather than clamped, for the reason `color_rule_scope` states: reading
+          # Refused rather than clamped, for the reason `label_arg` states: reading
           # "globl" as "project" would report success for an edit meant for every project.
           err("invalid scope (project | global)", "INVALID_ARGUMENT", field: "scope")
         end

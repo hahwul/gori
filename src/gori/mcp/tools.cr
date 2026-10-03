@@ -2589,6 +2589,20 @@ module Gori
         value
       end
 
+      # An enum argument named by its `label`: `dft` when absent or blank, else the member, else
+      # the INVALID_ARGUMENT refusal — never a clamp, since clamping "globl" to project would
+      # report success for an edit the caller meant to make everywhere. Matched on `label`
+      # rather than through `parse?`, which folds separators and so accepts spellings the enum
+      # never advertises (`shortcircuit` for `short_circuit`); one list — `values` — backs the
+      # match, the refusal sentence and the schema's `enum` alike. Case is folded.
+      private def label_arg(h, key : String, enum_type : E.class, dft : E, *, strip : Bool = true) : E | Result forall E
+        raw = str(h, key)
+        raw = raw.strip if raw && strip
+        return dft if raw.nil? || raw.empty?
+        enum_type.values.find { |v| v.label == raw.downcase } ||
+          err("invalid '#{key}' (expected #{enum_type.values.join("|", &.label)})", "INVALID_ARGUMENT", field: key)
+      end
+
       # A filter argument whose column holds a CLOSED set of strings: the value, nil when the
       # caller did not narrow, or the refusal. Blank reads as absent, and the match is on the
       # normalised form — every sibling reader on this surface strips and downcases, and a

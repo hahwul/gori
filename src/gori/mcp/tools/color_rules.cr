@@ -20,7 +20,7 @@ module Gori
       private def list_color_rules(h) : Result
         want = nil.as(Store::RuleScope?)
         if present?(h, "scope")
-          sc = color_rule_scope(h)
+          sc = rule_scope(h)
           return sc if sc.is_a?(Result)
           want = sc
         end
@@ -55,16 +55,6 @@ module Gori
         end)
       end
 
-      # The `scope` argument, defaulting to this project — the safe direction. An unrecognised
-      # value is REFUSED rather than clamped, because clamping "globl" to project would report
-      # success for an edit the caller meant to make everywhere.
-      private def color_rule_scope(h) : Store::RuleScope | Result
-        s = str(h, "scope")
-        return Store::RuleScope::Project if s.nil? || s.empty?
-        Store::RuleScope.values.find { |v| v.label == s.downcase } ||
-          err("invalid 'scope' (expected #{RULE_SCOPES.join("|")})", "INVALID_ARGUMENT", field: "scope")
-      end
-
       # A colour LABEL: one of the six built-in words, or the name of a user-defined custom
       # colour (settings.json `colormarker.colors`). An argument an agent just typed gets told it
       # was wrong, rather than clamped — the same refusal the CLI makes and the opposite of the
@@ -96,7 +86,7 @@ module Gori
         if reason = Gori::Colormarker.unusable_reason(filter)
           return err(reason, "INVALID_ARGUMENT", field: "when")
         end
-        scope = color_rule_scope(h)
+        scope = rule_scope(h)
         return scope if scope.is_a?(Result)
         color = marker_color(h, "yellow")
         return color if color.is_a?(Result)
@@ -140,7 +130,7 @@ module Gori
       private def update_color_rule(h) : Result
         id = int(h, "id")
         return err(id_error(h, "id"), "INVALID_ARGUMENT", field: "id") unless id
-        scope = color_rule_scope(h)
+        scope = rule_scope(h)
         return scope if scope.is_a?(Result)
         existing = Gori::Colormarker.merged(store).find { |r| r.id == id && r.scope == scope }
         return not_found("no #{scope.label} colour rule with id #{id}") unless existing
@@ -180,7 +170,7 @@ module Gori
       private def set_color_rule_enabled(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
-        scope = color_rule_scope(h)
+        scope = rule_scope(h)
         return scope if scope.is_a?(Result)
         enabled = optional_bool_arg(h, "enabled")
         return Result.new("missing required 'enabled' (true|false)", is_error: true) if enabled.nil?
@@ -220,7 +210,7 @@ module Gori
       private def delete_color_rule(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
-        scope = color_rule_scope(h)
+        scope = rule_scope(h)
         return scope if scope.is_a?(Result)
         return not_found("no #{scope.label} colour rule with id #{id}") unless color_rule_exists?(id, scope)
         ok =
@@ -244,7 +234,7 @@ module Gori
       private def move_color_rule(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
-        scope = color_rule_scope(h)
+        scope = rule_scope(h)
         return scope if scope.is_a?(Result)
         dir_s = str(h, "direction")
         dir =
@@ -290,7 +280,7 @@ module Gori
         # can claim a row from it: every global rule resolves before every project one, so a
         # project rule is never ahead of a global candidate. Previewing everything as a project
         # rule reported `would_paint: 0` for a global rule that in fact paints every row.
-        scope = color_rule_scope(h)
+        scope = rule_scope(h)
         return scope if scope.is_a?(Result)
         # Clamp in Int64, THEN narrow: `.to_i` is checked, so clamping after it meant
         # `{"limit": 10000000000}` — the "no limit" number an LLM reaches for — OverflowError'd
