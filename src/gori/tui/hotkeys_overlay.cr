@@ -160,9 +160,9 @@ module Gori::Tui
       elsif key.enter?
         return :commit
       elsif key.up?
-        select_move(-1)
+        move(-1)
       elsif key.down?
-        select_move(1)
+        move(1)
       elsif page_key(ev)
         # PgUp/PgDn/Home/End — the list contract, `Overlay#page_key`
       elsif key.left?
@@ -189,9 +189,9 @@ module Gori::Tui
       elsif key.enter?
         accept_search
       elsif key.up?
-        select_move(-1)
+        move(-1)
       elsif key.down?
-        select_move(1)
+        move(1)
       elsif search_edit(ev)
       elsif key.backspace?
         search_backspace
@@ -226,8 +226,8 @@ module Gori::Tui
       when 'x'      then unbind_selected
       when 'r'      then reset_selected
       when 'R'      then reset_all
-      when 'k'      then select_move(-1)
-      when 'j'      then select_move(1)
+      when 'k'      then move(-1)
+      when 'j'      then move(1)
       end
     end
 
@@ -350,10 +350,6 @@ module Gori::Tui
       :stay
     end
 
-    def move(step : Int32) : Nil
-      select_move(step)
-    end
-
     private def selected_id : String
       @rows[@selected]?.try(&.verb_id) || ""
     end
@@ -402,7 +398,7 @@ module Gori::Tui
     end
 
     # --- navigation ---
-    def select_move(d : Int32) : Nil
+    def move(d : Int32) : Nil
       bindings = visible_binding_indices
       return if bindings.empty?
       pos = bindings.index(@selected)

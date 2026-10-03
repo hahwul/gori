@@ -101,12 +101,12 @@ describe HotkeysOverlay do
 
     it "cancels to the row focused before search, then a second esc closes" do
       control = fresh_overlay
-      control.select_move(1)
+      control.move(1)
       control.unbind_selected
       expected = control.to_working[0].keys.first
 
       o = fresh_overlay
-      o.select_move(1)
+      o.move(1)
       h = OverlayHarness.new(o)
       start_hotkey_search(h)
       h.type("toggle capture")
