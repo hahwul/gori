@@ -274,8 +274,10 @@ module Gori::Tui
       # `save` returns its error message and persists NOTHING when validation fails, so a
       # :saved outcome there would be a lie the host acts on — apply_settings_saved
       # rebinds the live proxy and re-pushes upstream/landing settings for input that was
-      # just rejected. Report the failure in the footer only.
-      return NONE unless form.saved?
+      # just rejected. Report the failure in the footer only. A write that failed AFTER the
+      # setters ran is the other case: the change is live, so the host must apply it, or the
+      # proxy keeps (say) skipping upstream TLS verification the footer calls applied.
+      return NONE unless form.applied?
       Outcome.new(:saved, sec.sym, msg)
     end
 

@@ -782,6 +782,9 @@ module Gori::Tui
     # Validate, apply, and persist. Returns a status message for the caller to
     # toast (nil decoded values are not possible here — port is the only check).
     def save : String
+      # Per attempt: a refused edit after a good save must not read as saved (or applied).
+      @saved = false
+      @applied = false
       if @section == :theme
         Settings.theme = @values[0] # always one of THEME_FIELDS' choices (set only via cycle)
         return persist
@@ -984,7 +987,12 @@ module Gori::Tui
       persist
     end
 
+    # Whether the last `save` ran its setters — the change is live in this session whether or
+    # not it then reached disk, so the host still has to apply it.
+    getter? applied = false
+
     private def persist : String
+      @applied = true
       ok = Settings.save
       @saved = ok
       @baseline = @values.dup if ok # the working copy IS the persisted state now → no longer dirty
