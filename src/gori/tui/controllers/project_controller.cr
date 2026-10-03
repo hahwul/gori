@@ -389,8 +389,8 @@ module Gori::Tui
     # Backspace an open add/edit row; false when the ROW is empty (the caller then closes it)
     # — never merely because the caret sits at 0, which discarded a typed line the operator
     # had only moved the caret inside (← to the start of "TOKEN abc123", one ⌫ closed the row
-    # with the text unsaved). A caret at 0 with text behind it is an ordinary no-op.
-    private def backspace_row(field : TextField?) : Bool
+    # with the text unsaved). A caret at 0 with text behind it is an ordinary no-op. Public for its spec.
+    def self.backspace_row(field : TextField?) : Bool
       return false if field.nil? || field.value.empty?
       field.backspace
       true
@@ -1079,7 +1079,7 @@ module Gori::Tui
         # ⌫ on an already-empty row means "I am done here", so the empty check comes BEFORE
         # the field sees the key — `TextField#backspace` on an empty value is a silent no-op
         # and the row would sit there with no way out but esc.
-        @project_view.cancel_ov_add unless backspace_row(@project_view.ov_field)
+        @project_view.cancel_ov_add unless ProjectController.backspace_row(@project_view.ov_field)
       elsif key.tab?
         # ↹ types the IP/host separator rather than jumping focus. There is nowhere to jump
         # to: this row is one field holding two values, and the pair is what `ov_commit`
@@ -1235,7 +1235,7 @@ module Gori::Tui
       elsif key.enter?
         commit_project_env
       elsif key.backspace?
-        @project_view.cancel_env_add unless backspace_row(@project_view.env_field)
+        @project_view.cancel_env_add unless ProjectController.backspace_row(@project_view.env_field)
       elsif key.tab?
         @project_view.env_field.try(&.insert(' ')) # Tab types the KEY/VALUE separator, not a pane jump
       else
@@ -1273,7 +1273,7 @@ module Gori::Tui
       elsif key.enter?
         commit_project_env_prefix
       elsif key.backspace?
-        @project_view.cancel_env_prefix_edit unless backspace_row(@project_view.env_field)
+        @project_view.cancel_env_prefix_edit unless ProjectController.backspace_row(@project_view.env_field)
       else
         @project_view.env_field.try(&.handle_edit_key(ev)) # a sigil has no separator, so ↹ is the field's no-op
       end

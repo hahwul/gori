@@ -167,6 +167,20 @@ describe "ProjectView ENV pane" do
     end
   end
 
+  it "closes the row only once it is genuinely empty" do
+    tmp_store do |store, project|
+      with_project_vars([] of {String, String}) do
+        view = env_view(store, project)
+        view.env_add_start
+        type(view, "ab")
+        Gori::Tui::ProjectController.backspace_row(view.env_field).should be_true
+        Gori::Tui::ProjectController.backspace_row(view.env_field).should be_true
+        # nothing left => false, and the caller closes the row
+        Gori::Tui::ProjectController.backspace_row(view.env_field).should be_false
+      end
+    end
+  end
+
   it "adopts a peer's vars instead of writing a stale list back over them" do
     tmp_store do |store, project|
       with_project_vars([{"ALPHA", "1"}]) do
