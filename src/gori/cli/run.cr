@@ -174,7 +174,8 @@ module Gori
           # branches, where args[0] matched a subcommand string (so args is non-empty and the
           # tail slice is safe).
           case sub = args.first?
-          when nil, "-h", "--help" then print_help
+          # `help` too: it is the word people type, and refusing it pointed them at `shell`.
+          when nil, "-h", "--help", "help" then print_help
           {% for m in cmds %}
             when {{ m.annotation(Subcommand).args.splat }} then {{ m.name }}(args[1..])
           {% end %}
