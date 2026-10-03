@@ -406,13 +406,11 @@ module Gori::Tui
     # actions, the shell's ExecContext delegates) is downcast here, ONCE per tab, so
     # call sites stay cast-free. The key is always present after initialize, so `.as`
     # never raises in practice (a missing key would be a registry-wiring bug).
-    private def help_controller : HelpController
-      @tabs[:help].as(HelpController)
-    end
-
-    private def target_controller : TargetController
-      @tabs[:target].as(TargetController)
-    end
+    {% for tab in %w(help target intercept notes history issues evidence probe project repeater fuzzer miner oast sequencer comparer authorize decoder jwt cookie rewriter colormarker) %}
+      private def {{ tab.id }}_controller : {{ tab.camelcase.id }}Controller
+        @tabs[:{{ tab.id }}].as({{ tab.camelcase.id }}Controller)
+      end
+    {% end %}
 
     # Sitemap + Discover are sub-tabs composed under the Target parent, so their controllers
     # are reached through it (they aren't registered in @tabs directly).
@@ -422,82 +420,6 @@ module Gori::Tui
 
     private def discover_controller : DiscoverController
       target_controller.discover
-    end
-
-    private def intercept_controller : InterceptController
-      @tabs[:intercept].as(InterceptController)
-    end
-
-    private def notes_controller : NotesController
-      @tabs[:notes].as(NotesController)
-    end
-
-    private def history_controller : HistoryController
-      @tabs[:history].as(HistoryController)
-    end
-
-    private def issues_controller : IssuesController
-      @tabs[:issues].as(IssuesController)
-    end
-
-    private def evidence_controller : EvidenceController
-      @tabs[:evidence].as(EvidenceController)
-    end
-
-    private def probe_controller : ProbeController
-      @tabs[:probe].as(ProbeController)
-    end
-
-    private def project_controller : ProjectController
-      @tabs[:project].as(ProjectController)
-    end
-
-    private def repeater_controller : RepeaterController
-      @tabs[:repeater].as(RepeaterController)
-    end
-
-    private def fuzzer_controller : FuzzerController
-      @tabs[:fuzzer].as(FuzzerController)
-    end
-
-    private def miner_controller : MinerController
-      @tabs[:miner].as(MinerController)
-    end
-
-    private def oast_controller : OastController
-      @tabs[:oast].as(OastController)
-    end
-
-    private def sequencer_controller : SequencerController
-      @tabs[:sequencer].as(SequencerController)
-    end
-
-    private def comparer_controller : ComparerController
-      @tabs[:comparer].as(ComparerController)
-    end
-
-    private def authorize_controller : AuthorizeController
-      @tabs[:authorize].as(AuthorizeController)
-    end
-
-    private def decoder_controller : DecoderController
-      @tabs[:decoder].as(DecoderController)
-    end
-
-    private def jwt_controller : JwtController
-      @tabs[:jwt].as(JwtController)
-    end
-
-    private def cookie_controller : CookieController
-      @tabs[:cookie].as(CookieController)
-    end
-
-    private def rewriter_controller : RewriterController
-      @tabs[:rewriter].as(RewriterController)
-    end
-
-    private def colormarker_controller : ColormarkerController
-      @tabs[:colormarker].as(ColormarkerController)
     end
 
     # The flow to open this session on, set by the caller before `run`: the project picker's
