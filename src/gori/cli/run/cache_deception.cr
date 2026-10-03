@@ -219,21 +219,6 @@ module Gori
           end
         end
       end
-
-      # The output shapes are `private def self.`, so a spec reaches them through this module
-      # shim — the pattern `authorize_plan_error_for_spec` uses.
-      def self.cache_deception_text_for_spec(report : CacheDeception::Report) : String
-        cache_deception_report_text(report)
-      end
-
-      def self.cache_deception_json_for_spec(report : CacheDeception::Report) : String
-        cache_deception_report_json(report)
-      end
-
-      def self.check_cache_deception_flows_for_spec(store : Store, engine : Authorize::Engine,
-                                                    outbound : Outbound, flow_ids : Array(Int64))
-        check_cache_deception_flows(store, engine, outbound, flow_ids, false, :json)
-      end
     end
   end
 end

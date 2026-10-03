@@ -816,16 +816,13 @@ module Gori
 
       # --- probe scan issues --------------------------------------------------
 
+      # `Probe.group_json` is the shared field shape (also used by the MCP probe_scan tool).
       def self.probe_group_json(g : Probe::Group) : String
-        JSON.build { |j| probe_group_fields(j, g) }
+        JSON.build { |j| Probe.group_json(j, g) }
       end
 
       def self.probe_array_json(groups : Array(Probe::Group)) : String
-        JSON.build { |j| j.array { groups.each { |g| probe_group_fields(j, g) } } }
-      end
-
-      def self.probe_group_fields(j : JSON::Builder, g : Probe::Group) : Nil
-        Probe.group_json(j, g) # shared field shape (also used by the MCP probe_scan tool)
+        JSON.build { |j| j.array { groups.each { |g| Probe.group_json(j, g) } } }
       end
 
       # "[high]      secret_in_url             api.test   ×3   CWE-598   token"
