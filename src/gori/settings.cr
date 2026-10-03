@@ -1467,6 +1467,11 @@ module Gori
     # Narrowing this to "actually changed something" is not available cheaply: re-serializing
     # around the apply cannot tell a rejected section from one imported with the value already
     # in effect, and would report the second as skipped.
+    def self.upstream_import_refusal(err : String) : String
+      "#{err.lchop("settings: ")} in the profile — nothing was imported; fix the profile, or " \
+      "leave the section out with --sections"
+    end
+
     def self.import_document(raw : String, only : Array(String)? = nil) : Array(String)
       incoming = JSON.parse(raw).as_h
       selected = incoming.keys.select do |k|
@@ -1479,17 +1484,11 @@ module Gori
       # keeps an error that refuses every route, because a proxy the operator declared must
       # never quietly turn into DIRECT. That error lives in memory only, so an import that
       # carried one wrote the table WITHOUT the bad entry and the next start routed its hosts
-      # direct. Refused here instead, before anything is written: the parse sets these only for
-      # a node the profile carries, so whatever is set afterwards came from the profile.
-      rules_err, proxy_err = @@upstream_rules_load_error, @@upstream_proxy_load_error
-      @@upstream_rules_load_error = @@upstream_proxy_load_error = nil
-      apply_sections(JSON.parse(filtered))
-      if err = @@upstream_rules_load_error || @@upstream_proxy_load_error
-        raise Error.new("#{err.lchop("settings: ")} in the profile — nothing was imported; fix the " \
-                        "profile, or leave the section out with --sections")
+      # direct. Refused here instead, before anything is applied or written.
+      if err = upstream_import_error(JSON::Any.new(incoming), selected)
+        raise Error.new(upstream_import_refusal(err))
       end
-      @@upstream_rules_load_error = rules_err unless selected.includes?("upstream_rules")
-      @@upstream_proxy_load_error = proxy_err unless incoming["network"]?.try(&.as_h?).try(&.has_key?("upstream_proxy")) && selected.includes?("network")
+      apply_sections(JSON.parse(filtered))
       renumber_imported_ids(incoming, selected, counters, locals)
       # `save` REPORTS failure rather than raising, because a failed write must not crash the
       # TUI. Discarding that here meant a full disk, a read-only filesystem or an unwritable

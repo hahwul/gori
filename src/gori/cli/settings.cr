@@ -344,6 +344,10 @@ module Gori::CLI
     commands = Settings.command_entries(root, applicable)
 
     if dry
+      # The real run refuses this before writing; a plan that lists the section would be a lie.
+      if err = Settings.upstream_import_error(root, applicable)
+        abort "gori settings import: #{Settings.upstream_import_refusal(err)}"
+      end
       if applicable.empty?
         puts "nothing to apply — #{file} carries none of the selected sections"
       elsif changed.empty?

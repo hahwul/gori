@@ -422,6 +422,19 @@ describe "settings profiles" do
       end
     end
 
+    # `import --dry-run` asks the same question without applying anything, so its plan cannot
+    # list a section the real run would refuse.
+    it "names the upstream refusal without applying the profile" do
+      with_config_home do
+        root = JSON.parse(%({"upstream_rules":[{"host":"a.test","kind":"sock5","addr":"j:1"}],) +
+                          %("network":{"upstream_proxy":1}}))
+        Gori::Settings.upstream_import_error(root, ["upstream_rules"]).should match(/upstream_rules\[0\]/)
+        Gori::Settings.upstream_import_error(root, ["network"]).should match(/upstream_proxy/)
+        Gori::Settings.upstream_import_error(root, ["env"]).should be_nil
+        Gori::Settings.upstream_rules.should be_empty
+      end
+    end
+
     # A self-hosted interactsh token is a credential (MCP `list_oast_providers` redacts it); a
     # default export wrote it out at 0644 with no notice.
     it "keeps OAST providers out of a default export, and counts their token as a secret" do

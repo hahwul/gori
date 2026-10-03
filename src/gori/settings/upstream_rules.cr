@@ -918,11 +918,29 @@ module Gori::Settings
   # Without a trustworthy host pattern there is no safe destination to scope the refusal to.
   protected def self.apply_upstream_rules(node : JSON::Any?) : Nil
     return unless node
-    arr = node.as_a?
-    unless arr
-      @@upstream_rules_load_error = "settings: upstream_rules must be an array"
-      return
+    rules, error = parse_upstream_rules(node)
+    self.upstream_rules = rules if rules
+    @@upstream_rules_load_error = error
+  end
+
+  # The error `load` would retain for a profile's upstream declarations, or nil. Pure, so
+  # `import --dry-run` refuses exactly what the real import does without applying anything.
+  def self.upstream_import_error(root : JSON::Any, selected : Array(String)) : String?
+    o = root.as_h?
+    return nil unless o
+    if selected.includes?("upstream_rules") && (node = o["upstream_rules"]?)
+      err = parse_upstream_rules(node)[1]
+      return err if err
     end
+    return nil unless selected.includes?("network")
+    proxy = o["network"]?.try(&.as_h?).try(&.["upstream_proxy"]?)
+    "settings: network.upstream_proxy must be a string" if proxy && !proxy.as_s?
+  end
+
+  # The rule table and the first declaration error; nil rules when the node is not an array.
+  private def self.parse_upstream_rules(node : JSON::Any) : {Array(UpstreamRule)?, String?}
+    arr = node.as_a?
+    return {nil, "settings: upstream_rules must be an array"} unless arr
     out = [] of UpstreamRule
     error = nil.as(String?)
     arr.each_with_index do |e, index|
@@ -945,8 +963,7 @@ module Gori::Settings
       error ||= upstream_rule_error(rule)
       out << rule
     end
-    self.upstream_rules = out
-    @@upstream_rules_load_error = error
+    {out, error}
   end
 
   # A fresh disk load means a removed/fixed declaration must release the old refusal. Imports
